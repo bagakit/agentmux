@@ -1730,9 +1730,9 @@ export async function registerIpc(args: {
   }
   const captureSequences = new CaptureSequenceOwner({ directory: join(app.getPath('userData'), 'capture-sequences'), home: app.getPath('home'),
     appearance: () => config.appearance, native: getDesktopNativeUiOwner, select: async () => {
-      let selected: { image: import('../shared/contracts').BrowserPng; source: import('../shared/system-screenshot-editor').ScreenshotCaptureSource } | null = null
+      let selected: { image: import('../shared/contracts').BrowserPng; source: import('../shared/system-screenshot-editor').ScreenshotCaptureSource; background?: import('../shared/capture-surface').CaptureBackground } | null = null
       await captureSurface.present({ attachToDraft: false, expandable: false, returnFocus: false,
-        complete: async (image, source) => { selected = { image, source } } })
+        complete: async (image, source, _engine, background) => { selected = { image, source, background: background ?? 'included' } } })
       return selected
     } })
   const screenCapture = new ScreenCapture({ home: app.getPath('home'), native: getDesktopNativeUiOwner, appActive: () => BrowserWindow.getFocusedWindow() !== null,

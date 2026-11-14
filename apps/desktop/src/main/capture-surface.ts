@@ -31,7 +31,7 @@ export type CaptureSurfaceSession = {
   /** Another app was in front at capture start; closing the surface gives it focus back. */
   returnFocus: boolean
   /** Primary delivery of the processed selection, with the native engine of its frozen frame. A rejection keeps the surface and shows the reason. */
-  complete(image: BrowserPng, source: ScreenshotCaptureSource, engine: string): Promise<void>
+  complete(image: BrowserPng, source: ScreenshotCaptureSource, engine: string, background?: CaptureBackground): Promise<void>
 }
 export type CaptureSurfaceOutcome =
   | { state: 'completed' }
@@ -442,7 +442,7 @@ export class CaptureSurface {
     if (action !== 'finish') throw new Error('The screenshot overlay request is invalid.')
     if (active.finishing) return { status: 'failed', message: 'The previous copy is still in progress. Cancel remains available.' } satisfies SystemScreenshotEditorFinish
     active.finishing = true
-    try { await active.session.complete(params.image!, source, captured.engine) }
+    try { await active.session.complete(params.image!, source, captured.engine, active.background) }
     catch (error) { return { status: 'failed', message: message(error) } satisfies SystemScreenshotEditorFinish }
     finally { active.finishing = false }
     active.end({ state: 'completed' })

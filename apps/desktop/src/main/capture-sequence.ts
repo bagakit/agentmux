@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain, nativeTheme, screen, type IpcMainInvokeEvent } from 'electron'
+import { BrowserWindow, dialog, ipcMain, nativeTheme, nativeImage, screen, type IpcMainInvokeEvent } from 'electron'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, writeFile, rename, link, unlink, open, stat } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -9,12 +9,13 @@ import type { CaptureSequenceContext, CaptureSequenceMethod, CaptureSequencePara
 import type { AppearanceConfig, BrowserPng } from '../shared/contracts'
 import { CAPTURE_SEQUENCE_CHANNEL, type CaptureSequenceInput, type CaptureSequenceMode, type SequenceSnapshot } from '../shared/capture-sequence'
 import type { ScreenshotCaptureSource } from '../shared/system-screenshot-editor'
+import { matchScroll } from '../shared/scroll-stitch'
 import { inspectGif } from '../shared/gif-metadata'
 import { themeBootstrap } from './theme-bootstrap'
 import { savePastedImage } from './pasted-image-write'
 import { screenshotFileName, writeScreenshotFile } from './screenshot-files'
 
-type Selection = { image: BrowserPng; source: ScreenshotCaptureSource }
+type Selection = { image: BrowserPng; source: ScreenshotCaptureSource; background?: import('../shared/capture-surface').CaptureBackground }
 type Record = { receipt: CaptureSequenceResult; actor: CaptureSequenceContext['actor']; window?: BrowserWindow; input?: CaptureSequenceInput;
   timer?: ReturnType<typeof setTimeout>; inflight?: Promise<void>; fps: number; artifact?: { sha256: string; bytes: number }; journal?: { frames: unknown[]; source: ScreenshotCaptureSource }; size?: { width: number; height: number }; files?: string[]; persisting?: Promise<void>; resolve?(value: BrowserPng | string | null): void; attached?: string; ending?: boolean }
 const MAX_FRAME_BYTES = 64 * 1024 * 1024
@@ -99,14 +100,14 @@ export class CaptureSequenceOwner {
     })
   }
   private async present(record: Record, selection: Selection): Promise<void> {
-    const { source, image } = selection
+    const { source, image, background = 'included' } = selection
     const area = screen.getDisplayMatching(source.rect).workArea
     const width = Math.min(860, area.width), height = Math.min(650, area.height)
     const window = new BrowserWindow({ title: record.receipt.mode === 'gif' ? 'Record GIF' : 'Scrolling screenshot', width, height, minWidth: 420, minHeight: 400,
       x: area.x + Math.round((area.width - width) / 2), y: area.y + Math.round((area.height - height) / 2), show: false, autoHideMenuBar: true,
       webPreferences: { preload: join(import.meta.dirname, '../preload/capture-sequence.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false } })
     record.window = window; record.size = { width: image.width, height: image.height }
-    record.input = { requestId: record.receipt.operationId, mode: record.receipt.mode!, state: 'ready', source,
+    record.input = { requestId: record.receipt.operationId, mode: record.receipt.mode!, state: 'ready', source, background,
       theme: themeBootstrap(this.ports.appearance(), nativeTheme.shouldUseDarkColors), frames: [{ image, capturedAt: source.capturedAt, delayMs: 200 }], issue: null }
     record.receipt.state = 'ready'; record.receipt.frameCount = 1
     window.setContentProtection(true)
@@ -140,12 +141,22 @@ export class CaptureSequenceOwner {
       if (input.frames.reduce((size, frame) => size + frame.image.byteLength, 0) >= MAX_FRAME_BYTES) throw new Error('Captured PNG frames reached the 64 MB review budget. Finish this sequence or undo frames before capturing more.')
       const windowId = Number(window.getMediaSourceId().split(':')[1])
       if (!Number.isSafeInteger(windowId) || windowId <= 0) throw new Error('The exact capture control window could not be excluded. Existing frames are kept.')
-      const result = await this.ports.native().captureScreenshot({ mode: 'rect', rect: input.source.rect, excludeWindowIds: [windowId] })
+      const automaticScroll = input.mode === 'scroll' && ['recording', 'stopping'].includes(record.receipt.state)
+      const excluded = input.background === 'excluded' ? BrowserWindow.getAllWindows().filter(w => !w.isDestroyed() && w.isVisible()) : [window]
+      const excludeWindowIds = excluded.map(w => Number(w.getMediaSourceId().split(':')[1]))
+      if (excludeWindowIds.some(id => !Number.isSafeInteger(id) || id <= 0)) throw new Error('An exact host window could not be excluded. Existing frames remain available.')
+      const result = await this.ports.native().captureScreenshot({ mode: 'rect', rect: input.source.rect, excludeWindowIds })
       if (result.state !== 'captured' || !result.screenshot) throw new Error(result.error?.message ?? 'The original frame capture is unconfirmed.')
       const shot = result.screenshot, image: BrowserPng = { mimeType: 'image/png', dataUrl: 'data:image/png;base64,' + shot.data, width: shot.width, height: shot.height, byteLength: Buffer.byteLength(shot.data, 'base64') }
       pngBytes(image)
       const first = record.size!
       if (image.width !== first.width || image.height !== first.height) throw new Error('The selected display scale changed. Finish the existing sequence before choosing another region.')
+      const previous = input.frames.at(-1)?.image
+      if (automaticScroll && previous) {
+        if (previous.dataUrl === image.dataUrl) return
+        const pixels = (frame: BrowserPng) => { const bitmap = nativeImage.createFromBuffer(pngBytes(frame)).toBitmap(); return { width: frame.width, height: frame.height, data: new Uint8ClampedArray(bitmap.buffer, bitmap.byteOffset, bitmap.byteLength) } }
+        if (matchScroll(pixels(previous), pixels(image)).shift === 0) return
+      }
       const capturedAt = Date.now(), last = input.frames.at(-1)
       if (last) last.delayMs = Math.max(10, Math.round((capturedAt - last.capturedAt) / 10) * 10)
       input.frames.push({ image, capturedAt, delayMs: Math.max(10, Math.round(100 / record.fps) * 10) })
@@ -167,8 +178,28 @@ export class CaptureSequenceOwner {
     clearTimeout(record.timer)
     if (!['recording', 'stopping'].includes(record.receipt.state) || record.ending) return
     record.receipt.state = record.inflight ? 'stopping' : 'review'
+    this.reviewWindow(record)
     if (record.input) record.input.state = record.receipt.state as 'stopping' | 'review'
     void this.persist(record).catch(error => { record.receipt.issue = message(error) })
+  }
+  private compactWindow(record: Record) {
+    const window = record.window, source = record.input?.source.rect
+    if (!window || window.isDestroyed() || !source) return
+    const area = screen.getDisplayMatching(source).workArea, width = Math.min(440, area.width), height = record.input!.mode === 'gif' ? 180 : 360
+    const right = source.x + source.width + 12, left = source.x - width - 12
+    const x = right + width <= area.x + area.width ? right : left >= area.x ? left : area.x + area.width - width
+    const y = Math.max(area.y, Math.min(source.y, area.y + area.height - height))
+    window.setMinimumSize(420, record.input!.mode === 'gif' ? 160 : 320)
+    window.setContentBounds({ x, y, width, height: Math.min(height, area.height) })
+    window.setAlwaysOnTop(true, 'floating')
+  }
+  private reviewWindow(record: Record) {
+    const window = record.window, source = record.input?.source.rect
+    if (!window || window.isDestroyed() || !source) return
+    const area = screen.getDisplayMatching(source).workArea, width = Math.min(860, area.width), height = Math.min(650, area.height)
+    window.setAlwaysOnTop(false)
+    window.setMinimumSize(420, 400)
+    window.setContentBounds({ x: area.x + Math.round((area.width - width) / 2), y: area.y + Math.round((area.height - height) / 2), width, height })
   }
   private async end(record: Record, state: 'completed' | 'cancelled') {
     record.ending = true; clearTimeout(record.timer); record.receipt.state = state
@@ -190,10 +221,12 @@ export class CaptureSequenceOwner {
     if (action === 'stop') { this.stop(record); return this.snapshot(record) }
     if (action === 'cancel') { await this.end(record, 'cancelled'); record.window.close(); return }
     if (action === 'start') {
-      if (record.receipt.state !== 'ready') throw new Error('Finish the current capture before starting it again.')
+      if (record.receipt.state !== 'ready' && !(record.input.mode === 'scroll' && record.receipt.state === 'review')) throw new Error('Finish the current capture before starting it again.')
       if (![2, 5, 10].includes(input.fps!)) throw new Error('Choose 2, 5 or 10 frames per second.')
-      record.fps = input.fps!; record.input.frames = []; record.files = []; record.receipt.frameCount = 0
+      record.fps = input.fps!
+      if (record.input.mode === 'gif') { record.input.frames = []; record.files = []; record.receipt.frameCount = 0 }
       record.receipt.state = 'recording'; record.input.state = 'recording'; record.input.issue = null
+      this.compactWindow(record)
       await this.persist(record); void this.loop(record); return this.snapshot(record)
     }
     if (action === 'sample') { if (record.input.mode !== 'scroll' || record.receipt.state === 'completed') throw new Error('Manual sampling belongs to the original scrolling capture.'); await this.sample(record); return this.snapshot(record) }

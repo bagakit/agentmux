@@ -65,6 +65,7 @@ export function CaptureSequenceView({ input, api }: { input: CaptureSequenceInpu
   const [snapshot, setSnapshot] = useState<SequenceSnapshot>(input), [index, setIndex] = useState(0), [playing, setPlaying] = useState(false)
   const [keyframes, setKeyframes] = useState<GifKeyframe[]>([]), [busy, setBusy] = useState(false), [issue, setIssue] = useState<string | null>(null)
   const [fps, setFps] = useState(5), [progress, setProgress] = useState(0), [longImage, setLongImage] = useState<BrowserPng | null>(null)
+  const wasRecording = useRef(false)
   const originalGif = useRef<Uint8Array | null>(null), worker = useRef<Worker | null>(null), current = useRef(snapshot)
   current.current = snapshot
   const recording = snapshot.state === 'recording' || snapshot.state === 'stopping', gif = input.mode === 'gif'
@@ -72,7 +73,11 @@ export function CaptureSequenceView({ input, api }: { input: CaptureSequenceInpu
   const times = useMemo(() => { let sum = 0; return frames.map(frame => { const time = sum; sum += frame.delayMs; return time }) }, [frames])
   const time = times[index] ?? 0
   function merge(next: SequenceSnapshot) {
-    setSnapshot(old => ({ ...next, frames: next.frameOffset ? [...old.frames.slice(0, next.frameOffset), ...next.frames] : next.frames }))
+    setSnapshot(old => {
+      const combined = next.frameOffset ? [...old.frames.slice(0, next.frameOffset), ...next.frames] : next.frames
+      if (next.state === old.state && next.issue === old.issue && combined.length === old.frames.length && combined.at(-1)?.capturedAt === old.frames.at(-1)?.capturedAt && combined.at(-1)?.delayMs === old.frames.at(-1)?.delayMs && combined.at(-1)?.image.dataUrl === old.frames.at(-1)?.image.dataUrl) return old
+      return { ...next, frames: combined }
+    })
   }
   useEffect(() => {
     if (!recording) return
@@ -93,6 +98,10 @@ export function CaptureSequenceView({ input, api }: { input: CaptureSequenceInpu
     return () => clearTimeout(timer)
   }, [playing, index, frames])
   useEffect(() => () => { worker.current?.terminate() }, [])
+  useEffect(() => {
+    const ended = wasRecording.current && !recording; wasRecording.current = recording
+    if (ended && !gif && frames.length) void action(async () => { setLongImage(await stitchFrames(frames)) })
+  }, [recording])
   async function action(operation: () => Promise<void>) {
     setBusy(true); setIssue(null)
     try { await operation() } catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
@@ -127,7 +136,7 @@ export function CaptureSequenceView({ input, api }: { input: CaptureSequenceInpu
     })
   }
   function select(next: number) { setPlaying(false); setIndex(next) }
-  return <main className={`capture-sequence${gif ? ' capture-sequence--gif' : ''}`}>
+  return <main className={`capture-sequence${gif ? ' capture-sequence--gif' : ''}${recording ? ' capture-sequence--recording' : ''}`} >
     <header><div><h1>{gif ? 'Record GIF' : 'Scrolling screenshot'}</h1><p>{gif ? 'Record the selected region, then review and mark keyframes.' : 'Scroll the source yourself, leaving an overlap between captures.'}</p></div>
       <button type="button" onClick={() => void api.cancel(input.requestId)}>Close</button></header>
     <div className="capture-sequence__controls">
@@ -137,19 +146,19 @@ export function CaptureSequenceView({ input, api }: { input: CaptureSequenceInpu
           const bytes = Uint8Array.from(data), info = inspectGif(bytes), decoded = await decodeGif(bytes)
           originalGif.current = bytes; setKeyframes(info.metadata?.keyframes ?? []); setIndex(0); setPlaying(false)
           setSnapshot(old => ({ ...old, state: 'review', frames: decoded }))
-        })}>Open GIF…</button></> : <><button className="primary-button" disabled={busy} onClick={() => void action(sample)}>Capture next</button><button disabled={busy || frames.length < 2} onClick={() => void action(async () => { const next = await api.undo(input.requestId); merge(next); setLongImage(null); setLongImage(await stitchFrames(next.frames)) })}>Undo last frame</button><button disabled={busy} onClick={() => void action(async () => { const image = await stitchFrames(frames); await api.finishScroll(input.requestId, image) })}>Edit long image</button></>}
+        })}>Open GIF…</button></> : <><button className="primary-button" disabled={busy || snapshot.state === 'stopping'} onClick={() => void action(async () => { if (recording) merge(await api.stop(input.requestId)); else { await stitchFrames(frames); setLongImage(null); merge(await api.start(input.requestId, 2)) } })}>{snapshot.state === 'stopping' ? 'Finishing frame...' : recording ? 'Stop scrolling capture' : 'Start scrolling capture'}</button><button disabled={busy || recording} onClick={() => void action(sample)}>Capture next</button><button disabled={busy || recording || frames.length < 2} onClick={() => void action(async () => { const next = await api.undo(input.requestId); merge(next); setLongImage(null); setLongImage(await stitchFrames(next.frames)) })}>Undo last frame</button><button disabled={busy || recording} onClick={() => void action(async () => { const image = await stitchFrames(frames); await api.finishScroll(input.requestId, image) })}>Edit long image</button></>}
       <span className="capture-sequence__count" role="status">{recording ? '● ' : ''}{frames.length} {frames.length === 1 ? 'frame' : 'frames'}{busy && progress ? ` · Encoding ${progress}/${frames.length}` : ''}</span>
     </div>
     <div className="capture-sequence__body">
       <div className="capture-sequence__preview">{(longImage ?? frame?.image) ? <img src={(longImage ?? frame!.image).dataUrl} alt={gif ? `Frame ${index + 1}` : 'Scrolling capture preview'} /> : <p>Waiting for the first frame…</p>}</div>
-      {gif && !recording && frames.length > 0 ? <aside aria-label="Keyframe notes"><div className="capture-sequence__note-heading"><h2>Keyframes</h2>
+      {gif && snapshot.state === 'review' && frames.length > 0 ? <aside aria-label="Keyframe notes"><div className="capture-sequence__note-heading"><h2>Keyframes</h2>
         <button disabled={busy} aria-pressed={!!keyframe} onClick={() => { setPlaying(false); setKeyframes(old => keyframe ? old.filter(k => k.frameIndex !== index) : [...old, { frameIndex: index, note: '' }].sort((a, b) => a.frameIndex - b.frameIndex)) }}>{keyframe ? 'Remove keyframe' : 'Mark current frame'}</button></div><div className="capture-sequence__notes-body"><div className="capture-sequence__note-editor">
         {keyframe ? <label>Note for frame {index + 1}<textarea value={keyframe.note} disabled={busy} placeholder="What should the viewer notice?" onChange={e => setKeyframes(old => old.map(k => k.frameIndex === index ? { ...k, note: e.target.value } : k))} /></label> : <p>Pause on a frame to add a note.</p>}
         </div><div className="capture-sequence__marked-list"><h3>Marked frames</h3><nav aria-label="Marked frames">{keyframes.map(k => <button key={k.frameIndex} onClick={() => select(k.frameIndex)} aria-current={k.frameIndex === index ? 'true' : undefined}><strong>Frame {k.frameIndex + 1}</strong><span>{k.note || 'No note yet'}</span></button>)}</nav></div></div>
         <p className="capture-sequence__hint">Frame numbers and notes travel inside the GIF file.</p>
       </aside> : null}
     </div>
-    {gif && !recording && frames.length > 0 ? <footer>
+    {gif && snapshot.state === 'review' && frames.length > 0 ? <footer>
       <div className="capture-sequence__playback"><button disabled={busy} onClick={() => setPlaying(v => !v)}>{playing ? 'Pause' : 'Play'}</button><button disabled={busy || index <= 0} aria-label="Previous frame" onClick={() => select(index - 1)}>‹</button><div className="capture-sequence__track"><input type="range" aria-label="Current frame" min={0} max={frames.length - 1} value={index} disabled={busy} onChange={e => select(Number(e.target.value))} /><div className="capture-sequence__markers">{keyframes.map(k => <button key={k.frameIndex} aria-label={`Go to keyframe ${k.frameIndex + 1}`} title={`Frame ${k.frameIndex + 1}: ${k.note}`} style={{ left: `${frames.length > 1 ? k.frameIndex / (frames.length - 1) * 100 : 0}%` }} onClick={() => select(k.frameIndex)} />)}</div></div><button aria-label="Next frame" disabled={busy || index >= frames.length - 1} onClick={() => select(index + 1)}>›</button><output>{index + 1} / {frames.length} · {(time / 1000).toFixed(2)} s</output></div>
       <div className="capture-sequence__export"><button disabled={busy} onClick={() => void action(async () => { const result = await api.saveGif(input.requestId, [...await encode()]); if (result.status === 'saved') setIssue('GIF saved with keyframe notes.') })}>Save GIF…</button><button className="primary-button" disabled={busy} onClick={() => void action(async () => { await api.attachGif(input.requestId, [...await encode()]) })}>Use GIF</button></div>
     </footer> : null}

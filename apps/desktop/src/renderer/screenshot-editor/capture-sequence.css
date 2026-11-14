@@ -52,3 +52,7 @@
   .capture-sequence__marked-list nav span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .capture-sequence__hint { font-size: 10px; }
 }
+
+.capture-sequence--recording.capture-sequence--gif { padding: 12px; gap: 8px; }
+.capture-sequence--recording.capture-sequence--gif .capture-sequence__body { display: none; }
+.capture-sequence--recording.capture-sequence--gif header p { font-size: 11px; }

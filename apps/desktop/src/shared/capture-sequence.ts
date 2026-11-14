@@ -7,7 +7,7 @@ export type SequenceFrame = { image: BrowserPng; capturedAt: number; delayMs: nu
 export type GifKeyframe = { frameIndex: number; note: string }
 export type GifMetadata = { schema: 'agentmux.gif.v1'; width: number; height: number; delays: number[]; keyframes: GifKeyframe[] }
 export type SequenceSnapshot = { requestId: string; mode: CaptureSequenceMode; state: 'ready' | 'recording' | 'stopping' | 'review'; frames: SequenceFrame[]; frameOffset?: number; issue: string | null }
-export type CaptureSequenceInput = SequenceSnapshot & { theme: ThemeBootstrap; source: ScreenshotCaptureSource }
+export type CaptureSequenceInput = SequenceSnapshot & { theme: ThemeBootstrap; background?: import('./capture-surface').CaptureBackground; source: ScreenshotCaptureSource }
 export const CAPTURE_SEQUENCE_CHANNEL = 'capture:sequence'
 export type CaptureSequenceApi = {
   load(): Promise<CaptureSequenceInput>
