@@ -7,11 +7,14 @@ import ts from 'typescript'
 export { build } from 'esbuild'
 
 /** Emit the actual reachable CLI as separate ESM files, matching Core's published src/dist layout. */
-export async function compileRendererProfileCli(root: string, directory: string, frozen: Record<string, string>, loaded?: string): Promise<string> {
+export async function compileRendererProfileCli(root: string, directory: string, frozen: Record<string, string>, loaded?: string, includeRootSDK = false): Promise<string> {
   const core = join(root, 'packages/core'), sourceRoot = join(core, 'src'), packageRoot = join(directory, 'cli-core')
   const entry = join(packageRoot, 'dist/agentmux.js'), compilationReads: Record<string, string> = {}
   const outputFiles: Record<string, { sha256: string; bytes: number }> = {}
-  const modules: Array<{ source: string; output: string; imports: string[] }> = [], pending = [{ source: join(sourceRoot, 'agentmux.ts'), output: entry }]
+  const modules: Array<{ source: string; output: string; imports: string[] }> = [], pending = [{ source: join(sourceRoot, 'agentmux.ts'), output: entry },
+    ...(includeRootSDK ? [{ source: join(sourceRoot, 'index.ts'), output: join(packageRoot, 'dist/index.js') },
+      // The SDK finds this installed asset by package path rather than an import/URL edge.
+      { source: join(sourceRoot, 'control-endpoint-listener-worker.ts'), output: join(packageRoot, 'dist/control-endpoint-listener-worker.js') }] : [])]
   const emitted = new Map<string, string>(), hash = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).digest('hex')
   await mkdir(packageRoot)
   await symlink(join(core, 'node_modules'), join(packageRoot, 'node_modules'), 'dir')
@@ -70,7 +73,7 @@ export async function compileRendererProfileCli(root: string, directory: string,
     modules.push({ source: relative(root, source), output: relative(directory, destination), imports })
   }
   await writeFile(join(directory, 'compilation.json'), JSON.stringify({ sourceReads: compilationReads,
-    emission: 'esbuild-single-module-esm', bundled: false, modules, outputFiles,
+    emission: 'esbuild-single-module-esm', bundled: false, includeRootSDK, modules, outputFiles,
     compiledEntry: entry, compiledSha256: hash(await readFile(entry)), nativeOrApp: false }))
   return entry
 }

@@ -15,7 +15,7 @@ import { AgentMuxControlServer } from '../../../packages/core/src/control-host'
 import { agentMuxControlTimeoutMs } from '../../../packages/core/src/control'
 import { parseAgentMuxCliInvocation } from '../../../packages/core/src/agentmux-cli-commands'
 import { rpcControlRequest, parseRpcControlResult } from '../../../packages/core/src/rpc-business-codec'
-import { RENDERER_TRACE_CATEGORIES, RENDERER_TRACE_MAX_BYTES, parseRendererTraceInput,
+import { RENDERER_TRACE_CATEGORIES, RENDERER_ALLOCATOR_TRACE_CATEGORIES, RENDERER_TRACE_MAX_BYTES, parseRendererTraceInput,
   parseRendererTraceResult, type RendererTraceResult } from '../../../packages/core/src/renderer-trace'
 import { writeRendererTrace } from '../../../packages/core/src/renderer-trace-cli'
 import { writeRendererV8Profile } from '../../../packages/core/src/renderer-v8-profile-cli'
@@ -36,6 +36,7 @@ function fixture() {
   const state = { attached: false, devtools: false, destroyed: false, nativeForeignTrace: false,
     start: (): Promise<unknown> => Promise.resolve({}), end: (): Promise<unknown> => Promise.resolve({}),
     close: (): Promise<unknown> => Promise.resolve({}), read: null as (() => Promise<unknown>) | null,
+    dump: (): Promise<unknown> => Promise.resolve({ dumpGuid: '0x1', success: true }),
     completeOnEnd: true, dataLoss: false, raw: nativeJSON(), gzip: null as Buffer | null,
     handle: 'original-native-stream', chunkBytes: 64 * 1024, emptyBeforeData: false,
     activeReads: 0, maxActiveReads: 0, onEnd: () => {} }
@@ -57,6 +58,11 @@ function fixture() {
         state.onEnd()
         if (state.completeOnEnd) complete()
         return state.end()
+      }
+      if (method === 'Tracing.requestMemoryDump') {
+        // Mutations of the native policy are contained by this fake protocol, never sent to native.
+        expect(params).toEqual({ deterministic: false, levelOfDetail: 'light' })
+        return state.dump()
       }
       if (method === 'IO.read') {
         state.activeReads++; state.maxActiveReads = Math.max(state.maxActiveReads, state.activeReads)
@@ -414,3 +420,108 @@ it('delivers a raw trace larger than the old 8 MiB limit through actual tracer, 
   expect(f.state.maxActiveReads).toBe(1); expect(execute).not.toHaveBeenCalled()
   await expect(new AgentMuxRpcService({ execute }).call('system.metrics.trace.capture', input())).rejects.toMatchObject({ code: 'METRICS_UNSUPPORTED' })
 }, 30_000)
+
+const allocatorInput = () => ({ ...input(), purpose: 'memory-allocators' as const })
+const allocatorJSON = () => Buffer.from('{\n "traceEvents":' + JSON.stringify([
+  { pid: 4, tid: -1, ph: 'v', id: '0x1', ts: 101.25, name: 'periodic_interval', cat: 'disabled-by-default-memory-infra',
+    args: { dumps: { level_of_detail: 'light', allocators: { 'partition_alloc/partitions/array_buffer': { guid: 'original-guid', attrs: {
+      allocated_objects_size: { type: 'scalar', units: 'bytes', value: '1400000' }, effective_size: { type: 'scalar', units: 'bytes', value: '1000' }
+    } } }, allocators_graph: [{ source: 'original-guid', target: 'shared-guid', importance: 2 }] } } },
+  { pid: 99, tid: -1, ph: 'v', id: '0x1', ts: 101.5, name: 'another-point', cat: 'disabled-by-default-memory-infra', args: { dumps: { level_of_detail: 'light' } } }
+]) + ',\n "metadata":{"future":"original-native-material"}\n}\n')
+
+it('allocator purpose requests one false/light dump and keeps ACK tokens independent of exact native point bytes', async () => {
+  vi.useFakeTimers(); const f = fixture(); f.state.raw = allocatorJSON()
+  // Observe native dispatch even when a broken implementation later fails its result codec.
+  const pending = f.tracer.capture(allocatorInput()).then(result => ({ result, error: null }), error => ({ result: null, error }))
+  await vi.advanceTimersByTimeAsync(1000); const captured = await pending
+  expect(methods(f).filter(method => method === 'Tracing.requestMemoryDump')).toHaveLength(1)
+  if (captured.error) throw captured.error
+  const result = captured.result!
+  expect(result.status).toBe('completed')
+  expect(result).toMatchObject({ purpose: 'memory-allocators', scope: 'chromium-target-related-memory-allocators',
+    memoryDump: { deterministic: false, levelOfDetail: 'light', requested: true, acknowledged: true, response: { dumpGuid: '0x1', success: true } } })
+  expect(result.memoryDump!.requestedAt).toBeTypeOf('number'); expect(result.memoryDump!.acknowledgedAt).toBeTypeOf('number')
+  expect(methods(f).filter(method => method === 'Tracing.requestMemoryDump')).toHaveLength(1)
+  expect(f.debuggerClient.sendCommand.mock.calls[0]![1]).toEqual({ transferMode: 'ReturnAsStream', streamFormat: 'json', streamCompression: 'gzip', bufferUsageReportingInterval: 250,
+    traceConfig: { recordMode: 'recordUntilFull', includedCategories: [...RENDERER_ALLOCATOR_TRACE_CATEGORIES], excludedCategories: ['*'], memoryDumpConfig: { triggers: [] } } })
+  expect(Buffer.compare(gunzipSync(Buffer.from(result.trace!.data, 'base64')), f.state.raw)).toBe(0)
+  expect(result.memoryDump).not.toHaveProperty('nativePointId')
+  expect(result.memoryDump).not.toHaveProperty('associatedPoint')
+  expect(parseRendererTraceResult(result, allocatorInput())).toEqual(result)
+  expect(() => parseRendererTraceResult({ ...result, memoryDump: { ...result.memoryDump, nativePointId: '0x1' } })).toThrow()
+  expect(() => parseRendererTraceResult(result, input())).toThrow()
+  expect(result.lifecycle.detached).toBe('confirmed'); expect(result.stream.closeAcknowledged).toBe(true)
+})
+it.each([false, 'malformed'] as const)('allocator purpose preserves unsuccessful or malformed native request ACK (%s) without retry', async reply => {
+  vi.useFakeTimers(); const f = fixture(); f.state.raw = allocatorJSON()
+  f.state.dump = async () => reply === false ? { dumpGuid: '0x1', success: false } : { success: true }
+  const pending = f.tracer.capture(allocatorInput()); await vi.advanceTimersByTimeAsync(1000); const result = await pending
+  expect(result.status).toBe('failed'); expect(result.memoryDump!.requested).toBe(true)
+  expect(result.memoryDump!.acknowledged).toBe(reply === false)
+  expect(result.memoryDump!.response).toEqual(reply === false ? { dumpGuid: '0x1', success: false } : null)
+  expect(methods(f).filter(method => method === 'Tracing.requestMemoryDump')).toHaveLength(1)
+  expect(result.lifecycle.detached).toBe('confirmed'); expect(result.issues.some(issue => issue.stage === 'memory-dump')).toBe(true)
+})
+it('allocator purpose leaves a cancelled pending dump unknown and never accepts its late ACK', async () => {
+  vi.useFakeTimers(); const f = fixture(), cancel = new AbortController()
+  let resolve!: (value: unknown) => void; f.state.dump = () => new Promise(done => { resolve = done })
+  const pending = f.tracer.capture(allocatorInput(), cancel.signal); await vi.advanceTimersByTimeAsync(0)
+  cancel.abort(); await vi.advanceTimersByTimeAsync(1000); const result = await pending, saved = structuredClone(result)
+  expect(result.status).toBe('unknown'); expect(result.memoryDump).toMatchObject({ requested: true, acknowledged: false, acknowledgedAt: null, response: null })
+  expect(result.lifecycle.detached).toBe('confirmed')
+  resolve({ dumpGuid: 'late-ack', success: true }); await vi.advanceTimersByTimeAsync(0)
+  expect(result).toEqual(saved); expect(methods(f).filter(method => method === 'Tracing.requestMemoryDump')).toHaveLength(1)
+})
+it('allocator purpose does not claim a dump dispatched when its exact source changes after trace start', async () => {
+  const f = fixture()
+  f.state.start = async () => { f.setCurrent({ ...target, generation: target.generation + 1 }); return {} }
+  const result = await f.tracer.capture(allocatorInput())
+  expect(result.status).toBe('failed'); expect(result.memoryDump).toMatchObject({ requested: false, requestedAt: null, acknowledged: false, response: null })
+  expect(methods(f)).not.toContain('Tracing.requestMemoryDump'); expect(result.lifecycle.detached).toBe('confirmed')
+})
+it('allocator purpose validates only the fixed public selection and preserves omitted timeline input/result shape', async () => {
+  expect(parseRendererTraceInput(input())).toEqual(input()); expect(parseRendererTraceInput(allocatorInput())).toEqual(allocatorInput())
+  for (const illegal of [{ ...allocatorInput(), deterministic: true }, { ...allocatorInput(), levelOfDetail: 'detailed' }, { ...allocatorInput(), purpose: 'arbitrary' }])
+    expect(() => parseRendererTraceInput(illegal)).toThrow()
+  const args = ['system', 'metrics', 'trace', 'capture', '--window-id', '1', '--web-contents-id', '2', '--generation', '3', '--pid', '4', '--creation-time', '1000', '--duration-ms', '1000']
+  expect((await parseAgentMuxCliInvocation(args)).params).toEqual(input())
+  const parsed = await parseAgentMuxCliInvocation([...args, '--memory-allocators'])
+  expect(parsed.params).toEqual(allocatorInput()); expect(rpcControlRequest('system.metrics.trace.capture', parsed.params)).toMatchObject({ operation: 'metrics.trace.capture', ...allocatorInput() })
+  vi.useFakeTimers(); const f = fixture(), result = await finish(f)
+  expect(result).not.toHaveProperty('purpose'); expect(result).not.toHaveProperty('memoryDump'); expect(methods(f)).not.toContain('Tracing.requestMemoryDump')
+})
+it('allocator purpose follows actual Core Unix RPC and source CLI into original Main tracer and exact export', async () => {
+  const root = resolve(import.meta.dirname, '../../..'), directory = process.env.ALLOCATOR_CLI_DIRECTORY ?? await mkdtemp(join(tmpdir(), 'allocator-cli-'))
+  await mkdir(directory, { recursive: true })
+  if (!process.env.ALLOCATOR_CLI_DIRECTORY) disposers.push(() => rm(directory, { recursive: true, force: true }))
+  const frozen = process.env.AGENTMUX_PERFORMANCE_SOURCES ? JSON.parse(readFileSync(process.env.AGENTMUX_PERFORMANCE_SOURCES, 'utf8')) : {}
+  const executable = await compileRendererProfileCli(root, directory, frozen, process.env.AGENTMUX_PERFORMANCE_LOADED, true)
+  const f = fixture(); f.state.raw = allocatorJSON()
+  const port = createResourceMetricsPort({ sampler: {} as never, currentWindow: () => target, tracer: f.tracer })
+  // Darwin Unix sockets need a short path even when the task's TMPDIR is long.
+  const namespace = await mkdtemp('/tmp/amux-alloc-'), server = new AgentMuxControlServer({ coreClients: () => [], metrics: port }, join(namespace, 'c.sock'))
+  await server.start(); disposers.push(async () => { await server.stop(); port.dispose(); await rm(namespace, { recursive: true, force: true }) })
+  const env: NodeJS.ProcessEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(AGENTMUX_|CTXMUX_|CODEX_|ELECTRON_|NODE_OPTIONS$)/u.test(key)))
+  for (const [key, name] of Object.entries({ HOME: 'home', CODEX_HOME: 'codex', AGENTMUX_RUNTIME_DIRECTORY: 'runtime',
+    AGENTMUX_STATE_DIRECTORY: 'state', XDG_CONFIG_HOME: 'config', XDG_DATA_HOME: 'data', XDG_CACHE_HOME: 'cache', TMPDIR: 'tmp' })) {
+    env[key] = join(namespace, name); await mkdir(env[key]!, { recursive: true })
+  }
+  const output = join(directory, 'original-native.json')
+  const args = [executable, '--endpoint', 'unix://' + server.path, 'system', 'metrics', 'trace', 'capture', '--window-id', '1', '--web-contents-id', '2', '--generation', '3', '--pid', '4', '--creation-time', '1000', '--duration-ms', '1000', '--memory-allocators', '--output', output]
+  const child = spawn(process.execPath, args, { env, stdio: ['ignore', 'pipe', 'pipe'] })
+  let stdout = '', stderr = ''; child.stdout.on('data', chunk => { stdout += chunk }); child.stderr.on('data', chunk => { stderr += chunk })
+  const watchdog = setTimeout(() => child.kill('SIGKILL'), 15000)
+  const code = await new Promise<number | null>((resolve, reject) => { child.once('close', resolve); child.once('error', reject) }).finally(() => clearTimeout(watchdog))
+  await writeFile(join(directory, 'public-cli.json'), JSON.stringify({ code, stdout, stderr }))
+  expect(code, stderr).toBe(0)
+  const wire = JSON.parse(stdout), capture = parseRendererTraceResult(wire.result.capture, allocatorInput())
+  expect(capture.status).toBe('completed'); expect(capture.memoryDump!.response).toEqual({ dumpGuid: '0x1', success: true })
+  expect(methods(f).filter(method => method === 'Tracing.requestMemoryDump')).toHaveLength(1)
+  expect(Buffer.compare(await readFile(output), f.state.raw)).toBe(0)
+  expect(capture.trace!.data).toBe(gzipSync(f.state.raw).toString('base64'))
+  await expect(writeRendererTrace(output, { capture })).rejects.toMatchObject({ code: 'EEXIST' })
+  expect(methods(f).filter(method => method === 'Tracing.requestMemoryDump')).toHaveLength(1)
+  if (process.env.ALLOCATOR_FACTS) await writeFile(process.env.ALLOCATOR_FACTS, JSON.stringify({ sourceCLI: true, defaultTimelineUnchanged: true, originalRawSHA256: sha(f.state.raw), captureSHA256: capture.sha256,
+    nativePointOccurrences: JSON.parse(f.state.raw.toString()).traceEvents.map((event: any, index: number) => ({ index, pid: event.pid, id: event.id, ts: event.ts, name: event.name })), memoryDump: capture.memoryDump, exactlyOneRequest: true, noAssociation: true }, null, 2))
+}, 30000)
