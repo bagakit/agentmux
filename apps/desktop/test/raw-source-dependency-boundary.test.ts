@@ -48,15 +48,19 @@ import { describe, expect, it } from 'vitest'
 
 /** 仓根绝对路径。测试文件在 `apps/desktop/test/`，往上三层。 */
 const REPOSITORY = resolve(new URL('../../../', import.meta.url).pathname)
+const { resolvePackageRoot } = await import(new URL('../../../scripts/package-dependencies.mjs', import.meta.url).href) as {
+  resolvePackageRoot(sourcePackage: string, packageName: string, stopDirectory: string): Promise<string>
+}
 
 /** 交给 Node 的入口是未编译 TypeScript 的工作区依赖：包名 → 它的入口路径（报错时要说清是哪一个）。 */
-function rawSourceWorkspaceDependencies(): Map<string, string> {
+async function rawSourceWorkspaceDependencies(): Promise<Map<string, string>> {
   const desktop = JSON.parse(readFileSync(resolve(REPOSITORY, 'apps/desktop/package.json'), 'utf8'))
   const raw = new Map<string, string>()
   for (const [name, range] of Object.entries(desktop.dependencies ?? {})) {
     // 只有 workspace 依赖才可能是未编译源码；npm 上的包都是发布产物。
     if (typeof range !== 'string' || !range.startsWith('workspace:')) continue
-    const manifestPath = resolve(REPOSITORY, 'packages', name.split('/').pop()!, 'package.json')
+    const packageRoot = await resolvePackageRoot(resolve(REPOSITORY, 'apps/desktop'), name, REPOSITORY)
+    const manifestPath = resolve(packageRoot, 'package.json')
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
     // `exports` 优先于 `main`——Node 先看 exports。两处都取，任一是 .ts 就算未编译。
     const entries = [manifest.main, manifest.exports?.['.']?.import, manifest.exports?.['.']?.default]
@@ -106,8 +110,8 @@ function importsPackage(spec: string, name: string): boolean {
   return spec === name || spec.startsWith(`${name}/`)
 }
 
+const rawSource = await rawSourceWorkspaceDependencies()
 describe('主进程与 preload 不 import 未编译源码的依赖', () => {
-  const rawSource = rawSourceWorkspaceDependencies()
   const sources = nodeSideSources()
 
   it('至少有一个 raw-source 工作区依赖，否则这条判据今天没有靶子', () => {
