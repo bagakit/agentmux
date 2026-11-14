@@ -1,4 +1,5 @@
 import { SemanticIcon } from '@agentmux/client-ui/icons'
+import { SelectionIndicator } from '@agentmux/client-ui/components/SelectionIndicator'
 import { useId, type ReactNode } from 'react'
 import type { AgentTurnUsage } from '@agentmux/core'
 import type { AgentSessionControl } from '../../../shared/contracts'
@@ -34,6 +35,7 @@ export function AgentInformationDetails({ context, goalLinks, usage, control, ta
   const id = useId()
   return <div className="agent-information-details">
     <nav className="agent-information-details__tabs" aria-label="Agent information">
+      <SelectionIndicator />
       {tabs.map(([key, label]) => <button key={key} type="button" id={`${id}-${key}`} aria-controls={`${id}-body`}
         aria-current={tab === key ? 'page' : undefined} onClick={() => onTab(key)}>{label}</button>)}
     </nav>

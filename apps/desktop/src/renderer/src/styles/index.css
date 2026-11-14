@@ -16,6 +16,7 @@
 @import './chrome.css';
 @import '@agentmux/client-ui/styles/selection-field.css';
 @import '@agentmux/client-ui/styles/segmented-control.css';
+@import '@agentmux/client-ui/styles/selection-indicator.css';
 @import './space-tree.css';
 @import './project-groups.css';
 @import './space-object-appearance.css';

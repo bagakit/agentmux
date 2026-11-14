@@ -1,5 +1,6 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { Button } from '@agentmux/client-ui/components/Button'
+import { SelectionIndicator } from '@agentmux/client-ui/components/SelectionIndicator'
 import * as Menu from './DropdownMenu'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
@@ -66,32 +67,19 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   const [intentEditing, setIntentEditing] = useState(descriptionDirty)
   useLayoutEffect(() => {
     const nav = readingNavRef.current
-    if (!nav) return
     const detail = detailRef.current
     const toolbar = detail?.querySelector<HTMLElement>('.goals-detail__toolbar')
-    let frame: number | null = null
-    function positionReadingSelection() {
-      const selected = nav!.querySelector<HTMLElement>('[aria-current="location"]')
-      if (!selected) return
-      nav!.style.setProperty('--goal-reading-x', `${selected.offsetLeft}px`)
-      nav!.style.setProperty('--goal-reading-y', `${selected.offsetTop}px`)
-      nav!.style.setProperty('--goal-reading-width', `${selected.offsetWidth}px`)
-      nav!.style.setProperty('--goal-reading-height', `${selected.offsetHeight}px`)
-      nav!.dataset.selectionPositioned = 'true'
-      if (detail && toolbar) {
-        detail.style.setProperty('--goal-detail-toolbar-height', `${toolbar.offsetHeight}px`)
-        detail.style.setProperty('--goal-detail-reading-offset', `${toolbar.offsetHeight + nav!.offsetHeight + 12}px`)
-      }
-      // The first layout is already selected; only later user reading changes travel.
-      if (!nav!.dataset.selectionAnimated && frame === null) frame = requestAnimationFrame(() => { nav!.dataset.selectionAnimated = 'true'; frame = null })
+    if (!nav || !detail || !toolbar) return
+    const updateOffsets = () => {
+      detail.style.setProperty('--goal-detail-toolbar-height', `${toolbar.offsetHeight}px`)
+      detail.style.setProperty('--goal-detail-reading-offset', `${toolbar.offsetHeight + nav.offsetHeight + 12}px`)
     }
-    positionReadingSelection()
-    const observer = new ResizeObserver(positionReadingSelection)
+    updateOffsets()
+    const observer = new ResizeObserver(updateOffsets)
     observer.observe(nav)
-    if (toolbar) observer.observe(toolbar)
-    for (const button of nav.querySelectorAll('button')) observer.observe(button)
-    return () => { observer.disconnect(); if (frame !== null) cancelAnimationFrame(frame) }
-  }, [demand.id, visibleSection, hasActivity])
+    observer.observe(toolbar)
+    return () => observer.disconnect()
+  }, [demand.id])
   function revealSection(section: HTMLElement | null, focus = true) {
     const detail = detailRef.current
     if (!detail || !section) return
@@ -215,6 +203,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
         <p className="goals-detail__edit-status" aria-live="polite">{hasEditDraft ? draftIssue ? 'Edits kept · Save unconfirmed' : 'Unsaved edits' : null}</p>
       </header>
         <nav ref={readingNavRef} className="goals-detail__reading-nav" aria-label="Goal reading sections">
+          <SelectionIndicator />
           <button type="button" aria-current={visibleSection === 'overview' ? 'location' : undefined} onClick={() => revealWork(overviewRef.current)}>Overview</button>
           <button type="button" aria-current={visibleSection === 'plan' ? 'location' : undefined} onClick={() => revealWork(planRef.current)}>Plan</button>
           {hasActivity ? <button type="button" aria-current={visibleSection === 'activity' ? 'location' : undefined} onClick={() => revealWork(activityRef.current)}>Activity</button> : null}

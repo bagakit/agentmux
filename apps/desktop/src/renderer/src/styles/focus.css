@@ -349,9 +349,10 @@
 
 /* The shared Agent disclosure keeps supplementary facts below an intentional summary. */
 .agent-information-details { margin: 8px 0; color: var(--text-2); font-size: var(--fs-meta); }
-.agent-information-details__tabs { display: flex; gap: 4px; padding-bottom: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
+.agent-information-details__tabs { --selection-indicator-border: var(--line); --selection-indicator-background: var(--surface-3); position: relative; isolation: isolate; display: flex; gap: 4px; padding-bottom: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--line); }
 .agent-information-details__tabs > button { flex: 1; padding: 5px 4px; border: 1px solid transparent; border-radius: var(--radius-sm); background: none; color: var(--text-3); font: inherit; cursor: pointer; }
 .agent-information-details__tabs > button[aria-current="page"] { border-color: var(--line); background: var(--surface-3); color: var(--text); }
+.agent-information-details__tabs:has(> .selection-indicator:not([hidden])) > button[aria-current="page"] { border-color: transparent; background: transparent; }
 .agent-information-details__tabs > button:focus-visible { outline: 1px solid var(--green); outline-offset: 1px; }
 .agent-information-details h3, .agent-information-details h4 { margin: 8px 0 4px; font-size: var(--fs-meta); font-weight: 600; color: var(--text); }
 .agent-information-details p { color: var(--text-3); font-size: var(--fs-micro); }
