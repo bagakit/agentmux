@@ -84,6 +84,24 @@ it('keeps an explicitly empty scope empty and distinguishes missing from unavail
   expect(() => parseHostedBootstrap(value, 'summary', ['missing-original', 'unreadable-original'])).not.toThrow()
   expect(() => parseHostedBootstrap(value, 'summary', ['some-other-original'])).toThrow()
 })
+it('delivers original input receipts only to the selected Session reader', async () => {
+  const f = await fixture(), client = await connectHostedAgentMux({ rpc: f.port, sessions: 'summary', agentSessionIds: [f.selected.agentSessionId] })
+  cleanup.push(() => client.dispose())
+  client.onEvent(event => f.seen.push(event), { observeMessages: false })
+  await vi.waitFor(() => expect(f.subject).toHaveBeenCalled())
+  const receipt = (original: AgentMuxStoredAgentSession) => {
+    const key = { kind: 'prompt' as const, agentSessionId: original.agentSessionId, expectedRun: original.run, submissionId: 'original-input' }
+    const ref = { key, waitGeneration: 1 }
+    return { key, ref, persistence: 'confirmed' as const, control: { ref, state: 'enabled' as const, at: 1 },
+      admission: null, status: 'waiting' as const, observation: 'owned' as const }
+  }
+  const publish = (f.core as unknown as { publisher: { publish(event: AgentMuxClientEvent): void } }).publisher
+  publish.publish({ type: 'agent-input', receipt: receipt(f.unrelated) })
+  const original = receipt(f.selected)
+  publish.publish({ type: 'agent-input', receipt: original })
+  await vi.waitFor(() => expect(f.seen.filter(event => event.type === 'agent-input')).toEqual([{ type: 'agent-input', receipt: original }]))
+  expect(f.inventory).not.toHaveBeenCalled(); expect(f.listRuns).not.toHaveBeenCalled()
+})
 it('the actual producer visits only SID-indexed scoped readers for unrelated and related metadata updates', async () => {
   const f = await fixture(), frames = Array.from({ length: 64 }, () => 0), subscriptions = []
   for (let i = 0; i < frames.length; i++) {
