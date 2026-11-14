@@ -6,6 +6,7 @@ import type { DemandDelegation } from '@agentmux/demand/delegations'
 import type { GoalPlan, GoalPlanNodeInput } from '@agentmux/demand/goal-plan'
 import { goalPlanState, projectGoalPlan } from '@agentmux/demand/goal-plan'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
+import { GoalDetail } from '../src/renderer/src/components/GoalDetail'
 import { goalPlanColumns, goalPlanEdgePath, goalPlanHighlight, goalPlanProjection } from '../src/renderer/src/components/GoalPlanGraph'
 import { api } from '../src/renderer/src/lib/api'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
@@ -50,7 +51,7 @@ describe('Goal plan graph', () => {
     await dom.render(<GlobalBoardSurface />)
     const detail = dom.container.querySelector('.goals-detail')!
     const main = detail.querySelector('.goals-detail__main')!
-    expect(main.firstElementChild).toBe(graph())
+    expect(main.firstElementChild?.contains(graph())).toBe(true)
     expect(detail.querySelector('[data-goal-meta-plan]')?.textContent).toBe('Plan 1 of 4 done')
     expect(detail.querySelector('.goals-detail__side .goal-collaboration')).not.toBeNull()
     const side = detail.querySelector('.goals-detail__side')!
@@ -76,10 +77,18 @@ describe('Goal plan graph', () => {
     expect(side).not.toBeNull()
     const scroll = vi.fn()
     side.scrollIntoView = scroll
+    const detail = dom.container.querySelector<HTMLElement>('.goals-detail')!
+    detail.scrollTop = 100
+    side.style.scrollMarginTop = '48px'
+    vi.spyOn(side, 'getBoundingClientRect').mockReturnValue({ top: 600 } as DOMRect)
+    vi.spyOn(detail, 'getBoundingClientRect').mockReturnValue({ top: 20 } as DOMRect)
+    dom.container.scrollTop = 18
     const team = dom.container.querySelector<HTMLButtonElement>('.goals-detail__team-link')!
     expect(team.textContent).toBe('Team')
     await act(async () => team.click())
-    expect(scroll).toHaveBeenCalledWith({ block: 'start' })
+    expect(scroll).not.toHaveBeenCalled()
+    expect(detail.scrollTop).toBe(632)
+    expect(dom.container.scrollTop).toBe(18)
     expect(document.activeElement).toBe(side)
     expect(dom.container.querySelectorAll('[aria-label="Open discussion for Ship the plan"]')).toHaveLength(1)
     expect(graph()!.textContent).not.toContain('Open goal discussion')
@@ -197,7 +206,8 @@ describe('Goal plan graph', () => {
     expect(dom.container.querySelector('.goals-detail')).not.toBeNull()
     expect(graph()).not.toBeNull()
     expect(graph()!.querySelector('[data-goal-plan-node]')).toBeNull()
-    expect(dom.container.querySelector('.goals-detail__main')!.firstElementChild).toBe(graph())
+    if (alignment) expect(dom.container.querySelector('.goals-detail__main')!.firstElementChild?.contains(graph())).toBe(true)
+    else expect(Boolean(dom.container.querySelector('[data-goal-grill]')!.compareDocumentPosition(graph()!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
     const origin = graph()!.querySelector('[data-goal-plan-origin="goal"]')!
     expect(origin).not.toBeNull()
     expect(origin.getAttribute('aria-label')).toBe('Goal starting point')
@@ -206,8 +216,33 @@ describe('Goal plan graph', () => {
     expect([...graph()!.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Choose Supervisor to plan'])
     expect(graph()!.querySelector('h2')!.textContent).toContain('Execution plan')
     expect(graph()!.textContent).toContain('Starting point')
-    expect(graph()!.textContent).toContain('No execution plan yet')
+    expect(graph()!.textContent).toContain('No saved execution plan')
     expect(graph()!.querySelector('[data-goal-plan-request]')).not.toBeNull()
+  })
+
+  it('reads the actual report and its criteria before planning another execution', async () => {
+    seed(goal({ grounding: { alignmentRevision: alignment.revision, submissionId: 'current-report', acceptedAt: null,
+      summary: 'Review the original result.', checks: criteria.map(criterion => ({ criterionId: criterion.id, outcome: 'met', evidence: ['verification.log:1'], note: '' })) } }))
+    await dom.render(<GlobalBoardSurface />)
+    const finish = dom.container.querySelector('[data-goal-finish]')!
+    const firstCheck = dom.container.querySelector('[data-goal-outcome]')!
+    expect(finish).not.toBeNull()
+    expect(Boolean(firstCheck.compareDocumentPosition(finish) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+    expect(Boolean(finish.compareDocumentPosition(graph()!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+    expect(graph()!.classList.contains('goal-plan--compact')).toBe(true)
+    expect(dom.container.querySelector('[data-goal-work-area]')!.textContent).not.toContain('Ready when you are')
+  })
+
+  it('places the original unconfirmed acknowledgement read before the retained proposal and graph', async () => {
+    const demand = goal({ alignment: { ...alignment, confirmedAt: null } })
+    seed(demand)
+    await dom.render(<GoalDetail demand={demand} onClose={vi.fn()} onOpenMote={vi.fn()} onGrill={vi.fn()} onGrounding={vi.fn()} onPlan={vi.fn()}
+      acknowledgementFeedback={{ pending: false, failure: { attempt: { kind: 'confirm', revision: alignment.revision }, message: 'Original receipt unconfirmed' }, reloadError: null }}
+      onAcknowledgementFeedbackChange={vi.fn()} moteError={null} onRetryMote={vi.fn()} />)
+    const recovery = dom.container.querySelector('[data-goal-acknowledgement-failure]')!
+    expect(Boolean(recovery.compareDocumentPosition(dom.container.querySelector('[data-goal-summary]')!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+    expect(Boolean(recovery.compareDocumentPosition(graph()!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+    expect([...dom.container.querySelectorAll('.primary-button')].map(button => button.textContent?.trim())).toEqual(['Reload current proposal'])
   })
 })
 
