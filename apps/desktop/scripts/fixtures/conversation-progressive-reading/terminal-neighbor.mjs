@@ -165,20 +165,20 @@ export async function exerciseTerminalNeighbor({ win, read, ready, until, click,
     if(!tail?.isConnected||!feed.checkVisibility()||!feed.clientHeight)throw Error('Original Reader tail is absent');
     return tail.getBoundingClientRect().top-feed.getBoundingClientRect().top-feed.clientHeight})()`
   const awayFromTail = await ready(`${latestReaderAction}?.checkVisibility() && ${readerTailDistance} > 2 && ${readerTailDistance}`)
-  await click(latestReaderAction)
-  await ready(`${readerTailDistance} <= 2 && !${latestReaderAction}`)
-  const afterFollow = await inspect()
-  sameHistory(older, afterFollow)
-  assert.ok(afterFollow.focused, 'Returning the adjacent Reader to follow preserves terminal focus')
   const cut = await ready('readingProof.nativeCut()')
   const recordId = await append()
   const accepted = await ready(`readingProof.appendDisposition(${JSON.stringify(cut)},${JSON.stringify(recordId)},false)`)
   await read(twoFrames)
-  const readerFollowingTail = await ready(`${readerTailDistance} <= 2 && {tailDistance:${readerTailDistance}}`)
   const duringReader = await inspect()
   sameHistory(older, duringReader)
   assert.ok(duringReader.focused, 'Passive adjacent reading and append preserve terminal focus')
   assert.deepEqual([duringReader.buffer.x, duringReader.buffer.y], [older.buffer.x, older.buffer.y])
+
+  await click(latestReaderAction)
+  const readerFollowingTail = await ready(`${readerTailDistance} <= 2 && !${latestReaderAction} && {tailDistance:${readerTailDistance}}`)
+  const afterFollow = await inspect()
+  sameHistory(older, afterFollow)
+  assert.ok(afterFollow.focused, 'Returning the adjacent Reader to follow preserves terminal focus')
 
   const flow = await read(`(()=>{const button=[...document.querySelectorAll(${JSON.stringify(readerSelector + ' .wf-head[aria-expanded="false"]')})]
     .find(node=>node.getClientRects().length);if(!button)return false;button.dataset.proofTerminalAdjacent='true';return true})()`)
