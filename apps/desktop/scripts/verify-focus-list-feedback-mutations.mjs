@@ -29,6 +29,7 @@ export const listFeedbackMutations = [
   { label: 'close-returns-inside-focus-only', file: feedback, before: 'if (!next && !compact && content.current?.contains(content.current.ownerDocument.activeElement)) trigger.current?.focus({ preventScroll: true })', after: 'if (false) trigger.current?.focus({ preventScroll: true })' },
   { label: 'only-visible-communication-moves', file: css, before: ".focus-communication-feedback[data-motion-active='true'] .focus-communication-feedback__mark { animation-play-state: running; }", after: ".focus-communication-feedback[data-motion-active='false'] .focus-communication-feedback__mark { animation-play-state: running; }" },
   { label: 'pending-motion-wrapper-keeps-accent', file: css, before: '.agent-operation-feedback__label > :is(svg, .semantic-icon-motion) { flex: none; color: var(--operation-accent); }', after: '.agent-operation-feedback__label > svg { flex: none; color: var(--operation-accent); }' },
+  { label: 'pending-local-light-keeps-the-original-status-text', file: feedback, before: 'data-text={label(operation)}', after: 'data-text=""' },
   { label: 'feedback-siblings-keep-the-original-button-at-natural-height', file: focusCss, before: '.focus-context-card > .focus-context:only-child { height: 100%; }', after: '.focus-context-card > .focus-context { height: 100%; }' }
 ]
 

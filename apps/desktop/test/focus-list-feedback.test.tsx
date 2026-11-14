@@ -217,6 +217,8 @@ it('keeps pending glyph accents consistent through the real animated wrapper and
     const owner = card('sender').querySelector<HTMLElement>('.agent-operation-feedback')!
     const entries = [...owner.querySelectorAll<HTMLElement>('.agent-operation-feedback__item')]
     expect(entries).toHaveLength(2)
+    const status = entries.map(entry => entry.querySelector<HTMLElement>('summary > [role="status"]')!)
+    expect(status.every(label => label.textContent!.trim().length > 0 && label.dataset.text === label.textContent)).toBe(true)
     expect(entries.every(entry => entry.querySelector('summary > .semantic-icon-motion > svg'))).toBe(true)
     const colors = () => entries.map(entry => getComputedStyle(entry.querySelector<SVGElement>('summary svg')!).color)
     const visible = colors()
