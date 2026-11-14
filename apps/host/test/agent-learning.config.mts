@@ -8,6 +8,7 @@ const core = JSON.parse(readFileSync(resolve(root, 'packages/core/package.json')
 const host = JSON.parse(readFileSync(resolve(root, 'apps/host/package.json'), 'utf8'))
 const mutation = process.env.AGENT_LEARNING_MUTANT
 const variants = {
+  'spatial-prepared-observation': ['apps/host/src/spatial-agent-control.ts', "if (session.kind !== 'agent')", 'if (false)'],
   'prepared-observation': ['apps/host/src/agent-learning-owner.ts', "if (original.kind !== 'agent' && original.kind !== 'retired-agent')", 'if (false)'],
   'proposer-authority': ['apps/host/src/agent-learning-owner.ts', 'context.caller?.agentSessionId !== operation.proposer.agentSessionId', 'false'],
   'confirmation-binding': ['apps/host/src/agent-learning-owner.ts', 'await this.options.confirmation(input.confirmationId, binding)', 'void 0'],

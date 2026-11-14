@@ -113,6 +113,39 @@ it('keeps a real prepared creation unknown without inventing a retired Run or di
   expect(await f.store.readMetadata(original.agentSessionId)).toBeNull()
 })
 
+it('public spatial inspection keeps the exact real prepared creation and its original reserved position', async () => {
+  const f = await learningPublicFixture()
+  const start = f.inner.kernel.start.mockRejectedValueOnce(new AgentMuxError('Original Start result unavailable', 'CONTROL_UNAVAILABLE'))
+  const learning = await f.prepare('original-spatial-preparation')
+  const original = await f.core.inspectAgentCreation(learning.proposer.agentSessionId)
+  expect(original.kind).toBe('prepared-agent-creation')
+  if (original.kind !== 'prepared-agent-creation') throw Error('The controlled original Core must retain its preparation.')
+  const { createHostSpatialAgentControl } = await import('../src/spatial-agent-control.js')
+  const { AgentMuxControlServer, connectAgentMuxRpc } = await import('@agentmux/core')
+  const folder = await f.spatial.registerFolder({ id: 'prepared-source-workspace', hostId: 'local', name: 'Original prepared work', path: original.workspacePath })
+  const admission = await f.spatial.admitAgentOpen({ request: { schemaVersion: 5, requestId: original.creation.createOperationId, operation: 'agent.open',
+    content: { kind: 'new-agent', executorId: original.executorId }, destination: { spaceId: folder.spaceId, zoneId: folder.zoneId, newTab: true }, focus: false },
+    agentSessionId: original.agentSessionId, execution: { hostId: 'local', workspacePath: original.workspacePath,
+      workspaceId: 'prepared-source-workspace', ...(original.creation.executorRevision ? { executorRevision: original.creation.executorRevision } : {}) }, regionResource: {} })
+  const runtime = { client: f.core, ownerIdentity: () => ({ runtimeId: learning.ownerRuntimeId }) } as import('@agentmux/core').AgentMuxHeadlessRuntime
+  const server = new AgentMuxControlServer({ socketPath: join(f.root, 'prepared-spatial.sock'), spatialState: f.spatial, coreClients: f.coreClients,
+    spatialAgentControl: createHostSpatialAgentControl({ configurationPath: f.configurationPath, spatial: f.spatial, runtime: () => runtime }) })
+  await server.start()
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+  try {
+    const before = await f.spatial.read()
+    const result = await rpc.call('space.inspect', { target: { operationId: original.creation.createOperationId } })
+    expect(result.request).toMatchObject({ known: true, report: { outcome: 'unknown', agent: null, to: admission.record.address,
+      issues: [{ code: 'AGENT_CREATION_UNCONFIRMED', message: 'The original creation is not a committed Session. Its exact prepared or closed receipt is retained.' }] } })
+    expect(await f.spatial.read()).toEqual(before)
+    expect(await f.core.inspectAgentCreation(original.agentSessionId)).toEqual(original)
+    expect(await f.store.readMetadata(original.agentSessionId)).toBeNull()
+    expect(start).toHaveBeenCalledTimes(1); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+    expect((await f.store.readMetadata('source'))!.run.runId).toBe('run-source')
+    expect((await f.store.readMetadata('neighbor'))!.run.runId).toBe('run-neighbor')
+  } finally { await rpc.dispose(); await server.stop() }
+})
+
 it('keeps a lost creation ACK and original operation across owner reconstruction; never recreates or retargets it', async () => {
   const f = await learningPublicFixture(), actual = f.core.createAgentWithDelivery.bind(f.core), inspect = f.core.inspectAgentCreation.bind(f.core)
   const create = vi.spyOn(f.core, 'createAgentWithDelivery').mockImplementationOnce(async input => {
