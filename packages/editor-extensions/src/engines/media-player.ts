@@ -50,6 +50,59 @@ export function nextPlaybackRate(rate: number, direction: 1 | -1, wrap = false):
   return PLAYBACK_RATES[wrap ? (next + PLAYBACK_RATES.length) % PLAYBACK_RATES.length : Math.min(PLAYBACK_RATES.length - 1, Math.max(0, next))]!
 }
 
+/**
+ * Seeks for one media element that follows a moving pointer. Setting currentTime while a seek runs aborts it,
+ * so a pointer stream sent straight to the element would never let a frame land. This keeps one seek in
+ * flight and only the newest wanted time behind it; each finished seek sends wherever the pointer is by then.
+ */
+export type SeekQueue = {
+  /** Wants a time: sent now, queued behind the seek in flight, already the seek in flight, or where the element rests. */
+  request(time: number): 'sent' | 'queued' | 'in-flight' | 'resting'
+  /** Seeks there now, superseding the seek in flight (the element aborts it) and dropping the waiting time. */
+  land(time: number): void
+  /** The element finished the seek in flight. */
+  settle(): void
+  /** The element has metadata and accepts seeks: the newest wanted time goes out. */
+  open(): void
+  /** Forgets every time, as for a new source. */
+  reset(ready: boolean): void
+}
+
+export function createSeekQueue(seek: (time: number) => void, ready = true): SeekQueue {
+  let open = ready
+  let flight: number | null = null, next: number | null = null, rest: number | null = null
+  const send = (time: number) => { flight = time; next = null; seek(time) }
+  return {
+    request(time) {
+      if (open && flight === null) {
+        if (time === rest) return 'resting'
+        send(time)
+        return 'sent'
+      }
+      if (time === flight) { next = null; return 'in-flight' }
+      next = time
+      return 'queued'
+    },
+    land(time) {
+      if (!open) { next = time; return }
+      next = null
+      if (time === flight || (flight === null && time === rest)) return
+      send(time)
+    },
+    settle() {
+      if (flight === null) return
+      rest = flight; flight = null
+      if (next !== null && next !== rest) send(next)
+      else next = null
+    },
+    open() {
+      open = true
+      if (flight === null && next !== null) send(next)
+    },
+    reset(nextReady) { open = nextReady; flight = null; next = null; rest = null }
+  }
+}
+
 export type MediaPlayerAction =
   | { kind: 'toggle-play' } | { kind: 'toggle-mute' } | { kind: 'fullscreen' }
   | { kind: 'seek-by'; seconds: number } | { kind: 'seek-to-fraction'; fraction: number }
