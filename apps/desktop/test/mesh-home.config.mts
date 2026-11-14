@@ -9,10 +9,12 @@ process.env.AGENTMUX_RESOURCE_LIBRARY_SECTION = 'hosts'
 const mutant = process.env.AGENTMUX_MESH_HOME_MUTANT
 const mutations: Record<string, [string, string, string]> = {
   'wrong-home': ['MeshSettingsPane.tsx', "request?.field?.startsWith('mesh-') ? 'network' : 'paths'", "request?.field?.startsWith('mesh-') ? 'network' : 'network'"],
-  'wrong-host': ['MeshPathsPane.tsx', 'onClick={() => onDevice(host.id)}', 'onClick={() => onDevice(hosts[0]!.id)}'],
-  'unmount-editor': ['MeshSettingsPane.tsx', "visited.has('connections') ? <HostSettingsPane", "view === 'connections' ? <HostSettingsPane"],
+  'wrong-host': ['MeshSettingsPane.tsx', 'onConnections={openConnection}', 'onConnections={() => openConnection(props.config.hosts[0]!.id)}'],
+  'unmount-editor': ['MeshSettingsPane.tsx', "mounted('connections') ? <HostSettingsPane", "view === 'connections' ? <HostSettingsPane"],
   'duplicate-add': ['HostSettingsPane.tsx', ' || appliedAddRequest.current === addHostRequest.intentId', ''],
-  'filter-all': ['MeshPathsPane.tsx', 'const matchingHosts = hosts.filter(host =>', 'const matchingHosts = hosts.filter(host => true ||'],
+  'filter-all': ['ClusterMachinesPane.tsx', 'fields.some(field => field.toLocaleLowerCase().includes(needle))', 'true'],
+  'hidden-machines': ['MeshSettingsPane.tsx', "mounted('paths') || mounted('machines')", "view === 'machines'"],
+  'hidden-saved-gateways': ['MeshPathsPane.tsx', 'savedTargets={savedTargets}', 'savedTargets={undefined}'],
   'stale-add-after-navigation': ['MeshSettingsPane.tsx', 'function supersedeAdd() { setAddHostRequest(undefined) }', 'function supersedeAdd() {}'],
 }
 if (mutant && !mutations[mutant]) throw Error('Unknown Mesh homepage mutant')

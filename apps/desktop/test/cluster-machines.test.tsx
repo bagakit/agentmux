@@ -66,21 +66,22 @@ it('partial metric sources stay visibly unavailable rather than implying a pendi
 
 it('exact Machines field navigation wins over a Host hint, and unrelated renders do not replay a chosen connection navigation', async () => {
  const f=instrument(), config={...composerConfig,hosts}, close=vi.fn(),save=vi.fn()
- const request={section:'hosts' as const,field:'mesh-machines',hostId:'farm'}
+ let request={section:'hosts' as const,field:'mesh-machines',hostId:'farm'}
  const render=(next=config)=>dom.render(<MeshSettingsPane config={next} active onSave={save} onClose={close} navigationRequest={request}/>)
- await render();expect(dom.container.querySelector('[aria-current="page"]')?.textContent).toBe('Machines')
+ await render();expect(dom.container.querySelector('[data-mesh-home-view]')?.getAttribute('data-mesh-home-view')).toBe('machines')
  await settle(()=>dom.container.textContent?.includes('2 / 2 sampled')??false)
- await dom.click('[data-cluster-host="farm"] .cluster-machine-details button')
+ await dom.click('[data-cluster-host="farm"] .cluster-machine-manage')
  await settle(()=>Boolean(dom.container.querySelector('[data-resource-editor="farm"] [data-host-panel="projects"]')))
  await dom.click('[data-resource-editor="farm"] [data-host-panel="projects"]')
  expect(dom.container.querySelector('[data-resource-editor="farm"] [data-host-panel="projects"]')?.getAttribute('aria-current')).toBe('page')
  await render({...config,hosts:hosts.map(h=>({...h,label:h.label+' updated'}))})
  expect(dom.container.querySelector('[data-resource-editor="farm"] [data-host-panel="projects"]')?.getAttribute('aria-current')).toBe('page')
  await dom.click('.mesh-editor-navigation button')
- expect(dom.container.querySelector('[aria-current="page"]')?.textContent).toBe('Overview')
- await dom.click('.mesh-view-tabs button:nth-child(2)')
- expect(dom.container.querySelector('[aria-current="page"]')?.textContent).toBe('Machines')
- await dom.click('[data-cluster-host="farm"] .cluster-machine-details button')
+ expect(dom.container.querySelector('[data-mesh-home-view]')?.getAttribute('data-mesh-home-view')).toBe('paths')
+ request = { ...request }
+ await render()
+ expect(dom.container.querySelector('[data-mesh-home-view]')?.getAttribute('data-mesh-home-view')).toBe('machines')
+ await dom.click('[data-cluster-host="farm"] .cluster-machine-manage')
  expect(dom.container.querySelector('[data-resource-editor="farm"] [data-host-panel="connection"]')?.getAttribute('aria-current')).toBe('page')
  expect(dom.container.querySelector('[data-resource-editor]')?.getAttribute('data-resource-editor')).toBe('farm')
  expect(f.owner.mock.calls.every(call=>call[1]==='settings.node.resources')).toBe(true)
@@ -90,7 +91,7 @@ it('the production SettingsPanel reveals and focuses the actual Machines discove
  instrument()
  await dom.render(<SettingsPanel onClose={vi.fn()} initialSection="hosts" navigationRequest={{section:'hosts',field:'mesh-machines'}} />)
  await settle(()=>Boolean(dom.container.querySelector('[data-settings-field="mesh-machines"]')))
- expect(dom.container.querySelector('.mesh-view-tabs [aria-current="page"]')?.textContent).toBe('Machines')
+ expect(dom.container.querySelector('.settings-nav-children [aria-current="page"]')?.textContent).toBe('Machines')
  expect(dom.container.textContent).not.toContain('This setting is not shown')
  expect(dom.container.querySelector('[data-settings-field="mesh-machines"]')?.closest('[hidden]')).toBeNull()
 })

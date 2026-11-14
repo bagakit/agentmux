@@ -11,8 +11,9 @@ const mutations: Record<string, [string, string, string]> = {
   'circuit-as-route': ['mesh-topology.ts', "if (selected?.kind === 'circuit') return model.circuits.find(circuit => circuit.circuitId === selected.id)?.path ?? []", "if (selected?.kind === 'circuit') return model.routes[0]?.path ?? []"],
   'foreign-selection': ['MeshNetworkMap.tsx', 'key={meshTopologySource(snapshot)}', 'key="shared-source"'],
   'poll-relayout': ['MeshNetworkMap.tsx', '[active, view, topologyKey, arrangeAttempt, fit, setNodes]', '[active, view, topologyKey, arrangeAttempt, fit, setNodes, snapshot]'],
-  'lost-selection-fit': ['MeshNetworkMap.tsx', 'const requestViewport = useCallback(() => setFocusRequest(value => value + 1), [])', 'const requestViewport = useCallback(() => setFocusRequest(value => value), [])'],
+  'lost-selection-fit': ['MeshNetworkMap.tsx', 'setFocusRequest(value => value + 1)', 'setFocusRequest(value => value)'],
   'poll-focus': ['MeshNetworkMap.tsx', 'focusRequest === focusedRequest.current', 'false'],
+  'separate-list-inspector': ['MeshNetworkMap.tsx', "!onGateway || view === 'list' ? inspector : null", "!onGateway ? inspector : null"],
   'below-list-directory': ['MeshNetworkMap.tsx', "{view === 'list' ? directory : null}", '{null}'],
 }
 if (mutant && !mutations[mutant]) throw Error('Unknown Mesh topology mutant')
@@ -36,7 +37,7 @@ export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }
       output = output.replace(dependencies, '[focusRequest, active, view, fit, snapshot]')
     }
     if (mutant === 'below-list-directory') {
-      const placement = "{view === 'topology' ? directory : null}"
+      const placement = "{!onGateway && view === 'topology' && model.peers.length > 0 ? directory : null}"
       if (output.split(placement).length !== 2) throw Error('List directory placement must bind once')
       output = output.replace(placement, '{directory}')
     }

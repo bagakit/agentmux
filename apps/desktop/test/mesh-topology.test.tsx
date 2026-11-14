@@ -79,7 +79,10 @@ it('actual map consumer draws only reciprocal generation-matched links, retainin
 })
 
 it('available routes and adopted circuits keep distinct exact paths through the production graph and list', async () => {
-  await render(); await click('[data-mesh-object="route"]')
+  await act(async () => root.render(<MeshNetworkMap snapshot={observation()} onGateway={() => {}} />))
+  await click('[aria-label="Advertised gateways"] button')
+  expect(container.querySelector('[aria-label="Selected network object"]')?.textContent).toContain('gateway.internal:8444')
+  await click('.mesh-explorer__categories button:nth-child(2)'); await click('[data-mesh-object="route"]')
   expect(container.querySelector('[aria-label="Selected endpoint network path"]')!.children).toHaveLength(2)
   await click('.mesh-explorer__categories button:nth-child(3)'); await click('[data-mesh-object="circuit"]')
   expect(container.querySelector('[aria-label="Selected endpoint network path"]')!.children).toHaveLength(3)
@@ -89,6 +92,8 @@ it('available routes and adopted circuits keep distinct exact paths through the 
   expect(container.querySelectorAll('.mesh-explorer__directory')).toHaveLength(1)
   expect(container.querySelector('.mesh-explorer__workspace > .mesh-explorer__directory [data-mesh-object="circuit"]')).not.toBeNull()
   expect(container.querySelector<HTMLElement>('.mesh-explorer__graph')?.hidden).toBe(true)
+  expect(container.querySelector('.mesh-explorer__workspace > [aria-label="Selected network object"]')).not.toBeNull()
+  expect(container.querySelector('.mesh-explorer__companion > [aria-label="Selected network object"]')).toBeNull()
   await click('[aria-label="Network scope"] button:nth-child(2)')
   expect(container.querySelector('[aria-label="Selected endpoint network path"]')!.children).toHaveLength(3)
 })
@@ -160,11 +165,13 @@ it('an actual original Core mesh observation reaches the production explorer and
 },90000)
 
 
-it('an unobserved network keeps a compact source and directory without empty canvas tools', async () => {
+it('an unobserved network shows an unpinned world map without empty topology controls', async () => {
   await render({ ...observation(), network: null, apply: { state: 'disabled' } })
   expect(container.querySelector('.mesh-explorer__canvas')).toBeNull()
   expect(container.querySelector('[aria-label="Fit observed topology"]')).toBeNull()
-  expect(container.querySelector('[aria-label="Network objects"]')).not.toBeNull()
+  expect(container.querySelector('[aria-label="Network objects"]')).toBeNull()
+  expect(container.querySelector('[aria-label="World map with no reported device locations"] img')).not.toBeNull()
+  expect(container.querySelector('.mesh-explorer-node')).toBeNull()
   expect(container.textContent).toContain('Mesh participation is disabled')
   expect(container.textContent).toContain('original-runtime')
 })

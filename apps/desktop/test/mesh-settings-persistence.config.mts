@@ -2,6 +2,7 @@ import base from './vitest.mote-context.config.mts'
 import { relative, resolve } from 'node:path'
 import { mkdirSync } from 'node:fs'
 import { createHash } from 'node:crypto'
+import { installedDependency } from '../scripts/fixtures/settings-resource-library/environment.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), evidence = process.env.MESH_EDIT_EVIDENCE
 const mutation = process.env.MESH_EDIT_MUTATION
@@ -12,7 +13,7 @@ const observed = new Set(['apps/desktop/src/renderer/src/store.ts', 'apps/deskto
   'apps/desktop/src/renderer/src/lib/mesh-settings-draft.ts', 'apps/desktop/src/renderer/src/components/settings/MeshNetworkSettings.tsx',
   'apps/desktop/test/mesh-settings-persistence.test.tsx', 'packages/core/src/durable-write.ts'])
 export default { ...base, plugins: [...(base.plugins ?? []), {
-  name: 'mesh-native-user-document-consumer', enforce: 'pre' as const, transform(original: string, id: string) {
+  name: 'mesh-native-user-document-consumer', enforce: 'pre' as const, resolveId: installedDependency, transform(original: string, id: string) {
     const path = relative(root, id.split('?')[0]!)
     if (!observed.has(path)) return
     let source = original, mutated = false
