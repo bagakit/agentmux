@@ -2,7 +2,7 @@ import remarkGfm from 'remark-gfm'
 import remarkParse from 'remark-parse'
 import remarkMath from 'remark-math'
 import { unified } from 'unified'
-import type { Blockquote, Definition, FootnoteDefinition, Root, RootContent, PhrasingContent } from 'mdast'
+import type { Blockquote, Definition, FootnoteDefinition, Link, Root, RootContent, PhrasingContent } from 'mdast'
 import { htmlBlocks, htmlInlines, type HtmlProjection } from './markdown-html.js'
 
 /** remark owns the grammar. This projection retains semantics as data, never executable HTML. */
@@ -77,6 +77,28 @@ function originalText(node: PhrasingContent, context: ParseContext): Extract<Inl
   return { kind: 'text', text: start !== undefined && end !== undefined ? context.source.slice(start, end) : '' }
 }
 
+const BARE_LINK_PROSE_PUNCTUATION = /[、。…，；：！？（）「」『』《》〈〉【】〔〕“”‘’]/u
+
+function inlineLink(node: Link, context: ParseContext): InlineNode[] {
+  const child = node.children[0]
+  if (node.children.length === 1 && child?.type === 'text') {
+    const label = child.value
+    const boundary = label.search(BARE_LINK_PROSE_PUNCTUATION)
+    const bareUrl = /^https?:\/\//iu.test(label) && node.url === label
+    const bareWww = /^www\./iu.test(label) && node.url === `http://${label}`
+    // Remark uses the same Link node for GFM literals and authored destinations.
+    // Only the exact unadorned source spelling qualifies for the prose boundary.
+    if (boundary > 0 && (bareUrl || bareWww) && originalText(node, context).text === label) {
+      const address = label.slice(0, boundary)
+      return [
+        { kind: 'link', href: bareWww ? `http://${address}` : address, children: [{ kind: 'text', text: address }] },
+        { kind: 'text', text: label.slice(boundary) }
+      ]
+    }
+  }
+  return [{ kind: 'link', href: node.url, children: inlineFrom(node.children, context) }]
+}
+
 function inlineFrom(nodes: readonly PhrasingContent[], context: ParseContext): InlineNode[] {
   // Inline HTML is paired across siblings (`<sub>` … `</sub>`), so the whole run is projected together.
   if (nodes.some(node => node.type === 'html')) return htmlInlines(nodes, htmlProjection(context))
@@ -103,7 +125,7 @@ function inlineFrom(nodes: readonly PhrasingContent[], context: ParseContext): I
         out.push({ kind: 'strike', children: inlineFrom(node.children, context) })
         break
       case 'link':
-        out.push({ kind: 'link', href: node.url, children: inlineFrom(node.children, context) })
+        out.push(...inlineLink(node, context))
         break
       case 'linkReference': {
         const definition = context.definitions.get(node.identifier)
