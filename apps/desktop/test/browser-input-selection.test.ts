@@ -1,12 +1,14 @@
 import { fixtureEpoch as _batchFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { deriveObjectId } from '@agentmux/core/object-id'
 import type { BrowserInputContext } from '@agentmux/core/browser-input-context'
 import type { BrowserInputSelectionPrepare } from '../src/shared/browser-input-context-capture'
 import { BrowserInputContextCaptureFiles, BrowserInputContextCaptures } from '../src/main/browser-input-context-capture'
-import { browserInputSelectionImages } from '../src/main/browser-input-selection-image'
+import { browserInputSelectionImages, readBrowserInputSelectionImage } from '../src/main/browser-input-selection-image'
 import { browserPngFromBytes } from '../src/main/browser-image'
 
 const homes: string[] = []
@@ -53,7 +55,11 @@ describe('Browser selection Main preparation', () => {
     expect(selection.viewport).toEqual({ width: 100, height: 50, deviceScaleFactor: 2 })
     expect(selection.region).toEqual(f.input.region)
     expect(selection.attachment).toMatchObject({ hostId: 'local', path: prepared.artifact.path, sha256: prepared.artifact.sha256, width: 20, height: 10 })
+    const expectedPath = join(f.home, '.agentmux', 'pasted', `paste-${deriveObjectId('pasted-image.v1', JSON.stringify([createHash('sha256').update(bytes()).digest('hex'), 'png']))}.png`)
+    expect(prepared.artifact.path, 'the Browser selection owner must consume the compact pasted-image writer').toBe(expectedPath)
     expect(await readFile(prepared.artifact.path)).toEqual(bytes())
+    expect((await readBrowserInputSelectionImage(f.home, 'local', selection.attachment!, f.decode as never))?.dataUrl,
+      'the Browser selection owner must read back its own exact saved bytes').toBe(f.input.png.dataUrl)
     expect(prepared.artifact).toMatchObject({ byteLength: bytes().length, diskDurability: 'confirmed' })
     expect(prepared.scene.reference).not.toEqual(f.text.reference)
     expect(f.text.inputContext).not.toHaveProperty('selection')

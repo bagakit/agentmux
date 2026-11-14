@@ -5,6 +5,8 @@ import { readFile, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { AgentMuxMemoryAgentSessionStore } from '@agentmux/core'
+import { deriveObjectId } from '@agentmux/core/object-id'
+import { FileUploadOwner } from '@agentmux/host/file-upload-owner'
 import { RuntimeController } from '../../../src/main/runtime-controller'
 import { ConfigStore, DEFAULT_CONFIG } from '../../../src/main/config-store'
 import { WorkbenchWindows } from '../../../src/main/workbench-windows'
@@ -17,16 +19,28 @@ import { pastedDirectory } from '../../../src/main/pasted-directory'
 import type { AppConfig } from '../../../src/shared/contracts'
 
 const root = process.env.AGENTMUX_PASTED_PROOF_ROOT!, node = process.env.AGENTMUX_PASTED_PROOF_NODE!
-const report: any = { schema: 'agentmux.pasted-image-persistence.native.v1', passed: false, ipc: [],
-  boundary: 'Private hidden Electron actual Composer/Store/File paste → production sandbox preload/trusted registerIpc → original pasted writer/read/decoded thumbnail. Presentation-only Session seeds; no Agent Runtime, OS clipboard, focus or user workface is operated.' }
+const report: any = { schema: 'agentmux.pasted-image-persistence.native.v1', passed: false, ipc: [], uploads: [],
+  boundary: 'Private hidden Electron actual Composer/Store/File paste → production sandbox preload/trusted registerIpc → original pasted writer/read/decoded thumbnail and real Unix file.upload. Presentation-only Session facts; no Agent Runtime, OS clipboard, focus or user workface is operated.' }
 const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=', 'base64')
 const sha = createHash('sha256').update(bytes).digest('hex')
+const filename = `paste-${deriveObjectId('pasted-image.v1', JSON.stringify([sha, 'png']))}.png`
 let window: BrowserWindow, runtime: RuntimeController, dispose: (() => Promise<void>) | undefined
 let lost = true, hold = false, release!: () => void
 async function run() {
   await app.whenReady()
   runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), async () => { throw new Error('No Runtime is needed for a pasted file') })
   runtime.prepare = async () => ({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
+  runtime.rpcClients = () => [{ hostId: 'local', client: {
+    agentSession: (id: string) => ({ agentSessionId: id }),
+    readAgentSession: async (id: string) => ({ agentSessionId: id, hostId: 'local', run: { runId: 'presentation-only-' + id } })
+  } as never }]
+  const originalUpload = FileUploadOwner.prototype.upload
+  FileUploadOwner.prototype.upload = async function (input) {
+    const invocation: any = { input: structuredClone(input), result: null }
+    report.uploads.push(invocation)
+    invocation.result = await originalUpload.call(this, input)
+    return invocation.result
+  }
   const store = new ConfigStore(join(root, 'config.json'))
   const config: AppConfig = { ...structuredClone(DEFAULT_CONFIG), hosts: [{ id: 'local', kind: 'local', label: 'Private storage Host' }],
     workspaces: [{ id: 'pasted-workspace', hostId: 'local', kind: 'folder' as const, name: 'Paste proof', path: root }],
@@ -77,9 +91,17 @@ async function run() {
   assert.equal(saves[1].bytes, saves[0].bytes, 'explicit retry must preserve original image bytes')
   assert.equal(typeof saves[1].result, 'string', 'the existing IPC result must remain a path string')
   assert.equal(saves[1].result, saves[0].result, 'actual IPC retry must return the same original pasted object')
-  const originalPath = join(pastedDirectory(app.getPath('home')), sha + '.png')
-  assert.equal(saves[1].result, originalPath, 'actual IPC must consume the content-addressed writer')
+  const originalPath = join(pastedDirectory(app.getPath('home')), filename)
+  assert.match(saves[1].result, /\/paste-[1-9A-HJ-NP-Za-km-z]{12}\.png$/u, 'actual IPC must return the compact Base58 pasted-image name')
+  assert.equal(saves[1].result, originalPath, 'actual IPC must consume the deterministic short-name writer')
   assert.equal((await readFile(originalPath)).equals(bytes), true)
+  assert.equal(report.uploads.length, 1, 'the actual Composer must reach file.upload exactly once for the confirmed paste')
+  const uploadReceipt = report.uploads[0]
+  assert.equal(uploadReceipt.input.dataBase64, bytes.toString('base64'), 'retainInputImage → file.upload must preserve the original image bytes')
+  assert.equal(uploadReceipt.input.revision, 'sha256:' + sha, 'retainInputImage → file.upload must preserve the full SHA revision')
+  assert.match(uploadReceipt.input.revision, /^sha256:[a-f0-9]{64}$/u)
+  assert.equal(uploadReceipt.result?.status, 'uploaded', 'the real Host upload owner must confirm the original bytes')
+  assert.equal(uploadReceipt.result?.revision, uploadReceipt.input.revision)
   await until('pastedProof.facts().images.some(image => image.width > 0)')
   facts = await evaluate('pastedProof.facts()')
   assert.ok(facts.drafts['pasted-agent'].includes('agentmux-image:'), 'actual Composer must insert the confirmed semantic image reference')
@@ -109,7 +131,7 @@ async function run() {
   assert.notEqual(child.pid, process.pid)
   assert.equal(child.receipt.path, originalPath, 'second ordinary process must reconcile the same original artifact')
   assert.equal(child.image, 'data:image/png;base64,' + bytes.toString('base64'))
-  assert.deepEqual(await readdir(pastedDirectory(app.getPath('home'))), [sha + '.png'])
+  assert.deepEqual(await readdir(pastedDirectory(app.getPath('home'))), [filename])
   report.secondProcess = child; report.consumer = facts; report.passed = true
   await evaluate('pastedProof.dispose()')
 }

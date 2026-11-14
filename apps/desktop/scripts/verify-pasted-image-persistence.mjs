@@ -40,6 +40,12 @@ async function execute(file, args, env, label) {
 }
 const writer = 'apps/desktop/src/main/pasted-image-write.ts', ipc = 'apps/desktop/src/main/ipc.ts'
 const mutations = [
+  { id: 'sha-final-name', file: writer, from: 'const shortPath = join(directory, `paste-${objectId}.${extension}`)', to: 'const shortPath = legacyPath',
+    expected: 'derives stable short Base58 names from the full hash and normalized extension' },
+  { id: 'random-final-name', file: writer, from: "deriveObjectId('pasted-image.v1', JSON.stringify([sha256, extension]))", to: 'mintObjectId()',
+    expected: 'derives stable short Base58 names from the full hash and normalized extension' },
+  { id: 'legacy-reconciliation', file: writer, from: 'await confirm(legacyPath, bytes); path = legacyPath', to: '/* private mutant: skip legacy reconciliation */',
+    expected: 'reuses a matching legacy SHA object without publishing a short-name copy' },
   { id: 'retained-bytes', file: writer, from: 'await confirm(path, bytes)', to: '/* private mutant: trust filename */', expected: 'refuses changed retained bytes' },
   { id: 'no-overwrite', file: writer, from: 'await link(temporary, path)', to: "await (await import('node:fs/promises')).rename(temporary, path)", expected: 'refuses changed retained bytes' },
   { id: 'directory-confirmation', file: writer, from: 'await syncDirectory(directory)', to: '/* private mutant: omit publication sync */', expected: 'does not report success when directory synchronization is unconfirmed' },
@@ -82,7 +88,7 @@ export default {...base,cacheDir:${JSON.stringify(join(output, label + '-cache')
   const result = await execute(process.execPath, [join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config', config,
     '--reporter=default', '--reporter=json', '--outputFile.json=' + report], { ...process.env, NODE_ENV: 'test' }, label)
   const tests = JSON.parse(await readFile(report, 'utf8'))
-  assert.equal(tests.testResults.length, 2); assert.equal(tests.numTotalTests, 24); assert.equal(tests.numPendingTests, 0)
+  assert.equal(tests.testResults.length, 2); assert.equal(tests.numTotalTests, 28); assert.equal(tests.numPendingTests, 0)
   assert.equal(tests.numRuntimeErrorTestSuites ?? 0, 0)
   assert.doesNotMatch(result.log, /Unhandled Errors|Unhandled Rejection|Uncaught Exception/u)
   assert.doesNotMatch(result.log, /test timed out/iu, 'An individual test timeout cannot qualify RED')
@@ -165,7 +171,7 @@ async function native(label, mutation) {
 const root=${JSON.stringify(directory)};for(const key of ['home','appData','userData','sessionData']){const target=path.join(root,key);fs.mkdirSync(target,{recursive:true});app.setPath(key,target)};
 app.on('window-all-closed',()=>{});import(${JSON.stringify(pathToFileURL(join(directory, 'main.mjs')).href)}).catch(error=>{console.error(error);fs.writeFileSync(path.join(root,'native-receipt.json'),JSON.stringify({passed:false,failure:{name:error.name,message:error.message,stack:error.stack}}));app.exit(1)});`)
   const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^(AGENTMUX_|CTXMUX_)/u.test(name) && name !== 'ELECTRON_RUN_AS_NODE'))
-  Object.assign(env, { AGENTMUX_PASTED_PROOF_ROOT: directory, AGENTMUX_PASTED_PROOF_NODE: process.execPath,
+  Object.assign(env, { HOME: join(directory, 'home'), AGENTMUX_PASTED_PROOF_ROOT: directory, AGENTMUX_PASTED_PROOF_NODE: process.execPath,
     AGENTMUX_RUNTIME_DIRECTORY: join(directory, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(directory, 'state'),
     AGENTMUX_AGENT_SESSION_STORE: join(directory, 'sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: join(directory, 'messages.ndjson') })
   const result = await execute(require('electron'), [join(directory, 'bootstrap.cjs')], env, label)
