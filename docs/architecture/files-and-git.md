@@ -12,8 +12,10 @@ Desktop Main 的 [`WorkspaceFiles`](../../apps/desktop/src/main/workspace-files.
   - 覆盖已有文件用 `rename`；
   - `expectedRevision` 为 `null`（新建文件）时用 `link` 独占发布，目标已存在就失败，不会覆盖别人刚建的同名文件；
   - 临时写入或发布失败时删除临时文件，原文件字节不变。
-- **竞争窗口。** revision 是乐观并发信号。最终 revision 复核与原子替换之间仍存在外部进程的竞争窗口，当前实现不提供跨进程 compare-and-swap。
+- **合作写入。** helper 收齐输入后，对实际父目录持有 `flock`，在锁内比较原 revision、发布、核对已发布文件的实际字节与 inode，并同步父目录后确认。不同进程经同一 File 写入实现提交同一旧 revision 时，只有一个成功；同目录的独立保存等待当前短事务，其他目录不受此锁影响。不遵循这把锁的外部写入，以及目录移动，不由这项串行保证覆盖。
 - **观察。** Main 的观察只发布 `WorkspaceFileInvalidated`（`{ workspaceId, path }`），Renderer 收到后重新 read。远端 Workspace 的单文件观察返回 `REMOTE_WORKSPACE_FILE_OBSERVATION_UNSUPPORTED`。
+
+Mote 归档由 [`ScratchTopics`](../../apps/host/src/mote-resources.ts) 从同一份原文件字节取得业务版本与 File revision，再经上述 File 实现提交；冲突拒绝原意图，不借新读的 revision 重试。首次归档文件以 `0600` 创建，既有权限保持。业务状态、原目录身份和写后读取确认仍归 Mote owner，原 File 回执未知时保留已发布字节与重读入口。
 
 ## 移动与改名
 
