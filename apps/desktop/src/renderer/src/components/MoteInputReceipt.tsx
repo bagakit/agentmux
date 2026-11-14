@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { MoteInputInspection } from '@agentmux/core'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { SessionHistoryReference } from '../../../shared/contracts'
 import { api } from '../lib/api'
 
@@ -34,6 +35,6 @@ function OriginalMoteInputReceipt({ reference, observationId }: { reference: Ses
       {value.observation.issue ? <p>{value.observation.issue}</p> : null}
       <p>Notification delivery does not confirm understanding or completion.</p>
     </> : null}
-    <button type="button" className="small-button" disabled={phase === 'reading'} onClick={() => void read()}>Check original update</button>
+    <Button type="button" disabled={phase === 'reading'} onClick={() => void read()}>Check original update</Button>
   </details>
 }

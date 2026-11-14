@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ContinuousProgressTarget } from '@agentmux/core'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { useScheduleRecords } from '../lib/schedule-controller'
 import { useScheduleClock } from '../lib/schedule-clock'
 import { ScheduleArrangementRow } from './ScheduleArrangementRow'
@@ -65,7 +66,7 @@ export function CalendarScheduleControl({ target, onStatusChange, initialMessage
           {unified ? <button type="button" ref={createButton} className="automation-button automation-button--primary" onClick={() => openEditor('new')}><CreateIcon size={14} aria-hidden="true" />New automation</button>
             : <span>{source.observed ? source.records.length + ' saved' : 'Unconfirmed'}</span>}
         </header>
-        {source.error ? <div className="calendar-schedules__notice" role="status"><p>{source.error} Last confirmed arrangements and manual input remain available.</p><button type="button" className="small-button" onClick={source.refresh}>Retry arrangements</button></div> : null}
+        {source.error ? <div className="calendar-schedules__notice" role="status"><p>{source.error} Last confirmed arrangements and manual input remain available.</p><Button type="button" onClick={source.refresh}>Retry arrangements</Button></div> : null}
         {progress ? <div className="automation-progress-row">{progress}
           {progressConfigured ? <button type="button" ref={editButton} className="automation-button automation-progress-edit" aria-label="Edit continuous progress" onClick={() => openEditor('progress')}><EditIcon size={13} aria-hidden="true" />Edit</button> : null}
         </div> : null}

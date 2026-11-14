@@ -2,6 +2,7 @@ import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { useEffect, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { FileDocument } from '@agentmux/core'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import { sameWorkbenchProjectionSelection, type WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { prepareMoteIdeaDraft, prepareMoteIdeaSchedule, stageMoteIdeaFeedback, type MoteIdeaFeedback } from '../lib/mote-idea-request'
@@ -70,7 +71,7 @@ export function MoteIdeaControls({ scope, reference, material, onOpenPath, activ
         <label className="mote-details__check"><input type="checkbox" checked={input.includeDiscussion} aria-label="Include exact discussion and linked Goals"
           onChange={event => update({ ...input, includeDiscussion: event.target.checked })} />Include this exact discussion and linked Goals</label>
         <p className="mote-details__hint">Uses the saved profile and selected note. Optionally include this discussion and its Goals.</p>
-        <div className="mote-idea-controls__actions"><button type="button" className="small-button" aria-label="Prepare idea request" disabled={pending || !input.direction.trim()} onClick={() => {
+        <div className="mote-idea-controls__actions"><Button type="button" aria-label="Prepare idea request" disabled={pending || !input.direction.trim()} onClick={() => {
           if (pending) { setIssue('A context read is in progress. Your current inputs are kept.'); return }
           const epoch = lifetime.current
           if (!epoch) return
@@ -78,7 +79,7 @@ export function MoteIdeaControls({ scope, reference, material, onOpenPath, activ
           finish(prepareMoteIdeaDraft(scope, reference, input, material, () => lifetime.current === epoch && current.current.input === capturedInput && current.current.material === capturedMaterial &&
             (current.current.reference === capturedReference || !!capturedReference && sameWorkbenchProjectionSelection(current.current.reference ?? null, capturedReference))),
             'Request prepared in a new Launcher. Review it, choose the Agent and model, then Start.', epoch)
-        }}><ThemeObjectIdeaIcon size={14} />Prepare request</button><button type="button" className="small-button" aria-label={arrangement ? 'Review sourced idea arrangement' : 'Arrange sourced ideas'} disabled={pending || !input.direction.trim()} onClick={() => void prepareArrangement()}><ThemeObjectScheduleIcon size={14} />{arrangement ? 'Review arrangement' : 'Arrange ideas'}</button><span>{pending ? 'Reading selected sources…' : 'Review before starting.'}</span></div>
+        }}><ThemeObjectIdeaIcon size={14} />Prepare request</Button><Button type="button" aria-label={arrangement ? 'Review sourced idea arrangement' : 'Arrange sourced ideas'} disabled={pending || !input.direction.trim()} onClick={() => void prepareArrangement()}><ThemeObjectScheduleIcon size={14} />{arrangement ? 'Review arrangement' : 'Arrange ideas'}</Button><span>{pending ? 'Reading selected sources…' : 'Review before starting.'}</span></div>
       </div>
     </details>
     {arrangement ? <div ref={arranged} className="mote-idea-controls__arrangement">
@@ -124,7 +125,7 @@ export function MoteIdeaFeedbackControl({ scope, material, onOpenPath }: {
         <p className="mote-details__hint mote-details__source" title={material.revision}>Feedback on {material.path.split('/').at(-1)} · this saved revision</p>
         <div className="mote-idea-controls__actions" role="group" aria-label="Idea feedback response"><button type="button" className="icon-button" aria-label="Useful" title="Useful" aria-pressed={feedback.vote === 'useful'} onClick={() => updateFeedback({ ...feedback, vote: feedback.vote === 'useful' ? '' : 'useful' })}><ThemeActionApproveIcon size={16} /></button><button type="button" className="icon-button" aria-label="Less useful" title="Less useful" aria-pressed={feedback.vote === 'less-useful'} onClick={() => updateFeedback({ ...feedback, vote: feedback.vote === 'less-useful' ? '' : 'less-useful' })}><ThemeActionDisapproveIcon size={16} /></button></div>
         <label>Your feedback<ComposerTextarea aria-label="Idea feedback comment" rows={2} value={feedback.comment} onValueChange={value => updateFeedback({ ...feedback, comment: value })} /></label>
-        <button type="button" className="small-button" aria-label="Review feedback in SOUL" onClick={review}><ThemeActionEditIcon size={14} />{pending ? 'Preparing feedback…' : 'Review in SOUL'}</button>
+        <Button type="button" aria-label="Review feedback in SOUL" onClick={review}><ThemeActionEditIcon size={14} />{pending ? 'Preparing feedback…' : 'Review in SOUL'}</Button>
         <p className="mote-details__hint">Keeps the original SOUL text and this note. Correct facts through the note's original editor.</p>
       </div>
     </details>

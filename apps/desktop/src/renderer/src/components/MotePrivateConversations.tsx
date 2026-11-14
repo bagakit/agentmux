@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MoteChatConfiguration, MoteChatPerson, MoteChatTarget } from '@agentmux/core/mote-chat'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import { moteConnectionTarget } from '../lib/mote-connection-default'
@@ -47,7 +48,7 @@ function PrivateConversations({ target, active, observe, onCount }: { target: Mo
   }, [active, source?.owner, source?.configuration, target])
   useEffect(() => { if (issue) onCount?.({ value: null, unavailable: true }) }, [issue, onCount])
   return <section className="mote-private-conversations" aria-label="Mote private conversations" aria-busy={reading}>
-    <header><p>原独立私聊记录。与你的 Mote 继续交流，请返回主对话。</p><button type="button" className="small-button" disabled={reading} onClick={() => void read()}>刷新私聊</button></header>
+    <header><p>原独立私聊记录。与你的 Mote 继续交流，请返回主对话。</p><Button type="button" disabled={reading} onClick={() => void read()}>刷新私聊</Button></header>
     {issue ? <p role="status" className="mote-conversation__issue">{issue}</p> : null}
     {source?.peopleIssue ? <p role="status" className="mote-conversation__muted">人物资料暂未确认，原对话仍可读取。{source.peopleIssue}</p> : null}
     {source ? <MoteChatHistory key={JSON.stringify([target, source.owner])} target={target} hostingTarget={source.owner} people={source.people} active={active} observe={observe} onCount={onCount} />

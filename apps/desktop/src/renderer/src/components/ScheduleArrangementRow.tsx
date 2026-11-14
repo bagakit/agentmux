@@ -1,6 +1,7 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { ContinuousProgressLoop } from '@agentmux/core/continuous-progress-scheduler'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../lib/api'
 import { useScheduleOperation } from '../lib/schedule-controller'
 import { ScheduleOperationNotice } from './ScheduleOperationNotice'
@@ -78,12 +79,12 @@ export function ScheduleArrangementRow({ schedule, timezone, now, onReceipt, dis
         {schedule.checkInState?.budgetDate ? <p>{schedule.checkInState.budgetUsed} attempt used on {schedule.checkInState.budgetDate}.</p> : null}</> : null}
       {schedule.lastDecision ? <p className="calendar-schedules__notice">{schedule.lastDecision}</p> : null}
       <div className="calendar-schedules__actions">
-        <button type="button" className="small-button" onClick={() => void inspectSaved()}>Check original arrangement</button>
-        {onOpenDiscussion ? <button type="button" className="small-button" onClick={() => onOpenDiscussion(schedule)}>Open original discussion</button> : null}
+        <Button type="button" onClick={() => void inspectSaved()}>Check original arrangement</Button>
+        {onOpenDiscussion ? <Button type="button" onClick={() => onOpenDiscussion(schedule)}>Open original discussion</Button> : null}
         {schedule.status !== 'stopped' ? <>
-          {!quickActions ? <button type="button" className="small-button" disabled={operation.busy || !!operation.pending || schedule.revision === undefined}
-            onClick={() => mutate(schedule.status === 'active' ? 'pause' : 'resume')}>{schedule.status === 'active' ? 'Pause arrangement' : 'Resume arrangement'}</button> : null}
-          <button type="button" className="small-button" disabled={operation.busy || !!operation.pending || schedule.revision === undefined} onClick={() => mutate('cancel')}>Cancel arrangement</button>
+          {!quickActions ? <Button type="button" disabled={operation.busy || !!operation.pending || schedule.revision === undefined}
+            onClick={() => mutate(schedule.status === 'active' ? 'pause' : 'resume')}>{schedule.status === 'active' ? 'Pause arrangement' : 'Resume arrangement'}</Button> : null}
+          <Button type="button" disabled={operation.busy || !!operation.pending || schedule.revision === undefined} onClick={() => mutate('cancel')}>Cancel arrangement</Button>
         </> : null}
       </div>
       {inspection ? <p role="status">{inspection}</p> : null}

@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { useMoteMaterialsActions } from '../lib/mote-materials-actions'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
@@ -31,9 +32,9 @@ export function MoteFilesTool({ visible, isScratch, scope, reference, onOpenPath
     <div className="workspace-tool-slot" style={{ height: '100%' }}>
     {scope.issue ? <div className="surface-inline-error" role="status" aria-label="Mote directory observation"
       style={{ flexShrink: 0, maxHeight: '40%', overflowY: 'auto' }}>{scope.issue} Existing files and Mote content remain available.
-      <button type="button" className="small-button" aria-label="Retry Mote directory discovery" onClick={() => {
+      <Button type="button" aria-label="Retry Mote directory discovery" onClick={() => {
         void useAppStore.getState().refreshScratchTopics(scope.workspace.id, true).catch(error => useAppStore.getState().reportError(error))
-      }}>Retry directory discovery</button>
+      }}>Retry directory discovery</Button>
     </div> : null}
     <div className="workspace-tool-slot"><MoteDetailsPanel key={scope.topic.id} scope={scope} reference={reference} active={visible} onOpenPath={open}
       onCreateNote={() => {

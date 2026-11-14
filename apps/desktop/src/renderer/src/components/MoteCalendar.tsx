@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { requestDesktopFocusWorkfaceReveal } from '../lib/desktop-presentation'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { DateTime } from 'luxon'
@@ -271,7 +272,7 @@ export function MoteCalendar({ scope, reference, active, openRequest }: {
       <SurfaceModeSwitch value={mode} active={active} ariaLabel="Calendar view" options={[{ value: 'day', label: 'Day' }, { value: 'three-days', label: '3 Days' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'upcoming', label: 'Upcoming' }]} onChange={changeMode} />
       <button type="button" className="mote-calendar__create" aria-label="New arrangement" title="New arrangement" onClick={() => prepare()}><Plus size={14} aria-hidden /><span>New<span className="mote-calendar__create-label"> arrangement</span></span></button>
     </header>
-    {!queries.length || source.error ? <div className="calendar-schedules__notice" role="status"><p>{!queries.length ? scope.issue || scope.topic.readError || 'The current arrangement scope is unconfirmed.' : source.error} Last confirmed arrangements are kept.</p>{queries.length ? <button type="button" className="small-button" onClick={source.refresh}>Retry arrangements</button> : null}</div> : null}
+    {!queries.length || source.error ? <div className="calendar-schedules__notice" role="status"><p>{!queries.length ? scope.issue || scope.topic.readError || 'The current arrangement scope is unconfirmed.' : source.error} Last confirmed arrangements are kept.</p>{queries.length ? <Button type="button" onClick={source.refresh}>Retry arrangements</Button> : null}</div> : null}
     {navigationIssue ? <p role="status" className="calendar-schedules__notice">{navigationIssue}</p> : null}
     {mode !== 'upcoming' && queries.length > 0 && !source.error && source.observed && !source.records.length ? <div className="mote-calendar__empty"><strong>No arrangements yet</strong><p>Choose a date and prepare a reminder for an original discussion.</p></div> : null}
     {mode === 'upcoming' ? <section aria-label="Upcoming arrangements">
@@ -344,7 +345,7 @@ export function MoteCalendar({ scope, reference, active, openRequest }: {
             </li>)}</ul>
             {timed && selectedSlot ? <MoteCalendarTimes key={selected + ':' + selectedHour} items={selectedSlot.items} schedules={byId} timezone={timezone} now={now}
               repeatedHour={selectedSlot.window.to - selectedSlot.window.from > 3_600_000} onOpen={revealArrangement} />
-              : <button type="button" className="small-button" onClick={() => changeMode('day')}>Open day</button>}
+              : <Button type="button" onClick={() => changeMode('day')}>Open day</Button>}
           </div> : <p className="continuous-progress-control__help">{!source.observed ? 'Arrangements are unconfirmed.' : 'No planned triggers or recent accepted input in this period.'}</p>}
           <p className="mote-calendar__reading-note">Only the latest accepted input per arrangement is shown.</p>
         </section>

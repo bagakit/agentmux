@@ -4,6 +4,7 @@ import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
 import { parseAgentScheduleCalendar, parseAgentScheduleAfterMs, parseAgentScheduleEveryMs } from '@agentmux/core/schedule'
 import type { ContinuousProgressLoop, ContinuousProgressTarget } from '@agentmux/core/continuous-progress-scheduler'
 import { DateTime } from 'luxon'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { useAppStore } from '../store'
 import { useLauncherState } from '../lib/launcher-state'
 import { useScheduleOperation } from '../lib/schedule-controller'
@@ -153,7 +154,7 @@ export function ScheduleCreateForm({ draftKey, target, onReceipt, initialMessage
       {form.context ? <details className="calendar-schedules__rules"><summary>Request context</summary><p className="calendar-schedules__context">{form.context}</p></details> : null}
       {!form.target && !target ? <p className="continuous-progress-control__help">Choose an exact discussion to create an arrangement.</p> : null}
       {form.target && !embedded ? <p className="continuous-progress-control__help">Original discussion · {form.target.agentSessionId}</p> : null}
-      {target && form.target && JSON.stringify(target) !== JSON.stringify(form.target) ? <button type="button" className="small-button" disabled={locked} onClick={() => update({ target })}>Use selected discussion</button> : null}
+      {target && form.target && JSON.stringify(target) !== JSON.stringify(form.target) ? <Button type="button" disabled={locked} onClick={() => update({ target })}>Use selected discussion</Button> : null}
       {notice ? <p className="calendar-schedules__notice" role="status">{notice}</p> : null}
       <p className="continuous-progress-control__help automation-runtime-note">The Host must be running.{form.timing === 'afterMs' ? ' Countdown pause does not stop the clock.' : ''}</p>
       <button type="submit" className={embedded ? "automation-button automation-button--primary automation-submit" : "small-button"} disabled={locked || !form.prompt.trim()}>Save arrangement</button>

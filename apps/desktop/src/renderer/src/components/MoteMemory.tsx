@@ -6,6 +6,7 @@ import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { MOTE_MEMORY_PATH } from '@agentmux/host/mote-model'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../lib/api'
 import { readMoteMaterial } from '../lib/mote-cooperation'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
@@ -90,10 +91,10 @@ function OriginalMoteMemory({ scope, active, onOpenPath }: Props) {
     <summary><FileIcon size={13} /><span>Memory</span><DownIcon size={14} /></summary>
     {expanded ? <div className="mote-memory__body">
       <div className="mote-details__section-actions"><span>{saved ? issue || loading ? 'Last confirmed saved content' : 'Saved in MEMORY.md' : 'MEMORY.md'}</span>
-        <button type="button" className="small-button" aria-label="Correct or remove a memory detail in editor" onClick={openEditor}>Edit memory</button></div>
+        <Button type="button" aria-label="Correct or remove a memory detail in editor" onClick={openEditor}>Edit memory</Button></div>
       {dirty ? <p role="status" className="mote-details__hint mote-memory__draft">The editor has unsaved changes. This preview shows the saved file.</p> : null}
       {loading ? <p role="status" className="mote-details__hint">Reading saved memory…</p> : null}
-      {issue ? <div role="status" className="mote-details__issue"><span>{issue}</span><button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Retry memory</button></div> : null}
+      {issue ? <div role="status" className="mote-details__issue"><span>{issue}</span><Button type="button" onClick={() => setAttempt(value => value + 1)}>Retry memory</Button></div> : null}
       {openIssue ? <p role="status" className="mote-details__issue">{openIssue}</p> : null}
       {active && saved ? saved.document.content.trim() ? <AgentMarkdown content={saved.document.content} className="mote-details__prose mote-memory__prose"
         workspaceRoot={scope.workspace.path} sourcePath={path} openWorkspaceFile={link => { void onOpenPath(link) }} />

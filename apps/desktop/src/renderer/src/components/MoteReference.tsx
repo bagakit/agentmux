@@ -4,6 +4,7 @@ import type { ObjectLinkReference } from '@agentmux/client-ui/platform'
 import { useMoteDialogue } from '@agentmux/client-ui/use-mote-dialogue'
 import { useVisibleWork } from '@agentmux/client-ui/use-visible-work'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { useAppStore } from '../store'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
@@ -55,14 +56,14 @@ function MoteReferenceDetails({ reference, identity }: { reference: Reference; i
       </div> : null)}
     </dl>
     {!identity ? <p role="status">原 Mote 资料尚未确认。保留准确链接，可打开原对象核对。</p>
-      : source.issue ? <p role="status">{source.issue}<button type="button" className="small-button" onClick={source.refresh}>重读来源</button></p>
+      : source.issue ? <p role="status">{source.issue}<Button type="button" onClick={source.refresh}>重读来源</Button></p>
         : source.loading ? <p role="status">读取原来源…</p>
           : target.eventId !== undefined && !hasSource ? <p role="status">原工作事件尚未确认。链接与原工作面保留。</p>
             : !hasSource ? <p>尚未绑定主 Agent。</p> : null}
     <code>{uri}</code>
     <div className="mote-reference__actions">
-      <button type="button" className="small-button" onClick={() => void api.ui.openObjectLink(uri).catch(useAppStore.getState().reportError)}>{target.eventId === undefined ? '打开主对话' : '打开原 thread'}</button>
-      <button type="button" className="small-button" onClick={() => void copyTextToClipboard(uri, useAppStore.getState().reportError).then(ok => setCopied(ok))}>{copied ? '链接已复制' : '复制链接'}</button>
+      <Button type="button" onClick={() => void api.ui.openObjectLink(uri).catch(useAppStore.getState().reportError)}>{target.eventId === undefined ? '打开主对话' : '打开原 thread'}</Button>
+      <Button type="button" onClick={() => void copyTextToClipboard(uri, useAppStore.getState().reportError).then(ok => setCopied(ok))}>{copied ? '链接已复制' : '复制链接'}</Button>
     </div>
   </div>
 }

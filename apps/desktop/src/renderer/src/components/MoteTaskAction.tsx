@@ -3,6 +3,7 @@ import { focusReadCommand, focusTaskReadInputs } from '@agentmux/core/focus-task
 import { createPortal } from 'react-dom'
 import { SemanticIcon, type SemanticIconId } from '@agentmux/client-ui/icons'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath } from '@agentmux/host/mote-model'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { useScratchTopics } from '../hooks/useScratchTopics'
 import { scratchMoteTopics } from '../lib/scratch-topic-snapshots'
 import { useLauncherState } from '../lib/launcher-state'
@@ -130,10 +131,10 @@ export function MoteTaskAction({ scopeKey, active = true, orientation = 'horizon
     {!legacy && busy ? <p role="status">Preparing task…</p> : null}
     {actions.map(action => { const original = results[resultKey(action)]; return original ? <div className="mote-task-action__result" key={action.id}>
       <p role="status">{original.state === 'queued' ? 'Task queued. Open Mote to follow up.' : original.detail}</p>
-      {original.state === 'not-queued' && !original.draftSaved ? <button type="button" className="small-button" onClick={() => open(recipient)}>Open selected Mote</button> : null}
+      {original.state === 'not-queued' && !original.draftSaved ? <Button type="button" onClick={() => open(recipient)}>Open selected Mote</Button> : null}
       {!legacy ? <RetainedTaskDetails task={original} label={action.label} /> : null}
     </div> : null })}
-    {error ? <p role="status">Mote list could not be confirmed. Your saved choice is kept. <button type="button" className="small-button" onClick={() => void useAppStore.getState().refreshScratchTopics(SCRATCH_WORKSPACE_ID, true)}>Refresh Motes</button></p> : null}
+    {error ? <p role="status">Mote list could not be confirmed. Your saved choice is kept. <Button type="button" onClick={() => void useAppStore.getState().refreshScratchTopics(SCRATCH_WORKSPACE_ID, true)}>Refresh Motes</Button></p> : null}
     {legacy ? <details><summary>Task details</summary><pre>{results[resultKey(actions[0]!)]?.prompt ?? input.preview}</pre></details> : null}
   </div>
   // The original owner stays mounted when its Popover host goes away, retaining its receipts.

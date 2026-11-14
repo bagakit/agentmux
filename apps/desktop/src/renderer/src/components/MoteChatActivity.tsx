@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { MoteChatDiagnosis, MoteChatDiagnosisIntake, MoteChatTarget } from '@agentmux/core/mote-chat'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { api } from '../lib/api'
 
@@ -65,7 +66,7 @@ export function MoteChatActivity({ target, hostingTarget, active, revision }: {
   useEffect(() => { if (active) void read(); return () => { lifetime.current++ } }, [active, revision, read])
   const rows = report?.incoming?.rows ?? [], latest = rows[0], status = latest ? intakeLabel(latest) : null
   return <section className="mote-chat-activity" aria-label="Private chat message activity" aria-busy={reading}>
-    <header><span><ChatIcon size={13} />Recent messages</span><button type="button" className="icon-button" aria-label="Refresh private chat activity" title="Refresh private chat activity" disabled={reading} onClick={() => void read()}><RefreshIcon size={13} animation={reading ? 'spin' : undefined} /></button></header>
+    <header><span><ChatIcon size={13} />Recent messages</span><IconButton type="button" aria-label="Refresh private chat activity" title="Refresh private chat activity" disabled={reading} onClick={() => void read()}><RefreshIcon size={13} animation={reading ? 'spin' : undefined} /></IconButton></header>
     {status ? <div className="mote-chat-activity__latest" role="status"><strong>{status.title}</strong><p>{status.detail}</p>{latest && currentNotice(latest) ? <p><strong>Current route notice</strong> · {currentNotice(latest)}</p> : null}</div>
       : <p role="status">{reading ? 'Checking recent messages…' : !report ? 'Recent messages could not be checked.' : report.incoming ? 'No private messages in the current reading window.' : report.configuration?.connection ? 'Recent message records are unavailable.' : 'Choose a bot and save to start receiving private messages.'}</p>}
     {issue ? <p className="mote-details__issue" role="status">{report ? 'Previously read status is kept. ' : ''}{issue}</p> : null}

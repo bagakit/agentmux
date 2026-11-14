@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAgentInputMailbox } from '@agentmux/client-ui/use-agent-input-mailbox'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { MoteDefaultConversation } from '@agentmux/core/mote-preferences'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { agentSessionPresentationIndex } from '../lib/session-presentation'
 import { sessionFrontendPresentation } from '../lib/session-recovery-banner'
 import { originalFrontendRecovery } from '../lib/session-original-recovery'
@@ -69,7 +70,7 @@ export function MoteStartupStatus({ reference, active, onOpenTerminal }: {
       <p>{frontend?.description ?? (starting ? '原消息正在等待 Agent 完成原生启动，尚未投递。核对进度后会沿原输入继续。' : '目录信任的准备结果尚未确认。Agent 的原身份和输入记录保留。')}</p>
       {frontend?.detail ? <p>{frontend.detail}</p> : null}
     </div>
-    <div className="mote-startup-status__actions"><button type="button" className="small-button" disabled={busy} onClick={() => void check()}>{busy ? '正在核对…' : frontend?.actionLabel ?? '重新核对启动'}</button>
+    <div className="mote-startup-status__actions"><Button type="button" disabled={busy} onClick={() => void check()}>{busy ? '正在核对…' : frontend?.actionLabel ?? '重新核对启动'}</Button>
       <details><summary>启动详情与其他方式</summary>
         {trustIssue ? <p>{trustIssue.issue ?? trustIssue.code}</p> : null}{frontend?.diagnostic ? <p>{frontend.diagnostic}</p> : null}
         {starting ? <OriginalInputWaitingControl hostId={reference.hostId} receipt={starting} onRefresh={mailbox.refresh} /> : null}
@@ -77,7 +78,7 @@ export function MoteStartupStatus({ reference, active, onOpenTerminal }: {
         <p>部分 Agent 的首次目录信任或登录只能在原终端完成。这里不会代你同意未确认的请求。</p>
         <dl><dt>Session</dt><dd>{session.control.agentSessionId}</dd><dt>Run</dt><dd>{runId}</dd>
           {trustIssue ? <><dt>原步骤</dt><dd>{trustIssue.step}</dd><dt>目录</dt><dd>{trustIssue.workspacePath}</dd><dt>原操作</dt><dd>{trustIssue.lifecycleOperationId}</dd></> : null}</dl>
-        <button type="button" className="small-button" onClick={() => onOpenTerminal(session.id)}>查看原终端</button>
+        <Button type="button" onClick={() => onOpenTerminal(session.id)}>查看原终端</Button>
       </details></div>
     {issue ? <p role="status">{issue}</p> : null}
   </section>

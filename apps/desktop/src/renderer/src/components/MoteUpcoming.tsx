@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { DateTime } from 'luxon'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { automationCalendarTimezone, resolveAutomationPreferences } from '../../../shared/automation-preferences'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import { useScheduleRecords } from '../lib/schedule-controller'
@@ -30,7 +31,7 @@ export function MoteUpcoming({ scope, active, onOpenCalendar }: {
     </div>
     {!queries.length || source.error ? <div className="mote-details__issue" role="status">
       <span>{!queries.length ? 'The current arrangement scope is unconfirmed.' : source.error} Last confirmed arrangements are kept.</span>
-      {queries.length ? <button type="button" className="small-button" onClick={source.refresh}>Retry arrangements</button> : null}
+      {queries.length ? <Button type="button" onClick={source.refresh}>Retry arrangements</Button> : null}
     </div> : null}
     {upcoming.length ? <ol className="mote-upcoming__list">{upcoming.map(record => {
       const date = DateTime.fromMillis(record.nextCheckAt, { zone: timezone })

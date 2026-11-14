@@ -1,6 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { DateTime } from 'luxon'
 import type { ScheduleOccurrence } from '@agentmux/core/schedule-calendar'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { scheduleStateLabel, scheduleDisplayTitle } from './ScheduleArrangementRow'
 import type { CalendarSchedule } from '../lib/mote-calendar-range'
 
@@ -31,9 +32,9 @@ export function MoteCalendarTimes({ items, schedules, timezone, now, repeatedHou
     <summary>View times</summary>
     {expanded ? <div ref={pageElement} className="mote-calendar__time-page">
       {times.length > pageSize ? <nav aria-label="Occurrence pages" className="mote-calendar__time-pager">
-        <button type="button" className="small-button" disabled={page === 0} onClick={() => setPage(page - 1)}>Previous</button>
+        <Button type="button" disabled={page === 0} onClick={() => setPage(page - 1)}>Previous</Button>
         <span>{page * pageSize + 1}–{Math.min(times.length, (page + 1) * pageSize)} / {times.length}</span>
-        <button type="button" className="small-button" disabled={(page + 1) * pageSize >= times.length} onClick={() => setPage(page + 1)}>Next</button>
+        <Button type="button" disabled={(page + 1) * pageSize >= times.length} onClick={() => setPage(page + 1)}>Next</Button>
       </nav> : null}
       <ol aria-label="Occurrence times">{times.slice(page * pageSize, (page + 1) * pageSize).map(item => {
         const saved = schedules.get(item.scheduleId)

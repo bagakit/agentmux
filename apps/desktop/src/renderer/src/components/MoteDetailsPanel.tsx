@@ -1,3 +1,5 @@
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { TopicKnowledgePanel } from './TopicKnowledgePanel'
 import { MoteQuickMode } from './MoteQuickMode'
 import { useMoteSpace } from './MoteSpaceFrame'
@@ -80,7 +82,7 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, a
     iconTarget && invoker?.key === iconTarget.key && invoker.node.isConnected ? invoker.node : null
   const identity = <>
     <div className="mote-details__identity">
-          <button type="button" className="icon-button mote-details__avatar" aria-label="Change Mote avatar" title="Change Mote avatar" onClick={event => {
+          <IconButton type="button" className="mote-details__avatar" aria-label="Change Mote avatar" title="Change Mote avatar" onClick={event => {
             if (!iconTarget) { useAppStore.getState().reportError(new Error('The original avatar identity is unconfirmed. Its existing appearance and workface are kept; repair the same directory record.')); return }
             avatarInvoker.current = { node: event.currentTarget, key: iconTarget.key }
             setAvatar({ ...iconTarget, name: scope.topic.title })
@@ -88,11 +90,11 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, a
             <SpaceObjectIcon kind="mote" name={scope.topic.title} manualIcon={icon} avatarObjectKey={iconTarget?.key}
               avatarWorkspaceId={scope.workspace.id} avatarTopicId={scope.topic.id}
               visible={active} />
-          </button>
-          <div><div className="mote-details__name"><button type="button" className="mote-details__full-name" title={scope.topic.title} aria-label={scope.topic.title} aria-expanded={nameOpen} onClick={() => setNameOpen(value => !value)}><strong>{scope.topic.title}</strong></button><button type="button" className="icon-button" aria-label="Rename Mote" title="Rename Mote" onClick={event => {
+          </IconButton>
+          <div><div className="mote-details__name"><button type="button" className="mote-details__full-name" title={scope.topic.title} aria-label={scope.topic.title} aria-expanded={nameOpen} onClick={() => setNameOpen(value => !value)}><strong>{scope.topic.title}</strong></button><IconButton type="button" aria-label="Rename Mote" title="Rename Mote" onClick={event => {
             renameInvoker.current = { node: event.currentTarget, key: scope.topic.id }
             setRename({ topic: { ...scope.topic }, workspace: { ...scope.workspace } })
-          }}><ThemeActionEditIcon size={12} /></button></div></div>
+          }}><ThemeActionEditIcon size={12} /></IconButton></div></div>
         </div>
   </>
   return <section className="mote-details" data-mote-details={scope.topic.id} data-section={discussion ? 'discussion' : section} data-shared-navigation={space ? 'true' : undefined}>
@@ -209,7 +211,7 @@ function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, o
     }
   }, [ideasActive, reading, selected])
   const notesIssue = <>
-    {tree.rootError ? <div role="status" className="mote-details__issue">{tree.rootError}<button type="button" className="small-button" onClick={() => void tree.refreshTree()}>Retry notes</button></div> : null}
+    {tree.rootError ? <div role="status" className="mote-details__issue">{tree.rootError}<Button type="button" onClick={() => void tree.refreshTree()}>Retry notes</Button></div> : null}
     {tree.rootCache?.loading ? <p role="status" className="mote-details__hint">Reading notes…</p> : null}
   </>
   return <div ref={content} className="mote-details__content" role="tabpanel" aria-label={section === 'profile' ? 'Mote profile' : 'Mote ideas'}
@@ -247,7 +249,7 @@ function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, o
         onClose={() => setBehaviorOpen(false)} returnFocus={() => behaviorInvoker.current?.isConnected ? behaviorInvoker.current : null} /> : null}
     </div>
     <div className="mote-details__ideas" hidden={section !== 'ideas'} data-reading={reading}>
-      <header className="mote-ideas__heading"><h3>Saved ideas</h3>{onCreateNote ? <button type="button" className="small-button" onClick={onCreateNote}><ThemeActionCreateNoteIcon size={14} /> New note</button> : null}</header>
+      <header className="mote-ideas__heading"><h3>Saved ideas</h3>{onCreateNote ? <Button type="button" onClick={onCreateNote}><ThemeActionCreateNoteIcon size={14} /> New note</Button> : null}</header>
       <details className="mote-ideas__knowledge" onToggle={event => setKnowledgeOpen(event.currentTarget.open)}>
         <summary><ThemeSearchIcon size={14} /><span>知识与来源</span><ThemeNavigationDownIcon size={14} /></summary>
         {knowledgeOpen ? <TopicKnowledgePanel workspace={scope.workspace} topic={scope.topic} active={ideasActive && knowledgeOpen} /> : null}
@@ -259,7 +261,7 @@ function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, o
       <div className="mote-ideas__count"><span>Notes in this folder</span><span>{filter ? filteredNotes.length + ' / ' : ''}{notes.length}</span></div>
       {notesIssue}
       {!tree.rootCache?.loading && !notes.length && !tree.rootError ? <div className="mote-ideas__empty"><ThemeIdeaIcon size={24} /><strong>A thought starts here.</strong><p>No notes here yet. Capture a thought in a file, then continue the discussion.</p></div> : null}
-      {notes.length > 0 && !filteredNotes.length ? <div className="mote-ideas__empty"><p>No notes match this search.</p><button type="button" className="small-button" aria-label="Clear note filter" onClick={() => setFilter('')}>Clear search</button></div> : null}
+      {notes.length > 0 && !filteredNotes.length ? <div className="mote-ideas__empty"><p>No notes match this search.</p><Button type="button" aria-label="Clear note filter" onClick={() => setFilter('')}>Clear search</Button></div> : null}
       <div ref={noteList} className="mote-details__notes">{filteredNotes.map(entry => <button type="button" key={entry.path} aria-pressed={selected === entry.path}
         className="mote-details__note" onClick={() => selectNote(entry.path)}><ThemeFileTextIcon size={15} /><span>{entry.name.replace(/\.(md|txt)$/i, '')}<small>{typeof entry.mtimeMs === 'number' && Number.isFinite(entry.mtimeMs) ? new Date(entry.mtimeMs).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Saved note'}</small></span><ThemeNavigationForwardIcon size={12} /></button>)}</div>
       <p className="mote-details__hint mote-ideas__files-hint">Notes stay in your files. Use the file tree for other folders and formats.</p>
@@ -269,9 +271,9 @@ function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, o
           listFocus.current = true
           setReading(false)
         }}><ThemeBackIcon size={14} />All notes</button>
-        <div className="mote-ideas__reader-heading"><h4 ref={readerTitle} tabIndex={-1}>{selected.split('/').at(-1)?.replace(/\.(md|txt)$/i, '')}</h4><button type="button" className="small-button" onClick={() => void onOpenPath(selected)}>Open file</button></div>
+        <div className="mote-ideas__reader-heading"><h4 ref={readerTitle} tabIndex={-1}>{selected.split('/').at(-1)?.replace(/\.(md|txt)$/i, '')}</h4><Button type="button" onClick={() => void onOpenPath(selected)}>Open file</Button></div>
         {loading ? <p role="status">Reading note…</p> : null}
-        {issue ? <div role="status" className="mote-details__issue">{issue}<button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Retry</button></div> : null}
+        {issue ? <div role="status" className="mote-details__issue">{issue}<Button type="button" onClick={() => setAttempt(value => value + 1)}>Retry</Button></div> : null}
         {ideasActive && note?.path === selected ? <><p className="mote-details__hint mote-ideas__saved" title={note.revision}>{issue || loading ? 'Last confirmed saved content' : 'Read from the saved file'}</p><AgentMarkdown content={note.content} className="mote-details__prose" workspaceRoot={scope.workspace.path}
           sourcePath={selected} openWorkspaceFile={path => { void onOpenPath(path) }} /></> : null}
         {note?.path === selected && !issue && !loading ? <MoteIdeaFeedbackControl key={JSON.stringify([note.path, note.revision])} scope={scope} material={note} onOpenPath={onOpenPath} /> : null}
@@ -279,7 +281,7 @@ function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, o
           <p className="mote-details__hint mote-details__source">{scope.topic.title} · {selected}</p>
           <p className="mote-details__hint">Source and scope are available when recorded in this file. Agent use is not confirmed.</p>
           {note?.path === selected ? <code>{note.revision}</code> : null}
-          <button type="button" className="small-button" onClick={() => void onOpenPath(selected)}>Correct or remove a detail in editor</button>
+          <Button type="button" onClick={() => void onOpenPath(selected)}>Correct or remove a detail in editor</Button>
           <p className="mote-details__hint">Edit only what should change, then Save. File changes keep the original conversations and existing Session context.</p>
         </details>
       </section> : !emptyIdeas ? <div className="mote-ideas__welcome"><ThemeIdeaIcon size={28} /><h4>Give a thought some room.</h4><p>Choose a note to read, build on it, or take it into your next discussion.</p></div> : null}
@@ -349,15 +351,15 @@ function MoteBehaviorSummary({ scope, onEdit, onOpenPath, active }: {
       {confirmed.legacySoul ? <p className="mote-details__hint">Saved in your original SOUL. Save settings once to move them into BEHAVIOR.md.</p> : null}
       {!hasPreferences ? <button type="button" className="mote-details__invitation" onClick={onEdit}>Choose how we work together.<ThemeNavigationForwardIcon size={12} /></button> : null}
     </div> : <p className="mote-details__hint">{loading ? 'Reading saved behavior…' : !admitted.current ? 'Saved behavior not read yet.' : 'Saved behavior is unconfirmed.'}</p>}
-    {issue ? <div role="status" className="mote-details__issue">{issue}<button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Retry settings</button></div> : null}
+    {issue ? <div role="status" className="mote-details__issue">{issue}<Button type="button" onClick={() => setAttempt(value => value + 1)}>Retry settings</Button></div> : null}
     <details className="mote-details__soul" onToggle={event => setSoulOpen(event.currentTarget.open)}><summary><ThemeFileTextIcon size={12} />Original files<ThemeNavigationDownIcon size={12} /></summary>
-      {soulOpen && scope.topic.summary ? <div className="mote-details__original-context"><span className="mote-details__hint">topic.md · saved context</span><p>{scope.topic.summary}</p><button type="button" className="small-button" onClick={() => void onOpenPath(scope.rootPath + '/topic.md')}>Open original context</button></div> : null}
+      {soulOpen && scope.topic.summary ? <div className="mote-details__original-context"><span className="mote-details__hint">topic.md · saved context</span><p>{scope.topic.summary}</p><Button type="button" onClick={() => void onOpenPath(scope.rootPath + '/topic.md')}>Open original context</Button></div> : null}
       {soulOpen ? <p className="mote-details__hint">SOUL.md · self instructions</p> : null}
       {active && soulOpen && (soul !== null || scope.topic.soul) ? <AgentMarkdown content={soul ?? scope.topic.soul!.content} className="mote-details__prose" sourcePath={scope.rootPath + '/' + MOTE_SOUL_PATH}
         workspaceRoot={scope.workspace.path} openWorkspaceFile={path => { void onOpenPath(path) }} /> : soulOpen && soul === null && !scope.topic.soul ? <p className="mote-details__hint">Open the original file to inspect it.</p> : null}
       {soulReadIssue ? <p role="status" className="mote-details__issue">{soulReadIssue}</p> : null}
       <p className="mote-details__hint">Saved changes apply to new Sessions. Current discussions keep their context; your current directions take priority.</p>
-      <button type="button" className="small-button" onClick={() => void onOpenPath(scope.rootPath + '/' + MOTE_SOUL_PATH)}>Open original SOUL</button>
+      <Button type="button" onClick={() => void onOpenPath(scope.rootPath + '/' + MOTE_SOUL_PATH)}>Open original SOUL</Button>
     </details>
   </div>
 }

@@ -6,6 +6,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { agentPromptSubmissionOutcome } from '@agentmux/core/mote-dialogue'
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { MoteDefaultConversation } from '@agentmux/core/mote-preferences'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { MoteMainActions, type MoteStartActions } from './MoteMainActions'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { BrandIcon } from './BrandIcon'
@@ -163,11 +164,11 @@ export function MoteConversationStart({ scope, active, mode, onConfigure, onOpen
       notice={<>{mode === 'new' ? <p>新一轮只接收你明确发送的新消息；旧对话和未确认的消息留在原处，不会重发。</p> : null}
         {state.pending.length ? <div className="mote-main-recovery__actions" data-main-original-request>
           <span>原开始请求已保留，创建与交接分别核对。</span>
-          {state.pending.map(id => <button key={id} type="button" className="small-button" disabled={state.checking} onClick={() => state.inspect(id)}>核对原开始请求</button>)}
-          {state.openOriginal ? <button type="button" className="small-button" onClick={state.openOriginal}>查看原开始位置</button> : null}
+          {state.pending.map(id => <Button key={id} type="button" disabled={state.checking} onClick={() => state.inspect(id)}>核对原开始请求</Button>)}
+          {state.openOriginal ? <Button type="button" onClick={state.openOriginal}>查看原开始位置</Button> : null}
         </div> : null}{state.issue && <p role="status">{state.issue}
         {state.reading?.preferences.status === 'ready' && !state.reading.executor && (mode === 'new' || !state.reading.dialogue.main.current)
-          ? <> <button type="button" className="small-button" onClick={event => onConfigure(event.currentTarget)}>配置 Agent</button></> : null}
+          ? <> <Button type="button" onClick={event => onConfigure(event.currentTarget)}>配置 Agent</Button></> : null}
       </p>}{notice && <p role="status">{notice}</p>}{persistenceIssue && <p role="status">{persistenceIssue}</p>}
         {automatic && <div role="status">{automatic.decision.policy.kind === 'executor-change' ? '这条新问题将由所选 Agent 承接。' : automatic.decision.policy.kind === 'continuity-unavailable' ? '保存的接续策略为这条新问题选择新对话；旧消息留在原处。' : '这条新问题按保存的空闲策略接续；旧消息留在原处。'}<details><summary>这条新问题</summary><p>{automatic.query.prompt}</p></details></div>}
         {mode !== 'new' && state.reading?.dialogue.main.current && <p role="status">已有当前主对话，这里不会另建主 Agent；草稿保留，可从「对话选项」返回当前主对话。</p>}

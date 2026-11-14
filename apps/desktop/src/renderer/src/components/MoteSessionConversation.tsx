@@ -4,6 +4,7 @@ import { describeConversationWindow } from '@agentmux/client-ui/conversation-rec
 import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
 import { InputMailboxRecords } from '@agentmux/client-ui/components/InputMailboxRecords'
 import { useAgentInputMailbox } from '@agentmux/client-ui/use-agent-input-mailbox'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../lib/api'
 import { useMoteSessionReading } from '../lib/mote-session-reading'
 import { OriginalInputWaitingControl } from './OriginalInputWaitingControl'
@@ -29,13 +30,13 @@ export function MoteSessionConversation({ hostId, agentSessionId, identity, acti
       readingGeometry={scroll.readingGeometry} page={reading.historyPage ?? null} coverage={reading.timeline.coverage} active={active} readProcessDetail={view.readProcessDetail} detailsOnlyMetadata sourceLabelsInDetails />
       : <p className="mote-conversation__muted">{view.loading ? '读取原对话…' : view.error ? '原来源暂不可读，可重读同一会话。' : '此读取范围尚无对话记录。'}</p>}
     <div ref={scroll.tail} data-mote-conversation-tail aria-hidden="true" /></div>
-    <div className="mote-session-conversation__footer"><div className="mote-chat-actions">{view.hasMore ? <button type="button" className="small-button" disabled={view.loading} onClick={earlier}>更早的消息</button> : null}
-      <button type="button" className="small-button" disabled={view.loading} onClick={() => void view.refresh()}>重读原对话</button></div>
+    <div className="mote-session-conversation__footer"><div className="mote-chat-actions">{view.hasMore ? <Button type="button" disabled={view.loading} onClick={earlier}>更早的消息</Button> : null}
+      <Button type="button" disabled={view.loading} onClick={() => void view.refresh()}>重读原对话</Button></div>
     <details><summary>原会话来源</summary><code>{hostId} / {agentSessionId}</code></details>
     {view.held ? <p className="mote-conversation__muted" role="status">保留选区，取消选择后更新原对话。</p> : null}
     <details onToggle={event => setReceiptsOpen(event.currentTarget.open)}><summary>输入回执</summary><MoteSessionInputs hostId={hostId} agentSessionId={agentSessionId} active={active && receiptsOpen} /></details>
     </div></div>
-    {!scroll.atTail || view.historical || view.newerAvailable || view.held ? <button type="button" className="small-button mote-session-conversation__latest" onClick={latest}>回到最新</button> : null}
+    {!scroll.atTail || view.historical || view.newerAvailable || view.held ? <Button type="button" className="mote-session-conversation__latest" onClick={latest}>回到最新</Button> : null}
   </section>
 }
 

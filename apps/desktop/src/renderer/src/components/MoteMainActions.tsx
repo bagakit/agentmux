@@ -4,6 +4,7 @@ import { autoUpdate, computePosition, flip, offset, shift, size } from '@floatin
 import { agentPromptSubmissionOutcome, type MoteMainDeferredInput, type MoteMainRolloverDecision } from '@agentmux/core/mote-dialogue'
 import type { MoteDefaultConversation } from '@agentmux/core/mote-preferences'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import { useMoteDialogueView } from '../lib/mote-dialogue-view'
 import { moteConnectionTarget } from '../lib/mote-connection-default'
@@ -147,27 +148,27 @@ export function MoteMainActions({ scope, active, entryToken, onConfigure, onCrea
   const menu = Boolean(current) || presentation === 'menu'
   const leave = (action: () => void) => () => { setMenuOpen(false); action() }
   const actions = <>
-    <button type="button" className="small-button" disabled={busy || !onStartNew && (!reading || Boolean(reading.issue))}
-      onClick={() => { if (onStartNew) leave(onStartNew)(); else if (reading) void run(() => createMoteMain(scope, reading), undefined, true) }}>{busy ? '正在核对…' : current ? '开始新一轮对话' : '开始对话'}</button>
-    <button type="button" className="small-button" onClick={event => { const invoker = menu ? menuTrigger : event.currentTarget; setMenuOpen(false); onConfigure(invoker) }}>{current ? '选择已有主 Agent／设置' : '设置默认执行器'}</button>
-    {current && onOpenWorkspace ? <button type="button" className="small-button" onClick={leave(onOpenWorkspace)}>在工作区打开</button> : null}
-    <button type="button" className="small-button" disabled={busy} onClick={() => setGeneration(value => value + 1)}>重新核对</button>
+    <Button type="button" disabled={busy || !onStartNew && (!reading || Boolean(reading.issue))}
+      onClick={() => { if (onStartNew) leave(onStartNew)(); else if (reading) void run(() => createMoteMain(scope, reading), undefined, true) }}>{busy ? '正在核对…' : current ? '开始新一轮对话' : '开始对话'}</Button>
+    <Button type="button" onClick={event => { const invoker = menu ? menuTrigger : event.currentTarget; setMenuOpen(false); onConfigure(invoker) }}>{current ? '选择已有主 Agent／设置' : '设置默认执行器'}</Button>
+    {current && onOpenWorkspace ? <Button type="button" onClick={leave(onOpenWorkspace)}>在工作区打开</Button> : null}
+    <Button type="button" disabled={busy} onClick={() => setGeneration(value => value + 1)}>重新核对</Button>
   </>
   const status = <>
     {notice ? <p role="status" className="mote-details__issue">{notice}</p> : null}
     {retainedInput ? <details><summary>本设备保留的问题</summary><p>{retainedInput.prompt}</p><p>原问题保留在本设备，可移回草稿。</p>
-      <button type="button" className="small-button" disabled={restoringInput} onClick={() => { void restoreInput() }}>移回草稿</button></details> : null}
+      <Button type="button" disabled={restoringInput} onClick={() => { void restoreInput() }}>移回草稿</Button></details> : null}
     {result ? <details><summary>原主 Agent 请求 · {queryPending ? '首条消息待核对' : result.binding === 'confirmed' ? '绑定已确认' : '待核对'}</summary>
       <p>创建：{STAGE[result.creation]} · 原来源：{STAGE[result.source]} · 主角色绑定：{STAGE[result.binding]}</p>
       <code>{result.operationId}</code>
       {result.reference ? <p>{result.reference.hostId} / {result.reference.sessionId}</p> : null}
-      {result.creation === 'confirmed' && result.binding !== 'confirmed' && result.reference && onOpenCreated ? <button type="button" className="small-button"
-        onClick={() => { setMenuOpen(false); onOpenCreated(result.reference!) }}>打开已创建的 Agent</button> : null}
-      <button type="button" className="small-button" disabled={checking} onClick={() => void inspectOriginal(result.operationId)}>核对原请求</button>
+      {result.creation === 'confirmed' && result.binding !== 'confirmed' && result.reference && onOpenCreated ? <Button type="button"
+        onClick={() => { setMenuOpen(false); onOpenCreated(result.reference!) }}>打开已创建的 Agent</Button> : null}
+      <Button type="button" disabled={checking} onClick={() => void inspectOriginal(result.operationId)}>核对原请求</Button>
       {result.record?.moteMain?.deferredInput ? <details><summary>原首条消息</summary><p>{result.record.moteMain.deferredInput.prompt}</p>
         <p>{queryOutcome === 'not-applied' ? '首条消息未投递，原文保留。' : queryPending ? '首条消息尚未确认，不重复发送。' : '首条消息已确认接收。'}</p></details> : null}
-      {(result.binding === 'unconfirmed' || queryPending) && result.creation === 'confirmed' ? <button type="button" className="small-button" disabled={busy}
-        onClick={() => void run(() => continueMoteMainAction(scope, result.operationId), undefined, true)}>继续原开始请求</button> : null}
+      {(result.binding === 'unconfirmed' || queryPending) && result.creation === 'confirmed' ? <Button type="button" disabled={busy}
+        onClick={() => void run(() => continueMoteMainAction(scope, result.operationId), undefined, true)}>继续原开始请求</Button> : null}
     </details> : null}
     {pending.length > 1 || retained?.deferredInputIssue ? <details><summary>待核对的开始请求 · {pending.length}</summary>{pending.map(id => <div key={id}><code>{id}</code>
       <button type="button" disabled={checking} onClick={() => void inspectOriginal(id)}>核对原请求</button>

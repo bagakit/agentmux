@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { ConnectorEntityIdentity, ConnectorIdentityField, ConnectorProfileUpdates } from './ConnectorEntityIdentity'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useRef, useState } from 'react'
@@ -44,7 +45,7 @@ export function MoteChatPeople({ configuration, hostingTarget, active, refreshRe
     }} />)}
     {reading ? <p role="status" className="mote-details__hint">Reading people…</p> : !people.length && !issue ? <p className="mote-details__hint">People appear here when they first message this bot.</p> : null}
     {issue ? <p role="status" className="mote-details__issue">{issue}</p> : null}
-    <div className="mote-chat-actions"><button type="button" className="small-button" disabled={reading} onClick={() => void read()}>Refresh people</button>{next ? <button type="button" className="small-button" disabled={reading} onClick={() => void read(next)}>More people</button> : null}</div>
+    <div className="mote-chat-actions"><Button type="button" disabled={reading} onClick={() => void read()}>Refresh people</Button>{next ? <Button type="button" disabled={reading} onClick={() => void read(next)}>More people</Button> : null}</div>
   </div>
 }
 
@@ -87,8 +88,8 @@ function MoteChatPersonRow({ person, profileRead, configuration, hostingTarget, 
     <dl><div><dt>Used</dt><dd>{person.used}</dd></div><div><dt>Total</dt><dd>{person.creator ? 'Unlimited' : person.total}</dd></div><div><dt>Remaining</dt><dd>{person.creator ? 'Unlimited' : person.remaining}</dd></div></dl>
     {!person.creator ? editing ? <form className="mote-chat-person__allocation" onSubmit={event => { event.preventDefault(); void save() }}>
       <label><span>Total message allowance</span><TextInput type="number" min="0" step="1" aria-label={`Total allowance for ${person.name ?? person.actor.userId}`} value={total} disabled={busy} onChange={event => editTotal(event.target.value)} /></label>
-      <div className="mote-chat-actions"><button type="submit" className="small-button" disabled={busy || pending}>{busy ? 'Saving…' : 'Save allowance'}</button><button type="button" className="small-button" disabled={busy} onClick={() => { if (useLauncherState.getState().setMoteChatDraft(draftKey, undefined, ownVersion.current)) setEditing(false) }}>Cancel</button></div>
-    </form> : <button type="button" className="small-button" onClick={() => { editTotal(String(person.total)); setEditing(true) }}>Edit allowance</button> : <span className="mote-details__hint">Creator · unlimited</span>}
+      <div className="mote-chat-actions"><Button type="submit" disabled={busy || pending}>{busy ? 'Saving…' : 'Save allowance'}</Button><Button type="button" disabled={busy} onClick={() => { if (useLauncherState.getState().setMoteChatDraft(draftKey, undefined, ownVersion.current)) setEditing(false) }}>Cancel</Button></div>
+    </form> : <Button type="button" onClick={() => { editTotal(String(person.total)); setEditing(true) }}>Edit allowance</Button> : <span className="mote-details__hint">Creator · unlimited</span>}
     {issue || retainedDraft?.issue ? <p role="status" className="mote-details__issue">{issue || retainedDraft?.issue}</p> : null}
     {pending ? <p role="status" className="mote-details__hint">Check this person’s original allowance request below before another save.</p> : null}
     <details className="mote-chat-person__history" onToggle={event => setHistoryOpen(event.currentTarget.open)}><summary>Conversations</summary><MoteChatHistory target={configuration.target} actor={person.actor} hostingTarget={hostingTarget} active={active && historyOpen} /></details>

@@ -3,6 +3,7 @@ import type { ConnectionActor } from '@agentmux/core/connections'
 import type { MoteChatGeneration, MoteChatPerson, MoteChatTarget } from '@agentmux/core/mote-chat'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
@@ -47,7 +48,7 @@ export function MoteChatHistory({ target, actor, people = [], hostingTarget, act
       row: <span className="mote-conversation-browser__row" data-mote-chat-generation={generation.generationId}><PersonIcon size={22} /><span>
         <strong>{name}</strong><small>{generation.application.domain} · <time dateTime={at.toISOString()}>{time}</time></small>
         {generation.phase === 'preparing' ? <small>正在准备原对话</small> : null}</span></span>,
-      actions: <button type="button" className="small-button" onClick={() => useAppStore.getState().revealFocusAgent({ hostId: generation.executionHostId, agentSessionId: generation.agentSessionId })}>在 Focus 打开</button>,
+      actions: <Button type="button" onClick={() => useAppStore.getState().revealFocusAgent({ hostId: generation.executionHostId, agentSessionId: generation.agentSessionId })}>在 Focus 打开</Button>,
       conversation: (visible: boolean) => <MoteSessionConversation hostId={generation.executionHostId} agentSessionId={generation.agentSessionId} identity={'mote-private:' + generation.generationId} active={visible} /> }
   })
   return <section className="mote-chat-history" aria-label="Private conversations" aria-busy={reading}>
@@ -57,7 +58,7 @@ export function MoteChatHistory({ target, actor, people = [], hostingTarget, act
       footer={<>
         {reading ? <p className="mote-private-chat__activity" role="status"><LoadingIcon size={13} animation="spin" />读取私聊…</p> : null}
         {issue ? <p role="status" className="mote-details__issue">{generations.length ? '已读原对话保留。' : ''}{issue}</p> : null}
-        <div className="mote-chat-actions"><button type="button" className="small-button" disabled={reading} onClick={() => void read()}>Refresh conversations</button>{next ? <button type="button" className="small-button" disabled={reading} onClick={() => void read(next)}>Earlier conversations</button> : null}</div>
+        <div className="mote-chat-actions"><Button type="button" disabled={reading} onClick={() => void read()}>Refresh conversations</Button>{next ? <Button type="button" disabled={reading} onClick={() => void read(next)}>Earlier conversations</Button> : null}</div>
       </>} />
   </section>
 }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { scratchTopicsScope } from '../lib/scratch-topic-snapshots'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -39,5 +40,5 @@ export function MoteArchiveNotice({ issue, workspaceId, failure, targetName }: {
     step: failure ? `${failure.action} for ${failure.title} was not confirmed` : `${targetName ?? 'Mote'} archive state is unconfirmed`,
     mode: issue + ' The last confirmed state and original work surface are kept.',
     restore: failure ? `Refresh the directory, then retry ${failure.action.toLowerCase()} for ${failure.title}. Your current Mote selection remains available.` : 'Refresh the directory, then retry Archive or Restore for the same Mote.'
-  } }} actions={<button type="button" className="small-button" onClick={() => void useAppStore.getState().refreshScratchTopics(workspaceId, true)}>Retry directory</button>} />
+  } }} actions={<Button type="button" onClick={() => void useAppStore.getState().refreshScratchTopics(workspaceId, true)}>Retry directory</Button>} />
 }

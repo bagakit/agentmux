@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import '../styles/mote-primary-agent.css'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -78,9 +79,9 @@ function OriginalAgentConversation({ floating, target, projectionState, visible,
       {floating.entryMessage ? <span role="status">{floating.entryMessage}</span> : null}
       {issue ? <span role="status">{issue}</span> : null}
       {issue ? <>
-        <button type="button" className="small-button" onClick={() => requestAgentConversationFloatingOpen(agent.agentSessionId, agent.hostId, floating.entryMessage, floating.reference ?? undefined, floating.entryContext)}>重新读取原对话</button>
-        {agent.agentSessionId ? <button type="button" className="small-button" onClick={() => void api.ui.openObjectLink(formatSessionAddress(agent.agentSessionId!))}>读取原 Session</button> : null}
-        {choices.map((reference, index) => <button type="button" className="small-button" key={JSON.stringify(reference)} onClick={() => onSelect(reference)}>原对话位置 {index + 1}</button>)}
+        <Button type="button" onClick={() => requestAgentConversationFloatingOpen(agent.agentSessionId, agent.hostId, floating.entryMessage, floating.reference ?? undefined, floating.entryContext)}>重新读取原对话</Button>
+        {agent.agentSessionId ? <Button type="button" onClick={() => void api.ui.openObjectLink(formatSessionAddress(agent.agentSessionId!))}>读取原 Session</Button> : null}
+        {choices.map((reference, index) => <Button type="button" key={JSON.stringify(reference)} onClick={() => onSelect(reference)}>原对话位置 {index + 1}</Button>)}
       </> : null}
     </div>
     {!target.identityIssue && target.tab ? <WorkspaceWorkbench workspaceId={projectionState?.projection?.displayWorkspaceId ?? target.tab.workspaceId}
@@ -742,13 +743,13 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
     {floating.preferenceIssue ? <div role="status" className="workbench-restore-notice mote-size-notice">{floating.preferenceIssue}</div> : null}
     {!floating.agentTarget && selectedMote?.moteArchive?.state === 'archived' ? <div role="status" className="workbench-restore-notice mote-context-notice" data-mote-archived={selectedMote.id}>
       <span>{selectedMote.title} · Archived. The original work surface remains available.</span>
-      <button type="button" className="small-button" disabled={archive.pending === selectedMote.id} onClick={() => void archive.change(selectedMote, false)}>Restore Mote</button>
+      <Button type="button" disabled={archive.pending === selectedMote.id} onClick={() => void archive.change(selectedMote, false)}>Restore Mote</Button>
     </div> : null}
     {!floating.agentTarget ? <MoteArchiveNotice workspaceId={SCRATCH_WORKSPACE_ID} issue={archive.issue ?? (selectedMote?.moteArchive?.state === 'unknown' ? selectedMote.moteArchive.issue : null)} failure={archive.failure} targetName={selectedMote?.title} /> : null}
     {!scratch && !floating.agentTarget ? <div role="status" className="workbench-restore-notice">Original Mote retained · Workspace is still restoring</div> : null}
     {visible && !floating.agentTarget && (directoryError || !topics || !motes.some(mote => mote.id === target.topicId)) ? <div role="status" className="workbench-restore-notice mote-context-notice">
       <span>{directoryError ? 'Mote directory could not be refreshed: ' + directoryError : 'Mote directory is not confirmed yet.'} The current work surface is retained.</span>
-      <button type="button" className="small-button" onClick={() => void refreshTopics(SCRATCH_WORKSPACE_ID, true)}>Retry directory</button>
+      <Button type="button" onClick={() => void refreshTopics(SCRATCH_WORKSPACE_ID, true)}>Retry directory</Button>
     </div> : null}
     <div className="pmo-teams-topic-floating__body">
       {floating.agentTarget ? <OriginalAgentConversation floating={floating} target={target} projectionState={projectionState} visible={visible}

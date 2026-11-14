@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { MoteChatIntentOperation } from '../lib/mote-chat-intent'
 import type { MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import { sameMotePreferencesTarget } from '@agentmux/core/mote-preferences'
@@ -28,8 +29,8 @@ export function MoteChatRequests({ target, onConfirmed }: { target: MotePreferen
     {retained.map(intent => <div key={intent.input.operationId} data-mote-chat-request={intent.input.operationId}>
       <strong>{intent.method === 'space.mote.chat.configure' ? intent.input.refreshCreator ? 'Main identity' : 'Chat settings' : 'Message allowance'} · result not confirmed</strong>
       <p role="status">{results[intent.input.operationId]?.message ?? (!intent.hostingTarget ? 'The original bot hosting owner is unconfirmed. The original request is kept.' : intent.phase === 'not-dispatched' ? 'Original input retained before dispatch.' : 'The original request and its input are kept.')}</p>
-      <div className="mote-chat-actions"><button type="button" className="small-button" disabled={busy.has(intent.input.operationId) || !intent.hostingTarget} onClick={() => void check(intent)}>{busy.has(intent.input.operationId) ? 'Checking…' : 'Check original request'}</button>
-        {intent.hostingTarget && (intent.phase === 'not-dispatched' || results[intent.input.operationId]?.absent) ? <button type="button" className="small-button" disabled={busy.has(intent.input.operationId)} onClick={() => void check(intent, true)}>Continue original request</button> : null}</div>
+      <div className="mote-chat-actions"><Button type="button" disabled={busy.has(intent.input.operationId) || !intent.hostingTarget} onClick={() => void check(intent)}>{busy.has(intent.input.operationId) ? 'Checking…' : 'Check original request'}</Button>
+        {intent.hostingTarget && (intent.phase === 'not-dispatched' || results[intent.input.operationId]?.absent) ? <Button type="button" disabled={busy.has(intent.input.operationId)} onClick={() => void check(intent, true)}>Continue original request</Button> : null}</div>
       <details><summary>Request reference</summary>{intent.hostingTarget ? <code>{intent.hostingTarget.hostId} · {intent.hostingTarget.runtimeId}</code> : null}<code>{intent.input.operationId}</code></details>
     </div>)}
   </section>
