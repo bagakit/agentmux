@@ -91,3 +91,13 @@ it('keeps selection and the original nodes usable when automatic geometry fails'
   expect(node('second').textContent).toContain('Worker')
   expect(LayoutWorker.all[0]!.terminated).toBe(true)
 })
+
+it('releases the original name tooltip when the graph hides or switches to the selected link', async () => {
+  await show(); await act(async () => LayoutWorker.all[0]!.reply())
+  const focus = async () => act(async () => node('first').dispatchEvent(new FocusEvent('focusin', { bubbles: true })))
+  await focus(); expect(document.querySelector('[role="tooltip"]')).not.toBeNull()
+  await show(false); expect(document.querySelector('[role="tooltip"]')).toBeNull()
+  await show(); await focus(); expect(document.querySelector('[role="tooltip"]')).not.toBeNull()
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('[aria-label="Selected link"]')!.click())
+  expect(document.querySelector('[role="tooltip"]')).toBeNull()
+})
