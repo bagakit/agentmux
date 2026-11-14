@@ -9,7 +9,7 @@ export type AgentMuxHostedPromptIntentSummary = Pick<Intent, 'run' | 'ownerInsta
   /** UTF-8 bytes of the frozen prompt; the original body remains at its Core owner. */
   promptBytes: number
 }
-type AdmissionSummary<T = Admission> = T extends Admission ? Omit<T, 'intent'> & {
+export type AgentMuxHostedPromptAdmissionSummary<T = Admission> = T extends Admission ? Omit<T, 'intent'> & {
   intent?: never
   intentSummary?: AgentMuxHostedPromptIntentSummary
 } : never
@@ -19,7 +19,7 @@ export type AgentMuxHostedAgentSessionSummary = Omit<AgentMuxAgentSession, 'prom
   sessionProjection: 'summary'
   /** Historical operations stay at the Core owner and are read by exact read/inspect. */
   continuityOperations?: never
-  promptCompletionAdmission?: AdmissionSummary
+  promptCompletionAdmission?: AgentMuxHostedPromptAdmissionSummary
 }
 export type AgentMuxHostedSession<P extends AgentMuxHostedSessionProjection> =
   P extends 'summary' ? AgentMuxHostedAgentSessionSummary : AgentMuxAgentSession
@@ -28,17 +28,21 @@ export function isHostedAgentSessionSummary(session: AgentMuxAgentSession): sess
   return 'sessionProjection' in session && session.sessionProjection === 'summary'
 }
 
+/** Display-only admission facts; exact input and Session reads retain the frozen intent. */
+export function hostedPromptAdmissionSummary(original: Admission): AgentMuxHostedPromptAdmissionSummary {
+  const { intent, ...admission } = original
+  return { ...admission,
+    ...(intent ? { intentSummary: { run: { ...intent.run }, ownerInstanceId: intent.ownerInstanceId,
+      planKind: intent.plan.kind, ...(intent.execution === undefined ? {} : { execution: intent.execution }), promptBytes: new TextEncoder().encode(intent.prompt).byteLength } } : {})
+  }
+}
+
 export function hostedAgentSessionSummary(session: AgentMuxAgentSession): AgentMuxHostedAgentSessionSummary {
   const { continuityOperations: _history, ...source } = session
   if (isHostedAgentSessionSummary(source)) return source
   const { promptCompletionAdmission: original, ...rest } = source
   if (!original) return { ...rest, sessionProjection: 'summary' }
-  const { intent, ...admission } = original
-  return { ...rest, sessionProjection: 'summary', promptCompletionAdmission: {
-    ...admission,
-    ...(intent ? { intentSummary: { run: { ...intent.run }, ownerInstanceId: intent.ownerInstanceId,
-      planKind: intent.plan.kind, ...(intent.execution === undefined ? {} : { execution: intent.execution }), promptBytes: new TextEncoder().encode(intent.prompt).byteLength } } : {})
-  } }
+  return { ...rest, sessionProjection: 'summary', promptCompletionAdmission: hostedPromptAdmissionSummary(original) }
 }
 
 export function projectHostedSessionEvent(event: AgentMuxClientEvent, projection: AgentMuxHostedSessionProjection): AgentMuxClientEvent {

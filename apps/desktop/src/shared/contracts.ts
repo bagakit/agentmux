@@ -1038,9 +1038,14 @@ export type AgentWorkPlacement = { agentHostId: string; resourceHostId: string |
 /** Retained metadata with the same observer-relative route projection as live Sessions. */
 export type SessionHistoryDescriptor = AgentSessionHistoryDescriptor & { workPlacement?: AgentWorkPlacement }
 
+/** Main's display carrier; original member SDK events can still carry full Core facts. */
+export type DesktopAgentSessionDisplay = Omit<AgentMuxAgentSession, 'promptCompletionAdmission'> & {
+  promptCompletionAdmission?: import('@agentmux/core/hosted').AgentMuxHostedPromptAdmissionSummary
+  workPlacement?: AgentWorkPlacement
+}
 type DesktopRuntimeEvent = Exclude<AgentMuxClientEvent, { type: 'agent-session' }> |
   (Omit<Extract<AgentMuxClientEvent, { type: 'agent-session' }>, 'session'> & {
-    session: AgentMuxAgentSession & { workPlacement?: AgentWorkPlacement }
+    session: DesktopAgentSessionDisplay | (AgentMuxAgentSession & { workPlacement?: AgentWorkPlacement })
   })
 
 export type SessionSnapshot = SessionSnapshotBase & (

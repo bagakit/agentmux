@@ -1,4 +1,5 @@
-import type { TerminalSessionSnapshot } from '../shared/contracts'
+import type { DesktopAgentSessionDisplay, TerminalSessionSnapshot } from '../shared/contracts'
+import { hostedPromptAdmissionSummary } from '@agentmux/core/hosted'
 import { parseFocusTaskReference } from '@agentmux/core/focus-control'
 import { createSpaceMemberSurface } from './space-member-surface.js'
 import { connectSpaceMember, type SpaceMemberClient } from '@agentmux/core/space-member-client'
@@ -3532,8 +3533,14 @@ export class RuntimeController {
         warningChange = null
       }
     }
-    const projectedEvent = event.type === 'agent-session' ? { ...event, session: { ...event.session, hostId,
-      ...(event.session.toolExecution ? this.workPlacementProjection()(hostId, event.session.toolExecution) : {}) } } : event
+    let projectedEvent: RuntimeEvent['event'] = event
+    if (event.type === 'agent-session') {
+      const { promptCompletionAdmission, ...session } = event.session
+      const display: DesktopAgentSessionDisplay = { ...session, hostId,
+        ...(promptCompletionAdmission ? { promptCompletionAdmission: hostedPromptAdmissionSummary(promptCompletionAdmission) } : {}),
+        ...(event.session.toolExecution ? this.workPlacementProjection()(hostId, event.session.toolExecution) : {}) }
+      projectedEvent = { ...event, session: display }
+    }
     const runtimeEvent: RuntimeEvent = { type: 'core', hostId, event: projectedEvent,
       ...(event.type === 'connection-state' ? { hostTransport: this.hosts.has(hostId) ? hostTransportSnapshot(this.hosts.get(hostId)!.client) : null, hostTransportSequence: ++this.hostTransportSequence } : {}),
       ...(endpointObservation ? { endpointObservation } : {}),
