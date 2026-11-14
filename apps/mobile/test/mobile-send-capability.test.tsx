@@ -52,9 +52,15 @@ async function hostedFixture(protocol: 'ordinary' | 'interrupt' | 'stale-adverti
   await draw('', working)
   let native: AgentPromptExecutionEvidence = { sourceId: 'private-native', id: 'started', nativeTurnId: 'turn-1', state: working ? 'working' : 'ended', ...(!working ? { endReason: 'completed' as const } : {}) }
   const template = new AgentProviderRegistry().get('codex').catalog
-  const { promptExecution: _unused, providerFork: _fork, ...ordinaryCapabilities } = template.capabilities
+  // Strip capabilities that require specific contributions not provided by this PTY fixture:
+  // nativeConversationInput→prepareNativeInput, asyncQuestionReply→prepareNativeInput+planQuestionReply,
+  // providerResume→buildResumeArgs, providerFork→buildForkArgs (already removed).
+  const { promptExecution: _unused, providerFork: _fork, nativeConversationInput: _nci, asyncQuestionReply: _aqr, providerResume: _res, ...ordinaryCapabilities } = template.capabilities
   const provider = defineAgentProvider({ catalog: { ...template, id: providerId, label: 'Private native protocol',
-    capabilities: { ...ordinaryCapabilities, ...(protocol === 'ordinary' ? {} : { promptExecution: { immediate: 'interrupt-before-input' as const } }) },
+    // resumeStrategy must agree with providerResume (removed above); override to 'none'.
+    resumeStrategy: { kind: 'none' },
+    // permission 'observe' because fixture does not provide interaction or hook.permissionDecision.
+    capabilities: { ...ordinaryCapabilities, providerResume: false, permission: 'observe' as const, ...(protocol === 'ordinary' ? {} : { promptExecution: { immediate: 'interrupt-before-input' as const } }) },
     hookStrategy: { kind: 'native', installation: 'unmanaged' } }, buildArgs: (_, args) => [...args], hook: { rules: [] },
     ...(protocol !== 'ordinary' ? {
       terminalPromptRender: { frameStart: '\x1b[?2026h', frameEnd: '\x1b[?2026l', activeComposer: '>' },

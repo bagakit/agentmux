@@ -25,9 +25,15 @@ export async function attachmentHostedFixture(root: string) {
     run: { runId: 'run-original' }, retiredRuns: [], createdAt: 1, updatedAt: 1,
     semanticStatus: { state: 'working', source: 'native-hook', observedAt: 1 } })
   const template = new AgentProviderRegistry().get('codex').catalog
-  const { promptExecution: _execution, providerFork: _fork, ...ordinaryCapabilities } = template.capabilities
+  // Strip capabilities that require specific contributions not provided by this file-consumer fixture:
+  // nativeConversationInput→prepareNativeInput, asyncQuestionReply→prepareNativeInput+planQuestionReply,
+  // providerResume→buildResumeArgs, providerFork→buildForkArgs (already removed).
+  const { promptExecution: _execution, providerFork: _fork, nativeConversationInput: _nci, asyncQuestionReply: _aqr, providerResume: _res, ...ordinaryCapabilities } = template.capabilities
   const provider = defineAgentProvider({ catalog: { ...template, id: providerId, label: 'Private ordinary file consumer',
-    capabilities: ordinaryCapabilities, hookStrategy: { kind: 'native', installation: 'unmanaged' } },
+    // resumeStrategy must agree with providerResume (removed above); override to 'none'.
+    resumeStrategy: { kind: 'none' },
+    // permission 'observe' because fixture does not provide interaction or hook.permissionDecision.
+    capabilities: { ...ordinaryCapabilities, providerResume: false, permission: 'observe' as const }, hookStrategy: { kind: 'native', installation: 'unmanaged' } },
     buildArgs: (_, args) => [...args], hook: { rules: [] } })
   const core = new AgentMuxClient({ store, providers: [provider] })
   const inner = core as unknown as { connected: boolean; registry: { load(hostId: string): Promise<void> }; kernel: Record<string, unknown> }
