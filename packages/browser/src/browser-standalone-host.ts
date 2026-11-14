@@ -6,7 +6,7 @@ import { isAbsolute, join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import puppeteer, { type Browser, type Target, type CDPSession } from 'puppeteer-core'
 import { z } from 'zod'
-import { durableWriteFile, BROWSER_PAGE_CAPABILITY_NAMES, type AgentMuxBrowserTarget, type AgentMuxBrowserTargetsResult,
+import { durableWriteFile, BROWSER_PAGE_CAPABILITY_NAMES, projectBrowserTargetTitle, type AgentMuxBrowserTarget, type AgentMuxBrowserTargetsResult,
   type AgentMuxBrowserLifecycleIntent, type AgentMuxBrowserLifecycleReceipt, type AgentMuxControlRequest, type AgentMuxControlResult } from '@agentmux/core'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { BrowserOperationJournal, BrowserOperationFileStore, browserOperationAlreadyExistsError } from './browser-operation-journal.js'
@@ -238,7 +238,7 @@ export class StandaloneBrowserHost {
   private publicTarget(binding: Binding): AgentMuxBrowserTarget {
     return { id: binding.id, workspaceId: null, source: 'standalone', status: binding.status, ...(binding.navigationId ? { navigationId: binding.navigationId } : {}),
       dialogTypes: ['alert', 'confirm', 'prompt', 'beforeunload'],
-      url: binding.url, title: binding.title, capabilities: binding.status === 'ready' ? BROWSER_PAGE_CAPABILITY_NAMES.filter(name => !['setViewport','download','readDownload','uploadFiles','readResult'].includes(name)) : [],
+      url: binding.url, title: projectBrowserTargetTitle(binding.title), capabilities: binding.status === 'ready' ? BROWSER_PAGE_CAPABILITY_NAMES.filter(name => !['setViewport','download','readDownload','uploadFiles','readResult'].includes(name)) : [],
       control: { owner: 'unknown', activeOperationId: null, revision: 0, inputIsolation: 'unsupported', agent: null }, ...(binding.warning ? { warning: binding.warning } : {}) }
   }
   private async startLifecycle(operationId: string, browserId: string, intent: AgentMuxBrowserLifecycleIntent): Promise<void> {

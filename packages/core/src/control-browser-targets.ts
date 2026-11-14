@@ -23,6 +23,14 @@ function parseBrowserCertificateRequest(value: unknown): AgentMuxBrowserCertific
 const sources = new Set(['embedded', 'external', 'standalone'])
 const statuses = new Set(['ready', 'disconnected', 'revoked', 'closed', 'unavailable'])
 const capabilities = new Set(BROWSER_PAGE_CAPABILITY_NAMES)
+const BROWSER_TARGET_TITLE_LIMIT = 512
+
+/** Bounded display title for a public target; the source keeps the original title. */
+export function projectBrowserTargetTitle(title: string): string {
+  if (title.length <= BROWSER_TARGET_TITLE_LIMIT) return title
+  return title.slice(0, BROWSER_TARGET_TITLE_LIMIT).replace(/[\uD800-\uDBFF]$/u, '')
+}
+
 function text(value: unknown, limit: number, empty = false): string {
   if (typeof value !== 'string' || value.length > limit || (!empty && !value.trim())) throw new AgentMuxError('Browser target fact is invalid.', 'CONTROL_PROTOCOL_ERROR')
   return value
@@ -127,7 +135,7 @@ export function parseBrowserTarget(raw: unknown): AgentMuxBrowserTarget {
   return { id, workspaceId, source: row.source as AgentMuxBrowserTarget['source'],
     ...(row.mode === undefined ? {} : { mode: row.mode as 'normal' | 'private' }),
     ...(profile ? { profile } : {}),
-    status: row.status as AgentMuxBrowserTarget['status'], url: text(row.url, 8192, true), title: text(row.title, 512, true),
+    status: row.status as AgentMuxBrowserTarget['status'], url: text(row.url, 8192, true), title: text(row.title, BROWSER_TARGET_TITLE_LIMIT, true),
     ...(objectLink === undefined ? {} : { objectLink }),
     ...(row.navigationId === undefined ? {} : { navigationId: text(row.navigationId, 200) }), capabilities: [...row.capabilities] as string[],
     ...(navigation === undefined ? {} : { navigation }),

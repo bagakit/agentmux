@@ -33,7 +33,7 @@ import { parseBrowserOutcomeCriteriaRequest, type BrowserOutcomeEvaluation, type
 
 import { BaseWindow, dialog, nativeImage, session, WebContentsView, type BrowserWindow, type BrowserWindowConstructorOptions, type ContextMenuParams, type Referrer, type WebContents, type WebFrameMain, type Session } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { BROWSER_PAGE_CAPABILITY_NAMES, BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, browserPageCapabilityNames, parseAmuxObjectLink, type AgentMuxBrowserMode, type AgentMuxBrowserTarget, type AgentMuxBrowserRetention, type AgentMuxBrowserRetentionReason, type AgentMuxBrowserControl, type AgentMuxBrowserReleaseReceipt } from '@agentmux/core'
+import { BROWSER_PAGE_CAPABILITY_NAMES, BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, browserPageCapabilityNames, parseAmuxObjectLink, projectBrowserTargetTitle, type AgentMuxBrowserMode, type AgentMuxBrowserTarget, type AgentMuxBrowserRetention, type AgentMuxBrowserRetentionReason, type AgentMuxBrowserControl, type AgentMuxBrowserReleaseReceipt } from '@agentmux/core'
 import {
   BROWSER_EVENT_CHANNEL,
   BROWSER_PAGE_KEY_CHANNEL,
@@ -681,7 +681,7 @@ export class BrowserViewManager {
       control: this.controlState(entry),
       certificateRequest: entry.certificateDecision?.request ?? null,
       ...(sitePermissions ? { sitePermissions } : {}),
-      url, ...(objectLink ? { objectLink } : {}), title: available ? contents.getTitle().slice(0, 512) : '',
+      url, ...(objectLink ? { objectLink } : {}), title: available ? projectBrowserTargetTitle(contents.getTitle()) : '',
       navigationId: entry.navigationId,
       ...(available ? { navigation: this.navigationObservation(entry) } : {}),
       dialogTypes: DESKTOP_BROWSER_DIALOG_TYPES,
