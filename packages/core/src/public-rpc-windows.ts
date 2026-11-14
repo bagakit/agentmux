@@ -1,8 +1,9 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 
-/** Client presentation of one original occurrence; never a new Core spatial entity. */
+/** Client presentation of a complete navigation surface or an original spatial occurrence. */
 export type AppWindowTarget =
+  | { kind: 'surface'; surface: 'survey' | 'recall' }
   | { kind: 'tab'; displayWorkspaceId: string; groupId: string; tabId: string }
   | { kind: 'region'; displayWorkspaceId: string; groupId: string; tabId: string; regionId: string }
 export type AppWindowBounds = { x: number; y: number; width: number; height: number }
@@ -21,7 +22,7 @@ export type AppWindowParamsMap = {
   'app.window.ls': { operationId?: string }
   'app.window.open': { operationId: string; target: AppWindowTarget; focus?: boolean }
   'app.window.focus': { operationId: string; windowId: string; documentGeneration: string }
-  'app.window.return': { operationId: string; windowId: string; documentGeneration: string }
+  'app.window.return': { operationId: string; windowId: string; documentGeneration: string; navigate?: boolean }
 }
 export type AppWindowMethod = keyof AppWindowParamsMap
 export type AppWindowWriteMethod = Exclude<AppWindowMethod, 'app.window.ls'>
@@ -64,7 +65,13 @@ function identity(value: unknown, code: string): string {
   return value
 }
 export function parseAppWindowTarget(value: unknown, code = 'INVALID_CONTROL_REQUEST'): AppWindowTarget {
-  const p = rpcRecord(value, ['kind', 'displayWorkspaceId', 'groupId', 'tabId', 'regionId'], code)
+  const p = rpcRecord(value, undefined, code)
+  if (p.kind === 'surface') {
+    rpcRecord(p, ['kind', 'surface'], code)
+    if (p.surface !== 'survey' && p.surface !== 'recall') invalid('Choose the Survey or Recall surface.', code)
+    return { kind: 'surface', surface: p.surface }
+  }
+  rpcRecord(p, ['kind', 'displayWorkspaceId', 'groupId', 'tabId', 'regionId'], code)
   const common = { displayWorkspaceId: identity(p.displayWorkspaceId, code), groupId: identity(p.groupId, code), tabId: identity(p.tabId, code) }
   if (p.kind === 'region') return { kind: 'region', ...common, regionId: identity(p.regionId, code) }
   if (p.kind !== 'tab' || p.regionId !== undefined) invalid('Choose an exact original Tab or Region occurrence.', code)
@@ -72,13 +79,15 @@ export function parseAppWindowTarget(value: unknown, code = 'INVALID_CONTROL_REQ
 }
 export function parseAppWindowParams<M extends AppWindowMethod>(method: M, value: unknown, code = 'INVALID_CONTROL_REQUEST'): AppWindowParamsMap[M] {
   const fields = method === 'app.window.ls' ? ['operationId'] : method === 'app.window.open'
-    ? ['operationId', 'target', 'focus'] : ['operationId', 'windowId', 'documentGeneration']
+    ? ['operationId', 'target', 'focus'] : ['operationId', 'windowId', 'documentGeneration', ...(method === 'app.window.return' ? ['navigate'] : [])]
   const p = rpcRecord(value, fields, code)
   if (method === 'app.window.ls') return (p.operationId === undefined ? {} : { operationId: identity(p.operationId, code) }) as AppWindowParamsMap[M]
   const operationId = identity(p.operationId, code)
   if (method === 'app.window.open' && p.focus !== undefined && typeof p.focus !== 'boolean') invalid('Window focus must be an explicit boolean.', code)
+  if (p.navigate !== undefined && typeof p.navigate !== 'boolean') invalid('Return navigation must be an explicit boolean.', code)
   return (method === 'app.window.open' ? { operationId, target: parseAppWindowTarget(p.target, code), ...(p.focus === undefined ? {} : { focus: p.focus }) }
-    : { operationId, windowId: identity(p.windowId, code), documentGeneration: identity(p.documentGeneration, code) }) as AppWindowParamsMap[M]
+    : { operationId, windowId: identity(p.windowId, code), documentGeneration: identity(p.documentGeneration, code),
+      ...(p.navigate === undefined ? {} : { navigate: p.navigate }) }) as AppWindowParamsMap[M]
 }
 export function parseAppWindowDescriptor(value: unknown, code = 'CONTROL_PROTOCOL_ERROR'): AppWindowDescriptor {
   const p = rpcRecord(value, ['windowId', 'documentGeneration', 'target', 'presentation', 'bounds', 'focused'], code)

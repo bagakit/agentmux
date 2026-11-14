@@ -1554,6 +1554,8 @@ export type BrowserNativeOpening = {
 
 export type BrowserPresentationOccurrence = {
   presentationId: string
+  /** Navigation owner of this stage when Survey or Recall hosts its own window. */
+  surface?: 'survey' | 'recall' | undefined
   /** Original client navigation provenance; this never grants Browser input. */
   returnContext?: import('./workbench-windows').WorkbenchReturnContext | undefined
   location: Pick<import('@agentmux/core/control').AgentMuxSpaceLocation,

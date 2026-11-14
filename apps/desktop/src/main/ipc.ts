@@ -728,10 +728,11 @@ export async function registerIpc(args: {
   })
   const openProfileBookmark = createBrowserProfileBookmarkOpener({ browsers,
     scope: id => resolveRecoveryPreviewScope(id), prepare: id => ensureBrowser(id), authorize: browserAutomation })
-  browsers.setPresentationWindowOwner((document, occurrence) => 'kind' in occurrence
-    ? args.workbenchWindows.windowForDocument(document) : args.workbenchWindows.presentationWindow(document, occurrence))
+  browsers.setPresentationWindowOwner((document, occurrence, surface) => 'kind' in occurrence
+    ? args.workbenchWindows.windowForDocument(document) : args.workbenchWindows.presentationWindow(document, occurrence, surface))
   const nativeChrome = new NativeOverlayWindows(args.window, browsers, args.workbenchWindows)
   const releaseNativeWindowOwner = args.workbenchWindows.setNativeOwner({ requestClose: window => browsers.requestNativeWindowClose(window), windowSize: async target => {
+    if (target.kind === 'surface') return null
     const graph = (await spatialState.read())?.graph
     const regions = graph?.regions.filter(region => region.tabId === target.tabId && region.kind === 'browser' &&
       (target.kind === 'tab' || region.regionId === target.regionId)) ?? []

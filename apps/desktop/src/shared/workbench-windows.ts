@@ -48,7 +48,7 @@ export type WorkbenchReturnContext =
 /** A failed provenance observation does not take away the original window or Browser. */
 export function readWorkbenchReturnContext(value: unknown, target?: AppWindowTarget): WorkbenchReturnContext | null {
   try {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    if (target?.kind === 'surface' || !value || typeof value !== 'object' || Array.isArray(value)) return null
     const row = value as Record<string, unknown>
     if (!row.reference || typeof row.reference !== 'object' || Array.isArray(row.reference)) return null
     const { kind: _kind, ...reference } = parseAppWindowTarget({ ...row.reference, kind: 'region' }) as Extract<AppWindowTarget, { kind: 'region' }>

@@ -43,7 +43,7 @@ const targetKey = (target: AppWindowTarget) => JSON.stringify(target)
 export function windowContainsOccurrence(target: AppWindowTarget, occurrence: {
   displayWorkspaceId: string; groupId: string; tabId: string; regionId: string
 }): boolean {
-  return target.displayWorkspaceId === occurrence.displayWorkspaceId && target.groupId === occurrence.groupId &&
+  return target.kind !== 'surface' && target.displayWorkspaceId === occurrence.displayWorkspaceId && target.groupId === occurrence.groupId &&
     target.tabId === occurrence.tabId && (target.kind === 'tab' || target.regionId === occurrence.regionId)
 }
 
@@ -209,7 +209,8 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
       if (this.quitting || this.mayClose.has(window.id)) return
       event.preventDefault()
       if (record.target.kind === 'region' && this.nativeOwner?.requestClose?.(window)) return
-      void this.call('app.window.return', { operationId: mintObjectId(), windowId: record.windowId, documentGeneration: record.generation },
+      void this.call('app.window.return', { operationId: mintObjectId(), windowId: record.windowId, documentGeneration: record.generation,
+        ...(record.target.kind === 'surface' ? { navigate: false } : {}) },
         { actor: { kind: 'user', id: 'desktop' } }).catch(error => this.warn(String(error)))
     })
     window.on('closed', () => {
@@ -264,23 +265,24 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
   /** The Root sender remains unique; this resolves the exact current native host. */
   presentationWindow(document: WorkbenchWindowDocument | undefined, occurrence: {
     displayWorkspaceId: string; groupId: string; tabId: string; regionId: string
-  }): BrowserWindow {
+  }, surface?: 'survey' | 'recall'): BrowserWindow {
     if (!document || document.windowId === this.mainId && document.documentGeneration === this.mainGeneration) {
-      if (this.windowForOccurrence(occurrence) !== this.main) throw new Error('This original occurrence has moved to its recorded native window. The previous Main presentation is stale; its healthy Browser remains.')
+      if (this.windowForOccurrence(occurrence, surface) !== this.main) throw new Error('This original occurrence has moved to its recorded native window. The previous Main presentation is stale; its healthy Browser remains.')
       return this.main
     }
     const record = this.windows.get(document.windowId)
     if (!record?.native || record.native.isDestroyed() || record.generation !== document.documentGeneration ||
-        record.phase === 'returning' || !windowContainsOccurrence(record.target, occurrence)) {
+        record.phase === 'returning' || (record.target.kind === 'surface' ? record.target.surface !== surface : !windowContainsOccurrence(record.target, occurrence))) {
       throw new Error('This exact native presentation document no longer owns that original occurrence. Original Browser work remains.')
     }
     return record.native
   }
 
-  windowForOccurrence(occurrence: { displayWorkspaceId: string; groupId: string; tabId: string; regionId: string }): BrowserWindow {
+  windowForOccurrence(occurrence: { displayWorkspaceId: string; groupId: string; tabId: string; regionId: string }, surface?: 'survey' | 'recall'): BrowserWindow {
     const region = this.byTarget.get(targetKey({ kind: 'region', ...occurrence }))
     const tab = this.byTarget.get(targetKey({ kind: 'tab', displayWorkspaceId: occurrence.displayWorkspaceId, groupId: occurrence.groupId, tabId: occurrence.tabId }))
-    for (const record of [region, tab]) {
+    const surfaceWindow = surface && this.byTarget.get(targetKey({ kind: 'surface', surface }))
+    for (const record of [region, tab, surfaceWindow]) {
       const native = record?.native ?? record?.retiredNative
       if (native && !native.isDestroyed() && record?.phase !== 'returning') return native
     }
@@ -366,7 +368,7 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
       }
       return this.finish(operation, 'unknown', 'This original workface already has a pending or unconfirmed window. Reconcile its original window; no duplicate was opened.')
     }
-    const overlap = [...this.windows.values()].find(record => record.target.tabId === target.tabId &&
+    const overlap = target.kind !== 'surface' && [...this.windows.values()].find(record => record.target.kind !== 'surface' && record.target.tabId === target.tabId &&
       (record.target.kind === 'tab' || target.kind === 'tab' || record.target.regionId === target.regionId))
     if (overlap) {
       operation.windowId = overlap.windowId; operation.documentGeneration = overlap.native ? overlap.generation : null
@@ -454,7 +456,8 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
         await this.finish(operation, 'confirmed', null)
       } catch (error) { if (isOriginal()) record.phase = 'unknown'; await this.finish(operation, 'unknown', String(error)) }
     }
-    const response = await this.request(record, { action: 'return', navigate: true, operationId: operation.input.operationId }, complete)
+    const response = await this.request(record, { action: 'return',
+      navigate: operation.method === 'app.window.return' && operation.input.navigate !== false, operationId: operation.input.operationId }, complete)
     if (response.outcome === 'applied') await complete(response)
     else { if (isOriginal()) record.phase = 'unknown'; await this.finish(operation, response.outcome === 'rejected' ? 'rejected' : 'unknown', response.message) }
     return this.page(operation)
@@ -602,7 +605,7 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
   private warn(issue: string, focus?: WorkbenchWindowDocument): void { this.issue = issue; this.focusIssue = focus ? { ...focus } : null; this.changed() }
   private changed(operation?: AppWindowOperation): void {
     if (!this.disposed && this.rendererAvailable && !this.main.isDestroyed() && !this.main.webContents.isDestroyed()) {
-      const unknownOrigins = [...this.windows.values()].filter(record => record.durable && !readWorkbenchReturnContext(record.returnContext, record.target))
+      const unknownOrigins = [...this.windows.values()].filter(record => record.durable && record.target.kind !== 'surface' && !readWorkbenchReturnContext(record.returnContext, record.target))
       const issue = this.issue ?? (unknownOrigins.length ? `The original return context remains unconfirmed for window ${unknownOrigins.map(record => record.windowId).join(', ')}. The window and Browser remain usable; Return preserves current navigation.` : null)
       try { this.main.webContents.send(WORKBENCH_WINDOW_CHANGED, { windows: this.descriptors(), issue, ...(operation ? { recordedOperation: structuredClone(operation) } : {}) }) }
       catch { this.focusIssue = null; this.issue = 'The original interface document changed before the window observation arrived. Original workfaces and Agents remain.' }

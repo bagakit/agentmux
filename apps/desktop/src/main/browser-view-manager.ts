@@ -804,8 +804,8 @@ export class BrowserViewManager {
   /** Lookup index only; nativeOwner still verifies the current authoritative entry and attachment. */
   private readonly browserIdsByView = new WeakMap<WebContentsView, string>()
   private readonly viewWindows = new WeakMap<WebContentsView, BrowserWindow>()
-  private presentationWindow: ((document: WorkbenchWindowDocument | undefined, occurrence: BrowserPresentationOccurrence['location']) => BrowserWindow) | undefined
-  setPresentationWindowOwner(resolve: (document: WorkbenchWindowDocument | undefined, occurrence: BrowserPresentationOccurrence['location']) => BrowserWindow): void { this.presentationWindow = resolve }
+  private presentationWindow: ((document: WorkbenchWindowDocument | undefined, occurrence: BrowserPresentationOccurrence['location'], surface?: BrowserPresentationOccurrence['surface']) => BrowserWindow) | undefined
+  setPresentationWindowOwner(resolve: (document: WorkbenchWindowDocument | undefined, occurrence: BrowserPresentationOccurrence['location'], surface?: BrowserPresentationOccurrence['surface']) => BrowserWindow): void { this.presentationWindow = resolve }
   windowForView(view: WebContentsView): BrowserWindow { return this.viewWindows.get(view) ?? this.window }
   private placeView(view: WebContentsView, window: BrowserWindow, index = 1): void {
     const previous = this.viewWindows.get(view)
@@ -1105,7 +1105,7 @@ export class BrowserViewManager {
     if (!occurrence?.presentationId?.trim() || !inline && !spatial) {
       throw new Error('Browser presentation requires an exact occurrence')
     }
-    const nativeWindow = this.presentationWindow?.(input.window, occurrence.location) ?? this.window
+    const nativeWindow = this.presentationWindow?.(input.window, occurrence.location, occurrence.surface) ?? this.window
     const geometry = this.presentationGeometry(input.geometry)
     for (const id of entry.presentationLeaseIds) {
       const existing = this.presentationLeases.get(id)!
@@ -1115,7 +1115,7 @@ export class BrowserViewManager {
     }
     const id = mintObjectId()
     const lease: PresentationLease = { id, entry, document, window: nativeWindow, windowDocument: input.window,
-      occurrence: { presentationId: occurrence.presentationId, location: { ...occurrence.location }, ...(occurrence.layoutHost === true ? { layoutHost: true } : {}),
+      occurrence: { presentationId: occurrence.presentationId, location: { ...occurrence.location }, ...(occurrence.surface ? { surface: occurrence.surface } : {}), ...(occurrence.layoutHost === true ? { layoutHost: true } : {}),
         ...(spatial ? { returnContext: readWorkbenchReturnContext(occurrence.returnContext, { kind: 'region', ...occurrence.location as Exclude<typeof occurrence.location, { kind: 'inline' }> }) ?? undefined } : {}) }, geometry }
     this.presentationLeases.set(id, lease)
     entry.presentationLeaseIds.add(id)
@@ -1441,7 +1441,7 @@ export class BrowserViewManager {
     if (!lease || lease.document !== document || this.entries.get(lease.entry.id) !== lease.entry) {
       throw new Error('Unknown Browser presentation lease')
     }
-    if (validateWindow && this.presentationWindow && this.presentationWindow(lease.windowDocument, lease.occurrence.location) !== lease.window) throw new Error('The exact native Browser presentation document has changed. The original page remains.')
+    if (validateWindow && this.presentationWindow && this.presentationWindow(lease.windowDocument, lease.occurrence.location, lease.occurrence.surface) !== lease.window) throw new Error('The exact native Browser presentation document has changed. The original page remains.')
     return lease
   }
 
@@ -1584,7 +1584,7 @@ export class BrowserViewManager {
       if (lease?.entry === entry && lease.geometry.visible && capture?.document === lease.document &&
         !capture.preparingSource && capture.granted && capture.trackIds?.length && this.isPresentationCaptureCurrent(capture) &&
         capture.source === entry.view && !lease.window.isDestroyed() &&
-        (!this.presentationWindow || this.presentationWindow(lease.windowDocument, lease.occurrence.location) === lease.window) &&
+        (!this.presentationWindow || this.presentationWindow(lease.windowDocument, lease.occurrence.location, lease.occurrence.surface) === lease.window) &&
         this.windowForView(entry.view) === lease.window && lease.window.contentView.children.includes(entry.view)) {
         const actual = this.nativeOwner(entry.id, lease.window)?.bounds, expected = lease.geometry.bounds
         if (actual && actual.x === expected.x && actual.y === expected.y &&
@@ -1992,7 +1992,7 @@ export class BrowserViewManager {
     let returnContext: WorkbenchReturnContext | null = null
     if (lease?.entry === parent && 'displayWorkspaceId' in lease.occurrence.location && this.isPresentationDocumentCurrent(lease.document)) {
       try {
-        if (!this.presentationWindow || this.presentationWindow(lease.windowDocument, lease.occurrence.location) === lease.window) {
+        if (!this.presentationWindow || this.presentationWindow(lease.windowDocument, lease.occurrence.location, lease.occurrence.surface) === lease.window) {
           location = { ...lease.occurrence.location }
           returnContext = readWorkbenchReturnContext(lease.occurrence.returnContext, { kind: 'region', ...location })
         }
