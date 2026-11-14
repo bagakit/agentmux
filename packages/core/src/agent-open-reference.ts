@@ -5,6 +5,7 @@ import { parseAgentAssociationResource, parseCoordinatorAgentReference, type Age
 import type { AgentExecutionAssociationWitness } from './agent-execution-contract.js'
 import type { AgentMuxRpcClient } from './public-rpc-client.js'
 import type { AgentMuxRunRef } from './types.js'
+import type { AgentMuxRuntimeFence } from './hosted-client-contract.js'
 
 export type CoordinatorAgentReferenceObservation = {
   state: 'confirmed'
@@ -45,6 +46,44 @@ export async function inspectCoordinatorAgentReference(rpc: Pick<AgentMuxRpcClie
         session.toolExecution.resourceRuntimeId !== resource.runtimeId || session.toolExecution.workspacePath !== resource.workspacePath) return unknown(
       'AGENT_ASSOCIATION_CREATION_UNCONFIRMED', 'The original Agent registry does not confirm this creation and resource binding. Its reference and existing work remain available.')
     return { state: 'confirmed', reference, witness, run: structuredClone(session.run) }
+  } catch (error) {
+    return unknown(error instanceof AgentMuxError ? error.code : 'AGENT_ASSOCIATION_UNAVAILABLE', error instanceof Error ? error.message : String(error))
+  } finally { await client.dispose() }
+}
+
+export type CoordinatorAgentRecordObservation = {
+  state: 'matched'
+  reference: CoordinatorAgentReference
+  owner: AgentMuxRuntimeFence
+  /** These resource facts belong to A's original Session, not B's Workspace catalogue. */
+  resource: Pick<AgentAssociationResource, 'runtimeId' | 'workspacePath'>
+  /** Retained identity only; this read does not observe whether the Run is live. */
+  run: AgentMuxRunRef
+  /** Absence is not an explicit disk acknowledgement. This diagnosis grants no input. */
+  creationPersistence?: 'unconfirmed'
+} | {
+  state: 'unconfirmed'
+  reference: CoordinatorAgentReference
+  issue: { code: string; message: string }
+}
+
+/** Read the original Core's exact local registry through its fenced metadata port.
+ * No creation journal, Native observation or input permission is borrowed. */
+export async function inspectCoordinatorAgentRecord(rpc: Pick<AgentMuxRpcClient, 'call' | 'subscribe'>, rawReference: CoordinatorAgentReference,
+  rawResource: AgentAssociationResource, options: { signal?: AbortSignal } = {}): Promise<CoordinatorAgentRecordObservation> {
+  const reference = parseCoordinatorAgentReference(rawReference), resource = parseAgentAssociationResource(rawResource)
+  const client = await connectHostedAgentMux({ rpc, expectedRuntimeId: reference.runtimeId, connectOnDemand: true, agentSessionIds: [reference.binding.agentSessionId] })
+  const unknown = (code: string, message: string): CoordinatorAgentRecordObservation => ({ state: 'unconfirmed', reference, issue: { code, message } })
+  try {
+    const owner = await client.readRuntimeOwnerIdentity(options)
+    const session = await observeRead(client.readAgentSession(reference.binding.agentSessionId), options.signal)
+    if (!session || session.hostId !== 'local' || session.agentSessionId !== reference.binding.agentSessionId ||
+        session.creation?.createOperationId !== reference.binding.createOperationId || session.toolExecution?.bindingId !== reference.binding.bindingId ||
+        session.toolExecution.resourceRuntimeId !== resource.runtimeId || session.toolExecution.workspacePath !== resource.workspacePath) return unknown(
+      'AGENT_ASSOCIATION_CREATION_UNCONFIRMED', 'The original Core registry does not confirm this local creation and resource binding. Its reference and existing work remain available.')
+    return { state: 'matched', reference, owner: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId },
+      resource: { runtimeId: session.toolExecution.resourceRuntimeId, workspacePath: session.toolExecution.workspacePath }, run: structuredClone(session.run),
+      ...(session.creation.persistence === 'unconfirmed' ? { creationPersistence: 'unconfirmed' as const } : {}) }
   } catch (error) {
     return unknown(error instanceof AgentMuxError ? error.code : 'AGENT_ASSOCIATION_UNAVAILABLE', error instanceof Error ? error.message : String(error))
   } finally { await client.dispose() }

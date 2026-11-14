@@ -1,6 +1,6 @@
 import { AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS } from '@agentmux/core/control'
 import { observeRead } from '@agentmux/core/observation-read'
-import { inspectCoordinatorAgentReference } from '@agentmux/core/agent-open-reference'
+import { inspectCoordinatorAgentRecord } from '@agentmux/core/agent-open-reference'
 import { AgentMuxError, connectHostedAgentMux, connectSpaceMember, observeSpaceSessionStates,
   type AgentMuxHeadlessRuntime, type AgentMuxRpcCallContext } from '@agentmux/core'
 import { demandAgentReferenceKey, type DemandSpaceMemberReference } from '@agentmux/demand/relations'
@@ -79,8 +79,8 @@ async function openGoalFiniteCarrier(options: { runtime(): AgentMuxHeadlessRunti
   } else {
     if (!input.access.coordinator) throw new AgentMuxError('This association needs independent current access to its original Coordinator. Source membership does not grant input access.', 'CONTROL_UNAVAILABLE')
     const coordinator = await goalSourceRpc(options, input.access.coordinator, reference.execution.runtimeId, context)
-    const original = await inspectCoordinatorAgentReference(coordinator, fact.association.reference, fact.association.resource, context.signal ? { signal: context.signal } : {})
-    if (original.state !== 'confirmed') throw new AgentMuxError(original.issue.message, original.issue.code)
+    const original = await inspectCoordinatorAgentRecord(coordinator, fact.association.reference, fact.association.resource, context.signal ? { signal: context.signal } : {})
+    if (original.state !== 'matched') throw new AgentMuxError(original.issue.message, original.issue.code)
     runId = input.originalRunId ?? original.run.runId
     client = await connectHostedAgentMux({ rpc: coordinator, connectOnDemand: true, expectedRuntimeId: reference.execution.runtimeId, agentSessionIds: [reference.execution.agentSessionId] })
   }
