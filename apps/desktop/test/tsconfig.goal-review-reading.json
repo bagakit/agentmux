@@ -1,0 +1,5 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "types": ["node", "vite/client", "vitest/globals"] },
+  "include": ["../src/renderer/src/global.d.ts", "goal-review-reading.test.tsx", "vitest.goal-review-reading.config.mts"]
+}
