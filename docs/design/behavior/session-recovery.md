@@ -20,6 +20,8 @@
 
 精确 Tab／Region 的安全关闭须对 GUI 与 CLI 提供同一个准备、执行和原结果查询协调入口，复用原 close planner／reconcile 与资源 owner，不以 raw graph remove、解绑或关窗口外壳代替。准备固定 occurrence、原文档 lifetime／generation／内容摘要与保存基线、在途编辑／保存、原 Session／Run、其他 View 和资源后果；正文不进入普通计划摘要。准备不停止或丢内容，返回前保留原操作记录；原 Session 尚未确认且没有获准的 Run Stop 时，真人可明确选择准确 Region witness 的 view-only 关闭，原 Session／历史／未知操作继续保留；这不把未知 Stop 资源当成功，也不停止未知 Run；preparedBy与实际批准／执行主体分别记录，managed Agent准备不授予自己 discard／stop 权限。
 
+本地与跨 Runtime 的关闭入口消费同一协调器和回执。Focus 卡片、Tab 与 Region 的准确原展示可以在 Session／Run 观察未知时准备 view-only 关闭；名称、历史、原生状态和连接探测不作为关闭展示的前置证明。来源差异仅改变准确原空间及执行 owner 的路由，不另造 Source 关闭账本、隐藏名单或通过 raw graph remove 绕开关闭合同。原 owner 不可达或关闭回执未知时说明未确认步骤，保留原操作与可重试入口；未确认不冒充已停止、已关闭或允许重放。
+
 需要丢弃草稿或停止最后 View 的原对象时，原人或设备明确确认该计划中准确文档 witness／原 Run；没有敏感影响的原准备者只可执行自己仍有效的计划。每个外部 child action 前核对真实目标与 last-view 事实，等待结束后的最终 state transaction 必须再次核对 dirty witness：等待期间的新输入、IME、保存或 Run／绑定换代不能被旧决定消费。keep Agent与停止后果分开；单格 Region不得暗中升级为关闭整个Tab。失败或未知只保留受影响工作面与原草稿，独立成功的部分按真实原 reconcile回执。
 
 关闭记录由原用户状态／关闭 owner持有，复用其按操作独立成员或存储边界；仅保存计划、原 actor、child引用和已得结果，不复制布局／草稿／子业务状态，也不将全部历史回执嵌入每次普通输入／布局保存。投影、原空间贡献、资源效果与各自保存分别确认。普通进程重启后 prepared不自动apply，派发未知只查询原child；原关闭 owner 提供按 actor／Host scope 的只读薄摘要列表与原操作查询，跨重启仍可发现 prepared／unknown ID。列表采用有界 live-page 游标，声明新成员与未确认读取范围，不复制 Native／草稿状态或新建索引 Store，不在输入或 render 热路径扫描历史；原工作面、草稿、Session／Run及所有未确认责任保留，迟到回执不能二次关闭替代目标。
