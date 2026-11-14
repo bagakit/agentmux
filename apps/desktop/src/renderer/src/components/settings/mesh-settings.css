@@ -18,8 +18,7 @@
 .mesh-network-section { display: grid; gap: var(--sp-3); padding-top: var(--sp-4); border-top: 1px solid var(--line-soft); min-width: 0; }
 .mesh-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
 .mesh-form-grid label, .mesh-form-field { display: grid; gap: 6px; min-width: 0; color: var(--text-2); font-size: var(--fs-body); }
-.mesh-network-settings select, .mesh-network-settings textarea { width: 100%; box-sizing: border-box; color: var(--text); background: var(--surface-0); border: 1px solid var(--line-soft); border-radius: 6px; padding: 7px 9px; font: inherit; min-height: 32px; }
-.mesh-network-settings textarea { resize: vertical; font: var(--fs-meta)/1.5 var(--font-mono); overflow-wrap: anywhere; }
+.mesh-network-settings textarea { font-family: var(--font-mono); overflow-wrap: anywhere; }
 .mesh-network-settings code { font-family: var(--font-mono); font-size: var(--fs-meta); overflow-wrap: anywhere; user-select: text; }
 .mesh-gateway-fields { display: grid; gap: var(--sp-3); }
 .mesh-toggle { display: flex; align-items: center; gap: 8px; font-size: var(--fs-body); }
@@ -31,7 +30,8 @@
 .mesh-conflict > span { flex: 1 1 220px; }
 .mesh-pending code { flex: 1 1 150px; }
 .mesh-link-result { display: grid; gap: 8px; min-width: 0; font-size: var(--fs-meta); }
-.mesh-link-result button { justify-self: start; }
+.mesh-link-result__field { align-items: center; padding-inline-end: var(--sp-2); }
+.mesh-link-result__field > button { flex: none; }
 .mesh-link-result small { color: var(--text-3); }
 .mesh-copy-feedback { color: var(--text-3); font-size: var(--fs-meta); }
 .mesh-network-map { min-width: 0; border: 1px solid var(--line-soft); border-radius: var(--radius); overflow: hidden; }
@@ -114,7 +114,6 @@
 .mesh-peer-preview { display: grid; grid-template-columns: auto 1fr; gap: var(--sp-1) var(--sp-3); margin: 0; font-size: var(--fs-meta); }
 .mesh-peer-preview dt { color: var(--text-3); }
 .mesh-peer-preview dd { margin: 0; overflow-wrap: anywhere; }
-.mesh-form-field > select { color: var(--text); background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: var(--sp-2); font: inherit; }
 .mesh-settings-pane [data-mesh-view="network"] > .mesh-form-field { max-width: 32rem; margin-bottom: var(--sp-4); }
 .mesh-settings-pane [data-settings-field="mesh-access-work"] .mesh-network-section { max-width: 44rem; border: 0; }
 .mesh-settings-pane [data-settings-field="mesh-access-work"] h4 { margin: 0; }

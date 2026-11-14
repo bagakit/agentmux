@@ -44,7 +44,7 @@
 .remote-execution-empty p { max-width: 38ch; margin: 0 auto; font-size: var(--fs-body); line-height: 1.6; }
 .remote-execution-empty > button { margin-top: var(--sp-4); }
 .remote-execution-back { display: inline-flex; gap: var(--sp-2); align-items: center; margin-block: var(--sp-3); }
-.remote-execution-settings :is(button, select, summary):focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.remote-execution-settings :is(button:not(.selection-field), summary):focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 @container (max-width: 720px) {
   .remote-execution-bindings__body { grid-template-columns: 1fr; }
   .remote-execution-detail { padding: 0; border: 0; }

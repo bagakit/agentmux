@@ -9,7 +9,6 @@
 .mesh-explorer .mesh-explorer__header p { color: var(--text-2); font-size: var(--fs-body); }
 .mesh-explorer__toolbar { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 14px; align-items: center; }
 .mesh-explorer__search { flex: 1 1 210px; min-width: 150px; }
-.mesh-explorer__search input { width: 100%; }
 .mesh-explorer__segments { display: flex; flex: none; padding: 3px; gap: 2px; border-radius: 7px; background: var(--surface-0); }
 .mesh-explorer__segments button { padding: 5px 9px; min-height: 28px; border: 0; border-radius: 5px; background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-meta); cursor: pointer; }
 .mesh-explorer__segments button[aria-pressed=true] { background: var(--surface-2); color: var(--text); box-shadow: var(--hl-strong); font-weight: 600; }
@@ -148,7 +147,6 @@
 .mesh-explorer[data-mesh-overview] .mesh-explorer__detail section { gap: 4px; margin-top: 7px; padding-top: 7px; }
 .mesh-explorer[data-mesh-overview] .mesh-explorer__identity { margin-top: 8px; padding-top: 7px; }
 .mesh-explorer[data-mesh-overview] .mesh-explorer__path li { padding: 2px 0; }
-.mesh-explorer[data-mesh-overview] .mesh-explorer__search input { min-height: 28px; padding-block: 3px; font-size: var(--fs-body); }
 .mesh-explorer[data-mesh-overview] .mesh-explorer__toolbar { padding-bottom: 8px; }
 .mesh-explorer[data-mesh-overview] .mesh-explorer__footer { padding-block: 8px; }
 .mesh-explorer__workspace > .mesh-explorer__directory[data-list-view] { border-top: 0; }

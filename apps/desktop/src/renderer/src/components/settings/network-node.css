@@ -9,7 +9,7 @@
 .network-node-field { display: grid; gap: 6px; font-size: 12px; min-width: 0; }
 .network-node-field > span { font-weight: 550; }
 .network-node-field small,.network-node-switch small { color: var(--text-2); font-size: 11px; line-height: 1.6; }
-.network-node-field textarea { min-width: 0; resize: vertical; padding: 9px 10px; border: 1px solid var(--line-soft); border-radius: 7px; background: var(--surface-1); color: var(--text); font: 12px/1.6 var(--font-mono); }
+.network-node-field textarea { font-family: var(--font-mono); }
 .network-node-paths { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .network-node-switch { display: flex; align-items: start; gap: 10px; font-size: 12px; }
 .network-node-switch > span { display: grid; gap: 5px; }
@@ -26,6 +26,5 @@
 .network-node-section > .settings-pane-actions { position: static; margin: 0; }
 @media(max-width:740px) { .network-node-paths { grid-template-columns: minmax(0,1fr); } }
 
-.network-node-field .selection-field { min-width: 0; padding: 8px 10px; border: 1px solid var(--line-soft); border-radius: 7px; background: var(--surface-1); color: var(--text); font: inherit; }
 
 .settings-node-publication-icon { display: inline-flex; flex-shrink: 0; vertical-align: middle; }

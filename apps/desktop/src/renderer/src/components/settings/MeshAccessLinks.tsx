@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { TextInput } from '@agentmux/client-ui/input'
+import { InputGroup, NativeSelect, Textarea, TextInput } from '@agentmux/client-ui/input'
 import type { MeshNetworkInspection, MeshNetworkLink, MeshOwnerTarget } from '@agentmux/core/mesh-network'
 import { MeshOperatorTarget } from './MeshOperatorTarget'
 import { api } from '../../lib/api'
@@ -66,20 +66,23 @@ function GatewayLink({ active, observe, target, sameDevice, subject, originalEnd
     } catch (cause) { if (!controller.signal.aborted) setError(issueText(cause)) }
     finally { if (request.current === controller) { request.current = undefined; setBusy(false) } }
   }
-  const offerField = <label className="mesh-form-field"><span>Original endpoint offer</span><textarea aria-label="Original Mesh endpoint offer" value={offerText}
+  const offerField = <label className="mesh-form-field"><span>Original endpoint offer</span><Textarea aria-label="Original Mesh endpoint offer" value={offerText}
     onChange={e => { reset(); onInput(e.target.value) }} rows={3} placeholder="Paste an endpoint offer" /></label>
   return <section className="mesh-network-section" data-settings-field="mesh-link">
     {entries.length > 0 || choice ? <label className="mesh-form-field"><span>Published gateway address</span>
-      <select aria-label="Published gateway address" value={choice || (selected ? origin(selected) : '')} onChange={e => { reset(); setChoice(e.target.value) }}>
+      <NativeSelect aria-label="Published gateway address" value={choice || (selected ? origin(selected) : '')} onChange={e => { reset(); setChoice(e.target.value) }}>
         {choice && !selected ? <option value={choice}>{choice} · no longer advertised</option> : null}
         {entries.map(item => <option key={origin(item)} value={origin(item)}>{origin(item)}</option>)}
-      </select></label> : null}
+      </NativeSelect></label> : null}
     {!sameDevice && !remote ? <div role="status">{readIssue || 'Reading the selected gateway…'}{readIssue ? <button type="button" onClick={() => setRefresh(n => n + 1)}>Read gateway again</button> : null}</div> : null}
     {originalEndpoint ? <details className="mesh-advanced"><summary>Use a different endpoint offer{offerText ? ' · selected' : ''}</summary>{offerField}</details> : offerField}
     <button className="small-button" type="button" disabled={busy || !originalOffer || Boolean(choice && !selected)} onClick={() => void createLink()}>{busy ? 'Reading route…' : 'Create access link'}</button>
     {error ? <p role="alert" className="settings-inline-error">{error}</p> : null}
     {link ? <div className="mesh-link-result"><span>{link.observation.route.hops} network hop{link.observation.route.hops === 1 ? '' : 's'} · {origin(link.observation.ingress)} · endpoint {link.offer.serverId}</span>
-      <TextInput aria-label="Mesh access link" value={link.url} readOnly /><button className="small-button" onClick={() => copy(link.url)}>Copy access link</button>
+      <InputGroup className="mesh-link-result__field">
+        <TextInput aria-label="Mesh access link" value={link.url} readOnly />
+        <button type="button" className="small-button" onClick={() => copy(link.url)}>Copy access link</button>
+      </InputGroup>
       <details><summary>Original endpoint identity</summary><dl><dt>Server</dt><dd><code>{link.offer.serverId}</code></dd><dt>Encryption public key</dt><dd><code>{link.offer.daemonPublicKeyB64}</code></dd></dl></details>
       <small>On the accessing Mac, open Mesh → Use another device and paste this link.</small></div> : null}
   </section>

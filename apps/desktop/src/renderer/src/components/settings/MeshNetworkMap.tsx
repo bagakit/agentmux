@@ -4,7 +4,7 @@ import { Button } from '@agentmux/client-ui/components/Button'
 import type { HostConfig } from '../../../../shared/contracts'
 import { meshLocationValue, meshPeerLocationKey, readMeshLocation, type MeshDeviceLocation, type MeshMapLocations } from '../../../../shared/mesh-map-locations'
 import { hostConnectionSummary } from '../../lib/host-transport'
-import { TextInput } from '@agentmux/client-ui/input'
+import { SearchInput } from '@agentmux/client-ui/input'
 import type { MeshNetworkInspection, MeshNetworkSettings } from '@agentmux/core/mesh-network'
 import { meshPathEdges, meshPeerLabel, meshPeerState, meshRtt, meshSelectionExists, meshSelectionPath, meshTopologyModel, meshTopologySource, shortMeshIdentity, type MeshTopologyPeer, type MeshTopologySelection } from './mesh-topology'
 import './mesh-topology.css'
@@ -384,7 +384,8 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
   const summary = [savedCount ? `${savedCount} saved route${savedCount === 1 ? '' : 's'}` : '', (stale ? 'Last confirmed · ' : '') + relaySummary].filter(Boolean).join(' · ')
   return <section className="mesh-network-map mesh-explorer" aria-label="Observed Mesh topology" data-mesh-topology data-mesh-overview={onGateway ? true : undefined}>
     <header className="mesh-explorer__header"><div className="mesh-explorer__heading"><h3>Network map{snapshot?.network?.networkId ? <small>{snapshot.network.networkId}</small> : null}</h3><p>{localClient ? 'From this device · ' : ''}{summary}</p></div>{actions}</header>
-    {hasMap ? <div className="mesh-explorer__toolbar"><label className="mesh-explorer__search"><TextInput aria-label={savedCount ? hasRelayPeers ? 'Find a device, peer or path' : 'Find a device' : 'Find a peer, endpoint or circuit'} value={query} onChange={event => setQuery(event.target.value)} placeholder={savedCount ? hasRelayPeers ? 'Find a device, peer or path' : 'Find a device' : 'Find a peer or path'} /></label>
+    {hasMap ? <div className="mesh-explorer__toolbar"><SearchInput className="mesh-explorer__search" aria-label={savedCount ? hasRelayPeers ? 'Find a device, peer or path' : 'Find a device' : 'Find a peer, endpoint or circuit'}
+        clearLabel="Clear network search" value={query} onValueChange={setQuery} placeholder={savedCount ? hasRelayPeers ? 'Find a device, peer or path' : 'Find a device' : 'Find a peer or path'} />
       <div className="mesh-explorer__segments" role="group" aria-label="Network view">
         {([['geography', 'Geography'], ['connections', 'Connections'], ['list', 'List']] as const).map(([mode, label]) =>
           <button type="button" key={mode} aria-pressed={view === mode} onClick={() => setView(mode)}>{label}</button>)}

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { TextInput } from '@agentmux/client-ui/input'
+import { Textarea, TextInput } from '@agentmux/client-ui/input'
 import { ContentCopyButton } from '@agentmux/client-ui/components/ContentCopyButton'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -142,7 +142,7 @@ function RoutePolicyEditor({ host, identity, active }: { host: HostConfig; ident
         {edit.configuration.grants.map(grant => <div className="host-route-grant" key={grant.id}><div><strong>{equal(grant.scopes, ROUTE_DISCOVERY_SCOPES) ? 'Connection discovery' : equal(grant.scopes, ROUTE_WORK_SCOPES) ? 'Agent and project work' : 'Custom access'}</strong><small>{grant.actor.kind} · {grant.actor.id}</small><details><summary>Identities and {grant.scopes.length} exact permissions</summary><p>Permission <code>{grant.id}</code><br />Via <code>{grant.delegator.runtimeId}</code><br />To <code>{grant.destination.runtimeId}</code><br />Original actor Core <code>{grant.actor.source.runtimeId}</code></p><ul>{grant.scopes.map(value => <li key={value}>{value}</li>)}</ul></details></div>
           <Button type="button" onClick={() => report(() => policy.change(current => ({ ...current, configuration: { ...current.configuration, grants: current.configuration.grants.filter(value => value.id !== grant.id) } })))} >Remove permission</Button></div>)}
         {!edit.configuration.grants.length ? <p className="host-route-caption">No transit permissions saved in this edit.</p> : null}
-        <label className="host-route-field"><span>Public access request</span><textarea aria-label="Public route access request" rows={5} value={edit.grantRequestText ?? ''} placeholder="Paste the request copied from the source route" onChange={event => report(() => policy.change(current => ({ ...current, grantRequestText: event.target.value })))} /></label>
+        <label className="host-route-field"><span>Public access request</span><Textarea aria-label="Public route access request" rows={5} value={edit.grantRequestText ?? ''} placeholder="Paste the request copied from the source route" onChange={event => report(() => policy.change(current => ({ ...current, grantRequestText: event.target.value })))} /></label>
         <Button type="button" onClick={() => report(() => { const request = parseHostRouteGrantRequest(JSON.parse(edit.grantRequestText ?? ''))
           const grant = grantForRouteReceiver(request, identity, 'access-' + crypto.randomUUID())
           policy.change(current => ({ ...current, configuration: { ...current.configuration, grants: [...current.configuration.grants, grant] } }))

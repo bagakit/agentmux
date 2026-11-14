@@ -8,8 +8,7 @@
 .remote-management__toolbar > .remote-management__scope { display: flex; flex-direction: row; align-items: baseline; gap: var(--sp-2); margin-right: auto; color: var(--text-2); font-size: var(--fs-meta); }
 .remote-management__scope > strong { color: var(--text); font-size: 20px; font-weight: 550; font-variant-numeric: tabular-nums; }
 .remote-management__scope small { margin-left: var(--sp-3); color: var(--text-3); font-size: var(--fs-meta); }
-.remote-management__search { max-width: 260px; flex: 1 1 170px; min-width: 0; height: 30px; padding-inline: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
-.remote-management__search input { min-width: 0; width: 100%; height: 28px; min-height: 0; padding: 0; font-size: var(--fs-meta); }
+.remote-management__search { max-width: 260px; flex: 1 1 170px; min-width: 0; }
 .remote-management__toolbar > .remote-management__modes { display: flex; flex-direction: row; align-items: center; flex: none; gap: 2px; padding: 2px; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
 .remote-management__modes button { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 26px; padding: var(--sp-1) var(--sp-3); color: var(--text-3); border: 0; border-radius: var(--radius-sm); background: transparent; font: var(--fs-meta)/1.5 var(--font-sans); cursor: pointer; }
 .remote-management__modes button[aria-pressed='true'] { color: var(--text); background: var(--surface-3); box-shadow: var(--hl); }
@@ -98,9 +97,7 @@ button.remote-work__row:focus-visible { outline: 1px solid var(--focus-line); ou
 .application-access label { display: grid; align-content: start; gap: var(--sp-2); min-width: 0; }
 .application-access label > span { color: var(--text-2); font-size: var(--fs-meta); }
 .application-access label small { color: var(--text-3); }
-.application-access input, .application-access select, .application-access textarea { box-sizing: border-box; min-width: 0; width: 100%; }
-.application-access select { min-height: 32px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-0); color: var(--text); font: inherit; }
-.application-access textarea { padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-0); color: var(--text); font: 12px var(--font-mono); resize: vertical; }
+.application-access .ui-input { width: 100%; }
 .application-access__endpoint { display: grid; align-content: start; gap: var(--sp-3); min-width: 0; margin: 0; padding: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius); }
 .application-access__endpoint legend { padding-inline: var(--sp-2); color: var(--text-2); font-weight: 600; }
 .application-access__endpoint .small-button { justify-self: start; }

@@ -5,8 +5,7 @@
 .selection-field__menu.host-route-owner__menu { max-height: min(306px, var(--choice-available-height)); }
 .host-route-owner__menu .selection-field__results { overflow-y: scroll; overscroll-behavior: contain; scroll-padding-block: 26px; scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; box-shadow: inset 0 -12px 10px -12px var(--text-3); }
 .host-route-owner > span, .host-route-field > span { color: var(--text-2); }
-.host-route-owner select, .host-route-field select, .host-route-field textarea { width: 100%; min-width: 0; padding: 8px 10px; color: var(--text); background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius-sm); font: inherit; }
-.host-route-field textarea { resize: vertical; font-family: var(--font-mono); font-size: var(--fs-meta); line-height: 1.6; }
+.host-route-field textarea { font-family: var(--font-mono); }
 .host-route-toolbar, .host-route-inline-actions, .host-route-edge-picker { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
 .host-route-toolbar { justify-content: space-between; margin-bottom: var(--sp-4); }
 .host-route-toolbar .remote-work-tasks > button[aria-pressed='true'] { background: var(--surface-2); border-color: var(--line); color: var(--text); font-weight: 600; box-shadow: 0 1px 3px #0001; }
