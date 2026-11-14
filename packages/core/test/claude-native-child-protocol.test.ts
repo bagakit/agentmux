@@ -2,7 +2,8 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { CLAUDE_CHILD_ACTIVITY_EVENT, claudeNativeActivitySource } from '../src/providers/claude-native-activity.js'
+import { claudeNativeActivitySource } from '../src/providers/claude-plugin.js'
+import { CLAUDE_CHILD_ACTIVITY_EVENT } from '@agentmux/providers/claude/native-activity'
 import { activityCertaintyClient } from './fixtures/activity-certainty-client.js'
 
 type Handler = (api: unknown, event: Record<string, unknown>, next: (event: Record<string, unknown>) => unknown) => unknown

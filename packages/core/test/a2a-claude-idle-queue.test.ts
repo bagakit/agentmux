@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
 import type { AgentHookServer } from '../src/hook-server.js'
 import type { AgentMuxClientEvent } from '../src/types.js'
-import { CLAUDE_NOTICE_ADMISSION_EVENT, CLAUDE_TURN_END_EVENT } from '../src/providers/claude-native-activity.js'
+import { CLAUDE_NOTICE_ADMISSION_EVENT, CLAUDE_TURN_END_EVENT } from '@agentmux/providers/claude/native-activity'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 
 const cleanup: Array<() => Promise<void>> = []

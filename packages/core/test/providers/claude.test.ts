@@ -24,12 +24,8 @@ import { agentTurnCompletionIdentity, agentTurnEndBoundary } from '../../src/age
 import { defaultAgentMuxHookPort, defaultAgentMuxStateDirectory } from '../../src/runtime-paths.js'
 import type { CtxmuxRunAdapter } from '../../src/ctxmux-run-adapter.js'
 import type { AgentSemanticState } from '../../src/types.js'
-import {
-  CLAUDE_ASKED_TOOL_END_EVENT,
-  claudeNativeActivitySource,
-  CLAUDE_NOTICE_ADMISSION_EVENT,
-  CLAUDE_TURN_END_EVENT
-} from '../../src/providers/claude-native-activity.js'
+import { claudeNativeActivitySource } from '../../src/providers/claude-plugin.js'
+import { CLAUDE_ASKED_TOOL_END_EVENT, CLAUDE_NOTICE_ADMISSION_EVENT, CLAUDE_TURN_END_EVENT } from '@agentmux/providers/claude/native-activity'
 import { claudeManagedPlugin } from '../../src/providers/claude.js'
 
 type NativeModHandler = (client: unknown, event: Record<string, unknown>, next: (event: Record<string, unknown>) => unknown) => unknown

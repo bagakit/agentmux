@@ -10,7 +10,7 @@ import type { AgentPromptInputKey } from '../src/agent-prompt-condition.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
-import { claudeNativeActivitySource } from '../src/providers/claude-native-activity.js'
+import { claudeNativeActivitySource } from '../src/providers/claude-plugin.js'
 import { activityCertaintyClient } from './fixtures/activity-certainty-client.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 

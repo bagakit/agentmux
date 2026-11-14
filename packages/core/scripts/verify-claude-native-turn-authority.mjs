@@ -7,7 +7,7 @@ const root = resolve(import.meta.dirname, '../../..')
 const evidence = resolve(root, process.env.AGENTMUX_ACTIVITY_EVIDENCE_DIRECTORY ?? '.local/claude-native-activity')
 await mkdir(evidence, {recursive:true})
 const sources = ['client.ts','hook-normalizer.ts','agent-status-freshness.ts','agent-session-identity.ts','rpc-native-codec.ts',
-  'types.ts','providers/claude.ts','providers/claude-native-activity.ts'].map(name=>'packages/core/src/'+name)
+  'types.ts','providers/claude.ts','providers/claude-plugin.ts'].map(name=>'packages/core/src/'+name).concat('packages/providers/src/claude/native-activity.ts')
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const fingerprints = async () => Object.fromEntries(await Promise.all(sources.map(async file=>[file,hash(await readFile(join(root,file)))])))
 const before = await fingerprints()
