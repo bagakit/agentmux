@@ -209,7 +209,11 @@ const api: AgentMuxPreloadApi = {
     const release = context?.onAbort?.(() => { void ipcRenderer.invoke('mesh:cancel', token).catch(() => {}) })
     try { return await pending } finally { release?.() }
   } },
-  nodePublishing: { call: async (method, params, context) => {
+  nodePublishing: { deviceLocation: async (link, context) => {
+    const token = mintObjectId(), pending = ipcRenderer.invoke('nodePublishing:deviceLocation', token, link)
+    const release = context?.onAbort?.(() => { void ipcRenderer.invoke('nodePublishing:cancel', token).catch(() => {}) })
+    try { return await pending } finally { release?.() }
+  }, call: async (method, params, context) => {
     const token = mintObjectId(), pending = ipcRenderer.invoke('nodePublishing:call', token, method, params)
     const release = context?.onAbort?.(() => { void ipcRenderer.invoke('nodePublishing:cancel', token).catch(() => {}) })
     try { return await pending } finally { release?.() }

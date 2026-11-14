@@ -7,7 +7,9 @@ import type { NodeOwnerTarget } from '@agentmux/core/node-publishing'
 export const NODE_OWNER_METHODS = ['settings.node.inspect', 'settings.node.configure', 'settings.node.resources'] as const
 export type NodeOwnerMethod = typeof NODE_OWNER_METHODS[number]
 export type NodePublicMethod = Exclude<NodePublishingMethod, NodeOwnerMethod>
+export type NodeDeviceLocationRead = NodePublishingResults['node.location'] | null
 export type DesktopNodePublishingPort = {
+  deviceLocation(link: string, signal?: AbortSignal): Promise<NodeDeviceLocationRead>
   call<M extends NodePublicMethod>(method: M, params: NodePublishingParams[M], signal?: AbortSignal): Promise<NodePublishingResults[M]>
   owner<M extends NodeOwnerMethod>(target: NodeOwnerTarget, method: M, params: NodePublishingParams[M], signal?: AbortSignal): Promise<NodePublishingResults[M]>
 }

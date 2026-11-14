@@ -140,6 +140,7 @@ import { createFocusObservation } from './focus-observation.js'
 import { observeClientRpcSnapshot } from '@agentmux/host/snapshot-observation'
 import { SessionHistoryObservationOwners } from './session-history-observation.js'
 import { registerNodePublishingIpc } from './node-publishing-ipc.js'
+import { readMeshDeviceLocation } from './mesh-device-location.js'
 import { registerHostRoutesIpc } from './host-routes-ipc.js'
 import { registerHostRuntimeObservationIpc } from './host-runtime-observation-ipc.js'
 import { registerSearchIpc } from './search-ipc.js'
@@ -1068,7 +1069,7 @@ export async function registerIpc(args: {
   const sourceFileReads = registerSourceFilesIpc({ handle: handleWithEvent, runtime: args.runtime })
   const spaceMountReads = registerSpaceMountIpc({ handle: handleWithEvent, runtime: args.runtime, config: () => configOwner.current })
   const meshReads = registerMeshNetworkIpc({ handle: handleWithEvent, call: callUserRpc })
-  const nodePublishingReads = registerNodePublishingIpc({ handle: handleWithEvent, call: callUserRpc, owner: (target, method, params, context) => args.runtime.callNodeOwner(target, method, params, context) })
+  const nodePublishingReads = registerNodePublishingIpc({ handle: handleWithEvent, deviceLocation: readMeshDeviceLocation, call: callUserRpc, owner: (target, method, params, context) => args.runtime.callNodeOwner(target, method, params, context) })
   const hostRouteReads = registerHostRoutesIpc({ handle: handleWithEvent, call: (target, method, params, signal) => args.runtime.callHostRoute(target, method, params, signal) })
   const hostRuntimeReads = registerHostRuntimeObservationIpc({ handle: handleWithEvent,
     call: callUserRpc })

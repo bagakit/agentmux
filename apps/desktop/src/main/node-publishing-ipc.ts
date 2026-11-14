@@ -7,10 +7,13 @@ import { sessionInputOperationResult } from '../shared/session-input-result.js'
 /** Fixed public Node methods. The original Core owns policy, authority, resources and actual IO. */
 export function registerNodePublishingIpc(ports: {
   handle<T extends unknown[], R>(channel: string, listener: (event: IpcMainInvokeEvent, ...values: T) => R | Promise<R>): void
+  deviceLocation?(link: string, signal: AbortSignal): Promise<import('../shared/node-publishing.js').NodeDeviceLocationRead>
   owner(target: NodeOwnerTarget, method: NodeOwnerMethod, params: import('@agentmux/core/node-publishing').NodePublishingParams[NodeOwnerMethod], context: { signal: AbortSignal }): Promise<import('@agentmux/core/node-publishing').NodePublishingResults[NodeOwnerMethod]>
   call(method: import('@agentmux/core/node-publishing').NodePublishingMethod, params: import('@agentmux/core/node-publishing').NodePublishingParams[import('@agentmux/core/node-publishing').NodePublishingMethod], context: { signal: AbortSignal }): Promise<import('@agentmux/core/node-publishing').NodePublishingResults[import('@agentmux/core/node-publishing').NodePublishingMethod]>
 }) {
   const reads = new SessionHistoryReadOwners()
+  ports.handle('nodePublishing:deviceLocation', (event, token: string, link: string) => sessionInputOperationResult(() =>
+    reads.read(event.sender, token, signal => ports.deviceLocation ? ports.deviceLocation(link, signal) : Promise.resolve(null))))
   ports.handle('nodePublishing:call', (event, token: string, method: unknown, input: unknown) => sessionInputOperationResult(() => {
     if (!isNodePublishingMethod(method) || NODE_OWNER_METHODS.some(owner => owner === method)) throw new Error('Unknown Node publishing method.')
     const params = parseNodePublishingParams(method, input)
