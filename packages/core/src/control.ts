@@ -1234,6 +1234,8 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'browser.task.create-inspect': 'short',
   'browser.task.assets': 'short',
   'browser.task.inspect': 'short',
+  'browser.task.parallel-continue': 'long',
+  'browser.task.parallel-stop': 'short',
   'browser.task.parallel': 'long',
   'browser.task.parallel-inspect': 'short',
   'browser.task.parallel-list': 'short',

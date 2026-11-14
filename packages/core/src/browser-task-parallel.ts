@@ -6,6 +6,9 @@ import { isBrowserTaskRunStatus, type BrowserTaskRunStatus } from './browser-tas
 export type BrowserTaskParallelTarget = BrowserTaskInvocation & { id: string; browserId: string; profileId: string }
 export type BrowserTaskParallelInput = { operationId: string; concurrency?: number; targets: BrowserTaskParallelTarget[] }
 /** This tuple is emitted by the original owner; it is never accepted as execution input. */
+export type BrowserTaskParallelContinuationInput = BrowserTaskInvocation & { continuationId: string; expectedRevision: string }
+export type BrowserTaskParallelContinuation = { id: string; targetId: string; admission: 'confirmed' | 'unknown' | 'refused'; warning?: string }
+export type BrowserTaskParallelContinuationReceipt = { run: BrowserTaskParallelSummary; continuation: BrowserTaskParallelContinuation }
 export type BrowserTaskParallelBinding = { operationId: string; targetId: string; sourceBrowserId: string }
 export type BrowserTaskParallelCounts = { queued: number; preparing: number; running: number; waitingHuman: number; ready: number; completed: number; interrupted: number; failed: number; stopped: number }
 export type BrowserTaskParallelSummary = {
@@ -14,13 +17,14 @@ export type BrowserTaskParallelSummary = {
   startedAt: number; updatedAt: number; admission: 'confirmed' | 'unknown'; warning?: string
 }
 export type BrowserTaskParallelTargetProgress = {
-  id: string; browserId: string; profileId: string; phase: 'queued' | 'preparing' | 'bound' | 'failed'
+  id: string; browserId: string; profileId: string; phase: 'queued' | 'preparing' | 'bound' | 'failed' | 'stopped'
   run?: { id: string; status: BrowserTaskRunStatus; nextStep: number; operationCount: number }
   error?: { code: string; message: string }
+  continuationRevision?: string
   waitingForProfile?: { operationId: string; targetId: string }
 }
 export type BrowserTaskParallelInspection = {
-  run: BrowserTaskParallelSummary; targets: BrowserTaskParallelTargetProgress[]
+  run: BrowserTaskParallelSummary; targets: BrowserTaskParallelTargetProgress[]; continuation?: BrowserTaskParallelContinuation | null
   page: { after: string | null; limit: number; nextAfter: string | null }
 }
 const bad = (message: string, request = false): never => { throw new AgentMuxError(message, request ? 'INVALID_CONTROL_REQUEST' : 'CONTROL_PROTOCOL_ERROR') }
@@ -44,6 +48,21 @@ export function parseBrowserTaskParallelInput(value: unknown): BrowserTaskParall
   if (new Set(targets.map(target => target.id)).size !== targets.length || new Set(targets.map(target => target.browserId)).size !== targets.length) bad('Each target and Browser occurs once in an explicit execution set.', true)
   return { operationId: id(row.operationId, true), targets, ...(row.concurrency === undefined ? {} : { concurrency: count(row.concurrency, true, 1) }) }
 }
+export function parseBrowserTaskParallelContinuationInput(value: unknown): BrowserTaskParallelContinuationInput {
+  const row = rpcRecord(value, ['continuationId', 'expectedRevision', 'parameters', 'calls'])
+  if (typeof row.expectedRevision !== 'string' || !/^[a-f0-9]{64}$/u.test(row.expectedRevision)) bad('An exact original continuation revision is required.', true)
+  const invocation = parseBrowserTaskInvocation({ parameters: row.parameters, ...(row.calls === undefined ? {} : { calls: row.calls }) })
+  return { continuationId: id(row.continuationId, true), expectedRevision: row.expectedRevision as string, ...invocation }
+}
+export function parseBrowserTaskParallelContinuation(value: unknown): BrowserTaskParallelContinuation {
+  const row = rpcRecord(value, ['id', 'targetId', 'admission', 'warning'], 'CONTROL_PROTOCOL_ERROR')
+  if (!['confirmed', 'unknown', 'refused'].includes(row.admission as string) || row.warning !== undefined && (typeof row.warning !== 'string' || row.warning.length > 4096)) bad('Original continuation receipt is invalid.')
+  return { id: id(row.id), targetId: id(row.targetId), admission: row.admission as BrowserTaskParallelContinuation['admission'], ...(row.warning === undefined ? {} : { warning: row.warning as string }) }
+}
+export function parseBrowserTaskParallelContinuationReceipt(value: unknown): BrowserTaskParallelContinuationReceipt {
+  const row = rpcRecord(value, ['run', 'continuation'], 'CONTROL_PROTOCOL_ERROR')
+  return { run: parseBrowserTaskParallelSummary(row.run), continuation: parseBrowserTaskParallelContinuation(row.continuation) }
+}
 export function parseBrowserTaskParallelBinding(value: unknown): BrowserTaskParallelBinding {
   const row = rpcRecord(value, ['operationId', 'targetId', 'sourceBrowserId'], 'CONTROL_PROTOCOL_ERROR')
   return { operationId: id(row.operationId), targetId: id(row.targetId), sourceBrowserId: id(row.sourceBrowserId) }
@@ -62,13 +81,13 @@ export function parseBrowserTaskParallelSummary(value: unknown): BrowserTaskPara
     ...(row.warning === undefined ? {} : { warning: row.warning as string }) }
 }
 export function parseBrowserTaskParallelInspection(value: unknown): BrowserTaskParallelInspection {
-  const row = rpcRecord(value, ['run', 'targets', 'page'], 'CONTROL_PROTOCOL_ERROR')
+  const row = rpcRecord(value, ['run', 'targets', 'page', 'continuation'], 'CONTROL_PROTOCOL_ERROR')
   const run = parseBrowserTaskParallelSummary(row.run), page = rpcRecord(row.page, ['after', 'limit', 'nextAfter'], 'CONTROL_PROTOCOL_ERROR')
   const limit = count(page.limit, false, 1)
   if (limit > 64 || !Array.isArray(row.targets) || row.targets.length > limit) bad('Task execution inspection page is invalid.')
   const targets = (row.targets as unknown[]).map(value => {
-    const target = rpcRecord(value, ['id', 'browserId', 'profileId', 'phase', 'run', 'error', 'waitingForProfile'], 'CONTROL_PROTOCOL_ERROR')
-    if (!['queued', 'preparing', 'bound', 'failed'].includes(target.phase as string)) bad('Task target preparation phase is invalid.')
+    const target = rpcRecord(value, ['id', 'browserId', 'profileId', 'phase', 'run', 'error', 'waitingForProfile', 'continuationRevision'], 'CONTROL_PROTOCOL_ERROR')
+    if (!['queued', 'preparing', 'bound', 'failed', 'stopped'].includes(target.phase as string)) bad('Task target preparation phase is invalid.')
     let original: BrowserTaskParallelTargetProgress['run']
     if (target.run !== undefined) {
       const child = rpcRecord(target.run, ['id', 'status', 'nextStep', 'operationCount'], 'CONTROL_PROTOCOL_ERROR')
@@ -86,13 +105,14 @@ export function parseBrowserTaskParallelInspection(value: unknown): BrowserTaskP
       const raw = rpcRecord(target.waitingForProfile, ['operationId', 'targetId'], 'CONTROL_PROTOCOL_ERROR')
       waitingForProfile = { operationId: id(raw.operationId), targetId: id(raw.targetId) }
     }
+    if (target.continuationRevision !== undefined && (typeof target.continuationRevision !== 'string' || !/^[a-f0-9]{64}$/u.test(target.continuationRevision))) bad('Original continuation revision is invalid.')
     return { id: id(target.id), browserId: id(target.browserId), profileId: id(target.profileId), phase: target.phase as BrowserTaskParallelTargetProgress['phase'],
-      ...(original ? { run: original } : {}), ...(error ? { error } : {}), ...(waitingForProfile ? { waitingForProfile } : {}) }
+      ...(target.continuationRevision === undefined ? {} : { continuationRevision: target.continuationRevision as string }), ...(original ? { run: original } : {}), ...(error ? { error } : {}), ...(waitingForProfile ? { waitingForProfile } : {}) }
   })
   if (new Set(targets.map(target => target.id)).size !== targets.length) bad('Task target identities are duplicated in this page.')
   const after = page.after === null ? null : id(page.after), nextAfter = page.nextAfter === null ? null : id(page.nextAfter)
   if (nextAfter !== null && nextAfter !== targets.at(-1)?.id) bad('Task execution continuation does not name its original page boundary.')
-  return { run, targets, page: { after, limit, nextAfter } }
+  return { run, targets, page: { after, limit, nextAfter }, ...(row.continuation === undefined ? {} : { continuation: row.continuation === null ? null : parseBrowserTaskParallelContinuation(row.continuation) }) }
 }
 
 export type BrowserTaskParallelList = { runs: BrowserTaskParallelSummary[]; page: { before: string | null; limit: number; nextBefore: string | null } }

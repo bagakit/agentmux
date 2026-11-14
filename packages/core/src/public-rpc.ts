@@ -84,7 +84,7 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'browser.task.draft': 'browser.task.draft',
   'browser.task.create': 'browser.task.create',
   'browser.task.create-inspect': 'browser.task.create-inspect',
-  'browser.task.assets': 'browser.task.assets', 'browser.task.inspect': 'browser.task.inspect', 'browser.task.parallel': 'browser.task.parallel', 'browser.task.parallel-inspect': 'browser.task.parallel-inspect', 'browser.task.parallel-list': 'browser.task.parallel-list', 'browser.task.reliability': 'browser.task.reliability',
+  'browser.task.assets': 'browser.task.assets', 'browser.task.inspect': 'browser.task.inspect', 'browser.task.parallel-continue': 'browser.task.parallel-continue', 'browser.task.parallel-stop': 'browser.task.parallel-stop', 'browser.task.parallel': 'browser.task.parallel', 'browser.task.parallel-inspect': 'browser.task.parallel-inspect', 'browser.task.parallel-list': 'browser.task.parallel-list', 'browser.task.reliability': 'browser.task.reliability',
   'browser.task.edit': 'browser.task.edit', 'browser.task.publish': 'browser.task.publish',
   'browser.task.run': 'browser.task.run', 'browser.task.stop': 'browser.task.stop',
   'browser.task.batch': 'browser.task.batch', 'browser.task.batch-stop': 'browser.task.batch-stop',
