@@ -1,5 +1,5 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import type { ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { agentSessionPresentationIndex } from '../lib/session-presentation'
 import { currentDemandIndex, currentDemandKey } from '../lib/goal-current-work'
@@ -9,12 +9,14 @@ import { DEMAND_STATUS_LABELS, type DemandProjection, type DemandStatus } from '
 import { useAppStore } from '../store'
 import { GoalResponsibilitySummary } from './GoalResponsibilitySummary'
 import { GoalPlanRing } from './GoalPlanGraph'
+import { GoalAgentGroup } from './GoalAgentGroup'
 import goalsArtUrl from '@agentmux/client-ui/brand/illustrations/concepts/goals-companions.png'
 
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 /** One Goal reading unit. Its only subscription is the linked-Session summary for its own ids. */
 export function GoalRow({ demand, selected, selectedSessionId, acknowledgementFailed, stageChanged, onSelect, compact = false }: { demand: DemandProjection; selected: boolean; selectedSessionId: string | null; acknowledgementFailed: boolean; stageChanged: boolean; onSelect: () => void; compact?: boolean }) {
+  const teamDescriptionId = useId()
   const execution = useAppStore(useShallow((state) => {
     const byId = agentSessionPresentationIndex(state.sessions)
     let count = 0, unconfirmed = 0; const statuses = new Set<string>()
@@ -34,12 +36,12 @@ export function GoalRow({ demand, selected, selectedSessionId, acknowledgementFa
   const fact = goalNextStepFact(demand, retainedStart)
   const nextStep = acknowledgementFailed ? 'Acknowledgement unconfirmed' : fact.text
   const stage = acknowledgementFailed ? 'you' : fact.stage
-  return <div role="button" tabIndex={0} className={`goals-row${!demand.alignment ? ' goals-row--undefined' : ''}${selected ? ' goals-row--selected' : ''}${compact ? ' goals-row--compact' : ''}`} data-demand-id={demand.id} data-demand-status={demand.status} {...(stageChanged ? { 'data-goal-stage-changed': true } : {})} {...(execution.context === 'Current execution' ? { 'data-session-context': true } : {})} aria-pressed={selected} aria-label={`Open goal ${demand.title}. ${nextStep}`} onClick={onSelect} onKeyDown={(event) => {
+  return <div role="button" tabIndex={0} className={`goals-row${!demand.alignment ? ' goals-row--undefined' : ''}${selected ? ' goals-row--selected' : ''}${compact ? ' goals-row--compact' : ''}`} data-demand-id={demand.id} data-demand-status={demand.status} {...(stageChanged ? { 'data-goal-stage-changed': true } : {})} {...(execution.context === 'Current execution' ? { 'data-session-context': true } : {})} aria-pressed={selected} aria-describedby={demand.supervisorSessionId || demand.assigneeSessionIds?.length ? teamDescriptionId : undefined} aria-label={`Open goal ${demand.title}. ${nextStep}`} onClick={onSelect} onKeyDown={(event) => {
     if (event.target !== event.currentTarget) return
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect() }
   }}>
     <GoalStageMark stage={stage} />
-    <div className="goals-row__copy"><strong title={demand.title}>{demand.title}</strong><span className="goals-row__next">{nextStep}</span><span className="goals-row__facts"><GoalPlanRing demand={demand} />{demand.projectName ? <span title={demand.projectName}>{demand.projectName}</span> : null}{execution.count ? <span>{execution.count} linked · {execution.status}</span> : null}{!compact && execution.unconfirmed ? <span>{execution.unconfirmed} linked {execution.unconfirmed === 1 ? 'Session' : 'Sessions'} unconfirmed</span> : null}{execution.context ? <span>{execution.context}</span> : null}</span>{!compact ? <GoalResponsibilitySummary demand={demand} compact /> : null}</div>
+    <div className="goals-row__copy"><strong title={demand.title}>{demand.title}</strong><span className="goals-row__next">{nextStep}</span><div className="goals-row__footer"><span className="goals-row__facts"><GoalPlanRing demand={demand} />{demand.projectName ? <span title={demand.projectName}>{demand.projectName}</span> : null}{execution.count ? <span>{execution.count} linked · {execution.status}</span> : null}{!compact && execution.unconfirmed ? <span>{execution.unconfirmed} linked {execution.unconfirmed === 1 ? 'Session' : 'Sessions'} unconfirmed</span> : null}{execution.context ? <span>{execution.context}</span> : null}</span><GoalAgentGroup demand={demand} descriptionId={teamDescriptionId} /></div>{!compact ? <GoalResponsibilitySummary demand={demand} compact /> : null}</div>
     {selected ? <ThemeStatusSelectedIcon className="goals-row__selected" size={13} aria-label="Selected goal" /> : <ThemeNavigationDisclosureIcon className="goals-row__open" size={14} aria-hidden="true" />}
   </div>
 }
