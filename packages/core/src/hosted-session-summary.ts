@@ -15,8 +15,10 @@ type AdmissionSummary<T = Admission> = T extends Admission ? Omit<T, 'intent'> &
 } : never
 
 /** A separate read projection. Exact reads and durable storage retain AgentMuxAgentSession. */
-export type AgentMuxHostedAgentSessionSummary = Omit<AgentMuxAgentSession, 'promptCompletionAdmission'> & {
+export type AgentMuxHostedAgentSessionSummary = Omit<AgentMuxAgentSession, 'promptCompletionAdmission' | 'continuityOperations'> & {
   sessionProjection: 'summary'
+  /** Historical operations stay at the Core owner and are read by exact read/inspect. */
+  continuityOperations?: never
   promptCompletionAdmission?: AdmissionSummary
 }
 export type AgentMuxHostedSession<P extends AgentMuxHostedSessionProjection> =
@@ -27,8 +29,9 @@ export function isHostedAgentSessionSummary(session: AgentMuxAgentSession): sess
 }
 
 export function hostedAgentSessionSummary(session: AgentMuxAgentSession): AgentMuxHostedAgentSessionSummary {
-  if (isHostedAgentSessionSummary(session)) return session
-  const { promptCompletionAdmission: original, ...rest } = session
+  const { continuityOperations: _history, ...source } = session
+  if (isHostedAgentSessionSummary(source)) return source
+  const { promptCompletionAdmission: original, ...rest } = source
   if (!original) return { ...rest, sessionProjection: 'summary' }
   const { intent, ...admission } = original
   return { ...rest, sessionProjection: 'summary', promptCompletionAdmission: {
