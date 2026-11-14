@@ -30,6 +30,10 @@ Core 文档保存实体、全部绑定、原 Group／Region 分割树及选择�
 
 `DesktopSpatialPersistence` 的订阅与显式刷新进入同一观察路径。读取已观察状态与已经应用到客户端的状态分别保留；准确执行事实的读取不能提前消费尚未应用的布局／分类更新，本地编辑也不能以提前读到的状态冒充原编辑基线。分类更新经同一 apply 调用 [`reconcileWorkbenchSpaceSelection`](../../apps/desktop/src/renderer/src/lib/desktop-focus-navigation.ts)，GUI 没有另外的私有选择修补。该协调只更新同一原 Zone 的分类引用，不改 `tab.space` 的原内容身份；未知关系的可见性与局部能力沿[行为合同](../design/behavior/spaces-and-layout.md#topic-导航与成员范围)。
 
+Survey 显式组成多个 Tab 时，先完成已有编辑的 checkpoint，再由 [`planSurveyTabComposition`](../../apps/desktop/src/renderer/src/lib/survey-tab-composition.ts) 核对已消费的 Core 基线、冻结的原内容集合与准确目标；精确页面的提升也在同一个纯计划内完成。Core 的 [`composeSpatialTabs`](../../packages/core/src/spatial-tab-composition.ts) 只改变组成关系，整张图经原 Core 空间 owner 一次 CAS 提交；公共 `space.commit` 消费同一 owner，不用逐键合并拆散这次意图。后续 Survey 引用保存沿原偏好 owner 独立回执；组成已提交但引用保存未确认时，保留原请求并只修复引用，不重放移动。
+
+DOM 内容的寿命由窗口内 [`WorkbenchRegionOwners`](../../apps/desktop/src/renderer/src/components/WorkbenchRegionOwners.tsx) 按原 Region ID 持有。Tab 的几何与槽位仍由原 Workbench 呈现，Region 的 React 内容和原展示、文档、Mote 对话上下文随槽位移动，避免换 Workspace 或提升为新 Tab 时重建未提交输入。该 owner 只保存 React 内容与局部订阅，结构仍读原 Core 投影；单个 Region 内容更新不复制全部内容记录，也不订阅无关 Session。
+
 Topic 创建和新讨论 Tab 使用 [`originalTopicAddress`](../../apps/desktop/src/shared/space-addresses.ts) 写入原内容身份，Category 地址只用于导航。还原时，同一 Core Zone 资源中已确认的内容身份优先于客户端 Tab 描述，分类移动不改写它。带首句的创建先提交原 Launcher 工作面，再由 Host 注册该 Topic，避免客户端自己的待保存布局与注册争用同一图的 revision；失败仍保留原 Launcher 和草稿。
 
 ### 创建即确认位置与后台保存的停滞
