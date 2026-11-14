@@ -21,14 +21,14 @@ function deferred<T>() {
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
   return { promise, resolve, reject }
 }
-function Input({ scope = target, initial = '', description }: { scope?: BrowserInputHistoryTarget | null; initial?: string; description?: import('../src/renderer/src/lib/browser-address-suggestions').BrowserAddressDescription | undefined }) {
+function Input({ scope = target, initial = '' }: { scope?: BrowserInputHistoryTarget | null; initial?: string }) {
   const [value, setValue] = useState(initial), ref = useRef<BrowserAddressInputHandle>(null)
   return <div onContextMenu={regionContextMenu}><form onSubmit={event => { event.preventDefault(); ref.current?.submit() }}>
-    <BrowserAddressInput ref={ref} aria-label="Address" value={value} historyTarget={scope} description={description} onValueChange={setValue}
+    <BrowserAddressInput ref={ref} aria-label="Address" value={value} historyTarget={scope} onValueChange={setValue}
       onSubmit={submitted} onHistoryNotice={notice} onDeferredHistoryFailure={deferredFailure} />
     <button type="submit">Navigate</button><output data-draft>{value}</output></form><button id="outside">Outside</button></div>
 }
-async function mount(scope: BrowserInputHistoryTarget | null = target, initial = '', description?: import('../src/renderer/src/lib/browser-address-suggestions').BrowserAddressDescription) { await act(async () => root.render(<Input scope={scope} initial={initial} description={description} />)) }
+async function mount(scope: BrowserInputHistoryTarget | null = target, initial = '') { await act(async () => root.render(<Input scope={scope} initial={initial} />)) }
 function field() { const result = container.querySelector<HTMLInputElement>('input'); expect(result).not.toBeNull(); return result! }
 async function activate() { await act(async () => { field().focus(); field().click() }) }
 async function key(key: string, extra: KeyboardEventInit = {}) { await act(async () => field().dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...extra }))) }
@@ -256,8 +256,7 @@ async function nativeEdit(text: string, inputType = 'insertText') {
     field().dispatchEvent(new InputEvent('input', { bubbles: true, inputType, data: text.slice(-1) }))
   })
 }
-const description = { browserId: 'page', workspaceId: 'resource', profileId: 'profile', mode: 'normal' as const,
-  url: snapshot.entries[0]!.text, title: 'Reference notes', faviconDataUrl: 'data:image/png;base64,aGVsbG8=' }
+const appearance = { url: snapshot.entries[0]!.text, title: 'Reference notes', faviconDataUrl: 'data:image/png;base64,aGVsbG8=' }
 
 it('[address-suggestions] selected suffix is not the human draft and Enter adopts the exact original input once', async () => {
   await mount(); await activate(); await nativeEdit('https://ex')
@@ -303,21 +302,16 @@ it('[address-suggestions] composition replaces a selected suffix with the actual
   await key('Enter'); expect(submitted).toHaveBeenCalledExactlyOnceWith('https://ex中文')
 })
 
-it('[address-suggestions] exact caller artwork gives a real title, URL and visible match without querying pages', async () => {
+it('[address-suggestions] saved artwork gives a real title, URL and visible match without querying pages', async () => {
   const inspect = vi.spyOn(api.browser, 'listTargets'), capture = vi.spyOn(api.browser, 'getRecoveryPreview')
-  await mount(target, '', description); await activate(); await fill('Reference')
-  expect(popup()!.textContent).toContain('Reference notes'); expect(popup()!.textContent).toContain(description.url)
+  vi.mocked(api.browser.listInputHistory).mockResolvedValue({ ...snapshot, entries: [{ ...snapshot.entries[0]!, appearance }] })
+  await mount(); await activate(); await fill('Reference')
+  expect(popup()!.textContent).toContain('Reference notes'); expect(popup()!.textContent).toContain(appearance.url)
   expect(popup()!.querySelector('mark')?.textContent).toBe('Reference')
-  expect(popup()!.querySelector('img')?.getAttribute('src')).toBe(description.faviconDataUrl)
+  expect(popup()!.querySelector('img')?.getAttribute('src')).toBe(appearance.faviconDataUrl)
   expect(inspect).not.toHaveBeenCalled(); expect(capture).not.toHaveBeenCalled()
   await nativeEdit('R'); await nativeEdit('Re'); await nativeEdit('Ref')
   expect(api.browser.listInputHistory).toHaveBeenCalledTimes(1)
-})
-
-it.each([{ profileId: 'foreign' }, { workspaceId: 'display-only' }, { mode: 'private' as const }, { url: 'https://example.test/another' }, { browserId: 'different' }])('[address-suggestions] foreign caller metadata %j never decorates original history', async changed => {
-  await mount(target, '', { ...description, ...changed }); await activate()
-  expect(popup()!.textContent).not.toContain(description.title); expect(popup()!.querySelector('img')).toBeNull()
-  expect(historyTexts()).toEqual(snapshot.entries.map(entry => entry.text))
 })
 
 it('[address-suggestions] malformed explicit input remains available as its original submission, with no fake search or deletion', async () => {
@@ -338,13 +332,51 @@ it('[address-suggestions] keyboard removal targets only the selected original hi
 })
 
 it('[address-suggestions] a later exact favicon replaces a failed image without inheriting its hidden state', async () => {
-  await mount(target, '', description); await activate()
+  vi.mocked(api.browser.listInputHistory).mockResolvedValue({ ...snapshot, entries: [{ ...snapshot.entries[0]!, appearance }] })
+  await mount(); await activate()
   const failed = popup()!.querySelector<HTMLImageElement>('img')!
   await act(async () => failed.dispatchEvent(new Event('error'))); expect(failed.hidden).toBe(true)
-  await mount(target, '', { ...description, faviconDataUrl: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>' })
+  vi.mocked(api.browser.listInputHistory).mockResolvedValue({ ...snapshot, entries: [{ ...snapshot.entries[0]!, appearance: { ...appearance, faviconDataUrl: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>' } }] })
+  await key('Escape'); await activate()
   const updated = popup()!.querySelector<HTMLImageElement>('img')!
   expect(updated).not.toBe(failed); expect(updated.hidden).toBe(false)
-  expect(api.browser.listInputHistory).toHaveBeenCalledTimes(1)
+  expect(api.browser.listInputHistory).toHaveBeenCalledTimes(2)
+})
+
+it('[address-appearance] closed and redirected pages retain their stored title and icon while selecting the original input', async () => {
+  const redirectedAppearance = { url: 'https://example.test/redirected', title: 'Archived reference notes', faviconDataUrl: appearance.faviconDataUrl }
+  vi.mocked(api.browser.listInputHistory).mockResolvedValue({ ...snapshot, entries: [
+    { ...snapshot.entries[0]!, appearance: redirectedAppearance }, snapshot.entries[1]!
+  ] })
+  const targets = vi.spyOn(api.browser, 'listTargets'), preview = vi.spyOn(api.browser, 'getRecoveryPreview')
+  await mount(target, 'https://elsewhere.test/')
+  await activate(); await fill('Archived')
+  expect(historyTexts()).toEqual([snapshot.entries[0]!.text])
+  const row = popup()!.querySelector('.browser-address-history__delete')!.closest('[role="option"]')!
+  expect(row.textContent).toContain(redirectedAppearance.title)
+  expect(row.textContent).toContain(redirectedAppearance.url)
+  expect(row.querySelector('img')?.getAttribute('src')).toBe(redirectedAppearance.faviconDataUrl)
+  expect(row.querySelector('mark')?.textContent).toBe('Archived')
+  expect(targets).not.toHaveBeenCalled(); expect(preview).not.toHaveBeenCalled()
+  await key('ArrowUp'); await key('Enter')
+  expect(submitted).toHaveBeenCalledExactlyOnceWith(snapshot.entries[0]!.text)
+  expect(api.browser.recordInputHistory).toHaveBeenCalledExactlyOnceWith(target, snapshot.entries[0]!.text)
+})
+
+it('[address-appearance] stored title survives missing artwork and a bad image keeps the visible type glyph', async () => {
+  vi.mocked(api.browser.listInputHistory).mockResolvedValue({ ...snapshot, entries: [
+    { ...snapshot.entries[0]!, appearance: { url: appearance.url, title: 'Saved notes' } },
+    { text: 'https://another.test/', submittedAt: snapshot.entries[1]!.submittedAt, appearance: { url: 'https://another.test/', title: 'Another notes', faviconDataUrl: appearance.faviconDataUrl } }
+  ] })
+  await mount(); await activate()
+  const rows = [...popup()!.querySelectorAll('[role="option"]')]
+  expect(rows[0]!.textContent).toContain('Saved notes')
+  expect(rows[0]!.querySelector('img')).toBeNull()
+  expect(rows[0]!.querySelector('.browser-address-history__icon svg')).not.toBeNull()
+  const failed = rows[1]!.querySelector<HTMLImageElement>('img')!
+  await act(async () => failed.dispatchEvent(new Event('error')))
+  expect(failed.hidden).toBe(true)
+  expect(rows[1]!.querySelector('.browser-address-history__icon svg')).not.toBeNull()
 })
 
 it('[address-suggestions] selecting the last history and removing it never targets the first original entry', async () => {

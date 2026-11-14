@@ -12,7 +12,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxDesktopApi, AgentMuxPreloadApi, BrowserInputHistoryTarget, BrowserInputHistoryScope, BrowserProfileSummary } from '../src/shared/contracts.js'
 
-type TestOwner = { workspaceId: string | null; storage: { mode: 'normal' | 'private'; profileId: string | null }; url: string }
+class TestOwner {
+  activity: NonNullable<import('../src/shared/contracts.js').BrowserSnapshot['activity']> = { operation: null, control: 'human' }
+  navigationId = 'native-navigation'
+  committedNavigationId: string | null = null
+  pageAppearanceNavigation: { navigationId: string; requestedUrl: string; committedUrl?: string; title?: string } | undefined
+  title = ''
+  loading = false
+  error: string | null = null
+  readonly view = { webContents: { isDestroyed: () => false, isLoading: () => this.loading,
+    getURL: () => this.url, getTitle: () => this.title } }
+  constructor(public workspaceId: string | null, public storage: { mode: 'normal' | 'private'; profileId: string | null }, public url: string, public id = 'history-page') {}
+}
 const bridge = vi.hoisted(() => ({
   root: '', api: null as AgentMuxPreloadApi | null,
   handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>(),
@@ -65,6 +76,7 @@ import { ScratchTopics } from '../src/main/scratch-topics.js'
 import { DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { registerIpc } from '../src/main/ipc.js'
 import '../src/preload/index.js'
+import { BrowserInputHistoryStore } from '../src/main/browser-input-history.js'
 
 const roots: string[] = []
 const channels = ['browser:listInputHistory', 'browser:recordInputHistory', 'browser:removeInputHistory', 'browser:clearInputHistory']
@@ -103,7 +115,7 @@ async function fixture() {
   const defaultProfile = profiles.find(profile => profile.isDefault)
   expect(defaultProfile).toBeDefined()
   expect(defaultProfile!.id).toBe(bridge.defaultProfile())
-  bridge.owners.set('history-page', { workspaceId: 'resource-workspace', storage: { mode: 'normal', profileId: defaultProfile!.id }, url: 'about:blank' })
+  bridge.owners.set('history-page', new TestOwner('resource-workspace', { mode: 'normal', profileId: defaultProfile!.id }, 'about:blank'))
   const target: BrowserInputHistoryTarget = { kind: 'browser', browserId: 'history-page', profileId: defaultProfile!.id }
   const scope: BrowserInputHistoryScope = { workspaceId: 'resource-workspace', profileId: defaultProfile!.id }
   const path = join(root, 'browser-input-history', `${createHash('sha256').update(JSON.stringify([scope.workspaceId, scope.profileId])).digest('hex')}.json`)
@@ -118,12 +130,66 @@ async function fixture() {
 }
 
 describe('actual preload and registered Main input-history path', () => {
+  it('[page-appearance] admits a late human record through Main then decorates from its actual committed Browser', async () => {
+    const f = await fixture()
+    try {
+      const owner = bridge.owners.get('history-page')!
+      owner.url = 'https://document.invalid/final'; owner.title = 'Actual native title'
+      owner.committedNavigationId = owner.navigationId
+      owner.pageAppearanceNavigation = { navigationId: owner.navigationId, requestedUrl: 'https://input.invalid/start', committedUrl: owner.url, title: owner.title }
+      await f.api.recordInputHistory(f.target, 'https://input.invalid/start')
+      const actual = await f.api.listInputHistory(f.target)
+      expect(actual.entries).toEqual([{ text: 'https://input.invalid/start', submittedAt: expect.any(Number), appearance: { url: owner.url, title: owner.title } }])
+      expect(JSON.parse(await readFile(f.path, 'utf8')).entries).toEqual(actual.entries)
+      expect(await f.api.listInputHistory({ kind: 'workspace', workspaceId: 'display-workspace' })).toMatchObject({ entries: [] })
+      await f.api.removeInputHistory(f.target, f.scope, 'https://input.invalid/start')
+      const manager = bridge.manager as import('../src/main/browser-view-manager.js').BrowserViewManager
+      manager.refreshInputHistoryAppearance('history-page', f.scope.profileId)
+      expect((await f.api.listInputHistory(f.target)).entries).toEqual([])
+    } finally { await f.dispose() }
+  })
+
+  it('[page-appearance] a held decoration never delays the committed input result or normal navigation', async () => {
+    const f = await fixture(), original = BrowserInputHistoryStore.prototype.decorate
+    let release!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    const decorate = vi.spyOn(BrowserInputHistoryStore.prototype, 'decorate').mockImplementationOnce(async function (this: BrowserInputHistoryStore, scope, requested, appearance) {
+      await held
+      return original.call(this, scope, requested, appearance)
+    })
+    try {
+      const owner = bridge.owners.get('history-page')!
+      owner.url = 'https://document.invalid/page'; owner.title = 'Committed title'; owner.committedNavigationId = owner.navigationId
+      owner.pageAppearanceNavigation = { navigationId: owner.navigationId, requestedUrl: owner.url, committedUrl: owner.url, title: owner.title }
+      expect(await f.api.recordInputHistory(f.target, owner.url)).toMatchObject({ outcome: 'recorded' })
+      expect(decorate).toHaveBeenCalledOnce()
+      await f.api.navigate('history-page', 'https://next.invalid/healthy')
+      expect(bridge.navigate).toHaveBeenCalledExactlyOnceWith('history-page', 'https://next.invalid/healthy')
+      release()
+      await vi.waitFor(async () => expect((await f.api.listInputHistory(f.target)).entries[0]!.appearance?.title).toBe('Committed title'))
+    } finally { release(); await f.dispose() }
+  })
+
+  it('[page-appearance] pending or failed native targets cannot attach an old title to a new address', async () => {
+    const f = await fixture()
+    try {
+      const owner = bridge.owners.get('history-page')!
+      owner.url = 'https://new.invalid/target'; owner.title = 'Old page title'
+      owner.pageAppearanceNavigation = { navigationId: owner.navigationId, requestedUrl: owner.url, committedUrl: owner.url }
+      await f.api.recordInputHistory(f.target, owner.url)
+      expect((await f.api.listInputHistory(f.target)).entries[0]!.appearance).toBeUndefined()
+      owner.committedNavigationId = owner.navigationId; owner.error = 'Native document failed'
+      await f.api.recordInputHistory(f.target, owner.url)
+      expect((await f.api.listInputHistory(f.target)).entries[0]!.appearance).toBeUndefined()
+    } finally { await f.dispose() }
+  })
+
   it('private input does not read or write persistent history, through actual preload and Main handlers', async () => {
     const f = await fixture()
     try {
       await f.api.recordInputHistory(f.target, 'normal-kept')
       const before = await readFile(f.path, 'utf8'), files = await readdir(join(f.root, 'browser-input-history'))
-      bridge.owners.set('private-input', { workspaceId: 'resource-workspace', storage: { mode: 'private', profileId: null }, url: 'about:blank' })
+      bridge.owners.set('private-input', new TestOwner('resource-workspace', { mode: 'private', profileId: null }, 'about:blank', 'private-input'))
       const target: BrowserInputHistoryTarget = { kind: 'browser', browserId: 'private-input', profileId: null }
       expect(await f.api.listInputHistory(target)).toEqual({ scope: { workspaceId: 'resource-workspace', profileId: null }, entries: [] })
       const recorded = await f.api.recordInputHistory(target, 'private-secret-input')
@@ -206,7 +272,7 @@ describe('actual preload and registered Main input-history path', () => {
       await f.api.navigate('history-page', 'normal navigation still allowed')
       expect(bridge.navigate).toHaveBeenCalledExactlyOnceWith('history-page', 'normal navigation still allowed')
       expect(await readFile(f.path)).toEqual(raw)
-      expect(bridge.owners.get('history-page')).toEqual({ workspaceId: f.scope.workspaceId, storage: { mode: 'normal', profileId: f.scope.profileId }, url: 'normal navigation still allowed' })
+      expect(bridge.owners.get('history-page')).toMatchObject({ workspaceId: f.scope.workspaceId, storage: { mode: 'normal', profileId: f.scope.profileId }, url: 'normal navigation still allowed' })
     } finally { await f.dispose() }
   })
 })

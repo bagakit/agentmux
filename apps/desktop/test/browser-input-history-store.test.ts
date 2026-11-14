@@ -18,6 +18,7 @@ import {
   MAX_BROWSER_INPUT_HISTORY_TEXT_BYTES, MAX_BROWSER_INPUT_HISTORY_FILE_BYTES
 } from '../src/main/browser-input-history.js'
 import type { BrowserInputHistoryScope } from '../src/shared/browser-input-history.js'
+import { BROWSER_PAGE_MEMORY_MAX_FAVICON_LENGTH } from '../src/shared/browser-page-memory.js'
 
 const PROFILE_A = '11111111-1111-4111-8111-111111111111'
 const PROFILE_B = '22222222-2222-4222-8222-222222222222'
@@ -38,6 +39,74 @@ async function fixture() {
 }
 
 describe('actual bounded Browser input history store', () => {
+  it('[page-appearance] decorates exact original/redirect addresses durably without changing submission identity or search', async () => {
+    const f = await fixture(), original = 'https://example.invalid/start?q=%2B#part', final = 'https://other.invalid/final?q=%2B#part'
+    await f.store.record(scope, original); await f.store.record(scope, final); await f.store.record(scope, 'human search')
+    const before = (await f.store.list(scope)).entries
+    const appearance = { url: final, title: 'Real redirected title', faviconDataUrl: 'data:image/svg+xml;base64,PHN2Zy8+' }
+    await f.store.decorate(scope, original, appearance)
+    const after = (await new BrowserInputHistoryStore(f.directory).list(scope)).entries
+    expect(after.map(({ appearance: _appearance, ...entry }) => entry)).toEqual(before)
+    expect(after.filter(entry => entry.text !== 'human search').map(entry => entry.appearance)).toEqual([appearance, appearance])
+    expect(after.find(entry => entry.text === 'human search')!.appearance).toBeUndefined()
+    const bytes = await readFile(f.path); fs.rename.mockClear()
+    await f.store.decorate(scope, original, appearance)
+    expect(fs.rename).not.toHaveBeenCalled(); expect(await readFile(f.path)).toEqual(bytes)
+    expect((await f.store.record(scope, original)).entries[0]).toMatchObject({ text: original, appearance })
+  })
+
+  it('[page-appearance] cannot admit visits, borrow same-origin paths or write a different Workspace/Profile', async () => {
+    const f = await fixture(), url = 'https://example.invalid/first?q=one#first'
+    const appearance = { url, title: 'First document' }
+    await f.store.decorate(scope, url, appearance)
+    expect(await readdir(f.directory)).toEqual([])
+    for (const text of ['https://example.invalid/second?q=one#first', 'https://example.invalid/first?q=two#first', 'https://example.invalid/first?q=one#second']) await f.store.record(scope, text)
+    const before = await readFile(f.path)
+    await f.store.decorate(scope, url, appearance)
+    expect(await readFile(f.path)).toEqual(before)
+    for (const foreign of [{ ...scope, workspaceId: 'other-workspace' }, { ...scope, profileId: PROFILE_B }]) {
+      await f.store.decorate(foreign, url, appearance)
+      expect(await readFile(f.path)).toEqual(before)
+    }
+    expect(await readdir(f.directory)).toHaveLength(1)
+  })
+
+  it('[page-appearance] serializes remove/clear against both early and late observations without resurrection', async () => {
+    const f = await fixture(), url = 'https://example.invalid/page', appearance = { url, title: 'Real title' }
+    await f.store.record(scope, url)
+    await Promise.all([f.store.decorate(scope, url, appearance), f.store.remove(scope, url), f.store.decorate(scope, url, appearance)])
+    expect((await f.store.list(scope)).entries).toEqual([])
+    await f.store.record(scope, url); await f.store.record(scope, 'keep other human input')
+    await Promise.all([f.store.clear(scope), f.store.decorate(scope, url, appearance)])
+    expect((await new BrowserInputHistoryStore(f.directory).list(scope)).entries).toEqual([])
+  })
+
+  it('[page-appearance] spends the existing byte budget on inputs before optional artwork, including later submissions', async () => {
+    const f = await fixture(), icon = 'data:image/png;base64,' + 'a'.repeat(BROWSER_PAGE_MEMORY_MAX_FAVICON_LENGTH - 24)
+    for (let index = 0; index < 50; index++) await f.store.record(scope, `https://example.invalid/${index}?q=${'x'.repeat(3500)}`)
+    const before = (await f.store.list(scope)).entries
+    for (const entry of before.slice(0, 4)) await f.store.decorate(scope, entry.text, { url: entry.text, title: 'Real page', faviconDataUrl: icon })
+    const decorated = (await f.store.list(scope)).entries
+    expect(decorated.map(({ appearance: _appearance, ...entry }) => entry)).toEqual(before)
+    expect(decorated.filter(entry => entry.appearance?.faviconDataUrl).length).toBeLessThan(4)
+    expect((await stat(f.path)).size).toBeLessThanOrEqual(MAX_BROWSER_INPUT_HISTORY_FILE_BYTES)
+    const latest = 'https://example.invalid/new?q=' + 'y'.repeat(3500)
+    expect((await f.store.record(scope, latest)).entries.map(entry => entry.text)).toEqual([latest, ...before.slice(0, 49).map(entry => entry.text)])
+    await f.store.decorate(scope, latest, { url: latest, title: 'Kept title', faviconDataUrl: 'x'.repeat(BROWSER_PAGE_MEMORY_MAX_FAVICON_LENGTH + 1) })
+    expect((await f.store.list(scope)).entries[0]!.appearance).toEqual({ url: latest, title: 'Kept title' })
+  }, 20_000)
+
+  it('[page-appearance] keeps committed text on decoration IO failure and allows later owner work', async () => {
+    const f = await fixture(), url = 'https://example.invalid/retained'
+    await f.store.record(scope, url); const before = await readFile(f.path)
+    fs.rename.mockRejectedValueOnce(new Error('Appearance rename failure'))
+    await expect(f.store.decorate(scope, url, { url, title: 'Not yet saved' })).rejects.toThrow('Appearance rename failure')
+    expect(await readFile(f.path)).toEqual(before)
+    await f.store.record(scope, 'later search')
+    await f.store.decorate(scope, url, { url, title: 'Saved on retry' })
+    expect((await f.store.list(scope)).entries.find(entry => entry.text === url)!.appearance?.title).toBe('Saved on retry')
+  })
+
   it('stores a new short Profile scope beside the original UUID scope without merging or rewriting either', async () => {
     const f = await fixture(), short = { ...scope, profileId: 'AbCdEfGh1234' }
     await f.store.record(scope, 'original UUID profile')

@@ -14,7 +14,8 @@ const native = vi.hoisted(() => {
     readonly restores: { entries: Entry[]; index?: number }[] = []
     readonly mainFrame = { framesInSubtree: [{ osProcessId: 10, detached: false }] }
     readonly session = { fetch: vi.fn(), on: vi.fn(), removeListener: vi.fn(), setDevicePermissionHandler: vi.fn(),
-      setPermissionCheckHandler: vi.fn(), setPermissionRequestHandler: vi.fn() }
+      setPermissionCheckHandler: vi.fn(), setPermissionRequestHandler: vi.fn(), clearStorageData: vi.fn(async () => {}),
+      clearCache: vi.fn(async () => {}), closeAllConnections: vi.fn(async () => {}) }
     readonly listeners = new Map<string, Listener[]>()
     readonly navigationHistory = {
       canGoBack: () => this.index > 0,
@@ -48,7 +49,11 @@ const native = vi.hoisted(() => {
       return this.on(event, wrapped)
     }
     removeListener(event: string, listener: Listener) { this.listeners.set(event, (this.listeners.get(event) ?? []).filter(item => item !== listener)); return this }
-    emit(event: string, ...args: any[]) { for (const listener of this.listeners.get(event) ?? []) listener({}, ...args) }
+    emit(event: string, ...args: any[]) {
+      // Electron's title event always carries the observed title; retain that native port in this double.
+      if (event === 'page-title-updated' && !args.length) args.push(this.title)
+      for (const listener of this.listeners.get(event) ?? []) listener({}, ...args)
+    }
     commit(url: string) {
       this.loading = true
       for (const listener of this.listeners.get('did-start-navigation') ?? []) listener({ url, isSameDocument: false, isMainFrame: true })
@@ -94,6 +99,7 @@ vi.mock('electron', () => ({ WebContentsView: native.View, session: { fromPartit
 
 import { BROWSER_PAGE_MEMORY_SETTLE_MS, BrowserViewManager, type BrowserProfileResolver } from '../src/main/browser-view-manager.js'
 import { BrowserRecoveryPreviewStore } from '../src/main/browser-recovery-preview.js'
+import { BrowserInputHistoryStore } from '../src/main/browser-input-history.js'
 import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
 import type { BrowserColdDescriptor } from '../src/main/browser-cold-descriptor.js'
 
@@ -107,14 +113,14 @@ afterEach(async () => {
   native.View.instances.length = 0
 })
 
-function owner(directory = mkdtempSync(join(tmpdir(), 'amx-page-continuity-'))) {
+function owner(directory = mkdtempSync(join(tmpdir(), 'amx-page-continuity-')), withRecovery = true) {
   if (!roots.includes(directory)) roots.push(directory)
   const store = new BrowserRecoveryPreviewStore(join(directory, 'previews')); stores.push(store)
   const window = { getContentBounds: () => ({ x: 0, y: 0, width: 1000, height: 700 }), isDestroyed: () => false,
     contentView: { addChildView() {}, removeChildView() {} }, webContents: { isDestroyed: () => false, send() {} } }
   const manager = new BrowserViewManager(window as never, profiles, new BrowserRefLedgerStore(join(directory, 'ref-ledger.json')),
     { rememberedSchemes: async () => ({}), rememberScheme: async () => {}, openExternal: () => {} },
-    undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, store)
+    undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, withRecovery ? store : undefined)
   managers.push(manager)
   return { directory, store, manager, contents: () => native.View.instances.at(-1)!.webContents }
 }
@@ -128,6 +134,123 @@ async function visitTwoPagesAndGoBack(manager: BrowserViewManager) {
 }
 
 describe('Browser page continuity across release and cold start', () => {
+  it('[page-appearance] a real later save clears only its own warning and an older failure cannot reinstate it', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const f = owner(undefined, false), history = new BrowserInputHistoryStore(join(f.directory, 'inputs'))
+    const scope = { workspaceId: 'workspace', profileId: 'AbCdEfGh1234' }, url = 'https://pages.invalid/one'
+    await history.record(scope, url)
+    const decorate = vi.spyOn(history, 'decorate').mockRejectedValueOnce(new Error('Original appearance storage unavailable'))
+    f.manager.onPageAppearance = (actual, requested, appearance) => history.decorate(actual, requested, appearance)
+    await f.manager.create('page', url, scope.workspaceId, scope.profileId)
+    const entry = Reflect.get(f.manager, 'entries').get('page')
+    entry.activity.warning = 'An unrelated original warning'
+    vi.advanceTimersByTime(BROWSER_PAGE_MEMORY_SETTLE_MS)
+    await vi.waitFor(async () => expect((await f.manager.create('page', 'about:blank')).activity?.warning).toContain('Recent-page details could not be saved'))
+    f.manager.refreshInputHistoryAppearance('page', scope.profileId); await history.flush()
+    await vi.waitFor(async () => expect((await f.manager.create('page', 'about:blank')).activity?.warning).toBe('An unrelated original warning'))
+    let rejectOlder!: (error: Error) => void
+    const older = new Promise<import('../src/shared/browser-input-history.js').BrowserInputHistorySnapshot>((_resolve, reject) => { rejectOlder = reject })
+    decorate.mockReturnValueOnce(older)
+    f.manager.refreshInputHistoryAppearance('page', scope.profileId)
+    f.manager.refreshInputHistoryAppearance('page', scope.profileId); await history.flush()
+    rejectOlder(new Error('Earlier attempt failed after the latest save'))
+    await new Promise<void>(resolve => setImmediate(resolve))
+    expect((await f.manager.create('page', 'about:blank')).activity?.warning).toBe('An unrelated original warning')
+    expect((await history.list(scope)).entries[0]!.appearance?.title).toBe('Title of /one')
+  })
+
+  it('[page-appearance] the actual native resource Profile stays separate from the default and identical observations coalesce', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const f = owner(undefined, false), history = new BrowserInputHistoryStore(join(f.directory, 'inputs'))
+    const scope = { workspaceId: 'workspace', profileId: 'AbCdEfGh1234' }, other = { ...scope, profileId: 'ZyXwVuTs9876' }, url = 'https://pages.invalid/one'
+    await history.record(scope, url); await history.record(other, url)
+    const defaultProfile = vi.spyOn(profiles, 'defaultProfileId').mockReturnValue(other.profileId), decorate = vi.spyOn(history, 'decorate')
+    try {
+      f.manager.onPageAppearance = (actual, requested, appearance) => history.decorate(actual, requested, appearance)
+      await f.manager.create('page', url, scope.workspaceId, scope.profileId)
+      vi.advanceTimersByTime(BROWSER_PAGE_MEMORY_SETTLE_MS); await history.flush()
+      expect((await history.list(scope)).entries[0]!.appearance).toEqual({ url, title: 'Title of /one' })
+      expect((await history.list(other)).entries[0]!.appearance).toBeUndefined()
+      f.contents().emit('page-title-updated', 'Title of /one'); f.contents().emit('page-title-updated', 'Title of /one')
+      vi.advanceTimersByTime(BROWSER_PAGE_MEMORY_SETTLE_MS); await history.flush()
+      expect(decorate).toHaveBeenCalledOnce()
+    } finally { defaultProfile.mockRestore() }
+  })
+
+  it('[page-appearance] a committed slow document uses explicit native title/favicon before full load and Close', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const f = owner(undefined, false), history = new BrowserInputHistoryStore(join(f.directory, 'inputs'))
+    const scope = { workspaceId: 'workspace', profileId: 'AbCdEfGh1234' }, url = 'https://slow.invalid/document'
+    await history.record(scope, url)
+    f.manager.onPageAppearance = (actual, requested, appearance) => history.decorate(actual, requested, appearance)
+    await f.manager.create('page', 'about:blank', scope.workspaceId, scope.profileId)
+    const contents = f.contents()
+    for (const listener of contents.listeners.get('did-start-navigation') ?? []) listener({ url, isSameDocument: false, isMainFrame: true })
+    contents.url = url; contents.title = 'Old getter title'; contents.loading = true
+    contents.emit('did-navigate', url)
+    contents.emit('page-title-updated', 'Confirmed slow document')
+    contents.session.fetch.mockResolvedValue(new Response('<svg/>', { headers: { 'content-type': 'image/svg+xml' } }))
+    contents.emit('page-favicon-updated', ['https://slow.invalid/icon.svg'])
+    await vi.waitFor(async () => expect((await f.manager.create('page', 'about:blank')).faviconDataUrl).toMatch(/^data:image\/svg\+xml;base64,/))
+    expect(contents.loading).toBe(true)
+    await f.manager.close('page'); await history.flush()
+    expect((await history.list(scope)).entries[0]!.appearance).toEqual({ url, title: 'Confirmed slow document', faviconDataUrl: 'data:image/svg+xml;base64,PHN2Zy8+' })
+  })
+
+  it('[page-appearance] original native observations persist real title/icon before one-second Close without a recovery store', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const f = owner(undefined, false), history = new BrowserInputHistoryStore(join(f.directory, 'inputs'))
+    const scope = { workspaceId: 'workspace', profileId: 'AbCdEfGh1234' }, url = 'https://pages.invalid/one'
+    await history.record(scope, url)
+    f.manager.onPageAppearance = (actual, requested, appearance) => history.decorate(actual, requested, appearance)
+    await f.manager.create('page', url, scope.workspaceId, scope.profileId)
+    f.contents().session.fetch.mockResolvedValue(new Response('<svg/>', { headers: { 'content-type': 'image/svg+xml' } }))
+    f.contents().emit('page-favicon-updated', ['https://pages.invalid/icon.svg'])
+    await vi.waitFor(async () => expect((await f.manager.create('page', 'about:blank')).faviconDataUrl).toMatch(/^data:image\/svg\+xml;base64,/))
+    expect((await history.list(scope)).entries[0]!.appearance).toBeUndefined()
+    await f.manager.close('page'); await history.flush()
+    expect((await new BrowserInputHistoryStore(join(f.directory, 'inputs')).list(scope)).entries[0]!.appearance).toEqual({
+      url, title: 'Title of /one', faviconDataUrl: 'data:image/svg+xml;base64,PHN2Zy8+' })
+  })
+
+  it('[page-appearance] original committed redirect facts match the input, while failed/pending navigation cannot borrow the old title', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const f = owner(undefined, false), history = new BrowserInputHistoryStore(join(f.directory, 'inputs'))
+    const scope = { workspaceId: 'workspace', profileId: 'AbCdEfGh1234' }, input = 'https://input.invalid/start', final = 'https://document.invalid/final'
+    await history.record(scope, input); await history.record(scope, 'https://failed.invalid/target')
+    f.manager.onPageAppearance = (actual, requested, appearance) => history.decorate(actual, requested, appearance)
+    await f.manager.create('page', 'about:blank', scope.workspaceId, scope.profileId)
+    const contents = f.contents()
+    for (const listener of contents.listeners.get('did-start-navigation') ?? []) listener({ url: input, isSameDocument: false, isMainFrame: true })
+    contents.url = final; contents.title = 'Actual redirected document'; contents.emit('did-navigate', final); contents.emit('did-stop-loading')
+    vi.advanceTimersByTime(BROWSER_PAGE_MEMORY_SETTLE_MS); await history.flush()
+    expect((await history.list(scope)).entries.find(row => row.text === input)!.appearance).toEqual({ url: final, title: 'Actual redirected document' })
+    for (const listener of contents.listeners.get('did-start-navigation') ?? []) listener({ url: 'https://failed.invalid/target', isSameDocument: false, isMainFrame: true })
+    contents.emit('page-title-updated'); vi.advanceTimersByTime(BROWSER_PAGE_MEMORY_SETTLE_MS)
+    contents.emit('did-fail-load', -105, 'Resolution failed', 'https://failed.invalid/target', true)
+    contents.emit('did-stop-loading'); vi.advanceTimersByTime(BROWSER_PAGE_MEMORY_SETTLE_MS); await history.flush()
+    expect((await history.list(scope)).entries.find(row => row.text === 'https://failed.invalid/target')!.appearance).toBeUndefined()
+  })
+
+  it('[page-appearance] a confirmed observation survives departure and dispose, while private/native visits add no records', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const f = owner(undefined, false), history = new BrowserInputHistoryStore(join(f.directory, 'inputs'))
+    const scope = { workspaceId: 'workspace', profileId: 'AbCdEfGh1234' }, first = 'https://pages.invalid/one', second = 'https://pages.invalid/two'
+    await history.record(scope, first); await history.record(scope, second)
+    const decorate = vi.spyOn(history, 'decorate')
+    f.manager.onPageAppearance = (actual, requested, appearance) => history.decorate(actual, requested, appearance)
+    await f.manager.create('page', first, scope.workspaceId, scope.profileId)
+    await f.manager.navigate('page', second)
+    f.manager.dispose(); managers.splice(managers.indexOf(f.manager), 1); await history.flush()
+    expect((await new BrowserInputHistoryStore(join(f.directory, 'inputs')).list(scope)).entries.map(row => row.appearance?.title)).toEqual(['Title of /two', 'Title of /one'])
+    expect(decorate).toHaveBeenCalledTimes(2)
+    const p = owner(undefined, false)
+    p.manager.onPageAppearance = (actual, requested, appearance) => history.decorate(actual, requested, appearance)
+    await p.manager.create('private', first, scope.workspaceId, undefined, 'private')
+    vi.advanceTimersByTime(BROWSER_PAGE_MEMORY_SETTLE_MS); await history.flush()
+    expect(decorate).toHaveBeenCalledTimes(2)
+  })
+
   it('rebuilds back/forward entries and in-process page state after an idle release', async () => {
     const { manager, contents } = owner()
     await visitTwoPagesAndGoBack(manager)
