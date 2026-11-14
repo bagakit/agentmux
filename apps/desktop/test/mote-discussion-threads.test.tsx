@@ -160,3 +160,22 @@ it('explicit Discussion restores Main input intent when the already selected mem
  expect(submit.mock.calls[0]![0].agentSessionId).toBe(neighborAgent.id)
  expect(submit.mock.calls[0]![4]?.moteMain).toEqual({ target: expect.any(Object), expectedRoleRevision: 'role-' + neighborAgent.id })
 })
+
+it('a new Main startup card must not describe the retained old conversation', async () => {
+  useAppStore.setState(state => ({ sessions: state.sessions.map(value => value.id === neighborAgent.id && value.kind === 'agent' ? { ...value,
+    terminalFrontend: { run: neighborAgent.control.run, frontendId: 'new-main-attached', state: 'attached', backendState: 'running', source: 'managed-process', observedAt: 1000,
+      initialization: { lifecycleOperationId: 'new-main-setup', phase: 'unknown', native: { state: 'unknown' } } } } : value) }))
+  await open()
+  expect(visibleBody()?.querySelector('[data-activity-session="' + defaultAgent.id + '"]')).not.toBeNull()
+  currentMain = { ...main, sessionId: neighborAgent.id, tabId: neighborTab.id, regionId: neighborTab.layout.activeRegionId }
+  await act(async () => useAppStore.setState(state => ({ scratchTopicSnapshots: Object.fromEntries(Object.entries(state.scratchTopicSnapshots).map(([id, value]) => [id, { ...value,
+    topics: value.topics === null ? null : value.topics.map(topic => topic.id === moteTopics[0]!.id ? { ...topic, quickMode: { status: 'saved', version: 'confirmed-role-B', defaults: { conversation: currentMain } } } : topic) }])) })))
+  await vi.waitFor(() => expect(document.body.textContent).toContain('主 Agent 已更换'))
+  await settleMoteApp()
+  expect(readPmoTeamsTopicFloatingState().reference?.tabId).toBe(defaultTab.id)
+  expect(visibleBody()?.querySelector('[data-activity-session="' + defaultAgent.id + '"]')).not.toBeNull()
+  expect(visibleBody()?.querySelector('[data-activity-session="' + defaultAgent.id + '"]')?.closest('.agent-surface')?.getAttribute('aria-hidden')).not.toBe('true')
+  const readingRoot = visibleBody()!.closest<HTMLElement>('[data-mote-workface]')!
+  expect([...readingRoot.children].find(node => node.getAttribute('aria-label') === 'Mote startup')?.getAttribute('data-startup-session'),
+    'The retained old reading cannot borrow another Main startup state').not.toBe(neighborAgent.id)
+})

@@ -8,7 +8,8 @@ import { build } from 'vite'
 import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
 
 const desktop = resolve(import.meta.dirname, '..'), repository = resolve(desktop, '../..')
-const fixture = join(desktop, 'scripts/fixtures/mote-initialization'), require = createRequire(join(desktop, 'package.json'))
+const reliability = process.env.MOTE_SETUP_RELIABILITY === '1'
+const fixture = join(desktop, 'scripts/fixtures/' + (reliability ? 'mote-reliability' : 'mote-initialization')), require = createRequire(join(desktop, 'package.json'))
 const privateRoot = await mkdtemp(join(tmpdir(), 'agentmux-mote-initialization-'))
 const evidence = resolve(process.env.MOTE_INITIALIZATION_VISUAL_EVIDENCE ?? join(repository, '.local/state/mote-initialization/visual', 'capture-' + globalThis.crypto.randomUUID()))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -86,7 +87,7 @@ try {
   assert.equal(controlledApiTransforms, 1)
   assert.ok(styles.size > 1 && watchedStyles.size > 1, 'Actual consumed style graph is nonempty')
   assert.deepEqual([...styles].sort(), [...watchedStyles].sort(), 'Consumed bytes cover Vite stylesheet dependencies')
-  for (const owner of ['App.tsx', 'store.ts', 'PmoTeamsTopicEntry.tsx', 'PmoTeamsTopicFloatingPanel.tsx', 'WorkspaceWorkbench.tsx', 'MoteWorkface.tsx', 'MoteDetailsPanel.tsx', 'SurfaceToolDock.tsx', 'pmo-teams-topic-floating.ts', 'MoteProfileDialog.tsx', 'MoteQuickMode.tsx'])
+  for (const owner of ['App.tsx', 'store.ts', 'PmoTeamsTopicEntry.tsx', 'PmoTeamsTopicFloatingPanel.tsx', 'WorkspaceWorkbench.tsx', 'MoteWorkface.tsx', 'MoteDetailsPanel.tsx', 'SurfaceToolDock.tsx', 'pmo-teams-topic-floating.ts', 'MoteProfileDialog.tsx', 'MoteQuickMode.tsx', ...(reliability ? ['MoteHeartbeatStatus.tsx', 'MoteStartupStatus.tsx'] : [])])
     assert.ok([...inputs.keys()].some(file=>file.endsWith('/'+owner)), 'Actual product consumer compiled: '+owner)
   const compiled = {}
   for (const entry of await readdir(outDir, { recursive: true, withFileTypes: true })) if (entry.isFile()) {
