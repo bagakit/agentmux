@@ -173,7 +173,7 @@ function focusConversationFacts(timeline: AgentTimelineSnapshot | undefined, pre
 type FocusRecordFacts = Pick<FocusConversationFacts, 'recap' | 'latest' | 'firstPrompt'>
 const conversationFactsByRecords = new WeakMap<object, { latestId: string | undefined; facts: FocusRecordFacts }>()
 /** Original records from either public reading path share one summary/result rule. */
-function focusRecordFacts(records: readonly Pick<AgentConversationRecord, 'role' | 'author' | 'content' | 'kind' | 'rawId' | 'original'>[], latestId?: string): FocusRecordFacts {
+export function focusRecordFacts(records: readonly Pick<AgentConversationRecord, 'role' | 'author' | 'content' | 'kind' | 'rawId' | 'original'>[], latestId?: string): FocusRecordFacts {
   const held = conversationFactsByRecords.get(records)
   if (held && held.latestId === latestId) return held.facts
   const latestRecord = records.filter(record => record.role === 'message' || record.role === 'observation').at(-1)

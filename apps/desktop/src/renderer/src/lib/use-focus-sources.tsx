@@ -8,12 +8,14 @@ import type { ConversationReadApi } from '../../../shared/conversation-read'
 import type { HostConfig, SessionSnapshot } from '../../../shared/contracts'
 import { spaceMountKey, type SpaceMountMemberSurface, type SpaceMountMemberTarget, type SpaceMountRecord } from '../../../shared/space-mount'
 import { api } from './api'
+import { agentDisplayName } from './workbench-tabs'
+import { requestWorkbenchReferenceClose } from './workbench-close-request'
 import { agentRegionLocationBindings, ordinaryAgentSpaceMember, useAppStore } from '../store'
 import { workbenchSelectionCatalog } from './desktop-focus-navigation'
 import { mountedSpaceInputs, mountedSpaceRegions, mountedSpaceTarget, type MountedSpaceRegion } from './space-mount-view'
 import { mountedSessionFacts } from './space-mount-sessions'
 import { useSpaceSourceReader } from '../components/SpaceSourceReaders'
-import { agentContextForSession, agentContextForConversation, type FocusContext } from './focus-context'
+import { agentContextForSession, agentContextForConversation, focusRecordFacts, type FocusContext } from './focus-context'
 import type { FocusContextAccess } from './focus-context-access'
 import { focusContextIdentityKey, type FocusContextIdentity, type FocusContextOccurrence } from './focus-context-identity'
 import type { WorkbenchProjectionSelection } from './workbench-projection'
@@ -22,111 +24,95 @@ import { readSourceConversationRecap, sourceConversationPort } from './focus-sou
 import { originalSpaceResource, originalSourceRegionProjectionId, originalSourceTabProjectionId, originalSourceWorkspaceId } from './original-space-navigation'
 
 type Location = FocusContextAccess['locations'][number] & { member: MountedSpaceRegion; snapshot?: SpaceSnapshot }
-type Candidate = { key: string; runtimeId?: string; sid: string; locations: Location[]; target?: SpaceMountMemberTarget; issue?: string }
+type Candidate = { key: string; runtimeId?: string; sid: string; locations: Location[]; target?: SpaceMountMemberTarget; authorityKey?: string; readingTarget?: import('../../../shared/space-mount').SpaceMountReadingTarget; directName?: { hostId: string; target: import('@agentmux/core/name-control').AgentNameTarget }; issue?: string }
+const sourceFactKey = (target: NonNullable<Candidate['readingTarget']>) => JSON.stringify([target.target.runtimeId, target.target.agentSessionId, target.target.reference.runtimeId, target.target.expectedAdmission])
+const candidateFactKey = (candidate: Candidate) => candidate.readingTarget ? sourceFactKey(candidate.readingTarget) : candidate.directName ? JSON.stringify([candidate.runtimeId, candidate.sid, candidate.directName.target.runtimeId, { kind: 'creation', operationId: candidate.directName.target.createOperationId }]) : candidate.target ? JSON.stringify([candidate.runtimeId, candidate.sid, candidate.target.target.reference, candidate.target.target.regionId]) : undefined
 type SourceChoice = { locations: FocusContextAccess['locations']; choose(location: FocusContextAccess['locations'][number]): void }
-type ReadFact = { key: string; session?: SessionSnapshot; name?: NameObservation; issue?: string;
+type ReadFact = { key: string; session?: SessionSnapshot; name?: NameObservation;
   conversationPort?: ConversationReadApi; readConversation?: () => Promise<void>; reading?: ReturnType<typeof projectConversationWindow>;
-  rename?: (name: string | null, expectedRevision: number) => Promise<boolean>; isCurrent?: () => boolean; nameSaveIssue?: string }
+  rename?: (name: string | null, expectedRevision: number) => Promise<boolean>; nameSaveIssue?: string | undefined; sessionIssue?: string | undefined; nameIssue?: string | undefined; readingIssue?: string | undefined; readingCurrent?: () => boolean }
 
 function SourceReader({ target, visible }: { target: SpaceMountRecord; visible: boolean }) {
   useSpaceSourceReader(target, visible)
   return null
 }
 
-/** Full source observations belong to this visible consumer, never the local Session Store. */
-function MemberReader({ candidate, visible, publish, refresh, previous }: { candidate: Candidate; visible: boolean; publish(key: string, fact: ReadFact): void; refresh: number; previous: ReadFact | undefined }) {
-  const target = candidate.target, address = target && JSON.stringify(target)
-  // The read/name owner follows the chosen exact member target; another legal
-  // display of this Session does not donate its admission or carrier.
-  const first = target ? candidate.locations.find(location => location.source.hostId === target.hostId &&
-    location.source.reference.runtimeId === target.target.reference.runtimeId && location.source.reference.spaceId === target.target.reference.spaceId &&
-    location.regionId === target.target.regionId)! : candidate.locations[0]!
+/** Native facts have their own Run generation; they never own durable labels or history. */
+function SessionReader({ candidate, visible, publish, refresh }: { candidate: Candidate; visible: boolean; publish(key: string, fact: ReadFact, sameIdentityOnly?: boolean): void; refresh: number }) {
+  const target = candidate.target, address = target && JSON.stringify([target, candidate.authorityKey]), key = candidateFactKey(candidate)
+  useEffect(() => {
+    if (!target || !key || !visible || !candidate.readingTarget) return
+    const controller = new AbortController(); let surface: SpaceMountMemberSurface | undefined
+    const emit = (fact: Partial<ReadFact>) => { if (!controller.signal.aborted) publish(candidate.key, { key, ...fact }) }
+    void api.spaceMounts.member(target, event => {
+      if (event.type === 'session') emit({ session: event.session, sessionIssue: undefined })
+      else if (event.type === 'error' || event.type === 'observation-error') emit({ sessionIssue: event.error.message })
+    }, controller.signal).then(async value => {
+      if (controller.signal.aborted) { await value.dispose(); return }; surface = value
+      try { emit({ session: await value.call('read', {}, controller.signal), sessionIssue: undefined }) }
+      catch (cause) { emit({ sessionIssue: String(cause instanceof Error ? cause.message : cause) }) }
+    }).catch(cause => emit({ sessionIssue: String(cause instanceof Error ? cause.message : cause) }))
+    return () => { controller.abort(); void Promise.resolve(surface?.dispose()).catch(() => {}) }
+  }, [address, key, visible, refresh, publish])
+  return null
+}
+
+/** The existing fact projection retains exact C/L labels and bounded records across Run observation gaps. */
+function MemberReader({ candidate, visible, publish, refresh }: { candidate: Candidate; visible: boolean; publish(key: string, fact: ReadFact, sameIdentityOnly?: boolean): void; refresh: number }) {
+  const target = candidate.readingTarget ?? candidate.target, direct = candidate.directName, address = target && JSON.stringify([target, direct]), key = candidateFactKey(candidate)
   useEffect(() => {
     if (!target || !visible) return
-    const controller = new AbortController()
-    let surface: SpaceMountMemberSurface | undefined
-    const conversationObservations = new Map<string, (event: ConversationObservation) => void>()
-    const current: ReadFact = { key: address!, ...(previous && previous.key === address && previous.nameSaveIssue ? { nameSaveIssue: previous.nameSaveIssue } : {}) }
-    const failures = new Map<'session' | 'watch' | 'name' | 'name-save' | 'conversation' | 'conversation-watch', string>()
-    if (current.nameSaveIssue) failures.set('name-save', current.nameSaveIssue)
-    const emit = () => {
-      if (failures.size) current.issue = [...failures.values()].join(' · ')
-      else delete current.issue
-      if (!controller.signal.aborted) publish(candidate.key, { ...current })
+    const controller = new AbortController(); let surface: import('../../../shared/space-mount').SpaceMountReadingSurface | undefined
+    const emit = (fact: Partial<ReadFact>) => { if (!controller.signal.aborted) publish(candidate.key, { key: key!, ...fact }) }
+    const member = candidate.readingTarget?.target
+    const name = member && { object: 'agent' as const, target: { reference: member.reference, regionId: member.regionId, runtimeId: member.runtimeId, agentSessionId: member.agentSessionId, expectedAdmission: member.expectedAdmission } }
+    // Name authority is independent of Native Session reads and the conversation reader.
+    const nameRead = direct && !member ? api.spaceMounts.call('agentNameInspect', { hostId: direct.hostId, expectedRuntimeId: direct.target.runtimeId, name: direct.target }, controller.signal)
+      : name ? api.spaceMounts.call('memberNameInspect', { hostId: target.hostId, reference: target.target.reference, name }, controller.signal) : undefined
+    void nameRead?.then(observed => {
+      const rename = async (value: string | null, expectedNameRevision: number) => {
+        const change = { kind: 'rename' as const, operationId: mintObjectId(), name: value, expectedNameRevision, source: 'manual' as const }
+        const result = direct && !member ? await api.spaceMounts.call('agentNameChange', { hostId: direct.hostId, expectedRuntimeId: direct.target.runtimeId, name: { ...direct.target, change } })
+          : await api.spaceMounts.call('memberNameChange', { hostId: target.hostId, reference: target.target.reference, name: { ...name!, change } })
+        if (result.applied) publish(candidate.key, { key: key!, name: { ...result, diskAcknowledgement: 'not-observed' }, nameIssue: undefined, nameSaveIssue: result.save.diskDurability === 'confirmed' ? undefined : `The original name was applied; its save is unconfirmed (${change.operationId}). ${result.save.issue ?? ''}` }, true)
+        return result.applied
+      }
+      emit({ name: observed, rename, nameIssue: undefined })
+    }).catch(cause => emit({ nameIssue: String(cause instanceof Error ? cause.message : cause) }))
+    const observations = new Map<string, (event: ConversationObservation) => void>()
+    const receive = (event: import('../../../shared/space-mount').SpaceMountMemberEvent) => {
+      if (event.type === 'conversation') observations.get(event.readerId)?.(event.observation)
+      else if (event.type === 'session' && !member) emit({ session: event.session, sessionIssue: undefined })
+      else if (event.type === 'error' || event.type === 'observation-error') emit(member ? { readingIssue: event.error.message } : { sessionIssue: event.error.message })
     }
-    const issue = (cause: unknown, step: 'session' | 'watch' | 'name' | 'conversation' | 'conversation-watch' = 'session') => {
-      failures.set(step, cause instanceof Error ? cause.message : String(cause)); emit()
-    }
-    void api.spaceMounts.member(target, event => {
-      if (controller.signal.aborted) return
-      if (event.type === 'session') { current.session = event.session; failures.delete('watch'); emit() }
-      else if (event.type === 'conversation') conversationObservations.get(event.readerId)?.(event.observation)
-      else if (event.type === 'error' || event.type === 'observation-error') issue(event.error.message, 'watch')
-    }, controller.signal).then(async value => {
-      if (controller.signal.aborted) { await value.dispose(); return }
-      surface = value
-      current.isCurrent = () => !controller.signal.aborted && current.session?.kind === 'agent' &&
-        current.session.control.agentSessionId === target.target.agentSessionId && current.session.control.run.runId === target.target.expectedRun.runId
-      current.conversationPort = sourceConversationPort(value, candidate.sid, conversationObservations, controller.signal)
-      let recapRequest: Promise<void> | undefined, watchStarted = false, epoch = 0, attemptedEpoch = -1
-      current.readConversation = () => {
-        if (!watchStarted) {
-          watchStarted = true
-          // The optional watcher never gates the original fixed read. Re-read
-          // once after its opening to close the initial read/watch gap.
-          void current.conversationPort!.observeConversation({ hostId: 'local', agentSessionId: candidate.sid }, event => {
-            if (event.kind === 'unavailable') issue(event.message ?? 'Conversation updates are unavailable.', 'conversation-watch')
-            else { failures.delete('conversation-watch'); epoch++; void current.readConversation?.() }
-          }, { signal: controller.signal }).then(() => {
-            if (!controller.signal.aborted) { failures.delete('conversation-watch'); epoch++; void current.readConversation?.() }
-          }).catch(cause => { if (!controller.signal.aborted) issue(cause, 'conversation-watch') })
+    const opening = candidate.readingTarget ? api.spaceMounts.reading(candidate.readingTarget, receive, controller.signal) : api.spaceMounts.member(candidate.target!, receive, controller.signal)
+    void opening.then(async value => {
+      if (controller.signal.aborted) { await value.dispose(); return }; surface = value
+      const port = sourceConversationPort(value, candidate.sid, observations, controller.signal)
+      let pending: Promise<void> | undefined, watched = false, epoch = 0, attemptedEpoch = -1
+      const readConversation = (): Promise<void> => {
+        if (!watched) {
+          watched = true
+          void port.observeConversation({ hostId: 'local', agentSessionId: candidate.sid }, event => {
+            if (event.kind === 'unavailable') emit({ readingIssue: event.message ?? 'Conversation updates are unavailable.' })
+            else { epoch++; void readConversation() }
+          }, { signal: controller.signal }).then(() => { if (!controller.signal.aborted) { epoch++; void readConversation() } })
+            .catch(cause => emit({ readingIssue: String(cause instanceof Error ? cause.message : cause) }))
         }
-        if (recapRequest) return recapRequest
+        if (pending) return pending
         if (attemptedEpoch === epoch) return Promise.resolve()
-        const requestedEpoch = epoch; attemptedEpoch = requestedEpoch
-        recapRequest = (async () => {
-          try {
-            current.reading = await readSourceConversationRecap(current.conversationPort!, candidate.sid, controller.signal)
-            failures.delete('conversation'); emit()
-          } catch (cause) { if (!controller.signal.aborted) issue(cause, 'conversation') }
-          finally {
-            recapRequest = undefined
-            if (!controller.signal.aborted && epoch !== requestedEpoch) void current.readConversation?.()
-          }
-        })()
-        return recapRequest
+        const requested = epoch; attemptedEpoch = requested
+        pending = readSourceConversationRecap(port, candidate.sid, controller.signal).then(reading => emit({ reading, readingIssue: undefined }))
+          .catch(cause => emit({ readingIssue: String(cause instanceof Error ? cause.message : cause) }))
+          .finally(() => { pending = undefined; if (!controller.signal.aborted && requested !== epoch) void readConversation() })
+        return pending
       }
-      emit()
-      try { current.session = await value.call('read', {}, controller.signal); failures.delete('session'); emit() } catch (cause) { issue(cause) }
-      const operationId = first.member.region.creationOperationId ?? (current.session?.kind === 'agent' ? current.session.creation?.createOperationId : undefined)
-      if (operationId) {
-        const direct = !first.member.region.creationOperationId && target.target.runtimeId === first.source.reference.runtimeId
-        const memberName = { object: 'agent' as const, target: { reference: first.source.reference, regionId: first.regionId,
-          runtimeId: target.target.runtimeId, agentSessionId: target.target.agentSessionId, expectedAdmission: { kind: 'creation' as const, operationId } } }
-        const agentName = { runtimeId: target.target.runtimeId, agentSessionId: target.target.agentSessionId, createOperationId: operationId }
-        try {
-          current.name = direct
-            ? await api.spaceMounts.call('agentNameInspect', { hostId: first.source.hostId, expectedRuntimeId: target.target.runtimeId, name: agentName }, controller.signal)
-            : await api.spaceMounts.call('memberNameInspect', { hostId: first.source.hostId, reference: first.source.reference, name: memberName }, controller.signal)
-          current.rename = async (name, expectedNameRevision) => {
-            const change = { kind: 'rename' as const, operationId: mintObjectId(), name, expectedNameRevision, source: 'manual' as const }
-            const result = direct
-              ? await api.spaceMounts.call('agentNameChange', { hostId: first.source.hostId, expectedRuntimeId: target.target.runtimeId, name: { ...agentName, change } })
-              : await api.spaceMounts.call('memberNameChange', { hostId: first.source.hostId, reference: first.source.reference, name: { ...memberName, change } })
-            if (result.applied) {
-              current.name = { ...result, diskAcknowledgement: 'not-observed' }; failures.delete('name')
-              if (result.save.diskDurability !== 'confirmed') {
-                current.nameSaveIssue = `The original name was applied, but its save is unconfirmed (${change.operationId}). ${result.save.issue ?? 'The original name and task are retained.'}`
-                failures.set('name-save', current.nameSaveIssue)
-              } else { delete current.nameSaveIssue; failures.delete('name-save') }
-              emit()
-            }
-            return result.applied
-          }
-          failures.delete('name'); emit()
-        } catch (cause) { issue(cause, 'name') }
+      emit({ conversationPort: port, readConversation, readingCurrent: () => !controller.signal.aborted })
+      if (!member) {
+        try { emit({ session: await (value as SpaceMountMemberSurface).call('read', {}, controller.signal), sessionIssue: undefined }) }
+        catch (cause) { emit({ sessionIssue: String(cause instanceof Error ? cause.message : cause) }) }
       }
-    }).catch(issue)
+    }).catch(cause => emit({ readingIssue: String(cause instanceof Error ? cause.message : cause) }))
     return () => { controller.abort(); void Promise.resolve(surface?.dispose()).catch(() => {}) }
   }, [address, visible, refresh, publish])
   return null
@@ -181,7 +167,13 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
     }
     return result
   }, [config?.workspaces])
-  const publish = useCallback((key: string, fact: ReadFact) => setFacts(previous => new Map(previous).set(key, fact)), [])
+  const publish = useCallback((key: string, fact: ReadFact, sameIdentityOnly = false) => setFacts(previous => {
+    const prior = previous.get(key), same = prior?.key === fact.key
+    if (sameIdentityOnly && !same) return previous
+    const next = same ? { ...prior, ...fact } : fact
+    if (same && prior.name && fact.name && prior.name.current.nameRevision > fact.name.current.nameRevision) next.name = prior.name
+    return new Map(previous).set(key, next)
+  }), [])
   const refresh = useCallback((key: string) => setRefreshes(previous => new Map(previous).set(key, (previous.get(key) ?? 0) + 1)), [])
   const ordinaryLocations = useMemo(() => {
     const result: Array<{ source: SpaceMountRecord; presentation: MountedSpaceRegion; reference: WorkbenchProjectionSelection }> = []
@@ -219,6 +211,7 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
         const sid = member.region.agentSessionId
         if (!sid) continue
         const fact = sessionFacts.get(member.key), current = fact?.current?.state
+        const observed = current?.status === 'observed' ? current : fact?.last?.state.status === 'observed' ? fact.last.state : undefined
         // Source-local is explicitly defined by the original Core member contract.
         const runtimeId = member.region.execution?.runtimeId ?? fact?.current?.member.runtimeId ??
           (member.region.execution?.hostId === 'local' ? snapshot.reference.runtimeId : undefined)
@@ -228,10 +221,17 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
           tabId: member.tab.tabId, regionId: member.region.regionId, member, snapshot, ...(reference ? { reference } : {}) }))
         const original: Candidate = result.get(identity) ?? { key: identity, ...(runtimeId ? { runtimeId } : {}), sid, locations: [] }
         original.locations.push(...locations)
-        if (!original.target && runtimeId && current?.status === 'observed' && current.authority.runtimeId === runtimeId && current.session.agentSessionId === sid)
+        const admission = member.region.association ? { kind: 'association' as const, operationId: member.region.association.operationId }
+          : member.region.creationOperationId ? { kind: 'creation' as const, operationId: member.region.creationOperationId } : undefined
+        if (!original.readingTarget && runtimeId && admission) original.readingTarget = { hostId: target.hostId, target: {
+          kind: 'conversation', reference: target.reference, regionId: member.region.regionId, runtimeId, agentSessionId: sid, expectedAdmission: admission } }
+
+        if (!original.target && runtimeId && observed?.authority.runtimeId === runtimeId && observed.session.agentSessionId === sid)
           original.target = { hostId: target.hostId, target: { reference: target.reference, regionId: member.region.regionId,
-            runtimeId, agentSessionId: sid, expectedRun: current.session.run,
+            runtimeId, agentSessionId: sid, expectedRun: observed.session.run,
             ...(member.region.creationOperationId ? { expectedAdmission: { kind: 'creation', operationId: member.region.creationOperationId } } : {}) } }
+        if (!original.directName && runtimeId === target.reference.runtimeId && observed?.authority.runtimeId === runtimeId && observed.session.agentSessionId === sid && observed.session.creation?.createOperationId) original.directName = { hostId: target.hostId, target: { runtimeId, agentSessionId: sid, createOperationId: observed.session.creation.createOperationId } }
+        if (observed) original.authorityKey = observed.authority.ownerInstanceId
         const issue = observation?.error ?? metadata[key]?.error ?? (current?.status === 'unavailable' || current?.status === 'unknown' ? current.issue.message : undefined)
         if (issue) original.issue = issue
         result.set(identity, original)
@@ -295,12 +295,16 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
     for (const candidate of candidates.values()) {
       const first = candidate.locations[0]!, workspace = focusSourceWorkspace(first.source, first.member, first.snapshot, config, runtimes)
       let focusedContext: FocusContext | undefined
-      const navigate = (surface: 'agents' | 'workbench', requested?: FocusContextAccess['locations'][number]) => {
+      const navigate = (surface: 'agents' | 'workbench' | 'close', requested?: FocusContextAccess['locations'][number]) => {
         const choose = (request: FocusContextAccess['locations'][number]) => {
           const location = candidate.locations.find(location => JSON.stringify([location.source.reference, location.tabId, location.regionId, location.reference]) ===
             JSON.stringify([request.source.reference, request.tabId, request.regionId, request.reference]))
           if (location) {
-            const selected = openSourceLocation(location, surface, onSelectLocation)
+            const selected = openSourceLocation(location, surface === 'close' ? 'workbench' : surface, onSelectLocation)
+            if (selected && surface === 'close') {
+              const reference = location.reference ?? useAppStore.getState().workbenchSpaceSelection
+              if (reference?.tabId && reference.regionId && reference.groupId) requestWorkbenchReferenceClose({ displayWorkspaceId: 'displayWorkspaceId' in reference ? reference.displayWorkspaceId : reference.workspaceId, groupId: reference.groupId, tabId: reference.tabId, regionId: reference.regionId })
+            }
             if (selected && surface === 'agents' && !location.reference && focusedContext) onFocusContext?.(focusedContext)
           }
           else useAppStore.getState().reportError(Error('This position belongs to another original task. The current task and workface are retained.'))
@@ -335,26 +339,32 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
         focusedContext = ordinary
         const localKey = focusContextIdentityKey(ordinary.hostId, ordinary.id)
         aliases.set(localKey, { identity: { runtimeId: candidate.runtimeId ?? null, agentSessionId: candidate.sid },
-          locations: candidate.locations, open: (location?: FocusContextAccess['locations'][number]) => navigate('workbench', location), select: (location?: FocusContextAccess['locations'][number]) => navigate('agents', location), refresh: refreshCandidate })
+          locations: candidate.locations, open: (location?: FocusContextAccess['locations'][number]) => navigate('workbench', location), select: (location?: FocusContextAccess['locations'][number]) => navigate('agents', location), refresh: refreshCandidate, close: (location?: FocusContextAccess['locations'][number]) => navigate('close', location) })
         identities.set(localKey, { tabs: [], occurrenceCount: candidate.locations.length,
           ...(resources.length ? { resources } : {}),
           locations: { status: occurrences.length === candidate.locations.length ? 'confirmed' : 'unconfirmed', occurrences } })
         continue
       }
-      const memberKey = candidate.target && JSON.stringify(candidate.target), read = facts.get(candidate.key)
+      const memberKey = candidateFactKey(candidate), read = facts.get(candidate.key)
       const current = read?.key === memberKey ? read : undefined
-      const issue = current?.issue ?? candidate.issue
+      const issue = [current?.sessionIssue, current?.nameIssue, current?.nameSaveIssue, current?.readingIssue, candidate.issue].filter(Boolean).join(' · ') || undefined
+      const session = !current?.sessionIssue && candidate.target && current?.session?.kind === 'agent' && current.session.control.run.runId === candidate.target.target.expectedRun.runId ? current.session : undefined
+      const reading = current?.reading && focusRecordFacts(current.reading.records)
+      const readingCurrent = current?.readingCurrent?.()
       const access: FocusContextAccess = { identity: { runtimeId: candidate.runtimeId ?? null, agentSessionId: candidate.sid },
-        locations: candidate.locations, ...(current?.session ? { session: current.session } : {}),
+        locations: candidate.locations, ...(session ? { session } : {}),
         ...(current?.name ? { nameRevision: current.name.current.nameRevision } : {}),
         ...(current?.rename ? { rename: current.rename } : {}),
-        ...(current?.isCurrent ? { isCurrent: current.isCurrent } : { isCurrent: () => false }),
-        ...(current?.conversationPort ? { conversationPort: current.conversationPort, conversationReference: { hostId: 'local', agentSessionId: candidate.sid }, ...(current.readConversation ? { readConversation: current.readConversation } : {}) } : {}),
-        ...(issue ? { issue } : {}), open: (location?: FocusContextAccess['locations'][number]) => navigate('workbench', location), select: (location?: FocusContextAccess['locations'][number]) => navigate('agents', location), refresh: refreshCandidate }
-      let context = current?.session ? current.reading
-        ? agentContextForConversation(current.session, current.reading.records, current.name?.current.override ?? undefined, workspace, null)
-        : agentContextForSession(current.session, undefined, current.name?.current.override ?? undefined, workspace, null)
-        : unobservedFocusContext(candidate.runtimeId ?? '', candidate.sid, workspace, first.member.tab.name ?? undefined, access.issue, access)
+        isCurrent: () => Boolean(session && candidate.target && session.control.run.runId === candidate.target.target.expectedRun.runId),
+        ...(readingCurrent && current?.conversationPort ? { conversationPort: current.conversationPort, conversationReference: { hostId: 'local', agentSessionId: candidate.sid }, ...(current.readConversation ? { readConversation: current.readConversation } : {}) } : {}),
+        ...(issue ? { issue } : {}), open: (location?: FocusContextAccess['locations'][number]) => navigate('workbench', location), select: (location?: FocusContextAccess['locations'][number]) => navigate('agents', location), refresh: refreshCandidate, close: (location?: FocusContextAccess['locations'][number]) => navigate('close', location) }
+      let context = session ? current?.reading
+        ? agentContextForConversation(session, current.reading.records, current.name?.current.override ?? undefined, workspace, null)
+        : agentContextForSession(session, undefined, current?.name?.current.override ?? undefined, workspace, null)
+        : { ...unobservedFocusContext(candidate.runtimeId ?? '', candidate.sid, workspace,
+          agentDisplayName({ userName: current?.name?.current.override, firstPrompt: reading?.firstPrompt,
+            fallbackLabel: current?.session?.label ?? 'Agent task', providerLabel: current?.session?.kind === 'agent' ? current.session.providerId : 'Agent task' }), access.issue, access),
+          ...(current?.session?.kind === 'agent' ? { providerId: current.session.providerId, executorId: current.session.executorId } : {}), recap: reading?.recap ?? null }
       const { control: _control, ...readOnly } = context
       context = { ...readOnly, id: candidate.runtimeId ? focusSourceContextId(candidate.runtimeId, candidate.sid) : candidate.key,
         hostId: focusSourceHostId(candidate.runtimeId ?? candidate.key), access, recap: context.recap ?? null }
@@ -366,7 +376,8 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
       identities.set(focusContextIdentityKey(context.hostId, context.id), { tabs: [], occurrenceCount: candidate.locations.length,
         ...(resources.length ? { resources } : {}),
         locations: { status: occurrences.length === candidate.locations.length ? 'confirmed' : 'unconfirmed', occurrences } })
-      readers.push(<MemberReader key={'member:' + candidate.key} candidate={candidate} visible={visible} publish={publish} refresh={refreshes.get(candidate.key) ?? 0} previous={current} />)
+      readers.push(<SessionReader key={'session:' + candidate.key} candidate={candidate} visible={visible} publish={publish} refresh={refreshes.get(candidate.key) ?? 0} />)
+      readers.push(<MemberReader key={'member:' + candidate.key} candidate={candidate} visible={visible} publish={publish} refresh={refreshes.get(candidate.key) ?? 0}  />)
     }
     return { contexts: rows, identities, aliases, issues, readers: <Fragment>{readers}</Fragment> }
   }, [sources, observations, metadata, candidates, contexts, ordinaryContexts, runtimes, facts, refreshes, inputs, layouts, config, visible, clock, publish, refresh, onSelectLocation, onChooseLocation, onFocusContext])

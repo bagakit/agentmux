@@ -32,7 +32,7 @@ export function AgentContextContent({ context, metadata, identity, headingAccess
   // A retained excerpt describes its original record, even after its known Run
   // was interrupted. The adjacent state and service reason keep that distinct
   // from a current reply or a working Agent.
-  const recap = context.bucket !== 'attention' && context.state !== 'disconnected' && (context.processState === 'running' || context.processState === 'exited' || presentation === 'card' && context.processState === 'interrupted') && !context.runUnobserved ? context.recap : null
+  const recap = context.bucket !== 'attention' ? context.recap : null
   const showActivity = showsActivity(context, presentation)
   const mandatory = mandatoryAgentContextDetails(context, presentation)
   const status = mandatory ? 1 : disclosure?.status ?? 1, summary = mandatory ? 1 : disclosure?.summary ?? 1
