@@ -1,4 +1,5 @@
 import { parseSpaceMemberTarget } from '@agentmux/core/space-member-codec'
+import { parseHostRouteAgentTarget } from '@agentmux/core/host-route'
 import type { AppConfig } from '../shared/contracts.js'
 import type { IpcMainInvokeEvent } from 'electron'
 import { parseFolderSpaceRegistration } from '@agentmux/core/space-folder'
@@ -20,13 +21,19 @@ function host(value: unknown): string {
 export function registerSpaceMountIpc(ports: {
   handle<T extends unknown[], R>(channel: string, listener: (event: IpcMainInvokeEvent, ...values: T) => R | Promise<R>): void
   config?(): AppConfig
-  runtime: Pick<RuntimeController, 'openMountedSpaceMember' | 'spaceMountResources' | 'mountedSpaceHostChoices' | 'registerFolderSpace' | 'inspectFolderSpace' | 'readMountedSpace' | 'applyMountedSpace' | 'watchMountedSpace' | 'mountedSpaceExecutors' | 'openMountedSpace' | 'inspectMountedSpaceRequest' | 'watchMountedSpaceSessions'>
+  runtime: Pick<RuntimeController, 'openMountedSpaceMember' | 'spaceMountResources' | 'mountedSpaceHostChoices' | 'mountedSpaceRouteChoices' | 'mountedSpaceRouteExecutors' | 'registerFolderSpace' | 'inspectFolderSpace' | 'readMountedSpace' | 'applyMountedSpace' | 'watchMountedSpace' | 'mountedSpaceExecutors' | 'openMountedSpace' | 'inspectMountedSpaceRequest' | 'watchMountedSpaceSessions'>
 }) {
   const reads = new SessionHistoryReadOwners()
   const members = new Map<string, SpaceMountMemberSurface>()
   ports.handle('spaceMounts:call', (event, token: string, method: unknown, value: unknown) => sessionInputOperationResult(() => reads.read(event.sender, token, async signal => {
     if (method === 'resources') { const p = fields(value, ['hostId']); return await ports.runtime.spaceMountResources(host(p.hostId), signal) }
     if (method === 'hostChoices') { const p = fields(value, ['hostId', 'reference']); return await ports.runtime.mountedSpaceHostChoices({ hostId:host(p.hostId),reference:parseSpaceAuthorityRef(p.reference) },signal) }
+    if (method === 'routeChoices' || method === 'routeExecutors') {
+      const p = fields(value, ['hostId', 'reference', ...(method === 'routeExecutors' ? ['agentTarget'] : [])])
+      const target = { hostId: host(p.hostId), reference: parseSpaceAuthorityRef(p.reference) }
+      return method === 'routeChoices' ? await ports.runtime.mountedSpaceRouteChoices(target, signal)
+        : await ports.runtime.mountedSpaceRouteExecutors(target, parseHostRouteAgentTarget(p.agentTarget), signal)
+    }
     if (method === 'register') { const p = fields(value, ['hostId', 'registration']); return await ports.runtime.registerFolderSpace(host(p.hostId), parseFolderSpaceRegistration(p.registration), signal) }
     if (method === 'inspectRegistration') { const p = fields(value, ['hostId', 'registration']); return await ports.runtime.inspectFolderSpace(host(p.hostId), parseFolderSpaceRegistration(p.registration), signal) }
     if (method === 'snapshot' || method === 'apply') {

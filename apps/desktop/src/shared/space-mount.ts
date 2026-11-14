@@ -19,6 +19,8 @@ export type SpaceMountHostChoices = { runtimeId: string; hosts: Array<{ hostId: 
 export type SpaceMountMethods = {
   resources: { input: { hostId: string }; result: SpaceMountResources }
   hostChoices: { input: SpaceMountTarget; result: SpaceMountHostChoices }
+  routeChoices: { input: SpaceMountTarget; result: import('@agentmux/core/host-route').HostRouteChoices }
+  routeExecutors: { input: SpaceMountTarget & { agentTarget: import('@agentmux/core/host-route').HostRouteAgentTarget }; result: import('@agentmux/core/host-route').HostRouteExecutors }
   register: { input: { hostId: string; registration: FolderSpaceRegistration }; result: FolderSpaceReceipt }
   inspectRegistration: { input: { hostId: string; registration: FolderSpaceRegistration }; result: import('@agentmux/core/space-folder').FolderSpaceRegistrationInspection | null }
   snapshot: { input: SpaceMountTarget; result: SpaceSnapshot }

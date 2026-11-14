@@ -2706,6 +2706,14 @@ export class RuntimeController {
     const { rpc, context } = await this.mountedSpaceControl(target, signal)
     return await rpc.call('settings.executors.discover', { hostId: agentHostId, refresh: false }, context)
   }
+  async mountedSpaceRouteChoices(target: SpaceMountTarget, signal?: AbortSignal) {
+    const { rpc, context } = await this.mountedSpaceControl(target, signal)
+    return await rpc.call('route.choices', {}, context)
+  }
+  async mountedSpaceRouteExecutors(target: SpaceMountTarget, agentTarget: import('@agentmux/core/host-route').HostRouteAgentTarget, signal?: AbortSignal) {
+    const { rpc, context } = await this.mountedSpaceControl(target, signal)
+    return await rpc.call('route.executors', { agentTarget, refresh: false }, context)
+  }
   async openMountedSpace(target: SpaceMountTarget, request: import('@agentmux/core').AgentMuxRpcParams<'agent.open'>, signal?: AbortSignal) {
     if (request.destination.spaceId !== target.reference.spaceId) throw new AgentMuxError('This creation belongs to another original Space. Keep both requests.', 'SPACE_PARENT_MISMATCH')
     const { rpc, context } = await this.mountedSpaceControl(target, signal)

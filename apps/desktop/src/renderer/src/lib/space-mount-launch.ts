@@ -1,9 +1,10 @@
 import type { AgentMuxRpcParams, AgentMuxRpcResult } from '@agentmux/core'
+import { parseHostRouteAgentTarget, type HostRouteAgentTarget } from '@agentmux/core/host-route'
 import type { SpaceMountRecord } from '../../../shared/space-mount'
 import { editMountedSpaceInput, mountedSpaceInputs, mountedSpaceInput } from './space-mount-view'
 
 export type MountedLauncherSlot = { kind: 'region'; tabId: string; regionId: string } | { kind: 'new-work'; zoneId: string }
-export type MountedLauncherSelection = { agentHostId: string; executorId: string; prompt?: string }
+export type MountedLauncherSelection = { agentHostId: string; agentTarget?: HostRouteAgentTarget | undefined; executorId: string; prompt?: string }
 /** Original user intent, retained beside this Window's private view; never a source Session or phase. */
 export type MountedAgentOpenInput = { kind: 'agent-open'; target: SpaceMountRecord; slot: MountedLauncherSlot;
   request: AgentMuxRpcParams<'agent.open'> & { operationId: string }; submitted: boolean; receipt?: AgentMuxRpcResult<'agent.open'>; issue?: string }
@@ -17,6 +18,10 @@ export function mountedLauncherSelection(value: unknown, key: string, slot: Moun
   const selected = entry.launchers[mountedLauncherSlotKey(entry.target.reference, slot)]
   if (selected === undefined) return undefined
   if (!object(selected) || !text(selected.agentHostId) || typeof selected.executorId !== 'string' || selected.prompt !== undefined && typeof selected.prompt !== 'string') return unavailable()
+  if (selected.agentTarget !== undefined) {
+    const target = parseHostRouteAgentTarget(selected.agentTarget)
+    if (target.hostId !== selected.agentHostId) return unavailable()
+  }
   return selected as MountedLauncherSelection
 }
 export function editMountedLauncherSelection(value: unknown, key: string, slot: MountedLauncherSlot, selection: MountedLauncherSelection) {
@@ -44,6 +49,7 @@ export function mountedAgentOpenInput(value: unknown, key: string): MountedAgent
     content.prompt !== undefined && typeof content.prompt !== 'string' || !object(destination) || destination.spaceId !== entry.target.reference.spaceId ||
     destination.zoneId !== entry.target.zoneId || destination.newTab !== true) return unavailable()
   if (content.agentTarget !== undefined && (!object(content.agentTarget) || !text(content.agentTarget.hostId) || !text(content.agentTarget.runtimeId))) return unavailable()
+  if (object(content.agentTarget) && content.agentTarget.adoptedRoute !== undefined) parseHostRouteAgentTarget(content.agentTarget)
   const result = entry as MountedAgentOpenInput
   return mountedAgentOpenKey(result.target, result.slot) === key ? result : unavailable()
 }
