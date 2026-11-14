@@ -15,9 +15,11 @@ export type ComposerTextareaProps = Omit<
   value: string
   onValueChange: (value: string) => void
   variant?: 'compact'
+  /** Gives the compact field more editing room without replacing the native control. */
+  expanded?: boolean
 }
 
-export function ComposerTextarea({ value, onValueChange, variant, className, ...rest }: ComposerTextareaProps) {
+export function ComposerTextarea({ value, onValueChange, variant, expanded, className, ...rest }: ComposerTextareaProps) {
   const [composition, setComposition] = useState<ComposerCompositionState>(null)
   const ime = composerCompositionHandlers({
     state: composition,
@@ -28,6 +30,7 @@ export function ComposerTextarea({ value, onValueChange, variant, className, ...
     <Textarea
       {...rest}
       className={variant === 'compact' ? ['ui-input--compact-editor', className].filter(Boolean).join(' ') : className ?? ''}
+      data-expanded={variant === 'compact' && expanded || undefined}
       value={composerRenderValue(value, composition)}
       onChange={(event) => ime.change(event.target.value)}
       onCompositionStart={(event) => ime.compositionStart(event.currentTarget.value)}
