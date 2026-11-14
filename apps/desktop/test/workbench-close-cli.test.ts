@@ -217,6 +217,14 @@ it.runIf(business)('actual Source Focus last original position disappears after 
   await sourceViewCloseJourney('focus-last-visible')
 })
 
+it.runIf(business)('actual Source Focus closes an original occurrence without a local display projection', async () => {
+  await sourceViewCloseJourney('focus-unprojected')
+})
+
+it.runIf(business)('actual Source Focus refuses to apply an unprojected close plan that gained another Region', async () => {
+  await sourceViewCloseJourney('focus-unprojected-changed')
+})
+
 async function sourceViewCloseJourney(entry: string) {
   const f = await fixture({ originalSource: true })
   const inputs = entry === 'focus-cancel' || entry === 'focus-location-failure' ? (['createAgent', 'resumeAgent', 'restartAgent', 'reopenAgent', 'writeAgent', 'pasteAgent', 'submitAgentPrompt'] as const).map(method => vi.spyOn(f.host.client, method)) : []
@@ -300,6 +308,10 @@ async function sourceViewCloseJourney(entry: string) {
   } else {
     let card: HTMLElement | undefined
     await vi.waitFor(async () => { await act(async () => {}); card = [...node.querySelectorAll<HTMLElement>('.focus-context[data-session-id]')].find(card => card.textContent?.includes(f.agent.agentSessionId)); expect(card).toBeDefined() }, { timeout: 10000 })
+    if (entry.startsWith('focus-unprojected')) {
+      await act(async () => observer.setState({ tabs: {}, layouts: {} }))
+      expect(workbenchSelectionCatalog(observer.getState()).locations).toHaveLength(0)
+    }
     await act(async () => card!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2 })))
     await vi.waitFor(() => expect([...document.querySelectorAll('[role="menuitem"]')].some(item => item.textContent === 'Close workface…')).toBe(true))
     await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Close workface…')!.click())
@@ -335,9 +347,14 @@ async function sourceViewCloseJourney(entry: string) {
   if (process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM && entry === 'focus-menu') await writeFile(process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM + '-choice.html', document.body.innerHTML)
   const select = document.querySelector<HTMLElement>('[aria-label="Original position"]')!
   await act(async () => select.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
-  await vi.waitFor(() => expect(document.querySelectorAll('[role="menuitemradio"]:not([data-missing])').length).toBe(2))
+  await vi.waitFor(() => expect(document.querySelectorAll('[role="listbox"][aria-label="Original position"] [role="option"]:not([data-missing])').length).toBe(2))
   if (process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM && entry === 'focus-menu') await writeFile(process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM + '-choice-open.html', document.body.innerHTML)
-  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]:not([data-missing])')].find(option => option.textContent?.includes('otherDisplay'))!.click())
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="listbox"][aria-label="Original position"] [role="option"]:not([data-missing])')].find(option => option.textContent?.includes('otherDisplay'))!.click())
+  if (entry === 'focus-unprojected-changed') {
+    const { addWorkbenchRegion } = await import('../src/renderer/src/lib/workbench-tabs.js')
+    f.store.setState(state => ({ tabs: { ...state.tabs, [originalTab]: addWorkbenchRegion(state.tabs[originalTab]!, originalRegion, 'right',
+      { kind: 'launcher', regionId: 'new-neighbor', workspaceId: 'W' }) } }))
+  }
   if (entry.startsWith('changed-')) {
     const execute = f.store.getState().executeWorkbenchClose
     let changed = false
@@ -352,6 +369,14 @@ async function sourceViewCloseJourney(entry: string) {
     } })
   }
   await act(async () => document.querySelector<HTMLElement>('[data-confirm-label="Review close"]')!.click())
+  if (entry === 'focus-unprojected-changed') {
+    await vi.waitFor(() => expect(document.querySelector('.confirmation-dialog')?.textContent).toContain('Original position changed'))
+    expect(calls.mock.calls.some(([method, input]) => method === 'close' && (input as { method: string }).method === 'space.close.apply')).toBe(false)
+    expect(f.store.getState().tabs[originalTab]?.regions['new-neighbor']).toBeDefined()
+    expect(f.store.getState().layouts.otherDisplay!.groups[0]!.tabOrder).toContain(originalTab)
+    expect(localClose).not.toHaveBeenCalled(); expect(f.stops).not.toHaveBeenCalled()
+    return
+  }
   if (entry.startsWith('changed-')) {
     await vi.waitFor(() => expect(document.querySelector('[data-confirm-label="Check original status"]:not([disabled])')).not.toBeNull())
     await act(async () => document.querySelector<HTMLElement>('[data-confirm-label="Check original status"]:not([disabled])')!.click())
@@ -399,7 +424,10 @@ async function sourceViewCloseJourney(entry: string) {
   expect(f.store.getState().layouts.W!.groups[0]!.tabOrder).toContain('healthy-tab')
   expect(f.store.getState().agentComposerDrafts['healthy-region']).toBe('Original unsent Agent draft')
   expect(observer.getState().agentComposerDrafts[f.agent.agentSessionId]).toBe('Observer draft must not approve original close')
-  expect(observer.getState().tabs[tabId]).toBeDefined()
+  if (entry === 'focus-unprojected') {
+    expect(calls.mock.calls.find(([method]) => method === 'closeLocations')?.[1]).toMatchObject({ ...destination,
+      member: { scope: 'tab', tabId: originalTab, regionId: originalRegion, kind: 'agent', agentSessionId: f.agent.agentSessionId } })
+  } else expect(observer.getState().tabs[tabId]).toBeDefined()
   expect(localClose).not.toHaveBeenCalled(); expect(f.stops).not.toHaveBeenCalled()
   expect(calls.mock.calls.filter(([method, input]) => method === 'close' && (input as { method: string }).method === 'space.close.apply')).toHaveLength(1)
   expect((await f.native.client.status(f.other.runId)).state.type).toBe('running')

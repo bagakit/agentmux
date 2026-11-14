@@ -94,7 +94,7 @@ it('changing a Host configuration revokes only its old alias witness until the c
   useAppStore.getState().mountSpace(target, false)
   const session = composerSession('original-sid'), context = agentContextForSession(session, undefined, 'Keep original task', resource, null), contexts = [context]
   function Consumer() {
-    const value = useFocusSources({ visible: true, contexts })
+    const value = useFocusSources({ visible: true, contexts, onCloseOriginal: () => {} })
     return <>{value.readers}<output data-aliases>{value.aliases.size}</output><output data-source-contexts>{value.contexts.length}</output></>
   }
   await dom.render(<Consumer />)

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { splitWorkbenchRegion } from '@agentmux/layout'
+import { removeTab, splitWorkbenchRegion } from '@agentmux/layout'
 import { requestWorkbenchReferenceClose } from '../src/renderer/src/lib/workbench-close-request'
 import { afterEach, expect, it, vi } from 'vitest'
 import { tmpdir } from 'node:os'
@@ -14,6 +14,7 @@ import { WorkbenchCloseRequests } from '../src/renderer/src/hooks/useWorkbenchTa
 import { api } from '../src/renderer/src/lib/api'
 import { confirmedOriginalRawLocations, ordinaryAgentSpaceMember, useAppStore } from '../src/renderer/src/store'
 import { desktopWorkbenchFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
+import { workbenchSelectionCatalog } from '../src/renderer/src/lib/desktop-focus-navigation'
 import { WorkbenchUserStateStore } from '../src/main/workbench-user-state'
 import { DesktopControlIpcBridge } from '../src/main/control-ipc-bridge'
 import { createDesktopWorkbenchCloseOwner } from '../src/main/workbench-close-owner'
@@ -27,7 +28,7 @@ import { providerCatalogReader, historySourcesReader } from './helpers/startup-o
 const dom = composerDOM(), cleanup: Array<() => unknown | Promise<unknown>> = [], SID = 'original-unconfirmed-close'
 afterEach(async () => { await dom.render(null); for (const close of cleanup.splice(0).reverse()) await close(); vi.unstubAllGlobals() })
 /** Real Core spatial/readers and original durable Main/Renderer close owner; Native process observation is the existing fixture leaf. */
-async function fixture(execution: 'none' | 'runless' | 'known' = 'none', nonlocal = false, multiple = false, alias = false, observed = true, split = false) {
+async function fixture(execution: 'none' | 'runless' | 'known' = 'none', nonlocal = false, multiple = false, alias = false, observed = true, split = false, placement?: 'replaced' | 'unplaced') {
   vi.stubGlobal('crypto', webcrypto)
   const disposers: typeof cleanup = [], f = await createSpaceSessionsFixture(disposers)
   const privateRoots = new Set([f.b.root, f.d.root])
@@ -46,7 +47,16 @@ async function fixture(execution: 'none' | 'runless' | 'known' = 'none', nonloca
     graph.resources['region:' + nextId] = graph.resources['region:' + oldId]!; delete graph.resources['region:' + oldId]
     admitted.address.regionId = nextId
   }
-  
+  if (placement === 'replaced') {
+    const tab = graph.tabs.find(tab => tab.tabId === admitted.address.tabId)!
+    tab.regionIds = ['replacement-browser-region']
+    graph.regions.push({ tabId: tab.tabId, regionId: 'replacement-browser-region', kind: 'browser', browserId: 'replacement-browser', agentSessionId: null, runId: null, execution: null })
+    graph.tabLayouts[tab.tabId] = { root: { type: 'leaf', regionId: 'replacement-browser-region' }, activeRegionId: 'replacement-browser-region' }
+  }
+  if (placement === 'unplaced') {
+    const { displayWorkspaceId, groupId, tabId } = admitted.address
+    graph.layouts[displayWorkspaceId] = removeTab(graph.layouts[displayWorkspaceId]!, groupId, tabId)
+  }
   if (split) {
     const tab = graph.tabs.find(tab => tab.tabId === admitted.address.tabId)!
     tab.regionIds.push('retained-launcher-region')
@@ -60,7 +70,7 @@ async function fixture(execution: 'none' | 'runless' | 'known' = 'none', nonloca
   config.hosts = [{ id: 'local', kind: 'local', label: 'Original device' }, { id: 'remote', kind: 'ssh', hostname: 'private.invalid', label: 'Different device' }]
   config.workspaces = [{ id: 'original-b-project', hostId: 'local', name: 'Original', kind: 'folder', path: '/b/project' }]
   const main = spaceMountTransport(cleanup, ['local', 'remote'].map(id => ({ id, carrier: { forwardRpc: f.b.rpc.call.bind(f.b.rpc), subscribeRpc: f.b.rpc.subscribe.bind(f.b.rpc) } })), config)
-  vi.spyOn(api.spaceMounts, 'call').mockImplementation(main.api.call)
+  const sourceCalls = vi.spyOn(api.spaceMounts, 'call').mockImplementation(main.api.call)
   vi.spyOn(api.spaceMounts, 'watch').mockImplementation(main.api.watch); vi.spyOn(api.spaceMounts, 'sessions').mockImplementation(main.api.sessions)
   vi.spyOn(api.spaceMounts, 'member').mockImplementation(main.api.member); vi.spyOn(api.spaceMounts, 'reading').mockImplementation(main.api.reading)
   const user = new WorkbenchUserStateStore(join(f.b.root, 'private-user.json'))
@@ -88,10 +98,41 @@ async function fixture(execution: 'none' | 'runless' | 'known' = 'none', nonloca
   await vi.waitFor(() => expect(useAppStore.getState().mountedSpaceObservations[spaceMountKey(f.reference)]?.snapshot?.scope.regions.some(region => region.tabId === admitted.address.tabId && region.regionId === admitted.address.regionId && region.agentSessionId === SID)).toBe(true))
   const sourceId = execution === 'none' ? JSON.stringify(['unconfirmed-region', f.reference, admitted.address.regionId]) : focusSourceContextId(alias ? f.d.owner.runtimeId : f.b.owner.runtimeId, SID)
   const card = () => [...dom.container.querySelectorAll<HTMLElement>('.focus-context[data-session-id]')].find(node => node.dataset.sessionId === sourceId)!
-  await vi.waitFor(() => expect(card(), sourceId).toBeDefined())
+  if (placement !== 'replaced') await vi.waitFor(() => expect(card(), sourceId).toBeDefined())
   const close = async () => { await act(async () => card().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }))); const item = () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent === 'Close workface…'); await vi.waitFor(() => expect(item()).toBeDefined()); await act(async () => item()!.click()) }
-  return { ...f, original, admitted, target, calls, lifecycle, close, tabId: admitted.address.tabId, regionId: admitted.address.regionId }
+  return { ...f, original, admitted, target, calls, sourceCalls, lifecycle, card, close, tabId: admitted.address.tabId, regionId: admitted.address.regionId }
 }
+it('a retained Agent Region replaced by a Browser does not offer a current Focus workface', async () => {
+  const f = await fixture('none', false, false, false, false, false, 'replaced')
+  expect(f.card()).toBeUndefined()
+  expect(useAppStore.getState().agentComposerDrafts[SID]).toBe('Original draft')
+  expect((await f.b.core.readAgentSession(SID))!.run).toEqual(f.original.run)
+  await expect(api.spaceMounts.call('closeLocations', { hostId: f.target.hostId, reference: f.target.reference,
+    member: { scope: 'tab', tabId: f.tabId, regionId: f.regionId, kind: 'agent', agentSessionId: SID } })).rejects.toMatchObject({ code: 'WORKBENCH_CLOSE_STALE' })
+  const original = await f.b.spatial.read()
+  expect(original?.graph.tabs.find(tab => tab.tabId === f.tabId)?.regionIds).toEqual(['replacement-browser-region'])
+  expect(original?.graph.regions.find(region => region.regionId === 'replacement-browser-region')?.kind).toBe('browser')
+  expect(f.lifecycle).not.toHaveBeenCalled()
+})
+it('a current member without an original position gets a dismissible Focus close explanation', async () => {
+  const f = await fixture('none', false, false, false, false, false, 'unplaced')
+  await act(async () => useAppStore.setState({ tabs: {}, layouts: {} }))
+  expect(workbenchSelectionCatalog(useAppStore.getState()).locations).toHaveLength(0)
+  await f.close()
+  const done = () => document.querySelector<HTMLElement>('[data-confirm-label="Done"]:not([disabled])')
+  await vi.waitFor(() => {
+    expect(document.querySelector('.confirmation-dialog')?.textContent).toContain('The original workface has no confirmed display position')
+    expect(done()).not.toBeNull()
+  })
+  expect(f.sourceCalls.mock.calls.filter(([method]) => method === 'closeLocations')).toHaveLength(1)
+  expect(f.sourceCalls.mock.calls.some(([method]) => method === 'close')).toBe(false)
+  expect(f.calls).not.toHaveBeenCalled()
+  await act(async () => done()!.click())
+  await vi.waitFor(() => expect(document.querySelector('.confirmation-dialog')).toBeNull())
+  expect(f.card()).toBeDefined()
+  expect((await f.b.core.readAgentSession(SID))!.run).toEqual(f.original.run)
+  expect(f.lifecycle).not.toHaveBeenCalled()
+})
 it.each(['none', 'runless'] as const)('actual Focus closes confirmed raw position with %s execution while preserving original Session and draft', async execution => {
   const f = await fixture(execution, false, false, false, execution !== 'runless')
   expect(confirmedOriginalRawLocations(useAppStore.getState(), f.target)).toHaveLength(1)

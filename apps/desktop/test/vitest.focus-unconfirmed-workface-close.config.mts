@@ -7,6 +7,9 @@ import assert from 'node:assert/strict'
 const root = resolve(import.meta.dirname, '../../..')
 const sources = 'apps/desktop/src/renderer/src/lib/use-focus-sources.tsx'
 const mutations: Record<string, [string, string, string]> = {
+  'retained-member': [sources, 'if (!sid || !member.tab.regionIds.includes(member.region.regionId)) continue', 'if (!sid) continue'],
+  'source-dispatch': [sources, 'onCloseOriginal({ destination:', 'void ({ destination:'],
+  'stale-source-member': ['apps/desktop/src/main/source-workbench-close.ts', '!tab?.regionIds.includes(member.regionId)', '!tab'],
   'reading-erases-source': ['apps/desktop/src/renderer/src/store.ts', 'mountedSpaceInputs: reconciled.mountedSpaceInputs ?? state.mountedSpaceInputs', 'mountedSpaceInputs: reconciled.mountedSpaceInputs'],
   'execution-gate': [sources, 'return confirmedOriginalRawLocations(state, target).filter(reference => {', "return confirmedOriginalRawLocations(state, target).filter(reference => ordinaryAgentSpaceMember({ tabId: reference.tabId, regionId: reference.regionId, sessionId: candidate.sid }).kind === 'foreign').filter(reference => {"],
   'nonlocal-collision': [sources, 'return confirmedOriginalRawLocations(state, target).filter(reference => {', 'return workbenchSelectionCatalog(state).locations.filter(reference => {'],

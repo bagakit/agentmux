@@ -24,7 +24,7 @@ function VisibleConsumer({ target, visible, label }: { target: SpaceMountRecord;
   const refresh = useSpaceSourceReader(target, visible)
   return visible ? <button onClick={refresh}>{label}</button> : null
 }
-function FocusReaders({ visible }: { visible: boolean }) { return useFocusSources({ visible, contexts: [] }).readers }
+function FocusReaders({ visible }: { visible: boolean }) { return useFocusSources({ visible, contexts: [], onCloseOriginal: () => {} }).readers }
 it('ordinary source readers share the existing real Main/Core scope and only the last visible consumer releases it', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   const f = await createSpaceSessionsFixture(cleanup)

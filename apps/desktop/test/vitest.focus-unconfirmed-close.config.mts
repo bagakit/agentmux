@@ -6,6 +6,7 @@ import assert from 'node:assert/strict'
 import base from './vitest.workbench-close.config.mts'
 const root = resolve(import.meta.dirname, '../../..')
 const mutations: Record<string, [string, string, string]> = {
+  'broaden-focus-close': ['apps/desktop/src/renderer/src/hooks/useSourceWorkbenchClose.tsx', '      value.onlyMember && record.plan.projection.surfaces.length !== 1 ||', ''],
   'failure-done': ['apps/desktop/src/renderer/src/hooks/useSourceWorkbenchClose.tsx', '      if (value.issue) finish(false)', '      // Test mutation: failed position lookup cannot dismiss.'],
   'first-position': ['apps/desktop/src/renderer/src/hooks/useSourceWorkbenchClose.tsx', 'value.choices.locations.find(location => choiceKey(location) === value.selected)', 'value.choices.locations[0]'],
   'recovered-member': ['apps/desktop/src/renderer/src/hooks/useSourceWorkbenchClose.tsx', '      accept(value, operation)', '      // Test mutation: recovered member check removed.'],
