@@ -73,13 +73,6 @@
 .mounted-space-agent > .agent-body { flex:1 1 0; min-height:100px; }
 .mounted-space-agent__terminal { position:relative; min-width:0; height:100%; min-height:0; }
 .mounted-space-agent__terminal[hidden] { display:none; }
-.mounted-space-agent__heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
-.mounted-space-agent__heading > div { display:flex; align-items:center; gap:8px; min-width:0; }
-.mounted-space-agent__heading strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--fs-body); }
-.mounted-space-agent__heading span { font-size:var(--fs-meta); color:var(--text-3); white-space:nowrap; }
-.mounted-space-agent__heading button[aria-pressed='true'] { background:var(--surface-2); color:var(--text); }
-.mounted-space-agent__issue { margin:0; color:var(--text-2); font-size:12px; line-height:1.6; }
-.mounted-space-agent__composer { min-width:0; max-height:40vh; overflow:auto; }
 .mounted-space-agent__inputs ul { display:grid; gap:12px; list-style:none; padding:0; margin:12px 0 0; }
 .mounted-space-agent__inputs { max-height:36%; overflow:auto; font-size:var(--fs-meta); color:var(--text-2); }
 .mounted-space-agent__inputs > summary { cursor:pointer; color:var(--text-3); }

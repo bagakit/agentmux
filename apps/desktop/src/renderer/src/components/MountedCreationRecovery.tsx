@@ -3,6 +3,7 @@ import type { SpaceMountMethods, SpaceMountRecord } from '../../../shared/space-
 import type { MountedSpaceRegion } from '../lib/space-mount-view'
 import { api } from '../lib/api'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
+import { ServiceWindowNotice } from './ServiceWindowNotice'
 
 type Report = SpaceMountMethods['open']['result']
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error)
@@ -10,9 +11,9 @@ const sameReference = (a: NonNullable<Report['execution']>['reference'], b: NonN
   a.bindingId === b.bindingId && a.agentSessionId === b.agentSessionId && a.createOperationId === b.createOperationId
 
 /** A visible reader of one original Source operation. Core retains intent and all effects. */
-export function MountedCreationRecovery({ target, member, visible, onRefresh, reference, supplement, sessionIssue }: {
+export function MountedCreationRecovery({ target, member, visible, onRefresh, reference, supplement, sessionIssue, layout = 'surface' }: {
   target: SpaceMountRecord; member: MountedSpaceRegion; visible: boolean; onRefresh?: (() => void) | undefined
-  reference: ReactNode; supplement: ReactNode; sessionIssue?: string | undefined
+  reference: ReactNode; supplement?: ReactNode; sessionIssue?: string | undefined; layout?: 'inline' | 'surface'
 }) {
   const original = member.region, operationId = original.creationOperationId!, agentSessionId = original.agentSessionId!
   const key = JSON.stringify([target.hostId, target.reference, member.tab.tabId, original.regionId, operationId, agentSessionId, original.execution])
@@ -74,6 +75,21 @@ export function MountedCreationRecovery({ target, member, visible, onRefresh, re
   }
   const creationIssues = report?.issues.filter(issue => issue.step === 'creation') ?? []
   const observerIssues = report?.issues.filter(issue => issue.step === 'observation') ?? []
+  const actions = <>
+    {continuation ? <button type="button" className="primary-button" disabled={busy === scope.current} onClick={() => void continueOriginal()}>Continue original request</button> : null}
+    <button type="button" className="small-button" onClick={() => { void inspect(); onRefresh?.() }}>Check original status</button>
+  </>
+  if (layout === 'inline') return <ServiceWindowNotice disclosure={{ scope: key, id: 'original-creation',
+    cause: current.error ?? report?.outcome ?? 'creation-unconfirmed', visible }}
+    notice={{ kind: 'indeterminate', notice: {
+      step: retired ? 'Original Session retired' : report?.agent ? 'Original Agent confirmed; Session observation unconfirmed' : 'Agent creation unconfirmed',
+      mode: [retired ? 'The original Core confirmed retirement. No replacement was created.'
+        : report?.agent ? 'The Source confirmed this original Agent. Its Session observation has not arrived yet.' : 'The Source retained this original task; its Agent creation is unconfirmed.',
+        ...creationIssues.map(issue => issue.message), ...observerIssues.map(issue => issue.message), value?.diagnostic?.message,
+        current.error, sessionIssue, feedback?.key === key ? feedback.message : undefined].filter(Boolean).join(' '),
+      restore: continuation ? 'Continue uses the retained original request. Your conversation and private draft are kept.'
+        : 'Check this same original request. Conversation reading and its original authority remain separate.'
+    } }} actions={actions} />
   return <FullPageLoadingSurface scope="region" visible={visible} phase={busy === scope.current ? 'recovering' : current.reading && !report ? 'loading' : 'parked'}
     eyebrow="Original creation" title={busy === scope.current ? 'Continuing the original request' : retired ? 'Original Session retired' : report?.agent ? current.error ? 'Last confirmed original Agent' : 'Original Agent confirmed' : 'Agent creation unconfirmed'}
     description={<>
@@ -86,10 +102,7 @@ export function MountedCreationRecovery({ target, member, visible, onRefresh, re
       {feedback?.key === key ? <p role="status">{feedback.message}</p> : null}
     </>}
     detail={retired ? 'Retirement is separate from a connection failure. No replacement task has been created.' : continuation ? 'Continue uses the retained original request. Your private draft stays here.' : 'Check the original creation status. Missing startup receipts remain unconfirmed; your task and draft are kept.'}
-    actions={<>
-      {continuation ? <button type="button" className="primary-button" disabled={busy === scope.current} onClick={() => void continueOriginal()}>Continue original request</button> : null}
-      <button type="button" className="small-button" onClick={() => { void inspect(); onRefresh?.() }}>Check original status</button>
-    </>}
+    actions={actions}
     details={{ summary: 'Original request details', content: <>
       {reference}<dl><div><dt>Original creation</dt><dd><code>{operationId}</code></dd></div></dl>
       {observerIssues.map((issue, index) => <p key={index}>Source observation: {issue.message}</p>)}

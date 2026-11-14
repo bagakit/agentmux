@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { RuntimeEvent, SessionSnapshot } from '../../../shared/contracts'
-import type { SpaceMountMemberSurface, SpaceMountMemberTarget, SpaceMountRecord } from '../../../shared/space-mount'
+import type { SpaceMountMemberSurface, SpaceMountMemberTarget, SpaceMountReadingSurface, SpaceMountReadingTarget, SpaceMountRecord } from '../../../shared/space-mount'
 import { spaceMountKey } from '../../../shared/space-mount'
 import type { ConversationObservation } from '@agentmux/core/conversation'
 import { api } from '../lib/api'
@@ -10,25 +10,39 @@ import { AgentSessionComposer } from './AgentSessionComposer'
 import { TerminalView } from './TerminalView'
 import { ActivityView } from './ActivityView'
 import { sourceConversationPort } from '../lib/focus-source-conversation'
-import { sessionStatusLabel } from '../lib/session-presentation'
+import { createSessionViewModeSelector, sessionStatusLabel } from '../lib/session-presentation'
 import { originalSourceInputOwnerKey } from '../lib/original-space-navigation'
 import { usePendingDeliveryLayout } from '../lib/pending-delivery-layout'
 import { SourceComposerRecovery } from './SourceComposerRecovery'
+import { FullPageLoadingSurface } from './FullPageLoadingSurface'
+import { ServiceWindowNotice } from './ServiceWindowNotice'
 
 /** One exact member reader. Full Session facts stay here, never in the observer's Session map. */
-export function SpaceMemberWorkface({ target, visible, active, interactiveResize = false, privateInput, sourceTabId, onRefreshSource }: { target: SpaceMountMemberTarget; visible: boolean; active: boolean; interactiveResize?: boolean; privateInput?: SpaceMountRecord | undefined; sourceTabId?: string | undefined; onRefreshSource?: (() => void) | undefined }) {
+export function SpaceMemberWorkface({ target, visible, active, interactiveResize = false, privateInput, sourceTabId, onRefreshSource, runtimeRecovery }: { target: SpaceMountMemberTarget; visible: boolean; active: boolean; interactiveResize?: boolean; privateInput?: SpaceMountRecord | undefined; sourceTabId?: string | undefined; onRefreshSource?: (() => void) | undefined; runtimeRecovery?: ((layout: 'inline' | 'surface') => ReactNode) | undefined }) {
   const key = JSON.stringify(target)
+  const ownerKey = originalSourceInputOwnerKey(target.target.runtimeId, target.target.agentSessionId)
+  const viewModeSelector = useMemo(() => createSessionViewModeSelector(ownerKey), [ownerKey])
+  const mode = useAppStore(viewModeSelector)
+  const activityOpened = useRef(false)
+  if (mode === 'activity') activityOpened.current = true
+  const readingTarget = useMemo<SpaceMountReadingTarget | undefined>(() => {
+    const { expectedRun: _run, expectedAdmission, ...identity } = target.target
+    return expectedAdmission ? { hostId: target.hostId, target: { ...identity, kind: 'conversation', expectedAdmission } } : undefined
+  }, [target.hostId, target.target.reference.runtimeId, target.target.reference.spaceId, target.target.regionId, target.target.runtimeId, target.target.agentSessionId, target.target.expectedAdmission?.kind, target.target.expectedAdmission?.operationId])
+  const readingKey = JSON.stringify(readingTarget ?? null)
   const surfaceRef = useRef<HTMLDivElement>(null)
   const recoveryRef = useRef<HTMLDetailsElement>(null)
-  const pendingLayout = usePendingDeliveryLayout({ boundaryRef: surfaceRef, protectedRef: recoveryRef, active: visible })
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const pendingLayout = usePendingDeliveryLayout({ boundaryRef: surfaceRef, bodyRef, protectedRef: recoveryRef, active: visible })
   const currentKey = useRef(key); currentKey.current = key
   const mounted = useRef(false)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const [read, setRead] = useState<{ key: string; session?: SessionSnapshot; readIssue?: string | undefined; watchIssue?: string | undefined; inputIssue?: string | undefined }>({ key })
   const [attempt, setAttempt] = useState(0)
   const [reader, setReader] = useState<{ key: string; surface: SpaceMountMemberSurface; source: ReturnType<typeof spaceMemberTerminalSource>; conversation: ReturnType<typeof sourceConversationPort> }>()
-  const [reading, setReading] = useState<{ key: string; mode: 'terminal' | 'activity' }>({ key, mode: 'terminal' })
-  const mode = reading.key === key ? reading.mode : 'terminal'
+  const [conversationReader, setConversationReader] = useState<{ key: string; surface: SpaceMountReadingSurface; port: ReturnType<typeof sourceConversationPort> }>()
+  const [readingIssue, setReadingIssue] = useState<{ key: string; message: string }>()
+  const [readingAttempt, retryReading] = useState(0)
   const listeners = useMemo(() => new Set<(event: RuntimeEvent) => void>(), [key])
   const subscribe = useMemo(() => (listener:(event:RuntimeEvent)=>void) => { listeners.add(listener); return () => { listeners.delete(listener) } },[listeners])
   const appearance = useAppStore(state => state.config?.appearance)
@@ -47,7 +61,27 @@ export function SpaceMemberWorkface({ target, visible, active, interactiveResize
   }, [key, sourceTabId, visible, savedInput])
   const release = (surface: SpaceMountMemberSurface) => { void Promise.resolve(surface.dispose()).catch(cause => console.warn('[mounted-space] Member reader release unconfirmed', cause)) }
   useEffect(() => {
-    if (!visible) return
+    if (!visible || !readingTarget) return
+    const controller = new AbortController(), conversations = new Map<string, (event: ConversationObservation) => void>()
+    let acquired: SpaceMountReadingSurface | undefined
+    const issue = (cause: unknown) => { if (!controller.signal.aborted) setReadingIssue({ key: readingKey, message: cause instanceof Error ? cause.message : String(cause) }) }
+    void api.spaceMounts.reading(readingTarget, event => {
+      if (controller.signal.aborted) return
+      if (event.type === 'conversation') conversations.get(event.readerId)?.(event.observation)
+      else if (event.type === 'error' || event.type === 'observation-error') issue(event.error.message)
+    }, controller.signal).then(surface => {
+      if (controller.signal.aborted) { void surface.dispose(); return }
+      acquired = surface
+      setConversationReader({ key: readingKey, surface, port: sourceConversationPort(surface, readingTarget.target.agentSessionId, conversations, controller.signal) })
+      setReadingIssue(previous => previous?.key === readingKey ? undefined : previous)
+    }).catch(issue)
+    return () => {
+      controller.abort()
+      void Promise.resolve(acquired?.dispose()).catch(cause => console.warn('[mounted-space] Conversation reader release unconfirmed', cause))
+    }
+  }, [readingKey, visible, readingAttempt])
+  useEffect(() => {
+    if (!visible || !target.target.expectedRun.runId) return
     const controller = new AbortController()
     const conversations = new Map<string, (event: ConversationObservation) => void>()
     let acquired: SpaceMountMemberSurface | undefined
@@ -105,33 +139,60 @@ export function SpaceMemberWorkface({ target, visible, active, interactiveResize
   }
   const hasIssue = observed?.watchIssue || observed?.readIssue
   const session = observed?.session
+  const originalReading = conversationReader?.key === readingKey ? conversationReader : undefined
+  // Legacy full members retain their original reader; they do not acquire a
+  // conversation-only grant by inventing a missing C/L.
+  const conversation = readingTarget ? originalReading?.port : original?.conversation
+  const conversationIdentity = readingTarget ? readingKey : key
+  const conversationIssue = readingIssue?.key === readingKey ? readingIssue.message : undefined
   return <div ref={surfaceRef} className="agent-surface mounted-space-agent" aria-label="Original member workface" data-agent-surface-mode={mode}>
-    <header className="mounted-space-agent__heading">
-      <div><strong>{session?.label || 'Original Agent'}</strong>{session ? <span>{hasIssue ? 'Last confirmed: ' : ''}{sessionStatusLabel(session)}</span> : null}</div>
-      <div role="group" aria-label="Agent view">
-        <button type="button" className="small-button" aria-pressed={mode === 'terminal'} onClick={() => setReading({ key, mode: 'terminal' })}>Terminal</button>
-        <button type="button" className="small-button" aria-pressed={mode === 'activity'} onClick={() => setReading({ key, mode: 'activity' })}>Conversation</button>
-      </div>
-    </header>
-    {hasIssue ? <p role="status" className="mounted-space-agent__issue">{observed?.watchIssue ? <>Updates unconfirmed: {observed.watchIssue} </> : null}{observed?.readIssue ? <>Session read unconfirmed: {observed.readIssue} </> : null}{observed?.session ? 'Last confirmed Session facts are kept.' : 'The original target and private draft are kept.'}
-      <button type="button" className="small-button" onClick={() => void refresh()}>Refresh member observation</button></p> : null}
-    {observed?.inputIssue ? <p role="status" className="mounted-space-agent__issue">Saved input recovery is unconfirmed: {observed.inputIssue} The original saved inputs and this Agent remain available.
-      <button type="button" className="small-button" onClick={() => void retryInputRecovery()}>Retry saved input recovery</button></p> : null}
-    {session?.kind === 'agent' && !session.semanticStatus ? <p role="status" className="mounted-space-agent__issue">{!session.runUnobserved && session.processState === 'running' ? hasIssue ? 'Last confirmed process: running. ' : 'Process running. ' : ''}Agent activity has not been observed{hasIssue ? ' in the current connection' : ' yet'}. Review the original terminal for startup or permission questions. The original Session and your draft are kept.</p> : null}
-    <div className="agent-body" data-observation-surface={mode === 'activity' ? 'workflow' : undefined}><div className="agent-terminal-stage">
-      {session && original ? <>
+    {hasIssue || (session?.kind === 'agent' && !session.semanticStatus) ? <ServiceWindowNotice
+      disclosure={{ scope: key, id: 'member-observation', cause: JSON.stringify([observed?.watchIssue, observed?.readIssue, session?.semanticStatus?.state ?? null]), visible }}
+      title="Agent observation unconfirmed"
+      notice={{ kind: 'indeterminate', notice: {
+        step: 'Agent observation unconfirmed',
+        mode: [observed?.watchIssue ? `Updates: ${observed.watchIssue}` : undefined,
+          observed?.readIssue && observed.readIssue !== observed.watchIssue ? `Session read: ${observed.readIssue}` : undefined,
+          session ? `Last confirmed: ${sessionStatusLabel(session)}.` : 'The current Session and Run state are unknown.',
+          'Original conversation reading is separate. Your draft is kept.'].filter(Boolean).join(' '),
+        restore: 'Refresh this observation, or check the original terminal for startup and permission questions.'
+      } }} actions={<button type="button" className="small-button" onClick={() => void refresh()}>Refresh member observation</button>} /> : null}
+    {observed?.inputIssue ? <ServiceWindowNotice
+      disclosure={{ scope: key + ':saved-input', id: 'saved-input', cause: observed.inputIssue, visible }}
+      notice={{ kind: 'indeterminate', notice: { step: 'Saved input recovery unconfirmed', mode: observed.inputIssue,
+        restore: 'Your original saved inputs remain. Retry their recovery without resending them.' } }}
+      actions={<button type="button" className="small-button" onClick={() => void retryInputRecovery()}>Retry saved input recovery</button>} /> : null}
+    {!session && mode === 'activity' ? runtimeRecovery?.('inline') : null}
+    {mode === 'activity' && conversation && conversationIssue ? <ServiceWindowNotice
+      disclosure={{ scope: readingKey, id: 'conversation-updates', cause: conversationIssue, visible }}
+      notice={{ kind: 'indeterminate', notice: { step: 'Conversation updates unconfirmed', mode: conversationIssue,
+        restore: 'The last readable original records are kept. Retry reading from the same original source.' } }}
+      actions={<button type="button" className="small-button" onClick={() => retryReading(value => value + 1)}>Retry original reading</button>} /> : null}
+    <div ref={bodyRef} className="agent-body" data-observation-surface={mode === 'activity' ? 'workflow' : undefined}><div className="agent-terminal-stage">
+      {session && original ?
         <div className="mounted-space-agent__terminal" hidden={mode !== 'terminal'}><TerminalView session={session} sessionSource={original.source}
           themeId={appearance?.terminalTheme ?? 'graphite'} {...(appearance?.terminalFontSize === undefined ? {} : { fontSize: appearance.terminalFontSize })}
           interactiveResize={interactiveResize} visible={visible && mode === 'terminal'} autoFocus={active && mode === 'terminal'} /></div>
-        {mode === 'activity' ? <ActivityView sessionId={target.target.agentSessionId} executionHostId={session.hostId} capability={session.kind === 'agent' ? session.capabilities.timeline : 'unavailable'}
-          conversationReading={{ reference: { hostId: 'local', agentSessionId: target.target.agentSessionId }, identity: key, port: original.conversation,
-            enabled: visible, opened: true, readCaptured: true, onClose: () => setReading({ key, mode: 'terminal' }), returnLabel: 'Terminal',
-            consumer: { runId: target.target.expectedRun.runId, regionId: target.target.regionId, visible, activityShown: mode === 'activity', viewMode: mode } }} /> : null}
-      </> : <p role="status">{hasIssue ? 'The original member observation is unconfirmed.' : 'Reading the original Agent and terminal…'}</p>}
+        : mode === 'terminal' ? runtimeRecovery?.('surface') ?? <FullPageLoadingSurface scope="region" visible={visible}
+          phase={hasIssue ? 'parked' : 'loading'} title={hasIssue ? 'Terminal observation unconfirmed' : 'Reading the original terminal'}
+          detail="The original Agent and draft are kept. Conversation reading has its own original source."
+          actions={<button type="button" className="small-button" onClick={() => void refresh()}>Refresh member observation</button>} /> : null}
+      {activityOpened.current ? <div className="mounted-space-agent__terminal" hidden={mode !== 'activity'} inert={mode !== 'activity'}>
+        {conversation ? <ActivityView sessionId={target.target.agentSessionId} executionHostId={originalReading?.surface.initial.hostId ?? original?.surface.initial.hostId ?? ownerKey}
+          capability={session?.kind === 'agent' ? session.capabilities.timeline : undefined}
+          conversationReading={{ reference: { hostId: 'local', agentSessionId: target.target.agentSessionId }, identity: conversationIdentity, port: conversation,
+            enabled: visible && mode === 'activity', opened: true, readCaptured: true,
+            onClose: () => useAppStore.getState().setViewMode(ownerKey, 'terminal', { focus: false }), returnLabel: 'Terminal',
+            consumer: { regionId: target.target.regionId, visible, activityShown: mode === 'activity', viewMode: mode } }} />
+          : <FullPageLoadingSurface scope="region" visible={visible && mode === 'activity'} phase={conversationIssue ? 'failed' : 'loading'}
+            title={conversationIssue ? 'Original conversation unavailable' : 'Reading the original conversation'}
+            detail={conversationIssue ?? 'Reading this Agent’s original records independently of terminal observation.'}
+            actions={conversationIssue ? <button type="button" className="small-button" onClick={() => retryReading(value => value + 1)}>Retry original reading</button> : undefined} />}
+      </div> : null}
     </div></div>
     <SourceComposerRecovery target={target} tabId={sourceTabId} surfaceRef={recoveryRef} />
-    <div className="agent-input-stack" data-input-surface={mode}><AgentSessionComposer sessionId={originalSourceInputOwnerKey(target.target.runtimeId, target.target.agentSessionId)}
-      source={{ target, ...(session ? { session } : {}) }} resourceWorkspaceId={privateInput?.workspaceId} {...(session?.label === undefined ? {} : { tabName: session.label })} pendingLayout={pendingLayout} visible={visible && active} /></div>
+    <div className="agent-input-stack" data-input-surface={mode}><AgentSessionComposer sessionId={ownerKey}
+      source={{ target, ...(session ? { session } : {}) }} resourceWorkspaceId={privateInput?.workspaceId} {...(session?.label === undefined ? {} : { tabName: session.label })} pendingLayout={pendingLayout} visible={visible} /></div>
   </div>
 }
 export { SpaceMemberWorkface as MountedSpaceAgent }

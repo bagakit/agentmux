@@ -155,7 +155,8 @@ export function ActivityView({
   readingNotice?: ReactNode
   readingAction?: ReactNode
   revealRequest?: ConversationRevealRequest | null
-  capability: 'unavailable' | 'complete-events' | 'streaming'
+  /** Native timeline support may be unobserved while the original Conversation reader is available. */
+  capability?: 'unavailable' | 'complete-events' | 'streaming' | undefined
   /** Session 的显示状态——「这个 turn 在不在工作」的唯一真相，不从时间轴形状反推。 */
   displayState?: AgentDisplayState
   /** Original current observation only qualifies decorative motion; retained display state stays intact. */

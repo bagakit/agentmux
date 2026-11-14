@@ -482,7 +482,7 @@ export function AgentSessionComposer({
       promptKeywords={completion.promptKeywords} onCompletionQuery={completion.onCompletionQuery}
       completionFeedback={completion.completionFeedback}
       tools={(referenceTools) => <AgentComposerTools key={completion.scope} active={visible} disabled={!submitMode.canType} commands={completion.commands} referenceTools={referenceTools}
-        viewMode={viewMode} onViewModeChange={(mode) => setViewMode(sessionId, mode)}
+        viewMode={viewMode} onViewModeChange={(mode) => source ? setViewMode(sessionId, mode, { focus: false }) : setViewMode(sessionId, mode)}
         loadSkills={source ? async () => { throw new Error('Original Agent Skills are unavailable through this member connection. Your draft is kept; open the original Agent workface to inspect them.') } : completion.loadSkills} onChooseSkill={skill => { void feedback.run(() => completion.insertCandidate(skillComposerSuggestion(skill))) }}
         onCommand={(_command, candidate) => { void feedback.run(() => completion.insertCandidate(candidate)) }}
         {...(!source && session?.hostId === 'local' ? { onCapture: attachments.capture } : {})} runAction={feedback.run} />}
