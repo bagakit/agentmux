@@ -139,6 +139,8 @@ api.schedule.history = async params => {
     const morning = nine(now - day)
     if (record.loopId === 'group-watch') add(morning + 4 * minute, 'Group watch\nReview the open commitments and record what changed.')
     if (record.loopId === 'maintenance') {
+      add(morning - 39 * minute, record.prompt)
+      add(morning - 9 * minute, record.prompt)
       add(morning + 21 * minute, record.prompt)
       add(morning + 51 * minute, record.prompt, true)
     }

@@ -292,7 +292,7 @@ describe('Mote calendar original schedule consumer', () => {
     expect(dom.container.querySelector('[aria-label="Selected day arrangements"] [data-event-schedule="countdown"]')).not.toBeNull()
     await act(async () => day.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })))
     expect(dom.container.querySelector(("[data-mote-date=\"" + (new Date(_batchFixtureEpoch(20749, 0, 0)).toISOString().slice(0, 10)) + "\"]"))?.getAttribute('aria-pressed')).toBe('true')
-    expect(dom.container.querySelector('[aria-label="Selected date"] .mote-calendar__plan-total')?.textContent).toBe('1 planned')
+    expect(dom.container.querySelector('[aria-label="Selected day arrangements"] .mote-calendar__plan-total')?.textContent).toBe('1 planned')
     await act(async () => dom.container.querySelector<HTMLButtonElement>(("[data-mote-date=\"" + (new Date(_batchFixtureEpoch(20747, 0, 0)).toISOString().slice(0, 10)) + "\"]"))!.click())
     expect(dom.container.querySelector('[aria-label="Selected date"]')?.textContent).toContain('Input accepted')
     expect(dom.container.querySelectorAll('[aria-label="Calendar events"] [data-event-schedule="daily"]')).toHaveLength(1)

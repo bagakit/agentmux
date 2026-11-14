@@ -31,6 +31,7 @@ app.whenReady().then(async () => {
       }
       throw new Error('Missing original renderer state: ' + label)
     }
+    const settleMotion = () => read('Promise.allSettled(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished))')
     const click = async expression => {
       await waitFor(`(${expression})?.getBoundingClientRect().width>0`, 'visible action '+expression)
       await read(`(${expression}).scrollIntoView({block:'nearest',inline:'nearest'})`)
@@ -95,7 +96,7 @@ app.whenReady().then(async () => {
     await verifyEventSurface('.mote-calendar__point', 'border-inline-start:3px solid currentColor!important', /one-sided stripe/)
     const heartbeatPoint = locator('.mote-calendar__point[data-heartbeat="true"]')
     await waitFor(`${heartbeatPoint}?.querySelector('[data-semantic-icon="object.heartbeat"]')`, 'original heartbeat symbol')
-    await read(`Promise.allSettled(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished))`)
+    await settleMotion()
     await capture('month-event-surfaces')
     const hideHeartbeats = locator('[aria-label="Hide heartbeats"]')
     await click(hideHeartbeats)
@@ -120,14 +121,100 @@ app.whenReady().then(async () => {
     await read(`(${past}).scrollIntoView({block:'center'})`)
     await pause(240)
     await capture('week-recorded-events')
+    win.webContents.debugger.attach('1.3')
+    await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]})
+    const reader = locator('.mote-calendar__day')
+    const armReaderTransition = () => read(`window.readerTransition=null;
+      document.addEventListener('transitionrun', function onRun(event) {
+        if (!event.target.matches('.mote-calendar__day') || event.propertyName !== 'transform') return;
+        document.removeEventListener('transitionrun', onRun, true);
+        const animations=event.target.getAnimations();
+        for (const animation of animations) {
+          animation.pause();
+          animation.currentTime=animation.effect.getTiming().duration*.25;
+        }
+        window.readerTransition=animations;
+      },true)`)
+    const waitForReaderTransition = async name => {
+      await waitFor('window.readerTransition?.some(a=>a.transitionProperty==="transform")', name)
+      return read(`(()=>{const style=getComputedStyle(${reader});return {
+        opacity:Number(style.opacity),transform:style.transform,display:style.display,hidden:${reader}.hidden
+      }})()`)
+    }
+    const finishReaderTransition = () => read('Promise.allSettled(window.readerTransition.map(animation=>{animation.play();return animation.finished}))')
+    await armReaderTransition()
     await click(past)
+    const entering = await waitForReaderTransition('actual detail panel entering')
+    assert.ok(entering.opacity > 0 && entering.opacity < 1 && entering.transform !== 'none' && !entering.hidden)
+    await capture('period-opening-wide')
+    await finishReaderTransition()
     const events = locator('[aria-label="Calendar events"]')
     await waitFor(`${events}?.querySelectorAll('[data-event-kind="recorded"]').length===3`, 'three original events in one period')
     assert.equal(await read(`[...${events}.querySelectorAll('[data-event-result="failed"]')].length`),1)
+    const highlight = locator('.mote-calendar__highlight')
+    const verifyFocusCard = async () => {
+      const focus = await read(`(()=>{const card=${highlight},rect=card.getBoundingClientRect();return {text:card.textContent,height:rect.height}})()`)
+      assert.ok(focus.height > 44 && focus.text.includes('Needs attention') && focus.text.includes('Agent turn failed'), 'Visible focus card highlights the recorded failure')
+    }
+    await verifyFocusCard()
+    const hiddenCard = await win.webContents.insertCSS('.mote-calendar__highlight { display: none !important; }')
+    try { await assert.rejects(verifyFocusCard, /Visible focus card/) }
+    finally { await win.webContents.removeInsertedCSS(hiddenCard) }
+    await verifyFocusCard()
+    result.mutations.push({selector:'.mote-calendar__highlight',rejected:'Missing focus card',restored:true})
+    await capture('period-focus-wide')
+    await click(highlight)
+    await waitFor(`${reader}.querySelector('.mote-calendar__focus .mote-calendar__recap:not([hidden])')?.textContent.includes('Agent turn failed')`, 'focus opens the original failed receipt')
     await click(locator('.mote-calendar__event[data-event-schedule="group-watch"]'))
     await waitFor(`document.querySelector('.mote-calendar__recap')?.textContent.includes('Review the open commitments')`, 'frozen exact event recap')
+    await settleMotion()
     await capture('hour-original-recap')
+    const canvasDuringReader = (await dimensions()).canvasWidth
+    await armReaderTransition()
     key('Escape')
+    const exiting = await waitForReaderTransition('actual detail panel exiting')
+    assert.ok(exiting.opacity > 0 && exiting.opacity < 1 && exiting.display !== 'none' && exiting.hidden)
+    assert.equal((await dimensions()).canvasWidth,canvasDuringReader,'The calendar grid waits until the reader fades before expanding')
+    assert.equal(await read(`document.activeElement===${past}`),true,'Focus returns to the exact period trigger during exit')
+    await capture('period-closing-wide')
+    await finishReaderTransition()
+    result.observations.periodMotion = { entering, exiting }
+
+    const repeated = locator(`[data-calendar-hour="${dates.yesterday}:8"]`)
+    await click(repeated)
+    const group = locator('.mote-calendar__event-group')
+    await waitFor(`${group}?.querySelector('button')?.textContent.includes('2 events')`, 'normal repeated events fold into one row')
+    await settleMotion()
+    await capture('period-heartbeats-collapsed')
+    const groupSummary = `${group}.querySelector('button')`
+    const armGroupTransition = () => read(`window.groupTransition=null;
+      document.addEventListener('transitionrun', function onRun(event) {
+        if (!event.target.matches('.mote-calendar__event-group ol') || event.propertyName !== 'opacity') return;
+        document.removeEventListener('transitionrun', onRun, true);
+        const animations=event.target.getAnimations();
+        for (const animation of animations) {
+          animation.pause();
+          animation.currentTime=animation.effect.getTiming().duration*.19;
+        }
+        window.groupTransition=animations;
+      },true)`)
+    const awaitGroupTransition = label => waitFor('window.groupTransition?.some(a=>a.transitionProperty==="opacity")', label)
+    const finishGroupTransition = () => read('Promise.allSettled(window.groupTransition.map(animation=>{animation.play();return animation.finished}))')
+    await armGroupTransition()
+    await click(groupSummary)
+    await awaitGroupTransition('original grouped list has a visible opening transition')
+    await capture('period-heartbeats-opening')
+    await finishGroupTransition()
+    await waitFor(`${group}.querySelector('ol:not([hidden])')?.querySelectorAll('li[data-event-kind="recorded"]').length===2`, 'expanded group retains both original receipts')
+    await capture('period-heartbeats-expanded')
+    await armGroupTransition()
+    await click(groupSummary)
+    await awaitGroupTransition('original grouped list has a visible closing transition')
+    await waitFor(`${group}.querySelector('ol').hidden&&document.activeElement===${groupSummary}`, 'collapse keeps focus on the same group')
+    await capture('period-heartbeats-closing')
+    await finishGroupTransition()
+    key('Escape')
+    await settleMotion()
     await click(control('.mote-calendar__toolbar button','Today'))
     await view('3 Days')
     const future = locator(`[data-calendar-hour="${dates.tomorrow}:10"]`)
@@ -145,8 +232,6 @@ app.whenReady().then(async () => {
     await read(`(${future}).scrollIntoView({block:'center'})`)
     const hover = await read(`(()=>{const r=${future}.getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`)
     win.webContents.sendInputEvent({type:'mouseMove',...hover})
-    win.webContents.debugger.attach('1.3')
-    await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]})
     // Park the actual CSS animation when it starts, before a slow CI frame can finish it.
     await read(`document.addEventListener('animationstart',event=>{
       if(!event.target.matches('.schedule-create-popover'))return;
@@ -182,6 +267,13 @@ app.whenReady().then(async () => {
     await capture('editor-short-narrow-reduced')
     key('Escape')
     await waitFor(`!${dialog}`, 'calendar recovered after narrow editor')
+    await click(future)
+    await waitFor(`${highlight}?.textContent.includes('Next up')`, 'narrow sheet shows the confirmed next planned event')
+    assert.equal(await read(`${reader}.getAnimations({subtree:true}).length`),0,'Reduced motion places the period reader in its settled state')
+    await reach(locator('[aria-label="Close period details"]'))
+    await capture('period-narrow-reduced')
+    key('Escape')
+    assert.equal(await read(`getComputedStyle(${reader}).display`),'none')
     await view('Day')
     assert.equal(await read(`${calendar}.scrollWidth<=${calendar}.clientWidth+1`),true)
     await capture('day-narrow-reduced')
