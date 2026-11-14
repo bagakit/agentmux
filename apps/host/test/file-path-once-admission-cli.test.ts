@@ -2,17 +2,14 @@ import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import { once } from 'node:events'
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, readdir, rename, symlink, unlink, writeFile, rm, open, chmod } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rename, unlink, writeFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest'
-import { createRequire } from 'node:module'
-import * as core from '@agentmux/core'
-import { noteHistoryRevision } from '@agentmux/core/note-history'
+import { build } from 'esbuild'
 import { OrdinaryWorkspaceFiles } from '../src/ordinary-files.js'
-import { agent, cleanup, fixture, helper, hostFixture, operationRecord } from './helpers/file-path-fixture.js'
+import { agent, cleanup, fixture, helper, hostFixture } from './helpers/file-path-fixture.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
-import { FilePathMutations } from '../src/file-path-mutations.js'
-import { cleanupExecutableNativeFixtures, executableNativeFixture, until } from '../../../packages/core/test/helpers/executable-native-fixture.js'
+import { cleanupExecutableNativeFixtures } from '../../../packages/core/test/helpers/executable-native-fixture.js'
 
 const fault = vi.hoisted(() => ({ sync: '' }))
 const facts: unknown[] = []
@@ -44,7 +41,6 @@ it('a real new Host/Core process observes the original once-admission after targ
   await f.host.dispose()
   const bundle = resolve('apps/host/.local/file-path-host-reopen-' + process.pid + '.mjs')
   await mkdir(resolve('apps/host/.local'), { recursive: true })
-  const { build } = createRequire(new URL('../package.json', import.meta.url))('esbuild')
   await build({ stdin: { resolveDir: process.cwd(), contents: "export {startAgentMuxHost} from './apps/host/src/host.ts';export {OrdinaryWorkspaceFiles} from './apps/host/src/ordinary-files.ts';export {AgentMuxClient,AgentMuxFileAgentSessionStore} from '@agentmux/core'" }, outfile: bundle, bundle: true, packages: 'external', platform: 'node', format: 'esm', target: 'node24' })
   cleanup.push(() => rm(bundle, { force: true }))
   const socket = join(f.original.root, 'reopened-new-core.sock'), configuration = join(f.original.root, 'reopened-host.json')
@@ -103,11 +99,34 @@ it('partial once-admission and its failed file/base acknowledgement never author
   expect(native).toHaveBeenCalledTimes(1)
 })
 
+it('the compiled move also keeps its original key after the whole member namespace disappears and its source is externally returned', async () => {
+  const f = await hostFixture()
+  await writeFile(join(f.root, 'source'), 'original move bytes')
+  const query = { zoneId: 'original-files-zone', expectedResource: { hostId: 'local', workspaceId: f.workspace.id, workspacePath: f.root } }
+  const from = (await f.cli(['stat'], { ...query, path: 'source' })).body.result
+  const to = (await f.cli(['stat'], { ...query, path: 'destination' })).body.result
+  const input = { ...query, path: 'source', operationId: 'whole-namespace-original-move', expectedResource: from.resource,
+    expected: { root: from.result.observation.root, parent: from.result.observation.parent, entry: from.result.observation.entry },
+    destination: { ...query, path: 'destination', expectedResource: to.resource, expectedAbsent: true,
+      expected: { root: to.result.observation.root, parent: to.result.observation.parent } } }
+  const native = vi.spyOn(OrdinaryWorkspaceFiles.prototype, 'movePath')
+  expect((await f.cli(['move'], input)).body.result.result.filesystem).toBe('moved')
+  await rm(join(f.original.root, 'file-path-mutations'), { recursive: true })
+  // This external reversal restores the same inode; it grants no replay of the old operation.
+  await rename(join(f.root, 'destination'), join(f.root, 'source'))
+  const replay = await f.cli(['move'], input)
+  expect(replay.code, replay.stderr).toBe(0)
+  expect(replay.body.result.result).toMatchObject({ filesystem: 'unknown', code: 'FILE_MUTATION_RECORD_UNAVAILABLE' })
+  expect(native).toHaveBeenCalledTimes(1)
+  expect(await readFile(join(f.root, 'source'), 'utf8')).toBe('original move bytes')
+  expect((await f.cli(['move'], { ...input, operationId: 'independent-move-after-namespace-loss' })).body.result.result.filesystem).toBe('moved')
+  expect(native).toHaveBeenCalledTimes(2)
+})
+
 it('two real Files-owner processes admit only one Native producer for the same original key, and legacy complete records remain observation-only', async () => {
   const f = await fixture(), request = await f.request('race-target', 'same-key-first-publication')
   const bundle = resolve('apps/host/.local/file-path-admission-race-' + process.pid + '.mjs')
   await mkdir(resolve('apps/host/.local'), { recursive: true })
-  const { build } = createRequire(new URL('../package.json', import.meta.url))('esbuild')
   await build({ stdin: { resolveDir: process.cwd(), contents: "export {FilePathMutations} from './apps/host/src/file-path-mutations.ts';export {OrdinaryWorkspaceFiles} from './apps/host/src/ordinary-files.ts'" }, outfile: bundle, bundle: true, packages: 'external', platform: 'node', format: 'esm', target: 'node24' })
   cleanup.push(() => rm(bundle, { force: true }))
   const configuration = join(f.original.root, 'admission-race.json')
