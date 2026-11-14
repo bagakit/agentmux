@@ -44,7 +44,7 @@ it.runIf(!nativeBranch)('executes the shipping persistence branch in an isolated
   expect(result.text).toMatch(/[1-9]\d* passed/)
 }, 190_000)
 
-async function fixture() {
+async function fixture(options: { originalSource?: boolean } = {}) {
   vi.resetModules(); window.localStorage.clear(); vi.stubGlobal('crypto', webcrypto)
   const root = process.env.AGENTMUX_WORKBENCH_CLOSE_ROOT ?? await mkdtemp('/tmp/wc-')
   if (!restartMode) cleanup.push(() => rm(root, { recursive: true, force: true }))
@@ -54,7 +54,7 @@ async function fixture() {
   // graph. Real product owners load only inside their Native consumer process.
   core = await import('@agentmux/core')
   const [{ AgentMuxSpatialStateStore }, { startAgentMuxHost }, { RuntimeController },
-    { connectDesktopAgentMuxHost, callOriginalDesktopHost }, { desktopRpcMethods },
+    { connectDesktopAgentMuxHost }, { desktopRpcMethods },
     { WorkbenchUserStateStore }, { DesktopControlIpcBridge }, { createDesktopWorkbenchCloseOwner }] = await Promise.all([
     import('@agentmux/core/spatial-state'), import('../../host/src/host.js'), import('../src/main/runtime-controller.js'),
     import('../src/main/desktop-host.js'), import('../src/main/desktop-rpc-exposure.js'), import('../src/main/workbench-user-state.js'),
@@ -99,7 +99,7 @@ async function fixture() {
     activeWorkspaceId: 'W', loading: false, documents: { [key]: { path: 'draft.txt', content: 'Original unsaved content', revision: 'original-file-revision' } },
     dirtyDocuments: { [key]: true }, documentGenerations: { [key]: 1 }, agentComposerDrafts: { 'healthy-region': 'Original unsent Agent draft' } })
   else store.setState({ config, sessions, loading: false })
-  const spatial = new AgentMuxSpatialStateStore(join(root, 'spatial.json'))
+  const spatial = new AgentMuxSpatialStateStore(options.originalSource ? undefined : join(root, 'spatial.json'))
   if (!saved) await spatial.commit({ expectedRevision: 0, graph: desktopSpatialGraph(store.getState(), []) })
   const user = new WorkbenchUserStateStore(join(root, 'user.json'))
   vi.spyOn(api.ui, 'readWorkbenchState').mockImplementation(() => user.read())
@@ -124,7 +124,7 @@ async function fixture() {
     if (!request.operation.startsWith('workbench.close.')) throw Error('Unexpected private Renderer request')
     void store.getState().executeWorkbenchClose(request as import('../src/shared/workbench-close-control.js').WorkbenchCloseRendererRequest).then(result => {
       bridge.accept({ requestId: request.requestId, ok: true, result })
-    }, error => { bridge.accept({ requestId: request.requestId, ok: false, error: { code: 'CONTROL_UNAVAILABLE', message: error.message } }) })
+    }, error => { bridge.accept({ requestId: request.requestId, ok: false, error: { code: 'CONTROL_FAILED', message: error.message, cause: { code: error.code ?? 'CONTROL_UNAVAILABLE', message: error.message } } }) })
   } }); cleanup.push(async () => bridge.dispose())
   const browserClose = vi.fn(async (_id: string) => {})
   const authority = { ownerId: core.spaceCloseDigest(user.path), endpoint: 'private-desktop', documentGeneration: 'private-renderer-generation' }
@@ -132,7 +132,7 @@ async function fixture() {
   const server = new core.AgentMuxControlServer({ socketPath: paths.desktopSocketPath, exposedMethods: desktopRpcMethods(), forwardingPeer: { authoritySocketPath: paths.socketPath },
     coreClients: () => [{ hostId: 'local', client: host.client }], spaceClose: { call: (method, input, context) => owner.call(method, input, context) },
     execute: request => store.getState().executeControl(request),
-    callOriginalCore: (_host, method, params, context) => callOriginalDesktopHost(host.client as any, method, params, context) })
+    callOriginalCore: (_host, method, params, context) => runtime.callOriginalCore('local', method, params, context) })
   await server.start(); cleanup.push(() => server.stop())
   const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: paths.socketPath } }); cleanup.push(() => rpc.dispose())
   const managed = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: paths.socketPath }, credentials: { agentSessionId: agent.agentSessionId, capability } }); cleanup.push(() => managed.dispose())
@@ -145,6 +145,163 @@ async function fixture() {
     prepared: (value: { code: number | null; stdout: string; stderr: string }) => { expect(value.code, value.stderr || value.stdout).toBe(0); return JSON.parse(value.stdout).result.operation as Core.SpaceCloseReceipt },
     apply: (record: Core.SpaceCloseReceipt) => cli('apply', { operationId: record.operationId, expectedPlanDigest: record.planDigest, decisions: core.spaceCloseDecisions(record.plan) }) }
 }
+
+async function originalCloseBridge(f: Awaited<ReturnType<typeof fixture>>) {
+  const { spaceMountTransport } = await import('./helpers/space-mount-fixture.js')
+  const carrier = (f.runtime as unknown as { hosts: Map<string, { client: Parameters<typeof spaceMountTransport>[1][number]['carrier'] }> }).hosts.get('local')!.client
+  const bridge = spaceMountTransport(cleanup, [{ id: 'original-source', carrier }], f.store.getState().config!)
+  const { owner } = await f.rpc.call('runtime.owner.identity', {})
+  const inspected = await f.rpc.call('space.inspect', { target: { regionId: 'raw-region' } })
+  const reference = { runtimeId: owner.runtimeId, spaceId: inspected.catalog.locations[0]!.spaceId }
+  return { bridge, destination: { hostId: 'original-source', reference }, member: { tabId: 'target-tab', regionId: 'raw-region', kind: 'terminal' as const, agentSessionId: null, scope: 'tab' as const } }
+}
+
+it.runIf(business)('Source carrier closes one original occurrence through its original Host Main and Renderer', async () => {
+  const f = await fixture({ originalSource: true })
+  f.store.setState(state => ({ layouts: { ...state.layouts, otherDisplay: createWorkspaceLayout('other-group', ['target-tab']) } }))
+  const { prepareRendererUpdate } = await import('../src/renderer/src/store.js')
+  await prepareRendererUpdate('quit')
+  const { bridge, destination, member } = await originalCloseBridge(f)
+  const choices = await bridge.api.call('closeLocations', { ...destination, member })
+  expect(choices.locations.map(location => location.groupId).sort()).toEqual(['G', 'other-group'])
+  const request = { operationId: 'source-original-occurrence', target: { kind: 'tab-occurrence' as const, displayWorkspaceId: 'W', groupId: 'G', tabId: member.tabId }, keepAgentSessions: true }
+  const record = (await bridge.api.call('close', { ...destination, method: 'space.close.prepare', request, member })).operation!
+  expect(record.preparedBy.kind).toBe('user')
+  expect(record.plan.projection.closesView).toBe(false)
+  const result = (await bridge.api.call('close', { ...destination, method: 'space.close.apply', request: { operationId: record.operationId, expectedPlanDigest: record.planDigest, decisions: core.spaceCloseDecisions(record.plan) } })).operation!
+  expect(result.outcome).toBe('applied')
+  expect(f.store.getState().layouts.W!.groups[0]!.tabOrder).not.toContain('target-tab')
+  expect(f.store.getState().layouts.otherDisplay!.groups[0]!.tabOrder).toContain('target-tab')
+  expect(f.store.getState().documents[f.key]?.content).toBe('Original unsaved content')
+  expect((await f.native.client.status(f.run.runId)).state.type).toBe('running')
+  expect(f.stops).not.toHaveBeenCalled()
+  expect((await f.spatial.read())!.graph.layouts.otherDisplay!.groups[0]!.tabOrder).toContain('target-tab')
+})
+
+it.runIf(business)('a stale Source split never expands into closing the original single-Region Tab', async () => {
+  const f = await fixture({ originalSource: true }), { bridge, destination } = await originalCloseBridge(f)
+  const member = { tabId: 'healthy-tab', regionId: 'healthy-region', kind: 'agent' as const, agentSessionId: f.agent.agentSessionId, scope: 'region' as const }
+  const choices = await bridge.api.call('closeLocations', { ...destination, member })
+  expect(choices.kind).toBe('region')
+  await expect(bridge.api.call('close', { ...destination, method: 'space.close.prepare', member, request: { operationId: 'source-stale-split',
+    target: { kind: 'region', displayWorkspaceId: 'W', groupId: 'G', tabId: member.tabId, regionId: member.regionId }, keepAgentSessions: true } })).rejects.toMatchObject({ code: 'WORKBENCH_CLOSE_TARGET_REQUIRED' })
+  expect(f.store.getState().tabs[member.tabId]).toBeDefined()
+  expect(f.stops).not.toHaveBeenCalled()
+})
+
+it.runIf(business)('Source close plan reviews original editor input and retains newer original input', async () => {
+  const f = await fixture({ originalSource: true }), { bridge, destination, member } = await originalCloseBridge(f)
+  const request = { operationId: 'source-original-draft', target: { kind: 'tab-occurrence' as const, displayWorkspaceId: 'W', groupId: 'G', tabId: member.tabId }, keepAgentSessions: true }
+  const record = (await bridge.api.call('close', { ...destination, method: 'space.close.prepare', request, member })).operation!
+  expect(record.plan.projection.drafts).toHaveLength(1)
+  f.store.setState(state => ({ documents: { ...state.documents, [f.key]: { ...state.documents[f.key]!, content: 'New original unsaved input' } } }))
+  const result = (await bridge.api.call('close', { ...destination, method: 'space.close.apply', request: { operationId: record.operationId, expectedPlanDigest: record.planDigest, decisions: core.spaceCloseDecisions(record.plan) } })).operation!
+  expect(result.outcome).not.toBe('applied')
+  expect(f.store.getState().documents[f.key]?.content).toBe('New original unsaved input')
+  expect(f.store.getState().tabs['target-tab']).toBeDefined()
+})
+
+it.runIf(business).each(['tab-x', 'focus-menu', 'changed-agent', 'changed-kind'])('actual Source %s reviews and closes one original position without borrowing observer drafts', async entry => {
+  const f = await fixture({ originalSource: true })
+  f.store.setState(state => ({ layouts: { ...state.layouts, otherDisplay: createWorkspaceLayout('other-group', ['healthy-tab']) } }))
+  const { prepareRendererUpdate } = await import('../src/renderer/src/store.js'); await prepareRendererUpdate('quit')
+  const { bridge, destination } = await originalCloseBridge(f)
+  const originalLocation = (await f.rpc.call('space.inspect', { target: { regionId: 'healthy-region' } })).catalog.locations.find(location => location.displayWorkspaceId === 'W')!
+  // Distinct Renderer instances keep original and observer editor namespaces apart.
+  vi.resetModules()
+  const { useAppStore: observer } = await import('../src/renderer/src/store.js')
+  const { api } = await import('../src/renderer/src/lib/api.js')
+  const { WorkspaceWorkbench } = await import('../src/renderer/src/components/WorkspaceWorkbench.js')
+  const { GlobalFocusSurface } = await import('../src/renderer/src/components/GlobalFocusSurface.js')
+  const { mainFocusPresentation } = await import('../src/renderer/src/lib/focus-tab-projection.js')
+  const { workbenchSelectionCatalog } = await import('../src/renderer/src/lib/desktop-focus-navigation.js')
+  const { originalSourceWorkspaceId, originalSourceTabProjectionId } = await import('../src/renderer/src/lib/original-space-navigation.js')
+  const { installNativePopover } = await import('./fixtures/mote-workface.js')
+  const restore = installNativePopover(); cleanup.push(async () => restore())
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const calls = vi.spyOn(api.spaceMounts, 'call').mockImplementation(bridge.api.call)
+  vi.spyOn(api.spaceMounts, 'watch').mockImplementation(bridge.api.watch)
+  vi.spyOn(api.spaceMounts, 'sessions').mockImplementation(bridge.api.sessions)
+  vi.spyOn(api.spaceMounts, 'reading').mockImplementation(bridge.api.reading)
+  vi.spyOn(api.spaceMounts, 'member').mockImplementation(bridge.api.member)
+  vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([])
+  vi.spyOn(api.workspaces, 'listBranches').mockResolvedValue({ kind: 'not-a-git-repository', hostId: 'local', workspacePath: f.root })
+  const localClose = vi.spyOn(api.workbenchClose, 'call')
+  observer.setState({ config: f.store.getState().config, tabs: {}, layouts: {}, sessions: [], timelines: {}, loading: false,
+    mainSurface: entry === 'tab-x' ? 'workbench' : 'agents', focusView: 'list', mountedSpaceInputs: {}, mountedSpaceObservations: {}, mountedSpaceSessions: {},
+    agentComposerDrafts: { [f.agent.agentSessionId]: 'Observer draft must not approve original close' } })
+  const target = { ...destination, zoneId: originalLocation.zoneId!, workspaceId: originalLocation.workspaceId! }
+  const snapshot = await bridge.api.call('snapshot', destination)
+  observer.getState().mountSpace(target, false); observer.getState().observeSpaceMount(target, { snapshot, reading: false })
+  const workspaceId = originalSourceWorkspaceId(target), tabId = originalSourceTabProjectionId(target, 'healthy-tab')
+  observer.setState({ activeWorkspaceId: workspaceId })
+  if (entry === 'tab-x') observer.getState().openOriginalSpaceLocation({ target, occurrence: { tabId: 'healthy-tab', regionId: 'healthy-region', displayWorkspaceId: 'W', groupId: 'G' } })
+  function Consumer() {
+    const state = observer(), select = (reference: any) => state.selectMainRegion(reference, state.workbenchSpaceSelection)
+    const presentation = mainFocusPresentation(state.workbenchSpaceSelection, state.tabs, workbenchSelectionCatalog(state), select)
+    return createElement(Fragment, null,
+      createElement(GlobalFocusSurface, { workspaceOpen: false, onSelectContext: () => {}, onSelectLocation: select, presentation, viewTargets: {} }),
+      createElement(WorkspaceWorkbench, { workspaceId, visible: state.mainSurface === 'workbench', viewTargets: {} }))
+  }
+  const { createClientUiRoot } = await import('./helpers/client-ui-render.js')
+  const node = document.createElement('div'); document.body.append(node); const root = createClientUiRoot(node)
+  cleanup.push(async () => { await act(async () => root.unmount()); node.remove() })
+  await act(async () => root.render(createElement(Consumer)))
+  if (entry === 'tab-x') {
+    let tabNode: HTMLElement | undefined
+    await vi.waitFor(() => { tabNode = [...node.querySelectorAll<HTMLElement>('button.workbench-tab[data-workbench-tab-id]')].find(tab => tab.getAttribute('data-workbench-tab-id') === tabId); expect(tabNode, JSON.stringify({ selection: observer.getState().workbenchSpaceSelection, html: node.innerHTML })).toBeDefined() })
+    await act(async () => tabNode!.querySelector<HTMLElement>('[aria-label^="Close "]')!.click())
+  } else {
+    let card: HTMLElement | undefined
+    await vi.waitFor(async () => { await act(async () => {}); card = [...node.querySelectorAll<HTMLElement>('.focus-context[data-session-id]')].find(card => card.textContent?.includes(f.agent.agentSessionId)); expect(card).toBeDefined() }, { timeout: 10000 })
+    await act(async () => card!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2 })))
+    await vi.waitFor(() => expect([...document.querySelectorAll('[role="menuitem"]')].some(item => item.textContent === 'Close workface…')).toBe(true))
+    await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Close workface…')!.click())
+  }
+  await vi.waitFor(() => expect(document.querySelector('.confirmation-dialog')?.textContent).toContain('Choose the original position'), { timeout: 10000 })
+  if (process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM && entry === 'focus-menu') await writeFile(process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM + '-choice.html', document.body.innerHTML)
+  const select = document.querySelector<HTMLElement>('[aria-label="Original position"]')!
+  await act(async () => select.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+  await vi.waitFor(() => expect(document.querySelectorAll('[role="menuitemradio"]:not([data-missing])').length).toBe(2))
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]:not([data-missing])')].find(option => option.textContent?.includes('otherDisplay'))!.click())
+  if (entry.startsWith('changed-')) {
+    const execute = f.store.getState().executeWorkbenchClose
+    let changed = false
+    f.store.setState({ executeWorkbenchClose: async request => {
+      if (!changed && request.operation === 'workbench.close.capture') {
+        changed = true
+        f.store.setState(state => ({ tabs: { ...state.tabs, 'healthy-tab': { ...state.tabs['healthy-tab']!, regions: {
+          'healthy-region': entry === 'changed-agent' ? { kind: 'agent', regionId: 'healthy-region', workspaceId: 'W', phase: 'attached', sessionId: 'successor-original-agent' }
+            : { kind: 'launcher', regionId: 'healthy-region', workspaceId: 'W' } } } } }))
+      }
+      return await execute(request)
+    } })
+  }
+  await act(async () => document.querySelector<HTMLElement>('[data-confirm-label="Review close"]')!.click())
+  if (entry.startsWith('changed-')) {
+    await vi.waitFor(() => expect(document.querySelector('[data-confirm-label="Check original status"]:not([disabled])')).not.toBeNull())
+    await act(async () => document.querySelector<HTMLElement>('[data-confirm-label="Check original status"]:not([disabled])')!.click())
+    await vi.waitFor(() => expect(document.querySelector('.confirmation-dialog')?.textContent).toContain('changed member or position'))
+    if (process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM && entry === 'changed-agent') await writeFile(process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM + '-unknown.html', document.body.innerHTML)
+    expect(document.querySelector('[data-confirm-label="Keep Session & Close"]')).toBeNull()
+    expect(calls.mock.calls.some(([method, input]) => method === 'close' && (input as { method: string }).method === 'space.close.apply')).toBe(false)
+    expect(f.store.getState().layouts.otherDisplay!.groups[0]!.tabOrder).toContain('healthy-tab')
+    expect(f.stops).not.toHaveBeenCalled(); expect(localClose).not.toHaveBeenCalled()
+    return
+  }
+  await vi.waitFor(() => expect(document.querySelector('[data-confirm-label="Close"]:not([disabled])')).not.toBeNull())
+  if (process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM && entry === 'focus-menu') await writeFile(process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM + '-review.html', document.body.innerHTML)
+  await act(async () => document.querySelector<HTMLElement>('[data-confirm-label="Close"]:not([disabled])')!.click())
+  await vi.waitFor(() => expect(document.querySelector('.confirmation-dialog')?.textContent).toContain('Original view closed'))
+  expect(f.store.getState().layouts.otherDisplay!.groups[0]!.tabOrder).not.toContain('healthy-tab')
+  expect(f.store.getState().layouts.W!.groups[0]!.tabOrder).toContain('healthy-tab')
+  expect(f.store.getState().agentComposerDrafts['healthy-region']).toBe('Original unsent Agent draft')
+  expect(observer.getState().agentComposerDrafts[f.agent.agentSessionId]).toBe('Observer draft must not approve original close')
+  expect(observer.getState().tabs[tabId]).toBeDefined()
+  expect(localClose).not.toHaveBeenCalled(); expect(f.stops).not.toHaveBeenCalled()
+  expect(calls.mock.calls.filter(([method, input]) => method === 'close' && (input as { method: string }).method === 'space.close.apply')).toHaveLength(1)
+  expect((await f.native.client.status(f.other.runId)).state.type).toBe('running')
+})
 
 async function sourceCloseFixture(split = false, file = false) {
   const f = await fixture()
@@ -184,114 +341,89 @@ async function sourceCloseFixture(split = false, file = false) {
   return { ...f, source, bridge, target, call, sourceNative, tabId, regionId, ownerKey, close, admitted }
 }
 
-it.runIf(business).each([false, true])('the shared close owner retires an unobserved Source workface (split %s) without borrowing a same-SID local Run', async split => {
+it.runIf(business).each([false, true])('local close rejects a virtual Source position (split %s) and retains both same-SID owners', async split => {
   const f = await sourceCloseFixture(split), original = await f.source.d.core.readAgentSession(f.agent.agentSessionId)
-  const oldSnapshot = await f.bridge.api.call('snapshot', { hostId: f.target.hostId, reference: f.target.reference })
-  const record = await f.store.getState().prepareWorkbenchClose({ target: f.close, keepAgentSessions: false })
-  expect(record.plan.projection.source).toMatchObject({ hostId: f.target.hostId, edit: { reference: f.source.reference } })
-  expect(record.plan.projection.resources).toEqual([])
-  const { preparedCloseConfirmation, lastViewCloseCopy } = await import("../src/renderer/src/lib/last-view-close-confirmation.js")
-  const confirmation = preparedCloseConfirmation(record, f.store.getState())!
-  expect(confirmation.unconfirmed).toEqual(["Agent " + f.agent.agentSessionId])
-  const copy = lastViewCloseCopy(confirmation, split ? "split" : "tab")
-  expect(copy.description).toContain("original shared Space"); expect(copy.description).toContain("No Stop is sent")
-  expect(copy.description).not.toContain("original-source-member")
-  expect(core.spaceCloseDecisions(record.plan)).toMatchObject([{ action: 'close-view-only', regionId: f.regionId }])
-  expect(await f.store.getState().applyWorkbenchClose(record)).toBe(true)
-  expect(f.sourceNative).not.toHaveBeenCalled(); expect(f.stops).not.toHaveBeenCalled()
+  const graph = await f.source.b.spatial.read()
+  await expect(f.store.getState().prepareWorkbenchClose({ target: f.close, keepAgentSessions: false })).rejects.toMatchObject({ code: 'WORKBENCH_CLOSE_TARGET_REQUIRED' })
+  expect(f.call.mock.calls.some(([method]) => method === 'apply')).toBe(false)
+  expect(await f.source.b.spatial.read()).toEqual(graph)
   expect(await f.source.d.core.readAgentSession(f.agent.agentSessionId)).toEqual(original)
-  expect((await f.native.client.status(f.other.runId)).state.type).toBe('running')
+  expect(f.store.getState().tabs[f.tabId]?.regions[f.regionId]).toBeDefined()
   expect(f.store.getState().agentComposerDrafts[f.ownerKey]).toBe('Original unsent Source input')
   expect(f.store.getState().agentComposerDrafts['healthy-region']).toBe('Original unsent Agent draft')
-  const saved = (await f.source.b.spatial.read())!
-  expect(saved.graph.regions.some(region => region.regionId === f.admitted.address.regionId)).toBe(false)
-  f.store.getState().observeSpaceMount(f.target, { snapshot: oldSnapshot, reading: false })
-  expect(f.store.getState().tabs[f.tabId]?.regions[f.regionId]).toBeUndefined()
-  const snapshot = await f.bridge.api.call('snapshot', { hostId: f.target.hostId, reference: f.target.reference })
-  f.store.getState().observeSpaceMount(f.target, { snapshot, reading: false })
-  expect(f.store.getState().tabs[f.tabId]?.regions[f.regionId]).toBeUndefined()
-  if (split) expect(Object.values(f.store.getState().tabs[f.tabId]!.regions)).toHaveLength(1)
-  else expect(f.store.getState().tabs[f.tabId]).toBeUndefined()
-  expect(JSON.parse((await f.user.read())!).state.agentComposerDrafts[f.ownerKey]).toBe('Original unsent Source input')
-})
-
-it.runIf(business)('a lost Source spatial ACK keeps the same close unknown and never repeats the write or stops either same-SID Agent', async () => {
-  const f = await sourceCloseFixture(), apply = f.bridge.api.call
-  f.call.mockImplementation(async (method, input, signal) => {
-    const result = await apply(method, input, signal)
-    if (method === 'apply') throw Error('Original Source close ACK unavailable')
-    return result
-  })
-  const record = await f.store.getState().prepareWorkbenchClose({ target: f.close, keepAgentSessions: false })
-  expect(await f.store.getState().applyWorkbenchClose(record)).toBe(false)
-  expect(f.store.getState().tabs[f.tabId]?.regions[f.regionId]).toBeDefined()
-  expect(await f.store.getState().applyWorkbenchClose(record)).toBe(false)
-  expect(f.call.mock.calls.filter(([method]) => method === 'apply')).toHaveLength(1)
-  expect((await f.rpc.call('space.close.inspect', { operationId: record.operationId })).operation).toMatchObject({ outcome: 'unknown' })
-  expect(f.store.getState().agentComposerDrafts[f.ownerKey]).toBe('Original unsent Source input')
+  expect((await f.native.client.status(f.other.runId)).state.type).toBe('running')
   expect(f.sourceNative).not.toHaveBeenCalled(); expect(f.stops).not.toHaveBeenCalled()
-  const snapshot = await f.bridge.api.call('snapshot', { hostId: f.target.hostId, reference: f.target.reference })
-  f.store.getState().observeSpaceMount(f.target, { snapshot, reading: false })
-  expect(f.store.getState().tabs[f.tabId]).toBeUndefined()
 })
 
-it.runIf(business)('late Source File input retains its original View after the spatial ACK and can then close locally without a second Source write', async () => {
+it.runIf(business)('a retained Source buffer whose original Region is confirmed absent can review and close locally', async () => {
   const f = await sourceCloseFixture(true, true)
   const surface = f.store.getState().tabs[f.tabId]!.regions[f.regionId]!
-  expect(surface.kind).toBe('file'); if (surface.kind !== 'file') throw Error('Expected original Source File')
+  if (surface.kind !== 'file') throw Error('Expected original File')
   const { documentKey } = await import('../src/renderer/src/lib/workbench-tabs.js')
+  const { requiresSourceWorkbenchClose, sourceWorkbenchCloseReference } = await import('../src/renderer/src/lib/source-workbench-close.js')
   const key = documentKey(surface.workspaceId, surface.path)
-  f.store.setState(current => ({ documents: { ...current.documents, [key]: { path: surface.path, content: 'Original Source buffer', revision: 'original-source-file-revision' } }, dirtyDocuments: { ...current.dirtyDocuments, [key]: true } }))
-  const record = await f.store.getState().prepareWorkbenchClose({ target: f.close, keepAgentSessions: true })
-  expect(record.plan.projection.drafts).toMatchObject([{ document: { hostId: f.target.hostId, workspaceId: surface.workspaceId } }])
-  let enter!: () => void, release!: () => void
-  const entered = new Promise<void>(resolve => { enter = resolve }), waiting = new Promise<void>(resolve => { release = resolve })
-  cleanup.push(async () => release?.())
-  const actual = f.bridge.api.call
-  f.call.mockImplementation(async (method, input, signal) => {
-    if (method === 'apply') { enter(); await waiting }
-    return await actual(method, input, signal)
-  })
-  const pending = f.store.getState().applyWorkbenchClose(record); await entered
-  f.store.getState().updateDocument(f.tabId, 'Late Source buffer must survive', f.regionId)
-  release()
-  expect(await pending).toBe(false)
-  expect(f.store.getState().tabs[f.tabId]?.regions[f.regionId]).toMatchObject({ kind: 'file', path: surface.path })
-  expect(f.store.getState().documents[key]?.content).toBe('Late Source buffer must survive')
-  const inspected = (await f.rpc.call('space.close.inspect', { operationId: record.operationId })).operation!
-  expect(inspected, inspected.issue).toMatchObject({ outcome: 'partial', clientProjection: { retainedRegions: [f.regionId] } })
+  f.store.setState(state => ({ documents: { ...state.documents, [key]: { path: surface.path, content: 'Retained newer observer input', revision: 'retained-source-revision' } }, dirtyDocuments: { ...state.dirtyDocuments, [key]: true } }))
+  const saved = (await f.source.b.spatial.read())!, graph = structuredClone(saved.graph)
+  const { closeWorkbenchRegion } = await import('@agentmux/layout')
+  graph.tabs = graph.tabs.map(tab => tab.tabId === f.admitted.address.tabId ? { ...tab, regionIds: ['retained-source-launcher'] } : tab)
+  graph.regions = graph.regions.filter(region => region.regionId !== f.admitted.address.regionId)
+  graph.tabLayouts[f.admitted.address.tabId] = closeWorkbenchRegion(graph.tabLayouts[f.admitted.address.tabId]!, f.admitted.address.regionId)!
+  await f.source.b.spatial.commit({ expectedRevision: saved.revision, graph, allowEntityRemoval: true })
   const snapshot = await f.bridge.api.call('snapshot', { hostId: f.target.hostId, reference: f.target.reference })
   f.store.getState().observeSpaceMount(f.target, { snapshot, reading: false })
   expect(f.store.getState().tabs[f.tabId]?.regions[f.regionId]).toBeDefined()
-  expect(JSON.parse((await f.user.read())!).state.documents[key].content).toBe('Late Source buffer must survive')
-  const reviewed = await f.store.getState().prepareWorkbenchClose({ target: f.close, keepAgentSessions: true })
-  expect(reviewed.plan.projection.source).toBeUndefined()
-  expect(await f.store.getState().applyWorkbenchClose(reviewed)).toBe(true)
-  expect(f.call.mock.calls.filter(([method]) => method === 'apply')).toHaveLength(1)
+  expect(requiresSourceWorkbenchClose(f.store.getState(), f.tabId, f.regionId)).toBe(false)
+  const reference = { displayWorkspaceId: f.close.displayWorkspaceId, groupId: f.close.groupId, tabId: f.tabId, regionId: f.regionId }
+  expect(sourceWorkbenchCloseReference(f.store.getState(), reference, 'tab')?.member.regionId).toBe('retained-source-launcher')
+  const record = await f.store.getState().prepareWorkbenchClose({ target: { kind: 'region', ...reference }, keepAgentSessions: true })
+  expect(record.plan.projection.drafts).toHaveLength(1)
+  expect(record.plan.projection.source).toBeUndefined()
+  expect(await f.store.getState().applyWorkbenchClose(record)).toBe(true)
   expect(f.store.getState().tabs[f.tabId]?.regions[f.regionId]).toBeUndefined()
+  expect(f.call.mock.calls.some(([method]) => method === 'apply')).toBe(false)
+  expect(f.stops).not.toHaveBeenCalled()
 })
 
-it.runIf(business)('a Source successor binding received after the spatial write survives the older exact close', async () => {
-  const f = await sourceCloseFixture(true)
-  const record = await f.store.getState().prepareWorkbenchClose({ target: f.close, keepAgentSessions: false }), actual = f.bridge.api.call
-  f.call.mockImplementation(async (method, input, signal) => {
-    const receipt = await actual(method, input, signal)
-    if (method === 'apply') {
-      const current = (await f.source.b.spatial.read())!, graph = structuredClone(current.graph), tabId = f.admitted.address.tabId
-      graph.tabs = graph.tabs.map(tab => tab.tabId === tabId ? { ...tab, regionIds: [...tab.regionIds, f.admitted.address.regionId] } : tab)
-      graph.regions.push({ regionId: f.admitted.address.regionId, tabId, kind: 'agent', agentSessionId: 'successor-source-agent', runId: null, execution: null })
-      const { splitWorkbenchRegion } = await import('@agentmux/layout')
-      graph.tabLayouts[tabId] = splitWorkbenchRegion(graph.tabLayouts[tabId]!, graph.tabLayouts[tabId]!.activeRegionId, 'right', f.admitted.address.regionId)
-      await f.source.b.spatial.commit({ expectedRevision: current.revision, graph })
-      const snapshot = await actual('snapshot', { hostId: f.target.hostId, reference: f.target.reference })
-      f.store.getState().observeSpaceMount(f.target, { snapshot, reading: false })
-    }
-    return receipt
-  })
-  expect(await f.store.getState().applyWorkbenchClose(record)).toBe(false)
-  expect(f.store.getState().tabs[f.tabId]?.regions[f.regionId]?.source).toMatchObject({ agentSessionId: 'successor-source-agent' })
-  expect(f.stops).not.toHaveBeenCalled(); expect(f.sourceNative).not.toHaveBeenCalled()
-  expect((await f.source.b.spatial.read())!.graph.regions.find(region => region.regionId === f.admitted.address.regionId)?.agentSessionId).toBe('successor-source-agent')
+it.runIf(business)('a lost original close ACK is inspected by the same operation without replay or global membership deletion', async () => {
+  const f = await fixture({ originalSource: true })
+  f.store.setState(state => ({ layouts: { ...state.layouts, otherDisplay: createWorkspaceLayout('other-group', ['target-tab']) } }))
+  const { prepareRendererUpdate } = await import('../src/renderer/src/store.js'); await prepareRendererUpdate('quit')
+  const { bridge, destination, member } = await originalCloseBridge(f)
+  const actual = bridge.api.call, calls: string[] = []
+  const call: typeof actual = async (method, input, signal) => {
+    calls.push(method === 'close' ? (input as { method: string }).method : method)
+    const result = await actual(method, input, signal)
+    if (method === 'close' && (input as { method: string }).method === 'space.close.apply') throw Error('Original effect ACK unavailable')
+    return result
+  }
+  const record = (await call('close', { ...destination, method: 'space.close.prepare', member, request: { operationId: 'source-ack-inspect', target: { kind: 'tab-occurrence', displayWorkspaceId: 'W', groupId: 'G', tabId: member.tabId }, keepAgentSessions: true } })).operation!
+  await expect(call('close', { ...destination, method: 'space.close.apply', request: { operationId: record.operationId, expectedPlanDigest: record.planDigest, decisions: core.spaceCloseDecisions(record.plan) } })).rejects.toThrow('Original effect ACK unavailable')
+  const inspected = (await call('close', { ...destination, method: 'space.close.inspect', request: { operationId: record.operationId } })).operation!
+  expect(inspected).toMatchObject({ outcome: 'applied', diskDurability: 'confirmed' })
+  expect(calls.filter(method => method === 'space.close.apply')).toHaveLength(1)
+  expect(f.store.getState().layouts.W!.groups[0]!.tabOrder).not.toContain('target-tab')
+  expect(f.store.getState().layouts.otherDisplay!.groups[0]!.tabOrder).toContain('target-tab')
+  expect(f.store.getState().documents[f.key]?.content).toBe('Original unsaved content')
+  expect(f.stops).not.toHaveBeenCalled()
+})
+
+it.runIf(business)('an obtained original close ACK survives Renderer observation cancellation', async () => {
+  const f = await fixture({ originalSource: true }), { bridge, destination, member } = await originalCloseBridge(f)
+  const record = (await bridge.api.call('close', { ...destination, method: 'space.close.prepare', member, request: { operationId: 'source-ack-cancel',
+    target: { kind: 'tab-occurrence', displayWorkspaceId: 'W', groupId: 'G', tabId: member.tabId }, keepAgentSessions: true } })).operation!
+  const controller = new AbortController(), { createRendererSpaceMount } = await import('../src/renderer/src/lib/space-mount-api.js')
+  const port = createRendererSpaceMount({ call: async (method, input) => {
+    const result = await bridge.handlers.get('spaceMounts:call')!(bridge.event, 'cancel-after-original-ack', method, input)
+    controller.abort(Error('Observation ended after original ACK'))
+    return result
+  } } as import('../src/shared/space-mount.js').SpaceMountPreloadApi)
+  const result = await port.call('close', { ...destination, method: 'space.close.apply', request: { operationId: record.operationId,
+    expectedPlanDigest: record.planDigest, decisions: core.spaceCloseDecisions(record.plan) } }, controller.signal)
+  expect(controller.signal.aborted).toBe(true)
+  expect(result.operation).toMatchObject({ outcome: 'applied', diskDurability: 'confirmed' })
+  expect(f.store.getState().layouts.W!.groups[0]!.tabOrder).not.toContain(member.tabId)
+  expect(f.stops).toHaveBeenCalledTimes(1) // The explicitly reviewed raw Terminal, never the Agent.
+  expect((await f.native.client.status(f.other.runId)).state.type).toBe('running')
 })
 
 it.runIf(business)('compiled CLI closes the exact frozen raw Run and reviewed dirty file through the original Main and Renderer owners', async () => {
@@ -787,63 +919,48 @@ it.runIf(business)('one close snapshot indexes outside document consumers once r
 })
 
 it.runIf(Boolean(restartMode) && process.env.AGENTMUX_SOURCE_CLOSE_RESTART === '1')('private Source restart worker retains the exact applied close and original input without replay', async () => {
-  const f = await fixture(), source = JSON.parse(await readFile(join(f.root, 'source-restart-facts.json'), 'utf8'))
-  const { spaceMountTransport } = await import('./helpers/space-mount-fixture.js')
-  const { originalSourceInputOwnerKey, originalSourceWorkspaceId, originalSourceTabProjectionId, originalSourceRegionProjectionId } = await import('../src/renderer/src/lib/original-space-navigation.js')
-  const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: source.endpoint } }); cleanup.push(() => rpc.dispose())
-  const bridge = spaceMountTransport(cleanup, [{ id: source.target.hostId, carrier: { forwardRpc: rpc.call.bind(rpc), subscribeRpc: rpc.subscribe.bind(rpc) } }])
-  const calls = vi.spyOn(f.api.spaceMounts, 'call').mockImplementation(bridge.api.call)
-  vi.spyOn(f.api.workbenchClose, 'call').mockImplementation((method, input) => f.rpc.call(method, input))
-  const workspaceId = originalSourceWorkspaceId(source.target), tabId = originalSourceTabProjectionId(source.target, source.address.tabId)
-  const regionId = originalSourceRegionProjectionId(source.target, source.address.regionId), ownerKey = originalSourceInputOwnerKey(source.executionRuntimeId, f.agent.agentSessionId)
+  const f = await fixture({ originalSource: true }), { bridge, destination, member } = await originalCloseBridge(f)
+  const calls = vi.spyOn(bridge.api, 'call')
   if (restartMode === 'writer') {
-    f.store.getState().mountSpace(source.target, false)
-    const snapshot = await bridge.api.call('snapshot', { hostId: source.target.hostId, reference: source.target.reference })
-    f.store.getState().observeSpaceMount(source.target, { snapshot, reading: false })
-    const groupId = f.store.getState().layouts[workspaceId]!.groups.find(group => group.tabOrder.includes(tabId))!.id
-    f.store.getState().setAgentComposerDraft(ownerKey, 'Original Source draft across process restarts')
-    f.store.setState(current => ({ agentSteerQueues: { ...current.agentSteerQueues, [ownerKey]: [{ operationId: 'original-unknown-source-input',
-      text: 'Original unknown input must not replay', status: 'deferred', awaitingExplicitSend: true, archived: true,
-      recoveredSourceInput: { originalId: 'retained-source-input', delivery: 'unknown' } }] } }))
-    const prepared = await f.store.getState().prepareWorkbenchClose({ operationId: 'restart-source-applied', target: { kind: 'tab-occurrence', displayWorkspaceId: workspaceId, groupId, tabId }, keepAgentSessions: false })
-    expect(await f.store.getState().applyWorkbenchClose(prepared)).toBe(true)
-    expect(f.store.getState().tabs[tabId]).toBeUndefined()
+    f.store.setState(state => ({ layouts: { ...state.layouts, otherDisplay: createWorkspaceLayout('other-group', ['target-tab']) },
+      agentSteerQueues: { 'healthy-region': [{ operationId: 'original-unknown-source-input', text: 'Original unknown input must not replay',
+        status: 'deferred', awaitingExplicitSend: true, archived: true, recoveredSourceInput: { originalId: 'retained-source-input', delivery: 'unknown' } }] } }))
     const { prepareRendererUpdate } = await import('../src/renderer/src/store.js'); await prepareRendererUpdate('quit')
-    await writeFile(join(f.root, 'source-writer-proof.json'), JSON.stringify({ pid: process.pid, tabId, regionId, ownerKey,
-      agentSessionId: f.agent.agentSessionId, agentRun: f.other.runId, queues: f.store.getState().agentSteerQueues[ownerKey],
-      sourceWriteCalls: calls.mock.calls.filter(([method]) => method === 'apply').length }))
+    const record = (await bridge.api.call('close', { ...destination, method: 'space.close.prepare', member, request: { operationId: 'restart-source-applied',
+      target: { kind: 'tab-occurrence', displayWorkspaceId: 'W', groupId: 'G', tabId: member.tabId }, keepAgentSessions: true } })).operation!
+    const result = (await bridge.api.call('close', { ...destination, method: 'space.close.apply', request: { operationId: record.operationId, expectedPlanDigest: record.planDigest, decisions: core.spaceCloseDecisions(record.plan) } })).operation!
+    expect(result.outcome, result.issue).toBe('applied')
+    await prepareRendererUpdate('quit')
+    await writeFile(join(f.root, 'source-writer-proof.json'), JSON.stringify({ pid: process.pid, agentSessionId: f.agent.agentSessionId,
+      agentRun: f.other.runId, rawRun: f.run.runId, queues: f.store.getState().agentSteerQueues['healthy-region'],
+      sourceWriteCalls: calls.mock.calls.filter(([method, input]) => method === 'close' && (input as { method: string }).method === 'space.close.apply').length }))
   } else {
     const original = JSON.parse(await readFile(join(f.root, 'source-writer-proof.json'), 'utf8'))
     expect(process.pid).not.toBe(original.pid)
-    // Check the cold document before any new Source observation: no reseeding.
-    expect(f.store.getState().tabs[tabId]).toBeUndefined()
-    expect(f.store.getState().agentComposerDrafts[ownerKey]).toBe('Original Source draft across process restarts')
-    expect(f.store.getState().agentSteerQueues[ownerKey]).toEqual(original.queues)
-    const inspected = (await f.rpc.call('space.close.inspect', { operationId: 'restart-source-applied' })).operation!
-    expect(inspected).toMatchObject({ phase: 'settled', outcome: 'applied', plan: { projection: { source: { hostId: source.target.hostId } } } })
-    expect(await f.store.getState().applyWorkbenchClose(inspected)).toBe(false)
-    const snapshot = await bridge.api.call('snapshot', { hostId: source.target.hostId, reference: source.target.reference })
-    f.store.getState().observeSpaceMount(source.target, { snapshot, reading: false })
-    expect(snapshot.scope.regions.some(region => region.regionId === source.address.regionId)).toBe(false)
-    expect(f.store.getState().tabs[tabId]).toBeUndefined()
-    expect(calls.mock.calls.some(([method]) => method === 'apply')).toBe(false)
+    // Read the cold original document before any new observation or write.
+    expect(f.store.getState().layouts.W!.groups[0]!.tabOrder).not.toContain('target-tab')
+    expect(f.store.getState().layouts.otherDisplay!.groups[0]!.tabOrder).toContain('target-tab')
+    expect(f.store.getState().documents[f.key]?.content).toBe('Original unsaved content')
+    expect(f.store.getState().agentComposerDrafts['healthy-region']).toBe('Original unsent Agent draft')
+    expect(f.store.getState().agentSteerQueues['healthy-region']).toEqual(original.queues)
+    const inspected = (await bridge.api.call('close', { ...destination, method: 'space.close.inspect', request: { operationId: 'restart-source-applied' } })).operation!
+    expect(inspected).toMatchObject({ phase: 'settled', outcome: 'applied' })
+    expect(inspected.plan.projection.source).toBeUndefined()
+    expect((await bridge.api.call('closeLocations', { ...destination, member })).locations).toMatchObject([{ displayWorkspaceId: 'otherDisplay', groupId: 'other-group' }])
+    expect(calls.mock.calls.some(([method, input]) => method === 'close' && (input as { method: string }).method === 'space.close.apply')).toBe(false)
     expect(f.stops).not.toHaveBeenCalled()
     await f.host.client.writeAgent({ agentSessionId: f.agent.agentSessionId, expectedRun: f.agent.run, data: 'healthy-after-source-close-restart', source: 'user' })
     expect((await f.native.client.status(original.agentRun)).state.type).toBe('running')
+    expect((await f.native.client.status(original.rawRun)).state.type).toBe('running')
     const { prepareRendererUpdate } = await import('../src/renderer/src/store.js'); await prepareRendererUpdate('quit')
     await writeFile(join(f.root, `source-reader-${process.env.AGENTMUX_SOURCE_CLOSE_READER}.json`), JSON.stringify({ pid: process.pid, writerPid: original.pid,
-      restored: true, tabId, originalInput: f.store.getState().agentSteerQueues[ownerKey], sourceWriteCalls: 0, stopCalls: f.stops.mock.calls.length }))
+      restored: true, originalInput: f.store.getState().agentSteerQueues['healthy-region'], sourceWriteCalls: 0, stopCalls: f.stops.mock.calls.length }))
   }
 })
 
-it.runIf(!nativeBranch)('an applied Source close survives two actual consumer process restarts without reopening or replaying original input', async () => {
-  const root = await mkdtemp('/tmp/wcsr-'), { createSpaceSessionsFixture } = await import('../../../packages/core/test/helpers/space-session-fixture.js')
+it.runIf(!nativeBranch)('an applied Source close survives two actual original owner process restarts without replaying original input', async () => {
+  const root = await mkdtemp('/tmp/wcsr-')
   cleanup.push(() => rm(root, { recursive: true, force: true }))
-  const source = await createSpaceSessionsFixture(cleanup), agent = await source.d.put('healthy-agent', 1, 'retained-original-source-run')
-  const nativeRead = vi.spyOn(source.d.core, 'runtimeSubject').mockRejectedValue(Error('Original Native observation unavailable across consumer restarts'))
-  const admitted = await source.admit('D-in-B', source.d.owner.runtimeId, agent.agentSessionId, 'source-restart-creation')
-  const target = { hostId: 'source-restart-route', reference: source.reference, zoneId: admitted.address.zoneId!, workspaceId: admitted.address.workspaceId! }
-  await writeFile(join(root, 'source-restart-facts.json'), JSON.stringify({ target, address: admitted.address, executionRuntimeId: source.d.owner.runtimeId, endpoint: source.b.server.path }))
   await mkdir(join(root, 'state/ctxmux'), { recursive: true, mode: 0o700 })
   const native = await activateRuntime({ executable: resolve('packages/core/vendor/ctxmux', `${process.platform}-${process.arch}`, 'bin/ctxmuxd'),
     socketPath: join(root, 'ctxmux.sock'), stateDir: join(root, 'state/ctxmux'), childDisposition: { mode: 'detached', stderr: 'pipe' } })
@@ -860,12 +977,11 @@ it.runIf(!nativeBranch)('an applied Source close survives two actual consumer pr
     })
     expect(result.code, mode + '\n' + result.text).toBe(0); expect(result.text).toMatch(/1 passed/)
     const proof = JSON.parse(await readFile(join(root, index ? `source-reader-${index}.json` : 'source-writer-proof.json'), 'utf8')); pids.push(proof.pid)
-    expect((await source.d.core.readAgentSession(agent.agentSessionId))!.run).toEqual(agent.run)
-    expect((await source.b.spatial.read())!.graph.regions.some(region => region.regionId === admitted.address.regionId)).toBe(false)
+    expect(proof.sourceWriteCalls).toBe(index ? 0 : 1)
   }
-  expect(new Set(pids).size).toBe(3); expect(nativeRead).not.toHaveBeenCalled()
+  expect(new Set(pids).size).toBe(3)
   if (process.env.AGENTMUX_SOURCE_CLOSE_RESTART_PROOF) await writeFile(process.env.AGENTMUX_SOURCE_CLOSE_RESTART_PROOF, JSON.stringify({ pids, restarts: 2,
-    originalSessionId: agent.agentSessionId, originalRun: agent.run, sourceReference: source.reference, reopened: false, replayed: false, nativeReadCalls: 0 }))
+    originalRunPreserved: true, originalInputPreserved: true, unrelatedOccurrencePreserved: true, replayed: false }))
 }, 280_000)
 
 it.runIf(Boolean(restartMode) && process.env.AGENTMUX_SOURCE_CLOSE_RESTART !== '1')('private restart worker restores the original workface and discovers retained close operations without replay', async () => {
