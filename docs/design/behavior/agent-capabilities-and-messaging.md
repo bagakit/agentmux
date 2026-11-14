@@ -102,7 +102,7 @@ Agent 的状态和动作应可具象辨认：原身份旁显示当前有依据�
 
 新创建使用 SDK 或 AppConfig 显式传入的可执行文件、参数和环境时，Core 在原创建的私有记录中保留准确调用来源，公开只给安全摘要。历史、输入观察与恢复沿该原来源读取；当前同名 Executor 配置不能冒充它，也不能把另一配置 owner 的 revision 当作这个来源。旧 Session 缺少原来源时保持独立或未知，不从当前配置回填；退休与重新打开保留同一私有来源，公开会话及历史投影不泄露环境内容。
 
-Provider 启动项的当前声明唯一见 [launch-options.ts](../../../packages/core/src/providers/launch-options.ts)；运行中姿态控件的当前声明在各 Provider 的 interaction protocol（例如 [grok.ts](../../../packages/core/src/providers/grok.ts) 的 `GROK_POSTURE`）。本节只定义声明规则，不抄写各 Provider 的 flag 清单。
+Provider 启动项的当前声明唯一见 [launch-options.ts](../../../packages/core/src/providers/launch-options.ts)；运行中姿态控件的当前声明在各 Provider 的 interaction protocol（例如 [Grok](../../../packages/providers/src/grok/provider.ts) 的 `GROK_POSTURE`）。本节只定义声明规则，不抄写各 Provider 的 flag 清单。
 
 - **启动项以数据声明，标签与 argv 写在同一处。** Provider 以数据形式声明可供选择的启动项（例如 model、权限或沙箱模式）；每个 choice 把界面标签与兑现它的 argv 放在一起，两者不会漂移。
 - **describe 与 argv 分开。** describe 半边是纯数据，跨 IPC 供 Renderer 渲染；argv 半边只留在 Core。Renderer 看不到命令行，Launcher 也不知道 Provider 的名字，任何调用点都不按 `providerId` 分支决定启动项。
