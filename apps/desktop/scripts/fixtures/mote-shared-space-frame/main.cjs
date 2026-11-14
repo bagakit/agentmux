@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs/promises'), path = require('node:path'), { createHash } = require('node:crypto')
-const { app, BrowserWindow } = require('electron')
+const { app, BrowserWindow, ipcMain } = require('electron')
 const [html, privateRoot, phase, evidence] = process.argv.slice(2)
 const geometryDiagnostic = process.env.AGENTMUX_SHARED_FRAME_GEOMETRY_DIAGNOSTIC === '1'
 const serviceHintDiagnostic = process.env.AGENTMUX_SHARED_FRAME_SERVICE_HINT_DIAGNOSTIC === '1'
@@ -10,12 +10,41 @@ const styleMoveTraceDiagnostic = process.env.AGENTMUX_SHARED_FRAME_STYLE_MOVE_TR
 const preMoveStyleReadDiagnostic = process.env.AGENTMUX_SHARED_FRAME_PRE_MOVE_STYLE_READ_DIAGNOSTIC === '1'
 const commitIntervalDiagnostic = process.env.AGENTMUX_SHARED_FRAME_COMMIT_INTERVAL_DIAGNOSTIC === '1'
 const noDisclosureOpenDiagnostic = process.env.AGENTMUX_SHARED_FRAME_NO_DISCLOSURE_OPEN_DIAGNOSTIC === '1'
+const restartProofOnly = process.env.AGENTMUX_SHARED_FRAME_RESTART_ONLY === '1'
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const result = { passed: false, pid: process.pid, phase, frames: [], checks: [], userRunTouched: false,
   boundary: 'Actual complete App, Store, file tree, Tab/Region and Editor owners; controlled public Session/files API. No Browser seed, Native simultaneous display, actual Core/ctxmux/CLI or installed-app claim.' }
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 let win
+const documentPath = path.join(privateRoot, 'private-workbench-document.json')
+function installPrivateWorkbenchDocument() {
+  let tail = Promise.resolve()
+  const read = async () => {
+    await tail
+    try { return await fs.readFile(documentPath, 'utf8') }
+    catch (error) { if (error.code === 'ENOENT') return null; throw error }
+  }
+  const write = value => {
+    assert.equal(typeof value, 'string')
+    const document = JSON.parse(value)
+    assert.ok(document.state && Number.isFinite(document.version))
+    const admitted = tail.then(async () => {
+      const pending = documentPath + '.pending'
+      await fs.writeFile(pending, value, { mode: 0o600, flush: true })
+      await fs.rename(pending, documentPath)
+      const directory = await fs.open(privateRoot, 'r')
+      try { await directory.sync() } finally { await directory.close() }
+      return { path: documentPath, diskDurability: 'confirmed', contentDigest: createHash('sha256').update(value).digest('hex'),
+        sizeBytes: Buffer.byteLength(value), confirmedAt: Date.now() }
+    })
+    tail = admitted.catch(() => {})
+    return admitted
+  }
+  ipcMain.handle('private-workbench:read', (_event) => read())
+  ipcMain.handle('private-workbench:write', (_event, value) => write(value))
+  ipcMain.handle('private-workbench:import', async (_event, value) => { await write(value); return value })
+}
 function installPrivateCommitIntervalTrace() {
   const identities = new WeakMap(), remembered = new WeakSet(), restores = []
   let nextIdentity = 0
@@ -207,8 +236,13 @@ const bounded = async (work, label, budget = 12000) => {
 app.whenReady().then(async () => {
   try {
     if (process.platform === 'darwin') app.setActivationPolicy('regular')
+    if (restartProofOnly) {
+      installPrivateWorkbenchDocument()
+      result.boundary = 'Actual complete App/Store, Renderer writer and restored Mote composer DOM. Workbench user document goes over a private Electron Main file port with exact ACK. Controlled Session and spatial replies. No native Runtime, production Main file port, Browser Region or installed-app claim.'
+    }
     win = new BrowserWindow({ width: 1100, height: 760, useContentSize: true, show: false,
-      webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } })
+      webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false,
+        ...(restartProofOnly ? { preload: path.join(__dirname, 'restart-document-preload.cjs') } : {}) } })
     win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) process.stderr.write('Renderer: ' + message + '\n') })
     result.step = 'actual-App-ordinary-initialize'
     await bounded(win.loadFile(html, { query: { phase } }), result.step)
@@ -312,6 +346,70 @@ app.whenReady().then(async () => {
     const root = 'document'
     const exactPrimaryEditor = '[data-workbench-group-id="original-mote-second"][data-workbench-tab-id="mote-primary-tab"] .composer__editor .tiptap'
     const editor = selector(panel, exactPrimaryEditor + ', [data-workbench-retained-reference="mote-primary-tab"] .composer__editor .tiptap')
+    if (restartProofOnly) {
+      result.step = 'exact original Mote receipt and writable composer'
+      const draft = 'Private original Mote draft across the second process'
+      const proofEditor = selector(panel, '.mote-composer-surface .composer__editor .tiptap[contenteditable="true"]')
+      const primaryRegion = selector(panel, '[data-workbench-region-id="mote-primary-region"]')
+      await until(panel + '?.matches(":popover-open") && ' + panel + '.dataset.moteTargetTab==="mote-primary-tab" && ' + proofEditor + ' && ' + primaryRegion)
+      const initial = await facts()
+      assert.deepEqual(initial.floatingState.reference, reference)
+      assert.equal(initial.initialization.initializeCalls, 1)
+      assert.equal(initial.initialization.seedApplied, phase === 'seed')
+      const tab = initial.tabs[target], layout = initial.layouts.__scratch__
+      assert.equal(tab.layout.root.ratio, 0.61)
+      assert.equal(tab.layout.root.first.regionId, 'mote-primary-region')
+      assert.equal(tab.layout.root.second.regionId, 'mote-original-side-region')
+      assert.equal(layout.root.ratio, 0.54)
+      assert.ok(layout.groups.some(group => group.id === reference.groupId && group.tabOrder.includes(reference.tabId)))
+      assert.equal(initial.tabs['original-project-tab'].layout.root.ratio, 0.63)
+      if (phase === 'seed') {
+        result.step = 'type draft into the original Mote control'
+        await click(proofEditor)
+        await input('Input.insertText', { text: draft })
+      } else {
+        result.step = 'restore same persisted input and projection in the second PID'
+        const prior = JSON.parse(await fs.readFile(path.join(evidence, 'seed.json'), 'utf8'))
+        assert.notEqual(prior.pid, process.pid)
+        for (const name of ['tabs', 'layouts']) assert.deepEqual(JSON.parse(JSON.stringify(initial[name])), prior.final[name], name)
+        const controls = runs => runs.map(control => JSON.stringify(control)).sort()
+        assert.deepEqual(controls(initial.runs), controls(prior.final.runs), 'Exact controlled Session/Run identities independently of catalog order')
+        assert.deepEqual(initial.initialization.initialFloating.reference, reference)
+        assert.ok(initial.initialization.initialSpatial.graph.tabs.some(tab => tab.tabId === target))
+        assert.equal(createHash('sha256').update(JSON.stringify(initial.initialization.initialDurable)).digest('hex'), prior.durable.digest)
+      }
+      await until(proofEditor + '?.textContent.includes(' + JSON.stringify(draft) + ')')
+      const finalDraft = await read('window.sharedFrameProof.mainDraft()')
+      assert.equal(finalDraft.text, draft)
+      const hasDraft = value => JSON.parse(value?.desktopFragments?.launcher ?? '{}').state?.drafts?.[finalDraft.key]?.prompt === finalDraft.text
+      if (phase === 'restore') assert.equal(hasDraft(initial.initialization.initialDurable), true)
+      result.step = 'existing document and spatial writers confirm the original workface'
+      await read('window.sharedFrameProof.flushOriginal()')
+      let durable
+      const deadline = Date.now() + 10000
+      do {
+        const raw = await read('window.privateWorkbenchDocument.read()'), saved = JSON.parse(raw ?? 'null')
+        const committed = await read('window.sharedFrameProof.persistence().workbench')
+        if (committed?.tabs[target]?.layout.root.ratio === 0.61 && hasDraft(saved) &&
+            JSON.parse(saved?.desktopFragments?.moteFloating ?? 'null')?.reference?.groupId === reference.groupId) { durable = raw; break }
+        await pause(25)
+      } while (Date.now() < deadline)
+      assert.ok(durable, 'Both original persistence ports must independently contain the exact layout and authored text')
+      assert.equal(JSON.parse(durable).state.restoredWorkbench, undefined)
+      result.durable = { digest: createHash('sha256').update(durable).digest('hex'), size: Buffer.byteLength(durable) }
+      result.final = await facts()
+      assert.deepEqual(forbidden(result.final), [])
+      result.visible = await read(`(()=>{const e=${proofEditor},p=${primaryRegion},r=e.getBoundingClientRect(),q=p.getBoundingClientRect();return {draft:e.textContent,visible:r.width>0&&r.height>0&&q.width>0&&q.height>0,tabId:${panel}.dataset.moteTargetTab,regionId:p.dataset.workbenchRegionId,groupId:p.closest('[data-workbench-group-id]')?.dataset.workbenchGroupId}})()`)
+      assert.equal(result.visible.visible, true)
+      assert.equal(result.visible.draft, finalDraft.text)
+      assert.equal(result.visible.regionId, reference.regionId)
+      assert.equal(result.visible.groupId, reference.groupId)
+      await capture('original-Mote-projection-layout-and-draft')
+      win.webContents.session.flushStorageData()
+      result.checks.push({ name: phase === 'seed' ? 'original-layout-and-native-document-ack' : 'independent-second-PID-retains-original-projection-and-draft', passed: true })
+      result.passed = true
+      return
+    }
     const caret = (expression = editor, original = 'window.originalHealthyEditor') => read(`(()=>{const e=${expression},s=getSelection();let offset=null;if(e&&s?.anchorNode&&e.contains(s.anchorNode)){const r=document.createRange();r.selectNodeContents(e);r.setEnd(s.anchorNode,s.anchorOffset);offset=r.toString().length}return{same:e===${original},connected:!!e?.isConnected,text:e?.textContent,focused:document.activeElement===e,inert:!!e?.closest('[inert]'),hidden:!!e?.closest('[hidden]'),collapsed:s?.isCollapsed,offset}})()`)
     result.initial = await facts()
     assert.equal(result.initial.initialization.initializeCalls, 1)

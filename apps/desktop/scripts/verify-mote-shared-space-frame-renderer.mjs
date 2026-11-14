@@ -23,6 +23,7 @@ const preMoveStyleReadDiagnostic = process.argv.includes('--diagnostic-pre-move-
 const commitIntervalDiagnostic = process.argv.includes('--diagnostic-commit-interval')
 const noDisclosureOpenDiagnostic = process.argv.includes('--diagnostic-no-disclosure-open')
 const floatSpaceShortcut = process.argv.includes('--float-space-shortcut')
+const restartProofOnly = process.argv.includes('--restart-proof-only')
 const shortcutPointerDiagnostic = process.argv.includes('--diagnostic-shortcut-pointer-owner')
 assert.ok(!shortcutPointerDiagnostic || floatSpaceShortcut, 'Pointer-owner diagnostic requires the narrow shortcut fixture')
 const boundedReference = referenceCounterOnly || preMoveReadDiagnostic || styleMoveTraceDiagnostic || preMoveStyleReadDiagnostic || commitIntervalDiagnostic || noDisclosureOpenDiagnostic
@@ -59,6 +60,13 @@ const result = { schema: 'agentmux.mote-shared-frame-renderer-proof.v1', passed:
     'Lightweight isolated Renderer compilation, not a formal build/package/install. Screenshot success does not constitute independent aesthetic approval.'] }
 await mkdir(evidence, { recursive: true })
 try {
+  if (restartProofOnly) {
+    assert.ok(!(shortcutPointerDiagnostic || boundedReference || serviceHintDiagnostic || geometryDiagnostic), 'The restart proof must run both processes without private interventions')
+    result.acceptanceScope = 'mote-original-workface-and-draft-two-process-restart'
+    result.limitations = ['Actual App/Store, original Renderer persistence and an Electron Main private document port. Spatial and Session replies are controlled. No native Runtime, Main production storage owner, Browser Region or installed app is exercised.']
+    const preload = join(fixture, 'restart-document-preload.cjs')
+    inputs.set(preload, hash(await readFile(preload)))
+  }
   for (const file of [import.meta.filename, join(desktop, 'scripts/probe-process.mjs'), ...['main.cjs', 'entry.mjs', 'index.html', 'scenario.md'].map(name => join(fixture, name))]) inputs.set(file, hash(await readFile(file)))
   if (floatSpaceShortcut) inputs.set(join(fixture, 'float-space-shortcut.cjs'), hash(await readFile(join(fixture, 'float-space-shortcut.cjs'))))
   // Bind maintained public package exports to current Source, never a stale dist.
@@ -92,7 +100,7 @@ try {
     aliases.push({ find: new RegExp('^' + expression + '$'), replacement: resolve(client, source).replace('*', '$1') })
   }
   const outDir = join(privateRoot, 'renderer')
-  await build({ configFile: false, root: fixture, base: './', logLevel: 'error', esbuild: { jsx: 'automatic' },
+  await build({ configFile: false, root: fixture, base: './', logLevel: 'error', esbuild: { jsx: 'automatic' }, worker: { format: 'es' },
     resolve: { alias: aliases }, define: { __AGENTMUX_WEB_PREVIEW__: 'false', 'process.env.NODE_ENV': '"production"' },
     css: { postcss: { plugins: [stylesheetBinding] } }, plugins: [binding, {
       name: 'private-shared-frame-public-api-boundary', enforce: 'pre', transform(code, id) {
@@ -117,6 +125,8 @@ try {
   result.stylesheets = Object.fromEntries([...styles].sort().map(file => [relative(repository, file), inputs.get(file)]))
   result.compiled = compiled; result.controlledApiTransforms = controlledApiTransforms
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
+  delete env.AGENTMUX_SHARED_FRAME_RESTART_ONLY
+  if (restartProofOnly) env.AGENTMUX_SHARED_FRAME_RESTART_ONLY = '1'
   delete env.AGENTMUX_SHARED_FRAME_SHORTCUT_POINTER_DIAGNOSTIC
   if (shortcutPointerDiagnostic) { env.AGENTMUX_SHARED_FRAME_SHORTCUT_POINTER_DIAGNOSTIC='1'; result.notAcceptance=true; result.diagnostic='Observe only the exact original native input pointer event and delegate Event.preventDefault unchanged while capturing its caller stack. Original private-window setup and strict input counter stay unchanged; one process, not UI or restart acceptance.' }
   delete env.AGENTMUX_SHARED_FRAME_FLOAT_SPACE_SHORTCUT

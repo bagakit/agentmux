@@ -2,18 +2,27 @@ import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mj
 import { createElement, Fragment } from 'react'
 import { createClientUiRoot as createRoot } from '../../../test/helpers/client-ui-render'
 import { App } from '../../../src/renderer/src/App'
-import { useAppStore } from '../../../src/renderer/src/store'
+import { prepareRendererUpdate, useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
+import { useLauncherState } from '../../../src/renderer/src/lib/launcher-state'
+import { moteEntryDraftKey } from '../../../src/renderer/src/lib/mote-entry-hold'
 import { spatialCatalog } from '../../../src/renderer/src/lib/space-agent-control'
 import { desktopWorkbenchFromSpatial } from '../../../src/renderer/src/lib/desktop-spatial-state'
+import { directoryIdentity } from '../../../src/shared/space-addresses'
 import { requestPmoTeamsTopicFloatingOpen, readPmoTeamsTopicFloatingState, usePmoTeamsTopicFloatingState } from '../../../src/renderer/src/lib/pmo-teams-topic-floating'
 import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import '../../../src/renderer/src/styles/index.css'
 
 const phase = new URLSearchParams(location.search).get('phase')
+const privateDocument = window.privateWorkbenchDocument
+if (privateDocument) {
+  api.ui.readWorkbenchState = privateDocument.read
+  api.ui.writeWorkbenchState = privateDocument.write
+  api.ui.importWorkbenchState = privateDocument.import
+}
 const retainedSurface = true
 window.sharedFrameSetup.phase = 'controlled-public-data'
 const publicConfig = await api.config.get()
@@ -42,8 +51,9 @@ api.spatial.commit = async input => {
   return structuredClone(returned)
 }
 api.spatial.onChange = listener => { spatialListeners.add(listener); calls.push({ operation: 'spatialSubscribe' }); return () => spatialListeners.delete(listener) }
-const calls = [], recovered = new Set(), initialDurable = JSON.parse(localStorage.getItem(durableKey) ?? 'null')
-const initialFloating = JSON.parse(localStorage.getItem(floatingKey) ?? 'null')
+const calls = [], recovered = new Set()
+const initialDurable = JSON.parse((privateDocument ? await privateDocument.read() : localStorage.getItem(durableKey)) ?? 'null')
+const initialFloating = JSON.parse((privateDocument ? initialDurable?.desktopFragments?.moteFloating : localStorage.getItem(floatingKey)) ?? 'null')
 const sessions = [ ['project-worker', null], ['project-reader', null], ['mote-primary', PMO_TEAMS_TOPIC_ID],
   ['mote-neighbor', PMO_TEAMS_TOPIC_ID], ['custom-mote', customId], ['ordinary-worker', ordinaryId] ].map(([id, topicId]) => ({
   ...prototype, id, hostId: 'local', label: topicId ? 'Agent · Mote' : 'Agent · Project',
@@ -59,6 +69,19 @@ const topic = (id, title) => {
 }
 const ordinary = topic(ordinaryId, 'Ordinary Topic'); delete ordinary.soul
 const topics = [topic(PMO_TEAMS_TOPIC_ID, 'Mote'), topic(customId, 'Review the next step'), ordinary]
+const originalMote = topics[0], mainReference = { hostId: scratch.hostId, sessionId: 'mote-primary',
+  displayWorkspaceId: scratch.id, groupId: 'original-mote-second', tabId: targetId, regionId: 'mote-primary-region' }
+const mainDraftKey = moteEntryDraftKey({ workspace: scratch, topic: originalMote, rootPath: scratchTopicDirectoryName(originalMote.id) })
+if (privateDocument) {
+  originalMote.quickMode = { status: 'saved', version: 'private-original-main-document', defaults: { conversation: mainReference } }
+  const readDialogue = api.moteDialogue.read
+  api.moteDialogue.read = async request => {
+    if (request.target.spaceId !== directoryIdentity(scratch.hostId, originalMote.directoryPath)) return await readDialogue(request)
+    return { main: { target: request.target, identity: { hostId: scratch.hostId, moteId: originalMote.id }, status: 'ready', resource: null,
+      documentRevision: 'private-original-main-document', roleRevision: 'private-original-main-role', current: mainReference, issue: null },
+      links: [], incarnation: 'private-original-mote-links', throughSequence: 0, next: null, coverage: 'linked-sources-only', sourceStatus: 'read', sourceIssue: null }
+  }
+}
 // These controlled public records exercise the original message owners. They
 // are Renderer evidence, never a claim that a real Agent produced this text.
 const timelines = { 'mote-primary': { agentSessionId: 'mote-primary', revision: 1, items: [
@@ -160,6 +183,12 @@ function seedOriginalOnce() {
   projectTab.regions['original-reader-region'] = { regionId: 'original-reader-region', workspaceId: project.id, kind: 'agent', phase: 'attached', sessionId: 'project-reader' }
   const agentTab = (id, regionId, sessionId, topicId, name) => ({ ...createWorkbenchTab(id, { regionId, workspaceId: scratch.id, kind: 'agent', phase: 'attached', sessionId }, name), topicId })
   const primary = agentTab(targetId, 'mote-primary-region', 'mote-primary', PMO_TEAMS_TOPIC_ID, 'Review the current goal')
+  if (privateDocument) {
+    primary.layout = splitWorkbenchRegion(primary.layout, 'mote-primary-region', 'right', 'mote-original-side-region')
+    primary.layout.root.ratio = 0.61
+    primary.layout.activeRegionId = 'mote-primary-region'
+    primary.regions['mote-original-side-region'] = { regionId: 'mote-original-side-region', workspaceId: scratch.id, kind: 'agent', phase: 'attached', sessionId: 'mote-neighbor' }
+  }
   const neighbor = agentTab(neighborId, 'mote-neighbor-region', 'mote-neighbor', PMO_TEAMS_TOPIC_ID, 'Continue the original plan')
   const custom = agentTab(customTabId, 'custom-mote-region', 'custom-mote', customId, 'Review the next step')
   const ordinaryTab = agentTab('ordinary-topic-tab', 'ordinary-topic-region', 'ordinary-worker', ordinaryId, 'An ordinary Topic task')
@@ -172,7 +201,7 @@ function seedOriginalOnce() {
     agentFocus: { execution: { sessionId: 'project-worker', history: [{ sessionId: 'project-worker', focusedAt: 1000 }] }, pmo: { sessionId: 'mote-primary' } },
     viewModes: Object.fromEntries(sessions.map(session => [session.id, session.id !== 'project-reader' ? 'activity' : 'terminal'])) })
   for (const session of sessions) useAppStore.getState().setAgentComposerDraft(session.id, 'Original unsent draft · ' + session.id)
-  requestPmoTeamsTopicFloatingOpen({ targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: targetId })
+  requestPmoTeamsTopicFloatingOpen({ targetTopicId: PMO_TEAMS_TOPIC_ID, ...(privateDocument ? {} : { targetTabId: targetId }) })
   window.sharedFrameProof.setFloating({ open: true, preview: false, targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: targetId, reference: { displayWorkspaceId: scratch.id, groupId: 'original-mote-second', tabId: targetId, regionId: 'mote-primary-region' } })
 }
 const facts = () => {
@@ -201,6 +230,7 @@ function ProofBridge() {
   return null
 }
 window.sharedFrameProof = { ready: false, facts, ids: { targetId, neighborId, customId, customTabId },
+  ...(privateDocument ? { flushOriginal: () => prepareRendererUpdate('quit'), mainDraft: () => ({ key: mainDraftKey, text: useLauncherState.getState().drafts[mainDraftKey]?.prompt }) } : {}),
   persistence: () => ({ spatial: JSON.parse(localStorage.getItem(spatialKey) ?? 'null'), workbench: spatialState ? desktopWorkbenchFromSpatial(spatialState.graph) : null }),
   setNoteReadFailure: value => { noteReadFailure = value === true },
   prepareSpace: () => useAppStore.setState({ mainSurface: 'workbench', projectRailOpen: true, toolsOpen: true }),
