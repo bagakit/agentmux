@@ -1,3 +1,4 @@
+import { hostedSessionIds } from './hosted-session-summary.js'
 import { parseTerminalFrontend } from './agent-terminal-frontend.js'
 import { parseRuntimeIdentity } from './runtime-observation-codec.js'
 import { hostedCarrierPerformance } from './performance-diagnostics.js'
@@ -208,13 +209,26 @@ export function parseHostedTransferChunk(value: unknown): AgentMuxHostedTransfer
 }
 export function parseHostedMessageQueuePath(value: unknown): string { return wireString(value) }
 
-export function parseHostedBootstrap(value: unknown, projection: import('./hosted-session-summary.js').AgentMuxHostedSessionProjection = 'full'): import('./hosted-client-contract.js').AgentMuxHostedBootstrap {
-  const p = wireRecord(value, ['owner', 'connection', 'storePath', 'hostProcessId', 'catalog', 'sessions', 'messageQueuePath'])
+export function parseHostedBootstrap(value: unknown, projection: import('./hosted-session-summary.js').AgentMuxHostedSessionProjection = 'full', expectedIds?: readonly string[]): import('./hosted-client-contract.js').AgentMuxHostedBootstrap {
+  const p = wireRecord(value, ['owner', 'connection', 'storePath', 'hostProcessId', 'catalog', 'sessions', 'messageQueuePath', 'sessionScope'])
   parseHostedRuntimeOwnerIdentity(p.owner); wireCount(p.hostProcessId); parseHostedMessageQueuePath(p.messageQueuePath)
   if (p.storePath !== null) wireString(p.storePath)
   if (!Array.isArray(p.sessions) || !Array.isArray(p.catalog)) throw new AgentMuxError(
     'Runtime bootstrap is malformed.', 'CONTROL_PROTOCOL_ERROR')
   for (const session of p.sessions) parseHostedAgentSessionRead(session, (session as { agentSessionId: string }).agentSessionId, projection)
+  if (expectedIds !== undefined || p.sessionScope !== undefined) {
+    if (expectedIds === undefined || !p.sessionScope) throw new AgentMuxError('The bootstrap does not confirm its requested Session scope.', 'CONTROL_PROTOCOL_ERROR')
+    const scope = wireRecord(p.sessionScope, ['agentSessionIds', 'missing', 'unavailable'])
+    const actual = hostedSessionIds(scope.agentSessionIds, 'CONTROL_PROTOCOL_ERROR'), missing = hostedSessionIds(scope.missing, 'CONTROL_PROTOCOL_ERROR')
+    if (!actual || !missing || JSON.stringify(actual) !== JSON.stringify(expectedIds) || !Array.isArray(scope.unavailable)) throw new AgentMuxError('The bootstrap returned another Session selection.', 'CONTROL_PROTOCOL_ERROR')
+    const covered = new Set<string>(), requested = new Set(expectedIds)
+    const cover = (id: string) => { if (!requested.has(id) || covered.has(id)) throw new AgentMuxError('Scoped metadata has an unrequested or repeated Session.', 'CONTROL_PROTOCOL_ERROR'); covered.add(id) }
+    for (const session of p.sessions as Array<{agentSessionId:string}>) cover(session.agentSessionId)
+    for (const id of missing) cover(id)
+    for (const value of scope.unavailable) { const issue = wireRecord(value, ['agentSessionId','code','message']); wireString(issue.agentSessionId); wireString(issue.code); wireString(issue.message); cover(issue.agentSessionId as string) }
+    if (covered.size !== expectedIds.length) throw new AgentMuxError('The bootstrap omitted a requested Session observation.', 'CONTROL_PROTOCOL_ERROR')
+  }
+
   for (const entry of p.catalog) {
     const route = (entry as import('./types.js').AgentCatalogEntry | null)?.capabilities?.asyncQuestionReply
     if (route !== undefined && route !== 'native-input') throw new AgentMuxError(

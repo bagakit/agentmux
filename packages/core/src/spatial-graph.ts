@@ -137,6 +137,7 @@ export function parseAgentMuxSpatialGraph(value: unknown): AgentMuxSpatialGraph 
   facts(g.regions, 'regionId', r => {
     id(r.tabId);
     nullableId(r.agentSessionId);
+    if (r.creationOperationId !== undefined) id(r.creationOperationId);
     nullableId(r.runId);
     if (!['agent', 'terminal', 'browser', 'file', 'git', 'git-diff', 'launcher'].includes(String(r.kind)))
       invalid('Invalid Region kind.');
@@ -144,6 +145,7 @@ export function parseAgentMuxSpatialGraph(value: unknown): AgentMuxSpatialGraph 
       const e = record(r.execution);
       id(e.hostId);
       id(e.cwd);
+      if (e.runtimeId !== undefined) id(e.runtimeId);
     }
   });
   if (!Array.isArray(g.bindings))

@@ -1,4 +1,5 @@
 import { parseAgentToolExecutionBinding } from './agent-tool-execution.js'
+import { parseAdoptedHostRoute } from './host-route.js'
 import { parseSurveyOrganization, parseSurveyCollectionChange, parseSurveyZoneIds, parseSurveyPageReferences, parseSurveyProfileView, parseSurveyPinChange, parseSurveyPinnedReferences } from './survey-organization.js'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlSuccessReceipt } from './control.js'
 import { AgentMuxError } from './errors.js'
@@ -211,15 +212,22 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
     request = { ...base, operation, binding: bindingTarget(source.binding, code) }
   } else if (operation === 'agent.open') {
     fields(source, ['schemaVersion', 'requestId', 'operation', 'content', 'destination', 'focus', 'caller', 'moteMain'], code)
-    const input = fields(source.content, ['kind', 'executorId', 'executionWorkspaceId', 'toolWorkspaceId', 'nativeResumeSource', 'prompt', 'agentSessionId', 'source', 'actionId'], code)
+    const input = fields(source.content, ['kind', 'executorId', 'agentTarget', 'executionWorkspaceId', 'toolWorkspaceId', 'nativeResumeSource', 'prompt', 'agentSessionId', 'source', 'actionId'], code)
     const target = destination(source.destination, code)
     let content!: Extract<AgentMuxSpaceControlRequest, { operation: 'agent.open' }>['content']
     if (input.kind === 'new-agent') {
-      fields(input, ['kind', 'executorId', 'executionWorkspaceId', 'toolWorkspaceId', 'nativeResumeSource', 'prompt'], code)
+      fields(input, ['kind', 'executorId', 'agentTarget', 'executionWorkspaceId', 'toolWorkspaceId', 'nativeResumeSource', 'prompt'], code)
+      if (input.agentTarget !== undefined && (input.executionWorkspaceId !== undefined || input.toolWorkspaceId !== undefined || input.nativeResumeSource !== undefined || target.newZone || source.focus !== false)) fail('A source-owned Agent target uses an existing project Zone and background creation, without another Workspace or native-resume intent.', code)
+      const agentTarget = input.agentTarget === undefined ? undefined : (() => {
+        const target = fields(input.agentTarget, ['hostId', 'runtimeId', 'adoptedRoute'], code)
+        return { hostId: spaceControlId(target.hostId, 'Agent Host', code), runtimeId: spaceControlId(target.runtimeId, 'Agent Runtime', code),
+          ...(target.adoptedRoute === undefined ? {} : { adoptedRoute: parseAdoptedHostRoute(target.adoptedRoute) }) }
+      })()
       if (Object.hasOwn(input, 'toolWorkspaceId') && (!Object.hasOwn(input, 'executionWorkspaceId') || Object.hasOwn(input, 'nativeResumeSource') || target.newZone)) fail('A tool Workspace requires an explicit execution Workspace for a new Agent, without native resume or new Zone resources.', code)
       if (target.newZone && Object.hasOwn(input, 'executionWorkspaceId')) fail('An execution Workspace cannot be combined with new Zone resources.', code)
       if (target.newZone && Object.hasOwn(input, 'nativeResumeSource')) fail('Native resume retains its original execution directory; select an existing execution Workspace.', code)
       content = { kind: 'new-agent', executorId: spaceControlId(input.executorId, 'Executor', code),
+        ...(agentTarget ? { agentTarget } : {}),
         ...(Object.hasOwn(input, 'executionWorkspaceId') ? { executionWorkspaceId: spaceControlId(input.executionWorkspaceId, 'Execution Workspace', code) } : {}),
         ...(Object.hasOwn(input, 'toolWorkspaceId') ? { toolWorkspaceId: spaceControlId(input.toolWorkspaceId, 'Tool Workspace', code) } : {}),
         ...(Object.hasOwn(input, 'nativeResumeSource') ? { nativeResumeSource: parseAgentNativeResumeSource(input.nativeResumeSource) } : {}),
@@ -248,7 +256,7 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
     const moteMain = Object.hasOwn(source, 'moteMain') ? parseMoteMainCreationIntent(source.moteMain, code) : undefined
     if (moteMain && (content.kind !== 'new-agent' || content.executorId !== moteMain.baseline.defaults.executorId ||
       source.focus !== false || !target.newTab || target.spaceId !== moteMain.target.spaceId || target.zoneId !== moteMain.target.zoneId ||
-      content.prompt !== undefined || content.executionWorkspaceId !== undefined || content.toolWorkspaceId !== undefined || content.nativeResumeSource !== undefined ||
+      content.prompt !== undefined || content.agentTarget !== undefined || content.executionWorkspaceId !== undefined || content.toolWorkspaceId !== undefined || content.nativeResumeSource !== undefined ||
       target.displayWorkspaceId !== undefined || target.groupId !== undefined)) fail('Main creation retains its configured default, original home and no-input background admission.', code)
     request = { ...base, operation, content, destination: target, focus: bool(source.focus, 'focus', code), ...(caller ? { caller } : {}), ...(moteMain ? { moteMain } : {}) }
   } else {
@@ -284,14 +292,16 @@ function address(value: unknown, code: Code): AgentMuxSpaceAddress {
     tabId: spaceControlId(source.tabId, 'Tab', code, true), regionId: spaceControlId(source.regionId, 'Region', code, true) }
 }
 function regionFact(value: unknown, code: Code): AgentMuxSpaceRegionFact {
-    const item = fields(value, ['tabId', 'regionId', 'kind', 'agentSessionId', 'runId', 'execution', 'browserId', 'file'], code)
+    const item = fields(value, ['tabId', 'regionId', 'kind', 'agentSessionId', 'creationOperationId', 'runId', 'execution', 'browserId', 'file'], code)
     const execution = item.execution === null ? null : (() => {
-      const location = fields(item.execution, ['hostId', 'cwd'], code)
-      return { hostId: spaceControlId(location.hostId, 'Execution Host', code), cwd: string(location.cwd, 'Execution cwd', code) }
+      const location = fields(item.execution, ['hostId', 'cwd', 'runtimeId'], code)
+      return { hostId: spaceControlId(location.hostId, 'Execution Host', code), cwd: string(location.cwd, 'Execution cwd', code),
+        ...(location.runtimeId === undefined ? {} : { runtimeId: spaceControlId(location.runtimeId, 'Execution Runtime', code) }) }
     })()
     return { tabId: spaceControlId(item.tabId, 'Tab', code, true), regionId: spaceControlId(item.regionId, 'Region', code, true),
       kind: member(item.kind, ['agent', 'terminal', 'browser', 'file', 'git', 'git-diff', 'launcher'], 'Region kind', code),
       agentSessionId: nullableId(item.agentSessionId, 'Agent Session', code), runId: nullableId(item.runId, 'Run', code), execution,
+      ...(item.creationOperationId === undefined ? {} : { creationOperationId: spaceControlId(item.creationOperationId, 'Original creation operation', code) }),
       ...(Object.hasOwn(item, 'browserId') ? { browserId: spaceControlId(item.browserId, 'Browser', code, true) } : {}),
       ...(Object.hasOwn(item, 'file') ? { file: (() => { const file = fields(item.file, ['workspaceId', 'path', 'zoneRelativePath', 'issue'], code); return { workspaceId: spaceControlId(file.workspaceId, 'File Workspace', code), path: string(file.path, 'File path', code), ...(Object.hasOwn(file, 'zoneRelativePath') ? { zoneRelativePath: string(file.zoneRelativePath, 'Zone-relative file path', code) } : {}), ...(Object.hasOwn(file, 'issue') ? { issue: string(file.issue, 'File resource issue', code) } : {}) } })() } : {}) }
 

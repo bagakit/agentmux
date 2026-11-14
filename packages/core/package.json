@@ -434,13 +434,33 @@
       "types": "./dist/space-identity.d.ts",
       "import": "./dist/space-identity.js"
     },
+    "./space-folder-client": {
+      "types": "./dist/space-folder-client.d.ts",
+      "import": "./dist/space-folder-client.js"
+    },
+    "./space-session-stream": {
+      "types": "./dist/space-session-stream.d.ts",
+      "import": "./dist/space-session-stream.js"
+    },
+    "./space-sessions": {
+      "types": "./dist/space-sessions.d.ts",
+      "import": "./dist/space-sessions.js"
+    },
     "./space-folder": {
       "types": "./dist/space-folder.d.ts",
       "import": "./dist/space-folder.js"
     },
-    "./space-folder-client": {
-      "types": "./dist/space-folder-client.d.ts",
-      "import": "./dist/space-folder-client.js"
+    "./space-member": {
+      "types": "./dist/space-member.d.ts",
+      "import": "./dist/space-member.js"
+    },
+    "./space-member-client": {
+      "types": "./dist/space-member-client.d.ts",
+      "import": "./dist/space-member-client.js"
+    },
+    "./space-member-codec": {
+      "types": "./dist/space-member-codec.d.ts",
+      "import": "./dist/space-member-codec.js"
     }
   },
   "bin": {

@@ -14,7 +14,8 @@ export function spatialAgentOpenDigest(request: AgentMuxSpatialAgentOpenRequest)
 }
 /** Admission and topology are one graph mutation; no Runtime operation occurs here. */
 export function admitSpatialAgentOpen(graph: AgentMuxSpatialGraph, input: { request: AgentMuxSpatialAgentOpenRequest;
-  agentSessionId: string; execution: AgentMuxSpatialAgentOpenRecord['execution']; regionResource: SpatialJson }) {
+  agentSessionId: string; execution: AgentMuxSpatialAgentOpenRecord['execution']; placement?: AgentMuxSpatialAgentOpenRecord['placement'];
+  executionBinding?: AgentMuxSpatialAgentOpenRecord['executionBinding']; regionResource: SpatialJson }) {
   if (input.request.moteMain) {
     const intent = parseMoteMainCreationIntent(input.request.moteMain)
     if (intent.target.expectedResource.hostId !== input.execution.hostId || intent.target.expectedResource.workspaceId !== input.execution.workspaceId ||
@@ -32,9 +33,13 @@ export function admitSpatialAgentOpen(graph: AgentMuxSpatialGraph, input: { requ
     if (previous.digest !== digest) throw new AgentMuxError('This operation belongs to another original spatial creation intent.', 'SPACE_REQUEST_CONFLICT')
     const original = graph.regions.find(region => region.tabId === previous.address.tabId && region.regionId === previous.address.regionId)
     const zone = graph.zones.find(zone => zone.zoneId === previous.address.zoneId)
+    const placement = previous.placement ?? previous.execution
     if (previous.agentSessionId !== input.agentSessionId || !original || original.kind !== 'agent' || original.agentSessionId !== previous.agentSessionId ||
-        JSON.stringify(previous.execution) !== JSON.stringify(input.execution) || !zone || zone.hostId !== previous.execution.hostId ||
-        zone.directoryPath !== previous.execution.workspacePath || zone.workspaceId !== previous.execution.workspaceId) throw new AgentMuxError(
+        original.execution?.hostId !== previous.execution.hostId || original.execution.cwd !== previous.execution.workspacePath ||
+        original.execution.runtimeId !== previous.execution.runtimeId ||
+        JSON.stringify(previous.execution) !== JSON.stringify(input.execution) || JSON.stringify(previous.placement) !== JSON.stringify(input.placement) ||
+        JSON.stringify(previous.executionBinding) !== JSON.stringify(input.executionBinding) || !zone || zone.hostId !== placement.hostId ||
+        zone.directoryPath !== placement.workspacePath || zone.workspaceId !== placement.workspaceId) throw new AgentMuxError(
       'The exact admitted spatial binding or execution resource changed. Keep the original operation and inspect its Core Session.', 'SPACE_TARGET_CHANGED')
     return { graph, record: previous, admitted: false }
   }
@@ -43,8 +48,12 @@ export function admitSpatialAgentOpen(graph: AgentMuxSpatialGraph, input: { requ
   const address = destination.address, existingTab = next.tabs.find(tab => tab.tabId === address.tabId)
   const zone = next.zones.find(zone => zone.zoneId === address.zoneId)
   if (input.request.content.kind !== 'new-agent') throw new AgentMuxError('Spatial admission requires the original new Agent intent.', 'INVALID_CONTROL_REQUEST')
-  if (!input.request.content.executionWorkspaceId && (!zone || zone.workspaceId !== input.execution.workspaceId ||
-      zone.hostId !== input.execution.hostId || zone.directoryPath !== input.execution.workspacePath)) throw new AgentMuxError(
+  if (input.request.content.agentTarget && (!input.placement || input.execution.runtimeId !== input.request.content.agentTarget.runtimeId ||
+      input.executionBinding && (input.executionBinding.agentSessionId !== input.agentSessionId || input.executionBinding.createOperationId !== input.request.requestId))) throw new AgentMuxError(
+    'The source placement and original Agent target are not confirmed together. Keep the original request.', 'SPACE_RESOURCE_CHANGED')
+  const placement = input.placement ?? input.execution
+  if (!input.request.content.executionWorkspaceId && (!zone || zone.workspaceId !== placement.workspaceId ||
+      zone.hostId !== placement.hostId || zone.directoryPath !== placement.workspacePath)) throw new AgentMuxError(
     'The exact original Zone execution resource changed before admission. Existing contents and Agents were retained.', 'SPACE_RESOURCE_CHANGED')
   if (destination.kind === 'new-tab') {
     if (existingTab) throw new AgentMuxError('The reserved Tab already exists. Original contents were retained.', 'SPACE_TARGET_CHANGED')
@@ -72,10 +81,14 @@ export function admitSpatialAgentOpen(graph: AgentMuxSpatialGraph, input: { requ
     }
   }
   next.regions.push({ tabId: address.tabId, regionId: address.regionId, kind: 'agent', agentSessionId: input.agentSessionId,
-    runId: null, execution: { hostId: input.execution.hostId, cwd: input.execution.workspacePath } })
+    creationOperationId: input.request.requestId,
+    runId: null, execution: { hostId: input.execution.hostId, cwd: input.execution.workspacePath,
+      ...(input.execution.runtimeId ? { runtimeId: input.execution.runtimeId } : {}) } })
   next.resources['region:' + address.regionId] = structuredClone(input.regionResource)
   const record: AgentMuxSpatialAgentOpenRecord = { executorId: input.request.content.executorId, requestId: input.request.requestId, digest, agentSessionId: input.agentSessionId,
-    address, execution: structuredClone(input.execution), ...(input.request.moteMain ? { moteMain: structuredClone(input.request.moteMain) } : {}) }
+    address, execution: structuredClone(input.execution), ...(input.placement ? { placement: structuredClone(input.placement) } : {}),
+    ...(input.executionBinding ? { executionBinding: structuredClone(input.executionBinding) } : {}),
+    ...(input.request.moteMain ? { moteMain: structuredClone(input.request.moteMain) } : {}) }
   const original = spatialAgentOpenDocument(next); original.requests = Object.fromEntries([...Object.entries(original.requests), [record.requestId, record]])
   next.resources[AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE] = original as unknown as SpatialJson
   return { graph: next, record, admitted: true }

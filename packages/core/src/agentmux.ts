@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readSpaceSnapshot, observeSpace } from './space-authority-stream.js'
+import { observeSpaceSessionStates } from './space-session-stream.js'
 import type { SpaceAuthorityRef, SpaceWatch } from './space-authority.js'
 import { analyseLocalV8Profile } from './v8-profile-analysis-cli.js'
 import { mintObjectId } from './object-id.js'
@@ -115,19 +116,27 @@ async function readStdin(maxBytes?: number): Promise<string> {
   }
   return Buffer.concat(chunks).toString('utf8')
 }
-async function followSpace(client: AgentMuxRpcClient, input: SpaceWatch): Promise<number> {
+async function followSpace(client: AgentMuxRpcClient, input: SpaceWatch, sessions = false): Promise<number> {
   const controller = new AbortController()
   let finish!: () => void, failure: Error | undefined, cancelled = false
   const ended = new Promise<void>(yes => { finish = yes })
   const cancel = () => { cancelled = true; controller.abort(); finish() }
   process.once('SIGINT', cancel); process.once('SIGTERM', cancel)
   outputClosed.signal.addEventListener('abort', cancel, { once: true })
-  let reader: Awaited<ReturnType<typeof observeSpace>> | undefined
+  let reader: { dispose(): Promise<void> } | undefined
   try {
-    reader = await observeSpace(client, input, { signal: controller.signal,
-      onChange: (_snapshot, change) => write({ ok: true, operation: 'space.watch', event: { type: 'change', data: change } }),
-      onError: error => { failure = error; finish() } })
-    write({ ok: true, operation: 'space.watch', event: { type: 'snapshot', data: reader.initial, gap: reader.gap } })
+    const onError = (error: Error) => { failure = error; finish() }
+    if (sessions) {
+      const observation = await observeSpaceSessionStates(client, input, { signal: controller.signal, onError,
+        onObservation: event => write({ ok: true, operation: 'space.sessions.watch', event }) })
+      reader = observation
+      write({ ok: true, operation: 'space.sessions.watch', event: { type: 'opening', data: observation.initial } })
+    } else {
+      const observation = await observeSpace(client, input, { signal: controller.signal, onError,
+        onChange: (_snapshot, change) => write({ ok: true, operation: 'space.watch', event: { type: 'change', data: change } }) })
+      reader = observation
+      write({ ok: true, operation: 'space.watch', event: { type: 'snapshot', data: observation.initial, gap: observation.gap } })
+    }
     await ended
     if (failure && !cancelled) throw failure
     return 0
@@ -288,6 +297,7 @@ async function main(): Promise<number> {
       write({ ok: true, operation: method, result }); return 0
     }
     if (method === 'space.watch') return await followSpace(client, invocation.params as SpaceWatch)
+    if (method === 'space.sessions.watch') return await followSpace(client, invocation.params as SpaceWatch, true)
     if (isAgentMuxRpcStream(method, invocation.params)) {
       return await follow(client, method, invocation.params as AgentMuxRpcStreamParams<typeof method>)
     }

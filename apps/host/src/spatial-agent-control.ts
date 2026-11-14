@@ -1,6 +1,7 @@
 import { AgentMuxError, spatialCatalog, selectSpatialCatalog, type AgentMuxHeadlessRuntime, type AgentMuxRpcCallContext,
   type AgentMuxRpcServiceOptions, type AgentMuxSpatialStateStore, type AgentMuxControlResult } from '@agentmux/core'
-import { isBackgroundLocalAgentOpen, spatialAgentOpenRecord, spatialAgentOpenDigest, spatialAgentFact, type AgentMuxSpatialAgentOpenRecord, type AgentMuxSpatialAgentOpenRequest } from '@agentmux/core/spatial-state'
+import { isBackgroundLocalAgentOpen, isHeadlessSpatialAgentOpen, spatialAgentOpenRecord, spatialAgentOpenDigest, spatialAgentFact, type AgentMuxSpatialAgentOpenRecord, type AgentMuxSpatialAgentOpenRequest } from '@agentmux/core/spatial-state'
+import { openSpatialAgentTarget } from './spatial-agent-target.js'
 import type { AgentMuxSpaceMutationReport } from '@agentmux/core/control'
 import { configuredExecutor, readOriginalMoteConfiguration, ScratchTopics } from './mote-resources.js'
 import { SCRATCH_WORKSPACE_ID } from './mote-topic-model.js'
@@ -9,21 +10,34 @@ import { configuredProfileAgentContext } from './mote-user-profile.js'
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const issue = (error: unknown) => ({ step: 'creation', code: error instanceof AgentMuxError ? error.code : 'AGENT_CREATION_UNCONFIRMED',
   message: error instanceof Error ? error.message : String(error), recovery: 'Inspect this original operation. Do not repeat creation or its first input.' })
-const regionDescriptor = (record: Pick<AgentMuxSpatialAgentOpenRecord, 'agentSessionId' | 'execution'>, phase: 'launching' | 'attached') => ({
-  workspaceId: record.execution.workspaceId, phase, agentPresentation: { sessionId: record.agentSessionId,
-    agentSessionId: record.agentSessionId, hostId: record.execution.hostId } })
+const regionDescriptor = (record: Pick<AgentMuxSpatialAgentOpenRecord, 'agentSessionId' | 'execution' | 'placement'>, phase: 'launching' | 'attached') => ({
+  workspaceId: record.placement?.workspaceId ?? record.execution.workspaceId, phase, agentPresentation: { sessionId: record.agentSessionId,
+    agentSessionId: record.agentSessionId, hostId: record.execution.hostId,
+    ...(record.execution.runtimeId ? { runtimeId: record.execution.runtimeId } : {}) } })
 
 /** Original Core spatial admission plus original configured launch policy; no client screen or configuration writer. */
 export function createHostSpatialAgentControl(options: { configurationPath: string; spatial: AgentMuxSpatialStateStore; runtime(): AgentMuxHeadlessRuntime;
   agentMuxContext?(request: AgentMuxSpatialAgentOpenRequest): Promise<string | undefined> }): NonNullable<AgentMuxRpcServiceOptions['spatialAgentControl']> {
   const topics = new ScratchTopics()
-  async function reconcile(record: AgentMuxSpatialAgentOpenRecord, context: AgentMuxRpcCallContext, initialIssue?: unknown): Promise<AgentMuxSpaceMutationReport> {
+  async function reconcile(record: AgentMuxSpatialAgentOpenRecord, context: AgentMuxRpcCallContext, initialIssue?: unknown,
+    originalRequest?: AgentMuxSpatialAgentOpenRequest): Promise<AgentMuxSpaceMutationReport> {
     const report: AgentMuxSpaceMutationReport = { requestId: record.requestId, outcome: 'unknown', from: null, to: record.address,
       agent: null, resource: null, save: { layoutApplied: true, clientStateWritten: false, storageFlushRequested: false,
         diskDurability: 'confirmed', reason: null }, issues: initialIssue ? [issue(initialIssue)] : [] }
+    let borrowed: Awaited<ReturnType<AgentMuxHeadlessRuntime['executionHost']>> | null = null
     try {
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
-      const session = await options.runtime().client.inspectAgentCreation(record.agentSessionId)
+      if (record.execution.hostId !== 'local' && !record.execution.runtimeId) throw new AgentMuxError(
+        'The original foreign creation has no confirmed Runtime pin. Keep its Session and operation; a local same-SID lookup cannot confirm it.', 'SPATIAL_CREATION_UNCONFIRMED')
+      const access = originalRequest ? { context, call: { method: 'agent.open' as const, params: { operationId: originalRequest.requestId,
+        content: originalRequest.content, destination: originalRequest.destination, focus: originalRequest.focus } } }
+        : { context, observation: { kind: 'observation' as const, targetRuntimeId: record.execution.runtimeId!, agentSessionIds: [record.agentSessionId],
+          source: { kind: 'creation-reader' as const, createOperationId: record.requestId } } }
+      const host = borrowed = record.execution.runtimeId ? await options.runtime().executionHost(record.execution.hostId, record.execution.adoptedRoute, access) : null
+      if (host && host.runtimeId !== record.execution.runtimeId) throw new AgentMuxError('The original Agent route answers for another Runtime. Keep the original Session and request.', 'RUNTIME_OWNER_MISMATCH')
+      if (host && originalRequest && record.execution.adoptedRoute && await host.client.resolveAgentCreationSessionId(record.requestId) !== record.agentSessionId) throw new AgentMuxError(
+        'The original creation operation resolves to another Session. Keep both references; no current SID was substituted.', 'SPATIAL_CREATION_UNCONFIRMED')
+      const session = await (host?.client ?? options.runtime().client).inspectAgentCreation(record.agentSessionId)
       if (session.kind === 'retired-agent') {
         report.outcome = 'retired'; report.to = null
         report.issues.push(issue(new AgentMuxError('The original Agent was explicitly retired. Its exact Session and creation history remain available.', 'AGENT_SESSION_RETIRED')))
@@ -31,7 +45,11 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
       }
       const creation = session.creation
       if (!creation || session.agentSessionId !== record.agentSessionId || creation.createOperationId !== record.requestId ||
-          session.executorId !== record.executorId || session.workspacePath !== record.execution.workspacePath) throw new AgentMuxError(
+          session.executorId !== record.executorId || session.workspacePath !== record.execution.workspacePath ||
+          record.execution.executorRevision && creation.executorRevision !== record.execution.executorRevision ||
+          record.executionBinding && (session.toolExecution?.bindingId !== record.executionBinding.bindingId ||
+            session.toolExecution.resourceRuntimeId !== record.placement?.runtimeId || record.placement.runtimeId !== options.runtime().ownerIdentity().runtimeId ||
+            session.toolExecution.workspacePath !== record.placement?.workspacePath)) throw new AgentMuxError(
         'Core has not confirmed this original creation identity and execution target. The healthy Session is retained.', 'AGENT_CREATION_UNCONFIRMED')
       report.agent = spatialAgentFact(session, record.execution.hostId)
       const settled = await options.spatial.settleAgentOpen(record.requestId, session, regionDescriptor(record, 'attached'))
@@ -42,6 +60,7 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
       }
       report.outcome = report.issues.length ? 'partial' : 'opened'
     } catch (error) { report.issues.push(issue(error)); report.outcome = report.agent ? 'partial' : 'unknown' }
+    finally { try { await borrowed?.dispose?.() } catch (error) { report.issues.push(issue(error)); if (report.agent) report.outcome = 'partial' } }
     return report
   }
   return async (request, context) => {
@@ -51,6 +70,10 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
       const record = state ? spatialAgentOpenRecord(state.graph, request.target.requestId) : null
       return { operation: 'space.inspect', catalog: { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [] },
         request: { requestId: request.target.requestId, known: Boolean(record), report: record ? await reconcile(record, context) : null } }
+    }
+    if (isHeadlessSpatialAgentOpen(request, state?.graph) && request.content.agentTarget) {
+      if (!state) throw new AgentMuxError('The original spatial document is unavailable. Keep the chosen Space and original request.', 'SPATIAL_STATE_ABSENT')
+      return await openSpatialAgentTarget({ ...options, reconcile, descriptor: regionDescriptor }, request, state, context)
     }
     if (!isBackgroundLocalAgentOpen(request, state?.graph)) return undefined
     if (!state) throw new AgentMuxError('The original spatial document is unavailable. Keep the chosen Space and read its original owner before creation.', 'SPATIAL_STATE_ABSENT')

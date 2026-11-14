@@ -6,6 +6,7 @@ import { createHostMotePresence } from './mote-presence.js'
 import { createHostContent } from './content-owner.js'
 import { createHostMoteInputSource } from './mote-input-source.js'
 import { createHostSettingsResourceRead } from './settings-resource-read.js'
+import { readHostSettingsHosts } from './settings-hosts-read.js'
 import { createHostAppearanceObservation } from './host-appearance.js'
 import { createHostMobileIncidents } from './mobile-incidents.js'
 import { createHostSpatialAgentControl } from './spatial-agent-control.js'
@@ -19,7 +20,7 @@ import { createHostSpatialPresentation } from './spatial-presentation.js'
 import { createDesktopInputContextCaptureReader } from './input-context-capture-reader.js'
 import { dirname, join } from 'node:path'
 import { AgentMuxFileAgentSessionStore, AgentMuxSpatialStateStore, AgentMuxError,
-  startHeadlessAgentMux, connectAgentMuxRpc, spatialCatalog, defaultAgentMuxControlSocketPath, isMoteChatMethod,
+  startHeadlessAgentMux, connectAgentMuxRpc, spatialCatalog, rpcControlResult, defaultAgentMuxControlSocketPath, isMoteChatMethod,
   type AgentMuxAgentSessionStore, type AgentMuxRpcCallContext, type AgentMuxRpcMethod,
   type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxRpcStreamMethod,
   type AgentMuxRpcStreamParams, type AgentMuxRpcSubscriptionOptions,
@@ -43,6 +44,7 @@ import { FileUploadOwner } from './file-upload-owner.js'
 import { createHostMoteAvatarRead } from './mote-avatar-read.js'
 import { configuredTailcatListener } from './tailcat-listener.js'
 import { prepareTailcatKey } from './tailcat-key.js'
+import { configuredRouteEdge } from './host-route-edges.js'
 export type AgentMuxHostOptions = {
   prepareExecutionEnvironment?: () => Promise<void>
   store: AgentMuxAgentSessionStore
@@ -177,6 +179,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     ...(motePresence ? { maintenance: motePresence.read, changed: motePresence.invalidate } : {}) }) : undefined
   const service = {
     spatialState,
+    ...(configurationPath ? { spatialFolderResource: createHostFolderSpaceResource(configurationPath) } : {}),
     hostTailcat: (hostId: string) => hostId === 'local' ? tailcat!.inspect() : undefined,
     hostTailcatKey: (input: Parameters<typeof prepareTailcatKey>[0], signal?: AbortSignal) => prepareTailcatKey(input, { ...(signal ? { signal } : {}),
       ...(options.prepareExecutionEnvironment ? { prepareEnvironment: options.prepareExecutionEnvironment } : {}) }),
@@ -197,7 +200,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     ...(connectionOwner ? { connections: connectionOwner.connections,
       ...(connectionOwner.moteChat ? { moteChat: connectionOwner.moteChat } : {}),
       ...(connectionOwner.moteConnections ? { moteConnections: connectionOwner.moteConnections, motePreferences: connectionOwner.motePreferences } : {}) } : {}),
-    operationSource: (context: AgentMuxRpcCallContext) => context.caller ? undefined : authority?.operationSource(context.principal),
+    operationSource: (context: AgentMuxRpcCallContext) => context.caller || context.routeDelegation ? undefined : authority?.operationSource(context.principal),
     recordDeviceOperation: async (source: import('@agentmux/core').AgentOperationDevice, method: string, args: unknown[], result: 'confirmed' | 'failed' | 'unknown', operationId: string) => {
       if (authority) {
         try { await authority.recordOperation(source, method, args, result, operationId) }
@@ -209,6 +212,8 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       return offerUrl(address)
     }),
     forwardControl: async <M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>> => {
+      if (method === 'settings.hosts.ls') return rpcControlResult(method, { operation: 'settings.hosts.list',
+        hosts: (await readHostSettingsHosts(configurationPath)).map(host => ({ ...host })) }) as AgentMuxRpcResult<M>
       if (method.startsWith('goal.') && method !== 'goal.focus' || method.startsWith('schedule.') || method.startsWith('agent.progress.') || method.startsWith('agent.automation.')) throw new AgentMuxError('The original background automation owner is unavailable. Retain the exact Goal, Session and operation; healthy manual input remains available.', 'CONTROL_UNAVAILABLE')
       if (method === 'space.mote.avatar.read') {
         if (!moteAvatars) throw new AgentMuxError('The original Mote configuration is unavailable on this Host. Saved appearances and healthy Agents are retained.', 'MOTE_AVATAR_SOURCE_UNCONFIRMED')
@@ -306,6 +311,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       ...(configurationPath ? { ownedWorkspaceRoots: () => moteOwnedWorkspaceRoots(configurationPath) } : {}),
       ...(configurationPath && content?.files ? { moteInputResolver: createHostMoteInputSource({configurationPath,spatial:spatialState,files:content.files}) } : {}),
       ...(options.connections?.clients ? { coreClients: options.connections.clients } : {}),
+      routeEdge: edgeId => configuredRouteEdge(hostId => options.connections?.clients?.(hostId) ?? [], edgeId),
       ...(options.providers ? { providers: options.providers } : {}), service,
       forwardingPeer: { authoritySocketPath: desktopPath, bindAuthority: async principal => principal.kind === 'device'
         ? await (await getAuthority()).bindForwardedDevice(principal) : undefined },

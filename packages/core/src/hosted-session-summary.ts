@@ -49,3 +49,17 @@ export function hostedSessionProjection(value: unknown): AgentMuxHostedSessionPr
   if (value === 'summary') return value
   throw new AgentMuxError('Hosted sessions must be full or summary.', 'INVALID_CONTROL_REQUEST')
 }
+
+/** Read selection only; neither a capability nor an inventory fallback. */
+export function hostedSessionIds(value: unknown, code = 'INVALID_CONTROL_REQUEST'): readonly string[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.some(id => typeof id !== 'string' || !id || id.includes('\0')) || new Set(value).size !== value.length) {
+    throw new AgentMuxError('A scoped Runtime read requires exact, unique Session IDs.', code)
+  }
+  return [...value]
+}
+export type AgentMuxHostedSessionScope = {
+  agentSessionIds: readonly string[]
+  missing: string[]
+  unavailable: Array<{ agentSessionId: string; code: string; message: string }>
+}

@@ -62,8 +62,10 @@ export type AgentMuxSpaceRegionFact = {
   browserId?: string
   file?: { workspaceId: string; path: string; zoneRelativePath?: string; issue?: string }
   agentSessionId: string | null
+  /** Locator for this original source admission, never permission to recreate it. */
+  creationOperationId?: string
   runId: string | null
-  execution: { hostId: string; cwd: string } | null
+  execution: { hostId: string; cwd: string; runtimeId?: string } | null
 }
 export type AgentMuxSpaceBindingFact = { zoneId: string; spaceId: string }
 /** Navigable references, not a claim that a Native surface is mounted. */
@@ -331,7 +333,7 @@ export type AgentMuxSpaceControlRequest = Base & (
   | { operation: 'space.ls'; target: AgentMuxSpaceSelector; presentation?: boolean }
   | { operation: 'space.inspect'; presentation?: boolean; target: AgentMuxSpaceSelector | { requestId: string } }
   | { operation: 'agent.open'; content:
-      | { kind: 'new-agent'; executorId: string; executionWorkspaceId?: string; toolWorkspaceId?: string; nativeResumeSource?: import('./types.js').AgentNativeResumeSource; prompt?: string }
+      | { kind: 'new-agent'; executorId: string; agentTarget?: { hostId: string; runtimeId: string; adoptedRoute?: import('./host-route.js').AdoptedHostRoute }; executionWorkspaceId?: string; toolWorkspaceId?: string; nativeResumeSource?: import('./types.js').AgentNativeResumeSource; prompt?: string }
       | { kind: 'fork-agent'; source: import('./agent-fork.js').AgentMuxAgentForkSource; prompt?: string }
       /** A public request only: the Core service expands it into new-agent or fork-agent content before admission. */
       | { kind: 'derived-action'; actionId: string; source: { agentSessionId: string }; executorId?: string }

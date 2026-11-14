@@ -38,7 +38,7 @@ export type HostConnectionOptions = Pick<Parameters<typeof createConnectionServi
   /** Original profile/workspace configuration; read on demand, never a copied Host snapshot. */
   moteConfigurationPath?: string
   /** Original remote execution clients, owned by this Host rather than a GUI window. */
-  clients?(): readonly { hostId: string; client: ExecutionClient }[]
+  clients?(hostId?: string): readonly { hostId: string; client: ExecutionClient }[]
   subscribeClients?(listener: () => void): () => void
 }
 

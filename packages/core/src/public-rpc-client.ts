@@ -1,4 +1,7 @@
+import { parseSpaceMemberParams } from './space-member-codec.js'
+import { parseHostRouteResult } from './host-route.js'
 import { parseSpaceStreamOpening } from './space-authority-stream.js'
+import { parseSpaceSessionsStreamOpening } from './space-session-codec.js'
 import type { SpaceWatch } from './space-authority.js'
 import { parseGoalChanges } from './goal-changes.js'
 import { parseChannelMetadataChange } from './channel-metadata-codec.js'
@@ -199,6 +202,8 @@ function resultBody(method: AgentMuxRpcMethod, value: unknown, params: unknown, 
   return parseRpcNativeResult(method, value, params, credentials)
 }
 function streamInitial(method: AgentMuxRpcStreamMethod, value: unknown, params: Record<string, unknown>, credentials?: AgentMuxRpcCredentials): unknown {
+  if (method === 'space.member.watch') { const input = parseSpaceMemberParams(method, params); return streamInitial(input.call.method, value, input.call.params as Record<string, unknown>, credentials) }
+  if (method === 'route.watch' || method === 'route.receive-watch') return parseHostRouteResult(method, value)
   const p = rpcRecord(value, undefined, 'CONTROL_PROTOCOL_ERROR')
   if (method === 'runtime.events' || method === 'runtime.conversation-watch' || method === 'runtime.history-watch' ||
     method === 'runtime.attachment-watch' || method === 'runtime.replay-watch') {
@@ -221,6 +226,7 @@ function streamInitial(method: AgentMuxRpcStreamMethod, value: unknown, params: 
   }
   if (method === 'agent.conversation.watch') return parseConversationWatchOpening(p, params as import('./conversation.js').ConversationRef)
   if (method === 'space.snapshot' || method === 'space.watch') return parseSpaceStreamOpening(p, params as SpaceWatch)
+  if (method === 'space.sessions.watch') return parseSpaceSessionsStreamOpening(p, (params as import('./space-sessions.js').SpaceSessionsParams['space.sessions.watch']).reference)
   if (method === 'goal.watch') return parseGoalChanges(p)
   if (method === 'connection.metadata.watch') { rpcRecord(p, [], 'CONTROL_PROTOCOL_ERROR'); return {} }
   if (method === 'settings.appearance.watch') { rpcRecord(p, ['observation'], 'CONTROL_PROTOCOL_ERROR'); return { observation: parseAppearanceObservation(p.observation) } }
@@ -280,13 +286,18 @@ function streamEvent(method: AgentMuxRpcStreamMethod, value: unknown, initial: u
     }
     return event
   }
+  if (method === 'route.watch' || method === 'route.receive-watch') {
+    rpcRecord(event, ['type', 'event'], 'CONTROL_PROTOCOL_ERROR')
+    if (event.type !== 'route-event') throw new AgentMuxError('Invalid original route stream event.', 'CONTROL_PROTOCOL_ERROR')
+    return event
+  }
   rpcRecord(event, ['type', 'data'], 'CONTROL_PROTOCOL_ERROR')
-  if ((method === 'runtime.events' || method === 'runtime.conversation-watch' || method === 'runtime.history-watch' ||
+  if ((method === 'space.member.watch' || method === 'runtime.events' || method === 'runtime.conversation-watch' || method === 'runtime.history-watch' ||
     method === 'runtime.attachment-watch' || method === 'runtime.replay-watch') && event.type === 'snapshot') {
     return { ...event, data: parseHostedTransferChunk(event.data) }
   }
   if (method === 'agent.conversation.watch' && event.type === 'snapshot') return { ...event, data: parseConversationObservation(event.data, initial as ConversationWatchOpening) }
-  if ((method === 'space.snapshot' || method === 'space.watch') && event.type === 'snapshot') return { type: 'snapshot', data: parseHostedTransferChunk(event.data) }
+  if ((method === 'space.snapshot' || method === 'space.watch' || method === 'space.sessions.watch') && event.type === 'snapshot') return { type: 'snapshot', data: parseHostedTransferChunk(event.data) }
   if (method === 'goal.watch' && event.type === 'change') return { type: 'change', data: parseGoalChanges(event.data) }
   if (method === 'connection.metadata.watch' && event.type === 'change') return { type: 'change', data: parseChannelMetadataChange(event.data) }
   if (method === 'settings.appearance.watch' && event.type === 'snapshot') {

@@ -199,6 +199,7 @@ export type AgentMuxHostedClient<P extends AgentMuxHostedSessionProjection = 'fu
   onStatusEvent<Result>(listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions): () => void
   onRunEvent<Result>(runId: string, listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions): () => void
   onEvent<Result>(listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions): () => void
+  sessionObservationScope(): import('./hosted-session-summary.js').AgentMuxHostedSessionScope | null
   runtimeOwnerIdentity(): AgentMuxRuntimeOwnerIdentity | null
   /** Exact control-plane identity; no Native, Session bootstrap or event lease is required. */
   readRuntimeOwnerIdentity(options?: { signal?: AbortSignal }): Promise<AgentMuxRuntimeOwnerIdentity>
@@ -246,6 +247,7 @@ export type AgentMuxHostedBootstrap<P extends AgentMuxHostedSessionProjection = 
   hostProcessId: number
   catalog: AgentCatalogEntry[]
   sessions: AgentMuxHostedSession<P>[]
+  sessionScope?: import('./hosted-session-summary.js').AgentMuxHostedSessionScope
   messageQueuePath: string
 }
 export type AgentMuxHostedTransferChunk = { transferId: string; index: number; dataBase64: string; final: boolean }
@@ -267,10 +269,10 @@ export type AgentMuxHostedRuntimeParameterMap = {
   'runtime.owner.shutdown': { fence: AgentMuxRuntimeFence }
   'runtime.network.inspect': { fence: AgentMuxRuntimeFence }
   'runtime.profile.capture': import('./runtime-v8-profile.js').RuntimeV8ProfileInput
-  'runtime.bootstrap': { consumerId: string; fence: AgentMuxRuntimeFence; sessions?: AgentMuxHostedSessionProjection }
+  'runtime.bootstrap': { consumerId: string; fence: AgentMuxRuntimeFence; sessions?: AgentMuxHostedSessionProjection; agentSessionIds?: readonly string[] }
   'runtime.invoke': { consumerId: string; fence: AgentMuxRuntimeFence; invocation: AgentMuxHostedInvocation }
   'runtime.release-consumer': { consumerId: string; fence: AgentMuxRuntimeFence }
-  'runtime.events': { consumerId: string; fence: AgentMuxRuntimeFence; sessions?: AgentMuxHostedSessionProjection }
+  'runtime.events': { consumerId: string; fence: AgentMuxRuntimeFence; sessions?: AgentMuxHostedSessionProjection; agentSessionIds?: readonly string[] }
   'runtime.conversation-watch': { consumerId: string; fence: AgentMuxRuntimeFence; reference: import('./conversation-changes.js').ConversationWatchInput; options?: Omit<import('./conversation-changes.js').ConversationReadOptions, 'signal'> }
   'runtime.history-watch': { consumerId: string; fence: AgentMuxRuntimeFence; agentSessionId: string;
     options?: Omit<NonNullable<Parameters<AgentMuxClient['observeSessionHistory']>[2]>, 'signal'> }
@@ -313,8 +315,8 @@ export const AGENTMUX_HOSTED_RPC_METHODS = {
 export const AGENTMUX_HOSTED_RPC_FIELDS = {
   'runtime.owner.identity': ['expectedRuntimeId'], 'runtime.owner.shutdown': ['fence'],
   'runtime.network.inspect': ['fence'], 'runtime.profile.capture': ['fence', 'processId', 'durationMs'],
-  'runtime.bootstrap': ['consumerId', 'fence', 'sessions'], 'runtime.invoke': ['consumerId', 'fence', 'invocation'],
-  'runtime.release-consumer': ['consumerId', 'fence'], 'runtime.events': ['consumerId', 'fence', 'sessions'],
+  'runtime.bootstrap': ['consumerId', 'fence', 'sessions', 'agentSessionIds'], 'runtime.invoke': ['consumerId', 'fence', 'invocation'],
+  'runtime.release-consumer': ['consumerId', 'fence'], 'runtime.events': ['consumerId', 'fence', 'sessions', 'agentSessionIds'],
   'runtime.conversation-watch': ['consumerId', 'fence', 'reference', 'options'],
   'runtime.history-watch': ['consumerId', 'fence', 'agentSessionId', 'options'],
   'runtime.attachment-watch': ['consumerId', 'fence', 'target', 'afterByte', 'view', 'refresh', 'operationId'],

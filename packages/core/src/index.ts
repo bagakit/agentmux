@@ -1,3 +1,6 @@
+export * from './host-route-rpc.js'
+export * from './host-route.js'
+export * from './host-route-gateway.js'
 export { parseAgentSessionRecordInput, parseAgentSessionRecordInspection, parseAgentSessionRecordReceipt } from './agent-session-record.js'
 export type { AgentSessionRecordInput, AgentSessionRecordDeleteInput, AgentSessionRecordInspection, AgentSessionRecordDeletion, AgentSessionRecordDeletionReceipt } from './agent-session-record.js'
 export { isTerminalMouseReportPayload } from './terminal-input-protocol.js'
@@ -123,6 +126,11 @@ export * from './agent-role-directory.js'
 export * from './hosted-client.js'
 export { probeSocketLiveness } from './socket-liveness.js'
 
+export * from './space-identity.js'
+export * from './space-folder.js'
+export * from './space-folder-client.js'
+export * from './space-sessions.js'
+export * from './space-session-stream.js'
 export * from './spatial-state.js'
 export * from './space-authority.js'
 export * from './space-authority-owner.js'
@@ -144,7 +152,6 @@ export type { PortableCoreArtifact } from './portable-core-artifact.js'
 export { SESSION_HISTORY_IMAGE_MAX_BYTES, SESSION_HISTORY_IMAGE_MAX_PIXELS, SESSION_HISTORY_IMAGE_MAX_DIMENSION, imageBytes as readSessionHistoryImageBytes, parseProviderSessionHistoryResourceReadResult } from './session-history-resource.js'
 export type { AgentSessionHistoryResourceParams, AgentSessionHistoryResourceResult } from './session-history-resource.js'
 
-export * from './public-rpc-files.js'
 export * from './delivery-attempt.js'
 export * from './delivery-attempt-store.js'
 
@@ -206,7 +213,7 @@ export * from './agent-learning.js'
 export type { AgentAutomationTarget, AgentAutomationPause, AgentAutomationPauseReceipt, AgentAutomationPauseInspection, AgentAutomationOwner } from './agent-automation.js'
 export { parseAgentAutomationTarget, parseAgentAutomationInspection } from './agent-automation.js'
 
-export { callPublicGoalControl, rpcControlResult } from './rpc-business-codec.js'
+export { callPublicGoalControl, rpcControlRequest, rpcControlResult } from './rpc-business-codec.js'
 
 export * from './agent-progress.js'
 
@@ -253,6 +260,6 @@ export * from './node-publishing.js'
 
 export * from './node-locator.js'
 
-export * from './space-identity.js'
-export * from './space-folder.js'
-export * from './space-folder-client.js'
+
+export * from './space-member.js'
+export { connectSpaceMember, type SpaceMemberClient } from './space-member-client.js'

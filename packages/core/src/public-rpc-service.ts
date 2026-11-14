@@ -1,4 +1,13 @@
+import { parseSpaceMemberParams } from './space-member-codec.js'
+import { spaceMemberRuntime } from './space-member-runtime.js'
+import { HOST_ROUTE_METHODS, parseHostRouteParams } from './host-route.js'
+import { assertHostRouteDispatch, delegatedHostRouteActor, hostRouteActorScope, type HostRouteGateway, type VerifiedHostRouteDelegation } from './host-route-gateway.js'
 import { parseFolderSpaceRegistration, folderResourceIdentity, type FolderSpaceResource } from './space-folder.js'
+import { observeSpaceSessions } from './space-session-owner.js'
+import { readSpaceSessionSources } from './space-session-sources.js'
+import { createSpaceSessionObserver } from './space-session-client.js'
+import { createHostedTransferQueue } from './hosted-runtime-service.js'
+import { hostedTransfer } from './hosted-value.js'
 import { spaceStreamOpening, spaceTransfer } from './space-authority-stream.js'
 import { SpaceAuthorityOwner } from './space-authority-owner.js'
 import { isSpaceAuthorityMethod, parseSpaceAuthorityParams, type SpaceApply, type SpaceWatch } from './space-authority.js'
@@ -24,7 +33,7 @@ import { parseAgentExecutionReference } from './errors.js'
 import { AGENT_EXECUTION_CREATE_FIELDS, parseAgentExecutionCreate, parseAgentExecutionBinding } from './public-rpc-agent-execution.js'
 import { parseAgentInputResourceRead } from './agent-input-resource.js'
 import { isConnectionApiMethod, parseConnectionApiParams } from './connection-api-codec.js'
-import { isBackgroundLocalAgentOpen } from './spatial-agent-open-contract.js'
+import { isHeadlessSpatialAgentOpen } from './spatial-agent-open-contract.js'
 import { parseGoalParticipationConfirm } from './goal-participation.js'
 import { parseGoalChanges, type GoalChangePort } from './goal-changes.js'
 import { isAgentProgressMethod, parseAgentProgressParams, parseAgentProgressResult, type AgentProgressOwner, type AgentProgressMethod } from './agent-progress.js'
@@ -171,7 +180,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
 /** A structural slice of the original public SDK; hosted clients need no private fields. */
 export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').AgentExecutionHostPort & Pick<AgentMuxClient,
   'restartAgent' | 'inspectAgentRestart' | 'inspectAgentStop' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentMessageQueuePath' | 'readAgentSession' | 'readAgentSessions' | 'readAgentSessionHistory' | 'readAgentSessionUsage' | 'inspectAgentSessionRecord' | 'deleteAgentSessionRecord' | 'recordExternalConversationMessage' | 'readAgentConversation' | 'listConversationSnapshots' | 'releaseConversationSnapshot' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
-  'inspectAgentCreation' | 'continueAgentCreation' | 'recoverTerminal' | 'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
+  'resolveAgentCreationSessionId' | 'inspectAgentCreation' | 'continueAgentCreation' | 'recoverTerminal' | 'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'inspectAgentExecutionOperation' | 'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'notifyMessages' | 'inspectMessageNotification' | 'inspectAgentPromptSubmission' | 'readAgentInputActivity' | 'startDiscussion' | 'checkDeliveries' |
   'submitAgentPrompt' | 'readAgentInputMailbox' | 'readAgentInputChanges' | 'inspectAgentInput' | 'inspectMoteInput' | 'readAgentInputResource' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' | 'listAgentSpawns' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'listMessages' | 'listMessageEvents' | 'inspectMessageBroadcast' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
@@ -183,12 +192,14 @@ export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').Age
     agentSessionResourceSnapshot?: AgentMuxClient['agentSessionResourceSnapshot']
     runningSavedAgentResourceSnapshot?: AgentMuxClient['runningSavedAgentResourceSnapshot']
     forwardRpc?: import('./hosted-client-contract.js').AgentMuxHostedForwardRpc
+    subscribeRpc?: import('./hosted-client-contract.js').AgentMuxHostedSubscribeRpc
     handOff(...args: Parameters<AgentMuxClient['handOff']>):
       Awaited<ReturnType<AgentMuxClient['handOff']>> | Promise<Awaited<ReturnType<AgentMuxClient['handOff']>>>
   }
 export type AgentMuxRpcCoreClient = { hostId: string; client: AgentMuxRpcCorePort }
 type BorrowedHostedRuntime = Pick<AgentMuxHostedRuntimeService, 'call' | 'subscribe' | 'assertFence'> & Partial<Pick<AgentMuxHostedRuntimeService, 'client' | 'externalAuthor'>>
 export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'execute'> & {
+  hostRoutes?: HostRouteGateway;
   /** Exact capabilities composed by a specialized host; absence preserves the normal complete service. */
   exposedMethods?: ReadonlySet<AgentMuxRpcMethod>
   execute?(request: AgentMuxControlRequest, nameContext?: AgentMuxNameContext,
@@ -247,6 +258,8 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   images?: AgentMuxRpcImageOwner
   spatialFolderResource?(workspaceId: string): Promise<FolderSpaceResource>
   spatialState?: AgentMuxSpatialStateStore
+  /** Original configuration reader; callers cannot supply another path or Host here. */
+  spatialFolderResource?(workspaceId: string): Promise<FolderSpaceResource>
   /** Original Host policy over Core-owned spatial creation associations, without a screen. */
   spatialAgentControl?(request: AgentMuxControlRequest, context: AgentMuxRpcCallContext): Promise<AgentMuxControlResult | undefined>
   /** Read only original host metadata; topology and execution remain with their Core owners. */
@@ -297,7 +310,7 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   forwardSubscription?<M extends AgentMuxRpcStreamMethod>(method: M, params: import('./public-rpc.js').AgentMuxRpcStreamParams<M>,
     handlers: AgentMuxRpcSubscriptionOptions<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcSubscription>
 }
-export type AgentMuxRpcCallContext = { caller?: AgentMuxRpcCredentials; signal?: AbortSignal; principal?: AgentMuxRpcPrincipal;
+export type AgentMuxRpcCallContext = { routeDelegation?: VerifiedHostRouteDelegation; caller?: AgentMuxRpcCredentials; signal?: AbortSignal; principal?: AgentMuxRpcPrincipal;
   /** In-process transport capability. Never decoded from business arguments. */
   forwarding?: import('./rpc-forwarding.js').RpcForwardingSource;
   /** Exact receiving wire ID for response capacity; never supplied by business params. */
@@ -375,6 +388,8 @@ const NATIVE_FIELDS = {
   'notebook.scan': ['workspaceId','path','maxFiles','maxDirectories','maxBytes','query','limit'],
   'notebook.ls': [], 'notebook.inspect': ['notebookId','noteId','operationId','content','maxBytes'], 'notebook.graph': ['notebookId','noteId','maxBytes'], 'notebook.resolve': ['mode','query','limit','text','select','maxBytes'], 'notebook.apply': ['expectedRevision','operationId','change'],
   'space.folder.register': ['runtimeId','workspaceId','expectedResource'],
+  'space.member.call': ['target','call'], 'space.member.watch': ['target','call'],
+  'space.sessions.watch': ['reference'],
   'space.snapshot': ['reference'], 'space.apply': ['reference','expectedRevision','changes'], 'space.watch': ['reference','after'],
   'space.state': [], 'space.commit': ['expectedRevision','graph','allowEntityRemoval','removedProjectGroupIds'],
   'space.resolve': ['tabId','regionId','direction'],
@@ -465,7 +480,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | NodePublishingMethod | NodeLocatorMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | NodePublishingMethod | NodeLocatorMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod | keyof typeof HOST_ROUTE_METHODS>, readonly string[]>
 
 /** Home follows an exact execution route; its display name does not identify that route. */
 function homeHostRoute(configuration: import('./control.js').AgentMuxControlSettingsResourceFields | null) {
@@ -518,13 +533,14 @@ export class AgentMuxRpcService {
       !['user', 'device'].includes(context.principal.kind)) {
       throw new AgentMuxError('The runtime domain requires a transport-approved user or device, without a managed Agent caller.', 'AGENT_CAPABILITY_INVALID')
     }
-    const principalId = rpcString(context.principal.id, 'Transport principal')
+    const actor = delegatedHostRouteActor(context) ?? context.principal
+    const principalId = rpcString(actor.id, 'Transport principal')
     const p = rpcRecord(params, AGENTMUX_HOSTED_RPC_FIELDS[method as AgentMuxHostedRuntimeMethod])
     if (!this.ports.hostedRuntime) throw new AgentMuxError('The borrowed Runtime Host business owner is unavailable. Existing Runs are retained.', 'CONTROL_UNAVAILABLE')
     const owner = await this.ports.hostedRuntime()
     if (method === 'runtime.owner.identity' || method === 'runtime.owner.shutdown' || method === 'runtime.network.inspect' || method === 'runtime.profile.capture') return { owner, params: p }
     const consumer = rpcString(p.consumerId, 'Host consumer ID')
-    const consumerId = createHash('sha256').update(context.principal.kind + '\0' + principalId + '\0' + consumer).digest('hex')
+    const consumerId = createHash('sha256').update((hostRouteActorScope(context) ?? actor.kind + '\0' + principalId) + '\0' + consumer).digest('hex')
     return { owner, params: { ...p, consumerId } }
   }
 
@@ -564,6 +580,16 @@ export class AgentMuxRpcService {
       executorId: session.executorId, label: session.agentSessionId, diagnostic: 'Started from the public derived action command; read the complete context for the current state.' })
     return { ...rest, content: { kind: 'new-agent', executorId: chosen, prompt } } as AgentMuxRpcParams<'agent.open'>
   }
+  private async spaceMemberRuntime(input: import('./space-member.js').SpaceMemberParams[keyof import('./space-member.js').SpaceMemberParams], context: AgentMuxRpcCallContext) {
+    const source = await this.hosted('runtime.owner.identity', { expectedRuntimeId: input.target.reference.runtimeId }, context)
+    await source.owner.call('runtime.owner.identity', source.params, context)
+    return await spaceMemberRuntime({ store: this.spatial, clients: () => this.clients(),
+      ...(this.ports.hostRoutes ? { gateway: this.ports.hostRoutes } : {}), local: {
+        call: async (method, params, original) => { const endpoint = await this.hosted(method as AgentMuxRpcMethod, params, original); return await endpoint.owner.call(method, endpoint.params, original) },
+        subscribe: async (method, params, emit, original) => { const endpoint = await this.hosted(method as AgentMuxRpcMethod, params, original); return await endpoint.owner.subscribe(method, endpoint.params, emit, original) }
+      } }, input, context)
+  }
+
   private async assertRuntimeFence(context: AgentMuxRpcCallContext): Promise<void> {
     if (!context.runtimeFence) return
     if (!this.ports.hostedRuntime) throw new AgentMuxError('The original semantic Runtime owner is unavailable. No operation was rerouted.', 'CONTROL_UNAVAILABLE')
@@ -778,6 +804,20 @@ export class AgentMuxRpcService {
   async call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>,
     context: AgentMuxRpcCallContext = {}): Promise<AgentMuxRpcResult<M>> {
     this.assertExposed(method)
+    await assertHostRouteDispatch(context, method, params, false)
+    if (Object.hasOwn(HOST_ROUTE_METHODS, method)) {
+      const routes = this.ports.hostRoutes
+      if (!routes) throw new AgentMuxError('This Core has no composed route owner; original capabilities remain available.', 'CONTROL_UNAVAILABLE')
+      const input = parseHostRouteParams(method as keyof typeof HOST_ROUTE_METHODS, params)
+      if (method === 'route.identity') return await routes.identity() as AgentMuxRpcResult<M>
+      if (method === 'route.inspect' || method === 'route.configure') {
+        if (context.caller || context.routeDelegation || !context.principal) throw new AgentMuxError('Route policy requires its actual original user/device.', 'CONTROL_PERMISSION_DENIED')
+        await context.assertCurrent?.()
+        return (method === 'route.inspect' ? await routes.inspect() : await routes.configure(input as import('./host-route.js').HostRouteParams['route.configure'], context)) as AgentMuxRpcResult<M>
+      }
+      if (method === 'route.watch' || method === 'route.receive-watch') throw new AgentMuxError('Use the original route subscription transport.', 'INVALID_CONTROL_REQUEST')
+      return await routes.call(input as import('./host-route.js').HostRouteParams['route.call'] | import('./host-route.js').HostRouteParams['route.receive'], context, method === 'route.receive') as AgentMuxRpcResult<M>
+    }
     if (method === 'space.folder.register') {
       const input = parseFolderSpaceRegistration(params)
       await this.authenticated(context)
@@ -796,6 +836,14 @@ export class AgentMuxRpcService {
       return { reference: { runtimeId: owner.runtimeId, spaceId: registered.spaceId }, source: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId },
         zoneId: registered.zoneId, workspaceId: resource.id, resource: actual, revision: registered.state.revision, diskDurability: 'confirmed', created: registered.created } as AgentMuxRpcResult<M>
     }
+    if (method === 'space.member.call') {
+      const input = parseSpaceMemberParams('space.member.call', params)
+      await this.assertRuntimeFence(context)
+      const original = await this.spaceMemberRuntime(input, context)
+      return await original.port.call(input.call.method, input.call.params, original.context) as AgentMuxRpcResult<M>
+    }
+    if (method === 'space.member.watch') throw new AgentMuxError('Use the original member subscription transport.', 'INVALID_CONTROL_REQUEST')
+    if (method === 'space.sessions.watch') throw new AgentMuxError('Observe the original Space Session scope through its subscription API.', 'INVALID_CONTROL_REQUEST')
     if (isSpaceAuthorityMethod(method)) {
       const input = parseSpaceAuthorityParams(method, params)
       await this.authenticated(context)
@@ -1566,9 +1614,9 @@ export class AgentMuxRpcService {
       const owner = this.ports.executionBindings
       if (!owner) throw new AgentMuxError('The original execution binding owner is unavailable. No helper or Agent was replaced.', 'CONTROL_UNAVAILABLE')
       context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
-      const result = method === 'agent.execution.create' ? await owner.create(input as import('./agent-execution-coordinator.js').AgentExecutionOpenInput)
-        : method === 'agent.execution.continue' ? await owner.continueOriginal(input as import('./agent-execution-contract.js').AgentExecutionReference)
-        : method === 'agent.execution.rejoin' ? await owner.rejoin(input.bindingId) : await owner.inspect(input.bindingId)
+      const result = method === 'agent.execution.create' ? await owner.create(input as import('./agent-execution-coordinator.js').AgentExecutionOpenInput, context)
+        : method === 'agent.execution.continue' ? await owner.continueOriginal(input as import('./agent-execution-contract.js').AgentExecutionReference, context)
+        : method === 'agent.execution.rejoin' ? await owner.rejoin(input.bindingId, context) : await owner.inspect(input.bindingId)
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
       return parseRpcNativeResult(method, result, input) as AgentMuxRpcResult<M>
     }
@@ -2161,10 +2209,10 @@ export class AgentMuxRpcService {
       const originalSpatialRequest = method === 'agent.open' || method === 'space.inspect' ? rpcControlRequest(method, params) : null
       const originalResumeRequest = method === 'agent.resume' ? rpcControlRequest(method, params, internalCaller) : null
       const independentResume = originalResumeRequest?.operation === 'resume' && !originalResumeRequest.text.trim()
-      let independentSpatial = originalSpatialRequest && (isBackgroundLocalAgentOpen(originalSpatialRequest) ||
+      let independentSpatial = originalSpatialRequest && (isHeadlessSpatialAgentOpen(originalSpatialRequest) ||
         originalSpatialRequest.operation === 'space.inspect' && 'requestId' in originalSpatialRequest.target)
       if (independentSpatial && originalSpatialRequest?.operation === 'agent.open') independentSpatial =
-        isBackgroundLocalAgentOpen(originalSpatialRequest, (await this.spatial.readForLayout())?.graph)
+        isHeadlessSpatialAgentOpen(originalSpatialRequest, (await this.spatial.readForLayout())?.graph)
       if (independentSpatial && this.ports.callOriginalCore) return await this.ports.callOriginalCore('local', method, params, context)
       if (originalControlOperation === 'settings.resource.list' || originalControlOperation === 'settings.resource.get') {
         const request = rpcControlRequest(method as keyof typeof AGENTMUX_RPC_CONTROL_METHODS, params)
@@ -3925,6 +3973,11 @@ export class AgentMuxRpcService {
   async subscribe<M extends AgentMuxRpcStreamMethod>(method: M, params: Record<string, unknown>,
     onEvent: (event: AgentMuxRpcStreamEvent<M>) => void | Promise<void>, context: AgentMuxRpcCallContext = {}): Promise<AgentMuxRpcServiceSubscription<M>> {
     this.assertExposed(method)
+    await assertHostRouteDispatch(context, method, params, true)
+    if (method === 'route.watch' || method === 'route.receive-watch') {
+      if (!this.ports.hostRoutes) throw new AgentMuxError('The original route reader owner is unavailable.', 'CONTROL_UNAVAILABLE')
+      return await this.ports.hostRoutes.watch(method === 'route.watch' ? parseHostRouteParams('route.watch', params) : parseHostRouteParams('route.receive-watch', params), event => onEvent((event && typeof event === 'object' && ['error', 'end'].includes(String((event as { type?: unknown }).type)) ? event : { type: 'route-event', event }) as AgentMuxRpcStreamEvent<M>), context, method === 'route.receive-watch') as AgentMuxRpcServiceSubscription<M>
+    }
     if (Object.hasOwn(AGENTMUX_HOSTED_RPC_METHODS, method)) {
       const hosted = await this.hosted(method, params, context)
       return await hosted.owner.subscribe(method, hosted.params, onEvent as (event: import('./hosted-client-contract.js').AgentMuxHostedStreamEvent) => void | Promise<void>,
@@ -3970,7 +4023,41 @@ export class AgentMuxRpcService {
     const emit = (event: unknown) => { if (!closed) return onEvent(event as AgentMuxRpcStreamEvent<M>) }
     try {
       let initial: unknown, start: (() => void | Promise<void>) | undefined
-      if (method === 'space.snapshot' || method === 'space.watch') {
+      if (method === 'space.member.watch') {
+        const input = parseSpaceMemberParams('space.member.watch', params)
+        const original = await this.spaceMemberRuntime(input, { ...context, signal: controller.signal })
+        const membership = await this.spaceAuthority.watch({ reference: input.target.reference }, async event => {
+          try { if (event.type === 'error') throw new AgentMuxError(event.error.message, event.error.code); await original.assertCurrent() }
+          catch (error) { if (!closed) { await emit({ type: 'error', error: readerError(error) }); await dispose() } }
+        }, controller.signal)
+        let reader: Awaited<ReturnType<typeof original.port.subscribe>> | undefined
+        cleanup = async () => { membership.dispose(); await reader?.dispose() }
+        await original.assertCurrent()
+        reader = await original.port.subscribe(input.call.method, input.call.params, event => emit(event), original.context)
+        initial = reader.initial
+        start = async () => { membership.start(); await original.assertCurrent(); await reader!.start?.() }
+      } else if (method === 'space.sessions.watch') {
+        const input = parseSpaceAuthorityParams('space.snapshot', params)
+        // Reuse the Runtime domain's original user/device boundary; an Agent
+        // caller cannot obtain another identity by entering through a Space.
+        const original = await this.hosted('runtime.owner.identity', {}, context)
+        let queue: ReturnType<typeof createHostedTransferQueue>
+        const reader = await observeSpaceSessions({ authority: this.spaceAuthority,
+          sources: snapshot => readSpaceSessionSources(this.spatial, snapshot),
+          observe: createSpaceSessionObserver({ local: original.owner, clients: async () => await this.ports.coreClients?.() ?? [],
+            context: { ...context, signal: controller.signal }, reference: input.reference, ...(this.ports.hostRoutes ? { gateway: this.ports.hostRoutes } : {}) }) },
+        input.reference, value => queue.write(hostedTransfer({ kind: 'event', event: value }, mintObjectId())), error => queue.fail(error), controller.signal)
+        let admitted: string | undefined
+        queue = createHostedTransferQueue(async event => {
+          if (event.type === 'snapshot' && event.data.transferId !== admitted) {
+            controller.signal.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context); admitted = event.data.transferId
+          }
+          await emit(event)
+        }, reader.initial, () => { void dispose().catch(() => {}) })
+        initial = { ...reader.initial, transferId: queue.initialId }
+        cleanup = () => { queue.close(); reader.dispose() }
+        start = async () => { await queue.start(); if (!closed) await reader.start() }
+      } else if (method === 'space.snapshot' || method === 'space.watch') {
         const input = parseSpaceAuthorityParams(method, params)
         const sendValue = async (value: import('./space-authority.js').SpaceSnapshot | import('./space-authority.js').SpaceChange) => {
           // One admitted observation has one author/fence check. Each physical

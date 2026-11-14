@@ -125,7 +125,7 @@ const BUSINESS_FIELDS = {
     spaces: ['spaceId', 'kind', 'name', 'hostId', 'directoryPath', 'projectId', 'topicId', 'issue'],
     zones: ['zoneId', 'workspaceId', 'kind', 'hostId', 'directoryPath', 'branch', 'issue'],
     tabs: ['tabId', 'zoneId', 'workspaceId', 'name', 'nameRevision', 'regionIds', 'issue'],
-    regions: ['regionId', 'tabId', 'kind', 'browserId', 'file', 'agentSessionId', 'runId', 'execution'],
+    regions: ['regionId', 'tabId', 'kind', 'browserId', 'file', 'agentSessionId', 'creationOperationId', 'runId', 'execution'],
     bindings: ['zoneId', 'spaceId']
 } as const;
 /** Opaque host JSON and window details cannot enter the shared business DTO. */
@@ -135,7 +135,7 @@ function businessFact<K extends keyof typeof BUSINESS_FIELDS>(kind: K, value: Ag
     if (kind === 'regions') {
         if (result.execution && typeof result.execution === 'object') {
             const e = result.execution as Record<string, unknown>;
-            result.execution = { hostId: e.hostId, cwd: e.cwd };
+            result.execution = { hostId: e.hostId, cwd: e.cwd, ...(e.runtimeId === undefined ? {} : { runtimeId: e.runtimeId }) };
         }
         if (result.file && typeof result.file === 'object') {
             const file = result.file as Record<string, unknown>;
@@ -285,7 +285,7 @@ export function parseSpaceSnapshot(value: unknown, reference: SpaceAuthorityRef)
             const fact = rpcRecord(item, BUSINESS_FIELDS[field], 'CONTROL_PROTOCOL_ERROR');
             if (field === 'regions') {
                 if (fact.execution !== null)
-                    rpcRecord(fact.execution, ['hostId', 'cwd'], 'CONTROL_PROTOCOL_ERROR');
+                    rpcRecord(fact.execution, ['hostId', 'cwd', 'runtimeId'], 'CONTROL_PROTOCOL_ERROR');
                 if (fact.file !== undefined) {
                     const file = rpcRecord(fact.file, ['workspaceId', 'path', 'zoneRelativePath', 'issue'], 'CONTROL_PROTOCOL_ERROR');
                     rpcString(file.workspaceId, 'Original File Workspace', 'CONTROL_PROTOCOL_ERROR');

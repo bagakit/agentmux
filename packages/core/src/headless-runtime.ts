@@ -20,6 +20,9 @@ import type { AgentMuxRpcCoreClient, AgentMuxRpcServiceOptions } from './public-
 import { AgentMuxHostedRuntimeService } from './hosted-runtime-service.js'
 import { AgentMuxHostExecutorOwner } from './executor-owner.js'
 import { AgentMuxCreationAuthority } from './agent-creation-authority.js'
+import { HostRouteGateway, type HostRouteGatewayOptions, type HostRouteExecutionAccess } from './host-route-gateway.js'
+import { executionRouteRpc } from './host-route-rpc.js'
+import type { AdoptedHostRoute } from './host-route.js'
 import type { AgentMuxRuntimeOwnerIdentity, AgentMuxHostedClient, AgentMuxHostedRpcPort, AgentMuxHostedStreamEvent } from './hosted-client-contract.js'
 import { CapsuleRunManager, type CapsuleDesktopAdapters } from './capsule-run-manager.js'
 
@@ -32,6 +35,8 @@ export type AgentMuxHeadlessRuntimeOptions = AgentMuxClientOptions & {
   service?: Omit<AgentMuxRpcServiceOptions, 'coreClients' | 'hostedRuntime' | 'endpoint'>
   /** Borrow original remote Hosts; this Runtime owns only its local client's lifecycle. */
   coreClients?: () => readonly AgentMuxRpcCoreClient[]
+  /** The original Host composes only its exact configured public edge transports. */
+  routeEdge?: HostRouteGatewayOptions['edge']
   /** Borrow the original external input owner; the semantic Host never duplicates its grants or journal. */
   inputContextCaptureReader?: import('./agent-input-context-capture.js').AgentInputContextCaptureReader
   externalInputAuthority?: import('./external-author.js').AgentExternalInputAuthorityPort
@@ -45,7 +50,11 @@ export type AgentMuxHeadlessRuntime = {
   readonly hosted: AgentMuxHostedRuntimeService
   readonly server: AgentMuxControlServer
   readonly socketPath: string
+  readonly hostRoutes: HostRouteGateway
   ownerIdentity(): AgentMuxRuntimeOwnerIdentity
+  /** Borrow the same original configured execution route used by the coordinator. */
+  executionHost(hostId: string, adoptedRoute?: AdoptedHostRoute, access?: HostRouteExecutionAccess): Promise<{ runtimeId: string; client: AgentMuxRpcCoreClient['client']; executionPort: AgentExecutionHostPort; adoptedRoute?: AdoptedHostRoute; dispose?(): Promise<void> }>
+  readonly executionBindings: NonNullable<AgentMuxRpcServiceOptions['executionBindings']>
   stop(): Promise<void>
 }
 const native = createRequire(import.meta.url)('fs-native-extensions') as { tryLock(fd: number): boolean }
@@ -70,6 +79,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
   let capsules: CapsuleRunManager | undefined
   let executionBindings: AgentExecutionBindingService | undefined
   let executionReader: Promise<AgentMuxHostedClient> | undefined
+  let hostRoutes: HostRouteGateway | undefined
   try {
     endpointLease = await acquireOwner(socketPath + '.owner.lock')
     const identityPath = join(stateDirectory, 'semantic-runtime.json')
@@ -95,30 +105,69 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
     }
     const stop = (): Promise<void> => stopping ??= (async () => {
       try { await server?.stop() }
-      finally { try { try { await executionBindings?.dispose(); await (await executionReader)?.dispose(); await capsules?.dispose(); await hosted?.dispose() } finally { await client?.dispose() } }
+      finally { try { try { hostRoutes?.dispose(); await executionBindings?.dispose(); await (await executionReader)?.dispose(); await capsules?.dispose(); await hosted?.dispose() } finally { await client?.dispose() } }
         finally { await endpointLease?.close(); await semanticLease.close() } }
     })()
     // Both namespace leases are already held. One Client owns metadata and Native observation;
     // a caller's unconfirmed Native startup must not dispose this semantic authority.
+    const creationAuthority = options.creationAuthority ?? new AgentMuxCreationAuthority({ stateDirectory, runtimeId })
     client = new AgentMuxClient({ ...options, store, controlSocketPath: socketPath,
       diagnosticOwner: { authority: { kind: 'core-runtime', id: runtimeId, lifetime: storePath === null ? 'instance' : 'durable' }, ownerInstanceId },
       ...(options.externalInputAuthority?.resolveConversationMessage ? { externalConversationAuthority: { resolveConversationMessage: ref => options.externalInputAuthority!.resolveConversationMessage!(ref) } } : {}),
       hostExecutorOwner: options.hostExecutorOwner ?? new AgentMuxHostExecutorOwner({
         path: join(stateDirectory, 'host-executors.json'), runtimeId, catalog: () => client!.catalog()
       }),
-      creationAuthority: options.creationAuthority ?? new AgentMuxCreationAuthority({ stateDirectory, runtimeId }) })
+      creationAuthority })
+    hostRoutes = options.service?.hostRoutes ? undefined : new HostRouteGateway({ stateDirectory, authority: creationAuthority,
+      edge: options.routeEdge ?? (() => { throw new AgentMuxError('The original Host has no configured route edge transport. Keep the exact route; other Core capabilities remain available.', 'HOST_ROUTE_EDGE_UNAVAILABLE') }),
+      call: (method, params, context) => server!.callRpc(method, params, context),
+      subscribe: (method, params, emit, context) => server!.subscribeRpc(method, params, emit, context),
+    })
     hosted = new AgentMuxHostedRuntimeService(client, storePath, ownerIdentity, options.shutdown ?? stop, options.externalInputAuthority, options.inputContextCaptureReader)
     capsules = new CapsuleRunManager(client, stateDirectory, options.capsuleAdapters)
-    executionBindings = options.service?.executionBindings ? undefined : new AgentExecutionBindingService(join(stateDirectory, 'execution-bindings'), {
-      resolveHost: async hostId => {
+    const executionHost: AgentMuxHeadlessRuntime['executionHost'] = async (hostId, adoptedRoute, access) => {
+        if (adoptedRoute) {
+          if (!access) throw new AgentMuxError('This exact route needs its original admission authority. Existing Sessions and intent remain retained.', 'HOST_ROUTE_AUTHORITY_INVALID')
+          const gateway = options.service?.hostRoutes ?? hostRoutes!
+          const target = adoptedRoute.hops.at(-1)!.target.runtimeId
+          const authorization = 'authorization' in access ? access.authorization : 'observation' in access ? await gateway.authorizeObservation(access.observation, access.context) : await gateway.authorizePreparation(target, access.context, access.call)
+          const rpc = executionRouteRpc(gateway, adoptedRoute, authorization, 'authorization' in access ? access.helper : undefined, 'authorization' in access ? undefined : access.context)
+          const routeClient = await connectHostedAgentMux({ connectOnDemand: true, expectedRuntimeId: target, rpc })
+          try {
+            const identity = 'observation' in access ? (await rpc.call('runtime.owner.identity', {})).owner : await routeClient.agentCreationAuthority()
+            if (identity.runtimeId !== target) throw new AgentMuxError('The original adopted route answers for another Runtime.', 'HOST_ROUTE_TARGET_MISMATCH')
+            return { runtimeId: identity.runtimeId, client: routeClient, executionPort: routeClient, adoptedRoute: structuredClone(adoptedRoute), dispose: () => routeClient.dispose() }
+          } catch (error) { await routeClient.dispose().catch(() => {}); throw error }
+        }
+        if (access && 'observation' in access && access.observation.targetRuntimeId === runtimeId) {
+          // Original source-qualified local identity wins over a mutable carrier
+          // label. This read neither creates signing material nor connects Native.
+          return { runtimeId, client: client!, executionPort: client! }
+        }
         const scopes = [{ hostId: 'local', client: client! }, ...(options.coreClients?.() ?? [])].filter(scope => scope.hostId === hostId)
         if (scopes.length !== 1) throw new AgentMuxError('Execution requires one exact configured Host route.', 'UNKNOWN_HOST')
-        const original = scopes[0]!.client
+        let original = scopes[0]!.client
+        if (access && 'observation' in access) {
+          if (access.context.caller || access.context.routeDelegation) throw new AgentMuxError('This foreign observation needs original receiver delegation for the current viewer. Its Session and saved request remain retained.', 'HOST_ROUTE_AUTHORIZATION_REQUIRED')
+          const cached = 'runtimeOwnerIdentity' in original ? original.runtimeOwnerIdentity?.() : null
+          const observed = cached ?? ('forwardRpc' in original && original.forwardRpc ? (await original.forwardRpc('runtime.owner.identity', {}, access.context)).owner : null)
+          if (!observed) throw new AgentMuxError('The original semantic owner identity is unconfirmed; no Native identity or creation key was substituted.', 'RUNTIME_OWNER_UNCONFIRMED')
+          if (observed.runtimeId !== access.observation.targetRuntimeId) throw new AgentMuxError('This observation answers for another original semantic Runtime. Its Session and original request remain retained.', 'RUNTIME_OWNER_MISMATCH')
+          return { runtimeId: observed.runtimeId, client: original, executionPort: original }
+        }
         // Hosted control RPCs carry their own exact owner fence; unrelated event
         // subscription availability cannot become creation admission.
         if (!('runtimeOwnerIdentity' in original) || typeof original.runtimeOwnerIdentity !== 'function') await original.connect()
         const identity = await original.agentCreationAuthority()
-        if (original !== client) return { runtimeId: identity.runtimeId, client: original }
+        if (original !== client && access && ('context' in access ? access.context.routeDelegation : access.authorization.parent)) {
+          const localIdentity = await creationAuthority.identity()
+          if (identity.runtimeId !== localIdentity.runtimeId || identity.publicKey !== localIdentity.publicKey || identity.fingerprint !== localIdentity.fingerprint)
+            throw new AgentMuxError('This foreign transport has no adopted receiver delegation for the original actor. Keep its target and request; no transport account was substituted.', 'HOST_ROUTE_AUTHORIZATION_REQUIRED')
+          // An authenticated self carrier is still this original owner, regardless
+          // of its configured alias. Keep the canonical local reader namespace.
+          original = client!
+        }
+        if (original !== client) return { runtimeId: identity.runtimeId, client: original, executionPort: original }
         // The local SDK's attachment is shared by this Core. Borrow its existing
         // Hosted RunReaders owner, so closing this bridge cannot detach another
         // consumer of the same Run. This private transport carries only reads:
@@ -142,13 +191,18 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
           createPreparedTerminal: original.createPreparedTerminal.bind(original), createHostAgentWithDelivery: original.createHostAgentWithDelivery.bind(original),
           listHostExecutors: original.listHostExecutors.bind(original), readAgentSession: original.readAgentSession.bind(original)
         }
-        return { runtimeId: identity.runtimeId, client: scoped }
-      }
+        return { runtimeId: identity.runtimeId, client: original, executionPort: scoped }
+    }
+    executionBindings = options.service?.executionBindings ? undefined : new AgentExecutionBindingService(join(stateDirectory, 'execution-bindings'), {
+      authorize: (input, context, retained, existing) => (options.service?.hostRoutes ?? hostRoutes!).retainExecution(input, context, retained, existing),
+      resolveHost: async (hostId, route, access) => { const host = await executionHost(hostId, route, access); return { runtimeId: host.runtimeId, client: host.executionPort,
+        ...(host.adoptedRoute ? { adoptedRoute: host.adoptedRoute } : {}), ...(host.dispose ? { dispose: host.dispose } : {}) } }
     })
     server = new AgentMuxControlServer({ ...options.service, socketPath, ...(options.http ? { http: options.http } : {}),
       ...(options.forwardingPeer ? { forwardingPeer: options.forwardingPeer } : {}),
       capsules: options.service?.capsules ?? capsules,
       executionBindings: options.service?.executionBindings ?? executionBindings!,
+      hostRoutes: options.service?.hostRoutes ?? hostRoutes!,
       capsuleRuntime: options.service?.capsuleRuntime ?? capsules.runtime,
       deliveryAttempts: options.service?.deliveryAttempts ?? { hostId: 'local', store: new DeliveryAttemptStore(join(stateDirectory, 'client-delivery-attempts'), { clientJournal: true }) },
       diagnosticCoreAuthority: options.service?.diagnosticCoreAuthority ?? (() => ({ authority: { kind: 'core-runtime', id: runtimeId, lifetime: storePath === null ? 'instance' : 'durable' }, status: 'verified', causeCode: null })),
@@ -165,9 +219,10 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
       // The original binding remains inspectable as unavailable. A reader
       // failure does not close the public owner or another healthy capability.
     })
-    return { client, hosted, server, socketPath, ownerIdentity, stop }
+    return { client, hosted, server, socketPath, hostRoutes: options.service?.hostRoutes ?? hostRoutes!, ownerIdentity, executionHost,
+      executionBindings: options.service?.executionBindings ?? executionBindings!, stop }
   } catch (error) {
-    await server?.stop().catch(() => {}); await executionBindings?.dispose().catch(() => {}); await capsules?.dispose().catch(() => {}); await hosted?.dispose().catch(() => {}); await client?.dispose().catch(() => {})
+    await server?.stop().catch(() => {}); hostRoutes?.dispose(); await executionBindings?.dispose().catch(() => {}); await capsules?.dispose().catch(() => {}); await hosted?.dispose().catch(() => {}); await client?.dispose().catch(() => {})
     await endpointLease?.close().catch(() => {}); await semanticLease.close().catch(() => {})
     throw error
   }

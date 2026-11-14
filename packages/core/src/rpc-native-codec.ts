@@ -1,3 +1,7 @@
+import { parseSpaceMemberParams } from './space-member-codec.js'
+import { parseHostedRuntimeOwnerIdentity } from './hosted-value.js'
+import { hostedSessionProjection, hostedSessionIds } from './hosted-session-summary.js'
+import { HOST_ROUTE_METHODS, parseHostRouteResult } from './host-route.js'
 import { parseFolderSpaceRegistration, parseFolderSpaceReceipt } from './space-folder.js'
 import { parseAgentExecutionReference } from './errors.js'
 import { isSpaceAuthorityMethod, parseSpaceAuthorityParams, parseSpaceSnapshot } from './space-authority.js'
@@ -213,8 +217,8 @@ export function rpcSessionTargetMatches(selector: unknown, actual: string, crede
   try { return resolveAgentSessionId(expected, [actual]) === actual } catch { return false }
 }
 /** Host bootstrap is a read projection of the original SDK, never a new registry. */
-export function parseRpcHostedBootstrap(value: unknown): Record<string, unknown> {
-  const p = parseHostedBootstrap(value) as unknown as Record<string, unknown>
+export function parseRpcHostedBootstrap(value: unknown, input: {sessions?: unknown; agentSessionIds?: unknown} = {}): Record<string, unknown> {
+  const p = parseHostedBootstrap(value, hostedSessionProjection(input.sessions), hostedSessionIds(input.agentSessionIds)) as unknown as Record<string, unknown>
   array(p.sessions, session => parseRpcAgentSession(session))
   array(p.catalog, item => { const entry = record(item)
     for (const key of ['id', 'label', 'executable', 'expectedProcess']) string(entry[key])
@@ -395,6 +399,16 @@ function activity(value: unknown): void {
 export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, params: unknown,
   credentials?: AgentMuxRpcCredentials): Record<string, unknown> {
   try {
+    if (method === 'space.member.call') {
+      const input = parseSpaceMemberParams(method, params)
+      if (input.call.method === 'runtime.owner.identity') {
+        const p = record(value, ['owner']), owner = parseHostedRuntimeOwnerIdentity(p.owner)
+        if (owner.runtimeId !== input.target.runtimeId) fail()
+        return p
+      }
+      return parseRpcNativeResult(input.call.method, value, input.call.params, credentials)
+    }
+    if (Object.hasOwn(HOST_ROUTE_METHODS, method)) return parseHostRouteResult(method as keyof typeof HOST_ROUTE_METHODS, value) as Record<string, unknown>
     if (method === 'agent.creation.continue') return parseCreationContinueResult(value, parseCreationContinueParams(params)) as unknown as Record<string, unknown>
     if (method === 'agent.execution.binding' || method === 'agent.execution.rejoin') {
       const input = parseAgentExecutionBinding(params)
@@ -413,7 +427,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       const session = parseRpcAgentSession(result.session)
       const execution = parseAgentExecutionInspection(result.execution, { bindingId: input.bindingId, agentHostId: input.agentHostId,
         resourceHostId: input.resourceHostId, agentSessionId: input.agent.agentSessionId, resourceWorkspacePath: input.resourceWorkspacePath })
-      if (session.agentSessionId !== input.agent.agentSessionId || session.creation?.createOperationId !== input.agent.createOperationId ||
+      if (!isDeepStrictEqual(execution.agentRoute, input.agentRoute) || !isDeepStrictEqual(execution.resourceRoute, input.resourceRoute) ||
+          session.agentSessionId !== input.agent.agentSessionId || session.creation?.createOperationId !== input.agent.createOperationId ||
           session.executorId !== input.agent.executorId || session.workspacePath !== input.agent.workspacePath ||
           !isDeepStrictEqual(session.toolExecution, { bindingId: input.bindingId, resourceHostId: input.resourceHostId,
             resourceRuntimeId: input.resourceRuntimeId, workspacePath: input.resourceWorkspacePath })) fail()
@@ -602,7 +617,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'runtime.profile.capture': return parseRuntimeV8ProfileResult(value, parseRuntimeV8ProfileInput(input))
       case 'system.metrics.host-profile.capture': return parseRuntimeV8ProfileResult(value, parseRuntimeV8ProfileInput(input, true))
       case 'runtime.network.inspect': return parseRuntimeNetworkSnapshot(value, input.fence as import('./hosted-client-contract.js').AgentMuxRuntimeFence)
-      case 'runtime.bootstrap': parseRpcHostedBootstrap(p); break
+      case 'runtime.bootstrap': parseRpcHostedBootstrap(p, input); break
       case 'runtime.invoke': record(p, ['value']); if (!Object.hasOwn(p, 'value')) fail(); break
       case 'runtime.release-consumer': record(p, ['released']); bool(p.released); break
       case 'agent.interaction.respond': case 'agent.interaction.inspect': {

@@ -147,9 +147,11 @@ export class AgentMuxHostExecutorOwner {
     return await probeCommand(config, this.options.environment?.() ?? process.env)
   }
 
-  async list(input: { refresh?: boolean } = {}): Promise<AgentMuxHostExecutorInventory> {
+  async list(input: { refresh?: boolean; executorId?: string } = {}): Promise<AgentMuxHostExecutorInventory> {
     const entries = this.entries(await this.read())
-    const executors = await Promise.all([...entries].map(async ([id, { config, source }]) => ({
+    const id = input.executorId === undefined ? undefined : text(input.executorId, 'Executor ID', 512)
+    const selected = id === undefined ? [...entries] : entries.has(id) ? [[id, entries.get(id)!] as const] : []
+    const executors = await Promise.all(selected.map(async ([id, { config, source }]) => ({
       ...this.descriptor(id, config, source),
       ...(input.refresh ? await this.observe(config) : {})
     })))

@@ -636,7 +636,7 @@ export class AgentMuxClient {
     return await this.requireCreationAuthority().trust(input, principal)
   }
 
-  async listHostExecutors(input?: { refresh?: boolean }) {
+  async listHostExecutors(input?: { refresh?: boolean; executorId?: string }) {
     if (!this.hostExecutorOwner) throw new AgentMuxError('Target Host Executor registry is unavailable.', 'CONTROL_UNAVAILABLE')
     return await this.hostExecutorOwner.list(input)
   }

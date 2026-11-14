@@ -123,7 +123,11 @@ export function configuredHostClients(path: string | undefined) {
   return {
     start() { if (!started && !closed) { started = true; void refresh() } },
     subscribeClients(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener) } },
-    clients: () => [...leases].map(([hostId, lease]) => ({ hostId, client: lease.client })),
+    clients: (hostId?: string) => {
+      if (hostId === undefined) return [...leases].map(([hostId, lease]) => ({ hostId, client: lease.client }))
+      const lease = leases.get(hostId)
+      return lease ? [{ hostId, client: lease.client }] : []
+    },
     /** The saved record behind each served route: an SSH lease's adopted config, or the last valid local record. */
     configuration: (hostId: string): LocalHostConfig | SshHostConfig | null =>
       structuredClone(hostId === 'local' ? local ?? null : leases.get(hostId)?.config ?? null),

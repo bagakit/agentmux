@@ -1,3 +1,4 @@
+import { HostedSessionReaders } from './hosted-session-readers.js'
 import { parseCreationContinueInput, parseCreationContinueReceipt } from './agent-creation-continue.js'
 import { parseAgentInputResourceRead } from './agent-input-resource.js'
 import { mintObjectId } from './object-id.js'
@@ -17,7 +18,7 @@ import { readNetworkInterfaces } from './runtime-network.js'
 import { observeRead as observe } from './observation-read.js'
 import { parseAgentMuxCreationTrustInput } from './agent-creation-admission.js'
 import { rpcString } from './rpc-business-codec.js'
-import { hostedAgentSessionSummary, hostedSessionProjection, projectHostedSessionEvent, type AgentMuxHostedSessionProjection } from './hosted-session-summary.js'
+import { hostedAgentSessionSummary, hostedSessionProjection, hostedSessionIds, projectHostedSessionEvent, type AgentMuxHostedSessionScope, type AgentMuxHostedSessionProjection } from './hosted-session-summary.js'
 import { parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor, type AgentExternalInputAuthorityPort } from './external-author.js'
 import { AGENTMUX_HOSTED_METHODS, AGENTMUX_HOSTED_PREPARATION, AGENTMUX_HOSTED_RPC_FIELDS, type AgentMuxHostedRuntimeMethod, type AgentMuxHostedBootstrap, type AgentMuxHostedInvocation,
   type AgentMuxHostedStreamEvent, type AgentMuxHostedTransferChunk,
@@ -32,11 +33,12 @@ type Reader = { enqueue(chunks: AgentMuxHostedTransferChunk[], metadata?: AgentM
   start(): Promise<void>; close(): void;
   readonly initialId: string; readonly closed: boolean; readonly eventDestination?: Reader; readonly sessions: AgentMuxHostedSessionProjection }
 type InitialReader = Reader & { metadataIds(): readonly string[]; coverMetadata(id: string, retain: (queued: readonly AgentMuxClientEvent[]) => AgentMuxClientEvent | null): void;
+  write(chunks: AgentMuxHostedTransferChunk[]): Promise<void>;
   begin(initial: unknown): void; readonly opening: boolean }
 function reader(emit: Emit, initial: unknown, onFailure: () => void, opening = false, sessions: AgentMuxHostedSessionProjection = 'full'): InitialReader {
   const initialId = mintObjectId()
   let closed = false, started = false, pumping = false, queuedBytes = 0, initialReady = false
-  const queue: Array<{ chunks: AgentMuxHostedTransferChunk[]; metadata?: AgentMuxClientEvent | undefined }> = []
+  const queue: Array<{ chunks: AgentMuxHostedTransferChunk[]; metadata?: AgentMuxClientEvent | undefined; done?: () => void }> = []
   const metadataId = (event?: AgentMuxClientEvent) => event?.type === 'agent-session' ? event.session.agentSessionId
     : event?.type === 'run-removed' ? event.agentSessionId : undefined
   const size = (chunks: AgentMuxHostedTransferChunk[]) => chunks.reduce((sum, chunk) => sum + chunk.dataBase64.length, 0)
@@ -45,12 +47,21 @@ function reader(emit: Emit, initial: unknown, onFailure: () => void, opening = f
     pumping = true
     try {
       while (!closed && queue.length) {
-        const { chunks } = queue.shift()!
+        const { chunks, done } = queue.shift()!
         queuedBytes -= size(chunks)
-        for (const data of chunks) { if (closed) break; await emit({ type: 'snapshot', data }) }
+        try { for (const data of chunks) { if (closed) break; await emit({ type: 'snapshot', data }) } }
+        finally { done?.() }
       }
     } catch (error) { output.fail(error) }
     finally { pumping = false }
+  }
+  const enqueue = (chunks: AgentMuxHostedTransferChunk[], metadata?: AgentMuxClientEvent, done?: () => void) => {
+    if (closed) { done?.(); return }
+    queuedBytes += size(chunks)
+    queue.push({ chunks, metadata, ...(done ? { done } : {}) })
+    if (queuedBytes > AGENTMUX_HOSTED_TRANSFER_MAX_BYTES * 2) {
+      output.fail(new AgentMuxError('This reader fell behind; reattach from its last observed cursor. The Run remains live.', 'RUNTIME_READER_BUDGET_EXCEEDED'))
+    } else void pump()
   }
   const output: InitialReader = {
     initialId, sessions, get closed() { return closed }, get opening() { return !initialReady },
@@ -80,17 +91,14 @@ function reader(emit: Emit, initial: unknown, onFailure: () => void, opening = f
       } else void pump()
     },
     enqueue(chunks, metadata) {
-      if (closed) return
-      queuedBytes += size(chunks)
-      if (queuedBytes > AGENTMUX_HOSTED_TRANSFER_MAX_BYTES * 2) {
-        output.fail(new AgentMuxError('This reader fell behind; reattach from its last observed cursor. The Run remains live.', 'RUNTIME_READER_BUDGET_EXCEEDED'))
-        return
-      }
-      queue.push({ chunks, metadata }); void pump()
+      enqueue(chunks, metadata)
     },
+    // Membership rows await this physical write rather than queuing a complete
+    // large Space. Ordinary synchronous Runtime events retain the bounded queue.
+    write: chunks => new Promise<void>(done => enqueue(chunks, undefined, done)),
     fail(error) {
       if (closed) return
-      closed = true; queue.length = 0; queuedBytes = 0
+      closed = true; for (const entry of queue) entry.done?.(); queue.length = 0; queuedBytes = 0
       const failure = { code: error instanceof AgentMuxError ? error.code : 'RUNTIME_ATTACHMENT_UNAVAILABLE',
         message: error instanceof Error ? error.message : String(error) }
       void Promise.resolve().then(() => emit({ type: 'error', error: failure }))
@@ -98,11 +106,13 @@ function reader(emit: Emit, initial: unknown, onFailure: () => void, opening = f
       onFailure()
     },
     async start() { started = true; await pump() },
-    close() { closed = true; queue.length = 0; queuedBytes = 0 }
+    close() { closed = true; for (const entry of queue) entry.done?.(); queue.length = 0; queuedBytes = 0 }
   }
   if (!opening) output.begin(initial)
   return output
 }
+/** One original Hosted wire queue, also used by scoped Space reader composition. */
+export { reader as createHostedTransferQueue }
 function record(value: unknown, fields?: readonly string[]): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new AgentMuxError('Invalid hosted RPC input.', 'INVALID_CONTROL_REQUEST')
   if (fields && Object.keys(value).some(key => !fields.includes(key))) throw new AgentMuxError('Unknown hosted RPC field.', 'INVALID_CONTROL_REQUEST')
@@ -122,6 +132,7 @@ type RunReaders = { readers: Set<Reader>; open: Promise<AgentMuxRunAttachment>; 
 /** One semantic owner and one matching-Run dispatch index. Readers never own a Run's lifecycle. */
 export class AgentMuxHostedRuntimeService {
   private readonly consumers = new Map<string, Consumer>()
+  private readonly eventReaders = new HostedSessionReaders<InitialReader>()
   private readonly runs = new Map<string, RunReaders>()
   private readonly unsubscribe: () => void
   private disposed = false
@@ -188,7 +199,7 @@ export class AgentMuxHostedRuntimeService {
     const matching = runId ? this.runs.get(runId)?.readers : undefined
     if ((!matching || !matching.size) && (terminal || !this.consumers.size)) return
     const recipients = new Set<Reader>(matching ? [...matching].map(reader => reader.eventDestination ?? reader) : [])
-    if (!terminal) for (const consumer of this.consumers.values()) if (consumer.events && !consumer.events.closed) recipients.add(consumer.events)
+    if (!terminal) for (const reader of this.eventReaders.recipients(event)) if (!reader.closed) recipients.add(reader)
     if (!recipients.size) return
     // Encode once per requested projection, without serializing unused full prompt bodies.
     const projections = new Map<AgentMuxHostedSessionProjection, AgentMuxHostedTransferChunk[]>()
@@ -208,14 +219,25 @@ export class AgentMuxHostedRuntimeService {
       } catch (error) { reader.fail(error) }
     }
   }
-  async bootstrap(projection: AgentMuxHostedSessionProjection = 'full'): Promise<AgentMuxHostedBootstrap> {
-    const sessions = await this.client.readAgentSessions()
-    return this.bootstrapSnapshot(sessions, projection)
+  private async scopedSessions(ids: readonly string[], signal?: AbortSignal) {
+    const sessions = new Map<string, import('./types.js').AgentMuxAgentSession>(), missing = new Set<string>()
+    const unavailable = new Map<string, { agentSessionId: string; code: string; message: string }>()
+    for (const id of ids) {
+      signal?.throwIfAborted()
+      try { const session = await observe(this.client.readAgentSession(id), signal); if (session) sessions.set(id, session); else missing.add(id) }
+      catch (error) { signal?.throwIfAborted(); unavailable.set(id, { agentSessionId: id, code: error instanceof AgentMuxError ? error.code : 'AGENT_SESSION_STORE_READ_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) }) }
+    }
+    return { sessions, missing, unavailable }
   }
-  private bootstrapSnapshot(sessions: AgentMuxHostedBootstrap['sessions'], projection: AgentMuxHostedSessionProjection = 'full'): AgentMuxHostedBootstrap {
+  async bootstrap(projection: AgentMuxHostedSessionProjection = 'full', ids?: readonly string[], signal?: AbortSignal): Promise<AgentMuxHostedBootstrap> {
+    if (ids === undefined) return this.bootstrapSnapshot(await this.client.readAgentSessions(), projection)
+    const observed = await this.scopedSessions(ids, signal)
+    return this.bootstrapSnapshot([...observed.sessions.values()], projection, { agentSessionIds: ids, missing: [...observed.missing], unavailable: [...observed.unavailable.values()] })
+  }
+  private bootstrapSnapshot(sessions: AgentMuxHostedBootstrap['sessions'], projection: AgentMuxHostedSessionProjection = 'full', sessionScope?: AgentMuxHostedSessionScope): AgentMuxHostedBootstrap {
     return { owner: this.owner(), connection: structuredClone(this.connection), storePath: this.storePath,
       hostProcessId: process.pid, catalog: this.client.catalog(), sessions: projection === 'summary' ? sessions.map(hostedAgentSessionSummary) : sessions,
-      messageQueuePath: this.client.agentMessageQueuePath() }
+      messageQueuePath: this.client.agentMessageQueuePath(), ...(sessionScope ? { sessionScope } : {}) }
   }
   async call(method: 'runtime.owner.identity', params: unknown, context?: Context): Promise<{ owner: AgentMuxRuntimeOwnerIdentity }>
   async call(method: string, params: unknown, context?: Context): Promise<unknown>
@@ -236,7 +258,7 @@ export class AgentMuxHostedRuntimeService {
       return { owner: this.owner(), accepted: true }
     }
     const id = identifier(p.consumerId)
-    if (method === 'runtime.bootstrap') return await observe(this.bootstrap(hostedSessionProjection(p.sessions)), context.signal)
+    if (method === 'runtime.bootstrap') return await observe(this.bootstrap(hostedSessionProjection(p.sessions), hostedSessionIds(p.agentSessionIds), context.signal), context.signal)
     if (method === 'runtime.release-consumer') return { released: await this.releaseConsumer(id) }
     if (method !== 'runtime.invoke') throw new AgentMuxError('Unknown hosted public method.', 'RPC_METHOD_NOT_FOUND')
     const input = record(decodeHostedValue(sanitizeHostedInputInvocation(p.invocation)), ['method', 'args'])
@@ -507,12 +529,12 @@ export class AgentMuxHostedRuntimeService {
     this.assertFence(p.fence)
     const owner = this.owner()
     if (method === 'runtime.events') {
-      const projection = hostedSessionProjection(p.sessions)
+      const projection = hostedSessionProjection(p.sessions), selected = hostedSessionIds(p.agentSessionIds)
       const consumer = this.observationConsumer(id)
       if (consumer.events && !consumer.events.closed) throw new AgentMuxError('Host consumer already has an event owner.', 'CONTROL_OWNER_BUSY')
       let events: InitialReader
       const dispose = async () => {
-        events.close()
+        this.eventReaders.remove(events); events.close()
         if (consumer.events !== events) return
         consumer.stopMessages?.(); delete consumer.stopMessages
         delete consumer.events
@@ -525,7 +547,8 @@ export class AgentMuxHostedRuntimeService {
       try { events = reader(emit, undefined, () => { void dispose().catch(error => this.releaseUnconfirmed(error)) }, true, projection) }
       catch (error) { this.pruneConsumer(id, consumer); throw error }
       consumer.events = events
-      consumer.stopMessages = this.client.onEvent(event => {
+      this.eventReaders.add(events, selected)
+      if (selected === undefined) consumer.stopMessages = this.client.onEvent(event => {
         if (consumer.events !== events || events.closed ||
           event.type !== 'agent-message-changed' && event.type !== 'agent-message-observation') return
         try { events.enqueue(hostedTransfer({ kind: 'event', event }, mintObjectId())) }
@@ -536,20 +559,31 @@ export class AgentMuxHostedRuntimeService {
       context.signal?.addEventListener('abort', abort, { once: true })
       if (context.signal?.aborted) { await dispose(); throw new AgentMuxError('Host subscription was cancelled.', 'CONTROL_CANCELLED') }
       try {
-        const sessions = new Map((await observe(this.client.readAgentSessions(), context.signal)).map(session => [session.agentSessionId, session]))
+        const scoped = selected === undefined ? undefined : await this.scopedSessions(selected, context.signal)
+        const sessions = scoped?.sessions ?? new Map((await observe(this.client.readAgentSessions(), context.signal)).map(session => [session.agentSessionId, session]))
         // Only identities with queued publications or an in-flight metadata turn
         // need a scoped cut. Each callback runs inside that existing SID queue:
         // older events are covered, and later writes remain after the initial.
-        const ids = new Set([...events.metadataIds(), ...this.client.metadata.pendingIds()])
-        for (const id of ids) await observe(this.client.metadata.read(id, session => {
-          if (events.closed || consumer.events !== events) return
-          if (session) sessions.set(id, session)
-          else sessions.delete(id)
-          events.coverMetadata(id, queued => this.client.metadata.retainObservation(session, queued))
-        }, context.signal), context.signal)
+        const ids = selected ?? new Set([...events.metadataIds(), ...this.client.metadata.pendingIds()])
+        for (const id of ids) {
+          try { await observe(this.client.metadata.read(id, session => {
+            if (events.closed || consumer.events !== events) return
+            if (session) { sessions.set(id, session); scoped?.missing.delete(id); this.eventReaders.observe(events, session) }
+            else { sessions.delete(id); scoped?.missing.add(id) }
+            scoped?.unavailable.delete(id)
+            events.coverMetadata(id, queued => this.client.metadata.retainObservation(session, queued))
+          }, context.signal), context.signal) }
+          catch (error) {
+            context.signal?.throwIfAborted()
+            if (!scoped) throw error
+            sessions.delete(id); scoped.missing.delete(id)
+            scoped.unavailable.set(id, { agentSessionId: id, code: error instanceof AgentMuxError ? error.code : 'AGENT_SESSION_STORE_READ_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) })
+          }
+        }
+        for (const session of sessions.values()) this.eventReaders.observe(events, session)
         context.signal?.throwIfAborted(); this.assertFence(p.fence)
         if (events.closed || consumer.events !== events) throw new AgentMuxError('Host opening was released.', 'CONTROL_CANCELLED')
-        events.begin(this.bootstrapSnapshot([...sessions.values()], projection))
+        events.begin(this.bootstrapSnapshot([...sessions.values()], projection, selected === undefined ? undefined : { agentSessionIds: selected, missing: [...scoped!.missing], unavailable: [...scoped!.unavailable.values()] }))
       } catch (error) { context.signal?.removeEventListener('abort', abort); await dispose(); throw error }
       return { initial: { owner, transferId: events.initialId }, start: () => events.start(), dispose: async () => {
         context.signal?.removeEventListener('abort', abort); await dispose()
@@ -657,6 +691,7 @@ export class AgentMuxHostedRuntimeService {
     const consumer = this.consumers.get(id)
     if (!consumer) return false
     consumer.stopMessages?.(); delete consumer.stopMessages
+    if (consumer.events) this.eventReaders.remove(consumer.events)
     consumer.events?.close()
     for (const release of [...consumer.histories]) release()
     const releases = await Promise.allSettled([...consumer.readers, ...consumer.runs.values()].map(release => release()))

@@ -28,7 +28,11 @@ export function defaultAgentMuxSpatialStatePath(env: Readonly<Record<string, str
 }
 type AgentRegionAttachment = { tabId: string; regionId: string; agentSessionId: string; runId: string;
   execution: { hostId: string; cwd: string }; resource: SpatialJson };
-type SpaceAgentIndex = Map<string, { kind: AgentMuxSpatialGraph['spaces'][number]['kind']; agents: Set<string> }>;
+export type SpaceAgentRegion = {
+  region: AgentMuxSpatialGraph['regions'][number]; zone: AgentMuxSpatialGraph['zones'][number];
+  admission?: Pick<import('./spatial-agent-open-contract.js').AgentMuxSpatialAgentOpenRecord, 'requestId' | 'agentSessionId' | 'address' | 'execution' | 'placement'>
+};
+type SpaceAgentIndex = Map<string, { kind: AgentMuxSpatialGraph['spaces'][number]['kind']; agents: Set<string>; regions: Map<string, SpaceAgentRegion> }>;
 type SpaceAgentSnapshot = { stamp: string; index: SpaceAgentIndex };
 const spatialFileStamp = (file: { dev: bigint; ino: bigint; size: bigint; mtimeNs: bigint; ctimeNs: bigint }) =>
   [file.dev, file.ino, file.size, file.mtimeNs, file.ctimeNs].join(':');
@@ -142,6 +146,21 @@ export class AgentMuxSpatialStateStore {
   async readSpaceAgentMembership(input: { spaceId: string; hostId: string; agentSessionId: string }): Promise<{
     spaceKind: AgentMuxSpatialGraph['spaces'][number]['kind'] | null; member: boolean;
   } | null> {
+    return await this.readAgentMembership(snapshot => {
+      const space = snapshot.index.get(input.spaceId);
+      return { spaceKind: space?.kind ?? null, member: space?.agents.has(spatialAgentKey(input)) ?? false };
+    });
+  }
+  /** Exact member selectors share the opened-file membership index. No prompt,
+   * environment, creator credential or resource grant is retained in this projection. */
+  async readSpaceAgentRegion(input: { spaceId: string; regionId: string }): Promise<{ spaceKind: AgentMuxSpatialGraph['spaces'][number]['kind'] | null; member: SpaceAgentRegion | null } | null> {
+    return await this.readAgentMembership((snapshot, stable) => {
+      if (!stable) throw new AgentMuxError('The original member document changed during this read. Keep the target and inspect its original source.', 'SPACE_MEMBER_UNAVAILABLE');
+      const space = snapshot.index.get(input.spaceId);
+      return { spaceKind: space?.kind ?? null, member: structuredClone(space?.regions.get(input.regionId) ?? null) };
+    });
+  }
+  private async readAgentMembership<T>(select: (snapshot: SpaceAgentSnapshot, stable: boolean) => T): Promise<T | null> {
     let file: FileHandle | undefined, selected = this.agentMembership;
     try {
       file = await open(this.path, 'r');
@@ -155,8 +174,7 @@ export class AgentMuxSpatialStateStore {
       // A concurrent in-place write may change this handle while it is read. Keep
       // the original read semantics, but never reuse that unstable observation.
       if (snapshot.stamp !== stamp && this.agentMembership === selected) this.agentMembership = undefined;
-      const space = snapshot.index.get(input.spaceId);
-      return { spaceKind: space?.kind ?? null, member: space?.agents.has(spatialAgentKey(input)) ?? false };
+      return select(snapshot, snapshot.stamp === stamp);
     } catch (error) {
       if (this.agentMembership === selected) this.agentMembership = undefined;
       if (!file && (error as NodeJS.ErrnoException).code === 'ENOENT') return null;
@@ -167,19 +185,30 @@ export class AgentMuxSpatialStateStore {
   }
   private async readAgentIndex(file: FileHandle): Promise<SpaceAgentSnapshot> {
     const { graph } = this.decode(await file.readFile('utf8'));
-    const index: SpaceAgentIndex = new Map(graph.spaces.map(space => [space.spaceId, { kind: space.kind, agents: new Set<string>() }]));
+    const index: SpaceAgentIndex = new Map(graph.spaces.map(space => [space.spaceId, { kind: space.kind, agents: new Set<string>(), regions: new Map() }]));
     const spacesByZone = new Map<string, string[]>();
     for (const binding of graph.bindings) {
       const spaces = spacesByZone.get(binding.zoneId) ?? [];
       spaces.push(binding.spaceId); spacesByZone.set(binding.zoneId, spaces);
     }
     const zonesByTab = new Map(graph.tabs.map(tab => [tab.tabId, tab.zoneId]));
+    const zones = new Map(graph.zones.map(zone => [zone.zoneId, zone]));
     for (const region of graph.regions) {
       if (region.kind !== 'agent' || !region.agentSessionId || !region.execution) continue;
       const zone = zonesByTab.get(region.tabId);
       if (zone === null || zone === undefined) continue;
       const key = spatialAgentKey({ hostId: region.execution.hostId, agentSessionId: region.agentSessionId });
-      for (const spaceId of spacesByZone.get(zone) ?? []) index.get(spaceId)?.agents.add(key);
+      const resource = zones.get(zone);
+      if (!resource) continue;
+      let original: ReturnType<typeof spatialAgentOpenRecord> = null;
+      try { if (region.creationOperationId) original = spatialAgentOpenRecord(graph, region.creationOperationId); }
+      catch { /* An unreadable admission leaves only this foreign control unconfirmed, not other membership. */ }
+      const member: SpaceAgentRegion = { region, zone: resource, ...(original ? { admission: { requestId: original.requestId,
+        agentSessionId: original.agentSessionId, address: original.address, execution: original.execution,
+        ...(original.placement ? { placement: original.placement } : {}) } } : {}) };
+      for (const spaceId of spacesByZone.get(zone) ?? []) {
+        const space = index.get(spaceId); space?.agents.add(key); space?.regions.set(region.regionId, member);
+      }
     }
     return { stamp: spatialFileStamp(await file.stat({ bigint: true })), index };
   }
@@ -351,6 +380,8 @@ export class AgentMuxSpatialStateStore {
       if (!record || record.agentSessionId !== session.agentSessionId) throw new AgentMuxError('The original creation receipt names another reserved Session.', 'SPATIAL_CREATION_UNCONFIRMED');
       const graph = structuredClone(current.graph), region = graph.regions.find(region => region.regionId === record.address.regionId && region.tabId === record.address.tabId);
       if (!region || region.agentSessionId !== session.agentSessionId || region.kind !== 'agent') return { state: projectSpatialState(current), attached: false };
+      if (record.execution.runtimeId && (region.execution?.runtimeId !== record.execution.runtimeId || region.execution.hostId !== record.execution.hostId ||
+          region.execution.cwd !== record.execution.workspacePath)) return { state: projectSpatialState(current), attached: false };
       const descriptor = graph.resources['region:' + region.regionId];
       if (region.runId === session.run.runId && JSON.stringify(descriptor) === JSON.stringify(regionResource)) return { state: projectSpatialState(current), attached: true };
       region.runId = session.run.runId; graph.resources['region:' + region.regionId] = structuredClone(regionResource);

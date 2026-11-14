@@ -1,3 +1,5 @@
+import { parseAdoptedHostRoute } from './host-route.js'
+import { isDeepStrictEqual } from 'node:util'
 import { isAbsolute } from 'node:path'
 import { AgentMuxError, parseAgentExecutionReference } from './errors.js'
 import { parseAgentExecutionNotices } from './agent-execution-helper.js'
@@ -8,7 +10,7 @@ import { parseAgentCreationSpatialIntent } from './agent-session-store.js'
 import { parseAgentMuxCreationAdmission } from './agent-creation-admission.js'
 import type { AgentExecutionOpenInput, AgentExecutionInspection } from './agent-execution-coordinator.js'
 
-export const AGENT_EXECUTION_CREATE_FIELDS = ['bindingId', 'agentHostId', 'agentRuntimeId', 'resourceHostId', 'resourceRuntimeId', 'resourceWorkspacePath', 'resourceGrant', 'agent'] as const
+export const AGENT_EXECUTION_CREATE_FIELDS = ['bindingId', 'agentHostId', 'agentRuntimeId', 'resourceHostId', 'resourceRuntimeId', 'resourceWorkspacePath', 'resourceGrant', 'agent', 'agentRoute', 'resourceRoute'] as const
 const agentFields = ['agentSessionId', 'createOperationId', 'executorId', 'executorRevision', 'workspacePath', 'prompt', 'agentMuxNote', 'agentMuxTask',
   'optionalContext', 'launchOptions', 'cols', 'rows', 'nativeResumeSource', 'spatialIntent', 'initialMessageAdmission', 'threadId'] as const
 const invalid = (message: string, code: string): never => { throw new AgentMuxError(message, code) }
@@ -31,6 +33,10 @@ export function parseAgentExecutionCreate(value: unknown): AgentExecutionOpenInp
   const input = rpcRecord(value, AGENT_EXECUTION_CREATE_FIELDS, code)
   for (const field of ['bindingId', 'agentHostId', 'agentRuntimeId', 'resourceHostId', 'resourceRuntimeId']) identity(input[field], code)
   workspace(input.resourceWorkspacePath, code)
+  for (const [field, runtime] of [['agentRoute', 'agentRuntimeId'], ['resourceRoute', 'resourceRuntimeId']] as const) if (input[field] !== undefined) {
+    const route = parseAdoptedHostRoute(input[field])
+    if (route.hops.at(-1)!.target.runtimeId !== input[runtime]) invalid('The adopted route names another original endpoint Runtime.', code)
+  }
   const grant = rpcRecord(input.resourceGrant, ['scope', 'bindingId'], code)
   if (grant.scope !== 'host-user' || grant.bindingId !== input.bindingId) invalid('The explicit resource grant must name this original execution binding.', code)
   const agent = rpcRecord(input.agent, agentFields, code)
@@ -62,12 +68,13 @@ export function parseAgentExecutionBinding(value: unknown): { bindingId: string 
 
 /** Metadata only. A diagnostic's original operation key is usable without native payload bytes. */
 export function parseAgentExecutionInspection(value: unknown, expected: { bindingId: string } & Partial<Pick<AgentExecutionInspection,
-  'agentHostId' | 'resourceHostId' | 'agentSessionId' | 'resourceWorkspacePath'>>): AgentExecutionInspection {
+  'agentHostId' | 'resourceHostId' | 'agentSessionId' | 'resourceWorkspacePath' | 'agentRoute' | 'resourceRoute'>>): AgentExecutionInspection {
   const code = 'CONTROL_PROTOCOL_ERROR'
-  const result = rpcRecord(value, ['bindingId', 'agentHostId', 'resourceHostId', 'agentSessionId', 'resourceWorkspacePath', 'state', 'diagnostic', 'diagnostics', 'notices', 'continuation', 'helperStarts'], code)
+  const result = rpcRecord(value, ['bindingId', 'agentHostId', 'resourceHostId', 'agentSessionId', 'resourceWorkspacePath', 'state', 'diagnostic', 'diagnostics', 'notices', 'continuation', 'helperStarts', 'agentRoute', 'resourceRoute'], code)
   for (const field of ['bindingId', 'agentHostId', 'resourceHostId', 'agentSessionId']) identity(result[field], code)
   workspace(result.resourceWorkspacePath, code)
-  for (const [field, original] of Object.entries(expected)) if (result[field] !== original) invalid('Execution observation belongs to another original binding.', code)
+  for (const field of ['agentRoute', 'resourceRoute']) if (result[field] !== undefined) parseAdoptedHostRoute(result[field])
+  for (const [field, original] of Object.entries(expected)) if (!isDeepStrictEqual(result[field], original)) invalid('Execution observation belongs to another original binding.', code)
   if (result.state !== 'connected' && result.state !== 'unavailable' || (result.state === 'connected') === (result.diagnostic !== undefined)) invalid('Execution observation has inconsistent service state.', code)
   if (result.notices !== undefined) parseAgentExecutionNotices(result.notices, {}, code)
   if (result.continuation !== undefined) {

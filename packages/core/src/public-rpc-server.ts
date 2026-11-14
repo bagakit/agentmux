@@ -139,6 +139,11 @@ export class AgentMuxControlServer {
     params: import('./public-rpc.js').AgentMuxRpcParams<M>, context: import('./public-rpc-service.js').AgentMuxRpcCallContext): Promise<import('./public-rpc.js').AgentMuxRpcResult<M>> {
     return await this.service.call(method, params, context)
   }
+  /** Borrow this original dispatcher reader; the caller owns only its subscription. */
+  async subscribeRpc<M extends import('./public-rpc.js').AgentMuxRpcStreamMethod>(method: M, params: Record<string, unknown>,
+    emit: (event: import('./public-rpc.js').AgentMuxRpcStreamEvent<M>) => void | Promise<void>, context: import('./public-rpc-service.js').AgentMuxRpcCallContext) {
+    return await this.service.subscribe(method, params, emit, context)
+  }
   get httpUnavailable(): AgentMuxError | null { return this.httpFailure }
   async start(): Promise<void> {
     if (this.started) return

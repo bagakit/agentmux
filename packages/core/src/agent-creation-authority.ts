@@ -4,6 +4,8 @@ import { link, lstat, mkdir, open, readFile, readdir, unlink } from 'node:fs/pro
 import { dirname, join } from 'node:path'
 import { AgentMuxError } from './errors.js'
 import { durableWriteFile } from './durable-write.js'
+import { parseHostRouteEnvelope, parseHostRouteCall, parseHostRouteExecutionAuthorization, type HostRouteExecutionAuthorization, type HostRouteEnvelope, type HostRouteIdentity, type HostRouteStatement, type HostRouteCall } from './host-route.js'
+import { assertExecutionChild, assertExecutionParent } from './host-route-execution.js'
 import { parseMessageProvenance, parseMessageReadAuthority, parseRecipientInboxReceipt, type AgentMuxMessageParticipant, type AgentMuxMessageProvenance, type AgentMuxMessageReadAuthority, type AgentMuxMessageTrust, type AgentMuxRecipientInboxReceipt } from './agent-message-federation.js'
 import { parseAgentMuxCreationAdmission, parseAgentMuxCreationOrigin, parseAgentMuxCreationTrust, parseAgentMuxCreationTrustInput,
   type AgentMuxCreationAdmission, type AgentMuxCreationAuthorityIdentity, type AgentMuxCreationOrigin,
@@ -75,6 +77,61 @@ async function publishFirst(path: string, value: unknown): Promise<void> {
   } finally { await unlink(temporary).catch(error => { if (!absent(error)) throw error }) }
 }
 
+function hostRouteEndorsementPayload(envelope: HostRouteEnvelope, index: number) {
+  return { schema: 'agentmux.host-route-endorsement.v1', purpose: 'host-route',
+    statementDigest: agentCreationIntentDigest(envelope.statement),
+    previousDigest: agentCreationIntentDigest({ statement: envelope.statement, signature: envelope.signature, endorsements: envelope.endorsements.slice(0, index) }),
+    index, from: index === 0 ? envelope.statement.route.source : envelope.statement.route.hops[index - 1]!.target,
+    target: envelope.statement.route.hops[index]!.target }
+}
+/** Verify the complete original statement and every narrowing hop before owner dispatch. */
+export function verifyHostRouteSignatures(value: HostRouteEnvelope, receiver: HostRouteIdentity): HostRouteEnvelope {
+  const envelope = parseHostRouteEnvelope(value), { statement } = envelope
+  const nodes = [statement.route.source, ...statement.route.hops.map(hop => hop.target)]
+  const keys = nodes.map(node => {
+    const key = publicKey(node.publicKey)
+    if (key.fingerprint !== node.fingerprint) failure('The adopted Runtime key fingerprint changed.', 'HOST_ROUTE_KEY_MISMATCH')
+    return key
+  })
+  const signature = (payload: unknown, text: string, index: number) => {
+    const bytes = Buffer.from(text, 'base64url')
+    if (bytes.toString('base64url') !== text || !verify(null, Buffer.from(agentCreationIntentDigest(payload)), keys[index]!.key, bytes))
+      failure('The exact original route signature is invalid.', 'HOST_ROUTE_SIGNATURE_INVALID')
+  }
+  const length = envelope.endorsements.length
+  if (!length || length >= nodes.length || agentCreationIntentDigest(nodes[length]) !== agentCreationIntentDigest(receiver) ||
+    (!statement.authorization && agentCreationIntentDigest(statement.actor.source) !== agentCreationIntentDigest(statement.route.source)))
+    failure('This route statement names another original actor, target or request.', 'HOST_ROUTE_TARGET_MISMATCH')
+  if (statement.authorization) verifyHostRouteExecutionAuthorization(statement.authorization)
+  signature(statement, envelope.signature, 0)
+  for (let index = 0; index < length; index++) {
+    const item = envelope.endorsements[index]!, payload = hostRouteEndorsementPayload(envelope, index)
+    if (item.index !== index || item.previousDigest !== payload.previousDigest)
+      failure('The original route endorsement chain changed.', 'HOST_ROUTE_SIGNATURE_INVALID')
+    signature(payload, item.signature, index)
+  }
+  return envelope
+}
+
+export function verifyHostRouteEnvelope(value: HostRouteEnvelope, call: HostRouteCall, receiver: HostRouteIdentity, stream: boolean): HostRouteEnvelope {
+  const envelope = verifyHostRouteSignatures(value, receiver)
+  parseHostRouteCall(call, stream)
+  if (envelope.statement.method !== call.method || envelope.statement.paramsDigest !== agentCreationIntentDigest(call.params))
+    failure('This route statement names another original request.', 'HOST_ROUTE_TARGET_MISMATCH')
+  assertExecutionChild(envelope.statement, call, stream)
+  return envelope
+}
+export function verifyHostRouteExecutionAuthorization(value: HostRouteExecutionAuthorization): HostRouteExecutionAuthorization {
+  const authorization = parseHostRouteExecutionAuthorization(value)
+  const { signature, ...payload } = authorization, key = publicKey(authorization.coordinator.publicKey), bytes = Buffer.from(signature, 'base64url')
+  if (key.fingerprint !== authorization.coordinator.fingerprint || bytes.toString('base64url') !== signature ||
+    !verify(null, Buffer.from(agentCreationIntentDigest(payload)), key.key, bytes))
+    failure('The original execution admission signature is invalid.', 'HOST_ROUTE_SIGNATURE_INVALID')
+  if (authorization.parent) verifyHostRouteSignatures(authorization.parent, authorization.coordinator)
+  assertExecutionParent(authorization)
+  return authorization
+}
+
 /** One Runtime's lazy signing identity and explicit immutable source pins; no message queue lives here. */
 export class AgentMuxCreationAuthority {
   private readonly identityPath: string
@@ -116,6 +173,39 @@ export class AgentMuxCreationAuthority {
     } catch (error) { return failure('The original Agent creation identity cannot be verified. Its file was retained; restore that identity before creating a new attestation.', 'AGENT_CREATION_AUTHORITY_INVALID', error) }
   }
   async identity(): Promise<AgentMuxCreationAuthorityIdentity> { return (await this.loadIdentity()).identity }
+  /** One exact routed call purpose, independent from creation/message trust. */
+  async attestHostRoute(statement: HostRouteStatement): Promise<HostRouteEnvelope> {
+    const { identity, privateKey } = await this.loadIdentity()
+    const envelope = parseHostRouteEnvelope({ statement, signature: 'unsigned', endorsements: [] })
+    if (agentCreationIntentDigest(identity) !== agentCreationIntentDigest(envelope.statement.route.source) ||
+      (!envelope.statement.authorization && agentCreationIntentDigest(identity) !== agentCreationIntentDigest(envelope.statement.actor.source)))
+      return failure('A route source must be this actual ingress Core identity.', 'HOST_ROUTE_SOURCE_MISMATCH')
+    if (envelope.statement.authorization) {
+      const authorization = verifyHostRouteExecutionAuthorization(envelope.statement.authorization)
+      if (agentCreationIntentDigest(authorization.coordinator) !== agentCreationIntentDigest(identity)) return failure('Only the original admission owner can sign this child.', 'HOST_ROUTE_SOURCE_MISMATCH')
+    }
+    envelope.signature = sign(null, Buffer.from(agentCreationIntentDigest(envelope.statement)), privateKey).toString('base64url')
+    return envelope
+  }
+  /** Fixed-purpose assertion from the original admission, not a public signer. */
+  async attestHostRouteExecution(value: Omit<HostRouteExecutionAuthorization, 'signature' | 'coordinator'>): Promise<HostRouteExecutionAuthorization> {
+    const { identity, privateKey } = await this.loadIdentity()
+    const authorization = parseHostRouteExecutionAuthorization({ ...value, coordinator: identity, signature: 'unsigned' })
+    if (authorization.parent) verifyHostRouteSignatures(authorization.parent, identity)
+    assertExecutionParent(authorization)
+    const { signature: _unsigned, ...payload } = authorization
+    return { ...authorization, signature: sign(null, Buffer.from(agentCreationIntentDigest(payload)), privateKey).toString('base64url') }
+  }
+  /** Append only this Core's next exact configured hop; never sign arbitrary bytes. */
+  async endorseHostRoute(value: HostRouteEnvelope): Promise<HostRouteEnvelope> {
+    const { identity, privateKey } = await this.loadIdentity(), envelope = parseHostRouteEnvelope(value)
+    const index = envelope.endorsements.length, from = index === 0 ? envelope.statement.route.source : envelope.statement.route.hops[index - 1]?.target
+    if (!from || agentCreationIntentDigest(from) !== agentCreationIntentDigest(identity) || !envelope.statement.route.hops[index])
+      return failure('This Core is not the next adopted delegator.', 'HOST_ROUTE_SOURCE_MISMATCH')
+    const payload = hostRouteEndorsementPayload(envelope, index)
+    return { ...envelope, endorsements: [...envelope.endorsements, { index, previousDigest: payload.previousDigest,
+      signature: sign(null, Buffer.from(agentCreationIntentDigest(payload)), privateKey).toString('base64url') }] }
+  }
   private trustPath(sourceRuntimeId: string): string { return join(this.trustDirectory, hash(sourceRuntimeId) + '.json') }
   private async readTrust(path: string): Promise<AgentMuxCreationTrust> {
     try {

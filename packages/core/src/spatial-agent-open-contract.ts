@@ -68,16 +68,30 @@ export function isBackgroundLocalAgentOpen(request: { operation: string; content
       !request.destination || typeof request.destination !== 'object') return false
   const content = request.content as Record<string, unknown>, destination = request.destination as Record<string, unknown>
   return !graph?.zones.some(zone => zone.zoneId === destination.zoneId && zone.hostId && zone.hostId !== 'local') &&
-    content.kind === 'new-agent' && content.executionWorkspaceId === undefined && content.toolWorkspaceId === undefined && content.nativeResumeSource === undefined &&
+    content.kind === 'new-agent' && content.agentTarget === undefined && content.executionWorkspaceId === undefined && content.toolWorkspaceId === undefined && content.nativeResumeSource === undefined &&
     typeof destination.spaceId === 'string' && typeof destination.zoneId === 'string' && destination.newZone === undefined && destination.split === undefined &&
     destination.displayWorkspaceId === undefined && destination.groupId === undefined &&
     (destination.newTab === true && destination.tabId === undefined && destination.regionId === undefined ||
       destination.newTab === undefined && typeof destination.tabId === 'string' && typeof destination.regionId === 'string')
 }
+/** An explicit target stays at the Space's headless owner, never a focused Desktop.
+ * Target identity is validated again by its original execution owner before admission. */
+export function isHeadlessSpatialAgentOpen(request: { operation: string; content?: unknown; destination?: unknown; focus?: unknown }, graph?: Pick<AgentMuxSpatialGraph, 'zones'> | null): request is
+  Omit<AgentMuxSpatialAgentOpenRequest, 'content'> & { content: Extract<AgentMuxSpatialAgentOpenRequest['content'], { kind: 'new-agent' }> } {
+  if (isBackgroundLocalAgentOpen(request, graph)) return true
+  if (!request.content || typeof request.content !== 'object' || !('agentTarget' in request.content)) return false
+  // The original local predicate owns destination eligibility; only the explicit
+  // execution choice differs. This does not claim that a foreign resource is local.
+  const { agentTarget, ...content } = request.content as Record<string, unknown>
+  return !!agentTarget && isBackgroundLocalAgentOpen({ ...request, content }, graph)
+}
 /** Spatial intent only. Creation, input and Run facts remain with the original Core Session. */
 export type AgentMuxSpatialAgentOpenRecord = {
   requestId: string; digest: string; agentSessionId: string; executorId: string; address: AgentMuxSpaceAddress
-  execution: { hostId: string; workspacePath: string; workspaceId: string }
+  execution: { hostId: string; workspacePath: string; workspaceId: string | null; runtimeId?: string; executorRevision?: string; adoptedRoute?: import('./host-route.js').AdoptedHostRoute }
+  /** Source-owned resource/placement; an execution home is never its substitute. */
+  placement?: { runtimeId: string; hostId: string; workspacePath: string; workspaceId: string }
+  executionBinding?: import('./agent-execution-contract.js').AgentExecutionReference
   moteMain?: MoteMainCreationIntent
   /** Dispatch markers only. Actual outcomes are read from the original source and Files owners. */
   moteMainFollowUps?: { sourceStarted?: true; bindStarted?: true; bindingReceipt?: MoteMainBindingReceipt; refusedBeforeBinding?: MoteMainBaseline; bindingObserved?: MoteMainBindingObservation; deferredInputObserved?:'admitted'|'terminal-confirmed'|'not-applied'; deferredInputKey?: Extract<import('./agent-prompt-condition.js').AgentPromptInputKey,{kind:'prompt'}>; handoverInputKey?: Extract<import('./agent-prompt-condition.js').AgentPromptInputKey,{kind:'prompt'}> }
@@ -161,6 +175,12 @@ export function spatialAgentOpenRecord(graph: AgentMuxSpatialGraph, requestId: s
   if (original.requestId !== requestId || typeof original.digest !== 'string' || typeof original.agentSessionId !== 'string' ||
       !original.address || !original.execution || typeof original.execution.hostId !== 'string' || typeof original.execution.workspacePath !== 'string') throw new AgentMuxError(
     'The exact spatial creation association is unconfirmed. Keep its Session and original request.', 'SPATIAL_CREATION_UNCONFIRMED')
+  if (original.placement && (typeof original.placement.runtimeId !== 'string' || !original.placement.runtimeId || typeof original.placement.hostId !== 'string' || !original.placement.hostId ||
+      typeof original.placement.workspaceId !== 'string' || !original.placement.workspaceId || typeof original.placement.workspacePath !== 'string' ||
+      !original.placement.workspacePath || !original.execution.runtimeId || !original.execution.executorRevision) ||
+      original.executionBinding && (original.executionBinding.agentSessionId !== original.agentSessionId ||
+        original.executionBinding.createOperationId !== original.requestId || !original.executionBinding.bindingId)) throw new AgentMuxError(
+    'The original split execution reference is unconfirmed. Keep its Session, placement and operation.', 'SPATIAL_CREATION_UNCONFIRMED')
   if (original.moteMain) parseMoteMainCreationIntent(original.moteMain, 'CONTROL_PROTOCOL_ERROR')
   if (original.moteMainFollowUps && Object.entries(original.moteMainFollowUps).some(([key,value]) => !['sourceStarted','bindStarted','bindingReceipt','refusedBeforeBinding','bindingObserved','deferredInputKey','handoverInputKey','deferredInputObserved'].includes(key) || !['bindingReceipt','refusedBeforeBinding','bindingObserved','deferredInputKey','handoverInputKey','deferredInputObserved'].includes(key) && value !== true))
     throw new AgentMuxError('The original Main follow-up admission is unreadable.', 'SPATIAL_CREATION_UNCONFIRMED')

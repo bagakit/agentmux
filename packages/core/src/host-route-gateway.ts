@@ -1,0 +1,339 @@
+import { join } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { isDeepStrictEqual } from 'node:util'
+import { AgentMuxError } from './errors.js'
+import { durableWriteFile } from './durable-write.js'
+import { agentCreationIntentDigest as digest, verifyHostRouteEnvelope, verifyHostRouteExecutionAuthorization, type AgentMuxCreationAuthority } from './agent-creation-authority.js'
+import { parseHostRouteConfiguration, parseHostRouteCall, parseHostRouteEnvelope, hostRouteScope,
+  type AdoptedHostRoute, type HostRouteActor, type HostRouteCall, type HostRouteEnvelope, type HostRouteSettings,
+  type HostRouteObservationScope, type HostRouteExecutionAuthorization, type HostRouteStatement, type HostRouteParams, type HostRouteObservation, type HostRouteIdentity, type HostRouteStreamInitial, type HostRouteConfiguration } from './host-route.js'
+import { hostRouteOperation, executionRouteScope, memberRouteOperation, assertExecutionChild } from './host-route-execution.js'
+import { parseSpaceMemberParams } from './space-member-codec.js'
+import type { SpaceMemberParams } from './space-member.js'
+import type { AgentExecutionOpenInput } from './agent-execution-coordinator.js'
+import { rpcRecord, rpcString } from './rpc-data.js'
+import type { AgentMuxRpcCallContext, AgentMuxRpcServiceSubscription } from './public-rpc-service.js'
+import type { AgentMuxRpcMethod, AgentMuxRpcParams, AgentMuxRpcResult, AgentMuxRpcStreamMethod, AgentMuxRpcStreamEvent } from './public-rpc.js'
+
+type Delegation = { envelope: HostRouteEnvelope; actor: HostRouteActor; call: HostRouteCall; stream: boolean; assertCurrent(): Promise<void> }
+const verified = new WeakMap<object, Delegation>()
+/** Opaque in-process proof; only a signature/policy-verified gateway can construct one. */
+export type VerifiedHostRouteDelegation = object & { readonly __hostRouteDelegation: unique symbol }
+export function delegatedHostRouteActor(context: AgentMuxRpcCallContext): HostRouteActor | undefined {
+  if (!context.routeDelegation) return undefined
+  const authority = verified.get(context.routeDelegation)
+  if (!authority) throw new AgentMuxError('Unverified in-process route authority.', 'HOST_ROUTE_AUTHORITY_INVALID')
+  return authority.actor
+}
+export async function assertHostRouteDispatch(context: AgentMuxRpcCallContext, method: string, params: unknown, stream: boolean): Promise<void> {
+  if (!context.routeDelegation) return
+  const authority = verified.get(context.routeDelegation)
+  if (!authority || authority.stream !== stream || authority.call.method !== method || !isDeepStrictEqual(authority.call.params, params))
+    throw new AgentMuxError('Delegation cannot authorize a different original method or input.', 'HOST_ROUTE_AUTHORITY_INVALID')
+  await authority.assertCurrent()
+}
+export function hostRouteActorScope(context: AgentMuxRpcCallContext): string | undefined {
+  const actor = delegatedHostRouteActor(context)
+  if (!actor) return undefined
+  const authorization = verified.get(context.routeDelegation!)!.envelope.statement.authorization
+  // A narrower child cannot reuse its actor's broader consumer namespace.
+  // Keep the original stable scope across calls, without a per-call lease Store.
+  let scope = authorization?.scope
+  if (scope?.kind === 'member-control') {
+    const { method: _method, paramsDigest: _paramsDigest, ...member } = scope.operation
+    return digest({ actor, coordinator: authorization!.coordinator, scope: { kind: scope.kind, member, createOperationId: scope.createOperationId } })
+  }
+  return authorization ? digest({ actor, coordinator: authorization.coordinator, scope }) : digest(actor)
+}
+
+export type HostRouteExecutionAccess = { authorization: HostRouteExecutionAuthorization; helper?: () => HostRouteStatement['helper'] } | { context: AgentMuxRpcCallContext; call: HostRouteCall } | { context: AgentMuxRpcCallContext; observation: HostRouteObservationScope }
+
+export type HostRouteTransport = {
+  identity(signal?: AbortSignal): Promise<HostRouteIdentity>
+  call(method: 'route.receive', params: HostRouteParams['route.receive'], signal: AbortSignal): Promise<{ value: unknown; observation: HostRouteObservation }>
+  watch(params: HostRouteParams['route.receive-watch'], emit: (event: unknown) => void | Promise<void>, signal: AbortSignal): Promise<{
+    initial: HostRouteStreamInitial; start?(): void | Promise<void>; dispose(): void | Promise<void>
+  }>
+}
+type State = HostRouteConfiguration & { schema: 'agentmux.host-route-settings.v1'; runtimeId: string; revision: string;
+  operation: { operationId: string; inputDigest: string } | null }
+type PolicyIndex = { routes: Map<string, AdoptedHostRoute>; chains: Set<string>; grants: Set<string> }
+const grantKey = (delegator: HostRouteIdentity, actor: HostRouteActor, destination: HostRouteIdentity, scope: string) => digest([delegator, actor, destination, scope])
+const policyIndex = (state: HostRouteConfiguration): PolicyIndex => ({ routes: new Map(state.routes.map(item => [item.id, item.route])), chains: new Set(state.routes.map(item => digest(item.route))),
+  grants: new Set(state.grants.flatMap(item => item.scopes.map(scope => grantKey(item.delegator, item.actor, item.destination, scope)))) })
+type Active = { controller: AbortController; check(policy?: PolicyIndex): void }
+export type HostRouteGatewayOptions = {
+  stateDirectory: string
+  authority: AgentMuxCreationAuthority
+  /** Borrow exact configured edge transports, never caller-provided endpoints. */
+  edge(edgeId: string): HostRouteTransport | Promise<HostRouteTransport>
+  call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>>
+  subscribe<M extends AgentMuxRpcStreamMethod>(method: M, params: Record<string, unknown>, emit: (event: AgentMuxRpcStreamEvent<M>) => void | Promise<void>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcServiceSubscription<M>>
+}
+function denied(message: string, code = 'HOST_ROUTE_NOT_DELEGATED'): never { throw new AgentMuxError(message, code) }
+
+/** One Runtime's explicit route policy and related readers; no execution/replay journal. */
+export class HostRouteGateway {
+  private statePromise: Promise<State> | undefined
+  private tail: Promise<unknown> = Promise.resolve()
+  private readonly active = new Set<Active>()
+  private policy: PolicyIndex = { routes: new Map(), chains: new Set(), grants: new Set() }
+  private disposed = false
+  constructor(private readonly options: HostRouteGatewayOptions) {}
+  private state(): Promise<State> {
+    return this.statePromise ??= (async () => {
+      let state: State
+      try {
+        const p = rpcRecord(JSON.parse(await readFile(join(this.options.stateDirectory, 'host-route-settings.json'), 'utf8')),
+          ['schema', 'runtimeId', 'revision', 'operation', 'routes', 'grants'])
+        if (p.schema !== 'agentmux.host-route-settings.v1' || p.runtimeId !== this.options.authority.runtimeId) denied('The original route policy belongs to another Core.', 'HOST_ROUTE_POLICY_UNCONFIRMED')
+        const operation = p.operation === null ? null : rpcRecord(p.operation, ['operationId', 'inputDigest'])
+        state = { schema: p.schema as State['schema'], runtimeId: p.runtimeId as string, revision: rpcString(p.revision, 'Original route revision'),
+          operation: operation ? { operationId: rpcString(operation.operationId, 'Original save operation'), inputDigest: rpcString(operation.inputDigest, 'Original save digest') } : null,
+          ...parseHostRouteConfiguration({ routes: p.routes, grants: p.grants }) }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        state = { schema: 'agentmux.host-route-settings.v1', runtimeId: this.options.authority.runtimeId,
+          revision: digest({ runtimeId: this.options.authority.runtimeId, routes: [], grants: [] }), operation: null, routes: [], grants: [] }
+      }
+      this.index(state); return state
+    })().catch(error => { this.statePromise = undefined; throw error })
+  }
+  private index(state: State) {
+    this.policy = policyIndex(state)
+  }
+  async identity(): Promise<HostRouteIdentity> { return await this.options.authority.identity() }
+  async inspect(): Promise<HostRouteSettings> {
+    const state = await this.state()
+    return structuredClone({ identity: await this.identity(), revision: state.revision, operation: state.operation, routes: state.routes, grants: state.grants })
+  }
+  async configuredRoute(routeId: string): Promise<AdoptedHostRoute | undefined> {
+    await this.state(); const route = this.policy.routes.get(routeId); return route ? structuredClone(route) : undefined
+  }
+  async configure(input: HostRouteParams['route.configure'], context: AgentMuxRpcCallContext): Promise<{ settings: HostRouteSettings; diskDurability: 'confirmed' }> {
+    this.originalUser(context)
+    const work = this.tail.then(async () => {
+      context.signal?.throwIfAborted(); await context.assertCurrent?.()
+      const current = await this.state(), configuration = parseHostRouteConfiguration(input.configuration)
+      const identity = await this.identity(), inputDigest = digest(input)
+      if (current.operation?.operationId === input.operationId) {
+        if (current.operation.inputDigest !== inputDigest) denied('This original policy operation has another input.', 'HOST_ROUTE_OPERATION_CHANGED')
+        // A readback is not a replacement for the original durable write ACK.
+        denied('This save is already observed. Inspect its original revision; do not replay it.', 'HOST_ROUTE_SAVE_ALREADY_OBSERVED')
+      }
+      if (current.revision !== input.expectedRevision) denied('Route policy changed. Read the same original owner and preserve both edits.', 'HOST_ROUTE_POLICY_CHANGED')
+      if (configuration.routes.some(item => !isDeepStrictEqual(item.route.source, identity))) denied('An outgoing route must originate at this actual Core.', 'HOST_ROUTE_SOURCE_MISMATCH')
+      const state: State = { schema: current.schema, runtimeId: current.runtimeId, revision: digest({ previous: current.revision, operationId: input.operationId, configuration }),
+        operation: { operationId: input.operationId, inputDigest }, ...configuration }
+      await context.assertCurrent?.(); context.signal?.throwIfAborted()
+      try { await durableWriteFile(join(this.options.stateDirectory, 'host-route-settings.json'), JSON.stringify(state) + '\n', { mode: 0o600, requireDirectorySync: true }) }
+      catch (error) {
+        this.statePromise = undefined
+        const failure = new AgentMuxError('The original route policy save is unconfirmed. Retain this operation and inspect the same owner; no execution was replayed.', 'HOST_ROUTE_POLICY_SAVE_UNCONFIRMED')
+        Object.defineProperty(failure, 'cause', { value: error })
+        const proposed = policyIndex(configuration)
+        for (const item of this.active) { try { item.check(proposed) } catch { item.controller.abort(failure) } }
+        throw failure
+      }
+      this.statePromise = Promise.resolve(state); this.index(state)
+      for (const item of this.active) { try { item.check() } catch (error) { item.controller.abort(error) } }
+      return { settings: await this.inspect(), diskDurability: 'confirmed' as const }
+    })
+    this.tail = work.catch(() => {}); return await work
+  }
+  private originalUser(context: AgentMuxRpcCallContext) {
+    if (context.caller || context.routeDelegation || !context.principal || !['user', 'device'].includes(context.principal.kind))
+      denied('Only the actual original user/device can configure policy or enter a new source route. Managed callers keep their original capabilities.', 'HOST_ROUTE_ACTOR_REQUIRED')
+    return context.principal!
+  }
+  private activeContext(context: AgentMuxRpcCallContext, check: (policy?: PolicyIndex) => void): { signal: AbortSignal; current(): Promise<void>; dispose(): void } {
+    let closed = false
+    const controller = new AbortController(), item: Active = { controller, check }
+    const abort = () => controller.abort(context.signal?.reason)
+    context.signal?.addEventListener('abort', abort, { once: true }); if (context.signal?.aborted) abort()
+    this.active.add(item)
+    return { signal: controller.signal, current: async () => {
+      controller.signal.throwIfAborted(); if (closed || this.disposed) denied('This exact route reader is closed.', 'HOST_ROUTE_READER_CLOSED')
+      await context.assertCurrent?.(); check(); controller.signal.throwIfAborted()
+    }, dispose: () => { closed = true; context.signal?.removeEventListener('abort', abort); this.active.delete(item) } }
+  }
+  private async source(input: HostRouteParams['route.call'], context: AgentMuxRpcCallContext, stream: boolean) {
+    const principal = this.originalUser(context), route = await this.configuredRoute(input.routeId)
+    if (!route) denied('The exact original configured route is absent. Existing bindings and Runs are retained.', 'HOST_ROUTE_UNKNOWN')
+    if (!isDeepStrictEqual(route, input.adoptedRoute)) denied('The configured route differs from this original adopted chain. No call was rerouted.', 'HOST_ROUTE_CHANGED')
+    const call = parseHostRouteCall(input.call, stream), identity = await this.identity()
+    if (!isDeepStrictEqual(route.source, identity)) denied('The saved source key changed; retain the original route and identity.', 'HOST_ROUTE_SOURCE_MISMATCH')
+    const actor: HostRouteActor = { source: identity, kind: principal.kind, id: principal.id }
+    const authority = this.activeContext(context, (policy = this.policy) => {
+      if (!isDeepStrictEqual(policy.routes.get(input.routeId), route)) denied('The original route was changed or removed.', 'HOST_ROUTE_CHANGED')
+    })
+    try {
+      await authority.current()
+      const envelope = await this.options.authority.attestHostRoute({ schema: 'agentmux.host-route.v1', purpose: 'host-route', route, actor,
+        requestId: input.requestId, method: call.method, paramsDigest: digest(call.params),
+        ...(hostRouteOperation(call) ? { operation: hostRouteOperation(call)! } : {}) })
+      return { envelope, call, authority }
+    } catch (error) { authority.dispose(); throw error }
+  }
+  private async origin(context: AgentMuxRpcCallContext): Promise<{ actor: HostRouteActor; parent?: HostRouteEnvelope }> {
+    if (context.routeDelegation) {
+      const authority = verified.get(context.routeDelegation)
+      if (!authority) denied('Unverified original admission authority.', 'HOST_ROUTE_AUTHORITY_INVALID')
+      await authority.assertCurrent()
+      if (authority.envelope.statement.authorization) denied('A derived child cannot mint a different admission.', 'HOST_ROUTE_DERIVATION_MISMATCH')
+      return { actor: structuredClone(authority.actor), parent: structuredClone(authority.envelope) }
+    }
+    const principal = this.originalUser(context)
+    context.signal?.throwIfAborted(); await context.assertCurrent?.()
+    return { actor: { source: await this.identity(), kind: principal.kind, id: principal.id } }
+  }
+  /** Called by the original binding owner, before its immutable admission is saved. */
+  async authorizeExecution(input: AgentExecutionOpenInput, context: AgentMuxRpcCallContext): Promise<HostRouteExecutionAuthorization> {
+    return await this.options.authority.attestHostRouteExecution({ schema: 'agentmux.host-route-execution.v1', purpose: 'host-route-execution',
+      ...await this.origin(context), scope: executionRouteScope(input) })
+  }
+  async retainExecution(input: AgentExecutionOpenInput, context: AgentMuxRpcCallContext | undefined,
+    retained: HostRouteExecutionAuthorization | undefined, existing: boolean): Promise<HostRouteExecutionAuthorization | undefined> {
+    // An inbound A parent cannot turn B's saved SSH account into an implicit
+    // grant on a foreign Core. A direct real B user keeps its existing owner path.
+    const delegated = !!context?.routeDelegation || !!retained?.parent
+    if (delegated) for (const [runtimeId, route] of [[input.agentRuntimeId, input.agentRoute], [input.resourceRuntimeId, input.resourceRoute]] as const) {
+      if (runtimeId !== this.options.authority.runtimeId && !route) denied('The foreign endpoint has no adopted delegation for this original actor. Keep the original request and choose its explicitly approved route.', 'HOST_ROUTE_AUTHORIZATION_REQUIRED')
+    }
+    if (!input.agentRoute && !input.resourceRoute && !delegated && !retained) return undefined
+    if (retained) {
+      const original = verifyHostRouteExecutionAuthorization(retained)
+      if (!isDeepStrictEqual(original.coordinator, await this.identity()) || !isDeepStrictEqual(original.scope, executionRouteScope(input))) denied('The original route admission no longer matches this frozen binding.', 'HOST_ROUTE_DERIVATION_MISMATCH')
+      if (context) {
+        const current = await this.origin(context)
+        // A real local owner may explicitly inspect/continue its own admission.
+        // Another routed viewer cannot borrow the creator's input authorization.
+        if (context.routeDelegation && !isDeepStrictEqual(current.actor, original.actor)) denied('Another original actor cannot continue this admitted creation.', 'HOST_ROUTE_ACTOR_REQUIRED')
+      }
+      return original
+    }
+    if (existing || !context) denied('The original route admission is unconfirmed. Keep its original binding; no new origin was invented.', 'HOST_ROUTE_AUTHORITY_INVALID')
+    return await this.authorizeExecution(input, context)
+  }
+  /** Original pre-admission metadata only; the caller must still carry the same exact parent. */
+  async authorizePreparation(targetRuntimeId: string, context: AgentMuxRpcCallContext, originalCall?: HostRouteCall): Promise<HostRouteExecutionAuthorization> {
+    const origin = await this.origin(context)
+    const call = context.routeDelegation ? verified.get(context.routeDelegation)!.call : originalCall
+    const operation = call ? hostRouteOperation(call) : undefined
+    if (!operation || operation.kind !== 'spatial' && operation.kind !== 'execution') denied('Preparation needs the same original typed creation and target.', 'HOST_ROUTE_DERIVATION_MISMATCH')
+    const target = operation.kind === 'spatial' ? operation.targetRuntimeId : operation.agentRuntimeId
+    if (target !== targetRuntimeId) denied('Preparation names another original Agent target.', 'HOST_ROUTE_TARGET_MISMATCH')
+    return await this.options.authority.attestHostRouteExecution({ schema: 'agentmux.host-route-execution.v1', purpose: 'host-route-execution', ...origin,
+      scope: { kind: 'preparation', targetRuntimeId, createOperationId: operation.createOperationId, executorId: operation.executorId } })
+  }
+  /** Original Space/admission read owner supplies only its confirmed members.
+   * This uses the current viewer's read parent, never a creator's frozen input grant. */
+  async authorizeObservation(scope: HostRouteObservationScope, context: AgentMuxRpcCallContext): Promise<HostRouteExecutionAuthorization> {
+    return await this.options.authority.attestHostRouteExecution({ schema: 'agentmux.host-route-execution.v1', purpose: 'host-route-execution',
+      ...await this.origin(context), scope })
+  }
+  /** The original Space owner has already checked this exact member/admission.
+   * It signs one current viewer action, never a creator's retained input grant. */
+  async authorizeMemberControl(input: SpaceMemberParams[keyof SpaceMemberParams] & { createOperationId: string }, context: AgentMuxRpcCallContext): Promise<HostRouteExecutionAuthorization> {
+    const identity = await this.identity(), stream = input.call.method === 'runtime.events' || input.call.method === 'runtime.attachment-watch' || input.call.method === 'runtime.replay-watch'
+    const parsed = parseSpaceMemberParams(stream ? 'space.member.watch' : 'space.member.call', { target: input.target, call: input.call })
+    if (parsed.target.reference.runtimeId !== identity.runtimeId) denied('This Core does not own the original member Space.', 'HOST_ROUTE_TARGET_MISMATCH')
+    return await this.options.authority.attestHostRouteExecution({ schema: 'agentmux.host-route-execution.v1', purpose: 'host-route-execution', ...await this.origin(context),
+      scope: { kind: 'member-control', operation: memberRouteOperation(parsed), createOperationId: rpcString(input.createOperationId, 'Original member creation operation') } })
+  }
+  /** Internal typed child port. No RPC accepts an authorization or actor from business JSON. */
+  private async derived(input: HostRouteParams['route.call'], context: AgentMuxRpcCallContext, stream: boolean,
+    derived: { authorization: HostRouteExecutionAuthorization; helper?: HostRouteStatement['helper']; preparationSessionId?: string }) {
+    await this.state()
+    const authorization = verifyHostRouteExecutionAuthorization(derived.authorization), route = input.adoptedRoute, identity = await this.identity()
+    if (!isDeepStrictEqual(authorization.coordinator, identity) || !isDeepStrictEqual(route.source, identity)) denied('Only the original admission Core can issue this child.', 'HOST_ROUTE_SOURCE_MISMATCH')
+    const selector = digest(route), call = parseHostRouteCall(input.call, stream)
+    const authority = this.activeContext(context, (policy = this.policy) => {
+      if (!policy.chains.has(selector)) denied('The original adopted route is no longer configured. Original bindings and Runs remain retained.', 'HOST_ROUTE_CHANGED')
+    })
+    try {
+      await authority.current()
+      const statement: HostRouteStatement = { schema: 'agentmux.host-route.v1', purpose: 'host-route', route, actor: authorization.actor,
+        requestId: input.requestId, method: call.method, paramsDigest: digest(call.params), authorization,
+        ...(derived.helper ? { helper: structuredClone(derived.helper) } : {}), ...(derived.preparationSessionId ? { preparationSessionId: derived.preparationSessionId } : {}) }
+      assertExecutionChild(statement, call, stream)
+      return { envelope: await this.options.authority.attestHostRoute(statement), call, authority }
+    } catch (error) { authority.dispose(); throw error }
+  }
+  private async receiving(input: HostRouteParams['route.receive'], context: AgentMuxRpcCallContext, stream: boolean) {
+    if (context.caller || !context.principal) denied('A managed caller cannot wrap itself in an approved transport account.', 'HOST_ROUTE_ACTOR_REQUIRED')
+    await this.state()
+    const call = parseHostRouteCall(input.call, stream), envelope = verifyHostRouteEnvelope(parseHostRouteEnvelope(input.envelope), call, await this.identity(), stream)
+    const { statement } = envelope, index = envelope.endorsements.length
+    const delegator = index === 1 ? statement.route.source : statement.route.hops[index - 2]!.target
+    const destination = statement.route.hops.at(-1)!.target, scope = hostRouteScope(call, stream)
+    const selector = grantKey(delegator, statement.actor, destination, scope)
+    if (!this.policy.grants.has(selector)) denied('This receiving Core has not delegated this original actor, destination and finite method. Existing Agent capabilities remain available.')
+    const authority = this.activeContext(context, (policy = this.policy) => {
+      if (!policy.grants.has(selector)) denied('This original receiver grant was changed or revoked.')
+    })
+    try { await authority.current(); return { envelope, call, authority } }
+    catch (error) { authority.dispose(); throw error }
+  }
+  private observation(envelope: HostRouteEnvelope): HostRouteObservation {
+    return { route: structuredClone(envelope.statement.route), actor: structuredClone(envelope.statement.actor), requestId: envelope.statement.requestId,
+      logicalHops: envelope.statement.route.hops.length, observedAt: Date.now(), complete: true }
+  }
+  private async next(envelope: HostRouteEnvelope, authority: { signal: AbortSignal; current(): Promise<void> }) {
+    await authority.current()
+    const hop = envelope.statement.route.hops[envelope.endorsements.length]!, edge = await this.options.edge(hop.edgeId)
+    await authority.current()
+    // The original receiver verifies its exact adopted identity before dispatch.
+    // An independent metadata probe cannot gate this authenticated business call.
+    return { edge, envelope: await this.options.authority.endorseHostRoute(envelope) }
+  }
+  async call(input: HostRouteParams['route.call'] | HostRouteParams['route.receive'], context: AgentMuxRpcCallContext, receive = false, derived?: { authorization: HostRouteExecutionAuthorization; helper?: HostRouteStatement['helper']; preparationSessionId?: string }) {
+    const value = receive ? await this.receiving(input as HostRouteParams['route.receive'], context, false) : derived ? await this.derived(input as HostRouteParams['route.call'], context, false, derived) : await this.source(input as HostRouteParams['route.call'], context, false)
+    try {
+      if (value.envelope.endorsements.length < value.envelope.statement.route.hops.length) {
+        const next = await this.next(value.envelope, value.authority)
+        return await next.edge.call('route.receive', { envelope: next.envelope, call: value.call }, value.authority.signal)
+      }
+      const token = {} as VerifiedHostRouteDelegation
+      verified.set(token, { envelope: value.envelope, actor: value.envelope.statement.actor, call: value.call, stream: false, assertCurrent: value.authority.current })
+      const result = await this.options.call(value.call.method as AgentMuxRpcMethod, value.call.params as AgentMuxRpcParams<AgentMuxRpcMethod>,
+        { ...context, signal: value.authority.signal, assertCurrent: value.authority.current, routeDelegation: token })
+      return { value: result, observation: this.observation(value.envelope) }
+    } finally { value.authority.dispose() }
+  }
+  async watch(input: HostRouteParams['route.watch'] | HostRouteParams['route.receive-watch'], emit: (event: unknown) => void | Promise<void>, context: AgentMuxRpcCallContext, receive = false, derived?: { authorization: HostRouteExecutionAuthorization; helper?: HostRouteStatement['helper']; preparationSessionId?: string }) {
+    const value = receive ? await this.receiving(input as HostRouteParams['route.receive-watch'], context, true) : derived ? await this.derived(input as HostRouteParams['route.watch'], context, true, derived) : await this.source(input as HostRouteParams['route.watch'], context, true)
+    try {
+      const relay = async (event: unknown) => { await value.authority.current(); await emit(event) }
+      let subscription: { initial: HostRouteStreamInitial; start?(): void | Promise<void>; dispose(): void | Promise<void> }
+      if (value.envelope.endorsements.length < value.envelope.statement.route.hops.length) {
+        const next = await this.next(value.envelope, value.authority)
+        subscription = await next.edge.watch({ envelope: next.envelope, call: value.call }, relay, value.authority.signal)
+      } else {
+        const token = {} as VerifiedHostRouteDelegation
+        verified.set(token, { envelope: value.envelope, actor: value.envelope.statement.actor, call: value.call, stream: true, assertCurrent: value.authority.current })
+        const original = await this.options.subscribe(value.call.method as AgentMuxRpcStreamMethod, value.call.params,
+          event => relay(event), { ...context, signal: value.authority.signal, assertCurrent: value.authority.current, routeDelegation: token })
+        subscription = { ...original, initial: { value: original.initial, observation: this.observation(value.envelope) } }
+      }
+      let closed = false
+      const abort = () => {
+        if (closed) return; closed = true
+        const reason = value.authority.signal.reason
+        void Promise.resolve().then(async () => {
+          if (!context.signal?.aborted) await emit({ type: 'error', error: {
+            code: reason instanceof AgentMuxError ? reason.code : 'HOST_ROUTE_READER_UNAVAILABLE',
+            message: reason instanceof Error ? reason.message : 'The original route reader is unavailable. Keep its original cursor and operation.',
+          } })
+        }).finally(async () => { try { await subscription.dispose() } finally { value.authority.dispose() } }).catch(() => {})
+      }
+      value.authority.signal.addEventListener('abort', abort, { once: true }); if (value.authority.signal.aborted) abort()
+      return { initial: subscription.initial, ...(subscription.start ? { start: () => subscription.start!() } : {}), dispose: async () => {
+        closed = true
+        value.authority.signal.removeEventListener('abort', abort)
+        try { await subscription.dispose() } finally { value.authority.dispose() }
+      } }
+    } catch (error) { value.authority.dispose(); throw error }
+  }
+  dispose(): void { this.disposed = true; for (const item of this.active) item.controller.abort(new AgentMuxError('The original route reader is closed; durable operations remain retained.', 'HOST_ROUTE_READER_CLOSED')); this.active.clear() }
+}
