@@ -194,18 +194,7 @@ function outputForSession(event: RuntimeEvent, session: SessionSnapshot) {
   return { ...core, ...core.evidence.outputByteRange }
 }
 
-export function TerminalView({
-  session,
-  themeId,
-  fontSize = TERMINAL_FONT_SIZE_DEFAULT,
-  interactiveResize,
-  visible = true,
-  autoFocus = true,
-  readOnly = false,
-  linkOrigin,
-  onObservationRefresh,
-  onRefreshSession
-}: {
+type TerminalViewProps = {
   session: SessionSnapshot
   themeId: TerminalThemeId
   // The terminal font size in CSS pixels. Absent falls back to the shipped default (a caller that has
@@ -223,7 +212,56 @@ export function TerminalView({
   linkOrigin?: OpenHttpLinkOrigin
   onObservationRefresh?(refresh: (() => Promise<void>) | null): void
   onRefreshSession?(control: SessionSnapshot['control']): Promise<SessionSnapshot>
-}) {
+}
+
+type TerminalCommonFacts = Pick<SessionSnapshot,
+  'id' | 'hostId' | 'workspacePath' | 'label' | 'createdAt' | 'updatedAt' |
+  'processState' | 'status' | 'latestOutputBytes' | 'nativeService' | 'runUnobserved' | 'interruptionReason'>
+type TerminalSessionFacts = TerminalCommonFacts & (
+  | Pick<Extract<SessionSnapshot, { kind: 'agent' }>,
+    'kind' | 'providerId' | 'executorId' | 'capabilities' | 'agentSessionUpdatedAt' | 'control' |
+    'terminalCapability' | 'terminalOutputChannel' | 'hookIngressObservation' | 'hookDeliveryObservation'>
+  | Pick<Extract<SessionSnapshot, { kind: 'terminal' }>, 'kind' | 'providerId' | 'control'>
+)
+
+/** The terminal lifetime needs these facts, never the Session's retained input/body graphs. */
+function terminalSessionFacts(session: SessionSnapshot): TerminalSessionFacts {
+  const common: TerminalCommonFacts = {
+    id: session.id, hostId: session.hostId, workspacePath: session.workspacePath, label: session.label,
+    createdAt: session.createdAt, updatedAt: session.updatedAt, processState: session.processState,
+    status: session.status, latestOutputBytes: session.latestOutputBytes,
+    ...(session.nativeService !== undefined ? { nativeService: session.nativeService } : {}),
+    ...(session.runUnobserved !== undefined ? { runUnobserved: session.runUnobserved } : {}),
+    ...(session.interruptionReason !== undefined ? { interruptionReason: session.interruptionReason } : {})
+  }
+  if (session.kind === 'terminal') return { ...common, kind: session.kind, providerId: session.providerId, control: session.control }
+  return {
+    ...common, kind: session.kind, providerId: session.providerId, executorId: session.executorId,
+    capabilities: session.capabilities, agentSessionUpdatedAt: session.agentSessionUpdatedAt, control: session.control,
+    ...(session.terminalCapability !== undefined ? { terminalCapability: session.terminalCapability } : {}),
+    ...(session.terminalOutputChannel !== undefined ? { terminalOutputChannel: session.terminalOutputChannel } : {}),
+    ...(session.hookIngressObservation !== undefined ? { hookIngressObservation: session.hookIngressObservation } : {}),
+    ...(session.hookDeliveryObservation !== undefined ? { hookDeliveryObservation: session.hookDeliveryObservation } : {})
+  }
+}
+
+/** Keep full Session props outside the Context retained by terminal IO and cleanup callbacks. */
+export function TerminalView(props: TerminalViewProps) {
+  return <TerminalViewOwner {...props} session={terminalSessionFacts(props.session)} />
+}
+
+function TerminalViewOwner({
+  session,
+  themeId,
+  fontSize = TERMINAL_FONT_SIZE_DEFAULT,
+  interactiveResize,
+  visible = true,
+  autoFocus = true,
+  readOnly = false,
+  linkOrigin,
+  onObservationRefresh,
+  onRefreshSession
+}: Omit<TerminalViewProps, 'session'> & { session: TerminalSessionFacts }) {
   const refreshSessionRef = useRef(onRefreshSession)
   refreshSessionRef.current = onRefreshSession
   const autoFocusRef = useRef(autoFocus)
