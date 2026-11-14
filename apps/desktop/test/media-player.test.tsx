@@ -169,6 +169,37 @@ describe('mounted player', () => {
   function define(element: HTMLMediaElement, facts: Record<string, unknown>) {
     for (const [name, value] of Object.entries(facts)) Object.defineProperty(element, name, { configurable: true, get: () => value })
   }
+  // An element whose seeks finish only when the test says so, like an engine still decoding, and whose
+  // play and pause report back through their own events.
+  async function engine(element: HTMLMediaElement, facts: { paused: boolean; duration: number; picture?: boolean }) {
+    const state = { paused: facts.paused, time: 0, seeking: false, seeks: [] as number[] }
+    const picture = facts.picture ?? true
+    define(element, { duration: facts.duration, ended: false, videoWidth: picture ? 1280 : 0, videoHeight: picture ? 720 : 0 })
+    Object.defineProperty(element, 'paused', { configurable: true, get: () => state.paused })
+    Object.defineProperty(element, 'seeking', { configurable: true, get: () => state.seeking })
+    Object.defineProperty(element, 'currentTime', { configurable: true, get: () => state.time,
+      set: (value: number) => { state.time = value; state.seeking = true; state.seeks.push(value) } })
+    vi.mocked(HTMLMediaElement.prototype.pause).mockImplementation(function (this: HTMLMediaElement) {
+      if (this !== element || state.paused) return
+      state.paused = true; queueMicrotask(() => element.dispatchEvent(new Event('pause')))
+    })
+    vi.mocked(HTMLMediaElement.prototype.play).mockImplementation(function (this: HTMLMediaElement) {
+      if (this === element && state.paused) { state.paused = false; queueMicrotask(() => element.dispatchEvent(new Event('play'))) }
+      return Promise.resolve()
+    })
+    await act(async () => { for (const type of ['loadedmetadata', 'durationchange', 'loadeddata']) element.dispatchEvent(new Event(type)) })
+    return { state, async seeked() { state.seeking = false; await act(async () => { element.dispatchEvent(new Event('seeked')) }) } }
+  }
+  async function slide(value: number) {
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(timeline(), String(value))
+      timeline().dispatchEvent(new Event('input', { bubbles: true }))
+    })
+  }
+  async function press(type: 'pointerdown' | 'pointerup' | 'pointercancel') {
+    await act(async () => { timeline().dispatchEvent(new PointerEvent(type, { bubbles: true, button: 0, pointerId: 1 })) })
+  }
+  const announced = () => container.querySelector('.media-player__announcer')!.textContent
   function timeline() { return container.querySelector<HTMLInputElement>('.media-player__slider')! }
   // The track runs 200–800px inside a 1000px stage whose top is 400px above it: with a 600 s file, x - 200 is the second.
   function layout() {
@@ -529,5 +560,75 @@ describe('mounted player', () => {
     // 499.1px is step 498.47 of 1000, which the range rounds to 498: 298.8 s, not the 299.08 s in between.
     await point(499.1)
     expect(bubble()!.textContent).toBe('4:58')
+  })
+
+  it('a held drag on a playing video moves the picture one seek at a time, lands where released and plays on unannounced', async () => {
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+    const { state, seeked } = await engine(media(), { paused: false, duration: 600 })
+    await press('pointerdown')
+    expect(state.paused).toBe(true)
+    // The hold is not a pause the person asked for: the control keeps the playback the release brings back, and no play disc covers the picture.
+    expect(container.querySelector('button[aria-label="Pause"]')).not.toBeNull()
+    expect(container.querySelector('.media-player__start')).toBeNull()
+    for (const value of [100, 200, 300]) await slide(value)
+    expect(state.seeks).toEqual([60])
+    await seeked()
+    expect(state.seeks).toEqual([60, 180])
+    await slide(400)
+    await press('pointerup')
+    expect(state.seeks).toEqual([60, 180, 240])
+    // The time that waited behind the superseded seek is not sent once the landing settles.
+    await seeked()
+    expect(state.seeks).toEqual([60, 180, 240])
+    expect(state.paused).toBe(false)
+    expect(announced()).toBe('')
+  })
+
+  it('a paused video stays paused after a drag; a key let go mid-drag does not end it, and a cancelled pointer lands like a release', async () => {
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+    const { state } = await engine(media(), { paused: true, duration: 600 })
+    await press('pointerdown')
+    await slide(500); await slide(600)
+    expect(state.seeks).toEqual([300])
+    await act(async () => { timeline().dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', bubbles: true })) })
+    expect(state.seeks).toEqual([300])
+    await press('pointercancel')
+    expect(state.seeks).toEqual([300, 360])
+    expect(state.paused).toBe(true)
+    expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled()
+  })
+
+  it('audio and a video without a picture keep playing while held and jump on release only', async () => {
+    for (const [kind, picture] of [['audio', true], ['video', false]] as const) {
+      await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease(kind)} name={`${kind}.mp4`} onRetry={() => {}} />)
+      const { state } = await engine(media(), { paused: false, duration: 600, picture })
+      await press('pointerdown')
+      await slide(100); await slide(200)
+      expect(state.seeks, kind).toEqual([])
+      expect(state.paused, kind).toBe(false)
+      await press('pointerup')
+      expect(state.seeks, kind).toEqual([120])
+      await act(async () => root.render(<></>))
+    }
+  })
+
+  it('a keyboard scrub on the timeline lands on key release', async () => {
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+    const { state } = await engine(media(), { paused: true, duration: 600 })
+    await slide(700)
+    expect(state.seeks).toEqual([])
+    await act(async () => { timeline().dispatchEvent(new KeyboardEvent('keyup', { key: 'PageUp', bubbles: true })) })
+    expect(state.seeks).toEqual([420])
+  })
+
+  it('releasing a playing video at its very end leaves it ended instead of starting over', async () => {
+    await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+    const { state, seeked } = await engine(media(), { paused: false, duration: 600 })
+    await press('pointerdown')
+    await slide(1000)
+    await seeked()
+    await press('pointerup')
+    expect(state.seeks).toEqual([600])
+    expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled()
   })
 })

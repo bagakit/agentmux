@@ -15,7 +15,17 @@ const changes = {
   'pointer-rerenders-player': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', 'onPointerMove={audioOnly ? undefined : wake}',
     'onPointerMove={audioOnly ? undefined : () => { wake(); setFacts(previous => ({ ...previous })) }}'],
   'pointing-bare-track': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', "getPropertyValue('--media-thumb')) || 0", "getPropertyValue('--media-thumb')) * 0 || 0"],
-  'pointing-unstepped': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', 'Math.round(along * TIMELINE_STEPS) / TIMELINE_STEPS * span', 'along * span']
+  'pointing-unstepped': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', 'Math.round(along * TIMELINE_STEPS) / TIMELINE_STEPS * span', 'along * span'],
+  'drag-keeps-playing': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', 'if (hold.resume) { quiet.current.pause = true; element.pause() }', 'if (hold.resume) { quiet.current.pause = false }'],
+  'drag-stays-paused': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', 'quiet.current.play = true; void element.play().catch(() => { quiet.current.play = false })', 'quiet.current.play = false'],
+  'drag-bypasses-queue': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', 'if (holding.current?.follow) seeks.current!.request(time)', 'if (holding.current?.follow) media.current!.currentTime = time'],
+  'release-bypasses-queue': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', 'if (hold?.follow) seeks.current!.land(time); else element.currentTime = time', 'element.currentTime = time'],
+  'drag-audio-follows': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', 'const hold = { follow: !audioOnly,', 'const hold = { follow: true,'],
+  'drag-announces-play': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', "if (quiet.current.play) quiet.current.play = false; else announce('Playing')", "announce('Playing')"],
+  'drag-announces-pause': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', "if (quiet.current.pause) quiet.current.pause = false; else if (!released.current) announce('Paused')", "if (!released.current) announce('Paused')"],
+  'drag-shows-disc': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', 'facts.paused && !facts.ended && !failure && !drag ?', 'facts.paused && !facts.ended && !failure ?'],
+  'drag-shows-pause': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', 'const playingShown = drag ? drag.resume : playing', 'const playingShown = playing'],
+  'drag-lands-on-key-release': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', 'onKeyUp={() => { if (!pressed.current) onLand() }}', 'onKeyUp={onLand}']
 } as const
 
 export default defineConfig({ ...original,
