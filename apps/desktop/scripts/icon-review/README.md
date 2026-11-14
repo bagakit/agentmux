@@ -44,4 +44,4 @@ node apps/desktop/scripts/icon-review/build.mjs --out .local/icon-review/site
 
 `future-designs.json` 只保存尚未采用的设计草案与定义来源，不属于产品图形库，不进入选择器或主题文件。采用草案须另沿真实语义、消费者及验收流程推进；工作台中的拟议 ID 不是已注册语义。
 
-Mote 图标视图在同一页比较当前 Agent/Mote、Agent 体量、主会话角色与晋升动作候选，沿 `#mote` 进入；候选保存在原设计储备数据中，不注册为生产语义或进入主题导出。下方继续保留真实组件的局部交互预览。
+Mote 图标视图在同一页比较当前 Agent/Mote、Agent 体量、主对话角色 Leader 与晋升动作候选，沿 `#mote` 进入；候选保存在原设计储备数据中，不注册为生产语义或进入主题导出。下方继续保留真实组件的局部交互预览。
