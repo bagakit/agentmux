@@ -78,7 +78,7 @@ export class GoalDispatchInputOwner {
     }
   }
 
-  async reconcileQualified(reference: GoalDispatchReference, port: GoalFiniteInputPort, assertCurrent?: () => Promise<void>) {
+  async reconcileQualified(reference: GoalDispatchReference, port: Pick<GoalFiniteInputPort, 'inspectOriginal'>, assertCurrent?: () => Promise<void>) {
     const original = await this.original(reference)
     if (!('target' in original)) throw new AgentMuxError('The original Start is a legacy operation. Its original carrier remains available.', 'CONTROL_REQUEST_CONFLICT')
     if (original.stage === 'confirmed') return await this.demands.recordDispatchPhase(reference.goalId, reference.operationId, { stage: 'confirmed', receipt: original.receipt! })

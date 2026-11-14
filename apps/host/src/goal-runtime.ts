@@ -28,6 +28,8 @@ export type GoalFiniteInputPort = {
   rejoinOriginal(input: DemandQualifiedDispatchIntent, ref: AgentInputWaitRef): Promise<AgentInputSubmissionReceipt>
   dispose(): Promise<void>
 }
+export type GoalFiniteInspectionPort = Pick<GoalFiniteInputPort, 'inspectOriginal' | 'dispose'>
+export type GoalFiniteInspectionInput = GoalFiniteAccessInput & { originalRunId: string }
 export type GoalFiniteAccessInput = { reference: DemandSpaceMemberReference; access: GoalQualifiedAccess; originalRunId?: string }
 
 export type GoalAgentControl = { kind: 'agent'; hostId: string; agentSessionId: string; run: AgentMuxRunRef }
@@ -40,6 +42,7 @@ type Attention = { hostId: string; supervisorAgentSessionId: string; supervisorR
 /** The existing Goal mechanisms borrow typed Core operations, never an editor controller. */
 export interface GoalRuntimePort {
   openFinite(input: GoalFiniteAccessInput, context: AgentMuxRpcCallContext): Promise<GoalFiniteInputPort>
+  openFiniteInspection(input: GoalFiniteInspectionInput, context: AgentMuxRpcCallContext): Promise<GoalFiniteInspectionPort>
   spatialCreationCandidates(tabId: string, regionId: string): Promise<AgentMuxAgentSession[]>
   agentCreation(hostId: string, agentSessionId: string): Promise<AgentMuxAgentCreationInspection>
   observeGoalAgent(hostId: string, agentSessionId: string): Promise<AgentMuxAgentRuntimeStatus>
@@ -65,6 +68,7 @@ export interface GoalRuntimePort {
 
 export function createGoalRuntime(options: {
   openFinite?(input: GoalFiniteAccessInput, context: AgentMuxRpcCallContext): Promise<GoalFiniteInputPort>
+  openFiniteInspection?(input: GoalFiniteInspectionInput, context: AgentMuxRpcCallContext): Promise<GoalFiniteInspectionPort>
   clients(): readonly { hostId: string; client: GoalExecutionClient }[]
   subscribeClients?(listener: () => void): () => void
   inputOccupied?(control: GoalAgentControl, signal?: AbortSignal): Promise<boolean>
@@ -89,6 +93,10 @@ export function createGoalRuntime(options: {
     openFinite: async (input, context) => {
       if (!options.openFinite) throw new AgentMuxError('The current Source access for this finite Goal input is unavailable. Its original request and Agent remain retained.', 'CONTROL_UNAVAILABLE')
       return await options.openFinite(input, context)
+    },
+    openFiniteInspection: async (input, context) => {
+      if (!options.openFiniteInspection) throw new AgentMuxError('The original qualified Goal input reader is unavailable. Its request and Agent remain retained.', 'CONTROL_UNAVAILABLE')
+      return await options.openFiniteInspection(input, context)
     },
     spatialCreationCandidates: async (tabId, regionId) => {
       const clients = options.clients()

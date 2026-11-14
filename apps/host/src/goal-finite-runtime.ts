@@ -6,7 +6,7 @@ import { AgentMuxError, connectHostedAgentMux, connectSpaceMember, observeSpaceS
 import { demandAgentReferenceKey, type DemandSpaceMemberReference } from '@agentmux/demand/relations'
 import type { DemandQualifiedDispatchIntent } from '@agentmux/demand'
 import { assertGoalSourceRelation, goalSourceRpc } from './goal-source-relations.js'
-import type { GoalExecutionClient, GoalFiniteAccessInput, GoalFiniteInputPort } from './goal-runtime.js'
+import type { GoalExecutionClient, GoalFiniteAccessInput, GoalFiniteInputPort, GoalFiniteInspectionInput, GoalFiniteInspectionPort } from './goal-runtime.js'
 
 type Rpc = Awaited<ReturnType<typeof goalSourceRpc>>
 /** Read one original Source member's Run. This observes related Space metadata,
@@ -62,8 +62,8 @@ async function creationRun(rpc: Rpc, reference: DemandSpaceMemberReference, sign
 
 /** One invocation borrows the original configured carriers. No access selector is
  * saved as authority and disposing this SDK consumer never disposes its transport. */
-export async function openGoalFiniteInput(options: { runtime(): AgentMuxHeadlessRuntime; clients(): readonly { hostId: string; client: GoalExecutionClient }[] },
-  input: GoalFiniteAccessInput, context: AgentMuxRpcCallContext): Promise<GoalFiniteInputPort> {
+async function openGoalFiniteCarrier(options: { runtime(): AgentMuxHeadlessRuntime; clients(): readonly { hostId: string; client: GoalExecutionClient }[] },
+  input: GoalFiniteAccessInput, context: AgentMuxRpcCallContext) {
   const reference = input.reference
   const source = await goalSourceRpc(options, input.access.source, reference.source.runtimeId, context)
   const fact = await assertGoalSourceRelation(source, reference, context.signal)
@@ -81,17 +81,35 @@ export async function openGoalFiniteInput(options: { runtime(): AgentMuxHeadless
     runId = input.originalRunId ?? original.run.runId
     client = await connectHostedAgentMux({ rpc: coordinator, connectOnDemand: true, expectedRuntimeId: reference.execution.runtimeId, agentSessionIds: [reference.execution.agentSessionId] })
   }
-  return goalFiniteInputPort(client, reference, runId)
+  return { client, runId }
+}
+
+export async function openGoalFiniteInput(options: Parameters<typeof openGoalFiniteCarrier>[0],
+  input: GoalFiniteAccessInput, context: AgentMuxRpcCallContext): Promise<GoalFiniteInputPort> {
+  const { client, runId } = await openGoalFiniteCarrier(options, input, context)
+  return goalFiniteInputPort(client, input.reference, runId)
+}
+
+/** Check an existing frozen input using the explicitly selected current owner.
+ * An independent Coordinator read does not assert current Source membership or
+ * input eligibility, and a refusal never switches to another carrier. */
+export async function openGoalFiniteInspection(options: Parameters<typeof openGoalFiniteInput>[0],
+  input: GoalFiniteInspectionInput, context: AgentMuxRpcCallContext): Promise<GoalFiniteInspectionPort> {
+  if (input.access.coordinator) {
+    const rpc = await goalSourceRpc(options, input.access.coordinator, input.reference.execution.runtimeId, context)
+    const client = await connectHostedAgentMux({ rpc, connectOnDemand: true, expectedRuntimeId: input.reference.execution.runtimeId, agentSessionIds: [input.reference.execution.agentSessionId] })
+    return originalInputReader(client, input.reference, input.originalRunId)
+  }
+  const { client, runId } = await openGoalFiniteCarrier(options, input, context)
+  return originalInputReader(client, input.reference, runId)
 }
 
 /** Bind the already qualified carrier to its one original member and Run. */
 export function goalFiniteInputPort(client: Pick<Awaited<ReturnType<typeof connectHostedAgentMux>>, 'submitAgentPrompt' | 'inspectAgentInput' | 'inspectAgentPromptSubmission' | 'rejoinAgentInputWaiting' | 'dispose'>,
   reference: DemandSpaceMemberReference, runId: string): GoalFiniteInputPort {
-  const assertTarget = (value: DemandQualifiedDispatchIntent) => {
-    if (demandAgentReferenceKey(value.target) !== demandAgentReferenceKey(reference) || value.runId !== runId)
-      throw new AgentMuxError('This Goal input carrier belongs to another original Source member or Run.', 'CONTROL_REQUEST_CONFLICT')
-  }
+  const assertTarget = (value: DemandQualifiedDispatchIntent) => assertOriginalTarget(reference, runId, value)
   return {
+    ...originalInputReader(client, reference, runId),
     readCurrent: async () => ({ runId }),
     submit: async value => {
       assertTarget(value)
@@ -101,19 +119,30 @@ export function goalFiniteInputPort(client: Pick<Awaited<ReturnType<typeof conne
       if (!receipt || !('key' in receipt)) throw new AgentMuxError('The original controlled input receipt is unconfirmed. Keep this same Goal operation; no alternate input path was used.', 'CONTROL_UNAVAILABLE')
       return receipt
     },
-    inspectOriginal: async value => {
-      assertTarget(value)
-      const key = { kind: 'prompt' as const, agentSessionId: reference.execution.agentSessionId, expectedRun: { runId }, submissionId: value.operationId }
-      const input = await client.inspectAgentInput({ key })
-      if (!input && await client.inspectAgentPromptSubmission(key)) throw new AgentMuxError('The original Core retains an input claim without a controlled waiting receipt. Keep this operation and inspect its original owner; no input was replayed.', 'CONTROL_UNAVAILABLE')
-      return input
-    },
     rejoinOriginal: async (value, ref) => {
       assertTarget(value)
       if (ref.key.kind !== 'prompt' || ref.key.agentSessionId !== reference.execution.agentSessionId || ref.key.expectedRun.runId !== runId ||
           ref.key.submissionId !== value.operationId || ref.key.attemptId !== undefined)
         throw new AgentMuxError('This waiting reference belongs to another original Goal input. Its target was not changed.', 'CONTROL_REQUEST_CONFLICT')
       return await client.rejoinAgentInputWaiting({ ref })
+    }
+  }
+}
+
+function assertOriginalTarget(reference: DemandSpaceMemberReference, runId: string, value: DemandQualifiedDispatchIntent) {
+  if (demandAgentReferenceKey(value.target) !== demandAgentReferenceKey(reference) || value.runId !== runId)
+    throw new AgentMuxError('This Goal input carrier belongs to another original Source member or Run.', 'CONTROL_REQUEST_CONFLICT')
+}
+
+function originalInputReader(client: Pick<Awaited<ReturnType<typeof connectHostedAgentMux>>, 'inspectAgentInput' | 'inspectAgentPromptSubmission' | 'dispose'>,
+  reference: DemandSpaceMemberReference, runId: string): GoalFiniteInspectionPort {
+  return {
+    inspectOriginal: async value => {
+      assertOriginalTarget(reference, runId, value)
+      const key = { kind: 'prompt' as const, agentSessionId: reference.execution.agentSessionId, expectedRun: { runId }, submissionId: value.operationId }
+      const input = await client.inspectAgentInput({ key })
+      if (!input && await client.inspectAgentPromptSubmission(key)) throw new AgentMuxError('The original Core retains an input claim without a controlled waiting receipt. Keep this operation and inspect its original owner; no input was replayed.', 'CONTROL_UNAVAILABLE')
+      return input
     },
     dispose: async () => { await client.dispose() }
   }

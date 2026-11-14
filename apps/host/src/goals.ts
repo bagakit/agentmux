@@ -1,4 +1,4 @@
-import { openGoalFiniteInput } from './goal-finite-runtime.js'
+import { openGoalFiniteInput, openGoalFiniteInspection } from './goal-finite-runtime.js'
 import { demandAgentReferenceKey, type DemandSpaceMemberReference } from '@agentmux/demand/relations'
 import { createHash } from 'node:crypto'
 import { realpath } from 'node:fs/promises'
@@ -82,6 +82,7 @@ export function createHostGoals(options: {
   }
   const runtime = createGoalRuntime({ clients,
     openFinite: (input, context) => openGoalFiniteInput({ runtime: options.runtime, clients }, input, context),
+    openFiniteInspection: (input, context) => openGoalFiniteInspection({ runtime: options.runtime, clients }, input, context),
     ...(options.subscribeClients ? { subscribeClients: options.subscribeClients } : {}),
     ...(options.inputOccupied ? { inputOccupied: options.inputOccupied } : {}),
     subscribeInputOccupation: listener => {
@@ -191,7 +192,7 @@ export function createHostGoals(options: {
         const reference = { goalId: req.demandId, operationId: req.dispatchOperationId }, original = await dispatch.original(reference)
         if ('target' in original) {
           if (!req.access) throw new AgentMuxError('Choose current access to read this exact original qualified Goal input. The Goal and request remain retained.', 'CONTROL_UNAVAILABLE')
-          const port = await runtime.openFinite({ reference: original.target, access: req.access, originalRunId: original.runId }, context)
+          const port = await runtime.openFiniteInspection({ reference: original.target, access: req.access, originalRunId: original.runId }, context)
           try { await dispatch.reconcileQualified(reference, port, () => current(context)) }
           finally { await port.dispose().catch(error => { console.warn('Closing this exact Goal input reader was unconfirmed.', error) }) }
         } else await dispatch.reconcile(reference, () => current(context))
