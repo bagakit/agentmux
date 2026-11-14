@@ -39,6 +39,19 @@ exact Folder/resource, Workspace Zone and binding before reading that original s
 do not repeat registration automatically or use the current configuration to choose a
 replacement target. Existing conflicting entities, names, layout and Runs remain intact.
 
+New work in that Space returns to the original authority. Without an explicit Agent
+target, that authority uses its own Agent. For a directly configured Agent Core, read
+settings executors discover --host HOST on the Space authority and retain its Runtime
+identity. agent open --executor EXECUTOR --agent-host HOST --agent-runtime RUNTIME
+with the original --space/--zone and --new-tab selects only the Agent location. HOST
+belongs to the answering Space Core's namespace, not the observing client's namespace.
+The project remains in its original Zone; the remote Agent starts in its own home and
+uses the original execution binding for project tools. Both placements are frozen
+independently. This explicit target is for new work, not moving an existing Session,
+changing a frozen creation or granting access to a different Core. Source/Agent trust
+and transport permissions still apply. An unknown result retains the same operation;
+inspect it before an explicit continuation and never send its first input again.
+
 <!-- amux:generated command:space.snapshot -->
 <!-- amux:generated command:space.watch -->
 <!-- amux:generated command:space.apply -->
@@ -50,6 +63,24 @@ subscription port. Their begin/part/complete transport reuses the existing frame
 cumulative Space size is not a single RPC-frame or whole-observation value limit.
 A revision is this source graph's CAS revision, so unrelated writes may advance it.
 A cursor is not a retained event-history promise: reconnect starts an explicit snapshot.
+
+<!-- amux:generated command:space.sessions.watch -->
+
+Session state uses this separate related reader. The SDK observeSpaceSessionStates
+returns the original Space opening, then source-qualified member summaries, exact
+missing/unavailable observations, membership removal and original process events.
+The Space Core selects only its members; each Session Core answers for its exact
+Runtime and SID. A source-local Host alias never means the observer's local machine.
+This stream does not preload terminal output or history, grant input, or change
+private window layout. Metadata missing does not remove a business member. Retain
+the last confirmed view when disconnected, then reopen the same Space reference;
+this read never retries creation or its first input.
+
+Read settings hosts ls on the Space authority for its configured Agent choices,
+then use that same authority's settings executors discover for the selected Host.
+Configuration labels and saved Runtime pins are separate from live executor facts.
+An optional choices read must not delay opening the original project or using its
+default Agent. An unavailable catalogue never substitutes the observing client's Hosts.
 
 The shared scope contains only Space/Zone/Tab/Region membership, original Session/Run
 references and Zone–Space bindings. Host references retain that source Runtime's namespace;
@@ -153,3 +184,11 @@ expand a remote ~ with local environment facts. Opening an existing home reuses 
 Folder/Zone/Tab work and does not change any Session cwd or create an Agent.
 
 [spatial](../shared/spatial.md "amux:include")
+
+## Interact with one mounted member
+
+Use `connectSpaceMember(rpc, target)` from `@agentmux/core/space-member-client` for an original Hosted full Session and its existing terminal/input machinery. The target contains the original Space reference, Region, execution Runtime, Session and expected Run. Its membership and frozen route remain at the source Core; the execution Core separately authorizes the current viewer. The client never imports that Session into another Core’s local namespace.
+
+`space member call --input FILE|-` and `space member watch --input FILE|-` expose the same finite protocol. The JSON envelope is `{target, call:{method,params}}`; inner parameters retain the existing Hosted owner fence, consumer, exact Session/Run and original input operation. Calls allow exact metadata, terminal attachment/replay/resize, raw Agent input, prompt submission and original input/interaction inspection. Watch allows only the selected Session events or terminal/replay stream. No inventory, new Agent, stop/recovery, history, A2A or native human approval is included. Use the original execution device’s human entry for a pending native permission or question; an intermediate transport account cannot answer as that person.
+
+A failed observer keeps the original Space, Agent and pending input. A changed member or Run refuses only that exact action. Composer submissions retain their original submission ID and exact input key for receipt inspection. Raw write/paste has a Native acknowledgement but no caller-owned business operation ID; an unknown raw acknowledgement is not automatically resent or presented as an inspectable operation. The client does not change either input’s target. Closing a mounted reader releases its observation, never its Run.
