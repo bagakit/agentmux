@@ -25,12 +25,11 @@ type SpeakerSnapshot = {
 }
 
 /** The reading surface's identity dependencies, scoped to its actual speakers. */
-export function createConversationSpeakerFactsSelector(speakerIds: readonly string[], active: boolean) {
+export function createConversationSpeakerFactsSelector(speakerIds: readonly string[]) {
   let previous: readonly unknown[] | undefined
   let value: readonly unknown[] = []
   return (state: { sessions: readonly SessionSnapshot[]; config: AppConfig | null;
     agentNames: Readonly<Record<string, string>>; timelines: Readonly<Record<string, AgentTimelineSnapshot>> }): readonly unknown[] => {
-    if (!active) return value
     const sessions = sessionPresentationById(state.sessions)
     const facts: unknown[] = [state.config?.workspaces]
     for (const id of speakerIds) {
@@ -42,7 +41,9 @@ export function createConversationSpeakerFactsSelector(speakerIds: readonly stri
     }
     if (previous && facts.every((fact, i) => fact === previous![i])) return value
     previous = facts
-    value = speakerIds.flatMap(id => {
+    // The original project resolver also consumes sibling order/closeout when
+    // choosing a preferred workface. Preserve that immutable metadata boundary.
+    value = [state.config?.workspaces, ...speakerIds.flatMap(id => {
       const sender = sessions.get(id)
       if (!sender || sender.kind !== 'agent') return [id, state.agentNames[id]]
       const workspaces = state.config?.workspaces ?? []
@@ -52,7 +53,7 @@ export function createConversationSpeakerFactsSelector(speakerIds: readonly stri
       return [id, state.agentNames[id], sender.label, sender.providerId, sender.hostId, sender.workspacePath,
         firstPromptFromTimeline(state.timelines[id]), workspace?.id, workspace?.repoPath, workspace?.branch,
         workspace?.name, projectRoot?.id, projectRoot?.name]
-    })
+    })]
     return value
   }
 }

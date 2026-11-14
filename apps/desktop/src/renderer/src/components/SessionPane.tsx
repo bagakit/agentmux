@@ -158,26 +158,33 @@ function createHistoryResourceReader(hostId: string | undefined, agentSessionId:
     : (input: Parameters<typeof api.sessions.historyResource>[1]) => api.sessions.historyResource({ hostId, agentSessionId }, input)
 }
 
+function createPaneSpeakerDetailsReader(id: string) {
+  return () => {
+    const current = useAppStore.getState()
+    return currentConversationSenderDetails(id, {
+      sessions: current.sessions, workspaces: current.config?.workspaces ?? [],
+      agentNames: current.agentNames, timelines: current.timelines, demands: current.demands
+    })
+  }
+}
+
 function createPaneSpeakerResolver(currentSession: NonNullable<Parameters<typeof createSpeakerResolver>[0]>['currentSession'],
-  moteOwner: MoteConversationOwner | null, isMoteDialogue: boolean, mainSources: ReadonlySet<string>) {
+  moteOwner: MoteConversationOwner | null, isMoteDialogue: boolean, mainSources: ReadonlySet<string>, speakerIds: readonly string[]) {
+  const knownSpeakers = new Set(speakerIds)
+  const metadata = new Map<string, NonNullable<ReturnType<typeof currentConversationSpeakerMetadata>>>()
   const original = createSpeakerResolver({
     lookupAgent: (id) => {
       const state = useAppStore.getState()
-      const sender = currentConversationSpeakerMetadata(id, {
+      const sender = metadata.get(id) ?? currentConversationSpeakerMetadata(id, {
         sessions: state.sessions, workspaces: state.config?.workspaces ?? [],
         agentNames: state.agentNames, timelines: state.timelines
       })
+      if (sender && knownSpeakers.has(id)) metadata.set(id, sender)
       return sender ? {
         label: sender.label,
         providerId: sender.providerId,
         ...(sender.project ? { project: sender.project } : {}),
-        readDetails: () => {
-          const current = useAppStore.getState()
-          return currentConversationSenderDetails(id, {
-            sessions: current.sessions, workspaces: current.config?.workspaces ?? [],
-            agentNames: current.agentNames, timelines: current.timelines, demands: current.demands
-          })
-        }
+        readDetails: createPaneSpeakerDetailsReader(id)
       } : state.agentNames[id] ? { label: state.agentNames[id] } : undefined
     },
     ...(currentSession ? { currentSession } : {})
@@ -558,12 +565,12 @@ export function SessionPane({
   // Output/status from unrelated Sessions cannot refresh these descriptors or read sender goals.
   const speakerIds = useMemo(() => [...new Set([sessionId, ...(readingSpeakers.source === activitySourceKey ? [...readingSpeakers.readers.values()].flat() : [])])], [sessionId, activitySourceKey, readingSpeakers])
   const speakerScope = useMemo(() => ({ sessionIds: speakerIds, navigation: false }), [speakerIds])
-  const speakerFactsSelector = useMemo(() => createConversationSpeakerFactsSelector(speakerIds, activityDemand), [speakerIds, activityDemand])
+  const speakerFactsSelector = useMemo(() => createConversationSpeakerFactsSelector(speakerIds), [speakerIds])
   const speakerFacts = useObservedAppStore('sessionPane', observationVisible, speakerScope, useShallow(speakerFactsSelector))
   const describeSpeaker = useMemo(() => createPaneSpeakerResolver(session?.kind === 'agent'
     ? { id: session.id, ...(session.label === undefined ? {} : { label: session.label }), providerId: session.providerId } : undefined,
-  moteOwner, Boolean(moteDialogue?.target), mainSources),
-  [session?.id, session?.label, session?.kind, session?.kind === 'agent' ? session.providerId : undefined, speakerFacts, moteOwner, moteDialogue?.target, mainSources]
+  moteOwner, Boolean(moteDialogue?.target), mainSources, speakerIds),
+  [session?.id, session?.label, session?.kind, session?.kind === 'agent' ? session.providerId : undefined, speakerFacts, speakerIds, observationVisible, moteOwner, moteDialogue?.target, mainSources]
   )
   const refreshSession = useAppStore.getState().refreshSession
   const recoverSession = useAppStore.getState().recoverSession
