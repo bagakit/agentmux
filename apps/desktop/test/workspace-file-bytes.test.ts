@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, rename, rm, symlink, truncate, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rename, rm, symlink, stat, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LocalExecutionHost } from '@agentmux/core'
@@ -46,6 +46,10 @@ vi.mock('node:child_process', async importOriginal => {
 
 const roots: string[] = []
 const revision = (bytes: Uint8Array) => `sha256:${createHash('sha256').update(bytes).digest('hex')}`
+async function observedWitness(path: string) {
+  const value = await stat(path, { bigint: true })
+  return { device: String(value.dev), inode: String(value.ino), size: String(value.size), ctimeNs: String(value.ctimeNs), mtimeNs: String(value.mtimeNs), birthtimeNs: String(value.birthtimeNs) }
+}
 async function fixture() {
   const base = await mkdtemp(join(tmpdir(), 'agentmux-file-bytes-'))
   roots.push(base)
@@ -64,11 +68,20 @@ describe('WorkspaceFiles binary owner', () => {
   it('publishes exact binary bytes and returns bounded ranges with the actual total and revision', async () => {
     const { root, workspace, files } = await fixture()
     const bytes = Buffer.from([0, 255, 128, 13, 10, 0, 1])
-    await expect(files.writeBytes(workspace, { path: 'report.bin', bytes })).resolves.toEqual({ status: 'written', revision: revision(bytes) })
+    const published = await files.writeBytes(workspace, { path: 'report.bin', bytes })
+    expect({ ...published, fileWitness: undefined }).toEqual({ status: 'written', revision: revision(bytes), fileWitness: undefined })
+    if (published.status !== 'written' || !published.fileWitness) throw Error('Original creation witness missing')
+    expect(Object.keys(published.fileWitness).sort()).toEqual(['ctimeNs', 'device', 'inode', 'mtimeNs', 'size'])
+    const { birthtimeNs: _birth, ...creationWitness } = await observedWitness(join(root, 'report.bin'))
+    expect(published.fileWitness).toEqual(creationWitness)
     expect(await readFile(join(root, 'report.bin'))).toEqual(bytes)
     const chunk = await files.readBytes(workspace, 'report.bin', { offset: 1, maxBytes: 3 })
-    expect(chunk).toEqual({ bytes: Buffer.from([255, 128, 13]), totalBytes: 7, revision: revision(bytes), offset: 1, returnedBytes: 3, nextOffset: 4, readCost: { payloadBytes: 7 } })
-    await expect(files.readBytes(workspace, 'report.bin', { offset: 4, expectedRevision: chunk.revision })).resolves.toEqual({ bytes: Buffer.from([10, 0, 1]), totalBytes: 7, revision: revision(bytes), offset: 4, returnedBytes: 3, nextOffset: null, readCost: { payloadBytes: 7 } })
+    const { readIdentity, ...chunkBytes } = chunk
+    expect(readIdentity?.entry).toEqual(await observedWitness(join(root, 'report.bin')))
+    expect(chunkBytes).toEqual({ bytes: Buffer.from([255, 128, 13]), totalBytes: 7, revision: revision(bytes), offset: 1, returnedBytes: 3, nextOffset: 4, readCost: { payloadBytes: 7 } })
+    const { readIdentity: tailIdentity, ...tail } = await files.readBytes(workspace, 'report.bin', { offset: 4, expectedRevision: chunk.revision })
+    expect(tailIdentity?.entry).toEqual(await observedWitness(join(root, 'report.bin')))
+    expect(tail).toEqual({ bytes: Buffer.from([10, 0, 1]), totalBytes: 7, revision: revision(bytes), offset: 4, returnedBytes: 3, nextOffset: null, readCost: { payloadBytes: 7 } })
   })
 
   it('does not overwrite another file and refuses a changed revision', async () => {
@@ -89,7 +102,9 @@ describe('WorkspaceFiles binary owner', () => {
     await writeFile(join(root, 'upload.bin'), bytes)
     const snapshot = await files.snapshotBytes(workspace, 'upload.bin')
     expect(Buffer.from(snapshot.bytes).equals(bytes)).toBe(true)
-    expect({ ...snapshot, bytes: undefined }).toEqual({ bytes: undefined, totalBytes: bytes.length, revision: revision(bytes), offset: 0, returnedBytes: bytes.length, nextOffset: null, readCost: { payloadBytes: bytes.length } })
+    const { readIdentity, ...snapshotBytes } = snapshot
+    expect(readIdentity?.entry).toEqual(await observedWitness(join(root, 'upload.bin')))
+    expect({ ...snapshotBytes, bytes: undefined }).toEqual({ bytes: undefined, totalBytes: bytes.length, revision: revision(bytes), offset: 0, returnedBytes: bytes.length, nextOffset: null, readCost: { payloadBytes: bytes.length } })
     await expect(files.snapshotBytes(workspace, 'upload.bin', { expectedRevision: revision(Buffer.from([1])) })).rejects.toMatchObject({ code: 'WORKSPACE_FILE_REVISION_MISMATCH' })
   })
 
@@ -129,7 +144,12 @@ describe('WorkspaceFiles binary owner', () => {
     const checked = join(root, 'checked'), held = join(root, 'held'), outside = join(base, 'outside')
     await Promise.all([mkdir(checked), mkdir(outside)])
     race.beforeInput = async () => { await rename(checked, held); await symlink(outside, checked, 'dir') }
-    await expect(files.writeBytes(workspace, { path: 'checked/new.bin', bytes: Buffer.from([0, 255]) })).resolves.toEqual({ status: 'written', revision: revision(Buffer.from([0, 255])) })
+    const published = await files.writeBytes(workspace, { path: 'checked/new.bin', bytes: Buffer.from([0, 255]) })
+    expect({ ...published, fileWitness: undefined }).toEqual({ status: 'written', revision: revision(Buffer.from([0, 255])), fileWitness: undefined })
+    if (published.status !== 'written' || !published.fileWitness) throw Error('Original creation witness missing')
+    expect(Object.keys(published.fileWitness).sort()).toEqual(['ctimeNs', 'device', 'inode', 'mtimeNs', 'size'])
+    const { birthtimeNs: _birth, ...creationWitness } = await observedWitness(join(held, 'new.bin'))
+    expect(published.fileWitness).toEqual(creationWitness)
     expect(await readFile(join(held, 'new.bin'))).toEqual(Buffer.from([0, 255]))
     await expect(readFile(join(outside, 'new.bin'))).rejects.toMatchObject({ code: 'ENOENT' })
     expect(race.beforeInput).toBeNull()
