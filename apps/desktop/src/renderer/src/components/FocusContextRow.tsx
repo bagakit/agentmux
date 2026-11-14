@@ -1,23 +1,20 @@
 import { FocusTakeoverFeedback } from './FocusTakeoverRecipients'
 import { FocusCommunicationFeedback } from './FocusCommunicationFeedback'
 import type { FocusListActivity } from '../lib/focus-list-activity'
-import { TextInput } from '@agentmux/client-ui/input'
 import { memo, useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { FocusContext } from '../lib/focus-context'
 import { FocusContextMenu } from './FocusContextMenu'
 import { FocusTaskListContent } from './FocusTaskListContent'
 import { useAgentInformationPreview } from './AgentInformationPreview'
-import { currentDisplayNameRevision, useAppStore } from '../store'
+import { currentDisplayNameRevision, focusAgentNameEditor, useAppStore } from '../store'
+import type { FocusNameEditor } from '../lib/focus-name-edit'
+import { FocusAgentNameEdit } from './FocusAgentNameEdit'
 import { AgentContextContent, mandatoryAgentContextDetails } from './AgentContextContent'
 import type { FocusContextIdentity } from '../lib/focus-context-identity'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { FocusGoalLinks, FocusGoalMark } from './FocusGoalLinks'
 import type { FocusGoalLinks as GoalLinks } from '../lib/focus-goal-links'
 import type { FocusTopicHeading } from '../lib/focus-collection-lanes'
-
-const ThemeActionEditIcon = semanticIconComponent('action.edit')
-
 
 /** Move between task buttons in actual project and section order, including lazy slots. */
 function moveTaskFocus(button: HTMLButtonElement, forward: boolean) {
@@ -37,52 +34,45 @@ function moveTaskFocus(button: HTMLButtonElement, forward: boolean) {
 }
 
 export const FocusContextRow = memo(function FocusContextRow({ context, identity, goalLinks, selected, compact = false, list = false, resolvePreview, disclosure, onSelect, onOpenWorkface, topic, activity }: { context: FocusContext; identity?: FocusContextIdentity | undefined; goalLinks?: GoalLinks | undefined; selected: boolean; compact?: boolean; list?: boolean; resolvePreview?: (() => FocusContext) | undefined; disclosure?: { status: number; summary: number } | undefined; onSelect(id: string): void; onOpenWorkface?: ((id: string) => void) | undefined; topic?: FocusTopicHeading | undefined; activity?: FocusListActivity | undefined }) {
-  const [menuOpen, setMenuOpen] = useState(false), [draft, setDraft] = useState<string | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [rename, setRename] = useState<{ name: string; revision: number; owner: FocusNameEditor } | null>(null)
   const [goalOpen, setGoalOpen] = useState(false)
   const active = useWorkbenchPresentationActive()
   useEffect(() => { if (!active) setMenuOpen(false) }, [active])
-  const input = useRef<HTMLInputElement>(null), cancelled = useRef(false)
-  const expectedNameRevision = useRef({ revision: 0 }), saving = useRef(false), editGeneration = useRef(0)
-  useEffect(() => () => { ++editGeneration.current; expectedNameRevision.current = { revision: 0 } }, [context.id])
-  const hover = useAgentInformationPreview(context, !menuOpen && !goalOpen && draft === null, identity, goalLinks, () => (onOpenWorkface ?? onSelect)(context.id), resolvePreview ? { resolveContext: resolvePreview } : undefined)
+  const restoreRenameFocus = useRef(false)
+  const hover = useAgentInformationPreview(context, !menuOpen && !goalOpen && rename === null, identity, goalLinks, () => (onOpenWorkface ?? onSelect)(context.id), resolvePreview ? { resolveContext: resolvePreview } : undefined)
   const goalDisclosure = useCallback((open: boolean) => { hover.close(); setGoalOpen(open) }, [hover.close])
   useEffect(() => {
-    if (!active) return
-    if (draft !== null) { input.current?.focus(); input.current?.select() }
-    else if (cancelled.current) { cancelled.current = false; hover.anchor.current?.focus({ preventScroll: true }); hover.close() }
-  }, [draft === null])
-  async function commitRename() {
-    if (draft === null || saving.current) return
-    saving.current = true
-    const generation = editGeneration.current, baseline = expectedNameRevision.current
-    try {
-      if ((context.access ? await context.access.rename?.(draft.trim() || null, baseline.revision) : await useAppStore.getState().renameAgent(context.id, draft.trim() || null, baseline.revision)) && expectedNameRevision.current === baseline) {
-        ++baseline.revision
-        if (generation === editGeneration.current) { ++editGeneration.current; setDraft(null) }
-      }
+    if (active && rename === null && restoreRenameFocus.current) {
+      restoreRenameFocus.current = false
+      hover.suppressRestoredFocus()
+      hover.anchor.current?.focus({ preventScroll: true })
     }
-    finally { saving.current = false }
+  }, [active, rename])
+  function beginRename() {
+    const owner = context.access ? context.access.rename : focusAgentNameEditor(context.id)
+    const revision = context.access ? context.access.nameRevision : currentDisplayNameRevision('agent-session', context.id)
+    if (!owner || revision === undefined) {
+      useAppStore.getState().reportError(new Error('The original name owner is unavailable. Check the original Agent and try opening Rename again.'))
+      return
+    }
+    hover.close()
+    setRename({ name: context.name, revision, owner })
   }
   const description = [context.detailIsRecap && context.recap ? null : context.detail, context.recap ? `${context.recap.source} (${context.recap.origin}) · ${context.recap.text}` : null].filter(Boolean).join('\n')
   const rowDescription = list && mandatoryAgentContextDetails(context, 'card') && !context.detailIsRecap && context.detail !== context.stateLabel
     ? [context.originAddress, context.detail].filter(Boolean).join(' · ')
     : context.originAddress
   const className = `focus-context focus-context--card${list ? ' focus-context--list' : ''}${compact ? ' focus-context--compact' : ''}${selected ? ' is-selected' : ''}${menuOpen || goalOpen ? ' is-menu-open' : ''}`
-  if (draft !== null) return <div className={`${className} focus-context--renaming`} data-session-id={context.id}
-    onBlur={event => { if (active && !event.currentTarget.contains(event.relatedTarget as Node | null)) void commitRename() }}>
-    <div className="focus-context__rename-line"><ThemeActionEditIcon size={16} className="focus-context__rename-mark" aria-hidden="true" />
-    <TextInput ref={input} className="focus-context__rename" aria-label={`Rename Agent ${context.name}`} value={draft} onChange={event => { ++editGeneration.current; setDraft(event.target.value) }}
-      onKeyDown={event => {
-        event.stopPropagation()
-        if (event.nativeEvent.isComposing || event.keyCode === 229) return
-        if (event.key === 'Enter') { event.preventDefault(); cancelled.current = true; commitRename() }
-        if (event.key === 'Escape') { event.preventDefault(); cancelled.current = true; ++editGeneration.current; setDraft(null) }
-      }} /></div>
+  if (rename) return <FocusAgentNameEdit {...rename} sessionId={context.id} className={className} onClose={restoreFocus => {
+    restoreRenameFocus.current = restoreFocus
+    setRename(null)
+  }}>
     {mandatoryAgentContextDetails(context, 'card') ? <div className="focus-context__rename-service">
       <div role="status"><AgentContextContent context={context} presentation="card" topic={topic} /></div>
       <button type="button" className="focus-context__rename-open" onClick={() => onSelect(context.id)}>Open Agent</button>
     </div> : null}
-  </div>
+  </FocusAgentNameEdit>
   function listKey(event: KeyboardEvent<HTMLButtonElement>) {
     if (event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -101,6 +91,6 @@ export const FocusContextRow = memo(function FocusContextRow({ context, identity
       <AgentContextContent context={context} identity={hover.position} presentation="card" disclosure={disclosure} topic={topic}
         headingAccessory={goalLinks ? <span className="focus-goal__space" aria-hidden="true"><FocusGoalMark links={goalLinks} /></span> : undefined} />}
   </button>
-  const main = context.kind === 'agent' ? <FocusContextMenu open={active && menuOpen} context={context} onOpenChange={setMenuOpen} onRestoreFocus={hover.suppressRestoredFocus} onRename={() => { hover.close(); ++editGeneration.current; expectedNameRevision.current = { revision: context.access ? context.access.nameRevision ?? 0 : currentDisplayNameRevision('agent-session', context.id) }; setDraft(context.name) }}>{card}</FocusContextMenu> : card
+  const main = context.kind === 'agent' ? <FocusContextMenu open={active && menuOpen} context={context} onOpenChange={setMenuOpen} onRestoreFocus={hover.suppressRestoredFocus} onRename={beginRename}>{card}</FocusContextMenu> : card
   return <><div className="focus-context-card">{main}{activity ? <FocusCommunicationFeedback activity={activity} /> : null}{context.kind === 'agent' && (context.access || context.control) ? <FocusTakeoverFeedback context={context} active={active} onOpen={hover.close} /> : null}{goalLinks ? <FocusGoalLinks links={goalLinks} onOpenChange={goalDisclosure} /> : null}</div></>
 })

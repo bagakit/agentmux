@@ -21,6 +21,7 @@ import { mountedSessionFacts } from './space-mount-sessions'
 import { useSpaceSourceReader } from '../components/SpaceSourceReaders'
 import { agentContextForSession, agentContextForConversation, focusRecordFacts, type FocusContext } from './focus-context'
 import type { FocusContextAccess } from './focus-context-access'
+import type { FocusNameEditor } from './focus-name-edit'
 import { focusContextIdentityKey, type FocusContextIdentity, type FocusContextOccurrence } from './focus-context-identity'
 import type { WorkbenchProjectionSelection } from './workbench-projection'
 import { focusSourceContextId, focusSourceHistoryNames, focusSourceHostId, focusSourceKey, focusSourceWorkspace, matchingFocusContext, unobservedFocusContext } from './focus-source-model'
@@ -34,7 +35,7 @@ const candidateFactKey = (candidate: Candidate) => candidate.readingTarget ? sou
 type SourceChoice = { locations: FocusContextAccess['locations']; choose(location: FocusContextAccess['locations'][number]): void }
 type ReadFact = { key: string; session?: SessionSnapshot; name?: NameObservation;
   conversationPort?: ConversationReadApi; readConversation?: () => Promise<void>; reading?: ReturnType<typeof projectConversationWindow>;
-  rename?: ((name: string | null, expectedRevision: number) => Promise<boolean>) | undefined; nameSaveIssue?: string | undefined; sessionIssue?: string | undefined; nameIssue?: string | undefined; readingIssue?: string | undefined; readingCurrent?: () => boolean }
+  rename?: FocusNameEditor | undefined; nameSaveIssue?: string | undefined; sessionIssue?: string | undefined; nameIssue?: string | undefined; readingIssue?: string | undefined; readingCurrent?: () => boolean }
 
 const NO_SOURCE_CONTEXTS: FocusContext[] = []
 const NO_SOURCE_IDENTITIES = new Map<string, FocusContextIdentity>()
@@ -79,16 +80,29 @@ function MemberReader({ candidate, visible, publish, refresh }: { candidate: Can
     const member = candidate.readingTarget?.target
     const name = member && { object: 'agent' as const, target: { reference: member.reference, regionId: member.regionId, runtimeId: member.runtimeId, agentSessionId: member.agentSessionId, expectedAdmission: member.expectedAdmission } }
     // Name authority is independent of Native Session reads and the conversation reader.
-    const nameRead = direct && !member ? api.spaceMounts.call('agentNameInspect', { hostId: direct.hostId, expectedRuntimeId: direct.target.runtimeId, name: direct.target }, controller.signal)
-      : name ? api.spaceMounts.call('memberNameInspect', { hostId: target!.hostId, reference: target!.target.reference, name }, controller.signal) : undefined
-    void nameRead?.then(observed => {
-      const rename = (member ? member.expectedAdmission.kind === 'creation' : direct?.changeTarget) ? async (value: string | null, expectedNameRevision: number) => {
-        const change = { kind: 'rename' as const, operationId: mintObjectId(), name: value, expectedNameRevision, source: 'manual' as const }
+    const readName = direct && !member ? (signal?: AbortSignal) => api.spaceMounts.call('agentNameInspect', { hostId: direct.hostId, expectedRuntimeId: direct.target.runtimeId, name: direct.target }, signal)
+      : name ? (signal?: AbortSignal) => api.spaceMounts.call('memberNameInspect', { hostId: target!.hostId, reference: target!.target.reference, name }, signal) : undefined
+    void readName?.(controller.signal).then(observed => {
+      const rename: FocusNameEditor | undefined = (member ? member.expectedAdmission.kind === 'creation' : direct?.changeTarget) ? {
+        inspect: async () => {
+          const current = await readName!()
+          publish(candidate.key, { key: key!, name: current, nameIssue: undefined }, true)
+          return current.current
+        },
+        save: (value, expectedNameRevision) => changeName({ kind: 'rename', operationId: mintObjectId(), name: value, expectedNameRevision, source: 'manual' }),
+        confirm: operationId => changeName({ kind: 'confirm', operationId }),
+      } : undefined
+      async function changeName(change: import('@agentmux/core/name-control').NameChange) {
         const result = direct?.changeTarget && !member ? await api.spaceMounts.call('agentNameChange', { hostId: direct.hostId, expectedRuntimeId: direct.target.runtimeId, name: { ...direct.changeTarget, change } })
           : await api.spaceMounts.call('memberNameChange', { hostId: target!.hostId, reference: target!.target.reference, name: { ...name!, change } })
-        if (result.applied) publish(candidate.key, { key: key!, name: { ...result, diskAcknowledgement: 'not-observed' }, nameIssue: undefined, nameSaveIssue: result.save.diskDurability === 'confirmed' ? undefined : `The original name was applied; its save is unconfirmed (${change.operationId}). ${result.save.issue ?? ''}` }, true)
-        return result.applied
-      } : undefined
+        const { applied, current, record, save } = result
+        const issue = save.issue ?? record.reason ?? null
+        publish(candidate.key, {
+          key: key!, name: { ...result, diskAcknowledgement: 'not-observed' }, nameIssue: undefined,
+          ...(applied ? { nameSaveIssue: save.diskDurability !== 'confirmed' ? `The original name was applied; its save is unconfirmed (${change.operationId}). ${issue ?? ''}` : undefined } : {})
+        }, true)
+        return { operationId: change.operationId, applied, nameRevision: current.nameRevision, diskDurability: save.diskDurability, issue }
+      }
       emit({ name: observed, rename, nameIssue: undefined })
     }).catch(cause => emit({ nameIssue: String(cause instanceof Error ? cause.message : cause) }))
     if (!target) return () => controller.abort()

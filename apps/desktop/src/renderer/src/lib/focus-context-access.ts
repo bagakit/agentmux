@@ -1,6 +1,7 @@
 import type { AgentTimelineSnapshot } from '@agentmux/core'
 import type { SessionHistoryReference } from '../../../shared/contracts'
 import type { api } from './api'
+import type { FocusNameEditor } from './focus-name-edit'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import type { SpaceMountRecord } from '../../../shared/space-mount'
 import type { WorkbenchProjectionSelection } from './workbench-projection'
@@ -24,7 +25,7 @@ export type FocusContextAccess = {
   close?(location?: FocusContextAccess['locations'][number]): void
   isCurrent?(): boolean
   refresh(): void
-  rename?(name: string | null, expectedRevision: number): Promise<boolean>
+  rename?: FocusNameEditor
   /** A bounded reading request, supplied only by the original conversation owner. */
   readConversation?(): Promise<void>
   conversationPort?: typeof api.conversation

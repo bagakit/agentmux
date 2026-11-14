@@ -184,6 +184,10 @@
 .focus-context__rename-line { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
 .focus-context__rename-mark { flex: none; color: var(--text-3); }
 .focus-context__rename { width: 100%; min-width: 0; padding: 4px 5px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: 600 var(--fs-meta)/1.4 var(--font-sans); outline: none; }
+.focus-context__rename:focus-visible { border-color: var(--focus-line); box-shadow: 0 0 0 1px var(--focus-line); }
+.focus-context__rename-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-1); }
+.focus-context__rename-actions button[aria-disabled='true'] { opacity: .48; cursor: default; }
+.focus-context__rename-feedback { margin: 0; color: var(--text-2); font-size: var(--fs-micro); line-height: 1.4; overflow-wrap: anywhere; }
 .focus-context__rename-service { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
 .focus-context__rename-service > [role='status'] { flex: 1; min-width: 0; }
 .focus-context__rename-open { flex: none; min-height: 28px; padding: 4px 7px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-2); font: 500 var(--fs-micro)/1.2 var(--font-sans); white-space: nowrap; cursor: pointer; }

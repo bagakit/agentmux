@@ -4948,6 +4948,36 @@ async function commitDisplayName(target: AgentMuxNameTarget, value: string | nul
   }
 }
 
+/** The Focus row already identifies a local display-name target. The currently selected Space may belong to another owner. */
+export function focusAgentNameEditor(sessionId: string): import('./lib/focus-name-edit').FocusNameEditor {
+  const target = { kind: 'agent-session' as const, id: sessionId }
+  return {
+    async inspect() {
+      const saved = await api.spatial.read()
+      if (!saved) throw new Error('The original name document is unavailable. Check again when storage is available.')
+      coreSpatialPersistence?.acceptNames(saved)
+      applyNameAcknowledgement(saved)
+      const label = displayLabel(saved.graph, target)
+      return { override: label?.value ?? null, nameRevision: label?.nameRevision ?? 0 }
+    },
+    async save(value, expectedNameRevision) {
+      const result = await commitDisplayName(target, value, 'manual', expectedNameRevision)
+      return { operationId: result.record.id, applied: result.applied, nameRevision: result.label?.nameRevision ?? 0,
+        diskDurability: result.diskDurability, issue: result.issue ?? result.record.reason ?? null }
+    },
+    async confirm(operationId) {
+      const saved = await api.spatial.confirmNameCommit(operationId)
+      const receipt = saved.nameCommit
+      if (receipt?.operationId !== operationId || receipt.target.kind !== target.kind || receipt.target.id !== target.id)
+        throw new Error('The original name save is still unconfirmed.')
+      coreSpatialPersistence?.acceptNames(saved)
+      applyNameAcknowledgement(saved)
+      return { operationId, applied: receipt.applied, nameRevision: displayLabel(saved.graph, target)?.nameRevision ?? 0,
+        diskDurability: receipt.diskDurability, issue: receipt.issue ?? null }
+    },
+  }
+}
+
 const agentRegionExecutionIndex = new WeakMap<readonly import('@agentmux/core/spatial-graph').AgentMuxSpatialGraph['regions'][number][], Map<string, import('@agentmux/core/spatial-graph').AgentMuxSpatialGraph['regions'][number]>>()
 
 export type AgentRegionReference = { tabId: string; regionId: string; agentSessionId: string; expectedRunId?: string }
