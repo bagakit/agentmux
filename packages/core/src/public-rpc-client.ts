@@ -1,3 +1,4 @@
+import { parseTerminalInspection, parseTerminalOutputParams } from './terminal-observation.js'
 import { parseSpaceMemberParams } from './space-member-codec.js'
 import { parseHostRouteResult } from './host-route.js'
 import { parseSpaceStreamOpening } from './space-authority-stream.js'
@@ -224,6 +225,7 @@ function streamInitial(method: AgentMuxRpcStreamMethod, value: unknown, params: 
     } else if (typeof p.transferId !== 'string' || !p.transferId) throw new AgentMuxError('Runtime opening lacks its snapshot transfer identity.', 'CONTROL_PROTOCOL_ERROR')
     return p
   }
+  if (method === 'terminal.output') { const input = parseTerminalOutputParams(params); return parseTerminalInspection(value, input.target, input) }
   if (method === 'agent.conversation.watch') return parseConversationWatchOpening(p, params as import('./conversation.js').ConversationRef)
   if (method === 'space.snapshot' || method === 'space.watch') return parseSpaceStreamOpening(p, params as SpaceWatch)
   if (method === 'space.sessions.watch') return parseSpaceSessionsStreamOpening(p, (params as import('./space-sessions.js').SpaceSessionsParams['space.sessions.watch']).reference)
@@ -267,7 +269,16 @@ function streamInitial(method: AgentMuxRpcStreamMethod, value: unknown, params: 
 function streamEvent(method: AgentMuxRpcStreamMethod, value: unknown, initial: unknown, afterByte: number,
   params: Record<string, unknown>, appearancePrevious?: Pick<import('./public-rpc-settings-observation.js').AgentMuxAppearanceObservation, 'sourceId' | 'revision'>): Record<string, unknown> {
   const event = rpcRecord(value, undefined, 'CONTROL_PROTOCOL_ERROR')
-  if (event.type === 'end') { rpcRecord(event, ['type', 'data'], 'CONTROL_PROTOCOL_ERROR'); return event }
+  if (event.type === 'end') {
+    rpcRecord(event, ['type', 'data'], 'CONTROL_PROTOCOL_ERROR')
+    if (method === 'terminal.output') {
+      const data = rpcRecord(event.data, ['runId', 'state', 'reason', 'exitCode', 'exitSignal'], 'CONTROL_PROTOCOL_ERROR')
+      if (data.runId !== (initial as AgentMuxRpcStreamInitial<'terminal.output'>).run.runId ||
+        !['running', 'exited', 'interrupted'].includes(String(data.state)) || !['replay-complete', 'owner-ended'].includes(String(data.reason)))
+        throw new AgentMuxError('Terminal reader end belongs to another Run or source.', 'CONTROL_PROTOCOL_ERROR')
+    }
+    return event
+  }
   if (event.type === 'error') {
     rpcRecord(event, ['type', 'error'], 'CONTROL_PROTOCOL_ERROR')
     const error = rpcRecord(event.error, ['code', 'message', 'detail', 'details', 'candidates', 'controlFailure', 'logId', 'creationFailure', 'storageFailure', 'executionFailure', 'evidence'], 'CONTROL_PROTOCOL_ERROR')
@@ -280,7 +291,7 @@ function streamEvent(method: AgentMuxRpcStreamMethod, value: unknown, initial: u
     if (error.executionFailure !== undefined) parseAgentExecutionFailure(error.executionFailure)
     if (error.evidence !== undefined) {
       const evidence = parseOutputGapEvidence(error.evidence)
-      if (method === 'agent.output' && evidence.run && evidence.run.runId !== (initial as import('./public-rpc.js').AgentMuxRpcOutputInitial).run.runId) {
+      if ((method === 'agent.output' || method === 'terminal.output') && evidence.run && evidence.run.runId !== (initial as import('./public-rpc.js').AgentMuxRpcOutputInitial).run.runId) {
         throw new AgentMuxError('Output diagnostic belongs to another Run.', 'CONTROL_PROTOCOL_ERROR')
       }
     }
@@ -315,10 +326,11 @@ function streamEvent(method: AgentMuxRpcStreamMethod, value: unknown, initial: u
     if (!Number.isSafeInteger(p.sequence) || (p.sequence as number) < 0 || !Object.hasOwn(p, 'event')) throw new AgentMuxError('Invalid Browser progress cursor.', 'CONTROL_PROTOCOL_ERROR')
     return event
   }
-  if (method === 'agent.output' && event.type === 'output') {
+  if ((method === 'agent.output' || method === 'terminal.output') && event.type === 'output') {
     const p = rpcRecord(event.data, ['runId', 'replay', 'startByte', 'endByte', 'dataBase64'], 'CONTROL_PROTOCOL_ERROR')
     if (p.runId !== (initial as AgentMuxRpcStreamInitial<'agent.output'>).run.runId || typeof p.replay !== 'boolean' ||
       !Number.isSafeInteger(p.startByte) || !Number.isSafeInteger(p.endByte) || (p.startByte as number) < afterByte ||
+      (method === 'terminal.output' && p.startByte !== Math.max(afterByte, (initial as AgentMuxRpcStreamInitial<'terminal.output'>).firstAvailableByte)) ||
       (p.endByte as number) <= (p.startByte as number) || typeof p.dataBase64 !== 'string' ||
       Buffer.from(p.dataBase64, 'base64').toString('base64') !== p.dataBase64 ||
       Buffer.from(p.dataBase64, 'base64').byteLength !== (p.endByte as number) - (p.startByte as number)) {

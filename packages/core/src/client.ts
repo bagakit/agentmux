@@ -4498,12 +4498,8 @@ export class AgentMuxClient {
   async recoverTerminal(value: AgentMuxTerminalRecoveryInput): Promise<AgentMuxTerminalRecoveryResult> {
     this.requireConnected()
     const input = parseTerminalRecoveryInput(value)
-    const rawOwnership = async (ref: AgentMuxRunRef) => {
-      const [sessions, retired] = await Promise.all([loadAgentSessionMetadata(this.store), this.store.loadRetiredAgentSessions()])
-      if (sessions.some(session => session.run.runId === ref.runId || session.retiredRuns.some(run => run.runId === ref.runId)) ||
-          retired.some(session => session.run.runId === ref.runId) || this.registry.findByRun(ref) || this.registry.isRetiredRun(ref))
-        throw new AgentMuxError('The original Run belongs to an Agent Session. Its identity and healthy input are retained.', 'RUN_KIND_MISMATCH')
-    }
+    const rawOwnership = (ref: AgentMuxRunRef) => this.assertRawTerminal(ref)
+
     const owner = new TerminalRecoveryOwner(join(this.agentSessionStorePath() ? dirname(this.agentSessionStorePath()!) : this.kernel.stateDirectory, 'terminal-recoveries'), {
       runtime: () => this.terminalCreationRuntimeIdentity(),
       original: async request => {
@@ -4561,6 +4557,60 @@ export class AgentMuxClient {
     const { prepared } = decodePreparedRun(input, 'INVALID_TERMINAL_PREPARATION')
     this.requireConnected()
     return await this.kernel.observePreparedStartRetirement(prepared.createOperationId, runtime)
+  }
+
+  /** Classify persisted Agent ownership once per read, never per output chunk. */
+  private async originalAgentRunIds(): Promise<Set<string>> {
+    const [sessions, retired, retiredRuns] = await Promise.all([loadAgentSessionMetadata(this.store), this.store.loadRetiredAgentSessions(), this.store.loadRetiredRuns()])
+    return new Set([...sessions.flatMap(s => [s.run.runId, ...s.retiredRuns.map(r => r.runId)]),
+      ...retired.map(s => s.run.runId), ...retiredRuns.map(r => r.runId)])
+  }
+  private async assertRawTerminal(ref: AgentMuxRunRef): Promise<void> {
+    if ((await this.originalAgentRunIds()).has(ref.runId) || this.registry.findByRun(ref) || this.registry.isRetiredRun(ref))
+      throw new AgentMuxError('This Run belongs to an Agent Session. Use its original semantic owner.', 'RUN_KIND_MISMATCH')
+  }
+
+  async listTerminals(input: { cursor?: import('./terminal-observation.js').TerminalListCursor; limit: number }): Promise<{
+    runtime: import('./terminal-creation-retirement.js').AgentMuxCreationRuntime;
+    items: import('./terminal-observation.js').TerminalInspection[]; nextCursor: string | null
+  }> {
+    this.requireConnected()
+    const runtime = this.terminalCreationRuntimeIdentity()
+    if (input.cursor && (runtime.runtimeId !== input.cursor.runtimeId || runtime.instanceId !== input.cursor.ownerInstanceId))
+      throw new AgentMuxError('The original Terminal page owner changed. Begin a new listing; original Runs remain available.', 'TERMINAL_CURSOR_EXPIRED')
+    const agentRuns = await this.originalAgentRunIds(), page = await this.kernel.listPage(input.cursor?.afterRunId ?? null, input.limit)
+    if (this.terminalCreationRuntimeIdentity().instanceId !== runtime.instanceId)
+      throw new AgentMuxError('The original Terminal page owner changed.', 'TERMINAL_RUNTIME_MISMATCH')
+    const items = page.runs.flatMap(run => agentRuns.has(run.runId) || this.registry.findByRun({ runId: run.runId }) || this.registry.isRetiredRun({ runId: run.runId })
+      ? [] : [{ runtime, run: this.projectRun(run), firstAvailableByte: run.firstAvailableByte }])
+    return { runtime, items, nextCursor: page.nextCursor }
+  }
+
+  async inspectTerminal(target: { runtimeId: string; run: AgentMuxRunRef }): Promise<import('./terminal-observation.js').TerminalInspection> {
+    this.requireConnected()
+    const runtime = this.terminalCreationRuntimeIdentity()
+    if (runtime.runtimeId !== target.runtimeId) throw new AgentMuxError('The original Terminal Runtime changed.', 'TERMINAL_RUNTIME_MISMATCH')
+    await this.assertRawTerminal(target.run)
+    const run = await this.kernel.status(target.run.runId)
+    if (run.runId !== target.run.runId) throw new AgentMuxError('Terminal status returned another Run.', 'CONTROL_PROTOCOL_ERROR')
+    if (this.terminalCreationRuntimeIdentity().instanceId !== runtime.instanceId) throw new AgentMuxError('The original Terminal observation owner changed.', 'TERMINAL_RUNTIME_MISMATCH')
+    return { runtime, run: this.projectRun(run), firstAvailableByte: run.firstAvailableByte }
+  }
+
+  /** A private output lease; closing it never detaches the visible Terminal. */
+  async observeTerminalOutput(target: { runtimeId: string; run: AgentMuxRunRef }, afterByte: number,
+    listener: (event: import('./ctxmux-run-adapter.js').CtxmuxAdapterObservationEvent) => void): Promise<import('./terminal-observation.js').TerminalInspection & {
+      replay: AgentMuxRunDataEvent[]; gap: import('./types.js').AgentMuxRunReplayGap | null; close(): Promise<void>
+    }> {
+    const original = await this.inspectTerminal(target)
+    const observation = await this.kernel.observeOutput(target.run.runId, afterByte, listener)
+    try {
+      if (observation.run.runId !== target.run.runId || this.terminalCreationRuntimeIdentity().instanceId !== original.runtime.instanceId)
+        throw new AgentMuxError('The original Terminal output owner changed.', 'TERMINAL_RUNTIME_MISMATCH')
+      await this.assertRawTerminal(target.run)
+      return { runtime: original.runtime, run: this.projectRun(observation.run), firstAvailableByte: observation.run.firstAvailableByte,
+        replay: observation.replay, gap: observation.gap, close: observation.close }
+    } catch (error) { await observation.close(); throw error }
   }
 
   async attachTerminal(runId: string, afterByte = 0, view: AgentMuxRunAttachmentView = 'raw'): Promise<AgentMuxRunAttachment> {

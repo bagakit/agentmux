@@ -284,6 +284,9 @@ type NativeParams = HostRouteParams & SpaceMemberParams & SpaceSessionsParams & 
   'agent.execution.continue': import('./agent-execution-contract.js').AgentExecutionReference
   'agent.execution.binding': { bindingId: string }
   'agent.execution.rejoin': { bindingId: string }
+  'terminal.ls': import('./terminal-observation.js').TerminalListParams
+  'terminal.inspect': { target: import('./terminal-observation.js').TerminalTarget }
+  'terminal.output': import('./terminal-observation.js').TerminalOutputParams
   'terminal.recover': import('./terminal-recovery.js').AgentMuxTerminalRecoveryInput & { hostId: string }
   'skill.ls': { hostId: string; agentSessionId: string }
   'agent.continuity.control': import('./agent-session-recovery/control-contract.js').AgentMuxContinuityControlInput
@@ -398,6 +401,9 @@ type NativeResult = HostRouteResults & SpaceMemberResults & SpaceSessionsResults
   'agent.execution.continue': AgentMuxRpcResult<'agent.execution.create'>
   'agent.execution.binding': import('./agent-execution-coordinator.js').AgentExecutionInspection | null
   'agent.execution.rejoin': import('./agent-execution-coordinator.js').AgentExecutionInspection
+  'terminal.ls': import('./terminal-observation.js').TerminalListResult
+  'terminal.inspect': import('./terminal-observation.js').TerminalInspectResult
+  'terminal.output': import('./terminal-observation.js').TerminalOutputInitial
   'terminal.recover': import('./terminal-recovery.js').AgentMuxTerminalRecoveryResult
   'skill.ls': { hostId: string; sourceHostId: string; agentSessionId: string; providerId: string; workspacePath: string; skills: import('./agent-skills.js').AgentSkill[] }
   'agent.continuity.control': import('./agent-session-recovery/control-contract.js').AgentMuxContinuityControlResult
@@ -554,10 +560,10 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'message.federation.dispatch-intake': 'long', 'message.federation.intake': 'long', 'message.federation.export': 'long', 'message.dispatch.sync': 'long', 'message.dispatch.open': 'long', 'message.dispatch.inspect': 'short', 'message.dispatch.report': 'long',
   'message.notify': 'long', 'message.notify.inspect': 'short', 'message.read': 'short', 'message.ls': 'short', 'message.events': 'short', 'message.dispatch.read': 'short', 'message.dispatch.ls': 'short',
   'app.search': 'long', 'app.snapshot': 'long', 'goal.activity': 'short', 'system.doctor': 'long', 'system.storage': 'short',
-  'system.endpoint': 'short', 'system.subscription.cancel': 'short', 'terminal.recover': 'long'
+  'system.endpoint': 'short', 'system.subscription.cancel': 'short', 'terminal.recover': 'long', 'terminal.ls': 'short', 'terminal.inspect': 'short', 'terminal.output': 'long'
 } as const satisfies Record<keyof NativeParams, 'short' | 'long'>
 
-export type AgentMuxRpcStreamMethod = 'space.member.watch' | import('./host-route.js').HostRouteStreamMethod | 'space.sessions.watch' | 'space.snapshot' | 'space.watch' | 'goal.watch' | 'agent.conversation.watch' | 'agent.output' | 'browser.follow' | 'toolkit.watch' | 'system.metrics.watch' | 'settings.appearance.watch' | 'connection.metadata.watch' |
+export type AgentMuxRpcStreamMethod = 'space.member.watch' | import('./host-route.js').HostRouteStreamMethod | 'space.sessions.watch' | 'space.snapshot' | 'space.watch' | 'goal.watch' | 'agent.conversation.watch' | 'agent.output' | 'terminal.output' | 'browser.follow' | 'toolkit.watch' | 'system.metrics.watch' | 'settings.appearance.watch' | 'connection.metadata.watch' |
   AgentMuxHostedStreamMethod
 export type AgentMuxRpcStreamParams<M extends AgentMuxRpcStreamMethod> = AgentMuxRpcParams<M> &
   (M extends 'agent.output' ? { follow?: boolean } : Record<never, never>)
@@ -567,6 +573,7 @@ type AgentMuxRpcStreamInitialMap = AgentMuxHostedStreamInitialMap & {
   'route.receive-watch': import('./host-route.js').HostRouteStreamInitial
   'agent.conversation.watch': import('./conversation-changes.js').ConversationWatchOpening
   'agent.output': AgentMuxRpcOutputInitial
+  'terminal.output': import('./terminal-observation.js').TerminalOutputInitial
   'browser.follow': { runOperation: import('./control.js').AgentMuxControlBrowserOperation | null;
     gap: { droppedThrough: number } | null }
   'toolkit.watch': { toolId: string }
@@ -589,7 +596,7 @@ export type AgentMuxRpcStreamEvent<M extends AgentMuxRpcStreamMethod> =
     : M extends 'space.snapshot' | 'space.watch' | 'space.sessions.watch' ? { type: 'snapshot'; data: import('./hosted-client-contract.js').AgentMuxHostedTransferChunk }
     : M extends 'goal.watch' ? { type: 'change'; data: import('./goal-changes.js').GoalChanges }
     : M extends 'connection.metadata.watch' ? { type: 'change'; data: import('./channel-metadata-contract.js').ChannelMetadataChange }
-    : M extends 'agent.output' ? { type: 'output'; data: AgentMuxRpcOutputBytes }
+    : M extends 'agent.output' | 'terminal.output' ? { type: 'output'; data: AgentMuxRpcOutputBytes }
     : M extends 'browser.follow' ? { type: 'progress'; data: import('./control.js').AgentMuxControlBrowserEvent }
     : { type: 'snapshot'; data: M extends 'toolkit.watch' ? import('./toolkit.js').ToolkitSnapshot : M extends 'settings.appearance.watch' ? import('./public-rpc-settings-observation.js').AgentMuxAppearanceObservation : import('./metrics.js').MetricsObservation })
 
@@ -599,6 +606,6 @@ export function isAgentMuxRpcMethod(value: unknown): value is AgentMuxRpcMethod 
 }
 export function isAgentMuxRpcStream(method: AgentMuxRpcMethod, params: Record<string, unknown>): method is AgentMuxRpcStreamMethod {
   return method === 'space.member.watch' || method === 'route.watch' || method === 'route.receive-watch' || method === 'space.sessions.watch' || method === 'space.snapshot' || method === 'space.watch' || method === 'goal.watch' || method === 'connection.metadata.watch' || method === 'agent.conversation.watch' || method === 'browser.follow' || method === 'toolkit.watch' || method === 'system.metrics.watch' || method === 'settings.appearance.watch' ||
-    method === 'agent.output' || method === 'runtime.events' || method === 'runtime.conversation-watch' || method === 'runtime.history-watch' ||
+    method === 'agent.output' || method === 'terminal.output' || method === 'runtime.events' || method === 'runtime.conversation-watch' || method === 'runtime.history-watch' ||
     method === 'runtime.attachment-watch' || method === 'runtime.replay-watch'
 }

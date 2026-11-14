@@ -1205,6 +1205,18 @@ export class CtxmuxRunAdapter {
    * best-effort snapshot (the SDK pages it non-atomically), so a Run disappearing mid-walk is a normal
    * outcome of the walk, not an error to propagate. Every other failure still throws.
    */
+  /** One bounded source page; no unrelated Run status is hydrated. */
+  async listPage(after: string | null, limit: number): Promise<{ runs: CtxmuxAdapterRun[]; nextCursor: string | null }> {
+    try {
+      const page = await this.requireClient().listPage(after, limit)
+      const runs = await mapWithConcurrency(page.runs, RUN_STATUS_CONCURRENCY, async summary => {
+        try { return this.projectRun(await this.requireClient().status(summary.id)) }
+        catch (error) { if (translateCtxmuxError(error).code === 'CTXMUX_run_not_found') return null; throw error }
+      })
+      return { runs: runs.flatMap(run => run ? [run] : []), nextCursor: page.nextCursor }
+    } catch (error) { throw translateCtxmuxError(error) }
+  }
+
   async list(): Promise<CtxmuxAdapterRun[]> {
     try {
       const summaries = await this.requireClient().list()

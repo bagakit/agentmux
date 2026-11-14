@@ -1,4 +1,5 @@
 import { parseProviderCatalogQuery, parseProviderCatalogObservation } from './public-rpc-provider-catalog.js'
+import { parseTerminalInspection, parseTerminalTarget, parseTerminalListParams, parseTerminalListResult } from './terminal-observation.js'
 import { parseSpaceMemberParams } from './space-member-codec.js'
 import { parseHostedRuntimeOwnerIdentity } from './hosted-value.js'
 import { hostedSessionProjection, hostedSessionIds } from './hosted-session-summary.js'
@@ -663,6 +664,9 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (result.state === 'active') parseRpcAgentSession(result.session)
         return result as unknown as Record<string, unknown>
       }
+      case 'terminal.ls': return parseTerminalListResult(value, parseTerminalListParams(input)) as unknown as Record<string, unknown>
+      case 'terminal.inspect': return parseTerminalInspection(value, parseTerminalTarget(input.target)) as unknown as Record<string, unknown>
+      case 'terminal.output': fail() // Ordered subscription only.
       case 'terminal.recover': {
         const { hostId: _host, ...request } = input
         return parseTerminalRecoveryResult(value, parseTerminalRecoveryInput(request)) as unknown as Record<string, unknown>

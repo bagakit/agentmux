@@ -179,6 +179,8 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
   type AgentMuxRpcStreamInitial, type AgentMuxRpcStreamEvent, type AgentMuxRpcUnavailable, type AgentMuxRpcPrincipal } from './public-rpc.js'
 
 /** A structural slice of the original public SDK; hosted clients need no private fields. */
+import { parseTerminalTarget, parseTerminalOutputParams, parseTerminalInspection, parseTerminalListParams, parseTerminalListResult } from './terminal-observation.js'
+
 export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').AgentExecutionHostPort & Pick<AgentMuxClient,
   'restartAgent' | 'inspectAgentRestart' | 'inspectAgentStop' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentMessageQueuePath' | 'readAgentSession' | 'readAgentSessions' | 'readAgentSessionHistory' | 'readAgentSessionUsage' | 'inspectAgentSessionRecord' | 'deleteAgentSessionRecord' | 'recordExternalConversationMessage' | 'readAgentConversation' | 'listConversationSnapshots' | 'releaseConversationSnapshot' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'resolveAgentCreationSessionId' | 'inspectAgentCreation' | 'continueAgentCreation' | 'recoverTerminal' | 'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
@@ -187,6 +189,9 @@ export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').Age
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'listMessages' | 'listMessageEvents' | 'inspectMessageBroadcast' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
   'readDeliveryAttempt' | 'readReadingDiagnostic' | 'findReadingDiagnostics' | 'readAgentStartupDiagnostic' | 'findAgentStartupDiagnostics' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'agentMessageAuthority' | 'listTrustedMessageSources' | 'trustMessageSource' | 'prepareFederatedMessage' | 'intakeFederatedMessage' | 'prepareFederatedRead' | 'exportFederatedThread' | 'readFederatedOutbox' | 'recordFederatedDispatchEvent' | 'intakeFederatedDispatchEvent' | 'recordFederatedInboxReceipt' | 'listHostExecutors' | 'configureHostExecutor' | 'hostEnvironment'> & {
+    listTerminals?: AgentMuxClient['listTerminals']
+    inspectTerminal?: AgentMuxClient['inspectTerminal']
+    observeTerminalOutput?: AgentMuxClient['observeTerminalOutput']
     runtimeOwnerIdentity?: import('./hosted-client-contract.js').AgentMuxHostedClient['runtimeOwnerIdentity']
     readRuntimeOwnerIdentity?: import('./hosted-client-contract.js').AgentMuxHostedClient['readRuntimeOwnerIdentity']
     remoteTransportObservation?: import('./hosted-client-contract.js').AgentMuxHostedClient['remoteTransportObservation']
@@ -404,6 +409,7 @@ const NATIVE_FIELDS = {
   'agent.execution.continue': ['bindingId', 'agentSessionId', 'createOperationId'],
   'agent.execution.binding': ['bindingId'],
   'agent.execution.rejoin': ['bindingId'],
+  'terminal.ls': ['hostId', 'cursor', 'limit'], 'terminal.inspect': ['target'], 'terminal.output': ['target', 'afterByte', 'follow'],
   'terminal.recover': ['hostId', 'expectedRun', 'runtimeId', 'workspacePath', 'operationId', 'action'],
   'skill.ls': ['hostId', 'agentSessionId'],
   'agent.continuity.control': ['agentSessionId', 'intentOperationId', 'expectedRun', 'operationId', 'action', 'additionalAttempts'],
@@ -2762,6 +2768,43 @@ export class AgentMuxRpcService {
           'The recovery control returned another original Host.', 'CONTROL_PROTOCOL_ERROR')
         return verified as AgentMuxRpcResult<M>
       }
+      case 'terminal.ls': {
+        if (caller || !context.principal || !['user', 'device'].includes(context.principal.kind))
+          throw new AgentMuxError('Raw Terminal discovery requires the original transport-approved person or device.', 'CONTROL_PERMISSION_DENIED')
+        const input = parseTerminalListParams(p), scopes = (await this.clients()).filter(scope => scope.hostId === input.hostId)
+        if (scopes.length !== 1) throw new AgentMuxError('The exact Terminal execution Host is unavailable or ambiguous.', 'CONTROL_UNAVAILABLE')
+        const scope = scopes[0]!
+        if (scope.client.forwardRpc) {
+          const original = { ...input, hostId: 'local' }
+          const value = parseTerminalListResult(await scope.client.forwardRpc('terminal.ls', original, await this.inputForwardContext(context)), original)
+          result = { ...value, hostId: input.hostId, items: value.items.map(item => ({ ...item, target: { ...item.target, hostId: input.hostId } })) }
+        } else {
+          if (!scope.client.listTerminals) throw new AgentMuxError('The original Terminal discovery owner is unavailable.', 'CONTROL_UNAVAILABLE')
+          const page = await scope.client.listTerminals({ ...(input.cursor ? { cursor: input.cursor } : {}), limit: input.limit ?? 100 })
+          result = parseTerminalListResult({ hostId: input.hostId, runtime: page.runtime, coverage: 'live-page',
+            items: page.items.map(item => ({ ...item, target: { hostId: input.hostId, runtimeId: page.runtime.runtimeId, run: { runId: item.run.runId } } })),
+            nextCursor: page.nextCursor === null ? null : { runtimeId: page.runtime.runtimeId, ownerInstanceId: page.runtime.instanceId, afterRunId: page.nextCursor } }, input)
+        }
+        break
+      }
+      case 'terminal.inspect': {
+        rpcRecord(p, ['target'])
+        if (caller || !context.principal || !['user', 'device'].includes(context.principal.kind))
+          throw new AgentMuxError('Raw Terminal reads require the original transport-approved person or device.', 'CONTROL_PERMISSION_DENIED')
+        const target = parseTerminalTarget(p.target)
+        const scopes = (await this.clients()).filter(scope => scope.hostId === target.hostId)
+        if (scopes.length !== 1) throw new AgentMuxError('The exact Terminal execution Host is unavailable or ambiguous.', 'CONTROL_UNAVAILABLE')
+        const scope = scopes[0]!, original = { ...target, hostId: 'local' }
+        if (scope.client.forwardRpc) {
+          const value = parseTerminalInspection(await scope.client.forwardRpc('terminal.inspect', { target: original }, await this.inputForwardContext(context)), original)
+          result = { ...value, target }
+        } else {
+          if (!scope.client.inspectTerminal) throw new AgentMuxError('The original Terminal observation owner is unavailable.', 'CONTROL_UNAVAILABLE')
+          result = parseTerminalInspection({ ...await scope.client.inspectTerminal(target), target }, target)
+        }
+        break
+      }
+      case 'terminal.output': throw new AgentMuxError('Terminal output is a bounded byte subscription.', 'INVALID_CONTROL_REQUEST')
       case 'terminal.recover': {
         if (caller || !context.principal || !['user', 'device'].includes(context.principal.kind))
           throw new AgentMuxError('Raw Terminal recovery requires its transport-approved user or device owner.', 'CONTROL_PERMISSION_DENIED')
@@ -4161,6 +4204,57 @@ export class AgentMuxRpcService {
         initial = { hostId: input.hostId, agentSessionId: input.agentSessionId, sourceHostId: observer.sourceHostId, scope: observer.scope, coverage: observer.coverage }
         cleanup = () => { observer.closed?.removeEventListener('abort', ended); observer.dispose() }
         if (observer.closed?.aborted) ended()
+      } else if (method === 'terminal.output') {
+        const input = parseTerminalOutputParams(params), target = input.target
+        if (caller || !context.principal || !['user', 'device'].includes(context.principal.kind))
+          throw new AgentMuxError('Raw Terminal reads require the original transport-approved person or device.', 'CONTROL_PERMISSION_DENIED')
+        await context.assertCurrent?.()
+        const scopes = (await this.clients()).filter(scope => scope.hostId === target.hostId)
+        if (scopes.length !== 1) throw new AgentMuxError('The exact Terminal execution Host is unavailable or ambiguous.', 'CONTROL_UNAVAILABLE')
+        const scope = scopes[0]!, cursor = input.afterByte ?? 0, runId = target.run.runId
+        if (scope.client.forwardRpc) {
+          if (!scope.client.subscribeRpc) throw new AgentMuxError('The original Terminal output transport is unavailable.', 'CONTROL_UNAVAILABLE')
+          const original = { ...input, target: { ...target, hostId: 'local' } }
+          const forwarded = await this.inputForwardContext(context)
+          const reader = await scope.client.subscribeRpc('terminal.output', original, {
+            signal: controller.signal, ...(forwarded.forwarding ? { forwarding: forwarded.forwarding } : {}),
+            onInitial: value => { initial = { ...parseTerminalInspection(value, original.target, original), target } },
+            onEvent: event => { void emit(event) }, onEnd: error => { if (error) { void emit({ type: 'error', error: readerError(error) }); void dispose() } }
+          })
+          cleanup = () => reader.dispose()
+          if (!initial) throw new AgentMuxError('Original Terminal reader omitted its opening.', 'CONTROL_PROTOCOL_ERROR')
+        } else {
+          if (!scope.client.observeTerminalOutput) throw new AgentMuxError('The original Terminal output owner is unavailable.', 'CONTROL_UNAVAILABLE')
+          const ordered = new OrderedSessionOutputFollow(runId, cursor,
+            async event => { for (let offset = 0; offset < event.dataBytes.length && !closed; offset += 128 * 1024) {
+              const dataBytes = event.dataBytes.subarray(offset, offset + 128 * 1024), startByte = event.startByte + offset
+              await emit({ type: 'output', data: bytes({ ...event, dataBytes, startByte, endByte: startByte + dataBytes.length }) })
+            } }, event => { void emit({ type: 'end', data: { runId, ...event, reason: 'owner-ended' } }); void dispose() },
+            error => { void Promise.resolve(emit({ type: 'error', error: readerError(error) })).finally(dispose).catch(() => {}) })
+          const attached = await scope.client.observeTerminalOutput(target, cursor, event => {
+            if (closed || input.follow !== true) return
+            if (event.runId !== runId) { void emit({ type: 'error', error: { code: 'CONTROL_PROTOCOL_ERROR', message: 'Terminal reader received another Run.' } }); void dispose(); return }
+            if (event.type === 'data') ordered.accept({ type: 'terminal-output', run: target.run, data: event.data, dataBytes: event.dataBytes,
+              evidence: { source: 'terminal-output', observedAt: Date.now(), run: target.run, outputByteRange: { startByte: event.startByte, endByte: event.endByte } } })
+            else if (event.type === 'exit') ordered.accept({ type: 'process-state', run: target.run, state: event.state.type, pid: null,
+              ...(event.state.type === 'exited' ? { exitCode: event.state.code, ...(event.state.signal ? { exitSignal: event.state.signal } : {}) } : {}),
+              evidence: { source: 'run-process', observedAt: event.observedAt, run: target.run } })
+            else if (event.type === 'error' || event.type === 'gap') {
+              void emit({ type: 'error', error: event.type === 'error' ? readerError(event.error) : {
+                code: 'OUTPUT_GAP', message: 'This Terminal reader missed output. Keep its original cursor and reconnect.', details: { runId, latestOutputBytes: event.latestOutputBytes, causes: event.causes, observation: event.observation } } })
+              void dispose()
+            }
+          })
+          cleanup = () => attached.close()
+          initial = parseTerminalInspection({ target, runtime: attached.runtime, run: attached.run, firstAvailableByte: attached.firstAvailableByte, gap: attached.gap }, target, input)
+          start = async () => {
+            await ordered.finishReplayAsync(attached.replay)
+            if (!closed && (input.follow !== true || attached.run.state !== 'running')) {
+              await emit({ type: 'end', data: { runId, state: attached.run.state, reason: input.follow === true ? 'owner-ended' : 'replay-complete' } })
+              await dispose()
+            }
+          }
+        }
       } else if (method === 'agent.output') {
         const owner = outputOwner!
         const cursor = rpcCount(params.afterByte, 0)
