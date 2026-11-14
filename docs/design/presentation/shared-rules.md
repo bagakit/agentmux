@@ -488,7 +488,7 @@ styles/
   collaboration.css  Focus 协作图：画布、筛选、关系与检视面
   focus.css  Focus 三段工作面：历史、状态、选中的 Session
     focus-context.css  同一入口先读的查找、上下文卡片与位置选择
-  agent-operation-feedback.css  Agent 卡片及 Region 的异步操作短状态、边沿轨迹与原操作详情
+  agent-operation-feedback.css  Agent 卡片及 Region 的异步操作短状态、局部动效与原操作详情
   agent-input-recap.css  Focus 卡片里的原输入回看与图片缩略
   agent-bookmarks.css  Agent 信息阅读窗里的书签、更新提示与问题
   focus-timeline-ruler.css  Focus 时间轴与有界标尺
