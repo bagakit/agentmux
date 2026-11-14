@@ -1,4 +1,8 @@
 export type PixelFrame = { width: number; height: number; data: Uint8ClampedArray }
+/** A rejected alignment candidate; the source and existing frames remain usable. */
+export class ScrollOverlapError extends Error {
+  override name = 'ScrollOverlapError'
+}
 /** Find the downward scroll between two equal viewports. Uncertain alignment stays explicit. */
 export function matchScroll(previous: PixelFrame, next: PixelFrame): { shift: number; error: number } {
   const { width: w, height: h, data: a } = previous, b = next.data
@@ -25,6 +29,6 @@ export function matchScroll(previous: PixelFrame, next: PixelFrame): { shift: nu
   // Local cursor or blinking content can change pixels without moving the viewport.
   // Prefer zero motion when it is both within the overlap budget and the best alignment.
   if (best && unchanged < 6 && unchanged < best.error) return { shift: 0, error: unchanged }
-  if (!best || best.error > 6 || alternate && alternate.error - best.error < 1) throw new Error('The overlap is unclear. Scroll less, avoid fixed headers or moving content, and capture again. Previous frames are kept.')
+  if (!best || best.error > 6 || alternate && alternate.error - best.error < 1) throw new ScrollOverlapError('The overlap is unclear. Scroll back to overlap the last captured content, and pause moving content. Previous frames are kept.')
   return best
 }

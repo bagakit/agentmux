@@ -9,14 +9,14 @@ import type { CaptureSequenceContext, CaptureSequenceMethod, CaptureSequencePara
 import type { AppearanceConfig, BrowserPng } from '../shared/contracts'
 import { CAPTURE_SEQUENCE_CHANNEL, type CaptureSequenceInput, type CaptureSequenceMode, type SequenceSnapshot } from '../shared/capture-sequence'
 import type { ScreenshotCaptureSource } from '../shared/system-screenshot-editor'
-import { matchScroll } from '../shared/scroll-stitch'
+import { matchScroll, ScrollOverlapError } from '../shared/scroll-stitch'
 import { inspectGif } from '../shared/gif-metadata'
 import { themeBootstrap } from './theme-bootstrap'
 import { savePastedImage } from './pasted-image-write'
 import { screenshotFileName, writeScreenshotFile } from './screenshot-files'
 
 type Selection = { image: BrowserPng; source: ScreenshotCaptureSource; background?: import('../shared/capture-surface').CaptureBackground; startImmediately?: boolean }
-type Record = { receipt: CaptureSequenceResult; actor: CaptureSequenceContext['actor']; window?: BrowserWindow; frame?: BrowserWindow; input?: CaptureSequenceInput;
+type Record = { receipt: CaptureSequenceResult; actor: CaptureSequenceContext['actor']; window?: BrowserWindow; frame?: BrowserWindow; input?: CaptureSequenceInput; baselinePending?: boolean;
   timer?: ReturnType<typeof setTimeout>; inflight?: Promise<void>; fps: number; artifact?: { sha256: string; bytes: number }; journal?: { frames: unknown[]; source: ScreenshotCaptureSource }; size?: { width: number; height: number }; files?: string[]; persisting?: Promise<void>; resolve?(value: BrowserPng | string | null): void; attached?: string; ending?: boolean }
 const MAX_FRAME_BYTES = 64 * 1024 * 1024
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
@@ -154,10 +154,26 @@ export class CaptureSequenceOwner {
       const first = record.size!
       if (image.width !== first.width || image.height !== first.height) throw new Error('The selected display scale changed. Finish the existing sequence before choosing another region.')
       const previous = input.frames.at(-1)?.image
+      if (automaticScroll && record.baselinePending) {
+        // Selection can stay frozen while the real source changes. Start with live pixels.
+        input.frames[0] = { image, capturedAt: Date.now(), delayMs: 1000 / record.fps }
+        await this.saveFrame(record, 0)
+        record.baselinePending = false
+        await this.persist(record)
+        return
+      }
       if (automaticScroll && previous) {
-        if (previous.dataUrl === image.dataUrl) return
         const pixels = (frame: BrowserPng) => { const bitmap = nativeImage.createFromBuffer(pngBytes(frame)).toBitmap(); return { width: frame.width, height: frame.height, data: new Uint8ClampedArray(bitmap.buffer, bitmap.byteOffset, bitmap.byteLength) } }
-        if (matchScroll(pixels(previous), pixels(image)).shift === 0) return
+        let shift: number
+        try { shift = previous.dataUrl === image.dataUrl ? 0 : matchScroll(pixels(previous), pixels(image)).shift }
+        catch (error) {
+          if (!(error instanceof ScrollOverlapError)) throw error
+          record.receipt.issue = input.issue = message(error)
+          await this.persist(record)
+          return
+        }
+        if (input.issue || record.receipt.issue) { input.issue = record.receipt.issue = null; await this.persist(record) }
+        if (shift === 0) return
       }
       const capturedAt = Date.now(), last = input.frames.at(-1)
       if (last) last.delayMs = Math.max(10, Math.round((capturedAt - last.capturedAt) / 10) * 10)
@@ -188,6 +204,7 @@ export class CaptureSequenceOwner {
       if (record.receipt.state !== 'ready' && !(record.input!.mode === 'scroll' && record.receipt.state === 'review')) throw new Error('Finish the current capture before starting it again.')
       if (![2, 5, 10].includes(fps)) throw new Error('Choose 2, 5 or 10 frames per second.')
       record.fps = fps
+      record.baselinePending = record.input!.mode === 'scroll' && record.receipt.state === 'ready'
       if (record.input!.mode === 'gif') { record.input!.frames = []; record.files = []; record.receipt.frameCount = 0 }
       record.receipt.state = 'recording'; record.input!.state = 'recording'; record.input!.issue = null
       this.compactWindow(record)
