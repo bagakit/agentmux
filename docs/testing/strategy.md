@@ -2,7 +2,7 @@
 
 ## 权威边界
 
-AgentMux 只测试自己的公共 Core/Client 行为和 CtxMux public boundary，不读取 CtxMux wire、数据库、PID table 或私有模块。PTY、Replay、Signal 与 Stop 的底层正确性由固定 CtxMux source Gate 拥有；AgentMux 必须另做 checkout-external packed-boundary proof，证明打包和映射没有破坏这些能力。Agent-first 空间命令的操作见[按对象操作桌面](../guides/agentmux-cli-object-control.md)（准确 selector 与参数以 `amux space --help` 为准），产品约束见[交互 SSOT](../design/agentmux-desktop-interaction.md)。本文拥有验证分层、任务验收与公开 oracle，不是当前候选的通过报告。命令来源是[根 package scripts](../../package.json)与 [Desktop package scripts](../../apps/desktop/package.json)，随包版本唯一取自 [vendor manifest](../../packages/core/vendor/ctxmux/darwin-arm64/manifest.json)。
+AgentMux 只测试自己的公共 Core/Client 行为和 CtxMux public boundary，不读取 CtxMux wire、数据库、PID table 或私有模块。PTY、Replay、Signal 与 Stop 的底层正确性由固定 CtxMux source Gate 拥有；AgentMux 必须另做 checkout-external packed-boundary proof，证明打包和映射没有破坏这些能力。Agent-first 空间命令的用法见 [Core space 指南](../../packages/core/guides/modules/space.md)（准确 selector 与参数以 `amux space --help` 为准），产品约束见[交互 SSOT](../design/agentmux-desktop-interaction.md)。本文拥有验证分层、任务验收与公开 oracle，不是当前候选的通过报告。命令来源是[根 package scripts](../../package.json)与 [Desktop package scripts](../../apps/desktop/package.json)，随包版本唯一取自 [vendor manifest](../../packages/core/vendor/ctxmux/darwin-arm64/manifest.json)。
 
 Terminal output 是 raw PTY bytes 的 UTF-8 投影，不是模型上下文、Tool、Permission、Reply 或 Worker Done 证据。
 
@@ -20,7 +20,7 @@ Terminal output 是 raw PTY bytes 的 UTF-8 投影，不是模型上下文、Too
 | Seeded fuzz | `pnpm test:fuzz` | 固定 seed/case 数的 Hook/Store/terminal byte 与 Workspace path 边界；失败可由测试名中的 seed 重放。 |
 | Reliability | `pnpm test:reliability` | 16 个真实 Run、并发 Attachment、attach/detach churn、stop/input race、slow/fast Consumer、5 MiB 输出、live daemon `SIGKILL`、恢复与 Core 资源斜率。 |
 | Desktop resources | `pnpm test:resources` | 隔离 runtime 中七轮 reusable Terminal claim、Terminal+Monaco 使用与 ready launcher 回归，另验证 Browser WebContents 释放和进程组 working-set 预算。 |
-| Mounted Desktop | `pnpm --filter @agentmux/desktop package:mac` | [package-macos.mjs](../../apps/desktop/scripts/package-macos.mjs) 持有构建、DMG、挂载及安装身份核对，当前脚本还内置隔离 packaged probe；源码中的 probe 不代表本批已执行。功能与视觉验收在对应任务完成，打包消费已有结论，不另加全量回归、重复图审或无关任务等待作为安装前置。bundle identity、package report 与 artifact hash 须绑定同一 source commit/tree/version/platform/arch。 |
+| Mounted Desktop | `pnpm --filter @agentmux/desktop package:mac` | [package-macos.mjs](../../apps/desktop/scripts/package-macos.mjs) 持有构建、DMG、挂载及安装身份核对，并内置隔离 packaged probe；ad-hoc 签名的开发候选跳过其中的 LaunchServices 检查（`verifyLaunchServices`）。源码中有 probe 不代表某次候选已执行。打包复用任务验收、不追加前置检查的边界唯一见 [macOS 打包指南](../guides/macos-packaging.md#必要核对与触发式补查)。bundle identity、package report 与 artifact hash 须绑定同一 source commit/tree/version/platform/arch。 |
 | Nightly | `pnpm test:nightly` | Native Package、Security、fuzz、reliability 和 Desktop resources 各执行一次；不重复 packed smoke 冒充 chaos。 |
 
 Security/Fuzz 的 Input 证据由 public recoverable Input、option-like prompt、并发 prompt 与 stop/input race 提供；Workspace 除 rooted path、静态 symlink 与 seeded traversal 外，还会在 worker 固定 cwd 后交换父目录为 outside symlink，覆盖 read/list/reveal/create/write/move/delete；Secret 由随机 Hook bearer、私有 Stored Session、公共 Session/View 去密及 managed Hook receipt 边界提供；Permission 由 ACP default-reject/invalid decision/oversized event 提供；运行适配层只测试 AgentMux public error/Replay 投影，不 fuzz 或复制 CtxMux wire。
@@ -56,6 +56,8 @@ Security/Fuzz 的 Input 证据由 public recoverable Input、option-like prompt�
 | Terminal appearance query | Desktop Main 在 Renderer 未 attach 时识别完整及跨 chunk OSC 10/11 query，等待 Core 发布 ready Agent Session 后才经 Core → CtxMux Input 回复当前 shared palette，不能与 Core Terminal handshake 竞争 Input cursor；Renderer replay handler 消费旧 query 而不重复注入 |
 | Terminal/Explorer interaction | Fast suite 固定纯黑 Graphite 工作面、完整 ANSI 色槽、OSC parser、历史 Run 只读 fit、平台路径、Workspace Root reveal 边界、Move plan 与 Store action；Mounted Desktop 走真实 PointerSensor/drop、Radix `Move This Item to`、`Shift+F10`、invalid drop、500ms hover expand/cancel cleanup、Workspace 回访和 Workbench DnD overlay 隔离；Production build 证明 Search/WebLinks/WebGL/Context Menu 可打包 |
 | Terminal interaction latency | Fast suite 证明 raw `terminal-output` 绕过全局 Zustand projection、输出 ACK 在单一在途调用后折叠到最新游标、pointer Split drag 只提交一次最终 ratio；viewport owner 在拖动中执行零 fit/resize、释放后只同步最终 grid，并继续证明必需的真实像素门控、latest-wins PTY resize 与 View dispose 丢弃排队 Resize；Attachment owner 线性化 Resize/Stop，Stop 撤销 lease 后迟到 Resize 不触达 ctxmux；慢启动 Agent 在 attach 后、首段输出前显示启动中，首段 Replay 或 Live 输出到达后立即让位给真实 TUI，失败或退出不伪装成启动中 |
+| ordered Input under concurrency | 双 Client 交错写入仍各自取得准确范围；前一条回执延迟时，后一条 raw 输入已实际被接纳且字节有序；突发输入经过真实窗口后完整到达；授权准备乱序、Run 替换、语义输入交错、观察 detach 或失败、部分写与断连，都不换目标、不丢字节、不自动重放未知输入。链路见 [Terminal Runtime《输入顺序与等待成本》](../architecture/terminal-runtime.md#12-输入顺序与等待成本)。没有实际交互或尚未更新的实例不能证明流畅度已改善。 |
+| Agent token usage | Core 的 `agent-usage-transcript.test.ts`、`agent-usage-capability.test.ts` 证明声明 usage 能力的 Provider 只在既有收尾事件由 Hook 读一次自家 transcript 尾部，不新增轮询；`agent-usage-env-injection.test.ts` 守 catalog 到 Hook 环境的注入。Desktop 的 `agent-usage-display.test.ts`、`agent-roster.test.ts` 证明「报了用量」「声明能力但尚无样本」「根本不报」三态可辨，缺值不补 0，真实零值按原报告显示，用量只落在所属 Agent 的名册行。口径见[状态栏](../design/behavior/settings-and-observation.md#状态栏)。 |
 | Agent exact-Run control | Native package consumer 在 provider-native Resume 后用旧 Run 调用 resize/stop，证明 `STALE_AGENT_SESSION` 发生前没有改变 rebound Run 的 runId、grid 或运行态；合法 exact Run resize 仍成功 |
 | Workbench presentation persistence | [workbench-persistence.ts](../../apps/desktop/src/renderer/src/lib/workbench-persistence.ts) 保存 Tab Group、Region 树、焦点与持久内容描述（Agent、Terminal、File、GitDiff、Launcher、Browser），不保存活 WebContents 或复制 Run/PTY/状态。启动先恢复原工作面；空 snapshot、探测失败或 lease 未释放不能删除投影。健康 Run 自动 reattach；ended/missing Session 的恢复时机按 SSOT「冷启动按需恢复」。未被保存的 Runtime Session 不自动补 Tab，也不因未认领推断应杀掉健康 Run。 |
 | Workbench View close transaction | Fast suite 冻结逐 Surface owner 的关闭计划，并确定性覆盖 Browser/Session cleanup 独立并发 dispatch、部分成功只保留失败 owner、retry 不重复已成功资源、同 View 重复 close 不重复 cleanup、共享 Session 的唯一 Stop 责任、关闭期间 View/Session admission、owner event 先于 receipt 的幂等收敛，以及 Recover/Refresh 的 exact Run epoch fence；旧 Stop receipt 不能删除新 Run，Recover owner 丢失后的 cleanup failure 必须留下可发现 View。Renderer 不建立第二份 Stop ledger、tail 或 fallback。 |
@@ -63,7 +65,7 @@ Security/Fuzz 的 Input 证据由 public recoverable Input、option-like prompt�
 | Terminal Replay Gap recovery | 分别验证公开 continuation 可恢复当前画面、缺失历史如实提示，以及原始后缀不冒充完整屏幕。确需重绘的 Running Run 只经唯一 viewport owner 请求；Historical Run 与拖拽期间不写 PTY。重绘只能恢复当前画面，不能补回淘汰的 scrollback，也不能替代活跃会话连续向上阅读验收。 |
 | Workspace Agent discovery | Fast suite 证明二级菜单只保留 Files、Agents、Browser；Agents 从现有 Session Snapshot 过滤当前 Workspace 的 Agent，复用 Board 状态分组和 `selectSession` 重开 View，不包含 Raw Terminal 或第二份 Session Registry |
 | Workspace revision save | Owner tests 注入临时写入和替换故障并锁定原字节；Store tests 覆盖每文件串行、generation、close/reopen epoch、clean/dirty invalidation、Reload/Overwrite、删除与 read error；mounted oracle 走真实 Renderer → preload → IPC → `WorkspaceFiles`。 |
-| Workspace atomic move | Main owner tests 在 destination-absent 后、最终 syscall 前制造竞争目标，并覆盖 no-follow、no-replace、typed unsupported；post-commit receipt matrix 覆盖 source/destination replacement、moved-back、双缺失、destination parent/Workspace Root 换代与 mutation/read interleave，所有场景都保持 `unknown`，不从 pathname occupancy 猜对象身份。Store tests 覆盖 save mutation admission、目标 owner 冲突、unknown 不改投影，以及 Document/Dirty/Last Active/Tab/Region/Selection/Expanded/changed observed payload 的一次性 segment-aware rekey；订阅断言证明每次 Rename 恰好一次 Explorer projection 引用变化，A→B→A 为零次。Fast interaction tests 固定同 parent、自身/后代与 loaded collision 的共享 plan、成功或 unknown 后恰好两 parent 并发去重刷新。Mounted Desktop 证明 Pointer/菜单只表达单项 Move、非法目标不提交、真实 input 驱动的 A→B→A 保持多选且产生零 Explorer projection 通知；commit barrier 另制造 A Move 已提交、B 已激活、旧 A closure 才继续的时序，证明一次路径事务通知之外两个 parent load 都被 Workspace identity/epoch admission 拒绝，B DOM/cache 不受污染，回 A 后由当前 owner 自行恢复。packaged helper 继续证明安装副本使用同一 no-replace owner。 |
+| Workspace atomic move | Main owner tests 在 destination-absent 后、最终 syscall 前制造竞争目标，并覆盖 no-follow、no-replace、typed unsupported；post-commit receipt matrix 覆盖 source/destination replacement、moved-back、双缺失、destination parent/Workspace Root 换代与 mutation/read interleave，所有场景都保持 `unknown`，不从 pathname occupancy 猜对象身份。Store tests 覆盖 save mutation admission、目标 owner 冲突、unknown 不改投影，以及 Document/Dirty/Last Active/Tab/Region/Selection/Expanded/changed observed payload 的一次性 segment-aware rekey；订阅断言证明每次 Rename 恰好一次 Explorer projection 引用变化，A→B→A 为零次。Fast interaction tests 固定同 parent、自身/后代与 loaded collision 的共享 plan、成功或 unknown 后恰好两 parent 并发去重刷新。Mounted Desktop 证明 Pointer/菜单只表达单项 Move、非法目标不提交、真实 input 驱动的 A→B→A 保持多选且产生零 Explorer projection 通知；commit barrier 另制造 A Move 已提交、B 已激活、旧 A closure 才继续的时序，证明一次路径事务通知之外两个 parent load 都被 Workspace identity/epoch admission 拒绝，B DOM/cache 不受污染，回 A 后由当前 owner 自行恢复。packaged helper 继续证明安装副本使用同一 no-replace owner。验证事件按操作与 Workspace epoch 归属：挂载重建后不复用聚合 DOM 计数推断某一次 mutation，一次 Move 提交只产生一条权威 receipt，旧 epoch 的刷新记为 rejected，对已消失 Run 的 Stop 归入幂等终态。 |
 | Hook acceptance/drain | Hook command 的 receipt id 跨重试稳定；bound ingress 仅在 owner persistence 成功后 `204`，失败以非 2xx 触发同 receipt 重试；Server shutdown 排空已接受事件 |
 | Desktop Control owner | Fast suite 对真实 Renderer Store 验证 caller identity、Tab/Region 投影、四向 split、精确 focus、三类 typed open、send 唯一性、arrange 和 owner-loss rollback；bridge 测试证明跨 Electron world 只传普通 request/response/cancellation，所有布局 mutation 继续通过同一个 workbench reducer，ctxmux 只接收最终 viewport size |
 | Packed Control CLI | checkout-external packed consumer 从 injected `PATH` 执行同版本 `amux`，通过一个版本化 endpoint 验证 `inspect/list/open/send/focus/arrange/output/interrupt/resume/stop`、稳定 JSON receipt、literal `--help` payload、UTF-8 分片和 peer early-close；Core endpoint 测试另锁定 protocol mismatch、closed target、typed candidates 与 owner unavailable error |
@@ -113,7 +115,7 @@ CtxMux 的实际边界是：同一用户、本地、非提权 daemon；每次信
 
 ## Gate
 
-UI 交付按 [独立 Agent 看图评审](../guides/agent-visual-e2e-review.md) 采图、实际看图、修正后重拍，并在打包或更新 Renderer 前消费本批候选的意见。首个 Message Tool 示例入口是 `pnpm --filter @agentmux/desktop capture:visual`。采图成功不判审美，preview API 的真实 Renderer 证据不冒充 CLI/Native；流程由 Agent 执行，不增加自动发布拦截器。
+界面改动的采图、看图、复拍和交付前消费意见，唯一按[独立 Agent 看图评审](../guides/agent-visual-e2e-review.md)执行；它由 Agent 完成，不是自动发布拦截器。下列命令是本文各验证层的入口：
 
 ```bash
 pnpm typecheck
@@ -123,13 +125,15 @@ pnpm test:security   # deterministic auth, permission, secret and bounded-owner 
 pnpm test:fuzz       # deterministic seeded public-boundary fuzz
 pnpm test:reliability # native chaos/stress plus Core resource receipt
 pnpm test:resources  # isolated Desktop resource receipt
-pnpm --filter @agentmux/desktop package:mac # mounted DMG + LaunchServices workspace-file oracle
+pnpm --filter @agentmux/desktop package:mac # mounted DMG + LaunchServices workspace-file oracle (skipped for ad-hoc signing)
 pnpm test:nightly    # native package + security + fuzz + reliability + resources, each exactly once
-pnpm test:real-codex # opt-in，使用用户现有 Codex CLI/auth，不读取或复制 Credential
+CODEX_HOME="$private_seed" pnpm test:real-codex # opt-in；必须显式给出独立 seed（不能是 ~/.codex），fixture 把其中 auth.json 与 config.toml 复制到私有 Root
 pnpm check           # typecheck + fast + native + all builds
 ```
 
 Fast 与 Native 分开是为了让失败归因清晰，不允许用 Mock 代替 Native proof。Native fixture 使用独立 runtime/state 与真实 packaged `ctxmuxd`、真实 PTY；具体隔离方法以 harness 为准。产品进程级路径策略由 runtime-paths.ts 持有，不能把某一版 fixture 的 synthetic uid 方案写成「产品不支持 override」。清理只针对已证明归属的测试资源。 每个已登记的清理动作须按原依赖顺序尝试完成，某一步失败不能跳过后续资源释放或 mock／环境恢复；保留所有原始错误并在收尾后汇总报告。失败变异的兜底清理仍只操作其精确私有资源，不能把兜底成功计为被验证收尾路径已经成功。
+
+验证进程必须在报告结束前真正回收，因为用户内存有限。验证失败、超时或中断后不得留下 Electron、文件 observer 或测试 Runtime；runner 须确认本次进程已经退出，一条超时日志不算进程结束。一次验证尚未完成回收时，不启动下一份 Electron 验证。清理只针对本次验证的进程组、独立临时目录和 Runtime 身份，不影响正式应用和用户 Agent；先回收进程，再删除它们依赖的临时目录。观察失败必须明确报告，不能当作零残留。验证模式的启动落点只决定初始选择，不持续覆盖用户或 probe 随后的 Workspace 切换，也不能让项目切换在测试模式下失效。
 
 真实 Desktop Main 夹具还须在加载生产模块前设置并核对 Electron 的 `home`、`appData`、`userData` 与 `sessionData`；仅覆盖 `HOME` 或读取 `os.homedir()` 不能证明这些路径已隔离。独立启动入口先设置路径，再动态加载 Main，避免模块顶层提前固化用户目录。启动后复核实际 Store、scratch、Notes、Mote 和 connector owner 的目录；继承的 Agent 身份、Hook、端点及队列上下文须清除或由夹具明确替换。隔离缺口保留原回执和副作用未知，不以修正后的新夹具通过证明旧运行未触达用户数据。
 
@@ -143,9 +147,11 @@ Fast 与 Native 分开是为了让失败归因清晰，不允许用 Mock 代替 
 
 停止 16 个 Run 后 child、Attachment 和 transient thread 全部归零；daemon 相对基线保留 32 FD，即 2 FD/历史 Run。这不是未追踪泄漏：固定 CtxMux commit 的 `reliability-budgets.json` 明确声明，在没有 global Run GC 时，exited Run metadata、retained PTY descriptors 与部分 RSS 是有界历史成本。AgentMux Gate 分别验收 live owner 释放与这项显式保留成本，不能把“历史仍可查询”误写成 Run 已被删除。
 
-`test:resources` 的 `agentmux.t017-desktop-resources.v1` receipt 使用系统临时目录下的短、测试专属 Runtime；清理从 exact socket 的 `lsof` owner 出发，同时复核可用时的 `owner.json`、daemon path 与完整 argv，并在每次发信号前重验。Harness 先证明一个已 ready 但尚无 receipt 的真实 test-owned daemon 也能被精确清理，再运行 Desktop。receipt 从完整 ready-launcher process sample 计算 300 KiB xterm 输出、Monaco、Browser 和 release 增量，不为新的首屏基线预写未经测量的代表值。资源循环共七轮：前两轮显式记录 lazy-cache warm-up，后五轮以第一个 post-warmup 样本为 baseline，任一后续峰值相对它的增长必须低于 128 MiB；内存被系统回收后的下降不冒充泄漏。全部七轮 owner-clean release 样本与 browserReleased 都分别受 released-vs-ready-launcher increment 和 absolute total 硬上限约束，不能靠 warm-up 分类掩盖整体膨胀。Absolute total 保持 1 GiB；released increment 由该总上限减去 448 MiB 支持 baseline floor 得到 576 MiB，不再错误复用 Editor 的 512 MiB 增量预算。Fresh baseline 是首屏 reusable Terminal 已 ready 的真实产品态：0 Monaco model、0 document、0 file watcher、0 Browser WebContents、恰好 4 个全局 runtime subscription，以及恰好 1 个 Terminal View、3 或 4 个 Addon（取决于 WebGL 是否可用）、6 个 listener、1 个 Main Session Attachment owner 和 1 个 Renderer lease。每轮 claim 后继续使用同一 Run；stop 后必须出现从未使用过的新 reusable Terminal Session，并让完整 owner 集合精确回到 fresh baseline，不能复用已 stopped Session。打开 Browser 时 reusable Terminal 的 View 与 Attachment 会释放，但 backend Run 合法保留；关闭 Browser 后必须由同一个 Session 重新建立 ready launcher 并回到相同 owner baseline。多轮 steady-state peak growth 单独阻止持续泄漏；预算判断与完整进程样本保留在 Gate receipt，而不是只记录摘要。
+`test:resources` 由 [measure-desktop-resources.mjs](../../apps/desktop/scripts/measure-desktop-resources.mjs) 驱动 Main 的 [resource-probe.ts](../../apps/desktop/src/main/resource-probe.ts)，报告 schema 为 `agentmux.t001-desktop-resources.v2`，外层脚本以 `T017_DESKTOP_RESOURCE_RECEIPT=` 行输出并附加源码与 ctxmux 身份。它使用系统临时目录下的短、测试专属 Runtime；清理从 exact socket 的 `lsof` owner 出发，同时复核可用时的 `owner.json`、daemon path 与完整 argv，并在每次发信号前重验。Harness 先证明一个已 ready 但尚无 receipt 的真实 test-owned daemon 也能被精确清理，再运行 Desktop。receipt 从完整 ready-launcher process sample 计算 300 KiB xterm 输出、Monaco、Browser 和 release 增量，不为新的首屏基线预写未经测量的代表值。资源循环共七轮：前两轮显式记录 lazy-cache warm-up，后五轮以第一个 post-warmup 样本为 baseline，任一后续峰值相对它的增长必须低于 128 MiB；内存被系统回收后的下降不冒充泄漏。全部七轮 owner-clean release 样本与 browserReleased 都分别受 released-vs-ready-launcher increment 和 absolute total 硬上限约束，不能靠 warm-up 分类掩盖整体膨胀。Absolute total 为 1 GiB；released increment 是该总上限减去 448 MiB baseline floor 得到的 576 MiB（`MAX_RELEASED_INCREMENT_KIB`），与 Editor 的 512 MiB 增量预算是两项预算。Fresh baseline 是首屏 reusable Terminal 已 ready 的真实产品态：0 Monaco model、0 document、0 file watcher、0 Browser WebContents、恰好 4 个全局 runtime subscription，以及恰好 1 个 Terminal View、3 或 4 个 Addon（取决于 WebGL 是否可用）、6 个 listener、1 个 Main Session Attachment owner 和 1 个 Renderer lease。每轮 claim 后继续使用同一 Run；stop 后必须出现从未使用过的新 reusable Terminal Session，并让完整 owner 集合精确回到 fresh baseline，不能复用已 stopped Session。打开 Browser 时 reusable Terminal 的 View 与 Attachment 会释放，但 backend Run 合法保留；关闭 Browser 后必须由同一个 Session 重新建立 ready launcher 并回到相同 owner baseline。多轮 steady-state peak growth 单独阻止持续泄漏；预算判断与完整进程样本保留在 Gate receipt，而不是只记录摘要。
 
 live daemon `SIGKILL` 发生在 Run 与 Attachment 仍活跃时；fixture 证明 child 消失、同 Run ID 恢复为 historical/interrupted、崩溃前 Replay marker 保留，并由 replacement daemon 的不同 instance identity 证明没有复用死亡 Owner。slow Consumer 从 byte 0 读取时得到真实 Gap，另一 fast Consumer 仍连续收到超过 4 MiB 和最终 marker。
+
+保活与资源停放须显式断言隐藏消费者不新增 fit／resize／绘制／定时器／监听及无关 Session 工作；画面正确不能证明相关成本。内存结果按原进程和 surface owner 分层：至少分别记录 Main、Renderer、GPU／Utility 与 Browser target 进程，以及 Terminal、Monaco、Browser 与 Attachment owner 的数量。不能把 Chromium helper 的 RSS、共享页或 V8 保留容量相加后称为应用泄漏，也不能只看进程退出；只有同一场景的工作集与 owner 数量同时收敛，才把冷停（cold-park）记为有效回收。与其他客户端比较时按同样的分层记录；没有测量证据的数值不写成产品承诺。
 
 ### 隔离资源故障与恢复验证
 
@@ -160,12 +166,23 @@ live daemon `SIGKILL` 发生在 Run 与 Attachment 仍活跃时；fixture 证明
 
 恢复验收保留准确原 SID、Provider native conversation／上下文、durable 工作面与 operation／投递进度，并消费其原已保存输入；不换新身份、不重新种数据，不以新进程成功或终端有输出代签[原生上下文恢复](../design/behavior/session-recovery.md#durable-runtime-健康)。沿本次受影响的 Core／Runtime／Main／客户端真实链逐项证明；实现修改仍需承重变异及真实产品消费，纯文档不宣称矩阵已执行。
 
-- 在测试专属目录、存储或进程边界注入真实 errno，使实际 Owner 消费 ENOSPC、EACCES、EIO、短写，以及调度或内存压力；覆盖写前、写入／替换后回执与 cleanup 失败，断言故障确已触发。不得为注入故障耗尽宿主磁盘或压迫用户 Run；受控注入不能代签真实宿主资源耗尽后的自动恢复。慢响应、分配失败和进程被杀分别记录，不能仅凭超时推断资源原因；声称覆盖 OOM／强杀时，须有独立进程的实际退出及持久恢复证据。
+- 在测试专属目录、存储或进程边界注入真实 errno，使实际 Owner 消费 ENOSPC、EACCES、EIO、短写，以及调度或内存压力；覆盖写前、写入／替换后回执与 cleanup 失败，断言故障确已触发。注入发生在隔离的临时 state-dir 等测试专属位置：不得为注入故障耗尽宿主磁盘、改动用户 Runtime 或压迫用户 Run，也不把宿主带入故障态；这类测试只证明服务窗分类与恢复边界，受控注入不能代签真实宿主资源耗尽后的自动恢复。慢响应、分配失败和进程被杀分别记录，不能仅凭超时推断资源原因；声称覆盖 OOM／强杀时，须有独立进程的实际退出及持久恢复证据。
 - 对比故障前、故障期间与资源恢复后的原草稿、消息身份、条件、已确认输入进度和工作面。失败不能覆盖最后已确认记录；未保存内容仍在当前进程时须可见，并与持久确认区分。释放真实故障后，验证原操作可在同 Owner 及实际受影响的跨 Owner 入口显式重试、已确认字节不重复、未知输入不自动重投，健康能力不因旧失败持续被占用。
 - 按本次改动选择定义外生产消费者及受影响的公共 SDK／RPC／CLI 链，核对同一次失败的原因、标识与查询结果；不为未改动的接口复制全部场景。诊断存储失败或观测不完整也须可辨认，不以缺记录代替零输入或成功，不要求在不可写或 OOM 时凭空生成完整持久日志。
 - 涉及持久恢复时，用第二个测试专属进程直接读取第一次实际保存的记录，不重新种入数据。已确认内容应保持原身份与进度；强杀前未确认的内容只按真实可恢复结果陈述。记录本轮源码、实际故障、恢复条件、缺失证据与精确归属的清理结果，不将历史资源样本外推为本轮通过。
+- 持久化故障的回归在临时 state-dir 中分别制造真实容量不足与受控 I/O 失败，验证原始错误分类、同一 Owner 的后续写入与失败边界；固定容量且逻辑历史尚未超额的场景须证明不会永久等待。真实的第二个 Run、原 Run 的健康控制，以及不同进程从第一次实际保存的数据恢复，须一并保全身份、确认水位与可用的连续历史。不能用增大预算、重新种数据或「文件存在」代替持久 Session 的证明；不得杀掉宿主应用，也不能把测试故障伪装成真实用户数据损坏。
 
 构建与变异资格须量测宿主实际可用空间及本批产物占用，优先构建本次选定的精确 target；复用输出时绑定未变的源码、依赖、构建参数和实际产物身份，不将重编全部 integration 输出当作默认前置。空间不足时只释放本批已结束、可重建的缓存，保留在用产物、源码与执行证据；构建因外层资源不足应明确终止并记为未资格，编译失败、链接失败或资源超时均不计语义 RED 或 GREEN。这些要求约束 fixture 成本，不定义新的产品容量硬配额。
+
+### 真实重启与恢复
+
+以下验证[工作面恢复](../design/behavior/session-recovery.md#durable-runtime-健康)在真实进程边界上成立：
+
+- 重启验收启动隔离的真实 Electron 主进程和 Renderer，记录应用进程身份、持久化布局身份、焦点、草稿以及 Session、Run 与 Provider 原生 handle。至少发生一次真实退出，再由不同的进程从同一 userData 根目录恢复；组件 remount、Store 序列化或只比较启动文件都不能代替。恢复先重建 Tab、Region 与焦点，再尝试 reattach 或 resume 原 Session；Run 可以依法换代，但 Session、工作面和草稿不能被换成新对象。
+- 完整产品的私有恢复验收在首次 hydrate 之前提供真实、非空的持久化输入，并确认它进入实际工作面、正常退出后仍可恢复；不能在 hydrate 之后补写 seed，再把即时读回或人工修补当作重启保留的证明。
+- 退出与恢复类改动须有私有的真实 Renderer 消失证据和不同进程重启证据，原非空工作面仍可见且可恢复。
+- 探针只操作自己创建的隔离资源，记录前后不同的 PID 与身份匹配，结束时清理临时目录；故障注入不得停止用户当前的 App、daemon 或 Run。
+- 配置升级保留每个可读的 authored Host；所有 authored Host 都不可读时保留原文件并确定性拒绝，不能用本机 `local` 的回填掩盖。这项判断须有 focused regression，且验证命令能在打包前单独运行。
 
 ## 证据边界
 
@@ -175,24 +192,34 @@ live daemon `SIGKILL` 发生在 Run 与 Attachment 仍活跃时；fixture 证明
 - 当前 Core 已消费公开 `basic-vt` checkpoint、restore bytes 与 ordered Resize 的 continuation；来源为 terminal-continuation.ts、screen-evidence.ts 和 CtxmuxRunAdapter。存在这条实现不证明新候选画面或长期 scrollback 已验收；restore bytes 不能冒充新的 PTY output，缺失 checkpoint/历史或观察未知须如实表达；
 - headless 与 Renderer 共用公开 continuation 顺序，各自拥有解释和像素；Runtime 持有字节、checkpoint 与 Resize 事实。不能再把「从 byte 0 重播且等 TUI 全屏 redraw」写成唯一现行恢复模型，也不能从当前画面恢复外推连续向上阅读历史通过；
 - SSH 管理连接远端已有语义 owner，按当前公共 SDK／服务合同验证；本机通过记录不代签真实 SSH、远端 Provider 或桌面验收；
+- 连接器回归守在被修改的边界，改动行为须用原消费者与带负载的反例，保留授权、未知效果与独立内容用例。各类证据只证明自己的范围：`<img src>` 断言不证明浏览器解码；手工构造的 typed attachment 不证明粘贴或提交；两个 SDK fixture 都收到正文不证明两个平台都渲染了头像；飞书／Lark SDK 协议样本与 Core／CLI／Mailbox 消费测试不证明真实凭据、订阅权限、现场群、通用 Host 启动组合或最终平台送达。发布合同测试用锁定的 SDK 与 Axios 序列化对 loopback HTTP，证明产品调用链与准确字节；[room-public-journey](../../packages/connectors/test/room-public-journey.integration.test.ts) 的 Host 授权经受控 RPC adapter，不证明生产 Host 组合或本地直接授权路径；建群 adapter 测试只建立通用 Host 边界；Channel metadata 的 SDK 消费测试不证明现场订阅、数据可见性与权限；Profile refresh 只覆盖 IPC／SDK 观察，真实 Renderer 的图片解码需要生产策略；App image recovery 配置把真实 Composer 输出接到 Host 与两个 SDK，单有预备好的输入引用不证明 App 生产者。候选结果与平台现场回执留在任务证据，历史结果不代表当前安装；
 - 原生产物平台从 [artifact contract](../../packages/core/src/ctxmux-artifact-contract.json) 与对应 manifest 取得；每个平台必须有同源 Native proof，不能从本机结果推断。portable 空间 API 的可安装性与 Native Run 能力分别验证。
 
 ## 界面规则与真实行为
 
-空间呈现的视觉约束归[空间与布局](../design/presentation/spaces-and-layout.md#工作面与注意力密度)。本节描述样式与输入的失效形态和 oracle；以下原事故样本及测试数量只说明当时的假绿边界，不代表当前候选已验收。静态扫描、类型检查和静态渲染各有证明范围，真实状态变化与输入写回仍按任务场景操作验证。
+空间呈现的视觉约束归[空间与布局](../design/presentation/spaces-and-layout.md#工作面与注意力密度)。本节描述样式与输入的失效形态和 oracle；以下原事故样本只说明当时的假绿边界，不代表当前候选已验收。静态扫描、类型检查和静态渲染各有证明范围，真实状态变化与输入写回仍按任务场景操作验证。
 
-- 失效的声明比错的声明更危险。`-var(--sp-2)` 这类写法不是合法 CSS，浏览器**静默丢弃整条声明**——它不报错、不回退、在样式表里看起来完全正常，而它想做的事从未发生（负外边距归零，靠它做居中或叠压的东西一直是错位的）。数值型契约测试抓不到这一族，因为压根没有数字字面值可扫。负值必须写成 `calc(-1 * var(--sp-2))`，或改用不依赖数值的手法（如 `translate(-50%)` 随自身尺寸走）。这条由 `apps/desktop/test/stylesheet-organisation.test.ts` 守住：它扫全表断言 `-var(` 出现零次并报出文件与行号。**这类失效还会掩盖第二层错误**——声明既然从未生效，写在里面的数值对不对也就从来没人验证过；修复时要重新核算那个值，而不是照抄进 `calc()`。
-- 圆角例外的来源与守护：这条由 `apps/desktop/test/surface-radius-contract.test.ts` 守住：它从 CSS 推出所有低于最小 token 的圆角并核对是否落在已声明的例外清单内，新增一个未声明的硬编码圆角会红。
-- **状态在场标志与规则必须成对，判定按元素而非按属性名。**`data-x={cond ? '' : undefined}`（只有空串与不在场两种取值）对 JS 携带零信息，它存在的唯一理由就是被 `[data-x]` 选中；因此渲染了它却没有 `.那个class[data-x]` 规则，要么是规则在重构里丢了，要么这个属性本就多余、该删。**没有例外清单**——这个记号和 BEM 一样按定义成立。这条由 `apps/desktop/test/rendered-class-has-rule.test.ts` 守住，它逐元素配对：起因是那份测试原本只查选择器**名**在不在，于是删掉 `.log-fold[data-open] .log-fold__chevron { transform: rotate(90deg); }` 之后折叠箭头永久不转，而它自己 3 条 + `stylesheet-organisation` 8 条全绿（实测）——`[data-open]` 因为 `.log-row__chevron[data-open]` 还在而"依然出现过"。按属性名判会漏掉的正是它自己那次事故的形状，所以判据必须落到"同一个元素上的 class × 该元素的标志"，并另有一条自证钉住这个区别（拿一对成对的与一对属性名存在但元素不对的当样本）。
-- **受控表单控件必须有写回口，或显式声明它永不接受输入。** 判据不是自拟清单，而是 React 运行时自己的规则：给了 `value`/`checked` 却既无 `onChange`/`onInput` 也无无条件的 `readOnly`/`disabled`，React 会报 "without an `onChange` handler … read-only"。受控取值与写回口按定义成对（单独一个 `value` 没有任何用途——用户敲不进去），与上一条的在场标志同一形状，故同样**没有例外清单**：`defaultValue`、`readOnly`、`disabled` 本身就是判据的另一半。这条由 `apps/desktop/test/controlled-input-is-writable.test.tsx` 守住，它静态扫每一个组件文件、并把 React 的那句告警接成断言钉住判据。起因：启动对话框那两格名字输入删掉 `onChange` 之后永久不可写（用户填什么都送不出去），涉及该组件的 23 条测试与 `tsc --noEmit` **全绿**（实测）——当时相关测试只用 `renderToStaticMarkup`，不跑 effect、不派发 DOM 事件，未覆盖这类实际交互失效。**只有无条件的 `disabled` 才算自洽**：事故现场那两格正带着 `disabled={busy !== null}`（忙时才禁用），把任何 `disabled` 都算过的话这次变异照旧全绿（实测）。
+- **CSS 中不能写 `-var(...)` 形式的负值。** `-var(--sp-2)` 不是合法 CSS，浏览器会静默丢弃整条声明：不报错、不回退，样式表看起来正常，效果却从未发生（例如负外边距归零，依赖它居中或叠压的元素一直错位）。数值型契约测试扫不到这一类，因为其中没有数字字面量。负值写成 `calc(-1 * var(--sp-2))`，或改用不依赖数值的手法（如随自身尺寸变化的 `translate(-50%)`）。守护测试是 `apps/desktop/test/stylesheet-organisation.test.ts`，它断言全部样式表中 `-var(` 出现零次，并报出文件与行号。这类失效还会掩盖第二层错误：声明从未生效，写在里面的数值也从未被验证；修复时要重新核算那个值，不能照抄进 `calc()`。
+- **低于最小 token 的圆角必须是已声明的例外。** 守护测试 `apps/desktop/test/surface-radius-contract.test.ts` 从 CSS 推出所有低于最小 token 的圆角，并核对它们是否在例外清单内；新增未声明的硬编码圆角会使它变红。
+- **状态在场标志必须与样式规则成对，按元素判定。** `data-x={cond ? '' : undefined}` 只有空串与不在场两种取值，对 JS 没有信息量，存在的唯一理由是被 `[data-x]` 选中；渲染了它却没有对应的 `.该元素的class[data-x]` 规则，说明规则在重构中丢了，或这个属性本就多余、应删除。这条按定义成立，没有例外清单。守护测试 `apps/desktop/test/rendered-class-has-rule.test.ts` 逐元素把 class 与该元素的标志配对，并用一对成对样本和一对「属性名存在但不在同一元素」的样本自证这个区别。只查选择器名字是否出现会漏判：曾有一次删掉 `.log-fold[data-open] .log-fold__chevron` 的旋转规则后折叠箭头永久不转，而旧测试因为 `.log-row__chevron[data-open]` 仍在而保持全绿。同一测试的扫描面除 BEM 记号外，还收 `-button` 结尾的扁平类名：曾有人按密度合同的档位名写出 `.secondary-button`，全仓没有任何规则，按钮落成 macOS 原生样式，在深色主题里比相邻的主操作还重。扁平名此前整族不在扫描面内，这是判据形状的缺口，修法是扩大判据而不是加豁免。按钮档位与类名的对应归[控件语言](../design/presentation/shared-rules.md#控件语言)。
+- **列表选中态不能出现左侧竖条。** 守护测试 `apps/desktop/test/surface-selection-contract.test.ts` 从 CSS 推出 `box-shadow: inset <n>px 0 …` 与 `border-left`（含 `border-inline-start`）两种画法的全部左缘竖条，并断言选中态类名上不存在；两个形状判定各带一条自证样本（合法的容器分隔线与内容引用条），因为认不出竖条的检查会因「没找到」而全绿。
+- **Agent 状态到颜色的对照只在状态语汇定义一次。** 守护测试 `apps/desktop/test/topic-agent-status.test.ts` 防止新表面再列一遍状态与颜色。
+- **样式字面值必须落在刻度或具名例外内。** `apps/desktop/test/surface-scale-contract.test.ts` 从样式表反推全部字号、间距与颜色字面值，核对它们是否落在 token 或已声明的例外清单内，并断言没有悬空的 token 引用；同一测试判断 `.agent-catalog` 的规则体同时有 `max-height` 与 `overflow`（先断言确实扫到这条规则），守的是「有界」而不是某个像素值，避免同一个数值住在两处。尺寸约束从刻度与守卫的断言反推，不凭记忆中的下限：10px 是字号刻度的最小值，不需要豁免。该守卫当前待修，修复前不能当作证据：主题变量改为运行时注入后它的解析失效；它的 `FONT_SIZE_EXCEPTIONS` 仍按 `.status__dot::after` 的 `content` 字形登记例外，而状态点现在由 `--native-presence-*-mask` 遮罩绘制（`apps/desktop/src/renderer/src/styles/base.css` 的 `.status__dot` 规则、`packages/client-ui/src/theme/icon-sprite.ts`），这组例外已对不上实际样式。
+- **happy-dom 不计算布局。** 依赖子元素个数或几何的排版错误（例如 `justify-content: space-between` 遇到数量不定的子元素）不会让任何组件测试变红；这类约束在写法上消除（规则见[控件语言](../design/presentation/shared-rules.md#控件语言)），或用真实 Renderer 的采图与几何读数验证。
+- **受 Radix `Presence` 管理的入场动画只在 `[data-state='open']` 生效。** 守护测试 `apps/desktop/test/presence-exit-animation.test.ts` 从 Desktop 与共享 UI 包的实际组件源码推导受管节点，集合必须非空，不维护手抄类名，同时保留入场动画的断言，不能靠删动效满足。静态守护不能证明退出动画完成；有意的退出动画须由真实 Native Renderer 证明完成与卸载。
+- **受控表单控件必须有写回口，或显式声明永不接受输入。** 判据直接取自 React 运行时的规则：给了 `value`／`checked`，却既没有 `onChange`／`onInput`，也没有无条件的 `readOnly`／`disabled`，React 会报 "without an `onChange` handler … read-only"。受控取值与写回口按定义成对，同样没有例外清单；`defaultValue`、`readOnly`、`disabled` 本身就是判据的另一半。只有无条件的 `disabled` 才算自洽：形如 `disabled={busy !== null}` 的条件禁用在空闲时仍不可写。守护测试 `apps/desktop/test/controlled-input-is-writable.test.tsx` 静态扫描每个组件文件，并把 React 的这句告警接成断言。只用 `renderToStaticMarkup` 的测试不运行 effect、不派发 DOM 事件，抓不到这类交互失效：曾有启动对话框的两个名字输入框删掉 `onChange` 后永久不可写，相关组件测试与 `tsc --noEmit` 仍全绿。事故中的输入框正带着 `disabled={busy !== null}`；若把任何 disabled 算作自洽，这次变异仍会全绿。
 
 ## 任务验收与假绿防护
 
-实现 task 判 done 须同时有变异测试和真实产品调用链证明。变异是改坏实际实现，确认对应测试变红；不能只改测试制造红灯。调用链从受影响实现追到 owning 入口及实际产品消费者，核对调用条件、参数和结果，而不是以文件边界或符号是否导出判断。私有 helper 经同文件 owner、原生 helper 协议或模块入口接到实际消费者，可以构成该链；不为取得跨文件命中额外导出、拆文件或增加包装。可用 `rg -n "<symbol>" packages apps` 定位，再沿入口核对生产路径；测试、生成物、接口声明或仅有内部自调用不能单独代替产品消费。没有真实产品路径时仍是竖切未闭合，如实标 blocked。
+实现 task 判 done 须同时有变异测试和真实产品调用链证明。变异是改坏实际实现，确认对应测试变红；不能只改测试制造红灯。调用链从受影响实现追到 owning 入口及实际产品消费者，核对调用条件、参数和结果，而不是以文件边界或符号是否导出判断。私有 helper 经同文件 owner、原生 helper 协议或模块入口接到实际消费者，可以构成该链；不为取得跨文件命中额外导出、拆文件或增加包装。可用 `rg -n "<symbol>" packages apps` 定位，再沿入口核对生产路径；测试、生成物、接口声明或仅有内部自调用不能单独代替产品消费。没有真实产品路径时仍是竖切未闭合，如实标 blocked。修复用户现场报错的 task 还须把两件事分开取证：用户现场错误的原因，取自现场的原始错误、日志或状态；隔离环境里复现并修好的问题，取自复现条件与修复后的测试结果。隔离环境复现出相同报错，不等于找到了现场原因；隔离复现或局部测试通过，也不能代替用户现场错误已消失的证明，缺少现场证据时写明现场错误是否消失仍未确认。
+
+删除同样以真实调用链为依据。删除死 props 或分支，依据是真实生产调用链与生成路径，不是文件行数；只向废弃入口喂数据的测试不能代表现有产品消费，组件变薄时仍保留实际的当前、历史、退休与无数据路径。删除任何现有保护前，须能在它所在的共同边界解释它防住的原反例；解释不出就不能删。
+
+一个用例只证一件事。把多个各自启动子进程的场景串进同一个 `it`，耗时会叠加到逼近默认超时（并发运行时最先失败的就是它），失败时也指不出是哪个场景，后面的场景还会被前面的失败挡住、从不执行。安全性质逐操作各立用例，并断言注入钩子确实被消费：钩子没触发的绿是假绿。测试按执行时间和变更范围设计：小改动优先定向、并发地验证，只有跨边界的变化才触发更宽的回归。
 
 新增或修改公共能力时，接口影响判断、原业务 owner 到 RPC／CLI 的真实接线及完成边界按[公共能力贡献约定](../guides/public-capability-contributions.md#同一任务交付和验收)核对；本节继续持有变异与调用者证明的方法，不另维护方法或命令全集。
 
-评审意见和失败的检查按影响定级，级别决定它挡住什么。P0 是数据、身份或 Session 丢失，安全缺口，或正常使用中拿走健康能力；P1 是真实路径上用户可见的缺陷或合同违背；P2 是有明确代价但影响有界的缺陷、边界情况或维护漂移；P3 是细小体验或措辞。P0、P1 阻止该 Task 判 done、合入和发布，修完并重新验证后才能继续。P2、P3 不阻止合入或发布：随 Task 记成具名残留，写明影响和下一步，归入后续 Task 或下一轮评审。级别按实际影响定，不按发现的位置或修起来难不难定；修复本身引入的问题照它造成的影响定级。不能把 P2、P3 提成门禁来换取保险，也不能把 P0、P1 降级来换取通过。
+**评审严重度**只给评审意见和失败的检查定级，级别决定它挡住什么。事故复盘的定性另用[事故等级](../guides/incident-writing.md#1-定性--事故等级)，[AGENTS](../../AGENTS.md#目标与优先级) 中的 P0／P00 是产品优先级；三者名称相近，含义不互相换算。评审严重度的 P0 是数据、身份或 Session 丢失，安全缺口，或正常使用中拿走健康能力；P1 是真实路径上用户可见的缺陷或合同违背；P2 是有明确代价但影响有界的缺陷、边界情况或维护漂移；P3 是细小体验或措辞。P0、P1 阻止该 Task 判 done、合入和发布，修完并重新验证后才能继续。P2、P3 不阻止合入或发布：随 Task 记成具名残留，写明影响和下一步，归入后续 Task 或下一轮评审。级别按实际影响定，不按发现的位置或修起来难不难定；修复本身引入的问题照它造成的影响定级。不能把 P2、P3 提成门禁来换取保险，也不能把 P0、P1 降级来换取通过。
 
 限制类改动按 [RED-LINES《时限与容量必须守真实边界》](../../RED-LINES.md#时限与容量必须守真实边界)验证依据与影响范围。测试从正常业务规模和保护的不变量选择输入，分别证明正常使用、真实越界或故障、其他健康能力以及原身份恢复；覆盖触发后的重试、取消和回执未知时，不能重新种入数据或换身份代签恢复。仅导入实现常量再断言第 `N + 1` 项拒绝，或把常量改大后测试仍绿，只能证明实现遵循自己的选择，不能证明该限制合理。拒绝分支的变异与资源成本检查仍保留，但不代替这些行为证据；按本次受影响的 owner 和消费者选场景，不增加全仓扫描或无关验收。
 
@@ -205,6 +232,17 @@ live daemon `SIGKILL` 发生在 Run 与 Attachment 仍活跃时；fixture 证明
 运行期集合的 `[].every(p)` 为 true，`[].some(p)` 为 false；测试这两个方向时，同一个 `it()` 必须证明集合非空。能用 `toEqual([...])` 钉死整体集合时优先这样写。反向断言对空集合会直接变红，不需要该守护；有意接受空集合时用紧贴上一行的 `// vacuous-ok:` 解释，不建集中豁免清单。守护来源：[vacuous-on-empty-predicate.test.ts](../../apps/desktop/test/vacuous-on-empty-predicate.test.ts)。这一族变异须按块把同一 `it()` 中该集合的每次读取都改为空，模拟生产「什么都不返回」；只在 `.every()` 调用点喂空集合无法证明整体守护有效。
 
 纯文档任务核对来源、有效链接、冲突与语义保全；职责重组或硬约束改写需独立评审。没有实现变更时不制造代码变异或产品调用者证据；混合任务的代码部分仍过原验收。规范见[文档事实与维护](../guides/document-truth-and-maintenance.md)。
+
+### 体验、阅读品质与已交付优化
+
+界面审美的看图流程与各表面场景归[独立 Agent 看图评审](../guides/agent-visual-e2e-review.md)；本节规定体验类结论需要什么证据。
+
+- 自行体验验收须实际走完完整使用流程，记录实际操作、可见结果、响应成本与保留的原身份；组件测试通过或安装成功不能代替。发现的缺陷与未验证边界如实保留。
+- 「达到成熟产品水准」「优于竞品」是目标，不是已完成的事实；比较结论须绑定对比对象的版本、同等数据和任务条件。阅读入口的键盘、选区、复制、链接及原展开选择须实际操作验证；同内容、宽窄与关键阅读操作按成熟产品的阅读品质做有限匹配的独立评审，不足则返修，缺少比较不算完成。已接入 Provider 的原生会话阅读，须对照成熟参考项目已有的实现核验覆盖范围。
+- 大数量资格验证须绑定实际数据来源、版本与窗口条件；真实观测集合与扩展压力样本分别声明，合成样本或自然窗口之外的局部测试不能称为真实使用通过。
+- 原生协议须接到真实产品调用；内容顺序、主会话身份、恢复、长对话阅读和资源边界分别验证。
+- 输入类能力（如 Message Tool）的交付证据覆盖真实宿主调用、关键实现变异变红、浏览器交互及草稿恢复；已归档的状态不能代替当前候选的验证。
+- 已交付的优化须在并行集成与实际安装后仍可用。体验退化时，结论区分四种情况：实现被改回、实现还在但当前产物没包含、当前运行副本没用上、尚未确认。历史提交或当前源码还在，都不能证明用户正在用的界面保留了这项优化。
 
 
 ## Provider 输入边界回归
@@ -219,9 +257,19 @@ live daemon `SIGKILL` 发生在 Run 与 Attachment 仍活跃时；fixture 证明
 
 工作面快捷键的判定及落点解析使用原纯函数，组件负责实际注册与 `preventDefault`。静态渲染不会运行 effect，因此既验证判定，也验证生产接线；删除注册调用须使断言失败。不同平台与终端作用域键按真实键位比对，不能凭惯例猜无冲突。
 
-地址失败的下一步既须经实际 CLI parser 验证对象、动词、必填参数及转义，也须核语义是否对应真实失败分支；`send` 与 `inspect` 的必填项分别校验，不能共用一条粗形状断言。复制与错误回执共用出口时，两侧使用同一命令校验，并证明实际检查集合非空。`self` 多位置歧义使用能与显式ID分支区分的语义断言，不以错误码名字猜含义。
+地址失败与恢复命令给出的下一步，按动词逐行经实际 CLI parser 验证对象、动词、必填参数及转义，也须核语义是否对应真实失败分支；`send` 与 `inspect` 的必填项分别校验，不能共用一条粗形状断言。复制与错误回执共用出口时，两侧使用同一个校验函数，并各自断言检查行数的下界，证明实际检查集合非空。文案方向用语义断言钉住：`self` 多位置歧义的提示必须点名 `self`，能与显式 ID 分支区分；只断言形状抓不到措辞张冠李戴，也不以错误码名字猜含义。修「断言太粗」时，回查同一条断言里是否还有第二处粗糙。
 
-保活与资源停放须显式断言隐藏消费者不新增 fit／resize／绘制／定时器／监听及无关Session工作；画面正确不能证明相关成本。内存结果按原进程和surface owner分层，不能把RSS相加或仅看进程退出代替工作集与owner数量收敛。
+## 对话阅读的验证与性能测量
+
+纯序列、布局事务、卡片与宿主控制器的重构，以及渐进阅读的性能改动，按下列方法验证；接口影响按[公共能力贡献约定](../guides/public-capability-contributions.md)判断。
+
+验证按承诺的结果区分：统一序列保持原顺序、贡献与定位；呈现事务覆盖跨贡献变更、跨过程选区、没有 Reader 的共同消费者及迟到操作；共同组件覆盖两端的差异能力、完整复制、两个按钮交错操作及切换来源；输入控制器覆盖失败与未知、重连、切换与原操作核对。删除真实保护或接线的实现变异必须使对应场景变红（方法见[任务验收与假绿防护](#任务验收与假绿防护)）。
+
+渐进阅读分别测量「下一段何时可读」和「数据到达后主线程做了多少工作」：记录读取、组装、提交的时刻，长任务、帧耗时、节点规模与锚点偏移；使用折叠过程密集、长正文或已展开过程两类长会话，并核对隐藏位置、无关 Session 的输出和双向返程。受控批量输入先以原 Provider／Store 的准确回执确认准备完成，输入状态处理与阅读呈现的成本分别记录。新增正文只有进入原接受窗口后，才能比较挂载成本；待保护帧尚未呈现时的零挂载不算优化收益。首段可读正文与长答案完整呈现是两个指标，不能互相代替。源码里有 memo、分页或虚拟化都不是性能通过的证据；文档审查只证明设计与事实边界，不代替实现、真实产品或安装验收。
+
+成本比较保留原长任务的时长和时间条目。观察到的阻塞量按每项 `max(0, duration − 50ms)` 相加，复用[阻塞部分的定义](https://developer.chrome.com/docs/lighthouse/performance/lighthouse-total-blocking-time)，但不冒称 Lighthouse 的页面加载窗口，也不沿用它的评分阈值；只记录超过门槛的任务时，整项时长不代表全部任务成本。全部工作另以原生 `timeTicks` 的任务占用墙钟度量：「真实起点到终点」与「首次可读原样本到同一终点」两个窗口分别比较，不能用前段节省抵消连续阅读的增加；它不是 CPU 时间，重叠的子类不相加，采样开销不扣除。首次可读延迟、帧与长任务分布仍独立保留。
+
+测量起止点在正式样本之前固定。Current 原状态完成后的两个绘制帧之后，依次读取呈现快照与原生最终计数，保留各自的真实端点，不把两个独立读数称为同一时刻。Observer 快照先排空当时已完成且已入队的条目；当前快照任务及其后到原生端点之间的任务不保证在该集合中，须声明覆盖边界。旧的失败不按新口径回算成通过；任何窗口或指标持续退化、超过同基线样本的波动时，仍须调查并阻止性能通过。
 
 ## 动态视觉的浏览器成本验证
 
