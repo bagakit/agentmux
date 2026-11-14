@@ -29,6 +29,8 @@ it('submits and inspects only the original D Core input through the frozen membe
   const f = await fixture()
   const observer = vi.spyOn(f.b.core, 'submitAgentPrompt').mockRejectedValue(Error('The observer-local same SID must not receive input'))
   const original = vi.spyOn(f.d.core, 'submitAgentPrompt')
+  const observerSubmission = vi.spyOn(f.b.core, 'inspectAgentPromptSubmission').mockRejectedValue(Error('The observer-local submission must not be read'))
+  const originalSubmission = vi.spyOn(f.d.core, 'inspectAgentPromptSubmission')
   const receipt = await f.runtime.submitPrompt(f.target, 'Original Source body', 'original-source-operation', {
     expectedRun: f.session.run, admissionIntent: { kind: 'manual-actor' }
   }, undefined, { execution: 'immediate' }, true, undefined, 'message-tool', undefined, undefined, { name: 'Original person' })
@@ -43,7 +45,11 @@ it('submits and inspects only the original D Core input through the frozen membe
   expect(observer).not.toHaveBeenCalled()
   if (!receipt || !('key' in receipt)) throw Error('Expected the original Core input receipt')
   await expect(f.runtime.inspectInput(f.target, receipt.key)).resolves.toMatchObject({ key: receipt.key })
+  originalSubmission.mockClear(); observerSubmission.mockClear()
   await expect(f.runtime.inspectSubmission(f.target, receipt.key)).resolves.toBeNull()
+  expect(originalSubmission).toHaveBeenCalledOnce()
+  expect(originalSubmission.mock.calls[0]?.[0]).toEqual(receipt.key)
+  expect(observerSubmission).not.toHaveBeenCalled()
   expect(original).toHaveBeenCalledOnce()
   expect(observer).not.toHaveBeenCalled()
 })

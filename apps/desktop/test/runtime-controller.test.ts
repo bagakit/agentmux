@@ -1118,6 +1118,43 @@ describe('RuntimeController configuration transaction', () => {
     } finally { status.resolve(agentStatusFixture()); await pending; await controller.dispose() }
   })
 
+  it('cancels automatic prompt admission while the configured Host connection is still pending', async () => {
+    const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!, connecting = deferred<void>()
+    client.connect.mockClear()
+    client.connect.mockImplementationOnce(async () => { await connecting.promise })
+    const cancellation = new AbortController(), reason = new Error('Original scheduler stopped before connection.')
+    const control = { kind: 'agent' as const, hostId: 'local', agentSessionId: 'agent-1', run: { runId: 'run-1' } }
+    let settled = false
+    const pending = controller.submitPrompt(control, 'original automatic input', 'original-connect-tick',
+      { expectedRun: control.run, afterSubmissionId: null }, { isCurrent: () => true, signal: cancellation.signal })
+      .catch(error => error).finally(() => { settled = true })
+    try {
+      await vi.waitFor(() => expect(client.connect).toHaveBeenCalledOnce())
+      cancellation.abort(reason)
+      await vi.waitFor(() => expect(settled, 'abort must not await the configured connection receipt').toBe(true), { timeout: 1_000, interval: 10 })
+      expect(await pending).toBe(reason)
+      expect(client.statusAgent).not.toHaveBeenCalled(); expect(client.submitAgentPrompt).not.toHaveBeenCalled()
+    } finally { connecting.resolve(); await pending; await controller.dispose() }
+  })
+
+  it('cancels automatic prompt admission while the original Agent status is still pending', async () => {
+    const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!
+    const status = deferred<ReturnType<typeof agentStatusFixture>>(), cancellation = new AbortController(), reason = new Error('Original scheduler stopped during status.')
+    client.statusAgent.mockClear(); client.statusAgent.mockImplementationOnce(async () => await status.promise)
+    client.submitAgentPrompt.mockClear()
+    const control = { kind: 'agent' as const, hostId: 'local', agentSessionId: 'agent-1', run: { runId: 'run-1' } }
+    let settled = false
+    const pending = controller.submitPrompt(control, 'original automatic input', 'original-status-tick',
+      { expectedRun: control.run, afterSubmissionId: null }, { isCurrent: () => true, signal: cancellation.signal })
+      .catch(error => error).finally(() => { settled = true })
+    try {
+      await vi.waitFor(() => expect(client.statusAgent).toHaveBeenCalledOnce())
+      cancellation.abort(reason)
+      await vi.waitFor(() => expect(settled, 'abort must not await the post-connect status receipt').toBe(true))
+      expect(await pending).toBe(reason); expect(client.submitAgentPrompt).not.toHaveBeenCalled()
+    } finally { status.resolve(agentStatusFixture()); await pending; await controller.dispose() }
+  })
+
   it('maps one Terminal shell command only at the Desktop creation boundary', async () => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient.instances[0]!
