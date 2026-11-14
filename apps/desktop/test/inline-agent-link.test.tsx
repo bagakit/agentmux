@@ -88,6 +88,18 @@ describe('Desktop Agent links in the shared production conversation', () => {
 
 const regionUri = 'amux://region/region%3Alauncher%3A0ef42075-2820-47b9-afcf-66bb99ea2eb8'
 describe('Desktop spatial links in the shared production conversation', () => {
+  it('presents qualified Node links through the original conversation adapter and keeps each Runtime-pinned URI', async () => {
+    const uris = ['amux://host/studio?runtime=original-runtime', 'amux://host/studio/agent/original%2Fobject?runtime=original-runtime', 'amux://host/studio/capsule/original%2Fobject?runtime=original-runtime']
+    const open = vi.spyOn(api.ui, 'openObjectLink').mockResolvedValue(), copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue()
+    await render(<DesktopClientUiProvider><AgentMarkdown content={uris.join('\n\n')} /></DesktopClientUiProvider>)
+    const links = [...container.querySelectorAll<HTMLButtonElement>('[data-object-link-open="host"]')]
+    expect(links).toHaveLength(3)
+    expect(links.map(link => link.textContent)).toEqual(['Nodestudio', 'Nodestudio / Agent / original/object', 'Nodestudio / Capsule / original/object'])
+    for (const [index, link] of links.entries()) {
+      expect(link.title).toContain(uris[index]); await click(link); expect(open).toHaveBeenLastCalledWith(uris[index])
+      await click(link.parentElement!.querySelector<HTMLElement>('[aria-label="Copy Node link"]')!); expect(copy).toHaveBeenLastCalledWith(uris[index])
+    }
+  })
   it('renders the exact Region as a compact object action in bare and Markdown prose and copies the unmodified message', async () => {
     const open = vi.spyOn(api.ui, 'openObjectLink').mockResolvedValue(), copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue()
     const raw = `打开 ${regionUri}，或者 [原工作格](${regionUri})。`
