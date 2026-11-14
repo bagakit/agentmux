@@ -283,7 +283,7 @@ async function launch(label, seed) {
 }
 async function surface(probe) {
   if (workfaceJoin) {
-    const value = projectRoutesJoin ? await probe.cdp.evaluate(`(async()=>{const raw=await window.agentmux.ui.readWorkbenchState();if(!raw)throw Error('Original Main user-state document is unavailable');const saved=JSON.parse(raw).state,config=await window.agentmux.config.get(),group=[...document.querySelectorAll('.focus-project-frame[data-project-group-key]')].find(n=>n.dataset.projectGroupKey===JSON.stringify(['local',${JSON.stringify(workspaceId)}]));return{selection:saved.workbenchSpaceSelection,focus:saved.agentFocus,draft:saved.agentComposerDrafts[${JSON.stringify(session.agentSessionId)}],projectPreferences:JSON.stringify(config.focus?.projects??[]),zonePresentations:JSON.stringify(config.focus?.zonePresentations??[]),projectGroup:group?{pinned:group.dataset.pinned,color:group.dataset.focusProjectColor,note:group.querySelector('[data-focus-project-note]')?.textContent,text:group.textContent,organization:group.dataset.focusZonePresentation,artwork:(()=>{const e=group.querySelector('img[data-project-watermark]');if(!e)return null;const data=e.src.split(',')[1]??'';return{loaded:e.complete&&e.naturalWidth>0,width:e.naturalWidth,height:e.naturalHeight,png:e.src.startsWith('data:image/png;base64,'),bytes:data.length*3/4-(data.match(/=*$/)?.[0].length??0)}})(),headings:group.querySelectorAll('.focus-project-frame__heading').length,preferenceEntries:group.querySelectorAll('.focus-project-preferences__trigger').length,lanes:group.querySelectorAll('[data-lane-id]').length}:null,regions:[...document.querySelectorAll('[data-workbench-region-id]')].filter(n=>n.getClientRects().length&&getComputedStyle(n).visibility==='visible').map(n=>n.dataset.workbenchRegionId).sort()}})()`) : await probe.cdp.evaluate(`(() => { const saved=JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state;return{selection:saved.workbenchSpaceSelection,focus:saved.agentFocus,draft:saved.agentComposerDrafts[${JSON.stringify(session.agentSessionId)}],topicPresentation:document.querySelector('.global-focus-surface')?.dataset.focusTopicPresentation,regions:[...document.querySelectorAll('[data-workbench-region-id]')].filter(n=>n.getClientRects().length&&getComputedStyle(n).visibility==='visible').map(n=>n.dataset.workbenchRegionId).sort()}})()`)
+    const value = projectRoutesJoin ? await probe.cdp.evaluate(`(async()=>{const raw=await window.agentmux.ui.readWorkbenchState();if(!raw)throw Error('Original Main user-state document is unavailable');const saved=JSON.parse(raw).state,config=await window.agentmux.config.get(),group=[...document.querySelectorAll('.focus-project-frame[data-project-group-key]')].find(n=>n.dataset.projectGroupKey===JSON.stringify(['local',${JSON.stringify(workspaceId)}]));return{selection:saved.workbenchSpaceSelection,focus:saved.agentFocus,draft:saved.agentComposerDrafts[${JSON.stringify(session.agentSessionId)}],note:saved.agentComposerNotes?.[${JSON.stringify(session.agentSessionId)}]??null,projectPreferences:JSON.stringify(config.focus?.projects??[]),zonePresentations:JSON.stringify(config.focus?.zonePresentations??[]),projectGroup:group?{pinned:group.dataset.pinned,color:group.dataset.focusProjectColor,note:group.querySelector('[data-focus-project-note]')?.textContent,text:group.textContent,organization:group.dataset.focusZonePresentation,artwork:(()=>{const e=group.querySelector('img[data-project-watermark]');if(!e)return null;const data=e.src.split(',')[1]??'';return{loaded:e.complete&&e.naturalWidth>0,width:e.naturalWidth,height:e.naturalHeight,png:e.src.startsWith('data:image/png;base64,'),bytes:data.length*3/4-(data.match(/=*$/)?.[0].length??0)}})(),headings:group.querySelectorAll('.focus-project-frame__heading').length,preferenceEntries:group.querySelectorAll('.focus-project-preferences__trigger').length,lanes:group.querySelectorAll('[data-lane-id]').length}:null,regions:[...document.querySelectorAll('[data-workbench-region-id]')].filter(n=>n.getClientRects().length&&getComputedStyle(n).visibility==='visible').map(n=>n.dataset.workbenchRegionId).sort()}})()`) : await probe.cdp.evaluate(`(() => { const saved=JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state;return{selection:saved.workbenchSpaceSelection,focus:saved.agentFocus,draft:saved.agentComposerDrafts[${JSON.stringify(session.agentSessionId)}],topicPresentation:document.querySelector('.global-focus-surface')?.dataset.focusTopicPresentation,regions:[...document.querySelectorAll('[data-workbench-region-id]')].filter(n=>n.getClientRects().length&&getComputedStyle(n).visibility==='visible').map(n=>n.dataset.workbenchRegionId).sort()}})()`)
     const spatial = await new core.AgentMuxSpatialStateStore().read()
     assert.ok(spatial?.graph?.tabs.some(tab => tab.tabId === tabId), 'Original Tab must exist in the actual Core durable workface')
     assert.ok(spatial.graph.layouts[workspaceId] && spatial.graph.tabLayouts[tabId], 'Original Group and split layout must be nonempty')
@@ -321,6 +321,7 @@ async function collectionCommand(args, operation, expectedOk = true, input) {
   Object.assign(captured, result, { elapsedMs: Date.now() - captured.startedAt })
   // Preserve an unknown write exactly. Never retry it or open a second service.
   assert.equal(result.code, expectedOk ? 0 : 1, JSON.stringify(captured))
+  if (operation === null) return result.stdout
   const payload = JSON.parse(expectedOk ? result.stdout : result.stderr)
   captured.receipt = payload
   assert.equal(payload.ok, expectedOk); assert.equal(payload.operation, operation)
@@ -520,6 +521,14 @@ try {
       layouts: { [workspaceId]: { root: { type: 'leaf', groupId }, groups: [{ id: groupId, tabOrder: [tabId], activeTabId: tabId, recentTabIds: [tabId] }], activeGroupId: groupId },
         __scratch__: { root: { type: 'leaf', groupId: 'width-scratch-group' }, groups: [{ id: 'width-scratch-group', tabOrder: [], activeTabId: null, recentTabIds: [] }], activeGroupId: 'width-scratch-group' } } } } }
   const spaceId = directoryIdentity('local', workspacePath)
+  if (focusReadJoin) {
+    const { focusTaskHandoffNote } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/focus-task-guidance.js')).href)
+    const focusTask = { scope: { kind: 'project', hostId: 'local', projectSpaceId: spaceId },
+      selection: { kind: 'members', references: [{ hostId: 'local', contextId: session.agentSessionId }] } }
+    const note = focusTaskHandoffNote(focusTask)
+    seed.state.agentComposerNotes = { [session.agentSessionId]: note }
+    receipt.originalFocusDraft = { prompt: draft, focusTask, note, owner: 'Core focusTaskHandoffNote → original first-hydrate composer note' }
+  }
   seed.state.workbenchSpaceSelection = { spaceId, zoneId: JSON.stringify([spaceId, 'workspace', workspaceId]), workspaceId,
     topicId: null, tabId, groupId, regionId: agentRegionId }
   receipt.originalSelection = seed.state.workbenchSpaceSelection
@@ -536,6 +545,7 @@ try {
     receipt.workfaceGraphs = { before: await hostArtifact('first-before-core-graph.json', before.workbench) }
   } else { assert.equal(before.width, 112); assert.equal(before.renderedWidth, 112); assert.ok(before.tracks.includes(session.agentSessionId)); assert.ok(before.projects.length > 0) }
   assert.equal(before.draft, draft)
+  if (focusReadJoin) assert.equal(before.note, receipt.originalFocusDraft.note, 'Original Core reference guidance hydrates beside the unsent draft')
   receipt.seedReport = first.seedReport
   if(rulerJoin){
     assert.equal(before.hours,4)
@@ -559,6 +569,7 @@ try {
     assert.deepEqual(originalWorkfaceScope(edited.workbench), originalWorkfaceScope(before.workbench))
   } else assert.deepEqual(edited.workbench, before.workbench)
   assert.deepEqual(edited.focus, before.focus); assert.equal(edited.draft, draft)
+  if (focusReadJoin) assert.equal(edited.note, before.note, 'Presentation writes preserve the original task guidance')
   if (workfaceJoin) assert.deepEqual(edited.selection, before.selection)
   if (workfaceJoin) { assert.equal(projectRoutesJoin ? edited.projectPreferences : edited.topicPresentation, projectRoutesJoin ? serializedProjects : 'sections'); assert.deepEqual(edited.regions, before.regions) }
   else assert.equal(edited.height, before.height)
@@ -580,6 +591,7 @@ try {
     assert.deepEqual(originalWorkfaceScope(restored.workbench), originalWorkfaceScope(edited.workbench))
   } else assert.deepEqual(restored.workbench, edited.workbench)
   assert.deepEqual(restored.focus, edited.focus); assert.equal(restored.draft, draft)
+  if (focusReadJoin) assert.equal(restored.note, receipt.originalFocusDraft.note, 'Zero-seed ordinary restart retains the original reference guidance and draft')
   if (workfaceJoin) assert.deepEqual(restored.selection, before.selection)
   if (workfaceJoin) {
     stage = 'collection-preference-and-workface-restored'

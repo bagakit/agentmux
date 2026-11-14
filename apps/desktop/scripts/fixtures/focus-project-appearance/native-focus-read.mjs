@@ -34,6 +34,10 @@ export function createNativeFocusReadProof({ command, session, spaceId, regionId
   return {
     async first(probe) {
       const before = await run()
+      const skill = await command(['focus', '--skill'], null), help = await command(['focus', 'read', '--help'], null)
+      assert.ok(skill.includes('focus read') && skill.includes('focus ls'), 'Compiled public capability is discoverable')
+      assert.ok(help.includes('--input'), 'Compiled Focus input contract is discoverable')
+      proof.discovery = { skill, help }
       const directory = observed('original directory', await command(['focus', 'ls'], 'focus.ls'))
       const scope = { kind: 'project', hostId: 'local', projectSpaceId: spaceId }
       assert.equal(directory.items.filter(item => JSON.stringify(item.scope) === JSON.stringify(scope)).length, 1)
