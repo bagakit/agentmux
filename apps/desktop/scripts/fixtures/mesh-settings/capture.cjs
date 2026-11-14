@@ -11,6 +11,40 @@ app.whenReady().then(async()=>{try{
  const openGateway=()=>evaluate(`document.querySelector('.settings-sidebar nav [data-settings-target="hosts:mesh-configuration"]')?.click()`)
  const paint=async()=>{await evaluate('document.fonts.ready');await delay(400)}
  const frame=async name=>{await paint();const file=name+'.png';await fs.writeFile(path.join(output,file),(await window.webContents.capturePage()).toPNG());receipt.frames.push(file)}
+ if (scenario === '--device-workflow') {
+   const until = async test => { for (let i=0;i<120;i++) { if (await evaluate(test)) return; await delay(50) }; throw Error(test) }
+   const field = name => `document.querySelector('[aria-label="${name}"]')`
+   await window.loadURL(url+'?scenario=initial')
+   await until("document.querySelector('.mesh-home-actions')?.textContent.includes('Use another device')")
+   await frame('device-tasks')
+   await evaluate("document.querySelector('.mesh-home-actions button:last-child').click()")
+   await until(`Boolean(${field('Device access link')})`)
+   await frame('use-another-device')
+   await evaluate("document.querySelector('.mesh-editor-navigation button').click()")
+   await until("Boolean(document.querySelector('.mesh-home-actions button'))")
+   await evaluate("document.querySelector('.mesh-home-actions button').click()")
+   await until(`Boolean(${field('Paste a connection code')})`)
+   await evaluate(`(()=>{const e=${field('Paste a connection code')};Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,meshFixture.workflowCode);e.dispatchEvent(new Event('input',{bubbles:true}))})()`)
+   await until("document.querySelector('.mesh-peer-preview')?.textContent.includes('gateway.example')")
+   await frame('join-preview')
+   window.setContentSize(550,900);await evaluate('meshFixture.theme("light")')
+   await evaluate("document.querySelector('.mesh-peer-pairing').scrollIntoView({block:'center'})");await frame('join-preview-narrow')
+   window.setContentSize(1280,980);await window.loadURL(url+'?scenario=workflow-gateway');await openGateway()
+   await until(`Boolean(${field('Device to manage')})`)
+   await evaluate(`(()=>{const e=${field('Device to manage')};e.value=e.options[1].value;e.dispatchEvent(new Event('change',{bubbles:true}))})()`)
+   await until("document.querySelector('.mesh-network-heading h3')?.textContent.includes('Office gateway')")
+   await frame('managed-gateway')
+   await until(`Boolean(${field('Mesh device public keys')})`)
+   await evaluate("document.querySelector('.mesh-device-access').open=true;document.querySelector('.mesh-device-access').scrollIntoView({block:'center'})")
+   await frame('endpoint-approval')
+   await evaluate("meshFixture.endpoint();document.querySelector('.mesh-network-heading button').click();document.querySelector('.mesh-access-links').open=true")
+   await until("!document.querySelector('[data-settings-field=mesh-link]>button')?.disabled")
+   await evaluate("document.querySelector('[data-settings-field=mesh-link]>button').click()")
+   await until(`Boolean(${field('Mesh access link')})`)
+   await evaluate("document.querySelector('.mesh-link-result').scrollIntoView({block:'center'})")
+   await frame('gateway-access-link')
+   receipt.passed=true;return
+ }
  if (scenario === '--runtime-identity') {
   await window.loadURL(url+'?scenario=runtime-identity');await openGateway()
   for(let i=0;i<200;i++){if(await evaluate('Boolean(document.querySelector("[data-mesh-settings] .primary-button"))'))break;await delay(30)}

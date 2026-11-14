@@ -247,7 +247,9 @@ it('production Mesh editors exchange codes and save through Renderer/Main into t
     const originalBEndpoint=await wait(()=>b.client.call('mesh.inspect',{}),v=>v.endpoint.state==='available')
     bridge.mockRestore();bridge=connect(operator);await dom.render(<Editor active key="real-a-link"/>);await ready()
     await selectHost('Issuing gateway',operator.host.id)
-    await input('Original Mesh endpoint offer',JSON.stringify(originalBEndpoint.endpoint.offer));await dom.click('[data-settings-field="mesh-link"] > button')
+    await settled(()=>dom.container.querySelector('.mesh-endpoint-source')?.textContent?.includes(originalBEndpoint.endpoint.offer.serverId) ?? false)
+    expect(dom.container.querySelector<HTMLTextAreaElement>('[aria-label="Original Mesh endpoint offer"]')!.value).toBe('')
+    await dom.click('[data-settings-field="mesh-link"] > button')
     await settled(()=>Boolean(dom.container.querySelector('[aria-label="Mesh access link"]')))
     const linkUrl=dom.container.querySelector<HTMLInputElement>('[aria-label="Mesh access link"]')!.value
     const linkedOffer=b.readOffer(linkUrl)
