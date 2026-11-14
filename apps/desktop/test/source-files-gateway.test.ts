@@ -29,6 +29,7 @@ async function located() {
 it('actual Main uses Source directory registration and Native Files without an Agent metadata bootstrap or alias rewrite', async () => {
   const f = await sourceFilesHosts(cleanup), [a, b] = f.sources
   const reads = vi.spyOn(b!.client, 'readAgentSessions').mockRejectedValue(new Error('Unrelated Agent metadata unavailable'))
+  vi.spyOn(b!.client, 'runtimeOwnerIdentity').mockReturnValue(null)
   const target = { hostId: b!.id, expectedRuntimeId: b!.identity.runtimeId }
   const found = await f.runtime.resolveSourceFiles(target, { kind: 'directory', path: b!.project })
   expect(found.status).toBe('registration-required')
@@ -90,7 +91,7 @@ it('a positive original folder registration is retained after carrier replacemen
   expect(receipt).toMatchObject({ source: { runtimeId: target.expectedRuntimeId }, created: true, diskDurability: 'confirmed', resource: { workspacePath: b.project } })
   expect(register).toHaveBeenCalledTimes(1)
   f.routes.set(b.id, { client: b.client })
-  const recovered = await f.runtime.resolveSourceFiles(target, { kind: 'directory', path: b.project })
+  const recovered = await f.runtime.resolveSourceFiles(target, { kind: 'directory', path: b.project, expectedResource: discovered.registration.directory })
   expect(recovered).toMatchObject({ status: 'located', locator: { mount: { reference: receipt.reference, zoneId: receipt.zoneId, workspaceId: receipt.workspaceId } } })
   expect(register).toHaveBeenCalledTimes(1)
 })
@@ -105,7 +106,7 @@ it('a registration result interrupted after the original durable write is recove
   const found = await f.runtime.resolveSourceFiles(target, { kind: 'directory', path: b.project })
   if (found.status !== 'registration-required') throw Error('No original registration packet')
   await expect(f.runtime.registerFolderSpace(b.id, found.registration)).rejects.toThrow('interrupted after the durable write')
-  const recovered = await f.runtime.resolveSourceFiles(target, { kind: 'directory', path: b.project })
+  const recovered = await f.runtime.resolveSourceFiles(target, { kind: 'directory', path: b.project, expectedResource: found.registration.directory })
   expect(recovered.status).toBe('located')
   expect(JSON.stringify(recovered)).not.toContain('diskDurability')
   expect(register).toHaveBeenCalledTimes(1)
@@ -119,6 +120,8 @@ it('the frozen Source directory packet never adopts a replacement inode or regis
   await rename(b.project, b.project + '-retained'); await mkdir(b.project)
   const register = vi.spyOn(AgentMuxSpatialStateStore.prototype, 'registerDirectory')
   await expect(f.runtime.registerFolderSpace(b.id, found.registration)).rejects.toMatchObject({ code: 'SPACE_DIRECTORY_CHANGED' })
+  expect(await f.runtime.resolveSourceFiles(target, { kind: 'directory', path: b.project, expectedResource: found.registration.directory })).toMatchObject({
+    status: 'unconfirmed', issue: { code: 'SPACE_DIRECTORY_CHANGED' } })
   expect(register).not.toHaveBeenCalled()
   expect((await b.rpc.call('app.snapshot', { include: ['spaces'] })).spaces).toEqual([])
   expect(await readFile(join(b.project + '-retained', 'original.txt'), 'utf8')).toBe('source-b original body')
@@ -150,6 +153,7 @@ it('production-shaped client server borrows the real Core fence with no hostedRu
 it('original Files watch retains its exact fence without metadata bootstrap and ends only the stale carrier reader', async () => {
   const f = await located(), events: unknown[] = [], end = vi.fn()
   const metadata = vi.spyOn(f.b.client, 'readAgentSessions').mockRejectedValue(new Error('Unrelated metadata unavailable'))
+  vi.spyOn(f.b.client, 'runtimeOwnerIdentity').mockReturnValue(null)
   const controller = new AbortController()
   const initial = vi.fn()
   const reader = await f.runtime.watchSourceFiles(f.target, { zoneId: f.mount.zoneId, spaceId: f.mount.reference.spaceId, path: '.',
@@ -171,6 +175,7 @@ it('original Files watch retains its exact fence without metadata bootstrap and 
 
 it('a cancelled late Source subscription is disposed without adopting its opening or bootstrapping Agent metadata', async () => {
   const f = await located(), controller = new AbortController(), metadata = vi.spyOn(f.b.client, 'readAgentSessions').mockRejectedValue(new Error('Unrelated metadata unavailable'))
+  vi.spyOn(f.b.client, 'runtimeOwnerIdentity').mockReturnValue(null)
   const real = f.b.client.subscribeRpc!.bind(f.b.client), dispose = vi.fn(), end = vi.fn()
   vi.spyOn(f.b.client, 'subscribeRpc').mockImplementation(async (...args) => {
     const reader = await real(...args)
