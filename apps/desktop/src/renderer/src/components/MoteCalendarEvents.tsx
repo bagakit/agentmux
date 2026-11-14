@@ -4,6 +4,7 @@ import { Button } from '@agentmux/client-ui/components/Button'
 import { validateScheduleRpcResult, type ScheduleResultMap } from '@agentmux/core/schedule-rpc'
 import type { ContinuousProgressLoop } from '@agentmux/core/continuous-progress-scheduler'
 import type { ScheduleOccurrence, ScheduleOccurrenceWindow } from '@agentmux/core/schedule-calendar'
+import { deliveryLabel, turnLabel } from '../lib/mote-calendar-range'
 import { api } from '../lib/api'
 import type { CalendarSchedule } from '../lib/mote-calendar-range'
 import { scheduleCalendarLabel, scheduleStateLabel } from './ScheduleArrangementRow'
@@ -13,13 +14,6 @@ type Receipt = Page['entries'][number]
 type Reading = { entries: Receipt[]; next: string | null; retry?: { cursor: string | undefined } }
 type CalendarEvent = { at: number; saved: CalendarSchedule } & ({ receipt: Receipt } | { planned: ScheduleOccurrence })
 
-const deliveryLabel: Record<Receipt['delivery'], string> = {
-  'terminal-confirmed': 'Sent to terminal',
-  'native-admitted': 'Input accepted',
-  'not-applied': 'Not sent',
-  unconfirmed: 'Delivery unconfirmed',
-}
-const nativeLabel = { completed: 'Agent turn completed', failed: 'Agent turn failed', interrupted: 'Agent turn interrupted' } as const
 const receiptKey = (receipt: Receipt) => JSON.stringify([receipt.runId, receipt.operationId])
 const slotKey = (id: string, at: number) => JSON.stringify([id, at])
 const formatCount = new Intl.NumberFormat()
@@ -122,8 +116,8 @@ export function MoteCalendarEvents({ window, schedules, items, timezone, now, ac
       const planned = 'planned' in event ? event.planned : undefined
       const key = JSON.stringify([record.loopId, at, receipt ? receiptKey(receipt) : 'plan'])
       const result = receipt?.nativeResult.state
-      const nativeStatus = result && result !== 'unknown' && result !== 'unsupported' ? nativeLabel[result] : undefined
-      const status = receipt ? nativeStatus ?? deliveryLabel[receipt.delivery]
+      const nativeStatus = result && turnLabel(result)
+      const status = receipt ? nativeStatus ?? deliveryLabel(receipt.delivery)
         : planned?.kind === 'last-accepted' ? 'Input accepted'
         : planned?.repeat && planned.repeat.count > 1 ? formatCount.format(planned.repeat.count) + ' planned'
         : planned?.kind === 'next-due' ? scheduleStateLabel(record, now) === 'Active' ? 'Planned' : scheduleStateLabel(record, now)
@@ -137,7 +131,7 @@ export function MoteCalendarEvents({ window, schedules, items, timezone, now, ac
           <span title={label}>{label}</span><small>{status}</small>
         </button>
         {receipt && opened === key ? <div className="mote-calendar__recap">
-          <div><strong>Recap</strong><small>{deliveryLabel[receipt.delivery]}{nativeStatus ? ' · ' + nativeStatus : ''}</small></div>
+          <div><strong>Recap</strong><small>{deliveryLabel(receipt.delivery)}{nativeStatus ? ' · ' + nativeStatus : ''}</small></div>
           <p>{receipt.recap ? receipt.recap.text + (receipt.recap.truncated ? '…' : '') : 'Original input text is unavailable.'}</p>
           <Button type="button" onClick={() => onOpenDiscussion(record)}>Open original discussion</Button>
         </div> : null}
