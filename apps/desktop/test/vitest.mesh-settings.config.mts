@@ -15,6 +15,7 @@ const edits: Record<string, [string, string, string]> = {
   'invented-empty-network': ['renderer/src/components/settings/MeshNetworkSettings.tsx', '{hasTopology ? <MeshNetworkMap', '{true ? <MeshNetworkMap'],
   'lost-fence': ['main/mesh-network-ipc.ts', '...(original ? { runtimeFence: original } : {})', ''],
   'lost-draft': ['renderer/src/components/settings/MeshNetworkSettings.tsx', 'form: later ? value.form : meshForm(result.settings.configuration, result.settings.identity?.peerId)', 'form: meshForm(result.settings.configuration, result.settings.identity?.peerId)'],
+  'new-identity-imports-backup': ['renderer/src/components/settings/MeshNetworkSettings.tsx', 'await api.ui.openLocalIdentitySetup()', 'await api.ui.restoreLocalRuntimeIdentity()'],
   'lost-unknown': ['renderer/src/components/settings/MeshNetworkSettings.tsx', "if (!notApplied) return { ...value, pending: { ...value.pending, phase: 'unknown' } }", 'if (false) return value'],
   'wrong-method': ['renderer/src/lib/mesh-network-client.ts', 'preload.call(method, params,', "preload.call('mesh.inspect' as typeof method, params,"],
   'relocation': ['renderer/src/components/settings/HostSettingsPane.tsx', '          <LocalIncomingConnections config={config} active={localConnectionVisible} visible={localConnectionVisible} />', ''],
@@ -34,6 +35,7 @@ if (mutant && !edits[mutant]) throw Error('Unknown Mesh UI mutant')
 const targetedIncludes: Record<string, string[]> = {
   'lost-fence': ['apps/desktop/test/mesh-network-ipc.test.ts'], 'wrong-method': ['apps/desktop/test/mesh-network-ipc.test.ts'],
   'lost-draft': ['apps/desktop/test/mesh-settings.test.tsx'], 'lost-unknown': ['apps/desktop/test/mesh-settings.test.tsx'],
+  'new-identity-imports-backup': ['apps/desktop/test/mesh-settings.test.tsx'],
   relocation: ['apps/desktop/test/host-tailcat-settings.test.tsx', 'apps/desktop/test/tailcat-connection-draft.test.tsx'],
   'local-only-visibility': ['apps/desktop/test/host-tailcat-settings.test.tsx', 'apps/desktop/test/tailcat-connection-draft.test.tsx'],
   'incoming-scope': ['apps/desktop/test/host-tailcat-settings.test.tsx', 'apps/desktop/test/tailcat-connection-draft.test.tsx'],
