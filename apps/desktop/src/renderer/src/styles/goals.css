@@ -214,7 +214,7 @@
 .goal-work__responsibility strong { font-weight: 550; }
 .goal-work__responsibility dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-2) var(--sp-4); margin-block: var(--sp-3); }
 .goal-work__responsibility :is(dt, dd) { margin: 0; overflow-wrap: anywhere; }
-.goals-detail__definition { scroll-margin-top: 56px; }
+.goals-detail__definition { scroll-margin-top: var(--goal-detail-reading-offset, 90px); }
 .goals-detail__definition:focus { outline: none; }
 .goals-detail__definition:first-child > .goals-alignment:first-child { padding-top: 0; border-top: 0; }
 .goals-intent__prose, .goals-proposal, .goals-criteria { max-width: 110ch; }
