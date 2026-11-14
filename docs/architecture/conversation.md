@@ -115,10 +115,10 @@ Hook、Permission、Usage 与问题回答各自单独声明；history reader 可
 公开消息的 `messagePhase` 由各 Provider 解释，公共 `agent.history`、`agent.conversation.inspect/changes` 与共同 UI 直接消费这些记录与阶段，不按厂商另分消息呈现，也不从正文推断完成：
 
 - [Claude](../../packages/providers/src/claude/native-history.ts) 对未中断的真实助手消息读取 `message.stop_reason`，把 `tool_use` 映射为 progress、`end_turn` 映射为 final；未知原因保留为未分类的正文。
-- [Codex](../../packages/core/src/providers/codex-saved-history.ts) 消费消息的 `commentary`／`final_answer`。
+- [Codex](../../packages/providers/src/codex/saved-history.ts) 消费消息的 `commentary`／`final_answer`。
 - [Grok](../../packages/providers/src/grok/native-history.ts) 把同一 Session／prompt 的连续公开文本块组成一条消息：首块的字节位置持有稳定身份，之后的文字与成功终局更新这条消息；工具、思考与其他原生记录各保用途。 原 `user_message_chunk` 的 `_meta.syntheticPrompt === true` 明确标记原生合成输入，Provider 将其投影为 `activity` 并贡献既有 `recordPurpose: system-event`；`hideFromScrollback` 单独出现不改变分类，原正文标签不参与判定，`hostTurn` 的私有内容资格保持。组装只存在于本次 Provider 读取中：历史页保留快照切点，精确读取沿字节位置定位，旧的成功终局引用仍能读到完整回复。
 
-Codex 保存的 rollout 由首条 `session_meta` 中的 `history_mode` 声明格式；之后被复制进 fork 的元数据不能改写它（[codex-saved-history.ts](../../packages/core/src/providers/codex-saved-history.ts) 的 `open`）：
+Codex 保存的 rollout 由首条 `session_meta` 中的 `history_mode` 声明格式；之后被复制进 fork 的元数据不能改写它（[saved-history.ts](../../packages/providers/src/codex/saved-history.ts) 的 `open`）：
 
 - `history_mode` 为 `paginated` 时，canonical 用户发言是同一 thread、带 turn 的 `event_msg`／`item_completed` 中的 `UserMessage` TurnItem；`response_item` 中 role 为 user 的消息只作为「Model context」过程记录保留原文，内容资格为 private。typed MCP 工具结果中的文件 part 也只在这种格式下提取。
 - 其他格式保留各自原有的合同：`response_item` 的用户消息仍是用户发言。
@@ -128,7 +128,7 @@ Codex 保存的 rollout 由首条 `session_meta` 中的 `history_mode` 声明格
 
 ### 原生结果的接线与能力边界
 
-[`AgentTurnOutcome`](../../packages/core/src/types.ts) 是记录上的结果合同，与计量、当前活动和 Run 健康分开。Codex 的 [`codexTurnOutcome`](../../packages/core/src/providers/codex-turn-outcome.ts) 由原生状态观察、输入完成证据与 saved-history 共用；[`codexFailure`](../../packages/providers/src/codex/errors.ts) 保留原生错误码、有限诊断以及 Provider 明确提供的公开摘要。Claude 的结构化主轮错误由它自己的 Hook 适配贡献，缺少可信 turn 身份的信号只作诊断。
+[`AgentTurnOutcome`](../../packages/core/src/types.ts) 是记录上的结果合同，与计量、当前活动和 Run 健康分开。Codex 的 [`codexTurnOutcome`](../../packages/providers/src/codex/turn-outcome.ts) 由原生状态观察、输入完成证据与 saved-history 共用；[`codexFailure`](../../packages/providers/src/codex/errors.ts) 保留原生错误码、有限诊断以及 Provider 明确提供的公开摘要。Claude 的结构化主轮错误由它自己的 Hook 适配贡献，缺少可信 turn 身份的信号只作诊断。
 
 Core 在当前活动排序与显示资格判断之前保存结果。历史归一、公共 wire、changes 与 deferred header 都保留 `turnOutcome`；native 记录与 captured witness 只凭明确的 `same-event` 关系归并，迟到的失败不覆盖新的一轮，也不被新的一轮抹去。共享 [`ConversationView`](../../packages/client-ui/src/components/ConversationView.tsx) 把失败卡放在过程折叠之外，原始详情按需读取。外部发布如何使用结果见 [Connector publication](#外部-publication-的接线)。
 
