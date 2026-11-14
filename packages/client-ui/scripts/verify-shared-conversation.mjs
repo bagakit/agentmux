@@ -67,6 +67,9 @@ async function checkDependencyBoundary() {
       }
     }
   }
+  const corePackage = JSON.parse(await readFile(resolve(root, 'packages/core/package.json'), 'utf8'))
+  for (const dependency of Object.keys(corePackage.dependencies ?? {})) assert.ok(!/react|electron|client-ui/.test(dependency), 'Core must remain headless: ' + dependency)
+  if (interactionReceipts) return { sourceCount: sources.length, scope: 'Shared source dependencies and headless Core' }
   const pure = []
   for (const leaf of ['pasted-images', 'terminal-path-link']) {
     const path = resolve(sourceRoot, 'lib', leaf + '.ts')
@@ -83,8 +86,6 @@ async function checkDependencyBoundary() {
     console.log('Compiled ESM pure leaf imports work in Node without a DOM');
   `], { cwd: resolve(root, 'apps/desktop'), encoding: 'utf8' })
   assert.equal(child.status, 0, child.stderr || child.stdout)
-  const corePackage = JSON.parse(await readFile(resolve(root, 'packages/core/package.json'), 'utf8'))
-  for (const dependency of Object.keys(corePackage.dependencies ?? {})) assert.ok(!/react|electron|client-ui/.test(dependency), 'Core must remain headless: ' + dependency)
   return { sourceCount: sources.length, nodeLeaves: pure, nodeOutput: child.stdout.trim() }
 }
 async function callers(candidateRoot = root) {
@@ -123,12 +124,13 @@ const selectedSharedTests = interactionReceipts
   ? [...tests, ...receiptTests.map(name => 'packages/client-ui/test/' + name + '.test.tsx')] : tests
 await mkdir(evidenceRoot, { recursive: true })
 try {
+  const receiptBoundary = interactionReceipts ? await checkDependencyBoundary() : null
   run(['--filter', '@agentmux/client-ui', 'typecheck'])
   run(['--filter', '@agentmux/client-ui', 'build'])
   run(['exec', 'tsc', '--noEmit', '-p', 'apps/desktop/tsconfig.renderer.json'])
   run(selectedSharedTests)
   if (interactionReceipts) run([...desktopReceiptTests, '-t', desktopReceiptTestNames.join('|')])
-  const boundary = await checkDependencyBoundary()
+  const boundary = receiptBoundary ?? await checkDependencyBoundary()
   const mutationResults = []
   let productCallers = {}
   if (mutationAndCallers) {
