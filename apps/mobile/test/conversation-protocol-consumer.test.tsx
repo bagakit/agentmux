@@ -189,14 +189,13 @@ it('authenticated Mobile keeps compact sends beside distinct native records and 
   await vi.waitFor(() => expect(view.element.textContent).toContain('Captured original reply'))
   const record = (id: string) => view.element.querySelector<HTMLElement>(`[data-message-id="${id}"]`)!
   for (const [id, status] of [['input-duplicated', 'complete'], ['input-failed', 'failed'], ['input-unconfirmed', 'streaming']] as const) {
-    const row = view.element.querySelector<HTMLElement>(`[data-submission-id="${id}"]`)!, detail = row.querySelector<HTMLDetailsElement>('details')!
-    expect(detail.open).toBe(false); expect(row.querySelector('.log-turn__body')).toBeNull()
-    const summary = detail.querySelector('summary')!
-    expect(summary.textContent).toContain('对话记录'); expect(summary.textContent).toContain('对话已收录')
-    expect(summary.querySelector('[data-status]')?.getAttribute('data-status')).toBe(status)
-    expect(summary.textContent).not.toContain('Message Tool'); expect(summary.textContent).not.toContain(f.device.name)
-    expect(summary.textContent).not.toContain('已进入对话'); expect(summary.querySelector('.message-disclosure__preview')).not.toBeNull()
-    await act(async () => { detail.open = true; detail.dispatchEvent(new Event('toggle')) })
+    const row = record('captured:' + id)
+    expect(row, id).not.toBeNull()
+    expect(row.querySelector('.log-turn__body')).not.toBeNull()
+    await click(row.querySelector<HTMLButtonElement>('[aria-label="Message details"]')!)
+    const detail = row.querySelector('.conversation-input-details__body')!
+    expect(detail.textContent).toContain(id)
+    expect(detail.textContent).toContain(status)
   }
   for (const id of ['captured:input-duplicated', 'captured:input-failed', 'captured:input-unconfirmed', 'reply-captured']) {
     expect(record(id), id).not.toBeNull()
@@ -207,14 +206,14 @@ it('authenticated Mobile keeps compact sends beside distinct native records and 
   expect(view.element.querySelectorAll('[data-native-record-id="input-duplicated"]')).toHaveLength(1)
   expect(record('captured:input-duplicated').querySelector('.log-turn__body')!.textContent).toBe(sharedBody)
   expect(record('captured:input-duplicated').dataset.speakerRole).toBe('human')
-  await click(record('captured:input-duplicated').querySelector<HTMLButtonElement>('[aria-label="Message details"]')!)
-  expect(record('captured:input-duplicated').textContent).toContain('Message Tool')
+  expect(record('captured:input-duplicated').textContent).toContain('消息工具')
   expect(record('captured:input-duplicated').textContent).toContain(f.device.name)
   expect(record('captured:input-failed').dataset.status).toBe('failed')
   expect(record('captured:input-failed').textContent).toContain('Failed')
   expect(record('captured:input-unconfirmed').dataset.status).toBe('unverified')
   expect(record('captured:input-unconfirmed').textContent).toContain('Unverified')
   expect(record('reply-captured').dataset.speakerRole).toBe('agent')
+  await click(record('reply-captured').querySelector<HTMLButtonElement>('[aria-label="Message details"]')!)
   expect(record('reply-captured').querySelector('.log-turn__sender-id')!.textContent).toContain('exact-peer-author')
   expect(record('reply-captured').dataset.messageSourceKey).toBe(JSON.stringify([sid, 'captured', 'reply-captured']))
   expect(readOptions()).toEqual([{ limit: 100, cursor: undefined }])
@@ -272,7 +271,7 @@ it('authenticated Hosted preserves ordinary input and the original terminal rout
   const originalReply = { agentSessionId: sid, source, recordId: question.id, turnId: question.turnId,
     expectedRun: { runId: RUN_ID }, afterSubmissionId: null, operationId: 'unsupported-original-question',
     authorHuman: true as const, answers: [{ questionId: 'exact-async-question', answer: 'Keep original' }] }
-  await expect(f.client.replySessionQuestion(originalReply)).rejects.toMatchObject({ code: 'AGENT_NATIVE_INPUT_UNAVAILABLE' })
+  await expect(f.client.replySessionQuestion(originalReply)).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE' })
   expect(f.reply).toHaveBeenCalledOnce(); expect(f.writes).toEqual([])
   expect((await f.core.sessionTimeline(sid)).items.some(item => item.kind === 'user_message')).toBe(false)
   await paste(view.element, 'Ordinary original mobile message')
@@ -323,7 +322,8 @@ it('an unaddressable synchronous question opens its original terminal without an
     questions: [{ id: 'manual-question', prompt: 'Answer in the original Session', options: [{ id: 'keep', label: 'Keep original work' }] }] }
   const f = await authenticatedFixture(request), view = await mount(f.surface())
   await vi.waitFor(() => expect(view.element.querySelector('[data-request-id="manual-original-request"]')).not.toBeNull())
-  await click(button(view.element, 'Open terminal'))
+  await click(view.element.querySelector<HTMLButtonElement>('.mobile-message-tools__trigger')!)
+  await click(button(document.body, '查看 Terminal'))
   expect(f.openTerminal).toHaveBeenCalledOnce()
   expect(f.respond).not.toHaveBeenCalled(); expect(f.reply).not.toHaveBeenCalled(); expect(f.writes).toEqual([])
   expect(saved().responses).toEqual([])
@@ -449,7 +449,8 @@ it('the authenticated Mobile card reaches an open original Hook and adopts its e
   expect(await h.client.inspectAgentInteractionOperation(input)).toMatchObject({ operationId: input.operationId, delivery: 'hook-written', nativeAdoption: 'unknown' })
   await click(button(view.element, '查询答复结果'))
   expect(inspect.mock.calls.some(([value]) => value.operationId === input.operationId)).toBe(true)
-  expect(saved().responses[0][1].original.input).toEqual(input)
+  const { authorHuman: _authenticatedHuman, ...producerInput } = input
+  expect(saved().responses[0][1].original.input).toEqual(producerInput)
   expect(editor(view.element).textContent).toContain('Original newer draft remains editable')
   expect(h.inner.kernel.input).not.toHaveBeenCalled()
   expect(transport.authenticated.length).toBeGreaterThan(0)
@@ -642,7 +643,7 @@ it('authenticated Mobile pages the original captured stream beyond the recent wi
   const view = await mount(f.surface())
   await vi.waitFor(() => expect(view.element.textContent).toContain('Complete retained 719'))
   await paste(view.element, 'Original retained draft')
-  const originalIds = [...view.element.querySelectorAll<HTMLElement>('[data-submission-id^="retained-mobile:"]')].map(node => node.dataset.submissionId)
+  const originalIds = [...view.element.querySelectorAll<HTMLElement>('[data-message-id^="captured:retained-mobile:"]')].map(node => node.dataset.messageId?.slice(9))
   const read = f.client.readAgentConversation.bind(f.client)
   let foreignSource = true
   vi.spyOn(f.client, 'readAgentConversation').mockImplementation(async input => {
@@ -652,17 +653,15 @@ it('authenticated Mobile pages the original captured stream beyond the recent wi
   await vi.waitFor(() => expect(button(view.element, '更早消息').disabled).toBe(false))
   await click(button(view.element, '更早消息'))
   await vi.waitFor(() => expect(view.element.textContent).toContain('Conversation data changed scope, version or shape.'))
-  expect([...view.element.querySelectorAll<HTMLElement>('[data-submission-id^="retained-mobile:"]')].map(node => node.dataset.submissionId)).toEqual(originalIds)
+  expect([...view.element.querySelectorAll<HTMLElement>('[data-message-id^="captured:retained-mobile:"]')].map(node => node.dataset.messageId?.slice(9))).toEqual(originalIds)
   expect(editor(view.element).textContent).toContain('Original retained draft')
   foreignSource = false
-  for (let attempt = 0; attempt < 12 && !view.element.querySelector('[data-submission-id="retained-mobile:0"]'); attempt++) {
+  for (let attempt = 0; attempt < 12 && !view.element.querySelector('[data-message-id="captured:retained-mobile:0"]'); attempt++) {
     const earlier = button(view.element, '更早消息')
     expect(earlier).toBeDefined(); await click(earlier!)
     await vi.waitFor(() => expect([...view.element.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '更早消息')?.disabled).not.toBe(true), { timeout: 8000 })
   }
-  expect([...view.element.querySelectorAll<HTMLElement>('[data-submission-id^="retained-mobile:"]')].map(node => node.dataset.submissionId)).toEqual(items.map(item => item.id))
-  const detail = view.element.querySelector<HTMLDetailsElement>('[data-submission-id="retained-mobile:1"] details')!
-  await act(async () => { detail.open = true; detail.dispatchEvent(new Event('toggle')) })
+  expect([...view.element.querySelectorAll<HTMLElement>('[data-message-id^="captured:retained-mobile:"]')].map(node => node.dataset.messageId?.slice(9))).toEqual(items.map(item => item.id))
   const large = view.element.querySelector<HTMLElement>('[data-message-id="captured:retained-mobile:1"]')!
   const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
   await click(large.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!)
@@ -828,13 +827,11 @@ it('authenticated Mobile shows submission activity only for the original exact s
     if (exact) submitted = item
     await native.store.applyTimelineMutation({ type: 'append', agentSessionId: native.session.agentSessionId, item })
   }
-  const view = await mount(f.surface()), submission = (id = 'known-submission') => view.element.querySelector<HTMLElement>(`[data-submission-id="${id}"]`)!
+  const view = await mount(f.surface()), submission = (id = 'known-submission') => view.element.querySelector<HTMLElement>(`[data-message-id="captured:${id}"]`)!
   await vi.waitFor(() => { expect(submission()).not.toBeNull(); expect(view.element.querySelector('[data-native-record-id="original-unrelated"]')).not.toBeNull() })
-  const initialDetail = submission().querySelector<HTMLDetailsElement>('details')!
-  expect(initialDetail.open).toBe(false); expect(submission().querySelector('.log-turn__body')).toBeNull()
-  expect(initialDetail.querySelector('summary')?.textContent).toContain('对话记录')
-  expect(initialDetail.querySelector('summary')?.textContent).toContain('对话已收录')
-  expect(initialDetail.querySelector('.message-disclosure__preview')?.textContent).toBe(body)
+  expect(submission().querySelector('.log-turn__body')?.textContent).toBe(body)
+  await click(submission().querySelector<HTMLButtonElement>('[aria-label="Message details"]')!)
+  expect(submission().querySelector('.conversation-input-details__body')?.textContent).toContain('known-submission')
   expect(submission().querySelector('[data-icon-animation]')).toBeNull()
   let release!: () => void, once = true
   const real = native.client.readConversationChanges.bind(native.client); closes.push(async () => release?.())
@@ -852,9 +849,12 @@ it('authenticated Mobile shows submission activity only for the original exact s
   expect(submission('unrelated-submission').querySelector('[data-icon-animation]')).toBeNull()
   expect(view.element.querySelector('[data-native-record-id="canonical-input"]')).toBeNull()
   await act(async () => release())
-  await vi.waitFor(() => expect(view.element.querySelector('[data-native-record-id="canonical-input"] [data-submission-record]'), view.element.textContent ?? '').not.toBeNull())
+  await vi.waitFor(() => expect(view.element.querySelector('[data-native-record-id="canonical-input"]'), view.element.textContent ?? '').not.toBeNull())
   expect(submission()).toBeNull(); expect(submission('unrelated-submission')).not.toBeNull()
-  const accepted = view.element.querySelector<HTMLElement>('[data-native-record-id="canonical-input"] [data-submission-record]')!, acceptedDetail = accepted.querySelector<HTMLDetailsElement>('details')!
+  const nativeCard = view.element.querySelector<HTMLElement>('[data-native-record-id="canonical-input"]')!
+  expect(nativeCard.querySelector('.log-turn__body')?.textContent).toBe(body)
+  await click(nativeCard.querySelector<HTMLButtonElement>('[aria-label="Message details"]')!)
+  const accepted = nativeCard.querySelector<HTMLElement>('[data-submission-record]')!, acceptedDetail = accepted.querySelector<HTMLDetailsElement>('details')!
   expect(view.element.querySelectorAll('[data-original-contribution]')).toHaveLength(0)
   expect(acceptedDetail.open).toBe(false); expect(accepted.querySelector('summary')?.textContent).toContain('对话已收录')
   expect(accepted.getAttribute('data-native-readable')).toBe('true')
