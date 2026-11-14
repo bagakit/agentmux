@@ -52,11 +52,11 @@ async function key(key: string, code: string, virtual: number, modifiers = 0) {
   await current.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode: virtual, modifiers })
   if (!current.isDestroyed()) await current.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: virtual, modifiers })
 }
-async function click(name: string) {
-  const point = await evaluate(`(()=>{const b=[...document.querySelectorAll('button,[role=menuitem]')].find(b=>b.getAttribute('aria-label')===${JSON.stringify(name)}||b.textContent.trim()===${JSON.stringify(name)});if(!b)throw Error('Missing control '+${JSON.stringify(name)});const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,disabled:b.disabled}})()`)
+async function click(name: string, awaitReply = true) {
+  const point = await waitFor('available control ' + name, async () => await evaluate(`(()=>{const b=[...document.querySelectorAll('button,[role=menuitem]')].find(b=>b.getAttribute('aria-label')===${JSON.stringify(name)}||b.textContent.trim()===${JSON.stringify(name)});if(!b||b.disabled)return null;const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,disabled:false}})()`))
   assert.equal(point.disabled, false, name + ' is available')
-  await mouse('mouseMoved', point.x, point.y); await pointerClick(point)
-  if (!current.isDestroyed() && !['Done', 'Cancel', 'Expand editor'].includes(name)) await settle()
+  await mouse('mouseMoved', point.x, point.y); await pointerClick(point, awaitReply)
+  if (awaitReply && !current.isDestroyed() && !['Done', 'Cancel', 'Expand editor'].includes(name)) await settle()
 }
 async function sourcePoint(x: number, y: number) {
   return await evaluate<{x:number;y:number}>(`(()=>{const c=document.querySelector('canvas'),r=c.getBoundingClientRect(),m=c.getContext('2d').getTransform(),d=c.width/r.width;return {x:r.x+(m.e+m.a*${x})/d,y:r.y+(m.f+m.d*${y})/d}})()`)
@@ -67,11 +67,14 @@ async function drag(x: number, y: number, width: number, height: number) {
   for (let step = 1; step <= 8; step++) await mouse('mouseMoved', a.x + (b.x-a.x)*step/8, a.y + (b.y-a.y)*step/8, 1)
   await mouse('mouseReleased', b.x, b.y); await settle()
 }
-async function pointerClick(point: { x: number; y: number }) {
-  const pressed = current.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', buttons: 1, clickCount: 1 })
-  const released = current.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', buttons: 0, clickCount: 1 })
-  // CDP preserves this command order; do not yield between a click's press and release for a native move to turn it into a drag.
-  await Promise.all([pressed, released.catch(error => { if (!current.isDestroyed()) throw error })])
+async function pointerClick(point: { x: number; y: number }, awaitReply = true) {
+  const target = current
+  const pressed = target.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', buttons: 1, clickCount: 1 })
+  const released = target.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', buttons: 0, clickCount: 1 })
+  const completion = Promise.all([pressed, released.catch(error => { if (!target.isDestroyed()) throw error })])
+  // CDP preserves this command order; a window transition has its own business receipt instead of an old-window mouse reply.
+  if (awaitReply) await completion
+  else void completion.catch(error => { receipt.captureError = String(error) })
 }
 async function clickPoint(x: number, y: number) {
   const point = await sourcePoint(x, y)
@@ -346,12 +349,17 @@ async function run() {
   current.webContents.debugger.attach('1.3')
   await waitFor('same-capture editor decoded', async () => { try { return await evaluate(`document.querySelector('img')?.naturalWidth>0&&[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Copy'&&!b.disabled)`) } catch { return false } })
   const beforeProductCopy = deliveries.length
+  process.stdout.write('capture-proof stage: product Copy begin\n')
   await click('Copy')
   await waitFor('same-capture editor Copy consumed', async () => deliveries.length === beforeProductCopy + 1 ? true : null)
+  process.stdout.write('capture-proof stage: product Copy consumed\n')
   assert.equal(productEditor.isDestroyed(), false, 'Copy retains the original editable document')
   const beforeRetake = new Set(BrowserWindow.getAllWindows()), retakeGrab = receipt.grabs.length
-  await click('Retake')
-  const retaken = await waitOpen('included', beforeRetake, { displayId: 1, crop: { x: 130, y: 178, width: 690, height: 380 } }, retakeGrab)
+  const continuedCrop = await evaluate('window.screenshotEditor.load().then(input=>input.initialState.crop)')
+  process.stdout.write('capture-proof stage: Retake begin\n')
+  await click('Retake', false)
+  process.stdout.write('capture-proof stage: Retake dispatched\n')
+  const retaken = await waitOpen('included', beforeRetake, { displayId: 1, crop: continuedCrop }, retakeGrab)
   assert.equal(retaken.infos[0].initialState, undefined, 'the Retake surface receives crop only, not editor shapes or Undo')
   await shot('retake-continuation')
   const retakeCancelled = waitFor('Retake cancellation destroys every overlay', () => retaken.overlays.every(window => window.isDestroyed()) ? true : null)
