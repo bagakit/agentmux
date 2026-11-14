@@ -225,6 +225,8 @@ function retainedExecutorReference(sessions: readonly AgentMuxStoredAgentSession
 }
 
 export type AgentMuxAgentSessionStore = {
+  /** Exact active/retired Run ownership, including preceding admitted binding writes. */
+  hasAgentRun(run: AgentMuxRunRef): Promise<boolean>
   /** Exact executing-Host dependency, including durable no-Run creation seeds. */
   hostExecutorReferenced?(hostId: string, executorId: string): Promise<boolean>
   /** Optional read-only observation. Missing support never triggers Session hydration or repair. */
@@ -2627,7 +2629,10 @@ export function stopRetiredRuns(previous: AgentMuxStoredAgentSession, reservatio
 }
 
 /** Only a Stop retirement carries a Stop record, and only the record of that same lifecycle operation. */
-function stopRecordFor(reservation: AgentMuxLifecycleReservation, value: AgentMuxAgentStopRecord | undefined): AgentMuxAgentStopRecord | undefined {
+function stopRecordFor(reservation: AgentMuxLifecycleReservation, value: AgentMuxAgentStopRecord | undefined,
+  expected: AgentMuxLifecycleReservation): AgentMuxAgentStopRecord | undefined {
+  if (reservation.kind === 'stop' && (expected.kind !== 'stop' || !isDeepStrictEqual(reservation.supersededResume, expected.supersededResume)))
+    throw new AgentMuxError('The original Stop takeover witness changed. Read its complete original record before continuing.', 'STALE_AGENT_SESSION')
   if (value === undefined) return undefined
   const record = parseAgentStopRecord(value)
   if (reservation.kind !== 'stop' || record.lifecycleOperationId !== reservation.operationId) {
@@ -2797,6 +2802,13 @@ type MemoryCapturedHistory = { stream: AgentCapturedTimelinePage['stream'];
   versions: AgentCapturedTimelinePage['records']; retirementAfterSequence?: number }
 
 export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStore {
+  private readonly sessionRunIds = new Set<string>()
+  private retiredRunIds = new Set<string>()
+
+  async hasAgentRun(value: AgentMuxRunRef): Promise<boolean> {
+    const run = runRef(value)
+    return this.sessionRunIds.has(run.runId) || this.retiredRunIds.has(run.runId)
+  }
   async agentSessionResourceCounts(hostId: string, signal?: AbortSignal): Promise<{ saved: number; retired: number }> {
     signal?.throwIfAborted()
     return { saved: [...this.sessions.values()].filter(s => s.hostId === hostId && s.creation?.persistence !== 'unconfirmed').length,
@@ -2846,8 +2858,10 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     }
     return () => {
       for (const value of writes.values()) this.saveMemoryPromptAdmission(value)
+      for (const run of sessionRuns(this.sessions.get(id) ?? null)) this.sessionRunIds.delete(run.runId)
       if (next) this.sessions.set(id, next)
       else this.sessions.delete(id)
+      for (const run of sessionRuns(next)) this.sessionRunIds.add(run.runId)
     }
   }
 
@@ -3310,6 +3324,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
       retainedSessions
     )
     this.retiredRuns = merged
+    this.retiredRunIds = new Set(merged.map(run => run.runId))
     this.retiredAgentSessions = retainedSessions
     this.reservations.delete(reservation.agentSessionId)
   }
@@ -3324,6 +3339,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
       retainedSessions
     )
     this.retiredRuns = merged
+    this.retiredRunIds = new Set(merged.map(run => run.runId))
     this.retiredAgentSessions = retainedSessions
   }
 
@@ -3343,7 +3359,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
       throw new AgentMuxError('Lifecycle reservation is no longer current.', 'STALE_AGENT_SESSION')
     }
     // The Store's own row is the admitted takeover; the caller's copy cannot add or drop one.
-    const stopRecord = stopRecordFor(currentReservation, stop)
+    const stopRecord = stopRecordFor(currentReservation, stop, reservation)
     assertReservationPrecondition(
       reservation,
       [...this.sessions.values()],
@@ -3388,6 +3404,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
       this.setSession(reservation.agentSessionId, null)
     }
     this.retiredRuns = retiredRuns
+    this.retiredRunIds = new Set(retiredRuns.map(run => run.runId))
     this.retiredAgentSessions = retiredAgentSessions
     this.reservations.delete(reservation.agentSessionId)
     const retired = reservation.kind === 'stop' && previous
@@ -3604,7 +3621,41 @@ type MetadataTimelineSettlement = { rolledBackCleanly: boolean; releaseFailure?:
 /** Scope marker for a write that may change rows of any Session. */
 const CROSS_SESSION_WRITE = Symbol('cross-session-write')
 
+/** Capture identity-bearing refs without copying cumulative input/recovery bodies. */
+function captureSessionRuns(value: AgentMuxStoredAgentSession | null): AgentMuxStoredAgentSession | null {
+  return value ? { ...value, run: runRef(value.run), retiredRuns: value.retiredRuns.map(runRef) } : null
+}
+function sessionRuns(...values: Array<AgentMuxStoredAgentSession | null>): AgentMuxRunRef[] {
+  return values.flatMap(value => value ? [value.run, ...value.retiredRuns] : [])
+}
+
 export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore {
+  /** Pending original writes only, never ownership or receipt facts. */
+  private readonly runBindingWrites = new Map<string, Set<Promise<unknown>>>()
+
+  private withRunBindingWrites<T>(runs: readonly AgentMuxRunRef[], write: () => Promise<T>): Promise<T> {
+    const ids = new Set(runs.map(run => runRef(run).runId)), pending = write()
+    for (const id of ids) {
+      const writes = this.runBindingWrites.get(id) ?? new Set<Promise<unknown>>()
+      writes.add(pending); this.runBindingWrites.set(id, writes)
+    }
+    const release = () => { for (const id of ids) {
+      const writes = this.runBindingWrites.get(id)
+      writes?.delete(pending)
+      if (!writes?.size) this.runBindingWrites.delete(id)
+    } }
+    void pending.then(release, release)
+    return pending
+  }
+
+  async hasAgentRun(value: AgentMuxRunRef): Promise<boolean> {
+    const id = runRef(value).runId
+    // An admitted binding is not absent because its SQL write is still queued.
+    await Promise.all(this.runBindingWrites.get(id) ?? [])
+    return await this.withReadDatabase(db => !!db.prepare('SELECT 1 FROM run_bindings WHERE run_id=?').get(id), () => {
+      throw new AgentMuxError('Original Run ownership is unconfirmed. Keep the Run and inspect its original Store.', 'AGENT_SESSION_STORE_READ_UNCONFIRMED')
+    }, undefined, this.database ? false : 'observation')
+  }
   async agentSessionResourceCounts(hostId: string, signal?: AbortSignal): Promise<{ saved: number; retired: number }> {
     return await this.withReadDatabase(db => ({
       saved: Number(db.prepare("SELECT COUNT(*) AS n FROM sessions WHERE json_extract(json,'$.hostId')=? AND COALESCE(json_extract(json,'$.creation.persistence'),'')<>'unconfirmed'").get(hostId)!.n),
@@ -3857,11 +3908,15 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
 
   async compareAndSwapMetadata(expected: AgentMuxStoredAgentSession | null, next: AgentMuxStoredAgentSession | null,
     signal?: AbortSignal, future?: AgentMuxSessionFutureChange, author?: Readonly<AgentCapabilityBinding>): Promise<void> {
-    await this.enqueue(async () => { await this.swapSession(expected, next, false, signal, future, author) }, signal, expected?.agentSessionId ?? next?.agentSessionId)
+    expected = captureSessionRuns(expected); next = captureSessionRuns(next)
+    await this.withRunBindingWrites(sessionRuns(expected, next), () => this.enqueue(async () => {
+      await this.swapSession(expected, next, false, signal, future, author)
+    }, signal, expected?.agentSessionId ?? next?.agentSessionId))
   }
 
   async compareAndSwapMetadataWithTimeline(expected: AgentMuxStoredAgentSession, next: AgentMuxStoredAgentSession,
     mutation: AgentTimelineMutation, signal?: AbortSignal): Promise<AgentMuxMetadataTimelineResult> {
+    expected = captureSessionRuns(expected)!; next = captureSessionRuns(next)!
     if (expected.agentSessionId !== next.agentSessionId || expected.run.runId !== next.run.runId || !isDeepStrictEqual(expected.nativeHandle, next.nativeHandle))
       throw new AgentMuxError('A Tool history write must retain its original Session, Run and native target.', 'INVALID_AGENT_SESSION_STORE')
     const id = expected.agentSessionId
@@ -3921,7 +3976,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     const settled = current.then(() => {}, () => {})
     this.timelineTails.set(id, settled)
     void settled.then(() => { if (this.timelineTails.get(id) === settled) this.timelineTails.delete(id) })
-    return await current
+    return await this.withRunBindingWrites(sessionRuns(expected, next), () => current)
   }
 
   async loadRetiredRuns(): Promise<readonly AgentMuxRunRef[]> {
@@ -4040,7 +4095,10 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   async compareAndSwap(expected: AgentMuxStoredAgentSession | null, next: AgentMuxStoredAgentSession | null, signal?: AbortSignal): Promise<void> {
-    await this.enqueue(async () => { await this.swapSession(expected, next, true, signal) }, signal, expected?.agentSessionId ?? next?.agentSessionId)
+    expected = captureSessionRuns(expected); next = captureSessionRuns(next)
+    await this.withRunBindingWrites(sessionRuns(expected, next), () => this.enqueue(async () => {
+      await this.swapSession(expected, next, true, signal)
+    }, signal, expected?.agentSessionId ?? next?.agentSessionId))
   }
 
   private async swapSession(expected: AgentMuxStoredAgentSession | null, next: AgentMuxStoredAgentSession | null,
@@ -4327,8 +4385,9 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     value: AgentMuxLifecycleReservation,
     retiredRuns: readonly AgentMuxRunRef[] = []
   ): Promise<void> {
-    await this.enqueue(async () => {
-      const reservation = lifecycleReservation(value)
+    const reservation = lifecycleReservation(value)
+    retiredRuns = retiredRuns.map(runRef)
+    await this.withRunBindingWrites(retiredRuns, () => this.enqueue(async () => {
       const current = this.reservationRow(this.db, reservation.agentSessionId)
       if (!current) return
       if (!sameReservationOwner(current, reservation)) {
@@ -4337,13 +4396,14 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       this.retireRunRows(this.db, retiredRuns)
       this.db.prepare('DELETE FROM reservations WHERE id=?').run(reservation.agentSessionId)
       this.dirty = true
-    }, undefined, CROSS_SESSION_WRITE)
+    }, undefined, CROSS_SESSION_WRITE))
   }
 
   async retireRuns(runs: readonly AgentMuxRunRef[]): Promise<void> {
-    await this.enqueue(async () => {
+    runs = runs.map(runRef)
+    await this.withRunBindingWrites(runs, () => this.enqueue(async () => {
       this.retireRunRows(this.db, runs)
-    }, undefined, CROSS_SESSION_WRITE)
+    }, undefined, CROSS_SESSION_WRITE))
   }
 
   async recordStopProgress(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'stop' }>, progress: AgentMuxAgentStopProgress): Promise<void> {
@@ -4357,13 +4417,15 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     next: AgentMuxStoredAgentSession | null,
     stop?: AgentMuxAgentStopRecord
   ): Promise<AgentMuxRetiredAgentSession | null> {
+    const reservation = lifecycleReservation(value)
+    next = captureSessionRuns(next)
+    const retained = reservation.kind === 'stop' ? reservation.supersededResume?.retainedRun : undefined
     let committed: AgentMuxRetiredAgentSession | null = null
-    await this.enqueue(async () => {
-      const reservation = lifecycleReservation(value)
+    await this.withRunBindingWrites([...sessionRuns(next), ...(retained ? [retained] : [])], () => this.enqueue(async () => {
       if (reservation.kind === 'stop') { committed = this.commitStop(reservation, next, stop); return }
-      stopRecordFor(reservation, stop) // refuses a Stop record on any other lifecycle
+      stopRecordFor(reservation, stop, reservation) // refuses a Stop record on any other lifecycle
       this.commitSessionLifecycle(reservation, next)
-    }, undefined, value.agentSessionId)
+    }, undefined, reservation.agentSessionId))
     return committed
   }
 
@@ -4415,7 +4477,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       throw new AgentMuxError('Lifecycle reservation is no longer current.', 'STALE_AGENT_SESSION')
     }
     // The Store's own row is the admitted takeover; the caller's copy cannot add or drop one.
-    const record = stopRecordFor(current, stop)
+    const record = stopRecordFor(current, stop, reservation)
     const previous = this.sessionMetadata(db, id)
     if (!previous) throw new AgentMuxError(`Unknown Agent Session: ${id}`, 'UNKNOWN_AGENT_SESSION')
     assertReservationPrecondition(reservation, [previous], [])

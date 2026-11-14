@@ -4594,7 +4594,8 @@ export class AgentMuxClient {
       ...retired.map(s => s.run.runId), ...retiredRuns.map(r => r.runId)])
   }
   private async assertRawTerminal(ref: AgentMuxRunRef): Promise<void> {
-    if ((await this.originalAgentRunIds()).has(ref.runId) || this.registry.findByRun(ref) || this.registry.isRetiredRun(ref))
+    if (this.registry.findByRun(ref) || this.registry.isRetiredRun(ref) || await this.store.hasAgentRun(ref) ||
+      this.registry.findByRun(ref) || this.registry.isRetiredRun(ref))
       throw new AgentMuxError('This Run belongs to an Agent Session. Use its original semantic owner.', 'RUN_KIND_MISMATCH')
   }
 
