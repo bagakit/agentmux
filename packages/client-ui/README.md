@@ -48,7 +48,7 @@ Use these exact import paths under `@agentmux/client-ui/`. Each example imports 
 | --- | --- | --- |
 | Actions | `components/Button`, `components/IconButton` | `styles/buttons.css`. [Toggle, disabled action and pending save](examples/actions.tsx). |
 | Fields | `input`, `components/FormRow` | `input/styles.css`. [Label, help, error and multiline draft](examples/fields.tsx). |
-| Selection | `components/Tabs`, `components/SegmentedControl` | `styles/segmented-control.css`. [Panel navigation and a single setting](examples/selection.tsx). |
+| Selection | `components/Tabs`, `components/SegmentedControl`, `components/SelectionIndicator` | `styles/segmented-control.css` and `styles/selection-indicator.css`. [Panel navigation, a single setting and a current reading position](examples/selection.tsx). |
 | Overlays | `components/Modal`, `components/DropdownMenu`, `components/HoverDropdownMenu`, `overlay-host` | `styles/overlays.css` for the stack and attachment slots. [Host document, panel layout and focus](examples/overlays.tsx). |
 | Readable feedback | `components/ActionFeedback`, `components/InlineRenameField` | `styles/buttons.css` for bounded feedback. `input/styles.css`, `styles/semantic-icons.css` and `styles/inline-rename-field.css` for [rename, pending receipt and retryable error](examples/feedback.tsx). |
 | Work location | `patterns/agent-work-location` | `patterns/agent-work-location.css` and `styles/semantic-icons.css`. [Shared summary and distinct routes](examples/locations.tsx). |
@@ -173,6 +173,8 @@ export function ItemActions({ canRename, onRename, onDuplicate }: {
 ```
 
 ## Choose a control for the task
+
+Use `components/SelectionIndicator` to give native links or buttons one moving background for their current position. Import `styles/selection-indicator.css`. Place the indicator beside the direct `aria-current` controls in a positioned, isolated container. The caller sets the current item and owns focus, navigation and the static selected style. Use `:has(> .selection-indicator:not([hidden]))` to let the indicator take over that background when it is positioned. The indicator follows wrapping and size changes, begins at the current item and moves directly to the new position with reduced motion. The host can style the surface with `--selection-indicator-background`, `--selection-indicator-border` and `--selection-indicator-shadow`. The component uses that document's `ResizeObserver` and `MutationObserver`.
 
 Use `components/HoverDropdownMenu` for commands that run when a menu item is activated. Use `components/SelectionField` for an existing value selected from a list of options. Supply the value, labels and disabled facts. Import `styles/selection-field.css` and the shared input styles when the field needs a query. The current value stays separate from keyboard focus.
 
