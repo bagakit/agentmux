@@ -53,6 +53,12 @@ describe('Goal plan graph', () => {
     expect(main.firstElementChild).toBe(graph())
     expect(detail.querySelector('[data-goal-meta-plan]')?.textContent).toBe('Plan 1 of 4 done')
     expect(detail.querySelector('.goals-detail__side .goal-collaboration')).not.toBeNull()
+    const side = detail.querySelector('.goals-detail__side')!
+    expect(side.firstElementChild).toBe(side.querySelector('.goal-collaboration'))
+    expect(side.lastElementChild).toBe(side.querySelector('[aria-label="Goal properties"]'))
+    const head = detail.querySelector('.goals-detail__head')!
+    expect(head.firstElementChild?.getAttribute('aria-label')).toBe('Goal title')
+    expect(head.querySelector('[data-goal-detail-stage] strong')?.textContent).toBeTruthy()
     expect(main.querySelector('.goal-collaboration')).toBeNull()
     const intent = main.querySelector('.goals-original-intent .goals-intent__reading')!
     expect(intent.textContent).toContain('Original intent')
@@ -61,6 +67,22 @@ describe('Goal plan graph', () => {
     const edit = main.querySelector<HTMLButtonElement>('[aria-label="Edit goal description"]')!
     await act(async () => edit.click())
     expect(main.querySelector<HTMLTextAreaElement>('[aria-label="Goal description"]')?.value).toBe(record.description)
+  })
+
+  it('takes the reader to the original Team region with keyboard focus and keeps one original discussion action', async () => {
+    seed(goal({}))
+    await dom.render(<GlobalBoardSurface />)
+    const side = dom.container.querySelector<HTMLElement>('[aria-label="Goal team and properties"]')!
+    expect(side).not.toBeNull()
+    const scroll = vi.fn()
+    side.scrollIntoView = scroll
+    const team = dom.container.querySelector<HTMLButtonElement>('.goals-detail__team-link')!
+    expect(team.textContent).toBe('Team')
+    await act(async () => team.click())
+    expect(scroll).toHaveBeenCalledWith({ block: 'start' })
+    expect(document.activeElement).toBe(side)
+    expect(dom.container.querySelectorAll('[aria-label="Open discussion for Ship the plan"]')).toHaveLength(1)
+    expect(graph()!.textContent).not.toContain('Open goal discussion')
   })
 
   it('places each node in its dependency column and shows the derived state', async () => {
@@ -72,6 +94,7 @@ describe('Goal plan graph', () => {
     expect(graph()!.querySelector('[data-goal-plan-progress]')!.textContent).toBe('0 of 4 done · revision 2')
     expect(graph()!.querySelector('[data-goal-plan-node="ui"] .goal-plan-node__state')!.textContent).toBe('Waiting on dependencies')
     expect(graph()!.querySelector('[data-goal-plan-node="ui"] .goal-plan-node__depends')!.textContent).toBe('Depends on · Node api')
+    expect(graph()!.querySelector('[aria-label="Execution graph"]')?.getAttribute('tabindex')).toBe('0')
   })
 
   it('highlights exactly one next step: requested changes first, then the first ready node', async () => {
@@ -180,9 +203,9 @@ describe('Goal plan graph', () => {
     expect(origin.getAttribute('aria-label')).toBe('Goal starting point')
     expect(origin.textContent).toContain('Ship the plan')
     expect(graph()!.querySelector('[data-goal-plan-progress]')).toBeNull()
-    expect([...graph()!.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Choose Supervisor to plan', 'Open goal discussion'])
+    expect([...graph()!.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Choose Supervisor to plan'])
     expect(graph()!.querySelector('h2')!.textContent).toContain('Execution plan')
-    expect(graph()!.textContent).toContain('Tasks and dependencies')
+    expect(graph()!.textContent).toContain('Starting point')
     expect(graph()!.textContent).toContain('No execution plan yet')
     expect(graph()!.querySelector('[data-goal-plan-request]')).not.toBeNull()
   })
@@ -276,6 +299,7 @@ describe('plan graph navigation and list progress', () => {
     seed(goal({ plan: plan(nodes), delegations: [{ ...reported('api'), hostId: 'owner-host', workerHostId: 'worker-host' }] }))
     useAppStore.setState({ sessions: [
       { ...original, id: 'local-presentation', hostId: 'worker-host', control: { ...original.control, hostId: 'worker-host', agentSessionId: 'worker-api' },
+        workPlacement: { agentHostId: 'worker-host', resourceHostId: 'tool-host' },
         toolExecution: { bindingId: 'remote-tools', resourceHostId: 'tool-host', workspacePath: '/project/work' } },
       { ...original, id: 'other-presentation', hostId: 'another-host', control: { ...original.control, hostId: 'another-host', agentSessionId: 'worker-api' } }
     ], agentNames: { 'local-presentation': 'Exact execution lead', 'other-presentation': 'Another Agent' } })
