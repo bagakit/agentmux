@@ -8,7 +8,7 @@
 
 | 读者要做什么 | 从这里开始 | 继续核对 |
 | --- | --- | --- |
-| 在 Node 宿主接入本地 Agent／Terminal | [Core 接入说明](../../packages/core/README.md)，从 `@agentmux/core` 导入 `connectLocalAgentMux` 或 `AgentMuxClient` | [runtime-client.ts](../../packages/core/src/runtime-client.ts)、[client.ts](../../packages/core/src/client.ts) |
+| 在 Node 宿主接入本地 Agent／Terminal | [Core 接入说明](../../packages/core/README.md)，从 `@agentmux/core` 导入 `connectLocalAgentMux` 或 `AgentMuxClient` | [连接入口](../../packages/core/src/runtime-client.ts)、[Client 实现](../../packages/core/src/client.ts)、[操作、配置与观察类型](../../packages/core/src/client-contract.ts) |
 | 接入跨模块证据与 Agent 诊断 | [Diagnostic Evidence 协议](diagnostic-evidence-protocol.md)与[模块指南](../guides/diagnostic-evidence-integration.md) | [portable SDK](../../packages/diagnostic-evidence/src/index.ts)、[Core 领域合同](../../packages/core/src/diagnostic-evidence.ts)、RPC `system.diagnostics.inspect` / CLI `system diagnostics inspect`；业务 owner 仍持有事实与原件 |
 | 提供共享业务服务，或连接已运行的服务 owner | [公共 RPC 类型](../../packages/core/src/public-rpc.ts) 与 [`AgentMuxRpcServiceOptions`](../../packages/core/src/public-rpc-service.ts) | [`AgentMuxControlServer`](../../packages/core/src/public-rpc-server.ts)、[`connectAgentMuxRpc`](../../packages/core/src/public-rpc-client.ts)；经 [control-host.ts](../../packages/core/src/control-host.ts) 从包根导出 |
 | 用户配置的应用授权同步 | [应用领域合同与严格解析](../../packages/core/src/application-access.ts)、[应用 owner](../../packages/core/src/application-access-owner.ts)及[配置指南](../guides/remote-application-access.md) | 公共服务的 applicationAccess 端口；对象 CLI、Desktop 进程级 owner 与可信 IPC 消费同一配置、计划、目标验真和操作。浏览器只使用 node-free 的 `@agentmux/core/application-access` 类型与规则，不接触材料 |
