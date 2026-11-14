@@ -488,8 +488,26 @@ const RelationView = memo(function RelationView({ record, markerId, zoom, active
   }
   const dx = end && before ? end.x - before.x : 0, dy = end && before ? end.y - before.y : 0, length = Math.hypot(dx, dy)
   const horizontal = Math.abs(dx) >= Math.abs(dy)
-  const caption = end && length > 0 && (record.unconfirmed || zoom >= .7 || record.emphasis === 'related')
   const routeLength = useMemo(() => points.reduce((total, point, index) => index ? total + Math.hypot(point.x - points[index - 1]!.x, point.y - points[index - 1]!.y) : 0, 0), [points])
+  const caption = end && length > 0 && (record.unconfirmed || zoom >= .7 || record.emphasis === 'related')
+  const detachedCaption = routeLength * zoom < 160
+  const captionRow = kind === 'communication' ? 0 : kind === 'creation' ? 1 : 2
+  let captionX = end && length > 0 ? end.x - dx / length * 24 / zoom : 0
+  let captionY = end && length > 0 ? end.y - dy / length * 24 / zoom : 0
+  let captionAlignX = horizontal ? dx > 0 ? '-100%' : '0' : '-50%'
+  let captionAlignY = horizontal ? 'calc(-100% - 5px)' : dy > 0 ? '-100%' : '0'
+  if (detachedCaption) {
+    if (horizontal) {
+      captionY = dx > 0 ? Math.min(sourceHull.y, targetHull.y) - captionRow * 22 / zoom
+        : Math.max(sourceHull.y + sourceHull.height, targetHull.y + targetHull.height) + captionRow * 22 / zoom
+      captionAlignY = dx > 0 ? 'calc(-100% - 6px)' : '6px'
+    } else {
+      captionX = dy > 0 ? Math.max(sourceHull.x + sourceHull.width, targetHull.x + targetHull.width) + 6 / zoom
+        : Math.min(sourceHull.x, targetHull.x) - 6 / zoom
+      captionY += (dy > 0 ? 1 : -1) * captionRow * 22 / zoom
+      captionAlignX = dy > 0 ? '0' : '-100%'
+    }
+  }
   return <><g className={`react-flow__edge selectable collaboration-edge-group--${kind}`} data-id={record.id} data-emphasis={record.emphasis} data-recent={record.active ? true : undefined} tabIndex={0} role="button" aria-label={record.label} aria-pressed={record.selected} {...tooltip.props}
     style={{ pointerEvents: 'stroke', '--edge-weight': record.weight } as CSSProperties} onMouseEnter={event => { const group = event.currentTarget; gate.enter(group, () => latestShow.current({ currentTarget: group })) }} onMouseLeave={event => { gate.leave(event.currentTarget); if (!event.currentTarget.contains(event.currentTarget.ownerDocument.activeElement)) tooltip.hide() }} onFocus={show} onClick={event => { event.stopPropagation(); onSelect(record) }} onKeyDown={event => {
       if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); onSelect(record) }
@@ -497,8 +515,8 @@ const RelationView = memo(function RelationView({ record, markerId, zoom, active
     }}>
     <BaseEdge id={record.id} path={path} {...merged < 0 ? {} : { markerEnd: `url(#${markerId}-${kind})` }} interactionWidth={22} className={`collaboration-edge collaboration-edge--${kind}${record.selected ? ' is-selected' : ''}`} />
     {record.active && motion && kind !== 'creation' ? <CollaborationDispatchSignal key={record.active} pulseId={record.active} startedAt={record.startedAt} path={path} length={routeLength} zoom={zoom} kind={kind} /> : null}
-    {caption ? <EdgeLabelRenderer><span className="collaboration-edge__caption" data-creation-unconfirmed={record.unconfirmed} data-relation-id={record.id} aria-hidden="true"
-      style={{ transform: `translate(${end.x - dx / length * 24 / zoom}px, ${end.y - dy / length * 24 / zoom}px) scale(${1 / zoom}) translate(${horizontal ? dx > 0 ? '-100%' : '0' : '-50%'}, ${horizontal ? 'calc(-100% - 5px)' : dy > 0 ? '-100%' : '0'})` }}>{record.title}</span></EdgeLabelRenderer> : null}
+    {caption ? <EdgeLabelRenderer><span className="collaboration-edge__caption" data-creation-unconfirmed={record.unconfirmed} data-relation-id={record.id} data-detached={detachedCaption || undefined} aria-hidden="true"
+      style={{ transform: `translate(${captionX}px, ${captionY}px) scale(${1 / zoom}) translate(${captionAlignX}, ${captionAlignY})` }}>{record.title}</span></EdgeLabelRenderer> : null}
     {record.emphasis === 'related' && record.count > 1 && !record.selected && !tooltip.props['aria-describedby'] ? <EdgeLabelRenderer><span className="collaboration-edge__count" style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}>{record.count}</span></EdgeLabelRenderer> : null}
     {merged > 0 && end ? <EdgeLabelRenderer><span className="collaboration-edge__merged" data-kind={kind} aria-hidden="true" style={{ transform: `translate(${end.x - (length ? dx / length : 0) * 26 / zoom}px, ${end.y - (length ? dy / length : 0) * 26 / zoom}px) scale(${1 / zoom}) translate(-50%, -50%)` }}>+{merged}</span></EdgeLabelRenderer> : null}
   </g>{tooltip.content}</>
