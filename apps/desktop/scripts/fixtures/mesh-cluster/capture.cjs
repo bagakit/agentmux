@@ -167,8 +167,13 @@ app.whenReady().then(async()=>{try{
  const closeTo = (actual, expected) => Math.abs(actual - expected) < .001
  assert.ok(closeTo(receipt.geography.pins['saved:client'].x, (121.4737 + 180) / 360))
  assert.ok(closeTo(receipt.geography.pins['saved:client'].y, (90 - 31.2304) / 180))
- assert.ok(closeTo(receipt.geography.pins['saved:host:farm-cn1'].x, (-123.1207 + 180) / 360))
+ assert.ok(closeTo(receipt.geography.pins['saved:host:farm-cn1'].x, (-123 + 180) / 360))
  assert.ok(closeTo(receipt.geography.pins['saved:host:build'].y, .5))
+ await click('.mesh-explorer__canvas [data-host-node="farm-cn1"]')
+ assert.ok(await evaluate("document.querySelector('[aria-label=\"Selected saved connection\"]').textContent.includes('Estimated from public egress · ±120 km')"))
+ assert.ok(await evaluate("Boolean(document.querySelector('[data-geographic-point=\"saved:host:farm-cn1\"][data-approximate]'))"))
+ await frame('egress-estimate-dark')
+ await button('Clear');await click('[aria-label="Fit observed topology"]')
  await click('[aria-label="Zoom in network"]');await frame('geographic-zoom-dark')
  const zoomed = await geography()
  assert.ok(zoomed.atlasWidth > receipt.geography.atlasWidth * 1.1)
@@ -209,6 +214,12 @@ app.whenReady().then(async()=>{try{
  assert.equal(await evaluate("document.querySelector('[data-geographic-point=\"saved:host:studio\"]')"),null)
  await frame('geographic-location-cleared')
  receipt.geography.clearedExactHost = true
+ await window.loadURL(url+'?scenario=device')
+ await wait('[data-mesh-device="Office workstation"]')
+ await wait('[data-geographic-point^="device:"]')
+ await click('[data-mesh-device="Office workstation"]')
+ await wait('[aria-label="Selected device endpoint"]')
+ await frame('paired-device-location')
  receipt.overflow=Object.values(receipt.frameOverflow).some(Boolean)
  assert.equal(receipt.overflow,false,'every full frame fits horizontally')
  receipt.passed=true

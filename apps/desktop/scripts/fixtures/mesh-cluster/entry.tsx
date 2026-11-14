@@ -44,11 +44,21 @@ const resource = (id: string) => {
  const total=1024**3*[32,64,16,128][index]!, used=[.39,.72,.48,.87][index]!
  return {node,policyRevision:'original-policy',status:'available',sample:{node,policyRevision:'original-policy',processId:2450+index,observedAt:Date.now(),system:{state:'available',value:{platform:index===0||index===2?'darwin':'linux',architecture:'arm64',uptimeSeconds:86400*(index+3)+3768}},cpu:{state:'available',value:{logicalCpus:8,userMs:step*(index+1)*100,niceMs:0,systemMs:step*50,idleMs:step*(950-(index+1)*100),irqMs:0,loadAverage:[1.7+index,1.2+index,.9+index]}},memory:{state:'available',value:{totalBytes:total,freeBytes:total*(1-used)}},filesystem:{state:'available',value:{root:null,totalBytes:1024**4,availableBytes:1024**4*(1-used/1.2)}},process:{state:'available',value:{cpuUserMicros:10000*step,cpuSystemMicros:1000*step,rssBytes:1024**2*(85+index*25),heapUsedBytes:1,heapTotalBytes:2,externalBytes:1,uptimeSeconds:10000}}}}
 }
-api.nodePublishing.call=(async(method:string,params:any)=>method==='node.inspect'?{node:{runtimeId:params.hostId==='local'?'runtime-this-mac':'runtime-'+params.hostId,ownerInstanceId:'original-'+params.hostId,alias:params.hostId},policyRevision:'original-policy',resourcesShared:true,roots:[],landing:null}:resource(params.hostId)) as typeof api.nodePublishing.call
+api.nodePublishing.call = (async (method: string, params: { hostId: string }) => {
+ const id = params.hostId
+ const node = { runtimeId: id === 'local' ? 'runtime-this-mac' : 'runtime-' + id, ownerInstanceId: 'original-' + id, alias: id }
+ if (method === 'node.location') {
+   const location = state === 'geography' && id === 'farm-cn1'
+     ? { latitude: 49, longitude: -123, label: 'Vancouver region', source: 'public-egress', accuracyKm: 120 } : null
+   return { node, location }
+ }
+ if (method === 'node.inspect') return { node, policyRevision: 'original-policy', resourcesShared: true, roots: [], landing: null }
+ return resource(id)
+}) as typeof api.nodePublishing.call
 api.nodePublishing.owner=(async(target:any)=>{if(target.hostId==='private')throw Error('This device has published access only.');return resource(target.hostId)}) as typeof api.nodePublishing.owner
 api.config.save = async (next, expected) => applyConfigEdit(useAppStore.getState().config!, expected, next)
 mountThemeRuntime(window, { appAppearance: 'dark' })
-useAppStore.setState({ config: { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' },{ id:'farm-cn1',kind:'ssh',label:'Farm CN1',hostname:'farm-cn1.internal',runtimeId:'runtime-farm-cn1' },{id:'studio',kind:'ssh',label:'Studio Mac',hostname:'studio.internal',runtimeId:'runtime-studio'},{id:'build',kind:'ssh',label:'Build runner',hostname:'build.internal',runtimeId:'runtime-build'},{id:'private',kind:'ssh',label:'Private workspace',hostname:'private.internal',runtimeId:'runtime-private'},{id:'unavailable',kind:'ssh',label:'Remote workbench · secondary machine',hostname:'remote.internal',runtimeId:'runtime-unavailable'},...(state === 'initial' ? ([
+useAppStore.setState({ config: { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' },{ id:'farm-cn1',kind:'ssh',label:state === 'geography' ? 'Vancouver build host' : 'Farm CN1',hostname:'farm-cn1.internal',runtimeId:'runtime-farm-cn1' },{id:'studio',kind:'ssh',label:'Studio Mac',hostname:'studio.internal',runtimeId:'runtime-studio'},{id:'build',kind:'ssh',label:'Build runner',hostname:'build.internal',runtimeId:'runtime-build'},{id:'private',kind:'ssh',label:'Private workspace',hostname:'private.internal',runtimeId:'runtime-private'},{id:'unavailable',kind:'ssh',label:'Remote workbench · secondary machine',hostname:'remote.internal',runtimeId:'runtime-unavailable'},...(state === 'initial' ? ([
  { id:'build-secondary',kind:'ssh',label:'Build secondary',hostname:'build-secondary.internal',runtimeId:'runtime-build-secondary' },
  { id:'studio-tailcat',kind:'ssh',label:'Studio backup connection',hostname:'studio-backup.internal',runtimeId:'runtime-studio-tailcat',transport:'ssh-tailcat' },
  { id:'compute-east',kind:'ssh',label:'Compute East',hostname:'compute-east.internal',runtimeId:'runtime-compute-east' },
@@ -59,7 +69,15 @@ useAppStore.setState({ config: { version: 9, hosts: [{ id: 'local', kind: 'local
  } })
 createRoot(document.getElementById('root')!).render(<DesktopClientUiProvider><div className="mesh-review-shell"><SettingsPanel onClose={() => {}} initialSection="hosts" /><footer className="mesh-review-footer">Visual fixture · production Settings · controlled topology/resource observations; not live host telemetry</footer></div></DesktopClientUiProvider>)
 Object.assign(window, { meshFixture: { originalOffer, endpoint: () => { state = 'endpoint' }, relayOff: () => { state = 'initial' }, theme: (mode: 'dark' | 'light') => updateThemeSelection({ appAppearance: mode }), failure: () => { state = 'failure'; settings = { ...settings, revision: 'saved-9' } } } })
+if (state === 'device') {
+ const offer = { ...originalOffer, serverId: 'Office workstation', relay: { endpoint: 'gateway.example', useTls: true } }
+ useAppStore.setState({ meshDeviceLinks: { draft: '', saved: [connectionLinkUrl('https://gateway.example', offer)] } })
+ api.nodePublishing.deviceLocation = async () => ({
+   node: { runtimeId: 'workstation-core', ownerInstanceId: 'workstation-instance', alias: 'Office workstation' },
+   location: { source: 'node', latitude: 1.35, longitude: 103.82, label: 'Singapore office' },
+ })
+}
 if (state === 'geography') useAppStore.setState({ config: {
   ...useAppStore.getState().config!,
-  meshMapLocations: { local: '31.2304, 121.4737', 'farm-cn1': '49.2827, -123.1207', studio: '52.52, 13.405', build: '0, 0', private: '31.2304, 121.4737' },
+  meshMapLocations: { local: '31.2304, 121.4737', studio: '52.52, 13.405', build: '0, 0', private: '31.2304, 121.4737' },
 } })

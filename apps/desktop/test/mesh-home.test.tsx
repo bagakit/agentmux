@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
+import { connectionLinkUrl } from '@agentmux/relay/offer'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { MeshSettingsPane } from '../src/renderer/src/components/settings/MeshSettingsPane'
@@ -18,7 +19,7 @@ let config: AppConfig
 const save = vi.fn(async () => {})
 beforeEach(() => {
   config = { ...structuredClone(composerConfig), hosts: [...composerConfig.hosts, { id: 'selected-farm', kind: 'ssh', label: 'Farm same label', hostname: 'farm-original.internal' }, { id: 'neighbor-farm', kind: 'ssh', label: 'Farm same label', hostname: 'neighbor.internal', runtimeId: 'neighbor-original-runtime', transport: 'ssh-tailcat', tailcat: { address: 'fixture-private-credential', keyFile: 'fixture-client-key-path' } }] }
-  useAppStore.setState({ config, sessions: [], hostChecks: {}, hostTransports: {}, tailcatConnectionDrafts: {}, meshSettingsDrafts: {} })
+  useAppStore.setState({ config, meshDeviceLinks: { draft: '', saved: [] }, sessions: [], hostChecks: {}, hostTransports: {}, tailcatConnectionDrafts: {}, meshSettingsDrafts: {} })
   vi.spyOn(api.mesh, 'call').mockImplementation(async method => structuredClone(method === 'mesh.inspect' ? observed : saved) as never)
   save.mockClear()
 })
@@ -326,7 +327,7 @@ it('keeps annotations on the selected Relay peer within its network, independent
   await dom.click('.mesh-locations-panel [data-settings-save-bar] button')
   const marker = () => dom.container.querySelector('[data-geographic-point="relay:neighbor-farm"] circle')
   await vi.waitFor(() => expect(marker()?.getAttribute('cx')).toBe('250'))
-  expect(useAppStore.getState().config?.meshPeerMapLocations).toEqual({ [JSON.stringify([networkId, id])]: '0, -90' })
+  expect(useAppStore.getState().config?.meshNetworkMapLocations).toEqual({ [JSON.stringify([networkId, id])]: '0, -90' })
   expect(dom.container.querySelector('[data-geographic-point="saved:host:neighbor-farm"]')).toBeNull()
   await dom.click('[aria-label="Network view"] button:last-child')
   expect(dom.container.querySelector('[aria-label="Selected network object"]')?.textContent).toContain('Marked on this device')
@@ -336,4 +337,27 @@ it('keeps annotations on the selected Relay peer within its network, independent
   await dom.click('.mesh-explorer__header > button:last-child')
   await vi.waitFor(() => expect(marker()).toBeNull())
   expect(dom.container.querySelector(peer)).not.toBeNull()
+})
+
+it('places an approved device at its own published location and opens the selected gateway route', async () => {
+  const offer = { v: 2 as const, serverId: 'outbound-workstation', daemonPublicKeyB64: 'Hx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8=', relay: { endpoint: 'gateway.example', useTls: true } }
+  const second = { ...offer, relay: { ...offer.relay, endpoint: 'second.example' } }
+  const urls = [offer, second].map(item => connectionLinkUrl('https://' + item.relay.endpoint, item))
+  useAppStore.setState({ meshDeviceLinks: { draft: '', saved: urls } })
+  const reads = vi.spyOn(api.nodePublishing, 'deviceLocation').mockResolvedValue({
+    node: { runtimeId: 'endpoint-runtime', ownerInstanceId: 'endpoint-instance', alias: 'workstation' },
+    location: { source: 'node', label: 'Workshop', latitude: 0, longitude: 90 },
+  })
+  const open = vi.spyOn(api.ui, 'openMeshDevice').mockResolvedValue(undefined)
+  await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} />)
+  await vi.waitFor(() => expect(dom.container.querySelector('[data-geographic-point^="device:"] circle')?.getAttribute('cx')).toBe('750'))
+  expect(dom.container.querySelectorAll('[data-mesh-device="outbound-workstation"]')).toHaveLength(1)
+  expect(open).not.toHaveBeenCalled()
+  expect(reads).toHaveBeenCalledTimes(1)
+  await dom.click('[data-mesh-device="outbound-workstation"]')
+  await dom.click('[aria-label="Network view"] button:last-child')
+  const inspector = '[aria-label="Selected device endpoint"]'
+  expect(dom.container.querySelector(inspector)?.textContent).toContain('Workshop · Reported by node')
+  await dom.click(inspector + ' .mesh-explorer__detail-actions button:last-child')
+  expect(open).toHaveBeenCalledExactlyOnceWith(urls[1])
 })
