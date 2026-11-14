@@ -61,7 +61,8 @@ app.whenReady().then(async () => {
     const outerTrigger = query('[aria-haspopup="dialog"]')
     await wait(`Boolean(${outerTrigger}?.getClientRects().length)`, 'The secondary workface rendered')
     await click(outerTrigger)
-    await wait(`Boolean(${trigger}?.getClientRects().length)`, 'The File actions trigger is present in the original modal')
+    await wait(`Boolean(${trigger}?.getClientRects().length) && document.querySelector('img[alt="Captured image"]')?.naturalWidth > 0`,
+      'The original modal presents the actual annotation editor and its image')
     await move(trigger)
     assert.ok(await read(`!${menu}`), 'Pointer movement keeps a click menu closed')
     await click(trigger)
@@ -80,6 +81,14 @@ app.whenReady().then(async () => {
     await key('ArrowDown', 40)
     await wait(`${menu}?.contains(document.activeElement) && document.activeElement?.textContent === 'Open original…'`,
       'ArrowDown activates the click menu and focuses the first original action')
+    const keyboardHighlight = await read(`(() => {
+      const item = document.activeElement
+      const next = item.nextElementSibling
+      return item.hasAttribute('data-highlighted') && getComputedStyle(item).backgroundColor !== getComputedStyle(next).backgroundColor
+    })()`)
+    assert.equal(keyboardHighlight, true, 'The first action has a visible keyboard highlight')
+    await writeFile(join(evidence, 'original-file-keyboard.png'), (await secondary.webContents.capturePage()).toPNG())
+    result.frames.push('original-file-keyboard.png')
     const dimensions = await read(`(() => {
       const menu = ${menu}
       const style = getComputedStyle(menu)
@@ -95,6 +104,21 @@ app.whenReady().then(async () => {
     assert.deepEqual(await original('dropdownProof.requests'), ['save-original'])
     assert.equal(await read('Boolean(document.querySelector("[role=dialog]"))'), true)
     result.cases.push('keyboard-selects-the-exact-file-action-once')
+    await cdp.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
+    const tap = async target => {
+      const touch = await read(`(() => {
+        const r = ${target}.getBoundingClientRect()
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+      })()`)
+      await cdp.sendCommand('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [touch] })
+      await cdp.sendCommand('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    }
+    await tap(trigger)
+    await wait(openedInOriginal, 'A touch opens the original file menu')
+    await tap(query('.image-annotation-original-menu [role="menuitem"]'))
+    await wait(`!${menu}`, 'Touch selection closes only the menu')
+    assert.deepEqual(await original('dropdownProof.requests'), ['save-original', 'open-original'])
+    result.cases.push('touch-selects-the-exact-file-action-once')
     result.passed = true
   } catch (error) {
     result.failure = error.message

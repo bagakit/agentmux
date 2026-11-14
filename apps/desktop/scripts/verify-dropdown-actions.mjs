@@ -16,6 +16,7 @@ await mkdir(evidenceRoot, { recursive: true })
 const evidence = await mkdtemp(join(evidenceRoot, 'capture-'))
 const adapter = 'apps/desktop/src/renderer/src/components/DropdownMenu.tsx'
 const product = 'apps/desktop/src/renderer/src/components/image-annotation/AnnotationOriginalMenu.tsx'
+const editor = 'apps/desktop/src/renderer/src/components/image-annotation/ImageAnnotationEditor.tsx'
 const shared = 'packages/client-ui/src/components/DropdownMenu.tsx'
 const styles = 'packages/client-ui/src/styles/overlays.css'
 const menuPrimitive = '/@radix-ui/react-menu/dist/index.mjs'
@@ -45,7 +46,7 @@ async function run(mutation) {
             if (mutation === 'global-keyboard') return source
           }
           const file = relative(root, id)
-          if (![adapter, product, shared].includes(file)) return
+          if (![adapter, editor, product, shared].includes(file)) return
           if (file === adapter && mutation === 'wrong-document') {
             const before = '<DocumentOverlayPortal component={SharedPortal} container={container} {...props} />'
             assert.equal(source.split(before).length, 2, 'Mutate exactly one loaded host target')
@@ -65,7 +66,7 @@ async function run(mutation) {
       }],
       build: { target: 'esnext', outDir: compiled, emptyOutDir: true, reportCompressedSize: false }
     })
-    assert.deepEqual(Object.keys(loaded).sort(), [adapter, product, shared, styles].sort())
+    assert.deepEqual(Object.keys(loaded).sort(), [adapter, editor, product, shared, styles].sort())
     assert.ok(primitive, 'The edited production Radix Menu must actually compile')
     assert.equal(mutations, mutation ? 1 : 0)
     const env = { ...process.env }
@@ -82,7 +83,7 @@ async function run(mutation) {
     } else {
       assert.equal(execution.exitCode, 0, result.failure)
       assert.equal(result.passed, true)
-      assert.equal(result.cases.length, 2)
+      assert.equal(result.cases.length, 3)
     }
     const frames = Object.fromEntries(await Promise.all(result.frames.map(async frame => [frame, digest(await readFile(join(output, frame)))])))
     return { loaded, primitive, frames, result }
@@ -98,7 +99,7 @@ assert.notEqual(wrongDocument.loaded[adapter], original.loaded[adapter])
 assert.equal(wrongDocument.primitive, original.primitive)
 assert.notEqual(globalKeyboard.primitive, original.primitive)
 assert.deepEqual(globalKeyboard.loaded, original.loaded)
-for (const file of [product, shared, styles]) assert.equal(wrongDocument.loaded[file], original.loaded[file])
+for (const file of [editor, product, shared, styles]) assert.equal(wrongDocument.loaded[file], original.loaded[file])
 const goal = 'apps/desktop/src/renderer/src/components/GoalDetail.tsx'
 const test = 'apps/desktop/test/ui-button-consumers.test.tsx'
 const config = 'apps/desktop/test/ui-button-consumers.config.mts'
