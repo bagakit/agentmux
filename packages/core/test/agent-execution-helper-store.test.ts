@@ -219,6 +219,49 @@ try {
   for (const child of children) if (child.connected) child.disconnect()
 })
 
+it('blocks a same-key independent prepare while retained admission is held', async () => {
+  const f = await fixture(), worker = join(f.root, 'retained-lock.mjs')
+  await f.store.prepare(f.input, async () => prepared(f.input))
+  await symlink(resolve('packages/core/node_modules'), join(f.root, 'node_modules'), 'dir')
+  const source = `import {AgentExecutionHelperStore} from ${JSON.stringify(resolve('packages/core/src/agent-execution-helper-store.ts'))};
+const input=JSON.parse(process.argv[3]), role=process.argv[2], store=new AgentExecutionHelperStore(process.argv[4]);
+let release; const gate=new Promise(r=>release=r); process.on('message',message=>{if(message.type==='release')release()});
+const build=async()=>{throw new Error('retained build must not run')};
+const result=role==='A' ? await store.prepare(input,build,async(write,admission)=>{process.send({type:'held'});await gate;return await write()}) : await store.prepare(input,build);
+process.send({type:'done',role,createOperationId:result.prepared.createOperationId},()=>process.exit(0));`
+  const identityRequire = createRequire(join(await realpath('packages/core/node_modules/@agentmux/identity'), 'package.json'))
+  await bundle({ stdin: { contents: source, resolveDir: process.cwd() }, outfile: worker, bundle: true, platform: 'node', format: 'esm', alias: {
+    '@agentmux/identity': resolve('packages/identity/src/index.ts'), '@noble/hashes/sha2.js': identityRequire.resolve('@noble/hashes/sha2.js'), '@scure/base': identityRequire.resolve('@scure/base'),
+  }, logLevel: 'silent' })
+  const start = (role: 'A' | 'B') => {
+    const child = fork(worker, [role, JSON.stringify(f.input), f.root], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] })
+    let diagnostics = ''; child.stderr!.on('data', bytes => { diagnostics += bytes })
+    const exit = once(child, 'exit').then(([code, signal]) => ({ code, signal, diagnostics }))
+    const message = (type: string) => new Promise<void>((resolveMessage, reject) => {
+      const listener = (value: { type?: string }) => { if (value.type === type) { child.off('message', listener); resolveMessage() } }
+      child.on('message', listener); child.once('error', reject)
+    })
+    return { child, exit, message }
+  }
+  const a = start('A')
+  await a.message('held')
+  const b = start('B')
+  let bSettled = false
+  const bDone = b.message('done').then(() => { bSettled = true })
+  await new Promise(resolve => setTimeout(resolve, 100))
+  try {
+    expect(bSettled).toBe(false)
+  } finally {
+    a.child.send({ type: 'release' })
+    await bDone
+    const [aExit, bExit] = await Promise.all([a.exit, b.exit])
+    expect(aExit.code, aExit.diagnostics).toBe(0)
+    expect(bExit.code, bExit.diagnostics).toBe(0)
+    if (a.child.connected) a.child.disconnect()
+    if (b.child.connected) b.child.disconnect()
+  }
+})
+
 it('requires an explicit state root and rejects foreign grants', async () => {
   expect(() => new AgentExecutionHelperStore('relative')).toThrow('absolute')
   const f = await fixture()
