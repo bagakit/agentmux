@@ -13,22 +13,25 @@ const ThemeObjectFolderIcon = semanticIconComponent('object.folder')
 
 type Appearance = { kind: 'repository' | 'directory'; icon: string | null }
 
-export function ProjectIcon({ workspaceId, name, folderIdentityKey, lastActivityAt, visible = true }: {
+export function ProjectIcon({ workspaceId, name, folderIdentityKey, lastActivityAt, visible = true, backdrop = false }: {
   workspaceId: string; name: string; folderIdentityKey?: string | undefined; lastActivityAt?: number | null | undefined; visible?: boolean | undefined
+  /** The same accepted real image can decorate the containing project, with no second probe. */
+  backdrop?: boolean
 }) {
   // `null` means "not probed yet" — kept distinct from a probed `{icon: null}` (confirmed-absent).
   // The distinction has a visible consequence: on first paint we render the slot but NO glyph, so a
   // project that DOES have an icon never flashes a folder before its real icon arrives (principle 11:
   // unknown is not the same as known-absent, and must not be rendered as the absent state).
-  const [appearance, setAppearance] = useState<Appearance | null>(null)
+  const [loaded, setLoaded] = useState<{ workspaceId: string; appearance: Appearance } | null>(null)
+  const appearance = loaded?.workspaceId === workspaceId ? loaded.appearance : null
   const [, setNow] = useState(Date.now)
   const monogram = appearance && !appearance.icon ? projectMonogram(name) : ''
   // Only the Space Folder caller provides its durable Host + Project root identity.
   const coloredMonogram = Boolean(monogram && folderIdentityKey && lastActivityAt !== undefined)
   useEffect(() => {
     let active = true
-    setAppearance(null)
-    void api.workspaces.appearance(workspaceId).then((value) => { if (active) setAppearance(value) }).catch(cause => {
+    setLoaded(null)
+    void api.workspaces.appearance(workspaceId).then((value) => { if (active) setLoaded({ workspaceId, appearance: value }) }).catch(cause => {
       if (active) useAppStore.getState().reportError(new Error('This local project image could not be read. The original files and workface are retained; save a manual icon in Change icon, then Restore automatic to retry local image recognition. ' + presentError(cause)))
     })
     return () => { active = false }
@@ -66,7 +69,8 @@ export function ProjectIcon({ workspaceId, name, folderIdentityKey, lastActivity
   // 只在**探测完成且确认无图标**时才画（`appearance` 非 null 且 `icon` 为 null）：未探测态继续什么都
   // 不画，否则有图标的项目会先闪一枚字母牌再换成真图标——那正是上面那条 class-3 约束要避免的事。
   // 名字给不出可显示的字素时（空名、纯空白）monogram 为空串，如实退回图形字形，不编一个假首字母。
-  return <span
+  const imageFailed = () => setLoaded(current => current?.workspaceId === workspaceId ? { ...current, appearance: { ...current.appearance, icon: null } } : current)
+  return <><span
     className="project-rail-row__icon"
     data-space-icon-source="automatic"
     title={appearance ? `${appearance.kind === 'repository' ? 'Git project' : 'Project folder'}${(appearance.icon || coloredMonogram) && recency ? ` · ${activityLabel}` : ''}` : undefined}
@@ -75,8 +79,8 @@ export function ProjectIcon({ workspaceId, name, folderIdentityKey, lastActivity
     {...(monogram ? { 'data-monogram': '' } : {})}
   >
     {appearance === null ? null
-      : appearance.icon ? <img src={appearance.icon} alt="Project icon" data-folder-icon-recency={recency?.tone} onError={() => setAppearance({ ...appearance, icon: null })} />
+      : appearance.icon ? <img src={appearance.icon} alt="Project icon" data-folder-icon-recency={recency?.tone} onError={imageFailed} />
       : monogram ? <span aria-hidden="true">{monogram}</span>
       : appearance.kind === 'repository' ? <ThemeObjectBranchIcon size={15} /> : <ThemeObjectFolderIcon size={15} />}
-  </span>
+  </span>{backdrop && appearance?.icon ? <img className="project-appearance-backdrop" data-project-watermark src={appearance.icon} alt="" aria-hidden="true" onError={imageFailed} /> : null}</>
 }

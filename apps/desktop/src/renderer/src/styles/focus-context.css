@@ -272,10 +272,12 @@
 .focus-location-choice small { color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
 
 /* A remembered route: tint affects the surface, never text or state contrast. */
-.focus-project-lanes__row[data-focus-project-color]:not([data-focus-project-color='default']) { background: color-mix(in srgb, var(--focus-project-color) 5%, transparent); border-top-color: color-mix(in srgb, var(--focus-project-color) 18%, var(--line-soft)); }
-.focus-project-lanes__row[data-pinned='true'] { border-inline-start: 2px solid color-mix(in srgb, var(--focus-project-color) 50%, var(--line-soft)); }
-.focus-project-lanes__row[data-project-drop-target='before'] { box-shadow: inset 0 2px var(--blue); }
-.focus-project-lanes__row[data-project-drop-target='after'] { box-shadow: inset 0 -2px var(--blue); }
+.focus-project-frame { position: relative; isolation: isolate; overflow: clip; background: color-mix(in srgb, var(--focus-project-color) 5%, var(--surface-0)); border-top: 1px solid color-mix(in srgb, var(--focus-project-color) 14%, var(--line-soft)); }
+.focus-project-frame > .focus-project-lanes__row { background: transparent; border-top: 0; }
+.focus-project-frame__heading { border-bottom: 1px solid var(--line-soft); }
+.focus-project-frame .project-appearance-backdrop { position: absolute; z-index: -1; right: 12px; bottom: 12px; width: min(280px, 48%); height: min(280px, 100%); object-fit: contain; opacity: .055; pointer-events: none; user-select: none; }
+.focus-project-frame[data-project-drop-target='before'] { box-shadow: inset 0 2px var(--blue); }
+.focus-project-frame[data-project-drop-target='after'] { box-shadow: inset 0 -2px var(--blue); }
 .focus-project-pin-handle { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 3px; color: var(--text-2); background: transparent; cursor: grab; }
 .focus-project-pin-handle:active { cursor: grabbing; }
 .focus-project-pin-handle:hover, .focus-project-pin-handle:focus-visible { background: var(--surface-2); color: var(--text); }
@@ -304,9 +306,9 @@
 .focus-project-disclosure:hover, .focus-project-disclosure:focus-visible { color: var(--text); background: var(--surface-2); }
 .focus-project-lanes__row[data-collapsed='true'] .focus-project-lanes__heading { min-height: 28px; }
 .focus-project-lanes__row[data-collapsed='true'] .focus-project-lanes__groups { display: none; }
-.focus-project-lanes__row .focus-context-group { background: color-mix(in srgb, var(--focus-project-color, var(--text-3)) 3%, transparent); border-radius: var(--radius-sm); }
-.focus-context-card[data-focus-heat='recent'] { background: color-mix(in srgb, var(--focus-project-color, var(--text-3)) 9%, transparent); border-radius: var(--radius-sm); }
-.focus-context-card[data-focus-heat='warm'] { background: color-mix(in srgb, var(--focus-project-color, var(--text-3)) 5%, transparent); border-radius: var(--radius-sm); }
-.focus-context-card[data-focus-heat='cool'] { background: color-mix(in srgb, var(--focus-project-color, var(--text-3)) 2%, transparent); border-radius: var(--radius-sm); }
+.focus-project-lanes__row .focus-context-group { background: transparent; border-radius: var(--radius-sm); }
+.focus-context-card[data-focus-heat='recent'] { background: color-mix(in srgb, var(--text-3) 7%, transparent); border-radius: var(--radius-sm); }
+.focus-context-card[data-focus-heat='warm'] { background: color-mix(in srgb, var(--text-3) 4%, transparent); border-radius: var(--radius-sm); }
+.focus-context-card[data-focus-heat='cool'] { background: color-mix(in srgb, var(--text-3) 2%, transparent); border-radius: var(--radius-sm); }
 .focus-context-card:is(:hover, :focus-within) { background: var(--surface-2); }
 .focus-project-order-error { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
