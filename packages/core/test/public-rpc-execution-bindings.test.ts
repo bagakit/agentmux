@@ -15,7 +15,8 @@ const input: AgentExecutionOpenInput = { bindingId: 'original-binding', agentHos
   resourceHostId: 'resource-host', resourceRuntimeId: 'resource-core', resourceWorkspacePath: '/resource/project',
   resourceGrant: { scope: 'host-user', bindingId: 'original-binding' }, agent: { agentSessionId: 'original-session', createOperationId: 'original-create',
     executorId: 'configured-executor', executorRevision: 'a'.repeat(64), workspacePath: '/agent/launch', prompt: '原文\n  exact  ', launchOptions: {} } }
-const inspection: AgentExecutionInspection = { bindingId: input.bindingId, agentHostId: input.agentHostId, resourceHostId: input.resourceHostId,
+const original = { bindingId: input.bindingId, agentSessionId: input.agent.agentSessionId, createOperationId: input.agent.createOperationId }
+const inspection: AgentExecutionInspection = { continuation: original, bindingId: input.bindingId, agentHostId: input.agentHostId, resourceHostId: input.resourceHostId,
   agentSessionId: input.agent.agentSessionId, resourceWorkspacePath: input.resourceWorkspacePath, state: 'connected' }
 const session: AgentMuxAgentSession = { kind: 'agent', agentSessionId: input.agent.agentSessionId, executorId: input.agent.executorId, providerId: 'fixture-provider', hostId: 'local',
   run: { runId: 'original-agent-run' }, retiredRuns: [], workspacePath: input.agent.workspacePath, createdAt: 1, updatedAt: 1,
@@ -27,6 +28,7 @@ const cleanups: (() => Promise<void>)[] = []
 afterEach(async () => { vi.restoreAllMocks(); for (const cleanup of cleanups.splice(0).reverse()) await cleanup() })
 function fixture() {
   const owner = { create: vi.fn(async (_input: AgentExecutionOpenInput) => ({ session: structuredClone(session), execution: structuredClone(inspection) })),
+    continueOriginal: vi.fn(async () => ({ session: structuredClone(session), execution: structuredClone(inspection) })),
     inspect: vi.fn(async (): Promise<AgentExecutionInspection | null> => structuredClone(inspection)), rejoin: vi.fn(async () => structuredClone(inspection)) }
   const coreClients = vi.fn(() => { throw new Error('Coordinator routing must not scan Session clients') })
   return { owner, coreClients, service: new AgentMuxRpcService({ executionBindings: owner, coreClients }) }
@@ -37,6 +39,8 @@ describe('public execution binding owner', () => {
     const f = fixture()
     expect(await f.service.call('agent.execution.create', input, context)).toEqual({ session, execution: inspection })
     expect(f.owner.create).toHaveBeenCalledExactlyOnceWith(input)
+    expect(await f.service.call('agent.execution.continue', original, context)).toEqual({ session, execution: inspection })
+    expect(f.owner.continueOriginal).toHaveBeenCalledExactlyOnceWith(original)
     expect(await f.service.call('agent.execution.binding', key, context)).toEqual(inspection)
     expect(f.owner.inspect).toHaveBeenCalledExactlyOnceWith(input.bindingId)
     expect(await f.service.call('agent.execution.rejoin', key, context)).toEqual(inspection)
@@ -50,7 +54,7 @@ describe('public execution binding owner', () => {
     const f = fixture(), reverse = { ...input, bindingId: 'reverse-binding', resourceGrant: { scope: 'host-user' as const, bindingId: 'reverse-binding' },
       agentHostId: input.resourceHostId, agentRuntimeId: input.resourceRuntimeId, resourceHostId: input.agentHostId, resourceRuntimeId: input.agentRuntimeId }
     const reverseSession = { ...session, toolExecution: { ...session.toolExecution!, bindingId: reverse.bindingId, resourceHostId: reverse.resourceHostId, resourceRuntimeId: reverse.resourceRuntimeId } }
-    const reverseInspection = { ...inspection, bindingId: reverse.bindingId, agentHostId: reverse.agentHostId, resourceHostId: reverse.resourceHostId }
+    const reverseInspection = { ...inspection, continuation: { ...original, bindingId: reverse.bindingId }, bindingId: reverse.bindingId, agentHostId: reverse.agentHostId, resourceHostId: reverse.resourceHostId }
     f.owner.create.mockResolvedValueOnce({ session: reverseSession, execution: reverseInspection })
     expect(await f.service.call('agent.execution.create', reverse, { ...context, principal: { kind: 'device', id: 'paired-device' } })).toEqual({ session: reverseSession, execution: reverseInspection })
     await expect(f.service.call('agent.execution.create', { ...reverse, resourceGrant: input.resourceGrant }, context)).rejects.toThrow()
@@ -62,6 +66,7 @@ describe('public execution binding owner', () => {
     for (const caller of [{}, { ...context, caller: { agentSessionId: 'managed-agent', capability: 'agent-capability' } },
       { principal: { kind: 'user' as const, id: '' } }, { principal: { kind: 'device' as const, id: 'bad\0principal' } }]) {
       await expect(f.service.call('agent.execution.create', input, caller)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+      await expect(f.service.call('agent.execution.continue', original, caller)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
       await expect(f.service.call('agent.execution.binding', key, caller)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
       await expect(f.service.call('agent.execution.rejoin', key, caller)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
     }
@@ -165,4 +170,19 @@ it('roundtrips connected bindings with exact scoped local diagnostics without pr
   for (const wrong of [{ ...diagnostic, side: 'frontend' }, { ...diagnostic, operation: undefined }, { ...diagnostic, runId: '' }, { ...diagnostic, scope: 'guessed' }, { ...diagnostic, operation: { ...operation, bindingId: 'wrong' } }, { ...diagnostic, result: 'private' }]) {
     expect(() => parseAgentExecutionInspection({ ...inspection, diagnostics: [wrong] }, key)).toThrow()
   }
+})
+
+it('parses continuation CLI as exact original identity and rejects any replacement launch input', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'execution-continue-cli-')); cleanups.push(() => rm(root, { recursive: true, force: true }))
+  const file = join(root, 'original.json')
+  await writeFile(file, JSON.stringify(original))
+  const parsed = await parseAgentMuxCliInvocation(['agent', 'execution', 'continue', '--input', file])
+  expect(parsed).toMatchObject({ command: { method: 'agent.execution.continue' }, params: original })
+  expect(agentMuxCommandHelp('agent.execution.continue')).toContain('original')
+  for (const replacement of [{ ...original, prompt: 'replacement' }, { ...original, agentSessionId: '' }, { bindingId: original.bindingId }]) {
+    await writeFile(file, JSON.stringify(replacement))
+    await expect(parseAgentMuxCliInvocation(['agent', 'execution', 'continue', '--input', file])).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
+  }
+  for (const changed of [{ ...original, agentSessionId: 'another' }, { ...original, createOperationId: 'another' }])
+    expect(() => parseRpcNativeResult('agent.execution.continue', { session, execution: inspection }, changed)).toThrow()
 })

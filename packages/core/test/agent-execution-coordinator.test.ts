@@ -462,3 +462,69 @@ it('retains 10k native counter revisions without durable intent reads or unchang
   expect(f.observations).toHaveLength(count)
   expect(first.coordinator.inspect(f.input.bindingId)?.state).toBe('connected')
 })
+
+
+describe('original execution preparation and explicit continuation', () => {
+  it('prepares both exact endpoints before any Start and retains the precise failing frontend step', async () => {
+    const f = await fixture(), { coordinator } = await f.open(), ready = gate()
+    f.frontend.api.prepareAgentExecutionHelper.mockImplementationOnce(async () => { await ready.promise; throw new Error('Original frontend preparation unavailable') })
+    const pending = coordinator.create(f.input)
+    const observed = expect(pending).rejects.toMatchObject({ executionFailure: { reference: { bindingId: f.input.bindingId, agentSessionId: f.input.agent.agentSessionId,
+      createOperationId: f.input.agent.createOperationId }, hostId: f.input.agentHostId, role: 'frontend', stage: 'prepare' } })
+    try {
+      await vi.waitFor(() => expect(f.frontend.api.prepareAgentExecutionHelper).toHaveBeenCalledTimes(1))
+      expect(f.executor.api.createPreparedTerminal).not.toHaveBeenCalled()
+      expect(f.frontend.api.createPreparedTerminal).not.toHaveBeenCalled()
+    } finally { ready.release(); await observed }
+    expect(coordinator.inspect(f.input.bindingId)).toMatchObject({ helperStarts: { executor: { outcome: 'not-submitted', runId: null }, frontend: { outcome: 'not-submitted', runId: null } } })
+  })
+  it('continues only the retained immutable input after Coordinator restart in the same lane', async () => {
+    const f = await fixture(), first = await f.open()
+    f.frontend.api.prepareAgentExecutionHelper.mockRejectedValueOnce(new Error('Original frontend not ready'))
+    await expect(first.coordinator.create({ ...f.input, agent: { ...f.input.agent, prompt: '原始任务\n  exact bytes' } })).rejects.toThrow('Original frontend not ready')
+    const frozen = f.read().input
+    await first.close()
+    const second = await f.open(), original = { bindingId: frozen.bindingId, agentSessionId: frozen.agent.agentSessionId, createOperationId: frozen.agent.createOperationId }
+    const result = await second.coordinator.continueOriginal(original)
+    expect(result.session.agentSessionId).toBe(original.agentSessionId)
+    expect(f.frontend.api.createHostAgentWithDelivery).toHaveBeenCalledWith(expect.objectContaining({ ...frozen.agent }))
+    expect(f.read().input).toEqual(frozen)
+    expect(f.executor.api.createPreparedTerminal).toHaveBeenCalledTimes(1)
+    expect(f.frontend.api.createPreparedTerminal).toHaveBeenCalledTimes(1)
+    await second.coordinator.continueOriginal(original)
+    expect(f.executor.api.createPreparedTerminal).toHaveBeenCalledTimes(1)
+    expect(f.frontend.api.createPreparedTerminal).toHaveBeenCalledTimes(1)
+    for (const wrong of [{ ...original, agentSessionId: 'another' }, { ...original, createOperationId: 'another' }])
+      await expect(second.coordinator.continueOriginal(wrong)).rejects.toMatchObject({ code: 'EXECUTION_BINDING_CONFLICT' })
+  })
+  it('does not clear an unacknowledged Native Start attempt across Core restart or submit it again', async () => {
+    const f = await fixture(), first = await f.open()
+    f.executor.loseStart()
+    await expect(first.coordinator.create(f.input)).rejects.toThrow('Start acknowledgement lost')
+    f.executor.forgetCreation()
+    const attempts = f.read().attempts
+    await first.close()
+    const second = await f.open(), original = { bindingId: f.input.bindingId, agentSessionId: f.input.agent.agentSessionId, createOperationId: f.input.agent.createOperationId }
+    await expect(second.coordinator.continueOriginal(original)).rejects.toThrow('no confirmed receipt')
+    expect(f.read().attempts).toEqual(attempts)
+    expect(f.executor.api.createPreparedTerminal).toHaveBeenCalledTimes(1)
+    expect(second.coordinator.inspect(f.input.bindingId)).toMatchObject({ helperStarts: { executor: { outcome: 'unknown', runId: null } } })
+  })
+  it('does not create or resolve any Host when the original binding intent is missing', async () => {
+    const f = await fixture(), { coordinator } = await f.open()
+    await expect(coordinator.continueOriginal({ bindingId: 'missing', agentSessionId: 'original', createOperationId: 'original' })).rejects.toMatchObject({ code: 'EXECUTION_INTENT_UNCONFIRMED' })
+    expect(f.resolveHost).not.toHaveBeenCalled()
+    expect(f.frontend.api.createHostAgentWithDelivery).not.toHaveBeenCalled()
+  })
+})
+
+
+it('does not send the original initial input again when explicit continuation adopts an existing Agent receipt', async () => {
+  const f = await fixture(), { coordinator } = await f.open(), input = { ...f.input, agent: { ...f.input.agent, prompt: 'original initial input' } }
+  const first = await coordinator.create(input)
+  f.frontend.api.readAgentSession.mockResolvedValueOnce(first.session)
+  const continued = await coordinator.continueOriginal({ bindingId: input.bindingId, agentSessionId: input.agent.agentSessionId, createOperationId: input.agent.createOperationId })
+  expect(continued.session.run).toEqual(first.session.run)
+  expect(f.frontend.api.writeTerminal.mock.calls.filter(([target]) => (target as { runId: string }).runId === first.session.run.runId)).toHaveLength(0)
+  expect(f.frontend.api.createHostAgentWithDelivery).toHaveBeenLastCalledWith(expect.objectContaining({ ...input.agent }))
+})
