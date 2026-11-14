@@ -467,8 +467,12 @@ function rawRecord(entry: NativeJsonlHistoryRecord, row: Update): AgentSessionHi
   const { update, kind, method } = row, id = `grok-update:${entry.start}`, timestamp = recordedTime(entry.value)
   const time = timestamp === undefined ? {} : { startedAt: timestamp }
   if (method === 'session/update') {
-    if (kind === 'user_message_chunk') return { id, kind: hostTurn(update) ? 'activity' : 'user-message', ...time,
-      contentParts: textPart(update.content, hostTurn(update) ? 'private' : 'unconfirmed') }
+    if (kind === 'user_message_chunk') {
+      const synthetic = isRecord(update._meta) && update._meta.syntheticPrompt === true
+      return { id, kind: hostTurn(update) || synthetic ? 'activity' : 'user-message', ...time,
+        ...(synthetic ? { title: 'Grok system input', recordPurpose: 'system-event' as const } : {}),
+        contentParts: textPart(update.content, hostTurn(update) ? 'private' : 'unconfirmed') }
+    }
     if (kind === 'agent_message_chunk') return { id, kind: 'activity', title: 'Grok text chunk', ...time,
       contentParts: textPart(update.content, hostTurn(update) ? 'private' : 'unconfirmed') }
     if (kind === 'agent_thought_chunk') {
