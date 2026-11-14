@@ -1,5 +1,5 @@
 import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
-import { mkdir, mkdtemp, readFile, rm, stat, symlink } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink } from 'node:fs/promises'
 import { build } from 'esbuild'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
@@ -177,6 +177,21 @@ describe('remote initial creation admission', () => {
     if (fault === 'deleted') await expect(stat(split.locator.workspacePath)).rejects.toMatchObject({ code: 'ENOENT' })
     if (fault === 'replaced') await expect(stat(join(split.locator.workspacePath, '.claude'))).rejects.toMatchObject({ code: 'ENOENT' })
     if (fault === 'symlink') await expect(stat(join(external, '.claude'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it.each(['.claude', '.claude/agentmux/tool-execution'] as const)('rejects a pre-existing %s symlink without writing outside the proven leaf', async relative => {
+    const f = await fixture(), split = await splitFrontend(f)
+    allowSplitLaunch(f, split.locator.workspacePath)
+    const external = join(f.root, 'provider-descendant-symlink-target')
+    await mkdir(external)
+    const link = join(split.locator.workspacePath, relative)
+    await mkdir(join(link, '..'), { recursive: true })
+    await symlink(external, link)
+    const outcome = await createSplit(f, split.request).then(value => ({ value }), error => ({ error }))
+    expect(outcome).toHaveProperty('error')
+    expect((outcome as { error: Error }).error).toMatchObject({ code: 'EXECUTION_BINDING_CONFLICT' })
+    expect(f.start).not.toHaveBeenCalled()
+    expect(await readdir(external)).toEqual([])
   })
 
   it('adopts an existing split Session before any physical fence after its leaf disappears', async () => {
