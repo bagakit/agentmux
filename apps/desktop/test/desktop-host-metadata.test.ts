@@ -62,7 +62,7 @@ it.each(['identity', 'name', 'coordinator-target'] as const)('the real local con
   const names = createNameControlClient({ call: (method, params) => callOriginalDesktopHost(f.client, method, params, {}) })
   const observed = await (kind === 'coordinator-target' ? f.controller.executionCoordinatorTarget() : kind === 'identity'
     ? callOriginalDesktopHost(f.client, 'runtime.owner.identity', { expectedRuntimeId: f.owner.runtimeId }, {})
-    : names.inspectAgent({ runtimeId: f.owner.runtimeId, agentSessionId: 'original', createOperationId: 'original-C' }))
+    : names.inspectAgent({ runtimeId: f.owner.runtimeId, agentSessionId: 'original' }))
     .then(value => ({ value }), error => ({ error: { code: error.code, message: error.message } }))
   if (process.env.T011_LOCAL_OWNER_EVIDENCE) await writeFile(join(process.env.T011_LOCAL_OWNER_EVIDENCE, kind + '-observation.json'), JSON.stringify({ kind, observed,
     calls: f.calls, inventoryReads: f.inventory.mock.calls.length, nativeConnects: f.native.mock.calls.length,
@@ -82,13 +82,13 @@ it('warm metadata keeps the original actor, instance fence, device boundary and 
   expect(changed.save.diskDurability).toBe('confirmed')
   const discoveries = () => f.calls.filter(call => call.method === 'runtime.owner.identity' && call.expectedRuntimeId === undefined).length
   const before = discoveries()
-  expect((await names.inspectAgent(target)).current.override).toBe('Original Agent')
+  expect((await names.inspectAgent({ runtimeId: target.runtimeId, agentSessionId: target.agentSessionId })).current.override).toBe('Original Agent')
   expect(await f.controller.executionCoordinatorTarget()).toEqual({ hostId: 'local', runtimeId: f.owner.runtimeId })
   expect(discoveries()).toBe(before)
   const mutations = vi.spyOn(f.spatial, 'mutateDisplayLabel')
-  await expect(callOriginalDesktopHost(f.client, 'agent.name.inspect', target, {}, { runtimeId: f.owner.runtimeId, ownerInstanceId: 'another-instance' })).rejects.toMatchObject({ code: 'RUNTIME_OWNER_CHANGED' })
+  await expect(callOriginalDesktopHost(f.client, 'agent.name.inspect', { runtimeId: target.runtimeId, agentSessionId: target.agentSessionId }, {}, { runtimeId: f.owner.runtimeId, ownerInstanceId: 'another-instance' })).rejects.toMatchObject({ code: 'RUNTIME_OWNER_CHANGED' })
   const calls = f.calls.length
-  await expect(callOriginalDesktopHost(f.client, 'agent.name.inspect', target, { principal: { kind: 'device', id: 'device-without-forwarding' } })).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
+  await expect(callOriginalDesktopHost(f.client, 'agent.name.inspect', { runtimeId: target.runtimeId, agentSessionId: target.agentSessionId }, { principal: { kind: 'device', id: 'device-without-forwarding' } })).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
   const abort = new AbortController(); abort.abort(new AgentMuxError('Original reader cancelled', 'CONTROL_CANCELLED'))
   await expect(callOriginalDesktopHost(f.client, 'runtime.owner.identity', {}, { signal: abort.signal })).rejects.toMatchObject({ code: 'CONTROL_CANCELLED' })
   expect(f.calls).toHaveLength(calls); expect(mutations).not.toHaveBeenCalled()

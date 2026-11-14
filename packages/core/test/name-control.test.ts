@@ -78,7 +78,7 @@ test('original CAS, manual-clear priority, operation observation and explicit co
   await f.localNames.changeAgent({ ...target, change })
   const replay = await f.localNames.changeAgent({ ...target, change })
   expect(replay.changed).toBe(false); expect(replay.save.diskDurability).toBe('unconfirmed')
-  const inspected = await f.localNames.inspectAgent({ ...target, operationId: change.operationId })
+  const inspected = await f.localNames.inspectAgent({ runtimeId: target.runtimeId, agentSessionId: target.agentSessionId, operationId: change.operationId })
   expect(inspected).toMatchObject({ current: { override: 'First', nameRevision: 1 }, record: { id: change.operationId, status: 'applied' }, diskAcknowledgement: 'not-observed' })
   const conflict = await f.localNames.changeAgent({ ...target, change: { ...change, operationId: 'stale-OP', name: 'Stale' } })
   expect(conflict.applied).toBe(false); expect(conflict.current.override).toBe('First')
@@ -97,7 +97,10 @@ test('finite names reject a Run/actor argument, missing admission and associatio
   expect(() => parseNameControlParams('space.member.name.inspect', { target, object: 'agent' })).not.toThrow()
   for (const value of [{ target: { ...target, expectedRun: { runId: 'Run' } }, object: 'agent' }, { target: { ...target, expectedAdmission: undefined }, object: 'agent' }, { target, object: 'agent', actor: { kind: 'user', id: 'forged' } }]) expect(() => parseNameControlParams('space.member.name.inspect', value)).toThrow()
   expect(() => memberAgentNameInput({ target: { ...target, expectedAdmission: { kind: 'association', operationId: 'L' } }, object: 'agent' })).toThrowError(expect.objectContaining({ code: 'SPACE_MEMBER_EXTERNAL_COORDINATOR' }))
-  const input = { runtimeId: 'D', agentSessionId: 'SID', createOperationId: 'C' }, reply = { target: { runtimeId: 'D', kind: 'agent-session', id: 'SID' }, current: { override: null, source: null, nameRevision: 0 }, record: null, diskAcknowledgement: 'not-observed' }
+  const input = { runtimeId: 'D', agentSessionId: 'SID' }, reply = { target: { runtimeId: 'D', kind: 'agent-session', id: 'SID' }, current: { override: null, source: null, nameRevision: 0 }, record: null, diskAcknowledgement: 'not-observed' }
+  expect(parseNameControlParams('agent.name.inspect', input)).toEqual(input)
+  for (const extra of [{ createOperationId: 'C' }, { expectedRun: { runId: 'Run' } }, { actor: { kind: 'user' } }])
+    expect(() => parseNameControlParams('agent.name.inspect', { ...input, ...extra })).toThrow()
   expect(() => parseNameControlResult('agent.name.inspect', reply, input)).not.toThrow()
   expect(() => parseNameControlResult('agent.name.inspect', { ...reply, diskAcknowledgement: 'confirmed' }, input)).toThrow()
   expect(() => parseNameControlResult('agent.name.inspect', { ...reply, target: { ...reply.target, runtimeId: 'B' } }, input)).toThrow()
@@ -163,6 +166,12 @@ test('a real current-viewer A to Source B to C to D name child preserves origina
   expect(sourceTab).toMatchObject({ target: { runtimeId: b.identity.runtimeId, kind: 'tab', id: admitted.address.tabId }, applied: true })
   const result = await names.changeMember({ target, object: 'agent', change: { kind: 'rename', operationId: 'routed-original-name', name: 'Actual D original', expectedNameRevision: 0, source: 'manual' } })
   expect(result).toMatchObject({ current: { override: 'Actual D original' }, record: { context: { actor: { kind: 'user', id: actor.id, verified: true }, location: { sourceRuntimeId: b.identity.runtimeId, actorSourceRuntimeId: a.identity.runtimeId, admissionOperationId: 'routed-C' } } }, save: { diskDurability: 'confirmed' } })
+  const metadata = vi.spyOn(f.d.core, 'readAgentSession').mockRejectedValue(Error('Original Session metadata is temporarily unavailable'))
+  await expect(names.inspectMember({ target, object: 'agent', operationId: 'routed-original-name' })).resolves.toMatchObject({
+    target: { runtimeId: f.d.owner.runtimeId, id: routedSession.agentSessionId },
+    current: { override: 'Actual D original' }, diskAcknowledgement: 'not-observed' })
+  expect(metadata).not.toHaveBeenCalled()
+  metadata.mockRestore()
   expect((await f.b.spatial.readDisplayLabel({ kind: 'agent-session', id: routedSession.agentSessionId })).label).toBeNull()
   await configure(d, [], [])
   await expect(names.changeMember({ target, object: 'agent', change: { kind: 'rename', operationId: 'revoked-name', name: 'Not allowed', expectedNameRevision: 1, source: 'manual' } })).rejects.toBeDefined()
@@ -209,7 +218,7 @@ test('the actual public name CLI changes and inspects the original owner through
   await writeFile(localInput, JSON.stringify({ runtimeId: f.d.owner.runtimeId, agentSessionId: f.session.agentSessionId, createOperationId: 'original-C', change: { ...original.change, operationId: 'cli-Agent-name', name: 'CLI original Agent' } }))
   const agent = await send(f.d, ['agent', 'name', 'change', '--input', localInput])
   expect(agent.code, agent.stderr).toBe(0); expect(JSON.parse(agent.stdout).result).toMatchObject({ target: { runtimeId: f.d.owner.runtimeId }, current: { override: 'CLI original Agent' }, applied: true })
-  await writeFile(localInput, JSON.stringify({ runtimeId: f.d.owner.runtimeId, agentSessionId: f.session.agentSessionId, createOperationId: 'original-C', operationId: 'cli-Agent-name' }))
+  await writeFile(localInput, JSON.stringify({ runtimeId: f.d.owner.runtimeId, agentSessionId: f.session.agentSessionId, operationId: 'cli-Agent-name' }))
   const inspected = await send(f.d, ['agent', 'name', 'inspect', '--input', localInput])
   expect(inspected.code, inspected.stderr).toBe(0); expect(JSON.parse(inspected.stdout).result).toMatchObject({ record: { id: 'cli-Agent-name' }, diskAcknowledgement: 'not-observed' })
   for (const module of ['agent', 'space']) {
@@ -226,7 +235,7 @@ test('a replaced original name with unknown disk ACK stays applied and inspect n
   fault.path = f.d.spatial.path
   const changed = await f.localNames.changeAgent({ ...target, change: { kind: 'rename', operationId: 'unknown-name-ACK', name: 'Actual replaced name', expectedNameRevision: 0, source: 'manual' } })
   expect(changed).toMatchObject({ applied: true, changed: true, current: { override: 'Actual replaced name' }, save: { diskDurability: 'unconfirmed' } })
-  const observed = await f.localNames.inspectAgent({ ...target, operationId: 'unknown-name-ACK' })
+  const observed = await f.localNames.inspectAgent({ runtimeId: target.runtimeId, agentSessionId: target.agentSessionId, operationId: 'unknown-name-ACK' })
   expect(observed).toMatchObject({ record: { status: 'applied', id: 'unknown-name-ACK' }, diskAcknowledgement: 'not-observed' })
   const confirmed = await f.localNames.changeAgent({ ...target, change: { kind: 'confirm', operationId: 'unknown-name-ACK' } })
   expect(confirmed).toMatchObject({ changed: false, current: { override: 'Actual replaced name' }, save: { diskDurability: 'confirmed' } })
@@ -239,9 +248,42 @@ test('unreadable label storage is not treated as absent initialization and keeps
   const f = await member(), { writeFile } = await import('node:fs/promises'), original = '{"original-unreadable-name-document":'
   await writeFile(f.d.spatial.path, original)
   const target = { runtimeId: f.d.owner.runtimeId, agentSessionId: f.session.agentSessionId, createOperationId: 'original-C' }
-  await expect(f.localNames.inspectAgent(target)).rejects.toBeDefined()
+  await expect(f.localNames.inspectAgent({ runtimeId: target.runtimeId, agentSessionId: target.agentSessionId })).rejects.toBeDefined()
   await expect(f.localNames.changeAgent({ ...target, change: { kind: 'rename', operationId: 'must-not-initialize', name: 'Replacement', expectedNameRevision: 0, source: 'manual' } })).rejects.toBeDefined()
   expect(await readFile(f.d.spatial.path, 'utf8')).toBe(original)
   expect(await f.d.core.readAgentSession(f.session.agentSessionId)).toMatchObject({ run: f.session.run })
   expect(f.d.runs).not.toHaveBeenCalled()
+})
+
+test.each(['unobserved', 'unavailable'] as const)('the exact saved label stays readable with %s Session metadata without granting a name write', async state => {
+  const f = await member(), identity = { runtimeId: f.d.owner.runtimeId, agentSessionId: f.session.agentSessionId }
+  await f.localNames.changeAgent({ ...identity, createOperationId: 'original-C', change: {
+    kind: 'rename', operationId: 'saved-name-before-gap', name: 'Original saved task name', expectedNameRevision: 0, source: 'manual' } })
+  const before = await readFile(f.d.spatial.path, 'utf8')
+  const metadata = vi.spyOn(f.d.core, 'readAgentSession')
+  if (state === 'unobserved') metadata.mockResolvedValue(null)
+  else metadata.mockRejectedValue(Error('The original Session metadata is unavailable'))
+  const result = await f.localNames.inspectAgent(identity)
+  expect(result).toMatchObject({ target: { runtimeId: identity.runtimeId, id: identity.agentSessionId },
+    current: { override: 'Original saved task name', source: 'manual', nameRevision: 1 }, diskAcknowledgement: 'not-observed' })
+  expect(metadata).not.toHaveBeenCalled()
+  await expect(f.localNames.inspectAgent({ ...identity, runtimeId: f.b.owner.runtimeId })).rejects.toMatchObject({ code: 'RUNTIME_OWNER_MISMATCH' })
+  await expect(f.localNames.changeAgent({ ...identity, createOperationId: 'original-C', change: {
+    kind: 'rename', operationId: 'write-still-needs-creation', name: 'Must not replace', expectedNameRevision: 1, source: 'manual' } })).rejects.toBeDefined()
+  expect(await readFile(f.d.spatial.path, 'utf8')).toBe(before)
+  expect(f.native).not.toHaveBeenCalled(); expect(f.subject).not.toHaveBeenCalled(); expect(f.d.runs).not.toHaveBeenCalled()
+})
+
+test('a name read with no observed Session does not initialize labels and a saved clear remains authoritative', async () => {
+  const f = await member(), identity = { runtimeId: f.d.owner.runtimeId, agentSessionId: f.session.agentSessionId }
+  const metadata = vi.spyOn(f.d.core, 'readAgentSession').mockResolvedValue(null)
+  expect((await f.localNames.inspectAgent(identity)).current).toEqual({ override: null, source: null, nameRevision: 0 })
+  expect(metadata).not.toHaveBeenCalled()
+  await expect(access(f.d.spatial.path)).rejects.toMatchObject({ code: 'ENOENT' })
+  metadata.mockRestore()
+  await f.localNames.changeAgent({ ...identity, createOperationId: 'original-C', change: {
+    kind: 'rename', operationId: 'explicit-original-clear', name: null, expectedNameRevision: 0, source: 'manual' } })
+  vi.spyOn(f.d.core, 'readAgentSession').mockResolvedValue(null)
+  expect((await f.localNames.inspectAgent(identity)).current).toEqual({ override: null, source: 'manual', nameRevision: 1 })
+  expect(f.native).not.toHaveBeenCalled(); expect(f.subject).not.toHaveBeenCalled()
 })
