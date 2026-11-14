@@ -1,3 +1,4 @@
+import { parseGoalActivityHistoryParams, pageGoalActivity } from './goal-activity-history.js'
 import { parseProviderCatalogQuery, parseProviderCatalogObservation, type ProviderCatalogMethod } from './public-rpc-provider-catalog.js'
 import { parseSpaceMemberParams } from './space-member-codec.js'
 import { spaceMemberRuntime } from './space-member-runtime.js'
@@ -484,6 +485,7 @@ const NATIVE_FIELDS = {
   'message.dispatch.report': ['sourceMessageId', 'replyMessageId', 'kind'],
   'app.search': ['mode', 'query', 'hostId', 'agentSessionId', 'source', 'limit', 'scanLimit', 'maxBytes', 'cursor'],
   'app.snapshot': ['projectId', 'workspaceId', 'topicId', 'agentSessionId', 'goalId', 'executorId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit', 'include'],
+  'goal.activity.history': ['goalId', 'limit', 'cursor'],
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
@@ -3270,20 +3272,38 @@ export class AgentMuxRpcService {
       case 'agent.send': result = await this.send(p, caller, context); break
       case 'agent.broadcast': result = await this.broadcast(p, caller, context); break
       case 'agent.output': throw new AgentMuxError('Agent output is a bounded byte subscription.', 'INVALID_CONTROL_REQUEST')
+      case 'goal.activity.history': {
+        const input = parseGoalActivityHistoryParams(p)
+        if (this.ports.forwardControl) {
+          try { return await this.ports.forwardControl('goal.activity.history', input, context) as AgentMuxRpcResult<M> }
+          catch (error) { if (!(error instanceof AgentMuxError) || error instanceof AgentMuxRpcError || error.code !== 'CONTROL_UNAVAILABLE') throw error }
+        }
+        const read = await this.execute(this.request('demand.activity.read', { demandId: input.goalId }))
+        if (read.operation !== 'demand.activity.read' || read.demandId !== input.goalId || read.diskDurability !== 'confirmed')
+          throw new AgentMuxError('The original Goal activity read is unconfirmed.', 'CONTROL_PROTOCOL_ERROR')
+        result = pageGoalActivity(read.activities, input); break
+      }
       case 'goal.activity': {
+        validateFilters(p)
+        const limit = rpcCount(p.limit, 100, 1000), since = p.since as number | undefined
+        if (limit < 1) throw new AgentMuxError('Goal activity limit must be from 1 to 1000.', 'INVALID_CONTROL_REQUEST')
         if (this.ports.forwardControl) {
           try { return await this.ports.forwardControl(method, params, context) }
           catch (error) { if (!(error instanceof AgentMuxError) || error instanceof AgentMuxRpcError || error.code !== 'CONTROL_UNAVAILABLE') throw error }
         }
-        const goals = await this.goals(p)
-        const limit = rpcCount(p.limit, 100, 1000)
-        const records = await Promise.all(goals.map(async goal => {
-          const read = await this.execute(this.request('demand.activity.read', { demandId: goal.id }))
-          if (read.operation !== 'demand.activity.read' || read.demandId !== goal.id || read.diskDurability !== 'confirmed') throw new AgentMuxError('The original Goal activity observation is unconfirmed. Inspect the original operation; the Goal and Agent are retained.', 'CONTROL_PROTOCOL_ERROR')
-          return read.activities.map(activity => ({ goalId: goal.id, ...activity }))
-        }))
-        result = { activity: records.flat()
-          .filter(activity => p.since === undefined || activity.createdAt >= Number(p.since)).slice(-limit), diskDurability: 'confirmed' }; break
+        const { limit: _limit, since: _since, ...goalFilters } = p
+        const goals = await this.goals({ ...goalFilters, all: true })
+        // The original Goal list carries one confirmed file snapshot. Re-reading
+        // it once per Goal would clone the whole Store repeatedly and mix revisions.
+        const records = goals.map(goal => {
+          if (!Array.isArray(goal.activities)) throw new AgentMuxError('The original Goal activity projection is unavailable. Original Goals and Agents remain available.', 'CONTROL_UNAVAILABLE')
+          return goal.activities.map(activity => ({ goalId: goal.id, ...activity }))
+        })
+        const matching = records.flat().filter(activity => since === undefined || activity.createdAt >= since)
+        const activity = matching.slice(-limit)
+        result = { activity, diskDurability: 'confirmed', coverage: { scope: 'matching-goals', order: 'goal-order-then-append',
+          matchedGoalCount: goals.length, totalActivityCount: matching.length, returnedActivityCount: activity.length,
+          limit, truncated: matching.length > activity.length } }; break
       }
       case 'app.snapshot': {
         if (this.ports.callOriginalCore) return await this.ports.callOriginalCore('local', method, params, context)

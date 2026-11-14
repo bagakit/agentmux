@@ -369,6 +369,7 @@ type NativeParams = HostRouteParams & SpaceMemberParams & SpaceSessionsParams & 
   'message.dispatch.report': { sourceMessageId: string; replyMessageId: string; kind: import('./agent-handoff.js').DispatchEventKind }
   'app.search': import('./search-contract.js').AgentMuxSearchInput
   'app.snapshot': AgentMuxRpcSnapshotParams
+  'goal.activity.history': import('./goal-activity-history.js').GoalActivityHistoryParams
   'goal.activity': Omit<AgentMuxRpcGoalFilters, 'all'>
   'system.storage': { hostId: string; runId: string }
   'system.doctor': { workspacePath?: string }
@@ -483,7 +484,8 @@ type NativeResult = HostRouteResults & SpaceMemberResults & SpaceSessionsResults
   'message.dispatch.report': Awaited<ReturnType<AgentMuxClient['recordDispatchEvent']>> | import('./agent-message-federation.js').AgentMuxDispatchEventSubmission
   'app.search': import('./search-contract.js').AgentMuxSearchPage
   'app.snapshot': AgentMuxRpcSnapshot
-  'goal.activity': { activity: Array<import('./control.js').AgentMuxDemandActivity & { goalId: string }>; diskDurability: 'confirmed' }
+  'goal.activity.history': import('./goal-activity-history.js').GoalActivityHistory
+  'goal.activity': { activity: Array<import('./control.js').AgentMuxDemandActivity & { goalId: string }>; diskDurability: 'confirmed'; coverage: { scope: 'matching-goals'; order: 'goal-order-then-append'; matchedGoalCount: number; totalActivityCount: number; returnedActivityCount: number; limit: number; truncated: boolean } }
   'system.storage': import('./run-storage-observation.js').AgentMuxRunStorageObservation
   'system.doctor': AgentMuxDoctorReport
   'system.endpoint': { protocol: 'jsonrpc-2.0'; framing: 'json-lines'; endpoint: AgentMuxRpcEndpoint; connection: 'responded'; publication: import('./control-endpoint-state.js').AgentMuxControlEndpointState | null; methods?: AgentMuxRpcMethod[] }
@@ -559,7 +561,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'agent.output': 'long', 'message.inbox.check': 'long', 'message.inbox.ack': 'long',
   'message.federation.dispatch-intake': 'long', 'message.federation.intake': 'long', 'message.federation.export': 'long', 'message.dispatch.sync': 'long', 'message.dispatch.open': 'long', 'message.dispatch.inspect': 'short', 'message.dispatch.report': 'long',
   'message.notify': 'long', 'message.notify.inspect': 'short', 'message.read': 'short', 'message.ls': 'short', 'message.events': 'short', 'message.dispatch.read': 'short', 'message.dispatch.ls': 'short',
-  'app.search': 'long', 'app.snapshot': 'long', 'goal.activity': 'short', 'system.doctor': 'long', 'system.storage': 'short',
+  'app.search': 'long', 'app.snapshot': 'long', 'goal.activity': 'short', 'goal.activity.history': 'short', 'system.doctor': 'long', 'system.storage': 'short',
   'system.endpoint': 'short', 'system.subscription.cancel': 'short', 'terminal.recover': 'long', 'terminal.ls': 'short', 'terminal.inspect': 'short', 'terminal.output': 'long'
 } as const satisfies Record<keyof NativeParams, 'short' | 'long'>
 

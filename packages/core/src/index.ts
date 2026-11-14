@@ -267,3 +267,5 @@ export * from './space-member.js'
 export { connectSpaceMember, type SpaceMemberClient } from './space-member-client.js'
 
 export * from './public-rpc-provider-catalog.js'
+
+export type { GoalActivityCursor, GoalActivityHistoryParams, GoalActivityHistory } from './goal-activity-history.js'

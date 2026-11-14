@@ -1,3 +1,4 @@
+import { parseGoalActivityHistoryParams, parseGoalActivityHistoryResult } from './goal-activity-history.js'
 import { parseProviderCatalogQuery, parseProviderCatalogObservation } from './public-rpc-provider-catalog.js'
 import { parseTerminalInspection, parseTerminalTarget, parseTerminalListParams, parseTerminalListResult } from './terminal-observation.js'
 import { parseSpaceMemberParams } from './space-member-codec.js'
@@ -1085,7 +1086,21 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'message.dispatch.sync': dispatchObservation(p, { ...input, hostId: 'local' }); break
       case 'message.dispatch.read': dispatchObservation(p, input); break
       case 'message.dispatch.ls': dispatchPage(p, input); break
-      case 'goal.activity': record(p, ['activity', 'diskDurability']); activity(p.activity); member(p.diskDurability, ['confirmed']); break
+      case 'goal.activity.history': {
+        const result = parseGoalActivityHistoryResult(p, parseGoalActivityHistoryParams(input))
+        controlResult('demand.activity.read', { demandId: result.goalId, activities: result.activities, diskDurability: result.diskDurability })
+        return result as unknown as Record<string, unknown>
+      }
+      case 'goal.activity': {
+        record(p, ['activity', 'diskDurability', 'coverage']); activity(p.activity); member(p.diskDurability, ['confirmed'])
+        const coverage = record(p.coverage, ['scope', 'order', 'matchedGoalCount', 'totalActivityCount', 'returnedActivityCount', 'limit', 'truncated'])
+        member(coverage.scope, ['matching-goals']); member(coverage.order, ['goal-order-then-append'])
+        for (const key of ['matchedGoalCount', 'totalActivityCount', 'returnedActivityCount', 'limit']) count(coverage[key])
+        if (coverage.returnedActivityCount !== (p.activity as unknown[]).length || Number(coverage.limit) < 1 || Number(coverage.limit) > 1000 ||
+          Number(coverage.returnedActivityCount) > Number(coverage.limit) || Number(coverage.totalActivityCount) < Number(coverage.returnedActivityCount) ||
+          coverage.truncated !== (Number(coverage.totalActivityCount) > Number(coverage.returnedActivityCount))) fail()
+        break
+      }
       case 'app.snapshot': {
         record(p, ['projects', 'workspaces', 'topics', 'motes', 'spaces', 'zones', 'executors', 'agents', 'sessions', 'goals', 'decisions', 'activity', 'unavailable'])
         controlResult('list.projects', { projects: p.projects }); controlResult('list.agents', { agents: p.executors }); controlResult('list.active-agents', { agents: p.agents })
