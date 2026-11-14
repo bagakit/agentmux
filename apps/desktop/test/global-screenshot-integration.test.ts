@@ -7,7 +7,7 @@ import { GlobalScreenshot } from '../src/main/global-screenshot'
 import { ScreenCapture } from '../src/main/screen-capture'
 import { SystemScreenshotEditor } from '../src/main/system-screenshot-editor'
 import { CaptureSurface } from '../src/main/capture-surface'
-import { CAPTURE_SURFACE_CHANNEL, type CaptureSurfaceInput } from '../src/shared/capture-surface'
+import { CAPTURE_SURFACE_CHANNEL, type CaptureBackground, type CaptureSurfaceInput } from '../src/shared/capture-surface'
 import { readPastedImage } from '../src/main/pasted-image-read'
 import { pastedDirectory } from '../src/main/pasted-directory'
 import { SCREENSHOT_ATTACHMENT_RECEIVER } from '../src/shared/screenshot-attachment'
@@ -67,7 +67,7 @@ async function fixture(focused = true, fromOtherApp = false) {
   const home = await mkdtemp(join(tmpdir(), 'amux-screenshot-composition-')); homes.push(home)
   const native = {
     captureDisplays: vi.fn(async () => ({ state: 'captured' as const, capturedAt: 1_700_000_000_000,
-      timing: { contentMs: 1, windowListMs: 1, totalMs: 3, requestMs: 4, validationMs: 1 }, displays: [{ displayId: 1, frame: { x: 0, y: 0, width: 1, height: 1 },
+      timing: { contentMs: 1, windowListMs: 1, responseSerializationMs: 1, totalMs: 3, lazyConnectionMs: 1, socketReadMs: 1, jsonParseMs: 1, requestMs: 4, validationMs: 1 }, displays: [{ displayId: 1, frame: { x: 0, y: 0, width: 1, height: 1 },
       scale: 1, safeTop: 0, windows: [], timing: { captureMs: 1, pngMs: 1, base64Ms: 0, totalMs: 2 }, png: originalBytes.toString('base64'), width: 1, height: 1, engine: 'fixture-engine' }] })),
     captureScreenshot: vi.fn(),
     writeClipboardImage: vi.fn(async (_image: BrowserPng) => {})
@@ -84,7 +84,7 @@ async function fixture(focused = true, fromOtherApp = false) {
   owners.push(editor, surface)
   const capture = new ScreenCapture({ home, native: () => native, appActive: () => !fromOtherApp, edit: editor.edit.bind(editor), present: surface.present.bind(surface), reportIssue })
   const action = new GlobalScreenshot({ contents, focusedWindow, windowForDocument: () => workbench,
-    capture: (attach, background) => capture.capture(attach, 'selection', {}, background), remindPending: () => {}, reportIssue } as never)
+    capture: (attach: boolean, background: CaptureBackground) => capture.capture(attach, 'selection', {}, background), remindPending: () => {}, reportIssue } as never)
   async function overlay(index = 0) {
     await vi.waitFor(() => expect(electron.windows.length).toBeGreaterThan(index))
     const window = electron.windows[index]
