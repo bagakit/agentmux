@@ -362,7 +362,7 @@ async function workspacePublications(roots) {
 export async function materializeRuntimeCore(repositoryRoot, destination, release, options = {}) {
   const core = join(repositoryRoot, 'packages/core')
   const manifest = JSON.parse(await readFile(join(core, 'package.json'), 'utf8'))
-  const files = await runtimePackageSelection(['capsule', 'demand', 'diagnostic-evidence', 'git', 'identity', 'relay']
+  const files = await runtimePackageSelection(['capsule', 'demand', 'diagnostic-evidence', 'git', 'identity', 'providers', 'relay']
     .map(name => join(repositoryRoot, 'packages', name)))
   const copyTree = async (source, target) => {
     const info = await lstat(source)
