@@ -1,6 +1,5 @@
 import { memo, useMemo, type Ref } from 'react'
-import { ConversationMessage } from '@agentmux/client-ui'
-import type { ConversationMessageProps } from '@agentmux/client-ui/components/ConversationMessage'
+import { ConversationMessage, type ConversationMessageProps } from '@agentmux/client-ui/components/ConversationMessage'
 import type { AgentProviderSessionHistoryPage } from '@agentmux/core'
 
 /** Catalog and row-preview updates do not change this original history page. */

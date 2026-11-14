@@ -1,7 +1,7 @@
 import { spatialDestination } from '@agentmux/core/spatial-graph'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
-import type { LinkClickModifiers } from '@agentmux/client-ui'
+import type { LinkClickModifiers } from '@agentmux/client-ui/components/AgentMarkdown'
 import { resolveFocusLinkDestination } from '../../../shared/focus-preferences'
 import { useAppStore, currentCoreSpatialGraph } from '../store'
 import { api } from './api'

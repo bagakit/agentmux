@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { deriveObjectId } from '@agentmux/core/object-id'
-import type { CapsuleEmbedInput } from '@agentmux/client-ui'
+import type { CapsuleEmbedInput } from '@agentmux/client-ui/platform'
 import type { CapsuleInspection } from '@agentmux/core/capsule'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'

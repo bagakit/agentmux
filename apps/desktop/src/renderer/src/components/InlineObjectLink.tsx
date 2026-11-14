@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import type { ObjectLinkReference } from '@agentmux/client-ui'
+import type { ObjectLinkReference } from '@agentmux/client-ui/platform'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { useAppStore } from '../store'
