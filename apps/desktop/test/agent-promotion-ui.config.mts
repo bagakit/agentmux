@@ -9,6 +9,10 @@ const mutations = {
   'new-disabled': ['components/AgentPromotionDialog.tsx', 'const blocked = !receipt && allowed !== true', 'const blocked = false'],
   'continue-disabled': ['components/AgentPromotionDialog.tsx', 'const blocked = !receipt && allowed !== true', 'const blocked = allowed !== true'],
   'original-intent': ['components/AgentPromotionDialog.tsx', 'operationId: original.operationId', 'operationId: mintObjectId()'],
+  'destination': ['components/AgentPromotionDialog.tsx', "target: club.target })", "target: { ...club.target, spaceId: 'unrelated-club' } })"],
+  'dismissed-intent': ['lib/use-agent-promotion.tsx', 'initialIntent={intents.current.get(selectedKey!) ?? null}', 'initialIntent={null}'],
+  'discovery-gap': ['components/AgentPromotionDialog.tsx', '[previous.issue, result.discovery!.issue]', '[result.discovery!.issue]'],
+  'late-intent': ['lib/use-agent-promotion.tsx', 'intents.current.delete(key)', 'intents.current.clear()'],
   'header-menu': ['components/AgentRegionHeader.tsx', 'onPromote={promotion.open ? () => { handoffFocus.current = true; promotion.open?.() } : undefined}', 'onPromote={undefined}']
 } as const
 const identityModule = '\0agent-promotion:identity-runtime-source'
