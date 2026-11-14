@@ -24,6 +24,7 @@ import { browserCdpScopeRefusal, isBrowserCdpNativeInput } from './browser-cdp-s
 import type { BrowserPageInterrupts } from './browser-page-interrupts.js'
 import { createBrowserNetworkObservations } from './browser-network-observation.js'
 import { createBrowserNetworkRouting } from './browser-network-routing.js'
+import { parseBrowserScreenshotOptions, type BrowserScreenshotOptions } from './browser-screenshot-options.js'
 
 /**
  * 页面函数真正干活的那一头。
@@ -51,8 +52,8 @@ export type BrowserPageContext = {
     navigation?: import('@agentmux/core').AgentMuxBrowserNavigationObservation }
   /** 导航到一个地址，等它停下来。 */
   gotoUrl(url: string): Promise<void>
-  /** 截图走 Electron 的 capturePage，与 Agent 无关的那条既有路径。 */
-  captureScreenshot(): Promise<unknown>
+  /** The original host captures the same page; options never change its input or viewport. */
+  captureScreenshot(options?: BrowserScreenshotOptions): Promise<unknown>
   /** 这个 Browser 上一轮留下的 ref 账本；没有就是 null。 */
   readLedger(): Promise<BrowserRefLedger | null>
   /** 记下这一轮最新的一批 ref，供下一轮（乃至下次启动）认回来。 */
@@ -1188,7 +1189,8 @@ export function createBrowserPageDispatch(
       case 'extractStructured':
         return await extractStructured(args[0])
       case 'captureScreenshot':
-        return await context.captureScreenshot()
+        if (args.length > 1) throw new Error('captureScreenshot accepts one options object.')
+        return await context.captureScreenshot(parseBrowserScreenshotOptions(args[0]))
       case 'elementContext': {
         // Agent 读一个元素的完整上下文。**不经指针事件**——目标由 `callOn` 解出来的 CDP 句柄指定，
         // 页面脚本没有机会自己挑目标。人工选择那条路上的 `event.isTrusted` 门禁原样不动：

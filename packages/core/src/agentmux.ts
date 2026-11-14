@@ -8,6 +8,7 @@ import { writeRendererDiagnosticFile } from './renderer-scene-cli.js'
 import { writeRuntimeV8Profile } from './runtime-v8-profile-cli.js'
 import { writeRendererV8Profile } from './renderer-v8-profile-cli.js'
 import { writeAppCaptureFile, appCaptureCliMetadata } from './app-capture-cli.js'
+import { writeBrowserCaptureFile, browserCaptureCliMetadata, resolveBrowserCaptureReport } from './browser-capture-cli.js'
 import { writeRendererTrace } from './renderer-trace-cli.js'
 import { writeCliResourceDocument } from './cli-resource-document.js'
 import process from 'node:process'
@@ -285,7 +286,7 @@ async function main(): Promise<number> {
       try { invocation.params.graph = JSON.parse(await readStdin()) }
       catch { throw new AgentMuxError('A spatial graph JSON object is required on stdin.', 'INVALID_CLI_ARGUMENT') }
     }
-    if (method === 'browser.run') invocation.params.code = await readStdin()
+    if (method === 'browser.run' && invocation.params.code === undefined) invocation.params.code = await readStdin()
     if (method === 'file.write') invocation.params = parseFileWriteParams({ ...invocation.params, content: await readStdin() }) as unknown as Record<string, unknown>
     if (method === 'browser.task.run' && invocation.params.parameters === undefined) {
       const text = await readStdin(65_536)
@@ -320,21 +321,33 @@ async function main(): Promise<number> {
       return await follow(client, method, invocation.params as AgentMuxRpcStreamParams<typeof method>)
     }
     const result = await client.call(method, invocation.params as AgentMuxRpcParams<AgentMuxRpcMethod>, callOptions)
+    let captureResult: unknown = result
     let output: { path: string } | undefined
     try {
-      output = invocation.output === undefined ? undefined : method === 'app.capture' || method === 'app.record.read'
+      if (method === 'browser.run' && invocation.output !== undefined) {
+        captureResult = await resolveBrowserCaptureReport(result, invocation.params.browserId as string, async code => {
+          const readOperationId = mintObjectId()
+          try {
+            const continued = await client.call('browser.run', { browserId: invocation.params.browserId as string, code, operationId: readOperationId }, callOptions)
+            return continued
+          }
+          catch (error) { throw new AgentMuxError(`Screenshot result read ${readOperationId} is unconfirmed: ${error instanceof Error ? error.message : String(error)}. Keep the original capture; it was not repeated.`, 'BROWSER_CAPTURE_RESULT_READ_FAILED') }
+        })
+      }
+      output = invocation.output === undefined ? undefined : method === 'browser.run'
+        ? await writeBrowserCaptureFile(invocation.output, captureResult) : method === 'app.capture' || method === 'app.record.read'
         ? await writeAppCaptureFile(invocation.output, method, result) : method === 'system.metrics.host-profile.capture'
         ? await writeRuntimeV8Profile(invocation.output, result, invocation.params) : method === 'system.metrics.profile.capture'
         ? await writeRendererV8Profile(invocation.output, result) : method === 'system.metrics.allocations.capture' ? await writeRendererDiagnosticFile(invocation.output,result,'allocations') : method === 'system.metrics.scene.capture' ? await writeRendererDiagnosticFile(invocation.output,result,'scene-capture') : method === 'system.metrics.scene.inspect' ? await writeRendererDiagnosticFile(invocation.output,result,'scene-inspect') : method === 'system.metrics.trace.capture'
           ? await writeRendererTrace(invocation.output, result) : await writeCliResourceDocument(invocation.output, result)
     } catch (error) {
-      if (!['app.capture','app.record.read','system.metrics.host-profile.capture','system.metrics.profile.capture','system.metrics.trace.capture','system.metrics.allocations.capture','system.metrics.scene.capture','system.metrics.scene.inspect'].includes(method)) throw error
-      const source = error instanceof Error ? error as Error & { code?: string } : null
-      write({ ok: false, operation: method, result: method === 'app.capture' || method === 'app.record.read' ? appCaptureCliMetadata(method, result) : result, outputError: { code: source?.code ?? (method === 'system.metrics.trace.capture' ? 'TRACE_FILE_WRITE_FAILED' : 'PROFILE_FILE_WRITE_FAILED'),
-        message: source?.message ?? String(error) } })
+      if (!['browser.run','app.capture','app.record.read','system.metrics.host-profile.capture','system.metrics.profile.capture','system.metrics.trace.capture','system.metrics.allocations.capture','system.metrics.scene.capture','system.metrics.scene.inspect'].includes(method)) throw error
+      const source = error instanceof Error ? error as Error & { code?: string; detail?: string } : null
+      write({ ok: false, operation: method, ...(operationId === undefined ? {} : { operationId }), result: method === 'browser.run' ? browserCaptureCliMetadata(captureResult) : method === 'app.capture' || method === 'app.record.read' ? appCaptureCliMetadata(method, result) : result, outputError: { code: source?.code ?? (method === 'browser.run' ? 'BROWSER_CAPTURE_FILE_WRITE_FAILED' : method === 'system.metrics.trace.capture' ? 'TRACE_FILE_WRITE_FAILED' : 'PROFILE_FILE_WRITE_FAILED'),
+        message: source?.message ?? String(error), ...(source?.detail === undefined ? {} : { detail: source.detail }) } })
       return 1
     }
-    write({ ok: true, operation: method, ...(output === undefined ? {} : { output }), ...(operationId === undefined ? {} : { operationId }), result: output && (method === 'app.capture' || method === 'app.record.read') ? appCaptureCliMetadata(method, result) : result })
+    write({ ok: true, operation: method, ...(output === undefined ? {} : { output }), ...(operationId === undefined ? {} : { operationId }), result: output && method === 'browser.run' ? browserCaptureCliMetadata(captureResult) : output && (method === 'app.capture' || method === 'app.record.read') ? appCaptureCliMetadata(method, result) : result })
     return partial(method, result) ? 1 : 0
   } finally { await client.dispose() }
 }

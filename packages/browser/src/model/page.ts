@@ -23,6 +23,10 @@ export type BrowserScreenshotCapture = {
     /** CSS viewport observed around this capture; image pixels remain independent. */
     viewport: { width: number; height: number; deviceScaleFactor: number | null } | null
     viewportWarning: string | null
+    /** Requested viewport region and output density, when explicitly selected. */
+    region?: { x: number; y: number; width: number; height: number; pixelRatio: number } | null
+    /** Exact host feedback was excluded for these pixels, independently of input isolation. */
+    hostOverlays?: 'excluded' | 'unconfirmed'
   }
 }
 

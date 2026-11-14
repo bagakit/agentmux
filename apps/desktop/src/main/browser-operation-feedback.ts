@@ -1,3 +1,4 @@
+import { withBrowserFeedbackPresentation, initializeBrowserFeedbackPresentation, registerBrowserFeedbackTarget, removeBrowserFeedbackTarget, expireBrowserFeedbackTarget } from './browser-feedback-presentation.js'
 import { mintCapabilityToken } from '@agentmux/core/object-id'
 import type { WebContents } from 'electron'
 import type { BrowserPageNode } from '../shared/contracts.js'
@@ -122,7 +123,7 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
   }
   const placeLabel = () => { if (label && state.point) label.style.transform = labelPosition(state.point) }
   const stopMotion = () => { animation?.cancel(); labelAnimation?.cancel(); animation = labelAnimation = undefined }
-  const removeRipple = () => { clearTimeout(rippleTimer); rippleHost?.remove(); rippleHost = null }
+  const removeRipple = () => { clearTimeout(rippleTimer); globals.__agentMuxBrowserFeedbackPresentation?.remove(rippleHost); rippleHost?.remove(); rippleHost = null }
   state.hide = (reason: 'replace' | 'invalidate', retainRipple = false) => {
     if (globals[key] !== state) return
     if (reason === 'replace' && pointer && preferences.showCursor && state.point) {
@@ -135,7 +136,7 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
     if (reason === 'invalidate') state.history = null
     clearTimeout(timer); stopMotion()
     if (!retainRipple) removeRipple()
-    state.host?.remove(); state.host = null; state.shadow = null; pointer = null; visibleTarget = null
+    globals.__agentMuxBrowserFeedbackPresentation?.remove(state.host); state.host?.remove(); state.host = null; state.shadow = null; pointer = null; visibleTarget = null
     label = labelText = null
     state.point = null; state.phase = 'clear'; state.clearReason = reason; state.expiresAt = 0
   }
@@ -169,7 +170,7 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
     window.removeEventListener('resize', onGeometry, true)
     document.removeEventListener('scroll', onGeometry, true)
     media.removeEventListener('change', onMotion)
-    state.host?.remove()
+    globals.__agentMuxBrowserFeedbackPresentation?.remove(state.host); state.host?.remove()
   }
   state.observe = onGeometry
   state.complete = (completed: FeedbackPayload) => {
@@ -221,6 +222,7 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
   updateStyle(payload)
   shadow.adoptedStyleSheets = [sheet]
   state.host = host; state.shadow = shadow
+  globals.__agentMuxBrowserFeedbackPresentation?.register(host)
   const effects = document.createElement('div'); effects.className = 'amux-browser-agent-effects'; shadow.appendChild(effects)
   if (payload.kind === 'page') {
     if (payload.method === 'js' || payload.method === 'cdp') {
@@ -281,6 +283,9 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
     const ripple = document.createElement('span'); ripple.className = 'amux-browser-agent-ripple'
     ripple.style.left = `${state.point.x}px`; ripple.style.top = `${state.point.y}px`
     effects.appendChild(ripple); rippleShadow.appendChild(effects); root.appendChild(rippleHost)
+    // cloneNode copies a suppressed host's inline opacity: retain its original display value.
+    rippleHost.style.setProperty('opacity', '1', 'important')
+    globals.__agentMuxBrowserFeedbackPresentation?.register(rippleHost)
     try {
       rippleHost.showPopover()
       if (!rippleHost.matches(':popover-open')) throw new Error('Click feedback could not enter the document top layer')
@@ -318,10 +323,10 @@ function applyFeedback(payload: FeedbackPayload, target?: Element): boolean {
 
 // Function bytes are bundled by TypeScript/esbuild; the page never receives a second handwritten implementation.
 export function buildBrowserOperationFeedbackScript(payload: FeedbackPayload): string {
-  return `(${applyFeedback.toString()})(${JSON.stringify(payload)})`
+  return withBrowserFeedbackPresentation(`(${applyFeedback.toString()})(${JSON.stringify(payload)})`)
 }
 export function buildBrowserOperationTargetFeedbackDeclaration(): string {
-  return `function(payload){return (${applyFeedback.toString()})(payload,this)}`
+  return `function(payload){${initializeBrowserFeedbackPresentation()}return (${applyFeedback.toString()})(payload,this)}`
 }
 
 /** Read only our isolated-world ordering fact when its document outlives the client. */
@@ -387,8 +392,15 @@ export class BrowserOperationFeedback {
     return result
   }
   private async document(context: TargetContext, payload: FeedbackPayload): Promise<unknown> {
-    const response = await context.send('Runtime.evaluate', { contextId: context.id, expression: buildBrowserOperationFeedbackScript(payload), returnByValue: true }) as { exceptionDetails?: unknown; result?: { value?: unknown } }
-    if (response.exceptionDetails || (response.result?.value === false && ['running', 'completed'].includes(payload.phase))) throw new Error('Document feedback was unavailable')
+    const script = buildBrowserOperationFeedbackScript(payload)
+    const expression = payload.phase === 'completed'
+      ? `(()=>{const applied=${script};return {applied,expiresAt:globalThis.__agentMuxBrowserOperationFeedback?.expiresAt??0}})()` : script
+    const response = await context.send('Runtime.evaluate', { contextId: context.id, expression, returnByValue: true }) as { exceptionDetails?: unknown; result?: { value?: unknown } }
+    const value = response.result?.value
+    if (response.exceptionDetails || ((value === false || value && typeof value === 'object' && 'applied' in value && value.applied === false) && ['running', 'completed'].includes(payload.phase))) throw new Error('Document feedback was unavailable')
+    if (payload.phase === 'completed' && value && typeof value === 'object' && 'expiresAt' in value && typeof value.expiresAt === 'number') {
+      expireBrowserFeedbackTarget(this.input.contents, context, value.expiresAt)
+    }
     return response
   }
   private async bounded(work: Promise<unknown>, generation: number): Promise<void> {
@@ -427,9 +439,12 @@ export class BrowserOperationFeedback {
       const context = { send, id: created.executionContextId! }
       if (this.target && (this.target.send !== send || this.target.id !== context.id)) {
         await this.document(this.target, this.payload('clear', 'target', 0))
+        removeBrowserFeedbackTarget(this.input.contents, this.target)
         if (!live()) return
       }
       this.target = context
+      await registerBrowserFeedbackTarget(this.input.contents, { ...context, frameId: node.frameId!, navigationId: this.navigationId })
+      if (!live()) { removeBrowserFeedbackTarget(this.input.contents, context); return }
       const result = await send('DOM.resolveNode', { backendNodeId: node.backendNodeId, executionContextId: context.id,
         objectGroup: `feedback-${this.input.operationId}` }) as { object?: { objectId?: string } }
       if (!result.object?.objectId) {
@@ -478,7 +493,11 @@ export class BrowserOperationFeedback {
   }
   private async clearAt(generation: number, clearReason: FeedbackPayload['clearReason'] = 'invalidate'): Promise<void> {
     this.mode = 'clear'
+    const target = this.target
     this.target = undefined
+    if (target) {
+      await this.bounded(this.document(target, { ...this.payload('clear', 'target', 0), clearReason }).then(() => removeBrowserFeedbackTarget(this.input.contents, target)), generation)
+    }
     await this.bounded(this.page({ ...this.payload('clear', 'page', 0), clearReason }), generation)
   }
 }

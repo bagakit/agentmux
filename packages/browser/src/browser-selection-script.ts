@@ -121,6 +121,8 @@ export function buildBrowserElementSelectionScript(revision: number, inspectionT
     hint.textContent = 'Select an element · Esc to cancel';
     shadow.append(style, box, hint);
     root.appendChild(host);
+    // Capture can hide only this owned display while the trusted selection listeners remain active.
+    globalThis.__agentMuxBrowserFeedbackPresentation?.register(host);
 
     let target = null;
     let settled = false;
@@ -135,7 +137,9 @@ export function buildBrowserElementSelectionScript(revision: number, inspectionT
       document.removeEventListener('pointermove', onPointerMove, true);
       document.removeEventListener('click', onClick, true);
       document.removeEventListener('keydown', onKeyDown, true);
+      globalThis.__agentMuxBrowserFeedbackPresentation?.remove(host);
       host.remove();
+      state.host = null;
       if (globalThis[stateKey] === state && !state.selectedTarget) delete globalThis[stateKey];
     };
     const settle = (value) => {
@@ -181,7 +185,7 @@ export function buildBrowserElementSelectionScript(revision: number, inspectionT
       event.stopPropagation();
       settle(null);
     };
-    const state = { revision, inspectionToken, selectedTarget: null, cancel: () => { state.selectedTarget = null; if (settled) cleanup(); else settle(null); } };
+    const state = { revision, inspectionToken, host, selectedTarget: null, cancel: () => { state.selectedTarget = null; if (settled) cleanup(); else settle(null); } };
     globalThis[stateKey] = state;
     document.addEventListener('pointermove', onPointerMove, true);
     document.addEventListener('click', onClick, true);

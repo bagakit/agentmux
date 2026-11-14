@@ -2,6 +2,7 @@ import { installBrowserPageInterrupts, isBrowserPageDialogAnswer, BROWSER_PAGE_M
 import { browserPageCapabilityNames } from '@agentmux/core'
 import { capturePageImage, PNG_MAX_BASE64_CHARS } from '@agentmux/native-desktop/image'
 import { readScreenshotObservation, readScreenshotViewport, screenshotSource } from './browser-screenshot-source.js'
+import { prepareBrowserScreenshot } from './browser-screenshot-options.js'
 import type { BrowserPng, BrowserScriptRunReport, BrowserPageSnapshot, BrowserScreenshotCapture } from './model/page.js'
 import type { BrowserResultReadOptions, BrowserResultArtifactChunk } from './model/browser-result-artifact.js'
 import type { BrowserStructuredOutputReceipt } from './model/browser-structured-output.js'
@@ -126,7 +127,7 @@ export class BrowserProgramOwner {
         beforeAction: requireCurrent,
         pageInfo: () => { requireCurrent(); return { url: binding.url, title: binding.title, navigationId: binding.navigationId } },
         gotoUrl: async (url: string) => { requireCurrent(); await this.navigate(binding, attached, url, active.controller.signal); requireCurrent() },
-        captureScreenshot: async () => {
+        captureScreenshot: async (options = {}) => {
           requireCurrent(); const navigationId = binding.navigationId
           const observed = await readScreenshotObservation(async () => {
             const value = await attached.sendCommand('Runtime.evaluate', { expression: '({url:location.href,title:document.title})', returnByValue: true }) as { result?: { value?: unknown } }
@@ -135,13 +136,14 @@ export class BrowserProgramOwner {
           const info = observed && typeof observed === 'object' ? observed as Record<string, unknown> : {}
           const url = typeof info.url === 'string' ? info.url : null, title = typeof info.title === 'string' ? info.title : null
           const readViewport = () => readScreenshotViewport(async () => {
-            const metrics = await attached.sendCommand('Page.getLayoutMetrics') as { cssLayoutViewport?: { clientWidth: number; clientHeight: number } }
-            return { width: metrics.cssLayoutViewport?.clientWidth, height: metrics.cssLayoutViewport?.clientHeight }
+            const metrics = await attached.sendCommand('Runtime.evaluate', { expression: '({width:innerWidth,height:innerHeight,deviceScaleFactor:devicePixelRatio})', returnByValue: true }) as { result?: { value?: unknown } }
+            return metrics.result?.value
           })
           const before = await readViewport()
+          const prepared = await prepareBrowserScreenshot(attached.sendCommand, options, before)
           requireCurrent()
           const image = await capturePageImage({ capture: async () => {
-            const result = await attached.sendCommand('Page.captureScreenshot', { format: 'png' }) as { data?: unknown }
+            const result = await attached.sendCommand('Page.captureScreenshot', prepared.parameters) as { data?: unknown }
             const data = result?.data
             if (typeof data !== 'string' || !data.length || data.length > PNG_MAX_BASE64_CHARS) throw new Error('Browser screenshot must contain bounded base64 PNG data.')
             const bytes = Buffer.from(data, 'base64')
@@ -151,7 +153,7 @@ export class BrowserProgramOwner {
           const after = await readViewport()
           requireCurrent(); if (binding.navigationId !== navigationId) throw new BrowserRequestFailure('The original document changed during screenshot capture.', true)
           this.stores.validateScreenshot(image)
-          return { browserId: id, navigationId, source: screenshotSource(url, title, before, after), image }
+          return { browserId: id, navigationId, source: { ...screenshotSource(url, title, before, after), region: prepared.region, hostOverlays: 'unconfirmed' }, image }
         },
         ...(this.stores.uploads ? { uploads: this.stores.uploads(binding, operation, requireCurrent) } : {}),
         structuredOutput: { source: () => { requireCurrent(); return { workspaceId: binding.workspaceId,

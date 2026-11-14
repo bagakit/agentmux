@@ -1,3 +1,4 @@
+import { withBrowserFeedbackPresentation } from './browser-feedback-presentation.js'
 import type { BrowserAgentControlPreferences } from '../shared/browser-agent-control.js'
 import { browserAgentEffectsCss, DEFAULT_BROWSER_AGENT_CONTROL } from '../shared/browser-agent-control.js'
 import type { WebContents } from 'electron'
@@ -21,7 +22,7 @@ function applyControlFeedback(payload: ControlFeedback): boolean {
     navigationId: payload.navigationId, host: null, shadow: null, dispose: () => {} }
   globals[key] = state
   let observer: MutationObserver | undefined
-  const hide = () => { observer?.disconnect(); state.host?.remove(); state.host = null; state.shadow = null }
+  const hide = () => { observer?.disconnect(); globals.__agentMuxBrowserFeedbackPresentation?.remove(state.host); state.host?.remove(); state.host = null; state.shadow = null }
   state.hide = hide
   state.dispose = () => {
     hide()
@@ -52,6 +53,7 @@ function applyControlFeedback(payload: ControlFeedback): boolean {
   const glow = document.createElement('div'); glow.className = 'amux-browser-agent-glow'
   effects.appendChild(glow); shadow.appendChild(effects); root.appendChild(host)
   state.host = host; state.shadow = shadow
+  globals.__agentMuxBrowserFeedbackPresentation?.register(host)
   // Website root-content replacement does not change the native input owner.
   // Observe only direct root/document changes and restore this exact decoration;
   // no page-subtree scan, target lookup or animation restarts are needed.
@@ -72,7 +74,7 @@ function applyControlFeedback(payload: ControlFeedback): boolean {
 export function buildBrowserControlFeedbackScript(input: Omit<ControlFeedback, 'css' | 'blend'>,
   preferences: BrowserAgentControlPreferences): string {
   const payload: ControlFeedback = { ...input, css: browserAgentEffectsCss(preferences), blend: preferences.glowBlend }
-  return `(${applyControlFeedback.toString()})(${JSON.stringify(payload)})`
+  return withBrowserFeedbackPresentation(`(${applyControlFeedback.toString()})(${JSON.stringify(payload)})`)
 }
 
 /** Decoration follows one exact native page incarnation, independently of its operations. */

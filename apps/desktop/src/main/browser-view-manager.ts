@@ -1,3 +1,5 @@
+import { prepareBrowserScreenshot, type BrowserScreenshotOptions } from '@agentmux/browser/browser-screenshot-options'
+import { withCleanBrowserFeedback, confirmBrowserFeedbackPaint } from './browser-feedback-presentation.js'
 import { readWorkbenchReturnContext, type WorkbenchReturnContext } from '../shared/workbench-windows'
 import { resolveBrowserNewPagePlacement, type BrowserNewPagePlacement } from '../shared/browser-new-page-placement'
 import type { BrowserTaskParallelList, BrowserTaskParallelInput, BrowserTaskParallelInspection, BrowserTaskParallelSummary, BrowserTaskParallelContinuationInput, BrowserTaskParallelContinuationReceipt } from '@agentmux/core/control'
@@ -66,7 +68,7 @@ import { browserViewportSize, cloneBrowserViewport, isBrowserViewport } from '..
 import { resolveBrowserAddress } from '../shared/browser-address.js'
 import { browserObjectLink } from '../shared/browser-object-link.js'
 import type { BrowserInputHistoryAppearance, BrowserInputHistoryScope } from '../shared/browser-input-history.js'
-import { showBrowserOperationFeedback, type BrowserOperationFeedback } from './browser-operation-feedback.js'
+import { showBrowserOperationFeedback, BROWSER_OPERATION_FEEDBACK_WORLD_ID, type BrowserOperationFeedback } from './browser-operation-feedback.js'
 import { BrowserControlFeedback } from './browser-control-feedback.js'
 import { validateBrowserOperatorAvatarPng } from './browser-operator-avatar.js'
 import { DEFAULT_BROWSER_AGENT_CONTROL, type BrowserAgentControlPreferences } from '../shared/browser-agent-control.js'
@@ -2714,8 +2716,9 @@ export class BrowserViewManager {
     this.emit(entry)
   }
 
-  async captureScreenshot(id: string, transport?: { view: WebContentsView; sendCommand: BrowserCdpSender }): Promise<BrowserScreenshotCapture> {
-    return (await this.captureObservedScreenshot(id, transport)).capture
+  async captureScreenshot(id: string, transport?: { view: WebContentsView; sendCommand: BrowserCdpSender; readonly frames?: Map<string, BrowserCdpSender>; remainingMillis?: () => number }, options?: BrowserScreenshotOptions): Promise<BrowserScreenshotCapture> {
+    if (!transport && options && Object.keys(options).length > 0) throw new Error('Region and pixel-density screenshot options require the original Browser program transport. Default GUI capture remains available.')
+    return (await this.captureObservedScreenshot(id, transport, undefined, options)).capture
   }
 
   /** The original capture owner observes activity around these exact pixels. */
@@ -2725,7 +2728,7 @@ export class BrowserViewManager {
     return { capture: result.capture, before: result.before, after: result.after }
   }
 
-  private async captureObservedScreenshot(id: string, transport?: { view: WebContentsView; sendCommand: BrowserCdpSender }, hostId?: string) {
+  private async captureObservedScreenshot(id: string, transport?: { view: WebContentsView; sendCommand: BrowserCdpSender; readonly frames?: Map<string, BrowserCdpSender>; remainingMillis?: () => number }, hostId?: string, options?: BrowserScreenshotOptions) {
     if (this.entries.get(id)?.releaseAttempt?.pending) await this.prepareForConsumption(id)
     const entry = this.require(id)
     const view = entry.view
@@ -2745,24 +2748,32 @@ export class BrowserViewManager {
     const before = await readViewport()
     requireCurrent()
     const inputBefore = hostId === undefined ? undefined : this.inputContext(id, hostId)
-    let image: BrowserScreenshotCapture['image']
-    if (transport) {
-      // Reuse this operation's original session. CDP waits for a presented frame;
-      // the GUI's Native capture remains available without attaching a debugger.
-      const captured = await transport.sendCommand('Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: false })
-      requireCurrent()
-      const data = (captured as { data?: unknown } | null)?.data
-      if (typeof data !== 'string' || data.length === 0 || data.length > BROWSER_PNG_MAX_BASE64_CHARS) throw new Error('Browser screenshot must contain bounded base64 PNG data')
-      const bytes = Buffer.from(data, 'base64')
-      if (bytes.toString('base64') !== data) throw new Error('Browser screenshot must contain canonical base64 PNG data')
-      image = await capturePageImage({ capture: async () => ({ png: bytes }) })
-    } else {
-      image = await capturePageImage({ capture: async () => {
-        const captured = await view.webContents.capturePage()
+    const prepared = transport ? await prepareBrowserScreenshot(transport.sendCommand, options ?? {}, before) : undefined
+    const image = await withCleanBrowserFeedback({ contents: view.webContents, navigationId, worldId: BROWSER_OPERATION_FEEDBACK_WORLD_ID, selectionWorldId: BROWSER_SELECTION_WORLD_ID,
+      ...(transport ? { transport: { sendCommand: transport.sendCommand, get frames() { return transport.frames ?? new Map() } } } : {}),
+      openTransport: () => BrowserCdpSession.attach(view.webContents),
+      confirmPaint: () => confirmBrowserFeedbackPaint(view.webContents, transport?.remainingMillis?.(), pending => {
+        entry.resourceReads += 1
+        const settled = () => { entry.resourceReads -= 1; if (this.entries.get(id) === entry) this.emit(entry) }
+        void pending.then(settled, settled)
+      }),
+      capture: async (): Promise<BrowserScreenshotCapture['image']> => {
         requireCurrent()
-        return browserPagePixels(captured)
+        if (transport) {
+          const captured = await transport.sendCommand('Page.captureScreenshot', prepared!.parameters)
+          requireCurrent()
+          const data = (captured as { data?: unknown } | null)?.data
+          if (typeof data !== 'string' || data.length === 0 || data.length > BROWSER_PNG_MAX_BASE64_CHARS) throw new Error('Browser screenshot must contain bounded base64 PNG data')
+          const bytes = Buffer.from(data, 'base64')
+          if (bytes.toString('base64') !== data) throw new Error('Browser screenshot must contain canonical base64 PNG data')
+          return await capturePageImage({ capture: async () => ({ png: bytes }) })
+        }
+        return await capturePageImage({ capture: async () => {
+          const captured = await view.webContents.capturePage(undefined, { stayHidden: true })
+          requireCurrent()
+          return browserPagePixels(captured)
+        } })
       } })
-    }
     const after = await readViewport()
     requireCurrent()
     const inputAfter = hostId === undefined ? undefined : this.inputContext(id, hostId)
@@ -2772,7 +2783,7 @@ export class BrowserViewManager {
       capture: {
         browserId: id,
         navigationId,
-        source: screenshotSource(url, title, before, after),
+        source: { ...screenshotSource(url, title, before, after), ...(prepared?.region ? { region: prepared.region } : {}), hostOverlays: 'excluded' as const },
         image
       }
     }
@@ -4111,7 +4122,7 @@ export class BrowserViewManager {
         beforeAction()
         await runBrowserTaskNavigation(() => this.startNavigation(entry, url))
       },
-      captureScreenshot: async () => await this.captureScreenshot(entry.id, { view: observingView, sendCommand: session.sendCommand }),
+      captureScreenshot: async (options) => await this.captureScreenshot(entry.id, { view: observingView, sendCommand: session.sendCommand, get frames() { return session.frames }, remainingMillis: () => Math.max(0, deadlineMillis - performance.now()) }, options),
       readLedger: async () => await this.refLedgers.read(entry.id),
       writeLedger: async (ledger) => {
         // Controlled parameterized task scripts return no refs. Do not retain page-derived echoes of their private values.
