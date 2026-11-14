@@ -13,11 +13,13 @@ import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { hydratePersistedTab, reducePersistedTab } from '../src/renderer/src/lib/workbench-persistence'
 import { browserColdDescriptor, coldBrowserTargets } from '../src/main/browser-cold-descriptor'
+import { DEFAULT_BROWSER_ZOOM_FACTOR } from '../src/shared/browser-zoom'
 import { parseBrowserTargetsResult } from '../../../packages/core/src/control-browser-targets'
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server'
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc'
 import { capsulePresentation, createCapsuleBrowserDocument, resolveCapsuleColdDocument } from '../src/main/capsule-presentation'
+import { RemoteCapsuleProxy } from '../src/main/remote-capsule-proxy'
 import { agentMuxModuleSkill } from '../../../packages/core/src/agentmux-cli-module-skills'
 
 // Native ownership and event ordering are controlled here. Actual Electron navigation, pixels
@@ -117,6 +119,35 @@ async function originalSourceCli(root: string): Promise<string> {
   return join(directory, 'bin/amux')
 }
 
+it('keeps the original local partition and cold data identity while remote Runtime namespaces get separate containers', async () => {
+  const h = await fixture(), capsule = await h.page('injected')
+  await h.create('original-local', capsule)
+  expect(h.views.at(-1)!.options.webPreferences.partition).toBe(`persist:agentmux-capsule:${capsule.record.capsuleId}`)
+  const proxy = new RemoteCapsuleProxy(capsule, h.owner); await proxy.listen(); cleanups.push(() => proxy.close())
+  const snapshots = []
+  const partitions: string[] = []
+  for (const runtimeId of ['Runtime-B', 'runtime-b']) {
+    const source = { hostId: runtimeId + '-host', runtimeId }
+    const snapshot = await h.manager.create(runtimeId, proxy.origin + '/', 'workspace', undefined, 'normal', 'responsive', {
+      capsule, capsuleOrigin: proxy.origin, capsuleRemote: source })
+    await h.views.at(-1)!.lastLoad
+    const partition = h.views.at(-1)!.options.webPreferences.partition as string
+    expect(partition).toMatch(/^persist:agentmux-remote-capsule:[a-f0-9]+$/u)
+    partitions.push(partition)
+    expect(snapshot.capsuleRemote).toEqual(source)
+    const binding = h.manager.capsuleDocument(h.views.at(-1)!.webContents as never, h.views.at(-1)!.webContents.mainFrame as never)
+    expect(binding?.remote).toEqual(source)
+    expect(binding?.origin).toBe(proxy.origin)
+    snapshots.push(snapshot)
+  }
+  expect(new Set(partitions.map(value => value.toLowerCase())).size).toBe(2)
+  const tab = createWorkbenchTab('remote-tab', { ...snapshots[0]!, regionId: 'remote-region', kind: 'browser', workspaceId: 'workspace', browserId: 'Runtime-B' })
+  const persisted = reducePersistedTab(tab), hydrated = hydratePersistedTab(persisted)
+  expect(hydrated.regions['remote-region']).toMatchObject({ capsuleRemote: { runtimeId: 'Runtime-B' }, capsuleOrigin: proxy.origin })
+  await expect(h.manager.create('Runtime-B', proxy.origin + '/', 'workspace', undefined, 'normal', 'responsive', {
+    capsule, capsuleOrigin: proxy.origin, capsuleRemote: { hostId: 'other', runtimeId: 'runtime-b' } })).rejects.toThrow('another container')
+})
+
 it('keeps Capsule storage independent from user Profiles and installs SDK only for injected containers', async () => {
   const { manager, page, create, views, profiles } = await fixture()
   const ready = vi.fn(); manager.capsuleDocumentReady = ready
@@ -125,7 +156,7 @@ it('keeps Capsule storage independent from user Profiles and installs SDK only f
   expect(first).toMatchObject({ profileId: null, mode: 'normal', capsuleId: isolated.record.capsuleId, capsuleActive: true })
   expect(second).toMatchObject({ profileId: null, capsuleId: injected.record.capsuleId, capsuleActive: true })
   expect(views[0]!.options.webPreferences).toEqual({ partition: `persist:agentmux-capsule:${isolated.record.capsuleId}`,
-    contextIsolation: true, sandbox: true, nodeIntegration: false })
+    contextIsolation: true, sandbox: true, nodeIntegration: false, zoomFactor: DEFAULT_BROWSER_ZOOM_FACTOR })
   expect(views[1]!.options.webPreferences).toMatchObject({ partition: `persist:agentmux-capsule:${injected.record.capsuleId}`,
     preload: expect.stringMatching(/preload\/capsule\.cjs$/u), contextIsolation: true, sandbox: true, nodeIntegration: false })
   expect(views[0]!.options.webPreferences.partition).not.toBe(views[1]!.options.webPreferences.partition)

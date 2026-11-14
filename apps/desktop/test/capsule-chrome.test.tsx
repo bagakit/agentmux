@@ -25,6 +25,7 @@ vi.mock('../../../packages/capsule/src/storage', async original => {
 import { NodeCapsuleOwner } from '@agentmux/capsule/node'
 import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service'
 import { api } from '../src/renderer/src/lib/api'
+import { useAppStore } from '../src/renderer/src/store'
 import { CapsuleInteractionChrome } from '../src/renderer/src/components/CapsuleInteractionChrome'
 import { createClientUiRoot } from './helpers/client-ui-render'
 
@@ -95,6 +96,30 @@ async function mount(active = true) {
   await act(async () => trigger!.click()); await settle()
 }
 const mutations = (method: CapsuleMethod) => calls.filter(call => call.method === method)
+
+it('scopes remote page observations and drafts to the original Browser while leaving Human confirmation on that node', async () => {
+  const dispose = await useAppStore.getState().initialize()
+  vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue(undefined)
+  useAppStore.setState({ capsuleQuestionEditors: {} })
+  try {
+  const scoped = vi.spyOn(api.capsulePages, 'call').mockImplementation(((browserId: string, method: CapsuleMethod, params: CapsuleParamsMap[CapsuleMethod]) => {
+    expect(browserId).toBe('original-B-browser')
+    return track(transport(method, params))
+  }) as typeof api.capsulePages.call)
+  await act(async () => root.render(<CapsuleInteractionChrome capsuleId={capsuleId} browserId="original-B-browser"
+    remote={{ hostId: 'original-node-B', runtimeId: 'original-runtime-B' }} active toolbarHost={toolbarHost} />))
+  await settle()
+  await act(async () => toolbarHost.querySelector<HTMLButtonElement>('[aria-label="Page questions"]')!.click()); await settle()
+  expect(container.textContent).toContain('Confirm this answer in that node’s trusted App')
+  expect(container.querySelector('.capsule-question__confirm')).toBeNull()
+  await change('Original B draft')
+  await click('Save draft')
+  expect((await owner.call('capsule.interaction.inspect', { capsuleId, interactionId: interaction.interactionId })).interaction.draft, JSON.stringify({ scoped: scoped.mock.calls, value: editor().value, text: container.textContent, disabled: button('Save draft').disabled })).toBe('Original B draft')
+  expect(scoped).toHaveBeenCalledWith('original-B-browser', 'capsule.interaction.ls', { capsuleId })
+  expect(api.capsules.call).not.toHaveBeenCalled()
+  expect(nativeConfirm).not.toHaveBeenCalled()
+  } finally { dispose?.() }
+})
 
 it('reads original requests through public RPC, retains draft bytes, and confirms only through the trusted App boundary', async () => {
   await mount(false)

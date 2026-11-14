@@ -2,6 +2,7 @@ import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 // @vitest-environment happy-dom
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { EventEmitter } from 'node:events'
+import { inspect } from 'node:util'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createServer } from 'node:net'
@@ -13,7 +14,7 @@ import { formatCapsuleAnswer } from '@agentmux/core/capsule'
 import type { AgentMuxRpcServiceOptions } from '../../../packages/core/src/public-rpc-service'
 
 const bridge = vi.hoisted(() => ({ root: '', handlers: new Map<string, (...args: any[]) => any>(), options: [] as any[],
-  nativeDocument: null as null | { sender: any; frame: any; record: any; browserId: string; navigationId: string; instanceId?: string }, failDispatchSave: false }))
+  nativeDocument: null as null | { sender: any; frame: any; record: any; browserId: string; navigationId: string; instanceId?: string; remote?: { hostId: string; runtimeId: string } }, failDispatchSave: false }))
 vi.mock('electron', () => ({ app: { getPath: () => bridge.root, getAppPath: () => process.cwd() + '/apps/desktop', isPackaged: false, once: vi.fn(), on: vi.fn(), off: vi.fn() },
   ipcMain: { handle: (channel: string, handler: (...args: any[]) => any) => bridge.handlers.set(channel, handler),
     removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
@@ -30,10 +31,12 @@ vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class {
     capsuleDocument(sender: any, frame: any) { const value = bridge.nativeDocument; return value && value.sender === sender && value.frame === frame ? value : null }
     capsuleDocumentContents(id: string) { return bridge.nativeDocument?.browserId === id ? bridge.nativeDocument.sender : null }
     capsuleDocumentIds() { return bridge.nativeDocument ? [bridge.nativeDocument.browserId] : [] }
+    capsuleId(id: string) { return bridge.nativeDocument?.browserId === id ? bridge.nativeDocument.record.capsuleId : null }
+    capsuleRemote(id: string) { return bridge.nativeDocument?.browserId === id ? bridge.nativeDocument.remote : undefined }
     setPresentationWindowOwner() {} resourceProcessIds() { return [] } resourceOwnerCounts() { return { browserViews: 0, releasedBrowserViews: 0 } }
-    release() {} dispose() {}
+    async flushProfileActivity() {} release() {} dispose() {}
   } }))
-vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} onChange() { return () => {} } } }))
+vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { cookieFiles = { setFileOwner() {}, setConfirmationHandler() {} }; extensions = { setConfirmationHandler() {} }; async initialize() {} async dispose() {} onEnvironmentApplicationChange() { return () => {} } onChange() { return () => {} } } }))
 vi.mock('../src/main/native-overlay-windows', () => ({ NativeOverlayWindows: class { resourceProcessIds() { return [] } dispose() {} } }))
 vi.mock('../../../packages/capsule/src/storage', async original => {
   const actual = await original<typeof import('../../../packages/capsule/src/storage')>()
@@ -67,7 +70,7 @@ afterEach(async () => {
   let failure: unknown
   for (const close of closes.splice(0).reverse()) try { await close() } catch (error) { failure ??= error }
   vi.restoreAllMocks(); vi.unstubAllEnvs(); bridge.nativeDocument = null; bridge.failDispatchSave = false
-  if (failure) throw failure
+  if (failure) { console.error(inspect(failure, { depth: 6 })); throw failure }
 })
 function barrier() { let release!: () => void; const promise = new Promise<void>(yes => { release = yes }); return { promise, release } }
 async function fixture() {
@@ -92,7 +95,9 @@ async function fixture() {
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], hostSignatures: new Map(), reservedHostIds: [] })
   vi.spyOn(runtime as any, 'configuredClient').mockReturnValue(h.client)
   vi.spyOn(runtime as any, 'connectedClient').mockResolvedValue(h.client)
-  const original = vi.spyOn(runtime, 'callOriginalCore').mockImplementation(async (_hostId, method, params, context) => await rpc.call(method, params, context?.caller ? { credentials: context.caller } : {}) as never)
+  const original = vi.spyOn(runtime, 'callOriginalCore').mockImplementation(async (hostId, method, params, context) => {
+    return await rpc.call(method, params, context?.caller ? { credentials: context.caller } : {}) as never
+  })
   const submit = vi.spyOn(runtime, 'submitPrompt')
   const app = Object.assign(new EventEmitter(), { id: 810, mainFrame: { framesInSubtree: [] }, isDestroyed: () => false, send: vi.fn() })
   const config = { ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: 'workspace', hostId: 'local', name: 'Original project', path: directory, kind: 'folder' as const }] }
@@ -107,7 +112,7 @@ async function fixture() {
   const spatial = new AgentMuxSpatialStateStore(join(directory, 'presentation-spatial.json'))
   let presentationPort: NonNullable<AgentMuxRpcServiceOptions['capsules']> = registered.capsules
   let observation: Record<string, unknown> = {}
-  const desktop = new AgentMuxControlServer({ socketPath: desktopPath, coreClients: h.coreClients, capsuleInput: registered.capsuleInput,
+  const desktop = new AgentMuxControlServer({ ...(nodeOwner ? registered : {}), socketPath: desktopPath, coreClients: nodeOwner ? registered.coreClients : h.coreClients, capsuleInput: registered.capsuleInput,
     capsules: { call: (method, params, context, originalContext) => presentationPort.call(method, params, context, originalContext) }, spatialState: spatial,
     execute: async request => { if (request.operation !== 'inspect.client') throw new Error('Unexpected fixture Desktop operation'); return { operation: 'inspect.client', observation } } })
   await desktop.start()
@@ -132,6 +137,27 @@ async function fixture() {
     async restartCapsuleService() { await service.close(); service = await startCapsuleRuntime({ stateDirectory, socketPath: join(directory, 'capsule.sock') }) } }
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>
+
+it('the actual registered App chrome route derives the remote owner from its Browser and preserves original drafts without Human input', async () => {
+  const h = await fixture(), remote = { hostId: 'original-remote-B', runtimeId: 'original-runtime-B' }
+  bridge.nativeDocument!.remote = remote
+  // This transport leaf points to the private real Core/Capsule owner. The separate
+  // Native journey qualifies two distinct Runtime processes and the actual fence.
+  const acquire = vi.spyOn(h.runtime, 'capsuleHost').mockImplementation(async target => {
+    expect(target).toEqual(remote)
+    return { call: async (method, params) => await h.rpc.call(method, params) as never }
+  })
+  const browserId = bridge.nativeDocument!.browserId
+  expect(await h.invoke('capsules:page', [browserId, 'capsule.interaction.ls', { capsuleId: h.page.record.capsuleId }])).toMatchObject({ interactions: [{ interactionId: h.question.interactionId }] })
+  const draft = { capsuleId: h.page.record.capsuleId, interactionId: h.question.interactionId, expectedRevision: h.question.revision,
+    operationId: 'remote-chrome-draft', draft: 'Original remote draft' }
+  expect(await h.invoke('capsules:page', [browserId, 'capsule.interaction.draft', draft])).toMatchObject({ interaction: { draft: draft.draft } })
+  expect(acquire).toHaveBeenCalled()
+  await expect(h.invoke('capsules:page', [browserId, 'capsule.interaction.reply', h.params])).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  await expect(h.invoke('capsules:page', [browserId, 'capsule.inspect', { capsuleId: h.question.interactionId }])).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  await expect(h.invoke('capsules:page', [browserId, 'capsule.interaction.ls', { capsuleId: h.page.record.capsuleId }], h.pageSender)).rejects.toThrow()
+  expect(h.submit).not.toHaveBeenCalled()
+})
 async function terminalReceipt(h: Fixture, id: string) {
   await Reflect.get(h.client, 'inputWaitingRecipients').get('recipient')?.pending
   const key = { kind: 'prompt' as const, agentSessionId: 'recipient', expectedRun: { runId: 'run-recipient' }, submissionId: id }
