@@ -17,7 +17,7 @@ let config: AppConfig
 beforeEach(() => {
   installNoteCanvasGeometry()
   config = { ...structuredClone(composerConfig), hosts: [structuredClone(composerConfig.hosts[0]!), structuredClone(remote)] }
-  useAppStore.setState({ config, sessions: [], hostChecks: {} }); onSave.mockClear()
+  useAppStore.setState({ config, sessions: [], hostChecks: {}, tailcatConnectionDrafts: {} }); onSave.mockClear()
   vi.spyOn(api.hosts, 'inspect').mockImplementation(async host => ({ routeHostId: host.id, configuration: host, tailcat: { state: 'disabled' } }) as never)
   vi.spyOn(api.hosts, 'network').mockRejectedValue(new Error('Local network not observed in this controlled connection test'))
   vi.spyOn(api.nodePublishing, 'call').mockRejectedValue(new Error('Publication identity is outside this incoming-connection test'))
@@ -34,6 +34,8 @@ async function click(text: string) {
 }
 async function fill(label: string, value: string) {
   const node = input(label)
+  const details = node.closest('details')
+  if (details && !details.open) await act(async () => details.querySelector('summary')!.click())
   await act(async () => {
     Object.getOwnPropertyDescriptor(node instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(node, value)
     node.dispatchEvent(new Event('input', { bubbles: true }))
@@ -51,10 +53,31 @@ it('the receiving Mac prepares its missing server key as a draft, focuses approv
   expect(document.activeElement).toBe(input('Tailcat allowed clients'))
   expect(onSave).not.toHaveBeenCalled()
   expect(input('Tailcat allowed clients').value).toBe('')
+  expect(dom.container.querySelector('[data-tailcat-prepare="server"] [role="status"]')?.textContent).toContain('then Save incoming connections.')
+  expect(dom.container.querySelector('[data-tailcat-prepare="server"] [role="status"]')?.textContent).not.toContain('Save hosts')
+  expect(dom.container.querySelector('.host-tailcat-status')?.textContent).not.toContain('listening')
+  expect(api.config.save).not.toHaveBeenCalled()
   await fill('Tailcat allowed clients', publicKey)
   await click('Save incoming connections')
   expect(api.config.save).toHaveBeenCalledOnce()
   expect(vi.mocked(api.config.save).mock.calls[0]![0].hosts[0]).toEqual({ ...config.hosts[0], tailcat: { keyFile: 'agentmux-server', enabled: true, allowedClients: [publicKey] } })
+})
+
+it.each([
+  ['local', 'server', 'The other MacThis Mac', 'Allow & save'],
+  ['studio', 'client', 'This MacStudio Mac', 'Save & test']
+] as const)('the %s editor explains the actual device direction and three setup steps', async (hostId, role, direction, finalStep) => {
+  await show(hostId)
+  const flow = dom.container.querySelector(`[data-tailcat-flow="${role}"]`)!
+  expect(flow).not.toBeNull()
+  expect(flow.querySelector('[aria-label="Connection direction"]')?.textContent).toBe(direction)
+  expect(flow.querySelectorAll('ol li')).toHaveLength(3)
+  expect(flow.querySelectorAll('ol li')[2]?.textContent).toContain(finalStep)
+  const key = input(role === 'server' ? 'Tailcat server key' : 'Tailcat client key')
+  expect(key.closest('details')?.open).toBe(false)
+  expect(dom.container.querySelector('[aria-label="Private Tailcat address"]')).toBeNull()
+  expect(onSave).not.toHaveBeenCalled()
+  expect(api.config.save).not.toHaveBeenCalled()
 })
 
 it('the sending Mac reuses its chosen key, copies only the public code, and keeps the private destination and Runtime binding', async () => {
@@ -62,7 +85,7 @@ it('the sending Mac reuses its chosen key, copies only the public code, and keep
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   await show()
   await fill('Tailcat client key', 'studio.client')
-  await click('Use this Mac’s key')
+  await click('Get this Mac’s code')
   expect(prepare).toHaveBeenCalledExactlyOnceWith({ role: 'client', key: 'studio.client' })
   expect(input('This Mac’s connection code').readOnly).toBe(true)
   expect(input('This Mac’s connection code').value).toBe(publicKey)
@@ -80,13 +103,13 @@ it('an empty client field uses the Host default while a later destination edit s
   const prepare = vi.spyOn(api.hosts, 'prepareTailcatKey').mockImplementationOnce(() => new Promise(done => { finish = done })).mockResolvedValue(prepared('client'))
   await show()
   await fill('Tailcat client key', '')
-  await click('Use this Mac’s key')
+  await click('Get this Mac’s code')
   await fill('Tailcat address', 'tc-new-private-address')
   await act(async () => finish(prepared('client')))
   expect(input('Tailcat address').value).toBe('tc-new-private-address')
   expect(input('Tailcat client key').value).toBe('')
   expect(dom.container.textContent).toContain('Your later draft edits were kept')
-  await click('Use this Mac’s key')
+  await click('Get this Mac’s code')
   expect(input('Tailcat client key').value).toBe('agentmux-client')
   expect(input('Tailcat address').value).toBe('tc-new-private-address')
   expect(prepare).toHaveBeenCalledTimes(2)
@@ -112,11 +135,11 @@ it('missing CLI and copy failures stay local and retryable without clearing cust
   config.hosts[1] = { ...remote, tailcat: { ...remote.tailcat!, keyFile: 'custom-client' } }
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockRejectedValue(new Error('Clipboard unavailable'))
   await show()
-  await click('Use this Mac’s key')
+  await click('Get this Mac’s code')
   expect(dom.container.querySelector('[role="alert"]')?.textContent).toContain('Install the official Tailcat CLI')
   expect(input('Tailcat client key').value).toBe('custom-client')
   expect(input('Tailcat address').value).toBe(remote.tailcat!.address)
-  await click('Use this Mac’s key')
+  await click('Get this Mac’s code')
   expect(prepare).toHaveBeenCalledTimes(2)
   await click('Copy code')
   expect(copy).toHaveBeenCalledExactlyOnceWith(publicKey)

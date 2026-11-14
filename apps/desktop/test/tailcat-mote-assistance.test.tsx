@@ -40,7 +40,7 @@ beforeEach(() => {
   const tab = addWorkbenchRegion(original, 'main-region', 'right', { regionId: 'member-region', kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: 'member-ui' })
   const main = composerSession('main-ui'); main.control.agentSessionId = 'core-main'
   useLauncherState.setState({ drafts: {}, moteTopicId: null, persistenceIssue: null })
-  useAppStore.setState({ config, tabs: { 'mote-tab': { ...tab, layout: { ...tab.layout, activeRegionId: 'member-region' } } },
+  useAppStore.setState({ config, tailcatConnectionDrafts: {}, tabs: { 'mote-tab': { ...tab, layout: { ...tab.layout, activeRegionId: 'member-region' } } },
     layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('mote-group', ['mote-tab']) }, sessions: [main, composerSession('member-ui')],
     scratchTopicSnapshots: { [SCRATCH_WORKSPACE_ID]: { scope: JSON.stringify([scratch.hostId, scratch.path]), revision: 0, reading: false, error: null, topics: [leader, second] } },
     spaceZoneBindings: {}, hostChecks: {}, agentSteerQueues: {}, agentComposerDrafts: { 'main-ui': 'Keep Main draft', 'member-ui': 'Keep member draft' },
@@ -91,11 +91,11 @@ it.each([
   const failure = Object.assign(new Error('TAILCAT_CLI_MISSING raw-private-canary'), code ? { code } : {})
   vi.spyOn(api.hosts, 'prepareTailcatKey').mockRejectedValue(failure)
   await show()
-  await button('Use this Mac’s key')
+  await button('Get this Mac’s code')
   expect(dom.container.querySelector('[role="alert"]')?.textContent).toContain(title)
   expect(dom.container.textContent).not.toContain('raw-private-canary')
   expect(useAppStore.getState().config?.hosts.find(h => h.id === 'studio')).toEqual(remote)
-  expect([...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === 'Use this Mac’s key')?.disabled).toBe(false)
+  expect([...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === 'Get this Mac’s code')?.disabled).toBe(false)
   await button('Ask Mote to handle setup')
   const task = useAppStore.getState().agentSteerQueues['main-ui']![0]!.text
   expect(task).toContain('"step": "prepare-key"')
