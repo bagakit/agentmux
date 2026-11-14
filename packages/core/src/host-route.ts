@@ -34,7 +34,7 @@ export const HOST_ROUTE_CALLS = [
   'route.edges', 'route.edge.inspect', 'route.choices', 'route.executors',
   'runtime.owner.identity', 'runtime.bootstrap', 'runtime.invoke', 'runtime.release-consumer',
   'agent.open', 'agent.open.describe', 'space.ls', 'space.inspect', 'space.apply',
-  'space.member.call',
+  'space.member.call', 'space.member.name.inspect', 'space.member.name.change', 'agent.name.inspect', 'agent.name.change',
   'agent.execution.create', 'agent.execution.binding', 'agent.execution.continue', 'agent.execution.rejoin',
 ] as const
 export const HOST_ROUTE_STREAMS = [
@@ -90,14 +90,16 @@ export type HostRouteReadOperation = { kind: 'space-reader'; runtimeId: string; 
 export type HostRouteObservationScope = { kind: 'observation'; targetRuntimeId: string; agentSessionIds: string[]; source: HostRouteReadOperation }
 /** A safe projection of one exact current-viewer call, not a creator's input grant. */
 export type HostRouteMemberOperation = { kind: 'space-member'; runtimeId: string; spaceId: string; regionId: string; targetRuntimeId: string; agentSessionId: string; runId: string; method: string; paramsDigest: string; expectedAdmission?: SpaceMemberAdmission }
+export type HostRouteMemberNameOperation = { kind: 'space-member-name'; runtimeId: string; spaceId: string; regionId: string; targetRuntimeId: string; agentSessionId: string; expectedAdmission: SpaceMemberAdmission; object: 'agent' | 'tab'; method: 'agent.name.inspect' | 'agent.name.change'; paramsDigest: string }
+export type HostRouteMemberNameScope = { kind: 'member-name'; operation: HostRouteMemberNameOperation }
 export type HostRouteMemberScope = { kind: 'member-control'; operation: HostRouteMemberOperation; createOperationId: string }
 export type HostRouteExecutorOperation = { kind: 'executor-reader'; routeId: string; adoptedRoute: AdoptedHostRoute; targetRuntimeId: string; executorId?: string; refresh: boolean }
 export type HostRouteInventoryScope = { kind: 'executor-inventory'; operation: HostRouteExecutorOperation }
-export type HostRouteOperation = HostRouteExecutionScope | HostRouteSpatialOperation | HostRouteReadOperation | HostRouteMemberOperation | HostRouteExecutorOperation
+export type HostRouteOperation = HostRouteExecutionScope | HostRouteSpatialOperation | HostRouteReadOperation | HostRouteMemberOperation | HostRouteMemberNameOperation | HostRouteExecutorOperation
 export type HostRouteExecutionAuthorization = {
   schema: 'agentmux.host-route-execution.v1'; purpose: 'host-route-execution'
   coordinator: HostRouteIdentity; actor: HostRouteActor
-  scope: HostRouteExecutionScope | HostRoutePreparationScope | HostRouteObservationScope | HostRouteMemberScope | HostRouteInventoryScope
+  scope: HostRouteExecutionScope | HostRoutePreparationScope | HostRouteObservationScope | HostRouteMemberScope | HostRouteMemberNameScope | HostRouteInventoryScope
   /** The original signed A parent. It cannot contain another derived child. */
   parent?: HostRouteEnvelope
   signature: string
@@ -213,6 +215,14 @@ export function parseHostRouteOperation(value: unknown): HostRouteOperation {
     if (p.targetRuntimeId !== operation.targetRuntimeId) invalid('The executor read names another adopted target.')
     return operation
   }
+  if (kind === 'space-member-name') {
+    const p = rpcRecord(value, ['kind', 'runtimeId', 'spaceId', 'regionId', 'targetRuntimeId', 'agentSessionId', 'expectedAdmission', 'object', 'method', 'paramsDigest'])
+    const { object, method } = p
+    if (object !== 'agent' && object !== 'tab' || method !== 'agent.name.inspect' && method !== 'agent.name.change') invalid('Use the original finite member name operation.')
+    return { kind, runtimeId: originalString(p.runtimeId, 'Original Source Runtime'), spaceId: originalString(p.spaceId, 'Original Space'), regionId: originalString(p.regionId, 'Original Region'),
+      targetRuntimeId: originalString(p.targetRuntimeId, 'Original name Runtime'), agentSessionId: originalString(p.agentSessionId, 'Original Agent Session'),
+      expectedAdmission: parseSpaceMemberAdmission(p.expectedAdmission), object: object as 'agent' | 'tab', method: method as 'agent.name.inspect' | 'agent.name.change', paramsDigest: originalString(p.paramsDigest, 'Original name parameters digest') }
+  }
   if (kind === 'space-member') {
     const fields = ['runtimeId','spaceId','regionId','targetRuntimeId','agentSessionId','runId','method','paramsDigest'] as const
     const p = rpcRecord(value, ['kind',...fields,'expectedAdmission'])
@@ -255,6 +265,10 @@ export function parseHostRouteExecutionAuthorization(value: unknown): HostRouteE
     const s = rpcRecord(p.scope, ['kind','operation']), operation = parseHostRouteOperation(s.operation)
     if (operation.kind !== 'executor-reader') invalid('An inventory child needs the exact original executor read.')
     scope = { kind: 'executor-inventory', operation: operation as HostRouteExecutorOperation }
+  } else if (rpcRecord(p.scope).kind === 'member-name') {
+    const s = rpcRecord(p.scope, ['kind', 'operation']), operation = parseHostRouteOperation(s.operation)
+    if (operation.kind !== 'space-member-name' || operation.object !== 'agent') invalid('A member name child needs its exact original Agent name operation.')
+    scope = { kind: 'member-name', operation: operation as HostRouteMemberNameOperation }
   } else if (rpcRecord(p.scope).kind === 'member-control') {
     const s = rpcRecord(p.scope, ['kind','operation','createOperationId']), operation = parseHostRouteOperation(s.operation)
     if (operation.kind !== 'space-member') invalid('A member control needs its exact original member operation.')
@@ -270,7 +284,7 @@ export function parseHostRouteExecutionAuthorization(value: unknown): HostRouteE
     const s = rpcRecord(p.scope, ['kind','targetRuntimeId','createOperationId','executorId'])
     scope = { kind: 'preparation', targetRuntimeId: rpcString(s.targetRuntimeId, 'Original target Runtime'), createOperationId: originalString(s.createOperationId, 'Original CID'), executorId: originalString(s.executorId, 'Original Executor') }
   } else scope = parseHostRouteOperation(p.scope) as HostRouteExecutionScope
-  if (scope.kind !== 'execution' && scope.kind !== 'preparation' && scope.kind !== 'observation' && scope.kind !== 'member-control' && scope.kind !== 'executor-inventory') invalid('This execution authorization has another scope.')
+  if (scope.kind !== 'execution' && scope.kind !== 'preparation' && scope.kind !== 'observation' && scope.kind !== 'member-control' && scope.kind !== 'member-name' && scope.kind !== 'executor-inventory') invalid('This execution authorization has another scope.')
   return { schema: 'agentmux.host-route-execution.v1', purpose: 'host-route-execution', coordinator: parseHostRouteIdentity(p.coordinator), actor: parseHostRouteActor(p.actor), scope,
     ...(p.parent === undefined ? {} : { parent: parseHostRouteEnvelope(p.parent, true) }), signature: rpcString(p.signature, 'Original coordinator signature') }
 }

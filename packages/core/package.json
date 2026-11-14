@@ -470,6 +470,14 @@
       "types": "./dist/space-folder.d.ts",
       "import": "./dist/space-folder.js"
     },
+    "./name-control": {
+      "types": "./dist/name-control.d.ts",
+      "import": "./dist/name-control.js"
+    },
+    "./name-control-client": {
+      "types": "./dist/name-control-client.d.ts",
+      "import": "./dist/name-control-client.js"
+    },
     "./space-member": {
       "types": "./dist/space-member.d.ts",
       "import": "./dist/space-member.js"

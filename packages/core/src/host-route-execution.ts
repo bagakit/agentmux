@@ -1,3 +1,4 @@
+import { parseNameControlParams, memberAgentNameInput } from './name-control.js'
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { AgentMuxError } from './errors.js'
@@ -9,7 +10,7 @@ import { rpcRecord, rpcString } from './rpc-data.js'
 import { assertSpaceMemberCall, parseSpaceMemberParams } from './space-member-codec.js'
 import type { SpaceMemberParams } from './space-member.js'
 import type { AgentExecutionOpenInput } from './agent-execution-coordinator.js'
-import type { HostRouteCall, HostRouteExecutionScope, HostRouteOperation, HostRouteExecutionAuthorization, HostRouteStatement, HostRouteMemberOperation } from './host-route.js'
+import type { HostRouteCall, HostRouteExecutionScope, HostRouteOperation, HostRouteExecutionAuthorization, HostRouteStatement, HostRouteMemberOperation, HostRouteMemberNameOperation } from './host-route.js'
 import { hostRouteExecutorOperation } from './host-route.js'
 import { parseAgentOpenLaunchFields } from './agent-open-contract.js'
 
@@ -33,8 +34,20 @@ export function memberRouteOperation(input: SpaceMemberParams[keyof SpaceMemberP
     targetRuntimeId: target.runtimeId, agentSessionId: target.agentSessionId, runId: target.expectedRun.runId, method: call.method, paramsDigest: digest(call.params),
     ...(target.expectedAdmission ? { expectedAdmission: target.expectedAdmission } : {}) }
 }
+export function memberNameRouteOperation(method: 'space.member.name.inspect' | 'space.member.name.change', input: unknown): HostRouteMemberNameOperation {
+  const parsed = parseNameControlParams(method, input), target = parsed.target
+  return { kind: 'space-member-name', runtimeId: target.reference.runtimeId, spaceId: target.reference.spaceId, regionId: target.regionId,
+    targetRuntimeId: target.runtimeId, agentSessionId: target.agentSessionId, expectedAdmission: target.expectedAdmission, object: parsed.object,
+    method: method === 'space.member.name.change' ? 'agent.name.change' : 'agent.name.inspect', paramsDigest: digest(parsed.object === 'agent' ? memberAgentNameInput(parsed) : parsed) }
+}
 /** Project only the original schema owner's parsed selectors, never the input text. */
 export function hostRouteOperation(call: HostRouteCall): HostRouteOperation | undefined {
+  if (call.method === 'space.member.name.inspect' || call.method === 'space.member.name.change') {
+    const input = parseNameControlParams(call.method, call.params)
+    // A Source Tab never delegates to the execution Core. Its exact original
+    // method/parameters are already protected by the signed parent envelope.
+    return input.object === 'agent' ? memberNameRouteOperation(call.method, input) : undefined
+  }
   if (call.method === 'route.executors') return hostRouteExecutorOperation(call.params)
   if (call.method === 'space.member.call' || call.method === 'space.member.watch') return memberRouteOperation(parseSpaceMemberParams(call.method, call.params))
   if (call.method === 'agent.execution.create') return executionRouteScope(parseAgentExecutionCreate(call.params))
@@ -59,7 +72,7 @@ export function hostRouteOperation(call: HostRouteCall): HostRouteOperation | un
 export function assertExecutionParent(authorization: HostRouteExecutionAuthorization): void {
   const { parent, actor, coordinator, scope } = authorization
   if (scope.kind === 'executor-inventory' && !isDeepStrictEqual(scope.operation.adoptedRoute.source, coordinator)) deny()
-  if (scope.kind === 'member-control' && scope.operation.runtimeId !== coordinator.runtimeId) deny()
+  if ((scope.kind === 'member-control' || scope.kind === 'member-name') && scope.operation.runtimeId !== coordinator.runtimeId) deny()
   if (!parent) { if (!isDeepStrictEqual(actor.source, coordinator)) deny(); return }
   const root = parent.statement
   if (root.authorization || !isDeepStrictEqual(root.actor, actor) || !isDeepStrictEqual(root.route.hops.at(-1)!.target, coordinator) || parent.endorsements.length !== root.route.hops.length) deny()
@@ -69,7 +82,7 @@ export function assertExecutionParent(authorization: HostRouteExecutionAuthoriza
     if (!isDeepStrictEqual(operation, scope.operation)) deny()
     return
   }
-  if (scope.kind === 'member-control') {
+  if (scope.kind === 'member-control' || scope.kind === 'member-name') {
     if (!isDeepStrictEqual(operation, scope.operation)) deny()
     return
   }
@@ -106,6 +119,13 @@ export function assertExecutionChild(statement: HostRouteStatement, call: HostRo
     const invocation = rpcRecord(decodeHostedValue(call.params.invocation), ['method','args'])
     if (invocation.method !== 'listHostExecutors' || !Array.isArray(invocation.args) || invocation.args.length !== 1 ||
         !isDeepStrictEqual(invocation.args[0], { refresh: operation.refresh, ...(operation.executorId === undefined ? {} : { executorId: operation.executorId }) })) deny()
+    return
+  }
+  if (scope.kind === 'member-name') {
+    const operation = scope.operation
+    if (stream || operation.object !== 'agent' || destination !== operation.targetRuntimeId || call.method !== operation.method || digest(call.params) !== operation.paramsDigest) deny()
+    const input = parseNameControlParams(operation.method, call.params)
+    if (input.runtimeId !== operation.targetRuntimeId || input.agentSessionId !== operation.agentSessionId || operation.expectedAdmission.kind !== 'creation' || input.createOperationId !== operation.expectedAdmission.operationId) deny()
     return
   }
   if (scope.kind === 'member-control') {

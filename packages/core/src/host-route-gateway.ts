@@ -1,3 +1,4 @@
+import { parseNameControlParams, type NameControlParams } from './name-control.js'
 import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { isDeepStrictEqual } from 'node:util'
@@ -8,7 +9,7 @@ import { parseHostRouteConfiguration, parseHostRouteCall, parseHostRouteEnvelope
   type AdoptedHostRoute, type HostRouteActor, type HostRouteCall, type HostRouteEnvelope, type HostRouteSettings,
   type HostRouteObservationScope, type HostRouteExecutionAuthorization, type HostRouteStatement, type HostRouteParams, type HostRouteObservation, type HostRouteIdentity, type HostRouteStreamInitial, type HostRouteConfiguration, type HostRouteEdge, type HostRouteEdges, type HostRouteEdgeInspection,
   type HostRouteChoices, type HostRouteExecutors, type HostRouteAgentTarget, type HostRouteDefinition } from './host-route.js'
-import { hostRouteOperation, executionRouteScope, memberRouteOperation, assertExecutionChild } from './host-route-execution.js'
+import { hostRouteOperation, executionRouteScope, memberRouteOperation, memberNameRouteOperation, assertExecutionChild } from './host-route-execution.js'
 import { parseSpaceMemberParams } from './space-member-codec.js'
 import type { SpaceMemberParams } from './space-member.js'
 import type { AgentExecutionOpenInput } from './agent-execution-coordinator.js'
@@ -30,6 +31,13 @@ export function delegatedHostRouteActor(context: AgentMuxRpcCallContext): HostRo
   const authority = verified.get(context.routeDelegation)
   if (!authority) throw new AgentMuxError('Unverified in-process route authority.', 'HOST_ROUTE_AUTHORITY_INVALID')
   return authority.actor
+}
+/** Safe original Source provenance from a verified name child, never from business JSON. */
+export function delegatedHostRouteMemberName(context: AgentMuxRpcCallContext): import('./host-route.js').HostRouteMemberNameOperation | undefined {
+  if (!context.routeDelegation) return undefined
+  delegatedHostRouteActor(context)
+  const scope = verified.get(context.routeDelegation)!.envelope.statement.authorization?.scope
+  return scope?.kind === 'member-name' ? structuredClone(scope.operation) : undefined
 }
 export async function assertHostRouteDispatch(context: AgentMuxRpcCallContext, method: string, params: unknown, stream: boolean): Promise<void> {
   if (!context.routeDelegation) return
@@ -320,6 +328,13 @@ export class HostRouteGateway {
     if (parsed.target.reference.runtimeId !== identity.runtimeId) denied('This Core does not own the original member Space.', 'HOST_ROUTE_TARGET_MISMATCH')
     return await this.options.authority.attestHostRouteExecution({ schema: 'agentmux.host-route-execution.v1', purpose: 'host-route-execution', ...await this.origin(context),
       scope: { kind: 'member-control', operation: memberRouteOperation(parsed), createOperationId: rpcString(input.createOperationId, 'Original member creation operation') } })
+  }
+  /** A current viewer's original name parent authorizes exactly one local label method, never IO or creator control. */
+  async authorizeMemberName(input: { method: 'space.member.name.inspect' | 'space.member.name.change'; input: NameControlParams['space.member.name.inspect'] | NameControlParams['space.member.name.change'] }, context: AgentMuxRpcCallContext): Promise<HostRouteExecutionAuthorization> {
+    const identity = await this.identity(), parsed = parseNameControlParams(input.method, input.input)
+    if (parsed.target.reference.runtimeId !== identity.runtimeId || parsed.object !== 'agent') denied('This Core does not own the original Source Agent name request.', 'HOST_ROUTE_TARGET_MISMATCH')
+    return await this.options.authority.attestHostRouteExecution({ schema: 'agentmux.host-route-execution.v1', purpose: 'host-route-execution', ...await this.origin(context),
+      scope: { kind: 'member-name', operation: memberNameRouteOperation(input.method, parsed) } })
   }
   /** Internal typed child port. No RPC accepts an authorization or actor from business JSON. */
   private async derived(input: HostRouteParams['route.call'], context: AgentMuxRpcCallContext, stream: boolean,

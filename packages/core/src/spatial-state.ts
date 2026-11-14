@@ -496,12 +496,15 @@ export class AgentMuxSpatialStateStore {
     return records.filter(record => !target || nameTargetKey(record.target) === nameTargetKey(target)).slice(-limit);
   }
   /** Explicitly confirm the current document; never replay the original name edit. */
-  async confirmNameCommit(operationId: string): Promise<AgentMuxSpatialState> {
+  async confirmNameCommit(operationId: string, expectedTarget?: AgentMuxNameTarget, assertCurrent?: () => void | Promise<void>): Promise<AgentMuxSpatialState> {
     return this.locked(async () => {
+      await assertCurrent?.();
       const current = await this.requiredState();
       const document = displayLabelDocument(current.graph), record = document.records.find(record => record.id === operationId);
       if (!record)
         throw new AgentMuxError('The original name operation is unobserved. Keep the current name and inspect its owner.', 'NAME_INTENT_ABSENT');
+      if (expectedTarget && nameTargetKey(record.target) !== nameTargetKey(expectedTarget))
+        throw new AgentMuxError('The original name operation belongs to another exact target.', 'NAME_OPERATION_CONFLICT');
       if (!Object.hasOwn(document.labels, nameTargetKey(record.target)))
         throw new AgentMuxError('This name belongs to another owner. Confirm its actual data at that owner; this document only holds its audit record.', 'NAME_CONFIRM_OWNER_MISMATCH');
       return projectSpatialState(await this.writeLocked(current, current.graph, { operationId, target: record.target,
@@ -518,13 +521,28 @@ export class AgentMuxSpatialStateStore {
     const page = records.slice(cursor + 1, cursor + 1 + limit);
     return { records: page, nextCursor: cursor + 1 + page.length < records.length ? page.at(-1)!.id : null };
   }
+  /** One exact label/operation read. ENOENT is absence; unreadable bytes remain an error. */
+  async readDisplayLabel(target: AgentMuxNameTarget, operationId?: string): Promise<{ label: import('./display-label.js').AgentMuxDisplayLabel | null; value: string | null; record: AgentMuxNameChangeRecord | null }> {
+    const current = await this.read();
+    if (!current) return { label: null, value: null, record: null };
+    const document = displayLabelDocument(current.graph), label = document.labels[nameTargetKey(target)] ?? null;
+    const record = operationId === undefined ? null : document.records.find(record => record.id === operationId) ?? null;
+    if (record && nameTargetKey(record.target) !== nameTargetKey(target)) throw new AgentMuxError('The original name operation belongs to another target.', 'NAME_OPERATION_CONFLICT');
+    const tab = target.kind === 'tab' ? current.graph.tabs.find(tab => tab.tabId === target.id) : undefined;
+    return { label, value: label?.value ?? tab?.name ?? null, record };
+  }
   /** Label and history are one durable write under the same cross-process lock. */
-  async mutateDisplayLabel(input: AgentMuxDisplayLabelMutation, context: AgentMuxNameContext): Promise<AgentMuxDisplayLabelResult> {
+  async mutateDisplayLabel(input: AgentMuxDisplayLabelMutation, context: AgentMuxNameContext, options: { initializeAgentLabel?: true; assertCurrent?: () => void | Promise<void> } = {}): Promise<AgentMuxDisplayLabelResult> {
     if (!Number.isSafeInteger(input.expectedNameRevision) || input.expectedNameRevision < 0 ||
         !['manual', 'launch', 'derived'].includes(input.source)) invalid('An exact name revision and writer source are required.');
     validateNameIntent({ operationId: input.operationId, target: input.target, before: null, requested: input.value, context });
     return this.locked(async () => {
-      const current = await this.requiredState(), graph = structuredClone(current.graph), document = displayLabelDocument(graph);
+      const stored = await this.read();
+      if (!stored && !(options.initializeAgentLabel && input.target.kind === 'agent-session'))
+        throw new AgentMuxError('The original spatial document is not ready. Keep original names and retry after restoring storage.', 'SPATIAL_STATE_ABSENT');
+      await options.assertCurrent?.();
+      const current = stored ?? { schemaVersion: 1 as const, revision: 0, graph: parseAgentMuxSpatialGraph({ spaces: [], zones: [], tabs: [], regions: [], bindings: [], layouts: {}, tabLayouts: {}, resources: {} }) };
+      const graph = structuredClone(current.graph), document = displayLabelDocument(graph);
       const key = nameTargetKey(input.target), label = document.labels[key] ?? null;
       const tab = input.target.kind === 'tab' ? graph.tabs.find(tab => tab.tabId === input.target.id) : null;
       if (input.target.kind === 'tab' && !tab) throw new AgentMuxError('The exact Tab is unobserved; original names are retained.', 'NAME_TARGET_UNAVAILABLE');
@@ -555,7 +573,7 @@ export class AgentMuxSpatialStateStore {
       }
       setDisplayLabelDocument(graph, document);
       let state: AgentMuxSpatialState, diskDurability: 'confirmed' | 'unconfirmed' = 'confirmed', issue: string | null = null;
-      try { state = await this.writeLocked(current, graph, { operationId: record.id, target: record.target,
+      try { state = await this.writeLocked(stored, graph, { operationId: record.id, target: record.target,
         applied: !rejected, diskDurability: 'confirmed', issue: null }); }
       catch (error) {
         if (!(error instanceof DurableWriteError) || error.path !== this.path || error.phase !== 'after-replace') throw error;

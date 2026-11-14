@@ -1,3 +1,5 @@
+import { isNameControlMethod, parseNameControlParams, parseNameControlResult, type NameControlParams } from './name-control.js'
+import { inspectOwnedName, changeOwnedName, sourceMemberName } from './name-control-owner.js'
 import { AGENT_OPEN_LAUNCH_FIELDS, parseAgentOpenDescribe, parseAgentOpenDescription } from './agent-open-contract.js'
 import { parseTerminalCreationRetire, parseTerminalCreationInspect, parseTerminalCreationInspection } from './terminal-creation.js'
 import { avatarActorIdentity, isObjectAvatarMethod, parseObjectAvatarParams, parseObjectAvatarResult, parseAvatarActor, type AvatarExecutionContext, type ObjectAvatarMethod, type ObjectAvatarPort } from './object-avatar.js'
@@ -11,7 +13,7 @@ import { parseProviderCatalogQuery, parseProviderCatalogObservation, type Provid
 import { parseSpaceMemberParams } from './space-member-codec.js'
 import { spaceMemberRuntime } from './space-member-runtime.js'
 import { HOST_ROUTE_METHODS, parseHostRouteParams } from './host-route.js'
-import { assertHostRouteDispatch, delegatedHostRouteActor, hostRouteActorScope, type HostRouteGateway, type VerifiedHostRouteDelegation } from './host-route-gateway.js'
+import { assertHostRouteDispatch, delegatedHostRouteActor, delegatedHostRouteMemberName, hostRouteActorScope, type HostRouteGateway, type VerifiedHostRouteDelegation } from './host-route-gateway.js'
 import { parseFolderSpaceRegisterInput, parseFolderDirectoryInspectInput, folderResourceIdentity, type FolderSpaceResource } from './space-folder.js'
 import { observeSpaceSessions } from './space-session-owner.js'
 import { readSpaceSessionSources } from './space-session-sources.js'
@@ -407,6 +409,8 @@ export function boundedFileShareUndoResult(parsed: import('./public-rpc-file-sha
   return { ...parsed, destination: compact(parsed.destination), collections: parsed.collections.map(item => ({ ...item, source: compact(item.source) })) }
 }
 const NATIVE_FIELDS = {
+  'space.member.name.inspect': ['target', 'object', 'operationId'], 'space.member.name.change': ['target', 'object', 'change'],
+  'agent.name.inspect': ['runtimeId', 'agentSessionId', 'createOperationId', 'operationId'], 'agent.name.change': ['runtimeId', 'agentSessionId', 'createOperationId', 'change'],
   'space.close.ls': ['limit', 'cursor'],
   'space.close.prepare': ['operationId', 'target', 'keepAgentSessions'], 'space.close.apply': ['operationId', 'expectedPlanDigest', 'decisions'], 'space.close.inspect': ['operationId'],
   'app.capture': ['target'], 'app.record.start': ['operationId', 'target', 'durationMs', 'fps'],
@@ -802,6 +806,23 @@ export class AgentMuxRpcService {
     const { assertCurrent: _localRestriction, retainAcceptedInputAuthority: _localIntake, ...forwarded } = context
     return forwarded
   }
+  private async localAgentName(method: 'agent.name.inspect' | 'agent.name.change', input: NameControlParams['agent.name.inspect'] | NameControlParams['agent.name.change'],
+    context: AgentMuxRpcCallContext, nameContext: (target: import('./display-label.js').AgentMuxNameTarget) => AgentMuxNameContext) {
+    const locals = (await this.clients()).filter(item => item.hostId === 'local')
+    if (locals.length !== 1) throw new AgentMuxError('The exact local label owner is unavailable or ambiguous.', 'NAME_OWNER_UNAVAILABLE')
+    const target = { kind: 'agent-session', id: input.agentSessionId }
+    const current = async () => {
+      context.signal?.throwIfAborted(); await context.assertCurrent?.()
+      const session = await locals[0]!.client.readAgentSession(input.agentSessionId)
+      if (!session || session.agentSessionId !== input.agentSessionId || session.hostId !== 'local' || session.creation?.createOperationId !== input.createOperationId) throw new AgentMuxError(
+        'The original local Session creation is unconfirmed. Keep its exact name operation; no same-SID identity was substituted.', 'NAME_TARGET_UNCONFIRMED')
+      if (context.caller && context.caller.agentSessionId !== input.agentSessionId) throw new AgentMuxError('A managed name call stays with its original authenticated Session.', 'CONTROL_PERMISSION_DENIED')
+    }
+    await current()
+    return method === 'agent.name.change' && 'change' in input
+      ? await changeOwnedName(this.spatial, input.runtimeId, target, input.change, nameContext(target), current)
+      : await inspectOwnedName(this.spatial, input.runtimeId, target, 'operationId' in input ? input.operationId : undefined)
+  }
   private async execute(request: AgentMuxControlRequest, context?: AgentMuxNameContext, executionContext?: AgentMuxRpcCallContext): Promise<AgentMuxControlResult> {
     if (request.operation === 'resume' && !request.text.trim()) {
       const selected = await this.owner(request.target.kind === 'agent-session' ? request.target.agentSessionId : request.caller!.agentSessionId)
@@ -884,6 +905,37 @@ export class AgentMuxRpcService {
       }
       if (method === 'route.watch' || method === 'route.receive-watch') throw new AgentMuxError('Use the original route subscription transport.', 'INVALID_CONTROL_REQUEST')
       return await routes.call(input as import('./host-route.js').HostRouteParams['route.call'] | import('./host-route.js').HostRouteParams['route.receive'], context, method === 'route.receive') as AgentMuxRpcResult<M>
+    }
+    if (isNameControlMethod(method)) {
+      const input = parseNameControlParams(method, params), caller = await this.authenticated(context, true)
+      if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError('Name operations require the original authenticated actor.', 'CONTROL_PERMISSION_DENIED')
+      context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+      if (this.ports.callOriginalCore) {
+        if (method === 'agent.name.inspect') return await this.ports.callOriginalCore('local', 'agent.name.inspect', parseNameControlParams('agent.name.inspect', params), context) as AgentMuxRpcResult<M>
+        if (method === 'agent.name.change') return await this.ports.callOriginalCore('local', 'agent.name.change', parseNameControlParams('agent.name.change', params), context) as AgentMuxRpcResult<M>
+        if (method === 'space.member.name.inspect') return await this.ports.callOriginalCore('local', 'space.member.name.inspect', parseNameControlParams('space.member.name.inspect', params), context) as AgentMuxRpcResult<M>
+        return await this.ports.callOriginalCore('local', 'space.member.name.change', parseNameControlParams('space.member.name.change', params), context) as AgentMuxRpcResult<M>
+      }
+      const endpoint = await this.ports.hostedRuntime?.()
+      if (!endpoint) throw new AgentMuxError('The original label Runtime is unconfirmed. Current work and name input remain available.', 'NAME_OWNER_UNAVAILABLE')
+      const expectedRuntimeId = 'target' in input ? input.target.reference.runtimeId : input.runtimeId
+      const { owner } = await endpoint.call('runtime.owner.identity', { expectedRuntimeId }, context)
+      if (owner.runtimeId !== expectedRuntimeId) throw new AgentMuxError('The name belongs to another original Runtime.', 'RUNTIME_OWNER_MISMATCH')
+      const delegated = delegatedHostRouteActor(context), nameParent = delegatedHostRouteMemberName(context), actor = caller ? { kind: 'agent' as const, id: caller.agentSessionId, verified: true }
+        : { kind: (delegated ?? context.principal!).kind, id: (delegated ?? context.principal!).id, verified: true }
+      const nameContext = (target: import('./display-label.js').AgentMuxNameTarget): AgentMuxNameContext => ({ actor,
+        source: 'change' in input && input.change.kind === 'rename' ? input.change.source : 'explicit-confirm', entryPoint: method,
+        transport: context.transport ?? null, location: { targetKind: target.kind, targetId: target.id, runtimeId: expectedRuntimeId,
+          actorSourceRuntimeId: delegated?.source.runtimeId ?? expectedRuntimeId,
+          ...(nameParent ? { sourceRuntimeId: nameParent.runtimeId, spaceId: nameParent.spaceId, regionId: nameParent.regionId, admissionKind: nameParent.expectedAdmission.kind, admissionOperationId: nameParent.expectedAdmission.operationId } : {}),
+          ...('target' in input ? { sourceRuntimeId: input.target.reference.runtimeId, spaceId: input.target.reference.spaceId, regionId: input.target.regionId,
+            admissionKind: input.target.expectedAdmission.kind, admissionOperationId: input.target.expectedAdmission.operationId }
+            : { createOperationId: input.createOperationId }) } })
+      const result = 'target' in input ? await sourceMemberName({ store: this.spatial, ...(this.ports.hostRoutes ? { gateway: this.ports.hostRoutes } : {}), clients: () => this.clients(),
+        local: (leaf, request, original) => this.localAgentName(leaf, request, original, nameContext), nameContext },
+        method as 'space.member.name.inspect' | 'space.member.name.change', input, context)
+        : await this.localAgentName(method as 'agent.name.inspect' | 'agent.name.change', input, context, nameContext)
+      return parseNameControlResult(method, result, input) as AgentMuxRpcResult<M>
     }
     if (method === 'agent.open.describe') {
       const input = parseAgentOpenDescribe(params)

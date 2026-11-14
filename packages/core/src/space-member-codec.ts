@@ -1,17 +1,16 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord, rpcString } from './rpc-data.js'
-import { parseSpaceAuthorityRef } from './space-authority.js'
 import { decodeHostedValue } from './hosted-value.js'
 import { AGENTMUX_HOSTED_RPC_FIELDS } from './hosted-client-contract.js'
-import { SPACE_MEMBER_CALLS, SPACE_MEMBER_STREAMS, SPACE_MEMBER_INVOCATIONS, parseSpaceMemberAdmission, type SpaceMemberTarget, type SpaceMemberParams } from './space-member.js'
+import { parseSpaceMemberIdentity, SPACE_MEMBER_CALLS, SPACE_MEMBER_STREAMS, SPACE_MEMBER_INVOCATIONS, parseSpaceMemberAdmission, type SpaceMemberTarget, type SpaceMemberParams } from './space-member.js'
 import { validateAgentInputWaitRef } from './agent-input-wait.js'
 
 function mismatch(): never { throw new AgentMuxError('This operation does not identify the original Space member and Run. Its Session and other controls are retained.', 'SPACE_MEMBER_TARGET_MISMATCH') }
+export { parseSpaceMemberIdentity } from './space-member.js'
 export function parseSpaceMemberTarget(value: unknown): SpaceMemberTarget {
-  const p = rpcRecord(value, ['reference', 'regionId', 'runtimeId', 'agentSessionId', 'expectedRun', 'expectedAdmission']), run = rpcRecord(p.expectedRun, ['runId'])
-  return { reference: parseSpaceAuthorityRef(p.reference), regionId: rpcString(p.regionId, 'Original Region'), runtimeId: rpcString(p.runtimeId, 'Original execution Runtime'),
-    agentSessionId: rpcString(p.agentSessionId, 'Original Agent Session'), expectedRun: { runId: rpcString(run.runId, 'Original Run') },
-    ...(p.expectedAdmission === undefined ? {} : { expectedAdmission: parseSpaceMemberAdmission(p.expectedAdmission) }) }
+  const p = rpcRecord(value, ['reference', 'regionId', 'runtimeId', 'agentSessionId', 'expectedRun', 'expectedAdmission'])
+  const { expectedRun, ...identity } = p, run = rpcRecord(expectedRun, ['runId'])
+  return { ...parseSpaceMemberIdentity(identity), expectedRun: { runId: rpcString(run.runId, 'Original Run') } }
 }
 /** A finite target check shared with the routed receiver; full argument semantics
  * and effects still belong to the original Hosted/Provider/Native methods. */

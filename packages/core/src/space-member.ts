@@ -1,5 +1,5 @@
 import type { AgentMuxHostedRuntimeParameterMap, AgentMuxHostedRuntimeResultMap, AgentMuxHostedStreamInitialMap } from './hosted-client-contract.js'
-import type { SpaceAuthorityRef } from './space-authority.js'
+import { parseSpaceAuthorityRef, type SpaceAuthorityRef } from './space-reference.js'
 import type { AgentMuxRunRef } from './types.js'
 import { rpcRecord, rpcString } from './rpc-data.js'
 import { AgentMuxError } from './errors.js'
@@ -13,14 +13,21 @@ export function parseSpaceMemberAdmission(value: unknown): SpaceMemberAdmission 
 }
 
 /** IDs belong to the original Space and execution Core, never to a viewing client. */
-export type SpaceMemberTarget = {
+export type SpaceMemberIdentity = {
   reference: SpaceAuthorityRef
   regionId: string
   runtimeId: string
   agentSessionId: string
-  expectedRun: AgentMuxRunRef
   expectedAdmission?: SpaceMemberAdmission
 }
+export function parseSpaceMemberIdentity(value: unknown): SpaceMemberIdentity {
+  const p = rpcRecord(value, ['reference', 'regionId', 'runtimeId', 'agentSessionId', 'expectedAdmission'])
+  return { reference: parseSpaceAuthorityRef(p.reference), regionId: rpcString(p.regionId, 'Original Region'),
+    runtimeId: rpcString(p.runtimeId, 'Original execution Runtime'), agentSessionId: rpcString(p.agentSessionId, 'Original Agent Session'),
+    ...(p.expectedAdmission === undefined ? {} : { expectedAdmission: parseSpaceMemberAdmission(p.expectedAdmission) }) }
+}
+export type SpaceMemberTarget = SpaceMemberIdentity & { expectedRun: AgentMuxRunRef }
+export type PinnedSpaceMemberIdentity = SpaceMemberIdentity & { expectedAdmission: SpaceMemberAdmission }
 export const SPACE_MEMBER_INVOCATIONS = [
   'readAgentSession', 'runtimeSubject', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
   'releaseRunAttachment', 'resizeTerminal', 'writeAgent', 'pasteAgent', 'submitAgentPrompt',

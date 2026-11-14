@@ -267,6 +267,8 @@ export * from './node-publishing.js'
 export * from './node-locator.js'
 
 
+export * from './name-control.js'
+export { createNameControlClient } from './name-control-client.js'
 export * from './space-member.js'
 export { connectSpaceMember, type SpaceMemberClient } from './space-member-client.js'
 

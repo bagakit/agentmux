@@ -2,15 +2,8 @@ import { isDeepStrictEqual } from 'node:util';
 import { AgentMuxError } from './errors.js';
 import { rpcRecord } from './rpc-data.js';
 import { parseAgentMuxSpatialGraph, type AgentMuxSpatialGraph, type AgentMuxSpatialState } from './spatial-graph.js';
-/** IDs inside this reference retain the answering Core's namespace. Routes are client-local carriers. */
-export type SpaceAuthorityRef = {
-    runtimeId: string;
-    spaceId: string;
-};
-export type SpaceAuthoritySource = {
-    runtimeId: string;
-    ownerInstanceId: string;
-};
+import { parseSpaceAuthorityRef, spaceIdentityString as rpcString, type SpaceAuthorityRef, type SpaceAuthoritySource } from './space-reference.js';
+export { parseSpaceAuthorityRef, type SpaceAuthorityRef, type SpaceAuthoritySource } from './space-reference.js';
 export type SpaceScope = {
     space: AgentMuxSpatialGraph['spaces'][number] | null;
     zones: AgentMuxSpatialGraph['zones'];
@@ -84,20 +77,10 @@ export type SpaceAuthorityResults = {
 };
 export const isSpaceAuthorityMethod = (method: unknown): method is keyof typeof SPACE_AUTHORITY_METHODS => typeof method === 'string' && Object.hasOwn(SPACE_AUTHORITY_METHODS, method);
 const invalid = (message: string, code = 'INVALID_CONTROL_REQUEST'): never => { throw new AgentMuxError(message, code); };
-/** Same opaque identity contract as the original spatial graph; no new path-length/version gate. */
-function rpcString(value: unknown, label: string, code = 'INVALID_CONTROL_REQUEST'): string {
-    if (typeof value !== 'string' || !value || value.includes('\0'))
-        invalid(`${label} requires its exact original identity.`, code);
-    return value as string;
-}
 function count(value: unknown, code: string): number {
     if (!Number.isSafeInteger(value) || (value as number) < 0)
         invalid('An exact nonnegative Space revision is required.', code);
     return value as number;
-}
-export function parseSpaceAuthorityRef(value: unknown, code = 'INVALID_CONTROL_REQUEST'): SpaceAuthorityRef {
-    const p = rpcRecord(value, ['runtimeId', 'spaceId'], code);
-    return { runtimeId: rpcString(p.runtimeId, 'Original Space Runtime', code), spaceId: rpcString(p.spaceId, 'Original Space', code) };
 }
 export function parseSpaceAuthorityParams<M extends keyof SpaceAuthorityParams>(method: M, value: unknown): SpaceAuthorityParams[M] {
     const p = rpcRecord(value, method === 'space.apply' ? ['reference', 'expectedRevision', 'changes'] : method === 'space.watch' ? ['reference', 'after'] : ['reference']);

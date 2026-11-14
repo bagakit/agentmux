@@ -1,3 +1,4 @@
+import { isNameControlMethod, parseNameControlParams, parseNameControlResult } from './name-control.js'
 import { parseAgentOpenDescribe, parseAgentOpenDescription } from './agent-open-contract.js'
 import { parseTerminalCreationRetire, parseTerminalCreationInspect, parseTerminalCreationInspection } from './terminal-creation.js'
 import { isObjectAvatarMethod, parseObjectAvatarParams, parseObjectAvatarResult } from './object-avatar.js'
@@ -410,6 +411,7 @@ function activity(value: unknown): void {
 export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, params: unknown,
   credentials?: AgentMuxRpcCredentials): Record<string, unknown> {
   try {
+    if (isNameControlMethod(method)) return parseNameControlResult(method, value, parseNameControlParams(method, params)) as unknown as Record<string, unknown>
     if (method === 'space.member.call') {
       const input = parseSpaceMemberParams(method, params)
       if (input.call.method === 'runtime.owner.identity') {
