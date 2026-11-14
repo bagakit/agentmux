@@ -1348,7 +1348,8 @@ function PaneGroup({
           </div>
         )) : !focusMoved && !showEmptySpace && !recoveryNotice ? (
           projection ? <div role="status" className="workbench-restore-notice">Select a Tab in this Zone to display its original content.</div>
-            : <NewTabSurface tabGroupId={group.id} visible={surfaceVisible} />
+            : <NewTabSurface tabGroupId={group.id} visible={surfaceVisible}
+              emptyGroupWorkspaceId={group.tabOrder.length === 0 ? workspaceId : undefined} />
         ) : null}
         </div>
       </div>

@@ -74,12 +74,15 @@ export function NewTabSurface({
   tabGroupId,
   tabId,
   regionId,
+  emptyGroupWorkspaceId,
   creationTarget,
   visible = true
 }: {
   tabGroupId: string
   tabId?: string
   regionId?: string
+  /** Ordinary empty Group owner; global selection belongs to a different workface. */
+  emptyGroupWorkspaceId?: string
   /** Confirmed empty Zone; materialize only on an explicit action. */
   creationTarget?: { workspaceId: string; displayWorkspaceId: string; zoneId: string }
   /** Hidden Workbench slots stay mounted, but only the visible launcher may own the warm PTY. */
@@ -88,6 +91,8 @@ export function NewTabSurface({
   const presentationActive = useWorkbenchPresentationActive()
   const presentation = useWorkbenchBrowserPresentation()
   const projection = useContext(WorkbenchProjectionContext)
+  const emptyWorkspaceId = !tabId && !regionId ? emptyGroupWorkspaceId : undefined
+  const ordinaryEmptyGroup = emptyWorkspaceId !== undefined && !isOriginalSourceWorkspaceProjection(emptyWorkspaceId)
   const settings = useContext(SettingsNavigation)
   const surfaceRef = useRef<HTMLDivElement>(null)
   const operationHosts = useAppStore(useShallow(useMemo(() => {
@@ -146,10 +151,10 @@ export function NewTabSurface({
     : warmLauncherId({ tabGroupId, regionId })
   const sourceValue = useLauncherState(state => state.drafts[launcherId]?.sourceExecution)
   const sourceInputs = useAppStore(state => state.mountedSpaceInputs)
-  const rawSourceSelection = useAppStore(state => Boolean(state.workbenchSpaceSelection?.sourceRuntimeId &&
+  const rawSourceSelection = useAppStore(state => !ordinaryEmptyGroup && Boolean(state.workbenchSpaceSelection?.sourceRuntimeId &&
     !isOriginalSourceWorkspaceProjection(state.workbenchSpaceSelection.workspaceId)))
   const rawSourceUnknown = useAppStore(state => rawSourceSelection && !originalRawSourceOccurrenceConfirmed(state, currentCoreSpatialGraph()))
-  const implicitSourceKey = useAppStore(state => rawSourceSelection ? undefined : originalSourceEntryForSelection(state)?.key)
+  const implicitSourceKey = useAppStore(state => ordinaryEmptyGroup || rawSourceSelection ? undefined : originalSourceEntryForSelection(state)?.key)
   const implicitSourceObservation = useAppStore(state => implicitSourceKey ? state.mountedSpaceObservations[implicitSourceKey] : undefined)
   const implicitSource = useMemo(() => implicitSourceKey ? originalSourceLauncherExecution(useAppStore.getState(), tabId, regionId, currentCoreSpatialGraph()) : undefined,
     [implicitSourceKey, sourceInputs, implicitSourceObservation, tabId, regionId])
@@ -204,6 +209,7 @@ export function NewTabSurface({
   // A visible Tab can contain an unselected Launcher created by Control. Only its
   // selected Region may acquire input; the original empty-group Launcher has no Region.
   const inputRegionActive = useAppStore(state => {
+    if (ordinaryEmptyGroup) return state.layouts[creationTarget?.displayWorkspaceId ?? emptyWorkspaceId!]?.activeGroupId === tabGroupId
     if (!tabId || !regionId) return tabId === undefined && regionId === undefined
     if (state.tabs[tabId]?.regions[regionId]?.kind !== 'launcher') return false
     const reference = (presentation.surface === 'mote' || presentation.surface === 'recall') ? presentation.reference : mainRegionReference(state.workbenchSpaceSelection)
@@ -218,11 +224,14 @@ export function NewTabSurface({
   // 判定（resolveLauncherWorkspaceId）。分开算的症状不是报错：标题写着 A、点下去建到 B。
   const resolvedWorkspaceId = resolveLauncherWorkspaceId({
     launcherWorkspaceId,
-    launcherTabWorkspaceId: tabWorkspaceId ?? creationTarget?.workspaceId,
+    launcherTabWorkspaceId: tabWorkspaceId ?? creationTarget?.workspaceId ?? emptyWorkspaceId,
     activeWorkspaceId
   })
-  const workspace = useMemo(() => originalSpaceWorkspace(useAppStore.getState(), resolvedWorkspaceId, currentCoreSpatialGraph()),
-    [resolvedWorkspaceId, config, sourceInputs, implicitSourceObservation, rawSourceUnknown])
+  const workspace = useMemo(() => {
+    const state = useAppStore.getState()
+    return originalSpaceWorkspace(ordinaryEmptyGroup ? { ...state, workbenchSpaceSelection: null } : state,
+      resolvedWorkspaceId, currentCoreSpatialGraph())
+  }, [ordinaryEmptyGroup, resolvedWorkspaceId, config, sourceInputs, implicitSourceObservation, rawSourceUnknown])
   const host = workspace ? config?.hosts.find((candidate) => candidate.id === workspace.hostId) : undefined
   const splitExecution = agentTarget?.agentWorkspaceId !== undefined
   const agentWorkspace = splitExecution ? config?.workspaces.find(item => item.id === agentTarget.agentWorkspaceId) : workspace
@@ -527,7 +536,7 @@ export function NewTabSurface({
       ? settings.openHostExecutors(agentWorkspace.hostId) : settings.openHost(agentWorkspace.hostId) : undefined} />
   return (
     <SurfaceState ref={surfaceRef} className="launch-surface" data-agent-section={sections.agents} data-motion-active={motionActive}
-      data-density={compact ? 'compact' : 'normal'}
+      data-density={compact ? 'compact' : 'normal'} data-short={regionHeight !== null && regionHeight < 240 || undefined}
       style={{ '--launcher-hero': `url("${launcherHero}")`, ...(regionHeight === null ? {} : { '--launcher-region-height': `${regionHeight}px` }) } as CSSProperties} body={<>
       <LauncherEnvironment workspace={workspace} host={host} check={hostCheck} displayPath={displayPath}
         executionControl={workspace && sections.agents === 'expanded' ? <LauncherAgentDevice key={launcherId} hosts={config?.hosts ?? []} workspace={workspace} agentWorkspace={agentWorkspace}

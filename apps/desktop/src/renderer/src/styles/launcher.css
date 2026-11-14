@@ -265,3 +265,19 @@ button.launcher-mote__target:hover { color: var(--text); background: var(--surfa
   .launch-surface[data-density='compact'] .launcher-environment__title { gap: var(--sp-2); }
   .launch-surface[data-density='compact'] .launcher-environment__path { line-height: 1.2; }
 }
+
+/* A short, wide Group keeps the original input and launch actions together. */
+@container launcher (min-width: 640px) {
+  .launch-surface[data-short='true'] > .surface-state__content > .surface-state__body { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--sp-2) var(--sp-4); }
+  .launch-surface[data-short='true'] .surface-state__body > * { grid-column: 1 / -1; }
+  .launch-surface[data-short='true'] .launcher-environment { grid-column: 1; grid-row: 1; align-items: center; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-3); padding: 0; margin: 0; border: 0; }
+  .launch-surface[data-short='true'] .launcher-environment__project { display: flex; align-items: center; gap: var(--sp-3); }
+  .launch-surface[data-short='true'] .launcher-environment__title { min-width: 0; }
+  .launch-surface[data-short='true'] .launcher-environment__path { flex: 1; padding-inline-start: 0; }
+  .launch-surface[data-short='true'] .launcher-environment__execution-label { display: none; }
+  .launch-surface[data-short='true'] .launcher-agents-head { grid-column: 2; grid-row: 1; width: 240px; max-width: 100%; margin: 0; }
+  .launch-surface[data-short='true'] .launcher-composer { grid-column: 1; grid-row: 2; --composer-input-height: 40px; --composer-input-max: 40px; }
+  .launch-surface[data-short='true'] .launch-surface__footer { display: contents; }
+  .launch-surface[data-short='true'] .launcher-primary-actions { grid-column: 2; grid-row: 2; justify-self: end; margin: 0; }
+  .launch-surface[data-short='true'] .launcher-mote { grid-column: 1 / -1; }
+}
