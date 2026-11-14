@@ -37,6 +37,8 @@
 
 ## 目录与呈现资料
 
+目录与待回应提示按实际消费者读取：名录、准确位置和需要人处理的事实，与完整会话回顾或历史正文分开取得。查看一个内容工作面不周期补全无关 Session 的历史；退场或换来源后取消原只读请求，不能只丢弃迟到结果却继续原补全工作。目录保留原 client 与请求范围；当前来源未确认时，旧目录可以作为原来源的保留阅读，不能与新连接的动作或资源读取组合。
+
 手机目录完整消费原呈现 owner 的名称、项目、详情、状态与 recap，以及原 Mote 自定义头像。公共 carrier 保留这些 owner 的原展示值，不另加字段长度限制、再次截断摘要或截断正常数据；类型、准确身份、权限和既有整条传输容量边界仍成立，传输容量沿既有公共消息预算，不用更小的重复字段预算阻断原可用目录。正常中文与 emoji 展示数据不能使整份 Focus、Mote 目录不可读；验收包含原呈现生产者到实际公共 codec 的链路及原内容保真。
 
 呈现资料沿只读 presentation catalog 取得。`space.ls`／`space.inspect` 的 `presentation: true`（CLI `amux space ls|inspect --presentation`）由 client 原呈现 owner 返回空间的 `catalog.appearance` 与有界 `agentPresentation` 事实：只传有界 glyph、parts、图片引用版本与已选空间的原 App 图片（PNG、JPEG、GIF、WebP、SVG 或图标格式）。Core 不解释头像外观，不保存新的身份。图片字节按选中 Space 的 inspect 读取，列表不批量传图片。手机导航与头像是这项只读能力的生产消费者。
@@ -64,6 +66,8 @@ Space 等完整工作面目录中的 Launcher 提供可发现的创建 Agent 入
 手机消费原 Topic、Survey 与 Goals 的完整工作面及公共 owner，入口位置沿上文一级导航。Topic 保留 Category、Topic、Chat 和知识来源身份；Survey 只显示原明确收集的研究 Zone、原名称和准确 Tab／Region，不能把全量空间当研究或复制内容。Goals 沿原公共目标 owner 保留目标身份、状态、决策和操作回执，不维护手机独立目标系统；目标清单的完整范围与有界读取沿[Goal 的状态、筛选与路由队列](goals-and-demand.md#状态筛选与路由队列)。所选 File Region 以原目录元信息确定准确资源，通过既有 `file.read` 读取原内容与修订；列表不批量读取文件，不凭路径猜内容，不新增另一套文件读取接口。手机 Note 编辑和保存消费原共享 schema 与 revision-aware 文件写入 owner；冲突、未知写入和未保存草稿明确保全，未取得确认不冒充保存成功。正文写入若缺公共入口，在同一交付中暴露原 owner 的最小 RPC／CLI 能力并验证实际手机消费，不停留在只读占位。Browser 沿原 browserId 发现当前网页。原对话、Message Tools 与 Terminal 继续同源，自定义头像和动画保真，失败保留原对象和草稿。
 
 ## 对象身份与工作面
+
+从 Space／Zone／Tab／Region 打开 Agent 时，导航、对话读取、资源、输入及操作回执共同保留该原成员的来源与执行 Runtime／Host／Session 资格，复用原公共成员能力。显示身份中的原位置不能替代实际调用路由；不能把原成员的裸 SID 交给当前连接冒作 local。外部关联本身不授予反向控制，缺少原独立授权时保留准确原目标、内容与草稿，并说明该次路由未确认，不借用本机同 SID。
 
 手机网页与 App 共享同一对象可达和业务能力：Mote、Topic、Space 里的原 Agent 即使尚未出现在手机 SDK 元信息目录，也保留原 SID、准确位置与打开／读取原会话入口，元信息未知就地说明，不把观察缺口当成未启动。明确新建 Agent 在已选原空间／Zone 中沿原 `agent.open` 完成 Executor、执行资源与展示目标选择，保留创建 operation、真实回执与查询原操作的恢复路径；不自动重放 unknown，不因打开目录或重连创建 Agent。
 
