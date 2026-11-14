@@ -33,19 +33,16 @@
 
 `activatePresentation` 的选择意图与第一击准备／提交／取消是同一类型化入口。后台选择传 `select` 与 `focus: 'preserve'`，保留原键盘接受者；第一击沿现有 one-shot input scope，核原 view／Profile／navigation／geometry／capture 并限制重复派发。调用者消费实际 receipt，不能把 Promise 完成、`selected` 或 `input-dispatched` 一律解释成页面业务已成功。完整请求和回执 union 仍只见源码类型。
 
-## 身份、几何与媒体边界
+## 参数的身份与几何语义
 
-- occurrence 使用原 `presentationId` 和 Core 位置字段，与 `browserId` 分别输入；展示位置不改 Browser 资源 Workspace。Main 从真实 IPC sender 取得 Electron identity，payload 不提供 WebContents／Session／frame／origin／Profile 权限或任意 source URL。
-- lease／capture 是 Main 颁发的 opaque handle。空、过期、另一 requester 或已失效资源不得借句柄继续取得权限；类型存在不证明当前授权。
-- geometry 明确为不可见或可见加正面积有限 bounds。临时测量零不冒原页面关闭；原 viewport 与 Native 几何仍归原 owner。
-- 捕获流由 Renderer 的真实 `getDisplayMedia` 取得。BVM 的原 App Session display handler 只准当前 requester 主 frame／准确当前文档的 pending capture，video-only 且不走 system picker；不放行共享 Session 的所有 frame，也不改原 Source Profile 权限。
-- 一个 requester 同时仅一项未 settled arm，原 Browser 同一 capture 可供多个合法可见 stage。source 正常导航更新 Browser 事实；requester 文档身份与资源寿命是授权边界，不能把第一次 arm 的位置变成 capture 的唯一 home。
-- ready／stopped ACK 的实际 track IDs 非空且不重复，已 ready 后核同一集合；failed 独立。迟到流若已停止，可直接报告 stopped，不制造 ready。stopped 不重新激活撤销的 scope；旧文档或 scope 无法对账时保持 unconfirmed／unknown，不能据无异常返回证明物理 ended。
+- occurrence 用 `presentationId` 和 Core 位置字段表达，与 `browserId` 分别传入；展示位置不改变 Browser 的资源 Workspace。Main 从真实 IPC sender 取得 Electron identity，payload 不携带 WebContents、Session、frame、origin、Profile 权限或任意 source URL。
+- lease 与 capture 是 Main 颁发的 opaque handle。类型存在不证明当前授权；空、过期、属于另一 requester 或资源已失效的句柄都不能继续取得权限。
+- geometry 要么是不可见，要么是可见加正面积的有限 bounds。临时测得的零尺寸不表示页面已关闭；viewport 与 Native 几何仍归 Browser owner。
 
-## 事件与失效
+capture 的取得与共享、ACK 的 track 规则、撤销与清理的寿命，唯一见[资源合同《登记、ARM、ACK 与撤销》](browser-presentation-resource-contract.md#登记armack-与撤销)。
 
-`BROWSER_PRESENTATION_EVENT_CHANNEL` 的生产者是原 BVM；preload 转发给原媒体 holder。`capture-revoked` 与 `input-owner-changed` 描述媒体／输入位置，不交给原 Browser 实体关闭 reducer；实体更新、不可用及关闭继续走 `BrowserEvent` 与原 `onEvent` 通道。
+## 事件通道
 
-requester 真正卸载、资源替换／释放或最后可见 consumer 撤去时，沿原 BVM 撤许可与清理。每个 listener 只卸自身；dispose 不让过期 ACK 或迟到 Promise 复活新 scope。Main 发出撤销与 Renderer 物理 track ended 分开表达，缺后者观察时保留未知和服务窗，不能停掉健康原页面。
+`BROWSER_PRESENTATION_EVENT_CHANNEL` 的生产者是 BVM，preload 把它转发给媒体 holder。`capture-revoked` 与 `input-owner-changed` 描述媒体与输入位置，不交给 Browser 实体的关闭 reducer；实体的更新、不可用与关闭继续走 `BrowserEvent` 与 `onEvent` 通道。`onPresentationEvent` 返回的函数只退订自身 listener。
 
 原 App 加载与来源仍沿 [top-frame-navigation.ts](../../apps/desktop/src/main/top-frame-navigation.ts) 及实际 Main 加载入口。新调用者必须消费这些已有身份与授权边界，不能靠同名 preload／handler、任意 file origin 或 mock 数据冒真实 Native 资格。页面输入、IME、selection、clipboard、停轨及普通恢复分别需要对应实际事实，源码接口说明不代签这些结果。

@@ -16,13 +16,13 @@
 
 ## 登记、ARM、ACK 与撤销
 
-原 `AgentMuxDesktopApi.browser` 经 preload、`registerIpc.handleWithEvent` 到 BVM。display handler 对准确 pending scope 提供 video-only 原页面，关闭 system picker，不改原 Source Profile 权限；每 requester 仅一项未 settled arm，避免没有业务 request ID 的 callback 串源。
+`AgentMuxDesktopApi.browser` 经 preload、`registerIpc.handleWithEvent` 到 BVM。捕获流由 Renderer 的真实 `getDisplayMedia` 取得；BVM 在 App Session 上的 display handler 只放行当前 requester 主 frame 与当前文档的 pending capture，提供 video-only 的原页面，关闭 system picker，不放行共享 Session 的其他 frame，也不改变 Source Profile 的权限。每个 requester 同时只有一项未 settled 的 arm，避免没有业务 request ID 的 callback 串到另一个来源。
 
 `armPresentationCapture` 对尚未显示的原生来源先沿当前可见 lease 初始化缺失的正面积 bounds，将同一 view 暂放在隐藏且不取焦点的 `BaseWindow` 中完成采集启动所需绘制；不创建另一页面，已有来源尺寸不随被动镜像改变。这一步不取得输入 lease、不聚焦、不将原生页放到工作面上方。`finishPresentationCapturePreparation` 在 ready／failed／stopped／revoked 后结束准备并清理临时原生窗口，保留期间发生的真实选择，也不重新挂回已被 Profile 切换或释放移除的旧来源；被动来源隐藏失败时脱离原生宿主，保留原页面及显式选择的恢复路径，清理异常不截断撤销通知或留下不可重试的 pending capture。原媒体 API 与权限检查保持同一来源。
 
 错误主 frame／文档／Session、foreign opaque handle、已释放 source 或没有合法可见正面积 geometry，拒绝该次 capture。已有 capture 不因最初 issuer lease 隐藏或取消而收掉另一个可见 consumer 的流；最后可见 consumer 撤去才收媒体。媒体失败不作为原页面加载、导航或人工输入的前置条件，失败及显式重试规则只见[多位置呈现、局部遮挡与输入交接](../design/behavior/browser-workface.md#多位置呈现局部遮挡与输入交接)。
 
-ACK 是可信 App holder 的媒体报告：ready／stopped 带实际非空 track IDs，failed 独立，stopped 不重启已撤 scope；已 ready 后核同一集合。迟到流可直接报告真实 stopped，不能先假报 ready。物理 ended 需要实际观察，Main 发 revoke、ACK 无异常或移除 DOM 都不等同于已观测停轨；requester 结束后无法读旧 track 时保持 unknown。
+ACK 是可信 App holder 的媒体报告：ready／stopped 带实际非空且互不重复的 track IDs，failed 独立，stopped 不重启已撤 scope；已 ready 后核同一集合。迟到流可直接报告真实 stopped，不能先假报 ready。物理 ended 需要实际观察，Main 发 revoke、ACK 无异常或移除 DOM 都不等同于已观测停轨；requester 结束后无法读旧 track 时保持 unknown。
 
 媒体与 input 位置事件只经独立 `BROWSER_PRESENTATION_EVENT_CHANNEL` 到原 holder。原 BrowserEvent 与 Store 实体 reducer 保持自己的职责；media revoke 不移除 Tab／Region。listener 只退自身，handler／lease 清理沿原 BVM／dispose，旧 scope 的迟到报告不能复活新许可。
 
