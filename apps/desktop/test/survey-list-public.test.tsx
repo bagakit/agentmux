@@ -1,4 +1,3 @@
-import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
 // @vitest-environment happy-dom
 import { appendFileSync, readFileSync } from 'node:fs'
 import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
@@ -30,7 +29,10 @@ vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () =
 vi.mock('../src/renderer/src/components/RecentFocusTimeline', () => ({ RecentFocusTimeline: () => null }))
 
 const original = useAppStore.getState(), empty = (): AgentMuxSurveyOrganization => ({ ungrouped: [], groups: [] })
-const { build } = browserSourceBuild(createRequire(resolve('packages/core/package.json'))('esbuild'))
+// Keep this Node build tool's file import.meta URL outside the DOM transform.
+const nodeRequire = createRequire(resolve('packages/core/package.json'))
+const { browserSourceBuild } = nodeRequire('../browser/scripts/source-build.mjs')
+const { build } = browserSourceBuild(nodeRequire('esbuild'))
 const exec = promisify(execFile)
 let directory: string, cli: string, fixture: Awaited<ReturnType<typeof startWorkfaceFixture>>
 let zones: string[]
@@ -141,7 +143,7 @@ it('[survey-list] reports unknown storage honestly and keeps the already applied
   expect(result).toMatchObject({ outcome: 'partial', changed: true, storedOrganization: grouped(),
     save: { clientStateWritten: true, storageFlushRequested: false, diskDurability: 'unconfirmed' }, issues: [{ code: 'SURVEY_LIST_SAVE_UNCONFIRMED' }] })
   expect((await list()).storedOrganization).toEqual(grouped())
-  const ports = { get: useAppStore.getState, set: useAppStore.setState, hasZone: () => false,
+  const ports = { get: useAppStore.getState, set: useAppStore.setState, hasZone: () => false, hasPage: () => false,
     save: async () => ({ layoutApplied: false, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'confirmed' as const, reason: null }) }
   expect((await executeSurveyList(ports, { schemaVersion: 5, requestId: 'separate-client-save', operation: 'space.survey-list', organization: empty(), expected: grouped() })).save?.diskDurability).toBe('unconfirmed')
   fixture.noLifecycle()
@@ -170,7 +172,7 @@ it('[survey-list] GUI rejects malformed organization and late save receipts rema
   let finish!: () => void
   const waiting = new Promise<void>(resolve => { finish = resolve })
   const saved = { layoutApplied: false, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed' as const, reason: null }
-  const ports = { get: useAppStore.getState, set: useAppStore.setState, hasZone: () => false, save: async () => { await waiting; return saved } }
+  const ports = { get: useAppStore.getState, set: useAppStore.setState, hasZone: () => false, hasPage: () => false, save: async () => { await waiting; return saved } }
   const first = executeSurveyList(ports, { schemaVersion: 5, requestId: 'earlier-organization', operation: 'space.survey-list', organization: grouped(), expected: empty() })
   const later = { ...grouped(), groups: grouped().groups.map(group => ({ ...group, name: 'Later user name' })) }
   const second = await executeSurveyList({ ...ports, save: async () => saved }, { schemaVersion: 5, requestId: 'later-organization', operation: 'space.survey-list', organization: later, expected: grouped() })
@@ -221,7 +223,7 @@ it('[survey-list] strict public requests and receipts preserve the original shap
     { organization: { ungrouped: [zones[0], zones[0]], groups: [] }, expected: empty() },
     { organization: { ungrouped: [], groups: [{ groupId: 'g', name: 'Group', collapsed: true, zoneIds: [zones[0]] }, { groupId: 'g', name: 'Duplicate', collapsed: false, zoneIds: [] }] }, expected: empty() },
     { organization: { ungrouped: [], groups: [{ groupId: 'g', name: 'Group', collapsed: 'yes', zoneIds: [] }] }, expected: empty() }]) expect(() => parseSpaceControlRequest({ ...base, ...input })).toThrow()
-  const result = { scope: 'survey-list', collectedZoneIds: [zones[0], zones[1], 'saved-missing-zone'], storedOrganization: empty(), effectiveOrganization: grouped(), outcome: 'read', changed: false, save: null, issues: [] }
+  const result = { scope: 'survey-list', pageReferences: [], collectedZoneIds: [zones[0], zones[1], 'saved-missing-zone'], storedOrganization: empty(), effectiveOrganization: grouped(), outcome: 'read', changed: false, save: null, issues: [] }
   expect(parseSpaceControlSuccessReceipt({ ...base, ok: true, result })).toMatchObject({ result })
   expect(() => parseSpaceControlSuccessReceipt({ ...base, ok: true, result: { ...result, scope: 'wrong-scope' } })).toThrow()
   expect(restoreSurveyOrganization({ ungrouped: ['saved-missing-zone', 'saved-missing-zone'], groups: [{ groupId: 'g', name: 'Saved', collapsed: true, zoneIds: [zones[0], 'saved-missing-zone'] }] })).toEqual({ ungrouped: ['saved-missing-zone'], groups: [{ groupId: 'g', name: 'Saved', collapsed: true, zoneIds: [zones[0]] }] })

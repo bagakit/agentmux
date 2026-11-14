@@ -3,6 +3,7 @@ import { AGENTMUX_CLI_COMMANDS } from '../src/agentmux-cli-commands.js'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '../src/control.js'
 import { parseAgentMuxControlRequest, parseAgentMuxControlReceipt } from '../src/control-host.js'
 import { parseBrowserTargetsResult } from '../src/control-browser-targets.js'
+import { parseRpcResponse } from '../src/public-rpc-frame.js'
 
 const destination = { kind: 'launcher' as const, regionId: 'original-launcher' }
 const request = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'private-open', operation: 'open.browser', url: 'https://example.invalid/', destination }
@@ -21,12 +22,22 @@ describe('original Browser public creation and discovery mode', () => {
 
   it('creation receipts and target discovery retain actual mode without exposing a partition', () => {
     const region = { tabId: 'original-tab', regionId: 'original-region', workspaceId: 'workspace', kind: 'browser', browserId: 'original-browser', mode: 'private' }
-    const result = parseAgentMuxControlReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: request.requestId, ok: true, operation: request.operation, result: { region } })
-    expect(result).toMatchObject({ result: { region } })
+    const result = parseAgentMuxControlReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: request.requestId, ok: true, operation: request.operation, result: { region, survey: { outcome: 'not-requested', save: null, issues: [] } } })
+    expect(result).toMatchObject({ result: { region, survey: { outcome: 'not-requested', save: null, issues: [] } } })
     const target = { id: region.browserId, workspaceId: 'workspace', source: 'embedded', status: 'ready', mode: 'private', url: request.url, title: 'Private', navigationId: 'original-nav', capabilities: [], partition: 'must-not-cross-wire' }
     expect(parseBrowserTargetsResult({ coverage: 'complete', targets: [target] }).targets).toEqual([expect.objectContaining({ mode: 'private' })])
     expect(parseBrowserTargetsResult({ coverage: 'complete', targets: [target] }).targets[0]).not.toHaveProperty('partition')
     expect(() => parseBrowserTargetsResult({ coverage: 'complete', targets: [{ ...target, mode: 'invented' }] })).toThrow('mode')
     expect(parseBrowserTargetsResult({ coverage: 'complete', targets: [{ ...target, source: 'external', mode: undefined }] }).targets[0]).not.toHaveProperty('mode')
   })
+})
+
+it('preserves another owner’s typed mismatch details when parsing the new Browser mismatch branch', () => {
+  const details = { kind: 'original-launch-owner', operationId: 'original-agent-open', originalSessionId: 'original-session' }
+  const response = { jsonrpc: '2.0', id: 'transport-correlation', error: {
+    code: -32603, message: 'The original launch reply did not match.',
+    data: { code: 'LAUNCH_RESULT_MISMATCH', details }
+  } }
+  expect(() => parseRpcResponse(response)).not.toThrow()
+  expect(parseRpcResponse(response)).toMatchObject({ error: { data: { details } } })
 })
