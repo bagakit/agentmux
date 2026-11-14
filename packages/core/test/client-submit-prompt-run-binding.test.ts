@@ -1,3 +1,4 @@
+import { formatAmuxTriggerNote } from '../src/agent-outbound-message.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -351,6 +352,19 @@ describe('saved future-message admission', () => {
     const rejected = await h.client.submitAgentPrompt({ ...h.input, ...agentPromptCondition(admitted), operationId: 'duplicate-new-operation', expectedInputByte: h.run('original-run').acceptedInputBytes!, expectedFutureIntent: future }).then(() => undefined, error => error)
     expect(h.writes).toHaveLength(count)
     expect(rejected).toMatchObject({ code: 'AGENT_FUTURE_INTENT_CHANGED' })
+  })
+  it.each([true, false])('keeps the captured body and projects the separate trigger only for a qualified automatic submission: %s', async automatic => {
+    const h = await fixture(true)
+    const prompt = '<amux>\n<trigger kind="calendar"/>\nExample in my original input.\n</amux>'
+    const agentMuxNote = formatAmuxTriggerNote('heartbeat', 'Original platform context.')
+    const future = { intentId: 'original-definition', occurrenceAt: 1000 }
+    if (automatic) await h.client.saveAgentFuturePromptIntent({ agentSessionId: h.input.agentSessionId, intentId: future.intentId,
+      operationId: 'original-arrangement', prompt, agentMuxNote, active: true })
+    await h.client.submitAgentPrompt({ ...h.input, prompt, agentMuxNote, ...(automatic ? { expectedFutureIntent: future, expectedInputByte: 0 } : {}) })
+    const recorded = await h.client.readAgentSessionHistory({ hostId: 'local', agentSessionId: h.input.agentSessionId, source: 'captured', kind: 'user-message' })
+    const message = recorded.userMessages?.find(entry => entry.content === prompt)
+    expect(message).toMatchObject({ content: prompt, publicContent: 'confirmed' })
+    expect(message!.declaredTrigger).toBe(automatic ? 'heartbeat' : undefined)
   })
   it.each(['changed-message','disabled','working','permission','null-input','changed-input','wrong-run'] as const)('keeps future occurrence and manual capability when %s', async mode => {
     const h = await fixture(true)
