@@ -62,7 +62,7 @@ export async function captureAgentNativeSessionIdentity(input: {
     firstRun.state.type !== 'running' || !Number.isSafeInteger(firstRun.pid) || !firstRun.pid || firstRun.pid <= 0) {
     throw changed('The original running process is unconfirmed; its retained work is kept.')
   }
-  const discovered = await provider.discoverNativeSession!({ processId: firstRun.pid,
+  const discovered = await provider.discoverNativeSession!({ processId: firstRun.pid, nativeHandle: confirmed,
     workspacePath: expected.workspacePath, command: input.command, args: input.args, env: input.env, signal })
   assertObservation()
   const handle = discovered?.handle

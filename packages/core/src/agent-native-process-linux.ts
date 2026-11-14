@@ -26,6 +26,31 @@ async function descriptors(directory: string): Promise<string[]> {
   return values.sort()
 }
 
+/** OS start ticks for a native registry, with a pinned process lifetime recheck.
+ * This is an ephemeral witness, not a durable Agent or native Session identity. */
+export async function linuxNativeProcessStart(processId: number, signal: AbortSignal): Promise<{
+  startTicks: string; lifetime: string; assertCurrent(): Promise<void>; dispose(): Promise<void>
+}> {
+  signal.throwIfAborted()
+  if (!Number.isSafeInteger(processId) || processId <= 0) throw unavailable('The original Linux process is unconfirmed.')
+  const handle = await open(`/proc/${processId}`, 'r')
+  try {
+    const directory = `/proc/self/fd/${handle.fd}`, object = await handle.stat({ bigint: true })
+    const original = processStat(await readFile(directory + '/stat', { encoding: 'utf8', signal }), processId)
+    const assertCurrent = async () => {
+      signal.throwIfAborted()
+      const current = processStat(await readFile(directory + '/stat', { encoding: 'utf8', signal }), processId)
+      const pathObject = await stat(`/proc/${processId}`, { bigint: true })
+      if (current.start !== original.start || current.group !== original.group || pathObject.ino !== object.ino || pathObject.dev !== object.dev) {
+        throw unavailable('The original Linux process changed during native registry observation.')
+      }
+    }
+    await assertCurrent()
+    return { startTicks: original.start, lifetime: JSON.stringify([String(object.dev), String(object.ino), original.start]),
+      assertCurrent, dispose: () => handle.close() }
+  } catch (error) { await handle.close(); throw error }
+}
+
 /** Only target process objects are opened. A pinned proc directory never resolves a reused PID
  * to its replacement: https://docs.kernel.org/filesystems/proc.html#process-specific-subdirectories
  * starttime is a within-observation consistency check, not a durable/native process identity. */

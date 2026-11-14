@@ -4,6 +4,7 @@ import { AgentMuxError } from '../errors.js'
 import { normalizeNativeSessionId } from '../agent-native-locator.js'
 import { nativeProcessFiles, type NativeProcessFile } from '../agent-native-process.js'
 import type { AgentProviderNativeSessionDiscovery, AgentProviderNativeSessionDiscoveryContext, AgentProviderNativeSessionWitness } from '../types.js'
+import { discoverClaudeRegisteredSession } from './claude-native-registry.js'
 
 const unavailable = (message: string): AgentMuxError => new AgentMuxError(message, 'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE')
 
@@ -41,7 +42,18 @@ export async function locateClaudeNativeSessions(context: Pick<AgentProviderNati
 }
 
 export async function discoverClaudeNativeSession(context: AgentProviderNativeSessionDiscoveryContext): Promise<AgentProviderNativeSessionDiscovery | null> {
+  let registrationFailure: unknown
+  try {
+    const registered = await discoverClaudeRegisteredSession(context)
+    if (registered) return registered
+  } catch (error) {
+    // A current native identity conflict cannot be hidden by an old log descriptor.
+    if (error instanceof AgentMuxError && error.code === 'AGENT_NATIVE_IDENTITY_UNCONFIRMED') throw error
+    registrationFailure = error
+  }
   const originals = await locateClaudeNativeSessions(context)
+  // A failed auxiliary observation does not revoke independent positive file evidence.
+  if (!originals.length && registrationFailure) throw registrationFailure
   const witness = (original: ClaudeNativeRecord): AgentProviderNativeSessionWitness => {
     const assertRecord = async (target?: ClaudeNativeRecord): Promise<void> => {
       const records = await locateClaudeNativeSessions(context, target)

@@ -2606,7 +2606,7 @@ export class AgentMuxClient {
       if (!provider.discoverNativeSession || !run.pid || run.state.type !== 'running') {
         throw new AgentMuxError('This Run has no reliable current conversation witness. Retry observation; raw input remains available.', 'AGENT_NATIVE_IDENTITY_UNCONFIRMED')
       }
-      const discovery = await provider.discoverNativeSession({ processId: run.pid, command: this.providerLaunch(current, run).command,
+      const discovery = await provider.discoverNativeSession({ processId: run.pid, nativeHandle: input.candidateNativeHandle, command: this.providerLaunch(current, run).command,
         args: this.providerLaunch(current, run).args, env: {}, workspacePath: current.workspacePath, signal: new AbortController().signal })
       const witness = resolveNativeSessionWitness(discovery, selected ? input.candidateNativeHandle : undefined)
       if (!witness || !sameNativeHandle(witness.handle, input.candidateNativeHandle)) {
@@ -3463,7 +3463,7 @@ export class AgentMuxClient {
           }
           return current
         }
-        const discovery = await provider.discoverNativeSession!({ processId: firstRun.pid,
+        const discovery = await provider.discoverNativeSession!({ processId: firstRun.pid, nativeHandle: retained,
           command: resolveAgentExecutable(executorOptions.commandOverride, provider.executable),
           args: executorOptions.args ?? [], env: executorOptions.env ?? {}, workspacePath: session.workspacePath, signal })
         signal.throwIfAborted()
@@ -5425,7 +5425,7 @@ export class AgentMuxClient {
         const sourceRun = await this.requireCurrentAgentRun(source)
         if (sourceRun.state.type === 'running') {
           const witness = sourceRun.pid && provider.discoverNativeSession
-            ? await provider.discoverNativeSession({ processId: sourceRun.pid, command: this.providerLaunch(source, sourceRun).command,
+            ? await provider.discoverNativeSession({ processId: sourceRun.pid, nativeHandle: source.nativeHandle, command: this.providerLaunch(source, sourceRun).command,
               args: this.providerLaunch(source, sourceRun).args, env: {}, workspacePath: source.workspacePath, signal: new AbortController().signal }) : null
           if (!witness?.handle || !sameNativeHandle(witness.handle, forkSource.expectedNativeHandle)) {
             throw new AgentMuxError('The fork source has no confirmed current native witness. Refresh or confirm it; its raw input is retained.', 'AGENT_FORK_SOURCE_CHANGED')
@@ -10651,7 +10651,7 @@ export class AgentMuxClient {
       const before = await this.observeHookRun(session.run.runId, signal)
       this.assertAgentRun(session, before)
       if (before.state.type !== 'running' || !before.pid || !provider.discoverNativeSession) throw new Error('Native process witness unavailable.')
-      const discovery = await provider.discoverNativeSession({ processId: before.pid, command: this.providerLaunch(session, before).command, args: this.providerLaunch(session, before).args,
+      const discovery = await provider.discoverNativeSession({ processId: before.pid, nativeHandle: session.nativeHandle, command: this.providerLaunch(session, before).command, args: this.providerLaunch(session, before).args,
         env: {}, workspacePath: session.workspacePath, signal })
       const selected = hasSelectedNativeTarget(session)
       const members = discovery?.candidates ?? (selected && discovery?.handle && discovery.assertPresent ? [discovery] : undefined)
