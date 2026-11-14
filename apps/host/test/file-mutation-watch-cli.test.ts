@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
-import { writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { writeFile, lstat } from 'node:fs/promises'
+import { dirname, join, resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { agent, cleanup, hostFixture } from './helpers/file-path-fixture.js'
 import { objectCliEnvironment } from '../../../packages/core/test/helpers/object-cli-rpc.js'
@@ -11,6 +11,7 @@ import { startAgentMuxHost } from '../src/host.js'
 import { createHostContent } from '../src/content-owner.js'
 import * as core from '@agentmux/core'
 import { desktopRpcMethods } from '../../desktop/src/main/desktop-rpc-exposure.js'
+import { sourceFilesHosts } from '../../desktop/test/helpers/source-files-hosts.js'
 import type { FileMutationEffect } from '@agentmux/core/files'
 
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
@@ -80,6 +81,47 @@ it('compiled watch consumes actual Host/Native positive effects, distinguishes n
   expect(f.original.inner.kernel.stop).not.toHaveBeenCalled()
 }, 30000)
 
+it('a finite Core request retains its Runtime fence when the Desktop endpoint answers for another actual Source with the same physical resource', async () => {
+  const f = await sourceFilesHosts(cleanup, { sharedProject: true }), [a, b] = f.sources
+  const registrations = []
+  for (const source of [a!, b!]) {
+    const observed = await source.rpc.call('space.folder.inspect', { runtimeId: source.identity.runtimeId, path: source.project })
+    expect(observed.resource).not.toBeNull()
+    registrations.push(await source.rpc.call('space.folder.register', { runtimeId: source.identity.runtimeId, directory: observed.resource! }))
+  }
+  const original = registrations[0]!, other = registrations[1]!
+  expect(a!.identity.runtimeId).not.toBe(b!.identity.runtimeId)
+  expect({ zoneId: original.zoneId, workspaceId: original.workspaceId, resource: original.resource }).toEqual({ zoneId: other.zoneId, workspaceId: other.workspaceId, resource: other.resource })
+  const observed = await a!.rpc.call('file.stat', { zoneId: original.zoneId, path: 'original-runtime-only',
+    expectedResource: { hostId: 'local', workspaceId: original.workspaceId, workspacePath: a!.project } })
+  expect(observed.result.status).toBe('observed')
+  if (observed.result.status !== 'observed' || !observed.resource) throw new Error('The original Source stat is unavailable.')
+  const input = { operationId: 'finite-original-runtime-fence', zoneId: original.zoneId, path: 'original-runtime-only', expectedResource: observed.resource, expectedAbsent: true as const,
+    expected: { root: observed.result.observation.root, parent: observed.result.observation.parent } }
+  await a!.client.dispose(); await a!.rpc.dispose(); await a!.host.dispose()
+  vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', dirname(a!.socketPath)); vi.stubEnv('AGENTMUX_STATE_DIRECTORY', a!.state)
+  vi.stubEnv('AGENTMUX_SPATIAL_STATE_STORE', join(a!.state, 'spatial.json')); vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(a!.state, 'messages.ndjson'))
+  const desktopPath = join(f.root, 'other-source-desktop.sock')
+  const mkdir = vi.fn((params: any) => b!.rpc.call('file.mkdir', params))
+  const desktop = new core.AgentMuxControlServer({ socketPath: desktopPath, exposedMethods: desktopRpcMethods(),
+    coreClients: () => [{ hostId: 'local', client: b!.host.client }],
+    // Exact SDK business-port delegation to B; no invented Namespace or Runtime.
+    files: { read: p => b!.rpc.call('file.read', p), list: p => b!.rpc.call('file.list', p), write: p => b!.rpc.call('file.write', p), create: p => b!.rpc.call('file.create', p), mkdir },
+    callOriginalCore: (_host, method, params, context) => b!.rpc.call(method, params, context.runtimeFence ? { runtimeFence: context.runtimeFence } : {}) })
+  await desktop.start(); cleanup.push(() => desktop.stop())
+  const forwarded = await startAgentMuxHost({ store: a!.store, socketPath: a!.socketPath, desktopSocketPath: desktopPath, mobileBuildDirectory: join(a!.directory, 'absent-mobile') })
+  cleanup.push(() => forwarded.dispose())
+  const identity = (await forwarded.hosted.call('runtime.owner.identity', {})).owner
+  expect(identity.runtimeId).toBe(a!.identity.runtimeId)
+  const native = vi.spyOn(OrdinaryWorkspaceFiles.prototype, 'mkdirPath'), requests = vi.spyOn((desktop as any).service, 'call')
+  const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: a!.socketPath }, runtimeFence: { runtimeId: identity.runtimeId, ownerInstanceId: identity.ownerInstanceId } })
+  cleanup.push(() => rpc.dispose())
+  await expect(rpc.call('file.mkdir', input)).rejects.toThrow()
+  expect(requests.mock.calls.find(row => row[0] === 'file.mkdir')?.[2]).toMatchObject({ runtimeFence: { runtimeId: identity.runtimeId, ownerInstanceId: identity.ownerInstanceId } })
+  expect(mkdir).not.toHaveBeenCalled(); expect(native).not.toHaveBeenCalled()
+  await expect(lstat(join(a!.project, input.path))).rejects.toMatchObject({ code: 'ENOENT' })
+}, 60000)
+
 it('an actual Native producer never waits for a slow observer and terminates only that bounded reader once', async () => {
   const f = await hostFixture(), effects = new FileMutationObservations()
   const owner = new FilePathMutations({ directory: join(f.original.root, 'separate-mutation-records'), files: f.ordinary, effects, noteLease: work => work() })
@@ -111,7 +153,13 @@ it('compiled watch crosses the actual unconfigured Core forwarding port and Desk
   // mint a second Runtime owner. Its production semantic-fence port is the
   // existing callOriginalCore, added to the fenced case separately.
   const desktop = new core.AgentMuxControlServer({ socketPath: desktopPath, exposedMethods: desktopRpcMethods(),
-    coreClients: () => forwarded ? [{ hostId: 'local', client: forwarded.client }] : [], files: content.files })
+    coreClients: () => forwarded ? [{ hostId: 'local', client: forwarded.client }] : [], files: content.files,
+    callOriginalCore: async (hostId, method, params, context) => {
+      expect(hostId).toBe('local')
+      const original = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath },
+        ...(context.caller ? { credentials: context.caller } : {}), ...(context.runtimeFence ? { runtimeFence: context.runtimeFence } : {}) })
+      try { return await original.call(method, params) } finally { await original.dispose() }
+    } })
   await desktop.start(); cleanup.push(() => desktop.stop())
   const connect = vi.spyOn(core.AgentMuxClient.prototype, 'connect').mockImplementationOnce(async function () {
     const inner = this as any
@@ -152,6 +200,22 @@ it('compiled watch crosses the actual unconfigured Core forwarding port and Desk
   await vi.waitFor(() => expect(reader.effects()).toHaveLength(1))
   expect(reader.effects()[0]).toMatchObject({ request: input, receipt: created.body.result })
   await reader.close()
+  const borrowed = vi.spyOn((desktop as any).service, 'subscribe'), fencedEvents: any[] = []
+  const runtimeFence = { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }
+  const fenced = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath },
+    credentials: { agentSessionId: agent.actor.id, capability: f.original.capability }, runtimeFence })
+  cleanup.push(() => fenced.dispose())
+  const fencedReader = await fenced.subscribe('file.mutation.watch', scope, { onInitial: () => {}, onEvent: event => { fencedEvents.push(event) } })
+  cleanup.push(() => fencedReader.dispose())
+  expect(borrowed.mock.calls[0]![3]).toMatchObject({ runtimeFence, caller: { agentSessionId: agent.actor.id } })
+  const fencedStat = (await f.cli(['stat'], { ...query, path: 'fenced-crossed' })).body.result
+  const fencedCreated = await f.cli(['mkdir'], { ...input, operationId: 'fenced-crossed', path: 'fenced-crossed', expectedResource: fencedStat.resource,
+    expected: { root: fencedStat.result.observation.root, parent: fencedStat.result.observation.parent } })
+  expect(fencedCreated.code, fencedCreated.stdout + fencedCreated.stderr).toBe(0)
+  expect(fencedCreated.body.result.result.filesystem).toBe('created')
+  await vi.waitFor(() => expect(fencedEvents.filter(event => event.type === 'effect')).toHaveLength(1))
+  expect(fencedEvents[0]).toMatchObject({ type: 'effect', data: { request: { operationId: 'fenced-crossed' } } })
+  await fencedReader.dispose(); await fenced.dispose()
   const delivered: any[] = []
   let release!: () => void
   const held = new Promise<void>(yes => { release = yes })
@@ -172,7 +236,7 @@ it('compiled watch crosses the actual unconfigured Core forwarding port and Desk
   }
   expect(delivered.map(event => event.type)).toEqual(['effect', 'error'])
   expect(delivered[1]).toMatchObject({ error: { code: 'FILE_MUTATION_OBSERVATION_GAP' } })
-  expect(nativeMkdir).toHaveBeenCalledTimes(4)
+  expect(nativeMkdir).toHaveBeenCalledTimes(5)
   release(); await slow.dispose()
   expect(native.stop).not.toHaveBeenCalled()
 }, 30000)
