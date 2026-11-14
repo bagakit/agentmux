@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
+import { chooseField } from './helpers/selection-field'
 import { beforeEach, expect, it, vi } from 'vitest'
 import type { AppConfig, HostConfig, SshHostConfig } from '../src/shared/contracts'
 import { parseHostConfiguration, parseHostConfigurations } from '@agentmux/host/host-configuration'
@@ -40,9 +41,9 @@ async function fill(node: HTMLInputElement | HTMLTextAreaElement, value: string)
   })
 }
 async function transport(value: string) {
-  const select = dom.container.querySelector<HTMLSelectElement>('[aria-label="Connection transport"]')!
-  expect(select).not.toBeNull()
-  await act(async () => { select.value = value; select.dispatchEvent(new Event('change', { bubbles: true })) })
+  const field = dom.container.querySelector<HTMLElement>('[aria-label="Connection transport"]')!
+  expect(field).not.toBeNull()
+  await chooseField(field, value)
 }
 async function button(text: string) {
   const found = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].filter(node => node.textContent?.trim() === text)
@@ -72,10 +73,24 @@ it('the real Host editor saves Tailcat-only with no SSH hostname and tests the s
   const test = vi.spyOn(api.hosts, 'check').mockImplementation(async host => ({ input: host, outcome: 'ready', detail: 'Original Runtime confirmed' }))
   const upgrade = vi.spyOn(api.hosts, 'upgradeCheck')
   await show()
-  expect(dom.container.querySelector<HTMLSelectElement>('[aria-label="Connection transport"]')!.value).toBe('ssh')
+  const trigger = dom.container.querySelector<HTMLElement>('[aria-label="Connection transport"]')!
+  await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+  await vi.waitFor(() => expect(document.querySelectorAll('.selection-field__menu [role="menuitemradio"]')).toHaveLength(3))
+  expect([...document.querySelectorAll('.selection-field__menu [role="menuitemradio"]')].map(node => [node.getAttribute('data-value'), node.textContent])).toEqual([['ssh', 'SSH'], ['ssh-tailcat', 'SSH first, Tailcat backup'], ['tailcat', 'Tailcat only']])
+  expect(document.querySelector('.selection-field__search')).toBeNull()
+  await act(async () => document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 40)) })
+  expect(document.querySelector('.selection-field__menu')).toBeNull()
+  expect(document.activeElement).toBe(trigger)
+  expect(trigger.dataset.value).toBe('ssh')
+  const describedBy = trigger.getAttribute('aria-describedby')!.split(/\s+/)
+  expect(describedBy).toContain('host-transport-hint')
+  expect(describedBy).toHaveLength(2)
+  expect(document.getElementById(describedBy.find(id => id !== 'host-transport-hint')!)?.textContent).toContain('SSH')
+  expect(document.getElementById('host-transport-hint')?.textContent).toContain('Test verifies this connection.')
   expect(dom.container.querySelector('[data-tailcat-client]')).toBeNull()
   await transport('tailcat')
-  expect(dom.container.querySelector<HTMLSelectElement>('[aria-label="Connection transport"]')!.value).toBe('tailcat')
+  expect(trigger.dataset.value).toBe('tailcat')
   upgrade.mockClear()
   await fill(input('Tailcat address'), 'tcfixturecredential')
   await fill(input('Tailcat client key'), 'saved-client')
