@@ -16,6 +16,9 @@
 .session-takeover__club-create { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 10px 0 18px; }
 .session-takeover__club-create small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
 .session-takeover__notice { color: var(--text-2); font-size: var(--fs-meta); line-height: 1.6; }
+.session-takeover__placement { margin-block: 8px 16px; color: var(--text-3); font-size: var(--fs-meta); }
+.session-takeover__placement > summary { padding-block: 8px; cursor: pointer; overflow-wrap: anywhere; }
+.session-takeover__placement .selection-field { margin-top: 4px; }
 .session-takeover__retained { margin-bottom: 18px; color: var(--text-3); font-size: var(--fs-meta); }
 .session-takeover__retained > summary { padding-block: 8px; cursor: pointer; }
 .session-takeover__retained > button { display: flex; flex-wrap: wrap; gap: 8px; max-width: 100%; margin-block: 6px; }

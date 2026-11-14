@@ -48,7 +48,16 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, onSu
     const state = useAppStore.getState()
     return spatialCatalog(state, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots) ?? [])
   }, [config, facts])
-  const destinations = useMemo(() => agentNewTabDestinations(catalog, facts.layouts)
+  const placements = useMemo(() => Object.entries(facts.layouts).flatMap(([displayWorkspaceId, layout]) => layout.groups.map((group, index) => ({
+    value: JSON.stringify([displayWorkspaceId, group.id]), displayWorkspaceId, groupId: group.id,
+    label: `${config?.workspaces.find(workspace => workspace.id === displayWorkspaceId)?.name ?? 'Workspace'} · Group ${index + 1}`
+  }))), [facts.layouts, config?.workspaces])
+  const initialPlacement = { displayWorkspaceId: source.destination?.displayWorkspaceId ?? source.origin.workspaceId, groupId: source.destination?.groupId ?? source.origin.tabGroupId }
+  const [placementKey, setPlacementKey] = useState(JSON.stringify([initialPlacement.displayWorkspaceId, initialPlacement.groupId]))
+  const placement = placements.find(item => item.value === placementKey)
+  // Resource and display choices remain independent: mounting a menu never creates
+  // every Zone × display Group combination in this window.
+  const destinations = useMemo(() => (placement ? agentNewTabDestinations(catalog, facts.layouts, undefined, placement) : [])
     .filter(item => source.destinationKind !== 'club' || catalog.spaces.some(space => space.spaceId === item.destination.spaceId && space.kind === 'mote'))
     .sort((a, b) => Number(catalog.spaces.find(space => space.spaceId === b.destination.spaceId)?.kind === 'mote') -
       Number(catalog.spaces.find(space => space.spaceId === a.destination.spaceId)?.kind === 'mote'))
@@ -60,16 +69,29 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, onSu
       return { ...item, label: `${space?.name ?? 'Unbound Zone'} · ${workspace?.name ?? 'Workspace'}${group === undefined ? '' : ` · Group ${group + 1}`}`,
         ...(space?.kind === 'mote' ? { icon: <SpaceObjectIcon kind="mote" name={space.name} manualIcon={icons[space.spaceId] ?? null}
           avatarObjectKey={space.spaceId} avatarWorkspaceId={home?.workspaceId ?? undefined} avatarTopicId={space.topicId ?? undefined} visible={false} /> } : {}) }
-    }), [catalog, facts.layouts, config?.workspaces, source.destinationKind, icons])
-  const initialDestination = source.destination ?? (source.destinationKind !== 'club' ? (() => {
-    const location = catalog.locations.find(item => item.tabId === source.origin.tabId && item.regionId === source.origin.regionId &&
+    }), [catalog, facts.layouts, config?.workspaces, source.destinationKind, icons, placement])
+  const initialDestination = source.destination ?? (source.destinationKind !== 'club' && placement ? (() => {
+    const locations = catalog.locations.filter(item => item.tabId === source.origin.tabId && item.regionId === source.origin.regionId &&
       item.displayWorkspaceId === source.origin.workspaceId && item.groupId === source.origin.tabGroupId)
-    const exact = location ? destinations.filter(item => item.destination.zoneId === location.zoneId && item.destination.spaceId === location.spaceId &&
-      item.destination.displayWorkspaceId === location.displayWorkspaceId && item.destination.groupId === location.groupId) : []
+    const exact = locations.length ? destinations.filter(item => locations.some(location =>
+      item.destination.zoneId === location.zoneId && item.destination.spaceId === location.spaceId)) : source.origin.workspaceId ? destinations.filter(item =>
+      catalog.zones.some(zone => zone.zoneId === item.destination.zoneId && zone.workspaceId === source.origin.workspaceId)) : []
     return exact.length === 1 ? exact[0]!.destination : undefined
   })() : undefined)
-  const [destinationKey, setDestinationKey] = useState(initialDestination ? JSON.stringify(initialDestination) : '')
-  const destination = destinations.find(item => item.value === destinationKey)?.destination
+  const resourceKey = (value: { zoneId: string; spaceId?: string }) => JSON.stringify([value.zoneId, value.spaceId ?? null])
+  const [chosenResource, setChosenResource] = useState<string | null>(null)
+  const selectedResource = chosenResource ?? (initialDestination ? resourceKey(initialDestination) : '')
+  const destination = destinations.find(item => resourceKey(item.destination) === selectedResource)?.destination
+  const destinationKey = destination ? JSON.stringify(destination) : selectedResource && placement ? (() => {
+    const [zoneId, spaceId] = JSON.parse(selectedResource) as [string, string | null]
+    return JSON.stringify({ zoneId, ...(spaceId ? { spaceId } : {}), displayWorkspaceId: placement.displayWorkspaceId, groupId: placement.groupId, newTab: true })
+  })() : ''
+  function setDestinationKey(value: string) {
+    if (!value) { setChosenResource(''); return }
+    const next = JSON.parse(value) as NonNullable<typeof destination>
+    setPlacementKey(JSON.stringify([next.displayWorkspaceId, next.groupId]))
+    setChosenResource(resourceKey(next))
+  }
   const targetHostId = source.derived ? source.hostId : destination ? catalog.zones.find(zone => zone.zoneId === destination.zoneId)?.hostId ?? undefined : undefined
   const detections = useAppStore(state => state.executorDetections)
   const inventory = useAppStore(state => targetHostId ? state.hostExecutorInventories[targetHostId] : undefined)
@@ -211,11 +233,10 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, onSu
       const result = await prepareTakeoverClub(workingSource, operation => { if (mounted.current) setWorkingSource(operation.takeoverSource) })
       if (!mounted.current || !activeRef.current) return
       const { topic } = result, state = useAppStore.getState(), address = result.address
-      const existing = address && agentNewTabDestinations(spatialCatalog(state, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots) ?? []), state.layouts)
-        .filter(item => item.destination.spaceId === address.spaceId && item.destination.zoneId === address.zoneId)
-      // Prefer only the invoking presentation Group; creation never chooses an arbitrary Group or Agent.
-      const nearby = existing ? existing.filter(item => item.destination.displayWorkspaceId === source.origin.workspaceId && item.destination.groupId === source.origin.tabGroupId) : []
-      setDestinationKey(nearby.length === 1 ? nearby[0]!.value : '')
+      const existing = address && placement ? agentNewTabDestinations(spatialCatalog(state, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots) ?? []), state.layouts, undefined, placement)
+        .filter(item => item.destination.spaceId === address.spaceId && item.destination.zoneId === address.zoneId) : []
+      // Only the chosen confirmed Group can receive the newly prepared Club.
+      setDestinationKey(existing.length === 1 ? existing[0]!.value : '')
       setUnconfirmed(false)
       setNotice('Club created. Choose its destination and an Agent to complete the second step. No Agent has been started.')
     } catch (cause) { if (mounted.current) { setUnconfirmed(true); setIssue(presentError(cause)) } }
@@ -307,8 +328,12 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, onSu
       </details> : null}
       {!source.derived && subject.hostId && subject.agentSessionId ? <AgentPromotionRecovery target={{ hostId: subject.hostId, agentSessionId: subject.agentSessionId }} /> : null}
       {!source.derived ? <>
-        <SelectionField label="Takeover destination" value={destinationKey} onValueChange={value => { setDestinationKey(value); setSelected(null) }} disabled={busy || creatingClub || unconfirmed || closedRequest !== null}
+        <SelectionField label="Takeover destination" value={destinationKey} missingOptionLabel="Selected destination unavailable" missingOptionDescription="The original resource choice is retained. Choose another destination or return after its observation recovers." onValueChange={value => { setDestinationKey(value); setSelected(null) }} disabled={busy || creatingClub || unconfirmed || closedRequest !== null}
           options={[{ value: '', label: source.destinationKind === 'club' ? 'Choose an existing Club' : 'Choose a destination' }, ...destinations]} />
+        <details className="session-takeover__placement"><summary>Show in · {placement?.label ?? 'Choose a display location'}</summary>
+          <SelectionField label="Takeover display location" value={placementKey} missingOptionLabel="Selected display location unavailable" onValueChange={value => { setPlacementKey(value); setSelected(null) }}
+            disabled={busy || creatingClub || unconfirmed || closedRequest !== null} options={placements} />
+        </details>
         {!destinations.length ? <p>No destination is confirmed yet. Open its existing Project or Club, then return to this work.</p> : null}
         {source.destinationKind === 'club' ? <div className="session-takeover__club-create"><button type="button" className="small-button" disabled={busy || creatingClub || unconfirmed || Boolean(workingSource.clubPreparation) || operations.some(operation => operation.takeoverSource.clubPreparation && !operation.takeoverSource.coreRequest) || closedRequest !== null || config?.promotion?.enabled === false} onClick={() => { void createClub() }}><MoteIcon size={14} />{creatingClub ? 'Creating Club…' : 'Create a Club first'}</button><small>Two steps: create the team, then choose its Agent.</small></div> : null}
       </> : null}
