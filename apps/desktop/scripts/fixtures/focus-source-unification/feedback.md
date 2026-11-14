@@ -8,4 +8,6 @@ The scene exercises unconfirmed takeover, one explicit cancellation, pending, an
 
 Normal and narrow windows in light and dark themes retain the first-level check/cancel or check/continue controls until resolved. Complete technical IDs stay behind the default folded details. A second real Electron process reads the exact first process Store checkpoint from the same private file, uses actual persist hydration and startup workface restoration, and displays the original workface and draft. It retains the full cancellation input and result without replaying the settled feedback. This consumer proof does not claim Native owner durability, Core cancellation fencing or Provider continuation; those have separate behavioral evidence.
 
+The neighboring card with only a legacy read reference stays clear of active feedback. Open its Agent information and Source tab to find the folded legacy history. Capture the short pre-dispatch failure, exact read-only check, folded technical details and full copyable operation ID in wide dark and narrow light layouts.
+
 The capture only records evidence. An independent reviewer must actually view every final complete PNG and write the required changes and images read. Necessary proof is retained; isolated process data, compiled bundle and native-reader resources are removed when no owned process remains.
