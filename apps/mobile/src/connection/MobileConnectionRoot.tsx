@@ -208,10 +208,10 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, p
     void connect()
     return () => { controller.abort(); metadata.abort(); if (cancelMetadata.current === cancelObservation) cancelMetadata.current = null; clearTimeout(timer); release?.(); if (binding.current?.client === owned) binding.current = null; void owned?.dispose(); window.removeEventListener('online', resume); document.removeEventListener('visibilitychange', resume) }
   }, [offer, pin, linkIssue, connectionRetry])
-  const observationPanel = metadataPending ? <div className="mobile-startup-observation" role="status"><p>正在读取连接…</p><button type="button" onClick={() => cancelMetadata.current?.()}>取消本次读取</button></div>
-    : connection.state === 'unavailable' && pin ? <div className="mobile-startup-observation"><p>{connection.message}</p><button type="button" onClick={() => retryConnection(value => value + 1)}>重新检查连接</button></div> : null
+  const observationPanel = metadataPending ? <div className="mobile-startup-observation" role="status"><button type="button" onClick={() => cancelMetadata.current?.()}>取消本次读取</button></div>
+    : connection.state === 'unavailable' && pin ? <div className="mobile-startup-observation"><button type="button" onClick={() => retryConnection(value => value + 1)}>重新检查连接</button></div> : null
   const waiting = <main className="mobile-startup" aria-live="polite" aria-busy={!moduleIssue}>
-    <strong>{moduleIssue ? '工作面暂时无法打开' : '正在准备工作面'}</strong><p>{connection.message}</p>
+    {!moduleIssue && <strong>正在准备工作面</strong>}<p>{connection.message}</p>
     {moduleIssue ? <LoadFailure active label="工作面" failure={moduleIssue} onReturn={() => { if (history.length > 1) history.back(); else setReturnIssue('没有可返回的上一页，原工作面仍保留。') }} /> : <div className="mobile-startup-skeleton" aria-hidden="true"><span /><span /><span /></div>}
     {observationPanel}{returnIssue && <p role="status">{returnIssue}</p>}
   </main>

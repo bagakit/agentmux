@@ -13,4 +13,6 @@ body { color: var(--text); background: var(--bg); }
 .mobile-startup-skeleton > span { display: block; height: 12px; width: 100%; border-radius: var(--radius); background: var(--surface-2); }
 .mobile-startup-skeleton > span:last-child { width: 60%; }
 .mobile-startup-observation { margin-block: 8px; }
+.mobile-startup .mobile-deferred-surface { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
+.mobile-startup .mobile-deferred-surface > :not(button) { flex-basis: 100%; min-width: 0; }
 .mobile-startup .mobile-update-recovery__actions { display: flex; flex-wrap: wrap; gap: 8px; }
