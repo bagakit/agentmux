@@ -8,7 +8,7 @@ import { Button } from '@agentmux/client-ui/components/Button'
 import { agentSessionPresentationIndex } from '../lib/session-presentation'
 import { projectWorkspaces } from '../lib/workspace-projects'
 import type { GoalStage } from '../lib/goal-presentation'
-import { goalGroupSummary, groupGoals } from '../lib/goal-groups'
+import { GOAL_GROUP_LABELS, goalGroupSummary, groupGoals } from '../lib/goal-groups'
 import { adjacentGoalId, createGoalRetainedStartsSelector, goalQueuePosition, stageIndex, stageTransitions } from '../lib/goal-navigation'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { useAppStore } from '../store'
@@ -17,7 +17,7 @@ import { DEMAND_STATUS_IDS, DEMAND_STATUS_LABELS, demandColumns, projectDemands,
 import { requestPmoTeamsTopicFloatingOpen } from '../lib/pmo-teams-topic-floating'
 import { DIRECT_GOAL_TITLE, directGoalRequest, retryDirectGoal, saveDirectGoal, startDirectGoal, subscribeDirectGoalRequest } from '../lib/goals-direct-pmo'
 import { GoalDetail } from './GoalDetail'
-import { GoalRow, GoalsCollectionBody } from './GoalsCollection'
+import { GoalBoardWorkflow, GoalRow, GoalsCollectionBody } from './GoalsCollection'
 import { EMPTY_GOAL_ACKNOWLEDGEMENT, type GoalAcknowledgementFeedback } from './GoalAlignment'
 import { GoalsCommonActions } from './GoalsCommonActions'
 import { GlobalGoalPatrolControl } from './GlobalGoalPatrolControl'
@@ -46,6 +46,7 @@ export function GlobalBoardSurface() {
   const [query, setQuery] = useState('')
   const [view, setView] = useState(() => resolveGoalsPreferences(config?.goals).defaultView)
   const [filtersOpen, setFiltersOpen] = useState(false)
+  const [stageFilter, setStageFilter] = useState<GoalStage | null>(null)
   const [statusFilter, setStatusFilter] = useState<DemandStatus | 'all'>('all')
   const [projectFilter, setProjectFilter] = useState('all')
   const [routingFilter, setRoutingFilter] = useState<'all' | 'unassigned' | 'assigned'>('all')
@@ -73,25 +74,36 @@ export function GlobalBoardSurface() {
   const retainedStarts = useAppStore(useShallow(retainedStartsSelector))
   const selectedDemand = projectedDemands.find((demand) => demand.id === selectedDemandId) ?? null
   const projects = useMemo(() => projectWorkspaces((config?.workspaces ?? []).filter((workspace) => workspace.id !== SCRATCH_WORKSPACE_ID)), [config?.workspaces])
-  const filteredDemands = useMemo(() => projectedDemands.filter((demand) => {
+  const scopedDemands = useMemo(() => projectedDemands.filter((demand) => {
     const normalized = query.trim().toLocaleLowerCase()
     const matchesQuery = !normalized || `${demand.title} ${demand.description} ${demand.projectName ?? ''}`.toLocaleLowerCase().includes(normalized)
     const matchesRouting = routingFilter === 'all' || (routingFilter === 'unassigned' ? !demand.projectId || !demand.assigneeSessionIds?.length : Boolean(demand.projectId && demand.assigneeSessionIds?.length))
-    const matchesHistory = showHistory || statusFilter !== 'all' || (demand.status !== 'cancelled' && (demand.status !== 'done' || !isCurrentGroundingAccepted(demand.alignment, demand.grounding)))
-    return matchesQuery && matchesHistory && (statusFilter === 'all' || demand.status === statusFilter) && (projectFilter === 'all' || demand.projectId === projectFilter) && matchesRouting && (assigneeFilter === 'all' || demand.assigneeSessionIds?.some(ref => demandAgentReferenceKey(ref) === assigneeFilter))
-  }), [assigneeFilter, projectFilter, query, routingFilter, statusFilter, showHistory, projectedDemands])
-  const columns = useMemo(() => demandColumns(filteredDemands), [filteredDemands])
+    return matchesQuery && (statusFilter === 'all' || demand.status === statusFilter) && (projectFilter === 'all' || demand.projectId === projectFilter) && matchesRouting && (assigneeFilter === 'all' || demand.assigneeSessionIds?.some(ref => demandAgentReferenceKey(ref) === assigneeFilter))
+  }), [assigneeFilter, projectFilter, query, routingFilter, statusFilter, projectedDemands])
   const acknowledgementFailed = (id: string) => Boolean(acknowledgementFeedback[id]?.failure)
-  const groups = useMemo(() => groupGoals(filteredDemands, id => Boolean(acknowledgementFeedback[id]?.failure), id => retainedStarts[id]), [filteredDemands, acknowledgementFeedback, retainedStarts])
+  const filteredDemands = useMemo(() => showHistory || statusFilter !== 'all' ? scopedDemands : scopedDemands.filter(demand =>
+    demand.status !== 'cancelled' && (demand.status !== 'done' || !isCurrentGroundingAccepted(demand.alignment, demand.grounding))),
+  [showHistory, statusFilter, scopedDemands])
+  const allGroups = useMemo(() => groupGoals(scopedDemands, id => Boolean(acknowledgementFeedback[id]?.failure), id => retainedStarts[id]), [scopedDemands, acknowledgementFeedback, retainedStarts])
+  const defaultGroups = useMemo(() => {
+    if (filteredDemands === scopedDemands) return allGroups
+    const visible = new Set(filteredDemands)
+    return allGroups.map(group => ({ ...group, goals: group.goals.filter(goal => visible.has(goal)) })).filter(group => group.goals.length)
+  }, [allGroups, scopedDemands, filteredDemands])
+  // Selecting Finished explicitly opens the matching history, preserving the default view when returning to All.
+  const workflowGroups = useMemo(() => allGroups.flatMap(group => group.stage === 'finished' ? [group] : defaultGroups.filter(item => item.stage === group.stage)), [allGroups, defaultGroups])
+  const groups = useMemo(() => stageFilter ? workflowGroups.filter(group => group.stage === stageFilter) : defaultGroups, [workflowGroups, defaultGroups, stageFilter])
+  const visibleDemands = stageFilter ? groups[0]?.goals ?? [] : filteredDemands
+  const columns = useMemo(() => demandColumns(visibleDemands), [visibleDemands])
   const summaryGroups = groups.filter(group => group.stage !== 'finished')
   // A Goal that was already shown and moved group because its facts changed gets one short cue.
   const shownStages = useRef(new Map<string, GoalStage>())
   const [changedStages, setChangedStages] = useState<Set<string>>(() => new Set())
   useEffect(() => {
-    const moved = stageTransitions(shownStages.current, groups)
-    shownStages.current = stageIndex(groups)
+    const moved = stageTransitions(shownStages.current, workflowGroups)
+    shownStages.current = stageIndex(workflowGroups)
     if (moved.size) setChangedStages(moved)
-  }, [groups])
+  }, [workflowGroups])
   const collectionView = view
   const queue = selectedDemandId ? goalQueuePosition(groups, selectedDemandId) : null
   function moveFocus(from: HTMLElement, step: 1 | -1) {
@@ -100,12 +112,13 @@ export function GlobalBoardSurface() {
   }
   const visibleStatuses = statusFilter === 'all' ? DEMAND_STATUS_IDS : [statusFilter]
   const appliedFilters = [
+    ...(stageFilter ? [{ label: GOAL_GROUP_LABELS[stageFilter], clear: () => setStageFilter(null) }] : []),
     ...(statusFilter !== 'all' ? [{ label: DEMAND_STATUS_LABELS[statusFilter], clear: () => setStatusFilter('all') }] : []),
     ...(projectFilter !== 'all' ? [{ label: projects.find((project) => project.id === projectFilter)?.name ?? 'Project unavailable', clear: () => setProjectFilter('all') }] : []),
     ...(routingFilter !== 'all' ? [{ label: routingFilter === 'unassigned' ? 'Needs routing' : 'Assigned', clear: () => setRoutingFilter('all') }] : []),
     ...(assigneeFilter !== 'all' ? [{ label: assigneeName(assigneeFilter), clear: () => setAssigneeFilter('all') }] : [])
   ]
-  function clearConditions() { setQuery(''); setStatusFilter('all'); setProjectFilter('all'); setRoutingFilter('all'); setAssigneeFilter('all'); setFiltersOpen(false); queueMicrotask(() => searchRef.current?.focus()) }
+  function clearConditions() { setStageFilter(null); setQuery(''); setStatusFilter('all'); setProjectFilter('all'); setRoutingFilter('all'); setAssigneeFilter('all'); setFiltersOpen(false); queueMicrotask(() => searchRef.current?.focus()) }
 
   function closeDetail() {
     const row = selectedRowRef.current ?? surfaceRef.current?.querySelector<HTMLElement>('[data-demand-id][aria-pressed="true"]')
@@ -123,6 +136,7 @@ export function GlobalBoardSurface() {
     finally { moteRequests.current.delete(demandId); setMotePending(current => { const next = { ...current }; delete next[demandId]; return next }) }
   }
   function createGoal() {
+    if (stageFilter && stageFilter !== 'define') setStageFilter(null)
     const project = projects.find(candidate => candidate.id === projectFilter)
     if (query.trim() && !DIRECT_GOAL_TITLE.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())) setQuery('')
     if (statusFilter !== 'all' && statusFilter !== 'backlog') setStatusFilter('all')
@@ -131,7 +145,7 @@ export function GlobalBoardSurface() {
     if (projectFilter !== 'all' && !project) setProjectFilter('all')
     void startDirectGoal(project)
   }
-  function renderRow(demand: DemandProjection) { return <GoalRow key={demand.id} demand={demand} selected={demand.id === selectedDemandId} acknowledgementFailed={acknowledgementFailed(demand.id)} stageChanged={changedStages.has(demand.id)} selectedSessionId={selectedSessionId} compact={Boolean(selectedDemandId)} onSelect={() => { selectedRowRef.current = document.activeElement as HTMLElement; setSelectedDemand(demand.id) }} /> }
+  function renderRow(demand: DemandProjection) { return <GoalRow key={demand.id} board={view === 'board' && !selectedDemandId} demand={demand} selected={demand.id === selectedDemandId} acknowledgementFailed={acknowledgementFailed(demand.id)} stageChanged={changedStages.has(demand.id)} selectedSessionId={selectedSessionId} compact={Boolean(selectedDemandId)} onSelect={() => { selectedRowRef.current = document.activeElement as HTMLElement; setSelectedDemand(demand.id) }} /> }
 
   return <section ref={surfaceRef} className={`global-board-surface goals-surface${selectedDemandId ? ' goals-surface--detail-open' : ''}`} onKeyDown={(event) => {
     const row = (event.target as HTMLElement).closest<HTMLElement>('.goals-collection [data-demand-id]')
@@ -148,7 +162,7 @@ export function GlobalBoardSurface() {
       <header className="goals-page-header">
         {projectedDemands.length && !selectedDemandId ? <img className="goals-page-header__art" src={goalsHeaderArtUrl} alt="" aria-hidden="true" width={139} height={96} draggable={false} onError={event => { event.currentTarget.hidden = true }} /> : null}
         <div className="goals-page-header__title"><span className="goals-page-header__mark" aria-hidden="true"><ThemeObjectGoalIcon size={16} /></span><h1>Goals</h1></div>
-        {projectedDemands.length ? <p className="goals-page-header__summary" aria-live="polite">{summaryGroups.map(group => <span key={group.stage} data-goal-summary-stage={group.stage}>{goalGroupSummary(group.stage, group.goals.length)}</span>)}{!groups.some(group => group.stage === 'you') ? <span data-goal-summary-clear>Nothing waits on you</span> : null}</p> : null}
+        {projectedDemands.length && view !== 'board' ? <p className="goals-page-header__summary" aria-live="polite">{summaryGroups.map(group => <span key={group.stage} data-goal-summary-stage={group.stage}>{goalGroupSummary(group.stage, group.goals.length)}</span>)}{!groups.some(group => group.stage === 'you') ? <span data-goal-summary-clear>Nothing waits on you</span> : null}</p> : null}
         <div className="goals-page-header__actions">
           <GlobalGoalPatrolControl />
           <button ref={newGoalRef} type="button" className={selectedDemandId ? 'small-button' : 'primary-button'} aria-label="New Goal" aria-describedby="goals-create-effect" data-new-goal disabled={Boolean(creation)} onClick={createGoal}><ThemeActionCreateIcon size={14} />New Goal<span id="goals-create-effect" className="goals-visually-hidden">Draft + discussion</span></button>
@@ -167,15 +181,17 @@ export function GlobalBoardSurface() {
         <label>Routing<SelectionField label="Filter routing" value={routingFilter} onValueChange={value => setRoutingFilter(value as typeof routingFilter)} options={[{ value: 'all', label: 'All routing' }, { value: 'unassigned', label: 'Needs routing' }, { value: 'assigned', label: 'Assigned' }]} /></label>
         <label>Assignee<SelectionField label="Filter assignee" value={assigneeFilter} onValueChange={setAssigneeFilter} options={[{ value: 'all', label: 'Any assignee' }, ...assigneeIds.map(value => ({ value, label: assigneeName(value) }))]} /></label>
       </div> : null}
-      {appliedFilters.length ? <div className="goals-filter-chips">{appliedFilters.map((filter) => <button type="button" key={filter.label} onClick={filter.clear} aria-label={`Clear ${filter.label} filter`}>{filter.label}<ThemeActionClearIcon size={11} /></button>)}</div> : null}
+      {appliedFilters.length ? <div className="goals-filter-chips">{appliedFilters.map((filter) => <button type="button" key={filter.label} onClick={filter.clear} aria-label={`Clear ${filter.label} filter`}>{filter.label}<ThemeActionClearIcon size={11} /></button>)}<button type="button" className="goals-filter-chips__clear" data-goal-clear-all onClick={clearConditions}>Clear all</button></div> : null}
       {creation ? <div className="goals-service goals-creation" role="status" data-direct-goal-id={creation.id}>
         {creation.pending ? creation.phase === 'save' ? 'Saving goal…' : 'Goal saved. Preparing its discussion…' : creation.phase === 'save' ? creation.notSaved ? 'The goal is not saved. Save this same goal to continue.' : 'Goal save is unconfirmed. Read this same goal before continuing.' : 'Goal saved. Its discussion is unconfirmed; the original workface is kept.'}
         {creation.error ? <><span>{creation.error}</span><Button type="button" variant="primary" onClick={() => void (creation.notSaved ? saveDirectGoal() : retryDirectGoal())}>{creation.phase === 'save' ? creation.notSaved ? 'Save this goal' : 'Read goal again' : 'Retry goal discussion'}</Button></> : null}
       </div> : null}
+      {collectionView === 'board' && projectedDemands.length > 0 ? <GoalBoardWorkflow groups={workflowGroups} selected={stageFilter}
+        onSelect={value => setStageFilter(current => current === value ? null : value)} /> : null}
       <div className={`goals-collection goals-collection--${collectionView}`} role="region" aria-label="Global goals">
-        <GoalsCollectionBody view={collectionView} groups={groups} columns={columns} visibleStatuses={visibleStatuses} hasGoals={projectedDemands.length > 0} hasMatches={filteredDemands.length > 0} query={query} filterCount={appliedFilters.length} hideStart={creation?.phase === 'save' && !creation.notSaved} onClearConditions={clearConditions} onShowFinished={() => setShowHistory(true)} renderRow={renderRow} />
+        <GoalsCollectionBody view={collectionView} groups={groups} columns={columns} visibleStatuses={visibleStatuses} hasGoals={projectedDemands.length > 0} hasMatches={visibleDemands.length > 0} query={query} filterCount={appliedFilters.length} hideStart={creation?.phase === 'save' && !creation.notSaved} onClearConditions={clearConditions} onShowFinished={() => setShowHistory(true)} renderRow={renderRow} />
       </div>
-      <footer className="goals-footer"><span>{filteredDemands.length} of {projectedDemands.length} goals{collectionView === 'board' ? ' · Work status' : ''}</span><button type="button" aria-pressed={showHistory} onClick={() => setShowHistory(!showHistory)}>{showHistory ? 'Hide finished' : 'Show finished'}</button></footer>
+      <footer className="goals-footer"><span>{visibleDemands.length} of {projectedDemands.length} goals{collectionView === 'board' ? ' · Work status' : ''}</span><button type="button" aria-pressed={showHistory} onClick={() => setShowHistory(!showHistory)}>{showHistory ? 'Hide finished' : 'Show finished'}</button></footer>
     </div>
     {selectedDemand ? <GoalDetail
       key={selectedDemand.id}

@@ -149,12 +149,15 @@ function GoalTeamMenu({ faces, children, className, label }: { faces: readonly F
 }
 
 /** Current relationship summary only: no history members, per-card RPC or inferred activity. */
-export const GoalAgentGroup = memo(function GoalAgentGroup({ demand, descriptionId }: { demand: DemandProjection; descriptionId: string }) {
+export const GoalAgentGroup = memo(function GoalAgentGroup({ demand, descriptionId, board = false }: { demand: DemandProjection; descriptionId: string; board?: boolean }) {
   const selector = useMemo(() => createGoalAgentGroupSelector(demand), [demand.supervisorSessionId, demand.assigneeSessionIds, demand.creationOrigin, demand.participations, demand.plan, demand.delegations])
   const faces = useAppStore(selector)
-  if (!faces.length) return null
-  return <span className="goal-agent-group" data-goal-agent-group={demand.id}><span id={descriptionId} className="goals-visually-hidden">Goal agents: {faces.map(face => face.label).join('; ')}</span>
-    <GoalTeamMenu faces={faces} className="goal-agent-group__label" label="Read all Goal agents">Agents</GoalTeamMenu>
+  if (!faces.length) return board && demand.responsibility?.supervisor.state !== 'missing' ? <span className="goals-board__unassigned" data-goal-board-role>Team unassigned</span> : null
+  return <span className={`goal-agent-group${board ? ' goal-agent-group--board' : ''}`} data-goal-agent-group={demand.id}><span id={descriptionId} className="goals-visually-hidden">Goal agents: {faces.map(face => face.label).join('; ')}</span>
+    <GoalTeamMenu faces={faces} className="goal-agent-group__label" label="Read all Goal agents">{board
+      ? faces.slice(0, 2).map(face => <span className="goals-board__member" data-goal-board-role key={face.key} title={face.label}>
+          <small>{face.roles.replace('Executor', 'Assignee')}</small><span>{face.name ?? memberReference(face).join(' @ ')}</span>
+        </span>) : 'Agents'}</GoalTeamMenu>
     <AvatarGroup label="Goal agents" interactive items={faces.map(face => ({ key: face.key, label: face.label,
       avatar: face.subject ? <GoalAgentButton face={face} /> : <GoalTeamMenu faces={[face]} className="goal-agent-group__avatar" label={`Read ${face.label}`}><FaceAvatar face={face} /></GoalTeamMenu> }))}
       overflow={<GoalTeamMenu faces={faces} className="goal-agent-group__overflow" label={`Read all ${faces.length} Goal agents`}>+{faces.length - 3}</GoalTeamMenu>} />
