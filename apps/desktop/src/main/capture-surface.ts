@@ -217,6 +217,7 @@ export class CaptureSurface {
     for (const frame of result.displays) {
       const display = displays.find(row => row.id === frame.displayId), prepared = active.overlays.find(row => row.display.id === frame.displayId)
       if (!display || !prepared || !sameRect(display.bounds, frame.frame) || display.scaleFactor !== frame.scale || !Number.isFinite(frame.safeTop) || frame.safeTop < 0
+        || (prepared.input !== undefined && prepared.input.safeTop !== frame.safeTop)
         || !sameRect(prepared.display.bounds, display.bounds) || prepared.display.scaleFactor !== display.scaleFactor) layoutChanged()
     }
   }
@@ -225,7 +226,7 @@ export class CaptureSurface {
     const firstMode = active.background, secondMode: CaptureBackground = firstMode === 'included' ? 'excluded' : 'included'
     const geometry = !(first instanceof Error) ? first : !(second instanceof Error) && second ? second : null
     if (!geometry || (!usable(first) && !usable(second))) {
-      if (first instanceof Error && second instanceof Error) throw firstMode === 'included' ? first : second
+      if (first instanceof Error && second instanceof Error) throw first
       if (first instanceof Error && !second) throw first
       throw new Error('No display returned usable screenshot pixels. Take the screenshot again.')
     }
