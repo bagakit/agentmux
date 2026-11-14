@@ -313,7 +313,6 @@ export function SessionPane({
       ...(page?.links.flatMap(link => link.kind === 'main' ? [JSON.stringify([link.reference.hostId, link.reference.sessionId])] : []) ?? [])])
   }, [moteDialogue?.page])
   const timeline = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.timelines[sessionId]?.items ?? NO_TIMELINE_ITEMS)
-  const timelineSnapshot = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.timelines[sessionId])
   const firstPromptSelector = useMemo(() => createFirstPromptSelector(sessionId), [sessionId])
   const firstPrompt = useObservedAppStore('sessionPane', observationVisible, consumerScope, firstPromptSelector)
   const userName = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.agentNames?.[sessionId])
