@@ -12,6 +12,14 @@ import { parsePreparedTerminal } from './terminal-preparation.js'
 import { parseAgentToolExecutionBinding } from './agent-tool-execution.js'
 
 export type AgentExecutionFrontendPin = { runId: string; ownerInstanceId: string; url: string }
+export type AgentExecutionHelperAdmission = {
+  phase: 'first' | 'retained'
+  input: AgentExecutionHelperInput
+}
+export type AgentExecutionHelperAdmit = (
+  write: () => Promise<AgentExecutionHelperPreparation>,
+  admission: AgentExecutionHelperAdmission
+) => Promise<AgentExecutionHelperPreparation>
 export type AgentExecutionHelperRecord = { input: AgentExecutionHelperInput; preparation: AgentExecutionHelperPreparation; frontend?: AgentExecutionFrontendPin }
 type RecordValue = AgentExecutionHelperRecord & { schemaVersion: 1 }
 type Flight = { input: AgentExecutionHelperInput; result: Promise<AgentExecutionHelperPreparation> }
@@ -119,7 +127,7 @@ export class AgentExecutionHelperStore {
     pins.set(path, result)
     try { return structuredClone(await result) } finally { if (pins.get(path) === result) pins.delete(path) }
   }
-  async prepare(value: AgentExecutionHelperInput, build: () => Promise<AgentExecutionHelperPreparation>, admit?: (write: () => Promise<AgentExecutionHelperPreparation>) => Promise<AgentExecutionHelperPreparation>): Promise<AgentExecutionHelperPreparation> {
+  async prepare(value: AgentExecutionHelperInput, build: () => Promise<AgentExecutionHelperPreparation>, admit?: AgentExecutionHelperAdmit): Promise<AgentExecutionHelperPreparation> {
     const input = inputValue(value), path = this.path(input.bindingId, input.role)
     const prior = flights.get(path)
     if (prior) {
@@ -130,9 +138,12 @@ export class AgentExecutionHelperStore {
       const retained = await this.readPath(path)
       if (retained) {
         if (!isDeepStrictEqual(retained.input, input)) throw fail('This helper binding already has a different original preparation intent')
-        // Re-acknowledge exact retained bytes after a possibly lost fsync receipt.
-        await durableWriteFile(path, JSON.stringify(retained) + '\n', { mode: 0o600, requireDirectorySync: true })
-        return retained.preparation
+        const write = async () => {
+          // Re-acknowledge exact retained bytes after a possibly lost fsync receipt.
+          await durableWriteFile(path, JSON.stringify(retained) + '\n', { mode: 0o600, requireDirectorySync: true })
+          return retained.preparation
+        }
+        return admit ? await admit(write, { phase: 'retained', input: structuredClone(retained.input) }) : await write()
       }
       const write = async () => {
         const preparation = await build()
@@ -140,7 +151,7 @@ export class AgentExecutionHelperStore {
         await durableWriteFile(path, JSON.stringify(record) + '\n', { mode: 0o600, requireDirectorySync: true })
         return record.preparation
       }
-      return admit ? await admit(write) : await write()
+      return admit ? await admit(write, { phase: 'first', input: structuredClone(input) }) : await write()
     })
     const flight = { input, result }; flights.set(path, flight)
     try { return structuredClone(await result) } finally { if (flights.get(path) === flight) flights.delete(path) }

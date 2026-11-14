@@ -21,7 +21,7 @@ import { setImmediate as yieldRecordWriter } from 'node:timers/promises'
 import { bindAgentInputClaimStore, withAgentInputClaimLease } from './agent-input-claim-lease.js'
 import { parseHostEnvironment, parseHostEnvironmentSelector, parseSelectedHostEnvironment,
   type AgentMuxHostEnvironment, type AgentMuxHostEnvironmentSelector, type AgentMuxSelectedHostEnvironment } from './host-environment.js'
-import { locateAgentWorkspaceDirectory } from './agent-workspace-directory.js'
+import { AgentWorkspaceDirectory } from './agent-workspace-directory.js'
 import { homedir } from 'node:os'
 import { existsSync } from 'node:fs'
 import { realpath } from 'node:fs/promises'
@@ -677,9 +677,8 @@ export class AgentMuxClient {
     let home: AgentMuxHostEnvironment
     try { home = parseHostEnvironment({ homeDirectory: homedir() }) }
     catch { throw new AgentMuxError('The original Host could not read its home directory. Existing work is retained; retry this Host read.', 'HOST_ENVIRONMENT_UNAVAILABLE') }
-    const location = locateAgentWorkspaceDirectory({ storePath: this.store.path,
-      runtimeId: this.creationAuthority.runtimeId, agentSessionId: selected.agentSessionId })
-    return parseSelectedHostEnvironment({ ...home, agentWorkspace: location.agentWorkspace }, selected, this.creationAuthority.runtimeId)
+    const location = this.agentWorkspaceDirectory().locate(selected.agentSessionId)
+    return parseSelectedHostEnvironment({ ...home, agentWorkspace: location.agentWorkspace }, selected, this.creationAuthority!.runtimeId)
   }
 
   /** The original target Executor owns its Provider and environment; no secrets leave this owner. */
@@ -4534,12 +4533,54 @@ export class AgentMuxClient {
     return this.executionHelpers ??= new AgentExecutionHelperStore(this.agentSessionStorePath() ? dirname(this.agentSessionStorePath()!) : this.kernel.stateDirectory)
   }
 
+  private workspaceDirectory?: AgentWorkspaceDirectory
+  private agentWorkspaceDirectory(): AgentWorkspaceDirectory {
+    if (!(this.store instanceof AgentMuxFileAgentSessionStore) || !this.creationAuthority) {
+      throw new AgentMuxError('This Core cannot prove its file-backed Agent workspace namespace and semantic Runtime.', 'CONTROL_UNAVAILABLE')
+    }
+    return this.workspaceDirectory ??= new AgentWorkspaceDirectory(this.store.path, this.creationAuthority.runtimeId)
+  }
+
+  private ownedFrontendWorkspace(input: import('./agent-execution-helper.js').AgentExecutionHelperInput): AgentWorkspaceDirectory | null {
+    if (input.role !== 'frontend' || !input.toolExecution || !input.agentSessionId ||
+        !(this.store instanceof AgentMuxFileAgentSessionStore) || !this.creationAuthority) return null
+    const owner = this.agentWorkspaceDirectory()
+    return owner.locate(input.agentSessionId).agentWorkspace.workspacePath === input.workspacePath ? owner : null
+  }
+
+  private frontendBindingMatches(input: import('./agent-execution-helper.js').AgentExecutionHelperInput, providerId: string,
+    agentSessionId: string, workspacePath: string, toolExecution: import('./agent-tool-execution.js').AgentToolExecutionBinding): boolean {
+    return input.providerId === providerId && input.agentSessionId === agentSessionId &&
+      input.workspacePath === workspacePath && isDeepStrictEqual(input.toolExecution, toolExecution)
+  }
+
+  private async validateOwnedAgentCreation(input: Pick<AgentMuxAgentCreateInput, 'providerId' | 'workspacePath' | 'toolExecution'>, agentSessionId: string): Promise<string | undefined> {
+    if (!input.toolExecution || !(this.store instanceof AgentMuxFileAgentSessionStore) || !this.creationAuthority) return undefined
+    const owner = this.agentWorkspaceDirectory()
+    const requestedPath = owner.locate(agentSessionId).agentWorkspace.workspacePath
+    const original = await this.executionHelperStore().read(input.toolExecution.bindingId, 'frontend')
+    const originalPath = original?.input.agentSessionId
+      ? owner.locate(original.input.agentSessionId).agentWorkspace.workspacePath
+      : undefined
+    const requestedOwned = input.workspacePath === requestedPath
+    const retainedOwned = original ? original.input.workspacePath === originalPath : false
+    if (!requestedOwned && !retainedOwned) return undefined
+    if (!original) {
+      if (requestedOwned) throw new AgentMuxError('The exact Core-owned workspace has no retained frontend preparation; no Provider or Agent was started.', 'EXECUTION_HELPER_UNAVAILABLE')
+      return undefined
+    }
+    if (!this.frontendBindingMatches(original.input, input.providerId, agentSessionId, input.workspacePath, input.toolExecution)) {
+      throw new AgentMuxError('The requested tool resource differs from the original frontend binding.', 'EXECUTION_BINDING_MISMATCH')
+    }
+    return await owner.validate(agentSessionId, input.workspacePath)
+  }
+
   private async prepareToolExecutionLaunch(provider: import('./agent-provider.js').AgentProvider, plan: import('./types.js').AgentLaunchPlan,
     binding: import('./agent-tool-execution.js').AgentToolExecutionBinding, launchWorkspacePath: string, agentSessionId: string, invocation?: { lifecycleOperationId: string; capability: string }): Promise<import('./types.js').AgentLaunchPlan> {
     binding = parseAgentToolExecutionBinding(binding)
     if (!provider.prepareToolExecutionLaunch) throw new AgentMuxError('This Provider has no qualified native tool execution launch.', 'EXECUTION_PROVIDER_UNSUPPORTED')
     const original = await this.executionHelperStore().read(binding.bindingId, 'frontend')
-    if (!original || original.input.providerId !== provider.id || original.input.agentSessionId !== agentSessionId || !isDeepStrictEqual(original.input.toolExecution, binding))
+    if (!original || !this.frontendBindingMatches(original.input, provider.id, agentSessionId, launchWorkspacePath, binding))
       throw new AgentMuxError('The requested tool resource differs from the original frontend binding.', 'EXECUTION_BINDING_MISMATCH')
     const endpoint = await this.executionHelperStore().pinFrontend(binding.bindingId, async record => {
       const run = await this.inspectPreparedTerminal(record.preparation.prepared)
@@ -4617,6 +4658,7 @@ export class AgentMuxClient {
       input.toolExecution = parseAgentToolExecutionBinding(input.toolExecution)
       if (input.toolExecution.bindingId !== input.bindingId) throw new AgentMuxError('Frontend and resource binding identities differ.', 'EXECUTION_BINDING_MISMATCH')
     }
+    const workspaceOwner = this.ownedFrontendWorkspace(input)
     return await this.retainExecutionDirectoryIntent(input.workspacePath, () => this.executionHelperStore().prepare(input, async () => {
       const journalDirectory = join(this.agentSessionStorePath() ? dirname(this.agentSessionStorePath()!) : this.kernel.stateDirectory, 'agent-execution', input.bindingId)
       let journalIdentity: string | undefined
@@ -4631,7 +4673,15 @@ export class AgentMuxClient {
         command: launch.command, args: launch.args, env: launch.env })
       return { bindingId: input.bindingId, role: input.role, providerId: input.providerId, prepared,
         ...(plan.notices === undefined ? {} : { notices: parseAgentExecutionNotices(plan.notices, { providerId: input.providerId, role: input.role }) }), ...(journalIdentity ? { journalIdentity } : {}) }
-    }, write => this.withExecutionDirectoryAdmission(input.workspacePath, write)))
+    }, async (write, admission) => {
+      const writeOwned = async () => {
+        if (workspaceOwner) await workspaceOwner.admit(input.agentSessionId!, input.workspacePath, admission.phase)
+        return await write()
+      }
+      return admission.phase === 'first'
+        ? await this.withExecutionDirectoryAdmission(input.workspacePath, writeOwned)
+        : await writeOwned()
+    }))
   }
 
   /** Capture this Host's complete launch request without starting or observing a Run. */
@@ -5766,6 +5816,7 @@ export class AgentMuxClient {
         return { session: this.projectSession(existing), promptConfirmed, creation: existing.creation }
       }
     }
+    await preparation(() => this.validateOwnedAgentCreation(input, agentSessionId))
     const originalPrompt = initialEnvelope ? renderAgentMuxMessageEnvelope(initialEnvelope) : input.prompt
     await preparation(() => this.prepareExecutionEnvironment())
     if (signal?.aborted) throw signal.reason
@@ -5850,6 +5901,7 @@ export class AgentMuxClient {
       } : undefined
       // Bind the original operation before preparing its carrier. Shared declarations contain no
       // binding credentials; the native process inherits this binding only through its Run env.
+      await preparation(() => this.validateOwnedAgentCreation(input, agentSessionId))
       await this.requireHookIngressOwner()
       hookBinding = this.hookServer.createBinding(
         agentSessionId,
@@ -5864,7 +5916,7 @@ export class AgentMuxClient {
         hookBinding.endpoint,
         plan.hookLaunchIssue
       )
-      const workspaceTrust = await this.prepareOwnedWorkspaceTrust(provider, input.workspacePath, agentSessionId, input.env ?? {}, lifecycleOperationId)
+      const workspaceTrust = await this.prepareOwnedWorkspaceTrust(provider, input.workspacePath, agentSessionId, input.env ?? {}, lifecycleOperationId, input.toolExecution)
       const launchOptions = normalizeLaunchOptionSelection(input.launchOptions)
       let preparedCreation: AgentMuxPreparedCreation | undefined
       if (reservation.kind === 'create') {
@@ -5915,6 +5967,7 @@ export class AgentMuxClient {
       } while (checkedRevision !== execution.waitRevision())
       signal?.throwIfAborted()
       await preparation(() => this.assertExecutionDirectoryCreationAllowed(input.workspacePath))
+      await preparation(() => this.validateOwnedAgentCreation(input, agentSessionId))
       preservePreparedCreation = true
       startAttempted = true
       const run = await this.kernel.start(startInput).catch(error => {
@@ -6318,19 +6371,32 @@ export class AgentMuxClient {
     workspacePath: string,
     agentSessionId: string,
     env: Readonly<Record<string, string>>,
-    lifecycleOperationId: string
+    lifecycleOperationId: string,
+    toolExecution?: import('./agent-tool-execution.js').AgentToolExecutionBinding
   ): Promise<AgentWorkspaceTrustPreparation | undefined> {
     if (!provider.prepareOwnedWorkspaceTrust) return
+    // Core physical ownership is a hard launch prerequisite and must never enter the soft
+    // Provider trust-record catch below. Legacy Mote/home discovery keeps its old soft semantics.
+    const coreOwnedTarget = toolExecution && this.store instanceof AgentMuxFileAgentSessionStore && this.creationAuthority &&
+      this.agentWorkspaceDirectory().locate(agentSessionId).agentWorkspace.workspacePath === workspacePath
+      ? await this.validateOwnedAgentCreation({ providerId: provider.id, workspacePath, toolExecution }, agentSessionId)
+      : undefined
     let step: AgentWorkspaceTrustPreparation['step'] = 'home-identity'
     let result: AgentWorkspaceTrustPreparation
     try {
-      const target = await realpath(resolve(workspacePath))
-      const roots = await this.ownedWorkspaceRoots(workspacePath)
-      // Host identity is exact. Descendants, including nested repositories and links out of a
-      // home, never inherit permission to mutate the Provider's trust record.
+      let target: string
       let ownedRoot: string | undefined
-      for (const root of roots) {
-        if (await realpath(resolve(root)) === target) { ownedRoot = target; break }
+      if (coreOwnedTarget) {
+        target = coreOwnedTarget
+        ownedRoot = coreOwnedTarget
+      } else {
+        target = await realpath(resolve(workspacePath))
+        const roots = await this.ownedWorkspaceRoots(workspacePath)
+        // Host identity is exact. Descendants, including nested repositories and links out of a
+        // home, never inherit permission to mutate the Provider's trust record.
+        for (const root of roots) {
+          if (await realpath(resolve(root)) === target) { ownedRoot = target; break }
+        }
       }
       if (!ownedRoot) return
       step = 'trust-record'
