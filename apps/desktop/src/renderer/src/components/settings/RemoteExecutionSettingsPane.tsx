@@ -12,6 +12,7 @@ import { ResolvedAgentAvatar } from '../AgentAvatar'
 import { SettingsNavigation } from '../SettingsNavigation'
 import { SettingsResourceLibrary } from './SettingsResourceLibrary'
 import { RemoteExecutionGuide } from './RemoteExecutionGuide'
+import { RemoteRoutesPane } from './RemoteRoutesPane'
 import type { SettingsPaneProps } from './settings-catalog'
 
 const AgentIcon = semanticIconComponent('object.agent')
@@ -33,14 +34,16 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
   const initialSelection = initialProject ? { resourceWorkspaceId: initialProject.id, agentWorkspaceId: null } : undefined
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [view, setView] = useState<'library' | 'detail'>('library')
-  const [task, setTask] = useState<'start' | 'existing'>('existing')
+  const [task, setTask] = useState<'start' | 'existing' | 'routes'>('existing')
+  const [routesVisited, setRoutesVisited] = useState(false)
   const [prepareVisited, setPrepareVisited] = useState(false)
   const taskId = useId()
   useLayoutEffect(() => {
     if (!active || !navigationRequest?.field) return
-    const next = navigationRequest.field === 'prepare' ? 'start' : 'existing'
+    const next = navigationRequest.field === 'prepare' ? 'start' : navigationRequest.field === 'routes' ? 'routes' : 'existing'
     setTask(next)
     if (next === 'start') setPrepareVisited(true)
+    if (next === 'routes') setRoutesVisited(true)
     setView('library')
   }, [active, navigationRequest])
   const [narrow, setNarrow] = useState(false)
@@ -91,17 +94,17 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
     if (useAppStore.getState().selectSession(session.id)) onClose()
     else setActionError('The original workface could not be opened. This Session is kept; use its original workspace to continue.')
   }
-  function changeTask(next: 'start' | 'existing') { setTask(next); if (next === 'start') setPrepareVisited(true); setActionError(null) }
+  function changeTask(next: 'start' | 'existing' | 'routes') { setTask(next); if (next === 'start') setPrepareVisited(true); if (next === 'routes') setRoutesVisited(true); setActionError(null) }
   return <div ref={container} className="settings-pane-stack remote-execution-settings">
     <div className="remote-work-toolbar"><nav className="remote-work-tasks" role="tablist" aria-label="Remote work task">
-      {(['existing', 'start'] as const).map(id => <button key={id} type="button" role="tab" id={`${taskId}-${id}-tab`}
+      {(['existing', 'start', 'routes'] as const).map((id, index, tasks) => <button key={id} type="button" role="tab" id={`${taskId}-${id}-tab`}
         aria-controls={`${taskId}-${id}`} aria-selected={task === id} tabIndex={task === id ? 0 : -1}
         onClick={() => changeTask(id)} onKeyDown={event => {
           if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
           event.preventDefault()
-          const next = event.key === 'Home' ? 'existing' : event.key === 'End' ? 'start' : id === 'start' ? 'existing' : 'start'
+          const next = tasks[event.key === 'Home' ? 0 : event.key === 'End' ? tasks.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : tasks.length - 1)) % tasks.length]!
           changeTask(next); document.getElementById(`${taskId}-${next}-tab`)?.focus()
-        }}>{id === 'start' ? 'Set up new work' : <>Existing work <span>{work.length}</span></>}</button>)}
+        }}>{id === 'start' ? 'Set up new work' : id === 'routes' ? 'Routes' : <>Existing work <span>{work.length}</span></>}</button>)}
     </nav><button type="button" className="remote-work-hosts" onClick={() => onNavigate('hosts')}>Manage Hosts</button></div>
     <section hidden={task !== 'start'} id={`${taskId}-start`} role="tabpanel" aria-labelledby={`${taskId}-start-tab`} className="remote-execution-prepare" data-settings-field="prepare">
       <div className="remote-work-intro"><h3>Where will you work?</h3><p>The working folder holds this task’s files and commands. Choose a saved folder or use a device’s home, then continue in Launcher.</p></div>
@@ -129,6 +132,9 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
           <details className="remote-execution-identities"><summary>Original identities</summary><dl><dt>Session</dt><dd>{selected.session.control.agentSessionId}</dd><dt>Agent Host</dt><dd>{selected.placement.agentHostId}</dd><dt>Project Host</dt><dd>{selected.placement.projectHostId ?? 'Unobserved'}</dd>{selected.session.toolExecution ? <><dt>Binding</dt><dd>{selected.session.toolExecution.bindingId}</dd></> : null}</dl></details>
         </div> : <div className="remote-execution-empty"><AgentIcon size={24} aria-hidden="true" /><h3>{selectedId ? 'Work not observed' : 'Choose a Session'}</h3><p>{selectedId ? 'The original reference is not in this app’s current observation. No Session has been stopped or replaced.' : 'See its Agent, project and original continuation entry.'}</p></div>}
       </div>}
+    </section>
+    <section hidden={task !== 'routes'} id={`${taskId}-routes`} role="tabpanel" aria-labelledby={`${taskId}-routes-tab`} data-settings-field="routes">
+      {routesVisited ? <RemoteRoutesPane config={config} active={active && task === 'routes'} /> : null}
     </section>
     <RemoteExecutionGuide active={active} />
   </div>

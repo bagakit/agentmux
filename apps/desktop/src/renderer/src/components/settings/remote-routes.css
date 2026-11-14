@@ -1,0 +1,43 @@
+.remote-routes { min-width: 0; }
+.host-route-owner, .host-route-field { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; font-size: var(--fs-body); }
+.host-route-owner { max-width: 340px; margin-bottom: var(--sp-5); }
+.host-route-owner > span, .host-route-field > span { color: var(--text-2); }
+.host-route-owner select, .host-route-field select, .host-route-field textarea { width: 100%; min-width: 0; padding: 8px 10px; color: var(--text); background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius-sm); font: inherit; }
+.host-route-field textarea { resize: vertical; font-family: var(--font-mono); font-size: var(--fs-meta); line-height: 1.6; }
+.host-route-toolbar, .host-route-inline-actions, .host-route-edge-picker { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
+.host-route-toolbar { justify-content: space-between; margin-bottom: var(--sp-4); }
+.host-route-toolbar .remote-work-tasks > button[aria-pressed='true'] { background: var(--surface-2); border-color: var(--line); color: var(--text); font-weight: 600; box-shadow: 0 1px 3px #0001; }
+.host-route-layout { display: grid; grid-template-columns: minmax(160px, .65fr) minmax(0, 1.65fr); gap: var(--sp-6); align-items: start; }
+.host-route-library { display: grid; gap: var(--sp-3); min-width: 0; }
+.host-route-library > button { justify-self: start; }
+.host-route-detail { min-width: 0; }
+.host-route-detail > .host-route-field { max-width: 360px; }
+.host-route-path { display: flex; flex-wrap: wrap; list-style: none; margin: var(--sp-5) 0 var(--sp-3); padding: 0; row-gap: var(--sp-3); }
+.host-route-path > li { display: flex; align-items: center; min-width: 0; }
+.host-route-path > li > span { display: flex; align-items: center; gap: var(--sp-2); padding: 9px 11px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); min-width: 0; }
+.host-route-path > li > span > span { display: grid; gap: 2px; min-width: 0; }
+.host-route-path strong { max-width: 115px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-body); font-weight: 500; }
+.host-route-path small { color: var(--text-3); font-size: var(--fs-meta); }
+.host-route-path .execution-route-link { flex-shrink: 0; margin-inline: 2px; color: var(--text-3); }
+.host-route-caption, .host-route-new p, .host-route-access > p { color: var(--text-3); font-size: var(--fs-body); line-height: 1.6; }
+.host-route-new { padding-block: var(--sp-4); }
+.host-route-new > svg { color: var(--text-3); }
+.host-route-new h4, .host-route-access h4 { margin-block: var(--sp-3) var(--sp-2); font-weight: 500; font-size: var(--fs-title); }
+.host-route-edge-picker { align-items: end; margin-top: var(--sp-4); }
+.host-route-edge-picker > label { flex: 1; min-width: min(190px, 100%); }
+.host-route-access-request, .host-route-original-saves, .host-route-owner-details { margin-top: var(--sp-5); padding-top: var(--sp-3); border-top: 1px solid var(--line-soft); font-size: var(--fs-body); line-height: 1.6; color: var(--text-2); }
+.host-route-access-request summary, .host-route-original-saves summary, .host-route-owner-details summary { cursor: pointer; }
+.host-route-access-request > .host-route-field { margin-bottom: var(--sp-3); }
+.host-route-access-request pre { max-height: 280px; overflow: auto; font-size: var(--fs-meta); }
+.host-route-owner-details dd { margin: 0 0 var(--sp-2); overflow-wrap: anywhere; font-family: var(--font-mono); }
+.host-route-owner-details dt { color: var(--text-3); font-size: var(--fs-meta); }
+.host-route-grant { display: flex; align-items: start; justify-content: space-between; gap: var(--sp-3); padding-block: var(--sp-4); border-bottom: 1px solid var(--line-soft); }
+.host-route-grant > div { min-width: 0; }
+.host-route-grant strong { font-size: var(--fs-body); font-weight: 500; overflow-wrap: anywhere; }
+.host-route-grant small { display: block; margin-top: var(--sp-1); color: var(--text-2); overflow-wrap: anywhere; }
+.host-route-grant p, .host-route-grant details { margin-block: var(--sp-2); font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.host-route-access > .host-route-field { margin-block: var(--sp-4); }
+.host-route-conflict { margin-top: var(--sp-4); font-size: var(--fs-body); line-height: 1.6; }
+.host-route-conflict > button { margin-right: var(--sp-2); }
+.remote-routes-empty { padding: var(--sp-5) 0; color: var(--text-3); font-size: var(--fs-body); }
+@container (max-width: 650px) { .host-route-layout { grid-template-columns: 1fr; gap: var(--sp-4); } .host-route-library .settings-resource-library__list { max-height: 170px; } }

@@ -1135,6 +1135,7 @@ export type AppState = GitReadingActions & {
   agentLearningReviewDrafts: Record<string, AgentLearningReviewDraft>
   /** Opaque unrelated/invalid records stay in the original user document until explicitly resolved. */
   nodePublicationDrafts: unknown
+  hostRouteDrafts: unknown
   tailcatConnectionDrafts: unknown
   capsuleQuestionEditors: Record<string, CapsuleQuestionEditor>
   browserOpinionDrafts: Record<string, BrowserOpinionDraft>
@@ -4017,6 +4018,7 @@ type PersistedAppState = {
   agentComposerDrafts?: Record<string, string>
   agentLearningReviewDrafts?: Record<string, AgentLearningReviewDraft>
   nodePublicationDrafts?: unknown
+  hostRouteDrafts?: unknown
   tailcatConnectionDrafts?: unknown
   capsuleQuestionEditors?: Record<string, CapsuleQuestionEditor>
   browserOpinionDrafts?: Record<string, BrowserOpinionDraft>
@@ -4322,6 +4324,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     agentComposerDrafts: state.agentComposerDrafts,
     agentLearningReviewDrafts: state.agentLearningReviewDrafts,
     nodePublicationDrafts: state.nodePublicationDrafts,
+    hostRouteDrafts: state.hostRouteDrafts,
     tailcatConnectionDrafts: state.tailcatConnectionDrafts,
     capsuleQuestionEditors: state.capsuleQuestionEditors,
     browserOpinionDrafts: state.browserOpinionDrafts,
@@ -5094,6 +5097,13 @@ export async function updateNodePublicationDraft(runtimeId: string,
     await persistentWorkbenchStorage.checkpoint(WORKBENCH_USER_STATE_KEY, { state: partializeAppState(useAppStore.getState()), version: 1 })
   } catch (cause) { useAppStore.getState().reportWorkbenchSaveFailure(cause, 'local-storage'); throw cause }
 }
+/** Checkpoint this authored route intent through the original private user document. */
+export async function checkpointHostRouteDrafts(): Promise<void> {
+  try {
+    if (!workbenchWriteFence.isOpen()) throw new Error('The original Desktop user document is still being restored. Route edits are kept in memory.')
+    await checkpointWorkbenchUserDocument()
+  } catch (cause) { useAppStore.getState().reportWorkbenchSaveFailure(cause, 'local-storage'); throw cause }
+}
 export async function clearGoalAgentCreationDraft(goalId: string, role: 'assignees' | 'related', operationId: string): Promise<void> {
   const key = goalCreationDraftKey(goalId, role)
   useAppStore.setState(state => {
@@ -5652,6 +5662,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   agentComposerDrafts: {},
   agentLearningReviewDrafts: {},
   nodePublicationDrafts: {},
+  hostRouteDrafts: {},
   tailcatConnectionDrafts: {},
   capsuleQuestionEditors: {},
   browserOpinionDrafts: {},
