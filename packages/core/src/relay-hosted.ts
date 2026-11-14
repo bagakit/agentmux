@@ -2,6 +2,7 @@ import { parseAppearanceObservation } from './public-rpc-settings-observation.js
 import { connectHostedAgentMux, type AgentMuxHostedBootstrap, type AgentMuxHostedInvocation,
   type AgentMuxHostedRpcPort, type AgentMuxHostedOutputRpcPort, type AgentMuxHostedSubscription } from './hosted.js'
 import type { AgentMuxHostedSessionProjection } from './hosted-session-summary.js'
+import type { AgentMuxHostedClient } from './hosted-client-contract.js'
 import { AgentMuxError, AgentMuxRpcError, parseRpcRequest, parseRpcResponse, rpcRecord,
   rpcResponseError } from './public-rpc-http.js'
 import { createAgentMuxRpcRelayClient, type AgentMuxRpcRelayClient, type AgentMuxRpcRelayOptions, type AgentMuxRpcRelayReader } from './public-rpc-relay.js'
@@ -179,14 +180,15 @@ export class HostedRelayRpcPort implements AgentMuxHostedRpcPort {
   }
 }
 
-export async function connectRelayHostedClient<P extends AgentMuxHostedSessionProjection = 'full'>(options: AgentMuxRpcRelayOptions & { name: string; signal: AbortSignal; sessions?: P }) {
+export async function connectRelayHostedClient<P extends AgentMuxHostedSessionProjection = 'full'>(options: AgentMuxRpcRelayOptions & { name: string; signal: AbortSignal; sessions?: P; waitForReady?: boolean }) {
   const rpc = new HostedRelayRpcPort(options)
+  let client: AgentMuxHostedClient<P> | undefined
   const abort = () => rpc.dispose()
   options.signal.addEventListener('abort', abort, { once: true })
   try {
     options.signal.throwIfAborted()
     await rpc.hello(options.name)
-    const client = await connectHostedAgentMux({ rpc, ...(options.sessions === undefined ? {} : { sessions: options.sessions }), forwardRpc: (method, params, context) => rpc.forward(method, params, context),
+    client = await connectHostedAgentMux({ rpc, ...(options.sessions === undefined ? {} : { sessions: options.sessions }), ...(options.waitForReady === undefined ? {} : { waitForReady: options.waitForReady }), forwardRpc: (method, params, context) => rpc.forward(method, params, context),
       subscribeRpc: (method, params, handlers) => rpc.subscribePublic(method, params, handlers) })
     const dispose = client.dispose.bind(client)
     client.dispose = async () => {
@@ -196,9 +198,16 @@ export async function connectRelayHostedClient<P extends AgentMuxHostedSessionPr
       if (errors.length === 1) throw errors[0]
       if (errors.length) throw new AggregateError(errors, 'Hosted client release reported errors.')
     }
+    if (options.waitForReady === false) await client.readRuntimeOwnerIdentity({ signal: options.signal })
     if (options.signal.aborted) { await client.dispose(); throw cancelled() }
     return client
-  } catch (error) { rpc.dispose(); throw error }
+  } catch (error) {
+    const errors: unknown[] = [error]
+    try { await client?.dispose() } catch (cleanup) { errors.push(cleanup) }
+    try { rpc.dispose() } catch (cleanup) { errors.push(cleanup) }
+    if (errors.length > 1) throw new AggregateError(errors, 'Hosted Relay admission failed and consumer cleanup was incomplete.')
+    throw error
+  }
   finally { options.signal.removeEventListener('abort', abort) }
 }
 

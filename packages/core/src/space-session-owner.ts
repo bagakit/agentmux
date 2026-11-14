@@ -65,9 +65,9 @@ export async function observeSpaceSessions(ports: Ports, reference: SpaceSnapsho
       (authority, event) => {
         if (!live(group)) return
         if (authority.runtimeId !== group.runtimeId) { stop(group); void unavailable(group, new AgentMuxError('The original Session reader answered for another Runtime.', 'RUNTIME_OWNER_MISMATCH')); return }
-        if (event.type === 'connection-state' && event.observationOrigin.boundary === 'consumer-core') {
-          // This is B's reader connection, not a new Native/Run fact authored by D.
-          if (event.state !== 'restored') void unavailable(group, new AgentMuxError(event.diagnostic?.message ?? 'The original Session metadata reader is disconnected.', event.diagnostic?.code ?? 'SPACE_SESSION_SOURCE_UNAVAILABLE')).catch(failed)
+        if (event.type === 'session-observation-state') {
+          // This SDK-local directory fact is never forwarded as a Runtime event.
+          if (event.observation.state !== 'ready') void unavailable(group, new AgentMuxError(event.observation.diagnostic?.message ?? 'The original Session metadata is unconfirmed.', event.observation.diagnostic?.code ?? 'SPACE_SESSION_SOURCE_UNAVAILABLE')).catch(failed)
           else if (confirmedReader) void publishSnapshot(group, confirmedReader).catch(error => unavailable(group, error)).catch(failed)
           return
         }

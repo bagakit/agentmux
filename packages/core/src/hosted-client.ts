@@ -42,7 +42,9 @@ function isAbortSignal(value: unknown): value is AbortSignal {
 
 /** A consumer connection to the Host. Disposing this object never owns the Core or a Run. */
 export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProjection = 'full'>(options: {
-  rpc: AgentMuxHostedRpcPort; consumerId?: string; waitForReady?: boolean; expectedStorePath?: string;
+  rpc: AgentMuxHostedRpcPort; consumerId?: string;
+  /** False opens the complete directory in the background; exact reads independently confirm their control owner. Default waits for the complete directory. */
+  waitForReady?: boolean; expectedStorePath?: string;
   sessions?: P
   agentSessionIds?: readonly string[]
   /** Skip the initial whole-Host observation. Exact Run/control calls connect only their original scope; explicit connect() still opens the general observation. */
@@ -60,6 +62,7 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
   const publicOpenings = new Set<AbortController>()
   let publicReaderEpoch = 0
   let controlOwner: AgentMuxRuntimeOwnerIdentity | undefined, controlConnecting: Promise<void> | undefined, controlEpoch = 0
+  let controlDiscovery: AbortController | undefined
   let controlOwnerRejected = false
   let runtimePreparing: Promise<unknown> | undefined
   const acceptOwner = (owner: AgentMuxRuntimeOwnerIdentity): void => {
@@ -70,6 +73,8 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
   let endpointState: Extract<AgentMuxClientEvent, { type: 'control-endpoint-state' }> | undefined
   let bootstrap: AgentMuxHostedBootstrap | undefined, stream: AgentMuxHostedSubscription | undefined
   let connecting: Promise<void> | undefined, disposed = false, retry: ReturnType<typeof setTimeout> | undefined
+  let observationEnabled = true
+  let directoryObservation: AbortController | undefined
   let reconnectDelay = 100
   let reconnectAttempts = 0
   let eventEpoch = 0
@@ -88,15 +93,15 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
     if (!controlOwner) throw new AgentMuxError('Confirm the original semantic owner before another Runtime intent.', 'RUNTIME_UNAVAILABLE')
     return { runtimeId: controlOwner.runtimeId, ownerInstanceId: controlOwner.ownerInstanceId }
   }
-  const discoverControlOwner = async (expectedRuntimeId?: string): Promise<AgentMuxRuntimeOwnerIdentity> => {
+  const discoverControlOwner = async (expectedRuntimeId: string | undefined, signal: AbortSignal): Promise<AgentMuxRuntimeOwnerIdentity> => {
     const previous = controlOwner
     try {
-      const discovery = await rpc.call('runtime.owner.identity', expectedRuntimeId === undefined ? {} : { expectedRuntimeId }, { signal: observationSignal() })
+      const discovery = await rpc.call('runtime.owner.identity', expectedRuntimeId === undefined ? {} : { expectedRuntimeId }, { signal })
       return parseHostedRuntimeOwnerIdentity(discovery.owner)
     } catch (error) {
       // A failed control identity read differs from a failed observation lease.
       // Keep its exact fence; a late failure cannot revoke a newer confirmed owner.
-      if (!disposed && previous && controlOwner === previous) controlOwner = { ...previous, availability: 'unverified' }
+      if (!disposed && !signal.aborted && previous && controlOwner === previous) controlOwner = { ...previous, availability: 'unverified' }
       throw error
     }
   }
@@ -104,13 +109,27 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
     if (disposed) throw new AgentMuxError('Hosted consumer is disposed.', 'CONTROL_CANCELLED')
     if (controlConnecting) return await controlConnecting
     if (controlOwner && !refresh && !controlOwnerRejected) return
-    controlConnecting = (async () => {
-      const expectedRuntimeId = options.expectedRuntimeId ?? controlOwner?.runtimeId
-      const discovered = await discoverControlOwner(expectedRuntimeId)
-      if (disposed) throw new AgentMuxError('Hosted consumer was disposed during owner discovery.', 'CONTROL_CANCELLED')
-      acceptOwner(discovered)
-    })().finally(() => { controlConnecting = undefined })
-    await controlConnecting
+    const epoch = controlEpoch, previous = controlOwner, controller = new AbortController()
+    controlDiscovery = controller
+    const flight: Promise<void> = (async () => {
+      const expectedRuntimeId = options.expectedRuntimeId ?? previous?.runtimeId ?? bootstrap?.owner.runtimeId
+      const discovered = await discoverControlOwner(expectedRuntimeId, observationSignal(controller.signal))
+      if (disposed || controller.signal.aborted || epoch !== controlEpoch) throw new AgentMuxError('The original control discovery was released.', 'CONTROL_CANCELLED')
+      // A later accepted owner/native observation wins over this older reply.
+      if (controlOwner === previous) acceptOwner(discovered)
+    })().finally(() => { if (controlConnecting === flight) { controlConnecting = undefined; controlDiscovery = undefined } })
+    controlConnecting = flight
+    await flight
+  }
+  const rejectControlOwner = (error: unknown, original: AgentMuxRuntimeOwnerIdentity | undefined): void => {
+    // Only the original authority's definite refusal invalidates its fence.
+    // A directory transport failure cannot revoke a healthy exact control path.
+    if (error instanceof AgentMuxError && error.code === 'RUNTIME_OWNER_CHANGED' && original && controlOwner &&
+        controlOwner.runtimeId === original.runtimeId && controlOwner.ownerInstanceId === original.ownerInstanceId) {
+      controlOwner = { ...controlOwner, availability: 'unverified' }
+      controlOwnerRejected = true
+      controlEpoch++
+    }
   }
   const emit = (event: AgentMuxClientEvent): void => {
     event = projectHostedSessionEvent(event, sessionProjection)
@@ -176,19 +195,19 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
     }
     publisher.publish(event)
   }
-  let connectionPhase: 'lost' | 'restored' | 'unrecoverable' | undefined
-  const connectionState = (state: 'lost' | 'restored' | 'unrecoverable', error?: unknown): void => {
-    // Retries update the same pending observation; they do not lose a second
-    // connection. Keep one transition and its original scoped diagnostic.
-    if (connectionPhase === state) return
-    connectionPhase = state
-    emit({ type: 'connection-state', state,
-      observationOrigin: { kind: 'runtime-connection', boundary: 'consumer-core' },
-      ...(error instanceof Error ? { diagnostic: { code: error instanceof AgentMuxError ? error.code : 'RUNTIME_UNAVAILABLE',
-        message: `${error.message} Existing Session references are retained; reconnect this endpoint to restore observation.` } } : {}),
-      evidence: { source: 'agentmux', observedAt: Date.now() } })
+  let sessionObservationState: import('./types.js').AgentMuxHostedSessionObservation['state'] = 'unconfirmed'
+  let sessionObservationIssue: import('./types.js').AgentMuxHostedSessionObservation['diagnostic']
+  const sessionObservation = (): import('./types.js').AgentMuxHostedSessionObservation => ({
+    state: sessionObservationState, hasSnapshot: bootstrap !== undefined,
+    ...(sessionObservationIssue ? { diagnostic: { ...sessionObservationIssue } } : {})
+  })
+  const observeSessions = (state: typeof sessionObservationState, error?: unknown): void => {
+    const diagnostic = error === undefined ? undefined : { code: error instanceof AgentMuxError ? error.code : 'RUNTIME_UNAVAILABLE',
+      message: `${error instanceof Error ? error.message : String(error)} The complete directory is unconfirmed; exact control and reads retain their original owner. Retry this observation with connect().` }
+    if (sessionObservationState === state && dequal(sessionObservationIssue, diagnostic)) return
+    sessionObservationState = state; sessionObservationIssue = diagnostic
+    emit({ type: 'session-observation-state', observation: sessionObservation(), evidence: { source: 'agentmux', observedAt: Date.now() } })
   }
-  const connectionFailure = (error: unknown): void => connectionState(error instanceof AgentMuxError && error.code === 'AGENT_CAPABILITY_INVALID' ? 'unrecoverable' : 'lost', error)
   const attachmentUnavailable = (reading: Reading, error: unknown, step: string): void => {
     reading.unavailable = { code: error instanceof AgentMuxError ? error.code : 'RUNTIME_ATTACHMENT_UNAVAILABLE',
       message: `${step}: ${error instanceof Error ? error.message : String(error)} This reader stopped after byte ${reading.afterByte}; the original Run is retained. Refresh this observation if independent reread does not recover it.` }
@@ -198,7 +217,7 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
       evidence: { source: 'agentmux', observedAt: Date.now(), run: reading.run } })
   }
   const requireBootstrap = (): AgentMuxHostedBootstrap => {
-    if (!bootstrap) throw new AgentMuxError('The semantic Host identity is not confirmed.', 'CONTROL_UNAVAILABLE')
+    if (!bootstrap) throw new AgentMuxError('The complete Session/catalog observation is not confirmed. Exact reads remain available; retry this directory with connect().', 'HOSTED_SESSION_OBSERVATION_UNCONFIRMED')
     return bootstrap
   }
   const session = (id: string): AgentMuxAgentSession => {
@@ -282,11 +301,7 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
       // A definite owner refusal only prepares discovery for a later independent
       // intent. Never replay this invocation, or let an old refusal revoke a newer
       // observed owner. Retain runtimeId to reject a different Runtime at this endpoint.
-      if (error instanceof AgentMuxError && error.code === 'RUNTIME_OWNER_CHANGED' && invocationOwner && controlOwner &&
-          controlOwner.runtimeId === invocationOwner.runtimeId && controlOwner.ownerInstanceId === invocationOwner.ownerInstanceId) {
-        controlOwner = { ...controlOwner, availability: 'unverified' }
-        controlOwnerRejected = true
-      }
+      rejectControlOwner(error, invocationOwner)
       throw error
     })
     if (method === 'connectRuntime') await connectControl(true)
@@ -357,7 +372,9 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
     if (read.retry) clearTimeout(read.retry)
     if (read.abort) read.options.signal?.removeEventListener('abort', read.abort)
     const watch = read.stream; delete read.stream
-    void watch?.dispose().catch(error => { if (!disposed) connectionFailure(error) })
+    void watch?.dispose().catch(error => { if (!disposed) emit({ type: 'agent-error', agentSessionId: read.id,
+      code: 'AGENT_SESSION_HISTORY_RELEASE_UNCONFIRMED', message: `Releasing this original history reader is unconfirmed. Its Session and other readers are retained. ${error instanceof Error ? error.message : String(error)}`,
+      evidence: { source: 'agentmux', observedAt: Date.now() } }) })
   }
   const retryHistory = (read: HistoryRead): void => {
     if (disposed || read.disposed || read.retry || read.acquiring) return
@@ -430,31 +447,35 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
     return read.acquiring
   }
   const reconnect = (): void => {
-    if (disposed || retry) return
+    if (disposed || !observationEnabled || retry || stream) return
     // Retry observation until this consumer is disposed; never replay an invocation.
     retry = setTimeout(() => {
       retry = undefined
       reconnectAttempts++
-      void connect().catch(error => { connectionFailure(error); if (error instanceof AgentMuxError && error.code === 'AGENT_CAPABILITY_INVALID') return; reconnectDelay = Math.min(reconnectDelay * 2, 30000); reconnect() })
+      void connect().catch(error => { if (error instanceof AgentMuxError && error.code === 'AGENT_CAPABILITY_INVALID') return; reconnectDelay = Math.min(reconnectDelay * 2, 30000); reconnect() })
     }, reconnectDelay)
     retry.unref?.()
   }
   const connect = async (): Promise<void> => {
     if (disposed) throw new AgentMuxError('Hosted consumer is disposed.', 'CONTROL_CANCELLED')
+    observationEnabled = true
     if (stream) return
     if (connecting) return connecting
-    connecting = (async () => {
+    const opening: Promise<void> = (async () => {
       const previous = bootstrap
       const epoch = ++eventEpoch
+      const controller = new AbortController()
+      directoryObservation = controller
+      let admittedControlEpoch: number | undefined
       let ended = false
       const requireObservation = () => {
         if (disposed) throw new AgentMuxError('Hosted consumer was released during connection admission.', 'CONTROL_CANCELLED')
-        if (ended || epoch !== eventEpoch) throw new AgentMuxError('The original Host observation ended during connection admission. Retained Session metadata is unchanged; reconnect its original Host.', 'CONTROL_UNAVAILABLE')
+        if (controller.signal.aborted || ended || epoch !== eventEpoch || admittedControlEpoch !== undefined && admittedControlEpoch !== controlEpoch) throw new AgentMuxError('The original Host observation ended during connection admission. Retained Session metadata is unchanged; reconnect its original Host.', 'CONTROL_UNAVAILABLE')
       }
-      const expectedRuntimeId = options.expectedRuntimeId ?? previous?.owner.runtimeId
-      const owner = await discoverControlOwner(expectedRuntimeId)
-      requireObservation()
-      acceptOwner(owner)
+      try { await connectControl(); requireObservation() }
+      catch (error) { if (!disposed && epoch === eventEpoch) observeSessions('unavailable', error); throw error }
+      const owner = controlOwner!
+      admittedControlEpoch = controlEpoch
       const expected = { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }
       const transfer = new AgentMuxHostedTransferReader()
       let initialSeen = false, transferId = ''
@@ -465,6 +486,7 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
       let acquired: AgentMuxHostedSubscription | undefined
       let releasing: Promise<void> | undefined
       const releaseAcquired = (): Promise<void> => {
+        controller.abort()
         if (!acquired) return Promise.resolve()
         // Cache before invoking the transport: dispose may synchronously call onEnd.
         return releasing ??= Promise.resolve().then(() => acquired!.dispose())
@@ -474,21 +496,22 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
         ended = true; rejectInitial(error)
         if (epoch !== eventEpoch || disposed) return
         stream = undefined
-        connectionState('lost', error)
+        observeSessions('unavailable', error)
         // Only this failed observation is released. Retained Sessions and healthy Runs survive.
-        void releaseAcquired().catch(connectionFailure).finally(reconnect)
+        void releaseAcquired().catch(error => { if (!disposed && epoch === eventEpoch) observeSessions('unavailable', error) }).finally(reconnect)
       }
       try {
         acquired = await rpc.subscribe('runtime.events', { consumerId, fence: expected, ...(options.sessions ? { sessions: options.sessions } : {}), ...(selectedSessionIds === undefined ? {} : { agentSessionIds: selectedSessionIds }) }, {
-          signal: observationSignal(),
+          signal: observationSignal(controller.signal),
           onInitial: value => {
             requireObservation()
-            if (value.owner.runtimeId !== expected.runtimeId || value.owner.ownerInstanceId !== expected.ownerInstanceId) throw new AgentMuxError('Runtime opening belongs to another owner.', 'RUNTIME_OWNER_CHANGED')
+            if (value.owner.runtimeId !== expected.runtimeId || value.owner.ownerInstanceId !== expected.ownerInstanceId) throw new AgentMuxError('Runtime opening belongs to another owner.', 'CONTROL_PROTOCOL_ERROR')
             transferId = value.transferId
           },
           onEvent: value => {
             if (ended || epoch !== eventEpoch || disposed) return
             try {
+              requireObservation()
               if (value.type === 'error') throw new AgentMuxError(value.error.message, value.error.code)
               if (value.type !== 'snapshot') return
               if (!initialSeen && value.data.transferId !== transferId) throw new AgentMuxError('Runtime initial transfer belongs to another observation.', 'CONTROL_PROTOCOL_ERROR')
@@ -497,10 +520,11 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
               if (received.kind === 'initial') {
                 if (initialSeen) throw new AgentMuxError('Runtime repeated its initial observation.', 'CONTROL_PROTOCOL_ERROR')
                 const observed = parseHostedBootstrap(received.value, sessionProjection, selectedSessionIds)
-                if (observed.owner.runtimeId !== expected.runtimeId || observed.owner.ownerInstanceId !== expected.ownerInstanceId) throw new AgentMuxError('Runtime bootstrap belongs to another owner.', 'RUNTIME_OWNER_CHANGED')
+                if (observed.owner.runtimeId !== expected.runtimeId || observed.owner.ownerInstanceId !== expected.ownerInstanceId) throw new AgentMuxError('Runtime bootstrap belongs to another owner.', 'CONTROL_PROTOCOL_ERROR')
                 if (options.expectedStorePath !== undefined && observed.storePath !== options.expectedStorePath) throw new AgentMuxError('This Host owns a different durable Session Store. The original workbench is retained.', 'CONTROL_OWNER_BUSY')
                 bootstrap = structuredClone(observed); initialSeen = true
-                acceptOwner(observed.owner)
+                if (controlOwner === owner) acceptOwner(observed.owner)
+                else bootstrap.owner = structuredClone(controlOwner!)
                 // The complete validated snapshot already owns this cache. Publish
                 // its original order without feeding each entry back into that array.
                 for (const retained of bootstrap.sessions) publisher.publish({ type: 'agent-session', session: structuredClone(retained) })
@@ -543,16 +567,20 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
           onEnd: error => endObservation(error ?? new AgentMuxError('Host observation ended.', 'RUNTIME_UNAVAILABLE'))
         })
         await initialReady
-      } catch (error) { await releaseAcquired(); throw error }
+        requireObservation()
+      } catch (error) {
+        ended = true
+        if (!disposed && epoch === eventEpoch) { rejectControlOwner(error, owner); observeSessions('unavailable', error) }
+        await releaseAcquired(); throw error
+      }
       finally { clearTimeout(timer) }
-      if (disposed || ended || epoch !== eventEpoch) { await releaseAcquired(); requireObservation() }
       stream = { dispose: releaseAcquired }
+      observeSessions('ready')
       reconnectDelay = 100
       reconnectAttempts = 0
       // Metadata and this event lease are ready. Native projection and reattachment are
       // separate cancellable observations; they cannot hold the durable opening hostage.
       const observeProjection = async (): Promise<void> => {
-        let projectionFailure: unknown
         try {
           // Summary consumers need process facts here, not another all-Session
           // payload through RuntimeProjection after the body-free bootstrap.
@@ -561,7 +589,7 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
             for (const agentSessionId of selectedSessionIds) {
               if (!available.has(agentSessionId)) continue
               try {
-                const response = await rpc.call('runtime.invoke', { consumerId, fence: fence(), invocation: { method: 'runtimeSubject', args: [{ kind: 'agent-session', agentSessionId }] } }, { signal: observationSignal() })
+                const response = await rpc.call('runtime.invoke', { consumerId, fence: fence(), invocation: { method: 'runtimeSubject', args: [{ kind: 'agent-session', agentSessionId }] } }, { signal: observationSignal(controller.signal) })
                 requireObservation()
                 const subject = decodeHostedValue(response.value) as import('./runtime.js').AgentMuxRuntimeSubject
                 if (subject.kind !== 'agent' || subject.agentSession.agentSessionId !== agentSessionId || subject.agentSession.run.runId !== subject.run.runId) throw new AgentMuxError('The scoped process observation belongs to another original Session or Run.', 'CONTROL_PROTOCOL_ERROR')
@@ -576,7 +604,7 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
             return
           }
           const projectionResponse = await rpc.call('runtime.invoke', { consumerId, fence: fence(),
-            invocation: { method: sessionProjection === 'summary' ? 'listRuns' : 'runtimeProjection', args: [] } }, { signal: observationSignal() })
+            invocation: { method: sessionProjection === 'summary' ? 'listRuns' : 'runtimeProjection', args: [] } }, { signal: observationSignal(controller.signal) })
           requireObservation()
           if (sessionProjection === 'summary') {
             const runs = decodeHostedValue(projectionResponse.value) as Awaited<ReturnType<AgentMuxHostedClient['listRuns']>>
@@ -588,7 +616,6 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
           }
         } catch (error) {
           requireObservation()
-          projectionFailure = error
           // Host/Store identity and process observation are separate facts. An unsuccessful read
           // cannot discard the confirmed event lease or withhold writes which the original Core
           // can still validate against the exact Session and Run. Never invent a process-state.
@@ -628,14 +655,18 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
             }
           }
           requireObservation()
-          connectionState('restored', projectionFailure)
-        } else if (connectionPhase !== undefined) connectionState('restored', projectionFailure)
+        }
       }
       void observeProjection().catch(error => {
-        if (!disposed && epoch === eventEpoch && !ended) connectionFailure(error)
+        if (disposed || epoch !== eventEpoch || ended) return
+        if (admittedControlEpoch !== controlEpoch) { endObservation(error); return }
+        emit({ type: 'agent-error', code: error instanceof AgentMuxError ? error.code : 'CONTROL_UNAVAILABLE',
+          message: `An auxiliary Runtime observation failed; the accepted directory and exact controls remain available. ${error instanceof Error ? error.message : String(error)}`,
+          evidence: { source: 'agentmux', observedAt: Date.now() } })
       })
-    })().finally(() => { connecting = undefined })
-    return connecting
+    })().finally(() => { if (connecting === opening) connecting = undefined })
+    connecting = opening
+    return opening
   }
   const openingReaders = new Map<string, object>()
   const watchAttachment = async (target: AgentMuxHostedAttachmentTarget, afterByte: number, view: 'raw' | 'terminal',
@@ -760,6 +791,7 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
   }
   const client: Record<string, unknown> = {
     connect,
+    sessionObservation,
     sessionObservationScope: () => bootstrap?.sessionScope ? structuredClone(bootstrap.sessionScope) : null,
     runtimeOwnerIdentity: () => controlOwner ? structuredClone(controlOwner) : null,
     readRuntimeOwnerIdentity: async (options?: { signal?: AbortSignal }) => {
@@ -773,7 +805,18 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
       const observation = rpc.remoteTransportObservation?.()
       return observation == null ? null : parseRemoteTransportObservation(observation)
     },
-    disconnect: () => { runtimePreparing = undefined; publicReaderEpoch++; for (const controller of publicOpenings) controller.abort(); publicOpenings.clear(); for (const reading of publicReaders) void reading.dispose().catch(() => {}); publicReaders.clear(); eventEpoch++; controlEpoch++; controlOwner = undefined; openingReaders.clear(); const previous = stream; stream = undefined; void previous?.dispose();
+    disconnect: () => {
+      observationEnabled = false
+      if (retry) { clearTimeout(retry); retry = undefined }
+      runtimePreparing = undefined; publicReaderEpoch++
+      for (const controller of publicOpenings) controller.abort()
+      publicOpenings.clear()
+      for (const reading of publicReaders) void reading.dispose().catch(() => {})
+      publicReaders.clear(); eventEpoch++; controlEpoch++
+      directoryObservation?.abort(); directoryObservation = undefined
+      controlDiscovery?.abort(); controlDiscovery = undefined
+      controlConnecting = undefined; connecting = undefined; controlOwner = undefined; openingReaders.clear()
+      const previous = stream; stream = undefined; observeSessions('unconfirmed'); void previous?.dispose()
       for (const reading of attached.values()) void reading.stream.dispose(); attached.clear();
       for (const read of [...histories]) releaseHistory(read) },
     ...(options.forwardRpc ? { forwardRpc: async (method: Parameters<AgentMuxHostedForwardRpc>[0], params: Parameters<AgentMuxHostedForwardRpc>[1], context: Parameters<AgentMuxHostedForwardRpc>[2] = {}, expectedOwner?: AgentMuxRuntimeFence) => {
@@ -815,13 +858,13 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
       if (!catalog) throw new AgentMuxError(`Unknown Agent Provider: ${id}`, 'UNKNOWN_PROVIDER')
       return { catalog: structuredClone(catalog) }
     } },
-    catalog: () => structuredClone(bootstrap?.catalog ?? []),
+    catalog: () => structuredClone(requireBootstrap().catalog),
     runtimeIdentity: () => {
       const native = controlOwner?.ctxmux
       if (!native) throw new AgentMuxError('The original Native Runtime identity is unconfirmed. Durable Session metadata remains available.', 'CTXMUX_DISCONNECTED')
       return structuredClone(native)
     },
-    agentSessions: () => structuredClone(bootstrap?.sessions ?? []), agentSession: session,
+    agentSessions: () => structuredClone(requireBootstrap().sessions), agentSession: session,
     resolveAgentSession: (lookup: Parameters<AgentMuxHostedClient['resolveAgentSession']>[0]) => {
       if (!stream) throw new AgentMuxError('Session lookup is unverified while its endpoint is unavailable.', 'RUNTIME_UNAVAILABLE')
       if (lookup.kind === 'agent-session') return session(lookup.agentSessionId)
@@ -956,7 +999,10 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
   }
   if (options.connectOnDemand) return client as AgentMuxHostedClient<P>
   if (options.waitForReady === false) {
-    void connect().catch(error => { connectionState('lost', error); reconnect() })
-  } else await connect()
+    void connect().catch(error => { if (!(error instanceof AgentMuxError && error.code === 'AGENT_CAPABILITY_INVALID')) reconnect() })
+  } else {
+    try { await connect() }
+    catch (error) { await (client.dispose as () => Promise<void>)(); throw error }
+  }
   return client as AgentMuxHostedClient<P>
 }

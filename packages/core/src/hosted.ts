@@ -2,6 +2,7 @@
 export { connectHostedAgentMux } from './hosted-client.js'
 export { AGENTMUX_HOSTED_METHODS } from './hosted-client-contract.js'
 export { isHostedAgentSessionSummary } from './hosted-session-summary.js'
+export type { AgentMuxHostedSessionObservation } from './types.js'
 export type { AgentMuxHostEnvironment, AgentMuxHostEnvironmentSelector, AgentMuxAgentWorkspaceLocator, AgentMuxSelectedHostEnvironment } from './host-environment.js'
 export type { AgentMuxHostedAgentSessionSummary, AgentMuxHostedSessionProjection, AgentMuxHostedPromptIntentSummary } from './hosted-session-summary.js'
 export type {

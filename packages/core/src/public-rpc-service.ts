@@ -3394,8 +3394,16 @@ export class AgentMuxRpcService {
         if (lookup.kind === 'run') rpcString(rpcRecord(lookup.run, ['runId']).runId, 'Run ID')
         else if (lookup.kind === 'provider-native') { rpcString(lookup.providerId, 'Provider ID'); rpcString(lookup.sessionId, 'Native Session ID') }
         else if (lookup.kind === 'acp-native') { rpcString(lookup.adapterId, 'Adapter ID'); rpcString(lookup.sessionId, 'Native Session ID') }
-        const knownRun = lookup.kind === 'run' ? clients.filter(({ client }) => !this.endpointUnverified(client) &&
-          client.agentSessions().some(session => session.run.runId === rpcRecord(lookup.run, ['runId']).runId)) : []
+        const knownRun = lookup.kind === 'run' ? clients.filter(({ client }) => {
+          if (this.endpointUnverified(client)) return false
+          try { return client.agentSessions().some(session => session.run.runId === rpcRecord(lookup.run, ['runId']).runId) }
+          catch (error) {
+            // This cache only narrows a route. An unconfirmed directory cannot
+            // take away the original exact query below.
+            if (error instanceof AgentMuxError && error.code === 'HOSTED_SESSION_OBSERVATION_UNCONFIRMED') return false
+            throw error
+          }
+        }) : []
         const lookupScopes = knownRun.length === 1 ? knownRun : clients
         if (selected) sessions.push({ routeHostId: selected.hostId, client: selected.client, session: selected.session })
         else for (const scope of lookupScopes) {

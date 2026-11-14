@@ -209,6 +209,8 @@ export type AgentMuxHostedClient<P extends AgentMuxHostedSessionProjection = 'fu
   onRunEvent<Result>(runId: string, listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions): () => void
   onEvent<Result>(listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions): () => void
   sessionObservationScope(): import('./hosted-session-summary.js').AgentMuxHostedSessionScope | null
+  /** Read-only whole-directory availability. No snapshot is not an empty directory. */
+  sessionObservation(): import('./types.js').AgentMuxHostedSessionObservation
   runtimeOwnerIdentity(): AgentMuxRuntimeOwnerIdentity | null
   /** Exact control-plane identity; no Native, Session bootstrap or event lease is required. */
   readRuntimeOwnerIdentity(options?: { signal?: AbortSignal }): Promise<AgentMuxRuntimeOwnerIdentity>

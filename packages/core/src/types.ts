@@ -1946,7 +1946,15 @@ export type AgentMuxLifecycleDiagnosticSource = {
   expectedRun?: AgentMuxRunRef
 }
 
+/** This consumer's complete Session/catalog observation, never input or Run authority. */
+export type AgentMuxHostedSessionObservation = {
+  state: 'unconfirmed' | 'ready' | 'unavailable'
+  hasSnapshot: boolean
+  diagnostic?: { code: string; message: string }
+}
+
 export type AgentMuxClientEvent = (
+  | { type: 'session-observation-state'; observation: AgentMuxHostedSessionObservation; evidence: AgentMuxEvidence }
   /** Original journal change; live=false is initial/recovered catch-up, never a fresh user alert. */
   | { type: 'agent-message-changed'; messageId: string; sequence: number; messageSequence: number; live: boolean;
       recordKind: 'message' | 'delivery' | 'delivery-issue' | 'message-peer-inbox' | 'dispatch-open' | 'dispatch-event' | 'a2a-notification' | 'a2a-notification-result';

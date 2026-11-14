@@ -95,7 +95,7 @@ export class AgentMuxClientEventPublisher {
   }
 
   publish(event: AgentMuxClientEvent): void {
-    const listeners = event.type === 'agent-error' || event.type === 'connection-state' || event.type === 'agent-session'
+    const listeners = event.type === 'agent-error' || event.type === 'connection-state' || event.type === 'agent-session' || event.type === 'session-observation-state'
       ? [...this.listeners, ...this.statusListeners] : [...this.listeners]
     this.deliver(event, listeners)
     const runId = 'run' in event && event.run ? event.run.runId : undefined
