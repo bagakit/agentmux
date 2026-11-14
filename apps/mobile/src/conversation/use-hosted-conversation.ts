@@ -61,7 +61,7 @@ export function useHostedConversation(client: MobileConversationClient | null, i
     return result
   }, [client, id])
   useEffect(() => {
-    let live = true, epoch = 0, readingActivity = false, dirty = false
+    let live = true, epoch = 0, readingActivity = false, dirty = false, readingMetadata = false, metadataDirty = false
     let expiry: ReturnType<typeof setTimeout> | undefined
     let latestSession = selected.session
     setMetadata(value => value.id === id && value.owner === client ? value : empty(id, client))
@@ -69,11 +69,20 @@ export function useHostedConversation(client: MobileConversationClient | null, i
     const patch = (next: Partial<Metadata>) => { if (live) setMetadata(value => ({ ...(value.id === id && value.owner === client ? value : empty(id, client)), ...next })) }
     function clearActivity() { epoch++; if (expiry) clearTimeout(expiry); expiry = undefined; patch({ activity: null }) }
     async function sessionMetadata(): Promise<void> {
-      const result = await readMetadata()
-      if (!live || !result) return
-      latestSession = result.metadata.state === 'unconfirmed' ? latestSession : result.session
-      if (latestSession && result.metadata.state === 'active') void readActivity()
-      else clearActivity()
+      if (!live) return
+      // A newer event still invalidates an old reply, while its next read shares this owner.
+      if (readingMetadata) { metadataDirty = true; metadataEpoch.current++; return }
+      readingMetadata = true
+      try {
+        const result = await readMetadata()
+        if (!live || !result) return
+        latestSession = result.metadata.state === 'unconfirmed' ? latestSession : result.session
+        if (latestSession && result.metadata.state === 'active') void readActivity()
+        else clearActivity()
+      } finally {
+        readingMetadata = false
+        if (live && metadataDirty) { metadataDirty = false; void sessionMetadata() }
+      }
     }
     async function readActivity(): Promise<void> {
       if (!live || document.hidden || !latestSession) return
