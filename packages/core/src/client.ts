@@ -8715,7 +8715,7 @@ export class AgentMuxClient {
       throw new AgentMuxError(agentInteractionResponseUnavailableReason(pending) ??
         'This request has no addressable reply channel. Answer it in the original terminal.', 'AGENT_INTERACTION_UNCONFIRMED')
     }
-    await this.connect()
+    await this.connectRuntime()
     const assertOriginalResponseTarget = () => {
       const current = this.requireAgentSession(requestedSession.agentSessionId)
       if (!sameRun(current.run, requestedSession.run) || !sameNativeHandle(current.nativeHandle, canonical.nativeHandle) ||
