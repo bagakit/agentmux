@@ -4,7 +4,12 @@ import { resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '../../..')
 const mode = process.argv[2]
-if (!['--owner', '--checkpoint', '--auxiliary', '--restart'].includes(mode)) throw Error('Choose --owner, --checkpoint, --auxiliary or --restart')
+if (mode === '--reliability-input' || mode === '--reliability-spatial-window') {
+  const { verifyWorkbenchReliability } = await import('./verify-workbench-reliability.mjs')
+  verifyWorkbenchReliability(root, mode === '--reliability-input' ? 'input' : 'spatial-window')
+  process.exit(0)
+}
+if (!['--owner', '--checkpoint', '--auxiliary', '--restart'].includes(mode)) throw Error('Choose --owner, --checkpoint, --auxiliary, --restart or --reliability-input/--reliability-spatial-window')
 const evidence = resolve(root, '.local/durable-workbench-user-state', mode.slice(2))
 mkdirSync(evidence, { recursive: true })
 const receipts = []

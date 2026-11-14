@@ -12,9 +12,9 @@ import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 let root: string
 let dispose: (() => void) | undefined
 beforeEach(async () => { vi.resetModules(); window.localStorage.clear(); root = await mkdtemp(join(tmpdir(), 'amux-user-state-consumer-')) })
-afterEach(async () => { dispose?.(); dispose = undefined; vi.restoreAllMocks(); await rm(root, { recursive: true, force: true }) })
+afterEach(async () => { dispose?.(); dispose = undefined; vi.restoreAllMocks(); await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 }) })
 
-async function fixture(initial = 'Original unsent draft') {
+async function fixture(initial = 'Original unsent draft', unreadable = false) {
   const { useAppStore: store } = await import('../src/renderer/src/store')
   const { api } = await import('../src/renderer/src/lib/api')
   const { createWorkbenchTab } = await import('../src/renderer/src/lib/workbench-tabs')
@@ -34,7 +34,8 @@ async function fixture(initial = 'Original unsent draft') {
   await spatial.commit({ expectedRevision: 0, graph: desktopSpatialGraph(store.getState(), []) })
   const user = new WorkbenchUserStateStore(join(root, 'workbench-user-state.json'))
   window.localStorage.setItem('agentmux-workbench-v1', JSON.stringify({ state: { agentComposerDrafts: { 'original-region': initial } }, version: 1 }))
-  vi.spyOn(api.ui, 'readWorkbenchState').mockImplementation(() => user.read())
+  if (unreadable) await user.write(JSON.stringify({ state: { agentComposerDrafts: { 'original-region': initial } }, version: 1 }))
+  vi.spyOn(api.ui, 'readWorkbenchState').mockImplementation(() => unreadable ? Promise.reject(Error('Original read unavailable')) : user.read())
   vi.spyOn(api.ui, 'importWorkbenchState').mockImplementation(value => user.importIfAbsent(value))
   vi.spyOn(api.ui, 'writeWorkbenchState').mockImplementation(value => user.write(value))
   vi.spyOn(api.ui, 'requestStorageFlush').mockImplementation(async () => { await user.read() })
@@ -50,7 +51,7 @@ async function fixture(initial = 'Original unsent draft') {
   vi.spyOn(api.spatial, 'onChange').mockImplementation(listener => spatial.subscribe(listener))
   vi.spyOn(api.spatial, 'retainLabels').mockImplementation(values => spatial.retainDisplayLabels(values))
   dispose = await store.getState().initialize()
-  return { store, api, user, spatial, session }
+  return { store, api, user, spatial, session, repairRead: () => { unreadable = false } }
 }
 
 it('actual Desktop hydration and user editing use the host file and preserve original spatial and Run identities', async () => {
@@ -163,4 +164,53 @@ it('the actual Store registers a best-effort unload callback that submits pendin
     expect(entered).toBe(true)
     expect(JSON.parse((await f.user.read())!).state.agentComposerDrafts['original-region']).toBe('Pending input delivered by unload')
   } finally { realClearTimeout(deadline); vi.useRealTimers() }
+})
+
+
+it.each(['composer', 'queue', 'editor'])('fenced Quit keeps actual %s input while startup defaults alone can quit', async kind => {
+  const f = await fixture('Original protected bytes', true)
+  const { prepareRendererUpdate } = await import('../src/renderer/src/store')
+  const original = await readFile(f.user.path, 'utf8')
+  await expect(prepareRendererUpdate('quit')).resolves.toBeUndefined()
+  if (kind === 'composer') f.store.getState().setAgentComposerDraft('original-region', 'New authored root draft')
+  if (kind === 'queue') {
+    expect(f.store.getState().enqueueAgentSteer('original-agent', 'New authored queued input')).not.toBe(false)
+    expect(f.store.getState().agentSteerQueues['original-agent']?.at(-1)?.text).toBe('New authored queued input')
+  }
+  if (kind === 'editor') {
+    const { createWorkbenchTab } = await import('../src/renderer/src/lib/workbench-tabs')
+    const tab = createWorkbenchTab('original-file-tab', { kind: 'file', regionId: 'original-file-region', workspaceId: 'original-workspace', path: 'draft.txt' })
+    f.store.setState(state => ({ tabs: { ...state.tabs, [tab.id]: tab }, documents: { ...state.documents, ['original-workspace\0draft.txt']: { path: 'draft.txt', content: 'Original file', revision: 'original-revision' } } }))
+    f.store.getState().updateDocument(tab.id, 'New authored file buffer')
+    expect(f.store.getState().documents['original-workspace\0draft.txt']?.content).toBe('New authored file buffer')
+  }
+  await expect(prepareRendererUpdate('quit')).rejects.toThrow('Current Desktop input is not yet saved')
+  expect(await readFile(f.user.path, 'utf8')).toBe(original)
+  if (kind === 'composer') expect(f.store.getState().agentComposerDrafts['original-region']).toBe('New authored root draft')
+  expect(f.api.sessions.stop).not.toHaveBeenCalled()
+})
+
+
+it('repairing the original read merges disjoint real early edits before opening the original writer', async () => {
+  const f = await fixture('Original protected bytes', true)
+  f.store.getState().setAgentComposerDraft('new-original-region', 'New authored text during failed read')
+  f.repairRead(); dispose?.(); dispose = await f.store.getState().initialize()
+  const { prepareRendererUpdate } = await import('../src/renderer/src/store')
+  await prepareRendererUpdate('quit')
+  expect(JSON.parse((await f.user.read())!).state.agentComposerDrafts).toEqual({
+    'original-region': 'Original protected bytes', 'new-original-region': 'New authored text during failed read' })
+  expect(f.api.sessions.stop).not.toHaveBeenCalled()
+})
+
+it('repairing an overlapping unread input preserves both the original file and current authored draft', async () => {
+  const f = await fixture('Unknown original saved text', true), original = await readFile(f.user.path, 'utf8')
+  f.store.getState().setAgentComposerDraft('original-region', 'Current new text cannot silently replace unseen text')
+  f.repairRead(); dispose?.(); dispose = await f.store.getState().initialize()
+  const { prepareRendererUpdate } = await import('../src/renderer/src/store')
+  await expect(prepareRendererUpdate('quit')).rejects.toThrow('Current Desktop input is not yet saved')
+  // Independently readable fragments may checkpoint this same document. The
+  // original root input remains exact while the conflicting current edit stays live.
+  expect(JSON.parse((await f.user.read())!).state).toEqual(JSON.parse(original).state)
+  expect(f.store.getState().agentComposerDrafts['original-region']).toBe('Current new text cannot silently replace unseen text')
+  expect(f.api.sessions.stop).not.toHaveBeenCalled()
 })

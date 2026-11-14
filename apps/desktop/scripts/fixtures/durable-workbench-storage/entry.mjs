@@ -98,7 +98,7 @@ window.durableRestartFacts = () => {
     activeWorkspaceId: state.activeWorkspaceId, mainSurface: state.mainSurface,
     error: state.error, saveWarning: state.workbenchSaveWarning,
     originalLegacyPresent: localStorage.getItem('agentmux-workbench-v1') !== null,
-    auxiliary: Object.fromEntries(Object.keys(DESKTOP_FRAGMENT_KEYS).map(name => [name, desktopUserFragments.read(name)])),
+    auxiliary: Object.fromEntries(Object.keys(DESKTOP_FRAGMENT_KEYS).filter(name => desktopUserFragments.ready(name)).map(name => [name, desktopUserFragments.read(name)])),
     auxiliaryLegacyPresent: Object.keys(auxiliary.legacy).some(key => localStorage.getItem(key) !== null),
     regions: [...document.querySelectorAll('[data-workbench-region-id]')].filter(node => node.getClientRects().length)
       .map(node => node.dataset.workbenchRegionId).sort(),

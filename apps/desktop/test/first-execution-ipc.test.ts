@@ -96,6 +96,27 @@ it('registered native storage handlers reject foreign contents or frames before 
   } finally { await dispose() }
 })
 
+it('private save revisions fence a late old request through actual preload and registered Main admission', async () => {
+  const f = await owningBridge()
+  const invoke = bridge.invoke.getMockImplementation()!
+  let release!: () => void, entered!: () => void
+  const delayed = new Promise<void>(resolve => { release = resolve }), ready = new Promise<void>(resolve => { entered = resolve })
+  let first = true
+  bridge.invoke.mockImplementation(async (channel, ...values) => {
+    if (channel === 'ui:writeWorkbenchState' && first) { first = false; entered(); await delayed }
+    return invoke(channel, ...values)
+  })
+  const old = JSON.stringify({ state: { agentComposerDrafts: { original: 'old' } }, version: 1 })
+  const latest = JSON.stringify({ state: { agentComposerDrafts: { original: 'latest' } }, version: 1 })
+  try {
+    const pending = bridge.api!.ui.writeWorkbenchState(old)
+    const refused = expect(pending).rejects.toMatchObject({ code: 'WORKBENCH_USER_STATE_SUPERSEDED' })
+    await ready; await bridge.api!.ui.writeWorkbenchState(latest)
+    release(); await refused
+    expect(await readFile(f.workbenchUserState.path, 'utf8')).toBe(latest)
+  } finally { release(); await f.dispose() }
+})
+
 it('actual preload, registered IPC and Main keep injected context separate from the untouched manual body', async () => {
   const { client, pauseTarget, dispose } = await owningBridge()
   const prompt = '  <amux from="amux">User authored text</amux>\r\n  ', agentMuxNote = 'Platform rule <literal> & text.'
