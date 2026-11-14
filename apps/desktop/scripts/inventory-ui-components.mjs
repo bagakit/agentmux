@@ -57,7 +57,7 @@ const uniqueConsumers = [...new Map(consumers.map(item => [`${item.component}|${
 const nativeSelects = []
 for (const [file, source] of sources) {
   if (!file.endsWith('.tsx')) continue
-  for (const match of source.matchAll(/<select\b/g)) nativeSelects.push({ file: relativeFile(file), line: lineAt(source, match.index), owner: relativeFile(file).startsWith('apps/mobile/') ? 'apps/mobile' : 'apps/desktop' })
+  for (const match of source.matchAll(/<select\b/g)) nativeSelects.push({ file: relativeFile(file), line: lineAt(source, match.index), owner: relativeFile(file).startsWith('packages/client-ui/') ? 'packages/client-ui' : relativeFile(file).startsWith('apps/mobile/') ? 'apps/mobile' : 'apps/desktop' })
 }
 
 const defined = new Set()
