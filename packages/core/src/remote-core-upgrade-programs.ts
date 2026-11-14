@@ -238,18 +238,26 @@ const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypt
 const p=JSON.parse(fs.readFileSync(0,'utf8')); const hash=b=>crypto.createHash('sha256').update(b).digest('hex');
 const root=path.join(p.stateDirectory,'core-releases',p.digest), archive=Buffer.from(p.archive,'base64');
 if(hash(archive)!==p.archiveDigest)throw Error('Portable archive digest mismatch');
+if(Number(process.versions.node.split('.')[0])<24)throw Error('The original Node executable is older than the candidate requires');
+function qualify(directory){
+ const moduleUrl=name=>JSON.stringify(require('node:url').pathToFileURL(path.join(directory,'dist',name)).href);
+ cp.execFileSync(p.node,['--input-type=module','--eval','await import('+moduleUrl('headless-runtime.js')+'); (await import('+moduleUrl('directory-write.js')+')).assertDirectoryWriteSupport()'],{timeout:30000});
+}
 fs.mkdirSync(path.dirname(root),{recursive:true,mode:0o700});
 if(!fs.existsSync(root)){
  const staged=root+'.'+p.operationId+'.staging'; fs.mkdirSync(staged,{mode:0o700});
- const tar=path.join(staged,'.archive.tar.gz');fs.writeFileSync(tar,archive,{mode:0o600});
- cp.execFileSync('tar',['-xzf',tar,'-C',staged]);fs.unlinkSync(tar);
- for(const f of p.files){const target=path.join(staged,f.path);if(path.relative(staged,target).startsWith('..')||hash(fs.readFileSync(target))!==f.sha256)throw Error('Portable file digest mismatch');fs.chmodSync(target,f.mode);}
- fs.writeFileSync(path.join(staged,'deployment.json'),JSON.stringify({digest:p.digest,files:p.files}));fs.renameSync(staged,root);
+ try{
+  const tar=path.join(staged,'.archive.tar.gz');fs.writeFileSync(tar,archive,{mode:0o600});
+  cp.execFileSync('tar',['-xzf',tar,'-C',staged]);fs.unlinkSync(tar);
+  for(const f of p.files){const target=path.join(staged,f.path);if(path.relative(staged,target).startsWith('..')||hash(fs.readFileSync(target))!==f.sha256)throw Error('Portable file digest mismatch');fs.chmodSync(target,f.mode);}
+  qualify(staged);
+  fs.writeFileSync(path.join(staged,'deployment.json'),JSON.stringify({digest:p.digest,files:p.files}));fs.renameSync(staged,root);
+ }finally{fs.rmSync(staged,{recursive:true,force:true});}
+}else{
+ const record=JSON.parse(fs.readFileSync(path.join(root,'deployment.json'),'utf8'));if(record.digest!==p.digest)throw Error('Release identity mismatch');
+ for(const f of p.files){const target=path.join(root,f.path);if(hash(fs.readFileSync(target))!==f.sha256||(fs.statSync(target).mode&0o777)!==f.mode)throw Error('Staged release was changed');}
+ qualify(root);
 }
-const record=JSON.parse(fs.readFileSync(path.join(root,'deployment.json'),'utf8'));if(record.digest!==p.digest)throw Error('Release identity mismatch');
-for(const f of p.files){const target=path.join(root,f.path);if(hash(fs.readFileSync(target))!==f.sha256||(fs.statSync(target).mode&0o777)!==f.mode)throw Error('Staged release was changed');}
-if(Number(process.versions.node.split('.')[0])<24)throw Error('The original Node executable is older than the candidate requires');
-cp.execFileSync(p.node,['--input-type=module','--eval','await import('+JSON.stringify(require('node:url').pathToFileURL(path.join(root,'dist','headless-runtime.js')).href)+')'],{timeout:30000});
 const quote=s=>"'"+s.replaceAll("'","'\\''")+"'";
 const launcher=path.join(root,'launcher');fs.mkdirSync(launcher,{recursive:true,mode:0o700});
 const command=path.join(launcher,'amux');fs.writeFileSync(command,'#!/bin/sh\nexec '+quote(p.node)+' '+quote(path.join(root,'dist','agentmux.js'))+' "$@"\n',{mode:0o755});
