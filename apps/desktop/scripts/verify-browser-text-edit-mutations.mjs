@@ -15,7 +15,8 @@ const original = new Map(paths.map(path => [path, readFileSync(join(root, path),
 const sha = value => createHash('sha256').update(value).digest('hex')
 const definitions = [
   { id: 'renderer-binding', path: index, before: '    installTextEditContextMenu(window.webContents, window, { isCurrent: () => workbenchWindow === window })', after: '', test: 'executes the exact renderer-host registration call' },
-  { id: 'page-binding', path: bvm, before: '    installTextEditContextMenu(contents, this.window, {\n      isCurrent: () => this.nativeOwner(entry.id)?.view === view,\n      origin: () => view.getBounds()\n    })', after: '', test: 'actual BVM attaches to each original page' },
+  { id: 'page-binding', path: bvm, before: '    installTextEditContextMenu(contents, () => this.windowForView(view), {', after: '    if (false) installTextEditContextMenu(contents, () => this.windowForView(view), {', test: 'actual BVM attaches to each original page' },
+  { id: 'browser-link-address', path: helper, before: "label: 'Copy Link Address', address: params.linkURL", after: "label: 'Copy Link Address', address: params.pageURL", test: 'copies exact native link, linked image and page addresses through the actual BVM' },
   { id: 'wrong-host-target', path: helper, before: '            contents[item.action]()', after: '            window.webContents[item.action]()', test: 'targets original contents for all four native commands' },
   { id: 'disabled-action', path: helper, before: '        if (chosen || ended || !item.enabled) return', after: '        if (chosen || ended) return', test: 'derives disabled actions from real editFlags' },
   { id: 'same-frame-target', path: helper, before: '            if (!sameTarget || ended || !current()) { finish(); notice(); return }', after: '            if (ended || !current()) { finish(); notice(); return }', test: 'same frame changed input invalidates' },

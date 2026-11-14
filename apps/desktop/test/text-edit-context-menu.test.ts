@@ -5,7 +5,9 @@ import { tmpdir } from 'node:os'
 import { runInNewContext } from 'node:vm'
 import { Window as DomWindow } from 'happy-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-const native = vi.hoisted(() => ({ menus: [] as any[], contents: [] as any[], focused: null as any, frames: new Map<any, any>(), failMenu: false }))
+const native = vi.hoisted(() => ({ menus: [] as any[], contents: [] as any[], focused: null as any, frames: new Map<any, any>(), failMenu: false,
+  writeClipboardText: vi.fn<(text: string) => Promise<void>>() }))
+vi.mock('../src/main/native-desktop-owner.js', () => ({ getDesktopNativeUiOwner: () => ({ writeClipboardText: native.writeClipboardText }) }))
 vi.mock('electron', () => ({
   Menu: { buildFromTemplate: (items: any[]) => {
     if (native.failMenu) throw new Error('native menu unavailable')
@@ -38,7 +40,7 @@ class Frame {
 }
 class Contents extends EventEmitter {
   destroyed = false; mainFrame = new Frame(); focusedFrame = this.mainFrame; url = 'https://generic.invalid/'
-  session = Object.assign(new EventEmitter(), { setPermissionCheckHandler() {}, setPermissionRequestHandler() {} }); commands: string[] = []
+  session = Object.assign(new EventEmitter(), { setPermissionCheckHandler() {}, setPermissionRequestHandler() {}, setDevicePermissionHandler() {} }); commands: string[] = []
   navigationHistory = { canGoBack: () => false, canGoForward: () => false }
   constructor() { super(); native.frames.set(this.mainFrame, this) }
   isDestroyed() { return this.destroyed }; getURL() { return this.url }; getTitle() { return 'Page' }; isLoading() { return false }
@@ -53,6 +55,7 @@ class Window extends EventEmitter {
   webContents = { send: vi.fn(), isDestroyed: () => false, commands: [] as string[],
     copy() { this.commands.push('copy') }, cut() { this.commands.push('cut') }, paste() { this.commands.push('paste') }, selectAll() { this.commands.push('selectAll') } }
   contentView = { addChildView: vi.fn(), removeChildView: vi.fn() }
+  getContentBounds() { return { x: 0, y: 0, width: 500, height: 400 } }
   isDestroyed() { return this.destroyed }; isVisible() { return this.visible }; isMinimized() { return this.minimized }; isFocused() { return this.focused }
 }
 const flush = async () => { for (let i = 0; i < 9; i++) await Promise.resolve() }
@@ -75,7 +78,8 @@ async function click(menu: any, label: string) {
   const item = menu.items.find((entry: any) => entry.label === label)
   expect(item).toBeDefined(); item.click(); menu.options.callback?.(); await flush()
 }
-beforeEach(() => { native.menus.length = 0; native.contents.length = 0; native.frames.clear(); native.focused = null; native.failMenu = false })
+beforeEach(() => { native.menus.length = 0; native.contents.length = 0; native.frames.clear(); native.focused = null; native.failMenu = false
+  native.writeClipboardText.mockReset().mockResolvedValue(undefined) })
 afterEach(() => { for (const dispose of disposers.splice(0)) dispose(); for (const dom of doms.splice(0)) dom.window.close(); for (const root of roots.splice(0)) rmSync(root, { recursive: true }); vi.restoreAllMocks() })
 
 describe('actual native edit-menu Source with real local DOM identity scripts', () => {
@@ -230,5 +234,44 @@ describe('actual definition-external consumers', () => {
     await click(menu, 'Copy'); expect(contents.commands).toEqual(['copy']); expect(window.webContents.commands).toEqual([])
     contents.emit('context-menu', {}, params(contents.mainFrame)); await flush(); const next = native.menus.at(-1)
     manager.setBounds('original-browser', null); await click(next, 'Paste'); expect(contents.commands).toEqual(['copy'])
+  })
+  it('copies exact native link, linked image and page addresses through the actual BVM', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'agentmux-context-address-test-')); roots.push(root)
+    const window = new Window(), manager = new BrowserViewManager(window as never,
+      { defaultProfileId: () => 'profile', resolvePartition: () => 'persist:context-address' }, new BrowserRefLedgerStore(join(root, 'refs.json')),
+      { rememberedSchemes: async () => ({}), rememberScheme: async () => {}, openExternal() {} })
+    disposers.push(() => manager.dispose())
+    const pageURL = 'https://generic.invalid/page#current'
+    const linkURL = 'https://generic.invalid/linked%20page?primary=one&secondary=two#destination'
+    const srcURL = 'https://assets.invalid/image.png?scale=2'
+    await manager.create('browser', pageURL, 'workspace')
+    manager.setBounds('browser', { x: 40, y: 50, width: 500, height: 400 })
+    const contents: Contents = native.contents[0], frame = new Frame()
+    frame.parent = contents.mainFrame
+    native.frames.set(frame, contents); native.focused = contents
+    const script = vi.spyOn(frame, 'executeJavaScript').mockRejectedValue(new Error('The page script is unavailable'))
+    const openAddress = (overrides: Record<string, unknown> = {}) => open({ contents, window, owner: { current: true }, frame },
+      { isEditable: false, mediaType: 'none', pageURL, ...overrides })
+    const link = await openAddress({ linkURL })
+    expect(link.options.frame).toBe(frame)
+    expect(link.items.map((item: any) => item.label)).toEqual(['Copy Link Address'])
+    await click(link, 'Copy Link Address')
+    const image = await openAddress({ linkURL, mediaType: 'image', srcURL })
+    expect(image.items.map((item: any) => item.label)).toEqual(['Copy Link Address', 'Copy Image Address'])
+    await click(image, 'Copy Image Address')
+    await click(await openAddress(), 'Copy Page Address')
+    expect(native.writeClipboardText.mock.calls).toEqual([[linkURL], [srcURL], [pageURL]])
+    expect(script).not.toHaveBeenCalled()
+
+    native.writeClipboardText.mockRejectedValueOnce(new Error('Pasteboard unavailable'))
+    await click(await openAddress({ linkURL }), 'Copy Link Address')
+    expect(window.webContents.send.mock.calls.at(-1)?.[1].browser.activity.warning).toContain('Could not confirm the address was copied')
+    await click(await openAddress({ linkURL }), 'Copy Link Address')
+    expect(window.webContents.send.mock.calls.at(-1)?.[1].browser.activity.warning).toBeUndefined()
+
+    const stale = await openAddress({ linkURL })
+    contents.emit('did-start-navigation', { isMainFrame: false, frame })
+    await click(stale, 'Copy Link Address')
+    expect(native.writeClipboardText).toHaveBeenCalledTimes(5)
   })
 })
