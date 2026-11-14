@@ -64,7 +64,7 @@ export type MoteQuickPreferencesReadResult = MoteQuickPreferencesReadInput & {
   choices: MoteQuickChoices; main: boolean | null; issue: string | null; maintenance?: MotePresenceReading
 }
 export type MoteQuickPreferencesSaveInput = MoteQuickPreferencesReadInput & {
-  baseline: MoteQuickBaseline; values: MoteQuickDefaults; destination: MotePreferencesDestination
+  baseline: MoteQuickBaseline; values: MoteQuickDefaults; destination?: MotePreferencesDestination
 }
 export type MoteQuickPreferencesSaveParams = MoteQuickPreferencesSaveInput & { operationId: string }
 export type MoteQuickPreferencesSaveResult = MoteQuickPreferencesReadInput & {
@@ -120,10 +120,12 @@ export function parseMoteDefaultConversation(value: unknown, code: Code = 'INVAL
   const c = fields(value, [...tupleFields], [...tupleFields], code)
   return Object.fromEntries(tupleFields.map(key => [key, id(c[key], code, key === 'tabId' || key === 'regionId')])) as MoteDefaultConversation
 }
+export function sameMoteDefaultConversation(a: MoteDefaultConversation | undefined, b: MoteDefaultConversation | undefined): boolean {
+  return a === b || !!a && !!b && tupleFields.every(key => a[key] === b[key])
+}
 export function sameMoteQuickDefaults(a: MoteQuickDefaults, b: MoteQuickDefaults): boolean {
   return a.executorId === b.executorId && a.recovery === b.recovery && a.conversationRevision === b.conversationRevision &&
-    JSON.stringify(a.conversationRollover ?? {kind:'keep-current'}) === JSON.stringify(b.conversationRollover ?? {kind:'keep-current'}) && a.presence?.enabled === b.presence?.enabled && a.presence?.intervalMs === b.presence?.intervalMs && (a.conversation === b.conversation || !!a.conversation && !!b.conversation &&
-    tupleFields.every(key => a.conversation![key] === b.conversation![key]))
+    JSON.stringify(a.conversationRollover ?? {kind:'keep-current'}) === JSON.stringify(b.conversationRollover ?? {kind:'keep-current'}) && a.presence?.enabled === b.presence?.enabled && a.presence?.intervalMs === b.presence?.intervalMs && sameMoteDefaultConversation(a.conversation, b.conversation)
 }
 export function sameMotePreferencesTarget(a: MotePreferencesTarget, b: MotePreferencesTarget): boolean {
   return a.spaceId === b.spaceId && a.zoneId === b.zoneId && (['hostId', 'workspaceId', 'workspacePath'] as const)
@@ -215,7 +217,10 @@ export function parseMotePreferencesSaveInput(value: unknown, code: Code = 'INVA
     fields(p, ['kind', 'target', 'baseline', 'values'], [], code)
     return { ...base, baseline: parseMoteConnectionBaseline(p.baseline, base.target, code), values: parseMoteConnectionValues(p.values, code) }
   }
-  return { ...base, baseline: parseMoteQuickBaseline(p.baseline, base.target, code), values: parseMoteQuickDefaults(p.values, code), destination: parseMotePreferencesDestination(p.destination, code) }
+  const baseline = parseMoteQuickBaseline(p.baseline, base.target, code), values = parseMoteQuickDefaults(p.values, code)
+  const destination = p.destination === undefined ? undefined : parseMotePreferencesDestination(p.destination, code)
+  if (!destination && !sameMoteDefaultConversation(baseline.defaults.conversation, values.conversation)) fail('Changing the original Main requires its exact legitimate destination.', code)
+  return { ...base, baseline, values, ...(destination ? { destination } : {}) }
 }
 export function parseMotePreferencesSaveParams(value: MoteQuickPreferencesSaveParams, code?: Code): MoteQuickPreferencesSaveParams
 export function parseMotePreferencesSaveParams(value: MoteConnectionPreferencesSaveParams, code?: Code): MoteConnectionPreferencesSaveParams

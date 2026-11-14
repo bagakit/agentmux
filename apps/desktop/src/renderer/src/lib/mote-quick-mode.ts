@@ -1,7 +1,7 @@
 import type { FileDocument } from '@agentmux/core'
 import type { FileReadResult } from '@agentmux/core/files'
-import { parseMotePreferencesReadResult, parseMotePreferencesSaveResult, type MoteQuickBaseline, type MoteQuickChoices, type MoteQuickPreferencesSaveParams, type MotePresenceReading, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
-import type { MoteQuickDefaults } from '@agentmux/host/mote-model'
+import { parseMotePreferencesReadResult, parseMotePreferencesSaveResult, sameMoteDefaultConversation, type MoteQuickBaseline, type MoteQuickChoices, type MoteQuickPreferencesSaveParams, type MotePresenceReading, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
+import { scratchTopicLogicalPath, type MoteQuickDefaults } from '@agentmux/host/mote-model'
 import type { MoteWorkfaceScope } from './mote-workface'
 import type { WorkbenchProjectionSelection } from './workbench-projection'
 import { confirmedMoteReference, emptyMoteDestination, type FileDestination } from './mote-materials-actions'
@@ -32,17 +32,20 @@ export async function saveMoteQuickDefaults(scope: MoteWorkfaceScope, defaults: 
   let dispatched = false, confirmed: MoteQuickWrite | null = null
   try {
     const state = useAppStore.getState(), target = moteConnectionTarget(scope, state.spaceZoneBindings)
+    const workspace = state.config?.workspaces.find(value => value.id === scope.workspace.id)
+    if (workspace?.hostId !== scope.workspace.hostId || workspace.path !== scope.workspace.path || scratchTopicLogicalPath(scope.workspace, scope.topic) !== scope.rootPath) throw new Error('The original settings source changed. Keep your draft and reread it.')
     if (!target || saved.issue || !saved.source?.resource || !stillCurrent()) throw new Error(saved.issue ?? 'The original settings source changed. Keep your draft and reread it.')
     const path = scope.rootPath + '/MOTE.md', key = documentKey(scope.workspace.id, path)
     if (state.dirtyDocuments[key] || state.documentIssues[key]) throw new Error('The original settings Editor has an unsaved or unconfirmed draft. It is kept; review it before saving.')
-    const occurrence = destination ? null : confirmedMoteReference(state, scope, { reference })
-    const empty = destination ?? (occurrence ? null : emptyMoteDestination(state, scope, { reference }))
-    const chosen = occurrence ? { kind: 'occurrence' as const, ...occurrence } : empty ? { kind: 'empty' as const, ...empty } : null
-    if (!chosen) throw new Error('The original Mote display is unconfirmed. Your draft and existing work are kept.')
-    const baseline = { resource: saved.source.resource, document: saved.document, defaults: saved.defaults }
     const pending = saved.pending
+    const sameMain = sameMoteDefaultConversation(saved.defaults.conversation, defaults.conversation)
+    const occurrence = sameMain || pending || destination ? null : confirmedMoteReference(state, scope, { reference })
+    const empty = sameMain || pending ? null : destination ?? (occurrence ? null : emptyMoteDestination(state, scope, { reference }))
+    const chosen = occurrence ? { kind: 'occurrence' as const, ...occurrence } : empty ? { kind: 'empty' as const, ...empty } : null
+    if (!sameMain && !pending && !chosen) throw new Error('The original Mote display is unconfirmed. Your draft and existing work are kept.')
+    const baseline = { resource: saved.source.resource, document: saved.document, defaults: saved.defaults }
     if (pending && JSON.stringify(pending.values) !== JSON.stringify(defaults)) throw new Error('The previous save has an unknown result. Retain that original request and inspect it before saving different settings.')
-    const input: MoteQuickPreferencesSaveParams = pending ?? { kind: 'quick', target, baseline, values: structuredClone(defaults), destination: chosen, operationId: crypto.randomUUID() }
+    const input: MoteQuickPreferencesSaveParams = pending ?? { kind: 'quick', target, baseline, values: structuredClone(defaults), ...(chosen ? { destination: chosen } : {}), operationId: crypto.randomUUID() }
     saved.pending = input
     dispatched = true
     const result = parseMotePreferencesSaveResult(await api.motePreferences.save(input), input)

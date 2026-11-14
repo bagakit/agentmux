@@ -236,7 +236,7 @@ export function matchesMoteMainBindingInput(record: AgentMuxSpatialAgentOpenReco
   if (!record.moteMain || input.operationId !== record.moteMain.bindOperationId || !sameMotePreferencesTarget(input.target,record.moteMain.target) ||
     !sameMoteMainBaseline(moteMainBaseline(input.baseline), record.moteMain.baseline) || !sameMoteQuickDefaults(effectiveMoteQuickSave(input),moteMainBindingDefaults(record))) return false
   const ref = moteMainCreatedReference(record), destination = input.destination
-  return destination.kind === 'occurrence' && destination.displayWorkspaceId === ref.displayWorkspaceId && destination.groupId === ref.groupId && destination.tabId === ref.tabId && destination.regionId === ref.regionId
+  return destination?.kind === 'occurrence' && destination.displayWorkspaceId === ref.displayWorkspaceId && destination.groupId === ref.groupId && destination.tabId === ref.tabId && destination.regionId === ref.regionId
 }
 export function validateMoteMainBindingObservation(record: AgentMuxSpatialAgentOpenRecord, value: MoteMainBindingObservation): void {
   const code = 'CONTROL_PROTOCOL_ERROR', raw = rpcRecord(value,undefined,code), expected = moteMainBindingDefaults(record)

@@ -1,5 +1,6 @@
 import { parseMoteDefaultConversation, parseMoteConnectionValues, sameMoteConnectionValues,
-  parseMoteQuickDefaults, type MoteConnectionValues, type MoteDefaultConversation, type MoteQuickDefaults } from '@agentmux/core/mote-preferences'
+  parseMoteQuickDefaults, sameMoteDefaultConversation, type MoteConnectionValues, type MoteDefaultConversation, type MoteQuickDefaults } from '@agentmux/core/mote-preferences'
+export { sameMoteDefaultConversation } from '@agentmux/core/mote-preferences'
 export type { MoteDefaultConversation, MoteQuickDefaults } from '@agentmux/core/mote-preferences'
 import { Document, isMap, isScalar, parseDocument } from 'yaml'
 
@@ -134,8 +135,4 @@ export function serializeMoteQuickMode(content: string, defaults: MoteQuickDefau
   if (!defaults.conversation) document.deleteIn(['defaults', 'conversation'])
   else for (const field of FIELDS) document.setIn(['defaults', 'conversation', field], defaults.conversation[field])
   return serializeFrontmatter(document, original)
-}
-
-export function sameMoteDefaultConversation(a: MoteDefaultConversation | undefined, b: MoteDefaultConversation | undefined): boolean {
-  return a === b || Boolean(a && b && FIELDS.every(field => a[field] === b[field]))
 }
