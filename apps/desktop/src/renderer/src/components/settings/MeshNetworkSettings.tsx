@@ -1,31 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
 import { mintObjectId } from '@agentmux/core/object-id'
-import type { MeshNetworkInspection, MeshNetworkLink, MeshNetworkSettings } from '@agentmux/core/mesh-network'
+import type { MeshNetworkInspection, MeshNetworkSettings } from '@agentmux/core/mesh-network'
 import { api } from '../../lib/api'
 import { useAppStore, updateMeshSettingsDraft } from '../../store'
 import { configValuesEqual } from '../../../../shared/config-edit'
 import { meshConfiguration, meshDraftForRuntime, meshForm, meshPeerCode, type MeshForm, type MeshSettingsDraft } from '../../lib/mesh-settings-draft'
 import { SettingsSaveBar } from './SettingsSaveBar'
 import { MeshNetworkMap } from './MeshNetworkMap'
-import { MeshConnectionIntro } from './MeshConnectionIntro'
+import { MeshAccessLinks } from './MeshAccessLinks'
+import { MeshPeerPairing } from './MeshPeerPairing'
 import { ServiceWindowNotice } from '../ServiceWindowNotice'
 import { useLocalRuntimeRecovery } from '../../lib/use-local-runtime-recovery'
 import './mesh-settings.css'
 
 const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause)
-const retained = (edit: MeshSettingsDraft): MeshSettingsDraft | undefined => edit.pending || edit.linkInput || !configValuesEqual(edit.form, meshForm(edit.baseline.configuration, edit.baseline.identity?.peerId)) ? edit : undefined
+const retained = (edit: MeshSettingsDraft): MeshSettingsDraft | undefined => edit.pending || edit.linkInput || edit.pairingInput || !configValuesEqual(edit.form, meshForm(edit.baseline.configuration, edit.baseline.identity?.peerId)) ? edit : undefined
 
 export function MeshNetworkSettings({ active, onConnections, showTopology = true }: { active: boolean; onConnections?: () => void; showTopology?: boolean }) {
   const [settings, setSettings] = useState<MeshNetworkSettings>(), [networkSnapshot, setSnapshot] = useState<MeshNetworkInspection>()
   const [issue, setIssue] = useState(''), [networkIssue, setNetworkIssue] = useState(''), [notice, setNotice] = useState('')
   const [saving, setSaving] = useState(false), [reading, setReading] = useState(false), [newer, setNewer] = useState<MeshNetworkSettings>()
-  const [link, setLink] = useState<MeshNetworkLink>(), [linkIssue, setLinkIssue] = useState('')
-  const [copyFeedback, setCopyFeedback] = useState(''), [linking, setLinking] = useState(false)
+  const [copyFeedback, setCopyFeedback] = useState('')
   const [openingIdentity, setOpeningIdentity] = useState(false), [identitySetupIssue, setIdentitySetupIssue] = useState('')
+  const pairingField = useRef<HTMLInputElement>(null)
   const edits = useAppStore(state => state.meshSettingsDrafts)
   const current = useRef(settings); current.current = settings
-  const linkRequest = useRef<{ input: string; owner: MeshNetworkSettings['owner']; controller: AbortController } | undefined>(undefined)
   const networkReading = useRef(false)
   const readEpoch = useRef(0), reader = useRef<AbortController | undefined>(undefined), visible = useRef(active); visible.current = active
   let edit: MeshSettingsDraft | undefined, editIssue = ''
@@ -36,7 +36,6 @@ export function MeshNetworkSettings({ active, onConnections, showTopology = true
   const pending = edit?.pending
   const snapshot = networkSnapshot && (!settings || networkSnapshot.owner.runtimeId === settings.owner.runtimeId && networkSnapshot.owner.ownerInstanceId === settings.owner.ownerInstanceId) ? networkSnapshot : undefined
   const network = snapshot?.network
-  const endpointOffer = snapshot?.endpoint.state === 'available' ? snapshot.endpoint.offer : undefined
 
   async function copy(text: string) {
     try { await api.ui.writeClipboardText(text); setCopyFeedback('Copied') } catch (cause) { setCopyFeedback(message(cause)) }
@@ -63,7 +62,6 @@ export function MeshNetworkSettings({ active, onConnections, showTopology = true
       const result = await api.mesh.call('settings.mesh.inspect', operationId ? { operationId } : {}, { signal: controller.signal })
       if (controller.signal.aborted || epoch !== readEpoch.current) return
       if (originalRuntime && result.owner.runtimeId !== originalRuntime) throw new Error('Another Core answered. The original Mesh draft and request are retained for their Runtime.')
-      if (current.current?.owner.ownerInstanceId !== result.owner.ownerInstanceId) { linkRequest.current?.controller.abort(); linkRequest.current = undefined; setLinking(false); setLink(undefined) }
       current.current = result; setSettings(result)
       const held = meshDraftForRuntime(useAppStore.getState().meshSettingsDrafts, result.owner.runtimeId)
       if (operationId && held?.pending?.operationId === operationId) {
@@ -84,7 +82,7 @@ export function MeshNetworkSettings({ active, onConnections, showTopology = true
     } catch (cause) { if (!controller.signal.aborted && epoch === readEpoch.current) setIssue(message(cause)) }
     finally { if (epoch === readEpoch.current) setReading(false) }
   }
-  useEffect(() => { if (active && !current.current) void inspect(); return () => { reader.current?.abort(); setReading(false); linkRequest.current?.controller.abort(); linkRequest.current = undefined; setLinking(false) } }, [active])
+  useEffect(() => { if (active && !current.current) void inspect(); return () => { reader.current?.abort(); setReading(false) } }, [active])
   useEffect(() => {
     if (!active || !settings) return
     const controller = new AbortController()
@@ -93,11 +91,11 @@ export function MeshNetworkSettings({ active, onConnections, showTopology = true
     return () => { clearInterval(timer); controller.abort() }
   }, [active, settings?.owner.runtimeId, settings?.owner.ownerInstanceId, inspectNetwork])
 
-  function change(patch: Partial<MeshForm>) {
+  function change(patch: Partial<MeshForm>, pairingInput?: string) {
     if (!saved || !form) return
-    setNotice(''); setLink(undefined)
+    setNotice('')
     void updateMeshSettingsDraft(saved.owner.runtimeId, value => retained({ ...value, baseline: value?.baseline ?? saved,
-      form: { ...(value?.form ?? form), ...patch }, ...(value?.pending ? { pending: value.pending } : {}) })).catch(cause => setIssue(message(cause)))
+      form: { ...(value?.form ?? form), ...patch }, ...(pairingInput !== undefined ? { pairingInput } : {}), ...(value?.pending ? { pending: value.pending } : {}) })).catch(cause => setIssue(message(cause)))
   }
   async function save() {
     if (!saved || !form || saving || pending || newer || editIssue) return
@@ -134,19 +132,6 @@ export function MeshNetworkSettings({ active, onConnections, showTopology = true
     await updateMeshSettingsDraft(newer.owner.runtimeId, value => value ? retained({ ...value, pending: undefined, baseline: newer, form: keep ? value.form : meshForm(newer.configuration, newer.identity?.peerId) }) : undefined, true)
     setSettings(newer); setNewer(undefined); setIssue('')
   }
-  async function createLink() {
-    if (!settings) return
-    linkRequest.current?.controller.abort()
-    const request = { input: originalOffer, owner: settings.owner, controller: new AbortController() }; linkRequest.current = request
-    const isCurrent = () => linkRequest.current === request && !request.controller.signal.aborted && current.current?.owner.runtimeId === request.owner.runtimeId && current.current.owner.ownerInstanceId === request.owner.ownerInstanceId
-    setLinking(true); setLinkIssue(''); setLink(undefined)
-    try {
-      const input = JSON.parse(request.input), offer = input.offer ?? input
-      const result = await api.mesh.call('mesh.link', { offer }, { expectedOwner: request.owner, signal: request.controller.signal })
-      if (isCurrent()) setLink(result)
-    } catch (cause) { if (isCurrent()) setLinkIssue(message(cause)) }
-    finally { if (linkRequest.current === request) { setLinking(false); linkRequest.current = undefined } }
-  }
   const peerCode = settings ? meshPeerCode(settings) : null
   const hasTopology = Boolean(network && (network.peers.length || network.records.length || network.routes.length))
   const identityRecovery = useLocalRuntimeRecovery(active && !settings, () => { void inspect() })
@@ -167,7 +152,7 @@ export function MeshNetworkSettings({ active, onConnections, showTopology = true
   const recoveryNotice = identityRecovery.notice?.notice
   return <div className="mesh-network-settings" data-mesh-settings data-settings-field="mesh-configuration">
     {!identityRecovery.notice ? <header className="mesh-network-heading">
-      {newIdentityWindow ? <div className="mesh-connection-intro"><div><h3>New identity setup</h3><p>Pair this window with your gateway. Your original work stays in its own window.</p></div></div> : <MeshConnectionIntro />}
+      {newIdentityWindow ? <div className="mesh-connection-intro"><div><h3>New identity setup</h3><p>Pair this window with your gateway. Your original work stays in its own window.</p></div></div> : <div className="mesh-connection-intro"><div><h3>This device’s network</h3><p>Pair this device with a gateway. To receive connections here, turn on its gateway address.</p></div></div>}
       {settings || !issue ? <button className="small-button" onClick={refresh} disabled={reading || saving}>{reading ? 'Reading…' : 'Refresh'}</button> : null}
     </header> : null}
     {identityRecovery.notice ? <div className="mesh-identity-recovery">
@@ -197,19 +182,23 @@ export function MeshNetworkSettings({ active, onConnections, showTopology = true
     {form && saved ? <>
       {snapshot?.source === 'static' ? <p className="mesh-network-note">A startup gateway configuration is active. Saving these complete Mesh settings replaces that configuration and its publisher admissions; the original file is kept.</p> : null}
       {editIssue ? <p role="alert" className="settings-inline-error">{editIssue}</p> : <section className="mesh-network-section">
-        <header><h4>Connection setup</h4>{form.role !== 'disabled' ? <button className="small-button" onClick={() => change({ role: 'disabled' })}>Disable participation</button> : null}</header>
-        <div className="mesh-task-options" role="group" aria-label="Connection mode">
-          <button type="button" aria-pressed={form.role === 'participant'} onClick={() => change({ role: 'participant' })}><span className="mesh-task-label"><strong>Connect to a gateway</strong><span aria-hidden="true">{form.role === 'participant' ? '✓' : '→'}</span></span><span>Join through a device you can reach. No incoming port needed.</span></button>
-          <button type="button" aria-pressed={form.role === 'gateway'} onClick={() => change({ role: 'gateway' })}><span className="mesh-task-label"><strong>Provide a gateway</strong><span aria-hidden="true">{form.role === 'gateway' ? '✓' : '↗'}</span></span><span>Let other devices connect here. This device can also connect to other gateways.</span></button>
+        <header><h4>Network participation</h4>{form.role === 'participant' ? <button className="small-button" onClick={() => change({ role: 'disabled' })}>Leave network</button> : null}</header>
+        <div className="mesh-task-options" role="group" aria-label="Network participation">
+          <button type="button" aria-pressed={form.role !== 'disabled'} onClick={() => { change({ role: form.role === 'gateway' ? 'gateway' : 'participant' }); pairingField.current?.focus() }}><span className="mesh-task-label"><strong>Connect to a gateway</strong><span aria-hidden="true">→</span></span><span>This device can join using an outbound connection.</span></button>
+          <button type="button" aria-pressed={form.role === 'gateway'} onClick={() => change({ role: 'gateway' })}><span className="mesh-task-label"><strong>Provide a gateway</strong><span aria-hidden="true">{form.role === 'gateway' ? '✓' : '↗'}</span></span><span>Let devices connect here, including while this device uses an upstream gateway.</span></button>
         </div>
-        <div className="mesh-form-grid"><label className="mesh-form-field"><span>Network name</span><TextInput aria-label="Mesh network" value={form.networkId} onChange={event => change({ networkId: event.target.value })} /></label><div className="mesh-code-action">{peerCode ? <><button className="small-button" onClick={() => void copy(peerCode)}>Copy saved connection code</button><span className="field-hint">Contains the saved network name and gateway address. Save changes before sharing.</span></> : <p className="field-hint">Save a connection mode to create this device’s network identity.</p>}</div></div>
-        <p className="field-hint">Use the same network name on both devices. Exchange connection codes, then save on both sides.</p>
-        <label className="mesh-form-field"><span>Other devices’ connection codes</span><textarea aria-label="Mesh peer codes" value={form.peers} onChange={event => change({ peers: event.target.value })} placeholder="Paste a gateway or another device’s connection code" rows={3} /></label>
-        {form.role === 'gateway' ? <div className="mesh-gateway-fields"><header><h4>Gateway address</h4><p className="field-hint">Use an address the other devices can reach, such as an internal IP or hostname.</p></header><label className="mesh-toggle"><input type="checkbox" aria-label="Own Mesh listener" checked={form.listen} onChange={event => change({ listen: event.target.checked })} /><span>Listen on a dedicated address</span></label>{form.listen ? <div className="mesh-form-grid"><label><span>Listen address</span><TextInput aria-label="Mesh listen address" value={form.host} onChange={event => change({ host: event.target.value })} /></label><label><span>Port</span><TextInput aria-label="Mesh listen port" value={form.port} inputMode="numeric" onChange={event => change({ port: event.target.value })} /></label></div> : <p className="field-hint">Enable a dedicated listener, or use this Core’s existing HTTP listener.</p>}<label className="mesh-form-field"><span>Address to share with other devices</span><textarea aria-label="Mesh published origins" value={form.ingress} onChange={event => change({ ingress: event.target.value })} rows={2} placeholder="http://your-gateway:8444" /></label><p className="field-hint">Binding a port and saving this address do not confirm that another device can reach it.</p></div> : null}
+        <MeshPeerPairing input={edit?.pairingInput ?? ''} form={form} ownPeerId={settings?.identity?.peerId} inputRef={pairingField} allowNewNetwork={saved.configuration.role === 'disabled' && form.networkId === saved.configuration.networkId}
+          onInput={value => change({}, value)} onAdd={patch => change(patch, '')} />
+        <div className="mesh-code-action">{peerCode ? <><button className="small-button" onClick={() => void copy(peerCode)}>Copy saved connection code</button><span className="field-hint">{dirty ? 'Save changes before sharing the updated code.' : 'Exchange codes with the other device. Each device adds its peer and saves.'}</span></> : <p className="field-hint">Save participation to create this device’s pairing code.</p>}</div>
+        <details className="mesh-advanced"><summary>Network name and peer codes</summary>
+          <label className="mesh-form-field"><span>Network name</span><TextInput aria-label="Mesh network" value={form.networkId} onChange={event => change({ networkId: event.target.value })} /></label>
+          <label className="mesh-form-field"><span>Trusted peer codes</span><textarea aria-label="Mesh peer codes" value={form.peers} onChange={event => change({ peers: event.target.value })} rows={3} /></label>
+        </details>
+        {form.role === 'gateway' ? <div className="mesh-gateway-fields"><header><h4>Gateway address</h4><p className="field-hint">Use an address the other devices can reach, such as an internal IP or hostname.</p></header><label className="mesh-toggle"><input type="checkbox" aria-label="Own Mesh listener" checked={form.listen} onChange={event => change({ listen: event.target.checked })} /><span>Listen on a dedicated address</span></label>{form.listen ? <div className="mesh-form-grid"><label><span>Listen address</span><TextInput aria-label="Mesh listen address" value={form.host} onChange={event => change({ host: event.target.value })} /></label><label><span>Port</span><TextInput aria-label="Mesh listen port" value={form.port} inputMode="numeric" onChange={event => change({ port: event.target.value })} /></label></div> : <p className="field-hint">Enable a dedicated listener, or use this Core’s existing HTTP listener.</p>}<label className="mesh-form-field"><span>Address to share with other devices</span><textarea aria-label="Mesh published origins" value={form.ingress} onChange={event => change({ ingress: event.target.value })} rows={2} placeholder="http://your-gateway:8444" /></label><p className="field-hint">Other devices use this address to connect.</p><button className="small-button" onClick={() => change({ role: 'participant' })}>Stop providing a gateway</button><p className="field-hint">Saving this change removes the listener and shared addresses. Outbound connections remain available.</p></div> : null}
         <details className="mesh-advanced mesh-device-access"><summary>Allow devices to access this Core{form.clientKeys.trim() ? ' · configured' : ''}</summary>
           <p className="field-hint">Joining a network connects peers. Access to this Core is granted separately.</p>
           <p className="field-hint">{snapshot?.endpoint.state === 'not-provided' ? 'This deployment forwards network traffic without a local Host endpoint.' : snapshot?.endpoint.state === 'available' ? 'This Core’s endpoint is available. Add each accessing device’s public key below.' : snapshot?.endpoint.state === 'starting' ? 'This Core’s endpoint is starting.' : 'Enable participation, then refresh to check this Core’s endpoint.'}</p>
-          <label className="mesh-form-field"><span>Allowed device public keys</span><textarea aria-label="Mesh device public keys" value={form.clientKeys} onChange={event => change({ clientKeys: event.target.value })} rows={3} placeholder="One public key per line" /></label><p className="field-hint">On the accessing CLI, use <code>agentmux-runtime relay-key</code> to read its public key. An empty list admits no devices.</p>
+          <label className="mesh-form-field"><span>Allowed device public keys</span><textarea aria-label="Mesh device public keys" value={form.clientKeys} onChange={event => change({ clientKeys: event.target.value })} rows={3} placeholder="One public key per line" /></label><p className="field-hint">On the device that will use this Core, open its access link and copy the access key. Add that key on a new line here, then save to approve the device.</p>
         </details>
         <details className="mesh-advanced"><summary>Advanced network settings</summary><div className="mesh-form-grid"><label><span>TLS key file</span><TextInput aria-label="Mesh TLS key path" value={form.keyPath} onChange={event => change({ keyPath: event.target.value })} /></label><label><span>TLS certificate file</span><TextInput aria-label="Mesh TLS certificate path" value={form.certPath} onChange={event => change({ certPath: event.target.value })} /></label></div><label className="mesh-form-field"><span>Additional publisher grants</span><textarea aria-label="Mesh publisher grants" value={form.publishers} onChange={event => change({ publishers: event.target.value })} rows={3} /></label><p className="field-hint">Server IDs and token hashes for separately hosted publishers. Host deployments connect their own endpoint automatically.</p><code>{settings?.identity?.peerId ?? 'Network identity not created'}</code></details>
       </section>}
@@ -218,10 +207,9 @@ export function MeshNetworkSettings({ active, onConnections, showTopology = true
       {pending ? <div className="mesh-pending"><code>{pending.operationId}</code><button className="small-button" disabled={saving || reading} onClick={() => void inspect(pending.operationId)}>Inspect original save</button></div> : null}
       {notice ? <p role="status" className="mesh-network-notice">{notice}</p> : null}
     </> : null}
-    {settings ? <details className="mesh-advanced mesh-access-links"><summary>Access links and endpoint details</summary>
-      {endpointOffer ? <section className="mesh-network-section"><header><h4>This Core’s endpoint</h4><button className="small-button" onClick={() => void copy(JSON.stringify(endpointOffer))}>Copy endpoint offer</button></header><p className="field-hint">Use this offer at a reachable gateway to create a network access link.</p><code>{endpointOffer.serverId}</code></section> : snapshot?.endpoint.state === 'not-provided' ? <p className="field-hint">This deployment provides network forwarding without a Host endpoint.</p> : null}
-      <section className="mesh-network-section" data-settings-field="mesh-link"><header><h4>Create an access link</h4></header><p className="field-hint">For a connected node: paste its complete endpoint offer. The link keeps that node’s identity and device permissions.</p><label className="mesh-form-field"><span>Node endpoint offer</span><textarea aria-label="Original Mesh endpoint offer" value={originalOffer} onChange={event => { const text = event.target.value; linkRequest.current?.controller.abort(); linkRequest.current = undefined; setLinking(false); if (saved && form) void updateMeshSettingsDraft(saved.owner.runtimeId, value => retained({ ...value, baseline: value?.baseline ?? saved, form: value?.form ?? form, linkInput: text })).catch(cause => setLinkIssue(message(cause))); setLink(undefined) }} rows={3} placeholder="Paste the complete endpoint offer" /></label><button className="small-button" disabled={linking || !originalOffer || !settings} onClick={() => void createLink()}>{linking ? 'Reading route…' : 'Create access link'}</button>{linkIssue ? <p role="alert" className="settings-inline-error">{linkIssue}</p> : null}{link ? <div className="mesh-link-result"><span>{link.observation.route.hops} network hop{link.observation.route.hops === 1 ? '' : 's'} · endpoint {link.offer.serverId}</span><TextInput aria-label="Mesh access link" value={link.url} readOnly /><button className="small-button" onClick={() => void copy(link.url)}>Copy access link</button><details><summary>Original endpoint identity</summary><dl><dt>Server</dt><dd><code>{link.offer.serverId}</code></dd><dt>Encryption public key</dt><dd><code>{link.offer.daemonPublicKeyB64}</code></dd></dl><button className="small-button" onClick={() => void copy(link.offer.daemonPublicKeyB64)}>Copy original encryption key</button></details><small>Use the complete link with amux --endpoint. Device admission and Core permissions still apply.</small></div> : null}</section>
-    </details> : null}
+    {settings && form && saved ? <MeshAccessLinks active={active} owner={settings.owner} snapshot={snapshot} offerText={originalOffer} copy={copy}
+      onInput={text => { void updateMeshSettingsDraft(saved.owner.runtimeId, value => retained({ ...value, baseline: value?.baseline ?? saved,
+        form: value?.form ?? form, linkInput: text })).catch(cause => setIssue(message(cause))) }} /> : null}
     {settings && identitySetupAction ? <details className="mesh-advanced">
       <summary>Separate identity setup</summary>
       <p>Open the separate setup again, or start it and pair a new identity with your gateway.</p>

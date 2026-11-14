@@ -1,3 +1,5 @@
+import { meshPeerCode, decodeMeshPeerCode } from '@agentmux/core/mesh-peer-code'
+export { meshPeerCode } from '@agentmux/core/mesh-peer-code'
 import type { MeshNetworkConfiguration, MeshNetworkSettings } from '@agentmux/core/mesh-network'
 
 /** Authored form strings can be incomplete; only the original Core validates saved policy. */
@@ -6,10 +8,9 @@ export type MeshForm = {
   ingress: string; peers: string; clientKeys: string; keyPath: string; certPath: string; publishers: string
 }
 export type MeshSettingsDraft = {
-  baseline: MeshNetworkSettings; form: MeshForm; linkInput?: string
+  baseline: MeshNetworkSettings; form: MeshForm; linkInput?: string; pairingInput?: string
   pending?: { operationId: string; expectedRevision: string; submitted: MeshNetworkConfiguration; submittedForm: MeshForm; phase: 'in-flight' | 'unknown' } | undefined
 }
-type PeerCode = { schema: 'agentmux.mesh-peer.v1'; networkId: string; peerId: string; publicKey: string; endpoints: { endpoint: string; useTls: boolean }[]; direct?: boolean }
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
 const unreadable = (): never => { throw new Error('The original Mesh edit cannot be read. Its saved bytes and existing work are retained.') }
 const fields = ['networkId', 'host', 'port', 'ingress', 'peers', 'clientKeys', 'keyPath', 'certPath', 'publishers'] as const
@@ -20,6 +21,7 @@ export function meshDraftForRuntime(value: unknown, runtimeId: string): MeshSett
   if (draft === undefined) return undefined
   if (!record(draft) || !record(draft.baseline) || !record(draft.baseline.owner) || draft.baseline.owner.runtimeId !== runtimeId || typeof draft.baseline.revision !== 'string' ||
       !record(draft.baseline.configuration) || !readableForm(draft.form)) return unreadable()
+  if (draft.pairingInput !== undefined && typeof draft.pairingInput !== 'string') return unreadable()
   if (draft.linkInput !== undefined && typeof draft.linkInput !== 'string') return unreadable()
   if (draft.pending !== undefined && (!record(draft.pending) || typeof draft.pending.operationId !== 'string' || !draft.pending.operationId ||
       typeof draft.pending.expectedRevision !== 'string' || !record(draft.pending.submitted) || !readableForm(draft.pending.submittedForm) || !['in-flight', 'unknown'].includes(draft.pending.phase as string))) return unreadable()
@@ -34,20 +36,6 @@ export function restoredMeshDrafts(value: unknown): unknown {
     if (entry?.pending?.phase === 'in-flight') { result ??= { ...value }; result[runtimeId] = { ...entry, pending: { ...entry.pending, phase: 'unknown' } } }
   } catch { /* Keep unknown original entries opaque. Their own editor reports the gap. */ }
   return result ?? value
-}
-export function meshPeerCode(settings: MeshNetworkSettings, direct = true): string | null {
-  if (!settings.identity) return null
-  const data: PeerCode = { schema: 'agentmux.mesh-peer.v1', networkId: settings.configuration.networkId,
-    peerId: settings.identity.peerId, publicKey: settings.identity.publicKey, endpoints: [...settings.configuration.advertisedIngress ?? []], direct }
-  const text = JSON.stringify(data), bytes = new TextEncoder().encode(text)
-  return 'amux-mesh:' + btoa(Array.from(bytes, byte => String.fromCharCode(byte)).join('')).replace(/=/gu, '').replace(/\+/gu, '-').replace(/\//gu, '_')
-}
-function decodePeerCode(text: string): PeerCode {
-  if (!text.startsWith('amux-mesh:')) throw new Error('Paste a peer connection code copied from Mesh settings.')
-  const body = text.slice(10).replace(/-/gu, '+').replace(/_/gu, '/'), bytes = Uint8Array.from(atob(body), char => char.charCodeAt(0))
-  const p: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
-  if (!record(p) || p.schema !== 'agentmux.mesh-peer.v1' || typeof p.networkId !== 'string' || typeof p.peerId !== 'string' || typeof p.publicKey !== 'string' || !Array.isArray(p.endpoints)) throw new Error('This peer connection code is incomplete.')
-  return p as unknown as PeerCode
 }
 export function meshForm(configuration: MeshNetworkConfiguration, ownPeerId?: string): MeshForm {
   const codes = configuration.members.filter(member => member.peerId !== ownPeerId).map(member => {
@@ -65,7 +53,7 @@ export function meshConfiguration(form: MeshForm, baseline: MeshNetworkConfigura
   const before = meshForm(baseline, own?.peerId), configuration = structuredClone(baseline)
   configuration.role = form.role; configuration.networkId = form.networkId
   if (form.peers !== before.peers || form.networkId !== before.networkId) {
-    const codes = form.peers.split(/\s+/u).filter(Boolean).map(decodePeerCode)
+    const codes = form.peers.split(/\s+/u).filter(Boolean).map(decodeMeshPeerCode)
     if (codes.some(code => code.networkId !== form.networkId)) throw new Error('Peer codes must belong to this network. Keep the original codes or choose their network name.')
     configuration.members = codes.map(code => ({ peerId: code.peerId, publicKey: code.publicKey }))
     configuration.peers = codes.filter(code => code.direct !== false && code.peerId !== own?.peerId).map(code => ({ peerId: code.peerId, endpoints: code.endpoints }))
