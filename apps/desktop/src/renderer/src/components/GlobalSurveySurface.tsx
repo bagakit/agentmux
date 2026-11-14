@@ -198,6 +198,11 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     if (controlNavigation) return
     const surface = surfaceRef.current
     if (!visible) { if (surface?.contains(document.activeElement)) (document.activeElement as HTMLElement).blur(); return }
+    const focused = document.activeElement
+    // Clearing an incompatible page can mount the start page while the person
+    // is still typing in the environment select. That input intent stays put.
+    if (!toolsOpen && !selection && focused instanceof HTMLElement && surface?.contains(focused) &&
+        focused.matches('input, select, textarea, [contenteditable]:not([contenteditable="false"])')) return
     const findTarget = () => {
       const reference = selection?.active
       const hostId = reference && projection ? (projection.entity.kind === 'region' ? workbenchRegionProjectionSlotId : workbenchProjectionSlotId)(`${projection.presentationId}-slot`, reference) : null
