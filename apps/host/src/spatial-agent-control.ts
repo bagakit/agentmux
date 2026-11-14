@@ -55,6 +55,19 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
       const settled = await options.spatial.settleAgentOpen(record.requestId, session, regionDescriptor(record, 'attached'))
       report.to = settled.attached ? record.address : null
       if (!settled.attached) report.issues.push(issue(new AgentMuxError('The original Agent exists, but its reserved Region binding changed. Existing contents were retained.', 'SPACE_PLACEMENT_UNKNOWN')))
+      if (record.executionBinding) {
+        const binding = await options.runtime().executionBindings.inspect(record.executionBinding.bindingId)
+        const original = binding?.continuation
+        if (!binding || binding.bindingId !== record.executionBinding.bindingId || binding.agentSessionId !== record.agentSessionId ||
+            binding.agentHostId !== record.execution.hostId || binding.resourceHostId !== record.placement?.hostId ||
+            binding.resourceWorkspacePath !== record.placement?.workspacePath ||
+            !original || original.bindingId !== record.executionBinding.bindingId || original.agentSessionId !== record.agentSessionId ||
+            original.createOperationId !== record.requestId) report.issues.push(issue(new AgentMuxError(
+          'The original execution binding has no confirmed matching receipt. The Agent and its original operation are retained.', 'EXECUTION_INTENT_UNCONFIRMED')))
+        else if (binding.state !== 'connected') report.issues.push(issue(new AgentMuxError(
+          binding.diagnostic?.message ?? 'The original execution binding has not been confirmed connected. The Agent remains available.',
+          binding.diagnostic?.code ?? 'EXECUTION_OBSERVATION_UNCONFIRMED')))
+      }
       if (creation.persistence === 'unconfirmed' || creation.failure || ['unknown', 'unconfirmed'].includes(creation.initialPrompt)) {
         report.issues.push(issue(new AgentMuxError(creation.failure?.message ?? 'The original creation or first input is unconfirmed. Read the same operation without replaying.', creation.failure?.code ?? 'AGENT_CREATION_UNCONFIRMED')))
       }

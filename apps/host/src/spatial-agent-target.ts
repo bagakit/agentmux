@@ -26,7 +26,7 @@ export async function openSpatialAgentTarget(options: {
   if (previous && previous.digest !== spatialAgentOpenDigest(request)) throw new AgentMuxError('This operation belongs to another original spatial creation intent.', 'SPACE_REQUEST_CONFLICT')
   if (previous) {
     const observed = await options.reconcile(previous, context, undefined, request)
-    if (observed.agent || observed.outcome === 'retired') return { operation: 'agent.open' as const, ...observed }
+    if (observed.outcome === 'opened' || observed.outcome === 'retired') return { operation: 'agent.open' as const, ...observed }
   }
   context.signal?.throwIfAborted(); await context.assertCurrent?.()
   const catalog = selectSpatialCatalog(spatialCatalog(state.graph), request.destination)
