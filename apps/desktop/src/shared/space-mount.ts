@@ -99,12 +99,13 @@ export type SpaceMountMemberMethods = {
   paste: { input: { text: string; terminalData: string; observation?: import('@agentmux/core/control').InputObservationReference }; result: void }
   inspectInteraction: { input: { operationId: string }; result: import('@agentmux/core').AgentMuxInteractionOperationReceipt | null }
 } & { [M in import('@agentmux/core').AgentProgressMethod]: { input: import('@agentmux/core').AgentProgressParams[M]; result: import('@agentmux/core').AgentProgressResults[M] } }
+  & { [M in import('@agentmux/core/space-member').SpaceMemberNativeMailMethod]: { input: import('@agentmux/core').AgentMuxRpcParams<M>; result: import('@agentmux/core').AgentMuxRpcResult<M> } }
 export type SpaceMountMemberSurface = {
   initial: SpaceMountMemberIdentity
   call<M extends keyof SpaceMountMemberMethods>(method: M, input: SpaceMountMemberMethods[M]['input'], signal?: AbortSignal): Promise<SpaceMountMemberMethods[M]['result']>
   dispose(): void | Promise<void>
 }
-export type SpaceMountReadingMethods = Pick<SpaceMountMemberMethods, 'conversationRead' | 'conversationCheckpoint' | 'conversationChanges' | 'conversationRelease' | 'conversationWatch' | 'conversationUnwatch' | 'history' | 'historyResource' | 'inputMailbox' | 'skills' | 'inputEpoch' | 'agent.progress.list'>
+export type SpaceMountReadingMethods = Pick<SpaceMountMemberMethods, 'conversationRead' | 'conversationCheckpoint' | 'conversationChanges' | 'conversationRelease' | 'conversationWatch' | 'conversationUnwatch' | 'history' | 'historyResource' | 'inputMailbox' | 'skills' | 'inputEpoch' | 'agent.progress.list' | import('@agentmux/core/space-member').SpaceMemberNativeMailMethod>
 export type SpaceMountReadingSurface = Pick<SpaceMountMemberSurface, 'initial' | 'dispose'> & {
   call<M extends keyof SpaceMountReadingMethods>(method: M, input: SpaceMountReadingMethods[M]['input'], signal?: AbortSignal): Promise<SpaceMountReadingMethods[M]['result']>
 }

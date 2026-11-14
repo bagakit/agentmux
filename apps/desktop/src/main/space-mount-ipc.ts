@@ -146,6 +146,10 @@ export function registerSpaceMountIpc(ports: {
     return { initial: surface.initial, dispose: async () => { if (members.get(key) === surface) members.delete(key); await surface.dispose() } }
   }))
   const memberFields: { [M in keyof SpaceMountMemberMethods]: string[] } = {
+    'message.ls': ['hostId', 'participantSessionId', 'participantRuntimeId', 'direction', 'beforeSequence', 'limit'],
+    'message.read': ['hostId', 'participantSessionId', 'participantRuntimeId', 'messageId', 'operationId', 'notificationId', 'field', 'cursor', 'maxBytes'],
+    'message.dispatch.ls': ['hostId', 'participantSessionId', 'participantRuntimeId', 'afterSourceMessageId', 'limit'],
+    'message.dispatch.read': ['hostId', 'participantSessionId', 'participantRuntimeId', 'sourceMessageId'],
     retainImage: ['bytes', 'mimeType'], 'file.upload.inspect': ['hostId', 'agentSessionId', 'expectedRun', 'operationId', 'name', 'mimeType', 'byteLength', 'revision'],
     inputEpoch: [],
     'agent.progress.list': ['target', 'operationId'],

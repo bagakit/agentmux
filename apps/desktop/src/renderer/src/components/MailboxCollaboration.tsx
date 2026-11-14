@@ -9,36 +9,37 @@ import type { AgentSessionControl } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { MailboxEmpty, MailboxSourceNotice, MailboxTime } from './MailboxReading'
 import { SelectionField } from './SelectionField'
+import type { SessionMailReading } from '../lib/use-session-messages'
 
 type Page = AgentMuxRpcResult<'message.dispatch.ls'>
 type Observation = AgentMuxRpcResult<'message.dispatch.read'>
 const reason = (error: unknown) => error instanceof Error ? error.message : String(error)
 
-export function MailboxOriginalMessage({ record, reading, onCopy }: { record: DurableAgentMuxMessage; reading?: ConversationReadingProps | undefined; onCopy?: ((text: string) => Promise<boolean>) | undefined }) {
-  const [expanded, setExpanded] = useState(false)
+export function MailboxOriginalMessage({ record, reading, onCopy, initiallyOpen = false }: { record: DurableAgentMuxMessage; reading?: ConversationReadingProps | undefined; onCopy?: ((text: string) => Promise<boolean>) | undefined; initiallyOpen?: boolean }) {
+  const [expanded, setExpanded] = useState(initiallyOpen)
   const { envelope: message, delivery } = record
-  return <details className="mailbox-collaboration__message" data-message-id={message.messageId} onToggle={event => { if (event.target === event.currentTarget) setExpanded(event.currentTarget.open) }}>
+  return <details className="mailbox-collaboration__message" data-message-id={message.messageId} open={expanded} onToggle={event => { if (event.target === event.currentTarget) setExpanded(event.currentTarget.open) }}>
     <summary><span>{message.replyTo ? 'Original reply' : 'Original request'}</span><span>{delivery.state}</span></summary>
-    {expanded ? <><ConversationMessage {...(reading?.describeSpeaker ? { describeSpeaker: reading.describeSpeaker } : {})} {...(reading?.openHttpLink ? { openHttpLink: reading.openHttpLink } : {})} compact recordedIdentity messageId={message.messageId}
+    {expanded ? <ConversationMessage {...(reading?.describeSpeaker ? { describeSpeaker: reading.describeSpeaker } : {})} {...(reading?.openHttpLink ? { openHttpLink: reading.openHttpLink } : {})} compact recordedIdentity detailsOnlyMetadata contentBoundary="body" messageId={message.messageId}
       speaker={message.senderSessionId ? { role: 'agent', id: message.senderSessionId } : { role: 'unknown', id: 'unknown' }}
-      name={message.senderSessionId ?? 'Author unknown'} content={message.body} copyText={message.body} {...(onCopy ? { onCopy } : {})} />
-      <dl className="composer-mailbox__record-facts">
+      name={message.senderSessionId ?? 'Author unknown'} content={message.body} copyText={message.body} {...(onCopy ? { onCopy } : {})}
+      messageDetails={<dl className="composer-mailbox__record-facts">
         <dt>Message</dt><dd>{message.messageId}</dd><dt>Operation</dt><dd>{message.operationId}</dd>
         <dt>Sender Session</dt><dd>{message.senderSessionId ?? 'Unknown'}</dd><dt>Sender Run</dt><dd>{message.senderRunId ?? 'Unknown'}</dd>
         <dt>Recipient Session</dt><dd>{message.recipientSessionId ?? 'Unknown'}</dd><dt>Recipient Run</dt><dd>{message.recipientRunId ?? 'Unknown'}</dd>
         <dt>Thread</dt><dd>{message.threadId}</dd><dt>Correlation</dt><dd>{message.correlationId}</dd><dt>Reply to</dt><dd>{message.replyTo ?? 'None recorded'}</dd>
         <dt>Recorded Workspace</dt><dd>{message.workspaceId ?? 'Unknown'}</dd>
         <dt>Delivery</dt><dd>{delivery.state}{delivery.reason ? ` · ${delivery.reason}` : ''}</dd><dt>Receipt time</dt><dd><MailboxTime value={delivery.at} complete /></dd>
-      </dl></> : null}
+      </dl>} /> : null}
   </details>
 }
 
 /** A bounded original journal reader. It never sends, assigns, consumes or controls an Agent. */
-export function MailboxCollaboration({ control, active, reading, onCopy }: {
-  control: AgentSessionControl; active: boolean; reading?: ConversationReadingProps | undefined; onCopy?: ((text: string) => Promise<boolean>) | undefined
-}) {
-  const reference = { hostId: control.hostId, agentSessionId: control.agentSessionId }
-  const scope = JSON.stringify([control.hostId, control.agentSessionId, control.run.runId])
+export function MailboxCollaboration({ control, originalMail, active, reading, onCopy }: {
+  active: boolean; reading?: ConversationReadingProps | undefined; onCopy?: ((text: string) => Promise<boolean>) | undefined
+} & ({ control: AgentSessionControl; originalMail?: never } | { originalMail: SessionMailReading; control?: never })) {
+  const reference = originalMail?.reference ?? { hostId: control!.hostId, agentSessionId: control!.agentSessionId }
+  const scope = JSON.stringify([reference.hostId, reference.agentSessionId, originalMail?.identity ?? control!.run.runId])
   const visibilityOwner = useMemo(() => ({}), [active, scope])
   const live = useRef({ active, scope, owner: visibilityOwner }), listRequest = useRef(0), detailRequest = useRef(0)
   const [page, setPage] = useState<Page | null>(null), [selected, setSelected] = useState<string | null>(null)
@@ -73,7 +74,8 @@ export function MailboxCollaboration({ control, active, reading, onCopy }: {
       let result: Page | null = null, next = cursor, readPages = 0
       const records: Page['dispatches'][number][] = []
       for (let index = 0; index < pages; ++index) {
-        result = await api.sessions.dispatches(reference, { limit: 20, ...(next ? { afterSourceMessageId: next } : {}) })
+        const input = { limit: 20, ...(next ? { afterSourceMessageId: next } : {}) }
+        result = await (originalMail ? originalMail.dispatches(input) : api.sessions.dispatches(reference, input))
         if (!admitted(request, listRequest.current)) return
         if (result.hostId !== reference.hostId || result.participantSessionId !== reference.agentSessionId) throw new Error('The original Host or participant did not match this reading source.')
         records.push(...result.dispatches); ++readPages; next = result.nextSourceMessageId
@@ -91,7 +93,7 @@ export function MailboxCollaboration({ control, active, reading, onCopy }: {
     const request = ++detailRequest.current
     setDetail({ source, loading: true, issue: null })
     try {
-      const result = await api.sessions.dispatch(reference, source)
+      const result = await (originalMail ? originalMail.dispatch(source) : api.sessions.dispatch(reference, source))
       if (!admitted(request, detailRequest.current) || currentSelection.current !== source) return
       if (result.hostId !== reference.hostId || result.dispatch.sourceMessageId !== source || result.source.envelope.messageId !== source ||
         result.dispatch.ownerAgentSessionId !== reference.agentSessionId && result.dispatch.workerAgentSessionId !== reference.agentSessionId) throw new Error('The original collaboration record did not match this source and participant.')
@@ -141,24 +143,26 @@ export function MailboxCollaboration({ control, active, reading, onCopy }: {
     const searchable = [item.sourceMessageId, item.ownerAgentSessionId, item.workerAgentSessionId, names.get(item.ownerAgentSessionId), names.get(item.workerAgentSessionId)].join(' ').toLocaleLowerCase()
     return searchable.includes(query.trim().toLocaleLowerCase()) && (status === 'all' || (status === 'waiting' ? item.originAwaits : !item.originAwaits))
   })
+  const refreshControl = <button type="button" className="composer-tool" aria-label="Refresh records" title="Refresh records" aria-busy={loadingList || loadingDetail} onClick={refresh}>Refresh</button>
   return <section ref={root} className="mailbox-collaboration" aria-label="Supervised collaboration records">
-    <div className="mailbox-collaboration__heading"><strong>Supervised collaboration</strong><button type="button" className="composer-tool" aria-busy={loadingList || loadingDetail}
-      onClick={refresh}>Refresh records</button></div>
-    <details className="mailbox-collaboration__help"><summary><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />About these records</summary>
+    {!selected ? <div className="mailbox-collaboration__heading"><strong>Supervised collaboration</strong>{refreshControl}</div> : null}
+    {!selected ? <details className="mailbox-collaboration__help"><summary><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />About these records</summary>
       <p className="mailbox-collaboration__hint">Original supervised messages only. Other Agent messages remain in Received and Sent. Search covers the loaded list; load more records to extend it.</p>
-    </details>
+    </details> : null}
     {listIssue ? <MailboxSourceNotice title="Collaboration list is unconfirmed" message={listIssue.message} action="Retry collaboration list" onAction={() => void loadPage(listIssue.cursor, listIssue.pages, listIssue.extend)} /> : null}
-    {selected ? <><div className="mailbox-collaboration__actions"><button ref={back} type="button" className="composer-tool" onClick={leave}>Back to collaboration</button>
-      {original ? <span className="mailbox-collaboration__evidence"><span>Original evidence</span><ContentCopyButton label="Copy collaboration evidence" text={evidenceText} identity={evidenceIdentity} /></span> : null}</div>
+    {selected ? <><div className="mailbox-collaboration__actions"><button ref={back} type="button" className="composer-tool" aria-label="Back to collaboration" title="Back to collaboration" onClick={leave}>Back</button>
+      {refreshControl}{original ? <span className="mailbox-collaboration__evidence"><ContentCopyButton label="Copy collaboration evidence" text={evidenceText} identity={evidenceIdentity} /></span> : null}</div>
       {detailIssue ? <MailboxSourceNotice title="Original record read is unconfirmed" message={detailIssue} action="Retry original record" onAction={() => void loadDetail(selected)} /> : null}
       {original ? <article data-dispatch-source={selected}>
+        <MailboxOriginalMessage key={original.source.envelope.messageId} record={original.source} reading={reading} onCopy={onCopy} initiallyOpen />
+        <details className="mailbox-collaboration__help"><summary><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />Record details</summary>
         <p>{original.dispatch.originAwaits ? 'Communication is awaiting a worker report.' : 'Worker report recorded; review is separate.'}</p>
         <p className="mailbox-collaboration__hint">Delivery and supervision do not confirm execution or Goal acceptance. No Goal association is provided by this record.</p>
         <dl className="composer-mailbox__record-facts"><dt>Host</dt><dd>{original.hostId}</dd><dt>Source</dt><dd>{selected}</dd>
-          <dt>Owner</dt><dd><button type="button" className="composer-tool" onClick={() => void openAgent(original.dispatch.ownerAgentSessionId)}>{original.dispatch.ownerAgentSessionId}</button></dd>
-          <dt>Worker</dt><dd><button type="button" className="composer-tool" onClick={() => void openAgent(original.dispatch.workerAgentSessionId)}>{original.dispatch.workerAgentSessionId}</button></dd></dl>
+          <dt>Owner</dt><dd>{originalMail ? original.dispatch.ownerAgentSessionId : <button type="button" className="composer-tool" onClick={() => void openAgent(original.dispatch.ownerAgentSessionId)}>{original.dispatch.ownerAgentSessionId}</button>}</dd>
+          <dt>Worker</dt><dd>{originalMail ? original.dispatch.workerAgentSessionId : <button type="button" className="composer-tool" onClick={() => void openAgent(original.dispatch.workerAgentSessionId)}>{original.dispatch.workerAgentSessionId}</button>}</dd></dl>
         {navigationIssue?.source === selected ? <p role="status">{navigationIssue.message}</p> : null}
-        <MailboxOriginalMessage key={original.source.envelope.messageId} record={original.source} reading={reading} onCopy={onCopy} />
+        </details>
         <h3>Supervision events</h3>
         {original.dispatch.events.length ? <ol>{original.dispatch.events.map(event => <li key={event.replyMessageId}><strong>{event.kind}</strong> · {event.replyMessageId} · <MailboxTime value={event.at} /></li>)}</ol> : <p>No supervision events recorded.</p>}
         <h3>Original replies</h3>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AgentMuxMessageMetadata, AgentMuxMessageDirection } from '@agentmux/core'
+import type { AgentMuxMessageMetadata, AgentMuxMessageDirection, AgentMuxRpcParams, AgentMuxRpcResult } from '@agentmux/core'
+import type { SessionHistoryReference } from '../../../shared/contracts'
 import { api } from './api'
 
 type Window = { scope: string; pages: number; items: readonly AgentMuxMessageMetadata[]; nextCursor: number | null;
@@ -7,11 +8,22 @@ type Window = { scope: string; pages: number; items: readonly AgentMuxMessageMet
 const empty = (scope: string): Window => ({ scope, pages: 1, items: [], nextCursor: null, loading: false, error: null,
   observationError: 'Message update observation is unconfirmed. Explicitly refresh the original Host.' })
 
+/** Read-only original journal port; it grants no notification, input or navigation. */
+export type SessionMailReading = {
+  identity: string
+  runtimeId: string
+  reference: SessionHistoryReference
+  list(input: Pick<AgentMuxRpcParams<'message.ls'>, 'direction' | 'beforeSequence' | 'limit'>): Promise<AgentMuxRpcResult<'message.ls'>>
+  read(messageId: string): Promise<AgentMuxRpcResult<'message.read'>>
+  dispatches(input: Pick<AgentMuxRpcParams<'message.dispatch.ls'>, 'afterSourceMessageId' | 'limit'>): Promise<AgentMuxRpcResult<'message.dispatch.ls'>>
+  dispatch(sourceMessageId: string): Promise<AgentMuxRpcResult<'message.dispatch.read'>>
+}
+
 /** One visible participant's requested pages. No Agent consumption or editor state is owned here. */
-export function useSessionMessages({ hostId, agentSessionId, direction, enabled }: {
-  hostId: string; agentSessionId: string; direction: AgentMuxMessageDirection; enabled: boolean
+export function useSessionMessages({ hostId, agentSessionId, direction, enabled, reading }: {
+  hostId: string; agentSessionId: string; direction: AgentMuxMessageDirection; enabled: boolean; reading?: SessionMailReading | undefined
 }) {
-  const scope = JSON.stringify([hostId, agentSessionId, direction])
+  const scope = JSON.stringify([hostId, agentSessionId, direction, ...(reading ? [reading.identity] : [])])
   const [state, setState] = useState<Window>(() => empty(scope))
   const stateRef = useRef(state); stateRef.current = state
   const current = useRef({ scope, enabled, generation: 0 }); Object.assign(current.current, { scope, enabled })
@@ -31,7 +43,8 @@ export function useSessionMessages({ hostId, agentSessionId, direction, enabled 
       // Refresh the explicitly requested window, keeping it contiguous even after a burst larger than one page.
       // Stage every page first: an incomplete refresh cannot replace a previously readable window.
       for (let index = 0; index < requestedPages; ++index) {
-        const page = await api.sessions.listMessages({ hostId, agentSessionId }, { direction, limit: 25, ...(before === null ? {} : { beforeSequence: before }) })
+        const input = { direction, limit: 25, ...(before === null ? {} : { beforeSequence: before }) }
+        const page = await (reading ? reading.list(input) : api.sessions.listMessages({ hostId, agentSessionId }, input))
         if (!matches()) return
         if (page.hostId !== hostId || page.participantSessionId !== agentSessionId || page.direction !== direction ||
             page.messages.some(item => item.envelope.sender.kind !== 'agent-session' || item.envelope.recipient.kind !== 'agent-session' ||
@@ -55,11 +68,11 @@ export function useSessionMessages({ hostId, agentSessionId, direction, enabled 
     } catch (error) {
       if (matches()) setState(value => ({ ...(value.scope === scope ? value : empty(scope)), loading: false, error: error instanceof Error ? error.message : String(error) }))
     }
-  }, [scope, hostId, agentSessionId, direction])
+  }, [scope, hostId, agentSessionId, direction, reading])
   useEffect(() => {
     if (!enabled) return
     let queued = false, active = true
-    const release = api.sessions.onEvent(({ hostId: sourceHost, event }) => {
+    const release = reading ? () => {} : api.sessions.onEvent(({ hostId: sourceHost, event }) => {
       if (!active || sourceHost !== hostId) return
       if (event.type === 'agent-message-observation') {
         setState(value => value.scope !== scope ? value : { ...value, observationError: event.state === 'available' ? null : event.message ?? 'Original message observation is unavailable. Explicitly refresh.' })
@@ -71,7 +84,7 @@ export function useSessionMessages({ hostId, agentSessionId, direction, enabled 
     })
     void load()
     return () => { active = false; ++current.current.generation; release() }
-  }, [scope, hostId, agentSessionId, direction, enabled, load])
+  }, [scope, hostId, agentSessionId, direction, enabled, load, reading])
   const refresh = useCallback(() => load(), [load])
   const loadEarlier = useCallback(() => load(true), [load])
   const visible = state.scope === scope ? state : empty(scope)

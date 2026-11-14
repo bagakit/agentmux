@@ -1,7 +1,7 @@
 import { AgentMuxError, type AgentMuxRuntimeSubject } from '@agentmux/core'
 import { connectSpaceMember, type SpaceMemberClient } from '@agentmux/core/space-member-client'
 import { mintObjectId } from '@agentmux/core/object-id'
-import { isSpaceMemberNativeWrite, SPACE_MEMBER_NATIVE_SESSION_CALLS, type SpaceMemberNativeCall } from '@agentmux/core/space-member'
+import { isSpaceMemberNativeWrite, SPACE_MEMBER_NATIVE_SESSION_CALLS, SPACE_MEMBER_NATIVE_MAIL_CALLS, type SpaceMemberNativeCall } from '@agentmux/core/space-member'
 import { fileUploadRevision, parseFileUploadIdentity, parseFileUploadResult } from '@agentmux/core/files'
 import { spaceMountMemberCallHasReceipt } from '../shared/space-mount.js'
 import type { AgentMuxRpcClient } from '@agentmux/core'
@@ -74,11 +74,11 @@ export async function createSpaceMemberSurface(input: SpaceMountMemberRoute, por
         replay: attached.replay, gap: attached.gap, terminal: attached.terminal, resizeRevision: attached.resizeRevision }
     } catch (cause) { if (!leases.size) await client.releaseRunAttachment(originalRun()).catch(report); throw cause }
   }
-  const nativeProgress = async <M extends import('@agentmux/core').AgentProgressMethod>(method: M, value: import('@agentmux/core').AgentProgressParams[M], requestSignal?: AbortSignal): Promise<import('@agentmux/core').AgentProgressResults[M]> => {
+  const nativeCall = async <M extends import('@agentmux/core').AgentProgressMethod | import('@agentmux/core/space-member').SpaceMemberNativeMailMethod>(method: M, value: import('@agentmux/core').AgentMuxRpcParams<M>, requestSignal?: AbortSignal): Promise<import('@agentmux/core').AgentMuxRpcResult<M>> => {
     const rpc = isSpaceMemberNativeWrite(method) ? ports.retainedRpc ?? ports.rpc : ports.rpc
     const result = await rpc.call('space.member.call', { target: input.target, call: { method, params: value } as SpaceMemberNativeCall }, requestSignal ? { signal: requestSignal } : {})
     if (!isSpaceMemberNativeWrite(method)) check()
-    return result as import('@agentmux/core').AgentProgressResults[M]
+    return result as import('@agentmux/core').AgentMuxRpcResult<M>
   }
   const actions: Actions = {
     read,
@@ -98,10 +98,14 @@ export async function createSpaceMemberSurface(input: SpaceMountMemberRoute, por
       check(); return reply
     },
     inputEpoch: async () => { const epoch = await client.readAgentInputEpoch(); check(); return epoch ?? null },
-    'agent.progress.list': (value, signal) => nativeProgress('agent.progress.list', value, signal),
-    'agent.progress.create': (value, signal) => nativeProgress('agent.progress.create', value, signal),
-    'agent.progress.action': (value, signal) => nativeProgress('agent.progress.action', value, signal),
-    'agent.progress.update': (value, signal) => nativeProgress('agent.progress.update', value, signal),
+    'agent.progress.list': (value, signal) => nativeCall('agent.progress.list', value, signal),
+    'agent.progress.create': (value, signal) => nativeCall('agent.progress.create', value, signal),
+    'agent.progress.action': (value, signal) => nativeCall('agent.progress.action', value, signal),
+    'agent.progress.update': (value, signal) => nativeCall('agent.progress.update', value, signal),
+    'message.ls': (value, signal) => nativeCall('message.ls', value, signal),
+    'message.read': (value, signal) => nativeCall('message.read', value, signal),
+    'message.dispatch.ls': (value, signal) => nativeCall('message.dispatch.ls', value, signal),
+    'message.dispatch.read': (value, signal) => nativeCall('message.dispatch.read', value, signal),
     skills: async (_value, requestSignal) => {
       const page = await ports.rpc.call('space.member.call', { target: input.target,
         call: { method: 'skill.ls', params: conversationReference } }, requestSignal ? { signal: requestSignal } : {}) as import('@agentmux/core').AgentMuxRpcResult<'skill.ls'>
@@ -182,7 +186,7 @@ export async function createSpaceMemberSurface(input: SpaceMountMemberRoute, por
   return { initial, call: async (method, value, requestSignal) => {
     requestSignal?.throwIfAborted(); check()
     if (sessionOnly ? method !== 'skills' && !(SPACE_MEMBER_NATIVE_SESSION_CALLS as readonly string[]).includes(method)
-      : readingOnly && !method.startsWith('conversation') && !['history', 'historyResource', 'inputMailbox', 'skills', 'inputEpoch', 'agent.progress.list'].includes(method)) throw new AgentMuxError('This original surface does not grant that purpose. Its Agent and input are retained.', 'CONTROL_PERMISSION_DENIED')
+      : readingOnly && !method.startsWith('conversation') && !['history', 'historyResource', 'inputMailbox', 'skills', 'inputEpoch', 'agent.progress.list', ...SPACE_MEMBER_NATIVE_MAIL_CALLS].includes(method)) throw new AgentMuxError('This original surface does not grant that purpose. Its Agent and input are retained.', 'CONTROL_PERMISSION_DENIED')
     const result = await actions[method](value, requestSignal)
     if (!spaceMountMemberCallHasReceipt(method)) requestSignal?.throwIfAborted()
     return result

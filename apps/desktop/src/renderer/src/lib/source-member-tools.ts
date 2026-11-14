@@ -1,6 +1,22 @@
-import type { SpaceMountPort, SpaceMountSessionTarget, SpaceMountMemberTarget, SpaceMountMemberSurface } from '../../../shared/space-mount'
+import type { SpaceMountPort, SpaceMountSessionTarget, SpaceMountMemberTarget, SpaceMountMemberSurface, SpaceMountReadingTarget } from '../../../shared/space-mount'
+import type { SessionMailReading } from './use-session-messages'
 import type { OriginalContinuousProgressControl } from '../../../shared/continuous-progress'
 import type { ComposerImageRetention } from './use-composer-attachments'
+
+export function sourceMemberMail(port: Pick<SpaceMountPort, 'reading'>, member: SpaceMountReadingTarget): SessionMailReading {
+  const participant = { hostId: 'local', participantSessionId: member.target.agentSessionId, participantRuntimeId: member.target.runtimeId }
+  const call = async <M extends import('@agentmux/core/space-member').SpaceMemberNativeMailMethod>(method: M, input: import('@agentmux/core').AgentMuxRpcParams<M>) => {
+    const surface = await port.reading(member, () => {})
+    try { return await surface.call(method, input) }
+    finally { await surface.dispose() }
+  }
+  return { identity: JSON.stringify(member), runtimeId: member.target.runtimeId,
+    reference: { hostId: 'local', agentSessionId: member.target.agentSessionId },
+    list: input => call('message.ls', { ...input, ...participant }),
+    read: messageId => call('message.read', { messageId, ...participant }),
+    dispatches: input => call('message.dispatch.ls', { ...input, ...participant }),
+    dispatch: sourceMessageId => call('message.dispatch.read', { sourceMessageId, ...participant }) }
+}
 
 /** Original tool calls reuse the existing fixed member surface. A durable Session
  * purpose is explicit and does not borrow its conversation reader's grant. */

@@ -142,7 +142,7 @@ export function AgentSessionComposer({
   mailboxOrigin?: OpenHttpLinkOrigin | undefined
   resultReview?: ((onNavigate: () => void) => ReactNode) | undefined
   /** Foreign execution facts and locator; drafts and queues still use sessionId as their canonical owner. */
-  source?: { target: SpaceMountMemberTarget; session?: SessionSnapshot | undefined; inputReading?: ComposerInputReading | undefined; originalProgress?: import('../../../shared/continuous-progress').OriginalContinuousProgressControl | undefined; retainImage?: ComposerImageRetention | undefined; onRefreshTools?: (() => void) | undefined } | undefined
+  source?: { target: SpaceMountMemberTarget; session?: SessionSnapshot | undefined; inputReading?: ComposerInputReading | undefined; originalProgress?: import('../../../shared/continuous-progress').OriginalContinuousProgressControl | undefined; originalMail?: import('../lib/use-session-messages').SessionMailReading | undefined; retainImage?: ComposerImageRetention | undefined; onRefreshTools?: (() => void) | undefined } | undefined
   visible?: boolean
 }) {
   const moteWorkface = useContext(MoteWorkfaceContext)
@@ -382,12 +382,15 @@ export function AgentSessionComposer({
       : notice)
   if (feedback.failure) notices.push({ id: 'tool', notice: { kind: 'indeterminate', notice: {
     step: 'A message tool action did not complete', mode: feedback.failure.message,
-    restore: 'Your draft is kept. You can try the action again.'
+    restore: 'Your draft is kept. Review the original cause and available actions.'
   } }, ...(feedback.failure.retry ? { action: { label: 'Retry', run: feedback.failure.retry } } : {}) })
-  if (source) notices.push({ id: 'source-message-tools', occurrence: JSON.stringify(source.target), notice: {
+  const missingSourceTools = source ? [source.originalMail ? '' : 'The original Agent mail reader is unconfirmed.',
+    source.inputReading ? '' : 'The original input history and Skills reader are unconfirmed.', source.originalProgress ? '' : 'Automation needs the original Session metadata.',
+    source.retainImage ? '' : 'Image upload needs the original Run metadata.'].filter(Boolean) : []
+  if (source && missingSourceTools.length) notices.push({ id: 'source-message-tools', occurrence: JSON.stringify(source.target), notice: {
     kind: 'indeterminate', notice: {
       step: 'Some message tools are unavailable on this connection',
-      mode: `Agent mail is not connected through its original route yet.${source.inputReading ? '' : ' The original input history and Skills reader are unconfirmed.'}${source.originalProgress ? '' : ' Automation needs the original Session metadata.'}${source.retainImage ? '' : ' Image upload needs the original Run metadata.'} Your draft and the existing message waiting controls are kept.`,
+      mode: `${missingSourceTools.join(' ')} Your draft and the existing message waiting controls are kept.`,
       restore: 'Refresh the original connection for its missing observations. Available tools keep their original targets; another local Agent is never substituted.'
     }
   } })
@@ -402,6 +405,7 @@ export function AgentSessionComposer({
         noticePresentation={feedback.failure ? { id: 'tool', content: <ComposerFeedback compact failure={feedback.failure} onDismiss={feedback.dismiss} /> } : undefined}
         progressSession={!source && !readOnly && session?.kind === 'agent' ? session : undefined}
         originalProgress={!readOnly ? source?.originalProgress : undefined}
+        originalMail={source?.originalMail}
         progressUnavailable={source && !source.originalProgress ? { message: 'The original Session Provider and workspace metadata are unconfirmed. Its exact automation target cannot be formed yet. Existing arrangements and your draft are kept.', onRefresh: source.onRefreshTools } : undefined}
         control={source ? null : session?.kind === 'agent' ? session.control : undefined}
         queued={queuedEntries.map((entry) => ({

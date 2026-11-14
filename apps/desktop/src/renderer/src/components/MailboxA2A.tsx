@@ -59,6 +59,7 @@ export function a2aMessageKey(message: AgentMuxMessageMetadata): string { return
 
 type Props = {
   reference: SessionHistoryReference
+  readingIdentity?: string | undefined
   direction: AgentMuxMessageDirection
   items: readonly AgentMuxMessageMetadata[]
   selectedKey: string | null
@@ -85,7 +86,7 @@ export function MailboxA2A(props: Props) {
   const recent = useMemo(() => [...items].sort((a, b) => b.envelope.createdAt - a.envelope.createdAt), [items])
   const selected = recent.find(item => a2aMessageKey(item) === selectedKey)
   const selectedId = selectedKey?.startsWith('a2a:') ? selectedKey.slice(4) || undefined : undefined
-  const scope = JSON.stringify([reference.hostId, reference.agentSessionId, direction])
+  const scope = JSON.stringify([reference.hostId, reference.agentSessionId, direction, ...(props.readingIdentity ? [props.readingIdentity] : [])])
   const generation = useRef(0)
   const owner = useMemo(() => ({}), [active, scope, selectedId, props.readMessage])
   const live = useRef<object | null>(null)
