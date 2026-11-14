@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { Button } from '@agentmux/client-ui/components/Button'
+import { MeshDeviceAccess } from './MeshDeviceAccess'
 import { MeshNetworkSettings } from './MeshNetworkSettings'
 import { HostSettingsPane, type HostAddRequest } from './HostSettingsPane'
 import { MeshPathsPane } from './MeshPathsPane'
@@ -8,9 +9,9 @@ import { ClusterMachinesPane } from './ClusterMachinesPane'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
 
 /** Observation tasks share one homepage; visited editors retain their original drafts and requests. */
-type MeshView = 'paths' | 'machines' | 'network' | 'connections'
+type MeshView = 'paths' | 'machines' | 'network' | 'connections' | 'access'
 function requestedView(request?: SettingsNavigationRequest): MeshView {
-  return request?.field === 'mesh-machines' ? 'machines' : request?.field === 'mesh-paths' ? 'paths' : request?.hostId || request?.field === 'mesh-devices' ? 'connections' : request?.field?.startsWith('mesh-') ? 'network' : 'paths'
+  return request?.field === 'mesh-machines' ? 'machines' : request?.field === 'mesh-paths' ? 'paths' : request?.field === 'mesh-access-work' ? 'access' : request?.hostId || request?.field === 'mesh-devices' ? 'connections' : request?.field?.startsWith('mesh-') ? 'network' : 'paths'
 }
 const subpages: Partial<Record<MeshView, string>> = { machines: 'mesh-machines', network: 'mesh-configuration', connections: 'mesh-devices' }
 export function MeshSettingsPane({ onSubpageChange, ...props }: React.ComponentProps<typeof HostSettingsPane> & {
@@ -47,11 +48,16 @@ export function MeshSettingsPane({ onSubpageChange, ...props }: React.ComponentP
     {editing ? <header className="mesh-editor-navigation"><Button type="button" onClick={() => choose('paths')}>← Mesh overview</Button></header> : null}
     <div ref={observationScroll} data-mesh-view={view === 'machines' ? 'machines' : 'paths'} hidden={!observing}
       onScroll={event => { if (view === 'paths' || view === 'machines') scrollPositions.current[view] = event.currentTarget.scrollTop }}>
+      {view === 'paths' ? <nav className="mesh-home-actions" aria-label="Device setup">
+        <Button type="button" onClick={() => choose('network')}>Join this device to a network</Button>
+        <Button type="button" onClick={() => choose('access')}>Use another device</Button>
+      </nav> : null}
       <div hidden={view !== 'paths'}>{mounted('paths') ? <MeshPathsPane active={props.active && view === 'paths'} hosts={props.config.hosts} locations={props.config.meshMapLocations} onDevice={openConnection} onGateway={() => choose('network')} /> : null}</div>
       {mounted('paths') || mounted('machines') ? <ClusterMachinesPane hosts={props.config.hosts} active={props.active && observing}
         compact={view !== 'machines'} onAddDevice={addDevice} onConnections={openConnection} /> : null}
     </div>
     <div data-mesh-view="network" hidden={view !== 'network'}>{mounted('network') ? <MeshNetworkSettings active={props.active && view === 'network'} showTopology={false} onConnections={() => choose('connections')} /> : null}</div>
+    <div data-mesh-view="access" hidden={view !== 'access'}>{mounted('access') ? <section data-settings-field="mesh-access-work"><MeshDeviceAccess /></section> : null}</div>
     <div data-mesh-view="connections" hidden={view !== 'connections'}>{mounted('connections') ? <HostSettingsPane {...props} navigationRequest={pendingNavigation ? props.navigationRequest : connectionRequest ?? props.navigationRequest} addHostRequest={addHostNavigation.current === props.navigationRequest ? addHostRequest : undefined} active={props.active && view === 'connections'} /> : null}</div>
   </div>
 }
