@@ -42,8 +42,10 @@ Read amux schedule create --help for the complete current schema. The first crea
 operation fixes nextCheckAt as its absolute deadline. Repeating the same operationId, restarting the owner
 or pausing and resuming keeps that deadline. Pause suspends delivery, not time; resuming an overdue
 countdown processes the original occurrence. One confirmed input delivery ends a countdown.
-The connected Host must be running; App exit, sleep or offline delivery is not promised. Busy
-Agents, user input and permission waits keep the original occurrence pending.
+The original Host owns scheduling independently of Desktop windows. Its serving process and
+the target Runtime must remain available; sleep or offline delivery is not promised. Closing
+Desktop does not transfer that responsibility to a window or confirm delivery. Busy Agents,
+user input and permission waits keep the original occurrence pending.
 
 Use schedule update --data <FILE|-> with {scheduleId,expectedRevision,operationId,everyMs}
 to change an original repeating interval. It preserves the current deadline and any claimed input,

@@ -16,6 +16,12 @@
 | 独立窗口、应用导航、工作面截图与录制 | [app](../../packages/core/guides/modules/app.md) |
 | 读写和打开文件、切换正文模式、编辑 Note | [file](../../packages/core/guides/modules/file.md)、[note-editing](../../packages/core/guides/shared/note-editing.md)、[notebook](../../packages/core/guides/actions/notebook.md) |
 | 日历提醒、倒计时与重复消息 | [schedule](../../packages/core/guides/modules/schedule.md) |
+| 原 Terminal Run 的读取、输入、中断与停止 | [terminal](../../packages/core/guides/modules/terminal.md) |
+| Host 登记、配置、测试与原维护申请 | [settings](../../packages/core/guides/modules/settings.md) |
+| 外部连接、原账号确认、收发与恢复 | [connection](../../packages/core/guides/modules/connection.md) |
+| Node 发布范围、原资源读取与跨节点路由 | [node](../../packages/core/guides/modules/node.md)、[route](../../packages/core/guides/modules/route.md) |
+| Browser Profile、代理、书签与原创建操作查询 | [browser](../../packages/core/guides/modules/browser.md) |
+| 固定提交、分支比较与原 worktree | [git](../../packages/core/guides/modules/git.md) |
 | 按已读版本改显示名 | [name](../../packages/core/guides/modules/name.md) |
 | 消息、待发消息与准备退避 | [message](../../packages/core/guides/modules/message.md) |
 | Endpoint、Host 路由与远程调用 | [system-endpoint](../../packages/core/guides/actions/system-endpoint.md) |
@@ -25,3 +31,7 @@
 | 创建 Goal、打开讨论与人认可 | [goal-create](../../packages/core/guides/actions/goal-create.md)、[goal](../../packages/core/guides/modules/goal.md) |
 
 源码、构建、安装与实际运行分别核对；不在当前执行版本 help 中的能力不要猜命令。
+
+审查功能完整性时，沿同一业务 owner 核对发现、准确目标与权限、动作、原结果查询、未知结果与重开恢复，以及 GUI 的同源消费。全量注册与帮助差集、带明确输入样例的 transport 检查、实际业务调用链分别说明证明范围；方法计数、无效 JSON 或 help 成功不能代替完整链验收。原请求、业务 operationId、当前观察与原确认回执分别保留，查询不自动重放未知操作。
+
+RPC 无需逐方法对应一个独立命令。Hosted SDK 承载、签名接收 transport、reader 取消和真实 producer 报告由原消费者组合；它们不成为可制造确认的业务动作。学习批准、Host 维护审核、来源信任和人的页面输入仍沿原可信主体，不因存在 CLI 而放宽。原 GUI 的拖动、选区与逐键编辑无需另造一套 CLI 手势层。具体源码、消费者和边界见[公共能力来源导航](../specs/public-capabilities.md)，新增或改变行为按[公共能力贡献约定](public-capability-contributions.md)验收。
