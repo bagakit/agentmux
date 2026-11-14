@@ -35,6 +35,7 @@ const fixture = vi.hoisted(() => ({
   nativeFocusAllowed: true,
   releaseWrite: null as (() => void) | null,
   menuHistoryBoundary: null as string | null,
+  observeHistoryBoundary: null as (() => () => void) | null,
   reveal: null as (() => void) | null,
   state: {noticeReadReceipts:{},sessions: [] as SessionSnapshot[],config:{appearance:{terminalTheme:'graphite'},executors:{},workspaces:[]},pendingAgentLaunches:{},recoveryCandidates:[],timelines:{},agentNames:{},viewModes:{},regionCaretFocus:null,clearRegionCaretFocus:vi.fn(),focusRegion:vi.fn(),appendAgentComposerDraft:vi.fn(),refreshSession:vi.fn(),recoverSession:vi.fn(),respondInteraction:vi.fn(),openFile:vi.fn(),reportError:vi.fn(),openHttpLink:vi.fn()}
 }))
@@ -128,8 +129,11 @@ vi.mock('../src/renderer/src/lib/terminal-viewport-sync', () => ({
   }
 }))
 vi.mock('../src/renderer/src/components/TerminalContextMenu', () => ({
-  TerminalContextMenu: ({ children, historyBoundary }: { children: ReactNode; historyBoundary: string | null }) => {
+  TerminalContextMenu: ({ children, historyBoundary, observeHistoryBoundary }: {
+    children: ReactNode; historyBoundary: string | null; observeHistoryBoundary(): () => void
+  }) => {
     fixture.menuHistoryBoundary = historyBoundary
+    fixture.observeHistoryBoundary = observeHistoryBoundary
     return children
   }
 }))
@@ -146,6 +150,7 @@ let container:HTMLDivElement
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true)
   vi.clearAllMocks();fixture.terminals.length=0;fixture.webgl.length=0;fixture.receive=null
+  fixture.menuHistoryBoundary = null; fixture.observeHistoryBoundary = null
   fixture.blockFirstWrite=false;fixture.releaseWrite=null;fixture.nativeFocusAllowed=true;fixture.state.sessions=[session]
   Object.assign(fixture.state, { mainSurface: 'board', activeWorkspaceId: undefined, layouts: {}, tabs: {}, retainedSpatialFocus: null, regionCaretFocus: null })
   fixture.state.clearRegionCaretFocus.mockImplementation((nonce: number) => {
@@ -203,10 +208,12 @@ it.each(['normal', 'alternate', 'Runtime gap', 'retained read failure', 'line bo
     } else if (state === 'alternate') {
       expect(terminal.buffer.active.type).toBe('alternate')
       expect(document.querySelector('.terminal-replay-gap--compact')).toBeNull()
+      await act(async () => { fixture.observeHistoryBoundary!() })
       expect(fixture.menuHistoryBoundary).toContain('The full-screen buffer has no terminal scrollback')
     } else if (state === 'line boundary') {
       expect(terminal.buffer.active.length).toBe(terminal.rows + terminal.options.scrollback!)
       expect(document.querySelector('.terminal-replay-gap--compact')).toBeNull()
+      await act(async () => { fixture.observeHistoryBoundary!() })
       expect(fixture.menuHistoryBoundary).toBe('This terminal view retains up to 5000 normal-buffer history lines. Earlier Runtime bytes may still be retained.')
     } else if (state === 'Runtime gap') {
       expect(document.querySelector('.terminal-service-window')?.textContent).toContain('Earlier scrollback is unavailable')

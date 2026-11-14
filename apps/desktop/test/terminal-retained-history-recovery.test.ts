@@ -38,7 +38,8 @@ const fixture = vi.hoisted(() => ({
   releaseWrite: null as (() => void) | null,
   reveal: null as (() => void) | null,
   proposedGrid: { cols: 80, rows: 24 },
-  historyBoundary: null as string | null
+  historyBoundary: null as string | null,
+  observeHistoryBoundary: null as (() => () => void) | null
 }))
 
 vi.mock('@xterm/xterm', async () => {
@@ -127,8 +128,11 @@ vi.mock('../src/renderer/src/store', () => {
   }) }
 })
 vi.mock('../src/renderer/src/components/TerminalContextMenu', () => ({
-  TerminalContextMenu: ({ children, historyBoundary }: { children: ReactNode; historyBoundary: string | null }) => {
+  TerminalContextMenu: ({ children, historyBoundary, observeHistoryBoundary }: {
+    children: ReactNode; historyBoundary: string | null; observeHistoryBoundary(): () => void
+  }) => {
     fixture.historyBoundary = historyBoundary
+    fixture.observeHistoryBoundary = observeHistoryBoundary
     return children
   }
 }))
@@ -155,6 +159,7 @@ beforeEach(() => {
   fixture.blockFirstWrite = false
   fixture.proposedGrid = { cols: 80, rows: 24 }
   fixture.historyBoundary = null
+  fixture.observeHistoryBoundary = null
   vi.clearAllMocks()
   const original = globalThis.setTimeout
   vi.spyOn(globalThis, 'setTimeout').mockImplementation((callback, delay, ...args) => {
@@ -451,6 +456,7 @@ it('shows alternate semantics from the actual parser without transferring altern
   expect(terminal.buffer.active.type).toBe('alternate')
   expect(terminal.buffer.active.baseY).toBe(0)
   expect(terminal.buffer.normal.length).toBe(normalLength)
+  await act(async () => { fixture.observeHistoryBoundary!() })
   expect(fixture.historyBoundary).toContain('full-screen buffer')
   expect(fixture.historyBoundary).toContain('no terminal scrollback')
 })

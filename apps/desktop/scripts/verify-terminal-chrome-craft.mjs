@@ -39,7 +39,7 @@ const mutations=connectorNeutral?[
   {label:'notice-enters-flow',file:'styles/terminal.css',expected:/original Terminal viewport|outside vertical flow/,
     change:source=>replaceOne(source,'position: absolute; isolation: isolate; z-index: 42;','position: static; isolation: isolate; z-index: 42;')},
   {label:'buffer-boundary-unplugged',file:'components/TerminalContextMenu.tsx',expected:/actual buffer boundary|Actual Renderer fact absent/,
-    change:source=>replaceOne(source,'{historyBoundary ? <div className="tab-context-menu__hint" role="note">{historyBoundary}</div> : null}', '{null}')}
+    change:source=>replaceOne(source,'return historyBoundary ? <div className="tab-context-menu__hint" role="note">{historyBoundary}</div> : null', 'return null')}
 ]
 async function renderer(label,mutation=null){
   const directory=join(evidence,label), processRoot=join(privateRoot,label),outDir=join(processRoot,'out')
