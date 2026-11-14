@@ -69,3 +69,8 @@
 .agent-device-select { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; color: var(--text-2); font-size: var(--fs-meta); }
 .agent-device-select > span { flex: none; }
 .agent-device-select select { flex: 1; min-width: 0; min-height: 30px; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: inherit; }
+
+.tool-execution-details { margin-top: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
+.tool-execution-details > summary { cursor: pointer; width: fit-content; }
+.tool-execution-details > summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; }
+.tool-execution-details > p { line-height: 1.6; overflow-wrap: anywhere; }

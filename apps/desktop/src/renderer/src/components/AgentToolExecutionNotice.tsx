@@ -50,7 +50,7 @@ export function AgentToolExecutionNotice({ session, visible, presentation = 'dis
   if (current.error || !inspection || inspection.state === 'unavailable') items.push({ id: 'observation', cause: current.error ?? inspection?.diagnostic?.code ?? 'unobserved', notice: {
     kind: 'indeterminate', notice: { step: 'Tool execution observation is unconfirmed',
       mode: current.error ?? inspection?.diagnostic?.message ?? 'The original tool binding is retained; its current service state has not been read.',
-      restore: 'Refresh this binding observation. The Agent and terminal remain available; no tool operation is replayed.' }
+      restore: 'Refresh this connection status. The original Session and terminal entry are kept; this observation does not confirm running or input availability. No tool operation is replayed.' }
   } })
   for (const notice of inspection?.notices ?? []) items.push({ id: JSON.stringify([notice.providerId, notice.role, notice.capability]), cause: JSON.stringify([notice.code, notice.state]),
     notice: { kind: 'process-degraded', notice: { step: `${capabilityNames[notice.capability]} · ${notice.state}`, mode: notice.message, restore: notice.action } } })
@@ -61,7 +61,7 @@ export function AgentToolExecutionNotice({ session, visible, presentation = 'dis
       cause: diagnostic.message, notice: { kind: 'process-degraded', notice: {
         step: `${target} · ${diagnostic.code}`, mode: diagnostic.message,
         restore: diagnostic.scope === 'operation' ? 'This original operation remains unresolved. Reconnecting does not by itself confirm its outcome.'
-          : 'This issue is separate from the tool connection. The original Agent and binding remain available.'
+          : 'This issue is separate from the tool connection. The original Session and binding are kept; their running and input availability are not established by this issue.'
       } } })
   }
   async function refresh() {
@@ -96,19 +96,32 @@ export function AgentToolExecutionNotice({ session, visible, presentation = 'dis
   const actions = <><button type="button" className="small-button" onClick={() => void refresh()}>Refresh observation</button>
     {connectionUnconfirmed || recovery.pending || recovery.error ? <button type="button" className="small-button" disabled={recovery.pending} onClick={() => void rejoin()}>{recovery.pending ? 'Reconnecting…' : 'Reconnect original tools'}</button> : null}</>
   const recoveryDetails = connectionUnconfirmed ? <p className="tool-execution-recovery-scope">Reconnect to the same Agent and tools. Pending tool work may continue, without sending your prompt again.</p> : null
-  if (presentation === 'inline') return <section className="tool-execution-observation" aria-label="Tool execution observation">
-    <header><strong>Tool connection · {current.error || !inspection ? 'Unconfirmed' : inspection.state === 'connected' ? 'Connected' : 'Unavailable'}</strong>
-      <div className="tool-execution-actions">{actions}</div></header>
+  const connectionTitle = current.error || !inspection ? 'Unconfirmed' : inspection.state === 'connected' ? 'Connected' : 'Unavailable'
+  const unresolved = inspection?.diagnostics?.some(item => item.scope === 'operation')
+  const capabilityNeedsReview = inspection?.notices?.some(item => item.state === 'unsupported' || item.state === 'unqualified')
+  const summary = current.error || !inspection
+    ? 'Current project-tool status is unknown. Refresh to check the original connection.'
+    : inspection.state === 'unavailable'
+      ? 'The connection to this project’s tools is unavailable. Refresh its status or reconnect the original tools.'
+      : unresolved ? 'Project tools are connected. An earlier tool operation still needs review.'
+        : capabilityNeedsReview ? 'Project tools are connected. A capability needs attention; see details.' : 'Project tools are connected.'
+  const details = <>
     {current.error && inspection ? <p>Last confirmed tool connection: {inspection.state}.</p> : null}
     {items.map(item => <ServiceWindowNotice key={item.id} notice={item.notice} />)}
     {!items.length ? <p>No capability notices in this observation. Tool connection does not establish support for every Provider feature.</p> : null}
+    {recovery.error ? <p>The reconnect result is from the last attempt; the connection status above follows the current observation.</p> : null}
     {recoveryDetails}
+  </>
+  if (presentation === 'inline') return <section className="tool-execution-observation" aria-label="Tool execution observation">
+    <header><strong>Tool connection · {connectionTitle}</strong><div className="tool-execution-actions">{actions}</div></header>
+    <p className="tool-execution-summary" role="status">{summary}</p>
+    <details className="tool-execution-details"><summary>Connection details{items.length ? ` · ${items.length}` : ''}</summary>{details}</details>
   </section>
   return <ServiceNoticeDisclosure scope={`local:tool-execution:${identity}`} notices={items} visible={visible}
-    available={inspection !== undefined && !current.error} persistentTitle title="Tool execution" detailsTitle={`Tools · ${resourceHost ?? session.workPlacement?.resourceHostId ?? 'Host unknown'}`}
+    available={inspection !== undefined && !current.error} persistentTitle title="Project tools" detailsTitle={`Tools · ${resourceHost ?? session.workPlacement?.resourceHostId ?? 'Host unknown'}`}
     actions={actions}>
+    <p className="tool-execution-summary" role="status">{summary}</p>
     <p className="tool-execution-resource">{binding.workspacePath}</p>
-    {items.map(item => <ServiceWindowNotice key={item.id} notice={item.notice} />)}
-    {recoveryDetails}
+    {details}
   </ServiceNoticeDisclosure>
 }
