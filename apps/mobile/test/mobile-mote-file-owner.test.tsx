@@ -95,7 +95,7 @@ async function original() {
     await click(button(element, '编辑'))
     await waitFor(() => expect(element.querySelector('[aria-label="Mote 文件正文"]')).not.toBeNull())
   }
-  const mutations = () => rpc.mock.calls.map(([method]) => method).filter(method => !['space.ls', 'file.read', 'app.snapshot', 'goal.ls'].includes(method))
+  const mutations = () => rpc.mock.calls.map(([method]) => method).filter(method => !['space.ls', 'file.read', 'app.snapshot', 'goal.ls', 'space.mote.preferences.read', 'space.mote.dialogue.read', 'space.state'].includes(method))
   return { path, files, fileOwner, rpc, reads, writes, identity, f, copyText, createView, enter, mutations,
     fault(kind: 'receipt' | 'temporary-write' = 'receipt') { fault = kind },
     remote() { remote = true },
@@ -439,7 +439,7 @@ describe('actual Mote Profile editor → public Files → original native owner'
     await waitFor(() => expect(getDeviceWorkface().snapshot().record.moteFileDraftConflicts?.find(value => value.body === '冲突之后更晚的完整中文稿')?.attempts).toEqual(originalDraft.attempts))
     await click(button(view.element, '采用设备上的稿'))
     await waitFor(() => expect(view.element.querySelector<HTMLTextAreaElement>('[aria-label="Mote 文件正文"]')?.value).toBe('另一页面的完整原稿'))
-    expect(view.element.textContent).toContain('采用前保留的本页原稿')
+    expect(view.element.textContent).toContain('采用前保留的本页稿件')
     const beforeCopy = [...view.element.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === '复制采用前的稿')!
     await click(beforeCopy)
     expect(f.copyText).toHaveBeenCalledWith('冲突之后更晚的完整中文稿', expect.any(Function))
