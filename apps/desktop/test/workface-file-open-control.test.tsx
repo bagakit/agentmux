@@ -18,13 +18,13 @@ vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ()
 import { FileSurfaceView } from '../src/renderer/src/components/FileSurfaceView'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
 import { api } from '../src/renderer/src/lib/api'
-import { createWorkbenchTab, documentKey, fileTabId, initialWorkbenchRegionId, type FileWorkbenchSurface } from '../src/renderer/src/lib/workbench-tabs'
+import { createWorkbenchTab, documentKey, fileTabId, initialWorkbenchRegionId, type BrowserWorkbenchSurface, type FileWorkbenchSurface, type WorkbenchSurface } from '../src/renderer/src/lib/workbench-tabs'
 import { noteCreationTarget } from '../src/renderer/src/lib/note-creation'
 import { desktopSpatialGraph, desktopWorkbenchFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
 import { zoneContext } from '../src/renderer/src/lib/space-agent-control'
-import { prepareRendererUpdate, useAppStore } from '../src/renderer/src/store'
+import { fileNavigationSelection, prepareRendererUpdate, useAppStore } from '../src/renderer/src/store'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
-import { agent, neighborSid, privateEnvironment, regionIdC, tabId, targetSid } from './helpers/workface-control-fixture'
+import { agent, neighborSid, privateEnvironment, regionIdA, regionIdB, regionIdC, tabId, targetSid } from './helpers/workface-control-fixture'
 import { fileConfig, fileTopics, fileCatalog, startWorkfaceFileFixture, zoneFor } from './helpers/workface-file-fixture'
 import { workfaceMonacoModelCount } from './helpers/workface-monaco-fixture'
 
@@ -292,3 +292,94 @@ it(restoreName, async () => {
   expect(proof.spatialSha256).toBe(createHash('sha256').update(JSON.stringify(spatial!.graph)).digest('hex'))
   expect(proof.drafts).toEqual(state.agentComposerDrafts); expect(proof.paneText).toBe('Fresh restored original source')
 }, 40000)
+
+describe.skipIf(restoring)('[file-split-owner] original public File open during observation', () => {
+  const adjacent = ['--display-workspace', 'display', '--group', 'display-group', '--tab', tabId, '--region', regionIdC, '--split', 'right']
+  function replaceAnchor(value: WorkbenchSurface) {
+    useAppStore.setState(state => ({ tabs: { ...state.tabs, [tabId]: { ...state.tabs[tabId]!, regions: { ...state.tabs[tabId]!.regions, [regionIdC]: value } } } }))
+  }
+  async function browserAnchor() {
+    const browser: BrowserWorkbenchSurface = { regionId: regionIdC, workspaceId: 'resource', kind: 'browser', browserId: 'original-adjacent-browser',
+      id: 'original-adjacent-browser', mode: 'normal', navigationId: 'original-document', profileId: 'original-profile',
+      url: 'https://example.test/original', title: '', loading: true, canGoBack: false, canGoForward: false,
+      viewport: 'responsive', error: null, driving: false, appLinkPrompt: null }
+    replaceAnchor(browser)
+    const state = useAppStore.getState(), zoneId = zoneFor('resource').zoneId
+    state.setSurveyZoneCollected(zoneId, true)
+    state.setSurveyZoneSelection({ zoneId, selection: [{ tabId, regionId: regionIdC }], active: { tabId, regionId: regionIdC } })
+    state.setMainSurface('survey'); await prepareRendererUpdate()
+    return browser
+  }
+  function deferObservation() {
+    let release!: () => void
+    vi.mocked(api.files.observe).mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve }))
+    return async () => { await vi.waitFor(() => expect(api.files.observe).toHaveBeenCalledTimes(1)); return release }
+  }
+  it.each([false, true])('metadata updates retain exact original placement and focus=%s', async focus => {
+    const original = await browserAnchor(), before = protectedFacts(), siblings = useAppStore.getState().tabs[tabId]!.regions
+    const observed = deferObservation(), pending = open('metadata-neighbor.md', 'resource', [...adjacent, ...(focus ? ['--focus'] : [])])
+    const release = await observed(), originalNavigation = fileNavigationSelection(useAppStore.getState())
+    useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: { ...original, title: 'Native document title', loading: false,
+      faviconDataUrl: 'data:image/png;base64,iVBORw0KGgo=', zoomFactor: 0.9 } })
+    const current = useAppStore.getState().tabs[tabId]!.regions[regionIdC]
+    expect(fileNavigationSelection(useAppStore.getState())).toBe(originalNavigation)
+    expect(current).not.toBe(original); release()
+    const result = await pending
+    expect(result).toMatchObject({ placement: { status: 'created', tabId }, data: { kind: 'text' }, navigation: focus ? 'applied' : 'background', outcome: 'opened' })
+    expect(result.issues).toEqual([]); expect(result.save?.clientStateWritten).toBe(true)
+    expect(api.files.read).toHaveBeenCalledExactlyOnceWith('resource', 'metadata-neighbor.md')
+    const state = useAppStore.getState(), file = state.tabs[tabId]!.regions[result.placement.regionId!]
+    expect(file).toMatchObject({ kind: 'file', workspaceId: 'resource', path: 'metadata-neighbor.md' })
+    expect(state.tabs[tabId]!.regions[regionIdC]).toBe(current)
+    for (const id of [regionIdA, regionIdB]) expect(state.tabs[tabId]!.regions[id]).toBe(siblings[id])
+    if (!focus) expect(protectedFacts()).toEqual(before)
+    else expect(state.workbenchSpaceSelection).toMatchObject({ workspaceId: 'display', tabId, regionId: file!.regionId })
+    expect(state.sessions).toBe(before.sessions); expect(state.agentComposerDrafts).toBe(before.drafts); fixture!.noLifecycle()
+  })
+  it('later human navigation wins while metadata does not cancel the original File data', async () => {
+    const original = await browserAnchor(), observed = deferObservation(), pending = open('late-metadata.md', 'resource', [...adjacent, '--focus'], 1)
+    const release = await observed()
+    useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: { ...original, title: 'Confirmed native title', loading: false } })
+    useAppStore.getState().setMainSurface('agents'); release()
+    const result = await pending
+    expect(result).toMatchObject({ placement: { status: 'created', tabId }, data: { kind: 'text' }, navigation: 'cancelled', outcome: 'partial' })
+    expect(useAppStore.getState().mainSurface).toBe('agents')
+    expect(useAppStore.getState().documents[documentKey('resource', 'late-metadata.md')]?.content).toContain('Current readable source')
+    fixture!.noLifecycle()
+  })
+  it('a normal same-Session phase transition keeps the original adjacent File capability', async () => {
+    replaceAnchor({ regionId: regionIdC, workspaceId: 'resource', kind: 'agent', phase: 'launching', sessionId: neighborSid }); await prepareRendererUpdate()
+    const observed = deferObservation(), pending = open('phase-neighbor.md', 'resource', adjacent), release = await observed()
+    replaceAnchor({ regionId: regionIdC, workspaceId: 'resource', kind: 'agent', phase: 'attached', sessionId: neighborSid }); release()
+    expect(await pending).toMatchObject({ placement: { status: 'created', tabId }, data: { kind: 'text' }, navigation: 'background', outcome: 'opened' })
+    fixture!.noLifecycle()
+  })
+  it.each(['browser', 'kind', 'file-resource', 'ABA', 'occurrence-ABA', 'space-ABA', 'resource-ABA'] as const)('real %s replacement refuses only the old request and leaves a fresh explicit request usable', async kind => {
+    const original = await browserAnchor()
+    if (kind === 'file-resource') { replaceAnchor({ kind: 'file', workspaceId: 'resource', regionId: regionIdC, path: 'original-resource.md' }); await prepareRendererUpdate() }
+    const observed = deferObservation(), pending = open('replaced-neighbor.md', 'resource', adjacent, 1), release = await observed()
+    const state = useAppStore.getState(), tab = state.tabs[tabId]!, layout = state.layouts.display!, config = state.config!
+    if (kind === 'browser' || kind === 'ABA') replaceAnchor({ ...original, id: 'different-browser', browserId: 'different-browser' })
+    else if (kind === 'kind') replaceAnchor({ kind: 'launcher', workspaceId: 'resource', regionId: regionIdC })
+    else if (kind === 'file-resource') replaceAnchor({ kind: 'file', workspaceId: 'resource', regionId: regionIdC, path: 'different-resource.md' })
+    else if (kind === 'occurrence-ABA') {
+      useAppStore.setState(current => ({ layouts: { ...current.layouts, display: { ...layout, groups: layout.groups.map(group => ({ ...group, tabOrder: group.tabOrder.filter(id => id !== tabId) })) } } }))
+      useAppStore.setState(current => ({ layouts: { ...current.layouts, display: layout } }))
+    } else if (kind === 'space-ABA') {
+      useAppStore.setState(current => ({ tabs: { ...current.tabs, [tabId]: { ...tab, space: { spaceId: 'different-space', zoneId: 'different-zone' } } } }))
+      useAppStore.setState(current => ({ tabs: { ...current.tabs, [tabId]: tab } }))
+    } else {
+      useAppStore.setState({ config: { ...config, workspaces: config.workspaces.map(workspace => workspace.id === 'resource' ? { ...workspace, path: workspace.path + '/different-root' } : workspace) } })
+      useAppStore.setState({ config })
+    }
+    if (kind === 'ABA') replaceAnchor({ ...original })
+    const replacement = useAppStore.getState().tabs[tabId]!.regions[regionIdC]; release()
+    const result = await pending
+    expect(result).toMatchObject({ placement: { status: 'unconfirmed', tabId: null, regionId: null }, data: { kind: 'unconfirmed' }, outcome: 'unknown' })
+    expect(result.issues.map(issue => issue.code)).toContain('FILE_OPEN_UNCONFIRMED')
+    expect(api.files.read).not.toHaveBeenCalled(); expect(useAppStore.getState().tabs[tabId]!.regions[regionIdC]).toBe(replacement)
+    expect(useAppStore.getState().documents[documentKey('resource', 'replaced-neighbor.md')]).toBeUndefined()
+    expect(await open('fresh-neighbor.md', 'resource', adjacent)).toMatchObject({ placement: { status: 'created', tabId }, data: { kind: 'text' }, outcome: 'opened' })
+    fixture!.noLifecycle()
+  })
+})
