@@ -14,7 +14,7 @@ const mutations: Record<string, [string, string, string]> = {
   'ignore-definition-shape': ['public-rpc-schedules.ts', 'if (p.currentDefinition !== undefined) parseContinuousProgressDefinition(p.currentDefinition)', 'if (false) parseContinuousProgressDefinition(p.currentDefinition)'],
   'lose-adoption-op-read': ['public-rpc-schedules.ts', ' && !schedule.guidanceAdoptions?.some(receipt => receipt.operationId === request.operationId)', ''],
   'drop-control-adoption': ['space-control-parser.ts', "['kind', 'target', 'requestId', 'status', 'source', 'message', 'maintenanceAdoption']", "['kind', 'target', 'requestId', 'status', 'source', 'message']"],
-  'change-unchanged-file': ['mote/preferences.ts', 'if (action && confirmed && !isDeepStrictEqual(source, params.baseline))', 'if (false && action && confirmed && !isDeepStrictEqual(source, params.baseline))']
+  'change-unchanged-file': ['mote/preferences.ts', 'if (action && confirmed && !dequal(source, params.baseline))', 'if (false && action && confirmed && !dequal(source, params.baseline))']
 }
 export default defineConfig({ ...source, plugins: [...(source.plugins ?? []), { name: 'original-guidance-contract-source', enforce: 'pre', transform(original, id) {
   const path = relative(root, id.split('?')[0]!), selected = process.env.MOTE_GUIDANCE_CODEC_MUTANT
