@@ -23,6 +23,10 @@ export async function sourceFilesHosts(cleanup: Array<() => unknown | Promise<un
     const directory = join(root, id), state = join(directory, 'state'), runtimeDirectory = join(directory, 'runtime')
     const project = options.sharedProject ? join(root, 'shared-project') : join(directory, 'project')
     await Promise.all([mkdir(state, { recursive: true }), mkdir(runtimeDirectory, { recursive: true }), mkdir(project, { recursive: true })])
+    // The original Notes owner has a separate locator; state/runtime isolation alone
+    // must never let this fixture borrow the user's default Notes directory.
+    await mkdir(join(directory, 'notes'), { recursive: true })
+    await writeFile(join(state, 'notes-location.json'), JSON.stringify({ schemaVersion: 1, directory: join(directory, 'notes'), operations: {}, pending: null }))
     const daemon = spawn(resolve('packages/core/vendor/ctxmux', `${process.platform}-${process.arch}`, 'bin/ctxmuxd'),
       ['--socket', join(runtimeDirectory, 'ctxmux.sock'), '--state-dir', join(state, 'ctxmux'), '--readiness-fd', '3'], { stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
     cleanup.push(async () => { if (daemon.exitCode === null && daemon.signalCode === null) { const done = once(daemon, 'exit'); daemon.kill('SIGTERM'); await done } })
