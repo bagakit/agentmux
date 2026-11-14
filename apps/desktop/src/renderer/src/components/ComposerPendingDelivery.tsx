@@ -172,11 +172,12 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, composerRe
       if (disposed || request !== revision) return
       floating.style.top = position.y + 'px'
       floating.dataset.positioned = 'true'
+      layout?.reserveReadingSpace?.(new DOMRect(right - floating.offsetWidth, position.y, floating.offsetWidth, floating.offsetHeight))
       paintPointer()
     }
     const stopLayout = layout?.subscribe(scheduleUpdate)
     const stop = autoUpdate(composer, floating, scheduleUpdate)
-    return () => { disposed = true; stop(); stopLayout?.(); cancelAnimationFrame(geometryFrame) }
+    return () => { disposed = true; stop(); stopLayout?.(); cancelAnimationFrame(geometryFrame); layout?.reserveReadingSpace?.(null) }
   }, [composerRef, surfaceRef, layout, queued.length, suppressed, Boolean(notice)])
 
   useLayoutEffect(() => {

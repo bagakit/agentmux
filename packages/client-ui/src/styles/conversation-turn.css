@@ -203,3 +203,16 @@
 .log-turn__continue:hover { color: var(--green); }
 .log-turn__continue:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; border-radius: var(--radius-sm); }
 
+
+/* Narrow reading keeps the speaker on a real line; time and tools share the next one. */
+@container conversation-reading (max-width: 360px) {
+  .log-turn[data-speaker-role='agent']:not([data-compact='true'], [data-message-layout='stacked'], [data-speaker-relation='other-agent']) > .log-turn__head {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    & > .log-turn__identity { display: contents; }
+    & .log-turn__title { grid-column: 1 / -1; grid-row: 1; }
+    & .log-turn__identity > .log-turn__time { grid-column: 1; grid-row: 2; }
+    & > .log-turn__actions { grid-column: 2; grid-row: 2; }
+    & > .conversation-input-details > .conversation-input-details__toggle { grid-column: 3; grid-row: 2; }
+    & > .conversation-input-details > .conversation-input-details__body { grid-row: 3; }
+  }
+}

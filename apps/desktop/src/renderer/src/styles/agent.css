@@ -57,6 +57,7 @@
 .agent-body[data-observation-surface='workflow'] { background: radial-gradient(70% 18% at 50% 0, color-mix(in oklab, var(--blue) 5%, transparent), transparent 72%); }
 /* One reading ground: a feed that repaints its own would step below the Region header inset. */
 .agent-body[data-observation-surface='workflow'] .activity-feed { background: none; }
+.agent-body[data-observation-surface='workflow'] .activity-feed-frame { height: calc(100% - var(--pending-delivery-inset, 0px)); }
 .agent-terminal-stage { position: relative; width: 100%; height: 100%; overflow: hidden; }
 /* One current request belongs to the common reading host, not to a copied history row. */
 .agent-body[data-pending-interaction] { display: grid; grid-template-rows: minmax(0, 1fr) fit-content(min(320px, 55%)); }

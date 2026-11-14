@@ -4,6 +4,7 @@ import { observeTerminalInputGeometry, readTerminalInputOverlapTop, type Termina
 export type PendingDeliveryLayout = {
   boundaryRef: RefObject<HTMLElement | null>
   readOverlapTop(popup: DOMRect): number | undefined
+  reserveReadingSpace?(popup: DOMRect | null): void
   subscribe(onChange: () => void): () => void
 }
 
@@ -26,6 +27,16 @@ export function usePendingDeliveryLayout({ boundaryRef, bodyRef, protectedRef, i
 }): PendingDeliveryLayout {
   return useMemo(() => ({
     boundaryRef,
+    reserveReadingSpace(popup) {
+      const body = bodyRef?.current
+      if (!body) return
+      const bounds = body.getBoundingClientRect()
+      const overlap = popup && active && popup.left < bounds.right && popup.right > bounds.left
+        ? Math.max(0, Math.min(bounds.bottom, popup.bottom) - Math.max(bounds.top, popup.top)) : 0
+      const value = `${overlap ? overlap + 8 : 0}px`
+      if (body.style.getPropertyValue('--pending-delivery-inset') !== value)
+        body.style.setProperty('--pending-delivery-inset', value)
+    },
     readOverlapTop(popup) {
       if (!active || !visible(boundaryRef.current)) return undefined
       let top = terminal ? readTerminalInputOverlapTop(terminal, popup) : undefined
