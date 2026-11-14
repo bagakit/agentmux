@@ -24,7 +24,7 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   const appearance = mode => read(`mobileProductScene.setAppearance(${JSON.stringify(mode)})`)
   const rootGeometry = async label => {
     await flush()
-    const actual = await read(`(()=>{const app=document.querySelector('.mobile-app'),visible=n=>!!n.getClientRects().length&&getComputedStyle(n).visibility!=='hidden',r=n=>n.getBoundingClientRect().toJSON();return {label:${JSON.stringify(label)},viewport:{width:innerWidth,height:innerHeight},app:r(app),overflow:app.scrollWidth>app.clientWidth,tabs:[...document.querySelectorAll('.mobile-navigation button')].filter(visible).map(n=>({label:n.getAttribute('aria-label'),rect:r(n)}))}})()`)
+    const actual = await read(`(()=>{const app=document.querySelector('.mobile-app'),visible=n=>!!n.getClientRects().length&&getComputedStyle(n).visibility!=='hidden',r=n=>n.getBoundingClientRect().toJSON();return {label:${JSON.stringify(label)},viewport:{width:innerWidth,height:innerHeight},app:r(app),overflow:app.scrollWidth>app.clientWidth,chrome:[...document.querySelectorAll('.mobile-header,.mobile-page-header,.mobile-navigation-bar')].filter(visible).map(n=>{const s=getComputedStyle(n);return {className:n.className,rect:r(n),borderTop:parseFloat(s.borderTopWidth),borderBottom:parseFloat(s.borderBottomWidth),paddingTop:parseFloat(s.paddingTop),paddingBottom:parseFloat(s.paddingBottom)}}),tabs:[...document.querySelectorAll('.mobile-navigation button')].filter(visible).map(n=>({label:n.getAttribute('aria-label'),rect:r(n)}))}})()`)
     assert.equal(actual.overflow, false, `${label}: no horizontal overflow`)
     assert.ok(actual.app.right <= actual.viewport.width + 1)
     for (const tab of actual.tabs) assert.ok(tab.rect.width >= 44 && tab.rect.height >= 44, `${label}: original primary touch target ${tab.label}`)
@@ -66,6 +66,11 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
     assert.equal(actual.value, text); assert.equal(actual.start, 4); assert.equal(actual.end, 12)
   }
   const readCount = method => read(`mobileProductScene.facts().calls.filter(call=>call.method===${JSON.stringify(method)}).length`)
+  const conversationBoundary = async label => {
+    const actual=await read(`({label:${JSON.stringify(label)},sessionId:mobileProductScene.facts().record.selectedSessionId,originalComposerConnected:window.responsiveComposer?.isConnected,originalReadingConnected:window.responsiveReading?.isConnected,firstComposerSame:document.querySelector('.mobile-conversation-panel [contenteditable=true]')===window.responsiveComposer,firstReadingSame:document.querySelector('.mobile-conversation__reading')===window.responsiveReading,originalDraft:window.responsiveComposer?.textContent,editors:[...document.querySelectorAll('.mobile-conversation-panel [contenteditable=true]')].map(n=>({text:n.textContent,connected:n.isConnected,visible:!!n.getClientRects().length&&!n.closest('[hidden]')}))})`)
+    result.responsiveConversationBoundaries.push(actual)
+    return actual
+  }
   const rotation = async (width, height, reduced) => {
     const frame = '.mobile-goals-host:not([hidden]) .mobile-goals-layout'
     await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: reduced ? 'reduce' : 'no-preference' }] })
@@ -84,10 +89,12 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
     for (const frame of actual.frames) { assert.equal(frame.focused, true); assert.equal(frame.start, 4); assert.equal(frame.end, 12); assert.equal(frame.scrollTop, actual.before.scrollTop) }
     await sameEditor(goalEditor, 'responsiveGoalEditor', goalDraft)
     await split(`Goal rotation ${width}×${height}${reduced ? ' reduced' : ''}`, '.mobile-goals-host:not([hidden]) .mobile-goals-directory', '.mobile-goals-host:not([hidden]) .mobile-goals-work')
-    const chrome = await read(`({short:document.querySelector('.mobile-app').hasAttribute('data-short'),header:document.querySelector('.mobile-goals-host:not([hidden]) .mobile-page-header').getBoundingClientRect().toJSON(),tabs:[...document.querySelectorAll('.mobile-navigation button')].map(n=>n.getBoundingClientRect().toJSON())})`)
+    const chrome = await read(`(()=>{const h=document.querySelector('.mobile-goals-host:not([hidden]) .mobile-page-header'),box=n=>{const s=getComputedStyle(n);return {rect:n.getBoundingClientRect().toJSON(),borderTop:parseFloat(s.borderTopWidth),borderBottom:parseFloat(s.borderBottomWidth),paddingTop:parseFloat(s.paddingTop),paddingBottom:parseFloat(s.paddingBottom)}};return {short:document.querySelector('.mobile-app').hasAttribute('data-short'),header:box(h),buttons:[...h.querySelectorAll('button')].filter(n=>n.getClientRects().length).map(box),tabBar:box(document.querySelector('.mobile-navigation-bar')),tabs:[...document.querySelectorAll('.mobile-navigation button')].map(box)}})()`)
     result.responsiveMotion.at(-1).chrome = chrome
-    assert.equal(chrome.short, true); assert.equal(chrome.header.height, 44)
-    for (const tab of chrome.tabs) assert.ok(tab.height >= 44)
+    assert.equal(chrome.short, true)
+    const h=chrome.header
+    assert.equal(h.rect.height-h.borderTop-h.borderBottom-h.paddingTop-h.paddingBottom,44,'Short header keeps one 44px control row inside its observed stroke/insets')
+    for (const control of [...chrome.buttons,...chrome.tabs]) assert.ok(control.rect.height>=44&&control.rect.width>=44)
   }
   // CDP changes the actual CSS env() values; no injected style or viewport mock.
   const safeArea = async (width, height, selector, expectedSplit) => {
@@ -110,7 +117,7 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
     await button('知识', topic)
     await until(`Boolean(document.querySelector(${JSON.stringify(knowledge + ' .mobile-topics-list strong')}))`)
   }
-  result.responsiveGeometry = []; result.responsiveScroll = []; result.responsiveMotion = []; result.responsiveSafeArea = []; result.responsiveReadCounts = []
+  result.responsiveGeometry = []; result.responsiveScroll = []; result.responsiveMotion = []; result.responsiveSafeArea = []; result.responsiveReadCounts = []; result.responsiveConversationBoundaries = []
 
   if (phase === 'restore') {
     const original = JSON.parse(await fs.readFile(path.join(evidence, 'renderer-result.json'), 'utf8')).responsiveOriginal
@@ -120,6 +127,8 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
     assert.equal(restored.record.recordId, original.recordId)
     for (const field of ['selectedSessionId', 'presentation', 'conversation', 'goalDrafts', 'knowledgeDrafts', 'goalOperationRecords', 'agentCreates', 'fileUploads']) assert.deepEqual(restored.record[field], original.record[field], `Original ${field} survives a different private OS process`)
     assert.deepEqual(restored.sessionIds, original.sessionIds)
+    assert.ok(original.conversationKey)
+    assert.deepEqual(restored.record.conversation.drafts.find(([key])=>key===original.conversationKey),[original.conversationKey,conversationDraft])
     await resize(951, 585); await appearance('light')
     await split('restored Goal editor', '.mobile-goals:not([hidden]) .mobile-goals-directory', '.mobile-goals:not([hidden]) .mobile-goals-work')
     await capture('responsive-restored-goal-edit-951-light')
@@ -142,6 +151,8 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   await tap('.mobile-conversation-panel:not([hidden]) [contenteditable=true]', 'Retain the original Mote draft')
   await win.webContents.insertText(conversationDraft)
   await until(`mobileProductScene.facts().record.conversation.drafts.some(([,text])=>text===${JSON.stringify(conversationDraft)})`)
+  const conversationKey=await read(`mobileProductScene.facts().record.conversation.drafts.find(([,text])=>text===${JSON.stringify(conversationDraft)})[0]`)
+  assert.ok(conversationKey)
   await read('window.responsiveComposer=document.querySelector(".mobile-conversation-panel [contenteditable=true]");window.responsiveReading=document.querySelector(".mobile-conversation__reading");true')
   await resize(951, 585); await appearance('dark')
   await until('document.querySelector(".mobile-focus-pane h1")?.textContent==="Focus"&&document.querySelectorAll(".mobile-focus-pane .mobile-agent-row__open").length===mobileProductScene.facts().sessionIds.length')
@@ -237,7 +248,7 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   assert.equal(sourceReadsAfter,sourceReads,'Rotation preserves the same original Source reader without another file read')
   await button('返回知识', sourceReader)
   await until(`!document.querySelector(${JSON.stringify(sourceHost)})`)
-  await button('继续编辑草稿', knowledge)
+  await button('继续编辑草稿', `${knowledge} .mobile-knowledge-content`)
   await sameEditor(knowledgeEditor, 'responsiveKnowledgeEditor', knowledgeDraft)
 
   // A visible directory is an actual navigation surface while Source owns the right pane.
@@ -258,7 +269,7 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   await capture('responsive-source-to-discussion-951-light')
   await button('知识', topic)
   await button('第一周的实验依据', `${knowledge} .mobile-knowledge-directory`)
-  await button('继续编辑草稿', knowledge)
+  await button('继续编辑草稿', `${knowledge} .mobile-knowledge-content`)
   await sameEditor(knowledgeEditor, 'responsiveKnowledgeEditor', knowledgeDraft)
 
   await button('Space', '.mobile-navigation'); await appearance('light')
@@ -284,6 +295,7 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   result.responsiveReadCounts.push({owner:'original Space file',method:'file.read',before:spaceReads,after:spaceReadsAfter})
   assert.equal(spaceReadsAfter,spaceReads,'Width changes preserve the original Space file reader without another read')
 
+  await conversationBoundary('Before choosing Focus root; original Session remains selected')
   await button('Focus', '.mobile-navigation'); await appearance('light')
   await until('document.querySelector(".mobile-focus-pane")?.getAttribute("role")==="main"')
   const groups = await read(`(()=>{const p=document.querySelector('.mobile-focus-projects');return {display:getComputedStyle(p).display,columns:getComputedStyle(p).gridTemplateColumns,groups:[...p.querySelectorAll('.mobile-focus-project')].map(n=>n.getBoundingClientRect().toJSON())}})()`)
@@ -294,8 +306,16 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   await safeArea(667,375,'.mobile-focus-facet',false)
   await safeArea(812,375,'.mobile-focus-facet',true)
   await clearSafeArea(); await resize(1024,768); await flush()
+  const heldConversation=await conversationBoundary('Focus root before explicitly choosing another Session')
+  assert.equal(heldConversation.sessionId,'session-mote')
+  assert.equal(heldConversation.originalComposerConnected,true)
+  assert.equal(heldConversation.originalReadingConnected,true)
+  assert.equal(heldConversation.firstComposerSame,true)
+  assert.equal(heldConversation.firstReadingSame,true)
+  assert.equal(heldConversation.originalDraft,conversationDraft)
   await button('实验建议', '.mobile-focus-pane')
   await until('mobileProductScene.facts().record.selectedSessionId==="session-result"')
+  await conversationBoundary('After explicitly choosing the original result Session')
   await split('Ordinary Agent', '.mobile-focus-pane', '.mobile-primary-pane')
   assert.notEqual(await read('getComputedStyle(document.querySelector(".mobile-focus-pane .mobile-focus-projects")).display'), 'grid', 'The original 272px Agent sidebar stays one column')
   await capture('responsive-focus-agent-1024-light')
@@ -311,10 +331,11 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   const originalGoal = final.record.goalDrafts.find(item => item.description === goalDraft), originalKnowledge = final.record.knowledgeDrafts.find(item => item.content === knowledgeDraft)
   assert.ok(originalGoal?.goalId && originalKnowledge?.entryId)
   assert.ok(final.record.goalOperationRecords?.some(item => item.request.operationId === 'original-goal-operation'))
-  assert.equal(await read('document.querySelector(".mobile-conversation-panel [contenteditable=true]")===window.responsiveComposer'), true)
-  assert.equal(await read('document.querySelector(".mobile-conversation__reading")===window.responsiveReading'), true)
-  assert.ok(final.record.conversation.drafts.some(([, text]) => text === conversationDraft))
-  result.responsiveOriginal = { recordId: final.record.recordId, goalKey: { goalId: originalGoal.goalId, scope: originalGoal.scope }, knowledgeKey: final.record.presentation.topics.knowledge.draftKey, knowledgeEntryId: originalKnowledge.entryId, record: final.record, sessionIds: final.sessionIds }
+  await conversationBoundary('Final Goal editor after the explicit Session change')
+  assert.equal(final.record.selectedSessionId,'session-result')
+  assert.equal(await read('document.querySelector(".mobile-conversation-panel [data-agent-session-id]").getAttribute("data-agent-session-id")'),'session-result')
+  assert.deepEqual(final.record.conversation.drafts.find(([key])=>key===conversationKey),[conversationKey,conversationDraft])
+  result.responsiveOriginal = { recordId: final.record.recordId, goalKey: { goalId: originalGoal.goalId, scope: originalGoal.scope }, knowledgeKey: final.record.presentation.topics.knowledge.draftKey, knowledgeEntryId: originalKnowledge.entryId, conversationKey, record: final.record, sessionIds: final.sessionIds }
   await noBusiness()
   result.responsiveBoundary = 'Actual MobileApp, original five primary owners and controlled public SDK leaves; geometry/pointer/scroll and retained real editing nodes. Same userData must be restarted by the parent capture in two distinct private Electron OS processes. No installed App/user Browser/real Session operation; no aesthetic verdict and no physical-device claim.'
 }

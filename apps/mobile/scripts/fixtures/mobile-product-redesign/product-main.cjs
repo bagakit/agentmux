@@ -28,6 +28,7 @@ app.whenReady().then(async () => {
   const resize = async (width, height) => { win.setContentSize(width, height); await until(`innerWidth===${width}&&innerHeight===${height}&&Math.round(document.querySelector('.mobile-app').getBoundingClientRect().height)===${height}`) }
   const tap = async (selector, label = selector, { scroll = true } = {}) => {
     if (scroll) await read(`document.querySelector(${JSON.stringify(selector)})?.scrollIntoView({block:'nearest'})`)
+    if (mode === 'responsive-primary-workfaces') await read(`Promise.allSettled(document.getAnimations().filter(a=>a.playState==='running'&&Number.isFinite(a.effect?.getComputedTiming().endTime)).map(a=>a.finished))`)
     await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
     await until(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n?.getClientRects().length)return false;const r=n.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return hit===n||n.contains(hit)})()`)
     const observed = await read(`(()=>{const nodes=[...document.querySelectorAll(${JSON.stringify(selector)})].filter(n=>n.getClientRects().length);if(nodes.length!==1)throw Error('Actual visible control must be unique: '+${JSON.stringify(selector)}+' ('+nodes.length+')');const n=nodes[0];if(${JSON.stringify(scroll)})n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);if(hit!==n&&!n.contains(hit))throw Error('Actual touch target is covered: '+${JSON.stringify(label)});window.mobileTapFacts={clicked:false,events:[]};window.mobileTapTarget=n;if(!window.mobileTapRecorder){window.mobileTapRecorder=true;for(const type of ['touchstart','touchend','click'])document.addEventListener(type,event=>{if(window.mobileTapTarget===event.target||window.mobileTapTarget?.contains(event.target)){window.mobileTapFacts.events.push({type,observedAt:performance.now()});if(type==='click')window.mobileTapFacts.clicked=true}},{capture:true})}return {x,y,label:n.getAttribute('aria-label')||n.textContent,tag:n.tagName,rect:r.toJSON(),disabled:!!n.disabled}})()`)
@@ -913,7 +914,7 @@ app.whenReady().then(async () => {
   result.passed = true
  } catch (error) {
   result.error = { name: error.name, message: error.message, stack: error.stack }
-  if (win && mode === 'responsive-primary-workfaces') result.failureFacts = await win.webContents.executeJavaScript(`({record:mobileProductScene.facts().record,notices:[...document.querySelectorAll('[role=status]')].map(n=>n.textContent)})`).catch(() => null)
+  if (win && mode === 'responsive-primary-workfaces') result.failureFacts = await win.webContents.executeJavaScript(`({record:mobileProductScene.facts().record,notices:[...document.querySelectorAll('[role=status]')].map(n=>n.textContent),lastTap:{facts:window.mobileTapFacts,connected:window.mobileTapTarget?.isConnected,rect:window.mobileTapTarget?.getBoundingClientRect().toJSON()}})`).catch(() => null)
   if (win) { await fs.writeFile(path.join(evidence, 'failed.png'), (await win.webContents.capturePage()).toPNG()); result.images.push('failed.png') }
  } finally {
   await fs.writeFile(path.join(evidence, phase === 'restore' ? 'renderer-result-restored.json' : 'renderer-result.json'), JSON.stringify(result, null, 2) + '\n')
