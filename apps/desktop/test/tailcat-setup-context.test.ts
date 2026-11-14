@@ -52,6 +52,18 @@ describe('Tailcat help retains the exact Mac without forwarding its credentials'
     expect(task).toContain('do not install on your own local by assumption')
   })
 
+  it('carries the known preparation step and settings target without a raw failure or secret', () => {
+    const context = tailcatSetupContext(destination, 'client', { step: 'prepare-key', code: 'RPC_METHOD_NOT_FOUND' })
+    expect(context.failure).toEqual({ step: 'prepare-key', code: 'RPC_METHOD_NOT_FOUND' })
+    expect(context.settingsTarget).toEqual({ section: 'hosts', hostId: 'other-mac', item: 'connection' })
+    const task = tailcatSetupPrompt(context, 'desktop-original-runtime')
+    expect(task).toContain('check that service before any CLI installation')
+    expect(task).not.toContain('tcPrivateDestinationCanary')
+    const receiver = tailcatSetupContext(local, 'server', { step: 'prepare-key', code: null })
+    expect(receiver.settingsTarget).toEqual({ section: 'network-node', hostId: 'local', item: 'incoming' })
+    expect(receiver.failure?.code).toBeNull()
+  })
+
   it('rejects a foreign route while keeping the local owner across unrelated label edits', async () => {
     fixture.inspect.mockResolvedValue({ routeHostId: 'other-mac', configuration: local,
       owner: { state: 'available', value: { runtimeId: 'foreign-owner-canary' } } })

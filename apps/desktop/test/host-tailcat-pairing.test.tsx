@@ -4,6 +4,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import type { TailcatKeyPreparation } from '@agentmux/core'
 import type { AppConfig, HostConfig, SshHostConfig } from '../src/shared/contracts'
 import { HostSettingsPane } from '../src/renderer/src/components/settings/HostSettingsPane'
+import { NetworkNodeSettingsPane } from '../src/renderer/src/components/settings/NetworkNodeSettingsPane'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
@@ -19,8 +20,12 @@ beforeEach(() => {
   useAppStore.setState({ config, sessions: [], hostChecks: {} }); onSave.mockClear()
   vi.spyOn(api.hosts, 'inspect').mockImplementation(async host => ({ routeHostId: host.id, configuration: host, tailcat: { state: 'disabled' } }) as never)
   vi.spyOn(api.hosts, 'network').mockRejectedValue(new Error('Local network not observed in this controlled connection test'))
+  vi.spyOn(api.nodePublishing, 'call').mockRejectedValue(new Error('Publication identity is outside this incoming-connection test'))
+  vi.spyOn(api.config, 'save').mockImplementation(async next => next)
 })
-const show = (hostId = 'studio') => dom.render(<HostSettingsPane config={config} active={true} onSave={onSave} navigationRequest={{ section: 'hosts', hostId }} />)
+const show = (hostId = 'studio') => hostId === 'local'
+  ? dom.render(<NetworkNodeSettingsPane config={config} active={true} onSave={async () => {}} onNavigate={() => {}} navigationRequest={{ section: 'network-node', hostId }} />)
+  : dom.render(<HostSettingsPane config={config} active={true} onSave={onSave} navigationRequest={{ section: 'hosts', hostId }} />)
 const input = (label: string) => dom.container.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[aria-label="${label}"]`)!
 async function click(text: string) {
   const buttons = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].filter(node => node.textContent?.trim() === text)
@@ -47,8 +52,9 @@ it('the receiving Mac prepares its missing server key as a draft, focuses approv
   expect(onSave).not.toHaveBeenCalled()
   expect(input('Tailcat allowed clients').value).toBe('')
   await fill('Tailcat allowed clients', publicKey)
-  await click('Save hosts')
-  expect(onSave.mock.calls[0]![0][0]).toEqual({ ...config.hosts[0], tailcat: { keyFile: 'agentmux-server', enabled: true, allowedClients: [publicKey] } })
+  await click('Save incoming connections')
+  expect(api.config.save).toHaveBeenCalledOnce()
+  expect(vi.mocked(api.config.save).mock.calls[0]![0].hosts[0]).toEqual({ ...config.hosts[0], tailcat: { keyFile: 'agentmux-server', enabled: true, allowedClients: [publicKey] } })
 })
 
 it('the sending Mac reuses its chosen key, copies only the public code, and keeps the private destination and Runtime binding', async () => {
@@ -102,7 +108,7 @@ it('a later approval edit cannot be overwritten or enabled by an earlier server 
 })
 
 it('missing CLI and copy failures stay local and retryable without clearing custom fields or saving the Host', async () => {
-  const prepare = vi.spyOn(api.hosts, 'prepareTailcatKey').mockRejectedValueOnce(new Error('Install the official Tailcat CLI and try again.')).mockResolvedValue(prepared('client', 'custom-client'))
+  const prepare = vi.spyOn(api.hosts, 'prepareTailcatKey').mockRejectedValueOnce(Object.assign(new Error('Original serving environment error'), { code: 'TAILCAT_CLI_MISSING' })).mockResolvedValue(prepared('client', 'custom-client'))
   config.hosts[1] = { ...remote, tailcat: { ...remote.tailcat!, keyFile: 'custom-client' } }
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockRejectedValue(new Error('Clipboard unavailable'))
   await show()

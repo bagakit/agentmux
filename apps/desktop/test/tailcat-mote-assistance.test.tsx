@@ -5,6 +5,7 @@ import type { MoteDialoguePage, MoteDialogueRead } from '@agentmux/core/mote-dia
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import type { AppConfig, HostConfig, ScratchTopicSnapshot } from '../src/shared/contracts'
 import { HostSettingsPane } from '../src/renderer/src/components/settings/HostSettingsPane'
+import { NetworkNodeSettingsPane } from '../src/renderer/src/components/settings/NetworkNodeSettingsPane'
 import { MoteTaskAction } from '../src/renderer/src/components/MoteTaskAction'
 import { useAppStore } from '../src/renderer/src/store'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
@@ -49,9 +50,12 @@ beforeEach(() => {
   vi.spyOn(api.hosts, 'inspect').mockImplementation(async host => ({ routeHostId: host.id, configuration: host,
     owner: { state: 'available', value: { runtimeId: 'desktop-runtime-fixture' } }, tailcat: { state: 'disabled' } }) as never)
   vi.spyOn(api.hosts, 'network').mockRejectedValue(new Error('No live network qualification in this fixture'))
+  vi.spyOn(api.nodePublishing, 'call').mockRejectedValue(new Error('Publication identity is outside this setup-help test'))
   requestPmoTeamsTopicFloatingClose()
 })
-const show = (hostId = 'studio') => dom.render(<HostSettingsPane config={config} active={true} onSave={vi.fn()} navigationRequest={{ section: 'hosts', hostId }} />)
+const show = (hostId = 'studio') => hostId === 'local'
+  ? dom.render(<NetworkNodeSettingsPane config={config} active={true} onSave={async () => {}} onNavigate={() => {}} navigationRequest={{ section: 'network-node', hostId }} />)
+  : dom.render(<HostSettingsPane config={config} active={true} onSave={vi.fn()} navigationRequest={{ section: 'hosts', hostId }} />)
 async function button(text: string) {
   const found = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].filter(node => node.textContent?.trim() === text)
   expect(found).toHaveLength(1); await act(async () => { found[0]!.focus(); found[0]!.click() })
@@ -75,6 +79,32 @@ it('both real Tailcat forms expose install guidance and hand off to the logical 
   expect(useAppStore.getState().agentSteerQueues['main-ui']).toHaveLength(1)
   await show('local')
   expect(dom.container.querySelector('[data-tailcat-help="server"]')?.textContent).toContain('brew install tailcat')
+})
+
+it.each([
+  ['RPC_METHOD_NOT_FOUND', 'This AgentMux service cannot prepare keys yet'],
+  ['CONTROL_UNAVAILABLE', 'Key preparation is unavailable on this service'],
+  ['TAILCAT_CLI_MISSING', 'The service cannot find Tailcat'],
+  ['TAILCAT_KEY_CONFLICT', 'This saved key cannot be used here'],
+  [null, 'Key preparation could not be confirmed']
+] as const)('the real failed Prepare and Mote task retain %s as an exact preparation issue', async (code, title) => {
+  const failure = Object.assign(new Error('TAILCAT_CLI_MISSING raw-private-canary'), code ? { code } : {})
+  vi.spyOn(api.hosts, 'prepareTailcatKey').mockRejectedValue(failure)
+  await show()
+  await button('Use this Mac’s key')
+  expect(dom.container.querySelector('[role="alert"]')?.textContent).toContain(title)
+  expect(dom.container.textContent).not.toContain('raw-private-canary')
+  expect(useAppStore.getState().config?.hosts.find(h => h.id === 'studio')).toEqual(remote)
+  expect([...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === 'Use this Mac’s key')?.disabled).toBe(false)
+  await button('Ask Mote to handle setup')
+  const task = useAppStore.getState().agentSteerQueues['main-ui']![0]!.text
+  expect(task).toContain('"step": "prepare-key"')
+  expect(task).toContain(`"code": ${JSON.stringify(code)}`)
+  expect(task).toContain('"section": "hosts"')
+  expect(task).toContain('"hostId": "studio"')
+  expect(task).not.toContain('raw-private-canary')
+  expect(task).not.toContain('tc-fixture-only-private-address')
+  expect(useAppStore.getState().agentComposerDrafts['member-ui']).toBe('Keep member draft')
 })
 
 it('the shared chooser uses the explicitly selected Mote resource and role revision', async () => {

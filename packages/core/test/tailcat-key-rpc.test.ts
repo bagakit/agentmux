@@ -90,4 +90,6 @@ it('the CLI carries role and optional name only, and help names both defaults', 
   const help = agentMuxCommandHelp('settings.hosts.tailcat-key')
   expect(help).toContain('Usage: amux settings hosts tailcat-key --role <server|client> [--key <name>]')
   expect(help).toMatch(/agentmux-server[\s\S]*agentmux-client[\s\S]*never overwrites/)
+  expect(help).toContain('TAILCAT_CLI_MISSING')
+  expect(help).toContain('RPC_METHOD_NOT_FOUND')
 })

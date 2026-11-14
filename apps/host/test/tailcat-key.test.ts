@@ -76,7 +76,7 @@ it('a failed creation, a missing CLI or an unprepared environment reports unavai
   const missing = await fixture()
   const environment = { ...missing.environment, PATH: join(missing.root, 'home') }
   await expect(prepareTailcatKey({ role: 'client', key: 'agentmux-client' }, { environment }))
-    .rejects.toMatchObject({ code: 'TAILCAT_UNAVAILABLE', message: expect.stringContaining('not installed') })
+    .rejects.toMatchObject({ code: 'TAILCAT_CLI_MISSING', message: expect.stringContaining('PATH') })
 
   const unprepared = await fixture(), prepareEnvironment = vi.fn().mockRejectedValue(Error('login shell'))
   await expect(prepareTailcatKey({ role: 'client', key: 'agentmux-client' }, { environment: unprepared.environment, prepareEnvironment }))

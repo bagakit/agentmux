@@ -7,6 +7,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
 import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner'
 import { sessionInputOperationResult } from '../src/shared/session-input-result'
+import { prepareTailcatKey } from '../../host/src/tailcat-key'
 import type { AgentMuxPreloadApi } from '../src/shared/contracts'
 
 const wire = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invoke: vi.fn() }))
@@ -65,4 +66,19 @@ it('the real preload and Main handler forward user preparation through Desktop t
   const managed = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: desktop.path }, credentials: f.credentials }); cleanup.push(() => managed.dispose())
   await expect(managed.call('settings.hosts.tailcat-key', { role: 'client' })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
   expect(callOriginalCore).toHaveBeenCalledOnce()
+})
+
+it('the original Host spawn failure keeps its machine code through public RPC and Main/preload', async () => {
+  const f = await rpcOwnerFixture(); cleanup.push(f.close)
+  const original = new AgentMuxControlServer({ socketPath: join(f.root, 'missing-cli.sock'),
+    hostTailcatKey: input => prepareTailcatKey(input, { environment: { HOME: f.root, PATH: join(f.root, 'missing-bin') } }) })
+  await original.start(); cleanup.push(() => original.stop())
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: original.path } }); cleanup.push(() => rpc.dispose())
+  const wiring = productionWiring({}, (method: never, params: never) => rpc.call(method, params))
+  wire.invoke.mockImplementation(async (channel, ...args) => {
+    expect(channel).toBe('hosts:prepareTailcatKey')
+    return wiring.handler({ sender: {} }, ...structuredClone(args))
+  })
+  await expect(wire.api!.hosts.prepareTailcatKey({ role: 'client' }))
+    .rejects.toMatchObject({ code: 'TAILCAT_CLI_MISSING', message: expect.stringContaining('PATH') })
 })
