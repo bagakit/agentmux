@@ -193,6 +193,7 @@ import { clampSurveySidebarWidth, SURVEY_SIDEBAR_DEFAULT_WIDTH } from './lib/sur
 import { requireSpaceIconSelection, restoreSpaceIconOverrides, type SpaceIconChoice, type SpaceIconOverrides } from './lib/space-object-appearance'
 import { create } from 'zustand'
 import { createA2AMessageNotifier } from './lib/a2a-message-notifier'
+import { a2aNotificationContext } from './lib/a2a-notification-context'
 import { createVisibleSessionIdsSelector } from './lib/session-visibility'
 
 import { currentExecutorDetection, executorDetectionMatches, executorDetectionKey } from './lib/executor-detection'
@@ -6444,15 +6445,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const visibleA2ARecipients = createVisibleSessionIdsSelector()
     const a2aNotifications = createA2AMessageNotifier({
       listMessages: (reference, options) => api.sessions.listMessages(reference, options),
-      snapshot: () => {
+      current: target => {
         const state = get()
-        return { config: state.config, sessions: state.sessions, agentNames: state.agentNames, timelines: state.timelines,
-          ready: !booting && observing, windowFocused: document.hasFocus(), visibleSessionIds: visibleA2ARecipients(state) }
+        return a2aNotificationContext({ config: state.config, sessions: state.sessions, agentNames: state.agentNames, timelines: state.timelines,
+          ready: !booting && observing, windowFocused: document.hasFocus(), visibleSessionIds: visibleA2ARecipients(state) }, target)
       },
       notify: async input => {
-        const delivery = await api.ui.notifyAgentAttention(input)
-        const notice = notificationDeliveryNotice(delivery)
-        if (notice) get().reportError(notice.message, notice.context)
+        const receipt = { requestId: mintObjectId(), subject: sessionPresentationById(get().sessions).get(input.sessionId)!.control }
+        const delivery = await api.ui.notifyAgentAttention(input).catch(error => ({ status: 'unknown' as const, reason: presentError(error) }))
+        const notice = notificationDeliveryNotice(delivery, receipt)
+        if (observing && notice) get().reportError(notice.message, notice.context)
       }
     })
     const availabilityEpoch = ++startupAvailabilityEpoch
@@ -6466,7 +6468,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
     const disposeSessions = api.sessions.onEvent((event) => {
       if (event.event.type === 'agent-message-changed') {
-        void a2aNotifications.observe(event).catch(error => get().reportError(error))
+        void a2aNotifications.observe(event).catch(error => { if (observing) get().reportError(error) })
       }
       if (booting) {
         enqueueSessionMembershipEvent(pendingSessionEvents, event)
@@ -6528,6 +6530,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const disposeRuntimeSubscriptions = (): void => {
       if (!observing) return
       observing = false
+      a2aNotifications.dispose()
       disposeStartupProgress()
       runtimeSubscriptionCount -= 4
       cancelSessionMembershipResync()

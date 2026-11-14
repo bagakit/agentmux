@@ -1,131 +1,88 @@
 import type { AgentDisplayState, AgentTimelineSnapshot } from '@agentmux/core'
-import type {
-  AgentAttentionNotifyInput,
-  NotificationDelivery,
-  NotificationModeId,
-  SessionSnapshot
-} from '../../../shared/contracts'
+import type { AgentAttentionNotifyInput, NotificationModeId, SessionSnapshot } from '../../../shared/contracts'
 import { composeAttentionBody } from '../../../shared/notification-presentation'
-import { attentionEvents, nextAttentionStates, type AttentionEvent } from './attention-event'
-
-// Turns attention decisions into native notifications.
-//
-// The decision itself lives in attention-event.ts, the body wording in notification-presentation.ts,
-// and the on-screen answer in session-visibility.ts; this only sequences them and remembers what it
-// already announced. It is a plain object rather than a hook so the sequencing — the part that can
-// double-notify or go silent — is testable without a window.
-
-export type AttentionNotifierPorts = {
-  notify(input: AgentAttentionNotifyInput): Promise<NotificationDelivery>
-  // Reported once, the first time the platform refuses. Without this the user is told nothing at all and
-  // silently loses a feature they enabled.
-  onUnsupported?: (reason: string) => void
-  // Reported once, the first time the platform DOWNGRADES the requested mode (e.g. "until I dismiss it"
-  // on macOS, which cannot pin a banner open). Distinct from unsupported: the notification did show, it
-  // just did not stay the way the user asked — so we tell them once instead of pretending it stuck.
-  onDowngraded?: (mode: NotificationModeId) => void
-}
+import { attentionEventFor, type AttentionEvent } from './attention-event'
+import { agentSessionPresentationIndex } from './session-presentation'
 
 export type AttentionReconcileInput = {
   sessions: readonly SessionSnapshot[]
   windowFocused: boolean
   visibleSessionIds: ReadonlySet<string>
-  // The dwell tier the user chose. `off` means raise nothing at all (baseline still advances below).
   mode: NotificationModeId
-  // Whether the user asked for a sound. Resolved from config by the caller — the notifier is handed the
-  // answer rather than the config, for the same reason it is handed `mode`: this object sequences a
-  // decision, it does not make one.
   sound: boolean
-  // Activity timelines by Session id, read to compose the body. Absent entries simply yield a body with
-  // no conversation summary — no second message store is kept for notifications.
   timelines: Readonly<Record<string, AgentTimelineSnapshot>>
 }
-
+export type AttentionNotifierPorts = {
+  snapshot(): AttentionReconcileInput
+  notify(input: AgentAttentionNotifyInput): Promise<unknown>
+}
 export type AttentionNotifier = {
-  /**
-   * Reconcile the latest Sessions against what was last announced, raising notifications for anything
-   * newly worth attention. Returns the events it raised, for tests and for callers that want to log.
-   */
-  reconcile(input: AttentionReconcileInput): Promise<AttentionEvent[]>
-  /** Adopt the current states WITHOUT notifying — used to seed on first projection. */
+  /** Advance the baseline immediately; return only actual delivery attempts, never native success. */
+  reconcile(): Promise<AttentionEvent[]>
   seed(sessions: readonly SessionSnapshot[]): void
+  dispose(): void
 }
-
+type Agent = Extract<SessionSnapshot, { kind: 'agent' }>
+type Baseline = { state: AgentDisplayState; hostId: string; agentSessionId: string }
 const TITLES: Record<AttentionEvent['category'], string> = {
-  done: 'Agent finished',
-  'needs-you': 'Agent needs you',
-  error: 'Agent failed'
+  done: 'Agent finished', 'needs-you': 'Agent needs you', error: 'Agent failed'
+}
+const sameIdentity = (baseline: Baseline, session: Agent) => baseline.hostId === session.hostId && baseline.agentSessionId === session.control.agentSessionId
+const identity = (value: Pick<Baseline, 'hostId' | 'agentSessionId'>) => JSON.stringify([value.hostId, value.agentSessionId])
+function originalAgents(sessions: readonly SessionSnapshot[]): Map<string, Agent> {
+  const originals = new Map<string, Agent>()
+  for (const session of sessions) if (session.kind === 'agent') {
+    const key = identity({ hostId: session.hostId, agentSessionId: session.control.agentSessionId })
+    if (!originals.has(key)) originals.set(key, session)
+  }
+  return originals
+}
+function isVisible(input: AttentionReconcileInput, session: Agent): boolean {
+  return input.windowFocused && (agentSessionPresentationIndex(input.sessions).get(session.control.agentSessionId) ?? [])
+    .some(candidate => candidate.hostId === session.hostId && candidate.control.agentSessionId === session.control.agentSessionId && input.visibleSessionIds.has(candidate.id))
 }
 
-// The AgentDisplayState carried into the notification body, kept beside the label so the body can name
-// both the Agent and its current state. The event is always derived from a Session in the same batch,
-// so the lookup succeeds; the category-shaped fallback only guards the impossible missing case and stays
-// a valid state word rather than inventing one.
-const CATEGORY_FALLBACK_STATE: Record<AttentionEvent['category'], AgentDisplayState> = {
-  done: 'done',
-  'needs-you': 'waiting',
-  error: 'error'
-}
-
-function stateFor(event: AttentionEvent, sessions: readonly SessionSnapshot[]): AgentDisplayState {
-  const session = sessions.find((candidate) => candidate.id === event.sessionId)
-  return session?.status.state ?? CATEGORY_FALLBACK_STATE[event.category]
-}
-
+/** Status decisions stay in attention-event; this owns only transition and delivery sequencing. */
 export function createAttentionNotifier(ports: AttentionNotifierPorts): AttentionNotifier {
-  let previousStates = new Map<string, AgentDisplayState>()
-  // Reported once per notifier, not once per event: a platform that refuses (or downgrades) will do so
-  // every time, and repeating it would turn one honest fact into a stream of noise.
-  let unsupportedReported = false
-  let downgradeReported = false
-
+  let baseline = new Map<string, Baseline>()
+  let disposed = false
+  const advance = (originals: ReadonlyMap<string, Agent>) => {
+    const next = new Map<string, Baseline>()
+    for (const [key, session] of originals) {
+      const before = baseline.get(key)
+      // The baseline entry itself is the transition token. Same-state observations keep it;
+      // A -> B -> A replaces it, so a slow old batch cannot announce the later transition.
+      next.set(key, before && before.state === session.status.state ? before
+        : { state: session.status.state, hostId: session.hostId, agentSessionId: session.control.agentSessionId })
+    }
+    baseline = next
+  }
   return {
-    async reconcile(input) {
-      const events = attentionEvents({
-        sessions: input.sessions,
-        previousStates,
-        visibilityFor: (sessionId) => ({
-          windowFocused: input.windowFocused,
-          sessionVisible: input.visibleSessionIds.has(sessionId)
-        })
-      })
-      // Advance the baseline even when notifications are off, so turning them back on does not replay a
-      // backlog of transitions that happened while the user was not listening.
-      previousStates = nextAttentionStates(input.sessions)
-      // The `off` tier raises nothing. It still advanced the baseline above — reopening does not replay.
-      if (input.mode === 'off' || events.length === 0) return []
-
-      for (const event of events) {
-        const delivery = await ports.notify({
-          sessionId: event.sessionId,
-          title: TITLES[event.category],
-          body: composeAttentionBody({
-            label: event.label,
-            state: stateFor(event, input.sessions),
-            items: input.timelines[event.sessionId]?.items
-          }),
-          mode: input.mode,
-          sound: input.sound
-        })
-        if (delivery.status === 'unsupported') {
-          if (!unsupportedReported) {
-            unsupportedReported = true
-            // Explicit failure: the in-window dot and the Board still carry the fact, so the user keeps
-            // the signal — they just learn the OS channel is unavailable instead of assuming it works.
-            ports.onUnsupported?.(delivery.reason)
-          }
-          continue
-        }
-        if (delivery.presentation === 'downgraded' && !downgradeReported) {
-          downgradeReported = true
-          ports.onDowngraded?.(input.mode)
-        }
+    dispose() { disposed = true; baseline.clear() },
+    seed(sessions) { if (!disposed) advance(originalAgents(sessions)) },
+    async reconcile() {
+      if (disposed) return []
+      const input = ports.snapshot(), originals = originalAgents(input.sessions)
+      const events: { event: AttentionEvent; key: string }[] = []
+      for (const [key, session] of originals) {
+        const event = attentionEventFor({ session, previousState: baseline.get(key)?.state ?? null,
+          visibility: { windowFocused: input.windowFocused, sessionVisible: isVisible(input, session) } })
+        if (event) events.push({ event, key })
       }
-      return events
-    },
-
-    seed(sessions) {
-      previousStates = nextAttentionStates(sessions)
+      // Off, visible and first-sight transitions still advance; reopening never replays them.
+      advance(originals)
+      const candidates = events.map(candidate => ({ ...candidate, transition: baseline.get(candidate.key)! }))
+      const attempted: AttentionEvent[] = []
+      for (const { event, key, transition } of candidates) {
+        if (disposed) break
+        const current = ports.snapshot(), session = agentSessionPresentationIndex(current.sessions).get(transition.agentSessionId)?.find(candidate => sameIdentity(transition, candidate))
+        if (current.mode === 'off' || !session || session.status.state !== transition.state || baseline.get(key) !== transition || isVisible(current, session)) continue
+        attempted.push({ ...event, sessionId: session.id, label: session.label })
+        await ports.notify({ sessionId: session.id, title: TITLES[event.category],
+          body: composeAttentionBody({ label: session.label, state: session.status.state, items: current.timelines[session.id]?.items }),
+          mode: current.mode, sound: current.sound })
+      }
+      return attempted
     }
   }
 }

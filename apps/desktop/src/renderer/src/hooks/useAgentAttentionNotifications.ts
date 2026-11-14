@@ -1,4 +1,5 @@
 import { mintObjectId } from '@agentmux/core/object-id'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useEffect } from 'react'
 import {
   resolveNotificationModeId,
@@ -9,6 +10,7 @@ import { createAttentionNotifier } from '../lib/attention-notifier'
 import { notificationDeliveryNotice } from '../lib/notification-delivery-notice'
 import { summarizeAgentAttention } from '../lib/agent-attention'
 import { createVisibleSessionIdsSelector } from '../lib/session-visibility'
+import { sessionPresentationById } from '../lib/session-presentation'
 import { useAppStore } from '../store'
 
 // Wires the attention decision to the OS.
@@ -21,16 +23,21 @@ export function useAgentAttentionNotifications(): void {
   const reportError = useAppStore((state) => state.reportError)
   const selectSession = useAppStore((state) => state.selectSession)
   useEffect(() => {
+    let disposed = false
+    let windowFocused = document.hasFocus()
+    const visibleSessionIdsForState = createVisibleSessionIdsSelector()
     const notifier = createAttentionNotifier({
-      notify: (input) => api.ui.notifyAgentAttention(input),
-      // Both channels use one typed platform identity; localized prose never drives deduplication.
-      onUnsupported: reason => {
-        const notice = notificationDeliveryNotice({ status: 'unsupported', reason })!
-        reportError(notice.message, notice.context)
+      snapshot: () => {
+        const state = useAppStore.getState()
+        return { sessions: state.sessions, windowFocused, visibleSessionIds: visibleSessionIdsForState(state),
+          mode: resolveNotificationModeId(state.config), sound: resolveNotificationSound(state.config), timelines: state.timelines }
       },
-      onDowngraded: () => {
-        const notice = notificationDeliveryNotice({ status: 'shown', presentation: 'downgraded' })!
-        reportError(notice.message, notice.context)
+      notify: async input => {
+        const receipt = { requestId: mintObjectId(), subject: sessionPresentationById(useAppStore.getState().sessions).get(input.sessionId)!.control }
+        const delivery = await api.ui.notifyAgentAttention(input).catch(error => ({ status: 'unknown' as const, reason: presentError(error) }))
+        const notice = notificationDeliveryNotice(delivery, receipt)
+        if (!disposed && notice) reportError(notice.message, notice.context)
+        return delivery
       }
     })
 
@@ -40,7 +47,6 @@ export function useAgentAttentionNotifications(): void {
 
     // The Store owns attention facts. These values only track the one native side effect, so repeated
     // status observations don't repeat IPC and a failed setter never masquerades as a delivered badge.
-    let disposed = false
     let badgeCount: number | undefined
     let badgeFailureKey: string | undefined
     let publishingBadge = false
@@ -71,40 +77,13 @@ export function useAgentAttentionNotifications(): void {
     }
     void publishBadge()
 
-    let windowFocused = document.hasFocus()
-    const visibleSessionIdsForState = createVisibleSessionIdsSelector()
     const onFocus = (): void => { windowFocused = true }
     const onBlur = (): void => { windowFocused = false }
     window.addEventListener('focus', onFocus)
     window.addEventListener('blur', onBlur)
 
     const reconcile = (): void => {
-      const state = useAppStore.getState()
-      void notifier
-        .reconcile({
-          sessions: state.sessions,
-          windowFocused,
-          // The on-screen answer comes from ONE authority (surface-navigation-visibility, via
-          // session-visibility), the same one the terminal cold-parking and memory-budget recyclers
-          // read. It applies the active workspace, the workbench/board switch, AND the Scratch Topic
-          // projection — so an Agent finishing behind another Topic is correctly seen as off screen and
-          // its completion is announced, instead of being suppressed as "on screen" by a raw read of
-          // `layouts[ws].groups` that never Topic-rewrites the stored active tab.
-          visibleSessionIds: visibleSessionIdsForState(state),
-          // The chosen dwell tier, defaulting when unset. `off` makes reconcile raise nothing while
-          // still advancing its baseline.
-          mode: resolveNotificationModeId(state.config),
-          // Resolved here, next to the mode, from the same config projection: both are answers the
-          // renderer owns, and sending the answer (not the config) keeps main from holding a second
-          // default that could disagree with this one.
-          sound: resolveNotificationSound(state.config),
-          // The body's conversation summary comes from the Activity timelines already in the Store — no
-          // second message record is kept for notifications.
-          timelines: state.timelines
-        })
-        // The reconcile itself must never become a silent failure: it is exactly the kind of
-        // fire-and-forget path the renderer's net was added for, but a local catch says more.
-        .catch((error: unknown) => reportError(error))
+      void notifier.reconcile().catch((error: unknown) => { if (!disposed) reportError(error) })
     }
 
     // Only Session identity/status changes can produce an attention event, so the subscription is scoped
@@ -134,6 +113,7 @@ export function useAgentAttentionNotifications(): void {
 
     return () => {
       disposed = true
+      notifier.dispose()
       unsubscribe()
       window.removeEventListener('focus', onFocus)
       window.removeEventListener('blur', onBlur)
