@@ -1,10 +1,11 @@
 import '../styles/preview-common.css'
 import '../styles/media-player.css'
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { classifyStream, describeMediaFailure, formatClock, liveEdgeState, nextPlaybackRate, resolveMediaKey, seekableWindow, spokenDuration,
   type MediaFailureView, type MediaPlayerAction, type SeekableWindow } from '../engines/media-player'
 import { formatFileBytes } from '../format-file-bytes'
+import { MediaTimeline } from './MediaTimeline'
 
 const PlayIcon = semanticIconComponent('control.media-play')
 const PauseIcon = semanticIconComponent('control.media-pause')
@@ -70,7 +71,6 @@ export function MediaPlayer({ lease, name, onRetry, resume, readStatus }: { leas
   const [fullscreen, setFullscreen] = useState(false)
   const [remaining, setRemaining] = useState(false)
   const [scrub, setScrub] = useState<number | null>(null)
-  const [hover, setHover] = useState<{ fraction: number; time: number } | null>(null)
   const [indicator, setIndicator] = useState<Indicator | null>(null)
   const [announcement, setAnnouncement] = useState<{ key: number; text: string } | null>(null)
   const idle = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -224,15 +224,7 @@ export function MediaPlayer({ lease, name, onRetry, resume, readStatus }: { leas
   const sliderVisible = stream === 'on-demand' || stream === 'live-window'
   const valueText = live ? (edge === 'at-live' ? 'Live' : edge === 'behind' && facts.window ? `${spokenDuration(facts.window.end - shown)} behind live` : 'Live position unknown')
     : `${spokenDuration(shown)} of ${spokenDuration(facts.duration)}`
-
-  const onSliderPointer = (event: ReactPointerEvent<HTMLInputElement>) => {
-    if (!sliderBounds || span <= 0) return
-    const box = event.currentTarget.getBoundingClientRect()
-    const at = box.width > 0 ? Math.min(1, Math.max(0, (event.clientX - box.left) / box.width)) : 0
-    setHover({ fraction: at, time: sliderBounds.start + at * span })
-  }
-  const sliderStyle = { '--media-fill': `${fraction * 100}%`, '--media-buffered': `${bufferedFraction * 100}%`,
-    ...(hover ? { '--media-hover': `${hover.fraction * 100}%` } : {}) } as CSSProperties
+  const land = () => { const element = media.current; if (element && scrub !== null) element.currentTime = scrub; setScrub(null) }
 
   const playing = !facts.paused && !facts.ended
   const PlayGlyph = facts.ended ? ReplayIcon : playing ? PauseIcon : PlayIcon
@@ -269,18 +261,9 @@ export function MediaPlayer({ lease, name, onRetry, resume, readStatus }: { leas
     aria-valuetext={`${Math.round((facts.muted ? 0 : facts.volume) * 100)}%`} value={Math.round((facts.muted ? 0 : facts.volume) * 100)}
     style={{ '--media-fill': `${(facts.muted ? 0 : facts.volume) * 100}%` } as CSSProperties}
     onChange={event => { const element = media.current; if (!element) return; element.muted = false; element.volume = Number(event.currentTarget.value) / 100 }} />
-  const timeline = sliderVisible ? <div className="media-player__timeline">
-    <input className="media-player__slider" type="range" data-media-timeline="" aria-label={live ? 'Live position' : 'Seek'} aria-valuetext={valueText}
-      min={0} max={1000} step={1} value={Math.round(fraction * 1000)} style={sliderStyle}
-      onPointerMove={onSliderPointer} onPointerLeave={() => setHover(null)}
-      onPointerDown={event => { event.currentTarget.setPointerCapture?.(event.pointerId) }}
-      onChange={event => { if (!sliderBounds) return; setScrub(sliderBounds.start + Number(event.currentTarget.value) / 1000 * span) }}
-      onPointerUp={() => { const element = media.current; if (element && scrub !== null) element.currentTime = scrub; setScrub(null) }}
-      onKeyUp={() => { const element = media.current; if (element && scrub !== null) element.currentTime = scrub; setScrub(null) }}
-      onBlur={() => { const element = media.current; if (element && scrub !== null) element.currentTime = scrub; setScrub(null) }} />
-    {hover ? <output className="media-player__bubble" aria-hidden="true" style={{ left: `${hover.fraction * 100}%` }}>
-      {live && facts.window ? `-${formatClock(facts.window.end - hover.time)}` : formatClock(hover.time)}</output> : null}
-  </div> : null
+  const timeline = sliderVisible ? <MediaTimeline key={lease.id} bounds={sliderBounds} fraction={fraction} buffered={bufferedFraction}
+    label={live ? 'Live position' : 'Seek'} valueText={valueText}
+    clock={time => live && facts.window ? `-${formatClock(facts.window.end - time)}` : formatClock(time)} onScrub={setScrub} onLand={land} /> : null
   const liveBadge = live ? <button type="button" className="media-player__live" data-live-edge={edge}
     aria-disabled={edge !== 'behind'} aria-label={edge === 'unknown' ? 'Live position unknown' : edge === 'behind' ? 'Go to live' : 'Playing live'}
     title={edge === 'unknown' ? 'Live position unknown' : edge === 'behind' ? 'Go to live (End)' : 'Live'}
