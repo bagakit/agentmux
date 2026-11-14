@@ -78,3 +78,31 @@ For a concrete visual correction limited to the usage failure notice, `--agent-m
 `--auxiliary-density` covers the phone mixed-history density feedback: three original captured process/reply/input groups go through the existing Core conversation projection and actual MobileApp. It captures 320/390px dark/light and a 390px short screen, touches the original reply, Info provenance and process input/output, and checks 44px targets, summary width, original failure and unconfirmed acceptance, the same editor/reader, drafts and zero input/permission/recovery dispatch. The bounded `auxiliary-spacing`, `auxiliary-touch` and `auxiliary-source-labels` load-time mutants exercise those actual product owners. These private Chromium records do not prove a physical phone, Safari, live Host or installation.
 
 `--mote-composer` 从首帧真实 MobileApp/Device Mote 工作面开始，仅暂缓原 `space.ls`／`space.mote.dialogue.read`，人在原输入框中编辑并保留中间 caret。释放原读取后继续输入，再经实际“新一轮”与“打开主对话”切换，均复用同一编辑器。390 明色、320 暗色、390 矮屏和减少动态效果的完整图包含过渡中间帧；加载前后检查正文位置、宽高、字号与行高。第二个独立 Electron 进程使用原 Device profile，复原同一个 Mote 原文本地址、草稿 A、原 Session 草稿 B 和工作面，不创建或发送 Agent。没有用 prepareMoteStart 的 remount 伪装连续过渡。要求来源为 [Mote 行为](../../../../../docs/design/behavior/motes-and-coordination.md)与[呈现](../../../../../docs/design/presentation/motes-and-coordination.md)。这些是实际编辑器、浏览器与设备持久化的证据；受控 SDK/角色/历史不证明真机输入法、供应商 Native 上下文恢复，采图成功也不代替独立看图。
+
+## Exact first read and independent directory recovery
+
+`node apps/mobile/scripts/fixtures/mobile-product-redesign/capture-ui.mjs --exact-first-read`
+
+This narrow subset mounts the actual MobileApp, Spatial navigation, original
+Conversation/Composer and DeviceWorkface. A controlled SDK projection implements
+`sessionObservation()` and its original `session-observation-state` event; the
+selected exact Session/body remains an independent read. It is not a live Relay,
+user Host, physical phone, native keyboard or package claim.
+
+The five full-screen captures cover a 390px dark pending directory with readable
+original text and a draft; an 844×390 light unavailable directory retaining rows,
+body and a later draft beside an unknown receipt, with nearby recovery open;
+an explicit same-client retry at 390px; a 1024×768 light confirmed empty directory
+retaining the old read frame and unknown intent; and the original workface after
+normal exit and a new private OS process at 390px dark. The empty directory is an
+independent projection observation, not evidence that the original Run ended.
+The one unknown operation comes from one explicit touch on the real Send control
+and a controlled SDK acknowledgement failure. No automatic send, lifecycle,
+input replay or terminal resize is allowed. The second PID must restore the same
+record ID, original Session/Run reference, draft and complete unknown intent.
+
+Both processes use the same temporary HTTP origin and private userData. The
+shared `runProbeProcess` owns each exit receipt. Private compiled files are
+removed by the original capture path; this subset also removes its private
+profile only after both exits are explicitly confirmed. Original PNGs, result
+JSON, source identity and receipt remain for independent review.
