@@ -464,7 +464,7 @@ export type AppConfig = {
   version: typeof CONFIG_VERSION
   hosts: HostConfig[]
   meshMapLocations?: import('./mesh-map-locations').MeshMapLocations
-  meshPeerMapLocations?: import('./mesh-map-locations').MeshMapLocations
+  meshNetworkMapLocations?: import('./mesh-map-locations').MeshMapLocations
   executors: Record<AgentExecutorId, AgentExecutorConfig>
   workspaces: WorkspaceRecord[]
   appearance: AppearanceConfig

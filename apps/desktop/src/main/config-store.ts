@@ -326,7 +326,7 @@ const configSchema = z
     version: z.literal(CONFIG_VERSION),
     hosts: hostsSchema,
     meshMapLocations: meshMapLocationsSchema.optional(),
-    meshPeerMapLocations: meshMapLocationsSchema.optional(),
+    meshNetworkMapLocations: meshMapLocationsSchema.optional(),
     executors: z.record(executorIdSchema, executorSchema),
     workspaces: z.array(workspaceSchema),
     appearance: appearanceSchema,
@@ -682,7 +682,7 @@ function withNotificationDefault(config: AppConfig): { config: AppConfig; added:
 export function authoredConfigCarryOver(raw: unknown): {
   hosts: AppConfig['hosts']
   meshMapLocations: AppConfig['meshMapLocations']
-  meshPeerMapLocations: AppConfig['meshPeerMapLocations']
+  meshNetworkMapLocations: AppConfig['meshNetworkMapLocations']
   workspaces: WorkspaceRecord[]
   executors: AppConfig['executors']
   appearance: AppConfig['appearance'] | undefined
@@ -752,7 +752,7 @@ export function authoredConfigCarryOver(raw: unknown): {
     .object({
       hosts: z.unknown().optional(),
       meshMapLocations: z.unknown().optional(),
-      meshPeerMapLocations: z.unknown().optional(),
+      meshNetworkMapLocations: z.unknown().optional(),
       workspaces: z.unknown().optional(),
       executors: z.unknown().optional(),
       appearance: z.unknown().optional(),
@@ -931,7 +931,7 @@ export function authoredConfigCarryOver(raw: unknown): {
     goalsCommonActions: carried(goalsCommonActionsSchema, outer.success ? outer.data.goalsCommonActions : undefined) as
       AppConfig['goalsCommonActions'] | undefined,
     meshMapLocations: carried(meshMapLocationsSchema, outer.success ? outer.data.meshMapLocations : undefined),
-    meshPeerMapLocations: carried(meshMapLocationsSchema, outer.success ? outer.data.meshPeerMapLocations : undefined),
+    meshNetworkMapLocations: carried(meshMapLocationsSchema, outer.success ? outer.data.meshNetworkMapLocations : undefined),
     // The user's own instructions, like Prompts, survive a retirement reset.
     agentDerivedActions: carried(agentDerivedActionsSchema, outer.success ? outer.data.agentDerivedActions : undefined) as
       AppConfig['agentDerivedActions'] | undefined,
@@ -1065,7 +1065,7 @@ function retiredConfigReplacement(raw: unknown): AppConfig {
     ...(carried.composerShortcuts ? { composerShortcuts: carried.composerShortcuts } : {}),
     ...(carried.goalsCommonActions ? { goalsCommonActions: carried.goalsCommonActions } : {}),
     ...(carried.meshMapLocations ? { meshMapLocations: carried.meshMapLocations } : {}),
-    ...(carried.meshPeerMapLocations ? { meshPeerMapLocations: carried.meshPeerMapLocations } : {}),
+    ...(carried.meshNetworkMapLocations ? { meshNetworkMapLocations: carried.meshNetworkMapLocations } : {}),
     ...(carried.agentDerivedActions ? { agentDerivedActions: carried.agentDerivedActions } : {})
   }
 }

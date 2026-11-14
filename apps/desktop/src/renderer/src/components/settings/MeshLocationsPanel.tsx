@@ -8,7 +8,7 @@ import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
 import { MeshAtlas, projectMeshLocation, unprojectMeshLocation, WORLD_WIDTH, WORLD_HEIGHT } from './MeshGeography'
 
-export type MapAnnotationTarget = { field: 'meshMapLocations' | 'meshPeerMapLocations'; key: string; label: string }
+export type MapAnnotationTarget = { field: 'meshMapLocations' | 'meshNetworkMapLocations'; key: string; label: string }
 export const annotationId = ({field, key}: MapAnnotationTarget) => JSON.stringify([field, key])
 
 export function MeshLocationsPanel({ targets, locations, peerLocations, editing, onEdit }: {

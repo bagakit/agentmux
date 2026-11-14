@@ -12,13 +12,16 @@ import { MeshGeography, placeGeographicNodes, projectMeshLocation } from './Mesh
 import { MeshPorts, MeshSavedClient, MeshSavedHost, SAVED_CLIENT_ID, SavedConnectionDetails, savedConnectionNodes, savedHostId,
   type SavedClientNode, type SavedHostNode } from './MeshSavedConnections'
 
+import { SavedDeviceNode, SavedDeviceDetails, type DeviceNode, type SavedDevice } from './MeshSavedDevices'
+
 type PeerNode = Node<{ peer: MeshTopologyPeer; sharedLocal: boolean; selected: boolean; onPath: boolean; dimmed: boolean; onSelect(id: string): void }, 'meshPeer'>
-type MapNode = PeerNode | SavedHostNode | SavedClientNode
+type MapNode = PeerNode | SavedHostNode | SavedClientNode | DeviceNode
 type MapEdge = Edge<{ sourcePoint?: XYPosition; targetPoint?: XYPosition }>
 const SIZE = { width: 188, height: 64 }
 const COMPACT_PEER_SIZE = { width: 166, height: SIZE.height }
 const MIN_ZOOM = .15
 const MAX_ZOOM = 2
+const NO_DEVICES: readonly SavedDevice[] = []
 const NO_HOSTS: readonly HostConfig[] = []
 function MeshPeer({ data }: NodeProps<PeerNode>) {
   const { peer, sharedLocal } = data
@@ -29,7 +32,7 @@ function MeshPeer({ data }: NodeProps<PeerNode>) {
       <span className="mesh-explorer-node__state">{sharedLocal ? 'Saved links · Relay' : meshPeerState(peer)}{peer.rttMs === null ? '' : ` · ${meshRtt(peer.rttMs)}`}</span>
     </button><MeshPorts type="source" /></>
 }
-const nodeTypes = { meshPeer: MeshPeer, savedClient: MeshSavedClient, savedHost: MeshSavedHost }
+const nodeTypes = { device: SavedDeviceNode, meshPeer: MeshPeer, savedClient: MeshSavedClient, savedHost: MeshSavedHost }
 function MeshArc({ id, sourceX: startX, sourceY: startY, targetX: endX, targetY: endY, data }: EdgeProps<MapEdge>) {
   const { x: sourceX, y: sourceY } = data?.sourcePoint ?? { x: startX, y: startY }
   const { x: targetX, y: targetY } = data?.targetPoint ?? { x: endX, y: endY }
@@ -88,6 +91,7 @@ type MeshMapProps = {
   snapshot?: MeshNetworkInspection | undefined; active?: boolean; actions?: ReactNode; reading?: boolean; stale?: boolean
   onGateway?: (() => void) | undefined; savedTargets?: GatewayTargets | undefined; savedIssue?: string | undefined
   hosts?: readonly HostConfig[]; onDevice?: ((hostId: string) => void) | undefined; localClient?: boolean
+  devices?: readonly SavedDevice[]; onEndpointLocation?: ((id: string) => void) | undefined
   observedLocations?: ReadonlyMap<string, MeshDeviceLocation> | undefined
   onGeographicViewChange?: ((visible: boolean) => void) | undefined
   peerLocations?: MeshMapLocations | undefined; onPeerLocation?: ((peerId: string) => void) | undefined
@@ -96,14 +100,14 @@ type MeshMapProps = {
 export function MeshNetworkMap({ snapshot, active = true, reading = false, stale = false, hosts = NO_HOSTS, onGeographicViewChange, ...props }: MeshMapProps) {
   const [view, setView] = useState<MeshMapView>(props.localClient ? 'geography' : 'connections')
   useEffect(() => { onGeographicViewChange?.(view === 'geography') }, [view, onGeographicViewChange])
-  const [selectedHostId, selectHost] = useState<string>()
+  const [savedId, selectSaved] = useState<string>()
   return <MeshTopologyExplorer key={meshTopologySource(snapshot)} {...props} snapshot={snapshot} active={active}
-    hosts={hosts} view={view} setView={setView} selectedHostId={selectedHostId} selectHost={selectHost} reading={reading} stale={stale} />
+    hosts={hosts} view={view} setView={setView} savedId={savedId} selectSaved={selectSaved} reading={reading} stale={stale} />
 }
-function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, localClient, view, setView, locations, peerLocations, observedLocations, onPeerLocation, onLocation, selectedHostId, selectHost, onGateway, savedTargets, savedIssue, reading, stale }: MeshMapProps & {
+function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, localClient, view, setView, locations, peerLocations, observedLocations, onPeerLocation, onLocation, devices = NO_DEVICES, onEndpointLocation, savedId, selectSaved, onGateway, savedTargets, savedIssue, reading, stale }: MeshMapProps & {
   view: MeshMapView; setView: (view: MeshMapView) => void
   active: boolean; reading: boolean; stale: boolean; hosts: readonly HostConfig[]
-  selectedHostId: string | undefined; selectHost: (id: string | undefined) => void
+  savedId: string | undefined; selectSaved: (id: string | undefined) => void
 }) {
   const model = useMemo(() => meshTopologyModel(snapshot), [snapshot])
   const [selected, select] = useState<MeshTopologySelection>()
@@ -123,24 +127,28 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
       const id = savedHostId(host.id)
       add(id, meshLocationValue(locations, host.id), observedLocations?.get(id))
     }
+    for (const device of devices) add(device.id, meshLocationValue(peerLocations, device.id), observedLocations?.get(device.id))
     if (networkId) for (const peer of model.peers) {
       if (peer.id === sharedPeerId) continue
       const id = `relay:${peer.id}`
       add(id, meshLocationValue(peerLocations, meshPeerLocationKey(networkId, peer.id)), observedLocations?.get(id))
     }
     return result
-  }, [hosts, localClient, locations, peerLocations, observedLocations, networkId, model.peers, sharedPeerId])
+  }, [devices, hosts, localClient, locations, peerLocations, observedLocations, networkId, model.peers, sharedPeerId])
   const points = useMemo(() => new Map(Array.from(deviceLocations, ([id, location]) =>
     [id, projectMeshLocation(location)] as const)), [deviceLocations])
   const geographic = view === 'geography'
   const hasRelayPeers = model.peers.some(peer => !peer.own)
-  const mixed = hosts.length > 0 && hasRelayPeers
+  const savedCount = hosts.length + devices.length
+  const mixed = savedCount > 0 && hasRelayPeers
   const portrait = mixed && narrow
-  const hasMap = localClient || hosts.length > 0 || hasRelayPeers
-  const selectedHost = hosts.find(host => host.id === selectedHostId)
+  const hasMap = localClient || savedCount > 0 || hasRelayPeers
+  const selectedHost = hosts.find(host => savedHostId(host.id) === savedId)
+  const selectedHostId = selectedHost?.id
+  const selectedDevice = devices.find(device => device.id === savedId)
   const [scope, setScope] = useState<'network' | 'selection'>('network')
   const [chosenCategory, setCategory] = useState<'peers' | 'routes' | 'circuits' | 'hosts'>(() => model.routes.length ? 'routes' : 'peers')
-  const category = !hasRelayPeers ? 'hosts' : chosenCategory === 'hosts' && !hosts.length ? 'peers' : chosenCategory
+  const category = !hasRelayPeers ? 'hosts' : chosenCategory === 'hosts' && !hosts.length && !devices.length ? 'peers' : chosenCategory
   const [query, setQuery] = useState(''), [arrangeAttempt, arrange] = useState(0), [arranging, setArranging] = useState(false), [layoutIssue, setLayoutIssue] = useState('')
   const [focusRequest, setFocusRequest] = useState(0), focusedRequest = useRef(0), focusResizeRevision = useRef(0), canvasResizeRevision = useRef(0)
   const requestViewport = useCallback(() => { focusResizeRevision.current = canvasResizeRevision.current; setFocusRequest(value => value + 1) }, [])
@@ -161,8 +169,11 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
   const matchedPeers = new Set([...peers.map(peer => peer.id), ...routes.flatMap(route => route.path), ...circuits.flatMap(circuit => circuit.path)])
   const matchesHost = (host: HostConfig) => matches([host.id, host.label, hostConnectionSummary(host)])
   const matchingHosts = hosts.filter(matchesHost)
-  const choosePeer = useCallback((id: string) => { selectHost(undefined); select({ kind: 'peer', id }); requestViewport() }, [selectHost, requestViewport])
-  const chooseHost = useCallback((id: string) => { select(undefined); selectHost(id); setScope('network'); setCategory('hosts'); requestViewport() }, [selectHost, requestViewport])
+  const matchesDevice = (device: SavedDevice) => matches([device.serverId, ...device.routes.map(route => route.gateway)])
+  const matchingDevices = devices.filter(matchesDevice)
+  const choosePeer = useCallback((id: string) => { selectSaved(undefined); select({ kind: 'peer', id }); requestViewport() }, [selectSaved, requestViewport])
+  const chooseSaved = useCallback((id: string) => { select(undefined); selectSaved(id); setScope('network'); setCategory('hosts'); requestViewport() }, [selectSaved, requestViewport])
+  const chooseHost = useCallback((id: string) => chooseSaved(savedHostId(id)), [chooseSaved])
   const focused = hasRelayPeers && scope === 'selection' && path.length > 0
   // MeshPathsPane obtains this observation directly from the original local Core.
   const peerNodeId = (id: string) => id === sharedPeerId ? SAVED_CLIENT_ID : `relay:${id}`
@@ -172,6 +183,11 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
   const visiblePeers = hasRelayPeers ? model.peers : model.peers.filter(peer => peer.id === sharedPeerId)
   const projectedNodes: MapNode[] = [
     ...savedNodes.filter(node => node.type !== 'savedClient' || !sharedPeerId),
+    ...devices.map((device, index): DeviceNode => ({
+      id: device.id, type: 'device', ...COMPACT_PEER_SIZE, selectable: false,
+      position: { x: index % 3 * 190, y: 300 + Math.floor(index / 3) * 86 },
+      data: { device, selected: savedId === device.id, dimmed: focused || !matchesDevice(device), choose: chooseSaved },
+    })),
     ...visiblePeers.map((peer, index): PeerNode => {
       const id = peerNodeId(peer.id)
       const sharedLocal = id === SAVED_CLIENT_ID
@@ -192,11 +208,12 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
         return { ...measured, ...node }
       })
     })
-  }, [snapshot, hosts, points, narrow, selected, selectedHostId, scope, query, geographic, setNodes, choosePeer, chooseHost, sharedPeerId])
+  }, [snapshot, hosts, devices, points, narrow, selected, savedId, scope, query, geographic, setNodes, choosePeer, chooseHost, sharedPeerId])
   const visiblePeerIds = new Set(visiblePeers.map(peer => peer.id))
   const links = [
     ...model.edges.filter(edge => visiblePeerIds.has(edge.source) && visiblePeerIds.has(edge.target))
       .map(edge => ({ id: `relay:${edge.id}`, source: peerNodeId(edge.source), target: peerNodeId(edge.target), saved: false, selected: pathEdges.has(edge.id) })),
+    ...devices.map(device => ({ id: device.id, source: SAVED_CLIENT_ID, target: device.id, saved: true, selected: savedId === device.id })),
     ...hosts.map(host => ({ id: savedHostId(host.id), source: SAVED_CLIENT_ID, target: savedHostId(host.id), saved: true, selected: selectedHostId === host.id })),
   ]
   const topologyKey = JSON.stringify([projectedNodes.map(node => node.id), links.map(link => link.id).sort()])
@@ -297,11 +314,11 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
   const currentPeer = selected?.kind === 'peer' ? byId.get(selected.id) : undefined
   const currentRoute = selected?.kind === 'route' ? model.routes.find(route => route.serverId === selected.id) : undefined
   const currentCircuit = selected?.kind === 'circuit' ? model.circuits.find(circuit => circuit.circuitId === selected.id) : undefined
-  const count = category === 'peers' ? peers.length : category === 'routes' ? routes.length : category === 'circuits' ? circuits.length : matchingHosts.length
-  function choose(next: MeshTopologySelection) { selectHost(undefined); select(next); requestViewport() }
+  const count = category === 'peers' ? peers.length : category === 'routes' ? routes.length : category === 'circuits' ? circuits.length : matchingHosts.length + matchingDevices.length
+  function choose(next: MeshTopologySelection) { selectSaved(undefined); select(next); requestViewport() }
   function showPeer(id: string) { setCategory('peers'); choose({ kind: 'peer', id }) }
   const directory = <div className="mesh-explorer__directory" data-list-view={view === 'list' || undefined}>
-        <nav className="mesh-explorer__categories" aria-label="Network objects">{([['peers', 'Peers', model.peers.length], ['routes', 'Endpoints', model.routes.length], ['circuits', 'Adopted circuits', model.circuits.length], ...(hosts.length ? [['hosts', 'Saved connections', hosts.length] as const] : [])] as const).filter(([key]) => key === 'hosts' || hasRelayPeers).map(([key, name, size]) => <button type="button" key={key} aria-pressed={category === key} onClick={() => setCategory(key)}>{name}<span>{size}</span></button>)}</nav>
+        <nav className="mesh-explorer__categories" aria-label="Network objects">{([['peers', 'Peers', model.peers.length], ['routes', 'Endpoints', model.routes.length], ['circuits', 'Adopted circuits', model.circuits.length], ...(hosts.length || devices.length ? [['hosts', 'Saved connections', hosts.length + devices.length] as const] : [])] as const).filter(([key]) => key === 'hosts' || hasRelayPeers).map(([key, name, size]) => <button type="button" key={key} aria-pressed={category === key} onClick={() => setCategory(key)}>{name}<span>{size}</span></button>)}</nav>
         {needle ? <p className="mesh-explorer__search-result" role="status">{count} match{count === 1 ? '' : 'es'} · <button type="button" onClick={() => setQuery('')}>Clear search</button></p> : null}
         <ul className={`mesh-explorer__objects ${category === 'peers' ? 'mesh-peer-list' : category === 'routes' ? 'mesh-route-list' : 'mesh-circuit-list'}`}>
           {category === 'peers' ? peers.map(peer => <li key={peer.id}><button type="button" data-mesh-object="peer" aria-pressed={selected?.kind === 'peer' && selected.id === peer.id} onClick={() => choose({ kind: 'peer', id: peer.id })}><span><strong>{meshPeerLabel(peer)}</strong><code>{shortMeshIdentity(peer.id)}</code></span><span>{meshPeerState(peer)}<small>{meshRtt(peer.rttMs)}</small></span></button></li>) : null}
@@ -309,11 +326,14 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
           {category === 'hosts' ? matchingHosts.map(host => <li key={host.id}><button type="button" data-mesh-object="host" aria-pressed={selectedHostId === host.id} onClick={() => chooseHost(host.id)}>
             <span><strong>{host.label}</strong><small>{hostConnectionSummary(host)}</small></span><span>Saved route</span>
           </button></li>) : null}
+          {category === 'hosts' ? matchingDevices.map(device => <li key={device.id}><button type="button" data-mesh-object="device" aria-pressed={savedId === device.id} onClick={() => chooseSaved(device.id)}>
+            <span><strong>{device.serverId}</strong><small>{device.routes.map(route => route.gateway).join(', ')}</small></span><span>Device endpoint</span>
+          </button></li>) : null}
           {category === 'circuits' ? circuits.map(circuit => <li key={circuit.circuitId}><button type="button" data-mesh-object="circuit" aria-pressed={selected?.kind === 'circuit' && selected.id === circuit.circuitId} onClick={() => choose({ kind: 'circuit', id: circuit.circuitId })}><span><strong>{shortMeshIdentity(circuit.serverId)}</strong><small>{shortMeshIdentity(circuit.circuitId)}</small></span><span>Adopted<small>{Math.max(0, circuit.path.length - 1)} network hops</small></span></button></li>) : null}
         </ul>
         {!count ? <p className="mesh-explorer__directory-empty">{needle ? 'No matching objects in this category. Other network objects are unchanged.' : category === 'circuits' ? 'No adopted circuits are currently reported.' : category === 'routes' ? 'No endpoint route is currently advertised.' : category === 'hosts' ? 'No saved connections.' : 'No network peers are currently reported.'}</p> : null}
       </div>
-  const selectedPoint = selectedHost ? deviceLocations.get(savedHostId(selectedHost.id))
+  const selectedPoint = selectedDevice ? deviceLocations.get(selectedDevice.id) : selectedHost ? deviceLocations.get(savedHostId(selectedHost.id))
     : currentPeer ? deviceLocations.get(peerNodeId(currentPeer.id)) : undefined
   let locationDescription = ''
   if (selectedPoint) {
@@ -322,11 +342,12 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
     else {
       const source = { node: 'Reported by node', site: 'Registered site', 'public-egress': 'Estimated from public egress' }[selectedPoint.source]
       const accuracy = selectedPoint.accuracyKm === undefined ? '' : ` · ±${selectedPoint.accuracyKm} km`
-      locationDescription = `${selectedPoint.label} · ${source}${accuracy}`
+      locationDescription = `${selectedPoint.label || coordinates} · ${source}${accuracy}`
     }
   }
-  const inspector = selectedHost ? <SavedConnectionDetails host={selectedHost} onDevice={onDevice} onLocation={onLocation}
-    location={locationDescription} onClear={() => selectHost(undefined)} />
+  const inspector = selectedDevice ? <SavedDeviceDetails key={selectedDevice.id} device={selectedDevice} location={locationDescription}
+    edit={onEndpointLocation && (() => onEndpointLocation(selectedDevice.id))} clear={() => selectSaved(undefined)} /> : selectedHost ? <SavedConnectionDetails host={selectedHost} onDevice={onDevice} onLocation={onLocation}
+    location={locationDescription} onClear={() => selectSaved(undefined)} />
     : selected ? <aside className="mesh-explorer__detail" aria-label="Selected network object">
         <header><span className="mesh-explorer__eyebrow">{selected.kind === 'peer' ? 'NETWORK PEER' : selected.kind === 'route' ? 'AVAILABLE ROUTE' : 'ADOPTED CIRCUIT'}</span><Button type="button" onClick={() => select(undefined)}>Clear</Button></header>
         <h4>{currentPeer ? meshPeerLabel(currentPeer) : shortMeshIdentity(currentRoute?.serverId ?? currentCircuit?.serverId ?? selected.id)}</h4>
@@ -352,13 +373,13 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
     ? `${model.peers.length} Relay peers · ${model.edges.length} reciprocal link${model.edges.length === 1 ? '' : 's'} · ${model.routes.length} reachable endpoint${model.routes.length === 1 ? '' : 's'}`
     : networkState
   const legend = hasMap ? <span className="mesh-explorer__legend" aria-label="Link styles">
-    {hosts.length ? <><i className="mesh-explorer__legend-saved" aria-hidden="true" /> Saved connection</> : null}
+    {hosts.length || devices.length ? <><i className="mesh-explorer__legend-saved" aria-hidden="true" /> Saved connection</> : null}
     {hasRelayPeers ? <><i aria-hidden="true" /> Relay link{path.length > 1 ? <><i className="mesh-explorer__legend-selected" aria-hidden="true" /> Selected path</> : null}</> : null}
   </span> : null
-  const summary = [hosts.length ? `${hosts.length} saved route${hosts.length === 1 ? '' : 's'}` : '', (stale ? 'Last confirmed · ' : '') + relaySummary].filter(Boolean).join(' · ')
+  const summary = [savedCount ? `${savedCount} saved route${savedCount === 1 ? '' : 's'}` : '', (stale ? 'Last confirmed · ' : '') + relaySummary].filter(Boolean).join(' · ')
   return <section className="mesh-network-map mesh-explorer" aria-label="Observed Mesh topology" data-mesh-topology data-mesh-overview={onGateway ? true : undefined}>
     <header className="mesh-explorer__header"><div className="mesh-explorer__heading"><h3>Network map{snapshot?.network?.networkId ? <small>{snapshot.network.networkId}</small> : null}</h3><p>{localClient ? 'From this device · ' : ''}{summary}</p></div>{actions}</header>
-    {hasMap ? <div className="mesh-explorer__toolbar"><label className="mesh-explorer__search"><TextInput aria-label={hosts.length ? hasRelayPeers ? 'Find a device, peer or path' : 'Find a device' : 'Find a peer, endpoint or circuit'} value={query} onChange={event => setQuery(event.target.value)} placeholder={hosts.length ? hasRelayPeers ? 'Find a device, peer or path' : 'Find a device' : 'Find a peer or path'} /></label>
+    {hasMap ? <div className="mesh-explorer__toolbar"><label className="mesh-explorer__search"><TextInput aria-label={savedCount ? hasRelayPeers ? 'Find a device, peer or path' : 'Find a device' : 'Find a peer, endpoint or circuit'} value={query} onChange={event => setQuery(event.target.value)} placeholder={savedCount ? hasRelayPeers ? 'Find a device, peer or path' : 'Find a device' : 'Find a peer or path'} /></label>
       <div className="mesh-explorer__segments" role="group" aria-label="Network view">
         {([['geography', 'Geography'], ['connections', 'Connections'], ['list', 'List']] as const).map(([mode, label]) =>
           <button type="button" key={mode} aria-pressed={view === mode} onClick={() => setView(mode)}>{label}</button>)}
@@ -370,7 +391,7 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
       {view !== 'list' && legend ? <div className="mesh-explorer__map-key" data-geographic={geographic || undefined}>{legend}
         <span>{geography ? `${geography.marks.length} located · ${geography.unknown} location unknown` : 'Connection diagram'}</span></div> : null}
       {hasMap ? <div className="mesh-explorer__graph" hidden={view === 'list'}>
-        <div ref={canvas} className="mesh-explorer__canvas" data-mixed={mixed || undefined} data-saved={hosts.length > 0 || undefined} data-narrow={narrow || undefined}
+        <div ref={canvas} className="mesh-explorer__canvas" data-mixed={mixed || undefined} data-saved={savedCount > 0 || undefined} data-narrow={narrow || undefined}
           data-geographic={geographic || undefined} aria-label="Network relationship canvas">
           <ReactFlow<MapNode, MapEdge> nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onInit={value => { instance.current = value; if (geographic) requestViewport() }}
           onNodesChange={changes => { if (changes.some(change => change.type === 'position' && change.dragging)) cancelLayout.current?.(); for (const change of changes) if (change.type === 'position' && change.position && !geographic) positions.set(change.id, change.position); onNodesChange(changes) }}

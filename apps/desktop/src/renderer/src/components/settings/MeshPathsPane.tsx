@@ -5,6 +5,7 @@ import type { HostConfig } from '../../../../shared/contracts'
 import { meshPeerLocationKey, type MeshMapLocations } from '../../../../shared/mesh-map-locations'
 import { api } from '../../lib/api'
 import { useMeshDeviceLocations } from './use-mesh-device-locations'
+import { savedMeshDevices } from './MeshSavedDevices'
 import { MeshNetworkMap } from './MeshNetworkMap'
 import { MeshLocationsPanel, type MapAnnotationTarget } from './MeshLocationsPanel'
 import { meshPeerLabel, meshTopologyModel } from './mesh-topology'
@@ -20,7 +21,9 @@ export function MeshPathsPane({ active, hosts, locations, onGateway, onDevice }:
   onDevice: (hostId: string) => void
 }) {
   const [editingLocation, editLocation] = useState<MapAnnotationTarget>()
-  const peerLocations = useAppStore(state => state.config?.meshPeerMapLocations)
+  const peerLocations = useAppStore(state => state.config?.meshNetworkMapLocations)
+  const links = useAppStore(state => state.meshDeviceLinks.saved)
+  const devices = useMemo(() => savedMeshDevices(links), [links])
   const locationEditor = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (active && editingLocation !== undefined) locationEditor.current?.scrollIntoView({ block: 'nearest' })
@@ -55,13 +58,14 @@ export function MeshPathsPane({ active, hosts, locations, onGateway, onDevice }:
   const savedHosts = useMemo(() => hosts.filter(host => host.kind === 'ssh'), [hosts])
   const networkId = snapshot?.network?.networkId
   const targets = useMemo((): MapAnnotationTarget[] => [
+    ...devices.map(device => ({ field: 'meshNetworkMapLocations' as const, key: device.id, label: device.serverId })),
     ...hosts.map(host => ({ field: 'meshMapLocations' as const, key: host.id, label: host.label })),
     ...(networkId ? meshTopologyModel(snapshot).peers.filter(peer => !peer.own).map(peer => ({
-      field: 'meshPeerMapLocations' as const, key: meshPeerLocationKey(networkId, peer.id), label: meshPeerLabel(peer),
+      field: 'meshNetworkMapLocations' as const, key: meshPeerLocationKey(networkId, peer.id), label: meshPeerLabel(peer),
     })) : []),
-  ], [hosts, snapshot, networkId])
+  ], [devices, hosts, snapshot, networkId])
   const editHost = (id: string) => editLocation(targets.find(t => t.field === 'meshMapLocations' && t.key === id))
-  const editPeer = (id: string) => editLocation(targets.find(t => t.field === 'meshPeerMapLocations' && networkId && t.key === meshPeerLocationKey(networkId, id)))
+  const editPeer = (id: string) => editLocation(targets.find(t => t.field === 'meshNetworkMapLocations' && networkId && t.key === meshPeerLocationKey(networkId, id)))
   const actions = <><Button type="button" aria-expanded={editingLocation !== undefined} onClick={() => editHost('local')}>Device locations</Button>
     <Button type="button" disabled={busy} onClick={() => setRevision(value => value + 1)}>{busy ? 'Reading…' : 'Refresh network'}</Button></>
   return <section className="mesh-paths-pane" aria-label="Mesh network overview" data-settings-field="mesh-paths">
@@ -69,7 +73,8 @@ export function MeshPathsPane({ active, hosts, locations, onGateway, onDevice }:
     <div ref={locationEditor} hidden={editingLocation === undefined}>
       <MeshLocationsPanel targets={targets} peerLocations={peerLocations} locations={locations} editing={editingLocation} onEdit={editLocation} />
     </div>
-    <MeshNetworkMap onGeographicViewChange={setGeographicVisible} observedLocations={observedLocations} snapshot={snapshot} active={active && visible} actions={actions} localClient
+    <MeshNetworkMap devices={devices} onEndpointLocation={id => editLocation(targets.find(t => t.field === 'meshNetworkMapLocations' && t.key === id))}
+      onGeographicViewChange={setGeographicVisible} observedLocations={observedLocations} snapshot={snapshot} active={active && visible} actions={actions} localClient
       hosts={savedHosts} locations={locations} onLocation={editHost} onPeerLocation={editPeer} peerLocations={peerLocations} onDevice={onDevice} onGateway={onGateway} savedTargets={savedTargets} savedIssue={savedIssue} reading={busy && !snapshot} stale={Boolean(issue && snapshot)} />
   </section>
 }

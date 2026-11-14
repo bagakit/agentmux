@@ -41,7 +41,7 @@ type PreferenceDomain = {
 
 const preferenceDomains = new Map<string, PreferenceDomain>(Object.entries({
   meshMapLocations: { resolve: value => value ?? {}, merge: 'authored' },
-  meshPeerMapLocations: { resolve: value => value ?? {}, merge: 'authored' },
+  meshNetworkMapLocations: { resolve: value => value ?? {}, merge: 'authored' },
   a2a: { resolve: value => ({ notifications: resolveA2ANotifications({ a2a: value as AppConfig['a2a'] }) }), merge: 'authored' },
   automation: { resolve: value => resolveAutomationPreferences(value as AutomationPreferences | undefined), merge: 'authored' },
   'browser.agentControl': { resolve: value => resolveBrowserAgentControl(value as Partial<BrowserAgentControlPreferences> | undefined), merge: 'authored' },
