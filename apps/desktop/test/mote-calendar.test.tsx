@@ -662,3 +662,37 @@ it('the floating page bar opens its original calendar in place and restores the 
   expect(api.schedule.create).not.toHaveBeenCalled()
   await render(false)
 })
+
+it('combines calendar filters across views and restores original arrangements without changing them', async () => {
+  const sourceId = 'mote-main:' + createHash('sha256').update(JSON.stringify({ hostId: scope.workspace.hostId, moteId: topic.id })).digest('hex')
+  await owner([
+    saved('care', { managedSource: { sourceId, revision: 'original' }, prompt: '巡检' }),
+    saved('manual', { prompt: 'Mote heartbeat 巡检' }),
+    saved('paused', { status: 'paused', prompt: 'Pause for approval 巡检' }),
+    saved('ended', { status: 'stopped', prompt: 'Ended patrol' })
+  ])
+  await dom.render(<MoteCalendar scope={scope} reference={reference} active />)
+  const cell = (id: string) => dom.container.querySelector('[data-calendar-schedule-id="' + id + '"]')
+  const ids = () => [...dom.container.querySelectorAll<HTMLElement>('[data-schedule-id]')].map(row => row.dataset.scheduleId).sort()
+  await vi.waitFor(() => expect(cell('care')).toBeTruthy())
+  await dom.click('[aria-label="Hide heartbeats"]')
+  expect(cell('care')).toBeNull()
+  expect(cell('manual')).toBeTruthy()
+  await dom.click('[aria-label="Search and filter arrangements"]')
+  await edit('Search arrangements', '巡检')
+  await button('Upcoming')
+  await vi.waitFor(() => expect(ids()).toEqual(['manual', 'paused']))
+  await edit('Arrangement status', 'paused')
+  expect(ids()).toEqual(['paused'])
+  await edit('Search arrangements', 'nothing matches')
+  expect(ids()).toEqual([])
+  expect(dom.container.querySelector('.mote-calendar__filter-empty')?.textContent).toContain('No matching arrangements')
+  await button('Clear filters')
+  expect(ids()).toEqual(['care', 'manual', 'paused'])
+  await edit('Arrangement status', 'stopped')
+  expect(ids()).toEqual(['ended'])
+  expect(api.schedule.create).not.toHaveBeenCalled()
+  expect(api.schedule.pause).not.toHaveBeenCalled()
+  expect(api.schedule.resume).not.toHaveBeenCalled()
+  expect(api.schedule.cancel).not.toHaveBeenCalled()
+})
