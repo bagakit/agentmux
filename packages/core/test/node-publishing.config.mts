@@ -8,9 +8,16 @@ if (!evidence)
     throw Error('Explicit private Node evidence directory required');
 mkdirSync(evidence, { recursive: true });
 const require = createRequire(path.resolve(root, 'package.json'));
+const withoutLocationConsent = process.env.AGENTMUX_NODE_TEST_MUTATION === 'ignore-location-consent';
 export default { root, cacheDir: path.join(evidence, 'cache'), resolve: { alias: [candidateAlias(root, { source: true })] }, plugins: [{ name: 'node-current-source', enforce: 'pre', resolveId(source: string, importer?: string) { if (source.startsWith('.') || source.startsWith('/') || source.startsWith('\0') || source.startsWith('@agentmux/') || source.startsWith('node:') || source === 'vitest')
                 return; try {
                 return require.resolve(source, { paths: importer ? [path.dirname(importer), root] : [root] });
             }
             catch { } }, transform(code: string, id: string) { if (!id.startsWith(root + '/') || id.includes('/node_modules/') || id.includes('?'))
-                return; const hash = (s: string) => createHash('sha256').update(s).digest('hex'); const loaded = code; appendFileSync(path.join(evidence, 'consumed.jsonl'), JSON.stringify({ path: path.relative(root, id), source: hash(readFileSync(id, 'utf8')), loaded: hash(loaded), mutated: loaded !== code }) + '\n'); } }], test: { include: ['packages/core/test/node-location.test.ts', 'packages/core/test/node-publishing.test.ts'], setupFiles: [path.join(root, 'vitest.setup.ts')], maxWorkers: 1, fileParallelism: false, passWithNoTests: false, testTimeout: 20000 } };
+                return; const hash = (s: string) => createHash('sha256').update(s).digest('hex'); let loaded = code;
+                if (withoutLocationConsent && id === path.join(root, 'packages/core/src/node-location-source.ts')) {
+                    const check = 'if (!policy?.estimatePublicEgress) return null';
+                    if (code.split(check).length !== 2) throw Error('The location consent mutation must hit exactly one consumed source line');
+                    loaded = code.replace(check, 'if (false) return null');
+                }
+                appendFileSync(path.join(evidence, 'consumed.jsonl'), JSON.stringify({ path: path.relative(root, id), source: hash(readFileSync(id, 'utf8')), loaded: hash(loaded), mutated: loaded !== code }) + '\n'); if (loaded !== code) return { code: loaded, map: null }; } }], test: { include: ['packages/core/test/node-location.test.ts', 'packages/core/test/node-publishing.test.ts'], setupFiles: [path.join(root, 'vitest.setup.ts')], maxWorkers: 1, fileParallelism: false, passWithNoTests: false, testTimeout: 20000 } };
