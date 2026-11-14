@@ -2,7 +2,7 @@ import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mj
 import { flushSync } from 'react-dom'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api, PREVIEW_WORKSPACE_PATH } from '../../../src/renderer/src/lib/api'
-import { applyAppAppearance } from '../../../src/renderer/src/lib/app-appearance'
+import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import type { AgentDisplayState, ContinuousProgressLoop } from '@agentmux/core'
 
 // The existing preview resource is relative; actual Workbench Space addressing
@@ -18,6 +18,7 @@ api.sessions.snapshot = async () => {
   const snapshot = await previewSnapshot()
   return { ...snapshot, sessions: snapshot.sessions.map(session => session.workspacePath === PREVIEW_WORKSPACE_PATH ? { ...session, workspacePath: previewDirectory } : session) }
 }
+mountThemeRuntime(window, { themeId: 'graphite', appAppearance: 'dark' })
 await import('../result-ready-input-continuity/entry')
 const base = (window as any).resultReady
 api.continuousProgress.list = async (control) => {
@@ -54,7 +55,7 @@ const probe = {
       ? { ...session, status: { state: display, source: 'native-hook' as const, observedAt: Date.now() } } : session) })))
   },
   draft(text: string) { flushSync(() => useAppStore.getState().setAgentComposerDraft(base.sessionId, text)) },
-  appearance(mode: 'dark' | 'light') { applyAppAppearance(mode) },
+  appearance(mode: 'dark' | 'light') { updateThemeSelection({ themeId: 'graphite', appAppearance: mode }) },
   facts() { return { ...base.facts(), queues: useAppStore.getState().agentSteerQueues, receipts: useAppStore.getState().noticeReadReceipts } },
   terminal: base.terminal
 }
