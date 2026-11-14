@@ -350,6 +350,16 @@ promise later autonomous work only when the capability and its actual arrangemen
 <!-- amux:generated command:space.mote.preferences.read -->
 <!-- amux:generated command:space.mote.preferences.save -->
 
+Discover this exact Mote with `space inspect --space SPACE_ID --presentation`. Its
+`motePresentation.content` provides `zoneId`, `hostId`, `workspaceId` and `workspacePath`;
+construct `target` as `{spaceId,zoneId:content.zoneId,expectedResource:{hostId:content.hostId,
+workspaceId:content.workspaceId,workspacePath:content.workspacePath}}`. Preserve missing content
+as unknown; do not substitute execution cwd, physical home paths or current focus.
+Use `includeChoices:false` for original settings only; `choices:null` means discovery was not
+requested. Use `includeChoices:'executors'` or `'locations'` for independent source reads; unrequested
+source fields remain null. A ready read's source-specific issue does not revoke its saved settings.
+A changed choice is validated by its original owner; unchanged preferences need no display occurrence.
+
 Read saved quick settings with the exact target and `kind: "quick"`. Preserve the original
 source, baseline and operation. The default presence policy is enabled with `intervalMs`
 1800000 (30 minutes); that policy alone does not prove an Agent is online or a heartbeat

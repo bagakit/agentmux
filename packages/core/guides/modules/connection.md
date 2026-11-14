@@ -268,6 +268,17 @@ default save retain separate receipts; missing original File acknowledgement rem
 
 For private Mote chat use space mote chat configure/inspect/history/audience/allocate/diagnose --input FILE|-.
 New ordinary private messages from the bot's exact creator enter the Mote's logical Main.
+A native creator qualifies only Main routing and unlimited creator access. If creator is null,
+private chat may still be enabled for explicitly authorized finite guests; the default allowance
+of zero admits none. A positive initial allowance or a trusted exact-person allocation authorizes
+only that guest's existing isolated lane. Do not infer Main identity from the first sender, token
+holder, display name or an ordinary input grant. Current creator qualification applies to intake,
+the requested audience page and exact-person allocation, preserving usage and frozen admissions.
+A later confirmed creator becomes unlimited without resetting usage. If the original application
+confirms a different creator, a former unlimited person uses the current finite guest default,
+with prior usage retained; existing finite allocations stay unchanged. Unknown extra observation
+keeps the same application's confirmed creator. Each adapter's receive, profile and reply effects
+remain separate observations; missing native creator support does not imply all abilities are absent.
 Guests keep their independent private lanes. Without Main, the original message waits for setup;
 no separate creator Agent is created. Existing admitted messages keep their original recipient.
 Main's input-only relationship does not publish its ordinary output or grant a native API identity.
