@@ -153,16 +153,16 @@
 .composer-queued-editor { display: grid; gap: 8px; min-width: 0; }
 .composer-queued-editor__heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .composer-queued-editor__heading label { font-size: var(--fs-meta); font-weight: 600; color: var(--text); }
-.composer-queued-editor textarea { box-sizing: border-box; width: 100%; min-width: 0; max-height: 132px; margin: 0; padding: 8px 10px; resize: vertical; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text); font: inherit; font-size: var(--fs-body); line-height: 1.5; overscroll-behavior: contain; }
-.composer-queued-editor textarea:focus { outline: 1px solid var(--focus-line); outline-offset: -1px; }
 .composer-queued-editor p { margin: 0; color: var(--amber-text); font-size: var(--fs-meta); overflow-wrap: anywhere; }
-.composer-queued-editor__footer { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
-.composer-queued-editor__actions { display: flex; gap: 4px; margin-inline-start: auto; }
-.composer-queued-editor__actions > button { display: inline-flex; align-items: center; justify-content: center; min-height: 28px; padding: 0 10px; border-radius: var(--radius-sm); font: inherit; white-space: nowrap; }
-.composer-queued-editor__save { border: 1px solid var(--green-line); background: var(--green-bg); color: var(--green-text); cursor: pointer; }
-.composer-queued-editor__save:hover:enabled { background: var(--green-bg-hover); }
-.composer-queued-editor__save:disabled { opacity: .45; cursor: default; }
-.composer-queued-editor__save:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 1px; }
+.composer-edit-footer { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); }
+.composer-edit-footer__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-2); margin-inline-start: auto; }
+.composer-edit-footer .agent-button { min-height: 28px; padding: 0 10px; font-size: var(--fs-meta); white-space: nowrap; box-shadow: none; }
+.composer-edit-footer .primary-button { border: 1px solid var(--green-line); background: var(--green-bg); color: var(--green-text); }
+.composer-edit-footer .primary-button:hover:enabled { background: var(--green-bg-hover); }
+.composer-edit-footer :is(.small-button, .danger-button) { background: transparent; color: var(--text-2); font-weight: 500; }
+.composer-edit-footer .small-button:hover:enabled { background: var(--surface-3); color: var(--text); }
+.composer-edit-footer .danger-button:hover:enabled { background: var(--red-bg); color: var(--red-text); }
+.composer-edit-footer .agent-button:active:enabled { box-shadow: inset 0 1px 2px var(--scrim-1); }
 /* Whole-card distance uses cached layout bounds, never a pointer geometry walk. */
 @media (hover: hover) and (pointer: fine) {
   .composer-pending__card {
@@ -185,7 +185,7 @@
 /* The positioned surface bounds the combined edit card and existing notice. */
 .composer-pending[data-editing='true'] > .composer-pending__cards { max-height: none; }
 .composer-pending__card[data-editing='true'] { height: auto; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 10px 12px; border-radius: var(--radius); background: var(--surface-2); box-shadow: var(--elev-2); }
-.composer-pending__card[data-editing='true'] textarea { resize: none; }
+.composer-pending__card[data-editing='true'] .ui-input--compact-editor { resize: none; }
 .composer-pending__card[data-editing='true'] > .composer-pending__retry { grid-area: auto; }
 .composer-queued-editor .composer-pending__more:disabled { opacity: 1; color: var(--text-3); cursor: default; }
 

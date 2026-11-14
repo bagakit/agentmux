@@ -1,4 +1,6 @@
 import { ComposerTextarea } from '@agentmux/client-ui/input'
+import { Button } from '@agentmux/client-ui/components/Button'
+import { ComposerEditFooter } from '@agentmux/client-ui/components/ComposerEditFooter'
 import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -39,15 +41,12 @@ export function ComposerQueuedMessageEditor({ entry, onSave, onCancel, status, t
       <label htmlFor={fieldId}>{editorLabel}</label>
       {status}
     </div>
-    <ComposerTextarea id={fieldId} ref={textareaRef} autoFocus aria-label={editorLabel} rows={3} value={text} onValueChange={setText} readOnly={saving} />
+    <ComposerTextarea variant="compact" id={fieldId} ref={textareaRef} autoFocus aria-label={editorLabel} rows={3} value={text} onValueChange={setText} readOnly={saving} />
     {!entry.editable ? <p role="status">原消息已锁定，不能保存修改；编辑稿仍保留，可复制。</p> : null}
     {error ? <p role="alert">{error}</p> : null}
-    <div className="composer-queued-editor__footer">
-      {tools}
-      <div className="composer-queued-editor__actions">
-        <button type="button" className="composer-tool" onClick={onCancel} disabled={saving}>取消</button>
-        <button type="button" className="composer-queued-editor__save" aria-label="保存待发消息" disabled={saving || !entry.editable || !text.trim()} onClick={() => { void save() }}>{saving ? '保存中' : '保存'}</button>
-      </div>
-    </div>
+    <ComposerEditFooter leading={tools}>
+      <Button onClick={onCancel} disabled={saving}>取消</Button>
+      <Button variant="primary" aria-label="保存待发消息" aria-busy={saving || undefined} disabled={saving || !entry.editable || !text.trim()} onClick={() => { void save() }}>{saving ? '保存中' : '保存'}</Button>
+    </ComposerEditFooter>
   </div>
 }

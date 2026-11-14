@@ -3,8 +3,12 @@ import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conver
 import { useClientUiPlatform } from '@agentmux/client-ui/platform'
 import { autoUpdate, computePosition, flip, inline, offset, shift } from '@floating-ui/dom'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref, type RefObject } from 'react'
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode, type Ref, type RefObject } from 'react'
 import type { ConversationAnnotation } from '@agentmux/client-ui/components/ConversationMessage'
+import { Button } from '@agentmux/client-ui/components/Button'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
+import { ComposerEditFooter } from '@agentmux/client-ui/components/ComposerEditFooter'
+import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import { ConversationAnnotationDelivery } from './ConversationAnnotationDelivery'
@@ -222,6 +226,12 @@ export function ConversationAnnotationNote({ ref, sessionId, regionRef, active, 
   }
 
   const annotation = edit ? { messageId: edit.target.messageId, quote: edit.target.quote, note: note.trim() } : null
+  const renderFooter = (send?: ReactNode) => <ComposerEditFooter leading={<Button variant="danger" disabled={pending} onClick={discard}>丢弃批注</Button>}>
+    <Button variant={send ? 'secondary' : 'primary'} aria-label="将批注加入回复草稿" disabled={!note.trim() || pending} onClick={add}>
+      <ThemeActionAddToDraftIcon size={12} aria-hidden="true" />加入草稿
+    </Button>
+    {send}
+  </ComposerEditFooter>
   return <>
     <WindowOverlayPortal layer="window-chrome">
       {available && editing ? rects.map((rect, index) => <span key={index} className="conversation-annotation-underline" aria-hidden="true"
@@ -240,15 +250,16 @@ export function ConversationAnnotationNote({ ref, sessionId, regionRef, active, 
         data-anchor-state={rects.length ? 'range' : 'unavailable'} data-presentation="floating"
         style={{ position: 'fixed', left: position?.x ?? 0, top: position?.y ?? 0,
           maxWidth: position?.width, maxHeight: position?.height, visibility: position ? 'visible' : 'hidden' }}
-        onKeyDown={event => { if (event.key === 'Escape' && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); close() } }}>
+        onKeyDown={event => { if (event.key === 'Escape' && !isImeOwnedKeyboardEvent(event)) { event.preventDefault(); event.stopPropagation(); close() } }}>
 
-          <header className="conversation-annotation-note__header"><strong>批注</strong><button type="button" className="conversation-annotation-note__close" aria-label="关闭批注" title="关闭批注 · 保留草稿" onClick={close}><ThemeActionCloseIcon size={14} aria-hidden="true" /></button></header>
+          <header className="conversation-annotation-note__header"><strong>批注</strong><IconButton className="conversation-annotation-note__close" aria-label="关闭批注" title="关闭批注 · 保留草稿" onClick={close}><ThemeActionCloseIcon size={14} aria-hidden="true" /></IconButton></header>
           {!rects.length ? <span className="conversation-annotation-note__location" role="status">原选区位置暂不可用，批注已保留。</span> : null}
           <details className="conversation-annotation-note__passage"><summary aria-label="Selected passage"><span className="conversation-annotation-note__preview">{edit.target.quote}</span><ThemeNavigationDownIcon size={12} aria-hidden="true" /></summary><blockquote className="log-turn__annotation-quote" tabIndex={0} aria-label="Selected passage">{edit.target.quote}</blockquote></details>
-          <ComposerTextarea ref={inputRef} value={note} onValueChange={setNote} disabled={pending} aria-label="批注内容" placeholder="添加批注…" rows={2} />
+          <ComposerTextarea variant="compact" ref={inputRef} value={note} onValueChange={setNote} disabled={pending} aria-label="批注内容" placeholder="添加批注…" rows={2} />
           {error ? <div className="conversation-annotation-note__error" role="alert">{error}</div> : null}
-          {edit.origin && annotation ? <ConversationAnnotationDelivery key={edit.key} active={available && editing} sessionId={edit.sessionId} origin={edit.origin} annotation={annotation} onAccepted={accepted} onError={setError} onPendingChange={setPending} /> : null}
-          <div className="log-turn__annotation-actions"><button type="button" className="conversation-annotation-note__discard" disabled={pending} onClick={discard}>丢弃批注</button><button type="button" className="conversation-annotation-note__add" aria-label="将批注加入回复草稿" disabled={!note.trim() || pending} onClick={add}><ThemeActionAddToDraftIcon size={12} aria-hidden="true" />加入草稿</button></div>
+          {edit.origin && annotation
+            ? <ConversationAnnotationDelivery key={edit.key} active={available && editing} sessionId={edit.sessionId} origin={edit.origin} annotation={annotation} onAccepted={accepted} onError={setError} onPendingChange={setPending} renderFooter={renderFooter} />
+            : renderFooter()}
       </div> : null}
     </WindowOverlayPortal>
     {available && edit?.sessionId === sessionId && !opened && !selection ? <div className="conversation-annotation-recovery" role="status">批注草稿已保留。<button type="button" className="small-button" onClick={() => { focusRequested.current = { origin: document.activeElement }; setOpened(true) }}>继续批注</button></div> : null}

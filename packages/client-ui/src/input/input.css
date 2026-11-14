@@ -23,6 +23,15 @@ select[aria-invalid='true']:focus-visible { outline-color: var(--red-line); }
 .ui-input-group > .ui-input { border: 0; background: transparent; }
 .ui-input-group > .ui-input:focus-visible { outline: none; }
 
+.ui-input--compact-editor {
+  display: block; width: 100%; min-height: calc(2lh + 2 * var(--sp-4) + 2px);
+  max-height: min(132px, 35vh); margin: 0; padding: var(--sp-4) 10px;
+  field-sizing: content; overflow-y: auto; overscroll-behavior: contain; resize: vertical;
+  background: var(--surface-0); font-size: var(--fs-body); line-height: 1.5;
+}
+.ui-input--compact-editor:focus { outline: 1px solid var(--focus-line); outline-offset: -1px; }
+.ui-input--compact-editor[aria-invalid='true']:focus { outline-color: var(--red-line); }
+
 /* A compact question and its adjacent action share one complete boundary. */
 .ui-input-group--prompt {
   align-items: center; gap: 8px; min-height: 38px; padding: 4px 8px 4px 12px;
@@ -58,6 +67,7 @@ select[aria-invalid='true']:focus-visible { outline-color: var(--red-line); }
 
 @media (forced-colors: active) {
   input:focus-visible, textarea:focus-visible, select:focus-visible { outline-color: Highlight; }
+  .ui-input--compact-editor:focus { outline-color: Highlight; }
   .ui-input:focus-visible, .ui-input-group:focus-within { border-color: Highlight; }
   .ui-input-group > .ui-input:focus-visible { border: 0; outline: none; }
   .ui-input-group--prompt:focus-within { border-color: Highlight; }
