@@ -102,7 +102,7 @@ let holdFileUpload = false
 let releaseFileUpload: (() => void) | null = null
 let directoryComparisons = 0, inspectFails = false
 let directoryReadFails = false, missingSessionMetadata = false
-let conversationStatusScene: 'active' | 'retired' | 'unconfirmed' | 'parallel' = 'active'
+let conversationStatusScene: 'active' | 'retired' | 'retired-reading' | 'unconfirmed' | 'parallel' = 'active'
 let agentMenuScene = false, densityScene = false, copyFails = false
 let creationUpdateScene = false, rejectUpdatePreflight: (() => void) | null = null
 const copiedTexts: string[] = []
@@ -138,14 +138,14 @@ const client = {
   readAgentSession: async (id: string) => {
     record('sdk.readAgentSession', { id })
     if ((missingSessionMetadata || ['unconfirmed', 'parallel'].includes(conversationStatusScene)) && id === main.agentSessionId) throw Error('Original selected Session metadata unavailable [METADATA_POINT_READ_FAILED]')
-    if (conversationStatusScene === 'retired' && id === main.agentSessionId) return null
+    if (['retired', 'retired-reading'].includes(conversationStatusScene) && id === main.agentSessionId) return null
     return structuredClone(sessions.find(session => session.agentSessionId === id) ?? null)
   },
   sessionHistorySources: async (input: { agentSessionId: string }) => {
     record('sdk.sessionHistorySources', input)
     return [{ hostId: 'local', agentSessionId: input.agentSessionId,
-      state: conversationStatusScene === 'retired' && input.agentSessionId === main.agentSessionId ? 'retired' as const : 'active' as const,
-      ...(conversationStatusScene === 'retired' ? { retiredAt: 100 } : {}) }]
+      state: ['retired', 'retired-reading'].includes(conversationStatusScene) && input.agentSessionId === main.agentSessionId ? 'retired' as const : 'active' as const,
+      ...(['retired', 'retired-reading'].includes(conversationStatusScene) ? { retiredAt: 100 } : {}) }]
   },
   agentSession: (id: string) => { record('sdk.agentSession', { id }); if ((missingSessionMetadata || conversationStatusScene !== 'active') && id === main.agentSessionId) throw Error('Original selected Session metadata unavailable'); const found = sessions.find(session => session.agentSessionId === id); if (!found) throw Error('Unknown original fixture Session'); return found },
   agentSessions: () => { record('sdk.agentSessions'); return structuredClone(sessions) },
@@ -215,7 +215,7 @@ const client = {
   },
   observeSessionHistory: async (id: string) => { record('sdk.observeSessionHistory', { id }); return { source: { providerId: 'codex', nativeSessionId: `native-${id}` }, dispose() { record('sdk.releaseHistory', { id }) } } },
   readAgentConversation: async (input: Parameters<AgentMuxHostedClient['readAgentConversation']>[0]) => {
-    if (conversationStatusScene === 'parallel' && input.agentSessionId === main.agentSessionId) throw Error('Original history read failed [HISTORY_READ_FAILED]')
+    if (['parallel', 'retired-reading'].includes(conversationStatusScene) && input.agentSessionId === main.agentSessionId) throw Error('Original history read failed [HISTORY_READ_FAILED]')
     const sourceHostId = sessions.find(session => session.agentSessionId === input.agentSessionId)?.hostId ?? 'host-original'
     if (joinedNotice) record('sdk.noticeFrameIdentity', { routeHostId: input.hostId, sourceHostId, recipientAgentSessionId: input.agentSessionId })
     const rawHistory = await client.sessionHistoryPage(input.agentSessionId)

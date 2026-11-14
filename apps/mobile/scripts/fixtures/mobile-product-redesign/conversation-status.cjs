@@ -51,6 +51,15 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
       result.conversationStatus.push({width,height,appearance,state,normal,current,detail})
     }
   }
+  await resize(390,844); await read('mobileProductScene.setAppearance("light");mobileProductScene.setConversationStatus("retired-reading")')
+  await until(`document.querySelector('[aria-label="当前对话操作"]').getAttribute('aria-description')==='对话记录读取需要重试'`)
+  await capture('conversation-status-retired-reading-390-light')
+  await button('当前对话操作')
+  await until('document.querySelector(".mobile-session-diagnostic")?.dataset.conversationStatus==="retired"')
+  const retiredFailure = await read('document.querySelector(".mobile-session-diagnostic").textContent')
+  assert.ok(retiredFailure.includes('历史对话') && retiredFailure.includes('HISTORY_READ_FAILED'),'A historical record retains its independent reading failure')
+  await capture('conversation-status-retired-reading-details-390-light')
+  await button('关闭面板','[role=dialog]')
   await read('mobileProductScene.setConversationStatus("active")')
   await button('当前对话操作')
   await button('重新读取对话','.mobile-session-diagnostic')
