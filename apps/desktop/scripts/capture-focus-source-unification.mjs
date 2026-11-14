@@ -14,7 +14,7 @@ const root=resolve(import.meta.dirname,'../../..'),desktop=join(root,'apps/deskt
 assert.ok(process.argv[2]==='--evidence'&&process.argv[3]&&(process.argv.length===4||process.argv.length===5&&['--primary-only','--member-state','--unconfirmed','--source-recovery','--source-connection','--takeover-feedback','--task-layout','--inline-rename'].includes(process.argv[4])),'Use --evidence <private evidence directory> [--primary-only|--member-state|--unconfirmed|--source-recovery|--source-connection|--takeover-feedback|--task-layout|--inline-rename]')
 const taskLayout=process.argv[4]==='--task-layout',inlineRename=process.argv[4]==='--inline-rename'
 const layoutMutation=process.env.AGENTMUX_FOCUS_LAYOUT_MUTATION
-assert.ok(!taskLayout || !layoutMutation || ['omit-layout','hide-mandatory'].includes(layoutMutation),'Known Focus task layout mutation')
+assert.ok(!taskLayout || !layoutMutation || ['omit-layout','hide-mandatory','repeat-result-idle'].includes(layoutMutation),'Known Focus task layout mutation')
 const sourceConnection=process.argv[4]==='--source-connection'
 const takeoverFeedback=process.argv[4]==='--takeover-feedback',sourceRecovery=process.argv[4]==='--source-recovery',primaryOnly=process.argv[4]==='--primary-only',memberState=process.argv[4]==='--member-state',unconfirmed=process.argv[4]==='--unconfirmed'||sourceRecovery
 const sourceOnly=taskLayout||inlineRename||sourceRecovery||takeoverFeedback||sourceConnection
@@ -72,10 +72,10 @@ try{
     builder.onLoad({filter:/\.[cm]?[jt]sx?$/},async({path})=>{
     if(!path.startsWith(root+'/')||path.includes('/node_modules/'))return
     const source=await readFile(path,'utf8');inputs.set(path,hash(source));const component=path.slice(path.lastIndexOf('/')+1)
-    if(taskLayout && layoutMutation==='hide-mandatory' && component==='FocusTaskListContent.tsx'){
-      const target="const mandatory = mandatoryAgentContextDetails(context, 'card')"
+    if(taskLayout && ['hide-mandatory','repeat-result-idle'].includes(layoutMutation) && component==='FocusTaskListContent.tsx'){
+      const target="const showStatus = context.bucket !== 'results' && mandatoryAgentContextDetails(context, 'card')"
       assert.equal(source.split(target).length,2,'One actual task row status visibility decision')
-      const code=source.replace(target,'const mandatory = false')
+      const code=source.replace(target,layoutMutation==='hide-mandatory'?'const showStatus = false':"const showStatus = mandatoryAgentContextDetails(context, 'card')")
       transformations.push({path:relative(root,path),mutation:layoutMutation,sourceSHA256:hash(source),loadedSHA256:hash(code)})
       return {contents:code,loader:'tsx'}
     }

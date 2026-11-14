@@ -46,6 +46,8 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
       width: button.getBoundingClientRect().width,
       titleWidth: title?.getBoundingClientRect().width,
       mark: button.querySelector('[data-focus-state-icon]')?.dataset.focusStateIcon,
+      bucket: button.dataset.bucket,
+      activity: button.dataset.activity,
       status: visible(status) ? status.textContent : null,
       time: visible(time),
       tag: visible(tag) ? tag.textContent.trim() : null,
@@ -129,6 +131,20 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
   await movePointer(radio('list'))
   await read(`Promise.allSettled(document.querySelector(${JSON.stringify(first)}).getAnimations().map(animation => {animation.play(); return animation.finished}))`)
   result.refinement.hoverStable = true
+
+  const [resultRow, recoveryRow] = await Promise.all(['audit','interrupted'].map(rowFacts))
+  assert.equal(resultRow.bucket, 'results')
+  assert.equal(resultRow.activity, 'unknown', 'The completed Result has separate unconfirmed child activity')
+  assert.equal(resultRow.status, null, 'A completed Result cannot grow a second line for Idle')
+  assert.match(resultRow.accessibleName, /Idle/)
+  assert.match(recoveryRow.status, /Interrupted/)
+  result.refinement.resultRow = resultRow
+  result.refinement.recoveryRow = recoveryRow
+  const resultSelector = JSON.stringify(task('audit'))
+  await read(`document.querySelector(${resultSelector}).scrollIntoView({block:'center'})`)
+  await settle()
+  await frame('list-results-dark', 'Results stay single-line with the rest of the Focus list')
+  await read('document.querySelector(".focus-project-lanes__rows").scrollTop = 0')
 
   win.setContentSize(420, 800)
   await read('window.unifiedFocusProof.theme("light")')

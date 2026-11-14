@@ -59,7 +59,8 @@ if(localTaskScene){
   sessions.push({...sessions[0],id,label,status:{state,source:'native-hook',observedAt},
    semanticStatus:{state,source:'native-hook',observedAt,stateEnteredAt:observedAt},
    control:{...sessions[0].control,agentSessionId:id,run:{runId:'original-run-'+id}},
-   ...(state==='waiting_permission'?{pendingInteraction:{id:'payment-read-request',kind:'permission',title:'允许读取付款回执？',operation:'read'}}:{})})
+   ...(state==='waiting_permission'?{pendingInteraction:{id:'payment-read-request',kind:'permission',title:'允许读取付款回执？',operation:'read'}}:{}),
+   ...(id==='audit'&&window.__taskLayoutScene?{nativeSessionId:'original-audit-native',nativeSubagents:{run:{runId:'original-run-audit'},providerId:sessions[0].providerId,nativeSessionId:'original-audit-native',unconfirmed:true,sessions:[]}}:{})})
  }
 }
 const localReply='已核对原始数据与发布记录，接下来定位异常项并给出可验证的结论。'
