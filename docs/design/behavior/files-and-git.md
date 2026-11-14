@@ -45,13 +45,17 @@ Git、配置与空间持久化结果分别成立。失败保原事实和可接�
 - Editor 字号可设置，默认跟随 App 字号：缺省使用现有 App 正文大小；显式 override 与恢复继承在现有 Appearance 设置中完成，只由原 ConfigOwner 保存一个可选 Editor 字号值，恢复继承清除 override，不回填第二份 App 默认或新增并行偏好。Source 与只读 Diff 使用相同解析结果，修改大小就地更新现有编辑器，不重建模型、丢选择／滚动／草稿或改变保存冲突与未知结果。Terminal 字号仍属原偏好。
 - Editor 已保存事实作为安静的状态表达，原 Save 快捷键与必要保存动作保持可达；saving、dirty、冲突、读取失败与保存 unknown 仍准确可辨并沿原 owner 操作。More 菜单保原真实选项、键盘打开／导航／Escape 与焦点返回，压低正常态视觉不能把未确认写入显示为 Saved，不能隐藏可执行的恢复动作。
 
-### 准确路径发现与目录创建
+### 准确路径发现与变更
 
 - 原 Host Files owner 统一持有路径变更；公共 API、CLI 与 GUI 消费同一边界。路径先经原 Zone／Host／Workspace 映射，展示 Tab、焦点与 Session cwd 不授予文件权限，也不被 mkdir 改动。普通配置变更不因此引入操作记录；这里的记录只承担真实文件系统效果与丢失回执的恢复。
 - `file stat` 只观察准确 root、parent 与 entry／absence，不读正文或遍历子树。目录 scope witness 固定原对象的 device、inode 与真实 birth generation，不冻结目录内所有成员；完整元数据快照不能冒充子树内容 CAS。文件正文 revision 继续沿原 `file read`。symlink 只观察原 entry，不沿它越过写边界。
 - `file mkdir` 只创建准确、明确应缺席的一个直接目录，不补父目录，不覆盖后来占位的 entry。actor 与调用方 Host scope 来自原 transport，不能从请求 JSON、目录名或展示位置构造。物理操作仍由原 native helper 持有的 root／parent fd、原目录代次与原子 no-replace 发布承担；目录操作借用原 Note 写 lease，普通文件读写不因此等待无关 Note 操作。
 - 发布前，原 Files 域以独占 admission 目录保留操作身份，完整原 operation／请求／actor 必须已持久确认；admission 已存在而请求成员丢失或损坏时只报未知，不把成员缺失解释为从未执行，也不重建或重发。新 stage／entry 的准确身份经 helper 的专用协议交回原 Files 私有记录，保存确认前不得放行 publish。Workspace 内可被普通文件写入触及的标记或同名目录不成为权威 producer 回执。成功只回收准确的空原 stage；未知保留原身份与材料，不递归清除用户内容。
 - `file mutation inspect` 只查原 operation、原请求与原 producer 身份。当前 target 缺席不能证明未发生，当前读到记录不能补认原写入 ACK；filesystem effect 与 durability 分开。进程重开、观察失败或同 ID 显式重复都不能自动重跑未确认的 producer；同 ID 新 actor／目标／输入明确拒绝。原 live 映射不可用时保留历史原请求，不能改到新 Host 补做。
+- `file move` 固定准确 source entry 与 destination absence，限同原 Host／Workspace／文件系统。先以原子 no-replace claim 原 source，再从原 pinned stage fd 发布到原 pinned parent fd；source 同字节异 inode、父目录交换与后来占位均不能授权替换对象。父目录被外部移位后原 fd 上的真实效果如实报告未知，不从新路径重新解析发布。无 copy-delete 或 shell 降级。
+- 活跃、retired 与受管在途执行／恢复目录的祖先不能被 move／delete。Core 原 admission 同步登记短目录 scope 并冻结此前在途 cwd，随后读取同 Host DISTINCT 原 cwd、原执行 helper／Terminal 恢复 seed、Capsule 原绑定／命令 seed 与 Native 原 Run metadata；物理 alias 按 fd ancestor identity 检查。该显式冷路径成本随同 Host 不同执行目录增长，不 hydrate Run／正文，也不进入 input、read 或轮询热路径。缺 Runtime 的旧恢复 seed 保未知，不猜绑定当前 Runtime；尚未准入 Core 的 client 请求仍是保留请求，不扩大为当前 Core 已执行事实。
+- 新创建、恢复和持久 cwd seed 在所有相关 await 前登记原在途意图，并在原 seed 写入／Native dispatch 前消费同一 scope；不能只靠第二次读取关闭准入竞态。scope 持有至原有限 helper 真正 close，reader 超时、AbortError 或逻辑 response 均不证明物理 producer 静止。同 OS 的有限 move／delete helper 只在实际同步 spawn turn 借原 semantic owner lease；原 owner 开始 closing 即同步撤借用。父 Core 退出而 helper 仍可产生效果时，新 Core 按原 OS lease 拒绝竞争，helper 退出后保原 Runtime 身份恢复；不以 PID 缺失、timeout 或旧 endpoint 锁代替原 lease，也不把本地 SSH 客户端 fd 当远端 Core lease。该边界不包含长期 Agent／Terminal／Capsule Run。
+- 每次显式路径 move 都在原 Notes write lease 内查询 compact 原资源计划，再执行 rename；Note 资源可登记任意相对路径，不能按扩展名判断事实，也不能在空计划查询后让并发 registration 穿过物理效果。空计划不写 Note root，普通内容 read／write 不因此等待无关 Note 操作。受影响资源以原 Notebook 文件 root 同次发布目录引用、provenance 与历史 metadata；不复制正文、creator、event 身份或另造 Note Store。注册与未注册但已有历史的原资源都保全；catalog 的搬迁事件仍用原算法。Files 仅保留准确原资源计划与各阶段回执，元数据确认失败不重发文件系统动作、不让当前观察代签旧保存 ACK。
 - 平台资格按真实 helper／内核／文件系统能力逐项表达。Linux 使用已有 no-follow fd、statx birth generation 与 renameat2 no-replace；缺少真实代次或原子发布能力时只拒绝相应准确动作，保留 read、原文件和健康 Agent，不用 shell fallback 或 macOS 证明代签 Linux 运行。
 
 ### Revision-aware 保存与外部冲突

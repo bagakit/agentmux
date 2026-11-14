@@ -27,12 +27,36 @@ A null birthtimeNs reports missing native generation; implementation.mkdir then 
 generation-unavailable. Only that exact mutation is unavailable; ordinary reads remain usable.
 The original Host supplies actor/caller scope; JSON cannot supply actor.
 
-After a missing/unknown mkdir reply use file mutation inspect --input FILE|- with
+Use file move --input FILE|- for one exact entry on the same original Host/Workspace/filesystem.
+Read both source and destination with file stat. JSON is
+{operationId,zoneId,path,expectedResource:COMPLETE_SOURCE_RESOURCE,
+expected:{root:SOURCE_ROOT,parent:SOURCE_PARENT,entry:SOURCE_ENTRY},
+destination:{zoneId,path,expectedResource:COMPLETE_DESTINATION_RESOURCE,expectedAbsent:true,
+expected:{root:DESTINATION_ROOT,parent:DESTINATION_PARENT}},spaceId?}.
+Source entry must be present; the destination must be absent. Move pins the original source
+inode/birth generation, claims that entry without replacement, and publishes without replacing
+later occupants. There is no copy/delete or SSH shell fallback. A changed/moved parent may
+leave the original object in its pinned scope and report unknown; preserve its claim and request.
+Original execution/recovery cwd references, including physical aliases, prevent moving their
+ancestor. This cold-path check reads same-Host directory metadata, not Run bodies or every input.
+It never stops or rewrites a Run. Core new launch/recovery admissions share the same short
+physical-effect scope. A finite same-OS Files producer retains the original semantic owner lease
+until actual child close, including parent crash; no lease is exported to SSH clients or long Runs.
+Name audit and Note metadata use their original owners. Note IDs, block creators, original
+history/event IDs and Markdown bytes are retained. Filesystem, durability, name audit and Note
+metadata are separate result stages; a confirmed move does not certify an unconfirmed metadata save.
+Any relative file can have registered Note metadata, regardless of extension. This explicit cold
+path reads its compact original relocation plan under the existing Notes write lease through rename;
+an empty plan does not write the Note root. Ordinary content reads/writes keep their original path.
+Moved receipts must identify the original source device/inode/birth generation, including inspection;
+a mismatched reply is a protocol failure. Keep the original request and query without replaying.
+
+After a missing/unknown mkdir or move reply use file mutation inspect --input FILE|- with
 {operationId,zoneId,path,expectedResource:COMPLETE_ORIGINAL_STAT_RESOURCE,spaceId?}.
 The query returns the retained original request and separate filesystem/durability observations.
 It does not rerun the producer, infer a delete from absence, or turn a current read into an old ACK.
 A managed Agent reads only its own original actor/Host operation. Repeating the exact original
-mkdir only joins or observes its original record; it never republishes an unconfirmed action.
+mkdir/move only joins or observes its original record; it never republishes an unconfirmed action.
 An existing private admission with a missing/corrupt request member stays unconfirmed; missing
 member bytes never authorize a new producer. Keep the original admission for recovery.
 Changing input/target/actor under that same operation ID is refused. Keep all original IDs and
