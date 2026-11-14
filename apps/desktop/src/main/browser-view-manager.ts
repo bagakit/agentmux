@@ -2684,7 +2684,7 @@ export class BrowserViewManager {
    *   而分岔时两边各自看起来都正常（MEMORY：读的 key 与写的 key 必须只判一次）。
    */
   async runScript(id: string, code: string, operator?: BrowserOperator, replayOf?: string, operationId?: string, onOperationStarted?: (operation: BrowserOperation) => void | Promise<void>, privateTaskParameters = false, taskPage?: BrowserTaskPageExecution,
-    caller?: Pick<import('@agentmux/core').AgentMuxControlCaller, 'agentSessionId'>): Promise<BrowserScriptRunReport> {
+    caller?: Pick<import('@agentmux/core').AgentMuxControlCaller, 'agentSessionId'>, authorizeDispatch?: () => Promise<void>): Promise<BrowserScriptRunReport> {
     const originalView = this.entries.get(id)?.view
     if (this.entries.get(id)?.releaseAttempt?.pending) await this.prepareForConsumption(id)
     if (originalView && this.entries.get(id)?.view !== originalView) throw new Error('Browser native page changed during release. Refresh this original Browser snapshot before running the program; it has not been dispatched.')
@@ -2871,7 +2871,7 @@ export class BrowserViewManager {
       if (!Number.isFinite(remainingMillis) || remainingMillis <= 0) throw new Error('Task execution budget reached before script dispatch. Existing progress remains; the step was not replayed.')
       const run = await runBrowserScript({ code, signal: stopController.signal,
         timeoutMs: remainingMillis,
-        onPageCall: this.pageCallHandler(entry, runView, session, notes, operation, privateTaskParameters, stopController.signal, taskPage, deadlineMillis, pageInterrupts, cleanup => pageCleanups.push(cleanup)),
+        onPageCall: this.pageCallHandler(entry, runView, session, notes, operation, privateTaskParameters, stopController.signal, taskPage, deadlineMillis, pageInterrupts, cleanup => pageCleanups.push(cleanup), authorizeDispatch),
         ...(this.resultArtifacts ? { captureResultArtifact: async (sourcePath: string) => {
           if (!this.owns(entry, feedbackView) || entry.activeRun?.operationId !== operation.id || stopController.signal.aborted) throw new Error('The original Browser operation changed before retaining its result.')
           const context: BrowserResultContext = { workspaceId: entry.workspaceId, browserId: entry.id, operationId: operation.id, navigationId: entry.navigationId }
@@ -3889,7 +3889,8 @@ export class BrowserViewManager {
     taskPage?: BrowserTaskPageExecution,
     deadlineMillis = taskPage?.cursor.deadlineMillis ?? Infinity,
     interrupts?: BrowserPageInterrupts,
-    registerCleanup?: (cleanup: () => Promise<void>) => void
+    registerCleanup?: (cleanup: () => Promise<void>) => void,
+    authorizeDispatch?: () => Promise<void>
   ): (name: string, args: unknown[]) => Promise<unknown> {
     const controlRevision = entry.controlRevision
     let activeStep: BrowserOperationStep | null = null
@@ -4056,6 +4057,7 @@ export class BrowserViewManager {
           const changesPage = BROWSER_ACTION_PAGE_CALLS.has(name)
           const call = async () => {
             await taskPage?.authorize?.()
+            if (authorizeDispatch) { await authorizeDispatch(); beforeAction(step) }
             return dispatch(name, args, { beforeAction: () => beforeAction(step),
             recordTarget: (target, endpoint) => recordBrowserOperationTarget(step, target, endpoint),
             ...(feedback && action !== undefined && (name === 'click' || name === 'download') ? {

@@ -85,7 +85,8 @@
     "@agentmux/editor-extensions": "workspace:*",
     "tar-stream": "3.2.2",
     "@agentmux/browser": "workspace:*",
-    "fflate": "0.8.3"
+    "fflate": "0.8.3",
+    "parse5": "8.0.1"
   },
   "devDependencies": {
     "@electron/osx-sign": "2.7.1",

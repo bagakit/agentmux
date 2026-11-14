@@ -1,6 +1,7 @@
 import { queryBrowserProfiles, AgentMuxError, isBrowserProfileControlOperation, type AgentMuxControlRequest, type AgentMuxControlResult, type AgentMuxNameActor,
   type BrowserProfileControlOperation } from '@agentmux/core/control'
 import { ZodError } from 'zod'
+import type { BrowserProfileBookmarkOpen } from './browser-profile-bookmark-open.js'
 import type { BrowserProfileSummary } from '../shared/contracts.js'
 import type { BrowserProfileManager } from './browser-profile-manager.js'
 import type { BrowserProfileUsageOwner } from './browser-profile-usage.js'
@@ -14,9 +15,15 @@ export function isBrowserProfileControlRequest(request: AgentMuxControlRequest):
 }
 
 export type BrowserProfileControlPorts = {
-  profiles: Pick<BrowserProfileManager, 'networkHistory' | 'listProxies' | 'saveProxy' | 'deleteProxy' | 'assignProxy' | 'initialize' | 'listProfiles' | 'listRevision' | 'listSequence' | 'createProfile' | 'copyProfile' | 'updateProfile' | 'listViews' | 'saveView' | 'deleteView' | 'bulkUpdate' | 'listFolders' | 'createFolder' | 'renameFolder' | 'deleteFolder' | 'setDefaultProfile' | 'refresh' | 'listTrash' | 'listLegacyPendingDeletes' | 'restoreProfile' | 'setTrashRetention' | 'purgeProfile' | 'inspectTrashPurge'> & { extensions?: BrowserProfileManager['extensions'] }
+  profiles: Pick<BrowserProfileManager, 'networkHistory' | 'listProxies' | 'saveProxy' | 'deleteProxy' | 'assignProxy' | 'initialize' | 'listProfiles' | 'listRevision' | 'listSequence' | 'createProfile' | 'copyProfile' | 'updateProfile' | 'listViews' | 'saveView' | 'deleteView' | 'bulkUpdate' | 'listFolders' | 'createFolder' | 'renameFolder' | 'deleteFolder' | 'setDefaultProfile' | 'refresh' | 'listTrash' | 'listLegacyPendingDeletes' | 'restoreProfile' | 'setTrashRetention' | 'purgeProfile' | 'inspectTrashPurge'> & { extensions?: BrowserProfileManager['extensions']; bookmarks?: BrowserProfileManager['bookmarks'] }
   usage: Pick<BrowserProfileUsageOwner, 'usage' | 'deleteProfile' | 'assertUnused'>
+  openBookmark?: (request: BrowserProfileBookmarkOpen, url: string) => Promise<void>
   network: BrowserProfileNetworkControl
+}
+
+function bookmarkOwner(ports: BrowserProfileControlPorts): BrowserProfileManager['bookmarks'] {
+  if (!ports.profiles.bookmarks) throw new AgentMuxError('Bookmark management is unavailable in this Browser host. Original Profiles remain available.', 'HOST_CAPABILITY_UNAVAILABLE')
+  return ports.profiles.bookmarks
 }
 
 function extensionOwner(ports: BrowserProfileControlPorts): BrowserProfileManager['extensions'] {
@@ -49,6 +56,14 @@ export async function executeBrowserProfileControl(request: ProfileRequest, port
   await ports.profiles.initialize()
   if (request.operation === 'browser.profile.proxy.ls' || request.operation === 'browser.profile.ls' || request.operation === 'browser.profile.inspect' || request.operation === 'browser.profile.trash.ls') await ports.profiles.refresh()
   switch (request.operation) {
+    case 'browser.profile.bookmark.ls': return { operation: request.operation, ...await bookmarkOwner(ports).list(request.profileId, request.folderId, request.operationId) }
+    case 'browser.profile.bookmark.edit': return { operation: request.operation, ...await bookmarkOwner(ports).edit(request.profileId, request.expectedRevision, request.operationId, request.change) }
+    case 'browser.profile.bookmark.import': return { operation: request.operation, ...await bookmarkOwner(ports).import(request.profileId, request.folderId, request.expectedRevision, request.operationId, request.sourcePath) }
+    case 'browser.profile.bookmark.export': return { operation: request.operation, ...await bookmarkOwner(ports).export(request.profileId, request.folderId, request.expectedRevision, request.operationId, request.destinationPath) }
+    case 'browser.profile.bookmark.open': {
+      if (!ports.openBookmark) throw new AgentMuxError('Opening bookmarks is unavailable in this Browser host. The library is kept.', 'HOST_CAPABILITY_UNAVAILABLE')
+      return { operation: request.operation, ...await bookmarkOwner(ports).open(request.profileId, request.bookmarkId, request.browserId, request.expectedRevision, request.operationId, url => ports.openBookmark!(request, url)) }
+    }
     case 'browser.profile.extension.ls': return { operation: request.operation, ...await extensionOwner(ports).list(request.profileId, request.operationId) }
     case 'browser.profile.extension.prepare': return { operation: request.operation, review: await extensionOwner(ports).review(request.profileId, request.expectedRevision, request.operationId, request.sourcePath, request.extensionId) }
     case 'browser.profile.extension.apply': return { operation: request.operation, ...await extensionOwner(ports).apply(request.profileId, request.expectedRevision, request.reviewId) }

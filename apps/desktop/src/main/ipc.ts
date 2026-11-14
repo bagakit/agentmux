@@ -1,4 +1,5 @@
 import { parseBrowserTaskControlPayload } from '@agentmux/core/control'
+import { createBrowserProfileBookmarkOpener } from './browser-profile-bookmark-open.js'
 import { desktopRpcMethods } from './desktop-rpc-exposure.js'
 import { AppCaptureSource } from './app-capture.js'
 import { WorkspaceFileSources } from './workspace-file-sources.js'
@@ -651,6 +652,8 @@ export async function registerIpc(args: {
       return profile === undefined ? undefined : profile.agentAccess !== false
     }
   })
+  const openProfileBookmark = createBrowserProfileBookmarkOpener({ browsers,
+    scope: id => resolveRecoveryPreviewScope(id), prepare: id => ensureBrowser(id), authorize: browserAutomation })
   browsers.setPresentationWindowOwner((document, occurrence) => 'kind' in occurrence
     ? args.workbenchWindows.windowForDocument(document) : args.workbenchWindows.presentationWindow(document, occurrence))
   const nativeChrome = new NativeOverlayWindows(args.window, browsers, args.workbenchWindows)
@@ -814,7 +817,7 @@ export async function registerIpc(args: {
       return await executeSettingsBrowserControl(request, configOwner)
     }
     if (isBrowserProfileControlRequest(request)) return await executeBrowserProfileControl(request,
-      { profiles: browserProfiles, usage: profileUsage, network: profileNetworkControl }, nameChangeRequests.getStore()?.context.actor)
+      { profiles: browserProfiles, usage: profileUsage, network: profileNetworkControl, openBookmark: openProfileBookmark }, nameChangeRequests.getStore()?.context.actor)
     if (request.operation === 'settings.resource.list' || request.operation === 'settings.resource.get' ||
         request.operation === 'settings.resource.add' || request.operation === 'settings.resource.update' ||
         request.operation === 'settings.resource.remove') return await executeSettingsResourcesControl(request, configOwner)
@@ -2181,7 +2184,7 @@ export async function registerIpc(args: {
   browserProfiles.onEnvironmentApplicationChange(() => {
     if (!contents.isDestroyed()) contents.send('browser:profilesChanged', readBrowserProfileSnapshot(browserProfiles))
   })
-  registerBrowserProfileEditorIpc({ handle: handleWithEvent, profiles: browserProfiles })
+  registerBrowserProfileEditorIpc({ handle: handleWithEvent, profiles: browserProfiles, openBookmark: openProfileBookmark })
   // Profile handlers return their refusals as data so the Renderer keeps each error code.
   handleWithEvent('browser:listProfiles', (event) => ipcResult(async () => {
     await browserProfiles.initialize()

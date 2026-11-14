@@ -1,3 +1,5 @@
+import { BrowserProfileBookmarks } from './browser-profile-bookmarks.js'
+import { emptyBookmarks } from './browser-profile-bookmark-record.js'
 import { BrowserProfileExtensions } from './browser-profile-extensions.js'
 import type { BrowserProfileTrashEntry, BrowserProfileNativeUse, BrowserProfileRecycleReceipt, BrowserProfileRestoreReceipt } from '@agentmux/core/control'
 import { describeRetainedPartition, inspectRetainedPartition, retainedPartitionPath, BrowserProfileDataUnavailable } from './browser-profile-retained-data.js'
@@ -93,6 +95,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
   /** Applies each Profile's route to its own session; the view manager awaits it before any page opens. */
   readonly sessions: BrowserProfileSessions
   readonly extensions: BrowserProfileExtensions
+  readonly bookmarks: BrowserProfileBookmarks
 
   constructor(private readonly store = new BrowserProfileStore(), sessions?: BrowserProfileSessions, private readonly sessionRoot: () => string = () => app.getPath('sessionData'),
     private readonly purgeOptions: { now?: () => number; assertExclusiveDataOwner?: () => Promise<void> } = {}) {
@@ -107,6 +110,12 @@ export class BrowserProfileManager implements BrowserProfileResolver {
       environment: profileId => (this.profiles.get(profileId) ?? this.archivedProfiles.get(profileId)?.profile)?.environment,
       defaultLanguage: () => app.getLocale(),
       openContents: () => webContents.getAllWebContents()
+    })
+    this.bookmarks = new BrowserProfileBookmarks({
+      read: async profileId => { const { snapshot } = await this.store.inspectProfile(profileId); this.adopt(snapshot); return structuredClone(snapshot.bookmarks?.[profileId] ?? emptyBookmarks()) },
+      change: (profileId, action, durable) => { this.resolvePartition(profileId); return this.configuration(profileId, async () => {
+        const snapshot = await this.store.changeBookmarks(profileId, action, durable); this.adopt(snapshot); return structuredClone(snapshot.bookmarks?.[profileId] ?? emptyBookmarks())
+      }) }
     })
     this.extensions = new BrowserProfileExtensions({
       root: profileId => join(retainedPartitionPath(this.sessionRoot(), describeRetainedPartition(this.sessionRoot(), profileId, this.sessions.nativeSession(profileId).storagePath)), 'AgentMux Extensions'),

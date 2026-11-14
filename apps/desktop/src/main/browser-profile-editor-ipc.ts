@@ -21,7 +21,17 @@ export function registerBrowserProfileEditorIpc(ports: {
     listener: (event: IpcMainInvokeEvent, ...args: Args) => Result | Promise<Result>
   ): void
   profiles: BrowserProfileManager
+  openBookmark?: (input: import('./browser-profile-bookmark-open.js').BrowserProfileBookmarkOpen, url: string) => Promise<void>
 }): void {
+  ports.handle('browser:listProfileBookmarks', (_event, profileId: string, folderId: string | null, operationId?: string) => ipcResult(async () => { await ports.profiles.initialize(); return ports.profiles.bookmarks.list(profileId, folderId, operationId) }))
+  ports.handle('browser:editProfileBookmark', (_event, profileId: string, revision: string, operationId: string, change: import('@agentmux/core/control').BrowserProfileBookmarkChange) => ipcResult(async () => { await ports.profiles.initialize(); return ports.profiles.bookmarks.edit(profileId, revision, operationId, change) }))
+  ports.handle('browser:importProfileBookmarks', (_event, profileId: string, folderId: string | null, revision: string, operationId: string, sourcePath: string) => ipcResult(async () => { await ports.profiles.initialize(); return ports.profiles.bookmarks.import(profileId, folderId, revision, operationId, sourcePath) }))
+  ports.handle('browser:exportProfileBookmarks', (_event, profileId: string, folderId: string | null, revision: string, operationId: string, destinationPath: string) => ipcResult(async () => { await ports.profiles.initialize(); return ports.profiles.bookmarks.export(profileId, folderId, revision, operationId, destinationPath) }))
+  ports.handle('browser:openProfileBookmark', (_event, profileId: string, bookmarkId: string, browserId: string, revision: string, operationId: string) => ipcResult(async () => {
+    await ports.profiles.initialize()
+    if (!ports.openBookmark) throw new Error('Bookmark opening is unavailable in this Browser host. The original library is kept.')
+    return ports.profiles.bookmarks.open(profileId, bookmarkId, browserId, revision, operationId, url => ports.openBookmark!({ profileId, browserId, operationId }, url))
+  }))
   ports.handle('browser:listProfileExtensions', (_event, id: string, operationId?: string) => ipcResult(async () => { await ports.profiles.initialize(); return ports.profiles.extensions.list(id, operationId) }))
   ports.handle('browser:prepareProfileExtension', (_event, id: string, revision: string, operationId: string, source: string, extensionId?: string) => ipcResult(async () => { await ports.profiles.initialize(); return ports.profiles.extensions.review(id, revision, operationId, source, extensionId) }))
   ports.handle('browser:applyProfileExtension', (_event, id: string, revision: string, reviewId: string) => ipcResult(async () => { await ports.profiles.initialize(); return ports.profiles.extensions.apply(id, revision, reviewId) }))

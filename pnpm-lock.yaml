@@ -203,6 +203,9 @@ importers:
       zustand:
         specifier: ^5.0.0
         version: 5.0.14(@types/react@19.2.18)(react@19.2.8)(use-sync-external-store@1.7.0(react@19.2.8))
+      parse5:
+        specifier: 8.0.1
+        version: 8.0.1
     devDependencies:
       '@electron/osx-sign':
         specifier: 2.7.1
