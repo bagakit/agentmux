@@ -9,3 +9,5 @@ The real complete App, normal initialize, theme runtime, original public File CA
 CDP pointer actions open Profile and its actual Quick mode. Capture actual unknown/paused delivery, accepted input, unbound Main, inline startup failure, wide/narrow/light/dark and reduced motion. Original terminal remains an explicit secondary action. A second real Electron process reads the same private durable topology/draft; captures bind the full consumed source and styles graph and retain lifecycle-call deltas.
 
 Independent visual reviewer opens complete PNGs, checks hierarchy, branding, density, state honesty, actions/scroll/focus and draft retention, then records required corrections and final delivery verdict.
+
+For changes to the heartbeat badge, add `MOTE_HEARTBEAT_ICON=1` to capture just the original launcher and Discussion surfaces in one process. Check the 12 px waveform at wide and narrow widths in both themes, plus distinct paused and attention marks. The adjacent Agent status dot remains visible.
