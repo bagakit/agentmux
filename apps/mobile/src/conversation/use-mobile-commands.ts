@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import type { MobileConversationClient } from './mobile-conversation-client'
 import { composerCommandCandidates, type ComposerPrompt } from '@agentmux/client-ui/composer-command-candidates'
 
 /** Read the original Settings resource only while its menu or editor has a real consumer. */
 export function useMobileCommands({ client, agentSessionId, providerId, commands, visible, connected, demand }: {
-  client: AgentMuxHostedClient | null; agentSessionId: string | null; providerId: string | undefined
+  client: MobileConversationClient | null; agentSessionId: string | null; providerId: string | undefined
   commands: readonly { text: string; description: string }[] | undefined
   visible: boolean; connected: boolean; demand: boolean
 }) {

@@ -1,4 +1,4 @@
-import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import type { MobileConversationClient } from './mobile-conversation-client'
 import { parseMoteDialogueIdentity, parseMoteDialogueResult, sameMoteDialogue,
   type MoteDialogueIdentity, type MoteDialogueInputInspection, type MoteMainSnapshot } from '@agentmux/core/mote-dialogue'
 import { parseMoteDefaultConversation, parseMotePreferencesTarget, sameMotePreferencesTarget,
@@ -51,14 +51,14 @@ function originalInspection(value: MoteDialogueInputInspection, source: MobileMo
   }
   return value
 }
-export async function submitMobileMoteMain(client: AgentMuxHostedClient, source: MobileMoteMainInput, input: Parameters<AgentMuxHostedClient['submitAgentPrompt']>[0]) {
+export async function submitMobileMoteMain(client: MobileConversationClient, source: MobileMoteMainInput, input: Parameters<NonNullable<MobileConversationClient['submitAgentPrompt']>>[0]) {
   if (!client.forwardRpc) return failure('主对话暂时不能发送。')
   const { authorHuman: _human, agentMuxNote: _note, ...original } = input
   const params = { target: source.target, expectedRoleRevision: source.expectedRoleRevision, input: { ...original, moteGuidance: true as const } as AgentInputSubmit }
   const result = parseMoteDialogueResult('space.mote.dialogue.input.submit', await client.forwardRpc('space.mote.dialogue.input.submit', params), params)
   return originalInspection(result, source, input)
 }
-export async function inspectMobileMoteMain(client: AgentMuxHostedClient, source: MobileMoteMainInput,
+export async function inspectMobileMoteMain(client: MobileConversationClient, source: MobileMoteMainInput,
   input: { operationId: string; agentSessionId: string; expectedRun: { runId: string } }) {
   if (!client.forwardRpc) return failure('主对话暂时不能核对。')
   const params = { target: source.target, operationId: input.operationId }

@@ -14,6 +14,7 @@ import { MobileAvatarNotice } from '../notices/MobileNotice'
 const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
 type Catalog = AgentMuxRpcResult<'space.ls'>['catalog']
 export type MobileObjectIdentity = { name: string; project: string; context?: AgentMuxSpaceAddress;
+  member?: import('./mobile-member-target').MobileMemberSelection | undefined;
   mote?: { spaceId: string; name?: string; conversationName?: string | undefined; contentReference?: AgentMuxMotePresentation['content']; facts?: AgentMuxMotePresentation | undefined; appearance?: NonNullable<Catalog['appearance']>[number] | undefined } }
 export function MobileIdentity({ identity, session, client, connected, size = 32, visible = true, objectSpaceId, appearance, appearanceRevision }: {
   identity: MobileObjectIdentity; session?: AgentMuxAgentSession | undefined; client: AgentMuxHostedClient | null; connected: boolean; size?: number; visible?: boolean; objectSpaceId?: string | null | undefined; appearanceRevision?: number | undefined; appearance?: NonNullable<Catalog['appearance']>[number] | undefined

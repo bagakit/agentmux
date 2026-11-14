@@ -1,6 +1,6 @@
 import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { useEffect, useRef, useState } from 'react'
-import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import { mobileCapability, type MobileConversationClient } from './mobile-conversation-client'
 import type { AgentMuxAgentSession, AgentTurnUsage } from '@agentmux/core'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { MobileNotice } from '../notices/MobileNotice'
@@ -13,7 +13,7 @@ function UsageRow({ label, usage, missing }: { label: string; usage: Pick<AgentT
 }
 
 /** A visible, exact-SID read; no polling, billing estimate or lifecycle action. */
-export function MobileAgentUsage({ client, agentSessionId, connected, beforeRead }: { client: AgentMuxHostedClient | null; agentSessionId: string; connected: boolean; beforeRead?: (() => boolean) | undefined }) {
+export function MobileAgentUsage({ client, agentSessionId, connected, beforeRead }: { client: MobileConversationClient | null; agentSessionId: string; connected: boolean; beforeRead?: (() => boolean) | undefined }) {
   const [revision, refresh] = useState(0), [reading, setReading] = useState(false), [issue, setIssue] = useState('')
   const source = () => {
     const runtime = client?.runtimeOwnerIdentity?.(), { recordId, host } = getDeviceWorkface().snapshotIdentity()
@@ -22,13 +22,13 @@ export function MobileAgentUsage({ client, agentSessionId, connected, beforeRead
   const scope = source(), current = useRef({ client, agentSessionId, scope, connected })
   current.current = { client, agentSessionId, scope, connected }
   const [, updateSnapshot] = useState(0)
-  const [observed, setObserved] = useState<{ client: AgentMuxHostedClient; agentSessionId: string; scope: string; session: AgentMuxAgentSession } | null>(null)
+  const [observed, setObserved] = useState<{ client: MobileConversationClient; agentSessionId: string; scope: string; session: AgentMuxAgentSession } | null>(null)
   let cached: AgentMuxAgentSession | undefined
-  try { const value = client?.agentSession(agentSessionId); if (value?.agentSessionId === agentSessionId) cached = value } catch { /* Metadata may not have hydrated; the original public read remains available. */ }
+  try { const value = client?.agentSession?.(agentSessionId); if (value?.agentSessionId === agentSessionId) cached = value } catch { /* Metadata may not have hydrated; the original public read remains available. */ }
   const remote = observed && observed.client === client && observed.agentSessionId === agentSessionId && observed.scope === scope &&
     (!cached || observed.session.hostId === cached.hostId && observed.session.run.runId === cached.run.runId) ? observed.session : undefined
   const session = cached?.turnUsage && (!remote?.turnUsage || cached.turnUsage.observedAt > remote.turnUsage.observedAt) ? cached : remote ?? cached
-  useEffect(() => client?.onEvent(event => {
+  useEffect(() => client?.onEvent?.(event => {
     if (event.type === 'agent-session' && event.session.agentSessionId === agentSessionId) updateSnapshot(value => value + 1)
   }), [client, agentSessionId])
   useEffect(() => {
@@ -45,7 +45,7 @@ export function MobileAgentUsage({ client, agentSessionId, connected, beforeRead
       if (!unchanged()) return
       if (result.session.agentSessionId !== agentSessionId || originalHost && result.session.hostId !== originalHost) throw new Error('返回的读数属于另一个 Agent 或另一台 Mac，没有采用。')
       let latest: AgentMuxAgentSession | undefined
-      try { latest = client.agentSession(agentSessionId) } catch { /* Missing metadata does not invalidate the exact original public read. */ }
+      try { latest = mobileCapability(client, 'agentSession')(agentSessionId) } catch { /* Missing metadata does not invalidate the exact original public read. */ }
       if (latest && (latest.hostId !== result.session.hostId || latest.run.runId !== result.session.run.runId)) throw new Error('对话已更新，没有采用旧的读数。')
       setObserved({ client, agentSessionId, scope: originalScope, session: result.session })
     }).catch(error => { if (unchanged()) setIssue(`读取消耗未完成：${error instanceof Error ? error.message : String(error)}`) })

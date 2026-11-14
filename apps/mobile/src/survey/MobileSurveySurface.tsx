@@ -1,3 +1,4 @@
+import { mobileMemberSelection } from '../navigation/mobile-member-target'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { MobileHeaderMenu } from '../navigation/MobileHeaderMenu'
 import { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-format'
@@ -103,7 +104,8 @@ export function MobileSurveyCatalog({ client = null, connected = true, visible =
     || selected.zone && (!currentZone || currentZone.hostId !== selected.zone.hostId || currentZone.workspaceId !== selected.zone.workspaceId || currentZone.directoryPath !== selected.zone.directoryPath)))
   const openAgent = (region: Region, address?: AgentMuxSpaceCatalog['locations'][number]) => {
     const row = catalog?.agentPresentation?.find(value => value.agentSessionId === region.agentSessionId)
-    if (region.agentSessionId) openSession(region.agentSessionId, { name: row?.name ?? '名称未确认', project: row?.project ?? item?.name ?? '项目未确认', ...(address ? { context: address } : {}) })
+    const member = catalog && region.agentSessionId ? mobileMemberSelection(client, catalog, region.agentSessionId, address) : undefined
+    if (region.agentSessionId) openSession(region.agentSessionId, { ...(member ? { member } : {}), name: row?.name ?? '名称未确认', project: row?.project ?? item?.name ?? '项目未确认', ...(address ? { context: address } : {}) })
   }
   return <MobileNoticeScope owner={client} identity={[context.zoneId,context.tabId,context.regionId]}><section className="mobile-survey" aria-label="Survey">
     <header className="mobile-page-header"><MobileHeaderMenu hidden={Boolean(activeBack)} />{activeBack && <button className="mobile-text-button" type="button" aria-label={context.regionId ? '返回研究内容' : '返回研究列表'} onClick={activeBack}><SemanticIcon name="navigation.back" size={16} /><span>{context.regionId ? '内容' : '研究'}</span></button>}

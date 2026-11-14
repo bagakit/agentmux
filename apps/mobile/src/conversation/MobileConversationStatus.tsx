@@ -1,11 +1,11 @@
 import type { AgentMuxAgentSession } from '@agentmux/core'
-import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import type { MobileConversationClient } from './mobile-conversation-client'
 import type { MobileConnection } from './use-hosted-conversation'
 import type { MobileConversationMetadata } from './mobile-conversation-session'
 
 /** Presentation of the existing Reader's facts; never another Session observer. */
 export type MobileConversationStatus = {
-  client: AgentMuxHostedClient | null
+  client: MobileConversationClient | null
   agentSessionId: string | null
   session: AgentMuxAgentSession | null
   metadata: MobileConversationMetadata

@@ -1,5 +1,5 @@
 import type { AgentMuxAgentSession } from '@agentmux/core'
-import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import { mobileCapability, type MobileConversationClient } from './mobile-conversation-client'
 import { errorMessage } from './delivery'
 
 export type MobileConversationMetadata = {
@@ -9,10 +9,10 @@ export type MobileConversationMetadata = {
 export type MobileConversationSession = { session: AgentMuxAgentSession | null; metadata: MobileConversationMetadata }
 
 /** Read this original owner's exact identity; a cache miss supplies no lifecycle fact. */
-export async function readMobileConversationSession(client: AgentMuxHostedClient, id: string): Promise<MobileConversationSession> {
+export async function readMobileConversationSession(client: MobileConversationClient, id: string): Promise<MobileConversationSession> {
   try {
     let session: AgentMuxAgentSession | null = null
-    try { session = await client.readAgentSession(id) }
+    try { session = await mobileCapability(client, 'readAgentSession')(id) }
     catch (error) {
       // A deleted current row can reject its point read; still require the exact
       // retained descriptor before adopting any terminal record state.
@@ -22,7 +22,7 @@ export async function readMobileConversationSession(client: AgentMuxHostedClient
       if (session.agentSessionId !== id) throw new Error('对话当前不能投递：返回的对话信息与当前选择不一致。')
       return { session, metadata: { state: 'active', issue: null } }
     }
-    const sources = await client.sessionHistorySources({ agentSessionId: id })
+    const sources = await mobileCapability(client, 'sessionHistorySources')({ agentSessionId: id })
     const exact = sources.filter(source => source.agentSessionId === id)
     if (exact.length === 1 && (exact[0]!.state === 'retired' || exact[0]!.state === 'deleted')) {
       return { session: null, metadata: { state: exact[0]!.state, issue: null } }

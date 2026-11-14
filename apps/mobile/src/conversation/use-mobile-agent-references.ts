@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { AgentMuxAgentSession } from '@agentmux/core'
-import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import { mobileCapability, type MobileConversationClient } from './mobile-conversation-client'
 import { formatSessionAddress } from '@agentmux/core/sharing'
 import type { ComposerSuggestion } from '@agentmux/client-ui/components/AgentComposer'
 import { encodeSemanticReference } from '@agentmux/client-ui/composer-semantic-reference'
@@ -9,9 +9,9 @@ import { errorMessage } from './delivery'
 const empty: ComposerSuggestion[] = []
 
 /** Only an active completion query needs the peer directory, not ordinary reading. */
-export function useMobileAgentReferences(client: AgentMuxHostedClient | null, sessionId: string | null,
+export function useMobileAgentReferences(client: MobileConversationClient | null, sessionId: string | null,
   displayName: string | undefined, requested: boolean) {
-  const [snapshot, setSnapshot] = useState<{ client: AgentMuxHostedClient; sessionId: string;
+  const [snapshot, setSnapshot] = useState<{ client: MobileConversationClient; sessionId: string;
     displayName: string | undefined; values: ComposerSuggestion[]; issue: string | null } | null>(null)
   useEffect(() => {
     if (!requested || !client || !sessionId) { setSnapshot(null); return }
@@ -37,14 +37,15 @@ export function useMobileAgentReferences(client: AgentMuxHostedClient | null, se
       })
     }
     const refresh = () => {
-      const observation = client.sessionObservation()
+      if (!client.sessionObservation) { issue = '原成员的引用目录能力尚未确认；原对话和草稿保持不变。'; return }
+      const observation = mobileCapability(client, 'sessionObservation')()
       if (!observation.hasSnapshot) {
         issue = observation.state === 'unconfirmed' ? '正在读取引用目录…'
           : observation.diagnostic?.message ?? '引用目录暂时读不到；收起后可重新打开。'
         return
       }
       try {
-        const next = client.agentSessions().map(peer => [peer.agentSessionId,
+        const next = mobileCapability(client, 'agentSessions')().map(peer => [peer.agentSessionId,
           { runId: peer.run.runId, suggestion: reference(peer) }] as const)
         peers.clear()
         for (const [id, peer] of next) peers.set(id, peer)
@@ -54,7 +55,7 @@ export function useMobileAgentReferences(client: AgentMuxHostedClient | null, se
     let unsubscribe: (() => void) | undefined
     let subscriptionIssue: string | null = null
     try {
-      unsubscribe = client.onEvent(event => {
+      unsubscribe = client.onEvent?.(event => {
         if (!current) return
         if (event.type === 'agent-session') {
           const peer = event.session, previous = peers.get(peer.agentSessionId), next = reference(peer)

@@ -1,7 +1,7 @@
 import { MobileNotice } from '../notices/MobileNotice'
 import { useEffect, useImperativeHandle, useRef, useState, useSyncExternalStore, type Ref } from 'react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
-import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import type { MobileConversationClient } from './mobile-conversation-client'
 import type { AgentMuxAgentSession } from '@agentmux/core'
 import { FILE_UPLOAD_MAX_BYTES, parseFileUploadParams, type FileUploadIdentity } from '@agentmux/core/files'
 import { localAttachmentFromBlob, pickLocalAttachment, type LocalAttachment, type LocalAttachmentFile } from '../platform/native/device'
@@ -23,7 +23,7 @@ type CopyDecision = { upload: MobileFileUpload; file: LocalAttachment; kind: 'di
   recordId: string | null; revision: string; dataBase64: string }
 type Props = {
   owner?: AttachmentPageOwner | undefined
-  client: AgentMuxHostedClient | null; session: AgentMuxAgentSession | null; connected: boolean;
+  client: MobileConversationClient | null; session: AgentMuxAgentSession | null; connected: boolean;
   agentSessionId?: string | null;
   promptOperationId: string | null; confirmedPrompt: ConfirmedAttachmentPrompt | null;
   onSendBodyOnly?(): void; bodyOnlyDisabled?: boolean;
@@ -47,8 +47,8 @@ export function MobileAttachments({ owner: providedOwner, client, session, agent
   current.current = { client, session, connected, promptOperationId }
   const scope = () => {
     let original = current.current.session
-    try { if (original) original = current.current.client?.agentSession(original.agentSessionId) ?? null }
-    catch { original = null }
+    try { if (original) original = current.current.client?.agentSession?.(original.agentSessionId) ?? original }
+    catch { /* An unavailable cache cannot erase the accepted point read. The original upload Run is checked by its service. */ }
     return { runtimeId: current.current.client?.runtimeOwnerIdentity?.()?.runtimeId ?? null,
       hostId: original?.hostId ?? null, sessionId: original?.agentSessionId ?? null,
       runId: original?.run.runId ?? null }

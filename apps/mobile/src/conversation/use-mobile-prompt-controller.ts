@@ -1,6 +1,6 @@
 import { MOTE_INPUT_GUIDANCE } from '@agentmux/core/mote-input-source'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import { mobileCapability, type MobileConversationClient } from './mobile-conversation-client'
 import { isHostedAgentSessionSummary } from '@agentmux/core/hosted'
 import type { AgentInputMoteSource, AgentInputSubmissionReceipt, AgentMuxAgentSession, AgentTimelineSnapshot } from '@agentmux/core'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
@@ -76,10 +76,13 @@ function retainedPromptKey(sessionId: string | null, operationId: string): strin
   return JSON.stringify(['retained-prompt', sessionId, operationId])
 }
 /** These keys route existing device intents; they grant no Core input authority. */
-function promptAttemptsForSession(attempts: ReadonlyMap<string, PromptAttempt>, sessionId: string | null) {
+function promptAttemptsForSession(attempts: ReadonlyMap<string, PromptAttempt>, sessionId: string | null, selectedDraftKey?: string, runtimeId?: string) {
   const active = JSON.stringify(['draft', sessionId])
-  return [...attempts].filter(([key]) => {
-    if (key === active) return true
+  return [...attempts].filter(([key, original]) => {
+    if (key === (selectedDraftKey ?? active)) return true
+    const originalRuntime = original.manualInput?.runtimeId ?? original.request?.runtimeId ?? original.originalRuntimeId
+    if (selectedDraftKey !== undefined && selectedDraftKey !== active && (!runtimeId || originalRuntime !== runtimeId)) return false
+    if (runtimeId && originalRuntime && originalRuntime !== runtimeId) return false
     try {
       const value: unknown = JSON.parse(key)
       return Array.isArray(value) && value.length === 3 &&
@@ -92,8 +95,9 @@ type MobilePromptControllerOptions = {
   local: ReturnType<typeof createLocalDrafts>
   textDraft?: MobileTextDraft | undefined
   isTextTargetCurrent?: (() => boolean) | undefined
-  client: AgentMuxHostedClient | null
+  client: MobileConversationClient | null
   agentSessionId: string | null
+  draftScope?: string | undefined
   moteSource?: AgentInputMoteSource | undefined
   moteMain?: MobileMoteMainInput | undefined
   moteMainIssue?: string | undefined
@@ -118,9 +122,9 @@ export type MobilePromptPreparation = {
 type PendingInputAction = { cancelled: boolean; dispatched: boolean; saving: boolean; allowUpdate: () => void }
 
 /** Coordinates original device intents with Core; local-drafts remains the durable owner. */
-export function useMobilePromptController({ local, textDraft, isTextTargetCurrent, client, agentSessionId, moteSource, moteMain, moteMainIssue, moteDirectAgent, onRolloverRequired, session, sessionState, timeline, connection,
+export function useMobilePromptController({ local, textDraft, isTextTargetCurrent, client, agentSessionId, draftScope, moteSource, moteMain, moteMainIssue, moteDirectAgent, onRolloverRequired, session, sessionState, timeline, connection,
   disconnected, visible, refresh }: MobilePromptControllerOptions) {
-  const draftKey = JSON.stringify(['draft', agentSessionId])
+  const draftKey = JSON.stringify(['draft', draftScope ?? agentSessionId])
   const textDraftKey = textDraft?.key ?? draftKey, textDrafts = textDraft?.local.drafts ?? local.drafts
   // Each asynchronous producer retains the maps of its original device record.
   const drafts = useMemo(() => ({ current: local.drafts }), [local])
@@ -131,7 +135,7 @@ export function useMobilePromptController({ local, textDraft, isTextTargetCurren
   const dispatched = useMobileWebDispatchedOperations()
   const preparingKeys = useRef(new Map<string, { cancelled: boolean; retaining: boolean; cancel?: (() => void) | undefined }>())
   const pendingActions = useRef(new Map<string, PendingInputAction>())
-  const [preparationIssue, setPreparationIssue] = useState<{ client: AgentMuxHostedClient | null; sessionId: string | null; message: string; detail?: string } | null>(null)
+  const [preparationIssue, setPreparationIssue] = useState<{ client: MobileConversationClient | null; sessionId: string | null; message: string; detail?: string } | null>(null)
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const current = useRef({ client, agentSessionId, visible, onRolloverRequired })
@@ -140,13 +144,13 @@ export function useMobilePromptController({ local, textDraft, isTextTargetCurren
   const draft = textDrafts.get(textDraftKey) ?? ''
   const attempt = attempts.current.get(draftKey)
   const available = Boolean(client && agentSessionId && connection.state === 'connected' && !disconnected && sessionState !== 'retired' && sessionState !== 'deleted')
-  async function readSession(source: AgentMuxHostedClient, id: string) {
+  async function readSession(source: MobileConversationClient, id: string) {
     const observed = await readMobileConversationSession(source, id)
     if (!observed.session || observed.metadata.state !== 'active') throw Object.assign(new Error(observed.metadata.issue ??
       (observed.metadata.state === 'retired' ? '这段对话已退役，草稿仍保留。' : observed.metadata.state === 'deleted' ? '这段对话的记录已删除，草稿仍保留。' : '对话信息还没确认，可以重新核对。')), { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
     return observed.session
   }
-  const automaticPause = useRef<{ target: import('@agentmux/core/agent-automation').AgentAutomationTarget; client: AgentMuxHostedClient } | null>(null)
+  const automaticPause = useRef<{ target: import('@agentmux/core/agent-automation').AgentAutomationTarget; client: MobileConversationClient } | null>(null)
   const pauseForExplicitInput = () => {
     if (!client || !session || session.agentSessionId !== agentSessionId) return
     const owner = client.runtimeOwnerIdentity?.()
@@ -219,11 +223,11 @@ export function useMobilePromptController({ local, textDraft, isTextTargetCurren
     action.saving = true
     try { return await local.save() } finally { action.saving = false }
   }
-  const trackDispatchedPrompt = (originalClient: AgentMuxHostedClient, originalKey: string, original: PromptAttempt) => {
+  const trackDispatchedPrompt = (originalClient: MobileConversationClient, originalKey: string, original: PromptAttempt) => {
     const identity = dispatchedPromptIdentity(original), recordId = getDeviceWorkface().recordIdentity()
     return dispatched.track(originalKey, candidate => {
       if (!candidate || typeof candidate !== 'object' || !('original' in candidate)) return false
-      const value = candidate as { client: AgentMuxHostedClient | null; key: string; original: PromptAttempt; recordId: string | null }
+      const value = candidate as { client: MobileConversationClient | null; key: string; original: PromptAttempt; recordId: string | null }
       return value.client === originalClient && value.recordId === recordId && value.key === originalKey && dispatchedPromptIdentity(value.original) === identity
     })
   }
@@ -283,8 +287,8 @@ export function useMobilePromptController({ local, textDraft, isTextTargetCurren
     return Object.freeze({ ...startDeliveryAttempt({ agentSessionId: original.manualInput!.agentSessionId, operationId: original.operationId,
       hostId: original.originalHostId ?? null, prompt: expandSemanticReferences(original.draft) }), expectedRunId: original.runId, execution: 'immediate' as const })
   }
-  async function sendOriginalPrompt(source: AgentMuxHostedClient, original: PromptAttempt, input: Parameters<AgentMuxHostedClient['submitAgentPrompt']>[0]) {
-    if (!original.moteMain) return source.submitAgentPrompt(input)
+  async function sendOriginalPrompt(source: MobileConversationClient, original: PromptAttempt, input: Parameters<NonNullable<MobileConversationClient['submitAgentPrompt']>>[0]) {
+    if (!original.moteMain) return mobileCapability(source, 'submitAgentPrompt')(input)
     const result = await submitMobileMoteMain(source, original.moteMain, input)
     if (result.disposition === 'rollover-required' && result.rollover?.status === 'due' && result.rollover.decision) {
       original.inputRequested = false
@@ -320,10 +324,10 @@ export function useMobilePromptController({ local, textDraft, isTextTargetCurren
     if (outcome !== 'admitted' && outcome !== 'terminal-confirmed') throw Object.assign(
       new Error('主对话消息还没确认送达，不会重复发送。'), { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
   }
-  async function inspectOriginalManual(source: AgentMuxHostedClient, original: PromptAttempt) {
+  async function inspectOriginalManual(source: MobileConversationClient, original: PromptAttempt) {
     return original.moteMain ? (await inspectMobileMoteMain(source, original.moteMain, { operationId: original.operationId,
       agentSessionId: original.manualInput!.agentSessionId, expectedRun: original.manualInput!.expectedRun })).input
-      : source.inspectAgentInput({ key: manualKey(original) })
+      : mobileCapability(source, 'inspectAgentInput')({ key: manualKey(original) })
   }
   async function retryManualInput(key: string, original: PromptAttempt, action: PendingInputAction) {
     try {
@@ -354,7 +358,7 @@ export function useMobilePromptController({ local, textDraft, isTextTargetCurren
         return
       }
       if (!retained || attempts.current.get(key) !== original) return
-      const pending = observed ? source.rejoinAgentInputWaiting({ ref: observed.ref })
+      const pending = observed ? mobileCapability(source, 'rejoinAgentInputWaiting')({ ref: observed.ref })
         : sendOriginalPrompt(source, original, { agentSessionId: input.agentSessionId, operationId: original.operationId,
           expectedRun: input.expectedRun, admissionIntent: original.admissionIntent ?? { kind: 'manual-actor' }, prompt: expandSemanticReferences(original.draft),
           ...(original.moteSource ? { moteSource: structuredClone(original.moteSource) } : {}),
@@ -392,7 +396,7 @@ export function useMobilePromptController({ local, textDraft, isTextTargetCurren
         return
       }
       if (!retained || attempts.current.get(key) !== original) return
-      const pending = source.stopAgentInputWaiting(stop)
+      const pending = mobileCapability(source, 'stopAgentInputWaiting')(stop)
       action.dispatched = true; action.allowUpdate(); if (mounted.current) redraw(value => value + 1)
       const stopped = await pending
       if (attempts.current.get(key) !== original || input.stopIntent !== stop) return
@@ -415,29 +419,29 @@ export function useMobilePromptController({ local, textDraft, isTextTargetCurren
     const inspect = () => {
       if (!client.inspectAgentInput) return
       const currentRuntimeId = client.runtimeOwnerIdentity?.()?.runtimeId
-      for (const [key, original] of promptAttemptsForSession(attempts.current, agentSessionId)) {
+      for (const [key, original] of promptAttemptsForSession(attempts.current, agentSessionId, draftKey, client?.runtimeOwnerIdentity?.()?.runtimeId)) {
         if (!original.manualInput || original.manualInput.runtimeId !== null && currentRuntimeId && original.manualInput.runtimeId !== currentRuntimeId) continue
         void Promise.resolve().then(() => inspectOriginalManual(client, original)).then(receipt => {
           if (live && receipt) observeInputReceipt(key, original, receipt)
         }).catch(error => { if (live) void retainFailure(original, manualSeed(original), error, 'input-observation', client, key, true) })
       }
     }
-    const unlisten = client.onEvent(event => {
+    const unlisten = client.onEvent?.(event => {
       if (!live) return
       if (event.type === 'connection-state' && event.state === 'restored') inspect()
       if (event.type !== 'agent-input' || event.receipt.key.agentSessionId !== agentSessionId) return
       const currentRuntimeId = client.runtimeOwnerIdentity?.()?.runtimeId
-      for (const [key, original] of promptAttemptsForSession(attempts.current, agentSessionId)) {
+      for (const [key, original] of promptAttemptsForSession(attempts.current, agentSessionId, draftKey, client?.runtimeOwnerIdentity?.()?.runtimeId)) {
         if (!original.manualInput || original.manualInput.runtimeId !== null && currentRuntimeId && original.manualInput.runtimeId !== currentRuntimeId) continue
         try { observeInputReceipt(key, original, event.receipt) }
         catch (error) { void retainFailure(original, manualSeed(original), error, 'input-observation', client, key, true) }
       }
     })
     inspect()
-    return () => { live = false; unlisten() }
+    return () => { live = false; unlisten?.() }
   }, [client, agentSessionId, visible, connection.state])
   useEffect(() => {
-    for (const [key, pending] of promptAttemptsForSession(attempts.current, agentSessionId)) {
+    for (const [key, pending] of promptAttemptsForSession(attempts.current, agentSessionId, draftKey, client?.runtimeOwnerIdentity?.()?.runtimeId)) {
       if (pending.phase !== 'unknown' || pending.manualInput || pending.moteMain) continue
       if (originalPromptRefused(session, agentSessionId, pending, client?.runtimeOwnerIdentity?.()?.runtimeId)) {
         pending.phase = 'rejected'
@@ -452,11 +456,11 @@ export function useMobilePromptController({ local, textDraft, isTextTargetCurren
     }
   }, [timeline, session, agentSessionId, draftKey, revision])
 
-  const diagnosticOwner = (originalClient: AgentMuxHostedClient | null): string | null => {
+  const diagnosticOwner = (originalClient: MobileConversationClient | null): string | null => {
     const identity = originalClient?.runtimeOwnerIdentity?.()
     return identity ? `runtime:${identity.runtimeId}` : null
   }
-  const reportDiagnostics = (originalClient: AgentMuxHostedClient | null) => {
+  const reportDiagnostics = (originalClient: MobileConversationClient | null) => {
     const owner = diagnosticOwner(originalClient)
     if (owner && originalClient?.forwardRpc) void diagnostics.sync(owner, record => originalClient.forwardRpc!(
       'message.delivery.report', { hostId: 'local', record }))
@@ -464,7 +468,7 @@ export function useMobilePromptController({ local, textDraft, isTextTargetCurren
   useEffect(() => diagnostics.subscribe(() => redraw(value => value + 1)), [diagnostics])
   useEffect(() => { if (connection.state === 'connected') reportDiagnostics(client) }, [client, connection.state])
   async function retainFailure(original: PromptAttempt, seed: DeliveryAttemptSeed, error: unknown, stage: string,
-    originalClient: AgentMuxHostedClient | null, key: string, retry: boolean) {
+    originalClient: MobileConversationClient | null, key: string, retry: boolean) {
     const ownerId = original.manualInput?.runtimeId ?? original.request?.runtimeId
     const owner = ownerId ? `runtime:${ownerId}` : diagnosticOwner(originalClient)
     const settled = original.phase === 'confirmed' || original.inputReceipt?.status === 'terminal-confirmed' || original.inputReceipt?.status === 'admitted'
@@ -566,7 +570,7 @@ export function useMobilePromptController({ local, textDraft, isTextTargetCurren
       if (originalBody && !refused) return
       // An identical unresolved input keeps its original identity, even after another
       // draft became active. A distinct explicit body is a new intent for Core to qualify.
-      const unresolved = !originalBody && promptAttemptsForSession(attempts.current, agentSessionId).find(([, value]) =>
+      const unresolved = !originalBody && promptAttemptsForSession(attempts.current, agentSessionId, draftKey, client?.runtimeOwnerIdentity?.()?.runtimeId).find(([, value]) =>
         value.phase === 'unknown' && expandSemanticReferences(value.draft) === expandSemanticReferences(body))
       if (unresolved) {
         if (bodyOnly) { setPreparationIssue({ client, sessionId: agentSessionId, message: '同一正文已有一次还没确认的发送。请先核对那条消息的结果，这次不会重发。' }); return }
@@ -721,7 +725,7 @@ export function useMobilePromptController({ local, textDraft, isTextTargetCurren
         throw Object.assign(new Error('当前连接的不是这条消息所在的 Mac，不会发到另一台 Mac。'), { code: 'STALE_AGENT_SESSION' })
       }
       let cached: AgentMuxAgentSession | undefined
-      try { cached = originalClient.agentSession(originalId) } catch { /* Missing cache is not a gate. */ }
+      try { cached = mobileCapability(originalClient, 'agentSession')(originalId) } catch { /* Missing cache is not a gate. */ }
       if (original.phase === 'unknown' && cached && isHostedAgentSessionSummary(cached) && cached.promptCompletionAdmission?.submissionId !== original.operationId) throw Object.assign(
         new Error('对话或投递条件无法完整核实，这次没有发送。'), { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
       const originalSession = await readSession(originalClient, originalId)
@@ -799,7 +803,7 @@ export function useMobilePromptController({ local, textDraft, isTextTargetCurren
     }
   }
 
-  const allAttempts = promptAttemptsForSession(attempts.current, agentSessionId)
+  const allAttempts = promptAttemptsForSession(attempts.current, agentSessionId, draftKey, client?.runtimeOwnerIdentity?.()?.runtimeId)
   // Recent device intents remain editable memory; they are never promoted to native history or a delivery receipt.
   const historyLocalEntries = allAttempts
     .filter(([, original]) => original.draft && session?.hostId && original.originalHostId === session.hostId)

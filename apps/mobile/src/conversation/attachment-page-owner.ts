@@ -1,5 +1,5 @@
 import type { AgentMuxAgentSession } from '@agentmux/core'
-import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import type { MobileConversationClient } from './mobile-conversation-client'
 import type { LocalAttachment } from '../platform/native/device'
 import { getDeviceWorkface } from '../recovery/device-workface'
 import type { MobileFileUpload } from './attachments'
@@ -8,14 +8,14 @@ type Ref<T> = { current: T }
 export type SelectionTarget = { runtimeId: string; hostId: string; sessionId: string; runId: string; recordId: string | null }
 export type SelectionOperation = { id: number; kind: 'picker' | 'read'; label: string; target: SelectionTarget; cancelled: boolean; expanded: boolean;
   controller: AbortController; allowUpdate(): void; stopped: Promise<void>; stop(): void }
-export type AttachmentFlight = { client: AgentMuxHostedClient | null; recordId: string | null; intent: string; claimedForSend: boolean;
+export type AttachmentFlight = { client: MobileConversationClient | null; recordId: string | null; intent: string; claimedForSend: boolean;
   saved: boolean; dispatched: 'upload' | 'inspect' | null; cancelled: boolean; original: MobileFileUpload; stop(): void; stopped: Promise<null>; result: Promise<MobileFileUpload | null> }
 export type AttachmentPageOwner = {
   revision: number
   uploads: Ref<MobileFileUpload[]>; recordIds: Ref<Map<string, string | null>>; originalEntries: Ref<Map<string, MobileFileUpload>>
   bytes: Ref<Map<string, LocalAttachment>>; exports: Ref<Map<string, { file: LocalAttachment; url: string }>>; busy: Ref<Map<string, AttachmentFlight>>
   pickerOpen: Ref<SelectionOperation | null>; selectionTail: Ref<Promise<void>>; selections: Ref<Map<number, SelectionOperation>>; nextSelection: Ref<number>
-  current: Ref<{ client: AgentMuxHostedClient | null; session: AgentMuxAgentSession | null; connected: boolean; promptOperationId: string | null }>
+  current: Ref<{ client: MobileConversationClient | null; session: AgentMuxAgentSession | null; connected: boolean; promptOperationId: string | null }>
   subscribe(listener: () => void): () => void; changed(): void; issue(): string | null
 }
 /** One document-local owner; unmounting a presentation does not discard its original bytes or continuations. */

@@ -1,12 +1,12 @@
-import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import { mobileCapability, type MobileConversationClient } from './mobile-conversation-client'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { getDeviceWorkface } from '../recovery/device-workface'
 import type { MobileAgentResumeIntent } from '../recovery/agent-resume-intents'
 
 // In-flight coordination only. Durable Session, operation and phase facts stay with DeviceWorkface/Core.
-const flights = new WeakMap<AgentMuxHostedClient, Set<string>>()
-const subscribers = new WeakMap<AgentMuxHostedClient, Map<string, Set<() => void>>>()
-export function subscribeMobileAgentRecovery(client: AgentMuxHostedClient | null, agentSessionId: string, notify: () => void): () => void {
+const flights = new WeakMap<MobileConversationClient, Set<string>>()
+const subscribers = new WeakMap<MobileConversationClient, Map<string, Set<() => void>>>()
+export function subscribeMobileAgentRecovery(client: MobileConversationClient | null, agentSessionId: string, notify: () => void): () => void {
   if (!client) return () => {}
   let bySession = subscribers.get(client)
   if (!bySession) { bySession = new Map(); subscribers.set(client, bySession) }
@@ -15,19 +15,19 @@ export function subscribeMobileAgentRecovery(client: AgentMuxHostedClient | null
   listeners.add(notify)
   return () => { listeners.delete(notify); if (!listeners.size) bySession.delete(agentSessionId); if (!bySession.size) subscribers.delete(client) }
 }
-function notifyFlight(client: AgentMuxHostedClient, agentSessionId: string) {
+function notifyFlight(client: MobileConversationClient, agentSessionId: string) {
   for (const notify of subscribers.get(client)?.get(agentSessionId) ?? []) notify()
 }
-export function mobileAgentRecoveryBusy(client: AgentMuxHostedClient | null, agentSessionId: string): boolean {
+export function mobileAgentRecoveryBusy(client: MobileConversationClient | null, agentSessionId: string): boolean {
   return Boolean(client && flights.get(client)?.has(agentSessionId))
 }
-export function pendingMobileAgentRecovery(client: AgentMuxHostedClient | null, agentSessionId: string): MobileAgentResumeIntent | undefined {
+export function pendingMobileAgentRecovery(client: MobileConversationClient | null, agentSessionId: string): MobileAgentResumeIntent | undefined {
   const record = getDeviceWorkface().snapshot().record
   return record.agentResumes?.find(item => item.input.agentSessionId === agentSessionId && item.phase !== 'confirmed' && item.phase !== 'superseded' &&
     item.runtimeId === client?.runtimeOwnerIdentity?.()?.runtimeId && item.deviceHostId === (record.host?.hostId ?? null))
 }
 export type MobileAgentRecoveryRequest = {
-  client: AgentMuxHostedClient; agentSessionId: string; expectedHostId?: string
+  client: MobileConversationClient; agentSessionId: string; expectedHostId?: string
   /** Opening an existing main Agent inspects any pending operation; only Continue may redispatch that same request. */
   mode?: 'open' | 'new' | 'inspect' | 'continue'
   isCurrent(): boolean; onNotice(message: string, technical?: string): void
@@ -79,7 +79,7 @@ export async function recoverMobileAgent({ client, agentSessionId, expectedHostI
     intent ??= { ...scope, runtimeId: scope.runtimeId, hostId: result.session.hostId, input: { agentSessionId, expectedRun: { ...result.session.run }, operationId: randomClientRequestId(), trigger: 'manual' }, phase: 'sending' }
     await owner.retainAgentResume(intent, recordId)
     if (!unchanged()) return
-    const restored = await client.ensureAgentContinuity(intent.input)
+    const restored = await mobileCapability(client, 'ensureAgentContinuity')(intent.input)
     if (('session' in restored ? restored.session.agentSessionId !== agentSessionId || restored.session.hostId !== intent.hostId : restored.agentSessionId !== agentSessionId) || restored.previousRun.runId !== intent.input.expectedRun.runId) throw new Error('恢复结果属于另一个目标，可以核对后再试。')
     const confirmed = restored.kind === 'resumed' || restored.kind === 'reattachable'
     const superseded = restored.kind === 'conflict' && restored.reason === 'session-run-changed'

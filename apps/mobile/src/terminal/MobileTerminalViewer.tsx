@@ -5,7 +5,7 @@ import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { activateTerminalUnicodeWidth, UNICODE_WIDTH_VERSION } from '@agentmux/client-ui/terminal/unicode'
-import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import type { MobileTerminalClient } from '../conversation/mobile-conversation-client'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import type { MobileConnection } from '../conversation/MobileConversationSurface'
 import { createMobileTerminalReader, type MobileTerminalReading } from './reader'
@@ -27,7 +27,7 @@ const MOBILE_TERMINAL_KEYS = [
 ] as const
 
 export function MobileTerminalViewer({ client, agentSessionId, connection, platform, visible, inputActive = visible, terminalPalette }: {
-  client: AgentMuxHostedClient | null; agentSessionId: string | null; connection: MobileConnection
+  client: MobileTerminalClient | null; agentSessionId: string | null; connection: MobileConnection
   platform: ClientUiPlatform; visible: boolean; inputActive?: boolean; terminalPalette?: ITheme | undefined
 }) {
   const paletteRef = useRef(terminalPalette); paletteRef.current = terminalPalette

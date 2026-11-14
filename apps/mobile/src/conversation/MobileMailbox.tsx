@@ -2,7 +2,7 @@ import { inputMailboxItemKey, inputMailboxKey, useAgentInputMailbox } from '@age
 import { InputMailboxRecords, inputMailboxPresentation } from '@agentmux/client-ui/components/InputMailboxRecords'
 import { MessageDeliveryFailure } from '@agentmux/client-ui/components/MessageDeliveryFailure'
 import type { ClientDeliveryDiagnostics } from '@agentmux/client-ui/delivery-diagnostics'
-import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import type { MobileConversationClient } from './mobile-conversation-client'
 import { conversationRecordId, projectSessionInputs, type ConversationInputEntity } from '@agentmux/core/conversation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
@@ -27,7 +27,7 @@ function sameOriginalReading(a: AgentSessionUserMessage, b: AgentSessionUserMess
 /** A client presentation of original Core messages and state, never a second mailbox owner. */
 export function MobileMailbox({ client, session, connected, messages, inputs, sourceHostId, platform, describeSpeaker, refresh, terminal,
   historyScope, readHistory, onHistoryFill, onHistoryCopy, localEntries = [], onHistoryFillLocal, promptAttempts = [], diagnostics, reading, visible = true }: {
-  client?: AgentMuxHostedClient | null; session: AgentMuxAgentSession | null; connected: boolean; messages: readonly AgentSessionUserMessage[]; platform: ClientUiPlatform;
+  client?: MobileConversationClient | null; session: AgentMuxAgentSession | null; connected: boolean; messages: readonly AgentSessionUserMessage[]; platform: ClientUiPlatform;
   inputs?: readonly ConversationInputEntity[]; sourceHostId?: string
   describeSpeaker: DescribeSpeaker; refresh(): void; terminal?: () => void
   historyScope: string; readHistory: InputHistoryRead; reading?: ConversationReadingProps; visible?: boolean
@@ -51,7 +51,7 @@ export function MobileMailbox({ client, session, connected, messages, inputs, so
     enabled: open && visible && connected && Boolean(session && client), read: readInputMailbox })
   useEffect(() => {
     if (!client || !open || !visible || !session) return
-    return client.onEvent(event => {
+    return client.onEvent?.(event => {
       if (event.type === 'agent-input-recorded' && event.agentSessionId === session.agentSessionId ||
           event.type === 'agent-input' && event.receipt.key.agentSessionId === session.agentSessionId ||
           event.type === 'connection-state' && event.state === 'restored') void mailbox.refresh()

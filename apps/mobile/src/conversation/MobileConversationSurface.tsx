@@ -12,7 +12,7 @@ import { currentAgentSemanticStatus, nativeTargetSourceUnconfirmed } from '@agen
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createMobileMoteInputReader } from './mote-input-reader'
 import { createPortal } from 'react-dom'
-import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import { mobileCapability, type MobileConversationClient } from './mobile-conversation-client'
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { AgentInputMoteSource, AgentSessionUserMessage } from '@agentmux/core'
 import type { InputHistoryRead } from '@agentmux/client-ui/use-agent-input-history'
@@ -88,8 +88,11 @@ const mobileConversationToolLabels: NonNullable<ClientUiPlatform['conversationTo
 export type { MobileConnection } from './use-hosted-conversation'
 export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
   'openWorkspaceFile' | 'readPastedImage' | 'openHttpLink'> & {
-  client: AgentMuxHostedClient | null
+  client: MobileConversationClient | null
   agentSessionId: string | null
+  draftScope?: string | undefined
+  memberIssue?: string | undefined
+  onRetryMember?: (() => void) | undefined
   moteSource?: AgentInputMoteSource | undefined
   connection: MobileConnection
   platform: ClientUiPlatform
@@ -120,14 +123,14 @@ export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
   attachmentOwner?: AttachmentPageOwner | undefined
 }
 /** A first-party SDK reader and input client. Core owns ordering, authorship and admission. */
-export function MobileConversationSurface({ client, agentSessionId, moteSource, connection, platform, onStatusChange, onAttach, onShowTerminal, onShowGoals, toolbarTarget, statusTarget, noticeTarget, visible = true, displayName, moteMemberName, moteTarget, moteDialogue, moteDirectAgent, moteName, moteAppearance, moteWorkMemberName, onOpenMoteWork, onShowMoteThreads, moteConfigurationIssue, onRefreshMoteConfiguration, onMoteRolloverRequired, onReturnMoteMain, attachmentOwner: providedAttachmentOwner,
+export function MobileConversationSurface({ client, agentSessionId, draftScope, memberIssue, onRetryMember, moteSource, connection, platform, onStatusChange, onAttach, onShowTerminal, onShowGoals, toolbarTarget, statusTarget, noticeTarget, visible = true, displayName, moteMemberName, moteTarget, moteDialogue, moteDirectAgent, moteName, moteAppearance, moteWorkMemberName, onOpenMoteWork, onShowMoteThreads, moteConfigurationIssue, onRefreshMoteConfiguration, onMoteRolloverRequired, onReturnMoteMain, attachmentOwner: providedAttachmentOwner,
   openWorkspaceFile, readPastedImage, openHttpLink }: MobileConversationSurfaceProps) {
   const conversationIoPlatform = useMemo(() => ({ ...platform,
     readA2AMessage: async (reference: { hostId: string; agentSessionId: string }, messageId: string, notificationId?: string) => {
       // The selected hosted client owns the local namespace; it cannot route another Host or participant.
       if (!client) throw new Error('The selected Host is unavailable. The original message reference is retained.')
       if (reference.hostId !== 'local' || reference.agentSessionId !== agentSessionId) throw new Error('The original message belongs to another Host or Session. Its reference is retained.')
-      return client.readMessage({ messageId, ...(notificationId === undefined ? {} : { notificationId }) })
+      return mobileCapability(client, 'readMessage')({ messageId, ...(notificationId === undefined ? {} : { notificationId }) })
     }
   }), [platform, client, agentSessionId])
   const feed = useRef<HTMLDivElement>(null)
@@ -149,7 +152,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
   const [, redraw] = useState(0)
   useEffect(() => {
     if (!client || !visible || !agentSessionId) return
-    const unsubscribe = client.onEvent(event => {
+    const unsubscribe = client.onEvent?.(event => {
       if (event.type === 'session-observation-state') redraw(value => value + 1)
     })
     // Provider declarations share the directory's owner and its readiness,
@@ -179,14 +182,15 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
   current.current = { client, agentSessionId }
   const refreshConversation = useCallback(async () => {
     if (current.current.client !== client || current.current.agentSessionId !== agentSessionId) return
+    onRetryMember?.()
     await reading.refresh()
-  }, [client, agentSessionId, reading.refresh])
+  }, [client, agentSessionId, reading.refresh, onRetryMember])
   const conversationStatus = useMemo<MobileConversationStatus>(() => ({ client, agentSessionId,
     session: reading.id === agentSessionId && reading.metadataClient === client ? reading.session : null,
     metadata: reading.id === agentSessionId && reading.metadataClient === client ? reading.metadata : { state: 'loading', issue: null },
-    readingIssue: reading.id === agentSessionId && reading.metadataClient === client ? reading.notice : null,
+    readingIssue: [memberIssue, reading.id === agentSessionId && reading.metadataClient === client ? reading.notice : null].filter(Boolean).join('\n') || null,
     agentIssue: reading.id === agentSessionId && reading.metadataClient === client ? reading.agentIssue : null, connection, refresh: refreshConversation
-  }), [client, agentSessionId, reading.id, reading.metadataClient, reading.session, reading.metadata, reading.notice, reading.agentIssue, connection, refreshConversation])
+  }), [client, agentSessionId, reading.id, reading.metadataClient, reading.session, reading.metadata, reading.notice, reading.agentIssue, memberIssue, connection, refreshConversation])
   useLayoutEffect(() => { onStatusChange?.(conversationStatus) }, [onStatusChange, conversationStatus])
   const mainObservation = useRef<MobileMoteMainInput | undefined>(undefined)
   const moteMain = moteDirectAgent ? undefined : retainMobileMoteMain(mainObservation.current,
@@ -197,7 +201,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
   const { draftKey, textDraftKey, draft, attempt, available, diagnostics, setDraft, submit, sendBodyOnly, confirmedAttachmentPrompt, retryOriginalPrompt, stopManualInput, preparing, preparationIssue, preparationDetail,
     historyLocalEntries, retainedAttempts, sessionAttempts, promptWasRefused, hasAnyPreparation, isDispatchedPrompt, hasPendingAction, cancelPendingAction, cancelPreparation } = useMobilePromptController({ local, textDraft: composer?.text,
       isTextTargetCurrent: composer ? () => composer.sourceCurrent(composerSource) : undefined,
-      client, agentSessionId, moteSource, moteMain, moteMainIssue, moteDirectAgent, onRolloverRequired: onMoteRolloverRequired,
+      client, agentSessionId, draftScope, moteSource, moteMain, moteMainIssue, moteDirectAgent, onRolloverRequired: onMoteRolloverRequired,
       session: conversationStatus.session, sessionState: conversationStatus.metadata.state, timeline: reading.timeline, connection, disconnected: reading.disconnected, visible, refresh: reading.refresh })
   useMobileWebUpdateSafetyOwner(() => {
     if (local.saveIssue || local.recordChanged || local.hasUnconfirmedSave) return '草稿或操作尚未确认保存在设备上。请先恢复设备存储并保存，再更新网页。'
@@ -226,7 +230,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
   const isWorking = Boolean(session && (currentActivity || retainedActivity?.state === 'working'))
   const providerCapabilities = (() => {
     try {
-      if (client?.sessionObservation().state === 'unconfirmed') return {}
+      if (client?.sessionObservation?.().state === 'unconfirmed') return {}
       const provider = session?.providerId ? client?.catalog?.().find(entry => entry.id === session.providerId) : undefined
       return { route: provider?.capabilities.asyncQuestionReply, postureControl: provider?.postureControl, commands: provider?.composer?.commands }
     } catch (error) { return { route: undefined, postureControl: undefined, commands: undefined, issue: errorMessage(error) } }
@@ -259,12 +263,12 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
   async function interruptCurrentTurn() {
     if (!client?.signalAgent || !session || !agentSessionId) return
     try {
-      const originalSession = client.agentSession(agentSessionId)
+      const originalSession = mobileCapability(client, 'agentSession')(agentSessionId)
       if (originalSession.agentSessionId !== session.agentSessionId || originalSession.run.runId !== session.run.runId) {
         setCopyNotice('对话已变化，没有发送中断。')
         return
       }
-      await client.signalAgent(originalSession.agentSessionId, { ...originalSession.run }, 'SIGINT')
+      await mobileCapability(client, 'signalAgent')(originalSession.agentSessionId, { ...originalSession.run }, 'SIGINT')
       setCopyNotice(null)
     } catch (error) {
       setCopyNotice(`中断当前回复未确认：${errorMessage(error)}`)
@@ -274,7 +278,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
   async function changePosture(modeId: string) {
     if (!client?.setAgentPosture || !session || !agentSessionId) return
     try {
-      const originalSession = client.agentSession(agentSessionId)
+      const originalSession = mobileCapability(client, 'agentSession')(agentSessionId)
       if (originalSession.agentSessionId !== session.agentSessionId || originalSession.run.runId !== session.run.runId) {
         setCopyNotice('对话已变化，没有切换模式。')
         return
@@ -284,12 +288,12 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
       if (attempt.pending) return
       postureAttempts.current.set(key, attempt); attempt.pending = true
       try {
-        const original = await client.inspectAgentPosture({ hostId: 'local', agentSessionId, operationId: attempt.operationId })
+        const original = await mobileCapability(client, 'inspectAgentPosture')({ hostId: 'local', agentSessionId, operationId: attempt.operationId })
         let receipt = original.kind === 'operation' ? original.operation : null
         if (!receipt) {
-          const declaration = await client.inspectAgentPosture({ hostId: 'local', agentSessionId, expectedRun: { ...originalSession.run } })
+          const declaration = await mobileCapability(client, 'inspectAgentPosture')({ hostId: 'local', agentSessionId, expectedRun: { ...originalSession.run } })
           if (declaration.kind !== 'declaration' || !declaration.control || !declaration.controlDigest) throw new Error('The original Provider declares no addressable posture control.')
-          receipt = await client.setAgentPosture({ target: declaration.target, operationId: attempt.operationId, controlId: declaration.control.id, modeId, expectedControlDigest: declaration.controlDigest })
+          receipt = await mobileCapability(client, 'setAgentPosture')({ target: declaration.target, operationId: attempt.operationId, controlId: declaration.control.id, modeId, expectedControlDigest: declaration.controlDigest })
         }
         if (receipt.modeId !== modeId || receipt.target.expectedRun.runId !== originalSession.run.runId || receipt.outcome !== 'applied' || receipt.diskDurability !== 'confirmed')
           throw new Error(`Original posture intent ${attempt.operationId}: ${receipt.outcome}; durable ${receipt.diskDurability}. Inspect the same operation.`)
@@ -368,7 +372,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
     const original = createSpeakerResolver({
     lookupAgent: id => {
       try {
-        const author = session?.agentSessionId === id ? session : client?.agentSession(id)
+        const author = session?.agentSessionId === id ? session : client?.agentSession?.(id)
         return author?.agentSessionId === id ? { label: author.agentSessionId === agentSessionId && displayName ? displayName : agentProviderLabel(author.providerId), providerId: author.providerId } : undefined
       } catch { return undefined }
     },
@@ -559,7 +563,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
             questionReplyState={target => {
               const state = mobileQuestionReplyState(local, agentSessionId, target), original = state?.original
               return original && (original.hostId !== reading.pageOwner?.hostId || original.runtimeId &&
-                original.runtimeId !== pageClient?.runtimeOwnerIdentity()?.runtimeId) ? undefined : state
+                original.runtimeId !== pageClient?.runtimeOwnerIdentity?.()?.runtimeId) ? undefined : state
             }}
             questionReplyDraft={target => local.questionDrafts.get(questionReplyKey(agentSessionId, target))}
             onQuestionDraftChange={(target, answers) => {
@@ -635,7 +639,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
             commands={commandSuggestions} onCommand={item => { void insertSuggestion(item) }}
             onCommandsOpenChange={setCommandMenuOpen} commandsLoading={mobileCommands.loading}
             commandsIssue={mobileCommands.issue} retryCommands={mobileCommands.retry}
-            skills={<MobileSkillsPicker client={client} session={session} scope={JSON.stringify([historyScope, session?.providerId, session?.workspacePath, session?.run.runId])}
+            skills={<MobileSkillsPicker client={client} session={session} agentSessionId={agentSessionId} scope={JSON.stringify([historyScope, session?.providerId, session?.workspacePath, session?.run.runId])}
               connected={connection.state === 'connected' && !reading.disconnected} visible={visible} onSelect={item => { void insertSuggestion(item) }} />}
             {...(isWorking && available && Boolean(draft.trim()) ? { onInterrupt: () => { void interruptCurrentTurn() } } : {})} />}
           {...(postureControl && available && reading.activity?.process !== 'exited' && reading.activity?.process !== 'interrupted' ? { postureTool:

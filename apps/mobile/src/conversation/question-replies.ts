@@ -1,5 +1,5 @@
 import type { AgentInputMoteSource, AgentMuxAgentSession } from '@agentmux/core'
-import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import { mobileCapability, type MobileConversationClient } from './mobile-conversation-client'
 import { agentPromptCondition, agentPromptNotApplied } from '@agentmux/core/prompt-condition'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { questionReplyKey, submitQuestionReply,
@@ -9,7 +9,7 @@ import type { createLocalDrafts } from './local-drafts'
 export type MobileQuestionReplyAttempt = QuestionReplyAttempt & { runtimeId: string | null; hostId: string }
 type Local = ReturnType<typeof createLocalDrafts>
 const notAppliedDiagnostic = { code: 'QUESTION_REPLY_NOT_APPLIED', message: '答复没有送达，可以重新发送。' }
-export async function submitMobileQuestionReply(local: Local, sessionId: string, client: AgentMuxHostedClient | null,
+export async function submitMobileQuestionReply(local: Local, sessionId: string, client: MobileConversationClient | null,
   input: ConversationQuestionInput, notify: () => void, moteSource?: AgentInputMoteSource): Promise<void> {
   const key = questionReplyKey(sessionId, input)
   await submitQuestionReply<MobileQuestionReplyAttempt>({
@@ -17,8 +17,8 @@ export async function submitMobileQuestionReply(local: Local, sessionId: string,
     get: () => local.questions.get(key),
     create: () => {
       if (!client) throw new Error('Mac 还没连接，连上后可以继续发送。')
-      const session = client.agentSession(sessionId)
-      return { phase: 'sending', runtimeId: client.runtimeOwnerIdentity()?.runtimeId ?? null, hostId: session.hostId,
+      const session = mobileCapability(client, 'agentSession')(sessionId)
+      return { phase: 'sending', runtimeId: client.runtimeOwnerIdentity?.()?.runtimeId ?? null, hostId: session.hostId,
         input: structuredClone({ ...input, ...agentPromptCondition(session), operationId: randomClientRequestId(),
           ...(moteSource ? { moteSource } : {}) }) }
     },
@@ -34,12 +34,12 @@ export async function submitMobileQuestionReply(local: Local, sessionId: string,
       if (!client) throw new Error('Mac 还没连接，连上后可以核对发送结果。')
       const original = local.questions.get(key)!
       let target: AgentMuxAgentSession | undefined
-      try { target = client.agentSession(sessionId) } catch { /* Missing observations do not replace the original reply target. */ }
-      const runtimeId = client.runtimeOwnerIdentity()?.runtimeId
+      try { target = mobileCapability(client, 'agentSession')(sessionId) } catch { /* Missing observations do not replace the original reply target. */ }
+      const runtimeId = client.runtimeOwnerIdentity?.()?.runtimeId
       if (original.runtimeId && runtimeId && original.runtimeId !== runtimeId || target?.hostId && original.hostId !== target.hostId) {
         throw new Error('当前连接的不是这条答复所在的 Mac，不会改发到别处。')
       }
-      return client.replySessionQuestion({ ...frozen, agentSessionId: sessionId, authorHuman: true, sourceChannel: 'question-reply' })
+      return mobileCapability(client, 'replySessionQuestion')({ ...frozen, agentSessionId: sessionId, authorHuman: true, sourceChannel: 'question-reply' })
     }
   })
 }

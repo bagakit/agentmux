@@ -1,7 +1,7 @@
 import { MobileNotice } from '../notices/MobileNotice'
 import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxAgentSession, AgentSkill } from '@agentmux/core'
-import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import type { MobileConversationClient } from './mobile-conversation-client'
 import type { ComposerSuggestion } from '@agentmux/client-ui/components/AgentComposer'
 import { encodeSemanticReference, semanticReferenceKind, semanticReferenceLabel } from '@agentmux/client-ui/composer-semantic-reference'
 import { TextInput } from '@agentmux/client-ui/input'
@@ -9,12 +9,13 @@ import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { ComposerToolMenu } from '@agentmux/client-ui/components/ComposerToolMenu'
 
 /** A demand-driven reader of the original Session's public skill discovery. */
-export function MobileSkillsPicker({ client, session, scope, connected, visible, onSelect }: {
-  client: AgentMuxHostedClient | null; session: AgentMuxAgentSession | null; scope: string
+export function MobileSkillsPicker({ client, session, agentSessionId, scope, connected, visible, onSelect }: {
+  client: MobileConversationClient | null; session: AgentMuxAgentSession | null; scope: string
+  agentSessionId?: string | null
   connected: boolean; visible: boolean; onSelect(item: ComposerSuggestion): void
 }) {
   const [open, setOpen] = useState(false), [query, setQuery] = useState(''), [retry, setRetry] = useState(0)
-  const [reading, setReading] = useState<{ client: AgentMuxHostedClient | null; scope: string; skills: AgentSkill[]; loading: boolean; issue: string }>({ client: null, scope: '', skills: [], loading: false, issue: '' })
+  const [reading, setReading] = useState<{ client: MobileConversationClient | null; scope: string; skills: AgentSkill[]; loading: boolean; issue: string }>({ client: null, scope: '', skills: [], loading: false, issue: '' })
   const current = useRef({ client, scope, visible }); current.current = { client, scope, visible }
   useEffect(() => { setOpen(false); setQuery('') }, [client, scope, visible])
   useEffect(() => {
@@ -26,10 +27,11 @@ export function MobileSkillsPicker({ client, session, scope, connected, visible,
     setReading(value => ({ client, scope, skills: previousSkills(value), loading: true, issue: '' }))
     void (async () => {
       try {
-        if (!client?.forwardRpc || !session || !connected) throw new Error('暂时读不到 Mac 上的 Skills，可以重试。草稿仍可编辑。')
-        const page = await client.forwardRpc('skill.ls', { hostId: 'local', agentSessionId: session.agentSessionId })
-        if (page.agentSessionId !== session.agentSessionId || page.hostId !== 'local' || page.sourceHostId !== session.hostId ||
-          page.providerId !== session.providerId || page.workspacePath !== session.workspacePath) throw new Error('返回的 Skills 不属于这个 Agent 或工作区，没有采用。')
+        const id = session?.agentSessionId ?? agentSessionId
+        if (!client?.forwardRpc || !id || !connected) throw new Error('暂时读不到 Mac 上的 Skills，可以重试。草稿仍可编辑。')
+        const page = await client.forwardRpc('skill.ls', { hostId: 'local', agentSessionId: id })
+        if (page.agentSessionId !== id || page.hostId !== 'local' || session && (page.sourceHostId !== session.hostId ||
+          page.providerId !== session.providerId || page.workspacePath !== session.workspacePath)) throw new Error('返回的 Skills 不属于这个 Agent 或工作区，没有采用。')
         if (isCurrent()) setReading({ client, scope, skills: page.skills, loading: false, issue: '' })
       } catch (error) {
         if (isCurrent()) setReading(value => ({ client, scope, skills: previousSkills(value), loading: false,
@@ -37,7 +39,7 @@ export function MobileSkillsPicker({ client, session, scope, connected, visible,
       }
     })()
     return () => { active = false }
-  }, [client, session?.agentSessionId, session?.hostId, session?.providerId, session?.workspacePath, scope, connected, visible, open, retry])
+  }, [client, session?.agentSessionId, session?.hostId, session?.providerId, session?.workspacePath, agentSessionId, scope, connected, visible, open, retry])
   const own = reading.client === client && reading.scope === scope ? reading : null
   const matching = (own?.skills ?? []).filter(skill => `${skill.name} ${skill.description} ${skill.path}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
   return <ComposerToolMenu open={open && visible} onOpenChange={setOpen} label="Skills" className="mobile-posture-menu mobile-command-menu" trigger={

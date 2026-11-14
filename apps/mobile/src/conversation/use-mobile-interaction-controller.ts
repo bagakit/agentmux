@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import { mobileCapability, type MobileConversationClient } from './mobile-conversation-client'
 import type { AgentMuxAgentSession, AgentMuxInteractionOperationIntent, AgentMuxInteractionOperationReceipt, AgentMuxInteractionRequest, AgentMuxInteractionResponse } from '@agentmux/core'
 import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason, agentInteractionOperationReceiptMatches, agentInteractionRequestsMatch } from '@agentmux/core/agent-interaction-state'
 import { deliveryOutcome, errorMessage } from './delivery'
@@ -7,7 +7,7 @@ import type { createLocalDrafts, ResponseAttempt } from './local-drafts'
 
 type MobileInteractionControllerOptions = {
   local: ReturnType<typeof createLocalDrafts>
-  client: AgentMuxHostedClient | null
+  client: MobileConversationClient | null
   agentSessionId: string | null
   session: AgentMuxAgentSession | null
   available: boolean
@@ -55,9 +55,9 @@ export function useMobileInteractionController({ local, client, agentSessionId, 
     if (mounted.current) redraw(value => value + 1)
     try {
       if (!retained || responses.current.get(originalKey) !== original) throw new Error('另一页面已保全这个请求的答复；本次未重复回答。')
-      const target = client.agentSession(original.original!.input.agentSessionId)
+      const target = mobileCapability(client, 'agentSession')(original.original!.input.agentSessionId)
       if (target.hostId !== original.original!.hostId || client.runtimeOwnerIdentity?.()?.runtimeId !== original.original!.runtimeId) throw new Error('Mac 连接已变化，这次没有发送。答复已留在这台手机上。')
-      const receipt = await client.respondAgentInteraction(original.original!.input)
+      const receipt = await mobileCapability(client, 'respondAgentInteraction')(original.original!.input)
       if (responses.current.get(originalKey) !== original) return
       adoptResponseReceipt(original, receipt)
       return receipt
@@ -86,9 +86,9 @@ export function useMobileInteractionController({ local, client, agentSessionId, 
     if (!client || !attempt.original) return null
     const original = attempt.original
     try {
-      if (client.agentSession(original.input.agentSessionId).hostId !== original.hostId ||
+      if (mobileCapability(client, 'agentSession')(original.input.agentSessionId).hostId !== original.hostId ||
           !original.runtimeId || client.runtimeOwnerIdentity?.()?.runtimeId !== original.runtimeId) throw new Error('当前连接的不是这条答复所在的 Mac。')
-      const receipt = await client.inspectAgentInteractionOperation({ agentSessionId: original.input.agentSessionId, operationId: original.input.operationId })
+      const receipt = await mobileCapability(client, 'inspectAgentInteractionOperation')({ agentSessionId: original.input.agentSessionId, operationId: original.input.operationId })
       if (responses.current.get(key) !== attempt) return receipt
       if (receipt) adoptResponseReceipt(attempt, receipt)
       else attempt.message = '还没查到确认结果，答复是否送达仍未知。'

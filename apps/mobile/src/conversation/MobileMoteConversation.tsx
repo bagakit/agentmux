@@ -1,5 +1,5 @@
 import { useCallback, type ReactNode } from 'react'
-import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import type { MobileConversationClient } from './mobile-conversation-client'
 import type { MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import type { MoteDialogueLink } from '@agentmux/core/mote-dialogue'
 import { MoteConversationThreads } from '@agentmux/client-ui/components/MoteConversationThreads'
@@ -13,7 +13,7 @@ export type MobileMoteDialogue = ReturnType<typeof useMoteDialogue>
 /** Main reading and the compact related-work disclosure use the same original page. */
 export function MobileMoteConversation({ client, target, dialogue, agentSessionId, hostId, name, visible, mainAvatar, memberName, onOpenWork, onShowThreads, issuePresented,
   renderCurrent, readingGeometry, describeSpeaker }: {
-  client: AgentMuxHostedClient | null; target: MotePreferencesTarget | undefined; agentSessionId: string; hostId: string | undefined
+  client: MobileConversationClient | null; target: MotePreferencesTarget | undefined; agentSessionId: string; hostId: string | undefined
   dialogue: MobileMoteDialogue | undefined; mainAvatar?: ((size?: number) => ReactNode) | undefined
   name: string; visible: boolean
   memberName?: ((source: MobileMoteWork) => string) | undefined

@@ -1,3 +1,4 @@
+import { mobileMemberSelection } from './mobile-member-target'
 import { MobileNotice, MobileNoticeScope } from '../notices/MobileNotice'
 import { useEffect, useMemo, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
@@ -38,7 +39,10 @@ export function MobileZoneWorkface({ client, zoneId, name, visible, openSession,
           return <p key={region.regionId} className="mobile-spatial-notice">这个讨论还没确认对应的 Mac 与对话，收件人不变。</p>
         const agent = catalog.agentPresentation?.find(value => value.agentSessionId === region.agentSessionId)
         const occurrences = catalog.locations.filter(place => place.tabId === tab.tabId && place.regionId === region.regionId)
-        const identity = (context?: typeof occurrences[number]): MobileObjectIdentity => ({ name: agent?.name ?? tab.name ?? name, project: agent?.project ?? name, ...(context ? { context } : {}) })
+        const identity = (context?: typeof occurrences[number]): MobileObjectIdentity => {
+          const member = mobileMemberSelection(client, catalog, region.agentSessionId!, context)
+          return { name: agent?.name ?? tab.name ?? name, project: agent?.project ?? name, ...(context ? { context } : {}), ...(member ? { member } : {}) }
+        }
         return region.agentSessionId ? <div key={region.regionId} className="mobile-agent-row"><MobileAgentRow agentSessionId={region.agentSessionId} identity={identity(occurrences.length === 1 ? occurrences[0] : undefined)} presentation={agent} location={{ catalog, group: locationIndex.byAgent.get(agentLocationKey(region.execution?.hostId ?? null, region.agentSessionId)), onChoose: place => openSession(region.agentSessionId!, identity(place)) }} onOpen={() => openSession(region.agentSessionId!, identity(occurrences.length === 1 ? occurrences[0] : undefined))}>
           <MobileAgentRowContent title={agent?.name ?? tab.name ?? name} presentation={agent} providerId={agent?.providerId} />
         </MobileAgentRow></div> : region.kind === 'file' || region.kind === 'browser' ? <MobileRegionContent visible={visible} key={region.regionId} client={client} tabId={tab.tabId} regionId={region.regionId} kind={region.kind} browserId={region.browserId} file={region.file} zoneId={zoneId ?? tab.zoneId} />

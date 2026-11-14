@@ -1,5 +1,6 @@
 import type { AgentMuxMotePresentation, AgentMuxSpaceAddress, TopicKnowledgeSource } from '@agentmux/core/control'
 import type { MobileObjectIdentity } from '../navigation/MobileIdentity'
+import { parseMobileMemberSelection, type MobileMemberSelection } from '../navigation/mobile-member-target'
 import type { MobilePrimaryWorkface } from '../navigation/home-preference'
 import type { MobileTopicsContext } from '../topics/topics-navigation'
 import type { MobileSurveyContext } from '../survey/MobileSurveySurface'
@@ -9,6 +10,7 @@ import { parseMobileTopicSourceContentReference, type MobileTopicSourceContentRe
 
 /** Display references only: original content, appearance and Runtime facts stay with their owners. */
 export type MobileObjectReference = { name: string; project: string; context?: AgentMuxSpaceAddress;
+  member?: MobileMemberSelection;
   mote?: { spaceId: string; name?: string; conversationName?: string; contentReference?: AgentMuxMotePresentation['content'] } }
 export type MobilePresentationRoute = {
   primary: MobilePrimaryWorkface | 'survey'; showSession: boolean; showGoalWork: boolean
@@ -83,7 +85,8 @@ function parseTopicSource(value: unknown): void {
   for (const key of fields[1]!) if (v[key] !== undefined && !text(v[key], key === 'revision' ? 4096 : 256)) invalid()
 }
 function parseIdentity(value: unknown): MobileObjectReference {
-  const v = object(value, ['name', 'project'], ['context', 'mote'])
+  const v = object(value, ['name', 'project'], ['context', 'mote', 'member'])
+  if (v.member !== undefined) parseMobileMemberSelection(v.member)
   if (!text(v.name) || typeof v.project !== 'string' || v.project.length > 4096) invalid()
   if (v.context !== undefined) {
     const c = object(v.context, ['spaceId', 'zoneId', 'workspaceId', 'displayWorkspaceId', 'groupId', 'tabId', 'regionId'])
@@ -108,6 +111,7 @@ export function retainObjectReference(identity: MobileObjectIdentity | null): Mo
   const content = m?.contentReference ?? m?.facts?.content
   const c = identity.context
   return { name: identity.name, project: identity.project,
+    ...(identity.member ? { member: parseMobileMemberSelection(identity.member) } : {}),
     ...(c ? { context: { spaceId: c.spaceId, zoneId: c.zoneId, workspaceId: c.workspaceId, displayWorkspaceId: c.displayWorkspaceId,
       groupId: c.groupId, tabId: c.tabId, regionId: c.regionId } } : {}),
     ...(m ? { mote: { spaceId: m.spaceId, ...(m.name ? { name: m.name } : {}),

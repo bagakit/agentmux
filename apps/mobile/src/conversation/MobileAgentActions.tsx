@@ -1,6 +1,6 @@
 import { MobileNotice } from '../notices/MobileNotice'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import type { MobileConversationClient } from './mobile-conversation-client'
 import { formatSessionAddress } from '@agentmux/core/sharing'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import type { ClientUiPlatform } from '@agentmux/client-ui'
@@ -12,7 +12,7 @@ import { MobileAgentStatusDetails } from '../navigation/MobileAgentStatusDetails
 
 /** Explicit actions on the persistent Agent. Reading or reconnecting never submits a recovery. */
 export function MobileAgentActions({ client, agentSessionId, connected, copyText, visible = true, beforeAction, statusSource }: {
-  client: AgentMuxHostedClient | null; agentSessionId: string; connected: boolean
+  client: MobileConversationClient | null; agentSessionId: string; connected: boolean
   copyText: ClientUiPlatform['copyText']; visible?: boolean; beforeAction?(): boolean
   statusSource?: Pick<MobileAgentMenuTarget, 'presentation' | 'refreshStatus'> | undefined
 }) {

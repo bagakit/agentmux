@@ -3,7 +3,7 @@ import { ComposerHost, ComposerSource, ComposerSurface } from '@agentmux/client-
 import { AgentComposer, type AgentComposerProps } from '@agentmux/client-ui/components/AgentComposer'
 import { ClientUiProvider } from '@agentmux/client-ui'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
-import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import type { MobileConversationClient } from './mobile-conversation-client'
 import type { MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import { deriveObjectId } from '@agentmux/core/object-id'
 import { getDeviceWorkface } from '../recovery/device-workface'
@@ -11,7 +11,7 @@ import { useMobileLocalDrafts, type MobileLocalDrafts } from './local-drafts-own
 import { useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
 
 /** A device text address, independent of the Session input/operation address. */
-export function mobileMoteStartDraftKey(client: AgentMuxHostedClient | null, target: MotePreferencesTarget) {
+export function mobileMoteStartDraftKey(client: MobileConversationClient | null, target: MotePreferencesTarget) {
   const record = getDeviceWorkface().snapshotIdentity()
   return JSON.stringify(['mote-main-start', deriveObjectId('mobile-mote-main-draft', JSON.stringify([record.host?.origin || location.origin,
     client?.runtimeOwnerIdentity?.()?.runtimeId ?? null, record.host?.hostId ?? null, target.spaceId, target.zoneId,
@@ -40,7 +40,7 @@ export function MobileComposerSource({ sourceKey, ...props }: AgentComposerProps
 
 /** Fixed input position. The existing Device owner retains text; Sources retain input qualification. */
 export function MobileMoteComposer({ client, target, enabled, active, sourceKey, platform, children }: {
-  client: AgentMuxHostedClient | null; target: MotePreferencesTarget | undefined; enabled: boolean; active: boolean
+  client: MobileConversationClient | null; target: MotePreferencesTarget | undefined; enabled: boolean; active: boolean
   sourceKey: string; platform: ClientUiPlatform; children: ReactNode
 }) {
   const local = useMobileLocalDrafts(), [, redraw] = useState(0), device = getDeviceWorkface()

@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect, useReducer, useRef, type RefObject } from 'react'
-import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import type { MobileConversationClient } from './mobile-conversation-client'
 import type { MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import { initFollowState } from '@agentmux/client-ui/activity-autoscroll'
 import { markProgrammaticReadingScroll } from '@agentmux/client-ui/reading-scroll'
@@ -8,7 +8,7 @@ import { useHostedConversation } from './use-hosted-conversation'
 
 type Reading = ReturnType<typeof useHostedConversation>
 type ReaderOwner = {
-  key: string; client: AgentMuxHostedClient | null; id: string | null; reading: Reading | null
+  key: string; client: MobileConversationClient | null; id: string | null; reading: Reading | null
   follow: { current: ReturnType<typeof initFollowState> }; presentation: { current: ConversationPresentationController | null }
   intent: { current: number }; scrollTop: number | null; restore: boolean
 }
@@ -39,7 +39,7 @@ function MobileConversationReader({ owner, active, changed }: { owner: ReaderOwn
 
 /** Visited Mote members park their existing public Reader while hidden. Only the
  * selected reader observes; leaving the exact client/Mote releases every view. */
-export function useMobileConversationReading(client: AgentMuxHostedClient | null, id: string | null,
+export function useMobileConversationReading(client: MobileConversationClient | null, id: string | null,
   target: MotePreferencesTarget | undefined, active: boolean, viewport: RefObject<HTMLDivElement | null>) {
   const scopeKey = target ? JSON.stringify([target.spaceId, target.zoneId, target.expectedResource.hostId,
     target.expectedResource.workspaceId, target.expectedResource.workspacePath]) : JSON.stringify(['agent', id])

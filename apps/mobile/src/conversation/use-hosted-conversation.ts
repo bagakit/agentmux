@@ -1,27 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useConversationView } from '@agentmux/client-ui/use-conversation-view'
 import { describeConversationWindow, projectConversationWindow } from '@agentmux/client-ui/conversation-records'
-import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import { mobileCapability, type MobileConversationClient } from './mobile-conversation-client'
 import type { AgentMuxAgentSession, AgentSessionHistoryPage } from '@agentmux/core'
 import { agentEvidenceStale, msUntilSemanticStatusStale, type AgentObservation } from '@agentmux/core/agent-status'
 import { readMobileConversationSession, type MobileConversationMetadata } from './mobile-conversation-session'
 
 /** `paired` says whether this device holds a Mac connection link; absent when the owner has not established it. */
 export type MobileConnection = { state: 'unavailable' | 'connecting' | 'connected' | 'disconnected'; message: string; issue?: string; paired?: boolean }
-type PageOwner = { client: AgentMuxHostedClient; agentSessionId: string; hostId?: string; workspacePath?: string }
-type Metadata = { owner: AgentMuxHostedClient | null; id: string | null; session: AgentMuxAgentSession | null; metadata: MobileConversationMetadata; agentIssue: string | null; disconnected: boolean;
+type PageOwner = { client: MobileConversationClient; agentSessionId: string; hostId?: string; workspacePath?: string }
+type Metadata = { owner: MobileConversationClient | null; id: string | null; session: AgentMuxAgentSession | null; metadata: MobileConversationMetadata; agentIssue: string | null; disconnected: boolean;
   activity: { owner: object; hostId: string; runId: string; observation: AgentObservation } | null }
-const empty = (id: string | null, owner: AgentMuxHostedClient | null): Metadata => {
+const empty = (id: string | null, owner: MobileConversationClient | null): Metadata => {
   // Keep an already accepted bootstrap binding usable while the exact read is
   // pending. Cached data neither confirms metadata nor clears an earlier issue.
   let session: AgentMuxAgentSession | null = null
-  try { const cached = id && owner ? owner.agentSession(id) : null; if (cached?.agentSessionId === id) session = cached } catch { /* Point reading owns the result. */ }
+  try { const cached = id && owner ? mobileCapability(owner, 'agentSession')(id) : null; if (cached?.agentSessionId === id) session = cached } catch { /* Point reading owns the result. */ }
   return { owner, id, session, metadata: { state: 'loading', issue: null }, agentIssue: null, disconnected: false, activity: null }
 }
 const sameSource = (a: AgentSessionHistoryPage, b: AgentSessionHistoryPage) => a.agentSessionId === b.agentSessionId && a.sourceHostId === b.sourceHostId && a.source.providerId === b.source.providerId && a.source.nativeSessionId === b.source.nativeSessionId
 
 /** Complete accepted public Reader frames; transport loss retains the original view and resource owner. */
-export function useHostedConversation(client: AgentMuxHostedClient | null, id: string | null, active: boolean,
+export function useHostedConversation(client: MobileConversationClient | null, id: string | null, active: boolean,
   beforeCommit?: (frame: ReturnType<typeof projectConversationWindow>) => boolean) {
   const [metadata, setMetadata] = useState<Metadata>(() => empty(id, client))
   const selected = metadata.id === id && metadata.owner === client ? metadata : empty(id, client)
@@ -82,7 +82,7 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
       readingActivity = true
       try {
         const original = latestSession!, expectedOwner = client!.runtimeOwnerIdentity?.()
-        const value = await client!.statusAgent(id!)
+        const value = await mobileCapability(client!, 'statusAgent')(id!)
         if (!live || generation !== epoch) return
         // A status reply describes its original Run. Verify that the selected
         // Session still owns that Run before presenting the reply as current.
@@ -103,7 +103,7 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
       } catch { if (live && generation === epoch) clearActivity() }
       finally { readingActivity = false; if (live && dirty) { dirty = false; void readActivity() } }
     }
-    const unlisten = client.onEvent(event => {
+    const unlisten = client.onEvent?.(event => {
       if (!live) return
       if (event.type === 'connection-state') {
         clearActivity(); patch({ disconnected: event.state !== 'restored' })
@@ -121,7 +121,7 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
     const foreground = () => { if (document.hidden) clearActivity(); else void readActivity() }
     document.addEventListener('visibilitychange', foreground)
     void sessionMetadata()
-    return () => { live = false; if (expiry) clearTimeout(expiry); document.removeEventListener('visibilitychange', foreground); unlisten() }
+    return () => { live = false; if (expiry) clearTimeout(expiry); document.removeEventListener('visibilitychange', foreground); unlisten?.() }
   }, [client, id, active, activityOwner, view.resume, answers.resume, hasQuestion, readMetadata])
   const refresh = useCallback(async (includeMetadata = true) => { await Promise.all([view.refresh(), ...(includeMetadata ? [readMetadata()] : [])]) }, [view.refresh, readMetadata])
   const activity = active && selected.activity?.owner === activityOwner &&

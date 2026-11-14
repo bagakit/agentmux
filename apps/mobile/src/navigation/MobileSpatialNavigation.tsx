@@ -1,3 +1,4 @@
+import { mobileMemberSelection } from './mobile-member-target'
 import { createPortal } from 'react-dom'
 import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import type { MobileAgentCreateTarget } from './MobileAgentCreate'
@@ -290,8 +291,10 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
     const candidates = locations(session.agentSessionId)
     const context = occurrence === null ? undefined : occurrence ?? (candidates.length === 1 ? candidates[0] : undefined)
     const owner = context?.spaceId ? directory.owners.get(context.spaceId) : undefined
+    const member = catalog ? mobileMemberSelection(client, catalog, session.agentSessionId, context,
+      sessionById.get(session.agentSessionId)?.hostId ?? row?.projectGroup?.hostId ?? undefined) : undefined
     return { name: row?.name ?? '名称未确认', project: row?.project ?? owner?.name ?? '项目未确认',
-      ...(context ? { context } : {}), ...(owner?.kind === 'mote' ? { mote: moteIdentity(owner) } : {}) }
+      ...(context ? { context } : {}), ...(member ? { member } : {}), ...(owner?.kind === 'mote' ? { mote: moteIdentity(owner) } : {}) }
   }
   const sessionRow = (session: SessionReference, key = session.agentSessionId, context?: AgentMuxSpaceAddress | null, tabName?: string | null, places?: AgentMuxSpaceAddress[], hostId?: string | null, focus = false) => {
     const row = (focus ? focusRowById : directory.rows).get(session.agentSessionId), object = identity(session, context, row)
