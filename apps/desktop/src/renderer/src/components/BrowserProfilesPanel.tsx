@@ -1,5 +1,6 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useContext } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { useBrowserProfiles } from '../lib/browser-profiles'
 import { ProfileMark } from './ProfileMark'
 import { SettingsNavigation } from './SettingsNavigation'
@@ -22,9 +23,9 @@ export function BrowserProfilesPanel() {
         {profiles.map(profile => <li key={profile.id} title={profile.isDefault ? `${profile.label} · Default` : profile.label}><ProfileMark profile={profile} /></li>)}
       </ul> : null}
       {list.error ? <p className="browser-profiles__note" role="status">{list.error}</p> : null}
-      {settings ? <button type="button" className="small-button browser-profiles__manage" onClick={() => settings.open('browser-profiles')}>
+      {settings ? <Button type="button" className="browser-profiles__manage" onClick={() => settings.open('browser-profiles')}>
         Manage Browser Profiles <ThemeNavigationDisclosureIcon size={11} />
-      </button> : null}
+      </Button> : null}
     </section>
   )
 }

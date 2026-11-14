@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { BrowserRecoveryPreviewReadResult } from '../../../shared/browser-recovery-preview'
 
 const BrowserIcon = semanticIconComponent('object.browser')
@@ -85,7 +86,7 @@ export function BrowserRecoverySurface({ visible = true, url, objectLink, title,
           {busy || restoring ? <LoadingIcon size={13} animation="spin" /> : <RefreshIcon size={13} />}
           {retryLabel}
         </button> : null}
-        <button className="small-button" type="button" onClick={onEditAddress}>Edit address</button>
+        <Button type="button" onClick={onEditAddress}>Edit address</Button>
       </div>
       {previous && previousImage && failedPreview !== previousImage ? <figure className="browser-recovery__preview">
         <img src={previousImage} alt="Previously viewed page" width={previous.image.width} height={previous.image.height}

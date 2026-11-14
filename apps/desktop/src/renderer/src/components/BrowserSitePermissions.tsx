@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { BrowserSitePermissionAnswer, BrowserSitePermissionDecision, BrowserSitePermissionRequest, BrowserSitePermissionState } from '../../../shared/browser-site-permissions'
 
 type Props = {
@@ -22,8 +23,8 @@ function PermissionRequest({ request, onAnswer }: { request: BrowserSitePermissi
     {request.origin !== request.embeddingOrigin ? <p>Embedded in <strong>{request.embeddingOrigin}</strong>.</p> : null}
     <div className="browser-permission-actions">
       {request.profileId ? <label><input type="checkbox" checked={remember} disabled={busy} onChange={event => setRemember(event.target.checked)} /> Remember for this Profile</label> : <span>For this page only</span>}
-      <button className="small-button" type="button" disabled={busy} onClick={event => { if (event.isTrusted) void answer(false) }}>{remember ? 'Block' : 'Block once'}</button>
-      <button className="small-button" type="button" disabled={busy} onClick={event => { if (event.isTrusted) void answer(true) }}>{remember ? 'Allow' : 'Allow once'}</button>
+      <Button type="button" disabled={busy} onClick={event => { if (event.isTrusted) void answer(false) }}>{remember ? 'Block' : 'Block once'}</Button>
+      <Button type="button" disabled={busy} onClick={event => { if (event.isTrusted) void answer(true) }}>{remember ? 'Allow' : 'Allow once'}</Button>
     </div>
     {error ? <p role="alert">{error}</p> : null}
   </section>
@@ -39,11 +40,11 @@ export function BrowserSitePermissions({ state, onAnswer, onForget, onRetry }: P
   if (!state || (!state.requests.length && !state.decisions.length && !state.warning && !forgot && !error)) return null
   return <aside className="browser-site-permissions" aria-label="Site permissions">
     {state.requests.map(request => <PermissionRequest key={request.requestId} request={request} onAnswer={onAnswer} />)}
-    {state.warning ? <p role="status">{state.warning} <button className="small-button" type="button" disabled={busy} onClick={() => void run(onRetry)}>Retry reading</button></p> : null}
+    {state.warning ? <p role="status">{state.warning} <Button type="button" disabled={busy} onClick={() => void run(onRetry)}>Retry reading</Button></p> : null}
     {state.decisions.length ? <details><summary>Site permissions · {state.decisions.length}</summary>
       {state.decisions.map(decision => <p key={JSON.stringify([decision.origin, decision.embeddingOrigin, decision.permission])}>
         <span>{decision.origin} · {names[decision.permission]} · {decision.allow ? 'Allowed' : 'Blocked'} · {decision.scope === 'profile' ? 'This Profile' : 'This page'}</span>
-        <button className="small-button" type="button" disabled={busy} onClick={() => void run(async () => { await onForget(decision); setForgot(true) })}>Forget</button>
+        <Button type="button" disabled={busy} onClick={() => void run(async () => { await onForget(decision); setForgot(true) })}>Forget</Button>
       </p>)}
     </details> : null}
     {forgot ? <p role="status">The decision was forgotten for future requests. Reload this page to end existing access.</p> : null}

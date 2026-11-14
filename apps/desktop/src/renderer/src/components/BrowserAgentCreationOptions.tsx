@@ -4,6 +4,7 @@ import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { SplitDirection } from '@agentmux/layout'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { browserAgentCreationDraftKey, type BrowserAgentCreationOptions, type browserAgentCreationContext } from '../lib/browser-agent-creation'
 import { useLauncherState } from '../lib/launcher-state'
 import { DocumentOverlayPortal, getWindowOverlayHost } from './WindowOverlayHost'
@@ -66,8 +67,8 @@ export function BrowserAgentCreationOptionsDialog({ browserId, context, hostLabe
           {persistenceIssue ? <p className="surface-inline-error" role="status">{persistenceIssue}</p> : null}
           {preparationIssue && !failure && !pending ? <p className="surface-inline-error" role="status">{preparationIssue} Your task and choices remain editable; Create retries this directory preparation.</p> : null}
           {failure ? <p className="surface-inline-error" role="alert">{failure}</p> : null}
-          <footer><button type="button" className="small-button confirmation-dialog__cancel" onClick={onClose}>{pending ? 'Close' : 'Cancel'}</button>
-            <button type="submit" className="primary-button" disabled={pending}>{pending ? 'Creating…' : 'Create and give control'}</button></footer>
+          <footer><Button type="button" className="confirmation-dialog__cancel" onClick={onClose}>{pending ? 'Close' : 'Cancel'}</Button>
+            <Button type="submit" variant="primary" disabled={pending}>{pending ? 'Creating…' : 'Create and give control'}</Button></footer>
         </form>
       </Dialog.Content>
     </DocumentOverlayPortal>

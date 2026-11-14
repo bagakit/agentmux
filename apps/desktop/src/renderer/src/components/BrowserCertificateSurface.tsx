@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { useState } from 'react'
 import type { AgentMuxBrowserCertificateRequest } from '@agentmux/core'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -50,10 +51,10 @@ export function BrowserCertificateSurface({ request, privateMode, containerMode,
       </div>
       {failure ? <p className="browser-certificate__failure" role="alert">{failure}</p> : null}
       <div className="browser-recovery__actions browser-certificate__actions">
-        <button type="button" className="primary-button" disabled={answering}
-          onClick={event => { if (event.isTrusted) void answer(false) }}>Keep blocked</button>
-        <button type="button" className="small-button" disabled={answering}
-          onClick={event => { if (event.isTrusted) void answer(true) }}>Continue to site</button>
+        <Button type="button" variant="primary" disabled={answering}
+          onClick={event => { if (event.isTrusted) void answer(false) }}>Keep blocked</Button>
+        <Button type="button" disabled={answering}
+          onClick={event => { if (event.isTrusted) void answer(true) }}>Continue to site</Button>
       </div>
     </div>
   </section>

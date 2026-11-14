@@ -4,6 +4,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useEffect, useId, useRef, useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { browserViewportSize, browserViewportsEqual, isBrowserViewport, BROWSER_VIEWPORT_MAX_DIMENSION,
   type BrowserViewport, type BrowserViewportSize } from '../../../shared/browser-viewport'
 import * as Menu from './HoverDropdownMenu'
@@ -127,7 +128,7 @@ export function BrowserViewportSizeDialog({ value, visible, onApply, onClose }: 
             {(['desktop', 'mobile'] as const).map(mode => <label key={mode}><input type="radio" name={`${id}-layout`} value={mode} checked={layout === mode} disabled={pending} onChange={() => setLayout(mode)} />{mode === 'desktop' ? 'Desktop' : 'Mobile'}</label>)}
           </fieldset>
           {error ? <p className="surface-inline-error" role="alert">{error}</p> : null}
-          <footer><button type="button" className="small-button" onClick={close}>{pending ? 'Close' : 'Cancel'}</button><button type="submit" className="primary-button" disabled={pending}>{pending ? 'Applying…' : 'Apply size'}</button></footer>
+          <footer><Button type="button" onClick={close}>{pending ? 'Close' : 'Cancel'}</Button><Button type="submit" variant="primary" disabled={pending}>{pending ? 'Applying…' : 'Apply size'}</Button></footer>
         </form>
       </Dialog.Content>
     </DocumentOverlayPortal>

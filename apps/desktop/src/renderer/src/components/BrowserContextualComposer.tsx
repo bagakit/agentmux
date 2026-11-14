@@ -1,6 +1,7 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { AgentMuxBrowserControl } from '@agentmux/core'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { observeBrowserReader } from '../lib/browser-reader-position'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
@@ -177,24 +178,24 @@ export function useBrowserContextualComposer(browserId: string, agent: AgentMuxB
       </div> : original ? <p className="browser-contextual-composer__notice" role="status">{original.sceneError ? `Page context unavailable: ${original.sceneError}. You can send text only.` : 'Reading page context… Text-only sending remains available.'}</p> : null}
       {changed ? <p className="browser-contextual-composer__notice">The Browser has moved on. This draft still addresses the original Agent and captured page.</p> : null}
       {!original && !recipient ? <p className="browser-contextual-composer__notice">{agent === null ? 'Choose or create a collaborator before sending. Your message stays here.' : 'The linked Agent is not confirmed. Check the original association; your message stays here.'}
-        {onInspectControl ? <button type="button" className="small-button" onClick={() => { close(); onInspectControl() }}>View Agent controls</button> : null}</p> : null}
+        {onInspectControl ? <Button type="button" onClick={() => { close(); onInspectControl() }}>View Agent controls</Button> : null}</p> : null}
       <ComposerTextarea ref={editor} aria-label="Opinion for Browser operator" placeholder="What should the Agent notice?" value={text} onValueChange={setText} readOnly={pending.current !== null}
         onKeyDown={event => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !isImeOwnedKeyboardEvent(event)) { event.preventDefault(); void send() } }} />
       {selection.controls}
       {!includeContext && original && original.selection !== undefined ? <p className="browser-contextual-composer__notice">The image is kept in this draft. Text-only sending excludes it.</p> : null}
       {failure ? <div className="browser-contextual-composer__failure" role="alert"><p>{failure}</p>
-        {pending.current && !busy ? <button type="button" className="small-button" onClick={() => {
+        {pending.current && !busy ? <Button type="button" onClick={() => {
           const attempt = pending.current
           if (attempt && useAppStore.getState().agentSteerQueues[original!.control.agentSessionId]?.some(entry => entry.operationId === attempt.operationId)) {
             setFailure('The original queue already owns this opinion. Read its Pending record before creating another message.'); return
           }
           pending.current = null; setFailure(null)
-        }}>Edit as a new opinion</button> : null}</div> : null}
+        }}>Edit as a new opinion</Button> : null}</div> : null}
       {submitted ? <p className="browser-contextual-composer__notice" role="status">Queued for the original Agent. Delivery and adoption are separate; check Pending in its message box.</p> : null}
-      <footer><small>Ctrl / ⌘ Enter</small>{!text.trim() && !busy && !pending.current && original ? <button type="button" className="small-button" onClick={() => {
+      <footer><small>Ctrl / ⌘ Enter</small>{!text.trim() && !busy && !pending.current && original ? <Button type="button" onClick={() => {
         ++request.current; currentOriginal.current = null; setOriginal(null); setSubmitted(null); setIncludeContext(true);
         if (anchor.current) void show(anchor.current, undefined, true, anchorPane.current ?? undefined)
-      }}>New opinion</button> : null}<button type="button" className="primary-button" disabled={busy || selection.busy || !original || !text.trim()} onClick={() => void send()}><SendIcon size={12} />{busy ? 'Queueing…' : includeContext && source ? 'Queue opinion' : 'Queue text only'}</button></footer>
+      }}>New opinion</Button> : null}<Button type="button" variant="primary" disabled={busy || selection.busy || !original || !text.trim()} onClick={() => void send()}><SendIcon size={12} />{busy ? 'Queueing…' : includeContext && source ? 'Queue opinion' : 'Queue text only'}</Button></footer>
     </section>
   </WindowOverlayPortal> : null
   return { dialog: <>{dialog}{selection.editor}</>, buttonRef, open: (button: HTMLButtonElement, comment?: OriginalOpinion['comment'], pane?: HTMLElement) => { void show(button, comment, true, pane) },

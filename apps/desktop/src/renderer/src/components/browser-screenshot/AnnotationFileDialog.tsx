@@ -2,6 +2,7 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { useId, useLayoutEffect, useRef, useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { DocumentOverlayPortal } from '../WindowOverlayHost'
 import { useWorkbenchDocument } from '../../lib/workbench-document'
 
@@ -94,11 +95,11 @@ export function AnnotationFileDialog({ mode, initialPath, onSubmit, onCheck, onC
             className={feedback?.status === 'checked' ? 'confirmation-dialog__description' : 'surface-inline-error'}>
             {feedback?.message ?? 'Check this file before submitting the same path again.'}</p> : null}
           <footer>
-            <button type="button" className="small-button" onClick={close}>Cancel</button>
-            {blocked && onCheck ? <button type="button" className="small-button" disabled={busy !== null} onClick={() => void run('check')}>
-              {busy === 'check' ? 'Checking…' : 'Check file'}</button> : null}
-            <button type="submit" className="primary-button" disabled={busy !== null || !path.length || blocked}>
-              {busy === 'submit' ? mode === 'save' ? 'Saving…' : 'Opening…' : mode === 'save' ? 'Save original' : 'Open original'}</button>
+            <Button type="button" onClick={close}>Cancel</Button>
+            {blocked && onCheck ? <Button type="button" disabled={busy !== null} onClick={() => void run('check')}>
+              {busy === 'check' ? 'Checking…' : 'Check file'}</Button> : null}
+            <Button type="submit" variant="primary" disabled={busy !== null || !path.length || blocked}>
+              {busy === 'submit' ? mode === 'save' ? 'Saving…' : 'Opening…' : mode === 'save' ? 'Save original' : 'Open original'}</Button>
           </footer>
         </form>
       </Dialog.Content>

@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { useWorkbenchWindowDocument } from '../lib/workbench-document'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Ref, type PointerEvent } from 'react'
 import type { BrowserPresentationOccurrence, BrowserPresentationLease, BrowserPresentationCapture, BrowserPresentationGeometry, BrowserPresentationActivationReceipt, BrowserPresentationMouseModifier, BrowserPresentationEvent, BrowserBounds } from '../../../shared/contracts'
@@ -514,9 +515,9 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
       } } : null}
         disclosure={{ scope: `browser-presentation:${presentation.occurrence.presentationId}`, id: 'live-preview',
           occurrence: navigationId, cause: presentationNotice ?? '', visible: presentation.visible }} />
-      {presentationNotice ? <button className="small-button" type="button" disabled={retryPending || !presentation.visible || blocked} title={!presentation.visible || blocked ? 'Return to this preview to retry' : undefined} onClick={() => void retry()}>
+      {presentationNotice ? <Button type="button" disabled={retryPending || !presentation.visible || blocked} title={!presentation.visible || blocked ? 'Return to this preview to retry' : undefined} onClick={() => void retry()}>
         {retryPending ? 'Waiting…' : notice?.source === 'registration' ? 'Retry connection' : playbackError || playbackCurrent?.phase === 'first-frame' ? 'Retry playback' : 'Retry preview'}
-      </button> : null}
+      </Button> : null}
     </div>
     <div className="browser-stage" data-native-browser-stage={browserId} data-browser-presentation-id={presentation.occurrence.presentationId}
       ref={node => { element.current = node; if (typeof stageRef === 'function') stageRef(node); else if (stageRef) stageRef.current = node }}

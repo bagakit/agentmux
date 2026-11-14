@@ -1,5 +1,6 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { browserAnnotationDisplayNumber, type BrowserAnnotation } from '../lib/browser-annotations'
 import { agentComposerAvailability } from './AgentSessionComposer'
@@ -67,15 +68,15 @@ export function BrowserAnnotationsPanel({
             </select>
           </label>
           <div>
-            <button className="small-button" type="button" onClick={onClear}>Clear all</button>
-            <button
-              className="primary-button"
+            <Button type="button" onClick={onClear}>Clear all</Button>
+            <Button
+              variant="primary"
               type="button"
               disabled={!targetSessionId || currentAnnotations.length === 0}
               onClick={() => onAddToComposer(targetSessionId, currentAnnotations)}
             >
               <ThemeActionSendIcon size={12} /> Add to Composer
-            </button>
+            </Button>
           </div>
         </div>
       ) : null}

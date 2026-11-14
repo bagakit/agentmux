@@ -1,4 +1,5 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { BrowserToolbarConfig } from '../../../shared/contracts'
 import { BROWSER_TOOLBAR_ITEM_ORDER, type BrowserToolbarItem } from '../../../shared/browser-toolbar'
 import { BROWSER_TOOLBAR_ITEM_LABELS } from '../lib/browser-toolbar'
@@ -54,15 +55,14 @@ export function BrowserToolbarPreferences({
               </label>
             ))}
           </div>
-          <button
-            className="small-button"
+          <Button
             type="button"
             disabled={!draft.dirty || busy}
             onClick={() => void save()}
           >
             {busy ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : null}
             {busy ? 'Saving…' : 'Save Browser bar'}
-          </button>
+          </Button>
         </div>
       </details>
       {saveState.error ? <p className="settings-inline-error" role="alert">{saveState.error}</p> : null}

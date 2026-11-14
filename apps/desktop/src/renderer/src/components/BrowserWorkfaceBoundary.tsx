@@ -2,6 +2,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { TextInput } from '@agentmux/client-ui/input'
 import { Component, Fragment, useEffect, useState, type ReactNode, type RefObject } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../lib/api'
 import type { BrowserWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
@@ -69,11 +70,11 @@ function BrowserRenderingFailure({ tab, addressDraft, failure, retry, onRegionCl
       <span>The Browser view failed: {failure || 'No further detail was reported.'}</span>
       <span>The original page, URL and profile are kept. Your address draft is kept; temporary screenshot, selection and tool state may need reopening.</span>
       <small>Original page: {tab.objectLink ?? tab.url}</small>
-      <button className="small-button" type="button" onClick={retry}>Retry Browser view</button>
-      <button className="small-button" type="button" disabled={tab.url === 'about:blank'} onClick={() => {
+      <Button type="button" onClick={retry}>Retry Browser view</Button>
+      <Button type="button" disabled={tab.url === 'about:blank'} onClick={() => {
         void api.ui.openExternal(tab.url).catch(error => setActionError(`External open failed: ${presentError(error)}`))
-      }}>Open original page externally</button>
-      <button className="small-button" type="button" onClick={() => useAppStore.getState().setMainSurface('workbench')}>Return to Space</button>
+      }}>Open original page externally</Button>
+      <Button type="button" onClick={() => useAppStore.getState().setMainSurface('workbench')}>Return to Space</Button>
       {actionError ? <span role="alert">{actionError}</span> : null}
     </div>
   </section>

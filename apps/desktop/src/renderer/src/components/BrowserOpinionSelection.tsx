@@ -2,6 +2,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { ConversationImage } from '@agentmux/client-ui/components/ConversationImage'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { BrowserInputFrameResult, BrowserInputSelectionPrepare, BrowserInputSelectionReceipt } from '../../../shared/browser-input-context-capture'
 import type { BrowserOpinionSource } from '../lib/browser-opinion-draft'
 import { browserOpinionSelection } from '../lib/browser-opinion-draft'
@@ -105,18 +106,18 @@ export function useBrowserOpinionSelection({ source, visible, locked, document, 
       {attachment ? <div className="browser-opinion-selection__attachment">
         <ConversationImage key={imageKey} path={attachment.path} text="Processed Browser image" label="Processed Browser image" readImage={readImage} active={visible} />
         <span>Processed image · {attachment.width} × {attachment.height}<small>Captured at step {selected?.scene.inputContext.selection?.source.stepSequence ?? 'unknown'} · {selected?.scene.inputContext.selection?.source.association === 'unknown' ? 'Source association unknown' : 'Observed during'}</small></span>
-        <button className="small-button" type="button" disabled={locked || busy} onClick={() => {
+        <Button type="button" disabled={locked || busy} onClick={() => {
           if (current.current) { const { selection: _selection, ...retained } = current.current; change(retained) }
-        }}>Remove image</button>
+        }}>Remove image</Button>
       </div> : null}
       {selected?.scene.diskDurability === 'unconfirmed' ? <p className="browser-contextual-composer__notice" role="status">Image saved. Its capture details are not yet confirmed on disk. Your text is kept.</p> : null}
-      {invalidSelection ? <p className="browser-contextual-composer__notice" role="status">{invalidSelection}<button className="small-button" type="button" disabled={locked || busy} onClick={() => {
+      {invalidSelection ? <p className="browser-contextual-composer__notice" role="status">{invalidSelection}<Button type="button" disabled={locked || busy} onClick={() => {
         if (current.current) { const { selection: _selection, ...retained } = current.current; change(retained) }
-      }}>Remove image</button></p> : null}
+      }}>Remove image</Button></p> : null}
       <div className="browser-opinion-selection__actions">
-        <button className="small-button" type="button" disabled={!source?.scene || locked || busy} onClick={() => void capture()}>{busy && !frame ? 'Reading image…' : attachment ? 'Replace image…' : 'Mark captured image…'}</button>
-        {source?.selectionPreparation ? <button className="small-button" type="button" disabled={locked || busy} onClick={() => void inspect()}>Check original image</button> : null}
-        {busy && !frame ? <button className="small-button" type="button" onClick={cancel}>Cancel image</button> : null}
+        <Button type="button" disabled={!source?.scene || locked || busy} onClick={() => void capture()}>{busy && !frame ? 'Reading image…' : attachment ? 'Replace image…' : 'Mark captured image…'}</Button>
+        {source?.selectionPreparation ? <Button type="button" disabled={locked || busy} onClick={() => void inspect()}>Check original image</Button> : null}
+        {busy && !frame ? <Button type="button" onClick={cancel}>Cancel image</Button> : null}
       </div>
       {failure ? <p className="browser-contextual-composer__notice" role="status">Image: {failure} Your text is kept.</p> : null}
     </div>,

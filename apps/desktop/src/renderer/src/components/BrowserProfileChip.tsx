@@ -2,6 +2,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useContext, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { useAppStore } from '../store'
 import type { SurveyProfileBindingReceipt } from '../lib/survey-profile-binding'
 import type { AgentMuxBrowserControl } from '@agentmux/core'
@@ -105,13 +106,13 @@ export function BrowserProfileChip({ browserId, regionId, profileId, control, no
       step: superseded ? 'Later Survey choice kept' : 'Survey save unconfirmed',
       mode: registration.switchOutcome === 'unconfirmed' ? 'Switch reply unconfirmed' : 'Environment changed',
       restore: superseded ? 'The original page stays available. Its withdrawn reference is not added again.' : 'The page is available. Check only its original binding and Survey reference.'
-    }} actions={!superseded ? <button type="button" className="small-button" disabled={repairing} onClick={() => {
+    }} actions={!superseded ? <Button type="button" disabled={repairing} onClick={() => {
       const original = registration
       setRepairing(true)
       void useAppStore.getState().repairSurveyProfileAdmission(original).then(receipt => {
         setRegistration(current => current !== original ? current : receipt.admission.issues.length ? receipt : null)
       }).finally(() => setRepairing(false))
-    }}>{repairing ? 'Saving Survey reference…' : 'Retry Survey registration'}</button> : null} />
+    }}>{repairing ? 'Saving Survey reference…' : 'Retry Survey registration'}</Button> : null} />
   </div> : null
   return (
     <>

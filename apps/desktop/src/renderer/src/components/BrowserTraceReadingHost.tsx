@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { observeBrowserReader } from '../lib/browser-reader-position'
 import { getWindowOverlayHost, WindowOverlayPortal } from './WindowOverlayHost'
 
@@ -27,7 +28,7 @@ export function BrowserTraceReadingHost({ mode, open, held, visible, anchor, onR
     return () => { disposed = true; stop?.() }
   }, [mode, open, visible, anchor])
   if (mode === 'docked') return open || held && reserved ? <aside className="browser-trace-rail" aria-label="Browser activity trace">
-    {open ? children : <div className="browser-trace-held"><span>Page size is held for this Browser operation.</span><button type="button" className="small-button" onClick={onReopen}>Reopen trace</button></div>}
+    {open ? children : <div className="browser-trace-held"><span>Page size is held for this Browser operation.</span><Button type="button" onClick={onReopen}>Reopen trace</Button></div>}
   </aside> : null
   const source = anchor()
   return open && visible && source ? <WindowOverlayPortal container={getWindowOverlayHost(source.ownerDocument)}><aside ref={panel}

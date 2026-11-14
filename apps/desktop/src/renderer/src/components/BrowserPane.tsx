@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { presentKnowledgeSurface } from '../lib/knowledge-surface-navigation'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { BrowserSitePermissions } from './BrowserSitePermissions'
@@ -1297,9 +1298,9 @@ function BrowserPaneContent({
               />
             </label>
             <footer>
-              <button className="small-button" type="button" onClick={cancelElementSelection}>Cancel</button>
-              <button className="small-button" type="button" onClick={() => void copyElementContext()}><ThemeActionCopyIcon size={12} /> Copy context</button>
-              <button className="primary-button" type="button" onClick={addElementAnnotation}><ThemeActionAddAnnotationIcon size={12} /> Add annotation</button>
+              <Button type="button" onClick={cancelElementSelection}>Cancel</Button>
+              <Button type="button" onClick={() => void copyElementContext()}><ThemeActionCopyIcon size={12} /> Copy context</Button>
+              <Button variant="primary" type="button" onClick={addElementAnnotation}><ThemeActionAddAnnotationIcon size={12} /> Add annotation</Button>
             </footer>
           </section>
         ) : tab.appLinkPrompt ? (
@@ -1320,16 +1321,15 @@ function BrowserPaneContent({
               <span>Remember for every <code>{tab.appLinkPrompt.scheme}:</code> link</span>
             </label>
             <div className="browser-app-link-prompt__actions">
-              <button
-                className="small-button"
+              <Button
                 type="button"
                 onClick={() => void run(async () => await api.browser.answerAppLink(tab.browserId, false, rememberAppLink))}
-              >Not now</button>
-              <button
-                className="primary-button"
+              >Not now</Button>
+              <Button
+                variant="primary"
                 type="button"
                 onClick={() => void run(async () => await api.browser.answerAppLink(tab.browserId, true, rememberAppLink))}
-              >Open</button>
+              >Open</Button>
             </div>
           </div>
         ) : tab.error ? (
@@ -1602,19 +1602,19 @@ function BrowserPaneContent({
       {currentBookmark ? <p className="browser-bookmark-result" role="status">
         <ThemeStatusSavedIcon size={12} aria-hidden="true" /><span>Saved</span>
         <code title={currentBookmark.path}>{currentBookmark.path}</code>
-        <button type="button" className="small-button" disabled={busy} onClick={() => openSavedBookmark(presentation?.target)}>Open bookmark</button>
+        <Button type="button" disabled={busy} onClick={() => openSavedBookmark(presentation?.target)}>Open bookmark</Button>
       </p> : null}
       {currentBookmarkSave?.status === 'error' ? <p className="browser-address-error" role="alert">
-        Bookmark could not be saved: {currentBookmarkSave.message}. <button type="button" className="small-button" disabled={busy} onClick={saveBookmark}>Retry bookmark save</button>
+        Bookmark could not be saved: {currentBookmarkSave.message}. <Button type="button" disabled={busy} onClick={saveBookmark}>Retry bookmark save</Button>
       </p> : null}
       {currentUnconfirmedBookmarks.map((original, index) => <p key={index} className="browser-address-error browser-bookmark-error" role="alert">
         Bookmark save not confirmed{original.path ? <>: <code>{original.path}</code></> : null}. {original.message}. Check the workspace before saving another copy.
-        {original.path ? <button type="button" className="small-button" onClick={() => void openBookmarkFile(original.path!, false, presentation?.target).catch(reportError)}>Check bookmark</button> : null}
+        {original.path ? <Button type="button" onClick={() => void openBookmarkFile(original.path!, false, presentation?.target).catch(reportError)}>Check bookmark</Button> : null}
       </p>)}
       {currentUnconfirmedBookmarks.length ? <p className="browser-bookmark-result">
-        <button type="button" className="small-button" disabled={pageToolDisabled || bookmarkSaving} onClick={saveBookmark}>Save another copy</button>
+        <Button type="button" disabled={pageToolDisabled || bookmarkSaving} onClick={saveBookmark}>Save another copy</Button>
       </p> : null}
-      {addressError ? <p className="browser-address-error" role="alert">{addressError}{research.current ? <button type="button" className="small-button" disabled={busy} onClick={event => void startResearch(event.currentTarget.ownerDocument)}>Retry same research</button> : null}{privateCreation.current ? <button type="button" className="small-button" disabled={busy} onClick={() => void startPrivatePage()}>Retry same private page</button> : null}</p> : null}
+      {addressError ? <p className="browser-address-error" role="alert">{addressError}{research.current ? <Button type="button" disabled={busy} onClick={event => void startResearch(event.currentTarget.ownerDocument)}>Retry same research</Button> : null}{privateCreation.current ? <Button type="button" disabled={busy} onClick={() => void startPrivatePage()}>Retry same private page</Button> : null}</p> : null}
       {inputHistoryNotice ? <p className="browser-address-error" role="status">{inputHistoryNotice}</p> : null}
       <BrowserOperationWarning key={tab.profileId ?? tab.browserId} activity={browserActivity} />
       <BrowserSitePermissions key={`${tab.browserId}:${tab.navigationId}`} state={tab.sitePermissions}
@@ -1623,15 +1623,15 @@ function BrowserPaneContent({
         onRetry={async () => applyBrowserEvent({ type: 'updated', browser: await api.browser.retrySitePermissions(tab.browserId) })} />
       {handoffNotice ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Browser Agent handoff needs attention',
         mode: handoffNotice, restore: 'Inspect the same page and Agent before choosing again. No task was sent or replayed.' } }}
-        actions={<button type="button" className="small-button" onClick={() => setHandoffNotice(null)}>Dismiss</button>} /> : null}
+        actions={<Button type="button" onClick={() => setHandoffNotice(null)}>Dismiss</Button>} /> : null}
       {(agentCreationNotice || browserAgentIntent && !browserAgentIntent.inputStarted && !creatingAgent) ? <ServiceWindowNotice notice={{
         kind: 'indeterminate', notice: {
           step: 'Browser Agent setup needs attention',
           mode: agentCreationNotice?.message ?? 'The original Agent creation request is retained. Its first task has not been confirmed.',
           restore: 'Check the same request to continue. The existing Agent and original page are kept.'
         }
-      }} actions={<button type="button" className="small-button" disabled={creatingAgent}
-        onClick={() => void startBrowserAgent(presentation?.target ?? primaryPresentation)}>Check Agent setup</button>} /> : null}
+      }} actions={<Button type="button" disabled={creatingAgent}
+        onClick={() => void startBrowserAgent(presentation?.target ?? primaryPresentation)}>Check Agent setup</Button>} /> : null}
       {!connectionUnavailable && !tab.nativeOwnerReleased && tab.retention?.status === 'unknown' && tab.retention.reasons.includes('close-unconfirmed') ? <ServiceWindowNotice notice={{
         kind: 'indeterminate', notice: {
           step: 'Browser close unconfirmed',
@@ -1644,7 +1644,7 @@ function BrowserPaneContent({
       <ServiceWindowNotice notice={annotationSync.notice} title={annotationSync.retryAvailable ? 'Browser annotations unconfirmed' : 'Restoring Browser annotations'} disclosure={{
         scope: JSON.stringify(['local:browser-annotations', tab.browserId, tab.navigationId]), id: 'annotations',
         ...(annotationSync.cause ? { cause: annotationSync.cause } : {}), available: annotationSync.available, visible
-      }} actions={annotationSync.retryAvailable ? <button type="button" className="small-button" onClick={annotationSync.retry}>Retry annotations</button> : null} />
+      }} actions={annotationSync.retryAvailable ? <Button type="button" onClick={annotationSync.retry}>Retry annotations</Button> : null} />
       <div className="browser-body">
       {stagePresentation && !__AGENTMUX_WEB_PREVIEW__ ? <BrowserPresentationStage browserId={tab.browserId} navigationId={tab.navigationId} presentation={stagePresentation}
         control={tab.control} preferences={resolveBrowserAgentControl(agentAppearance)}
@@ -1808,7 +1808,7 @@ function BrowserPaneContent({
               }).catch(reportError)
             }}
           /> : null}
-          {timelineOperation && timelineSelectedStep ? <button type="button" className="small-button" onClick={event => { discussionOrigin.current = key; discussion.open(event.currentTarget as HTMLButtonElement, { operationId: timelineOperation.id, sequence: timelineSelectedStep.sequence }, traceAnchors.current.get(key)) }}>Comment on step {timelineSelectedStep.sequence}</button> : null}
+          {timelineOperation && timelineSelectedStep ? <Button type="button" onClick={event => { discussionOrigin.current = key; discussion.open(event.currentTarget as HTMLButtonElement, { operationId: timelineOperation.id, sequence: timelineSelectedStep.sequence }, traceAnchors.current.get(key)) }}>Comment on step {timelineSelectedStep.sequence}</Button> : null}
           {timelineOperation && timelineSelectedStep
             ? <BrowserStepEvidence operation={timelineOperation} step={timelineSelectedStep}
                 {...(selectedStep?.reveal?.presentation === key ? { revealRequest: selectedStep.reveal.request, revealTrigger: selectedStep.reveal.trigger } : {})} /> : null}
