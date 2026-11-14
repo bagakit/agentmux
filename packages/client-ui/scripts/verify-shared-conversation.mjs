@@ -137,9 +137,9 @@ try {
     const mutations = [
       { name: 'copy-port-disconnected', path: 'lib/use-content-copy-action.ts', needle: 'await write(text, failed) === true', replacement: 'true', test: 'copy failure' },
       { name: 'permission-response-disconnected', path: 'components/AgentInteractionCard.tsx', needle: 'await onRespond(response, original)', replacement: 'await Promise.resolve()', test: 'original request option' },
-      { name: 'saved-is-completion', path: 'lib/interaction-receipt-presentation.ts', needle: "if (receipt.delivery === 'saved') return 'saved'", replacement: "if (receipt.delivery === 'saved') return 'completed'", test: 'does not turn a saved delivery' },
-      { name: 'foreign-interaction-receipt', path: 'components/AgentInteractionCard.tsx', needle: 'const matched = value !== null && matches(original, value)', replacement: 'const matched = value !== null', test: 'keeps rejecting unrelated inspection receipts' },
-      { name: 'original-operation-inspection-removed', path: 'components/AgentInteractionCard.tsx', needle: "const needsInspection = retainedReceipt === null && phase", replacement: "const needsInspection = false && retainedReceipt === null && phase", test: 'converges an exact inspected completion' },
+      { name: 'saved-is-completion', testFile: 'affectui-motion-consumers', path: 'lib/interaction-receipt-presentation.ts', needle: "if (receipt.delivery === 'saved') return 'saved'", replacement: "if (receipt.delivery === 'saved') return 'completed'", test: 'does not turn a saved delivery' },
+      { name: 'foreign-interaction-receipt', testFile: 'affectui-motion-consumers', path: 'components/AgentInteractionCard.tsx', needle: 'const matched = value !== null && matches(original, value)', replacement: 'const matched = value !== null', test: 'keeps rejecting unrelated inspection receipts' },
+      { name: 'original-operation-inspection-removed', testFile: 'affectui-motion-consumers', path: 'components/AgentInteractionCard.tsx', needle: "const needsInspection = retainedReceipt === null && phase", replacement: "const needsInspection = false && retainedReceipt === null && phase", test: 'converges an exact inspected completion' },
       { name: 'composer-writeback-disconnected', path: 'components/AgentComposer.tsx', needle: 'onValueChange={onChange}', replacement: 'onValueChange={() => {}}', test: 'maintained editor controlled' }
     ]
     const originalSources = Object.fromEntries(await Promise.all((await files(sourceRoot)).map(async path => [relative(sourceRoot, path), sha(await readFile(path))])))
@@ -179,10 +179,11 @@ try {
         await symlink(entry === 'core' ? frozenCore : resolve(installed, '@agentmux', entry), resolve(isolatedModules, '@agentmux', entry), 'dir')
       }
       const isolatedConfig = resolve(isolatedPackage, 'vitest.config.ts')
-      const isolatedTests = ['exec', 'vitest', 'run', '--config', isolatedConfig]
       const selectedMutations = interactionReceipts
         ? mutations.filter(value => ['saved-is-completion', 'foreign-interaction-receipt', 'original-operation-inspection-removed'].includes(value.name)) : mutations
       for (const mutation of selectedMutations) {
+        const isolatedTests = ['exec', 'vitest', 'run', '--config', isolatedConfig,
+          'packages/client-ui/test/' + (mutation.testFile ?? 'shared-conversation') + '.test.tsx']
         const path = resolve(isolatedPackage, 'src', mutation.path)
         const original = await readFile(path, 'utf8')
         let changed
@@ -198,7 +199,7 @@ try {
         run([...isolatedTests, '--testNamePattern', mutation.test], 'red')
         await writeFile(path, original)
         run([...isolatedTests, '--testNamePattern', mutation.test])
-        mutationResults.push({ name: mutation.name, changedSource: mutation.path, isolatedCandidate: true, red: true, assertionError: true, restoredGreen: true, restoredSha256: sha(original) })
+        mutationResults.push({ name: mutation.name, changedSource: mutation.path, isolatedCandidate: true, red: true, assertionError: true, restoredGreen: true, mutatedSha256: sha(changed), restoredSha256: sha(original) })
       }
       await cp(resolve(root, 'apps/desktop/src/renderer/src'), resolve(isolatedRoot, 'apps/desktop/src/renderer/src'), { recursive: true })
       await callers(isolatedRoot)
