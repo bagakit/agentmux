@@ -1253,6 +1253,7 @@ export type AppState = GitReadingActions & {
   /** Opaque unrelated/invalid records stay in the original user document until explicitly resolved. */
   nodePublicationDrafts: unknown
   meshSettingsDrafts: unknown
+  meshDeviceLinks: { draft: string; saved: string[] }
   hostRouteDrafts: unknown
   tailcatConnectionDrafts: unknown
   capsuleQuestionEditors: Record<string, CapsuleQuestionEditor>
@@ -4273,6 +4274,7 @@ type PersistedAppState = {
   agentLearningReviewDrafts?: Record<string, AgentLearningReviewDraft>
   nodePublicationDrafts?: unknown
   meshSettingsDrafts?: unknown
+  meshDeviceLinks?: AppState['meshDeviceLinks']
   hostRouteDrafts?: unknown
   tailcatConnectionDrafts?: unknown
   capsuleQuestionEditors?: Record<string, CapsuleQuestionEditor>
@@ -4603,6 +4605,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     agentLearningReviewDrafts: state.agentLearningReviewDrafts,
     nodePublicationDrafts: state.nodePublicationDrafts,
     meshSettingsDrafts: state.meshSettingsDrafts,
+    meshDeviceLinks: state.meshDeviceLinks,
     hostRouteDrafts: state.hostRouteDrafts,
     tailcatConnectionDrafts: state.tailcatConnectionDrafts,
     capsuleQuestionEditors: state.capsuleQuestionEditors,
@@ -5556,6 +5559,10 @@ export async function updateMeshSettingsDraft(runtimeId: string, update: (curren
     await persistentWorkbenchStorage.checkpoint(WORKBENCH_USER_STATE_KEY, { state: partializeAppState(useAppStore.getState()), version: 1 })
   } catch (cause) { useAppStore.getState().reportWorkbenchSaveFailure(cause, 'local-storage'); throw cause }
 }
+export async function checkpointMeshDeviceLinks(): Promise<void> {
+  if (!workbenchWriteFence.isOpen()) throw new Error('The device link is kept in memory while the saved workbench is being restored.')
+  await checkpointWorkbenchUserDocument()
+}
 /** Checkpoint this authored route intent through the original private user document. */
 export async function checkpointHostRouteDrafts(): Promise<void> {
   try {
@@ -6483,6 +6490,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   agentLearningReviewDrafts: {},
   nodePublicationDrafts: {},
   meshSettingsDrafts: {},
+  meshDeviceLinks: { draft: '', saved: [] },
   hostRouteDrafts: {},
   tailcatConnectionDrafts: {},
   capsuleQuestionEditors: {},
