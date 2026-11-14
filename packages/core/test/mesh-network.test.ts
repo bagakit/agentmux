@@ -1,10 +1,11 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rename, rm, rmdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import WebSocket from 'ws'
 import { hashPublisherToken } from '@agentmux/relay/gateway'
+import { RelayMeshNetwork } from '../../relay/src/mesh-network.js'
 import { afterEach, expect, it, vi } from 'vitest'
 import { fileURLToPath } from 'node:url'
 import { generateKeyPair, exportPublicKey } from '@agentmux/relay/e2ee'
@@ -78,6 +79,29 @@ it('CAS conflicts and original operation mismatch preserve the accepted Mesh con
   await expect(f.rpc.call('settings.mesh.configure', { ...request, operationId: 'stale-editor' })).rejects.toMatchObject({ code: 'MESH_REVISION_CHANGED', controlFailure: { disposition: 'not_applied' } })
   await expect(f.rpc.call('settings.mesh.configure', { ...request, configuration: { ...configuration, networkId: 'changed-original-intent' } })).rejects.toMatchObject({ code: 'MESH_OPERATION_MISMATCH' })
   expect((await f.rpc.call('settings.mesh.inspect', {})).revision).toBe(saved.settings.revision)
+})
+
+it('returns the confirmed public save even when the next settings read fails', async () => {
+  const f = await fixture(), configuration = f.config(), operationId = 'original-confirmed-save'
+  const current = join(f.root, 'mesh-network.json'), retained = join(f.root, 'retained-mesh-network.json')
+  writeControl.intercept = async (actual, path, bytes, options) => {
+    await actual(path, bytes, options)
+    if (path !== current && JSON.parse(String(bytes)).result?.status === 'confirmed') {
+      await rename(current, retained)
+      await mkdir(current)
+    }
+  }
+  const reply = await f.rpc.call('settings.mesh.configure', { expectedRevision: f.settings.revision, operationId, configuration })
+    .then(result => ({ result }), error => ({ error }))
+  expect(reply).toMatchObject({ result: { diskDurability: 'confirmed', settings: { operation: { operationId, status: 'confirmed' }, configuration } } })
+  if (!('result' in reply)) throw Error('Original save receipt missing')
+  const { result } = reply
+  expect(result.settings.revision).toBe(result.settings.operation?.revision)
+  await expect(f.rpc.call('settings.mesh.inspect', { operationId })).rejects.toMatchObject({ code: 'MESH_SETTINGS_UNAVAILABLE' })
+  await rmdir(current)
+  await expect(f.rpc.call('settings.mesh.inspect', { operationId })).rejects.toMatchObject({ code: 'MESH_SETTINGS_UNAVAILABLE' })
+  await rename(retained, current)
+  expect((await f.rpc.call('settings.mesh.inspect', { operationId })).operation).toEqual(result.settings.operation)
 })
 
 it('unknown directory ACK is read back as the same save, without a second configuration or premature adoption', async () => {
@@ -266,6 +290,33 @@ it('device ingress remains device, explicit pins precede original authorization,
   await vi.waitFor(async () => expect((await f.rpc.call('mesh.inspect', {})).activeRevision).not.toBe(saved.settings.revision))
   await expect(remote.call('system.endpoint', {})).rejects.toBeDefined()
   expect((await f.rpc.call('system.endpoint', {})).publication!.state).toBe('available')
+})
+
+it('applies new device settings once while the original encrypted endpoint stays available', async () => {
+  const key = generateKeyPair(), daemon = generateKeyPair()
+  const f = await fixture({ endpoint: async () => ({ serverId: 'original-endpoint', keyPair: daemon,
+    authorize: async () => ({ principal: { kind: 'device', id: 'original-device' } }) }) })
+  const originalKey = exportPublicKey(key.publicKey)
+  await f.save(f.config({ endpointAccess: { allowedClientKeys: [originalKey] } }), 'publish-original-endpoint')
+  const before = await vi.waitFor(async () => {
+    const seen = await f.rpc.call('mesh.inspect', {})
+    expect(seen.endpoint.state).toBe('available')
+    return seen
+  })
+  if (before.endpoint.state !== 'available') throw Error('Original endpoint missing')
+  const remote = await connectAgentMuxRpc({ endpoint: { transport: 'relay', offer: before.endpoint.offer }, relayKeyPair: key })
+  cleanup.push(() => remote.dispose())
+  expect((await remote.call('system.endpoint', {})).publication?.state).toBe('available')
+  const configureNetwork = vi.spyOn(RelayMeshNetwork.prototype, 'configure')
+  const next = await f.save(f.config({ endpointAccess: { allowedClientKeys: [originalKey, exportPublicKey(generateKeyPair().publicKey)] } }), 'add-another-device-pin')
+  const adopted = await vi.waitFor(async () => {
+    const seen = await f.rpc.call('mesh.inspect', {})
+    expect(seen.activeRevision).toBe(next.settings.revision)
+    return seen
+  })
+  expect(adopted.endpoint).toEqual(before.endpoint)
+  expect((await remote.call('system.endpoint', {})).publication?.state).toBe('available')
+  expect(configureNetwork).toHaveBeenCalledTimes(1)
 })
 
 it('a wrong original Runtime fence is rejected before a durable configuration save', async () => {
