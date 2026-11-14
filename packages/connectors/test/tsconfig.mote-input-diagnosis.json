@@ -1,0 +1,57 @@
+{
+  "extends": "./tsconfig.mote-chat.json",
+  "compilerOptions": {
+    "baseUrl": "../../..",
+    "paths": {
+      "@agentmux/core": [
+        "packages/core/src/index.ts"
+      ],
+      "@agentmux/core/*": [
+        "packages/core/src/*.ts"
+      ],
+      "@agentmux/core/mote-chat": [
+        "packages/core/src/mote/chat.ts"
+      ],
+      "@agentmux/core/mote-preferences": [
+        "packages/core/src/mote/preferences.ts"
+      ],
+      "@agentmux/core/mote-dialogue": [
+        "packages/core/src/mote/dialogue.ts"
+      ],
+      "@agentmux/core/mote-dialogue-store": [
+        "packages/core/src/mote/dialogue-store.ts"
+      ],
+      "@agentmux/core/spatial-state": [
+        "packages/core/src/spatial-state.ts"
+      ],
+      "@agentmux/core/connections": [
+        "packages/core/src/connections.ts"
+      ],
+      "@agentmux/core/hosted": [
+        "packages/core/src/hosted.ts"
+      ],
+      "@agentmux/connectors": [
+        "packages/connectors/src/index.ts"
+      ],
+      "@agentmux/host/*": [
+        "apps/host/src/*.ts"
+      ],
+      "@agentmux/identity": [
+        "packages/identity/src/index.ts"
+      ],
+      "@agentmux/diagnostic-evidence": [
+        "packages/diagnostic-evidence/src/index.ts"
+      ],
+      "@agentmux/diagnostic-evidence/*": [
+        "packages/diagnostic-evidence/src/*.ts"
+      ]
+    }
+  },
+  "include": [
+    "../../core/test/mote-chat-diagnosis.test.ts",
+    "mote-chat-waiting.integration.test.ts",
+    "mote-chat-diagnosis.integration.test.ts",
+    "mote-input-diagnosis.integration.test.ts",
+    "vitest.mote-input-diagnosis.config.mts"
+  ]
+}
