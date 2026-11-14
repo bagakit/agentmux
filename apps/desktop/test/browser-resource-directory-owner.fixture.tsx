@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { readFileSync, appendFileSync } from 'node:fs'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
@@ -24,6 +24,7 @@ import { AgentMuxControlServer } from '../../../packages/core/src/control-host'
 import { objectCliReceipt } from '../../../packages/core/test/helpers/object-cli-receipt'
 import { BrowserViewManager } from '../src/main/browser-view-manager'
 import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { serveStandaloneBrowser } from '../../../packages/browser/src/standalone'
 import { ExternalBrowserBridge } from '../src/main/browser-external-bridge'
 import { coldBrowserTargets } from '../src/main/browser-cold-descriptor'
 import { browserResourceLocations } from '../src/main/browser-resource-directory'
@@ -44,7 +45,8 @@ async function fixture(graph = savedGraph()) {
         const before = views.indexOf(view); if (before !== -1) views.splice(before, 1); views.splice(index, 0, view)
       }, removeChildView(view: InstanceType<typeof native.View>) { const index = views.indexOf(view); if (index !== -1) views.splice(index, 1) } } }
   const partition = vi.fn((id: string) => 'persist:' + id)
-  const manager = new BrowserViewManager(window as never, { defaultProfileId: () => 'default', resolvePartition: partition },
+  const manager = new BrowserViewManager(window as never, { defaultProfileId: () => 'default', resolvePartition: partition,
+    listProfiles: () => [{ id: 'saved-profile', label: 'Saved Profile' }] },
     new BrowserRefLedgerStore(directory), { rememberedSchemes: async () => ({}), rememberScheme: async () => {}, openExternal() {} })
   managers.push(manager)
   const bridge = new ExternalBrowserBridge(join(directory, 'external.json')); bridges.push(bridge); await bridge.ready()
@@ -105,7 +107,7 @@ it('reads every original target and location beyond 256 through the registered M
   expect(f.browserProfiles.initialize).not.toHaveBeenCalled(); expect(f.partition).toHaveBeenCalledTimes(calls)
   expect(f.app.getAppMetrics).toHaveBeenCalledOnce()
   fact('actual-main-directory', { coverage: parsed.coverage, ids: parsed.targets.map(row => row.id), live, released, nativeViews: f.views.length, initializeCalls: f.browserProfiles.initialize.mock.calls.length, acquisitionCalls: create.mock.calls.length + ensure.mock.calls.length })
-  await expect(f.list({})).rejects.toThrow('Wrong source')
+  await expect(f.list(trusted, 'another-workspace')).rejects.toThrow('Wrong original workspace')
 })
 
 it('separates membership coverage from graph or process observation failure while retaining live original owners', async () => {
@@ -157,9 +159,22 @@ it('rejects absent or invented required coverage without changing the original r
   expect(parseBrowserTargetsResult(await previewListTargets()).coverage).toBe('partial')
 })
 
-it('consumes real CLI leaf through private Unix RPC Store API preload and the original Main directory owner', async () => {
+async function runDirectoryCli(socketPath: string, workspace?: string) {
   const cli = process.env.AGENTMUX_DIRECTORY_CLI
-  expect(cli, 'The original Core CLI must be emitted before running the public consumer').toBeTypeOf('string')
+  if (!cli) throw new Error('The original Core CLI must be emitted before running the public consumer')
+  return await new Promise<{ exit: number | null; pid: number | undefined; stdout: string; stderr: string }>((resolve, reject) => {
+    const env = Object.fromEntries(['PATH', 'HOME', 'CODEX_HOME', 'TMPDIR'].filter(key => process.env[key]).map(key => [key, process.env[key]!]))
+    env.AGENTMUX_RPC_ENDPOINT = 'unix:' + socketPath
+    const args = ['browser', 'targets', ...(workspace === undefined ? [] : ['--workspace', workspace])]
+    const child = spawn(process.execPath, [cli, ...args], { cwd: dirname(socketPath), env, stdio: ['ignore', 'pipe', 'pipe'] })
+    fact('original-cli-process', { pid: child.pid, cli, args, endpoint: socketPath })
+    let stdout = '', stderr = ''; child.stdout.on('data', bytes => { stdout += bytes }); child.stderr.on('data', bytes => { stderr += bytes })
+    const timer = setTimeout(() => { child.kill(); reject(new Error('The exact private CLI child exceeded its bounded read')) }, 10000)
+    child.once('error', error => { clearTimeout(timer); reject(error) }); child.once('close', exit => { clearTimeout(timer); resolve({ exit, pid: child.pid, stdout, stderr }) })
+  })
+}
+
+it('consumes real CLI leaf through private Unix RPC Store API preload and the original Main directory owner', async () => {
   const f = await fixture(); await f.manager.create('live', 'https://fixture.invalid/live', 'workspace', 'original')
   const socketRoot = await mkdtemp('/tmp/amux-dir-'); roots.push(socketRoot)
   wire.invoke.mockImplementation(async (channel: string, workspaceId?: string) => {
@@ -169,15 +184,7 @@ it('consumes real CLI leaf through private Unix RPC Store API preload and the or
   const execute = vi.spyOn(useAppStore.getState(), 'executeControl')
   const server = new AgentMuxControlServer({ socketPath: join(socketRoot, 'control.sock'), coreClients: () => [],
     execute: request => useAppStore.getState().executeControl(request) })
-  const run = async () => new Promise<{ exit: number | null; pid: number | undefined; stdout: string; stderr: string }>((resolve, reject) => {
-    const env = Object.fromEntries(['PATH', 'HOME', 'CODEX_HOME', 'TMPDIR', 'AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY'].filter(key => process.env[key]).map(key => [key, process.env[key]!]))
-    env.AGENTMUX_RPC_ENDPOINT = 'unix:' + server.path
-    const child = spawn(process.execPath, [cli!, 'browser', 'targets', '--workspace', 'workspace'], { cwd: socketRoot, env, stdio: ['ignore', 'pipe', 'pipe'] })
-    fact('original-cli-process', { pid: child.pid, cli, args: ['browser', 'targets', '--workspace', 'workspace'], endpoint: server.path })
-    let stdout = '', stderr = ''; child.stdout.on('data', bytes => { stdout += bytes }); child.stderr.on('data', bytes => { stderr += bytes })
-    const timer = setTimeout(() => { child.kill(); reject(new Error('The exact private CLI child exceeded its bounded read')) }, 10000)
-    child.once('error', error => { clearTimeout(timer); reject(error) }); child.once('close', exit => { clearTimeout(timer); resolve({ exit, pid: child.pid, stdout, stderr }) })
-  })
+  const run = () => runDirectoryCli(server.path, 'workspace')
   try {
     await server.start()
     const complete = await run(); fact('original-cli-complete', complete); expect(complete.exit, complete.stderr).toBe(0)
@@ -194,4 +201,63 @@ it('consumes real CLI leaf through private Unix RPC Store API preload and the or
     expect(f.views).toHaveLength(1); expect(f.views[0]!.webContents.close).not.toHaveBeenCalled()
     fact('actual-public-consumers', { execute: execute.mock.calls.map(([request]) => request), preload: wire.invoke.mock.calls, nativeViews: f.views.length, closeCalls: f.views[0]!.webContents.close.mock.calls.length })
   } finally { await server.stop() }
+})
+
+it('keeps neighboring pages discoverable through Desktop CLI when a saved page title exceeds the wire budget', async () => {
+  const graph = savedGraph(3)
+  const originalTitle = 'a'.repeat(511) + '🧭' + 'b'.repeat(265)
+  const longTitle = graph.resources['region:region-0'] as { title: string }
+  const exactTitle = graph.resources['region:region-1'] as { title: string }
+  longTitle.title = originalTitle
+  exactTitle.title = 'a'.repeat(510) + '🧭'
+  const held = structuredClone(graph)
+  const f = await fixture(graph), socketRoot = await mkdtemp('/tmp/amux-long-'); roots.push(socketRoot)
+  wire.invoke.mockImplementation(async (channel: string, workspaceId?: string) => {
+    expect(channel).toBe('browser:listTargets')
+    return await f.list(trusted, workspaceId)
+  })
+  vi.spyOn(api.browser, 'listTargets').mockImplementation(id => wire.api!.browser.listTargets(id))
+  const server = new AgentMuxControlServer({ socketPath: join(socketRoot, 'control.sock'), coreClients: () => [],
+    execute: request => useAppStore.getState().executeControl(request) })
+  try {
+    await server.start()
+    for (const workspace of [undefined, 'workspace']) {
+      const reply = await runDirectoryCli(server.path, workspace)
+      expect(reply.exit, reply.stderr).toBe(0)
+      const result = parseBrowserTargetsResult(objectCliReceipt(JSON.parse(reply.stdout)).result)
+      const byId = new Map(result.targets.map(target => [target.id, target]))
+      expect(result.coverage).toBe('complete')
+      expect(byId.get('cold-0')).toMatchObject({ title: 'a'.repeat(511), status: 'unavailable', workspaceId: 'workspace',
+        url: 'https://fixture.invalid/cold-0', profile: { id: 'saved-profile', label: 'Saved Profile' },
+        resource: { state: 'cold', locations: [{ workspaceId: 'workspace', tabId: 'tab-0', regionId: 'region-0' }] } })
+      expect(byId.get('cold-1')?.title).toBe(exactTitle.title)
+      expect(byId.get('cold-2')?.title).toBe('Original cold-2')
+    }
+    expect(graph).toEqual(held)
+    expect(f.partition).not.toHaveBeenCalled()
+    expect(f.views).toHaveLength(0)
+  } finally { await server.stop() }
+})
+
+it('reads a long native title and an ordinary neighbor from the original standalone directory through CLI', async () => {
+  const directory = await mkdtemp('/tmp/amux-stand-title-'); roots.push(directory)
+  const registry = join(directory, 'browser-targets.json'), socketPath = join(directory, 'control.sock')
+  const url = 'https://fixture.invalid/standalone?document=original#anchor'
+  const title = 'x'.repeat(778)
+  const saved = { version: 1, engine: null, targets: [
+    { id: 'original-long', targetId: null, navigationId: '', status: 'unavailable', url, title },
+    { id: 'ordinary-neighbor', targetId: null, navigationId: '', status: 'unavailable', url: 'about:blank', title: 'Neighbor title' }
+  ] }
+  await writeFile(registry, JSON.stringify(saved))
+  const host = await serveStandaloneBrowser({ directory, executablePath: join(directory, 'unused-engine'), socketPath })
+  try {
+    const reply = await runDirectoryCli(socketPath)
+    expect(reply.exit, reply.stderr).toBe(0)
+    const result = parseBrowserTargetsResult(objectCliReceipt(JSON.parse(reply.stdout)).result)
+    expect(result.targets).toMatchObject([
+      { id: 'original-long', source: 'standalone', status: 'unavailable', url, title: 'x'.repeat(512), capabilities: [] },
+      { id: 'ordinary-neighbor', title: 'Neighbor title' }
+    ])
+    expect(JSON.parse(await readFile(registry, 'utf8'))).toEqual(saved)
+  } finally { await host.stop() }
 })

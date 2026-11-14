@@ -1,4 +1,5 @@
 import { fixtureFileUrl as _tailFixtureFileUrl } from "../../../../test/fixture-values.mjs"
+import { EventEmitter } from 'node:events'
 import { vi } from 'vitest'
 
 /** Controlled Electron ports. No App, Browser or OS input is created by these Node consumers. */
@@ -13,14 +14,13 @@ export function directoryNativePorts() {
     removeListener = vi.fn()
   }
   let nextPid = 4100
-  class Contents {
+  class Contents extends EventEmitter {
     readonly id = ++nextPid
     readonly getOSProcessId = () => this.id
     readonly session = new Session()
     url = _tailFixtureFileUrl('private-fixture/renderer/index.html')
     dead = false
     readonly mainFrame: { url: string; detached: boolean; parent: null; osProcessId: number; framesInSubtree: { detached: boolean; osProcessId: number }[] } = { url: this.url, detached: false, parent: null, osProcessId: this.id, framesInSubtree: [{ detached: false, osProcessId: this.id }] }
-    readonly listeners = new Map<string, Set<(...args: any[]) => void>>()
     readonly navigationHistory = { canGoBack: () => false, canGoForward: () => false }
     send = vi.fn()
     focus = vi.fn()
@@ -41,16 +41,6 @@ export function directoryNativePorts() {
     isBeingCaptured = () => false
     isCurrentlyAudible = () => false
     isDestroyed = () => this.dead
-    on(event: string, listener: (...args: any[]) => void) {
-      const set = this.listeners.get(event) ?? new Set()
-      set.add(listener); this.listeners.set(event, set); return this
-    }
-    once(event: string, listener: (...args: any[]) => void) {
-      const wrapped = (...args: any[]) => { this.removeListener(event, wrapped); listener(...args) }
-      return this.on(event, wrapped)
-    }
-    removeListener(event: string, listener: (...args: any[]) => void) { this.listeners.get(event)?.delete(listener) }
-    emit(event: string, ...args: any[]) { for (const listener of this.listeners.get(event) ?? []) listener(...args) }
     readonly loads: string[] = []
     async loadURL(url: string) {
       this.loads.push(url)
