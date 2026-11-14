@@ -109,11 +109,26 @@ export function reconcileWorkbenchClose(state: State, record: SpaceCloseReceipt)
   try { current = originalPlan(state, record.request) } catch { /* The original surface may already be gone; no replacement is adopted. */ }
   if (!current || !current.closesView) return { plan: approved, tab: currentTab ?? null }
   const witnesses = new Map<string, string>()
+  const acknowledgedWithoutProjection = new Set<string>()
   const eligible = approved.surfaces.filter(s => {
     const frozen = record.plan.projection.surfaces.find(p => p.owner.regionId === s.owner.regionId)!, now = current?.surfaces.find(p => p.owner.regionId === s.owner.regionId)
-    return now && frozen.blocker !== 'draft-busy' && !(frozen.blocker === 'session-unconfirmed' && frozen.bindingAvailability !== 'unconfirmed') && !(now.owner.kind === 'file' && draftBusy(state, now.owner.workspaceId, now.owner.path)) && surfaceWitness(state, approved, now.owner, witnesses) === frozen.witness
+    if (!now || frozen.blocker === 'draft-busy' || frozen.blocker === 'session-unconfirmed' && frozen.bindingAvailability !== 'unconfirmed' || now.owner.kind === 'file' && draftBusy(state, now.owner.workspaceId, now.owner.path)) return false
+    if (surfaceWitness(state, approved, now.owner, witnesses) === frozen.witness) return true
+    // An exact original ACK can retire the Session projection before the View
+    // consumes it. Absence alone proves nothing, and a present successor never
+    // enters this branch. Keep the real surface/source and original child fence.
+    const owner = s.owner, actual = now.owner
+    if ((owner.kind !== 'agent' && owner.kind !== 'terminal') || actual.kind !== owner.kind || actual.phase !== owner.phase || actual.sessionId !== owner.sessionId ||
+      state.sessions.some(session => session.id === owner.sessionId)) return false
+    const resource = approved.resources.find(r => r.kind === 'session' && r.sessionId === owner.sessionId && s.resourceKeys.includes(r.key))
+    if (resource?.kind !== 'session' || resource.control.kind !== owner.kind || resource.control.run.runId !== owner.runId ||
+      resource.control.kind === 'agent' && (frozen.binding?.hostId !== resource.control.hostId || frozen.binding.agentSessionId !== resource.control.agentSessionId)) return false
+    const result = record.resources.find(r => r.key === resource.key)
+    if (result?.outcome !== 'acknowledged' || !result.receipt) return false
+    acknowledgedWithoutProjection.add(owner.regionId)
+    return true
   })
-  const result = reconcileWorkbenchViewClose({ plan: { ...approved, surfaces: eligible }, currentTab, currentSessions: state.sessions,
+  const result = reconcileWorkbenchViewClose({ plan: { ...approved, surfaces: eligible.map(s => acknowledgedWithoutProjection.has(s.owner.regionId) && (s.owner.kind === 'agent' || s.owner.kind === 'terminal') ? { ...s, owner: { ...s.owner, runId: null } } : s) }, currentTab, currentSessions: state.sessions,
     receipts: record.resources.map(r => ({ key: r.key as never, status: r.outcome === 'acknowledged' ? 'fulfilled' : 'rejected' })) })
   return { plan: approved, tab: result.tab }
 }

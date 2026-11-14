@@ -61,7 +61,7 @@ export class WorkbenchCloseOwner implements SpaceClosePort {
     try { image = await readFile(this.path(id), 'utf8') }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      if (await this.exists(this.path(id) + '.prepare') || await this.exists(this.path(id) + '.apply')) throw unavailable('The admitted close record is missing.')
+      if (this.acknowledgedImages.has(id) || await this.exists(this.path(id) + '.prepare') || await this.exists(this.path(id) + '.apply')) throw unavailable('The admitted close record is missing.')
       return null
     }
     let record: SpaceCloseReceipt
@@ -225,13 +225,15 @@ export class WorkbenchCloseOwner implements SpaceClosePort {
       }
     } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') namespaceMissing = true; else throw unavailable('Reading the original close namespace failed: ' + String(error)) }
     // Exceptional live ACK custody remains discoverable even when its disk member vanished.
-    for (const id of this.observed.keys()) choose(hash(id))
+    const heldRecords = new Map([...this.observed, ...[...this.live].map(([id, entry]) => [id, entry.record] as const)])
+    for (const id of heldRecords.keys()) choose(hash(id))
+    if (namespaceMissing && !heldRecords.size && this.acknowledgedImages.size) throw unavailable('The original close namespace disappeared after this owner confirmed operations.')
     const more = selected.length > limit, members = selected.slice(0, limit), items: SpaceCloseSummary[] = [], issues: SpaceCloseList['issues'] = []
     const belongs = (actor: SpaceCloseReceipt['preparedBy']) => context.actor.kind !== 'agent' || same(actor, context.actor)
     for (const member of members) {
       await context.assertCurrent?.(); context.signal?.throwIfAborted()
       try {
-        const held = [...this.observed.values()].find(r => hash(r.operationId) === member)
+        const held = [...heldRecords.values()].find(r => hash(r.operationId) === member)
         const raw = held ?? parseSpaceCloseReceipt(JSON.parse(await readFile(join(this.directory, member + '.json'), 'utf8')))
         if (hash(raw.operationId) !== member) throw unavailable('The original close member answers another operation.')
         if (!belongs(raw.preparedBy)) continue
