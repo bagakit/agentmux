@@ -3,14 +3,24 @@
 .mobile-agent-locations-entry:active { background: var(--mobile-group-press); }
 .mobile-agent-locations-sheet { display: flex; flex-direction: column; max-height: min(85dvh, 680px); }
 .mobile-agent-locations-list { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.mobile-agent-location-group + .mobile-agent-location-group { border-top: 1px solid var(--mobile-hairline); margin-top: var(--sp-2); }
+.mobile-agent-location-group > header { padding: var(--sp-3) var(--sp-4) var(--sp-1); }
+.mobile-agent-location-group > header > strong { font-size: var(--fs-small); font-weight: 600; }
+.mobile-agent-location-group > header > small { display: block; color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
+.mobile-agent-location { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
 .mobile-agent-location + .mobile-agent-location { border-top: 1px solid var(--mobile-hairline); }
-.mobile-agent-location > button { width: 100%; min-height: 56px; text-align: left; }
+.mobile-agent-location > button { width: 100%; min-height: 56px; text-align: left; border: 0; padding-inline: var(--sp-3) var(--sp-2); }
 .mobile-agent-location > button > span { min-width: 0; flex: 1; }
 .mobile-agent-location strong, .mobile-agent-location small { display: block; overflow-wrap: anywhere; }
 .mobile-agent-location small { color: var(--text-3); font-size: var(--fs-micro); }
-.mobile-agent-location > details { padding: 0 var(--sp-4) var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
-.mobile-agent-location summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; }
-.mobile-agent-location dl { margin: 0; }
+.mobile-agent-location > details { color: var(--text-3); font-size: var(--fs-micro); }
+.mobile-agent-location > details[open] { grid-column: 1 / -1; }
+.mobile-agent-location summary { display: flex; align-items: center; justify-content: center; min-width: 44px; min-height: 56px; cursor: pointer; list-style: none; }
+.mobile-agent-location summary::marker { content: ''; }
+.mobile-agent-location summary::-webkit-details-marker { display: none; }
+.mobile-agent-location dl { margin: 0; padding: 0 var(--sp-4) var(--sp-2); }
 .mobile-agent-location dl > div { margin: var(--sp-2) 0; }
 .mobile-agent-location dd { margin: 0; overflow-wrap: anywhere; }
 .mobile-agent-locations-issue { color: var(--text-2); font-size: var(--fs-small); }
+@keyframes mobile-agent-locations-enter { from { opacity: 1; translate: 0 24px; } to { opacity: 1; translate: 0 0; } }
+.mobile-sheet.mobile-agent-locations-sheet[data-state='open'] { animation-name: mobile-agent-locations-enter; }

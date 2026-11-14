@@ -25,15 +25,21 @@ export function MobileAgentLocations({ client, catalog, locations, agentSessionI
   const anchor = (node: HTMLButtonElement | null) => { mounted.current = node !== null }
   const known = catalog !== null && Boolean(locations?.hostId)
   const label = known ? `${locations?.count ?? 0} 个位置` : '位置待确认'
-  const entries = open ? (locations?.addresses ?? []).map(place => {
+  const groups = new Map<string, { title: string; path: string; regionId: string; entries: { place: AgentMuxSpaceAddress; title: string; detail: string }[] }>()
+  if (open) for (const place of locations?.addresses ?? []) {
     const tab = catalog?.tabs.find(value => value.tabId === place.tabId), space = catalog?.spaces.find(value => value.spaceId === place.spaceId)
     const zone = catalog?.zones.find(value => value.zoneId === place.zoneId)
-    const title = tab?.name && tab.name !== name && !['Tab', 'Agent', 'Untitled', '未命名'].includes(tab.name) ? tab.name : space?.name ?? '展示位置'
-    const detail = [title !== space?.name ? space?.name : '', zone?.branch, locations?.hostId].filter(Boolean).join(' · ')
-    return { place, title, detail, label: `${title}\n${detail}` }
-  }) : []
-  const labels = new Map<string, number>()
-  for (const entry of entries) labels.set(entry.label, (labels.get(entry.label) ?? 0) + 1)
+    const positionKey = JSON.stringify([place.displayWorkspaceId, place.groupId, place.tabId, place.regionId])
+    const sourcePath = zone?.directoryPath ?? space?.directoryPath ?? ''
+    const path = sourcePath.split('/').filter(Boolean).slice(-2).join('/')
+    const title = tab?.name && !['Tab', 'Agent', 'Untitled', '未命名'].includes(tab.name) ? tab.name : '工作面'
+    const group = groups.get(positionKey) ?? { title, path, regionId: place.regionId, entries: [] }
+    const kind = space?.kind === 'mote' ? 'Mote' : space?.kind === 'folder' ? '文件夹' : '空间'
+    group.entries.push({ place, title: space?.name ?? '未绑定空间', detail: [kind, zone?.branch].filter(Boolean).join(' · ') })
+    groups.set(positionKey, group)
+  }
+  const headings = new Map<string, number>()
+  for (const group of groups.values()) { const key = `${group.title}\n${group.path}`; headings.set(key, (headings.get(key) ?? 0) + 1) }
   async function choose(place: AgentMuxSpaceAddress) {
     const source = current.current, runtime = client?.runtimeOwnerIdentity(), operation = ++request.current
     if (!source.client?.forwardRpc || !source.hostId) { setIssue('此位置的来源或目录读取还没确认，原对话仍可打开。'); return }
@@ -67,16 +73,15 @@ export function MobileAgentLocations({ client, catalog, locations, agentSessionI
   </Dialog.Trigger><Dialog.Portal><Dialog.Overlay className="mobile-sheet-backdrop" /><Dialog.Content className="mobile-sheet mobile-agent-locations-sheet" aria-describedby={description}>
     <MobileSheetHandle onClose={() => setOpen(false)} /><div className="mobile-sheet-title"><Dialog.Title>{name}的位置</Dialog.Title>
       <Dialog.Close asChild><IconButton className="mobile-icon-button" aria-label="关闭位置选择"><SemanticIcon name="action.close" size={18} /></IconButton></Dialog.Close></div>
-    <Dialog.Description id={description}>{label} · 选择要查看的工作面。</Dialog.Description>
+    <Dialog.Description id={description}>{label}{locations && locations.addresses.length > locations.count ? `，${locations.addresses.length} 个空间入口。` : ' · 选择要查看的工作面。'}</Dialog.Description>
     {issue && <p role="status" className="mobile-agent-locations-issue">{issue}</p>}
     {!locations?.addresses.length && <p>{known ? '当前目录没有已绑定的展示位置，原对话入口仍可使用。' : '位置事实还没确认，原对话入口仍可使用；可返回目录刷新。'}</p>}
-    {open && <div className="mobile-agent-locations-list" aria-busy={pending}>{entries.map(({ place, title, detail, label: entryLabel }) => {
-      const short = (value: string) => value.length > 8 ? value.slice(0, 8) : value
-      const distinguish = labels.get(entryLabel)! > 1 ? [short(place.groupId), short(place.regionId), place.spaceId ? short(place.spaceId) : '未绑定空间'].join(' · ') : ''
-      return <section key={locationContextKey(place)} className="mobile-agent-location">
-        <button type="button" className="mobile-menu-row" onClick={() => void choose(place)}><span><strong>{title}</strong><small>{detail}</small>{distinguish && <small>{distinguish}</small>}</span><SemanticIcon name="navigation.disclosure" size={16} /></button>
-        <details><summary>完整地址</summary><dl>{Object.entries(place).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value ?? '未绑定'}</dd></div>)}</dl></details>
-      </section>
-    })}</div>}
+    {open && <div className="mobile-agent-locations-list" aria-busy={pending}>{[...groups].map(([key, group]) => <section key={key} className="mobile-agent-location-group" aria-label={`${group.title}的位置`}>
+      <header><strong>{group.title}</strong>{group.path && <small>{group.path}</small>}{headings.get(`${group.title}\n${group.path}`)! > 1 && <small>区域 {group.regionId}</small>}</header>
+      {group.entries.map(({ place, title, detail }) => <section key={locationContextKey(place)} className="mobile-agent-location">
+        <button type="button" className="mobile-menu-row" onClick={() => void choose(place)}><span><strong>{title}</strong><small>{detail}</small></span><SemanticIcon name="navigation.disclosure" size={16} /></button>
+        <details><summary aria-label={`${title}的完整地址`}>地址</summary><dl>{Object.entries(place).map(([field, value]) => <div key={field}><dt>{field}</dt><dd>{value ?? '未绑定'}</dd></div>)}</dl></details>
+      </section>)}
+    </section>)}</div>}
   </Dialog.Content></Dialog.Portal></Dialog.Root>
 }
