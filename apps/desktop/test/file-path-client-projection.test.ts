@@ -932,3 +932,22 @@ it.runIf(business)('a failed original UserState checkpoint refuses only the unse
   expect(Object.values(f.store.getState().sourceFilesInputs.pending)).toHaveLength(1)
   vi.mocked(f.api.ui.writeWorkbenchState).mockImplementation(value => f.user.write(value))
 }, 60000)
+
+it.runIf(business)('a full Source read opened before a real deletion cannot clear its newer disk observation', async () => {
+  const f = await fixture(); await connectFolder(f)
+  await f.store.getState().openFile('original.txt', 'file-group', undefined, f.workspace.id)
+  const key = f.workspace.id + '\0original.txt', original = f.store.getState().documents[key]!, before = f.store.getState().documentObservationGenerations[key] ?? 0
+  let entered!: () => void, release!: () => void
+  const held = new Promise<void>(resolve => { entered = resolve }), gate = new Promise<void>(resolve => { release = resolve }), call = f.bridge.files.call
+  cleanup.push(() => release())
+  vi.mocked(f.api.sourceFiles.call).mockImplementation(async (...args) => { const reply = await call(...args); if (args[1] === 'file.read') { entered(); await gate } return reply })
+  const reading = f.store.getState().refreshDocument(f.workspace.id, 'original.txt'); await held
+  await f.store.getState().deletePath('original.txt', f.workspace.id)
+  await vi.waitFor(() => expect(f.store.getState().documentIssues[key]?.kind).toBe('deleted'))
+  expect(f.store.getState().documentObservationGenerations[key]).toBeGreaterThan(before)
+  release(); await reading
+  expect(f.store.getState().documentIssues[key]?.kind).toBe('deleted')
+  expect(f.store.getState().documents[key]?.content).toBe(original.content)
+  expect(f.store.getState().dirtyDocuments[key]).not.toBe(true)
+  await expect(readFile(join(f.source.project, 'original.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
+}, 60000)
