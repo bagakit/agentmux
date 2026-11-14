@@ -1,5 +1,8 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { spawn } from 'node:child_process'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
 
 const fileApi = vi.hoisted(() => {
   const writes: Array<{
@@ -14,19 +17,11 @@ const fileApi = vi.hoisted(() => {
   }> = []
   const observes: Array<{ workspaceId: string; path: string }> = []
   const unobserves: Array<{ workspaceId: string; path: string }> = []
-  const moves: Array<{
-    input: {
-      source: { workspaceId: string; path: string }
-      destination: { workspaceId: string; path: string }
-    }
-    resolve(value: unknown): void
-  }> = []
   return {
     writes,
     reads,
     observes,
     unobserves,
-    moves,
     api: {
       files: {
         write(workspaceId: string, input: { path: string; content: string; expectedRevision: string | null }) {
@@ -37,19 +32,16 @@ const fileApi = vi.hoisted(() => {
         },
         observe: async (workspaceId: string, path: string) => { observes.push({ workspaceId, path }) },
         unobserve: async (workspaceId: string, path: string) => { unobserves.push({ workspaceId, path }) },
-        onInvalidated: () => () => {},
-        move(input: {
-          source: { workspaceId: string; path: string }
-          destination: { workspaceId: string; path: string }
-        }) {
-          return new Promise((resolve) => moves.push({ input, resolve }))
-        }
+        onInvalidated: () => () => {}
+
       }
     }
   }
 })
 
-vi.mock('../src/renderer/src/lib/api.js', () => ({ api: fileApi.api }))
+vi.mock('../src/renderer/src/lib/api.js', async importOriginal => process.env.AGENTMUX_TEST_SAVE_SOURCE_CHILD === '1'
+  ? await importOriginal() : { api: fileApi.api })
+vi.mock('electron', () => ({ app: { getPath: () => '/private-unused-save-fixture' } }))
 
 import type { AppConfig, FileDocument, WorkspaceRecord } from '../src/shared/contracts.js'
 import { createWorkspaceLayout } from '@agentmux/layout'
@@ -71,7 +63,6 @@ afterEach(() => {
   fileApi.reads.splice(0)
   fileApi.observes.splice(0)
   fileApi.unobserves.splice(0)
-  fileApi.moves.splice(0)
 })
 
 async function waitFor(predicate: () => boolean): Promise<void> {
@@ -179,54 +170,9 @@ describe('revision-aware file save Store', () => {
   })
 
   it('admits a move before waiting for saves and prevents a racing save from recreating the source', async () => {
-    const { workspace, tab } = seed()
-    useAppStore.getState().updateDocument(tab.id, 'bravo')
-    const firstSave = useAppStore.getState().saveDocument(tab.id)
-    await waitFor(() => fileApi.writes.length === 1)
-
-    const rename = useAppStore.getState().renamePath(tab.path, 'src/renamed.ts')
-    useAppStore.getState().updateDocument(tab.id, 'charlie')
-    const saveDuringMove = useAppStore.getState().saveDocument(tab.id)
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(fileApi.moves).toHaveLength(0)
-    expect(fileApi.writes).toHaveLength(1)
-
-    fileApi.writes[0]!.resolve({ status: 'written', revision: 'revision-bravo' })
-    await waitFor(() => fileApi.moves.length === 1)
-    expect(fileApi.moves[0]!.input).toEqual({
-      source: { workspaceId: workspace.id, path: tab.path },
-      destination: { workspaceId: workspace.id, path: 'src/renamed.ts' }
-    })
-    expect(fileApi.writes).toHaveLength(1)
-
-    fileApi.moves[0]!.resolve({ status: 'moved' })
-    await waitFor(() => fileApi.reads.length === 1)
-    fileApi.reads[0]!.resolve({
-      status: 'read',
-      document: { path: 'src/renamed.ts', content: 'bravo', revision: 'revision-bravo' }
-    })
-    await rename
-    // Settle an erroneous redirected write so a mutant fails assertions rather than timing out.
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    fileApi.writes[1]?.resolve({ status: 'written', revision: 'unexpected-redirect' })
-    await Promise.all([firstSave, rename, saveDuringMove])
-
-    const nextKey = documentKey(workspace.id, 'src/renamed.ts')
-    expect(fileApi.writes).toHaveLength(1)
-    expect(useAppStore.getState().tabs[tab.id]!.regions[tab.titleRegionId]).toMatchObject({ path: 'src/renamed.ts' })
-    expect(useAppStore.getState().documents[nextKey]).toMatchObject({ content: 'charlie' })
-    expect(useAppStore.getState().dirtyDocuments[nextKey]).toBe(true)
-    expect(useAppStore.getState().error).toContain('save the current file to continue')
-
-    const freshSave = useAppStore.getState().saveDocument(tab.id)
-    await waitFor(() => fileApi.writes.length === 2)
-    expect(fileApi.writes[1]!.input).toEqual({
-      path: 'src/renamed.ts', content: 'charlie', expectedRevision: 'revision-bravo'
-    })
-    fileApi.writes[1]!.resolve({ status: 'written', revision: 'revision-charlie' })
-    await freshSave
-    expect(useAppStore.getState().dirtyDocuments[nextKey]).toBe(false)
-  })
+    if (process.env.AGENTMUX_TEST_SAVE_SOURCE_CHILD === '1') { await actualSourceSaveMove(); return }
+    await runPrivateFileTest('admits a move before waiting for saves')
+  }, 180000)
 
   it('does not redirect a queued save when the same Region is rebound to another file', async () => {
     const { workspace, tab, key } = seed()
@@ -256,12 +202,23 @@ describe('revision-aware file save Store', () => {
   })
 
   it('does not send a queued save into a reopened lifetime at the same file key', async () => {
+    if (process.env.AGENTMUX_TEST_SAVE_SOURCE_CHILD !== '1') { await runPrivateFileTest('does not send a queued save into a reopened lifetime at the same file key'); return }
     const { workspace, tab, key } = seed()
     useAppStore.getState().updateDocument(tab.id, 'old-draft')
     const firstSave = useAppStore.getState().saveDocument(tab.id)
     await waitFor(() => fileApi.writes.length === 1)
     const queuedSave = useAppStore.getState().saveDocument(tab.id)
-    await useAppStore.getState().closeTab(workspace.id, 'pane', tab.id)
+    // A save in flight makes the original close plan draft-busy. It cannot discard
+    // an unacknowledged writer; the old pending-after-close oracle is no longer legal.
+    expect(await explicitlyCloseFile(workspace.id, tab.id)).toBe(false)
+    expect(useAppStore.getState().tabs[tab.id]).toBeDefined()
+    expect(useAppStore.getState().documents[key]?.content).toBe('old-draft')
+    expect(fileApi.writes).toHaveLength(1); expect(fileApi.reads).toHaveLength(0)
+    fileApi.writes[0]!.resolve({ status: 'written', revision: 'revision-old-draft' })
+    await Promise.all([firstSave, queuedSave])
+    useAppStore.getState().updateDocument(tab.id, 'discarded-after-original-save')
+    expect(await explicitlyCloseFile(workspace.id, tab.id)).toBe(true)
+    expect(useAppStore.getState().tabs[tab.id]).toBeUndefined()
     const reopen = useAppStore.getState().openFile(tab.path, 'pane')
     await waitFor(() => fileApi.reads.length === 1)
     fileApi.reads[0]!.resolve({
@@ -270,18 +227,14 @@ describe('revision-aware file save Store', () => {
     await reopen
     expect(useAppStore.getState().tabs[tab.id]).toBeDefined()
     useAppStore.getState().updateDocument(tab.id, 'new-draft')
-    fileApi.writes[0]!.resolve({ status: 'written', revision: 'revision-old-draft' })
-    await firstSave
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    fileApi.writes[1]?.resolve({ status: 'written', revision: 'unexpected-new-lifetime-write' })
-    await queuedSave
+    await new Promise(resolve => setTimeout(resolve, 0))
     expect(fileApi.writes).toHaveLength(1)
     expect(useAppStore.getState().documents[key]).toEqual({
       path: tab.path, content: 'new-draft', revision: 'revision-reopened'
     })
     expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
-    expect(useAppStore.getState().error).toContain('No write was sent')
-  })
+    // Both original save requests settled before closing and never entered the new lifetime.
+  }, 180000)
 
   it('serializes each file and binds save completion to the captured edit generation', async () => {
     const { tab, key } = seed()
@@ -568,6 +521,7 @@ describe('revision-aware file save Store', () => {
   })
 
   it('restarts a joined open when the first tab closes during open completion', async () => {
+    if (process.env.AGENTMUX_TEST_SAVE_SOURCE_CHILD !== '1') { await runPrivateFileTest('restarts a joined open when the first tab closes during open completion'); return }
     const { workspace, tab, key } = seed()
     useAppStore.setState({
       tabs: {},
@@ -585,8 +539,8 @@ describe('revision-aware file save Store', () => {
     const unsubscribe = useAppStore.subscribe((state) => {
       if (triggered || !state.documents[key]) return
       triggered = true
-      close = useAppStore.getState().closeTab(workspace.id, 'pane', tab.id)
-      reopen = useAppStore.getState().openFile(tab.path, 'pane')
+      close = explicitlyCloseFile(workspace.id, tab.id)
+      reopen = close.then(closed => { expect(closed).toBe(true); return useAppStore.getState().openFile(tab.path, 'pane') })
     })
     const firstOpen = useAppStore.getState().openFile(tab.path, 'pane')
     await waitFor(() => fileApi.reads.length === 1)
@@ -612,15 +566,24 @@ describe('revision-aware file save Store', () => {
       content: 'bravo',
       revision: 'revision-bravo'
     })
-  })
+  }, 180000)
 
   it('does not apply an old save receipt to a closed and reopened document', async () => {
+    if (process.env.AGENTMUX_TEST_SAVE_SOURCE_CHILD !== '1') { await runPrivateFileTest('does not apply an old save receipt to a closed and reopened document'); return }
     const { workspace, tab, key } = seed()
     useAppStore.getState().updateDocument(tab.id, 'old-draft')
     const oldSave = useAppStore.getState().saveDocument(tab.id)
     await waitFor(() => fileApi.writes.length === 1)
 
-    await useAppStore.getState().closeTab(workspace.id, 'pane', tab.id)
+    expect(await explicitlyCloseFile(workspace.id, tab.id)).toBe(false)
+    expect(useAppStore.getState().tabs[tab.id]).toBeDefined()
+    expect(useAppStore.getState().documents[key]?.content).toBe('old-draft')
+    expect(fileApi.writes).toHaveLength(1); expect(fileApi.reads).toHaveLength(0)
+    fileApi.writes[0]!.resolve({ status: 'written', revision: 'revision-old-draft' })
+    await oldSave
+    useAppStore.getState().updateDocument(tab.id, 'discarded-after-original-save')
+    expect(await explicitlyCloseFile(workspace.id, tab.id)).toBe(true)
+    expect(useAppStore.getState().tabs[tab.id]).toBeUndefined()
     const reopen = useAppStore.getState().openFile(tab.path, 'pane')
     await waitFor(() => fileApi.reads.length === 1)
     fileApi.reads[0]!.resolve({
@@ -629,8 +592,8 @@ describe('revision-aware file save Store', () => {
     })
     await reopen
 
-    fileApi.writes[0]!.resolve({ status: 'written', revision: 'revision-old-draft' })
-    await oldSave
+    // No pending writer may cross the confirmed close; no old request is replayed.
+    expect(fileApi.writes).toHaveLength(1)
 
     expect(useAppStore.getState().documents[key]).toEqual({
       path: tab.path,
@@ -640,14 +603,15 @@ describe('revision-aware file save Store', () => {
     expect(useAppStore.getState().dirtyDocuments[key]).not.toBe(true)
     expect(useAppStore.getState().documentIssues[key]).toBeUndefined()
     expect(useAppStore.getState().savingDocuments[key]).toBeUndefined()
-  })
+  }, 180000)
 
   it('does not apply an old refresh to a closed and reopened document', async () => {
+    if (process.env.AGENTMUX_TEST_SAVE_SOURCE_CHILD !== '1') { await runPrivateFileTest('does not apply an old refresh to a closed and reopened document'); return }
     const { workspace, tab, key } = seed()
     const oldRefresh = useAppStore.getState().refreshDocument(workspace.id, tab.path)
     await waitFor(() => fileApi.reads.length === 1)
 
-    await useAppStore.getState().closeTab(workspace.id, 'pane', tab.id)
+    expect(await explicitlyCloseFile(workspace.id, tab.id)).toBe(true)
     const reopen = useAppStore.getState().openFile(tab.path, 'pane')
     await waitFor(() => fileApi.reads.length === 2)
     fileApi.reads[1]!.resolve({
@@ -669,7 +633,7 @@ describe('revision-aware file save Store', () => {
     })
     expect(useAppStore.getState().dirtyDocuments[key]).not.toBe(true)
     expect(useAppStore.getState().documentIssues[key]).toBeUndefined()
-  })
+  }, 180000)
 
   it('keeps a dirty draft on invalidation, reloads explicitly, and overwrites only the latest observed revision', async () => {
     const { workspace, tab, key } = seed()
@@ -1008,3 +972,174 @@ describe('original File owner unconfirmed save checks', () => {
     expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
   })
 })
+
+
+async function actualSourceSaveMove(): Promise<void> {
+  const cleanup: Array<() => unknown | Promise<unknown>> = []
+  const facts: Record<string, unknown> = { scenario: 'actual Source save-tail / move / racing draft', writes: [], moves: [] }
+  try {
+    const { source, bridge, workspace, api } = await privateFileFixture(cleanup)
+    const selected = await useAppStore.getState().resolveFilesSource(workspace.id)
+    expect(selected.status).toBe('registration-required')
+    if (selected.status !== 'registration-required') throw Error('Actual Source registration packet required')
+    expect((await useAppStore.getState().useFilesSourceFolder(workspace.id, selected.registration)).status).toBe('located')
+    await useAppStore.getState().openFile('src/app.ts', 'pane', undefined, workspace.id)
+    const tab = Object.values(useAppStore.getState().tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === 'src/app.ts'))!
+    const key = documentKey(workspace.id, 'src/app.ts'), original = useAppStore.getState().documents[key]!
+    facts.afterOpen = { workspace, active: useAppStore.getState().activeWorkspaceId, documents: useAppStore.getState().documents, error: useAppStore.getState().error, issues: useAppStore.getState().documentIssues, tabs: useAppStore.getState().tabs }
+    if (!original) throw Error('Actual Source body unavailable: ' + JSON.stringify(facts.afterOpen))
+    expect(original.readSource?.resource.hostId).toBe('local')
+    expect(original.readSource?.target.hostId).toBe(source.id)
+    const writes: Array<{ request: unknown; receipt: any; release(): void }> = [], moves: unknown[] = []
+    vi.spyOn(api.sourceFiles, 'call').mockImplementation(async (target, method, request, signal) => {
+      const result = await bridge.files.call(target, method, request, signal)
+      if (method === 'file.write') {
+        let release!: () => void
+        const paused = new Promise<void>(yes => { release = yes })
+        writes.push({ request: structuredClone(request), receipt: result, release })
+        facts.writes = writes.map(item => ({ request: item.request, receipt: item.receipt }))
+        await paused // Pause the real post-effect owner reply; never invent a revision.
+      }
+      if (method === 'file.move') { moves.push(structuredClone(request)); facts.moves = moves }
+      return result
+    })
+    useAppStore.getState().updateDocument(tab.id, 'bravo')
+    const firstSave = useAppStore.getState().saveDocument(tab.id)
+    await vi.waitFor(() => expect(writes).toHaveLength(1))
+    const bravo = writes[0]!.receipt.result.result
+    expect(bravo.status).toBe('written')
+    expect(await readFile(join(source.project, 'src/app.ts'), 'utf8')).toBe('bravo')
+    const rename = useAppStore.getState().renamePath('src/app.ts', 'src/renamed.ts', workspace.id)
+    useAppStore.getState().updateDocument(tab.id, 'charlie')
+    const saveDuringMove = useAppStore.getState().saveDocument(tab.id)
+    await new Promise(yes => setTimeout(yes, 0))
+    expect(moves).toHaveLength(0); expect(writes).toHaveLength(1)
+    writes[0]!.release()
+    await firstSave; await rename
+    await new Promise(yes => setTimeout(yes, 0))
+    // Settle an erroneous redirected write before reporting its concrete assertion.
+    writes[1]?.release()
+    await saveDuringMove
+    const nextKey = documentKey(workspace.id, 'src/renamed.ts'), state = useAppStore.getState()
+    facts.afterMove = { regions: state.tabs[tab.id]?.regions, documents: state.documents, dirty: state.dirtyDocuments, issues: state.documentIssues, error: state.error }
+    expect(moves).toHaveLength(1); expect(writes).toHaveLength(1)
+    expect(moves[0]).toMatchObject({ path: 'src/app.ts', expectedResource: original.readSource!.resource, destination: { path: 'src/renamed.ts' } })
+    await expect(readFile(join(source.project, 'src/app.ts'))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(join(source.project, 'src/renamed.ts'), 'utf8')).toBe('bravo')
+    expect(state.tabs[tab.id]!.regions[tab.titleRegionId]).toMatchObject({ path: 'src/renamed.ts' })
+    expect(state.documents[nextKey]).toMatchObject({ content: 'charlie', revision: bravo.revision })
+    expect(state.dirtyDocuments[nextKey]).toBe(true)
+    expect(state.error).toContain('save the current file to continue')
+    const freshSave = useAppStore.getState().saveDocument(tab.id)
+    await vi.waitFor(() => expect(writes).toHaveLength(2))
+    expect(writes[1]!.request).toMatchObject({ path: 'src/renamed.ts', content: 'charlie', expectedRevision: bravo.revision })
+    writes[1]!.release(); await freshSave
+    expect(useAppStore.getState().dirtyDocuments[nextKey]).toBe(false)
+    expect(await readFile(join(source.project, 'src/renamed.ts'), 'utf8')).toBe('charlie')
+    facts.status = 'passed'
+  } finally {
+    if (process.env.AGENTMUX_TEST_SAVE_MOVE_FACTS) await writeFile(process.env.AGENTMUX_TEST_SAVE_MOVE_FACTS, JSON.stringify(facts, null, 2))
+    for (const close of cleanup.reverse()) await close()
+    vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs()
+  }
+}
+
+async function privateFileFixture(cleanup: Array<() => unknown | Promise<unknown>>) {
+    const { webcrypto } = await import('node:crypto')
+    vi.stubGlobal('crypto', webcrypto)
+    window.localStorage.clear()
+    const { sourceFilesHosts } = await import('./helpers/source-files-hosts.js')
+    const { sourceFilesIpcBridge } = await import('./helpers/source-files-ipc-bridge.js')
+    const { WorkbenchUserStateStore } = await import('../src/main/workbench-user-state.js')
+    const { AgentMuxSpatialStateStore } = await import('@agentmux/core/spatial-state')
+    const { desktopSpatialGraph } = await import('../src/renderer/src/lib/desktop-spatial-state.js')
+    const { providerCatalogReader, historySourcesReader } = await import('./helpers/startup-observation-api-fixture.js')
+    const { api } = await import('../src/renderer/src/lib/api.js')
+    const f = await sourceFilesHosts(cleanup), source = f.sources[1]!, bridge = sourceFilesIpcBridge(f.runtime, cleanup)
+    await mkdir(join(source.project, 'src'))
+    await writeFile(join(source.project, 'src/app.ts'), 'alpha')
+    const workspace = { id: 'save-source-workspace', hostId: source.id, path: source.project, name: 'Actual Source save', kind: 'folder' as const }
+    const config = { version: 9, hosts: [{ id: source.id, kind: 'local', label: source.id }], executors: {}, workspaces: [workspace],
+      appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } } as AppConfig
+    useAppStore.setState({ config, tabs: {}, documents: {}, layouts: { [workspace.id]: createWorkspaceLayout('pane', []) }, activeWorkspaceId: workspace.id })
+    const user = new WorkbenchUserStateStore(join(f.root, 'save-user.json'))
+    const spatial = new AgentMuxSpatialStateStore(join(f.root, 'save-spatial.json'))
+    await spatial.commit({ expectedRevision: 0, graph: desktopSpatialGraph(useAppStore.getState(), []) })
+    vi.spyOn(api.ui, 'readWorkbenchState').mockImplementation(() => user.read())
+    vi.spyOn(api.ui, 'importWorkbenchState').mockImplementation(value => user.importIfAbsent(value))
+    vi.spyOn(api.ui, 'writeWorkbenchState').mockImplementation(value => user.write(value))
+    vi.spyOn(api.ui, 'requestStorageFlush').mockImplementation(async () => { await user.read() })
+    vi.spyOn(api.config, 'get').mockResolvedValue(config)
+    vi.spyOn(api.providers, 'list').mockImplementation(providerCatalogReader())
+    vi.spyOn(api.sessions, 'historySources').mockImplementation(historySourcesReader())
+    vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
+    vi.spyOn(api.demands, 'list').mockResolvedValue([])
+    vi.spyOn(api.spatial, 'read').mockImplementation(() => spatial.readForLayout())
+    vi.spyOn(api.spatial, 'commit').mockImplementation(value => spatial.commit(value))
+    vi.spyOn(api.spatial, 'onChange').mockImplementation(listener => spatial.subscribe(listener))
+    vi.spyOn(api.spatial, 'retainLabels').mockImplementation(values => spatial.retainDisplayLabels(values))
+    vi.spyOn(api.sourceFiles, 'resolve').mockImplementation(bridge.files.resolve)
+    vi.spyOn(api.sourceFiles, 'call').mockImplementation(bridge.files.call)
+    vi.spyOn(api.sourceFiles, 'watch').mockImplementation(bridge.files.watch)
+    vi.spyOn(api.spaceMounts, 'call').mockImplementation(bridge.spaces.call)
+    vi.spyOn(api.files, 'observe').mockResolvedValue(undefined)
+    vi.spyOn(api.files, 'unobserve').mockResolvedValue(undefined)
+    vi.spyOn(api.files, 'read').mockImplementation(async () => { throw Error('Source save fixture must not read Main') })
+    vi.spyOn(api.files, 'write').mockImplementation(async () => { throw Error('Source save fixture must not write Main') })
+    cleanup.push(await useAppStore.getState().initialize())
+    return { f, source, bridge, workspace, user, api }
+}
+
+async function runPrivateFileTest(name: string): Promise<void> {
+    // The original minimal file mocks stay isolated from the actual Source owners.
+    const directory = await mkdtemp(join(resolve('.local'), 'save-source-test-'))
+    const config = join(directory, 'vitest.config.mts')
+    await writeFile(config, `import original from ${JSON.stringify(resolve('apps/desktop/test/vitest.file-path-client.config.mts'))}; export default {...original,test:{...original.test,environment:'happy-dom',include:['apps/desktop/test/file-save-store.test.ts'],passWithNoTests:false,hookTimeout:60000}}`)
+    try {
+      const child = spawn(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', '--config', config, '--maxWorkers=1', '-t', name], {
+        cwd: process.cwd(), env: { ...process.env, AGENTMUX_TEST_SAVE_SOURCE_CHILD: '1', AGENTMUX_WORKSPACE_MOVE_HELPER: resolve('apps/host/resources/bin/agentmux-workspace-move') }, stdio: ['ignore', 'pipe', 'pipe'] })
+      let log = ''
+      child.stdout.on('data', bytes => { log += bytes }); child.stderr.on('data', bytes => { log += bytes })
+      const code = await new Promise<number | null>((yes, no) => { child.once('error', no); child.once('close', yes) })
+      if (process.env.AGENTMUX_TEST_SAVE_EVIDENCE_DIRECTORY) {
+        const { createHash } = await import('node:crypto')
+        const id = createHash('sha256').update(name).digest('hex').slice(0, 12)
+        await writeFile(join(process.env.AGENTMUX_TEST_SAVE_EVIDENCE_DIRECTORY, 'child-' + id + '.log'), log)
+      }
+      expect(code, log).toBe(0)
+      expect(log).toMatch(/Tests\s+1 passed/)
+    } finally { await rm(directory, { recursive: true, force: true }) }
+}
+
+const closeCleanup: Array<() => unknown | Promise<unknown>> = []
+beforeEach(async context => {
+  if (process.env.AGENTMUX_TEST_SAVE_SOURCE_CHILD !== '1' || context.task.name.startsWith('admits a move')) return
+  const { f, user, api } = await privateFileFixture(closeCleanup)
+  vi.mocked(api.files.read).mockImplementation(fileApi.api.files.read as any)
+  vi.mocked(api.files.write).mockImplementation(fileApi.api.files.write as any)
+  vi.mocked(api.files.observe).mockImplementation(fileApi.api.files.observe)
+  vi.mocked(api.files.unobserve).mockImplementation(fileApi.api.files.unobserve)
+  const { DesktopControlIpcBridge } = await import('../src/main/control-ipc-bridge.js')
+  const { createDesktopWorkbenchCloseOwner } = await import('../src/main/workbench-close-owner.js')
+  const { spaceCloseDigest } = await import('@agentmux/core')
+  let bridge: InstanceType<typeof DesktopControlIpcBridge>
+  bridge = new DesktopControlIpcBridge({ isAvailable: () => true, sendCancellation() {}, sendRequest(request) {
+    void useAppStore.getState().executeWorkbenchClose(request as import('../src/shared/workbench-close-control.js').WorkbenchCloseRendererRequest).then(
+      result => { bridge.accept({ requestId: request.requestId, ok: true, result }) },
+      error => { bridge.accept({ requestId: request.requestId, ok: false, error: { code: 'CONTROL_UNAVAILABLE', message: error.message } }) })
+  } })
+  closeCleanup.push(() => bridge.dispose())
+  const owner = createDesktopWorkbenchCloseOwner({ store: user, bridge, runtime: f.runtime, closeBrowser: async () => { throw Error('Unexpected Browser close') },
+    authority: () => ({ ownerId: spaceCloseDigest(user.path), endpoint: 'private-save-main', documentGeneration: 'private-save-client' }) })
+  vi.spyOn(api.workbenchClose, 'call').mockImplementation((method, params) => owner.call(method, params, { actor: { kind: 'user', id: 'private-save-user' } }))
+})
+afterEach(async () => {
+  for (const close of closeCleanup.splice(0).reverse()) await close()
+  if (process.env.AGENTMUX_TEST_SAVE_SOURCE_CHILD === '1') { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs() }
+})
+async function explicitlyCloseFile(workspaceId: string, tabId: string): Promise<boolean> {
+  const approved = await useAppStore.getState().prepareWorkbenchClose({ target: { kind: 'tab-occurrence', displayWorkspaceId: workspaceId, groupId: 'pane', tabId }, keepAgentSessions: true })
+  const closed = await useAppStore.getState().closeTab(workspaceId, 'pane', tabId, { approved, keepAgentSessions: true })
+  console.info('FILE_SAVE_CLOSE_FACT', JSON.stringify({ operationId: approved.operationId, blockers: approved.plan.projection.surfaces.map(surface => surface.blocker), drafts: approved.plan.projection.drafts.length, closed, retainedTab: Boolean(useAppStore.getState().tabs[tabId]), writes: fileApi.writes.length, reads: fileApi.reads.length }))
+  return closed
+}
