@@ -1,4 +1,5 @@
 import { parseGoalActivityHistoryParams, pageGoalActivity } from './goal-activity-history.js'
+import { parseNotesStorageParams, parseNotesStorageInspection, notesStorageOperationInspection, type NotesStorageMethod, type NotesStoragePort } from './public-rpc-notes-storage.js'
 import { parseProviderCatalogQuery, parseProviderCatalogObservation, type ProviderCatalogMethod } from './public-rpc-provider-catalog.js'
 import { parseSpaceMemberParams } from './space-member-codec.js'
 import { spaceMemberRuntime } from './space-member-runtime.js'
@@ -241,6 +242,7 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   /** Original semantic owner identity; never ctxmux identity or a route alias. */
   diagnosticCoreAuthority?(scope: AgentMuxRpcCoreClient): import('./diagnostic-evidence.js').AgentMuxDiagnosticAuthorityObservation | Promise<import('./diagnostic-evidence.js').AgentMuxDiagnosticAuthorityObservation>
   conversationLandmarks?: ConversationLandmarkStore
+  notesStorage?: NotesStoragePort
   notebookStore?: AgentMuxNotebookStore
   notebookObservation?: NotebookObservationPort
   files?: AgentMuxRpcFilesOwner
@@ -491,7 +493,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | ProviderCatalogMethod | HostSettingsMethod | NodePublishingMethod | NodeLocatorMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod | keyof typeof HOST_ROUTE_METHODS>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | NotesStorageMethod | ProviderCatalogMethod | HostSettingsMethod | NodePublishingMethod | NodeLocatorMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod | keyof typeof HOST_ROUTE_METHODS>, readonly string[]>
 
 /** Home follows an exact execution route; its display name does not identify that route. */
 function homeHostRoute(configuration: import('./control.js').AgentMuxControlSettingsResourceFields | null) {
@@ -1493,6 +1495,16 @@ export class AgentMuxRpcService {
         }
       }
       return parseNodePublishingResult(nodeMethod, result, input) as AgentMuxRpcResult<M>
+    }
+    if (method === 'notebook.storage.inspect' || method === 'notebook.storage.change') {
+      const input = parseNotesStorageParams(method, params)
+      await this.authenticated(context)
+      context.signal?.throwIfAborted()
+      const result = this.ports.notesStorage
+        ? await this.ports.notesStorage.call(method, input)
+        : this.ports.forwardControl ? await this.ports.forwardControl<NotesStorageMethod>(method, input, context)
+        : (() => { throw new AgentMuxError('The original Notes storage owner is unavailable. Keep the original operation and Notes directory; this call did not move or convert files.', 'CONTROL_UNAVAILABLE') })()
+      return parseNotesStorageInspection(result, input.operationId) as AgentMuxRpcResult<M>
     }
     if (method === 'agent.provider.ls') {
       const query = parseProviderCatalogQuery(params)
@@ -2504,7 +2516,7 @@ export class AgentMuxRpcService {
       case 'notebook.inspect': {
         const input = parseNotebookObservationParams(p, true), state = await this.notebooks.read()
         const storage = this.notebooks.storage ? await this.notebooks.storage.inspect(input.operationId) : undefined
-        result = { ...inspectNotebook(state, input), ...(storage ? { storageOperation: storage.operation, resourceChanges: storage.resourceChanges, conversionIssues: storage.conversionIssues } : {}),
+        result = { ...inspectNotebook(state, input), ...(storage ? { storageOperation: storage.operation ? notesStorageOperationInspection(storage.operation) : null, resourceChanges: storage.resourceChanges, conversionIssues: storage.conversionIssues } : {}),
           ...(input.operationId ? { titleOperation: unavailableTitleObservation === undefined ? await this.notebooks.inspectTitleOperation(input.operationId)
             : { operation: { status: 'unavailable', operationId: input.operationId, reason: unavailableTitleObservation }, file: null, projection: null } } : {}),
           ...(input.content ? { content: this.ports.notebookObservation

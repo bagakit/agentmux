@@ -1,4 +1,5 @@
 import { expandCliOptionAssignments } from './cli-option-assignments.js'
+import { parseNotesStorageParams } from './public-rpc-notes-storage.js'
 import { SPACE_MEMBER_CLI_COMMANDS } from './space-member-cli.js'
 import { parseAdoptedHostRoute } from './host-route.js'
 import { HOST_ROUTE_CLI_COMMANDS } from './host-route-cli.js'
@@ -335,6 +336,10 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     { '--name': 'data' }, f => ({ name: value(f, '--name', true)! } satisfies AgentMuxRpcParams<'device.hello'>)),
   command('device.revoke', '--device ID', 'Revoke the exact device from the local Host.',
     { '--device': 'data' }, f => ({ deviceId: id(f, '--device') } satisfies AgentMuxRpcParams<'device.revoke'>)),
+  command('notebook.storage.inspect', '[--operation-id ID]', 'Read the original Notes directory and exact migration/conversion result without resuming it.',
+    { ...OP }, f => parseNotesStorageParams('notebook.storage.inspect', f.values.has('--operation-id') ? { operationId: id(f, '--operation-id') } : {})),
+  command('notebook.storage.change', '--input FILE|-', 'Move or convert Notes through its original owner with the exact operation and expected directory.',
+    { '--input': 'data' }, async f => parseNotesStorageParams('notebook.storage.change', await readControlJsonInput(value(f, '--input', true)!, 'Original Notes directory change'))),
   command('agent.provider.ls', '--host ID [--provider ID]', 'Read pure Provider declarations from one exact Host without probing or starting Native.',
     { '--host': 'data', '--provider': 'data' }, f => ({ hostId: id(f, '--host'), ...(f.values.has('--provider') ? { providerId: id(f, '--provider') } : {}) }),
     'local means the receiving service. catalog=[] is a confirmed empty result; an unavailable source is an error. runtimeId may be null. Posture modes and launch options are declarations, not current permissions, installation or readiness. Private argv and keystrokes remain with the Provider.'),

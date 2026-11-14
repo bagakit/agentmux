@@ -1,4 +1,5 @@
 import { parseGoalActivityHistoryParams, parseGoalActivityHistoryResult } from './goal-activity-history.js'
+import { parseNotesStorageParams, parseNotesStorageInspection, parseNotesStorageOperationInspection } from './public-rpc-notes-storage.js'
 import { parseProviderCatalogQuery, parseProviderCatalogObservation } from './public-rpc-provider-catalog.js'
 import { parseTerminalInspection, parseTerminalTarget, parseTerminalListParams, parseTerminalListResult } from './terminal-observation.js'
 import { parseSpaceMemberParams } from './space-member-codec.js'
@@ -68,7 +69,6 @@ import { isMoteAvatarWriteMethod, parseMoteAvatarWriteParams, parseMoteAvatarWri
 import { isMoteAvatarSeriesMethod, parseMoteAvatarSeriesParams, parseMoteAvatarSeriesResult } from './mote-avatar-series.js'
 import { parseDiagnosticEvidenceResult } from './diagnostic-evidence-codec.js'
 import { parseControlEndpointState } from './control-endpoint-state.js'
-import { parseNotesStorageOperation } from './notes-storage.js'
 import { noteProvenanceResourceKey } from './note-provenance.js'
 import type { NoteResource } from './notebook-catalog.js'
 import { parseControlDemandActivity } from './control-codec.js'
@@ -477,6 +477,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (isApplicationAccessMethod(method)) return parseApplicationAccessResult(method,value,parseApplicationAccessParams(method,params)) as unknown as Record<string,unknown>
     if (method === 'node.locate') return parseNodeLocateResult(value, parseNodeLocateParams(params)) as unknown as Record<string, unknown>
     if (isNodePublishingMethod(method)) return parseNodePublishingResult(method, value, parseNodePublishingParams(method, params)) as unknown as Record<string, unknown>
+    if (method === 'notebook.storage.inspect' || method === 'notebook.storage.change') return parseNotesStorageInspection(value, parseNotesStorageParams(method, params).operationId) as unknown as Record<string, unknown>
     if (method === 'agent.provider.ls') return parseProviderCatalogObservation(value, parseProviderCatalogQuery(params)) as unknown as Record<string, unknown>
     if (isHostSettingsMethod(method)) return parseHostSettingsResult(method, value, parseHostSettingsParams(method, params)) as unknown as Record<string, unknown>
     if (method === 'space.folder.register') return parseFolderSpaceReceipt(value, parseFolderSpaceRegistration(params)) as unknown as Record<string, unknown>
@@ -1140,7 +1141,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (observationInput.content === true) { const body = parseNoteContentObservation(content); if (body.noteId !== observationInput.noteId || !noteContentInCatalogScope(state, body)) fail() }
         else if (content !== undefined) fail()
         if (notebookFingerprint(knowledge) !== notebookFingerprint(inspectNotebook(state, input))) fail()
-        if (storageOperation !== undefined && storageOperation !== null) { const original = parseNotesStorageOperation(storageOperation); if (input.operationId !== undefined && original.operationId !== input.operationId) fail() }
+        if (storageOperation !== undefined && storageOperation !== null) { const original = parseNotesStorageOperationInspection(storageOperation); if (input.operationId !== undefined && original.operationId !== input.operationId) fail() }
         if (resourceChanges !== undefined) {
           if (!Array.isArray(resourceChanges)) fail()
           for (const value of resourceChanges as unknown[]) {

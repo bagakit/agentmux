@@ -18,7 +18,10 @@ const object = (value: unknown, fields: string[]): Record<string, unknown> => {
 const text = (value: unknown): string => typeof value === 'string' && value.length > 0 && !/[\0\r\n]/u.test(value) ? value : fail('An exact Note provenance identity is required.')
 export function noteProvenanceResourceKey(resource: NoteResource): string {
   const r = object(resource, ['hostId', 'workspaceId', 'workspacePath', 'path'])
-  for (const key of ['hostId', 'workspaceId', 'workspacePath', 'path']) text(r[key])
+  for (const key of ['hostId', 'workspaceId']) text(r[key])
+  // Filesystem names are JSON data, not one-line identifiers. Keep their exact
+  // spelling (including line breaks); the original file owner validates location.
+  for (const key of ['workspacePath', 'path']) if (typeof r[key] !== 'string' || !(r[key] as string).length || (r[key] as string).includes('\0')) fail('An exact Note filesystem path is required.')
   if (resource.path.startsWith('/') || resource.path.split(/[\\/]/u).includes('..')) fail('Note provenance requires an original relative path.')
   return JSON.stringify([resource.hostId, resource.workspaceId, resource.workspacePath, resource.path])
 }

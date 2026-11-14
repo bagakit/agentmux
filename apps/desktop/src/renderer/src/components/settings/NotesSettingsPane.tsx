@@ -8,14 +8,14 @@ import { useSettingDraftRecord } from './use-setting-draft'
 import '../../styles/settings-workflows.css'
 import { useAppStore } from '../../store'
 import { api } from '../../lib/api'
-import type { NotesStorageSnapshot } from '@agentmux/core/notebook-store'
+import type { NotesStorageInspection } from '@agentmux/core/notebook-store'
 
 export function NotesSettingsPane({ preferences, onSave, onOpenNotes }: {
   preferences: NotesPreferences | undefined
   onSave(value: Required<NotesPreferences>, expected: Required<NotesPreferences>): Promise<void>
   onOpenNotes(): void
 }) {
-  const [storage, setStorage] = useState<NotesStorageSnapshot | null>(null), [directory, setDirectory] = useState(''), [directoryIssue, setDirectoryIssue] = useState<string | null>(null), [moving, setMoving] = useState(false)
+  const [storage, setStorage] = useState<NotesStorageInspection | null>(null), [directory, setDirectory] = useState(''), [directoryIssue, setDirectoryIssue] = useState<string | null>(null), [moving, setMoving] = useState(false)
   const [intent, setIntent] = useState<import('@agentmux/core/notebook-store').NotesStorageChange | null>(null)
   useEffect(() => { let active = true; void api.notesStorage.inspect().then(value => { if (active) { setStorage(value); setDirectory(value.operation?.phase === 'prepared' ? value.operation.directory : value.directory); if (value.operation) setIntent(value.operation) } }).catch(error => { if (active) setDirectoryIssue(String(error)) }); return () => { active = false } }, [])
   async function moveDirectory() {

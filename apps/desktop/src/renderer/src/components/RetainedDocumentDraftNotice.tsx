@@ -6,13 +6,13 @@ import { api } from '../lib/api'
 import { useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
 import { SelectionField } from './SelectionField'
 import type { FileDocument } from '../../../shared/contracts'
-import type { NotesStorageSnapshot } from '@agentmux/core/notebook-store'
+import type { NotesStorageInspection } from '@agentmux/core/notebook-store'
 
 /** Observe the original conversion owner even when the auxiliary reader is closed. */
 export function useNoteConversionObservation(surface: FileWorkbenchSurface, active: boolean) {
   const workspace = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === surface.workspaceId))
   const scope = JSON.stringify([surface.workspaceId, surface.path, workspace?.hostId, workspace?.path])
-  const [snapshot, setSnapshot] = useState<{ scope: string; value: NotesStorageSnapshot } | null>(null)
+  const [snapshot, setSnapshot] = useState<{ scope: string; value: NotesStorageInspection } | null>(null)
   const [failure, setFailure] = useState<{ scope: string; message: string } | null>(null)
   const [retrying, setRetrying] = useState(false)
   const epoch = useRef(0)
@@ -22,7 +22,7 @@ export function useNoteConversionObservation(surface: FileWorkbenchSurface, acti
     const request = ++epoch.current
     setRetrying(false)
     if (!active || !/\.note\.(?:json|md)$/u.test(surface.path)) return
-    const observe = (value: NotesStorageSnapshot) => { if (epoch.current === request) { setSnapshot({ scope, value }); setFailure(null) } }
+    const observe = (value: NotesStorageInspection) => { if (epoch.current === request) { setSnapshot({ scope, value }); setFailure(null) } }
     void api.notesStorage.inspect().then(observe).catch(error => { if (epoch.current === request) setFailure({ scope, message: 'The original Note conversion observation is unavailable. This file remains available; inspect the Notes directory in Settings. ' + String(error) }) })
     const release = api.notesStorage.onChange(observe)
     return () => { ++epoch.current; release() }

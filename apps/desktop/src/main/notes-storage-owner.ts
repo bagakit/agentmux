@@ -1,13 +1,14 @@
+import { notesStorageInspection, parseNotesStorageParams, type NotesStorageMethod, type NotesStorageParamsMap, type NotesStorageResultMap } from '@agentmux/core'
 import { writeOriginalNoteResource } from '@agentmux/host/note-resource-write'
 import { mintObjectId } from '@agentmux/core/object-id'
-import { AgentMuxNotesStorage, type NotesStorageChange, type NotesStorageSnapshot } from '@agentmux/core/notebook-store'
+import { AgentMuxNotesStorage, validateNotesStorageChange, type NotesStorageChange, type NotesStorageSnapshot } from '@agentmux/core/notebook-store'
 import type { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import type { WorkspaceRecord, WorkspaceFileWriteInput } from '../shared/contracts.js'
 import type { ConfigOwner } from './config-owner.js'
 import { NOTES_WORKSPACE_ID, NOTES_WORKSPACE_NAME } from '@agentmux/host/notes-library'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { workspaceLocationKey } from './workspace-location.js'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 import { reconcileNotesSpatialResources } from '../shared/notes-storage-reconciliation.js'
 import { prepareLegacyNotesConversion, prepareLegacyPendingConversion } from './note-legacy-conversion.js'
@@ -15,6 +16,12 @@ import { prepareLegacyNotesConversion, prepareLegacyPendingConversion } from './
 export class NotesStorageOwner {
   constructor(private readonly config: ConfigOwner, private readonly spatial: AgentMuxSpatialStateStore, private readonly publish: (snapshot: NotesStorageSnapshot) => void, readonly storage = new AgentMuxNotesStorage()) {}
   inspect(operationId?: string) { return this.storage.inspect(operationId) }
+  async call<M extends NotesStorageMethod>(method: M, params: NotesStorageParamsMap[M]): Promise<NotesStorageResultMap[M]> {
+    const input = parseNotesStorageParams(method, params)
+    return notesStorageInspection(method === 'notebook.storage.inspect'
+      ? await this.inspect(input.operationId) : await this.change(input as NotesStorageChange))
+  }
+
   async initialize() {
     const legacyCatalogPath = join(dirname(this.storage.locatorPath), 'notebooks.json')
     await this.storage.importLegacyCatalog(legacyCatalogPath)
@@ -33,7 +40,9 @@ export class NotesStorageOwner {
     return this.reconcile(await this.inspect())
   }
   async change(input: NotesStorageChange) {
+    validateNotesStorageChange(input)
     const current = await this.inspect()
+    if (current.operation?.operationId === input.operationId && (current.operation.expectedDirectory !== resolve(input.expectedDirectory) || current.operation.directory !== resolve(input.directory))) throw Object.assign(new Error('This operation identity belongs to a different original Notes request. Keep the original operation and inspect it.'), { code: 'NOTES_STORAGE_INPUT_INVALID' })
     if (current.operation?.operationId === input.operationId && (current.operation.kind === 'convert' || !current.operation.database)) {
       if (!current.operation.database) await this.storage.recoverLegacyOperation(input.operationId,
         operation => prepareLegacyPendingConversion(operation, join(dirname(this.storage.locatorPath), 'note-conversion-staging')))

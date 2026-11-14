@@ -1,3 +1,4 @@
+import { notesStorageInspection } from '@agentmux/core'
 import { registerBrowserTaskParallelIpc } from './browser-task-parallel-ipc.js'
 import { createProfileCookieFileIo } from './browser-profile-cookie-file-io.js'
 import { confirmProfileCookieFile } from './browser-profile-cookie-file-confirmation.js'
@@ -433,7 +434,7 @@ export async function registerIpc(args: {
     reportIssue: issue => { if (!contents.isDestroyed()) contents.send('ui:appIconIssue', issue) } })
   const fileObservations = new FileObservationRegistry()
   const notesStorage = new AgentMuxNotesStorage(undefined, undefined, { beforeSourceCleanup: async changes => { await notesStorageOwner.confirmResources(await notesStorage.inspect()); for (const change of changes) await fileObservations.unobserve(change.from.workspaceId + '\0' + change.from.path) } })
-  const notesStorageOwner = new NotesStorageOwner(configOwner, spatialState, snapshot => { if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send('notesStorage:changed', snapshot) }, notesStorage)
+  const notesStorageOwner = new NotesStorageOwner(configOwner, spatialState, snapshot => { if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send('notesStorage:changed', notesStorageInspection(snapshot)) }, notesStorage)
   const notesStorageReady = notesStorageOwner.initialize().catch(error => process.stderr.write('Notes directory recovery remains available: ' + String(error) + '\n'))
   const maintenance = new RemoteCoreUpgradeManager({ stateDirectory: join(app.getPath('userData'), 'remote-core-upgrades') })
   const hostUpgrades = new SettingsHostsUpgradeOwner(maintenance, configOwner, args.runtime, join(app.getPath('userData'), 'remote-core-upgrade-adoptions.json'))
@@ -1428,8 +1429,8 @@ export async function registerIpc(args: {
       return handler(event, input)
     }))
 
-  handleWithEvent('notesStorage:inspect', async (event, operationId?: string) => { await notesStorageReady; return notesStorageOwner.inspect(operationId) })
-  handleWithEvent('notesStorage:change', async (event, input: import('@agentmux/core/notebook-store').NotesStorageChange) => { return notesStorageOwner.change(input) })
+  handleWithEvent('notesStorage:inspect', async (_event, operationId?: string) => notesStorageOwner.call('notebook.storage.inspect', operationId === undefined ? {} : { operationId }))
+  handleWithEvent('notesStorage:change', async (_event, input: import('@agentmux/core/notebook-store').NotesStorageChange) => notesStorageOwner.call('notebook.storage.change', input))
   const disposeNotebook = notebookStore.subscribe(observation => {
     if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send('notebook:changed', observation)
   })
@@ -2652,6 +2653,7 @@ export async function registerIpc(args: {
     nodeLocatorHosts: () => configOwner.current.hosts.map(host => host.id),
     hostTailcatKey: (input, signal) => args.runtime.callOriginalCore('local', 'settings.hosts.tailcat-key', input, { transport: 'unix', ...(signal ? { signal } : {}) }),
     hostTailcat: async (hostId, signal) => (await args.runtime.callOriginalCore(hostId, 'settings.hosts.inspect', { hostId: 'local' }, { transport: 'unix', ...(signal ? { signal } : {}) })).tailcat,
+    notesStorage: notesStorageOwner,
     coreClients: () => args.runtime.rpcClients(),
     callOriginalCore: (hostId, method, params, context) => args.runtime.callOriginalCore(hostId, method, params, context),
     snapshot: params => observeClientRpcSnapshot(config, args.scratchTopics, params),

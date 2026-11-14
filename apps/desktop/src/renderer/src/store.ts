@@ -254,7 +254,7 @@ import {
 import { CONNECTION_OBSERVATION_SOURCE_STEP, isScratchWorkspaceId } from '../../shared/contracts'
 import { bookmarkFileNameFromTitle, bookmarkKindForPath, emitWebloc } from '../../shared/bookmark-file'
 import { reconcileNotesStorageResources, reconcileNotesLauncherDrafts, reobserveNotesStorageResources } from './lib/notes-storage-reconciliation'
-import type { NotesStorageSnapshot } from '@agentmux/core/notebook-store'
+import type { NotesStorageInspection } from '@agentmux/core/notebook-store'
 import { api } from './lib/api'
 import { browserProfiles } from './lib/browser-profiles'
 import { sessionLaunchFailure } from '../../shared/session-launch-result'
@@ -5350,7 +5350,7 @@ export async function registerCreatedNote(receipt: NoteCreationReceipt): Promise
 }
 
 /** Consume the storage owner's exact resource receipt; never rename Tab/Region entities. */
-export async function applyNotesStorageSnapshot(snapshot: NotesStorageSnapshot): Promise<void> {
+export async function applyNotesStorageSnapshot(snapshot: NotesStorageInspection): Promise<void> {
   const before = useAppStore.getState()
   const next = reconcileNotesStorageResources(before, snapshot.resourceChanges, snapshot.directoryChanges)
   reconcileNotesLauncherDrafts(snapshot.resourceChanges, snapshot.directory)
@@ -6027,7 +6027,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const visibleA2ARecipients = createVisibleSessionIdsSelector()
     const availabilityEpoch = ++startupAvailabilityEpoch
     let disposeStartupProgress = () => {}
-    let pendingNotesStorage: NotesStorageSnapshot | null = null
+    let pendingNotesStorage: NotesStorageInspection | null = null
     const disposeNotesStorage = api.notesStorage.onChange(snapshot => {
       pendingNotesStorage = snapshot
       if (!booting) void applyNotesStorageSnapshot(snapshot).catch(error => {

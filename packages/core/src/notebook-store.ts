@@ -11,6 +11,7 @@ import { parseNoteFileTitle, parseNoteTitleIntent, parseNoteTitleOperation, type
 import { noteProvenanceResourceKey } from './note-provenance.js'
 import { parseNoteHistoryQuery, parseNoteHistoryRecord, type NoteHistoryQuery, type NoteHistoryRecord, type NoteHistorySnapshot, type NoteHistoryEntry } from './note-history.js'
 export * from './notes-storage.js'
+export * from './public-rpc-notes-storage.js'
 export * from './notebook-catalog.js'
 export * from './note-provenance.js'
 export * from './note-history.js'

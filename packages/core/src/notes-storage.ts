@@ -16,11 +16,19 @@ import { noteProvenanceResourceKey, parseNoteProvenanceWrite, type NoteProvenanc
 import { parseNoteHistoryRecord, type NoteHistoryRecord } from './note-history.js'
 export type NotesResourceChange = { noteId: string; from: NoteResource; to: NoteResource; conversion?: { sourceRevision: string; targetRevision: string } }
 export type NotesStorageChange = { operationId: string; expectedDirectory: string; directory: string }
+/** Host-native validation shared by every original directory-change admission. */
+export function validateNotesStorageChange(input: NotesStorageChange): void {
+  if (!input || typeof input.operationId !== 'string' || !input.operationId.trim() ||
+    typeof input.directory !== 'string' || !isAbsolute(input.directory) ||
+    typeof input.expectedDirectory !== 'string' || !isAbsolute(input.expectedDirectory)) throw failure(
+      'Choose an absolute Notes directory and the original operation identity.', 'NOTES_STORAGE_INPUT_INVALID')
+}
+
 export type NotesConversionIssue = { noteId: string | null; resource: NoteResource | null; code: string; message: string }
 export type NotesStorageTransfer = { source: string; destination: string; hash: string; preparedSource?: string; targetHash?: string; backup?: string }
 export type NotesStorageOperation = NotesStorageChange & { phase: 'prepared' | 'committed'; resourceChanges: NotesResourceChange[]; files: NotesStorageTransfer[]; catalog: NotebookState; sourceCatalog: string; sourceCatalogHash: string; database?: { incarnation: string; snapshotPath: string; snapshotHash: string }; kind?: 'convert' }
 export type NotesStorageSnapshot = { directory: string; catalogPath: string; resourceChanges: NotesResourceChange[]; directoryChanges: { from: string; to: string }[]; operation: NotesStorageOperation | null; conversionIssues?: NotesConversionIssue[] }
-export type NotesStorageApi = { inspect(operationId?: string): Promise<NotesStorageSnapshot>; change(input: NotesStorageChange): Promise<NotesStorageSnapshot>; onChange(listener: (snapshot: NotesStorageSnapshot) => void): () => void }
+export type NotesStorageApi = { inspect(operationId?: string): Promise<import('./public-rpc-notes-storage.js').NotesStorageInspection>; change(input: NotesStorageChange): Promise<import('./public-rpc-notes-storage.js').NotesStorageInspection>; onChange(listener: (snapshot: import('./public-rpc-notes-storage.js').NotesStorageInspection) => void): () => void }
 /** The converter stages fsynced Markdown; this original owner journals and publishes it. */
 export type NotesStorageConversion = { files: NotesStorageTransfer[]; resourceChanges: NotesResourceChange[]; provenance: NoteProvenanceWrite[]; issues?: NotesConversionIssue[] }
 type Location = { schemaVersion: 1; directory: string; operations: Record<string, NotesStorageOperation>; pending: string | null; catalogEstablished?: true; catalogFormat?: 'sqlite' | 'files'; conversionIssues?: NotesConversionIssue[] }
@@ -131,7 +139,7 @@ export class AgentMuxNotesStorage {
   /** Bootstrap is explicit old-directory adoption; normal moves read only managed Markdown. */
   async change(input: NotesStorageChange, adoption?: { catalogPath: string; workspace: { id: string; hostId: string; path: string }; destinationWorkspaceId: string }): Promise<NotesStorageSnapshot> {
     return this.withLock(async () => {
-      if (!input.operationId?.trim() || !isAbsolute(input.directory) || !isAbsolute(input.expectedDirectory)) throw failure('Choose an absolute Notes directory and the original operation identity.', 'NOTES_STORAGE_INPUT_INVALID')
+      validateNotesStorageChange(input)
       let location = await this.location(); const existing = Object.hasOwn(location.operations, input.operationId) ? location.operations[input.operationId] : undefined
       if (existing) { if (existing.kind || existing.directory !== resolve(input.directory) || existing.expectedDirectory !== resolve(input.expectedDirectory)) throw failure('This operation identity belongs to a different directory change.', 'NOTES_STORAGE_INPUT_INVALID'); return this.retry(location, existing) }
       if (location.pending) throw failure('Another Notes directory change needs recovery first.', 'NOTEBOOK_BUSY')
