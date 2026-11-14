@@ -12,6 +12,8 @@ import { saveScreenshotPng } from './screenshot-files'
 
 /** Overlays are shown together once every display painted its frozen frame, or after this long at the latest. */
 const PRESENT_FALLBACK_MS = 1500
+/** Matches the native producer observation window; expiry is an unknown observation, never a source failure. */
+const CAPTURE_BUSY_OBSERVE_MS = 10_000
 
 /** One capture's consumer: its primary delivery, and whether ⌘E may move the marks to the window editor. */
 export type CaptureSurfaceContinuation = { displayId: number; frame: CaptureSurfaceRect; scale: number; rect: CaptureSurfaceRect }
@@ -175,6 +177,7 @@ export class CaptureSurface {
     this.prepareWindows(active)
     const first = await firstPending
     if (this.active !== active) return
+    if (captureBusy(first)) throw first
     if (!(first instanceof Error)) this.validateFrames(active, first)
     const needsSecond = active.visibleHosts > 0
     if (needsSecond && !usable(first)) {
@@ -207,11 +210,13 @@ export class CaptureSurface {
       if (this.active !== active) return new Error('The original screenshot request is no longer current.')
       try {
         const native = this.ports.native()
-        let result: NativeDisplayFrames | null = null
+        let result: NativeDisplayFrames | null = null, busySince: number | null = null
         while (result === null && this.active === active) {
           try { result = await native.captureDisplays({ includeHostWindows: mode === 'included' }) }
           catch (error) {
-            if ((error as { code?: unknown }).code !== 'capture_busy') throw error
+            if (!captureBusy(error)) throw error
+            busySince ??= performance.now()
+            if (performance.now() - busySince >= CAPTURE_BUSY_OBSERVE_MS) return Object.assign(new Error("Another display capture is still busy. The previous producer's state is unknown. Wait for it to finish, then retry."), { code: 'capture_busy' })
             // Busy is the lease owner's proof that the old producer is still alive, not a source failure.
             await new Promise<void>(resolve => setTimeout(resolve, 25))
           }
@@ -551,6 +556,7 @@ function raise(window: BrowserWindow, bounds: CaptureSurfaceRect): void {
 function send(overlay: Overlay, event: CaptureSurfaceEvent): void {
   if (!overlay.window.isDestroyed()) overlay.window.webContents.send(CAPTURE_SURFACE_EVENT, event)
 }
+function captureBusy(error: unknown): boolean { return error instanceof Error && (error as { code?: unknown }).code === 'capture_busy' }
 function rendererTiming(value: unknown): CaptureRendererTiming | null {
   if (!value || typeof value !== 'object') return null
   const timing = value as Record<string, unknown>, keys = ['loadMs', 'decodeMs', 'paintMs', 'presentedMs'] as const
