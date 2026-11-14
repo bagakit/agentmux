@@ -136,7 +136,8 @@ async function captureMatrix() {
       assert.equal(await evaluate('Boolean(document.querySelector(".goals-collection--list"))'), true)
     }
     if (['history', 'multi-host', 'existing-loop'].includes(scene)) {
-      await click('document.querySelector(".goals-detail__team-link")')
+      const toggle = 'document.querySelector("[data-goal-supervisor-toggle]")'
+      if (await evaluate(toggle + '.getClientRects().length > 0')) await click(toggle)
       if (scene === 'existing-loop') await waitFor('Boolean(document.querySelector(".goals-continuation__saved"))')
     }
     if (scene === 'saved-plan' && width === 1280) {
@@ -167,9 +168,9 @@ async function captureMatrix() {
   assert.equal(result.frames.length, selected.length)
 }
 async function graphAnchors(phase) {
-  const facts = await evaluate(`(()=>{const canvas=document.querySelector('.goal-plan__canvas');return {scrollTop:canvas.scrollTop,edges:[...document.querySelectorAll('[data-goal-plan-edge]')].map(path=>{const [from,to]=path.dataset.goalPlanEdge.split('>'),node=id=>[...document.querySelectorAll('[data-goal-plan-node]')].find(e=>e.dataset.goalPlanNode===id),a=node(from),b=node(to),ah=a.querySelector('.goal-plan-node__head').getBoundingClientRect(),bh=b.querySelector('.goal-plan-node__head').getBoundingClientRect(),ar=a.getBoundingClientRect(),br=b.getBoundingClientRect(),matrix=path.getScreenCTM(),point=p=>new DOMPoint(p.x,p.y).matrixTransform(matrix),s=point(path.getPointAtLength(0)),e=point(path.getPointAtLength(path.getTotalLength()));return {from,to,error:Math.max(Math.abs(s.x-ar.right),Math.abs(s.y-(ah.top+ah.height/2)),Math.abs(e.x-br.left),Math.abs(e.y-(bh.top+bh.height/2)))}})}})()`)
+  const facts = await evaluate(`(()=>{const canvas=document.querySelector('.goal-plan__canvas');return {scrollTop:canvas.scrollTop,edges:[...document.querySelectorAll('[data-goal-plan-edge]')].map(path=>{const [from,to]=path.dataset.goalPlanEdge.split('>'),node=id=>[...document.querySelectorAll('[data-goal-plan-node]')].find(e=>e.dataset.goalPlanNode===id),a=node(from),b=node(to),ar=a.getBoundingClientRect(),br=b.getBoundingClientRect(),matrix=path.getScreenCTM(),point=p=>new DOMPoint(p.x,p.y).matrixTransform(matrix),s=point(path.getPointAtLength(0)),e=point(path.getPointAtLength(path.getTotalLength()));return {from,to,error:Math.max(Math.abs(s.x-ar.right),Math.abs(s.y-(ar.top+ar.height/2)),Math.abs(e.x-br.left),Math.abs(e.y-(br.top+br.height/2)))}})}})()`)
   assert.ok(facts.scrollTop > 0, 'Actual nonzero canvas scroll, not the initial frame')
-  assert.ok(facts.edges.length > 0); for (const edge of facts.edges) assert.ok(edge.error < 2, 'Rendered dependency endpoints follow their actual original node heads')
+  assert.ok(facts.edges.length > 0); for (const edge of facts.edges) assert.ok(edge.error < 2, 'Rendered dependency endpoints follow their actual original task cards')
   result.observations.push({ scene: 'saved-plan-edge-anchors', phase, facts })
 }
 

@@ -14,19 +14,23 @@ module.exports = async ({ evaluate, size, pointer, click, capture, waitFor, pain
   result.matrix = { key, scenes: settingsOnly ? [] : matrix, settings: !key && !goalsOnly }
   const query = selector => `document.querySelector(${JSON.stringify(selector)})`
   async function anchors(phase) {
-    const facts = await evaluate(`(()=>{const canvas=document.querySelector('.goal-plan__canvas');return {scrollTop:canvas.scrollTop,scrollLeft:canvas.scrollLeft,visible:getComputedStyle(document.querySelector('.goal-plan__edges')).display!=='none',edges:[...document.querySelectorAll('[data-goal-plan-edge]')].map(path=>{const [from,to]=path.dataset.goalPlanEdge.split('>'),node=id=>[...document.querySelectorAll('[data-goal-plan-node]')].find(e=>e.dataset.goalPlanNode===id),a=node(from),b=node(to),ah=a.querySelector('.goal-plan-node__head').getBoundingClientRect(),bh=b.querySelector('.goal-plan-node__head').getBoundingClientRect(),ar=a.getBoundingClientRect(),br=b.getBoundingClientRect(),matrix=path.getScreenCTM(),point=p=>new DOMPoint(p.x,p.y).matrixTransform(matrix),s=point(path.getPointAtLength(0)),e=point(path.getPointAtLength(path.getTotalLength()));return{from,to,error:Math.max(Math.abs(s.x-ar.right),Math.abs(s.y-ah.top-ah.height/2),Math.abs(e.x-br.left),Math.abs(e.y-bh.top-bh.height/2))}})}})()`)
+    const facts = await evaluate(`(()=>{const canvas=document.querySelector('.goal-plan__canvas');return {scrollTop:canvas.scrollTop,scrollLeft:canvas.scrollLeft,visible:getComputedStyle(document.querySelector('.goal-plan__edges')).display!=='none',edges:[...document.querySelectorAll('[data-goal-plan-edge]')].map(path=>{const [from,to]=path.dataset.goalPlanEdge.split('>'),node=id=>[...document.querySelectorAll('[data-goal-plan-node]')].find(e=>e.dataset.goalPlanNode===id),a=node(from),b=node(to),ar=a.getBoundingClientRect(),br=b.getBoundingClientRect(),matrix=path.getScreenCTM(),point=p=>new DOMPoint(p.x,p.y).matrixTransform(matrix),s=point(path.getPointAtLength(0)),e=point(path.getPointAtLength(path.getTotalLength()));return{from,to,error:Math.max(Math.abs(s.x-ar.right),Math.abs(s.y-ar.top-ar.height/2),Math.abs(e.x-br.left),Math.abs(e.y-br.top-br.height/2))}})}})()`)
     if (facts.visible) assert.ok(facts.edges.length > 0 && facts.edges.every(edge => edge.error < 2), `Actual edge anchors after ${phase}`)
     result.observations.push({ scene: 'hierarchy-edges', phase, ...facts })
     return facts
   }
   for (const [scene, width, theme] of settingsOnly ? [] : matrix) {
     const seeded = await evaluate(`goalsHierarchy.seed(${JSON.stringify(scene)})`)
-    await evaluate(`goalsVisual.appearance(${JSON.stringify(theme)})`); await size(width)
+    await evaluate(`goalsVisual.appearance(${JSON.stringify(theme)})`)
+    // A compact desktop window makes the saved DAG genuinely overflow for the anchor and scroll-hint checks.
+    await size(width, scene === 'saved-plan' && width === 1280 ? 660 : 780)
     await waitFor(scene === 'saved-plan' ? 'document.querySelectorAll("[data-goal-plan-node]").length===7' : 'document.querySelectorAll("[data-goal-plan-origin]").length===1')
     await evaluate('document.querySelector(".goals-detail").scrollTop=0'); await pointer(query('.goals-detail__toolbar')); await paint()
     const facts = await evaluate(`(()=>{const box=e=>{if(!e)return null;const r=e.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom}},detail=document.querySelector('.goals-detail'),head=document.querySelector('.goals-detail__head'),main=document.querySelector('.goals-detail__main'),graph=document.querySelector('[aria-label="Goal plan"]'),team=document.querySelector('.goal-team'),properties=document.querySelector('[aria-label="Goal properties"]'),canvas=graph.querySelector('.goal-plan__canvas');return {width:innerWidth,height:innerHeight,theme:document.documentElement.dataset.appearance,title:document.querySelector('[aria-label="Goal title"]').value,stage:document.querySelector('[data-goal-detail-stage]').innerText,head:box(head),graph:box(graph),origin:box(graph.querySelector('[data-goal-plan-origin]')),first:main.firstElementChild?.contains(graph),team:box(team),properties:box(properties),teamLink:box(document.querySelector('.goals-detail__team-link')),teamActors:[...team.querySelectorAll('[data-goal-team-actor]')].map(e=>({key:e.dataset.goalTeamActor,roles:[...e.querySelectorAll('[data-goal-team-role]')].map(r=>r.dataset.goalTeamRole),shared:!!e.querySelector('.focus-context.focus-context--card'),...box(e)})),unknown:[...team.querySelectorAll('[data-goal-team-unconfirmed]')].map(e=>({id:e.dataset.goalTeamUnconfirmed,text:e.innerText,interactiveAgentCard:!!e.querySelector('.focus-context')})),sections:[...main.children].map(e=>({tag:e.tagName,aria:e.getAttribute('aria-label'),heading:e.querySelector('h2,h3')?.textContent??null,...box(e)})),criteria:[...main.querySelectorAll('[data-goal-success-criterion]')].map(e=>({id:e.dataset.goalSuccessCriterion,text:e.textContent,...box(e)})),confirmation:main.querySelector('[data-goal-confirmation-state]')?.dataset.goalConfirmationState??null,canvas:canvas?{...box(canvas),clientHeight:canvas.clientHeight,scrollHeight:canvas.scrollHeight,clientWidth:canvas.clientWidth,scrollWidth:canvas.scrollWidth,tabIndex:canvas.tabIndex,scrollHint:graph.querySelector('.goal-plan__scroll-hint')?.textContent??null}:null,overflow:document.documentElement.scrollWidth>innerWidth||document.body.scrollWidth>innerWidth}})()`)
-    if (scene === 'team-unknown' && width === 620) {
-      await click(query('.goals-detail__team-link')); await paint()
+    const inspector = '[data-goal-supervisor-toggle]'
+    const teamScene = scene === 'team-unknown' && width === 620
+    if (teamScene) {
+      await click(query(inspector)); await paint()
       const view = await evaluate(`(()=>{const team=document.querySelector('.goal-team'),r=team.getBoundingClientRect();return {top:r.top,bottom:r.bottom,text:team.innerText,focused:document.activeElement?.getAttribute('aria-label'),actors:[...team.querySelectorAll('[data-goal-team-actor]')].map(e=>({key:e.dataset.goalTeamActor,top:e.getBoundingClientRect().top,bottom:e.getBoundingClientRect().bottom})),unknown:[...team.querySelectorAll('[data-goal-team-unconfirmed]')].map(e=>({id:e.dataset.goalTeamUnconfirmed,top:e.getBoundingClientRect().top,bottom:e.getBoundingClientRect().bottom}))}})()`)
       assert.ok(view.top >= 36 && view.top < 200, 'The real header Team action reveals its original Team region')
       result.observations.push({scene:'hierarchy-team-location',width,theme,view})
@@ -40,8 +44,16 @@ module.exports = async ({ evaluate, size, pointer, click, capture, waitFor, pain
     } else await capture(`${width}-${theme}-hierarchy-${scene}`, width)
     assert.equal(facts.width, width); assert.equal(facts.theme, theme); assert.equal(facts.overflow, false)
     assert.equal(facts.first, true); assert.ok(facts.graph.y >= facts.head.bottom - 1 && facts.graph.y < facts.height - 100)
-    assert.ok(facts.team.y < facts.properties.y, 'Team is above lower-emphasis Properties')
-    assert.ok(facts.teamLink && facts.teamLink.y < facts.height, 'Narrow Team remains discoverable from the Goal header')
+    if (facts.teamLink?.width > 0) {
+      assert.ok(facts.teamLink.y < facts.height, 'The narrow Supervisor opens from the Goal header')
+      if (!teamScene) await click(query(inspector))
+      await waitFor(`${query(inspector)}.getAttribute('aria-pressed') === 'true'`)
+      const positions = await evaluate(`[${query('.goal-team')}, ${query('[aria-label="Goal properties"]')}].map(el => el.getBoundingClientRect().top)`)
+      assert.ok(positions[0] < positions[1], 'Team precedes Properties inside the open Inspector')
+      await click(query(inspector))
+    } else {
+      assert.ok(facts.team.width > 0 && facts.team.y < facts.properties.y, 'The wide rail shows Team before Properties')
+    }
     if (scene === 'long-pending' || scene === 'pending-draft') { assert.equal(facts.confirmation, 'unconfirmed'); assert.equal(facts.criteria.length, 2) }
     if (scene === 'team-unknown') {
       assert.equal(facts.teamActors.length, 1); assert.equal(facts.teamActors[0].shared, true)

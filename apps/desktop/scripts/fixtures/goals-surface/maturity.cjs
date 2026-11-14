@@ -3,7 +3,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs/promises'), path = require('node:path'), crypto = require('node:crypto')
 const [html, privateRoot, evidence, scope, baselineFile] = process.argv.slice(2)
 const hierarchy = scope?.startsWith('goal-hierarchy-')
-if (hierarchy || ['goal-claim-workbench-only','goal-space-only','goal-space-layout-only','goal-space-settings-only','goal-space-wide-plan-only'].includes(scope)) app.commandLine.appendSwitch('force-device-scale-factor','1')
+if (hierarchy || ['goal-reading-outline-only','goal-claim-workbench-only','goal-space-only','goal-space-layout-only','goal-space-settings-only','goal-space-wide-plan-only'].includes(scope)) app.commandLine.appendSwitch('force-device-scale-factor','1')
 app.setPath('userData', path.join(privateRoot, 'user-data')); app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const result = { correctionsOnly: scope==='corrections-only', schema: 'agentmux.goals-maturity-render.v1', mode: scope==='goal-main-mote-only' ? 'goal-main-mote' : ['direct-goal-only','direct-reading-only'].includes(scope) ? 'direct-goal' : scope?.startsWith('density') ? 'density' : 'maturity', beforeOnly: ['before-only','density-before-only'].includes(scope), passed: false, readingOnly: scope==='direct-reading-only', frames: [], observations: [], userRunTouched: false, consoleErrors: [] }
 let win
@@ -12,10 +12,13 @@ const evaluate = expression => win.webContents.executeJavaScript(expression)
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 async function waitFor(expression) { for(let i=0;i<100;i++){if(await evaluate(expression))return;await delay(25)}throw new Error('Timed out: '+expression) }
 async function paint(){ await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');await delay(70) }
-async function size(width){await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride',{width,height:780,deviceScaleFactor:1,mobile:false});await paint()}
-async function capture(name,width){await phase('capture:'+name);if(scope==='corrections-only' && ['1280-dark-mixed-list','1280-dark-unoutlined-detail','620-light-initial','620-light-zero-match-focus','1280-dark-compact-new-save-failure'].includes(name))return;await paint();let appearance;if(['direct-goal-only','direct-reading-only','goal-main-mote-only','density-list-only'].includes(scope)){appearance=await evaluate('({config:goalsVisual.directFacts().appearance,dom:document.documentElement.dataset.appearance,colorScheme:document.documentElement.style.colorScheme})');const expected=name.split('-')[1];assert.deepEqual(appearance,{config:expected,dom:expected,colorScheme:expected},'Frame theme is the actual Config and painted DOM theme')}const bytes=hierarchy||['goal-claim-workbench-only','goal-space-only','goal-space-layout-only','goal-space-settings-only','goal-space-wide-plan-only'].includes(scope)?Buffer.from((await win.webContents.debugger.sendCommand('Page.captureScreenshot',{format:'png',fromSurface:true,captureBeyondViewport:false})).data,'base64'):(await win.webContents.capturePage()).toPNG();const file=name+'.png';await fs.writeFile(path.join(evidence,file),bytes);result.frames.push({name,width,file,...(appearance?{appearance}:{}),sha256:crypto.createHash('sha256').update(bytes).digest('hex')})}
+async function size(width,height=780){await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});await paint()}
+async function capture(name,width){await phase('capture:'+name);if(scope==='corrections-only' && ['1280-dark-mixed-list','1280-dark-unoutlined-detail','620-light-initial','620-light-zero-match-focus','1280-dark-compact-new-save-failure'].includes(name))return;await paint();let appearance;if(['direct-goal-only','direct-reading-only','goal-main-mote-only','density-list-only'].includes(scope)){appearance=await evaluate('({config:goalsVisual.directFacts().appearance,dom:document.documentElement.dataset.appearance,colorScheme:document.documentElement.style.colorScheme})');const expected=name.split('-')[1];assert.deepEqual(appearance,{config:expected,dom:expected,colorScheme:expected},'Frame theme is the actual Config and painted DOM theme')}const bytes=hierarchy||['goal-reading-outline-only','goal-claim-workbench-only','goal-space-only','goal-space-layout-only','goal-space-settings-only','goal-space-wide-plan-only'].includes(scope)?Buffer.from((await win.webContents.debugger.sendCommand('Page.captureScreenshot',{format:'png',fromSurface:true,captureBeyondViewport:false})).data,'base64'):(await win.webContents.capturePage()).toPNG();const file=name+'.png';await fs.writeFile(path.join(evidence,file),bytes);result.frames.push({name,width,file,...(appearance?{appearance}:{}),sha256:crypto.createHash('sha256').update(bytes).digest('hex')})}
 const button = label => `([...document.querySelectorAll('button')].find(node=>node.textContent.trim()===${JSON.stringify(label)} || node.getAttribute('aria-label')===${JSON.stringify(label)}))`
 async function click(expression){const point=await evaluate(`(()=>{const e=${expression};if(!e)throw new Error('Missing actual target');e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);for(const type of ['mousePressed','mouseReleased'])await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type,...point,button:'left',clickCount:1});await paint()}
+async function keyEscape() {
+ for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+}
 async function pointer(expression){const point=await evaluate(`(()=>{const e=${expression};if(!e)throw new Error('Missing actual target');const r=e.getBoundingClientRect();if(r.bottom<0||r.top>innerHeight)throw new Error('Pointer target is outside the frame');return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseMoved',...point});await paint()}
 async function insert(selector,text){await click(`document.querySelector(${JSON.stringify(selector)})`);await win.webContents.debugger.sendCommand('Input.insertText',{text});await paint()}
 async function keyboardFocus(selector){for(const type of ['keyDown','keyUp'])await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type,key:'Tab',code:'Tab',windowsVirtualKeyCode:9});await evaluate(`document.querySelector(${JSON.stringify(selector)}).focus()`);await paint()}
@@ -168,9 +171,12 @@ app.whenReady().then(async()=>{
   }else if(scope==='plan-request-only'){
    result.mode='plan-request'
    await require('./plan-request.cjs')({evaluate,size,click,pointer,capture,waitFor,paint,result})
+  }else if(scope==='goal-reading-outline-only'){
+   result.mode='goal-reading-outline'
+   await require('./reading-outline.cjs')({evaluate,size,click,pointer,capture,waitFor,paint,result,debuggerSession:win.webContents.debugger})
   }else if(scope==='goal-claim-workbench-only'){
    result.mode='goal-claim-workbench'
-   await require('./claim-workbench.cjs')({evaluate,size,click,capture,waitFor,paint,result})
+   await require('./claim-workbench.cjs')({evaluate,size,click,capture,waitFor,paint,result,keyEscape})
   }else if(hierarchy){
    result.mode='goal-hierarchy'
    await require('./hierarchy.cjs')({evaluate,size,click,pointer,capture,waitFor,paint,result,scope,insert})

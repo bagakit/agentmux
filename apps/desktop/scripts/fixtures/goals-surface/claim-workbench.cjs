@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict')
 
 // Host-shaped preview inputs enter the normal App. All navigation below uses its rendered controls.
-module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result }) => {
+module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result, keyEscape }) => {
   const query = selector => `document.querySelector(${JSON.stringify(selector)})`
   async function hitControl(selector) {
     const target = query(selector)
@@ -13,7 +13,6 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
     assert.equal(hittable.hit, true, selector + ' remains clickable below the sticky reading navigation ' + JSON.stringify(hittable))
     await click(target)
   }
-  const readingButton = label => `[...document.querySelectorAll('.goals-detail__reading-nav button')].find(node => node.textContent === ${JSON.stringify(label)})`
   for (const scene of ['inspection', 'parallel']) for (const [width, theme] of [[1600, 'dark'], [620, 'light']]) {
     await size(width)
     await evaluate(scene === 'inspection' ? 'goalsPlan.inspection()' : 'goalsPlan.seed(false, true)')
@@ -47,7 +46,10 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
     } else {
       const guide = '[data-goal-plan-node="guide"]'
       assert.equal(await evaluate(`${query(guide + ' [data-claim-open]')}.textContent`), 'Open to claim')
-      assert.ok(await evaluate(`Boolean(${query('.goals-detail__copy')})`), 'The owner-qualified Goal link is available')
+      await click(query('[aria-label="Goal actions"]'))
+      await waitFor(`[...document.querySelectorAll('[role="menuitem"]')].some(item => item.textContent.trim() === 'Copy goal link')`)
+      await keyEscape()
+      await waitFor(`!document.querySelector('[role="menu"]')`)
       await click(query(guide + ' button'))
       const assignments = '[aria-label="Node assignment"]'
       assert.ok(await evaluate(`${query(assignments)}.innerText.includes('Close claims')`))
@@ -73,10 +75,10 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
       assert.ok(await evaluate(`Boolean(${query('.goal-plan__reading h3')})`))
     }
     if (width === 620) {
-      await click(readingButton('Supervisor'))
+      await click(query('[data-goal-supervisor-toggle]'))
       assert.ok(await evaluate(`${query('.goals-detail__side')}.getBoundingClientRect().width > 0`))
       await capture(`${width}-${theme}-${scene}-supervisor`, width)
-      await click(readingButton('Plan'))
+      await click(query('[data-goal-supervisor-toggle]'))
       assert.equal(await evaluate(`${query('.goals-detail')}.dataset.goalView`), 'work')
     }
     assert.deepEqual(await evaluate('goalsSpace.facts()'), before, 'Reading preserves the same goal, plan, draft and Runs')
