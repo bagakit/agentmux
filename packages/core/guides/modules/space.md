@@ -30,14 +30,29 @@ registration rather than substituting another directory. Labels are not resource
 
 <!-- amux:generated command:space.folder.register -->
 
-The answering Host reads its own configuration and only adds the exact Folder Space,
-Workspace Zone and binding to its original spatial document. This operation neither
-registers a new directory nor saves a copy in the observing client. The receipt returns
-the original reference, Zone, resource witness and durability. If its reply is unknown,
-keep the complete original request. Read the same endpoint with space ls and match the
-exact Folder/resource, Workspace Zone and binding before reading that original snapshot;
-do not repeat registration automatically or use the current configuration to choose a
-replacement target. Existing conflicting entities, names, layout and Runs remain intact.
+For an unregistered directory, first observe that exact Source Runtime and absolute path.
+The original Files owner verifies a real directory and returns its physical witness,
+current original registrations or a typed unavailable/refusal issue. Inspection is read-only;
+a path string or a Node-published root is not an execution or sharing grant.
+
+<!-- amux:generated command:space.folder.inspect -->
+
+An explicit register may use the full {runtimeId,directory,workspaceId?} request, retaining
+the exact returned directory and witness. Only the transport-approved original user/device
+may admit a new root. The Source rechecks the physical directory at admission, reuses
+existing configured or graph IDs, and refuses ambiguous candidates until one original
+Workspace is explicitly selected. Newly allocated IDs come only from that Source.
+The same spatial owner retains Core-only resource facts; Host snapshot, Files and the
+ordinary Folder sidebar read those facts without writing Desktop configuration.
+Directory admission changes neither Node sharing nor another Core's execution rights.
+
+The configured registration path above remains unchanged. Both forms return the original
+reference, Zone, resource and durability. If a reply is unknown, keep the complete original
+request. For directory admission inspect the same Source path with the frozen
+expectedResource; for a configured resource read space ls and match its exact original
+Folder, Zone and binding. A current match is an object observation, not the lost write ACK.
+Never automatically repeat registration, mint a replacement identity or substitute current
+configuration. Existing conflicting entities, names, layout, drafts and Runs remain intact.
 
 New work in that Space returns to the original authority. Without an explicit Agent
 target, that authority uses its own Agent. For a directly configured Agent Core, read
