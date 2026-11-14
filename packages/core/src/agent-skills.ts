@@ -3,7 +3,7 @@ import { basename, join } from 'node:path'
 import { parse } from 'yaml'
 import type { AgentCatalogEntry } from './types.js'
 
-export type AgentSkill = { name: string; description: string; path: string; source: 'project' | 'user' }
+export type AgentSkill = { name: string; description: string; path: string; source: 'project' | 'user'; version?: string }
 
 // Directories that never hold a skill but are enormous or noise: dependency trees, VCS internals and
 // build output. Without this prune, discovery walks the whole workspace — a real repo's node_modules
@@ -51,10 +51,12 @@ async function walkSkills(bases: readonly (readonly [string, AgentSkill['source'
     if (text !== undefined) try {
       const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)?.[1]
       const data = frontmatter ? parse(frontmatter) : {}
+      const version = typeof data?.metadata?.version === 'string' ? data.metadata.version.trim() : ''
       found.push({
         name: typeof data?.name === 'string' ? data.name : basename(directory),
         description: typeof data?.description === 'string' ? data.description : '',
-        path: join(directory, 'SKILL.md'), source
+        path: join(directory, 'SKILL.md'), source,
+        ...(version ? { version } : {})
       })
       return
     } catch { /* Invalid skill frontmatter does not prevent discovering siblings. */ }

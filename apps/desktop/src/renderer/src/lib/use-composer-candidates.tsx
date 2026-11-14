@@ -22,10 +22,15 @@ export type ComposerCandidateQuery = { kind: 'command' | 'skill' | 'reference' |
 type Resource<T> = { scope: string; value: T[]; loading: boolean; error: string | null }
 const EMPTY: never[] = []
 
+export function skillSourceLabel(skill: AgentSkill): string {
+  return `${skill.source === 'project' ? 'Project' : 'User'} · ${skill.version ? `Version ${skill.version}` : 'Version not declared'}`
+}
+
 export function skillComposerSuggestion(skill: AgentSkill): ComposerSuggestion {
   const kind = semanticReferenceKind(skill.path)
   return { id: `skill:${skill.source}:${skill.path}`, text: `$${skill.name}`, label: skill.name,
-    searchText: `${skill.name} ${skill.description} ${skill.source} ${skill.path}`, description: `${skill.source} · ${skill.description || skill.path}`,
+    searchText: `${skill.name} ${skill.description} ${skill.source} ${skill.version ?? ''} ${skill.path}`,
+    description: `${skillSourceLabel(skill)} · ${skill.description || skill.path}`,
     insertText: encodeSemanticReference({ token: `$${skill.name}`, label: semanticReferenceLabel(skill.name), kind,
       reference: kind === 'subcommand' ? skill.path : `@${skill.path}` }),
     icon: <SemanticIcon name={kind === 'component' ? 'object.component' : 'object.skill'} size={15} /> }

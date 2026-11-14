@@ -542,8 +542,9 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         string(p.hostId); string(p.sourceHostId); string(p.agentSessionId); string(p.providerId); string(p.workspacePath)
         if (p.hostId !== input.hostId || p.agentSessionId !== input.agentSessionId) fail()
         array(p.skills, value => {
-          const skill = record(value, ['name', 'description', 'path', 'source'])
+          const skill = record(value, ['name', 'description', 'path', 'source', 'version'])
           string(skill.name); text(skill.description); string(skill.path); member(skill.source, ['project', 'user'])
+          if (skill.version !== undefined) text(skill.version)
         })
         break
       }

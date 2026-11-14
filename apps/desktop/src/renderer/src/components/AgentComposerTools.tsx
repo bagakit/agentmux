@@ -12,6 +12,7 @@ import { MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT } from '../../../shared/contracts'
 import { SCREENSHOT_SHORTCUTS } from '../../../shared/screenshot-shortcut'
 import { formatChord } from '../lib/shortcut-cheat-sheet'
 import { isMacPlatform } from '../lib/host-platform'
+import { skillSourceLabel } from '../lib/use-composer-candidates'
 
 import { ComposerLayoutToggle, type ComposerToolPhase as ToolDockPhase } from '@agentmux/client-ui/components/ComposerLayoutToggle'
 
@@ -90,16 +91,19 @@ export function AgentComposerTools({ active = true, disabled, commands, loadSkil
       trigger={<button type="button" className="composer-tool" disabled={disabled} aria-label="Choose a skill" title="Choose a skill">
         <SemanticIcon name="object.skill" size={14} /><span className="composer-tool__label">Skills</span>
       </button>} onOpenChange={open => { if (open) void runAction(discoverSkills); else discovery.current++ }}>
-      {(query, choose) => <>
+      {(query, choose) => {
+        const matchingSkills = skills.filter(skill => `${skill.name} ${skill.description} ${skill.source} ${skill.version ?? ''}`.toLocaleLowerCase().includes(query))
+        return <>
         <p className="composer-menu__hint">Choose a skill to reference</p>
         {loading ? <div className="composer-menu__hint" role="status">Loading skills…</div> : error ? <div className="composer-menu__hint" role="status">{error}</div> : skills.length === 0 ? <div className="composer-menu__hint" role="status">No skills found in this Agent’s skill folders.</div> : <>
-          {skills.filter(skill => `${skill.name} ${skill.description} ${skill.source}`.toLocaleLowerCase().includes(query)).map(skill =>
-          <button type="button" data-choice key={skill.path} disabled={disabled} className="composer-menu__item" {...composerChoiceReadingProps(`${skill.name}\n${skill.source} · ${skill.description}\n${skill.path}`)} onClick={() => choose(() => { void runAction(() => onChooseSkill(skill)) })}>
-            <SemanticIcon name={/(^|[\\/])components?([\\/]|$)/i.test(skill.path) ? "object.component" : "object.skill"} size={13} /><span><span data-choice-reading=""><span>{skill.name}</span></span><small data-choice-reading=""><span>{skill.source} · {skill.description ? `${skill.description} · ` : ''}{skill.path}</span></small></span>
+          {matchingSkills.map(skill =>
+          <button type="button" data-choice key={skill.path} disabled={disabled} className="composer-menu__item" {...composerChoiceReadingProps(`${skill.name}\n${skillSourceLabel(skill)} · ${skill.description}\n${skill.path}`)} onClick={() => choose(() => { void runAction(() => onChooseSkill(skill)) })}>
+            <SemanticIcon name={/(^|[\\/])components?([\\/]|$)/i.test(skill.path) ? "object.component" : "object.skill"} size={13} /><span><span data-choice-reading=""><span>{skill.name}</span></span><small data-choice-reading=""><span>{skillSourceLabel(skill)} · {skill.description ? `${skill.description} · ` : ''}{skill.path}</span></small></span>
           </button>)}
-          {!skills.some(skill => `${skill.name} ${skill.description} ${skill.source}`.toLocaleLowerCase().includes(query)) ? <div className="composer-menu__hint" role="status">No matching skills.</div> : null}
+          {!matchingSkills.length ? <div className="composer-menu__hint" role="status">No matching skills.</div> : null}
         </>}
-      </>}
+        </>
+      }}
     </SearchChoiceDialog>
     {commands.length ? <SearchChoiceDialog label="Commands" searchLabel="Find commands" clearLabel="Clear commands search" previewOnHover
       boundary={composerBoundary}
