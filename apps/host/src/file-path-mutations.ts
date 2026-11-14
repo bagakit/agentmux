@@ -3,7 +3,7 @@ import { constants, mkdir, open, lstat } from 'node:fs/promises'
 import { dirname, join, isAbsolute, resolve, sep } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { AgentMuxError, durableWriteFile, type AgentMuxClient } from '@agentmux/core'
-import { parseFileMkdirParams, parseFilePathMutationReceipt, parseFileEntryWitness, parseFileMoveParams, parseFileMoveReceipt, parseFileDeleteParams, parseFileDeleteReceipt, type FileDeleteParams, type FileDeleteResult, type FileDeleteReceipt, sameFileEntryIdentity, type FileMoveParams, type FileMoveResult, type FileMoveReceipt, type FileMkdirParams, type FileMkdirResult,
+import { parseFileMkdirParams, parseFilePathMutationReceipt, parseFileEntryWitness, parseFileMoveParams, parseFileMoveReceipt, parseFileDeleteParams, parseFileDeleteReceipt, parseFileDeleteSnapshotsParams, type FileDeleteSnapshotsParams, type FileDeleteSnapshotsResult, type FileDeleteSnapshotReference, type FileDeleteParams, type FileDeleteResult, type FileDeleteReceipt, sameFileEntryIdentity, type FileMoveParams, type FileMoveResult, type FileMoveReceipt, type FileMkdirParams, type FileMkdirResult,
   type FileMutationInspectParams, type FileMutationInspectResult, type FilePathMutationContext,
   type FilePathMutationReceipt, type FilePathObservation, type FileEntryWitness } from '@agentmux/core/files'
 import type { WorkspaceRecord } from './content-types.js'
@@ -11,6 +11,8 @@ import { NameChangeAudit, nameChangeRequests } from './name-change-audit.js'
 import { parseNotebookFileRelocationPlan, type NotebookFileRelocationPlan } from '@agentmux/core/notebook-store'
 import type { OrdinaryWorkspaceFiles } from './ordinary-files.js'
 import type { FileDeleteHistory } from './file-delete-history.js'
+import type { AgentMuxNotebookStore } from '@agentmux/core/notebook-store'
+import { FILE_DELETE_SNAPSHOT_REFERENCE_BYTES } from '@agentmux/core/files'
 
 type Actor = NonNullable<FilePathMutationContext['actor']>
 type Locator = { root: string; path: string }
@@ -58,6 +60,7 @@ export class FilePathMutations {
     retainPaths?(workspace: WorkspaceRecord, paths: readonly string[]): Promise<(physical: readonly Locator[]) => Promise<void>>
     notes?: { plan(from: FileMoveParams['expectedResource'], to: FileMoveParams['expectedResource']): Promise<NotebookFileRelocationPlan>; apply(plan: NotebookFileRelocationPlan, operationId: string, actor: Actor): Promise<void> }
     deleteHistory?(workspace: WorkspaceRecord, input: FileDeleteParams, digest: string, actor: Actor): Pick<FileDeleteHistory, 'snapshot' | 'confirmDeleted'>
+    deleteSnapshots?: AgentMuxNotebookStore['fileDeleteSnapshots']
     nameAudit?: NameChangeAudit
     noteLease<T>(work: () => Promise<T>): Promise<T>
   }) {}
@@ -162,6 +165,46 @@ export class FilePathMutations {
     const reader = actor(context)
     if (reader.kind === 'agent' && (!isDeepStrictEqual(reader, value.actor) || context?.callerHostId !== value.callerHostId))
       throw new AgentMuxError('A managed Agent may inspect only its own original Files mutation.', 'CONTROL_PERMISSION_DENIED')
+  }
+  async deleteSnapshots(raw: FileDeleteSnapshotsParams, context?: FilePathMutationContext): Promise<FileDeleteSnapshotsResult> {
+    const input = structuredClone(parseFileDeleteSnapshotsParams(raw)), originalContext = { actor: actor(context), ...(context?.callerHostId ? { callerHostId: context.callerHostId } : {}) }
+    const unknown = (cause: unknown, resource = null as FileDeleteSnapshotsResult['resource']): FileDeleteSnapshotsResult => ({ operationId: input.operationId, resource,
+      result: { status: 'unknown', code: (cause as { code?: string })?.code ?? 'FILE_DELETE_SNAPSHOTS_UNCONFIRMED', message: cause instanceof Error ? cause.message : String(cause), cursor: input.cursor ?? null } })
+    let original: Original | null
+    try { original = await this.load(input.operationId, undefined, originalContext) }
+    catch (cause) { if ((cause as { code?: string }).code === 'CONTROL_PERMISSION_DENIED') throw cause; return unknown(cause) }
+    if (!original || original.action !== 'delete') return unknown('The original deletion request is unavailable. Keep its complete request; no snapshot absence or filesystem result was inferred.')
+    this.authorizeRead(original, originalContext); this.sameTarget(original.request, input)
+    const resource = original.request.expectedResource
+    try {
+      if (!this.ports.deleteSnapshots) throw new Error('The original Notebook snapshot reader is unavailable; saved bodies and the request are retained.')
+      let cursor: { schema: string; query: string; root: string; after: { key: string; eventId?: string } } | undefined
+      if (input.cursor) {
+        cursor = JSON.parse(Buffer.from(input.cursor, 'base64url').toString('utf8'))
+        if (!cursor || typeof cursor !== 'object' || Object.keys(cursor).some(key => !['schema', 'query', 'root', 'after'].includes(key)) || cursor.schema !== 'agentmux.file-delete-snapshots.v1' || cursor.query !== original.digest || !/^[a-f0-9]{64}$/u.test(cursor.root) ||
+            !cursor.after || typeof cursor.after !== 'object' || Object.keys(cursor.after).some(key => key !== 'key' && key !== 'eventId') || !/^[a-f0-9]{64}$/u.test(cursor.after.key) || cursor.after.eventId !== undefined && (typeof cursor.after.eventId !== 'string' || !cursor.after.eventId.startsWith(input.operationId + '/note-delete/'))) throw new Error('The original deletion snapshot cursor belongs to another query or generation.')
+      }
+      const page = await this.ports.deleteSnapshots({ scope: { hostId: resource.hostId, workspaceId: resource.workspaceId, workspacePath: resource.workspacePath, path: resource.path },
+        operationId: input.operationId, digest: original.digest, actor: original.actor, limit: input.limit ?? 25, ...(cursor ? { root: cursor.root, after: cursor.after } : {}) })
+      const entries: FileDeleteSnapshotReference[] = []; let bytes = 0, cut = false, after = page.after
+      for (const entry of page.entries) {
+        const reference: FileDeleteSnapshotReference = { ...entry.reference, originalResource: { ...resource, path: entry.reference.originalResource.path },
+          historyUnavailable: 'The current history mapping is unconfirmed. Discover or register the original Source resource; the stable event and saved body remain with its owner.' }
+        const size = Buffer.byteLength(JSON.stringify(reference))
+        // Reserve the other packet share for actual live history mappings/envelope.
+        if (bytes + size > FILE_DELETE_SNAPSHOT_REFERENCE_BYTES) {
+          if (!entries.length) throw new Error('This reference exceeds the bounded snapshot packet share. The original event and body are retained.')
+          cut = true; break
+        }
+        bytes += size; entries.push(reference)
+        after = { key: entry.key, eventId: entry.reference.eventId }
+      }
+      if (!cut) after = page.after
+      const hasMore = cut || page.hasMore
+      const next = hasMore && after && page.root ? Buffer.from(JSON.stringify({ schema: 'agentmux.file-delete-snapshots.v1', query: original.digest, root: page.root, after })).toString('base64url') : null
+      if (hasMore && !next) throw new Error('The original snapshot continuation is unconfirmed; keep the cursor.')
+      return { operationId: input.operationId, resource, result: { status: 'read', entries, hasMore, cursor: next, rootRevision: page.root, filesystem: this.observeDelete(original).filesystem } }
+    } catch (cause) { return unknown(cause, resource) }
   }
   private async observe(value: MkdirOriginal, workspace?: WorkspaceRecord): Promise<FilePathMutationReceipt> {
     // Current reads never reconstruct the original directory/storage ACK.

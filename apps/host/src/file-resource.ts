@@ -71,10 +71,10 @@ export class FileResourceOwner<W extends FileWorkspace> {
       return { resource, result: publicWrite(await this.ports.files.write(workspace, { path: resource.path, content: params.content, expectedRevision: null }, context)) }
     } catch (error) { return { resource, result: { status: 'unknown', code: 'FILE_CREATE_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) } } }
   }
-  protected async resolve(params: FileReadParams): Promise<{ resource: FileReadResource; workspace: W } | { message: string }> {
+  protected async resolve(params: FileReadParams, observedCatalog?: AgentMuxSpaceCatalog | null): Promise<{ resource: FileReadResource; workspace: W } | { message: string }> {
     const unknown = (message: string) => ({ message })
     let catalog: AgentMuxSpaceCatalog | null
-    try { catalog = await this.ports.catalog() } catch (error) { return unknown(error instanceof Error ? error.message : String(error)) }
+    try { catalog = observedCatalog === undefined ? await this.ports.catalog() : observedCatalog } catch (error) { return unknown(error instanceof Error ? error.message : String(error)) }
     if (!catalog) return unknown('The original Zone observation is unavailable. Keep the original file reference and retry discovery.')
     const zones = catalog.zones.filter(zone => zone.zoneId === params.zoneId)
     let zone = zones[0]

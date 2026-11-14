@@ -5,7 +5,7 @@ import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { WorkspaceRecord, WorkspaceFileRestoreInput, WorkspaceFileUndoInput, WorkspaceFileWriteResult } from './content-types.js'
 import type { ScratchDirectoryFact } from './mote-topic-model.js'
 import type { WorkspaceFiles } from './content-types.js'
-import { parseFileHistoryParams, type FileHistoryParams, type FileHistoryResult, parseFileRestoreParams, parseFileUndoParams, type FileRestoreParams, type FileRestoreResult, type FileUndoParams, type FileUndoResult } from '@agentmux/core/files'
+import { parseFileHistoryParams, type FileHistoryParams, type FileHistoryResult, parseFileRestoreParams, parseFileUndoParams, type FileRestoreParams, type FileRestoreResult, type FileUndoParams, type FileUndoResult, parseFileDeleteSnapshotsParams, parseFileDeleteSnapshotsResult, type FileDeleteSnapshotsParams, type FileDeleteSnapshotsResult } from '@agentmux/core/files'
 import type { NoteHistoryQuery, NoteHistorySnapshot } from '@agentmux/core/note-history'
 import { fileUploadRevision, parseFileImportParams, type FileImportParams, type FileImportResult } from '@agentmux/core/files'
 import { parseFileStatParams, parseFileMkdirParams, parseFileMutationInspectParams, parseFileMoveParams, type FileMoveParams, type FileMoveResult, type FileStatParams,
@@ -18,7 +18,7 @@ const publicWrite = (value: WorkspaceFileWriteResult): WorkspaceFileWriteResult 
 /** Resolve once from original spatial/resource facts, then delegate to original Files. */
 export class FileReadOwner<W extends WorkspaceRecord = WorkspaceRecord> extends FileResourceOwner<W> implements AgentMuxRpcFilesOwner {
   constructor(protected override readonly ports: {
-    paths?: Pick<FilePathMutations, 'stat' | 'mkdir' | 'move' | 'delete' | 'inspect'>
+    paths?: Pick<FilePathMutations, 'stat' | 'mkdir' | 'move' | 'delete' | 'deleteSnapshots' | 'inspect'>
     share?: AgentMuxRpcFileShareOwner
     catalog(): Promise<AgentMuxSpaceCatalog | null>
     /** Original closed Zone descriptor from the same durable spatial resource owner. */
@@ -71,6 +71,25 @@ export class FileReadOwner<W extends WorkspaceRecord = WorkspaceRecord> extends 
     if (['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => resolved.resource[key as keyof FileReadResource] !== params.expectedResource[key as keyof FileReadResource])) throw new AgentMuxError('The exact original deletion target changed.', 'FILE_RESOURCE_MISMATCH')
     return this.ports.paths.delete(resolved.workspace, params, context)
   }
+  async deleteSnapshots(raw: FileDeleteSnapshotsParams, context?: FilePathMutationContext): Promise<FileDeleteSnapshotsResult> {
+    const params = structuredClone(parseFileDeleteSnapshotsParams(raw))
+    if (!this.ports.paths) return { operationId: params.operationId, resource: null, result: { status: 'unknown', code: 'FILE_DELETE_SNAPSHOTS_UNAVAILABLE', message: 'The original Files snapshot owner is unavailable. Keep the original request and cursor.', cursor: params.cursor ?? null } }
+    const result = await this.ports.paths.deleteSnapshots(params, context)
+    if (result.result.status === 'read') {
+      let catalog: AgentMuxSpaceCatalog | null
+      try { catalog = await this.ports.catalog() } catch { catalog = null }
+      for (const entry of result.result.entries) {
+        try {
+          const target = await this.targetForNote(entry.currentHistoryResource, catalog)
+          if (target) {
+            entry.historyQuery = parseFileHistoryParams({ ...target.params, expectedResource: target.resource, noteId: entry.noteId, eventId: entry.eventId, includeContent: true })
+            delete entry.historyUnavailable
+          }
+        } catch { /* Keep the stable reference; a failed map never guesses a Zone. */ }
+      }
+    }
+    return parseFileDeleteSnapshotsResult(result, params)
+  }
   async inspectMutation(input: FileMutationInspectParams, context?: FilePathMutationContext): Promise<FileMutationInspectResult> {
     const params = parseFileMutationInspectParams(input)
     if (!this.ports.paths) return { operationId: params.operationId, resource: null,
@@ -93,15 +112,15 @@ export class FileReadOwner<W extends WorkspaceRecord = WorkspaceRecord> extends 
     return this.ports.share.undoShare(input, context)
   }
   /** Internal mapping from trusted history/corpus facts, never a synthetic Zone. */
-  async targetForNote(original: import('@agentmux/core').NoteResource): Promise<{ params: FileReadParams; resource: FileReadResource } | null> {
-    const catalog = await this.ports.catalog()
+  async targetForNote(original: import('@agentmux/core').NoteResource, observedCatalog?: AgentMuxSpaceCatalog | null): Promise<{ params: FileReadParams; resource: FileReadResource } | null> {
+    const catalog = observedCatalog === undefined ? await this.ports.catalog() : observedCatalog
     if (!catalog) return null
     for (const zone of catalog.zones) {
       if (zone.workspaceId !== original.workspaceId || zone.hostId !== original.hostId || !zone.directoryPath) continue
       const root = original.workspacePath.replace(/\/+$/u, ''), directory = zone.directoryPath === root ? '' : zone.directoryPath.startsWith(root + '/') ? zone.directoryPath.slice(root.length + 1) : null
       if (directory === null || directory && !original.path.startsWith(directory + '/')) continue
       const params: FileReadParams = { zoneId: zone.zoneId, path: directory ? original.path.slice(directory.length + 1) : original.path, expectedResource: { hostId: original.hostId, workspaceId: original.workspaceId, workspacePath: original.workspacePath } }
-      const resolved = await this.resolve(params)
+      const resolved = await this.resolve(params, catalog)
       if (!('message' in resolved) && resolved.resource.path === original.path) return { params, resource: resolved.resource }
     }
     return null

@@ -1,5 +1,12 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
+import { parseFileHistoryParams, type FileHistoryParams } from './public-rpc-file-history.js'
+import { noteFileDeleteEventId, type NoteHistoryStatus } from './note-history.js'
+import { noteProvenanceResourceKey } from './note-provenance.js'
+import type { NoteResource } from './notebook-catalog.js'
+import { AGENTMUX_RPC_MAX_MESSAGE_BYTES } from './public-rpc-frame.js'
+/** Reserve the remaining wire budget for live mapping projection and envelope. */
+export const FILE_DELETE_SNAPSHOT_REFERENCE_BYTES = AGENTMUX_RPC_MAX_MESSAGE_BYTES / 4
 import { parseFileReadParams, parseFileReadResource, parseFileReadResult,
   type FileReadParams, type FileReadResource, type FileWriteContext } from './public-rpc-files.js'
 
@@ -48,6 +55,16 @@ export type FileDeleteReceipt = {
   code?: string; message?: string
 }
 export type FileDeleteResult = { operationId: string; resource: FileReadResource | null; result: FileDeleteReceipt }
+export type FileDeleteSnapshotsParams = FileMutationInspectParams & { limit?: number; cursor?: string }
+export type FileDeleteSnapshotReference = {
+  noteId: string; originalResource: FileReadResource; currentHistoryResource: NoteResource
+  eventId: string; batchId: string; status: NoteHistoryStatus
+  historyQuery?: FileHistoryParams; historyUnavailable?: string
+}
+export type FileDeleteSnapshotsResult = { operationId: string; resource: FileReadResource | null; result:
+  | { status: 'read'; entries: FileDeleteSnapshotReference[]; hasMore: boolean; cursor: string | null; rootRevision: string | null; filesystem: FileDeleteReceipt['filesystem'] }
+  | { status: 'unknown'; code: string; message: string; cursor: string | null }
+}
 
 /** Original transport provenance is supplied by the Host, never by a JSON request. */
 export type FilePathMutationContext = FileWriteContext & { callerHostId?: string; transport?: string }
@@ -67,6 +84,7 @@ export interface AgentMuxRpcFilePathsOwner {
   stat(params: FileStatParams): Promise<FileStatResult>
   move(params: FileMoveParams, context?: FilePathMutationContext): Promise<FileMoveResult>
   delete(params: FileDeleteParams, context?: FilePathMutationContext): Promise<FileDeleteResult>
+  deleteSnapshots(params: FileDeleteSnapshotsParams, context?: FilePathMutationContext): Promise<FileDeleteSnapshotsResult>
   mkdir(params: FileMkdirParams, context?: FilePathMutationContext): Promise<FileMkdirResult>
   inspectMutation(params: FileMutationInspectParams, context?: FilePathMutationContext): Promise<FileMutationInspectResult>
 }
@@ -120,6 +138,51 @@ function mutationParams(value: unknown, mkdir: boolean): FileMkdirParams | FileM
 }
 export const parseFileMkdirParams = (value: unknown): FileMkdirParams => mutationParams(value, true) as FileMkdirParams
 export const parseFileMutationInspectParams = (value: unknown): FileMutationInspectParams => mutationParams(value, false) as FileMutationInspectParams
+
+export function parseFileDeleteSnapshotsParams(value: unknown): FileDeleteSnapshotsParams {
+  const p = rpcRecord(value, ['zoneId', 'spaceId', 'path', 'expectedResource', 'operationId', 'limit', 'cursor'])
+  const { limit, cursor, ...original } = p
+  parseFileMutationInspectParams(original)
+  if (limit !== undefined && (!Number.isSafeInteger(limit) || Number(limit) < 1 || Number(limit) > 50)) invalid('Snapshot pages contain from 1 to 50 references.', 'INVALID_CONTROL_REQUEST')
+  if (cursor !== undefined && (typeof cursor !== 'string' || !cursor || cursor.length > 2048 || !/^[A-Za-z0-9_-]+$/u.test(cursor))) invalid('Keep the original snapshot cursor.', 'INVALID_CONTROL_REQUEST')
+  return p as FileDeleteSnapshotsParams
+}
+export function parseFileDeleteSnapshotsResult(value: unknown, params: FileDeleteSnapshotsParams): FileDeleteSnapshotsResult {
+  const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['operationId', 'resource', 'result'], code)
+  if (p.operationId !== params.operationId) invalid('Another deletion snapshot query was returned.', code)
+  const resource = resultResource(p.resource, params, code), r = rpcRecord(p.result, undefined, code)
+  if (resource && targetResourceKeys.some(key => resource[key] !== params.expectedResource[key])) invalid('The snapshot query belongs to another original target.', code)
+  if (r.status === 'unknown') {
+    rpcRecord(r, ['status', 'code', 'message', 'cursor'], code); text(r.code, code); message(r.message, code)
+    if (r.cursor !== (params.cursor ?? null)) invalid('An unknown query must preserve its original cursor.', code)
+  } else {
+    rpcRecord(r, ['status', 'entries', 'hasMore', 'cursor', 'rootRevision', 'filesystem'], code)
+    if (r.status !== 'read' || !resource || !Array.isArray(r.entries) || r.entries.length > (params.limit ?? 25) || typeof r.hasMore !== 'boolean' ||
+        !['deleted', 'not-applied', 'unknown'].includes(r.filesystem as string) || r.rootRevision !== null && (typeof r.rootRevision !== 'string' || !/^[a-f0-9]{64}$/u.test(r.rootRevision)) ||
+        (r.hasMore ? typeof r.cursor !== 'string' || !r.cursor || r.cursor.length > 2048 || !/^[A-Za-z0-9_-]+$/u.test(r.cursor) || r.rootRevision === null : r.cursor !== null)) invalid('The bounded original snapshot page is invalid.', code)
+    const seen = new Set<string>()
+    for (const raw of r.entries as unknown[]) {
+      const entry = rpcRecord(raw, ['noteId', 'originalResource', 'currentHistoryResource', 'eventId', 'batchId', 'status', 'historyQuery', 'historyUnavailable'], code)
+      if (typeof entry.noteId !== 'string' || !entry.noteId || /[\0\r\n]/u.test(entry.noteId)) invalid('The original snapshot Note identity is invalid.', code)
+      const original = parseFileReadResource(entry.originalResource, code)
+      const suffix = original.path.slice(params.expectedResource.path.length)
+      if (targetResourceKeys.some(key => key !== 'path' && original[key] !== params.expectedResource[key]) || original.path !== params.expectedResource.path && !original.path.startsWith(params.expectedResource.path + '/')) invalid('The snapshot is outside the original deletion subtree.', code)
+      parseFileReadResult({ resource: original, result: { status: 'directory' } }, { ...params, path: params.path + suffix })
+      const current = rpcRecord(entry.currentHistoryResource, ['hostId', 'workspaceId', 'workspacePath', 'path'], code)
+      try { noteProvenanceResourceKey(current as NoteResource) } catch { invalid('The current history resource is unconfirmed.', code) }
+      if (entry.eventId !== noteFileDeleteEventId(params.operationId, entry.noteId as string, original) || entry.batchId !== params.operationId ||
+          !['prepared', 'committed', 'unconfirmed', 'not-applied'].includes(entry.status as string) || seen.has(entry.eventId as string)) invalid('The snapshot reference belongs to another original operation.', code)
+      seen.add(entry.eventId as string)
+      if (entry.historyQuery !== undefined) {
+        const query = parseFileHistoryParams(entry.historyQuery)
+        if (entry.historyUnavailable !== undefined || query.noteId !== entry.noteId || query.eventId !== entry.eventId || query.includeContent !== true ||
+            ['hostId', 'workspaceId', 'workspacePath', 'path'].some(key => query.expectedResource[key as keyof FileReadResource] !== current[key])) invalid('The history query belongs to another snapshot or current resource.', code)
+      } else if (typeof entry.historyUnavailable !== 'string' || !entry.historyUnavailable) invalid('An unavailable live history mapping needs its original source discovery guidance.', code)
+    }
+  }
+  if (new TextEncoder().encode(JSON.stringify(p)).byteLength > AGENTMUX_RPC_MAX_MESSAGE_BYTES / 2) invalid('Snapshot references exceed their bounded RPC packet share. Choose a smaller page.', code)
+  return { operationId: params.operationId, resource, result: r as FileDeleteSnapshotsResult['result'] }
+}
 
 export function parseFileMoveParams(value: unknown): FileMoveParams {
   const code = 'INVALID_CONTROL_REQUEST'

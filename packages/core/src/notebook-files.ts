@@ -6,9 +6,9 @@ import { mintObjectId } from './object-id.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { durableWriteFile } from './durable-write.js'
-import { emptyNotebookState, notebookFingerprint, parseNotebookState, type NotebookState, type NoteResource } from './notebook-catalog.js'
+import { emptyNotebookState, notebookFingerprint, parseNotebookState, type NotebookState, type NoteResource, type NotebookActor } from './notebook-catalog.js'
 import { noteProvenanceResourceKey, parseNoteProvenanceWrite, type NoteAuthorship, type NoteProvenanceQuery, type NoteProvenanceSnapshot, type NoteProvenanceWrite } from './note-provenance.js'
-import { noteHistoryRevision, noteHistorySnapshot, parseNoteHistoryRecord, parseNoteHistoryQuery, parseNoteHistorySource, parseNoteFileWitness,
+import { noteHistoryRevision, noteHistorySnapshot, parseNoteHistoryRecord, parseNoteHistoryQuery, parseNoteHistorySource, parseNoteFileWitness, noteFileDeleteEventId, noteFileDeleteFingerprint,
   type NoteHistoryRecord, type NoteHistoryEntry, type NoteHistoryQuery, type NoteHistorySnapshot } from './note-history.js'
 
 export const NOTEBOOK_ROOT_NAME = 'notebooks.root.json'
@@ -401,6 +401,47 @@ export async function writeNotebookHistory(path: string, candidate: NoteHistoryR
 }
 export type NotebookFileRelocation = { noteId: string; from: NoteResource; to: NoteResource }
 export type NotebookFileResourceIdentity = { noteId: string; resource: NoteResource }
+export type NotebookFileDeleteSnapshotQuery = {
+  scope: NoteResource; operationId: string; digest: string; actor: NotebookActor; limit: number
+  root?: string | null; after?: { key: string; eventId?: string }
+}
+export type NotebookFileDeleteSnapshotReference = {
+  noteId: string; originalResource: NoteResource; currentHistoryResource: NoteResource; eventId: string; batchId: string; status: NoteHistoryRecord['status']
+}
+export type NotebookFileDeleteSnapshotPage = {
+  root: string | null; entries: { key: string; reference: NotebookFileDeleteSnapshotReference }[]
+  hasMore: boolean; after: { key: string; eventId?: string } | null
+}
+/** Explicit cold original-operation query: at most 100 metadata objects, no bodies. */
+export async function readNotebookFileDeleteSnapshots(path: string, input: NotebookFileDeleteSnapshotQuery): Promise<NotebookFileDeleteSnapshotPage> {
+  const root = await readRoot(path), revision = root ? hash(encoded(root)) : null
+  if (input.root !== undefined && input.root !== revision) throw new AgentMuxError('The original Notebook query generation changed. Keep the cursor or explicitly read the first page again.', 'FILE_DELETE_SNAPSHOTS_CHANGED')
+  if (!root) return { root: null, entries: [], hasMore: false, after: null }
+  const keys = Object.keys(root.originals).sort(), entries: NotebookFileDeleteSnapshotPage['entries'] = []
+  if (input.after && (!keys.includes(input.after.key) || input.after.eventId && !id(input.after.eventId))) throw failure('The original snapshot cursor does not identify this metadata generation.')
+  let scanned = 0, after = input.after ?? null
+  for (const key of keys) {
+    if (input.after && key < input.after.key || input.after && key === input.after.key && !input.after.eventId) continue
+    if (scanned === 100) return { root: revision, entries, hasMore: true, after }
+    scanned++
+    const original = root.originals[key]!, value = await metadata(path, root, original.noteId, original.resource, 'history')
+    const candidates = value.history.filter(event => event.batchId === input.operationId && event.eventId.startsWith(input.operationId + '/note-delete/')).sort((a, b) => a.eventId < b.eventId ? -1 : a.eventId > b.eventId ? 1 : 0)
+    if (input.after?.key === key && input.after.eventId && !candidates.some(event => event.eventId === input.after!.eventId)) throw failure('The original snapshot cursor event is unavailable in this metadata generation.')
+    for (const event of candidates) {
+      if (input.after?.key === key && input.after.eventId && event.eventId <= input.after.eventId) continue
+      const r = event.originalResource, scope = input.scope
+      if (r.hostId !== scope.hostId || r.workspaceId !== scope.workspaceId || r.workspacePath !== scope.workspacePath || r.path !== scope.path && !r.path.startsWith(scope.path + '/')) continue
+      if (event.operation !== 'delete' || event.source !== undefined || !event.fileWitness || event.actor?.kind !== input.actor.kind || event.actor?.id !== input.actor.id ||
+          event.eventId !== noteFileDeleteEventId(input.operationId, event.noteId, r) || !event.baseRevision ||
+          event.requestFingerprint !== noteFileDeleteFingerprint(input.digest, event.noteId, r, event.fileWitness, event.baseRevision)) throw failure('The original deletion snapshot correlation is unconfirmed.')
+      if (entries.length === input.limit) return { root: revision, entries, hasMore: true, after }
+      entries.push({ key, reference: { noteId: event.noteId, originalResource: structuredClone(r), currentHistoryResource: structuredClone(event.resource), eventId: event.eventId, batchId: event.batchId, status: event.status } })
+      after = { key, eventId: event.eventId }
+    }
+    after = { key }
+  }
+  return { root: revision, entries, hasMore: false, after: null }
+}
 /** The original metadata root and catalog share one exact-pair resource projection. */
 async function originalResources(path: string, root: Root) {
   const state = await catalog(path, root), originals = new Map<string, NotebookFileResourceIdentity>()

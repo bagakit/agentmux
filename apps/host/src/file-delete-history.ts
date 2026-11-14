@@ -1,8 +1,7 @@
-import { createHash } from 'node:crypto'
 import { AgentMuxError } from '@agentmux/core'
 import { parseFileEntryWitness, type FileDeleteParams, type FileEntryWitness } from '@agentmux/core/files'
 import { readNoteMarkdownHeader } from '@agentmux/core/note-format'
-import { noteHistoryRevision } from '@agentmux/core/note-history'
+import { noteFileDeleteEventId, noteFileDeleteFingerprint } from '@agentmux/core/note-history'
 import type { AgentMuxNotebookStore, NotebookActor } from '@agentmux/core/notebook-store'
 import { noteProvenanceResourceKey } from '@agentmux/core/note-provenance'
 import { fileBytesAreBinary, type OrdinaryWorkspaceFiles } from './ordinary-files.js'
@@ -50,20 +49,20 @@ export class FileDeleteHistory {
     if (header.status === 'valid' && registered.length && registered[0] !== header.noteId) throw new AgentMuxError('The registered resource and current Note header disagree. The original body is retained in its claim.', 'FILE_DELETE_NOTE_IDENTITY_CONFLICT')
     const noteId = registered[0] ?? (header.status === 'valid' ? header.noteId : undefined)
     if (!noteId) return null
-    const eventId = this.input.operationId + '/note-delete/' + createHash('sha256').update(JSON.stringify([noteId, resource])).digest('hex')
-    const fingerprint = noteHistoryRevision(JSON.stringify(['agentmux.file-delete-snapshot.v1', this.digest, noteId, resource, witness, read.revision]))
+    const { birthtimeNs: _birth, ...fileWitness } = witness
+    const eventId = noteFileDeleteEventId(this.input.operationId, noteId, resource)
+    const fingerprint = noteFileDeleteFingerprint(this.digest, noteId, resource, fileWitness, read.revision)
     const existing = await this.notes.readHistoryOperation(eventId)
     if (existing) {
-      if (existing.operation !== 'delete' || existing.requestFingerprint !== fingerprint || existing.source !== undefined || existing.beforeContent !== content || existing.baseRevision !== read.revision) throw new AgentMuxError('The original Note snapshot belongs to another deletion or body.', 'FILE_DELETE_NOTE_OPERATION_CONFLICT')
+      if (existing.operation !== 'delete' || existing.requestFingerprint !== fingerprint || existing.source !== undefined || existing.beforeContent !== content || existing.baseRevision !== read.revision || existing.actor?.kind !== this.actor.kind || existing.actor?.id !== this.actor.id) throw new AgentMuxError('The original Note snapshot belongs to another deletion, actor or body.', 'FILE_DELETE_NOTE_OPERATION_CONFLICT')
       this.events.set(eventId, fingerprint); return read.revision
     }
     const previous = (await this.notes.readHistory({ noteId, resource, limit: 1 })).entries[0]
-    const { birthtimeNs: _birth, ...fileWitness } = witness
     const saved = await this.notes.recordHistory({ eventId, sequence: 0, batchId: this.input.operationId, noteId, resource, originalResource: resource,
       status: 'prepared', at: Date.now(), actor: this.actor, operation: 'delete', requestFingerprint: fingerprint,
       parentEventId: previous?.status === 'committed' && previous.revision === read.revision ? previous.eventId : null,
       baseRevision: read.revision, beforeContent: content, revision: null, content: null, fileWitness })
-    if (saved.operation !== 'delete' || saved.requestFingerprint !== fingerprint || saved.beforeContent !== content || saved.source !== undefined) throw new AgentMuxError('The original Note snapshot was not confirmed.', 'FILE_DELETE_NOTE_HISTORY_UNCONFIRMED')
+    if (saved.operation !== 'delete' || saved.requestFingerprint !== fingerprint || saved.beforeContent !== content || saved.source !== undefined || saved.actor?.kind !== this.actor.kind || saved.actor?.id !== this.actor.id) throw new AgentMuxError('The original Note snapshot was not confirmed.', 'FILE_DELETE_NOTE_HISTORY_UNCONFIRMED')
     this.events.set(eventId, fingerprint)
     return read.revision
   }
@@ -71,7 +70,7 @@ export class FileDeleteHistory {
   async confirmDeleted(): Promise<void> {
     for (const [eventId, fingerprint] of this.events) {
       const event = await this.notes.readHistoryOperation(eventId)
-      if (!event || event.operation !== 'delete' || event.requestFingerprint !== fingerprint || event.source !== undefined) throw new AgentMuxError('The original retained Note snapshot cannot be confirmed after Native deletion.', 'FILE_DELETE_NOTE_HISTORY_UNCONFIRMED')
+      if (!event || event.operation !== 'delete' || event.requestFingerprint !== fingerprint || event.source !== undefined || event.actor?.kind !== this.actor.kind || event.actor?.id !== this.actor.id) throw new AgentMuxError('The original retained Note snapshot cannot be confirmed after Native deletion.', 'FILE_DELETE_NOTE_HISTORY_UNCONFIRMED')
       await this.notes.recordHistory({ ...event, status: 'committed' })
     }
   }

@@ -5,7 +5,7 @@ import { durableWriteFile } from './durable-write.js'
 import { AgentMuxNotesStorage, defaultNotesDirectory, withNotesStorageFileLock } from './notes-storage.js'
 import { AgentMuxError } from './errors.js'
 import { applyNotebookChange, applyNotebookFileRelocations, emptyNotebookState, notebookFingerprint, parseNotebookState, type NoteResource, type NotebookActor, type NotebookObservation, type NotebookState, type NotebookWrite } from './notebook-catalog.js'
-import { NOTEBOOK_ROOT_NAME, notebookFileRoot, notebookFilesLocated, initializeNotebookFiles, readNotebookFiles, readNotebookProvenance, writeNotebookFiles, readNotebookHistory, writeNotebookHistory, readNotebookHistoryProvenance, readNotebookHistoryOperation, readNotebookHistoryBatch, planNotebookFileRelocation, parseNotebookFileRelocationPlan, notebookFileRelocationRows, notebookFileResourceIdentities, type NotebookFileResourceIdentity, type NotebookFileRelocationPlan } from './notebook-files.js'
+import { NOTEBOOK_ROOT_NAME, notebookFileRoot, notebookFilesLocated, initializeNotebookFiles, readNotebookFiles, readNotebookProvenance, writeNotebookFiles, readNotebookHistory, writeNotebookHistory, readNotebookHistoryProvenance, readNotebookHistoryOperation, readNotebookHistoryBatch, planNotebookFileRelocation, parseNotebookFileRelocationPlan, notebookFileRelocationRows, notebookFileResourceIdentities, readNotebookFileDeleteSnapshots, type NotebookFileDeleteSnapshotQuery, type NotebookFileDeleteSnapshotPage, type NotebookFileResourceIdentity, type NotebookFileRelocationPlan } from './notebook-files.js'
 import { parseNoteProvenanceWrite, type NoteProvenanceQuery, type NoteProvenanceSnapshot, type NoteProvenanceWrite } from './note-provenance.js'
 import { parseNoteFileTitle, parseNoteTitleIntent, parseNoteTitleOperation, type NoteTitlePort, type NoteTitleIntent, type NoteTitleOperation, type NoteFileTitle, type NoteTitleProjection, type NoteTitleInspection } from './note-title.js'
 import { noteProvenanceResourceKey } from './note-provenance.js'
@@ -15,7 +15,7 @@ export * from './public-rpc-notes-storage.js'
 export * from './notebook-catalog.js'
 export * from './note-provenance.js'
 export * from './note-history.js'
-export { parseNotebookFileRelocationPlan, type NotebookFileRelocationPlan, type NotebookFileResourceIdentity } from './notebook-files.js'
+export { parseNotebookFileRelocationPlan, type NotebookFileRelocationPlan, type NotebookFileResourceIdentity, type NotebookFileDeleteSnapshotQuery, type NotebookFileDeleteSnapshotPage } from './notebook-files.js'
 /** The stable original catalog lock also serializes attribution and directory publication. */
 export async function withNotebookFileLock<T>(path: string, work: () => Promise<T>): Promise<T> {
   return withNotesStorageFileLock(path, work)
@@ -103,6 +103,15 @@ export class AgentMuxNotebookStore {
     if (Object.values(owned).some(value => typeof value !== 'string' || !value || value.includes('\0'))) throw new AgentMuxError('An exact original Files resource scope is required.', 'NOTEBOOK_INPUT_INVALID')
     await this.ensureReadableFiles()
     return notebookFileResourceIdentities(this.path, owned)
+  }
+  /** Original snapshot references only; this never loads saved body files. */
+  async fileDeleteSnapshots(input: NotebookFileDeleteSnapshotQuery): Promise<NotebookFileDeleteSnapshotPage> {
+    const owned = structuredClone(input)
+    if (Object.values(owned.scope).some(value => typeof value !== 'string' || !value || value.includes('\0'))) throw new AgentMuxError('An exact original Files resource scope is required.', 'NOTE_HISTORY_INVALID')
+    if (!Number.isSafeInteger(owned.limit) || owned.limit < 1 || owned.limit > 50 || !owned.operationId || !/^[a-f0-9]{64}$/u.test(owned.digest) ||
+        owned.root !== undefined && owned.root !== null && !/^[a-f0-9]{64}$/u.test(owned.root) || owned.after && !/^[a-f0-9]{64}$/u.test(owned.after.key)) throw new AgentMuxError('Keep the exact original deletion query and cursor.', 'NOTE_HISTORY_INVALID')
+    await this.ensureReadableFiles()
+    return readNotebookFileDeleteSnapshots(this.path, owned)
   }
   /** Compact original-resource projection, under the existing Files/Notes lease. */
   async planFileRelocation(from: NoteResource, to: NoteResource): Promise<NotebookFileRelocationPlan> {

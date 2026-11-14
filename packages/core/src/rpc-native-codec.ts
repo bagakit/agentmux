@@ -4,7 +4,7 @@ import { isObjectAvatarMethod, parseObjectAvatarParams, parseObjectAvatarResult 
 import { SPACE_CLOSE_METHODS, parseSpaceCloseParams, parseSpaceCloseResult, type SpaceCloseMethod } from './space-close.js'
 import { parseTailcatConfigurationParams, parseTailcatConfigurationResult } from './public-rpc-tailcat-configuration.js'
 import { parseTerminalControl, parseTerminalControlResult, parseTerminalControlInspect, parseTerminalControlInspection } from './terminal-control.js'
-import { parseFileStatParams, parseFileStatResult, parseFileMkdirParams, parseFileMkdirResult, parseFileMutationInspectParams, parseFileMutationInspectResult, parseFileMoveParams, parseFileMoveResult, parseFileDeleteParams, parseFileDeleteResult } from './public-rpc-file-path.js'
+import { parseFileStatParams, parseFileStatResult, parseFileMkdirParams, parseFileMkdirResult, parseFileMutationInspectParams, parseFileMutationInspectResult, parseFileMoveParams, parseFileMoveResult, parseFileDeleteParams, parseFileDeleteResult, parseFileDeleteSnapshotsParams, parseFileDeleteSnapshotsResult } from './public-rpc-file-path.js'
 import { parseGoalActivityHistoryParams, parseGoalActivityHistoryResult } from './goal-activity-history.js'
 import { parseNotesStorageParams, parseNotesStorageInspection, parseNotesStorageOperationInspection } from './public-rpc-notes-storage.js'
 import { parsePostureInspect, parsePostureSet, parsePostureInspection, parsePostureSetResult } from './agent-posture.js'
@@ -477,6 +477,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (method === 'file.share.inspect') return parseFileShareInspectResult(value, parseFileShareInspectParams(params)) as unknown as Record<string, unknown>
     if (method === 'file.share') return parseFileShareResult(value, parseFileShareParams(params)) as unknown as Record<string, unknown>
     if (method === 'file.import') return parseFileImportResult(value, parseFileImportParams(params)) as unknown as Record<string, unknown>
+    if (method === 'file.delete.snapshots') return parseFileDeleteSnapshotsResult(value, parseFileDeleteSnapshotsParams(params)) as unknown as Record<string, unknown>
     if (method === 'file.delete') return parseFileDeleteResult(value, parseFileDeleteParams(params)) as unknown as Record<string, unknown>
     if (method === 'file.move') return parseFileMoveResult(value, parseFileMoveParams(params)) as unknown as Record<string, unknown>
     if (method === 'file.stat') return parseFileStatResult(value, parseFileStatParams(params)) as unknown as Record<string, unknown>

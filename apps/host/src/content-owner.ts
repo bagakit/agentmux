@@ -91,6 +91,7 @@ export function createHostContent(options: {
     },
     notes: { plan: (from, to) => notebookStore.planFileRelocation(from, to), apply: (plan, operationId, actor) => notebookStore.applyFileRelocation(plan, operationId, actor) },
     deleteHistory: (workspace, input, digest, actor) => new FileDeleteHistory(notebookStore, ordinary, workspace, input, digest, actor),
+    deleteSnapshots: input => notebookStore.fileDeleteSnapshots(input),
     nameAudit: new NameChangeAudit(options.spatial),
     ...(options.directoryScope ? { directoryScope: options.directoryScope } : {}) })
   const owners = async () => {
@@ -107,6 +108,7 @@ export function createHostContent(options: {
         mkdir: (owner, input, context) => pathMutations.mkdir(local(owner), input, context),
         move: (owner, input, context) => pathMutations.move(local(owner), input, context),
         delete: (owner, input, context) => pathMutations.delete(local(owner), input, context),
+        deleteSnapshots: (input, context) => pathMutations.deleteSnapshots(input, context),
         inspect: (input, context, owner) => pathMutations.inspect(input, context, owner ? local(owner) : undefined)
       },
       catalog: async () => { const state = await options.spatial.read(); return state ? spatialCatalog(state.graph) : null },
@@ -142,6 +144,7 @@ export function createHostContent(options: {
     mkdir: async (...args) => (await owners()).files.mkdir(...args),
     move: async (...args) => (await owners()).files.move(...args),
     delete: async (...args) => (await owners()).files.delete(...args),
+    deleteSnapshots: async (...args) => (await owners()).files.deleteSnapshots(...args),
     inspectMutation: async (...args) => (await owners()).files.inspectMutation(...args),
     read: async (...args) => (await owners()).files.read(...args),
     list: async (...args) => (await owners()).files.list(...args),

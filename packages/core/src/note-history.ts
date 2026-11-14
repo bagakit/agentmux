@@ -4,6 +4,16 @@ import { noteProvenanceResourceKey, parseNoteProvenanceWrite, type NoteProvenanc
 import type { NoteResource, NotebookActor } from './notebook-catalog.js'
 
 export type NoteHistoryStatus = 'prepared' | 'committed' | 'unconfirmed' | 'not-applied'
+/** Correlation only; physical generation and unlink eligibility remain with Native. */
+export function noteFileDeleteEventId(operationId: string, noteId: string, resource: NoteResource): string {
+  return operationId + '/note-delete/' + noteHistoryRevision(JSON.stringify([noteId, { hostId: resource.hostId, workspaceId: resource.workspaceId, workspacePath: resource.workspacePath, path: resource.path }])).slice(7)
+}
+export function noteFileDeleteFingerprint(digest: string, noteId: string, resource: NoteResource, witness: NoteFileWitness, revision: string): string {
+  const w = parseNoteFileWitness(witness)
+  return noteHistoryRevision(JSON.stringify(['agentmux.file-delete-snapshot.v1', digest, noteId,
+    { hostId: resource.hostId, workspaceId: resource.workspaceId, workspacePath: resource.workspacePath, path: resource.path },
+    { device: w.device, inode: w.inode, size: w.size, ctimeNs: w.ctimeNs, mtimeNs: w.mtimeNs }, revision]))
+}
 /** Immutable selection behind a restoration or selective undo, held in the original event. */
 export type NoteHistorySource = { eventId: string } | { batchId: string; lastEventId: string } | { kind: 'shared'; eventIds: string[]; referenceIds: string[] }
 /** Kernel facts from the same successful publication, never caller supplied. */
