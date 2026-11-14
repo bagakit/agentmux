@@ -13,8 +13,16 @@ Use node inspect --host ID to obtain the original Runtime, policy revision, publ
 root references and default landing. An expected Runtime pin follows that original Node
 across alias rename. Alias collision or an unavailable route never selects another owner.
 
-Owner management is settings node inspect/configure, through the original authenticated
-person's transport. Managed Agents cannot grant themselves publication. Policy is
+Owner management is settings node inspect/configure. A managed Agent authenticated by
+this owner can inspect the complete policy through its original user operator transport:
+settings node inspect --host ID --expected-runtime RT. Both flags select one saved carrier;
+they are not an endpoint or a grant. JSON --input may carry {operationId} alongside those
+flags, or the complete {target:{hostId,expectedRuntimeId},operationId?} instead. Without a
+target, inspect stays with the original endpoint. The receiver independently requires its
+own operator transport; a device, guest, publication-only or delegated route is not one.
+Private paths never come from published roots. This finite read does not authorize
+configure, private owner measurements, trust or keys. Those owner operations retain the
+original authenticated person's restriction; managed Agents cannot grant publication. Policy is
 {alias,shareResources,allowedPaths,deniedPaths,defaultPath}. Alias may be empty; a declared
 alias is one lowercase DNS label. Owner paths are literal absolute paths. The default path
 is navigation, not an Agent working-directory change or an OS sandbox.

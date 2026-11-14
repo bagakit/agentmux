@@ -91,6 +91,14 @@ to be a Git repository. Registration, navigation and Agent creation have separat
 
 ## Node management
 
+For full-policy preparation, an authenticated managed Agent on the original user operator
+transport may read `settings node inspect --host ID --expected-runtime RT`. This selects
+one saved operator carrier and pins the original Runtime, not a Host label or global UID.
+Use `--input` with the original operationId when inspecting a prior save. Device, guest,
+publication-only and delegated routes cannot borrow that private read; configure and owner
+resources remain person-only. Preserve every original allowed/denied/default path when
+preparing a Share change; published roots are not the complete private policy.
+
 Cluster → Node defaults to this device and can explicitly select another saved Core.
 Its publishing editor uses that original Node owner, Runtime and policy operation;
 switching the management target does not change an Agent's execution or replay a save.

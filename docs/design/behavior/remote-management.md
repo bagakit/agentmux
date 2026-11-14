@@ -95,7 +95,7 @@ Remote 管理首先帮助用户回答四个问题：我连接了哪些环境；�
 
 Settings 的 **Node** 管“所管理节点对外提供什么”，**Hosts** 管“我连接谁、对方允许我看什么”，**Remote** 管“在哪里开始或继续工作”。连接、监控与浏览不以选择或登记项目为前提。Node 默认本机；显式选择已保存 Host 或从该 Host 进入 Node 设置后，页头、观察、草稿与保存均绑定其准确 Core／Runtime，不把远端节点冒充本机。
 
-节点管理沿原 Core 的 owner 接口与真实 user principal 执行。可信 App 可借原配置路由和 Runtime fence 访问选定 Core；固定的目标范围只承接原 Node inspect／configure／owner-resources，不接任意 RPC，不在 Agent 请求被拒后剥离 caller 重试。普通 device、managed Agent、页面与名字不能取得发布管理权。当前操作者不能完成原用户动作时，保留准确目标、待确认操作与可达入口，不以对话授权冒充协议 principal。
+节点管理沿原 Core 的 owner 接口与真实 user principal 执行。可信 App 可借原配置路由和 Runtime fence 访问选定 Core；固定的目标范围只承接原 Node inspect／configure／owner-resources，不接任意 RPC，不在 Agent 请求被拒后剥离 caller 重试。同一 owner 已认证的 managed Agent 可以在原 user operator transport 下读取准确 Node 的完整 policy 与原操作；远端只沿已保存且由接收者确认 operator 资格的 carrier，并固定 Runtime／owner 实例，不传递本机 Agent capability 冒充远端身份。该有限只读不授予 publication 写入、私有 owner-resources、密钥或信任权限；device、guest、有限发布 scope 与 route delegation 不能借它升级资格。managed Agent、页面与名字不能取得发布管理权。当前操作者不能完成原用户动作时，保留准确目标、待确认操作与可达入口，不以对话授权冒充协议 principal。
 
 切换目标只改变管理视图，保留各原 Runtime 的未保存内容和操作；迟到回复不能替另一节点保存、显示其策略或覆盖后续输入。远端不可用或缺少接口时给出准确维护入口，不回退为本机策略。入站 listener 仍由原设备自己的配置 owner 管理，远端发布页不得误挂本机 listener 表单。仅打开系统资源共享时，保留原目录授权；原完整 policy 保存会重新确认目录目标，不把它误报为毫无目录效果的窄开关。
 
