@@ -117,7 +117,8 @@ input.ui-switch[type="checkbox"]:checked {
 }
 input.ui-switch[type="checkbox"]:checked::before { background: var(--green-text); }
 input.ui-switch[type="checkbox"]:active:enabled { --switch-press: 1.12; }
-input.ui-switch[type="checkbox"]:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+/* Keep the entire ring visible in clipped panes, including flush-left rows. */
+input.ui-switch[type="checkbox"]:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -3px; }
 input.ui-switch[type="checkbox"]:disabled { cursor: default; opacity: .6; }
 @media (prefers-reduced-motion: reduce) {
   input.ui-switch[type="checkbox"], input.ui-switch[type="checkbox"]::before { transition: none; }
