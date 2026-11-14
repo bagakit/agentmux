@@ -179,6 +179,6 @@ Core 不构造平台 adapter，也不保存凭据。宿主通过 `AgentMuxRpcSer
 
 ## Mote 机器人操作
 
-方法：`space.mote.connection.create/sync/advance/inspect/ls`。合同：[mote-connection-contract](../../packages/core/src/mote-connection-contract.ts)。
+方法：`space.mote.connection.create/sync/advance/inspect/ls`。合同：[mote-connection-contract](../../packages/core/src/mote/connection-contract.ts)。
 
 父操作组合 Mote 已保存的公开资料、Enrollment 与 Setup 子操作和默认偏好保存：创建时冻结准确的公开主题修订、可选的头像修订、默认文件基线和子操作 ID，只共享已保存的公开标题、摘要和选中的 PNG，人格、私有记忆和未保存的编辑内容不在其中。`advance` 只观察或显式推进固定的子操作，账号确认与创建需要传入准确的子操作 ID、动作和修订，父操作不替用户选择。旧版本只记录了来源前提（`expectedTopicRevision` / `expectedAvatarRevision`）的父操作仍可读取，并沿已冻结的子步骤续接；这些历史前提不会作为新写入的输入，结果未知的旧请求也不会改形重发。默认偏好保存是一次 Files CAS 写入，丢失确认时保持未知，不因当前值相同而视为成功。同步已有应用的公开资料会影响使用同一应用的其他 Mote 与群。托管 Agent 只能操作自己工作区或其准确 Mote 执行目录内的目标；`sync` 只能用于该 Agent 自己接入的机器人。父操作的所有结果（包括 `inspect` / `ls`）只带子操作的安全摘要，不含扫码载荷、账号等私密确认材料；早期记录里残留的扫码挑战在返回时去掉，原记录不改写。这些材料只经 `connection.enrollment.*` 与 `connection.setup.*` 向原操作者返回。
