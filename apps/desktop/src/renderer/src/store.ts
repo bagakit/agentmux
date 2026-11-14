@@ -372,6 +372,11 @@ import {
   pendingAgentLaunchEventId,
   bufferPendingAgentEvent,
   discardPendingAgentLaunch,
+  retainedPendingAgentLaunches,
+  restoredPendingAgentLaunches,
+  reducePendingAgentLaunchIssue,
+  pendingAgentLaunchSource,
+  restorePendingAgentLaunchWorkfaces,
   projectRuntimeEvent,
   projectContinuityFacts,
   runtimeDiagnosticNotice,
@@ -387,6 +392,7 @@ import {
   reduceSessionLaunchFailed,
   reduceTimelineSnapshot,
   type PendingAgentLaunch,
+  type RetainedPendingAgentLaunches,
   type RuntimeOperationNotice,
   type SessionViewMode
 } from './lib/session-state'
@@ -3359,6 +3365,7 @@ function originalSavedSessionExecutions(tabs: PersistedWorkbench['tabs'], config
   const graph = coreSpatialPersistence?.current?.graph
   const regions = new Map((graph?.regions ?? []).map(region => [JSON.stringify([region.tabId, region.regionId]), region]))
   const hosts = new Set(config?.hosts.map(host => host.id))
+  const pendingLaunches = useAppStore.getState().pendingAgentLaunches
   const references = new Map<string, SavedSessionExecution | null>()
   for (const tab of Object.values(tabs)) for (const surface of workbenchSurfaces(tab)) {
     if (surface.kind !== 'agent' && surface.kind !== 'terminal') continue
@@ -3367,7 +3374,9 @@ function originalSavedSessionExecutions(tabs: PersistedWorkbench['tabs'], config
     const matches = original?.kind === surface.kind && (surface.kind === 'agent'
       ? original.agentSessionId === surface.sessionId || presentation?.sessionId === surface.sessionId : original.runId === surface.sessionId)
     const hostId = matches ? original.execution?.hostId ?? presentation?.hostId : undefined
-    let execution: SavedSessionExecution | null = hostId && hosts.has(hostId) ? { kind: surface.kind, hostId, agentSessionId: surface.kind === 'agent' ? original!.agentSessionId : null } : null
+    const pendingSource = surface.kind === 'agent' ? pendingAgentLaunchSource(pendingLaunches[surface.sessionId], tab.id, surface.regionId) : undefined
+    let execution: SavedSessionExecution | null = hostId && hosts.has(hostId) ? { kind: surface.kind, hostId, agentSessionId: surface.kind === 'agent' ? original!.agentSessionId : null }
+      : surface.kind === 'agent' && pendingSource?.hostId && hosts.has(pendingSource.hostId) ? { kind: 'agent', hostId: pendingSource.hostId, agentSessionId: surface.sessionId } : null
     const prior = references.get(surface.sessionId)
     // Every saved occurrence must agree; a missing fact or another Host cannot
     // borrow the first occurrence's execution identity.
@@ -3972,6 +3981,7 @@ function retainLayoutSelection(layout: WorkspaceLayout, next: WorkspaceLayout): 
 }
 
 type PersistedAppState = {
+  pendingAgentLaunches?: RetainedPendingAgentLaunches
   workbenchSpaceSelection: AgentMuxDesktopSpaceSelection | null
   projectGroups?: AgentMuxProjectGroupFact[]
   spaceZoneBindings?: SpaceZoneBindings
@@ -4271,6 +4281,7 @@ export function restorePersistedUiState(
 // references, so they can reuse the projection without visiting unrelated workbench / file content.
 function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
   return {
+    pendingAgentLaunches: retainedPendingAgentLaunches(state.pendingAgentLaunches),
     workbenchSpaceSelection: state.workbenchSpaceSelection,
     projectGroups: coreSpatialReady ? undefined : state.projectGroups,
     spaceZoneBindings: coreSpatialReady ? undefined : state.spaceZoneBindings,
@@ -6102,7 +6113,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       set({ startupProgress: { step: 'layout' } })
       const visibleSessions = persistedState.sessions
       const restoredUi = restorePersistedUiState(config, persistedState)
-      const workbench = restorePersistedWorkbench({
+      const restoredWorkbench = restorePersistedWorkbench({
         config,
         sessions: visibleSessions,
         persisted: persistedState.restoredWorkbench,
@@ -6110,6 +6121,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         createTabGroupId: newTabGroupId,
         retiredSessionIds: new Set()
       })
+      const workbench = { ...restoredWorkbench, tabs: restorePendingAgentLaunchWorkfaces(restoredWorkbench.tabs, persistedState.pendingAgentLaunches, config) }
       const observedSessionIds = new Set(visibleSessions.map(session => session.id))
       const unobservedSavedSessions = [...persistedSessionIds].filter(id => !observedSessionIds.has(id)
         && hasAttachedSessionView(workbench.tabs, id))
@@ -6156,7 +6168,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         config,
         sessions: visibleSessions,
         startupAgentAvailability: startupAgents,
-        pendingAgentLaunches: {},
+        pendingAgentLaunches: persistedState.pendingAgentLaunches,
         agentFocus: restoredAgentFocus,
         ...restoredUi,
         tabs: workbench.tabs,
@@ -6750,14 +6762,29 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           ? await api.scratch.listTopics(SCRATCH_WORKSPACE_ID) : [],
         createResource: input => api.workspaces.createZoneResource(input),
         launch: input => {
-          set(current => ({ pendingAgentLaunches: { ...current.pendingAgentLaunches,
-            [input.agentSessionId]: { ...current.pendingAgentLaunches[input.agentSessionId],
-              events: current.pendingAgentLaunches[input.agentSessionId]?.events ?? [],
-              overflowed: current.pendingAgentLaunches[input.agentSessionId]?.overflowed ?? false,
-              request: { executorId: input.executorId, hostId: input.hostId, workspacePath: input.workspacePath,
+          set(current => {
+            const original = current.pendingAgentLaunches[input.agentSessionId]
+            const prior = original?.request?.createOperationId === input.createOperationId && original.request.hostId === input.hostId ? original : undefined
+            return { pendingAgentLaunches: { ...current.pendingAgentLaunches,
+            [input.agentSessionId]: { ...prior,
+              events: prior?.events ?? [],
+              overflowed: prior?.overflowed ?? false,
+              request: { executorId: input.executorId, hostId: input.hostId, workspacePath: input.workspacePath, createOperationId: input.createOperationId,
+                ...(input.launcher ? { launcher: input.launcher } : {}),
+                ...(input.toolWorkspace ? { toolWorkspace: input.toolWorkspace } : {}),
+                ...(input.executionWorkspaceId ? { executionWorkspaceId: input.executionWorkspaceId } : {}),
+                ...(input.executorRevision ? { executorRevision: input.executorRevision } : {}),
+                ...(input.launchOptions ? { launchOptions: input.launchOptions } : {}),
+                ...(input.agentMuxNote === undefined ? {} : { agentMuxNote: input.agentMuxNote }),
                 ...(input.prompt === undefined ? {} : { prompt: input.prompt }) } }
-          } }))
-          return api.sessions.launchAgent(input)
+          } } })
+          return api.sessions.launchAgent(input).catch(error => {
+            const failure = error as { controlFailure?: import('@agentmux/core').AgentMuxControlFailure; code?: unknown } | null
+            if (failure?.controlFailure?.disposition !== 'not_applied') set(current => reducePendingAgentLaunchIssue(current, input.agentSessionId,
+              { hostId: input.hostId, createOperationId: input.createOperationId },
+              { message: presentError(error), code: typeof failure?.code === 'string' ? failure.code : null }))
+            throw error
+          })
         },
         creationSessionId: (hostId, createOperationId) => api.sessions.resolveCreationSessionId(hostId, createOperationId),
         creation: (hostId, sessionId) => api.sessions.creation(hostId, sessionId),
@@ -10721,6 +10748,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       pendingAgentLaunches: {
         ...current.pendingAgentLaunches,
         [sessionId]: { events: [], overflowed: false, request: { executorId, hostId: workspace.hostId, workspacePath: workspace.path, createOperationId, prompt,
+          ...(launcher ? { launcher: { tabId, regionId }, executionWorkspaceId: workspace.id } : {}),
+          ...(launchOptions ? { launchOptions } : {}),
           ...(toolWorkspace ? { toolWorkspace, executionWorkspaceId: workspace.id, executorRevision: executor!.executorRevision! } : {}),
           ...(launchNote === undefined ? {} : { agentMuxNote: launchNote }), ...(pmo ? { goalPmo: pmo.intent } : {}) } }
       }
@@ -10871,6 +10900,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             agentSessionId: sessionId, createOperationId,
             controlFailure: ownerFailure?.controlFailure?.disposition === 'unknown' ? ownerFailure.controlFailure
               : { disposition: 'unknown' as const, confirmedInputBytes: null } })
+        set(current => reducePendingAgentLaunchIssue(current, sessionId, { hostId: workspace.hostId, createOperationId },
+          { message: presentError(error), code: typeof retained.code === 'string' ? retained.code : null }))
         get().reportError(retained, { kind: 'indeterminate', lifecycle: { step: 'launch', regionId, tabId } })
         throw retained
       }
@@ -13537,6 +13568,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const local = (persisted ?? {}) as Partial<PersistedAppState>
     if (!Object.hasOwn(current.config?.appearance ?? {}, 'spaceObjectIcons') && Object.hasOwn(local, 'spaceObjectIcons')) retainedSpaceIconHandoff = local.spaceObjectIcons
     const state = { ...current, ...persisted as Partial<AppState> }
+    state.pendingAgentLaunches = { ...restoredPendingAgentLaunches(local.pendingAgentLaunches), ...current.pendingAgentLaunches }
     state.nodePublicationDrafts = restoredNodePublicationDrafts(state.nodePublicationDrafts)
     if (state.agentSteerQueues) {
       let changed = false

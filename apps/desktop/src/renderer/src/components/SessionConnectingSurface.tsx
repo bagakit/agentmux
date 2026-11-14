@@ -16,10 +16,11 @@ const ThemeActionCopyIcon = semanticIconComponent('action.copy')
 
 
 /** Launch intent stays readable while Runtime facts are still on their way. No guessed progress. */
-export function SessionConnectingSurface({ phase, surfaceKind, request, executor, appearance, session, actions, visible = true, unknownTerminalCreation = false, creationRecovery }: {
+export function SessionConnectingSurface({ phase, surfaceKind, request, requestIssue, executor, appearance, session, actions, visible = true, unknownTerminalCreation = false, creationRecovery }: {
   phase: 'launch' | 'restore' | 'connect'
   surfaceKind: 'agent' | 'terminal'
   request?: PendingAgentLaunch['request']
+  requestIssue?: PendingAgentLaunch['requestIssue']
   executor?: AgentExecutorConfig | undefined
   appearance?: AgentAvatarAppearance | undefined
   session?: SessionHistoryReference | undefined
@@ -33,7 +34,7 @@ export function SessionConnectingSurface({ phase, surfaceKind, request, executor
   const [copying, setCopying] = useState(false)
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState('')
-  const title = creationRecovery ? creationRecovery.waiting ? 'Waiting for storage' : 'Creation status is unconfirmed'
+  const title = requestIssue ? 'Creation status is unconfirmed' : creationRecovery ? creationRecovery.waiting ? 'Waiting for storage' : 'Creation status is unconfirmed'
     : unknownTerminalCreation ? 'Terminal creation is unconfirmed' : phase === 'launch' ? 'Starting your agent' : phase === 'restore' ? 'Restoring your session' : 'Connecting to this session'
   const detail = unknownTerminalCreation ? '' : phase === 'launch'
     ? ''
@@ -55,13 +56,16 @@ export function SessionConnectingSurface({ phase, surfaceKind, request, executor
     className="session-connecting"
     scope="region"
     visible={visible}
-    phase={unknownTerminalCreation || creationRecovery && !creationRecovery.waiting ? 'parked' : phase === 'restore' ? 'recovering' : 'loading'}
+    phase={requestIssue || unknownTerminalCreation || creationRecovery && !creationRecovery.waiting ? 'parked' : phase === 'restore' ? 'recovering' : 'loading'}
     eyebrow={unknownTerminalCreation ? 'Terminal retained' : phase === 'launch' ? 'Launch request' : 'Session connection'}
     title={title}
-    description={creationRecovery?.description}
+    description={requestIssue ? <><span>{requestIssue.message}</span><span className="session-connecting__status">The request returned an error. Its original creation result is still unconfirmed; check the original without starting or sending again.</span></> : creationRecovery?.description}
     detail={detail}
     actions={actions}
     supplement={<div className="session-connecting__body">
+      {requestIssue ? <div className="session-connecting__diagnostic">
+        <p>Host: {request?.hostId ?? 'Unknown'}</p><p>Creation: {request?.createOperationId ?? 'Unknown'}</p><p>Session: {session?.agentSessionId ?? 'Unknown'}</p>
+      </div> : null}
       {unknownTerminalCreation ? <ServiceWindowNotice summary={{
         step: 'Waiting for the original request result.',
         mode: 'Your Tab and layout are kept.',

@@ -1067,6 +1067,7 @@ export function SessionPane({
           </> } : undefined}
           surfaceKind={surfaceKind}
           request={pendingLaunch?.request}
+          requestIssue={pendingLaunch?.requestIssue}
           executor={connectingExecutor}
           appearance={connectingAppearance}
           session={{ hostId: executionHostId ?? '', agentSessionId: sessionId }}

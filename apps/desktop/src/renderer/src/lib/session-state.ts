@@ -1,5 +1,6 @@
 import type {
   AgentLaunchResult,
+  AppConfig,
   AgentSessionControl,
   AgentTimelineSnapshot,
   RuntimeEvent,
@@ -112,12 +113,94 @@ type AgentTimelineRuntimeEvent = RuntimeEvent & {
 
 export type PendingAgentLaunch = {
   /** Exact submitted request, captured before launch; never reconstructed from an editable draft. */
-  request?: { toolWorkspace?: import('../../../shared/contracts').AgentLaunchInput['toolWorkspace']; executionWorkspaceId?: string; executorRevision?: string; executorId: string; hostId?: string; workspacePath?: string; createOperationId?: string; prompt?: string; agentMuxNote?: string; goalPmo?: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent }
+  request?: { launcher?: import('../../../shared/contracts').AgentLaunchInput['launcher']; toolWorkspace?: import('../../../shared/contracts').AgentLaunchInput['toolWorkspace']; executionWorkspaceId?: string; executorRevision?: string; executorId: string; hostId?: string; workspacePath?: string; createOperationId?: string; prompt?: string; launchOptions?: import('../../../shared/contracts').AgentLaunchInput['launchOptions']; agentMuxNote?: string; goalPmo?: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent }
+  /** This exact invocation rejected. It does not establish a Core creation or Run outcome. */
+  requestIssue?: { message: string; code: string | null }
   events: RuntimeEvent[]
   overflowed: boolean
   /** Accepted Core identity while optional display reads are unavailable. */
   created?: AgentLaunchResult['created']
   projectionFailures?: AgentLaunchResult['projectionFailures']
+}
+
+/** A late producer can report only against its original request, never a replacement. */
+export function reducePendingAgentLaunchIssue(state: SessionProjectionState, agentSessionId: string,
+  expected: { hostId: string; createOperationId: string | undefined }, issue: NonNullable<PendingAgentLaunch['requestIssue']>): SessionProjectionState {
+  const pending = state.pendingAgentLaunches[agentSessionId]
+  if (!expected.createOperationId || pending?.request?.createOperationId !== expected.createOperationId || pending.request.hostId !== expected.hostId) return state
+  return { ...state, pendingAgentLaunches: { ...state.pendingAgentLaunches, [agentSessionId]: { ...pending, requestIssue: issue } } }
+}
+
+/** The existing native user document retains only rejected original invocations, never Runtime event buffers. */
+export type RetainedPendingAgentLaunches = Record<string, Pick<PendingAgentLaunch, 'request' | 'requestIssue'>>
+let previousRetainedLaunches: RetainedPendingAgentLaunches = {}
+let previousPendingLaunches: Record<string, PendingAgentLaunch> | undefined
+export function retainedPendingAgentLaunches(pending: Record<string, PendingAgentLaunch>): RetainedPendingAgentLaunches {
+  if (pending === previousPendingLaunches) return previousRetainedLaunches
+  previousPendingLaunches = pending
+  const next: RetainedPendingAgentLaunches = {}
+  for (const [id, value] of Object.entries(pending)) {
+    if (!value.requestIssue || !value.request?.hostId || !value.request.createOperationId) continue
+    const previous = previousRetainedLaunches[id]
+    next[id] = previous?.request === value.request && previous.requestIssue === value.requestIssue
+      ? previous : { request: value.request, requestIssue: value.requestIssue }
+  }
+  // Event-only changes must not serialize the whole workbench again.
+  if (Object.keys(next).length === Object.keys(previousRetainedLaunches).length &&
+    Object.entries(next).every(([id, value]) => previousRetainedLaunches[id] === value)) return previousRetainedLaunches
+  return previousRetainedLaunches = next
+}
+export function restoredPendingAgentLaunches(retained: RetainedPendingAgentLaunches | undefined): Record<string, PendingAgentLaunch> {
+  const pending: Record<string, PendingAgentLaunch> = {}
+  if (!retained || typeof retained !== 'object' || Array.isArray(retained)) return pending
+  for (const [id, value] of Object.entries(retained)) {
+    const request = value?.request, issue = value?.requestIssue
+    if (!request || typeof request.executorId !== 'string' || typeof request.hostId !== 'string' ||
+      typeof request.createOperationId !== 'string' || !request.createOperationId ||
+      !issue || typeof issue.message !== 'string' || !(issue.code === null || typeof issue.code === 'string') ||
+      request.prompt !== undefined && typeof request.prompt !== 'string') continue
+    pending[id] = { request, requestIssue: issue, events: [], overflowed: false }
+  }
+  return pending
+}
+
+/** Locates only the original client's unknown request. It grants no Core creation or input fact. */
+export function pendingAgentLaunchSource(pending: PendingAgentLaunch | undefined, tabId: string, regionId: string) {
+  const request = pending?.request
+  return pending?.requestIssue && request?.createOperationId && request.hostId &&
+    request.launcher?.tabId === tabId && request.launcher.regionId === regionId ? request : undefined
+}
+
+/** Core retains its original Launcher until creation is confirmed; restore this client's pending presentation only. */
+export function restorePendingAgentLaunchWorkfaces(tabs: Record<string, WorkbenchTab>, pending: Record<string, PendingAgentLaunch>, config: AppConfig): Record<string, WorkbenchTab> {
+  const candidates = Object.entries(pending).flatMap(([sessionId, value]) => {
+    const slot = value.request?.launcher
+    const request = slot ? pendingAgentLaunchSource(value, slot.tabId, slot.regionId) : undefined
+    if (!slot || !request) return []
+    const tab = tabs[slot.tabId], surface = tab?.regions[slot.regionId]
+    const execution = config.workspaces.find(item => item.id === request.executionWorkspaceId)
+    const resourceId = request.toolWorkspace?.id ?? request.executionWorkspaceId
+    const resource = config.workspaces.find(item => item.id === resourceId)
+    if (surface?.kind !== 'launcher' || surface.workspaceId !== resourceId ||
+      (surface.agentWorkspaceId ?? surface.workspaceId) !== request.executionWorkspaceId ||
+      !execution || execution.hostId !== request.hostId || execution.path !== request.workspacePath ||
+      !resource || request.toolWorkspace && (resource.hostId !== request.toolWorkspace.hostId || resource.path !== request.toolWorkspace.path) ||
+      !config.hosts.some(host => host.id === request.hostId) ||
+      surface.executorId && surface.executorId !== request.executorId ||
+      surface.agentExecutor && (surface.agentExecutor.hostId !== request.hostId || surface.agentExecutor.executorId !== request.executorId || surface.agentExecutor.executorRevision !== request.executorRevision)) return []
+    return [{ sessionId, slot, workspaceId: execution.id }]
+  })
+  const counts = new Map<string, number>()
+  for (const { slot } of candidates) { const key = JSON.stringify([slot.tabId, slot.regionId]); counts.set(key, (counts.get(key) ?? 0) + 1) }
+  let next = tabs
+  for (const { sessionId, slot, workspaceId } of candidates) {
+    // Two unresolved requests cannot choose their visible owner by insertion order or time.
+    if (counts.get(JSON.stringify([slot.tabId, slot.regionId])) !== 1) continue
+    if (next === tabs) next = { ...tabs }
+    next[slot.tabId] = replaceWorkbenchRegion(next[slot.tabId]!, slot.regionId,
+      { regionId: slot.regionId, kind: 'agent', phase: 'launching', workspaceId, sessionId })
+  }
+  return next
 }
 
 /** The original Core call owns retry eligibility; this only locates its current display fact. */
@@ -614,10 +697,14 @@ export function reduceAgentMembershipSnapshot(
   state: SessionProjectionState,
   snapshot: RuntimeSnapshot
 ): SessionProjectionState {
-  const pendingIds = new Set(Object.keys(state.pendingAgentLaunches))
-  const canonicalAgents = snapshot.sessions.filter((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => (
-    session.kind === 'agent' && !pendingIds.has(session.id) && !runtimeSnapshotHostUnavailable(snapshot, session.hostId)
-  ))
+  const canonicalAgents = snapshot.sessions.filter((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => {
+    if (session.kind !== 'agent' || runtimeSnapshotHostUnavailable(snapshot, session.hostId)) return false
+    const pending = state.pendingAgentLaunches[session.id]
+    // A rejected invocation cannot hide positive facts from that exact original owner.
+    // Keep its request/cause: observing a healthy Session does not settle the original operation.
+    return !pending || Boolean(pending.requestIssue && pending.request?.hostId === session.hostId &&
+      session.control.hostId === session.hostId && session.control.agentSessionId === session.id)
+  })
   if (snapshot.sessions.length === 0 && snapshot.recoveryCandidates.length === 0) {
     const sessions = projectRuntimeEndpointSessions(state.sessions, snapshot.runtimeEndpointWarnings)
     return sessions === state.sessions ? state : { ...state, sessions }
