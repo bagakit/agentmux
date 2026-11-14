@@ -17,6 +17,8 @@ import { authoredConfigCarryOver } from '../src/main/config-store'
 import { configOwnerFixture, deferred } from './helpers/config-owner-fixture'
 import { composerDOM, composerConfig, composerSession } from './helpers/composer-dom-fixture'
 
+import { configureGoalsCommonActions } from '../src/main/settings-preferences-control'
+
 const dom = composerDOM()
 const prompts = [
   { id: 'review', keyword: 'review', label: '检查改动', body: '  检查实际改动，指出具体风险。\n保留原话与证据。  ', providerId: 'claude', states: ['done' as const] },
@@ -44,6 +46,7 @@ beforeEach(async () => {
     mainSurface: 'board', createScratchTopic: createTopic, openScratchTopic: openTopic, sessions: [], tabs: {}, layouts: {}, executorDetections: {}, loading: false })
   createTopic.mockClear(); openTopic.mockReset().mockResolvedValue('owned-topic')
   vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => f.owner.edit(expected, next))
+  vi.spyOn(api.config, 'configureGoalsCommonActions').mockImplementation(input => configureGoalsCommonActions(f.owner, input))
 })
 function CommonActionSurface({ onNavigate }: { onNavigate: ReturnType<typeof vi.fn> }) {
   const [route, setRoute] = useState<SettingsNavigationRequest | null>(null), [visible, setVisible] = useState(false)
@@ -226,7 +229,7 @@ describe('Goals common actions through the mounted product and durable config ow
     expect(directory.querySelector(`[data-common-ref="prompt:${added}"]`)).not.toBeNull()
     await dom.click('[data-prompt-id="review"]')
     expect(body().value).toBe('One retained original body draft')
-    expect(api.config.save).toHaveBeenCalledTimes(1)
+    expect(api.config.configureGoalsCommonActions).toHaveBeenCalledTimes(1)
     expect(openTopic).not.toHaveBeenCalled(); expect(createTopic).not.toHaveBeenCalled()
   })
 
@@ -448,8 +451,8 @@ describe('Goals common actions through the mounted product and durable config ow
     await fill('First scoped body'); await openDirectory()
     expect(dom.container.querySelector('[data-settings-pane="goals"]')!.textContent).toContain('Goals preferences saved')
     expect(dom.container.querySelector('[data-settings-pane="goals"]')!.textContent).not.toContain('All changes saved')
-    const pending = deferred<void>(), published = deferred<void>(), original = vi.mocked(api.config.save).getMockImplementation()!
-    vi.mocked(api.config.save).mockImplementationOnce(async (next, expected) => { const result = await original(next, expected); published.resolve(); await pending.promise; return result })
+    const pending = deferred<void>(), published = deferred<void>(), original = vi.mocked(api.config.configureGoalsCommonActions).getMockImplementation()!
+    vi.mocked(api.config.configureGoalsCommonActions).mockImplementationOnce(async input => { const result = await original(input); published.resolve(); await pending.promise; return result })
     await click('Save common actions'); await act(async () => published.promise)
     expect((await f.disk()).goalsCommonActions?.items.at(-1)).toEqual({ kind: 'prompt', id })
     expect((await f.disk()).composerShortcuts!.find(prompt => prompt.id === id)!.body).toBe('First scoped body')
