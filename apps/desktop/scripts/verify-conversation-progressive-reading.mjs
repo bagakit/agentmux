@@ -17,6 +17,8 @@ const args = process.argv.slice(2), compileOnly = args.includes('--compile-only'
 const costPairs = args.includes('--cost-pairs')
 const readingPattern = args.includes('--reading-pattern')
 const terminalNeighbor = args.includes('--terminal-neighbor')
+const terminalScopeMutation = args.includes('--terminal-scope-mutation')
+assert.ok(!terminalScopeMutation || terminalNeighbor)
 const patternAttempts = Number(args.find(value => value.startsWith('--pattern-attempts='))?.slice('--pattern-attempts='.length) ?? 1)
 assert.ok(Number.isInteger(patternAttempts) && patternAttempts >= 1 && patternAttempts <= 5, 'Use one to five independent reading pattern attempts')
 const anchorAttempts = Number(args.find(value => value.startsWith('--anchor-attempts='))?.slice('--anchor-attempts='.length) ?? 0)
@@ -82,6 +84,12 @@ const plugin = (browser, variant = 'scheduled') => ({ name: 'exact-conversation-
       const transformed = immediateFirstMount(code)
       transforms.set(key, { file: key, ...transformed.receipt })
       returned = transformed.code; mutation = 'immediate-first-mount'
+    }
+    if (browser && terminalScopeMutation && key === 'apps/desktop/src/renderer/src/lib/session-events.ts') {
+      const route = 'hosts.get(event.hostId)?.get(core.run.runId)'
+      assert.equal(code.split(route).length, 2, 'A real cross-Run mutation must reach the exact original dispatch')
+      returned = code.replace(route, '[...(hosts.get(event.hostId)?.values() ?? [])].flatMap(readers => [...readers])')
+      mutation = 'cross-run-terminal-delivery'
     }
     loaded.push({ path: key, query, kind, browser, variant, fileSHA256, originalSHA256,
       loadedSHA256: hash(returned), mutation })

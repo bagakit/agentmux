@@ -53,9 +53,14 @@ api.sessions.readHistory = async (reference, input) => {
 // These proof scenes contain no send intent. Any accidental control crosses a failing boundary.
 api.sessions.write = (...args) => request('terminal-protocol', ...args)
 const terminalEvents: Array<{ subscriber: string; run: string; bytes: number }> = []
+const terminalIngress: Array<{ run: string; bytes: number }> = []
 if (setup.terminalNeighbor) {
   const production = window.agentmux!.sessions
-  const onEvent = createRendererSessionEvents(production.onEvent)
+  const onEvent = createRendererSessionEvents(listener => production.onEvent(event => {
+    const value = event.event
+    if (value.type === 'terminal-output') terminalIngress.push({ run: value.run.runId, bytes: value.dataBytes.byteLength })
+    listener(event)
+  }))
   api.sessions.onEvent = (listener, control) => onEvent(event => {
     const value = event.event
     if (value.type === 'terminal-output' && control && control.kind !== 'host-observation')
@@ -152,6 +157,13 @@ if (setup.phase === 'seed') {
 }
 if (setup.terminalNeighbor) {
   let original: Terminal | undefined
+  const input = new Set<string>()
+  for (const name of ['wheel', 'keydown', 'keypress', 'beforeinput', 'compositionstart', 'compositionupdate', 'compositionend']) {
+    document.addEventListener(name, event => {
+      const target = event.target instanceof Element ? event.target : null
+      if (event.isTrusted && target?.closest('[data-workbench-region-id="terminal-region"]')) input.add(name)
+    }, { capture: true, passive: true })
+  }
   Object.assign(window, { liveTerminalProof() {
     const region = document.querySelector('[data-workbench-region-id="terminal-region"]')
     const terminal = terminalInstances.find(value => value.element && region?.contains(value.element))
@@ -163,10 +175,14 @@ if (setup.terminalNeighbor) {
       bounds: { width: bounds.width, height: bounds.height, x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 },
       grid: { cols: terminal.cols, rows: terminal.rows },
       focused: document.activeElement === terminal.textarea,
+      parent: terminal.element!.closest('[data-workbench-region-id]')?.getAttribute('data-workbench-region-id'),
+      color: buffer.getLine(buffer.viewportY)?.getCell(0)?.getFgColor(),
+      preedit: terminal.element!.querySelector('.composition-view.active')?.textContent?.replaceAll('\u200e', '') ?? null,
+      input: [...input],
       buffer: { type: buffer.type, base: buffer.baseY, viewport: buffer.viewportY,
         x: buffer.cursorX, y: buffer.cursorY, length: buffer.length,
         top: buffer.getLine(buffer.viewportY)?.translateToString(true), tail: buffer.getLine(buffer.length - 2)?.translateToString(true) },
-      events: terminalEvents.slice()
+      events: terminalEvents.slice(), ingress: terminalIngress.slice()
     }
   } })
 }

@@ -1,3 +1,4 @@
+import { exerciseTerminalNeighbor, startTerminalNeighbor } from './terminal-neighbor.mjs'
 import { sessionObservationResult } from '../../../src/shared/session-observation-result'
 import { sessionInputWriteResult } from '../../../src/shared/session-input-result'
 import { THEME_BOOTSTRAP_CHANNEL } from '../../../src/shared/theme-bootstrap'
@@ -42,8 +43,7 @@ const unsubscribeSpatial = spatial.subscribe(state => { if (win && !win.isDestro
 const runtime = new RuntimeController(store, async (host, owner) => { core = await localRuntimeConnector(host, owner); return core })
 const terminalNeighbor = proofMode === 'terminal-neighbor'
 const terminalCalls: Array<{ kind: string; runId?: string; attachmentId?: string; bytes?: number; source?: string }> = []
-let privateTerminal: { id: string; runId: string } | undefined
-const terminalInput = 'native-one'
+let privateTerminal: Awaited<ReturnType<typeof startTerminalNeighbor>> | undefined
 if (terminalNeighbor) {
   ipcMain.on(THEME_BOOTSTRAP_CHANNEL, event => { event.returnValue = null })
   const trusted = (event: Electron.IpcMainInvokeEvent) => assert.equal(event.sender.id, win.webContents.id)
@@ -72,9 +72,9 @@ if (terminalNeighbor) {
   })
   ipcMain.handle('sessions:write', (event, control: SessionControl, data, source, observation) => sessionInputWriteResult(async () => {
     trusted(event)
-    assert.equal(control.run.runId, privateTerminal?.runId)
+    assert.equal(control.run.runId, privateTerminal?.reference.runId)
     assert.equal(source, 'user')
-    assert.equal(Buffer.from(data).toString(), terminalInput)
+    assert.ok(['z', '组合'].includes(Buffer.from(data).toString()), 'The private proof owns only its bounded declared input')
     terminalCalls.push({ kind: 'write', runId: control.run.runId, bytes: Buffer.byteLength(data), source })
     return runtime.write(control, data, source, observation, { webContentsId: event.sender.id, window: null })
   }))
@@ -114,23 +114,9 @@ ipcMain.handle('reading-proof:request', async (event, operation, ...args) => {
         assert.equal(phase, 'seed'); assert.equal(args[0], scene)
         const { session } = await runtime.launchAgent({ hostId: 'local', executorId: 'codex', workspacePath: config.workspaces[0]!.path }, config)
         const stored = await until(async () => { const value = await store.readMetadata(session.id); return value?.nativeHandle?.kind === 'provider' && value.nativeHandle.transcriptPath ? value : null }, 'original native handle')
-        if (terminalNeighbor) {
-          const executable = path.join(privateRoot, 'terminal-program.mjs')
-          await fs.writeFile(executable, String.raw`import assert from 'node:assert/strict'
-assert.ok(process.stdin.isTTY && process.stdout.isTTY)
-process.stdin.setRawMode(true)
-for (let row = 0; row < 320; row++) process.stdout.write('\u001b[32mprivate-history-'+row+'\u001b[0m\r\n')
-process.stdout.write('private-live-ready\r\n')
-process.stdin.on('data', bytes => process.stdout.write('private-echo:'+bytes.toString()+'\r\n'))
-`)
-          const quote = (text: string) => "'" + text.replaceAll("'", "'\\''") + "'"
-          const terminal = await runtime.launchTerminal({ hostId: 'local', workspacePath: config.workspaces[0]!.path,
-            shellCommand: 'exec ' + quote(nodeExecutable) + ' ' + quote(executable) }, config)
-          assert.equal(terminal.kind, 'terminal')
-          privateTerminal = { id: terminal.id, runId: terminal.control.run.runId }
-        }
+        if (terminalNeighbor) privateTerminal = await startTerminalNeighbor({ runtime, config, privateRoot, nodeExecutable })
         const value = { sessionId: session.id, runId: session.control.run.runId, nativeSessionId: stored.nativeHandle!.sessionId,
-          ...(privateTerminal ? { terminal: privateTerminal } : {}) }
+          ...(privateTerminal ? { terminal: privateTerminal.reference } : {}) }
         await fs.writeFile(path.join(privateRoot, 'ids.json'), JSON.stringify(value))
         const seeded = scene === 'surfaces' ? surfaceRows() : sceneRows(scene), preparationStarted = performance.now()
         const lastTurn = seeded.findLast((row: any) => row.type === 'event_msg' && row.payload?.type === 'task_complete') as
@@ -303,7 +289,8 @@ app.whenReady().then(async () => {
       return {text:selection.toString(),top:window.readingSelectedTop,source:body.closest('[data-message-source-key]')?.dataset.messageSourceKey}; })()`)
   const taskMetrics = async () => {
     const { metrics } = await win.webContents.debugger.sendCommand('Performance.getMetrics')
-    const names = ['Timestamp', 'TaskDuration', 'ScriptDuration', 'LayoutDuration', 'RecalcStyleDuration', 'DevToolsCommandDuration']
+    const names = ['Timestamp', 'TaskDuration', 'ScriptDuration', 'LayoutDuration', 'RecalcStyleDuration',
+      'DevToolsCommandDuration', 'LayoutCount', 'RecalcStyleCount']
     const values = Object.fromEntries(metrics.filter((item: { name: string }) => names.includes(item.name))
       .map((item: { name: string; value: number }) => [item.name, item.value]))
     assert.ok(Number.isFinite(values.TaskDuration) && Number.isFinite(values.Timestamp), 'Original Renderer task timing is available')
@@ -396,34 +383,12 @@ app.whenReady().then(async () => {
     }
     await sample('first-readable'); await shot('current')
     if (terminalNeighbor) {
-      const before = await ready(`(() => {
-        const current=window.liveTerminalProof?.();
-        return current?.buffer.base > 200 && current.buffer.tail==='private-live-ready' && current;
-      })()`)
-      assert.equal(before.buffer.viewport, before.buffer.base)
-      await click(`document.querySelector('[data-workbench-region-id="terminal-region"] .xterm-screen')`)
-      await ready('liveTerminalProof().focused')
-      const wheel = (bounds, deltaY) => win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',
-        { type: 'mouseWheel', x: bounds.x, y: bounds.y, deltaX: 0, deltaY })
-      await wheel(before.bounds, -420)
-      const up = await ready(`(() => { const state=liveTerminalProof(); return state.buffer.viewport < ${before.buffer.viewport} && state })()`)
-      assert.match(up.buffer.top, /^private-history-/u)
-      assert.ok(up.focused)
-      await wheel(before.bounds, 420)
-      await ready('liveTerminalProof().buffer.viewport===liveTerminalProof().buffer.base')
-      await win.webContents.debugger.sendCommand('Input.insertText', { text: terminalInput })
-      const after = await ready(`(() => {
-        const current=liveTerminalProof();
-        return current.buffer.tail==='private-echo:${terminalInput}' && current;
-      })()`)
-      assert.equal(after.sameTerminal, true)
-      assert.ok(after.focused)
-      assert.deepEqual(after.grid, before.grid)
-      const live = (await core.listRuns()).find(run => run.runId === privateTerminal!.runId)
-      assert.equal(live?.state, 'running')
-      assert.deepEqual(terminalCalls.filter(call => call.kind === 'write'), [{ kind: 'write', runId: privateTerminal!.runId, bytes: 10, source: 'user' }])
-      result.nativeTerminal = { before, up, after, live, calls: terminalCalls }
-      await shot('terminal-neighbor')
+      assert.ok(privateTerminal)
+      result.nativeTerminal = await exerciseTerminalNeighbor({ win, read, ready, until, click, shot, taskMetrics, calls: terminalCalls,
+        core, runtime, config, privateTerminal, nodeExecutable, append: () => {
+          const row = appendRow(scene, 'terminal-neighbor')
+          return append([row]).then(() => row.payload.id)
+        } })
       result.passed = true
       return
     }
@@ -553,6 +518,7 @@ app.whenReady().then(async () => {
     result.failure = { name: error.name, message: error.message, stack: error.stack, ...(error.details ? { details: error.details } : {}) }
     await runMobileOnce().catch(error => { result.mobileFailure = { name: error.name, message: error.message } })
     if (win && !win.isDestroyed()) {
+      if (terminalNeighbor) result.terminalFailureState = await read('window.liveTerminalProof?.()').catch(() => null)
       result.atFailure = await read('({state:window.readingProof?.state(),ui:window.readingProof?.inspect(),errors:window.readingProof?.errors,body:document.body.innerText.slice(0,5000)})').catch(() => null)
       await shot('failure').catch(() => {})
     }
