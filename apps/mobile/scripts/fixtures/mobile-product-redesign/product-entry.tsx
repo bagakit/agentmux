@@ -26,6 +26,8 @@ import '@agentmux/client-ui/styles.css'
 
 type Call = { sequence: number; observedAt: number; method: string; params: unknown }
 const responsiveFixture = new URLSearchParams(location.search).get('responsive-primary-workfaces') === '1'
+const exactFirstReadFixture = new URLSearchParams(location.search).get('exact-first-read') === '1'
+const exactFirstReadFresh = exactFirstReadFixture && localStorage.getItem('mobile-product-fixture-initialized') !== 'true'
 const composerFixture = new URLSearchParams(location.search).get('mote-composer') === '1'
 const composerFresh = composerFixture && localStorage.getItem('mobile-product-fixture-initialized') !== 'true'
 let composerRuntimeKnown = !composerFresh
@@ -169,11 +171,30 @@ const terminalAttachment = (id: string) => {
 }
 function publishClientEvent(event: AgentMuxClientEvent) {
   for (const listener of listeners) listener(event)
-  if (event.type === 'agent-session' || event.type === 'connection-state' || event.type === 'agent-error') {
+  if (event.type === 'agent-session' || event.type === 'connection-state' || event.type === 'agent-error' || event.type === 'session-observation-state') {
     for (const listener of statusListeners) listener(event)
   }
 }
+let exactDirectory: ReturnType<AgentMuxHostedClient['sessionObservation']> = exactFirstReadFresh
+  ? { state: 'unconfirmed', hasSnapshot: false } : { state: 'ready', hasSnapshot: true }
+let exactDirectoryEmpty = false
+let releaseExactDirectory: (() => void) | null = null
+let exactDirectoryConnecting: Promise<void> | null = null
+const publishExactDirectory = () => publishClientEvent({ type: 'session-observation-state', observation: structuredClone(exactDirectory),
+  evidence: { source: 'agentmux', observedAt: Date.now() } })
+const requireExactDirectory = () => {
+  if (exactFirstReadFixture && !exactDirectory.hasSnapshot) throw Object.assign(new Error('The complete controlled directory is unconfirmed.'), { code: 'HOSTED_SESSION_OBSERVATION_UNCONFIRMED' })
+}
 const client = {
+  sessionObservation: () => structuredClone(exactDirectory),
+  sessionObservationScope: () => null,
+  connect: async () => {
+    record('sdk.connect')
+    if (!exactFirstReadFixture) return
+    // The original SDK retains unavailable and its prior snapshot while retry
+    // waits; it does not fabricate a new unconfirmed/empty publication.
+    await (exactDirectoryConnecting ??= new Promise<void>(resolve => { releaseExactDirectory = resolve }))
+  },
   readAgentSession: async (id: string) => {
     record('sdk.readAgentSession', { id })
     if ((missingSessionMetadata || ['unconfirmed', 'parallel'].includes(conversationStatusScene)) && id === main.agentSessionId) throw Error('Original selected Session metadata unavailable [METADATA_POINT_READ_FAILED]')
@@ -186,14 +207,14 @@ const client = {
       state: ['retired', 'retired-reading'].includes(conversationStatusScene) && input.agentSessionId === main.agentSessionId ? 'retired' as const : 'active' as const,
       ...(['retired', 'retired-reading'].includes(conversationStatusScene) ? { retiredAt: 100 } : {}) }]
   },
-  agentSession: (id: string) => { record('sdk.agentSession', { id }); if ((missingSessionMetadata || conversationStatusScene !== 'active') && id === main.agentSessionId) throw Error('Original selected Session metadata unavailable'); const found = sessions.find(session => session.agentSessionId === id); if (!found) throw Error('Unknown original fixture Session'); return found },
-  agentSessions: () => { record('sdk.agentSessions'); return structuredClone(sessions) },
+  agentSession: (id: string) => { record('sdk.agentSession', { id }); requireExactDirectory(); if (exactFirstReadFixture && exactDirectoryEmpty) throw Error('The original Session is absent from this directory snapshot'); if ((missingSessionMetadata || conversationStatusScene !== 'active') && id === main.agentSessionId) throw Error('Original selected Session metadata unavailable'); const found = sessions.find(session => session.agentSessionId === id); if (!found) throw Error('Unknown original fixture Session'); return found },
+  agentSessions: () => { record('sdk.agentSessions'); requireExactDirectory(); return structuredClone(exactFirstReadFixture && exactDirectoryEmpty ? [] : sessions) },
   runtimeIdentity: () => ({ hostId: 'host-original', instanceId: 'runtime-original', buildIdentity: 'fixture', protocolVersion: 1, processId: null }),
   reattachAgent: async (id: string) => { record('sdk.reattachAgent', { id }); return { session: client.agentSession(id), attachment: terminalAttachment(id) } },
   readRunReplay: async (run: { runId: string }) => { record('sdk.readRunReplay', { runId: run.runId }); return terminalAttachment(sessions.find(value => value.run.runId === run.runId)?.agentSessionId ?? '') },
   releaseRunAttachment: async (run: { runId: string }) => { record('sdk.releaseRunAttachment', { runId: run.runId }) },
   resizeAgent: async (id: string, run: { runId: string }, cols: number, rows: number) => { record('sdk.resizeAgent', { id, runId: run.runId, cols, rows }); throw Error('The captured terminal never resizes the Mac grid') },
-  catalog: () => { record('sdk.catalog'); return __AGENTMUX_MOBILE_PROVIDER_CATALOG__ },
+  catalog: () => { record('sdk.catalog'); requireExactDirectory(); return __AGENTMUX_MOBILE_PROVIDER_CATALOG__ },
   onEvent: (listener: (event: AgentMuxClientEvent) => void) => { listeners.add(listener); record('sdk.onEvent'); return () => { listeners.delete(listener); record('sdk.releaseEvent') } },
   onStatusEvent: (listener: (event: AgentMuxClientEvent) => void) => { statusListeners.add(listener); record('sdk.onStatusEvent'); return () => { statusListeners.delete(listener); record('sdk.releaseStatusEvent') } },
   runtimeOwnerIdentity: () => composerFixture && !composerRuntimeKnown ? null : ({ runtimeId: 'runtime-original', ownerInstanceId: 'owner-original', availability: connected ? 'connected' : 'disconnected' }),
@@ -320,6 +341,14 @@ const client = {
     record(method, params)
     if (composerFixture && (method === 'space.ls' || method === 'space.mote.dialogue.read')) await composerReads
     if (!connected) throw Error('原 Host 连接中断；原对象、历史与草稿保留。')
+    if (exactFirstReadFixture && method === 'space.ls') {
+      const observed = structuredClone(catalog)
+      if (!exactDirectory.hasSnapshot) delete observed.agentPresentation
+      // Provider metadata belongs to the independently observed Session directory.
+      for (const row of observed.agentPresentation ?? []) delete row.providerId
+      if (exactDirectoryEmpty) observed.agentPresentation = []
+      return { catalog: observed }
+    }
     if (method === 'space.ls' && moteDialogueCapture && __AGENTMUX_MOBILE_SETUP_RETENTION__) {
       const source = moteDialogueCapture.facts(), fact = catalog.motePresentation!.find(value => value.spaceId === source.target.spaceId)!
       Object.assign(fact, { quickMode: { status: 'saved', version: source.page.main.documentRevision, defaults: source.defaults }, conversation: source.page.main.current })
@@ -401,13 +430,15 @@ const client = {
   }
 } as unknown as AgentMuxHostedClient
 if (!localStorage.getItem('mobile-product-fixture-initialized')) {
-  localStorage.setItem('agentmux-mobile-home', densityWorkfacesFixture ? 'focus' : 'mote')
-  if (responsiveFixture || densityWorkfacesFixture || composerFixture) {
+  localStorage.setItem('agentmux-mobile-home', densityWorkfacesFixture || exactFirstReadFixture ? 'focus' : 'mote')
+  if (responsiveFixture || densityWorkfacesFixture || composerFixture || exactFirstReadFixture) {
     await getDeviceWorkface().replaceBackup(emptyDeviceWorkface())
     await getDeviceWorkface().confirmHost({ origin: 'http://127.0.0.1', hostId: 'relay-original' })
   } else getDeviceWorkface().confirmHost({ origin: 'http://127.0.0.1', hostId: 'relay-original' })
   localStorage.setItem('mobile-product-fixture-initialized', 'true')
 }
+if (exactFirstReadFresh) await getDeviceWorkface().updatePresentation({ selectedSessionId: result.agentSessionId, hostUrl: '', panel: 'conversation' },
+  { primary: 'focus', showSession: true, showGoalWork: false, identity: { name: '实验建议', project: '并行项目' }, profile: null })
 if (composerFresh) {
   const fact = catalog.motePresentation!.find(value => value.spaceId === 'mote-original')!
   await getDeviceWorkface().updatePresentation({ selectedSessionId: main.agentSessionId, hostUrl: '', panel: 'conversation' },
@@ -451,6 +482,17 @@ function Scene() {
   const [webUpdateScene, setWebUpdateScene] = useState(false)
   const [connectScene, setConnectScene] = useState<MobileConnection | null>(null)
   Object.assign(window, { mobileProductScene: {
+    acceptExactDirectory: (empty = false) => {
+      exactDirectoryEmpty = empty
+      exactDirectory = { state: 'ready', hasSnapshot: true }
+      if (!empty) for (const session of sessions) publishClientEvent({ type: 'agent-session', session: structuredClone(session) })
+      publishExactDirectory(); releaseExactDirectory?.(); releaseExactDirectory = null; exactDirectoryConnecting = null
+    },
+    failExactDirectory: () => {
+      exactDirectory = { state: 'unavailable', hasSnapshot: exactDirectory.hasSnapshot,
+        diagnostic: { code: 'CONTROL_UNAVAILABLE', message: '原会话目录读取暂未确认，已读目录和对话保留。' } }
+      publishExactDirectory()
+    },
     releaseComposerReads: () => { composerRuntimeKnown = true; releaseComposerReads?.(); releaseComposerReads = null },
     prepareCompactNavigation: () => {
       const names = ['Sample Project 业务协作与代码审查', '研究材料与证据核对成员', '原上下文中的实验建议', '视觉方向与实现核对']
@@ -709,6 +751,7 @@ function Scene() {
     releaseFileUpload: () => { releaseFileUpload?.() },
     appearanceReady: () => Boolean(appearanceSubscriber),
     facts: () => ({ calls, dialogue: moteDialogueCapture?.facts(), record: getDeviceWorkface().snapshot().record, directoryComparisons, directoryFacts: catalog.regions.length + catalog.locations.length + catalog.spaces.length,
+      exactFirstRead: exactFirstReadFixture ? { observation: structuredClone(exactDirectory), empty: exactDirectoryEmpty, retryPending: exactDirectoryConnecting !== null } : null,
       densityFixture: densityWorkfacesFixture ? { goals: densityGoals, sessions, catalog } : null,
       directoryScope: { sessions: sessions.length, regions: catalog.regions.length, locations: catalog.locations.length, spaces: catalog.spaces.length, motes: catalog.spaces.filter(owner => owner.kind === 'mote').length },
       menuAgentName, expectedReply: ordinaryReply, auxiliaryRecords: auxiliaryDensityScene ? auxiliaryDensityTimeline(main) : null, copiedTexts, joinedNotice, controlledCopy: agentMenuScene || joinedNotice !== null, controlledSdk: true, physicalPhone: false,
@@ -716,7 +759,7 @@ function Scene() {
   } })
   if (connectScene) return <MobileApp key={'connect-' + connectScene.state + String(connectScene.paired)} client={null} connection={connectScene} platform={platform}
     connectionPanel={connectScene.paired === false ? undefined : connectScene.state === 'unavailable' ? <><p>请核对 Mac 的连接与授权，修复后重新检查。</p><button type="button">重新检查连接</button></> : <p>连接会自动恢复。Mac 和手机保持在同一局域网即可。</p>} />
-  const app = <MobileApp key={densityMount} restoreWorkface={restoreResponsiveWorkface || composerFixture} client={unconfirmedClient ? null : client} connection={connected ? { state: 'connected', message: '已连接原 Host', ...(conversationStatusScene === 'parallel' ? { issue: '原连接观察暂未确认 [CONNECTION_OBSERVATION_FAILED]' } : {}) } : { state: 'disconnected', message: '连接中断；原工作面与草稿保留。' }} platform={platform} webObservation={webUpdateScene ? webUpdateObservation : null} />
+  const app = <MobileApp key={densityMount} restoreWorkface={restoreResponsiveWorkface || composerFixture || exactFirstReadFixture} client={unconfirmedClient ? null : client} connection={connected ? { state: 'connected', message: '已连接原 Host', ...(conversationStatusScene === 'parallel' ? { issue: '原连接观察暂未确认 [CONNECTION_OBSERVATION_FAILED]' } : {}) } : { state: 'disconnected', message: '连接中断；原工作面与草稿保留。' }} platform={platform} webObservation={webUpdateScene ? webUpdateObservation : null} />
   return webUpdateScene ? <MobileWebUpdateSafetyProvider verifyConnection={verifyWebUpdateConnection}>{app}</MobileWebUpdateSafetyProvider> : app
 }
 createRoot(document.getElementById('root')!).render(<Scene />)

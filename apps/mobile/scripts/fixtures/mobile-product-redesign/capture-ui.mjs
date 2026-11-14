@@ -11,7 +11,7 @@ import { bundleIdentityRuntime } from '../../../../../packages/identity/scripts/
 const fixture = import.meta.dirname, root = path.resolve(fixture, '../../../../..')
 const require = createRequire(path.join(root, 'apps/desktop/package.json'))
 const { build } = createRequire(require.resolve('vite'))('esbuild')
-const directory = path.join(root, process.argv.includes('--density-workfaces') ? `.tmp/mobile-workface-architecture/density-workfaces/renderer-${randomUUID()}` : `.tmp/mobile-product-redesign/renderer-${randomUUID()}`), compiled = path.join(directory, 'compiled')
+const directory = path.join(root, process.argv.includes('--exact-first-read') ? `.tmp/mobile-loading-review/exact-first-read-capture/renderer-${randomUUID()}` : process.argv.includes('--density-workfaces') ? `.tmp/mobile-workface-architecture/density-workfaces/renderer-${randomUUID()}` : `.tmp/mobile-product-redesign/renderer-${randomUUID()}`), compiled = path.join(directory, 'compiled')
 
 await fs.mkdir(compiled, { recursive: true }); await fs.mkdir(path.join(directory, 'userData'))
 const receipt = { passed: false, captureOnly: true, captureSubset: 'mobile-product-redesign', aestheticReview: 'not-performed', source: {}, images: {},
@@ -233,7 +233,7 @@ try {
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="product-entry.css"></head><body><div id="root"></div><script type="module" src="product-entry.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  const subset = ['density-workfaces', 'mote-composer', 'responsive-primary-workfaces', 'compact-navigation', 'wide-agent-workface', 'auxiliary-density', 'agent-locations', 'conversation-status', 'brand-attention', 'brand-refinement', 'chrome-motion', 'terminal-restore', 'mature-shell', 'mote-start', 'mote-main-retention', 'quiet-run-status', 'directory-notices', 'mote-discussion-restore', 'mote-main-setup', 'mote-dialogue', 'creation-update', 'mote-notice-join', 'mote-host-boundaries', 'mote-cooperation', 'creation-recovery', 'polish-followup', 'floating-tools', 'attachment-upload-exit', 'attachment-selection', 'focus-state', 'conversation-spacing', 'web-update', 'goal-recovery', 'goal-exit', 'chat-start', 'conversation-controls', 'conversation-attachments', 'conversation-density-hit', 'conversation-density', 'agent-menu-notice', 'agent-menu', 'mote-home', 'spatial-resources', 'commands-entry', 'notice-light', 'notice-center', 'parity-final', 'baseline', 'navigation', 'source-recovery', 'input-history'].find(value => process.argv.includes('--' + value))
+  const subset = ['exact-first-read', 'density-workfaces', 'mote-composer', 'responsive-primary-workfaces', 'compact-navigation', 'wide-agent-workface', 'auxiliary-density', 'agent-locations', 'conversation-status', 'brand-attention', 'brand-refinement', 'chrome-motion', 'terminal-restore', 'mature-shell', 'mote-start', 'mote-main-retention', 'quiet-run-status', 'directory-notices', 'mote-discussion-restore', 'mote-main-setup', 'mote-dialogue', 'creation-update', 'mote-notice-join', 'mote-host-boundaries', 'mote-cooperation', 'creation-recovery', 'polish-followup', 'floating-tools', 'attachment-upload-exit', 'attachment-selection', 'focus-state', 'conversation-spacing', 'web-update', 'goal-recovery', 'goal-exit', 'chat-start', 'conversation-controls', 'conversation-attachments', 'conversation-density-hit', 'conversation-density', 'agent-menu-notice', 'agent-menu', 'mote-home', 'spatial-resources', 'commands-entry', 'notice-light', 'notice-center', 'parity-final', 'baseline', 'navigation', 'source-recovery', 'input-history'].find(value => process.argv.includes('--' + value))
   if (['brand-attention', 'brand-refinement'].includes(subset)) for (const name of ['brand-attention.cjs', ...(subset === 'brand-refinement' ? ['brand-goals.cjs'] : [])]) receipt.source[path.relative(root, path.join(fixture, name))] = sha(await fs.readFile(path.join(fixture, name)))
   if (subset === 'mote-composer') receipt.source[path.relative(root, path.join(fixture, 'mote-composer.cjs'))] = sha(await fs.readFile(path.join(fixture, 'mote-composer.cjs')))
   if (subset === 'agent-locations') receipt.source[path.relative(root, path.join(fixture, 'agent-locations.cjs'))] = sha(await fs.readFile(path.join(fixture, 'agent-locations.cjs')))
@@ -241,6 +241,7 @@ try {
   if (subset === 'chrome-motion') receipt.source[path.relative(root, path.join(fixture, 'chrome-motion.cjs'))] = sha(await fs.readFile(path.join(fixture, 'chrome-motion.cjs')))
   if (subset === 'mote-main-retention') receipt.source[path.relative(root, path.join(fixture, 'mote-main-retention.cjs'))] = sha(await fs.readFile(path.join(fixture, 'mote-main-retention.cjs')))
   if (['chat-start', 'goal-recovery', 'terminal-restore'].includes(subset)) for (const name of ['restart-chrome.cjs', ...(subset === 'terminal-restore' ? ['terminal-restore.cjs'] : [])]) receipt.source[path.relative(root, path.join(fixture, name))] = sha(await fs.readFile(path.join(fixture, name)))
+  if (subset === 'exact-first-read') receipt.source[path.relative(root, path.join(fixture, 'exact-first-read.cjs'))] = sha(await fs.readFile(path.join(fixture, 'exact-first-read.cjs')))
   if (subset === 'density-workfaces') receipt.source[path.relative(root, path.join(fixture, 'density-workfaces.cjs'))] = sha(await fs.readFile(path.join(fixture, 'density-workfaces.cjs')))
   if (subset === 'responsive-primary-workfaces') receipt.source[path.relative(root, path.join(fixture, 'responsive-primary-workfaces.cjs'))] = sha(await fs.readFile(path.join(fixture, 'responsive-primary-workfaces.cjs')))
   if (subset === 'compact-navigation') for (const name of ['compact-navigation.cjs', 'wide-agent-workface.cjs']) receipt.source[path.relative(root, path.join(fixture, name))] = sha(await fs.readFile(path.join(fixture, name)))
@@ -248,7 +249,7 @@ try {
   if (subset) receipt.captureSubset = subset
   if (process.argv.includes('--positions-only')) receipt.captureMode = 'positions-only'
   let productPage = path.join(compiled, 'index.html')
-  if (['responsive-primary-workfaces', 'density-workfaces'].includes(subset)) {
+  if (['responsive-primary-workfaces', 'density-workfaces', 'exact-first-read'].includes(subset)) {
     // Knowledge drafts use the same valid local HTTP origin across both private OS processes.
     // file:// has an opaque origin and cannot exercise the actual persisted draft contract.
     privateServer = createServer(async (request, response) => {
@@ -265,7 +266,7 @@ try {
   }
   receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'product-main.cjs'), productPage, directory, ...(subset ? [subset] : []), ...(process.argv.includes('--positions-only') ? ['positions-only'] : []), ...(process.argv.includes('--quiet-status-details-only') ? ['details-only'] : []), ...(process.argv.includes('--mote-start-visual-fixes') ? ['visual-fixes'] : [])],
     { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
-  if (['mote-composer', 'responsive-primary-workfaces', 'compact-navigation', 'wide-agent-workface', 'spatial-resources', 'chat-start', 'goal-recovery', 'terminal-restore', 'mote-discussion-restore'].includes(subset) && !process.argv.includes('--positions-only') && JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8')).passed) {
+  if (['exact-first-read', 'mote-composer', 'responsive-primary-workfaces', 'compact-navigation', 'wide-agent-workface', 'spatial-resources', 'chat-start', 'goal-recovery', 'terminal-restore', 'mote-discussion-restore'].includes(subset) && !process.argv.includes('--positions-only') && JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8')).passed) {
     receipt.restartProcess = await runProbeProcess(require('electron'), [path.join(fixture, 'product-main.cjs'), productPage, directory, subset, 'restore'],
       { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
     receipt.restoredRenderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result-restored.json'), 'utf8'))
@@ -300,5 +301,10 @@ if (privateServer) await new Promise(resolve => privateServer.close(resolve))
 receipt.compiled = Object.fromEntries(await Promise.all((await fs.readdir(compiled)).map(async file => [file, sha(await fs.readFile(path.join(compiled, file)))])))
 await fs.writeFile(path.join(directory, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
 await fs.rm(compiled, { recursive: true, force: true })
+if (receipt.captureSubset === 'exact-first-read' && receipt.process?.exitConfirmed === true && receipt.restartProcess?.exitConfirmed === true) {
+  await fs.rm(path.join(directory, 'userData'), { recursive: true, force: true })
+  receipt.profileCleanup = { removed: true, reason: 'Both private OS processes confirmed exit; original raw evidence retained.' }
+  await fs.writeFile(path.join(directory, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
+}
 console.log(path.relative(root, path.join(directory, 'receipt.json')))
 if (!receipt.passed) { console.error(receipt.error); process.exitCode = 1 }
