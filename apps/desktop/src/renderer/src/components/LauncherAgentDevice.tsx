@@ -7,6 +7,7 @@ import { isScratchWorkspaceId } from '../../../shared/contracts'
 import { useAppStore, type LauncherExecutionSelection } from '../store'
 import { agentWorkModeLabel, launcherWorkPlacement, workReferenceHostId, workHostLabel } from '../lib/agent-work-mode'
 import { AgentWorkModeSetup } from './AgentWorkModeSetup'
+import { AgentWorkModeBadge } from './AgentWorkModeBadge'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const ModeIcon = semanticIconComponent('object.remote-execution')
@@ -46,20 +47,19 @@ export function LauncherAgentDevice({ hosts, workspace, agentWorkspace, explicit
   const selectedAgent = explicitAgentWorkspaceId === undefined ? agentWorkspace ?? workspace : agentWorkspace
   const placement = launcherWorkPlacement(workspace, selectedAgent,
     isScratchWorkspaceId(workspace.id) ? workReferenceHostId(hosts) : workspace.hostId)
-  const arrangement = placement.agentHostId === null ? 'Agent location unknown'
-    : placement.agentHostId === placement.projectHostId ? 'Project device' : 'Outpost'
   if (isScratchWorkspaceId(workspace.id)) return <span className="launcher-work-arrangement" title="This context keeps its original project and Agent. Split tools require registered project folders.">
     <ModeIcon size={12} /><span>{agentWorkModeLabel(placement.mode)}</span>{onEditArrangement ? <button className="agent-work-text-action" type="button" onClick={onEditArrangement}>Remote work</button> : null}
   </span>
   return <Dialog.Root modal={false} open={open && active} onOpenChange={setOpen}>
     <span className="launcher-work-arrangement"><Dialog.Trigger asChild><button ref={setAnchor} type="button" className="launcher-work-arrangement__trigger" disabled={disabled || !active}
-      aria-label="Agent location" title={`Agent on ${workHostLabel(hosts, placement.agentHostId)} · Project on ${workHostLabel(hosts, placement.projectHostId)}`}><ModeIcon size={13} /><span>{arrangement}</span><DownIcon size={11} /></button></Dialog.Trigger></span>
+      aria-label="Agent location" title={`Agent on ${workHostLabel(hosts, placement.agentHostId)} · Project on ${workHostLabel(hosts, placement.projectHostId)}`}>
+      <AgentWorkModeBadge placement={placement} hosts={hosts} showLocal hideTooltip={open || !active} /><DownIcon size={11} /></button></Dialog.Trigger></span>
     <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Content ref={attach} className="launcher-work-arrangement__dialog" style={{ visibility: 'hidden' }}
         onOpenAutoFocus={event => { event.preventDefault(); surface.current?.focus({ preventScroll: true }) }}>
         <Dialog.Title>Choose the Agent’s device</Dialog.Title>
-        <Dialog.Description>Keep this project in its original location. Choose where the Agent runs, then launch with your original task.</Dialog.Description>
-        <AgentWorkModeSetup config={{ hosts, workspaces }} active={active && open} allowLocal actionLabel="Apply arrangement" disabled={disabled}
+        <Dialog.Description>Choose a device to run the Agent for this project.</Dialog.Description>
+        <AgentWorkModeSetup config={{ hosts, workspaces }} active={active && open} allowLocal actionLabel="Apply" disabled={disabled}
           fixedResourceWorkspaceId={workspace.id}
           initialSelection={{ resourceWorkspaceId: workspace.id, agentWorkspaceId: explicitAgentWorkspaceId ?? null }}
           onCancel={() => setOpen(false)} onApply={selection => { const applied = onSelect(selection); if (applied) setOpen(false); return applied }} />

@@ -2,9 +2,10 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useMemo, useRef } from 'react'
 import type { AppConfig } from '../../../shared/contracts'
 import { useAppStore } from '../store'
-import { agentWorkPlacement, workHostLabel, workReferenceHostId, type AgentWorkSource } from '../lib/agent-work-mode'
+import { agentWorkPlacement, workHostLabel, workReferenceHostId, type AgentWorkSource, type launcherWorkPlacement } from '../lib/agent-work-mode'
 import { hostConnectionPresentation } from '../lib/host-connection-presentation'
 import { useWorkbenchNameTooltip, useWorkbenchTooltipFocus } from './WorkbenchNameTooltip'
+import { AgentExecutionRelation } from './AgentExecutionRelation'
 import './agent-work-mode.css'
 
 const ProjectIcon = semanticIconComponent('object.folder')
@@ -12,14 +13,18 @@ const AgentIcon = semanticIconComponent('object.agent')
 const NO_HOSTS: AppConfig['hosts'] = []
 
 /** A reading of original addresses. It never checks a connection or changes a Session. */
-export function AgentWorkModeBadge({ source, hosts: suppliedHosts }: {
+export function AgentWorkModeBadge({ source, placement: suppliedPlacement, hosts: suppliedHosts, showLocal = false, hideTooltip = false }: {
   source?: AgentWorkSource | undefined
+  placement?: ReturnType<typeof launcherWorkPlacement> | undefined
   hosts?: AppConfig['hosts'] | undefined
   embedded?: boolean
+  showLocal?: boolean
+  hideTooltip?: boolean
 }) {
   const configured = useAppStore(state => suppliedHosts ? NO_HOSTS : state.config?.hosts ?? NO_HOSTS)
   const hosts = suppliedHosts ?? configured
-  const placement = source ? agentWorkPlacement(source, workReferenceHostId(hosts)) : null
+  const reference = workReferenceHostId(hosts)
+  const placement = suppliedPlacement ?? (source ? agentWorkPlacement(source, reference) : null)
   const projectId = placement?.projectHostId ?? null, agentId = placement?.agentHostId ?? null
   const projectTransport = useAppStore(state => projectId ? state.hostTransports?.[projectId] : undefined)
   const agentTransport = useAppStore(state => agentId ? state.hostTransports?.[agentId] : undefined)
@@ -39,15 +44,14 @@ export function AgentWorkModeBadge({ source, hosts: suppliedHosts }: {
     <span className="agent-work-detail__access"><small>Access from this device</small>{access.map(item => <span key={item.id}><strong>{item.label}</strong><span>{item.summary}</span>{item.source ? <small>{item.source}</small> : null}</span>)}</span>
     </span>
   }, [projectId, agentId, projectLabel, agentLabel, placement?.projectPath, placement?.agentPath, route, hosts, projectTransport, agentTransport])
-  const tooltip = useWorkbenchNameTooltip('Run mode', detail, mode === 'local')
+  const suppressed = hideTooltip || mode === 'local' && !showLocal
+  const tooltip = useWorkbenchNameTooltip('Run mode', detail, suppressed)
   const element = useRef<HTMLSpanElement>(null)
-  const focusOwner = useWorkbenchTooltipFocus(element, tooltip, mode === 'local', JSON.stringify([projectId, agentId]))
-  if (mode === 'local') return null
+  const focusOwner = useWorkbenchTooltipFocus(element, tooltip, suppressed, JSON.stringify([projectId, agentId]))
+  if (mode === 'local' && !showLocal) return null
   return <><span ref={element} className="agent-work-mode-badge" data-work-mode={mode} data-execution-relation={relation}
     data-agent-host-id={agentId ?? ''} data-project-host-id={projectId ?? ''} aria-label={`Run mode; ${description}`}
-    tabIndex={focusOwner ? undefined : 0} {...tooltip.props}>
-    <span className="agent-work-mode-badge__end" data-execution-role="project"><ProjectIcon size={12} aria-hidden="true" />{relation === 'same-device' ? null : <span>{projectLabel}</span>}</span>
-    <span className="agent-work-mode-badge__link" aria-label={route} data-path-state={relation}>{relation === 'unconfirmed' ? <span>?</span> : null}</span>
-    <span className="agent-work-mode-badge__end" data-execution-role="agent"><AgentIcon size={12} aria-hidden="true" /><span>{agentLabel}</span></span>
+    tabIndex={suppressed || focusOwner ? undefined : 0} {...tooltip.props}>
+    <AgentExecutionRelation projectLocal={projectId !== null && projectId === reference} agentLocal={agentId !== null && agentId === reference} relation={{ kind: relation }} />
   </span>{tooltip.content}</>
 }
