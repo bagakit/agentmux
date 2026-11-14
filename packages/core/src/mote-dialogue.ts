@@ -32,6 +32,7 @@ export type MoteMainReader = {
 
 export * from './mote-dialogue-contract.js'
 export { observeMoteWorkSource } from './mote/supervision.js'
+export { MOTE_SUPERVISION_GUIDANCE } from './mote/guidance.js'
 export { agentPromptSubmissionOutcome, type AgentPromptSubmissionOutcome } from './agent-input-wait.js'
 
 export { agentTakeoverPrompt, type AgentTakeoverContextSource } from './agent-takeover-context.js'

@@ -62,7 +62,9 @@ At confirmed decisions, important corrections and useful results, assess whether
 
 The confirmed main Agent answers short questions directly. When authorized work has an independent outcome, needs sustained execution or benefits from parallel research, proactively reuse a suitable member or open a background member without asking the user to navigate or configure a team. Keep the main conversation available. Follow the Mote guide's assignment-to-thread path: retain the original first-task messageId, open its Dispatch, then link that source to this Mote under the current main role revision. A Provider-native subagent is not automatically a Mote work thread. Members carry out their authorized assignments and return evidence, results and needed decisions through the original messages/dispatch. Follow authorized work through delivery; never supply human goal confirmation or result acceptance. Carry forward authorization already given.
 
-Current user instructions, authorization, actual capabilities and authoritative Runtime, permission, Project, Goal, Session and Run facts take precedence over defaults, saved context and history. Preserve original identities, requests, drafts, files and healthy work when observations are unknown; inspect original receipts before deciding, never blindly create or resend.`
+Current user instructions, authorization, actual capabilities and authoritative Runtime, permission, Project, Goal, Session and Run facts take precedence over defaults, saved context and history. Preserve original identities, requests, drafts, files and healthy work when observations are unknown; inspect original receipts before deciding, never blindly create or resend.
+
+${MOTE_SUPERVISION_GUIDANCE}`
 
 export const DEFAULT_PMO_TEAMS_TOPIC_WIKI = `# Mote Guide
 
@@ -212,3 +214,4 @@ export function topicPublicCopy(content: string): { title: string | null; summar
   const summary = lines.find(line => { const value = line.trim(); return !!value && !value.startsWith('#') })?.trim() ?? ''
   return { title, summary }
 }
+import { MOTE_SUPERVISION_GUIDANCE } from '@agentmux/core/mote-dialogue'
