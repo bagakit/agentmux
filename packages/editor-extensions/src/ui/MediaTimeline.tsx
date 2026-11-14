@@ -22,6 +22,7 @@ export function MediaTimeline({ bounds, fraction, buffered, label, valueText, cl
   clock(time: number): string
   /** A primary press starts a held scrub; the player decides what holding does. */
   onHold(): void
+  /** A scrub to a time: the pointed time at a press, then each value the range moves to. */
   onScrub(time: number): void
   /** Pointer release, cancel and lost capture, key release and blur each end a scrub; whichever comes first lands it. */
   onLand(): void
@@ -51,6 +52,9 @@ export function MediaTimeline({ bounds, fraction, buffered, label, valueText, cl
     event.currentTarget.setPointerCapture?.(event.pointerId)
     pressed.current = true
     onHold()
+    // A native range only grabs a thumb pressed on itself and keeps the old value until the pointer moves.
+    const pressedAt = pointAt(event.currentTarget, event.clientX)
+    if (pressedAt) onScrub(pressedAt.time)
   }
   const land = () => { pressed.current = false; onLand() }
   const style = { '--media-fill': `${fraction * 100}%`, '--media-buffered': `${buffered * 100}%`,
