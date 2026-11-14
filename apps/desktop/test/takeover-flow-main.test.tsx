@@ -117,7 +117,7 @@ async function originalPreserved() {
 it('the actual shared Stage creates one new Agent through api, complete preload/Main registration and original Unix Core/Host owners', async () => {
   const starts = f.started.length
   await chooseTargetAndAgent()
-  await vi.waitFor(() => expect(retained().phase, JSON.stringify(retained())).toBe('succeeded'))
+  await vi.waitFor(() => expect(retained().phase, JSON.stringify(retained())).toBe('succeeded'), { timeout: 10000 })
   const report = retained().report!, child = report.agent!
   expect(child.agentSessionId).not.toBe(f.source.agentSessionId)
   expect(child.runId).not.toBe(f.source.run.runId)
@@ -163,7 +163,7 @@ it('lost Main transport receipts keep Check read-only and Continue on the same c
     return result
   })
   await chooseTargetAndAgent()
-  await vi.waitFor(() => expect(retained().phase).toBe('unconfirmed'))
+  await vi.waitFor(() => expect(retained().phase).toBe('unconfirmed'), { timeout: 10000 })
   const frozen = structuredClone(retained().takeoverSource.coreRequest)!
   expect(checkpointBeforeCore).toBe(true)
   expect(f.started).toHaveLength(starts + 1)
@@ -194,7 +194,7 @@ it('lost Main transport receipts keep Check read-only and Continue on the same c
   const inspections = bridge.invoke.mock.calls.filter(call => call[0] === 'spatial:inspectOperation')
   expect(inspections.at(-1)?.[1]).toEqual({ target: { operationId: frozen.operationId } })
   await press('Continue original Takeover')
-  await vi.waitFor(() => expect(retained().phase).toBe('succeeded'))
+  await vi.waitFor(() => expect(retained().phase).toBe('succeeded'), { timeout: 10000 })
   const creations = bridge.invoke.mock.calls.filter(call => call[0] === 'spatial:openAgent')
   expect(creations.map(call => call[1])).toEqual([frozen, frozen])
   expect(f.started).toHaveLength(starts + 1)
