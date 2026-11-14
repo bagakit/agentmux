@@ -1,7 +1,7 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it, vi } from 'vitest'
 import { isSystemArtifactPath } from '@agentmux/client-ui/terminal-path-link'
-import { terminalPathLinkAtBufferCell } from '../src/renderer/src/lib/terminal-link-range'
+import { terminalLinkAtCell, terminalLinksAtRow } from '../src/renderer/src/lib/terminal-link-range'
 import { Terminal } from '@xterm/xterm'
 import { openTerminalFileLink } from '../src/renderer/src/lib/terminal-file-action'
 
@@ -25,9 +25,9 @@ describe('terminal system artifact paths', () => {
     const terminal = new Terminal({ allowProposedApi: true })
     try {
       await new Promise<void>(resolve => terminal.write('download release/AgentMux.dmg now', resolve))
-      const link = terminalPathLinkAtBufferCell(terminal.buffer.active, 13, 1, _hygiene_fixturePath("workspace"))
-      expect(link?.path).toBe('release/AgentMux.dmg')
-      expect(terminalPathLinkAtBufferCell(terminal.buffer.active, 1, 1, _hygiene_fixturePath("workspace"))).toBeNull()
+      const links = terminalLinksAtRow(terminal, 1, { workspaceRoot: _hygiene_fixturePath('workspace') })
+      expect(terminalLinkAtCell(links, 13, 1)).toMatchObject({ kind: 'file', file: { path: 'release/AgentMux.dmg' } })
+      expect(terminalLinkAtCell(links, 1, 1)).toBeNull()
     } finally { terminal.dispose() }
   })
 

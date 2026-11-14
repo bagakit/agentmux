@@ -2,7 +2,7 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 import { afterEach, describe, expect, it } from 'vitest'
 import { Terminal } from '@xterm/xterm'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
-import { terminalLinkAtCell, terminalLinksAtRow, terminalPathLinkAtBufferCell, terminalPathLinksInBuffer } from '../src/renderer/src/lib/terminal-link-range'
+import { terminalLinkAtCell, terminalLinksAtRow, terminalLinksInBuffer } from '../src/renderer/src/lib/terminal-link-range'
 
 const terminals: Terminal[] = []
 async function parsed(text: string, cols = 80, rows = 8) {
@@ -12,6 +12,16 @@ async function parsed(text: string, cols = 80, rows = 8) {
   return terminal
 }
 afterEach(() => { for (const terminal of terminals) terminal.dispose(); terminals.length = 0 })
+
+type Buffer = Parameters<typeof terminalLinksInBuffer>[0]
+function terminalPathLinksInBuffer(buffer: Buffer, y: number, workspaceRoot: string) {
+  return terminalLinksInBuffer(buffer, y, { workspaceRoot }).flatMap(({ target, range }) =>
+    target.kind === 'file' ? [{ link: target.file, range }] : [])
+}
+function terminalPathLinkAtBufferCell(buffer: Buffer, x: number, y: number, workspaceRoot: string) {
+  const target = terminalLinkAtCell(terminalLinksInBuffer(buffer, y, { workspaceRoot }), x, y)
+  return target?.kind === 'file' ? target.file : null
+}
 
 describe('published xterm buffer to file-link cell ranges', () => {
   for (const [prefix, start] of [['See ', 5], ['说明 ', 6], ['😀 ', 4], ['e\u0301 ', 3], ['a😀说明e\u0301 ', 10]] as const) {
@@ -41,16 +51,23 @@ describe('published xterm buffer to file-link cell ranges', () => {
     expect(terminalPathLinksInBuffer(separate.buffer.active, 1, _hygiene_fixturePath("repo")).map(item => item.link.path)).toEqual(['src/a.ts'])
     expect(terminalPathLinksInBuffer(separate.buffer.active, 2, _hygiene_fixturePath("repo"))).toEqual([])
   })
-  it('removes the actual early-wide-character padding while keeping the next cell coordinates correct', async () => {
+  it('preserves an independent following path after wide-character padding', async () => {
     const terminal = await parsed('1234567说明 src/x.ts', 8)
     const links = terminalPathLinksInBuffer(terminal.buffer.active, 3, _hygiene_fixturePath("repo"))
     expect(links).toHaveLength(1)
     expect(links[0]).toMatchObject({ link: { path: 'src/x.ts' }, range: { start: { x: 6, y: 2 }, end: { x: 5, y: 3 } } })
   })
-  it('does not glue paths across a wrapped row whose tail was erased into null cells', async () => {
+  it('does not open joined or split paths when a wrapped row tail was erased into null cells', async () => {
     const terminal = await parsed('src/a.tsXXXXsrc/b.ts\x1b[1;9H\x1b[K', 12)
-    expect(terminalPathLinksInBuffer(terminal.buffer.active, 1, _hygiene_fixturePath("repo")).map(item => item.link.path)).toEqual(['src/a.ts'])
-    expect(terminalPathLinksInBuffer(terminal.buffer.active, 2, _hygiene_fixturePath("repo")).map(item => item.link.path)).toEqual(['src/b.ts'])
+    expect(terminalPathLinksInBuffer(terminal.buffer.active, 1, _hygiene_fixturePath("repo"))).toEqual([])
+    expect(terminalPathLinksInBuffer(terminal.buffer.active, 2, _hygiene_fixturePath("repo"))).toEqual([])
+  })
+  it('keeps exact targets when the expanded or erased row contains a written boundary', async () => {
+    for (const text of ['src/a.ts XXXXsrc/b.ts\x1b[1;10H\x1b[K', 'src/a.tsXXXXX src/b.ts\x1b[1;9H\x1b[K']) {
+      const terminal = await parsed(text, 13)
+      const paths = [1, 2].flatMap(y => terminalPathLinksInBuffer(terminal.buffer.active, y, _hygiene_fixturePath('repo')))
+      expect(paths.map(item => item.link.path)).toEqual(['src/a.ts', 'src/b.ts'])
+    }
   })
   it('uses the actual buffer row after scrollback, with no work amplification from unrelated history', async () => {
     const reads: Array<{ history: number; lines: number; cells: number; links: number }> = []
@@ -93,6 +110,48 @@ describe('published xterm buffer to file-link cell ranges', () => {
 describe('terminal links use complete original targets', () => {
   const root = '/home/source/repo'
   const osc = (uri: string, label: string) => '\x1b]8;;' + uri + '\x07' + label + '\x1b]8;;\x07'
+
+  it('preserves provable neighbors and declines both file URI fragments after identical growth and VT erase', async () => {
+    const scope = { workspaceRoot: root }
+    const lead = 'src/before.ts 详见file://' + root + '/nested/'
+    const directoryTail = 'x'.repeat(80 - lead.length - 2)
+    const first = lead + directoryTail, second = 'suffix/src/%E5%AE%9E%E9%AA%8C.ts'
+    const url = 'https://example.test/exact'
+    const right = second + ' src/after.ts ' + osc(url, 'A')
+    const unchanged = await parsed(first + right, 80)
+    const target = `nested/${directoryTail}suffix/src/实验.ts`
+    expect(terminalLinkAtCell(terminalLinksAtRow(unchanged, 1, scope), 70, 1)).toMatchObject({ file: { path: target } })
+    expect(terminalLinkAtCell(terminalLinksAtRow(unchanged, 2, scope), 1, 2)).toMatchObject({ file: { path: target } })
+
+    unchanged.resize(94, 8)
+    const erased = await parsed(first + 'X'.repeat(14) + right + '\x1b7\x1b[1;81H\x1b[K\x1b8', 94)
+    const cells = (terminal: Terminal) => [0, 1].map(y => {
+      const row = terminal.buffer.active.getLine(y)!
+      return { wrapped: row.isWrapped, cells: Array.from({ length: row.length }, (_, x) => {
+        const cell = row.getCell(x)!
+        return [cell.getChars(), cell.getWidth(), cell.getCode(), cell.getFgColor(), cell.getBgColor()]
+      }) }
+    })
+    expect(cells(unchanged)).toEqual(cells(erased))
+    expect(unchanged.buffer.active.getLine(1)?.isWrapped).toBe(true)
+    expect(unchanged.buffer.active.getLine(0)?.getCell(79)?.getChars()).toBe('x')
+    expect(unchanged.buffer.active.getLine(0)?.getCell(80)?.getChars()).toBe('')
+    for (const terminal of [unchanged, erased]) {
+      const left = terminalLinksAtRow(terminal, 1, scope), right = terminalLinksAtRow(terminal, 2, scope)
+      expect(left.map(link => link.target)).toEqual([expect.objectContaining({ file: expect.objectContaining({ path: 'src/before.ts' }) })])
+      expect(right.map(link => link.target)).toEqual([
+        { kind: 'http', url }, expect.objectContaining({ file: expect.objectContaining({ path: 'src/after.ts' }) })
+      ])
+      expect(terminalLinkAtCell(left, 70, 1)).toBeNull()
+      expect(terminalLinkAtCell(right, 1, 2)).toBeNull()
+    }
+  })
+
+  it('does not use an erased wide-wrap-shaped cell as padding and join a target', async () => {
+    const terminal = await parsed('src/good.tX测试.ts\x1b[1;11H\x1b[K', 11)
+    expect(terminal.buffer.active.getLine(1)?.getCell(0)?.getWidth()).toBe(2)
+    expect(terminalLinksAtRow(terminal, 1, { workspaceRoot: root })).toEqual([])
+  })
 
   it('recovers a one-cell OSC link at the end of a row, including adjacent declarations', async () => {
     const file = 'file:///home/source/repo/src/%E4%B8%AD%20%3A42'
