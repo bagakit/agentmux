@@ -15,6 +15,7 @@ vi.mock('../src/renderer/src/components/TerminalView.js', () => ({ TerminalView:
 // Keep the original Focus/Attention request, without selecting a disabled duplicate in PTY paint.
 vi.mock('../src/renderer/src/components/SessionPane.js', () => ({ SessionPane: () => null }))
 
+import { AttentionRequestPanel } from '../src/renderer/src/components/AttentionRequestPanel.js'
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 import { api } from '../src/renderer/src/lib/api.js'
@@ -77,6 +78,31 @@ describe('Needs you request panel', () => {
     await act(async () => answer.click())
     expect(respondInteraction).toHaveBeenCalledExactlyOnceWith(session.control, { kind: 'question', requestId: 'request-a', outcome: 'answered', answers: [{ questionId: 'channel', optionId: 'stable' }] }, { operationId: expect.any(String), expectedRequest: request })
     expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('attention-a')
+  })
+
+  it.each(['saved', 'unknown'] as const)('keeps %s attached to the original request until the published operation confirms Native completion', async delivery => {
+    const respond = vi.spyOn(api.sessions, 'respondInteraction').mockImplementation(async (_control, response, intent) => ({
+      ...intent, agentSessionId: session.id, run: session.control.run, response, delivery,
+      nativeAdoption: 'unknown', nativeCompleted: request.evidence
+    }))
+    const inspect = vi.spyOn(api.sessions, 'inspectInteraction')
+    await act(async () => root.render(createElement(AttentionRequestPanel, { sessionId: session.id, onClose: vi.fn() })))
+    const named = (label: string) => [...container.querySelectorAll('button')].find(button => button.textContent?.trim() === label)!
+    await act(async () => named('Stable').click())
+    const [, response, intent] = respond.mock.calls[0]!
+    const exact = { ...intent, agentSessionId: session.id, run: session.control.run, response,
+      delivery: 'bytes-accepted' as const, inputByteRange: { startByte: 0, endByte: 1 }, nativeAdoption: 'unknown' as const,
+      nativeCompleted: request.evidence }
+    expect(container.textContent).toContain(delivery === 'saved' ? 'Answer saved' : 'Delivery unknown')
+    expect(container.querySelector('[data-request-id="request-a"]')?.getAttribute('data-completed')).toBe('false')
+    inspect.mockResolvedValueOnce({ ...exact, operationId: 'foreign-operation' }).mockResolvedValueOnce(exact)
+    await act(async () => named('Check original response').click())
+    expect(container.querySelector('[data-request-id="request-a"]')?.getAttribute('data-completed')).toBe('false')
+    await act(async () => named('Check original response').click())
+    expect(inspect.mock.calls).toEqual([[session.control, intent.operationId], [session.control, intent.operationId]])
+    expect(container.textContent).toContain('Original request completed')
+    expect(respond).toHaveBeenCalledOnce()
+    expect(useAppStore.getState().sessions[0]?.control).toEqual(session.control)
   })
 
   it.each([

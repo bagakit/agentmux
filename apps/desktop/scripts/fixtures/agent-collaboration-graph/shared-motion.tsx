@@ -4,7 +4,10 @@ import type { AgentMuxInteractionOperationIntent, AgentMuxInteractionOperationRe
 import { ClientUiProvider, type ClientUiPlatform } from '@agentmux/client-ui/platform'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
-import { AgentInteractionCard } from '@agentmux/client-ui/components/AgentInteractionCard'
+import { AttentionRequestPanel } from '../../../src/renderer/src/components/AttentionRequestPanel'
+import { useAppStore } from '../../../src/renderer/src/store'
+import { api } from '../../../src/renderer/src/lib/api'
+import { fixturePath } from '../../../../../test/fixture-values.mjs'
 import { mountThemeRuntime, updateThemeSelection } from '../../../../../packages/client-ui/src/theme/runtime'
 import { fixtureEpoch } from '../../../../../test/fixture-values.mjs'
 import '../../../src/renderer/src/styles/tokens.css'
@@ -27,9 +30,19 @@ function request(mode: Mode): AgentMuxInteractionRequest {
     kind: 'permission', title: 'Allow the original write?', toolName: 'Write', toolInput: input,
     options: [{ id: 'allow', label: 'Allow once', kind: 'allow-once' }, { id: 'deny', label: 'Deny', kind: 'reject-once' }] }
 }
+const sessionId = 'private-original-session'
+function publishRequest(mode: Mode) {
+  const original = request(mode), run = { runId: 'private-original-run' }
+  useAppStore.setState({ sessions: [{ id: sessionId, kind: 'agent', providerId: 'codex', executorId: 'codex', hostId: 'local',
+    workspacePath: fixturePath('original'), label: 'Original Agent', createdAt: 1, updatedAt: 1, processState: 'running', latestOutputBytes: 0,
+    status: { state: 'waiting', source: 'run-process', observedAt: 1 }, pendingInteraction: original,
+    capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
+    control: { kind: 'agent', hostId: 'local', agentSessionId: sessionId, run } }] })
+}
+publishRequest('native-completed')
 function SharedMotion() {
   const [mode, changeMode] = useState<Mode>('native-completed'), [busy, changeBusy] = useState(false)
-  setMode = changeMode
+  setMode = selected => { publishRequest(selected); changeMode(selected) }
   async function respond(response: AgentMuxInteractionResponse, intent: AgentMuxInteractionOperationIntent): Promise<AgentMuxInteractionOperationReceipt> {
     operations.push({ mode, response, intent })
     if (mode === 'failure') throw Error('Original operation failed; its request and retry remain available.')
@@ -40,6 +53,15 @@ function SharedMotion() {
     if (mode === 'native-completed') return new Promise(resolve => { pendingComplete = () => resolve(receipt) })
     return receipt
   }
+  api.sessions.respondInteraction = async (target, response, intent) => {
+    if (target.agentSessionId !== sessionId || target.run.runId !== 'private-original-run') throw new Error('Wrong original Desktop control.')
+    return respond(response, intent)
+  }
+  api.sessions.inspectInteraction = async (target, operationId) => {
+    if (target.agentSessionId !== sessionId || target.run.runId !== 'private-original-run') throw new Error('Wrong original Desktop inspection.')
+    operations.push({ mode, operationId, action: 'inspect' })
+    return null
+  }
   return <ClientUiProvider platform={platform}><main>
     <header><h1>Shared motion consumers</h1><p className="fixture-label">Original components, original theme · private controlled requests and receipts</p></header>
     <section><h2>Native actions</h2><div className="fixture-buttons"><Button data-fixture-primary variant="primary" onClick={() => changeBusy(!busy)}>Save changes</Button><Button>Review details</Button><Button disabled>Unavailable</Button><Button data-fixture-busy aria-busy={busy} onClick={() => changeBusy(!busy)}>{busy ? 'Saving changes…' : 'Start save'}</Button></div><p className="fixture-label">Busy reflects this fixture's pending action, never Provider completion.</p></section>
@@ -47,7 +69,7 @@ function SharedMotion() {
       { kind: 'tool-result', callId: 'result-before-unrelated-call', output: 'Original result\nRead succeeded; the next call is a separate observed part.\n', failed: false },
       { kind: 'tool-call', callId: 'private-original-call', name: 'Read', input }
     ]} /></section>
-    <section className="fixture-request"><h2>Original native request · {mode}</h2><AgentInteractionCard key={mode} request={request(mode)} sourceNotice="Private native-hook evidence · original Session and Run" onRespond={respond} onInspect={async () => null} /></section>
+    <section className="fixture-request"><h2>Original native request · {mode}</h2><AttentionRequestPanel key={mode} sessionId={sessionId} onClose={() => {}} /></section>
     <section><h2>Input remains independent</h2><input className="fixture-input" aria-label="Unsent review note" placeholder="Keep this original note" defaultValue="Unsent review note" /></section>
   </main></ClientUiProvider>
 }

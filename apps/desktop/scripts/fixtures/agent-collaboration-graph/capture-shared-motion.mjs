@@ -11,12 +11,15 @@ import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from '../../p
 import { createCssSourceOverlay } from './css-source-overlay.mjs'
 
 const fixture = import.meta.dirname, root = resolve(fixture, '../../../../..'), desktop = join(root, 'apps/desktop')
-assert.ok(process.argv.length === 3, 'Use capture-shared-motion.mjs <empty-evidence-directory>')
-const evidence = resolve(process.argv[2]), privateRoot = await mkdtemp(join(tmpdir(), 'amux-shared-motion-')), compiled = join(privateRoot, 'compiled')
+assert.ok(process.argv.length <= 3, 'Use capture-shared-motion.mjs [empty-evidence-directory]')
+const evidenceRoot = join(root, '.local/state/desktop-shared-motion')
+await mkdir(evidenceRoot, { recursive: true })
+const evidence = process.argv[2] ? resolve(process.argv[2]) : await mkdtemp(join(evidenceRoot, 'candidate-'))
+const privateRoot = await mkdtemp(join(tmpdir(), 'amux-shared-motion-')), compiled = join(privateRoot, 'compiled')
 await mkdir(evidence, { recursive: true }); assert.equal((await readdir(evidence)).length, 0)
 const hash = bytes => createHash('sha256').update(bytes).digest('hex'), require = createRequire(join(desktop, 'package.json'))
 const receipt = { schema: 'agentmux.shared-motion-capture.v1', captureOnly: true, aestheticReview: 'not-performed', inputs: {}, outputs: {}, sourceOverlay: {}, frames: [],
-  boundary: 'Bounded original shared production components and CSS/theme runtime; controlled typed requests/receipts/clipboard adapter. Not App initialization, real Provider execution, live Run, public CLI, mounted Terminal, durability or installation.' }
+  boundary: 'Original Desktop AttentionRequestPanel, Store, shared components and CSS/theme runtime with controlled public client results. Scope excludes App startup, Provider execution, real Run, device durability and installation.' }
 let server
 try {
   const ref = process.env.COLLABORATION_CAPTURE_SOURCE_REF, overlays = new Map()
@@ -40,7 +43,7 @@ try {
   const { build } = await import(pathToFileURL(require.resolve('vite')).href)
   const sourcePlugin = { name: 'shared-motion-source-bytes', enforce: 'pre', load(id) { if (!id.includes('?') && overlays.has(id)) return overlays.get(id).toString('utf8') }, transform(source, id) { if (id.startsWith(root + '/') && !id.includes('/node_modules/') && !id.includes('?') && /\.(?:tsx?|jsx?|css)$/.test(id)) receipt.inputs[relative(root, id)] = hash(source) } }
   const css = await createCssSourceOverlay({ root, privateRoot, overlays, inputs: receipt.inputs, vitePackage: require.resolve('vite/package.json') })
-  await build({ configFile: false, root: fixture, logLevel: 'error', worker: { format: 'es', plugins: () => [sourcePlugin, css.plugin] }, css: { postcss: { plugins: [css.observer] } }, esbuild: { jsx: 'automatic' }, resolve: { alias: aliases, conditions: ['browser', 'import', 'production', 'default'], dedupe: ['react', 'react-dom'] },
+  await build({ configFile: false, root: fixture, logLevel: 'error', define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, worker: { format: 'es', plugins: () => [sourcePlugin, css.plugin] }, css: { postcss: { plugins: [css.observer] } }, esbuild: { jsx: 'automatic' }, resolve: { alias: aliases, conditions: ['browser', 'import', 'production', 'default'], dedupe: ['react', 'react-dom'] },
     build: { outDir: compiled, target: 'esnext', minify: false, rollupOptions: { input: join(fixture, 'shared-motion.html') } },
     plugins: [sourcePlugin, css.plugin] })
   receipt.cssSourceProof = { ...css.verify(), outputs: {} }
