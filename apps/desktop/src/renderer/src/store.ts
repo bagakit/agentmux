@@ -4703,7 +4703,12 @@ function partializeAppState(state: AppState): PersistedAppState {
       (previous?.workspaceId === occurrence.workspaceId && previous.path === occurrence.path ? previous.source : undefined)
     if (source) readSources[occurrence.pointerKey] = { workspaceId: occurrence.workspaceId, path: occurrence.path, source }
   }
-  const hasSourceWorkface = Object.values(readNamespaceTopology).some(tab => tab.source) || Object.keys(readNamespaceLayout).some(isOriginalSourceWorkspaceProjection)
+  // Body edits share the existing structural projection; only topology or its owner transition invalidates it.
+  const sameTopology = previousPersistedInputs?.readNamespaceTopology === readNamespaceTopology &&
+    previousPersistedInputs.readNamespaceLayout === readNamespaceLayout && previousCoreSpatialReady === coreSpatialReady
+  const restoredWorkbench = sameTopology ? previousPersistedProjection?.restoredWorkbench :
+    !coreSpatialReady || Object.values(readNamespaceTopology).some(tab => tab.source) || Object.keys(readNamespaceLayout).some(isOriginalSourceWorkspaceProjection)
+      ? projectPersistedWorkbench({ tabs: readNamespaceTopology, layouts: readNamespaceLayout }) : undefined
   const projection: PersistedAppState = {
     ...presentation,
     sourceFilesInputs: { ...presentation.sourceFilesInputs, readSources },
@@ -4716,7 +4721,7 @@ function partializeAppState(state: AppState): PersistedAppState {
     documentIssues: Object.fromEntries(Object.entries(documentIssues).filter(([key, issue]) => hasRecoverableFileBuffer(documents[key], issue))),
     dirtyDocuments: Object.fromEntries(Object.entries(dirtyDocuments).filter(([, dirty]) => dirty)),
     ...(!coreSpatialReady ? { projectGroups: projectGroups!, spaceZoneBindings: spaceZoneBindings! } : {}),
-    ...(!coreSpatialReady || hasSourceWorkface ? { restoredWorkbench: projectPersistedWorkbench({ tabs: coreSpatialReady ? state.tabs : tabs!, layouts: coreSpatialReady ? state.layouts : layouts! }) } : {})
+    ...(restoredWorkbench ? { restoredWorkbench } : {})
   }
   if (state.nameAuthorityRevision > 0) {
     // A name document revision confirms its exact targets, not an unrelated startup handoff.
