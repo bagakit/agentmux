@@ -28,7 +28,7 @@ it('shows pending, saving, failure and successful retry without clearing the bro
   expect(dom.container.querySelector('[data-settings-save-bar] [role="status"]')!.textContent).toBe('Unsaved changes')
   await dom.click('.primary-button')
   expect(dom.container.querySelector('[data-settings-save-bar] [role="status"]')!.textContent).toContain('Saving changes')
-  expect(onSave).toHaveBeenCalledWith({ agentAutomation: true, automaticMemoryRelease: true, exitCheckUrl: '' }, { agentAutomation: false, automaticMemoryRelease: true, exitCheckUrl: '' })
+  expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ agentAutomation: true, automaticMemoryRelease: true, exitCheckUrl: '' }), expect.objectContaining({ agentAutomation: false, automaticMemoryRelease: true, exitCheckUrl: '' }))
   await act(async () => reject(new Error('Disk full')))
   expect(dom.container.querySelector('[role="alert"]')!.textContent).toBe('Disk full')
   expect(dom.container.querySelector<HTMLInputElement>('input')!.checked).toBe(true)

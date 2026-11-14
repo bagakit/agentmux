@@ -15,11 +15,12 @@ import { createBrowserProjectionEventQueue } from '../src/renderer/src/lib/brows
 import { hydratePersistedTab, reducePersistedTab } from '../src/renderer/src/lib/workbench-persistence'
 import { placeWorkbenchWindow, registerWorkbenchDocument, registerWorkbenchHost } from '../src/renderer/src/lib/workbench-window-registry'
 import { createClientUiRoot } from './helpers/client-ui-render'
+import * as windowRegistry from '../src/renderer/src/lib/workbench-window-registry'
 
 const windows = vi.hoisted(() => ({ open: vi.fn(async (_target: AppWindowTarget, _options?: { focus?: boolean }) => {}), focus: vi.fn(async (_document: WorkbenchWindowDocument) => true),
-  retire: vi.fn(async (_regions: readonly { tabId: string; regionId: string }[]) => {}) }))
+  reveal: vi.fn(), retire: vi.fn(async (_regions: readonly { tabId: string; regionId: string }[]) => {}) }))
 vi.mock('../src/renderer/src/lib/workbench-windows', () => ({ openWorkbenchWindow: windows.open, focusWorkbenchWindow: windows.focus,
-  returnClosedWorkbenchWindows: windows.retire }))
+  returnClosedWorkbenchWindows: windows.retire, revealWorkbenchContext: windows.reveal }))
 
 const original = useAppStore.getState()
 const sourceLocation = { displayWorkspaceId: 'source-display', groupId: 'source-group', tabId: 'source-tab', regionId: 'source-region' }
@@ -51,7 +52,7 @@ async function flush() { await act(async () => { await new Promise(resolve => se
 
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  windows.open.mockClear(); windows.focus.mockClear(); windows.retire.mockClear()
+  windows.open.mockClear(); windows.focus.mockClear(); windows.retire.mockClear(); windows.reveal.mockClear()
   disposers = []
   host = document.createElement('div'); document.body.append(host); root = createClientUiRoot(host)
   sourceFixture()
@@ -193,7 +194,7 @@ describe('native Browser child uses the ordinary Renderer workface', () => {
     const after = useAppStore.getState(), child = childSurface()!
     expect(child).toMatchObject({ ...snapshot, browserId: snapshot.id, workspaceId: 'resource-workspace', kind: 'browser' })
     const target = windows.open.mock.calls[0]?.[0]
-    expect(windows.open.mock.calls[0]?.[1]).toEqual({ focus: false })
+    expect(windows.open.mock.calls[0]?.[1]).toEqual({ focus: false, returnContext: null })
     expect(target).toMatchObject({ kind: 'region', displayWorkspaceId: sourceLocation.displayWorkspaceId, groupId: sourceLocation.groupId, regionId: snapshot.id })
     expect(after.tabs[target!.tabId]).toMatchObject({ space: sourceTab.space, topicId: sourceTab.topicId })
     expect(after.tabs[sourceLocation.tabId]).toBe(sourceTab)
@@ -237,7 +238,7 @@ describe('native Browser child uses the ordinary Renderer workface', () => {
     useAppStore.getState().applyBrowserEvent(ambiguous); await flush()
     expect(childSurface()).toMatchObject({ id: snapshot.id, browserId: snapshot.id, source: ambiguous.browser.source })
     expect(childSurface()!.source).not.toHaveProperty('location')
-    expect(windows.open).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: 'region', displayWorkspaceId: 'second-display', groupId: 'second-group', regionId: snapshot.id }), { focus: false })
+    expect(windows.open).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: 'region', displayWorkspaceId: 'second-display', groupId: 'second-group', regionId: snapshot.id }), { focus: false, returnContext: null })
     expect(resolveBrowserSource(useAppStore.getState(), ambiguous.browser.source)).toMatchObject({ status: 'ambiguous' })
     expect(useAppStore.getState().activeWorkspaceId).toBe(before.activeWorkspaceId)
     expect(useAppStore.getState().error).toBeNull(); expect(create).not.toHaveBeenCalled(); expect(navigate).not.toHaveBeenCalled()
@@ -253,7 +254,7 @@ describe('native Browser child uses the ordinary Renderer workface', () => {
       [sourceLocation.displayWorkspaceId]: createWorkspaceLayout(sourceLocation.groupId, []) } })
     useAppStore.getState().applyBrowserEvent(event); await flush()
     expect(windows.open).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: 'region',
-      displayWorkspaceId: sourceLocation.displayWorkspaceId, groupId: sourceLocation.groupId, regionId: snapshot.id }), { focus: false })
+      displayWorkspaceId: sourceLocation.displayWorkspaceId, groupId: sourceLocation.groupId, regionId: snapshot.id }), { focus: false, returnContext: null })
     expect(childSurface()!.source).toEqual(source)
     expect(resolveBrowserSource(useAppStore.getState(), source)).toMatchObject({ status: 'ambiguous' })
   })
@@ -264,7 +265,7 @@ describe('native Browser child uses the ordinary Renderer workface', () => {
     expect(childSurface()).toMatchObject({ id: snapshot.id, browserId: snapshot.id, workspaceId: event.workspaceId })
     expect(childSurface()).not.toHaveProperty('source')
     expect(windows.open).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: 'region',
-      displayWorkspaceId: sourceLocation.displayWorkspaceId, groupId: sourceLocation.groupId, regionId: snapshot.id }), { focus: false })
+      displayWorkspaceId: sourceLocation.displayWorkspaceId, groupId: sourceLocation.groupId, regionId: snapshot.id }), { focus: false, returnContext: null })
     expect(useAppStore.getState().activeWorkspaceId).toBe('human-workspace')
   })
 
@@ -274,7 +275,7 @@ describe('native Browser child uses the ordinary Renderer workface', () => {
       'unrelated-tab', 'right-group', 'right-group', 'left', 'left-group')
     useAppStore.setState({ layouts: { 'container-display': layout }, activeWorkspaceId: 'some-other-current-display' })
     useAppStore.getState().applyBrowserEvent({ ...event, browser, workspaceId: null }); await flush()
-    expect(windows.open).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: 'region', displayWorkspaceId: 'container-display', groupId: 'left-group', regionId: snapshot.id }), { focus: false })
+    expect(windows.open).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: 'region', displayWorkspaceId: 'container-display', groupId: 'left-group', regionId: snapshot.id }), { focus: false, returnContext: null })
     expect(childSurface()).toMatchObject({ id: snapshot.id, browserId: snapshot.id, workspaceId: before.tabs['unrelated-tab']!.workspaceId })
     expect(useAppStore.getState().layouts['container-display']!.activeGroupId).toBe(layout.activeGroupId)
     expect(useAppStore.getState().layouts['container-display']!.groups.find(group => group.id === 'left-group')!.activeTabId).toBe('unrelated-tab')
@@ -421,4 +422,144 @@ describe('native Browser child uses the ordinary Renderer workface', () => {
     await act(async () => second!.click())
     expect(focus).toHaveBeenLastCalledWith('copy', copy.id, 'random-copy-region', 'navigation', 'copy-group')
   })
+})
+
+describe('native webpage opening follows its original scene and frozen placement', () => {
+  for (const scene of ['space', 'focus', 'survey'] as const) for (const destination of ['window', 'tab', 'region'] as const) {
+    it(`${scene} ${destination} keeps the original Browser, resource and later human selection`, async () => {
+      const before = useAppStore.getState(), tabsBefore = Object.keys(before.tabs), selection = before.workbenchSpaceSelection
+      const context = scene === 'survey'
+        ? { surface: scene, reference: sourceLocation, selection: { zoneId: 'original-zone', selection: [{ tabId: sourceLocation.tabId, regionId: sourceLocation.regionId }], active: { tabId: sourceLocation.tabId, regionId: sourceLocation.regionId } } }
+        : { surface: scene, reference: sourceLocation, view: 'tab' as const }
+      const create = vi.spyOn(api.browser, 'create'), navigate = vi.spyOn(api.browser, 'navigate')
+      useAppStore.getState().applyBrowserEvent({ ...event, opening: { context, destination, foreground: false } })
+      await flush()
+      const current = useAppStore.getState(), owner = Object.values(current.tabs).find(tab => tab.regions[snapshot.id])!
+      expect(owner.regions[snapshot.id]).toMatchObject({ kind: 'browser', browserId: snapshot.id, source, workspaceId: 'resource-workspace' })
+      expect(current.tabs[sourceLocation.tabId]!.regions['dirty-sibling']).toBe(before.tabs[sourceLocation.tabId]!.regions['dirty-sibling'])
+      expect(current.workbenchSpaceSelection).toBe(selection); expect(current.activeWorkspaceId).toBe('human-workspace')
+      if (destination === 'region') {
+        expect(owner.id).toBe(sourceLocation.tabId); expect(Object.keys(current.tabs)).toEqual(tabsBefore)
+        expect(Object.keys(owner.regions)).toHaveLength(3); expect(owner.layout.activeRegionId).toBe(before.tabs[sourceLocation.tabId]!.layout.activeRegionId)
+      } else {
+        expect(owner.id).not.toBe(sourceLocation.tabId); expect(owner.space).toEqual({ spaceId: 'original-space', zoneId: 'original-zone' })
+      }
+      if (destination === 'window') expect(windows.open).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ tabId: owner.id, regionId: snapshot.id }),
+        { focus: false, returnContext: expect.objectContaining({ surface: scene, reference: expect.objectContaining({ tabId: owner.id, regionId: snapshot.id }) }) })
+      else expect(windows.open).not.toHaveBeenCalled()
+      expect(windows.reveal).not.toHaveBeenCalled(); expect(create).not.toHaveBeenCalled(); expect(navigate).not.toHaveBeenCalled()
+      useAppStore.getState().applyBrowserEvent({ ...event, opening: { context, destination, foreground: false } }); await flush()
+      expect(Object.values(useAppStore.getState().tabs).flatMap(tab => Object.values(tab.regions)).filter(region => region.kind === 'browser' && region.browserId === snapshot.id)).toHaveLength(1)
+      expect(windows.open).toHaveBeenCalledTimes(destination === 'window' ? 1 : 0)
+    })
+  }
+})
+
+// These cases exercise the Store's actual completion consumer, beyond the pure layout calculation.
+describe('original native opening completion', () => {
+  for (const scene of ['space', 'focus'] as const) it(`${scene} foreground child reveals the exact new split without replay`, async () => {
+    useAppStore.setState({ mainSurface: scene === 'focus' ? 'agents' : 'workbench', workbenchSpaceSelection: {
+      workspaceId: sourceLocation.displayWorkspaceId, groupId: sourceLocation.groupId, tabId: sourceLocation.tabId,
+      regionId: sourceLocation.regionId, spaceId: null, zoneId: 'original-zone', topicId: null } })
+    const context = { surface: scene, reference: sourceLocation, view: 'region' as const }
+    useAppStore.getState().applyBrowserEvent({ ...event, opening: { context, destination: 'region', foreground: true } })
+    await flush()
+    expect(windows.reveal).toHaveBeenCalledExactlyOnceWith({ surface: scene, view: 'tab', reference: {
+      ...sourceLocation, regionId: snapshot.id } })
+    expect(windows.open).not.toHaveBeenCalled()
+  })
+  it('Survey split expands the same page anchor and preserves the original caret for a background request', async () => {
+    const page = { kind: 'page' as const, regionId: sourceLocation.regionId, browserId: source.browserId }
+    useAppStore.setState({ mainSurface: 'survey', surveyZoneSelection: page })
+    const admit = vi.spyOn(useAppStore.getState(), 'registerSurveyBrowserPage')
+    useAppStore.getState().applyBrowserEvent({ ...event, opening: { context: { surface: 'survey', reference: sourceLocation, selection: page },
+      destination: 'region', foreground: false } })
+    await flush()
+    expect(windows.reveal).toHaveBeenCalledExactlyOnceWith({ surface: 'survey', reference: sourceLocation,
+      selection: { ...page, presentation: { kind: 'tab', ...sourceLocation } } })
+    expect(admit).not.toHaveBeenCalled(); expect(windows.open).not.toHaveBeenCalled()
+  })
+  it('a page withdrawn during its save stays withdrawn and later navigation is not stolen', async () => {
+    const page = { kind: 'page' as const, regionId: sourceLocation.regionId, browserId: source.browserId }
+    useAppStore.setState({ mainSurface: 'survey', surveyZoneSelection: page })
+    let finish!: () => void
+    const gate = new Promise<void>(resolve => { finish = resolve })
+    const admitted = vi.spyOn(useAppStore.getState(), 'registerSurveyBrowserPage').mockImplementation(async () => {
+      await gate
+      return { reference: { regionId: snapshot.id, browserId: snapshot.id }, outcome: 'registered', save: null, issues: [] }
+    })
+    useAppStore.getState().applyBrowserEvent({ ...event, opening: { context: { surface: 'survey', reference: sourceLocation, selection: page },
+      destination: 'tab', foreground: true } })
+    await flush(); expect(admitted).toHaveBeenCalledOnce()
+    expect(windows.reveal).toHaveBeenCalledOnce()
+    useAppStore.setState({ mainSurface: 'workbench', surveyPageReferences: [] }); finish(); await flush()
+    expect(windows.reveal).toHaveBeenCalledOnce(); expect(windows.open).not.toHaveBeenCalled()
+    expect(useAppStore.getState().mainSurface).toBe('workbench')
+    expect(childSurface()?.browserId).toBe(snapshot.id)
+  })
+  it('unknown original source keeps the same page usable without inventing a return scene', async () => {
+    const context = { surface: 'survey' as const, reference: sourceLocation, selection: {
+      kind: 'page' as const, regionId: sourceLocation.regionId, browserId: source.browserId } }
+    const current = useAppStore.getState()
+    useAppStore.setState({ tabs: { 'unrelated-tab': current.tabs['unrelated-tab']! },
+      layouts: { 'human-workspace': current.layouts['human-workspace']! } })
+    useAppStore.getState().applyBrowserEvent({ ...event, opening: { context, destination: 'region', foreground: true } }); await flush()
+    expect(childSurface()?.browserId).toBe(snapshot.id)
+    expect(windows.open).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({regionId:snapshot.id}),{focus:false,returnContext:null})
+    expect(windows.reveal).not.toHaveBeenCalled()
+    expect(useAppStore.getState().notificationEvents.some(event=>event.message.includes('original split destination'))).toBe(true)
+  })
+})
+
+it('does not reopen a later locally closed Focus workface while its native presentation loads', async () => {
+  useAppStore.setState({ mainSurface: 'agents', workbenchSpaceSelection: {
+    workspaceId: sourceLocation.displayWorkspaceId, groupId: sourceLocation.groupId, tabId: sourceLocation.tabId,
+    regionId: sourceLocation.regionId, spaceId: null, zoneId: 'original-zone', topicId: null } })
+  let token: object = { view: 'region' }
+  vi.spyOn(windowRegistry, 'workbenchNavigationStamp').mockImplementation(() => token)
+  let finish!: () => void
+  const gate = new Promise<void>(resolve => { finish = resolve })
+  const { finishNativeBrowserOpening } = await import('../src/renderer/src/lib/browser-native-opening')
+  const projected = projectNativeBrowserOpening(useAppStore.getState(), { ...event, opening: {
+    context: { surface: 'focus', reference: sourceLocation, view: 'region' }, destination: 'region', foreground: true } })
+  useAppStore.setState(projected.state)
+  const reveal = vi.fn()
+  const completing = finishNativeBrowserOpening({ get: useAppStore.getState, checkpoint: async () => {},
+    reveal: async (_context, stillCurrent) => { await gate; if (stillCurrent()) reveal() },
+    openWindow: vi.fn() }, { ...event, opening: {
+      context: { surface: 'focus', reference: sourceLocation, view: 'region' }, destination: 'region', foreground: true } }, projected.target!, 'region')
+  // App's existing local navigator publishes a different token without changing Store selection.
+  token = { view: 'closed' }; finish(); await completing
+  expect(reveal).not.toHaveBeenCalled(); expect(childSurface()?.browserId).toBe(snapshot.id)
+})
+
+it.each(['window', 'tab'] as const)('a pending Core save does not gate the healthy native %s', async destination => {
+  useAppStore.setState({ mainSurface: 'workbench', workbenchSpaceSelection: {
+    workspaceId: sourceLocation.displayWorkspaceId, groupId: sourceLocation.groupId, tabId: sourceLocation.tabId,
+    regionId: sourceLocation.regionId, spaceId: null, zoneId: 'original-zone', topicId: null } })
+  let finish!: () => void
+  const gate = new Promise<void>(resolve => { finish = resolve }), context = {surface:'space' as const,reference:sourceLocation,view:'tab' as const}
+  const opening = {...event,opening:{context,destination,foreground:true}}
+  const projected = projectNativeBrowserOpening(useAppStore.getState(), opening); useAppStore.setState(projected.state)
+  const {finishNativeBrowserOpening} = await import('../src/renderer/src/lib/browser-native-opening')
+  const openWindow = vi.fn(async()=>{}), reveal = vi.fn(async()=>{})
+  const completing = finishNativeBrowserOpening({get:useAppStore.getState,checkpoint:()=>gate,openWindow,reveal},opening,projected.target!,destination)
+  await flush()
+  try {
+    expect(destination==='window'?openWindow:reveal).toHaveBeenCalledOnce()
+    expect(childSurface()?.browserId).toBe(snapshot.id)
+  } finally { finish(); await completing }
+})
+
+it('a repeated native opening cannot clear an unconfirmed save on the same healthy child', async () => {
+  const projection = projectNativeBrowserOpening(useAppStore.getState(), event); useAppStore.setState(projection.state)
+  const {finishNativeBrowserOpening} = await import('../src/renderer/src/lib/browser-native-opening')
+  await finishNativeBrowserOpening({get:useAppStore.getState,checkpoint:async()=>{throw Error('Original child save remains unconfirmed')},
+    openWindow:async()=>{},reveal:async()=>{}},event,projection.target!,'window')
+  await flush()
+  const pending = useAppStore.getState().notificationEvents.find(row=>row.message.includes('Original child save remains unconfirmed'))
+  expect(pending).toBeDefined()
+  useAppStore.getState().applyBrowserEvent(event); await flush()
+  expect(useAppStore.getState().notificationEvents).toContainEqual(pending)
+  expect(childSurface()?.browserId).toBe(snapshot.id)
 })

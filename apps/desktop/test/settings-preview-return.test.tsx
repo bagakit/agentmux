@@ -39,7 +39,7 @@ it('Focus previews the chosen group and returns to the same edited control and r
   for (const [field, value, group, scene, label] of [
     ['reply-lines', '3', 'project-scanning', 'board', 'Reply excerpt'],
     ['recent-inputs', '10', 'agent-reading', 'reading', 'Recent inputs in a new preview'],
-    ['link-destination', 'tab', 'opening-resources', 'links', 'Open links in Focus']
+    ['link-destination', 'tab', 'opening-resources', 'links', 'Message and terminal links']
   ]) {
     const control = pane.querySelector<HTMLInputElement>(`input[name="focus-${field}"][value="${value}"]`)!
     for (const position of [137, 319]) {
