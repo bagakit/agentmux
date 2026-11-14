@@ -27,6 +27,8 @@ same Tab across all its presentations and keeps Session, Run, cwd, documents, dr
 ratios and the logical active Region. Cross-Tab, closing or ambiguous targets are refused
 before anything changes, and swapping a Region with itself returns unchanged. space focus
 --expect-session keeps that condition in the receipt as navigation.expectedAgentSessionId.
+Add --expect-host HOST with --expect-session to check the original Agent Host as well; the
+receipt preserves navigation.expectedAgentHostId. These conditions grant no Agent access.
 Presentation operations do not take input by default; if the original input loses
 eligibility, the receipt is partial with that input issue and keeps the applied result.
 Only save.diskDurability: confirmed is a durable save.

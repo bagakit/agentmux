@@ -46,3 +46,19 @@ base64, not executable HTML. Published payloads do not expose private absolute p
 node resolve locates Node metadata only. It does not grant Agent input, Capsule interaction,
 raw file/git/shell access or arbitrary runtime.invoke. Resolve original objects through
 their own owner. A remote Capsule's loopback URL is not a local page on this client.
+
+
+node locate --alias LABEL [--expected-runtime ID] observes only the current configured,
+authenticated Host scope, including configured routes whose clients are not yet prepared.
+An unavailable configured route stays an issue rather than disappearing from the scope.
+It returns status, matches and issues. Each match preserves the
+original publication and hostIds containing all confirmed carriers of that Runtime;
+hostId selects confirmed canonical local when present, otherwise configuration order.
+Multiple carriers of one Runtime are not multiple Nodes. This does not discover a mesh.
+
+A bare alias is unique only when exactly one Runtime matches and every admitted Host was
+observed. Unknown scope gives unconfirmed (CLI exits nonzero), while two known matching
+Runtimes remain ambiguous. Missing means no match and no unknown scope. An original
+Runtime pin selects that identity across alias rename and may be unique while retaining
+unrelated scope issues. Unknown source never selects a first candidate. Locating metadata
+does not grant Agent, Capsule or owner access and never creates or resumes a replacement.

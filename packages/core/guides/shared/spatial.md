@@ -83,7 +83,9 @@ Request display through capsule open with the same ID and an original operationI
 owner resolves the service before Browser presentation. A Capsule is not a spatial selector.
 Discover current Agent display positions with space ls; keep all original location candidates.
 To navigate the Agent, choose an exact existing Region and display occurrence, then use
-space focus --region REGION --display-workspace WORKSPACE --group GROUP --expect-session SID.
+space focus --region REGION --display-workspace WORKSPACE --group GROUP --expect-session SID
+--expect-host HOST. Keep the original Agent Host when its SID can appear on multiple Hosts;
+--expect-host requires --expect-session and does not grant control.
 The expected Session is a condition on that Region, not a replacement for its spatial identity.
 Spatial object links use space focus with their exact selector; ambiguous references require
 an explicit location. Default input is preserve. Missing positions do not prove a Session ended.
