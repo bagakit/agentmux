@@ -65,3 +65,27 @@ unresolved input, permission, source failure, interaction or Goal responsibility
 Guide delivery, actual tool use, saved content, native input outcome and human acceptance
 are separate facts. Updating this guide does not replace an existing future message or
 prove that an already-running model adopted it.
+
+## Record the check against its original input
+
+For an arranged heartbeat, read the exact Mote preferences with `kind: "quick"`, then
+inspect the returned original schedule. Explicitly select its `lastInputRef` (also exposed
+as `input.reference` by schedule inspect); do not invent a key or attach a report to a
+nearby turn. Missing references remain unknown. A later skipped check does not change the
+input that this reference names. You may report a check of an earlier original input;
+this is a later Agent statement, not proof that your current native turn consumed it.
+
+Use `amux space mote dialogue heartbeat report --input FILE|-` with the same target and
+an original operationId. Its source keeps inputKey from the selected reference,
+scheduleId from the original loop, definitionIntentId and occurrenceAt from the reference's
+futureIntent, and mainRoleRevision from that reference's managedSource.revision. If any
+required original source is missing or you cannot confirm participation, keep the check
+unreported rather than guessing another input. Inspect current help for the typed report.
+
+Keep the report brief: the relevant sources and their partial/unknown coverage, concrete
+actions with original receipts or Idea file references, and quiet or needs-attention.
+Zero new Ideas is valid. File observation, a committed Note event and an unknown save
+remain different evidence. The report is your work statement, separate from delivery,
+native input outcome, Goal acceptance and human confirmation. Quiet records your intent
+not to disturb; it never clears an unresolved fault or grants permission. Reconcile an
+unknown report by its original operation and payload, without sending another heartbeat.
