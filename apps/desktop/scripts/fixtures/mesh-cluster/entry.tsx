@@ -70,7 +70,7 @@ useAppStore.setState({ config: { version: 9, hosts: [{ id: 'local', kind: 'local
 createRoot(document.getElementById('root')!).render(<DesktopClientUiProvider><div className="mesh-review-shell"><SettingsPanel onClose={() => {}} initialSection="hosts" /><footer className="mesh-review-footer">Visual fixture · production Settings · controlled topology/resource observations; not live host telemetry</footer></div></DesktopClientUiProvider>)
 Object.assign(window, { meshFixture: { originalOffer, endpoint: () => { state = 'endpoint' }, relayOff: () => { state = 'initial' }, theme: (mode: 'dark' | 'light') => updateThemeSelection({ appAppearance: mode }), failure: () => { state = 'failure'; settings = { ...settings, revision: 'saved-9' } } } })
 if (state === 'device') {
- const offer = { ...originalOffer, serverId: 'Office workstation', relay: { endpoint: 'gateway.example', useTls: true } }
+ const offer = { ...originalOffer, serverId: 'office-workstation', relay: { endpoint: 'gateway.example', useTls: true } }
  useAppStore.setState({ meshDeviceLinks: { draft: '', saved: [connectionLinkUrl('https://gateway.example', offer)] } })
  api.nodePublishing.deviceLocation = async () => ({
    node: { runtimeId: 'workstation-core', ownerInstanceId: 'workstation-instance', alias: 'Office workstation' },

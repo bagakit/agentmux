@@ -215,9 +215,9 @@ app.whenReady().then(async()=>{try{
  await frame('geographic-location-cleared')
  receipt.geography.clearedExactHost = true
  await window.loadURL(url+'?scenario=device')
- await wait('[data-mesh-device="Office workstation"]')
+ await wait('[data-mesh-device="office-workstation"]')
  await wait('[data-geographic-point^="device:"]')
- await click('[data-mesh-device="Office workstation"]')
+ await click('[data-mesh-device="office-workstation"]')
  await wait('[aria-label="Selected device endpoint"]')
  await frame('paired-device-location')
  receipt.overflow=Object.values(receipt.frameOverflow).some(Boolean)
