@@ -664,9 +664,11 @@ function runningRegionsWithoutRun(workbench) {
     .map(region => region.regionId))
 }
 
-function workbenchIdentity(workbench, { expectedAfterRestart = false, includeSurvey = true } = {}) {
+function workbenchIdentity(workbench, { expectedAfterRestart = false, includeSurvey = true, includeSurveyPageReferences = true } = {}) {
+  const survey = workbench.survey && { ...workbench.survey }
+  if (survey && !includeSurveyPageReferences) delete survey.pageReferences
   return { activeWorkspaceId: workbench.activeWorkspaceId, mainSurface: workbench.mainSurface, focus: workbench.focus,
-    ...(includeSurvey ? { survey: workbench.survey } : {}),
+    ...(includeSurvey ? { survey } : {}),
     layouts: workbench.layouts, tabs: workbench.tabs.map(tab => ({ ...tab, regions: tab.regions.map(region => {
       if (region.kind === 'terminal') {
         // A raw shell's legacy sessionId is its execution Run, not a durable AgentSession.
@@ -703,7 +705,8 @@ async function qualifyUi(appPath, before = null, { outgoing = false } = {}) {
     if (before) {
       // Missing older facts do not gain empty values or revoke the activated GUI. The final receipt stays unknown.
       const includeSurvey = before.workbench.survey !== undefined && observation.workbench.survey !== undefined
-      assert(isDeepStrictEqual(workbenchIdentity(observation.workbench, { includeSurvey }), workbenchIdentity(before.workbench, { expectedAfterRestart: true, includeSurvey })),
+      const includeSurveyPageReferences = before.workbench.survey?.pageReferences !== undefined && observation.workbench.survey?.pageReferences !== undefined
+      assert(isDeepStrictEqual(workbenchIdentity(observation.workbench, { includeSurvey, includeSurveyPageReferences }), workbenchIdentity(before.workbench, { expectedAfterRestart: true, includeSurvey, includeSurveyPageReferences })),
         'The original workbench, Region descriptors or focus have not been restored.')
       for (const tab of before.workbench.tabs) for (const region of tab.regions) {
         const restored = observation.workbench.tabs.find(candidate => candidate.id === tab.id)?.regions.find(candidate => candidate.regionId === region.regionId)
@@ -982,6 +985,8 @@ export async function installApplication(appPath, { intent = installIntent, home
       const unconfirmed = []
       if (observed.workbench.survey === undefined || before && before.workbench.survey === undefined)
         unconfirmed.push('Complete Survey continuity is unconfirmed because an original or restored stored preference observation is unavailable.')
+      else if (observed.workbench.survey.pageReferences === undefined || before && before.workbench.survey.pageReferences === undefined)
+        unconfirmed.push('Survey Page reference continuity is unconfirmed because an original or restored stored Page reference observation is unavailable.')
       const unboundRegions = before ? runningRegionsWithoutRun(before.workbench) : []
       if (unboundRegions.length > 0)
         unconfirmed.push(`Run continuity is unconfirmed for Regions that had no confirmed Run before the update: ${unboundRegions.join(', ')}.`)
