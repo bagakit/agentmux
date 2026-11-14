@@ -22,7 +22,7 @@ import { sessionNameMetadataFor } from '../lib/session-name-metadata'
 import { useShallow } from 'zustand/react/shallow'
 import { retainActivityControls } from '../lib/retained-activity'
 import { createFirstPromptSelector, createSessionViewModeSelector, effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
-import type { AgentMuxRunExitReason, AgentSessionUserMessage, AgentSessionHistoryPage } from '@agentmux/core'
+import type { AgentMuxRunExitReason, AgentSessionUserMessage } from '@agentmux/core'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import { nativeSourceUnconfirmed, projectNativeSourceFacts } from '../../../shared/agent-native-source'
@@ -34,9 +34,8 @@ import { currentContinuitySupervision } from '../lib/continuity-supervision'
 import { workspaceRootForPath } from '../lib/workbench-tabs'
 import { createSessionProjectFileContextSelector } from '../lib/session-project-file-context'
 import { api } from '../lib/api'
-import { agentSessionIdsOfUserMessages, createSpeakerResolver } from '@agentmux/client-ui/conversation-speaker'
+import { createSpeakerResolver } from '@agentmux/client-ui/conversation-speaker'
 import { createConversationSpeakerFactsSelector, currentConversationSenderDetails, currentConversationSpeakerMetadata } from '../lib/conversation-sender-details'
-import { useSessionUserMessages } from '../lib/session-user-messages'
 import type { LinkClickModifiers } from '@agentmux/client-ui/components/AgentMarkdown'
 import { AgentSessionComposer } from './AgentSessionComposer'
 import { ConversationProcessSurface, ConversationProcessDockSlot } from './ConversationProcessSurface'
@@ -446,14 +445,19 @@ export function SessionPane({
   // One fact/observation owner, with demand from every actually visible reading stage.
   const activityDemand = canReadConversation &&
     (visible && (viewMode !== 'terminal' || historyOpen) || presentations.some(target => target.visible !== false && (viewMode !== 'terminal' || presentationHistory?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!))))
-  const {
-    messages: userMessages,
-    nativeHistoryPage,
-    nativeContextItems
-  } = useSessionUserMessages(
-    session?.kind === 'agent' ? session.control : undefined,
-    { enabled: activityDemand }
-  )
+  const [readingSpeakers, setReadingSpeakers] = useState<{ source: string; readers: Map<string, readonly string[]> }>(() => ({ source: activitySourceKey, readers: new Map() }))
+  const onReadingSpeakers = useCallback((owner: string, ids: readonly string[] | null) => {
+    if (currentSourceKey.current !== activitySourceKey) return
+    setReadingSpeakers(previous => {
+      const readers = previous.source === activitySourceKey ? previous.readers : new Map<string, readonly string[]>()
+      const current = readers.get(owner)
+      if (ids === null ? !current : current?.length === ids.length && current.every((id, index) => id === ids[index])) return previous
+      const next = new Map(readers)
+      if (ids === null) next.delete(owner)
+      else next.set(owner, ids)
+      return { source: activitySourceKey, readers: next }
+    })
+  }, [activitySourceKey])
   const revealConversationItem = useCallback((itemRef: ConversationItemRef, presentation?: WorkbenchViewTarget, mailboxInputId?: string, isIntentCurrent?: () => boolean, routeHostId = itemRef.hostId): Promise<MailboxMessageNavigationResult> => {
     navigation.current.cancel?.()
     const generation = ++navigation.current.generation
@@ -562,7 +566,7 @@ export function SessionPane({
     : undefined
   // Observe only identity facts for the Agents actually represented in this reading surface.
   // Output/status from unrelated Sessions cannot refresh these descriptors or read sender goals.
-  const speakerIds = useMemo(() => [...new Set([sessionId, ...agentSessionIdsOfUserMessages(userMessages)])], [sessionId, userMessages])
+  const speakerIds = useMemo(() => [...new Set([sessionId, ...(readingSpeakers.source === activitySourceKey ? [...readingSpeakers.readers.values()].flat() : [])])], [sessionId, activitySourceKey, readingSpeakers])
   const speakerScope = useMemo(() => ({ sessionIds: speakerIds, navigation: false }), [speakerIds])
   const speakerFactsSelector = useMemo(() => createConversationSpeakerFactsSelector(speakerIds, activityDemand), [speakerIds, activityDemand])
   const speakerFacts = useObservedAppStore('sessionPane', observationVisible, speakerScope, useShallow(speakerFactsSelector))
@@ -1055,7 +1059,7 @@ export function SessionPane({
               : 'Core confirmed this Session was closed. Its saved identity is retained.'}</div>}
           workspaceRoot={metadata?.workspacePath ?? ''} homeDir={fileContext.homeDir}
           readPastedImage={readPastedImage} readHistoryResource={readHistoryResource} openWorkspaceFile={openWorkspaceFile}
-          openHttpLink={onProseLinkClick} describeSpeaker={describeSpeaker} />
+          openHttpLink={onProseLinkClick} describeSpeaker={describeSpeaker} onReadingSpeakers={onReadingSpeakers} />
     return retainPresentations(target => cloneElement(retainedConversation, { readingAction: resumeActionAt(presentationOrigin(target), workbenchSessionStageHostId(target, linkOrigin.regionId!)), conversationReading: {
       ...retainedConversation.props.conversationReading, enabled: target.visible !== false && !parked
     } }), <section ref={surfaceRef} className="agent-surface" data-agent-surface-mode="retained-history">
@@ -1232,7 +1236,7 @@ export function SessionPane({
     ...(!inlineHistory && historyOpen ? { onClose: closeHistory, returnLabel: pendingAgentRestore ? 'Session' : viewMode === 'terminal' ? 'Terminal' : 'Activity' } : {})
   } : undefined
   const activityProps: ComponentProps<typeof ActivityView> = {
-    sessionId: session.id, nativeHistoryPage, nativeContextItems,
+    sessionId: session.id, onReadingSpeakers,
     ...(session.kind === 'agent' ? { executionHostId: session.control.hostId, ...(conversationReading ? { conversationReading } : {}) } : {}),
     ...(restorePresentation ? { readingNotice: <div className="activity-feed__read-notice" role="status"><strong>{restorePresentation.title}</strong><span>{restorePresentation.detail}</span></div> } : {}),
     ...(!restorePresentation && recoverableFrontendNotice ? { readingNotice: <div className="activity-feed__read-notice" role="status"><strong>{recoverableFrontendNotice.title}</strong><span>{recoverableFrontendNotice.detail}</span></div> } : {}),

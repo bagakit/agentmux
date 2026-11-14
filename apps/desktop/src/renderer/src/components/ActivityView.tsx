@@ -59,7 +59,9 @@ import { useConversationReadAhead } from '../lib/use-conversation-read-ahead'
 import type { ConversationConsumerQuery } from '@agentmux/core/control'
 import type { ConversationConsumerSample } from '../../../shared/conversation-consumer-observation'
 import { channelProfileKey, useChannelActorProfiles } from '../lib/use-channel-actor-profiles'
-import { createSpeakerResolver } from '@agentmux/client-ui/conversation-speaker'
+import { agentSessionIdsOfUserMessages, createSpeakerResolver } from '@agentmux/client-ui/conversation-speaker'
+import { useConversationView } from '@agentmux/client-ui/use-conversation-view'
+import { api } from '../lib/api'
 
 const ThemeNavigationUpIcon = semanticIconComponent('navigation.up')
 const ThemeActionCurrentIcon = semanticIconComponent('action.current')
@@ -126,6 +128,7 @@ export function ActivityView({
   executionHostId,
   nativeHistoryPage: recentNativePage,
   nativeContextItems,
+  onReadingSpeakers,
   conversationReading,
   readingNotice,
   readingAction,
@@ -151,6 +154,7 @@ export function ActivityView({
   executionHostId?: string
   nativeHistoryPage?: AgentSessionHistoryPage | null
   nativeContextItems?: AgentSessionHistoryPage['items']
+  onReadingSpeakers?: (owner: string, ids: readonly string[] | null) => void
   conversationReading?: ConversationReading
   readingNotice?: ReactNode
   readingAction?: ReactNode
@@ -257,6 +261,8 @@ export function ActivityView({
     clearEarlierSpace()
   }, [sessionId, conversationReading?.identity, conversationReading?.reference.hostId])
   const nativeHistoryPage = readingWindow.page
+  const speakerOwner = useId()
+  const readingSpeakers = useMemo(() => agentSessionIdsOfUserMessages(readingWindow.projection?.inputs ?? []), [readingWindow.projection])
   const traceDisclosure = useConversationTraceDisclosure(JSON.stringify([executionHostId, sessionId, conversationReading?.identity,
     nativeHistoryPage?.source.providerId, nativeHistoryPage?.source.nativeSessionId]))
   const [pinnedProcess, setPinnedProcess] = useState<string | null>(null)
@@ -270,18 +276,31 @@ export function ActivityView({
     markProgrammaticReadingScroll(feedEl)
     syncTailPosition()
   }, [traceDisclosure.expandedTraces, feedEl])
-  const questionAnswerContext = useMemo(() => recentNativePage
-    ? { ...recentNativePage, items: nativeContextItems ?? recentNativePage.items } : null,
-    [recentNativePage, nativeContextItems])
   const historyBoundary = readingWindow.historyBoundary
   const boundaryTime = historyBoundary?.recordedAt
   const items = readingWindow.captured ?? []
   const readingEnabled = conversationReading?.enabled !== false
   const consumerDocument = useWorkbenchDocument()
   const documentVisible = useWorkbenchDocumentVisibility(consumerDocument)
+  const readingActive = conversationReading?.enabled === true && documentVisible && conversationReading.consumer?.visible !== false &&
+    conversationReading.consumer?.activityShown !== false
+  useEffect(() => { onReadingSpeakers?.(speakerOwner, readingActive ? readingSpeakers : null) }, [onReadingSpeakers, speakerOwner, readingSpeakers, readingActive])
+  useEffect(() => () => onReadingSpeakers?.(speakerOwner, null), [onReadingSpeakers, speakerOwner])
+  const sameQuestionSource = (page: AgentSessionHistoryPage) => Boolean(nativeHistoryPage &&
+    page.agentSessionId === nativeHistoryPage.agentSessionId && page.sourceHostId === nativeHistoryPage.sourceHostId &&
+    page.source.providerId === nativeHistoryPage.source.providerId && page.source.nativeSessionId === nativeHistoryPage.source.nativeSessionId)
+  const suppliedAnswerContext = recentNativePage && sameQuestionSource(recentNativePage) ? recentNativePage : null
+  const needsCurrentAnswers = readingActive && readingWindow.historical && !suppliedAnswerContext &&
+    nativeHistoryPage?.items.some(item => item.questionRequest !== undefined) === true
+  const answers = useConversationView(conversationReading?.port ?? api.conversation, conversationReading?.reference, needsCurrentAnswers,
+    { identity: JSON.stringify([conversationReading?.identity, 'question-answer-context']) })
+  const answerPage = answers.reading?.historyPage
+  const questionAnswerContext = suppliedAnswerContext
+    ? { ...suppliedAnswerContext, items: nativeContextItems ?? suppliedAnswerContext.items }
+    : answerPage && sameQuestionSource(answerPage) ? answerPage : nativeHistoryPage
   const readAhead = useConversationReadAhead({
     identity: JSON.stringify([sessionId, conversationReading?.identity, conversationReading?.reference.hostId, nativeHistoryPage?.source]),
-    active: conversationReading?.enabled === true && documentVisible && conversationReading.consumer?.visible !== false && conversationReading.consumer?.activityShown !== false,
+    active: readingActive,
     stopped: Boolean(readingWindow.held || readingWindow.error || readingWindow.automaticReadError || readingWindow.previousSource),
     loading: readingWindow.loading,
     frame: readingWindow.snapshot,
@@ -758,6 +777,10 @@ export function ActivityView({
     id: 'conversation-records', label: 'Conversation records',
     reasons: [readingWindow.error ?? readingWindow.automaticReadError!.message], loading: readingWindow.loading,
     retryLabel: readingWindow.retryLabel === 'Retry' ? 'Retry conversation records' : readingWindow.retryLabel, retry: readingWindow.retry
+  })
+  if (needsCurrentAnswers && (answers.error || answers.observationError)) readingIssues.push({
+    id: 'question-answers', label: 'Current question answers', reasons: [(answers.error ?? answers.observationError)!.message],
+    loading: answers.loading, retryLabel: 'Retry current question answers', retry: answers.retry
   })
   const emptyReadFailed = Boolean(readingWindow.error || readingWindow.automaticReadError)
   const readingServiceScope = JSON.stringify(['conversation-reading', executionHostId, sessionId, conversationReading?.identity])
