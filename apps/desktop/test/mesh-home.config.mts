@@ -13,6 +13,8 @@ const mutations: Record<string, [string, string, string]> = {
   'unmount-editor': ['MeshSettingsPane.tsx', "mounted('connections') ? <HostSettingsPane", "view === 'connections' ? <HostSettingsPane"],
   'duplicate-add': ['HostSettingsPane.tsx', ' || appliedAddRequest.current === addHostRequest.intentId', ''],
   'filter-all': ['ClusterMachinesPane.tsx', 'fields.some(field => field.toLocaleLowerCase().includes(needle))', 'true'],
+  'empty-saved-map': ['MeshPathsPane.tsx', "hasMeshPeer ? 'mesh' : 'saved'", "'mesh'"],
+  'wrong-map-device': ['MeshSavedConnections.tsx', 'onClick={() => onDevice(host.id)}', 'onClick={() => onDevice("selected-farm")}'],
   'hidden-machines': ['MeshSettingsPane.tsx', "mounted('paths') || mounted('machines')", "view === 'machines'"],
   'hidden-saved-gateways': ['MeshPathsPane.tsx', 'savedTargets={savedTargets}', 'savedTargets={undefined}'],
   'stale-add-after-navigation': ['MeshSettingsPane.tsx', 'function supersedeAdd() { setAddHostRequest(undefined) }', 'function supersedeAdd() {}'],

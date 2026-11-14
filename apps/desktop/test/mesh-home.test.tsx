@@ -18,7 +18,7 @@ let config: AppConfig
 const save = vi.fn(async () => {})
 beforeEach(() => {
   config = { ...structuredClone(composerConfig), hosts: [...composerConfig.hosts, { id: 'selected-farm', kind: 'ssh', label: 'Farm same label', hostname: 'farm-original.internal' }, { id: 'neighbor-farm', kind: 'ssh', label: 'Farm same label', hostname: 'neighbor.internal', runtimeId: 'neighbor-original-runtime', transport: 'ssh-tailcat', tailcat: { address: 'fixture-private-credential', keyFile: 'fixture-client-key-path' } }] }
-  useAppStore.setState({ config, sessions: [], hostChecks: {}, tailcatConnectionDrafts: {}, meshSettingsDrafts: {} })
+  useAppStore.setState({ config, sessions: [], hostChecks: {}, hostTransports: {}, tailcatConnectionDrafts: {}, meshSettingsDrafts: {} })
   vi.spyOn(api.mesh, 'call').mockImplementation(async method => structuredClone(method === 'mesh.inspect' ? observed : saved) as never)
   save.mockClear()
 })
@@ -27,11 +27,16 @@ function pane() { return <MeshSettingsPane config={config} active onSave={save} 
 function editor() { return dom.container.querySelector<HTMLInputElement>('[data-mesh-view="connections"] [data-host-name]')! }
 async function ready() { await vi.waitFor(() => expect(dom.container.querySelector('[data-cluster-host="selected-farm"]')).not.toBeNull()) }
 
-it('the actual SettingsPanel opens a continuous Mesh homepage with world map, gateways and all machines before choosing any subpage', async () => {
+it('the actual SettingsPanel opens a continuous Mesh homepage with saved connection nodes, gateways and machines when Mesh is disabled', async () => {
   await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} />); await ready()
   expect(dom.container.querySelector('[data-mesh-home-view]')?.getAttribute('data-mesh-home-view')).toBe('paths')
   expect([...dom.container.querySelectorAll('.settings-nav-children button')].map(button => button.textContent)).toEqual(['Gateways', 'Machines', 'Device connections'])
-  expect(dom.container.querySelector('[aria-label="World map with no reported device locations"] img')).not.toBeNull()
+  const map = dom.container.querySelector('[aria-label="Saved connection map"]')!
+  expect(map.closest('[hidden]')).toBeNull()
+  expect([...map.querySelectorAll('[data-host-node]')].map(node => node.getAttribute('data-host-node'))).toEqual(['selected-farm', 'neighbor-farm'])
+  expect(map.textContent).toContain('Saved route')
+  expect(map.textContent).toContain('not confirmed')
+  expect(dom.container.querySelector('[aria-label="World map with no reported device locations"]')?.closest('[hidden]')).not.toBeNull()
   await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Saved gateway targets"]')?.textContent).toContain('saved-gateway.internal:8444'))
   expect(dom.container.querySelector('[aria-label="Saved gateway targets"]')?.textContent).toContain('Not observed')
   expect(dom.container.querySelector('[data-cluster-host="selected-farm"]')?.textContent).toContain('farm-original.internal')
@@ -159,4 +164,59 @@ it('left navigation opens each real Mesh subpage and Mesh restores the same over
   expect(dom.container.querySelector('[aria-label="Filter saved devices"]')).toBe(filter)
   expect(filter.value).toBe('neighbor')
   expect(dom.container.querySelectorAll('[data-cluster-host]')).toHaveLength(1)
+})
+
+it('selects an exact saved Host from the diagram and shows its channel independently of a stale connection test', async () => {
+  const host = config.hosts.find(item => item.id === 'neighbor-farm')!
+  const stale = { ...host, label: 'Previous host form' }
+  useAppStore.setState({
+    hostTransports: { [host.id]: { state: 'connected', transport: 'tailcat', fallback: true, observedAt: 2000, establishedAt: 1000 } },
+    hostChecks: { [host.id]: { state: 'ready', input: stale, observedAt: 850 } },
+  })
+  await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} />)
+  await ready()
+  await dom.click('[aria-label="Saved connection map"] [data-host-node="neighbor-farm"]')
+  const detail = dom.container.querySelector('[aria-label="Selected saved connection"]')!
+  expect(detail.textContent).toContain('neighbor.internal')
+  expect(detail.textContent).toContain('Tailcat · Channel connected')
+  expect(detail.textContent).not.toContain('Connection test')
+  await dom.click('[aria-label="Selected saved connection"] button')
+  expect(dom.container.querySelector('[data-resource-editor]')?.getAttribute('data-resource-editor')).toBe('neighbor-farm')
+  expect(save).not.toHaveBeenCalled()
+})
+
+it('opens Mesh paths when a remote peer is observed and keeps the explicitly selected source on refresh', async () => {
+  const identity = { peerId: 'this-core', publicKey: 'fixture', epoch: 1 }
+  let next: MeshNetworkInspection = { ...observed, identity, apply: { state: 'active' }, network: {
+    protocol: 1, networkId: 'fixture-network', state: 'active', identity,
+    peers: [{peerId: 'distant-gateway', state: 'connected', connectionId: 'mesh-fixture-link', rttMs: 11}],
+    records: [], routes: [], circuits: [],
+  } }
+  vi.mocked(api.mesh.call).mockImplementation(async method => structuredClone(method === 'mesh.inspect' ? next : saved) as never)
+  await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} />)
+  const savedButton = '[aria-label="Map source"] button:first-of-type'
+  const meshButton = '[aria-label="Map source"] button:last-of-type'
+  await vi.waitFor(() => expect(dom.container.querySelector(meshButton)?.getAttribute('aria-pressed')).toBe('true'))
+  expect(dom.container.querySelector('.mesh-explorer__canvas')?.closest('[hidden]')).toBeNull()
+  await dom.click(savedButton)
+  expect(dom.container.querySelector('[aria-label="Saved connection map"]')?.closest('[hidden]')).toBeNull()
+  await dom.click('.mesh-explorer__header-actions > button:last-child')
+  expect(dom.container.querySelector(savedButton)?.getAttribute('aria-pressed')).toBe('true')
+  next = { ...observed, identity, apply: { state: 'active' }, network: { ...next.network!, peers: [] } }
+  await dom.click('.mesh-explorer__header-actions > button:last-child')
+  await dom.click(meshButton)
+  expect(dom.container.querySelector('[aria-label="Saved connection map"]')?.closest('[hidden]')).not.toBeNull()
+  expect(dom.container.querySelector(meshButton)?.getAttribute('aria-pressed')).toBe('true')
+})
+
+it('defaults to the saved map when Mesh has only a local peer', async () => {
+  const identity = { peerId: 'this-core', publicKey: 'fixture', epoch: 1 }
+  const own: MeshNetworkInspection = { ...observed, identity, apply: { state: 'active' }, network: {
+    protocol: 1, networkId: 'fixture-network', state: 'active', identity, peers: [], records: [], routes: [], circuits: [],
+  } }
+  vi.mocked(api.mesh.call).mockImplementation(async method => structuredClone(method === 'mesh.inspect' ? own : saved) as never)
+  await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} />)
+  await ready()
+  await vi.waitFor(() => expect(dom.container.querySelector('.mesh-explorer__heading')?.textContent).toContain('No Mesh peers observed'))
+  expect(dom.container.querySelector('[aria-label="Saved connection map"]')?.closest('[hidden]')).toBeNull()
 })

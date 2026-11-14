@@ -5,6 +5,7 @@ import { DesktopClientUiProvider } from '../../../src/renderer/src/components/De
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { connectionLinkUrl } from '@agentmux/relay/offer'
+import type { HostConfig } from '../../../src/shared/contracts'
 import type { MeshNetworkInspection, MeshNetworkSettings } from '@agentmux/core/mesh-network'
 import '../../../src/renderer/src/styles/index.css'
 const ids = ['aa11cc22dd33ee44'.repeat(4), 'bb22dd33ee44ff55'.repeat(4), 'cc33ee44ff55aa66'.repeat(4), 'dd44ff55aa66bb77'.repeat(4), 'ee55aa66bb77cc88'.repeat(4)]
@@ -37,7 +38,7 @@ const samples: Record<string, number> = {}
 const resource = (id: string) => {
  const step = samples[id] = (samples[id] ?? 0) + 1, index = ['local','farm-cn1','studio','build','private','unavailable'].indexOf(id)
  const node = { runtimeId: id === 'local' ? 'runtime-this-mac' : 'runtime-'+id, ownerInstanceId: 'original-'+id, alias: id }
- if (id === 'private') return { node, policyRevision: 'private-policy', status: 'withheld' }
+ if (id === 'private' || index < 0) return { node, policyRevision: 'private-policy', status: 'withheld' }
  if (id === 'unavailable') throw Error('This saved Host did not return resource observations. Its connection and original work are retained.')
  const total=1024**3*[32,64,16,128][index]!, used=[.39,.72,.48,.87][index]!
  return {node,policyRevision:'original-policy',status:'available',sample:{node,policyRevision:'original-policy',processId:2450+index,observedAt:Date.now(),system:{state:'available',value:{platform:index===0||index===2?'darwin':'linux',architecture:'arm64',uptimeSeconds:86400*(index+3)+3768}},cpu:{state:'available',value:{logicalCpus:8,userMs:step*(index+1)*100,niceMs:0,systemMs:step*50,idleMs:step*(950-(index+1)*100),irqMs:0,loadAverage:[1.7+index,1.2+index,.9+index]}},memory:{state:'available',value:{totalBytes:total,freeBytes:total*(1-used)}},filesystem:{state:'available',value:{root:null,totalBytes:1024**4,availableBytes:1024**4*(1-used/1.2)}},process:{state:'available',value:{cpuUserMicros:10000*step,cpuSystemMicros:1000*step,rssBytes:1024**2*(85+index*25),heapUsedBytes:1,heapTotalBytes:2,externalBytes:1,uptimeSeconds:10000}}}}
@@ -45,6 +46,14 @@ const resource = (id: string) => {
 api.nodePublishing.call=(async(method:string,params:any)=>method==='node.inspect'?{node:{runtimeId:params.hostId==='local'?'runtime-this-mac':'runtime-'+params.hostId,ownerInstanceId:'original-'+params.hostId,alias:params.hostId},policyRevision:'original-policy',resourcesShared:true,roots:[],landing:null}:resource(params.hostId)) as typeof api.nodePublishing.call
 api.nodePublishing.owner=(async(target:any)=>{if(target.hostId==='private')throw Error('This device has published access only.');return resource(target.hostId)}) as typeof api.nodePublishing.owner
 mountThemeRuntime(window, { appAppearance: 'dark' })
-useAppStore.setState({ config: { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' },{ id:'farm-cn1',kind:'ssh',label:'Farm CN1',hostname:'farm-cn1.internal',runtimeId:'runtime-farm-cn1' },{id:'studio',kind:'ssh',label:'Studio Mac',hostname:'studio.internal',runtimeId:'runtime-studio'},{id:'build',kind:'ssh',label:'Build runner',hostname:'build.internal',runtimeId:'runtime-build'},{id:'private',kind:'ssh',label:'Private workspace',hostname:'private.internal',runtimeId:'runtime-private'},{id:'unavailable',kind:'ssh',label:'Remote workbench · secondary machine',hostname:'remote.internal',runtimeId:'runtime-unavailable'}], executors: {}, workspaces: [], appearance: { terminalTheme: 'graphite' }, browser: { toolbar: {} } } as never, sessions: [], meshSettingsDrafts: {} })
+useAppStore.setState({ config: { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' },{ id:'farm-cn1',kind:'ssh',label:'Farm CN1',hostname:'farm-cn1.internal',runtimeId:'runtime-farm-cn1' },{id:'studio',kind:'ssh',label:'Studio Mac',hostname:'studio.internal',runtimeId:'runtime-studio'},{id:'build',kind:'ssh',label:'Build runner',hostname:'build.internal',runtimeId:'runtime-build'},{id:'private',kind:'ssh',label:'Private workspace',hostname:'private.internal',runtimeId:'runtime-private'},{id:'unavailable',kind:'ssh',label:'Remote workbench · secondary machine',hostname:'remote.internal',runtimeId:'runtime-unavailable'},...(state === 'initial' ? ([
+ { id:'build-secondary',kind:'ssh',label:'Build secondary',hostname:'build-secondary.internal',runtimeId:'runtime-build-secondary' },
+ { id:'studio-tailcat',kind:'ssh',label:'Studio backup connection',hostname:'studio-backup.internal',runtimeId:'runtime-studio-tailcat',transport:'ssh-tailcat' },
+ { id:'compute-east',kind:'ssh',label:'Compute East',hostname:'compute-east.internal',runtimeId:'runtime-compute-east' },
+] satisfies HostConfig[]) : [])], executors: {}, workspaces: [], appearance: { terminalTheme: 'graphite' }, browser: { toolbar: {} } } as never, sessions: [], meshSettingsDrafts: {}, hostTransports: {
+  studio: {state:'connected', transport:'ssh', fallback:false, observedAt:Date.now(), establishedAt:Date.now()-180000},
+  'farm-cn1': {state:'disconnected', transport:'ssh', fallback:false, observedAt:Date.now(), establishedAt:Date.now()-180000},
+  'studio-tailcat': {state:'connected', transport:'tailcat', fallback:true, observedAt:Date.now(), establishedAt:Date.now()-180000},
+ } })
 createRoot(document.getElementById('root')!).render(<DesktopClientUiProvider><div className="mesh-review-shell"><SettingsPanel onClose={() => {}} initialSection="hosts" /><footer className="mesh-review-footer">Visual fixture · production Settings · controlled topology/resource observations; not live host telemetry</footer></div></DesktopClientUiProvider>)
 Object.assign(window, { meshFixture: { originalOffer, endpoint: () => { state = 'endpoint' }, theme: (mode: 'dark' | 'light') => updateThemeSelection({ appAppearance: mode }), failure: () => { state = 'failure'; settings = { ...settings, revision: 'saved-9' } } } })
