@@ -12,7 +12,8 @@ import {
   applyWorkbenchViewCloseTopology,
   closingWorkbenchTabs,
   planWorkbenchViewClose,
-  reconcileWorkbenchViewClose
+  reconcileWorkbenchViewClose,
+  workbenchViewCloseStillApproved
 } from '../src/renderer/src/lib/workbench-view-close.js'
 
 function terminalSession(id: string): SessionSnapshot {
@@ -94,6 +95,14 @@ function planFor(tab: ReturnType<typeof terminalTab>, sessions: SessionSnapshot[
 }
 
 describe('Workbench View close ownership', () => {
+  it('[confirmation-target] an unchanged Browser cannot authorize a different bound Agent Stop', () => {
+    const first = agentSession('first'), second = agentSession('second')
+    const browser = { ...browserSurface('page-region', 'same-browser'), agent: { hostId: 'local', agentSessionId: 'first' } }
+    const tab = createWorkbenchTab('view', browser), original = planFor(tab, [first, second])
+    const replacement = createWorkbenchTab('view', { ...browser, agent: { hostId: 'local', agentSessionId: 'second' } })
+    const current = planFor(replacement, [first, second])
+    expect(workbenchViewCloseStillApproved(original, current, replacement)).toBe(false)
+  })
   it('freezes the exact Surface owners and resource controls captured by the plan', () => {
     const session = terminalSession('run-1')
     const terminal = terminalTab('view', 'terminal-region', session.id)

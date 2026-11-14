@@ -80,6 +80,120 @@ async function click(label: string) {
 const dialog = () => document.querySelector('[role="dialog"]')
 const regions = () => Object.keys(useAppStore.getState().tabs[split.id]!.regions)
 
+it.each(['tab', 'region'] as const)('[confirmation-target] %s rejects a replacement Agent before the original Stop and permits a fresh request', async kind => {
+  await mount(); await askClose(kind)
+  await act(async () => useAppStore.setState(state => ({ tabs: { [split.id]: { ...state.tabs[split.id]!, regions: {
+    ...state.tabs[split.id]!.regions, 'lonely-region': { ...split.regions['lonely-region']!, sessionId: shared.id } } } },
+    layouts: { workspace: createWorkspaceLayout('group', [split.id]) } })))
+  const replacement = useAppStore.getState().tabs[split.id]!
+  await click('Stop & Close')
+  expect(api.sessions.stop).not.toHaveBeenCalled(); expect(dialog()).toBeNull()
+  expect(useAppStore.getState().tabs[split.id]).toBe(replacement)
+  expect(String(useAppStore.getState().error ?? '')).toContain('Close it again')
+  expect(useAppStore.getState().sessions.find(session => session.id === shared.id)?.control).toEqual(shared.control)
+  await askClose(kind); await click('Keep Session & Close')
+  expect(api.sessions.stop).not.toHaveBeenCalled()
+  expect(useAppStore.getState().tabs[split.id]?.regions['lonely-region']).toBeUndefined()
+})
+
+it.each(['tab', 'region'] as const)('[confirmation-target] %s permits title favicon and ordinary status updates', async kind => {
+  const browser = { ...file, kind: 'browser' as const, id: 'metadata-browser', browserId: 'metadata-browser', regionId: 'metadata-browser-region',
+    navigationId: 'metadata-navigation', mode: 'normal' as const, profileId: 'profile', url: 'https://example.test/', title: 'Before',
+    loading: false, canGoBack: false, canGoForward: false, viewport: 'responsive' as const, driving: false, appLinkPrompt: null, error: null, agent: null }
+  const withBrowser = addWorkbenchRegion(split, 'file-region', 'right', browser)
+  useAppStore.setState(state => ({ tabs: { ...state.tabs, [split.id]: withBrowser } }))
+  await mount(); await askClose(kind)
+  await act(async () => useAppStore.setState(state => ({ tabs: { ...state.tabs, [split.id]: { ...withBrowser, name: 'Updated title',
+    regions: { ...withBrowser.regions, [browser.regionId]: { ...browser, title: 'After', faviconDataUrl: 'data:image/png;base64,AA==' } } } },
+    sessions: state.sessions.map(session => session.kind === 'agent' && session.id === lonely.id ? { ...session, label: 'Updated Agent', status: { ...session.status, state: 'waiting' as const, observedAt: 12 } } : session) })))
+  await click('Stop & Close')
+  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(lonely.control, expect.any(String))
+  expect(useAppStore.getState().tabs[split.id]?.regions['lonely-region']).toBeUndefined()
+})
+
+it.each(['tab', 'region'] as const)('[confirmation-target] %s keeps a Session now shown in another View', async kind => {
+  await mount(); await askClose(kind)
+  const other = createWorkbenchTab('new-view', { ...split.regions['lonely-region']!, regionId: 'new-view-region' })
+  await act(async () => useAppStore.setState(state => ({ tabs: { ...state.tabs, [other.id]: other },
+    layouts: { workspace: createWorkspaceLayout('group', [split.id, elsewhere.id, other.id]) } })))
+  await click('Stop & Close')
+  expect(api.sessions.stop).not.toHaveBeenCalled()
+  expect(useAppStore.getState().tabs[split.id]?.regions['lonely-region']).toBeUndefined()
+  expect(useAppStore.getState().tabs[other.id]).toBe(other)
+  expect(useAppStore.getState().sessions.find(session => session.id === lonely.id)?.control).toEqual(lonely.control)
+})
+
+it('[confirmation-target] a new display of the same Tab permits removing only the originally approved binding', async () => {
+  const placeholder = createWorkbenchTab('other-placeholder', { kind: 'launcher', regionId: 'placeholder-region', workspaceId: 'workspace' })
+  const layout = createWorkspaceLayout('group', [split.id, elsewhere.id])
+  layout.groups.push({ id: 'new-display', tabOrder: [placeholder.id], activeTabId: placeholder.id, recentTabIds: [placeholder.id] })
+  layout.root = { type: 'split', direction: 'horizontal', ratio: 0.5, first: layout.root, second: { type: 'leaf', groupId: 'new-display' } }
+  useAppStore.setState(state => ({ tabs: { ...state.tabs, [placeholder.id]: placeholder }, layouts: { workspace: layout } }))
+  await mount(); await askClose('tab')
+  const state = useAppStore.getState()
+  await act(async () => useAppStore.setState({ layouts: { workspace: { ...layout, groups: layout.groups.map(group => group.id === 'new-display'
+    ? { ...group, tabOrder: [placeholder.id, split.id], activeTabId: split.id, recentTabIds: [placeholder.id, split.id] } : group) } } }))
+  await click('Stop & Close')
+  expect(api.sessions.stop).not.toHaveBeenCalled(); expect(useAppStore.getState().tabs[split.id]).toBe(state.tabs[split.id])
+  expect(useAppStore.getState().layouts.workspace!.groups.find(group => group.id === 'group')!.tabOrder).not.toContain(split.id)
+  expect(useAppStore.getState().layouts.workspace!.groups.find(group => group.id === 'new-display')!.tabOrder).toContain(split.id)
+})
+
+it.each(['tab', 'region'] as const)('[confirmation-target] %s does not require an old Session observation when no Stop is consumed', async kind => {
+  await mount(); await askClose(kind)
+  await act(async () => useAppStore.setState({ sessions: [] }))
+  await click('Stop & Close')
+  expect(api.sessions.stop).not.toHaveBeenCalled()
+  expect(useAppStore.getState().tabs[split.id]?.regions['lonely-region']).toBeUndefined()
+})
+
+it('[confirmation-target] a new Run requires a new Stop confirmation for the same Session', async () => {
+  await mount(); await askClose('tab')
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.kind === 'agent' && session.id === lonely.id
+    ? { ...session, control: { ...session.control, run: { runId: 'new-original-run' } } } : session) })))
+  const original = useAppStore.getState().tabs[split.id]
+  await click('Stop & Close')
+  expect(api.sessions.stop).not.toHaveBeenCalled(); expect(useAppStore.getState().tabs[split.id]).toBe(original)
+  await askClose('tab'); await click('Keep Session & Close')
+  expect(useAppStore.getState().tabs[split.id]).toBeUndefined(); expect(api.sessions.stop).not.toHaveBeenCalled()
+})
+
+it('[confirmation-target] the same file path in another resource Workspace is replacement content', async () => {
+  useAppStore.setState({ dirtyDocuments: { [documentKey(file.workspaceId, file.path)]: true } })
+  await mount(); await askClose('tab')
+  await act(async () => useAppStore.setState(state => ({ tabs: { ...state.tabs, [split.id]: { ...split,
+    regions: { ...split.regions, [file.regionId]: { ...file, workspaceId: 'different-resource' } } } } })))
+  const replacement = useAppStore.getState().tabs[split.id]
+  await click('Stop & Close')
+  expect(api.sessions.stop).not.toHaveBeenCalled(); expect(useAppStore.getState().tabs[split.id]).toBe(replacement)
+  expect(useAppStore.getState().dirtyDocuments[documentKey(file.workspaceId, file.path)]).toBe(true)
+})
+
+it.each(['missing', 'exited'] as const)('[confirmation-target] Region Stop succeeds when its confirmed receipt leaves the Session %s', async outcome => {
+  vi.mocked(api.sessions.stop).mockImplementationOnce(async (control, operationId) => {
+    const receipt = control.kind === 'agent' ? sessionStopReceipt(control, operationId!) : undefined
+    useAppStore.setState(state => ({ sessions: outcome === 'missing' ? state.sessions.filter(session => session.id !== lonely.id)
+      : state.sessions.map(session => session.id === lonely.id ? { ...session, processState: 'exited' as const } : session) }))
+    return receipt
+  })
+  await mount(); await askClose('region'); await click('Stop & Close')
+  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(lonely.control, expect.any(String))
+  expect(useAppStore.getState().tabs[split.id]?.regions['lonely-region']).toBeUndefined()
+})
+
+it('[confirmation-target] a new Run appearing after the Region Stop receipt remains visible', async () => {
+  vi.mocked(api.sessions.stop).mockImplementationOnce(async (control, operationId) => {
+    const receipt = control.kind === 'agent' ? sessionStopReceipt(control, operationId!) : undefined
+    useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.kind === 'agent' && session.id === lonely.id
+      ? { ...session, control: { ...session.control, run: { runId: 'late-new-run' } } } : session) }))
+    return receipt
+  })
+  await mount(); await askClose('region'); await click('Stop & Close')
+  expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(lonely.control, expect.any(String))
+  expect(useAppStore.getState().tabs[split.id]?.regions['lonely-region']).toEqual(split.regions['lonely-region'])
+  expect(useAppStore.getState().sessions.find(session => session.id === lonely.id)?.control.run.runId).toBe('late-new-run')
+})
+
 async function askClose(kind: 'tab' | 'region') {
   if (kind === 'region') await closeSplit('lonely-region')
   else {
