@@ -19,8 +19,7 @@ const derived = (): GoalPlanState => goalPlanState(projectGoalPlan(plan, delegat
 const owner = () => ({ goalId: 'goal', goalUpdatedAt: 1, diskDurability: 'confirmed', delegations, plan, planState: derived(),
   goalState: { status: 'in_progress', supervisorSessionId: 'mote', alignment } })
 const parse = (value: unknown) => parseGoalDelegationResult(value, { goalId: 'goal' })
-const refused = (detail: string) => expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR',
-  message: expect.stringMatching(new RegExp(`does not describe its plan and delegations: .*${detail}.*read the Goal again instead of repeating the write`, 'u')) })
+const unavailable = (detail: string) => expect.objectContaining({ planStateIssue: expect.stringContaining(detail) })
 
 const mismatches: Array<[string, string, (state: GoalPlanState) => void]> = [
   ['it describes another plan revision', 'another plan revision', state => { state.revision = 2 }],
@@ -30,12 +29,9 @@ const mismatches: Array<[string, string, (state: GoalPlanState) => void]> = [
   ['an unknown node names no reason', 'exactly when it is unknown', state => { state.nodes[0]!.unknown = [] }],
   ['a reason is outside the set', 'exactly when it is unknown', state => { Object.assign(state.nodes[0]!, { unknown: ['dispatch-link', 'mood'] }) }],
   ['a known state names a reason', 'exactly when it is unknown', state => { state.nodes[0]!.state = 'working' }],
-  ['the attempt names another source message', 'not one of its delegations', state => { state.nodes[0]!.attempt!.sourceMessageId = 'another-source' }],
-  ['the attempt names another thread', 'not one of its delegations', state => { state.nodes[0]!.attempt!.threadId = 'another-thread' }],
-  ['the attempt names another worker Host', 'not one of its delegations', state => { state.nodes[0]!.attempt!.workerHostId = 'another-host' }],
-  ['the attempt names another worker Session', 'not one of its delegations', state => { state.nodes[0]!.attempt!.workerAgentSessionId = 'another-worker' }],
   ['the attempt is a delegation of another node', 'not one of its delegations', state => { state.nodes[0]!.attempt = { ...state.nodes[1]!.attempt! } }],
   ['the attempt names no delegation', 'not one of its delegations', state => { state.nodes[0]!.attempt!.delegationOperationId = 'delegate-elsewhere' }],
+  ['the reported observation is not a boolean', 'not one of its delegations', state => { Object.assign(state.nodes[0]!.attempt!, { reported: 'yes' }) }],
   ['it counts attempts beyond the delegations', 'attempts beyond its delegations', state => { state.nodes[0]!.attempts = 2 }],
   ['a current attempt comes without attempts', 'without attempts', state => { state.nodes[0]!.attempts = 0 }],
   ['its next nodes leave the plan', 'outside the plan', state => { state.next = ['elsewhere'] }],
@@ -45,18 +41,23 @@ const mismatches: Array<[string, string, (state: GoalPlanState) => void]> = [
 describe('the plan state a Goal owner returns', () => {
   it('reaches readers as the derivation of the same plan, delegations and criteria', () => {
     expect(parse(owner()).planState!.nodes[0]).toEqual({ id: 'api', state: 'unknown', column: 0, attempts: 1, staleCriteria: [], unknown: ['dispatch-link'],
-      attempt: { delegationOperationId: 'delegate-api', sourceMessageId: 'source-api', threadId: 'thread-api', workerHostId: 'local', workerAgentSessionId: 'worker', reported: false } })
+      attempt: { delegationOperationId: 'delegate-api', reported: false } })
   })
 
-  it.each(mismatches)('is refused when %s', (_mismatch, detail, change) => {
+  it.each(mismatches)('isolates only the derivation when %s', (_mismatch, detail, change) => {
     const value = owner(); change(value.planState)
-    expect(() => parse(value)).toThrow(refused(detail))
+    const read = parse(value)
+    expect(read).toMatchObject({ plan, delegations, diskDurability: 'confirmed' })
+    expect(read).toEqual(unavailable(detail))
+    expect(read).not.toHaveProperty('planState')
   })
 
-  it('is refused when it arrives without its plan, since a write in the request may already be saved', () => {
+  it('isolates orphan state while retaining the original operation result', () => {
     const { plan: _orphan, ...orphan } = owner()
-    expect(() => parse(orphan)).toThrow(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR', message: 'The Goal owner returned a plan state that comes without its plan. '
-      + 'A write in this request may already be saved by the owner; read the Goal again instead of repeating the write.' }))
+    const read = parse(orphan)
+    expect(read).toMatchObject({ goalId: 'goal', delegations, diskDurability: 'confirmed' })
+    expect(read).toEqual(unavailable('without a plan'))
+    expect(read).not.toHaveProperty('planState')
   })
 
   it('is kept as the owner derivation when the owner rules differ from this reader', () => {
@@ -71,6 +72,17 @@ describe('the plan state a Goal owner returns', () => {
     const read = parse(older)
     expect(read).toMatchObject({ plan, delegations })
     expect(read).not.toHaveProperty('planState')
+    expect(read.planStateIssue).toContain('owner returned no derivation')
+  })
+
+  it('preserves the specific reading issue across public decodes and clears it after a valid read', () => {
+    const value = owner(); value.planState.revision = 2
+    const first = parse(value), twice = parse(first)
+    expect(twice.planStateIssue).toBe(first.planStateIssue)
+    expect(twice.planStateIssue).toContain('another plan revision')
+    expect(parse({ ...owner(), planStateIssue: first.planStateIssue })).not.toHaveProperty('planStateIssue')
+    const { planState: _state, plan: _plan, ...withoutPlan } = owner()
+    expect(parse(withoutPlan)).not.toHaveProperty('planStateIssue')
   })
 })
 
@@ -84,9 +96,12 @@ describe('a Goal record from its owner', () => {
     expect(inspect(record({ planState: derived() })).planState).toEqual(derived())
   })
 
-  it('is refused when its plan state does not describe its plan and delegations', () => {
-    const planState = derived(); planState.nodes[0]!.attempt!.threadId = 'another-thread'
-    expect(() => inspect(record({ planState }))).toThrow(refused('not one of its delegations'))
+  it('keeps the Goal record when its derivation names another delegation', () => {
+    const planState = derived(); planState.nodes[0]!.attempt!.delegationOperationId = 'another-delegation'
+    const read = inspect(record({ planState }))
+    expect(read).toMatchObject({ id: 'goal', plan, delegations })
+    expect(read).toEqual(unavailable('not one of its delegations'))
+    expect(read).not.toHaveProperty('planState')
   })
 
   it('still reads without a derivation, and carries none', () => {

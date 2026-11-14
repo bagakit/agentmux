@@ -236,11 +236,10 @@ describe('node delegation and review', () => {
     await deliver(delegation('a'))
     await store.prepareDelegation('goal', delegation('b', 'worker-b'), 'mote')
     const goal = (await store.get('goal'))!
-    const attempt = (id: string, worker: string, reported: boolean) =>
-      ({ delegationOperationId: `delegate-${id}-1`, sourceMessageId: `source-${id}-1`, threadId: `thread-${id}`, workerHostId: 'local', workerAgentSessionId: worker, reported })
+    const attempt = (id: string, reported: boolean) => ({ delegationOperationId: `delegate-${id}-1`, reported })
     expect(goalPlanState(projectGoalPlan(goal.plan!, goal.delegations!, goal.alignment!.criteria))).toEqual({ revision: 1, done: 0, total: 3, next: [], nodes: [
-      { id: 'a', state: 'review', column: 0, attempts: 1, staleCriteria: [], unknown: [], attempt: attempt('a', 'worker-a', true) },
-      { id: 'b', state: 'unknown', column: 0, attempts: 1, staleCriteria: [], unknown: ['dispatch-link'], attempt: attempt('b', 'worker-b', false) },
+      { id: 'a', state: 'review', column: 0, attempts: 1, staleCriteria: [], unknown: [], attempt: attempt('a', true) },
+      { id: 'b', state: 'unknown', column: 0, attempts: 1, staleCriteria: [], unknown: ['dispatch-link'], attempt: attempt('b', false) },
       { id: 'c', state: 'waiting', column: 1, attempts: 0, staleCriteria: [], unknown: [], attempt: null }] })
   })
 
