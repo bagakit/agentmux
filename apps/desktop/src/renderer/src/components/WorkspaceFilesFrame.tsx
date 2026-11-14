@@ -55,8 +55,10 @@ export function WorkspaceFilesFrame({ workspace, visible, presentation, title, s
     {directoryFirst ? <div className="workspace-topic-files__content">{fileContent}</div> : fileContent}
   </Panel>
   return <div className={`workspace-tool-explorer${directoryFirst ? ' workspace-tool-explorer--directory-first' : ''}${!showExplorer ? ' workspace-tool-explorer--content-only' : ''}`}>
-    <SourceFilesAccess key={JSON.stringify([workspace.id, workspace.hostId, workspace.path])} workspace={workspace} visible={visible && showExplorer} />
-    {!directoryFirst ? context : null}
+    <div className="workspace-files-source">
+      <SourceFilesAccess key={JSON.stringify([workspace.id, workspace.hostId, workspace.path])} workspace={workspace} visible={visible && showExplorer} />
+      {!directoryFirst ? context : null}
+    </div>
     <PanelGroup direction="vertical" className={collapsed ? 'workspace-tools-collapsed' : 'workspace-tools-split'}
       key={presentation.showTopics ? 'content-slot-topics' : 'content-slot-branches'}>
       {/* Page visibility leaves the original panel and file instance in place.

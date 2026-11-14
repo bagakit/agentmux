@@ -12,7 +12,7 @@
 .topic-navigation-panel__topics { display: flex; flex-direction: column; }
 .topic-navigation-panel__topics[hidden], .topic-navigation-panel__knowledge[hidden] { display: none; }
 .topic-navigation-panel > .surface-mode-switch { flex-shrink: 0; }
-.workspace-tool-explorer--directory-first { --topic-files-header-height: 34px; display: block; }
+.workspace-tool-explorer--directory-first { --topic-files-header-height: 34px; }
 .workspace-tool-explorer--directory-first .workspace-tools-split { height: 100%; }
 .workspace-topic-files { display: flex; flex-direction: column; }
 .workspace-topic-files > .workspace-tool-context { height: var(--topic-files-header-height); flex: 0 0 var(--topic-files-header-height); }
