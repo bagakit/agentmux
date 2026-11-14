@@ -30,17 +30,18 @@ beforeEach(() => { noticeActions.length = 0; vi.spyOn(api.sessions, 'dispatches'
 async function render(visible = true, current = control, reading?: ConversationReadingProps) { await dom.render(<SessionMailbox control={current} visible={visible} system={system} queued={[]} reading={reading} />) }
 async function toggle(newState: 'open' | 'closed') { const event = new Event('toggle'); Object.defineProperty(event, 'newState', { value: newState }); await act(async () => dom.container.querySelector('.composer-mailbox')!.dispatchEvent(event)) }
 async function start() { await render(); await toggle('open'); await dom.click('[role="tab"][id$="-collaboration-tab"]') }
-const textButton = (text: string) => [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === text)!
+const textButton = (text: string) => [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.getAttribute('aria-label') === text || button.textContent === text)!
 async function clickText(text: string) { await act(async () => textButton(text).click()) }
 async function select(id = 'source-one') { await dom.click(`[data-source-message="${id}"]`) }
 async function expand(id = 'source-one') { const details = dom.container.querySelector<HTMLDetailsElement>(`[data-message-id="${id}"]`)!; await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) }); return details }
+async function showOriginalInfo(id = 'source-one') { await dom.click(`[data-message-id="${id}"] [aria-label="Message details"]`) }
 
 it('the original Mailbox reads only its visible collaboration folder and exact Host participant', async () => {
   await render(); expect(api.sessions.dispatches).not.toHaveBeenCalled(); await toggle('open'); expect(api.sessions.dispatches).not.toHaveBeenCalled()
   await dom.click('[role="tab"][id$="-collaboration-tab"]')
   expect(api.sessions.dispatches).toHaveBeenCalledExactlyOnceWith({ hostId: 'local', agentSessionId: 'owner-agent' }, { limit: 20 })
   await select(); expect(api.sessions.dispatch).toHaveBeenCalledWith({ hostId: 'local', agentSessionId: 'owner-agent' }, 'source-one')
-  await expand(); expect(dom.container.textContent).toContain('original-run-owner-agent'); expect(dom.container.textContent).toContain('operation-source-one')
+  await expand(); await showOriginalInfo(); expect(document.body.textContent).toContain('original-run-owner-agent'); expect(document.body.textContent).toContain('operation-source-one')
   expect(dom.container.textContent).toContain('Delivery and supervision do not confirm execution or Goal acceptance')
   expect(dom.container.textContent).toContain('Current identity observation is unconfirmed'); expect(dom.container.textContent).not.toContain('Execution complete')
 })
@@ -140,7 +141,7 @@ it('original message file references cannot inherit the current reader workspace
   await render(true, control, { workspaceRoot: fixturePath('workspace/reader'), openWorkspaceFile, readPastedImage, openHttpLink }); await toggle('open'); await dom.click('[id$="-collaboration-tab"]'); await select(); await expand()
   expect(dom.container.querySelector('.md-link--file')).toBeNull(); expect(openWorkspaceFile).not.toHaveBeenCalled(); expect(readPastedImage).not.toHaveBeenCalled()
   const web = [...dom.container.querySelectorAll<HTMLElement>('button,a')].find(node => node.textContent === 'Web evidence')!; expect(web).toBeDefined(); await act(async () => web.click())
-  expect(openHttpLink).toHaveBeenCalled(); expect(dom.container.textContent).toContain('Recorded Workspace')
+  expect(openHttpLink).toHaveBeenCalled(); await showOriginalInfo(); expect(document.body.textContent).toContain('Recorded Workspace')
 })
 
 async function findLoaded(value: string) {
@@ -171,7 +172,7 @@ it('current presentation names help find original identities without changing th
   expect(dom.container.querySelectorAll('[data-source-message]')).toHaveLength(2); expect(dom.container.textContent).toContain('Review owner → Implementation colleague')
   expect(dom.container.textContent).toContain('owner-agent → worker-agent'); expect(readDetails).not.toHaveBeenCalled()
   await select('source-two'); expect(api.sessions.dispatch).toHaveBeenLastCalledWith({ hostId: 'local', agentSessionId: 'owner-agent' }, 'source-two')
-  await expand('source-two'); expect(dom.container.textContent).toContain('original-run-owner-agent')
+  await expand('source-two'); await showOriginalInfo('source-two'); expect(document.body.textContent).toContain('original-run-owner-agent')
 })
 it('communication filters never imply execution, and clearing filters returns focus without writing the draft', async () => {
   const reported = observation('source-two').dispatch; reported.originAwaits = false
@@ -262,7 +263,7 @@ it('keeps collaboration help deliberate without reading, clearing filters or cha
   expect(dom.container.querySelector('[role="status"]')?.textContent).toContain('This list only')
   const lists = vi.mocked(api.sessions.dispatches).mock.calls.length
   await act(async () => { help.open = true; help.dispatchEvent(new Event('toggle')) })
-  expect(help.textContent).toContain('Other Agent messages remain in Inbox and Outbox')
+  expect(help.textContent).toContain('Other Agent messages remain in Received and Sent')
   expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Find loaded collaboration records"]')!.value).toBe('source-two')
   expect(dom.container.querySelectorAll('[data-source-message]')).toHaveLength(1)
   expect(api.sessions.dispatches).toHaveBeenCalledTimes(lists); expect(api.sessions.dispatch).not.toHaveBeenCalled()
