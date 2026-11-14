@@ -42,7 +42,7 @@ export function MobileAgentLocations({ client, catalog, locations, agentSessionI
   for (const group of groups.values()) { const key = `${group.title}\n${group.path}`; headings.set(key, (headings.get(key) ?? 0) + 1) }
   async function choose(place: AgentMuxSpaceAddress) {
     const source = current.current, runtime = client?.runtimeOwnerIdentity(), operation = ++request.current
-    if (!source.client?.forwardRpc || !source.hostId) { setIssue('此位置的来源或目录读取还没确认，原对话仍可打开。'); return }
+    if (!source.client?.forwardRpc || !source.hostId) { setIssue('这个位置还没确认，对话仍可打开。'); return }
     const stillCurrent = () => mounted.current && operation === request.current && current.current.client === source.client &&
       current.current.agentSessionId === source.agentSessionId && current.current.hostId === source.hostId && current.current.open && current.current.visible
     setPending(true); setIssue('')
@@ -64,7 +64,7 @@ export function MobileAgentLocations({ client, catalog, locations, agentSessionI
       const owner = current.current.client?.runtimeOwnerIdentity()
       if (stillCurrent()) setIssue(runtime?.runtimeId !== owner?.runtimeId || runtime?.ownerInstanceId !== owner?.ownerInstanceId
         ? '读取期间连接已改变，这次没有打开；请在当前目录重新选择。'
-        : `位置暂时读不到，原对话仍可打开。${error instanceof Error ? error.message : String(error)}`)
+        : `位置暂时读不到，对话仍可打开。${error instanceof Error ? error.message : String(error)}`)
     }
     finally { if (stillCurrent()) setPending(false) }
   }
@@ -75,7 +75,7 @@ export function MobileAgentLocations({ client, catalog, locations, agentSessionI
       <Dialog.Close asChild><IconButton className="mobile-icon-button" aria-label="关闭位置选择"><SemanticIcon name="action.close" size={18} /></IconButton></Dialog.Close></div>
     <Dialog.Description id={description}>{label}{locations && locations.addresses.length > locations.count ? `，${locations.addresses.length} 个空间入口。` : ' · 选择要查看的工作面。'}</Dialog.Description>
     {issue && <p role="status" className="mobile-agent-locations-issue">{issue}</p>}
-    {!locations?.addresses.length && <p>{known ? '当前目录没有已绑定的展示位置，原对话入口仍可使用。' : '位置事实还没确认，原对话入口仍可使用；可返回目录刷新。'}</p>}
+    {!locations?.addresses.length && <p>{known ? '当前目录没有展示位置，对话入口仍可使用。' : '位置还没确认，对话入口仍可使用；请返回目录刷新。'}</p>}
     {open && <div className="mobile-agent-locations-list" aria-busy={pending}>{[...groups].map(([key, group]) => <section key={key} className="mobile-agent-location-group" aria-label={`${group.title}的位置`}>
       <header><strong>{group.title}</strong>{group.path && <small>{group.path}</small>}{headings.get(`${group.title}\n${group.path}`)! > 1 && <small>区域 {group.regionId}</small>}</header>
       {group.entries.map(({ place, title, detail }) => <section key={locationContextKey(place)} className="mobile-agent-location">
