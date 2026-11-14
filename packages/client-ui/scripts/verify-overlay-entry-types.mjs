@@ -14,6 +14,14 @@ const entries = {
         </Modal.Content>
       </Modal.Portal>
     </Modal.Root></ClientUiOverlayProvider>`,
+  dropdown: `import * as Menu from '@agentmux/client-ui/components/DropdownMenu'
+    import { ClientUiOverlayProvider, type ClientUiOverlayHost } from '@agentmux/client-ui/overlay-host'
+    const host: ClientUiOverlayHost = { ownerDocument: document, overlayContainer: () => document.body }
+    export const example = <ClientUiOverlayProvider host={host}><Menu.Root modal={false}>
+      <Menu.Trigger>File actions</Menu.Trigger><Menu.Portal><Menu.Content>
+        <Menu.Item onSelect={() => document.body.dataset.saved = 'true'}>Save original</Menu.Item>
+      </Menu.Content></Menu.Portal>
+    </Menu.Root></ClientUiOverlayProvider>`,
   menu: `import * as Menu from '@agentmux/client-ui/components/HoverDropdownMenu'
     import { ClientUiOverlayProvider, type ClientUiOverlayHost } from '@agentmux/client-ui/overlay-host'
     const host: ClientUiOverlayHost = { ownerDocument: document, overlayContainer: () => document.body }
@@ -46,7 +54,7 @@ function compile(name, text, mutate = false) {
   const diagnostics = ts.getPreEmitDiagnostics(program)
   const sources = program.getSourceFiles().map(file => file.fileName)
   assert.ok(sources.includes(overlay), 'Compile the real public Overlay host')
-  assert.ok(sources.some(file => file.endsWith('/components/' + (name === 'menu' ? 'HoverDropdownMenu' : 'Modal') + '.tsx')), 'Compile the actual published component entry')
+  assert.ok(sources.some(file => file.endsWith('/components/' + ({ menu: 'HoverDropdownMenu', dropdown: 'DropdownMenu', modal: 'Modal' }[name]) + '.tsx')), 'Compile the actual published component entry')
   const domainSources = sources.filter(file => forbidden.test(file))
   if (mutate) {
     assert.ok(domainSources.length > 0 || diagnostics.some(diagnostic => String(diagnostic.messageText).includes('@agentmux/core')),
@@ -60,4 +68,4 @@ function compile(name, text, mutate = false) {
 }
 for (const [name, text] of Object.entries(entries)) compile(name, text)
 compile('modal', entries.modal, true)
-console.log('Both public Overlay entries compile independently; a privately injected Core type was detected.')
+console.log('Public Overlay entries compile independently; a privately injected Core type was detected.')

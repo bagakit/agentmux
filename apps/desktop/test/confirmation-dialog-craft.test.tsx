@@ -43,7 +43,7 @@ it('removing only a project view uses a neutral action without a warning glyph',
   await act(async () => root.render(<ConfirmationDialog open intent="neutral" title="Remove project view?"
     description="Files and running Agents stay untouched." confirmLabel="Remove view" onCancel={cancel} onConfirm={confirm} />))
   expect(document.querySelector('.confirmation-dialog__heading svg')).toBeNull()
-  expect(button('Remove view').className).toBe('small-button confirmation-dialog__confirm--neutral')
+  expect(button('Remove view').matches('.agent-button.small-button.confirmation-dialog__confirm--neutral')).toBe(true)
   expect(document.querySelector('.danger-button')).toBeNull()
 })
 it('busy blocks Escape, outside dismissal, and every action, retaining the original dialog and subject', async () => {
