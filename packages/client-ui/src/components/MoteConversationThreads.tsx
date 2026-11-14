@@ -140,7 +140,7 @@ export function MoteWorkThreads({ page, issue, loading, visible, readWork, membe
   page: MoteDialoguePage | null; issue: string | null; loading: boolean; visible: boolean; readWork: MoteWorkReader
   memberName?: ((source: Work) => string) | undefined; onRefresh(): void; onOlder?(): void; onOpenWork(source: Work): void
   /** The host's original member directory, shown as a peer tab instead of a second block under the list. */
-  members?: { count: number | null; attention?: boolean | undefined; content: ReactNode } | undefined
+  members?: { count: number | null; attention?: boolean | undefined; content(visible: boolean): ReactNode } | undefined
   privateChats?: ((visible: boolean) => ReactNode) | undefined
   /** One explicit host navigation to this Mote's original event; no member inference. */
   requestedEvent?: { eventId: string; token: string } | undefined
@@ -220,7 +220,7 @@ export function MoteWorkThreads({ page, issue, loading, visible, readWork, membe
     </header>
     {issue && view === 'work' ? <p role="status" className="mote-conversation__issue">{issue} 原工作与输入仍保留。</p> : null}
     {privateChats ? <div className="mote-threads__private" role="tabpanel" aria-label="私聊" hidden={view !== 'private'}>{privateChats(visible && view === 'private')}</div> : null}
-    {members ? <div className="mote-threads__members" role="tabpanel" aria-label="成员" hidden={view !== 'members'}>{members.content}</div> : null}
+    {members ? <div className="mote-threads__members" role="tabpanel" aria-label="成员" hidden={view !== 'members'}>{members.content(visible && view === 'members')}</div> : null}
     <div className="mote-threads__work" role={members ? 'tabpanel' : undefined} aria-label={members ? '工作' : undefined} hidden={view !== 'work'}>
     {discovering ? <p className="mote-threads__scope" role="status">在已载入的 {events.length} 项工作中查找{pending ? ` · ${pending} 项资料待核对` : ''}{page?.next ? ' · 可继续读取更早工作' : ''}</p> : null}
     {open && !wide ? <button type="button" className="mote-threads__back" onClick={() => toggle(open)}>

@@ -51,11 +51,6 @@
 .mote-chat-person__history { width: 100%; min-width: 0; }
 .mote-chat-person__history > summary { cursor: pointer; color: var(--text-2); font-size: var(--fs-meta); padding-block: var(--sp-2); }
 .mote-chat-history { min-width: 0; display: grid; gap: var(--sp-3); padding-top: var(--sp-2); }
-.mote-chat-history > ol { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
-.mote-chat-history > ol > li { min-width: 0; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); overflow: hidden; }
-.mote-chat-history__row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--sp-2); padding: var(--sp-3); }
-.mote-chat-history__row > div:first-child { display: grid; gap: var(--sp-1); min-width: 0; }
-.mote-chat-history__row span, .mote-chat-history__row small { color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
 .mote-chat-inputs { min-width: 0; border-top: 1px solid var(--line-soft); padding: var(--sp-3); }
 .mote-chat-inputs > header { display: grid; gap: var(--sp-1); margin-bottom: var(--sp-3); }
 .mote-chat-inputs > header small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
@@ -67,9 +62,3 @@
 .mote-private-conversations { min-width: 0; display: grid; gap: var(--sp-3); padding-block: var(--sp-3); }
 .mote-private-conversations > header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-3); }
 .mote-private-conversations > header p { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
-.mote-private-conversation { min-width: 0; display: grid; gap: var(--sp-3); padding: var(--sp-3); border-top: 1px solid var(--line-soft); }
-.mote-private-conversation > details { min-width: 0; color: var(--text-3); font-size: var(--fs-meta); }
-.mote-private-conversation > details > summary { cursor: pointer; padding-block: var(--sp-1); }
-.mote-private-conversation > details > code { overflow-wrap: anywhere; }
-.mote-private-conversations .mote-chat-history__row > div:first-child { flex: 1 1 14rem; }
-.mote-private-conversations .mote-chat-history__row > div:first-child > strong { padding-inline-start: calc(28px + var(--sp-3)); color: var(--text-3); font-size: var(--fs-meta); font-weight: 400; }

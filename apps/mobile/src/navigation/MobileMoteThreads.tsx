@@ -27,7 +27,7 @@ export function MobileMoteThreads({ client, dialogue, team, issue, visible, curr
       memberName={source => team?.members.find(member => member.hostId === source.origin.hostId && member.sessionId === source.origin.recipientSessionId)?.name ?? source.origin.recipientSessionId}
       onRefresh={onRefresh} onOlder={() => { void dialogue.older() }} onOpenWork={onWork}
       members={{ count: members ? members.members.length : null, attention: Boolean(members?.members.some(member => member.request)),
-        content: <MobileMoteTeamPanel team={members} issue={issue} currentSessionId={currentSessionId} currentHostId={currentHostId} membersOnly
+        content: () => <MobileMoteTeamPanel team={members} issue={issue} currentSessionId={currentSessionId} currentHostId={currentHostId} membersOnly
           onRefresh={onRefresh} onOpen={onOpen} onMain={onMain} onWork={(id, identity, member) => onOpen(id, identity, member)} onConfigure={onConfigure} /> }} />
   </section>
 }

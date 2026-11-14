@@ -44,7 +44,7 @@ export function MoteThreadsPanel({ scope, active, onSelect, requestedEvent }: {
       memberName={source => members.find(member => member.hostId === source.origin.hostId && member.agentSessionId === source.origin.recipientSessionId)?.regions.find(region => region.title)?.title ?? source.origin.recipientSessionId}
       onRefresh={() => work?.refresh()} onOlder={() => void work?.older()}
       privateChats={visible => <MotePrivateConversations scope={scope} active={visible} />}
-      members={{ count: null, content: <MoteCooperation scope={scope} active={active} presentation="threads" onSelect={onSelect} /> }} onOpenWork={source => {
+      members={{ count: null, content: visible => <MoteCooperation scope={scope} active={visible} presentation="threads" onSelect={onSelect} /> }} onOpenWork={source => {
         const original = dialogue.target && moteMembers(workbenchSelectionCatalog(useAppStore.getState()), dialogue.target.spaceId)
           .find(member => member.hostId === source.origin.hostId && member.agentSessionId === source.origin.recipientSessionId)
         if (original?.locations.length === 1) onSelect(original.locations[0]!)

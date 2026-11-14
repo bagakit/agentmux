@@ -1,0 +1,32 @@
+.mote-conversation-browser { display: grid; min-width: 0; min-height: 0; height: min(68vh, 760px); }
+.mote-conversation-browser[data-layout="split"] { grid-template-columns: minmax(180px, 28%) minmax(0, 1fr); }
+.mote-conversation-browser [hidden] { display: none; }
+.mote-conversation-browser__list { min-width: 0; min-height: 0; overflow: auto; padding: var(--sp-2); }
+.mote-conversation-browser[data-layout="split"] > .mote-conversation-browser__list { border-inline-end: 1px solid var(--line-soft); }
+.mote-conversation-browser__list > ol { display: grid; align-content: start; gap: var(--sp-1); list-style: none; margin: 0; padding: 0; }
+.mote-conversation-browser__list li { min-width: 0; }
+.mote-conversation-browser__choice { display: flex; align-items: center; width: 100%; min-height: 58px; padding: var(--sp-3); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text); font: inherit; text-align: start; cursor: pointer; }
+.mote-conversation-browser__choice:hover { background: var(--surface-2); }
+.mote-conversation-browser__choice[aria-current="page"] { background: var(--surface-2); border-color: var(--line); box-shadow: inset 2px 0 var(--green); }
+.mote-conversation-browser button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
+.mote-conversation-browser__row { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; width: 100%; }
+.mote-conversation-browser__row > svg { flex: none; color: var(--text-3); }
+.mote-conversation-browser__row > span { display: grid; gap: var(--sp-1); min-width: 0; }
+.mote-conversation-browser__row strong { color: var(--text); font-size: var(--fs-body); font-weight: 550; overflow-wrap: anywhere; }
+.mote-conversation-browser__row small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; }
+.mote-conversation-browser__detail, .mote-conversation-browser__pane { min-width: 0; min-height: 0; height: 100%; }
+.mote-conversation-browser__pane:not([hidden]) { display: flex; flex-direction: column; }
+.mote-conversation-browser__heading { display: flex; flex: none; align-items: center; gap: var(--sp-2); min-height: 43px; padding: var(--sp-2) var(--sp-4); border-bottom: 1px solid var(--line-soft); }
+.mote-conversation-browser__heading > strong { flex: 1; min-width: 0; color: var(--text); font-size: var(--fs-body); font-weight: 550; overflow-wrap: anywhere; }
+.mote-conversation-browser__heading > button { flex: none; }
+.mote-conversation-browser__reading { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.mote-session-conversation { min-width: 0; display: grid; gap: var(--sp-3); padding: var(--sp-4); }
+.mote-session-conversation > details { min-width: 0; color: var(--text-3); font-size: var(--fs-meta); }
+.mote-session-conversation > details > summary { cursor: pointer; padding-block: var(--sp-1); }
+.mote-session-conversation > details > code { overflow-wrap: anywhere; }
+.mote-conversation-browser__list > p { margin: var(--sp-2) var(--sp-3) var(--sp-3); font-size: var(--fs-meta); color: var(--text-3); line-height: 1.5; }
+.mote-conversation-browser__list > .mote-chat-actions { margin-top: var(--sp-3); }
+.mote-conversation-browser__locations { flex: none; position: relative; color: var(--text-3); font-size: var(--fs-meta); }
+.mote-conversation-browser__locations > summary { cursor: pointer; padding: var(--sp-2); }
+.mote-conversation-browser__locations > button { display: block; margin-block: var(--sp-1); }
+.mote-cooperation--threads { border-bottom: 0; }

@@ -20,6 +20,8 @@ import { ResolvedAgentAvatar } from './AgentAvatar'
 import { MoteQuickModeDialog } from './MoteQuickMode'
 import { openMoteMaterial } from '../lib/mote-materials-actions'
 import { resolveMoteDefaultConversation, moteDefaultCatalog, useMoteDefaultConversation } from '../lib/mote-quick-preferences'
+import { MoteConversationBrowser } from './MoteConversationBrowser'
+import { MoteSessionConversation } from './MoteSessionConversation'
 import '../styles/mote-cooperation.css'
 
 const Team = semanticIconComponent('object.team')
@@ -171,8 +173,8 @@ export function MoteCooperation({ scope, active, reference, onSelect, actions, p
   const mainDetail = mainRequest ? mainRequest.kind === 'permission' ? mainRequest.title || '请求权限' : '等你回答'
     : roleConfirmed ? `${primary ? '继续' : '开始'}与 ${scope.topic.title} 合作` : '主对话来源待核对'
   function main() { setExpanded(false); conversation?.onMain() }
-  const membersPanel = <div className="mote-cooperation__team-body" id={id} data-mote-team>
-      <div className="mote-cooperation__team-heading"><strong>{presentation === 'threads' ? '其他 Agent' : '原工作对话'}</strong><span>{ordered.length}</span></div>
+  const membersPanel = presentation === 'navigation' ? <div className="mote-cooperation__team-body" id={id} data-mote-team>
+      <div className="mote-cooperation__team-heading"><strong>原工作对话</strong><span>{ordered.length}</span></div>
       {scope.issue || !spaceId ? <p className="mote-cooperation__issue" role="status">{spaceId ? '显示最后确认的成员及其原对话。' : '原团队绑定尚未确认，已有成员和对话都保留。'}</p> : null}
       {humanGoals.map(goal => <button key={goal.id} type="button" className="mote-cooperation__goal" onClick={() => openGoal(goal.id)}>
         <span>待你审阅</span><strong>{goal.title}</strong><Forward size={14} /></button>)}
@@ -201,10 +203,31 @@ export function MoteCooperation({ scope, active, reference, onSelect, actions, p
       })}
       {!members.length && spaceId ? <p className="mote-cooperation__empty">这个 Mote 还没有 Agent，从原讨论开始。</p> : null}
       {search && !shown.length ? <p className="mote-cooperation__empty" role="status">没有匹配的对话。<button type="button" onClick={() => setQuery('')}>清除查找</button></p> : null}
-    </div>
+    </div> : null
   const editDialog = editing ? <MoteQuickModeDialog scope={scope} reference={reference} onOpenPath={path => openMoteMaterial(scope, path)}
       onClose={() => setEditing(false)} returnFocus={() => trigger.current} /> : null
-  if (presentation === 'threads') return <section className="mote-cooperation mote-cooperation--threads" aria-label="其他 Agent 对话">{issue ? <p role="status">{issue}</p> : null}{membersPanel}</section>
+  if (presentation === 'threads') {
+    const choices = shown.map(member => {
+      const observed = sessions[member.key], request = requestFor(member), name = title(member)
+      const hostId = member.hostId ?? observed?.control.hostId
+      const detail = request ? request.kind === 'permission' ? request.title || '请求权限' : '等你回答' : observed ? sessionStatusLabel(observed) : '状态未确认'
+      return { id: member.key, title: name,
+        row: <span className="mote-conversation-browser__row" data-mote-member={member.agentSessionId} data-member-host={hostId ?? ''}>
+          {observed ? <ResolvedAgentAvatar label={observed.label} providerId={observed.providerId} state={observed.status.state} size={22} /> : <Team size={20} />}
+          <span><strong>{name}</strong><small>{isPrimary(member) ? '最后确认的主 Agent' : '成员'} · {detail}</small></span></span>,
+        actions: member.locations.length === 1 ? <button type="button" className="small-button" onClick={() => open(member.locations[0]!)}>在工作区打开</button>
+          : <details className="mote-conversation-browser__locations"><summary>原工作位置</summary>{member.locations.map((location, index) => <button type="button" key={JSON.stringify(location)} className="small-button" onClick={() => open(location)}>位置 {index + 1}</button>)}{!member.locations.length ? <span>原位置未确认</span> : null}</details>,
+        conversation: (visible: boolean) => hostId ? <MoteSessionConversation hostId={hostId} agentSessionId={observed?.control.agentSessionId ?? member.agentSessionId} identity={'mote-member:' + member.key} active={visible} />
+          : <p className="mote-cooperation__issue" role="status">原会话的执行 Host 尚未确认。原引用与工作位置保留，可在原工作区继续。</p> }
+    })
+    return <section className="mote-cooperation mote-cooperation--threads" aria-label="其他 Agent 对话">
+      {issue ? <p role="status">{issue}</p> : null}
+      {scope.issue || !spaceId ? <p className="mote-cooperation__issue" role="status">原团队绑定尚未确认，显示最后确认的成员及其原对话。</p> : null}
+      <MoteConversationBrowser key={identity} choices={choices} active={active} initialSelection={shown.find(member => member.hostId || sessions[member.key])?.key}
+        heading={<div className="mote-cooperation__team-heading"><strong>其他 Agent</strong><span>{ordered.length}</span></div>}
+        empty={<p className="mote-cooperation__empty">{members.length ? '没有匹配的对话。' : spaceId ? '这个 Mote 还没有其他 Agent。' : '成员来源尚未确认。'}</p>} />
+    </section>
+  }
   return <Dialog.Root modal={false} open={expanded && active} onOpenChange={setExpanded}>
     <section className="mote-cooperation mote-cooperation--navigation" data-mote-cooperation={scope.topic.id} data-mote-conversation-switcher aria-label="Mote 对话">
       {conversation && conversation.mode !== 'main' ? <button type="button" className="mote-cooperation__home" data-mote-main-entry aria-label="返回主对话" title="返回主对话" onClick={main}><Back size={14} /></button> : null}
