@@ -169,7 +169,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
           returnFocus: () => {
             const state = useAppStore.getState(), resource = state.config?.workspaces.find(item => item.id === workspace.id)
             if (resource?.hostId !== workspace.hostId || resource.path !== workspace.path || state.activeWorkspaceId !== activeWorkspaceId) return null
-            return tree.current?.querySelector<HTMLButtonElement>('[aria-label="Show archived Motes in Space"]') ?? null
+            return tree.current?.querySelector<HTMLButtonElement>('[aria-label="Show archived Clubs in Space"]') ?? null
           }
         } } : {})}>
         <div className={`space-tree-entry${isMote ? ' space-mote-entry' : ''}${isMote && topic.readError ? ' space-mote-entry--issue' : ''}`} data-space-entry data-mote-archive-state={isMote ? topic.moteArchive?.state : undefined}>
