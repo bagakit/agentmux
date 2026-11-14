@@ -305,7 +305,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
     return () => observer.disconnect()
   }, [Boolean(position), Boolean(actionDisclosure), document])
 
-  const face = <AgentAvatarFace provider={provider} displayState={displayState} avatar={avatar} count={count} size={size} mark={identityMark ?? disclosure?.mark} tintMark={identityMark === undefined} active={session?.active === true} />
+  const face = <AgentAvatarFace provider={provider} displayState={displayState} avatar={avatar} count={count} size={size} mark={identityMark ?? disclosure?.mark} tintMark={identityMark === undefined} active={visible && session?.active === true} />
   return <>
     <Element ref={trigger} className={`agent-avatar${inlineLabel !== undefined ? ' agent-avatar--inline' : ''}${displayState ? ` status status--${displayState}` : ''}`}
       style={{ '--agent-avatar-size': `${size}px` } as CSSProperties}

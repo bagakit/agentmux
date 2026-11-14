@@ -6,8 +6,8 @@ const marks = {
   unknown: semanticIconComponent('status.activity-unknown'), interrupted: semanticIconComponent('status.interrupted'),
   recovery: semanticIconComponent('status.disconnected'), idle: semanticIconComponent('status.idle')
 }
-/** Same semantic icon, theme, shape and motion in every client. */
+/** Compact status marks share the same static glyph across clients. */
 export function FocusStateMark({ kind, size = 12, presenceUnknown = false }: { kind: FocusStateMarkKind; size?: number; presenceUnknown?: boolean | undefined }) {
   const Icon = kind === 'unknown' && presenceUnknown ? semanticIconComponent('status.presence-unknown') : marks[kind]
-  return <span className="focus-state-mark" data-focus-state-icon={kind} aria-hidden="true"><Icon size={size} strokeWidth={1.8} animation={kind === 'working' ? 'work' : 'none'} /></span>
+  return <span className="focus-state-mark" data-focus-state-icon={kind} aria-hidden="true"><Icon size={size} strokeWidth={1.8} /></span>
 }
