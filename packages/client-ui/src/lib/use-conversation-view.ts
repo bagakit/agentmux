@@ -367,7 +367,8 @@ export function useConversationView(client: ConversationViewClient | null, refer
           // source. Keep their existing view and observer for recovery.
           if (sourceError && (kind === 'reopen' || kind === 'latest' && prior)) throw sourceError
           const cancellableRecord = Boolean(selection.record && readOptions.signal)
-          try { if (!continuation) prepared = await bind(complete, isCurrent, recoverObservation || kind === 'resume', attempt.id, requestSignal, cancellableRecord) }
+          const publishBeforeWatch = kind === 'latest' && !prior && !selection.record && !request.anchor && !continuation
+          try { if (!continuation && !publishBeforeWatch) prepared = await bind(complete, isCurrent, recoverObservation || kind === 'resume', attempt.id, requestSignal, cancellableRecord) }
           catch (error) { if (isCurrent()) {
             note({ phase: 'watch-unavailable', reason: diagnosticErrorReason(error), ...conversationDiagnosticFrame(complete) }); flush('failure')
             setState(value => ({ ...value, observationError: errorOf(error) })); reconnect()
@@ -439,6 +440,14 @@ export function useConversationView(client: ConversationViewClient | null, refer
               : sourceError || kind === 'latest' || kind === 'reopen' || value.errorOperation === kind ? { error: null, errorOperation: null } : {}),
             newerAvailable: kind === 'latest' || kind === 'changes' && !more && !current.held && !current.historical ? false : value.newerAvailable }))
           if (more) current.dirty = true
+          // Original read admission owns the first body; opening its observer cannot delay that body.
+          if (publishBeforeWatch) {
+            try { await bind(complete, isCurrent, false, attempt.id, requestSignal, false) }
+            catch (error) { if (isCurrent()) {
+              note({ phase: 'watch-unavailable', reason: diagnosticErrorReason(error), ...conversationDiagnosticFrame(complete) }); flush('failure')
+              setState(value => ({ ...value, observationError: errorOf(error) })); reconnect()
+            } }
+          }
         } catch (error) { if (isCurrent()) {
           attempt.error = errorOf(error)
           note({ phase: 'read-failed', attemptId: attempt.id, operation: kind, reason: diagnosticErrorReason(error) })
