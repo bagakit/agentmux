@@ -330,15 +330,17 @@
 .focus-project-order-error { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
 
 /* Container controls and subordinate original Zone labels share the existing type scale. */
-.focus-project-preferences__organization { display: grid; grid-template-columns: 36px minmax(0, 1fr); align-items: center; gap: 3px 6px; margin: 0; padding: 5px 0; border: 0; border-block: 1px solid var(--line-soft); }
-.focus-project-preferences__organization > span { color: var(--text-3); font-size: var(--fs-micro); }
-.focus-project-preferences__modes { display: flex; gap: 3px; padding: 2px; border-radius: 4px; background: var(--surface-0); }
-.focus-project-preferences__modes button { display: inline-flex; align-items: center; justify-content: center; flex: 1; gap: 5px; min-height: 22px; padding: 2px 5px; border: 1px solid transparent; border-radius: 3px; font: inherit; color: var(--text-3); background: transparent; cursor: pointer; }
-.focus-project-preferences__modes button[aria-pressed='true'] { border-color: var(--line); color: var(--text); background: var(--surface-2); }
-.focus-project-preferences__modes button:is(:hover,:focus-visible) { color: var(--text); outline: 1px solid var(--focus-line); outline-offset: -1px; }
-.focus-project-preferences__default { grid-column: 2; justify-self: start; min-height: 16px; padding: 0; border: 0; background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-micro); cursor: pointer; }
-.focus-project-preferences__default:is(:hover,:focus-visible) { color: var(--text); }
-.focus-project-preferences__notice { margin: 0; color: var(--text-3); font-size: var(--fs-micro); }
+.focus-zone-layout { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 3px; min-width: 0; max-width: 100%; font-size: var(--fs-micro); }
+.focus-zone-layout__modes { display: inline-flex; gap: 1px; padding: 1px; border: 1px solid var(--line-soft); border-radius: 4px; }
+.focus-zone-layout button { min-height: 22px; padding: 2px 5px; border: 0; border-radius: 3px; background: transparent; color: var(--text-3); font: inherit; cursor: pointer; }
+.focus-zone-layout__modes button[aria-pressed='true'] { background: var(--surface-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--line); }
+.focus-zone-layout button:is(:hover, :focus-visible) { color: var(--text); outline: 1px solid var(--focus-line); outline-offset: -1px; }
+.focus-zone-layout button:disabled { cursor: default; opacity: .6; }
+.focus-zone-layout__default { display: inline-flex; align-items: center; justify-content: center; width: 22px; }
+.focus-zone-layout__default[aria-pressed='true'] { color: var(--text-2); }
+.focus-zone-layout__status, .focus-zone-layout__unavailable { color: var(--text-3); overflow-wrap: anywhere; }
+.focus-zone-layout__status { flex-basis: 100%; }
+.focus-zone-layout__status button { color: var(--text-2); text-decoration: underline; }
 .focus-zone-heading { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
 .focus-zone-heading .focus-project-lanes__label strong { font-weight: 400; color: var(--text-3); }
 .focus-zone-heading .focus-project-lanes__summary { max-width: 220px; }

@@ -1,32 +1,29 @@
 import * as Popover from '@agentmux/client-ui/components/Modal'
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
-import { useCallback, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { FOCUS_PROJECT_COLORS, focusProjectPreference, focusProjectTint, type FocusProjectPreference } from '../../../shared/focus-project-preferences'
 import { configValuesEqual } from '../../../shared/config-edit'
 import { saveFocusPreferences } from '../lib/focus-preferences'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import type { FocusTopicPresentation } from '../../../shared/focus-preferences'
-import { focusZonePresentation, type FocusZonePresentation } from '../../../shared/focus-zone-presentation'
 import { useAppStore } from '../store'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 /** Draft stays at its exact original project on a failed save; no workspace or runtime writes. */
-export function FocusProjectPreferences({ projectKey, name, zoneKey, zoneDefault = focusZonePresentation(null, projectKey ? 'project' : 'collection', undefined), zoneUnavailable }: {
-  projectKey?: string; name: string; zoneKey?: string | null; zoneDefault?: FocusTopicPresentation; zoneUnavailable?: string
+export type FocusDiscussionSlot = { active: boolean; container: HTMLElement | null }
+export function FocusProjectPreferences({ projectKey, name, discussion }: {
+  projectKey?: string; name: string; discussion?(state: FocusDiscussionSlot): ReactNode
 }) {
   const projects = useAppStore(state => state.config?.focus?.projects)
-  const zonePresentations = useAppStore(state => state.config?.focus?.zonePresentations)
   const saved = focusProjectPreference(projectKey ?? '', projects ?? [])
-  const savedZone = zonePresentations?.find(item => item.key === zoneKey)?.presentation ?? null
-  const [zoneDraft, setZoneDraft] = useState<FocusTopicPresentation | null>(savedZone)
-  const zoneBaseline = useRef<readonly FocusZonePresentation[]>([])
   const subject = projectKey ? 'Project' : 'Container'
   const [open, setOpen] = useState(false), [draft, setDraft] = useState(saved)
   const baseline = useRef<readonly FocusProjectPreference[]>([])
   const [pending, setPending] = useState(false), [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const generation = useRef(0), draftVersion = useRef(0), inFlight = useRef(false)
+  const [discussionVisited, setDiscussionVisited] = useState(false)
+  const [discussionHost, setDiscussionHost] = useState<HTMLDivElement | null>(null)
   const trigger = useRef<HTMLButtonElement>(null), escape = useRef(false)
   const panel = useRef<HTMLDivElement>(null)
   const [panelElement, setPanelElement] = useState<HTMLDivElement | null>(null)
@@ -44,7 +41,7 @@ export function FocusProjectPreferences({ projectKey, name, zoneKey, zoneDefault
   }, [open, panelElement])
   function begin(next: boolean) {
     ++generation.current
-    if (next) { baseline.current = projects ?? []; zoneBaseline.current = zonePresentations ?? []; setZoneDraft(savedZone); setDraft(saved); setError(null); setNotice(null); draftVersion.current = 0 }
+    if (next) { setDiscussionVisited(true); baseline.current = projects ?? []; setDraft(saved); setError(null); setNotice(null); draftVersion.current = 0 }
     setOpen(next)
   }
   function edit(next: FocusProjectPreference) { ++draftVersion.current; setDraft(next) }
@@ -55,10 +52,6 @@ export function FocusProjectPreferences({ projectKey, name, zoneKey, zoneDefault
     edit({ ...value, pinned: draft.pinned !== previous.pinned ? draft.pinned : value.pinned,
       note: draft.note !== previous.note ? draft.note : value.note, color: draft.color !== previous.color ? draft.color : value.color,
       collapsed: draft.collapsed !== previous.collapsed ? draft.collapsed : value.collapsed })
-    const currentZones = useAppStore.getState().config?.focus?.zonePresentations ?? []
-    const previousZone = zoneBaseline.current.find(item => item.key === zoneKey)?.presentation ?? null
-    if (zoneDraft === previousZone) setZoneDraft(currentZones.find(item => item.key === zoneKey)?.presentation ?? null)
-    zoneBaseline.current = currentZones
     baseline.current = current
     setNotice(projectKey ? `Currently saved: ${value.pinned ? 'pinned' : 'unpinned'} · ${value.color}${value.note ? ' · ' + value.note : ' · no note'}. Your draft is kept; save to apply it.` : 'Current settings loaded. Your changes are kept; save to apply them.')
     setError(null)
@@ -71,13 +64,9 @@ export function FocusProjectPreferences({ projectKey, name, zoneKey, zoneDefault
     const original = baseline.current
     const next = configValuesEqual(draft, focusProjectPreference(projectKey ?? '', original)) ? original : original.some(item => item.key === projectKey) ? original.map(item => item.key === projectKey ? draft : item) : [...original, draft]
     try {
-      const zones = zoneBaseline.current.flatMap(item => item.key !== zoneKey ? [item] : zoneDraft ? [{ key: item.key, presentation: zoneDraft }] : [])
-      if (zoneKey && zoneDraft && !zoneBaseline.current.some(item => item.key === zoneKey)) zones.push({ key: zoneKey, presentation: zoneDraft })
-      await saveFocusPreferences({ ...(projectKey ? { projects: next } : {}), ...(zoneKey ? { zonePresentations: zones } : {}) },
-        { ...(projectKey ? { projects: original } : {}), ...(zoneKey ? { zonePresentations: zoneBaseline.current } : {}) })
+      await saveFocusPreferences({ projects: next }, { projects: original })
       if (generation.current !== token) return
       baseline.current = useAppStore.getState().config?.focus?.projects ?? next
-      zoneBaseline.current = useAppStore.getState().config?.focus?.zonePresentations ?? zones
       if (draftVersion.current !== version) { setNotice('Earlier changes saved. Your newer edits are kept.'); return }
       const returnFocus = Boolean(panel.current?.contains(panel.current.ownerDocument.activeElement))
       begin(false); if (returnFocus) trigger.current?.focus({ preventScroll: true })
@@ -85,23 +74,19 @@ export function FocusProjectPreferences({ projectKey, name, zoneKey, zoneDefault
     catch (cause) { if (generation.current === token) setError(presentError(cause)) }
     finally { inFlight.current = false; setPending(false) }
   }
-  return <Popover.Root modal={false} open={open} onOpenChange={begin}>
-    <Popover.Trigger asChild><button ref={trigger} type="button" className={`icon-button focus-project-preferences__trigger${open ? ' is-menu-open' : ''}`} aria-label={`${subject} preferences · ${name}`} title={projectKey ? 'Zone layout, pin, note and color' : 'Zone layout'}><SemanticIcon name="action.more" size={13} /></button></Popover.Trigger>
-    <DocumentOverlayPortal component={Popover.Portal}><Popover.Content ref={attachPanel} className="focus-project-preferences" data-focus-project-preferences="" data-focus-container-key={zoneKey ?? undefined} aria-describedby={undefined} style={{ position: 'fixed', visibility: 'hidden' }}
+  return <><Popover.Root modal={false} open={open} onOpenChange={begin}>
+    <Popover.Trigger asChild><button ref={trigger} type="button" className={`icon-button focus-project-preferences__trigger${open ? ' is-menu-open' : ''}`} aria-label={`${subject} preferences · ${name}`} title={projectKey ? 'Project actions, pin, note and color' : 'Collection actions'}><SemanticIcon name="action.more" size={13} /></button></Popover.Trigger>
+    <DocumentOverlayPortal component={Popover.Portal}><Popover.Content ref={attachPanel} className="focus-project-preferences" data-focus-project-preferences="" aria-describedby={undefined} style={{ position: 'fixed', visibility: 'hidden' }}
       onEscapeKeyDown={() => { escape.current = true }} onCloseAutoFocus={event => { event.preventDefault(); if (escape.current) trigger.current?.focus({ preventScroll: true }); escape.current = false }}>
       <div className="focus-project-preferences__header"><Popover.Title asChild><strong className="focus-project-preferences__name">{name}</strong></Popover.Title>
         {projectKey ? <label className="focus-project-preferences__pin"><input type="checkbox" aria-label="Pin project" checked={draft.pinned} onChange={event => edit({ ...draft, pinned: event.target.checked })} />Pin</label> : null}</div>
-      {zoneKey ? <div className="focus-project-preferences__organization" role="group" aria-label="Zone layout"><span>Zones</span>
-        <div className="focus-project-preferences__modes">{(['sections', 'cards'] as const).map(mode => <button type="button" key={mode} aria-pressed={(zoneDraft ?? zoneDefault) === mode} data-focus-zone-presentation={mode}
-          onClick={() => { ++draftVersion.current; setZoneDraft(mode) }}><SemanticIcon name={mode === 'sections' ? 'object.folder' : 'object.notebook'} size={13} />{mode === 'sections' ? 'Sections' : 'Tags'}</button>)}</div>
-        <button type="button" className="focus-project-preferences__default" onClick={() => { ++draftVersion.current; setZoneDraft(null) }}>Default · {zoneDefault === 'sections' ? 'Sections' : 'Tags'}{zoneDraft === null ? ' ✓' : ''}</button>
-      </div> : zoneUnavailable ? <p className="focus-project-preferences__notice">{zoneUnavailable}</p> : null}
       {projectKey ? <><label className="focus-project-preferences__note"><span>Note</span><input aria-label="Project note" value={draft.note} placeholder="A familiar reminder" onChange={event => edit({ ...draft, note: event.target.value })} /></label>
       <div role="group" aria-label="Project background color" className="focus-project-preferences__color-row"><span>Color</span><div className="focus-project-preferences__colors">{FOCUS_PROJECT_COLORS.map(color => <button type="button" key={color} aria-label={`Project color · ${color}`} title={color} aria-pressed={draft.color === color}
         style={{ background: `color-mix(in srgb, ${focusProjectTint(color)} 26%, var(--surface-1))` }} onClick={() => edit({ ...draft, color })}>{draft.color === color ? <SemanticIcon name="status.selected" size={13} /> : null}</button>)}</div></div></> : null}
+      {discussion ? <div ref={setDiscussionHost} data-focus-group-discussion-host="" /> : null}
       {error ? <div role="status" className="focus-project-preferences__error">{error}<button type="button" className="small-button" onClick={reviewCurrent} aria-label={`Review current ${subject.toLowerCase()} preferences`}>Review current settings</button></div> : null}
       {notice ? <p role="status">{notice}</p> : null}
-      <div className="focus-project-preferences__actions"><button type="button" className="small-button" onClick={() => begin(false)}>Cancel</button>{projectKey || zoneKey ? <button type="button" className="small-button" disabled={pending} onClick={() => void save()} aria-label={`Save ${subject.toLowerCase()} preferences`}>{pending ? 'Saving…' : error ? 'Retry save' : 'Save'}</button> : null}</div>
+      <div className="focus-project-preferences__actions"><button type="button" className="small-button" onClick={() => begin(false)}>Cancel</button>{projectKey ? <button type="button" className="small-button" disabled={pending} onClick={() => void save()} aria-label={`Save ${subject.toLowerCase()} preferences`}>{pending ? 'Saving…' : error ? 'Retry save' : 'Save'}</button> : null}</div>
     </Popover.Content></DocumentOverlayPortal>
-  </Popover.Root>
+  </Popover.Root>{discussionVisited ? discussion?.({ active: open, container: open ? discussionHost : null }) : null}</>
 }

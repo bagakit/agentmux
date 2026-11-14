@@ -23,7 +23,8 @@ import { categorySpaceIconTarget, type SpaceIconOverrides, type SpaceIconTarget 
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { TopicCategoryDialog } from './TopicCategoryDialog'
 import { SpaceIconPicker } from './SpaceIconPicker'
-import { FocusProjectPreferences } from './FocusProjectPreferences'
+import { FocusZoneLayoutToggle } from './FocusZoneLayoutToggle'
+import { FocusProjectPreferences, type FocusDiscussionSlot } from './FocusProjectPreferences'
 import { focusZoneContainerKey, focusZonePresentation } from '../../../shared/focus-zone-presentation'
 import { focusProjectPreference, focusProjectTint, moveFocusProject, type FocusProjectPreference } from '../../../shared/focus-project-preferences'
 import { saveFocusPreferences } from '../lib/focus-preferences'
@@ -65,10 +66,11 @@ function FocusCollectionHeadingIcon({ lane, icons, resourceMenus }: { lane: Focu
 }
 
 
-export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, revealRequestId, onSelect, renderLane, rowsRef, recentProjects = [], onRead, visible = true, origins, leading, cardMetrics = UNMEASURED_CARDS, replyLines = 2, resourceMenus = false, quietLanes, protectedLanes, forceExpanded = false, revealedLaneIds }: {
+export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, revealRequestId, onSelect, renderLane, rowsRef, recentProjects = [], onRead, visible = true, origins, leading, cardMetrics = UNMEASURED_CARDS, replyLines = 2, resourceMenus = false, quietLanes, protectedLanes, forceExpanded = false, revealedLaneIds, renderDiscussion }: {
   quietLanes?: ReadonlySet<string>; protectedLanes?: ReadonlySet<string>; forceExpanded?: boolean; revealedLaneIds?: ReadonlySet<string>
   /** Only a real resource consumer opts in; Settings examples remain static. */
   resourceMenus?: boolean
+  renderDiscussion?(lane: FocusScanLane, state: FocusDiscussionSlot): ReactNode
   leading?: ReactNode
   origins?: ReadonlyMap<string, FocusLaneOrigin>
   visible?: boolean
@@ -224,7 +226,8 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
               {first.summary ? <span className="focus-project-lanes__summary" title={first.summary}>{first.summary}</span> : null}
               {first.recovery ? <span className="focus-project-lanes__recovery">{first.recovery === 'removed' ? 'Worktree removed' : 'Workspace unregistered'}</span> : null}</> : null}
             <FocusProjectActivity at={activityAt} now={now} />
-            {resourceMenus ? <FocusProjectPreferences projectKey={key} name={name} zoneKey={containerKey} zoneDefault={focusZonePresentation(null, 'project', undefined)} /> : null}
+            {resourceMenus ? <><FocusZoneLayoutToggle containerKey={containerKey} name={name} presentation={mode} defaultPresentation={focusZonePresentation(null, 'project', undefined)} />
+              <FocusProjectPreferences projectKey={key} name={name} discussion={renderDiscussion ? state => renderDiscussion(scanLanes[0]!, state) : undefined} /></> : null}
           </header>
         return <div key={frame.key} className={frame.project ? 'focus-project-frame' : undefined} data-project-group-key={frame.project ? key : undefined}
           data-focus-current={frame.project && currentProject || undefined} data-focus-zone-presentation={resourceMenus || frame.project ? mode : undefined} data-focus-container-key={containerKey ?? undefined}
@@ -269,8 +272,9 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
           {!frame.project || lane.labels.length > 1 ? <FocusProjectActivity at={lane.lastActivityAt ?? null} now={now} /> : null}
           {lane.locationUnconfirmed ? <span className="focus-project-lanes__recovery">Location unconfirmed</span> : null}
           {lane.recovery ? <span className="focus-project-lanes__recovery">{lane.recovery === 'removed' ? 'Worktree removed' : 'Workspace unregistered'}</span> : null}
-          {lane.collection && resourceMenus ? <FocusProjectPreferences name={lane.name} zoneKey={containerKey} zoneDefault={focusZonePresentation(null, 'collection', undefined, authoredTopicPresentation)}
-            zoneUnavailable="Zone layout needs one confirmed Collection. Original members and their work surfaces remain available." /> : null}</>}
+          {lane.collection && resourceMenus ? <><FocusZoneLayoutToggle containerKey={containerKey} name={lane.name} presentation={mode} defaultPresentation={focusZonePresentation(null, 'collection', undefined, authoredTopicPresentation)}
+            unavailable="Zone layout needs one confirmed Collection. Original members and their work surfaces remain available." />
+            <FocusProjectPreferences name={lane.name} discussion={renderDiscussion ? state => renderDiscussion(lane, state) : undefined} /></> : null}</>}
         </div>
         , compact)}</div>
       </FocusLaneArticle>})}</div>})}
