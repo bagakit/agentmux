@@ -16,16 +16,19 @@ const require = createRequire(path.join(desktop, 'package.json'))
 const { build, loadConfigFromFile } = await import(pathToFileURL(require.resolve('vite')).href)
 const { config } = await loadConfigFromFile({ command: 'build', mode: 'production' }, path.join(fixture, 'vitest.config.mts'), root)
 const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agentmux-settings-search-'))
+const outDir = path.join(privateRoot, 'renderer')
 const evidence = path.join(root, '.tmp/settings-search-craft', ("" + (testCase) + "-" + (globalThis.crypto.randomUUID()) + ""))
 await fs.mkdir(evidence, { recursive: true })
 const hash = content => createHash('sha256').update(content).digest('hex')
-const source = path.join(desktop, 'src/renderer/src/components', testCase === 'clear-focus' ? 'SettingsPanel.tsx' : 'settings/GeneralSettingsPane.tsx')
+const source = path.join(root, testCase === 'clear-focus'
+  ? 'packages/client-ui/src/input/SearchInput.tsx'
+  : 'apps/desktop/src/renderer/src/components/settings/GeneralSettingsPane.tsx')
 const original = await fs.readFile(source, 'utf8')
-const anchor = testCase === 'clear-focus' ? '    searchInput.current?.focus()' : '<section className="settings-group">'
+const anchor = testCase === 'clear-focus' ? 'input.current?.focus({ preventScroll: true }); ' : '<section className="settings-group">'
 assert.equal(original.split(anchor).length, 2, 'Mutation must bind exactly one actual owning source block')
 const mutated = testCase === 'clear-focus' ? original.replace(anchor, '') : original.replace(anchor, `${anchor}\n      <p className="settings-lead">Choose how paths look when you share them.</p>`)
 const inputs = new Map(await Promise.all([
-  fileURLToPath(import.meta.url), path.join(fixture, 'main.cjs'), path.join(fixture, 'index.html'), path.join(fixture, 'vitest.config.mts'),
+  fileURLToPath(import.meta.url), path.join(fixture, 'main.cjs'), path.join(fixture, 'entry.tsx'), path.join(fixture, 'index.html'), path.join(fixture, 'vitest.config.mts'),
   path.join(desktop, 'scripts/probe-process.mjs'), path.join(desktop, 'src/renderer/src/App.tsx')
 ].map(async file => [file, hash(await fs.readFile(file))])))
 const runs = []
@@ -41,9 +44,10 @@ try {
           const digest = hash(await fs.readFile(file)); if (inputs.has(file)) assert.equal(digest, inputs.get(file), `Proof source changed: ${file}`); else inputs.set(file, digest)
         }
         if (file === source) { assert.equal(code, original); mutationCount++; return mode === 'mutant' ? mutated : code }
-      } }], build: { target: 'esnext', outDir: path.join(privateRoot, mode), emptyOutDir: true } })
+      } }], esbuild: { jsx: 'automatic' }, worker: { format: 'es' },
+      build: { target: 'esnext', outDir, emptyOutDir: true, minify: false } })
     assert.equal(mutationCount, 1)
-    const processReceipt = await runProbeProcess(require('electron'), [path.join(fixture, 'main.cjs'), path.join(privateRoot, mode, 'index.html'), path.join(privateRoot, mode), directory, testCase], { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 45000 })
+    const processReceipt = await runProbeProcess(require('electron'), [path.join(fixture, 'main.cjs'), path.join(outDir, 'index.html'), outDir, directory, testCase], { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 45000 })
     const render = JSON.parse(await fs.readFile(path.join(directory, 'render.json'), 'utf8'))
     assert.equal(processReceipt.timedOut, false)
     if (mode === 'mutant') {
@@ -55,7 +59,8 @@ try {
   // Product callers are actual JSX uses, separate from definitions, imports and this fixture.
   const ts = require('typescript')
   const callers = []
-  for (const [relative, symbol] of [['apps/desktop/src/renderer/src/App.tsx', 'SettingsPanel'], ['apps/desktop/src/renderer/src/components/SettingsPanel.tsx', 'GeneralSettingsPane']]) {
+  for (const [relative, symbol] of [['apps/desktop/src/renderer/src/App.tsx', 'SettingsPanel'],
+    ['apps/desktop/src/renderer/src/components/SettingsPanel.tsx', testCase === 'clear-focus' ? 'SearchInput' : 'GeneralSettingsPane']]) {
     const text = await fs.readFile(path.join(root, relative), 'utf8')
     const tree = ts.createSourceFile(relative, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
     const uses = []

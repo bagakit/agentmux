@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
+import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import { SettingsPanel } from '../../../src/renderer/src/components/SettingsPanel'
 import { SurfaceSwitch } from '../../../src/renderer/src/components/TopRowChrome'
 import { WindowUtilityBar } from '../../../src/renderer/src/components/WindowUtilityBar'
@@ -12,13 +14,15 @@ import '../../../src/renderer/src/styles/index.css'
 const config = await api.config.get()
 config.copyPathsAsAbsolute = false
 useAppStore.setState({ config, mainSurface: 'workbench', sessions: [], sessionSnapshots: {} })
-const events: { type: string; trusted: boolean; label: string | null; key?: string; value?: string }[] = []
-const probe = { ready: false, events }
+mountThemeRuntime(window, { ...config.appearance, appAppearance: 'dark' })
+const events: { type: string; trusted: boolean; label: string | null; key?: string; composing?: boolean; value?: string }[] = []
+const probe = { ready: false, events,
+  appearance: (mode: 'light' | 'dark') => updateThemeSelection({ ...config.appearance, appAppearance: mode }) }
 Object.assign(window, { __settingsSearchRefinement: probe })
 for (const type of ['click', 'keydown', 'input']) document.addEventListener(type, (event) => {
   const element = (event.target as Element).closest('button,input')
   if (element) events.push({ type, trusted: event.isTrusted, label: element.getAttribute('aria-label') || element.textContent,
-    ...(event instanceof KeyboardEvent ? { key: event.key } : {}),
+    ...(event instanceof KeyboardEvent ? { key: event.key, composing: event.isComposing } : {}),
     ...(element instanceof HTMLInputElement ? { value: element.value } : {}) })
 }, true)
 
@@ -38,5 +42,5 @@ function Fixture() {
     <WindowOverlayHost />
   </>
 }
-createRoot(document.getElementById('root')!).render(<Fixture />)
+createRoot(document.getElementById('root')!).render(<DesktopClientUiProvider><Fixture /></DesktopClientUiProvider>)
 probe.ready = true

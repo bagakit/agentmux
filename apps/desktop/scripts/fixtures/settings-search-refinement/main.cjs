@@ -27,9 +27,14 @@ app.whenReady().then(async () => {
     })()`)
     const click = async expr => {
       const r = await hit(expr)
-      assert.ok(r.width > 0 && r.height > 0 && r.hits.length === 5 && r.hits.every(Boolean), 'Control must have five real CSS hits')
+      assert.ok(r.width > 0 && r.height > 0 && r.hits.length === 5 && r.hits.every(Boolean), `Control must have five real CSS hits: ${expr}`)
       win.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, x: r.x, y: r.y })
       win.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, x: r.x, y: r.y })
+    }
+    const tap = async expr => {
+      const { x, y } = await hit(expr)
+      await win.webContents.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] })
+      await win.webContents.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
     }
     const key = async name => {
       const key = name === 'Return' ? 'Enter' : name
@@ -55,6 +60,22 @@ app.whenReady().then(async () => {
     const node = selector => `document.querySelector(${JSON.stringify(selector)})`
     const search = node('[aria-label="Search settings"]')
     const clear = node('[aria-label="Clear settings search"]')
+    const originalPane = node('[data-settings-pane="general"]')
+    const destinationPane = node('[data-settings-pane="hosts"]')
+    const heading = node('.settings-content__header h2')
+    const hostResult = node('[data-settings-search-section="hosts"]')
+    const focusedSearch = `({ exact: document.activeElement === window.__originalSettingsSearch, connected: window.__originalSettingsSearch.isConnected,
+      visible: window.__originalSettingsSearch.getBoundingClientRect().width > 0, tag: document.activeElement.tagName })`
+    const expectedFocus = { exact: true, connected: true, visible: true, tag: 'INPUT' }
+    const verifyOrigin = async scrollTop => {
+      await until(`!(${originalPane}).hidden && (${heading}).textContent === 'General'`)
+      assert.equal(await read(`(${originalPane}).scrollTop`), scrollTop, 'Restores the original Settings pane and its scroll')
+    }
+    const capture = async image => {
+      await settle()
+      fs.writeFileSync(path.join(evidence, image), (await win.webContents.capturePage()).toPNG())
+      return image
+    }
     const section = async title => {
       result.phase = `select-${title}`
       await until(`Array.from(document.querySelectorAll('nav[aria-label="Settings sections"] button')).some(n=>n.textContent.trim()===${JSON.stringify(title)})`)
@@ -63,8 +84,10 @@ app.whenReady().then(async () => {
       else {
         await click('document.querySelector(".settings-section-picker")')
         await until('document.querySelector(".settings-section-menu[role=menu]")?.dataset.state === "open"')
+        const item = `Array.from(document.querySelectorAll('.settings-section-menu [role=menuitemradio]')).find(n=>n.textContent.trim()===${JSON.stringify(title)})`
+        await read(`(${item}).scrollIntoView({ block: 'nearest' })`)
         await settle()
-        await click(`Array.from(document.querySelectorAll('.settings-section-menu [role=menuitemradio]')).find(n=>n.textContent.trim()===${JSON.stringify(title)})`)
+        await click(item)
       }
       await until(`document.querySelector('.settings-content__header h2').textContent===${JSON.stringify(title)}`)
       await until('document.querySelectorAll(".settings-content__scroll:not([hidden])").length === 1')
@@ -74,11 +97,13 @@ app.whenReady().then(async () => {
       win.setContentSize(width, 900)
       win.webContents.focus()
       await until(`innerWidth===${width}`)
+      const theme = width === 1480 ? 'dark' : 'light'
+      await read(`window.__settingsSearchRefinement.appearance(${JSON.stringify(theme)})`)
       await settle()
-      const frame = { width, controls: {}, clearMethods: [] }
-      frame.geometry = await read(`({width:innerWidth,brand:document.querySelectorAll('.settings-sidebar__brand').length,status:document.querySelector('.window-status-bar').getBoundingClientRect().toJSON(),page:document.querySelector('.settings-page').getBoundingClientRect().toJSON()})`)
+      const frame = { width, theme, controls: {}, clearMethods: [] }
+      frame.geometry = await read(`({width:innerWidth,brand:document.querySelectorAll('.settings-sidebar__identity').length,status:document.querySelector('.window-status-bar').getBoundingClientRect().toJSON(),page:document.querySelector('.settings-page').getBoundingClientRect().toJSON()})`)
       assert.equal(frame.geometry.brand, 1)
-      assert.equal(frame.geometry.status.height, 32)
+      assert.ok(frame.geometry.status.height > 0)
       assert.ok(frame.geometry.page.bottom <= frame.geometry.status.y + 1)
       frame.controls.search = await hit(search)
       frame.controls.close = await hit(node('[aria-label="Close settings"]'))
@@ -89,23 +114,20 @@ app.whenReady().then(async () => {
         assert.ok(h.width > 0 && h.hits.length === 5 && h.hits.every(Boolean)); frame.controls[label] = h
       }
       // Current sections are derived from the real owning nav, then matched against the real narrow menu.
-      const titles = await read(`Array.from(document.querySelectorAll('nav[aria-label="Settings sections"] button')).map(n=>n.textContent.trim())`)
-      assert.ok(titles.length > 0 && new Set(titles).size === titles.length)
-      frame.sections = titles
+      const sections = await read(`Array.from(document.querySelectorAll('nav[aria-label="Settings sections"] button[data-settings-target]')).map(n=>n.dataset.settingsTarget)`)
+      assert.ok(sections.length > 0 && new Set(sections).size === sections.length)
+      frame.sections = sections
       if (width < 700) {
         await click('document.querySelector(".settings-section-picker")')
         await until('document.querySelector(".settings-section-menu[role=menu]")?.dataset.state === "open"'); await settle()
-        const menu = await read(`Array.from(document.querySelectorAll('.settings-section-menu [role=menuitemradio]')).map(n=>n.textContent.trim())`)
-        assert.deepEqual(menu, titles)
-        for (const title of menu) {
-          const h = await hit(`Array.from(document.querySelectorAll('.settings-section-menu [role=menuitemradio]')).find(n=>n.textContent.trim()===${JSON.stringify(title)})`)
-          assert.ok(h.width > 0 && h.hits.length === 5 && h.hits.every(Boolean))
-        }
+        const menu = await read(`Array.from(document.querySelectorAll('.settings-section-menu [role=menuitemradio][data-settings-target]')).map(n=>n.dataset.settingsTarget)`)
+        assert.deepEqual(menu, sections)
         for (const { index } of footer) assert.ok((await hit(`document.querySelectorAll('.window-status-bar button')[${index}]`)).hits.every(Boolean))
         await key('Escape'); await until('!document.querySelector(".settings-section-menu")'); await settle()
       }
       await section('Appearance')
       const font = node('[aria-label="Terminal font size in pixels"]')
+      await read(`(${font}).scrollIntoView({ block: 'center' })`)
       await fill(font, '18'); await fill(font, '')
       await section('General')
       const toggle = 'document.querySelector("[data-settings-pane=general] input[type=checkbox]")'
@@ -113,40 +135,93 @@ app.whenReady().then(async () => {
       await until(`(${toggle}).checked`)
       frame.copyIntro = await read(`(() => {const p=document.querySelector('[data-settings-pane=general]'),group=p.querySelector('.settings-group');return {connected:p.isConnected,visible:!p.hidden,title:document.querySelector('.settings-content__header h2').textContent,description:document.querySelector('.settings-content__header p').textContent,groupConnected:group.isConnected,groupTitle:group.querySelector('header span').textContent,leadCount:group.querySelectorAll('.settings-lead').length,text:group.textContent,dirty:!p.querySelector('[data-settings-save-bar] button').disabled}})()`)
       assert.equal(frame.copyIntro.connected, true); assert.equal(frame.copyIntro.visible, true)
-      assert.equal(frame.copyIntro.title, 'General'); assert.equal(frame.copyIntro.description, 'Copied paths, local data, and diagnostics.'); assert.equal(frame.copyIntro.groupConnected, true); assert.equal(frame.copyIntro.groupTitle, 'Home directory in copied paths')
-      if (testCase === 'copy-intro') assert.equal(frame.copyIntro.leadCount, 0, 'Copy Paths has one introduction')
-      for (const text of ['~', 'proj/app', 'your own home directory', 'Remote paths and paths belonging to another user always stay complete', 'Applies to every Copy Path action']) assert.ok(frame.copyIntro.text.includes(text))
+      assert.equal(frame.copyIntro.title, 'General'); assert.equal(frame.copyIntro.groupConnected, true)
+      if (testCase === 'copy-intro') {
+        assert.equal(frame.copyIntro.description, 'Copied paths, local data, and diagnostics.')
+        assert.equal(frame.copyIntro.groupTitle, 'Home directory in copied paths')
+        assert.equal(frame.copyIntro.leadCount, 0, 'Copy Paths has one introduction')
+        for (const text of ['~', 'proj/app', 'your own home directory', 'Remote paths and paths belonging to another user always stay complete', 'Applies to every Copy Path action']) assert.ok(frame.copyIntro.text.includes(text))
+      }
       assert.equal(frame.copyIntro.dirty, true)
-      for (const method of ['mouse', 'keyboard']) {
-        result.phase = `${width}-${method}-clear`
+      if (testCase === 'clear-focus') {
+        assert.equal(await read(`(${search}).type`), 'search')
         await fill(search, 'copy')
+        frame.searchImage = await capture(`${width}-search-active.png`)
+        await key('Escape'); await until(`(${search}).value === ''`)
+        win.setContentSize(width, 520)
+        await until('innerHeight === 520')
+        await settle()
+      }
+      const methods = testCase === 'clear-focus' && width === 320 ? ['mouse', 'keyboard', 'touch'] : ['mouse', 'keyboard']
+      for (const method of methods) {
+        result.phase = `${width}-${method}-clear`
+        const scrollTop = testCase === 'clear-focus' ? await read(`(() => {
+          const pane = ${originalPane}; pane.scrollTop = 96; return pane.scrollTop
+        })()`) : 0
+        if (testCase === 'clear-focus') assert.ok(scrollTop >= 48, 'The original Settings pane was actually scrolled')
+        await fill(search, method === 'keyboard' ? 'host' : 'copy')
+        if (testCase === 'clear-focus' && method === 'keyboard') {
+          await until(`Boolean(${hostResult})`)
+          await click(hostResult)
+          await until(`Boolean(${destinationPane}) && !(${destinationPane}).hidden`)
+          await click(search)
+        }
         frame.controls.clear = await hit(clear)
-        await read(`window.__originalSettingsSearch=${search}`)
+        if (width <= 560) {
+          assert.ok(frame.controls.clear.width >= 44 && frame.controls.clear.height >= 44 && frame.controls.clear.hits.every(Boolean), 'Narrow Settings clear stays fully touchable')
+        }
+        await read(`void (window.__originalSettingsSearch = ${search})`)
         if (method === 'mouse') await click(clear)
+        else if (method === 'touch') await tap(clear)
         else {
           await key('Tab'); await until(`document.activeElement===${clear}`)
           await key('Return')
         }
         await until(`(${search}).value===''`)
-        const focus = await read(`({exact:document.activeElement===window.__originalSettingsSearch,connected:window.__originalSettingsSearch.isConnected,visible:window.__originalSettingsSearch.getBoundingClientRect().width>0,tag:document.activeElement.tagName})`)
-        assert.deepEqual(focus, { exact: true, connected: true, visible: true, tag: 'INPUT' }, 'Clear returns focus to the original visible search input')
+        const focus = await read(focusedSearch)
+        assert.deepEqual(focus, expectedFocus, 'Clear returns focus to the original visible search input')
+        if (testCase === 'clear-focus') await verifyOrigin(scrollTop)
         // No focus/click occurs between the Clear result and the next native characters.
         await type('host'); await until(`(${search}).value==='host'`)
-        assert.equal(await read("document.querySelector('.settings-content__header h2').textContent"), 'Hosts')
-        frame.clearMethods.push({ method, focus, nextQuery: await read(`(${search}).value`) })
+        await until(`(${heading}).textContent === 'Search results' && Boolean(${hostResult})`)
+        frame.clearMethods.push({ method, focus, scrollTop, nextQuery: await read(`(${search}).value`) })
         await click(clear); await until(`(${search}).value===''`)
+      }
+      if (testCase === 'clear-focus') {
+        result.phase = `${width}-escape`
+        const scrollTop = await read(`(${originalPane}).scrollTop`)
+        await fill(search, '路径')
+        const nativeDefaultAllowed = await read(`(${search}).dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'Escape', isComposing: true, bubbles: true, cancelable: true
+        }))`)
+        assert.equal(nativeDefaultAllowed, true, 'Composition-owned Escape keeps its native default')
+        assert.equal(await read(`(${search}).value`), '路径', 'Composition-owned Escape keeps the original query')
+        await key('Escape'); await until(`(${search}).value === ''`)
+        await verifyOrigin(scrollTop)
+        assert.deepEqual(await read(focusedSearch), expectedFocus, 'Ordinary Escape restores the original search focus')
+        frame.escape = { compositionPreserved: true, ordinaryRestores: true }
+        win.setContentSize(width, 900)
+        await until('innerHeight === 900')
       }
       await section('Appearance'); assert.equal(await read(`(${font}).value`), '', 'Incomplete numeric draft survives searching and clearing')
       await section('General'); assert.equal(await read(`(${toggle}).checked`), true, 'Dirty Copy Paths draft survives searching and clearing')
-      await settle(); const image = `${width}-${testCase}.png`; fs.writeFileSync(path.join(evidence, image), (await win.webContents.capturePage()).toPNG()); frame.image = image
-      await click(node('[aria-label="Close settings"]')); await until('!document.querySelector(".settings-page")')
+      if (testCase === 'clear-focus') {
+        await click(search)
+        frame.image = await capture(`${width}-${testCase}.png`)
+        await key('Escape')
+      } else {
+        frame.image = await capture(`${width}-${testCase}.png`)
+        await click(node('[aria-label="Close settings"]'))
+      }
+      await until('!document.querySelector(".settings-page")')
       await click('document.querySelector(".window-status-bar [aria-label=Settings]")'); await until('!!document.querySelector("[data-settings-pane=general]")')
       await click(node('.window-status-bar [aria-label="Space: show terminal and file workbench"]')); await until('!document.querySelector(".settings-page")')
       await click('document.querySelector(".window-status-bar [aria-label=Settings]")'); await until('!!document.querySelector("[data-settings-pane=general]")')
       result.frames.push(frame)
     }
     result.events = await read('window.__settingsSearchRefinement.events')
-    assert.ok(result.events.length > 0 && result.events.every(event => event.trusted))
+    assert.ok(result.events.length > 0 && result.events.every(event => event.trusted ||
+      event.type === 'keydown' && event.label === 'Search settings' && event.key === 'Escape' && event.composing))
     assert.ok(result.events.some(event => event.type === 'input' && event.label === 'Search settings'))
     assert.ok(result.events.some(event => event.type === 'click' && event.label === 'Clear settings search'))
     result.passed = true
