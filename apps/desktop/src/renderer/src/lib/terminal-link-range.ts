@@ -1,10 +1,10 @@
 import type { IBuffer, IBufferCell, IBufferLine, IBufferRange, Terminal } from '@xterm/xterm'
-import type { TerminalPathLink } from '@agentmux/client-ui/terminal-path-link'
 import { resolveTerminalDeclaredLink, terminalTextLinks, type TerminalLinkScope, type TerminalLinkTarget } from './terminal-link-target'
 
 // One hover window, independent of scrollback size. This also bounds combined-cell text.
 const TERMINAL_LINK_WINDOW_CELLS = 4096
 const TERMINAL_LINK_WINDOW_ROWS = 32
+const BARE_LINK_SEPARATOR = /[\s<>"\x60]/u
 type Buffer = Pick<IBuffer, 'getLine' | 'getNullCell'>
 type Cell = { chars: string; x: number; width: number; urlId?: number }
 type Row = { y: number; line: IBufferLine; cells: Cell[]; clipped: boolean }
@@ -60,23 +60,23 @@ export function terminalLinksInBuffer(buffer: Buffer, y: number, scope: Terminal
   }
   const incomplete = rows[0]!.line.isWrapped || rows.at(-1)!.clipped || next?.isWrapped === true
   let text = ''
+  const wrapGaps: { from: number; to: number }[] = []
   type Position = { from: number; to: number; start: IBufferRange['start']; end: IBufferRange['end']; urlId?: number }
   const positions: Position[] = []
   for (let index = 0; index < rows.length; index++) {
     const row = rows[index]!, following = rows[index + 1]
     const continues = following?.line.isWrapped ?? next?.isWrapped ?? false
-    // Keep erased tail cells as a separator. Only xterm's wide-cell padding is layout-only.
-    if (continues) {
-      if (following?.cells[0]?.width === 2 && row.cells.at(-1)?.x === row.line.length && row.cells.at(-1)?.chars === '') row.cells.pop()
-    } else {
-      while (row.cells.at(-1)?.chars === '') row.cells.pop()
-    }
+    if (!continues) while (row.cells.at(-1)?.chars === '') row.cells.pop()
+    let nullStart = -1
     for (const cell of row.cells) {
       const from = text.length
       text += cell.chars || ' '
+      if (cell.chars || cell.urlId) nullStart = -1
+      else if (nullStart < 0) nullStart = from
       positions.push({ from, to: text.length, start: { x: cell.x, y: row.y },
         end: { x: cell.x + cell.width - 1, y: row.y }, ...(cell.urlId ? { urlId: cell.urlId } : {}) })
     }
+    if (continues && nullStart >= 0) wrapGaps.push({ from: nullStart, to: text.length })
   }
 
   const result: TerminalBufferLink[] = []
@@ -103,11 +103,23 @@ export function terminalLinksInBuffer(buffer: Buffer, y: number, scope: Terminal
     cursor = cell.to
   }
   bare += text.slice(cursor)
-  let at = 0
+  // A cursor group skipped by xterm reflow and a VT erase can leave the same tail
+  // cells. Both sides may belong to one token. Explicit separators and declared
+  // targets bound only the affected candidate, and no gap becomes a file space.
+  for (const gap of wrapGaps) {
+    let left = gap.from, right = gap.to
+    while (left > 0 && !BARE_LINK_SEPARATOR.test(bare[left - 1]!)) left--
+    while (right < bare.length && !BARE_LINK_SEPARATOR.test(bare[right]!)) right++
+    if (left < gap.from && right > gap.to) { gap.from = left; gap.to = right }
+  }
+  let at = 0, gapIndex = 0
   for (const link of terminalTextLinks(bare, scope)) {
+    const endIndex = link.index + link.length
+    while (wrapGaps[gapIndex] && wrapGaps[gapIndex]!.to <= link.index) gapIndex++
+    if (wrapGaps[gapIndex] && wrapGaps[gapIndex]!.from < endIndex) continue
     while (positions[at] && positions[at]!.to <= link.index) at++
     const start = positions[at]?.start
-    while (positions[at] && positions[at]!.to < link.index + link.length) at++
+    while (positions[at] && positions[at]!.to < endIndex) at++
     const end = positions[at]?.end
     if (start && end && y >= start.y && y <= end.y) result.push({ target: link.target, range: { start, end } })
   }
@@ -117,15 +129,4 @@ export function terminalLinksInBuffer(buffer: Buffer, y: number, scope: Terminal
 export function terminalLinkAtCell(links: readonly TerminalBufferLink[], x: number, y: number): TerminalLinkTarget | null {
   return links.find(({ range }) => y >= range.start.y && y <= range.end.y &&
     (y > range.start.y || x >= range.start.x) && (y < range.end.y || x <= range.end.x))?.target ?? null
-}
-
-/** Pure file projection for consumers without OSC metadata. */
-export function terminalPathLinksInBuffer(buffer: Buffer, y: number, workspaceRoot: string): { link: TerminalPathLink; range: IBufferRange }[] {
-  return terminalLinksInBuffer(buffer, y, { workspaceRoot }).flatMap(({ target, range }) =>
-    target.kind === 'file' ? [{ link: target.file, range }] : [])
-}
-
-export function terminalPathLinkAtBufferCell(buffer: Buffer, x: number, y: number, workspaceRoot: string): TerminalPathLink | null {
-  const target = terminalLinkAtCell(terminalLinksInBuffer(buffer, y, { workspaceRoot }), x, y)
-  return target?.kind === 'file' ? target.file : null
 }
