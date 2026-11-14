@@ -10,10 +10,11 @@ import { useAppStore } from '../src/renderer/src/store'
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
 import { spaceMountKey, type SpaceMountRecord } from '../src/shared/space-mount'
 import { mountedSpaceRegions, mountedSpaceTarget } from '../src/renderer/src/lib/space-mount-view'
+import { originalSourceWorkspaceId } from '../src/renderer/src/lib/original-space-navigation'
 
 const dom = composerDOM(), cleanup: Array<() => unknown | Promise<unknown>> = []
 function SourceWorkbench({ mountKey, visible }: { mountKey: string; visible: boolean }) {
-  const workspaceId = useAppStore(state => mountedSpaceTarget(state.mountedSpaceInputs, mountKey)?.workspaceId)
+  const workspaceId = useAppStore(state => { const target=mountedSpaceTarget(state.mountedSpaceInputs,mountKey);return target?originalSourceWorkspaceId(target):undefined })
   return workspaceId ? <WorkspaceWorkbench workspaceId={workspaceId} visible={visible} /> : null
 }
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
@@ -108,10 +109,11 @@ test('a read arriving after this Region has been rebound cannot publish its old 
   const state = (await f.source.spatial.read())!
   await f.source.spatial.commit({ expectedRevision: state.revision, graph: { ...state.graph, regions: state.graph.regions.map(region => ({ ...region, agentSessionId: 'new-original-session', creationOperationId: 'new-original-creation' })) } })
   await vi.waitFor(() => expect(dom.container.textContent).toContain('new-original-session'))
-  await act(async () => { useAppStore.getState().setAgentComposerDraft(JSON.stringify([f.member.region.execution!.runtimeId!, f.member.region.agentSessionId!]), 'New private draft'); release() })
+  await act(async () => { useAppStore.getState().setAgentComposerDraft(JSON.stringify([f.member.region.execution!.runtimeId!, 'new-original-session']), 'New private draft'); release() })
   await vi.waitFor(() => expect(dom.container.textContent).toContain('The Source has not returned this original creation.'))
   expect(button('Continue original request')).toBeUndefined()
   expect(dom.container.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('New private draft')
+  expect(useAppStore.getState().agentComposerDrafts[JSON.stringify([f.member.region.execution!.runtimeId!,f.member.region.agentSessionId!])]).toBe('Keep this private unsent task')
   expect(f.source.bindings.continueOriginal).toHaveBeenCalledTimes(1); expect(f.source.agentInput).not.toHaveBeenCalled()
 })
 
@@ -153,10 +155,11 @@ test('a completed continuation arriving after Region rebinding cannot refresh or
   const state = (await f.source.spatial.read())!
   await f.source.spatial.commit({ expectedRevision: state.revision, graph: { ...state.graph, regions: state.graph.regions.map(region => ({ ...region, agentSessionId: 'new-original-session', creationOperationId: 'new-original-creation' })) } })
   await vi.waitFor(() => expect(dom.container.textContent).toContain('new-original-session'))
-  await act(async () => { useAppStore.getState().setAgentComposerDraft(JSON.stringify([f.member.region.execution!.runtimeId!, f.member.region.agentSessionId!]), 'Later private task'); release() })
+  await act(async () => { useAppStore.getState().setAgentComposerDraft(JSON.stringify([f.member.region.execution!.runtimeId!, 'new-original-session']), 'Later private task'); release() })
   await vi.waitFor(() => expect(button('Continue original request')).toBeUndefined())
   expect(dom.container.textContent).not.toContain('The original creation was confirmed.')
   expect(dom.container.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Later private task')
+  expect(useAppStore.getState().agentComposerDrafts[JSON.stringify([f.member.region.execution!.runtimeId!,f.member.region.agentSessionId!])]).toBe('Keep this private unsent task')
   expect(useAppStore.getState().sessions).toBe(f.sessions)
   expect((await f.source.spatial.read())!.graph.regions[0]!.agentSessionId).toBe('new-original-session')
   expect(f.source.create).toHaveBeenCalledTimes(1); expect(f.source.agentInput).not.toHaveBeenCalled()
