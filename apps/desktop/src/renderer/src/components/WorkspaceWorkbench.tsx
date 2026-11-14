@@ -73,7 +73,7 @@ import { opensContextMenuFromKeyboard } from '../lib/context-menu-key'
 import { SessionPane } from './SessionPane'
 import { OrdinarySpaceMemberViewport } from './OrdinarySpaceMemberViewport'
 import { SpaceSourceReaders, useSpaceSourceReader } from './SpaceSourceReaders'
-import { originalSourceEntryForSelection, originalSourceEntryByKey, originalSourceTabProjectionId, originalSourceRegionProjectionId } from '../lib/original-space-navigation'
+import { originalSourceEntryForSelection, originalSourceEntryByKey } from '../lib/original-space-navigation'
 import { spaceMountKey } from '../../../shared/space-mount'
 import { mountedRegionKey, mountedSpaceRegions } from '../lib/space-mount-view'
 import { MountedExecutionRelation } from './MountedExecutionRelation'
@@ -1806,8 +1806,7 @@ export function WorkspaceWorkbench({
   projection,
   leadingChrome,
   presentationAction,
-  projectionHeader,
-  sourceRegion
+  projectionHeader
 }: {
   workspaceId: string
   interactiveResize?: boolean
@@ -1843,8 +1842,6 @@ export function WorkspaceWorkbench({
   presentationAction?: ReactNode
   /** Optional chrome for an exact Region; its original content slot remains unchanged. */
   projectionHeader?: ReactNode
-  /** Focus's region-only presentation still uses the ordinary Source Region tree. */
-  sourceRegion?: { tabId: string; regionId: string } | undefined
 }) {
   useWorkbenchWindowRevision()
   const moteContext = useContext(MoteWorkfaceContext)
@@ -1894,7 +1891,7 @@ export function WorkspaceWorkbench({
   const navigationInputPolicy = useAppStore(state => state.workbenchNavigationInputPolicy)
   const requestedInputRegionId = useAppStore(state => state.workbenchNavigationInputPolicy === 'target' ? state.workbenchSpaceSelection?.regionId : undefined)
   const mainSelection = useAppStore(state => state.workbenchSpaceSelection)
-  const zoneLayout = useMemo(() => projection && !source ? projectWorkbenchProjection(projection.composition ?? residentLayout, tabs, projection, projectionActiveGroupId, viewOwnership) : null,
+  const zoneLayout = useMemo(() => projection && (!source || viewOwnership === 'projection') ? projectWorkbenchProjection(projection.composition ?? residentLayout, tabs, projection, projectionActiveGroupId, viewOwnership) : null,
     [residentLayout, tabs, projection, projectionActiveGroupId, viewOwnership, source])
   const projectionContext = useMemo(() => projection && zoneLayout
     ? { ...projection, unsupportedTabIds: new Set([...zoneLayout.unsupportedTabIds, ...zoneLayout.layout?.groups.flatMap(group => {
@@ -2132,17 +2129,6 @@ export function WorkspaceWorkbench({
     if (tabId) onTabSelect?.(tabId, groupId)
   }
 
-  if (source && sourceRegion) {
-    const tabId = originalSourceTabProjectionId(source.target, sourceRegion.tabId), regionId = originalSourceRegionProjectionId(source.target, sourceRegion.regionId)
-    const tab = tabs[tabId], group = residentLayout?.groups.find(group => group.tabOrder.includes(tabId))
-    return <div ref={workbenchRef} className="workspace-workbench workspace-workbench--merged" hidden={!visible}
-      data-original-source-space={source.key} data-source-runtime={source.target.reference.runtimeId}>
-      <div className="pane-body">{tab && group && tab.regions[regionId] ? <WorkbenchRegionTree
-        tab={{ ...tab, layout: { ...tab.layout, root: { type: 'leaf', regionId }, activeRegionId: regionId } }}
-        groupId={group.id} headerPortalTargetId={null} surfaceVisible={visible} nativeSurfacesVisible={visible} interactiveResize={interactiveResize} />
-        : <SurfaceState title="Original Region retained" description="Its exact Source occurrence is not currently confirmed. The original project and private input are kept." />}</div>
-    </div>
-  }
   if (categoryWorkspace) return <div ref={workbenchRef} className="workspace-workbench topic-category-overview">
     {leadingChrome ? <header className="pane-tabbar pane-tabbar--root">{leadingChrome}</header> : null}
     <SurfaceState title="Select a Topic" description="Choose a Topic from the directory to open its discussions." />

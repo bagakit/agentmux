@@ -1,6 +1,6 @@
 import type { FocusContextAccess } from '../lib/focus-context-access'
 import { spaceMountKey } from '../../../shared/space-mount'
-import { originalSourceEntryForSelection, originalSourceWorkspaceId } from '../lib/original-space-navigation'
+import { originalSourceEntryForSelection } from '../lib/original-space-navigation'
 import { useFocusSources } from '../lib/use-focus-sources'
 import { focusContextIdentityKey } from '../lib/focus-context-identity'
 import { SpaceSourceReaders } from './SpaceSourceReaders'
@@ -648,9 +648,6 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       {sourceChoices ? <div className="focus-location-choices" role="group" aria-label="Choose original workface">
         <p>Choose the exact workface for this Agent.</p>{sourceChoices.locations.map(location => <button type="button" className="small-button focus-location-choice" key={JSON.stringify(location)} onClick={() => { sourceChoices.choose(location); setSourceChoices(null) }}><strong>Tab {location.tabId}</strong><small>Region {location.regionId}</small></button>)}
         <button type="button" className="small-button" onClick={() => setSourceChoices(null)}>Dismiss location choices</button>
-      </div> : sourceSelection && selectedSourceKey ? <div className="focused-tab-workspace" data-focus-tab-id={sourceSelection.location.tabId}>
-        <WorkspaceWorkbench workspaceId={originalSourceWorkspaceId(sourceSelection.location.source)} visible={visible}
-          {...(regionOnly ? { sourceRegion: { tabId: sourceSelection.location.tabId, regionId: sourceSelection.location.regionId } } : {})} />
       </div> : projection
         ? <div className="focused-tab-workspace" data-focus-tab-id={selectedTab?.id}
           data-focus-zone-id={projection.entity.kind === 'zone' ? projection.entity.zoneId : undefined}>
