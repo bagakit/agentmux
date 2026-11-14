@@ -14,7 +14,7 @@ async function hashFile(path: string) { const hash = createHash('sha256'); for a
 export async function hashExtensionDirectory(root: string): Promise<string> {
   const hash = createHash('sha256')
   const visit = async (path: string, prefix: string): Promise<void> => {
-    const entries = (await readdir(path, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name, 'en'))
+    const entries = (await readdir(path, { withFileTypes: true })).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
     for (const entry of entries) {
       const relative = prefix + entry.name, full = join(path, entry.name), stat = await lstat(full)
       if (stat.isSymbolicLink() || (!stat.isDirectory() && !stat.isFile())) invalid('Extension packages must contain ordinary files and directories, without symbolic links.')
