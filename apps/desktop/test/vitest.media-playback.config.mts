@@ -29,7 +29,26 @@ const changes = {
   'drag-shows-disc': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', 'facts.paused && !facts.ended && !failure && !drag ?', 'facts.paused && !facts.ended && !failure ?'],
   'drag-shows-pause': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', 'const playingShown = drag ? drag.resume : playing', 'const playingShown = playing'],
   'drag-lands-on-key-release': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', 'onKeyUp={() => { if (!pressed.current) onLand() }}', 'onKeyUp={onLand}'],
-  'press-keeps-old-value': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', 'if (pressedAt) onScrub(pressedAt.time)', 'void pressedAt']
+  'press-keeps-old-value': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', 'if (pressedAt) onScrub(pressedAt.time)', 'void pressedAt'],
+  'preview-at-mount': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', 'const decoderShown = preview !== null && decoding', 'const decoderShown = preview !== null'],
+  'preview-no-dwell': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', '}, PREVIEW_DWELL_MS)', '}, 0)'],
+  'preview-preload-auto': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', 'muted preload="metadata"', 'muted preload="auto"'],
+  'preview-never-released': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', 'release.current = null; setDecoding(false) }, PREVIEW_RELEASE_MS)', 'release.current = null }, PREVIEW_RELEASE_MS)'],
+  'preview-return-keeps-release': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', 'now.session += 1\n      if (release.current) { clearTimeout(release.current); release.current = null }', 'now.session += 1'],
+  'preview-ignores-idle': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', 'useEffect(() => { if (!controlsShown) leave() }, [controlsShown, leave])', 'useEffect(() => {}, [controlsShown, leave])'],
+  'preview-ignores-hidden': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', "if (document.visibilityState === 'hidden') leave()", 'void document'],
+  'preview-after-main-failure': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', "decode === 'ready' && facts.width > 0", "decode !== 'loading' && facts.width > 0"],
+  'preview-frame-early': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', "if (status === 'resting') setFrameShown(true)", "if (status !== 'queued') setFrameShown(true)"],
+  'preview-rest-unseen': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', "if (status === 'resting') setFrameShown(true)", "if (status === 'resting') void 0"],
+  'preview-in-flight-unadopted': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', "else if (status === 'in-flight') pointing.current.issued = pointing.current.session", "else if (status === 'in-flight') void 0"],
+  'preview-stale-frame': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', 'fresh = now.issued === now.session', 'fresh = true'],
+  'preview-keeps-source': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', "node.removeAttribute('src'); node.load()", 'node.load()'],
+  'preview-during-drag': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', 'if (preview && !pressed.current && pointed.room', 'if (preview && pointed.room'],
+  'preview-in-short-player': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', ' && pointed.room >= PREVIEW_MIN_ROOM', ''],
+  'preview-frame-while-held': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', 'pressed.current = true\n    stopPreviewing()', 'pressed.current = true'],
+  'preview-retry-within-pointing': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', 'if (now.failed === now.session) return', ''],
+  'preview-never-retries': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', 'if (now.failed === now.session) return', 'if (now.failed !== -1) return'],
+  'preview-error-reaches-main': ['packages/editor-extensions/src/ui/MediaTimeline.tsx', 'const onPreviewError = () => {', 'const onPreviewError = () => { onHold();']
 } as const
 
 export default defineConfig({ ...original,

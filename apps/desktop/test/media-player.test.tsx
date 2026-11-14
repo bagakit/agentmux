@@ -206,19 +206,19 @@ describe('mounted player', () => {
       timeline().dispatchEvent(new Event('input', { bubbles: true }))
     })
   }
-  async function press(type: 'pointerdown' | 'pointerup' | 'pointercancel') {
-    await act(async () => { timeline().dispatchEvent(new PointerEvent(type, { bubbles: true, button: 0, pointerId: 1 })) })
+  async function press(type: 'pointerdown' | 'pointerup' | 'pointercancel', clientX?: number) {
+    await act(async () => { timeline().dispatchEvent(new PointerEvent(type, { bubbles: true, button: 0, pointerId: 1, ...(clientX === undefined ? {} : { clientX }) })) })
   }
   const announced = () => container.querySelector('.media-player__announcer')!.textContent
   function timeline() { return container.querySelector<HTMLInputElement>('.media-player__slider')! }
-  // The track runs 200–800px inside a 1000px stage whose top is 400px above it: with a 600 s file, x - 200 is the second.
-  function layout() {
+  // The track runs 200–800px inside a 1000px stage whose top is `room` px above it: with a 600 s file, x - 200 is the second.
+  function layout(room = 400) {
     const rect = (left: number, top: number, width: number, height: number) =>
       ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON() { return this } }) as DOMRect
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       if (this.classList.contains('media-player__slider')) return rect(200, 500, 600, 20)
       if (this.classList.contains('media-player__timeline')) return rect(192, 500, 616, 20)
-      return rect(0, 100, 1000, 450)
+      return rect(0, 500 - room, 1000, room + 50)
     })
   }
   async function point(clientX: number) {
@@ -226,6 +226,24 @@ describe('mounted player', () => {
   }
   const bubble = () => container.querySelector<HTMLElement>('.media-player__bubble')
   const spot = () => container.querySelector<HTMLElement>('.media-player__preview')
+  // React derives leaving from pointerout and the element the pointer went to.
+  async function leave() {
+    await act(async () => { timeline().dispatchEvent(new PointerEvent('pointerout', { bubbles: true, relatedTarget: document.body, pointerId: 1 })) })
+  }
+  const frameShown = () => spot()?.hasAttribute('data-frame') ?? false
+  const decoderElement = () => container.querySelector<HTMLVideoElement>('.media-player__preview video')
+  // The preview decoder, whose seeks finish only when the test says so.
+  function decoder() {
+    const element = decoderElement()!
+    const state = { time: 0, seeking: false, seeks: [] as number[] }
+    Object.defineProperty(element, 'seeking', { configurable: true, get: () => state.seeking })
+    Object.defineProperty(element, 'currentTime', { configurable: true, get: () => state.time,
+      set: (value: number) => { state.time = value; state.seeking = true; state.seeks.push(value) } })
+    return { element, state,
+      async ready() { await act(async () => { element.dispatchEvent(new Event('loadedmetadata')) }) },
+      async seeked() { state.seeking = false; await act(async () => { element.dispatchEvent(new Event('seeked')) }) } }
+  }
+  const loaded = () => vi.mocked(HTMLMediaElement.prototype.load).mock.contexts
   beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
     container = document.createElement('div'); document.body.append(container); root = createRoot(container)
@@ -662,5 +680,218 @@ describe('mounted player', () => {
     await press('pointerup')
     expect(state.seeks).toEqual([600])
     expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled()
+  })
+
+  describe('frame preview', () => {
+    beforeEach(() => { vi.useFakeTimers() })
+    afterEach(() => { vi.useRealTimers() })
+    // The pointer stays on the timeline; by default just long enough for a frame preview.
+    async function stay(ms = 150) { await act(async () => { vi.advanceTimersByTime(ms) }) }
+
+    it('makes a decoder only once the pointer stays on the timeline: muted, metadata only, unfocusable and over the lease', async () => {
+      await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+      await engine(media(), { paused: true, duration: 600 }); layout()
+      expect(decoderElement()).toBeNull()
+      // A pointer crossing the timeline on its way elsewhere makes none.
+      await point(500); await stay(100); await leave(); await stay(1_000)
+      expect(decoderElement()).toBeNull()
+      await point(500); await stay(149)
+      expect(decoderElement()).toBeNull()
+      await stay(1)
+      const unit = spot()!, video = decoderElement()!
+      expect(video.getAttribute('src')).toBe(lease().url); expect(video.muted).toBe(true); expect(video.getAttribute('preload')).toBe('metadata')
+      expect(video.tabIndex).toBe(-1); expect(video.hasAttribute('crossorigin')).toBe(false)
+      expect(video.hasAttribute('disablepictureinpicture')).toBe(true); expect(video.hasAttribute('disableremoteplayback')).toBe(true)
+      expect(container.querySelectorAll('video')).toHaveLength(2)
+      expect(unit.getAttribute('aria-hidden')).toBe('true'); expect(unit.textContent).toBe('5:00'); expect(frameShown()).toBe(false)
+      expect(unit.style.getPropertyValue('--media-preview-x')).toBe('308px')
+      expect([unit.style.getPropertyValue('--media-preview-lo'), unit.style.getPropertyValue('--media-preview-hi')]).toEqual(['-192px', '808px'])
+      expect(unit.style.getPropertyValue('--media-preview-room')).toBe('400px')
+      expect(Number(unit.style.getPropertyValue('--media-preview-ratio'))).toBeCloseTo(16 / 9)
+    })
+
+    it('the decoder seeks only the newest pointed time once it has metadata, one seek at a time, and shows the frame once that seek lands', async () => {
+      await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+      await engine(media(), { paused: true, duration: 600 }); layout()
+      await point(260); await stay(); await point(320)
+      const preview = decoder()
+      expect(preview.state.seeks).toEqual([])
+      await preview.ready()
+      expect(preview.state.seeks).toEqual([120])
+      await point(380); await point(440)
+      expect(preview.state.seeks).toEqual([120]); expect(frameShown()).toBe(false)
+      await preview.seeked()
+      // The landed frame shows while the newest time is still on its way.
+      expect(preview.state.seeks).toEqual([120, 240]); expect(frameShown()).toBe(true)
+    })
+
+    it('leaving keeps the decoder a moment for a return, which shows time only until its own seek lands; then the file is let go', async () => {
+      await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+      await engine(media(), { paused: true, duration: 600 }); layout()
+      await point(500); await stay()
+      const preview = decoder()
+      await preview.ready(); await preview.seeked()
+      expect(frameShown()).toBe(true)
+      await leave()
+      expect(frameShown()).toBe(false); expect(spot()!.hasAttribute('data-idle')).toBe(true)
+      await stay(2_900)
+      expect(decoderElement()).toBe(preview.element)
+      // A return seeks at once, without another dwell.
+      await point(560)
+      expect(preview.state.seeks).toEqual([300, 360]); expect(frameShown()).toBe(false)
+      await preview.seeked()
+      expect(frameShown()).toBe(true)
+      // The return called off the release that leaving had started.
+      await stay(1_000)
+      expect(decoderElement()).toBe(preview.element)
+      await leave(); await stay(3_000)
+      expect(spot()).toBeNull()
+      expect(preview.element.hasAttribute('src')).toBe(false); expect(loaded()).toContain(preview.element)
+    })
+
+    it('a frame from an earlier pointing never shows; a pointed time the decoder rests on or is already seeking to counts as asked for now', async () => {
+      await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+      await engine(media(), { paused: true, duration: 600 }); layout()
+      await point(500); await stay()
+      const preview = decoder()
+      await preview.ready()
+      await leave(); await point(320)
+      await preview.seeked()
+      expect(frameShown()).toBe(false); expect(preview.state.seeks).toEqual([300, 120])
+      await preview.seeked()
+      expect(frameShown()).toBe(true)
+      await leave(); await point(320)
+      expect(frameShown()).toBe(true)
+      await point(380); await leave(); await point(380)
+      expect(frameShown()).toBe(false)
+      await preview.seeked()
+      expect(frameShown()).toBe(true); expect(preview.state.seeks).toEqual([300, 120, 180])
+    })
+
+    it('a held drag hides the frame and keeps the time; after it, pointing previews again with the same decoder', async () => {
+      await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+      await engine(media(), { paused: true, duration: 600 }); layout()
+      await point(500); await stay()
+      const preview = decoder()
+      await preview.ready(); await preview.seeked()
+      await press('pointerdown', 500)
+      expect(frameShown()).toBe(false); expect(bubble()!.textContent).toBe('5:00')
+      await point(560)
+      expect(bubble()!.textContent).toBe('6:00'); expect(preview.state.seeks).toEqual([300])
+      await press('pointerup', 560)
+      await point(620)
+      expect(decoderElement()).toBe(preview.element); expect(preview.state.seeks).toEqual([300, 420])
+      await preview.seeked()
+      expect(frameShown()).toBe(true)
+    })
+
+    it('the controls idling away and the document hiding each end a pointing as leaving does', async () => {
+      await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+      await engine(media(), { paused: false, duration: 600 }); layout()
+      await point(500); await stay()
+      const first = decoder()
+      await first.ready(); await first.seeked()
+      expect(frameShown()).toBe(true)
+      await stay(2_000)
+      expect(container.querySelector('.media-player')!.getAttribute('data-controls')).toBe('hidden')
+      expect(spot()!.hasAttribute('data-idle')).toBe(true); expect(frameShown()).toBe(false)
+      await stay(3_000)
+      expect(decoderElement()).toBeNull(); expect(first.element.hasAttribute('src')).toBe(false)
+      await point(500); await stay()
+      const second = decoder()
+      await second.ready(); await second.seeked()
+      expect(frameShown()).toBe(true)
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' })
+      try {
+        await act(async () => { document.dispatchEvent(new Event('visibilitychange')) })
+        expect(spot()!.hasAttribute('data-idle')).toBe(true); expect(frameShown()).toBe(false)
+        await stay(3_000)
+        expect(decoderElement()).toBeNull(); expect(second.element.hasAttribute('src')).toBe(false)
+      } finally { delete (document as { visibilityState?: unknown }).visibilityState }
+    })
+
+    it('main playback failing drops the decoder as the failure shows', async () => {
+      vi.spyOn(api.files, 'mediaStreamStatus').mockResolvedValue({ state: 'active' })
+      await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+      await engine(media(), { paused: true, duration: 600 }); layout()
+      await point(500); await stay()
+      const preview = decoder()
+      define(media(), { error: { code: 4 } })
+      await act(async () => { media().dispatchEvent(new Event('error')) })
+      expect(container.querySelector('[role="alert"]')).not.toBeNull()
+      expect(decoderElement()).toBeNull()
+      expect(preview.element.hasAttribute('src')).toBe(false); expect(loaded()).toContain(preview.element)
+    })
+
+    it('a failed preview folds only its frame away for the rest of that pointing; the next pointing tries again and main playback is untouched', async () => {
+      await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+      const main = await engine(media(), { paused: false, duration: 600 }); layout()
+      await point(500); await stay()
+      const failed = decoder()
+      await act(async () => { failed.element.dispatchEvent(new Event('error')) })
+      expect(decoderElement()).toBeNull(); expect(failed.element.hasAttribute('src')).toBe(false)
+      expect(bubble()!.textContent).toBe('5:00')
+      await point(560); await stay(1_000)
+      expect(decoderElement()).toBeNull()
+      await leave(); await point(500); await stay()
+      expect(decoderElement()).not.toBeNull(); expect(decoderElement()).not.toBe(failed.element)
+      expect(main.state.seeks).toEqual([]); expect(main.state.paused).toBe(false)
+      expect(container.querySelector('[role="alert"]')).toBeNull(); expect(announced()).toBe('')
+      expect(container.querySelector('.media-player')!.getAttribute('data-decode-state')).toBe('ready')
+    })
+
+    it('audio, HLS playlists, live streams and a video without a picture point at time only', async () => {
+      for (const [kind, duration, picture] of [['audio', 600, true], ['playlist', 600, true], ['playlist', Number.POSITIVE_INFINITY, true], ['video', 600, false]] as const) {
+        const label = `${kind} ${duration} ${picture ? 'picture' : 'no picture'}`
+        await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease(kind)} name={label} onRetry={() => {}} />)
+        define(media(), { seekable: ranges([0, 600]) })
+        await engine(media(), { paused: true, duration, picture }); layout()
+        await point(500); await stay(1_000)
+        expect(decoderElement(), label).toBeNull()
+        expect(bubble()?.textContent, label).toMatch(/\d:\d\d/)
+        await act(async () => root.render(<></>))
+      }
+    })
+
+    it('a player with too little room above the timeline for a readable frame points at time only', async () => {
+      await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+      await engine(media(), { paused: true, duration: 600 }); layout(95)
+      await point(500); await stay(1_000)
+      expect(decoderElement()).toBeNull(); expect(bubble()!.textContent).toBe('5:00')
+      await leave(); layout(96)
+      await point(500); await stay()
+      expect(decoderElement()).not.toBeNull()
+    })
+
+    it('a new lease or leaving the File drops the preview source before the element goes', async () => {
+      await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+      await engine(media(), { paused: true, duration: 600 }); layout()
+      await point(500); await stay()
+      const first = decoderElement()!
+      const next = { ...lease(), id: 'lease-next', url: 'http://127.0.0.1:1/lease-next/clip' }
+      await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={next} name="clip.mp4" onRetry={() => {}} />)
+      expect(first.hasAttribute('src')).toBe(false); expect(loaded()).toContain(first)
+      expect(decoderElement()).toBeNull()
+      await point(500); await stay()
+      const second = decoderElement()!
+      expect(second.getAttribute('src')).toBe(next.url)
+      await act(async () => root.render(<></>))
+      expect(second.hasAttribute('src')).toBe(false); expect(loaded()).toContain(second)
+    })
+
+    it('the frame takes the picture’s shape, stops inside the player’s sides, shrinks when narrow and holds still for reduced motion', () => {
+      const rules = stripCssComments(readStyleSheet('@agentmux/editor-extensions/styles/media-player.css'))
+      const block = (start: string) => { const from = rules.indexOf(start); let depth = 0, at = rules.indexOf('{', from)
+        for (let index = at; index < rules.length; index++) { depth += rules[index] === '{' ? 1 : rules[index] === '}' ? -1 : 0; if (depth === 0) { at = index; break } }
+        return rules.slice(from, at + 1) }
+      expect(rules).toMatch(/\.media-player__preview-frame\s*\{[^}]*aspect-ratio:\s*var\(--media-preview-ratio\)/)
+      // A player shrinking under a shown frame folds it to nothing instead of letting it fall back to the picture's own size.
+      expect(rules).toMatch(/--media-preview-height:\s*min\(var\(--media-preview-tall\),\s*max\(0px,\s*calc\(var\(--media-preview-room/)
+      expect(rules).toMatch(/\.media-player__preview\[data-frame\]\s*\{\s*left:\s*clamp\(calc\(var\(--media-preview-lo\)[^;]*var\(--media-preview-x\),\s*calc\(var\(--media-preview-hi\)/)
+      expect(rules).toMatch(/\.media-player__preview:not\(\[data-frame\]\)\s*>\s*\.media-player__preview-frame\s*\{[^}]*visibility:\s*hidden/)
+      expect(block('@container (max-width: 511px)')).toMatch(/\.media-player__preview\s*\{[^}]*--media-preview-tall/)
+      expect(block('@media (prefers-reduced-motion: reduce)')).toMatch(/\.media-player__preview-frame\s*\{\s*transition:\s*none/)
+      expect(block('@media (prefers-reduced-transparency: reduce)')).toContain('.media-player__bubble')
+    })
   })
 })
