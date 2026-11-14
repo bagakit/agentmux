@@ -194,8 +194,7 @@ export function SpaceMemberWorkface({ target, visible, active, interactiveResize
         {conversation ? <ActivityView sessionId={target.target.agentSessionId} executionHostId={originalReading?.surface.initial.hostId ?? original?.surface.initial.hostId ?? ownerKey}
           capability={session?.kind === 'agent' ? session.capabilities.timeline : undefined}
           conversationReading={{ reference: { hostId: 'local', agentSessionId: target.target.agentSessionId }, identity: conversationIdentity, port: conversation,
-            enabled: visible && mode === 'activity', opened: true, readCaptured: true,
-            onClose: () => useAppStore.getState().setViewMode(ownerKey, 'terminal', { focus: false }), returnLabel: 'Terminal',
+            enabled: visible && mode === 'activity', readCaptured: true,
             consumer: { regionId: target.target.regionId, visible, activityShown: mode === 'activity', viewMode: mode } }} />
           : conversationIssue ? <ConversationReadFailure scope={readingKey} hasContent={false} visible={visible && mode === 'activity'}
             issues={[{ id: 'original-conversation', label: 'Original conversation source', reasons: [conversationIssue], loading: false,
