@@ -37,7 +37,7 @@ export const presenceMutants = {
   'source-reobservation': ['apps/host/src/mote-presence.ts', "if (reading?.status === 'unconfirmed' && now >= (retries.get(id)?.at ?? now)) dirty.add(id)", "if (false) dirty.add(id)"],
   'disabled-resume': ['apps/host/src/mote-presence.ts', "const method = loop.managedSource!.revision === main.roleRevision && main.current && !preference.enabled ? 'schedule.pause' : 'schedule.cancel'", "const method = 'schedule.cancel'"],
   'role-fence': ['apps/host/src/mote-presence.ts', 'main.roleRevision !== loop.managedSource.revision', 'false'],
-  'supervision-heartbeat-guidance': ['apps/host/src/mote-presence.ts', '+ MOTE_SUPERVISION_GUIDANCE +', '+ \'\' +'],
+  'supervision-heartbeat-guidance': ['apps/host/src/mote-presence.ts', "formatAmuxTriggerNote('heartbeat', MOTE_SUPERVISION_GUIDANCE +", "formatAmuxTriggerNote('heartbeat', '' +"],
   'supervision-heartbeat-target': ['apps/host/src/mote-presence.ts', 'JSON.stringify({ target })', "JSON.stringify({ target: { spaceId: 'another-mote' } })"],
   'thread-notification-disconnected': ['packages/core/src/agent-message-notifications.ts', 'if (notice) await this.deps.submit(notice)', 'if (false && notice) await this.deps.submit(notice)']
 }

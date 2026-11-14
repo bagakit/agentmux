@@ -1,3 +1,4 @@
+import { formatAmuxTriggerNote } from '@agentmux/core/agent-outbound-message'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { AGENTMUX_AGENT_MESSAGING_ENTRY, observeAgent } from '@agentmux/core'
 import { parseAgentProgressParams } from '../../../packages/core/src/agent-progress.js'
@@ -50,7 +51,7 @@ describe('ContinuousProgressLoopManager', () => {
     })
     const send = async () => {
       expect((await store.load())[0]?.pendingCompletion).toMatchObject({
-        id: JSON.stringify(['r', completedAt]), prompt: 'next', agentMuxNote: AGENTMUX_AGENT_MESSAGING_ENTRY
+        id: JSON.stringify(['r', completedAt]), prompt: 'next', agentMuxNote: formatAmuxTriggerNote('automation', AGENTMUX_AGENT_MESSAGING_ENTRY)
       })
       calls++
       return 'sent' as const

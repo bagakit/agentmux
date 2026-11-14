@@ -12,9 +12,9 @@ export default defineConfig({ ...source, plugins: [...(source.plugins ?? []), {
       'packages/core/src/generated/agentmux-guides.ts', 'apps/host/src/goal-runtime.ts'].includes(file)) return
     let loaded = code
     if (process.env.MOTE_GUIDANCE_MUTANT === 'heartbeat-disconnected' && file === 'apps/host/src/mote-presence.ts') {
-      const anchor = "'Mote main heartbeat.\\n\\n' + MOTE_SUPERVISION_GUIDANCE +"
+      const anchor = 'managedScheduleNote: heartbeatNote(target)'
       if (!code.includes(anchor)) throw Error('Missing heartbeat composition anchor')
-      loaded = code.replace(anchor, "'Mote main heartbeat.\\n\\n' +")
+      loaded = code.replace(anchor, "managedScheduleNote: 'untyped calendar context'")
     }
     if (process.env.MOTE_GUIDANCE_MUTANT === 'main-input-disconnected' && file === 'packages/core/src/mote/input-source.ts') {
       const anchor = '+ "\\n\\n" + MOTE_SUPERVISION_GUIDANCE'

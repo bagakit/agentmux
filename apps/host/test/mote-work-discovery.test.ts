@@ -144,9 +144,9 @@ it('bounded schedule coverage is separate from the empty linked-page cursor', as
   const page = await f.read(1)
   expect(page.next).toBeNull(); expect(page.arrangements.sourceStatus).toBe('read')
   expect(page.arrangements.entries).toHaveLength(1); expect(page.arrangements.hasMore).toBe(true)
-  for (const guide of [MOTE_INPUT_GUIDANCE, MOTE_COORDINATION_ROLE, agentMuxModuleSkill('mote')!]) {
-    expect(guide).toContain('arrangements.ownerHostId'); expect(guide).toContain('current-Main schedules only')
-  }
+  for (const entry of [MOTE_INPUT_GUIDANCE, MOTE_COORDINATION_ROLE]) expect(entry).toContain('amux mote --skill')
+  const guide = agentMuxModuleSkill('mote')!
+  expect(guide).toContain('arrangements.ownerHostId'); expect(guide).toContain('current-Main schedules only')
 })
 
 it('confirmed unbound Main is not source failure and does not query another Session', async () => {
