@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { createElement, useEffect, useState } from 'react'
 import { TextInput, Textarea } from '@agentmux/client-ui/input'
 import { getSemanticIconCatalog, iconShapes, ICON_GLYPHS, type IconGlyphId, type IconShape, type SemanticIconId } from '@agentmux/client-ui/icons'
@@ -56,7 +57,7 @@ export function ThemeIconEditor({ draft, onChange, onValidation }: {
             <span><strong>{icon.label}</strong><code>{icon.id}</code></span>
             {draft.icons[icon.id] ? <span className="theme-icon-editor__badge">Edited</span> : null}
           </button>)}
-          {!matches.length ? <div className="theme-icon-editor__empty"><p>No meanings match these filters.</p><button type="button" className="small-button" onClick={() => { setQuery(''); setGroup(''); setModified(false) }}>Clear filters</button></div> : null}
+          {!matches.length ? <div className="theme-icon-editor__empty"><p>No meanings match these filters.</p><Button type="button" onClick={() => { setQuery(''); setGroup(''); setModified(false) }}>Clear filters</Button></div> : null}
         </div>
       </div>
       <div className="theme-icon-editor__detail" aria-label="Selected semantic icon">
@@ -66,8 +67,8 @@ export function ThemeIconEditor({ draft, onChange, onValidation }: {
           <div><span>Current</span><div className="theme-icon-editor__sizes">{[16, 24].map(size => <span key={size}><Drawing shapes={iconShapes(selected, draft.icons)} style={draft.iconStyle} size={size} /><small>{size}px</small></span>)}</div><code>{asset?.kind === 'paths' ? 'Custom paths' : asset?.kind === 'glyph' ? asset.glyph : meaning.defaultGlyph}</code></div>
         </div>
         <div className="theme-icon-editor__drawing-actions">
-          <button type="button" className="small-button" aria-expanded={library} onClick={() => setLibrary(value => !value)}>Choose a drawing</button>
-          <button type="button" className="small-button" disabled={!asset && !raw[selected]} onClick={() => replace(undefined)}>Restore default drawing</button>
+          <Button type="button" aria-expanded={library} onClick={() => setLibrary(value => !value)}>Choose a drawing</Button>
+          <Button type="button" disabled={!asset && !raw[selected]} onClick={() => replace(undefined)}>Restore default drawing</Button>
         </div>
         {library ? <div className="theme-icon-editor__library">
           <label><span>Drawing library · {glyphs.length}</span><TextInput aria-label="Find icon drawing" value={glyphQuery} onChange={event => setGlyphQuery(event.target.value)} placeholder="Search drawings, e.g. circle-play" /></label>
@@ -76,7 +77,7 @@ export function ThemeIconEditor({ draft, onChange, onValidation }: {
         </div> : null}
         <details className="theme-icon-editor__advanced" open={asset?.kind === 'paths' || Boolean(raw[selected]) ? true : undefined}>
           <summary>Custom path asset</summary>
-          {asset?.kind !== 'paths' ? <button type="button" className="small-button" onClick={() => { setLibrary(false); replace({ kind: 'paths', paths: [{ d: 'M6 6 L18 18 M18 6 L6 18' }] }) }}>Use custom paths</button> : null}
+          {asset?.kind !== 'paths' ? <Button type="button" onClick={() => { setLibrary(false); replace({ kind: 'paths', paths: [{ d: 'M6 6 L18 18 M18 6 L6 18' }] }) }}>Use custom paths</Button> : null}
           {asset?.kind === 'paths' ? <label className="theme-icon-editor__paths"><span>Path asset · fixed 24 × 24 viewBox</span><Textarea aria-label="Semantic icon paths" rows={5} spellCheck={false} value={raw[selected]?.text ?? JSON.stringify(asset.paths, null, 2)} onChange={event => paths(event.target.value)} /><small>JSON path objects with d and optional fill (none or currentColor). Assets are included in the theme file.</small></label> : <p className="settings-hint">For drawings outside the library, use a bounded path asset.</p>}
         </details>
         {raw[selected]?.error ? <p role="alert" className="settings-error">{raw[selected].error} The last valid drawing is retained.</p> : null}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react'
 import { createPortal } from 'react-dom'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { browserAgentEffectsCss, type BrowserAgentControlPreferences } from '../../../../shared/browser-agent-control'
 import { AgentProviderIcon } from '@agentmux/client-ui/components/AgentProviderIcon'
 import { BrowserControlBoundary } from '../BrowserControlBoundary'
@@ -64,7 +65,7 @@ export function BrowserAgentControlPreview({ preferences, active, dirty, preview
     <header className="browser-agent-preview__header"><span><strong>Live preview</strong><small>Simulation · {dirty ? 'unsaved draft' : 'saved appearance'}</small></span>
       <div className="settings-preview-header-actions">{returnAction}<div className="browser-agent-preview__playback">
         <button type="button" className="small-button" disabled={phase !== 'running'} onClick={() => setPlaying(value => !value)} aria-pressed={playing}>{playing ? 'Pause' : 'Play'}</button>
-        <button type="button" className="small-button" disabled={phase !== 'running'} onClick={() => setStep(value => value + 1)}>Step</button>
+        <Button type="button" disabled={phase !== 'running'} onClick={() => setStep(value => value + 1)}>Step</Button>
       </div></div>
     </header>
     <div className="browser-agent-preview__options">

@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import './appearance-settings.css'
 import { ThemeLibrary } from './ThemeLibrary'
 import { BrandIcon } from '@agentmux/client-ui/components/BrandIcon'
@@ -162,7 +163,7 @@ export function AppearanceSettingsPane({ appearance, onSave, active = true }: {
             placeholder="App" disabled={inheritsEditorFont} value={inheritsEditorFont ? '' : editorFont.value}
             onChange={event => editorFont.setValue(event.target.value)} />
           <span className="terminal-font-size-control__unit">px</span>
-          <button type="button" className="small-button" disabled={inheritsEditorFont} onClick={() => editorFont.setValue('inherit')}>Reset editor size</button>
+          <Button type="button" disabled={inheritsEditorFont} onClick={() => editorFont.setValue('inherit')}>Reset editor size</Button>
         </div>
         <p className="settings-hint">Applies to source and diff editors. Inherit the App size or choose {EDITOR_FONT_SIZE_MIN} to {EDITOR_FONT_SIZE_MAX} pixels.</p>
       </section>

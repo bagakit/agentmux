@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { sameConnectionApplication, type ConnectionProfileObservation, ConnectionProfileOperation, ConnectionRecord } from '@agentmux/core/connections'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { ConnectionHostingTarget } from '../../../../shared/contracts'
 import { connectionSettingsPort } from '../../lib/connection-settings-port'
 import { ConnectionProfileObservationView, ConnectionProfileResult, ProfileManagementLink } from '../ConnectionProfileResult'
@@ -47,11 +48,11 @@ export function ConnectionProfilePanel({ record, hostingTarget }: { record: Conn
   const operation = operations.find(item => item.operationId === selected)
   return <details className="connector-profile" data-connection-profile={record.config.connectionId} open={expanded} onToggle={event => setExpanded(event.currentTarget.open)}>
     <summary>Public bot profile</summary><p className="settings-group-note">The bot’s public profile is separate from its name in AgentMux and its connection status.</p>
-    {expanded ? <><div className="connector-editor-actions"><button type="button" className="small-button" onClick={() => void get()}>Read current profile</button><button type="button" className="small-button" onClick={() => void list()}>Find earlier update receipts</button></div>
+    {expanded ? <><div className="connector-editor-actions"><Button type="button" onClick={() => void get()}>Read current profile</Button><Button type="button" onClick={() => void list()}>Find earlier update receipts</Button></div>
       {observation ? <><ConnectionProfileObservationView observation={observation} /><ProfileManagementLink url={observation.managementUrl} /></> : null}
-      {operations.length ? <div className="bot-profile-operations">{operations.map(item => <button type="button" className="small-button" data-profile-select={item.operationId} key={item.operationId} onClick={() => void check(item.operationId)}>{item.desired.name ?? 'Profile update'} · {item.patch.state === 'confirmed' ? 'Written, publication separate' : item.patch.state === 'unknown' || item.patch.state === 'dispatching' ? 'Result not confirmed' : 'Update incomplete'}</button>)}</div> : <p className="settings-group-note">No saved profile update is shown in this reading window.</p>}
-      {next ? <button type="button" className="small-button" onClick={() => void list(next)}>Load earlier updates</button> : null}
-      {operation ? <><ConnectionProfileResult operation={operation} /><div className="connector-editor-actions"><button type="button" className="small-button" onClick={() => void check(operation.operationId)}>View original update</button></div></> : null}
+      {operations.length ? <div className="bot-profile-operations">{operations.map(item => <Button type="button" data-profile-select={item.operationId} key={item.operationId} onClick={() => void check(item.operationId)}>{item.desired.name ?? 'Profile update'} · {item.patch.state === 'confirmed' ? 'Written, publication separate' : item.patch.state === 'unknown' || item.patch.state === 'dispatching' ? 'Result not confirmed' : 'Update incomplete'}</Button>)}</div> : <p className="settings-group-note">No saved profile update is shown in this reading window.</p>}
+      {next ? <Button type="button" onClick={() => void list(next)}>Load earlier updates</Button> : null}
+      {operation ? <><ConnectionProfileResult operation={operation} /><div className="connector-editor-actions"><Button type="button" onClick={() => void check(operation.operationId)}>View original update</Button></div></> : null}
       {issue ? <p role="status" className="connector-issue">{issue}</p> : null}</> : null}
   </details>
 }

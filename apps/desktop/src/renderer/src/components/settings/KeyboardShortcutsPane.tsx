@@ -1,6 +1,7 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { buildCheatSheet, type CheatSheetRow, type CheatSheetGroupId } from '../../lib/shortcut-cheat-sheet'
 import { bindingById, type ShortcutBinding } from '../../lib/shortcut-registry'
 import { isMacPlatform } from '../../lib/host-platform'
@@ -67,7 +68,7 @@ export function KeyboardShortcutsPane({ group: groupId }: { group?: CheatSheetGr
       <button type="button" aria-pressed={selectedGroup === null} onClick={() => setSelectedGroup(null)}>All contexts</button>
       {groups.map(group => <button key={group.id} type="button" aria-pressed={selectedGroup === group.id} onClick={() => setSelectedGroup(group.id)}>{group.title}</button>)}
     </div> : null}
-    {count === 0 ? <div className="keyboard-shortcuts__empty"><p>No shortcuts match “{query}”.</p><button type="button" className="small-button" onClick={clearSearch}>Clear search</button></div> : null}
+    {count === 0 ? <div className="keyboard-shortcuts__empty"><p>No shortcuts match “{query}”.</p><Button type="button" onClick={clearSearch}>Clear search</Button></div> : null}
     {visible.map(group => <section key={group.id} className="keyboard-shortcuts__group" data-shortcut-group={group.id}>
       {!groupId ? <header><h3>{group.title}</h3><p>{scopeDescription(bindingById(group.rows[0]!.id)!)}</p></header> : null}
       <ul>{group.rows.map(row => <li key={row.id} data-binding-id={row.id} data-tab-selection={row.id.startsWith('workbench.select-tab.') || undefined}>

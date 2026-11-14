@@ -1,5 +1,6 @@
 import { useId } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { Button } from '@agentmux/client-ui/components/Button'
 import {
   BROWSER_AGENT_CONTROL_LIMITS, BROWSER_AGENT_GLOW_BLENDS, BROWSER_AGENT_GLOW_ANIMATIONS,
   DEFAULT_BROWSER_AGENT_CONTROL, resolveBrowserAgentControl, type BrowserAgentControlPreferences
@@ -39,7 +40,7 @@ export function BrowserAgentControlSettingsPane({ preferences, active, onSave }:
     </label>
   }
   function previewButton(group: string, title: string) {
-    return <button type="button" className="small-button settings-preview-open" data-settings-preview-open={group} data-settings-preview-title={title} onClick={event => preview.open(event.currentTarget)}><PreviewIcon size={14} />View preview</button>
+    return <Button type="button" className="settings-preview-open" data-settings-preview-open={group} data-settings-preview-title={title} onClick={event => preview.open(event.currentTarget)}><PreviewIcon size={14} />View preview</Button>
   }
   return <div ref={preview.rootRef} className="settings-pane-stack browser-agent-control-settings" onFocusCapture={preview.remember} onInputCapture={preview.remember} onChangeCapture={preview.remember} onClickCapture={preview.remember}>
     <p className="settings-group-note">Make agent activity easy to follow. These preferences change its appearance; takeover and messaging remain available.</p>
@@ -70,7 +71,7 @@ export function BrowserAgentControlSettingsPane({ preferences, active, onSave }:
           <summary>Fine tuning</summary>
           <div>{slider('pointerDurationMs', 'Cursor travel', ' ms')}{slider('clickDurationMs', 'Ripple duration', ' ms')}{slider('clickRadius', 'Ripple radius', ' px')}{slider('glowSoftness', 'Glow softness', ' px')}{slider('glowDurationMs', 'Glow cycle', ' ms')}{previewButton('fine-tuning', 'Fine tuning')}</div>
         </details>
-        <button type="button" className="small-button browser-agent-control__reset" disabled={defaultsSelected} onClick={() => { for (const key of Object.keys(DEFAULT_BROWSER_AGENT_CONTROL) as (keyof BrowserAgentControlPreferences)[]) draft.setField(key, DEFAULT_BROWSER_AGENT_CONTROL[key]) }}>Reset draft to defaults</button>
+        <Button type="button" className="browser-agent-control__reset" disabled={defaultsSelected} onClick={() => { for (const key of Object.keys(DEFAULT_BROWSER_AGENT_CONTROL) as (keyof BrowserAgentControlPreferences)[]) draft.setField(key, DEFAULT_BROWSER_AGENT_CONTROL[key]) }}>Reset draft to defaults</Button>
       </div>
       <BrowserAgentControlPreview preferences={value} active={active} dirty={draft.dirty} previewRef={preview.previewRef} returnAction={preview.returnAction} />
     </div>

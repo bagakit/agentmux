@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { describeError, presentError } from '@agentmux/client-ui/error-presentation'
 import type { BrowserProfileEnvironment } from '@agentmux/core/control'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { BrowserProfileSummary } from '../../../../shared/contracts'
 import { api } from '../../lib/api'
 import { browserProfiles } from '../../lib/browser-profiles'
@@ -251,17 +252,17 @@ export function ProfileEnvironmentEditor({ profile }: { profile: BrowserProfileS
       {model.dirty ? (
         <div className="profile-environment__actions">
           <span>Unsaved changes</span>
-          <button type="button" className="small-button" onClick={useSaved}>
+          <Button type="button" onClick={useSaved}>
             Revert
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="primary-button"
+            variant="primary"
             disabled={busy || !!problem}
             onClick={() => void apply()}
           >
             {busy ? 'Saving…' : 'Apply environment'}
-          </button>
+          </Button>
         </div>
       ) : null}
       {model.dirty && problem ? (

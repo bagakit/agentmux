@@ -1,3 +1,5 @@
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { submitProfileCreation } from '../../lib/browser-profile-creations'
 import { useRef, useState } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
@@ -52,7 +54,7 @@ export function BrowserProfileOrganization({ profile, folders, revision, busy, r
         <option value="">Unassigned</option>{folders.map(folder => <option key={folder.id} value={folder.id}>{folder.label}</option>)}
       </select></label>
       <Menu.Root>
-        <Menu.Trigger asChild><button type="button" className="icon-button" aria-label="Manage folders" title="Manage folders" disabled={busy}><MoreIcon size={14} /></button></Menu.Trigger>
+        <Menu.Trigger asChild><IconButton type="button" aria-label="Manage folders" title="Manage folders" disabled={busy}><MoreIcon size={14} /></IconButton></Menu.Trigger>
         <DocumentOverlayPortal component={Menu.Portal}>
           <Menu.Content className="tab-context-menu" align="end" collisionPadding={8}>
             <Menu.Item className="tab-context-menu__item" onSelect={() => { setFolderDraft({ kind: 'new', name: '' }); setNotice('') }}>New folder…</Menu.Item>
@@ -75,8 +77,8 @@ export function BrowserProfileOrganization({ profile, folders, revision, busy, r
           if (event.key === 'Enter') { event.preventDefault(); void saveFolder() }
           if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setFolderDraft(null) }
         }} />
-      <button type="button" className="small-button" disabled={busy || !folderDraft.name.trim()} onClick={() => void saveFolder()}>{folderDraft.kind === 'new' ? 'Create folder' : 'Rename'}</button>
-      <button type="button" className="small-button" onClick={() => setFolderDraft(null)}>Cancel</button>
+      <Button type="button" disabled={busy || !folderDraft.name.trim()} onClick={() => void saveFolder()}>{folderDraft.kind === 'new' ? 'Create folder' : 'Rename'}</Button>
+      <Button type="button" onClick={() => setFolderDraft(null)}>Cancel</Button>
     </div> : null}
     <p className="browser-profile-editor__quiet">Deleting a folder keeps its Profiles and their sign-ins.</p>
     <div className="browser-profile-organization__tags" aria-label="Profile tags">
@@ -86,7 +88,7 @@ export function BrowserProfileOrganization({ profile, folders, revision, busy, r
     <div className="browser-profile-organization__tag-draft">
       <TextInput aria-label="New Profile tag" placeholder="Add a tag" value={tag} maxLength={128} onChange={event => setTag(event.target.value)}
         onKeyDown={event => { if (event.key === 'Enter' && !isImeOwnedKeyboardEvent(event)) { event.preventDefault(); void addTag() } }} />
-      <button type="button" className="small-button" disabled={busy || !tag.trim()} onClick={() => void addTag()}>Add tag</button>
+      <Button type="button" disabled={busy || !tag.trim()} onClick={() => void addTag()}>Add tag</Button>
     </div>
     <label className="browser-profile-organization__pin"><input type="checkbox" checked={profile.pinned === true} disabled={busy}
       onChange={event => void onEdit({ pinned: event.target.checked })} />Pin this Profile near the top</label>

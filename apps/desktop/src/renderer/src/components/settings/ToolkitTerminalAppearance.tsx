@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from 'react'
 import { observeResolvedTheme, readResolvedTheme } from '@agentmux/client-ui/theme'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { TERMINAL_THEME_CATALOG, terminalTheme } from '../../lib/terminal-theme'
 import { useAppStore } from '../../store'
 import type { ToolkitPaletteDraft } from './use-toolkit-palette-drafts'
@@ -30,6 +31,6 @@ export function ToolkitTerminalAppearance({ toolId, draft }: { toolId: string; d
       </label>)}
     </div>
     <div className="toolkit-palette__summary"><span>Currently applied · {theme ? applied.label : `Global · ${applied.label}`}</span>
-      {draft.dirty ? <button type="button" className="small-button" disabled={draft.state === 'saving'} onClick={draft.reset}>Restore saved palette</button> : null}</div>
+      {draft.dirty ? <Button type="button" disabled={draft.state === 'saving'} onClick={draft.reset}>Restore saved palette</Button> : null}</div>
   </section>
 }

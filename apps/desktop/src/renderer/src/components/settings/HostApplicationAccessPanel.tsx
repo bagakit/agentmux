@@ -4,6 +4,7 @@ import type { ApplicationAccessConfiguration, ApplicationAccessEndpoint, Applica
 import { mintObjectId } from '@agentmux/core/object-id'
 import { APPLICATION_ACCESS_NOT_APPLIED_CODES, APPLICATION_ACCESS_SCHEMA } from '@agentmux/core/application-access'
 import { TextInput } from '@agentmux/client-ui/input'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { HostConfig } from '../../../../shared/contracts'
 import { configValuesEqual } from '../../../../shared/config-edit'
 import { api } from '../../lib/api'
@@ -146,7 +147,7 @@ export function HostApplicationAccessPanel({ host, committed, hosts, active }: {
 
   return <section className="application-access" data-application-host={host.id} aria-label="Application account synchronization">
     <header className="application-access__header"><div><strong>Application accounts</strong><p>Manage application access involving {host.label}.</p></div>
-      <button type="button" className="small-button" disabled={!!busy} onClick={() => void perform('Reading applications', read)}>Refresh</button></header>
+      <Button type="button" disabled={!!busy} onClick={() => void perform('Reading applications', read)}>Refresh</Button></header>
     {!saved ? <p className="field-hint">Save this environment connection before configuring or synchronizing application access.</p> : null}
     {configurations.length ? <div className="application-access__rules" aria-label="Application rules">{configurations.map(item => <button key={item.profileId}
       type="button" aria-pressed={item.profileId === selected} className="application-access__rule" onClick={() => {
@@ -154,9 +155,9 @@ export function HostApplicationAccessPanel({ host, committed, hosts, active }: {
       }}>
       <strong>{item.profile.label}</strong><span>{hostName(item.profile.source.hostId)} → {hostName(item.profile.target.hostId)}</span>
       <small>{item.profile.accountId} · {item.profile.scopes.length} scopes</small></button>)}</div> : loaded ? <p className="application-access__empty">No application rules configured. Add a connector for the application you want to use here.</p> : !error ? <p role="status">Reading application rules…</p> : null}
-    {!draft ? <div className="application-access__actions"><button type="button" className="small-button" disabled={!saved || !!busy} onClick={add}>Add application</button>
-      {configuration ? <><button type="button" className="small-button" disabled={!saved || !!busy} onClick={() => setDraft(draftOf(configuration))}>Edit rule</button>
-        <button type="button" className="small-button" disabled={!!busy} onClick={() => setRemove(configuration)}>Remove rule</button></> : null}</div> : null}
+    {!draft ? <div className="application-access__actions"><Button type="button" disabled={!saved || !!busy} onClick={add}>Add application</Button>
+      {configuration ? <><Button type="button" disabled={!saved || !!busy} onClick={() => setDraft(draftOf(configuration))}>Edit rule</Button>
+        <Button type="button" disabled={!!busy} onClick={() => setRemove(configuration)}>Remove rule</Button></> : null}</div> : null}
     {draft ? <form className="application-access__editor" aria-label="Application connector rule" onSubmit={event => { event.preventDefault(); void perform('Saving rule', saveDraft) }}>
       <header><strong>{draft.revision ? 'Edit application rule' : 'Add an application connector'}</strong><p>Use an application access connector on each account. Save commands and scope here; credentials stay with the application. Rules appear here while this environment is a source or target.</p></header>
       <details><summary>Connector requirements</summary><p>Each command implements <code>{APPLICATION_ACCESS_SCHEMA}</code>: application identity and scope checks, scoped transfer, target verification and original operation lookup. Use arguments for non-sensitive options; credential material travels through stdin.</p></details>
@@ -169,19 +170,19 @@ export function HostApplicationAccessPanel({ host, committed, hosts, active }: {
       <div className="application-access__endpoints">{(['source', 'target'] as const).map(side => <EndpointEditor key={side} title={side === 'source' ? 'Source' : 'Target'}
         value={draft[side]} hosts={hosts}
         onChange={value => setDraft(current => current ? { ...current, [side]: value } : current)} />)}</div>
-      <div className="application-access__actions"><button className="primary-button" type="submit" disabled={!saved || !!busy}>Save application rule</button>
-        <button className="small-button" type="button" disabled={!!busy} onClick={() => setDraft(null)}>Cancel editing</button></div>
+      <div className="application-access__actions"><Button variant="primary" type="submit" disabled={!saved || !!busy}>Save application rule</Button>
+        <Button type="button" disabled={!!busy} onClick={() => setDraft(null)}>Cancel editing</Button></div>
     </form> : null}
     {configuration && !draft ? <div className="application-access__comparison">
       <div className="application-access__scope"><strong>{configuration.profile.accountId}</strong><span>{configuration.profile.scopes.join(' · ')}</span></div>
-      <button type="button" className="small-button" disabled={!saved || !!busy} onClick={() => void perform('Comparing access', compare)}>Compare access</button>
+      <Button type="button" disabled={!saved || !!busy} onClick={() => void perform('Comparing access', compare)}>Compare access</Button>
       {matchingPlan ? <div className="application-access__plan" role="status"><strong>{usedPlan ? 'Comparison for the original operation' : dispositionText[matchingPlan.disposition]}</strong>
         <time dateTime={matchingPlan.createdAt}>Compared {new Date(matchingPlan.createdAt).toLocaleString()}</time>
         {usedPlan ? <p>These checks preceded the original operation. Its result is shown below.</p> : null}
         <div className="application-access__observations"><AccessObservation title="Source" value={matchingPlan.source} /><AccessObservation title="Target" value={matchingPlan.target} /></div>
         {!currentPlan ? <p>This comparison is no longer current. Compare access again before synchronizing.</p> : null}
-        {currentPlan && !usedPlan && ['transfer', 'reuse'].includes(matchingPlan.disposition) ? <button type="button" className="primary-button" disabled={!saved || !!busy || unresolved}
-          onClick={() => void perform('Synchronizing access', apply)}>{matchingPlan.disposition === 'reuse' ? 'Verify existing target access' : 'Synchronize selected access'}</button> : null}
+        {currentPlan && !usedPlan && ['transfer', 'reuse'].includes(matchingPlan.disposition) ? <Button type="button" variant="primary" disabled={!saved || !!busy || unresolved}
+          onClick={() => void perform('Synchronizing access', apply)}>{matchingPlan.disposition === 'reuse' ? 'Verify existing target access' : 'Synchronize selected access'}</Button> : null}
       </div> : <p className="field-hint">Compare the two accounts before making any changes.</p>}
     </div> : null}
     {operations.length ? <div className="application-access__operations"><strong>Recent and unresolved operations</strong><div>{operations.map(item => <button className="application-access__operation-link"
@@ -189,13 +190,13 @@ export function HostApplicationAccessPanel({ host, committed, hosts, active }: {
       <span>{item.applicationId} · {item.accountId}</span><span>{item.status === 'succeeded' ? 'Verified' : item.status === 'unknown' ? 'Result unconfirmed' : item.status === 'pending' ? 'In progress' : 'Not completed'}</span>
     </button>)}</div></div> : null}
     {requested && !operations.some(item => item.operationId === requested.id) ? <div className="application-access__result" role="status"><strong>Synchronization result not confirmed</strong>
-      <p>The original request is retained. Check its result before making another transfer.</p><button type="button" className="small-button" disabled={!!busy}
-        onClick={() => void perform('Checking original operation', () => inspectOriginal(requested.id))}>Check original operation</button><details><summary>Original request</summary><code>{requested.id}</code></details></div> : null}
+      <p>The original request is retained. Check its result before making another transfer.</p><Button type="button" disabled={!!busy}
+        onClick={() => void perform('Checking original operation', () => inspectOriginal(requested.id))}>Check original operation</Button><details><summary>Original request</summary><code>{requested.id}</code></details></div> : null}
     {operation ? <div className="application-access__result" role="status"><strong>{operation.status === 'succeeded' ? 'Target account and scopes verified' : operation.status === 'unknown' ? 'Synchronization result not confirmed' : operation.status === 'pending' ? 'Synchronization in progress' : 'Synchronization not completed'}</strong>
       <p>{operation.accountId} · {operation.scopes.join(' · ')}</p><p>Last confirmed stage: {operation.stage.replaceAll('-', ' ')}</p>
       <time dateTime={operation.updatedAt}>{new Date(operation.updatedAt).toLocaleString()}</time>
       {operation.cause ? <p>{operation.cause.message}</p> : null}
-      {operation.status !== 'succeeded' ? <button type="button" className="small-button" disabled={!!busy} onClick={() => void perform('Checking original operation', () => inspectOriginal(operation.operationId))}>Check original operation</button> : null}
+      {operation.status !== 'succeeded' ? <Button type="button" disabled={!!busy} onClick={() => void perform('Checking original operation', () => inspectOriginal(operation.operationId))}>Check original operation</Button> : null}
       <details><summary>Operation details</summary><dl><div><dt>Original operation</dt><dd><code>{operation.operationId}</code></dd></div>
         <div><dt>Source</dt><dd>{operation.source.hostId} · {operation.source.osAccount}</dd></div><div><dt>Target</dt><dd>{operation.target.hostId} · {operation.target.osAccount}</dd></div></dl></details>
     </div> : null}
@@ -249,7 +250,7 @@ function EndpointEditor({ title, value, hosts, onChange }: {
     }}>{!selected ? <option value={value.hostId}>{value.hostId} · unavailable</option> : null}{hosts.map(host => <option key={host.id} value={host.id}>{host.label}</option>)}</select></label>
     <label><span>OS account</span><TextInput required aria-label={`${title} OS account`} value={value.osAccount} onChange={event => onChange({ ...value, osAccount: event.target.value })} /></label>
     <label><span>Runtime ID</span><TextInput required aria-label={`${title} Runtime ID`} value={value.runtimeId} onChange={event => onChange({ ...value, runtimeId: event.target.value })} /></label>
-    <button type="button" className="small-button" disabled={reading || !selected} onClick={() => void identify()}>{reading ? 'Reading identity…' : 'Read environment identity'}</button>
+    <Button type="button" disabled={reading || !selected} onClick={() => void identify()}>{reading ? 'Reading identity…' : 'Read environment identity'}</Button>
     <label><span>Connector command</span><TextInput required aria-label={`${title} connector command`} value={value.command} onChange={event => onChange({ ...value, command: event.target.value })} placeholder="Absolute executable on this Host" /></label>
     <label><span>Arguments <small>JSON array, no shell expansion</small></span><TextInput aria-label={`${title} connector arguments`} value={value.argumentsText} onChange={event => onChange({ ...value, argumentsText: event.target.value })} /></label>
     {error ? <p className="field-error" role="alert">{error}</p> : null}

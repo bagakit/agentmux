@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { BrowserProfileCreationOperation } from '@agentmux/core/control'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { submitProfileCreation } from '../../lib/browser-profile-creations'
 
 const creationLabels: Record<BrowserProfileCreationOperation, string> = {
@@ -32,7 +33,7 @@ export function BrowserProfilePendingCreations() {
     <p className="browser-profile-editor__quiet">Original requests and later inputs are kept. Resolve each pending request before repeating that action.</p>
     {requests.map(request => <div className="settings-pane-toolbar" key={request.operationId}>
       <span className="browser-profile-editor__quiet" style={{ overflowWrap: 'anywhere' }}>{creationLabels[request.operation]} · {request.operation === 'browser.profile.proxy.create' ? request.edit.label : request.label}<br /><code style={{ fontSize: '0.85em' }}>{request.operationId}</code></span>
-      <button type="button" className="small-button" disabled={busy.has(request.operation) || submitProfileCreation.isInFlight(request.operation)} onClick={() => void confirm(request.operation)}>Confirm creation</button>
+      <Button type="button" disabled={busy.has(request.operation) || submitProfileCreation.isInFlight(request.operation)} onClick={() => void confirm(request.operation)}>Confirm creation</Button>
     </div>)}
     {issue ? <p role="status" className="browser-profile-editor__quiet">{issue}</p> : null}
   </section>

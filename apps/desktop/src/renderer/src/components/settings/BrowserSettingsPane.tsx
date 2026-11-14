@@ -1,4 +1,5 @@
 import { TextInput } from '@agentmux/client-ui/input'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { SelectionField } from '../SelectionField'
 import { BROWSER_NEW_PAGE_DESTINATIONS, resolveBrowserNewPagePlacement, type BrowserNewPageDestination } from '../../../../shared/browser-new-page-placement'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
@@ -168,12 +169,11 @@ function AppLinkSchemes({ browser, onForget }: {
             <span className={`app-link-scheme-choice app-link-scheme-choice--${choice}`}>
               {choice === 'allow' ? 'Opens in your system' : 'Never opened'}
             </span>
-            <button
-              className="small-button"
+            <Button
               type="button"
               disabled={busy !== null}
               onClick={() => void forget(scheme, choice)}
-            >{busy === scheme ? 'Forgetting…' : 'Forget'}</button>
+            >{busy === scheme ? 'Forgetting…' : 'Forget'}</Button>
           </li>
         ))}
       </ul>

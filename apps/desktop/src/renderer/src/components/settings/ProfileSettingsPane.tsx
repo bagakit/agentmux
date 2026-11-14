@@ -3,6 +3,7 @@ import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState } from 'react'
 import { resolveUserProfile, USER_PROFILE_NAME_LIMIT, USER_PROFILE_ABOUT_LIMIT, validProfileAvatar, type UserProfile } from '@agentmux/host/mote-model'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { MoteAvatarCrop } from '../MoteAvatarCrop'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
@@ -68,8 +69,8 @@ export function ProfileSettingsPane({ profile, onSave }: {
         {value.avatar ? <img src={value.avatar} alt="" /> : <><ThemeObjectUserIcon size={34} strokeWidth={1.5} aria-hidden="true" /><span className="settings-profile__portrait-label" aria-hidden="true">You</span></>}
       </div>
       <div className="settings-profile__image-actions">
-        <button ref={photoButton} type="button" className="small-button" onClick={() => upload.current?.click()}><ThemeActionCaptureIcon size={13} aria-hidden="true" /> Change photo</button>
-        {value.avatar && <button type="button" className="small-button" onClick={() => draft.setField('avatar', '')}>Remove photo</button>}
+        <Button ref={photoButton} type="button" onClick={() => upload.current?.click()}><ThemeActionCaptureIcon size={13} aria-hidden="true" /> Change photo</Button>
+        {value.avatar && <Button type="button" onClick={() => draft.setField('avatar', '')}>Remove photo</Button>}
       </div>
       </div>
       <div className="settings-profile__identity-text">
@@ -85,7 +86,7 @@ export function ProfileSettingsPane({ profile, onSave }: {
     {source && <section className="settings-profile__crop" aria-label="Crop profile photo">
       <header><strong>Make it yours</strong><button type="button" className="icon-button" aria-label="Cancel photo crop" onClick={() => { imageRequest.current++; setSource(null); photoButton.current?.focus() }}><ThemeActionCancelIcon size={14} /></button></header>
       <MoteAvatarCrop key={source} source={source} canvasRef={canvas} disabled={false} onReady={() => setReady(true)} onError={setImageError} />
-      <button type="button" className="small-button" disabled={!ready} onClick={useCrop}>Use this photo</button>
+      <Button type="button" disabled={!ready} onClick={useCrop}>Use this photo</Button>
     </section>}
     {imageError && <p className="settings-inline-error" role="alert">{imageError}</p>}
     <div className="settings-profile__details">

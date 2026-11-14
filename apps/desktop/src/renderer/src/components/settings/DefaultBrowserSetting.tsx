@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { BrowserDefaultInspection } from '@agentmux/core'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../../lib/api'
 
 function stateLabel(fact: BrowserDefaultInspection): string {
@@ -51,8 +52,8 @@ export function DefaultBrowserSetting({ active }: { active: boolean }) {
       return `${scheme.toUpperCase()}: ${protocol.state === 'known' ? protocol.application.name : `Unknown (${protocol.cause.message})`}`
     }).join(' · ')}</p> : null}
     <div className="settings-workflows__inline-action">
-      <button type="button" className="small-button" disabled={opening || fact?.outcome === 'unsupported'} onClick={() => void open()}>{opening ? 'Opening…' : 'Set as default browser…'}</button>
-      <button type="button" className="small-button" disabled={reading} onClick={() => void read()}>Refresh status</button>
+      <Button type="button" disabled={opening || fact?.outcome === 'unsupported'} onClick={() => void open()}>{opening ? 'Opening…' : 'Set as default browser…'}</Button>
+      <Button type="button" disabled={reading} onClick={() => void read()}>Refresh status</Button>
     </div>
     {requested ? <p className="settings-group-note" role="status">System Settings requested. In Desktop &amp; Dock → Default web browser, choose AgentMux. Refresh here to confirm your choice.</p> : null}
     {error ? <p className="settings-inline-error" role="alert">{error} Your settings and pages are kept.</p> : null}

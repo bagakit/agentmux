@@ -5,6 +5,7 @@ import { PromptReactionIconView } from '@agentmux/client-ui/components/Conversat
 import { resolveComposerInputConfig } from '@agentmux/client-ui/composer-input-config'
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { AppConfig, ComposerShortcut } from '../../../../shared/contracts'
 import { COMPOSER_PROMPT_STATES } from '../../../../shared/composer-shortcut-library'
 import { configValuesEqual } from '../../../../shared/config-edit'
@@ -187,7 +188,7 @@ export function ShortcutSettingsPane({ config, active, onOpenGoals }: {
 
   return (
     <div className="settings-pane-stack prompt-workbench" data-view={view} data-creation-empty={!drafts.length}>
-      <div className="prompt-goals-link"><span>Manage Goals shortcuts, order and visibility in Goals settings.</span><button type="button" className="small-button" onClick={onOpenGoals}>Goals common actions</button></div>
+      <div className="prompt-goals-link"><span>Manage Goals shortcuts, order and visibility in Goals settings.</span><Button type="button" onClick={onOpenGoals}>Goals common actions</Button></div>
       <div className="prompt-scope" role="group" aria-label="Prompt authoring scope">
         <button type="button" data-prompt-scope="all" aria-pressed={scope.kind === 'all'} onClick={() => setScope({ kind: 'all' })}>All prompts <span>{drafts.length}</span></button>
         <button type="button" data-prompt-scope="shared" aria-pressed={scope.kind === 'shared'} onClick={() => setScope({ kind: 'shared' })}>Shared <span>{drafts.filter(candidate => candidate.providerId === undefined).length}</span></button>
@@ -198,9 +199,9 @@ export function ShortcutSettingsPane({ config, active, onOpenGoals }: {
       </div>
       <div className="settings-pane-toolbar prompt-workbench__toolbar">
         <span className="settings-resource-count">{visible.length === drafts.length ? drafts.length : `${visible.length} of ${drafts.length}`} {drafts.length === 1 ? 'prompt' : 'prompts'}</span>
-        <button type="button" className="small-button" onClick={() => add()}><ThemeActionCreatePromptIcon size={13} /> Add prompt</button>
+        <Button type="button" onClick={() => add()}><ThemeActionCreatePromptIcon size={13} /> Add prompt</Button>
         {PROMPT_REACTION_STARTERS.some(starter => !drafts.some(candidate => candidate.id === starter.id || candidate.keyword === starter.keyword)) ?
-          <button type="button" className="small-button" onClick={addReactionStarters}><ThemeActionAddQuickRepliesIcon size={13} /> Add quick replies</button> : null}
+          <Button type="button" onClick={addReactionStarters}><ThemeActionAddQuickRepliesIcon size={13} /> Add quick replies</Button> : null}
       </div>
       <div className="prompt-workbench__body">
         <section className="prompt-library" aria-label="Prompt library">
@@ -224,9 +225,9 @@ export function ShortcutSettingsPane({ config, active, onOpenGoals }: {
           {!visible.length ? <p className="settings-resource-empty">{drafts.length ? 'No prompts in this view. Your edits are kept.' : 'Keep the instructions you use often here. Add a prompt to get started.'}</p> : null}
         </section>
         {prompt ? <section ref={promptEditor} className="prompt-settings-card prompt-editor" data-prompt-editor={prompt.id} aria-label={`Edit ${promptName(prompt)}`}>
-          <div className="prompt-editor__heading"><button type="button" className="small-button prompt-editor__back" onClick={back}><ThemeNavigationBackIcon size={13} /> Back to prompts</button><span>{providerName(prompt)}</span><span className="prompt-editor__status" data-prompt-status={promptStatus}><SemanticIcon name={`status.prompt-${promptStatus}`} size={4} />{promptStatus === 'invalid' ? 'Needs attention' : promptStatus === 'unsaved' ? 'Unsaved' : 'Saved'}</span></div>
-          {selectedChanged && Object.hasOwn(resource.expected, prompt.id) ? <button type="button" className="small-button prompt-editor__revert" disabled={saveState.saving} onClick={() => resource.setValue(current => ({ ...current, [prompt.id]: resource.expected[prompt.id]! }))}>Cancel edit</button> : null}
-          {!visible.some((candidate) => candidate.id === prompt.id) ? <p className="prompt-editor__filtered" role="status">This prompt is outside your search or scope. <button type="button" className="small-button" onClick={showInLibrary}>Show in library</button></p> : null}
+          <div className="prompt-editor__heading"><Button type="button" className="prompt-editor__back" onClick={back}><ThemeNavigationBackIcon size={13} /> Back to prompts</Button><span>{providerName(prompt)}</span><span className="prompt-editor__status" data-prompt-status={promptStatus}><SemanticIcon name={`status.prompt-${promptStatus}`} size={4} />{promptStatus === 'invalid' ? 'Needs attention' : promptStatus === 'unsaved' ? 'Unsaved' : 'Saved'}</span></div>
+          {selectedChanged && Object.hasOwn(resource.expected, prompt.id) ? <Button type="button" className="prompt-editor__revert" disabled={saveState.saving} onClick={() => resource.setValue(current => ({ ...current, [prompt.id]: resource.expected[prompt.id]! }))}>Cancel edit</Button> : null}
+          {!visible.some((candidate) => candidate.id === prompt.id) ? <p className="prompt-editor__filtered" role="status">This prompt is outside your search or scope. <Button type="button" onClick={showInLibrary}>Show in library</Button></p> : null}
           <div className="agent-settings-fields prompt-editor__fields">
             <label className="prompt-editor__name"><span>Name</span><TextInput ref={nameInput} value={prompt.label} onChange={(event) => update(prompt.id, { label: event.target.value })} placeholder="Explain simply" /></label>
             <label className="prompt-editor__instruction"><span>Prompt</span><ComposerTextarea aria-invalid={errors.some((error) => error.field === 'Prompt')} aria-describedby={`${descriptionId}-body`} value={prompt.body} onValueChange={(value) => update(prompt.id, { body: value })} placeholder="Explain what changed in plain words, then name the next useful step." rows={7} /><small id={`${descriptionId}-body`} className={errors.some((error) => error.field === 'Prompt') ? 'settings-inline-error' : ''}>{errors.find((error) => error.field === 'Prompt')?.message ?? 'Your instruction, exactly as it will be used.'}</small></label>
@@ -259,7 +260,7 @@ export function ShortcutSettingsPane({ config, active, onOpenGoals }: {
             <section className="prompt-usage" aria-label="Usage preview"><header>Usage preview <small>Read only</small></header><div><code>{usageExamples.length ? usageExamples.join(' · ') : 'Input toolbar'}</code><span>{usageDescription}</span></div>{prompt.states?.length ? <div><span className="prompt-usage__example">{promptName(prompt)}</span><span>Open the receiving Agent avatar at {prompt.states.map(stateName).join(', ')} to choose this user prompt. Click sends this instruction only; pending permission or question requests queue it. Your draft is kept.</span></div> : <p>Draft shortcut only. Select states to make this instruction available in the receiving Agent avatar. Pending permission or question requests queue it.</p>}</section>
               </div>
             </details>
-            <div className="prompt-editor__remove"><button type="button" className="small-button" onClick={() => remove(prompt.id)}>{Object.hasOwn(resource.expected, prompt.id) ? <><ThemeActionRemoveIcon size={13} /> Delete prompt</> : <><ThemeActionCancelIcon size={13} /> Cancel new prompt</>}</button></div>
+            <div className="prompt-editor__remove"><Button type="button" onClick={() => remove(prompt.id)}>{Object.hasOwn(resource.expected, prompt.id) ? <><ThemeActionRemoveIcon size={13} /> Delete prompt</> : <><ThemeActionCancelIcon size={13} /> Cancel new prompt</>}</Button></div>
           </div>
         </section> : !drafts.length ? <section className="prompt-editor__empty settings-starting-points" aria-label="Prompt starting points">
           <SettingsConceptSummary icon="object.prompt" title="Keep a useful instruction close"
@@ -273,7 +274,7 @@ export function ShortcutSettingsPane({ config, active, onOpenGoals }: {
         </section> : <div className="prompt-editor__empty">Choose a prompt to edit its instruction and where it appears.</div>}
       </div>
       {problems.length ? <div className="prompt-validation" role="status"><strong>Check {problemsById.size} {problemsById.size === 1 ? 'prompt' : 'prompts'} before saving</strong>{problems.map((problem) => <button type="button" key={`${problem.id}-${problem.field}`} onClick={() => open(problem.id)}>{promptName(resource.value[problem.id]!)} · {problem.field}: {problem.message}</button>)}</div> : null}
-      {recentDelete ? <div className="prompt-pending-delete" role="status"><span>Recently removed “{promptName(recentDelete.prompt)}”.</span><button type="button" className="small-button" onClick={undoDelete}>Undo</button></div> : null}
+      {recentDelete ? <div className="prompt-pending-delete" role="status"><span>Recently removed “{promptName(recentDelete.prompt)}”.</span><Button type="button" onClick={undoDelete}>Undo</Button></div> : null}
       <footer className="prompt-save-footer">
         <p className="prompt-save-summary" role="status">Saves the whole prompt library.{resource.dirty ? <> {changedCount} changed{deletedCount ? ` · ${deletedCount} pending ${deletedCount === 1 ? 'deletion' : 'deletions'}` : ''}.</> : null}{directory.dirty ? ' Also saves Goals common actions.' : null}</p>
         <SettingsSaveBar save={saveState} dirty={resource.dirty || directory.dirty} resolution={owner.promptsResolution} blocked={problems.length ? `${problems.length === 1 ? 'one prompt needs' : `${problems.length} prompts need`} attention.` : undefined} label="Save prompts" onSave={() => void save()} />

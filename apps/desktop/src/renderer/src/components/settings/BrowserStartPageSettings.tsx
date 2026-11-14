@@ -1,6 +1,7 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { useState, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { BROWSER_START_PAGE_TITLE_LIMIT, BROWSER_START_PAGE_SUBTITLE_LIMIT, BROWSER_START_PAGE_HISTORY_LIMIT, resolveBrowserStartPage, validBrowserStartPageText, validBrowserStartPageImage, validBrowserStartPageHistoryLimit, type BrowserStartPageConfig } from '../../../../shared/browser-start-page'
 import { useSettingDraftRecord } from './use-setting-draft'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
@@ -53,12 +54,12 @@ export function BrowserStartPageSettings({ config, onSave, onOpen, children }: {
   return <div className="settings-pane-stack settings-survey">
     <SurveyIntroduction />
     <section className="settings-group">
-      <header><span>Start page</span><button type="button" className="small-button" onClick={onOpen}>Open Survey</button></header>
+      <header><span>Start page</span><Button type="button" onClick={onOpen}>Open Survey</Button></header>
       <div className="settings-survey__workspace"><div className="settings-survey__fields">
       <label className="browser-start-settings__field" data-settings-field="start-title"><span>Title</span><TextInput aria-label="Start page title" value={draft.value.title} maxLength={BROWSER_START_PAGE_TITLE_LIMIT} onChange={event => draft.setField('title', event.target.value)} /></label>
       <label className="browser-start-settings__field" data-settings-field="start-subtitle"><span>Subtitle</span><TextInput aria-label="Start page subtitle" value={draft.value.subtitle} maxLength={BROWSER_START_PAGE_SUBTITLE_LIMIT} onChange={event => draft.setField('subtitle', event.target.value)} /></label>
       <div className="settings-survey__images" role="group" aria-label="Icon and background">
-      <div className="settings-survey__image-actions"><strong>Icon and background</strong>{hasImages && <button type="button" className="small-button" aria-label="Preview icon and background images" onClick={previewImages}><PreviewIcon size={14} aria-hidden="true" />Preview images</button>}</div>
+      <div className="settings-survey__image-actions"><strong>Icon and background</strong>{hasImages && <Button type="button" aria-label="Preview icon and background images" onClick={previewImages}><PreviewIcon size={14} aria-hidden="true" />Preview images</Button>}</div>
       <StartPageImageField kind="icon" value={draft.value.icon} preview={iconPreview} revision={imagePreview?.revision ?? 0} onChange={value => { draft.setField('icon', value); setImageNotice('') }} />
       <StartPageImageField kind="background" value={draft.value.backgroundImage} preview={backgroundPreview} revision={imagePreview?.revision ?? 0} onChange={value => { draft.setField('backgroundImage', value); setImageNotice('') }} />
       </div>

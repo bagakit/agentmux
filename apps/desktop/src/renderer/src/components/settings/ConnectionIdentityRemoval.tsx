@@ -2,6 +2,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useRef, useState } from 'react'
 import { sameConnectionApplication, type ConnectionDeleteOperation, type ConnectionRecord } from '@agentmux/core/connections'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../../lib/api'
 import type { ConnectionHostingTarget } from '../../../../shared/contracts'
 import { retainedIdentityRemovalTasks, restoredIdentityRemovalTask, botTaskSelectionKey, readBotTaskLocator, type IdentityRemovalTaskScope } from '../../lib/bot-task-selection'
@@ -72,7 +73,7 @@ export function ConnectionIdentityRemoval({ record, readings, active, hostingTar
     {retained ? <code>{retained.operationId}</code> : null}
   </section>
   return <section className="connector-identity-removal" aria-label="Remove local identity">
-    <button type="button" className="small-button" data-identity-remove onClick={() => setOpen(true)}>{retained ? 'Review identity removal' : 'Remove from AgentMux'}</button>
+    <Button type="button" data-identity-remove onClick={() => setOpen(true)}>{retained ? 'Review identity removal' : 'Remove from AgentMux'}</Button>
     {retained ? <p role="status">An original removal request is retained. Its result is checked separately from the current identity list.</p> : null}
     <ConfirmationDialog open={active && open} title="Remove this identity from AgentMux?" subject={record.config.label}
       description="Removes this saved identity locally and prevents new messages through its connection. The remote bot application, Motes, conversations and original operation history are kept."

@@ -3,6 +3,8 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxRpcResult } from '@agentmux/core'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { Button } from '@agentmux/client-ui/components/Button'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { api } from '../../lib/api'
 import { NetworkChoice, PhoneConnectionCard, PhoneConnectionSteps, DevicePresence } from '../toolkit/PhoneConnectionVisuals'
 import { OpenInSurveyButton } from '../toolkit/ToolkitResultLink'
@@ -106,8 +108,8 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
           <NetworkChoice candidates={candidates} value={shown} disabled={busy} onChoose={address => { void link('scan', address) }} />
           {candidates.length > 1 ? <p className="phone-connect-hero__hint">Pick the network your phone is on.</p> : null}
           <div className="settings-pane-toolbar device-management__actions">
-            {url ? <button type="button" className="primary-button" data-device-action="scan" disabled={busy} onClick={() => { void link('scan') }}>{linkAction === 'scan' ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : <ThemeActionRefreshIcon size={16} />}{linkAction === 'scan' ? 'Getting code…' : 'Refresh code'}</button> : null}
-            <button type="button" className="small-button" data-device-action="copy" disabled={busy} onClick={() => { void link('copy') }}>{linkAction === 'copy' ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : <ThemeActionCopyIcon size={16} />}{linkAction === 'copy' ? 'Copying…' : 'Copy connection link'}</button>
+            {url ? <Button type="button" variant="primary" data-device-action="scan" disabled={busy} onClick={() => { void link('scan') }}>{linkAction === 'scan' ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : <ThemeActionRefreshIcon size={16} />}{linkAction === 'scan' ? 'Getting code…' : 'Refresh code'}</Button> : null}
+            <Button type="button" data-device-action="copy" disabled={busy} onClick={() => { void link('copy') }}>{linkAction === 'copy' ? <ThemeStatusLoadingIcon size={16} animation="spin" /> : <ThemeActionCopyIcon size={16} />}{linkAction === 'copy' ? 'Copying…' : 'Copy connection link'}</Button>
             {url ? <OpenInSurveyButton url={url} note="Opens your phone page in Survey on this Mac. It connects as another device." /> : null}
           </div>
           {url && <p className="phone-connect-hero__hint">Opening in Survey connects this Mac as another device.</p>}
@@ -133,7 +135,7 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
           <summary><span className="phone-device-avatar"><ThemeObjectPhoneIcon size={16} aria-hidden="true" /><DevicePresence online={device.online} /></span><strong>{device.name}</strong><span>{device.online === true ? 'Connected' : device.online === false ? 'Disconnected' : 'Connection unconfirmed'}</span></summary>
           <div className="device-management__record-body">
             <dl className="device-management__identity">
-              <div><dt>Key fingerprint</dt><dd><code>{device.keyFingerprint ?? 'Not yet confirmed'}</code>{device.keyFingerprint && <button type="button" className="icon-button" aria-label={`Copy key fingerprint for ${device.name}`} title="Copy key fingerprint" onClick={() => { void copyFingerprint(device.deviceId, device.keyFingerprint!) }}><ThemeActionCopyIcon size={14} /></button>}</dd></div>
+              <div><dt>Key fingerprint</dt><dd><code>{device.keyFingerprint ?? 'Not yet confirmed'}</code>{device.keyFingerprint && <IconButton type="button" aria-label={`Copy key fingerprint for ${device.name}`} title="Copy key fingerprint" onClick={() => { void copyFingerprint(device.deviceId, device.keyFingerprint!) }}><ThemeActionCopyIcon size={14} /></IconButton>}</dd></div>
               <div><dt>{device.online === true ? 'Connection IP' : device.online === false ? 'Last connection IP' : 'Recorded connection IP'}</dt><dd><code>{device.connection?.address ?? 'Not recorded'}</code>{device.connection?.address && <small>Recorded {new Date(device.connection.observedAt ?? device.connection.connectedAt).toLocaleString()}</small>}</dd></div>
               <div><dt>Browser (reported)</dt><dd>{device.connection?.userAgent ?? 'Not recorded'}</dd></div>
               <div><dt>Device ID</dt><dd><code>{device.deviceId}</code></dd></div>

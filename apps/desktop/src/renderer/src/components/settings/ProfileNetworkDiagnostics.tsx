@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { BrowserProxyProbe, BrowserProxyProbeHistory, BrowserProxyProbeReason } from '@agentmux/core/control'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { BrowserProfileSummary } from '../../../../shared/contracts'
 import { api } from '../../lib/api'
 import './profile-network-diagnostics.css'
@@ -82,7 +83,7 @@ export function ProfileNetworkDiagnostics({ profile, ports = api.browser }: { pr
   }
   return <section className="browser-profile-editor__section profile-network-diagnostics" aria-label="Proxy diagnostics">
     <div className="profile-network-diagnostics__heading"><h4>Proxy diagnostics</h4>
-      <button type="button" className="small-button" disabled={checking} onClick={() => void check()}>{checking ? 'Checking…' : result ? 'New check' : 'Check route'}</button>
+      <Button type="button" disabled={checking} onClick={() => void check()}>{checking ? 'Checking…' : result ? 'New check' : 'Check route'}</Button>
     </div>
     {result ? <Observation diagnostic={result} /> : <p className="browser-profile-editor__quiet">Check the connection, SOCKS5 sign-in and Profile exit separately.</p>}
     {notice ? <p role="status" className="profile-network-diagnostics__notice">{notice} {pendingId ? <button type="button" className="browser-profile-editor__link" onClick={() => void inspect()}>Inspect check</button> : null}</p> : null}

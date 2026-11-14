@@ -1,6 +1,7 @@
 import { Textarea } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useContext, useId, useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { MOBILE_CONNECTION_STATUS_BAR_IDS, type MobileConnectionPreferences } from '../../../../shared/toolkit-preferences'
 import { api } from '../../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -34,7 +35,7 @@ export function BuiltinMobileConnectionSettings({ preferences, active, onSave }:
       <div className="toolkit-settings__identity">
         <span className="toolkit-settings__icon"><ThemeObjectPhoneIcon size={24} strokeWidth={1.5} /></span>
         <div><span className="toolkit-settings__eyebrow">Built-in toolkit</span><h3>Phone connection</h3><p>Official extension for connection links and device status.</p></div>
-        <button type="button" className="primary-button toolkit-settings__phone-settings" data-phone-settings onClick={() => navigation?.open('mobile')}><ThemeObjectPhoneIcon size={15} /> Open phone settings</button>
+        <Button type="button" variant="primary" className="toolkit-settings__phone-settings" data-phone-settings onClick={() => navigation?.open('mobile')}><ThemeObjectPhoneIcon size={15} /> Open phone settings</Button>
       </div>
       <div className="toolkit-settings__preview" aria-label="Phone connection status bar preview"><span>Workspace · Settings</span><span className="toolkit-settings__preview-tool" data-enabled={draft.value.enabled}><ThemeObjectPhoneIcon size={15} />{draft.value.statusBar === 'label' && <span>Phone connection</span>}</span></div>
       <label className="toolkit-settings__toggle"><span><strong>Show Phone connection in the status bar</strong><small>Quickly connect and check devices. Hiding the tool keeps existing device access.</small></span><input type="checkbox" checked={draft.value.enabled} onChange={event => draft.setField('enabled', event.target.checked)} /></label>

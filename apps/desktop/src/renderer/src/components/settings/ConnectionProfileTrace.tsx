@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ConnectionProfileDiagnostic, ConnectionProfileOperation } from '@agentmux/core/connections'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../../lib/api'
 import type { ConnectionHostingTarget } from '../../../../shared/contracts'
 import { profileEffectLabels } from '../ConnectionProfileProgress'
@@ -49,14 +50,14 @@ export function ConnectionProfileTrace({ operationId, parentId, original, hostin
     <div className="connector-request-trace__body">
       <p>Original image upload and profile write receipts. These do not confirm publication or the current online profile. Missing HTTP details cannot be reconstructed.</p>
       <div className="connector-request-trace__actions">
-        <button type="button" className="small-button" disabled={!operationId || visible?.busy} onClick={() => void load()}>Refresh trace</button>
-        <button type="button" className="small-button" disabled={!operation} onClick={async () => {
+        <Button type="button" disabled={!operationId || visible?.busy} onClick={() => void load()}>Refresh trace</Button>
+        <Button type="button" disabled={!operation} onClick={async () => {
           if (!operation) return
           try {
             await api.ui.writeClipboardText(JSON.stringify({ operationId: operation.operationId, parentOperationId: parentId, upload: safeEffect(operation.upload), patch: safeEffect(operation.patch), publication: operation.publication, reason: operation.reason ?? null }, null, 2))
             setCopied('Sanitized trace copied.')
           } catch { setCopied('Could not copy. The original receipt remains available here.') }
-        }}>Copy diagnosis</button>
+        }}>Copy diagnosis</Button>
       </div>
       <p role="status" className="connector-request-trace__feedback">{visible?.issue || copied}</p>
       {operation ? <div className="connector-request-trace__scroll" tabIndex={0} aria-label="Original profile effects"><table>
