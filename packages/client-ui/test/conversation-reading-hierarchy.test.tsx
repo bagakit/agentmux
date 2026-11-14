@@ -7,6 +7,7 @@ import { ClientUiProvider, type ClientUiPlatform } from '../src/platform'
 import { ConversationMessage } from '../src/components/ConversationMessage'
 import { ConversationView } from '../src/components/ConversationView'
 import { NativeProcessObservation } from '../src/components/NativeProcessObservation'
+import { ConversationToolPayload } from '../src/components/ConversationToolPayload'
 import type { ConversationSources } from '../src/lib/conversation-sources'
 import { projectConversationReading } from '../src/lib/conversation-records'
 import type { AgentSessionHistoryPage } from '@agentmux/core'
@@ -74,7 +75,15 @@ it('keeps a direct tool part source in its own Info scope while an unread part r
     expect(info.textContent).toContain('工具内容来源'); expect(info.textContent).toContain('原生对话')
     expect(payload.textContent).toContain('{"original":true}')
     expect(payload.querySelector('[aria-label="Copy tool input"]')).not.toBeNull()
+    expect(payload.querySelector('.conversation-tool-payload__identity > .conversation-tool-trace__kind')?.textContent).toBe('Input')
   }
+})
+
+it('does not label a generic original record payload as a tool direction', async () => {
+  const identity = {}
+  await draw(<ConversationToolPayload text='{"originalRecord":true}' identity={identity} sourceIdentity={identity} copyLabel="Copy original record" />)
+  expect(host.querySelector('.conversation-tool-trace__kind')).toBeNull()
+  expect(host.querySelector('pre')?.textContent).toBe('{"originalRecord":true}')
 })
 
 it('keeps distinct original member times available without repeating the owning step clock in each payload header', async () => {
@@ -92,6 +101,7 @@ it('keeps distinct original member times available without repeating the owning 
     if (step.querySelector('button[data-observation-step-id]')?.getAttribute('aria-expanded') !== 'true') await click(step, 'button[data-observation-step-id]')
     const record = step.querySelector('[data-process-content]')!
     expect(record).not.toBeNull()
+    expect(record.querySelector('.conversation-tool-payload__identity > .conversation-tool-trace__kind')?.textContent).toBe(id === 'original-input' ? 'Input' : 'Output')
     expect(record.querySelector(':scope > .log-turn__head .log-turn__time')).toBeNull()
     await click(record, 'button[aria-label="Message details"]')
     expect(record.querySelector('.conversation-input-details__body')?.textContent).toContain('原记录时间')
