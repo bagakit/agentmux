@@ -86,6 +86,7 @@ export class CoreRelayGateway implements MeshNetworkPort {
   private desiredRevision: string | null = null
   private activeRevision: string | null = null
   private activeConfiguration: MeshNetworkConfiguration | undefined
+  private activeMesh: import('@agentmux/relay/gateway').RelayMeshConfiguration | undefined
   private endpointObservation: MeshEndpointObservation
   private endpointOpening: ReturnType<AgentMuxMeshEndpointSource> | undefined
   private endpointValue: Awaited<ReturnType<AgentMuxMeshEndpointSource>> | undefined
@@ -209,7 +210,7 @@ export class CoreRelayGateway implements MeshNetworkPort {
     if (!this.localEndpoint) return undefined
     if (this.endpointValue) return this.endpointValue
     this.endpointObservation = { state: 'starting' }
-    this.endpointOpening ??= this.localEndpoint.source(this.shutdown.signal).catch(error => { this.endpointOpening = undefined; throw error })
+    this.endpointOpening ??= Promise.resolve().then(() => this.localEndpoint!.source(this.shutdown.signal)).catch(error => { this.endpointOpening = undefined; throw error })
     const original = this.endpointOpening
     const value = await new Promise<Awaited<ReturnType<AgentMuxMeshEndpointSource>>>((resolve, reject) => {
       const aborted = () => reject(this.shutdown.signal.reason)
@@ -244,10 +245,11 @@ export class CoreRelayGateway implements MeshNetworkPort {
     let mesh: import('@agentmux/relay/gateway').RelayMeshConfiguration | undefined
     if (config.role !== 'disabled') mesh = parseRelayMeshConfiguration({ networkId: config.networkId, identity: await this.settings!.reserveEpoch(), members: config.members, peers: config.peers, advertisedIngress: config.advertisedIngress })
     this.shutdown.signal.throwIfAborted()
-    const endpoint = config.role !== 'disabled' ? await this.endpoint() : undefined
-    let privateListener = this.endpointListener
+    // Network forwarding never waits for the optional original RPC identity.
+    const endpoint = config.role !== 'disabled' ? this.endpointValue : undefined
     const publishers = [...config.publishers]
-    if (endpoint) { if (publishers.some(p => p.serverId === endpoint.serverId)) throw new AgentMuxError('The original local endpoint publisher cannot be replaced by public gateway admission settings.', 'MESH_ENDPOINT_COLLISION'); publishers.push({ serverId: endpoint.serverId, tokenHash: hashPublisherToken(this.endpointToken) }) }
+    if (endpoint && publishers.some(p => p.serverId === endpoint.serverId)) throw new AgentMuxError('Public gateway admission cannot replace the original local endpoint publisher.', 'MESH_ENDPOINT_COLLISION')
+    if (endpoint) publishers.push({ serverId: endpoint.serverId, tokenHash: hashPublisherToken(this.endpointToken) })
     let binding: Parameters<CoreRelayGateway['listener']>[0]
     if (config.listen) {
       let tls: { key: string; cert: string } | undefined
@@ -259,22 +261,40 @@ export class CoreRelayGateway implements MeshNetworkPort {
     const next = config.role === 'gateway' ? await this.listener(binding, config.listen ?? 'borrowed') : undefined
     try {
       this.shutdown.signal.throwIfAborted()
-      if (endpoint && !privateListener) privateListener = await this.listener({ host: '127.0.0.1', port: 0 }, 'private-original-endpoint')
       if (this.runtime) await this.runtime.configure({ publishers, ...(mesh ? { mesh } : {}) })
       else this.runtime = createRelayGateway({ publishers, ...(mesh ? { mesh } : {}) })
       this.shutdown.signal.throwIfAborted()
       this.installListener(next)
       this.allowedDeviceKeys = new Set(config.endpointAccess.allowedClientKeys)
       for (const reader of this.endpointReaders) if (!this.allowedDeviceKeys.has(reader.publicKey)) reader.controller.abort()
-      if (endpoint && privateListener) {
-        this.endpointListener = privateListener
-        this.endpointAttachment ??= this.runtime.attach(privateListener.server)
-        await this.publishEndpoint(endpoint, privateListener)
-      } else if (this.endpointPublisher) { await this.endpointPublisher.stop(); this.endpointPublisher = undefined; this.endpointObservation = { state: 'unavailable', issue: { code: 'MESH_ENDPOINT_DISABLED', message: 'This original Host Mesh endpoint is disabled; Sessions remain retained.' } } }
+      if (config.role === 'disabled' && this.endpointPublisher) { await this.endpointPublisher.stop(); this.endpointPublisher = undefined }
+      if (config.role === 'disabled' && this.localEndpoint) this.endpointObservation = { state: 'unavailable', issue: { code: 'MESH_ENDPOINT_DISABLED', message: 'This original Core Mesh endpoint is disabled; Sessions remain retained.' } }
       this.shutdown.signal.throwIfAborted()
+      this.activeMesh = mesh
       this.activeRevision = state.revision; this.activeConfiguration = structuredClone(config); this.sourceKind = 'managed'
       this.applyState = { state: config.role === 'disabled' ? 'disabled' : 'active' }
-    } catch (error) { if (privateListener && privateListener !== this.endpointListener) { privateListener.server.close(() => {}); this.listeners.delete(privateListener.server) }; if (next?.owned && next.server !== this.activeListener?.server) { next.server.close(() => {}); this.listeners.delete(next.server) }; throw error }
+      if (config.role !== 'disabled' && this.localEndpoint) this.scheduleEndpoint(state.revision)
+    } catch (error) { if (next?.owned && next.server !== this.activeListener?.server) { next.server.close(() => {}); this.listeners.delete(next.server) }; throw error }
+  }
+  private scheduleEndpoint(revision: string): void {
+    void this.endpoint().then(value => {
+      if (!value || this.shutdown.signal.aborted) return
+      this.application = this.application.then(async () => {
+        if (this.shutdown.signal.aborted || this.activeRevision !== revision || this.desiredRevision !== revision) return
+        const config = this.activeConfiguration!
+        if (config.role === 'disabled') return
+        if (config.publishers.some(p => p.serverId === value.serverId)) throw new AgentMuxError('Public gateway admission cannot replace the original local endpoint publisher.', 'MESH_ENDPOINT_COLLISION')
+        const publishers = [...config.publishers, { serverId: value.serverId, tokenHash: hashPublisherToken(this.endpointToken) }]
+        // Reuse the exact active network identity/epoch, not another Mesh owner.
+        await this.runtime!.configure({ publishers, ...(this.activeMesh ? { mesh: this.activeMesh } : {}) })
+        this.endpointListener ??= await this.listener({ host: '127.0.0.1', port: 0 }, 'private-original-endpoint')
+        this.shutdown.signal.throwIfAborted()
+        this.endpointAttachment ??= this.runtime!.attach(this.endpointListener.server)
+        await this.publishEndpoint(value, this.endpointListener)
+      }).catch(() => {
+        if (!this.shutdown.signal.aborted && this.activeRevision === revision) this.endpointObservation = { state: 'unavailable', issue: { code: 'MESH_ENDPOINT_UNAVAILABLE', message: 'The optional original RPC endpoint is unavailable. Original network forwarding, Unix Core and Sessions remain available.' } }
+      })
+    }).catch(() => {})
   }
   private inspection(): MeshNetworkInspection {
     if (!this.meshState) throw new AgentMuxError('This original Core has no durable Mesh settings owner.', 'MESH_OWNER_UNAVAILABLE')

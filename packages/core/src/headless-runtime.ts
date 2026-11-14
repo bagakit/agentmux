@@ -11,6 +11,7 @@ import { AgentMuxClient } from './client.js';
 import type { AgentMuxClientOptions } from "./client-contract.js";
 import { AgentMuxFileAgentSessionStore, defaultAgentMuxAgentSessionStorePath } from './agent-session-store.js'
 import { AgentMuxError } from './errors.js'
+import { createAgentMuxDeviceAccess, createDeviceAdministration } from './device-access.js'
 import { DeliveryAttemptStore } from './delivery-attempt-store.js'
 import { immutableIdentityFile } from './immutable-identity-file.js'
 import { readCurrentSessionDatabase } from './agent-session-database.js'
@@ -129,6 +130,9 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
   let executionReader: Promise<AgentMuxHostedClient> | undefined
   let hostRoutes: HostRouteGateway | undefined
   let storageRecovery: AgentMuxStorageRecovery | undefined
+  // A supplied endpoint/administration borrows its original owner (e.g. Host).
+  // Only the durable standalone entry composes its own portable device owner.
+  const deviceAccess = storePath !== null && !options.meshEndpoint && !options.service?.deviceAdministration ? createAgentMuxDeviceAccess(store) : undefined
   try {
     endpointLease = await acquireOwner(socketPath + '.owner.lock')
     const identityPath = join(stateDirectory, 'semantic-runtime.json')
@@ -182,11 +186,12 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
       return { runtimeId, ownerInstanceId, protocolVersion: AGENTMUX_RUNTIME_OWNER_PROTOCOL_VERSION, processId: process.pid, ctxmux, availability: 'connected' }
     }
     const stop = (): Promise<void> => {
+      deviceAccess?.close()
       producerLeaseActive = false // revoke borrowing synchronously, before any close/observer await
       return stopping ??= (async () => {
       try { await server?.stop() }
       finally { try { try { await storageRecovery?.dispose(); hostRoutes?.dispose(); await executionBindings?.dispose(); await (await executionReader)?.dispose(); await capsules?.dispose(); await hosted?.dispose() } finally { await client?.dispose() } }
-        finally { await endpointLease?.close(); await semanticLease.close() } }
+        finally { try { await deviceAccess?.flush() } finally { await endpointLease?.close(); await semanticLease.close() } } }
       })()
     }
     // Both namespace leases are already held. One Client owns metadata and Native observation;
@@ -303,7 +308,13 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
     server = new AgentMuxControlServer({ ...options.service, socketPath, meshState: { directory: stateDirectory, owner: { runtimeId, ownerInstanceId } }, ...(options.http ? { http: options.http } : {}),
       ...(storageRecovery ? { storageRecovery } : {}),
       ...(options.relayGateway === undefined ? {} : { relayGateway: options.relayGateway }),
-      ...(options.meshEndpoint ? { meshEndpoint: options.meshEndpoint } : {}),
+      ...((options.meshEndpoint ?? deviceAccess?.endpoint) ? { meshEndpoint: options.meshEndpoint ?? deviceAccess!.endpoint } : {}),
+      ...(deviceAccess ? {
+        deviceAdministration: createDeviceAdministration(deviceAccess.authority, () => ({ state: 'unavailable', message: 'This Core has no mobile page. Use its original Mesh endpoint offer.' }),
+          async () => { throw new AgentMuxError('This Core has no mobile page. Use mesh.inspect and mesh.link for its original encrypted endpoint.', 'CONTROL_UNAVAILABLE') }),
+        operationSource: options.service?.operationSource ?? deviceAccess.operationSource,
+        recordDeviceOperation: options.service?.recordDeviceOperation ?? deviceAccess.recordDeviceOperation
+      } : {}),
       ...(options.forwardingPeer ? { forwardingPeer: options.forwardingPeer } : {}),
       capsules: options.service?.capsules ?? capsules,
       executionBindings: options.service?.executionBindings ?? executionBindings!,
@@ -329,8 +340,10 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
     return { client, hosted, server, socketPath, hostRoutes: options.service?.hostRoutes ?? hostRoutes!, ownerIdentity, executionHost,
       executionBindings: options.service?.executionBindings ?? executionBindings!, storageRecovery, stop }
   } catch (error) {
+    deviceAccess?.close()
     producerLeaseActive = false
     await server?.stop().catch(() => {}); await storageRecovery?.dispose().catch(() => {}); hostRoutes?.dispose(); await executionBindings?.dispose().catch(() => {}); await capsules?.dispose().catch(() => {}); await hosted?.dispose().catch(() => {}); await client?.dispose().catch(() => {})
+    await deviceAccess?.flush().catch(() => {})
     await endpointLease?.close().catch(() => {}); await semanticLease.close().catch(() => {})
     throw error
   }
