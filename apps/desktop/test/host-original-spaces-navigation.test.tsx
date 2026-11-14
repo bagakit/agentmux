@@ -284,6 +284,21 @@ it('Source structural actions refuse local ownership instead of silently mutatin
   expect(Object.hasOwn(after,'selectedSpaceMount')).toBe(false)
 })
 
+it('splitting a Source projection cannot write the local graph when another workface is selected',async()=>{
+  const f=await sourceFileFixture()
+  useAppStore.setState({config:{...composerConfig,workspaces:[]},mountedSpaceInputs:{},mountedSpaceObservations:{},activeWorkspaceId:null,workbenchSpaceSelection:null,tabs:{},layouts:{},spaceZoneBindings:{}})
+  useAppStore.getState().mountSpace(f.target)
+  useAppStore.getState().observeSpaceMount(f.target,{snapshot:f.snapshot,reading:false})
+  const workspaceId=originalSourceWorkspaceId(f.target)
+  const tabId=originalSourceTabProjectionId(f.target,f.tabId),regionId=originalSourceRegionProjectionId(f.target,f.regionId)
+  useAppStore.setState({workbenchSpaceSelection:null})
+  const before=useAppStore.getState(),report=vi.spyOn(before,'reportError')
+  expect(before.tabs[tabId]?.regions[regionId]).toBeDefined()
+  expect(before.splitRegion(workspaceId,tabId,regionId,'right')).toBeUndefined()
+  expect(report).toHaveBeenCalledWith(expect.objectContaining({message:expect.stringMatching(/Source split/)}))
+  expect(useAppStore.getState().tabs[tabId]).toBe(before.tabs[tabId])
+})
+
 it('Source split ratios use only ordinary projected layouts and never create private view inputs',async()=>{
   const f=await sourceFileFixture()
   useAppStore.setState({config:{...composerConfig,workspaces:[]},mountedSpaceInputs:{},mountedSpaceObservations:{},activeWorkspaceId:null,workbenchSpaceSelection:null,tabs:{},layouts:{},spaceZoneBindings:{}})

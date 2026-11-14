@@ -1,7 +1,7 @@
 const { app, BrowserWindow } = require('electron')
 const assert = require('node:assert/strict')
 const fs = require('node:fs/promises'), path = require('node:path'), { createHash } = require('node:crypto')
-const [html, privateRoot, evidence] = process.argv.slice(2)
+const [html, privateRoot, evidence, probe] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data')); app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const result = { schema: 'agentmux.terminal-region-menu-render.v1', passed: false, frames: [], scenarios: [], consoleErrors: [], userRunTouched: false }
 let win
@@ -60,12 +60,47 @@ async function frame(file) {
   assert.ok(bounds.left>=0&&bounds.right<=bounds.width&&bounds.top>=0&&bounds.bottom<=bounds.height,'Menu remains inside the actual viewport: '+JSON.stringify(bounds))
   assert.ok(bounds.scrollWidth<=bounds.clientWidth,'The actual shared menu has no horizontal overflow')
 }
+async function splitFromTerminalBody(retainedSource = false) {
+  await seed(640)
+  await openBody()
+  await evaluate('identityMenu.focusNeighbor()')
+  const before = await evaluate('terminalMenu.facts()')
+  assert.equal(before.active, 'region-actions-survivor')
+  if (retainedSource) await evaluate('terminalMenu.retainLocalSource()')
+  await click(item('Split Down'))
+  await waitFor(`!${menu}`)
+  await painted()
+  const after = await evaluate('terminalMenu.facts()')
+  const original = 'region-actions-target', neighbor = 'region-actions-survivor'
+  const root = after.tab.layout.root
+  assert.equal(Object.keys(after.tab.regions).length, 3, 'Terminal-body Split opens one new Region: ' + await evaluate('terminalMenu.lastError()'))
+  assert.equal(root.type, 'split')
+  assert.deepEqual(root.second, { type: 'leaf', regionId: neighbor })
+  assert.equal(root.first.type, 'split')
+  assert.equal(root.first.direction, 'vertical')
+  assert.deepEqual(root.first.first, { type: 'leaf', regionId: original })
+  const added = root.first.second.regionId
+  assert.equal(after.tab.regions[added].kind, 'launcher')
+  await waitFor(`Boolean(document.querySelector('[data-workbench-region-id="${added}"]'))`)
+  for (const id of [original, neighbor]) assert.deepEqual(after.tab.regions[id], before.tab.regions[id])
+  assert.deepEqual(after.sessions, before.sessions)
+  assert.equal(after.terminal.id, before.terminal.id)
+  assert.equal(after.draft, before.draft)
+  result.scenarios.push({ kind: 'split', retainedSource, before: before.tab.layout, after: after.tab.layout })
+}
 app.whenReady().then(async()=>{
   try {
     await fs.mkdir(evidence,{recursive:true});win=new BrowserWindow({show:false,width:1281,height:780,webPreferences:{backgroundThrottling:false,sandbox:false}})
     win.webContents.on('console-message',details=>{if(details.level==='error')result.consoleErrors.push(details.message)})
     await win.loadFile(html);win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
     await waitFor('Boolean(window.terminalMenu)')
+    if (probe === 'split-only') {
+      await splitFromTerminalBody()
+      await splitFromTerminalBody(true)
+      assert.deepEqual(result.consoleErrors, [])
+      result.passed = true
+      return
+    }
     for(const appearance of ['dark','light'])for(const width of [640,320]){
       await seed(width,appearance);const before=await evaluate('terminalMenu.facts().terminal')
       await openBody()

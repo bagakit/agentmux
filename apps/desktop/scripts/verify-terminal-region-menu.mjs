@@ -11,9 +11,12 @@ const desktop = resolve(import.meta.dirname, '..'), repository = resolve(desktop
 const require = createRequire(import.meta.url), fixture = join(desktop, 'scripts/fixtures/terminal-region-menu')
 const temporaryRoot = await mkdtemp(fixturePath('tmp/amx-terminal-menu-'))
 const evidence = join(repository, '.tmp/terminal-region-menu', 'attempt-' + globalThis.crypto.randomUUID())
+const splitOnly = process.argv.includes('--split-only')
+const layoutStore = 'apps/desktop/src/renderer/src/store.ts'
 const hash = data => createHash('sha256').update(data).digest('hex')
 const owners = ['RegionContextMenu', 'AgentRegionHeader', 'AgentMenuContent', 'TerminalContextMenu', 'TerminalMenuTools', 'TerminalView']
   .map(name => `apps/desktop/src/renderer/src/components/${name}.tsx`).concat('apps/desktop/src/renderer/src/styles/terminal.css')
+if (splitOnly) owners.push(layoutStore)
 const sources = async () => Object.fromEntries(await Promise.all(owners.map(async name => [name, hash(await readFile(join(repository, name)))])))
 const result = { schema: 'agentmux.terminal-region-menu-delivery.v1', passed: false, userRunTouched: false,
   aestheticReview: 'not-performed', sourceBefore: await sources(), mutation: null, cleanup: {} }
@@ -30,7 +33,14 @@ async function renderer(label, mutation = false) {
     resolve: { alias: [{ find: /^@xterm\/xterm$/, replacement: wrapper }] },
     plugins: [{ name: 'terminal-menu-consumer-inputs', enforce: 'pre', transform(source, id) {
       if ((id.startsWith(join(desktop, 'src') + '/') || id.startsWith(join(repository, 'packages/client-ui/src') + '/') || id.startsWith(fixture + '/')) && !id.includes('?')) loadedSourceInputs[id.slice(repository.length + 1)] = hash(source)
-      if (mutation && id === join(desktop, 'src/renderer/src/components/TerminalContextMenu.tsx')) {
+      if (mutation && splitOnly && id === join(repository, layoutStore)) {
+        const anchor = "originalSourceActionUnavailable(current, workspaceId, 'split', tab)"
+        assert.equal(source.split(anchor).length, 2, 'The Split action uses the exact Tab once')
+        const altered = source.replace(anchor, "originalSourceActionUnavailable(current, workspaceId, 'split')")
+        sourceMutations.push({ file: layoutStore, originalSHA256: hash(source), mutatedSHA256: hash(altered), productionWritten: false })
+        return altered
+      }
+      if (mutation && !splitOnly && id === join(desktop, 'src/renderer/src/components/TerminalContextMenu.tsx')) {
         const anchor = "element.current?.closest('[hidden], [inert]')"
         assert.equal(source.split(anchor).length, 2, 'The actual terminal source visibility check is unique')
         const altered = source.replace(anchor, "element.current?.closest('[hidden], [inert], [aria-hidden=\"true\"]')")
@@ -52,7 +62,7 @@ async function renderer(label, mutation = false) {
   for (const name of ['entry.tsx', 'main.cjs']) { const data = await readFile(join(fixture, name)); harnessInputs[name] = hash(data); await writeFile(join(directory, 'driver-' + name), data) }
   await writeFile(join(directory, 'compiled.json'), JSON.stringify({ loadedSourceInputs, importedStyleInputs, compiledFiles, sourceMutations, harnessInputs, terminalWrapperSHA256: hash(await readFile(wrapper)) }, null, 2))
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
-  const log = [], outcome = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(outDir, 'index.html'), temporaryRoot, directory], {
+  const log = [], outcome = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(outDir, 'index.html'), temporaryRoot, directory, ...(splitOnly ? ['split-only'] : [])], {
     cwd: repository, env, timeoutMs: 90000, onLine: line => log.push(line)
   })
   await writeFile(join(directory, 'process.log'), log.join('\n'))
@@ -65,12 +75,15 @@ try {
   await mkdir(evidence, { recursive: true })
   result.fixed = await renderer('fixed')
   assert.equal(result.fixed.outcome.exitCode, 0, JSON.stringify(result.fixed.rendered.failure)); assert.equal(result.fixed.rendered.passed, true)
-  const red = await renderer('modal-source-red', true)
+  const label = splitOnly ? 'split-uses-selected-source' : 'modal-isolation-invalidates-visible-source'
+  const red = await renderer(label + '-red', true)
   assert.equal(red.outcome.exitCode, 1); assert.equal(red.rendered.failure.name, 'AssertionError')
-  assert.match(red.rendered.failure.message, /Normal output keeps the original context tools|The actual source contributes its original terminal tools/)
-  const restored = await renderer('modal-source-restored')
+  assert.match(red.rendered.failure.message, splitOnly
+    ? /Terminal-body Split opens one new Region: The original Source split is unavailable here/
+    : /Normal output keeps the original context tools|The actual source contributes its original terminal tools/)
+  const restored = await renderer(label + '-restored')
   assert.equal(restored.outcome.exitCode, 0, JSON.stringify(restored.rendered.failure)); assert.equal(restored.rendered.passed, true)
-  result.mutation = { label: 'modal-isolation-invalidates-visible-source', red, restored, productionWritten: false }
+  result.mutation = { label, red, restored, productionWritten: false }
   result.sourceAfter = await sources(); assert.deepEqual(result.sourceAfter, result.sourceBefore)
   result.passed = true
 } catch (error) { result.failure = { name: error.name, message: error.message, stack: error.stack } }

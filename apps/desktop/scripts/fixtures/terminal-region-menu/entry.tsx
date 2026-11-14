@@ -2,6 +2,7 @@ import '../agent-region-identity-menu/entry'
 import type { Terminal } from '@xterm/xterm'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
+import { openSourceFolderInput } from '../../../src/renderer/src/lib/space-mount-view'
 import type { RuntimeEvent } from '../../../src/shared/contracts'
 
 // The existing producer mounts WorkspaceWorkbench -> SessionPane -> real TerminalView.
@@ -62,6 +63,19 @@ Object.assign(window, { terminalMenu: {
   },
   select() { terminal().select(0, 0, 'src/original.txt'.length) },
   clearInputs() { inputs.length = 0; gestures.length = 0 },
+  retainLocalSource() {
+    const state = useAppStore.getState(), choice = state.workbenchSpaceSelection
+    if (!choice?.spaceId || !choice.zoneId || !choice.tabId || state.tabs[choice.tabId]?.source) {
+      throw new Error('The scene must have an ordinary Tab in an exact local Zone')
+    }
+    const reference = { runtimeId: 'private-terminal-split-source', spaceId: choice.spaceId }
+    const target = { reference, hostId: 'local', zoneId: choice.zoneId, workspaceId: choice.workspaceId }
+    useAppStore.setState({
+      mountedSpaceInputs: openSourceFolderInput(state.mountedSpaceInputs, target),
+      workbenchSpaceSelection: { ...choice, sourceRuntimeId: reference.runtimeId }
+    })
+  },
+  lastError() { return useAppStore.getState().notificationEvents.at(-1)?.message ?? null },
   facts() { return { ...identity.facts(), terminal: identity.terminal(), inputs: [...inputs], gestures: [...gestures],
     outputLine: terminal().buffer.active.getLine(0)?.translateToString(true), selected: terminal().getSelection(), mouseTrackingMode: terminal().modes.mouseTrackingMode } }
 } })
