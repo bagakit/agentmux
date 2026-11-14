@@ -12,6 +12,7 @@ vi.mock('@xyflow/react', async original => {
   const loaded = await original<typeof import('@xyflow/react') & { default?: typeof import('@xyflow/react') }>(), React = await import('react')
   const actual = loaded.ReactFlowProvider ? loaded : loaded.default!
   return { ...actual, ReactFlowProvider: actual.ReactFlowProvider, useReactFlow: actual.useReactFlow, useStoreApi: actual.useStoreApi,
+    ViewportPortal: actual.ViewportPortal, getViewportForBounds: actual.getViewportForBounds,
     Handle: actual.Handle, Position: actual.Position, useNodesState: actual.useNodesState,
     ReactFlow: (props: ReactFlowProps) => React.createElement(actual.ReactFlow, { ...props, onInit: instance => { flowTrace.instances.push(instance); props.onInit?.(instance) } }) }
 })
@@ -87,7 +88,7 @@ it('available routes and adopted circuits keep distinct exact paths through the 
   await click('.mesh-explorer__categories button:nth-child(3)'); await click('[data-mesh-object="circuit"]')
   expect(container.querySelector('[aria-label="Selected endpoint network path"]')!.children).toHaveLength(3)
   expect(container.querySelector('[aria-label="Selected network object"]')?.textContent).toContain('ADOPTED CIRCUIT')
-  await click('[aria-label="Network view"] button:nth-child(2)')
+  await click('[aria-label="Network view"] button:last-child')
   expect(container.querySelector('[data-mesh-object="circuit"]')?.getAttribute('aria-pressed')).toBe('true')
   expect(container.querySelectorAll('.mesh-explorer__directory')).toHaveLength(1)
   expect(container.querySelector('.mesh-explorer__workspace .mesh-explorer__directory [data-mesh-object="circuit"]')).not.toBeNull()
@@ -148,6 +149,7 @@ it('an actual original Core mesh observation shares the local anchor with saved 
     expect(container.querySelector('.mesh-explorer__header')?.textContent).toContain('original-topology-consumer')
     expect(container.querySelector('.mesh-explorer__header')?.textContent).toContain('1 reciprocal link')
     expect(container.querySelector('[data-id="saved:client"] [data-shared-local]')).not.toBeNull()
+    await click('[aria-label="Network view"] button:nth-child(2)')
     const layout = LayoutWorker.instances[0]?.input?.input
     expect(layout?.nodes.map(node => node.id).sort()).toEqual([`relay:${savedB.identity.peerId}`, 'saved:client', 'saved:host:configured-route'].sort())
     const localDestinations = layout?.edges.map(edge => edge.source === 'saved:client' ? edge.target : edge.target === 'saved:client' ? edge.source : null)

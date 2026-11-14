@@ -21,7 +21,7 @@ app.whenReady().then(async()=>{try{
  assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('.settings-nav-children button')).map(e=>e.textContent.trim())"),['Gateways','Machines','Device connections'])
  assert.equal(await evaluate("document.querySelectorAll('[data-cluster-host]').length"),6)
  assert.equal(await evaluate("Boolean(document.querySelector('[aria-label=\"Selected network object\"]'))"),false)
- await wait('.mesh-explorer-edge path')
+ await button('Connections');await wait('.mesh-explorer-edge path')
  const graphFacts = () => evaluate(`(() => {
   const canvas = document.querySelector('.mesh-explorer__canvas')
   const paths = kind => [...canvas.querySelectorAll('.mesh-explorer-edge--' + kind + ' .react-flow__edge-path')]
@@ -82,9 +82,9 @@ app.whenReady().then(async()=>{try{
  assert.equal(await evaluate("document.querySelectorAll('.mesh-explorer-edge--muted').length"),0,'returning to the full map restores link emphasis')
  await click('[aria-label="Network scope"] button:nth-child(2)')
  await click('.mesh-explorer__categories button:nth-child(3)');await click('[data-mesh-object=circuit]');await frame('adopted-circuit-dark');await pathVisibility('adopted-circuit')
- await evaluate('meshFixture.theme("light")');await click('[aria-label="Network view"] button:nth-child(2)');await frame('list-light');await evaluate('meshFixture.theme("dark")');await frame('list-dark');await evaluate('meshFixture.theme("light")')
+ await evaluate('meshFixture.theme("light")');await button('List');await frame('list-light');await evaluate('meshFixture.theme("dark")');await frame('list-dark');await evaluate('meshFixture.theme("light")')
  window.setContentSize(560,930);await top();await frame('overview-narrow-light');await evaluate('meshFixture.theme("dark")');await frame('overview-narrow-dark')
- await click('[aria-label="Network view"] button:first-child');await click('[aria-label="Fit observed topology"]');await frame('overview-narrow-graph-dark')
+ await button('Connections');await click('[aria-label="Fit observed topology"]');await frame('overview-narrow-graph-dark')
  await evaluate("document.querySelector('.cluster-machines').scrollIntoView({block:'start'})");await frame('devices-narrow-dark')
  await type('[aria-label="Filter saved devices"]','studio');assert.equal(await evaluate("document.querySelectorAll('[data-cluster-host]').length"),1);await frame('devices-filter-narrow-dark')
  await type('[aria-label="Filter saved devices"]','no-such-device');assert.equal(await evaluate("document.querySelectorAll('[data-cluster-host]').length"),0);await frame('devices-filter-empty-narrow-dark');await type('[aria-label="Filter saved devices"]','')
@@ -101,14 +101,14 @@ app.whenReady().then(async()=>{try{
  receipt.draftRetainedAcrossViews=true
  await button('← Mesh overview');await click('[data-cluster-host="farm-cn1"] .cluster-machine-manage');await wait('[data-resource-editor="farm-cn1"]');await type('[data-resource-editor="farm-cn1"] [data-host-name]','Farm CN1 draft');await frame('device-editor-dark')
  await button('← Mesh overview');await nav('mesh-machines');await nav();await click('[data-cluster-host="farm-cn1"] .cluster-machine-manage');assert.equal(await evaluate('document.querySelector("[data-resource-editor=\\"farm-cn1\\"] [data-host-name]").value'),'Farm CN1 draft');receipt.hostDraftRetainedAcrossViews=true
- await button('← Mesh overview');await button('Add device');await wait('[data-resource-editor] [data-host-name]');await frame('add-device-dark')
- await button('← Mesh overview');await top();await click('[aria-label="Network view"] button:first-child');await button('Clear');await click('[aria-label="Network scope"] button:first-child');await click('[aria-label="Fit observed topology"]');await frame('overview-final-dark')
+ await button('← Mesh overview');await button('Add SSH connection');await wait('[data-resource-editor] [data-host-name]');await frame('add-device-dark')
+ await button('← Mesh overview');await top();await button('Connections');await button('Clear');await click('[aria-label="Network scope"] button:first-child');await click('[aria-label="Fit observed topology"]');await frame('overview-final-dark')
  window.setContentSize(1440,720);await top();await frame('overview-short-dark')
  await evaluate('meshFixture.relayOff()');await button('Refresh network');await frame('relay-off-after-refresh')
  assert.equal((await graphFacts()).hosts,5)
  assert.equal((await graphFacts()).relay,0)
  await window.loadURL(url+'?scenario=initial');await wait('.mesh-explorer__canvas [data-host-node]')
- await wait('[aria-label="Saved gateway targets"]')
+ await button('Connections');await wait('[aria-label="Saved gateway targets"]')
  const savedNodes = async () => (await graphFacts()).hosts
  assert.equal(await savedNodes(),8)
  for(let i=0;i<150;i++){if(await evaluate('document.querySelector(".cluster-machines-coverage").textContent.includes("4 / 9")'))break;await delay(50)}
@@ -122,18 +122,21 @@ app.whenReady().then(async()=>{try{
  receipt.savedOnly = await graphFacts()
  assert.deepEqual(receipt.savedOnly,{graphs:1,hosts:8,saved:8,relay:0,sharedLocal:0,savedAtLocal:8,relayAtLocal:0,geography:false,savedDashed:true,relaySolid:true})
  window.setContentSize(1440,950)
- await window.loadURL(url+'?scenario=empty');await wait('.mesh-explorer__no-connections')
+ await window.loadURL(url+'?scenario=empty');await wait('.mesh-geography__atlas')
  await frame('no-connections-dark')
- assert.equal(await evaluate("document.querySelector('.mesh-explorer__graph')"),null)
+ assert.equal(await evaluate("document.querySelectorAll('[data-geographic-point]').length"),0)
  } else {
   await window.loadURL(url+'?scenario=initial')
   await wait('.mesh-explorer__canvas [data-host-node]')
-  assert.equal(await evaluate("document.querySelector('.mesh-explorer__canvas .mesh-geography__atlas')"),null)
-  await frame('logical-no-locations-dark')
+  await wait('.mesh-explorer__canvas .mesh-geography__atlas')
+  assert.equal(await evaluate("document.querySelectorAll('[data-geographic-point], .mesh-explorer-edge').length"),0)
+  await frame('geography-unknown-dark')
+  await button('Connections');await frame('connections-unknown-dark')
+  await button('List');await frame('devices-list-dark')
  }
  await window.loadURL(url+'?scenario=geography')
  await wait('[data-geographic-point="saved:client"] circle')
- await wait('.mesh-explorer-edge--relay path')
+ await wait('.mesh-explorer-edge--saved path')
  await evaluate("document.querySelector('.mesh-explorer__canvas .mesh-geography__land').decode()")
  const geography = () => evaluate(`(() => {
   const atlas = document.querySelector('.mesh-geography__atlas').getBoundingClientRect()

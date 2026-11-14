@@ -208,9 +208,11 @@ it('shares the local map anchor and keeps saved Hosts during path focus, failed 
     expect(canvas()?.querySelector('[data-id="saved:client"] [data-shared-local]')).not.toBeNull()
     expect(canvas()?.querySelector('[data-id="relay:this-core"]')).toBeNull()
   })
-  expect(canvas()?.querySelector('.mesh-geography__atlas')).toBeNull()
+  expect(canvas()?.querySelector('.mesh-geography__atlas')).not.toBeNull()
+  expect(canvas()?.querySelectorAll('[data-geographic-point], .mesh-explorer-edge')).toHaveLength(0)
+  expect(dom.container.querySelector('.mesh-explorer__map-key')?.textContent).toContain('0 located')
+  await dom.click('[aria-label="Network view"] button:nth-child(2)')
   expect(dom.container.querySelector('.mesh-explorer__map-key')?.textContent).toContain('Connection diagram')
-  expect(dom.container.querySelector('.mesh-explorer__map-key')?.textContent).toContain('Device locations unknown')
   expect(dom.container.querySelector('[aria-label="Map source"]')).toBeNull()
   await dom.click('[data-id="relay:distant-gateway"] button')
   await dom.click('[aria-label="Network scope"] button:last-of-type')
@@ -301,7 +303,37 @@ it('saves the exact selected device map location, projects it alongside zero and
   await dom.click('[aria-label="Selected saved connection"] .mesh-explorer__detail-actions button:first-child')
   await input(field(), '')
   await dom.click('.mesh-locations-panel [data-settings-save-bar] button')
-  await vi.waitFor(() => expect(dom.container.querySelector('.mesh-explorer__canvas .mesh-geography__atlas')).toBeNull())
-  expect(dom.container.querySelector('.mesh-explorer__map-key')?.textContent).toContain('Connection diagram')
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.mesh-explorer__canvas [data-geographic-point]')).toHaveLength(0))
+  expect(dom.container.querySelector('.mesh-explorer__canvas .mesh-geography__atlas')).not.toBeNull()
   expect(useAppStore.getState().config?.meshMapLocations).toEqual({})
+})
+
+it('keeps annotations on the selected Relay peer within its network, independent of a saved Host with the same ID', async () => {
+  const id = 'neighbor-farm'
+  let networkId = 'first-network'
+  const identity = { peerId: 'local-peer', publicKey: 'fixture', epoch: 1 }
+  vi.mocked(api.mesh.call).mockImplementation(async method => (method === 'mesh.inspect' ? {
+    ...observed, identity, network: { protocol: 1, networkId, state: 'active', identity,
+      peers: [{ peerId: id, state: 'connected', connectionId: 'link', rttMs: 3 }], records: [], routes: [], circuits: [] },
+  } : saved) as never)
+  vi.spyOn(api.config, 'save').mockImplementation(async next => next)
+  await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} />)
+  const peer = '[data-id="relay:neighbor-farm"] button'
+  await vi.waitFor(() => expect(dom.container.querySelector(peer)).not.toBeNull())
+  await dom.click(peer)
+  await dom.click('[aria-label="Selected network object"] > div button')
+  await input(dom.container.querySelector<HTMLInputElement>('[aria-label="Latitude, longitude"]')!, '0, -90')
+  await dom.click('.mesh-locations-panel [data-settings-save-bar] button')
+  const marker = () => dom.container.querySelector('[data-geographic-point="relay:neighbor-farm"] circle')
+  await vi.waitFor(() => expect(marker()?.getAttribute('cx')).toBe('250'))
+  expect(useAppStore.getState().config?.meshPeerMapLocations).toEqual({ [JSON.stringify([networkId, id])]: '0, -90' })
+  expect(dom.container.querySelector('[data-geographic-point="saved:host:neighbor-farm"]')).toBeNull()
+  await dom.click('[aria-label="Network view"] button:last-child')
+  expect(dom.container.querySelector('[aria-label="Selected network object"]')?.textContent).toContain('Marked on this device')
+  await dom.click('[aria-label="Network view"] button:first-child')
+  expect(marker()).not.toBeNull()
+  networkId = 'other-network'
+  await dom.click('.mesh-explorer__header > button:last-child')
+  await vi.waitFor(() => expect(marker()).toBeNull())
+  expect(dom.container.querySelector(peer)).not.toBeNull()
 })
