@@ -32,11 +32,8 @@ registerHooks({
       if (entry?.startsWith('./dist/')) file = resolve(root, 'apps/host/src', entry.slice(7).replace(/\.js$/u, '.ts'))
     }
     else if (specifier.startsWith('@agentmux/client-ui/')) {
-      const entries = JSON.parse(readFileSync(resolve(root, 'packages/client-ui/package.json'), 'utf8')).exports
-      const key = './' + specifier.slice('@agentmux/client-ui/'.length)
-      const entry = entries[key]?.types ?? (key.startsWith('./components/') ? entries['./components/*']?.types.replace('*', key.slice('./components/'.length))
-        : key.startsWith('./note/') ? entries['./note/*']?.types.replace('*', key.slice(7)) : entries['./*']?.types.replace('*', key.slice(2)))
-      if (entry?.startsWith('./src/')) file = resolve(root, 'packages/client-ui', entry)
+      // Source qualification uses the package's actual exported type/source condition.
+      return next(specifier, { ...context, conditions: [...context.conditions, 'types'] })
     }
     else if (specifier.startsWith('@agentmux/core/')) {
       const entry = manifest['./' + specifier.slice('@agentmux/core/'.length)]?.import
