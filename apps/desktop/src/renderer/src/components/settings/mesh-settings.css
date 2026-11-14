@@ -115,3 +115,11 @@
 .mesh-peer-preview dt { color: var(--text-3); }
 .mesh-peer-preview dd { margin: 0; overflow-wrap: anywhere; }
 .mesh-form-field > select { color: var(--text); background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: var(--sp-2); font: inherit; }
+.mesh-settings-pane [data-mesh-view="network"] > .mesh-form-field { max-width: 32rem; margin-bottom: var(--sp-4); }
+.mesh-settings-pane [data-settings-field="mesh-access-work"] .mesh-network-section { max-width: 44rem; border: 0; }
+.mesh-settings-pane [data-settings-field="mesh-access-work"] h4 { margin: 0; }
+.mesh-settings-pane [data-settings-field="mesh-access-work"] p { margin: 0; line-height: 1.55; }
+.mesh-settings-pane [data-settings-field="mesh-access-work"] button { justify-self: start; }
+.mesh-endpoint-source { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); overflow-wrap: anywhere; }
+.mesh-gateway-fields > button { justify-self: start; }
+.mesh-peer-preview summary { cursor: pointer; }

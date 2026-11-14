@@ -20,6 +20,8 @@ export function MeshOperatorTarget({ label, active, initial, children }: {
     return match ? routeKey(match) : initial ? JSON.stringify(initial) : ''
   })
   const selected = remotes.find(host => routeKey(host) === selection)
+  const option = (host: HostConfig) => JSON.stringify([host.id])
+  const choice = selected ? option(selected) : selection ? 'unavailable' : ''
   const [resolved, setResolved] = useState<{ route: string; runtime?: string; error?: string }>()
   const [retry, setRetry] = useState(0)
   useEffect(() => {
@@ -35,10 +37,13 @@ export function MeshOperatorTarget({ label, active, initial, children }: {
   const runtime = selected?.runtimeId ?? (resolved?.route === selection ? resolved.runtime : undefined)
   const target = selected && runtime ? { hostId: selected.id, expectedRuntimeId: runtime } : undefined
   return <>
-    {remotes.length || selection ? <label className="mesh-form-field"><span>{label}</span><select aria-label={label} value={selection} onChange={event => setSelection(event.target.value)}>
+    {remotes.length || selection ? <label className="mesh-form-field"><span>{label}</span><select aria-label={label} value={choice} onChange={event => {
+      const host = remotes.find(item => option(item) === event.target.value)
+      setSelection(host ? routeKey(host) : '')
+    }}>
       <option value="">This device</option>
-      {selection && !selected ? <option value={selection}>Previously selected Host unavailable</option> : null}
-      {remotes.map(host => <option key={host.id} value={routeKey(host)}>{host.label} · {host.id}</option>)}
+      {selection && !selected ? <option value="unavailable">Previously selected Host unavailable</option> : null}
+      {remotes.map(host => <option key={host.id} value={option(host)}>{host.label} · {host.id}</option>)}
     </select></label> : null}
     {!selection || target ? <Fragment key={JSON.stringify([selection, runtime])}>{children(target, selected?.label ?? 'This device')}</Fragment>
       : <div role="status">{!selected ? 'Select a saved Host to continue.' : resolved?.route === selection && resolved.error

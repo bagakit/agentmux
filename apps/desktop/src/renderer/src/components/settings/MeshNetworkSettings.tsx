@@ -143,7 +143,7 @@ function MeshNetworkEditor({ active, onConnections, showTopology = true, target,
     await updateMeshSettingsDraft(newer.owner.runtimeId, value => value ? retained({ ...value, pending: undefined, baseline: newer, form: keep ? value.form : meshForm(newer.configuration, newer.identity?.peerId) }) : undefined, true)
     setSettings(newer); setNewer(undefined); setIssue('')
   }
-  const peerCode = settings ? meshPeerCode(settings) : null
+  const peerCode = settings && settings.configuration.role !== 'disabled' ? meshPeerCode(settings) : null
   const hasTopology = Boolean(network && (network.peers.length || network.records.length || network.routes.length))
   const identityRecovery = useLocalRuntimeRecovery(active && !target && !settings, () => { void inspect() })
   const refresh = () => { if (!settings && !target) identityRecovery.refresh(); void inspect() }
@@ -200,8 +200,8 @@ function MeshNetworkEditor({ active, onConnections, showTopology = true, target,
         </div>
         <MeshPeerPairing input={edit?.pairingInput ?? ''} form={form} ownPeerId={settings?.identity?.peerId} inputRef={pairingField} allowNewNetwork={saved.configuration.role === 'disabled' && form.networkId === saved.configuration.networkId}
           onInput={value => change({}, value)} onAdd={patch => change(patch, '')} />
-        <div className="mesh-code-action">{peerCode ? <><button className="small-button" onClick={() => void copy(peerCode)}>Copy saved connection code</button><span className="field-hint">{dirty ? 'Save changes before sharing the updated code.' : 'Exchange codes with the other device. Each device adds its peer and saves.'}</span></> : <p className="field-hint">Save participation to create this device’s pairing code.</p>}</div>
-        <details className="mesh-advanced"><summary>Network name and peer codes</summary>
+        <div className="mesh-code-action">{peerCode ? <><button className="small-button" onClick={() => void copy(peerCode)}>Copy saved connection code</button><span className="field-hint">{dirty ? 'Save changes before sharing the updated code.' : 'Exchange codes with the other device. Each device adds its peer and saves.'}</span></> : <p className="field-hint">Add the peer and save. Then copy this device’s code back to its operator.</p>}</div>
+        <details className="mesh-advanced"><summary>Network name and peer codes{form.peers.trim() ? ` · ${form.peers.trim().split(/\s+/u).length} saved or pending` : ''}</summary>
           <label className="mesh-form-field"><span>Network name</span><TextInput aria-label="Mesh network" value={form.networkId} onChange={event => change({ networkId: event.target.value })} /></label>
           <label className="mesh-form-field"><span>Trusted peer codes</span><textarea aria-label="Mesh peer codes" value={form.peers} onChange={event => change({ peers: event.target.value })} rows={3} /></label>
         </details>
@@ -218,7 +218,7 @@ function MeshNetworkEditor({ active, onConnections, showTopology = true, target,
       {pending ? <div className="mesh-pending"><code>{pending.operationId}</code><button className="small-button" disabled={saving || reading} onClick={() => void inspect(pending.operationId)}>Inspect original save</button></div> : null}
       {notice ? <p role="status" className="mesh-network-notice">{notice}</p> : null}
     </> : null}
-    {settings && form && saved ? <MeshAccessLinks active={active} target={target} snapshot={snapshot} offerText={originalOffer} copy={copy}
+    {settings && form && saved ? <MeshAccessLinks active={active} target={target} deviceLabel={deviceLabel} snapshot={snapshot} offerText={originalOffer} copy={copy}
       onInput={text => { void updateMeshSettingsDraft(saved.owner.runtimeId, value => retained({ ...value, baseline: value?.baseline ?? saved,
         form: value?.form ?? form, linkInput: text })).catch(cause => setIssue(message(cause))) }} /> : null}
     {settings && identitySetupAction ? <details className="mesh-advanced">

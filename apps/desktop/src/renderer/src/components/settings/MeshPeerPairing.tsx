@@ -34,7 +34,8 @@ export function MeshPeerPairing({ input, form, ownPeerId, allowNewNetwork, input
   return <div className="mesh-peer-pairing">
     <label className="mesh-form-field"><span>Pair with a device</span><TextInput ref={inputRef} aria-label="Paste a connection code" value={input}
       placeholder="Paste its Mesh connection code" onChange={e => { setError(''); onInput(e.target.value) }} /></label>
-    {candidate ? <dl className="mesh-peer-preview"><dt>Network</dt><dd>{candidate.networkId}</dd><dt>Peer</dt><dd><code>{candidate.peerId}</code></dd>
+    {candidate ? <dl className="mesh-peer-preview"><dt>Network</dt><dd>{candidate.networkId}</dd><dt>Peer</dt><dd><details><summary><code>{candidate.peerId.length > 22 ? `${candidate.peerId.slice(0, 9)}…${candidate.peerId.slice(-7)}` : candidate.peerId}</code></summary>
+        <code>{candidate.peerId}</code></details></dd>
       <dt>Address</dt><dd>{candidate.endpoints.map(item => (item.useTls ? 'https://' : 'http://') + item.endpoint).join(' · ') || 'This device connects out'}</dd></dl> : null}
     {code ? <button type="button" className="small-button" onClick={add}>Add to network settings</button> : null}
     {error ? <p className="settings-inline-error" role="alert">{error}</p> : null}

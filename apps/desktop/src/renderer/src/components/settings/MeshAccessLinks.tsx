@@ -6,8 +6,8 @@ import { api } from '../../lib/api'
 
 const issueText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause)
 
-export function MeshAccessLinks({ active, target, snapshot, offerText, onInput, copy }: {
-  active: boolean; target: MeshOwnerTarget | undefined; snapshot: MeshNetworkInspection | undefined; offerText: string
+export function MeshAccessLinks({ active, target, deviceLabel, snapshot, offerText, onInput, copy }: {
+  active: boolean; target: MeshOwnerTarget | undefined; deviceLabel: string; snapshot: MeshNetworkInspection | undefined; offerText: string
   onInput(text: string): void; copy(text: string): void
 }) {
   const [expanded, setExpanded] = useState(false)
@@ -15,26 +15,28 @@ export function MeshAccessLinks({ active, target, snapshot, offerText, onInput, 
   return <details className="mesh-advanced mesh-access-links" onToggle={e => setExpanded(e.currentTarget.open)}>
     <summary>Share a device access link</summary>
     <p>Use a gateway that can reach the original endpoint. The device receiving the link still needs approval on the target.</p>
-    {endpoint ? <div className="mesh-network-section"><button type="button" className="small-button" onClick={() => copy(JSON.stringify(endpoint))}>Copy endpoint offer</button></div>
+    {endpoint ? <div className="mesh-endpoint-source"><strong>{deviceLabel} · {endpoint.serverId}</strong>
+      <button type="button" className="small-button" onClick={() => copy(JSON.stringify(endpoint))}>Copy endpoint offer</button></div>
       : snapshot?.endpoint.state === 'not-provided' ? <p>This Core forwards traffic without a local endpoint.</p> : null}
-    {endpoint ? <button className="small-button" type="button" onClick={() => onInput(JSON.stringify(endpoint))}>Use this device’s endpoint</button> : null}
+    {endpoint && offerText ? <button className="small-button" type="button" onClick={() => onInput('')}>Use {target ? deviceLabel + '’s' : 'this device’s'} endpoint</button> : null}
     <MeshOperatorTarget label="Issuing gateway" active={active && expanded} initial={target}>{(issuer) =>
       <GatewayLink active={active} observe={expanded} target={issuer}
         sameDevice={issuer?.hostId === target?.hostId && issuer?.expectedRuntimeId === target?.expectedRuntimeId}
-        subject={snapshot} offerText={offerText} onInput={onInput} copy={copy} />
+        subject={snapshot} originalEndpoint={endpoint} offerText={offerText} onInput={onInput} copy={copy} />
     }</MeshOperatorTarget>
   </details>
 }
 
-function GatewayLink({ active, observe, target, sameDevice, subject, offerText, onInput, copy }: {
+function GatewayLink({ active, observe, target, sameDevice, subject, originalEndpoint, offerText, onInput, copy }: {
   active: boolean; observe: boolean; target: MeshOwnerTarget | undefined; sameDevice: boolean; subject: MeshNetworkInspection | undefined
-  offerText: string; onInput(text: string): void; copy(text: string): void
+  originalEndpoint?: MeshNetworkLink['offer'] | undefined; offerText: string; onInput(text: string): void; copy(text: string): void
 }) {
   const [remote, setRemote] = useState<MeshNetworkInspection>(), [readIssue, setReadIssue] = useState('')
   const [refresh, setRefresh] = useState(0)
   const [link, setLink] = useState<MeshNetworkLink>(), [error, setError] = useState(''), [busy, setBusy] = useState(false)
   const [choice, setChoice] = useState('')
   const request = useRef<AbortController | undefined>(undefined)
+  const originalOffer = offerText.trim() || (originalEndpoint ? JSON.stringify(originalEndpoint) : '')
   const observation = sameDevice ? subject : remote
   const entries = observation?.network?.records.find(record => record.originPeerId === observation.identity?.peerId)?.advertisedIngress ?? []
   const origin = (item: { endpoint: string; useTls: boolean }) => (item.useTls ? 'https://' : 'http://') + item.endpoint
@@ -51,19 +53,21 @@ function GatewayLink({ active, observe, target, sameDevice, subject, offerText, 
     }).catch(cause => { if (!controller.signal.aborted) { setRemote(undefined); setReadIssue(issueText(cause)) } })
     return () => controller.abort()
   }, [active, observe, sameDevice, target?.hostId, target?.expectedRuntimeId, refresh])
-  useEffect(() => { reset(); return () => { request.current?.abort(); request.current = undefined } }, [active, offerText])
+  useEffect(() => { reset(); return () => { request.current?.abort(); request.current = undefined } }, [active, originalOffer])
   async function createLink() {
     reset()
     const controller = new AbortController()
     request.current = controller; setBusy(true)
     try {
-      const input = JSON.parse(offerText)
+      const input = JSON.parse(originalOffer)
       const value = await api.mesh.call('mesh.link', { offer: input.offer ?? input, ...(target ? { target } : {}), ...(selected ? { ingress: selected } : {}) },
         { ...(observation ? { expectedOwner: observation.owner } : {}), signal: controller.signal })
       if (request.current === controller) setLink(value)
     } catch (cause) { if (!controller.signal.aborted) setError(issueText(cause)) }
     finally { if (request.current === controller) { request.current = undefined; setBusy(false) } }
   }
+  const offerField = <label className="mesh-form-field"><span>Original endpoint offer</span><textarea aria-label="Original Mesh endpoint offer" value={offerText}
+    onChange={e => { reset(); onInput(e.target.value) }} rows={3} placeholder="Paste an endpoint offer" /></label>
   return <section className="mesh-network-section" data-settings-field="mesh-link">
     {entries.length > 0 || choice ? <label className="mesh-form-field"><span>Published gateway address</span>
       <select aria-label="Published gateway address" value={choice || (selected ? origin(selected) : '')} onChange={e => { reset(); setChoice(e.target.value) }}>
@@ -71,9 +75,8 @@ function GatewayLink({ active, observe, target, sameDevice, subject, offerText, 
         {entries.map(item => <option key={origin(item)} value={origin(item)}>{origin(item)}</option>)}
       </select></label> : null}
     {!sameDevice && !remote ? <div role="status">{readIssue || 'Reading the selected gateway…'}{readIssue ? <button type="button" onClick={() => setRefresh(n => n + 1)}>Read gateway again</button> : null}</div> : null}
-    <label className="mesh-form-field"><span>Original endpoint offer</span><textarea aria-label="Original Mesh endpoint offer" value={offerText}
-      onChange={e => { reset(); onInput(e.target.value) }} rows={3} placeholder="Paste an endpoint offer" /></label>
-    <button className="small-button" type="button" disabled={busy || !offerText || Boolean(choice && !selected)} onClick={() => void createLink()}>{busy ? 'Reading route…' : 'Create access link'}</button>
+    {originalEndpoint ? <details className="mesh-advanced"><summary>Use a different endpoint offer{offerText ? ' · selected' : ''}</summary>{offerField}</details> : offerField}
+    <button className="small-button" type="button" disabled={busy || !originalOffer || Boolean(choice && !selected)} onClick={() => void createLink()}>{busy ? 'Reading route…' : 'Create access link'}</button>
     {error ? <p role="alert" className="settings-inline-error">{error}</p> : null}
     {link ? <div className="mesh-link-result"><span>{link.observation.route.hops} network hop{link.observation.route.hops === 1 ? '' : 's'} · {origin(link.observation.ingress)} · endpoint {link.offer.serverId}</span>
       <TextInput aria-label="Mesh access link" value={link.url} readOnly /><button className="small-button" onClick={() => copy(link.url)}>Copy access link</button>
