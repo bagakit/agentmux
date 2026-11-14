@@ -348,7 +348,7 @@ export class DurableIngressHost implements ConnectionIngressPort {
       // Retained inputs keep the original Binding target; new semantic inputs
       // also require the exact admission owner to confirm this original query.
       const authorized = target.kind === 'session-conversation'
-        ? this.options.inputTarget?.(record, binding) : binding.inputTarget ?? { kind: 'manual-actor' }
+        ? this.newInputTarget(record, binding) : binding.inputTarget ?? { kind: 'manual-actor' }
       if (!isDeepStrictEqual(target, authorized)) fail('INGRESS_AUTHORITY_REVISED')
     }
     if (expected && (expected.hostId !== binding.executionHostId || expected.agentSessionId !== binding.agentSessionId || !equal(expected.author, author))) fail('INGRESS_AUTHORITY_REVISED')
@@ -405,6 +405,11 @@ export class DurableIngressHost implements ConnectionIngressPort {
     const handle = session?.nativeHandle
     return handle?.kind === 'provider' && !session?.nativeSourceObservation
       ? { providerId: handle.providerId, nativeSessionId: handle.sessionId } : undefined
+  }
+  /** A new external message addresses its conversation, not an arbitrary native setup screen.
+   * Existing frozen terminal inputs keep their original authorization path above. */
+  private newInputTarget(record: ConnectionIngressMessage, binding: RoomBinding): import('@agentmux/core').AgentDirectedPromptTarget {
+    return this.options.inputTarget?.(record, binding) ?? binding.inputTarget ?? { kind: 'session-conversation' }
   }
   private readPreparation(ingressId: string): ContextPreparation | undefined {
     const row = this.database.prepare('SELECT context_json FROM connection_ingress_message WHERE ingress_id=?').get(ingressId)
@@ -664,7 +669,7 @@ export class DurableIngressHost implements ConnectionIngressPort {
       const issue = this.options.inputRoute?.(current)?.unavailable
       if (issue) return { record: this.write({ ...current, code: issue.code }), own: false as const }
       const channelProfile = this.options.connections.readChannelActor(current.connectionId, current.actor)
-      const target = this.options.inputTarget?.(current, original.binding) ?? original.binding.inputTarget ?? { kind: 'manual-actor' as const }
+      const target = this.newInputTarget(current, original.binding)
       const frozen = { hostId: original.binding.executionHostId, agentSessionId: original.binding.agentSessionId, expectedRun: expectedRun!, operationId: mintObjectId(), messageId: mintObjectId(), createdAt: Date.now(), author: original.author, channelProfile, ...(channelQuote ? { channelQuote, ...(contextSource ? { contextSource } : {}), ...(contextObservation ? { contextObservation } : {}) } : {}), admissionIntent: { ...target, expectedRun } }
       this.authorize(current, frozen)
       const next = this.write({ ...current, state: 'claimed', input: frozen })

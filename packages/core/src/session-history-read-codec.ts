@@ -223,7 +223,9 @@ export function parseUserMessageHistoryPage(value: unknown, input: AgentSessionH
     }
     const author = rpcRecord(message.author, undefined, 'CONTROL_PROTOCOL_ERROR')
     if (message.inputSubmission !== undefined) {
-      if (input.source !== 'captured' || message.publicContent !== 'confirmed' || !message.inputRef || author.kind !== 'human') return bad()
+      const observedInput = author.kind === 'human' || author.kind === 'external' && message.inputRef !== undefined &&
+        validateAgentPromptInputKey(message.inputRef).kind === 'message'
+      if (input.source !== 'captured' || message.publicContent !== 'confirmed' || !message.inputRef || !observedInput) return bad()
       parseAgentInputSubmissionObservation(message.inputSubmission)
     }
     try { if (author.kind === 'external') ('grantId' in author ? parseAgentExternalMessageAuthor(author) : parseExternalConversationAuthor(author)); else rpcRecord(author, ['kind', 'agentSessionId'], 'CONTROL_PROTOCOL_ERROR') } catch { return bad() }
