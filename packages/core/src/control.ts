@@ -134,6 +134,8 @@ export const AGENTMUX_CONTROL_ERROR_CODES = [
   'BROWSER_PROFILE_IN_USE',
   'BROWSER_PROFILE_USAGE_UNKNOWN',
   'BROWSER_PROFILE_REVISION_CONFLICT',
+  'BROWSER_PROFILE_BOOKMARK_REFUSED',
+  'BROWSER_PROFILE_BOOKMARK_ALREADY_ADMITTED',
   'BROWSER_TASK_REVISION_CONFLICT',
   'BROWSER_TASK_SAVE_UNCONFIRMED',
   'BROWSER_PROFILE_NOT_FOUND',
@@ -1223,6 +1225,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'browser.profile.network.check': 'long',
   'browser.profile.network.probe': 'long',
   'browser.profile.network.history': 'short',
+  'browser.profile.bookmark.ls': 'short', 'browser.profile.bookmark.edit': 'long', 'browser.profile.bookmark.import': 'long', 'browser.profile.bookmark.export': 'long', 'browser.profile.bookmark.open': 'long',
   'browser.profile.extension.ls': 'short', 'browser.profile.extension.prepare': 'long', 'browser.profile.extension.apply': 'long', 'browser.profile.extension.remove': 'long', 'browser.profile.extension.load': 'long',
   'browser.task.export': 'short', 'browser.task.import': 'long', 'browser.task.import-inspect': 'short',
   'browser.task.source': 'short',
@@ -1319,4 +1322,5 @@ export * from './app-capture.js'
 
 export * from './browser-proxy-library.js'
 
+export * from './browser-profile-bookmarks.js'
 export * from './browser-profile-extensions.js'

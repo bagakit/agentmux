@@ -70,6 +70,8 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'browser.profile.network.check': 'browser.profile.network.check',
   'browser.profile.network.probe': 'browser.profile.network.probe',
   'browser.profile.network.history': 'browser.profile.network.history',
+  'browser.profile.bookmark.ls': 'browser.profile.bookmark.ls', 'browser.profile.bookmark.edit': 'browser.profile.bookmark.edit',
+  'browser.profile.bookmark.import': 'browser.profile.bookmark.import', 'browser.profile.bookmark.export': 'browser.profile.bookmark.export', 'browser.profile.bookmark.open': 'browser.profile.bookmark.open',
   'browser.profile.extension.ls': 'browser.profile.extension.ls', 'browser.profile.extension.prepare': 'browser.profile.extension.prepare',
   'browser.profile.extension.apply': 'browser.profile.extension.apply', 'browser.profile.extension.remove': 'browser.profile.extension.remove', 'browser.profile.extension.load': 'browser.profile.extension.load',
   // Stopping an active external-tab operation also ends only its original sharing
