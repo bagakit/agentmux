@@ -1,3 +1,4 @@
+import type { GoalRelationSave } from '../src/renderer/src/components/GoalAgentPicker'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
@@ -28,7 +29,7 @@ beforeEach(() => {
 it('the real Team and picker retain each Source-qualified relation without borrowing a local namesake or rendering an object', async () => {
   const original = goal(), input = useAppStore.getState().agentComposerDrafts
   const lookup = vi.spyOn(api.sessions, 'historySource')
-  const save = vi.fn(async () => false)
+  const save = vi.fn<GoalRelationSave>(async () => false)
   await dom.render(<GoalExecution demand={original} onUpdate={save} />)
   expect(dom.container.textContent).not.toContain('[object Object]')
   expect(dom.container.textContent).toContain('Runtime runtime-D'); expect(dom.container.textContent).toContain('Runtime runtime-E')
@@ -47,7 +48,10 @@ it('the real Team and picker retain each Source-qualified relation without borro
   await act(async () => other.click())
   const submit = document.querySelector<HTMLButtonElement>('.goal-agent-picker button[type="submit"]')!
   await act(async () => submit.click())
-  expect(save).toHaveBeenCalledWith({ supervisorSessionId: ref('runtime-E') }, original.updatedAt)
+  expect(save).toHaveBeenCalledTimes(1)
+  expect(save.mock.calls[0]?.[0]).toEqual({ supervisorSessionId: ref('runtime-E') })
+  expect(save.mock.calls[0]?.[1]).toBe(original.updatedAt)
+  expect(save.mock.calls[0]?.[2]).toBeUndefined()
   expect(document.body.textContent).toContain('Relationships are not saved')
   expect(Object.values(useAppStore.getState().goalAgentSelectionDrafts)).toEqual([{goalId:original.id,role:'supervisor',selected:[ref('runtime-E')],expectedUpdatedAt:original.updatedAt}])
   expect(useAppStore.getState().agentComposerDrafts).toBe(input)

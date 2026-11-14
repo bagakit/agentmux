@@ -11,6 +11,8 @@ import {api} from '../src/renderer/src/lib/api'
 import type {DemandProjection} from '../src/renderer/src/lib/global-demand-board'
 import {composerConfig,composerDOM} from './helpers/composer-dom-fixture'
 import {providerCatalogReader,historySourcesReader} from './helpers/startup-observation-api-fixture'
+import {readGoalAgentSelectionDraft} from '../src/renderer/src/lib/goal-agent-selection'
+import type {GoalRelationSave} from '../src/renderer/src/components/GoalAgentPicker'
 const dom=composerDOM(),key='agentmux-workbench-v1'
 const reference:DemandSpaceMemberReference={kind:'space-member',source:{runtimeId:'B',spaceId:'S',regionId:'R',admission:{kind:'creation',operationId:'C'}},execution:{runtimeId:'D',agentSessionId:'SID'}}
 const goal:DemandProjection={id:'draft-goal',title:'Original Goal',description:'',status:'todo',priority:'normal',projectId:null,projectName:null,sessionIds:[reference],assigneeSessionIds:[reference],supervisorSessionId:null,createdAt:1,updatedAt:1,source:'default-topic',sessions:[],workspacePath:null}
@@ -76,7 +78,7 @@ it('a late relationship ACK cannot clear a newer opaque selection in the origina
  const dispose=await initialize()
  try {
  let resolve!:(saved:boolean)=>void
- const onSave=vi.fn(()=>new Promise<boolean>(done=>{resolve=done}))
+ const onSave=vi.fn<GoalRelationSave>(()=>new Promise<boolean>(done=>{resolve=done}))
  await dom.render(<GoalAgentPicker demand={goal} role="assignees" onSave={onSave} onClose={()=>{}}/>)
  await act(async()=>document.querySelector<HTMLButtonElement>('.goal-agent-picker button[type="submit"]')!.click())
  expect(onSave).toHaveBeenCalledTimes(1)
@@ -87,6 +89,35 @@ it('a late relationship ACK cannot clear a newer opaque selection in the origina
  const checkpoint=await retainGoalAgentSelectionDraft({goalId:'another-goal',role:'related',selected:['retained-other'],expectedUpdatedAt:1})
  expect(checkpoint.clientStateWritten).toBe(true)
  expect(JSON.parse(localStorage.getItem(key)!).state.goalAgentSelectionDrafts[draftKey]).toEqual(opaque)
+ expect(useAppStore.getState().executeControl).not.toHaveBeenCalled()
+ } finally {dispose()}
+})
+
+it('the original private selection leaf restores exact current access and retains a newer saved prefix across a late Save ACK',async()=>{
+ const dispose=await initialize()
+ try {
+ const draftKey=JSON.stringify([goal.id,'supervisor'])
+ const original={goalId:goal.id,role:'supervisor' as const,selected:[reference],expectedUpdatedAt:1,
+  relationAccess:[{reference,access:{source:{hostId:'configured-B'}}}]}
+ await retainGoalAgentSelectionDraft(original)
+ let resolve!:(saved:boolean)=>void
+ const onSave=vi.fn<GoalRelationSave>(()=>new Promise<boolean>(done=>{resolve=done}))
+ await dom.render(<GoalAgentPicker demand={goal} role="supervisor" onSave={onSave} onClose={()=>{}}/>)
+ const submit=document.querySelector<HTMLButtonElement>('.goal-agent-picker button[type="submit"]')
+ expect(submit).toBeTruthy()
+ await act(async()=>submit!.click())
+ expect(onSave.mock.calls[0]?.[2]).toEqual(original.relationAccess)
+ const pin=(runtimeId:string)=>({runtimeId,publicKey:'original-key-'+runtimeId,fingerprint:'original-fingerprint-'+runtimeId})
+ const adoptedRoute={source:pin('A'),hops:[{edgeId:'B-in-A',target:pin('B')}]}
+ const newer={...original,relationAccess:[{reference,access:{source:{hostId:'configured-A',via:{routeId:'original-prefix',adoptedRoute}}}}]}
+ await act(async()=>useAppStore.setState(state=>({goalAgentSelectionDrafts:{...state.goalAgentSelectionDrafts,[draftKey]:newer}})))
+ await act(async()=>resolve(true))
+ const checkpoint=await retainGoalAgentSelectionDraft({goalId:'unrelated',role:'related',selected:['original-other'],expectedUpdatedAt:1})
+ expect(checkpoint.clientStateWritten).toBe(true)
+ expect(JSON.parse(localStorage.getItem(key)!).state.goalAgentSelectionDrafts[draftKey]).toEqual(newer)
+ expect(readGoalAgentSelectionDraft(newer,goal.id,'supervisor')).toEqual(newer)
+ await useAppStore.persist.rehydrate()
+ expect(useAppStore.getState().goalAgentSelectionDrafts[draftKey]).toEqual(newer)
  expect(useAppStore.getState().executeControl).not.toHaveBeenCalled()
  } finally {dispose()}
 })
