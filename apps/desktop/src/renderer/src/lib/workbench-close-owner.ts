@@ -3,7 +3,7 @@ import { spaceCloseDigest, type SpaceClosePrepare, type SpaceCloseProjection, ty
 import type { AppState } from '../store'
 import { documentKey, removeWorkbenchRegion, workbenchSurfaces } from './workbench-tabs'
 import { planWorkbenchViewClose, workbenchRegionCloseTarget, reconcileWorkbenchViewClose, workbenchViewCloseStillApproved,
-  closingWorkbenchReservations, type WorkbenchViewClosePlan, type WorkbenchViewCloseSurfaceOwner } from './workbench-view-close'
+  browserAgentBinding, closingWorkbenchReservations, type WorkbenchViewClosePlan, type WorkbenchViewCloseSurfaceOwner } from './workbench-view-close'
 import { documentLifetime, fileSaveTails } from './file-document-bookkeeping'
 import { hasFileDocumentConsumer } from './file-document-consumers'
 import { hasNoteComposition } from './note-live-merge'
@@ -46,7 +46,7 @@ function surfaceWitness(state: State, plan: WorkbenchViewClosePlan, owner: Workb
   const hasOwnStop = plan.surfaces.find(s => s.owner.regionId === owner.regionId)?.resourceKeys.some(k => k.startsWith('session:'))
   return spaceCloseDigest({ owner: owner.kind === 'agent' || owner.kind === 'terminal' ? { ...owner, runId: hasOwnStop ? owner.runId : null } : owner,
     binding: binding(state, plan, owner).binding,
-    source: !surface ? null : surface.kind === 'browser' ? { browserId: surface.browserId, navigationId: surface.navigationId, agent: surface.agent ?? null }
+    source: !surface ? null : surface.kind === 'browser' ? { browserId: surface.browserId, navigationId: surface.navigationId, agent: browserAgentBinding(surface) }
       : surface.kind === 'file' ? fileWitness(state, surface.workspaceId, surface.path, cache) : null })
 }
 function binding(state: State, plan: WorkbenchViewClosePlan, owner: WorkbenchViewCloseSurfaceOwner): Pick<SpaceCloseProjection['surfaces'][number], 'binding' | 'bindingAvailability'> {
@@ -56,8 +56,11 @@ function binding(state: State, plan: WorkbenchViewClosePlan, owner: WorkbenchVie
       : { binding: null, bindingAvailability: 'unconfirmed' }
   }
   const surface = state.tabs[plan.tabId]?.regions[owner.regionId]
-  if (surface?.kind === 'browser' && surface.agent) {
-    const original = { hostId: surface.agent.hostId, agentSessionId: surface.agent.agentSessionId }
+  if (surface?.kind === 'browser') {
+    const source = browserAgentBinding(surface)
+    if (source === undefined) return { binding: null, bindingAvailability: 'unconfirmed' }
+    if (source === null) return { binding: null, bindingAvailability: null }
+    const original = { hostId: source.hostId, agentSessionId: source.agentSessionId }
     return { binding: original, bindingAvailability: state.sessions.some(s => s.control.kind === 'agent' && s.control.hostId === original.hostId && s.control.agentSessionId === original.agentSessionId) ? 'known' : 'unconfirmed' }
   }
   return { binding: null, bindingAvailability: null }
@@ -65,21 +68,33 @@ function binding(state: State, plan: WorkbenchViewClosePlan, owner: WorkbenchVie
 /** Same GUI planner, with frozen machine witnesses. Bodies never leave the original document. */
 export function captureWorkbenchClose(state: State, input: SpaceClosePrepare): SpaceCloseProjection {
   const witnesses = new Map<string, string>(), plan = originalPlan(state, input), drafts: SpaceCloseProjection['drafts'] = []
-  if (plan.closesView) for (const { owner } of plan.surfaces) {
-    if (owner.kind !== 'file') continue
-    const key = documentKey(owner.workspaceId, owner.path), document = state.documents[key]
-    if (!document || !state.dirtyDocuments[key]) continue
-    // Other occurrences/independent shared consumers retain the original document.
-    const outside = Object.values(state.tabs).some(tab => workbenchSurfaces(tab).some(s => s.kind === 'file' && documentKey(s.workspaceId, s.path) === key &&
-      (tab.id !== plan.tabId || !plan.surfaces.some(p => p.owner.regionId === s.regionId))))
-    const header = readNoteMarkdownHeader(document.content)
-    if (outside || hasFileDocumentConsumer(key) || document.noteEditing?.share || document.noteEditing?.shareUndo || header.status === 'valid' && header.kind === 'shared-block') continue
-    const found = drafts.find(d => d.document.workspaceId === owner.workspaceId && d.document.path === owner.path)
-    if (found) { found.regionIds.push(owner.regionId); continue }
-    const workspace = state.config?.workspaces.find(w => w.id === owner.workspaceId)
-    if (!workspace) throw stale()
-    drafts.push({ document: { hostId: workspace.hostId, workspaceId: workspace.id, path: owner.path, noteId: header.status === 'valid' ? header.noteId : null },
-      witness: fileWitness(state, owner.workspaceId, owner.path, witnesses), regionIds: [owner.regionId] })
+  if (plan.closesView) {
+    const closingRegions = new Set(plan.surfaces.map(s => s.owner.regionId))
+    const documents = new Map<string, { owner: Extract<WorkbenchViewCloseSurfaceOwner, { kind: 'file' }>; regionIds: string[] }>()
+    for (const { owner } of plan.surfaces) if (owner.kind === 'file') {
+      const key = documentKey(owner.workspaceId, owner.path), found = documents.get(key)
+      if (found) found.regionIds.push(owner.regionId)
+      else documents.set(key, { owner, regionIds: [owner.regionId] })
+    }
+    // One relevant topology pass, independent of how many selected Views share
+    // one document. This is a snapshot-local index, never a historical cache.
+    const outside = new Set<string>()
+    if (documents.size) for (const tab of Object.values(state.tabs)) for (const surface of workbenchSurfaces(tab)) {
+      if (surface.kind !== 'file' || tab.id === plan.tabId && closingRegions.has(surface.regionId)) continue
+      const key = documentKey(surface.workspaceId, surface.path)
+      if (documents.has(key)) outside.add(key)
+    }
+    const workspaces = new Map(state.config?.workspaces.map(w => [w.id, w]) ?? [])
+    for (const [key, { owner, regionIds }] of documents) {
+      const document = state.documents[key]
+      if (!document || !state.dirtyDocuments[key] || outside.has(key) || hasFileDocumentConsumer(key) || document.noteEditing?.share || document.noteEditing?.shareUndo) continue
+      const header = readNoteMarkdownHeader(document.content)
+      if (header.status === 'valid' && header.kind === 'shared-block') continue
+      const workspace = workspaces.get(owner.workspaceId)
+      if (!workspace) throw stale()
+      drafts.push({ document: { hostId: workspace.hostId, workspaceId: workspace.id, path: owner.path, noteId: header.status === 'valid' ? header.noteId : null },
+        witness: fileWitness(state, owner.workspaceId, owner.path, witnesses), regionIds })
+    }
   }
   return { ...plan, surfaces: plan.surfaces.map(s => ({ owner: { ...s.owner }, resourceKeys: [...s.resourceKeys], witness: surfaceWitness(state, plan, s.owner, witnesses), ...binding(state, plan, s.owner),
     blocker: s.owner.kind === 'file' && draftBusy(state, s.owner.workspaceId, s.owner.path) ? 'draft-busy' : (s.owner.kind === 'agent' || s.owner.kind === 'terminal') && s.owner.phase === 'attached' && s.owner.runId === null && plan.closesView && (s.owner.kind === 'terminal' || !input.keepAgentSessions) ? 'session-unconfirmed' : null })),

@@ -207,11 +207,15 @@ export function parseSpaceCloseReceipt(value: unknown): SpaceCloseReceipt {
   const spatial = rpcRecord(p.spatialContribution, ['save'])
   const clientProjection = parseSpaceCloseProjectionResult(p.clientProjection), spatialContribution = { save: save(spatial.save) }
   const ids = plan.projection.surfaces.map(s => s.owner.regionId)
-  if ([...clientProjection.removedRegions, ...clientProjection.retainedRegions].some(id => !ids.includes(id))) invalid()
+  const covered = [...clientProjection.removedRegions, ...clientProjection.retainedRegions]
+  if (covered.some(id => !ids.includes(id)) || plan.projection.closesView && (covered.length !== ids.length || ids.some(id => !covered.includes(id))) ||
+    !plan.projection.closesView && (clientProjection.removedRegions.length > 0 || (clientProjection.applied ? clientProjection.retainedRegions.length !== 0 : clientProjection.retainedRegions.length !== ids.length))) invalid()
+  if (p.phase !== 'settled' && (clientProjection.applied || clientProjection.removedRegions.length || clientProjection.save || spatialContribution.save)) invalid()
   if (p.phase === 'prepared' ? decisions.length || resources.some(r => r.outcome !== 'pending' || r.receipt) || clientProjection.applied || clientProjection.save || spatialContribution.save
     : spaceCloseDigest(decisions.map(spaceCloseDigest).sort()) !== spaceCloseDigest(spaceCloseDecisions(plan).map(spaceCloseDigest).sort())) invalid()
-  if (p.outcome === 'applied' && (p.phase !== 'settled' || clientProjection.retainedRegions.length || resources.some(r => r.outcome !== 'acknowledged') ||
-    ![clientProjection.save, spatialContribution.save].every(s => s?.diskDurability === 'confirmed' && s.clientStateWritten && s.storageFlushRequested))) invalid()
+  if ([clientProjection.save, spatialContribution.save].some(s => s && s.layoutApplied !== clientProjection.applied)) invalid()
+  if (p.outcome === 'applied' && (p.phase !== 'settled' || !clientProjection.applied || clientProjection.retainedRegions.length || resources.some(r => r.outcome !== 'acknowledged') ||
+    ![clientProjection.save, spatialContribution.save].every(s => s?.diskDurability === 'confirmed' && s.layoutApplied && s.clientStateWritten && s.storageFlushRequested))) invalid()
   return { operationId: text(p.operationId), request, plan, planDigest: text(p.planDigest), preparedBy, approvedBy, decisions,
     phase: p.phase as SpaceCloseReceipt['phase'], outcome: p.outcome as SpaceCloseReceipt['outcome'], resources, clientProjection,
     spatialContribution, preparedAt: p.preparedAt as number, updatedAt: p.updatedAt as number, diskDurability: p.diskDurability as SpaceCloseReceipt['diskDurability'], ...(p.issue === undefined ? {} : { issue: p.issue as string }) }

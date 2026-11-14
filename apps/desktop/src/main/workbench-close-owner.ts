@@ -30,6 +30,9 @@ export class WorkbenchCloseOwner implements SpaceClosePort {
   private readonly acknowledgedImages = new Map<string, string>()
   private readonly writes = new Map<string, Promise<void>>()
   private readonly observationVersions = new Map<string, number>()
+  /** Observed existence is separate from any writer/directory-sync acknowledgement. */
+  private readonly knownMembers = new Set<string>()
+  private namespaceObserved = false
   /** Only admitted work/reads retain a shared image, never the historical namespace. */
   private readonly live = new Map<string, { record: SpaceCloseReceipt; references: number; applying: boolean }>()
   private readonly directory: string
@@ -43,7 +46,7 @@ export class WorkbenchCloseOwner implements SpaceClosePort {
     return { entry, release: () => { if (--entry!.references === 0) this.live.delete(record.operationId) } }
   }
   private async marker(path: string, value: unknown): Promise<boolean> {
-    await mkdir(this.directory, { recursive: true, mode: 0o700 }); await syncDirectory(dirname(this.directory))
+    await mkdir(this.directory, { recursive: true, mode: 0o700 }); this.namespaceObserved = true; await syncDirectory(dirname(this.directory))
     const handle = await open(path, 'wx', 0o600).catch(error => { if ((error as NodeJS.ErrnoException).code === 'EEXIST') return null; throw error })
     if (!handle) return false
     try { await handle.writeFile(JSON.stringify(value) + '\n'); await handle.sync() } finally { await handle.close() }
@@ -61,9 +64,13 @@ export class WorkbenchCloseOwner implements SpaceClosePort {
     try { image = await readFile(this.path(id), 'utf8') }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      if (this.acknowledgedImages.has(id) || await this.exists(this.path(id) + '.prepare') || await this.exists(this.path(id) + '.apply')) throw unavailable('The admitted close record is missing.')
+      if (this.knownMembers.has(hash(id)) || this.acknowledgedImages.has(id) || await this.exists(this.path(id) + '.prepare') || await this.exists(this.path(id) + '.apply')) {
+        this.knownMembers.add(hash(id)); this.namespaceObserved = true
+        throw unavailable('The admitted close record is missing.')
+      }
       return null
     }
+    this.knownMembers.add(hash(id)); this.namespaceObserved = true
     let record: SpaceCloseReceipt
     try { record = parseSpaceCloseReceipt(JSON.parse(image)) } catch (error) { throw unavailable('Reading original close ' + id + ' is unconfirmed: ' + String(error)) }
     if (record.operationId !== id) throw unavailable('The original close record answers another operation.')
@@ -134,6 +141,7 @@ export class WorkbenchCloseOwner implements SpaceClosePort {
       if (!original) throw unavailable('The original close preparation is still unconfirmed.')
       this.samePrepare(original, input, context); return original
     }
+    this.knownMembers.add(hash(input.operationId))
     await this.save(record, true)
     return structuredClone(record)
   }
@@ -197,10 +205,12 @@ export class WorkbenchCloseOwner implements SpaceClosePort {
         while (this.writes.has(record.operationId)) await this.writes.get(record.operationId)
         if (record.diskDurability !== 'confirmed') return structuredClone(record)
         const committed = parseSpaceCloseCommitResult(await this.ports.commit(record))
-        record.clientProjection = committed.clientProjection; record.spatialContribution = committed.spatialContribution
-        record.phase = 'settled'
-        record.outcome = record.clientProjection.retainedRegions.length || record.resources.some(r => r.outcome !== 'acknowledged') ? 'partial'
-          : record.clientProjection.save?.diskDurability === 'confirmed' && record.spatialContribution.save?.diskDurability === 'confirmed' ? 'applied' : 'unknown'
+        const outcome = committed.clientProjection.retainedRegions.length || record.resources.some(r => r.outcome !== 'acknowledged') ? 'partial'
+          : committed.clientProjection.applied && committed.clientProjection.save?.diskDurability === 'confirmed' && committed.spatialContribution.save?.diskDurability === 'confirmed' ? 'applied' : 'unknown'
+        // A malformed/partial source envelope cannot erase already-held ACKs or
+        // certify missing projection rows as a completed close.
+        const confirmed = parseSpaceCloseReceipt({ ...record, ...committed, phase: 'settled', outcome })
+        Object.assign(record, confirmed)
       } catch (error) {
         record.phase = 'settled'; record.outcome = 'unknown'; record.issue = String(error)
       } finally { await this.ports.release(record).catch(error => { record.issue = [record.issue, 'Releasing original close reservation is unconfirmed: ' + String(error)].filter(Boolean).join('\n') }) }
@@ -219,6 +229,7 @@ export class WorkbenchCloseOwner implements SpaceClosePort {
     let namespaceMissing = false
     try {
       const directory = await opendir(this.directory)
+      this.namespaceObserved = true
       for await (const entry of directory) {
         const match = /^([a-f0-9]{64})\.json(?:\.(?:prepare|apply))?$/u.exec(entry.name)
         if (match) choose(match[1]!)
@@ -227,7 +238,8 @@ export class WorkbenchCloseOwner implements SpaceClosePort {
     // Exceptional live ACK custody remains discoverable even when its disk member vanished.
     const heldRecords = new Map([...this.observed, ...[...this.live].map(([id, entry]) => [id, entry.record] as const)])
     for (const id of heldRecords.keys()) choose(hash(id))
-    if (namespaceMissing && !heldRecords.size && this.acknowledgedImages.size) throw unavailable('The original close namespace disappeared after this owner confirmed operations.')
+    for (const member of this.knownMembers) choose(member)
+    if (namespaceMissing && !heldRecords.size && this.namespaceObserved) throw unavailable('The original close namespace disappeared after this owner observed it.')
     const more = selected.length > limit, members = selected.slice(0, limit), items: SpaceCloseSummary[] = [], issues: SpaceCloseList['issues'] = []
     const belongs = (actor: SpaceCloseReceipt['preparedBy']) => context.actor.kind !== 'agent' || same(actor, context.actor)
     for (const member of members) {
@@ -235,6 +247,7 @@ export class WorkbenchCloseOwner implements SpaceClosePort {
       try {
         const held = [...heldRecords.values()].find(r => hash(r.operationId) === member)
         const raw = held ?? parseSpaceCloseReceipt(JSON.parse(await readFile(join(this.directory, member + '.json'), 'utf8')))
+        this.knownMembers.add(member)
         if (hash(raw.operationId) !== member) throw unavailable('The original close member answers another operation.')
         if (!belongs(raw.preparedBy)) continue
         const record = held ?? await this.read(raw.operationId)
@@ -256,6 +269,7 @@ export class WorkbenchCloseOwner implements SpaceClosePort {
         issues.push({ code: 'member-unconfirmed', member: context.actor.kind === 'agent' ? null : member })
       }
     }
+    if (namespaceMissing && this.namespaceObserved && !issues.length) issues.push({ code: 'member-unconfirmed', member: null })
     return { ownerId: this.ownerId, observedAt: Date.now(), coverage: 'live-page', availability: issues.length ? 'partial' : 'complete', items,
       nextCursor: more ? { ownerId: this.ownerId, actorScope, afterMember: members.at(-1)! } : null, issues }
   }

@@ -8082,7 +8082,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const request = { operationId: record.operationId, expectedPlanDigest: record.planDigest, decisions: spaceCloseDecisions(record.plan) }
     const result = parseSpaceCloseResult('space.close.apply', await api.workbenchClose.call('space.close.apply', request), request).operation!
     if (result.outcome !== 'applied' || result.diskDurability !== 'confirmed') {
-      get().reportError(new Error(`Original close ${result.operationId} is ${result.outcome}; retained Regions: ${result.clientProjection.retainedRegions.join(', ') || 'see original projection'}. Inspect with amux space close inspect --operation-id ${result.operationId}. ${result.issue ?? ''}`), { kind: 'indeterminate' })
+      const issues = [result.issue, ...result.resources.flatMap(resource => [resource.issue, resource.inspectionIssue, resource.receipt && 'issue' in resource.receipt ? resource.receipt.issue : undefined])].filter(Boolean).join('\n')
+      get().reportError(new Error(`Original close is ${result.outcome}; retained Regions: ${result.clientProjection.retainedRegions.join(', ') || 'see original projection'}. Inspect with amux space close inspect --operation-id <ID>. Pass the exact operation ID as one argument; its JSON data value is ${JSON.stringify(result.operationId)}. ${issues}`), { kind: 'indeterminate' })
       return false
     }
     return true
@@ -8149,7 +8150,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       collectionChanged = committed.surveyCollectedZones !== current.surveyCollectedZones
       recordClosedWorkbenchEntities(current.tabs, committed.tabs)
       const closesView = record.plan.projection.closesView
-      projection = { ...projection, applied: topology !== current, removedRegions: closesView ? record.plan.projection.surfaces.filter(s => !committed.tabs[target.tabId]?.regions[s.owner.regionId]).map(s => s.owner.regionId) : [],
+      const removedOriginal = closesView && record.plan.projection.surfaces.some(s => current.tabs[target.tabId]?.regions[s.owner.regionId] && !committed.tabs[target.tabId]?.regions[s.owner.regionId])
+      const unlinkedOriginal = current.layouts[target.displayWorkspaceId]?.groups.some(g => g.id === target.groupId && g.tabOrder.includes(target.tabId)) &&
+        !committed.layouts[target.displayWorkspaceId]?.groups.some(g => g.id === target.groupId && g.tabOrder.includes(target.tabId))
+      projection = { ...projection, applied: Boolean(removedOriginal || unlinkedOriginal), removedRegions: closesView ? record.plan.projection.surfaces.filter(s => !committed.tabs[target.tabId]?.regions[s.owner.regionId]).map(s => s.owner.regionId) : [],
         retainedRegions: closesView ? record.plan.projection.surfaces.filter(s => committed.tabs[target.tabId]?.regions[s.owner.regionId]).map(s => s.owner.regionId) : [] }
       if (!removedTab) return committed
       return { ...committed, recentMoteAgents: Object.fromEntries(Object.entries(current.recentMoteAgents).filter(([, agent]) => agent.tabId !== removedTab!.id)) }
