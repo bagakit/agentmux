@@ -278,3 +278,10 @@ drafts remain available. A readable completion marker is confirmed by its origin
 owner's durability check. Once complete, the original marker proves that historical
 operation; later membership or authored Main edits do not restart it or overwrite
 those edits. Saved personality files do not prove that an existing Session read them.
+
+A restored storage cut has an original input epoch. Read agent input epoch --host HOST
+before freezing a new prompt-bearing creation; Session observations carry the epoch for
+new input on that Session. Keep it with the original operation and binding across retries.
+A null namespace epoch means this original owner has never restored a cut; omit the
+optional inputEpoch field for this result. Never turn an unconfirmed read into null. Missing or old
+epochs after recovery retain unknown delivery; inspect the original key instead of resending.

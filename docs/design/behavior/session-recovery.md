@@ -232,6 +232,10 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 
 ### 长期 Host 与客户端生命周期
 
+尚未收口的原创建与恢复操作必须跨准确 SDK／Host owner 的结束保留完整来源及显式续办入口。派发前冻结原请求、Runtime 与身份绑定；读取正向 Run witness 时核对完整原主体，不仅凭 key／cwd 接纳另一执行来源。缺 witness 保持未知，显式结清只通过原 Runtime 对准确请求的观察或退休 fence，不冒称历史未执行、不自动换 SID 或重发首句。历史缺失来源不由当前配置补造。
+
+原 Client 实例已完成释放时，原 owner 交出其准确未决操作的执行拥有权，保留 reservation、冻结请求、原输入和未知效果。继任 owner 仍沿原 Runtime／请求边界核对；同一宿主 PID 仍在不代表原 SDK 实例仍执行，数字 PID 或时间过期都不能单独决定原 owner 的生死或授予重放资格。准确 owner 交出不能被解释为原 Start 未发生，也不停止原健康 Run。
+
 关闭 Desktop 或手机客户端只释放该客户端的连接、reader 和实际呈现，不停止长期 Host、健康 Agent 或 ctxmux Run。Host 服务的启动、存续和恢复由 Core 之外的执行环境服务管理者持有；原持久 Store、空间、配置、Hook 与 ctxmux namespace 不能因展示客户端离开而变化。手机继续使用的范围与 Desktop 专属能力沿[手机版 Relay 连接](public-control.md#手机版-relay-连接)，本节只持有服务恢复与原身份保护。
 
 Host 进程退出后，服务管理者沿原入口与准确 namespace 重新激活，原 Core 重新核对持久 Runtime 身份、设备身份、Session、原生句柄、空间图及原操作。仍健康的 Run 自动接回；已结束或丢失 Run 的同 Session 语义恢复沿[冷启动按需恢复](#冷启动按需恢复p0-末位)，不以另建空会话代替。断线或超时保留原 operation、输入和回执未知事实，不自动重放副作用；服务管理者不解释 Provider、输入资格或 Run 终态。

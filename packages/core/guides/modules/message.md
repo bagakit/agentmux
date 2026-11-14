@@ -9,6 +9,19 @@ when: "Browse original A2A messages, inspect delivery, manage pending input or r
 <!-- amux:content -->
 [A2A communication contract](../shared/messaging/contract.md "amux:include")
 
+## Preserve the original input cut
+
+For each new `agent send`, freeze the target Session's `inputEpoch` as
+`--input-epoch` (`recipientInputEpoch` in JSON). A broadcast JSON request freezes
+`recipientInputEpochs` by exact recipient SID. New `message notify` actions freeze
+`--input-epoch` (`inputEpoch` in JSON) before their first possible input effect.
+Retain the same epoch, IDs and content after an unknown reply; never read a new epoch
+to refresh an old request. A never-restored target has no epoch. After storage
+recovery, an absent or older message epoch keeps its original Inbox body and identity
+without automatically notifying the Agent. Read the original MID or receipt; compose
+an independent new action only when authorized. Native submission and business
+acceptance remain separate facts.
+
 ## Read original messages and receipts
 
 Core owns authenticated messages, ordered delivery, inbox generations and original
