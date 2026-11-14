@@ -67,7 +67,7 @@ export function GoalsCommonActions({ contextCompact = false, onReturnToCommon }:
       if (mounted.current && useAppStore.getState().mainSurface === 'board') setLaunchError(errorText(cause))
     })
   }
-  const openSettings = () => navigation?.open('prompts', undefined, 'goals-common-actions')
+  const openSettings = () => navigation?.open('goals', undefined, 'goals-common-actions')
   return <section className={`goals-entry goals-common${contextCompact ? ' goals-common--compact' : ''}${compactFeedback ? ' goals-common--attention' : ''}`} aria-label="常用操作" aria-busy={saving || pending} data-common-context={contextCompact ? 'compact' : 'full'} onFocusCapture={event => { if (!contextCompact) returnFocus.current = event.target as HTMLElement }}>
     <div className="goals-common__column">
       <header className="goals-common__heading"><h2>常用操作</h2>{contextCompact ? <button type="button" className="goals-common__icon" aria-label="回到常用操作" title="回到常用操作" onClick={() => { revealRequested.current = true; onReturnToCommon?.() }}><Up size={13} /></button> : <div>

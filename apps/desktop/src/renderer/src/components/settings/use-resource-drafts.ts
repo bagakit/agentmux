@@ -43,11 +43,29 @@ export function useResourceDrafts<T extends object>(saved: Records<T>) {
     ...draft,
     dirty: !equal(draft.value, draft.expected),
     /** After a conflict: drop every record draft and take the saved collection. */
-    useSaved: () => setDraft((current) => current.saving ? current : { ...current, value: saved, expected: saved }),
+    useSaved: (ids?: readonly string[]) => setDraft((current) => {
+      if (current.saving) return current
+      if (!ids) return { ...current, value: saved, expected: saved }
+      const value = { ...current.value }, expected = { ...current.expected }
+      for (const id of ids) {
+        if (Object.hasOwn(saved, id)) value[id] = expected[id] = saved[id]!
+        else { delete value[id]; delete expected[id] }
+      }
+      return { ...current, value, expected }
+    }),
     /** After a conflict: keep the record drafts and save them over the saved collection on the next Save. */
-    keepMine: () => setDraft((current) => current.saving ? current : { ...current, expected: saved }),
+    keepMine: (ids?: readonly string[]) => setDraft((current) => {
+      if (current.saving) return current
+      if (!ids) return { ...current, expected: saved }
+      const expected = { ...current.expected }
+      for (const id of ids) {
+        if (Object.hasOwn(saved, id)) expected[id] = saved[id]!
+        else delete expected[id]
+      }
+      return { ...current, expected }
+    }),
     setValue: (update: (current: Records<T>) => Records<T>) => setDraft((current) => ({ ...current, value: update(current.value) })),
-    beginSave: (captured: Records<T> = draft.value) => {
+    beginSave: (captured: Records<T> = draft.value, ids?: readonly string[]) => {
       const expected = draft.expected
       setDraft((current) => ({ ...current, saving: true }))
       return {
@@ -55,7 +73,12 @@ export function useResourceDrafts<T extends object>(saved: Records<T>) {
         finish: (committed: Records<T> | undefined) => setDraft((current) => {
           if (!committed) return { ...current, saving: false }
           const value = { ...current.value }
-          for (const id of new Set([...Object.keys(captured), ...Object.keys(committed)])) {
+          const acceptedExpected = ids ? { ...current.expected } : committed
+          for (const id of ids ?? new Set([...Object.keys(captured), ...Object.keys(committed)])) {
+            if (ids) {
+              if (Object.hasOwn(committed, id)) acceptedExpected[id] = committed[id]!
+              else delete acceptedExpected[id]
+            }
             const local = own(value, id), submitted = own(captured, id), accepted = own(committed, id)
             if (equal(local, submitted)) {
               if (accepted) value[id] = accepted
@@ -66,7 +89,7 @@ export function useResourceDrafts<T extends object>(saved: Records<T>) {
               }
             }
           }
-          return { value, expected: committed, saving: false }
+          return { value, expected: acceptedExpected, saving: false }
         })
       }
     }

@@ -8,6 +8,7 @@ import { wasWindowOverlayDismissed } from './WindowOverlayHost'
 import { useAppStore } from '../store'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { desktopElementVisible } from '../lib/desktop-presentation'
+import { GoalsPromptDraftProvider } from './settings/GoalsPromptDrafts'
 import { SettingsOverviewPane } from './settings/SettingsOverviewPane'
 import { SettingsSearchResults } from './settings/SettingsSearchResults'
 import { SettingsSidebarNavigation } from './settings/SettingsSidebarNavigation'
@@ -189,6 +190,16 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
   const groupTitle = searching && showResults || !currentGroup ? 'Settings' : currentGroup.title
   const overviewGroups = settingsNavGroups('')
 
+  const renderPane = (pane: SettingsSectionId) => {
+    const Pane = settingsModules.find((module) => module.id === pane)!.Pane
+    const paneVisible = visible && active === pane && !(searching && showResults)
+    return <div key={pane} className="settings-content__scroll" data-settings-pane={pane} hidden={!paneVisible} inert={!paneVisible}>
+      {paneVisible && searching ? <div className="settings-search-return"><button type="button" className="small-button" onClick={() => { setShowResults(true); setDestination(null); setTargetIssue('') }}>Search results</button><span>“{query}”</span>{targetIssue ? <span role="status">{targetIssue}</span> : null}</div>
+        : paneVisible && targetIssue ? <p className="settings-target-issue" role="status" data-settings-target-issue>{targetIssue}</p> : null}
+      <Pane config={config} onClose={onClose} onNavigate={chooseSection} active={paneVisible} executorId={executorId} toolId={toolId} navigationRequest={navigationRequest?.section === pane ? navigationRequest : undefined} />
+    </div>
+  }
+
   return (
     <div ref={page} className="settings-page" data-settings-page={active} hidden={!visible} inert={!visible}>
       <div className="window-drag-region" />
@@ -245,15 +256,10 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
         </header>
         {searching && showResults ? <SettingsSearchResults results={searchResults} query={query} onChoose={chooseSection} /> : null}
         {active === 'overview' && !(searching && showResults) ? <SettingsOverviewPane config={config} groups={overviewGroups} onOpen={chooseSection} active={visible} notice={unmatchedChannel(navigationRequest)} /> : null}
-        {visited.map((pane) => {
-          const Pane = settingsModules.find((module) => module.id === pane)!.Pane
-          const paneVisible = visible && active === pane && !(searching && showResults)
-          return <div key={pane} className="settings-content__scroll" data-settings-pane={pane} hidden={!paneVisible} inert={!paneVisible}>
-            {paneVisible && searching ? <div className="settings-search-return"><button type="button" className="small-button" onClick={() => { setShowResults(true); setDestination(null); setTargetIssue('') }}>Search results</button><span>“{query}”</span>{targetIssue ? <span role="status">{targetIssue}</span> : null}</div>
-              : paneVisible && targetIssue ? <p className="settings-target-issue" role="status" data-settings-target-issue>{targetIssue}</p> : null}
-            <Pane config={config} onClose={onClose} onNavigate={chooseSection} active={paneVisible} executorId={executorId} toolId={toolId} navigationRequest={navigationRequest?.section === pane ? navigationRequest : undefined} />
-          </div>
-        })}
+        {visited.filter(pane => pane !== 'goals' && pane !== 'prompts').map(renderPane)}
+        <GoalsPromptDraftProvider config={config} enabled={active === 'goals' || active === 'prompts' || visited.includes('goals') || visited.includes('prompts')}>
+          {visited.filter(pane => pane === 'goals' || pane === 'prompts').map(renderPane)}
+        </GoalsPromptDraftProvider>
       </main>
     </div>
   )

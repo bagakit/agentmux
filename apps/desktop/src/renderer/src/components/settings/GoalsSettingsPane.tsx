@@ -1,33 +1,43 @@
-import { useId } from 'react'
-import { DEFAULT_GOALS_COMMON_ACTIONS, GOALS_VIEW_IDS, resolveGoalsPreferences, type GoalsPreferences } from '@agentmux/host/goals-preferences'
+import { useId, useRef } from 'react'
+import { GOALS_VIEW_IDS, resolveGoalsPreferences, type GoalsPreferences } from '@agentmux/host/goals-preferences'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraft } from './use-setting-draft'
 import { GoalsIntroduction } from './SettingsConceptIntro'
+import type { AppConfig } from '../../../../shared/contracts'
+import { useGoalsPrompts } from './GoalsPromptDrafts'
+import { GoalsCommonActionsSettings } from './GoalsCommonActionsSettings'
 import '../../styles/settings-workflows.css'
 
 
-export function GoalsSettingsPane({ collapsed, preferences, onSave, onOpenPrompts }: {
-  collapsed: boolean | undefined
+export function GoalsSettingsPane({ config, preferences, onSave, onOpenPrompts }: {
+  config: AppConfig
   preferences?: GoalsPreferences | undefined
-  onSave(value: boolean, expected: boolean, preferences: Required<GoalsPreferences>, expectedPreferences: Required<GoalsPreferences>): Promise<void>
+  onSave(preferences: Required<GoalsPreferences>, expectedPreferences: Required<GoalsPreferences>): Promise<void>
   onOpenPrompts(): void
 }) {
-  const saved = collapsed ?? DEFAULT_GOALS_COMMON_ACTIONS.collapsed
-  const draft = useSettingDraft(saved), saveState = useSettingsSave()
+  const owner = useGoalsPrompts(), disclosure = useRef<HTMLDetailsElement>(null)
+  const saveState = useSettingsSave()
   const savedView = resolveGoalsPreferences(preferences)
   const view = useSettingDraft(savedView.defaultView), finished = useSettingDraft(savedView.showFinished), viewGroup = useId()
   const supervisor = useSettingDraft(savedView.requesterAsSupervisor)
   async function save(): Promise<void> {
-    const submitted = draft.beginSave()
     const submittedView = view.beginSave(), submittedFinished = finished.beginSave()
     const submittedSupervisor = supervisor.beginSave()
-    const committed = await saveState.run(() => onSave(submitted.value, submitted.expected,
-      { defaultView: submittedView.value, showFinished: submittedFinished.value, requesterAsSupervisor: submittedSupervisor.value },
+    const committed = await saveState.run(() => onSave({ defaultView: submittedView.value, showFinished: submittedFinished.value, requesterAsSupervisor: submittedSupervisor.value },
       { defaultView: submittedView.expected, showFinished: submittedFinished.expected, requesterAsSupervisor: submittedSupervisor.expected }))
-    submitted.finish(committed); submittedView.finish(committed); submittedFinished.finish(committed); submittedSupervisor.finish(committed)
+    submittedView.finish(committed); submittedFinished.finish(committed); submittedSupervisor.finish(committed)
   }
   return <div className="settings-pane-stack settings-goals">
     <GoalsIntroduction />
+    <GoalsCommonActionsSettings config={config} prompts={Object.values(owner.resource.value)} directory={owner.common} saving={owner.saveState.saving || owner.resource.saving} disclosureRef={disclosure}
+      onItemsChange={owner.changeItems} onCollapsedChange={value => owner.directory.setField('collapsed', value === (owner.directory.expected.collapsed ?? false) ? owner.directory.expected.collapsed : value)}
+      onAdd={() => { owner.addCommon(); onOpenPrompts() }} onEdit={id => { owner.requestEdit(id); onOpenPrompts() }} />
+    <div className="settings-goals-actions__save">
+      <p>Saves these shortcuts and their edited instructions. Other prompt drafts and all library deletions stay in Prompts.</p>
+      {owner.commonProblems.length ? <p className="settings-inline-error">{owner.commonProblems.map(problem => problem.message).join(' ')}</p> : null}
+      <SettingsSaveBar save={owner.saveState} dirty={owner.commonDirty} resolution={owner.commonResolution} label="Save common actions"
+        blocked={owner.commonProblems.length ? 'Referenced prompts need attention. Open their instruction to edit.' : undefined} onSave={() => void owner.saveCommon()} />
+    </div>
     <section className="settings-group" data-settings-field="starting-view">
       <header><span>Starting view</span><small>Saved: {savedView.defaultView === 'board' ? 'Board' : 'List'}</small></header>
       <p className="settings-workflows__note">Used when you open a new Goals view. You can still switch views while working.</p>
@@ -53,15 +63,6 @@ export function GoalsSettingsPane({ collapsed, preferences, onSave, onOpenPrompt
       </label>
       <p className="settings-workflows__note">Existing goals and your manual choices stay as saved. Without a confirmed source, choose a Supervisor in the goal.</p>
     </section>
-    <section className="settings-group" data-settings-field="common-actions">
-      <header><span>Common actions</span><small>Saved: {saved ? 'Collapsed' : 'Expanded'}</small></header>
-      <label className="browser-automation-toggle"><input type="checkbox" checked={draft.value} onChange={event => draft.setValue(event.target.checked)} aria-label="Collapse common actions" />
-        <span><strong>Start with common actions collapsed</strong><small>Keep Goals focused on your work. Expand common actions whenever you need them.</small></span>
-      </label>
-      <div className="settings-workflows__inline-action"><p className="settings-workflows__note">Choose, reorder and edit common actions in Prompts. Goals and Composer use that same instruction library.</p>
-      <button type="button" className="small-button" onClick={onOpenPrompts}>Open Prompts</button>
-      </div>
-    </section>
-    <SettingsSaveBar save={saveState} dirty={draft.dirty || view.dirty || finished.dirty || supervisor.dirty} resolution={{ useSaved: () => { for (const field of [draft, view, finished, supervisor]) field.useSaved() }, keepMine: () => { for (const field of [draft, view, finished, supervisor]) field.keepMine() } }} onSave={() => void save()} />
+    <SettingsSaveBar scopeLabel="Goals preferences" label="Save Goals preferences" save={saveState} dirty={view.dirty || finished.dirty || supervisor.dirty} resolution={{ useSaved: () => { for (const field of [view, finished, supervisor]) field.useSaved() }, keepMine: () => { for (const field of [view, finished, supervisor]) field.keepMine() } }} onSave={() => void save()} />
   </div>
 }

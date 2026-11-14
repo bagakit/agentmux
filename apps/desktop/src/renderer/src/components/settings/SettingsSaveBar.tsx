@@ -42,10 +42,11 @@ export function useSettingsSave() {
 /** A draft that can resolve a same-field conflict in place. */
 export type SettingsConflictResolution = { useSaved(): void; keepMine(): void }
 
-export function SettingsSaveBar({ save, dirty, label = 'Save changes', onSave, blocked, resolution }: {
+export function SettingsSaveBar({ save, dirty, label = 'Save changes', scopeLabel, onSave, blocked, resolution }: {
   save: Pick<ReturnType<typeof useSettingsSave>, 'state' | 'error' | 'saving'> & Partial<Pick<ReturnType<typeof useSettingsSave>, 'conflict' | 'resolve'>>
   dirty: boolean
   label?: string
+  scopeLabel?: string
   onSave: () => void
   blocked?: string | undefined
   /** Present when the draft can adopt the saved value or keep itself over it after a conflict. */
@@ -57,7 +58,7 @@ export function SettingsSaveBar({ save, dirty, label = 'Save changes', onSave, b
   return (
     <div className="settings-pane-actions" data-settings-save-bar data-settings-save-blocked={reason ? '' : undefined} data-settings-conflict={resolvable ? '' : undefined}>
       <span className={`settings-save-feedback ${save.error ? 'settings-inline-error' : ''}`} role={save.error ? 'alert' : 'status'}>
-        {save.error ? save.error : save.saving ? <><ThemeStatusLoadingIcon animation="spin" size={13} /> Saving changes…</> : reason ? `Can’t save yet — ${reason}` : dirty ? 'Unsaved changes' : save.state === 'saved' ? <><ThemeStatusSavedIcon size={13} /> Changes saved</> : 'All changes saved'}
+        {save.error ? save.error : save.saving ? <><ThemeStatusLoadingIcon animation="spin" size={13} /> {scopeLabel ? `Saving ${scopeLabel}…` : 'Saving changes…'}</> : reason ? `Can’t save yet — ${reason}` : dirty ? scopeLabel ? `${scopeLabel}: unsaved changes` : 'Unsaved changes' : save.state === 'saved' ? <><ThemeStatusSavedIcon size={13} /> {scopeLabel ? `${scopeLabel} saved` : 'Changes saved'}</> : scopeLabel ? `${scopeLabel} saved` : 'All changes saved'}
       </span>
       <Button variant="primary" aria-busy={save.saving} disabled={save.saving || !dirty || Boolean(reason)} onClick={onSave}>{label}</Button>
       {resolvable ? <span className="settings-conflict-actions">

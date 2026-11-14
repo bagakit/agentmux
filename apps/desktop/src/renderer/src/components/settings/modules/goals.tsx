@@ -1,5 +1,5 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { resolveGoalsCommonActions, resolveGoalsPreferences, type GoalsPreferences } from '@agentmux/host/goals-preferences'
+import { resolveGoalsPreferences, type GoalsPreferences } from '@agentmux/host/goals-preferences'
 import { GoalsSettingsPane } from '../GoalsSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
 import { saveConfigSlice } from '../save-config-slice'
@@ -7,10 +7,8 @@ import { saveConfigSlice } from '../save-config-slice'
 const GoalsIcon = semanticIconComponent('navigation.goals')
 
 
-async function saveGoals(collapsed: boolean, expected: boolean, preferences: Required<GoalsPreferences>, expectedPreferences: Required<GoalsPreferences>): Promise<void> {
-  await saveConfigSlice((current, value: { collapsed: boolean; preferences: Required<GoalsPreferences> }) => ({ ...current,
-    goals: { ...current.goals, ...value.preferences }, goalsCommonActions: { ...resolveGoalsCommonActions(current.goalsCommonActions), collapsed: value.collapsed } }),
-  { collapsed, preferences }, { collapsed: expected, preferences: expectedPreferences })
+async function saveGoals(preferences: Required<GoalsPreferences>, expectedPreferences: Required<GoalsPreferences>): Promise<void> {
+  await saveConfigSlice((current, value: Required<GoalsPreferences>) => ({ ...current, goals: { ...current.goals, ...value } }), preferences, expectedPreferences)
 }
 
 export const goalsSettingsModule = {
@@ -22,11 +20,11 @@ export const goalsSettingsModule = {
     { id: 'starting-view', title: 'Starting view', keywords: 'goals default list board' },
     { id: 'finished-goals', title: 'Show finished goals by default', keywords: 'done cancelled history' },
     { id: 'goal-supervisor', title: 'Supervisor for new goals', keywords: 'requesting agent PMO supervisor requester' },
-    { id: 'common-actions', title: 'Common actions', keywords: 'collapsed expanded prompts' },
+    { id: 'goals-common-actions', title: 'Goals common actions', keywords: 'default custom requests order reference collapsed expanded prompt library' },
   ],
   savedSummary: config => { const saved = resolveGoalsPreferences(config.goals); return `${saved.defaultView === 'board' ? 'Board' : 'List'} · ${saved.showFinished ? 'Including finished' : 'Active goals'}` },
   Pane({ config, onNavigate }) {
-    return <GoalsSettingsPane collapsed={config.goalsCommonActions?.collapsed} preferences={config.goals} onSave={saveGoals}
+    return <GoalsSettingsPane config={config} preferences={config.goals} onSave={saveGoals}
       onOpenPrompts={() => onNavigate('prompts')} />
   }
 } as const satisfies SettingsModule

@@ -13,4 +13,5 @@
 .settings-goals-actions__available { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin-top: var(--sp-4); }
 .settings-goals-actions__preview { margin-top: var(--sp-4); padding-block: var(--sp-4); border-top: 1px solid var(--line-soft); }
 .settings-goals-actions__preview p { white-space: pre-wrap; overflow-wrap: anywhere; }
-.settings-goals-actions .settings-goals-actions__save-note { margin-bottom: 0; }
+.settings-goals-actions__save > p { margin: 0 0 var(--sp-3); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
+.prompt-goals-link { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); color: var(--text-3); font-size: var(--fs-meta); flex-wrap: wrap; }
