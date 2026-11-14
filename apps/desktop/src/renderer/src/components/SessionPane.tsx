@@ -14,7 +14,7 @@ import { useConversationReactions } from '../lib/conversation-reactions'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { ConversationMessageAvatar } from './ConversationMessageAvatar'
 import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
-import { cloneElement, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type ReactElement, type ComponentProps } from 'react'
+import { cloneElement, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type ReactElement, type ComponentProps, type RefObject } from 'react'
 import { agentRegionExecution, useAppStore, currentCoreSpatialGraph } from '../store'
 import type { AgentDerivedAction } from '@agentmux/core/agent-derived-actions'
 import { sessionNameMetadataFor } from '../lib/session-name-metadata'
@@ -73,10 +73,10 @@ import { takeoverExecution } from '../lib/session-takeover'
 import { executionHostProjection, regionExecutionHost } from '../lib/region-execution-host'
 import { SessionActivityPresentation } from './SessionActivityPresentation'
 import { observeAgentSession } from '../lib/agent-observation'
-import { useWorkbenchBrowserPresentation, workbenchSessionStageHostId, type WorkbenchViewTarget } from '../lib/workbench-presentation'
+import { useWorkbenchBrowserPresentation, workbenchSessionStageHostId, type WorkbenchViewTarget, type WorkbenchPresentation } from '../lib/workbench-presentation'
 import { agentDisplayName } from '../lib/workbench-tabs'
 import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
-import { moteConversationIdentity, useMoteConversationOwner } from '../lib/mote-conversation-identity'
+import { moteConversationIdentity, useMoteConversationOwner, type MoteConversationOwner } from '../lib/mote-conversation-identity'
 import { agentContinuityPresentation, currentRunRecoveryOperation, currentUnconfirmedResumeOperation } from '../lib/continuity-presentation'
 import { type ConversationItemRef } from '@agentmux/core/conversation'
 import { sameWorkbenchProjectionSelection } from '../lib/workbench-projection'
@@ -94,6 +94,101 @@ const ThemeActionStopIcon = semanticIconComponent('action.stop')
 
 const NO_TIMELINE_ITEMS: never[] = []
 const NO_PRESENTATIONS: readonly WorkbenchViewTarget[] = []
+
+// Stable callbacks must not share the render context that owns a full Session.
+const readPastedImage = (path: string) => api.ui.readPastedImage(path)
+
+function createPaneSelection(regionId: OpenHttpLinkOrigin['regionId'], onSelectRegion: WorkbenchPresentation['onSelectRegion'],
+  survey: WorkbenchPresentation['survey'], surface: WorkbenchPresentation['surface'],
+  workspaceId: string, tabId: OpenHttpLinkOrigin['tabId'], tabGroupId: OpenHttpLinkOrigin['tabGroupId']): () => void {
+  return () => {
+    if (!regionId) return
+    // Navigation belongs to this captured presentation, not the Session's home.
+    if (onSelectRegion) onSelectRegion(regionId)
+    else if (tabId && !survey && (!surface || surface === 'space')) {
+      useAppStore.getState().focusRegion(workspaceId, tabId, regionId, 'pointer', tabGroupId)
+    }
+  }
+}
+
+function createAnnotationSelection(note: RefObject<ConversationAnnotationNoteHandle | null>, sessionId: string) {
+  return (selection: ConversationAnnotationSelection) => { note.current?.select(selection, sessionId) }
+}
+
+function createHistoryClose(resources: {
+  surface: RefObject<HTMLElement | null>; returnFocus: RefObject<HTMLButtonElement | null>;
+  returnContext: RefObject<string>; visible: RefObject<boolean>; historyOpen: RefObject<boolean>;
+  context: string; setOpen(open: boolean): void; selectRegion(): void
+}): () => void {
+  return () => {
+    const document = resources.surface.current?.ownerDocument ?? globalThis.document
+    const reader = resources.surface.current?.querySelector('.activity-feed')
+    const target = resources.returnFocus.current
+    const closingFocus = document.activeElement
+    resources.setOpen(false)
+    resources.selectRegion()
+    document.defaultView?.requestAnimationFrame(() => {
+      if (resources.returnContext.current !== resources.context || !resources.visible.current || resources.historyOpen.current ||
+        !resources.surface.current?.isConnected || !target?.isConnected || target.disabled) return
+      const active = document.activeElement
+      if (active && active !== document.body && (active !== closingFocus || !reader?.contains(active))) return
+      target.focus()
+    })
+  }
+}
+
+function createObservationRefreshBinding(refreshRef: RefObject<(() => Promise<void>) | null>, setMounted: (mounted: boolean) => void) {
+  return (refresh: (() => Promise<void>) | null) => {
+    refreshRef.current = refresh
+    setMounted(refresh !== null)
+  }
+}
+
+function navigationCleanup(navigation: RefObject<{ cancel: (() => void) | null }>) {
+  return () => { navigation.current.cancel?.() }
+}
+function observationCleanup(active: RefObject<boolean>) {
+  return () => { active.current = false }
+}
+
+function createHistoryResourceReader(hostId: string | undefined, agentSessionId: string) {
+  return hostId === undefined ? undefined
+    : (input: Parameters<typeof api.sessions.historyResource>[1]) => api.sessions.historyResource({ hostId, agentSessionId }, input)
+}
+
+function createPaneSpeakerResolver(currentSession: NonNullable<Parameters<typeof createSpeakerResolver>[0]>['currentSession'],
+  moteOwner: MoteConversationOwner | null, isMoteDialogue: boolean, mainSources: ReadonlySet<string>) {
+  const original = createSpeakerResolver({
+    lookupAgent: (id) => {
+      const state = useAppStore.getState()
+      const sender = currentConversationSpeakerMetadata(id, {
+        sessions: state.sessions, workspaces: state.config?.workspaces ?? [],
+        agentNames: state.agentNames, timelines: state.timelines
+      })
+      return sender ? {
+        label: sender.label,
+        providerId: sender.providerId,
+        ...(sender.project ? { project: sender.project } : {}),
+        readDetails: () => {
+          const current = useAppStore.getState()
+          return currentConversationSenderDetails(id, {
+            sessions: current.sessions, workspaces: current.config?.workspaces ?? [],
+            agentNames: current.agentNames, timelines: current.timelines, demands: current.demands
+          })
+        }
+      } : state.agentNames[id] ? { label: state.agentNames[id] } : undefined
+    },
+    ...(currentSession ? { currentSession } : {})
+  })
+  return (speaker: Parameters<typeof original>[0], avatarSize?: number) => {
+    const described = original(speaker)
+    const author = speaker.role === 'agent' ? sessionPresentationById(useAppStore.getState().sessions).get(speaker.id) : undefined
+    const mote = speaker.role !== 'agent' ? undefined : isMoteDialogue
+      ? moteOwner && author?.kind === 'agent' && mainSources.has(JSON.stringify([author.control.hostId, author.control.agentSessionId])) ? moteOwner : undefined
+      : moteConversationIdentity(moteOwner, author)
+    return mote ? { ...described, name: mote.name, avatar: <ConversationMessageAvatar speaker={speaker} name={mote.name} mote={mote} providerId={described.providerId} project={described.project} {...(avatarSize === undefined ? {} : { size: avatarSize })} /> } : described
+  }
+}
 
 function humanizeDetail(
   interruptionReason: string | undefined,
@@ -153,16 +248,9 @@ export function SessionPane({
   const primaryReference = primaryPresentation.reference
   const mailboxOrigin = primaryReference ? { ...linkOrigin, workspaceId: primaryReference.displayWorkspaceId,
     tabGroupId: primaryReference.groupId, tabId: primaryReference.tabId } : linkOrigin
-  const selectOwnRegion = useCallback((): void => {
-    if (!linkOrigin.regionId) return
-    // The current presentation owns navigation. The Session's resource home
-    // cannot stand in for a Survey, Mote or Focus selection callback.
-    if (primaryPresentation.onSelectRegion) primaryPresentation.onSelectRegion(linkOrigin.regionId)
-    else if (mailboxOrigin.tabId && !primaryPresentation.survey && (!primaryPresentation.surface || primaryPresentation.surface === 'space')) {
-      useAppStore.getState().focusRegion(mailboxOrigin.workspaceId, mailboxOrigin.tabId, linkOrigin.regionId,
-        'pointer', mailboxOrigin.tabGroupId)
-    }
-  }, [linkOrigin.regionId, primaryPresentation.onSelectRegion, primaryPresentation.survey, primaryPresentation.surface,
+  const selectOwnRegion = useMemo(() => createPaneSelection(linkOrigin.regionId, primaryPresentation.onSelectRegion,
+    primaryPresentation.survey, primaryPresentation.surface, mailboxOrigin.workspaceId, mailboxOrigin.tabId, mailboxOrigin.tabGroupId),
+  [linkOrigin.regionId, primaryPresentation.onSelectRegion, primaryPresentation.survey, primaryPresentation.surface,
     mailboxOrigin.workspaceId, mailboxOrigin.tabId, mailboxOrigin.tabGroupId])
   const observedSession = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => sessionPresentationById(state.sessions).get(sessionId))
   const pendingLaunch = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.pendingAgentLaunches[sessionId])
@@ -266,7 +354,7 @@ export function SessionPane({
   currentPresentations.current = presentations
   const navigation = useRef({ generation: 0, cancel: null as (() => void) | null, isCurrent: null as (() => boolean) | null })
   const [revealRequest, setRevealRequest] = useState<(ConversationRevealRequest & { displayId: string | null }) | null>(null)
-  useEffect(() => () => { navigation.current.cancel?.() }, [activitySourceKey])
+  useEffect(() => navigationCleanup(navigation), [activitySourceKey])
   if (activityLifetime.current.sourceKey !== activitySourceKey) {
     activityLifetime.current = { sourceKey: activitySourceKey, opened: false }
     activityContent.current = null
@@ -289,9 +377,7 @@ export function SessionPane({
   const interactionSourceRef = useRef<HTMLDivElement>(null)
   const interactionRef = useRef<HTMLElement>(null)
   const annotationNoteRef = useRef<ConversationAnnotationNoteHandle>(null)
-  const selectAnnotation = useCallback((selection: ConversationAnnotationSelection) => {
-    annotationNoteRef.current?.select(selection, sessionId)
-  }, [sessionId])
+  const selectAnnotation = useMemo(() => createAnnotationSelection(annotationNoteRef, sessionId), [sessionId])
   const resultAnchorId = useId()
   const resultSurfaceAnchor = `--result-surface-${resultAnchorId.replace(/[^a-zA-Z0-9_-]/g, '')}`
   const historyReturnFocusRef = useRef<HTMLButtonElement | null>(null)
@@ -318,21 +404,9 @@ export function SessionPane({
     historyReturnFocusRef.current = trigger ?? header?.querySelector<HTMLButtonElement>('.agent-region-header__more') ?? null
     setHistoryOpen(true)
   }
-  const closeHistory = useCallback((): void => {
-    const document = surfaceRef.current?.ownerDocument ?? globalThis.document
-    const reader = surfaceRef.current?.querySelector('.activity-feed')
-    const target = historyReturnFocusRef.current
-    const closingFocus = document.activeElement
-    setHistoryOpen(false)
-    selectOwnRegion()
-    document.defaultView?.requestAnimationFrame(() => {
-      if (historyReturnContextRef.current !== historyReturnContext || !visibleRef.current || historyOpenRef.current ||
-        !surfaceRef.current?.isConnected || !target?.isConnected || target.disabled) return
-      const active = document.activeElement
-      if (active && active !== document.body && (active !== closingFocus || !reader?.contains(active))) return
-      target.focus()
-    })
-  }, [historyReturnContext, selectOwnRegion])
+  const closeHistory = useMemo(() => createHistoryClose({ surface: surfaceRef, returnFocus: historyReturnFocusRef,
+    returnContext: historyReturnContextRef, visible: visibleRef, historyOpen: historyOpenRef,
+    context: historyReturnContext, setOpen: setHistoryOpen, selectRegion: selectOwnRegion }), [historyReturnContext, selectOwnRegion])
   const pendingAgentRestore = session?.kind === 'agent' && session.processState !== 'running'
   // Original conversation records do not require a live CLI. Qualify this
   // Mote source by its original main links, never by a member/name/array order.
@@ -481,38 +555,10 @@ export function SessionPane({
   const speakerScope = useMemo(() => ({ sessionIds: speakerIds, navigation: false }), [speakerIds])
   const speakerFactsSelector = useMemo(() => createConversationSpeakerFactsSelector(speakerIds, activityDemand), [speakerIds, activityDemand])
   const speakerFacts = useObservedAppStore('sessionPane', observationVisible, speakerScope, useShallow(speakerFactsSelector))
-  const describeSpeaker = useMemo(() => {
-    const original = createSpeakerResolver({
-      lookupAgent: (id) => {
-        const state = useAppStore.getState()
-        const sender = currentConversationSpeakerMetadata(id, {
-          sessions: state.sessions, workspaces: state.config?.workspaces ?? [],
-          agentNames: state.agentNames, timelines: state.timelines
-        })
-        return sender ? {
-          label: sender.label,
-          providerId: sender.providerId,
-          ...(sender.project ? { project: sender.project } : {}),
-          readDetails: () => {
-            const current = useAppStore.getState()
-            return currentConversationSenderDetails(id, {
-              sessions: current.sessions, workspaces: current.config?.workspaces ?? [],
-              agentNames: current.agentNames, timelines: current.timelines, demands: current.demands
-            })
-          }
-        } : state.agentNames[id] ? { label: state.agentNames[id] } : undefined
-      },
-      ...(session?.kind === 'agent' ? { currentSession: session } : {})
-    })
-    return (speaker: Parameters<typeof original>[0], avatarSize?: number) => {
-      const described = original(speaker)
-      const author = speaker.role === 'agent' ? sessionPresentationById(useAppStore.getState().sessions).get(speaker.id) : undefined
-      const mote = speaker.role !== 'agent' ? undefined : moteDialogue?.target
-        ? moteOwner && author?.kind === 'agent' && mainSources.has(JSON.stringify([author.control.hostId, author.control.agentSessionId])) ? moteOwner : undefined
-        : moteConversationIdentity(moteOwner, author)
-      return mote ? { ...described, name: mote.name, avatar: <ConversationMessageAvatar speaker={speaker} name={mote.name} mote={mote} providerId={described.providerId} project={described.project} {...(avatarSize === undefined ? {} : { size: avatarSize })} /> } : described
-    }
-  }, [session?.id, session?.label, session?.kind, session?.kind === 'agent' ? session.providerId : undefined, speakerFacts, moteOwner, moteDialogue?.target, mainSources]
+  const describeSpeaker = useMemo(() => createPaneSpeakerResolver(session?.kind === 'agent'
+    ? { id: session.id, ...(session.label === undefined ? {} : { label: session.label }), providerId: session.providerId } : undefined,
+  moteOwner, Boolean(moteDialogue?.target), mainSources),
+  [session?.id, session?.label, session?.kind, session?.kind === 'agent' ? session.providerId : undefined, speakerFacts, moteOwner, moteDialogue?.target, mainSources]
   )
   const refreshSession = useAppStore.getState().refreshSession
   const recoverSession = useAppStore.getState().recoverSession
@@ -568,10 +614,7 @@ export function SessionPane({
   // file outside the workspace) as an <img>-ready data URI. Main confines the read to the pasted
   // directory; a null return means "not a readable pasted image", and the renderer falls back to the
   // plain-text reference. Stable identity so the thumbnail's load effect does not re-fire each render.
-  const readPastedImage = useCallback((path: string) => api.ui.readPastedImage(path), [])
-  const readHistoryResource = useMemo(() => executionHostId === undefined ? undefined
-    : (input: Parameters<typeof api.sessions.historyResource>[1]) => api.sessions.historyResource({ hostId: executionHostId, agentSessionId: sessionId }, input),
-  [executionHostId, sessionId])
+  const readHistoryResource = useMemo(() => createHistoryResourceReader(executionHostId, sessionId), [executionHostId, sessionId])
   // File and HTTP links share the saved Focus destination and explicit modifier gestures.
   const linkRequest = linkOpening.request
   const canSplit = linkOpening.canSplit
@@ -584,7 +627,7 @@ export function SessionPane({
   const observationScopeRef = useRef<string | null>(observationScope)
   observationScopeRef.current = visible && !readOnly && !parked ? observationScope : null
   const observationActive = useRef(true)
-  useEffect(() => { observationActive.current = true; return () => { observationActive.current = false } }, [])
+  useEffect(() => { observationActive.current = true; return observationCleanup(observationActive) }, [])
   useEffect(() => { setUnobservedReadError(null) }, [observationScope])
   const creationScope = JSON.stringify([observationScope, pendingLaunch?.request?.hostId, pendingLaunch?.request?.createOperationId])
   const creationScopeRef = useRef(creationScope)
@@ -597,10 +640,7 @@ export function SessionPane({
   const creationWaiting = storageWait && (!currentCreationFeedback || currentCreationFeedback.status === 'woken')
   const [observationMounted, setObservationMounted] = useState(false)
   const observationRefreshRef = useRef<(() => Promise<void>) | null>(null)
-  const bindObservationRefresh = useCallback((refresh: (() => Promise<void>) | null) => {
-    observationRefreshRef.current = refresh
-    setObservationMounted(refresh !== null)
-  }, [])
+  const bindObservationRefresh = useMemo(() => createObservationRefreshBinding(observationRefreshRef, setObservationMounted), [])
   const [recovering, setRecovering] = useState(false)
   const frontendRecoveryIntent = useRef<{ scope: string; operationId: string } | null>(null)
   const reopenRetiredSession = useAppStore.getState().reopenRetiredSession
