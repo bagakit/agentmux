@@ -10,12 +10,11 @@ import type { AgentProvider } from '../agent-provider.js'
 import { nativeProcessBirth, nativeProcessExecutable, nativeProcessFiles, type NativeProcessFile } from '../agent-native-process.js'
 import { AgentMuxError } from '../errors.js'
 import { nativeInputSourceId } from '../native-input-correlation.js'
-import { runProcess } from '../process-runner.js'
 import { locateAppServerNativeSession } from './app-server-native-session.js'
 import { codexMainNativeRecord } from './codex-native-record-role.js'
 
-// Stable original queue contract, qualified on 0.163, 0.165, 0.166 and 0.167. This identifier
-// is retained by frozen claims and does not assert the running executable version.
+// Frozen claims retain this original wire identity. Qualification comes from the
+// original process/store and native protocol, not the executable's version label.
 const PROTOCOL = 'codex-durable-queue-0.163'
 const unavailable = () => new AgentMuxError('The original native queue source is unconfirmed. The message, Agent and ordinary terminal input remain available.', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
 type FileObject = Pick<NativeProcessFile, 'path' | 'device' | 'inode'>
@@ -100,9 +99,9 @@ async function openQueueHelper(command: string, storage: string, workspacePath: 
   })
   const abort = () => fail(signal.reason)
   signal.addEventListener('abort', abort, { once: true })
-  const request = async (method: 'initialize' | 'thread/read' | 'thread/queue/add', params: Record<string, unknown>): Promise<any> => {
+  const request = async (method: 'initialize' | 'thread/read' | 'thread/queue/list' | 'thread/queue/add', params: Record<string, unknown>): Promise<any> => {
     signal.throwIfAborted()
-    if (failed !== undefined || !['initialize', 'thread/read', 'thread/queue/add'].includes(method)) throw unavailable()
+    if (failed !== undefined || !['initialize', 'thread/read', 'thread/queue/list', 'thread/queue/add'].includes(method)) throw unavailable()
     return await client.timeout(10_000).request(method, params)
   }
   const dispose = async (): Promise<void> => {
@@ -141,8 +140,6 @@ export const prepareCodexDurableQueueInput: NonNullable<AgentProvider['prepareNa
   const owner = original.file.processId, ownerBirth = await nativeProcessBirth(owner, signal)
   const executable = await nativeProcessExecutable(owner, signal)
   await assertFile(executable)
-  const version = await runProcess(executable.path, ['--version'], { signal, timeoutMs: 2_000, maxOutputBytes: 4096 })
-  if (version.exitCode !== 0 || version.stderr || !['codex-cli 0.163.0', 'codex-cli 0.165.0', 'codex-cli 0.166.0', 'codex-cli 0.167.0'].includes(version.stdout.trim())) throw unavailable()
   const storage = await stores(await nativeProcessFiles(owner, signal, 'process'))
   await assertFile(storage.queue); await assertFile(storage.state)
   const helper = await openQueueHelper(executable.path, dirname(storage.queue.path), context.workspacePath, signal)
@@ -163,12 +160,20 @@ export const prepareCodexDurableQueueInput: NonNullable<AgentProvider['prepareNa
       if (!current || current.id !== original.id || current.file.processId !== owner || !sameFile(current.file, original.file) || current.file.path !== original.file.path) throw unavailable()
       await assertStorage(); await assertFile(executable)
       const read = await helper.request('thread/read', { threadId: original.id, includeTurns: false }), thread = read?.thread
-      // A helper reads the saved object without loading it. Null live capabilities
-      // stay unknown. In this native version queue/add uses the same ownership
-      // policy as canAcceptDirectInput, so an explicit false is counterevidence.
+      // The helper reads this saved object without loading a second writer. Null
+      // direct-input capability stays unknown; it never grants start or steer.
       if (thread?.id !== original.id || thread.path !== original.file.path || thread.ephemeral !== false ||
           thread.canAcceptDirectInput === false || !codexMainNativeRecord({ source: thread.source,
             ...(thread.threadSource === null ? {} : { thread_source: thread.threadSource }) })) throw unavailable()
+      // This native read proves that the original store exposes the queue wire.
+      // It grants no write acknowledgement: add still owns permission, dispatch
+      // and the exact original correlation/body receipt below.
+      const queue = await helper.request('thread/queue/list', { threadId: original.id, limit: 1 })
+      if (!Array.isArray(queue?.data) || queue.nextCursor !== undefined && queue.nextCursor !== null && typeof queue.nextCursor !== 'string' ||
+          queue.data.some((item: unknown) => !item || typeof item !== 'object' || Array.isArray(item) ||
+            typeof (item as Record<string, unknown>).id !== 'string' || !(item as Record<string, unknown>).id ||
+            (item as Record<string, unknown>).clientUserMessageId != null && typeof (item as Record<string, unknown>).clientUserMessageId !== 'string' ||
+            !Array.isArray((item as Record<string, unknown>).input))) throw unavailable()
       await assertStorage()
     }
     await assertCurrent()
