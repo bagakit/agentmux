@@ -484,7 +484,7 @@ export class BrowserProfileStore {
       if (intent.profileId !== profileId || intent.expectedRevision !== expectedRevision) throw new Error('The extension intent names a different original Profile.')
       if (current.extensionPending?.some(value => value.operationId === intent.operationId) || current.extensionReceipts?.some(value => value.operationId === intent.operationId)) throw new Error('This original extension operation already has a durable intent or receipt.')
       const updated = { ...current, extensionPending: [...(current.extensionPending ?? []), intent] }
-      return this.commit({ ...metadata, profiles: metadata.profiles.map(profile => profile.id === profileId ? updated : profile) }, false)
+      return this.commit({ ...metadata, profiles: metadata.profiles.map(profile => profile.id === profileId ? updated : profile) }, false, undefined, true)
     })
   }
 
@@ -504,7 +504,7 @@ export class BrowserProfileStore {
       const intent = current.extensionPending?.find(value => value.operationId === saved.operationId)
       if (!intent || intent.extensionId !== saved.extensionId || intent.kind !== saved.kind || intent.sha256 !== saved.sha256 || intent.profileId !== saved.profileId) throw new Error('The original durable extension dispatch intent is unavailable or different.')
       const updated = { ...current, revision: mintObjectId(), extensionPending: current.extensionPending!.filter(value => value.operationId !== saved.operationId), extensions: records, extensionReceipts: [...(current.extensionReceipts ?? []), saved] }
-      return this.commit({ ...metadata, profiles: metadata.profiles.map(profile => profile.id === profileId ? updated : profile) })
+      return this.commit({ ...metadata, profiles: metadata.profiles.map(profile => profile.id === profileId ? updated : profile) }, true, undefined, true)
     })
   }
 
@@ -877,9 +877,9 @@ export class BrowserProfileStore {
   }
 
   /** Every commit advances sequence; configuration writes also advance collection CAS. */
-  private async commit(metadata: BrowserProfileMetadata, configuration = true, retirement?: { operation: 'recycle' | 'restore' | 'purge' | 'retention'; profileId: string }): Promise<BrowserProfileSnapshot> {
+  private async commit(metadata: BrowserProfileMetadata, configuration = true, retirement?: { operation: 'recycle' | 'restore' | 'purge' | 'retention'; profileId: string }, requireDirectorySync = false): Promise<BrowserProfileSnapshot> {
     const next = metadataSchema.parse({ ...metadata, revision: (metadata.revision ?? 0) + (configuration ? 1 : 0), sequence: (metadata.sequence ?? metadata.revision ?? 0) + 1 })
-    try { await this.writeMetadata(next, retirement !== undefined) }
+    try { await this.writeMetadata(next, retirement !== undefined || requireDirectorySync) }
     catch (cause) {
       if (!retirement) throw cause
       // The original producer's replacement fact survives a missing directory ACK. Prefer an

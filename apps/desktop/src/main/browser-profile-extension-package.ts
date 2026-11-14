@@ -1,6 +1,6 @@
 import { createHash, createPublicKey, createVerify, generateKeyPairSync } from 'node:crypto'
-import { createReadStream, appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
-import { cp, lstat, mkdir, open, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { constants, createReadStream, appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { cp, copyFile, lstat, mkdir, open, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
 import { Unzip, UnzipInflate } from 'fflate'
 import type { BrowserProfileExtensionPermissions, BrowserProfileExtensionSource } from '@agentmux/core/control'
@@ -114,12 +114,13 @@ async function extract(path: string, destination: string, offset: number): Promi
 export async function prepareExtensionPackage(sourcePath: string, staging: string, previousKey?: string): Promise<PreparedExtensionPackage> {
   await mkdir(staging, { recursive: false })
   const snapshot = staging + '.package-snapshot'
-  const stats = await lstat(sourcePath); if (stats.isSymbolicLink()) invalid('Choose an ordinary extension directory or package, without a symbolic link.')
   let source: BrowserProfileExtensionSource = { kind: 'directory', label: 'Unpacked extension', signature: 'not-verified' }, packagedKey: string | undefined
   try {
+    const stats = await lstat(sourcePath); if (stats.isSymbolicLink()) invalid('Choose an ordinary extension directory or package, without a symbolic link.')
     if (stats.isDirectory()) { await hashExtensionDirectory(sourcePath); await cp(sourcePath, staging, { recursive: true, force: false, errorOnExist: false, dereference: false }) }
     else if (stats.isFile()) {
-      await cp(sourcePath, snapshot, { force: false, errorOnExist: true })
+      // Materialize ordinary owned bytes even if the caller path races to a symlink.
+      await copyFile(sourcePath, snapshot, constants.COPYFILE_EXCL)
       const info = await archive(snapshot); source = { ...source, label: info.offset ? 'CRX package' : 'ZIP package', kind: info.offset ? 'crx' : 'zip', signature: info.verified ? 'package-verified' : 'not-verified' }; packagedKey = info.key
       await extract(snapshot, staging, info.offset)
     } else invalid('Choose an ordinary extension directory, ZIP or CRX package.')

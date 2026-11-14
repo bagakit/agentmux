@@ -142,12 +142,12 @@ export class BrowserProfileExtensions {
       if (reviewedHash !== pkg.sha256) return unavailable('The reviewed package bytes changed. Nothing was loaded; prepare and review the source again.')
       const targetPath = this.path(profileId, { id: prepared.review.extensionId, sha256: pkg.sha256 })
       try {
-      await mkdir(dirname(targetPath), { recursive: true })
-      if (pkg.directory !== targetPath) {
-        try { await rename(pkg.directory, targetPath) }
-        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST' && (error as NodeJS.ErrnoException).code !== 'ENOTEMPTY') throw error; if (await hashExtensionDirectory(targetPath) !== pkg.sha256) throw error }
-        pkg.directory = targetPath
-      }
+        await mkdir(dirname(targetPath), { recursive: true })
+        if (pkg.directory !== targetPath) {
+          try { await rename(pkg.directory, targetPath) }
+          catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST' && (error as NodeJS.ErrnoException).code !== 'ENOTEMPTY') throw error; if (await hashExtensionDirectory(targetPath) !== pkg.sha256) throw error }
+          pkg.directory = targetPath
+        }
       } catch { return unavailable('The reviewed package could not be retained in its original Profile. No extension code was dispatched; original packages and Profile data remain.', 'BROWSER_PROFILE_EXTENSION_SOURCE_UNAVAILABLE') }
       const receipt: BrowserProfileExtensionReceipt = { operationId: reviewId, profileId, extensionId: prepared.review.extensionId, kind, sha256: pkg.sha256 }
       let nativeAttempted = false
