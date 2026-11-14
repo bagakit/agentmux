@@ -1,4 +1,4 @@
-import { useContext, useEffect, useId, useRef, useState } from 'react'
+import { useContext, useEffect, useId, useRef, useState, type RefObject } from 'react'
 import type { AppConfig } from '../../../shared/contracts'
 import { isScratchWorkspaceId } from '../../../shared/contracts'
 import { configValuesEqual } from '../../../shared/config-edit'
@@ -6,23 +6,39 @@ import { fileNavigationSelection, useAppStore, type LauncherExecutionSelection }
 import { AGENT_WORK_MODES, agentWorkMode, workHostLabel, workReferenceHostId, type AgentWorkMode } from '../lib/agent-work-mode'
 import { SelectionField } from './SelectionField'
 import { AgentWorkModePlacement } from './AgentWorkModePlacement'
-import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { SettingsNavigation } from './SettingsNavigation'
 import './agent-work-mode.css'
 import { SourceAgentTargetSetup } from './SourceAgentTargetSetup'
+import { AgentWorkProjectAnchor } from './AgentWorkProjectAnchor'
 
 type Config = Pick<AppConfig, 'hosts' | 'workspaces'>
-const ProjectIcon = semanticIconComponent('object.folder')
 
 /** Edits one prospective arrangement. The original Store owns addresses, registration and creation. */
 export function AgentWorkModeSetup(props: AgentWorkModeSetupProps) {
   const settings = useContext(SettingsNavigation)
   const [sourceSelection, setSourceSelection] = useState(Boolean(props.sourceTargets && (!props.initialSelection?.agentWorkspaceId || props.initialSelection.source)))
+  const anchored = props.presentation === 'anchored-editor'
+  const setupRef = useRef<HTMLDivElement>(null), previousSourceSelection = useRef(sourceSelection)
+  useEffect(() => {
+    const changed = previousSourceSelection.current !== sourceSelection
+    previousSourceSelection.current = sourceSelection
+    if (!changed || !props.active) return
+    const ownerDocument = setupRef.current?.ownerDocument
+    const focusAtSchedule = ownerDocument?.activeElement
+    const frame = requestAnimationFrame(() => {
+      if (ownerDocument?.activeElement !== focusAtSchedule) return
+      const target = setupRef.current?.querySelector<HTMLButtonElement>('[aria-label="Agent runs on"]:not([disabled])')
+        ?? setupRef.current?.querySelector<HTMLButtonElement>('.agent-work-setup__actions button:not([disabled])')
+        ?? setupRef.current
+      target?.focus({ preventScroll: true })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [sourceSelection, props.active])
   if (props.sourceTargets && sourceSelection) return <>
-    <SourceAgentTargetSetup {...props} onOpenHost={props.onOpenHost ?? (settings ? id => settings.openHost(id) : undefined)} />
-    <button className="agent-work-text-action" type="button" onClick={() => setSourceSelection(false)}>Choose a custom startup directory</button>
+    <SourceAgentTargetSetup {...props} setupRef={setupRef} onChooseCustom={anchored ? () => setSourceSelection(false) : undefined} onOpenHost={props.onOpenHost ?? (settings ? id => settings.openHost(id) : undefined)} />
+    {!anchored ? <button className="agent-work-text-action" type="button" onClick={() => setSourceSelection(false)}>Choose a custom startup directory</button> : null}
   </>
-  return <><LegacyAgentWorkModeSetup {...props} />{props.sourceTargets ? <button className="agent-work-text-action" type="button"
+  return <><LegacyAgentWorkModeSetup {...props} setupRef={setupRef} onChooseSource={anchored ? () => setSourceSelection(true) : undefined} />{props.sourceTargets && !anchored ? <button className="agent-work-text-action" type="button"
     onClick={() => setSourceSelection(true)}>Choose through the project device and its saved routes</button> : null}</>
 }
 type AgentWorkModeSetupProps = {
@@ -41,8 +57,13 @@ type AgentWorkModeSetupProps = {
   onApply(selection: LauncherExecutionSelection): boolean | void | Promise<boolean | void>
   onCancel?: (() => void) | undefined
   onOpenHost?: ((hostId: string) => void) | undefined
+  presentation?: 'anchored-editor' | undefined
+  menuBoundary?: HTMLElement | null | undefined
+  onChooseCustom?: (() => void) | undefined
+  onChooseSource?: (() => void) | undefined
+  setupRef?: RefObject<HTMLDivElement | null> | undefined
 }
-function LegacyAgentWorkModeSetup({ config, active, initialSelection, initialMode, fixedResourceWorkspaceId, allowLocal = false, actionLabel, preparationNote, disabled = false, onApply, onCancel, onOpenHost }: AgentWorkModeSetupProps) {
+function LegacyAgentWorkModeSetup({ config, active, initialSelection, initialMode, fixedResourceWorkspaceId, allowLocal = false, actionLabel, preparationNote, disabled = false, onApply, onCancel, onOpenHost, presentation, menuBoundary, onChooseSource, setupRef }: AgentWorkModeSetupProps) {
   const settings = useContext(SettingsNavigation), group = useId()
   const fixedProject = fixedResourceWorkspaceId !== undefined
   const initialProject = config.workspaces.find(item => item.id === (fixedResourceWorkspaceId ?? initialSelection?.resourceWorkspaceId))
@@ -130,17 +151,16 @@ function LegacyAgentWorkModeSetup({ config, active, initialSelection, initialMod
     } finally { stop(); if (request.current === controller) { request.current = null; setPending(false) } }
   }
   function openHost(id: string | null) { if (id) { if (onOpenHost) onOpenHost(id); else settings?.openHost(id) } }
-  const hostLinks = projectHost ? <div className="agent-work-setup__host-links"><button type="button" className="agent-work-text-action" onClick={() => openHost(projectHost.id)}>Project device settings</button>
-    {agentHostId && agentHostId !== projectHost.id ? <button type="button" className="agent-work-text-action" onClick={() => openHost(agentHostId)}>Agent device settings</button> : null}</div> : null
+  const hostActionClass = presentation === 'anchored-editor' ? 'small-button' : 'agent-work-text-action'
+  const hostLinks = projectHost ? <div className="agent-work-setup__host-links"><button type="button" className={hostActionClass} onClick={() => openHost(projectHost.id)}>Project device settings</button>
+    {agentHostId && agentHostId !== projectHost.id ? <button type="button" className={hostActionClass} onClick={() => openHost(agentHostId)}>Agent device settings</button> : null}</div> : null
   const unavailableProject = fixedProject ? !project || mode !== 'local' && mode !== 'remote-agent' : projectId && !projects.some(item => item.id === projectId)
-  return <div className={`agent-work-setup${allowLocal ? ' agent-work-setup--local' : ''}`} data-work-mode={mode} data-fixed-project={fixedProject || undefined} aria-busy={pending || undefined}>
+  return <div ref={setupRef} tabIndex={-1} className={`agent-work-setup${allowLocal ? ' agent-work-setup--local' : ''}`} data-work-mode={mode} data-fixed-project={fixedProject || undefined} data-presentation={presentation} aria-busy={pending || undefined}>
+    <div className="agent-work-setup__body">
     {fixedProject ? <>
-      <div className="agent-work-project-anchor"><ProjectIcon size={17} aria-hidden="true" /><div>
-        <strong>{project?.name ?? 'Original project unavailable'}</strong><span>{workHostLabel(config.hosts, projectHostId)}</span>
-        {project ? <code>{project.path}</code> : null}
-      </div></div>
+      <AgentWorkProjectAnchor project={project} hostLabel={workHostLabel(config.hosts, projectHostId)} compact={presentation === 'anchored-editor'} showIcon />
       <div className="agent-work-device-choice"><span className="agent-work-end__label">Agent runs on</span>
-        <SelectionField label="Agent runs on" value={agentHostId ?? ''} options={fixedAgentOptions} disabled={disabled || !active} onValueChange={changeAgentDevice} />
+        <SelectionField label="Agent runs on" value={agentHostId ?? ''} options={fixedAgentOptions} disabled={disabled || !active} onValueChange={changeAgentDevice} menuBoundary={menuBoundary ?? null} />
         <span className="agent-work-setup__note">{agentHostId === projectHostId ? 'Agent and files on this project’s device.'
           : agentHostId ? 'Outpost · files and tools stay with this project.' : 'Choose the device that will run the Agent.'}</span>
       </div>
@@ -156,9 +176,9 @@ function LegacyAgentWorkModeSetup({ config, active, initialSelection, initialMod
     </fieldset>
     <div className="agent-work-ends" aria-label="Files and Agent placement">
       <div className="agent-work-end"><span className="agent-work-end__label">Working folder</span>
-        <SelectionField label="Working folder for this arrangement" value={projectId} options={projectOptions} disabled={disabled || !active}
+        <SelectionField label="Working folder for this arrangement" value={projectId} options={projectOptions} disabled={disabled || !active} menuBoundary={menuBoundary ?? null}
           onValueChange={id => { invalidate(); setProjectId(id); setStartupId(''); const selected = projects.find(item => item.id === id); if (selected) setFolderHostId(selected.hostId) }} />
-        {!project && !wantsLocalProject ? <SelectionField label="Working folder device" value={folderHostId} disabled={disabled || !active}
+        {!project && !wantsLocalProject ? <SelectionField label="Working folder device" value={folderHostId} disabled={disabled || !active} menuBoundary={menuBoundary ?? null}
           options={[{ value: '', label: 'Choose a remote device…' }, ...config.hosts.filter(host => host.id !== reference).map(host => ({ value: host.id, label: workHostLabel(config.hosts, host.id) }))]}
           onValueChange={id => { invalidate(); setFolderHostId(id); setStartupId('') }} /> : null}
         <span className="agent-work-end__host">{workHostLabel(config.hosts, projectHostId)}</span>
@@ -166,7 +186,7 @@ function LegacyAgentWorkModeSetup({ config, active, initialSelection, initialMod
       </div>
       <div className="agent-work-end"><span className="agent-work-end__label">Agent</span>
         {mode === 'remote-agent' || mode === 'remote-workspace'
-          ? <SelectionField label="Agent runs on" value={agentId} options={agentOptions} disabled={disabled || !active}
+          ? <SelectionField label="Agent runs on" value={agentId} options={agentOptions} disabled={disabled || !active} menuBoundary={menuBoundary ?? null}
             onValueChange={id => { invalidate(); setAgentId(id); setStartupId('') }} />
           : <span className="agent-work-end__fixed">{workHostLabel(config.hosts, reference)}</span>}
         {!agentHost ? <span className="agent-work-end__empty">Choose the Agent device</span> : null}
@@ -174,16 +194,20 @@ function LegacyAgentWorkModeSetup({ config, active, initialSelection, initialMod
       </div>
     </div>
     </>}
-    <details className="agent-work-startup"><summary>Agent startup directory <span>Configuration &amp; Skills</span></summary>
-      <SelectionField label="Agent starts in" value={startupId} disabled={disabled || !agentHostId || !active}
+    <details className="agent-work-startup"><summary>{presentation === 'anchored-editor' ? 'Startup & device details' : <>Agent startup directory <span>Configuration &amp; Skills</span></>}</summary>
+      <div className="agent-work-setup__details-body">
+      <SelectionField label="Agent starts in" value={startupId} disabled={disabled || !agentHostId || !active} menuBoundary={menuBoundary ?? null}
         options={[{ value: '', label: agentHostId === projectHostId ? 'The working folder' : 'The device home' },
           ...config.workspaces.filter(item => item.hostId === agentHostId && !isScratchWorkspaceId(item.id)).map(item => ({ value: item.id, label: item.name, description: item.path }))]}
         onValueChange={id => { invalidate(); setStartupId(id) }} />
       <p className="agent-work-setup__note">Native settings and Skills load here. Files and commands use the working folder.</p>
       {fixedProject ? hostLinks : null}
+      {onChooseSource ? <div className="agent-work-setup__utility-actions"><button type="button" className="small-button agent-work-setup__source-routes" onClick={onChooseSource}>Choose through the project device and its saved routes</button></div> : null}
+      </div>
     </details>
     {!fixedProject ? hostLinks : null}
     {error ? <p className="agent-work-setup__error" role="status">{error}</p> : null}
+    </div>
     <footer className="agent-work-setup__actions"><span>{preparationNote ?? (fixedProject ? 'Applies to this Launcher. Launch starts the task.' : initialSelection?.resourceWorkspaceId && project && project.id !== initialSelection.resourceWorkspaceId ? 'A different project opens its own Launcher. Original drafts stay with their project.' : 'Preparing this arrangement starts no Agent.')}</span><div>
       {onCancel ? <button type="button" className="small-button" onClick={onCancel}>Cancel</button> : null}
       <button type="button" className="primary-button" disabled={disabled || pending || !active || !projectHost || !agentHost || Boolean(unavailableProject)} onClick={() => void prepare()}>{pending ? 'Preparing…' : actionLabel}</button>

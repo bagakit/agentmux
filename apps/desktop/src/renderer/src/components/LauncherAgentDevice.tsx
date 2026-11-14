@@ -13,6 +13,7 @@ import type { LauncherSourceExecution } from '../lib/launcher-source'
 
 const ModeIcon = semanticIconComponent('object.remote-execution')
 const DownIcon = semanticIconComponent('navigation.down')
+const CloseIcon = semanticIconComponent('action.close')
 const NO_WORKSPACES: WorkspaceRecord[] = []
 
 /** One compact entry for every direction, editing the original unstarted Launcher only. */
@@ -40,7 +41,13 @@ export function LauncherAgentDevice({ hosts, workspace, agentWorkspace, explicit
     const position = async () => {
       const result = await computePosition(anchor, content, { strategy: 'fixed', placement: 'bottom-end', middleware: [offset(8), flip(collision), shift(collision),
         size({ ...collision, apply: ({ availableHeight, availableWidth }) => {
-          if (current) Object.assign(content.style, { maxHeight: `${Math.max(0, availableHeight)}px`, maxWidth: `${Math.max(0, Math.min(420, availableWidth))}px` })
+          if (current) {
+            content.dataset.heightConstrained = 'false'
+            const headerHeight = content.querySelector('.agent-work-dialog__header')?.getBoundingClientRect().height ?? 52
+            const footerHeight = content.querySelector('.agent-work-setup__actions')?.getBoundingClientRect().height ?? 60
+            content.dataset.heightConstrained = availableHeight < headerHeight + footerHeight + 48 ? 'true' : 'false'
+            Object.assign(content.style, { maxHeight: `${Math.max(0, availableHeight)}px`, maxWidth: `${Math.max(0, Math.min(420, availableWidth))}px` })
+          }
         } })] })
       if (current) Object.assign(content.style, { left: `${result.x}px`, top: `${result.y}px`, visibility: 'visible' })
     }
@@ -63,10 +70,12 @@ export function LauncherAgentDevice({ hosts, workspace, agentWorkspace, explicit
       <AgentWorkModeBadge sourceSelection={sourceExecution} placement={placement} hosts={hosts} showLocal hideTooltip={open || !active} /><span className="launcher-work-arrangement__name">{agentLabel}</span><DownIcon size={11} /></button></Dialog.Trigger></span>
     <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Content ref={attach} className="launcher-work-arrangement__dialog" style={{ visibility: 'hidden' }}
-        onOpenAutoFocus={event => { event.preventDefault(); surface.current?.focus({ preventScroll: true }) }}>
-        <Dialog.Title>Choose the Agent’s device</Dialog.Title>
-        <Dialog.Description>Choose a device to run the Agent for this project.</Dialog.Description>
+        onOpenAutoFocus={event => { event.preventDefault(); const field = surface.current?.querySelector<HTMLButtonElement>('[aria-label="Agent runs on"]'); if (field) field.focus({ preventScroll: true }); else surface.current?.focus({ preventScroll: true }) }}>
+        <div className="agent-work-dialog__header"><Dialog.Title>Choose the Agent’s device</Dialog.Title>
+          <button type="button" className="icon-button" aria-label="Close Agent device editor" title="Close Agent device editor" onClick={() => setOpen(false)}><CloseIcon size={14} /></button></div>
+        <Dialog.Description className="agent-work-dialog__description">Choose a device to run the Agent for this project. The project and your draft stay here. Apply only changes this Launcher; Launch starts the task.</Dialog.Description>
         <AgentWorkModeSetup config={{ hosts, workspaces }} active={active && open} allowLocal sourceTargets actionLabel="Apply" disabled={disabled}
+          presentation="anchored-editor" menuBoundary={anchor?.closest<HTMLElement>('[data-workbench-region-id]') ?? null}
           fixedResourceWorkspaceId={workspace.id}
           initialSelection={{ resourceWorkspaceId: workspace.id, agentWorkspaceId: explicitAgentWorkspaceId ?? null, ...(sourceExecution ? { source: sourceExecution } : {}) }}
           onCancel={() => setOpen(false)} onApply={selection => { const applied = onSelect(selection); if (applied) setOpen(false); return applied }} />

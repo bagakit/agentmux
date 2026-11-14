@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import type { AgentOpenDescription } from '@agentmux/core/agent-open-contract'
 import type { AgentMuxSpaceAgentTarget } from '@agentmux/core'
 import type { HostRouteChoices } from '@agentmux/core/host-route'
@@ -11,15 +11,22 @@ import { configValuesEqual } from '../../../shared/config-edit'
 import { mountedRegistrationInput, mountedRegistrationKey, type MountedSpaceRegistrationInput } from '../lib/space-mount-view'
 import { checkpointMountedSpaceInputs, useAppStore, type LauncherExecutionSelection } from '../store'
 import { SelectionField } from './SelectionField'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { AgentWorkProjectAnchor } from './AgentWorkProjectAnchor'
 import type { LauncherSourceCoordinatorExecution } from '../lib/launcher-source'
 
+const RefreshIcon = semanticIconComponent('action.refresh')
+
 /** Chooses identities in the project's original Core realm. Preparation creates no Agent. */
-export function SourceAgentTargetSetup({ config, active, initialSelection, fixedResourceWorkspaceId, actionLabel, preparationNote, disabled, onApply, onCancel, onOpenHost }: {
+export function SourceAgentTargetSetup({ config, active, initialSelection, fixedResourceWorkspaceId, actionLabel, preparationNote, disabled, onApply, onCancel, onOpenHost, presentation, menuBoundary, onChooseCustom, setupRef }: {
   config: Pick<AppConfig, 'hosts' | 'workspaces'>; active: boolean; initialSelection?: LauncherExecutionSelection | undefined
   fixedResourceWorkspaceId?: string | undefined; actionLabel: string; disabled?: boolean | undefined
   preparationNote?: string | undefined
   onApply(selection: LauncherExecutionSelection): boolean | void | Promise<boolean | void>
   onCancel?: (() => void) | undefined; onOpenHost?: ((hostId: string) => void) | undefined
+  presentation?: 'anchored-editor' | undefined; menuBoundary?: HTMLElement | null | undefined
+  onChooseCustom?: (() => void) | undefined
+  setupRef?: RefObject<HTMLDivElement | null> | undefined
 }) {
   const [projectId, setProjectId] = useState(fixedResourceWorkspaceId ?? initialSelection?.resourceWorkspaceId ?? '')
   const project = config.workspaces.find(item => item.id === (fixedResourceWorkspaceId ?? projectId))
@@ -126,13 +133,23 @@ export function SourceAgentTargetSetup({ config, active, initialSelection, fixed
     } catch (cause) { if (current.current.active && current.current.identity === originalIdentity) setIssue(presentError(cause)) }
     finally { producer.current = false; setPending(false) }
   }
-  return <div className="agent-work-setup" data-source-arrangement aria-busy={pending || undefined}>
-    {fixedResourceWorkspaceId ? <div className="agent-work-project-anchor"><div><strong>{project?.name ?? 'Original project unavailable'}</strong><span>{host?.label}</span><code>{project?.path}</code></div></div>
-      : <SelectionField label="Project for this arrangement" value={projectId} disabled={disabled || !active || pending}
+  const anchored = presentation === 'anchored-editor'
+  const supported = description && (independent ? description.contracts.externalAssociation : description.contracts.ordinaryLaunch)
+  const requiredContract = independent ? description?.contracts.externalAssociation : description?.contracts.ordinaryLaunch
+  const hostRecovery = Boolean(description && !requiredContract) || Boolean(contractIssue)
+  const hostLink = host && onOpenHost ? <button type="button" className={anchored ? 'small-button' : 'agent-work-text-action'} onClick={() => onOpenHost(host.id)}>{description && !requiredContract ? `Open ${host.label} to update Core` : 'Project device settings'}</button> : null
+  const compatibilityText = `${independent ? 'The project device accepts a link to the original Coordinator’s Agent.' : 'The project device accepts complete launch fields.'} Native tool qualification is checked during Launch preparation.`
+  const compatibility = supported ? <div className="agent-work-compatibility"><strong>Launch compatibility</strong><p>{compatibilityText}</p></div> : null
+  return <div ref={setupRef} tabIndex={-1} className="agent-work-setup" data-source-arrangement data-presentation={presentation} aria-busy={pending || undefined}>
+    <div className="agent-work-setup__body">
+    {fixedResourceWorkspaceId ? <AgentWorkProjectAnchor project={project} hostLabel={host?.label} compact={anchored} />
+      : <SelectionField label="Project for this arrangement" value={projectId} disabled={disabled || !active || pending} menuBoundary={menuBoundary ?? null}
         options={[{ value: '', label: 'Choose a registered project…' }, ...config.workspaces.filter(item => !isScratchWorkspaceId(item.id)).map(item => ({ value: item.id, label: item.name, description: `${config.hosts.find(host => host.id === item.hostId)?.label ?? item.hostId} · ${item.path}` }))]}
         onValueChange={id => { setProjectId(id); setSelected(undefined); setIndependent(false); setIssue(undefined) }} />}
     <div className="agent-work-device-choice">
-      <SelectionField label="Agent runs on" value={choiceKey} disabled={disabled || !active || pending} onValueChange={value => {
+      {anchored ? <div className="agent-work-device-choice__label"><span className="agent-work-end__label">Agent runs on</span>
+        <button type="button" className="icon-button" aria-label="Refresh Agent device choices" title="Refresh Agent devices known by the project device" disabled={!active || pending} onClick={() => setRefresh(value => value + 1)}><RefreshIcon size={13} /></button></div> : null}
+      <SelectionField label="Agent runs on" value={choiceKey} disabled={disabled || !active || pending} menuBoundary={menuBoundary ?? null} onValueChange={value => {
         if (value === 'independent-coordinator') { setIndependent(true); setSelected(undefined); return }
         setIndependent(false)
         const route = routes?.routes.find(item => JSON.stringify(['route', item.agentTarget]) === value)
@@ -152,13 +169,17 @@ export function SourceAgentTargetSetup({ config, active, initialSelection, fixed
       ? independent ? `Update AgentMux Core on ${host?.label ?? 'the project device'} before linking this Reach Agent. This Core does not support an external Coordinator reference.`
         : `Update AgentMux Core on ${host?.label ?? 'the project device'} before launching this arrangement. The current Core cannot retain its complete launch fields.`
       : contractIssue ? `The project device’s launch support is unconfirmed. ${contractIssue}` : 'Reading launch support…'}</p> : null}
-    {description && (independent ? description.contracts.externalAssociation : description.contracts.ordinaryLaunch) ? <details><summary>Launch compatibility</summary><p>{independent ? 'The project device accepts a link to the original Coordinator’s Agent.' : 'The project device accepts complete launch fields.'} Native tool qualification is checked during Launch preparation.</p></details> : null}
+    {anchored ? (compatibility || hostLink && !hostRecovery || onChooseCustom ? <details className="agent-work-startup"><summary>Startup & device details</summary><div className="agent-work-setup__details-body">
+      {compatibility}
+      <div className="agent-work-setup__utility-actions">{!hostRecovery ? hostLink : null}{onChooseCustom ? <button type="button" className="small-button agent-work-setup__custom-startup" onClick={onChooseCustom}>Choose a custom startup directory</button> : null}</div>
+    </div></details> : null) : compatibility ? <details><summary>Launch compatibility</summary><p>{compatibilityText}</p></details> : null}
     {issue || resourceIssue ? <p className="agent-work-setup__error" role="status">{issue ?? resourceIssue}</p> : null}
     {choiceIssue || routeIssue ? <details><summary>Other Agent devices unconfirmed</summary><p>{choiceIssue}</p><p>{routeIssue}</p></details> : null}
-    {host && onOpenHost ? <button type="button" className="agent-work-text-action" onClick={() => onOpenHost(host.id)}>{description && !description.contracts.ordinaryLaunch ? `Open ${host.label} to update Core` : 'Project device settings'}</button> : null}
+    {!anchored || hostRecovery ? hostLink : null}
+    </div>
     <footer className="agent-work-setup__actions"><span>{preparationNote ?? 'Applies to this Launcher. Launch starts the task.'}</span><div>
       {onCancel ? <button type="button" className="small-button" onClick={onCancel}>Cancel</button> : null}
-      <button type="button" className="small-button" disabled={!active || pending} onClick={() => setRefresh(value => value + 1)}>Refresh</button>
+      {!anchored ? <button type="button" className="small-button" disabled={!active || pending} onClick={() => setRefresh(value => value + 1)}>Refresh</button> : null}
       <button type="button" className="primary-button" disabled={disabled || !active || pending || !project || !target || independent && !coordinator} onClick={() => void prepare()}>{pending ? 'Preparing…' : actionLabel}</button>
     </div></footer>
   </div>
