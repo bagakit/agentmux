@@ -192,3 +192,20 @@ it('a valid reverse-route removal refuses only rejoin, while restoring the origi
   facts.push({ case: 'default-reverse-removal-and-wait-rejoin', source: 'authoritySource' in original!.input!.author ? original!.input!.author.authoritySource : null, ref: before.ref,
     originalControlOperationId: before.originalControlOperationId, after: (await f.e.rpc.call('agent.input.inspect', { key: before.key })).input })
 })
+
+it('the default Host observes its saved local record, so a CLI network read answers instead of reporting a missing configuration', async () => {
+  const f = await fixture()
+  const tailcat = { enabled: false, keyFile: '', allowedClients: [] }
+  await f.config([{ ...local, tailcat }])
+  const h = await f.start()
+  let network: any
+  await vi.waitFor(async () => { network = await h.rpc.call('settings.hosts.network', { hostId: 'local' }) }, { timeout: 15_000 })
+  expect(network.configuration).toEqual({ ...local, tailcat })
+  expect(network.target).toMatchObject({ state: 'available', value: { sample: { owner: { runtimeId: h.owner.runtimeId } } } })
+  expect(network.ssh).toBeNull()
+  const inspected = await h.rpc.call('settings.hosts.inspect', { hostId: 'local' })
+  expect(inspected.configuration).toEqual({ ...local, tailcat })
+  // A later saved edit is the record the next observation is bound to.
+  await f.config([{ ...local, label: 'Renamed local Host', tailcat }])
+  await vi.waitFor(async () => expect((await h.rpc.call('settings.hosts.network', { hostId: 'local' })).configuration.label).toBe('Renamed local Host'), { timeout: 15_000 })
+})
