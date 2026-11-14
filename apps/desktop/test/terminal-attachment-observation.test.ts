@@ -73,3 +73,14 @@ it('reports synchronous late-release failure and preserves the original reply', 
   original.resolve(receipt); await expect(original.promise).resolves.toBe(receipt)
   expect(warning).toHaveBeenCalledExactlyOnceWith('[terminal] Late Attachment release was not acknowledged', error)
 })
+
+it('a retired explicit source releases its late lease through that source and never the observer-local API', async () => {
+  const original = deferred<SessionAttachResult>(), lifetime = new AbortController()
+  const local = vi.spyOn(api.sessions, 'detach'), exactSource = vi.fn(async () => {})
+  const reader = observeTerminalAttachment(original.promise, lifetime.signal, null, exactSource)
+  const reason = Symbol('source-retired'); lifetime.abort(reason)
+  await expect(reader).rejects.toBe(reason)
+  original.resolve(result('foreign-late-lease')); await original.promise
+  expect(exactSource).toHaveBeenCalledExactlyOnceWith('foreign-late-lease')
+  expect(local).not.toHaveBeenCalled()
+})

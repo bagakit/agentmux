@@ -1,6 +1,7 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act, createElement, type ReactNode } from 'react'
+import { tmpdir } from 'node:os'
 import { createRoot, type Root } from 'react-dom/client'
 import type { Terminal as BrowserTerminal } from '@xterm/xterm'
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest'
@@ -11,10 +12,13 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { TerminalView } from '../src/renderer/src/components/TerminalView'
+import type { TerminalSessionSource } from '../src/renderer/src/lib/terminal-session-source'
 import { TERMINAL_REPLAY_BATCH_BYTES } from '@agentmux/client-ui/terminal/replay'
 import { rendererPerformance } from '../src/renderer/src/lib/renderer-performance'
 import { parseRendererPerformanceSnapshot } from '@agentmux/core/control'
 import { readTerminalViewObservation } from '../src/renderer/src/lib/terminal-view-observation'
+
+vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 
 // Real public xterm parser/buffers/modes, TerminalView, Store and viewport synchronizer.
 // DOM painting/addons and Runtime IPC transport are fixture boundaries. Root's Native gate
@@ -87,9 +91,9 @@ function replay(data: string, current: SessionSnapshot = session): SessionAttach
   return { attachmentId: 'wheel-attachment', session: current, currentSize: { cols: 80, rows: 24 }, gap: null, terminal: { type: 'unknown', reason: 'origin_unknown' }, resizeRevision: 0,
     replay: [{ type: 'data', runId: current.control.run.runId, startByte: 0, endByte: data.length, data, dataBytes: new TextEncoder().encode(data) }] }
 }
-async function render(current: SessionSnapshot = session, visible = true, linkOrigin = origin) {
+async function render(current: SessionSnapshot = session, visible = true, linkOrigin = origin, sessionSource?: TerminalSessionSource) {
   await act(async () => root.render(createElement(TerminalView, { session: current,
-    interactiveResize: false, visible, autoFocus: false, themeId: configuration.appearance.terminalTheme, linkOrigin,
+    interactiveResize: false, visible, autoFocus: false, ...(sessionSource ? { sessionSource } : {}), themeId: configuration.appearance.terminalTheme, linkOrigin,
     onObservationRefresh: (refresh: (() => Promise<void>) | null) => { refreshObservation = refresh } })))
 }
 async function ready(result: SessionAttachResult) {
@@ -723,4 +727,150 @@ it('releases unused local default capacity to the current owner policy without c
   const terminal=await ready(result)
   expect(terminal.options.scrollback).toBe(7)
   expect(contents(terminal)).toContain('ORIGINAL')
+})
+
+it('an explicit member source runs the real Terminal reader through original Core and trusted Main without observer-local IO',async()=>{
+  const { createSpaceSessionsFixture } = await import('../../../packages/core/test/helpers/space-session-fixture')
+  const { AgentProviderRegistry } = await import('../../../packages/core/src/agent-provider')
+  const { DEFAULT_CONFIG } = await import('../src/main/config-store')
+  const { spaceMountTransport } = await import('./helpers/space-mount-fixture')
+  const { spaceMemberTerminalSource } = await import('../src/renderer/src/lib/space-member-terminal')
+  const cleanup:Array<()=>unknown|Promise<unknown>>=[]
+  try {
+    const f=await createSpaceSessionsFixture(cleanup),sid='original-scoped-terminal'
+    f.d.core.providers.register(new AgentProviderRegistry().get('codex'))
+    const original=await f.d.put(sid),admitted=await f.admit('D-in-B',f.d.owner.runtimeId,sid,'scoped-terminal-creation')
+    const subject=await f.d.core.runtimeSubject({kind:'agent-session',agentSessionId:sid})
+    if(subject.kind!=='agent')throw Error('Expected original Agent subject')
+    const data='source-D-only\r\n',bytes=new TextEncoder().encode(data)
+    const attachment:AgentMuxRunAttachment={run:subject.run,gap:null,resizeRevision:0,terminal:{type:'unknown',reason:'origin_unknown'},
+      replay:[{type:'data',runId:original.run.runId,startByte:0,endByte:bytes.length,data,dataBytes:bytes}]}
+    const nativeReader=vi.spyOn(f.d.core,'refreshRunAttachment').mockResolvedValue(attachment)
+    const nativeRelease=vi.spyOn(f.d.core,'releaseRunAttachment').mockResolvedValue()
+    const nativeWrite=vi.spyOn(f.d.core,'writeAgent').mockResolvedValue({runId:original.run.runId,appliedByteRange:{startByte:0,endByte:4},acceptedThroughByte:4})
+    const carrier={forwardRpc:f.b.rpc.call.bind(f.b.rpc),subscribeRpc:f.b.rpc.subscribe.bind(f.b.rpc)}
+    const main=spaceMountTransport(cleanup,[{id:'source-b-carrier',carrier}],structuredClone(DEFAULT_CONFIG))
+    const listeners=new Set<(event:RuntimeEvent)=>void>()
+    const surface=await main.api.member({hostId:'source-b-carrier',target:{reference:f.reference,regionId:admitted.address.regionId,runtimeId:f.d.owner.runtimeId,agentSessionId:sid,expectedRun:original.run}},event=>{if(event.type==='runtime')listeners.forEach(listener=>listener(event.event))})
+    cleanup.push(()=>surface.dispose())
+    const current=await surface.call('read',{})
+    if(current.kind!=='agent')throw Error('Expected the original Agent snapshot')
+    const source=spaceMemberTerminalSource(surface,{reference:f.reference,regionId:admitted.address.regionId,runtimeId:f.d.owner.runtimeId,agentSessionId:sid,expectedRun:original.run},listener=>{listeners.add(listener);return()=>{listeners.delete(listener)}})
+    const before=useAppStore.getState(),localDetach=vi.mocked(api.sessions.detach)
+    attach.mockClear();write.mockClear();localDetach.mockClear()
+    await render(current,true,origin,source)
+    await act(async()=>{await vi.waitFor(()=>expect(fixture.terminals).toHaveLength(1));await vi.waitFor(()=>expect(contents(fixture.terminals[0]!)).toContain('source-D-only'))})
+    fixture.terminals[0]!.input('ping')
+    await vi.waitFor(()=>expect(nativeWrite).toHaveBeenCalledTimes(1))
+    expect(nativeWrite.mock.calls[0]![0]).toMatchObject({agentSessionId:sid,expectedRun:original.run,data:'ping'})
+    const openExternal=vi.spyOn(api.ui,'openExternal').mockResolvedValue()
+    const activate=fixture.terminals[0]!.options.linkHandler?.activate
+    if(!activate)throw Error('Expected the actual original Terminal link handler')
+    const range={start:{x:1,y:1},end:{x:5,y:1}}
+    await act(async()=>activate(new MouseEvent('mouseup',{button:0}),'https://example.test/original-public',range))
+    expect(openExternal).toHaveBeenCalledExactlyOnceWith('https://example.test/original-public')
+    for(const url of ['http://localhost:3000','http://LOCALHOST.:3000','http://127.42.0.1:3000','http://127.1:3000','http://0x7f000001:3000','http://2130706433:3000','http://[::1]:3000','http://[0:0:0:0:0:0:0:1]:3000','http://[::ffff:127.2.3.4]:3000']){
+      await act(async()=>activate(new MouseEvent('mouseup',{button:0}),url,range))
+      expect(openExternal).toHaveBeenCalledTimes(1)
+    }
+    expect(useAppStore.getState().error).toContain('original Agent device')
+    const openObject=vi.spyOn(api.ui,'openObjectLink').mockResolvedValue()
+    for(const uri of ['amux://agent/same-id','amux://capsule/same-id','amux://host/original-node/agent/same-id']){
+      await act(async()=>activate(new MouseEvent('mouseup',{button:0}),uri,range))
+      expect(openObject).not.toHaveBeenCalled()
+    }
+    for(const uri of ['amux://host/original-node/agent/same-id?runtime=exact-D-runtime','amux://host/original-node/capsule/same-id?runtime=exact-D-runtime']){
+      await act(async()=>activate(new MouseEvent('mouseup',{button:0}),uri,range))
+      expect(openObject).toHaveBeenLastCalledWith(uri)
+    }
+    expect(openObject).toHaveBeenCalledTimes(2)
+
+    const wrong={...current, id:'another-visible-view', control:{...current.control,agentSessionId:'other-visible-sid',run:{runId:'other-visible-run'}}}
+    for(const control of [{...current.control,hostId:'another-visible-host'},{...current.control,agentSessionId:'another-visible-sid'},{...current.control,run:{runId:'another-visible-run'}}])
+      await expect(source.sessions.write(control,'must-not-reach-D','user')).rejects.toThrow('another original Session or Run')
+    expect(nativeWrite).toHaveBeenCalledTimes(1)
+    await render(wrong,true,origin,source)
+    await act(async()=>{await vi.waitFor(()=>expect(container.textContent).toContain('another original Session or Run'))})
+    fixture.terminals.at(-1)!.input('wrong')
+    await act(async()=>{await Promise.resolve()})
+    expect(nativeWrite).toHaveBeenCalledTimes(1)
+    await expect(source.sessions.attach(wrong.control,0)).rejects.toThrow('another original Session or Run')
+    await expect(source.sessions.refreshAttachment(wrong.control,null,0)).rejects.toThrow('another original Session or Run')
+    await expect(source.sessions.paste(wrong.control,'bad','bad')).rejects.toThrow('another original Session or Run')
+    await expect(source.refresh(wrong.control)).rejects.toThrow('another original Session or Run')
+    expect(()=>source.sessions.onEvent(()=>{},wrong.control)).toThrow('another original Session or Run')
+    await source.sessions.write(current.control,'ping','user')
+    expect(nativeWrite).toHaveBeenCalledTimes(2)
+
+    expect(nativeReader).toHaveBeenCalledExactlyOnceWith(original.run,0,'terminal')
+    expect(attach).not.toHaveBeenCalled();expect(write).not.toHaveBeenCalled()
+    expect(useAppStore.getState().sessions).toBe(before.sessions)
+    await act(async()=>root.render(null))
+    await vi.waitFor(()=>expect(nativeRelease).toHaveBeenCalledTimes(1))
+    expect(localDetach).not.toHaveBeenCalled();expect(listeners.size).toBe(0)
+  }finally{for(const close of cleanup.reverse())await close()}
+})
+
+it('the mounted Agent workface consumes the real member handle for original Terminal and rich Composer without joining observer Sessions',async()=>{
+  const {createSpaceSessionsFixture}=await import('../../../packages/core/test/helpers/space-session-fixture')
+  const {AgentProviderRegistry}=await import('../../../packages/core/src/agent-provider')
+  const {DEFAULT_CONFIG}=await import('../src/main/config-store')
+  const {spaceMountTransport}=await import('./helpers/space-mount-fixture')
+  const {MountedSpaceAgent}=await import('../src/renderer/src/components/MountedSpaceAgent')
+  const {DesktopClientUiProvider}=await import('../src/renderer/src/components/DesktopClientUiProvider')
+  const {spaceMountKey}=await import('../src/shared/space-mount')
+  const store=await import('../src/renderer/src/store')
+  const cleanup:Array<()=>unknown|Promise<unknown>>=[]
+  try{
+    const f=await createSpaceSessionsFixture(cleanup),sid='original-visible-member'
+    f.d.core.providers.register(new AgentProviderRegistry().get('codex'))
+    const original=await f.d.put(sid),admitted=await f.admit('D-in-B',f.d.owner.runtimeId,sid,'visible-member-creation')
+    const tabId=admitted.address.tabId,zoneId=admitted.address.zoneId;if(!zoneId)throw Error('Expected original admitted Zone');if(!tabId)throw Error('Expected original admitted Tab')
+    const subject=await f.d.core.runtimeSubject({kind:'agent-session',agentSessionId:sid});if(subject.kind!=='agent')throw Error('Expected original Agent')
+    const data='The original D terminal\r\n',dataBytes=new TextEncoder().encode(data)
+    vi.spyOn(f.d.core,'refreshRunAttachment').mockResolvedValue({run:subject.run,gap:null,resizeRevision:0,terminal:{type:'unknown',reason:'origin_unknown'},replay:[{type:'data',runId:original.run.runId,startByte:0,endByte:dataBytes.length,data,dataBytes}]})
+    const release=vi.spyOn(f.d.core,'releaseRunAttachment').mockResolvedValue()
+    const bytes=vi.spyOn(f.d.core,'writeAgent').mockResolvedValue({runId:original.run.runId,appliedByteRange:null,acceptedThroughByte:1})
+    const prompt=vi.spyOn(f.d.core,'submitAgentPrompt').mockResolvedValue(undefined)
+    const main=spaceMountTransport(cleanup,[{id:'original-B-carrier',carrier:{forwardRpc:f.b.rpc.call.bind(f.b.rpc),subscribeRpc:f.b.rpc.subscribe.bind(f.b.rpc)}}],structuredClone(DEFAULT_CONFIG))
+    let memberToken:unknown
+    const originalMemberOpen=main.handlers.get('spaceMounts:member')!
+    main.handlers.set('spaceMounts:member',(event,...args)=>{memberToken=args[0];return originalMemberOpen(event,...args)})
+    let deliver:Parameters<typeof api.spaceMounts.member>[1]=()=>{}
+    // Only the general session event delivery is unavailable; the original fixed read/IO remain real.
+    vi.spyOn(api.spaceMounts,'member').mockImplementation((input,listener,signal)=>{deliver=listener;listener({type:'observation-error',error:{code:'PRIVATE_UPDATES_UNAVAILABLE',message:'Private session updates unavailable'}});return main.api.member(input,event=>{if(event.type!=='session')listener(event)},signal)})
+    const target={hostId:'original-B-carrier',target:{reference:f.reference,regionId:admitted.address.regionId,runtimeId:f.d.owner.runtimeId,agentSessionId:sid,expectedRun:original.run}},key=spaceMountKey(f.reference)
+    useAppStore.getState().mountSpace({hostId:target.hostId,reference:f.reference,zoneId,workspaceId:'original-b-project'})
+    useAppStore.getState().editSpaceMountDraft(key,tabId,admitted.address.regionId,'Original visible rich message')
+    const checkpoint=vi.spyOn(store,'checkpointMountedSpaceInputs').mockResolvedValue()
+    const sessions=useAppStore.getState().sessions
+    const view=(visible:boolean)=><DesktopClientUiProvider><MountedSpaceAgent target={target} visible={visible} active={visible} mountKey={key} tabId={tabId}/></DesktopClientUiProvider>
+    await act(async()=>root.render(view(true)))
+    await vi.waitFor(async()=>{await act(async()=>{});expect(container.querySelector('[aria-label="Send new message"]')).not.toBeNull();expect(fixture.terminals,container.textContent??'').toHaveLength(1);expect(contents(fixture.terminals[0]!)).toContain('The original D terminal')})
+    expect(container.textContent).toContain('Private session updates unavailable')
+    fixture.terminals[0]!.input('x');await vi.waitFor(()=>expect(bytes).toHaveBeenCalledOnce())
+    await act(async()=>container.querySelector<HTMLButtonElement>('[aria-label="Send new message"]')!.click())
+    await vi.waitFor(()=>expect(prompt).toHaveBeenCalledOnce())
+    expect(prompt.mock.calls[0]![0]).toMatchObject({agentSessionId:sid,expectedRun:original.run,prompt:'Original visible rich message'})
+    expect(checkpoint).toHaveBeenCalledOnce();expect(useAppStore.getState().sessions).toBe(sessions)
+    expect(attach).not.toHaveBeenCalled();expect(write).not.toHaveBeenCalled()
+    expect(container.textContent).not.toContain('Stop Agent');expect(container.textContent).not.toContain('Approve')
+    const handle=await vi.mocked(api.spaceMounts.member).mock.results[0]!.value,confirmed=await handle.call('read',{})
+    await act(async()=>deliver({type:'session',session:confirmed}))
+    expect(container.textContent).not.toContain('Private session updates unavailable')
+    expect(typeof memberToken).toBe('string')
+    await act(async()=>{expect(()=>main.renderer.emit('spaceMounts:memberEvent',{}, {token:memberToken,observation:{type:'error',error:{code:'PRIVATE_READER_CLOSED',message:'Private member reader closed'}}})).not.toThrow()})
+    await vi.waitFor(()=>expect(release).toHaveBeenCalledOnce())
+    expect(container.textContent).toContain('Private member reader closed')
+    const rich=container.querySelector<HTMLElement & {editor:import('@tiptap/core').Editor}>('[role="textbox"]')!
+    expect(rich).not.toBeNull()
+    await act(async()=>{rich.editor.commands.setContent({type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'Explicit message after observer closed'}]}]})})
+    await act(async()=>container.querySelector<HTMLButtonElement>('[aria-label="Send new message"]')!.click())
+    await vi.waitFor(()=>expect(prompt).toHaveBeenCalledTimes(2))
+    expect(prompt.mock.calls[1]![0]).toMatchObject({agentSessionId:sid,expectedRun:original.run,prompt:'Explicit message after observer closed'})
+    expect(useAppStore.getState().sessions).toBe(sessions);expect(bytes).toHaveBeenCalledOnce()
+    await act(async()=>root.render(view(false)))
+    expect(await f.d.core.readAgentSession(sid)).toMatchObject({run:original.run})
+    await act(async()=>root.render(null))
+  }finally{for(const close of cleanup.reverse())await close()}
 })
