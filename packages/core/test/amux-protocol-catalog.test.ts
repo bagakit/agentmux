@@ -43,6 +43,10 @@ describe('source-owned amux reading catalog', () => {
   it('classifies only the complete registered platform declaration', () => {
     const human = 'Mote main heartbeat. Continue the calendar automation.'
     expect(parseAgentMuxMessagePrefix(composeAgentPrompt(human, 'Read the original instructions.').text)?.declaredTrigger).toBeUndefined()
+    const quoted = composeAgentPrompt(human, formatAmuxTriggerNote('heartbeat', 'Example.')).text
+    const ordinary = parseAgentMuxMessagePrefix(composeAgentPrompt(quoted, 'Read the original instructions.').text)
+    expect(ordinary?.declaredTrigger).toBeUndefined()
+    expect(ordinary?.body).toBe('\n\n' + quoted)
     for (const header of ['<trigger kind="invented"/>', '<trigger kind="heartbeat" actor="agent"/>', '<trigger kind="calendar"/><trigger kind="automation"/>']) {
       expect(parseAgentMuxMessagePrefix(`<amux>\n${header}\nOriginal source.\n</amux>\n\n${human}`)).toBeNull()
     }
