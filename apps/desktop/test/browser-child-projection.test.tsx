@@ -551,6 +551,26 @@ it.each(['window', 'tab'] as const)('a pending Core save does not gate the healt
   } finally { finish(); await completing }
 })
 
+it('foreground native windows keep delayed focus tied to the original selected workface', async () => {
+  useAppStore.setState({ mainSurface: 'workbench', workbenchSpaceSelection: {
+    workspaceId: sourceLocation.displayWorkspaceId, groupId: sourceLocation.groupId, tabId: sourceLocation.tabId,
+    regionId: sourceLocation.regionId, spaceId: null, zoneId: 'original-zone', topicId: null } })
+  const opening = { ...event, opening: { context: { surface: 'space' as const, reference: sourceLocation, view: 'tab' as const },
+    destination: 'window' as const, foreground: true } }
+  const projected = projectNativeBrowserOpening(useAppStore.getState(), opening)
+  useAppStore.setState(projected.state)
+  const { finishNativeBrowserOpening } = await import('../src/renderer/src/lib/browser-native-opening')
+  const openWindow = vi.fn(async (_target: unknown, _context: unknown, shouldFocus?: () => boolean) => {
+    expect(shouldFocus?.()).toBe(true)
+    useAppStore.setState({ mainSurface: 'survey' })
+    expect(shouldFocus?.()).toBe(false)
+  })
+  await finishNativeBrowserOpening({ get: useAppStore.getState, checkpoint: async () => {}, openWindow, reveal: vi.fn() },
+    opening, projected.target!, 'window')
+  expect(openWindow).toHaveBeenCalledOnce()
+  expect(childSurface()?.browserId).toBe(snapshot.id)
+})
+
 it('a repeated native opening cannot clear an unconfirmed save on the same healthy child', async () => {
   const projection = projectNativeBrowserOpening(useAppStore.getState(), event); useAppStore.setState(projection.state)
   const {finishNativeBrowserOpening} = await import('../src/renderer/src/lib/browser-native-opening')
