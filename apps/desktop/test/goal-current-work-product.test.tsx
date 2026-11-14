@@ -45,6 +45,8 @@ it('original ended finite work dominates clarification in the actual Goal detail
   expect(action('Open original Agent').classList.contains('primary-button')).toBe(true)
   expect(actions().filter(button => button.classList.contains('primary-button')).map(button => button.textContent?.trim())).toEqual(['Open original Agent'])
   const currentRecord = container.querySelector(`[data-goal-work-kind="start"][data-goal-work-operation="${original.operationId}"]`)!
+  await act(async () => action('View current work').click())
+  expect(document.activeElement).toBe(currentRecord)
   const responsibility = current.responsibility!.executions.find(row => row.execution.kind === 'start' && row.execution.operationId === original.operationId)!
   expect(responsibility).toBeDefined()
   expect(currentRecord.querySelector('.goal-work__responsibility details')?.textContent, 'Full original responsibility remains readable in its own source disclosure').toContain(responsibility.reason)
@@ -69,6 +71,10 @@ it('a restored unknown Start keeps its exact operation and recipient through rea
   await mount(id)
   await vi.waitFor(() => expect(container.querySelector('[data-goal-current-conclusion]')?.textContent).toBe('Original task input unconfirmed'))
   await vi.waitFor(() => expect(action('Inspect original Start').disabled).toBe(false))
+  const originalReads = inspect.mock.calls.length
+  await act(async () => action('View current work').click())
+  expect(document.activeElement).toBe(container.querySelector(`[data-goal-retained-operation="${original.operationId}"]`))
+  expect(inspect).toHaveBeenCalledTimes(originalReads)
   await act(async () => action('Inspect original Start').click())
   await vi.waitFor(() => expect(action('Inspect original Start').disabled).toBe(false))
   expect(inspect).toHaveBeenCalledWith({ goalId: id, operationId: original.operationId })

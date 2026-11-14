@@ -63,6 +63,8 @@ describe('Goal plan graph', () => {
     const head = detail.querySelector('.goals-detail__head')!
     expect(head.firstElementChild?.getAttribute('aria-label')).toBe('Goal title')
     expect(head.querySelector('[data-goal-detail-stage] strong')?.textContent).toBeTruthy()
+    expect(detail.querySelector('[data-goal-reading-section="activity"]')).toBeNull()
+    expect([...detail.querySelectorAll('.goals-detail__reading-nav button')].some(button => button.textContent === 'Activity')).toBe(false)
     expect(main.querySelector('.goal-collaboration')).toBeNull()
     const overview = main.querySelector('.goal-work-area__overview')!
     expect(overview.firstElementChild).toBe(main.querySelector('[aria-label="Goal brief"]'))
@@ -370,10 +372,11 @@ describe('plan graph navigation and list progress', () => {
     open.mockRestore()
   })
 
-  it('names remote tools from the exact Host-qualified Session snapshot', async () => {
+  it('reads the exact Host names in coordination and keeps the assignment index compact', async () => {
     const original = useAppStore.getState().sessions.find(session => session.kind === 'agent')!
     if (original.kind !== 'agent') throw new Error('An actual preview Agent snapshot is required')
-    seed(goal({ plan: plan(nodes), delegations: [{ ...reported('api'), hostId: 'owner-host', workerHostId: 'worker-host' }] }))
+    const review = { ...pass('api'), reviewer: { kind: 'agent' as const, id: 'worker-api', hostId: 'unobserved-host' } }
+    seed(goal({ plan: plan(nodes, [review]), delegations: [{ ...reported('api'), hostId: 'owner-host', workerHostId: 'worker-host' }] }))
     useAppStore.setState({ sessions: [
       { ...original, id: 'local-presentation', hostId: 'worker-host', control: { ...original.control, hostId: 'worker-host', agentSessionId: 'worker-api' },
         workPlacement: { agentHostId: 'worker-host', resourceHostId: 'tool-host' },
@@ -386,6 +389,13 @@ describe('plan graph navigation and list progress', () => {
     expect(who.textContent).toContain('Tools · tool-host')
     expect(who.textContent).not.toContain('Another Agent')
     expect(who.getAttribute('title')).toContain('/project/work')
+    const assignment = graph()!.querySelector('[aria-label="Task assignments"] button')!
+    expect(assignment.textContent).toContain('Exact execution lead')
+    expect(assignment.textContent).not.toContain('Tools')
+    const author = (event: string) => dom.container.querySelector(`[data-goal-coordination="${event}"] .goal-supervisor-rail__author`)
+    expect(author('report:d-api')?.textContent).toBe('Exact execution lead')
+    expect(author('report:d-api')?.getAttribute('title')).toBe('Agent worker-api · Host worker-host')
+    expect(author('review:rv-api')?.textContent).toBe('Agent worker-api · Host unobserved-host')
   })
 
   it('shows done over live nodes as a ring in the Goal row', async () => {
@@ -404,7 +414,8 @@ describe('plan graph navigation and list progress', () => {
 
 
 describe('Goal continuous reading', () => {
-  const addressed = () => goal({ description: 'Original outcome with precise spacing.  ', address: formatGoalAddress('goal', 'original-runtime', 'original-namespace') })
+  const addressed = () => goal({ description: 'Original outcome with precise spacing.  ', address: formatGoalAddress('goal', 'original-runtime', 'original-namespace'),
+    activities: [{ id: 'original-progress', kind: 'progress', message: 'Read the original outcome', createdAt: 1, actorId: 'worker' }] })
   const button = (text: string) => [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === text)!
 
   it('keeps the original Brief editor and draft mounted while moving between reading anchors', async () => {

@@ -12,6 +12,7 @@ import { chooseField } from './helpers/selection-field'
 
 const dom = composerDOM()
 const record = (): DemandRecord => ({ id: 'detail-reading', title: 'One continuous original Goal', description: 'Keep this original brief.  ', status: 'in_progress', priority: 'normal', projectId: null, projectName: null,
+  activities: [{ id: 'original-progress', kind: 'progress', message: 'Read the original brief', createdAt: 1, actorId: 'worker' }],
   source: 'session', sessionIds: [], createdAt: 1, updatedAt: 1, address: formatGoalAddress('detail-reading', 'original-runtime', 'original-namespace') })
 async function mount() {
   const goal = record()

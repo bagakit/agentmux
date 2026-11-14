@@ -23,8 +23,12 @@ it('the actual Goal work area collects the exact Core report through its Host ow
   const collect = [...record!.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Collect report')
   expect(collect).toBeDefined(); expect(collect!.classList.contains('primary-button')).toBe(true)
   const before = [...f.nativeInputs]
-  await act(async () => collect!.click())
   const calls = vi.mocked(api.demands.delegation)
+  const jump = container.querySelector<HTMLButtonElement>('.goals-detail__current-work')!
+  await act(async () => jump.click())
+  expect(document.activeElement).toBe(record)
+  expect(calls.mock.calls.some(([method]) => method === 'goal.collect')).toBe(false)
+  await act(async () => collect!.click())
   const collectionIndex = calls.mock.calls.findLastIndex(([method]) => method === 'goal.collect')
   expect(collectionIndex).toBeGreaterThanOrEqual(0)
   await act(async () => { await calls.mock.results[collectionIndex]!.value })

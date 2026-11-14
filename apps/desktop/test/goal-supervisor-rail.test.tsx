@@ -14,6 +14,7 @@ vi.mock('../src/renderer/src/components/GoalContinuationControl', () => ({
     <strong data-original-supervisor-host={hostId} data-original-supervisor-reference={JSON.stringify(agentSessionId)}>{hostId === 'source-host' ? 'Original Supervisor name' : 'Other Host name'}</strong>
 }))
 vi.mock('../src/renderer/src/lib/workbench-presentation', () => ({ useWorkbenchPresentationActive: () => true }))
+vi.mock('../src/renderer/src/lib/goal-discussion-recipient', () => ({ useGoalAgentName: () => null }))
 
 const node = (id: string): GoalPlanNodeInput => ({ id, title: `Task ${id}`, outcome: 'An observable result', dependsOn: [], criterionIds: ['criterion'], check: 'check result', executor: null })
 const delegation = (operationId: string, planNodeId = 'task'): DemandDelegation => ({ operationId, planNodeId, sourceMessageId: `message-${operationId}`,
