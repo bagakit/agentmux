@@ -105,7 +105,7 @@
 .focus-context-group[data-bucket='attention'] > .focus-context-group__header, .focus-project-lanes__status-rail > [data-visible-state='true'][data-bucket='attention'] { color: var(--amber); background: color-mix(in srgb, var(--amber) 5%, transparent); }
 .focus-context-group[data-bucket='working'] > .focus-context-group__header, .focus-project-lanes__status-rail > [data-visible-state='true'][data-bucket='working'] { color: var(--green); background: color-mix(in srgb, var(--green) 5%, transparent); }
 .focus-context-group[data-bucket='results'] > .focus-context-group__header, .focus-project-lanes__status-rail > [data-visible-state='true'][data-bucket='results'] { color: var(--blue); background: color-mix(in srgb, var(--blue) 5%, transparent); }
-.focus-context, .focus-context-card[data-focus-card-key] { --focus-selected-surface: color-mix(in srgb, var(--text) 10%, var(--surface-1)); }
+.focus-context, .focus-context-card[data-focus-card-key] { --focus-selected-surface: color-mix(in srgb, var(--text) 20%, var(--surface-1)); }
 .focus-context { width: 100%; min-width: 0; min-height: var(--focus-card-track-height, 52px); display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); text-align: left; cursor: pointer; }
 .focus-context--compact { min-height: 28px; height: 28px; padding-top: 0; padding-bottom: 0; }
 .focus-context--compact .focus-context__detail { display: none; }
@@ -344,7 +344,7 @@
 .focus-context-card[data-focus-heat='warm'] { background: color-mix(in srgb, var(--text-3) 4%, transparent); border-radius: var(--radius-sm); }
 .focus-context-card[data-focus-heat='cool'] { background: color-mix(in srgb, var(--text-3) 2%, transparent); border-radius: var(--radius-sm); }
 .focus-context-card[data-focus-card-key]:is(:hover, :focus-within) { background: var(--surface-2); }
-.focus-context-card[data-focus-card-key][data-focus-agent-selected='true'] { background: var(--focus-selected-surface); }
+.focus-context-card[data-focus-card-key][data-focus-agent-selected='true'] { background: var(--focus-selected-surface); outline: 1px solid color-mix(in srgb, var(--text) 35%, transparent); outline-offset: -1px; }
 .focus-context-card[data-focus-card-key][data-focus-agent-selected='true'] .focus-context.is-selected { background: transparent; }
 .focus-project-order-error { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
 
