@@ -1,10 +1,11 @@
 import { vi } from 'vitest'
 import { rpcOwnerFixture } from './public-rpc-owner.js'
 import type { AgentMuxStoredAgentSession } from '../../src/index.js'
+import type { AgentMuxClientOptions } from '../../src/client-contract.js'
 
 /** Original Core metadata/input owners with an isolated deterministic Runtime transport. */
-export async function creationInputOwner(postLaunch = false) {
-  const h = await rpcOwnerFixture(['source', 'neighbor'])
+export async function creationInputOwner(postLaunch = false, clientOptions?: (root: string) => Omit<AgentMuxClientOptions, 'store'>) {
+  const h = await rpcOwnerFixture(['source', 'neighbor'], undefined, undefined, clientOptions)
   const inner = h.client as any, original = h.client.providers.get('codex')
   const provider = { ...original, catalog: { ...original.catalog, ...(postLaunch ? { promptDelivery: 'post-launch-only' as const } : {}) },
     prepareManagedLaunch: async (plan: any) => ({ plan }) }

@@ -14,12 +14,14 @@ const AgentMuxFileAgentSessionStore: typeof SourceStore = ownerEntry ? ownerEntr
 import { issueAgentCapability, hashAgentCapability } from '../../src/agent-capability.js'
 import type { AgentMuxStoredAgentSession } from '../../src/types.js'
 import type { CtxmuxAdapterObservationEvent, CtxmuxAdapterRun } from '../../src/ctxmux-run-adapter.js'
+import type { AgentMuxClientOptions } from '../../src/client-contract.js'
 
 /** Real Core registry, authorization and journal; Runtime byte I/O is a deterministic port. */
 export async function rpcOwnerFixture<Client extends Pick<SourceClient, 'dispose'> = SourceClient, Store extends AgentMuxAgentSessionStore = SourceStore>(ids = ['caller', 'recipient'], ownerModule?: {
   AgentMuxClient: new (options: { store: AgentMuxAgentSessionStore }) => Client
   AgentMuxFileAgentSessionStore: new (path: string) => Store
-}, sessionFacts?: (root: string) => Partial<Pick<AgentMuxStoredAgentSession, 'providerId' | 'executorId' | 'nativeHandle'>>) {
+}, sessionFacts?: (root: string) => Partial<Pick<AgentMuxStoredAgentSession, 'providerId' | 'executorId' | 'nativeHandle'>>,
+  clientOptions?: (root: string) => Omit<AgentMuxClientOptions, 'store'>) {
   const Client = ownerModule?.AgentMuxClient ?? AgentMuxClient
   const Store = ownerModule?.AgentMuxFileAgentSessionStore ?? AgentMuxFileAgentSessionStore
   const root = await mkdtemp(fixturePath("tmp/amx-rpc-owner-")), store = new Store(join(root, 'sessions.json'))
@@ -35,7 +37,7 @@ export async function rpcOwnerFixture<Client extends Pick<SourceClient, 'dispose
       ...facts, hookBindingId: 'fixture-hook', hookToken: 'fixture-token', capabilityHash: hashAgentCapability(capability), createdAt: reshapeFixtureEpoch(0, 0, 1), updatedAt: reshapeFixtureEpoch(0, 0, 1) }
     await store.compareAndSwap(null, record)
   }
-  const client = new Client({ store })
+  const client = new Client({ store, ...clientOptions?.(root) })
   const inner = client as unknown as { connected: boolean; registry: { load(hostId: string): Promise<void> }; kernel: Record<string, unknown> }
   await inner.registry.load('local'); inner.connected = true; inner.kernel.isConnected = () => true
   // The Runtime here is a deterministic port. A real connect would activate a detached ctxmuxd that,

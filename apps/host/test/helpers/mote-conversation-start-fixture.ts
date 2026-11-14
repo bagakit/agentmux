@@ -16,9 +16,11 @@ import {HostMoteQuickPreferences} from '../../src/mote-quick-preferences.js'
 import {createHostSpatialAgentControl} from '../../src/spatial-agent-control.js'
 import {ScratchTopics,readConfiguredExecutorChoices} from '../../src/mote-resources.js'
 import {directoryIdentity,homeZoneId,serializeMoteQuickMode} from '../../src/mote-model.js'
+import {fixtureHostExecutorOptions} from './configured-executor-owner.js'
 export async function createMoteConversationStartFixture(input:{providerId?:'codex'|'claude';extraClients?:import('../../../../packages/core/src/public-rpc-service.js').AgentMuxRpcCoreClient[]}={}){
  const closes:Array<()=>unknown|Promise<unknown>>=[]
- const h=await creationInputOwner(true);closes.push(h.close)
+ let configurationPath=''
+ const h=await creationInputOwner(true,fixtureHostExecutorOptions(()=>configurationPath));closes.push(h.close)
  const providerId=input.providerId??'codex'
  if(providerId==='claude'){
   const provider=h.client.providers.get('claude')
@@ -42,7 +44,7 @@ export async function createMoteConversationStartFixture(input:{providerId?:'cod
  await writeFile(path,serializeMoteQuickMode('',{executorId:'saved'})+'\nKeep original cooperation notes.\n')
  const graph={spaces:[{spaceId,kind:'mote' as const,topicId:topic.id,name:'Original Mote',hostId:'local',directoryPath:topic.physicalDirectoryPath!,projectId:null}],zones:[{zoneId,kind:'home' as const,workspaceId:workspace.id,hostId:'local',directoryPath:topic.physicalDirectoryPath!,branch:null}],bindings:[{spaceId,zoneId}],tabs:[{tabId:'old-tab',zoneId,workspaceId:workspace.id,name:null,regionIds:['old-region']}],regions:[{tabId:'old-tab',regionId:'old-region',kind:'agent' as const,agentSessionId:'source',runId:'run-source',execution:{hostId:'local',cwd:h.root}}],layouts:{__scratch__:{groups:[{id:'group',tabOrder:['old-tab'],activeTabId:'old-tab',recentTabIds:[]}],activeGroupId:'group',root:{type:'leaf' as const,groupId:'group'}}},tabLayouts:{'old-tab':{root:{type:'leaf' as const,regionId:'old-region'},activeRegionId:'old-region'}},resources:{'tab:old-tab':{draft:'original draft'}}}
  const spatial=new AgentMuxSpatialStateStore(join(h.root,'spatial.json'));await spatial.commit({expectedRevision:0,graph})
- const configurationPath=join(h.root,'configuration.json');await writeFile(configurationPath,JSON.stringify({workspaces:[workspace],executors:{saved:{label:'Saved',providerId,command:providerId,args:[],env:{},injectAgentMuxGuide:false}}}))
+ configurationPath=join(h.root,'configuration.json');await writeFile(configurationPath,JSON.stringify({workspaces:[workspace],executors:{saved:{label:'Saved',providerId,command:providerId,args:[],env:{},injectAgentMuxGuide:false}}}))
  const content=createHostContent({configurationPath,spatial}),main=createHostMoteMainReader({configurationPath,spatial,files:content.files!}),store=new MoteDialogueStore(join(h.root,'dialogue.sqlite'))
  const dialogue=createHostMoteDialogue({main,spatial,store,clientForHost:()=>h.client})
  const quick=new HostMoteQuickPreferences({main,files:content.files!,prepareMainSource:dialogue.prepareMainSource,recordMainSource:dialogue.recordMainSource,catalog:async()=>spatialCatalog((await spatial.read())!.graph),executors:()=>readConfiguredExecutorChoices(configurationPath)})

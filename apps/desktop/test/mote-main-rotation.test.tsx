@@ -19,6 +19,7 @@ import { HostMoteQuickPreferences } from '../../host/src/mote-quick-preferences'
 import { MoteDialogueStore } from '../../../packages/core/src/mote-dialogue-store'
 import { ScratchTopics } from '../../host/src/mote-resources'
 import { creationInputOwner } from '../../../packages/core/test/helpers/creation-input-owner'
+import { fixtureHostExecutorOptions } from '../../host/test/helpers/configured-executor-owner'
 import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
 import { parseMoteQuickMode, serializeMoteQuickMode } from '@agentmux/host/mote-model'
 import { useAppStore } from '../src/renderer/src/store'
@@ -52,7 +53,8 @@ beforeEach(async () => {
 })
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 async function fixture(initialMain = false) {
-  const h = await creationInputOwner(true); cleanups.push(h.close)
+  let configurationPath = ''
+  const h = await creationInputOwner(true, fixtureHostExecutorOptions(() => configurationPath)); cleanups.push(h.close)
   const root = await realpath(await mkdtemp(join(tmpdir(), 'mote-main-actions-'))); cleanups.push(() => rm(root, { recursive: true, force: true }))
   const workspace = { id: '__scratch__', hostId: 'local', path: join(root, 'scratch'), name: 'Original Scratch', kind: 'directory' as const }
   await mkdir(workspace.path)
@@ -68,7 +70,7 @@ async function fixture(initialMain = false) {
     layouts: { __scratch__: { groups: [{ id: 'original-group', tabOrder: ['old-tab'], activeTabId: 'old-tab', recentTabIds: [] }], activeGroupId: 'original-group', root: { type: 'leaf' as const, groupId: 'original-group' } } },
     tabLayouts: { 'old-tab': { root: { type: 'leaf' as const, regionId: 'old-region' }, activeRegionId: 'old-region' } }, resources: { 'tab:old-tab': { draft: 'original-unsent-draft' } } }
   const spatial = new AgentMuxSpatialStateStore(join(root, 'spatial.json')); await spatial.commit({ expectedRevision: 0, graph })
-  const configurationPath = join(root, 'configuration.json')
+  configurationPath = join(root, 'configuration.json')
   await writeFile(configurationPath, JSON.stringify({ workspaces: [workspace], executors: { saved: { label: 'Saved default', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: false } } }))
   const content = createHostContent({ configurationPath, spatial }), main = createHostMoteMainReader({ configurationPath, spatial, files: content.files! })
   const dialogue = createHostMoteDialogue({ main, spatial, store: new MoteDialogueStore(join(root, 'dialogue.sqlite')), clientForHost: () => h.client })

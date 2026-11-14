@@ -4,7 +4,7 @@ export const executorRecoveryMutations = {
     before: 'this.ports.forwardControl && !independentResume &&', after: 'this.ports.forwardControl &&',
     target: 'session configuration reaches the default Host through original agent.open, RPC and CLI across Host restart' },
   'host-reader-omitted': { path: 'apps/host/src/host.ts',
-    before: "...(configurationPath ? { sessionExecutorConfiguration: (executorId: string) => readConfiguredExecutor(configurationPath, executorId) } : {}),",
+    before: "...(configurationPath ? { executorConfigurations: (id?: string) => readConfiguredExecutors(configurationPath, id) } : {}),",
     after: '', target: 'session configuration reaches the default Host through original agent.open, RPC and CLI across Host restart' },
   'reader-ignored': { path: 'packages/core/src/client.ts', before: 'config = await this.sessionExecutorConfiguration(session.executorId)',
     after: 'config = (await this.hostExecutorOwner!.resolve(session.executorId)).config', target: 'session configuration unreadable retains the original identity without fallback' },

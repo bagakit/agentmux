@@ -11,6 +11,7 @@ import { createHostSpatialAgentControl } from '../src/spatial-agent-control.js'
 import { ScratchTopics } from '../src/mote-resources.js'
 import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID } from '../src/mote-topic-model.js'
 import { contributeGoalDiscussionBinding, readGoalDiscussionBinding } from '../src/goal-discussion-bindings.js'
+import { fixtureHostExecutorOptions } from './helpers/configured-executor-owner.js'
 
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
@@ -19,13 +20,14 @@ async function fixture() {
   cleanup.push(() => rm(root, { recursive: true, force: true }))
   const coreRoot = join(root, 'core'), scratchRoot = join(root, 'scratch')
   await mkdir(coreRoot); await mkdir(scratchRoot)
-  const io = await injectedContextCore(coreRoot); cleanup.push(io.dispose)
+  const configurationPath = join(root, 'configuration.json')
+  const io = await injectedContextCore(coreRoot, undefined, fixtureHostExecutorOptions(() => configurationPath)); cleanup.push(io.dispose)
   vi.spyOn((io.core as unknown as { screenEvidence: { wait(): Promise<number> } }).screenEvidence, 'wait').mockResolvedValue(0)
   const workspace = { id: SCRATCH_WORKSPACE_ID, name: 'Original Mote', hostId: 'local', path: scratchRoot, kind: 'scratch' }
   const topic = await new ScratchTopics().ensure(workspace, PMO_TEAMS_TOPIC_ID)
   const config = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private' }], workspaces: [workspace],
     executors: { claude: { providerId: 'claude', label: 'Private original Agent', command: 'claude', args: [], env: {}, injectAgentMuxGuide: false } } }
-  const configurationPath = join(root, 'configuration.json'); await writeFile(configurationPath, JSON.stringify(config))
+  await writeFile(configurationPath, JSON.stringify(config))
   const primary = await io.core.createAgent({ agentSessionId: 'primary', providerId: 'claude', executorId: 'claude', workspacePath: topic.physicalDirectoryPath!, createOperationId: 'original-primary', injectAgentMuxGuide: false })
   const spatial = new AgentMuxSpatialStateStore(join(root, 'spatial.json'))
   await spatial.commit({ expectedRevision: 0, graph: {

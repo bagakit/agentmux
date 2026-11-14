@@ -48,7 +48,8 @@ it('session configuration reaches the default Host through original agent.open, 
   await writeFile(configurationPath, JSON.stringify(configuration))
   const configurationBytes = await readFile(configurationPath, 'utf8')
   const inventory = await client.listHostExecutors()
-  expect(inventory.executors.find(value => value.executorId === 'codex')?.source).toBe('provider-default')
+  const selectedExecutor = inventory.executors.find(value => value.executorId === 'codex')!
+  expect(selectedExecutor.source).toBe('configured')
   const spatial = new AgentMuxSpatialStateStore(join(f.env.AGENTMUX_STATE_DIRECTORY!, 'spatial-state.json'))
   const spaceId = 'original-space', zoneId = 'original-zone', tabId = 'original-tab', regionId = 'original-region'
   await spatial.commit({ expectedRevision: 0, graph: {
@@ -62,7 +63,7 @@ it('session configuration reaches the default Host through original agent.open, 
   expect(opened.outcome).toBe('opened')
   const sid = opened.agent!.agentSessionId
   const original = await until(() => client.statusAgent(sid), value => Boolean(value.session.nativeHandle), 'original native identity')
-  expect(original.session.creation?.executorRevision).toBeUndefined()
+  expect(original.session.creation?.executorRevision).toBe(selectedExecutor.configRevision)
   const { CtxmuxClient } = await import(/* @vite-ignore */ pathToFileURL(resolve(import.meta.dirname, '../../../packages/core/node_modules/@ctxmux/sdk/dist/index.js')).href)
   const socketPath = join(f.env.AGENTMUX_RUNTIME_DIRECTORY!, 'ctxmux.sock'), identity = await new CtxmuxClient({ socketPath }).runtimeInfo()
   expect(identity.daemonInstanceId).toBe(f.owner.ctxmux!.instanceId)
@@ -110,11 +111,11 @@ it('session configuration reaches the default Host through original agent.open, 
   const witness = JSON.parse(/codex-restored-context:([^\r\n]+)/u.exec(raw)![1]!)
   expect(witness.bodies).toContainEqual({ role: 'user', text: retained })
   expect(await readFile(configurationPath, 'utf8')).toBe(configurationBytes)
-  expect((await client.listHostExecutors()).executors.find(value => value.executorId === 'codex')?.source).toBe('provider-default')
+  expect((await client.listHostExecutors()).executors.find(value => value.executorId === 'codex')?.source).toBe('configured')
   expect((await client.readAgentSessions()).filter(value => value.creation?.createOperationId === 'original-configuration-create')).toHaveLength(1)
   const launch = (run: any) => ({ id: run.id, pid: run.pid, program: run.spec.program, args: run.spec.args, cwd: run.spec.cwd,
     agentSessionId: run.spec.env.AGENTMUX_AGENT_SESSION_ID, executorId: run.spec.env.AGENTMUX_EXECUTOR_ID,
     nativeRecordDirectory: run.spec.env.AGENTMUX_FAKE_NATIVE_RECORD_DIRECTORY, hookCredentialPresent: Boolean(run.spec.env.AGENTMUX_HOOK_TOKEN) })
   fact({ phase: 'default-host-original-configuration', sid, originalRun: launch(firstRun), rpcRun: launch(rpcRun), cliRun: launch(cliRun),
-    nativeHandle: final.session.nativeHandle, publicRpc: resumed, cli: result, registrySource: 'provider-default', configurationUnchanged: true })
+    nativeHandle: final.session.nativeHandle, publicRpc: resumed, cli: result, registrySource: 'configured', configurationUnchanged: true })
 })

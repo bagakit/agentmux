@@ -1,4 +1,4 @@
-import './mobile-web-node-loader.mjs'
+import './configured-executor-node-loader.mjs'
 import { registerHooks } from 'node:module'
 import { relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'

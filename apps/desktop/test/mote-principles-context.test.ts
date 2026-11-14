@@ -1,8 +1,8 @@
 import { mkdtemp, mkdir, writeFile, readFile, rm, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { afterEach, expect, it } from 'vitest'
-import { AgentMuxSpatialStateStore, AgentMuxError } from '@agentmux/core'
+import { afterEach, expect, it, vi } from 'vitest'
+import { AgentMuxSpatialStateStore } from '@agentmux/core'
 import { directoryIdentity, homeZoneId } from '@agentmux/host/mote-model'
 import { createAgentLearningResources } from '../../host/src/agent-learning-resources'
 import { createMoteChatAgents } from '@agentmux/host/mote-chat-agents'
@@ -10,8 +10,11 @@ import { createMoteChatResources } from '@agentmux/host/mote-resources'
 import { createHostSpatialAgentControl } from '../../host/src/spatial-agent-control'
 import { ScratchTopics } from '@agentmux/host/mote-resources'
 import { composeAgentLaunchPrompt } from '@agentmux/core/agent-outbound-message'
+import { creationInputOwner } from '../../../packages/core/test/helpers/creation-input-owner'
+import { fixtureHostExecutorOptions } from '../../host/test/helpers/configured-executor-owner'
 const roots: string[] = []
-afterEach(async () => { await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
+const closes: Array<() => Promise<void>> = []
+afterEach(async () => { for (const close of closes.splice(0).reverse()) await close(); await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true }))); vi.restoreAllMocks() })
 it('actual Host preparation keeps current identity task and environment principles with custom user files and disabled Wiki', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'mote-principles-'))); roots.push(root)
   const path = join(root, 'scratch'); await mkdir(path)
@@ -64,17 +67,14 @@ it('actual Host spatial chat and learning consumers deliver the same current pri
   const chat = createMoteChatAgents({ resources, clients: () => [{ hostId: 'local', client: {} as never }], executors: {
     resolve: async () => ({ providerId: 'codex', launch: { injectAgentMuxGuide: false } }), create: async () => { throw Error('No creation authorized by this preparation-only check') } } })
   const preparedChat = await chat.prepare({ generation: { target, executionHostId: 'local', agentSessionId: 'chat-worker', createOperationId: 'chat-operation' }, systemContext: 'Original private audience context' } as never)
-  let created: any, received: any
-  const client = { resolveAgentCreationSessionId: async () => 'spatial-worker', inspectAgentCreation: async () => {
-    if (!created) throw new AgentMuxError('Original absent creation', 'AGENT_CREATION_UNKNOWN'); return created
-  }, createAgentWithDelivery: async (input: any) => { received = structuredClone(input); created = { kind: 'agent', agentSessionId: input.agentSessionId,
-    hostId: 'local', providerId: 'codex', executorId: input.executorId, workspacePath: input.workspacePath, run: { runId: 'private-test-run' }, retiredRuns: [], createdAt: 1, updatedAt: 1,
-    creation: { createOperationId: input.createOperationId, initialPrompt: 'confirmed', persistence: 'confirmed', agentMuxContext: 'confirmed' } }; return { session: created, creation: created.creation } } }
-  const creator = createHostSpatialAgentControl({ configurationPath, spatial, runtime: () => ({ client }) as never })
+  const h = await creationInputOwner(true, fixtureHostExecutorOptions(() => configurationPath)); closes.push(h.close)
+  const create = vi.spyOn(h.client, 'createHostAgentWithDelivery')
+  const creator = createHostSpatialAgentControl({ configurationPath, spatial, runtime: () => ({ client: h.client }) as never })
   const human = 'Original authorized test body; preserve exact scope.'
   const opened = await creator({ operation: 'agent.open', requestId: 'spatial-operation', content: { kind: 'new-agent', executorId: 'saved', prompt: human }, destination: { spaceId, zoneId, newTab: true }, focus: false } as never, {} as never)
-  expect(opened?.operation).toBe('agent.open'); expect(received.prompt).toBe(human)
-  for (const value of [learning, preparedChat.input, received]) {
+  expect(opened?.operation).toBe('agent.open'); expect(create).toHaveBeenCalledTimes(1)
+  const received = create.mock.calls[0]![0]; expect(received.prompt).toBe(human)
+  for (const value of [learning, preparedChat.input, { ...received, agentMuxNote: received.sourceAgentMuxNote }]) {
     expect(value.workspacePath).toBe(mote.physicalDirectoryPath)
     expect(value.agentMuxNote).toContain('Identity consistency and task consistency are base operating principles')
     expect(value.agentMuxNote).toContain('available capabilities and execution cwd')

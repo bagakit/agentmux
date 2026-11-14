@@ -2,10 +2,10 @@ import { isolateCoreFixtureEnvironment } from './isolate-core-environment'
 import { join } from 'node:path'
 import { readFile, writeFile } from 'node:fs/promises'
 import { expect, vi } from 'vitest'
-import { AgentMuxClient, AgentMuxFileAgentSessionStore, AgentProviderRegistry, normalizeAgentSession, type AgentMuxAgentSession, type AgentMuxStoredAgentSession } from '@agentmux/core'
+import { AgentMuxClient, AgentMuxFileAgentSessionStore, AgentProviderRegistry, normalizeAgentSession, type AgentMuxAgentSession, type AgentMuxStoredAgentSession, type AgentMuxClientOptions } from '@agentmux/core'
 
 /** Real Core/FileStore; only private Native I/O, probes and hooks are controlled. */
-export async function injectedContextCore(root: string, initial?: AgentMuxStoredAgentSession) {
+export async function injectedContextCore(root: string, initial?: AgentMuxStoredAgentSession, clientOptions?: (root: string) => Omit<AgentMuxClientOptions, 'store'>) {
   isolateCoreFixtureEnvironment(root)
   const path = join(root, 'sessions.json')
   const store = new AgentMuxFileAgentSessionStore(path)
@@ -37,7 +37,7 @@ export async function injectedContextCore(root: string, initial?: AgentMuxStored
   }), stop = vi.fn()
   const clients: AgentMuxClient[] = []
   const make = async () => {
-    const freshStore = new AgentMuxFileAgentSessionStore(path), core = new AgentMuxClient({ store: freshStore })
+    const freshStore = new AgentMuxFileAgentSessionStore(path), core = new AgentMuxClient({ store: freshStore, ...clientOptions?.(root) })
     clients.push(core)
     const inner = core as unknown as { connected: boolean; registry: { load(hostId: string): Promise<void> };
       kernel: Record<string, unknown>; hookServer: Record<string, unknown>;
