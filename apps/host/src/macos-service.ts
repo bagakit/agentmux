@@ -197,7 +197,7 @@ export async function reloadReplacedMacosHost(service: MacosHostService): Promis
     const native = await inspectCompatibleAgentMuxRuntime(signal)
     if (owner.ctxmux && (!native || owner.ctxmux.instanceId !== native.daemonInstanceId || owner.ctxmux.buildIdentity !== native.buildId))
       throw failure('The original CtxMux Runtime could not be confirmed for the installed App.')
-    if (await inspectSemanticRuntimeIdentity({ stateDirectory: dirname(service.storePath), storePath: service.storePath }) !== runtimeId)
+    if (await inspectSemanticRuntimeIdentity({ stateDirectory: dirname(service.storePath), storePath: service.storePath }, { requirePrimary: true }) !== runtimeId)
       throw failure('The replacement cannot yet read the original Runtime identity. The working Host was retained.', 'IDENTITY_SOURCE_MISSING')
     if ((await inspectMacosHostProcess(pid))?.birth !== before.birth || !sameImage(installed, await imageAtPath()))
       throw failure('The original Host or installed App changed while preparing the reload.')
