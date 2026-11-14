@@ -306,6 +306,8 @@ tar -xzf agentmux-core-<version>-linux-x64.tar.gz
 
 `connectHostedAgentMux` 是统一的公共 Runtime SDK，本地服务、SSH 与宿主 HTTP 连接使用同一服务合同；`connectSshAgentMux` 在它之上组合系统 SSH，客户端不会复制 Provider、Session Store 或 Run owner。独立的 Core Headless 服务和宿主服务共用同一个语义 owner，宿主额外注入私网、设备与 Desktop 能力。每次调用分别核验传输授权、持久 owner 和当前进程代次；托管 Agent 的 capability 不授予完整的 Runtime SDK 权限。Tailcat 与 Relay 端点通过 `connectAgentMuxRpc` 和 `amux --endpoint` 使用，见[公共 JSON-RPC 服务](#公共-json-rpc-服务)。
 
+`connectOnDemand: true` 跳过初始整机 Session 观察，准确 Run／控制读取仅连接各自原作用域；显式调用 `connect()` 仍打开一般观察。它不改变权限、Session 或 Run 的 owner，默认连接行为保持不变。
+
 ```sh
 # 在远端启动语义 owner；健康 Run 不随它退出而终止。
 agentmux-runtime serve
