@@ -48,7 +48,7 @@ export function HostTailcatListenerFields({ host, committed, active, onChange }:
   const address = listener?.state === 'listening' ? listener.address : undefined
   return <div className="host-tailcat-listener" data-tailcat-listener>
     <div className="settings-local-host"><strong>Your local host</strong><p>Uses this computer’s installed agents and registered projects.</p></div>
-    <TailcatKeyPreparation role="server" keyFile={configuration.keyFile} onPrepared={(result, mayFocus) => {
+    <TailcatKeyPreparation host={host} role="server" keyFile={configuration.keyFile} onPrepared={(result, mayFocus) => {
       if (!configValuesEqual(latest.current, configuration)) return false
       onChange({ ...latest.current, keyFile: latest.current.keyFile || result.key, enabled: true })
       if (visible.current && mayFocus) allowedInput.current?.focus()

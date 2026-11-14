@@ -50,3 +50,12 @@
 .host-tailcat-preparation .host-check-detail { margin: 0; }
 .host-tailcat-preparation input { font-family: var(--font-mono); }
 [data-tailcat-client] > .host-edit-grid { margin-top: var(--sp-3); }
+.host-tailcat-help { display: grid; gap: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--line-soft); }
+.host-tailcat-help > p, .mote-task-action > p { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.host-tailcat-help code { user-select: text; }
+.mote-task-action { display: grid; gap: var(--sp-2); min-width: 0; }
+.mote-task-action .launcher-mote__actions { width: 100%; flex-wrap: wrap; }
+.mote-task-action .launcher-mote__create { flex: 1 1 auto; white-space: normal; text-align: left; }
+.mote-task-action .launcher-mote__target { max-width: 180px; }
+.mote-task-action details { color: var(--text-3); font-size: var(--fs-meta); }
+.mote-task-action pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; font: var(--fs-meta)/1.5 var(--font-mono); user-select: text; }

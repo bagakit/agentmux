@@ -3,9 +3,12 @@ import { TextInput } from '@agentmux/client-ui/input'
 import type { TailcatKeyPreparation as PreparedKey, TailcatKeyRole } from '@agentmux/core'
 import { api } from '../../lib/api'
 import { copyTextToClipboard } from '../../lib/clipboard-copy'
+import type { HostConfig } from '../../../../shared/contracts'
+import { TailcatSetupHelp } from './TailcatSetupHelp'
 
 /** The original Host owns preparation. This component owns only its explicit action and receipt. */
-export function TailcatKeyPreparation({ role, keyFile, onPrepared }: {
+export function TailcatKeyPreparation({ host, role, keyFile, onPrepared }: {
+  host: HostConfig
   role: TailcatKeyRole
   keyFile: string
   onPrepared: (result: PreparedKey, mayFocus: boolean) => boolean
@@ -44,5 +47,6 @@ export function TailcatKeyPreparation({ role, keyFile, onPrepared }: {
         void copyTextToClipboard(code, () => setCopyError('Copy failed. Select the public code and copy it again.')).then(ok => { if (live.current) setCopied(ok) })
       }}>{copied ? 'Copied code' : 'Copy code'}</button></div> : null}
     {copyError ? <p role="alert" className="host-check-detail">{copyError}</p> : null}
+    <TailcatSetupHelp host={host} role={role} />
   </div>
 }

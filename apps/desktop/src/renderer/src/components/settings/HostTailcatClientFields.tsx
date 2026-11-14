@@ -11,7 +11,7 @@ export function HostTailcatClientFields({ host, onChange }: {
   const tailcat = host.tailcat ?? { address: '', keyFile: '' }
   const latest = useRef(tailcat); latest.current = tailcat
   return <div data-tailcat-client>
-    <TailcatKeyPreparation role="client" keyFile={tailcat.keyFile} onPrepared={result => {
+    <TailcatKeyPreparation host={host} role="client" keyFile={tailcat.keyFile} onPrepared={result => {
       if (!configValuesEqual(latest.current, tailcat)) return false
       onChange({ ...latest.current, keyFile: latest.current.keyFile || result.key })
       return true
