@@ -6,6 +6,19 @@ export type AgentExecutionReference = {
   createOperationId: string
 }
 
+/** Frozen journal facts only. Confirmed does not establish a live Agent or input eligibility. */
+export type AgentExecutionAssociationWitness = {
+  state: 'confirmed'
+  reference: AgentExecutionReference
+  agentRuntimeId: string
+  resourceRuntimeId: string
+  resourceWorkspacePath: string
+} | {
+  state: 'unconfirmed'
+  reference: AgentExecutionReference
+  issue: { code: 'EXECUTION_RUNTIME_WITNESS_UNCONFIRMED'; message: string }
+}
+
 /** The failed step, separate from the health or outcome of existing Runs. */
 export type AgentExecutionFailure = {
   reference: AgentExecutionReference

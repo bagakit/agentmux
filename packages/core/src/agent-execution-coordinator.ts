@@ -12,7 +12,7 @@ import { parseAdoptedHostRoute, type AdoptedHostRoute, type HostRouteExecutionAu
 import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
 import type { HostRouteExecutionAccess } from './host-route-gateway.js'
 import { AgentMuxError, parseAgentExecutionReference } from './errors.js'
-import type { AgentExecutionReference, AgentExecutionFailure, AgentExecutionHelperStart } from './agent-execution-contract.js'
+import type { AgentExecutionReference, AgentExecutionFailure, AgentExecutionHelperStart, AgentExecutionAssociationWitness } from './agent-execution-contract.js'
 import { parseAgentExecutionNotices, type AgentExecutionNotice } from './agent-execution-helper.js'
 
 export type AgentExecutionHostPort = AgentExecutionBridgePort & Pick<AgentMuxClient,
@@ -42,7 +42,10 @@ const originalOperation = (value: unknown, bindingId: string, generation: unknow
   return Object.keys(key).length === 3 && key.bindingId === bindingId && typeof key.streamGeneration === 'string' && !!key.streamGeneration &&
     key.streamGeneration === generation && (typeof key.nativeRequestId === 'string' || Number.isSafeInteger(key.nativeRequestId))
 }
-type RecordValue = { input: AgentExecutionOpenInput; routeAuthorization?: HostRouteExecutionAuthorization; agentControl?: { generation: string; state: 'unconfigured' | 'unverified' | 'available' | 'unavailable'; stage?: 'invocation-registration'; code?: string }; notices?: AgentExecutionNotice[]; diagnostic?: AgentExecutionInspection['diagnostic']; diagnostics?: AgentExecutionDiagnostic[]; attempts?: Partial<Record<'frontend' | 'executor', { ownerInstanceId: string }>>; bridge?: AgentExecutionBridgeState; frontend?: AgentExecutionBridgeState['frontend']; executor?: AgentExecutionBridgeState['executor'] }
+type RecordValue = { input: AgentExecutionOpenInput; routeAuthorization?: HostRouteExecutionAuthorization;
+  /** Actual target handler observation in this original journal; not caller input or Provider qualification. */
+  creationContract?: { ordinaryLaunch: 1; runtimeId: string; executorRevision: string };
+  agentControl?: { generation: string; state: 'unconfigured' | 'unverified' | 'available' | 'unavailable'; stage?: 'invocation-registration'; code?: string }; notices?: AgentExecutionNotice[]; diagnostic?: AgentExecutionInspection['diagnostic']; diagnostics?: AgentExecutionDiagnostic[]; attempts?: Partial<Record<'frontend' | 'executor', { ownerInstanceId: string }>>; bridge?: AgentExecutionBridgeState; frontend?: AgentExecutionBridgeState['frontend']; executor?: AgentExecutionBridgeState['executor'] }
 export interface AgentExecutionInspection {
   bindingId: string
   agentHostId: string
@@ -54,6 +57,8 @@ export interface AgentExecutionInspection {
   resourceRoute?: AdoptedHostRoute
   state: 'unavailable' | 'connected'
   continuation?: AgentExecutionReference
+  /** Explicit view:'association' only; not inferred from current Host routes or service state. */
+  association?: AgentExecutionAssociationWitness
   helperStarts?: Record<'executor' | 'frontend', AgentExecutionHelperStart>
   notices?: AgentExecutionNotice[]
   /** Current original helper/reader connection only; not native tool qualification. */
@@ -215,16 +220,23 @@ export class AgentExecutionCoordinator {
     this.observations.set(input.bindingId, value)
     try { this.options.onObservation?.(structuredClone(value)) } catch { /* A reader cannot change this operation or healthy helpers. */ }
   }
-  inspect(bindingId: string): AgentExecutionInspection | null {
+  inspect(bindingId: string, view?: 'association'): AgentExecutionInspection | null {
     const record = this.read(bindingId)
     if (!record) return null
+    const association: AgentExecutionAssociationWitness | undefined = view === 'association' ? ((): AgentExecutionAssociationWitness => {
+      const input = record.input, original = reference(input)
+      if (typeof input.agentRuntimeId !== 'string' || !input.agentRuntimeId || typeof input.resourceRuntimeId !== 'string' || !input.resourceRuntimeId ||
+          typeof input.resourceWorkspacePath !== 'string' || !isAbsolute(input.resourceWorkspacePath)) return { state: 'unconfirmed', reference: original,
+        issue: { code: 'EXECUTION_RUNTIME_WITNESS_UNCONFIRMED', message: 'The original journal has no complete frozen Runtime/resource tuple. Current routes were not substituted.' } }
+      return { state: 'confirmed', reference: original, agentRuntimeId: input.agentRuntimeId, resourceRuntimeId: input.resourceRuntimeId, resourceWorkspacePath: input.resourceWorkspacePath }
+    })() : undefined
     return structuredClone({ ...(this.observations.get(bindingId) ?? { bindingId, agentHostId: record.input.agentHostId,
       resourceHostId: record.input.resourceHostId, agentSessionId: record.input.agent.agentSessionId,
       resourceWorkspacePath: record.input.resourceWorkspacePath, state: 'unavailable',
       ...(record.input.agentRoute ? { agentRoute: record.input.agentRoute } : {}), ...(record.input.resourceRoute ? { resourceRoute: record.input.resourceRoute } : {}),
       ...(record.notices === undefined ? {} : { notices: this.qualificationNotices(record)! }),
       ...(this.localDiagnostics(record).length ? { diagnostics: this.localDiagnostics(record) } : {}),
-      diagnostic: { code: 'EXECUTION_OBSERVATION_UNCONFIRMED', message: 'The original helpers have not been observed by this Core connection.' } }), ...this.operationFacts(record) })
+      diagnostic: { code: 'EXECUTION_OBSERVATION_UNCONFIRMED', message: 'The original helpers have not been observed by this Core connection.' } }), ...this.operationFacts(record), ...(association ? { association } : {}) })
   }
   /** Resume only retained bridge readers. This never creates or restores an Agent Run. */
   async rejoin(bindingId: string, context?: AgentMuxRpcCallContext): Promise<AgentExecutionInspection> {
@@ -388,6 +400,19 @@ export class AgentExecutionCoordinator {
       const inventory = await hosts.agent.listHostExecutors({ executorId: input.agent.executorId })
       const selected = inventory.executors.find(executor => executor.executorId === input.agent.executorId)
       if (!selected || selected.configRevision !== input.agent.executorRevision) throw fail('The selected Agent Host Executor configuration changed.', 'EXECUTOR_REVISION_CONFLICT')
+      if (input.agent.sourceAgentMuxNote !== undefined) {
+        // Provider preparation does not attest this Core's creation wire handler.
+        // Once observed for this frozen intent, metadata disappearance is not revocation.
+        const receipt = record.creationContract
+        if (receipt && (receipt.ordinaryLaunch !== 1 || receipt.runtimeId !== input.agentRuntimeId || receipt.executorRevision !== input.agent.executorRevision)) throw fail(
+          'The original target creation contract receipt is unconfirmed. Its intent and helpers were retained.', 'EXECUTION_STORAGE_UNCONFIRMED')
+        if (!receipt) {
+          if (inventory.runtimeId !== input.agentRuntimeId || selected.creationContract?.ordinaryLaunch !== 1) throw fail(
+            'The selected Agent Core has not confirmed this complete Source launch input. Keep the original binding and confirm or update that Core; no new helper was started.', 'EXECUTION_CREATION_CONTRACT_UNCONFIRMED')
+          record.creationContract = { ordinaryLaunch: 1, runtimeId: inventory.runtimeId, executorRevision: selected.configRevision }
+          this.save(record)
+        }
+      }
       const preparations = {} as Record<'executor' | 'frontend', import('./agent-execution-helper.js').AgentExecutionHelperPreparation>
       // Both endpoint owners acknowledge required preparation before either Start.
       for (const role of ['executor', 'frontend'] as const) {
@@ -493,9 +518,9 @@ export class AgentExecutionBindingService {
     if (!this.owner && !await this.retained()) throw fail('The original frozen execution intent is unavailable.', 'EXECUTION_INTENT_UNCONFIRMED')
     return await (await this.coordinator()).continueOriginal(input, context)
   }
-  async inspect(bindingId: string): Promise<AgentExecutionInspection | null> {
+  async inspect(bindingId: string, view?: 'association'): Promise<AgentExecutionInspection | null> {
     if (!this.owner && !await this.retained()) return null
-    return (await this.coordinator()).inspect(bindingId)
+    return (await this.coordinator()).inspect(bindingId, view)
   }
   async rejoin(bindingId: string, context?: AgentMuxRpcCallContext): Promise<AgentExecutionInspection> {
     if (!this.owner && !await this.retained()) throw fail('The original execution binding is unavailable.', 'EXECUTION_HELPER_UNAVAILABLE')
