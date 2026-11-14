@@ -24,7 +24,10 @@ if (outboundTest) await writeFile(outboundPath, JSON.stringify({ relay: outbound
 const host = await startAgentMuxHost({ store: new AgentMuxFileAgentSessionStore(process.env.AGENTMUX_AGENT_SESSION_STORE),
   configurationPath, socketPath: path, desktopSocketPath: path + '.desktop', mobileBuildDirectory: directory, mobilePort: 0,
   ...(outboundPath ? { outboundRelayConfigurationPath: outboundPath } : {}) })
-if (outboundTest?.holdOperationId) {
+const heldOperationId = process.env.MESH_HELD_OPERATION_ID ?? outboundTest?.holdOperationId
+const heldFile = process.env.MESH_HELD_OPERATION_ID ? 'mesh-held-response.json' : 'outbound-held-response.json'
+const dispatchFile = process.env.MESH_HELD_OPERATION_ID ? 'mesh-input-dispatch.jsonl' : 'outbound-input-dispatch.jsonl'
+if (heldOperationId) {
   // Fault seam: Core still authorizes and executes every request. Withhold only the
   // selected original response *after* its real owner returned, then cut its network.
   const open = host.server.openAuthenticatedFrames.bind(host.server)
@@ -32,8 +35,8 @@ if (outboundTest?.holdOperationId) {
     const requests = new Map()
     const frames = open({ ...options, send: async frame => {
       const request = requests.get(frame.id)
-      if (request?.operationId === outboundTest.holdOperationId && Object.hasOwn(frame, 'result')) {
-        writeFileSync(join(root, 'outbound-held-response.json'), JSON.stringify({ operationId: request.operationId, method: request.method, result: frame.result }), { mode: 0o600 })
+      if (request?.operationId === heldOperationId && Object.hasOwn(frame, 'result')) {
+        writeFileSync(join(root, heldFile), JSON.stringify({ operationId: request.operationId, method: request.method, result: frame.result }), { mode: 0o600 })
         await new Promise(resolve => {
           if (options.authorization.signal?.aborted) resolve()
           else options.authorization.signal?.addEventListener('abort', resolve, { once: true })
@@ -46,7 +49,7 @@ if (outboundTest?.holdOperationId) {
       if (frame.method === 'agent.input.submit') {
         const request = { method: frame.method, operationId: frame.params.operationId }
         requests.set(frame.id, request)
-        appendFileSync(join(root, 'outbound-input-dispatch.jsonl'), JSON.stringify(request) + '\n', { mode: 0o600 })
+        appendFileSync(join(root, dispatchFile), JSON.stringify(request) + '\n', { mode: 0o600 })
       }
       return await frames.receive(frame)
     } }
