@@ -5,7 +5,7 @@ import { SEMANTIC_ICON_CATALOG, type SemanticIconName } from '@agentmux/client-u
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { ImageAnnotationEditor } from '../src/renderer/src/components/image-annotation/ImageAnnotationEditor'
 import { CaptureSurfaceView } from '../src/renderer/screenshot-editor/CaptureSurfaceView'
-import type { CaptureSurfaceApi } from '../src/shared/capture-surface'
+import type { CaptureSurfaceApi, CaptureSurfaceInput, CaptureSurfaceRect } from '../src/shared/capture-surface'
 import { captureLoupePlacement, captureSizeChipPlacement, captureToolbarPlacement } from '../src/renderer/src/components/image-annotation/capture-geometry'
 import type { ImageViewport } from '../src/renderer/src/components/image-annotation/view'
 
@@ -51,6 +51,14 @@ beforeEach(() => {
   node = document.createElement('div'); document.body.append(node); root = createClientUiRoot(node)
 })
 afterEach(async () => { await act(async () => root.unmount()); node.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+function overlayInput(safeTop: number, windows: CaptureSurfaceRect[]): CaptureSurfaceInput {
+  return { requestId: 'request', revision: 1, displayId: 1, frame: { x: 0, y: 0, width: FRAME.width, height: FRAME.height }, scale: 2, safeTop,
+    attachToDraft: false, expandable: true, theme: { status: 'unavailable', message: '' },
+    background: 'included', backgrounds: {
+      included: { status: 'ready', capturedAt: 1, engine: 'fixture', image: { mimeType: 'image/png', byteLength: 1, ...image }, windows },
+      excluded: { status: 'pending', capturedAt: 0 }
+    } }
+}
 // Each flushed frame is one 16 ms display frame later than the last.
 let clock = 0
 async function frame() { await act(async () => { const pending = [...frames.values()]; frames.clear(); clock += 16; pending.forEach(callback => callback(clock)) }) }
@@ -493,8 +501,7 @@ describe('capture image annotation', () => {
   it('keeps the hint, toolbar, size chip and loupe below a camera housing in the mounted overlay', async () => {
     const api = { load: vi.fn(), presented: vi.fn(async () => {}), select: vi.fn(async () => true), onEvent: vi.fn(() => () => {}), finish: vi.fn(),
       pin: vi.fn(), savePng: vi.fn(), copyText: vi.fn(), expand: vi.fn(), cancel: vi.fn() } as unknown as CaptureSurfaceApi
-    const input = { requestId: 'request', displayId: 1, frame: { x: 0, y: 0, width: FRAME.width, height: FRAME.height }, scale: 2, safeTop: 32, attachToDraft: false, expandable: true,
-      theme: { status: 'unavailable' as const, message: '' }, image: { mimeType: 'image/png' as const, byteLength: 1, ...image }, windows: [], initialCrop: { x: 600, y: 0, width: 400, height: 200 } }
+    const input = { ...overlayInput(32, []), initialCrop: { x: 600, y: 0, width: 400, height: 200 } }
     await act(async () => root.render(<CaptureSurfaceView input={input} api={api} />)); await frame(); await frame()
     const editor = node.querySelector<HTMLElement>('[aria-label="Screenshot editor"]')!
     await act(async () => editor.querySelector('img')!.dispatchEvent(new Event('load'))); await frame()
@@ -507,8 +514,7 @@ describe('capture image annotation', () => {
   it('the capture overlay hands its frozen windows to the editor, so a click there selects one', async () => {
     const api = { load: vi.fn(), presented: vi.fn(async () => {}), select: vi.fn(async () => true), onEvent: vi.fn(() => () => {}), finish: vi.fn(),
       pin: vi.fn(), savePng: vi.fn(), copyText: vi.fn(), expand: vi.fn(), cancel: vi.fn() } as unknown as CaptureSurfaceApi
-    const input = { requestId: 'request', displayId: 1, frame: { x: 0, y: 0, ...FRAME }, scale: 2, safeTop: 0, attachToDraft: false, expandable: true,
-      theme: { status: 'unavailable' as const, message: '' }, image: { mimeType: 'image/png' as const, byteLength: 1, ...image }, windows: [FRONT, BACK] }
+    const input = overlayInput(0, [FRONT, BACK])
     await act(async () => root.render(<CaptureSurfaceView input={input} api={api} />)); await frame(); await frame()
     const canvas = node.querySelector<HTMLCanvasElement>('[aria-label="Screenshot canvas"]')!
     canvas.setPointerCapture = vi.fn()
