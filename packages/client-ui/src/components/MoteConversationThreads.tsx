@@ -136,22 +136,23 @@ function WorkEventCard({ event, read, visible, memberName, onOpen, expanded, onE
 /** Original dispatch threads, independent of the Main Agent's native reader.
  * Master-detail: one toolbar row (status tabs, search, refresh), a dense list, and the selected thread as a flat document.
  * Narrow containers show the list, then the selected thread full width with a back control. Grouping by day is a list option, not a mode. */
-export function MoteWorkThreads({ page, issue, loading, visible, readWork, memberName, onRefresh, onOlder, onOpenWork, members, requestedEvent, renderEventActions }: {
+export function MoteWorkThreads({ page, issue, loading, visible, readWork, memberName, onRefresh, onOlder, onOpenWork, members, privateChats, requestedEvent, renderEventActions }: {
   page: MoteDialoguePage | null; issue: string | null; loading: boolean; visible: boolean; readWork: MoteWorkReader
   memberName?: ((source: Work) => string) | undefined; onRefresh(): void; onOlder?(): void; onOpenWork(source: Work): void
   /** The host's original member directory, shown as a peer tab instead of a second block under the list. */
   members?: { count: number | null; attention?: boolean | undefined; content: ReactNode } | undefined
+  privateChats?: ((visible: boolean) => ReactNode) | undefined
   /** One explicit host navigation to this Mote's original event; no member inference. */
   requestedEvent?: { eventId: string; token: string } | undefined
   renderEventActions?: ((event: MoteWorkEvent) => ReactNode) | undefined
 }) {
   const viewport = useVisibleWork<HTMLElement>(visible)
   const [history, setHistory] = useState(false), [expanded, setExpanded] = useState<Set<string>>(() => new Set())
-  const [view, setView] = useState<'work' | 'members'>('work')
+  const [view, setView] = useState<'work' | 'private' | 'members'>('work')
   const [query, setQuery] = useState(''), [filter, setFilter] = useState<ThreadFilter>('all')
   const [summaries, setSummaries] = useState<Record<string, ThreadSummary>>({})
   const identity = page?.main.identity ? JSON.stringify(page.main.identity) : ''
-  useEffect(() => { setExpanded(new Set()); setQuery(''); setFilter('all'); setSummaries({}); setView('work') }, [identity])
+  useEffect(() => { setExpanded(new Set()); setQuery(''); setFilter('all'); setSummaries({}) }, [identity])
   const events = useMemo(() => moteWorkEvents(page?.links ?? []), [page?.links])
   const onSummary = useCallback((id: string, summary: ThreadSummary) => setSummaries(previous =>
     JSON.stringify(previous[id]) === JSON.stringify(summary) ? previous : { ...previous, [id]: summary }), [])
@@ -201,9 +202,10 @@ export function MoteWorkThreads({ page, issue, loading, visible, readWork, membe
   let previousDay = ''
   return <section ref={viewport.ref} className="mote-conversation mote-threads" data-mote-threads={identity || undefined} data-detail={open ? 'open' : undefined} data-layout={wide ? 'split' : 'stack'}>
     <header className="mote-threads__toolbar">
-      {members ? <div className="mote-threads__views" role="tablist" aria-label="Threads 内容">
+      {members || privateChats ? <div className="mote-threads__views" role="tablist" aria-label="Threads 内容">
         <button type="button" role="tab" aria-selected={view === 'work'} onClick={() => setView('work')}>工作<span>{events.length}</span></button>
-        <button type="button" role="tab" aria-selected={view === 'members'} data-attention={members.attention || undefined} onClick={() => setView('members')}>成员{members.count === null ? null : <span>{members.count}</span>}</button>
+        {privateChats ? <button type="button" role="tab" aria-selected={view === 'private'} onClick={() => setView('private')}>私聊</button> : null}
+        {members ? <button type="button" role="tab" aria-selected={view === 'members'} data-attention={members.attention || undefined} onClick={() => setView('members')}>成员{members.count === null ? null : <span>{members.count}</span>}</button> : null}
       </div> : null}
       <div className="mote-threads__filters" role="group" aria-label="按回报记录筛选" hidden={view !== 'work'}>{([
         ['all', '全部'], ['question', '含问题'], ['reported', '已回报'], ['unconfirmed', '待核对']
@@ -213,10 +215,11 @@ export function MoteWorkThreads({ page, issue, loading, visible, readWork, membe
       <nav className="mote-conversation__navigation" aria-label="Threads 浏览方式">
         {view === 'work' ? <><button type="button" aria-pressed={!history} onClick={() => setHistory(false)}>工作列表</button>
         <button type="button" aria-pressed={history} onClick={() => setHistory(true)}>事件历史</button></> : null}
-        <button type="button" className="mote-conversation__refresh" onClick={onRefresh} disabled={loading} aria-label={loading ? '正在读取' : '刷新'} title="刷新">{loading ? '正在读取…' : '刷新'}</button>
+        {view !== 'private' ? <button type="button" className="mote-conversation__refresh" onClick={onRefresh} disabled={loading} aria-label={loading ? '正在读取' : '刷新'} title="刷新">{loading ? '正在读取…' : '刷新'}</button> : null}
       </nav>
     </header>
-    {issue ? <p role="status" className="mote-conversation__issue">{issue} 原工作与输入仍保留。</p> : null}
+    {issue && view === 'work' ? <p role="status" className="mote-conversation__issue">{issue} 原工作与输入仍保留。</p> : null}
+    {privateChats ? <div className="mote-threads__private" role="tabpanel" aria-label="私聊" hidden={view !== 'private'}>{privateChats(visible && view === 'private')}</div> : null}
     {members ? <div className="mote-threads__members" role="tabpanel" aria-label="成员" hidden={view !== 'members'}>{members.content}</div> : null}
     <div className="mote-threads__work" role={members ? 'tabpanel' : undefined} aria-label={members ? '工作' : undefined} hidden={view !== 'work'}>
     {discovering ? <p className="mote-threads__scope" role="status">在已载入的 {events.length} 项工作中查找{pending ? ` · ${pending} 项资料待核对` : ''}{page?.next ? ' · 可继续读取更早工作' : ''}</p> : null}

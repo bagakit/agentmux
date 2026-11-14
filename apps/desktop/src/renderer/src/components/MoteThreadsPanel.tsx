@@ -11,6 +11,7 @@ import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { useAppStore } from '../store'
 import { api } from '../lib/api'
 import { MoteCooperation } from './MoteCooperation'
+import { MotePrivateConversations } from './MotePrivateConversations'
 import { formatMoteAddress } from '@agentmux/core/sharing'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 
@@ -42,6 +43,7 @@ export function MoteThreadsPanel({ scope, active, onSelect, requestedEvent }: {
       }}>复制 thread 链接</button> : null}
       memberName={source => members.find(member => member.hostId === source.origin.hostId && member.agentSessionId === source.origin.recipientSessionId)?.regions.find(region => region.title)?.title ?? source.origin.recipientSessionId}
       onRefresh={() => work?.refresh()} onOlder={() => void work?.older()}
+      privateChats={visible => <MotePrivateConversations scope={scope} active={visible} />}
       members={{ count: null, content: <MoteCooperation scope={scope} active={active} presentation="threads" onSelect={onSelect} /> }} onOpenWork={source => {
         const original = dialogue.target && moteMembers(workbenchSelectionCatalog(useAppStore.getState()), dialogue.target.spaceId)
           .find(member => member.hostId === source.origin.hostId && member.agentSessionId === source.origin.recipientSessionId)

@@ -100,7 +100,7 @@
 .mote-work-event__provenance { margin: 12px 0 0; color: var(--text-3); font-size: var(--fs-micro, 11px); line-height: 1.5; overflow-wrap: anywhere; }
 /* Split (measured >= 640px): list on the left, the selected thread in its own scrolling pane on the right. */
 .mote-threads[data-layout="split"] { display: flex; flex-direction: column; min-height: 100%; }
-.mote-threads[data-layout="split"] > .mote-threads__work { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.mote-threads[data-layout="split"] > .mote-threads__work:not([hidden]) { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .mote-threads[data-layout="split"] .mote-threads__body { flex: 1; display: grid; grid-template-columns: minmax(220px, 36%) minmax(0, 1fr); column-gap: 0; align-items: stretch; }
 .mote-threads[data-layout="split"] .mote-threads__list { padding-inline-end: 12px; }
 .mote-threads__pane { min-height: 240px; padding: 4px 4px 20px 20px; border-inline-start: 1px solid var(--line-soft); }

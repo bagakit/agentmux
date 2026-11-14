@@ -44,7 +44,7 @@
 .mote-chat-activity { display: grid; gap: var(--sp-2); min-width: 0; padding: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-2); }
 .mote-chat-activity > header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
 .mote-chat-activity > header > span { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
-.mote-chat-activity p, .mote-chat-activity summary, .mote-chat-activity code, .mote-chat-history p { margin: 0; font-size: var(--fs-meta); line-height: 1.6; color: var(--text-3); overflow-wrap: anywhere; }
+.mote-chat-activity p, .mote-chat-activity summary, .mote-chat-activity code, .mote-chat-history > p { margin: 0; font-size: var(--fs-meta); line-height: 1.6; color: var(--text-3); overflow-wrap: anywhere; }
 .mote-chat-activity strong { color: var(--text-2); font-size: var(--fs-meta); font-weight: 550; }
 .mote-chat-activity summary { cursor: pointer; }
 .mote-chat-activity details > ol { display: grid; gap: var(--sp-3); margin: var(--sp-3) 0; padding-left: var(--sp-4); }
@@ -64,3 +64,12 @@
 .mote-chat-inputs .composer-mailbox__record { min-width: 0; }
 .mote-chat-inputs .composer-mailbox__detail { min-width: 0; overflow-wrap: anywhere; }
 .mote-chat-inputs pre { max-width: 100%; overflow: auto; }
+.mote-private-conversations { min-width: 0; display: grid; gap: var(--sp-3); padding-block: var(--sp-3); }
+.mote-private-conversations > header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+.mote-private-conversations > header p { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
+.mote-private-conversation { min-width: 0; display: grid; gap: var(--sp-3); padding: var(--sp-3); border-top: 1px solid var(--line-soft); }
+.mote-private-conversation > details { min-width: 0; color: var(--text-3); font-size: var(--fs-meta); }
+.mote-private-conversation > details > summary { cursor: pointer; padding-block: var(--sp-1); }
+.mote-private-conversation > details > code { overflow-wrap: anywhere; }
+.mote-private-conversations .mote-chat-history__row > div:first-child { flex: 1 1 14rem; }
+.mote-private-conversations .mote-chat-history__row > div:first-child > strong { padding-inline-start: calc(28px + var(--sp-3)); color: var(--text-3); font-size: var(--fs-meta); font-weight: 400; }
