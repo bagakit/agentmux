@@ -6,6 +6,9 @@ import { parseAdoptedHostRoute, type AdoptedHostRoute } from './host-route.js'
 /** One operation's configured carrier. A saved business relation carries no access grant. */
 export type GoalRuntimeAccess = { hostId: string; via?: { routeId: string; adoptedRoute: AdoptedHostRoute } }
 export type GoalQualifiedAccess = { source: GoalRuntimeAccess; coordinator?: GoalRuntimeAccess }
+/** Read an already-frozen input through its original independent owner. Start,
+ * Resume and relationship writes continue to require GoalQualifiedAccess. */
+export type GoalInspectionAccess = GoalQualifiedAccess | { coordinator: GoalRuntimeAccess; source?: never }
 export type GoalRelationAccess = { reference: DemandSpaceMemberReference; access: GoalQualifiedAccess }
 
 export function parseGoalAgentReference(value: unknown, code = 'INVALID_CONTROL_REQUEST'): DemandAgentReference {
@@ -33,6 +36,11 @@ function runtimeAccess(value: unknown): GoalRuntimeAccess {
 export function parseGoalQualifiedAccess(value: unknown): GoalQualifiedAccess {
   const p = rpcRecord(value, ['source', 'coordinator'])
   return { source: runtimeAccess(p.source), ...(p.coordinator === undefined ? {} : { coordinator: runtimeAccess(p.coordinator) }) }
+}
+export function parseGoalInspectionAccess(value: unknown): GoalInspectionAccess {
+  const p = rpcRecord(value, ['source', 'coordinator'])
+  if (p.source !== undefined) return parseGoalQualifiedAccess(p)
+  return { coordinator: runtimeAccess(p.coordinator) }
 }
 export function parseGoalRelationAccesses(value: unknown): GoalRelationAccess[] {
   if (!Array.isArray(value)) throw new AgentMuxError('Goal relation access must be an array.', 'INVALID_CONTROL_REQUEST')

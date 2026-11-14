@@ -1,6 +1,6 @@
-export type { GoalRelationAccess, GoalRuntimeAccess, GoalQualifiedAccess } from './goal-agent-reference.js'
+export type { GoalRelationAccess, GoalRuntimeAccess, GoalQualifiedAccess, GoalInspectionAccess } from './goal-agent-reference.js'
 import type { DemandAgentReference, DemandSpaceMemberReference } from '@agentmux/demand/relations'
-import type { GoalQualifiedAccess, GoalRelationAccess } from './goal-agent-reference.js'
+import type { GoalQualifiedAccess, GoalRelationAccess, GoalInspectionAccess } from './goal-agent-reference.js'
 import { SETTINGS_PREFERENCE_METHODS } from './settings-preferences.js'
 import type { AgentMuxResumeResolution } from './agent-session-recovery/resume-resolution.js'
 import type { RendererAllocationsInput, RendererAllocationsResult } from './renderer-allocations.js'
@@ -501,7 +501,7 @@ export type AgentMuxDemandDecision = {
   sourceSessionId: string | null
 }
 export type AgentMuxControlDemandListRequest = RequestBase & { operation: 'demand.list' }
-export type AgentMuxControlDemandShowRequest = RequestBase & { operation: 'demand.show'; demandId: string; dispatchOperationId?: string; access?: GoalQualifiedAccess }
+export type AgentMuxControlDemandShowRequest = RequestBase & { operation: 'demand.show'; demandId: string; dispatchOperationId?: string; access?: GoalInspectionAccess }
 export type AgentMuxControlDemandCreateRequest = RequestBase & {
   operation: 'demand.create'
   relationAccess?: GoalRelationAccess[]

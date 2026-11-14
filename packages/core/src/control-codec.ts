@@ -1,5 +1,5 @@
 import { formatGoalAddress } from './sharing.js'
-import { parseGoalAgentReference, parseGoalAgentReferences, parseGoalQualifiedAccess, parseGoalRelationAccesses } from './goal-agent-reference.js'
+import { parseGoalAgentReference, parseGoalAgentReferences, parseGoalQualifiedAccess, parseGoalInspectionAccess, parseGoalRelationAccesses } from './goal-agent-reference.js'
 import { demandAgentReferenceKey } from '@agentmux/demand/relations'
 import { parseBrowserAgentWorkspaceParams, parseBrowserAgentWorkspaceResult } from './browser-agent-workspace.js'
 import { isSettingsPreferenceMethod, parseSettingsPreferenceParams, parseSettingsPreferenceResult } from './settings-preferences.js'
@@ -567,7 +567,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   }
   if (source.operation === 'demand.show') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'),
     ...(source.dispatchOperationId === undefined ? {} : { dispatchOperationId: id(source.dispatchOperationId, 'Original Goal dispatch operation is invalid.', 'INVALID_CONTROL_REQUEST') }),
-    ...(source.access === undefined ? {} : { access: parseGoalQualifiedAccess(source.access) }) }
+    ...(source.access === undefined ? {} : { access: parseGoalInspectionAccess(source.access) }) }
   if (source.operation === 'demand.decision-log' || source.operation === 'demand.activity.inspect' || source.operation === 'demand.activity.read') {
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST') }
   }

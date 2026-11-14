@@ -1,6 +1,6 @@
 import { awaitUntilCancelled } from './await-until-cancelled.js'
 import type { DemandSpaceMemberReference } from '@agentmux/demand/relations'
-import type { GoalQualifiedAccess } from '@agentmux/core/control'
+import type { GoalQualifiedAccess, GoalInspectionAccess } from '@agentmux/core/control'
 import type { DemandQualifiedDispatchIntent } from '@agentmux/demand'
 import type { AgentInputSubmissionReceipt, AgentInputWaitRef } from '@agentmux/core'
 
@@ -29,7 +29,7 @@ export type GoalFiniteInputPort = {
   dispose(): Promise<void>
 }
 export type GoalFiniteInspectionPort = Pick<GoalFiniteInputPort, 'inspectOriginal' | 'dispose'>
-export type GoalFiniteInspectionInput = GoalFiniteAccessInput & { originalRunId: string }
+export type GoalFiniteInspectionInput = { reference: DemandSpaceMemberReference; access: GoalInspectionAccess; originalRunId: string }
 export type GoalFiniteAccessInput = { reference: DemandSpaceMemberReference; access: GoalQualifiedAccess; originalRunId?: string }
 
 export type GoalAgentControl = { kind: 'agent'; hostId: string; agentSessionId: string; run: AgentMuxRunRef }

@@ -103,7 +103,8 @@ export async function openGoalFiniteInspection(options: Parameters<typeof openGo
     const client = await connectHostedAgentMux({ rpc, connectOnDemand: true, expectedRuntimeId: input.reference.execution.runtimeId, agentSessionIds: [input.reference.execution.agentSessionId] })
     return originalInputReader(client, input.reference, input.originalRunId)
   }
-  const { client, runId } = await openGoalFiniteCarrier(options, input, context)
+  if (!input.access.source) throw new AgentMuxError('Choose an original Source or independent Coordinator for this input observation.', 'INVALID_CONTROL_REQUEST')
+  const { client, runId } = await openGoalFiniteCarrier(options, { ...input, access: { source: input.access.source } }, context)
   return originalInputReader(client, input.reference, runId)
 }
 
