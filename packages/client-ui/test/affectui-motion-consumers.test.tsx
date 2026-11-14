@@ -1,4 +1,4 @@
-import { act, createRef, type ReactNode } from 'react'
+import { act, createRef, startTransition, Suspense, useState, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentMuxInteractionOperationIntent, AgentMuxInteractionOperationReceipt, AgentMuxInteractionRequest, AgentMuxInteractionResponse } from '@agentmux/core'
@@ -219,6 +219,38 @@ it('preserves completion across unchanged request snapshots and excludes a misma
   await render(<AgentInteractionCard request={{ evidence, ...target }} onRespond={respond} onInspect={inspect} />)
   expect(host.querySelector('.agent-interaction')?.getAttribute('data-completed')).toBe('true')
   expect(panel()).toBe(body); expect(button('Details')).toBe(control); expect(control.getAttribute('aria-expanded')).toBe('true')
+})
+
+it('keeps a committed request response while a different request render is suspended', async () => {
+  const original = request(), staged = { ...request(), title: 'A staged request', toolInput: 'Staged parameters' }
+  const pending = deferred<AgentMuxInteractionOperationReceipt>(), barrier = deferred<void>()
+  const respond = vi.fn<Respond>().mockReturnValue(pending.promise)
+  let stage!: () => void, stagedRenders = 0, stagedReady = false
+  function PendingView({ blocked }: { blocked: boolean }) {
+    if (blocked && !stagedReady) { stagedRenders++; throw barrier.promise }
+    return null
+  }
+  function ConcurrentRequests() {
+    const [next, setNext] = useState(false)
+    stage = () => startTransition(() => setNext(true))
+    return <Suspense fallback={<p>Preparing request view</p>}>
+      <AgentInteractionCard request={next ? staged : original} onRespond={respond} />
+      <PendingView blocked={next} />
+    </Suspense>
+  }
+  await render(<ConcurrentRequests />)
+  await click(button('Allow once'))
+  const [response, intent] = respond.mock.calls[0]!
+  await act(async () => stage())
+  expect(stagedRenders).toBeGreaterThan(0)
+  expect(host.textContent).not.toContain('Staged parameters')
+  await act(async () => pending.resolve(receipt(response, intent)))
+  expect(host.querySelector('.agent-interaction')?.getAttribute('data-completed')).toBe('true')
+  expect(host.textContent).toContain('Original request completed')
+  await act(async () => { stagedReady = true; barrier.resolve() })
+  expect(host.textContent).toContain('Staged parameters')
+  expect(button('Allow once').disabled).toBe(false)
+  expect(respond).toHaveBeenCalledOnce()
 })
 
 it('review S1: an inspection failure cannot veto a later exact native completion', async () => {
