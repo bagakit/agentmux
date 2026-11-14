@@ -84,8 +84,16 @@ export function launchAntigravityAcp({ observeRead, AgentMuxRpcLines, isRpcId, r
     lifetime.throwIfAborted()
     return await observeRead(Promise.resolve(client.request(method, params, undefined)), lifetime)
   }
+  const prompt = (id: string, params: Record<string, unknown>) => {
+    transport.signal.throwIfAborted()
+    return observeRead(Promise.resolve(client.requestAdvanced({ jsonrpc: '2.0', id, method: 'session/prompt', params }, undefined)), transport.signal)
+  }
+  const cancel = async (sessionId: string): Promise<void> => {
+    transport.signal.throwIfAborted()
+    await write({ jsonrpc: '2.0', method: 'session/cancel', params: { sessionId } })
+  }
   let shutdown: Promise<void> | undefined
-  return { ready, closed, request, close: () => shutdown ??= (async () => {
+  return { ready, closed, request, prompt, cancel, close: () => shutdown ??= (async () => {
     unavailable()
     client.rejectAllPendingRequests('The scoped ACP client has closed.')
     child.stdin.end()

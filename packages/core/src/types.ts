@@ -1260,6 +1260,8 @@ export type AgentNativePromptInputPlan = Readonly<{
 } & (
   /** Manual input authorizes the actor's atomic idle start or busy append. */
   { operation: 'start-or-steer'; expectedTurnId?: never } |
+  /** The protocol actor accepts this exact request without issuing a Provider turn ID. */
+  { operation: 'submit'; expectedTurnId?: never } |
   /** The original native input owner queues this frozen input and dispatches only while idle. */
   { operation: 'queue-idle'; expectedTurnId?: never } |
   /** Original exact-turn plans remain readable and joinable; never converted. */
@@ -1355,7 +1357,7 @@ export type AgentMuxAgentSession = {
   } & (
     { transport?: 'pty'; startByte: number; endByte: number; chunks?: AgentTerminalInputChunkState[]; native?: never; launch?: never } |
     { transport: 'native'; startByte?: never; endByte?: never; chunks?: never;
-      native: { plan: AgentNativePromptInputPlan; outcome: 'claimed' | 'admitted' | 'not-applied' | 'unknown'; turnId?: string; queuedSubmissionId?: string; errorCode?: number }; launch?: never } |
+      native: { plan: AgentNativePromptInputPlan; outcome: 'claimed' | 'admitted' | 'not-applied' | 'unknown'; turnId?: string; queuedSubmissionId?: string; requestId?: string; errorCode?: number }; launch?: never } |
     { transport: 'launch'; startByte?: never; endByte?: never; chunks?: never; native?: never;
       launch: { plan: AgentLaunchPromptInputPlan } & (
         { outcome: 'claimed' | 'not-applied' | 'unknown'; receipt?: never } |

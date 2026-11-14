@@ -220,6 +220,7 @@ export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').Age
     maintainHostExecutorHooks?: AgentMuxClient['maintainHostExecutorHooks']
     probeHostExecutorAcp?: AgentMuxClient['probeHostExecutorAcp']
     stopAgent?: AgentMuxClient['stopAgent']
+    signalAgent?: AgentMuxClient['signalAgent']
     controlTerminal?: AgentMuxClient['controlTerminal']
     inspectTerminalControl?: AgentMuxClient['inspectTerminalControl']
     retireTerminalCreation?: AgentMuxClient['retireTerminalCreation']
@@ -3068,6 +3069,22 @@ export class AgentMuxRpcService {
           context.signal?.throwIfAborted()
           return rpcControlResult(method, { operation: method, catalog }) as AgentMuxRpcResult<M>
         }
+      }
+      if (method === 'agent.interrupt' && (p.expectedRun !== undefined || p.promptOperationId !== undefined)) {
+        if (context.caller || !context.principal || !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError(
+          'Exact prompt cancellation requires an authorized person or device.', 'CONTROL_PERMISSION_DENIED')
+        const request = rpcControlRequest('agent.interrupt', params)
+        if (request.operation !== 'interrupt' || request.target.kind !== 'agent-run' || !request.expectedRun || !request.promptOperationId) throw new AgentMuxError(
+          'Prompt cancellation requires its original Agent Session, Run and operation.', 'INVALID_CONTROL_REQUEST')
+        const selected = await this.owner(request.target.agentSessionId, true)
+        context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+        const exact = { target: request.target, expectedRun: request.expectedRun, promptOperationId: request.promptOperationId, operationId: request.requestId }
+        if (this.ports.callOriginalCore) return await this.ports.callOriginalCore(selected.hostId, 'agent.interrupt', exact, await this.inputForwardContext(context)) as AgentMuxRpcResult<M>
+        if (selected.client.forwardRpc) return await selected.client.forwardRpc('agent.interrupt', exact, await this.inputForwardContext(context)) as AgentMuxRpcResult<M>
+        if (!selected.client.signalAgent) throw new AgentMuxError('The original prompt cancellation owner is unavailable.', 'CONTROL_UNAVAILABLE')
+        await selected.client.signalAgent(selected.agentSessionId, request.expectedRun, 'SIGINT', { promptOperationId: request.promptOperationId })
+        return rpcControlResult('agent.interrupt', { operation: 'interrupt', agentSessionId: selected.agentSessionId,
+          runId: request.expectedRun.runId, promptOperationId: request.promptOperationId }) as AgentMuxRpcResult<M>
       }
       if (method === 'agent.stop' && p.expectedRun !== undefined) {
         const request = rpcControlRequest('agent.stop', params, internalCaller)

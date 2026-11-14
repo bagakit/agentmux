@@ -743,6 +743,20 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     if (target.kind === 'self' && !owner) throw new AgentMuxError('A self target requires a managed caller.', 'INVALID_CONTROL_REQUEST')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: 'stop', target, ...(owner ? { caller: owner } : {}) }
   }
+  if (source.operation === 'interrupt' && (source.expectedRun !== undefined || source.promptOperationId !== undefined)) {
+    settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'target', 'caller', 'expectedRun', 'promptOperationId'], 'INVALID_CONTROL_REQUEST')
+    const target = object(source.target, 'The original interrupt target is invalid.', 'INVALID_CONTROL_REQUEST')
+    const run = object(source.expectedRun, 'The original interrupt Run is invalid.', 'INVALID_CONTROL_REQUEST')
+    settingsFields(target, ['kind', 'agentSessionId'], 'INVALID_CONTROL_REQUEST')
+    settingsFields(run, ['runId'], 'INVALID_CONTROL_REQUEST')
+    if (target.kind !== 'agent-run') throw new AgentMuxError('Prompt cancellation requires an exact Agent Session and Run.', 'INVALID_CONTROL_REQUEST')
+    const owner = optionalCaller(source.caller)
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: 'interrupt',
+      target: { kind: 'agent-run', agentSessionId: identity(target.agentSessionId, 'Keep the original Agent Session ID.', 'INVALID_CONTROL_REQUEST') },
+      expectedRun: { runId: identity(run.runId, 'Keep the original interrupt Run identity.', 'INVALID_CONTROL_REQUEST') },
+      promptOperationId: identity(source.promptOperationId, 'Keep the original prompt operation identity.', 'INVALID_CONTROL_REQUEST'),
+      ...(owner ? { caller: owner } : {}) }
+  }
   if (source.operation === 'interrupt' || source.operation === 'resume') {
     const target = sessionSelector(source.target), owner = optionalCaller(source.caller)
     if (target.kind === 'self' && !owner) throw new AgentMuxError('A self target requires a managed caller.', 'INVALID_CONTROL_REQUEST')
@@ -1687,7 +1701,14 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
   if (operation === 'list.agents') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agents: parseExecutors(result.agents) } }
   if (operation === 'list.projects') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { projects: parseControlProjects(result.projects) } }
   if (operation === 'list.active-agents') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agents: parseControlActiveAgents(result.agents) } }
-  if (operation === 'interrupt') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agentSessionId: identity(result.agentSessionId, 'Control interrupt result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
+  if (operation === 'interrupt') {
+    if ((result.runId === undefined) !== (result.promptOperationId === undefined)) throw new AgentMuxError('Prompt cancellation receipt lacks its original target.', 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: {
+      agentSessionId: identity(result.agentSessionId, 'Control interrupt result is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+      ...(result.runId === undefined ? {} : { runId: identity(result.runId, 'Control interrupt Run is invalid.', 'CONTROL_PROTOCOL_ERROR'),
+        promptOperationId: identity(result.promptOperationId, 'Control interrupt prompt operation is invalid.', 'CONTROL_PROTOCOL_ERROR') })
+    } }
+  }
   if (operation === 'resume') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agentSessionId: identity(result.agentSessionId, 'Control resume result is invalid.', 'CONTROL_PROTOCOL_ERROR'), runId: id(result.runId, 'Control resume result is invalid.', 'CONTROL_PROTOCOL_ERROR'), ...(result.resolution === undefined ? {} : { resolution: parseResumeResolution(result.resolution) }) } }
   if (operation === 'stop') {
     const agentSessionId = identity(result.agentSessionId, 'Control stop result is invalid.', 'CONTROL_PROTOCOL_ERROR')

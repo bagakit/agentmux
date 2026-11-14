@@ -803,10 +803,12 @@ export class AgentPromptSubmissionCoordinator {
     // A manual terminal intent and any previously frozen byte plan stay terminal.
     const defaultMessageInput = control?.requiredNativeSource || control?.idleOnly || inputKey.kind === 'message' || expectedFutureIntent !== undefined
     const sessionConversation = admissionIntent?.kind === 'session-conversation'
-    const defaultSemanticInput = (sessionConversation || execution === 'default' && admissionIntent?.kind === 'exact-condition') && !rejoiningFrozenPlan
+    const managedPlan = plan.kind === 'native-rpc' && plan.operation === 'submit' ? plan : undefined
+    const managed = managedPlan && provider.managedAcp?.protocolId === managedPlan.protocolId ? provider.managedAcp : undefined
+    const defaultSemanticInput = (managedPlan || sessionConversation || execution === 'default' && admissionIntent?.kind === 'exact-condition') && !rejoiningFrozenPlan
     const nativeIdleOnly = Boolean(control?.idleOnly || control?.nativeIdleOnly || expectedCompletionId !== undefined || expectedFutureIntent !== undefined)
-    const nativeInputAvailable = provider.prepareNativeInput !== undefined &&
-      (!nativeIdleOnly || provider.catalog.capabilities.nativeConversationInput?.idleQueue !== false)
+    const nativeInputAvailable = managedPlan ? !nativeIdleOnly && managed?.prepareInput !== undefined
+      : provider.prepareNativeInput !== undefined && (!nativeIdleOnly || provider.catalog.capabilities.nativeConversationInput?.idleQueue !== false)
     // An original Core initialization input already names its Provider-confirmed
     // native object. An unknown transcript locator cannot revoke that input:
     // prepareNativeInput still verifies the exact live actor/object before claim.
@@ -814,7 +816,7 @@ export class AgentPromptSubmissionCoordinator {
     const defaultNativeSource = (current: AgentMuxStoredAgentSession) => {
       const handle = current.nativeHandle
       const selected = hasSelectedNativeTarget(current)
-      if (!defaultSemanticInput || !sessionConversation && !defaultMessageInput && !selected || current.hostId !== 'local' || run.pid === null || !nativeInputAvailable ||
+      if (!defaultSemanticInput || !managedPlan && !sessionConversation && !defaultMessageInput && !selected || current.hostId !== 'local' || run.pid === null || !nativeInputAvailable ||
           this.deps.registry.isDurabilityUnconfirmed(current.agentSessionId) ||
           handle?.kind !== 'provider' || handle.providerId !== current.providerId ||
           current.nativeBinding && !sameRun(current.nativeBinding.run, current.run) ||
@@ -865,15 +867,24 @@ export class AgentPromptSubmissionCoordinator {
         throw new AgentMuxError('This exact native input target has no confirmed Provider transport. The original terminal remains available.', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
       }
       const original = nativeOriginal!, processId = run.pid
-      const prepared = await observeInput(diagnostic, 'provider-prepare', () => provider.prepareNativeInput!({ processId,
+      const context: import('./agent-provider.js').AgentProviderNativeInputPreparationContext = { processId,
         ...(original.nativeActor ? { nativeActor: original.nativeActor } : {}),
         ...(original.nativeHandle ? { nativeHandle: original.nativeHandle } : {}),
-        workspacePath: session.workspacePath, signal: signal ?? new AbortController().signal }, { ...target.source,
-        ...(target.expectedTurnId === undefined ? {} : { expectedTurnId: target.expectedTurnId }), ...(nativeIdleOnly ? { idleOnly: true } : {}) }))
+        workspacePath: session.workspacePath, signal: signal ?? new AbortController().signal }
+      const prepared = await observeInput(diagnostic, 'provider-prepare', () => {
+        if (managedPlan) {
+          if (!context.nativeActor || context.nativeActor.protocolId !== managedPlan.protocolId ||
+              context.nativeActor.actorId !== managedPlan.actorId || target.expectedTurnId !== undefined ||
+              !managed?.prepareInput) throw new AgentMuxError('The original ACP input target changed.', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
+          return managed.prepareInput({ ...context, nativeActor: context.nativeActor }, managedPlan)
+        }
+        return provider.prepareNativeInput!(context, { ...target.source,
+          ...(target.expectedTurnId === undefined ? {} : { expectedTurnId: target.expectedTurnId }), ...(nativeIdleOnly ? { idleOnly: true } : {}) })
+      })
       try {
         if (prepared.plan.sourceId !== nativeInputSourceId(target.source) || prepared.plan.threadId !== target.source.nativeSessionId ||
             prepared.plan.expectedTurnId !== target.expectedTurnId ||
-            prepared.plan.operation !== (nativeIdleOnly ? 'queue-idle' : target.expectedTurnId === undefined ? 'start-or-steer' : 'steer')) throw new AgentMuxError(
+            prepared.plan.operation !== (managedPlan ? 'submit' : nativeIdleOnly ? 'queue-idle' : target.expectedTurnId === undefined ? 'start-or-steer' : 'steer')) throw new AgentMuxError(
           'The prepared native plan does not address the original source and input operation. No input was sent.', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
         await observeInput(diagnostic, 'provider-verify', () => prepared.assertCurrent())
         // The exact Provider queue arbitrates idle dispatch atomically; a screen cannot renew a consumed boundary.

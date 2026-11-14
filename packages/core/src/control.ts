@@ -440,8 +440,11 @@ export type AgentMuxControlSettingEntry =
   | { key: string; kind: 'number'; value: number; default: number; enum?: number[] }
 export type AgentMuxSessionSelector = AgentMuxSelfAnchor | { kind: 'agent-session'; agentSessionId: string }
 export type AgentMuxControlInterruptRequest = RequestBase & {
-  operation: 'interrupt'; target: AgentMuxSessionSelector; caller?: AgentMuxControlCaller
-}
+  operation: 'interrupt'; caller?: AgentMuxControlCaller
+} & (
+  | { target: AgentMuxSessionSelector; expectedRun?: never; promptOperationId?: never }
+  | { target: { kind: 'agent-run'; agentSessionId: string }; expectedRun: import('./types.js').AgentMuxRunRef; promptOperationId: string }
+)
 export type AgentMuxControlResumeRequest = RequestBase & {
   operation: 'resume'; target: AgentMuxSessionSelector; text: string; inputEpoch?: string; caller?: AgentMuxControlCaller
 }
@@ -915,7 +918,7 @@ export type AgentMuxControlResult =
   | AgentMuxControlSettingsHostsResult
   | AgentMuxControlSettingsExecutorRefreshResult
   | AgentMuxControlCrashLogResult
-  | { operation: 'interrupt'; agentSessionId: string }
+  | { operation: 'interrupt'; agentSessionId: string; runId?: string; promptOperationId?: string }
   | { operation: 'resume'; agentSessionId: string; runId: string; resolution?: AgentMuxResumeResolution }
   /** The receipt is present when the executing owner returns Core's Stop receipt for this request. */
   | { operation: 'stop'; agentSessionId: string; receipt?: import('./agent-stop-receipt.js').AgentMuxAgentStopReceipt }

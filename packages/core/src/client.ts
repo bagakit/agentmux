@@ -182,6 +182,7 @@ import { advanceDelivery, type AgentThread } from './agent-message.js'
 import type { AgentMuxExecutorProbeResult } from './control.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
 import { observeMessageJournal } from './agent-message-observer.js'
+import { nativeInputSourceId } from './native-input-correlation.js'
 import { assertAgentInputEpoch, optionalInputEpoch, agentPromptCondition, agentPromptInputId, agentPromptNotApplied, validateAgentPromptAdmissionIntent, validateAgentPromptCondition, validateAgentPromptInputKey, type AgentPromptAdmissionIntent, type AgentPromptInputKey } from './agent-prompt-condition.js';
 import { parseScheduledPromptHistoryRequest, type ScheduledPromptHistoryRequest, type ScheduledPromptHistory } from './scheduled-prompt-history.js';
 import { agentTurnCompletionIdentity, agentTurnEndEvidence, agentNativeTurnEnd, nativeTurnEndScopeMatches, agentNativeInteractionEnd, nativeInteractionEndScopeMatches, cloneSession, sameNativeHandle, sameRun } from './agent-session-identity.js'
@@ -8593,8 +8594,23 @@ export class AgentMuxClient {
           input.expectedCompletionId === undefined ? 'AGENT_TURN_END_UNCONFIRMED' : 'AGENT_COMPLETION_CHANGED')
       }
     }
-    this.assertTerminalInputCarrier(session)
-    const ordinaryPlan = inputControl?.handoff && inputControl.handoff.carrier.kind !== 'launch' ? inputControl.handoff.carrier.plan : provider.planPromptInput(outbound,
+    const actor = this.registry.findByRun(session.run)?.nativeActor
+    const acp = actor && provider.managedAcp?.protocolId === actor.protocolId ? provider.managedAcp : undefined
+    const managedPlan = acp && actor && (() => {
+      if (admissionIntent.kind === 'manual-actor') this.assertTerminalInputCarrier(session)
+      if (!acp.prepareInput || session.nativeHandle?.kind !== 'provider' || session.nativeHandle.providerId !== provider.id) {
+        throw new AgentMuxError('The original ACP conversation has no confirmed prompt endpoint.', 'AGENT_NATIVE_INPUT_UNAVAILABLE',
+          undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
+      }
+      if (message.inputImages?.length) throw new AgentMuxError('This ACP input endpoint accepts text. The original input is retained.',
+        'AGENT_ACP_PROMPT_CONTENT_UNSUPPORTED', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
+      return { kind: 'native-rpc' as const, operation: 'submit' as const, protocolId: actor.protocolId, actorId: actor.actorId,
+        threadId: session.nativeHandle.sessionId, sourceId: nativeInputSourceId({ providerId: provider.id, nativeSessionId: session.nativeHandle.sessionId }) }
+    })()
+    const savedCarrier = inputControl?.handoff?.carrier
+    if (managedPlan && savedCarrier && (savedCarrier.kind !== 'native' || savedCarrier.plan.operation !== 'submit')) throw new AgentMuxError(
+      'The original input has another frozen carrier.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+    const ordinaryPlan = savedCarrier && savedCarrier.kind !== 'launch' ? savedCarrier.plan : managedPlan ?? provider.planPromptInput(outbound,
       admissionIntent.kind === 'manual-actor' ? { currentTerminal: true } : admissionIntent.kind === 'session-conversation' || input.execution === undefined ? undefined : { execution: input.execution })
     const protocolInput: AgentPromptProtocolInputBoundary = { invalid: false }
     let releasePreparationObservation: ((next?: AbortController) => void) | undefined
@@ -9342,12 +9358,39 @@ export class AgentMuxClient {
     return applied
   }
 
-  async signalAgent(agentSessionId: string, expectedRun: AgentMuxRunRef, signal: string): Promise<void> {
+  async signalAgent(agentSessionId: string, expectedRun: AgentMuxRunRef, signal: string, options: { promptOperationId: string } | undefined = undefined): Promise<void> {
     this.requireConnected()
     const session = await this.resolveRawAgentSession(agentSessionId)
     if (!sameRun(session.run, expectedRun)) {
       throw new AgentMuxError('Agent Session changed before its Run was interrupted.', 'STALE_AGENT_SESSION')
     }
+    const provider = this.providers.get(session.providerId)
+    const actor = session.nativeActor
+    const acp = actor && provider.managedAcp?.protocolId === actor.protocolId ? provider.managedAcp : undefined
+    if (signal === 'SIGINT' && acp && actor) {
+      const run = await this.requireCurrentAgentRun(session)
+      if (!acp.interrupt || run.state.type !== 'running' || run.pid === null || session.nativeHandle?.kind !== 'provider' ||
+          session.nativeHandle.providerId !== provider.id) throw new AgentMuxError(
+        'The original ACP interrupt target could not be confirmed.', 'AGENT_ACP_CANCEL_UNCONFIRMED')
+      let expectedRequestId: string | undefined
+      if (options) {
+        const promptId = safeId(options.promptOperationId, 'Original prompt operation id')
+        const record = await this.store.readPromptAdmission(agentSessionId, expectedRun, promptId)
+        const original = record?.admission
+        if (original?.inputKey?.kind !== 'prompt' || original.transport !== 'native' ||
+            original.native.plan.operation !== 'submit' || original.native.plan.actorId !== actor.actorId ||
+            original.native.plan.protocolId !== actor.protocolId || original.native.plan.threadId !== session.nativeHandle.sessionId ||
+            original.native.outcome !== 'admitted' || !original.native.requestId) throw new AgentMuxError(
+          'The original ACP prompt receipt could not be confirmed for this exact Run.', 'AGENT_ACP_CANCEL_UNCONFIRMED',
+          undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
+        expectedRequestId = original.native.requestId
+      }
+      await acp.interrupt({ nativeActor: actor, processId: run.pid, workspacePath: session.workspacePath,
+        signal: AbortSignal.timeout(5_000) }, session.nativeHandle.sessionId, expectedRequestId)
+      return
+    }
+    if (options) throw new AgentMuxError('The original Run cannot confirm protocol prompt cancellation.', 'AGENT_NATIVE_INPUT_UNAVAILABLE',
+      undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
     await this.signalTerminal(expectedRun, signal)
   }
 

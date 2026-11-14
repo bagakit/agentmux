@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { setTimeout as wait } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
@@ -85,6 +85,37 @@ function createAntigravityProvider(defineAgentProvider: ProviderFactory): AgentP
     managedAcp: {
       protocolId: ANTIGRAVITY_ACP_ACTOR_PROTOCOL,
       launchOption: ACP_LAUNCH_OPTION,
+      async prepareInput({ nativeActor, processId, signal }, plan) {
+        const { actorId, lifecycleOperationId, token } = nativeActor
+        const identity = { actorId, lifecycleOperationId, processId }
+        const assertCurrent = async (): Promise<void> => {
+          signal.throwIfAborted()
+          const snapshot = await antigravityAcpActor.inspect(identity, token, signal)
+          if (snapshot.state !== 'ready' || snapshot.sessionId !== plan.threadId) throw new AgentMuxError(
+            'The original native ACP session could not confirm its input endpoint.', 'AGENT_ACP_ACTOR_UNCONFIRMED')
+          if (snapshot.activePromptId !== undefined) throw new AgentMuxError(
+            'The current ACP turn is still active.', 'AGENT_ACP_PROMPT_BUSY')
+        }
+        return { plan, assertCurrent, dispose() {},
+          async send(prompt, { clientCorrelation, ...frozen }) {
+            if (JSON.stringify(frozen) !== JSON.stringify(plan) || !clientCorrelation) throw new AgentMuxError(
+              'The prepared ACP request does not match the original input claim.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+            const requestId = `acp-prompt-${createHash('sha256').update(clientCorrelation).digest('hex')}`
+            return await antigravityAcpActor.submitPrompt(identity, token, { sessionId: plan.threadId, requestId, prompt }, signal)
+          }
+        }
+      },
+      async interrupt({ nativeActor, processId, signal }, nativeSessionId, expectedRequestId) {
+        const { actorId, lifecycleOperationId, token } = nativeActor
+        const identity = { actorId, lifecycleOperationId, processId }
+        const snapshot = await antigravityAcpActor.inspect(identity, token, signal)
+        if (snapshot.state !== 'ready' || snapshot.sessionId !== nativeSessionId) throw new AgentMuxError(
+          'The original ACP cancellation target could not be confirmed.', 'AGENT_ACP_CANCEL_UNCONFIRMED')
+        const requestId = expectedRequestId ?? snapshot.activePromptId
+        if (requestId === undefined) throw new AgentMuxError('The original ACP session has no active prompt.',
+          'AGENT_ACP_TURN_NOT_ACTIVE', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
+        await antigravityAcpActor.cancelPrompt(identity, token, { sessionId: nativeSessionId, requestId }, signal)
+      },
       async attach({ nativeActor, processId, signal, waitForReady }) {
         const { actorId, lifecycleOperationId, token } = nativeActor
         const observe = () => antigravityAcpActor.inspect({ actorId, lifecycleOperationId, processId }, token, signal)

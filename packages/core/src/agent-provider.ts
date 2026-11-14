@@ -194,7 +194,7 @@ export type AgentProviderPreparedNativeInput = {
   assertCurrent(): Promise<void>
   /** Called only after Core persists the original claim and correlation. */
   send(prompt: string, plan: AgentNativePromptInputPlan): Promise<{ outcome: 'admitted'; turnId: string } |
-    { outcome: 'admitted'; queuedSubmissionId: string } | { outcome: 'not-applied'; errorCode: number }>
+    { outcome: 'admitted'; queuedSubmissionId: string } | { outcome: 'admitted'; requestId: string } | { outcome: 'not-applied'; errorCode: number }>
   dispose(): void | Promise<void>
 }
 export type AgentProviderSessionStatusObservationContext = AgentProviderSessionStatusContext & {
@@ -206,6 +206,8 @@ export type AgentProviderManagedAcp = {
   protocolId: string
   launchOption: { id: string; choiceId: string }
   attach(context: AgentProviderNativeInputContext & { waitForReady?: true }): Promise<import('./acp-adapter.js').AgentMuxAcpBinding>
+  prepareInput?(context: AgentProviderNativeInputContext, plan: AgentNativePromptInputPlan): Promise<AgentProviderPreparedNativeInput>
+  interrupt?(context: AgentProviderNativeInputContext, nativeSessionId: string, expectedRequestId?: string): Promise<void>
 }
 
 export type AgentProvider = {

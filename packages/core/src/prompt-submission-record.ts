@@ -478,14 +478,18 @@ export function normalizePromptCompletionAdmission(value: unknown): NonNullable<
       const intent = normalizePromptInputIntent(admission.intent)
       if (admission.submissionId === undefined || admission.operationId !== admission.submissionId || intent.message === undefined ||
           !['claimed', 'admitted', 'not-applied', 'unknown'].includes(String(native.outcome)) || JSON.stringify(intent.plan) !== JSON.stringify(plan) ||
+          (plan.operation === 'submit' && native.outcome === 'admitted'
+            ? typeof native.requestId !== 'string' || !native.requestId || native.turnId !== undefined || native.queuedSubmissionId !== undefined
+            : native.requestId !== undefined) ||
           (native.outcome === 'admitted' ? admission.acknowledged !== true || (plan.operation === 'queue-idle'
             ? typeof native.queuedSubmissionId !== 'string' || !native.queuedSubmissionId || native.turnId !== undefined
-            : typeof native.turnId !== 'string' || !native.turnId || native.queuedSubmissionId !== undefined ||
-              plan.expectedTurnId !== undefined && native.turnId !== plan.expectedTurnId) : admission.acknowledged === true || native.queuedSubmissionId !== undefined) ||
+            : plan.operation !== 'submit' && (typeof native.turnId !== 'string' || !native.turnId || native.queuedSubmissionId !== undefined ||
+              plan.expectedTurnId !== undefined && native.turnId !== plan.expectedTurnId)) : admission.acknowledged === true || native.queuedSubmissionId !== undefined) ||
           (native.outcome === 'not-applied') !== (admission.notApplied === true)) throw new AgentMuxError('Invalid native admission outcome.', 'INVALID_AGENT_SESSION_STORE')
       return { transport: 'native' as const, native: { plan, outcome: native.outcome as 'claimed' | 'admitted' | 'not-applied' | 'unknown',
         ...(native.turnId === undefined ? {} : { turnId: string(native.turnId, 'native admitted turn') }),
         ...(native.queuedSubmissionId === undefined ? {} : { queuedSubmissionId: string(native.queuedSubmissionId, 'native queued submission') }),
+        ...(native.requestId === undefined ? {} : { requestId: string(native.requestId, 'native protocol request') }),
         ...(native.errorCode === undefined ? {} : { errorCode: (() => { if (!Number.isSafeInteger(native.errorCode)) throw new AgentMuxError('Invalid native error code.', 'INVALID_AGENT_SESSION_STORE'); return Number(native.errorCode) })() }) } }
     }
     if (admission.transport !== undefined && admission.transport !== 'pty' || admission.native !== undefined || admission.launch !== undefined ||
@@ -637,7 +641,7 @@ function nativePromptPlan(value: unknown): import('./types.js').AgentNativePromp
   const common = { kind: 'native-rpc' as const, protocolId: string(plan.protocolId, 'native protocol contract'), sourceId: string(plan.sourceId, 'native input source'), actorId: string(plan.actorId, 'native input actor'),
     threadId: string(plan.threadId, 'native input thread'), ...(plan.clientCorrelation === undefined ? {} : { clientCorrelation: string(plan.clientCorrelation, 'original native input correlation', 8192) }),
     ...(plan.interactionQueue === true ? { interactionQueue: true as const } : {}) }
-  if (plan.operation === 'start-or-steer' || plan.operation === 'queue-idle') {
+  if (plan.operation === 'submit' || plan.operation === 'start-or-steer' || plan.operation === 'queue-idle') {
     if (plan.expectedTurnId !== undefined) throw new AgentMuxError('A native start or idle queue plan cannot claim an exact turn.', 'INVALID_AGENT_SESSION_STORE')
     return { ...common, operation: plan.operation }
   }
