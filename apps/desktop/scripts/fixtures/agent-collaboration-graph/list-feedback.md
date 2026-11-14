@@ -23,7 +23,7 @@ For a bounded two-frame correction after independent image review, set `COLLABOR
 
 ## Eight repeated cost traces per arm
 
-Only run costs after the candidate Native arm is qualified. Use the same final harness bytes and parameters for immutable `<candidate-ref>` and `<baseline-ref>`; the refs belong to execution evidence, not this contract.
+Run costs after the affected interaction path has qualified Native coverage. An incremental pending-material change can reuse explicitly reviewed unchanged interaction evidence, then qualify its new pixels through the three post-trace frames below; it does not inherit full-scene or document-visibility approval. For a contemporaneous comparison, use the same final harness bytes and parameters for immutable `<candidate-ref>` and `<baseline-ref>`; the refs belong to execution evidence, not this contract. An independently approved older baseline may instead remain a historical reference with exact original inputs and scope, never a relabeled current or contemporaneous arm.
 
 ```sh
 COLLABORATION_CAPTURE_SOURCE_REF="${CANDIDATE_REF:?set immutable candidate ref}" \
@@ -33,6 +33,8 @@ node apps/desktop/scripts/capture-agent-collaboration-graph.mjs \
 ```
 
 For the original baseline arm, set `COLLABORATION_CAPTURE_SOURCE_REF` to `<baseline-ref>`, additionally set `COLLABORATION_CAPTURE_LIST_BASELINE=1`, and use a different empty evidence directory. Verify either completed cost arm with the same `--verify ... --scenario list-feedback` command. No screenshots are taken during traces.
+
+After all eight traces, the candidate captures exactly three complete native pending frames: wide dark normal motion, narrow light normal motion, and the same narrow light under reduced motion. Both normal frames require the original CSS animation to be nonpending and actually advance through native rAF into its middle before capture; clock or duration assignment is forbidden. The same original status must be fully clipped-in and hit-testable, retain its nonempty original text, and keep the exact unresolved operation/control. The reduced frame requires no running animation on that operation. Original workfaces, retained catalogs, layouts and draft are checked across this post-trace refresh; it creates no new Stop. The original baseline takes no such frames. Independent Agent review of these exact full PNGs remains mandatory; these frames do not qualify hidden-window behavior or replace unrelated approved details/failure/focus scenes.
 
 Each arm fixes four relevant visible original Project cards, their original output load, and one exact uncompleted Stop promise/control/operation. Catalog sizes 8, 128 and 384 increase unrelated private retained workfaces; the final condition increases related feedback endpoints from two to four at size 384. Every condition has two repeats. These are typed private membership/workface inputs, not live PTY output, transport/admission or real Runtime measurements.
 
