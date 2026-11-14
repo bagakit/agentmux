@@ -1010,19 +1010,56 @@ it.runIf(business)('Core-owned topology-only File View changes add and prune ori
   expect(saved.sourceFilesInputs.readSources[tab.id + '\0' + originalRegion]?.source).toEqual(state.documents[key]!.readSource)
 }, 60000)
 
-it.runIf(business)('stable Source body input reuses its topology projection instead of rescanning unrelated Tabs', async () => {
+it.runIf(business).each([false, true])('stable Source body input reuses its topology projection beside 500 unrelated Tabs (retained Source: %s)', async retained => {
   const f = await fixture(); await connectFolder(f)
   await f.store.getState().openFile('original.txt', 'file-group', undefined, f.workspace.id)
-  const state = f.store.getState(), tab = Object.values(state.tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === 'original.txt'))!
-  let topologyScans = 0
-  const tabs = new Proxy(state.tabs, { ownKeys(value) { topologyScans++; return Reflect.ownKeys(value) } })
-  f.store.setState({ tabs })
-  topologyScans = 0
+  const { createWorkbenchTab } = await import('../src/renderer/src/lib/workbench-tabs.js')
+  const { prepareRendererUpdate } = await import('../src/renderer/src/store.js')
+  const state = f.store.getState(), key = f.workspace.id + '\0original.txt'
+  const tab = Object.values(state.tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === 'original.txt'))!
   const regionId = Object.values(tab.regions).find(region => region.kind === 'file')!.regionId
+  const unrelated = Object.fromEntries(Array.from({ length: 500 }, (_, index) => {
+    const id = 'unrelated-file-' + index
+    return [id, createWorkbenchTab(id, { kind: 'file', regionId: id + '-region', workspaceId: f.workspace.id, path: id + '.txt' })]
+  }))
+  const mount = state.sourceFilesInputs.selections[f.workspace.id]!.locator!.mount
+  const sourceWorkspace = 'original-source-workspace:retained-file-fixture'
+  const retainedTab = { ...createWorkbenchTab('retained-source-tab', { kind: 'file', regionId: 'retained-source-region', workspaceId: sourceWorkspace, path: 'retained.txt' }),
+    source: { reference: mount.reference, zoneId: mount.zoneId, workspaceId: mount.workspaceId, tabId: 'original-source-tab' } }
+  f.store.setState({ tabs: { ...unrelated, ...state.tabs, ...(retained ? { [retainedTab.id]: retainedTab } : {}) }, layouts: {
+    [f.workspace.id]: createWorkspaceLayout('file-group', [...Object.keys(unrelated), ...Object.keys(state.tabs)]),
+    ...(retained ? { [sourceWorkspace]: createWorkspaceLayout('retained-source-group', [retainedTab.id]) } : {})
+  } })
+  await prepareRendererUpdate('reload')
+  let topologyScans = 0, layoutScans = 0
+  const tabs = new Proxy(f.store.getState().tabs, { ownKeys(value) { topologyScans++; return Reflect.ownKeys(value) } })
+  const layouts = new Proxy(f.store.getState().layouts, { ownKeys(value) { layoutScans++; return Reflect.ownKeys(value) } })
+  f.store.setState({ tabs, layouts })
+  const partialize = f.store.persist.getOptions().partialize!
+  const before = partialize(f.store.getState()).restoredWorkbench
+  expect(Boolean(before)).toBe(retained)
+  topologyScans = 0; layoutScans = 0
   for (let index = 0; index < 3; index++) f.store.getState().updateDocument(tab.id, 'Source body input ' + index, regionId)
   expect(f.store.getState().tabs).toBe(tabs)
-  expect(topologyScans).toBe(0)
-  expect(f.store.getState().documents[f.workspace.id + '\0original.txt']?.content).toBe('Source body input 2')
+  expect(topologyScans).toBe(0); expect(layoutScans).toBe(0)
+  expect(partialize(f.store.getState()).restoredWorkbench).toBe(before)
+  await prepareRendererUpdate('reload')
+  const saved = JSON.parse((await f.user.read())!).state
+  expect(saved.documents[key]).toMatchObject({ content: 'Source body input 2', readSource: state.documents[key]!.readSource })
+  expect(saved.dirtyDocuments[key]).toBe(true)
+  expect(Object.keys(saved.documents)).toEqual([key])
+  expect(saved.sourceFilesInputs.readSources[tab.id + '\0' + regionId].source).toEqual(state.documents[key]!.readSource)
+  expect(f.user.observe().lastConfirmedWrite?.diskDurability).toBe('confirmed')
+  // Both structural inputs invalidate the retained projection independently.
+  if (retained) {
+    f.store.setState({ tabs: { ...f.store.getState().tabs, [retainedTab.id]: { ...retainedTab, name: 'Original renamed Tab' } } })
+    await prepareRendererUpdate('reload')
+    expect(JSON.parse((await f.user.read())!).state.restoredWorkbench.tabs[retainedTab.id].name).toBe('Original renamed Tab')
+    const layout = createWorkspaceLayout('changed-file-group', [retainedTab.id])
+    f.store.setState({ layouts: { ...f.store.getState().layouts, [sourceWorkspace]: layout } })
+    await prepareRendererUpdate('reload')
+    expect(JSON.parse((await f.user.read())!).state.restoredWorkbench.layouts[sourceWorkspace]).toEqual(layout)
+  }
 }, 60000)
 
 it.runIf(business)('a confirmed Source write retains its namespace when its fresh identity read is unavailable', async () => {
