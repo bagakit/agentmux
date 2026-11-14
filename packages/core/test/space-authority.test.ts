@@ -12,6 +12,7 @@ const { SpaceAuthorityOwner } = process.env.SPACE_AUTHORITY_COMPILED_CORE ? awai
 import { readSpaceSnapshot, observeSpace, SpaceTransferReader, spaceStreamOpening } from '../src/space-authority-stream.js';
 import { applySpaceChange, type SpaceSnapshot, type SpaceChange } from '../src/space-authority.js';
 import type { AgentMuxSpatialGraph } from '../src/spatial-graph.js';
+import { createWorkbenchViewLayout, splitWorkbenchRegion, regionIds } from '../src/spatial-layout.js';
 const cleanup: Array<() => unknown | Promise<unknown>> = [];
 afterEach(async () => {
     for (const release of cleanup.splice(0).reverse())
@@ -53,6 +54,37 @@ async function fixture(runtimeId = 'runtime-b') {
 }
 async function observed<T>(read: () => T, accept: (value: T) => boolean): Promise<T> { return await vi.waitFor(() => { const value = read(); expect(accept(value), 'Expected original Space observation to arrive').toBe(true); return value; }, { timeout: 5000, interval: 10 }); }
 describe('original Space authority through the production RPC client/server', () => {
+    it('removes an exact unobserved member and its saved split leaf through the original spatial writer', async () => {
+        const f = await fixture(), original = graph();
+        original.tabs[0]!.regionIds.push('kept-region');
+        original.regions.push({ ...original.regions[0]!, regionId: 'kept-region', agentSessionId: 'kept-session' });
+        original.regions[0] = { ...original.regions[0]!, runId: null, execution: null };
+        original.tabLayouts.tab = splitWorkbenchRegion(createWorkbenchViewLayout('region'), 'region', 'right', 'kept-region');
+        await f.store.commit({ expectedRevision: 1, graph: original });
+        const rpc = await f.connect();
+        const receipt = await rpc.call('space.apply', { reference: f.reference, expectedRevision: 2,
+            changes: { tabs: [{ ...original.tabs[0]!, regionIds: ['kept-region'] }], remove: { regions: ['region'] } } });
+        expect(receipt).toMatchObject({ revision: 3, diskDurability: 'confirmed' });
+        const saved = (await f.store.read())!;
+        expect(saved.graph.regions.some(region => region.regionId === 'region')).toBe(false);
+        expect(regionIds(saved.graph.tabLayouts.tab!.root)).toEqual(['kept-region']);
+        expect(saved.graph.tabLayouts.tab!.activeRegionId).toBe('kept-region');
+        expect(saved.graph.regions.find(region => region.regionId === 'kept-region')?.agentSessionId).toBe('kept-session');
+        expect(saved.graph.resources).toEqual(original.resources);
+        const reopened = new AgentMuxSpatialStateStore(f.store.path);
+        expect((await reopened.read())!.graph.tabLayouts).toEqual(saved.graph.tabLayouts);
+    });
+    it('retires the removed Tab occurrences while preserving other original workfaces and recovery descriptors', async () => {
+        const f = await fixture(), rpc = await f.connect(), original = graph();
+        await rpc.call('space.apply', { reference: f.reference, expectedRevision: 1,
+            changes: { remove: { tabs: ['tab'], regions: ['region'] } } });
+        const saved = (await f.store.read())!;
+        expect(saved.graph.layouts.zone!.groups[0]!.tabOrder).toEqual([]);
+        expect(saved.graph.layouts.zone!.groups[0]!.activeTabId).toBeNull();
+        expect(saved.graph.tabLayouts.tab).toBeUndefined();
+        expect(saved.graph.tabLayouts['other-tab']).toEqual(original.tabLayouts['other-tab']);
+        for (const [key, value] of Object.entries(original.resources)) expect(saved.graph.resources[key]).toEqual(value);
+    });
     it('scopes the original graph, Session refs and content without guessing a client-local Host route', async () => {
         const f = await fixture(), rpc = await f.connect();
         const snapshot = await readSpaceSnapshot(rpc, f.reference);
