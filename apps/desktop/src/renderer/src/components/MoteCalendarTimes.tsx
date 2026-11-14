@@ -2,7 +2,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { DateTime } from 'luxon'
 import type { ScheduleOccurrence } from '@agentmux/core/schedule-calendar'
 import { Button } from '@agentmux/client-ui/components/Button'
-import { scheduleStateLabel, scheduleDisplayTitle } from './ScheduleArrangementRow'
+import { scheduleCalendarLabel, scheduleStateLabel, scheduleDisplayTitle } from './ScheduleArrangementRow'
 import type { CalendarSchedule } from '../lib/mote-calendar-range'
 
 const pageSize = 12
@@ -20,11 +20,12 @@ export function MoteCalendarTimes({ items, schedules, timezone, now, repeatedHou
     : [item]).sort((a, b) => a.at - b.at || a.scheduleId.localeCompare(b.scheduleId)) : [], [expanded, items])
   const page = Math.min(requestedPage, Math.max(0, Math.ceil(times.length / pageSize) - 1))
   useLayoutEffect(() => {
-    const body = pageElement.current, pane = body?.closest<HTMLElement>('.mote-calendar__window-info')
-    const summary = body?.previousElementSibling, header = pane?.firstElementChild
-    if (!expanded || !body || !pane || !summary || !header || getComputedStyle(pane).overflowY !== 'auto') return
-    const bottom = body.getBoundingClientRect().bottom - pane.getBoundingClientRect().bottom
-    const top = summary.getBoundingClientRect().top - header.getBoundingClientRect().bottom
+    const body = pageElement.current, pane = body?.closest<HTMLElement>('.mote-calendar__day')
+    const summary = body?.previousElementSibling
+    if (!expanded || !body || !pane || !summary || getComputedStyle(pane).overflowY !== 'auto') return
+    const bounds = pane.getBoundingClientRect()
+    const bottom = body.getBoundingClientRect().bottom - bounds.bottom
+    const top = summary.getBoundingClientRect().top - bounds.top
     if (bottom > 0 && top > 0) pane.scrollTop += Math.min(bottom, top)
   }, [expanded])
   if (!items.length) return null
@@ -44,7 +45,7 @@ export function MoteCalendarTimes({ items, schedules, timezone, now, repeatedHou
         const state = item.kind === 'last-accepted' ? 'Input accepted' : item.kind === 'projected' ? 'Planned' : status === 'Active' ? 'Next planned' : status
         return <li key={JSON.stringify([item.scheduleId, item.at])} data-occurrence-kind={item.kind}>
           <time dateTime={new Date(item.at).toISOString()}>{local.toFormat(repeatedHour ? 'HH:mm ZZ' : 'HH:mm')}</time>
-          <button type="button" title={scheduleDisplayTitle(saved.record)} onClick={() => onOpen(item.scheduleId)}>{scheduleDisplayTitle(saved.record)}</button>
+          <button type="button" title={scheduleDisplayTitle(saved.record)} onClick={() => onOpen(item.scheduleId)}>{scheduleCalendarLabel(saved.record)}</button>
           <small>{state}</small>
         </li>
       })}</ol>

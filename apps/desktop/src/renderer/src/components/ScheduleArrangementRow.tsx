@@ -2,11 +2,14 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import type { ContinuousProgressLoop } from '@agentmux/core/continuous-progress-scheduler'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@agentmux/client-ui/components/Button'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { api } from '../lib/api'
 import { useScheduleOperation } from '../lib/schedule-controller'
 import { ScheduleOperationNotice } from './ScheduleOperationNotice'
 
 const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+const MoteIcon = semanticIconComponent('object.mote')
+const ScheduleIcon = semanticIconComponent('object.schedule')
 export function scheduleRuleLabel(schedule: ContinuousProgressLoop): string {
   if (schedule.everyMs !== undefined) return schedule.everyMs === 60000 ? 'Every minute' : 'Every ' + schedule.everyMs / 60000 + ' minutes'
   if (!schedule.calendar) return 'One-shot countdown'
@@ -21,6 +24,11 @@ export function scheduleStateLabel(schedule: ContinuousProgressLoop, now: number
 }
 export function scheduleDisplayTitle(schedule: ContinuousProgressLoop): string {
   return schedule.prompt.trim().split('\n')[0]!
+}
+export function scheduleCalendarLabel(schedule: ContinuousProgressLoop): string {
+  if (schedule.managedSource) return 'Mote heartbeat'
+  const headline = scheduleDisplayTitle(schedule)
+  return headline.match(/^(.{2,16}?)(?:：|:\s)/u)?.[1]?.trim() || headline
 }
 export function ScheduleArrangementRow({ schedule, timezone, now, onReceipt, discussion, onOpenDiscussion, quickActions = false, calendarSummary = false }: {
   schedule: ContinuousProgressLoop; timezone: string; now: number; calendarSummary?: boolean
@@ -40,8 +48,10 @@ export function ScheduleArrangementRow({ schedule, timezone, now, onReceipt, dis
   const date = formats.short.format(at)
   const phase = scheduleStateLabel(schedule, now)
   const nextLabel = phase === 'Active' ? 'Next planned' : phase === 'Due' ? 'Due since' : 'Original due'
+  const Icon = schedule.managedSource ? MoteIcon : ScheduleIcon
   const remaining = Math.ceil((schedule.nextCheckAt - now) / 1000)
   const relative = remaining <= 0 ? 'Due' : remaining < 60 ? remaining + 's left' : remaining < 3600 ? Math.ceil(remaining / 60) + 'm left' : Math.ceil(remaining / 3600) + 'h left'
+  const cadence = schedule.afterMs === undefined ? scheduleRuleLabel(schedule).split(' · ')[0] : 'Countdown' + (phase === 'Active' ? ' · ' + relative : '')
   const mutate = (action: 'pause' | 'resume' | 'cancel') => void operation.perform({ action,
     params: { scheduleId: schedule.loopId, expectedRevision: schedule.revision!, operationId: mintObjectId() } })
   async function inspectSaved() {
@@ -52,20 +62,27 @@ export function ScheduleArrangementRow({ schedule, timezone, now, onReceipt, dis
       onReceipt(result.schedule); setInspection('Original arrangement checked. Input acceptance and completed work are separate.')
     } catch (error) { if (alive.current) setInspection(error instanceof Error ? error.message : String(error)) }
   }
-  return <li className="schedule-arrangement" data-compact={quickActions || undefined} data-calendar-summary={calendarSummary || undefined} data-schedule-id={schedule.loopId}>
+  return <li className="schedule-arrangement" data-compact={quickActions || undefined} data-calendar-summary={calendarSummary || undefined} data-managed={schedule.managedSource ? true : undefined} data-schedule-id={schedule.loopId}>
     <div className="schedule-arrangement__overview">
       {!calendarSummary ? <>
         {quickActions ? <p className="schedule-arrangement__message">{schedule.prompt.split('\n')[0]}</p> : null}
         <div className="schedule-arrangement__when"><time dateTime={new Date(at).toISOString()}>{date}</time><span className={quickActions ? 'automation-state' : undefined} data-state={schedule.lastOutcome === 'unknown' ? 'unconfirmed' : schedule.status}>{phase}</span></div>
         {!quickActions ? <p className="schedule-arrangement__message">{schedule.prompt.split('\n')[0]}</p> : null}
-      </> : <p className="schedule-arrangement__message" title={scheduleDisplayTitle(schedule)}>{scheduleDisplayTitle(schedule)}</p>}
-      <div className="schedule-arrangement__caption"><span>{schedule.calendar || schedule.everyMs !== undefined ? scheduleRuleLabel(schedule) : 'Countdown' + (schedule.status === 'active' && schedule.lastOutcome !== 'unknown' ? ' · ' + relative : '')}</span>
-        {discussion ? <span>{discussion}</span> : null}</div>
+      </> : <div className="schedule-arrangement__heading">
+        <span className="schedule-arrangement__mark"><Icon size={14} aria-hidden /></span>
+        <p className="schedule-arrangement__message" title={scheduleDisplayTitle(schedule)}>{scheduleCalendarLabel(schedule)}</p>
+        <span className="schedule-arrangement__cadence" title={scheduleRuleLabel(schedule)}>{cadence}</span>
+      </div>}
+      {!calendarSummary ? <div className="schedule-arrangement__caption"><span>{schedule.calendar || schedule.everyMs !== undefined ? scheduleRuleLabel(schedule) : 'Countdown' + (schedule.status === 'active' && schedule.lastOutcome !== 'unknown' ? ' · ' + relative : '')}</span>
+        {discussion ? <span>{discussion}</span> : null}</div> : null}
       {calendarSummary ? <>
-        {phase !== 'Active' && phase !== 'Due' ? <p className="schedule-arrangement__state">{phase}</p> : null}
+        {discussion || phase !== 'Active' && phase !== 'Due' ? <div className="schedule-arrangement__calendar-context">
+          {discussion ? <span title={discussion}>{discussion}</span> : null}
+          {phase !== 'Active' && phase !== 'Due' ? <span className="schedule-arrangement__state">{phase}</span> : null}
+        </div> : null}
         <dl className="schedule-arrangement__times">
           <div><dt>Last input accepted</dt><dd>{schedule.lastOccurrenceAt === undefined ? '—' : <time dateTime={new Date(schedule.lastOccurrenceAt).toISOString()}>{formats.short.format(schedule.lastOccurrenceAt)}</time>}</dd></div>
-          <div><dt>{nextLabel}</dt><dd><time dateTime={new Date(at).toISOString()}>{date}</time></dd></div>
+          {schedule.status !== 'stopped' ? <div><dt>{nextLabel}</dt><dd><time dateTime={new Date(at).toISOString()}>{date}</time></dd></div> : null}
         </dl>
       </> : null}
       {quickActions && schedule.status !== 'stopped' ? <button type="button" className="automation-button schedule-arrangement__toggle" disabled={operation.busy || !!operation.pending || schedule.revision === undefined} onClick={() => mutate(schedule.status === 'active' ? 'pause' : 'resume')}>{schedule.status === 'active' ? 'Pause' : 'Resume'}</button> : null}
@@ -73,7 +90,8 @@ export function ScheduleArrangementRow({ schedule, timezone, now, onReceipt, dis
     <details className="schedule-arrangement__details">
       <summary>Details and controls</summary>
       {calendarSummary || quickActions || schedule.prompt.includes('\n') ? <p className="calendar-schedules__context">{schedule.prompt}</p> : null}
-      {!calendarSummary ? <><p>{scheduleRuleLabel(schedule)}</p><p>{schedule.status === 'active' ? 'Next due' : 'Original due'} · <time dateTime={new Date(schedule.nextCheckAt).toISOString()}>{formats.full.format(schedule.nextCheckAt)}</time></p></> : null}
+      <p>{scheduleRuleLabel(schedule)}</p>
+      {!calendarSummary || schedule.status === 'stopped' ? <p>{schedule.status === 'active' ? 'Next due' : 'Original due'} · <time dateTime={new Date(schedule.nextCheckAt).toISOString()}>{formats.full.format(schedule.nextCheckAt)}</time></p> : null}
       {schedule.checkIn ? <><p>Quiet follow-up · {schedule.checkIn.quiet.start}–{schedule.checkIn.quiet.end} quiet · at least {schedule.checkIn.silenceMs / 3600000}h silence · {schedule.checkIn.minIntervalMs / 3600000}h between attempts · {schedule.checkIn.dailyBudget} per local day</p>
         {schedule.checkInState?.unanswered ? <p>{schedule.lastOutcome === 'sent' ? 'Waiting for your next confirmed reply.' : 'Previous follow-up is unconfirmed. Reconcile its original operation.'}</p> : null}
         {schedule.checkInState?.budgetDate ? <p>{schedule.checkInState.budgetUsed} attempt used on {schedule.checkInState.budgetDate}.</p> : null}</> : null}
