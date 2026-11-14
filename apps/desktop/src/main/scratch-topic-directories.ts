@@ -1,1 +1,0 @@
-export { ensureScratchStorageRoot, resolveScratchTopicDirectory, scratchDirectoryAddress, scratchDirectoryIdentity, scratchStorageTopicIds, scratchIdentityContext, scratchConfirmedDirectoryPaths, SCRATCH_DIRECTORY_IDENTITY_PATH } from '@agentmux/host/mote-resources'
