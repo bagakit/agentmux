@@ -10726,10 +10726,16 @@ export class AgentMuxClient {
               return
             }
             let publishedState: AgentSemanticState = observation.state
-            let displayAccepted = false
+            let displayAccepted = false, unattributedInitialSnapshot = false
             const next = await this.updateExactAgentSession(current.agentSessionId, current.run, saved => {
-              displayAccepted = false
+              displayAccepted = false; unattributedInitialSnapshot = false
               if (watch.controller.signal.aborted || saved.providerId !== session.providerId || !sameNativeHandle(saved.nativeHandle, session.nativeHandle)) return saved
+              if (observation.initialSnapshot && [...Object.values(saved.continuityOperations ?? {}), saved.continuity].some(operation =>
+                operation?.kind === 'resumed' && operation.agentSessionId === saved.agentSessionId && operation.newRun?.runId === saved.run.runId)) {
+                const predecessor = saved.nativePromptPredecessor
+                const exactPredecessor = predecessor?.run.runId === saved.run.runId && predecessor.previousRun.runId === saved.retiredRuns.at(-1)?.runId
+                if (!exactPredecessor) { unattributedInitialSnapshot = true; return saved }
+              }
               if (ended) {
                 const previous = nativeTurnEndScopeMatches(saved) ? saved.nativeTurnEnds!.turns : {}
                 const end = Object.hasOwn(previous, observation.nativeTurnId) ? previous[observation.nativeTurnId]! : {
@@ -10792,6 +10798,13 @@ export class AgentMuxClient {
             if (watch.controller.signal.aborted) return
             watch.recordId = observation.recordId
             if (observation.sequence !== undefined) watch.sequence = observation.sequence
+            if (unattributedInitialSnapshot) {
+              this.publishSession(next)
+              this.publisher.publish({ type: 'agent-error', agentSessionId: next.agentSessionId, code: 'AGENT_NATIVE_STATUS_UNCONFIRMED',
+                message: 'The retained initial snapshot cannot confirm a new turn for this restored Run. Existing live activity, history and input remain available.',
+                evidence: { source: 'agentmux', run: { ...next.run }, observedAt: Date.now() } })
+              return
+            }
             // Preserve the original failure even when a newer turn owns current activity.
             // The captured record observes this source, not a claim that this Run caused it.
             if (observation.failure) {
