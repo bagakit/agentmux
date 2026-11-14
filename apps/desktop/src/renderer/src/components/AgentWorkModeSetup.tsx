@@ -28,15 +28,16 @@ export function AgentWorkModeSetup({ config, active, initialSelection, initialMo
   onOpenHost?: ((hostId: string) => void) | undefined
 }) {
   const settings = useContext(SettingsNavigation), group = useId()
-  const reference = workReferenceHostId(config.hosts)
   const fixedProject = fixedResourceWorkspaceId !== undefined
   const initialProject = config.workspaces.find(item => item.id === (fixedResourceWorkspaceId ?? initialSelection?.resourceWorkspaceId))
+  const reference = fixedProject ? initialProject?.hostId ?? null : workReferenceHostId(config.hosts)
   const initialAgent = config.workspaces.find(item => item.id === (initialSelection?.agentWorkspaceId ?? initialProject?.id))
   const observedMode = agentWorkMode(reference, initialAgent?.hostId ?? null, initialProject?.hostId ?? null)
-  const modeOptions = AGENT_WORK_MODES.filter(item => fixedProject
-    ? reference !== null && initialProject && (item.id === 'local' || item.id === 'remote-agent') === (initialProject.hostId === reference)
-    : allowLocal || item.id !== 'local')
-  const [mode, setMode] = useState<AgentWorkMode>(() => initialMode ?? (observedMode === 'unknown' || !allowLocal && observedMode === 'local' ? 'remote-agent' : observedMode))
+  const modeOptions = fixedProject ? AGENT_WORK_MODES.filter(item => item.id === 'local' || item.id === 'remote-agent').map(item => item.id === 'local'
+    ? { ...item, brand: 'Project device', label: 'Project device', description: 'Agent and files on the project’s device.' }
+    : { ...item, label: 'Other device', description: 'Agent elsewhere. Files stay with this project.' })
+    : AGENT_WORK_MODES.filter(item => allowLocal || item.id !== 'local')
+  const [mode, setMode] = useState<AgentWorkMode>(() => initialMode ?? (observedMode === 'unknown' || !fixedProject && !allowLocal && observedMode === 'local' ? 'remote-agent' : observedMode))
   const [projectId, setProjectId] = useState(initialProject?.id ?? '')
   const [folderHostId, setFolderHostId] = useState(initialProject?.hostId ?? '')
   const [agentId, setAgentId] = useState(initialAgent && initialAgent.hostId !== reference && initialAgent.hostId !== initialProject?.hostId ? initialAgent.hostId
@@ -108,12 +109,12 @@ export function AgentWorkModeSetup({ config, active, initialSelection, initialMo
   }
   function openHost(id: string | null) { if (id) { if (onOpenHost) onOpenHost(id); else settings?.openHost(id) } }
   const unavailableProject = fixedProject ? !project || !modeOptions.some(item => item.id === mode) : projectId && !projects.some(item => item.id === projectId)
-  return <div className={`agent-work-setup${allowLocal ? ' agent-work-setup--local' : ''}`} data-work-mode={mode} aria-busy={pending || undefined}>
+  return <div className={`agent-work-setup${allowLocal ? ' agent-work-setup--local' : ''}`} data-work-mode={mode} data-fixed-project={fixedProject || undefined} aria-busy={pending || undefined}>
     <fieldset className="agent-work-mode-choices" disabled={disabled || !active}>
-      <legend>Work mode <span>From {workHostLabel(config.hosts, reference)}</span></legend>
+      <legend>{fixedProject ? 'Agent location' : 'Work mode'} <span>{fixedProject ? 'Project on ' : 'From '}{workHostLabel(config.hosts, reference)}</span></legend>
       <div className="agent-work-mode-choices__options">{modeOptions.map(item =>
         <label className="agent-work-mode-choice" data-selected={mode === item.id || undefined} key={item.id}>
-          <AgentWorkModePlacement mode={item.id} />
+          <AgentWorkModePlacement mode={item.id} referenceLabel={fixedProject ? 'Project' : 'Here'} otherLabel={fixedProject ? 'Other' : 'Remote'} />
           <span className="agent-work-mode-choice__copy"><span className="agent-work-mode-choice__name"><strong>{item.brand}</strong>{item.brand !== item.label ? <span>{item.label}</span> : null}</span><small>{item.description}</small></span>
           <input type="radio" name={group} value={item.id} checked={mode === item.id} aria-label={`${item.brand === item.label ? item.label : `${item.brand} · ${item.label}`}: ${item.description}`} onChange={() => changeMode(item.id)} />
         </label>)}</div>

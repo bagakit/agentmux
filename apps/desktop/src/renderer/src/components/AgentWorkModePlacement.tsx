@@ -5,7 +5,9 @@ const AgentIcon = semanticIconComponent('object.agent')
 const ProjectIcon = semanticIconComponent('object.folder')
 
 /** Static role locations explain a choice; the original placement projection owns live addresses. */
-export function AgentWorkModePlacement({ mode }: { mode: AgentWorkMode }) {
+export function AgentWorkModePlacement({ mode, referenceLabel = 'Here', otherLabel = 'Remote' }: {
+  mode: AgentWorkMode; referenceLabel?: string; otherLabel?: string
+}) {
   const agent = mode === 'local' || mode === 'remote-project' ? 'here' : 'remote'
   const project = mode === 'local' || mode === 'remote-agent' ? 'here' : 'remote'
   return <span className="agent-work-mode-placement" aria-hidden="true">
@@ -14,7 +16,7 @@ export function AgentWorkModePlacement({ mode }: { mode: AgentWorkMode }) {
         {agent === location ? <AgentIcon size={12} data-placement-role="agent" /> : null}
         {project === location ? <ProjectIcon size={12} data-placement-role="project" /> : null}
         {agent !== location && project !== location ? <i /> : null}
-      </span><small>{location === 'here' ? 'Here' : 'Remote'}</small>
+      </span><small>{location === 'here' ? referenceLabel : otherLabel}</small>
     </span>)}
   </span>
 }

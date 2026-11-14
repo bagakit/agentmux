@@ -1,18 +1,18 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { useMemo, useRef } from 'react'
 import type { AppConfig } from '../../../shared/contracts'
 import { useAppStore } from '../store'
-import { agentWorkModeLabel, agentWorkPlacement, workHostLabel, workReferenceHostId, type AgentWorkSource } from '../lib/agent-work-mode'
-import { useWorkbenchNameTooltip } from './WorkbenchNameTooltip'
+import { agentWorkPlacement, workHostLabel, workReferenceHostId, type AgentWorkSource } from '../lib/agent-work-mode'
+import { hostConnectionPresentation } from '../lib/host-connection-presentation'
+import { useWorkbenchNameTooltip, useWorkbenchTooltipFocus } from './WorkbenchNameTooltip'
 import './agent-work-mode.css'
 
-const RemoteIcon = semanticIconComponent('object.remote-execution')
 const ProjectIcon = semanticIconComponent('object.folder')
-const AgentIcon = semanticIconComponent('object.host')
-const UnknownIcon = semanticIconComponent('status.unknown')
+const AgentIcon = semanticIconComponent('object.agent')
 const NO_HOSTS: AppConfig['hosts'] = []
 
 /** A reading of original addresses. It never checks a connection or changes a Session. */
-export function AgentWorkModeBadge({ source, hosts: suppliedHosts, embedded = false }: {
+export function AgentWorkModeBadge({ source, hosts: suppliedHosts }: {
   source?: AgentWorkSource | undefined
   hosts?: AppConfig['hosts'] | undefined
   embedded?: boolean
@@ -20,13 +20,34 @@ export function AgentWorkModeBadge({ source, hosts: suppliedHosts, embedded = fa
   const configured = useAppStore(state => suppliedHosts ? NO_HOSTS : state.config?.hosts ?? NO_HOSTS)
   const hosts = suppliedHosts ?? configured
   const placement = source ? agentWorkPlacement(source, workReferenceHostId(hosts)) : null
-  const mode = placement?.mode ?? 'unknown', label = agentWorkModeLabel(mode)
-  const detail = placement ? `Agent · ${workHostLabel(hosts, placement.agentHostId)}\n${placement.agentPath || 'Startup directory unobserved'}\nProject · ${workHostLabel(hosts, placement.projectHostId)}\n${placement.projectPath || 'Project directory unobserved'}`
-    : 'The original Agent and project addresses are not observed.'
-  const tooltip = useWorkbenchNameTooltip(label, detail, embedded || mode === 'local', { pointerPassThrough: true })
+  const projectId = placement?.projectHostId ?? null, agentId = placement?.agentHostId ?? null
+  const projectTransport = useAppStore(state => projectId ? state.hostTransports?.[projectId] : undefined)
+  const agentTransport = useAppStore(state => agentId ? state.hostTransports?.[agentId] : undefined)
+  const mode = placement?.mode ?? 'unknown'
+  const relation = projectId && agentId && projectId === agentId ? 'same-device' : 'unconfirmed'
+  const projectLabel = workHostLabel(hosts, projectId), agentLabel = workHostLabel(hosts, agentId)
+  const route = relation === 'same-device' ? 'Same device' : 'Execution path unconfirmed'
+  const description = `Project · ${projectLabel}\n${placement?.projectPath || 'Project directory unobserved'}\nAgent · ${agentLabel}\n${placement?.agentPath || 'Startup directory unobserved'}\n${route}`
+  const detail = useMemo(() => {
+    const access = [...new Set([projectId, agentId])].filter((id): id is string => id !== null).map(id => ({
+      id, label: workHostLabel(hosts, id), ...hostConnectionPresentation(hosts.find(host => host.id === id), id === projectId ? projectTransport : agentTransport)
+    }))
+    return <span className="agent-work-detail">
+    <span className="agent-work-detail__end"><ProjectIcon size={14} aria-hidden="true" /><span><small>Project</small><strong>{projectLabel}</strong><code>{placement?.projectPath || 'Directory unobserved'}</code></span></span>
+    <span className="agent-work-detail__end"><AgentIcon size={14} aria-hidden="true" /><span><small>Agent</small><strong>{agentLabel}</strong><code>{placement?.agentPath || 'Startup directory unobserved'}</code></span></span>
+    <span className="agent-work-detail__route"><small>Execution route</small><span>{route}</span></span>
+    <span className="agent-work-detail__access"><small>Access from this device</small>{access.map(item => <span key={item.id}><strong>{item.label}</strong><span>{item.summary}</span>{item.source ? <small>{item.source}</small> : null}</span>)}</span>
+    </span>
+  }, [projectId, agentId, projectLabel, agentLabel, placement?.projectPath, placement?.agentPath, route, hosts, projectTransport, agentTransport])
+  const tooltip = useWorkbenchNameTooltip('Run mode', detail, mode === 'local')
+  const element = useRef<HTMLSpanElement>(null)
+  const focusOwner = useWorkbenchTooltipFocus(element, tooltip, mode === 'local', JSON.stringify([projectId, agentId]))
   if (mode === 'local') return null
-  const Icon = mode === 'unknown' ? UnknownIcon : mode === 'remote-project' ? ProjectIcon : mode === 'remote-agent' ? AgentIcon : RemoteIcon
-  return <><span className="agent-work-mode-badge" data-work-mode={mode} data-agent-host-id={placement?.agentHostId ?? ''}
-    data-project-host-id={placement?.projectHostId ?? ''} aria-label={`${label}; ${detail}`} title={embedded ? `${label}\n${detail}` : undefined}
-    tabIndex={embedded ? undefined : 0} {...(embedded ? {} : tooltip.props)}><Icon size={11} aria-hidden="true" /><span className="agent-work-mode-badge__label">{label}</span></span>{tooltip.content}</>
+  return <><span ref={element} className="agent-work-mode-badge" data-work-mode={mode} data-execution-relation={relation}
+    data-agent-host-id={agentId ?? ''} data-project-host-id={projectId ?? ''} aria-label={`Run mode; ${description}`}
+    tabIndex={focusOwner ? undefined : 0} {...tooltip.props}>
+    <span className="agent-work-mode-badge__end" data-execution-role="project"><ProjectIcon size={12} aria-hidden="true" />{relation === 'same-device' ? null : <span>{projectLabel}</span>}</span>
+    <span className="agent-work-mode-badge__link" aria-label={route} data-path-state={relation}>{relation === 'unconfirmed' ? <span>?</span> : null}</span>
+    <span className="agent-work-mode-badge__end" data-execution-role="agent"><AgentIcon size={12} aria-hidden="true" /><span>{agentLabel}</span></span>
+  </span>{tooltip.content}</>
 }

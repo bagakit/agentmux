@@ -139,8 +139,9 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
     data-session-kind={sessionKind}
     aria-label={`${sessionKind === 'agent' ? 'Agent' : 'Terminal'} ${name}; ${readOnly ? 'Read-only; ' : ''}${executorLabel}; ${sessionKind === 'agent' ? 'Session' : 'Terminal'} ${sessionId}; Host ${executionHost.label}`}>
     <strong className="agent-region-header__name" title={name}>{name}</strong>
-    <HostBadge host={executionHost} />
-    {sessionKind === 'agent' ? <AgentWorkModeBadge source={connectorSession} /> : null}
+    {sessionKind === 'agent' ? <AgentWorkModeBadge source={connectorSession ?? (executionHost.id === null ? undefined : {
+      hostId: executionHost.id, workspacePath: '', resourceUnobserved: true
+    })} /> : <HostBadge host={executionHost} />}
     {connectorSession?.kind === 'agent' ? <AgentOperationFeedback compact subject={{ hostId: connectorSession.control.hostId, agentSessionId: connectorSession.control.agentSessionId, regionId }} /> : null}
     {readOnly ? <span className="agent-region-header__mode">Read-only</span> : null}
     {recordDetails}

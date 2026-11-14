@@ -1,9 +1,34 @@
 import { autoUpdate, computePosition, flip, offset, shift, type Placement } from '@floating-ui/dom'
-import { useCallback, useEffect, useId, useRef, useState, type MouseEvent, type FocusEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type FocusEvent, type ReactNode, type RefObject } from 'react'
 import { markWindowOverlayDismissal, WindowOverlayPortal } from './WindowOverlayHost'
 
 // Pointer and keyboard can occupy different anchors. The latest reading intent owns one tooltip.
 const nameTooltipOwners = new WeakMap<Document, () => void>()
+
+/** Inline identities use their enclosing button's keyboard focus, without nesting a tab stop. */
+export function useWorkbenchTooltipFocus(element: RefObject<HTMLElement | null>, tooltip: ReturnType<typeof useWorkbenchNameTooltip>, suppressed: boolean, identity: string) {
+  const current = useRef(tooltip); current.current = tooltip
+  const [owner, setOwner] = useState<HTMLElement | null>(null)
+  useLayoutEffect(() => {
+    const parent = suppressed ? null : element.current?.parentElement?.closest<HTMLElement>('button, summary, a[href], [tabindex]:not([tabindex="-1"])') ?? null
+    setOwner(parent)
+    if (!parent) return
+    const show = () => current.current.showFor(parent), hide = () => current.current.hide()
+    parent.addEventListener('focus', show); parent.addEventListener('blur', hide)
+    return () => { parent.removeEventListener('focus', show); parent.removeEventListener('blur', hide) }
+  }, [element, suppressed, identity])
+  const describedBy = tooltip.props['aria-describedby']
+  useLayoutEffect(() => {
+    if (!owner || !describedBy) return
+    const ids = (owner.getAttribute('aria-describedby') ?? '').split(/\s+/u).filter(Boolean)
+    owner.setAttribute('aria-describedby', [...new Set([...ids, describedBy])].join(' '))
+    return () => {
+      const remaining = (owner.getAttribute('aria-describedby') ?? '').split(/\s+/u).filter(id => id && id !== describedBy)
+      if (remaining.length) owner.setAttribute('aria-describedby', remaining.join(' ')); else owner.removeAttribute('aria-describedby')
+    }
+  }, [owner, describedBy])
+  return owner
+}
 
 /** Full names and descriptions stay outside their original surface’s overflow. */
 export function useWorkbenchNameTooltip(name: string, detail: ReactNode, suppressed: boolean,

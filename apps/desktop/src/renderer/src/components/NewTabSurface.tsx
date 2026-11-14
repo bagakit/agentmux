@@ -195,6 +195,7 @@ export function NewTabSurface({
   const splitExecution = agentTarget?.agentWorkspaceId !== undefined
   const agentWorkspace = splitExecution ? config?.workspaces.find(item => item.id === agentTarget.agentWorkspaceId) : workspace
   const splitWorkspaceSupported = Boolean(workspace && agentWorkspace && !isScratchWorkspaceId(workspace.id) && !isScratchWorkspaceId(agentWorkspace.id))
+  const splitProjectUnsupported = Boolean(workspace && isScratchWorkspaceId(workspace.id) || agentWorkspace && isScratchWorkspaceId(agentWorkspace.id))
   const agentHost = agentWorkspace ? config?.hosts.find(candidate => candidate.id === agentWorkspace.hostId) : undefined
   const usesHostInventory = splitExecution || agentHost?.kind === 'ssh'
   const inventory = useAppStore(state => agentWorkspace ? state.hostExecutorInventories[agentWorkspace.hostId] : undefined)
@@ -441,8 +442,10 @@ export function NewTabSurface({
 
 
       {splitExecution && !splitWorkspaceSupported ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
-        step: 'Separate execution needs two registered projects', mode: 'Mote context is not configured for this mode. Your selection and draft are retained.',
-        restore: 'Choose a registered project for both ends, or turn off separate execution to launch in the original workspace.'
+        step: splitProjectUnsupported ? 'Separate tools need project folders' : 'Original Agent location is unconfirmed',
+        mode: 'Your original project, Agent selection and task are kept. No request has been sent.',
+        restore: splitProjectUnsupported ? 'Choose project folders in Remote work to prepare separate tools.'
+          : 'Open Agent location to confirm or explicitly change the Agent device. Your project stays here.'
       } }} /> : null}
       {splitExecution && agentTarget?.agentExecutor && !selectedExecutor && inventory?.state === 'ready' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
         step: 'Choose the current Agent configuration', mode: 'The saved Agent configuration does not match this Host revision. Your original selection and draft are retained.',
