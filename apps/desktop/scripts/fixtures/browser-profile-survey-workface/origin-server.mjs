@@ -54,6 +54,9 @@ export async function startProfileSurveyOrigins() {
     if (url.pathname === '/context-frame') {
       html(response, 'Embedded actions', '<a id="frame-link" href="/work?context=frame&amp;exact=1#frame-target">Open from embedded document</a><p id="frame-background" style="user-select:none">Embedded document background</p>'); return
     }
+    if (url.pathname === '/context-media-frame') {
+      html(response, 'Embedded video', '<style>body{margin:0}</style><video width="128" height="80" preload="auto" muted src="/context-video.webm"></video>'); return
+    }
     if (url.pathname === '/field-guide') {
       html(response, 'Field Guide', '<h1>Field Guide</h1><p>Saved destination for the original address input.</p>'); return
     }

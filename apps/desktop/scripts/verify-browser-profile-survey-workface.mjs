@@ -241,7 +241,7 @@ try {
   if (selectedCase === 'address-selection') {
     assert.ok(first.cases.some(item => item.kind === 'address-selection-exact-navigation' && item.passed))
   } else if (selectedCase === 'context-menu') {
-    for (const kind of ['context-menu-profile-admission', 'context-menu-original-frame-reload', 'context-menu-directional-split', 'context-menu-object-hierarchy', 'context-menu-short-keyboard'])
+    for (const kind of ['context-menu-profile-admission', 'context-menu-original-frame-reload', 'context-menu-directional-split', 'context-menu-object-hierarchy', 'context-menu-short-keyboard', 'context-menu-exact-video-frame'])
       assert.ok(first.cases.some(item => item.kind === kind && item.passed), 'The original workbench menu must complete ' + kind)
     const restart = await execute('restart')
     assert.notEqual(first.pid, restart.pid)

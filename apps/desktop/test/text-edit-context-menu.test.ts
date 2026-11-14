@@ -34,6 +34,7 @@ let frameId = 0
 class Frame {
   parent: Frame | null = null; detached = false; destroyed = false; frameToken = `frame-${++frameId}`
   reload = vi.fn(() => true)
+  copyVideoFrameAt = vi.fn(); saveVideoFrameAs = vi.fn()
   evaluateHook: ((code: string) => Promise<unknown>) | undefined
   readonly dom = { window: new DomWindow({ url: 'https://generic.invalid/' }) }
   constructor() { this.dom.window.document.body.innerHTML = '<input id="original"><input id="other"><textarea id="textarea"></textarea><div id="editable" tabindex="0">editable text</div><p id="text">Selected plain text</p>'; doms.push(this.dom) }
@@ -46,7 +47,9 @@ class Contents extends EventEmitter {
   destroyed = false; mainFrame = new Frame(); focusedFrame = this.mainFrame; url = 'https://generic.invalid/'
   session = Object.assign(new EventEmitter(), { setPermissionCheckHandler() {}, setPermissionRequestHandler() {}, setDevicePermissionHandler() {} }); commands: string[] = []
   navigationHistory = { canGoBack: () => false, canGoForward: () => false, goBack: vi.fn(), goForward: vi.fn() }
-  copyImageAt = vi.fn(); copyVideoFrameAt = vi.fn(); saveVideoFrameAs = vi.fn(); downloadURL = vi.fn(); inspectElement = vi.fn(); isDevToolsOpened = () => true; reload = vi.fn()
+  copyImageAt = vi.fn(); downloadURL = vi.fn(); inspectElement = vi.fn(); isDevToolsOpened = () => true; reload = vi.fn()
+  copyVideoFrameAt(x: number, y: number) { this.mainFrame.copyVideoFrameAt(x, y) }
+  saveVideoFrameAs(x: number, y: number) { this.mainFrame.saveVideoFrameAs(x, y) }
   constructor() { super(); native.frames.set(this.mainFrame, this) }
   isDestroyed() { return this.destroyed }; getURL() { return this.url }; getTitle() { return 'Page' }; isLoading() { return false }
   getZoomFactor() { return 1 }; setZoomFactor() {}; setBackgroundThrottling() {}; getBackgroundThrottling() { return true }
@@ -383,8 +386,8 @@ describe('actual definition-external consumers', () => {
     ])
     await click(await openHit(video), 'Copy Video Frame')
     await click(await openHit(video), 'Save Video Frame As…')
-    expect(contents.copyVideoFrameAt).toHaveBeenCalledWith(21, 34)
-    expect(contents.saveVideoFrameAs).toHaveBeenCalledWith(21, 34)
+    expect(frame.copyVideoFrameAt).toHaveBeenCalledWith(21, 34)
+    expect(frame.saveVideoFrameAs).toHaveBeenCalledWith(21, 34)
     await click(await openHit(), 'Reload Page')
     expect(contents.reload).toHaveBeenCalledTimes(1)
     await click(await openHit(), 'Inspect')
@@ -400,6 +403,34 @@ describe('actual definition-external consumers', () => {
     manager.setBounds('source', null)
     await click(stale, 'Open Link in Split')
     expect(projections()).toHaveLength(2)
+  })
+
+  it('copies and saves video frames through the original embedded frame', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'agentmux-context-video-test-')); roots.push(root)
+    const window = new Window()
+    const manager = new BrowserViewManager(window as never,
+      { defaultProfileId: () => 'profile', resolvePartition: () => 'persist:context-video' }, new BrowserRefLedgerStore(join(root, 'refs.json')),
+      { rememberedSchemes: async () => ({}), rememberScheme: async () => {}, openExternal() {} })
+    disposers.push(() => manager.dispose())
+    const pageURL = 'https://generic.invalid/page'
+    await manager.create('source', pageURL, 'workspace')
+    manager.setBounds('source', { x: 40, y: 50, width: 500, height: 400 })
+    const contents = native.contents[0] as Contents, child = new Frame()
+    child.parent = contents.mainFrame
+    native.frames.set(child, contents); native.focused = contents
+    const fixture = { contents, window, owner: { current: true }, frame: child }
+    const video = { pageURL, srcURL: 'https://media.invalid/video.webm', mediaType: 'video', isEditable: false, mediaFlags: { canSave: true, inError: false } }
+    await click(await open(fixture, video), 'Copy Video Frame')
+    await click(await open(fixture, video), 'Save Video Frame As…')
+    expect(child.copyVideoFrameAt).toHaveBeenCalledExactlyOnceWith(21, 34)
+    expect(child.saveVideoFrameAs).toHaveBeenCalledExactlyOnceWith(21, 34)
+    expect(contents.mainFrame.copyVideoFrameAt).not.toHaveBeenCalled()
+    expect(contents.mainFrame.saveVideoFrameAs).not.toHaveBeenCalled()
+
+    const stale = await open(fixture, video)
+    child.detached = true
+    await click(stale, 'Save Video Frame As…')
+    expect(child.saveVideoFrameAs).toHaveBeenCalledTimes(1)
   })
 
   it('reloads only the original embedded frame even when it shares the page address', async () => {

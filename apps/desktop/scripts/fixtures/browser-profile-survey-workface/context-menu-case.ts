@@ -3,7 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { setTimeout as pause } from 'node:timers/promises'
 import type { SplitDirection } from '@agentmux/layout'
-import { session, webContents, type BrowserWindow, type ContextMenuParams, type WebContentsView } from 'electron'
+import { nativeImage, session, webContents, type BrowserWindow, type ContextMenuParams, type DownloadItem, type WebContents, type WebContentsView } from 'electron'
 import { browserProfilePartition } from '../../../src/main/browser-profile-store'
 import { nativeInput, nativeUntil } from './native-input'
 import type { CompletePorts } from './complete-ports'
@@ -104,8 +104,38 @@ export async function contextMenuCase({ phase, directory, window, observation, e
     await writeFile(join(directory, file), (await window.capturePage()).toPNG())
     receipt.frames.push({ file, measured: measured[0], submenu: measured[1] })
   }
-  const openHit = async (embedded: boolean, id: string) => {
+  const showHit = async (id: string, point: { x: number; y: number }, separateProcess = false) => {
     hit = undefined
+    const zoom = contents.getZoomFactor(), at = { x: Math.round(point.x * zoom), y: Math.round(point.y * zoom) }
+    contents.focus()
+    if (separateProcess) {
+      const attachedHere = !contents.debugger.isAttached()
+      if (attachedHere) contents.debugger.attach('1.3')
+      try {
+        for (const [type, button, buttons] of [['mouseMoved', 'none', 0], ['mousePressed', 'right', 2], ['mouseReleased', 'right', 0]] as const) {
+          await contents.debugger.sendCommand('Input.dispatchMouseEvent',
+            { type, button, buttons, ...point, clickCount: type === 'mouseMoved' ? 0 : 1 })
+        }
+      } finally { if (attachedHere) contents.debugger.detach() }
+    } else {
+      contents.sendInputEvent({ type: 'mouseMove', ...at })
+      await pause(60)
+      contents.sendInputEvent({ type: 'mouseDown', button: 'right', clickCount: 1, ...at })
+      contents.sendInputEvent({ type: 'mouseUp', button: 'right', clickCount: 1, ...at })
+    }
+    try {
+      await nativeUntil(async () => hit && await evaluate(`document.querySelector(${JSON.stringify(menu)})?.checkVisibility()`), 'the original hit and its real workbench menu: ' + id)
+    } finally {
+      const observed = hit as ContextMenuParams | undefined
+      display.gestures.push({ target: id, at: separateProcess ? point : at, guest: sourceView.getBounds(), visible: sourceView.getVisible(),
+        hit: observed && { x: observed.x, y: observed.y, linkURL: observed.linkURL, isEditable: observed.isEditable,
+          hasSelection: observed.selectionText.length > 0, frameUrl: observed.frameURL } })
+    }
+    const nativeHit = hit! as ContextMenuParams
+    assert.ok(nativeHit.frame)
+    return nativeHit
+  }
+  const openHit = async (embedded: boolean, id: string) => {
     if (!sourceView.getVisible() || (await facts()).workbenchSpaceSelection?.regionId !== source.region.regionId) {
       const focus = await cli(['space', 'focus', '--region', source.region.regionId, '--input', 'preserve'])
       assert.equal(focus.value.ok, true)
@@ -129,24 +159,33 @@ export async function contextMenuCase({ phase, directory, window, observation, e
       }
       return null;
     })()`) as Promise<{ x: number; y: number } | null>, 'visible target inside the original Chromium document')
-    const zoom = contents.getZoomFactor(), at = { x: Math.round(point.x * zoom), y: Math.round(point.y * zoom) }
-    contents.focus()
-    contents.sendInputEvent({ type: 'mouseMove', ...at })
-    await pause(60)
-    contents.sendInputEvent({ type: 'mouseDown', button: 'right', clickCount: 1, ...at })
-    contents.sendInputEvent({ type: 'mouseUp', button: 'right', clickCount: 1, ...at })
-    try {
-      await nativeUntil(async () => hit && await evaluate(`document.querySelector(${JSON.stringify(menu)})?.checkVisibility()`), 'the original hit and its real workbench menu: ' + id)
-    } finally {
-      const observed = hit as ContextMenuParams | undefined
-      display.gestures.push({ target: id, at, guest: sourceView.getBounds(), visible: sourceView.getVisible(),
-        hit: observed && { x: observed.x, y: observed.y, linkURL: observed.linkURL, isEditable: observed.isEditable,
-          hasSelection: observed.selectionText.length > 0, frameUrl: observed.frameURL } })
-    }
-    const nativeHit = hit! as ContextMenuParams
-    assert.ok(nativeHit.frame)
+    const nativeHit = await showHit(id, point)
     assert.equal(nativeHit.frame === contents.mainFrame, !embedded)
     return nativeHit
+  }
+  const saveFrame = async (scene: string, nativeHit: ContextMenuParams) => {
+    const frame = nativeHit.frame
+    assert.ok(frame && nativeHit.mediaType === 'video')
+    const file = `first-video-frame-${scene}.png`, destination = join(directory, file)
+    let result: { state: string; bytes: number } | undefined
+    const started = (_event: Electron.Event, item: DownloadItem, owner: WebContents) => {
+      if (owner !== contents) return
+      item.setSavePath(destination)
+      item.once('done', (_event, state) => { result = { state, bytes: item.getReceivedBytes() } })
+    }
+    contents.session.on('will-download', started)
+    try {
+      await chrome.click(menu + ' [role="menuitem"]', 'Save Video Frame As…')
+      const saved = await nativeUntil(() => result, 'the exact ' + scene + ' video frame saves from the menu')
+      const bytes = await readFile(destination), image = nativeImage.createFromBuffer(bytes)
+      assert.equal(saved.state, 'completed')
+      assert.equal(bytes.length, saved.bytes)
+      assert.ok(bytes.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex')))
+      assert.deepEqual(image.getSize(), { width: 32, height: 24 })
+      return { file, size: image.getSize(), bytes: bytes.length, processId: frame.processId, url: nativeHit.frameURL }
+    } finally {
+      contents.session.removeListener('will-download', started)
+    }
   }
   const menuLabels = () => evaluate(`[...document.querySelectorAll(${JSON.stringify(menu + ' [role="menuitem"]')})].map(item=>item.getAttribute('aria-label') || item.textContent.trim())`)
   const escape = async () => {
@@ -157,7 +196,7 @@ export async function contextMenuCase({ phase, directory, window, observation, e
     const existing = new Set(observation.childrenOf(source.region.browserId).map(event => event.browser.id))
     const nativeHit = await openHit(embedded, embedded ? 'frame-link' : 'main-link')
     assert.equal(nativeHit.linkURL, address)
-    display.hits.push({ frame: nativeHit.frame.url, url: nativeHit.linkURL, menu: await menuLabels(), selection: itemLabel })
+    display.hits.push({ frame: nativeHit.frameURL, url: nativeHit.linkURL, menu: await menuLabels(), selection: itemLabel })
     if (submenu) {
       await chrome.click(menu + ' [aria-haspopup="menu"]', submenu)
       await nativeUntil(() => evaluate(`[...document.querySelectorAll(${JSON.stringify(openMenus)})].length === 2`), 'the original Profile submenu')
@@ -274,6 +313,39 @@ export async function contextMenuCase({ phase, directory, window, observation, e
     await escape()
     receipt.cases.push({ kind: 'context-menu-short-keyboard', passed: true })
     window.setContentSize(1280, 900)
+    const savedFrames = [await saveFrame('main', await openHit(false, 'context-video'))]
+    for (const scene of ['same-site', 'cross-site']) {
+      const frameUrl = new URL('/context-media-frame', origin)
+      if (scene === 'cross-site') frameUrl.hostname = 'localhost'
+      const address = JSON.stringify(frameUrl.href)
+      await contents.executeJavaScript(`(() => {
+        const frame = document.createElement('iframe');
+        frame.id = 'context-video-test-frame';
+        frame.style.cssText = 'width:165px;height:105px;border:0;display:block';
+        frame.src = ${address};
+        document.body.append(frame);
+        frame.scrollIntoView({block:'nearest'});
+      })()`)
+      const frame = await nativeUntil(() => contents.mainFrame.frames.find(current => current.url === frameUrl.href),
+        'original loaded ' + scene + ' frame')
+      const local = await nativeUntil(() => frame.executeJavaScript(`(() => {
+        const video=document.querySelector('video');
+        if (!video || video.readyState < 2) return null;
+        const r=video.getBoundingClientRect();
+        return {x:r.left+r.width/2,y:r.top+r.height/2};
+      })()`) as Promise<{x: number; y: number} | null>, 'decoded video in the ' + scene + ' frame')
+      const offset = await contents.executeJavaScript(`(() => {
+        const r=document.getElementById('context-video-test-frame').getBoundingClientRect();
+        return {x:r.left,y:r.top};
+      })()`) as {x: number; y: number}
+      const separateProcess = scene === 'cross-site'
+      assert.equal(frame.processId !== contents.mainFrame.processId, separateProcess)
+      const originalHit = await showHit(scene + ' video', { x: offset.x + local.x, y: offset.y + local.y }, separateProcess)
+      assert.equal(originalHit.frame?.frameToken, frame.frameToken)
+      savedFrames.push(await saveFrame(scene, originalHit))
+      await contents.executeJavaScript("document.getElementById('context-video-test-frame').remove()")
+    }
+    receipt.cases.push({ kind: 'context-menu-exact-video-frame', passed: true, frames: savedFrames })
     for (const [direction, label] of [['left', 'Split Left'], ['down', 'Split Down'], ['up', 'Split Up'], ['right', 'Split Right']] as const) {
       const split = await selectLink(false, pageUrl + '?context=main#main-target', label)
       const splitTab = await nativeUntil(async () => {
