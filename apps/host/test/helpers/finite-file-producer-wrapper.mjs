@@ -6,7 +6,7 @@ process.stderr.on('error', () => {})
 const nativeHelper = process.env.FILE_PRODUCER_NATIVE_HELPER
 const evidence = process.env.FILE_PRODUCER_EVIDENCE
 const args = process.argv.slice(2)
-args[args.length - 1] = 'at-move-publish-barrier'
+args[args.length - 1] = args[1] === 'delete' ? 'before-delete-unlink-barrier' : 'at-move-publish-barrier'
 let inherited = false
 try { const actual = fstatSync(7), original = statSync(process.env.FILE_PRODUCER_LEASE_PATH); inherited = actual.dev === original.dev && actual.ino === original.ino } catch {}
 const child = spawn(nativeHelper, args, { stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'pipe', 'pipe', 'pipe', inherited ? 7 : 'ignore'] })

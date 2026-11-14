@@ -482,6 +482,28 @@ it.each(['source','delete'] as const)('retains shared knowledge when another int
  else await f.metadata.recordHistory({...record,eventId:id,batchId:id,sequence:0,operation:'delete',source:{eventId:created.eventId},baseRevision:created.revision,beforeContent:created.content,revision:null,content:null,requestFingerprint:'another-original-intent'})
  const result=await f.port.undoShare(params,{actor:person});expect(result).toMatchObject({status:'committed',collections:[{source:null,deletion:null,retainedReason:{code:stage==='source'?'source-unconfirmed':'operation-conflict'}}]});expect(await readFile(join(f.directory,'source.note.md'),'utf8')).toContain('::note-include');expect(await readFile(join(f.directory,'block-shared.note.md'),'utf8')).toContain('One original knowledge source')
 })
+it('keeps ordinary deletion history without a shared source from authorizing either shared deletion or its public undo consumer', async () => {
+  const f = await fixture(); expect((await f.port.share(f.params, { actor: person })).status).toBe('committed')
+  const created = await f.metadata.readHistoryOperation('promote-original:create')
+  if (!created || created.operation !== 'edit' || !created.fileWitness || !created.revision) throw Error('The real shared creation must retain its original file witness')
+  const native = vi.spyOn(f.files, 'deleteExact')
+  const input = { path: 'block-shared.note.md', noteId: 'shared-note', expectedRevision: created.revision, witness: created.fileWitness,
+    operationId: 'ordinary-delete-without-shared-source', creationEventId: created.eventId, undoFingerprint: 'original-shared-undo-intent' }
+  const fingerprint = noteHistoryRevision(JSON.stringify(['agentmux.note.shared-delete.v1', created.resource, input, person]))
+  const ordinary = { eventId: input.operationId, sequence: 0, batchId: input.operationId, noteId: created.noteId, resource: created.resource,
+    originalResource: created.resource, status: 'prepared' as const, at: Date.now(), actor: person, operation: 'delete' as const,
+    requestFingerprint: fingerprint, parentEventId: created.eventId, baseRevision: created.revision, beforeContent: created.content,
+    revision: null, content: null, fileWitness: created.fileWitness }
+  await f.metadata.recordHistory(ordinary)
+  expect(await f.deletion.delete(f.workspace, input, { actor: person })).toMatchObject({ status: 'error', code: 'NOTE_OPERATION_CONFLICT' })
+  const params = await removal(f), id = fileShareUndoStageOperation(params.destination.operationId!, 'delete', 'shared-note')
+  await f.metadata.recordHistory({ ...ordinary, eventId: id, batchId: id })
+  expect(await f.port.undoShare(params, { actor: person })).toMatchObject({ status: 'committed', collections: [{ source: null, deletion: null, retainedReason: { code: 'operation-conflict' } }] })
+  expect(native).not.toHaveBeenCalled()
+  expect(await readFile(join(f.directory, 'block-shared.note.md'), 'utf8')).toContain('One original knowledge source')
+  expect(await f.metadata.readHistoryOperation(input.operationId)).toMatchObject({ status: 'prepared', beforeContent: created.content })
+  expect((await f.metadata.readHistoryOperation(input.operationId))!).not.toHaveProperty('source')
+})
 it('restores a quoted shared subtree with original descendant addresses and author after its final saved use is removed',async()=>{
  const f=await fixture(),source=newNoteDocument('','source-note','unused');source.content.content=[{type:'blockquote',attrs:{blockId:'quote-root'},content:[{type:'paragraph',attrs:{blockId:'quote-child'},content:[{type:'text',text:'Quoted original knowledge'}]}]}]
  const saved=await f.writer.write(f.workspace,{path:f.source.path,expectedRevision:f.source.expectedRevision,content:serializeNoteDocument(source)},{actor:author});if(saved.status!=='written')throw Error('fixture');const canonical=await readFile(join(f.directory,f.source.path),'utf8');f.params.promotions[0]!.source={...f.source,baseContent:canonical,content:canonical,expectedRevision:saved.revision};f.params.promotions[0]!.sourceBlockId='quote-root'
