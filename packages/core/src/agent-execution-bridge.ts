@@ -41,6 +41,8 @@ export class AgentExecutionBridge {
   private tail: Promise<void> = Promise.resolve()
   private releases: (() => void)[] = []
   private stopped = false
+  private firstFailure: Error | undefined
+  private firstFailureSide: Side | undefined
   private readonly connections: Record<Side, AgentExecutionBridgeConnection>
   private queuedBytes = 0
   private readonly partial: Record<Side, { parts: Buffer[]; bytes: number }> = { frontend: { parts: [], bytes: 0 }, executor: { parts: [], bytes: 0 } }
@@ -68,32 +70,55 @@ export class AgentExecutionBridge {
     await this.options.persist(structuredClone(next))
     this.state = next
   }
-  private fail(error: unknown): void {
-    if (this.stopped) return
+  get failureSide(): Side | undefined { return this.firstFailureSide }
+  private fail(error: unknown, side?: Side): Error {
+    if (this.stopped) return this.firstFailure ?? (error instanceof Error ? error : new Error(String(error)))
+    this.firstFailure = error instanceof Error ? error : new Error(String(error))
+    this.firstFailureSide = side
     this.stopped = true
-    for (const release of this.releases.splice(0)) release()
-    this.options.onError(error instanceof Error ? error : new Error(String(error)))
+    for (const release of this.releases.splice(0)) { try { release() } catch { /* Cleanup cannot replace the original reader failure. */ } }
+    this.options.onError(this.firstFailure)
+    return this.firstFailure
+  }
+  private async endpoint<T>(side: Side, operation: () => T | Promise<T>): Promise<T> {
+    try { return await operation() }
+    catch (error) { throw this.fail(error, side) }
+  }
+  private assertOpen(): void {
+    if (this.firstFailure) throw this.firstFailure
+    if (this.stopped) throw new AgentMuxError('The original execution reader was closed. Its helpers and admitted operations remain retained.', 'EXECUTION_READER_UNAVAILABLE')
   }
   private enqueue(side: Side, data: { startByte: number; endByte: number; dataBytes: Uint8Array }): void {
     if (this.stopped) return
     this.queuedBytes += data.dataBytes.byteLength
     if (this.queuedBytes > EXECUTION_FRAME_LIMIT * 2) {
-      this.fail(new AgentMuxError('The execution reader is backpressured; retain its original byte cursor and reattach.', 'EXECUTION_READER_BACKPRESSURED'))
+      this.fail(new AgentMuxError('The execution reader is backpressured; retain its original byte cursor and reattach.', 'EXECUTION_READER_BACKPRESSURED'), side)
       return
     }
     const frozen = { ...data, dataBytes: Buffer.from(data.dataBytes) }
     this.tail = this.tail.then(async () => { if (!this.stopped) await this.consume(side, frozen) })
-      .catch(error => this.fail(error)).finally(() => { this.queuedBytes -= frozen.dataBytes.byteLength })
+      .catch(error => { this.fail(error) }).finally(() => { this.queuedBytes -= frozen.dataBytes.byteLength })
   }
   async start(): Promise<void> {
+    try { await this.open() }
+    catch (error) {
+      try { this.fail(error) } catch { /* A failing observer cannot replace this original cause. */ }
+      try { await this.close() } catch { /* Retain the first failure even if its exact reader cleanup fails. */ }
+      throw this.firstFailure ?? error
+    }
+  }
+  private async open(): Promise<void> {
+    this.assertOpen()
     // Retry only the Runtime's ORIGINAL recoverable Input claim. No new native
     // operation or process may be synthesized from an uncertain acknowledgement.
     if (this.state.pending) await this.deliverPending()
     for (const side of ['frontend', 'executor'] as const) {
+      this.assertOpen()
       const port = this.options.ports[side], position = this.state[side]
-      const identity = await port.runtimeIdentity()
-      if (identity.instanceId !== position.ownerInstanceId) throw new AgentMuxError(
-        'The original helper Runtime instance is unavailable. No replacement helper was started.', 'EXECUTION_RUNTIME_CHANGED')
+      const identity = await this.endpoint(side, () => port.runtimeIdentity())
+      this.assertOpen()
+      if (identity.instanceId !== position.ownerInstanceId) throw this.fail(new AgentMuxError(
+        'The original helper Runtime instance is unavailable. No replacement helper was started.', 'EXECUTION_RUNTIME_CHANGED'), side)
       let opening = true, processObserved = false, attachmentObserved = false
       const connection = this.connections[side]
       const service = (value: AgentMuxNativeService | null | undefined) => {
@@ -104,7 +129,7 @@ export class AgentExecutionBridge {
       const receiveBytes = (data: { startByte: number; endByte: number; dataBytes: Uint8Array }) => {
         if (!opening) { this.enqueue(side, data); return }
         waitingBytes += data.dataBytes.byteLength
-        if (waitingBytes > EXECUTION_FRAME_LIMIT * 2) { this.fail(new Error('Execution attachment replay exceeded its reader budget')); return }
+        if (waitingBytes > EXECUTION_FRAME_LIMIT * 2) { this.fail(new AgentMuxError('Execution attachment replay exceeded its reader budget', 'EXECUTION_READER_BACKPRESSURED'), side); return }
         waiting.push({ ...data, dataBytes: Uint8Array.from(data.dataBytes) })
       }
       const receive = (event: AgentMuxClientEvent) => {
@@ -126,21 +151,31 @@ export class AgentExecutionBridge {
           if (connection.process === 'unobserved' || connection.process === 'running') connection.process = event.run.state
           processObserved = true; service(event.run.nativeService)
           this.publishConnection(side)
-          if (event.gap) { this.fail(new AgentMuxError('The original helper snapshot contains an output Gap.', 'EXECUTION_PROTOCOL_GAP')); return }
+          if (event.gap) { this.fail(new AgentMuxError('The original helper snapshot contains an output Gap.', 'EXECUTION_PROTOCOL_GAP'), side); return }
           for (const data of event.replay) receiveBytes(data)
           return
         }
         if (event.type !== 'terminal-output') return
         const range = event.evidence.outputByteRange
-        if (!range) { this.fail(new Error('Execution output has no authoritative byte range')); return }
+        if (!range) { this.fail(new Error('Execution output has no authoritative byte range'), side); return }
         receiveBytes({ ...range, dataBytes: event.dataBytes })
       }
-      this.releases.push(port.onRunEvent(position.runId, receive, { observeMessages: false, onError: error => this.fail(new Error(error.message)) }))
-      const attached = await port.attachTerminal(position.runId, position.outputByte, 'raw')
-      if (attached.run.state !== 'running') throw new AgentMuxError(
-        'The original helper is not confirmed running. Historical output does not establish a live execution service.', 'EXECUTION_HELPER_UNAVAILABLE')
-      if (attached.run.runId !== position.runId || attached.gap) throw new AgentMuxError(
-        'The original execution protocol has an output Gap; its tool outcomes remain unknown.', 'EXECUTION_PROTOCOL_GAP')
+      const release = await this.endpoint(side, () => port.onRunEvent(position.runId, receive, { observeMessages: false, onError: error => {
+        const failure = error instanceof AgentMuxError ? error : new AgentMuxError(error.message, error.code)
+        if (failure !== error) Object.defineProperty(failure, 'cause', { value: error })
+        this.fail(failure, side)
+      } }))
+      if (this.stopped) {
+        try { release() } catch { /* The registration callback already retained its original failure. */ }
+        this.assertOpen()
+      }
+      this.releases.push(release)
+      const attached = await this.endpoint(side, () => port.attachTerminal(position.runId, position.outputByte, 'raw'))
+      this.assertOpen()
+      if (attached.run.state !== 'running') throw this.fail(new AgentMuxError(
+        'The original helper is not confirmed running. Historical output does not establish a live execution service.', 'EXECUTION_HELPER_UNAVAILABLE'), side)
+      if (attached.run.runId !== position.runId || attached.gap) throw this.fail(new AgentMuxError(
+        'The original execution protocol has an output Gap; its tool outcomes remain unknown.', 'EXECUTION_PROTOCOL_GAP'), side)
       if (!processObserved) connection.process = attached.run.state
       if (!attachmentObserved) { connection.reader = 'attached'; delete connection.readerDiagnostic }
       service(attached.run.nativeService); this.publishConnection(side)
@@ -149,12 +184,12 @@ export class AgentExecutionBridge {
       for (const data of waiting) this.enqueue(side, data)
     }
     await this.tail
-    if (this.stopped) throw new AgentMuxError('The execution reader could not establish its original continuation.', 'EXECUTION_READER_UNAVAILABLE')
+    this.assertOpen()
   }
   private async consume(side: Side, data: Pick<AgentMuxRunDataEvent, 'startByte' | 'endByte' | 'dataBytes'>): Promise<void> {
     if (data.endByte <= this.readThrough[side]) return // Exact attachment/live overlap only.
     if (data.startByte > this.readThrough[side] || data.endByte - data.startByte !== data.dataBytes.byteLength)
-      throw new AgentMuxError('Execution output is not contiguous with its original cursor.', 'EXECUTION_PROTOCOL_GAP')
+      throw this.fail(new AgentMuxError('Execution output is not contiguous with its original cursor.', 'EXECUTION_PROTOCOL_GAP'), side)
     if (data.startByte < this.readThrough[side]) data = { ...data,
       dataBytes: data.dataBytes.subarray(this.readThrough[side] - data.startByte), startByte: this.readThrough[side] }
     const partial = this.partial[side]
@@ -165,12 +200,14 @@ export class AgentExecutionBridge {
       const end = newline < 0 ? bytes.length : newline
       const part = bytes.subarray(from, end)
       partial.bytes += part.length
-      if (partial.bytes > EXECUTION_FRAME_LIMIT) throw new Error('Execution frame exceeds its declared byte limit')
+      if (partial.bytes > EXECUTION_FRAME_LIMIT) throw this.fail(new Error('Execution frame exceeds its declared byte limit'), side)
       partial.parts.push(part)
       if (newline < 0) break
       const line = Buffer.concat(partial.parts, partial.bytes)
       partial.parts = []; partial.bytes = 0
-      const frame = JSON.parse(line.toString('utf8')) as { type?: unknown }
+      let frame: { type?: unknown }
+      try { frame = JSON.parse(line.toString('utf8')) as { type?: unknown } }
+      catch (error) { throw this.fail(error, side) }
       const sourceEndByte = data.startByte + newline + 1
       const forward = side === 'frontend' ? ['request', 'closed', 'agent-rpc-context', 'agent-rpc-response', 'agent-rpc-closed'].includes(String(frame.type)) : ['response', 'agent-rpc-request', 'agent-rpc-close'].includes(String(frame.type))
       if (forward) {
@@ -194,30 +231,30 @@ export class AgentExecutionBridge {
     const pending = this.state.pending!
     const target = pending.source === 'frontend' ? 'executor' : 'frontend'
     const position = this.state[target]
-    const identity = await this.options.ports[target].runtimeIdentity()
-    if (identity.instanceId !== pending.operation.ownerInstanceId) throw new AgentMuxError(
-      'The original execution Input owner changed; its outcome remains unknown.', 'EXECUTION_RUNTIME_CHANGED')
+    const identity = await this.endpoint(target, () => this.options.ports[target].runtimeIdentity())
+    if (identity.instanceId !== pending.operation.ownerInstanceId) throw this.fail(new AgentMuxError(
+      'The original execution Input owner changed; its outcome remains unknown.', 'EXECUTION_RUNTIME_CHANGED'), target)
     if (!data) {
       const source = this.state[pending.source]
-      const originalSourceOwner = await this.options.ports[pending.source].runtimeIdentity()
-      if (originalSourceOwner.instanceId !== source.ownerInstanceId) throw new AgentMuxError(
-        'The original execution source Runtime changed; its Input was not resent.', 'EXECUTION_RUNTIME_CHANGED')
-      const replay = await this.options.ports[pending.source].readRunReplay({ runId: source.runId }, pending.sourceStartByte, 'raw')
-      const observedSourceOwner = await this.options.ports[pending.source].runtimeIdentity()
-      if (observedSourceOwner.instanceId !== source.ownerInstanceId) throw new AgentMuxError(
-        'The execution source Runtime changed during replay; its Input was not resent.', 'EXECUTION_RUNTIME_CHANGED')
-      if (replay.run.runId !== source.runId || replay.gap) throw new AgentMuxError(
-        'The original pending Input source has a Replay Gap; no replacement bytes were sent.', 'EXECUTION_PROTOCOL_GAP')
+      const originalSourceOwner = await this.endpoint(pending.source, () => this.options.ports[pending.source].runtimeIdentity())
+      if (originalSourceOwner.instanceId !== source.ownerInstanceId) throw this.fail(new AgentMuxError(
+        'The original execution source Runtime changed; its Input was not resent.', 'EXECUTION_RUNTIME_CHANGED'), pending.source)
+      const replay = await this.endpoint(pending.source, () => this.options.ports[pending.source].readRunReplay({ runId: source.runId }, pending.sourceStartByte, 'raw'))
+      const observedSourceOwner = await this.endpoint(pending.source, () => this.options.ports[pending.source].runtimeIdentity())
+      if (observedSourceOwner.instanceId !== source.ownerInstanceId) throw this.fail(new AgentMuxError(
+        'The execution source Runtime changed during replay; its Input was not resent.', 'EXECUTION_RUNTIME_CHANGED'), pending.source)
+      if (replay.run.runId !== source.runId || replay.gap) throw this.fail(new AgentMuxError(
+        'The original pending Input source has a Replay Gap; no replacement bytes were sent.', 'EXECUTION_PROTOCOL_GAP'), pending.source)
       const parts: Uint8Array[] = []
       let cursor = pending.sourceStartByte
       for (const chunk of replay.replay) {
         if (cursor === pending.sourceEndByte) break
         if (chunk.startByte !== cursor || chunk.endByte - chunk.startByte !== chunk.dataBytes.byteLength)
-          throw new AgentMuxError('The original pending Input replay is not contiguous.', 'EXECUTION_PROTOCOL_GAP')
+          throw this.fail(new AgentMuxError('The original pending Input replay is not contiguous.', 'EXECUTION_PROTOCOL_GAP'), pending.source)
         const count = Math.min(chunk.endByte, pending.sourceEndByte) - cursor
         parts.push(chunk.dataBytes.subarray(0, count)); cursor += count
       }
-      if (cursor !== pending.sourceEndByte) throw new AgentMuxError('The original pending Input source is incomplete.', 'EXECUTION_PROTOCOL_GAP')
+      if (cursor !== pending.sourceEndByte) throw this.fail(new AgentMuxError('The original pending Input source is incomplete.', 'EXECUTION_PROTOCOL_GAP'), pending.source)
       data = Buffer.concat(parts)
     }
     if (data.byteLength !== pending.sourceEndByte - pending.sourceStartByte || createHash('sha256').update(data).digest('hex') !== pending.digest)
@@ -232,11 +269,11 @@ export class AgentExecutionBridge {
       // A previously persisted whole-frame operation has no chunk layout. Its ID
       // and bytes remain exact: an oversized unknown claim is never repartitioned.
       const part = data.subarray(offset, Math.min(data.byteLength, offset + limit))
-      const receipt = await this.options.ports[target].writeTerminal({ runId: position.runId }, { ...current.operation, data: part })
+      const receipt = await this.endpoint(target, () => this.options.ports[target].writeTerminal({ runId: position.runId }, { ...current.operation, data: part }))
       const end = current.operation.expectedByte + part.byteLength
       if (receipt.runId !== position.runId || receipt.appliedByteRange?.startByte !== current.operation.expectedByte ||
         receipt.appliedByteRange.endByte !== end || receipt.acceptedThroughByte === null || receipt.acceptedThroughByte < end)
-        throw new AgentMuxError('Execution Input receipt does not identify the original byte range.', 'EXECUTION_INPUT_RECEIPT_MISMATCH')
+        throw this.fail(new AgentMuxError('Execution Input receipt does not identify the original byte range.', 'EXECUTION_INPUT_RECEIPT_MISMATCH'), target)
       const through = offset + part.byteLength
       if (through < data.byteLength) {
         const operation = { ...current.operation, expectedByte: end,

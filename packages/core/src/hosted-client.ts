@@ -42,6 +42,8 @@ function isAbortSignal(value: unknown): value is AbortSignal {
 /** A consumer connection to the Host. Disposing this object never owns the Core or a Run. */
 export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProjection = 'full'>(options: {
   rpc: AgentMuxHostedRpcPort; consumerId?: string; waitForReady?: boolean; expectedStorePath?: string;
+  /** Skip the initial whole-Host observation. Exact Run/control calls connect only their original scope; explicit connect() still opens the general observation. */
+  connectOnDemand?: boolean
   sessions?: P
   expectedRuntimeId?: string; forwardRpc?: AgentMuxHostedForwardRpc; subscribeRpc?: AgentMuxHostedSubscribeRpc
 }): Promise<AgentMuxHostedClient<P>> {
@@ -912,6 +914,7 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
     }
     return value
   }
+  if (options.connectOnDemand) return client as AgentMuxHostedClient<P>
   if (options.waitForReady === false) {
     void connect().catch(error => { connectionState('lost', error); reconnect() })
   } else await connect()

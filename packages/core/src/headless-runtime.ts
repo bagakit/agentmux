@@ -1,5 +1,6 @@
 import { NodePublishingOwner } from './node-publishing-owner.js'
-import { AgentExecutionBindingService } from './agent-execution-coordinator.js'
+import { AgentExecutionBindingService, type AgentExecutionHostPort } from './agent-execution-coordinator.js'
+import { connectHostedAgentMux } from './hosted-client.js'
 import { mintObjectId } from './object-id.js'
 import { createHash } from 'node:crypto'
 import { AGENTMUX_RUNTIME_OWNER_PROTOCOL_VERSION } from './runtime-owner-protocol.js'
@@ -19,7 +20,7 @@ import type { AgentMuxRpcCoreClient, AgentMuxRpcServiceOptions } from './public-
 import { AgentMuxHostedRuntimeService } from './hosted-runtime-service.js'
 import { AgentMuxHostExecutorOwner } from './executor-owner.js'
 import { AgentMuxCreationAuthority } from './agent-creation-authority.js'
-import type { AgentMuxRuntimeOwnerIdentity } from './hosted-client-contract.js'
+import type { AgentMuxRuntimeOwnerIdentity, AgentMuxHostedClient, AgentMuxHostedRpcPort, AgentMuxHostedStreamEvent } from './hosted-client-contract.js'
 import { CapsuleRunManager, type CapsuleDesktopAdapters } from './capsule-run-manager.js'
 
 export type AgentMuxHeadlessRuntimeOptions = AgentMuxClientOptions & {
@@ -68,6 +69,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
   let hosted: AgentMuxHostedRuntimeService | undefined, stopping: Promise<void> | undefined
   let capsules: CapsuleRunManager | undefined
   let executionBindings: AgentExecutionBindingService | undefined
+  let executionReader: Promise<AgentMuxHostedClient> | undefined
   try {
     endpointLease = await acquireOwner(socketPath + '.owner.lock')
     const identityPath = join(stateDirectory, 'semantic-runtime.json')
@@ -93,7 +95,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
     }
     const stop = (): Promise<void> => stopping ??= (async () => {
       try { await server?.stop() }
-      finally { try { try { await executionBindings?.dispose(); await capsules?.dispose(); await hosted?.dispose() } finally { await client?.dispose() } }
+      finally { try { try { await executionBindings?.dispose(); await (await executionReader)?.dispose(); await capsules?.dispose(); await hosted?.dispose() } finally { await client?.dispose() } }
         finally { await endpointLease?.close(); await semanticLease.close() } }
     })()
     // Both namespace leases are already held. One Client owns metadata and Native observation;
@@ -116,7 +118,31 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
         // subscription availability cannot become creation admission.
         if (!('runtimeOwnerIdentity' in original) || typeof original.runtimeOwnerIdentity !== 'function') await original.connect()
         const identity = await original.agentCreationAuthority()
-        return { runtimeId: identity.runtimeId, client: original }
+        if (original !== client) return { runtimeId: identity.runtimeId, client: original }
+        // The local SDK's attachment is shared by this Core. Borrow its existing
+        // Hosted RunReaders owner, so closing this bridge cannot detach another
+        // consumer of the same Run. This private transport carries only reads:
+        // it supplies no principal/caller and cannot issue Runtime control.
+        const reader = await (executionReader ??= connectHostedAgentMux({ connectOnDemand: true, expectedRuntimeId: runtimeId, rpc: {
+          call: async (method: string, params: unknown, context?: { signal?: AbortSignal }) => {
+            if (method !== 'runtime.owner.identity') throw new AgentMuxError('The execution reader transport accepts only owner observation.', 'INVALID_CONTROL_REQUEST')
+            return await hosted!.call(method, params, context)
+          },
+          subscribe: async (method: string, params: unknown, handlers: { onInitial(value: unknown): void; onEvent(value: AgentMuxHostedStreamEvent): void; signal?: AbortSignal }) => {
+            if (method !== 'runtime.attachment-watch' && method !== 'runtime.replay-watch') throw new AgentMuxError('The execution reader transport accepts only exact Run observations.', 'INVALID_CONTROL_REQUEST')
+            const watch = await hosted!.subscribe(method, params, event => handlers.onEvent(event), handlers.signal ? { signal: handlers.signal } : {})
+            try { handlers.onInitial(watch.initial); await watch.start?.(); return { dispose: watch.dispose } }
+            catch (error) { await watch.dispose().catch(() => {}); throw error }
+          }
+        } as AgentMuxHostedRpcPort }))
+        const scoped: AgentExecutionHostPort = {
+          onRunEvent: reader.onRunEvent.bind(reader), attachTerminal: reader.attachTerminal.bind(reader), releaseRunAttachment: reader.releaseRunAttachment.bind(reader),
+          runtimeIdentity: original.runtimeIdentity.bind(original), readRunReplay: original.readRunReplay.bind(original), writeTerminal: original.writeTerminal.bind(original),
+          prepareAgentExecutionHelper: original.prepareAgentExecutionHelper.bind(original), inspectPreparedTerminal: original.inspectPreparedTerminal.bind(original),
+          createPreparedTerminal: original.createPreparedTerminal.bind(original), createHostAgentWithDelivery: original.createHostAgentWithDelivery.bind(original),
+          listHostExecutors: original.listHostExecutors.bind(original), readAgentSession: original.readAgentSession.bind(original)
+        }
+        return { runtimeId: identity.runtimeId, client: scoped }
       }
     })
     server = new AgentMuxControlServer({ ...options.service, socketPath, ...(options.http ? { http: options.http } : {}),

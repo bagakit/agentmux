@@ -284,7 +284,12 @@ export class AgentExecutionCoordinator {
       },
       onError: error => this.observeFailure(record.input, error) })
     this.bridges.set(id, bridge)
-    await bridge.start()
+    try { await bridge.start() }
+    catch (error) {
+      const side = bridge.failureSide
+      if (side) throw executionFailure(error, record.input, { hostId: side === 'frontend' ? record.input.agentHostId : record.input.resourceHostId, role: side, stage: 'attach' })
+      throw error
+    }
     this.connectionFailures.delete(id)
     this.observe(record.input, undefined, record.notices)
   }
@@ -383,7 +388,13 @@ export class AgentExecutionCoordinator {
       step = { hostId: input.agentHostId, role: 'agent', stage: 'create' }
       const created = await hosts.agent.createHostAgentWithDelivery({ ...input.agent, toolExecution })
       return { session: created.session, execution: this.inspect(input.bindingId)! }
-    } catch (error) { this.observeFailure(input, error); throw executionFailure(error, input, step) }
+    } catch (error) {
+      this.observeFailure(input, error)
+      // Bridge endpoint failures already carry their exact step. A local
+      // persistence/observation failure cannot be assigned to an invented Host.
+      if (step.stage === 'attach') throw error
+      throw executionFailure(error, input, step)
+    }
   }
 
   async restoreReaders(): Promise<void> {
