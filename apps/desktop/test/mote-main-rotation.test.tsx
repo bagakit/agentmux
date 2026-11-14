@@ -16,7 +16,7 @@ import { createHostSpatialAgentControl } from '../../host/src/spatial-agent-cont
 import { createHostContent } from '../../host/src/content-owner'
 import { createHostMoteMainReader, createHostMoteDialogue } from '../../host/src/mote-dialogue'
 import { HostMoteQuickPreferences } from '../../host/src/mote-quick-preferences'
-import { MoteDialogueStore } from '../../../packages/core/src/mote-dialogue-store'
+import { MoteDialogueStore } from '../../../packages/core/src/mote/dialogue-store'
 import { ScratchTopics } from '../../host/src/mote-resources'
 import { creationInputOwner } from '../../../packages/core/test/helpers/creation-input-owner'
 import { fixtureHostExecutorOptions } from '../../host/test/helpers/configured-executor-owner'
@@ -32,13 +32,13 @@ import { agentMuxCommandHelp } from '../../../packages/core/src/agentmux-cli-hel
 import { parseAgentMuxCliInvocation } from '../../../packages/core/src/agentmux-cli-commands'
 import { rpcControlRequest } from '../../../packages/core/src/rpc-business-codec'
 import { moteMainBindingDefaults, moteMainBindingInput, matchesMoteMainBindingInput, pendingMoteMainCreation } from '../../../packages/core/src/spatial-agent-open-contract'
-import { moteQuickBaseline } from '../../../packages/core/src/mote-preferences'
+import { moteQuickBaseline } from '../../../packages/core/src/mote/preferences'
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'
 import { connectHostedAgentMux } from '../../../packages/core/src/hosted-client'
 import { AgentMuxHostedRuntimeService } from '../../../packages/core/src/hosted-runtime-service'
 import { hostedTestOwner } from '../../../packages/core/test/helpers/hosted-runtime-port'
 import { objectCliEnvironment } from '../../../packages/core/test/helpers/object-cli-rpc'
-import { parseMoteDialogueParams, parseMoteDialogueResult } from '../../../packages/core/src/mote-dialogue'
+import { parseMoteDialogueParams, parseMoteDialogueResult } from '../../../packages/core/src/mote/dialogue'
 
 
 vi.mock('electron', () => ({ app: { isPackaged: false }, nativeImage: {} }))

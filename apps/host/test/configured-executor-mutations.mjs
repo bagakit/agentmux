@@ -13,7 +13,7 @@ export const mutations = {
   'local-caller-lost': ['apps/host/src/spatial-agent-control.ts', "if (request.caller) await client.createLocalHostAgentWithDelivery(create, { agentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' })", 'if (request.caller) await client.createHostAgentWithDelivery(create)'],
   'local-run-fence-lost': ['packages/core/src/client.ts', 'if (execution.sources && (!isDeepStrictEqual(execution.sources.author?.run, author?.run) ||', 'if (false && (!isDeepStrictEqual(execution.sources.author?.run, author?.run) ||'],
   'local-sdk-exported': ['packages/core/src/hosted-client-contract.ts', "'removeHostExecutor', 'createHostAgentWithDelivery',", "'removeHostExecutor', 'createHostAgentWithDelivery', 'createLocalHostAgentWithDelivery',"],
-  'setup-freeze-rejected': ['packages/core/src/mote-dialogue-contract.ts', "const execution = rpcRecord(raw.execution,['hostId','workspacePath','workspaceId','runtimeId','executorRevision'],code)", "const execution = rpcRecord(raw.execution,['hostId','workspacePath','workspaceId'],code)"]
+  'setup-freeze-rejected': ['packages/core/src/mote/dialogue-contract.ts', "const execution = rpcRecord(raw.execution,['hostId','workspacePath','workspaceId','runtimeId','executorRevision'],code)", "const execution = rpcRecord(raw.execution,['hostId','workspacePath','workspaceId'],code)"]
 }
 export function instrument(source, path, surface) {
   if (!/^(?:packages\/core|apps\/host)\/src\/.*\.ts$/u.test(path)) return source

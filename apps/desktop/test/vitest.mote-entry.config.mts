@@ -5,7 +5,7 @@ import original from './vitest.mote-context.config.mts'
 const variants = {
  'entry-retarget-foreign-source':['apps/desktop/src/renderer/src/lib/mote-main-entry.ts',' && sameMoteMainEntrySource(original.moteMainEntry, source)',''],
  'entry-reuses-completed-attach':['apps/desktop/src/renderer/src/lib/mote-main-entry.ts','JSON.stringify([entryToken,t.spaceId','JSON.stringify([t.spaceId'],
- 'entry-completed-as-unknown':['packages/core/src/mote-main-entry-source.ts',"return Boolean(operation && (operation.kind === 'starting' ||\n    ['runtime-unverified', 'provider-unverified', 'operation-unconfirmed', 'original-operation-unconfirmed'].includes(operation.reason)))",'return Boolean(operation)'],
+ 'entry-completed-as-unknown':['packages/core/src/mote/main-entry-source.ts',"return Boolean(operation && (operation.kind === 'starting' ||\n    ['runtime-unverified', 'provider-unverified', 'operation-unconfirmed', 'original-operation-unconfirmed'].includes(operation.reason)))",'return Boolean(operation)'],
  'role-failure-spin':['apps/desktop/src/renderer/src/lib/mote-main-entry.ts',"dialogue?.issue ? { status:'unconfirmed', issue:dialogue.issue } : { status:'reading', issue:null }","{ status:'reading', issue:null }"],
  'entry-bridge-disconnect':['apps/desktop/src/main/mote-dialogue-ipc.ts',"return await options.runtime.callOriginalCore(input.target.expectedResource.hostId, method, input, { transport:'unix' })","throw new Error('Disconnected original Mote entry transport')"],
  'hide-offline-history':['apps/desktop/src/renderer/src/components/SessionPane.tsx','const canReadConversation = !pendingAgentRestore || moteHistoryReading','const canReadConversation = !pendingAgentRestore'],

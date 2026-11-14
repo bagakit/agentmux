@@ -20,7 +20,7 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { MoteWorkface } from '../src/renderer/src/components/MoteWorkface'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { DesktopClientUiProvider } from '../src/renderer/src/components/DesktopClientUiProvider'
-import { moteQuickBaseline } from '../../../packages/core/src/mote-preferences'
+import { moteQuickBaseline } from '../../../packages/core/src/mote/preferences'
 import { scratchTopicLogicalPath } from '../../host/src/mote-topic-model'
 import { moteGoalContext } from '../src/renderer/src/lib/mote-goals'
 

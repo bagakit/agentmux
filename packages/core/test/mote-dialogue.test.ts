@@ -6,13 +6,13 @@ import { join } from 'node:path'
 import { fixtureEpoch } from './helpers/fixture-values.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
-import { MoteDialogueStore } from '../src/mote-dialogue-store.js'
+import { MoteDialogueStore } from '../src/mote/dialogue-store.js'
 import { createHostMoteMainReader, createHostMoteDialogue } from '../../../apps/host/src/mote-dialogue.js'
 import { createHostContent } from '../../../apps/host/src/content-owner.js'
 import { HostMoteQuickPreferences } from '../../../apps/host/src/mote-quick-preferences.js'
 import { spatialCatalog } from '../src/spatial-state.js'
 import { MOTE_INPUT_GUIDANCE } from '../src/mote/input-source.js'
-import { agentPromptSubmissionOutcome, parseMoteDialogueResult } from '../src/mote-dialogue.js'
+import { agentPromptSubmissionOutcome, parseMoteDialogueResult } from '../src/mote/dialogue.js'
 import type { AgentPromptSubmissionRecord } from '../src/types.js'
 import { createAgentInputContextCaptureRecord, type AgentInputContextCaptureReader, type AgentInputContextCaptureRecord } from '../src/agent-input-context-capture.js'
 import { createMoteInputFixture, moteInputTestSource } from './helpers/mote-input-owner.js'
@@ -234,7 +234,7 @@ it('the original indexed source journal survives two different reader processes 
   const linked=await f.rpc.call('space.mote.dialogue.link',{target:f.target,operationId:'persistent-source',expectedRoleRevision:snapshot.roleRevision!,source:{kind:'main'}})
   expect(linked.links.length).toBeGreaterThan(0)
   const loader=new URL('./fixtures/a2a-resumed-inbox/source-loader.mjs',import.meta.url).href
-  const entry=new URL('../src/mote-dialogue-store.ts',import.meta.url).href
+  const entry=new URL('../src/mote/dialogue-store.ts',import.meta.url).href
   const registration=`import {register} from 'node:module';register(${JSON.stringify(loader)});`
   const script=`import {MoteDialogueStore} from ${JSON.stringify(entry)};const [path,identity,query]=process.argv.slice(1);console.log(JSON.stringify({pid:process.pid,page:await new MoteDialogueStore(path).read(JSON.parse(identity),JSON.parse(query))}));`
   const pids:number[]=[]
@@ -288,7 +288,7 @@ it('logical main input freezes an unknown original through actual CLI intake, ro
   const originalSubmit=vi.spyOn(f.client,'submitAgentPrompt')
   const cli=await runSourceObjectCli(['--endpoint','unix://'+join(f.root,'dialogue.sock'),'space','mote','dialogue','input','submit','--input','-'],objectCliEnvironment(f.root),JSON.stringify(request),30_000,new URL('./fixtures/a2a-resumed-inbox/source-loader.mjs',import.meta.url))
   expect(cli.code,cli.stdout+cli.stderr).toBe(0)
-  const accepted=JSON.parse(cli.stdout).result as import('../src/mote-dialogue.js').MoteDialogueInputInspection
+  const accepted=JSON.parse(cli.stdout).result as import('../src/mote/dialogue.js').MoteDialogueInputInspection
   expect(accepted.input?.status).toBe('unknown')
   await vi.waitFor(async()=>{const claim=(await f.rpc.call('space.mote.dialogue.input.inspect',{target:f.target,operationId:request.input.operationId})).record?.admission;expect(claim?.transport==='native'?claim.native.outcome:null).toBe('unknown')},{timeout:15_000})
   const original=await f.rpc.call('space.mote.dialogue.input.inspect',{target:f.target,operationId:request.input.operationId})
@@ -549,7 +549,7 @@ it('the shared original-record outcome requires the complete terminal input and 
   expect(agentPromptSubmissionOutcome(null)).toBe('unknown')
 })
 
-function mainEntry(main: import('../src/mote-dialogue.js').MoteMainSnapshot, operationId: string) {
+function mainEntry(main: import('../src/mote/dialogue.js').MoteMainSnapshot, operationId: string) {
   if (!main.current || !main.roleRevision) throw Error('Expected nonempty original main role')
   return { target:main.target, expectedRoleRevision:main.roleRevision, reference:main.current, expectedRun:{runId:'run-primary'}, operationId }
 }

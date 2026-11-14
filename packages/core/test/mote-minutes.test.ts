@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { moteMinutesToMs, parseMoteQuickDefaults } from '../src/mote-preferences.js'
+import { moteMinutesToMs, parseMoteQuickDefaults } from '../src/mote/preferences.js'
 
 // Every two-decimal minute count a person could type is a positive whole number of milliseconds that
 // Core then stores. Before this reader, 68 of these were refused as not converting exactly.

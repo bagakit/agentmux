@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { relative } from 'node:path'
 const variants={
  'entry-foreign-unknown':['packages/core/src/public-rpc-service.ts','if (!prior && pending && !sameMoteMainEntrySource(pending.moteMainEntry, source))','if (false && !prior && pending && !sameMoteMainEntrySource(pending.moteMainEntry, source))'],
- 'entry-codec-foreign-unknown':['packages/core/src/mote-dialogue-contract.ts','!unconfirmedMoteMainEntryOperation(op) || !sameMoteMainEntrySource(op.moteMainEntry, query)','!unconfirmedMoteMainEntryOperation(op)'],
+ 'entry-codec-foreign-unknown':['packages/core/src/mote/dialogue-contract.ts','!unconfirmedMoteMainEntryOperation(op) || !sameMoteMainEntrySource(op.moteMainEntry, query)','!unconfirmedMoteMainEntryOperation(op)'],
  'entry-inspect-unknown-missing':['packages/core/src/public-rpc-service.ts',"return { operation: prior ?? pending }","return { operation: prior ?? null }"],
  'entry-stale-role':['packages/core/src/public-rpc-service.ts','main.roleRevision !== input.expectedRoleRevision || !isDeepStrictEqual(main.current, input.reference)','!isDeepStrictEqual(main.current, input.reference)'],
  'entry-full-reference':['packages/core/src/public-rpc-service.ts','|| !isDeepStrictEqual(main.current, input.reference)', ''],

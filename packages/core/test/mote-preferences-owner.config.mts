@@ -8,7 +8,7 @@ const mutation = process.env.MOTE_PREFERENCES_OWNER_MUTANT
 const report = process.env.MOTE_PREFERENCES_OWNER_LOADED
 if (mutation && mutation !== 'omit-owner-dispatch') throw Error('Unknown Mote preference owner mutation')
 const exports = JSON.parse(readFileSync(resolve(root, 'packages/core/package.json'), 'utf8')).exports
-const observed = new Set(['public-rpc-service', 'mote-preferences', 'public-rpc-server', 'public-rpc-client',
+const observed = new Set(['public-rpc-service', 'mote/preferences', 'public-rpc-server', 'public-rpc-client',
   'public-rpc-wire', 'client', 'agent-capability', 'agent-session-store', 'hosted-runtime-service'])
 
 export default defineConfig({ root, cacheDir: resolve(root, '.tmp/mote-preferences-owner', mutation ?? 'normal'),
@@ -22,7 +22,7 @@ export default defineConfig({ root, cacheDir: resolve(root, '.tmp/mote-preferenc
     },
     transform(original, id) {
       const path = relative(root, id.split('?')[0]!)
-      const match = /^packages\/core\/src\/([^/]+)\.ts$/u.exec(path)
+      const match = /^packages\/core\/src\/(.+)\.ts$/u.exec(path)
       if (!match || !observed.has(match[1]!)) return
       let loaded = original
       if (mutation && path === 'packages/core/src/public-rpc-service.ts') {

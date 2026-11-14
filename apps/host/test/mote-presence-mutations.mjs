@@ -25,7 +25,7 @@ export function presenceSharedSlices(path,source) {
 }
 export const presenceMutants = {
   'preferences-host': ['packages/core/src/public-rpc-service.ts', "p.kind === 'quick' ? this.ports.moteQuickPreferences", "p.kind === 'quick' ? undefined"],
-  'role-generation': ['packages/core/src/mote-preferences.ts', 'conversationRevision: same ? before.conversationRevision', 'conversationRevision: false ? before.conversationRevision'],
+  'role-generation': ['packages/core/src/mote/preferences.ts', 'conversationRevision: same ? before.conversationRevision', 'conversationRevision: false ? before.conversationRevision'],
   'standing-implicit-trigger': ['packages/core/src/agent-session-recovery/service.ts', "input.trigger === undefined || input.trigger === 'manual'", "input.trigger === 'manual'"],
   'standing-admission': ['packages/core/src/agent-session-recovery/continuity-attempt.ts', '} else if (standing) {', '} else if (false && standing) {'],
   'standing-revoked': ['packages/core/src/agent-session-recovery/continuity-attempt.ts', '!intent?.active || intent.operationId', '(!intent) || intent.operationId'],
@@ -49,7 +49,7 @@ export function instrumentPresence(original, path, surface) {
     if (source.split(selected[1]).length !== 2) throw Error('Presence mutant must modify one actual loaded owner: ' + mutant)
     source = source.replace(selected[1], selected[2])
   }
-  const owned = path === 'apps/desktop/src/main/mote-preferences-ipc.ts' || /^apps\/host\/src\/(mote-presence|mote-quick-preferences|mote-quick-mode|continuous-progress-loop-manager|host)\.ts$|^packages\/core\/src\/(mote-preferences|automatic-input-source|continuous-progress-scheduler|agentmux-cli-commands|client|public-rpc-service|agent-message-notifications|agent-session-recovery\/(?:continuity-attempt|service))\.ts$/u.test(path)
+  const owned = path === 'apps/desktop/src/main/mote-preferences-ipc.ts' || /^apps\/host\/src\/(mote-presence|mote-quick-preferences|mote-quick-mode|continuous-progress-loop-manager|host)\.ts$|^packages\/core\/src\/(mote\/preferences|automatic-input-source|continuous-progress-scheduler|agentmux-cli-commands|client|public-rpc-service|agent-message-notifications|agent-session-recovery\/(?:continuity-attempt|service))\.ts$/u.test(path)
   if (report && owned) {
     const hash = s => createHash('sha256').update(s).digest('hex')
     const fact = { path, surface, originalSHA256: hash(original), loadedSHA256: hash(source), ...(presenceSharedSource[path] ? {sharedSlices:presenceSharedSlices(path,original)} : {}), ...(source !== original ? { mutant } : {}) }

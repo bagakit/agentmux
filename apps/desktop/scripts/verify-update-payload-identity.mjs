@@ -115,7 +115,7 @@ try {
   await command('original-core-target-build', process.execPath, ['packages/core/scripts/build.mjs'], candidate,
     { timeout: 0, env: { ...env, PATH: toolRoot + ':' + env.PATH } })
   const coreOutputs = await hashes(candidate, ['packages/core/dist'])
-  assert.ok(Object.keys(coreOutputs).length > 100 && coreOutputs['packages/core/dist/mote-dialogue.js'], 'Complete original Core output includes the actually consumed public entry')
+  assert.ok(Object.keys(coreOutputs).length > 100 && coreOutputs['packages/core/dist/mote/dialogue.js'], 'Complete original Core output includes the actually consumed public entry')
   assert.deepEqual(await hashes(repository, coreInputPaths), coreInputs, 'Private build must not write back to original Core sources')
   receipt.coreBuild = { inputs: coreInputs, generated: await hashes(candidate, ['packages/core/src/generated']), outputs: coreOutputs,
     tools: Object.fromEntries(await Promise.all(Object.entries(tools).map(async ([name, path]) => [name, { path, sha256: sha(await readFile(path)) }]))) }

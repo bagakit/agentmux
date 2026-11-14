@@ -10,7 +10,7 @@ import { createMoteInputFixture,moteInputTestSource } from '../../../packages/co
 import { createHostContent } from '../../host/src/content-owner'
 import { createHostMoteMainReader,createHostMoteDialogue } from '../../host/src/mote-dialogue'
 import { HostMoteQuickPreferences } from '../../host/src/mote-quick-preferences'
-import { MoteDialogueStore } from '../../../packages/core/src/mote-dialogue-store'
+import { MoteDialogueStore } from '../../../packages/core/src/mote/dialogue-store'
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server'
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'
 import { spatialCatalog } from '../../../packages/core/src/spatial-state'

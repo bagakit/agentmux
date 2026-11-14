@@ -8,7 +8,7 @@ const root = resolve(import.meta.dirname, '../../..'), directory = '.artifacts/b
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const production = ['packages/core/src/space-control.ts', 'packages/core/src/space-control-parser.ts']
 const testFile = 'apps/desktop/test/spatial-mote-defaults.test.ts'
-const owners = ['packages/core/src/mote-preferences.ts', 'apps/desktop/src/renderer/src/lib/mobile-presentation.ts',
+const owners = ['packages/core/src/mote/preferences.ts', 'apps/desktop/src/renderer/src/lib/mobile-presentation.ts',
   'apps/desktop/src/renderer/src/lib/space-agent-control.ts', 'packages/core/src/rpc-business-codec.ts']
 const qualification = { passed: false, sourceQualified: false, installedQualified: false,
   boundary: 'Original Desktop producer/public catalog/fresh Source CLI on a private transport. No lifecycle, preference save, user page, Native capture or installed delivery claim.' }

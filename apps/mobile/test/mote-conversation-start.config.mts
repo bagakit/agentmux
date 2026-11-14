@@ -6,7 +6,7 @@ const root = resolve(import.meta.dirname, '../../..')
 const files = ['apps/mobile/src/MobileApp.tsx', 'apps/mobile/src/navigation/MobileMoteConversationStart.tsx', 'apps/mobile/src/navigation/MobileMoteMainActions.tsx',
   'apps/mobile/src/conversation/MobileConversationSurface.tsx', 'apps/mobile/src/conversation/use-mobile-prompt-controller.ts', 'apps/mobile/src/conversation/mote-main-input.ts', 'apps/mobile/src/navigation/MobileMoteStartPortrait.tsx',
 'apps/mobile/src/conversation/MobileMoteSourceNotice.tsx', 'apps/mobile/src/conversation/MobileMoteConversation.tsx',
-  'packages/client-ui/src/components/MoteConversationStart.tsx', 'packages/core/src/mote-main-setup.ts']
+  'packages/client-ui/src/components/MoteConversationStart.tsx', 'packages/core/src/mote/main-setup.ts']
 const mutations: Record<string, { file: string; edits: [string, string][] }> = {
   'welcome-wire': { file: files[0]!, edits: [['welcomeVisible && moteTarget && objectIdentity && !historyVisible &&', 'false && welcomeVisible && moteTarget && objectIdentity && !historyVisible &&']] },
   'first-query': { file: files[2]!, edits: [['deferredInput: { operationId: query.operationId, prompt: query.prompt }', "deferredInput: { operationId: query.operationId, prompt: 'Wrong original question' }"]] },

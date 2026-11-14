@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, expect, it, vi } from 'vitest'
 import { fixturePath } from '../../../test/fixture-values.mjs'
-import { PMO_TEAMS_TOPIC_ID, isPrimaryMoteSpace } from '../../../packages/core/src/mote-preferences'
+import { PMO_TEAMS_TOPIC_ID, isPrimaryMoteSpace } from '../../../packages/core/src/mote/preferences'
 import { PMO_TEAMS_TOPIC_ID as hostPrimary, isPmoTopicId, scratchTopicDirectoryName } from '../../host/src/mote-topic-model'
 import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service'
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'

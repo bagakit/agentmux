@@ -12,7 +12,7 @@ import type { AgentMuxRuntimeOwnerIdentity } from '../src/hosted-client-contract
 import type { ConnectionEnrollmentCallContext } from '../src/connection-enrollment-contract.js'
 import type { MoteConnectionPreferencesPort, MoteConnectionPreferencesReadInput,
   MoteConnectionPreferencesReadResult, MoteConnectionPreferencesSaveParams,
-  MoteConnectionPreferencesSaveResult } from '../src/mote-preferences.js'
+  MoteConnectionPreferencesSaveResult } from '../src/mote/preferences.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { fixturePath } from './helpers/fixture-values.js'
 

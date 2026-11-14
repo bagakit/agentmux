@@ -24,7 +24,7 @@ Object.assign(process.env, env)
 const core = await import(pathToFileURL(join(corePackage, 'dist/index.js')).href)
 const { ScratchTopics } = await import(pathToFileURL(join(hostPackage, 'dist/mote-resources.js')).href)
 const { directoryIdentity, homeZoneId, SCRATCH_WORKSPACE_ID } = await import(pathToFileURL(join(hostPackage, 'dist/mote-model.js')).href)
-const { moteConnectionBaseline } = await import(pathToFileURL(join(corePackage, 'dist/mote-preferences.js')).href)
+const { moteConnectionBaseline } = await import(pathToFileURL(join(corePackage, 'dist/mote/preferences.js')).href)
 const fixture = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', name: 'Portable fixture', path: workspacePath, kind: 'folder' }
 const facts = { passed: false, platform: process.platform, arch: process.arch, node: process.versions.node,
   boundary: 'Actual portable default Host, original packaged Core/CLI/SQLite/native file helper. Fresh private namespace; no Desktop, SSH, live platform or Agent turn is qualified.', steps: [] }

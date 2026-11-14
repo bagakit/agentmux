@@ -5,14 +5,14 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { createMoteWorkThreadFixture, openMoteWorkThread } from './helpers/mote-work-thread.js'
 import { serializeMoteQuickMode } from '../../../apps/host/src/mote-model.js'
-import { parseMoteDialogueResult, MOTE_SUPERVISION_GUIDANCE } from '../src/mote-dialogue.js'
+import { parseMoteDialogueResult, MOTE_SUPERVISION_GUIDANCE } from '../src/mote/dialogue.js'
 import { MOTE_INPUT_GUIDANCE } from '../src/mote/input-source.js'
 import { MOTE_COORDINATION_ROLE } from '../../../apps/host/src/mote-topic-model.js'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import { AgentMuxCreationAuthority } from '../src/agent-creation-authority.js'
 import { issueAgentCapability, hashAgentCapability } from '../src/agent-capability.js'
-import { MoteDialogueStore } from '../src/mote-dialogue-store.js'
+import { MoteDialogueStore } from '../src/mote/dialogue-store.js'
 
 const cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
