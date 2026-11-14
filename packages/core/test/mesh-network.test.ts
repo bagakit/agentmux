@@ -300,8 +300,7 @@ it('explicit settings adoption can recover the same unavailable Host identity wi
     return { serverId: 'restored-original-host', keyPair, authorize: async () => ({ principal: { kind: 'device', id: 'original-device' } }) }
   } })
   await f.save(f.config(), 'first-original-identity-observation')
-  await vi.waitFor(async () => expect((await f.rpc.call('mesh.inspect', {})).apply.state).toBe('unavailable'))
-  expect((await f.rpc.call('mesh.inspect', {})).endpoint.state).toBe('unavailable')
+  await vi.waitFor(async () => expect(await f.rpc.call('mesh.inspect', {})).toMatchObject({ apply: { state: 'active' }, endpoint: { state: 'unavailable', issue: { code: 'MESH_ENDPOINT_UNAVAILABLE' } } }))
   const saved = await f.save(f.config(), 'explicit-original-identity-recovery')
   await vi.waitFor(async () => expect((await f.rpc.call('mesh.inspect', {})).endpoint.state).toBe('available'))
   expect((await f.rpc.call('mesh.inspect', {})).activeRevision).toBe(saved.settings.revision)
