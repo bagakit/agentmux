@@ -45,7 +45,7 @@ it('all declared scalar types persist through the original owner with strict tar
     expect((await call(['set', `continuity.${key}`, String(value)])).entry.value).toBe(value)
     expect((await call(['inspect', `continuity.${key}`])).entries[0].value).toBe(value)
   }
-  expect((await new ConfigStore(f.store.filePath).get()).continuity).toEqual({ ...retained, ...choices })
+  expect((await new ConfigStore(f.store.filePath).readSaved()).continuity).toEqual({ ...retained, ...choices })
   const bytes = await f.bytes()
   for (const value of ['-1', '1.5', 'NaN', 'Infinity', '', '0x10', '1e3', String(Number.MAX_SAFE_INTEGER + 1)]) {
     await expect(call(['set', 'continuity.activeRecoveryDelayMs', value])).rejects.toMatchObject({ code: 'INVALID_SETTING_VALUE' })
@@ -128,12 +128,12 @@ it('actual CLI executable writes and reads continuity through the owned public s
     expect((await command(['set', 'continuity.retryMaxAttempts', '0'])).entry.value).toBe(0)
     expect((await command(['set', 'continuity.continuationEnabled', 'false'])).entry.value).toBe(false)
     expect((await command(['inspect', 'continuity.activeRecoveryDelayMs'])).entries[0].value).toBe(1200)
-    expect((await new ConfigStore(f.store.filePath).get()).continuity).toEqual({ ...retained, activeInterruptionFallback: true, activeRecoveryDelayMs: 1200, retryMaxDelayMs: 45000, retryInitialDelayMs: 2125, retryMaxAttempts: 0, continuationEnabled: false })
+    expect((await new ConfigStore(f.store.filePath).readSaved()).continuity).toEqual({ ...retained, activeInterruptionFallback: true, activeRecoveryDelayMs: 1200, retryMaxDelayMs: 45000, retryInitialDelayMs: 2125, retryMaxAttempts: 0, continuationEnabled: false })
     await expect(command(['set', 'continuity.recheckMaxAttempts', '-1'])).rejects.toBeDefined()
     await expect(command(['set', 'continuity.activeInterruptionFallback', 'yes'])).rejects.toBeDefined()
     for (const key of Object.keys(retained)) await expect(command(['set', `continuity.${key}`, 'replacement'])).rejects.toBeDefined()
     await expect(command(['set', 'continuity.unknown', 'value'])).rejects.toBeDefined()
     expect((await command(['set', 'continuity.activeInterruptionFallback', 'false'])).entry.value).toBe(false)
-    expect((await new ConfigStore(f.store.filePath).get()).continuity).toMatchObject({ ...retained, activeInterruptionFallback: false })
+    expect((await new ConfigStore(f.store.filePath).readSaved()).continuity).toMatchObject({ ...retained, activeInterruptionFallback: false })
   } finally { await server.stop(); await rm(directory, { recursive: true, force: true }) }
 }, 60000)
