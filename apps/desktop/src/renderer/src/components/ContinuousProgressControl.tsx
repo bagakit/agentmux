@@ -1,6 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { usePathDisplay } from '../hooks/usePathDisplay'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { continuousProgressRequestDigest, isAgentSchedule, type ContinuousProgressLoop } from '@agentmux/core/continuous-progress-scheduler'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { api } from '../lib/api'
@@ -68,6 +68,16 @@ export function ContinuousProgressControl({ session, original, targetName, onSta
   const [sourceId, setSourceId] = useState('')
   const [readerPath, setReaderPath] = useState('')
   const hadLoop = useRef(false), edited = useRef(false), progressFormElement = useRef<HTMLFormElement>(null)
+  const submitButton = useRef<HTMLButtonElement>(null)
+  const requestAction = useRef<HTMLButtonElement>(null)
+  const requestFocus = useRef<string | undefined>(undefined)
+  const pendingOperationId = pendingRequest?.input.operationId
+  useLayoutEffect(() => {
+    if (!pendingOperationId || requestFocus.current !== pendingOperationId) return
+    requestFocus.current = undefined
+    const action = requestAction.current
+    if (visible && action && action.ownerDocument.activeElement === action.ownerDocument.body) action.focus()
+  }, [pendingOperationId, visible])
   const current = useRef(target); current.current = target
   const updates = useRef(0)
   const reads = useRef(new Map<string, Promise<ContinuousProgressLoop[]>>())
@@ -153,7 +163,11 @@ export function ContinuousProgressControl({ session, original, targetName, onSta
     catch (failure) { setSaveNotice(presentError(failure)); return }
     if (current.current !== captured) return
     const held = useLauncherState.getState().drafts[draftKey]?.progressRequest
+    const submit = submitButton.current
+    // Transfer focus only when this submit is still focused as its own request replaces it.
+    if (submit && submit.ownerDocument.activeElement === submit) requestFocus.current = request.input.operationId
     if (held || !useLauncherState.getState().setProgressRequest(draftKey, { ...request, dispatch: 'prepared' })) {
+      requestFocus.current = undefined
       setSaveNotice('The original progress request is unconfirmed. Check that operation before another action.'); return
     }
     try {
@@ -349,15 +363,15 @@ export function ContinuousProgressControl({ session, original, targetName, onSta
           {previousUpdates.map(request => <div key={request.operationId} className="continuous-progress-control__detail-body"><code>{request.operationId}</code><p>{request.notDispatched ? 'Not dispatched. ' : ''}{request.intervalMs / 60_000} minutes</p><p className="continuous-progress-control__prompt">{request.prompt}</p></div>)}
         </details> : null}
         {conflict ? <button type="button" className="small-button" onClick={() => void reviewLatest()}>Review latest settings</button>
-          : <button type="submit" className="automation-button automation-button--primary automation-submit" disabled={busy || (!pendingRequest && !pendingUpdate && (!prompt.trim() || (!loop && bindSource && (!sourceRoot.trim() || !sourceId.trim() || !readerPath.trim()))))}>{busy ? 'Saving…' : pendingRequest ? pendingRequest.dispatch === 'prepared' ? 'Keep request and edit' : 'Check original request' : pendingUpdate ? 'Retry save' : loop ? 'Save changes' : 'Enable continuous progress'}</button>}
+          : pendingRequest ? null : <button ref={submitButton} type="submit" className="automation-button automation-button--primary automation-submit" disabled={busy || (!pendingUpdate && (!prompt.trim() || (!loop && bindSource && (!sourceRoot.trim() || !sourceId.trim() || !readerPath.trim()))))}>{busy ? 'Saving…' : pendingUpdate ? 'Retry save' : loop ? 'Save changes' : 'Enable continuous progress'}</button>}
       </form>
   return <div className="continuous-progress-control" data-progress-state={status}>
     {presented && pendingRequest ? <section className="continuous-progress-control__notice" aria-label="Original progress request" role="status">
       <p>{pendingRequest.dispatch === 'prepared' ? 'The original request was not dispatched. Your input is kept.' : `The original ${pendingRequest.kind === 'create' ? 'creation' : pendingRequest.input.action} operation is unconfirmed. Your input is kept.`}</p>
-      <code>{pendingRequest.input.operationId}</code>
-      <button type="button" className="small-button" disabled={busy} onClick={() => void returnToEditing()}>{pendingRequest.dispatch === 'prepared' ? 'Keep request and edit' : 'Keep unknown request and edit'}</button>
+      <button ref={requestAction} type="button" className="automation-button automation-button--primary" disabled={busy}
+        onClick={() => void (pendingRequest.dispatch === 'prepared' ? returnToEditing() : checkOriginalRequest())}>{pendingRequest.dispatch === 'prepared' ? 'Keep request and edit' : 'Check original request'}</button>
       {pendingRequest.dispatch !== 'prepared' ? <>
-        <button type="button" className="small-button" disabled={busy} onClick={() => void checkOriginalRequest()}>Check original request</button>
+        <button type="button" className="small-button" disabled={busy} onClick={() => void returnToEditing()}>Keep unknown request and edit</button>
         <button type="button" className="small-button" disabled={busy} onClick={() => void checkOriginalRequest(true)}>Return to original loop</button>
       </> : null}
       <details><summary>Original request</summary><pre className="continuous-progress-control__prompt">{JSON.stringify(pendingRequest.input, null, 2)}</pre></details>
