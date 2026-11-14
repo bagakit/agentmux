@@ -38,7 +38,7 @@ export type CaptureSurfaceOutcome =
   | { state: 'completed' }
   | { state: 'cancelled' }
   | { state: 'source'; mode: 'display' | 'window' | 3 | 5 | 10; background: CaptureBackground }
-  | { state: 'sequence'; mode: 'scroll' | 'gif'; image: BrowserPng; source: ScreenshotCaptureSource; background: CaptureBackground }
+  | { state: 'sequence'; mode: 'scroll' | 'gif'; startImmediately: boolean; image: BrowserPng; source: ScreenshotCaptureSource; background: CaptureBackground }
   /** The marks move to the window editor on this display's full frozen frame; `source.rect` is the selection. */
   | { state: 'expanded'; image: BrowserPng; source: ScreenshotCaptureSource; handoff: CaptureSurfaceHandoff
       /** Returns the delivered geometry for an explicit Retake in the same capture call. No document history crosses into the new surface. */
@@ -439,7 +439,7 @@ export class CaptureSurface {
     const source = this.source(active, frameInput, params.selection)
     if (action === 'sequence') {
       if (!active.session.sourceChoices || !['scroll', 'gif'].includes(String(params.mode))) throw new Error('Choose an available sequence in this screenshot component.')
-      active.end({ state: 'sequence', mode: params.mode as 'scroll' | 'gif', image: params.image!, source, background: active.background }); return
+      active.end({ state: 'sequence', mode: params.mode as 'scroll' | 'gif', startImmediately: params.mode === 'scroll', image: params.image!, source, background: active.background }); return
     }
     if (action === 'save-png') return await saveScreenshotPng(params.image!, overlay.window, { capturedAt: captured.capturedAt })
     if (action === 'pin') {

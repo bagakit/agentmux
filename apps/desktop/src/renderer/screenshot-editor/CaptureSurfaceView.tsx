@@ -152,7 +152,7 @@ export function CaptureSurfaceView({ input, api, diagnostic }: { input: CaptureS
           <option value="" disabled>More...</option><option value="display">Entire display...</option><option value="window">Application window...</option>{[3, 5, 10].map(seconds => <option key={seconds} value={seconds}>Region in {seconds} s</option>)}
         </select></label>
       </nav> : null}
-      completeLabel={mode === 'scroll' ? 'Continue to scroll' : mode === 'gif' ? 'Continue to GIF' : 'Done'} busyLabel="Copying…" documentStatus={status ?? input.notice ?? (input.theme.status === 'unavailable' ? input.theme.message : null)}
+      completeLabel={mode === 'scroll' ? 'Start scrolling capture' : mode === 'gif' ? 'Continue to GIF' : 'Done'} busyLabel="Copying…" documentStatus={status ?? input.notice ?? (input.theme.status === 'unavailable' ? input.theme.message : null)}
       onComplete={edit => output(edit, 'finish')} onSavePng={edit => output(edit, 'save')} onPin={edit => output(edit, 'pin')}
       onCopyColor={hex => void copyColor(hex)} onExpand={handoff => void claim().then(owned => owned ? api.expand(input.requestId, background, handoff) : undefined).catch(cause => setStatus(presentError(cause)))}
       onPresented={reportPresented}

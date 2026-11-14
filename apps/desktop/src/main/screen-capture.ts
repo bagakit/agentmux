@@ -16,7 +16,7 @@ type Ports = {
   edit(image: BrowserPng, attachToDraft: boolean, complete: (image: BrowserPng) => Promise<void>, context: ScreenshotEditContext): Promise<void>
   /** The per-display capture surface; selection, marks and the primary delivery happen there. */
   present(session: CaptureSurfaceSession): Promise<CaptureSurfaceOutcome>
-  sequence?(mode: 'scroll' | 'gif', selection: { image: BrowserPng; source: import('../shared/system-screenshot-editor').ScreenshotCaptureSource; background?: CaptureBackground }): Promise<BrowserPng | string | null>
+  sequence?(mode: 'scroll' | 'gif', selection: { image: BrowserPng; source: import('../shared/system-screenshot-editor').ScreenshotCaptureSource; background?: CaptureBackground; startImmediately?: boolean }): Promise<BrowserPng | string | null>
   reportIssue(error: unknown): void
   chooseSource?(mode: 'display' | 'window'): Promise<CaptureParams | null>
   /** Shows the countdown; resolves false when the user cancelled it. */
@@ -47,7 +47,7 @@ export class ScreenCapture {
     const returnFocus = !this.ports.appActive()
     if (mode === 'scroll' || mode === 'gif') {
       if (!this.ports.sequence) throw new Error('Continuous capture is unavailable in this host. Ordinary screenshots remain available.')
-      let selected: { image: BrowserPng; source: import('../shared/system-screenshot-editor').ScreenshotCaptureSource; background?: CaptureBackground } | null = null
+      let selected: { image: BrowserPng; source: import('../shared/system-screenshot-editor').ScreenshotCaptureSource; background?: CaptureBackground; startImmediately?: boolean } | null = null
       await this.ports.present({ attachToDraft: false, expandable: false, returnFocus: false, background, timing,
         complete: async (image, source, _engine, frozenBackground) => { selected = { image, source, background: frozenBackground ?? background } } })
       if (!selected) return null
@@ -140,7 +140,7 @@ export class ScreenCapture {
     if (submitted) await Promise.resolve(submitted).catch(() => {})
     return path
   }
-  private async sequence(attachToDraft: boolean, mode: 'scroll' | 'gif', selected: { image: BrowserPng; source: import('../shared/system-screenshot-editor').ScreenshotCaptureSource; background?: CaptureBackground }, returnFocus: boolean): Promise<string | null> {
+  private async sequence(attachToDraft: boolean, mode: 'scroll' | 'gif', selected: { image: BrowserPng; source: import('../shared/system-screenshot-editor').ScreenshotCaptureSource; background?: CaptureBackground; startImmediately?: boolean }, returnFocus: boolean): Promise<string | null> {
     const result = await this.ports.sequence!(mode, selected)
     if (typeof result === 'string') return attachToDraft ? result : null
     if (!result) return null

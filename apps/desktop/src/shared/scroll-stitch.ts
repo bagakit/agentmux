@@ -22,6 +22,9 @@ export function matchScroll(previous: PixelFrame, next: PixelFrame): { shift: nu
   for (let shift = 1; shift <= h - minimumOverlap; shift++) scores.push({ shift, error: score(shift) })
   scores.sort((a, b) => a.error - b.error)
   const best = scores[0], alternate = scores.find(item => best && Math.abs(item.shift - best.shift) > 2)
+  // Local cursor or blinking content can change pixels without moving the viewport.
+  // Prefer zero motion when it is both within the overlap budget and the best alignment.
+  if (best && unchanged < 6 && unchanged < best.error) return { shift: 0, error: unchanged }
   if (!best || best.error > 6 || alternate && alternate.error - best.error < 1) throw new Error('The overlap is unclear. Scroll less, avoid fixed headers or moving content, and capture again. Previous frames are kept.')
   return best
 }

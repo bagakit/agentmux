@@ -15,8 +15,8 @@ import { themeBootstrap } from './theme-bootstrap'
 import { savePastedImage } from './pasted-image-write'
 import { screenshotFileName, writeScreenshotFile } from './screenshot-files'
 
-type Selection = { image: BrowserPng; source: ScreenshotCaptureSource; background?: import('../shared/capture-surface').CaptureBackground }
-type Record = { receipt: CaptureSequenceResult; actor: CaptureSequenceContext['actor']; window?: BrowserWindow; input?: CaptureSequenceInput;
+type Selection = { image: BrowserPng; source: ScreenshotCaptureSource; background?: import('../shared/capture-surface').CaptureBackground; startImmediately?: boolean }
+type Record = { receipt: CaptureSequenceResult; actor: CaptureSequenceContext['actor']; window?: BrowserWindow; frame?: BrowserWindow; input?: CaptureSequenceInput;
   timer?: ReturnType<typeof setTimeout>; inflight?: Promise<void>; fps: number; artifact?: { sha256: string; bytes: number }; journal?: { frames: unknown[]; source: ScreenshotCaptureSource }; size?: { width: number; height: number }; files?: string[]; persisting?: Promise<void>; resolve?(value: BrowserPng | string | null): void; attached?: string; ending?: boolean }
 const MAX_FRAME_BYTES = 64 * 1024 * 1024
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
@@ -96,15 +96,15 @@ export class CaptureSequenceOwner {
     await this.persist(record)
     return await new Promise((resolve, reject) => {
       record.resolve = resolve
-      void this.present(record, selection).catch(error => { void this.fail(record, error); reject(error) })
+      void this.present(record, selection, mode === 'scroll' && selection.startImmediately === true).catch(error => { void this.fail(record, error); reject(error) })
     })
   }
-  private async present(record: Record, selection: Selection): Promise<void> {
+  private async present(record: Record, selection: Selection, startImmediately = false): Promise<void> {
     const { source, image, background = 'included' } = selection
     const area = screen.getDisplayMatching(source.rect).workArea
     const width = Math.min(860, area.width), height = Math.min(650, area.height)
     const window = new BrowserWindow({ title: record.receipt.mode === 'gif' ? 'Record GIF' : 'Scrolling screenshot', width, height, minWidth: 420, minHeight: 400,
-      x: area.x + Math.round((area.width - width) / 2), y: area.y + Math.round((area.height - height) / 2), show: false, autoHideMenuBar: true,
+      x: area.x + Math.round((area.width - width) / 2), y: area.y + Math.round((area.height - height) / 2), show: false, autoHideMenuBar: true, frame: record.receipt.mode !== 'scroll', acceptFirstMouse: true,
       webPreferences: { preload: join(import.meta.dirname, '../preload/capture-sequence.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false } })
     record.window = window; record.size = { width: image.width, height: image.height }
     record.input = { requestId: record.receipt.operationId, mode: record.receipt.mode!, state: 'ready', source, background,
@@ -114,9 +114,9 @@ export class CaptureSequenceOwner {
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     window.webContents.on('will-navigate', event => event.preventDefault())
     window.webContents.on('will-attach-webview', event => event.preventDefault())
-    window.once('ready-to-show', () => { if (!window.isDestroyed()) window.show() })
+    window.once('ready-to-show', () => { if (!window.isDestroyed()) { if (record.receipt.state === 'recording' && record.receipt.mode === 'scroll') window.showInactive(); else window.show() } })
     window.once('closed', () => {
-      clearTimeout(record.timer)
+      clearTimeout(record.timer); this.closeFrame(record)
       if (record.receipt.state !== 'completed' && record.receipt.state !== 'failed') void this.end(record, 'cancelled')
       record.resolve?.(null); delete record.resolve
       // Disk owns retained frames; release this disposable window's image memory.
@@ -124,6 +124,7 @@ export class CaptureSequenceOwner {
     })
     await this.saveFrame(record, 0)
     await this.persist(record)
+    if (startImmediately) await this.start(record, 2)
     if (process.env.ELECTRON_RENDERER_URL) await window.loadURL(new URL('screenshot-editor/index.html', process.env.ELECTRON_RENDERER_URL).href)
     else await window.loadFile(join(import.meta.dirname, '../renderer/screenshot-editor/index.html'))
   }
@@ -142,7 +143,8 @@ export class CaptureSequenceOwner {
       const windowId = Number(window.getMediaSourceId().split(':')[1])
       if (!Number.isSafeInteger(windowId) || windowId <= 0) throw new Error('The exact capture control window could not be excluded. Existing frames are kept.')
       const automaticScroll = input.mode === 'scroll' && ['recording', 'stopping'].includes(record.receipt.state)
-      const excluded = input.background === 'excluded' ? BrowserWindow.getAllWindows().filter(w => !w.isDestroyed() && w.isVisible()) : [window]
+      const chrome = [window, record.frame].filter((w): w is BrowserWindow => !!w && !w.isDestroyed())
+      const excluded = [...new Set(input.background === 'excluded' ? [...BrowserWindow.getAllWindows().filter(w => !w.isDestroyed() && w.isVisible()), ...chrome] : chrome)]
       const excludeWindowIds = excluded.map(w => Number(w.getMediaSourceId().split(':')[1]))
       if (excludeWindowIds.some(id => !Number.isSafeInteger(id) || id <= 0)) throw new Error('An exact host window could not be excluded. Existing frames remain available.')
       const result = await this.ports.native().captureScreenshot({ mode: 'rect', rect: input.source.rect, excludeWindowIds })
@@ -174,39 +176,76 @@ export class CaptureSequenceOwner {
     if (record.receipt.state === 'recording') record.timer = setTimeout(() => void this.loop(record), Math.max(0, 1000 / record.fps - (Date.now() - start)))
     else if (record.receipt.state === 'stopping') { record.receipt.state = 'review'; if (record.input) record.input.state = 'review'; await this.persist(record) }
   }
-  private stop(record: Record) {
+  private stop(record: Record, focus = false) {
     clearTimeout(record.timer)
     if (!['recording', 'stopping'].includes(record.receipt.state) || record.ending) return
     record.receipt.state = record.inflight ? 'stopping' : 'review'
-    this.reviewWindow(record)
+    this.closeFrame(record); this.reviewWindow(record, focus)
     if (record.input) record.input.state = record.receipt.state as 'stopping' | 'review'
     void this.persist(record).catch(error => { record.receipt.issue = message(error) })
+  }
+  private async start(record: Record, fps: number) {
+      if (record.receipt.state !== 'ready' && !(record.input!.mode === 'scroll' && record.receipt.state === 'review')) throw new Error('Finish the current capture before starting it again.')
+      if (![2, 5, 10].includes(fps)) throw new Error('Choose 2, 5 or 10 frames per second.')
+      record.fps = fps
+      if (record.input!.mode === 'gif') { record.input!.frames = []; record.files = []; record.receipt.frameCount = 0 }
+      record.receipt.state = 'recording'; record.input!.state = 'recording'; record.input!.issue = null
+      this.compactWindow(record)
+      if (record.input!.mode === 'scroll') this.regionFrame(record)
+      await this.persist(record); void this.loop(record)
+  }
+  private regionFrame(record: Record) {
+    this.closeFrame(record)
+    const rect = record.input!.source.rect
+    const frame = new BrowserWindow({ x: Math.round(rect.x - 2), y: Math.round(rect.y - 2), width: Math.round(rect.width + 4), height: Math.round(rect.height + 4),
+      show: false, frame: false, transparent: true, backgroundColor: '#00000000', hasShadow: false, resizable: false, movable: false,
+      focusable: false, skipTaskbar: true, enableLargerThanScreen: true, roundedCorners: false,
+      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, devTools: false } })
+    record.frame = frame
+    frame.setIgnoreMouseEvents(true)
+    frame.setAlwaysOnTop(true, 'screen-saver')
+    frame.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    frame.webContents.on('will-navigate', event => event.preventDefault())
+    const html = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><style>html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden}body{box-sizing:border-box;border:2px solid #3b82f6;box-shadow:inset 0 0 0 1px #111827}</style><title>Capture region</title>`
+    void frame.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html)).then(() => {
+      if (record.frame === frame && record.receipt.state === 'recording' && !frame.isDestroyed()) frame.showInactive()
+    }, error => { if (record.frame === frame) { record.receipt.issue = message(error); if (record.input) record.input.issue = message(error); this.stop(record) } })
+  }
+  private closeFrame(record: Record) {
+    const frame = record.frame; delete record.frame
+    const close = () => { if (frame && !frame.isDestroyed()) frame.destroy() }
+    if (record.inflight) void record.inflight.finally(close).catch(() => {})
+    else close()
   }
   private compactWindow(record: Record) {
     const window = record.window, source = record.input?.source.rect
     if (!window || window.isDestroyed() || !source) return
-    const area = screen.getDisplayMatching(source).workArea, width = Math.min(440, area.width), height = record.input!.mode === 'gif' ? 180 : 360
-    const right = source.x + source.width + 12, left = source.x - width - 12
-    const x = right + width <= area.x + area.width ? right : left >= area.x ? left : area.x + area.width - width
-    const y = Math.max(area.y, Math.min(source.y, area.y + area.height - height))
-    window.setMinimumSize(420, record.input!.mode === 'gif' ? 160 : 320)
-    window.setContentBounds({ x, y, width, height: Math.min(height, area.height) })
+    const area = screen.getDisplayMatching(source).workArea, scroll = record.input!.mode === 'scroll'
+    const width = Math.min(scroll ? 240 : 440, area.width), height = Math.min(scroll ? 300 : 180, area.height)
+    const candidates = [{ x: source.x + source.width + 12, y: source.y }, { x: source.x - width - 12, y: source.y },
+      { x: source.x + source.width - width, y: source.y + source.height + 12 }, { x: source.x + source.width - width, y: source.y - height - 12 }]
+    const place = candidates.find(p => p.x >= area.x && p.y >= area.y && p.x + width <= area.x + area.width && p.y + height <= area.y + area.height)
+      ?? { x: Math.max(area.x, Math.min(source.x + source.width - width, area.x + area.width - width)), y: Math.max(area.y, Math.min(source.y + source.height - height, area.y + area.height - height)) }
+    window.setMinimumSize(scroll ? 220 : 420, scroll ? 260 : 160)
+    window.setContentBounds({ ...place, width, height })
     window.setAlwaysOnTop(true, 'floating')
+    if (scroll) { window.setFocusable(false); if (window.isFocused()) window.blur() }
   }
-  private reviewWindow(record: Record) {
+  private reviewWindow(record: Record, focus: boolean) {
     const window = record.window, source = record.input?.source.rect
     if (!window || window.isDestroyed() || !source) return
     const area = screen.getDisplayMatching(source).workArea, width = Math.min(860, area.width), height = Math.min(650, area.height)
-    window.setAlwaysOnTop(false)
+    window.setAlwaysOnTop(false); window.setFocusable(true)
     window.setMinimumSize(420, 400)
     window.setContentBounds({ x: area.x + Math.round((area.width - width) / 2), y: area.y + Math.round((area.height - height) / 2), width, height })
+    if (focus) { window.show(); window.focus() }
   }
   private async end(record: Record, state: 'completed' | 'cancelled') {
-    record.ending = true; clearTimeout(record.timer); record.receipt.state = state
+    record.ending = true; clearTimeout(record.timer); this.closeFrame(record); record.receipt.state = state
     await this.persist(record)
   }
   private async fail(record: Record, error: unknown) {
-    clearTimeout(record.timer); record.receipt.state = 'failed'; record.receipt.issue = message(error)
+    clearTimeout(record.timer); this.closeFrame(record); record.receipt.state = 'failed'; record.receipt.issue = message(error)
     try { await this.persist(record) } catch (error) { console.warn('Capture sequence receipt:', error) }
   }
   private async invoke(event: IpcMainInvokeEvent, action: string, input?: { requestId?: string; fps?: number; afterFrames?: number; image?: BrowserPng; data?: number[] }): Promise<unknown> {
@@ -218,16 +257,10 @@ export class CaptureSequenceOwner {
       const offset = Number.isSafeInteger(input.afterFrames) && input.afterFrames! >= 0 && input.afterFrames! <= record.input.frames.length ? input.afterFrames! : 0
       return { ...record.input, frames: record.input.frames.slice(Math.max(0, offset - 1)), frameOffset: Math.max(0, offset - 1) }
     }
-    if (action === 'stop') { this.stop(record); return this.snapshot(record) }
+    if (action === 'stop') { this.stop(record, true); return this.snapshot(record) }
     if (action === 'cancel') { await this.end(record, 'cancelled'); record.window.close(); return }
     if (action === 'start') {
-      if (record.receipt.state !== 'ready' && !(record.input.mode === 'scroll' && record.receipt.state === 'review')) throw new Error('Finish the current capture before starting it again.')
-      if (![2, 5, 10].includes(input.fps!)) throw new Error('Choose 2, 5 or 10 frames per second.')
-      record.fps = input.fps!
-      if (record.input.mode === 'gif') { record.input.frames = []; record.files = []; record.receipt.frameCount = 0 }
-      record.receipt.state = 'recording'; record.input.state = 'recording'; record.input.issue = null
-      this.compactWindow(record)
-      await this.persist(record); void this.loop(record); return this.snapshot(record)
+      await this.start(record, input.fps!); return this.snapshot(record)
     }
     if (action === 'sample') { if (record.input.mode !== 'scroll' || record.receipt.state === 'completed') throw new Error('Manual sampling belongs to the original scrolling capture.'); await this.sample(record); return this.snapshot(record) }
     if (action === 'undo') {

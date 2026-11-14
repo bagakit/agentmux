@@ -136,6 +136,13 @@ export function CaptureSequenceView({ input, api }: { input: CaptureSequenceInpu
     })
   }
   function select(next: number) { setPlaying(false); setIndex(next) }
+  if (!gif && recording) return <main className="capture-live-controls">
+    <header><h1>Scrolling screenshot</h1><button aria-label="Cancel scrolling capture" onClick={() => void api.cancel(input.requestId)}>Cancel</button></header>
+    <p>Scroll or click in the outlined app.</p>
+    <div className="capture-live-controls__preview">{frame ? <img src={frame.image.dataUrl} alt="Latest captured frame" /> : null}</div>
+    <footer><span role="status">{frames.length} {frames.length === 1 ? 'frame' : 'frames'}</span><button className="primary-button" disabled={snapshot.state === 'stopping'} onClick={() => void action(async () => { merge(await api.stop(input.requestId)) })}>{snapshot.state === 'stopping' ? 'Finishing...' : 'Stop scrolling capture'}</button></footer>
+    {issue || snapshot.issue ? <p role="status">{issue ?? snapshot.issue}</p> : null}
+  </main>
   return <main className={`capture-sequence${gif ? ' capture-sequence--gif' : ''}${recording ? ' capture-sequence--recording' : ''}`} >
     <header><div><h1>{gif ? 'Record GIF' : 'Scrolling screenshot'}</h1><p>{gif ? 'Record the selected region, then review and mark keyframes.' : 'Scroll the source yourself, leaving an overlap between captures.'}</p></div>
       <button type="button" onClick={() => void api.cancel(input.requestId)}>Close</button></header>

@@ -56,3 +56,16 @@
 .capture-sequence--recording.capture-sequence--gif { padding: 12px; gap: 8px; }
 .capture-sequence--recording.capture-sequence--gif .capture-sequence__body { display: none; }
 .capture-sequence--recording.capture-sequence--gif header p { font-size: 11px; }
+
+.capture-live-controls { height: 100dvh; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; padding: 10px; color: var(--text); background: var(--surface-0); font: 12px/1.4 system-ui; }
+.capture-live-controls header, .capture-live-controls footer { display: flex; align-items: center; gap: 8px; }
+.capture-live-controls header { -webkit-app-region: drag; }
+.capture-live-controls h1 { margin: 0; font-size: 12px; font-weight: 600; flex: 1; }
+.capture-live-controls p { margin: 0; color: var(--text-3); }
+.capture-live-controls button { -webkit-app-region: no-drag; font: inherit; border: 1px solid var(--line); border-radius: 5px; padding: 6px; color: var(--text); background: var(--surface-1); cursor: pointer; }
+.capture-live-controls button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.capture-live-controls button:disabled { opacity: .5; cursor: default; }
+.capture-live-controls__preview { flex: 1; min-height: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-1); display: grid; align-items: start; }
+.capture-live-controls__preview img { width: 100%; height: auto; display: block; }
+.capture-live-controls footer { flex-wrap: wrap; justify-content: space-between; font-variant-numeric: tabular-nums; }
+.capture-live-controls .primary-button { background: var(--green); color: var(--bg); border-color: transparent; }
