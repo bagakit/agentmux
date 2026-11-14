@@ -18,7 +18,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex'), inputs =
 const receipt = { schema: 'agentmux.focus-project-appearance-capture.v1', capturedPass: false, captureOnly: true, aestheticReview: 'not-performed', userAppRunRuntimeControlled: false,
   boundary: 'Private Electron Renderer with actual App, GlobalFocusSurface, FocusFilters, Store and Workbench; maintained typed preview API. Only PTY/Agent and unused Monaco painting leaves isolated. No live Runtime, native Run proof, installation, user navigation or restart.' }
 try {
-  assert.ok(!process.env.AGENTMUX_FOCUS_APPEARANCE_STYLE_MUTANT || ['oversized-menu', 'unbounded-menu', 'search-overflow', 'wrapped-footer'].includes(process.env.AGENTMUX_FOCUS_APPEARANCE_STYLE_MUTANT), 'Known actual style inverse')
+  assert.ok(!process.env.AGENTMUX_FOCUS_APPEARANCE_STYLE_MUTANT || ['oversized-menu', 'unbounded-menu', 'search-overflow', 'wrapped-footer', 'starved-search'].includes(process.env.AGENTMUX_FOCUS_APPEARANCE_STYLE_MUTANT), 'Known actual style inverse')
   receipt.sourceResolution = { loadedDist: false, resolution: 'Current workspace public export source aliases; no Desktop build or unrelated dist scan.' }
   const workspaceSource = { name: 'current-workspace-public-sources', setup(builder) {
     // Preserve Vite's asset URL contract for the unused PDF leaf; emit the real
@@ -84,6 +84,12 @@ try {
         const before = '.focus-zone-tags .focus-context__topic > span { display: block; overflow: hidden; white-space: nowrap;'
         assert.equal(source.split(before).length, 2, 'Unique footer line source anchor')
         contents = source.replace(before, '.focus-zone-tags .focus-context__topic > span { display: block; overflow: hidden; white-space: normal;')
+        transformations.push({ path: relative(root, path), mutant, before: hash(source), compiledSource: hash(contents) })
+      }
+      if (mutant === 'starved-search' && path.endsWith('/styles/focus.css')) {
+        const before = '.global-focus-surface .global-focus-main:has(> .focus-search-results) > .global-board-columns { flex-basis: 0; }'
+        assert.equal(source.split(before).length, 2, 'Unique search allocation source anchor')
+        contents = source.replace(before, '')
         transformations.push({ path: relative(root, path), mutant, before: hash(source), compiledSource: hash(contents) })
       }
       if (mutant === 'search-overflow' && path.endsWith('/styles/focus.css')) {
