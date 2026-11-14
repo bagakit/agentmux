@@ -8,7 +8,7 @@
 .host-install__actions, .host-install__confirm { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
 .host-install__actions > span, .host-install__confirm > span { color: var(--text-3); font-size: var(--fs-meta); }
 .host-install__confirm { justify-content: space-between; }
-.host-install__machine { display: grid; gap: var(--sp-2); padding: var(--sp-4); border-left: 2px solid var(--green); background: var(--surface-2); border-radius: var(--radius-sm); }
+.host-install__machine { display: grid; gap: var(--sp-2); padding: var(--sp-4); border: 1px solid var(--line); background: var(--surface-2); border-radius: var(--radius-sm); }
 .host-install__machine > strong { color: var(--text); font-size: var(--fs-body); }
 .host-install__machine > span { font-size: var(--fs-meta); color: var(--text-3); overflow-wrap: anywhere; }
 .host-install dl { display: grid; gap: var(--sp-2); margin: var(--sp-2) 0; }

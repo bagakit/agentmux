@@ -37,7 +37,7 @@
 .agent-work-text-action:hover { color: var(--text); }
 .agent-work-text-action:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; }
 .agent-work-setup__host-links { display: flex; gap: 16px; font-size: 11px; }
-.agent-work-setup__error { font-size: 12px; line-height: 1.55; color: var(--text); border-left: 2px solid var(--focus-line); padding-left: 10px; margin: 0; overflow-wrap: anywhere; }
+.agent-work-setup__error { font-size: 12px; line-height: 1.55; color: var(--text); border: 1px solid var(--line-soft); border-radius: 8px; background: var(--surface-1); padding: 10px 12px; margin: 0; overflow-wrap: anywhere; }
 .agent-work-setup__actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--line-soft); padding-top: 12px; }
 .agent-work-setup__actions > span { font-size: 11px; line-height: 1.5; color: var(--text-2); }
 .agent-work-setup__actions > div { display: flex; gap: 8px; flex-shrink: 0; }
