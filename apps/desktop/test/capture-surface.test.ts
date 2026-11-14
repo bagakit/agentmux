@@ -460,6 +460,7 @@ it.each(['throw', 'reject'] as const)('a timing writer that will %s only warns a
     await overlays[0]!.call('select')
     await overlays[0]!.call('finish', { image: result, selection })
     expect(session.complete).toHaveBeenCalledOnce()
+    expect(overlays.every(row => row.window.dead), 'the timed delivery ended its capture before the outcome is awaited').toBe(true)
     expect(await outcome).toEqual({ state: 'completed' })
   } finally { warning.mockRestore() }
 })
@@ -522,6 +523,7 @@ it('the public selection returns the processed selection as captured, or cancell
   await handler(event, 'select', { requestId: input.requestId })
   await expect(handler(event, 'expand', { requestId: input.requestId, background: input.background, handoff: { shapes: [], crop: selection, tool: 'rect' } })).rejects.toThrow('returns its selection directly')
   await handler(event, 'finish', { requestId: input.requestId, background: input.background, image: result, selection })
+  expect(window.dead, 'the public delivery ended its capture before the result is awaited').toBe(true)
   expect(await pending).toEqual({ state: 'captured', engine: 'fixture-engine', selectionRect: { x: 1, y: 1, width: 2, height: 1 },
     screenshot: { format: 'png', data: result.dataUrl.split(',')[1], width: 4, height: 2, scale: 2 } })
   const cancelled = surface.captureSelection(false)
@@ -547,6 +549,7 @@ it('a public selection refuses an included background switch and still delivers 
   expect(window.webContents.send, 'Main refuses the substitution without closing the usable surface').toHaveBeenCalledWith(CAPTURE_SURFACE_EVENT,
     { kind: 'notice', message: 'This public capture requires its original excluded screenshot background.' })
   await handler(event, 'finish', { requestId: input.requestId, background: 'excluded', image: result, selection })
+  expect(window.dead, 'the excluded public delivery ended its capture before the result is awaited').toBe(true)
   expect(await pending).toMatchObject({ state: 'captured', engine: 'fixture-engine', selectionRect: { x: 1, y: 1, width: 2, height: 1 } })
 })
 
@@ -578,6 +581,7 @@ it('every fresh capture starts empty after Done, independent editor Copy, Cancel
   expect(first.overlays.map(row => row.input.initialCrop)).toEqual([undefined, undefined])
   await first.overlays[0]!.call('select')
   await first.overlays[0]!.call('finish', { image: result, selection })
+  expect(first.overlays.every(row => row.window.dead), 'Done closed the first capture before its outcome is awaited').toBe(true)
   await first.outcome
   const afterDone = await opened()
   expect(afterDone.overlays.map(row => row.input.initialCrop), 'Done leaves no process recall').toEqual([undefined, undefined])
@@ -635,6 +639,7 @@ it('a public selection never recalls a previous GUI delivery and defaults to the
   const previous = await opened()
   await previous.overlays[0]!.call('select')
   await previous.overlays[0]!.call('finish', { image: result, selection })
+  expect(previous.overlays.every(row => row.window.dead), 'the previous GUI delivery closed before the public capture starts').toBe(true)
   await previous.outcome
   const pending = surface.captureSelection(false)
   await vi.advanceTimersByTimeAsync(0)
@@ -644,6 +649,7 @@ it('a public selection never recalls a previous GUI delivery and defaults to the
   expect(input.background).toBe('excluded')
   await handler(event, 'select', { requestId: input.requestId })
   await handler(event, 'finish', { requestId: input.requestId, background: input.background, image: result, selection })
+  expect(window.dead, 'the fresh public delivery ended its capture before the result is awaited').toBe(true)
   expect(await pending).toMatchObject({ state: 'captured', selectionRect: { x: 1, y: 1, width: 2, height: 1 } })
   const fresh = await opened()
   expect(fresh.overlays.map(row => row.input.initialCrop), 'a public delivery is not process recall either').toEqual([undefined, undefined])
@@ -668,6 +674,7 @@ it('the chosen initial background delivers its own pixels, timestamp and engine'
   expect(value.complete).not.toHaveBeenCalled()
   await invoke('finish', { requestId: input.requestId, background: 'excluded', image: result, selection })
   expect(value.complete).toHaveBeenCalledExactlyOnceWith(result, expect.objectContaining({ capturedAt: second.capturedAt }), 'excluded-engine')
+  expect(window.dead, 'the selected background delivery ended its capture before the outcome is awaited').toBe(true)
   expect(await outcome).toEqual({ state: 'completed' })
 })
 
