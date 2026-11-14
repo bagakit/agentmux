@@ -1,14 +1,7 @@
-import { inspectHookDisableSetting } from './shared.js'
-import { executionEnvironmentValue, executionHomeDirectory, executionPath, type ProviderExecutionEnvironment } from './execution-environment.js'
 import { join } from 'node:path'
-import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
-import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
-import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
-import { formatHookToolOutput } from '../hook-tool-outcome.js'
-import { catalog, hookToolFields, runScopedHookCommand, hookCommandTimeout } from './shared.js'
-import { readDroidSessionHistoryPage, readDroidSessionHistoryRecord } from './droid-native-history.js'
+import type { ProviderHookEnvironment, ProviderHookServices, ProviderHookTarget } from '../hook-services.js'
 
-type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
+type DroidServices = ProviderHookServices<'droid'> & ProviderHookEnvironment
 
 /**
  * 写进 `<factory-home>/.factory/hooks.json` 的事件名。
@@ -41,67 +34,69 @@ export const DROID_HOOK_EVENTS = [
   'Stop', 'SubagentStop', 'PreCompact', 'Notification'
 ] as const
 
-export const DROID_HOOKS: AgentNativeHookSpecification = {
-  retainedRuntime: true,
-  toolFields(eventName, payload) {
-    if (eventName !== 'PreToolUse' && eventName !== 'PostToolUse') return {}
-    return hookToolFields(payload.tool_name, payload.tool_input)
-  },
-  toolOutcome(eventName, payload) {
-    // Factory defines tool_response as tool-specific; arbitrary keys are not failure flags.
-    const output = formatHookToolOutput(eventName === 'PostToolUse' ? payload.tool_response : undefined)
-    return { failed: false, ...(output === undefined ? {} : { output }) }
-  },
-  lifecycle: {
-    SessionStart: 'session-start',
-    UserPromptSubmit: 'user-prompt-submit',
-    PreToolUse: 'tool-use-start',
-    PostToolUse: 'tool-use-end',
-    SubagentStop: 'subagent-stop',
-  },
-  // 事件名随负载到达：每个事件的基础键里都有 `hook_event_name`（见上方 DROID_HOOK_EVENTS 的说明）。
-  eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' },
-  rules: [
-    // predecision Stop：官方在完整 Agent loop 返回、持久化 outcome 前就派发 Stop hook。
-    // 它不代表轮次结束或成功完成，故显式声明 state: 'unknown', lifecycleEvent: null，
-    // 阻止从默认方言补 turn-end，不产生新 readiness，也不判定 done/completion。
-    { events: ['Stop'], state: 'unknown', lifecycleEvent: null },
-    // Notification 中 notification_type: idle_prompt 是用户取消/中断后的 turn 收尾事实，
-    // 跳过 Stop，语义状态保持 unknown（非成功 done），生命周期事件记 turn-end。
-    {
-      events: ['Notification'],
-      matches: (payload) =>
-        payload.notification_type === 'idle_prompt' || payload.notificationType === 'idle_prompt',
-      state: 'unknown',
-      lifecycleEvent: 'turn-end'
+function nativeHook({ formatHookToolOutput, hookToolFields }: DroidServices) {
+  return {
+    retainedRuntime: true,
+    toolFields(eventName: string, payload: Readonly<Record<string, unknown>>) {
+      if (eventName !== 'PreToolUse' && eventName !== 'PostToolUse') return {}
+      return hookToolFields(payload.tool_name, payload.tool_input)
     },
-    // 普通系统通知保持中立 unknown，既不是工作中也不是轮次结束。
-    {
-      events: ['Notification'],
-      state: 'unknown'
+    toolOutcome(eventName: string, payload: Readonly<Record<string, unknown>>) {
+      // Factory defines tool_response as tool-specific; arbitrary keys are not failure flags.
+      const output = formatHookToolOutput(eventName === 'PostToolUse' ? payload.tool_response : undefined)
+      return { failed: false, ...(output === undefined ? {} : { output }) }
     },
-    {
-      events: [
-        'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse',
-        'SubagentStop', 'PreCompact'
-      ],
-      state: 'working'
+    lifecycle: {
+      SessionStart: 'session-start',
+      UserPromptSubmit: 'user-prompt-submit',
+      PreToolUse: 'tool-use-start',
+      PostToolUse: 'tool-use-end',
+      SubagentStop: 'subagent-stop',
+    },
+    // 事件名随负载到达：每个事件的基础键里都有 `hook_event_name`（见上方 DROID_HOOK_EVENTS 的说明）。
+    eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' },
+    rules: [
+      // predecision Stop：官方在完整 Agent loop 返回、持久化 outcome 前就派发 Stop hook。
+      // 它不代表轮次结束或成功完成，故显式声明 state: 'unknown', lifecycleEvent: null，
+      // 阻止从默认方言补 turn-end，不产生新 readiness，也不判定 done/completion。
+      { events: ['Stop'], state: 'unknown', lifecycleEvent: null },
+      // Notification 中 notification_type: idle_prompt 是用户取消/中断后的 turn 收尾事实，
+      // 跳过 Stop，语义状态保持 unknown（非成功 done），生命周期事件记 turn-end。
+      {
+        events: ['Notification'],
+        matches: (payload: Readonly<Record<string, unknown>>) =>
+          payload.notification_type === 'idle_prompt' || payload.notificationType === 'idle_prompt',
+        state: 'unknown',
+        lifecycleEvent: 'turn-end'
+      },
+      // 普通系统通知保持中立 unknown，既不是工作中也不是轮次结束。
+      {
+        events: ['Notification'],
+        state: 'unknown'
+      },
+      {
+        events: [
+          'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse',
+          'SubagentStop', 'PreCompact'
+        ],
+        state: 'working'
+      }
+    ],
+    // 携带非空 calling_session_id 的 SessionStart 为子会话主体，禁止晋升为主 Session 的恢复定位符。
+    subagentSubject: (payload: Readonly<Record<string, unknown>>) => {
+      const calling = payload.calling_session_id ?? payload.callingSessionId
+      return typeof calling === 'string' && calling.trim().length > 0
+    },
+    // **不声明 subagentTracking**：事件全集里只有 `SubagentStop`，没有对应的 start。子代理在途记账
+    // 要求 start/stop 成对（花名册加一才能减一），只装 stop 会让计数变成负数，并且会压制主 Agent 的
+    // 收尾——它会一直等一个永远等不到的减一。与 Hermes 同一个判断。
+    //
+    // 负载键一律 snake_case，与 Claude 一族逐字相同（`session_id`/`transcript_path`）。
+    nativeHandle: {
+      sessionIdKeys: ['session_id'],
+      transcriptPathKeys: ['transcript_path']
     }
-  ],
-  // 携带非空 calling_session_id 的 SessionStart 为子会话主体，禁止晋升为主 Session 的恢复定位符。
-  subagentSubject: (payload) => {
-    const calling = payload.calling_session_id ?? payload.callingSessionId
-    return typeof calling === 'string' && calling.trim().length > 0
-  },
-  // **不声明 subagentTracking**：事件全集里只有 `SubagentStop`，没有对应的 start。子代理在途记账
-  // 要求 start/stop 成对（花名册加一才能减一），只装 stop 会让计数变成负数，并且会压制主 Agent 的
-  // 收尾——它会一直等一个永远等不到的减一。与 Hermes 同一个判断。
-  //
-  // 负载键一律 snake_case，与 Claude 一族逐字相同（`session_id`/`transcript_path`）。
-  nativeHandle: {
-    sessionIdKeys: ['session_id'],
-    transcriptPathKeys: ['transcript_path']
-  }
+  } as const
 }
 
 /**
@@ -121,7 +116,8 @@ export const DROID_HOOKS: AgentNativeHookSpecification = {
  * 我们的根级事件键直接盖在用户同名的桶上，最后再写一个这个 CLI 不认的 `hooks: {}`。用户手写的
  * `PreToolUse` 审计 hook 会在下一次启动时消失。这不是推理——`renderMergedHookContent` 实测如此。
  */
-export function createDroidManagedHookPlan(env?: ProviderExecutionEnvironment, workspacePath?: string): AgentManagedHookPlan {
+function planManagedHooks(services: DroidServices, { env, workspacePath }: ProviderHookTarget) {
+  const { executionEnvironmentValue, executionHomeDirectory, executionPath, runScopedHookCommand, hookCommandTimeout } = services
   const override = executionEnvironmentValue(env, 'FACTORY_HOME_OVERRIDE')?.trim()
   const home = executionPath(override || executionHomeDirectory(env), workspacePath)
   const command = runScopedHookCommand('droid')
@@ -131,23 +127,22 @@ export function createDroidManagedHookPlan(env?: ProviderExecutionEnvironment, w
     hooks: [{ type: 'command', command, ...hookCommandTimeout('droid') }]
   }]]))
   return {
-    providerId: 'droid',
-    retainPreviousDeclarations: true,
+    providerId: 'droid' as const,
+    retainPreviousDeclarations: true as const,
     mutations: [{
       path: join(home, '.factory', 'hooks.json'),
       content: `${JSON.stringify(events, null, 2)}\n`,
       mode: 0o600,
-      merge: { kind: 'json-root-managed-events' }
+      merge: { kind: 'json-root-managed-events' as const }
     }]
   }
 }
 
-export function createDroidProvider(defineAgentProvider: ProviderFactory): AgentProvider {
-  return defineAgentProvider({
-    planManagedHooks: ({ env, workspacePath }) => createDroidManagedHookPlan(env, workspacePath),
-    readSessionHistoryPage: readDroidSessionHistoryPage,
-    readSessionHistoryRecord: readDroidSessionHistoryRecord,
-    catalog: catalog({
+export function droidProvider(services: DroidServices) {
+  return {
+    planManagedHooks: (target: ProviderHookTarget) => planManagedHooks(services, target),
+    hookDisableKey: 'hooksDisabled',
+    catalog: {
       id: 'droid', label: 'Droid', executable: 'droid', expectedProcess: 'droid',
       promptDelivery: 'positional-argv',
       hookStrategy: { kind: 'native', installation: 'explicit-managed' },
@@ -167,12 +162,11 @@ export function createDroidProvider(defineAgentProvider: ProviderFactory): Agent
         // **没有任何 token 字段**。它报 `transcript_path`，但那份文件的格式未经核实，
         // 今天两个 reader（claude-jsonl / codex-rollout）都不能假定适用。按「未核实就不声明」留空。
       }
-    }),
-    buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
-    hook: DROID_HOOKS,
-    inspectHookActivation: context => inspectHookDisableSetting(context, 'hooksDisabled'),
-    buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
+    } as const,
+    buildArgs: (prompt: string, args: readonly string[]) => [...args, ...(prompt ? [prompt] : [])],
+    hook: nativeHook(services),
+    buildResumeArgs: (sessionId: string, _transcriptPath: string | undefined, prompt: string | undefined, args: readonly string[]) => [
       '--resume', sessionId, ...args, ...(prompt ? [prompt] : [])
     ]
-  })
+  }
 }

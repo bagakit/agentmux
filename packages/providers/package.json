@@ -79,6 +79,22 @@
     "./antigravity/acp-probe": {
       "types": "./dist/antigravity/acp-probe.d.ts",
       "import": "./dist/antigravity/acp-probe.js"
+    },
+    "./droid/native-history": {
+      "types": "./dist/droid/native-history.d.ts",
+      "import": "./dist/droid/native-history.js"
+    },
+    "./kimi/native-history": {
+      "types": "./dist/kimi/native-history.d.ts",
+      "import": "./dist/kimi/native-history.js"
+    },
+    "./droid/provider": {
+      "types": "./dist/droid/provider.d.ts",
+      "import": "./dist/droid/provider.js"
+    },
+    "./kimi/provider": {
+      "types": "./dist/kimi/provider.d.ts",
+      "import": "./dist/kimi/provider.js"
     }
   },
   "files": [

@@ -1,4 +1,8 @@
 import { dirname, join } from 'node:path'
+import type {
+  NativeHistoryItem, NativeHistoryPart, NativeHistoryReadBudget, NativeHistoryReaderContext, NativeHistoryTarget,
+  NativeHistoryText, NativeJsonlHistoryReader, NativeJsonlHistoryServices
+} from '../jsonl-history-services.js'
 
 const ANTIGRAVITY_TRANSCRIPT_FILE = 'transcript.jsonl'
 const ANTIGRAVITY_SYSTEM_DIR = '.system_generated'
@@ -17,45 +21,14 @@ export function antigravityConversationIdFromTranscriptPath(filePath: string): s
   return segments[transcriptIndex - 3] ?? null
 }
 
-type HistoryTarget = { transcriptPath?: string; source: { providerId: string; nativeSessionId: string } }
-
-type HistoryPart<Text> = ({ kind: 'text' | 'reasoning'; text: string | Text } |
-  { kind: 'resource'; resourceType: 'image' | 'audio' | 'file'; reference: string | Text } |
-  { kind: 'tool-call'; name: string; input: string | Text; callId?: string }) & { contentEligibility?: 'public' }
-
-type HistoryItem<Text> = {
-  id: string
-  kind: 'user-message' | 'assistant-message' | 'activity'
-  contentParts: HistoryPart<Text>[]
-  title?: string
-  startedAt?: number
-}
-
-type NativeHistoryReadBudget = { bytesRead: number; startedAt: number }
-type HistoryReaderContext<Context> = Omit<Context, 'cursor' | 'transcriptPath'> & {
-  cursor?: string
-  transcriptPath?: string
-}
-
-type HistoryReader<Text, Item> = {
-  readonly continuation: string | undefined
-  readPrevious(): Promise<{ value: Record<string, unknown>; start: number } | null>
-  nextCursor(continuation?: string): Promise<string | null>
-  close(): Promise<void>
-  materializeItem(item: HistoryItem<Text>): Promise<Item>
-}
+type HistoryTarget = Pick<NativeHistoryTarget, 'source'> & { transcriptPath?: string }
 
 export function antigravityNativeHistory<Text extends { length: number }, Context extends HistoryTarget & {
   limit: number; cursor?: string; signal: AbortSignal
-}, Item>(services: {
-  AgentMuxError: new (message: string, code: string) => Error & { code: string }
-  NativeJsonlHistoryReader: { open(context: HistoryReaderContext<Context>, budget: NativeHistoryReadBudget): Promise<HistoryReader<Text, Item>> }
-  isNativeText(value: unknown): value is string | Text
-  nativeJsonStringify(value: unknown, replacer?: null, space?: number): string | Text
-  nativeTextConcat(...values: (string | Text)[]): string | Text
-  nativeTextHasSpeech(value: string | Text): boolean
-  nativeTextTrim(value: string | Text): string | Text
-  nativeTextBetween(value: string | Text, begin: string, end: string, signal: AbortSignal): Promise<string | Text>
+}, Item>(services: NativeJsonlHistoryServices<Text, Context, Item> & {
+  nativeTextHasSpeech(value: NativeHistoryText<Text>): boolean
+  nativeTextTrim(value: NativeHistoryText<Text>): NativeHistoryText<Text>
+  nativeTextBetween(value: NativeHistoryText<Text>, begin: string, end: string, signal: AbortSignal): Promise<NativeHistoryText<Text>>
 }) {
   const { AgentMuxError, NativeJsonlHistoryReader, isNativeText, nativeJsonStringify, nativeTextConcat, nativeTextHasSpeech,
     nativeTextTrim, nativeTextBetween } = services
@@ -66,7 +39,7 @@ export function antigravityNativeHistory<Text extends { length: number }, Contex
     }
   }
 
-  async function extractAntigravityUserRequest(content: string | Text, signal: AbortSignal): Promise<string | Text> {
+  async function extractAntigravityUserRequest(content: NativeHistoryText<Text>, signal: AbortSignal): Promise<NativeHistoryText<Text>> {
     return nativeTextTrim(await nativeTextBetween(content, '<USER_REQUEST>', '</USER_REQUEST>', signal))
   }
 
@@ -76,9 +49,9 @@ export function antigravityNativeHistory<Text extends { length: number }, Contex
     fullState: { unavailable?: boolean; budgetExceeded?: boolean },
     signal: AbortSignal
   ): Promise<{
-    kind: HistoryItem<Text>['kind']
+    kind: NativeHistoryItem<Text>['kind']
     title?: string
-    contentParts: HistoryPart<Text>[]
+    contentParts: NativeHistoryPart<Text>[]
   }> {
     const source = typeof record.source === 'string' ? record.source : ''
     const type = typeof record.type === 'string' ? record.type : ''
@@ -103,7 +76,7 @@ export function antigravityNativeHistory<Text extends { length: number }, Contex
     const toolCalls = effectiveRecord.tool_calls
     const media = effectiveRecord.media
 
-    const omissionNotice = (): HistoryPart<Text> | null => {
+    const omissionNotice = (): NativeHistoryPart<Text> | null => {
       if (unrecoveredFields.length === 0) return null
       const reason = fullState.budgetExceeded
         ? 'full transcript budget exceeded'
@@ -118,7 +91,7 @@ export function antigravityNativeHistory<Text extends { length: number }, Contex
 
     // 1. User message (source USER_EXPLICIT and type USER_INPUT per agy specification)
     if (source === 'USER_EXPLICIT' && type === 'USER_INPUT') {
-      const parts: HistoryPart<Text>[] = []
+      const parts: NativeHistoryPart<Text>[] = []
       const text = isNativeText(content)
         ? await extractAntigravityUserRequest(content, signal)
         : nativeJsonStringify(content ?? '')
@@ -129,7 +102,7 @@ export function antigravityNativeHistory<Text extends { length: number }, Contex
       if (Array.isArray(media)) {
         for (const item of media) {
           if (item && typeof item === 'object' && isNativeText((item as { uri?: unknown }).uri)) {
-            const uri = (item as { uri: string | Text }).uri
+            const uri = (item as { uri: NativeHistoryText<Text> }).uri
             const mimeType = typeof (item as { mime_type?: unknown }).mime_type === 'string'
               ? (item as { mime_type: string }).mime_type
               : ''
@@ -156,7 +129,7 @@ export function antigravityNativeHistory<Text extends { length: number }, Contex
 
     // 2. MODEL / PLANNER_RESPONSE
     if (source === 'MODEL' && type === 'PLANNER_RESPONSE') {
-      const parts: HistoryPart<Text>[] = []
+      const parts: NativeHistoryPart<Text>[] = []
       const hasAssistantText = isNativeText(content) && nativeTextHasSpeech(content)
 
       // Source order per embedded specification: thinking -> content -> tool_calls -> media
@@ -195,7 +168,7 @@ export function antigravityNativeHistory<Text extends { length: number }, Contex
       if (Array.isArray(media)) {
         for (const item of media) {
           if (item && typeof item === 'object' && isNativeText((item as { uri?: unknown }).uri)) {
-            const uri = (item as { uri: string | Text }).uri
+            const uri = (item as { uri: NativeHistoryText<Text> }).uri
             const mimeType = typeof (item as { mime_type?: unknown }).mime_type === 'string'
               ? (item as { mime_type: string }).mime_type
               : ''
@@ -233,7 +206,7 @@ export function antigravityNativeHistory<Text extends { length: number }, Contex
 
     // 3. Other steps remain activity preserving raw content
     const title = type ? `Antigravity ${type}` : source ? `Antigravity ${source}` : 'Antigravity activity'
-    const parts: HistoryPart<Text>[] = []
+    const parts: NativeHistoryPart<Text>[] = []
 
     const text = isNativeText(content) ? content : nativeJsonStringify(effectiveRecord, null, 2)
     parts.push({ kind: 'text', text })
@@ -264,7 +237,7 @@ export function antigravityNativeHistory<Text extends { length: number }, Contex
     fullRecord: Record<string, unknown> | undefined,
     fullState: { unavailable?: boolean; budgetExceeded?: boolean },
     signal: AbortSignal
-  ): Promise<HistoryItem<Text>> {
+  ): Promise<NativeHistoryItem<Text>> {
     const { kind, title, contentParts } = await parseRecordParts(record, fullRecord, fullState, signal)
     const id = typeof record.id === 'string' && record.id
       ? record.id
@@ -319,14 +292,15 @@ export function antigravityNativeHistory<Text extends { length: number }, Contex
         const fullCursor = compactReader.continuation
 
         // Explicitly strip outer cursor so compact cursor is never passed to fullReader
-        const { cursor: _outerCursor, transcriptPath: _compactTranscript, ...baseContext } = context
-        const fullContext: HistoryReaderContext<Context> = {
+        const { cursor: _outerCursor, transcriptPath: _compactTranscript, limit, ...baseContext } = context
+        const fullContext: NativeHistoryReaderContext<Context> = {
           ...baseContext,
+          limit,
           transcriptPath: fullPath,
           ...(fullCursor ? { cursor: fullCursor } : {})
         }
 
-        let fullReader: HistoryReader<Text, Item> | undefined
+        let fullReader: NativeJsonlHistoryReader<Text, Item> | undefined
         try {
           fullReader = await NativeJsonlHistoryReader.open(fullContext, budget)
         } catch (error) {
@@ -395,7 +369,7 @@ export function antigravityNativeHistory<Text extends { length: number }, Contex
         budgetExceeded: fullBudgetExceeded
       }
 
-      const items: HistoryItem<Text>[] = []
+      const items: NativeHistoryItem<Text>[] = []
       for (const { record, start } of rawEntries) {
         const stepIndex = typeof record.step_index === 'number' ? record.step_index : undefined
         const fullRecord = stepIndex !== undefined ? resolvedFull.get(stepIndex) : undefined

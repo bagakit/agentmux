@@ -7,37 +7,41 @@ import { antigravityNativeSession } from '@agentmux/providers/antigravity/native
 import { AgentMuxError } from '../errors.js'
 import { nativeProcessBirth, nativeProcessFiles } from '../agent-native-process.js'
 import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
-import { NativeJsonlHistoryReader } from '../native-jsonl-history-reader.js'
-import { isNativeText, nativeJsonStringify, nativeTextConcat, nativeTextHasSpeech, nativeTextTrim, type NativeText } from '../native-history-value.js'
+import { NativeJsonlHistoryReader, readNativeHistoryBytes } from '../native-jsonl-history-reader.js'
+import { isNativeText, nativeJsonStringify, nativeTextConcat, nativeTextHasSpeech, nativeTextJoin, nativeTextBase64, nativeTextTrim, type NativeText } from '../native-history-value.js'
 import { nativeTextBetween } from '../native-history-source.js'
 import { observeRead } from '../observation-read.js'
 import { AgentMuxRpcLines, isRpcId, rpcEncode } from '../public-rpc-frame.js'
 import type { AgentProviderSessionHistoryContext, AgentProviderSessionHistoryObservation, AgentProviderSessionHistoryObservationContext, AgentSessionHistoryItem } from '../types.js'
 import { executionEnvironmentValue, executionHomeDirectory, executionPath, executionTemporaryDirectory } from './execution-environment.js'
-import { catalog, hookCommandTimeout, hookToolFields, runScopedHookCommand } from './shared.js'
+import { catalog, hookCommandTimeout, hookToolFields, inspectHookDisableSetting, runScopedHookCommand } from './shared.js'
 import { createClaudeProvider } from './claude.js'
 import { createCodexProvider } from './codex.js'
 import { copilotProvider } from '@agentmux/providers/copilot/provider'
 import { normalizeNativeSessionId } from '../agent-native-locator.js'
 import { createCursorProvider } from './cursor.js'
-import { createDroidProvider } from './droid.js'
+import { droidProvider } from '@agentmux/providers/droid/provider'
+import { droidNativeHistory } from '@agentmux/providers/droid/native-history'
 import { geminiProvider } from '@agentmux/providers/gemini/provider'
 import { createGrokProvider } from './grok.js'
 import { createHermesProvider } from './hermes.js'
-import { createKimiProvider } from './kimi.js'
+import { kimiProvider } from '@agentmux/providers/kimi/provider'
+import { kimiNativeHistory } from '@agentmux/providers/kimi/native-history'
 import { createOpenCodeProvider } from './opencode.js'
 import { createPiProvider } from './pi.js'
 import { createTraexProvider } from './traex.js'
 
 export type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
+
+const historyServices = { AgentMuxError, NativeJsonlHistoryReader, isNativeText, nativeJsonStringify, nativeTextConcat }
+
 function createAntigravityProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   const { catalog: seed, planManagedHooks, ...provider } = antigravityProvider({
     formatHookToolOutput, hookToolFields, hookCommandTimeout, runScopedHookCommand
   })
   const { assertAntigravityHistorySource, readAntigravitySessionHistoryPage } =
     antigravityNativeHistory<NativeText, AgentProviderSessionHistoryContext, AgentSessionHistoryItem>({
-      AgentMuxError, NativeJsonlHistoryReader, isNativeText, nativeJsonStringify, nativeTextConcat, nativeTextHasSpeech,
-      nativeTextTrim, nativeTextBetween
+      ...historyServices, nativeTextHasSpeech, nativeTextTrim, nativeTextBetween
     })
   const { discoverAntigravityNativeSession, observeAntigravitySessionHistory } =
     antigravityNativeSession<AgentProviderSessionHistoryObservation, AgentProviderSessionHistoryObservationContext>({
@@ -61,6 +65,15 @@ const hookServices = { formatHookToolOutput, hookCommandTimeout, hookToolFields,
 export function createBuiltInAgentProviders(defineAgentProvider: ProviderFactory): readonly AgentProvider[] {
   const gemini = geminiProvider({ ...hookServices, executionTemporaryDirectory })
   const copilot = copilotProvider({ ...hookServices, normalizeNativeSessionId })
+  const kimi = kimiProvider(hookServices)
+  const { hookDisableKey, ...droid } = droidProvider(hookServices)
+  const { readKimiSessionHistoryPage } = kimiNativeHistory<NativeText, AgentProviderSessionHistoryContext, AgentSessionHistoryItem>({
+    ...historyServices, readNativeHistoryBytes
+  })
+  const { readDroidSessionHistoryPage, readDroidSessionHistoryRecord } =
+    droidNativeHistory<NativeText, AgentProviderSessionHistoryContext, AgentSessionHistoryItem>({
+      ...historyServices, nativeTextJoin, nativeTextHasSpeech, nativeTextBase64
+    })
   return [
     createCodexProvider(defineAgentProvider),
     createClaudeProvider(defineAgentProvider),
@@ -71,8 +84,10 @@ export function createBuiltInAgentProviders(defineAgentProvider: ProviderFactory
     defineAgentProvider({ ...gemini, catalog: catalog(gemini.catalog) }),
     createAntigravityProvider(defineAgentProvider),
     createCursorProvider(defineAgentProvider),
-    createKimiProvider(defineAgentProvider),
-    createDroidProvider(defineAgentProvider),
+    defineAgentProvider({ ...kimi, catalog: catalog(kimi.catalog), readSessionHistoryPage: readKimiSessionHistoryPage }),
+    defineAgentProvider({ ...droid, catalog: catalog(droid.catalog),
+      readSessionHistoryPage: readDroidSessionHistoryPage, readSessionHistoryRecord: readDroidSessionHistoryRecord,
+      inspectHookActivation: context => inspectHookDisableSetting(context, hookDisableKey) }),
     defineAgentProvider({ ...copilot, catalog: catalog(copilot.catalog) }),
     createOpenCodeProvider(defineAgentProvider)
   ]
@@ -81,10 +96,8 @@ export function createBuiltInAgentProviders(defineAgentProvider: ProviderFactory
 export { createClaudeProvider } from './claude.js'
 export { createCodexProvider } from './codex.js'
 export { createCursorProvider } from './cursor.js'
-export { createDroidProvider } from './droid.js'
 export { createGrokProvider } from './grok.js'
 export { createHermesProvider } from './hermes.js'
-export { createKimiProvider } from './kimi.js'
 export { createOpenCodeProvider } from './opencode.js'
 export { createPiProvider } from './pi.js'
 export { createTraexProvider } from './traex.js'
