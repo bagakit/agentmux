@@ -16,6 +16,7 @@ export type WorkspaceFileWorkerRequest =
       action: 'write'
       name: string
       expectedRevision: string | null
+      createMode?: number
       exclusive?: true
       textOnly?: true
       fault?: 'temporary-write' | 'replace' | 'receipt' | 'occupy'
@@ -50,7 +51,8 @@ export async function runWorkspaceFileWorker(
     request.action === 'read-bytes' ? String(request.offset) : '0',
     request.action === 'read-bytes' ? String(request.maxBytes) : '0',
     request.action === 'read-bytes' ? String(request.maxFileBytes) : '0',
-    request.action === 'read-bytes' ? request.expectedRevision ?? 'null' : 'null'
+    request.action === 'read-bytes' ? request.expectedRevision ?? 'null' : 'null',
+    ...(request.action === 'write' && request.createMode !== undefined ? [String(request.createMode)] : [])
   ] : [
     '--input-type=module',
     '--eval',

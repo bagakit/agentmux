@@ -253,17 +253,21 @@ static int workspace_expect(int exists, const char *revision, const char *expect
 }
 
 static void workspace_write(const char *name, const char *expected, int exclusive, int text_only,
-                            const char *fault, const unsigned char *bytes, size_t length) {
-  char revision[72]; mode_t mode = 0666; int binary = 0;
+                            const char *fault, const unsigned char *bytes, size_t length, mode_t create_mode) {
+  const int parent = open(".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (parent < 0) workspace_errno();
+  /* stdin is complete; hold the actual parent across comparison, publication and ACK. */
+  if (flock(parent, LOCK_EX)) workspace_errno();
+  char revision[72]; mode_t mode = create_mode; int binary = 0;
   const int exists = workspace_current(name, revision, &mode, &binary);
   if (text_only && binary) workspace_error("WORKSPACE_BINARY_FILE_NOT_EDITABLE", "The current file contains binary bytes. The original file and text draft were kept.");
-  if (!workspace_expect(exists, revision, expected)) { workspace_conflict(exists, revision); return; }
+  if (!workspace_expect(exists, revision, expected)) { workspace_conflict(exists, revision); close(parent); return; }
   char token[33]; unsigned char entropy[16]; native_random(entropy, sizeof(entropy));
   for (size_t i = 0; i < sizeof(entropy); i++) snprintf(token + i * 2, 3, "%02x", entropy[i]);
   char *temporary = malloc(strlen(name) + 64);
   if (!temporary) workspace_errno();
   sprintf(temporary, ".%s.agentmux-%d-%s", name, getpid(), token);
-  const int fd = open(temporary, (exclusive ? O_RDWR : O_WRONLY) | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, mode);
+  const int fd = open(temporary, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, mode);
   if (fd < 0) workspace_errno();
   workspace_temporary = temporary;
   if (exists && fchmod(fd, mode)) workspace_errno();
@@ -272,12 +276,12 @@ static void workspace_write(const char *name, const char *expected, int exclusiv
   }
   workspace_write_all(fd, bytes, length);
   if (fsync(fd)) { const int value = errno; close(fd); unlink(temporary); errno = value; workspace_errno(); }
-  if (!exclusive) close(fd);
   const int current = workspace_current(name, revision, &mode, &binary);
   if ((text_only && binary) || !workspace_expect(current, revision, expected)) {
+    close(fd);
     unlink(temporary); workspace_temporary = NULL; free(temporary);
     if (text_only && binary) workspace_error("WORKSPACE_BINARY_FILE_NOT_EDITABLE", "The current file contains binary bytes. The original file and text draft were kept.");
-    workspace_conflict(current, revision); return;
+    workspace_conflict(current, revision); close(parent); return;
   }
   if (!strcmp(fault, "replace")) { unlink(temporary); workspace_error("INJECTED_REPLACE", "Injected atomic replace failure"); }
   if (!strcmp(fault, "occupy")) {
@@ -290,28 +294,29 @@ static void workspace_write(const char *name, const char *expected, int exclusiv
   const int value = errno;
   unlink(temporary); workspace_temporary = NULL; free(temporary);
   if (published) {
+    close(fd);
     if (exclusive && value == EEXIST) {
-      const int observed = workspace_current(name, revision, &mode, &binary); workspace_conflict(observed, revision); return;
+      const int observed = workspace_current(name, revision, &mode, &binary); workspace_conflict(observed, revision); close(parent); return;
     }
     errno = value; workspace_errno();
   }
   workspace_write_published = 1;
+  commit_barrier(!strcmp(fault, "after-publish-barrier"), 3, 4, "after-workspace-file-publish");
   if (!strcmp(fault, "receipt")) workspace_error("INJECTED_WRITE_RECEIPT", "Write was published but its receipt failed");
   workspace_digest(bytes, length, revision);
   struct stat published_info, visible;
-  if (exclusive) {
-    char observed[72];
-    const int parent = open(".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (parent < 0 || fsync(parent)) workspace_errno();
-    close(parent);
-    if (!workspace_fd_revision(fd, observed, &published_info, (off_t)length) || strcmp(observed, revision) ||
-        fstatat(AT_FDCWD, name, &visible, AT_SYMLINK_NOFOLLOW) || !workspace_same_file(&published_info, &visible))
-      workspace_error("WORKSPACE_FILE_PUBLISHED_CHANGED", "The newly published file changed before its receipt was confirmed");
-    close(fd);
-  }
+  char observed[72];
+  if (!workspace_fd_revision(fd, observed, &published_info, (off_t)length) || strcmp(observed, revision) ||
+      fstatat(parent, name, &visible, AT_SYMLINK_NOFOLLOW) || !workspace_same_file(&published_info, &visible))
+    workspace_error("WORKSPACE_FILE_PUBLISHED_CHANGED", "The newly published file changed before its receipt was confirmed");
+  if (fsync(parent)) workspace_errno();
+  if (fstatat(parent, name, &visible, AT_SYMLINK_NOFOLLOW) || !workspace_same_file(&published_info, &visible))
+    workspace_error("WORKSPACE_FILE_PUBLISHED_CHANGED", "The newly published file changed before its receipt was confirmed");
+  close(fd);
   printf("{\"status\":\"written\",\"revision\":"); workspace_json_string(stdout, revision);
   if (exclusive) { printf(",\"fileWitness\":"); workspace_witness(&published_info); }
   printf("}");
+  close(parent);
 }
 
 #if defined(__APPLE__)
@@ -529,8 +534,18 @@ static void workspace_list(void) {
 
 static int workspace_file_operation(int argc, char **argv) {
   if (argc < 2 || strcmp(argv[1], "--workspace-file")) return 0;
-  if (argc != 13) workspace_error("WORKSPACE_FILE_INVALID_REQUEST", "Invalid local file helper arguments");
+  if (argc != 13 && argc != 14) workspace_error("WORKSPACE_FILE_INVALID_REQUEST", "Invalid local file helper arguments");
   const char *action = argv[2], *root = argv[3], *name = argv[4];
+  mode_t create_mode = 0666;
+  if (argc == 14) {
+    char *end = NULL;
+    errno = 0;
+    const unsigned long requested = strtoul(argv[13], &end, 10);
+    if (strcmp(action, "write") || !*argv[13] || strspn(argv[13], "0123456789") != strlen(argv[13]) ||
+        errno || *end || requested > 0777)
+      workspace_error("WORKSPACE_FILE_INVALID_REQUEST", "Invalid local file creation mode");
+    create_mode = (mode_t)requested;
+  }
 #if !defined(__APPLE__)
   if (strcmp(action, "read") && strcmp(action, "read-bytes") && strcmp(action, "write"))
     workspace_error("WORKSPACE_FILE_UNSUPPORTED_OPERATION", "This platform supports file read, read-bytes and write only");
@@ -561,7 +576,7 @@ static int workspace_file_operation(int argc, char **argv) {
     workspace_byte_range(name, (size_t)parse_identity(argv[9], "byte offset"),
       (size_t)parse_identity(argv[10], "byte length"), (size_t)parse_identity(argv[11], "file byte limit"), argv[12]);
   } else if (!strcmp(action, "write")) {
-    workspace_write(name, argv[5], !strcmp(argv[6], "1"), !strcmp(argv[7], "1"), argv[8], input, length);
+    workspace_write(name, argv[5], !strcmp(argv[6], "1"), !strcmp(argv[7], "1"), argv[8], input, length, create_mode);
   #if defined(__APPLE__)
   } else if (!strcmp(action, "delete-exact")) {
     workspace_delete_exact(root, name, original_cwd, &original_parent, &original_root, argv);

@@ -318,7 +318,7 @@ export class OrdinaryWorkspaceFiles {
 
   async writeContent(
     workspace: FileWorkspace,
-    input: { path: string; content: string | Uint8Array; expectedRevision: string | null; exclusive?: true },
+    input: { path: string; content: string | Uint8Array; expectedRevision: string | null; exclusive?: true; createMode?: number },
     beforeWrite?: () => void | Promise<void>
   ): Promise<OrdinaryFileWriteResult> {
     const requestKey = `${workspace.hostId}\0${workspace.path}\0${input.path}`
@@ -340,6 +340,7 @@ export class OrdinaryWorkspaceFiles {
               name: resolved.name,
               expectedRevision: input.expectedRevision,
               ...(input.exclusive ? { exclusive: true as const } : {}),
+              ...(input.createMode === undefined ? {} : { createMode: input.createMode }),
               ...(typeof input.content === 'string' ? { textOnly: true as const } : {}),
               ...(fault ? { fault } : {})
             }, input.content)).toString('utf8')) as OrdinaryFileWriteResult
