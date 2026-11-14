@@ -1206,10 +1206,13 @@ export class AgentMuxRpcService {
         return parseMoteDialogueResult(method,value,input) as AgentMuxRpcResult<M>
       }
       const original = { ...(caller ? { caller: { hostId: caller.hostId, agentSessionId: caller.agentSessionId } } : {}),
+        readDispatch: async (hostId: string, sourceMessageId: string) => this.call('message.dispatch.read', { hostId, sourceMessageId }, context),
         ...(context.signal ? { signal: context.signal } : {}), assertCurrent: async () => {
           context.signal?.throwIfAborted(); await context.assertCurrent?.(); if (caller) await this.authenticated(context)
         } }
-      const result = method === 'space.mote.dialogue.read'
+      const result = method === 'space.mote.dialogue.supervision.read'
+        ? await this.ports.moteDialogue.supervision(parseMoteDialogueParams(method, params), original)
+        : method === 'space.mote.dialogue.read'
         ? await this.ports.moteDialogue.read(parseMoteDialogueParams(method, params), original)
         : await this.ports.moteDialogue.link(parseMoteDialogueParams(method, params), original)
       return parseMoteDialogueResult(method, result, input) as AgentMuxRpcResult<M>

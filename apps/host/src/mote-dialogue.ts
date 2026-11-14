@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto'
 import type { ConversationCheckpoint } from '@agentmux/core/mote-dialogue'
 import type { MoteMainTransitionMarker } from '@agentmux/core/mote-preferences'
 import { AgentMuxError, spatialCatalog, type AgentMuxSpatialStateStore } from '@agentmux/core'
-import { moteMainRoleRevision, type MoteMainReader, type MoteMainSnapshot } from '@agentmux/core/mote-dialogue'
+import { moteMainRoleRevision, observeMoteWorkSource, type MoteMainReader, type MoteMainSnapshot, type MoteSupervisionObservation } from '@agentmux/core/mote-dialogue'
 import type { MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import type { AgentMuxRpcFilesOwner } from '@agentmux/core/files'
 import { sameMoteDefaultConversation } from './mote-quick-mode.js'
@@ -151,6 +151,29 @@ export function createHostMoteDialogue(options: {
           throughSequence: input.cursor?.throughSequence ?? 0, next: null, coverage: 'linked-sources-only', sourceStatus: 'unconfirmed',
           sourceIssue: error instanceof Error ? error.message : String(error) }, input)
       }
+    },
+    async supervision(raw, context) {
+      const input = parseMoteDialogueParams('space.mote.dialogue.supervision.read', raw)
+      const page = await this.read({ ...input, kind: 'work' }, context)
+      const observations = await Promise.all(page.links.map(async (link): Promise<MoteSupervisionObservation> => {
+        try {
+          context?.signal?.throwIfAborted()
+          if (link.kind !== 'work') throw new Error('This source is not an original work association.')
+          if (context?.caller && !context.readDispatch)
+            throw new AgentMuxError('The original authenticated Dispatch reader is unavailable. Retain the source and inspect it through message dispatch read.', 'CONTROL_UNAVAILABLE')
+          const observed = context?.readDispatch
+            ? await context.readDispatch(link.origin.hostId, link.origin.messageId)
+            : await (await options.clientForHost(link.origin.hostId)).readDispatch({ sourceMessageId: link.origin.messageId })
+          return observeMoteWorkSource(link, observed)
+        } catch (error) {
+          context?.signal?.throwIfAborted()
+          const issue = error instanceof Error ? error.message : String(error)
+          return { sequence: link.sequence, communication: null,
+            issue: issue.trim() ? issue : 'The original work source observation is unavailable. Retain its source message and retry this read.' }
+        }
+      }))
+      await context?.assertCurrent?.()
+      return parseMoteDialogueResult('space.mote.dialogue.supervision.read', { ...page, observations }, input)
     },
     async link(raw, context) {
       const input = parseMoteDialogueParams('space.mote.dialogue.link', raw)
