@@ -13,6 +13,7 @@ const fixture = fileURLToPath(new URL('./', import.meta.url)), repo = resolve(fi
 const desktop = join(repo, 'apps/desktop'), core = join(repo, 'packages/core')
 const require = createRequire(join(desktop, 'package.json'))
 const coreRequire = createRequire(join(core, 'package.json'))
+const { assertStopForkScenarios } = createRequire(import.meta.url)('./agent-operations-main.cjs')
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const delay = ms => new Promise(done => setTimeout(done, ms))
 const nativeMutations = {
@@ -29,14 +30,24 @@ async function artifacts(directory) {
   return files
 }
 export async function runNative(requestedEvidence, options = {}) {
+  assert.ok(!(options.liveAdoption && options.agentOperations), 'Live adoption and Stop/Fork have distinct native qualifications')
+  if (!options.liveAdoption && !options.agentOperations) {
+    assert.ok(!options.nativeMutant && !options.preflight && (!options.frameScope || options.frameScope === 'all'),
+      'Public Takeover uses its complete original capture; Stop/Fork mutation, preflight and terminal-only options require an explicit qualification')
+    const { runTakeoverFlow } = await import('../takeover-flow/capture.mjs')
+    return runTakeoverFlow(requestedEvidence)
+  }
+  assert.ok(!options.nativeMutant || options.agentOperations, 'Native feedback mutations require the Stop/Fork qualification')
   if (options.nativeMutant !== undefined) assert.ok(Object.hasOwn(nativeMutations, options.nativeMutant), 'A native source mutation must be explicitly supported')
   const evidence = resolve(repo, requestedEvidence ?? ".tmp/session-takeover-fixture/native")
   await mkdir(evidence, { recursive: true })
   const privateRoot = await realpath(await mkdtemp(_hygiene_fixturePath("tmp/amx-takeover-renderer-")))
   const out = join(privateRoot, 'renderer'), sourceBefore = {}, styleBefore = {}, logs = []
-  const receipt = { schema: options.agentOperations ? 'agentmux.agent-operations-native.v1' : 'agentmux.session-takeover-native.v1', qualification: options.liveAdoption ? 'live-adoption-v1' : options.nativeMutant ? 'agent-operations-mutation-v1' : options.agentOperations ? 'agent-operations-v1' : 'takeover-only', sourceMutations: [], passed: false, frames: [], processes: [],
+  const receipt = { schema: options.agentOperations ? 'agentmux.stop-fork-feedback-native.v1' : 'agentmux.session-takeover-native.v1', qualification: options.liveAdoption ? 'live-adoption-v1' : options.nativeMutant ? 'stop-fork-feedback-mutation-v1' : 'stop-fork-feedback-v1', sourceMutations: [], passed: false, frames: [], processes: [],
     userSessionTouched: false, independentVisualReview: 'pending',
-    scope: 'Actual production WorkspaceWorkbench, SessionPane, shared picker and product styles in two ordinary Electron processes. Real public Core spatial file owner and Chromium profile storage. A controlled Native retirement challenges a stale Renderer projection; trusted user choices create a distinct successor operation and both requests remain inspectable after restart. Native session facts/creation API remain controlled preview; this receipt does not prove vendor CLI or ctxmux process execution; Core exact Store/Hosted creation inspection has separate source-test evidence.',
+    scope: options.agentOperations
+      ? 'Actual production cards, Stop/Fork controllers, SessionPane, xterm, feedback motion and product styles in two ordinary Electron processes. Real public Core spatial file owner and Chromium profile storage. Exact original Stop/Fork references, created partial Fork, sessions, Runs, drafts and workfaces survive restart without replay. Native launch/stop/input/ordered bytes are controlled; this does not qualify public Takeover, live adoption, vendor CLI or ctxmux process execution.'
+      : 'Independent original live-adoption fixture with controlled Native reattachment. It does not qualify public Takeover or Stop/Fork feedback.',
     controlledRecovery: 'The same exact Native snapshot owns refresh/recover. For a matching healthy running Host/Session/Run it returns the Core reattachable protocol (packages/core/src/client.ts, recoverAgentSession running branch); the generic apps/desktop/src/renderer/src/lib/api.ts preview recover unconditionally mints a Run and is not the Native owner of this fixture. Per-process nativeReads record request and returned identities; unknown or mismatched targets fail.', }
   let failure
   try {
@@ -98,7 +109,7 @@ export async function runNative(requestedEvidence, options = {}) {
     const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => name !== 'ELECTRON_RUN_AS_NODE' && !name.startsWith('AGENTMUX_') && !name.startsWith('CTXMUX_')))
     for (const mode of options.nativeMutant ? ['first'] : ['first', 'second']) {
       const lines = []
-      const outcome = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(out, 'index.html'), privateRoot, evidence, mode, spatialModule, options.frameScope ?? 'all', options.liveAdoption ? 'live-adoption' : options.agentOperations ? 'agent-operations' : 'takeover-only', options.nativeMutant ?? ''], {
+      const outcome = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(out, 'index.html'), privateRoot, evidence, mode, spatialModule, options.frameScope ?? 'all', options.liveAdoption ? 'live-adoption' : 'agent-operations', options.nativeMutant ?? ''], {
         temporaryRoot: privateRoot, cwd: repo, env, timeoutMs: 115000, onLine: line => lines.push(line)
       })
       await writeFile(join(evidence, mode + '-process.log'), lines.join('\n'))
@@ -123,17 +134,14 @@ export async function runNative(requestedEvidence, options = {}) {
       assert.equal(receipt.processes[0].rendered.liveReattached.agentSessionId,
         receipt.processes[1].rendered.restart.inspection.request.report.agent.agentSessionId)
     } else if (options.agentOperations) {
-      for (const process of receipt.processes) assert.equal(process.rendered.agentOperations?.qualification, 'agent-operations-v1')
-      assert.ok(receipt.processes[0].rendered.agentOperations.scenarios.length >= 8)
+      for (const process of receipt.processes) {
+        assert.equal(process.rendered.agentOperations?.qualification, 'stop-fork-feedback-v1')
+        assertStopForkScenarios(process.rendered.agentOperations.scenarios, process.mode)
+      }
       assert.ok(receipt.processes[0].rendered.agentOperations.costSamples.length >= 6)
       assert.ok(receipt.processes[0].rendered.agentOperations.motion.length >= 5)
       assert.ok(receipt.processes[1].rendered.agentOperations.restart.operationReferencesPreserved)
       assert.ok(receipt.processes[1].rendered.agentOperations.restart.noReplay)
-    } else {
-    assert.ok(receipt.processes[0].rendered.closedTarget.staleProjectionIgnored)
-    assert.ok(receipt.processes[0].rendered.closedTarget.inspectedWithoutLaunch)
-    assert.ok(receipt.processes[1].rendered.restart.closedTarget.requestsPreserved)
-    assert.ok(receipt.processes[1].rendered.restart.closedTarget.noReplay)
     }
     receipt.sourceAfter = Object.fromEntries(await Promise.all(Object.keys(sourceBefore).map(async path => [path, hash(await readFile(join(repo, path)))])))
     receipt.stylesAfter = Object.fromEntries(await Promise.all(Object.keys(styleBefore).map(async path => [path, hash(await readFile(join(repo, path)))])))
@@ -166,6 +174,6 @@ export async function runNative(requestedEvidence, options = {}) {
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const evidence = process.argv.find(value => value.startsWith('--evidence='))?.slice('--evidence='.length)
-  try { const receipt = await runNative(evidence, { frameScope: process.argv.includes('--terminal-only') ? 'terminal' : 'all', agentOperations: process.argv.includes('--agent-operations'), preflight: process.argv.includes('--preflight'), nativeMutant: process.argv.find(value => value.startsWith('--native-mutant='))?.slice('--native-mutant='.length) }); console.log(JSON.stringify({ passed: receipt.passed, frames: receipt.frames.length, processes: receipt.processes.length })) }
+  try { const receipt = await runNative(evidence, { frameScope: process.argv.includes('--terminal-only') ? 'terminal' : 'all', liveAdoption: process.argv.includes('--live-adoption'), agentOperations: process.argv.includes('--agent-operations'), preflight: process.argv.includes('--preflight'), nativeMutant: process.argv.find(value => value.startsWith('--native-mutant='))?.slice('--native-mutant='.length) }); console.log(JSON.stringify({ passed: receipt.passed, frames: receipt.frames.length, processes: receipt.processes.length })) }
   catch (error) { console.error(error.message); process.exitCode = 1 }
 }

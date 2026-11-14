@@ -79,7 +79,8 @@ if (task === 'T-004') {
     const negative = await nativeRun('native-' + mutant + '-red', mutantArgs)
     assert.notEqual(negative.code, 0, 'Actual native source mutation must fail')
     const native = JSON.parse(await readFile(join(nativeDirectory, 'receipt.json'), 'utf8'))
-    assert.equal(native.qualification, 'agent-operations-mutation-v1')
+    assert.equal(native.schema, 'agentmux.stop-fork-feedback-native.v1')
+    assert.equal(native.qualification, 'stop-fork-feedback-mutation-v1')
     assert.equal(native.processes.length, 1, 'Negative proof executes only its actual first Renderer')
     const rendered = native.processes[0].rendered
     assert.equal(native.processes[0].outcome.timedOut, false)
@@ -116,7 +117,8 @@ if (task === 'T-004') {
   const positive = await nativeRun('native-work-restored-green', restoredArgs)
   assert.equal(positive.code, 0, positive.log)
   const restored = JSON.parse(await readFile(join(candidateDirectory, 'receipt.json'), 'utf8'))
-  assert.ok(restored.passed && restored.qualification === 'agent-operations-v1' && restored.processes.length === 2)
+  assert.equal(restored.schema, 'agentmux.stop-fork-feedback-native.v1')
+  assert.ok(restored.passed && restored.qualification === 'stop-fork-feedback-v1' && restored.processes.length === 2)
   for (const input of allNativeInputs) assert.equal(restored.sourceBefore[input.file], input.source, 'Restored GREEN binds the same exact source as RED')
   const isolation = restored.processes[0].rendered.agentOperations.isolationObservations
   assert.ok(isolation.length >= 2 && isolation.every(observation => observation.beforeRunning + observation.afterRunning === 0 && !observation.moving))

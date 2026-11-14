@@ -2,6 +2,22 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs/promises')
 const path = require('node:path')
 
+const stopForkScenarios = Object.freeze([
+  'production-card-source-identities', 'independent-confirmed-stops',
+  'actual-cycle-ordered-output', 'reduced-hidden-offscreen-pause',
+  'native-browser-related-consumer-scale', 'stop-unknown-read-only-inspection',
+  'fork-real-original-controller', 'partial-result-inspection-without-create',
+  'persistent-original-operation-references'
+])
+const stopForkRestartScenarios = Object.freeze([
+  'second-real-process-no-reseed', 'restored-unknown-checks-without-replay'
+])
+exports.assertStopForkScenarios = function (scenarios, mode) {
+  assert.ok(mode === 'first' || mode === 'second', 'The Stop/Fork scenario collection belongs to an exact process mode')
+  assert.deepEqual([...scenarios].sort(), [...(mode === 'first' ? stopForkScenarios : stopForkRestartScenarios)].sort(),
+    'The complete actual Stop/Fork scenario set must execute exactly once')
+}
+
 /** Native driver for mounted production consumers. It never calls a business controller itself. */
 exports.runAgentOperations = async function ({ win, result, evaluate, wait, click, key, size, frame, painted, originalTerminalReady, spatial, evidence, mode, nativeMutant }) {
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -12,7 +28,7 @@ exports.runAgentOperations = async function ({ win, result, evaluate, wait, clic
   const menuItem = text => `([...document.querySelectorAll('[role="menu"] [role="menuitem"]')].find(node=>node.textContent.trim()===${JSON.stringify(text)}))`
   const feedback = kind => `${cards}.querySelector('.agent-operation-feedback[data-kind="${kind}"]')`
   const reference = (values, kind) => Object.values(values.operations).find(item => item.kind === kind)
-  const own = result.agentOperations = { qualification: 'agent-operations-v1', scenarios: [], costSamples: [], motion: [],
+  const own = result.agentOperations = { qualification: 'stop-fork-feedback-v1', scenarios: [], costSamples: [], motion: [],
     nativeBoundary: 'Controlled exact Native launch/stop/ordered-byte/input facts; production card/controller/spatial/persistence consumers. No vendor CLI or real user Session is operated.' }
 
   async function openCard(index, action) {
@@ -38,44 +54,36 @@ exports.runAgentOperations = async function ({ win, result, evaluate, wait, clic
     await evaluate('takeoverProbe.focus(0)')
     return operation
   }
-  async function beginCreation(kind) {
+  async function beginFork() {
     await evaluate('takeoverProbe.focus(0);takeoverProbe.operations.creation("hold")')
-    if (kind === 'takeover') {
-      await openCard(0, 'Take over')
-      const picker = 'document.querySelector(".session-takeover:not([hidden])")'
-      await wait(`Boolean(${picker}) && ${picker}.querySelector('.agent-pick[data-executor-id="codex"]')?.disabled===false`)
-      await click(`${picker}.querySelector('.agent-pick[data-executor-id="codex"]')`)
-      await wait(`!${picker}`, 'Takeover submitted choice releases its local selection surface')
-    } else {
-      result.stage = 'agent-operation-fork-pointer'
-      await openCard(0, 'Fork current conversation…')
-      const destination = 'document.querySelector("[data-current-fork-review] [data-destination=right]")'
-      await wait(`Boolean(${destination})`)
-      // Expanding the real review resizes and collision-shifts its Radix menu.
-      // Let its positioning paint before dispatching coordinates to the button.
-      await painted()
-      own.forkNativePointer = await evaluate(`(()=>{
-        const button=${destination}, rect=button.getBoundingClientRect(), host=button.closest('[popover]');
-        const events=[], controller=new AbortController();
-        const describe=node=>node?.nodeType===1?{tag:node.tagName,role:node.getAttribute('role'),destination:node.closest('[data-destination]')?.getAttribute('data-destination'),className:typeof node.className==='string'?node.className:null}:null;
-        for(const type of ['pointerdown','pointerup','click','focusin','focusout','beforetoggle','toggle'])document.addEventListener(type,event=>events.push({type,at:performance.now(),target:describe(event.target),trusted:event.isTrusted,oldState:event.oldState,newState:event.newState,hostShown:host?.matches(':popover-open'),active:describe(document.activeElement)}),{capture:true,signal:controller.signal});
-        window.__forkPointerObservation={events,controller};
-        return {rect:rect.toJSON(),hit:describe(document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2)),hostShown:host?.matches(':popover-open')};
-      })()`)
-      await click(destination)
-      await painted()
-      own.forkNativePointer.after = await evaluate(`(()=>{const probe=window.__forkPointerObservation;probe.controller.abort();return {events:probe.events,submitted:Object.values(takeoverProbe.operations.facts().operations).some(item=>item.kind==='fork')}})()`)
-      assert.equal(own.forkNativePointer.after.submitted, true, 'Trusted native Fork activation reaches its original operation controller')
-      const pointerEvents = own.forkNativePointer.after.events
-      const down = pointerEvents.findIndex(event => event.type === 'pointerdown' && event.trusted && event.target?.destination === 'right')
-      const activation = pointerEvents.findIndex(event => event.type === 'click' && event.trusted && event.target?.destination === 'right')
-      assert.ok(down >= 0 && activation > down, 'Original Fork destination receives the real trusted pointer activation')
-      assert.ok(!pointerEvents.slice(down, activation).some(event => event.type === 'beforetoggle' && event.newState === 'closed'), 'Opening its tooltip preserves the shown host through the native pointer sequence')
-      await wait('!document.querySelector("[data-current-fork-review]") && !document.querySelector(".focus-context-menu[role=menu]")', 'Submitted fork releases the original menu')
-    }
+    result.stage = 'agent-operation-fork-pointer'
+    await openCard(0, 'Fork current conversation…')
+    const destination = 'document.querySelector("[data-current-fork-review] [data-destination=right]")'
+    await wait(`Boolean(${destination})`)
+    // Expanding the real review resizes and collision-shifts its Radix menu.
+    // Let its positioning paint before dispatching coordinates to the button.
+    await painted()
+    own.forkNativePointer = await evaluate(`(()=>{
+      const button=${destination}, rect=button.getBoundingClientRect(), host=button.closest('[popover]');
+      const events=[], controller=new AbortController();
+      const describe=node=>node?.nodeType===1?{tag:node.tagName,role:node.getAttribute('role'),destination:node.closest('[data-destination]')?.getAttribute('data-destination'),className:typeof node.className==='string'?node.className:null}:null;
+      for(const type of ['pointerdown','pointerup','click','focusin','focusout','beforetoggle','toggle'])document.addEventListener(type,event=>events.push({type,at:performance.now(),target:describe(event.target),trusted:event.isTrusted,oldState:event.oldState,newState:event.newState,hostShown:host?.matches(':popover-open'),active:describe(document.activeElement)}),{capture:true,signal:controller.signal});
+      window.__forkPointerObservation={events,controller};
+      return {rect:rect.toJSON(),hit:describe(document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2)),hostShown:host?.matches(':popover-open')};
+    })()`)
+    await click(destination)
+    await painted()
+    own.forkNativePointer.after = await evaluate(`(()=>{const probe=window.__forkPointerObservation;probe.controller.abort();return {events:probe.events,submitted:Object.values(takeoverProbe.operations.facts().operations).some(item=>item.kind==='fork')}})()`)
+    assert.equal(own.forkNativePointer.after.submitted, true, 'Trusted native Fork activation reaches its original operation controller')
+    const pointerEvents = own.forkNativePointer.after.events
+    const down = pointerEvents.findIndex(event => event.type === 'pointerdown' && event.trusted && event.target?.destination === 'right')
+    const activation = pointerEvents.findIndex(event => event.type === 'click' && event.trusted && event.target?.destination === 'right')
+    assert.ok(down >= 0 && activation > down, 'Original Fork destination receives the real trusted pointer activation')
+    assert.ok(!pointerEvents.slice(down, activation).some(event => event.type === 'beforetoggle' && event.newState === 'closed'), 'Opening its tooltip preserves the shown host through the native pointer sequence')
+    await wait('!document.querySelector("[data-current-fork-review]") && !document.querySelector(".focus-context-menu[role=menu]")', 'Submitted fork releases the original menu')
     await wait(`takeoverProbe.operations.facts().pending.some(item=>item.kind==='creation')`)
-    const state = await operationFacts(), operation = reference(state, kind)
-    assert.ok(operation && operation.phase === 'pending', `Real ${kind} controller retained its original request`)
+    const state = await operationFacts(), operation = reference(state, 'fork')
+    assert.ok(operation && operation.phase === 'pending', 'Real Fork controller retained its original request')
     assert.equal(operation.subject.agentSessionId, state.originals[0])
     return operation
   }
@@ -232,14 +240,7 @@ exports.runAgentOperations = async function ({ win, result, evaluate, wait, clic
     await frame('ops-07-stop-unconfirmed-static')
     own.scenarios.push('stop-unknown-read-only-inspection')
 
-    const takeover = await beginCreation('takeover')
-    await frame('ops-08-takeover-in-flight')
-    await evaluate(`takeoverProbe.operations.resolve(${JSON.stringify(takeover.operationId)},'success')`)
-    await wait(`takeoverProbe.operations.facts().pending.every(item=>item.operationId!==${JSON.stringify(takeover.operationId)}) && takeoverProbe.facts().launches.some(item=>item.createOperationId===${JSON.stringify(takeover.operationId)})`)
-    const takeoverInspection = await evaluate(`takeoverProbe.inspect(${JSON.stringify(takeover.operationId)})`)
-    assert.equal(takeoverInspection.request.report.outcome, 'opened', 'Original creation owner confirms Takeover success even after a completed feedback is dismissed')
-    await evaluate('takeoverProbe.focus(0)')
-    const fork = await beginCreation('fork')
+    const fork = await beginFork()
     await frame('ops-09-fork-in-flight')
     await evaluate(`takeoverProbe.operations.resolve(${JSON.stringify(fork.operationId)},'partial')`)
     await wait(`Object.values(takeoverProbe.operations.facts().operations).some(item=>item.kind==='fork'&&item.phase==='partial')`)
@@ -251,7 +252,7 @@ exports.runAgentOperations = async function ({ win, result, evaluate, wait, clic
     await delay(200)
     assert.equal((await operationFacts()).calls.filter(call => call.kind === 'creation').length, beforeForkCheck, 'Partial creation inspection never creates again')
     await frame('ops-10-partial-real-result')
-    own.scenarios.push('takeover-and-fork-real-original-controllers', 'partial-result-inspection-without-create')
+    own.scenarios.push('fork-real-original-controller', 'partial-result-inspection-without-create')
     const final = await facts()
     assert.deepEqual(final.drafts, initial.drafts, 'Operation completion and unknown preserve original drafts')
     assert.deepEqual(final.nativeSessions.find(session => session.id === initial.origins[0].sessionId)?.control, initial.sessions.find(session => session.id === initial.origins[0].sessionId)?.control, 'Healthy neighbor keeps its exact Run')
@@ -260,7 +261,8 @@ exports.runAgentOperations = async function ({ win, result, evaluate, wait, clic
     await wait('takeoverProbe.saved()', 'Actual production writers saved operation references, original drafts and Core workface')
     const sealed = await evaluate('takeoverProbe.seal()')
     const core = await spatial.read()
-    assert.ok(Object.keys(sealed.persistedOperations).length > 0 && Object.keys(sealed.requests).length >= 2, 'Restart baseline contains actual unresolved original references and creation requests')
+    assert.ok(Object.keys(sealed.persistedOperations).length > 0, 'Restart baseline contains actual unresolved original references')
+    assert.deepEqual(Object.keys(sealed.requests), [fork.operationId], 'The exact original Fork is the only creation request in this qualification')
     const completedOperationKeys = Object.entries(sealed.operations).filter(([, operation]) => operation.phase === 'succeeded').map(([key]) => key)
     assert.ok(completedOperationKeys.length > 0, 'A completed Stop without a mounted card exercises finite, nonpersistent completion')
     assert.ok(completedOperationKeys.every(key => !Object.hasOwn(sealed.persistedOperations, key)), 'Actual production persistence omits confirmed completion decorations')
@@ -281,7 +283,7 @@ exports.runAgentOperations = async function ({ win, result, evaluate, wait, clic
     assert.deepEqual(Object.keys(restored.operations).sort(), Object.keys(baseline.operations).sort(), 'Exact unresolved client references survive process restart')
     for (const [key, original] of Object.entries(baseline.operations)) {
       const actual = restored.operations[key]
-      for (const field of ['kind', 'operationId', 'subject', 'control', 'takeoverSource', 'report']) assert.deepEqual(actual[field], original[field], 'Restart retains original operation identity and any real partial result: ' + field)
+      for (const field of ['kind', 'operationId', 'subject', 'control', 'report']) assert.deepEqual(actual[field], original[field], 'Restart retains original operation identity and any real partial result: ' + field)
     }
     assert.ok(baseline.completedOperationKeys.every(key => !Object.hasOwn(restored.operations, key)), 'Confirmed completion never reappears as a restart warning')
     assert.ok(Object.values(restored.operations).every(operation => operation.phase === 'unconfirmed'), 'Restored references are unknown observations, never fabricated active work')
@@ -309,6 +311,6 @@ exports.runAgentOperations = async function ({ win, result, evaluate, wait, clic
     own.restart = { noWorkfaceReseed: true, operationReferencesPreserved: true, noReplay: true, checks, before, after: afterChecks, identitiesBefore: { sessions: restored.sessions, nativeSessions: restored.nativeSessions }, identitiesAfter: { sessions: afterFacts.sessions, nativeSessions: afterFacts.nativeSessions } }
     result.restart = own.restart
   }
-  assert.ok(own.scenarios.length > 0)
+  exports.assertStopForkScenarios(own.scenarios, mode)
   own.passed = true
 }
