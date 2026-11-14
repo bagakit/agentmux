@@ -183,13 +183,13 @@ it('an unreadable saved edit stays in the original user projection and is never 
  expect(useAppStore.getState().nodePublicationDrafts).toBe(raw);expect(call).toHaveBeenCalledTimes(2)
  expect(dom.container.querySelector<HTMLButtonElement>('.network-node-save button')!.disabled).toBe(true)
 })
-it('actual Host consumer uses private owner resources locally, public target resources remotely, and explicit withheld clears retained private values',async()=>{
+it('actual trusted Host consumer uses exact private owner resources on either device and explicit withheld clears retained values',async()=>{
  vi.useFakeTimers();vi.spyOn(api.hosts,'inspect').mockRejectedValue(Error('independent identity observation failed'))
  const call=vi.spyOn(api.nodePublishing,'call').mockResolvedValue(resources() as never)
  const local=composerConfig.hosts.find(host=>host.kind==='local')!
  await dom.render(<HostRuntimePanel host={local} committed={local} ownerTarget={{hostId:local.id,expectedRuntimeId:identity.runtimeId}} active/>);expect(call.mock.calls[0]!.slice(0,2)).toEqual(['settings.node.resources',{}]);expect(dom.container.textContent).toContain('6 GiB')
  const remote={id:'peer',kind:'ssh' as const,label:'Peer',hostname:'peer.invalid',runtimeId:identity.runtimeId}
- await dom.render(<HostRuntimePanel host={remote} committed={remote} active/>);expect(call.mock.calls.at(-1)!.slice(0,2)).toEqual(['node.resources',{hostId:'peer',expectedRuntimeId:identity.runtimeId}])
+ await dom.render(<HostRuntimePanel host={remote} committed={remote} active/>);expect(call.mock.calls.at(-1)!.slice(0,2)).toEqual(['settings.node.resources',{}])
  call.mockResolvedValueOnce({node:identity,policyRevision:'policy-2',status:'withheld'} as never)
  await act(async()=>{await vi.advanceTimersByTimeAsync(5000)})
  expect(dom.container.textContent).toContain('System resources are not shared');expect(dom.container.textContent).not.toContain('6 GiB');expect(dom.container.querySelector('[data-node-trends]')).toBeNull()
@@ -201,7 +201,7 @@ it('temporary failure keeps last confirmed values, hides the reader without furt
  await dom.render(<HostRuntimePanel host={local} committed={local} ownerTarget={{hostId:local.id,expectedRuntimeId:identity.runtimeId}} active/>);call.mockResolvedValueOnce(resources(6000) as never)
  await act(async()=>{await vi.advanceTimersByTimeAsync(5000)})
  expect(dom.container.textContent).toContain('25.0%');expect(dom.container.textContent).toContain('10.0%')
- call.mockRejectedValueOnce(Error('temporary read loss'));await act(async()=>{await vi.advanceTimersByTimeAsync(5000)})
+ call.mockRejectedValueOnce(Error('temporary read loss')).mockRejectedValueOnce(Error('published read loss'));await act(async()=>{await vi.advanceTimersByTimeAsync(5000)})
  expect(dom.container.textContent).toContain('Last confirmed');expect(dom.container.textContent).toContain('6 GiB')
  await dom.render(<HostRuntimePanel host={local} committed={local} ownerTarget={{hostId:local.id,expectedRuntimeId:identity.runtimeId}} active={false}/>);const count=call.mock.calls.length
  await act(async()=>{await vi.advanceTimersByTimeAsync(15000)});expect(call).toHaveBeenCalledTimes(count)
@@ -251,10 +251,10 @@ it('the actual chart wrapper replaces only its inline samples on the same engine
 })
 
 it('actual Settings catalog and visited Node pane retain the authored publication draft across original navigation',async()=>{
- vi.spyOn(api.nodePublishing,'call').mockResolvedValue(structuredClone(settings) as never)
+ vi.spyOn(api.nodePublishing,'call').mockImplementation(async method => (method === 'node.inspect' ? { node: identity, policyRevision: settings.policyRevision, resourcesShared: false, roots: [], landing: null } : structuredClone(settings)) as never)
  expect(settingsCatalog.visibleSections('Node alias').map(item=>item.id)).toContain('network-node')
  const before=useAppStore.getState().agentComposerDrafts
- await dom.render(<SettingsPanel initialSection="network-node" onClose={vi.fn()}/>);await input('Node alias','retained-publication')
+ await dom.render(<SettingsPanel initialSection="network-node" onClose={vi.fn()}/>);await readyNode();await input('Node alias','retained-publication')
  await dom.click('[data-settings-target="hosts"]')
  await dom.click('[data-settings-target="network-node"]')
  expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Node alias"]')!.value).toBe('retained-publication')

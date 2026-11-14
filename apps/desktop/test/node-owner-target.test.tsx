@@ -33,7 +33,7 @@ async function input(value:string){await act(async()=>{const n=dom.container.que
 async function choose(hostId:string){await act(async()=>{const n=dom.container.querySelector<HTMLSelectElement>('[aria-label="Node to manage"]')!;n.value=hostId;n.dispatchEvent(new Event('change',{bubbles:true}))})}
 async function alias(value:string){await vi.waitFor(()=>expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Node alias"]')?.value,dom.container.textContent??'').toBe(value))}
 const props=()=>({config:useAppStore.getState().config!,active:true,onClose:vi.fn(),onNavigate:vi.fn()})
-async function fixture(){
+async function fixture(actor?: 'managed'){
  const root=await mkdtemp('/tmp/node-target-'),cores=[]
  for(const id of ['local','farm']){
   const directory=join(root,id);await mkdir(directory)
@@ -44,14 +44,14 @@ async function fixture(){
   const server=new AgentMuxControlServer({socketPath:join(directory,'rpc.sock'),coreClients:issuer.coreClients,hostedRuntime:()=>hosted,nodePublishing:owner});await server.start()
   const rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:server.path}})
   const calls:Array<{method:string;params:unknown;context:unknown;fence:unknown}>=[]
-  const carrier={runtimeOwnerIdentity:()=>identity,forwardRpc:async(method:any,params:any,context:any,fence:any)=>{calls.push({method,params,context,fence});return rpc.call(method,params,{...context,...(fence?{runtimeFence:fence}:{})})}}
+  const carrier={runtimeOwnerIdentity:()=>identity,forwardRpc:async(method:any,params:any,context:any,fence:any)=>{calls.push({method,params,context,fence});return rpc.call(method,params,{...context,...(actor ? {credentials:issuer.credentials} : {}),...(fence?{runtimeFence:fence}:{})})}}
   cores.push({id,owner,identity,client,issuer,hosted,server,rpc,carrier,calls})
  }
  const routes=new Map(cores.map(core=>[core.id,{client:core.carrier}]))
  const runtime=Object.assign(Object.create(RuntimeController.prototype),{hosts:routes,hostReconfigurationReservations:new Map()}) as RuntimeController
  class Sender extends EventEmitter{id=51;mainFrame={url:'file:///private/review/index.html',detached:false,isDestroyed:()=>false};isDestroyed(){return false}}
  const sender=new Sender(),event={sender,senderFrame:sender.mainFrame},handlers=new Map<string,(...args:any[])=>any>()
- const owner=registerNodePublishingIpc({handle:(name,listener)=>handlers.set(name,(e,...args)=>{assertAppDocumentSender(e,sender,{current:{mode:'prod',filePath:'/private/review/index.html'},loading:null});return listener(e,...args)}),call:(method,params,context)=>{const route=cores.find(core=>core.id===(params as {hostId:string}).hostId)!;return route.rpc.call(method,{...params,hostId:'local'},context)},owner:runtime.callNodeOwner.bind(runtime)})
+ const owner=registerNodePublishingIpc({handle:(name,listener)=>handlers.set(name,(e,...args)=>{assertAppDocumentSender(e,sender,{current:{mode:'prod',filePath:'/private/review/index.html'},loading:null});return listener(e,...args)}),call:(method,params,context)=>{const route=cores.find(core=>core.id===(params as {hostId:string}).hostId)!;return route.rpc.call(method,{...params,hostId:'local'},{...context,...(actor ? {credentials:route.issuer.credentials} : {})})},owner:runtime.callNodeOwner.bind(runtime)})
  const invoke=async(channel:string,...args:any[])=>handlers.get(channel)!(event,...args)
  preloadBridge.invoke.mockImplementation(invoke)
  const bridge=createRendererNodePublishing(preloadBridge.api!.nodePublishing)
@@ -120,4 +120,38 @@ it.each(['Node editor','Host panel'] as const)('independent Host diagnostics fai
  vi.spyOn(api.hosts,'inspect').mockRejectedValue(Error('Independent diagnostics unavailable'))
  try{if(surface==='Node editor'){await dom.render(<NetworkNodeSettingsPane {...props()}/>);await alias('');await act(async()=>{const n=dom.container.querySelector<HTMLDetailsElement>('[data-settings-field="monitoring"]')!;n.open=true;n.dispatchEvent(new Event('toggle'))})}else{const host=useAppStore.getState().config!.hosts[0]!;await dom.render(<HostRuntimePanel host={host} committed={host} active/>)};await vi.waitFor(()=>expect(dom.container.textContent).toContain('Private owner view'));await vi.waitFor(()=>expect(f.cores[0]!.calls.some(call=>call.method==='settings.node.resources')).toBe(true));await vi.waitFor(()=>expect(dom.container.textContent).toContain('Independent diagnostics unavailable'))}
  finally{await f.dispose()}
+})
+
+it('the real trusted service consumer reads original private Core metrics while its public Share remains false', async () => {
+ const f=await fixture()
+ try {
+  const host=useAppStore.getState().config!.hosts.find(host=>host.id==='farm')!
+  const before=await f.bridge.owner({hostId:'farm',expectedRuntimeId:'farm-runtime'},'settings.node.inspect',{})
+  expect(before.policy.shareResources).toBe(false)
+  const published=await f.bridge.call('node.resources',{hostId:'farm',expectedRuntimeId:'farm-runtime'})
+  expect(published.status).toBe('withheld')
+  await dom.render(<HostRuntimePanel host={host} committed={host} active/>)
+  await vi.waitFor(()=>expect(dom.container.textContent).toContain('Private owner view'))
+  await vi.waitFor(()=>expect(dom.container.textContent).toContain(' MiB'))
+  expect(f.cores[1]!.calls.some(call=>call.method==='settings.node.resources')).toBe(true)
+  expect(f.cores[0]!.calls.some(call=>call.method==='settings.node.resources')).toBe(false)
+  const after=await f.bridge.owner({hostId:'farm',expectedRuntimeId:'farm-runtime'},'settings.node.inspect',{})
+  expect(after.policy).toEqual(before.policy);expect(after.policyRevision).toBe(before.policyRevision)
+  expect(f.cores.flatMap(core=>core.calls).some(call=>call.method==='settings.node.configure')).toBe(false)
+ } finally {await f.dispose()}
+})
+
+it('a real managed-owner rejection keeps the original public shared service measurements available', async () => {
+ const f=await fixture('managed')
+ try {
+  const farm=f.cores[1]!,state=await farm.rpc.call('settings.node.inspect',{})
+  await farm.rpc.call('settings.node.configure',{expectedRevision:state.policyRevision,operationId:'private-fixture-publish',policy:{...state.policy,shareResources:true}})
+  await expect(f.bridge.owner({hostId:'farm',expectedRuntimeId:'farm-runtime'},'settings.node.resources',{})).rejects.toMatchObject({code:'CONTROL_PERMISSION_DENIED'})
+  const host=useAppStore.getState().config!.hosts.find(host=>host.id==='farm')!
+  await dom.render(<HostRuntimePanel host={host} committed={host} active/>)
+  await vi.waitFor(()=>expect(dom.container.textContent).toContain('Private service read unavailable'))
+  await vi.waitFor(()=>expect(dom.container.textContent).toContain('Published by this node'))
+  expect(dom.container.textContent).toContain(' MiB')
+  expect((await farm.rpc.call('settings.node.inspect',{})).policy.shareResources).toBe(true)
+ } finally {await f.dispose()}
 })

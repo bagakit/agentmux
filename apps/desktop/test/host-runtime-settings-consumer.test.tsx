@@ -18,9 +18,6 @@ function observation(): HostRuntimeObservation {
   return { routeHostId: host.id, configuration: host, requestedAt: _historyFixtureEpoch(0, 4, 999), completedAt: _historyFixtureEpoch(0, 5, 0), owner: missing, nativeIdentity: missing, diagnostics: missing,
     resources: { state: 'available', readAt: _historyFixtureEpoch(0, 5, 0), value: { observedAt: _historyFixtureEpoch(0, 4, 0), runCount: 3, runningRuns: 2, terminatedRuns: 1, terminatedUnattachedRuns: 1, attachments: 4, retainedOutputBytes: 2048 } } }
 }
-async function expandService() {
-  await act(async () => { const details = [...dom.container.querySelectorAll<HTMLDetailsElement>('.remote-host-section')].find(node => node.querySelector('summary')?.textContent?.startsWith('Service status'))!; details.open = true; details.dispatchEvent(new Event('toggle')) })
-}
 it('actual Settings module selects the original saved Host and mounts its real public observation consumer', async () => {
   const inspect = vi.spyOn(api.hosts, 'inspect').mockResolvedValue(observation())
   const Pane = hostsSettingsModule.Pane
@@ -29,7 +26,7 @@ it('actual Settings module selects the original saved Host and mounts its real p
   // The original name-edit deep link opens Connection, which must not observe.
   expect(inspect).not.toHaveBeenCalled()
   await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-host-panel="overview"]')!.click())
-  await expandService()
+  expect(dom.container.querySelector<HTMLDetailsElement>('.remote-host-section')?.open).toBe(true)
   expect(inspect).toHaveBeenCalledOnce()
   expect(inspect.mock.calls[0]![0]).toEqual(host)
   expect(dom.container.querySelector('[data-host-runtime]')?.getAttribute('data-host-runtime')).toBe(host.id)
@@ -54,7 +51,7 @@ it('does not read the old overview when activation brings a new exact Host navig
   await dom.render(<Pane config={config} active onClose={vi.fn()} onNavigate={vi.fn()} navigationRequest={originalNavigation} />)
   expect(inspect).not.toHaveBeenCalled()
   await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-host-panel="overview"]')!.click())
-  await expandService()
+  expect(dom.container.querySelector<HTMLDetailsElement>('.remote-host-section')?.open).toBe(true)
   expect(inspect).toHaveBeenCalledOnce()
   expect(inspect.mock.calls[0]![0]).toEqual(host)
   const signal = inspect.mock.calls[0]![1]!.signal!
@@ -64,7 +61,7 @@ it('does not read the old overview when activation brings a new exact Host navig
   await dom.render(<Pane config={config} active onClose={vi.fn()} onNavigate={vi.fn()} navigationRequest={nextNavigation} />)
   expect(inspect).toHaveBeenCalledOnce()
   await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-host-panel="overview"]')!.click())
-  await expandService()
+  expect(dom.container.querySelector<HTMLDetailsElement>('.remote-host-section')?.open).toBe(true)
   expect(inspect).toHaveBeenCalledTimes(2)
   expect(inspect.mock.calls[1]![0]).toEqual(second)
   expect(dom.container.querySelector('[data-host-runtime]')?.getAttribute('data-host-runtime')).toBe(second.id)
@@ -85,7 +82,27 @@ it('does not observe a hidden default overview while the initial narrow layout i
   await dom.render(<Pane config={config} active onClose={vi.fn()} onNavigate={vi.fn()} />)
   expect(inspect).not.toHaveBeenCalled()
   await act(async () => dom.container.querySelector<HTMLButtonElement>(`[data-host-disclosure="${host.id}"] [data-host-panel="overview"]`)!.click())
-  await expandService()
+  expect(dom.container.querySelector<HTMLDetailsElement>('.remote-host-section')?.open).toBe(true)
   expect(inspect).toHaveBeenCalledOnce()
   expect(inspect.mock.calls[0]![0]).toEqual(host)
+})
+
+it('the selected service initially reads without a disclosure click and keeps its explicit collapse on reactivation', async () => {
+  const inspect = vi.spyOn(api.hosts, 'inspect').mockImplementation(async input => ({ ...observation(), routeHostId: input.id, configuration: input }))
+  const Pane = hostsSettingsModule.Pane, navigation = { section: 'hosts', hostId: host.id } as const
+  await dom.render(<Pane config={config} active onClose={vi.fn()} onNavigate={vi.fn()} navigationRequest={navigation} />)
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-host-panel="overview"]')!.click())
+  expect(inspect).toHaveBeenCalledOnce(); expect(inspect.mock.calls[0]![0].id).toBe(host.id)
+  const larger = { ...config, hosts: [...config.hosts, ...Array.from({ length: 24 }, (_, index) => ({ ...host, id: 'unrelated-' + index, hostname: 'unrelated-' + index + '.invalid' }))] }
+  await act(async () => useAppStore.setState({ config: larger }))
+  await dom.render(<Pane config={larger} active onClose={vi.fn()} onNavigate={vi.fn()} navigationRequest={navigation} />)
+  expect(inspect).toHaveBeenCalledOnce()
+  const details = dom.container.querySelector<HTMLDetailsElement>('.remote-host-section')!
+  expect(details.open).toBe(true)
+  await act(async () => { details.open = false; details.dispatchEvent(new Event('toggle')) })
+  expect(inspect.mock.calls[0]![1]!.signal!.aborted).toBe(true)
+  await dom.render(<Pane config={larger} active={false} onClose={vi.fn()} onNavigate={vi.fn()} navigationRequest={navigation} />)
+  await dom.render(<Pane config={larger} active onClose={vi.fn()} onNavigate={vi.fn()} navigationRequest={navigation} />)
+  expect(dom.container.querySelector<HTMLDetailsElement>('.remote-host-section')!.open).toBe(false)
+  expect(inspect).toHaveBeenCalledOnce()
 })
