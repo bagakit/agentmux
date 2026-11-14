@@ -2291,12 +2291,13 @@ it('[survey-item-refinement] locates unknown status on its original Tab while pa
   await renderApp(); await enterSurvey(); await choose()
   await act(async () => { expect(useAppStore.getState().setSurveyZoneCollected('refinement-zone', true)).toBe(true) })
   const row = () => surveyRow('refinement-zone'), tab = (id: string) => row().querySelector<HTMLElement>(`[data-survey-tab-id="${id}"]`)!
-  expect(row().querySelector('.survey-status-dot')).toBeNull()
+  expect(row().querySelector('.survey-status-label')).toBeNull()
   const before = useAppStore.getState()
   await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'unavailable', id: unavailable.id, error: 'Native owner unavailable' }))
-  expect(tab(unavailable.id).getAttribute('aria-description')).toContain('Page status unavailable')
-  expect(tab(unavailable.id).querySelector('.survey-status-dot')).not.toBeNull()
-  expect(tab(parked.id).querySelector('.survey-status-dot')).toBeNull()
+  expect(tab(unavailable.id).getAttribute('aria-description')).toContain('Page status unconfirmed')
+  expect(tab(unavailable.id).querySelector('.survey-status-label')?.textContent).toBe('Unconfirmed')
+  expect(row().querySelector('.survey-status-dot'), 'No unexplained state dot remains').toBeNull()
+  expect(tab(parked.id).querySelector('.survey-status-label')).toBeNull()
   expect(tab(parked.id).hasAttribute('aria-description')).toBe(false)
   expect(row().querySelector('.survey-item-activity')!.childElementCount).toBe(0)
   expect(tab(unavailable.id).title).toContain('Reading notes'); expect(tab(unavailable.id).title).not.toContain(`${unavailable.id}-region`)
@@ -2338,7 +2339,7 @@ it('[survey-item-actions] shows every original Tab favicon in workface order and
   expect(columns[2]!.querySelector('img'), 'second Tab retains its original favicon').not.toBeNull()
   expect(columns[1]!.querySelector('img')!.getAttribute('src')).toBe('data:image/png;base64,BB==')
   expect(columns[2]!.querySelector('img')!.getAttribute('src')).toBe('data:image/png;base64,AA==')
-  expect(columns[2]!.textContent).toBe('Source B')
+  expect(columns[2]!.querySelector('.survey-tab-label > span:first-child')?.textContent).toBe('Source B')
   const before = useAppStore.getState()
   await act(async () => columns[2]!.click())
   expect(useAppStore.getState().surveyZoneSelection!.active).toEqual({ tabId: second.id, regionId: pageB.regionId })
@@ -2392,6 +2393,8 @@ it('[survey-item-chrome] hides only automatic multi-Tab titles and preserves an 
 
 it('[survey-item-chrome] closes background member Tabs without selecting their item, including the last single Tab', async () => {
   vi.mocked(api.browser.create).mockImplementation(async (id, url = 'about:blank') => ({ ...browser, id, url, agent: null }))
+  // Last-member removal consumes the confirmed Core composition, not an uninitialized directory.
+  await realNameOwner()
   await renderApp(); await enterSurvey(); await choose(); await createSurveyResearch()
   const zoneId = useAppStore.getState().surveyZoneSelection!.zoneId
   await rowCreate(zoneId, 'New Browser')
