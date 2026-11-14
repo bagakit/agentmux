@@ -27,7 +27,9 @@ app.whenReady().then(async () => {
       await fs.writeFile(path.join(evidence, name + '.png'), (await win.webContents.capturePage()).toPNG())
       result.images.push(name + '.png'); result.operations.push({ name, ...facts })
     }
-    await until(`!!window.privateChatPreview && document.querySelector('[data-mote-chat-saved="on"]') && document.querySelector('.mote-chat-activity')?.textContent.includes('interrupted')`)
+    await until(`!!window.privateChatPreview && document.querySelector('.mote-profile__preferences > summary')`)
+    await click('.mote-profile__preferences > summary')
+    await until(`document.querySelector('[data-mote-chat-saved="on"]') && document.querySelector('.mote-chat-activity')?.textContent.includes('interrupted')`)
     if (peopleOnly) {
       await click('.mote-private-chat__people > summary'); await until('document.querySelectorAll("[data-mote-chat-person]").length===2')
       await read('privateChatPreview.theme(false)'); await capture('people-wide-dark', '.mote-private-chat__people')

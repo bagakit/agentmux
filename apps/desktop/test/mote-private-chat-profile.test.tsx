@@ -144,7 +144,13 @@ it('shows creator unlimited access and each guest used, total and remaining allo
   const creatorRow = chat().querySelector<HTMLElement>('[data-mote-chat-person="original-creator"]')!
   expect(creatorRow.textContent).toContain('Creator · unlimited'); expect(creatorRow.textContent).not.toContain('Edit allowance')
   expect(row().querySelector('[data-entity-kind="person"]')).not.toBeNull()
-  await ready(() => expect(row().querySelector('.connector-entity__profile-note[role="status"]')?.textContent).toBeTruthy())
+  await ready(() => expect(row().querySelector('.connector-entity__profile-note[role="status"]')?.textContent).toBe('Profile update unconfirmed'))
+  const accountDetails = row().querySelector<HTMLDetailsElement>('.agent-connector-disclosure')!
+  expect(accountDetails.open).toBe(false)
+  expect(accountDetails.querySelector('p')?.textContent).toBe('The original adapter does not expose typed metadata management.')
+  expect(row().querySelector('.connector-entity')?.textContent).not.toContain('typed metadata management')
+  await act(async () => accountDetails.querySelector<HTMLElement>('summary')!.click())
+  expect(accountDetails.open).toBe(true)
   await copyConnectorIdentity(row(), 'Copy person name', 'Previously observed person')
   await copyConnectorIdentity(row(), 'Copy open_id', guest.userId)
   await copyConnectorIdentity(creatorRow, 'Copy open_id', creator.userId)

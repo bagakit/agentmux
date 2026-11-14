@@ -5,7 +5,7 @@ import { defineConfig } from 'vitest/config'
 import original from '../../../vitest.config.ts'
 
 const root = resolve(import.meta.dirname, '../../..'), mutation = process.env.AGENTMUX_MOTE_CHAT_PROFILE_MUTATION
-if (mutation && !['fixed-interval', 'discard-unknown-input', 'allocate-wrong-total'].includes(mutation)) throw Error('Unknown Mote chat Profile mutation')
+if (mutation && !['fixed-interval', 'discard-unknown-input', 'allocate-wrong-total', 'verbose-profile-issue', 'drop-profile-issue-detail'].includes(mutation)) throw Error('Unknown Mote chat Profile mutation')
 export default defineConfig({ ...original, root, cacheDir: resolve(root, '.cache/mote-private-chat-profile'),
   plugins: [{ name: 'original-mote-chat-profile-mutations', enforce: 'pre', transform(source, id) {
     const file = relative(root, id.split('?')[0]!)
@@ -13,11 +13,16 @@ export default defineConfig({ ...original, root, cacheDir: resolve(root, '.cache
     let code = source, applied: string | null = null
     const anchor = mutation === 'fixed-interval' && file.endsWith('/MotePrivateChat.tsx') ? 'conversationIdleMs: idle'
       : mutation === 'discard-unknown-input' && file.endsWith('/mote-chat-request.ts') ? 'if (!dispatched ||'
-        : mutation === 'allocate-wrong-total' && file.endsWith('/MoteChatPeople.tsx') ? 'expectedPersonRevision: person.revision, total: count' : null
+        : mutation === 'allocate-wrong-total' && file.endsWith('/MoteChatPeople.tsx') ? 'expectedPersonRevision: person.revision, total: count'
+          : mutation === 'verbose-profile-issue' && file.endsWith('/MoteChatPeople.tsx') ? 'profileIssueSummary="Profile update unconfirmed"'
+            : mutation === 'drop-profile-issue-detail' && file.endsWith('/MoteChatPeople.tsx') ? '<p className="mote-details__hint">{profileRead.issue}</p>' : null
     if (anchor) {
       if (source.split(anchor).length !== 2) throw Error('Missing unique actual Profile consumer mutation')
       code = source.replace(anchor, mutation === 'fixed-interval' ? 'conversationIdleMs: MOTE_CHAT_DEFAULT_VALUES.conversationIdleMs'
-        : mutation === 'discard-unknown-input' ? 'if (true ||' : 'expectedPersonRevision: person.revision, total: person.used'); applied = mutation!
+        : mutation === 'discard-unknown-input' ? 'if (true ||'
+          : mutation === 'verbose-profile-issue' ? ''
+            : mutation === 'drop-profile-issue-detail' ? '<p className="mote-details__hint" />'
+              : 'expectedPersonRevision: person.revision, total: person.used'); applied = mutation!
     }
     if (process.env.AGENTMUX_MOTE_CHAT_PROFILE_LOADED) {
       const sha = (value: string) => createHash('sha256').update(value).digest('hex')
