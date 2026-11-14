@@ -264,3 +264,5 @@ export * from './node-locator.js'
 
 export * from './space-member.js'
 export { connectSpaceMember, type SpaceMemberClient } from './space-member-client.js'
+
+export * from './public-rpc-provider-catalog.js'

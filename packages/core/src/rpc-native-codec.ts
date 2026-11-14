@@ -1,3 +1,4 @@
+import { parseProviderCatalogQuery, parseProviderCatalogObservation } from './public-rpc-provider-catalog.js'
 import { parseSpaceMemberParams } from './space-member-codec.js'
 import { parseHostedRuntimeOwnerIdentity } from './hosted-value.js'
 import { hostedSessionProjection, hostedSessionIds } from './hosted-session-summary.js'
@@ -474,6 +475,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (isApplicationAccessMethod(method)) return parseApplicationAccessResult(method,value,parseApplicationAccessParams(method,params)) as unknown as Record<string,unknown>
     if (method === 'node.locate') return parseNodeLocateResult(value, parseNodeLocateParams(params)) as unknown as Record<string, unknown>
     if (isNodePublishingMethod(method)) return parseNodePublishingResult(method, value, parseNodePublishingParams(method, params)) as unknown as Record<string, unknown>
+    if (method === 'agent.provider.ls') return parseProviderCatalogObservation(value, parseProviderCatalogQuery(params)) as unknown as Record<string, unknown>
     if (isHostSettingsMethod(method)) return parseHostSettingsResult(method, value, parseHostSettingsParams(method, params)) as unknown as Record<string, unknown>
     if (method === 'space.folder.register') return parseFolderSpaceReceipt(value, parseFolderSpaceRegistration(params)) as unknown as Record<string, unknown>
     if (isSpaceAuthorityMethod(method)) {

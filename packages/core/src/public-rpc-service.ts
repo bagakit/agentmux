@@ -1,3 +1,4 @@
+import { parseProviderCatalogQuery, parseProviderCatalogObservation, type ProviderCatalogMethod } from './public-rpc-provider-catalog.js'
 import { parseSpaceMemberParams } from './space-member-codec.js'
 import { spaceMemberRuntime } from './space-member-runtime.js'
 import { HOST_ROUTE_METHODS, parseHostRouteParams } from './host-route.js'
@@ -480,7 +481,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | NodePublishingMethod | NodeLocatorMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod | keyof typeof HOST_ROUTE_METHODS>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | ProviderCatalogMethod | HostSettingsMethod | NodePublishingMethod | NodeLocatorMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod | keyof typeof HOST_ROUTE_METHODS>, readonly string[]>
 
 /** Home follows an exact execution route; its display name does not identify that route. */
 function homeHostRoute(configuration: import('./control.js').AgentMuxControlSettingsResourceFields | null) {
@@ -1480,6 +1481,41 @@ export class AgentMuxRpcService {
         }
       }
       return parseNodePublishingResult(nodeMethod, result, input) as AgentMuxRpcResult<M>
+    }
+    if (method === 'agent.provider.ls') {
+      const query = parseProviderCatalogQuery(params)
+      // A declaration read never creates the service's lazy SDK/Native connection, including caller admission.
+      if (!this.ports.coreClients && !this.local) throw new AgentMuxError('The original Provider source is unavailable. No Runtime was started.', 'CONTROL_UNAVAILABLE')
+      await this.authenticated(context)
+      const targets = (await this.clients()).filter(entry => entry.hostId === query.hostId)
+      context.signal?.throwIfAborted()
+      if (!targets.length && this.ports.forwardControl) {
+        return parseProviderCatalogObservation(await this.ports.forwardControl<ProviderCatalogMethod>(method, query, context), query) as AgentMuxRpcResult<M>
+      }
+      if (targets.length !== 1) throw new AgentMuxError('The exact Provider source Host is unknown or ambiguous.', targets.length ? 'AMBIGUOUS_AGENT_SESSION' : 'UNKNOWN_HOST')
+      const client = targets[0]!.client
+      let result: import('./public-rpc-provider-catalog.js').ProviderCatalogObservation
+      if (this.ports.callOriginalCore || client.forwardRpc) {
+        // Only this fixed public read borrows the target transport; the source
+        // Agent capability cannot authenticate as an Agent of another Host.
+        const originalQuery = { ...query, hostId: 'local' }, originalContext = context.signal ? { signal: context.signal } : {}
+        const original = this.ports.callOriginalCore
+          ? await this.ports.callOriginalCore(query.hostId, 'agent.provider.ls', originalQuery, originalContext)
+          : await client.forwardRpc!('agent.provider.ls', originalQuery, originalContext)
+        result = { ...parseProviderCatalogObservation(original, { ...query, hostId: 'local' }), routeHostId: query.hostId }
+      } else {
+        const catalog = client.catalog().filter(entry => query.providerId === undefined || entry.id === query.providerId)
+        let runtimeId: string | null = null
+        try {
+          const owner = client.runtimeOwnerIdentity?.() ?? (this.ports.hostedRuntime ? (await (await this.ports.hostedRuntime()).call('runtime.owner.identity', {})).owner : null)
+          runtimeId = owner?.availability === 'connected' ? owner.runtimeId : null
+        } catch { context.signal?.throwIfAborted() /* Owner observation is optional for pure declarations. */ }
+        result = { routeHostId: query.hostId, runtimeId, observedAt: Date.now(), catalog }
+      }
+      const current = (await this.clients()).filter(entry => entry.hostId === query.hostId)
+      if (current.length !== 1 || current[0]!.client !== client) throw new AgentMuxError('The Provider source Host changed during this read. Refresh the exact Host.', 'HOST_CONFIGURATION_CHANGED')
+      context.signal?.throwIfAborted()
+      return parseProviderCatalogObservation(result, query) as AgentMuxRpcResult<M>
     }
     if (isHostSettingsMethod(method)) {
       const input = parseHostSettingsParams(method, params)

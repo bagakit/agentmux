@@ -1,3 +1,4 @@
+import { PROVIDER_CATALOG_METHODS, type ProviderCatalogParamsMap, type ProviderCatalogResultMap, type ProviderCatalogMethod } from './public-rpc-provider-catalog.js'
 import { SPACE_MEMBER_METHODS, type SpaceMemberParams, type SpaceMemberResults } from './space-member.js'
 import { HOST_ROUTE_METHODS, type HostRouteParams, type HostRouteResults } from './host-route.js'
 import { SPACE_FOLDER_METHODS, type SpaceFolderParams, type SpaceFolderResults } from './space-folder.js'
@@ -258,7 +259,7 @@ export type AgentMuxRpcOutputInitial = {
   session: ReturnType<AgentMuxClient['agentSession']>
 } & Pick<Awaited<ReturnType<AgentMuxClient['observeAgentOutput']>>['attachment'],
   'run' | 'gap' | 'terminal' | 'resizeRevision'>
-type NativeParams = HostRouteParams & SpaceMemberParams & SpaceSessionsParams & SpaceFolderParams & SpaceAuthorityParams & NodeLocatorParamsMap & NodePublishingParams & MoteDialogueParamsMap & { 'capsule.input': import('./capsule-input.js').CapsuleInputRequest } & CapsuleRuntimeParamsMap & CapsuleParamsMap & ApplicationAccessParameterMap & AgentLearningParamsMap & MoteChatParamsMap & MoteConnectionParamsMap & GoalDelegationParamsMap & MoteAvatarParameterMap & TopicParameterMap & ConnectionParamsMap & HostSettingsParameterMap & TailcatKeyParamsMap & HostMaintenanceParamsMap & FileParameterMap & GitParameterMap & AppWindowParamsMap & AppCaptureParamsMap & ScheduleParamsMap & AgentProgressParams & ImageParamsMap & NativeDesktopParamsMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
+type NativeParams = HostRouteParams & SpaceMemberParams & SpaceSessionsParams & SpaceFolderParams & SpaceAuthorityParams & NodeLocatorParamsMap & NodePublishingParams & MoteDialogueParamsMap & { 'capsule.input': import('./capsule-input.js').CapsuleInputRequest } & CapsuleRuntimeParamsMap & CapsuleParamsMap & ApplicationAccessParameterMap & AgentLearningParamsMap & MoteChatParamsMap & MoteConnectionParamsMap & GoalDelegationParamsMap & MoteAvatarParameterMap & TopicParameterMap & ConnectionParamsMap & ProviderCatalogParamsMap & HostSettingsParameterMap & TailcatKeyParamsMap & HostMaintenanceParamsMap & FileParameterMap & GitParameterMap & AppWindowParamsMap & AppCaptureParamsMap & ScheduleParamsMap & AgentProgressParams & ImageParamsMap & NativeDesktopParamsMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
   'system.metrics.host-profile.capture': import('./runtime-v8-profile.js').HostV8ProfileInput
   'goal.participation.confirm': import('./goal-participation.js').GoalParticipationConfirm
   'goal.watch': Record<string, never>
@@ -371,7 +372,7 @@ type NativeParams = HostRouteParams & SpaceMemberParams & SpaceSessionsParams & 
   'system.endpoint': Record<string, never>
   'system.subscription.cancel': { subscriptionId: string }
 }
-type NativeResult = HostRouteResults & SpaceMemberResults & SpaceSessionsResults & SpaceFolderResults & SpaceAuthorityResults & NodeLocatorResultMap & NodePublishingResults & MoteDialogueResultMap & { 'capsule.input': import('./capsule-input.js').CapsuleInputResult } & CapsuleRuntimeResultMap & CapsuleResultMap & ApplicationAccessResultMap & AgentLearningResultMap & MoteChatResultMap & MoteConnectionResultMap & GoalDelegationResultMap & MoteAvatarResultMap & TopicResultMap & ConnectionResultMap & HostSettingsResultMap & TailcatKeyResultMap & HostMaintenanceResultMap & FileResultMap & GitResultMap & AppWindowResultMap & AppCaptureResultMap & ScheduleResultMap & AgentProgressResults & ImageResultMap & NativeDesktopResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
+type NativeResult = HostRouteResults & SpaceMemberResults & SpaceSessionsResults & SpaceFolderResults & SpaceAuthorityResults & NodeLocatorResultMap & NodePublishingResults & MoteDialogueResultMap & { 'capsule.input': import('./capsule-input.js').CapsuleInputResult } & CapsuleRuntimeResultMap & CapsuleResultMap & ApplicationAccessResultMap & AgentLearningResultMap & MoteChatResultMap & MoteConnectionResultMap & GoalDelegationResultMap & MoteAvatarResultMap & TopicResultMap & ConnectionResultMap & ProviderCatalogResultMap & HostSettingsResultMap & TailcatKeyResultMap & HostMaintenanceResultMap & FileResultMap & GitResultMap & AppWindowResultMap & AppCaptureResultMap & ScheduleResultMap & AgentProgressResults & ImageResultMap & NativeDesktopResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
   'system.metrics.host-profile.capture': import('./runtime-v8-profile.js').RuntimeV8ProfileResult
   'goal.participation.confirm': import('./goal-participation.js').GoalParticipationReceipt
   'goal.watch': never
@@ -483,8 +484,8 @@ type NativeResult = HostRouteResults & SpaceMemberResults & SpaceSessionsResults
   'system.subscription.cancel': { disposed: boolean }
 }
 export type AgentMuxRpcMethod = ControlMethod | keyof NativeParams
-type PublicParameterMap = NodeLocatorParamsMap & NodePublishingParams & ApplicationAccessParameterMap & AgentLearningParamsMap & MoteChatParamsMap & MoteConnectionParamsMap & MoteAvatarParameterMap & TopicParameterMap & ConnectionParamsMap & HostSettingsParameterMap & TailcatKeyParamsMap & HostMaintenanceParamsMap & FileParameterMap & GitParameterMap & ScheduleParamsMap & AgentProgressParams & ImageParamsMap & NativeDesktopParamsMap & AgentMuxHostedRuntimeParameterMap & AgentMuxRpcDeviceParameterMap & {
-  [M in Exclude<keyof NativeParams, keyof AgentMuxHostedRuntimeParameterMap | AgentMuxRpcDeviceMethod | ApplicationAccessMethod | AgentLearningMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | NodePublishingMethod | NodeLocatorMethod | TailcatKeyMethod | HostMaintenanceMethod | FileMethod | GitMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod>]: NativeParams[M] & { operationId?: string }
+type PublicParameterMap = NodeLocatorParamsMap & NodePublishingParams & ApplicationAccessParameterMap & AgentLearningParamsMap & MoteChatParamsMap & MoteConnectionParamsMap & MoteAvatarParameterMap & TopicParameterMap & ConnectionParamsMap & ProviderCatalogParamsMap & HostSettingsParameterMap & TailcatKeyParamsMap & HostMaintenanceParamsMap & FileParameterMap & GitParameterMap & ScheduleParamsMap & AgentProgressParams & ImageParamsMap & NativeDesktopParamsMap & AgentMuxHostedRuntimeParameterMap & AgentMuxRpcDeviceParameterMap & {
+  [M in Exclude<keyof NativeParams, keyof AgentMuxHostedRuntimeParameterMap | AgentMuxRpcDeviceMethod | ApplicationAccessMethod | AgentLearningMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarMethod | TopicMethod | ConnectionMethod | ProviderCatalogMethod | HostSettingsMethod | NodePublishingMethod | NodeLocatorMethod | TailcatKeyMethod | HostMaintenanceMethod | FileMethod | GitMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod>]: NativeParams[M] & { operationId?: string }
 } & { [M in ControlMethod]: ControlParams<M> & { operationId?: string } }
 export type AgentMuxRpcParams<M extends AgentMuxRpcMethod> = PublicParameterMap[M]
 type PublicResultMap = NativeResult & {
@@ -524,6 +525,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   ...AGENTMUX_RPC_DEVICE_METHODS,
   ...NODE_PUBLISHING_METHODS,
   ...NODE_LOCATOR_METHODS,
+  ...PROVIDER_CATALOG_METHODS,
   ...AGENTMUX_RPC_HOST_SETTINGS_METHODS,
   ...AGENTMUX_RPC_TAILCAT_KEY_METHODS,
   ...AGENTMUX_RPC_HOST_MAINTENANCE_METHODS,

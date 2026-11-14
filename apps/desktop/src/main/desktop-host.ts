@@ -124,10 +124,14 @@ async function connectOriginalDesktopHost(config: HostConfig, store: AgentMuxAge
     call: async (method, params, context, expectedOwner) => {
       if (context.principal?.kind === 'device' && !context.forwarding) throw new AgentMuxError(
         'The original device forwarding authority is unavailable. Its saved input and Sessions are retained.', 'CONTROL_UNAVAILABLE')
-      const confirmed = await originalOwner(context.signal)
+      // This fixed declaration read needs only the original transport. Acquiring a
+      // Session observation to fence it would start Native and turn unknown identity
+      // into a false empty/unavailable catalog. All execution keeps its normal fence.
+      const confirmed = method === 'agent.provider.ls' ? undefined : await originalOwner(context.signal)
+      const fence = expectedOwner ?? confirmed
       return await rpc.call(method, params, { ...(context.signal ? { signal: context.signal } : {}),
         ...(context.principal?.kind === 'device' ? { forwarding: context.forwarding! } : {}),
-        ...(context.caller ? { credentials: context.caller } : {}), runtimeFence: expectedOwner ?? confirmed })
+        ...(context.caller ? { credentials: context.caller } : {}), ...(fence ? { runtimeFence: fence } : {}) })
     },
     subscribe: async (method, params, handlers, expectedOwner) => {
       const confirmed = await originalOwner(handlers.signal)

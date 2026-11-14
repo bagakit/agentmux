@@ -735,12 +735,10 @@ export class RuntimeController {
       let connected = false
       try {
         if (options?.observation) this.assertObservationHostConnection(hostId, host)
-        if (host.config.kind !== 'local') {
-          await host.client.connect()
-          connected = true
-        }
+        connected = 'runtimeOwnerIdentity' in host.client && host.client.runtimeOwnerIdentity()?.availability === 'connected'
+        const { catalog: entries } = await callOriginalDesktopHost(host.client, 'agent.provider.ls', { hostId: 'local' }, {})
+        connected = true
         if (this.hosts.get(hostId) !== host) throw new AgentMuxError('The execution Host changed while reading its Provider catalog.', 'EXECUTOR_HOST_CHANGED')
-        const entries = host.client.providers.catalog()
         this.observationWarnings.delete(JSON.stringify([hostId, step]))
         return entries
       } catch (error) {
