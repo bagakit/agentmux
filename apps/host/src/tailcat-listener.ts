@@ -1,41 +1,15 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { watch, type FSWatcher } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join } from 'node:path'
-import { homedir } from 'node:os'
+import { basename, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isDeepStrictEqual } from 'node:util'
-import type { TailcatListenerObservation } from '@agentmux/core'
+import { isTailcatNodePublicKey, type TailcatListenerObservation } from '@agentmux/core'
 import { parseHostConfiguration, type LocalHostConfig, type TailcatListenerConfig } from './host-configuration.js'
+import { tailcatEnvironment, validateServerKey } from './tailcat-key.js'
 
 const retryDetail = 'Fix the local Tailcat configuration or install the official tailcat CLI in PATH, then turn Tailcat off and on. Original Agents and SSH connections are retained.'
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
-const nonzeroKey = (value: unknown, prefix: string): boolean => typeof value === 'string' &&
-  new RegExp('^' + prefix + '[0-9a-f]{64}$', 'u').test(value) && !value.endsWith('0'.repeat(64))
-
-/** Read only the official saved-key format. The CLI remains the key/protocol owner. */
-async function validateServerKey(name: string, environment: NodeJS.ProcessEnv): Promise<void> {
-  if (!name || name === 'new' || /[\0\r\n]/u.test(name)) throw Error('A saved Tailcat server key is required.')
-  let path = name
-  if (/[/\\]/u.test(name)) {
-    if (!isAbsolute(name)) throw Error('A saved Tailcat server key requires an absolute file path.')
-  } else {
-    // Match the official CLI's os.UserConfigDir keyPath; never create a missing identity.
-    const home = environment.HOME ?? homedir()
-    const config = process.platform === 'darwin' ? join(home, 'Library', 'Application Support')
-      : process.platform === 'win32' ? environment.APPDATA : environment.XDG_CONFIG_HOME || join(home, '.config')
-    if (!config || !isAbsolute(config)) throw Error('The Tailcat key directory is unavailable.')
-    path = join(config, 'tailcat', 'keys', name + '.private.json')
-  }
-  const key: unknown = JSON.parse(await readFile(path, 'utf8'))
-  if (!record(key) || !nonzeroKey(key.Private, 'privkey:') || !record(key.Public) ||
-      !nonzeroKey(key.Public.PresharedKey, 'psk:') ||
-      !(Number.isSafeInteger(key.Public.RegionID) && Number(key.Public.RegionID) > 0 ||
-        Array.isArray(key.Public.Region) && key.Public.Region.length === 1 && record(key.Public.Region[0]) &&
-        Number.isSafeInteger(key.Public.Region[0].RegionID) && Number(key.Public.Region[0].RegionID) > 0)) {
-    throw Error('Use an official saved Tailcat server key with a PSK and fixed DERP region.')
-  }
-}
 
 type ListenerOptions = {
   socketPath: string
@@ -77,7 +51,7 @@ export class HostTailcatListener {
       return
     }
     try {
-      if (!configuration.allowedClients.length || configuration.allowedClients.some(key => !nonzeroKey(key, 'nodekey:'))) {
+      if (!configuration.allowedClients.length || !configuration.allowedClients.every(isTailcatNodePublicKey)) {
         throw Error('Tailcat requires an explicit nonempty client public-key allowlist.')
       }
       await validateServerKey(configuration.keyFile, this.options.environment ?? process.env)
@@ -90,11 +64,7 @@ export class HostTailcatListener {
       args: [fileURLToPath(new URL('./agentmux.js', import.meta.resolve('@agentmux/core')))] }
     const args = ['serve', '--key=' + configuration.keyFile, '--allow=' + configuration.allowedClients.join(','), '--json', '--psk',
       'exec', '--', command.executable, ...command.args, '--endpoint', 'unix:' + this.options.socketPath, 'system', 'endpoint', '--stdio']
-    const environment = { ...this.options.environment ?? process.env }
-    // These ambient options could publish a credential or change the installed Core target.
-    for (const name of ['TAILCAT_ADDR_FILE', 'TAILCAT_STATUS_LOOP', 'TS_DEBUG_TAILCAT_LOCAL_DERP', 'TS_DEBUG_TAILCAT_ADDR',
-      'AGENTMUX_AGENT_SESSION_ID', 'AGENTMUX_AGENT_CAPABILITY', 'AGENTMUX_RPC_ENDPOINT', 'AGENTMUX_TOOL_CONTEXT']) delete environment[name]
-    const child = spawn('tailcat', args, { stdio: ['pipe', 'pipe', 'pipe'], env: environment })
+    const child = spawn('tailcat', args, { stdio: ['pipe', 'pipe', 'pipe'], env: tailcatEnvironment(this.options.environment ?? process.env) })
     this.child = child
     this.childClosed = new Promise(resolve => child.once('close', () => resolve()))
     child.stdin.end()

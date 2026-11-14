@@ -1150,6 +1150,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   settings('settings.hosts.trust-message-source', '--host <id> --input <file|->', 'Pin one message-purpose source key through the authenticated user; creation pins grant no message authority.'),
   settings('settings.hosts.trusted-sources', '--host <id>', 'Read this Host creation authority and explicitly trusted source keys.'),
   settings('settings.hosts.trust-source', '--host <id> --input <file|->', 'Trust one source key; input requires sourceRuntimeId, publicKey, targetRuntimeId and targetKeyFingerprint. Requires a transport-approved user.'),
+  settings('settings.hosts.tailcat-key', '--role <server|client> [--key <name>]', 'Prepare this Mac\'s saved Tailcat key through the official CLI: server (PSK, fixed DERP region) or client; default names agentmux-server and agentmux-client. Creates only a missing key and never overwrites; created tells new from reused. Client returns its public key as the connection code. Requires a transport-approved user.'),
   settings('settings.hosts.install-check', '<id>', 'Read whether this saved SSH Host qualifies for a first Linux x64 Core install, without installing.'),
   settings('settings.hosts.install', '<id> --input <file|->', 'Install the reviewed Core with expected (including keepRunning) and original operationId. Requires a transport-approved person or device.'),
   settings('settings.hosts.install-inspect', '<id> --operation-id ID', 'Read the original Core install without repeating it or adopting a connection.'),

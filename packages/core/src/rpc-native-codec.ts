@@ -104,6 +104,7 @@ import { parseRpcControlResult, rpcRecord } from './rpc-business-codec.js'
 import { isAgentMuxRpcMethod, type AgentMuxRpcCredentials, type AgentMuxRpcMethod } from './public-rpc.js'
 import { isAgentMuxRpcDeviceMethod, parseAgentMuxRpcDeviceParams, parseAgentMuxRpcDeviceResult } from './public-rpc-device.js'
 import { isHostSettingsMethod, parseHostSettingsParams, parseHostSettingsResult } from './public-rpc-host-settings.js'
+import { isTailcatKeyMethod, parseTailcatKeyParams, parseTailcatKeyResult } from './public-rpc-tailcat-key.js'
 
 const fail = (): never => { throw new AgentMuxError('Core RPC result is malformed or belongs to another object.', 'CONTROL_PROTOCOL_ERROR') }
 const record = (value: unknown, fields?: readonly string[]) => rpcRecord(value, fields, 'CONTROL_PROTOCOL_ERROR')
@@ -444,6 +445,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (isConnectionMethod(method)) return parseConnectionResult(method, value, parseConnectionParams(method, params)) as unknown as Record<string, unknown>
     if (isApplicationAccessMethod(method)) return parseApplicationAccessResult(method,value,parseApplicationAccessParams(method,params)) as unknown as Record<string,unknown>
     if (isHostSettingsMethod(method)) return parseHostSettingsResult(method, value, parseHostSettingsParams(method, params)) as unknown as Record<string, unknown>
+    if (isTailcatKeyMethod(method)) return parseTailcatKeyResult(value, parseTailcatKeyParams(params)) as unknown as Record<string, unknown>
     if (isAgentProgressMethod(method)) return parseAgentProgressResult(method, value, parseAgentProgressParams(method, params)) as unknown as Record<string, unknown>
     if (isScheduleMethod(method)) return validateScheduleRpcResult(method, value, parseScheduleRpcParams(method, params)) as unknown as Record<string, unknown>
     if (isImageMethod(method)) return parseImageResult(method, value, parseImageParams(method, params)) as unknown as Record<string, unknown>

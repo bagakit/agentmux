@@ -66,6 +66,16 @@ export async function parseSettingsCommand(args: readonly string[]): Promise<Rec
     if ((action === 'trust-source' || action === 'trust-message-source') && args.length === 6 && id === '--host' && args[3]?.length && args[4] === '--input') {
       return { hostId: args[3], input: await input(args[5]!) }
     }
+    if (action === 'tailcat-key') {
+      const flags = new Map<string, string>()
+      for (let index = 2; index < args.length; index += 2) {
+        const [name, value] = [args[index]!, args[index + 1]]
+        if (!['--role', '--key'].includes(name) || !value?.length || flags.has(name)) invalid('Use settings hosts tailcat-key --role <server|client> [--key <name>].')
+        flags.set(name, value!)
+      }
+      if (!flags.has('--role')) invalid('Choose --role server on the receiving Mac or --role client on the connecting Mac.')
+      return { role: flags.get('--role'), ...(flags.has('--key') ? { key: flags.get('--key') } : {}) }
+    }
     if (action === 'ls' && args.length === 2) return {}
     if (action === 'test' && args.length === 3 && id?.length) return { id }
     if (action === 'test' && args.length === 4 && id === '--input') return { input: await input(args[3]!) }

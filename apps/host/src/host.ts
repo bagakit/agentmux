@@ -41,6 +41,7 @@ import { createHostAgentLearning } from './agent-learning.js'
 import { FileUploadOwner } from './file-upload-owner.js'
 import { createHostMoteAvatarRead } from './mote-avatar-read.js'
 import { configuredTailcatListener } from './tailcat-listener.js'
+import { prepareTailcatKey } from './tailcat-key.js'
 export type AgentMuxHostOptions = {
   prepareExecutionEnvironment?: () => Promise<void>
   store: AgentMuxAgentSessionStore
@@ -175,6 +176,8 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   const service = {
     spatialState,
     hostTailcat: (hostId: string) => hostId === 'local' ? tailcat!.inspect() : undefined,
+    hostTailcatKey: (input: Parameters<typeof prepareTailcatKey>[0], signal?: AbortSignal) => prepareTailcatKey(input, { ...(signal ? { signal } : {}),
+      ...(options.prepareExecutionEnvironment ? { prepareEnvironment: options.prepareExecutionEnvironment } : {}) }),
     ...(options.hostConfiguration ? { hostConfiguration: options.hostConfiguration } : {}),
     ...(moteDialogue ? { moteDialogue } : {}),
     ...(moteQuickPreferences ? { moteQuickPreferences } : {}),

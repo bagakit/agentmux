@@ -151,6 +151,7 @@ import { observeHostRuntime, parseTailcatListenerObservation } from './host-runt
 import { observeRead } from './observation-read.js'
 import { observeHostNetwork } from './host-network-observation.js'
 import { isHostSettingsMethod, parseHostSettingsParams, parseHostSettingsResult, type HostSettingsMethod } from './public-rpc-host-settings.js'
+import { AGENTMUX_TAILCAT_DEFAULT_KEYS, isTailcatKeyMethod, parseTailcatKeyParams, parseTailcatKeyResult } from './public-rpc-tailcat-key.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMuxRpcMethod,
   type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxRpcCredentials,
   type AgentMuxRpcSnapshotParams, type AgentMuxRpcSnapshot, type AgentMuxRpcStreamMethod,
@@ -244,6 +245,8 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   hostConfiguration?(hostId: string): import('./control.js').AgentMuxControlSettingsResourceFields | null
   /** Read the selected Host's original listener owner. Missing observation remains unknown. */
   hostTailcat?(hostId: string, signal?: AbortSignal): import('./host-runtime-observation.js').TailcatListenerObservation | undefined | Promise<import('./host-runtime-observation.js').TailcatListenerObservation | undefined>
+  /** This Host's own saved-key owner: create only a missing key through the official CLI, never overwrite. */
+  hostTailcatKey?(input: { role: import('./public-rpc-tailcat-key.js').TailcatKeyRole; key: string }, signal?: AbortSignal): Promise<import('./public-rpc-tailcat-key.js').TailcatKeyPreparation>
   endpoint?: import('./public-rpc.js').AgentMuxRpcEndpoint
   endpointPublication?(): import('./control-endpoint-state.js').AgentMuxControlEndpointState
   /** Borrow existing SDK clients. Their lifecycle remains with their host. */
@@ -439,7 +442,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod>, readonly string[]>
 
 /** Home follows an exact execution route; its display name does not identify that route. */
 function homeHostRoute(configuration: import('./control.js').AgentMuxControlSettingsResourceFields | null) {
@@ -1286,6 +1289,19 @@ export class AgentMuxRpcService {
       }
       // A later routing change does not erase an already acquired original capture.
       return parseRuntimeV8ProfileResult(result, input) as AgentMuxRpcResult<M>
+    }
+    if (isTailcatKeyMethod(method)) {
+      const input = parseTailcatKeyParams(params)
+      if (context.caller !== undefined || context.principal?.kind !== 'user') {
+        throw new AgentMuxError('Preparing a Tailcat key requires a transport-approved user without a managed Agent caller.', 'CONTROL_PERMISSION_DENIED')
+      }
+      await this.authenticated(context)
+      if (!this.ports.hostTailcatKey) throw new AgentMuxError('This Host cannot prepare Tailcat keys. No key was created or changed.', 'CONTROL_UNAVAILABLE')
+      context.signal?.throwIfAborted()
+      await context.assertCurrent?.()
+      context.signal?.throwIfAborted()
+      const result = await this.ports.hostTailcatKey({ role: input.role, key: input.key ?? AGENTMUX_TAILCAT_DEFAULT_KEYS[input.role] }, context.signal)
+      return parseTailcatKeyResult(result, input) as AgentMuxRpcResult<M>
     }
     if (isHostSettingsMethod(method)) {
       const input = parseHostSettingsParams(method, params)
