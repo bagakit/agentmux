@@ -897,7 +897,8 @@ function manualComposerBinding(sessionId: string, origin?: 'manual', options?: A
   if (recipient) return { expectedRun: { ...recipient.run }, admissionIntent: { kind: 'session-conversation' } }
   if (session.pendingInteraction) return interactionNativeComposerBinding(session)
   return initialNativeComposerBinding(session) ??
-    { expectedRun: { ...(recipient ?? session.control).run }, admissionIntent: { kind: options?.moteMain ? 'session-conversation' : 'manual-actor' } }
+    // Main role routing is frozen separately; this new human Send still uses the current terminal.
+    { expectedRun: { ...session.control.run }, admissionIntent: { kind: 'manual-actor' } }
 }
 
 /** Associate a Core receipt with its original client intent; never infer carriage from a current Run. */
