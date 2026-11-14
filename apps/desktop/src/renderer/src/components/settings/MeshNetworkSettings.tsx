@@ -14,7 +14,7 @@ import './mesh-settings.css'
 const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause)
 const retained = (edit: MeshSettingsDraft): MeshSettingsDraft | undefined => edit.pending || edit.linkInput || !configValuesEqual(edit.form, meshForm(edit.baseline.configuration, edit.baseline.identity?.peerId)) ? edit : undefined
 
-export function MeshNetworkSettings({ active, onConnections }: { active: boolean; onConnections?: () => void }) {
+export function MeshNetworkSettings({ active, onConnections, showTopology = true }: { active: boolean; onConnections?: () => void; showTopology?: boolean }) {
   const [settings, setSettings] = useState<MeshNetworkSettings>(), [networkSnapshot, setSnapshot] = useState<MeshNetworkInspection>()
   const [issue, setIssue] = useState(''), [networkIssue, setNetworkIssue] = useState(''), [notice, setNotice] = useState('')
   const [saving, setSaving] = useState(false), [reading, setReading] = useState(false), [newer, setNewer] = useState<MeshNetworkSettings>()
@@ -157,7 +157,7 @@ export function MeshNetworkSettings({ active, onConnections }: { active: boolean
     </section> : null}
     {snapshot ? <div className="mesh-network-status" role="status"><strong>{networkIssue ? 'Last confirmed · ' : ''}{snapshot.source === 'static' ? 'Startup configuration active' : snapshot.apply.state === 'active' ? 'Mesh active' : snapshot.apply.state === 'disabled' ? 'Mesh disabled' : snapshot.apply.state === 'starting' ? 'Applying settings…' : 'Mesh apply unavailable'}</strong>{network ? <span>{network.peers.filter(peer => peer.state === 'connected').length} authenticated peer{network.peers.filter(peer => peer.state === 'connected').length === 1 ? '' : 's'} · {network.routes.length} known route{network.routes.length === 1 ? '' : 's'}</span> : null}{snapshot.gateway.state === 'listening' ? <span>Listening on {snapshot.gateway.listener?.host}:{snapshot.gateway.listener?.port}</span> : null}{snapshot.apply.issue ? <span className="settings-inline-error">{snapshot.apply.issue.message}</span> : null}{snapshot.activeRevision && snapshot.desiredRevision !== snapshot.activeRevision ? <span>Saved settings differ from the active network.</span> : null}</div> : null}
     {networkIssue && (settings || snapshot) ? <div className="mesh-network-note" role="status"><strong>Network observation unavailable.</strong><p>{snapshot ? 'The last confirmed view is retained. Refresh to check again.' : 'Current connections haven’t been confirmed. Refresh to check again.'}</p><details className="mesh-advanced"><summary>Technical details</summary><p>{networkIssue}</p></details></div> : null}
-    {hasTopology ? <MeshNetworkMap snapshot={snapshot} /> : null}
+    {showTopology ? <>{hasTopology ? <MeshNetworkMap snapshot={snapshot} /> : null}</> : null}
     {form && saved ? <>
       {snapshot?.source === 'static' ? <p className="mesh-network-note">A startup gateway configuration is active. Saving these complete Mesh settings replaces that configuration and its publisher admissions; the original file is kept.</p> : null}
       {editIssue ? <p role="alert" className="settings-inline-error">{editIssue}</p> : <section className="mesh-network-section" data-settings-field="mesh-configuration">
