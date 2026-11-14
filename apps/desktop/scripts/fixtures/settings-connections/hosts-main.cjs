@@ -58,22 +58,25 @@ app.whenReady().then(async () => {
       win.showInactive(); win.focus(); win.webContents.focus()
       await until('document.hasFocus()')
       await settle()
+      await click('[data-mesh-saved-host="host-02"] button')
       if (width>900) {
-        await mode('Topology')
+        await mode('Machines')
         await until(`document.querySelector(${JSON.stringify(pane+' [data-host-node="host-02"]')})`)
         assert.equal(await read(`document.querySelectorAll(${JSON.stringify(pane+' [data-host-node]')}).length`),7)
-        assert.equal(await read(`document.querySelectorAll(${JSON.stringify(pane+' [data-host-disclosure]')}).length`),0)
+        assert.equal(await read(`[...document.querySelectorAll(${JSON.stringify(pane+' [data-host-disclosure]')})].filter(node=>node.checkVisibility()).length`),0,'The equivalent list is not visible alongside the graph')
         const saveCalls = await business()
         await click(`${pane} [data-host-node="host-02"]`)
         await until(`document.querySelector(${JSON.stringify(pane+' [data-resource-editor]')})?.dataset.resourceEditor==='host-02'`)
-        assert.equal(await read(`document.querySelector(${JSON.stringify(pane+' [data-resource-editor]')}).dataset.hostView`),'overview')
-        assert.equal(await read(`!!document.querySelector(${JSON.stringify(nameSelector)})`),false)
         const focus = await read('document.activeElement?.closest("[data-host-node]")?.dataset.hostNode')
         assert.equal(focus,'host-02','Actual graph selection retains native keyboard focus at the selected node')
         assert.deepEqual((await business()).filter(value=>/save|host-check/.test(value)),saveCalls.filter(value=>/save|host-check/.test(value)))
         result.interactions.push({kind:'native-topology-exact-host-selection',id:'host-02',focus})
         assert.equal(await read(`document.querySelectorAll(${JSON.stringify(pane+' .react-flow__background')}).length`),0,'The actual graph has no dot pattern')
-        assert.equal(await read(`document.querySelector(${JSON.stringify(pane+' [data-host-node="host-02"] [data-route-port]')})?.textContent`),'SSH config')
+        await press('Tab')
+        for (const type of ['keyDown', 'keyUp']) win.webContents.sendInputEvent({ type, keyCode: 'Tab', modifiers: ['shift'] })
+        await settle()
+        await until(`document.querySelector('[data-route-port]')?.textContent==='SSH config'`)
+        assert.equal(await read(`document.querySelector('[data-route-port]')?.textContent`),'SSH config')
         if (theme==='light') {
           const start=await read(`(()=>{const r=document.querySelector(${JSON.stringify(pane+' .remote-topology')}).getBoundingClientRect();for(const offset of [.3,.45,.6]){const x=Math.round(r.left+22),y=Math.round(r.top+r.height*offset),hit=document.elementFromPoint(x,y);if(hit?.classList.contains('react-flow__pane'))return{x,y}}return null})()`)
           assert.ok(start,'A visible empty canvas point is available for actual panning')
@@ -86,28 +89,35 @@ app.whenReady().then(async () => {
           win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,x:start.x+36,y:start.y+18})
           await settle();const after=await transform();assert.notEqual(after,before,'Actual canvas drag moves the original viewport')
           await supplemental(width,theme,'pan-after')
-          await click(`${pane} [data-host-node="host-01"]`)
+          await choose('host-01', 'overview')
           assert.equal(await transform(),after,'Selecting an environment keeps the panned viewport')
           result.interactions.push({kind:'native-topology-pan-and-select',before,after,hostId:'host-01'})
           // Continue the original session-navigation case on its accurate initial target.
-          await click(`${pane} [data-host-node="host-02"]`)
+          await choose('host-02', 'overview')
         }
 
-      } else assert.equal(await read(`document.querySelectorAll(${JSON.stringify(pane+' [data-host-node]')}).length`),0,'Narrow view releases the actual graph')
+      } else assert.equal(await read(`[...document.querySelectorAll(${JSON.stringify(pane+' [data-host-node]')})].filter(node=>node.checkVisibility()).length`),0,'Narrow view hides the actual graph')
+        await choose('host-02', 'overview')
+        assert.equal(await read(`document.querySelector(${JSON.stringify(pane+' [data-resource-editor]')}).dataset.hostView`),'overview')
+        await until(`![...document.querySelectorAll(${JSON.stringify(nameSelector)})].some(node=>node.checkVisibility()&&!node.closest('[hidden],[inert]'))`)
       if (width<=900) await choose('host-02','overview')
+      await click('js:[...document.querySelectorAll(".remote-host-section > summary")].find(node => node.textContent.includes("Session references"))')
       await click(`${pane} [data-host-session="host-b-agent"]`)
       await until('!document.querySelector(".settings-page")')
       assert.equal(await read('window.connectionsProof.selection()?.regionId'),'region-host-b-agent','Original Session action navigates to the exact existing cross-Host projection')
       assert.ok(await read('window.connectionsProof.calls.some(call=>call.kind==="original-select-session"&&call.input.id==="host-b-agent")'))
       result.interactions.push({kind:'native-remote-original-session-navigation',id:'host-b-agent'})
       await read('window.connectionsProof.reopen("hosts")');await until('document.querySelector(".settings-page")')
+      await click('[data-mesh-saved-host="host-02"] button')
       if (width===1480&&theme==='light') {
         await choose(target,'overview')
+        await click('js:[...document.querySelectorAll(".remote-host-section > summary")].find(node => node.textContent.includes("Session references"))')
         await click(`${pane} [data-host-session="host-a-terminal"]`)
         await until('!document.querySelector(".settings-page")')
         assert.equal(await read('window.connectionsProof.selection()?.regionId'),'region-host-a-terminal')
         result.interactions.push({kind:'native-remote-original-terminal-navigation',id:'host-a-terminal'})
         await read('window.connectionsProof.reopen("hosts")');await until('document.querySelector(".settings-page")')
+      await click('[data-mesh-saved-host="host-02"] button')
       }
       await choose(target)
       if(width===320&&theme==='light') {
@@ -125,8 +135,7 @@ app.whenReady().then(async () => {
       const projects = await read(`document.querySelector(${JSON.stringify(pane+' [data-host-projects="host-02"]')}).textContent`)
       assert.ok(projects.includes('Application on B')&&!projects.includes('Application on A'),'Same-name/same-path resources retain exact Host ownership')
       if (width>900) {
-        await mode('Topology')
-        await click(`${pane} [data-host-node="host-01"]`)
+        await choose('host-01', 'overview')
         await until(`document.querySelector(${JSON.stringify(pane+' [data-resource-editor]')})?.dataset.resourceEditor==='host-01'`)
       }
       await choose(target)
@@ -143,14 +152,16 @@ app.whenReady().then(async () => {
         await route('hosts')
         assert.equal(await read(`document.querySelector(${JSON.stringify(nameSelector)})===window.__retainedName`),true)
         assert.equal(await read('window.__retainedName.value'),original.name)
+        await click('[data-mesh-saved-host="host-01"] button')
+        await choose(target)
       }
-      await click(`${pane} [data-settings-save-bar] button`)
-      await until(`document.querySelector(${JSON.stringify(pane+' [data-settings-save-bar] button')}).disabled`)
+      await click('js:[...document.querySelectorAll("button")].find(node => node.checkVisibility() && node.textContent.trim() === "Save hosts")')
+      await until('Boolean([...document.querySelectorAll("button")].find(node => node.checkVisibility() && node.textContent.trim() === "Save hosts")?.disabled)')
       const saved=await read('window.connectionsProof.current()'),host=saved.hosts.find(host=>host.id===target)
       assert.equal(host.label,original.name);assert.equal(host.hostname,original.hostname)
       result.interactions.push({kind:'native-remote-draft-test-save',width,theme,captured:check,saved:host})
       if (width>900) {
-        await mode('Topology');await click(`${pane} [data-host-node="host-01"]`)
+        await choose('host-01', 'overview')
       } else if (width===640&&theme==='light'||width===320&&theme==='light') {
         await click(`${pane} .settings-resource-back`)
       }
@@ -163,9 +174,9 @@ app.whenReady().then(async () => {
       await until(`document.querySelector(${JSON.stringify(access)})?.textContent.includes('Approval result unconfirmed')`)
       const approvals = await read('window.connectionsProof.calls.filter(c=>c.kind==="controlled-source-trust-approval").length')
       await choose(target, 'connection')
-      await until(`document.querySelector(${JSON.stringify(pane + ' [data-host-upgrade="' + target + '"]')})?.textContent.includes('Upgrade result unconfirmed')`)
+      await until(`document.querySelector(${JSON.stringify(pane + ' [data-host-upgrade="' + target + '"]')})?.textContent.includes('Original upgrade result unconfirmed')`)
       assert.equal(await read(`document.querySelector(${JSON.stringify(access)})?.hidden`), true)
-      assert.ok(await read(`document.querySelector(${JSON.stringify(pane + ' [data-upgrade-stage="verifying"]')})?.checkVisibility()`), 'Original typed maintenance stage is visible before technical disclosure')
+      await until(`[...document.querySelectorAll(${JSON.stringify(pane + ' [data-upgrade-stage="verifying"]')})].some(node=>node.checkVisibility())`, 'Original typed maintenance stage is visible before technical disclosure')
       assert.ok(await read(`document.querySelector(${JSON.stringify(pane + ' .host-upgrade__observation time')})?.dateTime`), 'Original receipt has its own update time')
       if (theme==='light') {
         await read(`document.querySelector(${JSON.stringify(pane + ' [data-host-upgrade="' + target + '"]')}).scrollIntoView({block:'center'})`)
@@ -233,15 +244,15 @@ app.whenReady().then(async () => {
       // Exercise the same saved Host panel and its explicit Refresh operation, without replacing the UI.
       await read('window.connectionsProof.runtimeScenario("healthy")')
       await choose(target,'overview')
-      if(width>900) { await mode('Topology');await click(`${pane} [data-host-node="host-01"]`) }
+      if(width>900) { await choose('host-01', 'overview') }
       const runtime = `${pane} [data-host-runtime="${target}"]`
       const running = `${runtime} .host-runtime__resources > div:first-child strong`
       const sample = `${runtime} .host-runtime__sample`
       await until(`document.querySelector(${JSON.stringify(runtime + ' [aria-label="Refresh Runtime observation"]')})?.disabled===false`)
       await click(`${runtime} [aria-label="Refresh Runtime observation"]`)
-      await until(`document.querySelector(${JSON.stringify(running)})?.textContent==='4'`)
-      assert.equal(await read(`document.querySelector(${JSON.stringify(runtime + ' .host-runtime__resources > div:nth-child(2) strong')}).textContent`),'3')
-      assert.equal(await read(`document.querySelector(${JSON.stringify(runtime + ' .host-runtime__resources > div:nth-child(3) strong')}).textContent`),'12 MiB')
+      await until(`[...document.querySelectorAll(${JSON.stringify(running)})].some(node=>node.checkVisibility()&&node.textContent==='4')`)
+      assert.ok(await read(`[...document.querySelectorAll(${JSON.stringify(runtime + ' .host-runtime__resources > div:nth-child(2) strong')})].some(node=>node.checkVisibility()&&node.textContent==='3')`))
+      assert.ok(await read(`[...document.querySelectorAll(${JSON.stringify(runtime + ' .host-runtime__resources > div:nth-child(3) strong')})].some(node=>node.checkVisibility()&&node.textContent==='12 MiB')`))
       await click(`${runtime} .host-runtime__details > summary`)
       const identities = await read(`Object.fromEntries([...document.querySelectorAll(${JSON.stringify(runtime + ' dl > div')})].map(row=>[row.querySelector('dt').textContent,row.querySelector('dd').textContent]))`)
       assert.equal(identities['Host route'],target,'The Host route remains its own identity')
@@ -261,37 +272,41 @@ app.whenReady().then(async () => {
         result.supplementalFrames.push({section,width,theme,scenario:'native-capabilities',image,pngPixels:{width:png.readUInt32BE(16),height:png.readUInt32BE(20)}})
       }
       await click(`${runtime} .host-runtime__details > summary`)
-      const originalSample = await read(`document.querySelector(${JSON.stringify(sample)}).textContent`)
+      const resourceSample = `(()=>{const nodes=[...document.querySelectorAll(${JSON.stringify(sample)})].filter(node=>node.checkVisibility()&&!node.closest('[hidden],[inert]')&&node.textContent.startsWith('Resource sample '));return nodes.length===1?nodes[0].textContent:null})()`
+      await until(resourceSample, 'The visible original Runtime resource sample is available')
+      const originalSample = await read(resourceSample)
       await read('window.connectionsProof.runtimeScenario("partial")')
       await click(`${runtime} [aria-label="Refresh Runtime observation"]`)
       await until(`document.querySelector(${JSON.stringify(runtime)})?.textContent.includes('Resource observation is temporarily unavailable')`)
-      assert.equal(await read(`document.querySelector(${JSON.stringify(running)}).textContent`),'4','A partial read keeps the original confirmed count')
-      assert.equal(await read(`document.querySelector(${JSON.stringify(sample)}).textContent`),originalSample,'A partial read preserves the original producer sample time')
+      assert.ok(await read(`[...document.querySelectorAll(${JSON.stringify(running)})].some(node=>node.checkVisibility()&&node.textContent==='4')`),'A partial read keeps the original confirmed count')
+      assert.equal(await read(resourceSample),originalSample,'A partial read preserves the original producer sample time')
       await read('window.connectionsProof.runtimeScenario("recovered")')
       await click(`${runtime} [aria-label="Refresh Runtime observation"]`)
-      await until(`document.querySelector(${JSON.stringify(running)})?.textContent==='5'`)
-      assert.notEqual(await read(`document.querySelector(${JSON.stringify(sample)}).textContent`),originalSample,'A recovered real sample has its own producer time')
+      await until(`[...document.querySelectorAll(${JSON.stringify(running)})].some(node=>node.checkVisibility()&&node.textContent==='5')`)
+      await until(`${resourceSample}!==null&&${resourceSample}!==${JSON.stringify(originalSample)}`, 'A recovered real sample has its own producer time')
       assert.equal(await read(`document.querySelector(${JSON.stringify(runtime)})?.textContent.includes('Resource observation is temporarily unavailable')`),false,'Recovery settles only its original source issue')
       if(theme==='light') {
         await read('window.connectionsProof.runtimeScenario("partial")')
         await click(`${runtime} [aria-label="Refresh Runtime observation"]`)
         await until(`document.querySelector(${JSON.stringify(runtime)})?.textContent.includes('Resource observation is temporarily unavailable')`)
-        assert.equal(await read(`document.querySelector(${JSON.stringify(running)}).textContent`),'5')
+        assert.ok(await read(`[...document.querySelectorAll(${JSON.stringify(running)})].some(node=>node.checkVisibility()&&node.textContent==='5')`))
       }
-      await read(`document.querySelector(${JSON.stringify(runtime)}).scrollIntoView({block:'center',inline:'nearest'})`)
+      const workload = `${runtime} .host-runtime__workload`
+      await read(`document.querySelector(${JSON.stringify(workload)}).scrollIntoView({block:'center',inline:'nearest'})`)
       await settle()
-      const runtimeFrame = await read(`({bounds:document.querySelector(${JSON.stringify(runtime)}).getBoundingClientRect().toJSON(),height:innerHeight})`)
-      assert.ok(runtimeFrame.bounds.height>0&&runtimeFrame.bounds.top>=0&&runtimeFrame.bounds.bottom<=runtimeFrame.height,'The complete actual Runtime panel is inside the captured viewport')
+      const runtimeFrame = await read(`({bounds:document.querySelector(${JSON.stringify(workload)}).getBoundingClientRect().toJSON(),height:innerHeight})`)
+      assert.ok(runtimeFrame.bounds.height>0&&runtimeFrame.bounds.top>=0&&runtimeFrame.bounds.bottom<=runtimeFrame.height,'The complete Native workload and its original source issue are inside the captured viewport')
       result.interactions.push({kind:'native-runtime-source-partial-recovery',width,theme,identities,originalSample,
         runtimeFrame,
-        currentSample:await read(`document.querySelector(${JSON.stringify(sample)}).textContent`),
+        currentSample:await read(resourceSample),
         boundary:'Controlled strict public DTOs through the original Runtime panel; not a real remote Host or Native observation'})
       await settle()
-      const facts=await read(`(()=>{const p=document.querySelector(${JSON.stringify(pane)}),close=document.querySelector('[aria-label="Close settings"]'),visible=n=>n.isConnected&&n.checkVisibility(),controls=[...p.querySelectorAll('button,input,select,summary')].filter(n=>visible(n)&&!n.closest('.react-flow'));return{theme:document.documentElement.dataset.appearance,viewport:{width:innerWidth,height:innerHeight},hosts:p.querySelectorAll('[data-host-node]').length,branches:p.querySelectorAll('[data-host-disclosure]').length,editors:[...p.querySelectorAll('[data-resource-editor]')].map(n=>({id:n.dataset.resourceEditor,panel:n.dataset.hostView,visible:visible(n)})),closeVisible:visible(close),clipped:controls.filter(n=>{const r=n.getBoundingClientRect();return r.width>0&&(r.left<-.5||r.right>innerWidth+.5)}).map(n=>({text:n.textContent?.slice(0,80),rect:n.getBoundingClientRect().toJSON()})),errors:window.connectionsProof.errors.slice()}})()`)
+      if (width > 900) await mode('Topology')
+      const facts=await read(`(()=>{const p=document.querySelector(${JSON.stringify(pane)}),close=document.querySelector('[aria-label="Close settings"]'),visible=n=>n.isConnected&&n.checkVisibility(),controls=[...p.querySelectorAll('button,input,select,summary')].filter(n=>visible(n)&&!n.closest('.react-flow'));return{theme:document.documentElement.dataset.appearance,viewport:{width:innerWidth,height:innerHeight},hosts:[...p.querySelectorAll('[data-host-node]')].filter(visible).length,branches:[...p.querySelectorAll('[data-host-disclosure]')].filter(visible).length,editors:[...p.querySelectorAll('[data-resource-editor]')].map(n=>({id:n.dataset.resourceEditor,panel:n.dataset.hostView,visible:visible(n)})),closeVisible:visible(close),clipped:controls.filter(n=>{const r=n.getBoundingClientRect();return r.width>0&&(r.left<-.5||r.right>innerWidth+.5)}).map(n=>({text:n.textContent?.slice(0,80),rect:n.getBoundingClientRect().toJSON()})),errors:window.connectionsProof.errors.slice()}})()`)
       assert.equal(facts.theme,theme);assert.equal(facts.closeVisible,true);assert.deepEqual(facts.errors,[])
       assert.deepEqual(facts.clipped,[],'All ordinary controls fit the actual viewport')
       assert.ok(facts.editors.length<=1,'Only the exact selected Host owns editable fields')
-      assert.equal(width>900?facts.branches:facts.hosts,0,'Graph and equivalent list never mount together')
+      assert.equal(width>900?facts.branches:facts.hosts,0,'Graph and equivalent list are not visible together')
       const image=`hosts-${width}-${theme}.png`,png=(await win.webContents.capturePage()).toPNG()
       fs.writeFileSync(path.join(evidence,image),png)
       result.frames.push({section,width,theme,image,pngPixels:{width:png.readUInt32BE(16),height:png.readUInt32BE(20)},facts})
