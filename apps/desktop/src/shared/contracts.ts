@@ -2062,6 +2062,7 @@ export type AgentMuxDesktopApi = {
   continuousProgress: ContinuousProgressApi
   schedule: {
     list(params: AgentMuxRpcParams<'schedule.list'>): Promise<AgentMuxRpcResult<'schedule.list'>>
+    history(params: AgentMuxRpcParams<'schedule.history'>): Promise<AgentMuxRpcResult<'schedule.history'>>
     inspect(params: AgentMuxRpcParams<'schedule.inspect'>, ownerHostId?: string): Promise<AgentMuxRpcResult<'schedule.inspect'>>
     create(params: AgentMuxRpcParams<'schedule.create'>): Promise<AgentMuxRpcResult<'schedule.create'>>
     pause(params: AgentMuxRpcParams<'schedule.pause'>): Promise<AgentMuxRpcResult<'schedule.pause'>>

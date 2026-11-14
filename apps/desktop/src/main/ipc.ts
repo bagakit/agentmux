@@ -2000,6 +2000,9 @@ export async function registerIpc(args: {
   handleWithEvent('schedule:list', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.list']) => {
     return callUserRpc('schedule.list', input)
   })
+  handleWithEvent('schedule:history', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.history']) => {
+    return callUserRpc('schedule.history', input)
+  })
   handleWithEvent('schedule:inspect', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.inspect'], ownerHostId?: string) => {
     return ownerHostId === undefined ? callUserRpc('schedule.inspect', input)
       : args.runtime.callOriginalCore(ownerHostId, 'schedule.inspect', input, { transport: 'unix' })

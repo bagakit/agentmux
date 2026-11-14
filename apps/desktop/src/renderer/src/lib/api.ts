@@ -996,6 +996,7 @@ const mockApi: AgentMuxDesktopApi = {
   },
   schedule: {
     list: async () => { throw new Error('Arrangement discovery requires the connected background Host. Existing work is retained.') },
+    history: async () => { throw new Error('Recorded arrangement history requires its connected background Host.') },
     inspect: async () => { throw new Error('Arrangement inspection requires the connected background Host. The original reference is retained.') },
     create: async () => { throw new Error('Saving an arrangement requires the connected background Host. The message is retained.') },
     pause: async () => { throw new Error('Pausing an arrangement requires the connected background Host. Its state is unconfirmed.') },

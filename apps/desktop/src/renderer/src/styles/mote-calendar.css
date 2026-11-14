@@ -120,6 +120,9 @@
 .mote-calendar__window-card li > button { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; }
 .mote-calendar__window-card li > button:hover { background: var(--surface-2); }
 .mote-calendar__reading-note { padding-block-start: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
+.mote-calendar__recorded { margin-block-start: var(--sp-2); }
+.mote-calendar__recorded > .selection-field { max-width: 100%; margin-block-end: var(--sp-2); }
+.mote-calendar__recorded .mote-calendar__time-page li > small { white-space: normal; }
 .mote-calendar__time-details { border-top: 1px solid var(--line-soft); }
 .mote-calendar__time-details > summary { color: var(--text-2); cursor: pointer; padding-block: var(--sp-2); font-size: var(--fs-meta); }
 .mote-calendar__time-page { animation: mote-calendar-detail-in 180ms ease-out both; }

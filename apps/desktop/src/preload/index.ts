@@ -636,6 +636,7 @@ const api: AgentMuxPreloadApi = {
   },
   schedule: {
     list: (params: import('@agentmux/core').ScheduleParamsMap['schedule.list']) => ipcRenderer.invoke('schedule:list', params),
+    history: (params: import('@agentmux/core').ScheduleParamsMap['schedule.history']) => ipcRenderer.invoke('schedule:history', params),
     inspect: (params: import('@agentmux/core').ScheduleParamsMap['schedule.inspect'], ownerHostId?: string) => ipcRenderer.invoke('schedule:inspect', params, ownerHostId),
     create: (params: import('@agentmux/core').ScheduleParamsMap['schedule.create']) => ipcRenderer.invoke('schedule:create', params),
     pause: (params: import('@agentmux/core').ScheduleParamsMap['schedule.pause']) => ipcRenderer.invoke('schedule:pause', params),

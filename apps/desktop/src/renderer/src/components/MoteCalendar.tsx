@@ -23,6 +23,7 @@ import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 import { ScheduleArrangementRow, scheduleCalendarLabel, scheduleDisplayTitle, scheduleRuleLabel, scheduleStateLabel } from './ScheduleArrangementRow'
 import { ScheduleCreateForm } from './ScheduleCreateForm'
 import { MoteCalendarTimes } from './MoteCalendarTimes'
+import { MoteScheduleHistory } from './MoteScheduleHistory'
 
 const ChevronLeft = semanticIconComponent('navigation.back')
 const ChevronRight = semanticIconComponent('navigation.forward')
@@ -142,12 +143,12 @@ export function MoteCalendar({ scope, reference, active, openRequest }: {
       return [date.toISODate()!, calendarScheduleGroups(items, byId, minute)]
     }))
   }, [visibleDates, occurrences, byId, minute])
-  const hourWindows = useMemo(() => active && timed ? visibleDates.flatMap(date => [...calendarHourWindows(date)].map(([hour, window]) =>
-    [date.toISODate()! + ':' + hour, window] as const)) : [], [active, timed, visibleDates])
-  const hourly = useMemo(() => new Map(hourWindows.map(([key, window]) => {
+  const hourWindows = useMemo(() => new Map(timed ? visibleDates.flatMap(date => [...calendarHourWindows(date)].map(([hour, window]) =>
+    [date.toISODate()! + ':' + hour, window] as const)) : []), [timed, visibleDates])
+  const hourly = useMemo(() => new Map(active ? [...hourWindows].map(([key, window]) => {
     const items = sliceScheduleOccurrences(occurrences, window)
     return [key, { items, window, groups: calendarScheduleGroups(items, byId, minute) }]
-  })), [hourWindows, occurrences, byId, minute])
+  }) : []), [active, hourWindows, occurrences, byId, minute])
   function chooseDate(date: DateTime, focus = false, changePeriod = false) {
     const key = date.toISODate()!
     setSelected(key); setSelectedSchedule(undefined)
@@ -200,7 +201,9 @@ export function MoteCalendar({ scope, reference, active, openRequest }: {
     focusArrangement(surface.current, id)
   }, [active, mode, showEnded, source.observed, byId, openRequest])
   const today = DateTime.fromMillis(now, { zone: timezone }).toISODate()!
-  const selectedSlot = hourly.get(selected + ':' + selectedHour)
+  const hourKeyOfSelection = selected + ':' + selectedHour
+  const selectedSlot = hourly.get(hourKeyOfSelection)
+  const historyWindow = timed ? hourWindows.get(hourKeyOfSelection) : calendarDayWindow(selectedDate)
   const selectedGroups = timed ? selectedSlot?.groups ?? [] : days.get(selected) ?? []
   const selectedCount = selectedGroups.reduce((sum, group) => sum + group.planned, 0)
   const acceptedCount = selectedGroups.filter(group => group.accepted).length
@@ -354,7 +357,9 @@ export function MoteCalendar({ scope, reference, active, openRequest }: {
               repeatedHour={selectedSlot.window.to - selectedSlot.window.from > 3_600_000} onOpen={revealArrangement} />
               : <Button type="button" onClick={() => changeMode('day')}>Open day</Button>}
           </div> : <p className="continuous-progress-control__help">{!source.observed ? 'Arrangements are unconfirmed.' : 'No planned triggers or recent accepted input in this period.'}</p>}
-          <p className="mote-calendar__reading-note">History shows the latest confirmed input per arrangement.</p>
+          <p className="mote-calendar__reading-note">The calendar marks the latest confirmed input for each arrangement.</p>
+          {historyWindow ? <MoteScheduleHistory window={historyWindow} records={source.records} timezone={timezone}
+            active={active && queries.length > 0} selectedSchedule={selectedSchedule} onSelectSchedule={setSelectedSchedule} /> : null}
         </section>
       </section>
     </div>}
