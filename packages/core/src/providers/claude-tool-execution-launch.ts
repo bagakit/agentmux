@@ -8,11 +8,11 @@ import type { AgentToolExecutionLaunchContext } from '../agent-tool-execution.js
 import { classifyExecutable } from '../executable-probe.js'
 import { agentControlFailureCode, registerAgentExecutionInvocation } from '../agent-execution-rpc-relay.js'
 
-import { inspectClaudeHookSettings } from './claude-hook-activation.js'
+import { inspectClaudeHookSettings } from './claude-native-settings.js'
 import { prepareClaudeExecutionPolicy, proveClaudeExecutionPolicyDirectory } from './claude-execution-policy.js'
 import { openDirectoryWriteParent } from '../directory-write.js'
 export const CLAUDE_EXECUTION_MCP_SERVER = 'amux_exec'
-import { claudeLaunchValueOptions as valueOptions } from './claude-launch-options.js'
+import { claudeLaunchValueOptions as valueOptions } from '@agentmux/providers/claude/launch-options'
 
 /** Resolve this Host's exact executable; native protocol and permissions belong to execution. */
 export async function resolveClaudeExecutionExecutable(command: string, options: { env: Readonly<NodeJS.ProcessEnv>; workspacePath: string }): Promise<string> {

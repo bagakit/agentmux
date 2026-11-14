@@ -1,8 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, open, readFile, realpath, rename, rmdir, stat, unlink } from 'node:fs/promises'
-import { executionEnvironmentValue, executionHomeDirectory, executionPath, type ProviderExecutionEnvironment } from './execution-environment.js'
+import type { ProviderExecutionEnvironment, ProviderHookEnvironment } from '../hook-services.js'
 import { join, resolve } from 'node:path'
-import type { AgentWorkspaceTrustContext, AgentWorkspaceTrustReceipt } from '../agent-provider.js'
 
 /**
  * Claude asks "Is this a project you trust?" on its first start in an untrusted folder. The
@@ -37,7 +36,8 @@ export async function claudeTrustKey(directory: string): Promise<string> {
 }
 
 /** Mirror Claude's own choice of its global configuration file. */
-export async function claudeGlobalConfigPath(env: ProviderExecutionEnvironment, workspacePath?: string): Promise<string> {
+export async function claudeGlobalConfigPath({ executionEnvironmentValue, executionHomeDirectory, executionPath }: ProviderHookEnvironment,
+  env: ProviderExecutionEnvironment, workspacePath?: string): Promise<string> {
   const configDirectory = executionEnvironmentValue(env, 'CLAUDE_CONFIG_DIR')
   const home = executionPath(executionHomeDirectory(env), workspacePath)
   const configRoot = configDirectory ? executionPath(configDirectory, workspacePath) : join(home, '.claude')
@@ -101,31 +101,32 @@ async function writeThrough(path: string, content: string): Promise<void> {
  * Record Claude folder trust for `workspacePath`, a home the Host confirmed as AgentMux's own.
  * Never creates the configuration file and changes only that one project entry.
  */
-export async function prepareClaudeOwnedWorkspaceTrust(context: AgentWorkspaceTrustContext): Promise<AgentWorkspaceTrustReceipt> {
+export async function prepareClaudeOwnedWorkspaceTrust(environment: ProviderHookEnvironment,
+  context: { ownedRoot: string; workspacePath: string; env: Readonly<Record<string, string>>; signal?: AbortSignal }) {
   let trustKey: string | null = null, configPath: string | null = null
   try {
     trustKey = await claudeTrustKey(context.workspacePath)
     if (trustKey !== await claudeTrustKey(context.ownedRoot)) return {
-      status: 'not-applicable', trustKey, configPath, code: 'CLAUDE_TRUST_HOME_MISMATCH' }
-    configPath = await claudeGlobalConfigPath(context.env, context.workspacePath)
+      status: 'not-applicable' as const, trustKey, configPath, code: 'CLAUDE_TRUST_HOME_MISMATCH' }
+    configPath = await claudeGlobalConfigPath(environment, context.env, context.workspacePath)
     const before = await readConfig(configPath)
     // Claude creates and owns a missing configuration during its own onboarding.
-    if (!before) return { status: 'unconfirmed', trustKey, configPath, code: 'CLAUDE_CONFIG_ABSENT' }
-    if (trusted(before, trustKey)) return { status: 'already-trusted', trustKey, configPath, code: 'CLAUDE_TRUST_PRESENT' }
+    if (!before) return { status: 'unconfirmed' as const, trustKey, configPath, code: 'CLAUDE_CONFIG_ABSENT' }
+    if (trusted(before, trustKey)) return { status: 'already-trusted' as const, trustKey, configPath, code: 'CLAUDE_TRUST_PRESENT' }
     const release = await acquireLock(`${configPath}.lock`, context.signal)
     try {
       const current = await readConfig(configPath)
-      if (!current) return { status: 'unconfirmed', trustKey, configPath, code: 'CLAUDE_CONFIG_ABSENT' }
-      if (trusted(current, trustKey)) return { status: 'already-trusted', trustKey, configPath, code: 'CLAUDE_TRUST_PRESENT' }
+      if (!current) return { status: 'unconfirmed' as const, trustKey, configPath, code: 'CLAUDE_CONFIG_ABSENT' }
+      if (trusted(current, trustKey)) return { status: 'already-trusted' as const, trustKey, configPath, code: 'CLAUDE_TRUST_PRESENT' }
       const projects = current.projects && typeof current.projects === 'object' ? current.projects : {}
       const entry = projects[trustKey] && typeof projects[trustKey] === 'object' ? projects[trustKey] : {}
       const next: ClaudeConfig = { ...current, projects: { ...projects, [trustKey]: { ...entry, hasTrustDialogAccepted: true } } }
       await writeThrough(configPath, JSON.stringify(next, null, 2))
-      return { status: 'trusted', trustKey, configPath, code: 'CLAUDE_TRUST_RECORDED' }
+      return { status: 'trusted' as const, trustKey, configPath, code: 'CLAUDE_TRUST_RECORDED' }
     } finally { await release() }
   } catch (error) {
     if (context.signal?.aborted) throw error
-    return { status: 'unconfirmed', trustKey, configPath, code: 'CLAUDE_TRUST_UNCONFIRMED',
+    return { status: 'unconfirmed' as const, trustKey, configPath, code: 'CLAUDE_TRUST_UNCONFIRMED',
       issue: error instanceof Error ? error.message : String(error) }
   }
 }

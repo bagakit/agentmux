@@ -2,13 +2,26 @@ import { execFile } from 'node:child_process'
 import { readFile, realpath, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
-import type { AgentProviderInputInitialization, AgentProviderInputInitializationContext } from '../agent-provider.js'
-import { claudeLaunchValueOptions } from './claude-launch-options.js'
-import { claudeGlobalConfigPath, claudeTrustKey } from './claude-workspace-trust.js'
+import type { ProviderExecutionEnvironment } from '../hook-services.js'
+import { claudeLaunchValueOptions } from './launch-options.js'
+import { claudeTrustKey } from './workspace-trust.js'
+
+type ClaudeInputContext = {
+  command?: string
+  processId?: number
+  args: readonly string[]
+  env: ProviderExecutionEnvironment
+  workspacePath: string
+  signal?: AbortSignal
+}
+type ClaudeInputState =
+  | { state: 'unknown'; reason: 'inspection-unavailable' | 'native-input-unconfirmed'; source: 'unavailable'; scope: 'unknown' }
+  | { state: 'pending'; reason: 'authentication' | 'onboarding' | 'directory-trust';
+      source: 'native-protocol' | 'native-configuration'; scope: 'prerequisite' }
 
 const execute = promisify(execFile)
-const unavailable: AgentProviderInputInitialization = { state: 'unknown', reason: 'inspection-unavailable', source: 'unavailable', scope: 'unknown' }
-const unconfirmed: AgentProviderInputInitialization = { state: 'unknown', reason: 'native-input-unconfirmed', source: 'unavailable', scope: 'unknown' }
+const unavailable: ClaudeInputState = { state: 'unknown', reason: 'inspection-unavailable', source: 'unavailable', scope: 'unknown' }
+const unconfirmed: ClaudeInputState = { state: 'unknown', reason: 'native-input-unconfirmed', source: 'unavailable', scope: 'unknown' }
 const flags = new Set(['--continue', '-c', '--print', '-p', '--verbose', '--dangerously-skip-permissions', '--allow-dangerously-skip-permissions', '--strict-mcp-config', '--no-session-persistence', '--chrome', '--no-chrome', '--disable-slash-commands'])
 const authMethods = new Set(['none', 'claude.ai', 'oauth_token', 'api_key', 'api_key_helper', 'third_party'])
 
@@ -48,7 +61,7 @@ async function sameDirectory(left: string, right: string): Promise<boolean> {
 }
 
 /** Match the existing native trust contract, including nested repository boundaries. */
-async function directoryTrusted(config: Record<string, unknown>, context: AgentProviderInputInitializationContext, env: NodeJS.ProcessEnv): Promise<boolean> {
+async function directoryTrusted(config: Record<string, unknown>, context: ClaudeInputContext, env: NodeJS.ProcessEnv): Promise<boolean> {
   if (config.projects !== undefined && !object(config.projects)) throw new Error('Unconfirmed native projects configuration')
   const projects = (config.projects ?? {}) as Record<string, unknown>
   const workspace = await realpath(context.workspacePath)
@@ -81,7 +94,10 @@ async function directoryTrusted(config: Record<string, unknown>, context: AgentP
  * A fresh read of native prerequisites, never proof of a live prompt or permission to answer it.
  * Core supplies the original process environment; observer environment is never merged in.
  */
-export async function readClaudeInputInitialization(context: AgentProviderInputInitializationContext): Promise<AgentProviderInputInitialization> {
+export async function readClaudeInputInitialization(
+  claudeGlobalConfigPath: (env: ProviderExecutionEnvironment, workspacePath: string) => Promise<string>,
+  context: ClaudeInputContext
+): Promise<ClaudeInputState> {
   const args = authenticationArgs(context.args)
   const home = process.platform === 'win32' ? 'USERPROFILE' : 'HOME'
   const commandHasPath = context.command && (isAbsolute(context.command) || context.command.includes('/') || process.platform === 'win32' && context.command.includes('\\'))

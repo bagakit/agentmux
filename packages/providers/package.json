@@ -195,6 +195,18 @@
     "./hermes/native-history": {
       "types": "./dist/hermes/native-history.d.ts",
       "import": "./dist/hermes/native-history.js"
+    },
+    "./claude/hook-settings": {
+      "types": "./dist/claude/hook-settings.d.ts",
+      "import": "./dist/claude/hook-settings.js"
+    },
+    "./claude/workspace-trust": {
+      "types": "./dist/claude/workspace-trust.d.ts",
+      "import": "./dist/claude/workspace-trust.js"
+    },
+    "./claude/input-initialization": {
+      "types": "./dist/claude/input-initialization.d.ts",
+      "import": "./dist/claude/input-initialization.js"
     }
   },
   "files": [

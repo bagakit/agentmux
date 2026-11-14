@@ -1,13 +1,11 @@
+import { inspectClaudeHookSettings, prepareClaudeOwnedWorkspaceTrust, readClaudeInputInitialization } from './claude-native-settings.js'
 import { prepareClaudeToolExecutionLaunch } from './claude-tool-execution-launch.js'
 import { prepareClaudeExecutionHelper } from './claude-execution-helper.js'
 import { CLAUDE_USAGE_CAPABILITY } from '@agentmux/providers/claude/usage'
-import { inspectClaudeHookActivation } from './claude-hook-activation.js'
 import { listClaudeNativeSessions, assertClaudeNativeResumeSource, claudeRecoveryFiles } from './claude-native-catalog.js'
 import { readClaudeSessionHistoryPage, readClaudeSessionHistoryRecord, readClaudeConversationChanges } from './claude-native-history.js'
 import { discoverClaudeNativeSession } from './claude-native-session.js'
 import { prepareClaudeNativeInput } from './claude-native-input.js'
-import { prepareClaudeOwnedWorkspaceTrust } from './claude-workspace-trust.js'
-import { readClaudeInputInitialization } from './claude-input-initialization.js'
 import {
   CLAUDE_ASKED_TOOL_END_EVENT,
   CLAUDE_CHILD_ACTIVITY_EVENT,
@@ -264,7 +262,7 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
       permissionOptions: CLAUDE_PERMISSION_OPTIONS
     }),
     hook: CLAUDE_HOOKS,
-    inspectHookActivation: inspectClaudeHookActivation,
+    inspectHookActivation: inspectClaudeHookSettings,
     launchOptions: CLAUDE_LAUNCH_OPTIONS,
     buildForkArgs: (sessionId, _transcriptPath, prompt, args) => [
       '--resume', sessionId, '--fork-session', ...args, ...(prompt ? [prompt] : [])
