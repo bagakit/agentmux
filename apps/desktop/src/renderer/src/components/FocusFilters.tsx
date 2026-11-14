@@ -54,19 +54,19 @@ export function FocusFilters({ value, onChange, onInspectChange, options, visibl
   const match = (name: string) => name.toLocaleLowerCase().includes(optionQuery.trim().toLocaleLowerCase())
   const option = (dimension: 'project' | 'state' | 'type', item: Option, checked: boolean, change: () => void) => <Menu.CheckboxItem key={item.id}
     {...{ [`data-focus-${dimension}`]: item.id }} checked={checked} onCheckedChange={change} onSelect={event => event.preventDefault()}
-    className="tab-context-menu__item focus-filter-menu__item">
+    className="tab-context-menu__item focus-filter-menu__item" data-focus-project-scope-control={dimension === 'project' || undefined}>
     <span className="focus-filter-menu__check"><Menu.ItemIndicator><CheckIcon size={13} /></Menu.ItemIndicator></span>
     {dimension === 'type' && item.id !== 'all' ? (() => { const Icon = TYPE_ICONS[item.id as FocusSourceType]; return <Icon size={13} /> })() : null}
     <span className="focus-filter-menu__name">{item.name}{item.unavailable ? <small>Unavailable · Original condition kept</small> : null}</span>
     {item.id !== 'all' ? <span className="focus-filter-menu__count">{item.count}</span> : null}
   </Menu.CheckboxItem>
-  const chip = (field: 'projects' | 'states' | 'types', label: string, names: readonly string[]) => names.length ? <span className="focus-filter-chip" key={field}>
+  const chip = (field: 'projects' | 'states' | 'types', label: string, names: readonly string[]) => names.length ? <span className="focus-filter-chip" key={field} data-focus-project-scope-control={field === 'projects' || undefined}>
     <ExplicitFilterTrigger type="button" className="focus-filter-chip__value" title={names.join(' or ')} aria-label={`Edit ${label} filter: ${names.join(' or ')}`} onClick={event => { originRef.current = event.currentTarget; setOptionQuery(''); changeOpen(true) }}><span>{label}</span><strong>{names.length > 1 ? `${names[0]} +${names.length - 1}` : names[0]}</strong></ExplicitFilterTrigger>
     <button type="button" className="focus-filter-chip__remove" aria-label={`Remove ${label} filter`} onClick={() => { onChange({ ...value, [field]: [] }); triggerRef.current?.focus() }}><CloseIcon size={11} /></button>
   </span> : null
   return <Menu.Root open={visible && open} onOpenChange={changeOpen}>
     <div className="focus-filter-chips" aria-label="Applied Focus filters">{chip('projects', 'Project', projectNames)}{chip('states', 'State', stateNames)}{chip('types', 'Type', typeNames)}</div>
-      <Menu.Trigger asChild><button ref={triggerRef} type="button" className="focus-filter-trigger" aria-label="Focus filters" aria-description={summary} title={summary} data-active={count > 0 || undefined} onPointerDown={() => { originRef.current = triggerRef.current }} onKeyDown={() => { originRef.current = triggerRef.current }}>
+      <Menu.Trigger asChild><button ref={triggerRef} type="button" className="focus-filter-trigger" data-focus-project-scope-control aria-label="Focus filters" aria-description={summary} title={summary} data-active={count > 0 || undefined} onPointerDown={() => { originRef.current = triggerRef.current }} onKeyDown={() => { originRef.current = triggerRef.current }}>
         <FilterIcon size={14} /><span className="focus-filter-trigger__summary">Filter</span>{count ? <span className="focus-filter-trigger__count">{count}</span> : null}
       </button></Menu.Trigger>
       <Menu.Portal><Menu.Content className="tab-context-menu focus-filter-menu" align="end" sideOffset={4} collisionPadding={8} onKeyDown={event => {
@@ -106,7 +106,7 @@ export function FocusFilters({ value, onChange, onInspectChange, options, visibl
         </div>
         <Menu.Separator className="tab-context-menu__separator" />
         <Menu.Label className="focus-filter-menu__scope">Match all groups · Any value within a group. Types may overlap.</Menu.Label>
-        <Menu.Item className="tab-context-menu__item" onSelect={() => { onChange(EMPTY_FOCUS_FILTERS); onClear() }}>Clear filters</Menu.Item>
+        <Menu.Item className="tab-context-menu__item" data-focus-project-scope-control onSelect={() => { onChange(EMPTY_FOCUS_FILTERS); onClear() }}>Clear filters</Menu.Item>
         <Menu.Item className="tab-context-menu__item" disabled={!historyAvailable} onSelect={onHistory}>Search all retained conversation text</Menu.Item>
         <Menu.Item className="tab-context-menu__item" onSelect={() => {}}>Done</Menu.Item>
       </Menu.Content></Menu.Portal>

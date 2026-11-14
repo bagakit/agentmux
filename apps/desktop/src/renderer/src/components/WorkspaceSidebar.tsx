@@ -311,6 +311,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
           data-workspace-id={preferred ?? undefined}
           data-space-icon-target={target.key}
           {...(active ? { 'data-active-workspace-id': activeWorkspaceId } : {})}
+          data-focus-project-scope-control
           // 分类成员、路径聚合与真实目录层级相加；这里只报层数，像素归密度合同和样式表。
           {...(depth > 0 ? { style: { '--rail-depth': depth } as CSSProperties } : {})}
           {...(activity.working > 0 ? { 'data-running': 'true' } : {})}

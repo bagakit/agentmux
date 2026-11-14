@@ -33,6 +33,12 @@ function focusProjectIndex(config: Pick<AppConfig, 'workspaces'> | null): Projec
   return index
 }
 export function focusProjectRoots(config: Pick<AppConfig, 'workspaces'> | null) { return focusProjectIndex(config).roots }
+/** Map a selected registered resource to the same Host/Project identity as its lanes. */
+export function focusWorkspaceProject(workspace: AppConfig['workspaces'][number], config: Pick<AppConfig, 'workspaces'> | null) {
+  const project = workspace.repoPath ? focusProjectRoots(config).get(JSON.stringify([workspace.hostId, workspace.repoPath])) : workspace
+  const projectId = project?.id ?? (workspace.repoPath ? directoryIdentity(workspace.hostId, workspace.repoPath) : workspace.id)
+  return { id: focusProjectKey(workspace.hostId, projectId), name: project?.name ?? workspace.name }
+}
 export type FocusContextReference = Pick<FocusContext, 'hostId' | 'id'>
 export type FocusProjectLane = {
   /** The lane belongs to its Project; each Agent keeps its own qualified identity. */

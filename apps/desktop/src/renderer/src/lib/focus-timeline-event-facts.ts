@@ -6,7 +6,7 @@ import type { FocusTimeFormatters } from './focus-timeline-ruler'
 
 /** A disposable description of facts already in this track, never a history read. */
 export type FocusTimelineEventFacts = {
-  kind: 'work' | 'focus' | 'live' | 'gap'
+  kind: 'work' | 'focus' | 'live' | 'gap' | 'messages'
   name: string
   event: string
   time: string

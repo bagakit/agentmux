@@ -8,6 +8,7 @@ const ThemeObjectActivityIcon = semanticIconComponent('object.activity')
 const ThemeActionRevealIcon = semanticIconComponent('action.reveal')
 const ThemeStatusRunningIcon = semanticIconComponent('status.running')
 const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
+const ThemeConversationIcon = semanticIconComponent('object.conversation')
 
 
 /** Only the existing event's already-read facts; no focus, Reader or resource work. */
@@ -44,7 +45,7 @@ export function FocusTimelineEventPreview({ facts, anchor, onClose, onMouseEnter
       }
     }
   }, [anchor, id, onClose])
-  const Icon = { work: ThemeObjectActivityIcon, focus: ThemeActionRevealIcon, live: ThemeStatusRunningIcon, gap: ThemeStatusUnknownIcon }[facts.kind]
+  const Icon = { work: ThemeObjectActivityIcon, focus: ThemeActionRevealIcon, live: ThemeStatusRunningIcon, gap: ThemeStatusUnknownIcon, messages: ThemeConversationIcon }[facts.kind]
   return <WindowOverlayPortal layer="tooltip"><div ref={element} id={id} role="tooltip"
     className="recent-focus__message-preview recent-focus__event-preview" data-event-kind={facts.kind}
     onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}>

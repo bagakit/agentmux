@@ -402,3 +402,38 @@
 .agent-locations > span:last-child { margin-left: auto; color: var(--text-3); font-size: var(--fs-xs); }
 .agent-locations:hover, .agent-locations[data-highlighted] { background: var(--surface-3); color: var(--text); }
 .agent-locations:focus-visible { outline: 1px solid var(--green); outline-offset: -1px; }
+
+.recent-focus__title:has(.recent-focus__scope) { min-width: min(220px, 60%); }
+.recent-focus__scope {
+  flex: 0 1 auto;
+  max-width: 160px;
+  min-width: 8ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-3);
+  font: inherit;
+}
+button.recent-focus__scope {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 5px;
+  background: transparent;
+  cursor: pointer;
+}
+button.recent-focus__scope:hover,
+button.recent-focus__scope:focus-visible { color: var(--text); background: var(--surface-2); }
+
+.recent-focus__track .recent-focus__gutter .agent-avatar--inline {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  font: inherit;
+  color: inherit;
+}
+.recent-focus__track .recent-focus__gutter .agent-avatar--inline .agent-avatar__face { flex: none; }
+.recent-focus__track .recent-focus__gutter .agent-avatar--inline .agent-avatar__label { min-width: 0; }
+
+.recent-focus__identity { display: flex; flex-direction: column; justify-content: center; min-width: 0; }

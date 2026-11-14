@@ -118,7 +118,7 @@ export function FocusMessagePreview({ active = true, autoFocus = true, message, 
     const outside = (event: PointerEvent) => {
       // A nested image Portal remains inside this React subtree, though DOM.contains is false.
       if (insidePointer.current === event) { insidePointer.current = null; return }
-      if (interactive && event.target instanceof Node && !surface.contains(event.target) && !(event.target instanceof Element && event.target.closest('.recent-focus__message'))) onClose()
+      if (interactive && event.target instanceof Node && !surface.contains(event.target) && !(event.target instanceof Element && event.target.closest('.recent-focus__message, [data-focus-project-scope-control]'))) onClose()
     }
     document.addEventListener('keydown', dismiss)
     document.addEventListener('pointerdown', outside)
