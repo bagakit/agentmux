@@ -76,6 +76,13 @@ export function readFocusGroups<M extends FocusMethod>(state: AppState, input: {
     if (relevant) sourceStatuses.push({ source: 'mounted-space:' + key, status: observation.error ? 'unavailable' : 'unconfirmed' })
   }
   const group = read ? groups.get(JSON.stringify(read.scope)) : undefined
+  const topicSources = read ? new Set(lanes.filter(lane => lane.collection && JSON.stringify(focusGroupReadScope(lane, resources)) === JSON.stringify(read.scope))
+    .flatMap(lane => lane.collection!.topics.map(topic => topic.workspaceId))) : new Set(Object.keys(state.scratchTopicSnapshots))
+  for (const workspaceId of topicSources) {
+    const snapshot = state.scratchTopicSnapshots[workspaceId], confirmed = Boolean(snapshot && snapshot.topics !== null && !snapshot.error && !snapshot.discoveryError && !snapshot.reading)
+    sourceStatuses.push({ source: 'topic-directory:' + workspaceId, status: confirmed ? 'observed' : 'unconfirmed' })
+    if (!confirmed) issues.push({ code: 'FOCUS_METADATA_UNCONFIRMED', message: 'The original Topic directory metadata update is unconfirmed. Cached members and their original references remain readable.' })
+  }
   const byReference = new Map(contexts.map(context => [focusContextIdentityKey(context.hostId, context.id), context]))
   const selected = read ? read.selection.kind === 'members' ? read.selection.references.map(reference => [focusContextReferenceKey(reference), reference] as const)
     : [...group?.references ?? []].sort(compare).map(key => { const [hostId, contextId] = JSON.parse(key) as [string, string]; return [key, { hostId, contextId }] as const }) : []
@@ -95,11 +102,11 @@ export function readFocusGroups<M extends FocusMethod>(state: AppState, input: {
   const items = read ? slice.map(([key, value]): AgentMuxFocusMember => {
     const reference = value as { hostId: string; contextId: string }, context = byReference.get(key)
     const observed = Boolean(context && group?.references.has(key)), availability = observed ? 'observed' : context ? 'changed' : 'unconfirmed'
-    const identity = observed ? identities.get(key) : undefined
-    return { reference, availability, name: observed ? context!.name : null, kind: observed ? context!.kind : null,
-      state: observed ? { process: context!.processState, semantic: context!.activitySemantic ?? null, label: context!.stateLabel, unobserved: context!.runUnobserved ?? false } : null,
-      agent: observed && context!.control ? { hostId: context!.control!.hostId, agentSessionId: context!.control!.agentSessionId, run: { runId: context!.control!.run.runId } } : null,
-      excerpt: observed ? { text: context!.detail.slice(0, FOCUS_EXCERPT_MAX), truncated: context!.detail.length > FOCUS_EXCERPT_MAX } : null,
+    const identity = context ? identities.get(key) : undefined
+    return { reference, availability, name: context?.name ?? null, kind: context?.kind ?? null,
+      state: context ? { process: context.processState, semantic: context.activitySemantic ?? null, label: context.stateLabel, unobserved: context.runUnobserved ?? false } : null,
+      agent: context?.control ? { hostId: context.control.hostId, agentSessionId: context.control.agentSessionId, run: { runId: context.control.run.runId } } : null,
+      excerpt: context ? { text: context.detail.slice(0, FOCUS_EXCERPT_MAX), truncated: context.detail.length > FOCUS_EXCERPT_MAX } : null,
       locations: { status: identity?.locations.status ?? 'unconfirmed', occurrences: identity?.locations.occurrences.flatMap(occurrence => occurrence.display.hostId ? [{
         hostId: occurrence.display.hostId, workspaceId: occurrence.display.workspaceId, groupId: occurrence.display.groupId,
         tabId: occurrence.display.tabId, regionId: occurrence.display.regionId
