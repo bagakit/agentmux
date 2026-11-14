@@ -153,6 +153,7 @@ export function createHostSpatialPresentation(options: { configurationPath?: str
     const motePresentation = await Promise.all(catalog.spaces.filter(space => space.kind === 'mote').map(async space => {
       const workspace = configuration.workspaces.find(value => value.id === SCRATCH_WORKSPACE_ID && value.hostId === space.hostId)
       const home = catalog.zones.find(zone => zone.zoneId === homeZoneId(space.spaceId) && zone.workspaceId === workspace?.id && zone.hostId === workspace.hostId)
+      const content = workspace && home ? { zoneId: home.zoneId, hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path } : null
       try {
         const topic = workspace && space.topicId ? await topics.read(workspace, space.topicId) : null
         const quickMode = topic?.quickMode ?? { status: 'unconfirmed' as const, message: 'The original MOTE.md preferences are unconfirmed. Original conversations and manual navigation remain available.' }
@@ -161,9 +162,9 @@ export function createHostSpatialPresentation(options: { configurationPath?: str
         const confirmed = saved && region?.agentSessionId === saved.sessionId && (!region.execution || region.execution.hostId === saved.hostId)
           && catalog.locations.some(location => location.spaceId === space.spaceId && location.displayWorkspaceId === saved.displayWorkspaceId
             && location.groupId === saved.groupId && location.tabId === saved.tabId && location.regionId === saved.regionId)
-        return { spaceId: space.spaceId, quickMode, content: workspace && home ? { zoneId: home.zoneId, hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path } : null,
+        return { spaceId: space.spaceId, quickMode, content,
           conversation: confirmed ? saved : null, ...(saved && !confirmed ? { issue: 'The saved default conversation is unconfirmed at its original location. Keep its original reference and refresh the same Mote.' } : {}) }
-      } catch (error) { return { spaceId: space.spaceId, content: null, quickMode: { status: 'unconfirmed' as const, message: message(error) }, conversation: null, issue: message(error) } }
+      } catch (error) { return { spaceId: space.spaceId, content, quickMode: { status: 'unconfirmed' as const, message: message(error) }, conversation: null, issue: message(error) } }
     }))
     const appearance = await Promise.all(catalog.spaces.map(async space => {
       const choice = configuration.appearance.spaceObjectIcons?.[space.spaceId]
