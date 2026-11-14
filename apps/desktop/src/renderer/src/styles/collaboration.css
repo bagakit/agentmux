@@ -110,11 +110,11 @@
 .collaboration-edge--supervision { stroke: var(--amber); }
 .collaboration-edge.is-selected { opacity: 1; stroke-width: 2.75; }
 .collaboration-edge__count { position: absolute; pointer-events: none; background: var(--surface-1); border: 1px solid var(--line); color: var(--text-2); border-radius: 8px; padding: 0 5px; font-size: 10px; line-height: 16px; font-variant-numeric: tabular-nums; }
-.collaboration-edge__pulse, .collaboration-edge__packet { fill: none; vector-effect: non-scaling-stroke; stroke-linecap: round; pointer-events: none; animation: collaboration-transfer var(--collaboration-transfer-duration) linear 1 both; stroke-dasharray: var(--collaboration-transfer-span) 2; stroke-dashoffset: var(--collaboration-transfer-span); }
+.collaboration-edge__pulse, .collaboration-edge__packet { fill: none; vector-effect: non-scaling-stroke; stroke-linecap: round; pointer-events: none; animation: collaboration-transfer var(--collaboration-transfer-duration) linear 1 both; stroke-dasharray: calc(var(--collaboration-transfer-span) * 1px) 2px; stroke-dashoffset: calc(var(--collaboration-transfer-span) * 1px); }
 .collaboration-edge__pulse { stroke: color-mix(in srgb, var(--green) 26%, transparent); stroke-width: 4; }
 .collaboration-edge__packet { stroke: color-mix(in srgb, var(--green) 72%, var(--text)); stroke-width: 2; }
 .collaboration-edge__update { stroke: var(--amber); stroke-width: 2; stroke-dasharray: none; animation-name: collaboration-supervision; animation-timing-function: ease-out; }
-@keyframes collaboration-transfer { 0% { stroke-dashoffset: var(--collaboration-transfer-span); opacity: 0; } 9%, 78% { opacity: 1; } 100% { stroke-dashoffset: calc(var(--collaboration-transfer-span) - 1); opacity: 0; } }
+@keyframes collaboration-transfer { 0% { stroke-dashoffset: calc(var(--collaboration-transfer-span) * 1px); opacity: 0; } 9%, 78% { opacity: 1; } 100% { stroke-dashoffset: calc((var(--collaboration-transfer-span) - 1) * 1px); opacity: 0; } }
 @keyframes collaboration-supervision { 0% { opacity: 0; } 25% { opacity: .9; } 100% { opacity: 0; } }
 .collaboration-canvas__controls { z-index: 6; position: relative; display: flex; align-items: center; padding: 5px; gap: 2px; margin-left: auto; background: var(--surface-1); border: 1px solid var(--line); border-radius: 9px; box-shadow: var(--elev-1); pointer-events: auto; }
 .collaboration-canvas__controls .collaboration-canvas__arrange { display: inline-flex; gap: 5px; width: auto; padding-inline: 7px; font-size: 11px; }
