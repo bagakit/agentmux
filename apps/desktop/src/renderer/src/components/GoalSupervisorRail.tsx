@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { demandAgentReferenceLabel, goalSupervisorHostWitnesses } from '@agentmux/demand/relations'
 import { delegationWorkerHostId, type DemandDelegation } from '@agentmux/demand/delegations'
@@ -7,7 +7,8 @@ import { Button } from '@agentmux/client-ui/components/Button'
 import type { DemandProjection } from '../lib/global-demand-board'
 import { useGoalAgentName } from '../lib/goal-discussion-recipient'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
-import { GoalContinuationAgent } from './GoalContinuationControl'
+import { GoalPatrolControl } from './GoalPatrolControl'
+import { GoalContinuationAgent, GoalContinuationControl } from './GoalContinuationControl'
 import '../styles/goal-supervisor-rail.css'
 
 const DiscussionIcon = semanticIconComponent('object.conversation')
@@ -80,17 +81,20 @@ function coordinationEntries(demand: DemandProjection): CoordinationEntry[] {
   return entries.sort((left, right) => right.at - left.at)
 }
 
-/** A reading rail over the Goal owner's existing records. It performs no Agent or Goal writes. */
-export function GoalSupervisorRail({ demand, onChooseSupervisor, onAddAssignee, currentDelivery, onOpenDiscussion, discussionBusy = false, onRevealAttempt }: {
+/** A workbench over the Goal owner's records and explicit actions. */
+export function GoalSupervisorRail({ demand, onChooseSupervisor, onAddAssignee, planning, inspectionIsCurrent = false, currentDelivery, onOpenDiscussion, discussionBusy = false, onRevealAttempt }: {
   demand: DemandProjection
   onChooseSupervisor?: () => void
   onAddAssignee?: () => void
+  planning?: ReactNode
+  inspectionIsCurrent?: boolean
   currentDelivery?: AttemptTarget | undefined
   onOpenDiscussion?: (() => void) | undefined
   discussionBusy?: boolean
   onRevealAttempt(nodeId: string, operationId: string, trigger: HTMLButtonElement): void
 }) {
   const active = useWorkbenchPresentationActive()
+  const [progressOpened, setProgressOpened] = useState(false)
   const [all, setAll] = useState(false)
   const entries = useMemo(() => coordinationEntries(demand), [demand.plan, demand.delegations, demand.patrols, demand.decisions])
   const supervisor = demand.supervisorSessionId, hosts = goalSupervisorHostWitnesses(demand)
@@ -104,6 +108,7 @@ export function GoalSupervisorRail({ demand, onChooseSupervisor, onAddAssignee, 
     ?? rows.find(row => row.alert !== null) ?? rows.find(row => row.phase !== 'closed')
   const nextOwner = next ? { manager: 'Supervisor', worker: 'Executor', human: 'Human', external: 'External' }[next.nextOwner.kind] : undefined
   const needsAssignee = !supervisor && !demand.assigneeSessionIds?.length
+  const editProgressSupervisor = needsAssignee ? onAddAssignee : onChooseSupervisor
   const shown = all ? entries : entries.slice(0, RECENT)
   return <section className="goal-supervisor-rail" aria-label="Goal Supervisor" data-goal-supervisor-rail={demand.id}>
     <header className="goal-supervisor-rail__heading"><h2><SupervisorIcon size={17} aria-hidden="true" />Supervisor</h2></header>
@@ -115,7 +120,7 @@ export function GoalSupervisorRail({ demand, onChooseSupervisor, onAddAssignee, 
       {needsAssignee && onAddAssignee
         ? <Button type="button" className="goal-supervisor-rail__assign" onClick={onAddAssignee}>Add assignee</Button>
         : onChooseSupervisor ? <Button type="button" className="goal-supervisor-rail__assign" onClick={onChooseSupervisor}>
-          {supervisor ? 'Change' : 'Assign'}<span className="goals-visually-hidden"> Supervisor</span>
+          {typeof supervisor === 'string' && hosts.length !== 1 ? 'Choose Supervisor' : <>{supervisor ? 'Change' : 'Assign'}<span className="goals-visually-hidden"> Supervisor</span></>}
         </Button> : null}
     </div>
     {showDiagnostic ? <p className="goal-supervisor-rail__issue" role="status">{diagnostic}</p> : null}
@@ -125,6 +130,13 @@ export function GoalSupervisorRail({ demand, onChooseSupervisor, onAddAssignee, 
     {next && next.execution.operationId !== currentDelivery?.operationId ? <div className="goal-supervisor-rail__next" data-goal-supervisor-next={next.execution.operationId}>
       <span>{next.nextOwner.kind === 'manager' ? 'Supervisor’s next step' : `Waiting on · ${nextOwner}`}</span><p>{next.nextOwner.action}</p>
     </div> : !currentDelivery && (rows.length || demand.dispatches?.length || demand.delegations?.length) ? <p className="goal-supervisor-rail__empty">{demand.responsibility ? 'No open execution responsibility recorded.' : 'Current execution responsibility is unconfirmed.'}</p> : null}
+    <GoalPatrolControl demand={demand} embedded primary={inspectionIsCurrent} />
+    {planning}
+    <details className="goal-supervisor-rail__progress" onToggle={event => { if (event.target === event.currentTarget && event.currentTarget.open) setProgressOpened(true) }}>
+      <summary>Progress settings</summary>
+      {progressOpened ? <GoalContinuationControl demand={demand} active={active}
+        {...(editProgressSupervisor ? { onChooseSupervisor: editProgressSupervisor } : {})} /> : null}
+    </details>
     {demand.delegationObservationIssue ? <p className="goal-supervisor-rail__issue" role="status">{demand.delegationObservationIssue}</p> : null}
     {onOpenDiscussion ? <Button type="button" className="goal-supervisor-rail__discussion" disabled={discussionBusy} onClick={onOpenDiscussion}><DiscussionIcon size={13} aria-hidden="true" />Open goal discussion</Button> : null}
     {typeof supervisor === 'string' || diagnostic ? <details className="goal-supervisor-rail__detail" data-goal-supervisor-source>

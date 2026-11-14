@@ -20,7 +20,6 @@ import { useGoalAgentPresentation } from '../lib/goal-discussion-recipient'
 import { GoalPlanReadingPlacement } from './GoalPlanReadingPlacement'
 import { GoalPlanThread } from './GoalPlanThread'
 import { delegationWorkerHostId, type DemandDelegation } from '@agentmux/demand/delegations'
-import { GoalPlanRequest } from './GoalPlanRequest'
 import { GoalExecutionTimeline } from './GoalExecutionTimeline'
 import { GoalPlanDelivery, type GoalPlanReviewDraft } from './GoalPlanDelivery'
 import { clearGoalPlanReviewDraft, editGoalPlanReviewDraft, goalPlanReviewDraftKey } from '../lib/goal-edit-drafts'
@@ -261,10 +260,10 @@ function NodeDetail({ demand, item, historical, dependencyNames, onIssue, draft,
  * dependency, joined to what it depends on by a smooth connector. State comes only from the
  * Goal owner's derivation; this view never decides it.
  */
-export function GoalPlanGraph({ demand, projection: provided, planLink, onOpenGoalWork, onRequestPlan, pending = false, busy = false, reveal }: {
+export function GoalPlanGraph({ demand, projection: provided, planLink, planningLink, onOpenGoalWork, reveal }: {
   demand: DemandProjection
   projection?: GoalPlanView; planLink?: ReactNode; onOpenGoalWork?: (() => void) | undefined
-  onRequestPlan?: () => void; pending?: boolean; busy?: boolean; reveal?: GoalPlanReveal | null
+  planningLink?: ReactNode; reveal?: GoalPlanReveal | null
 }) {
   const projection = useMemo(() => provided ?? goalPlanProjection(demand), [demand, provided])
   const wholeGoal = projection.revision === null
@@ -320,7 +319,6 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, onOpenGo
     }
     setSelection(null)
   }
-  const requestAction = onRequestPlan ? <GoalPlanRequest demand={demand} onRequest={onRequestPlan} pending={pending} busy={busy} /> : null
   async function readState() {
     setReadingState(true); setIssue(null)
     try { await useAppStore.getState().refreshDemand(demand.id) }
@@ -358,7 +356,7 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, onOpenGo
       </div>
       <div className="goal-plan__tools">
         {planLink}
-        {requestAction ? <div className="goal-plan__revise">{requestAction}</div> : null}
+        {planningLink}
       </div>
     </div>
     {stateService}

@@ -2,7 +2,7 @@
 .goal-supervisor-rail__heading h2 { display: flex; align-items: center; gap: var(--sp-3); margin: 0 0 var(--sp-2); font-size: var(--fs-title); font-weight: 650; }
 .goal-supervisor-rail__identity { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--sp-2); min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-body); }
 .goal-supervisor-rail__person { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
-.goal-supervisor-rail__assign { align-self: start; font-size: var(--fs-meta); }
+.goal-supervisor-rail__assign { align-self: start; font-size: var(--fs-meta); white-space: normal; }
 .goal-supervisor-rail__identity strong { font-weight: 550; }
 .goal-supervisor-rail__source, .goal-supervisor-rail__empty, .goal-supervisor-rail__issue { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; }
 .goal-supervisor-rail__next { display: grid; gap: var(--sp-1); padding: var(--sp-3) var(--sp-4); border-inline-start: 2px solid var(--line); background: var(--surface-1); }
@@ -36,3 +36,13 @@
 .goals-document .goal-supervisor-rail__record > summary { display: flex; flex-direction: row-reverse; justify-content: flex-end; gap: var(--sp-2); color: var(--text); }
 .goals-document .goal-supervisor-rail__record > summary::before { width: 10px; height: 10px; color: var(--text-3); }
 .goals-document .goal-supervisor-rail__coordination { padding-top: var(--sp-5); }
+
+.goal-supervisor-rail .goal-patrol { display: grid; gap: var(--sp-2); min-width: 0; padding-block: var(--sp-3); border-block-start: 1px solid var(--line-soft); }
+.goal-supervisor-rail .goal-patrol__actions { display: flex; flex-wrap: wrap; align-items: start; gap: var(--sp-2); }
+.goal-supervisor-rail .goal-patrol__actions > button { max-width: 100%; white-space: normal; text-align: start; }
+.goal-supervisor-rail .goal-patrol__feedback { margin: 0; }
+.goals-detail__side .goal-supervisor-rail :is([data-goal-work-operation], .goal-supervisor-rail__planning):focus { outline: 2px solid var(--focus-line); outline-offset: -2px; border-radius: var(--radius-sm); }
+.goal-supervisor-rail__planning { min-width: 0; padding-block: var(--sp-2); }
+.goal-supervisor-rail__planning button { max-width: 100%; white-space: normal; text-align: start; }
+.goal-supervisor-rail__progress { min-width: 0; font-size: var(--fs-body); }
+.goal-supervisor-rail__progress > summary { color: var(--text-2); cursor: pointer; }

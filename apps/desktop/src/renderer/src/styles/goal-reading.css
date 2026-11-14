@@ -68,16 +68,18 @@
 .goals-detail__main :is(button, summary, input, select, textarea, [tabindex='0']),
 .goals-detail :is([data-goal-work-operation], [data-goal-retained-operation]) { scroll-margin-top: var(--goal-detail-reading-offset, 90px); }
 .goals-detail :is([data-goal-work-operation], [data-goal-retained-operation]):focus { outline: 2px solid var(--focus-line); outline-offset: 3px; border-radius: var(--radius-sm); }
-.goals-detail__main > :is(.goals-detail__brief, .goals-detail__definition, .goal-work-area, .goals-detail__activity) {
+.goals-detail__main > :is(.goals-detail__overview, .goal-work-area, .goals-detail__activity) {
   margin-block: var(--sp-5) 0;
   padding-block: var(--sp-5);
   border-block-start: 1px solid var(--line);
 }
-.goals-detail__definition > .goals-section-heading { margin-bottom: var(--sp-3); }
+.goals-detail__overview .goals-detail__brief { margin-block: 0; }
+.goals-detail__overview .goals-detail__definition { margin-block-start: var(--sp-4); }
 .goals-detail__definition > .goals-alignment { border-top: 0; padding-top: 0; }
-.goals-detail__definition > .goals-clarification { margin-bottom: 0; }
+.goals-detail__definition > .goals-clarification { display: grid; gap: var(--sp-2); margin-bottom: 0; padding: var(--sp-3) 0 0; border-top: 1px solid var(--line-soft); }
+.goal-agreement__prompt { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); color: var(--text-2); font-size: var(--fs-body); }
 .goal-work-area .goal-work-area__plan-task { margin: 0 0 var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); font-weight: 550; }
-.goals-detail__brief .goals-section-heading { margin-bottom: var(--sp-3); }
+.goals-detail__overview > .goals-section-heading { margin-bottom: var(--sp-3); }
 .goals-detail__brief .goals-intent__reading { line-height: 1.65; }
 .goal-work-area__records { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; padding-block: var(--sp-4); border-top: 1px solid var(--line-soft); }
 .goal-work-area__records > details, .goal-work-area__records > .small-button { grid-area: 1 / 1; }

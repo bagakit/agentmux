@@ -52,7 +52,7 @@ export function GoalExecution({ demand, onUpdate, onChooseSupervisor }: { demand
   }
   return <section className="goal-collaboration goal-team" aria-label="Goal collaboration">
     <header className="goal-team__heading"><h2>Team</h2><details className="goal-team__edit"><summary>Edit relationships</summary><div className="goal-team__editors">
-      <Button type="button" onClick={() => chooseRole('supervisor')} aria-label="Choose Goal Supervisor">Supervisor</Button>
+      {!onChooseSupervisor ? <Button type="button" onClick={() => chooseRole('supervisor')} aria-label="Choose Goal Supervisor">Supervisor</Button> : null}
       <Button type="button" onClick={() => setRole('assignees')} aria-label="Choose Goal assignees"><ThemeActionChooseAssigneeIcon size={12} />Assignees</Button>
       <Button type="button" onClick={() => setRole('related')} aria-label="Choose related Goal sessions">Related</Button>
     </div></details></header>
@@ -85,7 +85,7 @@ export function GoalExecution({ demand, onUpdate, onChooseSupervisor }: { demand
     {!demand.supervisorSessionId && demand.creationOrigin?.supervisorDefaultPending ? <p className="goals-condition">The original requester is not yet confirmed. You can choose a Supervisor explicitly.</p> : null}
     {creationDrafts.map(role => <p key={role} className="goals-service" role="status">Original Agent creation retained.<Button type="button" onClick={() => setRole(role)}>Check creation and relationship</Button></p>)}
     {issue ? <p className="goals-service" role="status">{issue}</p> : null}
-    <GoalContinuationControl demand={demand} active={active} onChooseSupervisor={() => setRole('supervisor')} />
+    {!onChooseSupervisor ? <GoalContinuationControl demand={demand} active={active} onChooseSupervisor={() => setRole('supervisor')} /> : null}
     {demand.sessionIds.length ? <details className="goals-topology" onToggle={event => { if (event.target === event.currentTarget) setArrangementOpen(event.currentTarget.open) }}><summary>Arrangement</summary>{arrangementOpen ? <GoalArrangement sessionIds={team.groups.filter(group => group.roles.includes('related')).flatMap(group => group.actors.map(actor => actor.session.id))} /> : null}</details> : null}
     {role ? <GoalAgentPicker key={`${demand.id}:${role}`} demand={demand} role={role} onSave={onUpdate} onClose={() => setRole(null)} /> : null}
   </section>

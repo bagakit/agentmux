@@ -106,9 +106,11 @@ export function GoalPatrolControl({ demand, compact = false, embedded = false, p
     targetHostId && manager.hostId === targetHostId && manager.state !== 'ended' && manager.state !== 'unknown' && !patrol.attempts.some(a => a.attemptedAt) && (!attempt || attempt.target.runId !== manager.runId)
   const openConversation = targetSessionId ? <Button type="button" onClick={() => requestAgentConversationFloatingOpen(targetHostId ? targetSessionId : null, targetHostId,
     targetHostId ? undefined : 'The original Supervisor destination is unconfirmed. Check the retained inspection to read its destination.', undefined, entryContext)}>{targetName ? `Open ${targetName} conversation` : 'Open owner conversation'}</Button> : null
+  const feedback = observed ? <p className="goal-patrol__feedback" role="status"><strong data-goal-current-conclusion={primary ? true : undefined} data-goal-current-source={primary ? 'patrol' : undefined}>{labels[observed.state]}</strong>{!compact || !['delivered', 'reported'].includes(observed.state) ? <span>{observed.reason}</span> : null}</p> : null
   return <div className={`goal-patrol${compact ? ' goal-patrol--compact' : ''}`} aria-label="PMO 巡查"
     data-goal-work-kind={embedded && patrol ? 'patrol' : undefined} data-goal-work-operation={embedded ? patrol?.operationId : undefined}
     tabIndex={embedded && patrol ? -1 : undefined} onClick={event => event.stopPropagation()}>
+    {embedded ? feedback : null}
     <div className="goal-patrol__actions">
       <button type="button" className={(primary ?? !pending) && !needsSupervisor && !firstDestination ? 'primary-button' : 'small-button'} aria-busy={busy}
         aria-label={pending ? 'Check original inspection' : targetName ? `Request inspection from ${targetName}` : 'Request owner inspection'} onClick={() => {
@@ -119,7 +121,7 @@ export function GoalPatrolControl({ demand, compact = false, embedded = false, p
       {!compact && !embedded && patrol ? <Button type="button" disabled={busy} onClick={() => void run(() => refreshGoalDelegations(demand.id))}>Read inspection</Button> : null}
       {canContinue ? <Button type="button" disabled={busy} onClick={() => void run(continueOriginal)}>Continue original inspection</Button> : null}
       {!embedded && (!compact || needsSupervisor) ? openConversation : null}
-      {needsSupervisor ? <button type="button" className={primary && !firstDestination ? 'primary-button' : 'small-button'} onClick={() => setSupervisorGoalId(demand.id)}>Choose Supervisor</button> : null}
+      {needsSupervisor && !embedded ? <button type="button" className={primary && !firstDestination ? 'primary-button' : 'small-button'} onClick={() => setSupervisorGoalId(demand.id)}>Choose Supervisor</button> : null}
     </div>
     {firstDestination ? <div className="goals-inline-actions">
       <button type="button" className={primary ? 'primary-button' : 'small-button'} disabled={busy} onClick={() => {
@@ -128,7 +130,7 @@ export function GoalPatrolControl({ demand, compact = false, embedded = false, p
       }}>Send first inspection</button>
       <span className="goals-caption" title={`Host ${firstDestination.hostId} · Session ${firstDestination.agentSessionId} · Run ${firstDestination.runId}`}>First send to {firstName ?? 'the current Supervisor'} on {firstHostName}.</span>
     </div> : null}
-    {observed ? <p className="goal-patrol__feedback" role="status"><strong data-goal-current-conclusion={primary ? true : undefined} data-goal-current-source={primary ? 'patrol' : undefined}>{labels[observed.state]}</strong>{!compact || !['delivered', 'reported'].includes(observed.state) ? <span>{observed.reason}</span> : null}</p> : null}
+    {!embedded ? feedback : null}
     {!embedded && observed?.state === 'missing' ? <p className="goal-patrol__feedback">原 PMO 尚未确认，巡查尚未开始。恢复原 PMO 后接续原巡查，或明确选择 Supervisor；选择不会自动发送。</p> : null}
     {!embedded && manager?.state === 'ended' ? <p className="goal-patrol__feedback">原管理 Run 已结束；打开原 PMO 恢复同一 Session，再接续或回报实际巡查。</p> : null}
     {patrol?.report ? <p className="goal-patrol__feedback"><span className="goal-patrol__report-summary">{patrol.report.summary}</span><span>Next: {patrol.report.nextOwner.agentSessionId ?? patrol.report.nextOwner.kind} · {patrol.report.nextOwner.action}</span></p> : null}

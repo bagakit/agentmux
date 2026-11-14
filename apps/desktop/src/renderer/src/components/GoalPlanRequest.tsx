@@ -17,7 +17,7 @@ const labels = { prepared: 'Planning request saved', delivered: 'Delivered · wa
   unknown: 'Planning input unconfirmed', stale: 'Original planning request needs attention', planned: 'Plan saved', reported: 'Original request recorded' }
 
 /** The original Host request is delivery truth; the native user document keeps only the person's action reference. */
-export function GoalPlanRequest({ demand, onRequest, pending, busy }: { demand: Goal; onRequest(): void; pending: boolean; busy: boolean }) {
+export function GoalPlanRequest({ demand, onRequest, onChooseSupervisor, pending, busy }: { demand: Goal; onRequest(): void; onChooseSupervisor?: (() => void) | undefined; pending: boolean; busy: boolean }) {
   const split = !demand.plan?.nodes.length
   const retained = useAppStore(state => state.goalDiscussionRequests?.[goalDiscussionRequestKey(demand.id, 'plan')])
   const [choose, setChoose] = useState(false), [issue, setIssue] = useState<string | null>(null), [working, setWorking] = useState(false)
@@ -60,7 +60,8 @@ export function GoalPlanRequest({ demand, onRequest, pending, busy }: { demand: 
     const key = goalDiscussionRequestKey(demand.id, 'plan'), previous = useAppStore.getState().goalDiscussionRequests[key]
     await retainGoalPlanRequest(demand.id)
     if (!previous) setUnsentSelection(useAppStore.getState().goalDiscussionRequests[key]!.requestId)
-    setChoose(true)
+    if (onChooseSupervisor) onChooseSupervisor()
+    else setChoose(true)
   })
   const canContinue = original && original.supervisorAgentSessionId === demand.supervisorSessionId && !original.attempts.some(item => item.attemptedAt) &&
     currentRun && (!attempt || attempt.target.runId !== currentRun)

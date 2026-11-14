@@ -152,8 +152,8 @@ export function GoalAlignment({ demand, emphasis, onGrill, onGrounding, onOpenMo
       </div></details>
       {compactAgreement ? noResults : null}
     </section> : <div className="goals-clarification" aria-label="Clarify goal" data-goal-id={demand.id} data-goal-confirmation-state="unconfirmed">
-      {useBrief ? null : <p className="goals-muted">Clarify the outcome and what success looks like with the agent.</p>}
-      <div className="goals-inline-actions">{goalRequestButton}{goalRequestNote}</div>
+      <div className="goal-agreement__prompt"><span>Success criteria haven’t been set.</span>{goalRequestButton}</div>
+      {goalRequestNote}
     </div>}
     {grounding && !currentReport ? report : !grounding && !compactAgreement && alignment?.confirmedAt ? noResults : null}
   </>

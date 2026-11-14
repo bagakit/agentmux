@@ -15,6 +15,7 @@ import type { GoalAgentRole } from '../lib/goal-agent-selection'
 import { GoalAgentPicker } from './GoalAgentPicker'
 import { GoalExecution } from './GoalExecution'
 import { GoalPlanGraph, goalPlanDeliveries, goalPlanProjection, type GoalPlanReveal } from './GoalPlanGraph'
+import { GoalPlanRequest } from './GoalPlanRequest'
 import { GoalSupervisorRail } from './GoalSupervisorRail'
 import { useGoalDiscussionRecipient } from '../lib/goal-discussion-recipient'
 import { editGoalDraft, saveGoalDrafts } from '../lib/goal-edit-drafts'
@@ -56,7 +57,8 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   const teamRegionId = useId()
   const overviewRef = useRef<HTMLElement>(null)
   const planRef = useRef<HTMLDivElement>(null)
-  const resultsRef = useRef<HTMLElement>(null)
+  const planningControls = useRef<HTMLDivElement>(null)
+  const resultsRef = useRef<HTMLDivElement>(null)
   const executionRef = useRef<HTMLElement>(null)
   const [inspectorRole, setInspectorRole] = useState<GoalAgentRole | null>(null)
   const activityRef = useRef<HTMLDivElement>(null)
@@ -124,22 +126,42 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
     const pending = source.kind === 'start' ? detail?.querySelector<HTMLElement>(`[data-goal-retained-operation="${operation}"]`) : null
     const original = pending ?? detail?.querySelector<HTMLElement>(`[data-goal-work-kind="${source.kind}"][data-goal-work-operation="${operation}"]`)
     if (!original) return
+    if (source.kind === 'patrol') {
+      revealSupervisor(true, original)
+      return
+    }
     for (let ancestor = original.parentElement; ancestor && ancestor !== executionRef.current; ancestor = ancestor.parentElement) {
       if (ancestor instanceof HTMLDetailsElement) ancestor.open = true
     }
     revealWork(original)
   }
-  function revealSupervisor(focus = true) {
-    const section = teamRef.current
-    previousReadingTop.current = detailRef.current?.scrollTop ?? 0
-    setShowSupervisor(true)
+  function revealSupervisor(focus = true, target = teamRef.current) {
+    const side = teamRef.current
+    const detail = detailRef.current
+    if (!side || !detail || !target) return
+    const narrow = supervisorToggle.current && getComputedStyle(supervisorToggle.current).display !== 'none'
+    if (narrow) {
+      if (!showSupervisor) previousReadingTop.current = detail.scrollTop
+      setShowSupervisor(true)
+    }
     useAppStore.setState({ goalReadingEntry: null })
     const reveal = () => {
-      if (detailRef.current) detailRef.current.scrollTop = 0
-      if (focus) section?.focus({ preventScroll: true })
+      if (narrow) {
+        detail.scrollTop = target === side ? 0 : Math.max(0, detail.scrollTop + target.getBoundingClientRect().top
+          - detail.getBoundingClientRect().top - (toolbarRef.current?.offsetHeight ?? 0) - 12)
+      } else if (target !== side) {
+        side.scrollTop += target.getBoundingClientRect().top - side.getBoundingClientRect().top
+      }
+      if (focus) target.focus({ preventScroll: true })
     }
-    if (section && getComputedStyle(section).display === 'none') requestAnimationFrame(reveal)
+    if (narrow && !showSupervisor) requestAnimationFrame(reveal)
     else reveal()
+  }
+  function revealPlanningControls() {
+    const target = planningControls.current
+    const actions = target?.querySelector('details')
+    if (actions) actions.open = true
+    revealSupervisor(true, target)
   }
   function revealAttempt(nodeId: string, operationId: string, trigger: HTMLButtonElement) {
     previousReadingTop.current = null
@@ -153,7 +175,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
     const detail = detailRef.current
     if (!detail || showSupervisor) return
     let frame: number | null = null
-    const roots = [planRef.current, overviewRef.current, resultsRef.current, executionRef.current, activityRef.current]
+    const roots = [planRef.current, overviewRef.current, executionRef.current, activityRef.current]
     function updateReadingSection() {
       frame = null
       if (jumpedToScrollTop.current === detail!.scrollTop) return
@@ -220,21 +242,18 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   const currentWork = !acknowledgementFeedback.failure && (fact.source.kind === 'start' || fact.source.kind === 'delegation' || fact.source.kind === 'patrol') ? fact.source : null
   const plan = <div ref={planRef} tabIndex={-1} className="goals-detail__plan" data-goal-reading-section="plan" data-goal-reading-id={demand.id} data-goal-reading-runtime={demand.address?.runtimeId} data-goal-reading-namespace={demand.address?.namespace}>
     <GoalPlanGraph demand={demand} projection={projection} reveal={planReveal} onOpenGoalWork={currentWork ? () => revealOriginalWork(currentWork) : undefined}
+      planningLink={!finished ? <Button type="button" onClick={revealPlanningControls}>{demand.plan?.nodes.length ? 'Plan actions' : 'Plan with Supervisor'}<SupervisorPaneIcon size={14} aria-hidden="true" /></Button> : null}
       planLink={demand.address ? <button type="button" className="icon-button goal-plan__copy" title={copied === 'plan' ? 'Plan link copied' : 'Copy plan link'} onClick={() => void copyLink('plan')}>
         {copied === 'plan' ? <ThemeDoneIcon size={15} aria-hidden="true" /> : <CopyLinkIcon size={15} aria-hidden="true" />}
         <span className="goals-visually-hidden">{copied === 'plan' ? 'Plan link copied' : 'Copy plan link'}</span>
-      </button> : null}
-      {...(finished ? {} : { onRequestPlan: onPlan })} pending={motePending === 'plan'} busy={Boolean(motePending)} />
+      </button> : null} />
   </div>
   const stage = acknowledgementFeedback.failure ? 'you' : fact.stage
   const next = acknowledgementFeedback.failure ? 'Acknowledgement unconfirmed' : fact.text
   const missingDoneReport = demand.status === 'done' && !demand.grounding
   const readReport = Boolean(demand.grounding) && (fact.source.kind === 'results' || fact.source.kind === 'definition' && !demand.alignment)
   const readDefinition = Boolean(demand.alignment) && (fact.source.kind === 'definition' || missingDoneReport && !demand.alignment?.confirmedAt)
-  const readingTargets = { plan: planRef, overview: overviewRef, results: resultsRef, execution: executionRef, activity: activityRef }
-  const brief = <section ref={overviewRef} tabIndex={-1} className="goals-intent-body goals-detail__brief" aria-label="Goal brief" data-goal-reading-section="overview" data-goal-reading-id={demand.id} data-goal-reading-runtime={demand.address?.runtimeId} data-goal-reading-namespace={demand.address?.namespace}>
-    <div className="goals-section-heading"><h2><ThemeObjectGoalIcon size={14} aria-hidden="true" />Goal brief</h2>{descriptionDirty ? <span className="goals-caption">Unsaved draft</span> : null}</div>{intent(demand.plan ? 3 : 6)}{saveFeedback}
-  </section>
+  const readingTargets = { plan: planRef, overview: overviewRef, execution: executionRef, activity: activityRef }
   return <aside ref={detailRef} className="goals-detail" data-goal-detail-id={demand.id} data-goal-view={showSupervisor ? 'supervisor' : 'work'} aria-label={`Goal workspace for ${demand.title}`}>
     <header ref={toolbarRef} className="goals-detail__toolbar">
       <nav className="goal-outline__trail" aria-label="Goal location">
@@ -289,19 +308,28 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
         {acknowledgementFeedback.failure ? <GoalAcknowledgementRecovery goalId={demand.id} feedback={acknowledgementFeedback} onFeedbackChange={onAcknowledgementFeedbackChange} /> : null}
         <div className="goals-detail__main">
           {plan}
-          {brief}
-          <section ref={resultsRef} tabIndex={-1} className="goals-detail__definition" data-goal-reading-section="results" aria-label="Criteria and results">
-            <div className="goals-section-heading"><h2>Criteria &amp; results</h2></div>
-            <GoalAlignment emphasis={fact.source.kind === 'definition' || fact.source.kind === 'results' ? fact.source.kind : null}
-              feedback={acknowledgementFeedback} onFeedbackChange={onAcknowledgementFeedbackChange}
-              demand={demand} onGrill={onGrill} onGrounding={onGrounding} onOpenMote={onOpenMote} motePending={motePending} />
+          <section ref={overviewRef} tabIndex={-1} className="goals-detail__overview" aria-label="Goal overview" data-goal-reading-section="overview"
+            data-goal-reading-id={demand.id} data-goal-reading-runtime={demand.address?.runtimeId} data-goal-reading-namespace={demand.address?.namespace}>
+            <div className="goals-section-heading"><h2><ThemeObjectGoalIcon size={14} aria-hidden="true" />Goal overview</h2>{descriptionDirty ? <span className="goals-caption">Unsaved draft</span> : null}</div>
+            <div className="goals-intent-body goals-detail__brief" aria-label="Goal brief">{intent(demand.plan ? 3 : 6)}{saveFeedback}</div>
+            <div ref={resultsRef} tabIndex={-1} className="goals-detail__definition" aria-label="Criteria and results">
+              <GoalAlignment emphasis={fact.source.kind === 'definition' || fact.source.kind === 'results' ? fact.source.kind : null}
+                feedback={acknowledgementFeedback} onFeedbackChange={onAcknowledgementFeedbackChange}
+                demand={demand} onGrill={onGrill} onGrounding={onGrounding} onOpenMote={onOpenMote} motePending={motePending} />
+            </div>
           </section>
           <GoalWorkArea key={demand.id} demand={demand} sectionRef={executionRef} primary={!acknowledgementFeedback.failure && !currentDelivery} onRevealResults={() => revealGoalReview(false)} />
           {hasActivity ? <div ref={activityRef} tabIndex={-1} className="goals-detail__activity" data-goal-reading-section="activity" data-goal-reading-id={demand.id} data-goal-reading-runtime={demand.address?.runtimeId} data-goal-reading-namespace={demand.address?.namespace}><GoalActivity demand={demand} /></div> : null}
         </div>
       </div>
         <aside ref={teamRef} id={teamRegionId} tabIndex={-1} className="goals-detail__side" aria-label="Goal team and properties">
-          <GoalSupervisorRail demand={demand} onChooseSupervisor={() => setInspectorRole('supervisor')} onAddAssignee={() => setInspectorRole('assignees')} currentDelivery={currentDelivery ? { nodeId: currentDelivery.node.id, operationId: currentDelivery.delegation.operationId, title: currentDelivery.node.title } : undefined} onOpenDiscussion={demand.plan && !continueInBody ? onOpenMote : undefined} discussionBusy={Boolean(motePending)} onRevealAttempt={revealAttempt} />
+          <GoalSupervisorRail demand={demand} inspectionIsCurrent={currentWork?.kind === 'patrol' && !currentDelivery}
+            onChooseSupervisor={() => setInspectorRole('supervisor')} onAddAssignee={() => setInspectorRole('assignees')}
+            planning={!finished ? <div ref={planningControls} className="goal-supervisor-rail__planning" tabIndex={-1} aria-label="Planning with Supervisor">
+              <GoalPlanRequest demand={demand} onRequest={onPlan} pending={motePending === 'plan'} busy={Boolean(motePending)}
+                onChooseSupervisor={() => setInspectorRole(demand.assigneeSessionIds?.length ? 'supervisor' : 'assignees')} />
+            </div> : null}
+            currentDelivery={currentDelivery ? { nodeId: currentDelivery.node.id, operationId: currentDelivery.delegation.operationId, title: currentDelivery.node.title } : undefined} onOpenDiscussion={demand.plan && !continueInBody ? onOpenMote : undefined} discussionBusy={Boolean(motePending)} onRevealAttempt={revealAttempt} />
           <details className="goals-detail__relationships"><summary>Team and relationships</summary>
             <GoalExecution demand={demand} onUpdate={update} onChooseSupervisor={() => setInspectorRole('supervisor')} />
           </details>

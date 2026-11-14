@@ -29,7 +29,6 @@
 .goal-plan__heading [data-goal-plan-progress] { font-variant-numeric: tabular-nums; }
 .goal-plan__tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
 .goal-plan__tools .small-button { min-height: 24px; }
-.goal-plan__revise { margin: 0; }
 
 /* The canvas scrolls sideways on wide windows and never shrinks the type; edges share its coordinates. */
 .goal-plan__canvas { position: relative; max-height: clamp(280px, 49vh, 500px); overflow: auto; scroll-snap-type: x proximity;
