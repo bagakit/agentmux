@@ -1466,7 +1466,7 @@ it('Demand picker: common properties and accurate names are in the actual body; 
   await act(async () => root.render(<PickerDetail />))
   const sessions = useAppStore.getState().sessions.map(item => item.id === session.agentSessionId ? { ...item, id: 'local:original-presentation' } : item)
   const currentSession = sessions.find(item => item.control.agentSessionId === session.agentSessionId)!
-  useAppStore.setState({ sessions, agentNames: { [currentSession.id]: 'Named original colleague' } })
+  useAppStore.setState({ sessions, agentNames: { [currentSession.id]: 'Named original colleague', [session.agentSessionId]: 'Named original colleague' } })
   expect(container.querySelector('.goals-common-properties')).not.toBeNull()
   // Main reading precedes secondary properties in the current Goal detail contract.
   expect(container.querySelector('.goals-common-properties')!.compareDocumentPosition(container.querySelector('.goals-intent-body') ?? container.querySelector('.goals-alignment')!)).toBe(Node.DOCUMENT_POSITION_PRECEDING)
