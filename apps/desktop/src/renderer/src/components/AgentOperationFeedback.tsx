@@ -50,9 +50,6 @@ function AgentOperationFeedbackBody({ operations, compact, active }: { operation
   return <div ref={ref} className={`agent-operation-feedback${compact ? ' agent-operation-feedback--compact' : ''}`}
     data-kind={decoration.kind} data-phase={decoration.phase} data-motion-active={visible && decoration.phase === 'pending'}
     style={{ '--operation-phase': `${phase}s` } as CSSProperties} onClick={event => event.stopPropagation()}>
-    {!compact ? <div className="agent-operation-feedback__motion" aria-hidden="true">
-      <span className="agent-operation-feedback__veil" /><span className="agent-operation-feedback__trail" />
-    </div> : null}
     {operations.map(operation => <OperationFeedbackItem key={agentOperationKey(operation)} operation={operation} compact={compact} active={active} visible={visible} />)}
   </div>
 }
@@ -71,7 +68,7 @@ function OperationFeedbackItem({ operation, compact, active, visible }: { operat
   useEffect(() => () => { setReading(key, reader.current, false); dismissDecoration(latest.current) }, [key])
   // Offscreen completion needs no decorative wait; open readers and unresolved references remain.
   useEffect(() => { if (!visible) dismissDecoration(operation) }, [operation, visible])
-  const status = <span role="status">{label(operation)}</span>
+  const status = <span role="status" data-text={label(operation)}>{label(operation)}</span>
   const onAnimationEnd = (event: { animationName: string }) => {
     if (event.animationName === 'agent-operation-settle') dismissDecoration(operation)
   }
