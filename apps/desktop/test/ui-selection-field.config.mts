@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, relative, resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
 import baseConfig from './selection-field.config.mts'
 
 const root = resolve(import.meta.dirname, '../../..')
-const evidence = process.env.AGENTMUX_SELECTION_EVIDENCE
-assert.ok(evidence, 'Explicit SelectionField evidence directory')
 const mutant = process.env.AGENTMUX_SELECTION_MUTANT ?? 'baseline'
+const configuredEvidence = process.env.AGENTMUX_SELECTION_EVIDENCE
+assert.ok(mutant === 'baseline' || configuredEvidence, 'SelectionField mutations require an explicit evidence directory')
+const evidence = configuredEvidence ?? resolve(root, '.tmp/ui-selection-field', 'unit-' + randomUUID())
 const file = 'packages/client-ui/src/components/SelectionField.tsx'
 const consumer = 'apps/desktop/src/renderer/src/components/SelectionField.tsx'
 const edits = {
