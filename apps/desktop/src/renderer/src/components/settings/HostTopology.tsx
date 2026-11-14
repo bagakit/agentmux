@@ -25,7 +25,7 @@ export type HostTopologyItem = {
   network?: string | null | undefined
   localAddress?: LocalHostAddress | undefined
 }
-type HostNodeData = HostTopologyItem & { selected: boolean; onSelect: (id: string) => void }
+type HostNodeData = HostTopologyItem & { selected: boolean; tooltipSuppressed: boolean; onSelect: (id: string) => void }
 type HostNode = Node<HostNodeData, 'host'>
 type EntryNode = Node<{ label: string }, 'entry'>
 type TopologyNode = HostNode | EntryNode
@@ -41,7 +41,7 @@ const HostTopologyNode = memo(function HostTopologyNode({ data }: NodeProps<Host
   const { host, check } = data
   const hint = useHostConnectionHint(host.id, host.label)
   const address = data.localAddress
-  const tooltip = useWorkbenchNameTooltip(hint.name, host.kind === 'local' ? <LocalAddressDetails address={address} /> : <span className="remote-host-route-detail"><span>{hint.detail}</span><span>SSH user · <code data-route-user>{host.kind === 'ssh' && host.transport !== 'tailcat' ? host.user || 'SSH config' : 'Not used'}</code></span><span>Port override · <code data-route-port>{host.kind === 'ssh' && host.transport !== 'tailcat' ? host.port ?? 'SSH config' : 'Not used'}</code></span><span>Runtime binding · <code data-route-runtime>{host.kind === 'ssh' ? host.runtimeId ?? 'Unconfirmed' : 'Unconfirmed'}</code></span>{data.network ? <span>{data.network}</span> : null}</span>, false, { pointerPassThrough: host.kind !== 'local' })
+  const tooltip = useWorkbenchNameTooltip(hint.name, host.kind === 'local' ? <LocalAddressDetails address={address} /> : <span className="remote-host-route-detail"><span>{hint.detail}</span><span>SSH user · <code data-route-user>{host.kind === 'ssh' && host.transport !== 'tailcat' ? host.user || 'SSH config' : 'Not used'}</code></span><span>Port override · <code data-route-port>{host.kind === 'ssh' && host.transport !== 'tailcat' ? host.port ?? 'SSH config' : 'Not used'}</code></span><span>Runtime binding · <code data-route-runtime>{host.kind === 'ssh' ? host.runtimeId ?? 'Unconfirmed' : 'Unconfirmed'}</code></span>{data.network ? <span>{data.network}</span> : null}</span>, data.tooltipSuppressed, { pointerPassThrough: host.kind !== 'local' })
   const checkedAt = check && check.state !== 'idle' && check.state !== 'checking' ? check.observedAt : undefined
   return <>
     <Ports type="target" />
@@ -96,8 +96,8 @@ export const HostTopology = memo(function HostTopology({ items, selectedId, onSe
   const projectedNodes: TopologyNode[] = useMemo(() => [
     { id: 'entry', type: 'entry', position: { x: 0, y: 0 }, ...ENTRY_SIZE, data: { label: 'AgentMux' }, selectable: false },
     ...items.map((item, index): HostNode => ({ id: `host:${item.host.id}`, type: 'host',
-      position: { x: 220 + index % 2 * 232, y: Math.floor(index / 2) * 146 }, ...HOST_SIZE, data: { ...item, selected: item.host.id === selectedId, onSelect } }))
-  ], [items, selectedId, onSelect])
+      position: { x: 220 + index % 2 * 232, y: Math.floor(index / 2) * 146 }, ...HOST_SIZE, data: { ...item, selected: item.host.id === selectedId, tooltipSuppressed: !active || scope !== 'fleet', onSelect } }))
+  ], [items, selectedId, onSelect, active, scope])
   const [nodes, setNodes, onNodesChange] = useNodesState<TopologyNode>(projectedNodes)
   useEffect(() => {
     setNodes(previous => {
