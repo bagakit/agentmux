@@ -5,7 +5,7 @@ import { createRequire } from 'node:module'
 import { act, useMemo } from 'react'
 import { createRoot } from 'react-dom/client'
 import { useObservedAppStore } from '../src/renderer/src/lib/use-observed-app-store'
-import { expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { ComposerResubmitGuard, RESUBMIT_WINDOW_MS } from '../src/renderer/src/lib/composer-resubmit-guard'
@@ -18,11 +18,20 @@ import * as topics from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { sessionNameMetadataRecord } from '../src/renderer/src/lib/session-name-metadata'
 import { composerDOM, composerSession, composerConfig } from './helpers/composer-dom-fixture'
+import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
+import { nativeHistoryFixture } from '../../../packages/core/test/fixtures/native-history-session'
 
 vi.mock('react-resizable-panels', () => createRequire(import.meta.url)('../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js'))
 // Only PTY painting is outside this test; the production Pane, Composer, rich editor and Store remain mounted.
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ({ autoFocus }: { autoFocus?: boolean }) => <div data-pty-paint data-pane-autofocus={String(autoFocus)} /> }))
 const dom = composerDOM()
+const speakerMetadataReads = { count: 0 }
+const speakerFixtureCleanup: Array<() => unknown | Promise<unknown>> = []
+beforeEach(() => { speakerMetadataReads.count = 0; vi.stubGlobal('__agentmuxConversationSpeakerMetadataRead', () => speakerMetadataReads.count++) })
+afterEach(async () => {
+  Reflect.deleteProperty(globalThis, '__agentmuxConversationSpeakerMetadataRead')
+  if (speakerFixtureCleanup.length) { await dom.render(null); for (const close of speakerFixtureCleanup.splice(0).reverse()) await close() }
+})
 const browser = { id: 'browser', browserId: 'browser', kind: 'browser' as const,
   regionId: 'browser-region', workspaceId: 'workspace', navigationId: 'navigation',
   url: 'https://example.test/original', title: 'Original', profileId: 'profile',
@@ -144,8 +153,11 @@ it('the mounted Workbench uses its cheap-facts mode cache and preserves invalida
   await dom.render(<WorkspaceWorkbench workspaceId="workspace" interactiveResize={false} visible />)
   expect(dom.container.querySelectorAll('[data-workbench-tab-id]').length).toBeGreaterThan(0)
   expect(walks.mock.calls.length).toBeGreaterThan(0)
+  expect(speakerMetadataReads.count).toBeGreaterThan(0)
   walks.mockClear()
+  speakerMetadataReads.count = 0
   for (let n = 0; n < 8; n++) await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => ({ ...session, updatedAt: n + 2 })) })))
+  expect(speakerMetadataReads.count).toBe(0)
   expect(walks.mock.calls.length).toBe(0)
   await act(async () => useAppStore.setState({ config: { ...composerConfig, workspaces: [...composerConfig.workspaces] } }))
   expect(walks.mock.calls.length).toBeGreaterThan(0)
@@ -204,25 +216,62 @@ it('accepted submits protect an immediate remount duplicate, release expired pro
 })
 
 it('the actual Pane keeps current cross-session speaker identity in its notification scope', async () => {
-  const recipient = composerSession('speaker-recipient'), speaker = composerSession('recorded-speaker')
+  const native = await nativeHistoryFixture('codex', '', { agentSessionId: 'speaker-recipient' })
+  speakerFixtureCleanup.push(async () => { expect(native.controls.every(control => control.mock.calls.length === 0)).toBe(true); await native.close() })
+  const recipient = { ...composerSession('speaker-recipient'), workspacePath: native.root }, speaker = { ...composerSession('recorded-speaker'), workspacePath: native.root }
   const captured = { id: 'recorded-agent-input', agentSessionId: recipient.id, kind: 'user_message' as const,
     source: 'user' as const, status: 'complete' as const, createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1),
     title: 'Captured agent input', content: 'Original related speaker passage', authorAgentSessionId: speaker.id }
-  const history = vi.spyOn(api.sessions, 'historyPage').mockResolvedValue({ agentSessionId: recipient.id,
-    source: { providerId: 'codex', nativeSessionId: 'private-observation-only' }, items: [], nextCursor: null })
-  useAppStore.setState({ sessions: [recipient, speaker, composerSession('unrelated')],
+  await native.store.applyTimelineMutation({ type: 'append', agentSessionId: recipient.id, item: captured })
+  await desktopConversationReadBridge(native, speakerFixtureCleanup)
+  const reading = vi.spyOn(api.conversation, 'readAgentConversation'), watching = vi.spyOn(api.conversation, 'observeConversation')
+  useAppStore.setState({ config: { ...composerConfig, workspaces: [{ ...composerConfig.workspaces[0]!, path: native.root }] }, sessions: [recipient, speaker, composerSession('unrelated')],
     agentNames: { [speaker.id]: 'Original related speaker' }, viewModes: { [recipient.id]: 'activity' },
     timelines: { [recipient.id]: { agentSessionId: recipient.id, revision: 1, items: [captured] } },
     agentComposerDrafts: { [recipient.id]: 'Keep exact input' }, recoveryCandidates: [], pendingAgentLaunches: {} })
   await dom.render(<SessionPane sessionId={recipient.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{ workspaceId: 'workspace' }} />)
   await vi.waitFor(() => expect(dom.container.textContent).toContain('Original related speaker passage'))
-  expect(history).toHaveBeenCalled()
+  await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('[data-project-workspace-id][title^="Original related speaker"]')).not.toBeNull() })
+  expect([...reading.mock.calls, ...watching.mock.calls].some(([reference]) => reference.hostId === recipient.hostId && reference.agentSessionId === recipient.id)).toBe(true)
   expect(dom.container.textContent).toContain('Original related speaker')
   const editor = dom.container.querySelector('.ProseMirror')
+  const body = dom.container.querySelector<HTMLElement>('[data-conversation-layout-key] .log-turn__text')
+  expect(body).not.toBeNull()
+  const selectedBody = body!.textContent!, range = document.createRange()
+  range.selectNodeContents(body!); window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range); body!.scrollTop = 9
   await act(async () => useAppStore.setState(state => ({ agentNames: { ...state.agentNames, [speaker.id]: 'Fresh related speaker' } })))
   expect(dom.container.textContent).toContain('Fresh related speaker')
+  const authorAvatar = () => dom.container.querySelector<HTMLElement>('[data-project-workspace-id][title^="Fresh related speaker"]')
+  expect(authorAvatar()).not.toBeNull()
+  await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, workspaces: state.config!.workspaces.map(workspace => ({ ...workspace, name: 'Updated original project' })) } })))
+  expect(authorAvatar()?.title).toContain('Updated original project')
+  const authorRepo = native.root + '/author-repo'
+  const firstTree = { ...composerConfig.workspaces[0]!, id: 'author-first-tree', name: 'Author project', path: authorRepo + '/first', repoPath: authorRepo, branch: 'first' }
+  const secondTree = { ...firstTree, id: 'author-second-tree', path: authorRepo + '/second', branch: 'second' }
+  await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, workspaces: [...state.config!.workspaces, firstTree, secondTree] },
+    sessions: state.sessions.map(session => session.id === speaker.id ? { ...session, workspacePath: secondTree.path } : session) })))
+  expect(authorAvatar()?.dataset.projectWorkspaceId).toBe(firstTree.id)
+  await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, workspaces: state.config!.workspaces.filter(workspace => workspace.id !== firstTree.id) } })))
+  expect(authorAvatar()?.dataset.projectWorkspaceId).toBe(secondTree.id)
+  await act(async () => useAppStore.setState(state => ({
+    config: { ...state.config!, workspaces: [...state.config!.workspaces, { ...state.config!.workspaces[0]!, id: 'speaker-other-host', hostId: 'other-host', path: state.sessions.find(session => session.id === speaker.id)!.workspacePath, name: 'Exact other Host project' }] },
+    sessions: state.sessions.map(session => session.id === speaker.id && session.kind === 'agent' ? { ...session, hostId: 'other-host', control: { ...session.control, hostId: 'other-host' } } : session)
+  })))
+  expect(authorAvatar()?.dataset.projectWorkspaceId).toBe('speaker-other-host')
+  expect(authorAvatar()?.title).toContain('Exact other Host project')
+  const pane = (visible: boolean) => <SessionPane sessionId={recipient.id} surfaceKind="agent" interactiveResize={false} visible={visible} linkOrigin={{ workspaceId: 'workspace' }} />
+  await dom.render(pane(false))
+  await act(async () => useAppStore.setState(state => ({ agentNames: { ...state.agentNames, [speaker.id]: 'Name changed while hidden' },
+    sessions: state.sessions.map(session => session.id === recipient.id && session.kind === 'agent' ? { ...session, turnUsage: { context: { usedTokens: 250, capacityTokens: 1000 }, inputTokens: 240, outputTokens: 10, totalTokens: 250, observedAt: _tailFixtureEpoch(0, 0, 2) } } : session) })))
+  await dom.render(pane(true))
+  expect(dom.container.textContent).toContain('Name changed while hidden')
+  expect(dom.container.querySelector('.composer__context')?.getAttribute('aria-label')).toContain('25%')
   expect(dom.container.querySelector('.ProseMirror')).toBe(editor)
+  expect(dom.container.querySelector('[data-conversation-layout-key] .log-turn__text')).toBe(body)
+  expect(window.getSelection()!.toString()).toBe(selectedBody)
+  expect(body!.scrollTop).toBe(9)
   expect(dom.draft(recipient.id)).toBe('Keep exact input')
+  window.getSelection()!.removeAllRanges()
 })
 
 it('a hidden mounted Composer observes a published in-place timeline revision without another changed fact', async () => {
