@@ -18,12 +18,14 @@ type AgentConfigurationSnapshot = {
   options: NonNullable<ReturnType<typeof readAntigravityConfiguration>>
 }
 
+type PromptImage = { dataBase64: string; mimeType: string }
+
 type ActorRequest = { method: 'session.inspect' } |
   { method: 'configuration.inspect'; sessionId: string } |
   ({ method: 'configuration.set'; sessionId: string } & ConfigurationCommand) |
   { method: 'session.watch'; sessionId: string } |
   { method: 'permission.respond'; sessionId: string; requestId: string; decision: PermissionOutcome } |
-  { method: 'prompt.start'; sessionId: string; requestId: string; prompt: string } |
+  { method: 'prompt.start'; sessionId: string; requestId: string; prompt: string; images?: readonly PromptImage[] } |
   { method: 'prompt.cancel'; sessionId: string; requestId: string }
 
 type PermissionOutcome = { outcome: 'selected'; optionId: string } | { outcome: 'cancelled' }
@@ -45,7 +47,7 @@ type Permission = {
 
 type ActorIdentity = { actorId: string; lifecycleOperationId: string; processId: number }
 type AcpActorPlan = { command: string; args: string[]; cwd: string; resumeSessionId?: string }
-type AcpActorSnapshot = { state: 'initializing' } | { state: 'ready'; sessionId: string; activePromptId?: string } |
+type AcpActorSnapshot = { state: 'initializing' } | { state: 'ready'; sessionId: string; promptImages: boolean; activePromptId?: string } |
   { state: 'authentication-required' | 'initialization-unconfirmed'; stage: 'launch' | 'initialize' | 'session/new' | 'session/load' | 'session/resume' }
 
 const signature = (token: string, body: unknown) => createHmac('sha256', token).update(JSON.stringify(body)).digest('hex')
@@ -143,7 +145,7 @@ export function createAntigravityAcpActor(services: AcpWireServices & {
     if (result.state === 'initializing') return { state: 'initializing' }
     if (result.state === 'ready' && typeof result.sessionId === 'string' && result.sessionId.trim()) {
       if (result.activePromptId !== undefined && typeof result.activePromptId !== 'string') throw unavailable()
-      return { state: 'ready', sessionId: result.sessionId,
+      return { state: 'ready', sessionId: result.sessionId, promptImages: result.promptImages === true,
         ...(result.activePromptId === undefined ? {} : { activePromptId: result.activePromptId }) }
     }
     if ((result.state === 'initialization-unconfirmed' || result.state === 'authentication-required') &&
@@ -325,7 +327,13 @@ export function createAntigravityAcpActor(services: AcpWireServices & {
       if (command.method !== 'prompt.start' || typeof command.prompt !== 'string' || !command.prompt.trim()) return { state: 'not-applied' }
       if (turn?.requestId === requestId) return { state: 'accepted', requestId }
       if (turn && (!turn.result || turn.result.state === 'unconfirmed') || pending.size) return { state: 'busy' }
-      const completion = native.requestWithId(requestId, 'session/prompt', { sessionId, prompt: [{ type: 'text', text: command.prompt }] }).then((response): TurnResult => {
+      const images = command.images ?? []
+      if (!Array.isArray(images) || images.length && !snapshot.promptImages || images.some(image =>
+        typeof image?.dataBase64 !== 'string' || image.dataBase64.length === 0 || typeof image.mimeType !== 'string' || !image.mimeType.startsWith('image/'))) return { state: 'not-applied' }
+      const prompt = [{ type: 'text', text: command.prompt }, ...images.map(image => ({
+        type: 'image', data: image.dataBase64, mimeType: image.mimeType
+      }))]
+      const completion = native.requestWithId(requestId, 'session/prompt', { sessionId, prompt }).then((response): TurnResult => {
         if (response.error) return { state: 'refused' }
         const reason = acpRecord(response.result)?.stopReason
         return stopReasons.has(reason) ? { state: 'stopped', stopReason: reason as StopReason } : { state: 'unconfirmed' }
@@ -419,14 +427,14 @@ export function createAntigravityAcpActor(services: AcpWireServices & {
             if (!handshake.sessions.resume && !handshake.sessions.load) throw unavailable()
             const result = acpRecord(await child.request(stage, { ...params, sessionId: plan.resumeSessionId }))
             if (!result || result.sessionId !== undefined && result.sessionId !== plan.resumeSessionId) throw unavailable()
-            snapshot = { state: 'ready', sessionId: plan.resumeSessionId }
+            snapshot = { state: 'ready', sessionId: plan.resumeSessionId, promptImages: handshake.prompt.image }
             const options = readAntigravityConfiguration(result.configOptions)
             if (options) observeConfiguration({ revision: randomUUID(), options })
           } else {
             stage = 'session/new'
             const result = acpRecord(await child.request(stage, params))
             if (typeof result?.sessionId !== 'string' || result.sessionId.trim().length === 0) throw unavailable()
-            snapshot = { state: 'ready', sessionId: result.sessionId }
+            snapshot = { state: 'ready', sessionId: result.sessionId, promptImages: handshake.prompt.image }
             const options = readAntigravityConfiguration(result.configOptions)
             if (options) observeConfiguration({ revision: randomUUID(), options })
           }

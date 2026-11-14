@@ -3,8 +3,11 @@ import type { AgentInputCarrier, AgentInputHandoff } from './agent-input-handoff
 import type { InputPerformanceHandle, InputPerformanceStage } from './performance-diagnostics.js'
 import { readAgentPromptPreparationWait, type AgentPromptPreparationWait, type AgentPromptPreparationRetryFence } from './prompt-preparation.js'
 import { createHash } from 'node:crypto'
+import { inputImageMatches, readOriginalInputImage, type AgentInputResourceOwner } from './agent-input-resource.js'
+import { FILE_UPLOAD_MAX_BYTES, fileUploadRevision } from './public-rpc-files.js'
+import { AGENTMUX_RPC_MAX_MESSAGE_BYTES } from './public-rpc-frame.js'
 import { isDeepStrictEqual } from 'node:util'
-import { AgentProviderRegistry, type AgentProviderPromptExecutionContext, type AgentProviderPreparedPromptTransport } from './agent-provider.js'
+import { AgentProviderRegistry, type AgentProviderPromptExecutionContext, type AgentProviderPromptImage, type AgentProviderPreparedPromptTransport } from './agent-provider.js'
 import { agentTurnCompletionIdentity, agentTurnEndBoundary, cloneSession, sameNativeHandle, sameRun } from './agent-session-identity.js'
 import { hasCurrentNativeMainBinding, hasSelectedNativeTarget } from './agent-native-source.js'
 import { agentHasActiveSubagents, subagentScopeMatches } from './agent-subagent-state.js'
@@ -203,6 +206,7 @@ function terminalPromptInputPhase(runId: string, ownerInstanceId: string, operat
 type PromptSubmissionDeps = {
   store: AgentMuxAgentSessionStore
   inputJournalId?: string
+  inputResources?: AgentInputResourceOwner
   kernel: CtxmuxRunAdapter
   providers: AgentProviderRegistry
   registry: AgentMuxAgentSessionRegistry
@@ -871,12 +875,13 @@ export class AgentPromptSubmissionCoordinator {
         ...(original.nativeActor ? { nativeActor: original.nativeActor } : {}),
         ...(original.nativeHandle ? { nativeHandle: original.nativeHandle } : {}),
         workspacePath: session.workspacePath, signal: signal ?? new AbortController().signal }
+      const inputImages = managedPlan ? message.inputImages : undefined
       const prepared = await observeInput(diagnostic, 'provider-prepare', () => {
         if (managedPlan) {
           if (!context.nativeActor || context.nativeActor.protocolId !== managedPlan.protocolId ||
               context.nativeActor.actorId !== managedPlan.actorId || target.expectedTurnId !== undefined ||
               !managed?.prepareInput) throw new AgentMuxError('The original ACP input target changed.', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
-          return managed.prepareInput({ ...context, nativeActor: context.nativeActor }, managedPlan)
+          return managed.prepareInput({ ...context, nativeActor: context.nativeActor }, managedPlan, { hasImages: Boolean(inputImages?.length) })
         }
         return provider.prepareNativeInput!(context, { ...target.source,
           ...(target.expectedTurnId === undefined ? {} : { expectedTurnId: target.expectedTurnId }), ...(nativeIdleOnly ? { idleOnly: true } : {}) })
@@ -887,6 +892,31 @@ export class AgentPromptSubmissionCoordinator {
             prepared.plan.operation !== (managedPlan ? 'submit' : nativeIdleOnly ? 'queue-idle' : target.expectedTurnId === undefined ? 'start-or-steer' : 'steer')) throw new AgentMuxError(
           'The prepared native plan does not address the original source and input operation. No input was sent.', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
         await observeInput(diagnostic, 'provider-verify', () => prepared.assertCurrent())
+        let images: readonly AgentProviderPromptImage[] | undefined
+        if (inputImages?.length) {
+          const unavailable = new AgentMuxError('The original selected images could not be read on this Run. The original input remains available.',
+            'AGENT_PROMPT_IMAGE_UNAVAILABLE', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
+          const body = message.userContent
+          if (body === undefined) throw unavailable
+          const bodyRevision = fileUploadRevision(new TextEncoder().encode(body))
+          if (inputImages.some(image => image.upload.hostId !== session.hostId || !inputImageMatches(image, inputKey, body, bodyRevision))) throw unavailable
+          // The private actor and original ACP request each encode these in one bounded JSON frame.
+          // Allow for the command envelope and per-image JSON/MIME metadata in addition to content.
+          const imageBytes = inputImages.reduce((bytes, image) => bytes + 4 * Math.ceil(image.upload.byteLength / 3) + 256, 0)
+          if (Buffer.byteLength(JSON.stringify(prompt)) + imageBytes + 4096 > AGENTMUX_RPC_MAX_MESSAGE_BYTES) throw new AgentMuxError(
+            'The selected images exceed the native input transport budget. The original input remains available.',
+            'AGENT_PROMPT_IMAGE_BUDGET_EXCEEDED', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
+          images = await observeInput(diagnostic, 'provider-prepare', async () => {
+            const original = []
+            for (const image of inputImages) {
+              signal?.throwIfAborted()
+              const resource = await readOriginalInputImage(this.deps.inputResources, image.upload, FILE_UPLOAD_MAX_BYTES)
+              if (resource.status !== 'available') throw unavailable
+              original.push({ dataBase64: resource.dataBase64, mimeType: resource.mimeType })
+            }
+            return original
+          })
+        }
         // The exact Provider queue arbitrates idle dispatch atomically; a screen cannot renew a consumed boundary.
         nativeFutureAdmissionReady = nativeIdleOnly && prepared.plan.operation === 'queue-idle'
         await observeInput(diagnostic, 'provider-verify', () => assertNativeIdle())
@@ -945,7 +975,7 @@ export class AgentPromptSubmissionCoordinator {
             return stored
           }, expectedFutureIntent?.intentId, control?.authority?.binding)
           dispatchAttempted = true
-          result = await observeInput(diagnostic, 'provider-send', () => prepared.send(prompt, frozenPlan))
+          result = await observeInput(diagnostic, 'provider-send', () => prepared.send(prompt, frozenPlan, images))
         } catch (error) { failure = error }
         const next = structuredClone(record)
         if (next.admission.transport !== 'native') throw new AgentMuxError('Native input cannot settle PTY bytes.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')

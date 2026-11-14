@@ -83,6 +83,25 @@ export async function resolveAgentInputImages(value: readonly AgentInputImageRef
   }))
 }
 
+/** Verify bytes from the same immutable Host upload before reading or delivering an image. */
+export async function readOriginalInputImage(owner: AgentInputResourceOwner | undefined, upload: FileUploadIdentity, maxBytes: number): Promise<
+  { status: 'available'; dataBase64: string; byteLength: number; mimeType: Extract<AgentInputResourceResult, { status: 'available' }>['mimeType']; width: number; height: number } |
+  { status: 'unavailable'; code: string }
+> {
+  const unavailable = (code: string) => ({ status: 'unavailable' as const, code })
+  if (!owner || upload.byteLength > maxBytes) return unavailable('INPUT_IMAGE_RESOURCE_UNAVAILABLE')
+  try {
+    const data = await owner.read(upload, maxBytes)
+    if (!data || data.revision !== upload.revision || data.byteLength !== upload.byteLength || data.mimeType !== upload.mimeType ||
+        data.dataBase64.length > 4 * Math.ceil(maxBytes / 3)) return unavailable('INPUT_IMAGE_RESOURCE_UNCONFIRMED')
+    const bytes = Uint8Array.from(atob(data.dataBase64), char => char.charCodeAt(0))
+    if (bytes.length !== upload.byteLength || fileUploadRevision(bytes) !== upload.revision) return unavailable('INPUT_IMAGE_RESOURCE_UNCONFIRMED')
+    const image = imageBytes(bytes, maxBytes, upload.mimeType)
+    if (image.status !== 'read') return unavailable('INPUT_IMAGE_FORMAT_UNAVAILABLE')
+    return { status: 'available', dataBase64: data.dataBase64, byteLength: bytes.length, mimeType: image.mimeType, width: image.width, height: image.height }
+  } catch { return unavailable('INPUT_IMAGE_RESOURCE_UNAVAILABLE') }
+}
+
 export function parseAgentInputResourceResult(value: unknown, input: AgentInputResourceRead): AgentInputResourceResult {
   const p = rpcRecord(value, ['key', 'index', 'revision', 'status', 'mimeType', 'name', 'dataBase64', 'byteLength', 'width', 'height', 'code', 'message', 'purpose'], 'CONTROL_PROTOCOL_ERROR')
   if (JSON.stringify(validateAgentPromptInputKey(p.key)) !== JSON.stringify(input.key) || p.index !== input.index || p.revision !== input.revision || p.purpose !== input.purpose) invalid('The image response belongs to another original input resource.')

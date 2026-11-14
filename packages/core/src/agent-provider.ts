@@ -188,12 +188,14 @@ export type AgentProviderResumedTurnInterruptionContext = AgentProviderNativeInp
   nativeHandle: Readonly<AgentNativeSessionHandle>
   previousTurn: Readonly<AgentPromptExecutionEvidence & { nativeTurnId: string }>
 }
+/** Bounded, verified original Host bytes for one native dispatch. */
+export type AgentProviderPromptImage = { dataBase64: string; mimeType: string }
 export type AgentProviderPreparedNativeInput = {
   plan: AgentNativePromptInputPlan
   /** Recheck the exact prepared source without sending, loading or replacing a conversation. */
   assertCurrent(): Promise<void>
   /** Called only after Core persists the original claim and correlation. */
-  send(prompt: string, plan: AgentNativePromptInputPlan): Promise<{ outcome: 'admitted'; turnId: string } |
+  send(prompt: string, plan: AgentNativePromptInputPlan, images?: readonly AgentProviderPromptImage[]): Promise<{ outcome: 'admitted'; turnId: string } |
     { outcome: 'admitted'; queuedSubmissionId: string } | { outcome: 'admitted'; requestId: string } | { outcome: 'not-applied'; errorCode: number }>
   dispose(): void | Promise<void>
 }
@@ -206,7 +208,7 @@ export type AgentProviderManagedAcp = {
   protocolId: string
   launchOption: { id: string; choiceId: string }
   attach(context: AgentProviderNativeInputContext & { waitForReady?: true }): Promise<import('./acp-adapter.js').AgentMuxAcpBinding>
-  prepareInput?(context: AgentProviderNativeInputContext, plan: AgentNativePromptInputPlan): Promise<AgentProviderPreparedNativeInput>
+  prepareInput?(context: AgentProviderNativeInputContext, plan: AgentNativePromptInputPlan, input: { hasImages: boolean }): Promise<AgentProviderPreparedNativeInput>
   interrupt?(context: AgentProviderNativeInputContext, nativeSessionId: string, expectedRequestId?: string): Promise<void>
   readConfiguration?(context: AgentProviderNativeInputContext, nativeSessionId: string): Promise<import('./agent-configuration.js').AgentConfigurationSnapshot | null>
   setConfiguration?(context: AgentProviderNativeInputContext, nativeSessionId: string, request: Pick<import('./agent-configuration.js').AgentConfigurationSet, 'configId' | 'value' | 'expectedRevision'> & { requestId: string }): Promise<import('./agent-configuration.js').AgentConfigurationSnapshot>

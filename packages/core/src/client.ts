@@ -45,8 +45,7 @@ import { AgentExecutionHelperStore } from './agent-execution-helper-store.js'
 import { parseAgentToolExecutionBinding } from './agent-tool-execution.js'
 import { parsePreparedAuthorProfile, publicAuthorProfile } from './author-profile.js'
 import { parseAgentInputChangesRead, type AgentInputChangesRead, type AgentInputChangesPage } from './agent-input-changes.js'
-import { imageBytes } from './session-history-resource.js'
-import { resolveAgentInputImages, parseAgentInputResourceRead, inputImageMatches, type AgentInputResourceOwner, type AgentInputResourceRead, type AgentInputResourceResult } from './agent-input-resource.js';
+import { resolveAgentInputImages, readOriginalInputImage, parseAgentInputResourceRead, inputImageMatches, type AgentInputResourceOwner, type AgentInputResourceRead, type AgentInputResourceResult } from './agent-input-resource.js';
 import { originalMessageInputKey, parseMessageParticipantSelection, messageHasParticipant } from './agent-message-query.js'
 import { validateMessageFieldRead } from './agent-message-field.js'
 import { readMessageField } from './agent-message-field-reader.js'
@@ -1427,6 +1426,7 @@ export class AgentMuxClient {
     this.promptSubmission = new AgentPromptSubmissionCoordinator({
       store: this.store,
       inputJournalId: this.messageQueue.queueId,
+      ...(this.inputResources ? { inputResources: this.inputResources } : {}),
       kernel: this.kernel,
       providers: this.providers,
       registry: this.registry,
@@ -7428,14 +7428,9 @@ export class AgentMuxClient {
         } catch { return unavailable('INPUT_AUTHOR_AVATAR_UNAVAILABLE') }
       }
       if (!image || body === undefined || image.upload.revision !== input.revision || !inputImageMatches(image, key, body)) return unavailable('INPUT_IMAGE_MEMBERSHIP_UNCONFIRMED')
-      if (!this.inputResources || image.upload.byteLength > input.maxBytes) return unavailable('INPUT_IMAGE_RESOURCE_UNAVAILABLE')
-      try {
-        const bytes = await this.inputResources.read(image.upload, input.maxBytes)
-        if (!bytes || bytes.revision !== image.upload.revision || bytes.byteLength !== image.upload.byteLength || bytes.mimeType !== image.upload.mimeType) return unavailable('INPUT_IMAGE_RESOURCE_UNCONFIRMED')
-        const imageData = imageBytes(Buffer.from(bytes.dataBase64, 'base64'), input.maxBytes, image.upload.mimeType)
-        if (imageData.status !== 'read') return unavailable('INPUT_IMAGE_FORMAT_UNAVAILABLE')
-        return { key, index: input.index, status: 'available', name: image.upload.name, ...bytes, mimeType: imageData.mimeType, width: imageData.width, height: imageData.height }
-      } catch { return unavailable('INPUT_IMAGE_RESOURCE_UNAVAILABLE') }
+      const original = await readOriginalInputImage(this.inputResources, image.upload, input.maxBytes)
+      return original.status === 'available' ? { key, index: input.index, name: image.upload.name, revision: input.revision, ...original }
+        : unavailable(original.code)
     })
   }
 
@@ -8621,7 +8616,7 @@ export class AgentMuxClient {
       }
     }
     if (admissionIntent.kind === 'manual-actor') this.assertTerminalInputCarrier(session)
-    const managedPlan = this.managedAcpPromptPlan(provider, session, message)
+    const managedPlan = this.managedAcpPromptPlan(provider, session)
     const savedCarrier = inputControl?.handoff?.carrier
     if (managedPlan && savedCarrier && (savedCarrier.kind !== 'native' || savedCarrier.plan.operation !== 'submit')) throw new AgentMuxError(
       'The original input has another frozen carrier.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
@@ -10973,7 +10968,7 @@ export class AgentMuxClient {
       const renderObservation = new AbortController()
       let waitingForStartup = false
       await this.serializeAgentInput(session, async (current, live, diagnostic) => {
-        const managedPlan = this.managedAcpPromptPlan(provider, current, message)
+        const managedPlan = this.managedAcpPromptPlan(provider, current)
         const initializationWait = !managedPlan && !nativeSource && await this.initialInputWait(current, live,
           { kind: 'session-conversation', expectedRun: current.run, ...optionalInputEpoch(inputEpoch) }, this.requireAgentSession(current.agentSessionId).initialInput?.key?.expectedRun.runId === live.runId ? 'initial-input' : 'resumed-input', renderObservation.signal)
         if (initializationWait) {
@@ -11558,15 +11553,13 @@ export class AgentMuxClient {
     } finally { releaseAdmission() }
   }
 
-  private managedAcpPromptPlan(provider: AgentProvider, session: AgentMuxAgentSession, message: AgentPromptMessageContent): import('./types.js').AgentNativePromptInputPlan | undefined {
+  private managedAcpPromptPlan(provider: AgentProvider, session: AgentMuxAgentSession): import('./types.js').AgentNativePromptInputPlan | undefined {
     const actor = this.registry.findByRun(session.run)?.nativeActor
     const managed = provider.managedAcp
     if (!actor || managed?.protocolId !== actor.protocolId) return undefined
     if (!managed.prepareInput || session.nativeHandle?.kind !== 'provider' || session.nativeHandle.providerId !== provider.id) throw new AgentMuxError(
       'The original ACP conversation has no confirmed prompt endpoint.', 'AGENT_NATIVE_INPUT_UNAVAILABLE',
       undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
-    if (message.inputImages?.length) throw new AgentMuxError('This ACP input endpoint accepts text. The original input is retained.',
-      'AGENT_ACP_PROMPT_CONTENT_UNSUPPORTED', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
     return { kind: 'native-rpc', operation: 'submit', protocolId: actor.protocolId, actorId: actor.actorId,
       threadId: session.nativeHandle.sessionId, sourceId: nativeInputSourceId({ providerId: provider.id, nativeSessionId: session.nativeHandle.sessionId }) }
   }

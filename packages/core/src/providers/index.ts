@@ -83,7 +83,7 @@ function createAntigravityProvider(defineAgentProvider: ProviderFactory): AgentP
     managedAcp: {
       protocolId: ANTIGRAVITY_ACP_ACTOR_PROTOCOL,
       launchOption: ACP_LAUNCH_OPTION,
-      async prepareInput({ nativeActor, processId, signal }, plan) {
+      async prepareInput({ nativeActor, processId, signal }, plan, { hasImages }) {
         const { actorId, lifecycleOperationId, token } = nativeActor
         const identity = { actorId, lifecycleOperationId, processId }
         const assertCurrent = async (): Promise<void> => {
@@ -91,15 +91,18 @@ function createAntigravityProvider(defineAgentProvider: ProviderFactory): AgentP
           const snapshot = await antigravityAcpActor.inspect(identity, token, signal)
           if (snapshot.state !== 'ready' || snapshot.sessionId !== plan.threadId) throw new AgentMuxError(
             'The original native ACP session could not confirm its input endpoint.', 'AGENT_ACP_ACTOR_UNCONFIRMED')
+          if (hasImages && !snapshot.promptImages) throw new AgentMuxError(
+            'The original ACP agent did not advertise image input. The original input remains available.',
+            'AGENT_ACP_PROMPT_CONTENT_UNSUPPORTED', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
           if (snapshot.activePromptId !== undefined) throw new AgentMuxError(
             'The current ACP turn is still active.', 'AGENT_ACP_PROMPT_BUSY')
         }
         return { plan, assertCurrent, dispose() {},
-          async send(prompt, { clientCorrelation, ...frozen }) {
+          async send(prompt, { clientCorrelation, ...frozen }, images) {
             if (JSON.stringify(frozen) !== JSON.stringify(plan) || !clientCorrelation) throw new AgentMuxError(
               'The prepared ACP request does not match the original input claim.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
             const requestId = `acp-prompt-${createHash('sha256').update(clientCorrelation).digest('hex')}`
-            return await antigravityAcpActor.submitPrompt(identity, token, { sessionId: plan.threadId, requestId, prompt }, signal)
+            return await antigravityAcpActor.submitPrompt(identity, token, { sessionId: plan.threadId, requestId, prompt, ...(images ? { images } : {}) }, signal)
           }
         }
       },
