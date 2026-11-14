@@ -120,7 +120,7 @@ it('early edit cancellation survives same-Run continuity observation updates whi
   const container=await mounted(<Entry token="original-entry"/>)
   await act(async()=>document.dispatchEvent(new InputEvent('input',{bubbles:true})))
   await act(async()=>{setOriginal(item=>({...item,continuity:{operationId:'observed-original',agentSessionId:item.id,trigger:'manual',previousRun:item.control.run,policy:{...DEFAULT_AGENT_CONTINUITY_POLICY},admittedAt:1,observedAt:2,rechecks:1,kind:'unavailable',reason:'native-handle-unavailable',evidence:{kind:'run-ended',state:'exited',observedAt:2}}}));release()})
-  await vi.waitFor(()=>expect(container.querySelector('output')?.textContent).toContain('无法原样恢复'))
+  await vi.waitFor(()=>expect(container.querySelector('output')?.textContent).toContain('尚未确认可接续原会话的 ID'))
   expect(calls.inspect).not.toHaveBeenCalled();expect(calls.ensure).not.toHaveBeenCalled();expect(calls.open).not.toHaveBeenCalled()
 })
 
@@ -145,7 +145,7 @@ it.each(['new-run','same-run'] as const)('a late unavailable reply never faults 
   const request=calls.ensure.mock.calls[0]![0]
   await act(async()=>setOriginal(item=>({...item,processState:'running',control:{...item.control,run:kind==='new-run'?{runId:'new-healthy-run'}:item.control.run}})))
   await act(async()=>release({operation:{operationId:request.operationId,agentSessionId:reference.sessionId,trigger:'manual',previousRun:request.expectedRun,policy:{...DEFAULT_AGENT_CONTINUITY_POLICY},admittedAt:1,observedAt:2,rechecks:0,kind:'unavailable',reason:'native-handle-unavailable',evidence:{kind:'run-ended',state:'exited',observedAt:2},moteMainEntry:{target:request.target,reference:request.reference,expectedRoleRevision:request.expectedRoleRevision}}}))
-  expect(container.textContent).not.toContain('无法原样恢复');expect(calls.ensure).toHaveBeenCalledTimes(1)
+  expect(container.textContent).not.toContain('尚未确认可接续原会话的 ID');expect(calls.ensure).toHaveBeenCalledTimes(1)
 })
 
 it('actual App opens the retained original start position while its public handover source is still waiting',async()=>{

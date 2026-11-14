@@ -121,6 +121,7 @@ it('names a Main Core holds no conversation for apart from one without a confirm
  const absent=moteMainUnavailableIssue('native-conversation-absent'),identity=moteMainUnavailableIssue('native-handle-unavailable')
  expect(absent).toContain('开始新一轮');expect(absent).toContain('原对话和草稿都在');expect(absent).not.toBe(identity)
  expect(absent).not.toMatch(/Provider|之前|开始对话前|未保存/u)
+ expect(identity).toContain('尚未确认可接续原会话的 ID');expect(identity).not.toContain('没有留下')
 })
 
 // Core's unavailable result is a fact about this Main, not an unread operation: the issue names what
