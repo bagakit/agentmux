@@ -14,8 +14,8 @@ const dom = composerDOM()
 const remote: HostConfig = { id: 'remote', kind: 'ssh', label: 'Remote', hostname: 'original.invalid' }
 function inventory(host = remote): HostExecutorInventoryState {
   return { input: host, state: 'ready', result: { routeHostId: host.id, runtimeId: 'target-runtime', executors: [
-    { executorId: 'shared', label: 'Remote Agent', providerId: 'claude', command: _hygiene_fixturePath("remote/claude"), configRevision: 'revision', source: 'registered', availability: 'available' },
-    { executorId: 'remote-only', label: 'Remote exclusive Agent', providerId: 'codex', command: _hygiene_fixturePath("remote/exclusive"), configRevision: 'exclusive-revision', source: 'registered', availability: 'available' },
+    { executorId: 'shared', label: 'Remote Agent', providerId: 'claude', command: _hygiene_fixturePath("remote/claude"), executable: _hygiene_fixturePath("remote/claude"), configRevision: 'revision', source: 'registered', availability: 'available' },
+    { executorId: 'remote-only', label: 'Remote exclusive Agent', providerId: 'codex', command: _hygiene_fixturePath("remote/exclusive"), executable: _hygiene_fixturePath("remote/exclusive"), configRevision: 'exclusive-revision', source: 'registered', availability: 'available' },
     { executorId: 'missing', label: 'Missing Agent', providerId: 'codex', command: _hygiene_fixturePath("remote/missing"), configRevision: 'missing-revision', source: 'registered', availability: 'missing' }
   ] } }
 }
@@ -85,6 +85,11 @@ it('does not substitute a same-ID executor after the selected connection changes
   await show(); await choose()
   const replacement: HostConfig = { ...remote, hostname: 'replacement.invalid' }
   await act(async () => { const config = useAppStore.getState().config!; useAppStore.setState({ config: { ...config, hosts: [config.hosts[0]!, replacement] }, hostExecutorInventories: { remote: inventory(replacement) } }) })
+  const trigger = dom.container.querySelector<HTMLButtonElement>('[aria-label="Prepare an Agent"]')!
+  await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+  const oldOption = document.querySelector<HTMLElement>('.selection-field__menu [data-value="shared"]')!
+  expect(oldOption.getAttribute('aria-disabled')).toBe('true')
+  await act(async () => oldOption.click())
   await open()
   expect(useAppStore.getState().launchAgent).not.toHaveBeenCalled()
   expect(dom.container.textContent).toContain('Agent Launcher was not prepared')

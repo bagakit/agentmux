@@ -82,6 +82,15 @@ test('route device choices expose a stable identity alongside duplicate display 
   await flush(() => expect(trigger.dataset.value).toBe('C'))
   expect(trigger.textContent).toContain('Compute · C')
 })
+test('saved route edge choices expose a stable edge ID beside the connection label', async () => {
+  const f = await fixture()
+  await dom.render(<RemoteRoutesPane config={f.config} active />)
+  await flush(() => expect(dom.container.querySelector('[aria-label="Next saved route connection"]')).not.toBeNull())
+  const trigger = dom.container.querySelector<HTMLButtonElement>('[aria-label="Next saved route connection"]')!
+  await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+  await flush(() => expect(document.querySelector('.selection-field__menu [data-value="C"]')).not.toBeNull())
+  expect(document.querySelector('.selection-field__menu [data-value="C"]')?.textContent).toContain('Compute · C')
+})
 test('actual Remote route editor browses saved edges without probes or writes and explicitly saves to its original Core', async () => {
   const f = await fixture(); await newRoute(f)
   expect(f.probes).toEqual(['B/C']); expect(f.calls.filter(call => call.method === 'route.configure')).toEqual([])
