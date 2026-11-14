@@ -9,6 +9,7 @@ import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
 
 const desktop = resolve(import.meta.dirname, '..'), repository = resolve(desktop, '../..')
 const reliability = process.env.MOTE_SETUP_RELIABILITY === '1'
+const recoveryVisualOnly = reliability && process.env.MOTE_RECOVERY_VISUAL_ONLY === '1'
 const fixture = join(desktop, 'scripts/fixtures/' + (reliability ? 'mote-reliability' : 'mote-initialization')), require = createRequire(join(desktop, 'package.json'))
 const privateRoot = await mkdtemp(join(tmpdir(), 'agentmux-mote-initialization-'))
 const evidence = resolve(process.env.MOTE_INITIALIZATION_VISUAL_EVIDENCE ?? join(repository, '.local/state/mote-initialization/visual', 'capture-' + globalThis.crypto.randomUUID()))
@@ -37,7 +38,7 @@ const binding = { name: 'bind-shared-frame-current-source', enforce: 'pre', asyn
 } }
 let controlledApiTransforms = 0
 const result = { schema: 'agentmux.mote-initialization-renderer-proof.v1', passed: false, captureOnly: true, aestheticReview: 'not-performed', phases: [],
-  boundary: 'Complete production App and ordinary Store initialize; controlled public API facts, current source compilation, private original durable profile, two independent Electron processes. No user App/Session/Run, real Runtime lifecycle, package or install is touched.' }
+  boundary: 'Complete production App and ordinary Store initialize; controlled public API facts, current source compilation, private original durable profile, ' + (recoveryVisualOnly ? 'one capture-only Electron process; original restart proof is separately consumed' : 'two independent Electron processes') + '. No user App/Session/Run, real Runtime lifecycle, package or install is touched.' }
 await mkdir(evidence, { recursive: true })
 try {
   for (const file of [import.meta.filename, join(desktop, 'scripts/probe-process.mjs'), join(desktop, 'scripts/fixtures/mote-shared-space-frame/entry.mjs'), ...['main.cjs', 'entry.mjs', 'index.html', 'scenario.md'].map(name => join(fixture, name))]) inputs.set(file, hash(await readFile(file)))
@@ -99,7 +100,7 @@ try {
   result.compiled = compiled; result.controlledApiTransforms = controlledApiTransforms
 
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
-  for (const phase of ['seed', 'restore']) {
+  for (const phase of recoveryVisualOnly ? ['seed'] : ['seed', 'restore']) {
     const logs = []
     const exit = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(outDir, 'index.html'), privateRoot, phase, evidence],
       { temporaryRoot: privateRoot, cwd: repository, env, timeoutMs: 90000, onLine: line => logs.push(line) })
@@ -108,8 +109,8 @@ try {
     result.phases.push({ phase, exit, app })
     assert.equal(exit.exitCode, 0, app.failure?.message); assert.equal(app.passed, true, app.failure?.message)
   }
-  assert.equal(new Set(result.phases.map(one => one.app.pid)).size, 2, 'Two actual independent Electron processes')
-  if (reliability) {
+  assert.equal(new Set(result.phases.map(one => one.app.pid)).size, recoveryVisualOnly ? 1 : 2, 'Actual independent Electron capture processes')
+  if (reliability && !recoveryVisualOnly) {
     const seed = result.phases.find(one => one.phase === 'seed').app, restore = result.phases.find(one => one.phase === 'restore').app
     assert.ok(seed.original.agentDrafts[seed.original.session.id]?.trim() && seed.original.drafts['private-mote-reliability-original-draft']?.prompt?.trim(), 'Nonempty original inputs are required')
     assert.deepEqual(seed.persistedInputs, { agentDrafts: seed.original.agentDrafts, drafts: seed.original.drafts })

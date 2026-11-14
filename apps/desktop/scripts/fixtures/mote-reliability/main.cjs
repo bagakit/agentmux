@@ -44,6 +44,23 @@ app.whenReady().then(async () => {
     }
     const profile = async () => { await click(button('Profile', 'document.querySelector(".mote-space-frame__header")')); await until('document.querySelector("[data-mote-page=profile]")') }
     const refresh = async () => { await click(button('Refresh actual schedule', 'document.querySelector(".mote-quick-mode")')) }
+    const checkedRecovery = async () => {
+      result.checkedLegacyRecovery = []
+      for (const [theme, width, height] of [['dark', 1180, 820], ['dark', 420, 740], ['light', 1180, 820], ['light', 420, 740]]) {
+        win.setContentSize(width, height); await read(`window.moteInit.theme(${JSON.stringify(theme)});window.moteReliability.variant("legacy-without-key")`)
+        await profile(); await refresh(); await click('document.querySelector(".mote-space-frame__header .mote-heartbeat-lamp")')
+        await until('document.querySelector(".mote-quick-mode-dialog [data-mote-maintenance-status=paused]")')
+        await click(button('Check original delivery', 'document.querySelector(".mote-quick-mode-dialog")'))
+        await until(`[...document.querySelectorAll('.mote-quick-mode-dialog button')].some(e=>e.textContent==='Resume future checks')`)
+        const reachable = await read(`(()=>{const e=${button('Resume future checks', 'document.querySelector(".mote-quick-mode-dialog")')},r=e.getBoundingClientRect(),body=e.closest('.mote-quick-mode-dialog__body').getBoundingClientRect(),footer=document.querySelector('.mote-quick-mode-dialog__footer').getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;return {details:e.closest('details')!==null,inViewport:r.y>=body.y&&r.bottom<=Math.min(body.bottom,footer.y)&&r.x>=0&&r.right<=innerWidth,hit:e.contains(document.elementFromPoint(x,y)),text:e.closest('[role="status"]')?.textContent}})()`)
+        assert.equal(reachable.details, false); assert.equal(reachable.inViewport, true, 'Explicit future recovery is in the first screen'); assert.equal(reachable.hit, true)
+        assert.ok(reachable.text.includes('earlier delivery remains unknown'))
+        result.checkedLegacyRecovery.push({ theme, width, ...reachable })
+        await capture('legacy-checked-recovery-' + theme + '-' + (width > 600 ? 'wide' : 'narrow')); await escape()
+      }
+      win.setContentSize(1180, 820); await read('window.moteInit.theme("dark")')
+    }
+    if (process.env.MOTE_RECOVERY_VISUAL_ONLY === '1') { await checkedRecovery(); result.passed = true; return }
     if (phase === 'restore') {
       const seeded = JSON.parse(await fs.readFile(path.join(evidence, 'seed.json'), 'utf8')), seed = seeded.original
       result.restored = await read('window.moteReliability.facts()')
@@ -109,6 +126,9 @@ app.whenReady().then(async () => {
     if (watch) {
       await profile(); await read('window.moteInit.theme("dark");window.moteReliability.variant("manual")'); await refresh(); await capture('care-manual-dark-wide')
       await read('window.moteReliability.variant("legacy")'); await refresh(); await capture('care-legacy-dark-wide')
+      if (process.env.MOTE_RECOVERY_CAPTURE === '1') {
+        await checkedRecovery(); await profile()
+      }
       await read('window.moteReliability.variant("paused")'); await refresh()
       await read('window.moteReliability.variant("unavailable")'); await refresh(); await capture('care-observation-unavailable-dark-wide')
       await read('window.moteReliability.variant("paused")'); await refresh()

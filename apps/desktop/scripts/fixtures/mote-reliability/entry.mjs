@@ -50,8 +50,8 @@ const schedule = () => ({ loopId: 'original-mote-heartbeat', hostId: reference.h
   everyMs: 1800000, intervalMs: 1800000, revision: variant === 'active' ? 5 : 4, creationOperationId: 'original-mote-heartbeat-creation', futureIntentId: 'original-mote-heartbeat-standing-intent', prompt: 'Check current work and unfinished commitments.',
   status: variant === 'active' ? 'active' : 'paused', nextCheckAt: Date.now() + 25 * 60000, lastTickAt: Date.now() - 5 * 60000,
   lastOutcome: variant === 'active' ? 'sent' : 'unknown', lastDecision: variant === 'active' ? 'The original input was accepted.' : 'The original Host connection was unavailable. Delivery remains unconfirmed.',
-  ...(variant === 'active' || variant === 'legacy' ? {} : { pause: { reason: variant === 'manual' ? 'manual' : 'input-unconfirmed', episodeId: 'private-original-pause', pausedAt: 1794362400000 } }),
-  ...(variant === 'active' ? {} : { pendingCompletion: { id: 'original-occurrence', operationId: 'original-heartbeat-input', condition: { expectedRun: session.control.run, afterSubmissionId: null }, prompt: 'Check current work and unfinished commitments.', agentMuxNote: 'Original maintenance input.' } }) })
+  ...(variant === 'active' || variant === 'legacy' || variant === 'legacy-without-key' ? {} : { pause: { reason: variant === 'manual' ? 'manual' : 'input-unconfirmed', episodeId: 'private-original-pause', pausedAt: 1794362400000 } }),
+  ...(variant === 'active' || variant === 'legacy-without-key' ? {} : { pendingCompletion: { id: 'original-occurrence', operationId: 'original-heartbeat-input', condition: { expectedRun: session.control.run, afterSubmissionId: null }, prompt: 'Check current work and unfinished commitments.', agentMuxNote: 'Original maintenance input.' } }) })
 api.motePreferences.read = async input => {
   heartbeatReads.push({ method: 'preferences', target: input.target })
   if (variant === 'unavailable') throw Error('The original heartbeat observation is unavailable. Its last reading is kept.')

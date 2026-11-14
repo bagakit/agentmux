@@ -92,9 +92,10 @@ it('the real conversation and daily entry share one original reading while Profi
   expect(input).toHaveBeenCalledWith(defaultAgent.control, expect.objectContaining({ submissionId: 'original-heartbeat-input' }))
   expect(resume).not.toHaveBeenCalled(); retained()
 })
-it.each(['another-main', 'next-pause-in-same-loop'])('a reminder for A inspects original A after %s and closes back to the exact lamp', async change => {
+it.each(['another-main', 'next-pause-in-same-loop', 'legacy-without-key'])('a reminder for A inspects original A after %s and closes back to the exact lamp', async change => {
   maintenance.schedule!.pause = { reason: 'input-unconfirmed', episodeId: 'original-pause-A', pausedAt: 1794210000500 }
   maintenance.schedule!.managedSource = { sourceId: 'original-mote-source', revision: 'legacy:missing' }
+  if (change === 'legacy-without-key') delete maintenance.schedule!.pendingCompletion
   const originalA = structuredClone(maintenance.schedule!)
   const newerPause = { ...originalA, pause: { reason: 'input-unconfirmed' as const, episodeId: 'next-pause-B', pausedAt: 1794211800500 },
     pendingCompletion: { ...originalA.pendingCompletion!, id: 'next-occurrence-B', operationId: 'next-input-B', condition: { expectedRun: { runId: 'next-run-B' }, afterSubmissionId: null } } }
@@ -106,18 +107,21 @@ it.each(['another-main', 'next-pause-in-same-loop'])('a reminder for A inspects 
   const row = center.querySelector<HTMLElement>('.notification-item[data-notice-id^="mote-heartbeat:"]')!
   expect(row).not.toBeNull()
   const source = vi.mocked(api.motePreferences.read), read = source.getMockImplementation()!
-  const next = change === 'another-main' ? { ...loop(), loopId: 'new-main-heartbeat-B', agentSessionId: 'new-main-B', status: 'active' as const, lastOutcome: 'sent' as const } : newerPause
+  const next = change === 'another-main' ? { ...loop(), loopId: 'new-main-heartbeat-B', agentSessionId: 'new-main-B', status: 'active' as const, lastOutcome: 'sent' as const } : change === 'legacy-without-key' ? originalA : newerPause
   source.mockImplementation(async params => { const result = await read(params); return { ...result, defaults: { ...result.defaults!, conversation: change === 'another-main' ? { ...reference, sessionId: 'new-main-B' } : reference }, maintenance: { status: next.status === 'active' ? 'active' : 'paused', schedule: next, issue: null } } })
   const action = button('Inspect original heartbeat', row)
   await act(async () => action.focus()); await moteClick(action)
   const dialog = document.querySelector<HTMLElement>('.mote-quick-mode-dialog')!
   await vi.waitFor(() => expect(dialog?.textContent).toContain('Original heartbeat'))
   expect(inspect).toHaveBeenCalledWith({ scheduleId: originalA.loopId }, 'local')
-  expect(dialog.textContent).toContain('original-heartbeat-input'); expect(dialog.textContent).not.toContain('new-main-heartbeat-B'); expect(dialog.textContent).not.toContain('next-input-B')
+  if (change !== 'legacy-without-key') expect(dialog.textContent).toContain('original-heartbeat-input')
+  expect(dialog.textContent).not.toContain('new-main-heartbeat-B'); expect(dialog.textContent).not.toContain('next-input-B')
   expect(dialog.querySelector('[aria-label="Enable automatic Mote maintenance"]')).toBeNull()
   expect([...dialog.querySelectorAll('button')].some(value => value.textContent?.includes('Save') || value.textContent?.includes('Resume'))).toBe(false)
   await moteClick(button('Check original delivery', dialog))
-  expect(input).toHaveBeenCalledWith(defaultAgent.control, expect.objectContaining({ submissionId: 'original-heartbeat-input' }))
+  if (change === 'legacy-without-key') expect(input).not.toHaveBeenCalled()
+  else expect(input).toHaveBeenCalledWith(defaultAgent.control, expect.objectContaining({ submissionId: 'original-heartbeat-input' }))
+  expect([...dialog.querySelectorAll('button')].some(value => value.textContent?.includes('Save') || value.textContent?.includes('Resume'))).toBe(false)
   await moteClick(button('Close', dialog))
   expect(document.activeElement).toBe(document.querySelector('.mote-space-frame__header .mote-heartbeat-lamp'))
   expect(resume).not.toHaveBeenCalled(); retained()
@@ -134,6 +138,117 @@ it('legacy pause wording and an old check cannot invent an explicit cause or pau
   expect(card.textContent).toContain('Original pause time not recorded')
   expect(card.querySelectorAll('time')).toHaveLength(1)
   expect(card.textContent).toContain('Its original reason and pause time were not recorded'); retained()
+})
+it('legacy current heartbeat exposes a checked missing key and explicit future recovery outside details', async () => {
+  delete maintenance.schedule!.pendingCompletion
+  const original = structuredClone(maintenance.schedule!)
+  vi.spyOn(api.schedule, 'inspect').mockResolvedValue({ schedule: original, executionScope: 'connected-host' })
+  const input = vi.spyOn(api.sessions, 'inspectInput'), resume = vi.spyOn(api.schedule, 'resume').mockImplementation(async request => ({
+    schedule: { ...original, status: 'active', revision: request.expectedRevision + 1,
+      lastMutation: { operationId: request.operationId, expectedRevision: request.expectedRevision, action: 'resume' } }, diskDurability: 'confirmed', executionScope: 'connected-host' }))
+  await app.mount(); await moteClick(document.querySelector<HTMLButtonElement>('.mote-space-frame__header .mote-heartbeat-lamp')!)
+  const dialog = document.querySelector<HTMLElement>('.mote-quick-mode-dialog')!
+  expect([...dialog.querySelectorAll('button')].some(node => node.textContent === 'Resume future checks')).toBe(false)
+  await moteClick(button('Check original delivery', dialog))
+  const recovery = button('Resume future checks', dialog), explanation = recovery.closest('[role="status"]')!
+  expect(recovery.closest('details')).toBeNull(); expect(explanation.closest('details')).toBeNull()
+  expect(explanation.textContent).toContain('no retained input key'); expect(explanation.textContent).toContain('earlier delivery remains unknown')
+  expect(explanation.textContent).toContain('due check immediately'); expect(input).not.toHaveBeenCalled(); expect(resume).not.toHaveBeenCalled()
+  await moteClick(recovery)
+  expect(resume).toHaveBeenCalledExactlyOnceWith({ scheduleId: original.loopId, expectedRevision: original.revision, operationId: expect.any(String) }, 'local')
+  expect(dialog.querySelector('[aria-label="Mote heartbeat"]')?.getAttribute('data-mote-maintenance-status')).toBe('active')
+  expect(dialog.textContent).toContain('Delivery unconfirmed'); await moteClick(button('Cancel', dialog)); retained()
+})
+it('legacy current heartbeat does not confuse missing receipts for an existing key with a missing key', async () => {
+  const input = vi.spyOn(api.sessions, 'inspectInput').mockResolvedValue(null), resume = vi.spyOn(api.schedule, 'resume')
+  vi.spyOn(api.schedule, 'inspect').mockResolvedValue({ schedule: maintenance.schedule!, executionScope: 'connected-host' })
+  await app.mount(); await moteClick(document.querySelector<HTMLButtonElement>('.mote-space-frame__header .mote-heartbeat-lamp')!)
+  const dialog = document.querySelector<HTMLElement>('.mote-quick-mode-dialog')!
+  await moteClick(button('Check original delivery', dialog))
+  expect(input).toHaveBeenCalledWith(defaultAgent.control, expect.objectContaining({ submissionId: 'original-heartbeat-input' }))
+  expect([...dialog.querySelectorAll('button')].some(node => node.textContent === 'Resume future checks')).toBe(false)
+  expect(dialog.textContent).not.toContain('no retained input key'); expect(resume).not.toHaveBeenCalled(); retained()
+})
+it.each(['main', 'source-role', 'revision', 'pause', 'unavailable'])('legacy current heartbeat invalidates checked recovery after original %s changes', async change => {
+  delete maintenance.schedule!.pendingCompletion
+  vi.spyOn(api.schedule, 'inspect').mockResolvedValue({ schedule: maintenance.schedule!, executionScope: 'connected-host' })
+  const resume = vi.spyOn(api.schedule, 'resume')
+  await app.mount(); await moteClick(document.querySelector<HTMLButtonElement>('.mote-space-frame__header .mote-heartbeat-lamp')!)
+  const dialog = document.querySelector<HTMLElement>('.mote-quick-mode-dialog')!
+  await moteClick(button('Check original delivery', dialog)); const recovery = button('Resume future checks', dialog)
+  const source = vi.mocked(api.motePreferences.read), read = source.getMockImplementation()!
+  source.mockImplementation(async params => {
+    if (change === 'unavailable') throw Error('Original preference source unavailable')
+    const current = await read(params), schedule = structuredClone(current.maintenance!.schedule!)
+    if (change === 'source-role') schedule.managedSource = { sourceId: 'original-source', revision: 'new-source-role' }
+    if (change === 'revision') schedule.revision = 9
+    if (change === 'pause') schedule.pause = { reason: 'input-unconfirmed', episodeId: 'later-episode', pausedAt: 1794211800000 }
+    return { ...current, defaults: { ...current.defaults!, ...(change === 'main' ? { conversation: { ...reference, sessionId: 'another-main' } } : {}) },
+      maintenance: { ...current.maintenance!, schedule } }
+  })
+  await moteClick(recovery)
+  expect(resume).not.toHaveBeenCalled()
+  expect([...dialog.querySelectorAll('button')].some(node => node.textContent === 'Resume future checks' || node.textContent === 'Inspect original resume')).toBe(false)
+  expect(dialog.textContent).toContain(change === 'unavailable' ? 'Original preference source unavailable' : 'main role or original heartbeat changed')
+  retained()
+})
+it('legacy current heartbeat keeps an unknown resume on its original operation in the first screen', async () => {
+  delete maintenance.schedule!.pendingCompletion
+  const original = structuredClone(maintenance.schedule!)
+  const inspect = vi.spyOn(api.schedule, 'inspect').mockResolvedValue({ schedule: original, executionScope: 'connected-host' })
+  const resume = vi.spyOn(api.schedule, 'resume').mockRejectedValue(Error('Resume receipt unavailable'))
+  await app.mount(); await moteClick(document.querySelector<HTMLButtonElement>('.mote-space-frame__header .mote-heartbeat-lamp')!)
+  const dialog = document.querySelector<HTMLElement>('.mote-quick-mode-dialog')!
+  await moteClick(button('Check original delivery', dialog)); await moteClick(button('Resume future checks', dialog))
+  const request = resume.mock.calls[0]![0], retainedAction = button('Inspect original resume', dialog)
+  expect(retainedAction.closest('details')).toBeNull(); expect(resume).toHaveBeenCalledTimes(1)
+  inspect.mockResolvedValue({ schedule: { ...original, status: 'active', revision: request.expectedRevision + 1,
+    lastMutation: { operationId: request.operationId, expectedRevision: request.expectedRevision, action: 'resume' } }, executionScope: 'connected-host' })
+  await moteClick(retainedAction)
+  expect(inspect).toHaveBeenLastCalledWith({ operationId: request.operationId }, 'local'); expect(resume).toHaveBeenCalledTimes(1)
+  await moteClick(button('Cancel', dialog)); retained()
+})
+it('legacy current heartbeat cannot establish checked recovery from another current Main', async () => {
+  delete maintenance.schedule!.pendingCompletion
+  const inspect = vi.spyOn(api.schedule, 'inspect').mockResolvedValue({ schedule: maintenance.schedule!, executionScope: 'connected-host' })
+  const resume = vi.spyOn(api.schedule, 'resume')
+  await app.mount(); await moteClick(document.querySelector<HTMLButtonElement>('.mote-space-frame__header .mote-heartbeat-lamp')!)
+  const dialog = document.querySelector<HTMLElement>('.mote-quick-mode-dialog')!
+  const source = vi.mocked(api.motePreferences.read), read = source.getMockImplementation()!
+  source.mockImplementation(async params => { const result = await read(params); return { ...result, defaults: { ...result.defaults!, conversation: { ...reference, sessionId: 'new-main' } } } })
+  await moteClick(button('Check original delivery', dialog))
+  expect(inspect).not.toHaveBeenCalled(); expect(resume).not.toHaveBeenCalled()
+  expect([...dialog.querySelectorAll('button')].some(node => node.textContent === 'Resume future checks')).toBe(false)
+  expect(dialog.textContent).toContain('main role or original heartbeat changed'); retained()
+})
+it('legacy current heartbeat qualifies the same original resource independent of JSON property order', async () => {
+  delete maintenance.schedule!.pendingCompletion
+  vi.spyOn(api.schedule, 'inspect').mockResolvedValue({ schedule: maintenance.schedule!, executionScope: 'connected-host' })
+  await app.mount(); await moteClick(document.querySelector<HTMLButtonElement>('.mote-space-frame__header .mote-heartbeat-lamp')!)
+  const dialog = document.querySelector<HTMLElement>('.mote-quick-mode-dialog')!
+  const source = vi.mocked(api.motePreferences.read), read = source.getMockImplementation()!
+  source.mockImplementation(async params => { const result = await read(params), resource = result.source!.resource!; return { ...result,
+    source: { ...result.source!, resource: Object.fromEntries(Object.entries(resource).reverse()) as typeof resource } } })
+  await moteClick(button('Check original delivery', dialog))
+  expect(button('Resume future checks', dialog).closest('details')).toBeNull(); retained()
+})
+it('legacy current heartbeat does not retain a resume that was never dispatched after its preflight closes', async () => {
+  delete maintenance.schedule!.pendingCompletion
+  vi.spyOn(api.schedule, 'inspect').mockResolvedValue({ schedule: maintenance.schedule!, executionScope: 'connected-host' })
+  const resume = vi.spyOn(api.schedule, 'resume')
+  await app.mount(); const lamp = document.querySelector<HTMLButtonElement>('.mote-space-frame__header .mote-heartbeat-lamp')!
+  await moteClick(lamp)
+  const dialog = document.querySelector<HTMLElement>('.mote-quick-mode-dialog')!
+  await moteClick(button('Check original delivery', dialog))
+  const source = vi.mocked(api.motePreferences.read), current = await source.mock.results.at(-1)!.value
+  let complete!: (value: typeof current) => void
+  source.mockImplementationOnce(() => new Promise(resolve => { complete = resolve }))
+  await moteClick(button('Resume future checks', dialog)); expect(complete).toBeTypeOf('function')
+  await moteClick(button('Cancel', dialog)); expect(document.querySelector('.mote-quick-mode-dialog')).toBeNull()
+  await act(async () => complete(current)); await moteClick(lamp)
+  const reopened = document.querySelector<HTMLElement>('.mote-quick-mode-dialog')!
+  expect([...reopened.querySelectorAll('button')].some(node => node.textContent === 'Inspect original resume')).toBe(false)
+  expect(button('Check original delivery', reopened)).toBeDefined(); expect(resume).not.toHaveBeenCalled(); retained()
 })
 it('confirmed off settings keep the lamp quiet while the original Host still returns the preceding paused arrangement', async () => {
   maintenance.schedule!.pause = { reason: 'input-unconfirmed', episodeId: 'previous-pause', pausedAt: 1794210000500 }
