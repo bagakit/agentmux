@@ -40,7 +40,7 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
       await button('当前对话操作')
       await until(`document.querySelector('.mobile-session-diagnostic')?.dataset.conversationStatus===${JSON.stringify(state === 'parallel' ? 'unconfirmed' : state)}`)
       const detail = await read(`(()=>{const n=document.querySelector('.mobile-session-diagnostic');return {text:n.textContent,rect:n.getBoundingClientRect().toJSON(),sheet:document.querySelector('[role=dialog]').getBoundingClientRect().toJSON()}})()`)
-      if(state==='retired') {assert.ok(detail.text.includes('历史仍可阅读'));assert.equal(detail.text.includes('离线'),false)}
+      if(state==='retired') {assert.ok(detail.text.includes('内容仍可阅读'));assert.equal(detail.text.includes('离线'),false)}
       if(state==='parallel') for(const reason of ['METADATA_POINT_READ_FAILED','HISTORY_READ_FAILED','CONNECTION_OBSERVATION_FAILED']) assert.ok(detail.text.includes(reason),'Separate source details retain the original reason: '+reason)
       assert.ok(detail.sheet.y>=0&&detail.sheet.y+detail.sheet.height<=height+1,'The existing detail sheet stays within the viewport')
       if (width===320 || height===480) await capture(`conversation-status-${state}-details-${width}x${height}-${appearance}`)
