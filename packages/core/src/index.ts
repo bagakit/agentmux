@@ -302,6 +302,7 @@ export * from './storage-recovery.js'
 export * from './storage-recovery-rpc.js'
 export * from './storage-restore.js'
 export * from './storage-recovery-maintenance.js'
+export { inspectSemanticRuntimeIdentity } from './semantic-runtime-identity.js'
 
 export { normalizeAgentSession, normalizeInteractionOperationReceipt, normalizeSessionHistoryMetadata, parseAgentCreationFact, parseAgentCreationSpatialIntent, normalizeAgentInteractionRequest } from './agent-session-codec.js'
 export { agentLifecycleOperationIdentity } from './agent-session-identity.js'

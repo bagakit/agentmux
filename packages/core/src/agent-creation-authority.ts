@@ -56,6 +56,20 @@ function publicKey(value: unknown): { key: KeyObject; encoded: string; fingerpri
   } catch { return failure('Invalid Agent creation public key.', 'AGENT_CREATION_AUTHORITY_INVALID') }
 }
 
+/** Pure validation of the retained signer. Reading a witness grants no signing authority. */
+export function parseOriginalCreationIdentity(bytes: string) {
+  const p = JSON.parse(bytes) as Record<string, unknown>
+  if (!p || typeof p !== 'object' || Object.keys(p).length !== 4 || p.schema !== 'agentmux.agent-creation-authority.v1' ||
+    typeof p.runtimeId !== 'string' || !p.runtimeId || typeof p.privateKey !== 'string' || !/^[A-Za-z0-9_-]{1,512}$/u.test(p.privateKey))
+    throw new AgentMuxError('The original Agent creation identity cannot be verified.', 'AGENT_CREATION_AUTHORITY_INVALID')
+  const pub = publicKey(p.publicKey)
+  const privateKey = createPrivateKey({ key: Buffer.from(p.privateKey, 'base64url'), format: 'der', type: 'pkcs8' })
+  if (privateKey.asymmetricKeyType !== 'ed25519' || privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64url') !== p.privateKey ||
+    createPublicKey(privateKey).export({ format: 'der', type: 'spki' }).toString('base64url') !== pub.encoded)
+    throw new AgentMuxError('The original Agent creation key pair does not match.', 'AGENT_CREATION_AUTHORITY_INVALID')
+  return { schema: 'agentmux.agent-creation-authority.v1' as const, runtimeId: p.runtimeId, publicKey: pub.encoded, privateKey: p.privateKey }
+}
+
 /** Target-host receipt only; it grants no Agent authorship or source-message trust. */
 export function verifyAgentMessageInboxReceipt(value: AgentMuxRecipientInboxReceipt): AgentMuxRecipientInboxReceipt {
   const receipt = parseRecipientInboxReceipt(value), key = publicKey(receipt.publicKey)
@@ -160,15 +174,10 @@ export class AgentMuxCreationAuthority {
     try {
       const expected = await this.recoveryIdentity?.()
       const parse = (bytes: string) => {
-      const p = JSON.parse(bytes) as Record<string, unknown>
-      if (!p || typeof p !== 'object' || Object.keys(p).length !== 4 || p.schema !== 'agentmux.agent-creation-authority.v1' ||
-        p.runtimeId !== this.runtimeId || typeof p.privateKey !== 'string' || !/^[A-Za-z0-9_-]{1,512}$/u.test(p.privateKey)) throw new Error('Invalid identity')
-      const pub = publicKey(p.publicKey)
-      const privateKey = createPrivateKey({ key: Buffer.from(p.privateKey, 'base64url'), format: 'der', type: 'pkcs8' })
-      if (privateKey.asymmetricKeyType !== 'ed25519' || privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64url') !== p.privateKey ||
-        createPublicKey(privateKey).export({ format: 'der', type: 'spki' }).toString('base64url') !== pub.encoded) throw new Error('Mismatched identity')
-      if (expected && (p.runtimeId !== expected.runtimeId || p.publicKey !== expected.publicKey || p.privateKey !== expected.privateKey)) throw new Error('Original namespace signing binding changed')
-      return { schema: 'agentmux.agent-creation-authority.v1' as const, runtimeId: this.runtimeId, publicKey: pub.encoded, privateKey: p.privateKey }
+        const value = parseOriginalCreationIdentity(bytes)
+        if (value.runtimeId !== this.runtimeId || expected && (value.runtimeId !== expected.runtimeId || value.publicKey !== expected.publicKey || value.privateKey !== expected.privateKey))
+          throw new Error('Original namespace signing binding changed')
+        return value
       }
       const value = await immutableIdentityFile(this.identityPath, {
         parse,

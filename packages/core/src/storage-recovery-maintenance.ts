@@ -1,14 +1,19 @@
 import { createRequire } from 'node:module'
 import { lstat, mkdir, open, readFile, readdir, type FileHandle } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 import { AgentMuxError } from './errors.js'
 import { AgentMuxFileAgentSessionStore } from './agent-session-store.js'
 import { DurableAgentMuxMessageQueue } from './agent-global-message-queue.js'
 import { AgentMuxSpatialStateStore } from './spatial-state.js'
-import { AgentMuxStorageRecovery, type RecoverySource } from './storage-recovery.js'
+import { AgentMuxStorageRecovery, recoveryDigest, restoreMissingRecoveryFile, type RecoveryRestoreMember, type RecoverySource } from './storage-recovery.js'
 import { legacySessionRecoverySource, semanticRecoverySource, sessionRecoverySource } from './storage-recovery-sources.js'
 import { AgentMuxControlServer } from './public-rpc-server.js'
 import { STORAGE_RECOVERY_METHODS } from './storage-recovery-rpc.js'
+import { readProtectedIdentityFile } from './immutable-identity-file.js'
+import { parseOriginalCreationIdentity } from './agent-creation-authority.js'
+import { inspectSemanticRuntimeIdentity, parseSemanticRuntimeIdentity, priorSemanticNamespace,
+  semanticRuntimeAuthority, semanticRuntimeIdentityName, semanticRuntimeIdentityMembers, type SemanticRuntimeLocation } from './semantic-runtime-identity.js'
 
 export type AgentMuxStorageMaintenanceOptions = {
   stateDirectory: string; storePath: string; recoverySources?: readonly RecoverySource[]
@@ -26,6 +31,41 @@ async function protectedJson(path: string): Promise<Record<string, unknown>> {
   const attributes = await lstat(path)
   if (!attributes.isFile() || (attributes.mode & 0o077) !== 0) throw new AgentMuxError('The original recovery identity is not a protected regular file.', 'IDENTITY_SOURCE_UNCONFIRMED')
   return JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>
+}
+
+const identityUnconfirmed = () => new AgentMuxError('The selected material does not confirm the original Runtime identity.', 'IDENTITY_SOURCE_UNCONFIRMED')
+async function retainedSigner(directory: string) {
+  const originals = (await Promise.all(['agent-creation-identity.json', 'agent-creation-identity.json.original']
+    .map(name => readProtectedIdentityFile(join(directory, name), 16_384)))).filter(bytes => bytes !== null).map(parseOriginalCreationIdentity)
+  if (originals.length === 2 && !isDeepStrictEqual(originals[0], originals[1])) throw identityUnconfirmed()
+  return originals[0]
+}
+
+async function verifySemanticIdentity(options: SemanticRuntimeLocation, bytes: string, expectedRuntimeId?: string) {
+  const value = parseSemanticRuntimeIdentity(bytes, semanticRuntimeAuthority(options.stateDirectory, options.storePath))
+  const seed = value.creationIdentity && parseOriginalCreationIdentity(JSON.stringify({
+    schema: 'agentmux.agent-creation-authority.v1', ...value.creationIdentity
+  }))
+  const witness = await retainedSigner(options.stateDirectory)
+  if (value.runtimeId !== (expectedRuntimeId ?? witness?.runtimeId) || witness && (witness.runtimeId !== value.runtimeId ||
+    seed && !isDeepStrictEqual(seed, witness)))
+    throw identityUnconfirmed()
+  return value
+}
+
+function semanticIdentityValidator(options: SemanticRuntimeLocation, namespace: string) {
+  return async (members: readonly RecoveryRestoreMember[]) => {
+    const identities = members.filter(member => semanticRuntimeIdentityMembers.some(name => name === member.id))
+    let first: Awaited<ReturnType<typeof verifySemanticIdentity>> | undefined
+    for (const member of identities) {
+      if (member.target !== join(options.stateDirectory, member.id)) throw identityUnconfirmed()
+      const bytes = await readProtectedIdentityFile(member.file, 16_384)
+      if (bytes === null || recoveryDigest(bytes) !== member.sha256) throw identityUnconfirmed()
+      const identity = await verifySemanticIdentity(options, bytes, namespace)
+      if (first && !isDeepStrictEqual(first, identity)) throw identityUnconfirmed()
+      first = identity
+    }
+  }
 }
 /** Pure data owner: no Client, signing identity initialization, Native activation or default Session creation. */
 export async function openAgentMuxStorageRecovery(options: AgentMuxStorageMaintenanceOptions): Promise<{ recovery: AgentMuxStorageRecovery; close(): Promise<void> }> {
@@ -74,14 +114,63 @@ export async function openAgentMuxStorageRecovery(options: AgentMuxStorageMainte
       if (!used) throw new AgentMuxError('No original durable namespace or recovery source has been created here.', 'RECOVERY_OWNER_NOT_CREATED')
     }
     if (identities.size !== 1) throw new AgentMuxError('The exact original namespace is missing or contradictory. All original sources were retained.', 'IDENTITY_SOURCE_UNCONFIRMED')
+    const namespace = [...identities][0]!
     const store = new AgentMuxFileAgentSessionStore(options.storePath)
     const semanticPaths = ['semantic-runtime.json', 'semantic-runtime.json.original', 'agent-creation-identity.json', 'agent-creation-identity.json.original', 'agent-creation-trusted-sources', 'agent-message-trusted-sources', 'host-executors.json'].map(name => join(options.stateDirectory, name))
     const external = options.recoverySources ?? []
-    const recovery = new AgentMuxStorageRecovery(directory, [...identities][0]!, [sessionRecoverySource(store), legacySessionRecoverySource(store.path),
-      semanticRecoverySource(options.stateDirectory, directory, semanticPaths), ...[...enrolled.values()].filter(source => !external.some(owner => owner.id === source.id)), ...external], 5, { admit: input => store.admitRecoveryInputCut(input) })
+    const recovery = new AgentMuxStorageRecovery(directory, namespace, [sessionRecoverySource(store), legacySessionRecoverySource(store.path),
+      semanticRecoverySource(options.stateDirectory, directory, semanticPaths, semanticIdentityValidator(options, namespace)),
+      ...[...enrolled.values()].filter(source => !external.some(owner => owner.id === source.id)), ...external], 5, { admit: input => store.admitRecoveryInputCut(input) })
     let closed = false
     return { recovery, async close() { if (closed) return; closed = true; try { await recovery.dispose() } finally { await lock.close() } } }
   } catch (error) { await lock.close(); throw error }
+}
+
+export type SemanticIdentityRecoveryResult = { state: 'unchanged' | 'restored' | 'deferred' } | { state: 'needs-backup'; code: string }
+
+/** Missing identity only. Desktop and headless maintenance use the same storage owner and lease. */
+export async function restoreMissingSemanticIdentity(options: SemanticRuntimeLocation, selectedOriginal?: string): Promise<SemanticIdentityRecoveryResult> {
+  if (!isAbsolute(options.stateDirectory) || !isAbsolute(options.storePath) || selectedOriginal !== undefined && !isAbsolute(selectedOriginal))
+    throw new AgentMuxError('Recovery requires the exact original configured paths.', 'STORAGE_RECOVERY_INVALID')
+  if (await inspectSemanticRuntimeIdentity(options)) return { state: 'unchanged' }
+  if (selectedOriginal !== undefined) {
+    const lock = await lease(join(options.stateDirectory, 'semantic-owner.lock'))
+    try {
+      if (await inspectSemanticRuntimeIdentity(options)) return { state: 'unchanged' }
+      const bytes = await readProtectedIdentityFile(selectedOriginal, 16_384)
+      if (bytes === null) throw identityUnconfirmed()
+      await verifySemanticIdentity(options, bytes)
+      const outcome = await restoreMissingRecoveryFile(selectedOriginal, join(options.stateDirectory, semanticRuntimeIdentityName), recoveryDigest(bytes))
+      if (outcome === 'conflict') throw identityUnconfirmed()
+      return { state: 'restored' }
+    } finally { await lock.close() }
+  }
+  let owner: Awaited<ReturnType<typeof openAgentMuxStorageRecovery>>
+  try { owner = await openAgentMuxStorageRecovery(options) }
+  catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'RUNTIME_OWNER_BUSY') return { state: 'deferred' }
+    if (code === 'RECOVERY_OWNER_NOT_CREATED') return { state: 'unchanged' }
+    if (code === 'IDENTITY_SOURCE_UNCONFIRMED' && !await priorSemanticNamespace(options.stateDirectory, options.storePath)) return { state: 'unchanged' }
+    throw error
+  }
+  try {
+    if (await inspectSemanticRuntimeIdentity(options)) return { state: 'unchanged' }
+    const generations = await owner.recovery.list()
+    const sourceId = 'core.semantic'
+    const generation = generations.find(result => result.coverage?.some(member => member.sourceId === sourceId &&
+      semanticRuntimeIdentityMembers.some(name => name === member.memberId)))
+    if (!generation?.coverage) return { state: 'needs-backup', code: 'IDENTITY_SOURCE_MISSING' }
+    const selectors = generation.coverage.filter(member => member.sourceId === sourceId &&
+      semanticRuntimeIdentityMembers.some(name => name === member.memberId)).map(({ sourceId, memberId }) => ({ sourceId, memberId }))
+    const { generationId, manifestHash } = generation
+    const operationId = 'semantic-bootstrap-' + recoveryDigest(JSON.stringify({ generationId, manifestHash, selectors }))
+    const prepared = await owner.recovery.restorePreflight({ operationId, generationId, manifestHash, selectors })
+    if (prepared.state === 'unknown' || prepared.state === 'unavailable') return { state: 'needs-backup', code: 'IDENTITY_RECOVERY_UNCONFIRMED' }
+    const applied = await owner.recovery.restoreApply(operationId)
+    return applied.state === 'complete' && await inspectSemanticRuntimeIdentity(options)
+      ? { state: 'restored' } : { state: 'needs-backup', code: 'IDENTITY_RECOVERY_UNCONFIRMED' }
+  } finally { await owner.close() }
 }
 
 /** Explicit maintenance endpoint remains reachable when normal semantic startup cannot read its original identity or DB. */

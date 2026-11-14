@@ -4,7 +4,7 @@ import { lstat, mkdir, readdir } from 'node:fs/promises'
 import { AgentMuxFileAgentSessionStore } from './agent-session-store.js'
 import { isDeepStrictEqual } from 'node:util'
 import { AgentMuxError } from './errors.js'
-import type { RecoveryInputSelector } from './storage-recovery.js'
+import type { RecoveryInputSelector, RecoveryRestoreMember } from './storage-recovery.js'
 import { snapshotRecoveryFile, snapshotRecoverySqlite, hashRecoveryFile, recoveryDirectorySource, recoveryDigest, type RecoveryGap, type RecoverySource, type RecoverySourceMember } from './storage-recovery.js'
 
 /** Exact file contribution from its composing owner, without a second business parser. */
@@ -22,7 +22,8 @@ export function recoveryFileSource(id: string, path: string, format: 'file' | 's
 }
 
 /** The semantic owner contributes only its own state namespace, excluding ctxmux and recovery storage. */
-export function semanticRecoverySource(directory: string, recoveryDirectory: string, ownedPaths: readonly string[]): RecoverySource {
+export function semanticRecoverySource(directory: string, recoveryDirectory: string, ownedPaths: readonly string[],
+  validateIdentity?: (members: readonly RecoveryRestoreMember[]) => Promise<void>): RecoverySource {
   const authorityRoots = ['agent-creation-trusted-sources', 'agent-message-trusted-sources'].map(name => resolve(directory, name))
   const authorityFile = (target: string) => authorityRoots.some(root => resolve(target) === root || resolve(target).startsWith(root + '/'))
   const source = recoveryDirectorySource('core.semantic', directory, { restoreInertFiles: true, watchPaths: ownedPaths, exclude: path => {
@@ -33,6 +34,7 @@ export function semanticRecoverySource(directory: string, recoveryDirectory: str
   return { ...source, async prepareRestore(members, output) {
     const unavailable = members.filter(member => authorityFile(member.target))
     if (unavailable.length) return { state: 'unavailable', selectors: unavailable.map(member => ({ memberId: member.id, reason: 'RECOVERY_AUTHORITY_REAPPROVAL_REQUIRED' })) }
+    await validateIdentity?.(members)
     await mkdir(output, { mode: 0o700 })
     const prepared = []
     for (const member of members) {

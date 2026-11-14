@@ -6,10 +6,10 @@ import { AgentMuxError } from './errors.js'
 import { mintObjectId } from './object-id.js'
 
 const missing = (error: unknown) => (error as NodeJS.ErrnoException)?.code === 'ENOENT'
-async function optional(path: string): Promise<string | null> {
+export async function readProtectedIdentityFile(path: string, maxBytes?: number): Promise<string | null> {
   try {
     const attributes = await lstat(path)
-    if (!attributes.isFile() || (attributes.mode & 0o077) !== 0) throw new AgentMuxError(
+    if (!attributes.isFile() || (attributes.mode & 0o077) !== 0 || maxBytes !== undefined && attributes.size > maxBytes) throw new AgentMuxError(
       'The original private identity is not a protected regular file. Its bytes were retained.', 'IDENTITY_SOURCE_UNCONFIRMED')
     return await readFile(path, 'utf8')
   } catch (error) { if (missing(error)) return null; throw error }
@@ -54,12 +54,12 @@ export async function immutableIdentityFile<T>(path: string, options: {
   onRecoveryIssue?: (issue: Extract<ImmutableIdentityRecovery, { status: 'unavailable' }>) => void
 }): Promise<T> {
   const custody = path + '.original'
-  const primary = await optional(path)
+  const primary = await readProtectedIdentityFile(path)
   if (primary !== null) {
     const value = options.parse(primary)
     try {
-      let original = await optional(custody)
-      if (original === null) { await publish(custody, primary); original = await optional(custody) }
+      let original = await readProtectedIdentityFile(custody)
+      if (original === null) { await publish(custody, primary); original = await readProtectedIdentityFile(custody) }
       if (original === null || !isDeepStrictEqual(options.parse(original), value)) throw new AgentMuxError(
         'The immutable identity contradicts its original recovery source. Keep both sources and inspect this owner.', 'IDENTITY_SOURCE_CONFLICT')
     } catch (error) {
@@ -71,7 +71,7 @@ export async function immutableIdentityFile<T>(path: string, options: {
     }
     return value
   }
-  let original = await optional(custody)
+  let original = await readProtectedIdentityFile(custody)
   if (original === null) {
     const recovered = await options.recover?.()
     if (!recovered && await options.priorIdentity?.()) throw new AgentMuxError(
@@ -79,12 +79,12 @@ export async function immutableIdentityFile<T>(path: string, options: {
     const proposed = options.encode(recovered ?? options.create())
     options.parse(proposed)
     await publish(custody, proposed)
-    original = await optional(custody)
+    original = await readProtectedIdentityFile(custody)
   }
   if (original === null) throw new AgentMuxError('Original identity custody is unconfirmed. Keep this namespace and retry the same initialization.', 'IDENTITY_SOURCE_UNCONFIRMED')
   const value = options.parse(original)
   await publish(path, original)
-  const actual = await optional(path)
+  const actual = await readProtectedIdentityFile(path)
   if (actual === null || !isDeepStrictEqual(options.parse(actual), value)) throw new AgentMuxError(
     'The original identity changed during publication. Both sources were retained.', 'IDENTITY_SOURCE_CONFLICT')
   return value
