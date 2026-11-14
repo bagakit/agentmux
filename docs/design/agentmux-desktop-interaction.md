@@ -41,7 +41,7 @@
 | 持久交互页面、全托管／路径、隔离／注入模式及 HITL | [持久交互页面 PRD](behavior/local-page-hosting.md) |
 | 真实文件、格式、保存、worktree 与 Git 操作 | [文件、编辑与 Git](behavior/files-and-git.md) |
 | 配置入口、状态、通知、资源与 Toolkit | [设置、状态与观测](behavior/settings-and-observation.md) |
-| 系统／Browser 截图、共享标注、原稿、PNG／贴图与录制／长截图评估 | [截图与录制](behavior/capture-and-recording.md) |
+| 系统／Browser 截图、共享标注、原稿、PNG／贴图、GIF 与滚动截图 | [截图与录制](behavior/capture-and-recording.md) |
 | 系统应用／窗口、剪贴板、辅助功能与键鼠操作 | [AgentMux 原生层](behavior/native-desktop.md) |
 | 网络域、节点发布、主动接入、网关、拓扑、多跳路径和 Host 连接 | [Mesh 网络与接入](behavior/mesh.md) |
 | 远程工作、远程 Agent 能力方向、运行观察、来源核验与维护；应用账户授权同步 | [Remote 管理 PRD](behavior/remote-management.md) · [Remote 应用授权同步](behavior/remote-application-access.md) |

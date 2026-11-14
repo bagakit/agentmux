@@ -31,6 +31,8 @@ A completed action followed by observation failure returns `ok:true` with `{acti
 
 `listDisplays` returns `{displays:[{id,x,y,width,height,scale,isMain}]}` using the OS `CGDirectDisplayID`, global Quartz points and each display's actual backing scale.
 
+Rect captures may additionally specify `excludeWindowIds: number[]` containing exact Quartz window IDs. The native capture source excludes only those windows without moving or hiding them; ordinary rect, window and display capture remain unchanged. This is used by continuous capture to keep its own controls out of the image.
+
 `captureScreenshot` captures one exact source. Its parameters are one of:
 
 - `{mode:"display",displayId}`: exact active display from discovery.
