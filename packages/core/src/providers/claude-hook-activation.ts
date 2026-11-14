@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { executionEnvironmentValue, executionHomeDirectory, executionPath } from './execution-environment.js'
 import { isAbsolute, join, resolve } from 'node:path'
 import { AgentMuxError } from '../errors.js'
-import { claudeLaunchValueOptions } from './claude-launch-options.js'
+import { claudeLaunchValueOptions, claudeSafeModeEnvironmentEnabled } from './claude-launch-options.js'
 import type { AgentProviderHookActivation, AgentProviderHookActivationContext } from '../agent-provider.js'
 
 const MANAGED_SETTINGS = process.platform === 'darwin'
@@ -11,6 +11,8 @@ const MANAGED_SETTINGS = process.platform === 'darwin'
   : '/etc/claude-code/managed-settings.json'
 const DISABLED: AgentProviderHookActivation = { active: false, code: 'HOOK_CONFIGURATION_DISABLED',
   action: 'Claude settings disable AgentMux Hooks for this launch. Review that Claude setting, then inspect again.' }
+
+type ClaudeHookSettingsContext = Pick<AgentProviderHookActivationContext, 'workspacePath' | 'args' | 'env'> & { signal?: AbortSignal }
 
 type Source = { name: string; read(): Promise<Record<string, unknown> | undefined> }
 
@@ -47,7 +49,7 @@ function launchOptions(args: readonly string[]): Map<string, string | true> {
   return options
 }
 
-function launchSettings(context: AgentProviderHookActivationContext, options: ReadonlyMap<string, string | true>): Source | undefined {
+function launchSettings(context: ClaudeHookSettingsContext, options: ReadonlyMap<string, string | true>): Source | undefined {
   const value = options.get('--settings')
   if (value === undefined) return undefined
   if (typeof value !== 'string') throw new AgentMuxError('Claude --settings has no value.', 'HOOK_TARGET_UNPARSEABLE')
@@ -66,11 +68,16 @@ function launchSettings(context: AgentProviderHookActivationContext, options: Re
  * settings that allow only managed Hooks exclude the plugin. A missing source is skipped; one that
  * cannot be read is an error, never reported as active.
  */
-export async function inspectClaudeHookActivation(context: AgentProviderHookActivationContext): Promise<AgentProviderHookActivation> {
-  context.signal.throwIfAborted()
+export function inspectClaudeHookActivation(context: AgentProviderHookActivationContext): Promise<AgentProviderHookActivation> {
+  return inspectClaudeHookSettings(context)
+}
+
+/** One owner for the native launch's settings sources and precedence. */
+export async function inspectClaudeHookSettings(context: ClaudeHookSettingsContext): Promise<AgentProviderHookActivation> {
+  context.signal?.throwIfAborted()
   const env = { ...process.env, ...context.env }
   const options = launchOptions(context.args)
-  if (options.has('--safe-mode') || ['1', 'true'].includes(env.CLAUDE_CODE_SAFE_MODE ?? '')) return DISABLED
+  if (options.has('--safe-mode') || claudeSafeModeEnvironmentEnabled(env)) return DISABLED
   const selected = options.get('--setting-sources')
   if (selected === true) throw new AgentMuxError('Claude --setting-sources has no value.', 'HOOK_TARGET_UNPARSEABLE')
   const sourcesToRead = selected === undefined ? ['user', 'project', 'local'] : selected.split(',').map(value => value.trim()).filter(Boolean)

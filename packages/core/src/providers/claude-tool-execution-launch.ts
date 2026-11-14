@@ -1,24 +1,24 @@
 import { delimiter, isAbsolute, join, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
+import { AgentMuxError } from '../errors.js'
 import { durableWriteFile } from '../durable-write.js'
 import type { AgentLaunchPlan } from '../types.js'
 import type { AgentToolExecutionLaunchContext } from '../agent-tool-execution.js'
 import { classifyExecutable } from '../executable-probe.js'
-import { runProcess } from '../process-runner.js'
 import { agentControlFailureCode, registerAgentExecutionInvocation } from '../agent-execution-rpc-relay.js'
 
+import { inspectClaudeHookSettings } from './claude-hook-activation.js'
 import { prepareClaudeExecutionPolicy } from './claude-execution-policy.js'
 export const CLAUDE_EXECUTION_MCP_SERVER = 'amux_exec'
 import { claudeLaunchValueOptions as valueOptions } from './claude-launch-options.js'
 
-export async function qualifyClaudeExecutionExecutable(command: string, options: { env: Readonly<NodeJS.ProcessEnv>; workspacePath: string }): Promise<string> {
+/** Resolve this Host's exact executable; native protocol and permissions belong to execution. */
+export async function resolveClaudeExecutionExecutable(command: string, options: { env: Readonly<NodeJS.ProcessEnv>; workspacePath: string }): Promise<string> {
   const candidates = isAbsolute(command) || command.includes('/') ? [resolve(options.workspacePath, command)]
     : (options.env.PATH ?? '').split(delimiter).map(directory => resolve(options.workspacePath, directory, command))
   for (const executable of candidates) {
     if ((await classifyExecutable(executable)).availability !== 'available') continue
-    const version = await runProcess(executable, ['--version'], { cwd: options.workspacePath, env: options.env, timeoutMs: 2000, maxOutputBytes: 4096 })
-    if (version.exitCode !== 0 || version.stdout.trim() !== '2.1.314 (Claude Code)') throw new Error('The selected Claude executable has no qualified remote tool contract')
     return executable
   }
   throw new Error('The selected Claude executable is unavailable on its original Host')
@@ -27,7 +27,7 @@ export async function qualifyClaudeExecutionExecutable(command: string, options:
 /** Keep native authentication, settings, hooks and resume identity. Only this launch uses the fixed tool binding. */
 export async function prepareClaudeToolExecutionLaunch(plan: AgentLaunchPlan, context: AgentToolExecutionLaunchContext): Promise<AgentLaunchPlan> {
   const env = { ...process.env, ...plan.env }
-  const executable = await qualifyClaudeExecutionExecutable(plan.command, { env, workspacePath: context.launchWorkspacePath })
+  const executable = await resolveClaudeExecutionExecutable(plan.command, { env, workspacePath: context.launchWorkspacePath })
   const endpoint = new URL(context.url)
   if (endpoint.protocol !== 'ws:' || endpoint.hostname !== '127.0.0.1' || !endpoint.port || endpoint.pathname === '/' || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new Error('Claude tools require the original loopback execution capability')
   const args = [...plan.args]
@@ -38,6 +38,14 @@ export async function prepareClaudeToolExecutionLaunch(plan: AgentLaunchPlan, co
     if (['--remote', '--teleport', '--worktree', '-w'].includes(option)) throw new Error('This launch selects a different tool environment; choose one original execution binding')
     if (valueOptions.has(option) && !arg.includes('=')) i++
   }
+  let activation
+  try { activation = await inspectClaudeHookSettings({ workspacePath: context.launchWorkspacePath, args, env }) }
+  catch (cause) {
+    const error = new AgentMuxError('The selected resource-tool route configuration is unconfirmed. Inspect the original Claude Hook settings before retrying this bound launch. ' + (cause instanceof Error ? cause.message : String(cause)), 'EXECUTION_ROUTING_CONFIGURATION_UNCONFIRMED')
+    error.cause = cause
+    throw error
+  }
+  if (activation.active === false) throw new Error('Claude settings disable this bound launch’s resource tools. Enable its Hooks for this launch or choose local tools.')
   let url = context.url
   if (context.invocation) {
     try { url = await registerAgentExecutionInvocation(context.url, context.invocation) }

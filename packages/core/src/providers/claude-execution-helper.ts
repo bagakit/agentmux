@@ -1,9 +1,9 @@
 import { fileURLToPath } from 'node:url'
 import type { AgentExecutionHelperContext, AgentExecutionHelperLaunchPlan } from '../agent-execution-helper.js'
-import { qualifyClaudeExecutionExecutable } from './claude-tool-execution-launch.js'
+import { resolveClaudeExecutionExecutable } from './claude-tool-execution-launch.js'
 
 export async function prepareClaudeExecutionHelper(context: AgentExecutionHelperContext): Promise<AgentExecutionHelperLaunchPlan> {
-  const executable = await qualifyClaudeExecutionExecutable(context.executable, { env: process.env, workspacePath: context.workspacePath })
+  const executable = await resolveClaudeExecutionExecutable(context.executable, { env: process.env, workspacePath: context.workspacePath })
   return { command: process.execPath,
     args: ['--disable-warning=ExperimentalWarning', fileURLToPath(new URL('./claude-execution-run.js', import.meta.url)), '--agentmux-execution-helper', JSON.stringify({ ...context, executable })],
     env: { ELECTRON_RUN_AS_NODE: '1' },
