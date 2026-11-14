@@ -40,6 +40,23 @@ the original ready cursor. Values never enter the saved asset or durable progres
 `--step` runs one eligible step. This path cannot approve a human checkpoint or
 take Browser input back from the person. `browser task stop --browser <id> --run <id>`
 stops the original run while preserving its cursor.
+A `subflow` step calls one fixed retained version of another task in the same Browser:
+`{kind: "subflow", subflow: {target: {kind: "local", assetId: "<id>", version: <n>},
+iteration: "once" | "each"}}`. Publishing checks that the callee exists; because callees
+are already published, calls cannot cycle, and nesting is at most 4 levels. Run such a
+version with `--input <file|->` carrying `{parameters, calls}`, where `calls` maps the
+subflow step id to `{parameters, items: [{id, parameters, calls?}]}`: `once` takes exactly
+one item, `each` 1–16. Per-item values use declared non-secret parameters; shared secrets
+go in the call's `parameters`. Each item runs as its own original child run, in order, under
+the root's one budget (128 operations, 120 seconds, 32 child runs). Completed items are never
+rerun. A waiting, failed or unknown item stops the root at that step; continue the root with
+`--run <root>` and the same item ids in the same order with fresh values. A child run cannot
+be continued directly, and batches do not run versions that call subflows.
+`browser task inspect --browser <id> [--run <id>]` reads one exact tree: the root, each call's
+item ids, nextItem and bound child run, every run's cursor and operation ids, the current run
+and shared cost. `browser task assets` lists root runs only. Portable imports keep each
+callee as an unbound `{kind: "imported", source}` reference; edit it to a local version before
+publishing.
 For a bounded batch, use `browser task batch --browser <id> --asset <id> --version <n>`,
 fresh stdin JSON {parameters: {...}, items: [{id: "one", parameters: {...}}]} and optional
 `--batch <id>` to continue the original eligible group. Each of 1–16 unique items uses
