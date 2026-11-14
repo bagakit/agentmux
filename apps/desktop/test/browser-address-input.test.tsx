@@ -202,7 +202,7 @@ it('save rejection never delays human form navigation and remains explicit even 
 it('read and deletion failures retain data and draft with a persistent local warning', async () => {
   vi.mocked(api.browser.listInputHistory).mockRejectedValueOnce(new Error('read unavailable'))
   await mount(); await activate(); await fill('original')
-  expect(popup()?.textContent).toContain('read unavailable'); expect(popup()?.textContent).toContain('not loaded')
+  expect(popup()?.textContent).toContain('read unavailable'); expect(popup()?.textContent).not.toContain('not loaded')
   expect(popup()?.textContent).not.toContain('No saved input yet')
   await click('p[role="status"] button')
   vi.mocked(api.browser.removeInputHistory).mockRejectedValueOnce(new Error('delete unavailable'))
@@ -424,4 +424,38 @@ it('[address-suggestions] selecting the last history and removing it never targe
   await mount(); await activate(); await key('ArrowUp'); await key('Delete', { shiftKey: true })
   expect(api.browser.removeInputHistory).toHaveBeenCalledExactlyOnceWith(target, snapshot.scope, 'original search')
   expect(submitted).not.toHaveBeenCalled(); expect(field().value).toBe('')
+})
+
+it('[history-retry] returns keyboard recovery to the original draft and reads that same history once', async () => {
+  vi.mocked(api.browser.listInputHistory).mockRejectedValueOnce(new Error('Original history could not be read')).mockResolvedValue(snapshot)
+  await mount(target, 'kept recovery draft'); await activate()
+  expect(popup()!.textContent).toContain('Original history could not be read')
+  expect(popup()!.textContent).not.toContain('Input history is not loaded.')
+  const retry = popup()!.querySelector<HTMLButtonElement>('p[role="status"] button')!
+  await act(async () => retry.focus())
+  expect(document.activeElement).toBe(retry)
+  await act(async () => retry.click())
+  expect(api.browser.listInputHistory).toHaveBeenCalledTimes(2)
+  expect(api.browser.listInputHistory).toHaveBeenLastCalledWith(target)
+  expect(document.activeElement).toBe(field())
+  expect(field().value).toBe('kept recovery draft')
+  expect(popup()!.querySelector('[role="status"]')).toBeNull()
+  expect(historyTexts()).toEqual(snapshot.entries.map(entry => entry.text))
+  expect(submitted).not.toHaveBeenCalled()
+})
+
+it('[history-retry] a later outside focus wins over the pending recovery result', async () => {
+  const pending = deferred<BrowserInputHistorySnapshot>()
+  vi.mocked(api.browser.listInputHistory).mockRejectedValueOnce(new Error('Original read failed')).mockReturnValueOnce(pending.promise)
+  await mount(target, 'kept recovery draft'); await activate()
+  const retry = popup()!.querySelector<HTMLButtonElement>('p[role="status"] button')!
+  await act(async () => { retry.focus(); retry.click() })
+  expect(document.activeElement).toBe(field())
+  const outside = container.querySelector<HTMLButtonElement>('#outside')!
+  await act(async () => outside.focus())
+  await act(async () => pending.resolve(snapshot))
+  expect(document.activeElement).toBe(outside)
+  expect(popup()).toBeNull()
+  expect(field().value).toBe('kept recovery draft')
+  expect(submitted).not.toHaveBeenCalled()
 })
