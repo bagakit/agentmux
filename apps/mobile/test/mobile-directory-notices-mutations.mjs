@@ -1,6 +1,6 @@
 export const directoryNoticeMutations = {
   'global-session-warning': { file: 'apps/mobile/src/MobileApp.tsx',
-    before: 'const visibleProjectionError = workspaceVisible && showSession ? projectionError : null',
+    before: 'const visibleProjectionError = workspaceVisible && showSession && !welcomeVisible && !historyVisible ? projectionError : null',
     after: 'const visibleProjectionError = projectionError', target: 'scopes missing selected-session metadata' },
   'lost-session-diagnostic': { file: 'apps/mobile/src/MobileApp.tsx',
     before: 'projectionError && workface.selectedSessionId && <section className="mobile-session-diagnostic">',
