@@ -22,13 +22,13 @@ export type MoteStartActions = { reading: MoteMainActionReading | null; result: 
   restoringInput?: boolean; restoreInput?(): Promise<boolean>;
   submit(query: MoteMainDeferredInput, rollover?: MoteMainRolloverDecision, onRetained?: (query: MoteMainDeferredInput) => void | Promise<void>): Promise<void>;
   inspect(id: string): void; advance(id: string): void; refresh(): void }
-export function MoteMainActions({ scope, active, entryToken, onConfigure, onCreated, onRefresh, onOpenWorkspace, onOpenCreated, presentation, renderStart, onQueryResult, onStartNew, onResult, onPending }: {
+export function MoteMainActions({ scope, active, entryToken, onConfigure, onCreated, onRefresh, onOpenWorkspace, onOpenCreated, presentation, renderStart, onQueryResult, onStartNew, onResult, onPendingCreation }: {
   scope: MoteWorkfaceScope; active: boolean; presentation?: 'menu' | 'setup' | undefined; entryToken?: string | undefined
   onConfigure(invoker?: HTMLElement | null): void; onCreated?(reference: MoteDefaultConversation): void; onOpenCreated?: ((reference: MoteDefaultConversation) => void) | undefined; onRefresh?: (() => void) | undefined; onOpenWorkspace?: (() => void) | undefined
   onStartNew?: (() => void) | undefined; renderStart?: ((state: MoteStartActions) => ReactNode) | undefined
   onQueryResult?: ((result: MoteMainActionResult, query: MoteMainDeferredInput, mayNavigate: () => boolean) => void) | undefined
   onResult?: ((result: MoteMainActionResult, mayNavigate: () => boolean) => void) | undefined
-  onPending?: ((operationIds: string[]) => void) | undefined
+  onPendingCreation?: ((operationIds: string[]) => void) | undefined
 }) {
   const model = useMoteDialogueView()
   const [reading, setReading] = useState<MoteMainActionReading | null>(null), [result, setResult] = useState<MoteMainActionResult | null>(null)
@@ -129,15 +129,17 @@ export function MoteMainActions({ scope, active, entryToken, onConfigure, onCrea
     catch (cause) { if (lifetime.current === token) setIssue(presentError(cause)); return false }
     finally { restoring.current = false; setRestoringInput(false) }
   }
-  const pending = [...new Set([...(reading?.pendingStarts ?? []), ...(reading?.pendingOperationId ? [reading.pendingOperationId] : []), ...(result?.binding === 'unconfirmed' ? [result.operationId] : []),
+  const pendingCreations = [...new Set([...(reading?.pendingOperationId ? [reading.pendingOperationId] : []), ...(result?.binding === 'unconfirmed' ? [result.operationId] : []),
     ...(retained && (!result || result.operationId !== retained.operationId || result.binding === 'unconfirmed') ? [retained.operationId] : [])])]
-  const pendingKey = JSON.stringify(pending)
-  useEffect(() => { if (active) onPending?.(pending) }, [active, identity, pendingKey, onPending])
+  // Bound first-message custody stays inspectable; it is not another creation intent.
+  const pending = [...new Set([...(reading?.pendingStarts ?? []), ...pendingCreations])]
+  const pendingCreationKey = JSON.stringify(pendingCreations)
+  useEffect(() => { if (active) onPendingCreation?.(pendingCreations) }, [active, identity, pendingCreationKey, onPendingCreation])
   if (!active) return null
   const notice = [issue, retained?.deferredInputIssue].filter(Boolean).join('\n') || null
   const retainedInput = retained?.deferredInput && !originalMainCreationRetainsInput(retained, result) ? { ...retained.deferredInput, creationOperationId: retained.operationId } : undefined
   if (renderStart) return renderStart({ reading, result, issue: notice, busy, checking, pending, originalPosition,
-    ...(originalPosition && onOpenCreated ? { openOriginal: () => onOpenCreated(originalPosition.reference) } : {}), retainedInput, restoringInput, restoreInput, ready: Boolean(reading && !reading.issue && !pending.length),
+    ...(originalPosition && onOpenCreated ? { openOriginal: () => onOpenCreated(originalPosition.reference) } : {}), retainedInput, restoringInput, restoreInput, ready: Boolean(reading && !reading.issue && !pendingCreations.length),
     submit: async (query, rollover, retained) => { if (reading) await run(() => createMoteMain(scope, reading, query, rollover, retained), undefined, false, query) },
     inspect: id => { void inspectOriginal(id) }, advance: id => { void run(() => continueMoteMainAction(scope, id)) }, refresh: () => setGeneration(value => value + 1) })
   const queryOutcome = result?.deferredInput?.input?.status === 'not-applied' ? 'not-applied' : agentPromptSubmissionOutcome(result?.deferredInput?.record ?? null)

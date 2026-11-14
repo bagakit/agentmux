@@ -219,17 +219,17 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
   useEffect(() => { if (entry === 'unconfirmed' && entryHold.held) entryHold.release() }, [entry, entryHold.held, entryHold.release])
   const composerActive = visible && section === 'discussion' && presentation === 'conversation' && !memberIntent && !currentLocal.period
   const composerSource = readingMain && showOriginal ? moteComposerSessionKey(readingMain, main?.roleRevision) : entry === 'welcome' ? 'welcome' : 'reading'
-  const [pendingStarts, setPendingStarts] = useState<{ owner: string; ids: string[] }>({ owner, ids: [] })
+  const [pendingCreations, setPendingCreations] = useState<{ owner: string; ids: string[] }>({ owner, ids: [] })
   const pendingOwner = useRef(owner); pendingOwner.current = owner
-  const reportPending = useCallback((ids: string[]) => {
-    if (pendingOwner.current === owner) setPendingStarts(previous => previous.owner === owner && JSON.stringify(previous.ids) === JSON.stringify(ids) ? previous : { owner, ids })
+  const reportPendingCreation = useCallback((ids: string[]) => {
+    if (pendingOwner.current === owner) setPendingCreations(previous => previous.owner === owner && JSON.stringify(previous.ids) === JSON.stringify(ids) ? previous : { owner, ids })
   }, [owner])
   const serviceSession = mainOccurrence?.session
   const service = scope && main && entryRecovery.issue && showOriginal && selectedMain && presentation === 'conversation' && section === 'discussion' &&
     readingMain?.hostId === currentMain?.hostId && readingMain?.sessionId === currentMain?.sessionId && serviceSession?.kind === 'agent' &&
     serviceSession.control.hostId === currentMain?.hostId && serviceSession.control.agentSessionId === currentMain?.sessionId &&
     (entryRecovery.status === 'unavailable' || entryRecovery.status === 'unconfirmed')
-    ? moteMainServicePresentation(entryRecovery.status, moteMainServicePolicy(scope, main), pendingStarts.owner === owner && pendingStarts.ids.length > 0) : null
+    ? moteMainServicePresentation(entryRecovery.status, moteMainServicePolicy(scope, main), pendingCreations.owner === owner && pendingCreations.ids.length > 0) : null
   const mainService = service && serviceSession?.kind === 'agent' ? { hostId: serviceSession.control.hostId, agentSessionId: serviceSession.control.agentSessionId,
     runId: serviceSession.control.run.runId, composerHint: service.hint } : undefined
   const context = useMemo(() => scope ? { ...scope, floating, defaultConversation: defaults.conversation, presentation, section, memberIntent, entryToken, bodyVisible: showOriginal, mainService,
@@ -272,7 +272,7 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
       </div> : null}
       {scope && (floating ? floatingActionsHost : sharedFrame?.actionsHost) ? createPortal(<>
         {!floating && visible ? conversations : null}
-        <MoteMainActions scope={scope} active={visible && section === 'discussion' && showOriginal && (!sharedFrame || sharedFrame.section === 'discussion')} entryToken={entryToken} presentation="menu" onConfigure={openSettings} onCreated={openMain} onStartNew={showNewRound} onOpenCreated={created => { showThread(created) }} onOpenWorkspace={() => setLocal(previous => ({ ...previous, owner, original: true }))} onRefresh={dialogue?.refresh} onPending={reportPending} />
+        <MoteMainActions scope={scope} active={visible && section === 'discussion' && showOriginal && (!sharedFrame || sharedFrame.section === 'discussion')} entryToken={entryToken} presentation="menu" onConfigure={openSettings} onCreated={openMain} onStartNew={showNewRound} onOpenCreated={created => { showThread(created) }} onOpenWorkspace={() => setLocal(previous => ({ ...previous, owner, original: true }))} onRefresh={dialogue?.refresh} onPendingCreation={reportPendingCreation} />
       </>, (floating ? floatingActionsHost : sharedFrame?.actionsHost)!) : null}
       {scope && entry === 'reading' ? <MoteEntryReading scope={scope} active={visible} held={entryHold.held} onHold={entryHold.hold} onRelease={entryHold.release} /> : null}
       {scope && entry === 'current' && currentMain ? <p role="status" className="mote-conversation__issue">{scope.topic.title} 已有当前主对话，原对话和草稿都在。{entryHold.held ? '读取中写下的那条消息会在打开主对话后发出。' : null}<button type="button" className="small-button" onClick={() => openMain(currentMain)}>打开当前主对话</button></p> : null}
