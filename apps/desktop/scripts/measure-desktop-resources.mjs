@@ -5,7 +5,11 @@ import { createRequire } from 'node:module'
 import { access, chmod, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { setTimeout as delay } from 'node:timers/promises'
 import { promisify } from 'node:util'
+import { privatePackageSmokeEnvironment } from './package-smoke-context.mjs'
+import { runProbeProcess, stopProbeProcesses } from './probe-process.mjs'
 
 const execFileAsync = promisify(execFile)
 const require = createRequire(import.meta.url)
@@ -23,11 +27,14 @@ const measuredWorkspaces = [
   { id: 'resource-workspace-b', name: 'Resource Probe B', path: join(workspaceRoot, 'b') },
   { id: 'resource-workspace-c', name: 'Resource Probe C', path: join(workspaceRoot, 'c') }
 ]
-const workspace = measuredWorkspaces[0].path
 const reportPath = join(directory, 'report.json')
 const entry = resolve(import.meta.dirname, '../out/main/index.js')
 const socketPath = join(runtimeDirectory, 'ctxmux.sock')
 const stateDirectory = join(runtimeDirectory, 'state', 'ctxmux')
+const representativeDirectory = join(directory, 'representative')
+const representativeRuntime = join(runtimeDirectory, 'representative')
+const representativeReportPath = join(representativeDirectory, 'report.json')
+const desktopRoot = resolve(import.meta.dirname, '..')
 
 async function pathExists(path) {
   try {
@@ -59,7 +66,7 @@ async function assertProbePathsRemoved() {
   }
 }
 
-async function ownedDaemonPids() {
+async function ownedDaemonPids(daemonSocket = socketPath, daemonState = stateDirectory) {
   // Private cleanup is authorized by this invocation's exact socket/process scope.
   // Product provenance files are independent observations, not cleanup ownership.
   const processes = await execFileAsync('/usr/sbin/lsof', ['-n', '-P', '-a', '-U', '-Fpcn'], {
@@ -73,12 +80,12 @@ async function ownedDaemonPids() {
       current = { pid: Number(line.slice(1)), command: '', ownsSocket: false }
       candidates.push(current)
     } else if (current && line.startsWith('c')) current.command = line.slice(1)
-    else if (current && line === `n${socketPath}`) current.ownsSocket = true
+    else if (current && line === `n${daemonSocket}`) current.ownsSocket = true
   }
   const expectedCommand = [
     daemonPath,
-    '--socket', socketPath,
-    '--state-dir', stateDirectory,
+    '--socket', daemonSocket,
+    '--state-dir', daemonState,
     '--readiness-fd', '3'
   ].join(' ')
   const owned = []
@@ -132,222 +139,255 @@ async function exerciseReceiptlessDaemonCleanup() {
   }
 }
 
-async function waitForDaemonCleanup() {
+async function waitForDaemonCleanup(...scope) {
   const deadline = Date.now() + 5_000
-  let remaining = await ownedDaemonPids()
+  let remaining = await ownedDaemonPids(...scope)
   while (remaining.length > 0 && Date.now() <= deadline) {
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 20))
-    remaining = await ownedDaemonPids()
+    remaining = await ownedDaemonPids(...scope)
   }
   return remaining
 }
 
-async function stopOwnedDaemons() {
-  const owned = await ownedDaemonPids()
+async function stopOwnedDaemons(...scope) {
+  const owned = await ownedDaemonPids(...scope)
   for (const pid of owned) {
-    if (!(await ownedDaemonPids()).includes(pid)) continue
+    if (!(await ownedDaemonPids(...scope)).includes(pid)) continue
     try { process.kill(pid, 'SIGTERM') } catch (error) {
       if (!(error && typeof error === 'object' && error.code === 'ESRCH')) throw error
     }
   }
-  let remaining = await waitForDaemonCleanup()
+  let remaining = await waitForDaemonCleanup(...scope)
   for (const pid of remaining) {
-    if (!(await ownedDaemonPids()).includes(pid)) continue
+    if (!(await ownedDaemonPids(...scope)).includes(pid)) continue
     try { process.kill(pid, 'SIGKILL') } catch (error) {
       if (!(error && typeof error === 'object' && error.code === 'ESRCH')) throw error
     }
   }
-  remaining = await waitForDaemonCleanup()
+  remaining = await waitForDaemonCleanup(...scope)
   if (remaining.length > 0) {
     throw new Error(`Desktop resource probe left ${remaining.length} test-owned ctxmuxd process(es).`)
   }
   return owned.length
 }
 
-async function main() {
-  let child = null
-  let timer = null
-  let report = null
-  let failure = null
-  let daemonCount = 0
-  let sourceCommit = null
-  let trackedDiff = null
-  let finalCommit = null
-  let finalStatus = null
-  let manifest = null
-  let receiptlessDaemonCleanup = false
+async function prepareStage({ root, userData, runtimeRoot, workspaces }) {
+  const configurationPath = join(userData, 'agentmux.config.json')
+  const { AGENTMUX_DESKTOP_READY_FILE, AGENTMUX_DESKTOP_EXIT_AFTER_READY, ...environment } =
+    privatePackageSmokeEnvironment(process.env, { userData, runtimeRoot })
+  const paths = { home: environment.HOME, appData: join(userData, 'appData'), userData, sessionData: join(userData, 'sessionData') }
+  await Promise.all([...new Set([...Object.values(paths), environment.TMPDIR,
+    ...workspaces.map(({ path }) => path)])].map(path => mkdir(path, { recursive: true, mode: 0o700 })))
+  await writeFile(configurationPath, `${JSON.stringify({
+    version: 9,
+    hosts: [{ id: 'local', kind: 'local', label: 'Resource Probe' }],
+    executors: {
+      codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true },
+      claude: { label: 'Claude', providerId: 'claude', command: 'claude', args: [], env: {}, injectAgentMuxGuide: true },
+      traex: { label: 'TraeX', providerId: 'traex', command: 'traex', args: [], env: {}, injectAgentMuxGuide: true },
+      hermes: { label: 'Hermes', providerId: 'hermes', command: 'hermes', args: [], env: {}, injectAgentMuxGuide: true },
+      pi: { label: 'Pi', providerId: 'pi', command: 'pi', args: [], env: {}, injectAgentMuxGuide: true },
+      grok: {
+        label: 'Grok',
+        providerId: 'grok',
+        command: 'grok',
+        args: ['--permission-mode', 'bypassPermissions'],
+        env: {},
+        injectAgentMuxGuide: true
+      },
+      gemini: { label: 'Gemini', providerId: 'gemini', command: 'gemini', args: [], env: {}, injectAgentMuxGuide: true },
+      antigravity: { label: 'Antigravity', providerId: 'antigravity', command: 'agy', args: [], env: {}, injectAgentMuxGuide: true },
+      cursor: { label: 'Cursor', providerId: 'cursor', command: 'cursor-agent', args: [], env: {}, injectAgentMuxGuide: true }
+    },
+    workspaces: workspaces.map(({ id, name, path }) => ({
+      id,
+      name,
+      hostId: 'local',
+      path,
+      kind: 'folder'
+    })),
+    appearance: { terminalTheme: 'graphite' },
+    browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
+  }, null, 2)}\n`, { mode: 0o600 })
+  const bootstrap = join(root, 'launch.cjs')
+  await writeFile(bootstrap, `const {app}=require('electron');
+for (const [name,path] of Object.entries(${JSON.stringify(paths)})) {
+  app.setPath(name,path);
+  if (app.getPath(name)!==path) throw new Error('Private Electron path mismatch: '+name);
+}
+app.setAppPath(${JSON.stringify(desktopRoot)});
+import(${JSON.stringify(pathToFileURL(entry).href)}).catch(error=>{console.error(error);app.exit(1)});`)
+  return { bootstrap, environment, configurationPath, hostPaths: paths }
+}
 
+async function runStage(stage, identity, run) {
+  const { root, runtimeRoot, userData, reportPath, workspaces } = stage
+  const fixturePath = stage.representative ? join(root, 'workface.json') : undefined
+  const { bootstrap, environment, configurationPath, hostPaths } = await prepareStage(stage)
+  const storePath = environment.AGENTMUX_AGENT_SESSION_STORE
+  const hostEntry = join(desktopRoot, 'out', 'main', 'agentmux-host.js')
+  const host = spawn(electron, [hostEntry, '--store', storePath], {
+    env: { ...environment, ELECTRON_RUN_AS_NODE: '1',
+      AGENTMUX_MOBILE_BUILD_DIRECTORY: join(desktopRoot, 'out', 'mobile'),
+      AGENTMUX_HOST_CONFIGURATION_PATH: configurationPath,
+      AGENTMUX_MOTE_CONFIGURATION_PATH: configurationPath,
+      AGENTMUX_CONNECTOR_DIRECTORY: join(userData, 'connectors') },
+    stdio: ['ignore', 'pipe', 'pipe'], detached: true
+  })
+  let hostError
+  host.on('error', error => { hostError = error })
+  let stdout = '', hostStderr = '', stderr = ''
+  host.stdout.setEncoding('utf8').on('data', chunk => { stdout = (stdout + chunk).slice(-65_536) })
+  host.stderr.setEncoding('utf8').on('data', chunk => { hostStderr = (hostStderr + chunk).slice(-65_536) })
+  const daemonSocket = join(runtimeRoot, 'ctxmux.sock')
+  const daemonState = join(runtimeRoot, 'state', 'ctxmux')
+  let desktopPid = null
+  const failures = []
   try {
-    const evidence = await Promise.all([
+    const deadline = Date.now() + 30_000
+    let ready
+    while (!ready && Date.now() < deadline) {
+      if (hostError) throw hostError
+      if (host.exitCode !== null || host.signalCode !== null) throw new Error('Private resource Host exited before its ready receipt.')
+      ready = stdout.split('\n').find(line => {
+        try { const value = JSON.parse(line); return value.protocol === 'jsonrpc-2.0' && value.pid === host.pid }
+        catch { return false }
+      })
+      if (!ready) await delay(100)
+    }
+    if (!ready) throw new Error('Private resource Host did not emit an exact ready receipt.')
+    const hostIdentity = JSON.parse(ready).owner
+
+    if (fixturePath) {
+      const { connectAgentMuxRpc } = await import('@agentmux/core')
+      const { seedRepresentativeWorkface } = await import('./representative-resource-fixture.mjs')
+      const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(runtimeRoot, 'control.sock') } })
+      try { await seedRepresentativeWorkface({ rpc, storePath, directory: root, workspaces, fixturePath }) }
+      finally { await rpc.dispose() }
+    }
+    const timeoutMs = Number(process.env.AGENTMUX_DESKTOP_RESOURCE_TIMEOUT_MS ?? 180_000)
+    const result = await runProbeProcess(electron, [
+      ...(!fixturePath ? ['--js-flags=--expose-gc'] : []),
+      bootstrap
+    ], {
+      cwd: desktopRoot,
+      env: { ...environment, AGENTMUX_DESKTOP_RESOURCE_REPORT: reportPath,
+        ...(fixturePath ? { AGENTMUX_DESKTOP_RESOURCE_WORKFACE: fixturePath } : {}),
+        AGENTMUX_DESKTOP_RESOURCE_IDENTITY: JSON.stringify(identity),
+        AGENTMUX_DESKTOP_SPAWNED_AT_MS: String(Date.now()),
+        AGENTMUX_DESKTOP_RESOURCE_DEBUG: process.env.AGENTMUX_DESKTOP_RESOURCE_DEBUG ?? '0' },
+      timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 180_000,
+      onSpawn: child => { desktopPid = child.originalPid },
+      onLine: line => { stderr = (stderr + line + '\n').slice(-65_536) }
+    })
+    run.report = JSON.parse(await readFile(reportPath, 'utf8'))
+    run.isolation = { paths: hostPaths, hostPid: host.pid, desktopPid, runtimeId: hostIdentity.runtimeId,
+      ownerInstanceId: hostIdentity.ownerInstanceId }
+    if (result.exitCode !== 0 || run.report.error) throw new Error(run.report.error ?? `Desktop resource probe exited ${result.exitCode}.`)
+    if (fixturePath && run.report.mainPid !== desktopPid) throw new Error('Representative probe reported a different Main process.')
+  } catch (error) {
+    failures.push(new Error([error.message, stderr.trim(), hostStderr.trim()].filter(Boolean).join('\n'), { cause: error }))
+  } finally {
+    for (const clean of [
+      async () => { if (desktopPid) await stopProbeProcesses(desktopPid, '') },
+      async () => { if (host.pid) await stopProbeProcesses(host.pid, '', 2_000) },
+      async () => { run.daemonCount = await stopOwnedDaemons(daemonSocket, daemonState) },
+      async () => { await stopProbeProcesses(0, root) }
+    ]) {
+      try { await clean() } catch (error) { failures.push(error); run.cleanup = false }
+    }
+  }
+  if (failures.length) throw new AggregateError(failures, `Desktop resource probe stage ${stage.representative ? 'representative' : 'diagnostic'} failed.`)
+}
+
+function assertRepresentativeResult(report) {
+  const status = report?.representative?.status
+  if (status !== 'passed') {
+    throw new Error(`Representative resource Gate ${status ?? 'coverage-missing'}: ${report?.representative?.issue ?? 'inspect the workload and phase receipt.'}`)
+  }
+}
+
+async function main() {
+  const diagnostic = { report: null, cleanup: true, daemonCount: 0 }
+  const representative = { report: null, cleanup: true, daemonCount: 0 }
+  const failures = []
+  let sourceCommit, trackedDiff, manifest, receiptlessDaemonCleanup = false
+  try {
+    const [commit, status, bytes] = await Promise.all([
       execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot }),
       execFileAsync('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: repositoryRoot }),
       readFile(manifestPath, 'utf8')
     ])
-    sourceCommit = evidence[0]
-    trackedDiff = evidence[1]
-    manifest = JSON.parse(evidence[2])
-    await Promise.all([
-      mkdir(userData, { recursive: true }),
-      chmod(runtimeDirectory, 0o700),
-      mkdir(workspaceRoot, { recursive: true }),
-      ...measuredWorkspaces.map(({ path }) => mkdir(path, { recursive: true }))
-    ])
+    sourceCommit = commit.stdout.trim()
+    trackedDiff = status.stdout
+    manifest = JSON.parse(bytes)
+    const identity = {
+      agentmuxCommit: sourceCommit,
+      ctxmux: { sourceCommit: manifest.source.commit, sourceTree: manifest.source.tree,
+        protocolVersion: manifest.product.protocol, artifactPlatform: `${manifest.support.platform}-${manifest.support.architecture}`,
+        daemonSha256: manifest.binaries.find(binary => binary.name === 'ctxmuxd')?.sha256 ?? null },
+      platform: `${process.platform}-${process.arch}`
+    }
+    await Promise.all([access(entry), chmod(runtimeDirectory, 0o700),
+      mkdir(representativeRuntime, { recursive: true, mode: 0o700 }),
+      ...measuredWorkspaces.map(({ path }) => mkdir(path, { recursive: true, mode: 0o700 }))])
     await exerciseReceiptlessDaemonCleanup()
     receiptlessDaemonCleanup = true
     await Promise.all(measuredWorkspaces.map(({ path }) => (
       writeFile(join(path, 'resource-probe.ts'), 'export const value = 1\n'.repeat(20_000))
     )))
-    await writeFile(join(userData, 'agentmux.config.json'), `${JSON.stringify({
-      version: 9,
-      hosts: [{ id: 'local', kind: 'local', label: 'Resource Probe' }],
-      executors: {
-        codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true },
-        claude: { label: 'Claude', providerId: 'claude', command: 'claude', args: [], env: {}, injectAgentMuxGuide: true },
-        traex: { label: 'TraeX', providerId: 'traex', command: 'traex', args: [], env: {}, injectAgentMuxGuide: true },
-        hermes: { label: 'Hermes', providerId: 'hermes', command: 'hermes', args: [], env: {}, injectAgentMuxGuide: true },
-        pi: { label: 'Pi', providerId: 'pi', command: 'pi', args: [], env: {}, injectAgentMuxGuide: true },
-        grok: {
-          label: 'Grok',
-          providerId: 'grok',
-          command: 'grok',
-          args: ['--permission-mode', 'bypassPermissions'],
-          env: {},
-          injectAgentMuxGuide: true
-        },
-        gemini: { label: 'Gemini', providerId: 'gemini', command: 'gemini', args: [], env: {}, injectAgentMuxGuide: true },
-        antigravity: { label: 'Antigravity', providerId: 'antigravity', command: 'agy', args: [], env: {}, injectAgentMuxGuide: true },
-        cursor: { label: 'Cursor', providerId: 'cursor', command: 'cursor-agent', args: [], env: {}, injectAgentMuxGuide: true }
-      },
-      workspaces: measuredWorkspaces.map(({ id, name, path }) => ({
-        id,
-        name,
-        hostId: 'local',
-        path,
-        kind: 'folder'
-      })),
-      appearance: { terminalTheme: 'graphite' },
-      browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
-    }, null, 2)}\n`, { mode: 0o600 })
-
-    child = spawn(electron, [`--user-data-dir=${userData}`, '--js-flags=--expose-gc', entry], {
-      env: {
-        ...process.env,
-        // The main process deliberately binds Electron's userData path so dev and packaged
-        // launches share durable state. A probe must override that binding with its own
-        // isolated directory; otherwise an already-running desktop instance owns the
-        // single-instance lock and the probe exits before writing a report.
-        AGENTMUX_DESKTOP_USER_DATA: userData,
-        AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),
-        AGENTMUX_DESKTOP_RESOURCE_REPORT: reportPath,
-        AGENTMUX_DESKTOP_RESOURCE_IDENTITY: JSON.stringify({
-          agentmuxCommit: sourceCommit.stdout.trim(),
-          worktreeStatus: trackedDiff.stdout,
-          ctxmux: {
-            sourceCommit: manifest.source.commit,
-            sourceTree: manifest.source.tree,
-            protocolVersion: manifest.product.protocol,
-            artifactPlatform: `${manifest.support.platform}-${manifest.support.architecture}`,
-            daemonSha256: manifest.binaries.find((binary) => binary.name === 'ctxmuxd')?.sha256 ?? null
-          },
-          platform: `${process.platform}-${process.arch}`
-        }),
-        AGENTMUX_DESKTOP_SPAWNED_AT_MS: String(Date.now()),
-        AGENTMUX_DESKTOP_RESOURCE_DEBUG: process.env.AGENTMUX_DESKTOP_RESOURCE_DEBUG ?? '0',
-        ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
-      },
-      stdio: ['ignore', 'ignore', 'pipe']
-    })
-    let stderr = ''
-    child.stderr.setEncoding('utf8')
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk
-      if (Buffer.byteLength(stderr) > 1024 * 1024) child?.kill('SIGKILL')
-    })
-    const timeoutMs = Number(process.env.AGENTMUX_DESKTOP_RESOURCE_TIMEOUT_MS ?? 180_000)
-    timer = setTimeout(
-      () => child?.kill('SIGKILL'),
-      Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 180_000
-    )
-    timer.unref()
-    const [exitCode] = await once(child, 'exit')
-    clearTimeout(timer)
-    timer = null
-    const reportText = await readFile(reportPath, 'utf8').catch(() => '')
-    if (!reportText) throw new Error(`Desktop resource probe did not produce a report. ${stderr.trim()}`)
-    report = JSON.parse(reportText)
-    if (exitCode !== 0 || report.error) {
-      const detail = report.error ?? `Desktop resource probe exited ${exitCode}.`
-      throw new Error(stderr.trim() ? `${detail}\nElectron stderr:\n${stderr.trim()}` : detail)
-    }
-  } catch (error) {
-    failure = error
-  } finally {
-    if (timer) clearTimeout(timer)
-    if (child && child.exitCode === null && child.signalCode === null) {
-      child.kill('SIGKILL')
-      await once(child, 'exit')
-    }
+    const workspaces = measuredWorkspaces.map(workspace => ({ ...workspace, hostId: 'local', kind: 'folder' }))
     try {
-      daemonCount = await stopOwnedDaemons()
-    } catch (cleanupError) {
-      failure = failure
-        ? new AggregateError([failure, cleanupError], 'Desktop resource probe and cleanup failed.')
-        : cleanupError
-    }
-  }
+      await runStage({ root: directory, runtimeRoot: runtimeDirectory, userData, reportPath, workspaces }, identity, diagnostic)
+    } catch (error) { failures.push(error) }
 
-  if (report) {
-    if (!sourceCommit || !trackedDiff || !manifest) {
-      throw new Error('Desktop resource probe identity evidence is incomplete.')
+    if (diagnostic.cleanup) {
+      try {
+        await runStage({ root: representativeDirectory, runtimeRoot: representativeRuntime,
+          userData: join(representativeDirectory, 'user-data'), reportPath: representativeReportPath, representative: true,
+          workspaces: workspaces.map((workspace, index) => ({ ...workspace,
+            path: join(representativeDirectory, 'workspaces', String(index)) })) }, identity, representative)
+      } catch (error) { failures.push(error) }
     }
-    ;[finalCommit, finalStatus] = await Promise.all([
-      execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot }),
-      execFileAsync('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: repositoryRoot })
-    ])
-    const worktreeStable = finalStatus.stdout === trackedDiff.stdout
-    const sourceCommitStable = finalCommit.stdout === sourceCommit.stdout
-    const daemon = manifest.binaries.find((binary) => binary.name === 'ctxmuxd')
-    const receipt = {
-      ...report,
-      identity: {
-        agentmux: {
-          sourceCommit: sourceCommit.stdout.trim(),
-          endCommit: finalCommit.stdout.trim(),
-          trackedDiffClean: trackedDiff.stdout.trim().length === 0,
-          worktreeStable,
-          sourceCommitStable,
-          statusAtStart: trackedDiff.stdout,
-          statusAtEnd: finalStatus.stdout
-        },
-        ctxmux: {
-          sourceCommit: manifest.source.commit,
-          sourceTree: manifest.source.tree,
-          protocolVersion: manifest.product.protocol,
-          artifactPlatform: `${manifest.support.platform}-${manifest.support.architecture}`,
-          daemonSha256: daemon?.sha256 ?? null
-        }
-      },
-      harness: {
-        isolatedRuntime: true,
-        receiptlessDaemonCleanup,
-        ownedDaemonCount: daemonCount,
-        daemonCleanup: true
-      }
+  } catch (error) { failures.push(error) }
+
+  try { assertRepresentativeResult(representative.report) } catch (error) { failures.push(error) }
+  let diagnosticCleanup = false
+  if (diagnostic.cleanup && representative.cleanup) {
+    try {
+      await Promise.all([
+        rm(directory, { recursive: true, force: true }),
+        rm(runtimeDirectory, { recursive: true, force: true })
+      ])
+      await assertProbePathsRemoved()
+      diagnosticCleanup = true
+    } catch (error) { failures.push(error) }
+  }
+  const [finalCommit, finalStatus] = await Promise.all([
+    execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot }),
+    execFileAsync('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: repositoryRoot })
+  ])
+  const report = diagnostic.report
+  const receipt = {
+    ...report,
+    representative: representative.report?.representative ?? { status: 'coverage-missing', issue: 'Representative workload receipt unavailable.' },
+    identity: {
+      agentmux: { sourceCommit, endCommit: finalCommit.stdout.trim(), trackedDiffClean: trackedDiff?.trim().length === 0,
+        worktreeStable: finalStatus.stdout === trackedDiff, sourceCommitStable: finalCommit.stdout.trim() === sourceCommit,
+        statusAtStart: trackedDiff, statusAtEnd: finalStatus.stdout },
+      ctxmux: manifest ? { sourceCommit: manifest.source.commit, sourceTree: manifest.source.tree,
+        protocolVersion: manifest.product.protocol, artifactPlatform: `${manifest.support.platform}-${manifest.support.architecture}`,
+        daemonSha256: manifest.binaries.find(binary => binary.name === 'ctxmuxd')?.sha256 ?? null } : null
+    },
+    harness: {
+      isolatedRuntime: true, receiptlessDaemonCleanup, ownedDaemonCount: diagnostic.daemonCount + representative.daemonCount,
+      daemonCleanup: diagnostic.cleanup && representative.cleanup, pathsRemoved: diagnosticCleanup,
+      diagnostic: diagnostic.isolation ?? null, representative: representative.isolation ?? null,
+      ...(diagnosticCleanup ? {} : { retained: [directory, runtimeDirectory] })
     }
-    process.stdout.write(`T017_DESKTOP_RESOURCE_RECEIPT=${JSON.stringify(receipt)}\n`)
   }
-  try {
-    await Promise.all([
-      rm(directory, { recursive: true, force: true }),
-      rm(runtimeDirectory, { recursive: true, force: true })
-    ])
-    await assertProbePathsRemoved()
-  } catch (cleanupError) {
-    failure = failure
-      ? new AggregateError([failure, cleanupError], 'Desktop resource probe cleanup failed.')
-      : cleanupError
-  }
-  if (failure) throw failure
+  process.stdout.write(`T017_DESKTOP_RESOURCE_RECEIPT=${JSON.stringify(receipt)}\n`)
+  if (failures.length) throw new AggregateError(failures, 'Desktop resource probe failed.')
 }
 
 await main()
