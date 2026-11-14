@@ -27,6 +27,9 @@ async function source() {
   const native = original.inner.kernel; await original.client.dispose()
   const configurationPath = join(original.root, 'config.json'), socketPath = join(original.root, 'host.sock'), directory = join(original.root, 'project')
   await mkdir(directory)
+  const notes = join(original.root, 'private-notes')
+  await mkdir(notes); await mkdir(join(original.root, 'state'), { recursive: true })
+  await writeFile(join(original.root, 'state/notes-location.json'), JSON.stringify({ schemaVersion: 1, directory: notes, operations: {}, pending: null }))
   await writeFile(configurationPath, JSON.stringify({ hosts: [{ id: 'local', kind: 'local', label: 'Source' }],
     workspaces: [{ id: 'same-workspace', hostId: 'local', path: directory, name: 'Source project' }] }))
   const start = async () => {
