@@ -21,6 +21,8 @@ export interface AgentToolExecutionLaunchContext {
   /** Private exact original local helper capability; never a caller-selected URL. */
   url: string
   launchWorkspacePath: string
+  /** Revalidate an exact Core-owned cwd immediately before Provider-affecting filesystem writes. */
+  assertWorkspace?: () => Promise<void>
   invocation?: import('./agent-execution-rpc-relay.js').AgentExecutionInvocation
 }
 export type PrepareAgentToolExecutionLaunch = (plan: AgentLaunchPlan, context: AgentToolExecutionLaunchContext) => Promise<AgentLaunchPlan>

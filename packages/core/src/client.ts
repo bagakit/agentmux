@@ -4591,7 +4591,12 @@ export class AgentMuxClient {
     if (this.runtimeIdentity().instanceId !== endpoint.ownerInstanceId) throw new AgentMuxError('The original execution helper Runtime is unavailable.', 'EXECUTION_RUNTIME_CHANGED')
     const run = await this.inspectPreparedTerminal(original.preparation.prepared, { runId: endpoint.runId })
     if (!run || run.state !== 'running') throw new AgentMuxError('The original execution helper is unavailable; the original Session remains retained.', 'EXECUTION_HELPER_UNAVAILABLE')
+    const ownedWorkspace = await this.validateOwnedAgentCreation({ providerId: provider.id, workspacePath: launchWorkspacePath, toolExecution: binding }, agentSessionId)
+    const assertWorkspace = ownedWorkspace ? async () => {
+      await this.validateOwnedAgentCreation({ providerId: provider.id, workspacePath: launchWorkspacePath, toolExecution: binding }, agentSessionId)
+    } : undefined
     return await provider.prepareToolExecutionLaunch(plan, { binding, url: endpoint.url, launchWorkspacePath,
+      ...(assertWorkspace ? { assertWorkspace } : {}),
       ...(invocation ? { invocation: { agentSessionId, lifecycleOperationId: invocation.lifecycleOperationId, capability: invocation.capability,
         endpointPath: this.controlSocketPath, runtimeId: (await this.agentCreationAuthority()).runtimeId,
         ctxmuxInstanceId: this.runtimeIdentity().instanceId } } : {}) })

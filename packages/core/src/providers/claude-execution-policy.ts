@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
-import { dirname, isAbsolute, join } from 'node:path'
+import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { durableWriteFile } from '../durable-write.js'
 import { AgentMuxError } from '../errors.js'
 import { CLAUDE_EXECUTION_TOOL_NAMES, CLAUDE_EXECUTION_SHELL_TASK_PREFIX } from './claude-execution-protocol.js'
@@ -117,8 +117,23 @@ export function register(on) {
 `
 }
 
+async function preparePolicyDirectory(input: { workspacePath: string; assertWorkspace?: () => Promise<void> }, parent: string): Promise<void> {
+  if (!input.assertWorkspace) { await mkdir(parent, { recursive: true, mode: 0o700 }); return }
+  const descendant = relative(input.workspacePath, parent)
+  if (!descendant || isAbsolute(descendant) || descendant === '..' || descendant.startsWith('..' + sep)) {
+    throw new AgentMuxError('The generated execution plugin must remain below the exact validated workspace.', 'EXECUTION_BINDING_CONFLICT')
+  }
+  let current = input.workspacePath
+  for (const component of descendant.split(sep)) {
+    await input.assertWorkspace()
+    current = join(current, component)
+    try { await mkdir(current, { mode: 0o700 }) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
+  }
+  await input.assertWorkspace()
+}
+
 /** Immutable generated inputs keep an active original Run's loaded plugin intact. */
-export async function prepareClaudeExecutionPolicy(input: { workspacePath: string; bindingId: string; serverName: string }): Promise<string> {
+export async function prepareClaudeExecutionPolicy(input: { workspacePath: string; bindingId: string; serverName: string; assertWorkspace?: () => Promise<void> }): Promise<string> {
   if (!isAbsolute(input.workspacePath) || !input.bindingId || /[\0\r\n]/u.test(input.bindingId))
     throw new AgentMuxError('The original execution binding and absolute launch workspace are required.', 'INVALID_EXECUTION_BINDING')
   const identity = createHash('sha256').update(input.bindingId).digest('hex')
@@ -134,10 +149,12 @@ export async function prepareClaudeExecutionPolicy(input: { workspacePath: strin
   for (const [relativePath, content] of files) {
     const path = join(directory, relativePath)
     const parent = dirname(path)
-    await mkdir(parent, { recursive: true, mode: 0o700 })
+    await preparePolicyDirectory(input, parent)
+    if (input.assertWorkspace) await input.assertWorkspace()
     const retained = await readFile(path, 'utf8').catch(error => { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; return undefined })
     if (retained === content) continue
     if (retained !== undefined) throw new AgentMuxError('The generated execution plugin no longer matches its original content. The original Run remains retained.', 'EXECUTION_BINDING_CONFLICT')
+    if (input.assertWorkspace) await input.assertWorkspace()
     await durableWriteFile(path, content, { mode: 0o600 })
   }
   return directory

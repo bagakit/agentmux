@@ -51,7 +51,8 @@ export async function prepareClaudeToolExecutionLaunch(plan: AgentLaunchPlan, co
     try { url = await registerAgentExecutionInvocation(context.url, context.invocation) }
     catch (error) { url += '/unverified/' + agentControlFailureCode(error) }
   }
-  const policy = await prepareClaudeExecutionPolicy({ workspacePath: context.launchWorkspacePath, bindingId: context.binding.bindingId, serverName: CLAUDE_EXECUTION_MCP_SERVER })
+  const policy = await prepareClaudeExecutionPolicy({ workspacePath: context.launchWorkspacePath, bindingId: context.binding.bindingId, serverName: CLAUDE_EXECUTION_MCP_SERVER,
+    ...(context.assertWorkspace ? { assertWorkspace: context.assertWorkspace } : {}) })
   const mcp = JSON.stringify({ mcpServers: { [CLAUDE_EXECUTION_MCP_SERVER]: { type: 'ws', url } } })
   const note = `Your project and tools are on Host ${JSON.stringify(context.binding.resourceHostId)}, in ${JSON.stringify(context.binding.workspacePath)}. Your original file and command tools are routed to that resource Host by the execution binding. Their paths and command cwd belong to that Host. Your Agent process cwd is ${JSON.stringify(context.launchWorkspacePath)}. Read the resource project's CLAUDE.md through its Read tool before working. Existing native permission decisions still apply to MCP calls; connection does not grant blanket tool approval.`
   const lastOption = (flag: string) => {
@@ -89,8 +90,10 @@ export async function prepareClaudeToolExecutionLaunch(plan: AgentLaunchPlan, co
   } else if (fileAt >= 0) {
     const equal = args[fileAt]!.startsWith('--append-system-prompt-file=')
     const original = equal ? args[fileAt]!.slice('--append-system-prompt-file='.length) : args[fileAt + 1]!
+    if (context.assertWorkspace) await context.assertWorkspace()
     const text = note + '\n\n' + await readFile(resolve(context.launchWorkspacePath, original), 'utf8')
     const file = join(policy, 'context-' + createHash('sha256').update(text).digest('hex') + '.txt')
+    if (context.assertWorkspace) await context.assertWorkspace()
     await durableWriteFile(file, text, { mode: 0o600 })
     args.splice(fileAt, equal ? 1 : 2, '--append-system-prompt-file', file)
   } else args.unshift('--append-system-prompt', note)
