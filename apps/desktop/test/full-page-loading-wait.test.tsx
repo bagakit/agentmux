@@ -44,6 +44,23 @@ it('shows local waiting, marks a long wait without inventing completion, and sto
   expect(container.querySelector('.full-page-loading__elapsed')?.textContent).toBe('0s')
 })
 
+it('keeps the phase a surface appeared in, so a later phase never replays its entrance', async () => {
+  const surface = () => container.querySelector('.full-page-loading')!
+  await render('parked')
+  expect(surface().getAttribute('data-loading-entry')).toBe('parked')
+  for (const phase of ['recovering', 'loading', 'failed'] as const) {
+    await render(phase)
+    expect(surface().getAttribute('data-loading-phase')).toBe(phase)
+    expect(surface().getAttribute('data-loading-entry')).toBe('parked')
+  }
+  await act(async () => root.unmount())
+  root = createRoot(container)
+  await render('loading')
+  expect(surface().getAttribute('data-loading-entry')).toBe('loading')
+  await render('failed')
+  expect(surface().getAttribute('data-loading-entry')).toBe('loading')
+})
+
 it('releases the clock while hidden and resumes honest elapsed time when shown', async () => {
   let visible = true
   vi.spyOn(document, 'hidden', 'get').mockImplementation(() => !visible)
