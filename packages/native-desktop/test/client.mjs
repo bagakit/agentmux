@@ -284,20 +284,30 @@ test('capture outcome is a machine string, not string-coerced display data', asy
 
 test('display frames keep each display exact and isolate a failed one', async () => {
   const pixels = { png: PNG.toString('base64'), width: 1, height: 1, engine: 'screenCaptureKit' }
+  const displayTiming = { captureMs: 4, pngMs: 2, base64Ms: 1, totalMs: 7 }
+  const nativeTiming = { contentMs: 3, windowListMs: 1, totalMs: 15 }
+  const assertFrames = (actual, expected) => {
+    assert.ok(actual.timing && Number.isFinite(actual.timing.requestMs) && actual.timing.requestMs >= 0 && actual.timing.requestMs <= 150_000,
+      'Node request timing is present and bounded')
+    assert.ok(Number.isFinite(actual.timing.validationMs) && actual.timing.validationMs >= 0 && actual.timing.validationMs <= 150_000,
+      'Node validation timing is present and bounded')
+    const { requestMs, validationMs, ...native } = actual.timing
+    assert.deepEqual({ ...actual, timing: native }, expected)
+  }
   const editor = { windowId: 11, frame: { x: 10, y: 10, width: 100, height: 80 }, owner: 'Editor' }
   const across = { windowId: 15, frame: { x: -150, y: -40, width: 300, height: 120 } }
-  const main = { displayId: 1, frame: { x: 0, y: 0, width: 400, height: 300 }, scale: 2, safeTop: 32, windows: [editor, across], ...pixels }
-  const failed = { displayId: 2, frame: { x: -200, y: -50, width: 200, height: 100 }, scale: 1, safeTop: 0, windows: [across], issue: 'display_not_found: gone' }
-  const frames = { state: 'captured', capturedAt: 1000, displays: [main, failed] }
+  const main = { displayId: 1, frame: { x: 0, y: 0, width: 400, height: 300 }, scale: 2, safeTop: 32, windows: [editor, across], timing: displayTiming, ...pixels }
+  const failed = { displayId: 2, frame: { x: -200, y: -50, width: 200, height: 100 }, scale: 1, safeTop: 0, windows: [across], timing: displayTiming, issue: 'display_not_found: gone' }
+  const frames = { state: 'captured', capturedAt: 1000, timing: nativeTiming, displays: [main, failed] }
   await fixture(async ({ connection, calls }) => {
     const desktop = new NativeDesktop({})
     desktop.launch = async () => connection
-    assert.deepEqual(await desktop.captureDisplays(), frames)
+    assertFrames(await desktop.captureDisplays(), frames)
     assert.equal(calls.at(-1).method, 'captureDisplays')
     assert.deepEqual(calls.at(-1).params, { includeHostWindows: false })
-    assert.deepEqual(await desktop.captureDisplays({ includeHostWindows: true }), frames)
+    assertFrames(await desktop.captureDisplays({ includeHostWindows: true }), frames)
     assert.deepEqual(calls.at(-1).params, { includeHostWindows: true })
-    assert.deepEqual(await desktop.captureDisplays({ includeHostWindows: false }), frames)
+    assertFrames(await desktop.captureDisplays({ includeHostWindows: false }), frames)
     assert.deepEqual(calls.at(-1).params, { includeHostWindows: false })
     assert.equal(calls.at(-1).operationId, undefined)
     await desktop.dispose()
@@ -308,6 +318,18 @@ test('display frames keep each display exact and isolate a failed one', async ()
     { ...frames, state: 'cancelled' },
     { ...frames, capturedAt: 'now' },
     { ...frames, displays: [] },
+    { ...frames, timing: undefined },
+    { ...frames, timing: null },
+    { ...frames, timing: { ...nativeTiming, contentMs: undefined } },
+    { ...frames, timing: { ...nativeTiming, contentMs: -1 } },
+    { ...frames, timing: { ...nativeTiming, windowListMs: '1' } },
+    { ...frames, timing: { ...nativeTiming, totalMs: Number.POSITIVE_INFINITY } },
+    { ...frames, timing: { ...nativeTiming, totalMs: 150_001 } },
+    { ...frames, displays: [{ ...main, timing: undefined }, failed] },
+    { ...frames, displays: [{ ...main, timing: { ...displayTiming, captureMs: Number.NaN } }, failed] },
+    { ...frames, displays: [{ ...main, timing: { ...displayTiming, pngMs: null } }, failed] },
+    { ...frames, displays: [main, { ...failed, timing: { ...displayTiming, base64Ms: 150_001 } }] },
+    { ...frames, displays: [main, { ...failed, timing: { ...displayTiming, totalMs: -0.1 } }] },
     { ...frames, displays: [failed] },
     { ...frames, displays: [main, { ...main }] },
     { ...frames, displays: [{ ...main, displayId: 1.5 }] },
@@ -345,12 +367,15 @@ test('display frames keep each display exact and isolate a failed one', async ()
 
 test('display capture waits past the default request timeout for slow grabs', async () => {
   // The fixture connection times requests out after 1000 ms; native may grab several displays for longer.
-  const frames = { state: 'captured', capturedAt: 1000, displays: [{ displayId: 1, frame: { x: 0, y: 0, width: 1, height: 1 }, scale: 1, safeTop: 0, windows: [],
-    png: PNG.toString('base64'), width: 1, height: 1, engine: 'screenCaptureKit' }] }
+  const frames = { state: 'captured', capturedAt: 1000, timing: { contentMs: 1, windowListMs: 1, totalMs: 4 }, displays: [{ displayId: 1, frame: { x: 0, y: 0, width: 1, height: 1 }, scale: 1, safeTop: 0, windows: [],
+    timing: { captureMs: 1, pngMs: 1, base64Ms: 1, totalMs: 3 }, png: PNG.toString('base64'), width: 1, height: 1, engine: 'screenCaptureKit' }] }
   await fixture(async ({ connection }) => {
     const desktop = new NativeDesktop({})
     desktop.launch = async () => connection
-    assert.deepEqual(await desktop.captureDisplays(), frames)
+    const actual = await desktop.captureDisplays()
+    assert.equal(actual.timing.requestMs >= 1200 && actual.timing.requestMs <= 150_000, true)
+    assert.equal(Number.isFinite(actual.timing.validationMs) && actual.timing.validationMs >= 0, true)
+    assert.deepEqual(actual.displays, frames.displays)
     await desktop.dispose()
   }, (_request, send) => { setTimeout(() => send(frames), 1200) })
 })

@@ -148,11 +148,11 @@ async function run() {
       const { width, height } = display.bounds
       const png = image(width, height, active.iteration * 4 + index + (includeHostWindows ? 0 : 2))
       grab.sources[display.id] = png
-      return { displayId: display.id, frame: display.bounds, scale: 1, safeTop: 0, windows: [], png, width, height, engine: 'controlled-startup-' + (includeHostWindows ? 'included' : 'excluded') }
+      return { displayId: display.id, frame: display.bounds, scale: 1, safeTop: 0, windows: [], timing: { captureMs: 1, pngMs: 1, base64Ms: 0, totalMs: 2 }, png, width, height, engine: 'controlled-startup-' + (includeHostWindows ? 'included' : 'excluded') }
     })
     await wait(200)
     grab.returnedMs = performance.now() - active.startedAt
-    return { state: 'captured' as const, capturedAt: grab.capturedAt, displays: frames }
+    return { state: 'captured' as const, capturedAt: grab.capturedAt, timing: { contentMs: 1, windowListMs: 1, totalMs: 3, requestMs: 4, validationMs: 1 }, displays: frames }
   } }), appearance: () => ({ terminalTheme: 'graphite', appAppearance: 'dark' }),
     pin: async () => { throw new Error('No pin output in a startup proof.') }, copyText: async () => {}, returnFocus: () => {},
     recordTiming: async timing => {

@@ -64,8 +64,9 @@ afterEach(async () => {
 async function fixture(focused = true, fromOtherApp = false) {
   const home = await mkdtemp(join(tmpdir(), 'amux-screenshot-composition-')); homes.push(home)
   const native = {
-    captureDisplays: vi.fn(async () => ({ state: 'captured' as const, capturedAt: 1_700_000_000_000, displays: [{ displayId: 1, frame: { x: 0, y: 0, width: 1, height: 1 },
-      scale: 1, safeTop: 0, windows: [], png: originalBytes.toString('base64'), width: 1, height: 1, engine: 'fixture-engine' }] })),
+    captureDisplays: vi.fn(async () => ({ state: 'captured' as const, capturedAt: 1_700_000_000_000,
+      timing: { contentMs: 1, windowListMs: 1, totalMs: 3, requestMs: 4, validationMs: 1 }, displays: [{ displayId: 1, frame: { x: 0, y: 0, width: 1, height: 1 },
+      scale: 1, safeTop: 0, windows: [], timing: { captureMs: 1, pngMs: 1, base64Ms: 0, totalMs: 2 }, png: originalBytes.toString('base64'), width: 1, height: 1, engine: 'fixture-engine' }] })),
     captureScreenshot: vi.fn(),
     writeClipboardImage: vi.fn(async (_image: BrowserPng) => {})
   }

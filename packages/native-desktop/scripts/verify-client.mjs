@@ -34,6 +34,11 @@ const mutations = [
   { file: 'client.js', before: 'if (!result.displays.some(display => display.png !== undefined))', after: 'if (false)', test: 'display frames keep' },
   { file: 'client.js', before: "this.request('captureDisplays', { includeHostWindows }, { timeoutMs: 120_000 })", after: "this.request('captureDisplays', { includeHostWindows })", test: 'display capture waits' },
   { file: 'client.js', before: "this.request('captureDisplays', { includeHostWindows },", after: "this.request('captureDisplays', { includeHostWindows: false },", test: 'display frames keep' },
+  { file: 'client.js', before: '|| !hasBoundedTiming(raw.timing, NATIVE_FRAME_TIMING)', after: '', test: 'display frames keep' },
+  { file: 'client.js', before: '|| !hasBoundedTiming(display.timing, DISPLAY_FRAME_TIMING)', after: '', test: 'display frames keep' },
+  { file: 'client.js', before: '&& timing[key] <= MAX_TIMING_MS', after: '', test: 'display frames keep' },
+  { file: 'client.js', before: 'result.timing = { ...result.timing, requestMs, validationMs }', after: 'result.timing = { ...result.timing, validationMs }', test: 'display frames keep' },
+  { file: 'client.js', before: 'result.timing = { ...result.timing, requestMs, validationMs }', after: 'result.timing = { ...result.timing, requestMs }', test: 'display frames keep' },
   { file: 'client.js', before: "!['captured', 'failed'].includes(raw.state)", after: "!['captured', 'cancelled', 'failed'].includes(raw.state)", test: 'capture conveniences reject' },
   { file: 'client.js', before: "throw invalid('Failed capture contains pixels')", after: '{}', test: 'capture conveniences reject' },
   { file: 'protocol.js', before: "'scroll', 'drag'\n]", after: "'scroll', 'drag', 'captureDisplays'\n]", test: 'display frames keep' }

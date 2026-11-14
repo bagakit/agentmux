@@ -56,9 +56,11 @@ const main = { x: 0, y: 0, width: 4, height: 3 }, side = { x: -2, y: -1, width: 
 const front = { windowId: 3, frame: { x: 1, y: 0.5, width: 2, height: 1 }, owner: 'Editor' }
 const across = { windowId: 5, frame: { x: -1, y: -1, width: 3, height: 2 } }
 const beyond = { windowId: 9, frame: { x: 4, y: 0, width: 2, height: 2 } }
-const frames = () => ({ state: 'captured' as const, capturedAt: 1_700_000_000_000, displays: [
-  { displayId: 1, frame: main, scale: 2, safeTop: 0, windows: [front, across, beyond], png: png(8, 6).toString('base64'), width: 8, height: 6, engine: 'fixture-engine' },
-  { displayId: 7, frame: side, scale: 1, safeTop: 0, windows: [across], png: png(2, 2).toString('base64'), width: 2, height: 2, engine: 'fixture-engine' }] })
+const nativeTiming = { contentMs: 1, windowListMs: 1, totalMs: 3, requestMs: 4, validationMs: 1 }
+const displayTiming = { captureMs: 1, pngMs: 1, base64Ms: 0, totalMs: 2 }
+const frames = () => ({ state: 'captured' as const, capturedAt: 1_700_000_000_000, timing: nativeTiming, displays: [
+  { displayId: 1, frame: main, scale: 2, safeTop: 0, windows: [front, across, beyond], timing: displayTiming, png: png(8, 6).toString('base64'), width: 8, height: 6, engine: 'fixture-engine' },
+  { displayId: 7, frame: side, scale: 1, safeTop: 0, windows: [across], timing: displayTiming, png: png(2, 2).toString('base64'), width: 2, height: 2, engine: 'fixture-engine' }] })
 const result = pngFromBytes(png(4, 2))
 
 let surface: CaptureSurface, ports: ReturnType<typeof makePorts>

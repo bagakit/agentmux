@@ -3,9 +3,9 @@ import CoreGraphics
 import AgentMuxNativeMacOSCore
 
 // The exact production capture dispatch, captureDisplays/displayPixels and
-// BlockingAsync source is inserted. Only the OS display list, ScreenCaptureKit,
-// PNG encoding and the exact-source grabs are controlled, so each display's
-// grab, issue and ownership are observable.
+// BlockingAsync source is inserted. Only the OS display/window lists,
+// ScreenCaptureKit, CoreGraphics, PNG encoding and exact-source grabs are
+// controlled, so each display's grab, issue, exclusion and timing is observable.
 private enum NativeDesktopOperations {
     /* PRODUCTION_CAPTURE_DISPATCH */
     /* PRODUCTION_DISPLAY_FRAMES */
@@ -54,7 +54,7 @@ private let bounds: [CGDirectDisplayID: CGRect] = [
 private func CGDisplayBounds(_ display: CGDirectDisplayID) -> CGRect { bounds[display] ?? .null }
 private func CGMainDisplayID() -> CGDirectDisplayID { 1 }
 private func CGDisplayIsActive(_ display: CGDirectDisplayID) -> boolean_t { bounds[display] == nil ? 0 : 1 }
-private func CGWindowListCreateImage(_ rect: CGRect, _ option: Int, _ window: Int, _ image: [Int]) -> CGImage? { nil }
+private func CGWindowListCreateImage(_ rect: CGRect, _ option: Int, _ window: Int, _ image: [Int]) -> CGImage? { Controlled.shared.coreGraphicsPixels(rect) }
 private func CGWindowListCopyWindowInfo(_ option: Int, _ window: Int) -> CFArray? { Controlled.shared.listedWindows() as CFArray }
 // The window server's on-screen list, front to back.
 private let hostPID: pid_t = 4242
@@ -73,6 +73,9 @@ private func windowList() -> [[String: Any]] { [
     window(17, pid: 504, CGRect(x: 40, y: 40, width: 100, height: 100), alpha: 0),
     window(18, pid: 505, CGRect(x: 30, y: 30, width: 300, height: 200), owner: "Finder"),
     window(19, pid: 506, CGRect(x: 50, y: 50, width: 100, height: 100), sharing: 0),
+    window(20, pid: hostPID, CGRect(x: 30, y: 100, width: 80, height: 70), layer: 25, owner: ""),
+    window(21, pid: getpid(), CGRect(x: 5, y: 5, width: 40, height: 40), layer: 25, owner: ""),
+    window(22, pid: 507, CGRect(x: 90, y: 90, width: 80, height: 70), layer: 25, owner: "Panel"),
 ] }
 private let kCGNullWindowID = 0
 private extension Int { static let optionOnScreenOnly = 0, bestResolution = 0 }
@@ -87,20 +90,31 @@ private struct NSScreen {
 }
 
 private struct SCDisplay: Sendable { let displayID: CGDirectDisplayID; let frame: CGRect }
-private struct SCWindow: Sendable {}
+private struct SCRunningApplication: Sendable { let processID: pid_t }
+private struct SCWindow: Sendable { let windowID: UInt32; let owningApplication: SCRunningApplication?; let windowLayer: Int }
+private func scWindow(_ id: UInt32, _ pid: pid_t, layer: Int = 0) -> SCWindow { SCWindow(windowID: id, owningApplication: SCRunningApplication(processID: pid), windowLayer: layer) }
 private struct SCShareableContent: Sendable {
     let displays = [SCDisplay(displayID: 1, frame: bounds[1]!), SCDisplay(displayID: 2, frame: bounds[2]!),
         SCDisplay(displayID: 4, frame: CGRect(x: 0, y: 300, width: 120, height: 100))]
+    let windows = [
+        scWindow(11, 500), scWindow(12, getpid()), scWindow(21, getpid(), layer: 25),
+        scWindow(13, hostPID), scWindow(20, hostPID, layer: 25), scWindow(14, 501, layer: 25),
+        scWindow(15, 502), scWindow(22, 507, layer: 25),
+    ]
     static var current: SCShareableContent { get async throws { Controlled.shared.enumerated(); return SCShareableContent() } }
 }
 private final class SCContentFilter: @unchecked Sendable {
     let displayID: CGDirectDisplayID
-    init(display: SCDisplay, excludingWindows: [SCWindow]) { displayID = display.displayID }
+    let excludedWindowIDs: [UInt32]
+    init(display: SCDisplay, excludingWindows: [SCWindow]) {
+        displayID = display.displayID
+        excludedWindowIDs = excludingWindows.map(\.windowID).sorted()
+    }
 }
 private final class SCStreamConfiguration: @unchecked Sendable { var width = 0, height = 0; var showsCursor = true }
 private enum SCScreenshotManager {
     static func captureImage(contentFilter: SCContentFilter, configuration: SCStreamConfiguration) async throws -> CGImage {
-        let number = Controlled.shared.started(contentFilter.displayID, cursor: configuration.showsCursor)
+        let number = Controlled.shared.started(contentFilter.displayID, cursor: configuration.showsCursor, excludedWindowIDs: contentFilter.excludedWindowIDs)
         defer { Controlled.shared.returned(number) }
         // Each grab takes measurable time, so a timestamp taken after the grabs is distinguishable.
         try await Task.sleep(nanoseconds: 5_000_000)
@@ -124,16 +138,21 @@ private final class Controlled: @unchecked Sendable {
     let suspended = DispatchSemaphore(value: 0), managerReturned = DispatchSemaphore(value: 0)
     private let lock = NSLock()
     private var continuation: CheckedContinuation<CGImage, Error>?
-    private var grabs: [CGDirectDisplayID] = [], cursors = 0, encodes = 0, enumerations = 0, windowLists = 0, firstReturned = false
+    private var grabs: [CGDirectDisplayID] = [], exclusions: [[UInt32]] = [], cursors = 0, encodes = 0, enumerations = 0, windowLists = 0, firstReturned = false
     private var firstGrabAt: Double?
     var screens: [NSScreen] = []
     var holdFirst = false
     var pngBytes: Int?
-    func started(_ id: CGDirectDisplayID, cursor: Bool) -> Int {
+    func started(_ id: CGDirectDisplayID, cursor: Bool, excludedWindowIDs: [UInt32]) -> Int {
         lock.lock(); defer { lock.unlock() }
-        grabs.append(id); if cursor { cursors += 1 }
+        grabs.append(id); exclusions.append(excludedWindowIDs); if cursor { cursors += 1 }
         if grabs.count == 1 { firstGrabAt = Date().timeIntervalSince1970 * 1000 }
         return grabs.count
+    }
+    func coreGraphicsPixels(_ rect: CGRect) -> CGImage? {
+        let id = bounds.first(where: { $0.value == rect })?.key ?? 0
+        _ = started(id, cursor: false, excludedWindowIDs: [])
+        return try? pixels(width: Int(rect.width), height: Int(rect.height))
     }
     func enumerated() { lock.lock(); enumerations += 1; lock.unlock() }
     func listedWindows() -> [[String: Any]] { lock.lock(); windowLists += 1; lock.unlock(); return windowList() }
@@ -152,18 +171,34 @@ private final class Controlled: @unchecked Sendable {
         do { value.resume(returning: try pixels(width: 800, height: 600)) } catch { value.resume(throwing: error) }
     }
     func reset(screens: [NSScreen], holdFirst: Bool = false, pngBytes: Int? = nil) {
-        lock.lock(); grabs = []; cursors = 0; encodes = 0; enumerations = 0; windowLists = 0; sources = 0; firstReturned = false; firstGrabAt = nil; lock.unlock()
+        lock.lock(); grabs = []; exclusions = []; cursors = 0; encodes = 0; enumerations = 0; windowLists = 0; sources = 0; firstReturned = false; firstGrabAt = nil; lock.unlock()
         self.screens = screens; self.holdFirst = holdFirst; self.pngBytes = pngBytes
     }
-    var observation: (grabs: [CGDirectDisplayID], cursors: Int, encodes: Int, enumerations: Int, firstReturned: Bool, firstGrabAt: Double?) {
+    var observation: (grabs: [CGDirectDisplayID], exclusions: [[UInt32]], cursors: Int, encodes: Int, enumerations: Int, firstReturned: Bool, firstGrabAt: Double?) {
         lock.lock(); defer { lock.unlock() }
-        return (grabs, cursors, encodes, enumerations, firstReturned, firstGrabAt)
+        return (grabs, exclusions, cursors, encodes, enumerations, firstReturned, firstGrabAt)
+    }
+}
+
+private func hasBoundedTiming(_ value: Any?, keys: [String]) -> Bool {
+    guard let timing = value as? [String: Any] else { return false }
+    return keys.allSatisfy { key in
+        guard let milliseconds = (timing[key] as? NSNumber)?.doubleValue else { return false }
+        return milliseconds.isFinite && milliseconds >= 0 && milliseconds <= 150_000
     }
 }
 
 @main
 private struct DisplayFramesChecks {
     static func main() {
+#if FORCE_CORE_GRAPHICS
+        legacyMain()
+#else
+        modernMain()
+#endif
+    }
+
+    static func modernMain() {
         guard #available(macOS 14.0, *) else {
             print("{\"environmentError\":\"The production ScreenCaptureKit branch requires macOS 14 or newer\"}")
             exit(2)
@@ -184,6 +219,9 @@ private struct DisplayFramesChecks {
         let (frames, error) = run()
         let displays = frames?["displays"] as? [[String: Any]] ?? []
         func entry(_ id: CGDirectDisplayID) -> [String: Any] { displays.first { $0["displayId"] as? CGDirectDisplayID == id } ?? [:] }
+        check("native timing covers content, window list, total and every display's capture, PNG, base64 and total",
+            hasBoundedTiming(frames?["timing"], keys: ["contentMs", "windowListMs", "totalMs"])
+                && [1, 2, 3, 4].allSatisfy { hasBoundedTiming(entry($0)["timing"], keys: ["captureMs", "pngMs", "base64Ms", "totalMs"]) })
         check("returns a captured receipt for an all-display grab", error == nil && frames?["state"] as? String == "captured")
         check("capturedAt is taken before the first grab", (frames?["capturedAt"] as? Double).map { capturedAt in
             io.observation.firstGrabAt.map { capturedAt >= before && capturedAt <= $0 } ?? false } == true)
@@ -226,11 +264,18 @@ private struct DisplayFramesChecks {
         check("the included background lists the host's visible windows in place", included.error == nil && includedIds == [11, 13, 15, 18])
         check("the included background still excludes the helper's windows", includedIds.map { !$0.contains(12) } == true)
         check("including host windows still grabs and lists each display only once", io.observation.grabs == [1, 2] && io.windowListings == 1 && io.observation.enumerations == 1)
+        check("included pixels exclude every helper window and no host or other-PID window",
+            io.observation.exclusions == [[12, 21], [12, 21]])
+        check("included pixel filtering includes helper panels without adding panels to normal-layer metadata",
+            includedIds.map { !$0.contains(20) && !$0.contains(21) && !$0.contains(22) } == true)
         io.reset(screens: all)
         let excluded = run(["includeHostWindows": .bool(false)])
         let excludedDisplays = excluded.result?["displays"] as? [[String: Any]] ?? []
         let excludedIds = excludedDisplays.flatMap { ($0["windows"] as? [[String: Any]] ?? []).compactMap { $0["windowId"] as? UInt32 } }
         check("the explicit excluded background keeps the host out", excluded.error == nil && !excludedIds.contains(13))
+        check("excluded pixels remove helper and every capturable host window by PID, including panels, and no other PID",
+            io.observation.exclusions == [[12, 13, 20, 21], [12, 13, 20, 21]])
+        check("excluded normal-layer metadata matches those pixels without listing panels", !excludedIds.contains(20) && !excludedIds.contains(21) && !excludedIds.contains(22))
         io.reset(screens: all)
         let invalid = run(["includeHostWindows": .string("true")])
         check("a nonboolean host-window option is refused before a grab", code(invalid.error) == "invalid_argument" && io.observation.grabs.isEmpty && io.windowListings == 0)
@@ -293,6 +338,50 @@ private struct DisplayFramesChecks {
 
         let report: [String: Any] = ["schema": "agentmux.display-frames-checks.v1", "tests": cases.count, "cases": cases, "failures": failures,
             "boundary": "Exact production capture dispatch, captureDisplays/displayPixels/BlockingAsync source and Core lease; controlled display list, ScreenCaptureKit service, PNG encoder and exact-source grabs. No WindowServer pixels, TCC prompt or installed-app proof."]
+        let data = try! JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
+        print(String(data: data, encoding: .utf8)!)
+        if cases.isEmpty || !failures.isEmpty { exit(1) }
+    }
+
+    static func legacyMain() {
+        var cases: [String] = [], failures: [String] = []
+        func check(_ name: String, _ value: @autoclosure () -> Bool) { cases.append(name); if !value() { failures.append(name) } }
+        func run(_ includeHostWindows: Bool) -> (result: [String: Any]?, error: Error?) {
+            do { return (try displayRequest(["includeHostWindows": .bool(includeHostWindows)]), nil) } catch { return (nil, error) }
+        }
+        let io = Controlled.shared
+        let screens = [NSScreen(id: 1, backingScaleFactor: 1), NSScreen(id: 2, backingScaleFactor: 1)]
+        func display(_ result: [String: Any]?, _ id: CGDirectDisplayID) -> [String: Any] {
+            (result?["displays"] as? [[String: Any]] ?? []).first { $0["displayId"] as? CGDirectDisplayID == id } ?? [:]
+        }
+
+        io.reset(screens: screens)
+        let included = run(true)
+        check("forced CoreGraphics inclusion captures the visible host normally", included.error == nil
+            && display(included.result, 1)["png"] is String && display(included.result, 1)["engine"] as? String == "coreGraphics"
+            && ((display(included.result, 1)["windows"] as? [[String: Any]] ?? []).contains { $0["windowId"] as? UInt32 == 13 }))
+        check("forced CoreGraphics inclusion keeps its native and per-display timing", hasBoundedTiming(included.result?["timing"], keys: ["contentMs", "windowListMs", "totalMs"])
+            && hasBoundedTiming(display(included.result, 1)["timing"], keys: ["captureMs", "pngMs", "base64Ms", "totalMs"]))
+
+        io.reset(screens: screens)
+        let excluded = run(false)
+        let hostDisplay = display(excluded.result, 1), otherDisplay = display(excluded.result, 2)
+        check("forced CoreGraphics exclusion refuses only the display containing the visible host", excluded.error == nil
+            && (hostDisplay["issue"] as? String)?.hasPrefix("host_window_exclusion_unavailable:") == true
+            && hostDisplay["png"] == nil && hostDisplay["engine"] == nil)
+        check("forced CoreGraphics exclusion leaves a display without the host usable", otherDisplay["png"] is String
+            && otherDisplay["engine"] as? String == "coreGraphics" && otherDisplay["issue"] == nil && io.observation.grabs == [2])
+        check("forced CoreGraphics exclusion reports bounded timing for refused and captured displays",
+            hasBoundedTiming(hostDisplay["timing"], keys: ["captureMs", "pngMs", "base64Ms", "totalMs"])
+                && hasBoundedTiming(otherDisplay["timing"], keys: ["captureMs", "pngMs", "base64Ms", "totalMs"]))
+
+        io.reset(screens: [NSScreen(id: 2, backingScaleFactor: 1)])
+        let noHost = run(false)
+        check("forced CoreGraphics exclusion captures normally when no host window is visible", noHost.error == nil
+            && display(noHost.result, 2)["png"] is String && display(noHost.result, 2)["issue"] == nil && io.observation.grabs == [2])
+
+        let report: [String: Any] = ["schema": "agentmux.display-frames-checks.v1", "tests": cases.count, "cases": cases, "failures": failures,
+            "engine": "forced-coreGraphics", "boundary": "Exact production captureDisplays with its macOS 14 availability branch forced off; controlled CoreGraphics pixels and window server. No real macOS 12/13 device claim."]
         let data = try! JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
         print(String(data: data, encoding: .utf8)!)
         if cases.isEmpty || !failures.isEmpty { exit(1) }

@@ -134,9 +134,9 @@ async function run() {
   surface = new CaptureSurface({ native: () => ({ captureDisplays: async ({ includeHostWindows = false } = {}) => {
     const background: CaptureBackground = includeHostWindows ? 'included' : 'excluded', capturedAt = Date.now()
     receipt.grabs.push({ includeHostWindows, opacity: host.getOpacity(), capturedAt, observedMs: performance.now() })
-    return { capturedAt, displays: displays.map(display => {
+    return { state: 'captured' as const, capturedAt, timing: { contentMs: 1, windowListMs: 1, totalMs: 3, requestMs: 4, validationMs: 1 }, displays: displays.map(display => {
       const image = sources.get(background + ':' + display.id)!
-      return { displayId: display.id, frame: display.bounds, scale: 1, safeTop: 0,
+      return { displayId: display.id, frame: display.bounds, scale: 1, safeTop: 0, timing: { captureMs: 1, pngMs: 1, base64Ms: 0, totalMs: 2 },
         windows: includeHostWindows ? [{ windowId: 1, frame: { x: display.bounds.x + 460, y: 310, width: 350, height: 230 } }] : [],
         png: image.dataUrl.split(',')[1]!, width: image.width, height: image.height, engine: 'controlled-' + background }
     }) }
