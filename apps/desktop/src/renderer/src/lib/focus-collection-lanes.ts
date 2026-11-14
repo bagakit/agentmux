@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import type { AgentMuxSpaceCatalog, TopicCategory } from '@agentmux/core/control'
 import { homeZoneId, type SpaceZoneBindings } from '../../../shared/space-addresses'
 import type { FocusContext } from './focus-context'
-import { focusLaneOrderKey, type FocusProjectLane } from './focus-project-lanes'
+import { focusLaneOrderKey, focusLaneProjectKey, type FocusProjectLane } from './focus-project-lanes'
 import { focusContextIdentityKey } from './focus-context-identity'
 import { focusCollectionPreferenceKey } from '../../../shared/focus-project-preferences'
 
@@ -18,9 +18,14 @@ export type FocusScanLane = FocusProjectLane & {
 }
 export const focusTopicContextKey = focusContextIdentityKey
 
+/** The same confirmed ordinary project owns its frame and any attached history. */
+export function focusScanProjectKey(lane: FocusScanLane): string | undefined {
+  return !lane.collection && !lane.topicId && !lane.locationUnconfirmed ? focusLaneProjectKey(lane) : undefined
+}
+
 /** Only confirmed original container identities can own a saved personal preference. */
 export function focusScanPreferenceKey(lane: FocusScanLane): string | undefined {
-  if (!lane.collection) return !lane.topicId && !lane.locationUnconfirmed ? focusLaneOrderKey(lane) : undefined
+  if (!lane.collection) return focusScanProjectKey(lane)
   const { confirmed, categories } = lane.collection
   return confirmed && categories.length > 0 && categories.every(category => category.hostId === lane.hostId)
     ? focusCollectionPreferenceKey(lane.hostId, categories.map(category => category.spaceId)) : undefined

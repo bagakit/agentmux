@@ -22,7 +22,7 @@ import { SessionObservationRegions } from './SessionObservationRegions'
 import { AgentTopologySummary } from './AgentTopologySummary'
 import { FocusProjectLanes, FocusRetainedProjects } from './FocusProjectLanes'
 import { FocusScanLaneContent } from './FocusScanLaneContent'
-import { filterFocusScanLanes, focusTopicContextKey } from '../lib/focus-collection-lanes'
+import { filterFocusScanLanes, focusScanProjectKey, focusTopicContextKey } from '../lib/focus-collection-lanes'
 import { useFocusCollectionLanes } from '../lib/use-focus-collection-lanes'
 import { useFocusProjectOrder } from '../lib/use-focus-project-order'
 import { FocusGroupDiscussion } from './FocusGroupDiscussion'
@@ -440,8 +440,10 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const revealedLaneIds = new Set(agentReveal && revealedContext ? (scansByContext.get(focusTopicContextKey(revealedContext.context.hostId, revealedContext.context.id)) ?? []).map(item => item.scanId) : [])
   const filteredRetainedProjects = retainedProjects.filter(item => focusMatchesProject(item.key, filters.projects) && filters.states.length === 0 && focusMatchesTypes(['unknown'], filters.types)
     && searchResult.projectKeys.has(item.key))
-  const recentProjects = filteredRetainedProjects.filter(item => item.recent)
-  const pastProjects = filteredRetainedProjects.filter(item => !item.recent)
+  const currentProjectKeys = new Set(boardLanes.map(focusScanProjectKey))
+  const boardHistory = filteredRetainedProjects.filter(item => item.recent || currentProjectKeys.has(item.key))
+  const pastProjects = filteredRetainedProjects.filter(item => !item.recent && !currentProjectKeys.has(item.key))
+  const pastProjectCount = retainedProjects.filter(item => !item.recent && !currentProjectKeys.has(item.key)).length
   const readProjectHistory = useCallback((at: number) => {
     if (at > 0) setHistoryWindowRequest(current => ({ at, sequence: (current?.sequence ?? 0) + 1 }))
   }, [])
@@ -463,7 +465,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     previousActivity.current = next
     return next
   }, [pulses])
-  const hasBoardLanes = boardLanes.length > 0 || recentProjects.length > 0
+  const hasBoardLanes = boardLanes.length > 0 || boardHistory.length > 0
   const hasBoardCards = hasBoardLanes || pastProjects.length > 0
   useLayoutEffect(() => {
     const rows = boardRowsRef.current ?? focusLayoutRef.current?.querySelector<HTMLElement>('.focus-retained-projects__rows')
@@ -638,13 +640,13 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       {executionRows.length === 0 && retainedProjects.length === 0 && coordinationContexts.length === 0 && !moteChoices ? <div className="global-agents-empty" role="status"><ThemeObjectTeamIcon size={20} /><strong>No execution contexts yet</strong><span>Open an Agent from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Filtered Focus contexts">
         <div className="focus-project-board">
           <WorkbenchPresentationContext.Provider value={cardPresentation}><div className="focus-project-board__live" data-empty={!hasBoardLanes && !leadingResults || undefined}>
-            {hasBoardLanes || leadingResults ? <FocusProjectLanes resourceMenus renderDiscussion={(lane, slot) => <FocusGroupDiscussion lane={lane} contexts={filterContexts} active={slot.active && visible && documentActive} container={slot.container} />} quietLanes={quietLanes} protectedLanes={protectedLanes} forceExpanded={filtering} revealedLaneIds={revealedLaneIds} leading={leadingResults} visible={visible && documentActive} origins={laneOrigins} lanes={boardLanes} recentProjects={recentProjects} cardMetrics={laneMetrics} replyLines={replyLines} onRead={readProjectHistory} selectedProjectKey={filters.projects.length === 1 ? filters.projects[0]!.id : 'all'} currentLaneId={displayedCurrentLaneId} revealRequestId={agentReveal?.pending ? agentReveal.requestId : undefined} onSelect={key => setFilters(value => ({ ...value, projects: [{ id: key, name: projectOptions.find(option => option.id === key)?.name ?? key }] }))} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}
+            {hasBoardLanes || leadingResults ? <FocusProjectLanes resourceMenus renderDiscussion={(lane, slot) => <FocusGroupDiscussion lane={lane} contexts={filterContexts} active={slot.active && visible && documentActive} container={slot.container} />} quietLanes={quietLanes} protectedLanes={protectedLanes} forceExpanded={filtering} revealedLaneIds={revealedLaneIds} leading={leadingResults} visible={visible && documentActive} origins={laneOrigins} lanes={boardLanes} boardHistory={boardHistory} revealHistory={Boolean(trimmedQuery)} cardMetrics={laneMetrics} replyLines={replyLines} onRead={readProjectHistory} selectedProjectKey={filters.projects.length === 1 ? filters.projects[0]!.id : 'all'} currentLaneId={displayedCurrentLaneId} revealRequestId={agentReveal?.pending ? agentReveal.requestId : undefined} onSelect={key => setFilters(value => ({ ...value, projects: [{ id: key, name: projectOptions.find(option => option.id === key)?.name ?? key }] }))} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}
             {filtered.length === 0 && filteredRetainedProjects.length === 0 && coordinationResults.length === 0 ? <p className="focus-project-lanes__empty">
               <span>No contexts match these local filters.</span>
               {query || filters.projects.length || filters.states.length || filters.types.length ? <button type="button" className="focus-project-lanes__clear" onClick={clearLocalFilters}>Clear filters</button> : null}
             </p> : null}
           </div></WorkbenchPresentationContext.Provider>
-          <FocusRetainedProjects projects={pastProjects} total={retainedProjects.filter(item => !item.recent).length} cardMetrics={laneMetrics} replyLines={replyLines} onRead={readProjectHistory} />
+          <FocusRetainedProjects projects={pastProjects} total={pastProjectCount} cardMetrics={laneMetrics} replyLines={replyLines} onRead={readProjectHistory} />
         </div>
       </div>}
       </div>

@@ -18,7 +18,7 @@ import type { FocusLaneMetrics } from '../lib/focus-lane-layout'
 import type { FocusReplyLines } from '../../../shared/focus-preferences'
 import { FocusLaneGroups } from './FocusLaneGroups'
 import { ResolvedAgentAvatar } from './AgentAvatar'
-import { focusCollectionTopicCount, focusScanPreferenceKey, type FocusScanLane } from '../lib/focus-collection-lanes'
+import { focusCollectionTopicCount, focusScanPreferenceKey, focusScanProjectKey, type FocusScanLane } from '../lib/focus-collection-lanes'
 import { categorySpaceIconTarget, type SpaceIconOverrides, type SpaceIconTarget } from '../lib/space-object-appearance'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { TopicCategoryDialog } from './TopicCategoryDialog'
@@ -39,6 +39,7 @@ const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
 const CollectionIcon = semanticIconComponent('object.folder')
 const ThemeObjectHistoryIcon = semanticIconComponent('object.history')
 const UNMEASURED_CARDS: FocusLaneMetrics = { width: 0, padding: 4, gap: 2, cardGap: 2 }
+const EMPTY_PROJECT_HISTORY: readonly FocusRetainedProject[] = []
 type ProjectChange = { kind: 'move'; key: string; target: string; after: boolean } | { kind: 'visibility'; key: string; collapsed: boolean }
 function applyProjectChange(original: readonly FocusProjectPreference[], change: ProjectChange) {
   if (change.kind === 'move') {
@@ -67,7 +68,7 @@ function FocusCollectionHeadingIcon({ lane, icons, resourceMenus }: { lane: Focu
 }
 
 
-export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, revealRequestId, onSelect, renderLane, rowsRef, recentProjects = [], onRead, visible = true, origins, leading, cardMetrics = UNMEASURED_CARDS, replyLines = 2, resourceMenus = false, quietLanes, protectedLanes, forceExpanded = false, revealedLaneIds, renderDiscussion }: {
+export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, revealRequestId, onSelect, renderLane, rowsRef, boardHistory = EMPTY_PROJECT_HISTORY, revealHistory = false, onRead, visible = true, origins, leading, cardMetrics = UNMEASURED_CARDS, replyLines = 2, resourceMenus = false, quietLanes, protectedLanes, forceExpanded = false, revealedLaneIds, renderDiscussion }: {
   quietLanes?: ReadonlySet<string>; protectedLanes?: ReadonlySet<string>; forceExpanded?: boolean; revealedLaneIds?: ReadonlySet<string>
   /** Only a real resource consumer opts in; Settings examples remain static. */
   resourceMenus?: boolean
@@ -80,7 +81,9 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
   currentLaneId?: string | null | undefined
   revealRequestId?: string | undefined
   onSelect(projectKey: string): void; renderLane(lane: FocusScanLane, heading: ReactNode, compact?: boolean): ReactNode
-  recentProjects?: readonly FocusRetainedProject[]; onRead?(at: number): void
+  boardHistory?: readonly FocusRetainedProject[]
+  revealHistory?: boolean
+  onRead?(at: number): void
   cardMetrics?: FocusLaneMetrics; replyLines?: FocusReplyLines
 }) {
   const displayPath = usePathDisplay()
@@ -148,14 +151,15 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
   // A stable frame is a project presentation, never the first checkout's identity.
   const frames: Array<{ key: string; project: boolean; lanes: FocusScanLane[] }> = []
   const projects = new Map<string, typeof frames[number]>()
+  const historyByProject = new Map(boardHistory.map(project => [project.key, project]))
   const compactLanes = new Map<string, boolean>()
   for (const lane of lanes) {
-    const key = focusLaneProjectKey(lane), preference = focusProjectPreference(focusScanPreferenceKey(lane) ?? '', resourceMenus ? preferences ?? [] : [])
-    const project = !lane.collection && !lane.topicId && !lane.locationUnconfirmed
-    let frame = project ? projects.get(key) : undefined
+    const projectKey = focusScanProjectKey(lane)
+    const preference = focusProjectPreference(focusScanPreferenceKey(lane) ?? '', resourceMenus ? preferences ?? [] : [])
+    let frame = projectKey === undefined ? undefined : projects.get(projectKey)
     if (!frame) {
-      frame = { key: project ? key : lane.id, project, lanes: [] }; frames.push(frame)
-      if (project) projects.set(key, frame)
+      frame = { key: projectKey ?? lane.id, project: projectKey !== undefined, lanes: [] }; frames.push(frame)
+      if (projectKey !== undefined) projects.set(projectKey, frame)
     }
     frame.lanes.push(lane)
     const current = currentLaneId === lane.id || Boolean(lane.collection?.topics.some(topic => topic.id === currentLaneId))
@@ -174,8 +178,10 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
       }}>Retry using current settings</button></div> : null}
     <div className="focus-project-lanes__rows" ref={rowsRef}>
       {leading}
-      {frames.map(frame => {
+      {/* History-only projects keep the same keyed frame and history child as live projects. */}
+      {[...frames.map(frame => {
         const first = frame.lanes[0]!, key = focusLaneProjectKey(first), preferenceKey = focusScanPreferenceKey(first)
+        const history = frame.project ? historyByProject.get(key) : undefined
         const preference = focusProjectPreference(preferenceKey ?? '', resourceMenus ? preferences ?? [] : [])
         const resource = frame.project ? workspaces?.find(workspace => workspace.hostId === first.hostId && workspace.id === first.projectId) : undefined
         const name = resource?.name ?? first.labels[0] ?? first.name
@@ -280,12 +286,16 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
             <FocusProjectPreferences active={visible} collection {...(preferenceKey === undefined ? {} : { projectKey: preferenceKey })} name={lane.name} discussion={renderDiscussion ? state => renderDiscussion(lane, state) : undefined} /></> : null}</>}
         </div>
         , compact)}</div>
-      </FocusLaneArticle>})}</div>})}
-      {recentProjects.map(project => <article className="focus-project-lanes__row" data-project-id={project.projectId} data-project-key={project.key} data-observed-project="true" key={`observed:${project.key}`}>
-        <FocusProjectObservation project={project} recent onRead={onRead} cardMetrics={cardMetrics} replyLines={replyLines} />
-      </article>)}
+      </FocusLaneArticle>})}
+          {history ? <FocusProjectObservation key="history" project={history} projectName={name} revealHistory={revealHistory}
+            onRead={onRead} cardMetrics={cardMetrics} replyLines={replyLines} /> : null}
+        </div>
+      }), ...boardHistory.filter(project => !projects.has(project.key)).map(project =>
+        <div className="focus-project-lanes__row" data-project-id={project.projectId} data-project-key={project.key} data-observed-project="true" key={project.key}>
+          <FocusProjectObservation key="history" project={project} recent onRead={onRead} cardMetrics={cardMetrics} replyLines={replyLines} />
+        </div>)]}
     </div>
-    {!leading && lanes.length === 0 && recentProjects.length === 0 ? <p className="focus-project-lanes__empty">No matching contexts</p> : null}
+    {!leading && lanes.length === 0 && boardHistory.length === 0 ? <p className="focus-project-lanes__empty">No matching contexts</p> : null}
     {categoryTarget ? <TopicCategoryDialog target={categoryTarget} onClose={() => setCategoryTarget(null)} returnFocus={returnFocus} /> : null}
     {iconTarget ? <SpaceIconPicker target={iconTarget} onClose={() => setIconTarget(null)} returnFocus={returnFocus} /> : null}
   </section>
@@ -323,10 +333,16 @@ function FocusProjectActivity({ at, now }: { at: number | null; now: number }) {
   </span>
 }
 
-const FocusProjectObservation = memo(function FocusProjectObservation({ project, recent = false, onRead, cardMetrics, replyLines, showCards = true }: {
+const FocusProjectObservation = memo(function FocusProjectObservation({ project, projectName, recent = false, onRead, cardMetrics, replyLines, showCards = true, revealHistory = false }: {
   project: FocusRetainedProject; recent?: boolean; onRead: ((at: number) => void) | undefined
+  projectName?: string
+  revealHistory?: boolean
   cardMetrics: FocusLaneMetrics; replyLines: FocusReplyLines; showCards?: boolean
 }) {
+  const withinProject = projectName !== undefined
+  const [expanded, setExpanded] = useState(!withinProject)
+  const showHistory = withinProject ? expanded || revealHistory : showCards
+  const historyId = useId()
   const hosts = useAppStore(state => state.config?.hosts)
   const zone = useAppStore(state => state.focusTimelineRuler.timeZone)
   const time = useMemo(() => createFocusTimeFormatters(zone), [zone])
@@ -334,24 +350,38 @@ const FocusProjectObservation = memo(function FocusProjectObservation({ project,
   const activity = project.lastActivityAt !== null && project.lastActivityAt > (project.lastFocusedAt ?? 0)
   const at = activity ? project.lastActivityAt : project.lastFocusedAt
   const status = project.state === 'retired' ? 'Closed source' : project.state === 'active' ? 'Stored source · No current Context' : 'Current status unknown'
-  return <div className="focus-retained-projects__project"><button type="button" className="focus-retained-projects__row" data-retained-project={recent ? undefined : project.key} data-recent-project={recent ? project.key : undefined}
+  // A current frame can briefly show only its saved visits. Keep a visit in
+  // use open when the current facts return to that same frame.
+  const keepRecentHistoryOpen = !withinProject && recent ? () => setExpanded(true) : undefined
+  return <div className="focus-retained-projects__project" data-project-history={withinProject ? project.key : undefined}>
+    {withinProject ? <button type="button" className="focus-retained-projects__toggle focus-project-history__toggle" aria-label={`History in ${projectName} · ${project.observations.length} saved`}
+      aria-expanded={showHistory} aria-controls={historyId} onClick={() => setExpanded(!showHistory)} disabled={revealHistory}>
+      <ThemeNavigationDisclosureIcon size={12} aria-hidden="true" /><ThemeObjectHistoryIcon size={13} aria-hidden="true" />
+      <span>History</span><span className="focus-retained-projects__count">{project.observations.length}</span>
+    </button> : null}
+    <div id={historyId} hidden={withinProject && !showHistory} onFocusCapture={keepRecentHistoryOpen} onPointerDownCapture={keepRecentHistoryOpen}>
+    {!withinProject || showHistory ? <button type="button" className={`focus-retained-projects__row${withinProject ? ' focus-project-history__read' : ''}`}
+      data-retained-project={withinProject || recent ? undefined : project.key} data-recent-project={recent ? project.key : undefined}
     aria-label={`View ${project.name} focus history`} disabled={at === null}
     title={[project.name, status, 'Observed project · Focus visits and task activity are separate', displayPath(project.identity.workspacePath, project.hostId), project.identity.branch, project.identity.topicId, at === null ? 'Focus time not recorded' : time.detailed(at)].filter(Boolean).join('\n')}
     onPointerDownCapture={event => {
       if (event.button !== 0) return
       event.stopPropagation(); event.preventDefault()
     }} onClick={() => { if (at !== null) onRead?.(at) }}>
-    <span className="focus-retained-projects__identity">{recent ? <ThemeObjectHistoryIcon size={13} aria-hidden="true" /> : null}<strong>{project.name}</strong>{project.identity.source ? <span className="focus-retained-projects__source" title={`Original Runtime: ${project.identity.source.runtimeId ?? 'unconfirmed'}`}>Original source</span> : <HostBadge context="Host" host={hostIdentityProjection(project.hostId, hosts?.find(host => host.id === project.hostId))} />}</span>
+    <span className="focus-retained-projects__identity">{withinProject ? <span>View in timeline</span> : <>
+      {recent ? <ThemeObjectHistoryIcon size={13} aria-hidden="true" /> : null}<strong>{project.name}</strong>{project.identity.source ? <span className="focus-retained-projects__source" title={`Original Runtime: ${project.identity.source.runtimeId ?? 'unconfirmed'}`}>Original source</span> : <HostBadge context="Host" host={hostIdentityProjection(project.hostId, hosts?.find(host => host.id === project.hostId))} />}
+    </>}</span>
     <span className="focus-retained-projects__date">{activity ? 'Last active' : 'Last focused'} {at === null ? '· Time unknown' : <time dateTime={new Date(at).toISOString()}>{time.dateClock(at)}</time>}</span>
-  </button>
-    {showCards ? <FocusLaneGroups counts={[0, 0, 0, project.observations.length]} metrics={cardMetrics} replyLines={replyLines}>{layout =>
-      <section className="focus-context-group" aria-label={`Saved tasks in ${project.name}`} style={{ '--focus-card-columns': layout.columns[3], '--focus-group-width': `${layout.widths[3]}px` } as CSSProperties}>
-        <header className="focus-context-group__header" title={status}><strong>Saved</strong><span className="focus-context-group__count">{project.observations.length}</span></header>
+    </button> : null}
+    {showHistory ? <FocusLaneGroups counts={[0, 0, 0, project.observations.length]} metrics={cardMetrics} replyLines={replyLines}>{layout =>
+      <section className="focus-context-group" aria-label={`Saved tasks in ${projectName ?? project.name}`} style={{ '--focus-card-columns': layout.columns[3], '--focus-group-width': `${layout.widths[3]}px` } as CSSProperties}>
+        {!withinProject ? <header className="focus-context-group__header" title={status}><strong>Saved</strong><span className="focus-context-group__count">{project.observations.length}</span></header> : null}
         <div className="focus-context-group__cards" role="list">{project.observations.map(entry =>
           <FocusSavedTaskCard key={JSON.stringify([entry.identity!.hostId, entry.sessionId])} entry={entry} time={time} displayPath={displayPath} onRead={onRead} />
         )}</div>
       </section>
     }</FocusLaneGroups> : null}
+    </div>
   </div>
 })
 
@@ -369,7 +399,7 @@ const FocusSavedTaskCard = memo(function FocusSavedTaskCard({ entry, time, displ
   return <div className="focus-context-card" role="listitem" data-saved-focus-session={entry.sessionId} data-saved-focus-host={identity.hostId}>
     <Element className="focus-context focus-context--card" type={Element === 'button' ? 'button' : undefined}
       aria-label={Element === 'button' ? `View ${name} saved focus history` : undefined}
-      title={[`Saved observation · ${entry.sessionId}`, identity.hostId, displayPath(identity.workspacePath, identity.hostId), location, dated ? time.detailed(entry.focusedAt) : 'Focus time not recorded'].filter(Boolean).join('\n')}
+      title={[name, `Saved observation · ${entry.sessionId}`, identity.hostId, displayPath(identity.workspacePath, identity.hostId), location, dated ? time.detailed(entry.focusedAt) : 'Focus time not recorded'].filter(Boolean).join('\n')}
       onPointerDown={event => { if (event.button === 0 && Element === 'button') event.preventDefault() }}
       onClick={Element === 'button' ? () => onRead?.(entry.focusedAt) : undefined}>
       <span className="focus-context__copy">
