@@ -18,7 +18,7 @@ import { readNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { api } from '../lib/api'
 import { fileNavigationSelection, useAppStore } from '../store'
 import { documentKey } from '../lib/workbench-tabs'
-import type { CanvasLayoutInput } from '../lib/note-canvas-layout-engine'
+import type { CanvasLayoutInput } from '../lib/force-layout-engine'
 import { noteCanvasScopeKey, type NoteCanvasScope } from '../lib/note-canvas-state'
 import { useNoteCanvasLayout } from '../lib/use-note-canvas-layout'
 import { useNoteCanvasObservation } from '../lib/use-note-canvas-observation'
@@ -990,7 +990,7 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
     }
     if (!force && projection.notes.every(note => held[note.id])) { frameInitial(); return }
     let worker: Worker
-    try { worker = new Worker(new URL('../lib/note-canvas-layout.worker.ts', import.meta.url), { type: 'module' }) }
+    try { worker = new Worker(new URL('../lib/force-layout.worker.ts', import.meta.url), { type: 'module' }) }
     catch { setLayoutIssue('Automatic layout could not start. You can still move Notes; retry Arrange.'); frameInitial(); return }
     const id = mintObjectId(), input: CanvasLayoutInput = { nodes: projection.notes.map(note => {
       const node = refs.current.nodes.find((candidate): candidate is CanvasNoteNode => candidate.type === 'note' && candidate.id === note.id)

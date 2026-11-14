@@ -17,8 +17,8 @@ const expand = (box: CollaborationBounds, amount: number): CollaborationBounds =
   x: box.x - amount, y: box.y - amount, width: box.width + amount * 2, height: box.height + amount * 2,
 })
 
-/** Clustered force-directed layout (fdp): Note areas frame their members while multi-host shared blocks bridge between clusters. */
-export async function arrangeNoteCanvas(input: CanvasLayoutInput): Promise<Record<string, { x: number; y: number }>> {
+/** Finite force-directed layout shared by relationship canvases; optional areas group related nodes. */
+export async function arrangeForceGraph(input: CanvasLayoutInput): Promise<Record<string, { x: number; y: number }>> {
   if (!input.nodes.length) return {}
   const viz = await graphviz()
   const byId = new Map(input.nodes.map(node => [node.id, node]))
@@ -80,7 +80,7 @@ export async function arrangeNoteCanvas(input: CanvasLayoutInput): Promise<Recor
       rawPositions.set(node.id, { x: Math.round(x! - node.width / 2), y: Math.round(y! - node.height / 2) })
     }
   }
-  if (rawPositions.size !== input.nodes.length) throw new Error('Layout did not return every original Note. Your positions are kept.')
+  if (rawPositions.size !== input.nodes.length) throw new Error('Layout did not return every original node. Your positions are kept.')
   const occupied = new CollaborationBoundsIndex<CollaborationBounds>([])
   const positions: Record<string, { x: number; y: number }> = {}
   for (const node of input.nodes) {
