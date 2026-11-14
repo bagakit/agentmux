@@ -11,7 +11,7 @@ const changes: Record<string, [string, string, string]> = {
     'return `ELECTRON_RUN_AS_NODE=1 AGENTMUX_HOOK_PROVIDER=${shellQuote(providerId)} ${shellQuote(process.execPath)} /private/retired-install/worker.mjs`'],
   'shell-runtime-unretained': ['packages/core/src/providers/gemini.ts', '  retainedRuntime: true,', '  retainedRuntime: false,'],
   'native-timeout-unit': ['packages/core/src/providers/gemini.ts', "hookCommandTimeout('gemini', 'milliseconds')", "hookCommandTimeout('gemini')"],
-  'key-overwrites-callbacks': ['packages/core/src/providers/antigravity.ts', "merge: { kind: 'json-managed-events', key: 'agentmux-status' }", "merge: { kind: 'json-owned-key', key: 'agentmux-status' }"],
+  'key-overwrites-callbacks': ['packages/providers/src/antigravity/provider.ts', "merge: { kind: 'json-managed-events' as const, key: 'agentmux-status' }", "merge: { kind: 'json-owned-key' as const, key: 'agentmux-status' }"],
   'forget-native-container': ['packages/core/src/hook-config-merge.ts', 'retainPrevious, strategy.key)', 'retainPrevious)'],
   'conflate-container-ownership': ['packages/core/src/managed-hook-installer.ts',
     "...(merge.kind === 'json-managed-events' && merge.key !== undefined ? { key: merge.key } : {})", '...{}']
@@ -21,8 +21,11 @@ export default defineConfig({ ...base, plugins: [...(base.plugins ?? []), {
   name: 'actual-hook-carrier-owner', enforce: 'pre', transform(source, id) {
     const change = mutation ? changes[mutation] : undefined
     const path = relative(base.root!, id.split('?')[0]!)
-    const owners = new Set(['providers/shared', 'managed-hook-installer', 'hook-config-merge',
-      ...['gemini', 'antigravity', 'cursor', 'copilot', 'droid'].map(name => 'providers/' + name)].map(name => 'packages/core/src/' + name + '.ts'))
+    const owners = new Set([
+      ...['providers/shared', 'managed-hook-installer', 'hook-config-merge',
+        ...['gemini', 'cursor', 'copilot', 'droid'].map(name => 'providers/' + name)].map(name => 'packages/core/src/' + name + '.ts'),
+      'packages/providers/src/antigravity/provider.ts'
+    ])
     if (!owners.has(path)) return
     let code = source
     if (change && path === change[0]) {

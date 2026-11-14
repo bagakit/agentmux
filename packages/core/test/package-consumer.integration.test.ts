@@ -367,7 +367,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           throw new Error(`Private ${directory} publish pack failed:\n${failure.stdout ?? ''}${failure.stderr ?? ''}${failure.message}`)
         }
       }
-      const manifests = new Map<string, { name: string; version: string; files: string[]; scripts?: Record<string, string>; dependencies?: Record<string, string> }>()
+      const manifests = new Map<string, { name: string; version: string; files: string[]; scripts?: Record<string, string>; dependencies?: Record<string, string>; os?: string[]; cpu?: string[] }>()
       const workspacePackages = await runtimeWorkspacePackages(join(repositoryRoot, 'packages/core'))
       for (const { directory, source, manifest } of workspacePackages) {
         const destination = join(packWorkspace, 'packages', directory)
@@ -494,8 +494,6 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           directory: 'packages/core'
         },
         engines: { node: '>=24.0.0' },
-        os: ['darwin', 'linux'],
-        cpu: ['arm64', 'x64'],
         exports: {
           '.': { types: './dist/index.d.ts', import: './dist/index.js' },
           './runtime': { types: './dist/runtime.d.ts', import: './dist/runtime.js' }
@@ -507,11 +505,34 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           'agentmux-runtime': './bin/agentmux-runtime'
         }
       })
+      expect(installedManifest.os).toEqual(sourceManifest.os)
+      expect(installedManifest.cpu).toEqual(sourceManifest.cpu)
       expect(installedManifest.dependencies).not.toHaveProperty('node-pty')
       const publishedDependencies = Object.fromEntries(Object.entries(sourceManifest.dependencies!).map(([name, version]) =>
         [name, version === 'workspace:*' ? manifests.get(name)!.version : version]))
       expect(installedManifest.dependencies).toEqual(publishedDependencies)
       expect(installedManifest.dependencies['@agentmux/demand']).toBe(manifests.get('@agentmux/demand')!.version)
+      expect(installedManifest.dependencies['@agentmux/providers']).toBe(manifests.get('@agentmux/providers')!.version)
+      const defaultProviders = await execFileAsync(process.execPath, ['--input-type=module', '--eval', `
+        import assert from 'node:assert/strict'
+        import { AgentMuxClient, BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core'
+        const client = new AgentMuxClient()
+        try {
+          assert.deepEqual(client.catalog().map(entry => entry.id).sort(), [...BUILT_IN_AGENT_PROVIDER_IDS].sort())
+          assert.equal(client.providers.get('antigravity').executable, 'agy')
+          const plan = client.providers.get('antigravity').buildResumeLaunch({
+            workspacePath: process.cwd(), args: [], env: {},
+            nativeHandle: { kind: 'provider', providerId: 'antigravity', sessionId: 'same-native-conversation' }
+          })
+          assert.deepEqual(plan.args, ['--conversation', 'same-native-conversation'])
+          process.stdout.write('packaged default Provider and original resume verified')
+        } finally { await client.dispose() }
+      `], { cwd: consumerDirectory })
+      expect(defaultProviders.stdout).toBe('packaged default Provider and original resume verified')
+      const packagedHook = await execFileAsync(process.execPath, [join(packageRoot, 'dist/agentmux-hook.mjs'), '--event', 'PreToolUse'], {
+        cwd: consumerDirectory, env: { AGENTMUX_HOOK_PROVIDER: 'antigravity' }
+      })
+      expect(packagedHook.stdout).toBe('{"decision":"ask"}\n')
       const developmentSdk = 'file:vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz'
       expect(installedManifest.devDependencies['@ctxmux/sdk']).toBe(developmentSdk)
       const sdkArchive = await realpath(join(packageRoot, developmentSdk.slice('file:'.length)))

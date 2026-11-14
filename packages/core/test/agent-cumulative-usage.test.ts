@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { build } from 'esbuild'
 import { extractTurnUsage, parseTurnUsage } from '../src/agent-usage-transcript.js'
-import { decodeClaudeUsage } from '../src/providers/claude-usage.js'
+import { usageTranscriptDecoder } from '../src/provider-usage.js'
 import { AgentMuxFileAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js';
 import { normalizeAgentSession } from "../src/agent-session-codec.js";
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
@@ -19,6 +19,8 @@ import { Readable } from 'node:stream'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { ObjectCliProbe, objectCliEnvironment, type CliResult } from './helpers/object-cli-rpc.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
+
+const decodeClaudeUsage = usageTranscriptDecoder('claude', 'claude-jsonl')!
 
 
 const response = { input_tokens: 29, output_tokens: 7, total_tokens: 43 }

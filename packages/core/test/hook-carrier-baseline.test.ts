@@ -93,7 +93,11 @@ it.each(ids)('%s public Core creates and receives its actual declared callback u
   vi.spyOn(inner, 'probePreparedAgent').mockResolvedValue({ providerId, executable: providerId, installed: true,
     capabilities: provider.catalog.capabilities })
   let started: RunSpec | undefined
-  const runtime = inner.kernel as { startPrepared(request: RunSpec, operationKey: string): Promise<ReturnType<typeof f.run>> }
+  const runtime = inner.kernel as { startPrepared(request: RunSpec, operationKey: string): Promise<ReturnType<typeof f.run>>
+    creationRuntimeIdentity(): { runtimeId: string; instanceId: string; buildIdentity: string; protocolVersion: number } }
+  vi.spyOn(runtime, 'creationRuntimeIdentity').mockReturnValue({
+    runtimeId: 'fixture-runtime', instanceId: 'fixture-runtime', buildIdentity: 'fixture', protocolVersion: 1
+  })
   vi.spyOn(runtime, 'startPrepared').mockImplementation(async (request, operationKey) => {
     started = request
     return { ...f.run('private-native-run'), lifecycleOperationId: operationKey }

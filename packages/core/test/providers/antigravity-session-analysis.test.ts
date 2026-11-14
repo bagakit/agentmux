@@ -5,7 +5,6 @@ import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../../src/client.js'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
-import { readAntigravitySessionHistoryPage } from '../../src/providers/antigravity-native-history.js'
 import { AgentMuxFileAgentSessionStore } from '../../src/agent-session-store.js'
 import type { CtxmuxRunAdapter } from '../../src/ctxmux-run-adapter.js'
 import type { AgentMuxStoredAgentSession, AgentNativeSessionHandle } from '../../src/types.js'
@@ -1102,7 +1101,7 @@ describe('Antigravity session analysis and native history', () => {
     controller.abort(new Error('abort during history resolution'))
 
     await expect(
-      readAntigravitySessionHistoryPage({
+      new AgentProviderRegistry().get('antigravity').readSessionHistoryPage!({
         source: { providerId: 'antigravity', nativeSessionId: NATIVE_CONVERSATION_ID },
         transcriptPath,
         command: 'agy',

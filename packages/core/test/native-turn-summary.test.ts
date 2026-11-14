@@ -12,11 +12,13 @@ import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
 import { consumeConversationWindowPage, projectConversationWindow, type AgentConversationReadPage } from '../src/conversation.js'
 import { normalizeSessionHistoryPage, SESSION_HISTORY_MAX_PAGE_BYTES } from '../src/session-history.js'
 import { extractTurnUsage, parseTurnUsage } from '../src/agent-usage-transcript.js'
-import { decodeClaudeUsage } from '../src/providers/claude-usage.js'
-import { decodeCodexUsage } from '../src/providers/codex-usage.js'
+import { usageTranscriptDecoder } from '../src/provider-usage.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 import type { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
 import type { AgentMuxStoredAgentSession, AgentSessionHistoryItem } from '../src/types.js'
+
+const decodeClaudeUsage = usageTranscriptDecoder('claude', 'claude-jsonl')!
+const decodeCodexUsage = usageTranscriptDecoder('codex', 'codex-rollout')!
 
 const cleanups: Array<() => void | Promise<void>> = []
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); vi.restoreAllMocks() })

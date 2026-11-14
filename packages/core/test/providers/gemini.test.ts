@@ -10,7 +10,6 @@ import { fixturePath } from '../helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import { GEMINI_HOOK_EVENTS, createGeminiManagedHookPlan } from '../../src/providers/gemini.js'
-import { createAntigravityManagedHookPlan } from '../../src/providers/antigravity.js'
 import { canonicalHookLifecycleEvent as declaredHookLifecycleEvent } from '../../src/agent-hook-event.js'
 import { renderMergedHookContent } from '../../src/hook-config-merge.js'
 import { AgentMuxError } from '../../src/errors.js'
@@ -142,7 +141,7 @@ describe('Gemini provider', () => {
       expect(target.endsWith("/.gemini/settings.json")).toBe(true)
       // 关键的邻接风险：两个 Provider 同住 ~/.gemini。路径必须真的不同，否则装 Gemini 会改掉
       // 用户 Antigravity 的行为。这里直接拿两个 plan 对比，而不是只断言字符串长相。
-      const antigravity = createAntigravityManagedHookPlan()
+      const antigravity = new AgentProviderRegistry().get('antigravity').planManagedHooks!({ workspacePath: fixturePath("repo") })!
       expect(antigravity.mutations[0]!.path).not.toBe(target)
       expect(antigravity.mutations[0]!.path).toContain("/.gemini/config/hooks.json")
     })

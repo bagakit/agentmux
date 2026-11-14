@@ -29,7 +29,12 @@ const run = {
   spec: { program: 'private-synthetic-antigravity', args: [], cwd: root, env: {} },
   lineage: null, pid: null, state: { type: 'running' }, latest_output_bytes: 42,
   durable_output_bytes: 42, first_available_byte: 0, attachments: 0,
-  applied_input_bytes: 0, current_size: { cols: 80, rows: 24 }
+  applied_input_bytes: 0, current_size: { cols: 80, rows: 24 },
+  native_service: { revision: 1, owner: { type: 'serving' }, output: { type: 'serving' },
+    input: { phase: { type: 'open' }, unsettled_commands: 0, unsettled_request_bytes: 0,
+      write_blocked: false, completed_input_bytes: 0, current_size: { cols: 80, rows: 24 },
+      active_confirmed_bytes: 0 },
+    terminal_fault: null }
 }
 const base = new AgentProviderRegistry().get('antigravity')
 const contexts = []
@@ -69,7 +74,8 @@ Object.assign(client.kernel, {
       return { run, receipt: { start_byte: start, end_byte: run.applied_input_bytes, data: operation.data } }
     }
   },
-  runtime: { daemonInstanceId: 'private-synthetic-antigravity-daemon', protocolVersion: 18 }
+  runtime: { daemonInstanceId: 'private-synthetic-antigravity-daemon', runtimeId: 'private-synthetic-antigravity-runtime',
+    protocolGeneration: 18, buildId: 'private-synthetic-antigravity-build' }
 })
 const published = []
 client.onEvent(event => published.push(event))
