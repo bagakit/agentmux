@@ -122,6 +122,8 @@ async function capture(iteration: number, warmup = false) {
   shortcutCallbacks[callback]!()
   await until('the actual GlobalScreenshot promise exists', () => Boolean(row.globalPromise))
   void row.globalPromise.catch((error: unknown) => { captureError = error })
+  let captureSettled = false
+  void row.globalPromise.then(() => { captureSettled = true }, () => { captureSettled = true })
   const overlays = await until('selected current overlays shown with their current frame', async () => {
     if (captureError) throw captureError
     if (row.windows.length !== count || !row.timing) return null
@@ -210,8 +212,8 @@ async function capture(iteration: number, warmup = false) {
     overlays[0]!.webContents.debugger.attach('1.3')
     await overlays[0]!.webContents.executeJavaScript('document.querySelector("canvas").focus()')
     await overlays[0]!.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }).catch((error: unknown) => { if (!overlays[0]!.isDestroyed()) throw error })
-  } else await overlays[0]!.webContents.executeJavaScript('window.captureSurface.load().then(i=>window.captureSurface.cancel(i.requestId))').catch((error: unknown) => { if (!overlays[0]!.isDestroyed()) throw error })
-  await row.globalPromise
+  } else await overlays[0]!.webContents.executeJavaScript('window.captureSurface.load().then(i=>{void window.captureSurface.cancel(i.requestId)}); true').catch((error: unknown) => { if (!overlays[0]!.isDestroyed()) throw error })
+  await until('the original capture settles after cancellation', () => captureSettled)
   assert.equal(captureError, undefined)
   assert.equal(host.getOpacity(), 0.65)
   assert.deepEqual(receipt.opacityChanges.slice(opacityStart).map((row: any) => row.value), variant === 'candidate' ? [] : [0, 0.65])
