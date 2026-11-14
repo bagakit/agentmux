@@ -6,6 +6,8 @@ export const mobileAgentLocationOwners = [
   'apps/mobile/test/mobile-agent-locations.test.tsx'
 ]
 export const mobileAgentLocationMutations = {
+  'ungroup-alias-contexts': { file: mobileAgentLocationOwners[2], target: 'actual App folds aliases',
+    before: 'const positionKey = JSON.stringify([place.displayWorkspaceId, place.groupId, place.tabId, place.regionId])', after: 'const positionKey = locationContextKey(place)' },
   'unknown-as-zero': { file: mobileAgentLocationOwners[0], target: 'actual App folds aliases',
     before: "(groups.some(group => group.hostId === null) ? undefined : { hostId, agentSessionId: id, addresses: [], count: 0 })", after: '{ hostId, agentSessionId: id, addresses: [], count: 0 }' },
   'silent-runtime-failure': { file: mobileAgentLocationOwners[2], target: 'rejects late exact reads',

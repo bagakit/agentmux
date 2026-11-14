@@ -34,6 +34,7 @@ try {
   } }
   const mutationId = process.argv.find(value => value.startsWith('--mutation='))?.slice('--mutation='.length)
   const variants = {
+    'agent-locations-transparent-sheet': { file: 'apps/mobile/src/navigation/agent-locations.css', before: "animation-name: mobile-agent-locations-enter;", after: 'animation-name: mobile-sheet-enter;' },
     'connection-inline-notice': { file: 'apps/mobile/src/conversation/MobileConversationSurface.tsx', before: '      {readers}', after: '      {readers}\n      {connection.issue ? <div className="mobile-conversation__connection">{connection.issue}</div> : null}' },
     'metadata-bottom-notice': { file: 'apps/mobile/src/MobileApp.tsx', before: '    <div className="mobile-notice-stack">', after: '    <div className="mobile-notice-stack">\n      {conversationStatus?.metadata.issue ? <div className="mobile-service-notice">{conversationStatus.metadata.issue}</div> : null}' },
     'focus-attention-rail': { file: 'apps/mobile/src/navigation/focus-home.css', before: 'background: var(--mobile-group); box-shadow: none; }', after: 'background: var(--mobile-group); box-shadow: inset 3px 0 0 var(--amber); }' },
