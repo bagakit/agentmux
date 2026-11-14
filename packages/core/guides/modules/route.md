@@ -13,7 +13,27 @@ It is not a mesh, a global user account, a Node alias or an SSH ProxyJump trace.
 
 <!-- amux:generated command:route.identity -->
 <!-- amux:generated command:route.inspect -->
+<!-- amux:generated command:route.edges -->
+<!-- amux:generated command:route.edge.inspect -->
 <!-- amux:generated command:route.configure -->
+
+`route edges` reads only this owner's saved outgoing edge IDs, labels, kind and
+already known Runtime pins. It does not connect to every Host or expose endpoints,
+credentials or private configuration. Its `identity` is this owner; its typed `actor`
+is the actual source-qualified user/device, including a verified incoming actor.
+It is a fact for an explicit receiver-grant request, not permission or a global user
+identity. `route edge inspect --edge EDGE` explicitly observes that one saved peer's
+signing identity and time. A saved Runtime-pin mismatch rejects only this inspection;
+it never replaces a pin, route or healthy Agent.
+
+To read a later owner's edges, explicitly use `route.call` through an already saved
+and authorized prefix, with `call:{method:'route.edges',params:{}}` or
+`call:{method:'route.edge.inspect',params:{edgeId:'EXACT_EDGE'}}`. Every receiving Core
+must independently grant the original actor that exact finite read. A missing grant
+keeps the draft and original work; ask that receiver's actual owner to configure it.
+Discovery never saves a prefix, imports remote Hosts, recursively walks the network
+or authorizes execution. `route.inspect` and `route.configure` remain restricted to
+their actual original user/device and cannot be carried as delegated policy access.
 
 Read the actual participating owners before approving a chain. The source saves a
 route definition; every receiving Core separately approves its immediate delegator,
