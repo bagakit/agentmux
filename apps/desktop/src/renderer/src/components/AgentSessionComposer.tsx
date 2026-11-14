@@ -74,6 +74,7 @@ export function AgentSessionComposer({
   disabled = false,
   readOnly = false,
   tabName,
+  aboveInput,
   resultReview,
   reading,
   onRevealMessage,
@@ -88,6 +89,7 @@ export function AgentSessionComposer({
   readOnly?: boolean
   // Authored Tab name is contextual; the Session identity remains primary.
   tabName?: string
+  aboveInput?: ReactNode
   reading?: ConversationReadingProps | undefined
   onRevealMessage?: RevealMailboxMessage | undefined
   onOpenTerminal?(): void
@@ -372,7 +374,7 @@ export function AgentSessionComposer({
       onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) inputHistory.setFocused(false) }}>
     {fileReferencesOpen && workspace && visible ? <ComposerFileReferences key={attachmentScope} workspace={workspace}
       onClose={() => setFileReferencesOpen(false)} onSelect={path => { void attachments.referencePaths([path]) }} /> : null}
-    <AgentComposer surfaceRef={composerRef} key={sessionId} active={visible} aboveInput={<>{pending}{rollovers.length > 0 && moteWorkface?.startRollover ? <details ref={rolloverSurface} className="mote-conversation__muted" open={rollovers.length === 1}><summary>待承接到新对话的输入</summary>{rollovers.map(entry => <div className="mote-conversation__handoff" data-mote-rollover={entry.operationId} key={entry.operationId}><p style={{ margin: 0, flex: '1 1 12rem' }}>{entry.text.slice(0, 80)}</p><button className="small-button" style={{ flexShrink: 0 }} type="button" onClick={() => openRollover(entry)}>接到新对话</button></div>)}</details> : null}</>} mailbox={mailbox}
+    <AgentComposer surfaceRef={composerRef} key={sessionId} active={visible} aboveInput={<>{aboveInput}{pending}{rollovers.length > 0 && moteWorkface?.startRollover ? <details ref={rolloverSurface} className="mote-conversation__muted" open={rollovers.length === 1}><summary>待承接到新对话的输入</summary>{rollovers.map(entry => <div className="mote-conversation__handoff" data-mote-rollover={entry.operationId} key={entry.operationId}><p style={{ margin: 0, flex: '1 1 12rem' }}>{entry.text.slice(0, 80)}</p><button className="small-button" style={{ flexShrink: 0 }} type="button" onClick={() => openRollover(entry)}>接到新对话</button></div>)}</details> : null}</>} mailbox={mailbox}
       readPastedImage={api.ui.readPastedImage}
       insertionRef={insertionRef}
       identity={session?.kind === 'agent' && displayName ? <AgentIdentity session={session} name={displayName}

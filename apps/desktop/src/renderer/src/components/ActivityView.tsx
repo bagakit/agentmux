@@ -48,7 +48,7 @@ import type { ConversationProcessMember, ConversationProcessProps } from '@agent
 import { renderConversationQuestionNotice } from './ConversationQuestionNotice'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { SemanticIcon } from './semantic-icons'
-import { NativeProcessObservation } from '@agentmux/client-ui/components/NativeProcessObservation'
+import { ConversationProcessObservation } from './ConversationProcessSurface'
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
 import { conversationReadingAnchor, restoreConversationAnchor, useSessionConversationWindow, type ConversationReading } from '../lib/session-conversation-window'
 import type { ConversationRevealRequest, RevealConversationItem } from '../lib/mailbox-message-navigation'
@@ -238,6 +238,8 @@ export function ActivityView({
     else readAhead.request('newer', true)
   }
   const handleReadingKey = (event: KeyboardEvent<HTMLDivElement>): void => {
+    // Portalled summaries belong to the Composer's DOM surface, not this Reader.
+    if (!event.currentTarget.contains(event.target as Node)) return
     const interactive = event.target instanceof Element && event.target.closest('input, textarea, select, button, a, [contenteditable]:not([contenteditable="false"]), [role="slider"], [role="button"], [role="textbox"], [role="combobox"], [role="menu"]')
     if (!event.defaultPrevented && !interactive) {
       if (event.target !== event.currentTarget) anchorRef.current = captureReadingAnchor(event.currentTarget, event.target)
@@ -255,6 +257,9 @@ export function ActivityView({
   const nativeHistoryPage = readingWindow.page
   const traceDisclosure = useConversationTraceDisclosure(JSON.stringify([executionHostId, sessionId, conversationReading?.identity,
     nativeHistoryPage?.source.providerId, nativeHistoryPage?.source.nativeSessionId]))
+  const [pinnedProcess, setPinnedProcess] = useState<string | null>(null)
+  const processScope = JSON.stringify([executionHostId, sessionId, conversationReading?.identity,
+    nativeHistoryPage?.source.providerId, nativeHistoryPage?.source.nativeSessionId])
   const traceAnchorPending = useRef(false)
   useLayoutEffect(() => {
     if (!traceAnchorPending.current || !feedEl) return
@@ -481,6 +486,7 @@ export function ActivityView({
   }
 
   const handleReadingWheel = (event: WheelEvent<HTMLDivElement>): void => {
+    if (!event.currentTarget.contains(event.target as Node)) return
     const el = event.currentTarget
     anchorRef.current = captureReadingAnchor(el, event.target)
     const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? el.clientHeight : 1)
@@ -1049,7 +1055,8 @@ export function ActivityView({
         active={readingEnabled}
         {...(renderRecordActions ? { renderRecordActions } : {})}
         {...(renderMessageActions ? { renderMessageActions } : {})}
-        renderProcess={(props) => <NativeProcessObservation {...props} compact={true} />}
+        renderProcess={props => <ConversationProcessObservation process={props} scope={processScope}
+          selected={pinnedProcess} onSelect={setPinnedProcess} onLocate={revealLoadedRecord} active={readingEnabled && documentVisible} />}
         sessionId={sessionId}
         {...(executionHostId ? { executionHostId } : {})}
         locatedMessageKey={locatedMessageKey}

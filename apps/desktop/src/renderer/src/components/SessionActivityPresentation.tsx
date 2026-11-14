@@ -15,6 +15,7 @@ import { SessionRegionHost } from './SessionRegionHost'
 import { OpenDestinationPopover } from './OpenDestinationBar'
 import type { ConversationAnnotation } from '@agentmux/client-ui/components/ConversationMessage'
 import { ConversationAnnotationNote, type ConversationAnnotationNoteHandle } from './ConversationAnnotationNote'
+import { ConversationProcessSurface } from './ConversationProcessSurface'
 
 /** A reading/input presentation, not a Session, Reader, Terminal or lifecycle owner. */
 export function SessionActivityPresentation({ target, regionId, sourceKey, sessionId, name, executorLabel, executionHost,
@@ -105,7 +106,7 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
   return <StableWorkbenchView kind="region" homeId={`${hostId}:parked`} targetId={hostId}
     active={target.active} visible={visible} surface={target.surface} moteInputIntent={target.moteInputIntent} moteContextKey={target.moteContextKey} retainedRegionId={regionId} reference={{ ...reference, regionId }}
     onSelectRegion={() => selectRegion()}>
-    {renderFrame(<SessionRegionHost arrangement="columns" className="workbench-session-region-host">
+    {renderFrame(<ConversationProcessSurface><SessionRegionHost arrangement="columns" className="workbench-session-region-host">
       <section ref={surfaceRef} className="agent-surface" data-agent-surface-mode="activity"
         data-session-presentation={hostId} aria-hidden={!visible} inert={!visible}>
         {header ?? <AgentRegionHeader name={name} executorLabel={executorLabel} sessionId={sessionId} sessionKind="agent" executionHost={executionHost}
@@ -123,6 +124,6 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
           active={visible && eligible && Boolean(onAnnotate)} {...(onAnnotate ? { onAnnotate } : {})} />
         {renderComposer ? <div className="agent-input-stack" data-input-surface="activity" hidden={!eligible} inert={!eligible}>{renderComposer(pendingLayout)}</div> : null}
       </section>
-    </SessionRegionHost>, target)}
+    </SessionRegionHost></ConversationProcessSurface>, target)}
   </StableWorkbenchView>
 }

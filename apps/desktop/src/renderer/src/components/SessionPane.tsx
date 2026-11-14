@@ -38,6 +38,7 @@ import { createConversationSpeakerFactsSelector, currentConversationSenderDetail
 import { useSessionUserMessages } from '../lib/session-user-messages'
 import type { LinkClickModifiers } from '@agentmux/client-ui/components/AgentMarkdown'
 import { AgentSessionComposer } from './AgentSessionComposer'
+import { ConversationProcessSurface, ConversationProcessDockSlot } from './ConversationProcessSurface'
 import type { ConversationAnnotation } from '@agentmux/client-ui/components/ConversationMessage'
 import { ConversationAnnotationNote, type ConversationAnnotationNoteHandle } from './ConversationAnnotationNote'
 import { formatConversationAnnotation } from '../lib/conversation-annotation-delivery'
@@ -1265,10 +1266,10 @@ export function SessionPane({
       readOnly={readOnly} resourceOrigin={linkOrigin}
       {...(hasAgentComposer ? { onAnnotate: annotateMessage } : {})}
       renderFrame={renderPresentationFrame} selectRegion={() => onPresentationSelected?.(target)}
-      {...(hasAgentComposer ? { renderComposer: (pendingLayout: PendingDeliveryLayout) => <AgentSessionComposer resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading} mailboxOrigin={{ ...linkOrigin, workspaceId: target.reference!.displayWorkspaceId, tabGroupId: target.reference!.groupId, tabId: target.reference!.tabId }} onRevealMessage={(message, reference) => revealMailboxMessage(message, reference, target)} sessionId={session.id}
+      {...(hasAgentComposer ? { renderComposer: (pendingLayout: PendingDeliveryLayout) => <AgentSessionComposer aboveInput={<ConversationProcessDockSlot />} resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading} mailboxOrigin={{ ...linkOrigin, workspaceId: target.reference!.displayWorkspaceId, tabGroupId: target.reference!.groupId, tabId: target.reference!.tabId }} onRevealMessage={(message, reference) => revealMailboxMessage(message, reference, target)} sessionId={session.id}
         visible={target.visible !== false && viewMode !== 'terminal' && canReadConversation} {...(tabName ? { tabName } : {})} /> } : {})}
     />) : null}
-    <section
+    <ConversationProcessSurface><section
       ref={surfaceRef}
       className="agent-surface"
       data-agent-surface-mode={session.kind === 'agent' ? viewMode : 'terminal'}
@@ -1386,10 +1387,10 @@ export function SessionPane({
           data-input-surface={session.kind === 'agent' && viewMode === 'terminal' ? 'terminal' : 'activity'}
           aria-label={viewMode === 'terminal' ? 'Agent input channel' : undefined}
         >
-          <AgentSessionComposer resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading} mailboxOrigin={mailboxOrigin} onRevealMessage={revealMailboxMessage} onOpenTerminal={openTerminal} key={sessionId} sessionId={session.id} resultReview={(onNavigate) => <SessionResultReviewContent showStatus={false} sessionId={session.id} items={timeline} origin={linkOrigin} onNavigate={onNavigate} />} visible={visible} {...(tabName ? { tabName } : {})} />
+          <AgentSessionComposer aboveInput={<ConversationProcessDockSlot />} resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading} mailboxOrigin={mailboxOrigin} onRevealMessage={revealMailboxMessage} onOpenTerminal={openTerminal} key={sessionId} sessionId={session.id} resultReview={(onNavigate) => <SessionResultReviewContent showStatus={false} sessionId={session.id} items={timeline} origin={linkOrigin} onNavigate={onNavigate} />} visible={visible} {...(tabName ? { tabName } : {})} />
         </div>
       ) : null}
-    </section>
+    </section></ConversationProcessSurface>
     </>
   )
 }
