@@ -3,6 +3,8 @@ import { parseHostRouteAgentTarget } from '@agentmux/core/host-route'
 import { parseNameControlParams } from '@agentmux/core/name-control'
 import type { AppConfig } from '../shared/contracts.js'
 import type { IpcMainInvokeEvent } from 'electron'
+import { sourceWorkbenchClosePort, parseSourceWorkbenchCloseMember } from './source-workbench-close'
+import { parseSpaceCloseParams } from '@agentmux/core/space-close'
 import { parseFolderSpaceRegistration, parseFolderSpaceRegisterInput } from '@agentmux/core/space-folder'
 import { parseAgentExecutionReference, parseSpaceAuthorityRef, parseSpaceAuthorityParams, rpcControlRequest } from '@agentmux/core'
 import type { RuntimeController } from './runtime-controller.js'
@@ -27,11 +29,25 @@ export function sourceTarget(p: Record<string, unknown>): import('../shared/spac
 export function registerSpaceMountIpc(ports: {
   handle<T extends unknown[], R>(channel: string, listener: (event: IpcMainInvokeEvent, ...values: T) => R | Promise<R>): void
   config?(): AppConfig
-  runtime: Pick<RuntimeController, 'openMountedSpaceMember' | 'spaceMountResources' | 'describeMountedSpace' | 'mountedSpaceHostChoices' | 'mountedSpaceRouteChoices' | 'mountedSpaceRouteExecutors' | 'registerFolderSpace' | 'inspectFolderSpace' | 'readMountedSpace' | 'applyMountedSpace' | 'watchMountedSpace' | 'mountedSpaceExecutors' | 'openMountedSpace' | 'inspectMountedSpaceRequest' | 'continueMountedSpaceExecution' | 'watchMountedSpaceSessions' | 'inspectMountedMemberName' | 'changeMountedMemberName' | 'inspectOriginalAgentName' | 'changeOriginalAgentName'>
+  runtime: Pick<RuntimeController, 'callOriginalCore' | 'subscribeOriginalCore' | 'openMountedSpaceMember' | 'spaceMountResources' | 'describeMountedSpace' | 'mountedSpaceHostChoices' | 'mountedSpaceRouteChoices' | 'mountedSpaceRouteExecutors' | 'registerFolderSpace' | 'inspectFolderSpace' | 'readMountedSpace' | 'applyMountedSpace' | 'watchMountedSpace' | 'mountedSpaceExecutors' | 'openMountedSpace' | 'inspectMountedSpaceRequest' | 'continueMountedSpaceExecution' | 'watchMountedSpaceSessions' | 'inspectMountedMemberName' | 'changeMountedMemberName' | 'inspectOriginalAgentName' | 'changeOriginalAgentName'>
 }) {
   const reads = new SessionHistoryReadOwners()
+  const close = sourceWorkbenchClosePort(ports.runtime)
   const members = new Map<string, SpaceMountMemberSurface>()
   ports.handle('spaceMounts:call', (event, token: string, method: unknown, value: unknown) => sessionInputOperationResult(async () => {
+    if (method === 'close' || method === 'closeLocations') {
+      const p = fields(value, method === 'closeLocations' ? ['hostId', 'reference', 'member'] : ['hostId', 'reference', 'method', 'request', 'member'])
+      const destination = { hostId: host(p.hostId), reference: parseSpaceAuthorityRef(p.reference) }
+      let obtained: import('../shared/source-workbench-close').SourceWorkbenchCloseResult | undefined
+      try { return await reads.read(event.sender, token, async signal => {
+        const actor = { kind: 'user' as const, id: `local-user:${process.getuid?.() ?? 'current'}` }
+        const context = { principal: actor, transport: 'unix' as const, signal }
+        if (method === 'closeLocations') return await close.locations(destination, parseSourceWorkbenchCloseMember(p.member), context)
+        if (p.method === 'space.close.prepare') return obtained = await close.call({ ...destination, method: p.method, request: parseSpaceCloseParams(p.method, p.request), member: parseSourceWorkbenchCloseMember(p.member) }, context)
+        if (p.method === 'space.close.apply' || p.method === 'space.close.inspect') return obtained = await close.call({ ...destination, method: p.method, request: parseSpaceCloseParams(p.method, p.request) } as import('../shared/source-workbench-close').SourceWorkbenchCloseCall, context)
+        throw new Error('Choose an original workface close operation.')
+      }) } catch (cause) { if (obtained) return obtained; throw cause }
+    }
     if (method === 'register') {
       const p = fields(value, ['hostId', 'registration']), originalHost = host(p.hostId), packet = structuredClone(parseFolderSpaceRegisterInput(p.registration))
       let obtained: Awaited<ReturnType<RuntimeController['registerFolderSpace']>> | undefined

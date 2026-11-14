@@ -27,6 +27,8 @@ export type SpaceMountMethods = {
   inspectRegistration: { input: { hostId: string; registration: FolderSpaceRegistration }; result: import('@agentmux/core/space-folder').FolderSpaceRegistrationInspection | null }
   snapshot: { input: SpaceMountTarget; result: SpaceSnapshot }
   apply: { input: SpaceMountTarget & { edit: SpaceApply }; result: SpaceApplyReceipt }
+  closeLocations: { input: SpaceMountTarget & { member: import('./source-workbench-close').SourceWorkbenchCloseMember }; result: import('./source-workbench-close').SourceWorkbenchCloseLocations }
+  close: { input: import('./source-workbench-close').SourceWorkbenchCloseCall; result: import('./source-workbench-close').SourceWorkbenchCloseResult }
   executors: { input: SpaceMountSourceTarget & { agentHostId: string; executorId?: string }; result: import('@agentmux/core').AgentMuxRpcResult<'settings.executors.discover'> }
   open: { input: SpaceMountTarget & { request: import('@agentmux/core').AgentMuxRpcParams<'agent.open'> }; result: import('@agentmux/core').AgentMuxRpcResult<'agent.open'> }
   inspect: { input: SpaceMountTarget & { requestId: string }; result: import('@agentmux/core').AgentMuxRpcResult<'space.inspect'> }
