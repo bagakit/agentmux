@@ -123,6 +123,24 @@ it('the original Settings section exposes Mesh and a real editor; saved connecti
   expect(dom.container.querySelector('[data-mesh-home-view]')?.getAttribute('data-mesh-home-view')).toBe('paths')
   expect(dom.container.querySelector('[aria-label="Mesh network overview"]')).not.toBeNull()
 })
+it('the Mesh code field announces an invalid submission and clears the error when edited', async () => {
+  const call = inspectOnly()
+  await dom.render(<Editor active />); await ready()
+  const code = dom.container.querySelector<HTMLInputElement>('[aria-label="Paste a connection code"]')!
+  await input('Paste a connection code', 'incomplete-code')
+  expect(code.getAttribute('aria-invalid')).toBeNull()
+  await dom.click('.mesh-peer-pairing button')
+  expect(code.getAttribute('aria-invalid'), 'Invalid pairing code is associated with the authored field').toBe('true')
+  const description = code.getAttribute('aria-describedby')
+  expect(description).toBeTruthy()
+  expect(document.getElementById(description!)?.getAttribute('role')).toBe('alert')
+  expect(code.value).toBe('incomplete-code')
+  expect(call.mock.calls.some(([method]) => method === 'settings.mesh.configure')).toBe(false)
+  await input('Paste a connection code', 'revised-code')
+  expect(code.getAttribute('aria-invalid')).toBeNull()
+  expect(code.getAttribute('aria-describedby')).toBeNull()
+})
+
 it('actual editor submits the original fence once and retains text authored after the save started', async () => {
   let finish!: (value: unknown) => void
   const call = vi.spyOn(api.mesh, 'call').mockImplementation(async method => method === 'settings.mesh.configure' ? await new Promise(done => { finish = done }) as never : structuredClone(method === 'mesh.inspect' ? observation() : settings) as never)

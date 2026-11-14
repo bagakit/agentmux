@@ -1,4 +1,6 @@
 import { createRoot } from 'react-dom/client'
+import type { SettingsNavigationRequest } from '../../../src/renderer/src/components/SettingsNavigation'
+import type { NodeSettings } from '@agentmux/core/node-publishing'
 import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import { SettingsPanel } from '../../../src/renderer/src/components/SettingsPanel'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
@@ -46,6 +48,41 @@ function showHosts(localOnly: boolean) {
  const current = useAppStore.getState().config!
  useAppStore.setState({ config: { ...current, hosts: localOnly ? savedHosts.slice(0, 1) : savedHosts } })
 }
-createRoot(document.getElementById('root')!).render(<DesktopClientUiProvider><div className="mesh-review-shell"><SettingsPanel onClose={() => {}} initialSection="hosts" /><footer className="mesh-review-footer">Visual review fixture · production Settings and theme · controlled network observations</footer></div></DesktopClientUiProvider>)
+const reviewCases: Record<string, SettingsNavigationRequest> = {
+  providers: { section: 'agents', field: 'providers' },
+  executor: { section: 'agents', field: 'executors' },
+  host: { section: 'hosts', field: 'connection', hostId: 'studio' },
+  incoming: { section: 'hosts', field: 'connection', hostId: 'local' },
+  mesh: { section: 'hosts', field: 'mesh-configuration' },
+  node: { section: 'network-node' },
+  remote: { section: 'remote-execution' }
+}
+const render = (request?: SettingsNavigationRequest) => createRoot(document.getElementById('root')!).render(
+  <DesktopClientUiProvider><div className="mesh-review-shell">
+    <SettingsPanel onClose={() => {}} initialSection={request?.section ?? 'hosts'} navigationRequest={request} />
+    <footer className="mesh-review-footer">Visual review fixture · production Settings and theme · controlled observations</footer>
+  </div></DesktopClientUiProvider>)
+async function mountInputReview() {
+  const config = await api.config.get()
+  const hosts: AppConfig['hosts'] = [
+    { id: 'local', kind: 'local', label: 'This Mac', tailcat: { enabled: true, keyFile: 'review-host-key', allowedClients: [] } },
+    { id: 'studio', kind: 'ssh', label: 'Studio Mac', hostname: 'studio.invalid', runtimeId: 'managed-gateway',
+      user: 'reviewer', port: 2222, transport: 'ssh' }
+  ]
+  const node = { runtimeId: 'fixture-node-runtime', ownerInstanceId: 'fixture-node-process', alias: 'studio-review' }
+  const policy: NodeSettings = { node, policyRevision: 'fixture-policy', operation: null,
+    policy: { alias: node.alias, shareResources: true, allowedPaths: ['/workspace/shared', '/workspace/review'],
+      deniedPaths: ['/workspace/shared/private'], defaultPath: '/workspace/shared' } }
+  api.nodePublishing.call = async () => ({ node, policyRevision: policy.policyRevision, resourcesShared: true, roots: [],
+    landing: null }) as never
+  api.nodePublishing.owner = async () => structuredClone(policy) as never
+  api.hosts.inspect = async host => ({ routeHostId: host.id, configuration: host, tailcat: {
+    state: 'listening', address: 'private-review-credential'
+  } }) as never
+  useAppStore.setState({ config: { ...config, hosts }, providerCatalog: await api.providers.list() })
+  render(reviewCases[new URLSearchParams(location.search).get('case') ?? ''])
+}
+if (state === 'settings-inputs') void mountInputReview()
+else render()
 const workflowCode = meshPeerCode({ identity: { peerId: ids[1]!, publicKey: 'fixture-public-peer', epoch: 1 }, configuration: { ...settings.configuration, networkId: 'work-machines', advertisedIngress: [{ endpoint: 'gateway.example', useTls: true }] } })
 Object.assign(window, { meshFixture: { originalOffer, workflowCode, endpoint: () => { state = 'endpoint' }, localOnly: () => showHosts(true), allHosts: () => showHosts(false), theme: (mode: 'dark' | 'light') => updateThemeSelection({ appAppearance: mode }), failure: () => { state = 'failure'; settings = { ...settings, revision: 'saved-9' } } } })

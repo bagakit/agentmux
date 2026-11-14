@@ -1,5 +1,5 @@
 const {app,BrowserWindow}=require('electron'),fs=require('node:fs/promises'),path=require('node:path'),assert=require('node:assert/strict')
-const [url,profile,output,scenario]=process.argv.slice(2)
+const [url,profile,output,scenario,...requestedCases]=process.argv.slice(2)
 app.setPath('userData',path.resolve(profile));app.disableHardwareAcceleration()
 const delay=ms=>new Promise(r=>setTimeout(r,ms));const receipt={captureOnly:true,visualReview:'pending-independent-review',frames:[],console:[],passed:false,boundary:'Production Settings/components/theme using controlled observations; separate actual Unix Core/Native tests prove transport.'}
 let window
@@ -11,6 +11,115 @@ app.whenReady().then(async()=>{try{
  const openGateway=()=>evaluate(`document.querySelector('.settings-sidebar nav [data-settings-target="hosts:mesh-configuration"]')?.click()`)
  const paint=async()=>{await evaluate('document.fonts.ready');await delay(400)}
  const frame=async name=>{await paint();const file=name+'.png';await fs.writeFile(path.join(output,file),(await window.webContents.capturePage()).toPNG());receipt.frames.push(file)}
+ if (scenario === '--settings-inputs') {
+   const element = selector => `document.querySelector(${JSON.stringify(selector)})`
+   const until = async check => {
+     for (let attempt = 0; attempt < 120; attempt++) { if (await evaluate(check)) return; await delay(50) }
+     throw Error('Production Settings field did not appear: ' + check)
+   }
+   window.webContents.debugger.attach('1.3')
+   const focus = async selector => {
+     const target = element(selector)
+     await until(`${target}?.checkVisibility()`)
+     await evaluate(`${target}.focus({ preventScroll: true })`)
+     for (const type of ['keyDown', 'keyUp']) {
+       await window.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+     }
+     await evaluate(`${target}.scrollIntoView({ block: 'center', inline: 'nearest' }); ${target}.focus({ preventScroll: true })`)
+     assert.equal(await evaluate(`document.activeElement === ${target} && ${target}.matches(':focus-visible')`), true,
+       'Original field receives visible keyboard focus: ' + selector)
+   }
+   const click = selector => evaluate(`${element(selector)}?.click()`)
+   const fill = (selector, value) => evaluate(`(() => {
+     const field = ${element(selector)}
+     const prototype = field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+     Object.getOwnPropertyDescriptor(prototype, 'value').set.call(field, ${JSON.stringify(value)})
+     field.dispatchEvent(new Event('input', { bubbles: true }))
+   })()`)
+   const field = label => `[aria-label="${label}"]`
+   const cases = {
+     providers: async () => {
+       const search = field('Filter providers')
+       await until(`Boolean(${element(search)}?.closest('[data-settings-search-highlight]'))`)
+       await focus(search)
+       const reveal = await evaluate(`(() => {
+         const panel = ${element(search)}.closest('[data-settings-search-highlight]')
+         return panel && { outline: getComputedStyle(panel).outlineStyle, focusInside: panel.matches(':focus-within') }
+       })()`)
+       assert.deepEqual(reveal, { outline: 'none', focusInside: true })
+       await fill(search, 'codex')
+       await until(`document.querySelector('[data-provider-id="codex"]')?.checkVisibility()`)
+       await click(field('Select Codex for comparison'))
+       await focus(search)
+     },
+     executor: async () => {
+       await until("Boolean([...document.querySelectorAll('.settings-pane-toolbar button')].find(button => button.textContent.trim() === 'Add executor'))")
+       await evaluate("[...document.querySelectorAll('.settings-pane-toolbar button')].find(button => button.textContent.trim() === 'Add executor').click()")
+       await focus('[data-executor-provider]')
+       await fill(field('Executor arguments'), '--model "review model"')
+     },
+     host: async () => {
+       await until("Boolean(document.querySelector('.host-edit-disclosure summary'))")
+       await click('.host-edit-disclosure summary')
+       await focus('.host-edit-grid input[type="number"]')
+       assert.equal(await evaluate('document.activeElement.value'), '2222')
+     },
+     incoming: async () => {
+       const address = field('Private Tailcat address')
+       await focus(address)
+       await evaluate("document.querySelector('.host-tailcat-preparation').scrollIntoView({ block: 'start' })")
+       assert.equal(await evaluate(`(() => { const r = ${element(address)}.getBoundingClientRect();
+         const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return at === ${element(address)} })()`), true)
+       assert.equal(await evaluate('document.activeElement.type'), 'password')
+       assert.equal(await evaluate('document.activeElement.readOnly'), true)
+     },
+     mesh: async () => {
+       const code = field('Paste a connection code')
+       await focus(code)
+       await fill(code, 'incomplete-review-code')
+       await click('.mesh-peer-pairing button')
+       await until(`${element(code)}?.getAttribute('aria-invalid') === 'true'`)
+       await focus(code)
+     },
+     node: async () => {
+       await focus('[name="allowedPaths"]')
+       await evaluate(`(() => {
+         const publish = document.querySelector('[data-settings-field="publishing"]')
+         const scroll = publish.closest('.settings-content__scroll')
+         scroll.scrollTop += publish.getBoundingClientRect().top - scroll.getBoundingClientRect().top - 8
+       })()`)
+       assert.ok(await evaluate("document.activeElement.value.includes('review')"))
+       assert.ok(await evaluate(`(() => {
+         const heading = document.querySelector('[data-settings-field="publishing"] h3')
+         return heading.getBoundingClientRect().top >= heading.closest('.settings-content__scroll').getBoundingClientRect().top
+       })()`), 'The whole Node publication heading is visible')
+     },
+     remote: async () => {
+       const agent = field('Agent runs on')
+       await focus(agent)
+       const outline = await evaluate(`(() => {
+         const style = getComputedStyle(${element(agent)})
+         return { width: style.outlineWidth, offset: style.outlineOffset }
+       })()`)
+       assert.deepEqual(outline, { width: '1px', offset: '-1px' })
+     }
+   }
+   for (const name of requestedCases.length ? requestedCases : Object.keys(cases)) {
+     const prepare = cases[name]
+     assert.equal(typeof prepare, 'function', 'Known Runtime Settings input capture case')
+     for (const [width, theme] of [[1280, 'dark'], [520, 'light']]) {
+       window.setContentSize(width, 900)
+       await window.loadURL(url + '?scenario=settings-inputs&case=' + name)
+       await evaluate(`meshFixture.theme(${JSON.stringify(theme)})`)
+       await prepare()
+       assert.ok(await evaluate('document.documentElement.scrollWidth <= innerWidth'), 'No horizontal page overflow')
+       assert.equal(await evaluate(`document.documentElement.dataset.appearance === ${JSON.stringify(theme)}`), true)
+       await frame('inputs-' + name + '-' + theme + '-' + width)
+     }
+   }
+   receipt.passed = true
+   return
+ }
  if (scenario === '--device-workflow') {
    const until = async test => { for (let i=0;i<120;i++) { if (await evaluate(test)) return; await delay(50) }; throw Error(test) }
    const field = name => `document.querySelector('[aria-label="${name}"]')`

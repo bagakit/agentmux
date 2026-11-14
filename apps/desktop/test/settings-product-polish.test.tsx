@@ -56,7 +56,10 @@ it('finds one of 51 Host projects by path, preserves folder drafts, and distingu
   await fill('[aria-label="Find a project on This Mac"]', 'nothing-matches')
   expect(dom.container.querySelector('.settings-resource-empty[role="status"]')!.textContent).toContain('No projects match')
   expect(dom.container.querySelector<HTMLInputElement>('[placeholder="Project directory"]')!.value).toBe(_hygiene_fixturePath("unsaved-project"))
-  await fill('[aria-label="Find a project on This Mac"]', '')
+  const clear = dom.container.querySelector<HTMLButtonElement>('[aria-label="Clear project filter"]')
+  expect(clear, 'The Host project query exposes an explicit clear action').not.toBeNull()
+  await act(async () => clear!.click())
+  expect(document.activeElement).toBe(dom.container.querySelector('[aria-label="Find a project on This Mac"]'))
   expect(dom.container.querySelectorAll('.host-projects__list [data-registered-folder]')).toHaveLength(51)
 })
 

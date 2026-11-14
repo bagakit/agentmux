@@ -63,7 +63,7 @@ async function newRoute(f: Awaited<ReturnType<typeof fixture>>) {
   await dom.render(<RemoteRoutesPane config={f.config} active />)
   await flush(() => expect(dom.container.querySelector('[aria-label="Next saved route connection"]')).not.toBeNull())
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Next saved route connection"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
-  await flush(() => expect(document.querySelectorAll('.selection-field__menu [role="menuitemradio"]')).toHaveLength(2))
+  await flush(() => expect(document.querySelectorAll('.selection-field__menu [role="option"]')).toHaveLength(2))
   expect(f.probes).toEqual([])
   await field('Next saved route connection', 'C'); await button('Inspect & add')
   await flush(() => expect(dom.container.querySelector('[aria-label="Route name"]')).not.toBeNull())

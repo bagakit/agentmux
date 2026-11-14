@@ -53,6 +53,10 @@ it('a changed Runtime or reused route never inherits the original retained conne
   expect(read('hosts','studio')?.retained).toHaveLength(1)
   const retainedEdit=tailcatConnectionDraft(read('hosts','studio')?.retained?.[0])
   expect(retainedEdit?.value.kind==='ssh' ? retainedEdit.value.tailcat?.address : undefined).toBe('tc-private-original-edit')
+  const privateDestination = dom.container.querySelector<HTMLInputElement>('.host-check-detail details input[type="password"]')!
+  expect(privateDestination.readOnly).toBe(true)
+  expect(privateDestination.value).toBe('tc-private-original-edit')
+  expect(dom.container.textContent).not.toContain('tc-private-original-edit')
   const partial=useAppStore.persist.getOptions().partialize!(useAppStore.getState()) as {tailcatConnectionDrafts:unknown}
   await dom.render(null);useAppStore.setState({tailcatConnectionDrafts:JSON.parse(JSON.stringify(partial.tailcatConnectionDrafts))});await show()
   expect(value('Tailcat client key')).toBe('replacement-unsent-key');expect(read('hosts','studio')?.retained).toHaveLength(1)
