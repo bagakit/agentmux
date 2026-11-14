@@ -114,6 +114,8 @@ it.each([
   expect(line.getAttribute('data-path-state')).toBe(kind)
   expect(line.querySelector('text')?.textContent ?? '').toBe(count)
   expect(line.querySelector('path')).not.toBeNull()
+  if (kind !== 'cascade') expect(Number(line.getAttribute('width'))).toBeLessThan(28)
+  expect(line.getAttribute('aria-label')).toBe(kind === 'same-device' ? 'Same device' : kind === 'direct' ? 'Direct execution path' : kind === 'cascade' ? '3 execution hops' : 'Execution path unconfirmed')
 })
 
 it('one fixed-project device selection applies the other Agent end and retains the task without launching', async () => {
