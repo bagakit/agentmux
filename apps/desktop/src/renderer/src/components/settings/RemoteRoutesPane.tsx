@@ -14,6 +14,7 @@ import { HostRoutePath } from './HostRoutePath'
 import { useHostRoutePolicy } from './use-host-route-policy'
 import { SettingsResourceLibrary } from './SettingsResourceLibrary'
 import { SettingsSaveBar } from './SettingsSaveBar'
+import { SelectionField } from '../SelectionField'
 import './remote-routes.css'
 
 const HostIcon = semanticIconComponent('object.host')
@@ -35,10 +36,7 @@ export function RemoteRoutesPane({ config, active }: { config: AppConfig; active
   const current = identity?.key === carrierKey ? identity : undefined
   return <div className="remote-routes">
     <div className="remote-work-intro"><h3>Routes between devices</h3><p>Follow saved connections directly or through other nodes. Each device controls who can pass through it.</p></div>
-    <label className="host-route-owner"><span>Manage routes on</span><select aria-label="Route policy device" value={hostId} onChange={event => setHostId(event.target.value)}>
-      {!host ? <option value={hostId}>Original saved device unavailable</option> : null}
-      {config.hosts.map(item => <option key={item.id} value={item.id}>{item.label}{item.kind === 'local' ? ' · This device' : ''}</option>)}
-    </select></label>
+    <label className="host-route-owner"><span>Manage routes on</span><SelectionField label="Route policy device" value={hostId} options={config.hosts.map(item => ({ value: item.id, label: `${item.label}${item.kind === 'local' ? ' · This device' : ''}` }))} missingOptionLabel="Original saved device unavailable" missingOptionDescription={hostId} onValueChange={setHostId} /></label>
     {host && current?.value ? <RoutePolicyEditor key={carrierKey + current.value.runtimeId} host={host} identity={current.value} active={active} />
       : <div className="remote-routes-empty"><HostIcon size={24} aria-hidden="true" /><p role="status">{current?.issue ?? (host ? 'Reading this device’s route owner…' : 'Select its saved Host connection. Existing routes and edits are retained.')}</p><button type="button" className="small-button" onClick={() => setRefresh(value => value + 1)}>Read route owner</button></div>}
   </div>
@@ -127,13 +125,11 @@ function RoutePolicyEditor({ host, identity, active }: { host: HostConfig; ident
               <button type="button" className="small-button" onClick={() => void readEdges()}>Explore next node</button></div>
             {!savedPrefix ? <p className="settings-group-note">Save this path before exploring further. Browsing never saves or grants access.</p> : null}
           </> : <div className="host-route-new"><HostIcon size={28} aria-hidden="true" /><h4>Choose the first connection</h4><p>Start from a saved Host on {host.label}. Inspecting its identity does not trust it or start an Agent.</p></div>}
-          <div className="host-route-edge-picker"><label className="host-route-field"><span>{row ? 'Next saved connection' : 'Saved connection'}</span><select aria-label="Next saved route connection" value={edgeId} onChange={event => setEdgeId(event.target.value)}>
-            <option value="">{readingEdge ? 'Reading this node…' : options.length ? 'Choose a connection' : 'Read this node’s connections'}</option>{options.map(edge => <option key={edge.edgeId} value={edge.edgeId}>{edge.label}</option>)}
-          </select></label><button type="button" className="small-button" disabled={!edgeId || readingEdge} onClick={() => void appendEdge()}>Inspect &amp; add</button>
+          <div className="host-route-edge-picker"><label className="host-route-field"><span>{row ? 'Next saved connection' : 'Saved connection'}</span><SelectionField label="Next saved route connection" value={edgeId} options={[{ value: '', label: readingEdge ? 'Reading this node…' : options.length ? 'Choose a connection' : 'Read this node’s connections' }, ...options.map(edge => ({ value: edge.edgeId, label: edge.label }))]} onValueChange={setEdgeId} /></label><button type="button" className="small-button" disabled={!edgeId || readingEdge} onClick={() => void appendEdge()}>Inspect &amp; add</button>
             {!row ? <button type="button" className="small-button" onClick={() => void readEdges()}>Read connections</button> : null}</div>
           {edgeIssue ? <p className="settings-inline-error" role="status">{edgeIssue} Your path is retained.</p> : null}
           {request ? <details className="host-route-access-request"><summary>Request access along this route</summary><p>Each receiving device approves the original actor and purpose. Send this public request to its owner; copying it changes no policy.</p>
-            <label className="host-route-field"><span>Purpose</span><select aria-label="Route access purpose" value={scope} onChange={event => setScope(event.target.value as typeof scope)}><option value="discover">Discover saved next connections</option><option value="work">Agent work, Space, terminal and input</option></select></label>
+            <label className="host-route-field"><span>Purpose</span><SelectionField label="Route access purpose" value={scope} options={[{ value: 'discover', label: 'Discover saved next connections' }, { value: 'work', label: 'Agent work, Space, terminal and input' }]} searchable={false} onValueChange={value => setScope(value as typeof scope)} /></label>
             <ContentCopyButton text={JSON.stringify(request, null, 2)} identity={JSON.stringify(request)} label="Copy public access request" />
             <details><summary>Public identities and exact permissions</summary><pre>{JSON.stringify(request, null, 2)}</pre></details>
           </details> : row ? <p className="settings-group-note">Read this route’s next connections to obtain its actual actor for an access request.</p> : null}
