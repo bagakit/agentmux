@@ -462,6 +462,7 @@ export type { GoalsCommonActionRef, GoalsCommonActionsConfig } from '@agentmux/h
 export type AppConfig = {
   version: typeof CONFIG_VERSION
   hosts: HostConfig[]
+  meshMapLocations?: import('./mesh-map-locations').MeshMapLocations
   executors: Record<AgentExecutorId, AgentExecutorConfig>
   workspaces: WorkspaceRecord[]
   appearance: AppearanceConfig

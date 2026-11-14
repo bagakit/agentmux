@@ -2,7 +2,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import type { AppConfig } from '../shared/contracts.js'
 import { validateThemeConfigEdit } from './theme-config.js'
 
-import { applyConfigEdit, configValuesEqual } from '../shared/config-edit.js'
+import { applyConfigEdit, ConfigConflict, configValuesEqual } from '../shared/config-edit.js'
 import { validateReservedWorkspaceConfigEdit } from './workspace-location.js'
 import { configNameChanges, configNameValue, type NamedChange, type NameChangeAudit } from './name-change-audit.js'
 
@@ -67,7 +67,18 @@ export class ConfigOwner {
       const intended = capturedIntents.map(intent => ({ ...intent, before: configNameValue(current, intent.target) }))
       let next: AppConfig
       try {
-        const requested = apply(current)
+        let requested = apply(current)
+        if (requested.meshMapLocations) {
+          const hostIds = new Set(requested.hosts.map(host => host.id))
+          const locations = Object.entries(requested.meshMapLocations).filter(([id, point]) => {
+            if (hostIds.has(id)) return true
+            if (current.meshMapLocations?.[id] !== point) throw new ConfigConflict(`meshMapLocations[${JSON.stringify(id)}]`)
+            return false
+          })
+          if (locations.length !== Object.keys(requested.meshMapLocations).length) {
+            requested = { ...requested, meshMapLocations: Object.fromEntries(locations) }
+          }
+        }
         validateReservedWorkspaceConfigEdit(current, requested)
         validateThemeConfigEdit(current, requested)
         next = this.ports.prepare ? await this.ports.prepare(current, requested) : requested

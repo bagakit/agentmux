@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { BaseEdge, Position, ReactFlow, useNodesState, type Edge, type EdgeProps, type Node, type NodeProps, type ReactFlowInstance } from '@xyflow/react'
+import { BaseEdge, Position, ReactFlow, useNodesState, type Edge, type EdgeProps, type Node, type NodeProps, type ReactFlowInstance, type XYPosition } from '@xyflow/react'
 import type { HostConfig } from '../../../../shared/contracts'
+import { meshLocationValue, readMeshLocation, type MeshMapLocations } from '../../../../shared/mesh-map-locations'
 import { hostConnectionSummary } from '../../lib/host-transport'
 import { TextInput } from '@agentmux/client-ui/input'
 import type { MeshNetworkInspection, MeshNetworkSettings } from '@agentmux/core/mesh-network'
 import { meshPathEdges, meshPeerLabel, meshPeerState, meshRtt, meshSelectionExists, meshSelectionPath, meshTopologyModel, meshTopologySource, shortMeshIdentity, type MeshTopologyPeer, type MeshTopologySelection } from './mesh-topology'
 import './mesh-topology.css'
+import { MeshGeography, placeGeographicNodes, projectMeshLocation } from './MeshGeography'
 import { MeshPorts, MeshSavedClient, MeshSavedHost, SAVED_CLIENT_ID, SavedConnectionDetails, savedConnectionNodes, savedHostId,
   type SavedClientNode, type SavedHostNode } from './MeshSavedConnections'
 
 type PeerNode = Node<{ peer: MeshTopologyPeer; sharedLocal: boolean; selected: boolean; onPath: boolean; dimmed: boolean; onSelect(id: string): void }, 'meshPeer'>
 type MapNode = PeerNode | SavedHostNode | SavedClientNode
+type MapEdge = Edge<{ sourcePoint?: XYPosition; targetPoint?: XYPosition }>
 const SIZE = { width: 188, height: 64 }
 const COMPACT_PEER_SIZE = { width: 166, height: SIZE.height }
 const NO_HOSTS: readonly HostConfig[] = []
@@ -24,7 +27,12 @@ function MeshPeer({ data }: NodeProps<PeerNode>) {
     </button><MeshPorts type="source" /></>
 }
 const nodeTypes = { meshPeer: MeshPeer, savedClient: MeshSavedClient, savedHost: MeshSavedHost }
-function MeshArc({ id, sourceX, sourceY, targetX, targetY }: EdgeProps) {
+function MeshArc({ id, sourceX: startX, sourceY: startY, targetX: endX, targetY: endY, data }: EdgeProps<MapEdge>) {
+  const { x: sourceX, y: sourceY } = data?.sourcePoint ?? { x: startX, y: startY }
+  const { x: targetX, y: targetY } = data?.targetPoint ?? { x: endX, y: endY }
+  if (data?.sourcePoint && data.targetPoint && sourceX === targetX && sourceY === targetY) {
+    return <BaseEdge id={id} path={`M ${sourceX},${sourceY} C ${sourceX - 48},${sourceY - 22} ${sourceX - 48},${sourceY + 22} ${sourceX},${sourceY}`} />
+  }
   const dx = targetX - sourceX, dy = targetY - sourceY
   const bend = Math.min(Math.hypot(dx, dy) * .2, 80)
   const direction = Math.sign(dx || dy)
@@ -75,23 +83,36 @@ type MeshMapProps = {
   snapshot?: MeshNetworkInspection | undefined; active?: boolean; actions?: ReactNode; reading?: boolean; stale?: boolean
   onGateway?: (() => void) | undefined; savedTargets?: GatewayTargets | undefined; savedIssue?: string | undefined
   hosts?: readonly HostConfig[]; onDevice?: ((hostId: string) => void) | undefined; localClient?: boolean
+  locations?: MeshMapLocations | undefined; onLocation?: ((hostId: string) => void) | undefined
 }
 export function MeshNetworkMap({ snapshot, active = true, reading = false, stale = false, hosts = NO_HOSTS, ...props }: MeshMapProps) {
   const [selectedHostId, selectHost] = useState<string>()
   return <MeshTopologyExplorer key={meshTopologySource(snapshot)} {...props} snapshot={snapshot} active={active}
     hosts={hosts} selectedHostId={selectedHostId} selectHost={selectHost} reading={reading} stale={stale} />
 }
-function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, localClient, selectedHostId, selectHost, onGateway, savedTargets, savedIssue, reading, stale }: MeshMapProps & {
+function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, localClient, locations, onLocation, selectedHostId, selectHost, onGateway, savedTargets, savedIssue, reading, stale }: MeshMapProps & {
   active: boolean; reading: boolean; stale: boolean; hosts: readonly HostConfig[]
   selectedHostId: string | undefined; selectHost: (id: string | undefined) => void
 }) {
   const model = useMemo(() => meshTopologyModel(snapshot), [snapshot])
   const [selected, select] = useState<MeshTopologySelection>(), [view, setView] = useState<'topology' | 'list'>('topology')
   const [narrow, setNarrow] = useState(false)
+  const points = useMemo(() => {
+    const positions = new Map<string, XYPosition>()
+    for (const host of hosts) {
+      const location = readMeshLocation(meshLocationValue(locations, host.id))
+      if (location) positions.set(savedHostId(host.id), projectMeshLocation(location))
+    }
+    const here = localClient && readMeshLocation(meshLocationValue(locations, 'local'))
+    if (here) positions.set(SAVED_CLIENT_ID, projectMeshLocation(here))
+    return positions
+  }, [hosts, localClient, locations])
+  const geographic = points.size > 0
+  const localPlaced = points.has(SAVED_CLIENT_ID)
   const hasRelayPeers = model.peers.some(peer => !peer.own)
   const mixed = hosts.length > 0 && hasRelayPeers
   const portrait = mixed && narrow
-  const hasMap = hosts.length > 0 || hasRelayPeers
+  const hasMap = hosts.length > 0 || hasRelayPeers || localPlaced
   const selectedHost = hosts.find(host => host.id === selectedHostId)
   const [scope, setScope] = useState<'network' | 'selection'>('network')
   const [chosenCategory, setCategory] = useState<'peers' | 'routes' | 'circuits' | 'hosts'>(() => model.routes.length ? 'routes' : 'peers')
@@ -102,7 +123,7 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
   const widePositions = useRef(new Map<string, { x: number; y: number }>())
   const narrowPositions = useRef(new Map<string, { x: number; y: number }>())
   const positions = portrait ? narrowPositions.current : widePositions.current
-  const instance = useRef<ReactFlowInstance<MapNode, Edge> | null>(null), canvas = useRef<HTMLDivElement>(null)
+  const instance = useRef<ReactFlowInstance<MapNode, MapEdge> | null>(null), canvas = useRef<HTMLDivElement>(null)
   const viewportTouched = useRef(false), cancelLayout = useRef<(() => void) | null>(null), arrangedAttempt = useRef(-1)
   const path = meshSelectionPath(model, selected), pathSet = useMemo(() => new Set(path), [path.join('\0')])
   const pathEdges = useMemo(() => meshPathEdges(path), [path.join('\0')])
@@ -120,10 +141,10 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
   const chooseHost = useCallback((id: string) => { select(undefined); selectHost(id); setScope('network'); setCategory('hosts'); requestViewport() }, [selectHost, requestViewport])
   const focused = hasRelayPeers && scope === 'selection' && path.length > 0
   // MeshPathsPane obtains this observation directly from the original local Core.
-  const sharedPeerId = localClient && hosts.length ? model.peers.find(peer => peer.own)?.id : undefined
+  const sharedPeerId = localClient && (hosts.length || localPlaced) ? model.peers.find(peer => peer.own)?.id : undefined
   const peerNodeId = (id: string) => id === sharedPeerId ? SAVED_CLIENT_ID : `relay:${id}`
   const peerSize = mixed ? COMPACT_PEER_SIZE : SIZE
-  const savedNodes = savedConnectionNodes(hosts, narrow || mixed, selectedHostId, host => !focused && matchesHost(host), chooseHost)
+  const savedNodes = savedConnectionNodes(hosts, narrow || mixed, selectedHostId, host => !focused && matchesHost(host), chooseHost, localPlaced)
   const clientPosition = savedNodes[0]?.position
   const visiblePeers = hasRelayPeers ? model.peers : model.peers.filter(peer => peer.id === sharedPeerId)
   const projectedNodes: MapNode[] = [
@@ -137,14 +158,18 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
           dimmed: !pathSet.has(peer.id) && (focused || Boolean(needle && !matchedPeers.has(peer.id))), onSelect: choosePeer } }
     }),
   ]
-  const placedNodes = projectedNodes.map(node => ({ ...node, position: positions.get(node.id) ?? node.position }))
+  const geography = geographic ? placeGeographicNodes(projectedNodes, points, narrow) : undefined
+  const placedNodes = geography?.placements ?? projectedNodes.map(node => ({ ...node, position: positions.get(node.id) ?? node.position }))
   const [nodes, setNodes, onNodesChange] = useNodesState<MapNode>(placedNodes)
   useEffect(() => {
     setNodes(previous => {
       const held = new Map(previous.map(node => [node.id, node]))
-      return placedNodes.map(node => ({ ...held.get(node.id), ...node }))
+      return placedNodes.map(node => {
+        const { className: _className, draggable: _draggable, ...measured } = held.get(node.id) ?? {}
+        return { ...measured, ...node }
+      })
     })
-  }, [snapshot, hosts, narrow, selected, selectedHostId, scope, query, setNodes, choosePeer, chooseHost, sharedPeerId])
+  }, [snapshot, hosts, points, narrow, selected, selectedHostId, scope, query, setNodes, choosePeer, chooseHost, sharedPeerId])
   const visiblePeerIds = new Set(visiblePeers.map(peer => peer.id))
   const links = [
     ...model.edges.filter(edge => visiblePeerIds.has(edge.source) && visiblePeerIds.has(edge.target))
@@ -153,19 +178,28 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
   ]
   const topologyKey = JSON.stringify([projectedNodes.map(node => node.id), links.map(link => link.id).sort()])
   const nodePositions = new Map(nodes.map(node => [node.id, node.position]))
-  const edges = links.map(({ id, source, target, saved, selected }): Edge => {
+  const edges = links.map(({ id, source, target, saved, selected }): MapEdge => {
     const from = nodePositions.get(source), to = nodePositions.get(target)
     const dx = (to?.x ?? 0) - (from?.x ?? 0), dy = (to?.y ?? 0) - (from?.y ?? 0)
     const horizontal = Math.abs(dx) > Math.abs(dy)
+    const sourcePoint = points.get(source), targetPoint = points.get(target)
     return {
       id, source, target, type: 'meshArc', selectable: false,
+      data: { ...(sourcePoint ? { sourcePoint } : {}), ...(targetPoint ? { targetPoint } : {}) },
       sourceHandle: horizontal ? dx > 0 ? Position.Right : Position.Left : dy > 0 ? Position.Bottom : Position.Top,
       targetHandle: horizontal ? dx > 0 ? Position.Left : Position.Right : dy > 0 ? Position.Top : Position.Bottom,
       className: `mesh-explorer-edge ${saved ? 'mesh-explorer-edge--saved' : 'mesh-explorer-edge--relay'}${selected ? ' mesh-explorer-edge--selected' : focused ? ' mesh-explorer-edge--muted' : ''}`,
     }
   })
-  const fitPadding = narrow ? .08 : .16
-  const fit = useCallback(() => { void instance.current?.fitView({ padding: fitPadding, maxZoom: 1 }) }, [fitPadding])
+  const fitPadding = geographic ? .045 : narrow ? .08 : .16
+  const boundsX = geography?.bounds.x, boundsY = geography?.bounds.y
+  const boundsWidth = geography?.bounds.width, boundsHeight = geography?.bounds.height
+  const fit = useCallback(() => {
+    if (boundsWidth !== undefined && boundsHeight !== undefined) {
+      void instance.current?.fitBounds({ x: boundsX ?? 0, y: boundsY ?? 0, width: boundsWidth, height: boundsHeight }, { padding: fitPadding })
+    }
+    else void instance.current?.fitView({ padding: fitPadding, maxZoom: 1 })
+  }, [fitPadding, boundsX, boundsY, boundsWidth, boundsHeight])
   // Container changes are real geometry changes, not new observations. Refit the same nodes while
   // retaining their positions, so a narrow overview never leaves the original Core off-canvas.
   useEffect(() => {
@@ -199,7 +233,7 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
   }, [focusRequest, active, view, fit])
   // Geometry is finite and off-thread. Counters, RTT and selection do not relayout the network.
   useEffect(() => {
-    if (!active || view !== 'topology' || !hasRelayPeers) return
+    if (!active || view !== 'topology' || !hasRelayPeers || geographic) return
     const ids = projectedNodes.map(node => node.id), force = arrangedAttempt.current !== arrangeAttempt
     if (!force && ids.every(id => positions.has(id))) return
     let worker: Worker
@@ -232,7 +266,7 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
       edges: links.map(({ source, target }) => ({ source, target })),
     } })
     return () => { cancel(); if (cancelLayout.current === cancel) cancelLayout.current = null }
-  }, [active, view, topologyKey, arrangeAttempt, fit, setNodes, hasRelayPeers, portrait, positions])
+  }, [active, view, topologyKey, arrangeAttempt, fit, setNodes, hasRelayPeers, portrait, positions, geographic])
   const currentPeer = selected?.kind === 'peer' ? byId.get(selected.id) : undefined
   const currentRoute = selected?.kind === 'route' ? model.routes.find(route => route.serverId === selected.id) : undefined
   const currentCircuit = selected?.kind === 'circuit' ? model.circuits.find(circuit => circuit.circuitId === selected.id) : undefined
@@ -252,10 +286,12 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
         </ul>
         {!count ? <p className="mesh-explorer__directory-empty">{needle ? 'No matching objects in this category. Other network objects are unchanged.' : category === 'circuits' ? 'No adopted circuits are currently reported.' : category === 'routes' ? 'No endpoint route is currently advertised.' : category === 'hosts' ? 'No saved connections.' : 'No network peers are currently reported.'}</p> : null}
       </div>
-  const inspector = selectedHost ? <SavedConnectionDetails host={selectedHost} onDevice={onDevice} onClear={() => selectHost(undefined)} />
+  const inspector = selectedHost ? <SavedConnectionDetails host={selectedHost} onDevice={onDevice} onLocation={onLocation}
+    location={meshLocationValue(locations, selectedHost.id)} onClear={() => selectHost(undefined)} />
     : selected ? <aside className="mesh-explorer__detail" aria-label="Selected network object">
         <header><span className="mesh-explorer__eyebrow">{selected.kind === 'peer' ? 'NETWORK PEER' : selected.kind === 'route' ? 'AVAILABLE ROUTE' : 'ADOPTED CIRCUIT'}</span><button type="button" className="small-button" onClick={() => select(undefined)}>Clear</button></header>
         <h4>{currentPeer ? meshPeerLabel(currentPeer) : shortMeshIdentity(currentRoute?.serverId ?? currentCircuit?.serverId ?? selected.id)}</h4>
+        {currentPeer?.own && currentPeer.id === sharedPeerId && onLocation ? <button type="button" className="small-button" onClick={() => onLocation('local')}>Edit map location</button> : null}
         {selectionMissing ? <p role="status">This object is no longer in the current observation. Its selected identity is retained; choose another object to inspect the current network.</p> : null}
         {currentPeer ? <section><h5>Reciprocal neighbors · {currentPeer.neighbors.length}</h5>{currentPeer.neighbors.length ? <ul>{currentPeer.neighbors.map(id => <li key={id}><button type="button" onClick={() => showPeer(id)}>{byId.get(id) ? meshPeerLabel(byId.get(id)!) : shortMeshIdentity(id)}</button></li>)}</ul> : <p>No reciprocal link observed.</p>}</section> : null}
         {path.length > 1 ? <section className="mesh-explorer__path"><h5>{selected.kind === 'circuit' ? 'Adopted path' : 'Available path'} · {path.length - 1} network hops</h5><ol aria-label="Selected endpoint network path">{path.map((id, index) => <li key={index + ':' + id}><span>{index + 1}</span><button type="button" onClick={() => showPeer(id)}><strong>{byId.get(id) ? meshPeerLabel(byId.get(id)!) : shortMeshIdentity(id)}</strong><code>{shortMeshIdentity(id)}</code></button></li>)}</ol><p>{selected.kind === 'circuit' ? 'The circuit keeps this adopted path. A newer available route may differ.' : 'This route is available for new circuits. It does not prove a completed Core operation.'}</p></section> : null}
@@ -286,14 +322,18 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
     </div> : null}
     <div className="mesh-explorer__body" data-empty={!hasMap || undefined}><div className="mesh-explorer__workspace">
       {view === 'list' ? directory : null}
-      {view === 'topology' && legend ? <div className="mesh-explorer__map-key">{legend}<span>Logical layout · Device locations unknown</span></div> : null}
+      {view === 'topology' && legend ? <div className="mesh-explorer__map-key" data-geographic={geographic || undefined}>{legend}
+        <span>{geography ? `${geography.marks.length} placed · ${geography.unknown} location unknown` : 'Logical layout · Device locations unknown'}</span></div> : null}
       {hasMap ? <div className="mesh-explorer__graph" hidden={view !== 'topology'}>
-        <div ref={canvas} className="mesh-explorer__canvas" data-mixed={mixed || undefined} data-saved={hosts.length > 0 || undefined} data-narrow={narrow || undefined} aria-label="Network relationship canvas">
-          <div className="mesh-explorer__map-outline" aria-hidden="true" />
-          <ReactFlow<MapNode, Edge> nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onInit={value => { instance.current = value }}
-          onNodesChange={changes => { if (changes.some(change => change.type === 'position' && change.dragging)) cancelLayout.current?.(); for (const change of changes) if (change.type === 'position' && change.position) positions.set(change.id, change.position); onNodesChange(changes) }}
-          onMoveStart={event => { if (event) viewportTouched.current = true }} fitView fitViewOptions={{ padding: fitPadding, maxZoom: 1 }} minZoom={.15} maxZoom={1.6} nodesDraggable nodesConnectable={false} nodesFocusable={false} edgesFocusable={false} edgesReconnectable={false} elementsSelectable={false} deleteKeyCode={null} zoomOnScroll={false} proOptions={{ hideAttribution: true }} /></div>
-        <div className="mesh-explorer__canvas-tools"><span>{selected?.kind === 'circuit' ? 'Adopted circuit selected' : selected?.kind === 'route' ? 'Available route selected' : ''}</span><button type="button" className="small-button" aria-label="Fit observed topology" onClick={fit}>Fit</button>{hasRelayPeers ? <button type="button" className="small-button" aria-label="Rearrange observed topology" onClick={() => { cancelLayout.current?.(); viewportTouched.current = false; arrange(value => value + 1) }}>{arranging ? 'Arranging…' : 'Arrange'}</button> : null}<button type="button" className="small-button" aria-label="Zoom in network" onClick={() => void instance.current?.zoomIn()}>+</button><button type="button" className="small-button" aria-label="Zoom out network" onClick={() => void instance.current?.zoomOut()}>−</button></div>
+        <div ref={canvas} className="mesh-explorer__canvas" data-mixed={mixed || undefined} data-saved={hosts.length > 0 || undefined} data-narrow={narrow || undefined}
+          data-geographic={geographic || undefined} aria-label="Network relationship canvas">
+          {geography ? null : <div className="mesh-explorer__map-outline" aria-hidden="true" />}
+          <ReactFlow<MapNode, MapEdge> nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onInit={value => { instance.current = value; if (geographic) requestViewport() }}
+          onNodesChange={changes => { if (changes.some(change => change.type === 'position' && change.dragging)) cancelLayout.current?.(); for (const change of changes) if (change.type === 'position' && change.position && !geographic) positions.set(change.id, change.position); onNodesChange(changes) }}
+          onMoveStart={event => { if (event) viewportTouched.current = true }} fitView={!geographic} fitViewOptions={{ padding: fitPadding, maxZoom: 1 }} minZoom={.15} maxZoom={2} nodesDraggable={!geographic} nodesConnectable={false} nodesFocusable={false} edgesFocusable={false} edgesReconnectable={false} elementsSelectable={false} deleteKeyCode={null} zoomOnScroll={false} proOptions={{ hideAttribution: true }}>
+          {geography ? <MeshGeography {...geography} /> : null}
+          </ReactFlow></div>
+        <div className="mesh-explorer__canvas-tools"><span>{selected?.kind === 'circuit' ? 'Adopted circuit selected' : selected?.kind === 'route' ? 'Available route selected' : ''}</span><button type="button" className="small-button" aria-label="Fit observed topology" onClick={fit}>Fit</button>{hasRelayPeers && !geographic ? <button type="button" className="small-button" aria-label="Rearrange observed topology" onClick={() => { cancelLayout.current?.(); viewportTouched.current = false; arrange(value => value + 1) }}>{arranging ? 'Arranging…' : 'Arrange'}</button> : null}<button type="button" className="small-button" aria-label="Zoom in network" onClick={() => void instance.current?.zoomIn()}>+</button><button type="button" className="small-button" aria-label="Zoom out network" onClick={() => void instance.current?.zoomOut()}>−</button></div>
         {layoutIssue ? <p className="mesh-explorer__layout-issue" role="status">{layoutIssue}</p> : null}
       </div> : <div className="mesh-explorer__empty mesh-explorer__no-connections" role="status">
         <strong>{reading ? 'Reading connections…' : 'No connections to show'}</strong>

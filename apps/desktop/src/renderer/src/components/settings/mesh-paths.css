@@ -4,3 +4,28 @@
 .mesh-paths-issue details { color: var(--text-3); font-size: var(--fs-meta); }
 .mesh-settings-pane > [data-mesh-view=paths], .mesh-settings-pane > [data-mesh-view=machines] { overflow: auto; overscroll-behavior: contain; }
 .mesh-editor-navigation { flex: none; display: flex; align-items: center; padding-bottom: var(--sp-3); }
+.mesh-locations-panel {
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: var(--surface-1);
+}
+.mesh-locations-panel > header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.mesh-locations-panel h3 { margin: 0; }
+.mesh-locations-panel p { margin: 8px 0 0; color: var(--text-3); }
+.mesh-locations-panel__fields { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.mesh-locations-panel__fields label { display: grid; flex: 1 1 215px; gap: 4px; min-width: 0; }
+.mesh-locations-panel .settings-pane-actions { position: static; margin-top: 10px; }
+@media (min-width: 850px) {
+  .mesh-locations-panel:not([hidden]) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'heading heading' 'fields save' 'help save';
+    column-gap: 18px;
+  }
+  .mesh-locations-panel > header { grid-area: heading; }
+  .mesh-locations-panel__fields { grid-area: fields; }
+  .mesh-locations-panel p { grid-area: help; }
+  .mesh-locations-panel .settings-pane-actions { grid-area: save; align-self: end; }
+}

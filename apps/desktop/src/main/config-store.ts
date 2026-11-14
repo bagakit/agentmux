@@ -1,4 +1,5 @@
 import { parseFocusProjects } from '../shared/focus-project-preferences.js'
+import { readMeshLocation } from '../shared/mesh-map-locations.js'
 import { parseFocusZonePresentations } from '../shared/focus-zone-presentation.js'
 import { parseGoalsCommonActions } from '@agentmux/core'
 import { validateReservedWorkspaceConfigEdit } from './workspace-location.js'
@@ -102,6 +103,10 @@ function ownKeyRecordSchema(valueSchema: z.ZodType<string>, message: string) {
     return Object.entries(value)
   }).pipe(z.array(z.tuple([z.string(), valueSchema]))).transform((entries) => Object.fromEntries(entries))
 }
+const meshMapLocationsSchema = ownKeyRecordSchema(
+  z.string().refine(value => Boolean(readMeshLocation(value)), 'Use latitude, longitude in decimal degrees.'),
+  'Expected device locations.'
+)
 const environmentSchema = ownKeyRecordSchema(z.string(), 'Environment must be an object of string values')
 
 export const executorSchema = z
@@ -320,6 +325,7 @@ const configSchema = z
   .object({
     version: z.literal(CONFIG_VERSION),
     hosts: hostsSchema,
+    meshMapLocations: meshMapLocationsSchema.optional(),
     executors: z.record(executorIdSchema, executorSchema),
     workspaces: z.array(workspaceSchema),
     appearance: appearanceSchema,
@@ -672,6 +678,7 @@ function withNotificationDefault(config: AppConfig): { config: AppConfig; added:
  */
 export function authoredConfigCarryOver(raw: unknown): {
   hosts: AppConfig['hosts']
+  meshMapLocations: AppConfig['meshMapLocations']
   workspaces: WorkspaceRecord[]
   executors: AppConfig['executors']
   appearance: AppConfig['appearance'] | undefined
@@ -740,6 +747,7 @@ export function authoredConfigCarryOver(raw: unknown): {
   const outer = z
     .object({
       hosts: z.unknown().optional(),
+      meshMapLocations: z.unknown().optional(),
       workspaces: z.unknown().optional(),
       executors: z.unknown().optional(),
       appearance: z.unknown().optional(),
@@ -917,6 +925,7 @@ export function authoredConfigCarryOver(raw: unknown): {
       AppConfig['composerShortcuts'] | undefined,
     goalsCommonActions: carried(goalsCommonActionsSchema, outer.success ? outer.data.goalsCommonActions : undefined) as
       AppConfig['goalsCommonActions'] | undefined,
+    meshMapLocations: carried(meshMapLocationsSchema, outer.success ? outer.data.meshMapLocations : undefined),
     // The user's own instructions, like Prompts, survive a retirement reset.
     agentDerivedActions: carried(agentDerivedActionsSchema, outer.success ? outer.data.agentDerivedActions : undefined) as
       AppConfig['agentDerivedActions'] | undefined,
@@ -1049,6 +1058,7 @@ function retiredConfigReplacement(raw: unknown): AppConfig {
     // 所以这里落在带过来那一侧——写成按长度判会让「删光」静默变回默认两条。
     ...(carried.composerShortcuts ? { composerShortcuts: carried.composerShortcuts } : {}),
     ...(carried.goalsCommonActions ? { goalsCommonActions: carried.goalsCommonActions } : {}),
+    ...(carried.meshMapLocations ? { meshMapLocations: carried.meshMapLocations } : {}),
     ...(carried.agentDerivedActions ? { agentDerivedActions: carried.agentDerivedActions } : {})
   }
 }

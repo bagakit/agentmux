@@ -37,9 +37,9 @@ export function MeshSavedClient() {
 }
 
 export function savedConnectionNodes(hosts: readonly HostConfig[], twoBanks: boolean,
-  selectedId: string | undefined, matches: (host: HostConfig) => boolean, onSelect: (id: string) => void): (SavedHostNode | SavedClientNode)[] {
-  if (hosts.length === 0) return []
-  const bank = Math.ceil(hosts.length / 2)
+  selectedId: string | undefined, matches: (host: HostConfig) => boolean, onSelect: (id: string) => void, includeClient = false): (SavedHostNode | SavedClientNode)[] {
+  if (hosts.length === 0 && !includeClient) return []
+  const bank = Math.max(1, Math.ceil(hosts.length / 2))
   return [
     { id: SAVED_CLIENT_ID, type: 'savedClient', ...CLIENT_SIZE, selectable: false,
       position: twoBanks ? { x: 175, y: (bank - 1) * 40 + 6 } : { x: (bank - 1) * 88 + 23, y: 91 }, data: {} },
@@ -51,9 +51,11 @@ export function savedConnectionNodes(hosts: readonly HostConfig[], twoBanks: boo
   ]
 }
 
-export function SavedConnectionDetails({ host, onDevice, onClear }: {
+export function SavedConnectionDetails({ host, onDevice, onLocation, location, onClear }: {
   host: HostConfig
   onDevice: ((hostId: string) => void) | undefined
+  onLocation: ((hostId: string) => void) | undefined
+  location: string
   onClear: () => void
 }) {
   const connection = useHostConnectionHint(host.id, host.label)
@@ -65,6 +67,10 @@ export function SavedConnectionDetails({ host, onDevice, onClear }: {
     <h4>{host.label}</h4>
     <p>{hostConnectionSummary(host)}<br />{connection.summary}</p>
     {check && check.state !== 'idle' ? <p>Connection test · {hostCheckLabel(check)}{testedAt !== undefined ? ` · ${new Date(testedAt).toLocaleString()}` : ''}</p> : null}
-    {onDevice ? <button type="button" className="small-button" onClick={() => onDevice(host.id)}>Manage connection</button> : null}
+    {onLocation ? <p>{location || 'Location unknown'}</p> : null}
+    <div className="mesh-explorer__detail-actions">
+      {onLocation ? <button type="button" className="small-button" onClick={() => onLocation(host.id)}>{location ? 'Edit map location' : 'Set map location'}</button> : null}
+      {onDevice ? <button type="button" className="small-button" onClick={() => onDevice(host.id)}>Manage connection</button> : null}
+    </div>
   </aside>
 }
