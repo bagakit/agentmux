@@ -191,8 +191,9 @@
   display: grid;
   gap: var(--sp-2);
   width: max-content;
-  max-width: min(360px, calc(100vw - 16px));
-  max-height: calc(100vh - 16px);
+  max-width: min(360px, calc(100vw - 16px), var(--tooltip-available-width, 100vw));
+  max-height: min(calc(100vh - 16px), var(--tooltip-available-height, 100vh));
+  grid-template-columns: minmax(0, 1fr);
   overflow: auto;
   padding: var(--sp-3);
   border: 1px solid var(--line);
@@ -207,6 +208,7 @@
   pointer-events: auto;
 }
 .workbench-tab-name-tooltip > strong { color: var(--text); font-size: var(--fs-body); font-weight: 600; }
+.workbench-tab-name-tooltip > span { min-width: 0; max-width: 100%; }
 .workbench-tab-rename-feedback {
   position: fixed;
   visibility: hidden;

@@ -40,23 +40,27 @@ export function AgentWorkModeBadge({ source, sourceSelection, placement: supplie
   const relation: ExecutionRouteRelation = sourceSelection ? sourceSame ? { kind: 'same-device' } : selectedRoute
     ? selectedRoute.hops.length > 1 ? { kind: 'cascade', hops: selectedRoute.hops.length } : { kind: 'direct' } : { kind: 'unconfirmed' }
     : { kind: projectId && agentId && projectId === agentId ? 'same-device' : 'unconfirmed' }
+  const planned = sourceSelection !== undefined || suppliedPlacement !== undefined
   const projectLabel = workHostLabel(hosts, projectId), agentLabel = sourceSelection && !agentId
-    ? `${selectedAgent?.hostId ?? 'Unconfirmed'} · project device’s selection` : workHostLabel(hosts, agentId)
-  const projectPath = sourceSelection?.project.path ?? placement?.projectPath, agentPath = sourceSelection?.kind === 'source-coordinator' ? sourceSelection.coordinator.homeDirectory : sourceSelection ? undefined : placement?.agentPath
+    ? selectedAgent?.hostId ?? 'Unconfirmed' : workHostLabel(hosts, agentId)
+  const projectPath = sourceSelection?.project.path ?? placement?.projectPath, agentPath = sourceSelection?.kind === 'source-coordinator' ? sourceSelection.coordinator.homeDirectory : sourceSelection ? sourceSame ? sourceSelection.project.path : undefined : placement?.agentPath
   const route = relation.kind === 'same-device' ? 'Same device' : relation.kind === 'direct' ? 'Direct execution path' : relation.kind === 'cascade' ? `${relation.hops} execution hops` : 'Execution path unconfirmed'
+  const directory = agentPath || (sourceSelection ? 'Resolved by the project device at launch' : 'Startup directory unobserved')
   const chain = selectedRoute ? [selectedRoute.source, ...selectedRoute.hops.map(hop => hop.target)] : []
-  const description = `Project · ${projectLabel}\n${projectPath || 'Project directory unobserved'}\nAgent · ${agentLabel}\n${agentPath || 'Startup directory unobserved'}\n${route}${chain.length ? '\n' + chain.map(item => item.runtimeId).join(' → ') : ''}`
+  const description = `Project · ${projectLabel}\n${projectPath || 'Project directory unobserved'}\nAgent · ${agentLabel}\n${directory}\n${planned ? 'Next launch · ' : ''}${route}${chain.length ? '\n' + chain.map(item => item.runtimeId).join(' → ') : ''}`
   const detail = useMemo(() => {
     const access = [...new Set([projectId, agentId])].filter((id): id is string => id !== null).map(id => ({
       id, label: workHostLabel(hosts, id), ...hostConnectionPresentation(hosts.find(host => host.id === id), id === projectId ? projectTransport : agentTransport)
     }))
     return <span className="agent-work-detail">
-    <span className="agent-work-detail__end"><ProjectIcon size={14} aria-hidden="true" /><span><small>Project</small><strong>{projectLabel}</strong><code>{projectPath || 'Directory unobserved'}</code>{sourceSelection ? <small>Runtime {sourceSelection.target.reference.runtimeId}</small> : null}</span></span>
-    <span className="agent-work-detail__end"><AgentIcon size={14} aria-hidden="true" /><span><small>Agent</small><strong>{agentLabel}</strong><code>{agentPath || 'Startup directory unobserved'}</code>{selectedAgent ? <small>Runtime {selectedAgent.runtimeId}</small> : null}</span></span>
-    <span className="agent-work-detail__route"><small>Execution route</small><span>{route}</span>{chain.map((item, index) => <code key={index}>{index + 1}. {item.runtimeId}</code>)}</span>
+    {planned ? <small className="agent-work-detail__context">Next launch arrangement</small> : null}
+    <span className="agent-work-detail__end"><ProjectIcon size={14} aria-hidden="true" /><span><small>Project device</small><strong>{projectLabel}</strong><code>{projectPath || 'Directory unobserved'}</code></span></span>
+    <span className="agent-work-detail__end"><AgentIcon size={14} aria-hidden="true" /><span><small>Agent device</small><strong>{agentLabel}</strong>{agentPath ? <code>{agentPath}</code> : <small>{directory}</small>}{sourceSelection && !agentId ? <small>Address from {projectLabel}</small> : null}</span></span>
+    <span className="agent-work-detail__route"><small>{planned ? 'Planned tool route' : 'Execution route'}</small><span>{route}</span>{planned && relation.kind === 'unconfirmed' ? <small>Choosing devices does not establish a tool connection.</small> : null}</span>
     <span className="agent-work-detail__access"><small>Access from this device</small>{access.map(item => <span key={item.id}><strong>{item.label}</strong><span>{item.summary}</span>{item.source ? <small>{item.source}</small> : null}</span>)}</span>
+    {sourceSelection ? <span className="agent-work-detail__identity"><small>Runtime identities</small><code>Project · {sourceSelection.target.reference.runtimeId}</code><code>Agent · {selectedAgent?.runtimeId}</code>{chain.map((item, index) => <code key={index}>Route {index + 1} · {item.runtimeId}</code>)}</span> : null}
     </span>
-  }, [projectId, agentId, projectLabel, agentLabel, projectPath, agentPath, route, hosts, projectTransport, agentTransport, sourceSelection, selectedAgent, selectedRoute])
+  }, [projectId, agentId, projectLabel, agentLabel, projectPath, agentPath, directory, route, planned, relation.kind, hosts, projectTransport, agentTransport, sourceSelection, selectedAgent, selectedRoute])
   const suppressed = hideTooltip || !sourceSelection && mode === 'local' && !showLocal
   const tooltip = useWorkbenchNameTooltip('Run mode', detail, suppressed)
   const element = useRef<HTMLSpanElement>(null)

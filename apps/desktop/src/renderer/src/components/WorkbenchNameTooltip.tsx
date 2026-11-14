@@ -1,4 +1,4 @@
-import { autoUpdate, computePosition, flip, offset, shift, type Placement } from '@floating-ui/dom'
+import { autoUpdate, computePosition, flip, offset, shift, size, type Placement } from '@floating-ui/dom'
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type FocusEvent, type ReactNode, type RefObject } from 'react'
 import { markWindowOverlayDismissal, WindowOverlayPortal } from './WindowOverlayHost'
 
@@ -67,7 +67,13 @@ export function useWorkbenchNameTooltip(name: string, detail: ReactNode, suppres
     const panel = surface.current, document = anchor.ownerDocument, window = document.defaultView!
     const update = async () => {
       const position = await computePosition(anchor, panel, { strategy: 'fixed', placement,
-        middleware: [offset(8), flip(), shift({ padding: 8, crossAxis: true })] })
+        middleware: [offset(8), flip(), shift({ padding: 8, crossAxis: true }), size({ padding: 8,
+          apply: ({ availableWidth, availableHeight }) => {
+            if (!disposed) {
+              panel.style.setProperty('--tooltip-available-width', `${Math.max(0, availableWidth)}px`)
+              panel.style.setProperty('--tooltip-available-height', `${Math.max(0, availableHeight)}px`)
+            }
+          } })] })
       if (!disposed) {
         Object.assign(panel.style, { left: `${position.x}px`, top: `${position.y}px`, visibility: 'visible' })
         if (pointerPassThrough) setOverflowing(panel.scrollHeight > panel.clientHeight + 1)
