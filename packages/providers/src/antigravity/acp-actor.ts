@@ -2,10 +2,13 @@ import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from
 import { once } from 'node:events'
 import { chmod } from 'node:fs/promises'
 import { createConnection, createServer } from 'node:net'
+import { homedir } from 'node:os'
+import { isAbsolute } from 'node:path'
 import { JSONRPCErrorException } from 'json-rpc-2.0'
 import { acpRecord, initializeAntigravityAcp, launchAntigravityAcp, type AcpWireServices } from './acp-process.js'
 import { readAntigravityAcpHandshake } from './acp-probe.js'
 import { readAntigravityConfiguration, readAntigravityPermission, readAntigravityUpdate } from './acp-events.js'
+import { antigravityAcpTranscriptPath } from './native-session.js'
 
 export const ANTIGRAVITY_ACP_ACTOR_PROTOCOL = 'antigravity-acp.v1'
 export const ACP_ACTOR_TOKEN = 'AGENTMUX_ACP_ACTOR_TOKEN'
@@ -47,7 +50,8 @@ type Permission = {
 
 type ActorIdentity = { actorId: string; lifecycleOperationId: string; processId: number }
 type AcpActorPlan = { command: string; args: string[]; cwd: string; resumeSessionId?: string }
-type AcpActorSnapshot = { state: 'initializing' } | { state: 'ready'; sessionId: string; promptImages: boolean; activePromptId?: string } |
+type AcpActorSnapshot = { state: 'initializing' } |
+  { state: 'ready'; sessionId: string; promptImages: boolean; transcriptPath?: string; activePromptId?: string } |
   { state: 'authentication-required' | 'initialization-unconfirmed'; stage: 'launch' | 'initialize' | 'session/new' | 'session/load' | 'session/resume' }
 
 const signature = (token: string, body: unknown) => createHmac('sha256', token).update(JSON.stringify(body)).digest('hex')
@@ -145,7 +149,9 @@ export function createAntigravityAcpActor(services: AcpWireServices & {
     if (result.state === 'initializing') return { state: 'initializing' }
     if (result.state === 'ready' && typeof result.sessionId === 'string' && result.sessionId.trim()) {
       if (result.activePromptId !== undefined && typeof result.activePromptId !== 'string') throw unavailable()
+      const transcriptPath = typeof result.transcriptPath === 'string' && isAbsolute(result.transcriptPath) ? result.transcriptPath : undefined
       return { state: 'ready', sessionId: result.sessionId, promptImages: result.promptImages === true,
+        ...(transcriptPath === undefined ? {} : { transcriptPath }),
         ...(result.activePromptId === undefined ? {} : { activePromptId: result.activePromptId }) }
     }
     if ((result.state === 'initialization-unconfirmed' || result.state === 'authentication-required') &&
@@ -422,19 +428,23 @@ export function createAntigravityAcpActor(services: AcpWireServices & {
           stage = 'initialize'
           const handshake = readAntigravityAcpHandshake(await initializeAntigravityAcp(child, undefined, { session: { configOptions: { boolean: {} } } }))
           const params = { cwd: plan.cwd, mcpServers: [] }
+          const ready = (sessionId: string): AcpActorSnapshot => {
+            const transcriptPath = antigravityAcpTranscriptPath(homedir(), plan.args, sessionId)
+            return { state: 'ready', sessionId, promptImages: handshake.prompt.image, ...(transcriptPath === undefined ? {} : { transcriptPath }) }
+          }
           if (plan.resumeSessionId !== undefined) {
             stage = handshake.sessions.resume ? 'session/resume' : 'session/load'
             if (!handshake.sessions.resume && !handshake.sessions.load) throw unavailable()
             const result = acpRecord(await child.request(stage, { ...params, sessionId: plan.resumeSessionId }))
             if (!result || result.sessionId !== undefined && result.sessionId !== plan.resumeSessionId) throw unavailable()
-            snapshot = { state: 'ready', sessionId: plan.resumeSessionId, promptImages: handshake.prompt.image }
+            snapshot = ready(plan.resumeSessionId)
             const options = readAntigravityConfiguration(result.configOptions)
             if (options) observeConfiguration({ revision: randomUUID(), options })
           } else {
             stage = 'session/new'
             const result = acpRecord(await child.request(stage, params))
             if (typeof result?.sessionId !== 'string' || result.sessionId.trim().length === 0) throw unavailable()
-            snapshot = { state: 'ready', sessionId: result.sessionId, promptImages: handshake.prompt.image }
+            snapshot = ready(result.sessionId)
             const options = readAntigravityConfiguration(result.configOptions)
             if (options) observeConfiguration({ revision: randomUUID(), options })
           }

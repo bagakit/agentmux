@@ -4032,7 +4032,9 @@ export class AgentMuxClient {
           }
           return current
         }
+        const nativeActor = expected.nativeActor
         const discovery = await provider.discoverNativeSession!({ processId: firstRun.pid, nativeHandle: retained,
+          ...(nativeActor && provider.managedAcp?.protocolId === nativeActor.protocolId ? { nativeActor } : {}),
           command: resolveAgentExecutable(executorOptions.commandOverride, provider.executable),
           args: executorOptions.args ?? [], env: executorOptions.env ?? {}, workspacePath: session.workspacePath, signal })
         signal.throwIfAborted()

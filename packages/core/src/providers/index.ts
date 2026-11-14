@@ -146,6 +146,7 @@ function createAntigravityProvider(defineAgentProvider: ProviderFactory): AgentP
         const sessionId = snapshot.sessionId
         let close: (() => void) | undefined
         return { adapterId: 'antigravity', sessionId,
+          ...(snapshot.transcriptPath === undefined ? {} : { nativeTranscriptPath: snapshot.transcriptPath }),
           onEvent(listener, onError) {
             listener({ type: 'native-session', sessionId })
             let disposed = false, timer: ReturnType<typeof setTimeout> | undefined, stop: (() => void) | undefined
@@ -175,7 +176,25 @@ function createAntigravityProvider(defineAgentProvider: ProviderFactory): AgentP
       }
     },
     planManagedHooks: ({ env, workspacePath }) => planLocalHooks(executionPath(executionHomeDirectory(env), workspacePath)),
-    discoverNativeSession: discoverAntigravityNativeSession,
+    async discoverNativeSession(context) {
+      const nativeActor = context.nativeActor
+      if (nativeActor?.protocolId !== ANTIGRAVITY_ACP_ACTOR_PROTOCOL) return discoverAntigravityNativeSession(context)
+      const { actorId, lifecycleOperationId, token } = nativeActor
+      const identity = { actorId, lifecycleOperationId, processId: context.processId }
+      const inspect = () => antigravityAcpActor.inspect(identity, token, context.signal)
+      const original = await inspect()
+      if (original.state !== 'ready') return null
+      const { sessionId, transcriptPath } = original
+      return { handle: { kind: 'provider', providerId: 'antigravity', sessionId,
+        ...(transcriptPath === undefined ? {} : { transcriptPath }) },
+        async assertCurrent() {
+          const current = await inspect()
+          if (current.state !== 'ready' || current.sessionId !== sessionId || current.transcriptPath !== transcriptPath) throw new AgentMuxError(
+            'The original ACP conversation source changed during observation. Its retained records and input remain available.',
+            'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+        }
+      }
+    },
     readSessionHistoryPage: readAntigravitySessionHistoryPage,
     observeSessionHistory: observeAntigravitySessionHistory
   })

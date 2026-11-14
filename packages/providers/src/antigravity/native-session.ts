@@ -1,6 +1,6 @@
 import { constants } from 'node:fs'
 import { open } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, isAbsolute, join } from 'node:path'
 type DiscoveryContext = { processId: number; signal: AbortSignal }
 type NativeProcessFile = {
   processId: number
@@ -12,6 +12,20 @@ type NativeProcessFile = {
 }
 type HistoryTarget = { transcriptPath?: string; source: { providerId: string; nativeSessionId: string } }
 type ObserverHandle = { dispose(): void }
+
+const conversationId = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+const presenceName = new RegExp('^(' + conversationId + ')\\.lock$', 'iu')
+const nativeId = new RegExp('^' + conversationId + '$', 'iu')
+
+function nativeTranscriptPath(root: string, id: string): string {
+  return join(root, 'brain', id, '.system_generated', 'logs', 'transcript.jsonl')
+}
+
+/** The original ACP startup selects its native profile before returning the conversation ID. */
+export function antigravityAcpTranscriptPath(home: string, args: readonly string[], id: string): string | undefined {
+  if (!isAbsolute(home) || !nativeId.test(id) || args.some(arg => /^--(?:gemini[-_]dir|app[-_]data[-_]dir|cli[-_]dir[-_]name)(?:=|$)/u.test(arg))) return undefined
+  return nativeTranscriptPath(join(home, '.gemini', 'antigravity-cli'), id)
+}
 
 export function antigravityNativeSession<Event extends { kind: string }, Context extends HistoryTarget & {
   signal: AbortSignal
@@ -39,7 +53,7 @@ export function antigravityNativeSession<Event extends { kind: string }, Context
     const candidates: Array<{ file: NativeProcessFile; id: string }> = []
     for (const file of await nativeProcessFiles(context.processId, context.signal)) {
       if (file.processId !== context.processId || file.access !== 'u' || basename(dirname(file.path)) !== 'presence') continue
-      const match = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.lock$/iu.exec(basename(file.path))
+      const match = presenceName.exec(basename(file.path))
       if (match) candidates.push({ file, id: match[1]! })
     }
     // A process may report the same native file through several descriptors.
@@ -64,7 +78,7 @@ export function antigravityNativeSession<Event extends { kind: string }, Context
       throw unavailable('The native process changed during discovery. Refresh can retry; the Run is kept.')
     }
     context.signal.throwIfAborted()
-    return { ...original, birth, transcriptPath: join(dirname(dirname(original.file.path)), 'brain', original.id, '.system_generated', 'logs', 'transcript.jsonl') }
+    return { ...original, birth, transcriptPath: nativeTranscriptPath(dirname(dirname(original.file.path)), original.id) }
   }
 
   async function discoverAntigravityNativeSession(context: DiscoveryContext) {

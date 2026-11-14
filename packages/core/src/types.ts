@@ -1019,6 +1019,8 @@ export type AgentSessionHistoryPageOptions = {
 /** A short-lived, read-only witness for a missing native locator, never Run control. */
 export type AgentProviderNativeSessionDiscoveryContext = {
   processId: number
+  /** Private witness for an original managed Run's native connection. */
+  nativeActor?: AgentPrivateNativeActor
   /** Locator hint only. The Provider must independently verify its current process binding. */
   nativeHandle?: AgentNativeSessionHandle | undefined
   command: string

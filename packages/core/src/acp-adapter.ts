@@ -14,6 +14,7 @@ const MAX_ACP_EVENT_BYTES = 128 * 1024
 export type AgentMuxAcpBinding = {
   readonly adapterId: string
   readonly sessionId: string
+  readonly nativeTranscriptPath?: string
   onEvent(listener: (event: AgentMuxAcpEvent, observedAt?: number) => void, onError?: (error: Error) => void): () => void
   respondPermission(
     requestId: string,
@@ -279,8 +280,10 @@ export class AgentMuxAcpBridge {
   }
 
   private nativeHandle(bound: BoundAcpSession): AgentNativeSessionHandle {
+    const transcriptPath = bound.nativeSessionId === bound.binding.sessionId ? bound.binding.nativeTranscriptPath : undefined
     return bound.nativeProviderId === undefined ? { kind: 'acp', adapterId: bound.binding.adapterId, sessionId: bound.nativeSessionId }
-      : { kind: 'provider', providerId: bound.nativeProviderId, sessionId: bound.nativeSessionId }
+      : { kind: 'provider', providerId: bound.nativeProviderId, sessionId: bound.nativeSessionId,
+          ...(transcriptPath === undefined ? {} : { transcriptPath }) }
   }
 
   private evidence(bound: BoundAcpSession, observedAt = Date.now()): AgentMuxEvidence {
