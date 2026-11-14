@@ -230,6 +230,62 @@ it.each(['initial-missing', 'retargeted-missing'] as const)(
   }
 )
 
+it('[browser-native-placement] keeps the exact Survey frame when the canonical Work presentation leaves', async () => {
+  expect(__AGENTMUX_WEB_PREVIEW__).toBe(false)
+  const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(220, 74, 640, 320))
+  const activate = vi.spyOn(api.browser, 'activatePresentation').mockResolvedValue({ outcome: 'selected' })
+  const arm = vi.spyOn(api.browser, 'armPresentationCapture').mockResolvedValue({ captureId: 'scope-capture', browserId: 'original-browser' })
+  const ack = vi.spyOn(api.browser, 'ackPresentationCapture').mockResolvedValue(undefined)
+  const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+  const { track, stream } = previewMedia('scope-track')
+  const previousMedia = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices')
+  Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getDisplayMedia: vi.fn(async () => stream) } })
+  try {
+    await withPane('page', true, async ({ host, render, presentations, browser, create }) => {
+      const pane = host.querySelector('.browser-surface')
+      const input = host.querySelector<HTMLInputElement>('[aria-label="Browser address"]')!
+      await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'https://unsubmitted.example.test/original'); input.dispatchEvent(new Event('input', { bubbles: true })) })
+      input.setSelectionRange(8, 19)
+      const stage = host.querySelector('[data-browser-presentation-id="survey-original"]')
+      expect(stage).not.toBeNull()
+      // The exact Survey occurrence/slot stays; the separate canonical Work target no longer shows this Tab.
+      await render([presentations[1]!]); await settle()
+      expect(host.querySelector('.browser-surface')).toBe(pane)
+      expect(host.querySelector('[data-browser-presentation-id="survey-original"]')).toBe(stage)
+      expect(host.querySelector('[aria-label="Browser address"]')).toBe(input)
+      expect(input.value).toBe('https://unsubmitted.example.test/original')
+      expect(input.selectionStart).toBe(8); expect(input.selectionEnd).toBe(19)
+      expect(stage!.closest('[hidden],[inert]')).toBeNull()
+      expect(host.querySelector('.browser-toolbar')).not.toBeNull()
+      expect(host.querySelector('[aria-label^="Browser activity:"]')).not.toBeNull()
+      expect(document.querySelectorAll('[data-browser-presentation-id="survey-original"]')).toHaveLength(1)
+      expect(document.querySelectorAll('[data-native-browser-stage="original-browser"]')).toHaveLength(1)
+      expect(vi.mocked(api.browser.updatePresentation).mock.calls.filter(([id]) => id === 'survey-original-lease').at(-1)?.[1]).toMatchObject({ visible: true, bounds: { x: 220, y: 74 } })
+      expect(activate.mock.calls.some(([id, action]) => id === 'survey-original-lease' && action.kind === 'select')).toBe(true)
+      expect(useAppStore.getState().tabs['original-tab']?.regions['original-region']).toBe(browser)
+      expect(create).not.toHaveBeenCalled()
+      const replacement = document.createElement('div'); replacement.id = host.id
+      const ancestor = document.createElement('section'), laterInput = document.createElement('input')
+      ancestor.append(replacement); host.remove(); document.body.append(ancestor, laterInput); laterInput.focus()
+      try {
+        // The logical slot address is unchanged while its DOM element/ancestor is replaced.
+        await render([presentations[1]!]); await settle()
+        expect(replacement.querySelector('.browser-surface')).toBe(pane)
+        expect(replacement.querySelector('[data-browser-presentation-id="survey-original"]')).toBe(stage)
+        expect(replacement.querySelector('[aria-label="Browser address"]')).toBe(input)
+        expect(input.value).toBe('https://unsubmitted.example.test/original')
+        expect([input.selectionStart, input.selectionEnd]).toEqual([8, 19])
+        expect(document.activeElement).toBe(laterInput)
+        expect(stage!.closest('[hidden],[inert]')).toBeNull()
+      } finally { ancestor.remove(); laterInput.remove() }
+    })
+  } finally {
+    if (previousMedia) Object.defineProperty(navigator, 'mediaDevices', previousMedia)
+    else Reflect.deleteProperty(navigator, 'mediaDevices')
+    rect.mockRestore(); activate.mockRestore(); arm.mockRestore(); ack.mockRestore(); play.mockRestore()
+  }
+})
+
 type Shape = 'error' | 'blank' | 'page'
 function assertPane(host: HTMLElement, shape: Shape) {
   expect(host.querySelectorAll('.browser-surface')).toHaveLength(1)
