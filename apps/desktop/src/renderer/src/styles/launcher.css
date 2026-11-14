@@ -158,6 +158,17 @@ button.launcher-mote__target:hover { color: var(--text); background: var(--surfa
 .launcher-mote__target > svg, .launcher-mote__create > svg { flex: none; }
 .launcher-mote__target > .space-object-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; }
 .launcher-mote__target > .space-object-icon :is(svg, img, .mote-face) { width: 18px; height: 18px; }
+.mote-task-action { min-width: 0; }
+.mote-task-action > details pre, .mote-task-action__result pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.mote-task-action--vertical { display: flex; flex-direction: column; gap: var(--sp-2); font-size: var(--fs-meta); }
+.mote-task-action__recipient { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; color: var(--text-3); }
+.mote-task-action__recipient > span { flex: none; }
+.mote-task-action__recipient .launcher-mote__target { border: 0; border-radius: var(--radius-sm); padding: var(--sp-1) var(--sp-2); min-height: 28px; max-width: 100%; }
+.mote-task-action--vertical .launcher-mote__actions { flex-direction: column; width: 100%; min-height: 0; box-shadow: none; border: 0; background: transparent; }
+.mote-task-action--vertical .launcher-mote__create { flex-direction: column; align-items: flex-start; gap: 2px; min-height: 30px; padding: var(--sp-2); border-radius: var(--radius-sm); white-space: normal; text-align: left; }
+.mote-task-action--vertical .launcher-mote__create small { color: var(--text-3); font-size: var(--fs-micro); font-weight: 400; }
+.mote-task-action__result { min-width: 0; color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
+.mote-task-action__result p { margin-block: var(--sp-1); }
 .launcher-mote__archive { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); margin-top: var(--sp-3); color: var(--text-3); font: var(--fs-meta)/1.5 var(--font-sans); }
 .launcher-mote__archive > span { flex: 1 1 160px; min-width: 0; overflow-wrap: anywhere; }
 .launcher-mote__archive > button { flex: none; white-space: nowrap; }

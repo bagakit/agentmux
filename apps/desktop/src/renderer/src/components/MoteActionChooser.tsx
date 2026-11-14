@@ -9,6 +9,9 @@ import * as DropdownMenu from './HoverDropdownMenu'
 
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
+const AgentIcon = semanticIconComponent('object.agent')
+
+export type MoteChooserNewAgent = { kind: 'new-agent'; key: string; label?: string; selected: boolean; onSelect(): void }
 
 function LauncherMoteAvatar({ mote, topicId, active }: { mote?: ScratchTopicSnapshot | undefined; topicId: string; active: boolean }) {
   const workspace = useAppStore(state => state.config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID))
@@ -19,12 +22,14 @@ function LauncherMoteAvatar({ mote, topicId, active }: { mote?: ScratchTopicSnap
 }
 
 /** One existing Mote choice, shared by creation and ordinary task handoffs. */
-export function MoteActionChooser({ motes, topicId, pending, onSelect, active = true }: {
+export function MoteActionChooser({ motes, topicId, pending, onSelect, active = true, newAgent, menuContainer }: {
   motes: readonly ScratchTopicSnapshot[]; topicId: string; pending: boolean; onSelect(id: string): void; active?: boolean
+  newAgent?: MoteChooserNewAgent | undefined; menuContainer?: HTMLElement | null | undefined
 }) {
   const selectedMote = motes.find(mote => mote.id === topicId)
   const availableMotes = motes.filter(mote => mote.moteArchive?.state !== 'archived')
   const moteName = selectedMote?.title ?? 'Saved Mote'
-  return availableMotes.length > 1 || !availableMotes.some(mote => mote.id === topicId) ? <DropdownMenu.Root><DropdownMenu.Trigger className="launcher-mote__target" aria-label={`Choose Mote: ${moteName}`} title={moteName} disabled={pending}><LauncherMoteAvatar mote={selectedMote} topicId={topicId} active={active} /><span className="launcher-mote__name">{moteName}</span><ThemeNavigationDownIcon size={12} /></DropdownMenu.Trigger><DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu composer-menu" side="top" align="start">{availableMotes.map(mote => <DropdownMenu.Item key={mote.id} className="tab-context-menu__item" onSelect={() => onSelect(mote.id)}><LauncherMoteAvatar mote={mote} topicId={mote.id} active={active} /><span>{mote.title}</span>{mote.id === topicId ? <span aria-label="Selected Mote"><ThemeStatusSelectedIcon size={12} /></span> : null}</DropdownMenu.Item>)}{availableMotes.length === 0 ? <DropdownMenu.Item className="tab-context-menu__item" disabled>No active Motes</DropdownMenu.Item> : null}</DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root> : <span className="launcher-mote__target" title={moteName}><LauncherMoteAvatar mote={selectedMote} topicId={topicId} active={active} /><span className="launcher-mote__name">{moteName}</span></span>
+  const recipientName = newAgent?.selected ? newAgent.label ?? 'New Agent' : moteName
+  return newAgent || availableMotes.length > 1 || !availableMotes.some(mote => mote.id === topicId) ? <DropdownMenu.Root><DropdownMenu.Trigger className="launcher-mote__target" aria-label={`${newAgent ? 'Choose recipient' : 'Choose Mote'}: ${recipientName}`} title={recipientName} disabled={pending}>{newAgent?.selected ? <AgentIcon size={18} /> : <LauncherMoteAvatar mote={selectedMote} topicId={topicId} active={active} />}<span className="launcher-mote__name">{recipientName}</span><ThemeNavigationDownIcon size={12} /></DropdownMenu.Trigger><DropdownMenu.Portal {...(menuContainer ? { container: menuContainer } : {})}><DropdownMenu.Content className="tab-context-menu composer-menu" side="top" align="start">{availableMotes.map(mote => <DropdownMenu.Item key={mote.id} className="tab-context-menu__item" onSelect={() => onSelect(mote.id)}><LauncherMoteAvatar mote={mote} topicId={mote.id} active={active} /><span>{mote.title}</span>{!newAgent?.selected && mote.id === topicId ? <span aria-label="Selected Mote"><ThemeStatusSelectedIcon size={12} /></span> : null}</DropdownMenu.Item>)}{availableMotes.length === 0 ? <DropdownMenu.Item className="tab-context-menu__item" disabled>No active Motes</DropdownMenu.Item> : null}{newAgent ? <><DropdownMenu.Separator className="tab-context-menu__separator" /><DropdownMenu.Item className="tab-context-menu__item" onSelect={newAgent.onSelect}><AgentIcon size={18} /><span>{newAgent.label ?? 'New Agent'}</span>{newAgent.selected ? <span aria-label="Selected recipient"><ThemeStatusSelectedIcon size={12} /></span> : null}</DropdownMenu.Item></> : null}</DropdownMenu.Content></DropdownMenu.Portal></DropdownMenu.Root> : <span className="launcher-mote__target" title={moteName}><LauncherMoteAvatar mote={selectedMote} topicId={topicId} active={active} /><span className="launcher-mote__name">{moteName}</span></span>
 }
 
