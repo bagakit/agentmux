@@ -2,17 +2,18 @@ import { NodePublishingOwner } from './node-publishing-owner.js'
 import { AgentExecutionBindingService, type AgentExecutionHostPort } from './agent-execution-coordinator.js'
 import { connectHostedAgentMux } from './hosted-client.js'
 import { mintObjectId } from './object-id.js'
-import { createHash } from 'node:crypto'
+import { createHash, generateKeyPairSync } from 'node:crypto'
 import { AGENTMUX_RUNTIME_OWNER_PROTOCOL_VERSION } from './runtime-owner-protocol.js'
-import { chmod, mkdir, open, readFile, type FileHandle } from 'node:fs/promises'
+import { chmod, lstat, mkdir, open, readdir, type FileHandle } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { AgentMuxClient } from './client.js';
 import type { AgentMuxClientOptions } from "./client-contract.js";
 import { AgentMuxFileAgentSessionStore, defaultAgentMuxAgentSessionStorePath } from './agent-session-store.js'
 import { AgentMuxError } from './errors.js'
 import { DeliveryAttemptStore } from './delivery-attempt-store.js'
-import { durableWriteFile } from './durable-write.js'
+import { immutableIdentityFile } from './immutable-identity-file.js'
+import { readCurrentSessionDatabase } from './agent-session-database.js'
 import { defaultAgentMuxControlSocketPath, defaultAgentMuxStateDirectory, defaultCtxmuxSocketPath,
   defaultCtxmuxStateDirectory, defaultAgentMuxHookPort } from './runtime-paths.js'
 import { AgentMuxControlServer, type AgentMuxRpcHttpOptions, type AgentMuxControlServerOptions } from './public-rpc-server.js'
@@ -69,6 +70,28 @@ async function acquireOwner(path: string): Promise<FileHandle> {
   if (!native.tryLock(handle.fd)) { await handle.close(); throw new AgentMuxError('This semantic Runtime or endpoint has another live owner.', 'RUNTIME_OWNER_BUSY') }
   return handle
 }
+
+async function priorSemanticNamespace(stateDirectory: string, storePath: string): Promise<boolean> {
+  for (const path of [join(stateDirectory, 'agent-creation-identity.json'), join(stateDirectory, 'agent-creation-identity.json.original')]) {
+    try { await lstat(path); return true } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+  }
+  const database = await readCurrentSessionDatabase(storePath, { readOnly: true })
+  if (database) try {
+    // An empty catalog created by first-launch observation is not a previous
+    // semantic Runtime. Existing user/lifecycle facts are a different case.
+    for (const table of ['sessions', 'retired_sessions', 'reservations', 'prompt_admissions']) {
+      if (!database.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?").get(table)) continue
+      if (database.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get()) return true
+    }
+  } finally { database.close() }
+  if (!database) {
+    // A retained original import is positive evidence of a used namespace,
+    // never permission to import it again or silently initialize an empty one.
+    try { if ((await readdir(dirname(storePath))).some(name => name.startsWith(basename(storePath) + '.original-'))) return true }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+  }
+  return false
+}
 /** The one explicitly launched semantic owner, usable independently of any UI or client Host. */
 export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOptions = {}): Promise<AgentMuxHeadlessRuntime> {
   const store = options.store ?? new AgentMuxFileAgentSessionStore(defaultAgentMuxAgentSessionStorePath())
@@ -92,15 +115,39 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
     // Explicit non-file Stores keep the existing Unix Host capability. Their owner
     // is ephemeral: no durable identity file can claim continuity for that data.
     let runtimeId: string = mintObjectId()
-    if (storePath !== null) try {
-      const state = JSON.parse(await readFile(identityPath, 'utf8')) as { schema?: unknown; runtimeId?: unknown; authority?: unknown }
-      if (state.schema !== 'agentmux.semantic-runtime.v1' || typeof state.runtimeId !== 'string' || !state.runtimeId || state.authority !== authority) throw new AgentMuxError(
-        'Durable semantic Runtime authority does not match this Store/Hook/ctxmux binding. Existing Runs were preserved.', 'RUNTIME_AUTHORITY_MISMATCH')
+    let originalCreationIdentity: { runtimeId: string; publicKey: string; privateKey: string } | null = null
+    if (storePath !== null) {
+      const state = await immutableIdentityFile(identityPath, {
+        parse: bytes => {
+          let value: { schema?: unknown; runtimeId?: unknown; authority?: unknown; creationIdentity?: unknown }
+          try { value = JSON.parse(bytes) } catch { throw new AgentMuxError('The original semantic identity is unreadable. Its sources and Runs were retained.', 'RUNTIME_AUTHORITY_MISMATCH') }
+          if (value.schema !== 'agentmux.semantic-runtime.v1' || typeof value.runtimeId !== 'string' || !value.runtimeId || value.authority !== authority) throw new AgentMuxError(
+            'Durable semantic Runtime authority does not match this Store/Hook/ctxmux binding. Existing Runs were preserved.', 'RUNTIME_AUTHORITY_MISMATCH')
+          let creationIdentity: typeof originalCreationIdentity = null
+          if (value.creationIdentity !== undefined) {
+            const seed = value.creationIdentity as Record<string, unknown>
+            if (!seed || typeof seed !== 'object' || seed.runtimeId !== value.runtimeId || typeof seed.publicKey !== 'string' || typeof seed.privateKey !== 'string' ||
+              !/^[A-Za-z0-9_-]{1,512}$/u.test(seed.publicKey) || !/^[A-Za-z0-9_-]{1,512}$/u.test(seed.privateKey)) throw new AgentMuxError(
+              'The original namespace signing preparation is unreadable. Its sources and Runs were retained.', 'RUNTIME_AUTHORITY_MISMATCH')
+            creationIdentity = { runtimeId: value.runtimeId, publicKey: seed.publicKey, privateKey: seed.privateKey }
+          }
+          return { schema: 'agentmux.semantic-runtime.v1' as const, runtimeId: value.runtimeId, authority, ...(creationIdentity ? { creationIdentity } : {}) }
+        },
+        create: () => {
+          const id = mintObjectId(), pair = generateKeyPairSync('ed25519')
+          // Freeze all original initialization material before publishing the
+          // namespace. A crash before lazy signer materialization can therefore
+          // continue that exact identity without generating a second key.
+          return { schema: 'agentmux.semantic-runtime.v1' as const, runtimeId: id, authority, creationIdentity: {
+            runtimeId: id, publicKey: pair.publicKey.export({ format: 'der', type: 'spki' }).toString('base64url'),
+            privateKey: pair.privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64url') } }
+        },
+        encode: value => JSON.stringify(value) + '\n',
+        priorIdentity: () => priorSemanticNamespace(stateDirectory, storePath),
+        onRecoveryIssue: issue => process.emitWarning('The semantic identity is readable, but its original recovery copy is unavailable. Original Runs remain available; retry storage recovery.', { code: issue.code })
+      })
       runtimeId = state.runtimeId
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      runtimeId = mintObjectId()
-      await durableWriteFile(identityPath, JSON.stringify({ schema: 'agentmux.semantic-runtime.v1', runtimeId, authority }) + '\n')
+      originalCreationIdentity = state.creationIdentity ?? null
     }
     const ownerInstanceId = mintObjectId()
     const ownerIdentity = (): AgentMuxRuntimeOwnerIdentity => {
@@ -119,7 +166,8 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
     }
     // Both namespace leases are already held. One Client owns metadata and Native observation;
     // a caller's unconfirmed Native startup must not dispose this semantic authority.
-    const creationAuthority = options.creationAuthority ?? new AgentMuxCreationAuthority({ stateDirectory, runtimeId })
+    const creationAuthority = options.creationAuthority ?? new AgentMuxCreationAuthority({ stateDirectory, runtimeId,
+      ...(storePath === null ? {} : { requireOriginalIdentity: true, recoveryIdentity: async () => originalCreationIdentity }) })
     client = new AgentMuxClient({ ...options, store, controlSocketPath: socketPath,
       retainedServiceExecutionDirectories: async () => [
         ...await options.retainedServiceExecutionDirectories?.() ?? [],

@@ -4,6 +4,7 @@ import { link, lstat, mkdir, open, readFile, readdir, unlink } from 'node:fs/pro
 import { dirname, join } from 'node:path'
 import { AgentMuxError } from './errors.js'
 import { durableWriteFile } from './durable-write.js'
+import { immutableIdentityFile } from './immutable-identity-file.js'
 import { parseHostRouteEnvelope, parseHostRouteCall, parseHostRouteExecutionAuthorization, type HostRouteExecutionAuthorization, type HostRouteEnvelope, type HostRouteIdentity, type HostRouteStatement, type HostRouteCall } from './host-route.js'
 import { assertExecutionChild, assertExecutionParent } from './host-route-execution.js'
 import { parseMessageProvenance, parseMessageReadAuthority, parseRecipientInboxReceipt, type AgentMuxMessageParticipant, type AgentMuxMessageProvenance, type AgentMuxMessageReadAuthority, type AgentMuxMessageTrust, type AgentMuxRecipientInboxReceipt } from './agent-message-federation.js'
@@ -139,36 +140,62 @@ export class AgentMuxCreationAuthority {
   private readonly messageTrustDirectory: string
   /** Original Runtime address, available independently of lazy signing material. */
   readonly runtimeId: string
-  constructor(options: { stateDirectory: string; runtimeId: string }) {
+  private readonly recoveryIdentity: (() => Promise<{ runtimeId: string; publicKey: string; privateKey: string } | null>) | undefined
+  private readonly requireOriginalIdentity: boolean
+  constructor(options: { stateDirectory: string; runtimeId: string;
+    /** Original namespace bootstrap custody; never a public signer/import port. */
+    recoveryIdentity?: () => Promise<{ runtimeId: string; publicKey: string; privateKey: string } | null>
+    requireOriginalIdentity?: boolean }) {
     this.identityPath = join(options.stateDirectory, 'agent-creation-identity.json')
     this.trustDirectory = join(options.stateDirectory, 'agent-creation-trusted-sources')
     this.messageTrustDirectory = join(options.stateDirectory, 'agent-message-trusted-sources')
     this.runtimeId = options.runtimeId
+    this.recoveryIdentity = options.recoveryIdentity
+    this.requireOriginalIdentity = options.requireOriginalIdentity ?? false
     if (!options.runtimeId || options.runtimeId.length > 256 || options.runtimeId.trim() !== options.runtimeId || /[\u0000-\u001f\u007f]/u.test(options.runtimeId)) {
       failure('Agent creation authority needs its original Runtime identity.', 'AGENT_CREATION_AUTHORITY_INVALID')
     }
   }
   private async loadIdentity(): Promise<{ identity: AgentMuxCreationAuthorityIdentity; privateKey: KeyObject }> {
-    let raw: string
-    try { raw = await readFile(this.identityPath, 'utf8') }
-    catch (error) {
-      if (!absent(error)) throw error
-      const pair = generateKeyPairSync('ed25519')
-      await publishFirst(this.identityPath, { schema: 'agentmux.agent-creation-authority.v1', runtimeId: this.runtimeId,
-        publicKey: pair.publicKey.export({ format: 'der', type: 'spki' }).toString('base64url'),
-        privateKey: pair.privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64url') })
-      raw = await readFile(this.identityPath, 'utf8')
-    }
     try {
-      const attributes = await lstat(this.identityPath)
-      if (!attributes.isFile() || (attributes.mode & 0o077) !== 0) throw new Error('Unprotected identity')
-      const p = JSON.parse(raw) as Record<string, unknown>
+      const expected = await this.recoveryIdentity?.()
+      const parse = (bytes: string) => {
+      const p = JSON.parse(bytes) as Record<string, unknown>
       if (!p || typeof p !== 'object' || Object.keys(p).length !== 4 || p.schema !== 'agentmux.agent-creation-authority.v1' ||
         p.runtimeId !== this.runtimeId || typeof p.privateKey !== 'string' || !/^[A-Za-z0-9_-]{1,512}$/u.test(p.privateKey)) throw new Error('Invalid identity')
       const pub = publicKey(p.publicKey)
       const privateKey = createPrivateKey({ key: Buffer.from(p.privateKey, 'base64url'), format: 'der', type: 'pkcs8' })
       if (privateKey.asymmetricKeyType !== 'ed25519' || privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64url') !== p.privateKey ||
         createPublicKey(privateKey).export({ format: 'der', type: 'spki' }).toString('base64url') !== pub.encoded) throw new Error('Mismatched identity')
+      if (expected && (p.runtimeId !== expected.runtimeId || p.publicKey !== expected.publicKey || p.privateKey !== expected.privateKey)) throw new Error('Original namespace signing binding changed')
+      return { schema: 'agentmux.agent-creation-authority.v1' as const, runtimeId: this.runtimeId, publicKey: pub.encoded, privateKey: p.privateKey }
+      }
+      const value = await immutableIdentityFile(this.identityPath, {
+        parse,
+        recover: async () => {
+          return expected ? parse(JSON.stringify({ schema: 'agentmux.agent-creation-authority.v1', ...expected })) : null
+        },
+        create: () => {
+          const pair = generateKeyPairSync('ed25519')
+          return { schema: 'agentmux.agent-creation-authority.v1' as const, runtimeId: this.runtimeId,
+            publicKey: pair.publicKey.export({ format: 'der', type: 'spki' }).toString('base64url'),
+            privateKey: pair.privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64url') }
+        },
+        encode: value => JSON.stringify(value) + '\n',
+        priorIdentity: async () => {
+          if (this.requireOriginalIdentity) return true
+          // Durable adopted source pins cannot be reassigned to a newly minted
+          // signer just because one private file disappeared.
+          for (const directory of [this.trustDirectory, this.messageTrustDirectory]) {
+            try { if ((await readdir(directory)).length) return true }
+            catch (error) { if (!absent(error)) throw error }
+          }
+          return false
+        },
+        onRecoveryIssue: issue => process.emitWarning('The original signing identity remains usable, but its recovery copy is unavailable. Retry this owner recovery without replacing the key.', { code: issue.code })
+      })
+      const pub = publicKey(value.publicKey)
+      const privateKey = createPrivateKey({ key: Buffer.from(value.privateKey, 'base64url'), format: 'der', type: 'pkcs8' })
       return { identity: { runtimeId: this.runtimeId, publicKey: pub.encoded, fingerprint: pub.fingerprint }, privateKey }
     } catch (error) { return failure('The original Agent creation identity cannot be verified. Its file was retained; restore that identity before creating a new attestation.', 'AGENT_CREATION_AUTHORITY_INVALID', error) }
   }

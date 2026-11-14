@@ -1,9 +1,10 @@
 import { mintObjectId } from './object-id.js'
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, open, readFile, rename, unlink } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { chmod, mkdir, open, readFile, readdir, rename, unlink } from 'node:fs/promises'
+import { basename, dirname } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { durableWriteFile } from './durable-write.js'
+import { immutableIdentityFile } from './immutable-identity-file.js'
 
 const applicationId = 0x414d5353
 const sqliteHeader = Buffer.from('SQLite format 3\0')
@@ -69,10 +70,44 @@ async function prefix(path: string): Promise<Buffer | null> {
 }
 
 async function marker(path: string): Promise<string | null> {
-  try { return await readFile(`${path}.sqlite-identity`, 'utf8') } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
-    throw error
+  const read = async (target: string) => {
+    try { return await readFile(target, 'utf8') } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw error
+    }
   }
+  const current = await read(`${path}.sqlite-identity`)
+  if (current !== null && !/^[A-Za-z0-9_-]+$/u.test(current)) throw new Error('The original Session incarnation is unreadable.')
+  let original: string | null
+  try {
+    original = await read(`${path}.sqlite-identity.original`)
+    if (original !== null && !/^[A-Za-z0-9_-]+$/u.test(original)) throw new Error('The recovery incarnation is unreadable.')
+  } catch (error) {
+    if (current === null) throw error
+    process.emitWarning('The original Session incarnation remains readable, but its recovery copy is unavailable. Keep the database and retry storage recovery.', { code: 'SESSION_INCARNATION_RECOVERY_UNAVAILABLE' })
+    return current
+  }
+  if (original !== null && current !== null && current !== original)
+    throw new Error('The Session incarnation contradicts its retained original. Keep both sources and restore the original database.')
+  return current ?? original
+}
+
+async function assertNewDatabaseNamespace(path: string): Promise<void> {
+  let names: string[]
+  try { names = await readdir(dirname(path)) }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error }
+  const prefix = basename(path) + '.original-'
+  if (names.includes(basename(path) + '.sqlite-identity.original') || names.some(name => name.startsWith(prefix) && /^[a-f0-9]{64}$/u.test(name.slice(prefix.length)))) throw new Error(
+    'This used Session namespace lost its database and acknowledgement. Its original archive was retained; inspect or restore the original owner instead of initializing an empty catalog.')
+}
+
+async function confirmOriginalIncarnation(path: string, incarnation: string): Promise<void> {
+  const identity = await immutableIdentityFile(`${path}.sqlite-identity`, {
+    parse: bytes => { if (!/^[A-Za-z0-9_-]+$/u.test(bytes)) throw new Error('Invalid original Session incarnation.'); return bytes },
+    create: () => incarnation, encode: value => value,
+    onRecoveryIssue: issue => process.emitWarning('The original Session database remains usable, but incarnation recovery custody is unavailable. Retry storage recovery without replacing the database.', { code: issue.code })
+  })
+  if (identity !== incarnation) throw new Error('The original Session incarnation changed. Retain both sources and restore the original database.')
 }
 
 function validate(db: DatabaseSync, acknowledged: string | null): string {
@@ -96,8 +131,10 @@ function closeAfterFailure(db: DatabaseSync, failure: unknown): never {
 /** Current reads never take the old writer lock or read retained future bodies. */
 export async function readCurrentSessionDatabase(path: string, options?: { readOnly?: boolean }): Promise<DatabaseSync | null> {
   const acknowledged = await marker(path)
-  if (!(await prefix(path))?.equals(sqliteHeader)) {
+  const header = await prefix(path)
+  if (!header?.equals(sqliteHeader)) {
     if (acknowledged !== null) throw new Error('The acknowledged Session database was removed or replaced. Restore its original file.')
+    if (header === null) await assertNewDatabaseNamespace(path)
     return null
   }
   // A killed cutover may have published SQLite before its marker ACK. Read the complete
@@ -123,12 +160,14 @@ export async function openSessionDatabase(
       const incarnation = validate(db, acknowledged)
       if (acknowledged === null) {
         await syncSessionDatabase(path)
-        await durableWriteFile(`${path}.sqlite-identity`, incarnation, { mode: 0o600, requireDirectorySync: true })
+        await confirmOriginalIncarnation(path, incarnation)
       }
+      else await confirmOriginalIncarnation(path, incarnation)
       return db
     } catch (error) { return closeAfterFailure(db, error) }
   }
   if (acknowledged !== null) throw new Error('The acknowledged Session database was removed or replaced; re-import would lose original facts.')
+  if (header === null) await assertNewDatabaseNamespace(path)
   let raw: Buffer | undefined
   let hash: string | null = null
   if (header !== null) {
@@ -156,7 +195,7 @@ export async function openSessionDatabase(
     }
     await rename(candidate, path); published = true
     await syncSessionDatabase(path)
-    await durableWriteFile(`${path}.sqlite-identity`, incarnation, { mode: 0o600, requireDirectorySync: true })
+    await confirmOriginalIncarnation(path, incarnation)
     db = new DatabaseSync(path); configureSessionDatabase(db)
     return db
   } catch (error) {
