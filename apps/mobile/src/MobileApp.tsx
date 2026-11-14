@@ -724,7 +724,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
         <span>网页有新版本</span><button type="button" onClick={() => setSheet('settings')}>前往更新</button>
       </MobileNotice>}
       {!directoryVisible && attention.issue && <MobileAttentionNotice owner={client} issue={attention.issue} retry={attention.refresh} />}
-      <MobileAvatarNoticeOutlet />
+      {!primaryHeader && <MobileAvatarNoticeOutlet />}
       {(serviceNotices.length > 0 || !canPersist) && <MobileNotice owner={client} kind="feedback" identity={[notice,noticeDetail,visibleProjectionError,hostAppearance.issue,connection.issue,connection.state,canPersist]} className="mobile-service-notice"><span className="mobile-notice-mark"><ThemeStatusInfoIcon size={15} /></span><div>{serviceNotices.map(message => <p key={message}>{message}</p>)}{notice && noticeDetail && <details><summary>技术信息</summary><p>{noticeDetail}</p></details>}{!canPersist && <button onClick={restoreNavigationStorage}>用当前工作面替换记录</button>}</div></MobileNotice>}
     </div>
     {rootPage && <footer className="mobile-navigation-bar" {...(tabBar.current.entering ? { 'data-motion': 'enter' } : {})}><MobilePrimaryNavigation current={secondary === 'survey' ? null : secondary ?? home} onSelect={openPrimaryWorkface} needsYou={needsYou.length} needsYouUnconfirmed={attention.unconfirmed} /></footer>}

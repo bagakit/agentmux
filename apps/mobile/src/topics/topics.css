@@ -67,3 +67,7 @@
 .mobile-app .mobile-topics-tree button.mobile-topics-category, .mobile-app .mobile-topics-tree button.mobile-topics-topic { min-height: 52px; padding: 8px 14px; border-radius: 0; font-size: var(--fs-lead); font-weight: 600; }
 .mobile-app .mobile-topics-tree button.mobile-topics-topic { font-size: var(--fs-body); font-weight: 550; }
 .mobile-app .mobile-topics-tree button:active { background: var(--mobile-group-press); }
+
+/* Segment labels, search and the grouped tree share the same reading gutter. */
+.mobile-topics .mobile-topics-tabs { gap: 4px; margin: 4px 0; }
+.mobile-topics .mobile-topics-tabs button { border: 0; padding-inline: 14px; }

@@ -1,6 +1,6 @@
 import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import type { MobileAgentCreateTarget } from './MobileAgentCreate'
-import { MobileNotice, MobileNoticeScope } from '../notices/MobileNotice'
+import { MobileAvatarNoticeOutlet, MobileNotice, MobileNoticeScope } from '../notices/MobileNotice'
 import { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-format'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
@@ -368,7 +368,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
   return <MobileNoticeScope owner={client} identity={[home,spaceId,context.tabId,context.regionId]}><section className="mobile-spatial-panel">
     <div className="mobile-section-heading mobile-page-header"><MobileHeaderMenu hidden={Boolean(context.regionId && activeBack)} /><div><h1>{home === 'mote' ? 'Mote' : home === 'focus' ? 'Focus' : 'Space'}</h1>
       <p>{home === 'mote' ? '与你的协调 Agent 继续讨论' : home === 'focus' ? '需要你处理的事项与最近执行' : '按 Mac 上的工作空间继续'}</p></div>
-      <div className="mobile-section-actions"><MobileDirectoryNotice issues={[...(issue ? [{ source: '空间目录', message: issue }] : []), ...(metadata.issue ? [{ source: '会话目录', message: metadata.issue }] : []), ...presentationIssues]} retry={() => refresh(count => count + 1)} />{onCreateAgent && <IconButton className="mobile-icon-button" aria-label="新建 Agent" onClick={() => onCreateAgent(spaceId ? { spaceId } : {})}><SemanticIcon name="action.create-agent" size={18} /></IconButton>}<IconButton className="mobile-icon-button" aria-label="刷新空间目录" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} animation={pending ? 'spin' : 'none'} /></IconButton></div></div>
+      <div className="mobile-section-actions">{visible && <MobileAvatarNoticeOutlet header />}<MobileDirectoryNotice issues={[...(issue ? [{ source: '空间目录', message: issue }] : []), ...(metadata.issue ? [{ source: '会话目录', message: metadata.issue }] : []), ...presentationIssues]} retry={() => refresh(count => count + 1)} />{onCreateAgent && <IconButton className="mobile-icon-button" aria-label="新建 Agent" onClick={() => onCreateAgent(spaceId ? { spaceId } : {})}><SemanticIcon name="action.create-agent" size={18} /></IconButton>}<IconButton className="mobile-icon-button" aria-label="刷新空间目录" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} animation={pending ? 'spin' : 'none'} /></IconButton></div></div>
     {!connected && <MobileNotice owner={client} identity={[connected]} className="mobile-spatial-notice" role="status">连接暂不可用，显示的是最近一次读取的目录。</MobileNotice>}
     <label className="mobile-spatial-search"><SemanticIcon name="action.search" size={16} /><TextInput value={query} onChange={event => setQuery(event.target.value)} placeholder={home === 'focus' ? '查找 Agent 或工作空间' : '查找工作空间'} aria-label="查找" /></label>
     {home === 'focus' ? <>

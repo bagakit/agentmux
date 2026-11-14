@@ -12,8 +12,8 @@ type Creation = { recordId: string | null; input: GoalCreationInput; target: Goa
 export type GoalDiscussionReceipt = AgentMuxRpcResult<'goal.discuss'>['receipt']
 
 /** One explicit click, one caller-held identity, and the original Goal owner. */
-export function MobileGoalCreate({ client, visible, created, openDiscussion, beginPresentation }: {
-  client: AgentMuxHostedClient | null; visible: boolean; created(goal: AgentMuxRpcGoal, present: () => boolean): void
+export function MobileGoalCreate({ client, visible, expanded, created, openDiscussion, beginPresentation }: {
+  client: AgentMuxHostedClient | null; visible: boolean; expanded: boolean; created(goal: AgentMuxRpcGoal, present: () => boolean): void
   openDiscussion(receipt: GoalDiscussionReceipt): void
   beginPresentation(): () => boolean
 }) {
@@ -101,10 +101,11 @@ export function MobileGoalCreate({ client, visible, created, openDiscussion, beg
     finally { flight.current = false; setBusy(false) }
   }
   return <section className="mobile-goal-create" aria-label="新建目标">
-    {visible && <>
-      <button type="button" disabled={busy || !!retained || !!request && request.phase !== 'ready'} onClick={() => void invoke('new')}>{busy ? '处理中…' : '新建目标'}</button>
-      <details><summary>新目标的项目上下文</summary><label>项目<select aria-label="新目标项目" value={projectId} disabled={busy} onChange={event => setProjectId(event.target.value)}><option value="">未分配项目</option>{projectId && !projects.some(project => project.projectId === projectId) && <option value={projectId}>项目未确认</option>}{projects.map(project => <option key={project.projectId} value={project.projectId}>{project.name}</option>)}</select></label><button type="button" onClick={() => reread(value => value + 1)}>刷新项目目录</button></details>
-    </>}
+    <div className="mobile-goal-create__form" hidden={!visible || !expanded}>
+
+      <label>新目标的项目<select aria-label="新目标项目" value={projectId} disabled={busy} onChange={event => setProjectId(event.target.value)}><option value="">未分配项目</option>{projectId && !projects.some(project => project.projectId === projectId) && <option value={projectId}>项目未确认</option>}{projects.map(project => <option key={project.projectId} value={project.projectId}>{project.name}</option>)}</select></label><button type="button" onClick={() => reread(value => value + 1)}>刷新项目目录</button>
+      <button type="button" disabled={busy || !!retained || !!request && request.phase !== 'ready'} onClick={() => void invoke('new')}>{busy ? '处理中…' : '创建目标'}</button>
+    </div>
     {directoryIssue && <MobileNotice kind="feedback" identity={[directoryIssue,deviceIssue]} role="status">{directoryIssue}</MobileNotice>}{deviceIssue && <MobileNotice identity={[directoryIssue,deviceIssue]} role="status">{deviceIssue}</MobileNotice>}
     {owner.snapshot().issue && <details><summary>保全设备意图</summary><MobileRecoveryPanel onRestored={() => reread(value => value + 1)} /><button type="button" onClick={async () => { try { await owner.replaceUnreadableWithCurrent(); setDirectoryIssue('已保存当前工作面。') } catch { setDirectoryIssue('这台手机的存储仍不可写；可以继续操作并导出备份。') } }}>存储恢复后保存当前工作面</button></details>}
     {request && request.phase !== 'ready' && <><MobileNotice dismissible={!busy && request.phase !== "saving"} kind={busy || request.phase === "saving" ? "feedback" : "warning"} identity={[request?.input.operationId,request?.phase,request?.issue]} role="status">{request.issue}</MobileNotice>

@@ -1,5 +1,5 @@
 import { MobileHeaderMenu } from '../navigation/MobileHeaderMenu'
-import { MobileNotice, MobileNoticeScope } from '../notices/MobileNotice'
+import { MobileAvatarNoticeOutlet, MobileNotice, MobileNoticeScope } from '../notices/MobileNotice'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -128,6 +128,7 @@ export function MobileTopicsSurface({ rpc, client, connected, onOpenTopic, rende
       {inTopic ? <button aria-label={topicBackLabel ?? '返回分类目录'} onClick={backToCategory}>{topicBackLabel ?? '返回'}</button>
         : categoryId && <button aria-label="返回所有分类" onClick={backToAllCategories}>返回</button>}
       <div className="mobile-topics-heading">{(inTopic || category) && <small>{category?.title ?? 'Topics'}</small>}<h1>{inTopic ? currentTopic?.title ?? 'Topic 未确认' : 'Topics'}</h1></div>
+      {visible && <MobileAvatarNoticeOutlet header />}
     </header>
     <MobileTopicOrganization rpc={rpc} categories={categories} category={category} topic={currentTopic} visible={visible} onBackChange={reportOrganizationBack} onRefresh={() => setRefresh(value => value + 1)} onChanged={() => setRefresh(value => value + 1)} />
     {[categoryIssue, openIssue].filter(Boolean).map((value, index) => <MobileNotice identity={[categoryId,topicId,value]} key={index} className="mobile-topics-issue" role="status">{value}</MobileNotice>)}

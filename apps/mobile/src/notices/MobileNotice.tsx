@@ -62,13 +62,13 @@ export function MobileNoticeProvider({ children }: { children: ReactNode }) {
 }
 
 /** Presentation only: each original avatar owner keeps its own observation and retry. */
-export function MobileAvatarNoticeOutlet() {
+export function MobileAvatarNoticeOutlet({ header = false }: { header?: boolean }) {
   const avatars = useContext(AvatarNotices), presentation = useMobileNotices()
   const entries = [...(avatars?.entries.values() ?? [])].filter(entry => !presentation?.dismissed.has(entry.key))
-  return <div className="mobile-avatar-notice-outlet">{entries.length > 0 && <MobileNotice
+  return <div className="mobile-avatar-notice-outlet" data-placement={header ? 'header' : 'footer'}>{entries.length > 0 && <MobileNotice
     identity={entries.map(entry => entry.key)} className="mobile-avatar-notice"
     onDismiss={() => entries.forEach(entry => presentation?.dismiss(entry.key))}>
-    <details><summary><SemanticIcon name="status.warning" size={13} /><span>{entries.length === 1
+    <details><summary aria-label="图标外观未确认" data-count={entries.length}><SemanticIcon name="status.warning" size={16} /><span>{entries.length === 1
       ? `头像外观未确认 · ${entries[0]!.name}` : `${entries.length} 个图标外观未确认`}</span></summary>
       <div className="mobile-avatar-notice__list">{entries.map(entry => <section key={entry.key} className="mobile-avatar-notice__item" data-avatar-notice-key={entry.key}>
         {entries.length > 1 && <strong>{entry.name}</strong>}

@@ -10,9 +10,9 @@
   overflow-x: auto; overscroll-behavior-inline: contain; scroll-snap-type: x mandatory; scroll-padding-inline: var(--mobile-gutter); scrollbar-width: none; }
 .mobile-needs-you > ul::-webkit-scrollbar { display: none; }
 .mobile-needs-you-card { flex: 0 0 min(300px, 84%); display: grid; align-content: start; scroll-snap-align: start; overflow: hidden;
-  border: 1px solid var(--mobile-attention-line); border-radius: var(--mobile-radius-group); background: var(--mobile-attention-wash); }
+  border: 0; border-radius: var(--mobile-radius-group); background: var(--mobile-group); box-shadow: inset 3px 0 0 var(--mobile-attention); }
 .mobile-needs-you-card:only-child { flex-basis: 100%; }
-.mobile-needs-you-card[data-reason='error'] { border-color: color-mix(in srgb, var(--red) 40%, transparent); background: color-mix(in srgb, var(--red) 8%, var(--mobile-group)); }
+.mobile-needs-you-card[data-reason='error'] { box-shadow: inset 3px 0 0 var(--red); background: color-mix(in srgb, var(--red) 8%, var(--mobile-group)); }
 .mobile-needs-you-ticket { display: flex; align-items: center; gap: var(--sp-4); width: 100%; min-width: 0; min-height: 52px; padding: 6px 14px 6px 8px;
   border: 0; border-radius: 0; background: transparent; color: var(--text); text-align: left; transition: background-color var(--dur-fast) ease; }
 .mobile-needs-you-ticket:active { background: color-mix(in srgb, var(--text) 6%, transparent); }
@@ -23,10 +23,10 @@
 
 /* One-tap answer: the request in one line, then its choices as equal-weight pills; the safe
  * single-use grant is the one filled action. */
-.mobile-ticket-answer { display: grid; gap: var(--sp-3); padding: 0 12px 12px 42px; animation: mobile-ticket-answer-in var(--dur-enter) var(--ease-enter) both; }
+.mobile-ticket-answer { display: grid; gap: var(--sp-3); padding: 0 12px 12px; animation: mobile-ticket-answer-in var(--dur-enter) var(--ease-enter) both; }
 .mobile-ticket-answer__title { margin: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
   color: var(--text-2); font-size: var(--fs-meta); line-height: 1.4; }
-.mobile-ticket-answer__choices { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+.mobile-ticket-answer__choices { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .mobile-ticket-answer__choices > button { flex: 1 1 0; min-width: 72px; min-height: 44px; padding: 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   border: 1px solid var(--mobile-hairline); border-radius: 999px; background: var(--mobile-group); color: var(--text); font-size: var(--fs-meta); font-weight: 600;
   transition: transform var(--dur-fast) ease, background-color var(--dur-fast) ease, opacity var(--dur-fast) ease; }

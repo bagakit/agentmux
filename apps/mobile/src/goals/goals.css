@@ -52,3 +52,21 @@
 .mobile-app .mobile-goals-list button { min-height: 56px; padding: 10px 14px; border-radius: 0; gap: 3px 10px; }
 .mobile-app .mobile-goals-list button:active { background: var(--mobile-group-press); }
 .mobile-app .mobile-goals-list strong { font-size: var(--fs-lead); font-weight: 600; line-height: 1.35; }
+
+/* Header actions disclose the existing creation and lookup owners. */
+.mobile-goals .mobile-goals-new { width: 44px; padding: 0; background: transparent; box-shadow: none; }
+.mobile-goal-lookup { position: relative; flex: none; margin: 0 !important; padding: 0 !important; }
+.mobile-goal-lookup > summary { display: grid; place-items: center; width: 44px; height: 44px; list-style: none; }
+.mobile-goal-lookup > summary::-webkit-details-marker { display: none; }
+.mobile-goal-lookup__panel { position: absolute; right: 0; top: 48px; z-index: 4; width: min(280px, calc(100vw - 32px)); padding: 16px; border-radius: var(--mobile-radius-group); background: var(--surface-2); box-shadow: var(--elev-3); }
+.mobile-goal-create:empty { display: none; }
+.mobile-goal-create__form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 6px; width: 100%; padding: 12px; border-radius: var(--mobile-radius-group); background: var(--mobile-group); }
+.mobile-goal-create__form[hidden] { display: none; }
+.mobile-goal-create__form label { grid-column: 1 / -1; margin: 0; }
+.mobile-goal-create__form > button:last-child { color: var(--bg); background: var(--mobile-accent); }
+.mobile-app .mobile-goals-list button { display: flex; align-items: center; gap: 14px; min-height: var(--mobile-row); }
+.mobile-goals-list button > svg { flex: none; color: var(--text-3); }
+.mobile-goals-list button > svg:first-child { width: 40px; height: 40px; padding: 8px; border-radius: var(--mobile-radius); background: var(--surface-2); }
+.mobile-goal-row-copy { display: grid; gap: 3px; flex: 1; min-width: 0; }
+.mobile-goal-row-copy > strong, .mobile-goal-row-copy > span { max-width: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-goal-row-copy > small { display: none; }

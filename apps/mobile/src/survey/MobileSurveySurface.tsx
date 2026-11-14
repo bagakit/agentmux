@@ -107,7 +107,7 @@ export function MobileSurveyCatalog({ client = null, connected = true, visible =
   return <MobileNoticeScope owner={client} identity={[context.zoneId,context.tabId,context.regionId]}><section className="mobile-survey" aria-label="Survey">
     <header className="mobile-page-header"><MobileHeaderMenu hidden={Boolean(activeBack)} />{activeBack && <button className="mobile-text-button" type="button" aria-label={context.regionId ? '返回研究内容' : '返回研究列表'} onClick={activeBack}><SemanticIcon name="navigation.back" size={16} /><span>{context.regionId ? '内容' : '研究'}</span></button>}
       <h1>{context.regionId ? selected?.region.kind === 'file' ? selected.region.file?.path.split('/').at(-1) ?? '文件' : selected?.region.kind === 'browser' ? '网页' : '内容' : context.zoneId ? item?.name ?? selected?.zoneName ?? '研究' : 'Survey'}</h1>
-      <button type="button" className="mobile-icon-button" aria-label="刷新研究" title="刷新研究" onClick={refresh}><SemanticIcon name="action.refresh" size={18} /></button></header>
+      {visible && <MobileAvatarNoticeOutlet header />}<button type="button" className="mobile-icon-button" aria-label="刷新研究" title="刷新研究" onClick={refresh}><SemanticIcon name="action.refresh" size={18} /></button></header>
     {[issue, survey?.issue].filter(Boolean).map((message, index) => <MobileNotice owner={client} identity={[context.zoneId,message]} className="mobile-survey-issue" key={index}>{message}</MobileNotice>)}
     {!context.zoneId ? <><p className="mobile-survey-intro">已收集的研究</p>
       {!survey ? <MobileNotice owner={client}>研究列表还没确认。</MobileNotice> : <nav aria-label="研究列表"><ul>{survey.items.map(value => <li key={value.zoneId}>
@@ -150,5 +150,5 @@ export function MobileSurveyCatalog({ client = null, connected = true, visible =
     </div>)}
   </section></MobileNoticeScope>
 }
-import { MobileNotice, MobileNoticeScope } from '../notices/MobileNotice'
+import { MobileAvatarNoticeOutlet, MobileNotice, MobileNoticeScope } from '../notices/MobileNotice'
 import { MobileAgentRow } from '../navigation/MobileAgentRow'
