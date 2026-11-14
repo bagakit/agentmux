@@ -281,7 +281,7 @@ it('real persisted Core owner → Unix public client → Main bridge → Rendere
  const sender=new Sender(),handlers=new Map<string,(...args:any[])=>any>()
  const ipc=registerNodePublishingIpc({handle:(name,listener)=>handlers.set(name,listener),call:(method,params,context)=>rpc.call(method,params,context),owner:(target,method,params,context)=>{expect(target).toEqual({hostId:'local',expectedRuntimeId:'original-ui-runtime'});return rpc.call(method,params,context)}})
  let serial=0
- const bridge=createRendererNodePublishing({owner:async(target,method,params,context)=>{const token='owner-'+(++serial);return handlers.get('nodePublishing:owner')!({sender},token,target,method,params)},call:async(method,params,context)=>{const token='ui-'+(++serial),release=context?.onAbort?.(()=>handlers.get('nodePublishing:cancel')!({sender},token));try{return await handlers.get('nodePublishing:call')!({sender},token,method,params)}finally{release?.()}}})
+ const bridge=createRendererNodePublishing({deviceLocation:async()=>({ok:true,value:null}),owner:async(target,method,params,context)=>{const token='owner-'+(++serial);return handlers.get('nodePublishing:owner')!({sender},token,target,method,params)},call:async(method,params,context)=>{const token='ui-'+(++serial),release=context?.onAbort?.(()=>handlers.get('nodePublishing:cancel')!({sender},token));try{return await handlers.get('nodePublishing:call')!({sender},token,method,params)}finally{release?.()}}})
  vi.spyOn(nodeCall,'call').mockImplementation(bridge.call as never)
  vi.spyOn(api.nodePublishing,'owner').mockImplementation(bridge.owner)
  vi.spyOn(api.hosts,'inspect').mockResolvedValue({routeHostId:'local',owner:{state:'available',value:{runtimeId:'original-ui-runtime'}}} as never)
@@ -338,4 +338,32 @@ it('keeps an unfinished map coordinate draft, and submits its final policy to th
   expect(call.mock.calls.find(row => row[0] === 'settings.node.configure')?.[1]).toMatchObject({ policy: { mapLocation: {
     coordinates: '45, -90', label: 'Field office', estimatePublicEgress: false,
   } } })
+})
+
+it('borrows only a connected device workface and cancels its own map read on disconnect', async () => {
+  const { bindDesktopNodeLocation } = await import('../../mobile/src/connection/desktop-device-location')
+  const reader = window as unknown as {
+    readOriginalNodeLocation(token: string): Promise<import('@agentmux/core/node-publishing').NodePublishingResults['node.location'] | null>
+    cancelNodeLocationRead(token: string): void
+  }
+  bindDesktopNodeLocation(null)
+  expect(await reader.readOriginalNodeLocation('closed')).toBeNull()
+  const result = { node: identity, location: { source: 'node', label: 'Field office', latitude: -10, longitude: 20 } }
+  const rpc = vi.fn(async (_method: string, _input: object, _context: { signal: AbortSignal }) => result)
+  bindDesktopNodeLocation({ forwardRpc: rpc } as never)
+  try {
+    expect(await reader.readOriginalNodeLocation('one')).toEqual(result)
+    expect(rpc).toHaveBeenCalledExactlyOnceWith('node.location', { hostId: 'local' }, expect.objectContaining({ signal: expect.anything() }))
+    const pending = (_method: string, _input: object, context: { signal: AbortSignal }) =>
+      new Promise<typeof result>((_resolve, reject) => context.signal.addEventListener('abort', () => reject(context.signal.reason), { once: true }))
+    rpc.mockImplementation(pending)
+    const mapHidden = reader.readOriginalNodeLocation('two')
+    reader.cancelNodeLocationRead('two')
+    await expect(mapHidden).rejects.toMatchObject({ name: 'AbortError' })
+    const disconnected = reader.readOriginalNodeLocation('three')
+    bindDesktopNodeLocation(null)
+    await expect(disconnected).rejects.toMatchObject({ name: 'AbortError' })
+    expect(await reader.readOriginalNodeLocation('four')).toBeNull()
+    expect(rpc).toHaveBeenCalledTimes(3)
+  } finally { bindDesktopNodeLocation(null) }
 })
