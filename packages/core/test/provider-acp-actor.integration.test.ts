@@ -11,7 +11,7 @@ import { headlessFixture, until } from './helpers/headless-runtime-fixture.js'
 
 const exec = promisify(execFile)
 const entry = (relative: string) => fileURLToPath(new URL(relative, import.meta.url))
-type RecordedRequest = { pid: number; id?: number | string; method: string; params: unknown }
+type RecordedRequest = { pid: number; id?: number | string; method: string; params: unknown; result?: unknown }
 
 it('opens and rejoins one ACP Session, then awaits an exact resume before binding a replacement Run', async () => {
   const scope = await headlessFixture({ ownerEntry: entry('./fixtures/acp-spatial-host.mjs'),
@@ -106,17 +106,46 @@ it('opens and rejoins one ACP Session, then awaits an exact resume before bindin
     expect(promptResult.record?.admission?.native).not.toHaveProperty('turnId')
     expect(JSON.parse((await submit()).stdout).result.record.admission.native).toEqual(promptResult.record.admission.native)
     expect(await calls()).toEqual(promptCalls)
+    const readPermission = async () => (await core.readAgentSession(session.agentSessionId))?.pendingInteraction?.request
+    const permission = await until(readPermission, request => request?.kind === 'permission', 'first exact ACP permission')
+    expect(permission).toMatchObject({ kind: 'permission', nativeToolCallId: 'original-tool-call', options: [
+      { id: 'native-allow-exact', kind: 'allow-once' }, { id: 'native-deny-exact', kind: 'reject-once' }
+    ] })
+    const timeline = await until(() => core.sessionTimeline(session.agentSessionId),
+      result => result.items.some(item => item.kind === 'tool_call' && item.status === 'complete'), 'actual ACP activity updates')
+    expect(timeline.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'assistant_message', content: 'ACP fixture assistant content' }),
+      expect.objectContaining({ kind: 'tool_call', title: 'Original tool activity', status: 'complete' })
+    ]))
+    expect(timeline.items).not.toEqual(expect.arrayContaining([expect.objectContaining({ content: 'Foreign message' })]))
+
     await core.dispose()
     await scope.restart()
     core = await scope.client()
+    const originalPermission = await until(readPermission, request => request?.id === permission?.id && !request?.responseUnavailableReason,
+      'same unanswered ACP permission after Core restart')
+    expect(originalPermission).toEqual(permission)
+    expect(await calls()).toEqual(promptCalls)
+    const answerFile = join(scope.root, 'permission-answer.json')
+    await writeFile(answerFile, JSON.stringify({ agentSessionId: session.agentSessionId, expectedRun: session.run,
+      operationId: 'original-structured-permission-answer', expectedRequest: originalPermission,
+      response: { kind: 'permission', requestId: originalPermission?.id, decision: { outcome: 'selected', optionId: 'native-deny-exact' } } }))
+    const answered = await exec(process.execPath, [...cli, 'agent', 'interaction', 'respond', '--input', answerFile], { env: scope.env })
+    expect(JSON.parse(answered.stdout).result).toMatchObject({ delivery: 'acp-acknowledged', expectedRequest: originalPermission })
+    const answeredCalls = await until(calls, value => value.length >= 5, 'exact native response on the original permission')
+    expect(answeredCalls[4]).toEqual({ pid: nativePid, id: 41, method: 'client-response', result: { outcome: { outcome: 'selected', optionId: 'native-deny-exact' } } })
+    const nextPermission = await until(readPermission, request => !!request && request.id !== originalPermission?.id, 'new ACP permission occurrence')
+    expect(nextPermission?.evidence).toMatchObject({ acpBindingId: originalPermission?.evidence.acpBindingId })
+
     const cancel = (promptOperationId: string) => exec(process.execPath, [...cli, 'agent', 'interrupt', '--session', session.agentSessionId, '--run', session.run.runId,
       '--prompt-operation-id', promptOperationId], { env: scope.env })
     await expect(cancel('foreign-prompt-operation')).rejects.toMatchObject({ stderr: expect.stringContaining('AGENT_ACP_CANCEL_UNCONFIRMED') })
-    expect(await calls()).toEqual(promptCalls)
+    expect(await calls()).toEqual(answeredCalls)
     const cancelling = cancel('original-structured-prompt')
     void cancelling.catch(() => {})
-    const cancelCalls = await until(calls, value => value.length >= 5, 'the original native session/cancel notification')
-    expect(cancelCalls[4]).toEqual({ pid: nativePid, method: 'session/cancel', params: { sessionId: 'fixture-original-acp-session' } })
+    const cancelCalls = await until(calls, value => value.length >= 7, 'the original native cancel and permission cancellation')
+    expect(cancelCalls[5]).toEqual({ pid: nativePid, method: 'session/cancel', params: { sessionId: 'fixture-original-acp-session' } })
+    expect(cancelCalls[6]).toEqual({ pid: nativePid, id: '41', method: 'client-response', result: { outcome: { outcome: 'cancelled' } } })
     expect(await Promise.race([cancelling.then(() => 'returned'), wait(175, 'pending')])).toBe('pending')
     expect((await core.listRuns()).find(run => run.runId === session.run.runId)).toMatchObject({ pid: original.pid, state: 'running' })
     await writeFile(cancelRelease, 'complete the original cancelled prompt')
@@ -124,16 +153,22 @@ it('opens and rejoins one ACP Session, then awaits an exact resume before bindin
     expect(cancelled).toEqual({ agentSessionId: session.agentSessionId, runId: session.run.runId, promptOperationId: 'original-structured-prompt' })
     expect(JSON.parse((await cancel('original-structured-prompt')).stdout).result).toEqual(cancelled)
     expect(await calls()).toEqual(cancelCalls)
+    const finalActivity = await until(() => core.sessionTimeline(session.agentSessionId),
+      result => result.items.some(item => item.kind === 'assistant_message' && item.status === 'complete'), 'final Activity from the original cancelled turn')
+    expect(finalActivity.items.filter(item => item.kind === 'assistant_message')).toEqual([
+      expect.objectContaining({ content: 'ACP fixture assistant content', status: 'complete' })
+    ])
+    expect(await readPermission()).toBeUndefined()
     expect(() => process.kill(nativePid, 0)).not.toThrow()
 
     const restartRequest = { agentSessionId: session.agentSessionId, expectedRun: session.run, operationId: 'restore-original-acp-session' }
     const restarting = exec(process.execPath, [...cli, 'agent', 'restart', '--session', restartRequest.agentSessionId,
       '--run', restartRequest.expectedRun.runId, '--operation-id', restartRequest.operationId], { env: scope.env })
     void restarting.catch(() => {})
-    const resumedCalls = await until(calls, value => value.length >= 7, 'replacement child already requesting the original ACP session')
-    expect(resumedCalls.map(call => call.method)).toEqual(['initialize', 'session/new', 'session/prompt', 'session/prompt', 'session/cancel', 'initialize', 'session/resume'])
-    expect(resumedCalls[5]!.pid).not.toBe(nativePid)
-    expect(resumedCalls[6]).toMatchObject({ pid: resumedCalls[5]!.pid,
+    const resumedCalls = await until(calls, value => value.length >= 9, 'replacement child already requesting the original ACP session')
+    expect(resumedCalls.map(call => call.method)).toEqual(['initialize', 'session/new', 'session/prompt', 'session/prompt', 'client-response', 'session/cancel', 'client-response', 'initialize', 'session/resume'])
+    expect(resumedCalls[7]!.pid).not.toBe(nativePid)
+    expect(resumedCalls[8]).toMatchObject({ pid: resumedCalls[7]!.pid,
       params: { sessionId: 'fixture-original-acp-session', cwd: scope.root, mcpServers: [] } })
     const beforeAck = await core.inspectAgentRestart(restartRequest)
     expect(beforeAck.phase).not.toBe('restarted')
@@ -146,7 +181,7 @@ it('opens and rejoins one ACP Session, then awaits an exact resume before bindin
     expect(resumed.nativeHandle).toEqual(saved?.nativeHandle)
     expect(await calls()).toEqual(resumedCalls)
 
-    process.kill(resumedCalls[5]!.pid, 'SIGTERM')
+    process.kill(resumedCalls[7]!.pid, 'SIGTERM')
     await until(async () => (await core.listRuns()).find(run => run.runId === resumed.run.runId),
       run => run !== undefined && run.state !== 'running', 'confirmed terminal state on the exact ACP Run')
     const resumeInput = { agentSessionId: session.agentSessionId, operationId: 'resume-with-original-draft', prompt: 'Original resumed draft',
@@ -154,9 +189,9 @@ it('opens and rejoins one ACP Session, then awaits an exact resume before bindin
     const withDraft = await core.resumeAgent(resumeInput)
     started = withDraft
     expect(withDraft.nativeHandle).toEqual(saved?.nativeHandle)
-    const withDraftCalls = await until(calls, value => value.length >= 10, 'typed SDK resume with the original deferred draft')
-    expect(withDraftCalls.slice(7).map(call => call.method)).toEqual(['initialize', 'session/resume', 'session/prompt'])
-    expect(withDraftCalls[9]).toMatchObject({ pid: withDraftCalls[8]!.pid, params: { sessionId: 'fixture-original-acp-session',
+    const withDraftCalls = await until(calls, value => value.length >= 12, 'typed SDK resume with the original deferred draft')
+    expect(withDraftCalls.slice(9).map(call => call.method)).toEqual(['initialize', 'session/resume', 'session/prompt'])
+    expect(withDraftCalls[11]).toMatchObject({ pid: withDraftCalls[10]!.pid, params: { sessionId: 'fixture-original-acp-session',
       prompt: [{ type: 'text', text: expect.stringMatching(/Original resumed draft$/u) }] } })
     expect((await core.resumeAgent(resumeInput)).run).toEqual(withDraft.run)
     expect(await calls()).toEqual(withDraftCalls)
@@ -168,7 +203,7 @@ it('opens and rejoins one ACP Session, then awaits an exact resume before bindin
     const retained = await core.readAgentSession(session.agentSessionId)
     expect(retained?.nativeHandle).toEqual(saved?.nativeHandle)
     expect(retained?.run).toEqual(withDraft.run)
-    expect((await calls()).slice(10).map(call => call.method)).toEqual(['initialize', 'session/resume'])
+    expect((await calls()).slice(12).map(call => call.method)).toEqual(['initialize', 'session/resume'])
     await core.stopAgent(started.agentSessionId, started.run, { operationId: 'stop-original-structured-acp' })
     started = undefined
   } finally {

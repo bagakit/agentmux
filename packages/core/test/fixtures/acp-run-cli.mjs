@@ -5,24 +5,51 @@ import { setTimeout } from 'node:timers/promises'
 
 if (process.argv.length !== 3 || process.argv[2] !== 'acp' || !process.env.ACP_RUN_TRACE || !process.env.ACP_RUN_RELEASE) process.exit(2)
 if (process.env.AGENTMUX_ACP_ACTOR_TOKEN || process.env.AGENTMUX_HOOK_TOKEN) process.exit(3)
-let pendingPrompt
+const sessionId = 'fixture-original-acp-session'
+const options = [
+  { optionId: 'native-allow-exact', name: 'Allow once', kind: 'allow_once' },
+  { optionId: 'native-deny-exact', name: 'Reject once', kind: 'reject_once' }
+]
+const send = frame => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...frame }) + '\n')
+const update = update => send({ method: 'session/update', params: { sessionId, update } })
+const permission = (id, toolCallId) => send({ id, method: 'session/request_permission',
+  params: { sessionId, toolCall: { toolCallId, title: 'Original tool permission' }, options } })
+
+let pendingPrompt, cancelNotified = false
 for await (const line of createInterface({ input: process.stdin })) {
-  const { id, method, params } = JSON.parse(line)
-  appendFileSync(process.env.ACP_RUN_TRACE, JSON.stringify({ pid: process.pid, id, method, params }) + '\n')
-  const reply = result => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\n')
+  const { id, method, params, result } = JSON.parse(line)
+  appendFileSync(process.env.ACP_RUN_TRACE, JSON.stringify({ pid: process.pid, id, method: method ?? 'client-response', params, result }) + '\n')
+  const reply = result => send({ id, result })
   if (method === 'initialize') reply({ protocolVersion: 1, agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} } } })
   else if (method === 'session/new') {
     while (!existsSync(process.env.ACP_RUN_RELEASE)) await setTimeout(20)
-    reply({ sessionId: 'fixture-original-acp-session' })
-  } else if (method === 'session/resume' && params.sessionId === 'fixture-original-acp-session' && process.env.ACP_RUN_RESUME_RELEASE) {
+    reply({ sessionId })
+  } else if (method === 'session/resume' && params.sessionId === sessionId && process.env.ACP_RUN_RESUME_RELEASE) {
     while (!existsSync(process.env.ACP_RUN_RESUME_RELEASE)) await setTimeout(20)
     reply(readFileSync(process.env.ACP_RUN_RESUME_RELEASE, 'utf8') === 'mismatch' ? { sessionId: 'fixture-foreign-acp-session' } : {})
-  } else if (method === 'session/prompt' && params.sessionId === 'fixture-original-acp-session' && typeof id === 'string' && !pendingPrompt) {
-    if (params.prompt?.[0]?.text.endsWith('Original creation draft') || params.prompt?.[0]?.text.endsWith('Original resumed draft')) reply({ stopReason: 'end_turn' })
-    else pendingPrompt = id
-  } else if (method === 'session/cancel' && params.sessionId === 'fixture-original-acp-session' && id === undefined && pendingPrompt) {
-    while (!existsSync(process.env.ACP_RUN_CANCEL_RELEASE)) await setTimeout(20)
-    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: pendingPrompt, result: { stopReason: 'cancelled' } }) + '\n')
-    pendingPrompt = undefined
+  } else if (method === 'session/prompt' && params.sessionId === sessionId && typeof id === 'string' && !pendingPrompt) {
+    const draft = params.prompt?.[0]?.text
+    if (draft?.endsWith('Original creation draft') || draft?.endsWith('Original resumed draft')) {
+      reply({ stopReason: 'end_turn' })
+    } else {
+      pendingPrompt = id
+      update({ sessionUpdate: 'agent_message_chunk', messageId: 'original-msg', content: { type: 'text', text: 'ACP fixture ' } })
+      update({ sessionUpdate: 'agent_message_chunk', messageId: 'original-msg', content: { type: 'text', text: 'assistant content' } })
+      update({ sessionUpdate: 'tool_call', toolCallId: 'original-tool-call', title: 'Original tool activity', status: 'pending' })
+      update({ sessionUpdate: 'tool_call_update', toolCallId: 'original-tool-call', status: 'completed' })
+      send({ method: 'session/update', params: { sessionId: 'foreign-session', update: { sessionUpdate: 'agent_message_chunk',
+        messageId: 'foreign-msg', content: { type: 'text', text: 'Foreign message' } } } })
+      permission(41, 'original-tool-call')
+    }
+  } else if (method === 'session/cancel' && params.sessionId === sessionId && id === undefined && pendingPrompt) {
+    cancelNotified = true
+  } else if (method === undefined && pendingPrompt) {
+    if (id === 41 && result?.outcome?.outcome === 'selected' && result.outcome.optionId === 'native-deny-exact') permission('41', 'second-tool-call')
+    else if (id === '41' && result?.outcome?.outcome === 'cancelled' && cancelNotified) {
+      while (!existsSync(process.env.ACP_RUN_CANCEL_RELEASE)) await setTimeout(20)
+      send({ id: pendingPrompt, result: { stopReason: 'cancelled' } })
+      pendingPrompt = undefined
+      cancelNotified = false
+    } else process.exit(4)
   } else process.exit(2)
 }
