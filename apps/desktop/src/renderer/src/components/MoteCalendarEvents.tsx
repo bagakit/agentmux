@@ -1,3 +1,4 @@
+import { isMoteHeartbeatSchedule } from '@agentmux/core/mote-preferences'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { DateTime } from 'luxon'
 import { Button } from '@agentmux/client-ui/components/Button'
@@ -18,7 +19,8 @@ const receiptKey = (receipt: Receipt) => JSON.stringify([receipt.runId, receipt.
 const slotKey = (id: string, at: number) => JSON.stringify([id, at])
 const formatCount = new Intl.NumberFormat()
 
-export function MoteCalendarEvents({ window, schedules, items, timezone, now, active, onOpenRule, onOpenDiscussion }: {
+export function MoteCalendarEvents({ heartbeatSourceId, window, schedules, items, timezone, now, active, onOpenRule, onOpenDiscussion }: {
+  heartbeatSourceId: string
   window: ScheduleOccurrenceWindow
   schedules: ReadonlyMap<string, CalendarSchedule>
   items: readonly ScheduleOccurrence[]
@@ -89,12 +91,15 @@ export function MoteCalendarEvents({ window, schedules, items, timezone, now, ac
     return () => { valid = false }
   }, [active, from, to, request, watch])
 
-  const events = useMemo(() => {
+  const { events, failed, more } = useMemo(() => {
     const timeline: CalendarEvent[] = []
     const recorded = new Set<string>()
-    for (const [id, page] of pages) {
-      const saved = schedules.get(id)
-      if (!saved) continue
+    let failed = false, more = false
+    for (const [id, saved] of schedules) {
+      const page = pages.get(id)
+      if (!page) continue
+      if (page.retry) failed = true
+      else if (page.next) more = true
       for (const receipt of page.entries) {
         recorded.add(slotKey(id, receipt.occurrenceAt))
         timeline.push({ at: receipt.occurrenceAt, saved, receipt })
@@ -104,10 +109,9 @@ export function MoteCalendarEvents({ window, schedules, items, timezone, now, ac
       const saved = schedules.get(planned.scheduleId)
       if (saved && !recorded.has(slotKey(planned.scheduleId, planned.at))) timeline.push({ at: planned.at, saved, planned })
     }
-    return timeline.sort((a, b) => a.at - b.at || a.saved.record.loopId.localeCompare(b.saved.record.loopId))
+    const events = timeline.sort((a, b) => a.at - b.at || a.saved.record.loopId.localeCompare(b.saved.record.loopId))
+    return { events, failed, more }
   }, [items, pages, schedules])
-  const failed = [...pages.values()].some(page => page.retry)
-  const more = [...pages.values()].some(page => page.next && !page.retry)
   return <div className="mote-calendar__events" aria-busy={busy}>
     {events.length ? <ol aria-label="Calendar events">{events.map(event => {
       const { saved, at } = event, { record } = saved
@@ -122,8 +126,9 @@ export function MoteCalendarEvents({ window, schedules, items, timezone, now, ac
         : planned?.repeat && planned.repeat.count > 1 ? formatCount.format(planned.repeat.count) + ' planned'
         : planned?.kind === 'next-due' ? scheduleStateLabel(record, now) === 'Active' ? 'Planned' : scheduleStateLabel(record, now)
         : 'Planned'
-      const label = receipt?.recap ? scheduleCalendarLabel({ ...record, prompt: receipt.recap.text })
-        : receipt && !record.managedSource ? 'Scheduled input' : scheduleCalendarLabel(record)
+      const heartbeat = isMoteHeartbeatSchedule(record, heartbeatSourceId)
+      const label = !heartbeat && receipt && !receipt.recap ? 'Scheduled input'
+        : scheduleCalendarLabel(receipt?.recap ? { ...record, prompt: receipt.recap.text } : record, heartbeat)
       return <li key={key} data-event-result={result} data-event-kind={receipt ? 'recorded' : planned?.kind}>
         <button type="button" className="mote-calendar__event" data-event-schedule={record.loopId} aria-expanded={receipt ? opened === key : undefined}
           onClick={() => receipt ? setOpened(opened === key ? undefined : key) : onOpenRule(record.loopId)}>

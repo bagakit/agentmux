@@ -1,3 +1,4 @@
+import { isMoteHeartbeatSchedule, motePresenceSourceId } from '@agentmux/core/mote-preferences'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { requestDesktopFocusWorkfaceReveal } from '../lib/desktop-presentation'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
@@ -29,6 +30,7 @@ import { MoteCalendarEvents } from './MoteCalendarEvents'
 const ChevronLeft = semanticIconComponent('navigation.back')
 const ChevronRight = semanticIconComponent('navigation.forward')
 const Plus = semanticIconComponent('action.create')
+const Heartbeat = semanticIconComponent('object.heartbeat')
 type CalendarMode = 'day' | 'three-days' | 'week' | 'month' | 'upcoming'
 const hourLabel = (hour: number) => String(hour).padStart(2, '0') + ':00'
 const hoursOfDay = Array.from({ length: 24 }, (_, hour) => hour)
@@ -51,6 +53,7 @@ export function MoteCalendar({ scope, reference, active, openRequest, onSelectDi
   onSelectDiscussion?: (reference: WorkbenchProjectionSelection) => boolean
   openRequest?: { scheduleId: string } | undefined
 }) {
+  const heartbeatSourceId = useMemo(() => motePresenceSourceId({ hostId: scope.workspace.hostId, moteId: scope.topic.id }), [scope.workspace.hostId, scope.topic.id])
   const contentPresentation = useSpaceContentPresentation()
   const queries = moteScheduleQueries(scope)
   const retained = useRef(queries)
@@ -167,7 +170,8 @@ export function MoteCalendar({ scope, reference, active, openRequest, onSelectDi
     if (detailsInvoker.current?.isConnected) detailsInvoker.current.focus({ preventScroll: true })
   }
   function lineTitle(line: CalendarCellLine) {
-    if (!line.recorded || line.record.managedSource) return scheduleCalendarLabel(line.record)
+    const heartbeat = isMoteHeartbeatSchedule(line.record, heartbeatSourceId)
+    if (!line.recorded || heartbeat) return scheduleCalendarLabel(line.record, heartbeat)
     return line.originalLabel ? scheduleCalendarLabel({ ...line.record, prompt: line.originalLabel }) : 'Scheduled input'
   }
   const localTime = useMemo(() => new Intl.DateTimeFormat('en-GB', { timeZone: timezone, hour: '2-digit', minute: '2-digit' }), [timezone])
@@ -176,6 +180,15 @@ export function MoteCalendar({ scope, reference, active, openRequest, onSelectDi
     const time = localTime.format(line.at)
     if (line.recorded && line.recorded > 1) return line.text + ' ×' + formatCount.format(line.recorded)
     return time + ' · ' + line.text
+  }
+  function lineContent(line: CalendarCellLine) {
+    const heartbeat = isMoteHeartbeatSchedule(line.record, heartbeatSourceId)
+    const count = line.recorded ?? line.planned ?? 0
+    return <>
+      {heartbeat ? <Heartbeat size={13} aria-hidden /> : <span>{lineTitle(line)}</span>}
+      <small>{lineText(line)}</small>
+      <b aria-hidden="true">{line.attention ? '!' : line.recorded ? '✓' : ''}{count > 1 || (heartbeat && line.planned) ? '×' + formatCount.format(count) : ''}</b>
+    </>
   }
   function describeLine(line: CalendarCellLine) {
     const label = lineTitle(line) + ' · ' + lineText(line)
@@ -207,7 +220,7 @@ export function MoteCalendar({ scope, reference, active, openRequest, onSelectDi
     if (next) { event.preventDefault(); chooseDate(next, true) }
   }
   const row = (record: ContinuousProgressLoop) => <ScheduleArrangementRow
-    key={record.loopId} schedule={record} calendarSummary timezone={timezone} now={now}
+    key={record.loopId} schedule={record} calendarSummary heartbeat={isMoteHeartbeatSchedule(record, heartbeatSourceId)} timezone={timezone} now={now}
     onReceipt={source.accept} discussion={byId.get(record.loopId)?.discussion || 'Original discussion unconfirmed'} onOpenDiscussion={openDiscussion} />
   const requested = useRef<typeof openRequest>(undefined)
   const pendingReveal = useRef<string | undefined>(undefined)
@@ -332,11 +345,10 @@ export function MoteCalendar({ scope, reference, active, openRequest, onSelectDi
                 aria-label={date.toFormat('cccc, LLLL d, yyyy') + ', ' + groups.length + ' arrangements, ' + planned + ' planned'} aria-pressed={selected === key} tabIndex={selected === key ? 0 : -1}
                 onClick={event => { chooseDate(date); openPeriod(event.currentTarget) }} onKeyDown={event => dateKey(event, date)}><span>{date.day}</span>{timed ? <strong>{date.toFormat('ccc')}</strong> : null}{planned ? <small>{formatCount.format(planned)}<span> planned</span></small> : null}</button>
               {!timed ? <div className="mote-calendar__previews">{lines.slice(0, 3).map(line =>
-                <button key={line.record.loopId + line.text} type="button" className="mote-calendar__point" data-calendar-schedule-id={line.record.loopId} data-managed={!!line.record.managedSource} data-attention={line.attention}
+                <button key={line.record.loopId + line.text} type="button" className="mote-calendar__point" data-calendar-schedule-id={line.record.loopId} data-heartbeat={isMoteHeartbeatSchedule(line.record, heartbeatSourceId) || undefined} data-attention={line.attention}
                   aria-label={describeLine(line)} title={describeLine(line)}
                   onClick={event => { chooseDate(date); openPeriod(event.currentTarget) }}>
-                  <span>{lineTitle(line)}</span><small>{lineText(line)}</small>
-                  <b aria-hidden="true">{line.attention ? '!' : line.recorded ? '✓' : ''}{(line.recorded ?? line.planned ?? 0) > 1 ? '×' + formatCount.format((line.recorded ?? line.planned)!) : ''}</b>
+                  {lineContent(line)}
                 </button>)}
                 {lines.length > 3 ? <button type="button" className="mote-calendar__more" onClick={event => { chooseDate(date); openPeriod(event.currentTarget) }}>+{lines.length - 3} more</button> : null}</div> : null}
             </div>
@@ -355,15 +367,16 @@ export function MoteCalendar({ scope, reference, active, openRequest, onSelectDi
               return <div className="mote-calendar__hour-day" key={key}>
                 <button type="button" className="mote-calendar__bucket" data-calendar-hour={slotKey} data-calendar-planned={planned} disabled={!slot}
                   aria-label={date.toFormat('cccc, LLLL d') + ' at ' + hourLabel(hour) + ', ' + formatCount.format(planned) + ' planned' + (recorded ? ', ' + recorded + ' recorded' : '') + (emptyFuture ? ', prepare arrangement' : '')}
+                  aria-description={lines.length ? lines.slice(0, 3).map(describeLine).join('; ') : undefined}
                   aria-pressed={key === selected && hour === selectedHour} tabIndex={key === selected && hour === selectedHour ? 0 : -1}
                   onClick={event => {
                     selectHour(date, hour)
                     if (emptyFuture) prepare(event.currentTarget, date, hourLabel(hour))
                     else openPeriod(event.currentTarget)
                   }} onKeyDown={event => hourKey(event, date, hour)}>
-                  {lines.slice(0, 3).map(line => <span key={line.record.loopId + line.text} className="mote-calendar__rate" data-managed={!!line.record.managedSource} data-attention={line.attention}
+                  {lines.slice(0, 3).map(line => <span key={line.record.loopId + line.text} className="mote-calendar__rate" data-heartbeat={isMoteHeartbeatSchedule(line.record, heartbeatSourceId) || undefined} data-attention={line.attention}
                     title={describeLine(line)}>
-                    <span>{lineTitle(line)}</span><small>{lineText(line)}</small>
+                    {lineContent(line)}
                   </span>)}
                   {lines.length > 3 ? <small className="mote-calendar__more">+{lines.length - 3} more</small> : null}
                   {!slot ? <small>Skipped hour</small> : null}
@@ -378,13 +391,13 @@ export function MoteCalendar({ scope, reference, active, openRequest, onSelectDi
       {detailsOpen ? <section className="mote-calendar__day" aria-label="Selected day arrangements" onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); closePeriod() } }}>
         <section className="mote-calendar__window-info" aria-label={timed ? 'Selected hour' : 'Selected date'}>
           <header><h4>{selectedDate.toFormat('ccc, LLL d')}{timed ? ' · ' + hourLabel(selectedHour) : ''}</h4><button type="button" aria-label="Close period details" onClick={closePeriod}>×</button></header>
-          {source.observed && eventWindow ? <MoteCalendarEvents key={JSON.stringify([retained.current, eventWindow.from, eventWindow.to])}
+          {source.observed && eventWindow ? <MoteCalendarEvents heartbeatSourceId={heartbeatSourceId} key={JSON.stringify([retained.current, eventWindow.from, eventWindow.to])}
             window={eventWindow} schedules={byId} items={selectedEvents} timezone={timezone} now={now}
             active={active && queries.length > 0} onOpenRule={revealArrangement} onOpenDiscussion={openDiscussion} />
             : <p className="continuous-progress-control__help">{source.observed ? 'This hour does not exist in the calendar timezone.' : 'Arrangements are unconfirmed.'}</p>}
           {selectedCount ? <div className="mote-calendar__period-plan">
             <p className="mote-calendar__plan-total"><strong>{formatCount.format(selectedCount)}</strong> planned</p>
-            {timed && selectedSlot ? <MoteCalendarTimes key={selected + ':' + selectedHour} items={selectedPlans} schedules={byId} timezone={timezone} now={now}
+            {timed && selectedSlot ? <MoteCalendarTimes heartbeatSourceId={heartbeatSourceId} key={selected + ':' + selectedHour} items={selectedPlans} schedules={byId} timezone={timezone} now={now}
               repeatedHour={selectedSlot.window.to - selectedSlot.window.from > 3_600_000} onOpen={revealArrangement} />
               : <Button type="button" onClick={() => changeMode('day')}>Open day</Button>}
           </div> : null}

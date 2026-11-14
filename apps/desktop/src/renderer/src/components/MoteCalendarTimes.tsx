@@ -1,3 +1,4 @@
+import { isMoteHeartbeatSchedule } from '@agentmux/core/mote-preferences'
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { DateTime } from 'luxon'
 import type { ScheduleOccurrence } from '@agentmux/core/schedule-calendar'
@@ -7,7 +8,8 @@ import type { CalendarSchedule } from '../lib/mote-calendar-range'
 
 const pageSize = 12
 
-export function MoteCalendarTimes({ items, schedules, timezone, now, repeatedHour, onOpen }: {
+export function MoteCalendarTimes({ heartbeatSourceId, items, schedules, timezone, now, repeatedHour, onOpen }: {
+  heartbeatSourceId: string
   items: readonly ScheduleOccurrence[]; schedules: ReadonlyMap<string, CalendarSchedule>
   timezone: string; now: number; repeatedHour: boolean; onOpen(scheduleId: string, recorded: boolean): void
 }) {
@@ -45,7 +47,7 @@ export function MoteCalendarTimes({ items, schedules, timezone, now, repeatedHou
         const state = item.kind === 'last-accepted' ? 'Input accepted' : item.kind === 'projected' ? 'Planned' : status === 'Active' ? 'Next planned' : status
         return <li key={JSON.stringify([item.scheduleId, item.at])} data-occurrence-kind={item.kind}>
           <time dateTime={new Date(item.at).toISOString()}>{local.toFormat(repeatedHour ? 'HH:mm ZZ' : 'HH:mm')}</time>
-          <button type="button" title={scheduleDisplayTitle(saved.record)} onClick={() => onOpen(item.scheduleId, item.kind === 'last-accepted')}>{scheduleCalendarLabel(saved.record)}</button>
+          <button type="button" title={scheduleDisplayTitle(saved.record)} onClick={() => onOpen(item.scheduleId, item.kind === 'last-accepted')}>{scheduleCalendarLabel(saved.record, isMoteHeartbeatSchedule(saved.record, heartbeatSourceId))}</button>
           <small>{state}</small>
         </li>
       })}</ol>

@@ -8,7 +8,7 @@ import { useScheduleOperation } from '../lib/schedule-controller'
 import { ScheduleOperationNotice } from './ScheduleOperationNotice'
 
 const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-const MoteIcon = semanticIconComponent('object.mote')
+const HeartbeatIcon = semanticIconComponent('object.heartbeat')
 const ScheduleIcon = semanticIconComponent('object.schedule')
 export function scheduleRuleLabel(schedule: Pick<ContinuousProgressLoop, 'everyMs' | 'calendar' | 'afterMs'>): string {
   if (schedule.everyMs !== undefined) return schedule.everyMs === 60000 ? 'Every minute' : 'Every ' + schedule.everyMs / 60000 + ' minutes'
@@ -25,13 +25,13 @@ export function scheduleStateLabel(schedule: ContinuousProgressLoop, now: number
 export function scheduleDisplayTitle(schedule: ContinuousProgressLoop): string {
   return schedule.prompt.trim().split('\n')[0]!
 }
-export function scheduleCalendarLabel(schedule: ContinuousProgressLoop): string {
-  if (schedule.managedSource) return 'Mote heartbeat'
+export function scheduleCalendarLabel(schedule: ContinuousProgressLoop, heartbeat = false): string {
+  if (heartbeat) return 'Mote heartbeat'
   const headline = scheduleDisplayTitle(schedule)
   return headline.match(/^(.{2,16}?)(?:：|:\s)/u)?.[1]?.trim() || headline
 }
-export function ScheduleArrangementRow({ schedule, timezone, now, onReceipt, discussion, onOpenDiscussion, quickActions = false, calendarSummary = false }: {
-  schedule: ContinuousProgressLoop; timezone: string; now: number; calendarSummary?: boolean
+export function ScheduleArrangementRow({ schedule, timezone, now, onReceipt, discussion, onOpenDiscussion, quickActions = false, calendarSummary = false, heartbeat = false }: {
+  schedule: ContinuousProgressLoop; timezone: string; now: number; calendarSummary?: boolean; heartbeat?: boolean
   onReceipt(schedule: ContinuousProgressLoop): void; discussion?: string | undefined
   onOpenDiscussion?: (schedule: ContinuousProgressLoop) => void
   quickActions?: boolean
@@ -48,7 +48,7 @@ export function ScheduleArrangementRow({ schedule, timezone, now, onReceipt, dis
   const date = formats.short.format(at)
   const phase = scheduleStateLabel(schedule, now)
   const nextLabel = phase === 'Active' ? 'Next planned' : phase === 'Due' ? 'Due since' : 'Original due'
-  const Icon = schedule.managedSource ? MoteIcon : ScheduleIcon
+  const Icon = heartbeat ? HeartbeatIcon : ScheduleIcon
   const remaining = Math.ceil((schedule.nextCheckAt - now) / 1000)
   const relative = remaining <= 0 ? 'Due' : remaining < 60 ? remaining + 's left' : remaining < 3600 ? Math.ceil(remaining / 60) + 'm left' : Math.ceil(remaining / 3600) + 'h left'
   const cadence = schedule.afterMs === undefined ? scheduleRuleLabel(schedule).split(' · ')[0] : 'Countdown' + (phase === 'Active' ? ' · ' + relative : '')
@@ -62,7 +62,7 @@ export function ScheduleArrangementRow({ schedule, timezone, now, onReceipt, dis
       onReceipt(result.schedule); setInspection('Original arrangement checked. Input acceptance and completed work are separate.')
     } catch (error) { if (alive.current) setInspection(error instanceof Error ? error.message : String(error)) }
   }
-  return <li className="schedule-arrangement" data-compact={quickActions || undefined} data-calendar-summary={calendarSummary || undefined} data-managed={schedule.managedSource ? true : undefined} data-schedule-id={schedule.loopId}>
+  return <li className="schedule-arrangement" data-compact={quickActions || undefined} data-calendar-summary={calendarSummary || undefined} data-heartbeat={heartbeat || undefined} data-schedule-id={schedule.loopId}>
     <div className="schedule-arrangement__overview">
       {!calendarSummary ? <>
         {quickActions ? <p className="schedule-arrangement__message">{schedule.prompt.split('\n')[0]}</p> : null}
@@ -70,7 +70,7 @@ export function ScheduleArrangementRow({ schedule, timezone, now, onReceipt, dis
         {!quickActions ? <p className="schedule-arrangement__message">{schedule.prompt.split('\n')[0]}</p> : null}
       </> : <div className="schedule-arrangement__heading">
         <span className="schedule-arrangement__mark"><Icon size={14} aria-hidden /></span>
-        <p className="schedule-arrangement__message" title={scheduleDisplayTitle(schedule)}>{scheduleCalendarLabel(schedule)}</p>
+        <p className="schedule-arrangement__message" title={scheduleDisplayTitle(schedule)}>{scheduleCalendarLabel(schedule, heartbeat)}</p>
         <span className="schedule-arrangement__cadence" title={scheduleRuleLabel(schedule)}>{cadence}</span>
       </div>}
       {!calendarSummary ? <div className="schedule-arrangement__caption"><span>{schedule.calendar || schedule.everyMs !== undefined ? scheduleRuleLabel(schedule) : 'Countdown' + (schedule.status === 'active' && schedule.lastOutcome !== 'unknown' ? ' · ' + relative : '')}</span>

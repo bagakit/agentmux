@@ -71,7 +71,7 @@
 .mote-calendar__cell[data-today="true"] .mote-calendar__date > span { color: var(--surface-1); background: var(--green); font-weight: 650; }
 .mote-calendar__previews { display: grid; gap: var(--sp-1); margin-top: var(--sp-1); }
 .mote-calendar__point, .mote-calendar__rate, .schedule-arrangement[data-calendar-summary] { --mote-rule-ink: var(--blue); }
-.mote-calendar__surface [data-managed="true"] { --mote-rule-ink: var(--green); }
+.mote-calendar__surface [data-heartbeat="true"] { --mote-rule-ink: var(--green); }
 .mote-calendar__point, .mote-calendar__rate {
   display: grid; min-width: 0; overflow: hidden; padding: 3px var(--sp-3);
   border-radius: var(--radius-sm); background-color: color-mix(in srgb, var(--mote-rule-ink) 14%, var(--surface-1));
@@ -85,7 +85,7 @@
 .mote-calendar__point > :is(span, small), .mote-calendar__rate > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mote-calendar__point > small, .mote-calendar__rate > small, .mote-calendar__point > b { font: inherit; font-variant-numeric: tabular-nums; }
 .mote-calendar__point > small { color: var(--text-2); }
-.mote-calendar__point > b { display: none; }
+.mote-calendar__point > b, .mote-calendar__rate > b { display: none; }
 @container calendar-canvas (max-width: 1100px) {
   .mote-calendar__point { grid-template-columns: minmax(0, 1fr); gap: 0; }
 }
@@ -112,6 +112,11 @@
 .mote-calendar__hour-day:hover .mote-calendar__slot, .mote-calendar__slot:focus-visible { opacity: 1; }
 .mote-calendar__rate { gap: 1px; font-size: var(--fs-meta); }
 .mote-calendar__rate > small { color: var(--text-2); font-size: var(--fs-micro); overflow: hidden; text-overflow: ellipsis; }
+.mote-calendar :is(.mote-calendar__point, .mote-calendar__rate)[data-heartbeat="true"] {
+  grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--sp-2);
+  width: fit-content; max-width: 100%; justify-self: start; padding-block: 2px;
+}
+[data-heartbeat="true"] > .semantic-icon { color: var(--mote-rule-ink); }
 .mote-calendar__surface [data-attention="true"] { --mote-rule-ink: var(--amber); color: var(--amber); }
 .mote-calendar__legend { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-top: 1px solid var(--line-soft); background: var(--surface-2); }
 
