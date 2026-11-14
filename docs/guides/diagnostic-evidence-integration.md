@@ -114,7 +114,7 @@ amux system diagnostics inspect --input mote-context-query.json
 - 用 Mote 发现取 topicId，用 `app inspect` 或 `space ls` 取原 Tab 与展示 reference。
 - Mote 的物理路径、HomeZone 或逻辑 Topic 路径都不能代替原 `Workspace.path`；今天的发现结果也不回填旧 failure 当时捕获的目标。
 
-完整查询通过既有 CLI `--input FILE|-` 或 typed RPC 传入，字段以 [领域类型](../../packages/core/src/mote-context-observation.ts) 为准，例如：
+完整查询通过既有 CLI `--input FILE|-` 或 typed RPC 传入，字段以 [领域类型](../../packages/core/src/mote/context-observation.ts) 为准，例如：
 
 ```json
 {"target":{"domain":"mote.context.client","hostId":"local","scope":{"hostId":"RESOURCE_HOST","directoryPath":"RESOURCE_WORKSPACE_PATH","topicId":"TOPIC_ID","tabId":"TAB_ID"},"action":"prepare"},"includeRaw":false,"includeRelated":false}
