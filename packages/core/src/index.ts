@@ -252,3 +252,7 @@ export { sessionSemanticResumeSourceRuns } from './agent-session-resume-sources.
 export * from './node-publishing.js'
 
 export * from './node-locator.js'
+
+export * from './space-identity.js'
+export * from './space-folder.js'
+export * from './space-folder-client.js'

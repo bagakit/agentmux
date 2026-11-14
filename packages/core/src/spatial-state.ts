@@ -1,3 +1,4 @@
+import { folderSpaceFacts, type FolderSpaceResource } from './space-folder.js'
 import { watch, type FSWatcher } from 'node:fs';
 import { createRequire } from 'node:module';
 import { mkdir, open, readFile, type FileHandle } from 'node:fs/promises';
@@ -218,10 +219,10 @@ export class AgentMuxSpatialStateStore {
       await handle.close();
     }
   }
-  private async writeLocked(current: AgentMuxSpatialState, graph: AgentMuxSpatialState['graph'],
+  private async writeLocked(current: AgentMuxSpatialState | null, graph: AgentMuxSpatialState['graph'],
     nameCommit?: AgentMuxSpatialState['nameCommit']): Promise<AgentMuxSpatialState> {
-    const next: AgentMuxSpatialState = { schemaVersion: 1, revision: current.revision + 1, graph };
-    await durableWriteFile(this.path + '.previous', JSON.stringify(current) + '\n', { requireDirectorySync: true });
+    const next: AgentMuxSpatialState = { schemaVersion: 1, revision: (current?.revision ?? 0) + 1, graph };
+    if (current) await durableWriteFile(this.path + '.previous', JSON.stringify(current) + '\n', { requireDirectorySync: true });
     await durableWriteFile(this.path, JSON.stringify(next) + '\n', { requireDirectorySync: true });
     const acknowledged = nameCommit ? { ...next, nameCommit } : next;
     this.announce(acknowledged);
@@ -231,6 +232,29 @@ export class AgentMuxSpatialStateStore {
     const state = await this.read();
     if (!state) throw new AgentMuxError('The original spatial document is not ready. Keep original names and retry this change after restoring storage.', 'SPATIAL_STATE_ABSENT');
     return state;
+  }
+  /** Explicit registration of an already configured resource; reads never ensure it. */
+  async registerFolder(resource: FolderSpaceResource) {
+    const { space, zone } = folderSpaceFacts(resource);
+    return this.locked(async () => {
+      const current = await this.read();
+      const graph: AgentMuxSpatialGraph = current ? structuredClone(current.graph) : { spaces: [], zones: [], tabs: [], regions: [], bindings: [], layouts: {}, tabLayouts: {}, resources: {} };
+      const originalSpace = graph.spaces.find(value => value.spaceId === space.spaceId);
+      const originalZone = graph.zones.find(value => value.zoneId === zone.zoneId);
+      if (originalSpace && (originalSpace.kind !== space.kind || originalSpace.hostId !== space.hostId ||
+          originalSpace.directoryPath !== space.directoryPath || originalSpace.projectId !== space.projectId) ||
+          originalZone && (originalZone.kind !== zone.kind || originalZone.workspaceId !== zone.workspaceId || originalZone.hostId !== zone.hostId || originalZone.directoryPath !== zone.directoryPath)) {
+        throw new AgentMuxError('The registered Folder identity contradicts its original Space or Zone. Existing members, names and Runs are retained.', 'SPACE_RESOURCE_CHANGED');
+      }
+      const binding = graph.bindings.some(value => value.spaceId === space.spaceId && value.zoneId === zone.zoneId);
+      const created = !originalSpace || !originalZone || !binding;
+      if (!created) return { state: projectSpatialState(current!), spaceId: space.spaceId, zoneId: zone.zoneId, created: false };
+      if (!originalSpace) graph.spaces.push(space);
+      if (!originalZone) graph.zones.push(zone);
+      if (!binding) graph.bindings.push({ spaceId: space.spaceId, zoneId: zone.zoneId });
+      const state = await this.writeLocked(current, parseAgentMuxSpatialGraph(graph));
+      return { state: projectSpatialState(state), spaceId: space.spaceId, zoneId: zone.zoneId, created: true };
+    });
   }
   async admitAgentOpen(input: Parameters<typeof admitSpatialAgentOpen>[1]) {
     return this.locked(async () => {

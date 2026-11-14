@@ -1,3 +1,4 @@
+import { createHostFolderSpaceResource } from './folder-space-resource.js'
 import { createHostMoteMainReader, createHostMoteDialogue } from './mote-dialogue.js'
 import { MoteDialogueStore } from '@agentmux/core/mote-dialogue-store'
 import { HostMoteQuickPreferences } from './mote-quick-preferences.js'
@@ -182,6 +183,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     ...(options.hostConfiguration ? { hostConfiguration: options.hostConfiguration } : {}),
     ...(moteDialogue ? { moteDialogue } : {}),
     ...(moteQuickPreferences ? { moteQuickPreferences } : {}),
+    ...(configurationPath ? { spatialFolderResource: createHostFolderSpaceResource(configurationPath) } : {}),
     ...(configurationPath ? { spatialAgentControl: createHostSpatialAgentControl({ configurationPath, spatial: spatialState, runtime: originalRuntime, agentMuxContext: async request => await goals?.contextForSpatialOpen(request) }) } : {}),
     ...(mobileIncidents ? { clientIncidents: mobileIncidents.clientIncidents, mobileWebReports: mobileIncidents.mobileWebReports } : {}),
     ...(configurationPath ? { settingsResources: createHostSettingsResourceRead(configurationPath), appearance: createHostAppearanceObservation(configurationPath) } : {}),

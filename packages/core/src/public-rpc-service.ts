@@ -1,3 +1,4 @@
+import { parseFolderSpaceRegistration, folderResourceIdentity, type FolderSpaceResource } from './space-folder.js'
 import { spaceStreamOpening, spaceTransfer } from './space-authority-stream.js'
 import { SpaceAuthorityOwner } from './space-authority-owner.js'
 import { isSpaceAuthorityMethod, parseSpaceAuthorityParams, type SpaceApply, type SpaceWatch } from './space-authority.js'
@@ -244,6 +245,7 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
     originalContext?: AgentMuxRpcCallContext): Promise<AgentMuxControlResult | undefined>
   nativeDesktop?: AgentMuxRpcNativeDesktopOwner
   images?: AgentMuxRpcImageOwner
+  spatialFolderResource?(workspaceId: string): Promise<FolderSpaceResource>
   spatialState?: AgentMuxSpatialStateStore
   /** Original Host policy over Core-owned spatial creation associations, without a screen. */
   spatialAgentControl?(request: AgentMuxControlRequest, context: AgentMuxRpcCallContext): Promise<AgentMuxControlResult | undefined>
@@ -372,6 +374,7 @@ const NATIVE_FIELDS = {
   'settings.appearance.watch': [],
   'notebook.scan': ['workspaceId','path','maxFiles','maxDirectories','maxBytes','query','limit'],
   'notebook.ls': [], 'notebook.inspect': ['notebookId','noteId','operationId','content','maxBytes'], 'notebook.graph': ['notebookId','noteId','maxBytes'], 'notebook.resolve': ['mode','query','limit','text','select','maxBytes'], 'notebook.apply': ['expectedRevision','operationId','change'],
+  'space.folder.register': ['runtimeId','workspaceId','expectedResource'],
   'space.snapshot': ['reference'], 'space.apply': ['reference','expectedRevision','changes'], 'space.watch': ['reference','after'],
   'space.state': [], 'space.commit': ['expectedRevision','graph','allowEntityRemoval','removedProjectGroupIds'],
   'space.resolve': ['tabId','regionId','direction'],
@@ -775,6 +778,24 @@ export class AgentMuxRpcService {
   async call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>,
     context: AgentMuxRpcCallContext = {}): Promise<AgentMuxRpcResult<M>> {
     this.assertExposed(method)
+    if (method === 'space.folder.register') {
+      const input = parseFolderSpaceRegistration(params)
+      await this.authenticated(context)
+      context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+      if (this.ports.callOriginalCore) return await this.ports.callOriginalCore('local', 'space.folder.register', input, context) as AgentMuxRpcResult<M>
+      const endpoint = await this.ports.hostedRuntime?.()
+      if (!endpoint || !this.ports.spatialFolderResource) throw new AgentMuxError('This original Host cannot read its registered Folder resource. Its existing Spaces and Agents remain available.', 'SPACE_RESOURCE_UNAVAILABLE')
+      const { owner } = await endpoint.call('runtime.owner.identity', { expectedRuntimeId: input.runtimeId })
+      if (owner.runtimeId !== input.runtimeId) throw new AgentMuxError('The selected Folder belongs to another Runtime. No local Space was substituted.', 'RUNTIME_OWNER_MISMATCH')
+      const resource = await this.ports.spatialFolderResource(input.workspaceId), actual = folderResourceIdentity(resource)
+      if (resource.id !== input.workspaceId || actual.hostId !== input.expectedResource.hostId || actual.workspacePath !== input.expectedResource.workspacePath || actual.projectRootPath !== input.expectedResource.projectRootPath) {
+        throw new AgentMuxError('The original registered Workspace resource changed. Keep the selected intent and inspect its original Folder; no new directory was substituted.', 'SPACE_RESOURCE_CHANGED')
+      }
+      context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+      const registered = await this.spatial.registerFolder(resource)
+      return { reference: { runtimeId: owner.runtimeId, spaceId: registered.spaceId }, source: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId },
+        zoneId: registered.zoneId, workspaceId: resource.id, resource: actual, revision: registered.state.revision, diskDurability: 'confirmed', created: registered.created } as AgentMuxRpcResult<M>
+    }
     if (isSpaceAuthorityMethod(method)) {
       const input = parseSpaceAuthorityParams(method, params)
       await this.authenticated(context)

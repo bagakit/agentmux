@@ -1,3 +1,4 @@
+import { SPACE_FOLDER_CLI_COMMANDS } from './space-folder-cli.js'
 import { parseAgentExecutionReference } from './errors.js'
 import { SPACE_AUTHORITY_CLI_COMMANDS } from './space-authority-cli.js'
 import { NODE_LOCATOR_CLI_COMMAND } from './node-locator-cli.js'
@@ -230,6 +231,7 @@ function goal(method: string, usage: string, summary: string, specs: FlagSpec, b
 
 /** Actual executable registration. Help, skill and playbooks enumerate this same source. */
 export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
+  ...SPACE_FOLDER_CLI_COMMANDS,
   ...SPACE_AUTHORITY_CLI_COMMANDS,
   ...NODE_PUBLISHING_CLI_COMMANDS,
   NODE_LOCATOR_CLI_COMMAND,

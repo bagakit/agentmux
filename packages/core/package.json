@@ -429,6 +429,18 @@
     "./node-publishing": {
       "types": "./dist/node-publishing.d.ts",
       "import": "./dist/node-publishing.js"
+    },
+    "./space-identity": {
+      "types": "./dist/space-identity.d.ts",
+      "import": "./dist/space-identity.js"
+    },
+    "./space-folder": {
+      "types": "./dist/space-folder.d.ts",
+      "import": "./dist/space-folder.js"
+    },
+    "./space-folder-client": {
+      "types": "./dist/space-folder-client.d.ts",
+      "import": "./dist/space-folder-client.js"
     }
   },
   "bin": {

@@ -1,3 +1,4 @@
+import { folderSpaceFacts } from '@agentmux/core/space-folder'
 import type { AgentMuxSpaceFact, AgentMuxZoneFact, AgentMuxSpaceDestination, AgentMuxSpaceMutationReport, AgentMuxSpaceBindingFact, AgentMuxSpaceAddress, AgentMuxSpatialIssue, TopicCategory } from '@agentmux/core/control'
 import type { AgentMuxAgentForkSource } from '@agentmux/core'
 import type { AppConfig, ScratchTopicSnapshot, WorkspaceRecord } from './contracts'
@@ -6,9 +7,8 @@ import { categorySpaceFact, isKnowledgeTopic, knownTopicContentSpaceId, UNCLASSI
 
 /** Durable directory identity shared by the Space tree, CLI and Project grouping. */
 export { directoryIdentity, homeZoneId } from '@agentmux/host/mote-model'
-export function workspaceZoneId(spaceId: string, workspaceId: string): string {
-  return JSON.stringify([spaceId, 'workspace', workspaceId])
-}
+export { workspaceZoneId } from '@agentmux/core/space-identity'
+import { workspaceZoneId } from '@agentmux/core/space-identity'
 
 /** A failed Host read cannot replace the durable original identity with a logical-path guess. */
 export function originalTopicAddress(workspace: Pick<WorkspaceRecord, 'id' | 'hostId' | 'path'>, topic: Pick<ScratchTopicSnapshot, 'id' | 'directoryPath' | 'identityDirectoryPath' | 'readError'>, bindings: SpaceZoneBindings): { spaceId: string; zoneId: string } | null {
@@ -190,12 +190,9 @@ export function spatialSources(config: AppConfig | null, topics: readonly Scratc
     if (workspace.closeout) continue
     if (workspace.id === SCRATCH_WORKSPACE_ID) continue
     const root = workspace.repoPath ?? workspace.path
-    const spaceId = directoryIdentity(workspace.hostId, root)
+    const { space } = folderSpaceFacts(workspace), spaceId = space.spaceId
     const existing = spaces.get(spaceId)
-    if (!existing || workspace.path === root) spaces.set(spaceId, {
-      spaceId, kind: 'folder', name: workspace.path === root ? workspace.name : root.split(/[\\/]/).filter(Boolean).at(-1) ?? root,
-      hostId: workspace.hostId, directoryPath: root, projectId: directoryIdentity(workspace.hostId, root)
-    })
+    if (!existing || workspace.path === root) spaces.set(spaceId, space)
     addZone(workspaceZoneId(spaceId, workspace.id), workspace.id, spaceId)
   }
   const scratch = workspaces.get(SCRATCH_WORKSPACE_ID)

@@ -1,3 +1,4 @@
+import { parseFolderSpaceRegistration, parseFolderSpaceReceipt } from './space-folder.js'
 import { parseAgentExecutionReference } from './errors.js'
 import { isSpaceAuthorityMethod, parseSpaceAuthorityParams, parseSpaceSnapshot } from './space-authority.js'
 import { parseNodeLocateParams, parseNodeLocateResult } from './node-locator.js'
@@ -459,6 +460,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (method === 'node.locate') return parseNodeLocateResult(value, parseNodeLocateParams(params)) as unknown as Record<string, unknown>
     if (isNodePublishingMethod(method)) return parseNodePublishingResult(method, value, parseNodePublishingParams(method, params)) as unknown as Record<string, unknown>
     if (isHostSettingsMethod(method)) return parseHostSettingsResult(method, value, parseHostSettingsParams(method, params)) as unknown as Record<string, unknown>
+    if (method === 'space.folder.register') return parseFolderSpaceReceipt(value, parseFolderSpaceRegistration(params)) as unknown as Record<string, unknown>
     if (isSpaceAuthorityMethod(method)) {
       const input = parseSpaceAuthorityParams(method, params)
       if (method === 'space.apply') {
