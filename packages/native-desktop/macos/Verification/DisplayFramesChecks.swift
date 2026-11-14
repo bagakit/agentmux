@@ -13,7 +13,7 @@ private enum NativeDesktopOperations {
     static func captureWindow(_ params: [String: JSONValue]) throws -> [String: Any] { Controlled.shared.sourceCaptured(); return ["state": "captured"] }
     static func capturedRectangle(_ rect: CGRect) throws -> [String: Any] { Controlled.shared.sourceCaptured(); return ["state": "captured"] }
     static func pngData(_ image: CGImage) throws -> Data {
-        Controlled.shared.encoded()
+        if Controlled.shared.encoded() { throw ProviderError.coded("controlled_png_failed", "the controlled PNG encoder failed after its delay") }
         return Controlled.shared.pngBytes.map { Data(count: $0) } ?? Data("png-\(image.width)x\(image.height)".utf8)
     }
     static func renderRect(_ rect: CGRect) -> [String: Double] { ["x": rect.minX, "y": rect.minY, "width": rect.width, "height": rect.height] }
@@ -55,7 +55,10 @@ private func CGDisplayBounds(_ display: CGDirectDisplayID) -> CGRect { bounds[di
 private func CGMainDisplayID() -> CGDirectDisplayID { 1 }
 private func CGDisplayIsActive(_ display: CGDirectDisplayID) -> boolean_t { bounds[display] == nil ? 0 : 1 }
 private func CGWindowListCreateImage(_ rect: CGRect, _ option: Int, _ window: Int, _ image: [Int]) -> CGImage? { Controlled.shared.coreGraphicsPixels(rect) }
-private func CGWindowListCopyWindowInfo(_ option: Int, _ window: Int) -> CFArray? { Controlled.shared.listedWindows() as CFArray }
+private func CGWindowListCopyWindowInfo(_ option: Int, _ window: Int) -> CFArray? {
+    guard let listed = Controlled.shared.listedWindows() else { return nil }
+    return listed as CFArray
+}
 // The window server's on-screen list, front to back.
 private let hostPID: pid_t = 4242
 private func window(_ id: UInt32, pid: pid_t, _ frame: CGRect, layer: Int = 0, alpha: Double = 1, sharing: Int = 1, owner: String = "Editor") -> [String: Any] {
@@ -118,6 +121,7 @@ private enum SCScreenshotManager {
         defer { Controlled.shared.returned(number) }
         // Each grab takes measurable time, so a timestamp taken after the grabs is distinguishable.
         try await Task.sleep(nanoseconds: 5_000_000)
+        if Controlled.shared.failingDisplay == contentFilter.displayID { throw ProviderError.coded("controlled_capture_failed", "the controlled display grab failed after its delay") }
         if Controlled.shared.holdFirst, number == 1 { return try await withCheckedThrowingContinuation { Controlled.shared.suspend($0) } }
         return try pixels(width: configuration.width, height: configuration.height)
     }
@@ -143,6 +147,9 @@ private final class Controlled: @unchecked Sendable {
     var screens: [NSScreen] = []
     var holdFirst = false
     var pngBytes: Int?
+    var failingDisplay: CGDirectDisplayID?
+    var windowListAvailable = true
+    private var pngFailures = 0
     func started(_ id: CGDirectDisplayID, cursor: Bool, excludedWindowIDs: [UInt32]) -> Int {
         lock.lock(); defer { lock.unlock() }
         grabs.append(id); exclusions.append(excludedWindowIDs); if cursor { cursors += 1 }
@@ -155,11 +162,16 @@ private final class Controlled: @unchecked Sendable {
         return try? pixels(width: Int(rect.width), height: Int(rect.height))
     }
     func enumerated() { lock.lock(); enumerations += 1; lock.unlock() }
-    func listedWindows() -> [[String: Any]] { lock.lock(); windowLists += 1; lock.unlock(); return windowList() }
+    func listedWindows() -> [[String: Any]]? { lock.lock(); windowLists += 1; let available = windowListAvailable; lock.unlock(); return available ? windowList() : nil }
     var windowListings: Int { lock.lock(); defer { lock.unlock() }; return windowLists }
     private(set) var sources = 0
     func sourceCaptured() { lock.lock(); sources += 1; lock.unlock() }
-    func encoded() { lock.lock(); encodes += 1; lock.unlock() }
+    func failNextPNG() { lock.lock(); pngFailures = 1; lock.unlock() }
+    func encoded() -> Bool {
+        lock.lock(); encodes += 1; let fail = pngFailures > 0; if fail { pngFailures -= 1 }; lock.unlock()
+        if fail { Thread.sleep(forTimeInterval: 0.005) }
+        return fail
+    }
     func suspend(_ value: CheckedContinuation<CGImage, Error>) { lock.lock(); continuation = value; lock.unlock(); suspended.signal() }
     func returned(_ number: Int) {
         guard holdFirst, number == 1 else { return }
@@ -171,8 +183,8 @@ private final class Controlled: @unchecked Sendable {
         do { value.resume(returning: try pixels(width: 800, height: 600)) } catch { value.resume(throwing: error) }
     }
     func reset(screens: [NSScreen], holdFirst: Bool = false, pngBytes: Int? = nil) {
-        lock.lock(); grabs = []; exclusions = []; cursors = 0; encodes = 0; enumerations = 0; windowLists = 0; sources = 0; firstReturned = false; firstGrabAt = nil; lock.unlock()
-        self.screens = screens; self.holdFirst = holdFirst; self.pngBytes = pngBytes
+        lock.lock(); grabs = []; exclusions = []; cursors = 0; encodes = 0; enumerations = 0; windowLists = 0; sources = 0; firstReturned = false; firstGrabAt = nil; pngFailures = 0; lock.unlock()
+        self.screens = screens; self.holdFirst = holdFirst; self.pngBytes = pngBytes; self.failingDisplay = nil; self.windowListAvailable = true
     }
     var observation: (grabs: [CGDirectDisplayID], exclusions: [[UInt32]], cursors: Int, encodes: Int, enumerations: Int, firstReturned: Bool, firstGrabAt: Double?) {
         lock.lock(); defer { lock.unlock() }
@@ -186,6 +198,10 @@ private func hasBoundedTiming(_ value: Any?, keys: [String]) -> Bool {
         guard let milliseconds = (timing[key] as? NSNumber)?.doubleValue else { return false }
         return milliseconds.isFinite && milliseconds >= 0 && milliseconds <= 150_000
     }
+}
+
+private func timingMilliseconds(_ entry: [String: Any], _ key: String) -> Double? {
+    ((entry["timing"] as? [String: Any])?[key] as? NSNumber)?.doubleValue
 }
 
 @main
@@ -298,6 +314,24 @@ private struct DisplayFramesChecks {
             && (oversizedDisplays[0]["issue"] as? String)?.hasPrefix("image_too_large:") == true && oversizedDisplays[0]["png"] == nil
             && oversizedDisplays[1]["png"] is String && io.observation.grabs == [2])
 
+        io.reset(screens: all)
+        io.failingDisplay = 1
+        let failedCapture = run()
+        let failedCaptureDisplay = (failedCapture.result?["displays"] as? [[String: Any]] ?? []).first { $0["displayId"] as? CGDirectDisplayID == 1 } ?? [:]
+        check("a failed capture records the time it actually spent", (failedCaptureDisplay["issue"] as? String)?.hasPrefix("controlled_capture_failed:") == true
+            && (timingMilliseconds(failedCaptureDisplay, "captureMs") ?? 0) >= 4
+            && timingMilliseconds(failedCaptureDisplay, "pngMs") == 0
+            && (timingMilliseconds(failedCaptureDisplay, "totalMs") ?? 0) >= (timingMilliseconds(failedCaptureDisplay, "captureMs") ?? .infinity))
+
+        io.reset(screens: all)
+        io.failNextPNG()
+        let failedPNG = run()
+        let failedPNGDisplay = (failedPNG.result?["displays"] as? [[String: Any]] ?? []).first { $0["displayId"] as? CGDirectDisplayID == 1 } ?? [:]
+        check("a failed PNG encode records the time it actually spent", (failedPNGDisplay["issue"] as? String)?.hasPrefix("controlled_png_failed:") == true
+            && (timingMilliseconds(failedPNGDisplay, "captureMs") ?? 0) >= 4
+            && (timingMilliseconds(failedPNGDisplay, "pngMs") ?? 0) >= 4
+            && (timingMilliseconds(failedPNGDisplay, "totalMs") ?? 0) >= (timingMilliseconds(failedPNGDisplay, "pngMs") ?? .infinity))
+
         io.reset(screens: [NSScreen(id: 3, backingScaleFactor: 1)])
         let none = run()
         check("no captured display is a typed failure, not an empty success", none.result == nil && code(none.error) == "display_capture_unavailable")
@@ -346,6 +380,7 @@ private struct DisplayFramesChecks {
     static func legacyMain() {
         var cases: [String] = [], failures: [String] = []
         func check(_ name: String, _ value: @autoclosure () -> Bool) { cases.append(name); if !value() { failures.append(name) } }
+        func code(_ error: Error?) -> String? { if case let ProviderError.coded(code, _)? = error { return code }; return nil }
         func run(_ includeHostWindows: Bool) -> (result: [String: Any]?, error: Error?) {
             do { return (try displayRequest(["includeHostWindows": .bool(includeHostWindows)]), nil) } catch { return (nil, error) }
         }
@@ -379,6 +414,18 @@ private struct DisplayFramesChecks {
         let noHost = run(false)
         check("forced CoreGraphics exclusion captures normally when no host window is visible", noHost.error == nil
             && display(noHost.result, 2)["png"] is String && display(noHost.result, 2)["issue"] == nil && io.observation.grabs == [2])
+
+        io.reset(screens: screens)
+        io.windowListAvailable = false
+        let unknownIncluded = run(true)
+        check("forced CoreGraphics inclusion still captures when window metadata is unavailable", unknownIncluded.error == nil
+            && display(unknownIncluded.result, 1)["png"] is String && display(unknownIncluded.result, 2)["png"] is String && io.observation.grabs == [1, 2])
+
+        io.reset(screens: screens)
+        io.windowListAvailable = false
+        let unknownExcluded = run(false)
+        check("forced CoreGraphics exclusion is typed unavailable when host visibility is unknown", unknownExcluded.result == nil
+            && code(unknownExcluded.error) == "window_list_unavailable" && io.observation.grabs.isEmpty)
 
         let report: [String: Any] = ["schema": "agentmux.display-frames-checks.v1", "tests": cases.count, "cases": cases, "failures": failures,
             "engine": "forced-coreGraphics", "boundary": "Exact production captureDisplays with its macOS 14 availability branch forced off; controlled CoreGraphics pixels and window server. No real macOS 12/13 device claim."]

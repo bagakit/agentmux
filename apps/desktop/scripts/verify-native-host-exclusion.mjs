@@ -114,13 +114,15 @@ try {
   const mutant = await runElectron('wrong-pid', mutantExecutable)
   assert.notEqual(mutant.code, 0, 'The real wrong-PID native helper survived')
   assert.equal(mutant.fixture.passed, false)
+  assert(mutant.fixture.excluded?.regionArea > 100, 'Wrong-PID kill requires a nonempty excluded sample region')
+  assert(mutant.fixture.excluded?.colorPixels > 0, 'Wrong-PID kill requires actual host pixels, not an empty or clipped sample')
   assert.equal(mutant.fixture.failure?.name, wrongPid.killedBy,
     `Wrong-PID must fail the owning pixel assertion, not infrastructure or another check: ${JSON.stringify(mutant.fixture.failure)}`)
   assert.equal(mutant.fixture.checks.find(check => check.name === 'included isolated-region unique color is present')?.passed, true,
     'The mutation must reach excluded capture after a passing included pixel proof')
   assert.equal(mutant.fixture.checks.find(check => check.name === wrongPid.killedBy)?.passed, false)
   receipt.wrongPidMutation = { killedBy: wrongPid.killedBy, includedColorPixels: mutant.fixture.included.colorPixels,
-    excludedColorPixels: mutant.fixture.excluded.colorPixels }
+    excludedColorPixels: mutant.fixture.excluded.colorPixels, excludedRegionArea: mutant.fixture.excluded.regionArea }
   receipt.passed = true
 } catch (error) {
   receipt.failure = error instanceof Error ? error.message : String(error)

@@ -90,8 +90,8 @@ const mutations = [
   { name: 'ignore-configuration-change', part: 'frames', before: 'guard match.frame == frame else {', after: 'guard true else {', kills: 'a display whose bounds changed since enumeration carries its issue and no pixels' },
   { name: 'enumerate-per-display', part: 'frames', before: 'content: resolved.shareable,', after: 'content: BlockingAsync.run(timeout: 10) { try await SCShareableContent.current },', kills: "one window enumeration serves every display's grab" },
   { name: 'timestamp-after-grabs', part: 'frames', before: '"capturedAt": capturedAt', after: '"capturedAt": Date().timeIntervalSince1970 * 1000', kills: 'capturedAt is taken before the first grab' },
-  { name: 'list-host-windows', part: 'frames', before: 'let windows = allWindows.filter { $0.normalLayer && !excludedOwners.contains($0.pid) }', after: 'let windows = allWindows.filter { $0.normalLayer && $0.pid != getpid() }', kills: "the host's windows are not capture content" },
-  { name: 'list-helper-windows', part: 'frames', before: 'let windows = allWindows.filter { $0.normalLayer && !excludedOwners.contains($0.pid) }', after: 'let windows = allWindows.filter { $0.normalLayer && $0.pid != hostPID }', kills: "the helper's own windows are not capture content" },
+  { name: 'list-host-windows', part: 'frames', before: 'let windows = windowSnapshot.filter { $0.normalLayer && !excludedOwners.contains($0.pid) }', after: 'let windows = windowSnapshot.filter { $0.normalLayer && $0.pid != getpid() }', kills: "the host's windows are not capture content" },
+  { name: 'list-helper-windows', part: 'frames', before: 'let windows = windowSnapshot.filter { $0.normalLayer && !excludedOwners.contains($0.pid) }', after: 'let windows = windowSnapshot.filter { $0.normalLayer && $0.pid != hostPID }', kills: "the helper's own windows are not capture content" },
   { name: 'omit-included-host-windows', part: 'frames', before: 'includeHostWindows ? [getpid()] :', after: 'includeHostWindows ? [getpid(), hostPID] :', kills: "the included background lists the host's visible windows in place" },
   { name: 'include-helper-windows', part: 'frames', before: 'includeHostWindows ? [getpid()] :', after: 'includeHostWindows ? [] :', kills: "the included background still excludes the helper's windows" },
   { name: 'excluded-pixels-keep-host-wrong-pid', part: 'frames', before: ': [getpid(), hostPID]', after: ': [getpid(), hostPID + 1]', kills: 'excluded pixels remove helper and every capturable host window by PID, including panels, and no other PID' },
@@ -103,24 +103,26 @@ const mutations = [
   { name: 'drop-native-timing', part: 'frames', before: '"timing": ["contentMs": contentMs, "windowListMs": windowListMs, "totalMs": captureMilliseconds(since: totalStarted)]', after: '"timing": [:]', kills: "native timing covers content, window list, total and every display's capture, PNG, base64 and total" },
   { name: 'drop-per-display-timing', part: 'frames', before: 'entry["timing"] = ', after: '_ = ', kills: "native timing covers content, window list, total and every display's capture, PNG, base64 and total" },
   { name: 'old-os-silent-coregraphics-fallback', part: 'frames', before: 'if !includeHostWindows && hostWindows.contains(where: { $0.frame.intersects(frame) }) {', after: 'if false {', kills: 'forced CoreGraphics exclusion refuses only the display containing the visible host', forceCoreGraphics: true },
+  { name: 'old-os-unknown-window-list-falls-back', part: 'frames', before: 'guard allWindows != nil || includeHostWindows else {', after: 'guard true else {', kills: 'forced CoreGraphics exclusion is typed unavailable when host visibility is unknown', forceCoreGraphics: true },
+  { name: 'drop-failure-stage-timing', part: 'frames', before: 'defer { milliseconds = captureMilliseconds(since: start) }\n        return try body()', after: 'let result = try body()\n        milliseconds = captureMilliseconds(since: start)\n        return result', kills: 'a failed capture records the time it actually spent' },
   { name: 'drop-include-host-option', part: 'displayRequest', before: 'includeHostWindows: params["includeHostWindows"]?.bool ?? false', after: 'includeHostWindows: false', kills: "the included background lists the host's visible windows in place" },
   { name: 'accept-nonboolean-host-option', part: 'displayRequest', before: 'value.bool == nil', after: 'false', kills: 'a nonboolean host-window option is refused before a grab' },
-  { name: 'list-every-layer', part: 'frames', before: 'let windows = allWindows.filter { $0.normalLayer && !excludedOwners.contains($0.pid) }', after: 'let windows = allWindows.filter { !excludedOwners.contains($0.pid) }', kills: 'only normal-layer windows are listed' },
+  { name: 'list-every-layer', part: 'frames', before: 'let windows = windowSnapshot.filter { $0.normalLayer && !excludedOwners.contains($0.pid) }', after: 'let windows = windowSnapshot.filter { !excludedOwners.contains($0.pid) }', kills: 'only normal-layer windows are listed' },
   { name: 'list-transparent-windows', part: 'frames', before: '((info[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1) > 0,', after: '', kills: 'windows absent from the pixels are not listed' },
   { name: 'list-unshared-windows', part: 'frames', before: '(info[kCGWindowSharingState as String] as? NSNumber)?.intValue != 0,', after: '', kills: 'windows absent from the pixels are not listed' },
   { name: 'list-windows-off-display', part: 'frames', before: 'windows.filter { $0.frame.intersects(frame) }', after: 'windows', kills: 'a window on no display is not listed' },
   { name: 'windows-back-to-front', part: 'frames', before: '.filter { $0.frame.intersects(frame) }.map(\\.entry)', after: '.filter { $0.frame.intersects(frame) }.reversed().map(\\.entry)', kills: 'each display lists the normal windows over it front to back' },
   { name: 'drop-window-owner', part: 'frames', before: 'entry["owner"] = owner', after: '_ = owner', kills: 'a window across displays is listed on each with its global frame and owner' },
-  { name: 'list-windows-per-display', part: 'frames', before: '"windows": windows.filter', after: '"windows": visibleWindows(excludingOwners: excludedOwners).filter', kills: 'one window list serves every display' },
+  { name: 'list-windows-per-display', part: 'frames', before: '"windows": windows.filter', after: '"windows": visibleWindows(excludingOwners: excludedOwners)!.filter', kills: 'one window list serves every display' },
   { name: 'lease-never-busy', part: 'lease', before: 'guard !occupied else { lock.unlock(); throw Failure.busy }', after: '', kills: 'a second capture is busy while the first producer still owns the display' },
 ]
 const receipt = { schema: 'agentmux.native-frames-verification.v1', passed: false, mutants: [] }
 try {
   const baseline = build('baseline')
   receipt.baseline = { tests: baseline.tests, failures: baseline.failures }
-  assert.equal(baseline.exitCode, 0, `Baseline failed: ${JSON.stringify(baseline.failures)}`)
   const legacyBaseline = build('legacy-baseline', undefined, true)
   receipt.legacyBaseline = { tests: legacyBaseline.tests, failures: legacyBaseline.failures }
+  assert.equal(baseline.exitCode, 0, `Baseline failed: ${JSON.stringify(baseline.failures)}`)
   assert.equal(legacyBaseline.exitCode, 0, `Forced CoreGraphics baseline failed: ${JSON.stringify(legacyBaseline.failures)}`)
   for (const mutation of mutations) {
     const result = build('mutant-' + mutation.name, mutation, mutation.forceCoreGraphics === true)
