@@ -49,19 +49,21 @@ export type BrowserAutomationGatePorts = {
 
 /** One gate for every entry that starts page work: run, replay, task run, batch and outcome checks. */
 export function createBrowserAutomationGate(ports: BrowserAutomationGatePorts) {
-  return async (browserId: string, rawCaller: { agentSessionId?: string } | undefined | null): Promise<void> => {
+  return async (browserId: string, rawCaller: { agentSessionId?: string } | undefined | null, expectedProfileId?: string): Promise<void> => {
     const caller = browserAutomationCaller(rawCaller)
     if (!ports.automation() || caller.kind !== 'agent') return assertBrowserAutomation(caller, { automation: ports.automation(), profile: null })
     // Only an Agent asks for the Profile, so a person's run does no extra reads.
-    let profile: BrowserAutomationFacts['profile']
+    let profile: BrowserAutomationFacts['profile'], observedProfileId: string | null | undefined
     try {
       const profileId = await ports.profileOf(browserId)
+      observedProfileId = profileId
       if (profileId === null) profile = null
       else {
         const access = ports.agentAccess(profileId)
         profile = access === undefined ? 'unknown' : { agentAccess: access }
       }
     } catch { profile = 'unknown' }
+    if (expectedProfileId !== undefined && observedProfileId !== undefined && observedProfileId !== expectedProfileId) throw new AgentMuxError('The original task target Profile changed. No native page or action was admitted for a replacement Profile.', 'CONTROL_REQUEST_CONFLICT')
     assertBrowserAutomation(caller, { automation: ports.automation(), profile })
   }
 }

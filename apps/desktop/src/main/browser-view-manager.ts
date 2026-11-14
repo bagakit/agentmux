@@ -1,3 +1,5 @@
+import type { BrowserTaskParallelList, BrowserTaskParallelInput, BrowserTaskParallelInspection, BrowserTaskParallelSummary } from '@agentmux/core/control'
+import type { BrowserTaskParallelExecution } from '../shared/browser-task-parallel.js'
 import { browserUploadPort, browserDownloadPort } from './browser-page-files.js'
 import { BROWSER_TASK_SUBFLOW_MAX_DEPTH, parseBrowserTaskImportInput, type BrowserTaskImportInput, type BrowserTaskPortableBundle } from '@agentmux/core/control'
 import { mintObjectId, mintCapabilityToken, isObjectId } from '@agentmux/core/object-id'
@@ -3345,6 +3347,40 @@ export class BrowserViewManager {
     return projected
   }
 
+  /** Native admission for a new target is supplied by the original cold Browser owner. */
+  prepareTaskTarget?: (browserId: string, profileId: string) => Promise<void>
+
+  async runTaskParallel(browserId: string, assetId: string, version: number, input: BrowserTaskParallelInput, authorize: (browserId: string, profileId: string) => Promise<void>): Promise<BrowserTaskParallelSummary> {
+    return await this.executeTaskParallel(browserId, assetId, version, input, 'human', authorize)
+  }
+  async runControlledTaskParallel(browserId: string, assetId: string, version: number, input: BrowserTaskParallelInput, authorize: (browserId: string, profileId: string) => Promise<void>): Promise<BrowserTaskParallelSummary> {
+    return await this.executeTaskParallel(browserId, assetId, version, input, 'control', authorize)
+  }
+  private async executeTaskParallel(browserId: string, assetId: string, version: number, input: BrowserTaskParallelInput, intent: 'human' | 'control', authorize: (browserId: string, profileId: string) => Promise<void>): Promise<BrowserTaskParallelSummary> {
+    if (!this.taskAssets) throw new Error('Task asset storage is unavailable. Existing Browser work remains usable.')
+    return await this.taskAssets.startParallel(browserId, assetId, version, input, {
+      runTask: async (input, execution) => {
+        await authorize(input.browserId, execution.profileId)
+        await this.prepareTaskTarget?.(input.browserId, execution.profileId)
+        const entry = this.require(input.browserId)
+        if (entry.storage.mode !== 'normal' || entry.storage.profileId !== execution.profileId) throw new Error('This target no longer has its explicitly selected Profile. Its page was retained and no task action was sent.')
+        return await this.executeTaskAsset(input, intent, undefined, execution)
+      }
+    })
+  }
+  async taskProfileReferences(profileId: string): Promise<{ operationId: string; targetId: string; browserId: string }[]> {
+    if (!this.taskAssets) throw new Error('The original task reference owner is unavailable. Profile data is retained.')
+    return await this.taskAssets.profileReferences(profileId)
+  }
+  async listTaskParallel(browserId: string, before?: string, limit?: number): Promise<BrowserTaskParallelList> {
+    if (!this.taskAssets) throw new Error('Task records are unavailable. Existing Browser work remains usable.')
+    return await this.taskAssets.listParallel(browserId, before, limit)
+  }
+  async inspectTaskParallel(browserId: string, operationId?: string, after?: string, limit?: number): Promise<BrowserTaskParallelInspection | null> {
+    if (!this.taskAssets) throw new Error('Task records are unavailable. Existing Browser work remains usable.')
+    return await this.taskAssets.inspectParallel(browserId, operationId, after, limit)
+  }
+
   /** Saved run facts do not need a native page or presentation lease. */
   async inspectTaskRun(id: string, runId?: string): Promise<Awaited<ReturnType<BrowserTaskAssets['inspect']>>> {
     if (!this.taskAssets) throw new Error('Task asset storage is unavailable. The Browser remains usable.')
@@ -3510,13 +3546,13 @@ export class BrowserViewManager {
     return await this.executeTaskAsset(input, 'control')
   }
 
-  private async executeTaskAsset(input: BrowserTaskAssetRunInput, intent: 'human' | 'control', budget?: BrowserTaskRunBudget): Promise<BrowserTaskAssetRun> {
+  private async executeTaskAsset(input: BrowserTaskAssetRunInput, intent: 'human' | 'control', budget?: BrowserTaskRunBudget, parallel?: BrowserTaskParallelExecution): Promise<BrowserTaskAssetRun> {
     const entry = this.require(input.browserId)
     const view = entry.view
     const controlRevision = entry.controlRevision
-    const asset = await this.requireTaskAsset(input.browserId, input.assetId)
+    const asset = await this.requireTaskAsset(parallel?.sourceBrowserId ?? input.browserId, input.assetId)
     const privateTaskParameters = Boolean(asset.versions.find(version => version.version === input.version)?.parameters.length)
-    if (this.taskExecutions.has(entry.id) || this.taskAssets!.isBrowserExecuting(entry.id, budget?.batchId) || entry.runInFlight || entry.activeRun) throw new Error('Another operation is using this Browser.')
+    if (this.taskExecutions.has(entry.id) || this.taskAssets!.isBrowserExecuting(entry.id, budget?.batchId, parallel?.operationId) || entry.runInFlight || entry.activeRun) throw new Error('Another operation is using this Browser.')
     const execution = { entry, runId: input.runId, operationId: undefined as string | undefined, stopRequested: false }
     this.taskExecutions.set(entry.id, execution)
     try {
@@ -3563,6 +3599,7 @@ export class BrowserViewManager {
         navigationId: id => id === entry.id && this.owns(entry, view) && !view.webContents.isDestroyed() ? entry.navigationId : null,
         runScript: async (id, code, cursor, frame) => {
           if (this.entries.get(id) !== entry) throw new Error('The original Browser owner is unavailable; the task was not replayed.')
+          if (parallel && (entry.storage.mode !== 'normal' || entry.storage.profileId !== parallel.profileId || !this.owns(entry, view))) throw new Error('The original execution Profile or native page changed; no action was sent to its replacement.')
           if (!execution.runId) throw new Error('The task cursor is unavailable; the action was not restarted.')
           const taskPage: BrowserTaskPageExecution = { cursor: { ...cursor } }
           try {
@@ -3603,7 +3640,7 @@ export class BrowserViewManager {
             }, frame?.sensitive ?? privateTaskParameters, taskPage)
           } finally { execution.operationId = undefined }
         }
-      }, budget)
+      }, budget, parallel)
     } finally {
       if (this.taskExecutions.get(entry.id) === execution) this.taskExecutions.delete(entry.id)
     }

@@ -1,3 +1,4 @@
+import { parseBrowserTaskControlPayload } from '@agentmux/core/control'
 import { desktopRpcMethods } from './desktop-rpc-exposure.js'
 import { AppCaptureSource } from './app-capture.js'
 import { WorkspaceFileSources } from './workspace-file-sources.js'
@@ -599,18 +600,21 @@ export async function registerIpc(args: {
     browsers, home: app.getPath('home'), directory: join(app.getPath('userData'), 'browser-input-context'),
     createFromBuffer: bytes => nativeImage.createFromBuffer(bytes) })
   const inputContextCaptures = browserInputContextPorts.captures
-  const ensureBrowser = (id: string, input?: Parameters<BrowserViewManager['restore']>[1]) => browsers.ensure(id, async () => {
+  const ensureBrowser = (id: string, input?: Parameters<BrowserViewManager['restore']>[1], expectedProfileId?: string) => browsers.ensure(id, async () => {
     let saved = browserColdDescriptor((await spatialState.read())?.graph ?? null, id)
+    if (expectedProfileId !== undefined && (saved.mode !== 'normal' || saved.profileId !== expectedProfileId || saved.capsuleId)) throw new Error('The saved Browser Profile differs from this explicit task target. No native page was admitted.')
     workspace(config, saved.workspaceId)
     if (saved.mode !== 'private' && !saved.capsuleId) {
       await browserProfiles.initialize()
       // Profile IO must not revive a Region removed while this consumer was waiting.
       saved = browserColdDescriptor((await spatialState.read())?.graph ?? null, id)
+      if (expectedProfileId !== undefined && (saved.mode !== 'normal' || saved.profileId !== expectedProfileId || saved.capsuleId)) throw new Error('The saved task target Profile changed during preparation. Its original data is retained.')
       workspace(config, saved.workspaceId)
     }
     if (saved.capsuleId) saved = resolveCapsuleColdDocument(saved, await capsuleClient.call('capsule.inspect', { capsuleId: saved.capsuleId }))
     return saved
   }, input)
+  browsers.prepareTaskTarget = async (id, profileId) => { await ensureBrowser(id, undefined, profileId) }
   const savedRecoveryPreviewScope = (graph: Parameters<typeof browserColdDescriptor>[0], id: string): BrowserRecoveryPreviewScope | null => {
     const saved = browserColdDescriptor(graph, id)
     if (saved.mode === 'normal' && !saved.profileId) return null
@@ -744,6 +748,9 @@ export async function registerIpc(args: {
     inspectTaskAssetCreation: (id, input) => browsers.inspectTaskAssetCreation(id, input),
     getTaskAssets: async (id: string) => { await ensureBrowser(id); return await browsers.getTaskAssets(id) },
     inspectTaskRun: (id: string, runId?: string) => browsers.inspectTaskRun(id, runId),
+    runControlledTaskParallel: (id, assetId, version, input, authorize) => browsers.runControlledTaskParallel(id, assetId, version, input, authorize),
+    inspectTaskParallel: (id, operationId, after, limit) => browsers.inspectTaskParallel(id, operationId, after, limit),
+    listTaskParallel: (id, before, limit) => browsers.listTaskParallel(id, before, limit),
     saveTaskAssetDraft: (id: string, assetId: string, revision: number, content: unknown) => browsers.saveTaskAssetDraft(id, assetId, revision, content),
     publishTaskAsset: (id: string, assetId: string, revision: number) => browsers.publishTaskAsset(id, assetId, revision),
     getOperation: (id: string) => browsers.getOperation(id),
@@ -757,7 +764,7 @@ export async function registerIpc(args: {
   ): Promise<AgentMuxControlResult> => {
     if (request.operation === 'browser.release') return { operation: request.operation,
       receipt: await browsers.release(request.browserId, request.navigationId) }
-    if (request.operation === 'browser.task.inspect' || request.operation === 'browser.task.export' || request.operation === 'browser.task.import' || request.operation === 'browser.task.import-inspect' || request.operation === 'browser.task.edit' || request.operation === 'browser.task.publish' || request.operation === 'browser.task.source' || request.operation === 'browser.task.draft' || request.operation === 'browser.task.create' || request.operation === 'browser.task.create-inspect') return await controlBrowserTask(request)
+    if (request.operation === 'browser.task.parallel-list' || request.operation === 'browser.task.parallel' || request.operation === 'browser.task.parallel-inspect' || request.operation === 'browser.task.inspect' || request.operation === 'browser.task.export' || request.operation === 'browser.task.import' || request.operation === 'browser.task.import-inspect' || request.operation === 'browser.task.edit' || request.operation === 'browser.task.publish' || request.operation === 'browser.task.source' || request.operation === 'browser.task.draft' || request.operation === 'browser.task.create' || request.operation === 'browser.task.create-inspect') return await controlBrowserTask(request)
     if (request.operation === 'space.mote.preferences.read' || request.operation === 'space.mote.preferences.save') {
       if (request.kind === 'quick') return controlBridge.execute(request, signal)
       throw new AgentMuxError('Connection preferences belong to their original background Host. Use that Host endpoint; the Mote files and Agents are retained.', 'CONTROL_UNAVAILABLE')
@@ -2190,6 +2197,7 @@ export async function registerIpc(args: {
   handleWithEvent('browser:deleteProfileFolder', (_event, folderId: string, expectedRevision: number) => ipcResult(() => browserProfiles.deleteFolder(folderId, expectedRevision)))
   handleWithEvent('browser:setDefaultProfile', (event, profileId: string) => ipcResult(() => browserProfiles.setDefaultProfile(profileId)))
   const profileUsage = createBrowserProfileUsage({
+    taskReferences: profileId => browsers.taskProfileReferences(profileId),
     open: profileId => browsers.profileUses(profileId),
     readSaved: () => spatialState.read(),
     nativeUse: profileId => browserProfiles.nativeUse(profileId),
@@ -2390,6 +2398,22 @@ export async function registerIpc(args: {
   handleWithEvent('browser:locateTaskAssetStep', async (event, id: string, assetId: string, revision: number, stepId: string) => {
     await ensureBrowser(id)
     return await browsers.locateTaskAssetStep(id, assetId, revision, stepId)
+  })
+  handleWithEvent('browser:runTaskParallel', async (_event, browserId: string, assetId: string, version: number, input: unknown) => {
+    const request = parseBrowserTaskControlPayload({ operation: 'browser.task.parallel', browserId, assetId, version, input })
+    if (request.operation !== 'browser.task.parallel') throw new Error('Task operation identity changed.')
+    return await browsers.runTaskParallel(request.browserId, request.assetId, request.version, request.input,
+      (id, profileId) => browserAutomation(id, undefined, profileId))
+  })
+  handleWithEvent('browser:inspectTaskParallel', async (_event, browserId: string, options: { operationId?: string; after?: string; limit?: number } = {}) => {
+    const request = parseBrowserTaskControlPayload({ ...options, operation: 'browser.task.parallel-inspect', browserId })
+    if (request.operation !== 'browser.task.parallel-inspect') throw new Error('Task operation identity changed.')
+    return await browsers.inspectTaskParallel(request.browserId, request.operationId, request.after, request.limit)
+  })
+  handleWithEvent('browser:listTaskParallel', async (_event, browserId: string, options: { before?: string; limit?: number } = {}) => {
+    const request = parseBrowserTaskControlPayload({ ...options, operation: 'browser.task.parallel-list', browserId })
+    if (request.operation !== 'browser.task.parallel-list') throw new Error('Task operation identity changed.')
+    return await browsers.listTaskParallel(request.browserId, request.before, request.limit)
   })
   handleWithEvent('browser:runTaskBatch', async (event, input: BrowserTaskBatchInput) => {
     await browserAutomation(input.browserId, undefined)

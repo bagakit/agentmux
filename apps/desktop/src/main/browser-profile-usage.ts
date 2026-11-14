@@ -32,6 +32,8 @@ export type BrowserProfileUsagePorts = {
   open(profileId: string): { browserId: string; workspaceId: string | null; title: string; url: string }[]
   /** null means no saved Tabs exist yet (known empty); a rejection means the saved Tabs are unknown. */
   readSaved(): Promise<{ graph: AgentMuxSpatialGraph } | null>
+  /** Original task owner only; unavailable facts protect this deletion, not healthy pages. */
+  taskReferences?(profileId: string): Promise<{ operationId: string; targetId: string; browserId: string }[]>
   nativeUse(profileId: string): BrowserProfileNativeUse
   deleteProfile(profileId: string, approval: BrowserProfileDeleteApproval, expectedRevision: string, assertUnused: () => Promise<void>): Promise<BrowserProfileRecycleReceipt>
 }
@@ -74,6 +76,10 @@ export function createBrowserProfileUsage(ports: BrowserProfileUsagePorts) {
       throw profileError(`Browser Profile is still used by the saved Browser "${name}"${savedList.length > 1 ? ` and ${savedList.length - 1} more` : ''}. Open it and switch it to another Profile, or close it, then delete again.`,
         'BROWSER_PROFILE_IN_USE', { details: { browsers } })
     }
+    let tasks: { operationId: string; targetId: string; browserId: string }[]
+    try { tasks = await ports.taskReferences?.(profileId) ?? [] }
+    catch (cause) { throw profileError('Original task references could not be read. Keep this Profile and inspect its existing task operations before retrying deletion.', 'BROWSER_PROFILE_USAGE_UNKNOWN', {}, cause) }
+    if (tasks.length) throw profileError('This Profile is still held by unfinished task targets. Inspect and stop the original task operations before recycling or cleaning it.', 'BROWSER_PROFILE_IN_USE', { details: { tasks } })
     const native = ports.nativeUse(profileId)
     if (native.status === 'unknown') {
       throw profileError('Native Profile use could not be confirmed. Original Profile data is kept; retry after its workers, requests and downloads can be read.',

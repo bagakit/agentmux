@@ -1,3 +1,4 @@
+import type { BrowserTaskParallelRecord, BrowserTaskParallelSelection, BrowserTaskParallelSummary } from './browser-task-parallel.js'
 import type { BrowserTaskCreateInput } from '@agentmux/core/control'
 import type { BrowserReplayTarget } from '@agentmux/browser/model/browser-operation'
 import type { BrowserOutcomeHumanFact } from '@agentmux/browser/model/browser-outcome-criteria'
@@ -115,6 +116,7 @@ export type BrowserTaskAssetRun = {
   parent?: import('@agentmux/core/control').BrowserTaskRunParent
   /** Subflow parent only: item identities and bound child runs, never fresh values or child status. */
   calls?: import('@agentmux/core/control').BrowserTaskCallProgress[]
+  orchestration?: import('@agentmux/core/control').BrowserTaskParallelBinding
   pendingCheckpointId?: string
   /** Main-created trusted Continue events. Absence means their recording information is unavailable. */
   humanCheckpoints?: BrowserTaskHumanCheckpoint[]
@@ -138,8 +140,8 @@ export type BrowserTaskBatchInput = {
   /** Shared fresh invocation values, including secrets; never saved with batch progress. */
   parameters: Record<string, string>
 }
-export type BrowserTaskAssetDocument = { version: 1; assets: BrowserTaskAsset[]; runs: BrowserTaskAssetRun[]; batches?: BrowserTaskBatchRun[]; selectedRuns?: { browserId: string; runId: string }[] }
-export type BrowserTaskAssetState = { assets: BrowserTaskAsset[]; runs: BrowserTaskAssetRun[]; batches?: BrowserTaskBatchRun[]; selectedRunId?: string | null; activeBatchId?: string | null; warning?: string }
+export type BrowserTaskAssetDocument = { version: 1; assets: BrowserTaskAsset[]; runs: BrowserTaskAssetRun[]; batches?: BrowserTaskBatchRun[]; selectedRuns?: { browserId: string; runId: string }[]; parallel?: BrowserTaskParallelRecord[]; selectedParallel?: BrowserTaskParallelSelection[] }
+export type BrowserTaskAssetState = { assets: BrowserTaskAsset[]; runs: BrowserTaskAssetRun[]; batches?: BrowserTaskBatchRun[]; selectedRunId?: string | null; activeBatchId?: string | null; parallel?: BrowserTaskParallelSummary | null; warning?: string }
 export type BrowserTaskAssetRunInput = {
   assetId: string
   version: number
