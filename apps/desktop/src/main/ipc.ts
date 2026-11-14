@@ -2595,14 +2595,7 @@ export async function registerIpc(args: {
   const executionBindingReaders = new ExecutionBindingReaders(bindingId => executionBindings.inspect(bindingId))
   const executionBindings = new AgentExecutionBindingService(join(app.getPath('userData'), 'execution-bindings'), {
     onObservation: inspection => executionBindingReaders.publish(inspection),
-    resolveHost: async hostId => {
-      const scopes = args.runtime.rpcClients().filter(scope => scope.hostId === hostId)
-      if (scopes.length !== 1) throw new AgentMuxError('Execution requires one exact configured Host route.', 'UNKNOWN_HOST')
-      const client = scopes[0]!.client
-      await client.connect()
-      const identity = await client.agentCreationAuthority()
-      return { runtimeId: identity.runtimeId, client }
-    }
+    resolveHost: hostId => args.runtime.executionBindingHost(hostId)
   })
   registerExecutionBindingIpc({ handle: handleWithEvent, bindings: executionBindings, readers: executionBindingReaders })
   // Rejoin only retained tool readers. Startup never creates or restores an Agent.

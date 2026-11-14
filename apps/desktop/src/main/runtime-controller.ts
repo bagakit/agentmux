@@ -1106,7 +1106,7 @@ export class RuntimeController {
 
   private async launchAdmittedAgent(request: AgentLaunchInput, config: AppConfig, spatialIntent?: import('@agentmux/core').AgentMuxAgentCreationSpatialIntent, executionBindings?: Pick<AgentExecutionBindingService, 'create'>): Promise<AgentLaunchResult> {
     return await this.trackHostOperation(request.hostId, async () => {
-      const client = await this.connectedClient(request.hostId)
+      const client = await this.connectedClient(request.hostId, 'creation')
       const resource = request.toolWorkspace
       if (resource) {
         if (!executionBindings || request.creationCaller || request.initialMessage || request.forkSource || request.nativeResumeSource || request.scratchTopicId) throw new AgentMuxError(
@@ -1181,8 +1181,7 @@ export class RuntimeController {
         }
         const localExecutor = !remoteCreation ? config.executors[request.executorId]! : undefined
         const boundCreation = resource && hostIntent ? async () => {
-          const resourceClient = await this.connectedClient(resource.hostId)
-          const authority = await resourceClient.agentCreationAuthority()
+          const resourceHost = await this.executionBindingHost(resource.hostId)
           // Public operation IDs are opaque, not filesystem-safe binding IDs.
           // Keep the original intent intact and derive its stable private binding.
           const bindingId = createHash('sha256').update(JSON.stringify([
@@ -1190,7 +1189,7 @@ export class RuntimeController {
           ])).digest('hex')
           const created = await executionBindings!.create({ bindingId,
             agentHostId: request.hostId, agentRuntimeId: inventory!.runtimeId,
-            resourceHostId: resource.hostId, resourceRuntimeId: authority.runtimeId, resourceWorkspacePath: resource.path,
+            resourceHostId: resource.hostId, resourceRuntimeId: resourceHost.runtimeId, resourceWorkspacePath: resource.path,
             resourceGrant: { scope: 'host-user', bindingId },
             agent: { ...hostIntent, agentSessionId: hostIntent.agentSessionId!, createOperationId: hostIntent.createOperationId! } })
           return { session: created.session, creation: created.session.creation! }
@@ -2504,19 +2503,28 @@ export class RuntimeController {
     }
   }
 
-  private async connectedClient(hostId: string, scope: 'runtime' | 'session' | 'raw-input' = 'session'): Promise<AgentMuxClient> {
+  private async connectedClient(hostId: string, scope: 'runtime' | 'session' | 'raw-input' | 'creation' = 'session'): Promise<AgentMuxClient> {
     const client = this.configuredClient(hostId)
-    // Hosted raw input discovers its Host and prepares Native in the original
-    // invocation. Direct Core clients retain their connection prerequisite.
-    if (scope === 'raw-input' && 'runtimeOwnerIdentity' in client) return client
+    // Hosted input and creation discover the original control owner and prepare
+    // Native in their invocation; the whole-Host event reader is independent.
+    // Direct Core clients retain their original connection prerequisites.
+    if ((scope === 'raw-input' || scope === 'creation') && 'runtimeOwnerIdentity' in client) return client
     try {
-      if (scope !== 'session') await client.connectRuntime()
+      if (scope === 'runtime' || scope === 'raw-input') await client.connectRuntime()
       else await client.connect()
     } catch (error) {
       this.endpointWarnings.set(hostId, endpointWarning(hostId, 'Connecting to Runtime', error))
       throw error
     }
     return client
+  }
+
+  /** Exact Main route for a tool binding; Hosted business invocations own their fence. */
+  async executionBindingHost(hostId: string) {
+    if (!this.hosts.has(hostId)) throw new AgentMuxError('Execution requires one exact configured Host route.', 'UNKNOWN_HOST')
+    const client = await this.connectedClient(hostId, 'creation')
+    const identity = await client.agentCreationAuthority()
+    return { runtimeId: identity.runtimeId, client }
   }
 
   /** Durable semantic intake does not require the original Runtime connection. */
