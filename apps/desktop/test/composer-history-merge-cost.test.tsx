@@ -3,8 +3,9 @@ import { act } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
 import type { AgentSessionHistoryReadPage, AgentSessionUserMessage, AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
+import { promptCarrierWaiting } from './helpers/prompt-carrier-receipt'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
-import { useAppStore } from '../src/renderer/src/store'
+import { useAppStore, type AgentSteerQueueEntry } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 import * as inputProjection from '@agentmux/core/session-user-messages'
@@ -207,6 +208,69 @@ it('preserves the selected captured record, Range and scroll when its Composer l
     selection.removeAllRanges()
     outside.remove()
   }
+})
+
+it('reuses the original queue projection across hidden output and refreshes original pending cards when their facts change', async () => {
+  const session = composerSession(sid, 'claude')
+  const archivedCount = 1400, activeCount = 8
+  const activeIds = Array.from({ length: activeCount }, (_, index) => `pending-${index}`)
+  const editableId = activeIds[0]!, controlledId = activeIds.at(-1)!
+  const queue: AgentSteerQueueEntry[] = [
+    ...Array.from({ length: archivedCount }, (_, index): AgentSteerQueueEntry => ({
+      operationId: `archived-${index}`, text: 'Original archived record', status: 'failed', archived: true, promptCondition: null
+    })),
+    ...activeIds.map((operationId): AgentSteerQueueEntry => ({ operationId, text: `Original ${operationId}`,
+      status: 'queued', runId: session.control.run.runId, awaitingExplicitSend: true, promptCondition: null,
+      ...(operationId === controlledId ? { directInputBinding: { expectedRun: session.control.run,
+        admissionIntent: { kind: 'manual-actor' } }, directInputControl: session.control } : {})
+    }))
+  ]
+  const originalMap = vi.spyOn(queue, 'map')
+  const submit = vi.spyOn(api.sessions, 'submitPrompt')
+  useAppStore.setState({ sessions: [session], timelines: { [sid]: originalStream([captured(0)]) }, agentSteerQueues: { [sid]: queue } })
+  await render(0, true)
+  const card = (operationId: string) => document.querySelector<HTMLElement>(`.composer-pending__card[data-operation-id="${operationId}"]`)
+  const projectedIds = () => [...document.querySelectorAll<HTMLElement>('.composer-pending__card')].map(row => row.dataset.operationId)
+  const label = (operationId: string) => card(operationId)?.querySelector('.composer-pending__state')?.getAttribute('aria-label')
+  expect(projectedIds()).toEqual(activeIds)
+  expect(label(editableId)).toBe('待手动发送')
+  expect(originalMap).toHaveBeenCalled()
+  const originalEditor = editor()
+  await render(1, false)
+  originalMap.mockClear()
+  for (let index = 1; index <= 10; index++) {
+    await commitInput({ type: 'append', agentSessionId: sid, item: { ...captured(index),
+      id: `queue-audit-output-${index}`, kind: 'assistant_message', source: 'native-hook' } })
+  }
+  expect(useAppStore.getState().timelines[sid]?.items).toHaveLength(11)
+  expect(useAppStore.getState().agentSteerQueues[sid]).toBe(queue)
+  const sample = { queueEntries: queue.length, publications: 10,
+    projections: originalMap.mock.calls.length, mappedEntries: queue.length * originalMap.mock.calls.length }
+  if (process.env.AGENTMUX_CAPTURED_INPUT_SAMPLE) appendFileSync(process.env.AGENTMUX_CAPTURED_INPUT_SAMPLE, JSON.stringify(sample) + '\n')
+  expect(sample.projections, JSON.stringify(sample)).toBe(0)
+  await act(async () => useAppStore.getState().editQueuedAgentSteer(sid, editableId, `Original ${editableId}`, 'Edited original input'))
+  const waiting = promptCarrierWaiting(sid, session.control.run.runId, controlledId)
+  await act(async () => useAppStore.getState().applyEvent({ type: 'core', hostId: session.control.hostId, event: {
+    type: 'agent-input', receipt: waiting
+  } }))
+  expect(useAppStore.getState().agentSteerQueues[sid]?.find(entry => entry.operationId === controlledId)?.inputReceipt).toEqual(waiting)
+  await render(2, true)
+  expect(card(editableId)?.textContent).toContain('Edited original input')
+  expect(label(controlledId)).toBe('已保存 · 等待确认')
+  await act(async () => useAppStore.setState({ agentSteerInFlight: { [sid]: editableId }, agentSteerInFlightPhase: { [sid]: 'submitting' } }))
+  expect(label(editableId)).toBe('发送中')
+  await act(async () => useAppStore.setState({ agentSteerInFlight: {}, agentSteerInFlightPhase: {} }))
+  await act(async () => useAppStore.getState().applyEvent({ type: 'core', hostId: session.control.hostId, event: {
+    type: 'process-state', agentSessionId: sid, run: session.control.run, state: 'exited',
+    evidence: { source: 'run-process', observedAt: 100 }
+  } }))
+  expect(label(editableId)).toBe('原 Run 不可投递')
+  expect(label(controlledId)).toBe('已保存 · 等待确认')
+  expect(projectedIds()).toEqual(activeIds)
+  expect(editor()).toBe(originalEditor)
+  expect(dom.draft(sid)).toBe(draft)
+  expect(useAppStore.getState().sessions[0]?.control).toBe(session.control)
+  expect(submit).not.toHaveBeenCalled()
 })
 
 it('keeps query snapshots separate from the original live seed and reads current captured facts again after clearing the query', async () => {
