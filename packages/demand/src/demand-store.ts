@@ -749,6 +749,10 @@ export class DemandStore {
       if (current?.history.some(record => record.operationId === revision.operationId)) {
         const original = current.history.find(record => record.operationId === revision.operationId)!
         if (original.author.kind !== author.kind || original.author.id !== author.id || (original.author.runtimeId ? original.author.runtimeId !== author.runtimeId : original.author.hostId !== undefined && original.author.hostId !== author.hostId)) this.rejectDelegation('This plan revision operation belongs to another author.')
+        if (original.revision !== current.revision)
+          this.rejectDelegation(`This operation already applied at plan revision ${original.revision}; the current plan is revision ${current.revision}. Read the current plan instead of repeating the revision.`)
+        if (revision.expectedRevision !== original.revision - 1 || revision.alignmentRevision !== current.alignmentRevision || JSON.stringify(revision.nodes) !== JSON.stringify(current.nodes))
+          this.rejectDelegation('This plan revision operation was already recorded with different content. Read the original plan before another revision.')
         return { unchanged: demand }
       }
       if ((current?.revision ?? 0) !== revision.expectedRevision)
@@ -756,6 +760,12 @@ export class DemandStore {
       if (!demand.alignment || demand.alignment.revision !== revision.alignmentRevision)
         this.rejectDelegation('A plan must be written against the current Goal proposal version.')
       try { assertGoalPlanKeepsRecordedNodes(current, revision.nodes, demand.delegations ?? []) } catch (error) { this.rejectDelegation(error instanceof Error ? error.message : String(error)) }
+      for (const node of revision.nodes) {
+        const previous = current?.nodes.find(item => item.id === node.id)
+        const criteriaWritten = !previous || previous.criterionIds.length !== node.criterionIds.length || previous.criterionIds.some(id => !node.criterionIds.includes(id))
+        if (criteriaWritten && (!node.criterionIds.length || node.criterionIds.some(id => !demand.alignment!.criteria.some(criterion => criterion.id === id))))
+          this.rejectDelegation(`Plan node ${node.id} must write at least one success criterion, all from the current Goal proposal. Unchanged existing criteria and recorded work are retained.`)
+      }
       const now = Date.now(), next = (current?.revision ?? 0) + 1
       demand.plan = { revision: next, alignmentRevision: revision.alignmentRevision, nodes: clone(revision.nodes), reviews: current?.reviews ?? [],
         history: [...(current?.history ?? []), { operationId: revision.operationId, revision: next, author, revisedAt: now }] }

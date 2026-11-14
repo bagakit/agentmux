@@ -202,7 +202,7 @@ export type GoalPlanNodeProjection = {
   state: GoalPlanNodeState
   /** 0-based dependency column: one past the deepest dependency. */
   column: number
-  /** The current attempt, the newest delegation of this node. */
+  /** The newest delegation, unless an explicit executor revision superseded its unreviewed work. */
   delegation: DemandDelegation | null
   attempts: number
   review: GoalPlanReview | null
@@ -231,8 +231,12 @@ export function projectGoalPlan(plan: GoalPlan, delegations: readonly DemandDele
   const derive = (node: GoalPlanNodeInput): Omit<GoalPlanNodeProjection, 'column'> => {
     const known = derived.get(node.id)
     if (known) return known
-    const attempts = delegations.filter(delegation => delegation.planNodeId === node.id), current = attempts.at(-1) ?? null
-    const review = current ? plan.reviews.filter(item => item.nodeId === node.id && item.delegationOperationId === current.operationId).at(-1) ?? null : null
+    const attempts = delegations.filter(delegation => delegation.planNodeId === node.id), latest = attempts.at(-1) ?? null
+    const latestReview = latest ? plan.reviews.filter(item => item.nodeId === node.id && item.delegationOperationId === latest.operationId).at(-1) ?? null : null
+    const reassigned = Boolean(latest && !latestReview && node.executor &&
+      (node.executor.hostId !== delegationWorkerHostId(latest) || node.executor.agentSessionId !== latest.workerAgentSessionId))
+    const current = reassigned ? null : latest
+    const review = current ? latestReview : null
     const staleCriteria = staleGoalPlanCriteria(node, criteria, current)
     const unknown: GoalPlanUnknownReason[] = node.cancelled ? [] : [
       ...(staleCriteria.length || !node.criterionIds.length ? ['criteria' as const] : []),
