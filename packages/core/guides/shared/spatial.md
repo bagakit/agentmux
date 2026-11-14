@@ -67,7 +67,10 @@ These are advisory strategies, not fixed directions, size thresholds or addition
 ## Read an amux object link
 An amux:// link carries one exact object identity, not a command, permission or sender credential.
 Use the public @agentmux/core/sharing parseAmuxObjectLink helper to decode its URI path segment
-without trimming or changing the original ID. Supported kinds are agent, region, tab, space, zone, capsule and mote.
+without trimming or changing the original ID. Supported kinds are agent, region, tab, space, zone, capsule, mote, host and goal.
+A Goal link retains its original Runtime and Goal-store namespace. Read `goal --skill`
+for the exact `goal focus --goal ID --runtime ID --namespace ID --section plan` reading path;
+opening the link never creates a plan or executes work.
 For amux://agent/<SID>, use agent inspect --session SID or agent send --to-session SID --text TEXT.
 For spatial kinds, use space inspect with --region, --tab, --space or --zone and the decoded ID.
 For amux://mote/<SPACE>, keep its decoded stable Space identity and use app focus --mote SPACE.

@@ -14,6 +14,26 @@ delegation, report, collection and patrol operations. Inspect the same original 
 an unknown write; do not create another Goal or duplicate input. Navigation, assignment, finite
 Start, source-bound delegation and actual execution are different facts.
 
+## Read the original Goal workspace
+
+`goal inspect` exposes `goal.address` when the original owner can confirm it:
+`runtimeId`, `namespace`, `goalUrl` and `planUrl`. Copy those canonical URLs unchanged.
+They identify the original semantic Runtime, its canonical Goal store and this exact
+Goal. They contain no source path and grant no access or execution authority. A Host
+alias, Supervisor or current cwd cannot replace that source. If `addressIssue` is
+present, the Goal remains readable; read that original source again before sharing a link.
+
+<!-- amux:generated command:goal.focus -->
+
+For source-qualified navigation retain both `--runtime` and `--namespace` from that
+address. `--section plan` reveals the same Goal's original graph, including its honest
+empty state; opening it never requests planning, creates tasks or sends input. Read
+navigation and `presentation.goal` separately: selection alone does not confirm the
+requested plan is in view. Missing or mismatched sources keep the current workface and
+original link, rather than opening another store's namesake Goal. Without source flags,
+existing Goal focus keeps its current-owner meaning. `goal plan` remains the structured
+read of the saved plan and its owner-derived states; it does not open the GUI.
+
 [contract](../shared/goal/contract.md "amux:include")
 
 [activity](../shared/goal/activity.md "amux:include")
