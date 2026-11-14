@@ -9,11 +9,12 @@ import { fileURLToPath } from 'node:url'
 const components = 'apps/desktop/src/renderer/src/components/'
 const library = 'apps/desktop/src/renderer/src/lib/'
 const feedback = components + 'AgentOperationFeedback.tsx'
+const communication = components + 'FocusCommunicationFeedback.tsx'
 const index = library + 'focus-list-activity.ts'
 const surface = components + 'GlobalFocusSurface.tsx'
 const css = 'apps/desktop/src/renderer/src/styles/agent-operation-feedback.css'
 const focusCss = 'apps/desktop/src/renderer/src/styles/focus.css'
-export const listFeedbackSources = [surface, components + 'FocusContextCards.tsx', components + 'FocusContextCardBody.tsx', components + 'FocusContextRow.tsx', feedback,
+export const listFeedbackSources = [surface, components + 'FocusContextCards.tsx', components + 'FocusContextCardBody.tsx', components + 'FocusContextRow.tsx', feedback, communication,
   index, library + 'use-collaboration-reading.ts', css, focusCss]
 export const listFeedbackMutations = [
   { label: 'real-list-active-subscription', file: surface, before: 'useCollaborationActivity(activityScope, visible && documentActive)', after: 'useCollaborationActivity(activityScope, false)' },
@@ -22,8 +23,8 @@ export const listFeedbackMutations = [
   { label: 'message-direction-is-not-reversed', file: index, before: "agentSessionId === pulse.sender ? 'sent' : 'received'", after: "agentSessionId === pulse.sender ? 'received' : 'sent'" },
   { label: 'supervision-is-not-a-send', file: index, before: "pulse.kind === 'supervision' ? 'updated'", after: "false ? 'updated'" },
   { label: 'unrelated-activity-retains-references', file: index, before: 'held?.pulse === pulse && held.direction === direction ? held', after: 'false ? held' },
-  { label: 'visible-return-keeps-original-phase', file: feedback, before: 'Math.min(0, activity.pulse.startedAt - Date.now())', after: '0' },
-  { label: 'visible-owner-replaces-only-the-motion-mark', file: feedback, before: '<span key={`${activity.pulse.id}:${visible}`} className="focus-communication-feedback__mark"', after: '<span key={activity.pulse.id} className="focus-communication-feedback__mark"' },
+  { label: 'visible-return-keeps-original-phase', file: communication, before: 'Math.min(0, activity.pulse.startedAt - Date.now())', after: '0' },
+  { label: 'visible-owner-replaces-only-the-motion-mark', file: communication, before: '<span key={`${activity.pulse.id}:${visible}`} className="focus-communication-feedback__mark"', after: '<span key={activity.pulse.id} className="focus-communication-feedback__mark"' },
   { label: 'close-is-immediately-inert', file: feedback, before: 'inert={!open} aria-hidden={!open}', after: 'inert={false} aria-hidden={!open}' },
   { label: 'close-returns-inside-focus-only', file: feedback, before: 'if (!next && !compact && content.current?.contains(content.current.ownerDocument.activeElement)) trigger.current?.focus({ preventScroll: true })', after: 'if (false) trigger.current?.focus({ preventScroll: true })' },
   { label: 'only-visible-communication-moves', file: css, before: ".focus-communication-feedback[data-motion-active='true'] .focus-communication-feedback__mark { animation-play-state: running; }", after: ".focus-communication-feedback[data-motion-active='false'] .focus-communication-feedback__mark { animation-play-state: running; }" },
