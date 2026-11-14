@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawnClaudeNativeInputProducer } from './helpers/claude-native-input-producer.js'
 import { once } from 'node:events'
 import { chmod, mkdtemp, readFile, realpath, rename, rm, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -37,19 +37,7 @@ afterEach(async () => { vi.restoreAllMocks(); for (const close of cleanups.splic
 async function fixture(openTranscript = true, extraEndpoints = 0) {
   const root = await realpath(await mkdtemp('/tmp/amux-ci-')), id = 'original-main', path = join(root, 'in.sock')
   const sourcePath = join(root, 'config', 'projects', 'project', `${id}.jsonl`)
-  const child = spawn(process.execPath, ['-e', String.raw`
-    const fs=require('node:fs'),net=require('node:net'),crypto=require('node:crypto'),cp=require('node:child_process'),path=require('node:path');
-    const [root,id,socket,source,keepOpen,extras]=process.argv.slice(1), token=crypto.randomBytes(16).toString('hex');
-    fs.mkdirSync(path.dirname(source),{recursive:true});fs.mkdirSync(path.join(root,'config','sessions'));
-    fs.writeFileSync(source,JSON.stringify({type:'user',sessionId:id,isSidechain:false,message:{role:'user',content:'source'}})+'\n');
-    const fd=keepOpen==='true'?fs.openSync(source,'a'):undefined; const peers=new Set(),extraServers=[];let unrelated;
-    const server=net.createServer(peer=>{peers.add(peer);let carry='';peer.on('error',()=>{});peer.on('close',()=>peers.delete(peer));
-      peer.on('data',bytes=>{carry+=bytes;for(let n;(n=carry.indexOf('\n'))>=0;){const line=carry.slice(0,n);carry=carry.slice(n+1);if(line)process.send({frame:JSON.parse(line)});}});});
-    server.listen(socket,()=>{fs.chmodSync(socket,0o600);const key=path.join(root,'config','sessions',process.pid+'.'+crypto.createHash('sha256').update(path.resolve(socket)).digest('hex')+'.key');
-      fs.writeFileSync(key,JSON.stringify({peerToken:token,procStart:cp.execFileSync('ps',['-o','lstart=','-p',String(process.pid)],{env:{...process.env,LC_ALL:'C',TZ:'UTC'}}).toString().trim(),pidDomain:'darwin'}),{mode:0o600});
-      const procStart=JSON.parse(fs.readFileSync(key,'utf8')).procStart;fs.writeFileSync(path.join(root,'config','sessions',process.pid+'.json'),JSON.stringify({pid:process.pid,sessionId:id,messagingSocketPath:socket,procStart,status:'waiting',kind:'interactive'}),{mode:0o600});for(let i=0;i<Number(extras);i++){const extra=net.createServer();extra.listen(path.join(root,'tool-'+i+'.sock'));extraServers.push(extra);}process.send({ready:true,key});});
-    process.on('message',()=>{unrelated=cp.spawn(process.execPath,['-e',"const net=require('node:net');const server=net.createServer();server.listen(process.argv[1],()=>process.send('ready'));process.on('disconnect',()=>server.close(()=>process.exit(0)))",path.join(root,'unrelated.sock')],{stdio:['ignore','ignore','ignore','ipc']});unrelated.once('message',()=>{fs.writeFileSync(path.join(root,'config','sessions',unrelated.pid+'.json'),'{ damaged unrelated registry',{mode:0o600});process.send({unrelatedPid:unrelated.pid});});});process.on('disconnect',async()=>{if(unrelated){const ended=new Promise(resolve=>unrelated.once('exit',resolve));unrelated.disconnect();await ended;}for(const extra of extraServers)extra.close();for(const peer of peers)peer.destroy();server.close(()=>{if(fd!==undefined)fs.closeSync(fd);process.exit(0)});});
-  `, root, id, path, sourcePath, String(openTranscript), String(extraEndpoints)], { detached: true, stdio: ['ignore', 'ignore', 'pipe', 'ipc'] })
+  const child = spawnClaudeNativeInputProducer({ root, id, socketPath: path, sourcePath, keepOpen: openTranscript, extraEndpoints })
   const frames: Record<string, any>[] = []
   child.on('message', value => { if (value && typeof value === 'object' && 'frame' in value) frames.push((value as { frame: Record<string, any> }).frame) })
   const [ready] = await once(child, 'message') as [{ ready: boolean; key: string }]
