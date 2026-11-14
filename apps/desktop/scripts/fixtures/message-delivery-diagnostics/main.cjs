@@ -27,6 +27,99 @@ async function capture(width, state) {
   assert.ok(png.length > 0); await fs.writeFile(path.join(evidence, file), png)
   result.frames.push({ width, state, file, sha256: createHash('sha256').update(png).digest('hex') })
 }
+async function queuedEditorScene(width, appearance) {
+  const floating = "document.querySelector('.composer-pending[data-positioned=true]')"
+  const card = `${floating}.querySelector('.composer-pending__card')`
+  const preview = `${card}.querySelector('.composer-pending__preview')`
+  const editor = `${card}.querySelector('.composer-queued-editor')`
+  const field = `${editor}.querySelector('textarea')`
+  const save = `${editor}.querySelector('[aria-label="保存待发消息"]')`
+  const copy = `${editor}.querySelector('.composer-pending__copy')`
+  const cancel = `${editor}.querySelector('.composer-queued-editor__actions .composer-tool')`
+  const long = width === 320
+  const seed = await evaluate(`deliveryDiagnostics.seedQueuedEditor(${JSON.stringify(appearance)},${long})`)
+  await waitFor(`${floating}?.querySelector('.composer-pending__preview:enabled')`)
+  await painted()
+  const terminal = `${surface}.querySelector('.xterm')`
+  await waitFor(`Boolean(${terminal})`)
+  const before = await evaluate(`(()=>{window.queuedEditorFixtureTerminal=${terminal};return{terminal:${terminal}.getBoundingClientRect().toJSON(),facts:deliveryDiagnostics.facts()}})()`)
+  await click(preview)
+  await waitFor(`${editor}?.contains(document.activeElement)`)
+  await painted()
+  const geometry = await evaluate(`(()=>{const c=${card},e=${editor},f=${field},s=${save};
+    const rect=node=>node.getBoundingClientRect().toJSON()
+    const parts=[${copy},${cancel},s]
+    return {card:rect(c),owner:rect(${surface}),field:rect(f),footer:rect(e.querySelector('.composer-queued-editor__footer')),
+      title:e.querySelector('label').textContent, focus:f===document.activeElement, scrolls:f.scrollHeight>f.clientHeight,
+      fullButtons:parts.every(button=>{const r=rect(button);return button.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}),
+      copy:rect(parts[0]),cancel:rect(parts[1]),save:rect(s),terminal:rect(${terminal}),sameTerminal:window.queuedEditorFixtureTerminal===${terminal},
+      cardBorder:getComputedStyle(c).borderTopColor,fieldOutline:getComputedStyle(f).outlineColor}})()`)
+  assert.equal(geometry.title, '编辑待发消息')
+  assert.ok(geometry.focus && geometry.fullButtons && geometry.sameTerminal)
+  assert.ok(geometry.field.width >= Math.min(geometry.owner.width, 360) - 56, 'The real editor gives the message a full-width field')
+  assert.ok(geometry.card.x >= geometry.owner.x && geometry.card.right <= geometry.owner.right)
+  assert.ok(geometry.field.bottom < geometry.footer.top && geometry.copy.right < geometry.cancel.x && geometry.cancel.right <= geometry.save.x)
+  assert.notEqual(geometry.cardBorder, geometry.fieldOutline, 'The card does not repeat the focused field outline')
+  assert.equal(geometry.scrolls, long)
+  assert.deepEqual(geometry.terminal, before.terminal)
+  await capture(width, `queued-editor-${appearance}`)
+
+  const insert = async text => {
+    await evaluate(`${field}.focus();${field}.select()`)
+    await win.webContents.debugger.sendCommand('Input.insertText', { text })
+    await waitFor(`${field}.value===${JSON.stringify(text)}`)
+  }
+  const edited = '只更新这条待发消息。\n继续保留当前输入草稿。'
+  await insert(edited)
+  await click(copy)
+  await waitFor(`deliveryDiagnostics.facts().copies.at(-1)===${JSON.stringify(seed.entry.text)}`)
+  await click(cancel)
+  await waitFor(`!${card}.querySelector('textarea')`)
+  assert.deepEqual((await evaluate('deliveryDiagnostics.facts()')).queues, before.facts.queues)
+  await click(preview)
+  await waitFor(`${editor}?.contains(document.activeElement)`)
+  await insert(edited)
+  if (width === 320 && appearance === 'light') {
+    await evaluate(`deliveryDiagnostics.changeQueuedEditorOriginal(${JSON.stringify(seed.sessionId)},${JSON.stringify(seed.entry.operationId)},${JSON.stringify(seed.entry.text)})`)
+    await click(save)
+    await waitFor(`${editor}.querySelector('[role=alert]')`)
+    assert.equal(await evaluate(`${field}.value`), edited, 'A stale save preserves the edited text')
+    assert.ok(await evaluate(`(()=>{
+      const overlay=${floating}, list=overlay.querySelector('.composer-pending__cards')
+      const notice=list.querySelector('.composer-pending__notice'), viewport=list.getBoundingClientRect()
+      const rect=notice?.getBoundingClientRect()
+      return rect && rect.top>=viewport.top-1 && ${save}.getBoundingClientRect().bottom<=viewport.bottom+1
+    })()`), 'The existing notice and Save are fully in view when the Region has room for both')
+    await capture(width, 'queued-editor-conflict')
+    await key('Escape', 'Escape', 27)
+    await waitFor(`!${card}.querySelector('textarea')`)
+    await click(preview)
+    await waitFor(`${editor}?.contains(document.activeElement)`)
+    await insert(edited)
+  }
+  await click(save)
+  await waitFor(`!${card}.querySelector('textarea')`)
+  const after = await evaluate('deliveryDiagnostics.facts()')
+  assert.deepEqual(after.queues[seed.sessionId], [{ ...seed.entry, text: edited }])
+  assert.deepEqual(after.drafts, before.facts.drafts)
+  assert.deepEqual(after.sessions, before.facts.sessions)
+  if (width === 320 && appearance === 'light') {
+    await evaluate(`${surface}.querySelector('.composer__mailbox').focus()`)
+    await key(' ', 'Space', 32)
+    await waitFor(`${mailbox}.matches(':popover-open')`)
+    await click(`${mailbox}.querySelector('[data-operation-id="${seed.entry.operationId}"] [aria-label="编辑这条待发消息"]')`)
+    const mailboxField = `${mailbox}.querySelector('.composer-queued-editor textarea')`
+    await waitFor(`document.activeElement===${mailboxField}`)
+    await evaluate(`${mailboxField}.select()`)
+    await win.webContents.debugger.sendCommand('Input.insertText', { text: '仅编辑邮箱里的候选文字。' })
+    await waitFor(`${mailboxField}.value==='仅编辑邮箱里的候选文字。'`)
+    await capture(width, 'mailbox-queued-editor-light')
+    await key('Escape', 'Escape', 27)
+    await waitFor(`!${mailboxField}`)
+    assert.deepEqual((await evaluate('deliveryDiagnostics.facts()')).queues, after.queues)
+  }
+  result.events.push({ width, appearance, geometry, copyCancelSavePassed: true })
+}
 app.whenReady().then(async () => {
   try {
     await fs.mkdir(evidence, { recursive: true })
@@ -36,6 +129,16 @@ app.whenReady().then(async () => {
     await win.loadFile(html); win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     await waitFor('Boolean(window.deliveryDiagnostics)')
+    if (only === 'queued-editor') {
+      for (const width of [640, 320]) for (const appearance of ['dark', 'light']) {
+        result.stage = `${width}-queued-editor-${appearance}`
+        await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: width * 2 + 1, height: 820, deviceScaleFactor: 1, mobile: false })
+        await queuedEditorScene(width, appearance)
+      }
+      assert.equal(result.frames.length, 6)
+      result.passed = true
+      return
+    }
     const kinds = ['preparation', 'unknown', 'legacy', 'compaction', 'first-wait', 'exhausted', 'observer', 'density']
     assert.ok(!only || kinds.includes(only), 'Only a named owning scene can be recaptured')
     for (const width of [640, 320]) for (const kind of only ? [only] : kinds) {

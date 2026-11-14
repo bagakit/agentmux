@@ -16,7 +16,7 @@ const exports = JSON.parse(await readFile(join(root, 'packages/core/package.json
 const aliases = Object.entries(exports).map(([key, value]) => ({ find: new RegExp(`^@agentmux/core${key === '.' ? '' : key.slice(1)}$`), replacement: join(root, 'packages/core', value.import.replace('./dist/', './src/').replace(/\.js$/, '.ts')) }))
 try {
   await mkdir(directory, { recursive: true })
-  await build({ configFile: false, root: fixture, base: './', logLevel: 'error', resolve: { alias: aliases },
+  await build({ configFile: false, root: fixture, base: './', logLevel: 'error', worker: { format: 'es' }, resolve: { alias: aliases },
     define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' },
     plugins: [{ name: 'actual-source-identities', enforce: 'pre', transform(source, id) {
       if (!id.includes('?') && (id.startsWith(join(root, 'apps/desktop/src') + '/') || id.startsWith(join(root, 'packages/client-ui/src') + '/') || id.startsWith(fixture + '/'))) inputs[id.slice(root.length + 1)] = hash(source)

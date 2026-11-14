@@ -38,6 +38,25 @@ api.ui.writeClipboardText = async text => { if (copyFails) throw new Error('Priv
 api.continuousProgress.list = async () => []
 // The fixture supplies existing Store/API facts; it never owns admission or sends to a user Run.
 const probe = {
+  seedQueuedEditor(appearance: 'dark' | 'light', long: boolean) {
+    base.mode('terminal')
+    updateThemeSelection({ ...useAppStore.getState().config?.appearance, appAppearance: appearance })
+    const session = useAppStore.getState().sessions[0]!
+    const text = long
+      ? ['先核对当前工作区的待办和未提交改动。', '逐项记录仍需复查的文件和原因。', '保留原会话的草稿和运行记录。', '最后整理一份简短结果。'].join('\n\n')
+      : '确认还有哪些闲置的项目可以清理，再按占用从大到小列出来。'
+    const entry = { operationId: 'private-queued-editor', runId: session.control.run.runId, text,
+      status: 'queued' as const, promptCondition: null, awaitingExplicitSend: true as const, enqueuedAt: Date.now() }
+    copies.length = 0
+    flushSync(() => useAppStore.setState({
+      agentComposerDrafts: { [session.id]: '保留当前输入草稿' },
+      agentSteerQueues: { [session.id]: [entry] }
+    }))
+    return { sessionId: session.id, entry }
+  },
+  changeQueuedEditorOriginal(sessionId: string, operationId: string, expectedText: string) {
+    useAppStore.getState().editQueuedAgentSteer(sessionId, operationId, expectedText, '这条待发消息已由另一个入口更新。')
+  },
   async seed(kind: 'preparation' | 'unknown' | 'legacy' | 'compaction' | 'first-wait' | 'exhausted' | 'observer' | 'density', appearance: 'dark' | 'light') {
     const generation = base.mode('terminal')
     updateThemeSelection({ ...useAppStore.getState().config?.appearance, appAppearance: appearance })
