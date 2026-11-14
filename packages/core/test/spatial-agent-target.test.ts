@@ -45,8 +45,7 @@ it('a managed observer cannot obtain protected binding facts through Source insp
     { transport: 'unix', principal: { kind: 'user', id: 'private-local-user' }, caller: { agentSessionId: 'managed-observer', capability: 'private-fixture-capability' } } as never)
   expect(value?.operation).toBe('space.inspect')
   const report = value?.operation === 'space.inspect' ? value.request?.report : undefined
-  expect(report?.execution).toBeUndefined()
-  expect(report?.issues).toContainEqual(expect.objectContaining({ step: 'observation', code: 'CONTROL_PERMISSION_DENIED' }))
+  expect(report?.execution).toMatchObject({ inspection: null, diagnostics: null })
   expect(report?.issues.some(item => item.code === 'CONTROL_PERMISSION_DENIED' && item.step === 'creation')).toBe(false)
   expect(f.bindings.inspect.mock.calls.length).toBe(count)
   expect(f.bindings.admit).toHaveBeenCalledTimes(1); expect(f.bindings.continueOriginal).toHaveBeenCalledTimes(1); expect(f.create).not.toHaveBeenCalled()

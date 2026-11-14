@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { mkdtemp, realpath, rm, stat, mkdir } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -43,15 +44,16 @@ function host(role: 'frontend' | 'executor') {
       return { runId, appliedByteRange: range, acceptedThroughByte: cursor }
     }),
   }
-  return { api, port: api as unknown as AgentExecutionHostPort, runId, claimed,
-    listeners, forgetCreation: () => { missing = true }, loseStart: () => { lostStart = true }, replaceRuntime: () => { runtime += '-replacement'; missing = true },
-    setState: (value: string) => { state = value },
-    addOutput: (frame: unknown) => {
-      const data = JSON.stringify(frame) + '\n', startByte = Buffer.byteLength(output); output += data
+  const addBytes = (data: string) => {
+      const startByte = Buffer.byteLength(output); output += data
       for (const listener of listeners) listener({ type: 'terminal-output', run: { runId }, data, dataBytes: Buffer.from(data),
         evidence: { source: 'terminal-output', observedAt: 0, run: { runId }, outputByteRange: { startByte, endByte: Buffer.byteLength(output) } } } as AgentMuxClientEvent)
       return Buffer.byteLength(output)
-    },
+  }
+  return { api, port: api as unknown as AgentExecutionHostPort, runId, claimed,
+    listeners, forgetCreation: () => { missing = true }, loseStart: () => { lostStart = true }, replaceRuntime: () => { runtime += '-replacement'; missing = true },
+    setState: (value: string) => { state = value },
+    addBytes, addOutput: (frame: unknown) => addBytes(JSON.stringify(frame) + '\n'),
   }
 }
 async function fixture() {
@@ -188,12 +190,35 @@ describe('execution coordinator retained original pair', () => {
     expect(f.read().bridge.frontend.outputByte).toBe(through)
   })
 
+  it.each(['[1234/PRIVATE_STDERR]\n', '{"type":"response","private":"PRIVATE_PAYLOAD"\n'])('records safe exact bad-frame provenance without returning raw bytes or changing helpers: %s', async bad => {
+    const f = await fixture(), first = await f.open(); await first.coordinator.create(f.input)
+    f.frontend.api.createPreparedTerminal.mockClear(); f.executor.api.createPreparedTerminal.mockClear()
+    f.frontend.api.createHostAgentWithDelivery.mockClear()
+    f.executor.addBytes(bad.slice(0, 5)); f.executor.addBytes(bad.slice(5))
+    const ref = { bindingId: f.input.bindingId, agentSessionId: f.input.agent.agentSessionId, createOperationId: f.input.agent.createOperationId }
+    await vi.waitFor(() => expect(first.coordinator.diagnostics(ref)?.failure).toMatchObject({
+      hostId: f.input.resourceHostId, role: 'executor', stage: 'attach', code: 'EXECUTION_PROTOCOL_INVALID_FRAME',
+      frame: { startByte: 0, endByte: Buffer.byteLength(bad), bytes: Buffer.byteLength(bad) - 1, syntax: 'invalid-json' }
+    }))
+    const diagnostic = first.coordinator.diagnostics(ref)!
+    expect(diagnostic.failure!.frame!.sha256).toBe(createHash('sha256').update(bad.slice(0, -1)).digest('hex'))
+    expect(JSON.stringify(diagnostic)).not.toContain('PRIVATE_')
+    expect(first.coordinator.inspect(f.input.bindingId)).toMatchObject({ state: 'unavailable', diagnostic: { code: 'EXECUTION_PROTOCOL_INVALID_FRAME' } })
+    expect(first.coordinator.inspect(f.input.bindingId)!.diagnostic).not.toHaveProperty('protocolFrame')
+    expect(first.coordinator.diagnostics({ ...ref, createOperationId: 'another-operation' })).toBeNull()
+    expect(f.frontend.api.createPreparedTerminal).not.toHaveBeenCalled(); expect(f.executor.api.createPreparedTerminal).not.toHaveBeenCalled()
+    expect(f.frontend.api.createHostAgentWithDelivery).not.toHaveBeenCalled()
+    expect(f.executor.api.writeTerminal).not.toHaveBeenCalled(); expect(f.frontend.api.writeTerminal).not.toHaveBeenCalled()
+    await first.close(); const reopened = await f.open()
+    expect(reopened.coordinator.diagnostics(ref)).not.toHaveProperty('failure') // Current observation is not manufactured history.
+  })
+
   it('rejects a competing process writer and releases ownership when its reader is disposed', async () => {
     const f = await fixture(), first = await f.open(); await first.coordinator.create(f.input)
     const modulePath = fileURLToPath(new URL(`../.tmp/execution-coordinator-owner-${process.pid}.mjs`, import.meta.url))
     cleanups.push(() => rm(modulePath, { force: true }))
     await build({ entryPoints: [fileURLToPath(new URL('../src/agent-execution-coordinator.ts', import.meta.url))], outfile: modulePath,
-      bundle: true, platform: 'node', format: 'esm' })
+      bundle: true, packages: 'external', platform: 'node', format: 'esm' })
     const source = `const {AgentExecutionCoordinator}=await import(process.argv[1]);
       try { const owner=await AgentExecutionCoordinator.open(process.argv[2],{resolveHost:async()=>{throw Error('unexpected host operation')}});
         await owner.dispose(); process.stdout.write(JSON.stringify({opened:true})); }

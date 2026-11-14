@@ -157,7 +157,13 @@ async function clipboardConsumer() {
 test('real clipboard Preload/Main consumer acknowledges only safe original metadata, and copy has zero Source effects', async () => {
  const f = await fixture('writer', true), clipboard = await clipboardConsumer()
  f.input.receipt!.issues[0]!.message = 'PRIVATE_NATIVE_PAYLOAD and env=PRIVATE_ENV'
- await f.render()
+ const execution = f.input.receipt!.execution!
+ execution.diagnostics = { sourceRuntimeId: execution.coordinatorRuntimeId, reference: execution.reference, state: 'matched',
+   helpers: { executor: { start: { outcome: 'confirmed', runId: 'original-helper-run' }, cursor: 42, ownerInstanceId: 'original-native-instance' }, frontend: { start: { outcome: 'unknown', runId: null }, cursor: null, ownerInstanceId: null } },
+   failure: { hostId: 'local', role: 'executor', stage: 'attach', code: 'EXECUTION_PROTOCOL_INVALID_FRAME', frame: { startByte: 42, endByte: 52, bytes: 9, sha256: 'c'.repeat(64), syntax: 'invalid-json' } } }
+ Reflect.set(execution.diagnostics, 'rawOutput', 'PRIVATE_HELPER_BYTES')
+
+ await f.render({ ...f.input, receipt: { ...f.input.receipt! } })
  let release!: () => void; clipboard.hold(new Promise<void>(done => { release = done }))
  await act(async () => button('Copy diagnostics').click())
  expect(dom.container.textContent).toContain('Copying diagnostics'); expect(dom.container.textContent).not.toContain('Diagnostics copied'); expect(clipboard.values).toEqual([])
@@ -167,6 +173,7 @@ test('real clipboard Preload/Main consumer acknowledges only safe original metad
  expect(text).not.toMatch(/PRIVATE_|newer private draft|Original helper preparation/)
  expect(diagnosis).not.toHaveProperty('privateRequest'); expect(diagnosis).not.toHaveProperty('request')
  expect(diagnosis).toMatchObject({ operationId: f.input.request.operationId, source: { hostId: 'original-source' }, execution: { reference: f.receipt.execution!.reference }, cli: { command: 'space inspect', operationId: f.input.request.operationId } })
+ expect(diagnosis.execution.diagnostics).toMatchObject({ state: 'matched', helpers: { executor: { start: { runId: 'original-helper-run' } } }, failure: { code: 'EXECUTION_PROTOCOL_INVALID_FRAME', frame: { sha256: 'c'.repeat(64) } } })
  expect(diagnosis.original.issues).toContainEqual(expect.objectContaining({ category: 'source-operation-unconfirmed' }))
  expect(f.calls).toEqual([]);expect(f.onContinue).not.toHaveBeenCalled();expect(useAppStore.getState().agentComposerDrafts['original-launcher']).toBe('Keep this newer private draft unsent')
 })

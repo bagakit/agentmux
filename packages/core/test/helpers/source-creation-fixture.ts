@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { isDeepStrictEqual } from 'node:util'
 import { AgentMuxError } from '@agentmux/core'
+import type { AgentMuxRpcServiceOptions } from '../../src/public-rpc-service.js'
 import { AgentMuxControlServer } from '../../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../../src/public-rpc-client.js'
 import { AgentMuxSpatialStateStore } from '../../src/spatial-state.js'
@@ -14,7 +15,7 @@ import type { AgentMuxAgentSession, AgentMuxAgentCreationInspection } from '../.
 
 /** This preflight isolates spatial ownership: target control/Native creation are
  * explicit leaves. It is not the separate two-Core Native execution proof. */
-export async function sourceCreationFixture(releases: Array<() => unknown | Promise<unknown>>, sourceContext = '  Source business context\n', options: { realBindings?: boolean } = {}) {
+export async function sourceCreationFixture(releases: Array<() => unknown | Promise<unknown>>, sourceContext = '  Source business context\n', options: { realBindings?: boolean; legacyBindingDigest?: boolean; helperOutput?: { frontend: string; executor: string }; coreClients?: AgentMuxRpcServiceOptions['coreClients'] } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'amx-spatial-target-')); releases.push(() => rm(root, { recursive: true, force: true }))
   const spatial = new AgentMuxSpatialStateStore(join(root, 'spatial.json'))
   const folder = await spatial.registerFolder({ id: 'b-workspace', hostId: 'local', name: 'B project', path: '/b/project' })
@@ -49,6 +50,7 @@ export async function sourceCreationFixture(releases: Array<() => unknown | Prom
   }
   const bindings = { admit: vi.fn(freeze), create: vi.fn(async (input: AgentExecutionOpenInput) => { await freeze(input); return advance() }),
     continueOriginal: vi.fn(async original => { if (!frozen || !isDeepStrictEqual(original, reference())) throw new AgentMuxError('Original reference missing or changed.', 'EXECUTION_INTENT_UNCONFIRMED'); return advance() }),
+    sourceDiagnostics: vi.fn(async (_operationId: string, _context: import('../../src/public-rpc-service.js').AgentMuxRpcCallContext) => null as import('../../src/agent-execution-source-diagnostics.js').AgentExecutionSourceDiagnostics | null),
     inspect: vi.fn(async (bindingId: string, view?: 'association') => frozen && bindingId === frozen.bindingId ? { bindingId: frozen.bindingId, agentHostId: frozen.agentHostId,
       resourceHostId: frozen.resourceHostId, agentSessionId: frozen.agent.agentSessionId, resourceWorkspacePath: frozen.resourceWorkspacePath,
       continuation: reference(),
@@ -62,13 +64,29 @@ export async function sourceCreationFixture(releases: Array<() => unknown | Prom
   // Independent Core endpoint leaves remain qualified. Throwing the Source's
   // inventory observer proves it is skipped, without revoking the real Core's
   // per-operation Executor qualification or Native preparation authority.
-  const bindingHosts = { resolveHost: async (hostId: string) => ({ runtimeId: hostId === 'local' ? 'runtime-b' : runtimeId,
-    client: { ...client, listHostExecutors: async () => ({ runtimeId, executors: [{ executorId: 'd-executor', providerId: 'codex', configRevision: 'd'.repeat(64), creationContract: { ordinaryLaunch: 1 } }] }), readAgentSession: async () => null, prepareAgentExecutionHelper: prepare, createPreparedTerminal: starts } as unknown as AgentExecutionHostPort }) }
+  if (options.helperOutput) starts.mockImplementation(async () => undefined as never)
+  const bindingHosts = { resolveHost: async (hostId: string) => {
+    const role = hostId === 'local' ? 'executor' : 'frontend', runId = role + '-original-helper'
+    const run = { runId, state: 'running' }
+    const bytes = Buffer.from(options.helperOutput?.[role] ?? '')
+    const io = options.helperOutput ? {
+      runtimeIdentity: () => ({ instanceId: role + '-native-instance' }),
+      prepareAgentExecutionHelper: async (input: { createOperationId: string; workspacePath: string }) => ({ prepared: { ...input, launch: 'controlled-native-launch' } }),
+      inspectPreparedTerminal: async () => null, createPreparedTerminal: async () => { await starts(); return run },
+      onRunEvent: () => () => {}, releaseRunAttachment: async () => {}, writeTerminal: async () => { throw Error('Diagnostic read cannot issue Native input') },
+      attachTerminal: async () => ({ run, gap: null, replay: bytes.length ? [{ startByte: 0, endByte: bytes.length, dataBytes: bytes }] : [] })
+    } : { prepareAgentExecutionHelper: prepare, createPreparedTerminal: starts }
+    return { runtimeId: hostId === 'local' ? 'runtime-b' : runtimeId,
+      client: { ...client, listHostExecutors: async () => ({ runtimeId, executors: [{ executorId: 'd-executor', providerId: 'codex', configRevision: 'd'.repeat(64), creationContract: { ordinaryLaunch: 1 } }] }), readAgentSession: async () => null,
+        ...io } as unknown as AgentExecutionHostPort }
+  } }
+
   let service: AgentExecutionBindingService | undefined
-  const newService = () => new AgentExecutionBindingService(join(root, 'execution-bindings'), bindingHosts)
+  const newService = () => new AgentExecutionBindingService(join(root, 'execution-bindings'), bindingHosts, { spatial, runtimeId: () => runtime.ownerIdentity().runtimeId })
   if (options.realBindings) {
     service = newService(); releases.push(() => service?.dispose())
-    bindings.admit.mockImplementation(input => service!.admit(input))
+    bindings.sourceDiagnostics.mockImplementation((operationId, context) => service!.sourceDiagnostics(operationId, context))
+    bindings.admit.mockImplementation(input => { const { sourceRequestDigest, ...original } = input; return service!.admit(options.legacyBindingDigest ? original : input) })
     bindings.create.mockImplementation(input => service!.create(input) as never)
     bindings.continueOriginal.mockImplementation(original => service!.continueOriginal(original) as never)
     bindings.inspect.mockImplementation((bindingId, view) => service!.inspect(bindingId, view) as never)
@@ -79,7 +97,7 @@ export async function sourceCreationFixture(releases: Array<() => unknown | Prom
   const sourceNote = vi.fn(async () => sourceContext)
   const control = createHostSpatialAgentControl({ configurationPath: join(root, 'unused-local-executor-config.json'), spatial, runtime: () => runtime,
     agentMuxContext: sourceNote })
-  const server = new AgentMuxControlServer({ socketPath: join(root, 'rpc.sock'), spatialState: spatial, coreClients: () => [], spatialAgentControl: control, executionBindings: bindings as never,
+  const server = new AgentMuxControlServer({ socketPath: join(root, 'rpc.sock'), spatialState: spatial, coreClients: options.coreClients ?? (() => []), spatialAgentControl: control, executionBindings: bindings as never,
     hostedRuntime: () => ({ call: async () => ({ owner: identity }), assertFence: () => {}, subscribe: async () => { throw Error('General Host events are not a source admission prerequisite.') } }) as never })
   Object.assign(runtime, { server })
   releases.push(() => server.stop()); await server.start()
