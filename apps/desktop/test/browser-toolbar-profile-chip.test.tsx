@@ -6,7 +6,7 @@ import type { BrowserProfileList, BrowserProfileSummary } from '../src/shared/co
 
 const port = vi.hoisted(() => {
   const listeners = new Set<(list: BrowserProfileList) => void>()
-  let list: BrowserProfileList = { revision: 1, sequence: 1, folders: [], profiles: [] }
+  let list: BrowserProfileList = { revision: 1, sequence: 1, folders: [], views: [], profiles: [] }
   return {
     listeners, set(next: BrowserProfileList) { list = next },
     readProfiles: vi.fn(async () => list),
@@ -14,20 +14,26 @@ const port = vi.hoisted(() => {
     switchProfile: vi.fn(async () => ({}))
   }
 })
-vi.mock('../src/renderer/src/lib/api', () => ({ api: { browser: port } }))
+vi.mock('../src/renderer/src/lib/api', async importOriginal => {
+  const actual = await importOriginal<typeof import('../src/renderer/src/lib/api')>()
+  return { ...actual, api: { ...actual.api, browser: { ...actual.api.browser, ...port } } }
+})
 
 import { browserProfiles } from '../src/renderer/src/lib/browser-profiles'
 import { BrowserProfileChip } from '../src/renderer/src/components/BrowserProfileChip'
+import { useAppStore } from '../src/renderer/src/store'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
 
 const personal: BrowserProfileSummary = { revision: 'personal-token', id: 'p-personal', label: 'Personal', createdAt: 1, isDefault: true, source: null }
 const client: BrowserProfileSummary = { revision: 'client-token', id: 'p-client', label: 'Northwind client', createdAt: 2, isDefault: false, source: null }
 
+const originalState = useAppStore.getState()
 let root: Root, container: HTMLDivElement
 const open = vi.fn()
 async function mount(props: Partial<Parameters<typeof BrowserProfileChip>[0]> = {}) {
   await act(async () => root.render(<SettingsNavigation.Provider value={{ open } as never}>
-    <BrowserProfileChip browserId="b1" profileId="p-client" control={undefined} {...props} /></SettingsNavigation.Provider>))
+    <BrowserProfileChip browserId="b1" regionId="r1" profileId="p-client" control={undefined} {...props} /></SettingsNavigation.Provider>))
 }
 async function openMenu() {
   const trigger = document.querySelector<HTMLButtonElement>('.browser-profile-chip')!
@@ -40,11 +46,17 @@ const items = () => [...document.querySelectorAll<HTMLElement>('.browser-profile
 
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  browserProfiles.reset(); port.listeners.clear(); port.switchProfile.mockClear(); open.mockClear()
-  port.set({ revision: 1, sequence: 1, folders: [], profiles: [personal, client] })
+  browserProfiles.reset(); port.listeners.clear(); port.switchProfile.mockReset(); open.mockClear()
+  const native = (profileId: string) => ({ id: 'b1', profileId, mode: 'normal' as const, url: 'https://generic.invalid/', title: 'Original page',
+    navigationId: profileId + '-document', canGoBack: false, canGoForward: false, loading: false, viewport: 'responsive' as const, error: null, driving: false, appLinkPrompt: null })
+  port.switchProfile.mockImplementation(async (_id: string, profileId: string) => native(profileId))
+  useAppStore.setState(originalState, true)
+  useAppStore.setState({ tabs: { t1: createWorkbenchTab('t1', { ...native('p-client'), regionId: 'r1', browserId: 'b1', kind: 'browser', workspaceId: 'resource' }) },
+    surveyPageReferences: [], surveyPageReadRecovery: null })
+  port.set({ revision: 1, sequence: 1, folders: [], views: [], profiles: [personal, client] })
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals() })
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); useAppStore.setState(originalState, true) })
 
 describe('Browser toolbar Profile chip', () => {
   it('names the exact Profile of this Browser with its mark', async () => {
@@ -55,10 +67,10 @@ describe('Browser toolbar Profile chip', () => {
   })
 
   it('stays out of the way with a single Profile, a private page or no list yet', async () => {
-    port.set({ revision: 1, sequence: 1, folders: [], profiles: [personal] })
+    port.set({ revision: 1, sequence: 1, folders: [], views: [], profiles: [personal] })
     await mount({ profileId: 'p-personal' })
     expect(container.querySelector('.browser-profile-chip')).toBeNull()
-    browserProfiles.reset(); port.set({ revision: 2, sequence: 2, folders: [], profiles: [personal, client] })
+    browserProfiles.reset(); port.set({ revision: 2, sequence: 2, folders: [], views: [], profiles: [personal, client] })
     await mount({ profileId: null })
     expect(container.querySelector('.browser-profile-chip')).toBeNull()
   })
@@ -94,7 +106,8 @@ describe('Browser toolbar Profile chip', () => {
     const retry = [...container.querySelectorAll<HTMLButtonElement>('.browser-profile-chip__failure button')].find(button => button.textContent === 'Retry')!
     await act(async () => retry.click())
     expect(port.switchProfile).toHaveBeenNthCalledWith(2, 'b1', 'p-personal')
-    expect(container.querySelector('.browser-profile-chip__failure')).toBeNull()
+    expect(container.textContent).not.toContain('Couldn’t switch')
+    expect(useAppStore.getState().tabs.t1!.regions.r1).toMatchObject({ profileId: 'p-personal' })
   })
 
   it('says the Profile is unknown when the list cannot be read, instead of hiding it', async () => {
