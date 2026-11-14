@@ -67,13 +67,20 @@ app.whenReady().then(async () => {
       const layer = await read('getComputedStyle(document.querySelector("[data-overlay-modal-scope]")).zIndex')
       assert.equal(layer, '320')
       await capture('overlays-open-wide-dark')
+      win.setContentSize(320, 520)
+      await until('innerWidth===320 && document.activeElement.matches("[role=dialog] .ui-input")')
+      const layout = await read('(()=>{const field=document.querySelector("[role=dialog] .ui-input"),done=document.querySelector("[role=dialog] .primary-button"),dialog=document.querySelector("[data-overlay-modal-part=content]");return {gap:done.getBoundingClientRect().top-field.getBoundingClientRect().bottom,overflow:dialog.scrollWidth>dialog.clientWidth}})()')
+      assert.ok(layout.gap >= 8 && !layout.overflow, 'Title and Done are distinct in the narrow dialog')
+      await capture('overlays-open-narrow-dark')
+      win.setContentSize(760, 580)
+      await until('innerWidth===760')
       await key('Escape', 'Escape', 27)
       await until('!document.querySelector("[role=dialog]") && document.activeElement.textContent==="Edit the review board title"')
       await tap('[aria-haspopup=menu]')
       await until('document.querySelector("[role=menuitem]")?.textContent==="Reset title"')
       await key('Escape', 'Escape', 27)
       await until('!document.querySelector("[role=menu]")')
-      return { layer, returnedFocus: true, menuOpened: true }
+      return { layer, returnedFocus: true, menuOpened: true, narrowFieldActionGap: layout.gap }
     },
     async feedback() {
       await until('document.activeElement.matches(".inline-rename-field__input")')
