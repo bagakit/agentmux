@@ -159,6 +159,7 @@ export function objectCliSeed(method: string, input: string): string[] {
     'goal.focus': ['--goal', ids.goal], 'goal.link-session': ['--goal', ids.goal, '--session', ids.agent],
     'goal.link-project': ['--goal', ids.goal, '--project', 'P'], 'goal.decisions': ['--goal', ids.goal], 'goal.activity': [],
     'goal.activity.append': ['--goal', ids.goal, '--kind', 'review', '--message', 'Original evidence', '--operation-id', 'ACTIVITY'],
+    'goal.activity.history': ['--goal', ids.goal],
     'goal.activity.inspect': ['--goal', ids.goal, '--operation-id', 'ACTIVITY'],
     'message.inbox.check': ['--limit', '5'], 'message.inbox.ack': ['--generation', '3', '--reader-run', 'RUN'],
     'message.read': ['--operation-id', 'ORIGINAL', '--host', 'local'],
