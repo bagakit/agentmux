@@ -42,6 +42,20 @@ Read only the matching local help:
   actions are pin, move to folder, add-tag and remove-tag. Read every updated/failed item;
   partial failure leaves successful items saved. New matches never join the frozen set.
   A missing receipt is unknown: inspect the original IDs before considering another write.
+  Profile recycling uses profile delete --profile ID --expected-revision TOKEN and requires
+  a verified person or device. Default, open, switching, closing, saved cold, native page,
+  worker, request or download use prevents this action; unknown use or source IO keeps
+  the Profile and its healthy work. The same metadata transaction retains the entire
+  original record and original partition in place. No data is cleared, copied or moved;
+  recycling is not an independent backup or immediate disk release.
+  Read profile trash ls for exact archive IDs and revisions. A person/device restores
+  one with profile trash restore --archive ID --expected-revision TOKEN. It returns the
+  original Profile ID with a fresh configuration token, retaining its site data, proxy
+  sign-in and human permissions. Missing source or ownership conflicts never substitute
+  an empty Profile. If the original folder is gone, explicitly choose --folder ID or
+  --clear-folder. Legacy deletion tombstones have no complete recoverable record and
+  remain separate unconfirmed cleanup facts. After a lost recycle/restore receipt, read
+  these original identities first; do not automatically replay the write.
   A person or device can set a proxy sign-in with browser profile proxy-sign-in set
   --profile ID --input FILE|-; the JSON contains only username and password. Never put
   a password in command arguments. Managed Agents cannot set or clear sign-ins. The
