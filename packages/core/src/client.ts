@@ -687,10 +687,20 @@ export class AgentMuxClient {
     let target = input.target, targetKeyFingerprint = input.targetKeyFingerprint, threadId = input.threadId ?? input.messageId, correlationId = input.correlationId ?? input.messageId, replyTo = input.replyTo ?? null
     if (input.replySourceMessageId) {
       const source = await this.messageQueue.readByMessageId(input.replySourceMessageId)
-      if (!source?.provenance || source.deliveryMode === 'outbox' || source.envelope.recipientRuntimeId !== identity.runtimeId || source.envelope.recipientSessionId !== author.agentSessionId || source.envelope.recipientRunId !== author.run.runId) throw new AgentMuxError('Reply requires this exact authenticated worker Run and its original received message.', 'MESSAGE_PARTICIPANT_MISMATCH')
+      if (!source?.provenance || source.deliveryMode === 'outbox' || source.envelope.recipientRuntimeId !== identity.runtimeId || source.envelope.recipientSessionId !== author.agentSessionId ||
+          !sessionSemanticResumeSourceRuns(author).includes(source.envelope.recipientRunId!)) throw new AgentMuxError('Reply requires this authenticated Session and its original received Run or a confirmed semantic successor. Inspect the original Session recovery and source; healthy input remains available.', 'MESSAGE_PARTICIPANT_MISMATCH')
       target = source.provenance.source; threadId = source.envelope.threadId; correlationId = source.envelope.messageId; replyTo = source.envelope.messageId
       targetKeyFingerprint = source.provenance.sourceKeyFingerprint
       if (input.threadId !== undefined && input.threadId !== threadId || input.correlationId !== undefined && input.correlationId !== correlationId || input.replyTo !== undefined && input.replyTo !== replyTo) throw new AgentMuxError('Reply lineage conflicts with the original signed message.', 'MESSAGE_RECIPIENT_MISMATCH')
+    }
+    if (replyTo && !input.replySourceMessageId) {
+      const source = await this.messageQueue.readByMessageId(replyTo)
+      const proof = source?.provenance
+      const sent = proof?.source.runtimeId === identity.runtimeId && proof.source.agentSessionId === author.agentSessionId
+      const actor = sent ? proof?.source : proof?.target, peer = sent ? proof?.target : proof?.source
+      if (!proof || actor?.runtimeId !== identity.runtimeId || actor.agentSessionId !== author.agentSessionId ||
+          !sessionSemanticResumeSourceRuns(author).includes(actor.runId) || peer?.runtimeId !== target?.runtimeId || peer?.agentSessionId !== target?.agentSessionId ||
+          source!.envelope.threadId !== threadId) throw new AgentMuxError('Reply requires the original signed thread and a confirmed semantic successor of its participant. Inspect the original Session recovery; healthy input remains available.', 'MESSAGE_PARTICIPANT_MISMATCH')
     }
     if (!target || !targetKeyFingerprint) throw new AgentMuxError('The exact remote participant and approved target key are required.', 'MESSAGE_RECIPIENT_MISMATCH')
     if (input.expectedRun && input.expectedRun.runId !== target.runId) throw new AgentMuxError('The explicit recipient Run conflicts with this original signed target. No new outbox was saved.', 'MESSAGE_RECIPIENT_MISMATCH')
@@ -722,11 +732,17 @@ export class AgentMuxClient {
     }
     await this.requireCreationAuthority().verifyMessageProof(packet.provenance)
     const target = await this.currentStoredAgentSession(packet.provenance.target.agentSessionId)
-    if (packet.provenance.target.runtimeId !== identity.runtimeId || target.hostId !== 'local' || target.run.runId !== packet.provenance.target.runId && !target.retiredRuns.some(run => run.runId === packet.provenance.target.runId)) throw new AgentMuxError('The signed message names another retained recipient Run. No input was retargeted.', 'MESSAGE_RECIPIENT_MISMATCH')
+    const recipientRuns = sessionSemanticResumeSourceRuns(target)
+    if (packet.provenance.target.runtimeId !== identity.runtimeId || target.hostId !== 'local' || !recipientRuns.includes(packet.provenance.target.runId) && !target.retiredRuns.some(run => run.runId === packet.provenance.target.runId)) throw new AgentMuxError('The signed message names another retained recipient Run. No input was retargeted.', 'MESSAGE_RECIPIENT_MISMATCH')
     if (target.run.runId !== packet.provenance.target.runId && !packet.envelope.replyTo) throw new AgentMuxError('The original remote request Run changed. Keep the exact request; no replacement Run received input.', 'AGENT_CAPABILITY_STALE_RUN')
     const receipt = await this.messageQueue.append({ ...packet.envelope, execution: packet.execution, sourceChannel: packet.sourceChannel }, { deliveryMode: 'reference', provenance: packet.provenance,
       reauthorize: async () => { await this.requireCreationAuthority().verifyMessageProof(packet.provenance) } })
-    if (target.run.runId === packet.provenance.target.runId) this.messageNotifications.saved(target.agentSessionId)
+    if (!recipientRuns.includes(packet.provenance.target.runId)) this.publisher.publish({ type: 'agent-error', agentSessionId: target.agentSessionId,
+      code: 'A2A_NOTIFICATION_UNCONFIRMED', message: `The signed reply ${packet.envelope.messageId} is saved for its original Run. Its semantic recovery relationship to the current Run is unconfirmed; read this MID or inspect the original Session recovery. Healthy manual input remains available.`,
+      evidence: { source: 'agentmux', observedAt: Date.now(), run: target.run } })
+    // Saving the original reference never retargets its envelope. Only a confirmed
+    // semantic successor may receive the notification; excluded history stays readable.
+    this.messageNotifications.saved(target.agentSessionId)
     return { ...receipt, recipientInbox: await this.attestFederatedInboxReceipt(receipt) }
   }
 
@@ -783,13 +799,13 @@ export class AgentMuxClient {
     if (actor.runtimeId !== identity.runtimeId || actor.agentSessionId !== author || original && original.kind !== input.kind) throw new AgentMuxError('Only the exact original Runtime actor can report this Dispatch fact.', 'DISPATCH_PARTICIPANT_MISMATCH')
     let event = original?.authority
     if (!event) {
-      if (actor.runId !== caller.run.runId) throw new AgentMuxError('The original Dispatch actor Run changed. Keep the original source and reply.', 'AGENT_CAPABILITY_STALE_RUN')
+      if (!sessionSemanticResumeSourceRuns(caller).includes(actor.runId)) throw new AgentMuxError('The original Dispatch actor Run has no confirmed semantic recovery to this writer. Inspect the original Session recovery; source, reply and healthy input are retained.', 'AGENT_CAPABILITY_STALE_RUN')
       const payload = { schema: 'agentmux.agent-dispatch-event.v1' as const, sourceMessageId: input.sourceMessageId, replyMessageId: input.replyMessageId,
         sourceIntentDigest: source.provenance.intentDigest, replyIntentDigest: reply.provenance.intentDigest, kind: input.kind, at: original?.at ?? Date.now() }
       const provenance = await this.requireCreationAuthority().attestMessage({ agentSessionId: author, runId: caller.run.runId }, peer, dispatchEventDigest(payload),
         input.kind === 'cleanup' ? source.provenance.targetKeyFingerprint : source.provenance.sourceKeyFingerprint)
       event = parseSignedDispatchEvent({ ...payload, provenance })
-      await this.messageQueue.appendSignedDispatchEvent(event, async () => this.assertDispatchAdmission(input.capability, author, caller.run, [source.envelope, reply.envelope]))
+      await this.messageQueue.appendSignedDispatchEvent(event, async () => this.assertDispatchAdmission(input.capability, author, caller.run, [source.envelope, reply.envelope], true))
       this.publisher.publish({ type: 'dispatch-changed', sourceMessageId: input.sourceMessageId, ownerAgentSessionId: source.provenance.source.agentSessionId,
         workerAgentSessionId: source.provenance.target.agentSessionId, threadId: source.envelope.threadId,
         event: { kind: event.kind, replyMessageId: event.replyMessageId, at: event.at, authority: event }, evidence: { source: 'agentmux', observedAt: Date.now(), run: caller.run } })
@@ -5106,7 +5122,7 @@ export class AgentMuxClient {
     async (messages) => {
       const actorRuntime = input.kind === 'cleanup' ? messages[0]!.senderRuntimeId : messages[0]!.recipientRuntimeId
       if (actorRuntime && actorRuntime !== (await this.agentMessageAuthority()).runtimeId) throw new AgentMuxError('This Dispatch action belongs to the other exact Runtime participant.', 'DISPATCH_PARTICIPANT_MISMATCH')
-      await this.assertDispatchAdmission(input.capability, author, caller.run, messages)
+      await this.assertDispatchAdmission(input.capability, author, caller.run, messages, true)
     })
     this.publisher.publish({ type: 'dispatch-changed', sourceMessageId: dispatch.sourceMessageId,
       ownerAgentSessionId: dispatch.ownerAgentSessionId, workerAgentSessionId: dispatch.workerAgentSessionId,
@@ -5286,7 +5302,7 @@ export class AgentMuxClient {
 
   private async assertDispatchAdmission(
     capability: string, author: string, expectedRun: AgentMuxRunRef,
-    messages: readonly AgentMuxMessageEnvelope[]
+    messages: readonly AgentMuxMessageEnvelope[], semanticActor = false
   ): Promise<void> {
     const runtimeId = messages.some(message => message.senderRuntimeId || message.recipientRuntimeId) ? (await this.agentMessageAuthority()).runtimeId : undefined
     if (runtimeId && messages.some(message => !((message.senderSessionId === author && message.senderRuntimeId === runtimeId) || (message.recipientSessionId === author && message.recipientRuntimeId === runtimeId)))) throw new AgentMuxError('The current caller is not this original Runtime-qualified participant.', 'DISPATCH_PARTICIPANT_MISMATCH')
@@ -5309,7 +5325,11 @@ export class AgentMuxClient {
       ]) {
         if (participantRuntimeId !== undefined && participantRuntimeId !== runtimeId) continue
         const participant = sessions.get(agentSessionId ?? null)
-        if (!participant || participant.hostId !== 'local' || (participant.run.runId !== runId && !participant.retiredRuns.some((run) => run.runId === runId))) {
+        // Reading or binding an existing source only needs its retained identity.
+        // A newly authored Dispatch fact also needs this writer's semantic chain.
+        if (!participant || participant.hostId !== 'local' || (semanticActor && agentSessionId === author
+          ? !sessionSemanticResumeSourceRuns(participant).includes(runId!)
+          : participant.run.runId !== runId && !participant.retiredRuns.some((run) => run.runId === runId))) {
           throw new AgentMuxError('A Dispatch message Run is outside the retained Session identity history.', 'DISPATCH_IDENTITY_UNAVAILABLE')
         }
       }

@@ -1,21 +1,27 @@
-import { AgentMuxError } from '@agentmux/core'
+import { AgentMuxError, sessionSemanticResumeSourceRuns } from '@agentmux/core'
 import { assertGoalSourceReport, goalDelegationReportBody, goalReportApplication, readGoalDelegationSource,
   type GoalDelegationAuthority, type GoalDelegationParamsMap, type GoalReportSubmissionResult } from '@agentmux/core/goal-delegation'
 import type { AgentMuxRpcCallContext } from '@agentmux/core'
 import type { GoalDelegationCorePort } from './goal-delegation-owner.js'
+import type { GoalRuntimePort } from './goal-runtime.js'
 
 /** The worker's own inbox and outbox are sufficient. This path never reads or writes a Goal store. */
-export async function submitGoalSourceReport(core: GoalDelegationCorePort, request: GoalDelegationParamsMap['goal.report'],
+export async function submitGoalSourceReport(core: GoalDelegationCorePort, runtime: Pick<GoalRuntimePort, 'agentCreation'>, request: GoalDelegationParamsMap['goal.report'],
   context: AgentMuxRpcCallContext, authority: GoalDelegationAuthority): Promise<GoalReportSubmissionResult> {
   if (authority.actor.kind !== 'agent' || !authority.hostId || !authority.runId || !request.sourceMessageId)
     throw new AgentMuxError('A source report requires its authenticated original worker and current Run.', 'CONTROL_PERMISSION_DENIED')
   const source = (await core.call(authority.hostId, 'message.read', { hostId: authority.hostId, messageId: request.sourceMessageId }, context)).message
   if (!source) throw new AgentMuxError('The original delegation source is unavailable in this worker inbox. Keep its identity and report.', 'CONTROL_UNAVAILABLE')
   const envelope = source.envelope, data = readGoalDelegationSource(source)
+  const sourceRuns = envelope.recipientRunId === authority.runId ? [authority.runId] : await (async () => {
+    const worker = await runtime.agentCreation(authority.hostId!, authority.actor.id)
+    return worker.kind === 'agent' && worker.run.runId === authority.runId ? sessionSemanticResumeSourceRuns(worker) : []
+  })()
   // A same-SID outbox at another Runtime is not this worker's received source.
   if (!source.provenance || authority.runtimeId !== envelope.recipientRuntimeId || source.transport?.state !== 'received' || source.deliveryMode === 'outbox' ||
       envelope.recipient.kind !== 'agent-session' || envelope.recipientSessionId !== authority.actor.id || envelope.recipient.agentSessionId !== authority.actor.id ||
-      envelope.recipientRunId !== authority.runId || envelope.sender.kind !== 'agent-session' || envelope.senderSessionId !== envelope.sender.agentSessionId ||
+      !sourceRuns.includes(envelope.recipientRunId!) ||
+      envelope.sender.kind !== 'agent-session' || envelope.senderSessionId !== envelope.sender.agentSessionId ||
       envelope.senderRuntimeId !== source.provenance.source.runtimeId || envelope.recipientRuntimeId !== source.provenance.target.runtimeId ||
       envelope.messageId !== request.sourceMessageId || envelope.operationId !== data.delegationOperationId || envelope.replyTo !== null ||
       data.goalId !== request.goalId || data.delegationOperationId !== request.operationId || request.report.authorAgentSessionId !== authority.actor.id)
@@ -28,7 +34,7 @@ export async function submitGoalSourceReport(core: GoalDelegationCorePort, reque
     application: goalReportApplication(data.goalId, data.delegationOperationId, request.report) }, context)
   const reply = submission.envelope
   if (reply.senderRuntimeId !== envelope.recipientRuntimeId || reply.recipientRuntimeId !== envelope.senderRuntimeId ||
-      reply.senderSessionId !== envelope.recipientSessionId || reply.senderRunId !== envelope.recipientRunId ||
+      reply.senderSessionId !== envelope.recipientSessionId || !sourceRuns.includes(reply.senderRunId!) ||
       reply.recipientSessionId !== envelope.senderSessionId || reply.recipientRunId !== envelope.senderRunId ||
       reply.threadId !== envelope.threadId || !submission.provenance)
     throw new AgentMuxError('The original report submission receipt does not match its signed source. Inspect this same outbox operation; no Goal update was attested.', 'CONTROL_PROTOCOL_ERROR')

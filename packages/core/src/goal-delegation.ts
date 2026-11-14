@@ -184,19 +184,26 @@ export function assertGoalDelegationSource(saved: DemandDelegationIntent & Parti
       throw new AgentMuxError('The signed Goal application differs from the frozen delegation standards.', 'CONTROL_REQUEST_CONFLICT')
   }
 }
-export function assertGoalDelegationReply(saved: DemandDelegation, report: DemandDelegationReportInput, message: DurableAgentMuxMessage, body: string, source?: DurableAgentMuxMessage): void {
+/** For unsigned local replies the Host reads these from the original Core, never from wire text. */
+export type GoalDelegationReplyRuns = { workerSourceRuns?: readonly string[]; ownerSourceRuns?: readonly string[] }
+export function assertGoalDelegationReply(saved: DemandDelegation, report: DemandDelegationReportInput, message: DurableAgentMuxMessage, body: string, source?: DurableAgentMuxMessage, runs?: GoalDelegationReplyRuns): void {
   const envelope = message.envelope
+  // Signed peers admit successors at their signing Core. A local business owner
+  // supplies its Core read here; a wire reader only checks the owner's returned structure.
+  const signed = Boolean(message.provenance && (saved.runtimeIdentity || source?.provenance))
+  const successor = (actual: string | null, original: string, chain?: readonly string[]) => actual === original ||
+    Boolean(actual && chain && chain.indexOf(actual) >= 0 && chain.indexOf(original) > chain.indexOf(actual))
   if (envelope.operationId !== report.operationId || envelope.messageId !== report.replyMessageId || envelope.sender.kind !== 'agent-session' ||
     envelope.sender.agentSessionId !== saved.workerAgentSessionId || envelope.senderSessionId !== saved.workerAgentSessionId ||
     envelope.recipient.kind !== 'agent-session' || envelope.recipient.agentSessionId !== saved.ownerAgentSessionId || envelope.recipientSessionId !== saved.ownerAgentSessionId ||
-    envelope.senderRunId !== saved.workerRunId || envelope.recipientRunId !== saved.ownerRunId ||
+    !signed && runs !== undefined && (!successor(envelope.senderRunId, saved.workerRunId, runs.workerSourceRuns) || !successor(envelope.recipientRunId, saved.ownerRunId, runs.ownerSourceRuns)) ||
     envelope.replyTo !== saved.sourceMessageId || envelope.threadId !== saved.threadId || envelope.body !== body ||
     saved.runtimeIdentity && (!message.provenance || envelope.senderRuntimeId !== saved.runtimeIdentity.workerRuntimeId || envelope.recipientRuntimeId !== saved.runtimeIdentity.ownerRuntimeId) ||
     source && (envelope.senderRuntimeId !== source.envelope.recipientRuntimeId || envelope.recipientRuntimeId !== source.envelope.senderRuntimeId ||
       source.provenance && !message.provenance))
     throw new AgentMuxError('The actual worker reply differs from this original report. No result was collected or accepted.', 'CONTROL_REQUEST_CONFLICT')
 }
-export function readGoalDelegationWireReport(goalId: string, saved: DemandDelegation, reply: DurableAgentMuxMessage, source?: DurableAgentMuxMessage): DemandDelegationReportInput {
+export function readGoalDelegationWireReport(goalId: string, saved: DemandDelegation, reply: DurableAgentMuxMessage, source?: DurableAgentMuxMessage, runs?: GoalDelegationReplyRuns): DemandDelegationReportInput {
   const report = reply.envelope.application ? readGoalReportApplication(reply, goalId, saved.operationId) : (() => {
     if (reply.provenance) throw new AgentMuxError('A signed remote report requires its explicit Goal application.', 'CONTROL_PROTOCOL_ERROR')
     let payload: unknown
@@ -207,7 +214,7 @@ export function readGoalDelegationWireReport(goalId: string, saved: DemandDelega
     return parseDemandDelegationReportInput(p.report)
   })()
   validateDemandDelegationReport(saved, report)
-  assertGoalDelegationReply(saved, report, reply, goalDelegationReportBody(goalId, saved.operationId, report), source)
+  assertGoalDelegationReply(saved, report, reply, goalDelegationReportBody(goalId, saved.operationId, report), source, runs)
   return report
 }
 

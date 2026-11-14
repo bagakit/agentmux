@@ -83,7 +83,9 @@ export function assertSignedDispatchLineage(source: AgentMuxSignedMessage, reply
   const actor = cleanup ? source.provenance.source : source.provenance.target, peer = cleanup ? source.provenance.target : source.provenance.source
   const actorKey = cleanup ? source.provenance.sourceKeyFingerprint : source.provenance.targetKeyFingerprint
   const peerKey = cleanup ? source.provenance.targetKeyFingerprint : source.provenance.sourceKeyFingerprint
-  const same = (left: AgentMuxMessageParticipant, right: AgentMuxMessageParticipant) => left.runtimeId === right.runtimeId && left.agentSessionId === right.agentSessionId && left.runId === right.runId
+  // The signing Core admits only its confirmed semantic successor. A peer verifies
+  // that Core's signature and the original Runtime/Session, retaining the actual Run.
+  const same = sameMessageSession
   if (event.sourceMessageId !== source.envelope.messageId || event.replyMessageId !== reply.envelope.messageId ||
     event.sourceIntentDigest !== source.provenance.intentDigest || event.replyIntentDigest !== reply.provenance.intentDigest ||
     reply.envelope.replyTo !== source.envelope.messageId || reply.envelope.threadId !== source.envelope.threadId ||
@@ -94,7 +96,7 @@ export function parseFederatedThread(value: unknown): AgentMuxFederatedThread {
   const p = object(value, ['source', 'replies', 'dispatchEvents', 'sourceReceipt', 'inboxReceipts']), source = parseSignedMessage(p.source)
   if (!Array.isArray(p.replies)) invalid()
   const replies = p.replies.map(parseSignedMessage), byId = new Map<string, AgentMuxSignedMessage>()
-  const same = (left: AgentMuxMessageParticipant, right: AgentMuxMessageParticipant) => left.runtimeId === right.runtimeId && left.agentSessionId === right.agentSessionId && left.runId === right.runId
+  const same = sameMessageSession
   for (const reply of replies) {
     if (reply.envelope.messageId === source.envelope.messageId || byId.has(reply.envelope.messageId) || reply.envelope.threadId !== source.envelope.threadId ||
       !(same(reply.provenance.source, source.provenance.source) && same(reply.provenance.target, source.provenance.target) || same(reply.provenance.source, source.provenance.target) && same(reply.provenance.target, source.provenance.source))) invalid()
@@ -125,6 +127,9 @@ export function parseFederatedThread(value: unknown): AgentMuxFederatedThread {
     return parseRecipientInboxReceipt(receipt, message)
   })
   return { source, replies, ...(dispatchEvents === undefined ? {} : { dispatchEvents }), ...(sourceReceipt ? { sourceReceipt } : {}), ...(inboxReceipts === undefined ? {} : { inboxReceipts }) }
+}
+function sameMessageSession(left: AgentMuxMessageParticipant, right: AgentMuxMessageParticipant): boolean {
+  return left.runtimeId === right.runtimeId && left.agentSessionId === right.agentSessionId
 }
 export function parseRecipientInboxReceipt(value: unknown, source?: AgentMuxSignedMessage): AgentMuxRecipientInboxReceipt {
   const p = object(value, ['kind', 'runtimeId', 'keyFingerprint', 'messageId', 'operationId', 'intentDigest', 'sequence', 'deliveryMode', 'diskDurability', 'publicKey', 'signature'])

@@ -240,3 +240,4 @@ export type { AgentMuxBrowserLifecycleIntent, AgentMuxBrowserLifecycleReceipt } 
 export { parseBrowserLifecycleIntent, parseBrowserLifecycleReceipt } from './browser-lifecycle.js'
 
 export * from './browser-sdk.js'
+export { sessionSemanticResumeSourceRuns } from './agent-session-resume-sources.js'

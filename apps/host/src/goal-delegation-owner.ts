@@ -2,7 +2,7 @@ import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { isDeepStrictEqual } from 'node:util'
 import { prepareGoalDelegationMaterials } from './goal-delegation-materials.js'
 import type { FileReadParams, FileReadResult } from '@agentmux/core/files'
-import { AgentMuxError } from '@agentmux/core'
+import { AgentMuxError, sessionSemanticResumeSourceRuns } from '@agentmux/core'
 import { assertGoalDelegationSource, assertGoalDelegationReply, readGoalDelegationWireReport, goalDelegationReportBody, goalDelegationApplication, goalReportApplication } from '@agentmux/core/goal-delegation'
 export { goalDelegationReportBody } from '@agentmux/core/goal-delegation'
 import type { GoalDelegationAuthority, GoalDelegationMethod, GoalDelegationParamsMap,
@@ -41,7 +41,7 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
     context: AgentMuxRpcCallContext, authority: GoalDelegationAuthority): Promise<GoalDelegationResultMap[M]> {
     context.signal?.throwIfAborted()
     if (method === 'goal.report' && (input as GoalDelegationParamsMap['goal.report']).sourceMessageId !== undefined)
-      return await submitGoalSourceReport(this.requireCore(), input as GoalDelegationParamsMap['goal.report'], context, authority) as GoalDelegationResultMap[M]
+      return await submitGoalSourceReport(this.requireCore(), this.runtime, input as GoalDelegationParamsMap['goal.report'], context, authority) as GoalDelegationResultMap[M]
     if (method === 'goal.patrol' || method === 'goal.patrol.continue' || method === 'goal.patrol.report') {
       if (!this.patrol) throw new AgentMuxError('The original Goal patrol owner is unavailable; retain original requests and native input.', 'CONTROL_UNAVAILABLE')
       if (method === 'goal.patrol') {
@@ -182,7 +182,12 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
       const core = this.requireCore()
       if (method === 'goal.report') {
         const report = (input as GoalDelegationParamsMap['goal.report']).report
-        if (authority.actor.kind !== 'agent' || !this.participant(saved, authority, 'worker') || authority.runId !== saved.workerRunId)
+        let workerMatches = authority.actor.kind === 'agent' && this.participant(saved, authority, 'worker')
+        if (workerMatches && authority.runId !== saved.workerRunId) {
+          const worker = await this.runtime.agentCreation(delegationWorkerHostId(saved), saved.workerAgentSessionId)
+          workerMatches = worker.kind === 'agent' && worker.run.runId === authority.runId && sessionSemanticResumeSourceRuns(worker).includes(saved.workerRunId)
+        }
+        if (!workerMatches)
           throw new AgentMuxError('Only the authenticated original worker can report this delegation.', 'CONTROL_PERMISSION_DENIED')
         validateDemandDelegationReport(saved, report)
         if (!saved.linkedAt) throw new AgentMuxError('The original dispatch association is not yet confirmed. The worker and its results are retained.', 'CONTROL_UNAVAILABLE')
@@ -190,21 +195,23 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
           throw new AgentMuxError('The original worker report is frozen. Read it before continuing.', 'CONTROL_REQUEST_CONFLICT')
         const body = goalDelegationReportBody(input.goalId, saved.operationId, report)
         const existing = await core.call(delegationWorkerHostId(saved), 'message.read', { hostId: delegationWorkerHostId(saved), operationId: report.operationId }, context)
-        if (existing.message) this.assertReply(saved, report, existing.message, body)
+        if (existing.message) await this.assertReply(saved, report, existing.message, body)
         else {
           const owner = await this.runtime.agentCreation(saved.hostId, saved.ownerAgentSessionId)
           if (owner.kind === 'retired-agent') throw new AgentMuxError(
             'The original report recipient is closed. Keep the worker report and its original operation; explicitly recover the recipient before sending.', 'AGENT_SESSION_RETIRED')
+          if (!sessionSemanticResumeSourceRuns(owner).includes(saved.ownerRunId)) throw new AgentMuxError(
+            'The original report recipient has no confirmed semantic recovery to its current Run. Inspect that Session recovery; the report, operation and healthy input are retained.', 'CONTROL_REQUEST_CONFLICT')
           await core.call(delegationWorkerHostId(saved), 'agent.send', { target: { kind: 'agent-session', agentSessionId: saved.ownerAgentSessionId, hostId: saved.hostId },
             operationId: report.operationId, messageId: report.replyMessageId, threadId: saved.threadId, correlationId: saved.sourceMessageId,
-            replyTo: saved.sourceMessageId, text: body, application: goalReportApplication(input.goalId, saved.operationId, report), expectedRun: { runId: saved.ownerRunId } }, context)
+            replyTo: saved.sourceMessageId, text: body, application: goalReportApplication(input.goalId, saved.operationId, report), expectedRun: owner.run }, context)
         }
         await core.call(saved.hostId, 'message.dispatch.report', { sourceMessageId: saved.sourceMessageId, replyMessageId: report.replyMessageId, kind: 'worker_done' }, context)
         const observed = await core.call(saved.hostId, 'message.dispatch.read', { hostId: saved.hostId, sourceMessageId: saved.sourceMessageId }, context)
         this.assertSource(saved, observed.source, input.goalId)
         const reply = observed.replies.find(message => message.envelope.messageId === report.replyMessageId)
         if (!reply) throw new AgentMuxError('The original report reply is unconfirmed. Keep the same report identity and evidence.', 'CONTROL_UNAVAILABLE')
-        this.assertReply(saved, report, reply, body, observed.source)
+        await this.assertReply(saved, report, reply, body, observed.source)
         await this.demands.submitDelegationReport(input.goalId, saved.operationId, report, authority.actor.id)
       } else {
         const collection = (input as GoalDelegationParamsMap['goal.collect']).collection
@@ -217,9 +224,9 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
         const reply = observed.replies.find(message => message.envelope.messageId === collection.replyMessageId)
         if (!reply)
           throw new AgentMuxError(syncIssue ?? 'The original worker report reply is unconfirmed. No result was accepted.', 'CONTROL_UNAVAILABLE')
-        const report = saved.report ?? this.readReport(input.goalId, saved, reply, observed.source)
+        const report = saved.report ?? await this.readReport(input.goalId, saved, reply, observed.source)
         if (report.replyMessageId !== collection.replyMessageId) throw new AgentMuxError('Collection refers to another original report.', 'CONTROL_REQUEST_CONFLICT')
-        this.assertReply(saved, report, reply, goalDelegationReportBody(input.goalId, saved.operationId, report), observed.source)
+        await this.assertReply(saved, report, reply, goalDelegationReportBody(input.goalId, saved.operationId, report), observed.source)
         if (!saved.report) await this.demands.recoverDelegationReport(input.goalId, saved.operationId, report, authority.actor)
         await this.demands.collectDelegationReport(input.goalId, saved.operationId, collection, authority.actor)
       }
@@ -256,8 +263,24 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
     return this.core
   }
   private assertSource = assertGoalDelegationSource
-  private assertReply = assertGoalDelegationReply
-  private readReport = readGoalDelegationWireReport
+  private async replyRuns(saved: DemandDelegation, reply: DurableAgentMuxMessage) {
+    if (reply.provenance) return undefined
+    const chain = async (hostId: string, agentSessionId: string) => {
+      const session = await this.runtime.agentCreation(hostId, agentSessionId)
+      return session.kind === 'agent' ? sessionSemanticResumeSourceRuns(session) : []
+    }
+    const [workerSourceRuns, ownerSourceRuns] = await Promise.all([
+      reply.envelope.senderRunId === saved.workerRunId ? undefined : chain(delegationWorkerHostId(saved), saved.workerAgentSessionId),
+      reply.envelope.recipientRunId === saved.ownerRunId ? undefined : chain(saved.hostId, saved.ownerAgentSessionId)
+    ])
+    return { ...(workerSourceRuns ? { workerSourceRuns } : {}), ...(ownerSourceRuns ? { ownerSourceRuns } : {}) }
+  }
+  private async assertReply(saved: DemandDelegation, report: DemandDelegationReportInput, reply: DurableAgentMuxMessage, body: string, source?: DurableAgentMuxMessage) {
+    assertGoalDelegationReply(saved, report, reply, body, source, await this.replyRuns(saved, reply))
+  }
+  private async readReport(goalId: string, saved: DemandDelegation, reply: DurableAgentMuxMessage, source?: DurableAgentMuxMessage) {
+    return readGoalDelegationWireReport(goalId, saved, reply, source, await this.replyRuns(saved, reply))
+  }
   private participant(saved: DemandDelegation, authority: GoalDelegationAuthority | undefined, role: 'owner' | 'worker'): boolean {
     if (authority?.actor.kind !== 'agent' || authority.actor.id !== (role === 'owner' ? saved.ownerAgentSessionId : saved.workerAgentSessionId)) return false
     return saved.runtimeIdentity ? authority.runtimeId === (role === 'owner' ? saved.runtimeIdentity.ownerRuntimeId : saved.runtimeIdentity.workerRuntimeId)
@@ -306,7 +329,7 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
             let schema: unknown = reply.envelope.application?.schema
             if (schema === undefined) { try { schema = JSON.parse(reply.envelope.body)?.schema } catch { continue } }
             if (schema !== 'agentmux.goal-report.v1') continue
-            try { reports.push(this.readReport(goalId, saved, reply, observed.source)) }
+            try { reports.push(await this.readReport(goalId, saved, reply, observed.source)) }
             catch (error) { issues.push(error instanceof Error ? error.message : String(error)) }
           }
           if (reports.length === 1) observation.recoverableReport = reports[0]!
