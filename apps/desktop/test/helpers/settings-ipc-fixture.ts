@@ -16,6 +16,7 @@ export function settingsScratchTopics(): ScratchTopics {
 }
 
 export class SettingsBrowserProfiles {
+  storage = { setConfirmationHandler: vi.fn() }
   cookieFiles = { setFileOwner: vi.fn(), setConfirmationHandler: vi.fn() }
   extensions = { setConfirmationHandler: vi.fn() }
   listProfiles = vi.fn(() => [])

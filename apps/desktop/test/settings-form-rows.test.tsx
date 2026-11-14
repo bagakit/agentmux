@@ -7,6 +7,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { configOwnerFixture, deferred } from './helpers/config-owner-fixture'
 import { FormRow } from '@agentmux/client-ui/components/FormRow'
+import { Switch } from '@agentmux/client-ui/input'
 
 const dom = composerDOM()
 const cases = [
@@ -95,4 +96,42 @@ it('keeps the caller native control ref, explicit ID, name and disabled state wi
   expect(inputRef.current).toBe(input); expect(input.disabled).toBe(true)
   await act(async () => row.click())
   expect(changed.mock.calls).toEqual([[true]]); expect(input.checked).toBe(true)
+})
+
+it('keeps the switch native for label activation, form serialization, reset and disabled fields', async () => {
+  const inputRef = createRef<HTMLInputElement>()
+  const changed = vi.fn()
+  const fields = (disabled = false) => <form>
+    <FormRow label="Announce new messages" description="Only unread messages" error="Review your choice." invalid>
+      {attributes => <Switch {...attributes} ref={inputRef} disabled={disabled} name="announce" value="on"
+        defaultChecked onChange={event => changed(event.currentTarget.checked)} />}
+    </FormRow>
+  </form>
+  await dom.render(fields())
+
+  const form = dom.container.querySelector('form')!
+  const input = inputRef.current!
+  const name = document.getElementById(input.getAttribute('aria-labelledby')!)
+  const descriptions = input.getAttribute('aria-describedby')!.split(' ').map(id => document.getElementById(id)?.textContent)
+  expect(name?.textContent).toBe('Announce new messages')
+  expect(descriptions).toEqual(['Only unread messages', 'Review your choice.'])
+  expect(input.getAttribute('aria-invalid')).toBe('true')
+  expect(input.getAttribute('role')).toBe('switch')
+  expect(input.type).toBe('checkbox')
+  expect(input.form).toBe(form)
+  expect(new FormData(form).get('announce')).toBe('on')
+
+  await act(async () => name!.click())
+  expect(changed.mock.calls).toEqual([[false]])
+  expect(new FormData(form).has('announce')).toBe(false)
+  form.reset()
+  expect(input.checked).toBe(true)
+  expect(new FormData(form).get('announce')).toBe('on')
+
+  await dom.render(fields(true))
+  expect(inputRef.current).toBe(input)
+  expect(new FormData(form).has('announce')).toBe(false)
+  await act(async () => name!.click())
+  expect(changed.mock.calls).toEqual([[false]])
+  expect(input.checked).toBe(true)
 })
