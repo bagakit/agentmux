@@ -56,26 +56,41 @@ export type GoalAgentRow = {
   id: string; name: string; context: string; status: string; selectable: boolean
   participated: boolean; session?: Extract<SessionSnapshot, { kind: 'agent' }>; related: boolean; project: boolean; mote: boolean
 }
+/** Several original presentations can describe the same Actor and Run. Choose a
+ * stable existing presentation only after that exact identity is established. */
+export function goalAgentPresentation(candidates: readonly Extract<SessionSnapshot, { kind: 'agent' }>[], referenceId?: string) {
+  const source = candidates[0]
+  if (!source || candidates.some(session => session.hostId !== session.control.hostId ||
+    session.control.hostId !== source.control.hostId || session.control.agentSessionId !== source.control.agentSessionId ||
+    session.control.run.runId !== source.control.run.runId)) return undefined
+  return candidates.find(session => session.id === referenceId) ?? candidates.find(session => session.id === source.control.agentSessionId)
+    ?? [...candidates].sort((a, b) => a.id.localeCompare(b.id))[0]
+}
 /** Business selection uses canonical Core identities; original presentation IDs remain navigation facts. */
 export function goalAgentRows(state: Inputs, goal: DemandRecord, retainedIds: readonly string[] = []): GoalAgentRow[] {
   const topics = scratchTopicsForConfig(state.config, state.scratchTopicSnapshots)
   const projects = projectWorkspaces(state.config?.workspaces.filter(workspace => workspace.id !== '__scratch__') ?? [])
   const hasProject = projects.some(project => project.id === goal.projectId)
   const agents = state.sessions.filter((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.kind === 'agent' && session.control.kind === 'agent')
-  const counts = new Map<string, number>()
-  for (const session of agents) counts.set(session.control.agentSessionId, (counts.get(session.control.agentSessionId) ?? 0) + 1)
+  const grouped = new Map<string, typeof agents>()
+  for (const session of agents) { const id = session.control.agentSessionId; grouped.set(id, [...grouped.get(id) ?? [], session]) }
   const seen = new Set<string>()
   const rows: GoalAgentRow[] = []
-  for (const session of agents) {
-    const id = session.control.agentSessionId
-    if (seen.has(id)) continue
+  for (const [id, candidates] of grouped) {
     seen.add(id)
+    const session = goalAgentPresentation(candidates, id)
+    if (!session) {
+      rows.push({ id, name: id, context: `Original reference · Hosts ${[...new Set(candidates.map(source => source.control.hostId))].join(', ')}`,
+        status: 'Session owner or Run is ambiguous · reference retained', selectable: false, related: goal.sessionIds.includes(id),
+        participated: Boolean(goal.participations?.some(source => source.agentSessionId === id)), project: false, mote: false })
+      continue
+    }
     const workspace = workspaceForSession(state.config, session, topics), topicId = topicIdForSession(state.config, session, topics)
     const projectId = workspace && workspace.id !== '__scratch__' ? workspaceProjectId(workspace) : null
     const project = projects.find(project => project.id === projectId), topic = topics?.find(topic => topic.id === topicId)
     const name = agentDisplayName({ userName: state.agentNames[session.id], firstPrompt: firstPromptFromTimeline(state.timelines[session.id]), fallbackLabel: session.label, providerLabel: session.providerId })
     rows.push({ id, session, name, context: `${topic?.title ?? project?.name ?? 'No registered Project'} · ${session.workspacePath}`,
-      status: counts.get(id) === 1 ? sessionStatusLabel(session) : 'Session owner is ambiguous', selectable: counts.get(id) === 1,
+      status: sessionStatusLabel(session), selectable: true,
       related: goal.sessionIds.includes(id) || goal.sessionIds.includes(session.id), participated: Boolean(goal.participations?.some(source => source.agentSessionId === id)), project: hasProject && projectId === goal.projectId,
       mote: Boolean(topic && scratchTopicKind(topic.id, topics) === 'mote') })
   }

@@ -1,0 +1,12 @@
+.goal-team { display: grid; gap: 12px; min-width: 0; }
+.goal-team__heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.goal-team__heading h2 { margin: 0; font-size: var(--fs-meta); font-weight: 600; color: var(--text); }
+.goal-team__editors { display: flex; flex-wrap: wrap; gap: 4px; }
+.goal-team__actors { display: grid; gap: 12px; min-width: 0; }
+.goal-team__actor { min-width: 0; }
+.goal-team__roles { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 0 8px 2px; color: var(--text-3); font-size: var(--fs-micro); }
+.goal-team__roles [data-goal-team-role='supervisor'] { color: var(--text-2); font-weight: 600; }
+.goal-team__context { margin: 2px 8px 0; overflow-wrap: anywhere; color: var(--text-3); font-size: var(--fs-micro); }
+.goal-team__recommend { margin: 6px 8px 0; }
+.goal-team__reference { display: grid; gap: 5px; }
+.goal-team__reference code { overflow-wrap: anywhere; }

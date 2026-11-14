@@ -6,9 +6,9 @@ import type { ContinuousProgressLoop } from '@agentmux/core'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { DemandRecord } from '../lib/global-demand-board'
-import { agentSessionPresentationIndex } from '../lib/session-presentation'
+import { agentSessionPresentationIndex, createFirstPromptSelector } from '../lib/session-presentation'
 import { agentDisplayName } from '../lib/workbench-tabs'
-import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
+import { goalAgentPresentation } from '../lib/goal-agent-selection'
 import { AgentAvatar } from './AgentAvatar'
 import { useAppStore } from '../store'
 
@@ -132,24 +132,31 @@ export function GoalContinuationControl({ demand, onRefresh, onChooseSupervisor,
 }
 
 /** Resolve presentation metadata only; the saved canonical target and Host never change. */
-function continuationAgentPresentation(state: ReturnType<typeof useAppStore.getState>, agentSessionId: string, hostId?: string) {
+function continuationAgentPresentation(state: ReturnType<typeof useAppStore.getState>, agentSessionId: string, firstPrompt: (state: ReturnType<typeof useAppStore.getState>, sessionId: string) => string | null, hostId?: string) {
   const candidates = agentSessionPresentationIndex(state.sessions).get(agentSessionId) ?? []
   const matches = candidates.filter(session => session.control.agentSessionId === agentSessionId && session.control.hostId === session.hostId && (hostId === undefined || session.control.hostId === hostId))
-  const session = matches.length === 1 ? matches[0] : undefined
+  const session = goalAgentPresentation(matches, agentSessionId)
   const hosts = [...new Set(matches.map(source => source.hostId))].sort().join(', ')
   return {
-    name: session ? agentDisplayName({ userName: state.agentNames[session.id], firstPrompt: firstPromptFromTimeline(state.timelines[session.id]), fallbackLabel: session.label, providerLabel: session.providerId }) : `Session ${agentSessionId}${matches.length > 1 ? ` · Hosts ${hosts}` : hostId ? ` · Host ${hostId}` : ''}`,
-    identity: `${agentSessionId}\nHost ${(hostId ?? hosts) || 'unconfirmed'}${matches.length > 1 ? '\nPresentation is ambiguous' : ''}`,
+    name: session ? agentDisplayName({ userName: state.agentNames[session.id], firstPrompt: firstPrompt(state, session.id), fallbackLabel: session.label, providerLabel: session.providerId }) : `Session ${agentSessionId}${matches.length > 1 ? ` · Hosts ${hosts}` : hostId ? ` · Host ${hostId}` : ''}`,
+    identity: `${agentSessionId}\nHost ${(hostId ?? hosts) || 'unconfirmed'}${!session && matches.length > 1 ? '\nPresentation is ambiguous' : ''}`,
     executorId: session?.executorId,
     providerId: session?.providerId,
     appearance: session ? state.config?.executors[session.executorId]?.avatar ?? state.config?.appearance.agentAvatars?.[session.executorId] : undefined
   }
 }
 export function GoalContinuationAgent({ agentSessionId, hostId, active, size }: { agentSessionId: string; hostId?: string; active: boolean; size: number }) {
-  const observed = useAppStore(useShallow(state => active ? continuationAgentPresentation(state, agentSessionId, hostId) : null))
+  const firstPrompt = useMemo(() => {
+    let id = agentSessionId, read = createFirstPromptSelector(agentSessionId)
+    return (state: ReturnType<typeof useAppStore.getState>, sessionId: string) => {
+      if (id !== sessionId) { id = sessionId; read = createFirstPromptSelector(sessionId) }
+      return read(state)
+    }
+  }, [agentSessionId, hostId])
+  const observed = useAppStore(useShallow(state => active ? continuationAgentPresentation(state, agentSessionId, firstPrompt, hostId) : null))
   const key = JSON.stringify([agentSessionId, hostId]), retained = useRef<{ key: string; value: ReturnType<typeof continuationAgentPresentation> } | null>(null)
   if (observed !== null) retained.current = { key, value: observed }
-  if (retained.current?.key !== key) retained.current = { key, value: continuationAgentPresentation(useAppStore.getState(), agentSessionId, hostId) }
+  if (retained.current?.key !== key) retained.current = { key, value: continuationAgentPresentation(useAppStore.getState(), agentSessionId, firstPrompt, hostId) }
   const face = retained.current.value
   return <><span inert aria-hidden="true"><AgentAvatar label={face.name} providerId={face.providerId} executorId={face.executorId} appearance={face.appearance} size={size} visible={false} /></span><strong title={face.identity}>{face.name}</strong></>
 }

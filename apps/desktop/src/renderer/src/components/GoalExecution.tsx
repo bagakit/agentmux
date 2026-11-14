@@ -1,57 +1,76 @@
 import { GoalContinuationControl } from './GoalContinuationControl'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useMemo, useState } from 'react'
+import { memo, useCallback, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../store'
 import type { DemandProjection } from '../lib/global-demand-board'
-import { goalAgentRows, type GoalAgentRole } from '../lib/goal-agent-selection'
-import { agentSessionPresentationIndex } from '../lib/session-presentation'
-import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
+import type { GoalAgentRole } from '../lib/goal-agent-selection'
+import { createFirstPromptSelector } from '../lib/session-presentation'
+import { createGoalTeamSelector, type GoalTeamActor } from '../lib/goal-team'
+import { agentContextForSession } from '../lib/focus-context'
+import { agentDisplayName, topicIdForSession, workspaceForSession } from '../lib/workbench-tabs'
+import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { AgentTopologySummary } from './AgentTopologySummary'
-import { GoalAgentFace, GoalAgentPicker, type GoalRelationSave } from './GoalAgentPicker'
+import { GoalAgentPicker, type GoalRelationSave } from './GoalAgentPicker'
+import { FocusContextCardBody } from './FocusContextCardBody'
+import '../styles/goal-team.css'
 
-const ThemeNavigationSpaceIcon = semanticIconComponent('navigation.space')
 const ThemeActionChooseAssigneeIcon = semanticIconComponent('action.choose-assignee')
+const roleNames = { supervisor: 'Supervisor', assignees: 'Executor', related: 'Related' }
 
 
 /** The full Agent directory and topology mount only in their explicit editors. */
 export function GoalExecution({ demand, onUpdate }: { demand: DemandProjection; onUpdate: GoalRelationSave }) {
   const [role, setRole] = useState<GoalAgentRole | null>(null), [arrangementOpen, setArrangementOpen] = useState(false)
   const [issue, setIssue] = useState<string | null>(null)
-  const ids = useMemo(() => [...new Set([...demand.sessionIds, ...demand.assigneeSessionIds ?? [], ...demand.participations?.map(source => source.agentSessionId) ?? []])], [demand.sessionIds, demand.assigneeSessionIds, demand.participations])
-  const facts = useAppStore(useShallow(state => {
-    const index = agentSessionPresentationIndex(state.sessions)
-    return [state.config, state.scratchTopicSnapshots, ...ids.flatMap(id => [id, state.agentNames[id], ...(index.get(id) ?? []).flatMap(session => [session.id, session.label, session.providerId, session.executorId, session.workspacePath, session.hostId, session.status.state, Boolean(session.pendingInteraction), state.agentNames[session.id], firstPromptFromTimeline(state.timelines[session.id])])])]
-  }))
-  const rows = useMemo(() => {
-    const state = useAppStore.getState(), index = agentSessionPresentationIndex(state.sessions)
-    return goalAgentRows({ ...state, sessions: [...new Set(ids.flatMap(id => index.get(id) ?? []))] }, demand, ids)
-  }, [facts, demand, ids])
-  const selectSession = useAppStore(state => state.selectSession)
-  const assignees = rows.filter(row => (demand.assigneeSessionIds ?? []).includes(row.id))
-  const related = rows.filter(row => demand.sessionIds.includes(row.id))
-  const supervisor = rows.find(row => row.id === demand.supervisorSessionId)
-  const recommended = rows.filter(row => row.selectable && row.id !== demand.supervisorSessionId && (row.related || demand.participations?.some(source => source.agentSessionId === row.id))).slice(0, 3)
+  const membership = JSON.stringify([demand.supervisorSessionId, demand.assigneeSessionIds, demand.sessionIds, demand.participations])
+  const select = useMemo(() => createGoalTeamSelector(demand), [membership])
+  const team = useAppStore(select)
   const creationDrafts = useAppStore(useShallow(state => Object.values(state.goalAgentCreationDrafts).filter(draft => draft.goalId === demand.id)))
   async function recommend(id: string) {
     setIssue(null)
     try { if (!await onUpdate({ assigneeSessionIds: [...new Set([...demand.assigneeSessionIds ?? [], id])], supervisorSessionId: id }, demand.updatedAt)) setIssue('Supervisor is not saved. The original selection and Agent remain available.') }
     catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
   }
-  const members = (items: typeof rows, empty: string) => items.length ? items.map(row => <button key={row.id} type="button" className="goal-collaboration__member" data-session-state={row.session?.status.state} disabled={!row.session} title={`${row.name} · ${row.status}\n${row.id}`} onClick={() => { if (row.session) selectSession(row.session.id) }}><GoalAgentFace row={row} /><span>{row.name}<small>{row.status}</small></span>{row.session ? <ThemeNavigationSpaceIcon size={11} /> : null}</button>) : <span className="goals-caption">{empty}</span>
-  return <section className="goal-collaboration" aria-label="Goal collaboration">
-    <div className="goal-collaboration__line"><strong>Supervisor</strong><button type="button" className="small-button" onClick={() => setRole('supervisor')} aria-label="Choose Goal Supervisor">Choose</button><div>{supervisor ? members([supervisor], '') : <span className="goals-caption">Not selected</span>}</div></div>
-    {!supervisor && recommended.length ? <div className="goal-collaboration__recommendations"><span className="goals-caption">Recommended</span>{recommended.map(row => <button key={row.id} type="button" className="small-button" aria-label={`Assign ${row.name} as Supervisor`} title={row.id} onClick={() => void recommend(row.id)}><GoalAgentFace row={row} /><span>{row.name}</span><span className="goal-collaboration__assign">Assign</span></button>)}</div> : null}
-    {!supervisor && demand.creationOrigin?.supervisorDefaultPending ? <p className="goals-condition">The original requester is not yet confirmed. You can choose a Supervisor explicitly.</p> : null}
-    <div className="goal-collaboration__line"><strong>Execution Agents</strong><button type="button" className="small-button" onClick={() => setRole('assignees')} aria-label="Choose Goal assignees"><ThemeActionChooseAssigneeIcon size={12} />Choose</button><div>{members(assignees, 'No assignees yet')}</div></div>
-    <div className="goal-collaboration__line"><strong>Related discussions</strong><button type="button" className="small-button" onClick={() => setRole('related')} aria-label="Choose related Goal sessions">Edit</button><div>{members(related, 'No related sessions')}</div></div>
+  return <section className="goal-collaboration goal-team" aria-label="Goal collaboration">
+    <header className="goal-team__heading"><h2>Team</h2><div className="goal-team__editors">
+      <button type="button" className="small-button" onClick={() => setRole('supervisor')} aria-label="Choose Goal Supervisor">Supervisor</button>
+      <button type="button" className="small-button" onClick={() => setRole('assignees')} aria-label="Choose Goal assignees"><ThemeActionChooseAssigneeIcon size={12} />Executors</button>
+      <button type="button" className="small-button" onClick={() => setRole('related')} aria-label="Choose related Goal sessions">Related</button>
+    </div></header>
+    <div className="goal-team__actors">{team.actors.map(actor => <GoalTeamActorCard key={actor.key} actor={actor} onRecommend={recommend} />)}</div>
+    {!team.actors.length && !team.references.length ? <p className="goals-caption">No Agents assigned yet. Choose a Supervisor or add execution Agents.</p> : null}
+    {team.references.map(reference => <div key={reference.id} className="goals-service goal-team__reference" role="status" data-goal-team-unconfirmed={reference.id}>
+      <strong>Unconfirmed reference · {reference.roles.map(role => roleNames[role]).join(' · ')}</strong><code>{reference.id}</code><span>{reference.reason}</span>
+      <button type="button" className="small-button" onClick={() => setRole(reference.roles[0]!)}>Review relationship</button>
+    </div>)}
+    {!demand.supervisorSessionId && demand.creationOrigin?.supervisorDefaultPending ? <p className="goals-condition">The original requester is not yet confirmed. You can choose a Supervisor explicitly.</p> : null}
     {creationDrafts.map(draft => <p key={draft.operationId} className="goals-service" role="status">Original Agent creation retained.<button type="button" className="small-button" onClick={() => setRole(draft.role)}>Check creation and relationship</button></p>)}
     {issue ? <p className="goals-service" role="status">{issue}</p> : null}
     <GoalContinuationControl demand={demand} onChooseSupervisor={() => setRole('supervisor')} />
-    {demand.sessionIds.length ? <details className="goals-topology" onToggle={event => { if (event.target === event.currentTarget) setArrangementOpen(event.currentTarget.open) }}><summary>Arrangement</summary>{arrangementOpen ? <GoalArrangement sessionIds={related.map(row => row.session?.id ?? row.id)} /> : null}</details> : null}
+    {demand.sessionIds.length ? <details className="goals-topology" onToggle={event => { if (event.target === event.currentTarget) setArrangementOpen(event.currentTarget.open) }}><summary>Arrangement</summary>{arrangementOpen ? <GoalArrangement sessionIds={team.actors.filter(actor => actor.roles.includes('related')).map(actor => actor.session.id)} /> : null}</details> : null}
     {role ? <GoalAgentPicker key={`${demand.id}:${role}`} demand={demand} role={role} onSave={onUpdate} onClose={() => setRole(null)} /> : null}
   </section>
 }
+const GoalTeamActorCard = memo(function GoalTeamActorCard({ actor, onRecommend }: { actor: GoalTeamActor; onRecommend(id: string): Promise<void> }) {
+  const { session } = actor
+  const name = useAppStore(state => state.agentNames[session.id])
+  const firstPrompt = useAppStore(useMemo(() => createFirstPromptSelector(session.id), [session.id]))
+  const scope = useAppStore(useShallow(state => ({ config: state.config, topics: state.scratchTopicSnapshots })))
+  const selectSession = useAppStore(state => state.selectSession)
+  const context = useMemo(() => {
+    const topics = scratchTopicsForConfig(scope.config, scope.topics), workspace = workspaceForSession(scope.config, session, topics)
+    return { ...agentContextForSession(session, undefined, name, workspace, topicIdForSession(scope.config, session, topics)),
+      name: agentDisplayName({ userName: name, firstPrompt, fallbackLabel: session.label, providerLabel: session.providerId }), recap: undefined }
+  }, [session, name, firstPrompt, scope])
+  const open = useCallback(() => { selectSession(session.id) }, [selectSession, session.id])
+  return <div className="goal-team__actor" data-goal-team-actor={actor.key}>
+    <div className="goal-team__roles">{actor.roles.map(role => <span key={role} data-goal-team-role={role}>{roleNames[role]}</span>)}{!actor.roles.length ? <span>Participated in this Goal</span> : null}</div>
+    <FocusContextCardBody context={context} selected={false} onSelect={open} />
+    <p className="goal-team__context">{context.workspaceName} · {session.control.hostId}</p>
+    {actor.recommended ? <button type="button" className="small-button goal-team__recommend" aria-label={`Assign ${context.name} as Supervisor`} onClick={() => void onRecommend(session.control.agentSessionId)}>Assign as Supervisor</button> : null}
+  </div>
+})
 function GoalArrangement({ sessionIds }: { sessionIds: string[] }) {
   const config = useAppStore(state => state.config), tabs = useAppStore(state => state.tabs), sessions = useAppStore(state => state.sessions)
   return <AgentTopologySummary sessionIds={sessionIds} sessions={sessions} tabs={tabs} config={config} />
