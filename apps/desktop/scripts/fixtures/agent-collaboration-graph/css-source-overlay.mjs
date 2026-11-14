@@ -6,7 +6,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path'
 
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 
-export async function createCssSourceOverlay({ root, privateRoot, overlays, inputs, vitePackage }) {
+export async function createCssSourceOverlay({ root, privateRoot, overlays, inputs, sourcePin, vitePackage }) {
   const postcss = createRequire(vitePackage)('postcss')
   root = await realpath(root)
   await mkdir(privateRoot, { recursive: true }); privateRoot = await realpath(privateRoot)
@@ -53,15 +53,19 @@ export async function createCssSourceOverlay({ root, privateRoot, overlays, inpu
     const found = new Set()
     if (tree.source?.input) found.add(tree.source.input)
     tree.walk(node => { if (node.source?.input) found.add(node.source.input) })
+    if (sourcePin) await Promise.all([...found].filter(input => input.file).map(async input => {
+      const reader = await realpath(resolve(input.file)), file = originals.get(reader) ?? reader
+      if (sourcePin.owns(file)) await sourcePin.read(file)
+    }))
     for (const input of found) {
       if (!input.file) continue
       const reader = await realpath(resolve(input.file)), file = originals.get(reader) ?? reader
       if (!projectFile(file)) continue
-      const bytes = overlays.get(file) ?? await readFile(file), sourceSHA256 = digest(bytes)
+      const bytes = overlays.get(file) ?? await (sourcePin?.owns(file) ? sourcePin.read(file) : readFile(file)), sourceSHA256 = digest(bytes)
       const actualSHA256 = digest(input.hasBOM ? '\uFEFF' + input.css : input.css), rewrite = rewritten.get(file)
       assert.ok(actualSHA256 === sourceSHA256 || actualSHA256 === rewrite?.effectiveSHA256, 'Actual PostCSS input is not the declared source bytes: ' + relative(root, file))
       if (mirrors.has(file)) assert.ok(originals.has(reader), 'Baseline stylesheet bypassed its private original-byte mirror: ' + relative(root, file))
-      const key = relative(root, file), record = loaded[key] ??= { sourceSHA256, origin: overlays.has(file) ? 'git-blob' : 'current-file', reads: [] }
+      const key = relative(root, file), record = loaded[key] ??= { sourceSHA256, origin: overlays.has(file) || sourcePin?.owns(file) ? 'git-blob' : 'current-file', reads: [] }
       assert.equal(record.sourceSHA256, sourceSHA256, 'CSS source changed during compilation')
       if (!record.reads.some(read => read.actualSHA256 === actualSHA256 && read.mirror === originals.has(reader))) record.reads.push({ actualSHA256, mirror: originals.has(reader), rewrittenImports: actualSHA256 !== sourceSHA256 })
       inputs[key] = sourceSHA256
@@ -77,14 +81,15 @@ export async function createCssSourceOverlay({ root, privateRoot, overlays, inpu
     return { loaded, rewrites: Object.fromEntries([...rewritten].map(([file, value]) => [relative(root, file), value])) }
   }
   function emitted(bytes) {
-    const tree = postcss.parse(bytes), packetRules = [], disclosureRules = [], keyframes = []
+    const tree = postcss.parse(bytes), packetRules = [], disclosureRules = [], headerRules = [], keyframes = []
     tree.walkAtRules('keyframes', rule => keyframes.push(rule.params))
     tree.walkRules(rule => {
       const target = rule.selector.includes('.collaboration-edge__packet') ? packetRules : rule.selector.includes('.conversation-disclosure') ? disclosureRules : null
       if (target) target.push({ selector: rule.selector, declarations: rule.nodes.filter(node => node.type === 'decl').map(node => ({ property: node.prop, value: node.value, important: Boolean(node.important) })) })
+      if (rule.selector.includes('.collaboration-area__overview-label') || rule.selector.includes('.collaboration-area__summary') || rule.selector.includes('.collaboration-area__meta')) headerRules.push({ selector: rule.selector, declarations: rule.nodes.filter(node => node.type === 'decl').map(node => ({ property: node.prop, value: node.value, important: Boolean(node.important) })) })
     })
     const packetAnimationNames = [...new Set(packetRules.flatMap(rule => rule.declarations.filter(declaration => declaration.property === 'animation' || declaration.property === 'animation-name').map(declaration => postcss.list.space(declaration.value)[0])))]
-    return { sha256: digest(bytes), keyframes, packetRules, packetAnimationNames, disclosureRules }
+    return { sha256: digest(bytes), keyframes, packetRules, packetAnimationNames, disclosureRules, headerRules }
   }
   return { plugin, observer, verify, emitted }
 }
