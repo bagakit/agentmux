@@ -1,4 +1,4 @@
-import { isAbsolute } from 'node:path'
+import { isAbsoluteNativePath } from './agent-native-locator.js'
 import { AgentMuxError } from './errors.js'
 import { parseNativeConfirmationHandle } from './agent-native-session-confirmation.js'
 import type { AgentNativeResumeSource } from './types.js'
@@ -9,7 +9,7 @@ export function parseAgentNativeResumeSource(value: unknown): AgentNativeResumeS
   if (!value || typeof value !== 'object' || Array.isArray(value)) invalid()
   const p = value as Record<string, unknown>
   if (Object.keys(p).some(key => !['nativeHandle', 'workspacePath', 'revision'].includes(key)) ||
-      typeof p.workspacePath !== 'string' || !isAbsolute(p.workspacePath) || /[\0\r\n]/u.test(p.workspacePath) ||
+      typeof p.workspacePath !== 'string' || !isAbsoluteNativePath(p.workspacePath) || /[\0\r\n]/u.test(p.workspacePath) ||
       typeof p.revision !== 'string' || !/^[a-f0-9]{64}$/u.test(p.revision)) invalid()
   let nativeHandle: AgentNativeResumeSource['nativeHandle']
   try { nativeHandle = parseNativeConfirmationHandle(p.nativeHandle) } catch { return invalid() }

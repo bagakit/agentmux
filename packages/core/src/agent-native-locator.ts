@@ -44,6 +44,15 @@ export function normalizeNativeSessionId(value: unknown): string | undefined {
   return normalized && !normalized.startsWith('-') ? normalized : undefined
 }
 
+/** Structural decoding keeps the original Host's platform rules in Node and accepts
+ * either supported Host path in a browser. It never resolves or opens that path. */
+export function isAbsoluteNativePath(value: string): boolean {
+  const node = typeof process !== 'undefined' && typeof process.versions?.node === 'string'
+  const windowsPath = (!node || process.platform === 'win32') &&
+    (value.startsWith('\\') || /^[A-Za-z]:[\\/]/u.test(value))
+  return value.startsWith('/') || windowsPath
+}
+
 /**
  * Normalize the authoritative transcript/session file reported by a Provider.
  * It is a locator, not display text: relative paths are not stable across a
@@ -52,12 +61,7 @@ export function normalizeNativeSessionId(value: unknown): string | undefined {
 export function normalizeNativeTranscriptPath(value: unknown): string | undefined {
   const normalized = boundedText(value, MAX_NATIVE_TRANSCRIPT_PATH_BYTES)
   if (!normalized) return undefined
-  // A Host retains node:path's platform decision. A browser decodes either
-  // supported Host path shape; it does not select the execution Host.
-  const node = typeof process !== 'undefined' && typeof process.versions?.node === 'string'
-  const windowsPath = (!node || process.platform === 'win32') &&
-    (normalized.startsWith('\\') || /^[A-Za-z]:[\\/]/u.test(normalized))
-  return normalized.startsWith('/') || windowsPath ? normalized : undefined
+  return isAbsoluteNativePath(normalized) ? normalized : undefined
 }
 
 
