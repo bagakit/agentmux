@@ -409,7 +409,7 @@ const originalZoneId = () => catalog().tabs.find(tab => tab.tabId === mixed.id)!
 async function choose(zoneId = originalZoneId()) {
   if (!useAppStore.getState().surveyCollectedZones[zoneId]) await act(async () => { expect(useAppStore.getState().setSurveyZoneCollected(zoneId, true)).toBe(true) })
   const row = [...dom.container.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(row => row.dataset.surveyZoneId === zoneId)
-  expect(row).toBeDefined(); await act(async () => row!.querySelector<HTMLButtonElement>('.survey-item')!.click())
+  expect(row).toBeDefined(); await act(async () => (row!.querySelector<HTMLElement>('.survey-item') ?? row!).click())
 }
 const slot = () => [...dom.container.querySelectorAll<HTMLElement>('.global-survey-surface .workbench-tab-slot[data-workbench-tab-id]')].find(slot => slot.dataset.workbenchTabId === useAppStore.getState().surveyZoneSelection?.active?.tabId)!
 const selectedRegion = () => [...slot().querySelectorAll<HTMLElement>('[data-workbench-region-id]')].find(region => region.dataset.workbenchRegionId === useAppStore.getState().surveyZoneSelection?.active?.regionId)!
@@ -420,7 +420,8 @@ async function selectRegion(regionId: string) {
 }
 function healthy() {
   const state = useAppStore.getState()
-  expect(state.sessions).toEqual([session]); expect(state.sessions[0]!.control.run.runId).toBe('11111111-1111-4111-8111-111111111111')
+  expect(state.sessions.map(value => value.id)).toEqual([session.id]); expect(state.sessions[0]!.control).toEqual(session.control)
+  expect(state.sessions[0]!.control.run.runId).toBe('11111111-1111-4111-8111-111111111111')
   expect(state.agentComposerDrafts[session.id]).toBe('Keep my draft'); expect(state.agentFocus.execution.sessionId).toBe(session.id)
   expect(state.tabs[mixed.id]?.regions[agent.regionId]).toEqual(agent)
   expect(state.documents[key]?.content).toBe('Unsaved file'); expect(api.sessions.stop).not.toHaveBeenCalled()
@@ -1309,9 +1310,10 @@ it('keeps a distinct unnamed exploration instead of concatenating its mixed Tab 
   useAppStore.setState({ tabs: { [named.id]: named, [second.id]: second }, layouts: { [workspace.id]: createWorkspaceLayout('original-group', [named.id, second.id]) } })
   await renderApp(); await enterSurvey(); await choose()
   const before = useAppStore.getState(), row = dom.container.querySelector<HTMLElement>('.survey-item-row[data-selected="true"]')!
-  expect(row.querySelector('strong')!.textContent).toBe('Untitled exploration')
-  expect(row.querySelector('.survey-item')!.getAttribute('title')).toBe('Untitled exploration')
-  expect(row.querySelector('.survey-item')!.getAttribute('aria-label')).toBe('Show survey item: Untitled exploration')
+  expect(row.querySelector('.survey-item')).toBeNull()
+  expect(row.dataset.headerless).toBe('true')
+  expect(row.getAttribute('aria-label')).toBe('Untitled exploration')
+  expect(row.querySelectorAll('[data-survey-tab-id]')).toHaveLength(2)
   expect(dom.container.querySelector('.survey-view-controls')).toBeNull()
   expect(row.textContent).not.toContain('2 tabs')
   expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts); healthy()
@@ -1324,8 +1326,9 @@ it.each([false, true])('flat list keeps a confirmed shared name and never borrow
     layouts: { [workspace.id]: createWorkspaceLayout('original-group', single ? [tab.id] : [tab.id, second.id]) } })
   const before = useAppStore.getState()
   await renderApp(); await enterSurvey(); await choose()
-  const title = dom.container.querySelector('.survey-item-row[data-selected="true"] strong')!.textContent
-  expect(title).toBe(single ? browser.title : 'Untitled exploration')
+  const row = dom.container.querySelector<HTMLElement>('.survey-item-row[data-selected="true"]')!
+  expect(row.querySelector('strong')?.textContent).toBe(single ? browser.title : undefined)
+  expect(row.dataset.headerless).toBe(single ? 'false' : 'true')
   expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
   expect(useAppStore.getState().sessions).toBe(before.sessions); expect(useAppStore.getState().documents).toBe(before.documents)
   expect(useAppStore.getState().agentComposerDrafts[session.id]).toBe('Keep my draft'); expect(api.sessions.stop).not.toHaveBeenCalled()
@@ -2302,6 +2305,98 @@ it('[survey-item-actions] creates Browser and general Launcher in the clicked un
   expect(create).toHaveBeenCalledTimes(1)
   expect(surveyRow(other).querySelectorAll('.survey-item-shortcuts > button')).toHaveLength(2)
   healthy()
+})
+
+it('[survey-item-chrome] hides only automatic multi-Tab titles and preserves an explicitly named Untitled', async () => {
+  const second = createWorkbenchTab('chrome-browser', { ...pageB, title: 'Reference page' }, 'Reference page')
+  useAppStore.setState({ tabs: { [mixed.id]: mixed, [second.id]: second },
+    layouts: { [workspace.id]: createWorkspaceLayout('original-group', [mixed.id, second.id]) } })
+  await renderApp(); await enterSurvey(); await choose()
+  const zoneId = originalZoneId(), before = useAppStore.getState()
+  let row = surveyRow(zoneId)
+  expect(row.dataset.headerless).toBe('true'); expect(row.querySelector('.survey-item')).toBeNull()
+  expect(row.querySelectorAll('[data-survey-tab-id]')).toHaveLength(2)
+  expect(row.querySelector('.survey-item-options')).not.toBeNull()
+  await act(async () => row.querySelector<HTMLButtonElement>('[data-survey-tab-id]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true })))
+  const input = surveyRow(zoneId).querySelector<HTMLInputElement>('[aria-label="Exploration name"]')!
+  expect(input).not.toBeNull()
+  await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  row = surveyRow(zoneId)
+  expect(row.dataset.headerless).toBe('true')
+  await act(async () => useAppStore.setState({ surveyExplorationNames: { [zoneId]: 'Untitled exploration' } }))
+  expect(row.dataset.headerless).toBe('false'); expect(row.querySelector('.survey-item strong')?.textContent).toBe('Untitled exploration')
+  expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
+  healthy()
+})
+
+it('[survey-item-chrome] closes background member Tabs without selecting their item, including the last single Tab', async () => {
+  vi.mocked(api.browser.create).mockImplementation(async (id, url = 'about:blank') => ({ ...browser, id, url, agent: null }))
+  await renderApp(); await enterSurvey(); await choose(); await dom.click('[aria-label="New webpage"]')
+  const zoneId = useAppStore.getState().surveyZoneSelection!.zoneId
+  await rowCreate(zoneId, 'New Browser')
+  const ids = [...surveyRow(zoneId).querySelectorAll<HTMLElement>('[data-survey-tab-id]')].map(e => e.dataset.surveyTabId!)
+  expect(ids).toHaveLength(2)
+  await choose(originalZoneId())
+  const before = useAppStore.getState(), reference = before.tabs[ids[1]!]!, browserSurface = workbenchSurfaces(reference).find(s => s.kind === 'browser')!
+  const column = surveyRow(zoneId).querySelector<HTMLElement>(`[data-survey-tab-id="${ids[1]}"]`)!
+  const close = column.parentElement!.querySelector<HTMLButtonElement>('.survey-tab-close')!
+  expect(close.closest('button')).toBe(close); expect(close.querySelector('button')).toBeNull()
+  await act(async () => close.click())
+  expect(api.browser.close).toHaveBeenCalledWith(browserSurface.browserId)
+  expect(useAppStore.getState().tabs[ids[1]!]).toBeUndefined()
+  expect(useAppStore.getState().tabs[ids[0]!]).toBe(before.tabs[ids[0]!])
+  expect(useAppStore.getState().surveyZoneSelection).toEqual(before.surveyZoneSelection)
+  await act(async () => surveyRow(zoneId).querySelector<HTMLButtonElement>('.survey-item-tab-close')!.click())
+  expect(useAppStore.getState().tabs[ids[0]!]).toBeUndefined()
+  expect(useAppStore.getState().surveyCollectedZones[zoneId]).toBeUndefined()
+  expect(useAppStore.getState().surveyZoneSelection).toEqual(before.surveyZoneSelection)
+  healthy()
+})
+
+it('[survey-item-chrome] shares the Agent and dirty-content confirmation; Cancel keeps the original Tab and input', async () => {
+  const second = createWorkbenchTab('chrome-browser', pageB, 'Reference page')
+  useAppStore.setState({ tabs: { [mixed.id]: mixed, [second.id]: second },
+    layouts: { [workspace.id]: createWorkspaceLayout('original-group', [mixed.id, second.id]) } })
+  await renderApp(); await enterSurvey(); await choose()
+  const before = useAppStore.getState()
+  const column = surveyRow(originalZoneId()).querySelector<HTMLElement>(`[data-survey-tab-id="${mixed.id}"]`)!
+  await act(async () => column.parentElement!.querySelector<HTMLButtonElement>('.survey-tab-close')!.click())
+  const confirmation = document.querySelector<HTMLElement>('[role="dialog"]')!
+  expect(confirmation.textContent).toContain('Stop Agent Session?')
+  expect(api.sessions.stop).not.toHaveBeenCalled()
+  await dialogButton(confirmation, 'Cancel')
+  expect(useAppStore.getState().tabs[mixed.id]).toBe(before.tabs[mixed.id])
+  expect(useAppStore.getState().surveyZoneSelection).toEqual(before.surveyZoneSelection)
+  expect(useAppStore.getState().dirtyDocuments[key]).toBe(true); healthy()
+})
+
+it('[survey-item-chrome] keeps a Browser Tab and selection after an unconfirmed close', async () => {
+  const second = createWorkbenchTab('chrome-browser', { ...pageB, browserId: 'chrome-failure-browser', regionId: 'chrome-failure-region', agent: null }, 'Reference page')
+  useAppStore.setState({ tabs: { [mixed.id]: mixed, [second.id]: second },
+    layouts: { [workspace.id]: createWorkspaceLayout('original-group', [mixed.id, second.id]) } })
+  vi.mocked(api.browser.close).mockRejectedValueOnce(new Error('Native close not confirmed'))
+  await renderApp(); await enterSurvey(); await choose()
+  const before = useAppStore.getState(), column = surveyRow(originalZoneId()).querySelector<HTMLElement>('[data-survey-tab-id="chrome-browser"]')!
+  await act(async () => column.parentElement!.querySelector<HTMLButtonElement>('.survey-tab-close')!.click())
+  expect(useAppStore.getState().tabs[second.id]).toBe(before.tabs[second.id])
+  expect(useAppStore.getState().surveyZoneSelection).toEqual(before.surveyZoneSelection)
+  expect(api.browser.close).toHaveBeenCalledTimes(1); healthy()
+})
+
+it('[survey-item-chrome] keeps unknown Agent ownership explicit and closes only after human confirmation', async () => {
+  const second = createWorkbenchTab('chrome-unknown', { ...pageB, browserId: 'unknown-owner-browser', regionId: 'unknown-owner-region' }, 'Unknown owner page')
+  useAppStore.setState({ tabs: { [mixed.id]: mixed, [second.id]: second },
+    layouts: { [workspace.id]: createWorkspaceLayout('original-group', [mixed.id, second.id]) } })
+  await renderApp(); await enterSurvey(); await choose()
+  const before = useAppStore.getState(), column = surveyRow(originalZoneId()).querySelector<HTMLElement>('[data-survey-tab-id="chrome-unknown"]')!
+  await act(async () => column.parentElement!.querySelector<HTMLButtonElement>('.survey-tab-close')!.click())
+  const confirmation = document.querySelector<HTMLElement>('[role="dialog"]')!
+  expect(confirmation.textContent).toContain('Close without confirming the Agent?')
+  expect(api.browser.close).not.toHaveBeenCalled(); expect(api.sessions.stop).not.toHaveBeenCalled()
+  await dialogButton(confirmation, 'Close')
+  expect(useAppStore.getState().tabs[second.id]).toBeUndefined()
+  expect(useAppStore.getState().surveyZoneSelection).toEqual(before.surveyZoneSelection)
+  expect(api.browser.close).toHaveBeenCalledExactlyOnceWith('unknown-owner-browser'); healthy()
 })
 
 it('[survey-item-actions] shares row options and right-click actions, closing only the invoked Survey reference', async () => {
