@@ -198,6 +198,12 @@ export function terminalPromptSubmission(
       }
     })() }),
     outputCursorBytes,
+    ...(source.payloadConsumption === undefined ? {} : { payloadConsumption: (() => {
+      const consumed = record(source.payloadConsumption, 'terminalPromptSubmission.payloadConsumption')
+      const receipt = consumed.receipt === undefined ? undefined : record(consumed.receipt, 'payload consumption receipt')
+      return { sourceId: string(consumed.sourceId, 'payload consumption sourceId'), baselineId: string(consumed.baselineId, 'payload consumption baselineId'),
+        ...(receipt ? { receipt: { id: string(receipt.id, 'payload consumption receipt id'), observedAt: timestamp(receipt.observedAt, 'payload consumption observedAt') } } : {}) }
+    })() }),
     ...(source.prepare === undefined ? {} : { prepare: (() => {
       const prepare = record(source.prepare, 'terminalPromptSubmission.prepare')
       if (prepare.context !== 'idle' && prepare.context !== 'interruptible') {
@@ -344,6 +350,12 @@ export function normalizePromptInputPlan(value: unknown): import('./types.js').A
       return { interrupt: bytes(prepare.interrupt), endEvent: bytes(prepare.endEvent),
         ...(prepare.refresh === undefined ? {} : { refresh: bytes(prepare.refresh) }) }
     })() })
+  }
+  else if (plan.kind === 'payload-then-submit') {
+    if (!Number.isSafeInteger(plan.minimumSubmitDelayMs) || Number(plan.minimumSubmitDelayMs) < 0 || Number(plan.minimumSubmitDelayMs) > 10_000) {
+      throw new AgentMuxError('Frozen native payload interval is invalid.', 'INVALID_AGENT_SESSION_STORE')
+    }
+    input = { kind: plan.kind, payload: bytes(plan.payload), payloadText: bytes(plan.payloadText), submit: bytes(plan.submit), minimumSubmitDelayMs: Number(plan.minimumSubmitDelayMs) }
   }
   else if (plan.kind === 'native-rpc') input = nativePromptPlan(plan)
   else if (plan.kind === 'runtime-launch') input = validateAgentLaunchPromptInputPlan(plan)

@@ -253,7 +253,7 @@ export function parseHostedAgentSessionRead(value: unknown, agentSessionId: stri
       if (admission.intentSummary !== undefined) {
         const intent = wireRecord(admission.intentSummary, ['run', 'ownerInstanceId', 'planKind', 'execution', 'promptBytes'])
         wireString(wireRecord(intent.run, ['runId']).runId); wireString(intent.ownerInstanceId); wireCount(intent.promptBytes)
-        if (!['single-phase', 'render-then-submit', 'native-rpc', 'runtime-launch'].includes(String(intent.planKind))) throw new AgentMuxError('The Session prompt plan summary is malformed.', 'CONTROL_PROTOCOL_ERROR')
+        if (!['single-phase', 'render-then-submit', 'payload-then-submit', 'native-rpc', 'runtime-launch'].includes(String(intent.planKind))) throw new AgentMuxError('The Session prompt plan summary is malformed.', 'CONTROL_PROTOCOL_ERROR')
         if (intent.execution !== undefined && intent.execution !== 'default' && intent.execution !== 'immediate') throw new AgentMuxError('The Session prompt execution summary is malformed.', 'CONTROL_PROTOCOL_ERROR')
       }
     }

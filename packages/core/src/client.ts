@@ -1119,6 +1119,8 @@ export class AgentMuxClient {
       screenEvidence: this.screenEvidence,
       requireAgentSession: (agentSessionId) => this.requireAgentSession(agentSessionId),
       providerArgs: (session, run) => this.providerLaunch(session, run).args,
+      providerCommand: (session, run) => this.providerLaunch(session, run).command,
+      providerExecutionEnvironment: async session => (await this.sessionExecutorOptions<AgentSessionHistoryPageOptions>(this.requireAgentSession(session.agentSessionId), {}, session.agentSessionId)).env,
       assertUncontrolledInput: async key => {
         if (await this.messageQueue.inspectInput({ key })) throw new AgentMuxError(
           'The original controlled input requires its original journal gate and intent.', 'AGENT_PROMPT_OPERATION_CONFLICT')
@@ -6375,7 +6377,7 @@ export class AgentMuxClient {
       throw new AgentMuxError('Agent Session changed before paste.', 'STALE_AGENT_SESSION')
     }
     const plan = this.providers.get(session.providerId).planPromptInput(input.text)
-    return await this.writeAgentInput(session, plan.kind === 'render-then-submit'
+    return await this.writeAgentInput(session, (plan.kind === 'render-then-submit' || plan.kind === 'payload-then-submit')
       ? plan.payload
       : input.terminalData, 'user', 'paste', readInputObservationField(input), call)
   }
@@ -7574,7 +7576,7 @@ export class AgentMuxClient {
       }
     }
     const ordinaryPlan = inputControl?.handoff && inputControl.handoff.carrier.kind !== 'launch' ? inputControl.handoff.carrier.plan : provider.planPromptInput(outbound,
-      admissionIntent.kind === 'manual-actor' || admissionIntent.kind === 'session-conversation' || input.execution === undefined ? undefined : { execution: input.execution })
+      admissionIntent.kind === 'manual-actor' ? { currentTerminal: true } : admissionIntent.kind === 'session-conversation' || input.execution === undefined ? undefined : { execution: input.execution })
     const protocolInput: AgentPromptProtocolInputBoundary = { invalid: false }
     let releasePreparationObservation: ((next?: AbortController) => void) | undefined
     let preparationStarted = false
@@ -10489,8 +10491,9 @@ export class AgentMuxClient {
     // active binding may replace the managed wrapper with its original launch.
     const current = this.registry.findByRun(session.run)
     const actor = current?.agentSessionId === session.agentSessionId && sameRun(current.run, { runId: run.runId }) ? current.nativeActor : undefined
+    const invocation = this.kernel.originalInvocation(run)
     return actor && actor.lifecycleOperationId === run.lifecycleOperationId ? actor.launch
-      : { command: run.program ?? this.providers.get(session.providerId).executable, args: run.args }
+      : { command: invocation.program ?? this.providers.get(session.providerId).executable, args: invocation.args }
   }
 
   private providerNativeContext(session: AgentMuxAgentSession, run: CtxmuxAdapterRun): AgentProviderPromptExecutionContext {

@@ -37,7 +37,8 @@ function receiptIdentity(record: NonNullable<AgentInputSubmissionReceipt['admiss
   }
   return JSON.stringify([...common, 'pty', claim.startByte, claim.endByte, plan?.kind,
     plan?.kind === 'single-phase' ? plan.data : plan?.kind === 'render-then-submit'
-      ? [plan.payload, plan.renderedText, plan.submit, plan.prepare?.interrupt, plan.prepare?.endEvent, plan.prepare?.refresh] : undefined])
+      ? [plan.payload, plan.renderedText, plan.submit, plan.prepare?.interrupt, plan.prepare?.endEvent, plan.prepare?.refresh]
+      : plan?.kind === 'payload-then-submit' ? [plan.payload, plan.payloadText, plan.submit, plan.minimumSubmitDelayMs] : undefined])
 }
 
 const settled = (receipt: AgentInputSubmissionReceipt) =>
@@ -66,11 +67,15 @@ export function projectInputReceipt(prior: AgentInputSubmissionReceipt | undefin
   const oldPhases = prior.admission?.terminalPromptSubmission, newPhases = next.admission?.terminalPromptSubmission
   const phasesIdentity = (phases: NonNullable<typeof oldPhases>) => JSON.stringify([phases.run.runId, phases.submissionId, phases.promptDigest,
     phases.payload.operationId, phases.payload.inputByteRange.startByte, phases.payload.inputByteRange.endByte,
-    phases.submit.operationId, phases.submit.inputByteRange.startByte, phases.submit.inputByteRange.endByte])
+    phases.submit.operationId, phases.submit.inputByteRange.startByte, phases.submit.inputByteRange.endByte,
+    phases.payloadConsumption?.sourceId, phases.payloadConsumption?.baselineId])
   if (settled(prior) && settled(next) && prior.status !== next.status ||
       prior.control.state === 'dispatch-authorized' && next.control.state === 'dispatch-authorized' && prior.control.gateId !== next.control.gateId ||
       prior.admission && next.admission && receiptIdentity(prior.admission) !== receiptIdentity(next.admission) ||
       oldPhases && newPhases && phasesIdentity(oldPhases) !== phasesIdentity(newPhases) ||
+      oldPhases?.payloadConsumption?.receipt && newPhases?.payloadConsumption?.receipt && (
+        oldPhases.payloadConsumption.receipt.id !== newPhases.payloadConsumption.receipt.id ||
+        oldPhases.payloadConsumption.receipt.observedAt !== newPhases.payloadConsumption.receipt.observedAt) ||
       oldLaunch && newLaunch && (oldLaunch.operationId !== newLaunch.operationId || oldLaunch.run.runId !== newLaunch.run.runId || oldLaunch.observedAt !== newLaunch.observedAt) ||
       oldNative?.transport === 'native' && newNative?.transport === 'native' && (
         oldNative.native.turnId !== undefined && newNative.native.turnId !== undefined && oldNative.native.turnId !== newNative.native.turnId ||
@@ -81,6 +86,7 @@ export function projectInputReceipt(prior: AgentInputSubmissionReceipt | undefin
   if (prior.admission && !next.admission || settled(prior) && next.status !== prior.status ||
       oldNative?.transport === 'native' && oldNative.native.turnId !== undefined && newNative?.transport === 'native' && newNative.native.turnId === undefined ||
       oldPhases && (!newPhases || oldPhases.payload.acknowledged && !newPhases.payload.acknowledged || oldPhases.submit.acknowledged && !newPhases.submit.acknowledged) ||
+      oldPhases?.payloadConsumption?.receipt && !newPhases?.payloadConsumption?.receipt ||
       prior.control.state === 'dispatch-authorized' && next.control.state !== 'dispatch-authorized' ||
       prior.control.state === 'stopped-before-dispatch' && next.control.state !== 'stopped-before-dispatch' ||
       prior.status === 'unknown' && (next.status === 'waiting' || next.status === 'stopped')) return prior

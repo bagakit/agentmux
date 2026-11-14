@@ -28,7 +28,7 @@ export function parseAgentInputHandoff(value: unknown): AgentInputHandoff {
     const plan = normalizePromptInputPlan(c.plan)
     if (!isDeepStrictEqual(plan, c.plan)) return fail()
     if (c.kind === 'native' && plan.kind === 'native-rpc' && c.qualification === undefined) carrier = { kind: 'native', plan }
-    else if (c.kind === 'pty' && (plan.kind === 'single-phase' || plan.kind === 'render-then-submit')) {
+    else if (c.kind === 'pty' && (plan.kind === 'single-phase' || plan.kind === 'render-then-submit' || plan.kind === 'payload-then-submit')) {
       let qualification: Extract<AgentInputCarrier, { kind: 'pty' }>['qualification']
       if (c.qualification !== undefined) {
         const q = object(c.qualification, ['nativeSourceId', 'processId', 'inputByte'])

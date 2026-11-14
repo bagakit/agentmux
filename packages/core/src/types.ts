@@ -511,8 +511,26 @@ export type AgentNativePromptPredecessor = {
   evidenceId: string
 }
 
+/** An opaque original native payload source and its pre-input baseline. */
+export type AgentPromptPayloadConsumption = {
+  sourceId: string
+  baselineId: string
+  /** Native body consumption only; never turn acceptance or completion. */
+  receipt?: { id: string; observedAt: number }
+}
+
 export type AgentPromptInputPlan =
   | { kind: 'single-phase'; data: string }
+  | {
+      kind: 'payload-then-submit'
+      payload: string
+      /** Exact logical body consumed by the native Provider, independent of display. */
+      payloadText: string
+      submit: string
+      /** A Provider protocol interval, starting after native payload consumption. */
+      minimumSubmitDelayMs: number
+      prepare?: never
+    }
   | {
       kind: 'render-then-submit'
       /** Exact transport bytes written before submit. */
@@ -1569,6 +1587,8 @@ export type AgentTerminalPromptSubmissionState = {
     readyThroughByte: number
   }
   outputCursorBytes: number
+  /** Exact original native body source/baseline and its consumption observation. */
+  payloadConsumption?: AgentPromptPayloadConsumption
   /** Immutable preparation receipt; absent on ordinary input. */
   prepare?: {
     context: 'idle' | 'interruptible'

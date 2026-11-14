@@ -164,7 +164,7 @@ export function agentPromptSubmissionOutcome(admission: AgentPromptSubmissionRec
   const byteLength = (data: string) => new TextEncoder().encode(data).byteLength
   const confirmedBytes = !phases
     ? plan?.kind === 'single-phase' && claim.endByte - claim.startByte === byteLength(plan.data)
-    : plan?.kind === 'render-then-submit' && phases.run.runId === admission?.run.runId &&
+    : (plan?.kind === 'render-then-submit' || plan?.kind === 'payload-then-submit') && phases.run.runId === admission?.run.runId &&
       phases.submissionId === claim.submissionId && first?.operationId === claim.operationId &&
       first.inputByteRange.startByte === claim.startByte && phases.submit.inputByteRange.endByte === claim.endByte &&
       phases.payload.inputByteRange.endByte === phases.submit.inputByteRange.startByte &&

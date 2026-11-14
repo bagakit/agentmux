@@ -1256,6 +1256,18 @@ export class CtxmuxRunAdapter {
     return { program: '/usr/bin/env', args: [...unsetArgs, '--', input.program, ...input.args], env }
   }
 
+  /** Original invocation inside this owner's same-PID environment-removal wrapper.
+   * RunSpec stays authoritative and unchanged; Providers consume the CLI argv,
+   * rather than mistaking this Core-owned launcher for a different executable.
+   */
+  originalInvocation(run: Pick<CtxmuxAdapterRun, 'program' | 'args'>): { program: string | null; args: readonly string[] } {
+    if (run.program !== '/usr/bin/env') return { program: run.program, args: run.args }
+    let offset = 0
+    while (run.args[offset] === '-u' && typeof run.args[offset + 1] === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(run.args[offset + 1]!)) offset += 2
+    if (run.args[offset] !== '--' || !run.args[offset + 1]) return { program: run.program, args: run.args }
+    return { program: run.args[offset + 1]!, args: run.args.slice(offset + 2) }
+  }
+
   /** Exact RunSpec identity used by the existing Start owner, without exposing environment values. */
   launchIdentity(input: { program: string; args: readonly string[]; env?: Readonly<Record<string, string>> }): { program: string; argsDigest: string } {
     const command = this.launchCommand(input)

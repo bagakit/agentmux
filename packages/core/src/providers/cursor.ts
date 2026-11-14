@@ -8,6 +8,8 @@ import { formatHookToolOutput } from '../hook-tool-outcome.js'
 import { catalog, hookToolFields, managedHookCommand, hookCommandTimeout } from './shared.js'
 import { cursorDataRoot, readCursorSessionHistoryPage, observeCursorSessionHistory } from './cursor-native-history.js'
 import { discoverCursorNativeSession } from './cursor-native-session.js'
+import { cursorPromptPayloadConsumption } from './cursor-payload-consumption.js'
+import { buildPromptInputPayload, sanitizeBracketedPasteText } from '../bracketed-paste.js'
 import { prepareCursorOwnedWorkspaceTrust } from './cursor-workspace-trust.js'
 export { cursorTrustMarkerPath } from './cursor-workspace-trust.js'
 
@@ -156,11 +158,17 @@ export function createCursorProvider(defineAgentProvider: ProviderFactory): Agen
     }),
     launchOptions: CURSOR_LAUNCH_OPTIONS,
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
-    // Cursor's input parser accepts bracketed paste and CSI-u key events. A raw
-    // CR batched with text is treated as pasted content, leaving it unsubmitted.
-    // Encode Enter as a key event (kitty keyboard protocol), outside the paste;
-    // one durable phase needs neither a rendering observation nor a timer.
-    planPromptInput: prompt => ({ kind: 'single-phase', data: `\u001b[200~${prompt}\u001b[201~\u001b[13u` }),
+    promptPayloadConsumption: cursorPromptPayloadConsumption,
+    planPromptInput: (prompt, context) => {
+      const payload = buildPromptInputPayload(prompt)
+      const payloadText = sanitizeBracketedPasteText(prompt).replace(/\r\n?/gu, '\n').replaceAll('\t', '  ')
+      // Native persistence acknowledges only this supported body domain. Explicit
+      // current-terminal input retains its ordinary plan before it is frozen;
+      // optional native observation cannot take that healthy capability away.
+      return context?.currentTerminal !== true && payloadText.length > 800
+        ? { kind: 'payload-then-submit', payload, payloadText, submit: '\u001b[13u', minimumSubmitDelayMs: 35 }
+        : { kind: 'single-phase', data: `${payload}\u001b[13u` }
+    },
     hook: CURSOR_HOOKS,
     discoverNativeSession: discoverCursorNativeSession,
     readSessionHistoryPage: readCursorSessionHistoryPage,

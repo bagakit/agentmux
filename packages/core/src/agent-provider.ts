@@ -120,17 +120,26 @@ export type AgentProviderHookNormalizationContext = Readonly<{
 }>
 
 export type AgentProviderPromptExecutionContext = {
+  command?: string
   /** Present only for the executing Core Host's local Runtime-owned process. */
   processId?: number
   /** Exact Provider source being authorized; diagnostics must bind this source. */
   nativeSourceId?: string
   args: readonly string[]
   workspacePath: string
+  /** Original private launch-source environment, resolved by the Core owner. */
+  env?: Readonly<Record<string, string | undefined>>
   nativeHandle?: Readonly<AgentNativeSessionHandle>
   /** Only the exact current Core Run can consume its pre-resume native evidence. */
   nativePromptPredecessor?: Readonly<AgentNativePromptPredecessor>
   /** Cancellation abandons only this read-only observation, never the Agent. */
   signal?: AbortSignal
+}
+
+/** Read-only native body acknowledgement; it does not observe terminal presentation. */
+export type AgentProviderPromptPayloadConsumption = {
+  prepare(context: AgentProviderPromptExecutionContext, text: string): Promise<Pick<import('./types.js').AgentPromptPayloadConsumption, 'sourceId' | 'baselineId'>>
+  read(context: AgentProviderPromptExecutionContext, original: Readonly<import('./types.js').AgentPromptPayloadConsumption>, text: string): Promise<{ receiptId: string } | null>
 }
 
 export type AgentProviderPreparedPromptTransport = Readonly<{
@@ -185,6 +194,7 @@ export type AgentProvider = {
   readonly hook: AgentNativeHookSpecification
   readonly terminalHandshake?: AgentTerminalHandshake
   readonly terminalPromptRender?: AgentTerminalPromptRenderMatcher
+  readonly promptPayloadConsumption?: AgentProviderPromptPayloadConsumption
   /** This contribution is the native history capability; its absence is explicitly unsupported. */
   discoverNativeSession?(context: AgentProviderNativeSessionDiscoveryContext): Promise<AgentProviderNativeSessionDiscovery | null>
   /** Persisted conversation discovery is independent of a currently managed Run. */
@@ -221,7 +231,7 @@ export type AgentProvider = {
     assertCurrent(): Promise<void>
   }, request: AgentTerminalFrontendRecoveryRequest): Promise<AgentTerminalFrontendObservation>
   resolveLaunchArgv(selections: LaunchOptionSelection): string[]
-  planPromptInput(prompt: string, context?: { execution?: AgentPromptExecution }): AgentPromptInputPlan
+  planPromptInput(prompt: string, context?: { execution?: AgentPromptExecution; currentTerminal?: true }): AgentPromptInputPlan
   /** Provider owns native terminal decoding; unavailable refuses only this immediate operation. */
   inspectPromptExecution?(screen: AgentTerminalScreenSnapshot, strategy?: NonNullable<AgentCatalogEntry['capabilities']['promptExecution']>['immediate']): AgentPromptExecutionContext
   /** Complete current composer reason only; this observation never authorizes input. */
@@ -252,6 +262,7 @@ export type AgentProviderDefinition = {
   launchOptions?: readonly LaunchOptionDeclaration[]
   terminalHandshake?: AgentTerminalHandshake
   terminalPromptRender?: AgentTerminalPromptRenderMatcher
+  promptPayloadConsumption?: AgentProviderPromptPayloadConsumption
   discoverNativeSession?: (context: AgentProviderNativeSessionDiscoveryContext) => Promise<AgentProviderNativeSessionDiscovery | null>
   listNativeSessions?: AgentProvider['listNativeSessions']
   assertNativeResumeSource?: AgentProvider['assertNativeResumeSource']
@@ -281,7 +292,7 @@ export type AgentProviderDefinition = {
   prepareNativeInput?: AgentProvider['prepareNativeInput']
   observeTerminalFrontend?: AgentProvider['observeTerminalFrontend']
   reconnectTerminalFrontend?: AgentProvider['reconnectTerminalFrontend']
-  planPromptInput?: (prompt: string, context?: { execution?: AgentPromptExecution }) => AgentPromptInputPlan
+  planPromptInput?: (prompt: string, context?: { execution?: AgentPromptExecution; currentTerminal?: true }) => AgentPromptInputPlan
   inspectPromptExecution?: (screen: AgentTerminalScreenSnapshot, strategy?: NonNullable<AgentCatalogEntry['capabilities']['promptExecution']>['immediate']) => AgentPromptExecutionContext
   inspectPromptPreparationWait?: AgentProvider['inspectPromptPreparationWait']
   verifyPromptExecutionTransport?: (context: AgentProviderPromptExecutionContext) => Promise<boolean>
@@ -438,6 +449,14 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
   // 只探两个代表性 prompt（单行 / 多行）。一个「按 prompt 内容切换计划种类」的 Provider 本就不被这套
   // 机制支持——readiness 在不知道 prompt 内容时就已 arm——故这里假定计划种类对一个 Provider 稳定；
   // 两个探针里只要有一个与匹配器在场不一致就抛。
+  for (const probe of ['probe', 'probe\nsecond-line', 'p'.repeat(801)]) {
+    const plan = definition.planPromptInput?.(probe)
+    if (plan?.kind === 'payload-then-submit' && (!definition.promptPayloadConsumption ||
+        !plan.payload || !plan.payloadText || !plan.submit || !Number.isSafeInteger(plan.minimumSubmitDelayMs) ||
+        plan.minimumSubmitDelayMs < 0 || plan.minimumSubmitDelayMs > 10_000)) {
+      throw new AgentMuxError('Native payload phases require their native consumption contribution and bounded protocol interval.', 'INVALID_AGENT_PROVIDER')
+    }
+  }
   const producesRenderThenSubmit = (prompt: string): boolean =>
     (definition.planPromptInput?.(prompt) ?? { kind: 'single-phase' as const }).kind === 'render-then-submit'
   const hasRenderMatcher = Boolean(definition.terminalPromptRender)
@@ -487,6 +506,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.prepareManagedLaunch ? { prepareManagedLaunch: definition.prepareManagedLaunch } : {}),
     ...(definition.planQuestionReply ? { planQuestionReply: definition.planQuestionReply } : {}),
     ...(definition.prepareNativeInput ? { prepareNativeInput: definition.prepareNativeInput } : {}),
+    ...(definition.promptPayloadConsumption ? { promptPayloadConsumption: definition.promptPayloadConsumption } : {}),
     ...(definition.terminalHandshake ? { terminalHandshake: { ...definition.terminalHandshake } } : {}),
     ...(definition.terminalPromptRender ? { terminalPromptRender: { ...definition.terminalPromptRender } } : {}),
     ...(definition.inspectPromptExecution ? { inspectPromptExecution: definition.inspectPromptExecution } : {}),

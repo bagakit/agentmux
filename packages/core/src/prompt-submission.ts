@@ -225,6 +225,8 @@ type PromptSubmissionDeps = {
   screenEvidence: AgentScreenEvidenceStore
   requireAgentSession: (agentSessionId: string) => AgentMuxStoredAgentSession
   providerArgs?: (session: AgentMuxAgentSession, run: CtxmuxAdapterRun) => readonly string[]
+  providerCommand?: (session: AgentMuxAgentSession, run: CtxmuxAdapterRun) => string
+  providerExecutionEnvironment?: (session: AgentMuxAgentSession) => Promise<Readonly<Record<string, string | undefined>> | undefined>
   /** Under the original Session input lock, refuse another saved producer contract. */
   assertUncontrolledInput?: (key: AgentPromptInputKey) => Promise<void>
   withUncontrolledInputClaim?: (key: AgentPromptInputKey, claim: () => Promise<AgentMuxStoredAgentSession>, notificationId?: string) => Promise<AgentMuxStoredAgentSession>
@@ -1067,7 +1069,7 @@ export class AgentPromptSubmissionCoordinator {
       await publishSettledNotice(uncertainTurn)
       return
     }
-    if (!plan.payload || !plan.renderedText || !plan.submit) {
+    if (!plan.payload || !(plan.kind === 'render-then-submit' ? plan.renderedText : plan.payloadText) || !plan.submit) {
       throw new AgentMuxError(
         'Provider terminal prompt phases cannot be empty.',
         'INVALID_AGENT_PROVIDER'
@@ -1075,8 +1077,8 @@ export class AgentPromptSubmissionCoordinator {
     }
 
     const immediateStrategy = provider.catalog.capabilities.promptExecution?.immediate
-    if (currentTerminal ? Boolean(plan.prepare) : execution === 'default' ? Boolean(plan.prepare) :
-        !(plan.prepare && (immediateStrategy === 'interrupt-before-input' || rejoiningFrozenPlan))) {
+    if (plan.kind === 'render-then-submit' && (currentTerminal ? Boolean(plan.prepare) : execution === 'default' ? Boolean(plan.prepare) :
+        !(plan.prepare && (immediateStrategy === 'interrupt-before-input' || rejoiningFrozenPlan)))) {
       throw new AgentMuxError('Provider preparation does not match this single prompt execution authorization.', 'AGENT_PROMPT_OPERATION_CONFLICT')
     }
     const nativeContext: AgentProviderPromptExecutionContext = { args: this.deps.providerArgs?.(session, run) ?? run.args, workspacePath: session.workspacePath,
@@ -1085,6 +1087,26 @@ export class AgentPromptSubmissionCoordinator {
     if (session.nativePromptPredecessor?.run.runId === session.run.runId &&
       session.retiredRuns.at(-1)?.runId === session.nativePromptPredecessor.previousRun.runId) {
       Object.assign(nativeContext, { nativePromptPredecessor: session.nativePromptPredecessor })
+    }
+    let payloadConsumption: import('./types.js').AgentPromptPayloadConsumption | undefined
+    if (plan.kind === 'payload-then-submit') {
+      const saved = this.deps.requireAgentSession(session.agentSessionId), original = saved.terminalPromptSubmission
+      const rejoining = original?.submissionId === submissionId || saved.promptCompletionAdmission?.submissionId === submissionId
+      try {
+        const command = this.deps.providerCommand?.(session, run) ?? run.program
+        if (command !== null) nativeContext.command = command
+        const env = await this.deps.providerExecutionEnvironment?.(session)
+        if (env !== undefined) nativeContext.env = env
+        if (!provider.promptPayloadConsumption) throw new AgentMuxError('Provider omitted native payload consumption.', 'INVALID_AGENT_PROVIDER')
+        payloadConsumption = original?.submissionId === submissionId && sameRun(original.run, session.run)
+          ? original.payloadConsumption : await provider.promptPayloadConsumption.prepare(nativeContext, plan.payloadText)
+        if (!payloadConsumption?.sourceId || !payloadConsumption.baselineId) throw new AgentMuxError('The original native payload baseline is unavailable.', 'AGENT_PROMPT_PAYLOAD_CONSUMPTION_UNCONFIRMED')
+      } catch (error) {
+        // This read-only failure precedes this new operation's first claim/write.
+        // It must not reclassify any retained original claim or partial input.
+        if (!rejoining) throw promptPreparationFailure(error)
+        throw error
+      }
     }
     let preparation: NonNullable<AgentMuxAgentSession['terminalPromptSubmission']>['prepare']
     let preparationGeneration: number | undefined
@@ -1348,6 +1370,7 @@ export class AgentPromptSubmissionCoordinator {
           promptDigest,
           ...(readinessEvidence ? { readinessEvidence } : {}),
           outputCursorBytes,
+          ...(payloadConsumption ? { payloadConsumption } : {}),
           ...(preparation ? { prepare: { ...preparation,
             ...(interruptOperationId ? { interrupt: terminalPromptInputPhase(session.run.runId, intent.ownerInstanceId,
               interruptOperationId, expectedByte, plan.prepare!.interrupt) } : {}) } } : {}),
@@ -1585,7 +1608,9 @@ export class AgentPromptSubmissionCoordinator {
       await applyPhase('submit', plan.submit)
       return
     }
-    if (!currentTerminal) await this.confirmRenderOrDegrade(session, submissionId, submission, plan.renderedText, renderSignal, diagnostic)
+    if (plan.kind === 'payload-then-submit') {
+      await this.confirmPayloadConsumption(session, submissionId, submission, plan, nativeContext, renderSignal)
+    } else if (!currentTerminal) await this.confirmRenderOrDegrade(session, submissionId, submission, plan.renderedText, renderSignal, diagnostic)
     if (uncertainTurn) await this.publishDeliveryDegrade(session, {
       state: 'unverified', mode: 'degraded', reason: 'turn-end-unconfirmed',
       submissionId, run: { ...session.run }, observedAt: Date.now()
@@ -1851,6 +1876,62 @@ export class AgentPromptSubmissionCoordinator {
       }
     )
     this.deps.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+  }
+
+  /** The original native body receipt, followed by its declared input-protocol interval. */
+  private async confirmPayloadConsumption(session: AgentMuxAgentSession, submissionId: string,
+    submission: NonNullable<AgentMuxAgentSession['terminalPromptSubmission']>,
+    plan: Extract<AgentPromptInputPlan, { kind: 'payload-then-submit' }>,
+    context: AgentProviderPromptExecutionContext, signal?: AbortSignal): Promise<void> {
+    const contribution = this.deps.providers.get(session.providerId).promptPayloadConsumption!
+    let original: import('./types.js').AgentPromptPayloadConsumption = structuredClone(submission.payloadConsumption!)
+    const deadline = Date.now() + TERMINAL_PROMPT_RENDER_TIMEOUT_MS
+    try {
+      if (!submission.payloadConsumption) throw new AgentMuxError('The original native payload baseline is missing.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+      for (;;) {
+        signal?.throwIfAborted()
+        const current = this.deps.requireAgentSession(session.agentSessionId)
+        if (!sameRun(current.run, session.run) || current.terminalPromptSubmission?.submissionId !== submissionId ||
+            !isDeepStrictEqual(current.terminalPromptSubmission.payloadConsumption, submission.payloadConsumption)) {
+          throw new AgentMuxError('The original native payload claim changed.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+        }
+        const observed = await contribution.read({ ...context, ...(signal ? { signal } : {}) }, original, plan.payloadText)
+        if (observed && (!original.receipt || observed.receiptId === original.receipt.id)) {
+          const baseline = original
+          const receipt: { id: string; observedAt: number } = original.receipt ?? { id: observed.receiptId, observedAt: Date.now() }
+          if (!original.receipt) {
+            await this.deps.updateExactAgentSession(session.agentSessionId, session.run, stored => {
+              const state = stored.terminalPromptSubmission
+              if (state?.submissionId !== submissionId || !isDeepStrictEqual(state.payloadConsumption, original)) {
+                throw new AgentMuxError('The original native payload claim changed.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+              }
+              return { ...stored, terminalPromptSubmission: { ...state, payload: { ...state.payload, acknowledged: true },
+                payloadConsumption: { ...baseline, receipt } }, updatedAt: Math.max(stored.updatedAt, receipt.observedAt) }
+            })
+            submission = this.deps.requireAgentSession(session.agentSessionId).terminalPromptSubmission!
+            original = { ...baseline, receipt }
+          }
+          const remaining = receipt.observedAt + plan.minimumSubmitDelayMs - Date.now()
+          if (remaining <= 0) return
+          await observePromptInput(signal ?? new AbortController().signal, () => new Promise(resolve => setTimeout(resolve, remaining)))
+          continue // Recheck the same exact native receipt after the protocol interval.
+        }
+        if (Date.now() >= deadline) throw new AgentMuxError('Native payload consumption remains unconfirmed.', 'AGENT_PROMPT_PAYLOAD_CONSUMPTION_UNCONFIRMED')
+        await observePromptInput(signal ?? new AbortController().signal, () => new Promise(resolve => setTimeout(resolve, 25)))
+      }
+    } catch (error) {
+      // Reaching this observation proves the original payload Runtime ACK. Keep
+      // that applied prefix even when the independent native observation fails.
+      await this.deps.updateExactAgentSession(session.agentSessionId, session.run, stored => {
+        const state = stored.terminalPromptSubmission
+        if (state?.submissionId !== submissionId) return stored
+        return { ...stored, terminalPromptSubmission: { ...state, payload: { ...state.payload, acknowledged: true } }, updatedAt: Math.max(stored.updatedAt, Date.now()) }
+      })
+      await this.publishDeliveryDegrade(session, { state: 'unverified', mode: 'degraded', reason: 'input-unconfirmed',
+        submissionId, run: { ...session.run }, observedAt: Date.now() })
+      throw new AgentMuxError('The original payload and submission are kept. Native body consumption is unconfirmed; inspect the original input before continuing. The terminal remains available.',
+        'AGENT_PROMPT_PAYLOAD_CONSUMPTION_UNCONFIRMED', promptFailureCauseDetail(error), { disposition: 'unknown', confirmedInputBytes: submission.payload.inputByteRange.endByte - submission.payload.inputByteRange.startByte })
+    }
   }
 
   private async waitForRender(
