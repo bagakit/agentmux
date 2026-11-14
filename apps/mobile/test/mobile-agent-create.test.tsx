@@ -58,14 +58,17 @@ function setup(options: { launcher?: boolean; requireRetainedIntent?: boolean } 
     state = { ...state, spaceZoneBindings: { [target.zoneId]: { spaceId: target.spaceId, workspaceId: 'original-workspace', relations: { [target.spaceId]: false } } } }
   }, open: vi.fn(), props: { client, connected: true, visible: true, target: {}, platform: createBrowserPlatform(), onClose: vi.fn(), openSession: vi.fn() } }
 }
-async function select(label: string, value: string) {
-  const input = document.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!
+async function select(name: string, value: string) {
+  const input = document.querySelector<HTMLSelectElement>(`.mobile-agent-create select[name="${name}"]`)!
   await act(async () => { input.value = value; input.dispatchEvent(new Event('change', { bubbles: true })) })
 }
 async function choose(f: ReturnType<typeof setup>) {
-  await select('新 Agent 空间', f.catalog.spaces[0]!.spaceId)
-  await select('新 Agent Zone', f.catalog.zones[0]!.zoneId)
-  await select('新 Agent 执行器', 'original')
+  const space = document.querySelector<HTMLSelectElement>('.mobile-agent-create select[name="spaceId"]')!
+  expect(space.labels?.[0]?.htmlFor).toBe(space.id)
+  expect(document.getElementById(space.getAttribute('aria-labelledby')!)?.textContent).toBe('空间')
+  await select('spaceId', f.catalog.spaces[0]!.spaceId)
+  await select('zoneId', f.catalog.zones[0]!.zoneId)
+  await select('executorId', 'original')
 }
 it('connects Focus/Mote/Space and Topic entry points without creating an Agent during reading', async () => {
   const f = setup(), create = vi.fn()
@@ -125,12 +128,12 @@ it('does not qualify a new Host with a previous client discovery while its exact
   const view = await mount(<MobileAgentCreate {...f.props} />); await choose(f)
   next.client.forwardRpc = vi.fn((method: string) => method === 'space.ls' ? spaces.promise : executors.promise)
   await view.render(<MobileAgentCreate {...next.props} />)
-  expect(document.querySelector('[aria-label="新 Agent 执行器"]')?.textContent).not.toContain('Original Executor')
+  expect(document.querySelector('.mobile-agent-create [name="executorId"]')?.textContent).not.toContain('Original Executor')
   await click(button(document.body, '创建 Agent'))
   expect(next.client.forwardRpc).not.toHaveBeenCalledWith('agent.open', expect.anything())
   expect(getDeviceWorkface().snapshot().record.agentCreates ?? []).toHaveLength(0)
   await act(async () => { spaces.resolve({ catalog: next.catalog }); executors.resolve({ items: [{ id: 'original', value: { name: 'New Host Executor' } }] }); await spaces.promise; await executors.promise })
-  expect(document.querySelector('[aria-label="新 Agent 执行器"]')?.textContent).toContain('New Host Executor')
+  expect(document.querySelector('.mobile-agent-create [name="executorId"]')?.textContent).toContain('New Host Executor')
 })
 
 it('keeps another healthy Host creation independent of a pending original request and reconciles each original operation', async () => {
@@ -171,10 +174,10 @@ it('creates only at the selected original Launcher through the public codec and 
   expect(f.launch).not.toHaveBeenCalled()
   expect(document.body.textContent).toContain('Original empty workface')
   expect(document.body.textContent).toContain('在选定的启动位中创建 Agent')
-  expect(document.querySelector<HTMLSelectElement>('[aria-label="新 Agent 空间"]')?.disabled).toBe(true)
-  expect(document.querySelector<HTMLSelectElement>('[aria-label="新 Agent Zone"]')?.disabled).toBe(true)
-  expect(document.querySelector('[aria-label="新 Agent Zone"]')?.textContent).not.toContain(fixturePath('original'))
-  await select('新 Agent 执行器', 'original')
+  expect(document.querySelector<HTMLSelectElement>('.mobile-agent-create [name="spaceId"]')?.disabled).toBe(true)
+  expect(document.querySelector<HTMLSelectElement>('.mobile-agent-create [name="zoneId"]')?.disabled).toBe(true)
+  expect(document.querySelector('.mobile-agent-create [name="zoneId"]')?.textContent).not.toContain(fixturePath('original'))
+  await select('executorId', 'original')
   await click(button(document.body, '创建 Agent'))
   await act(async () => { await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.agentCreates?.at(-1)?.phase, document.body.textContent ?? '').toBe('confirmed')) })
   const intent = getDeviceWorkface().snapshot().record.agentCreates!.at(-1)!
@@ -188,7 +191,7 @@ it('creates only at the selected original Launcher through the public codec and 
 it.each(['occupy', 'remove', 'unbind'] as const)('does not reroute or launch when the original Launcher changes: %s', async change => {
   const f = setup({ launcher: true })
   await mount(<MobileAgentCreate {...f.props} target={f.target} />)
-  await select('新 Agent 执行器', 'original')
+  await select('executorId', 'original')
   f[change]()
   const original = structuredClone(f.state().tabs)
   await click(button(document.body, '创建 Agent'))
@@ -211,7 +214,7 @@ it('isolates old target receipts while another explicit target on the same healt
     return result
   }
   const view = await mount(<MobileAgentCreate {...f.props} target={f.target} />)
-  await select('新 Agent 执行器', 'original'); await click(button(document.body, '创建 Agent'))
+  await select('executorId', 'original'); await click(button(document.body, '创建 Agent'))
   await vi.waitFor(() => expect(f.launch).toHaveBeenCalledTimes(1))
   const first = getDeviceWorkface().snapshot().record.agentCreates!.at(-1)!
   await view.render(<MobileAgentCreate {...f.props} target={{ spaceId: f.target.spaceId, zoneId: f.target.zoneId }} />)
@@ -290,7 +293,7 @@ describe('Mobile recovery usability', () => {
     <UpdateAction /><MobileAgentCreate {...props} />
   </MobileWebUpdateSafetyProvider>
   async function instruction(value: string) {
-    const input = document.querySelector<HTMLTextAreaElement>('[aria-label="新 Agent 初始指令"]')!
+    const input = document.querySelector<HTMLTextAreaElement>('.mobile-agent-create [name="prompt"]')!
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, value)
       input.dispatchEvent(new Event('input', { bubbles: true }))
@@ -390,7 +393,7 @@ describe('Mobile recovery usability', () => {
     expect(f.rpc).not.toHaveBeenCalled()
     await view.render(<MobileAgentCreate {...f.props} />)
     expect(copied.length).toBeGreaterThan(0)
-    expect(document.querySelector('[aria-label="新 Agent 初始指令"]')).not.toBeNull()
+    expect(document.querySelector('.mobile-agent-create [name="prompt"]')).not.toBeNull()
   })
 
   it('offers original inspection before another creation and never resends it on inspection', async () => {

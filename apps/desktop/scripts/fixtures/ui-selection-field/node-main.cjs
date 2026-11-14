@@ -47,7 +47,7 @@ app.whenReady().then(async () => {
         await shot('node-keyboard-focus-420-dark.png', width, theme, 'keyboard-focus')
       }
       await click('.selection-field__menu [data-value="host-02"]')
-      await until(`document.querySelector(${JSON.stringify(pane + ' [aria-label="Node to manage"]')})?.dataset.value==='host-02'&&document.querySelector('[id^="node-to-manage-hint-"]')?.textContent.includes('Runtime controlled-bound-runtime')&&Boolean(document.querySelector('[aria-label="Node alias"]'))`)
+      await until(`document.querySelector(${JSON.stringify(pane + ' [aria-label="Node to manage"]')})?.dataset.value==='host-02'&&document.querySelector('[id^="node-to-manage-hint-"]')?.textContent.includes('Runtime controlled-bound-runtime')&&Boolean(document.querySelector('[name="alias"]'))`)
       await click(pane + ' [aria-label="Node to manage"]')
       await until('document.querySelector(".selection-field__menu")?.checkVisibility() === true')
       await press('Escape')
@@ -68,7 +68,7 @@ app.whenReady().then(async () => {
     await settle()
     await shot('node-missing-menu-420-dark.png', 420, 'dark', 'missing-menu')
     await click('.selection-field__menu [data-value="host-02"]')
-    await until('document.querySelector(\'[aria-label="Node to manage"]\')?.dataset.value === "host-02" && Boolean(document.querySelector(\'[aria-label="Node alias"]\'))')
+    await until('document.querySelector(\'[aria-label="Node to manage"]\')?.dataset.value === "host-02" && Boolean(document.querySelector(\'[name="alias"]\'))')
     await shot('node-missing-recovered-420-dark.png', 420, 'dark', 'missing-recovered')
 
     result.stage = 'identity-error'
@@ -77,13 +77,13 @@ app.whenReady().then(async () => {
     await read('window.connectionsProof.reopen("network-node", "local")')
     await until('document.body.innerText.includes("Controlled Node identity is unconfirmed")')
     await read('new Promise(resolve => setTimeout(resolve, 80))')
-    assert.equal(await read('Boolean(document.querySelector(\'[aria-label="Node alias"]\'))'), false, 'Identity failure does not substitute a local policy editor')
+    assert.equal(await read('Boolean(document.querySelector(\'[name="alias"]\'))'), false, 'Identity failure does not substitute a local policy editor')
     assert.equal(await read("document.evaluate('count(//button[text()=\"Refresh Node identity\" and not(@disabled)])', document, null, XPathResult.NUMBER_TYPE, null).numberValue > 0"), true, 'Identity recovery remains enabled')
     await shot('node-identity-error-420-dark.png', 420, 'dark', 'identity-error')
     result.stage = 'identity-recovery'
     await read('window.connectionsProof.nodeScenario("healthy")')
     await click('js:[...document.querySelectorAll("button")].find(node => node.textContent === "Refresh Node identity")')
-    await until('Boolean(document.querySelector(\'[aria-label="Node alias"]\'))', 'Identity recovery reaches the original editor')
+    await until('Boolean(document.querySelector(\'[name="alias"]\'))', 'Identity recovery reaches the original editor')
 
     result.stage = 'owner-error'
     await read('window.connectionsProof.reset()')
@@ -91,11 +91,11 @@ app.whenReady().then(async () => {
     await read('window.connectionsProof.reopen("network-node", "host-02")')
     await until('document.body.innerText.includes("Controlled Node owner read failed")')
     await until("document.evaluate('count(//button[text()=\"Refresh\" and not(@disabled)])', document, null, XPathResult.NUMBER_TYPE, null).numberValue > 0", 'Owner recovery becomes enabled after the busy transition')
-    assert.equal(await read('Boolean(document.querySelector(\'[aria-label="Node alias"]\'))'), false, 'Owner failure does not replace the original policy editor')
+    assert.equal(await read('Boolean(document.querySelector(\'[name="alias"]\'))'), false, 'Owner failure does not replace the original policy editor')
     await shot('node-owner-error-420-dark.png', 420, 'dark', 'owner-error')
     await read('window.connectionsProof.nodeScenario("healthy")')
     await click('js:[...document.querySelectorAll("button")].find(node => node.textContent === "Refresh")')
-    await until('Boolean(document.querySelector(\'[aria-label="Node alias"]\'))', 'Owner recovery reaches the original editor')
+    await until('Boolean(document.querySelector(\'[name="alias"]\'))', 'Owner recovery reaches the original editor')
 
     result.stage = 'connection-transport'
     await read('window.connectionsProof.reset()')

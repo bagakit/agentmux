@@ -530,8 +530,8 @@ app.whenReady().then(async () => {
     }
     await resize(390,844); await button('在此启动位新建 Agent', '.mobile-spatial-panel')
     await until('!!document.querySelector(".mobile-create-target")')
-    assert.equal(await read(`document.querySelector('[aria-label="新 Agent 空间"]').value`), "space-resources")
-    assert.equal(await read(`document.querySelector('[aria-label="新 Agent Zone"]').value`), "zone-resources")
+    assert.equal(await read(`document.querySelector('.mobile-agent-create [name="spaceId"]').value`), "space-resources")
+    assert.equal(await read(`document.querySelector('.mobile-agent-create [name="zoneId"]').value`), "zone-resources")
     await capture('spatial-launcher-phone'); await resize(320,760); await capture('spatial-launcher-narrow')
     await button('关闭新建 Agent', '[role=dialog]')
     assert.equal(await read('mobileProductScene.facts().calls.filter(call=>call.method==="agent.open").length'),0)

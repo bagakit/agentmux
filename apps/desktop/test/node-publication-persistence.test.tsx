@@ -51,25 +51,25 @@ if (phase) it('Node publication restart phase uses the original native user docu
   const container = document.createElement('div'); document.body.append(container)
   const root = createClientUiRoot(container)
   await act(async () => root.render(<NetworkNodeSettingsPane config={config} navigationRequest={{section:'network-node',hostId:'farm'}} active onClose={() => {}} onNavigate={() => {}} />))
-  for (let attempt = 0; attempt < 100 && !container.querySelector('[aria-label="Node alias"]'); attempt++) await act(async () => { await pause(10) })
-  expect(container.querySelector('[aria-label="Node alias"]'), container.textContent ?? '').not.toBeNull()
-  const input = async (label: string, value: string) => act(async () => {
-    const element = container.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[aria-label="${label}"]`)!
+  for (let attempt = 0; attempt < 100 && !container.querySelector('[name="alias"]'); attempt++) await act(async () => { await pause(10) })
+  expect(container.querySelector('[name="alias"]'), container.textContent ?? '').not.toBeNull()
+  const input = async (name: string, value: string) => act(async () => {
+    const element = container.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[name="${name}"]`)!
     const prototype = element.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
     Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(element, value); element.dispatchEvent(new Event('input', { bubbles: true }))
   })
   if (phase === 'write') {
-    await input('Node alias', 'original-draft')
+    await input('alias', 'original-draft')
     await act(async () => container.querySelector<HTMLButtonElement>('.network-node-save button')!.click())
     await vi.waitFor(() => expect(calls.filter(call => call.method === 'settings.node.configure')).toHaveLength(1))
     const pending = nodePublicationDraftForRuntime(useAppStore.getState().nodePublicationDrafts, runtimeId)?.pending
     expect(pending?.operationId).toBeTruthy()
     expect(pending?.phase).toBe('in-flight')
     expect(calls.filter(call => call.method === 'settings.node.configure')).toHaveLength(1)
-    await input('Node alias', 'later-draft')
-    await input('Shared folders', join(directory, 'published '))
-    await input('Excluded paths', join(directory, 'published ', 'private '))
-    await input('Default landing folder', join(directory, 'published '))
+    await input('alias', 'later-draft')
+    await input('allowedPaths', join(directory, 'published '))
+    await input('deniedPaths', join(directory, 'published ', 'private '))
+    await input('defaultPath', join(directory, 'published '))
     // No test checkpoint or graceful-exit flush: the original bounded writer owns custody.
     await pause(900)
     expect(user.observe().lastConfirmedWrite?.diskDurability).toBe('confirmed')
@@ -79,10 +79,10 @@ if (phase) it('Node publication restart phase uses the original native user docu
   } else {
     const before = JSON.parse(await readFile(join(directory, 'writer-ready.json'), 'utf8'))
     expect(process.pid).not.toBe(before.pid)
-    await vi.waitFor(() => expect(container.querySelector<HTMLInputElement>('[aria-label="Node alias"]')?.value).toBe('later-draft'))
-    expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Shared folders"]')?.value).toBe(join(directory, 'published '))
-    expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Excluded paths"]')?.value).toBe(join(directory, 'published ', 'private '))
-    expect(container.querySelector<HTMLInputElement>('[aria-label="Default landing folder"]')?.value).toBe(join(directory, 'published '))
+    await vi.waitFor(() => expect(container.querySelector<HTMLInputElement>('[name="alias"]')?.value).toBe('later-draft'))
+    expect(container.querySelector<HTMLTextAreaElement>('[name="allowedPaths"]')?.value).toBe(join(directory, 'published '))
+    expect(container.querySelector<HTMLTextAreaElement>('[name="deniedPaths"]')?.value).toBe(join(directory, 'published ', 'private '))
+    expect(container.querySelector<HTMLInputElement>('[name="defaultPath"]')?.value).toBe(join(directory, 'published '))
     await vi.waitFor(() => expect(calls.some(call => call.method === 'settings.node.inspect' && (call.input as { operationId?: string }).operationId === before.operationId)).toBe(true))
     expect(calls.filter(call => call.method === 'settings.node.configure')).toHaveLength(0)
     expect((await node.call('settings.node.inspect', {})).policy).toEqual(before.originalPolicy)

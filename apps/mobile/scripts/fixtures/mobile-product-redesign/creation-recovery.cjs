@@ -6,7 +6,7 @@ module.exports = async ({ read, until, resize, tap, button, capture, result }) =
   await button('Space', '.mobile-navigation')
   await button('资料工作区', '.mobile-spatial-panel')
   await button('在此启动位新建 Agent', '.mobile-spatial-panel')
-  await until(`document.querySelector('.mobile-create-receipt[data-pending]') && document.querySelector('select[aria-label="新 Agent 执行器"] option[value="fixture-original"]')`)
+  await until(`document.querySelector('.mobile-create-receipt[data-pending]') && document.querySelector('.mobile-agent-create select[name="executorId"] option[value="fixture-original"]')`)
   const facts = () => read(`(()=>{const card=document.querySelector('.mobile-create-receipt[data-pending]'),inspect=card.querySelector('.mobile-create-recovery-actions button'),create=[...document.querySelectorAll('.mobile-agent-create button')].find(node=>node.textContent.startsWith('另建 Agent')),dialog=document.querySelector('.mobile-agent-create'),close=dialog.querySelector('[aria-label="关闭新建 Agent"]');return {summary:card.textContent,inspect:{label:inspect.textContent,primary:inspect.classList.contains('mobile-primary'),rect:inspect.getBoundingClientRect().toJSON()},create:{label:create.textContent,primary:create.classList.contains('mobile-primary'),enabled:!create.disabled},precedes:!!(card.compareDocumentPosition(dialog.querySelector('label'))&Node.DOCUMENT_POSITION_FOLLOWING),close:close.getBoundingClientRect().toJSON(),horizontalOverflow:dialog.scrollWidth>dialog.clientWidth}})()`)
   for (const [width, height, name] of [[390, 844, 'creation-recovery-phone'], [320, 660, 'creation-recovery-narrow']]) {
     await resize(width, height)

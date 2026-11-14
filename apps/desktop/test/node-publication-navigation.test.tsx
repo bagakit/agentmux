@@ -13,10 +13,10 @@ const identity=(id='local')=>({runtimeId:id+'-runtime',ownerInstanceId:id+'-inst
 const settings=(published=false,id='local'):NodeSettings=>({node:identity(id),policyRevision:'revision',operation:null,policy:{alias:id+'-node',shareResources:published,allowedPaths:[],deniedPaths:[],defaultPath:null}})
 const publication=(published=false,id='local'):NodePublication=>({node:identity(id),policyRevision:'revision',resourcesShared:published,roots:[],landing:null})
 const icon=()=>dom.container.querySelector<HTMLElement>('[data-settings-target="network-node"] [data-node-publication]')!
-async function input(value:string){await act(async()=>{const n=dom.container.querySelector<HTMLInputElement>('[aria-label="Node alias"]')!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(n,value);n.dispatchEvent(new Event('input',{bubbles:true}))})}
-async function paths(label:string,value:string){await act(async()=>{const n=dom.container.querySelector<HTMLTextAreaElement>(`[aria-label="${label}"]`)!;Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(n,value);n.dispatchEvent(new Event('input',{bubbles:true}))})}
+async function input(value:string){await act(async()=>{const n=dom.container.querySelector<HTMLInputElement>('[name="alias"]')!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(n,value);n.dispatchEvent(new Event('input',{bubbles:true}))})}
+async function paths(name:string,value:string){await act(async()=>{const n=dom.container.querySelector<HTMLTextAreaElement>(`[name="${name}"]`)!;Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(n,value);n.dispatchEvent(new Event('input',{bubbles:true}))})}
 async function choose(value:string){const field=dom.container.querySelector<HTMLElement>('[aria-label="Node to manage"]')!;expect(field).not.toBeNull();await chooseField(field,value)}
-async function ready(){await vi.waitFor(()=>expect(dom.container.querySelector('[aria-label="Node alias"]')).not.toBeNull())}
+async function ready(){await vi.waitFor(()=>expect(dom.container.querySelector('[name="alias"]')).not.toBeNull())}
 function leaves(published=false){const read=vi.spyOn(api.nodePublishing,'call').mockResolvedValue(publication(published) as never),owner=vi.spyOn(api.nodePublishing,'owner').mockResolvedValue(settings(published) as never);return{read,owner}}
 it('the real Settings sidebar and Overview share one publication read, accessible current facts and the authored semantic family',async()=>{
  const{read}=leaves(true);await dom.render(<SettingsPanel initialSection="overview" onClose={vi.fn()}/>)
@@ -41,7 +41,7 @@ it('drafts and selection do not enable publication; an unconfirmed save is unkno
  owner.mockImplementation(async(_target,method,input)=>{if(method==='settings.node.configure'){current={...settings(true),operation:{operationId:(input as{operationId:string}).operationId,expectedRevision:'revision',revision:'revision-next',status:'unknown',updatedAt:2}};return current as never}return current as never})
  await dom.render(<SettingsPanel initialSection="network-node" onClose={vi.fn()}/>);await ready();expect(icon().dataset.nodePublication).toBe('private')
  expect(dom.container.querySelector('[data-settings-field="incoming"]')).toBeNull()
- await act(async()=>dom.container.querySelector<HTMLInputElement>('[aria-label="Share system resources"]')!.click());await input('edited-alias')
+ await act(async()=>dom.container.querySelector<HTMLInputElement>('[name="shareResources"]')!.click());await input('edited-alias')
  expect(icon().dataset.nodePublication).toBe('private');expect(icon().querySelector('[data-icon-animation="stream"]')).toBeNull();expect(read).toHaveBeenCalledTimes(1)
  await dom.click('.network-node-save button');expect(icon().dataset.nodePublication).toBe('unknown');expect(icon().getAttribute('aria-label')).toContain('Last confirmed private');expect(icon().querySelector('[data-icon-animation="stream"]')).toBeNull()
  await dom.click('[data-settings-field="publishing"] > header button')
@@ -65,7 +65,7 @@ it('a missing saved Host keeps its raw identity and never substitutes local poli
  expect(trigger.getAttribute('aria-labelledby')).toContain('node-to-manage-label');expect(trigger.getAttribute('aria-describedby')).toContain('node-to-manage-hint')
  const hintId=trigger.getAttribute('aria-describedby')!.split(/\s+/).find(id=>id.startsWith('node-to-manage-hint-'))!
  expect(document.getElementById(hintId)?.textContent).toContain('no replacement target is selected automatically')
- expect(dom.container.querySelector('[aria-label="Node alias"]')).toBeNull();expect(read).not.toHaveBeenCalled();expect(owner).not.toHaveBeenCalled()
+ expect(dom.container.querySelector('[name="alias"]')).toBeNull();expect(read).not.toHaveBeenCalled();expect(owner).not.toHaveBeenCalled()
  await choose('local');await ready();expect(trigger.dataset.value).toBe('local');expect(owner).toHaveBeenCalled()
 })
 it('Node menus distinguish duplicate Host labels by stable ID',async()=>{
@@ -100,7 +100,7 @@ it('the editor uses actual published folders, and a metadata failure never close
  expect(read).toHaveBeenLastCalledWith('node.inspect',{hostId:'local',expectedRuntimeId:'local-runtime'},expect.any(AbortSignal))
  read.mockRejectedValue(Error('Publication metadata unavailable'))
  await dom.click('[data-settings-field="publishing"] > header button');await vi.waitFor(()=>expect(icon().dataset.nodePublication).toBe('unknown'))
- expect(dom.container.querySelector('[aria-label="Node alias"]')).not.toBeNull();expect(dom.container.querySelector('.network-node-feedback')).toBeNull()
+ expect(dom.container.querySelector('[name="alias"]')).not.toBeNull();expect(dom.container.querySelector('.network-node-feedback')).toBeNull()
  await input('healthy-owner-edit');expect(dom.container.querySelector<HTMLButtonElement>('.network-node-save button')!.disabled).toBe(false)
 })
 it('a metadata read from before a save cannot overwrite that newer unconfirmed publication',async()=>{
@@ -111,14 +111,14 @@ it('a metadata read from before a save cannot overwrite that newer unconfirmed p
  const original={...settings(false,'farm'),policy:{...settings(false,'farm').policy,allowedPaths:['/root']}}
  owner.mockImplementation(async(_target,method,value)=>method==='settings.node.configure'?{...original,policy:{...original.policy,deniedPaths:['/root']},operation:{operationId:(value as{operationId:string}).operationId,expectedRevision:'revision',revision:'next',status:'unknown',updatedAt:2}} as never:original as never)
  await dom.render(<SettingsPanel initialSection="network-node" navigationRequest={{section:'network-node',hostId:'farm'}} onClose={vi.fn()}/>);await ready();await vi.waitFor(()=>expect(finish).toBeTypeOf('function'))
- await paths('Excluded paths','/root');await dom.click('.network-node-save button');expect(signal.aborted).toBe(true)
+ await paths('deniedPaths','/root');await dom.click('.network-node-save button');expect(signal.aborted).toBe(true)
  await act(async()=>finish({...publication(false,'farm'),roots:[{root:{runtimeId:'farm-runtime',rootId:'root',policyRevision:'revision'},label:'root'}]}))
  expect(icon().dataset.nodePublication).toBe('unknown');expect(icon().querySelector('[data-icon-animation="stream"]')).toBeNull()
 })
 it('a save completing after the Node becomes hidden cannot start a decorative folder read',async()=>{
  const{read,owner}=leaves(false);let finish!:(value:NodeSettings)=>void,operationId=''
  owner.mockImplementation(async(_target,method,input)=>{if(method==='settings.node.configure'){operationId=(input as{operationId:string}).operationId;return await new Promise<NodeSettings>(done=>{finish=done}) as never}return settings(false) as never})
- await dom.render(<SettingsPanel initialSection="network-node" onClose={vi.fn()}/>);await ready();await paths('Shared folders','/root');await dom.click('.network-node-save button');await vi.waitFor(()=>expect(finish).toBeTypeOf('function'))
+ await dom.render(<SettingsPanel initialSection="network-node" onClose={vi.fn()}/>);await ready();await paths('allowedPaths','/root');await dom.click('.network-node-save button');await vi.waitFor(()=>expect(finish).toBeTypeOf('function'))
  await dom.render(<SettingsPanel initialSection="network-node" visible={false} onClose={vi.fn()}/>)
  await act(async()=>finish({...settings(false),policy:{...settings(false).policy,allowedPaths:['/root']},operation:{operationId,expectedRevision:'revision',revision:'next',status:'confirmed',updatedAt:2}}))
  expect(read).toHaveBeenCalledTimes(1);expect(dom.container.querySelector('[data-icon-animation="stream"]')).toBeNull()

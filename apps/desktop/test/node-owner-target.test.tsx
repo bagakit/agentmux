@@ -41,9 +41,9 @@ const dom=composerDOM()
 let dispose:(()=>void)|undefined
 beforeAll(async()=>{dispose=await useAppStore.getState().initialize()})
 afterAll(()=>dispose?.())
-async function input(value:string){await act(async()=>{const n=dom.container.querySelector<HTMLInputElement>('[aria-label="Node alias"]')!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(n,value);n.dispatchEvent(new Event('input',{bubbles:true}))})}
+async function input(value:string){await act(async()=>{const n=dom.container.querySelector<HTMLInputElement>('[name="alias"]')!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(n,value);n.dispatchEvent(new Event('input',{bubbles:true}))})}
 async function choose(hostId:string){const field=dom.container.querySelector<HTMLElement>('[aria-label="Node to manage"]')!;expect(field).not.toBeNull();await chooseField(field,hostId)}
-async function alias(value:string){await vi.waitFor(()=>expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Node alias"]')?.value,dom.container.textContent??'').toBe(value))}
+async function alias(value:string){await vi.waitFor(()=>expect(dom.container.querySelector<HTMLInputElement>('[name="alias"]')?.value,dom.container.textContent??'').toBe(value))}
 const props=()=>({config:useAppStore.getState().config!,active:true,onClose:vi.fn(),onNavigate:vi.fn()})
 async function fixture(actor?: 'managed'){
  const root=await mkdtemp('/tmp/node-target-'),cores:CoreRecord[]=[]
@@ -112,7 +112,7 @@ it.each(['confirmed','unknown','route-changed'] as const)('switching Nodes prese
   await input('later-farm');await choose('local');await alias('');await input('local-later')
   if(outcome==='route-changed')f.routes.set('farm',{client:{...farm.carrier,forwardRpc:forward}})
   await act(async()=>{if(outcome==='unknown')reject(Error('Original reply lost after Core applied it'));else finish()})
-  expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Node alias"]')?.value).toBe('local-later')
+  expect(dom.container.querySelector<HTMLInputElement>('[name="alias"]')?.value).toBe('local-later')
   const retained=nodePublicationDraftForRuntime(useAppStore.getState().nodePublicationDrafts,'farm-runtime')!
   expect(retained.draft.alias).toBe('later-farm');expect(retained.pending?.operationId).toBe(outcome==='confirmed'?undefined:op)
   expect((await f.cores[0]!.owner.call('settings.node.inspect',{})).policy.alias).toBe('')
@@ -125,7 +125,7 @@ it.each(['confirmed','unknown','route-changed'] as const)('switching Nodes prese
 it('an unavailable saved Node stays selected and never substitutes a local policy or listener',async()=>{
  const f=await fixture(),farm=f.cores[1]!
  farm.carrier.forwardRpc=async()=>{throw Object.assign(Error('Original Core has no Node owner interface. Upgrade this saved Host and refresh.'),{code:'RPC_METHOD_NOT_FOUND'})}
- try{await dom.render(<NetworkNodeSettingsPane {...props()} navigationRequest={{section:'network-node',hostId:'farm'}}/>);await vi.waitFor(()=>expect(dom.container.textContent).toContain('Original Core has no Node owner interface'));expect(dom.container.querySelector('[aria-label="Node alias"]')).toBeNull();expect(dom.container.querySelector('[data-settings-field="incoming"]')).toBeNull();expect(dom.container.querySelector<HTMLElement>('[aria-label="Node to manage"]')?.dataset.value).toBe('farm');expect(f.cores[0]!.calls).toHaveLength(0)}finally{await f.dispose()}
+ try{await dom.render(<NetworkNodeSettingsPane {...props()} navigationRequest={{section:'network-node',hostId:'farm'}}/>);await vi.waitFor(()=>expect(dom.container.textContent).toContain('Original Core has no Node owner interface'));expect(dom.container.querySelector('[name="alias"]')).toBeNull();expect(dom.container.querySelector('[data-settings-field="incoming"]')).toBeNull();expect(dom.container.querySelector<HTMLElement>('[aria-label="Node to manage"]')?.dataset.value).toBe('farm');expect(f.cores[0]!.calls).toHaveLength(0)}finally{await f.dispose()}
 })
 
 it.each(['Node editor','Host panel'] as const)('independent Host diagnostics failure cannot close an available %s or owner resource reader',async surface=>{

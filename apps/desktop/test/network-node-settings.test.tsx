@@ -20,8 +20,8 @@ const settings:NodeSettings={node:identity,policyRevision:'policy-1',policy:{ali
 const available=<T,>(value:T)=>({state:'available' as const,value})
 function sample(at=1000):NodeResourceSample{return {node:identity,policyRevision:'policy-1',processId:123,observedAt:at,system:available({platform:'darwin',architecture:'arm64',uptimeSeconds:3600}),cpu:available({logicalCpus:4,userMs:at,systemMs:0,niceMs:0,irqMs:0,idleMs:at*3,loadAverage:[0,0,0]}),memory:available({totalBytes:8*1024**3,freeBytes:2*1024**3}),filesystem:available({root:null,totalBytes:100*1024**3,availableBytes:40*1024**3}),process:available({cpuUserMicros:at*100,cpuSystemMicros:0,rssBytes:128*1024**2,heapUsedBytes:1,heapTotalBytes:2,externalBytes:0,uptimeSeconds:10})}}
 function resources(at=1000):NodeResources{return{node:identity,policyRevision:'policy-1',status:'available',sample:sample(at)}}
-async function readyNode(){for(let i=0;i<100&&!dom.container.querySelector('[aria-label="Node alias"]');i++)await act(async()=>{await new Promise(done=>setTimeout(done,10))});expect(dom.container.querySelector('[aria-label="Node alias"]'),dom.container.textContent??'').not.toBeNull()}
-async function input(label:string,value:string){await act(async()=>{const element=dom.container.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(element,value);element.dispatchEvent(new Event('input',{bubbles:true}))})}
+async function readyNode(){for(let i=0;i<100&&!dom.container.querySelector('[name="alias"]');i++)await act(async()=>{await new Promise(done=>setTimeout(done,10))});expect(dom.container.querySelector('[name="alias"]'),dom.container.textContent??'').not.toBeNull()}
+async function input(name:string,value:string){await act(async()=>{const element=dom.container.querySelector<HTMLInputElement>(`[name="${name}"]`)!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(element,value);element.dispatchEvent(new Event('input',{bubbles:true}))})}
 const props=()=>({config:useAppStore.getState().config!,active:true,onClose:vi.fn(),onNavigate:vi.fn()})
 let disposeStore: (() => void) | undefined
 beforeAll(async()=>{disposeStore=await useAppStore.getState().initialize()})
@@ -36,7 +36,7 @@ afterEach(()=>{vi.useRealTimers();for(const value of Object.values(engine))value
 it('Node addresses copy only confirmed aliases and exact Runtime identity, independently of unsaved drafts or Host labels',async()=>{
  const copy=vi.spyOn(api.ui,'writeClipboardText').mockResolvedValue(undefined)
  const call=vi.spyOn(nodeCall,'call').mockResolvedValue(structuredClone(settings) as never)
- await dom.render(<NetworkNodeSettingsPane {...props()}/>);await input('Node alias','unsaved-alias')
+ await dom.render(<NetworkNodeSettingsPane {...props()}/>);await input('alias','unsaved-alias')
  await dom.click('[aria-label="Copy Node address"]')
  expect(copy).toHaveBeenLastCalledWith('amux://host/work-mac?runtime=node-original')
  expect(dom.container.querySelector('.node-share-address')?.textContent).toContain('Copied')
@@ -48,29 +48,29 @@ it('Node addresses copy only confirmed aliases and exact Runtime identity, indep
  expect(copy).toHaveBeenLastCalledWith('amux://host/observed-remote?runtime=remote-original')
  expect(call.mock.calls.filter(row=>row[0]!=='settings.node.inspect'&&row[0]!=='node.inspect')).toHaveLength(0)
  call.mockResolvedValue({...settings,node:{...identity,alias:''},policy:{...settings.policy,alias:''}} as never)
- await dom.render(<NetworkNodeSettingsPane key="without-published-alias" {...props()}/>);await input('Node alias','not-yet-published')
+ await dom.render(<NetworkNodeSettingsPane key="without-published-alias" {...props()}/>);await input('alias','not-yet-published')
  expect(dom.container.querySelector('[aria-label="Copy Node address"]')).toBeNull()
 })
 it('actual Node editor preserves a later publication draft without owning listener or other Host configuration',async()=>{
  let finish!:(value:NodeSettings)=>void
  const call=vi.spyOn(nodeCall,'call').mockImplementation(async(method,input)=>{if(method==='settings.node.configure')return await new Promise<NodeSettings>(done=>{finish=done}) as never;return structuredClone(settings) as never})
- await dom.render(<NetworkNodeSettingsPane {...props()}/>);await input('Node alias','my-node')
+ await dom.render(<NetworkNodeSettingsPane {...props()}/>);await input('alias','my-node')
  expect(dom.container.querySelector('[data-settings-field="incoming"]')).toBeNull()
  await dom.click('.network-node-save button');expect(call.mock.calls.find(row=>row[0]==='settings.node.configure')?.[1]).toMatchObject({expectedRevision:'policy-1',policy:{alias:'my-node'}})
- await input('Node alias','later-edit')
+ await input('alias','later-edit')
  await act(async()=>finish({...settings,node:{...settings.node,alias:'my-node'},policyRevision:'policy-2',policy:{...settings.policy,alias:'my-node'},operation:{operationId:(call.mock.calls.find(row=>row[0]==='settings.node.configure')![1] as {operationId:string}).operationId,expectedRevision:'policy-1',revision:'policy-2',status:'confirmed',updatedAt:2}}))
- expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Node alias"]')!.value).toBe('later-edit')
+ expect(dom.container.querySelector<HTMLInputElement>('[name="alias"]')!.value).toBe('later-edit')
  expect(dom.container.textContent).toContain('Publication: unsaved changes')
  const configSave=vi.spyOn(api.hosts,'configureTailcat').mockResolvedValue({} as never)
  const before=useAppStore.getState().config!,other={id:'peer',kind:'ssh' as const,label:'A newer peer',hostname:'peer.invalid'}
  useAppStore.setState({config:{...before,hosts:[...before.hosts,other]}})
  expect(configSave).not.toHaveBeenCalled()
  expect(useAppStore.getState().config!.hosts).toContainEqual(other)
- expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Node alias"]')!.value).toBe('later-edit')
+ expect(dom.container.querySelector<HTMLInputElement>('[name="alias"]')!.value).toBe('later-edit')
 })
 it('a lost publication reply retains its original operation and only inspects it instead of repeating the save',async()=>{
  const call=vi.spyOn(nodeCall,'call').mockImplementation(async method=>{if(method==='settings.node.configure')throw Error('reply lost');return structuredClone(settings) as never})
- await dom.render(<NetworkNodeSettingsPane {...props()}/>);await input('Node alias','another-node');await dom.click('.network-node-save button')
+ await dom.render(<NetworkNodeSettingsPane {...props()}/>);await input('alias','another-node');await dom.click('.network-node-save button')
  expect(dom.container.textContent).toContain('Publication save was not confirmed')
  const button=[...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(n=>n.textContent==='Inspect original save')!;await act(async()=>button.click())
  expect(call.mock.calls.filter(row=>row[0]==='settings.node.configure')).toHaveLength(1)
@@ -82,7 +82,7 @@ it('a lost publication reply retains its original operation and only inspects it
 it('remounting while the original configure is in flight cannot clear its operation from an earlier not-recorded observation',async()=>{
  let reject!:(cause:unknown)=>void
  const call=vi.spyOn(nodeCall,'call').mockImplementation(async method=>method==='settings.node.configure'?await new Promise<never>((_done,no)=>{reject=no}):structuredClone(settings) as never)
- await dom.render(<NetworkNodeSettingsPane key="original-producer" {...props()}/>);await input('Node alias','pending-original');await dom.click('.network-node-save button')
+ await dom.render(<NetworkNodeSettingsPane key="original-producer" {...props()}/>);await input('alias','pending-original');await dom.click('.network-node-save button')
  const retained=useAppStore.getState().nodePublicationDrafts as Record<string,{pending:{operationId:string}}>
  const operationId=retained[identity.runtimeId]!.pending.operationId
  try{
@@ -95,15 +95,15 @@ it('a replacement Node pane observes the original confirmed save after its depar
  let current=structuredClone(settings),finish!:(value:NodeSettings)=>void
  const copy=vi.spyOn(api.ui,'writeClipboardText').mockResolvedValue(undefined)
  const call=vi.spyOn(nodeCall,'call').mockImplementation(async method=>method==='settings.node.configure'?await new Promise<NodeSettings>(done=>{finish=done}):structuredClone(current) as never)
- await dom.render(<NetworkNodeSettingsPane key="departing-producer" {...props()}/>);await input('Node alias','confirmed-node')
- await act(async()=>dom.container.querySelector<HTMLInputElement>('[aria-label="Share system resources"]')!.click());await dom.click('.network-node-save button')
+ await dom.render(<NetworkNodeSettingsPane key="departing-producer" {...props()}/>);await input('alias','confirmed-node')
+ await act(async()=>dom.container.querySelector<HTMLInputElement>('[name="shareResources"]')!.click());await dom.click('.network-node-save button')
  const request=call.mock.calls.find(row=>row[0]==='settings.node.configure')![1] as {operationId:string}
  await dom.render(<NetworkNodeSettingsPane key="replacement-observer" {...props()}/>)
- expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Node alias"]')!.value).toBe('confirmed-node')
+ expect(dom.container.querySelector<HTMLInputElement>('[name="alias"]')!.value).toBe('confirmed-node')
  current={...settings,node:{...identity,alias:'confirmed-node'},policyRevision:'policy-2',policy:{...settings.policy,alias:'confirmed-node',shareResources:true},operation:{operationId:request.operationId,expectedRevision:'policy-1',revision:'policy-2',status:'confirmed',updatedAt:2}}
  await act(async()=>finish(current))
- await vi.waitFor(()=>expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Share system resources"]')!.checked).toBe(true))
- expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Node alias"]')!.value).toBe('confirmed-node');expect(dom.container.textContent).toContain('Publication saved')
+ await vi.waitFor(()=>expect(dom.container.querySelector<HTMLInputElement>('[name="shareResources"]')!.checked).toBe(true))
+ expect(dom.container.querySelector<HTMLInputElement>('[name="alias"]')!.value).toBe('confirmed-node');expect(dom.container.textContent).toContain('Publication saved')
  await dom.click('[aria-label="Copy Node address"]');expect(copy).toHaveBeenLastCalledWith('amux://host/confirmed-node?runtime=node-original')
  expect(call.mock.calls.filter(row=>row[0]==='settings.node.configure')).toHaveLength(1)
 })
@@ -114,20 +114,20 @@ it('a producer confirmed before the replacement initial read returns still refre
   if(holdInitial&&!(input as {operationId?:string}).operationId){holdInitial=false;return await new Promise<NodeSettings>(done=>{initial=done}) as never}
   return structuredClone(current) as never
  })
- await dom.render(<NetworkNodeSettingsPane key="old-producer" {...props()}/>);await input('Node alias','arrived-first');await dom.click('.network-node-save button')
+ await dom.render(<NetworkNodeSettingsPane key="old-producer" {...props()}/>);await input('alias','arrived-first');await dom.click('.network-node-save button')
  const request=call.mock.calls.find(row=>row[0]==='settings.node.configure')![1] as {operationId:string}
  holdInitial=true;await dom.render(<NetworkNodeSettingsPane key="delayed-initial-observer" {...props()}/>)
  current={...settings,node:{...identity,alias:'arrived-first'},policyRevision:'policy-2',policy:{...settings.policy,alias:'arrived-first',shareResources:true},operation:{operationId:request.operationId,expectedRevision:'policy-1',revision:'policy-2',status:'confirmed',updatedAt:2}}
  await act(async()=>finish(current));await act(async()=>initial(structuredClone(settings)))
- await vi.waitFor(()=>expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Node alias"]')?.value).toBe('arrived-first'))
- expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Share system resources"]')!.checked).toBe(true)
+ await vi.waitFor(()=>expect(dom.container.querySelector<HTMLInputElement>('[name="alias"]')?.value).toBe('arrived-first'))
+ expect(dom.container.querySelector<HTMLInputElement>('[name="shareResources"]')!.checked).toBe(true)
  expect(call.mock.calls.filter(row=>row[0]==='settings.node.configure')).toHaveLength(1)
 })
 it('an edit for another original Runtime is retained without applying or saving it on this Core',async()=>{
  const foreign={baseline:{node:{...identity,runtimeId:'other-runtime'},policyRevision:'foreign-revision',policy:settings.policy},draft:{...settings.policy,alias:'foreign-draft'}}
  useAppStore.setState({nodePublicationDrafts:{'other-runtime':foreign}})
  const call=vi.spyOn(nodeCall,'call').mockResolvedValue(structuredClone(settings) as never)
- await dom.render(<NetworkNodeSettingsPane {...props()}/>);expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Node alias"]')!.value).toBe('work-mac')
+ await dom.render(<NetworkNodeSettingsPane {...props()}/>);expect(dom.container.querySelector<HTMLInputElement>('[name="alias"]')!.value).toBe('work-mac')
  expect(useAppStore.getState().nodePublicationDrafts).toEqual({'other-runtime':foreign});expect(call).toHaveBeenCalledTimes(2)
 })
 it.each(['superseded-confirmation','same-value-revision','unrecorded-returned-to-baseline'] as const)('the real Core %s requires saved-publication review before advancing the edited CAS baseline',async scenario=>{
@@ -141,16 +141,16 @@ it.each(['superseded-confirmation','same-value-revision','unrecorded-returned-to
   vi.spyOn(api.hosts,'inspect').mockResolvedValue({routeHostId:'local',owner:{state:'available',value:first.node}} as never)
   await dom.render(<NetworkNodeSettingsPane {...props()}/>);await readyNode()
   if(scenario!=='same-value-revision'){
-   await input('Node alias','first-save');await dom.click('.network-node-save button');await vi.waitFor(()=>expect(dom.container.textContent).toContain('Publication save was not confirmed'))
+   await input('alias','first-save');await dom.click('.network-node-save button');await vi.waitFor(()=>expect(dom.container.textContent).toContain('Publication save was not confirmed'))
   }
   const draftAlias=scenario==='unrecorded-returned-to-baseline'?'base-node':'later-draft'
-  await input('Node alias',draftAlias)
+  await input('alias',draftAlias)
   const before=await owner.call('settings.node.inspect',{}),changed=await owner.call('settings.node.configure',{operationId:'another-owner-revision',expectedRevision:before.policyRevision,policy:scenario!=='same-value-revision'?{...before.policy,alias:'other-owner',allowedPaths:[],defaultPath:null}:before.policy})
   const read=[...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent===(scenario!=='same-value-revision'?'Inspect original save':'Refresh'))!
   await act(async()=>read.click());await vi.waitFor(()=>expect(dom.container.querySelector('[data-publication-review]')).not.toBeNull())
   const retained=nodePublicationDraftForRuntime(useAppStore.getState().nodePublicationDrafts,first.node.runtimeId)!
   expect(retained.baseline.policyRevision).toBe(first.policyRevision);expect(retained.pending).toBeUndefined()
-  expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Node alias"]')!.value).toBe(draftAlias)
+  expect(dom.container.querySelector<HTMLInputElement>('[name="alias"]')!.value).toBe(draftAlias)
   expect(dom.container.querySelector<HTMLButtonElement>('.network-node-save button')!.disabled).toBe(true)
   expect(call.mock.calls.filter(row=>row[0]==='settings.node.configure')).toHaveLength(scenario!=='same-value-revision'?1:0)
   const details=dom.container.querySelector<HTMLDetailsElement>('[data-publication-review]')!;await act(async()=>{details.open=true;details.dispatchEvent(new Event('toggle'))})
@@ -165,11 +165,11 @@ it.each(['superseded-confirmation','same-value-revision','unrecorded-returned-to
 })
 it('a failed original local checkpoint retains the edit and operation, reports not sent and leaves the healthy Agent usable',async()=>{
  const call=vi.spyOn(nodeCall,'call').mockResolvedValue(structuredClone(settings) as never),stop=vi.spyOn(api.sessions,'stop')
- await dom.render(<NetworkNodeSettingsPane {...props()}/>);await input('Node alias','keep-local-edit')
+ await dom.render(<NetworkNodeSettingsPane {...props()}/>);await input('alias','keep-local-edit')
  const write=vi.spyOn(window.localStorage,'setItem').mockImplementation(()=>{throw Error('Original local writer unavailable')})
  await dom.click('.network-node-save button')
  expect(dom.container.textContent).toContain('Publication request was not sent')
- expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Node alias"]')!.value).toBe('keep-local-edit')
+ expect(dom.container.querySelector<HTMLInputElement>('[name="alias"]')!.value).toBe('keep-local-edit')
  expect(call.mock.calls.filter(row=>row[0]==='settings.node.configure')).toHaveLength(0)
  expect(useAppStore.getState().workbenchSaveWarning).toBeTruthy();expect(useAppStore.getState().sessions[0]?.processState).toBe('running');expect(stop).not.toHaveBeenCalled()
  write.mockRestore()
@@ -253,10 +253,15 @@ it('actual Settings catalog and visited Node pane retain the authored publicatio
  vi.spyOn(nodeCall,'call').mockImplementation(async method => (method === 'node.inspect' ? { node: identity, policyRevision: settings.policyRevision, resourcesShared: false, roots: [], landing: null } : structuredClone(settings)) as never)
  expect(settingsCatalog.visibleSections('Node alias').map(item=>item.id)).toContain('network-node')
  const before=useAppStore.getState().agentComposerDrafts
- await dom.render(<SettingsPanel initialSection="network-node" onClose={vi.fn()}/>);await readyNode();await input('Node alias','retained-publication')
+ await dom.render(<SettingsPanel initialSection="network-node" onClose={vi.fn()}/>);await readyNode()
+ const alias = dom.container.querySelector<HTMLInputElement>('[name="alias"]')!
+ expect(alias.labels?.[0]?.htmlFor).toBe(alias.id)
+ expect(document.getElementById(alias.getAttribute('aria-labelledby')!)?.textContent).toBe('Node alias')
+ expect(document.getElementById(alias.getAttribute('aria-describedby')!)?.textContent).toBe('A readable locator. Original Runtime identity remains unchanged.')
+ await input('alias','retained-publication')
  await dom.click('[data-settings-target="hosts"]')
  await dom.click('[data-settings-target="network-node"]')
- expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Node alias"]')!.value).toBe('retained-publication')
+ expect(dom.container.querySelector<HTMLInputElement>('[name="alias"]')!.value).toBe('retained-publication')
  expect(useAppStore.getState().agentComposerDrafts).toBe(before)
 })
 it('real persisted Core owner → Unix public client → Main bridge → Renderer adapter → Settings editor and published file consumer',async()=>{
@@ -280,10 +285,10 @@ it('real persisted Core owner → Unix public client → Main bridge → Rendere
  vi.spyOn(api.nodePublishing,'owner').mockImplementation(bridge.owner)
  vi.spyOn(api.hosts,'inspect').mockResolvedValue({routeHostId:'local',owner:{state:'available',value:{runtimeId:'original-ui-runtime'}}} as never)
  try{
-  await dom.render(<NetworkNodeSettingsPane {...props()}/>);await readyNode();await input('Node alias','real-ui-node')
-  for(const[label,value]of[['Shared folders',published],['Excluded paths',denied]]){
-   await act(async()=>{const textarea=dom.container.querySelector<HTMLTextAreaElement>(`[aria-label="${label}"]`)!;Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(textarea,value!);textarea.dispatchEvent(new Event('input',{bubbles:true}))})
-   await act(async()=>dom.container.querySelector<HTMLTextAreaElement>(`[aria-label="${label}"]`)!.dispatchEvent(new FocusEvent('focusout',{bubbles:true})))
+  await dom.render(<NetworkNodeSettingsPane {...props()}/>);await readyNode();await input('alias','real-ui-node')
+  for(const[name,value]of[['allowedPaths',published],['deniedPaths',denied]]){
+   await act(async()=>{const textarea=dom.container.querySelector<HTMLTextAreaElement>(`[name="${name}"]`)!;Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(textarea,value!);textarea.dispatchEvent(new Event('input',{bubbles:true}))})
+   await act(async()=>dom.container.querySelector<HTMLTextAreaElement>(`[name="${name}"]`)!.dispatchEvent(new FocusEvent('focusout',{bubbles:true})))
   }
   await dom.click('.network-node-save button')
   await act(async()=>{for(let i=0;i<80&&dom.container.querySelector('.network-node-save [role="status"]')?.textContent!=='Publication saved';i++)await new Promise(resolve=>setTimeout(resolve,10))})

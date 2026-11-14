@@ -597,12 +597,12 @@ it('keeps a dispatched original send updateable across real mobile workface swit
 it('protects a new Agent initial instruction after its form is hidden', async () => {
   const platform = createBrowserPlatform(), props = { client: null, connected: false, target: {}, platform, onClose: vi.fn(), openSession: vi.fn() }
   const view = await mount(<MobileWebUpdateSafetyProvider verifyConnection={verifyConnection}><Action /><MobileAgentCreate {...props} visible /></MobileWebUpdateSafetyProvider>)
-  const input = document.querySelector<HTMLTextAreaElement>('[aria-label="新 Agent 初始指令"]')!
+  const input = document.querySelector<HTMLTextAreaElement>('.mobile-agent-create [name="prompt"]')!
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, '原始指令'); input.dispatchEvent(new Event('input', { bubbles: true })) })
   await view.render(<MobileWebUpdateSafetyProvider verifyConnection={verifyConnection}><Action /><MobileAgentCreate {...props} visible={false} /></MobileWebUpdateSafetyProvider>)
   expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('新建 Agent') })
   await view.render(<MobileWebUpdateSafetyProvider verifyConnection={verifyConnection}><Action /><MobileAgentCreate {...props} visible /></MobileWebUpdateSafetyProvider>)
-  expect(document.querySelector<HTMLTextAreaElement>('[aria-label="新 Agent 初始指令"]')?.value).toBe('原始指令')
+  expect(document.querySelector<HTMLTextAreaElement>('.mobile-agent-create [name="prompt"]')?.value).toBe('原始指令')
 })
 
 it('offers an explicit escape when Agent creation was never sent because its local intent could not be retained', async () => {
@@ -613,9 +613,9 @@ it('offers an explicit escape when Agent creation was never sent because its loc
   const failed = vi.spyOn(getDeviceWorkface(), 'retainAgentCreate').mockRejectedValue(new Error('device unavailable'))
   await mount(<MobileWebUpdateSafetyProvider verifyConnection={verifyConnection}><Action /><MobileAgentCreate client={client} connected visible target={{}}
     platform={createBrowserPlatform()} onClose={() => {}} openSession={() => {}} /></MobileWebUpdateSafetyProvider>)
-  await vi.waitFor(() => expect(document.querySelectorAll('[aria-label="新 Agent 空间"] option').length).toBe(2))
-  const select = async (label: string, value: string) => { const input = document.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!; await act(async () => { input.value = value; input.dispatchEvent(new Event('change', { bubbles: true })) }) }
-  await select('新 Agent 空间', 'space-original'); await select('新 Agent Zone', 'zone-original'); await select('新 Agent 执行器', 'executor-original')
+  await vi.waitFor(() => expect(document.querySelectorAll('.mobile-agent-create [name="spaceId"] option').length).toBe(2))
+  const select = async (name: string, value: string) => { const input = document.querySelector<HTMLSelectElement>(`.mobile-agent-create select[name="${name}"]`)!; await act(async () => { input.value = value; input.dispatchEvent(new Event('change', { bubbles: true })) }) }
+  await select('spaceId', 'space-original'); await select('zoneId', 'zone-original'); await select('executorId', 'executor-original')
   await click(button(document.body, '创建 Agent'))
   await vi.waitFor(() => expect(failed).toHaveBeenCalledOnce())
   expect(rpc.mock.calls.filter(([method]) => method === 'agent.open')).toHaveLength(0)
