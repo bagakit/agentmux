@@ -95,3 +95,61 @@ it.each([4,40])('isolates actual Focus timeline consumers with %i confirmed curr
   expect(useAppStore.getState().agentComposerDrafts).toBe(draft)
 })
 
+it.each([4, 40])('keeps unrelated timeline and name publications out of %i mounted Focus projections', async size => {
+  await scene(size)
+  expect(renders.FocusProjectionSubject).toBeGreaterThan(0)
+  expect(renders.FocusCardRankComparison).toBeGreaterThan(0)
+  expect(renders.deriveFocusProjectLanes).toBeGreaterThan(0)
+  expect(renders.groupFocusTimeline).toBeGreaterThan(0)
+  expect(renders.focusTimelineOrderCandidates).toBeGreaterThan(0)
+  const original = useAppStore.getState()
+  const cards = () => [...host.querySelectorAll<HTMLElement>('[data-focus-card-key]')]
+  const cardOrder = () => cards().map(card => JSON.parse(card.dataset.focusCardKey!)[1])
+  const originalOrder = cardOrder()
+  const tracks = [...host.querySelectorAll('[data-focus-timeline-id]')]
+  for (const count of [1, 40]) {
+    await updates(revision => useAppStore.setState(state => {
+      const timelines = { ...state.timelines }, agentNames = { ...state.agentNames }
+      for (let index = 0; index < count; index++) {
+        const id = 'background-only-' + index
+        timelines[id] = { agentSessionId: id, revision, items: [] }
+        agentNames[id] = 'Background task ' + revision
+      }
+      return { timelines, agentNames }
+    }))
+    expect(renders.FocusProjectionSubject ?? 0, `${count} unrelated subjects`).toBe(0)
+    expect(renders.FocusCardRankComparison ?? 0).toBe(0)
+    expect(renders.deriveFocusProjectLanes ?? 0).toBe(0)
+    expect(renders.groupFocusTimeline ?? 0).toBe(0)
+    expect(renders.focusTimelineOrderCandidates ?? 0).toBe(0)
+    expect(renderedTracks).toEqual([])
+    expect(cardOrder()).toEqual(originalOrder)
+    expect([...host.querySelectorAll('[data-focus-timeline-id]')]).toEqual(tracks)
+  }
+
+  const id = originalOrder.at(-1) as string
+  const card = host.querySelector<HTMLButtonElement>(`[data-session-id="${id}"].focus-context`)!
+  expect(card).not.toBeNull()
+  await updates(() => useAppStore.setState(state => ({ agentNames: { ...state.agentNames, [id]: 'Renamed original task' } })), 1)
+  expect(renders.FocusProjectionSubject).toBeGreaterThan(0)
+  expect(renders.FocusCardRankComparison ?? 0).toBe(0)
+  expect(cardOrder()).toEqual(originalOrder)
+  expect(card.textContent).toContain('Renamed original task')
+  expect(renderedTracks).toEqual([id])
+  expect(useAppStore.getState().agentComposerDrafts).toBe(original.agentComposerDrafts)
+  expect(useAppStore.getState().sessions).toBe(original.sessions)
+  expect(useAppStore.getState().tabs).toBe(original.tabs)
+
+  await updates(index => useAppStore.setState(state => {
+    const nextState = index === 0 ? 'waiting' as const : 'working' as const
+    const observedAt = Date.now() + index
+    const status = { state: nextState, source: 'native-hook' as const, observedAt }
+    return { sessions: state.sessions.map(session => session.id === id
+      ? { ...session, status, semanticStatus: { ...status, stateEnteredAt: observedAt } } : session) }
+  }), 2)
+  expect(renders.FocusCardRankComparison).toBeGreaterThan(0)
+  expect(cardOrder()).toEqual([id, ...originalOrder.slice(0, -1)])
+  expect(useAppStore.getState().sessions.find(session => session.id === id)?.control).toBe(original.sessions.find(session => session.id === id)?.control)
+  expect(useAppStore.getState().agentFocus).toBe(original.agentFocus)
+})
+
