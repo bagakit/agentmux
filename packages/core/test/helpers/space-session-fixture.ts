@@ -43,9 +43,9 @@ async function coreFixture(cleanup: Array<() => unknown | Promise<unknown>>, run
   let server = new AgentMuxControlServer(serverOptions)
   cleanup.push(() => server.stop()); await server.start()
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); cleanup.push(() => rpc.dispose())
-  const put = async (id: string, updatedAt = 1) => {
+  const put = async (id: string, updatedAt = 1, runId = runtimeId + '-run-' + id) => {
     const session: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: id, hostId: 'local', providerId: 'codex', executorId: 'test-executor',
-      workspacePath: '/' + runtimeId + '/home', capabilityHash: hashAgentCapability('private-original-capability'), hookBindingId: 'private-binding', hookToken: 'private-token', run: { runId: runtimeId + '-run-' + id }, retiredRuns: [], createdAt: 1, updatedAt }
+      workspacePath: '/' + runtimeId + '/home', capabilityHash: hashAgentCapability('private-original-capability'), hookBindingId: 'private-binding', hookToken: 'private-token', run: { runId }, retiredRuns: [], createdAt: 1, updatedAt }
     const previous = await core.readAgentSession(id); await inner.registry.put(session, previous?.run); inner.publishSession(session); return session
   }
   return { root, spatial, core, hosted, rpc, get server() { return server }, owner, inventory, runs, all, put,
