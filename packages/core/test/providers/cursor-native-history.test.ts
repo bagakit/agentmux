@@ -1,6 +1,6 @@
 import { fixturePath } from '../helpers/fixture-values.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
@@ -35,11 +35,11 @@ function nextChange(expected = 'invalidated') {
 }
 
 async function nativeFixture(rootId = fixture.rootId) {
-  const root = await mkdtemp(join(tmpdir(), 'amux-cursor-canonical-'))
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'amux-cursor-canonical-')))
   const workspace = join(root, 'workspace'), env = { CURSOR_CONFIG_DIR: join(root, 'config') }
   await mkdir(workspace)
   const source = { providerId: 'cursor', nativeSessionId: '019ff166-9788-4ace-b9eb-9a71a42f0af9' }
-  const path = resolveCursorStorePath(workspace, source.nativeSessionId, env)
+  const path = await resolveCursorStorePath(workspace, source.nativeSessionId, env)
   await mkdir(join(path, '..'), { recursive: true })
   const writer = new DatabaseSync(path)
   writer.exec('PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE blobs(id TEXT PRIMARY KEY,data BLOB); CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT)')
@@ -70,6 +70,58 @@ async function nativeWriter(paths: string[]) {
 }
 
 describe('Cursor first-party encoded canonical turns', () => {
+  it('reads and observes the original native namespace through a retained workspace alias', async () => {
+    const f = await nativeFixture(), alias = join(f.root, 'retained-home')
+    await symlink(f.workspace, alias)
+    const context = { source: f.source, workspacePath: alias, command: 'cursor-agent', args: [], env: f.env,
+      transcriptPath: f.path, signal: new AbortController().signal, limit: 2 }
+    const newest = await readCursorSessionHistoryPage(context)
+    const older = await readCursorSessionHistoryPage({ ...context, cursor: newest.nextCursor! })
+    expect([...older.items, ...newest.items]).toEqual((await f.read()).items)
+    let changed = nextChange()
+    const observer = await observeCursorSessionHistory({ ...context, onChange: change => changed.resolve(change) })
+    dispose.push(async () => observer.dispose())
+    f.metadata(fixture.grownRootId)
+    expect(await changed.promise).toMatchObject({ kind: 'invalidated' })
+    expect((await readCursorSessionHistoryPage({ ...context, limit: 30 })).items.at(-1)!.contentParts)
+      .toEqual([{ kind: 'text', text: 'original answer extended', contentEligibility: 'public' }])
+  })
+
+  it('qualifies the exact writable native input subject from an alias and rejects a changed alias', async () => {
+    const f = await nativeFixture(), alias = join(f.root, 'retained-home')
+    await symlink(f.workspace, alias)
+    const pid = await nativeWriter([f.path])
+    const context = { processId: pid, command: 'cursor-agent', args: [], env: f.env, workspacePath: alias, signal: new AbortController().signal }
+    const witness = await discoverCursorNativeSession(context)
+    expect(witness?.handle).toEqual({ kind: 'provider', providerId: 'cursor', sessionId: f.source.nativeSessionId, transcriptPath: f.path })
+    await witness!.assertCurrent()
+    const outside = join(f.root, 'another-workspace'); await mkdir(outside)
+    await unlink(alias); await symlink(outside, alias)
+    await expect(witness!.assertCurrent()).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE' })
+  })
+
+  it('accepts the original physical supplementary locator without reading it as a body fallback', async () => {
+    const f = await nativeFixture(), alias = join(f.root, 'retained-home'), data = join(f.root, 'data')
+    await symlink(f.workspace, alias)
+    const slug = f.workspace.replace(/[^a-zA-Z0-9]/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '')
+    const id = encodeURIComponent(f.source.nativeSessionId).replace(/%/g, '_').slice(0, 200)
+    const transcriptPath = join(data, 'projects', slug, 'agent-transcripts', id, `${id}.jsonl`)
+    const page = await readCursorSessionHistoryPage({ source: f.source, workspacePath: alias, command: 'cursor-agent', args: [],
+      env: { ...f.env, CURSOR_DATA_DIR: data }, transcriptPath, signal: new AbortController().signal, limit: 30 })
+    expect(page.items).toEqual((await f.read()).items)
+    await expect(readFile(transcriptPath)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('does not fall back to a spelled-alias bucket when the original native database is unavailable', async () => {
+    const f = await nativeFixture(), alias = join(f.root, 'retained-home')
+    await symlink(f.workspace, alias)
+    const spelled = join(f.env.CURSOR_CONFIG_DIR, 'chats', createHash('md5').update(alias).digest('hex'), f.source.nativeSessionId, 'store.db')
+    await mkdir(join(spelled, '..'), { recursive: true }); await copyFile(f.path, spelled)
+    await rename(f.path, f.path + '.original')
+    await expect(readCursorSessionHistoryPage({ source: f.source, workspacePath: alias, command: 'cursor-agent', args: [], env: f.env,
+      signal: new AbortController().signal, limit: 30 })).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_LOCATOR_UNAVAILABLE' })
+  })
+
   it('reads original user/assistant/reasoning/tool records when the prompt projection is empty', async () => {
     const f = await nativeFixture(), before = await readFile(f.path), page = await f.read()
     expect(page.items.map(item => item.kind)).toEqual(['user-message', 'assistant-message', 'activity', 'assistant-message'])
@@ -202,12 +254,14 @@ describe('Cursor first-party encoded canonical turns', () => {
     f.metadata(fixture.rootId); await new Promise(resolve => setTimeout(resolve, 80))
     expect(changes).toHaveLength(count)
   })
-  it('feeds the production public Client and shared conversation projector after a client restart without Run controls or store writes', async () => {
+  it.each(['physical', 'alias'] as const)('feeds the production public Client and shared conversation projector after a client restart without Run controls or store writes: %s', async shape => {
     const f = await nativeFixture(), storePath = join(f.root, 'sessions.json'), store = new AgentMuxFileAgentSessionStore(storePath)
+    const workspacePath = shape === 'physical' ? f.workspace : join(f.root, 'retained-home')
+    if (shape === 'alias') await symlink(f.workspace, workspacePath)
     vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(f.root, 'runtime')); vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(f.root, 'state'))
     vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(f.root, 'messages.ndjson'))
     await store.compareAndSwap(null, { kind: 'agent', agentSessionId: 'private-cursor-session', providerId: 'cursor', executorId: 'cursor',
-      hostId: 'local', workspacePath: f.workspace, run: { runId: 'private-original-run' }, retiredRuns: [], createdAt: 1, updatedAt: 1,
+      hostId: 'local', workspacePath, run: { runId: 'private-original-run' }, retiredRuns: [], createdAt: 1, updatedAt: 1,
       hookBindingId: 'b'.repeat(43), hookToken: 't'.repeat(43), nativeHandle: { kind: 'provider', providerId: 'cursor', sessionId: f.source.nativeSessionId, transcriptPath: f.path } })
     const before = await readFile(storePath), clients: AgentMuxClient[] = [], controls: Array<() => void> = []
     const client = () => {
@@ -255,7 +309,7 @@ describe('Cursor first-party encoded canonical turns', () => {
     expect(controls).toHaveLength(12); controls.forEach(check => check())
   })
   it('discovers the real writable exact main DB and excludes proven child metadata in the same process group', async () => {
-    const f = await nativeFixture(), childId = '019ff166-9788-4ace-b9eb-9a71a42f0afb', childPath = resolveCursorStorePath(f.workspace, childId, f.env)
+    const f = await nativeFixture(), childId = '019ff166-9788-4ace-b9eb-9a71a42f0afb', childPath = await resolveCursorStorePath(f.workspace, childId, f.env)
     await mkdir(join(childPath, '..'), { recursive: true })
     const child = new DatabaseSync(childPath)
     child.exec('CREATE TABLE blobs(id TEXT PRIMARY KEY,data BLOB); CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT)')
@@ -272,7 +326,7 @@ describe('Cursor first-party encoded canonical turns', () => {
     await expect(result!.assertCurrent()).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE' })
   })
   it('refuses two writable main Sessions rather than choosing a recent filename', async () => {
-    const f = await nativeFixture(), otherId = '019ff166-9788-4ace-b9eb-9a71a42f0afb', otherPath = resolveCursorStorePath(f.workspace, otherId, f.env)
+    const f = await nativeFixture(), otherId = '019ff166-9788-4ace-b9eb-9a71a42f0afb', otherPath = await resolveCursorStorePath(f.workspace, otherId, f.env)
     await mkdir(join(otherPath, '..'), { recursive: true })
     const other = new DatabaseSync(otherPath)
     other.exec('CREATE TABLE blobs(id TEXT PRIMARY KEY,data BLOB); CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT)')
