@@ -10,13 +10,14 @@ export type ChannelPresentation = { section: SettingsPageId; title: string; icon
 
 export const SETTINGS_GROUPS = [
   { id: 'preferences', icon: 'object.settings-preferences', title: 'Preferences', description: 'Your profile and everyday defaults.' },
+  { id: 'environment', icon: 'object.host', title: 'Environment', description: 'Hosts and the connections that support your work.' },
+  { id: 'remote', icon: 'object.settings-remote', title: 'Remote', description: 'Remote work and device access.' },
   { id: 'agents', icon: 'object.settings-agents', title: 'Agents', description: 'Agent CLIs, derived actions and session recovery.' },
   { id: 'mote', icon: 'object.mote', title: 'Mote', description: 'Your collaborators and how they grow.' },
   { id: 'work', icon: 'object.settings-work', title: 'Work', description: 'Organize work, focus attention and pursue goals.' },
   { id: 'know', icon: 'object.settings-know', title: 'Know', description: 'Develop topics, explore sources and keep notes.' },
   { id: 'browser-use', icon: 'object.settings-browser-use', title: 'Browser use', description: 'Browsing and Agent interaction.' },
   { id: 'message-tool', icon: 'object.settings-message-tool', title: 'Message Tool', description: 'Input, collaboration and reusable instructions.' },
-  { id: 'remote', icon: 'object.settings-remote', title: 'Remote', description: 'Hosts, remote execution, and device access.' },
   { id: 'conversation-channels', icon: 'object.settings-channels', title: 'Conversation Channels', description: 'Conversations in the app and beyond.' },
   { id: 'toolkit', icon: 'object.settings-mods', title: 'Mods', description: 'Tools that extend your workspace.' }
 ] as const satisfies readonly { id: string; icon: SemanticIconId; title: string; description: string }[]

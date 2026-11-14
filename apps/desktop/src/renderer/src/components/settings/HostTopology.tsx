@@ -33,7 +33,7 @@ const HostTopologyNode = memo(function HostTopologyNode({ data }: NodeProps<Host
   const { host, check } = data
   const hint = useHostConnectionHint(host.id, host.label)
   const address = data.localAddress
-  const tooltip = useWorkbenchNameTooltip(hint.name, host.kind === 'local' ? <LocalAddressDetails address={address} /> : hint.detail, false, { pointerPassThrough: host.kind !== 'local' })
+  const tooltip = useWorkbenchNameTooltip(hint.name, host.kind === 'local' ? <LocalAddressDetails address={address} /> : <span className="remote-host-route-detail"><span>{hint.detail}</span><span>SSH user · <code data-route-user>{host.kind === 'ssh' && host.transport !== 'tailcat' ? host.user || 'SSH config' : 'Not used'}</code></span><span>Port override · <code data-route-port>{host.kind === 'ssh' && host.transport !== 'tailcat' ? host.port ?? 'SSH config' : 'Not used'}</code></span><span>Runtime binding · <code data-route-runtime>{host.kind === 'ssh' ? host.runtimeId ?? 'Unconfirmed' : 'Unconfirmed'}</code></span>{data.network ? <span>{data.network}</span> : null}</span>, false, { pointerPassThrough: host.kind !== 'local' })
   const checkedAt = check && check.state !== 'idle' && check.state !== 'checking' ? check.observedAt : undefined
   return <>
     <Handle className={data.selected ? 'remote-host-port remote-host-port--selected' : 'remote-host-port'} type="target" position={Position.Left} isConnectable={false} />
@@ -44,15 +44,10 @@ const HostTopologyNode = memo(function HostTopologyNode({ data }: NodeProps<Host
         <span className="remote-host-node__selection" aria-hidden="true">{data.selected ? 'Selected' : null}</span></span>
       <strong>{host.label}</strong>
       <span className="remote-host-node__address" title={host.kind === 'ssh' && host.transport !== 'tailcat' ? host.hostname : undefined}>{host.kind === 'local' ? address?.label ?? 'Local address unknown' : host.transport === 'tailcat' ? 'Private Tailcat address' : host.hostname || 'Address required'}</span>
-      <span className="remote-host-node__network" aria-label="Configured connection">
-        <span><small>{host.kind === 'local' ? 'INTERFACE' : host.transport !== 'tailcat' ? 'SSH USER' : 'ACCESS'}</small><code data-route-user>{host.kind === 'ssh' ? host.transport === 'tailcat' ? 'Client key' : host.user || 'SSH config' : address?.preferred?.name ?? 'Not observed'}</code></span>
-        <span><small>{host.kind === 'local' ? 'ADDRESSES' : host.transport !== 'tailcat' ? 'PORT OVERRIDE' : 'TRANSPORT'}</small><code data-route-port>{host.kind === 'ssh' ? host.transport === 'tailcat' ? 'Tailcat' : host.port ?? 'SSH config' : address?.addresses.length ? `${address.addresses.length} addresses` : 'Local route'}</code></span>
-      </span>
-      <span className="remote-host-node__readout"><span className="remote-host-node__binding"><span>Service ID</span><code data-route-runtime title={host.kind === 'ssh' ? host.runtimeId : undefined}>{host.kind === 'ssh' ? host.runtimeId ?? 'Unconfirmed' : 'Inspect host'}</code></span>
-      <span className="remote-host-node__link" data-route-network title={data.network ?? undefined}>{data.network ?? 'Network · read on demand'}</span></span>
+      <span className="remote-host-node__context">{host.kind === 'local' ? address?.preferred ? `${address.preferred.name} · ${address.addresses.length} interface addresses` : 'Interface details on focus' : `${data.projectCount} registered projects · ${data.sessionCount} Session references`}</span>
       <span className="remote-host-node__footer"><span className={`remote-check-dot remote-check-dot--${check?.state ?? 'idle'}`} />
         <span>{hostCheckLabel(check ?? { state: 'idle' })}</span>{checkedAt !== undefined ? <time dateTime={new Date(checkedAt).toISOString()} title={new Date(checkedAt).toLocaleString()}>{new Date(checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time> : null}
-        <span className="remote-host-node__work" title="Registered projects · client Session references">{data.projectCount} projects · {data.sessionCount} sessions</span></span>
+</span>
     </button>
     {tooltip.content}
   </>
@@ -93,9 +88,9 @@ export const HostTopology = memo(function HostTopology({ items, selectedId, onSe
     return [...(start === 0 ? [{ id: 'entry' }] : []), ...items.slice(start, start + 3).map(item => ({ id: `host:${item.host.id}` }))]
   }, [topologyKey])
   const projectedNodes: TopologyNode[] = useMemo(() => [
-    { id: 'entry', type: 'entry', position: { x: 0, y: Math.min(1, Math.max(0, items.length - 1)) * 272 + 28 }, data: { label: 'AgentMux' }, selectable: false },
+    { id: 'entry', type: 'entry', position: { x: 0, y: Math.min(1, Math.max(0, items.length - 1)) * 214 + 28 }, data: { label: 'AgentMux' }, selectable: false },
     ...items.map((item, index): HostNode => ({ id: `host:${item.host.id}`, type: 'host',
-      position: { x: 310, y: index * 272 + 28 }, data: { ...item, selected: item.host.id === selectedId, onSelect } }))
+      position: { x: 310, y: index * 214 + 28 }, data: { ...item, selected: item.host.id === selectedId, onSelect } }))
   ], [items, selectedId, onSelect])
   const [nodes, setNodes, onNodesChange] = useNodesState<TopologyNode>(projectedNodes)
   useEffect(() => {

@@ -5,15 +5,15 @@ import type { SettingsModule } from '../settings-catalog'
 export const remoteExecutionSettingsModule = {
   id: 'remote-execution', archetype: 'console',
   group: 'remote',
-  title: 'Remote Agents',
-  description: 'Keep your local project. Choose where the Agent runs.',
+  title: 'Remote work',
+  description: 'Choose where your Agent and project work.',
   keywords: 'remote agents agent runs on remote execution agent runtime tools binding workspace project guide how start Space 双向 远程执行 运行端 工具 操作指南',
   icon: semanticIconComponent('object.remote-execution'),
-  savedSummary: () => 'Local project · Agent device',
+  savedSummary: () => 'Project · Agent · Work',
   searchTargets: [
-    { id: 'prepare', title: 'Open a remote Agent Launcher', kind: 'action' },
+    { id: 'prepare', title: 'Prepare remote work in Launcher', kind: 'action' },
     { id: 'guide', title: 'Step-by-step remote execution guide', kind: 'info' },
-    { id: 'bindings', title: 'Cross-device Agents', kind: 'info' }
+    { id: 'bindings', title: 'Existing remote work', kind: 'info' }
   ],
   Pane: RemoteExecutionSettingsPane
 } as const satisfies SettingsModule

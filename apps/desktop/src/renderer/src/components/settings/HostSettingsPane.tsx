@@ -47,10 +47,11 @@ const ThemeObjectHostIcon = semanticIconComponent('object.host')
 const NO_SESSIONS: SessionSnapshot[] = []
 const NO_HOST_CHECKS: Record<string, HostCheckState> = {}
 
-export function HostSettingsPane({ config, onSave, active, onClose, navigationRequest }: {
+export function HostSettingsPane({ config, onSave, active, onClose, navigationRequest, onRemoteWork }: {
   config: AppConfig
   active: boolean
   onClose?: (() => void) | undefined
+  onRemoteWork?: (() => void) | undefined
   navigationRequest?: SettingsNavigationRequest | undefined
   onSave: (hosts: HostConfig[], workspaces: WorkspaceRecord[], expected: Pick<AppConfig, 'hosts' | 'workspaces'>) => Promise<void>
 }) {
@@ -87,6 +88,12 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   const [pendingEdit, setPendingEdit] = useState<{ id: string; select: boolean } | null>(null)
   const [returnFocus, setReturnFocus] = useState<{ id: string | null } | null>(null)
   const [advancedOpen, setAdvancedOpen] = useState<Record<string, boolean>>({})
+  const [sectionsOpen, setSectionsOpen] = useState<Record<string, boolean>>({})
+  const sectionKey = (id: string, section: string) => JSON.stringify([id, section])
+  function toggleSection(id: string, section: string, open: boolean) {
+    const key = sectionKey(id, section)
+    setSectionsOpen(current => current[key] === open ? current : { ...current, [key]: open })
+  }
   const [requestedHost, setRequestedHost] = useState<string | null>(null)
   const appliedNavigation = useRef(navigationRequest)
   const pendingHostNavigation = requestedHostId !== undefined && appliedNavigation.current !== navigationRequest
@@ -240,6 +247,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   const selectedNetworkHost = hosts.find(host => host.id === selectedId)
   return (
     <div ref={container} className="settings-pane-stack settings-resource-workbench remote-management" data-resource-view={view} data-remote-mode={showTopology ? 'topology' : 'list'} data-remote-wide={wide}>
+      <div className="remote-foundation"><div><strong>Connection foundation</strong><p>Connect and check your environments here. Use saved Hosts in Remote work.</p></div>{onRemoteWork ? <button type="button" className="small-button" onClick={onRemoteWork}>Remote work</button> : null}</div>
       <div className="settings-pane-toolbar remote-management__toolbar">
         {view === 'editor' && <button type="button" className="settings-resource-back small-button" onClick={backToLibrary}><ThemeNavigationBackIcon size={14} /> All hosts</button>}
         <div className="remote-management__scope"><strong>{hosts.length}</strong><span>hosts</span><small>{hosts.filter(host => host.kind === 'ssh').length} remote</small></div>
@@ -293,16 +301,25 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
                   {title}</button>)}
               </nav>
               {panel === 'overview' ? <div className="remote-overview">
-                <dl className="remote-overview__facts"><div><dt>Projects</dt><dd>{projectFacts.get(host.id)?.count ?? 0}<small>registered</small></dd></div>
-                  <div><dt>Sessions</dt><dd>{sessionCount}<small>client references</small></dd></div></dl>
+                <div className="remote-overview__actions"><button type="button" className="small-button" onClick={() => selectHostPanel(host.id, 'connection')}>Connection settings</button><button type="button" className="small-button" onClick={() => selectHostPanel(host.id, 'projects')}>View projects</button></div>
+                <p className="remote-overview__counts">{projectFacts.get(host.id)?.count ?? 0} registered projects <span aria-hidden="true">·</span> {sessionCount} Session references</p>
                 <div className="remote-overview__identity"><span>Last connection test</span><strong>{hostCheckLabel(check ?? { state: 'idle' })}</strong>
                   {check?.observedAt ? <time dateTime={new Date(check.observedAt).toISOString()}>{new Date(check.observedAt).toLocaleString()}</time> : null}
                   {check?.state === 'error' ? <button type="button" className="small-button remote-overview__connection-action" onClick={() => selectHostPanel(host.id, 'connection')}>Review connection</button> : null}
                   {check?.detail && check.state === 'error' ? <details className="remote-overview__check-details"><summary>Connection test details</summary><p>{check.detail}</p></details> : null}</div>
-                <HostSessionSummary sessions={hostSessions} active={active && (wide || view === 'editor')} onOpen={id => { if (useAppStore.getState().selectSession(id)) onClose?.() }} />
-                <HostRuntimePanel host={host} committed={config.hosts.find(item => item.id === host.id)} active={active && !pendingHostNavigation && (measuredWide === true || view === 'editor')} />
-                <HostNetworkPanel host={host} committed={config.hosts.find(item => item.id === host.id)} state={network.reads[host.id]} onRead={network.read}
-                  active={active && !pendingHostNavigation && (measuredWide === true || view === 'editor')} visible={network.visible} />
+                <details className="remote-host-section" open={sectionsOpen[sectionKey(host.id, 'service')] ?? false} onToggle={event => toggleSection(host.id, 'service', event.currentTarget.open)}>
+                  <summary>Service status<span>Runtime identity and resources</span></summary>
+                  <HostRuntimePanel host={host} committed={config.hosts.find(item => item.id === host.id)} active={active && Boolean(sectionsOpen[sectionKey(host.id, 'service')]) && !pendingHostNavigation && (measuredWide === true || view === 'editor')} />
+                </details>
+                <details className="remote-host-section" open={sectionsOpen[sectionKey(host.id, 'network')] ?? false} onToggle={event => toggleSection(host.id, 'network', event.currentTarget.open)}>
+                  <summary>Network details<span>Configuration, interfaces and source facts</span></summary>
+                  <HostNetworkPanel host={host} committed={config.hosts.find(item => item.id === host.id)} state={network.reads[host.id]} onRead={network.read}
+                    active={active && Boolean(sectionsOpen[sectionKey(host.id, 'network')]) && !pendingHostNavigation && (measuredWide === true || view === 'editor')} visible={network.visible} />
+                </details>
+                <details className="remote-host-section" open={sectionsOpen[sectionKey(host.id, 'sessions')] ?? false} onToggle={event => toggleSection(host.id, 'sessions', event.currentTarget.open)}>
+                  <summary>Session references<span>{sessionCount} saved in this app</span></summary>
+                  {sectionsOpen[sectionKey(host.id, 'sessions')] ? <HostSessionSummary sessions={hostSessions} active={active && (wide || view === 'editor')} onOpen={id => { if (useAppStore.getState().selectSession(id)) onClose?.() }} /> : null}
+                </details>
               </div> : null}
               {panel === 'connection' && check?.detail && check.state !== 'checking' ? check.state === 'ready' ? (
                 <details className="host-check-details">

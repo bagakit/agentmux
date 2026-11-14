@@ -67,3 +67,28 @@
 .agent-device-select > span { flex: none; }
 .agent-device-select select { flex: 1; min-width: 0; min-height: 30px; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: inherit; }
 .remote-execution-prepare__controls > .agent-device-select { align-items: stretch; }
+
+.settings-page[data-settings-page='remote-execution'] .settings-content__header { width: min(100%, calc(1040px + var(--sp-7) * 2)); }
+.settings-content__scroll[data-settings-pane='remote-execution'] { padding-inline: max(var(--sp-7), calc((100% - 1040px) / 2)); }
+.remote-execution-prepare > header, .remote-execution-bindings > header { align-items: flex-start; gap: var(--sp-4); }
+.remote-execution-prepare > header > div, .remote-execution-bindings > header > div { min-width: 0; }
+.remote-execution-prepare > header .settings-group-note, .remote-execution-bindings > header .settings-group-note { margin-top: var(--sp-2); font-size: var(--fs-body); line-height: 1.55; }
+.remote-execution-bindings__body { margin-top: var(--sp-4); }
+.remote-execution-empty { padding-block: var(--sp-5); }
+.remote-execution-empty h3 { margin-block: var(--sp-2); }
+.remote-execution-empty p { font-size: var(--fs-body); }
+.remote-execution-endpoints dd span { font-size: var(--fs-body); line-height: 1.6; user-select: text; }
+@media (max-width: 700px) {
+  .settings-content__scroll[data-settings-pane='remote-execution'] { padding-inline: var(--sp-5); }
+}
+
+.remote-execution-prepare > header .settings-group-note, .remote-execution-bindings > header .settings-group-note { font-weight: 400; }
+.remote-execution-bindings > header > small { flex: none; white-space: nowrap; }
+.remote-execution-library .settings-resource-row { display: grid; grid-template-columns: 26px minmax(0, 1fr); align-items: start; row-gap: var(--sp-1); }
+.remote-execution-library .settings-resource-row__mark { grid-row: 1 / 4; }
+.remote-execution-library .settings-resource-row__text { display: contents; }
+.remote-execution-library .settings-resource-row__text > strong { grid-column: 2; grid-row: 1; }
+.remote-execution-library .settings-resource-row__text > small { grid-column: 2; grid-row: 3; }
+.remote-execution-library .settings-resource-row__status { grid-column: 2; grid-row: 2; min-width: 0; justify-self: start; }
+.remote-execution-detail > header > div { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.remote-execution-detail > header h3 { flex-basis: 100%; }
