@@ -474,6 +474,17 @@ export async function registerIpc(args: {
   // workspace's host differently.
   const gh = new GhService((id) => args.runtime.executionHost(id), git)
   const browserProfiles = new BrowserProfileManager()
+  browserProfiles.extensions.setConfirmationHandler(async ({ kind, review, localSourcePath }) => {
+    const profile = browserProfiles.listProfiles().find(profile => profile.id === review.profileId)
+    if (!profile || profile.revision !== review.expectedRevision || args.window.isDestroyed()) return false
+    const verb = kind === 'remove' ? 'Remove' : kind === 'update' ? 'Update' : 'Install'
+    const permissions = [...review.permissions.api.map(value => 'API: ' + value), ...review.permissions.hosts.map(value => 'Host: ' + value),
+      ...review.permissions.contentScripts.map(value => 'Content: ' + value), ...review.permissions.optional.map(value => 'Optional: ' + value)]
+    const answer = await dialog.showMessageBox(args.window, { type: 'warning', buttons: ['Cancel', verb + ' extension'], defaultId: 0, cancelId: 0,
+      message: `${verb} “${review.name}” in “${profile.label}”?`,
+      detail: `Version ${review.version} · ${review.source.label}\n${localSourcePath ? 'Local source: ' + localSourcePath + '\n' : ''}${review.source.signature === 'package-verified' ? 'Package signature verified; publisher trust is not established.' : 'This local source has no verified package signature.'}\n\n${permissions.length ? permissions.join('\n') : 'No declared extension permissions.'}\n\n${kind === 'update' ? 'New permission scope:\n' + (review.addedPermissions.join('\n') || 'No added permissions.') + '\n\n' : ''}File access remains off. Extension support depends on the host; loading does not guarantee every Chrome API. Profile sign-ins and Browser input remain.` })
+    return answer.response === 1
+  })
   // Every page, child windows included, keeps WebRTC on its Profile's proxy; one hook instead of every creation site.
   const observeProfileContents = (_event: unknown, contents: WebContents): void => browserProfiles.sessions.observe(contents)
   app.on('web-contents-created', observeProfileContents)

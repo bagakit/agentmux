@@ -1,6 +1,7 @@
+import { BrowserProfileExtensions } from './browser-profile-extensions.js'
 import type { BrowserProfileTrashEntry, BrowserProfileNativeUse, BrowserProfileRecycleReceipt, BrowserProfileRestoreReceipt } from '@agentmux/core/control'
 import { describeRetainedPartition, inspectRetainedPartition, retainedPartitionPath, BrowserProfileDataUnavailable } from './browser-profile-retained-data.js'
-import { resolve } from 'node:path'
+import { resolve, join } from 'node:path'
 import { realpath } from 'node:fs/promises'
 import { createProfileSafetyCopy, verifyProfileSafetyCopy, restoreProfileSafetyCopy, removeOriginalProfileData, eraseProfileSafetyCopy, eraseHistoricalProfilePurge } from './browser-profile-purge-data.js'
 import { type BrowserProxyAsset, type BrowserProxyEdit, type BrowserProxyBinding, parseBrowserProfileQuery, parseBrowserProfileSelection, parseBrowserProfileBulkAction, type BrowserProfileQuery, type BrowserProfileView, type BrowserProfileViewSaveReceipt, type BrowserProfileBulkAction, type BrowserProfileSelectionItem, type BrowserProfileBulkItemResult } from '@agentmux/core/control'
@@ -91,6 +92,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
 
   /** Applies each Profile's route to its own session; the view manager awaits it before any page opens. */
   readonly sessions: BrowserProfileSessions
+  readonly extensions: BrowserProfileExtensions
 
   constructor(private readonly store = new BrowserProfileStore(), sessions?: BrowserProfileSessions, private readonly sessionRoot: () => string = () => app.getPath('sessionData'),
     private readonly purgeOptions: { now?: () => number; assertExclusiveDataOwner?: () => Promise<void> } = {}) {
@@ -106,12 +108,30 @@ export class BrowserProfileManager implements BrowserProfileResolver {
       defaultLanguage: () => app.getLocale(),
       openContents: () => webContents.getAllWebContents()
     })
+    this.extensions = new BrowserProfileExtensions({
+      root: profileId => join(retainedPartitionPath(this.sessionRoot(), describeRetainedPartition(this.sessionRoot(), profileId, this.sessions.nativeSession(profileId).storagePath)), 'AgentMux Extensions'),
+      prepareSession: profileId => this.sessions.prepare(profileId),
+      session: profileId => this.sessions.nativeSession(profileId),
+      existingSession: profileId => this.sessions.observedSession?.(profileId),
+      change: (profileId, action) => { this.resolvePartition(profileId); return this.configuration(profileId, action) },
+      read: async profileId => {
+        const { snapshot, profile } = await this.store.inspectProfile(profileId)
+        this.adopt(snapshot)
+        return { profileRevision: profile.revision, records: snapshot.extensions?.[profileId] ?? [], receipts: snapshot.extensionReceipts?.[profileId] ?? [] }
+      },
+      commit: async (profileId, expectedRevision, records, receipt) => {
+        const snapshot = await this.store.setExtensions(profileId, expectedRevision, records, receipt)
+        this.adopt(snapshot)
+        return { profileRevision: snapshot.profiles.find(profile => profile.id === profileId)!.revision, records: snapshot.extensions?.[profileId] ?? [], receipts: snapshot.extensionReceipts?.[profileId] ?? [] }
+      }
+    })
   }
 
   /** Await before creating, restoring or switching any page into this Profile; nothing to await without a route. */
   prepareSession(profileId: string): Promise<void> | undefined {
     this.resolvePartition(profileId)
-    return this.sessions.prepare(profileId)
+    const network = this.sessions.prepare(profileId)
+    return network ? network.then(() => this.extensions.prepare(profileId)) : this.extensions.prepare(profileId)
   }
 
   environmentSettings(profileId: string): import('@agentmux/core/control').BrowserProfileEnvironment | undefined { const value = this.profiles.get(profileId)?.environment; return value && structuredClone(value) }
@@ -765,6 +785,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
   }
 
   private replace(snapshot: BrowserProfileSnapshot): void {
+    this.extensions.adopt(snapshot.extensions ?? {})
     this.profiles.clear()
     this.archivedProfiles.clear()
     for (const entry of snapshot.trash) this.archivedProfiles.set(entry.profile.id, structuredClone(entry))

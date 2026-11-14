@@ -14,9 +14,14 @@ export function isBrowserProfileControlRequest(request: AgentMuxControlRequest):
 }
 
 export type BrowserProfileControlPorts = {
-  profiles: Pick<BrowserProfileManager, 'networkHistory' | 'listProxies' | 'saveProxy' | 'deleteProxy' | 'assignProxy' | 'initialize' | 'listProfiles' | 'listRevision' | 'listSequence' | 'createProfile' | 'copyProfile' | 'updateProfile' | 'listViews' | 'saveView' | 'deleteView' | 'bulkUpdate' | 'listFolders' | 'createFolder' | 'renameFolder' | 'deleteFolder' | 'setDefaultProfile' | 'refresh' | 'listTrash' | 'listLegacyPendingDeletes' | 'restoreProfile' | 'setTrashRetention' | 'purgeProfile' | 'inspectTrashPurge'>
+  profiles: Pick<BrowserProfileManager, 'networkHistory' | 'listProxies' | 'saveProxy' | 'deleteProxy' | 'assignProxy' | 'initialize' | 'listProfiles' | 'listRevision' | 'listSequence' | 'createProfile' | 'copyProfile' | 'updateProfile' | 'listViews' | 'saveView' | 'deleteView' | 'bulkUpdate' | 'listFolders' | 'createFolder' | 'renameFolder' | 'deleteFolder' | 'setDefaultProfile' | 'refresh' | 'listTrash' | 'listLegacyPendingDeletes' | 'restoreProfile' | 'setTrashRetention' | 'purgeProfile' | 'inspectTrashPurge'> & { extensions?: BrowserProfileManager['extensions'] }
   usage: Pick<BrowserProfileUsageOwner, 'usage' | 'deleteProfile' | 'assertUnused'>
   network: BrowserProfileNetworkControl
+}
+
+function extensionOwner(ports: BrowserProfileControlPorts): BrowserProfileManager['extensions'] {
+  if (!ports.profiles.extensions) throw new AgentMuxError('Extension management is unavailable in this Browser host. Original Profiles remain available.', 'HOST_CAPABILITY_UNAVAILABLE')
+  return ports.profiles.extensions
 }
 
 function existing(ports: BrowserProfileControlPorts, profileId: string): BrowserProfileSummary {
@@ -44,6 +49,11 @@ export async function executeBrowserProfileControl(request: ProfileRequest, port
   await ports.profiles.initialize()
   if (request.operation === 'browser.profile.proxy.ls' || request.operation === 'browser.profile.ls' || request.operation === 'browser.profile.inspect' || request.operation === 'browser.profile.trash.ls') await ports.profiles.refresh()
   switch (request.operation) {
+    case 'browser.profile.extension.ls': return { operation: request.operation, ...await extensionOwner(ports).list(request.profileId, request.operationId) }
+    case 'browser.profile.extension.prepare': return { operation: request.operation, review: await extensionOwner(ports).review(request.profileId, request.expectedRevision, request.operationId, request.sourcePath, request.extensionId) }
+    case 'browser.profile.extension.apply': return { operation: request.operation, ...await extensionOwner(ports).apply(request.profileId, request.expectedRevision, request.reviewId) }
+    case 'browser.profile.extension.remove': return { operation: request.operation, ...await extensionOwner(ports).remove(request.profileId, request.expectedRevision, request.extensionId, request.operationId) }
+    case 'browser.profile.extension.load': return { operation: request.operation, ...await extensionOwner(ports).load(request.profileId, request.extensionId) }
     case 'browser.profile.proxy.ls': return { operation: request.operation, revision: ports.profiles.listRevision(), proxies: ports.profiles.listProxies() }
     case 'browser.profile.proxy.create': return { operation: request.operation, ...await owned(() => ports.profiles.saveProxy(request.edit)) }
     case 'browser.profile.proxy.update': return { operation: request.operation, ...await owned(() => ports.profiles.saveProxy(request.edit, request.proxyId, request.expectedRevision)) }

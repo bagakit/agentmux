@@ -146,6 +146,9 @@ importers:
       dompurify:
         specifier: 3.4.16
         version: 3.4.16
+      fflate:
+        specifier: 0.8.3
+        version: 0.8.3
       lucide-react:
         specifier: ^0.468.0
         version: 0.468.0(react@19.2.8)

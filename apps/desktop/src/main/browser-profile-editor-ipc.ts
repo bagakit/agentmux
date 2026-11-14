@@ -22,6 +22,11 @@ export function registerBrowserProfileEditorIpc(ports: {
   ): void
   profiles: BrowserProfileManager
 }): void {
+  ports.handle('browser:listProfileExtensions', (_event, id: string, operationId?: string) => ipcResult(async () => { await ports.profiles.initialize(); return ports.profiles.extensions.list(id, operationId) }))
+  ports.handle('browser:prepareProfileExtension', (_event, id: string, revision: string, operationId: string, source: string, extensionId?: string) => ipcResult(async () => { await ports.profiles.initialize(); return ports.profiles.extensions.review(id, revision, operationId, source, extensionId) }))
+  ports.handle('browser:applyProfileExtension', (_event, id: string, revision: string, reviewId: string) => ipcResult(async () => { await ports.profiles.initialize(); return ports.profiles.extensions.apply(id, revision, reviewId) }))
+  ports.handle('browser:removeProfileExtension', (_event, id: string, revision: string, extensionId: string, operationId: string) => ipcResult(async () => { await ports.profiles.initialize(); return ports.profiles.extensions.remove(id, revision, extensionId, operationId) }))
+  ports.handle('browser:loadProfileExtension', (_event, id: string, extensionId: string) => ipcResult(async () => { await ports.profiles.initialize(); return ports.profiles.extensions.load(id, extensionId) }))
   ports.handle('browser:readProfiles', () =>
     ipcResult(async () => {
       await ports.profiles.initialize()

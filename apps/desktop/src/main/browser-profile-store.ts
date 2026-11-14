@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util'
+import { browserProfileExtensionRecordSchema, browserProfileExtensionReceiptSchema, type BrowserProfileExtensionRecord, type BrowserProfileExtensionReceipt } from './browser-profile-extension-record.js'
 import { parseBrowserProxyEdit, parseBrowserProxyAsset, type BrowserProxyAsset, type BrowserProxyEdit, type BrowserProxyBinding, parseBrowserProfileQuery, parseBrowserProfileView, type BrowserProfileView, type BrowserProfileQuery, parseBrowserProfileEnvironment, normalizeBrowserProfileTags, type BrowserProfileEnvironment } from '@agentmux/core/control'
 import { parseBrowserProxyProbe, type BrowserProxyProbe, type BrowserProxyProbeHistory } from '@agentmux/core/control'
 import { isDeepStrictEqual } from 'node:util'
@@ -91,6 +93,8 @@ const profileRecordSchema = z
       try { parseBrowserProfileEnvironment(value); return true } catch { return false }
     }, 'Browser Profile environment is invalid').optional(),
     // Stored only when Agents are turned off, so an untouched Profile keeps the global switch's answer.
+    extensions: z.array(browserProfileExtensionRecordSchema).optional(),
+    extensionReceipts: z.array(browserProfileExtensionReceiptSchema).optional(),
     agentAccess: z.literal(false).optional()
   })
   .strict()
@@ -241,7 +245,7 @@ export type BrowserProfileRecord = z.infer<typeof profileRecordSchema>
 export type PendingBrowserProfileImport = z.infer<typeof pendingImportSchema>
 
 /** The whole committed list after one write; the manager replaces its cache with it. */
-export type BrowserProfileSnapshot = { proxyAssets?: BrowserProxyAsset[]; revision: number; sequence: number; profiles: BrowserProfileSummary[]; defaultProfileId: string; folders: BrowserProfileFolder[]; views: BrowserProfileView[]; trash: BrowserProfileTrashRecord[]; purgeReceipts?: import('@agentmux/core/control').BrowserProfilePurgeReceipt[]; legacyPendingDeletes: string[]; activitySources: Record<string, string> }
+export type BrowserProfileSnapshot = { extensions?: Record<string, BrowserProfileExtensionRecord[]>; extensionReceipts?: Record<string, BrowserProfileExtensionReceipt[]>; proxyAssets?: BrowserProxyAsset[]; revision: number; sequence: number; profiles: BrowserProfileSummary[]; defaultProfileId: string; folders: BrowserProfileFolder[]; views: BrowserProfileView[]; trash: BrowserProfileTrashRecord[]; purgeReceipts?: import('@agentmux/core/control').BrowserProfilePurgeReceipt[]; legacyPendingDeletes: string[]; activitySources: Record<string, string> }
 
 function cloneImportedSource(source: z.infer<typeof importedSourceSchema> | null): BrowserProfileImportedSource | null {
   if (source === null) return null
@@ -250,7 +254,10 @@ function cloneImportedSource(source: z.infer<typeof importedSourceSchema> | null
 }
 
 function snapshotOf(metadata: BrowserProfileMetadata): BrowserProfileSnapshot {
-  return { purgeReceipts: structuredClone(metadata.purgeReceipts ?? []), proxyAssets: structuredClone(metadata.proxyAssets ?? []), legacyPendingDeletes: [...(metadata.pendingDeletes ?? [])], trash: structuredClone(metadata.trash ?? []), activitySources: Object.fromEntries([...metadata.profiles, ...(metadata.trash ?? []).map(entry => entry.profile)].filter(profile => profile.activity).map(profile => [profile.id, profile.activity!.checkpoint.observerId])),
+  const retained = [...metadata.profiles, ...(metadata.trash ?? []).map(entry => entry.profile)]
+  const extensions = Object.fromEntries(retained.filter(profile => profile.extensions?.length).map(profile => [profile.id, structuredClone(profile.extensions!)]))
+  const extensionReceipts = Object.fromEntries(retained.filter(profile => profile.extensionReceipts?.length).map(profile => [profile.id, structuredClone(profile.extensionReceipts!)]))
+  return { purgeReceipts: structuredClone(metadata.purgeReceipts ?? []), ...(Object.keys(extensions).length ? { extensions } : {}), ...(Object.keys(extensionReceipts).length ? { extensionReceipts } : {}), proxyAssets: structuredClone(metadata.proxyAssets ?? []), legacyPendingDeletes: [...(metadata.pendingDeletes ?? [])], trash: structuredClone(metadata.trash ?? []), activitySources: Object.fromEntries([...metadata.profiles, ...(metadata.trash ?? []).map(entry => entry.profile)].filter(profile => profile.activity).map(profile => [profile.id, profile.activity!.checkpoint.observerId])),
     views: structuredClone(metadata.views ?? []), revision: metadata.revision ?? 0, sequence: metadata.sequence ?? metadata.revision ?? 0, defaultProfileId: metadata.defaultProfileId, folders: (metadata.folders ?? []).map(folder => ({ ...folder })),
     profiles: metadata.profiles.map((profile) => profileSummary(profile, metadata.defaultProfileId)) }
 }
@@ -462,6 +469,24 @@ export class BrowserProfileStore {
         profiles: metadata.profiles.map((profile) => profile.id === validatedProfileId ? updated : profile)
       })
       return { snapshot, profile: profileSummary(updated, snapshot.defaultProfileId) }
+    })
+  }
+
+  /** Extension changes use the original Profile transaction and configuration token. */
+  setExtensions(profileId: string, expectedRevision: string, extensions: BrowserProfileExtensionRecord[], receipt: BrowserProfileExtensionReceipt): Promise<BrowserProfileSnapshot> {
+    return this.enqueue(async () => {
+      const metadata = await this.readMetadata(), current = metadata.profiles.find(profile => profile.id === profileId)
+      if (!current) throw new Error('The original Browser Profile is unavailable.')
+      this.assertProfileRevision(current, expectedRevision)
+      const records = z.array(browserProfileExtensionRecordSchema).parse(extensions), saved = browserProfileExtensionReceiptSchema.parse(receipt)
+      if (saved.profileId !== profileId || new Set(records.map(record => record.id)).size !== records.length || new Set(records.map(record => record.nativeId)).size !== records.length) throw new Error('Extension identities do not match this Profile.')
+      const previous = current.extensionReceipts?.find(value => value.operationId === saved.operationId)
+      if (previous) {
+        if (!isDeepStrictEqual(previous, saved)) throw new Error('This original extension operation belongs to a different request.')
+        return snapshotOf(metadata)
+      }
+      const updated = { ...current, revision: mintObjectId(), extensions: records, extensionReceipts: [...(current.extensionReceipts ?? []), saved] }
+      return this.commit({ ...metadata, profiles: metadata.profiles.map(profile => profile.id === profileId ? updated : profile) })
     })
   }
 
