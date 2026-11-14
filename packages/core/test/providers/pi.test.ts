@@ -242,7 +242,7 @@ describe('Pi provider', () => {
     })
 
     it('写出去的是 JS，不是 shell 命令', () => {
-      // 其余九家写的是一条 shell 命令（`managedHookCommand()` 那条 ELECTRON_RUN_AS_NODE=1 ...）。
+      // 命令型 Provider 通过原 Run 保留的运行器投递。
       // Pi 没有那条通路：它的扩展面就是 in-process JS。
       expect(mutation.content).not.toContain('ELECTRON_RUN_AS_NODE')
       expect(mutation.content).toContain("pi.on('agent_settled'")
@@ -263,9 +263,7 @@ describe('Pi provider', () => {
     })
 
     it('token 与 URL 在运行时从环境变量取，一个字节都不落盘', () => {
-      // 这是与 opencode **相反**的那一条：Pi 是 AgentMux 通过 PTY 起的进程，扩展在它里面读得到
-      // `client.ts:2123-2124` 注入的变量。写进磁盘的 token 会长期留在用户 home 下，且 Binding 轮换后
-      // 立刻失效——既泄密又过期。
+      // 进程内扩展捕获原 Run 环境，不把凭证写进共享文件。
       expect(mutation.content).toContain('process.env.AGENTMUX_HOOK_URL')
       expect(mutation.content).toContain('process.env.AGENTMUX_HOOK_TOKEN')
       // 反向：内容里不能出现任何形似真实 token 的内联字面量。这条在有人改成
@@ -387,6 +385,7 @@ describe('Pi provider', () => {
     const sessionCtx = ctxFor(presentTranscript)
 
     const hookEnv = {
+      AGENTMUX_ENV: '1', AGENTMUX_PROVIDER_ID: 'pi',
       AGENTMUX_HOOK_URL: 'http://127.0.0.1:7777/v1/events',
       AGENTMUX_HOOK_TOKEN: 'tok-pi-runtime'
     }
@@ -438,10 +437,10 @@ describe('Pi provider', () => {
     it('环境变量缺席时一条都不投——不往一个空 URL 上打', async () => {
       // 修复路径或非 AgentMux 启动的 pi 会落在这里：扩展装着，但这个进程不是我们起的。
       const ext = await loadExtension({
-        env: { AGENTMUX_HOOK_URL: undefined, AGENTMUX_HOOK_TOKEN: undefined },
+        env: { ...hookEnv, AGENTMUX_HOOK_URL: undefined, AGENTMUX_HOOK_TOKEN: undefined },
         sessionFile: presentTranscript
       })
-      ext.handlers.get('agent_start')!({}, sessionCtx)
+      expect(ext.handlers.size).toBe(0)
       await ext.flush()
       expect(ext.posts).toEqual([])
     })
@@ -453,8 +452,8 @@ describe('Pi provider', () => {
       // 上一条只覆盖「两个都缺」，于是守卫写成 `if (!url) return`（漏掉 token 那一侧）也能过——
       // 实测存活。而那一侧正是最坏的：URL 在、token 空，于是每个事件都带着 `Bearer undefined`
       // 打到真实端点上，服务端拒绝、界面无状态，看起来像"装了但不工作"。逐个变量守。
-      const ext = await loadExtension({ env, sessionFile: presentTranscript })
-      ext.handlers.get('agent_start')!({}, sessionCtx)
+      const ext = await loadExtension({ env: { ...hookEnv, ...env }, sessionFile: presentTranscript })
+      expect(ext.handlers.size).toBe(0)
       await ext.flush()
       expect(ext.posts).toEqual([])
     })
@@ -486,8 +485,7 @@ describe('Pi provider', () => {
 
   describe('接到 registry 的 managed 安装路径上', () => {
     it('Provider.planManagedHooks 按 id 找得到它，且不需要 endpoint', () => {
-      // 与 opencode 相反：那家没有 endpoint 就必须弃权（返回 null），Pi 在修复路径（没有 Binding）
-      // 也照常产出一份完全有效的 plan——因为内容在运行时才取 endpoint。
+      // Pi 在修复路径没有 Binding 也能产出稳定内容；原生加载时才捕获准确 Run 的 endpoint。
       const resolved = (new AgentProviderRegistry().get('pi').planManagedHooks?.({ workspacePath: fixturePath("tmp/ws"), env: { PI_CODING_AGENT_DIR: fixturePath("tmp/pi-agent-dir") } }) ?? null)
       expect(resolved?.providerId).toBe('pi')
       expect(resolved?.mutations[0]!.path).toBe(fixturePath("tmp/pi-agent-dir/extensions/agentmux.js"))
