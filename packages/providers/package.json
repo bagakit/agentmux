@@ -92,6 +92,10 @@
       "types": "./dist/grok/native-history.d.ts",
       "import": "./dist/grok/native-history.js"
     },
+    "./grok/session-status": {
+      "types": "./dist/grok/session-status.d.ts",
+      "import": "./dist/grok/session-status.js"
+    },
     "./antigravity/acp-probe": {
       "types": "./dist/antigravity/acp-probe.d.ts",
       "import": "./dist/antigravity/acp-probe.js"

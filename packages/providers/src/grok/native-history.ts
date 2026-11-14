@@ -7,12 +7,12 @@ import type { FileHandle } from 'node:fs/promises'
 import type { NativeHistoryItem, NativeHistoryPart, NativeHistoryReadBudget, NativeHistoryReaderContext,
   NativeHistoryTarget, NativeHistoryText, NativeJsonlHistoryReader as BaseReader, NativeJsonlHistoryServices } from '../jsonl-history-services.js'
 
-type GrokHistoryTarget = NativeHistoryTarget & {
+export type GrokHistoryTarget = NativeHistoryTarget & {
   transcriptPath?: string
   env: Readonly<Record<string, string | undefined>>
   workspacePath: string
 }
-type NativeJsonlHistoryRecord = { value: Record<string, unknown>; start: number; end: number }
+export type NativeJsonlHistoryRecord = { value: Record<string, unknown>; start: number; end: number }
 type NativeJsonlHistoryReader<Text, Item> = BaseReader<Text, Item> & {
   readonly sourceSizeBytes: number
   sourceText(holder: Record<string, unknown>, key: string): Text | undefined
