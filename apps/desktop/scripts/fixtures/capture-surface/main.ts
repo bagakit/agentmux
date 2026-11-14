@@ -13,8 +13,6 @@ app.setPath('userData', join(import.meta.dirname, 'user-data'))
 app.on('window-all-closed', () => {})
 const protectionAtShow = new WeakMap<BrowserWindow, boolean[]>()
 app.on('browser-window-created', (_event, window) => {
-  // CDP still exercises the real page input path; physical mouse input passes through instead of racing the controlled gestures.
-  window.setIgnoreMouseEvents(true)
   const showInactive = window.showInactive.bind(window)
   window.showInactive = () => {
     const states = protectionAtShow.get(window) ?? []
@@ -44,9 +42,12 @@ async function waitFor<T>(label: string, read: () => Promise<T>): Promise<NonNul
   throw new Error('Timed out: ' + label)
 }
 async function evaluate<T = any>(script: string): Promise<T> { try { return await current.webContents.executeJavaScript(script) } catch (error) { process.stderr.write('Failed renderer script: '+script+'\n'); throw error } }
+async function isolatePointerEvents() {
+  await evaluate(`window.captureEvents=[];for(const type of ['pointermove','pointerdown','pointerup','pointercancel','lostpointercapture'])document.addEventListener(type,event=>{if(event.pointerType!=='pen'){event.stopImmediatePropagation();return}window.captureEvents.push({type,x:event.clientX,y:event.clientY,target:event.target.tagName,button:event.button,trusted:event.isTrusted})},true)`)
+}
 async function settle() { await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))') }
 async function mouse(type: string, x: number, y: number, buttons = 0) {
-  await current.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, x, y, button: type === 'mouseMoved' && !buttons ? 'none' : 'left', buttons, clickCount: type === 'mouseMoved' ? 0 : 1 })
+  await current.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, x, y, pointerType: 'pen', button: type === 'mouseMoved' && !buttons ? 'none' : 'left', buttons, clickCount: type === 'mouseMoved' ? 0 : 1 })
 }
 async function key(key: string, code: string, virtual: number, modifiers = 0) {
   await current.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode: virtual, modifiers })
@@ -69,8 +70,8 @@ async function drag(x: number, y: number, width: number, height: number) {
 }
 async function pointerClick(point: { x: number; y: number }, awaitReply = true) {
   const target = current
-  const pressed = target.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', buttons: 1, clickCount: 1 })
-  const released = target.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', buttons: 0, clickCount: 1 })
+  const pressed = target.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, pointerType: 'pen', button: 'left', buttons: 1, clickCount: 1 })
+  const released = target.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, pointerType: 'pen', button: 'left', buttons: 0, clickCount: 1 })
   const completion = Promise.all([pressed, released.catch(error => { if (!target.isDestroyed()) throw error })])
   // CDP preserves this command order; a window transition has its own business receipt instead of an old-window mouse reply.
   if (awaitReply) await completion
@@ -160,7 +161,7 @@ async function waitOpen(background: CaptureBackground, before: Set<BrowserWindow
   }
   current.webContents.debugger.attach('1.3')
   current.webContents.on('console-message', event => process.stdout.write('renderer: '+event.message+'\n'))
-  await evaluate(`window.captureEvents=[];for(const type of ['pointermove','pointerdown','pointerup','lostpointercapture'])document.addEventListener(type,event=>window.captureEvents.push({type,x:event.clientX,y:event.clientY,target:event.target.tagName,button:event.button,trusted:event.isTrusted}),true)`)
+  await isolatePointerEvents()
   await settle()
   assert.equal(await evaluate('typeof window.agentmux'), 'undefined', 'capture never receives the full application bridge')
   return { overlays, infos }
@@ -318,6 +319,7 @@ async function run() {
   void editing.catch(error => { receipt.editorError = String(error) })
   current = await waitFor('production expanded editor', async () => BrowserWindow.getAllWindows().find(window => !beforeEditors.has(window)))
   current.webContents.debugger.attach('1.3')
+  await isolatePointerEvents()
   await waitFor('expanded editor decoded', async () => { try { return await evaluate(`document.querySelector('img')?.naturalWidth>0&&[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Copy'&&!b.disabled)`) } catch { return false } })
   await shot('expanded-included')
   assert.notEqual(current, captureWindow)
@@ -347,6 +349,7 @@ async function run() {
   })
   current = productEditor
   current.webContents.debugger.attach('1.3')
+  await isolatePointerEvents()
   await waitFor('same-capture editor decoded', async () => { try { return await evaluate(`document.querySelector('img')?.naturalWidth>0&&[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Copy'&&!b.disabled)`) } catch { return false } })
   const beforeProductCopy = deliveries.length
   process.stdout.write('capture-proof stage: product Copy begin\n')
