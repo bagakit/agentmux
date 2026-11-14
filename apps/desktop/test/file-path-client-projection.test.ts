@@ -1153,3 +1153,133 @@ it.runIf(business)('literal Unix candidates continue through actual CLI reads, S
     expectedResource: { hostId: r.hostId, workspaceId: r.workspaceId, workspacePath: r.workspacePath } })).rejects.toBeTruthy()
   expect(native).toHaveBeenCalledTimes(count)
 }, 60000)
+
+async function repeatedWorkingLocations() {
+  const f = await fixture(), rpc = f.source.rpc
+  const observed = await rpc.call('space.folder.inspect', { runtimeId: f.source.identity.runtimeId, path: f.source.project })
+  const saved = await rpc.call('space.folder.register', { runtimeId: f.source.identity.runtimeId, directory: observed.resource! })
+  const { readSpaceSnapshot } = await import('@agentmux/core')
+  const snapshot = await readSpaceSnapshot(rpc, saved.reference)
+  const zone = snapshot.scope.zones.find(zone => zone.zoneId === saved.zoneId)!
+  await rpc.call('space.apply', { reference: saved.reference, expectedRevision: snapshot.revision, changes: {
+    zones: [{ ...zone, zoneId: 'another-working-position' }], bindings: [...snapshot.scope.bindings, { spaceId: saved.reference.spaceId, zoneId: 'another-working-position' }]
+  } })
+  const ambiguous = await f.bridge.files.resolve({ hostId: f.source.id, expectedRuntimeId: f.source.identity.runtimeId }, { kind: 'directory', path: f.source.project })
+  expect(ambiguous.status).toBe('selection-required')
+  return { ...f, saved, ambiguous }
+}
+
+it.runIf(business)('working location context reaches actual Files without asking for the same directory registration again', async () => {
+  const f = await repeatedWorkingLocations(), workspace = { ...f.workspace, id: f.saved.workspaceId, hostId: 'local' }
+  f.routes.set('local', f.routes.get(f.source.id)!)
+  const graph = await new AgentMuxSpatialStateStore(join(f.source.state, 'spatial.json')).read()
+  const local = await f.api.spatial.read()
+  const next = structuredClone(local!.graph)
+  for (const [kind, key] of [['spaces', 'spaceId'], ['zones', 'zoneId']] as const) {
+    for (const value of graph!.graph[kind]) if (!next[kind].some(item => (item as any)[key] === (value as any)[key])) (next[kind] as any[]).push(value)
+  }
+  next.bindings.push(...graph!.graph.bindings); next.resources = { ...next.resources, ...graph!.graph.resources }
+  await f.api.spatial.commit({ expectedRevision: local!.revision, graph: next })
+  const { currentCoreSpatialGraph } = await import('../src/renderer/src/store.js')
+  await vi.waitFor(() => expect(currentCoreSpatialGraph()?.zones.some(value => value.zoneId === f.saved.zoneId)).toBe(true))
+  const state = f.store.getState(), original = { spaceId: f.saved.reference.spaceId, zoneId: f.saved.zoneId, workspaceId: workspace.id, topicId: null, tabId: null, groupId: null, regionId: null }
+  f.store.setState({ config: { ...state.config!, workspaces: [workspace] }, activeWorkspaceId: workspace.id, workbenchSpaceSelection: original, sourceFilesInputs: { selections: {}, pending: {}, creations: {}, folderRequests: {} } })
+  const resolved = await f.store.getState().resolveFilesSource(workspace.id)
+  expect(resolved).toMatchObject({ status: 'located', locator: { mount: { reference: f.saved.reference, zoneId: f.saved.zoneId, workspaceId: f.saved.workspaceId } } })
+  expect(f.api.sourceFiles.resolve).toHaveBeenLastCalledWith(expect.objectContaining({ hostId: 'local' }), { kind: 'mount', mount: expect.objectContaining({ reference: f.saved.reference, zoneId: f.saved.zoneId }) })
+  const { readWorkspaceDirectory } = await import('../src/renderer/src/lib/source-files-discovery.js')
+  expect((await readWorkspaceDirectory(workspace.id, '', f.store.getState)).entries.map(value => value.name)).toContain('original.txt')
+  expect(f.store.getState().workbenchSpaceSelection).toBe(original)
+})
+
+it.runIf(business)('working location chooser accepts the first explicit click through real Source adapters', async () => {
+  const f = await repeatedWorkingLocations(), { SourceFilesAccess } = await import('../src/renderer/src/components/SourceFilesAccess.js')
+  const element = document.createElement('div'), root = createRoot(element); document.body.append(element)
+  cleanup.push(async () => { await act(async () => root.unmount()); element.remove() })
+  await act(async () => root.render(createElement(SourceFilesAccess, { workspace: f.workspace, visible: true })))
+  await vi.waitFor(() => expect(element.textContent).toContain('Choose working location'))
+  expect(f.store.getState().sourceFilesInputs.selections[f.workspace.id]).toBeUndefined()
+  const disclosure = element.querySelector('details')!
+  expect(disclosure.open).toBe(false)
+  expect(element.textContent).not.toContain('Choose current Source')
+  disclosure.open = true
+  const button = [...element.querySelectorAll('button')].find(value => value.textContent === 'Use this location')!
+  await act(async () => button.click())
+  await vi.waitFor(() => expect(f.store.getState().sourceFilesInputs.selections[f.workspace.id]?.locator).toBeTruthy())
+  expect(element.querySelector('.file-operation-service')).toBeNull()
+})
+
+it.runIf(business)('working location observation cannot replace a later exact position selection', async () => {
+  const f = await repeatedWorkingLocations(), workspace = { ...f.workspace, id: f.saved.workspaceId, hostId: 'local' }, state = f.store.getState()
+  f.routes.set('local', f.routes.get(f.source.id)!)
+  const graph = await new AgentMuxSpatialStateStore(join(f.source.state, 'spatial.json')).read()
+  const local = await f.api.spatial.read()
+  const next = structuredClone(local!.graph)
+  for (const [kind, key] of [['spaces', 'spaceId'], ['zones', 'zoneId']] as const) {
+    for (const value of graph!.graph[kind]) if (!next[kind].some(item => (item as any)[key] === (value as any)[key])) (next[kind] as any[]).push(value)
+  }
+  next.bindings.push(...graph!.graph.bindings); next.resources = { ...next.resources, ...graph!.graph.resources }
+  await f.api.spatial.commit({ expectedRevision: local!.revision, graph: next })
+  const { currentCoreSpatialGraph } = await import('../src/renderer/src/store.js')
+  await vi.waitFor(() => expect(currentCoreSpatialGraph()?.zones.some(value => value.zoneId === f.saved.zoneId)).toBe(true))
+  const original = { spaceId: f.saved.reference.spaceId, zoneId: f.saved.zoneId, workspaceId: workspace.id, topicId: null, tabId: null, groupId: null, regionId: null }
+  f.store.setState({ config: { ...state.config!, workspaces: [workspace] }, activeWorkspaceId: workspace.id, workbenchSpaceSelection: original, sourceFilesInputs: { selections: {}, pending: {}, creations: {}, folderRequests: {} } })
+  const real = f.bridge.files.resolve; let finish!: () => void
+  const held = new Promise<void>(yes => { finish = yes })
+  vi.mocked(f.api.sourceFiles.resolve).mockImplementation(async (...args) => { const result = await real(...args); await held; return result })
+  const pending = f.store.getState().resolveFilesSource(workspace.id)
+  await vi.waitFor(() => expect(f.api.sourceFiles.resolve).toHaveBeenCalled())
+  const later = { ...original, zoneId: 'another-working-position' }
+  f.store.setState({ workbenchSpaceSelection: later }); finish()
+  expect(await pending).toMatchObject({ status: 'unconfirmed' })
+  expect(f.store.getState().sourceFilesInputs.selections[workspace.id]).toBeUndefined()
+  expect(f.store.getState().workbenchSpaceSelection).toBe(later)
+})
+
+it.runIf(business)('working location explicit choice is retained before observation and later clicks win', async () => {
+  const f = await repeatedWorkingLocations()
+  if (f.ambiguous.status !== 'selection-required') throw Error('Expected real distinct working positions')
+  const [a, b] = f.ambiguous.registrations.map(value => ({ hostId: f.source.id, reference: value.reference, zoneId: value.zoneId, workspaceId: value.workspaceId }))
+  const real = f.bridge.files.resolve; let finish!: () => void
+  const held = new Promise<void>(yes => { finish = yes })
+  vi.mocked(f.api.sourceFiles.resolve).mockImplementation(async (...args) => { const result = await real(...args); await held; return result })
+  const first = f.store.getState().selectFilesRegistration(f.workspace.id, a!)
+  await vi.waitFor(() => expect(f.api.sourceFiles.resolve).toHaveBeenCalled())
+  expect(f.store.getState().sourceFilesInputs.selections[f.workspace.id]?.selection).toMatchObject({ registration: a })
+  vi.mocked(f.api.sourceFiles.resolve).mockImplementation(real)
+  await f.store.getState().selectFilesRegistration(f.workspace.id, b!)
+  finish(); await expect(first).rejects.toThrow('Later Source selection')
+  expect(f.store.getState().sourceFilesInputs.selections[f.workspace.id]?.locator?.mount.zoneId).toBe(b!.zoneId)
+  vi.mocked(f.api.sourceFiles.resolve).mockRejectedValueOnce(Error('Original Source observation unavailable'))
+  await expect(f.store.getState().selectFilesRegistration(f.workspace.id, a!)).rejects.toThrow('observation unavailable')
+  const selected = f.store.getState().sourceFilesInputs.selections[f.workspace.id]!
+  expect(selected.selection).toMatchObject({ registration: a }); expect(selected.locator).toBeUndefined()
+  expect(selected.issue).toContain('observation unavailable')
+  const { readWorkspaceDirectory } = await import('../src/renderer/src/lib/source-files-discovery.js')
+  const main = vi.spyOn(f.api.files, 'readDirectory')
+  await expect(readWorkspaceDirectory(f.workspace.id, '', f.store.getState)).rejects.toThrow('unconfirmed')
+  expect(main).not.toHaveBeenCalled()
+  vi.mocked(f.api.sourceFiles.resolve).mockImplementation(real)
+  await f.store.getState().selectFilesRegistration(f.workspace.id, b!)
+  const known = f.store.getState().sourceFilesInputs.selections[f.workspace.id]!.locator
+  vi.mocked(f.api.sourceFiles.resolve).mockRejectedValueOnce(Error('Same position observation unavailable'))
+  await expect(f.store.getState().selectFilesRegistration(f.workspace.id, b!)).rejects.toThrow('Same position observation')
+  expect(f.store.getState().sourceFilesInputs.selections[f.workspace.id]?.locator).toBe(known)
+})
+
+it.runIf(business)('working location Source projection uses the original registration through the same Files owner', async () => {
+  const f = await repeatedWorkingLocations()
+  const target = { hostId: f.source.id, reference: f.saved.reference, zoneId: f.saved.zoneId, workspaceId: f.saved.workspaceId }
+  const { readSpaceSnapshot } = await import('@agentmux/core')
+  const snapshot = await readSpaceSnapshot(f.source.rpc, f.saved.reference)
+  f.store.getState().openOriginalSpaceLocation({ target })
+  f.store.getState().observeSpaceMount(target, { snapshot, reading: false })
+  const workspaceId = f.store.getState().activeWorkspaceId!
+  expect(workspaceId).not.toBe(f.workspace.id)
+  await expect(f.store.getState().resolveFilesSource(workspaceId)).resolves.toMatchObject({ status: 'located', locator: { mount: target } })
+  const { readWorkspaceDirectory, listWorkspaceFileNames } = await import('../src/renderer/src/lib/source-files-discovery.js')
+  const main = vi.spyOn(f.api.files, 'readDirectory'), names = vi.spyOn(f.api.files, 'list')
+  expect((await readWorkspaceDirectory(workspaceId, '', f.store.getState)).entries.map(value => value.name)).toContain('original.txt')
+  expect((await listWorkspaceFileNames(workspaceId, f.store.getState)).files).toContain('original.txt')
+  expect(main).not.toHaveBeenCalled(); expect(names).not.toHaveBeenCalled()
+})
