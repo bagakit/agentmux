@@ -13,14 +13,16 @@ import { cleanupExecutableNativeFixtures } from '../../../packages/core/test/hel
 
 const fault = vi.hoisted(() => ({ sync: '' }))
 const facts: unknown[] = []
+// Fixtures replace AGENTMUX_* to isolate the actual private Core from this Session.
+const evidencePath = process.env.AGENTMUX_FILE_PATH_ONCE_EVIDENCE
 async function recordConsumerBuild(entry: string) {
-  if (!process.env.AGENTMUX_FILE_PATH_ONCE_EVIDENCE) return
+  if (!evidencePath) return
   const paths = [entry, 'apps/host/src/file-path-mutations.ts', 'packages/core/dist/index.js',
     'packages/core/dist/public-rpc-service.js', 'packages/core/dist/agentmux.js', helper]
   facts.push({ case: 'original-consumer-build', cwd: process.cwd(), entry,
     artifacts: await Promise.all(paths.map(async path => ({ path: resolve(path), sha256: createHash('sha256').update(await readFile(path)).digest('hex') }))) })
 }
-afterAll(async () => { if (process.env.AGENTMUX_FILE_PATH_ONCE_EVIDENCE) await writeFile(process.env.AGENTMUX_FILE_PATH_ONCE_EVIDENCE, JSON.stringify({ schema: 'agentmux.file-path-once-proof.v1', platform: process.platform, facts }, null, 2) + '\n') })
+afterAll(async () => { if (evidencePath) await writeFile(evidencePath, JSON.stringify({ schema: 'agentmux.file-path-once-proof.v1', platform: process.platform, facts }, null, 2) + '\n') })
 vi.mock('node:fs/promises', async original => {
   const actual = await original<typeof import('node:fs/promises')>()
   return { ...actual, open: async (...args: Parameters<typeof actual.open>) => {
