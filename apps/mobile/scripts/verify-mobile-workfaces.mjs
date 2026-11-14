@@ -90,7 +90,8 @@ try {
     }
   }
   const knownInputs = { ...renderedInputs, ...inputs }
-  for (const [name, file] of [['navigation', 'verify-topics-navigation.mjs'], ['layout', 'verify-workface-layout.mjs']]) {
+  // The layout owner builds the original native file helper before navigation consumes it.
+  for (const [name, file] of [['layout', 'verify-workface-layout.mjs'], ['navigation', 'verify-topics-navigation.mjs']]) {
     const result = await run(name, [resolve(import.meta.dirname, file)], root)
     assert.equal(result.exitCode, 0, result.output)
     receipt.runs.push({ name, exitCode: result.exitCode })
