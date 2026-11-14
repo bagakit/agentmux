@@ -6,7 +6,7 @@ import { sessionInputOperationResult } from '../shared/session-input-result.js'
 
 type Ports = {
   handle<T extends unknown[], R>(channel: string, listener: (event: IpcMainInvokeEvent, ...values: T) => R | Promise<R>): void
-  call<M extends 'settings.hosts.inspect' | 'settings.hosts.network' | 'settings.hosts.home'>(method: M, params: AgentMuxRpcParams<M>, context: { signal: AbortSignal }): Promise<AgentMuxRpcResult<M>>
+  call<M extends 'settings.hosts.inspect' | 'settings.hosts.network' | 'settings.hosts.home' | 'settings.hosts.agent-resources'>(method: M, params: AgentMuxRpcParams<M>, context: { signal: AbortSignal }): Promise<AgentMuxRpcResult<M>>
 }
 /** Sender trust and cancellable read lifetimes only. Public Core owns all observed facts. */
 export function registerHostRuntimeObservationIpc(ports: Ports) {
@@ -15,6 +15,10 @@ export function registerHostRuntimeObservationIpc(ports: Ports) {
   for (const channel of Object.keys(methods) as Array<keyof typeof methods>) ports.handle(channel, (event, token: string, host: HostConfig) => {
     return sessionInputOperationResult(() => reads.read(event.sender, token, signal => ports.call(methods[channel], { hostId: host.id, expected: host }, { signal })))
   })
+  ports.handle('hosts:agentResources', (event, token: string, host: HostConfig, kind: 'records' | 'running', expectedRuntimeId?: string) =>
+    sessionInputOperationResult(() => reads.read(event.sender, token, signal => ports.call('settings.hosts.agent-resources', {
+      hostId: host.id, expected: host, kind, ...(expectedRuntimeId === undefined ? {} : { expectedRuntimeId })
+    }, { signal }))))
   ports.handle('hosts:cancelInspect', (event, token: string) => {
     reads.cancel(event.sender.id, token)
   })

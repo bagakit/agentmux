@@ -2,6 +2,7 @@ import type { NodeOwnerTarget } from '../../../../shared/node-publishing'
 import type { NodeResources } from '@agentmux/core/node-publishing'
 import { appendNodeSample, type NodeSampleFrame } from './node-resource-view'
 import { HostNodeResources } from './HostNodeResources'
+import { HostAgentResources, type AgentResourceRead } from './HostAgentResources'
 import { useEffect, useState } from 'react'
 import type { HostRuntimeObservation, HostRuntimeSource } from '@agentmux/core'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -13,7 +14,7 @@ import './host-runtime-panel.css'
 const RefreshIcon = semanticIconComponent('action.refresh')
 const InfoIcon = semanticIconComponent('status.info')
 const NATIVE_CAPABILITIES = [['orderedOutputBytes', 'Ordered output'], ['boundedReplay', 'Bounded replay'], ['recoverableInput', 'Recoverable input'], ['resize', 'Resize'], ['interrupt', 'Interrupt'], ['completeStop', 'Complete stop']] as const
-type State = { target: string; nodeReply?: NodeResources; nodeError?: string | undefined; nodeNotice?: string | undefined; nodePrivate?: boolean; nodeBusy?: boolean; frames?: NodeSampleFrame[]; current?: HostRuntimeObservation; confirmed?: HostRuntimeObservation; error?: string | undefined; busy?: boolean | undefined }
+type State = { target: string; records?: AgentResourceRead; running?: AgentResourceRead; nodeReply?: NodeResources; nodeError?: string | undefined; nodeNotice?: string | undefined; nodePrivate?: boolean; nodeBusy?: boolean; frames?: NodeSampleFrame[]; current?: HostRuntimeObservation; confirmed?: HostRuntimeObservation; error?: string | undefined; busy?: boolean | undefined }
 function route({ label: _label, ...host }: HostConfig) { return host }
 function keep<T>(current: HostRuntimeSource<T>, previous?: HostRuntimeSource<T>): HostRuntimeSource<T> {
   return current.state === 'available' || previous?.state !== 'available' ? current : previous
@@ -54,8 +55,10 @@ export function HostRuntimePanel({ host, committed, active, ownerTarget }: { hos
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined, runtimeId = ownerTarget?.expectedRuntimeId ?? (host.kind === 'ssh' ? host.runtimeId : undefined)
     let runtimePending = false, nodePending = false
+    const agentPending = { records: false, running: false }
     const pending = () => {
-      if (!controller.signal.aborted) setState(previous => ({ ...(previous.target === target ? previous : { target }), busy: runtimePending && nodePending, nodeBusy: nodePending }))
+      if (!controller.signal.aborted) setState(previous => ({ ...(previous.target === target ? previous : { target }), busy: runtimePending && nodePending && agentPending.records && agentPending.running, nodeBusy: nodePending,
+        records: { ...(previous.target === target ? previous.records : undefined), busy: agentPending.records }, running: { ...(previous.target === target ? previous.running : undefined), busy: agentPending.running } }))
     }
     const readRuntime = async () => {
       try {
@@ -110,12 +113,31 @@ export function HostRuntimePanel({ host, committed, active, ownerTarget }: { hos
         if (!controller.signal.aborted) setState(previous => ({ ...(previous.target === target ? previous : { target }), nodeError: privateIssue ? `Private service read unavailable: ${privateIssue}. Published resources unavailable: ${error instanceof Error ? error.message : String(error)}` : error instanceof Error ? error.message : String(error), frames: [...(previous.target === target ? previous.frames ?? [] : []), { at: Date.now(), sample: null }].slice(-120) }))
       }
     }
+    const readAgents = async (kind: 'records' | 'running') => {
+      try {
+        const observation = await api.hosts.agentResources(committed!, kind, ownerTarget?.expectedRuntimeId ?? (host.kind === 'ssh' ? host.runtimeId : undefined), { signal: controller.signal })
+        if (controller.signal.aborted) return
+        if (observation.routeHostId !== host.id || observation.kind !== kind || runtimeId !== undefined && observation.owner.state === 'available' && observation.owner.value.runtimeId !== runtimeId)
+          throw new Error('Agent measurements belong to another Host or source. Refresh this original connection.')
+        setState(previous => {
+          const next: State = { ...(previous.target === target ? previous : { target }) }
+          const before = next[kind]?.confirmed
+          const changed = observation.owner.state === 'available' && before?.owner.state === 'available' &&
+            (observation.owner.value.runtimeId !== before.owner.value.runtimeId || observation.owner.value.ownerInstanceId !== before.owner.value.ownerInstanceId)
+          next[kind] = { current: observation, confirmed: observation.measurement.state === 'available' || changed ? observation : before, busy: agentPending[kind] }
+          return next
+        })
+      } catch (error) {
+        if (!controller.signal.aborted) setState(previous => ({ ...(previous.target === target ? previous : { target }), [kind]: { ...(previous.target === target ? previous[kind] : undefined), error: error instanceof Error ? error.message : String(error) } }))
+      }
+    }
     // One clock, at most one in-flight read per source. A slow optional source
     // does not queue duplicates or stop the other original source from sampling.
     const observe = () => {
       if (controller.signal.aborted) return
       if (!runtimePending) { runtimePending = true; void readRuntime().finally(() => { runtimePending = false; pending() }) }
       if (!nodePending) { nodePending = true; void readNode().finally(() => { nodePending = false; pending() }) }
+      for (const kind of ['records', 'running'] as const) if (!agentPending[kind]) { agentPending[kind] = true; void readAgents(kind).finally(() => { agentPending[kind] = false; pending() }) }
       pending()
       timer = setTimeout(observe, 5000)
     }
@@ -138,8 +160,8 @@ export function HostRuntimePanel({ host, committed, active, ownerTarget }: { hos
     {failed ? <p className="host-runtime__issue" role="status" data-diagnostics><InfoIcon size={13} /><span>{failed} {retained ? 'Last confirmed values are kept below.' : 'Refresh to read this original connection again.'}</span></p> : null}
     {saved ? <>
       {state.target === target && state.nodeNotice ? <p className="host-runtime__issue" role="status">{state.nodeNotice}</p> : null}
-      <HostNodeResources reply={state.target === target ? state.nodeReply : undefined} frames={state.target === target ? state.frames ?? [] : []} error={state.target === target ? state.nodeError : undefined} busy={state.target === target && state.nodeBusy === true} active={active && visible} privateOwner={state.target !== target || state.nodePrivate !== false} />
-      <section className="host-runtime__workload" aria-label="Native workload measurements"><header><strong>Native workload</strong><span>Original Run Runtime</span></header>
+      <HostNodeResources reply={state.target === target ? state.nodeReply : undefined} frames={state.target === target ? state.frames ?? [] : []} error={state.target === target ? state.nodeError : undefined} busy={state.target === target && state.nodeBusy === true} active={active && visible} privateOwner={state.target !== target || state.nodePrivate !== false}
+        workload={<section className="host-runtime__workload" aria-label="Native workload measurements"><header><strong>Native workload</strong><span>Original Run Runtime</span></header>
       <div className="host-runtime__resources" aria-label="Retained Runtime resources">
         <div><span>Running Runs</span><strong>{resources?.runningRuns ?? '—'}</strong><small>{resources ? `${resources.runCount} retained in total` : 'Not observed'}</small></div>
         <div><span>Attachments</span><strong>{resources?.attachments ?? '—'}</strong><small>Service readers</small></div>
@@ -147,7 +169,9 @@ export function HostRuntimePanel({ host, committed, active, ownerTarget }: { hos
       </div>
       <SourceIssue source={current?.resources} retained={retained?.resources} />
       {resources ? <p className="host-runtime__sample">Resource sample {time(resources.observedAt)} · {resources.terminatedRuns} ended Runs · {resources.terminatedUnattachedRuns} ended without readers. Retained output is in-memory payload, not disk I/O.</p> : null}
-      </section>
+      </section>}
+        agents={<HostAgentResources records={state.target === target ? state.records : undefined} running={state.target === target ? state.running : undefined} />} />
+
       <div className="host-runtime__environment"><span>Agent service</span><strong>{owner ? owner.availability === 'connected' ? 'Identity confirmed' : 'Connection not verified' : 'Identity not verified'}</strong>
         <span>{diagnostic ? `${diagnostic.platform} · ${diagnostic.arch} · Node ${diagnostic.nodeVersion}` : 'Platform not observed'}</span></div>
       <SourceIssue source={current?.owner} retained={retained?.owner} /><SourceIssue source={current?.diagnostics} retained={retained?.diagnostics} />

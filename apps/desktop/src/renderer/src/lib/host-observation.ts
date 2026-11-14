@@ -17,3 +17,8 @@ export function createRendererHostObservation<T>(read: (host: HostConfig, contex
     } catch (error) { signal?.throwIfAborted(); throw error }
   }
 }
+
+export function createRendererHostAgentResources(read: import('../../../shared/contracts').AgentMuxPreloadApi['hosts']['agentResources']) {
+  return (host: HostConfig, kind: 'records' | 'running', expectedRuntimeId?: string, context?: { signal?: AbortSignal }) =>
+    createRendererHostObservation((saved, cancellation) => read(saved, kind, expectedRuntimeId, cancellation))(host, context)
+}

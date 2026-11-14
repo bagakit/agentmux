@@ -1686,6 +1686,7 @@ export type AgentMuxDesktopApi = {
     prepareTailcatKey(input: AgentMuxRpcParams<'settings.hosts.tailcat-key'>): Promise<AgentMuxRpcResult<'settings.hosts.tailcat-key'>>
     home(host: HostConfig, context?: { signal?: AbortSignal }): Promise<AgentMuxRpcResult<'settings.hosts.home'>>
     inspect(host: HostConfig, context?: { signal?: AbortSignal }): Promise<import('@agentmux/core').HostRuntimeObservation>
+    agentResources(host: HostConfig, kind: 'records' | 'running', expectedRuntimeId?: string, context?: { signal?: AbortSignal }): Promise<import('@agentmux/core').HostAgentResourceObservation>
     network(host: HostConfig, context?: { signal?: AbortSignal }): Promise<import('@agentmux/core').HostNetworkObservation>
     check(host: HostConfig): Promise<HostCheckResult>
     creationTrust(host: HostConfig): Promise<HostCreationTrustSnapshot>
@@ -2301,9 +2302,10 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
   }
   conversation: import('./conversation-read').ConversationReadPreloadApi
   nodePublishing: { call<M extends import('./node-publishing.js').NodePublicMethod>(method: M, params: import('@agentmux/core/node-publishing').NodePublishingParams[M], context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core/node-publishing').NodePublishingResults[M]>>; owner<M extends import('./node-publishing.js').NodeOwnerMethod>(target: import('./node-publishing.js').NodeOwnerTarget, method: M, params: import('@agentmux/core/node-publishing').NodePublishingParams[M], context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core/node-publishing').NodePublishingResults[M]>> }
-  hosts: Omit<AgentMuxDesktopApi['hosts'], 'inspect' | 'network' | 'home'> & {
+  hosts: Omit<AgentMuxDesktopApi['hosts'], 'inspect' | 'network' | 'home' | 'agentResources'> & {
     home(host: HostConfig, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<AgentMuxRpcResult<'settings.hosts.home'>>>
     inspect(host: HostConfig, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core').HostRuntimeObservation>>
+    agentResources(host: HostConfig, kind: 'records' | 'running', expectedRuntimeId?: string, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core').HostAgentResourceObservation>>
     network(host: HostConfig, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core').HostNetworkObservation>>
   }
   browser: Omit<AgentMuxDesktopApi['browser'], 'runScript' | import('./ipc-result').BrowserProfileResultMethod> & {

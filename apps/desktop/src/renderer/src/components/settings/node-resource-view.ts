@@ -1,6 +1,6 @@
 import type { NodeResourceSample } from '@agentmux/core/node-publishing'
 export type NodeSampleFrame = { at: number; sample: NodeResourceSample | null }
-export type NodeTrendPoint = { at: number; hostCpu: number | null; coreCpu: number | null; memoryGiB: number | null; coreGiB: number | null }
+export type NodeTrendPoint = { at: number; hostCpu: number | null; coreCpu: number | null; memoryGiB: number | null; coreGiB: number | null; ioRead: number | null; ioWrite: number | null; ioReadTotal: number | null; ioWriteTotal: number | null }
 const total = (cpu: NodeResourceSample['cpu'] & { state: 'available' }) => cpu.value.userMs + cpu.value.niceMs + cpu.value.systemMs + cpu.value.idleMs + cpu.value.irqMs
 export function sameNodeProcess(a: NodeResourceSample, b: NodeResourceSample) {
   return a.node.runtimeId === b.node.runtimeId && a.node.ownerInstanceId === b.node.ownerInstanceId && a.processId === b.processId
@@ -9,7 +9,7 @@ export function sameNodeProcess(a: NodeResourceSample, b: NodeResourceSample) {
 export function nodeTrendPoints(frames: readonly NodeSampleFrame[]): NodeTrendPoint[] {
   return frames.map(({at,sample},index) => {
     const previous=frames[index-1]?.sample
-    let hostCpu: number|null=null,coreCpu: number|null=null
+    let hostCpu: number|null=null,coreCpu: number|null=null,ioRead: number|null=null,ioWrite: number|null=null
     if(sample&&previous&&sameNodeProcess(sample,previous)&&sample.observedAt>previous.observedAt){
       if(sample.cpu.state==='available'&&previous.cpu.state==='available'&&sample.cpu.value.logicalCpus===previous.cpu.value.logicalCpus){
         const dt=total(sample.cpu)-total(previous.cpu),idle=sample.cpu.value.idleMs-previous.cpu.value.idleMs
@@ -19,8 +19,14 @@ export function nodeTrendPoints(frames: readonly NodeSampleFrame[]): NodeTrendPo
         const delta=sample.process.value.cpuUserMicros+sample.process.value.cpuSystemMicros-previous.process.value.cpuUserMicros-previous.process.value.cpuSystemMicros
         if(delta>=0&&sample.process.value.cpuUserMicros>=previous.process.value.cpuUserMicros&&sample.process.value.cpuSystemMicros>=previous.process.value.cpuSystemMicros)coreCpu=delta/(sample.observedAt-previous.observedAt)/10
       }
+      if(sample.filesystemIo?.state==='available'&&previous.filesystemIo?.state==='available'&&sample.filesystemIo.value.scope===previous.filesystemIo.value.scope){
+        const elapsed=(sample.observedAt-previous.observedAt)/1000
+        const reads=sample.filesystemIo.value.readOperations-previous.filesystemIo.value.readOperations
+        const writes=sample.filesystemIo.value.writeOperations-previous.filesystemIo.value.writeOperations
+        if(reads>=0&&writes>=0){ioRead=reads/elapsed;ioWrite=writes/elapsed}
+      }
     }
-    return {at,hostCpu,coreCpu,memoryGiB:sample?.memory.state==='available'?(sample.memory.value.totalBytes-sample.memory.value.freeBytes)/1024**3:null,coreGiB:sample?.process.state==='available'?sample.process.value.rssBytes/1024**3:null}
+    return {at,hostCpu,coreCpu,ioRead,ioWrite,ioReadTotal:sample?.filesystemIo?.state==='available'?sample.filesystemIo.value.readOperations:null,ioWriteTotal:sample?.filesystemIo?.state==='available'?sample.filesystemIo.value.writeOperations:null,memoryGiB:sample?.memory.state==='available'?(sample.memory.value.totalBytes-sample.memory.value.freeBytes)/1024**3:null,coreGiB:sample?.process.state==='available'?sample.process.value.rssBytes/1024**3:null}
   })
 }
 export function appendNodeSample(frames: readonly NodeSampleFrame[], sample: NodeResourceSample): NodeSampleFrame[] {
