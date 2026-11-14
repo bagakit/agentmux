@@ -8,7 +8,7 @@ import { projectConversationWindow } from '../src/lib/conversation-records'
 import { conversationMessageSourceKey } from '../src/lib/conversation-message-location'
 import { readConversationProcessDetail } from '../src/lib/read-conversation-process-detail'
 import { ConversationView } from '../src/components/ConversationView'
-import { NativeProcessObservation } from '../src/components/NativeProcessObservation'
+import { NativeProcessObservation, NativeProcessStep } from '../src/components/NativeProcessObservation'
 import { ClientUiProvider, type ClientUiPlatform } from '../src/platform'
 import { ActivityView } from '../../../apps/desktop/src/renderer/src/components/ActivityView'
 import { api } from '../../../apps/desktop/src/renderer/src/lib/api'
@@ -27,11 +27,13 @@ beforeEach(() => {
 afterEach(async () => { getSelection()?.removeAllRanges(); for (const close of closes.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 const native = (id: string, timestamp: number, content: unknown[]) => ({ type: id === 'native-call' ? 'assistant' : 'user', uuid: id,
   sessionId: source.nativeSessionId, timestamp: new Date(timestamp).toISOString(), message: { role: id === 'native-call' ? 'assistant' : 'user', content } })
-async function fixture(options: { correlated?: boolean; subject?: 'main' | 'child'; scope?: 'turn'; interleaved?: boolean } = {}) {
+async function fixture(options: { correlated?: boolean; subject?: 'main' | 'child'; scope?: 'turn'; interleaved?: boolean; failed?: boolean; errorText?: boolean } = {}) {
   const f = await nativeHistoryFixture('claude', jsonl([
     native('native-call', 1000, [{ type: 'tool_use', id: 'original-call', name: 'inspect', input: { exact: 'native input' } }]),
     ...(options.interleaved ? [native('other-call', 2500, [{ type: 'tool_result', tool_use_id: 'different-call', content: 'Interleaved result' }])] : []),
-    native('native-result', 3000, [{ type: 'tool_result', tool_use_id: 'original-call', content: 'Original native result' }])
+    native('native-result', 3000, [{ type: 'tool_result', tool_use_id: 'original-call',
+      content: options.errorText ? 'Failure and error are words in this original output.' : 'Original native result',
+      ...(options.failed === undefined ? {} : { is_error: options.failed }) }])
   ]))
   closes.push(f.close)
   const ref = { hostId: 'local', agentSessionId: f.session.agentSessionId }
@@ -82,7 +84,7 @@ it.each([false, true])('the real Core and shared View give one disclosure to adj
   expect(visibleRows(host)).toHaveLength(1)
   const controls = visibleRows(host)[0]!.getAttribute('aria-controls')!.split(' ')
   expect(controls).toHaveLength(3)
-  expect(rows(host).slice(1).map(row => row.getAttribute('aria-controls')!.split(' ').length)).toEqual([1, 1])
+  expect(rows(host).slice(1).map(row => row.getAttribute('aria-controls')!.split(' ').length)).toEqual([3, 3])
   expect(controls.map(id => document.getElementById(id))).not.toContain(null)
   await act(async () => visibleRows(host)[0]!.click())
   await settle(() => { expect(host.textContent).toContain('Original Hook result'); expect(host.textContent).toContain('Original native result') })
@@ -97,6 +99,49 @@ it.each([false, true])('the real Core and shared View give one disclosure to adj
   expect(body.querySelector('pre')?.firstChild).toBe(originalText)
   expect(f.controls.length).toBeGreaterThan(0)
   for (const control of f.controls) expect(control).not.toHaveBeenCalled()
+})
+
+it.each([false, true])('the original failed result keeps a visible shared disclosure, deferred %s', async deferred => {
+  const f = await fixture({ failed: true }), snapshot = await f.read(deferred), { host, render } = surface()
+  await render(view(f, snapshot))
+  expect(visibleRows(host)).toHaveLength(2)
+  const failed = visibleRows(host).find(row => row.dataset.observationStepId === 'native-result')!
+  if (deferred) {
+    // The existing deferred header expresses its original result flag as a recorded row status.
+    expect(failed.textContent).toContain('Failed')
+    expect(failed.getAttribute('data-status')).toBe('failed')
+  } else {
+    expect(failed.textContent).toContain('含失败结果')
+    expect(failed.hasAttribute('data-status')).toBe(false)
+  }
+  const controls = failed.getAttribute('aria-controls')!.split(' ')
+  expect(controls).toEqual(visibleRows(host)[0]!.getAttribute('aria-controls')!.split(' '))
+  expect(controls).toHaveLength(3)
+  await act(async () => failed.click())
+  await settle(() => { expect(host.textContent).toContain('Original Hook result'); expect(host.textContent).toContain('Original native result') })
+  expect(controls.map(id => document.getElementById(id)?.hidden)).toEqual([false, false, false])
+  for (const control of f.controls) expect(control).not.toHaveBeenCalled()
+})
+
+it.each([false, undefined])('failure words do not reveal or label an unflagged result, flag %s', async failed => {
+  const f = await fixture({ failed, errorText: true }), snapshot = await f.read(), { host, render } = surface()
+  await render(view(f, snapshot))
+  expect(visibleRows(host)).toHaveLength(1)
+  expect(host.querySelector('.log-row__issue')).toBeNull()
+  await act(async () => visibleRows(host)[0]!.click())
+  await settle(() => expect(host.textContent).toContain('Failure and error are words in this original output.'))
+})
+
+it('a later failed part remains visible when an earlier result in the same original has no failure flag', async () => {
+  const { host, render } = surface()
+  await render(<NativeProcessStep item={{ id: 'multiple-results', kind: 'activity', contentParts: [
+    { kind: 'tool-result', output: 'First original result' }, { kind: 'tool-result', output: 'Later original result', failed: true }
+  ] }} stepGroup={{ headerHidden: true, bodyId: 'original-result-body', controls: 'original-result-body' }}>
+    <p>Both originals remain available.</p>
+  </NativeProcessStep>)
+  expect(visibleRows(host)).toHaveLength(1)
+  expect(visibleRows(host)[0]!.textContent).toContain('含失败结果')
+  expect(visibleRows(host)[0]!.hasAttribute('data-status')).toBe(false)
 })
 
 it.each([{ correlated: false }, { subject: 'child' as const }, { scope: 'turn' as const }, { interleaved: true }])('unknown, different scoped subjects and interleaved calls retain original steps: %j', async options => {

@@ -10,8 +10,7 @@ import { nativeHistoryFixture, jsonl } from '../../../packages/core/test/fixture
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import * as activityDiff from '@agentmux/client-ui/conversation-tool-diff'
-import { WorkflowCard } from '../src/renderer/src/components/workflow/WorkflowCard'
-import { WorkflowToolRow } from '../src/renderer/src/components/workflow/WorkflowToolRow'
+import { RecordedStepsCard as WorkflowCard, RecordedToolRow as WorkflowToolRow } from '@agentmux/client-ui/components/WorkflowObservation'
 import { writeFile } from 'node:fs/promises'
 
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => <div data-leaf="terminal" /> }))
@@ -55,7 +54,7 @@ async function render(node:ReactNode){await act(async()=>root.render(node))}
 function pane(){return <SessionPane sessionId={ID} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'ws',tabGroupId:'group',tabId:'tab',regionId:'region'}}/>}
 async function mount(items:AgentTimelineItem[]){const snapshot=await record(items);useAppStore.setState({timelines:{[ID]:snapshot}});await render(pane())}
 async function publish(items:AgentTimelineItem[]){const snapshot=await record(items);await act(async()=>useAppStore.setState({timelines:{[ID]:snapshot}}))}
-function group(){const node=host.querySelector<HTMLButtonElement>('.wf-card--observation > .log-fold');expect(node).not.toBeNull();return node!}
+function group(){const node=host.querySelector<HTMLButtonElement>('.wf-card--observation > .wf-observation__header > .log-fold');expect(node).not.toBeNull();return node!}
 function row(id:string){const node=host.querySelector<HTMLElement>(`[data-observation-step-id="${id}"]`);expect(node).not.toBeNull();return node!}
 async function click(node:HTMLElement){await act(async()=>node.click())}
 function select(el:Element){const text=el.firstChild!;const range=document.createRange();range.setStart(text,0);range.setEnd(text,4);const selection=window.getSelection()!;selection.removeAllRanges();selection.addRange(range);expect(selection.toString()).toBe('Keep');return {text,range,selection}}

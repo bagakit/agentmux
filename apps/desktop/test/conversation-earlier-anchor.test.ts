@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from 'vitest'
 import { conversationReadingAnchor, restoreConversationAnchor } from '../src/renderer/src/lib/session-conversation-window'
+import { conversationReadingNode } from '../../../packages/client-ui/src/lib/conversation-body-work'
 
 const surfaces: HTMLElement[] = []
 afterEach(() => { getSelection()?.removeAllRanges(); surfaces.splice(0).forEach(surface => surface.remove()); vi.restoreAllMocks() })
@@ -56,7 +57,9 @@ it('does not create space without the retained row or on a viewport that has no 
 it('anchors the selected native original before a stale visible leading-group candidate', () => {
   const viewport = document.createElement('div'), group = document.createElement('div'), card = document.createElement('div'), head = document.createElement('button'), row = document.createElement('div')
   group.dataset.conversationProcessKey = 'leading'; card.className = 'wf-card--observation'; card.dataset.observationId = 'stable-leading'
-  head.className = 'wf-head'; head.setAttribute('aria-expanded', 'false'); card.append(head); group.append(card)
+  const header = document.createElement('div'), action = document.createElement('button')
+  header.className = 'wf-observation__header'; action.textContent = 'Pin original group'
+  head.className = 'wf-head'; head.setAttribute('aria-expanded', 'false'); header.append(head, action); card.append(header); group.append(card)
   row.dataset.nativeRecordId = 'selected'; row.textContent = 'Original selected body'; viewport.append(group, row); document.body.append(viewport); surfaces.push(viewport)
   let added = 0
   viewport.getBoundingClientRect = () => new DOMRect(0, 0, 600, 400)
@@ -68,6 +71,9 @@ it('anchors the selected native original before a stale visible leading-group ca
   added = 1040; restoreConversationAnchor(viewport, anchor!)
   expect(row.getBoundingClientRect().top).toBe(150); expect(viewport.scrollTop).toBe(1040)
   expect(getSelection()!.getRangeAt(0)).toBe(range)
+  expect(conversationReadingNode(group)).toBe(head)
+  getSelection()!.removeAllRanges(); viewport.scrollTop = 0
+  expect(conversationReadingAnchor(viewport, undefined, false, [head])).toEqual({ kind: 'group', id: 'stable-leading', offset: 30 })
 })
 
 it('uses only existing visible leaves when both selected Range endpoints are offscreen', () => {
@@ -118,9 +124,11 @@ for (const kind of ['segment', 'record', 'group'] as const) it(`restores a known
   if (kind === 'group') {
     row.className = 'wf-card--observation'
     nested.className = 'wf-head'; nested.setAttribute('aria-expanded', 'false'); nested.getBoundingClientRect = nestedRect
-    const child = document.createElement('div'); child.append(nested); row.prepend(child)
+    const child = document.createElement('div'), nestedHeader = document.createElement('div')
+    nestedHeader.className = 'wf-observation__header'; nestedHeader.append(nested); child.append(nestedHeader); row.prepend(child)
     target = document.createElement('button'); target.className = 'wf-head'; target.setAttribute('aria-expanded', 'false')
-    target.getBoundingClientRect = row.getBoundingClientRect; row.append(target)
+    const header = document.createElement('div'); header.className = 'wf-observation__header'
+    target.getBoundingClientRect = row.getBoundingClientRect; header.append(target); row.append(header)
   }
   const range = document.createRange(); range.selectNodeContents(body.firstChild!); getSelection()!.addRange(range)
   const enumerate = vi.spyOn(viewport, 'querySelectorAll')

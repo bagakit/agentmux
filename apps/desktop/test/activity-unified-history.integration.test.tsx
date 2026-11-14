@@ -458,7 +458,7 @@ describe('One Activity reading surface over public original-sequence windows', (
   expect(tail).not.toBeNull(); expect(readingTail).not.toBeNull()
   tail.getBoundingClientRect = () => rect(100 + nativeBottom - viewport.scrollTop, 0)
   readingTail.getBoundingClientRect = () => rect(100 + readingBottom - viewport.scrollTop, 0)
-  const nativeGroup = [...viewport.querySelectorAll<HTMLElement>('.wf-card--observation > .wf-head[aria-expanded="false"]')].at(-1)!
+  const nativeGroup = [...viewport.querySelectorAll<HTMLElement>('.wf-card--observation > .wf-observation__header > .wf-head[aria-expanded="false"]')].at(-1)!
   expect(nativeGroup).toBeDefined()
   nativeGroup.getBoundingClientRect = () => rect(100 + (returning === 'Home' ? -200 : 1730) - viewport.scrollTop, 40)
   const last = Number(ids().at(-1)!.slice('record-'.length)); expect(last).toBeLessThan(2399)

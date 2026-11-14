@@ -109,7 +109,7 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     const feed = host.querySelector<HTMLElement>('.activity-feed'), top = feed?.scrollTop ?? 0
     if (this.matches('.activity-feed')) return rect(0, 600)
-    if (this.matches('[data-native-record-id], .wf-card--observation > .wf-head')) return rect(nativeVisible ? 20 : -1000, 30)
+    if (this.matches('[data-native-record-id], .wf-card--observation > .wf-observation__header > .wf-head')) return rect(nativeVisible ? 20 : -1000, 30)
     if (this.matches('[data-segment-key]')) return rect(400 - top, 1800)
     if (this.matches('.activity-feed__reading')) return rect(20 - top, 30)
     if (this.matches('[data-conversation-native-tail], .activity-log')) return rect(400 - top, 0)
@@ -133,7 +133,7 @@ it.each([{ provider: 'claude', width: 360 }, { provider: 'claude', width: 1100 }
   { provider: 'codex', width: 360 }, { provider: 'codex', width: 1100 }] as const)('$provider captured-only reading at width $width does not borrow the native Earlier cursor, while visible native content still pages normally', async shape => {
   await fixture(shape.provider, shape.width)
   const before = nativeIds(), count = requests.length, cursors = requests.filter(request => request.cursor).length
-  const process = host.querySelector<HTMLButtonElement>('.wf-card--observation > .wf-head')!
+  const process = host.querySelector<HTMLButtonElement>('.wf-card--observation > .wf-observation__header > .wf-head')!
   expect(process).not.toBeNull(); await act(async () => process.click()); expect(process.getAttribute('aria-expanded')).toBe('true')
   const row = host.querySelector('[data-native-record-id="record-449"]')!, body = row.querySelector('.log-turn__body p')!.firstChild!
   const range = document.createRange(); range.selectNodeContents(body); window.getSelection()!.addRange(range)
