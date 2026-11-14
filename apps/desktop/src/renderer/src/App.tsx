@@ -870,7 +870,7 @@ function DesktopApp() {
           onClose={closeSettings}
         />
       ) : null}
-      {documentation.opening ? <DocumentationOverlay opener={documentation.opening.opener} onClose={documentation.close} /> : null}
+      {documentation.opening ? <DocumentationOverlay target={documentation.opening.target} opener={documentation.opening.opener} onClose={documentation.close} /> : null}
       <footer className="window-status-bar">
         <div className="window-status-bar__surface-switch"><SurfaceSwitch settingsOpen={settingsOpen} onCloseSettings={closeSettings} /></div>
         <div className="window-status-bar__right">

@@ -1,16 +1,17 @@
 import { createContext, useCallback, useMemo, useState } from 'react'
 import { useWorkbenchDocument } from '../../lib/workbench-document'
 
-export const DocumentationNavigation = createContext<{ open(): void } | null>(null)
+export type DocumentationTarget = 'protocols' | 'remote-execution'
+export const DocumentationNavigation = createContext<{ open(target?: DocumentationTarget): void } | null>(null)
 
 /** One App-owned reading request. It does not change the underlying workface or drafts. */
 export function useDocumentationOwner() {
   const document = useWorkbenchDocument()
-  const [opening, setOpening] = useState<{ opener: HTMLElement | null } | null>(null)
-  const open = useCallback(() => {
+  const [opening, setOpening] = useState<{ opener: HTMLElement | null; target: DocumentationTarget } | null>(null)
+  const open = useCallback((target: DocumentationTarget = 'protocols') => {
     const active = document.activeElement
     const opener = active?.nodeType === 1 ? active as HTMLElement : null
-    setOpening(current => current ?? { opener })
+    setOpening(current => current?.target === target ? current : { opener, target })
   }, [document])
   const close = useCallback(() => setOpening(null), [])
   const navigation = useMemo(() => ({ open }), [open])

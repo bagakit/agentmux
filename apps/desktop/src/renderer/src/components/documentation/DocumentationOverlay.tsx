@@ -1,12 +1,16 @@
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { useRef } from 'react'
+import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
+import { AGENT_EXECUTION_GUIDE } from '@agentmux/core/agent-execution-guide'
+import type { DocumentationTarget } from './DocumentationNavigation'
 import { DocumentOverlayPortal, markWindowOverlayDismissal } from '../WindowOverlayHost'
 import { AmuxProtocolReference } from './AmuxProtocolReference'
 import './documentation.css'
 
 /** The original pane stays mounted below this read-only document. */
-export function DocumentationOverlay({ opener, onClose }: { opener: HTMLElement | null; onClose(): void }) {
+export function DocumentationOverlay({ opener, onClose, target = 'protocols' }: { opener: HTMLElement | null; onClose(): void; target?: DocumentationTarget }) {
+  const remote = target === 'remote-execution'
   const content = useRef<HTMLDivElement>(null)
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}>
     <DocumentOverlayPortal component={Dialog.Portal}>
@@ -23,12 +27,12 @@ export function DocumentationOverlay({ opener, onClose }: { opener: HTMLElement 
         }}
         onEscapeKeyDown={markWindowOverlayDismissal}>
         <header className="documentation-dialog__header">
-          <span className="documentation-dialog__symbol"><SemanticIcon name="object.amux-protocols" size={22} aria-hidden="true" /></span>
-          <div><span className="documentation-dialog__eyebrow">Documentation</span><Dialog.Title>amux Protocols</Dialog.Title>
-            <Dialog.Description>Original text and readable cards from this app version’s protocol definitions.</Dialog.Description></div>
+          <span className="documentation-dialog__symbol"><SemanticIcon name={remote ? 'object.document' : 'object.amux-protocols'} size={22} aria-hidden="true" /></span>
+          <div><span className="documentation-dialog__eyebrow">Documentation</span><Dialog.Title>{remote ? 'Remote work guide' : 'amux Protocols'}</Dialog.Title>
+            <Dialog.Description>{remote ? 'Project, Agent device and continuing original work. From this app version’s Core guide.' : 'Original text and readable cards from this app version’s protocol definitions.'}</Dialog.Description></div>
           <Dialog.Close className="icon-button" aria-label="Close documentation" title="Close documentation"><SemanticIcon name="action.close" size={16} /></Dialog.Close>
         </header>
-        <AmuxProtocolReference active />
+        {remote ? <div className="documentation-guide"><AgentMarkdown content={AGENT_EXECUTION_GUIDE} documentMode readOnly visible /></div> : <AmuxProtocolReference active />}
       </Dialog.Content>
     </DocumentOverlayPortal>
   </Dialog.Root>

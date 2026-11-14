@@ -1,12 +1,10 @@
-import { useState } from 'react'
-import { AGENT_EXECUTION_GUIDE } from '@agentmux/core/agent-execution-guide'
-import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
+import { useContext } from 'react'
+import { DocumentationNavigation } from '../documentation/DocumentationNavigation'
 
-/** One Core-owned guide, read locally without opening resources or starting work. */
+/** One entry into the App-owned document reader and the canonical offline Core guide. */
 export function RemoteExecutionGuide({ active }: { active: boolean }) {
-  const [open, setOpen] = useState(false)
-  return <details className="remote-execution-guide" data-settings-field="guide" onToggle={event => setOpen(event.currentTarget.open)}>
-    <summary>Step-by-step guide <span>Project · Agent device · continue work</span></summary>
-    {open && active ? <div className="remote-execution-guide__body"><AgentMarkdown content={AGENT_EXECUTION_GUIDE} documentMode readOnly visible /></div> : null}
-  </details>
+  const documentation = useContext(DocumentationNavigation)
+  return <div className="remote-execution-guide" data-settings-field="guide">
+    <button type="button" className="agent-work-text-action" onClick={() => { if (active) documentation?.open('remote-execution') }}>Remote work guide</button>
+  </div>
 }
