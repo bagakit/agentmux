@@ -22,6 +22,8 @@ test('the original viewer gets safe saved choices and the real D inventory despi
   const read = await f.rpc.call('route.executors', { agentTarget: choices.routes[0]!.agentTarget, executorId: 'same-executor' })
   expect(read.agentTarget).toEqual(choices.routes[0]!.agentTarget)
   expect(read.inventory).toMatchObject({ runtimeId: 'runtime-D', executors: [{ executorId: 'same-executor', command: '/private/runtime-D/original-command', availability: 'unknown' }] })
+  expect(read.inventory.executors[0]!.launchOptions).toEqual(f.original.client.catalog().find(provider => provider.id === 'claude')!.launchOptions)
+  expect(read.inventory.executors[0]!.creationContract).toEqual({ ordinaryLaunch: 1 })
   expect(read.observation).toMatchObject({ route: f.route, logicalHops: 2, actor: f.actor, complete: true })
   expect(JSON.stringify(read.inventory)).not.toMatch(/private-argument|private-environment|"env"|"args"/)
   expect(f.inventory).toHaveBeenCalledExactlyOnceWith({ refresh: false, executorId: 'same-executor' })
@@ -112,6 +114,7 @@ test('the actual CLI reads the same original route choices and executor owner', 
   expect(read.code, read.stderr).toBe(0)
   expect(JSON.parse(read.stdout).result).toMatchObject({ agentTarget: choices.routes[0].agentTarget,
     inventory: { runtimeId: 'runtime-D', executors: [{ executorId: 'same-executor', availability: 'unknown' }] } })
+  expect(JSON.parse(read.stdout).result.inventory.executors[0].launchOptions).toEqual(f.original.client.catalog().find(provider => provider.id === 'claude')!.launchOptions)
   expect(f.inventory).toHaveBeenCalledExactlyOnceWith({ refresh: false, executorId: 'same-executor' })
   expect(f.native).not.toHaveBeenCalled(); expect(f.creation).not.toHaveBeenCalled()
 })

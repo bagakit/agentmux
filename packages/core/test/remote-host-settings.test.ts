@@ -1,4 +1,6 @@
 import { fixturePath } from './helpers/fixture-values.js'
+import { runSourceObjectCli } from './helpers/source-object-cli.js'
+import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxCreationAuthority } from '../src/agent-creation-authority.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
@@ -163,6 +165,18 @@ it('public Unix discovery and registration consume the executing Host owner, pre
   expect(JSON.stringify(saved)).not.toMatch(/remote-private|saved-argument|"env"|"args"/)
   const unchecked = await rpc.call('settings.executors.discover', { hostId: 'remote', refresh: false })
   expect(unchecked.executors.every(executor => executor.availability === 'unknown')).toBe(true)
+  const query = {hostId:'remote',refresh:false,executorId:'custom'}, inventory = vi.spyOn(f.client,'listHostExecutors')
+  const selected = rpc.call('settings.executors.discover',query)
+  await expect(selected).resolves.toMatchObject({routeHostId:'remote',runtimeId:'target-runtime',executors:[{executorId:'custom',creationContract:{ordinaryLaunch:1}}]})
+  expect((await selected).executors).toHaveLength(1)
+  expect((await selected).executors[0]!.launchOptions).toEqual(f.client.catalog().find(provider=>provider.id==='claude')!.launchOptions)
+  expect(inventory).toHaveBeenCalledExactlyOnceWith({refresh:false,executorId:'custom'})
+  expect(()=>parseHostSettingsResult('settings.executors.discover',unchecked,query)).toThrow()
+  const cli = await runSourceObjectCli(['--endpoint','unix:'+server.path,'settings','executors','discover','--host','remote','--executor','custom','--refresh','false'],objectCliEnvironment(f.root))
+  expect(cli.code,cli.stderr).toBe(0);expect(JSON.parse(cli.stdout).result.executors).toHaveLength(1)
+  expect(JSON.parse(cli.stdout).result.executors[0].launchOptions).toEqual((await selected).executors[0]!.launchOptions)
+  expect(await parseSettingsCommand(['executors','discover','--host','remote','--executor','custom','--refresh','false'])).toEqual({method:'settings.executors.discover',params:query})
+
   expect(await parseSettingsCommand(['executors', 'discover', '--host', 'remote'])).toEqual({ method: 'settings.executors.discover', params: { hostId: 'remote', refresh: true } })
   await expect(rpc.call('settings.executors.register', { hostId: 'remote', executorId: 'custom', input: { config: {
     label: 'Overwrite', providerId: 'claude', command: fixturePath("local/copied/path"), args: [], env: {}, injectAgentMuxGuide: true

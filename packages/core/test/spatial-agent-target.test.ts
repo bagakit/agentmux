@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { mkdtemp, rm, readFile } from 'node:fs/promises'
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
@@ -9,6 +9,9 @@ import { AgentMuxSpatialStateStore } from '../src/spatial-state.js'
 import { spatialAgentOpenRecord, isHeadlessSpatialAgentOpen, isBackgroundLocalAgentOpen } from '../src/spatial-agent-open.js'
 import { readSpaceSnapshot } from '../src/space-authority-stream.js'
 import { parseAgentMuxCliInvocation } from '../src/agentmux-cli-commands.js'
+import { rpcControlRequest } from '../src/rpc-business-codec.js'
+import { runSourceObjectCli } from './helpers/source-object-cli.js'
+import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
 import { createHostSpatialAgentControl } from '../../../apps/host/src/spatial-agent-control.js'
 import type { AgentMuxHeadlessRuntime } from '../src/headless-runtime.js'
 import type { AgentExecutionOpenInput } from '../src/agent-execution-coordinator.js'
@@ -19,7 +22,7 @@ afterEach(async () => { for (const release of releases.splice(0).reverse()) awai
 
 /** This preflight isolates spatial ownership: target control/Native creation are
  * explicit leaves. It is not the separate two-Core Native execution proof. */
-async function fixture() {
+async function fixture(sourceContext = '  Source business context\n') {
   const root = await mkdtemp(join(tmpdir(), 'amx-spatial-target-')); releases.push(() => rm(root, { recursive: true, force: true }))
   const spatial = new AgentMuxSpatialStateStore(join(root, 'spatial.json'))
   const folder = await spatial.registerFolder({ id: 'b-workspace', hostId: 'local', name: 'B project', path: '/b/project' })
@@ -35,7 +38,7 @@ async function fixture() {
   const agentInput = vi.fn(async () => { throw Error('No Agent input belongs to this Host continuation fixture.') })
   const client = { writeAgent: agentInput, pasteAgent: agentInput, submitAgentPrompt: agentInput, resolveAgentCreationSessionId: vi.fn(async () => 'original-d-session'),
     inspectAgentCreation: vi.fn(async () => { if (!observed) throw new AgentMuxError('No original creation is observed.', 'AGENT_CREATION_UNKNOWN'); return observed }),
-    listHostExecutors: vi.fn(async () => ({ runtimeId, executors: [{ executorId: 'd-executor', configRevision: 'd-original-revision' }] })),
+    listHostExecutors: vi.fn(async () => ({ runtimeId, executors: [{ executorId: 'd-executor', configRevision: 'd-original-revision', creationContract: { ordinaryLaunch: 1 } }] })),
     hostEnvironment: vi.fn(async () => ({ homeDirectory: '/d/home' })), createHostAgentWithDelivery: create }
   const bindings = { create: vi.fn(async (input: AgentExecutionOpenInput) => {
       frozen = structuredClone(input)
@@ -56,7 +59,8 @@ async function fixture() {
   const identity = { runtimeId: 'runtime-b', ownerInstanceId: 'instance-b', protocolVersion: 2, processId: process.pid, ctxmux: null, availability: 'connected' }
   const runtime = { client: { inspectAgentCreation: vi.fn(async () => { throw Error('A B-local SID lookup cannot locate a D Session.') }) }, ownerIdentity: () => identity,
     executionHost: vi.fn(async (hostId: string) => { expect(hostId).toBe('D-in-B'); return { runtimeId, client } }), executionBindings: bindings } as unknown as AgentMuxHeadlessRuntime
-  const control = createHostSpatialAgentControl({ configurationPath: join(root, 'unused-local-executor-config.json'), spatial, runtime: () => runtime })
+  const control = createHostSpatialAgentControl({ configurationPath: join(root, 'unused-local-executor-config.json'), spatial, runtime: () => runtime,
+    agentMuxContext: async () => sourceContext })
   const server = new AgentMuxControlServer({ socketPath: join(root, 'rpc.sock'), spatialState: spatial, coreClients: () => [], spatialAgentControl: control,
     hostedRuntime: () => ({ call: async () => ({ owner: identity }), assertFence: () => {}, subscribe: async () => { throw Error('General Host events are not a source admission prerequisite.') } }) as never })
   releases.push(() => server.stop()); await server.start()
@@ -66,6 +70,41 @@ async function fixture() {
   return { root, rpc, spatial, runtime, client, create, bindings, input, folder, control, agentInput,
     pending: () => { pending = true }, partialAfterStart: () => { partialAfterStart = true }, changeRuntime: () => { runtimeId = 'another-runtime' }, frozen: () => frozen }
 }
+
+it('the public Source describes its actual owner and preserves complete CLI launch fields into the foreign child', async () => {
+  const f = await fixture()
+  expect(await f.rpc.call('agent.open.describe', { expectedRuntimeId: 'runtime-b' })).toEqual({
+    source: { runtimeId: 'runtime-b', ownerInstanceId: 'instance-b' }, contracts: { ordinaryLaunch: { revision: 1, destination: 'source-zone-background' }, externalAssociation: null } })
+  expect(f.runtime.executionHost).not.toHaveBeenCalled()
+  const options = join(f.root, 'options.json'); await writeFile(options, JSON.stringify({ model: 'target-choice' }))
+  const prompt = '  Original task\n', note = '  Caller note\n'
+  const args = ['agent','open','--executor','d-executor','--agent-host','D-in-B','--agent-runtime','runtime-d',
+    '--space',f.folder.spaceId,'--zone',f.folder.zoneId,'--new-tab','--operation-id',f.input.operationId,
+    '--prompt',prompt,'--agentmux-note',note,'--launch-options',options,'--cols','117','--rows','39']
+  const parsed = await parseAgentMuxCliInvocation(args)
+  const request = rpcControlRequest('agent.open',parsed.params)
+  if (request.operation !== 'agent.open' || request.content.kind !== 'new-agent') throw Error('Exact new Agent input required')
+  const wire = {operationId:request.requestId,content:request.content,destination:request.destination,focus:request.focus}
+  const described = await runSourceObjectCli(['--endpoint','unix:'+f.root+'/rpc.sock','agent','open','describe','--runtime','runtime-b'],objectCliEnvironment(f.root))
+  expect(described.code,described.stderr).toBe(0);expect(JSON.parse(described.stdout).result.contracts.ordinaryLaunch).toEqual({revision:1,destination:'source-zone-background'})
+  const skill = await runSourceObjectCli(['space','--skill'],objectCliEnvironment(f.root))
+  expect(skill.code,skill.stderr).toBe(0);expect(skill.stdout).toContain('agent open describe');expect(skill.stdout).toContain('--launch-options')
+  const launched = await runSourceObjectCli(['--endpoint','unix:'+f.root+'/rpc.sock',...args],objectCliEnvironment(f.root))
+  expect(launched.code,launched.stderr).toBe(0);expect(JSON.parse(launched.stdout).result).toMatchObject({outcome:'opened'})
+  expect(f.frozen()?.agent).toMatchObject({ prompt, agentMuxNote: note, sourceAgentMuxNote: '  Source business context\n', launchOptions: { model: 'target-choice' }, cols: 117, rows: 39 })
+  const original = structuredClone(f.frozen())
+  await expect(f.rpc.call('agent.open', { ...wire, content: { ...wire.content, rows: 40 } })).rejects.toMatchObject({ code: 'SPACE_REQUEST_CONFLICT' })
+  expect(f.frozen()).toEqual(original); expect(f.bindings.create).toHaveBeenCalledTimes(1)
+})
+it('an old target creation handler cannot receive new Source fields after helper Start, while original reads stay independent', async () => {
+  const f = await fixture()
+  f.client.listHostExecutors.mockResolvedValueOnce({ runtimeId: 'runtime-d', executors: [{ executorId: 'd-executor', configRevision: 'd-original-revision' }] } as never)
+  await expect(f.rpc.call('agent.open', f.input)).rejects.toMatchObject({ code: 'AGENT_OPEN_CONTRACT_UNCONFIRMED' })
+  expect(f.create).not.toHaveBeenCalled(); expect(f.bindings.create).not.toHaveBeenCalled()
+  expect(spatialAgentOpenRecord((await f.spatial.read())!.graph, f.input.operationId)).toBeNull()
+  expect(await f.rpc.call('space.inspect', { target: { operationId: f.input.operationId } })).toMatchObject({ request: { known: false } })
+  expect(f.input.operationId).toBe('source-create-operation')
+})
 
 it('the actual CLI retains a B-relative Agent route and Runtime and does not route it to a focused Desktop creator', async () => {
   const input = await parseAgentMuxCliInvocation(['agent', 'open', '--executor', 'd-executor', '--agent-host', 'D-in-B', '--agent-runtime', 'runtime-d', '--space', 'b-space', '--zone', 'b-zone', '--new-tab'])
@@ -175,4 +214,39 @@ it('a retained foreign creation without its original Runtime pin remains unconfi
   expect(f.runtime.client.inspectAgentCreation).not.toHaveBeenCalled();expect(f.runtime.executionHost).not.toHaveBeenCalled()
   expect(await readFile(f.spatial.path,'utf8')).toBe(before)
   expect((await f.spatial.read())!.graph.regions).toMatchObject([{regionId:admitted.record.address.regionId,agentSessionId:sid,runId:null}])
+})
+
+
+it('an empty optional Source context does not add a contract gate to the original prompt-only creation', async () => {
+  const f = await fixture('')
+  f.client.listHostExecutors.mockResolvedValueOnce({runtimeId:'runtime-d',executors:[{executorId:'d-executor',configRevision:'d-original-revision'}]} as never)
+  expect(await f.rpc.call('agent.open',f.input)).toMatchObject({outcome:'opened'})
+  expect(f.frozen()!.agent).not.toHaveProperty('sourceAgentMuxNote');expect(f.bindings.create).toHaveBeenCalledTimes(1)
+})
+
+
+it('the background local Host creator preserves the same ordinary fields without going through a foreign coordinator', async () => {
+  const f = await fixture()
+  await writeFile(join(f.root,'unused-local-executor-config.json'),JSON.stringify({executors:{'d-executor':{label:'Original',providerId:'codex',command:'codex',args:[],env:{},injectAgentMuxGuide:false}}}))
+  const create = vi.fn(async (input: import('../src/client-contract.js').AgentMuxAgentCreateInput) => {
+    if (!input.agentSessionId || !input.createOperationId) throw Error('Original local creation identities are required')
+    return await f.create({...input,agentSessionId:input.agentSessionId,createOperationId:input.createOperationId,executorRevision:'local-config-revision'})
+  })
+  Object.assign(f.runtime.client,{resolveAgentCreationSessionId:f.client.resolveAgentCreationSessionId,inspectAgentCreation:f.client.inspectAgentCreation,createAgentWithDelivery:create})
+  const {agentTarget:_target,...content} = f.input.content
+  const fields = {agentMuxNote:'  caller note\n',launchOptions:{model:'selected'},cols:117,rows:39}
+  expect(await f.rpc.call('agent.open',{...f.input,content:{...content,...fields,prompt:'  original task\n'}})).toMatchObject({outcome:'opened'})
+  expect(create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({...fields,prompt:'  original task\n',sourceAgentMuxNote:'  Source business context\n'}))
+  expect(f.runtime.executionHost).not.toHaveBeenCalled();expect(f.bindings.create).not.toHaveBeenCalled()
+})
+
+
+it('an original launch with ordinary fields continues its frozen binding without a new description gate', async () => {
+  const f = await fixture();f.partialAfterStart()
+  const request = {...f.input,content:{...f.input.content,agentMuxNote:'original caller note',cols:117}}
+  expect(await f.rpc.call('agent.open',request)).toMatchObject({outcome:'partial'})
+  const original = structuredClone(f.frozen());delete f.control.describe
+  f.client.listHostExecutors.mockRejectedValue(Error('Current discovery cannot replace an original creation.'))
+  expect(await f.rpc.call('agent.open',request)).toMatchObject({outcome:'opened',agent:{runId:'original-d-run'}})
+  expect(f.bindings.create).toHaveBeenCalledTimes(1);expect(f.bindings.continueOriginal).toHaveBeenCalledTimes(1);expect(f.frozen()).toEqual(original)
 })

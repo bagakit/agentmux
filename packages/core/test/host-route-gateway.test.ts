@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentMuxCreationAuthority, agentCreationIntentDigest } from '../src/agent-creation-authority.js'
+import { executionRouteScope } from '../src/host-route-execution.js'
 import { HostRouteGateway, delegatedHostRouteActor } from '../src/host-route-gateway.js'
 import { hostRouteTransport, routedAgentMuxRpc, executionRouteRpc } from '../src/host-route-rpc.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
@@ -387,4 +388,58 @@ test('related route cost stays two pinned edges and zero unrelated dispatches wi
   expect(f.traffic.map(value => value.kind).sort()).toEqual(first)
   expect(first).toEqual(['call', 'call'])
   expect(f.arrivals).toHaveLength(2)
+})
+
+test('an actual spatial parent binds the complete caller launch contribution and actual target child without rewriting old scopes', async () => {
+  const f = await fixture(), a = f.e, actor = {source:a.identity,...principal}
+  const parentRoute: AdoptedHostRoute = {source:a.identity,hops:[{edgeId:'B',target:f.b.identity}]}
+  const launch = {agentMuxNote:'  Caller note\n',launchOptions:{mode:'selected'},cols:117,rows:39}
+  const input = {bindingId:'launch-binding',agentHostId:'D-over-C',agentRuntimeId:f.d.identity.runtimeId,agentRoute:f.route,
+    resourceHostId:'local',resourceRuntimeId:f.b.identity.runtimeId,resourceWorkspacePath:'/B/project',resourceGrant:{scope:'host-user' as const,bindingId:'launch-binding'},
+    agent:{agentSessionId:'launch-SID',createOperationId:'launch-CID',executorId:'selected',executorRevision:'revision',workspacePath:'/D/home',prompt:'  task\n',...launch,sourceAgentMuxNote:'Source-owned context'}}
+  await f.configure(a,[{id:'B',route:parentRoute}],[])
+  await f.configure(f.b,[{id:'D',route:f.route}],[{id:'A-open',delegator:a.identity,actor,destination:f.b.identity,scopes:['agent.open']}])
+  for (const [node,delegator] of [[f.c,f.b.identity],[f.d,f.c.identity]] as const)
+    await f.configure(node,[],[{...f.grant('exact-create',delegator,actor),scopes:['runtime.invoke/createHostAgentWithDelivery']}])
+  let retained: HostRouteExecutionAuthorization | undefined
+  f.intercept.set('B',async (_method,_params,context) => {
+    retained = await f.b.gateway.authorizeExecution(input,context)
+    await expect(f.b.gateway.authorizeExecution({...input,agent:{...input.agent,agentMuxNote:'changed'}},context)).rejects.toMatchObject({code:'HOST_ROUTE_DERIVATION_MISMATCH'})
+    return {admitted:true}
+  })
+  const request = {operationId:'launch-CID',content:{kind:'new-agent' as const,executorId:'selected',agentTarget:{hostId:'D-over-C',runtimeId:f.d.identity.runtimeId,adoptedRoute:f.route},prompt:'  task\n',...launch},destination:{spaceId:'B-space',zoneId:'B-zone',newTab:true as const},focus:false}
+  await routedAgentMuxRpc(a.rpc,'B',parentRoute).call('agent.open',request)
+  expect(retained!.scope.kind).toBe('execution')
+  expect(retained!.parent!.statement.operation).toMatchObject({kind:'spatial',launchDigest:agentCreationIntentDigest(launch)})
+  const child = {...input.agent,toolExecution:{bindingId:input.bindingId,resourceHostId:input.resourceHostId,resourceRuntimeId:input.resourceRuntimeId,workspacePath:input.resourceWorkspacePath}}
+  const sdk = executionRouteRpc(f.b.gateway,f.route,retained!)
+  await sdk.call('runtime.invoke',{...f.call.params,invocation:{method:'createHostAgentWithDelivery',args:[child]}})
+  await expect(sdk.call('runtime.invoke',{...f.call.params,invocation:{method:'createHostAgentWithDelivery',args:[{...child,sourceAgentMuxNote:'changed source'}]}})).rejects.toMatchObject({code:'HOST_ROUTE_DERIVATION_MISMATCH'})
+  // A real old-shaped parent cannot authorize extra contributions on a new child.
+  const {agentMuxNote:_note,launchOptions:_options,cols:_cols,rows:_rows,...oldContent}=request.content
+  await expect(routedAgentMuxRpc(a.rpc,'B',parentRoute).call('agent.open',{...request,content:oldContent})).rejects.toMatchObject({code:'HOST_ROUTE_DERIVATION_MISMATCH'})
+})
+
+
+test('an original signed scope remains byte-identical during continuation and its full input digest cannot be widened', async () => {
+  const f = await fixture()
+  const input = {bindingId:'legacy-binding',agentHostId:'D',agentRuntimeId:f.d.identity.runtimeId,agentRoute:f.route,
+    resourceHostId:'local',resourceRuntimeId:f.b.identity.runtimeId,resourceWorkspacePath:'/B/project',resourceGrant:{scope:'host-user' as const,bindingId:'legacy-binding'},
+    agent:{agentSessionId:'legacy-SID',createOperationId:'legacy-CID',executorId:'selected',executorRevision:'revision',workspacePath:'/D/home',agentMuxNote:'Original historic note',launchOptions:{mode:'original'},cols:80}}
+  const scope = executionRouteScope(input,false)
+  const original = await f.b.authority.attestHostRouteExecution({schema:'agentmux.host-route-execution.v1',purpose:'host-route-execution',actor:{source:f.b.identity,...principal},scope})
+  const bytes = JSON.stringify(original)
+  expect(await f.b.gateway.retainExecution(input,{principal},original,true)).toEqual(original)
+  expect(JSON.stringify(original)).toBe(bytes);expect(original.scope).not.toHaveProperty('launchDigest')
+  await expect(f.b.gateway.retainExecution({...input,agent:{...input.agent,cols:81}},{principal},original,true)).rejects.toMatchObject({code:'HOST_ROUTE_DERIVATION_MISMATCH'})
+})
+
+test('Source contract metadata requires its own exact read grant and reports the actual remote assembly', async () => {
+  const f = await fixture(true), sdk = routedAgentMuxRpc(f.b.rpc,'D',f.route)
+  await expect(sdk.call('agent.open.describe',{expectedRuntimeId:f.d.identity.runtimeId})).rejects.toMatchObject({code:'HOST_ROUTE_NOT_DELEGATED'})
+  for (const [node,delegator] of [[f.c,f.b.identity],[f.d,f.c.identity]] as const)
+    await f.configure(node,[],[{...f.grant('source-metadata',delegator),scopes:['agent.open.describe']}])
+  expect(await sdk.call('agent.open.describe',{expectedRuntimeId:f.d.identity.runtimeId})).toEqual({source:{runtimeId:f.d.identity.runtimeId,ownerInstanceId:'fixture-instance'},contracts:{ordinaryLaunch:null,externalAssociation:null}})
+  expect(f.arrivals.at(-1)!.actor).toEqual({source:f.b.identity,...principal})
+  await expect(sdk.call('agent.open.describe',{expectedRuntimeId:'another-Source'})).rejects.toMatchObject({code:'RUNTIME_OWNER_MISMATCH'})
 })

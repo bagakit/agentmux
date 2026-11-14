@@ -41,9 +41,11 @@ describe('target Host Executor owner', () => {
     expect(selected.executors.map(value => value.executorId)).toEqual(['selected'])
     expect(selected.executors[0]?.availability).toBe('available')
     expect(observations).toBe(1)
+    expect(selected.executors[0]?.launchOptions).toEqual(catalog.find(provider => provider.id === 'codex')!.launchOptions)
     expect(JSON.stringify(selected)).not.toContain('PRIVATE_VALUE')
     expect((await owner.list({ executorId: 'missing' })).executors).toEqual([])
     expect((await owner.list()).executors.map(value => value.executorId)).toEqual(['codex', 'claude', 'selected', 'unrelated'])
+    expect((await owner.list()).executors.every(value => value.launchOptions === undefined)).toBe(true)
   })
 
   it('discovers only target Provider defaults and distinguishes unchecked, available and missing without writing configuration', async () => {
