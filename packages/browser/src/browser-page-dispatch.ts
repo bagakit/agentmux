@@ -438,15 +438,18 @@ export function createBrowserPageDispatch(
       if (owned !== true) throw covered
     } finally { await send('Runtime.releaseObject', { objectId: hitObject }).catch(() => {}) }
     if (!node.sessionId) return { x, y }
-    // Out-of-process frame: its quads are in its own document. Add the frame owner's content origin in
-    // the top-level document, and prove that origin is what the top-level hit test sees at the sum.
-    const owner = await read<{ backendNodeId?: number }>(session.sendCommand, 'DOM.getFrameOwner', { frameId: node.frameId })
+    // Quads are relative to this CDP target's viewport, including its same-process descendants.
+    // Translate its root once, rather than treating a descendant document as a top-level target.
+    const unconverted = (reason: string) => notDispatched(`The position of the frame holding ${ref} in the top-level page could not be established${reason}, ` +
+      'so a native press could land on the wrong element. Nothing was pressed; use an element of the top-level document or inspect the frame.')
+    const tree = await read<{ frameTree?: { frame?: { id?: string } } }>(send, 'Page.getFrameTree', {})
+    const rootFrameId = tree.value?.frameTree?.frame?.id
+    if (!rootFrameId) throw unconverted(tree.reason)
+    const owner = await read<{ backendNodeId?: number }>(session.sendCommand, 'DOM.getFrameOwner', { frameId: rootFrameId })
     const ownerId = owner.value?.backendNodeId
     const box = ownerId === undefined ? owner
       : await read<{ model?: { content?: number[] } }>(session.sendCommand, 'DOM.getBoxModel', { backendNodeId: ownerId })
     const origin = (box.value as { model?: { content?: number[] } } | undefined)?.model?.content
-    const unconverted = (reason: string) => notDispatched(`The position of the frame holding ${ref} in the top-level page could not be established${reason}, ` +
-      'so a native press could land on the wrong element. Nothing was pressed; use an element of the top-level document or inspect the frame.')
     if (!origin || origin.length < 2 || !Number.isFinite(origin[0]) || !Number.isFinite(origin[1])) throw unconverted(box.reason)
     const top = { x: Math.round(x + origin[0]!), y: Math.round(y + origin[1]!) }
     const topHit = await read<{ backendNodeId?: number }>(session.sendCommand, 'DOM.getNodeForLocation',
