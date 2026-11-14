@@ -94,6 +94,30 @@ describe('Mote calendar original schedule consumer', () => {
     expect(dom.container.querySelector('[data-schedule-id="other"] .schedule-arrangement__message')?.textContent).toBe('Other automation')
   })
 
+  it('filters selected-period receipt actions and reads along with their original schedules', async () => {
+    const readHistory = vi.fn<NonNullable<FutureProgressInputOwner['readHistory']>>(async (record, query) => {
+      if (query.bucketStarts) return { coverage: 'recorded-inputs', entries: [], buckets: [], nextCursor: null }
+      return { coverage: record.loopId === 'fault' ? 'unconfirmed' : 'recorded-inputs', entries: [],
+        nextCursor: record.loopId === 'pages' ? 'original-cursor' : null }
+    })
+    await owner([saved('fault'), saved('pages'), saved('visible')], readHistory)
+    await dom.render(<MoteCalendar scope={scope} reference={reference} active />)
+    await vi.waitFor(() => expect(readHistory).toHaveBeenCalledTimes(3))
+    await dom.click('[data-mote-date="' + DateTime.fromMillis(now, { zone: 'UTC' }).toISODate() + '"]')
+    const detail = () => dom.container.querySelector('.mote-calendar__events')!
+    await vi.waitFor(() => {
+      expect(detail().textContent).toContain('Retry')
+      expect(detail().textContent).toContain('Earlier events')
+    })
+    readHistory.mockClear()
+    await dom.click('[aria-label="Search and filter arrangements"]')
+    await edit('Search arrangements', 'visible')
+    expect(detail().textContent).toContain('visible')
+    expect(detail().textContent).not.toContain('Retry')
+    expect(detail().textContent).not.toContain('Earlier events')
+    expect(readHistory).not.toHaveBeenCalled()
+  })
+
   it('keeps an earlier completed event with its frozen recap after the latest input moves', async () => {
     const selectedDate = DateTime.fromMillis(now, { zone: 'UTC' }).minus({ days: 1 })
     const range = calendarDayWindow(selectedDate)
