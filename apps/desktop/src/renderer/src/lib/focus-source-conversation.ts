@@ -1,10 +1,10 @@
 import { consumeConversationWindowPage, projectConversationWindow, type ConversationObservation,
   type ConversationWindowAssembly } from '@agentmux/core/conversation'
-import type { SpaceMountMemberSurface } from '../../../shared/space-mount'
+import type { SpaceMountReadingSurface } from '../../../shared/space-mount'
 import type { ConversationReadApi } from '../../../shared/conversation-read'
 
 /** The common Reader's port, fixed to one original member; no observer-local fallback. */
-export function sourceConversationPort(surface: SpaceMountMemberSurface, agentSessionId: string,
+export function sourceConversationPort(surface: SpaceMountReadingSurface, agentSessionId: string,
   observations: Map<string, (event: ConversationObservation) => void>, lifetime: AbortSignal): ConversationReadApi {
   const original = (input: { hostId: string; agentSessionId: string }) => {
     if (input.hostId !== 'local' || input.agentSessionId !== agentSessionId) throw Error('This reading belongs to another original Agent. The original task and reading are retained.')
@@ -33,7 +33,8 @@ export function sourceConversationPort(surface: SpaceMountMemberSurface, agentSe
         if (closed.signal.aborted) return
         if (readerId) {
           observations.delete(readerId)
-          void surface.call('conversationUnwatch', { readerId }).catch(cause => console.warn('[focus-source] Conversation reader release unconfirmed', cause))
+          // Releasing the containing surface already releases its Main-owned readers.
+          if (!lifetime.aborted) void surface.call('conversationUnwatch', { readerId }).catch(cause => console.warn('[focus-source] Conversation reader release unconfirmed', cause))
         }
         options?.signal?.removeEventListener('abort', dispose); lifetime.removeEventListener('abort', dispose); closed.abort()
       }

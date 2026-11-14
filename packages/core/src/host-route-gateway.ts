@@ -323,7 +323,7 @@ export class HostRouteGateway {
   /** The original Space owner has already checked this exact member/admission.
    * It signs one current viewer action, never a creator's retained input grant. */
   async authorizeMemberControl(input: SpaceMemberParams[keyof SpaceMemberParams] & { createOperationId: string }, context: AgentMuxRpcCallContext): Promise<HostRouteExecutionAuthorization> {
-    const identity = await this.identity(), stream = input.call.method === 'runtime.events' || input.call.method === 'runtime.attachment-watch' || input.call.method === 'runtime.replay-watch'
+    const identity = await this.identity(), stream = input.call.method === 'runtime.events' || input.call.method === 'runtime.attachment-watch' || input.call.method === 'runtime.replay-watch' || input.call.method === 'runtime.conversation-watch'
     const parsed = parseSpaceMemberParams(stream ? 'space.member.watch' : 'space.member.call', { target: input.target, call: input.call })
     if (parsed.target.reference.runtimeId !== identity.runtimeId) denied('This Core does not own the original member Space.', 'HOST_ROUTE_TARGET_MISMATCH')
     return await this.options.authority.attestHostRouteExecution({ schema: 'agentmux.host-route-execution.v1', purpose: 'host-route-execution', ...await this.origin(context),

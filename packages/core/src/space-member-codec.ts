@@ -2,7 +2,7 @@ import { AgentMuxError } from './errors.js'
 import { rpcRecord, rpcString } from './rpc-data.js'
 import { decodeHostedValue } from './hosted-value.js'
 import { AGENTMUX_HOSTED_RPC_FIELDS } from './hosted-client-contract.js'
-import { parseSpaceMemberIdentity, SPACE_MEMBER_CALLS, SPACE_MEMBER_STREAMS, SPACE_MEMBER_INVOCATIONS, parseSpaceMemberAdmission, type SpaceMemberTarget, type SpaceMemberParams } from './space-member.js'
+import { parseSpaceMemberIdentity, SPACE_MEMBER_CALLS, SPACE_MEMBER_STREAMS, SPACE_MEMBER_INVOCATIONS, parseSpaceMemberAdmission, type SpaceMemberTarget, type SpaceMemberRoute, type SpaceMemberParams } from './space-member.js'
 import { validateAgentInputControlId, validateAgentInputWaitRef } from './agent-input-wait.js'
 import { parseConversationTimelineReadInput, parseConversationCheckpointInput, parseConversationChangesInput, parseConversationWatchInput, parseConversationViewReleaseInput } from './conversation-changes.js'
 
@@ -13,11 +13,20 @@ export function parseSpaceMemberTarget(value: unknown): SpaceMemberTarget {
   const { expectedRun, ...identity } = p, run = rpcRecord(expectedRun, ['runId'])
   return { ...parseSpaceMemberIdentity(identity), expectedRun: { runId: rpcString(run.runId, 'Original Run') } }
 }
+export function parseSpaceMemberRoute(value: unknown): SpaceMemberRoute {
+  const p = rpcRecord(value)
+  if (p.kind !== 'conversation') return parseSpaceMemberTarget(value)
+  rpcRecord(p, ['kind', 'reference', 'regionId', 'runtimeId', 'agentSessionId', 'expectedAdmission'])
+  const { kind: _kind, ...identity } = p
+  return { ...parseSpaceMemberIdentity(identity), kind: 'conversation', expectedAdmission: parseSpaceMemberAdmission(p.expectedAdmission) }
+}
 /** A finite target check shared with the routed receiver; full argument semantics
  * and effects still belong to the original Hosted/Provider/Native methods. */
-export function assertSpaceMemberCall(target: SpaceMemberTarget, call: { method: string; params: unknown }, stream: boolean): void {
+export function assertSpaceMemberCall(target: SpaceMemberRoute, call: { method: string; params: unknown }, stream: boolean): void {
   const allowed: readonly string[] = stream ? SPACE_MEMBER_STREAMS : SPACE_MEMBER_CALLS
   if (!allowed.includes(call.method)) throw new AgentMuxError('This method is outside the original Space member interaction surface.', 'CONTROL_PERMISSION_DENIED')
+  if (!('expectedRun' in target) && (call.method === 'runtime.bootstrap' || call.method === 'runtime.events')) throw new AgentMuxError(
+    'Conversation access does not open another Session or process observation.', 'CONTROL_PERMISSION_DENIED')
   const p = rpcRecord(call.params, AGENTMUX_HOSTED_RPC_FIELDS[call.method as keyof typeof AGENTMUX_HOSTED_RPC_FIELDS])
   if (call.method === 'runtime.owner.identity') { if (p.expectedRuntimeId !== target.runtimeId) mismatch(); return }
   const fence = rpcRecord(p.fence, ['runtimeId', 'ownerInstanceId'])
@@ -34,7 +43,7 @@ export function assertSpaceMemberCall(target: SpaceMemberTarget, call: { method:
     if (!Array.isArray(p.agentSessionIds) || p.agentSessionIds.length !== 1 || p.agentSessionIds[0] !== target.agentSessionId || p.sessions !== undefined && p.sessions !== 'full') mismatch()
     return
   }
-  const run = (value: unknown) => { if (typeof value === 'string' ? value !== target.expectedRun.runId : rpcRecord(value).runId !== target.expectedRun.runId) mismatch() }
+  const run = (value: unknown) => { if (!('expectedRun' in target) || (typeof value === 'string' ? value !== target.expectedRun.runId : rpcRecord(value).runId !== target.expectedRun.runId)) mismatch() }
   if (call.method === 'runtime.attachment-watch' || call.method === 'runtime.replay-watch') {
     const ref = rpcRecord(p.target, ['kind', 'agentSessionId', 'runId'])
     if (ref.kind !== 'agent-session' && ref.kind !== 'terminal-run' || ref.kind === 'agent-session' && ref.agentSessionId !== target.agentSessionId) mismatch()
@@ -54,6 +63,7 @@ export function assertSpaceMemberCall(target: SpaceMemberTarget, call: { method:
     if (invocation.args.length === 2) rpcRecord(invocation.args[1], [])
     return
   }
+  if (!('expectedRun' in target)) throw new AgentMuxError('This original member target grants conversation reading only, without Native or input control.', 'CONTROL_PERMISSION_DENIED')
   if (invocation.method === 'rejoinAgentInputWaiting') {
     if (invocation.args.length !== 1) throw new AgentMuxError('Member rejoin accepts only its original waiting reference.', 'INVALID_CONTROL_REQUEST')
     const input = rpcRecord(first, ['ref']), ref = validateAgentInputWaitRef(input.ref)
@@ -96,7 +106,7 @@ export function assertSpaceMemberCall(target: SpaceMemberTarget, call: { method:
   if (invocation.method !== 'inspectAgentInteractionOperation') run(input.expectedRun)
 }
 export function parseSpaceMemberParams<M extends keyof SpaceMemberParams>(method: M, value: unknown): SpaceMemberParams[M] {
-  const p = rpcRecord(value, ['target', 'call']), target = parseSpaceMemberTarget(p.target), call = rpcRecord(p.call, ['method', 'params'])
+  const p = rpcRecord(value, ['target', 'call']), target = parseSpaceMemberRoute(p.target), call = rpcRecord(p.call, ['method', 'params'])
   const original = { method: rpcString(call.method, 'Original Hosted method'), params: call.params }
   assertSpaceMemberCall(target, original, method === 'space.member.watch')
   return { target, call: original } as SpaceMemberParams[M]

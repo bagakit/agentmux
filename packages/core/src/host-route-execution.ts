@@ -32,7 +32,7 @@ export function executionRouteScope(input: AgentExecutionOpenInput, includeLaunc
 export function memberRouteOperation(input: SpaceMemberParams[keyof SpaceMemberParams]): HostRouteMemberOperation {
   const { target, call } = input
   return { kind: 'space-member', runtimeId: target.reference.runtimeId, spaceId: target.reference.spaceId, regionId: target.regionId,
-    targetRuntimeId: target.runtimeId, agentSessionId: target.agentSessionId, runId: target.expectedRun.runId, method: call.method, paramsDigest: digest(call.params),
+    targetRuntimeId: target.runtimeId, agentSessionId: target.agentSessionId, ...('expectedRun' in target ? { runId: target.expectedRun.runId } : { access: 'conversation' as const }), method: call.method, paramsDigest: digest(call.params),
     ...(target.expectedAdmission ? { expectedAdmission: target.expectedAdmission } : {}) }
 }
 export function memberNameRouteOperation(method: 'space.member.name.inspect' | 'space.member.name.change', input: unknown): HostRouteMemberNameOperation {
@@ -133,9 +133,9 @@ export function assertExecutionChild(statement: HostRouteStatement, call: HostRo
     const operation = scope.operation
     if (destination !== operation.targetRuntimeId) deny()
     const target = { reference: { runtimeId: operation.runtimeId, spaceId: operation.spaceId }, regionId: operation.regionId,
-      runtimeId: operation.targetRuntimeId, agentSessionId: operation.agentSessionId, expectedRun: { runId: operation.runId },
+      runtimeId: operation.targetRuntimeId, agentSessionId: operation.agentSessionId, ...(operation.access === 'conversation' ? { kind: 'conversation' as const } : { expectedRun: { runId: operation.runId } }),
       ...(operation.expectedAdmission ? { expectedAdmission: operation.expectedAdmission } : {}) }
-    assertSpaceMemberCall(target, call, stream)
+    assertSpaceMemberCall(operation.access === 'conversation' ? { ...target, kind: 'conversation', expectedAdmission: operation.expectedAdmission! } : target as import('./space-member.js').SpaceMemberTarget, call, stream)
     // Exact metadata is the original action's target check. It cannot submit
     // input, read another SID or turn a snapshot parent into an input grant.
     if (call.method === 'runtime.owner.identity') return

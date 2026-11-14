@@ -41,6 +41,7 @@ export type SpaceMountEvent = { type: 'snapshot'; snapshot: SpaceSnapshot } | { 
 export type SpaceMountSessionsEvent = { type: 'observation'; observation: SpaceSessionsObservation } | { type: 'error'; error: { code: string; message: string } }
 export type SpaceMountPort = {
   member(input: SpaceMountMemberTarget, listener: (event: SpaceMountMemberEvent) => void, signal?: AbortSignal): Promise<SpaceMountMemberSurface>
+  reading(input: SpaceMountReadingTarget, listener: (event: SpaceMountMemberEvent) => void, signal?: AbortSignal): Promise<SpaceMountReadingSurface>
   call<M extends keyof SpaceMountMethods>(method: M, input: SpaceMountMethods[M]['input'], signal?: AbortSignal): Promise<SpaceMountMethods[M]['result']>
   watch(input: SpaceMountWatch, listener: (event: SpaceMountEvent) => void, signal?: AbortSignal): Promise<{ initial: SpaceSnapshot; dispose(): void }>
   sessions(input: SpaceMountTarget, listener: (event: SpaceMountSessionsEvent) => void, signal?: AbortSignal): Promise<{ initial: SpaceSessionsOpening; dispose(): void }>
@@ -48,7 +49,7 @@ export type SpaceMountPort = {
 export const SPACE_MOUNT_EVENT = 'spaceMounts:event'
 export const SPACE_MOUNT_SESSIONS_EVENT = 'spaceMounts:sessionsEvent'
 export type SpaceMountPreloadApi = {
-  member(input: SpaceMountMemberTarget, listener: (event: SpaceMountMemberEvent) => void, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<import('./contracts').SessionInputOperationResult<SpaceMountPreloadMemberSurface>>
+  member(input: SpaceMountMemberRoute, listener: (event: SpaceMountMemberEvent) => void, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<import('./contracts').SessionInputOperationResult<SpaceMountPreloadMemberSurface>>
   call<M extends keyof SpaceMountMethods>(method: M, input: SpaceMountMethods[M]['input'], context?: { onAbort?: (cancel: () => void) => () => void }): Promise<import('./contracts').SessionInputOperationResult<SpaceMountMethods[M]['result']>>
   watch(input: SpaceMountWatch, listener: (event: SpaceMountEvent) => void, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<import('./contracts').SessionInputOperationResult<{ initial: SpaceSnapshot; dispose(): void }>>
   sessions(input: SpaceMountTarget, listener: (event: SpaceMountSessionsEvent) => void, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<import('./contracts').SessionInputOperationResult<{ initial: SpaceSessionsOpening; dispose(): void }>>
@@ -58,6 +59,8 @@ export const spaceMountKey = (reference: SpaceAuthorityRef) => JSON.stringify([r
 
 /** One viewing surface; inner identities always remain at their original Core. */
 export type SpaceMountMemberTarget = { hostId: string; target: import('@agentmux/core/space-member').SpaceMemberTarget }
+export type SpaceMountReadingTarget = { hostId: string; target: import('@agentmux/core/space-member').SpaceMemberReadingTarget }
+export type SpaceMountMemberRoute = { hostId: string; target: import('@agentmux/core/space-member').SpaceMemberRoute }
 export type SpaceMountMemberIdentity = { id: string; hostId: string }
 export type SpaceMountMemberEvent =
   | { type: 'session'; session: import('./contracts').SessionSnapshot }
@@ -86,6 +89,10 @@ export type SpaceMountMemberSurface = {
   initial: SpaceMountMemberIdentity
   call<M extends keyof SpaceMountMemberMethods>(method: M, input: SpaceMountMemberMethods[M]['input'], signal?: AbortSignal): Promise<SpaceMountMemberMethods[M]['result']>
   dispose(): void | Promise<void>
+}
+export type SpaceMountReadingMethods = Pick<SpaceMountMemberMethods, 'conversationRead' | 'conversationCheckpoint' | 'conversationChanges' | 'conversationRelease' | 'conversationWatch' | 'conversationUnwatch'>
+export type SpaceMountReadingSurface = Pick<SpaceMountMemberSurface, 'initial' | 'dispose'> & {
+  call<M extends keyof SpaceMountReadingMethods>(method: M, input: SpaceMountReadingMethods[M]['input'], signal?: AbortSignal): Promise<SpaceMountReadingMethods[M]['result']>
 }
 /** AbortSignal belongs to Renderer; only functions cross the isolated bridge. */
 export type SpaceMountPreloadMemberSurface = Omit<SpaceMountMemberSurface, 'call'> & {

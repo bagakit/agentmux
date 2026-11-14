@@ -1,4 +1,4 @@
-import { parseSpaceMemberTarget } from '@agentmux/core/space-member-codec'
+import { parseSpaceMemberRoute } from '@agentmux/core/space-member-codec'
 import { parseHostRouteAgentTarget } from '@agentmux/core/host-route'
 import { parseNameControlParams } from '@agentmux/core/name-control'
 import type { AppConfig } from '../shared/contracts.js'
@@ -118,7 +118,7 @@ export function registerSpaceMountIpc(ports: {
   ports.handle('spaceMounts:member', (event, token: string, value: unknown) => reader(event, token, SPACE_MOUNT_MEMBER_EVENT, async (signal, listener) => {
     const p = fields(value, ['hostId', 'target'])
     if (!ports.config) throw new Error('The original App configuration owner is unavailable for this member presentation.')
-    const surface = await ports.runtime.openMountedSpaceMember({ hostId: host(p.hostId), target: parseSpaceMemberTarget(p.target) }, ports.config(), listener, signal)
+    const surface = await ports.runtime.openMountedSpaceMember({ hostId: host(p.hostId), target: parseSpaceMemberRoute(p.target) }, ports.config(), listener, signal)
     const key = `${event.sender.id}:${token}`; members.set(key, surface); surface.start()
     return { initial: surface.initial, dispose: async () => { if (members.get(key) === surface) members.delete(key); await surface.dispose() } }
   }))

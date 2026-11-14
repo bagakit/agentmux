@@ -2786,7 +2786,7 @@ export class RuntimeController {
     const snapshot = await rpc.call('app.snapshot', { include: ['workspaces'] }, { ...(signal ? { signal } : {}), runtimeFence: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId } })
     return { hostId, runtimeId: owner.runtimeId, workspaces: snapshot.workspaces }
   }
-  async openMountedSpaceMember(input: import('../shared/space-mount.js').SpaceMountMemberTarget, config: AppConfig,
+  async openMountedSpaceMember(input: import('../shared/space-mount.js').SpaceMountMemberRoute, config: AppConfig,
     listener: (event: import('../shared/space-mount.js').SpaceMountMemberEvent) => void, signal: AbortSignal) {
     const carrier = this.spaceMountHost(input.hostId)
     return await createSpaceMemberSurface(input, { ...carrier,

@@ -1,11 +1,11 @@
 import { connectHostedAgentMux } from './hosted-client.js'
 import { parseHostedBootstrap } from './hosted-value.js'
 import { mintObjectId } from './object-id.js'
-import { parseSpaceMemberTarget, parseSpaceMemberParams } from './space-member-codec.js'
+import { parseSpaceMemberRoute, parseSpaceMemberParams } from './space-member-codec.js'
 import { rpcRecord } from './rpc-data.js'
 import type { AgentMuxRpcClient } from './public-rpc-client.js'
 import type { AgentMuxHostedClient, AgentMuxHostedRpcPort, AgentMuxHostedStreamEvent } from './hosted-client-contract.js'
-import type { SpaceMemberTarget } from './space-member.js'
+import type { SpaceMemberTarget, SpaceMemberReadingTarget, SpaceMemberRoute } from './space-member.js'
 
 export type SpaceMemberClient = Pick<AgentMuxHostedClient, 'connect' | 'dispose' | 'onEvent' | 'onRunEvent' | 'runtimeOwnerIdentity' | 'runtimeIdentity' |
   'catalog' | 'providers' | 'agentSessions' | 'agentSession' | 'readAgentSession' | 'reattachAgent' | 'attachTerminal' |
@@ -21,8 +21,12 @@ export type SpaceMemberClient = Pick<AgentMuxHostedClient, 'connect' | 'dispose'
 
 /** Reuse the original exact-SID Hosted client and its reader/attachment machinery.
  * The carrier cannot invoke an arbitrary remote method or change this member. */
-export async function connectSpaceMember(rpc: Pick<AgentMuxRpcClient, 'call' | 'subscribe'>, value: SpaceMemberTarget): Promise<SpaceMemberClient> {
-  const target = parseSpaceMemberTarget(value)
+export type SpaceMemberReadingClient = Pick<SpaceMemberClient, 'dispose' | 'readAgentConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'releaseConversationView' | 'observeConversation'>
+export function connectSpaceMember(rpc: Pick<AgentMuxRpcClient, 'call' | 'subscribe'>, value: SpaceMemberTarget): Promise<SpaceMemberClient>
+export function connectSpaceMember(rpc: Pick<AgentMuxRpcClient, 'call' | 'subscribe'>, value: SpaceMemberReadingTarget): Promise<SpaceMemberReadingClient>
+export function connectSpaceMember(rpc: Pick<AgentMuxRpcClient, 'call' | 'subscribe'>, value: SpaceMemberRoute): Promise<SpaceMemberClient | SpaceMemberReadingClient>
+export async function connectSpaceMember(rpc: Pick<AgentMuxRpcClient, 'call' | 'subscribe'>, value: SpaceMemberRoute): Promise<SpaceMemberClient> {
+  const target = parseSpaceMemberRoute(value)
   const port = {
     async call(method: string, params: unknown, options: { signal?: AbortSignal } = {}) {
       const input = parseSpaceMemberParams('space.member.call', { target, call: { method, params } })
@@ -34,7 +38,7 @@ export async function connectSpaceMember(rpc: Pick<AgentMuxRpcClient, 'call' | '
       const p = rpcRecord(params)
       // The original SDK's SID attachment shorthand has no Run argument. This
       // fixed carrier adds only its already explicit expected Run, never a new one.
-      const current = method === 'runtime.attachment-watch' || method === 'runtime.replay-watch' ? { ...p,
+      const current = 'expectedRun' in target && (method === 'runtime.attachment-watch' || method === 'runtime.replay-watch') ? { ...p,
         target: { ...rpcRecord(p.target), runId: target.expectedRun.runId } } : p
       const input = parseSpaceMemberParams('space.member.watch', { target, call: { method, params: current } })
       return await rpc.subscribe('space.member.watch', input, handlers)

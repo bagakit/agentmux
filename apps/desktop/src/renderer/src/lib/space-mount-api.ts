@@ -1,4 +1,4 @@
-import type { SpaceMountPreloadApi, SpaceMountPort } from '../../../shared/space-mount'
+import type { SpaceMountPreloadApi, SpaceMountPort, SpaceMountMemberRoute, SpaceMountMemberSurface } from '../../../shared/space-mount'
 import { unwrapSessionInputOperationResult } from '../../../shared/session-input-result'
 
 const cancellation = (signal?: AbortSignal) => signal ? { onAbort: (cancel: () => void) => {
@@ -6,20 +6,22 @@ const cancellation = (signal?: AbortSignal) => signal ? { onAbort: (cancel: () =
   signal.addEventListener('abort', cancel, { once: true }); return () => signal.removeEventListener('abort', cancel)
 } } : undefined
 export function createRendererSpaceMount(preload: SpaceMountPreloadApi): SpaceMountPort {
-  return {
-    member: async (input, listener, signal) => {
+  const member = async (input: SpaceMountMemberRoute, listener: Parameters<SpaceMountPort['member']>[1], signal?: AbortSignal): Promise<SpaceMountMemberSurface> => {
+    signal?.throwIfAborted()
+    const result = unwrapSessionInputOperationResult(await preload.member(input, listener, cancellation(signal)))
+    try {
       signal?.throwIfAborted()
-      const result = unwrapSessionInputOperationResult(await preload.member(input, listener, cancellation(signal)))
-      try {
-        signal?.throwIfAborted()
-        return { initial: result.initial, dispose: result.dispose, call: async (method, input, requestSignal) => {
-          requestSignal?.throwIfAborted()
-          const reply = await result.call(method, input, cancellation(requestSignal))
-          requestSignal?.throwIfAborted()
-          return reply
-        } }
-      } catch (error) { await result.dispose(); throw error }
-    },
+      return { initial: result.initial, dispose: result.dispose, call: async (method, input, requestSignal) => {
+        requestSignal?.throwIfAborted()
+        const reply = await result.call(method, input, cancellation(requestSignal))
+        requestSignal?.throwIfAborted()
+        return reply
+      } }
+    } catch (error) { await result.dispose(); throw error }
+  }
+  return {
+    member,
+    reading: member,
     call: async (method, input, signal) => {
       signal?.throwIfAborted()
       const result = await preload.call(method, input, cancellation(signal))

@@ -43,8 +43,8 @@ export async function resolveSpaceMemberIdentity(store: AgentMuxSpatialStateStor
   return { kind: 'execution', tabId: region.tabId, execution: { hostId, runtimeId, createOperationId: admission.requestId, ...(admission.execution.adoptedRoute ? { adoptedRoute: admission.execution.adoptedRoute } : {}) } }
 }
 
-/** IO keeps its original external-Coordinator boundary; naming may still locate the Source Tab. */
-export async function resolveSpaceMember(store: AgentMuxSpatialStateStore, target: SpaceMemberTarget): Promise<ResolvedSpaceMember> {
+/** Conversation and control retain the external-Coordinator boundary; naming can still locate the Source Tab. */
+export async function resolveSpaceMember(store: AgentMuxSpatialStateStore, target: SpaceMemberIdentity): Promise<ResolvedSpaceMember> {
   const identity = await resolveSpaceMemberIdentity(store, target)
   if (identity.kind === 'external') throw new AgentMuxError('This member is controlled by its original independent Coordinator. Use that separately authenticated SDK; Source membership grants no reverse transport or input.', 'SPACE_MEMBER_EXTERNAL_COORDINATOR')
   return identity.execution

@@ -98,7 +98,7 @@ export async function spaceMemberRuntime(ports: {
   const fencedInput = invocation && ['writeAgent', 'pasteAgent', 'submitAgentPrompt', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting', 'signalAgent'].includes(String(invocation.method))
   const originalReceipt = invocation && ['inspectAgentInput', 'inspectAgentPromptSubmission', 'inspectAgentInteractionOperation'].includes(String(invocation.method))
   const exactAttachment = (input.call.method === 'runtime.attachment-watch' || input.call.method === 'runtime.replay-watch') && rpcRecord(p.target).kind === 'agent-session'
-  if (input.call.method !== 'runtime.owner.identity' && input.call.method !== 'runtime.release-consumer' && !fencedInput && !originalReceipt && !exactAttachment) {
+  if ('expectedRun' in input.target && input.call.method !== 'runtime.owner.identity' && input.call.method !== 'runtime.release-consumer' && !fencedInput && !originalReceipt && !exactAttachment) {
     const read = rpcRecord(await port.call('runtime.invoke', { consumerId: rpcString(p.consumerId, 'Original member reader'),
       fence: p.fence, invocation: { method: 'readAgentSession', args: [input.target.agentSessionId] } }, context))
     const session = parseHostedAgentSessionRead(decodeHostedValue(read.value), input.target.agentSessionId)

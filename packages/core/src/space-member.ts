@@ -28,6 +28,9 @@ export function parseSpaceMemberIdentity(value: unknown): SpaceMemberIdentity {
 }
 export type SpaceMemberTarget = SpaceMemberIdentity & { expectedRun: AgentMuxRunRef }
 export type PinnedSpaceMemberIdentity = SpaceMemberIdentity & { expectedAdmission: SpaceMemberAdmission }
+/** Durable conversation access cannot grant Native observation, attachment or input. */
+export type SpaceMemberReadingTarget = PinnedSpaceMemberIdentity & { kind: 'conversation' }
+export type SpaceMemberRoute = SpaceMemberTarget | SpaceMemberReadingTarget
 export const SPACE_MEMBER_INVOCATIONS = [
   'readAgentSession', 'runtimeSubject', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
   'releaseRunAttachment', 'resizeTerminal', 'writeAgent', 'pasteAgent', 'submitAgentPrompt',
@@ -48,8 +51,8 @@ export type SpaceMemberHostedWatch<M extends SpaceMemberStreamMethod = SpaceMemb
 }[M]
 export const SPACE_MEMBER_METHODS = { 'space.member.call': 'long', 'space.member.watch': 'long' } as const
 export type SpaceMemberParams = {
-  'space.member.call': { target: SpaceMemberTarget; call: SpaceMemberHostedCall }
-  'space.member.watch': { target: SpaceMemberTarget; call: SpaceMemberHostedWatch }
+  'space.member.call': { target: SpaceMemberRoute; call: SpaceMemberHostedCall }
+  'space.member.watch': { target: SpaceMemberRoute; call: SpaceMemberHostedWatch }
 }
 export type SpaceMemberResults = {
   'space.member.call': AgentMuxHostedRuntimeResultMap[SpaceMemberCallMethod]
