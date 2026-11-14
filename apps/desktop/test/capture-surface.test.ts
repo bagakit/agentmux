@@ -232,6 +232,25 @@ it('a deferred exposure with one bad display updates no ready geometry and atomi
   }
 })
 
+it('a deferred exposure with a changed safeTop updates no ready geometry and atomically publishes failed instead', async () => {
+  const deferred = pending<ReturnType<typeof frames>>()
+  electron.workbench = [{ isDestroyed: () => false, isVisible: () => true, isMinimized: () => false, getOpacity: () => 1, setOpacity: vi.fn() }]
+  ports.native.mockReturnValue({ captureDisplays: vi.fn().mockResolvedValueOnce(frames()).mockImplementationOnce(() => deferred.promise) })
+  const { overlays } = await opened()
+  const malformed = frames(); malformed.displays[1]!.safeTop = 12
+  deferred.resolve(malformed)
+  await vi.advanceTimersByTimeAsync(0)
+  for (const overlay of overlays) {
+    const latest = await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(loadEvent(overlay.window), 'load') as CaptureSurfaceInput
+    expect(latest.revision).toBe(2)
+    expect(latest.backgrounds.excluded).toMatchObject({ status: 'failed', issue: expect.stringContaining('display layout changed') })
+    expect(overlay.window.webContents.send).toHaveBeenCalledWith(CAPTURE_SURFACE_EVENT, expect.objectContaining({ kind: 'snapshot', revision: 2, background: 'excluded',
+      frame: expect.objectContaining({ status: 'failed' }) }))
+    expect(overlay.window.webContents.send).not.toHaveBeenCalledWith(CAPTURE_SURFACE_EVENT, expect.objectContaining({ kind: 'snapshot', background: 'excluded',
+      frame: expect.objectContaining({ status: 'ready' }) }))
+  }
+})
+
 it('cancel releases an early load and a late result cannot grab, revive or replace the next capture', async () => {
   const late = pending<ReturnType<typeof frames>>()
   const captureDisplays = vi.fn().mockImplementationOnce(() => late.promise).mockResolvedValue(frames())
@@ -627,6 +646,13 @@ it('a public selection whose excluded exposure is unavailable fails instead of o
   expect(observed, 'the unavailable requested source must produce a typed failure, not an included fallback').toEqual({
     state: 'failed', error: { code: 'host_window_exclusion_unavailable', message: 'CoreGraphics cannot exclude the visible host' }
   })
+})
+
+it('an excluded-first double failure preserves the requested excluded error code and message', async () => {
+  electron.workbench = [{ isDestroyed: () => false, isVisible: () => true, isMinimized: () => false, getOpacity: () => 1, setOpacity: vi.fn() }]
+  const excluded = Object.assign(new Error('excluded pixels are unavailable'), { code: 'host_window_exclusion_unavailable' })
+  ports.native.mockReturnValue({ captureDisplays: vi.fn().mockRejectedValueOnce(excluded).mockRejectedValueOnce(new Error('included pixels failed too')) })
+  expect(await surface.captureSelection(false)).toEqual({ state: 'failed', error: { code: 'host_window_exclusion_unavailable', message: 'excluded pixels are unavailable' } })
 })
 
 async function expandedDelivery() {
