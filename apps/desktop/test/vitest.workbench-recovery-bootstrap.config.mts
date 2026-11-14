@@ -7,6 +7,8 @@ const root = resolve(import.meta.dirname, '../../..')
 const mutation = process.env.AGENTMUX_BOOTSTRAP_MUTATION
 const edits: Record<string, [string, string, string]> = {
   'main-load-before-recovery': ['apps/desktop/src/main/index.ts', '    await recoverWorkbench()', '    void recoverWorkbench()'],
+  'main-load-before-identity': ['apps/desktop/src/main/index.ts', '    await runtimeIdentityRecovery.check()', '    void runtimeIdentityRecovery.check()'],
+  'accept-wrong-runtime-binding': ['packages/core/src/semantic-runtime-identity.ts', 'value.authority !== authority', 'false'],
   'skip-missing-originals': ['apps/desktop/src/main/workbench-recovery-bootstrap.ts', "if (!absent.length) return { state: 'unchanged' }", "if (true) return { state: 'unchanged' }"],
   'unknown-default-write': ['apps/desktop/src/main/workbench-recovery-bootstrap.ts', 'options.user.retainRecoveryGaps(', 'options.user.observe('],
   'disconnect-host-source': ['apps/host/src/host.ts', "recoverySources: [createDesktopStorageRecoverySource(() => desktopClient({ transport: 'unix' }))],", 'recoverySources: [],']

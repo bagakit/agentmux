@@ -20,6 +20,30 @@ async function ready() { for (let i = 0; i < 150 && !dom.container.querySelector
 async function settled(check: () => boolean) { for (let i=0;i<200;i++) { if (check()) return; await act(async()=>{await new Promise(done=>setTimeout(done,15))}) }; throw Error('GUI did not settle: '+dom.container.textContent) }
 async function input(label: string, value: string) { await act(async () => { const element = dom.container.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[aria-label="${label}"]`)!; Object.getOwnPropertyDescriptor(element.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(element, value); element.dispatchEvent(new Event('input', { bubbles: true })) }) }
 function inspectOnly() { return vi.spyOn(api.mesh, 'call').mockImplementation(async method => structuredClone(method === 'mesh.inspect' ? observation() : settings) as never) }
+it('Mesh shows the App recovery action before Host answers, and reopens setup after recovery', async () => {
+  let restored = false
+  const read = vi.spyOn(api.ui, 'readLocalRuntimeRecovery').mockResolvedValue({ state: 'needs-backup', code: 'IDENTITY_SOURCE_MISSING' })
+  const choose = vi.spyOn(api.ui, 'restoreLocalRuntimeIdentity').mockResolvedValueOnce({ state: 'needs-backup', code: 'IDENTITY_BACKUP_UNVERIFIED' })
+    .mockImplementationOnce(async () => { restored = true; return { state: 'restored' } })
+  const call = vi.spyOn(api.mesh, 'call').mockImplementation(async (method, _params, context) => {
+    if (!restored) return await new Promise((_resolve, reject) => {
+      context?.signal?.addEventListener('abort', () => reject(Error('Cancelled first read')), { once: true })
+    })
+    return structuredClone(method === 'mesh.inspect' ? observation() : settings) as never
+  })
+  try {
+    await dom.render(<Editor active onConnections={vi.fn()} />)
+    await settled(() => dom.container.textContent?.includes('Restore this Mac’s identity') ?? false)
+    expect(dom.container.textContent).toContain('Open saved connections')
+    await dom.click('[data-mesh-settings] .primary-button')
+    expect(dom.container.textContent).toContain('That file couldn’t confirm this Mac’s original identity')
+    await dom.click('[data-mesh-settings] .primary-button')
+    await ready()
+    expect(choose.mock.calls).toEqual([[], []])
+    expect(call.mock.calls.filter(([method]) => method === 'settings.mesh.inspect')).toHaveLength(2)
+    expect(dom.container.textContent).toContain('Connect to a gateway')
+  } finally { read.mockRestore(); choose.mockRestore(); call.mockRestore() }
+})
 it('the original Settings section exposes Mesh and a real editor; saved connection identities keep their original route', async () => {
   inspectOnly(); expect(hostsSettingsModule.id).toBe('hosts'); expect(hostsSettingsModule.title).toBe('Mesh')
   await dom.render(<hostsSettingsModule.Pane config={useAppStore.getState().config!} active onClose={vi.fn()} onNavigate={vi.fn()} navigationRequest={{section:'hosts',field:'mesh-configuration'}} />)

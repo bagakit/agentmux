@@ -11,6 +11,7 @@ import { WorkbenchWindowStore } from '../src/main/workbench-window-store'
 import { WorkbenchCloseOwner } from '../src/main/workbench-close-owner'
 import { DesktopStorageRecoveryExports } from '../src/main/storage-recovery-exports'
 import { recoverWorkbenchBeforeLoad } from '../src/main/workbench-recovery-bootstrap'
+import { localRuntimeRecovery } from '../src/main/local-runtime-recovery'
 
 const roots: string[] = [], cleanups: Array<() => Promise<unknown>> = []
 const body = JSON.stringify({ version: 1, state: { agentComposerDrafts: { original: 'Original unsent input' }, agentSteerQueues: { original: [{ operationId: 'original-prompt', text: 'Original queued input', status: 'queued', promptCondition: null }] } } }) + '\n'
@@ -76,6 +77,52 @@ it('a cold data owner restores only original Main members without constructing o
   expect((await current.windows.load()).state.mainWindowId).toBe('original-native-window')
 })
 
+it('Desktop boot restores missing identity from its verified backup and the same Host answers Mesh again', async () => {
+  const f = await backedUpHost()
+  const identity = join(f.directory, 'semantic-runtime.json')
+  const original = await readFile(identity)
+  const before = await f.rpc.call('settings.mesh.inspect', {})
+  await f.rpc.dispose(); await f.host.dispose()
+  await unlink(identity); await unlink(identity + '.original')
+  const recovery = localRuntimeRecovery(f.source)
+  expect(await recovery.check()).toEqual({ state: 'restored' })
+  expect(await readFile(identity)).toEqual(original)
+  await expect(readFile(f.source.user.path)).rejects.toMatchObject({ code: 'ENOENT' })
+  expect(await recoverWorkbenchBeforeLoad(f.owners())).toMatchObject({ state: 'restored' })
+  expect(JSON.parse((await f.source.user.read())!).state.agentComposerDrafts.original).toBe('Original unsent input')
+
+  const host = await startAgentMuxHost({ store: new AgentMuxFileAgentSessionStore(f.source.storePath), socketPath: f.source.socketPath,
+    desktopSocketPath: f.source.desktopSocketPath, mobileBuildDirectory: join(f.root, 'no-mobile-assets'), mobilePort: 0 })
+  cleanups.push(() => host.dispose())
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: f.source.socketPath } }); cleanups.push(() => rpc.dispose())
+  const after = await rpc.call('settings.mesh.inspect', {})
+  expect(after.owner.runtimeId).toBe(before.owner.runtimeId)
+  expect(after.owner.ownerInstanceId).not.toBe(before.owner.ownerInstanceId)
+})
+
+it('the App picker keeps a signer-only namespace intact until an original backup is selected', async () => {
+  const f = await backedUpHost(), identity = join(f.directory, 'semantic-runtime.json')
+  const bytes = await readFile(identity, 'utf8'), original = JSON.parse(bytes)
+  const selected = join(f.root, 'original-recovery-file'), wrong = join(f.root, 'wrong-recovery-file')
+  const signer = join(f.directory, 'agent-creation-identity.json')
+  const signerBytes = JSON.stringify({ schema: 'agentmux.agent-creation-authority.v1', ...original.creationIdentity })
+  await f.rpc.dispose(); await f.host.dispose()
+  await writeFile(signer, signerBytes, { mode: 0o600 })
+  await writeFile(selected, bytes, { mode: 0o600 })
+  await writeFile(wrong, JSON.stringify({ ...original, authority: 'wrong-original-binding' }), { mode: 0o600 })
+  await unlink(identity); await unlink(identity + '.original')
+  await rm(join(f.directory, 'recovery'), { recursive: true })
+  const recovery = localRuntimeRecovery(f.source)
+  const missing = await recovery.check()
+  expect(missing).toMatchObject({ state: 'needs-backup' })
+  expect(await recovery.choose(async () => null)).toEqual(missing)
+  expect(await recovery.choose(async () => wrong)).toEqual({ state: 'needs-backup', code: 'IDENTITY_BACKUP_UNVERIFIED' })
+  await expect(readFile(identity)).rejects.toMatchObject({ code: 'ENOENT' })
+  expect(await recovery.choose(async () => selected)).toEqual({ state: 'restored' })
+  expect(await readFile(identity, 'utf8')).toBe(bytes)
+  expect(await readFile(signer, 'utf8')).toBe(signerBytes)
+})
+
 it('an explicitly unused namespace can initialize while used-but-unconfirmed missing originals retain their write gates', async () => {
   const f = await fixture(), first = f.owners()
   expect(await recoverWorkbenchBeforeLoad(first)).toEqual({ state: 'not-created' })
@@ -92,13 +139,20 @@ it('the actual Main buildWindow consumer awaits recovery before its first config
   let functionSource: string | undefined
   const visit = (node: ts.Node) => { if (ts.isFunctionDeclaration(node) && node.name?.text === 'buildWindow') functionSource = node.getText(file); else ts.forEachChild(node, visit) }
   visit(file); expect(functionSource).toBeTypeOf('string')
-  let release!: () => void
+  let release!: () => void, releaseIdentity!: () => void
+  const identityWaiting = new Promise<void>(resolve => { releaseIdentity = resolve })
   const waiting = new Promise<void>(resolve => { release = resolve }), configuration = vi.fn(async () => { throw Error('Controlled next original owner boundary') })
+  const recovery = vi.fn(() => waiting)
   const implementation = ts.transpileModule(functionSource!.replaceAll('import.meta.dirname', JSON.stringify(resolve('apps/desktop/src/main'))) + '\nglobalThis.actualBuildWindow = buildWindow', { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText
-  const context = { recoverWorkbench: () => waiting, configStore: { get: configuration }, actualBuildWindow: undefined as (() => Promise<void>) | undefined }
+  const context = { runtimeIdentityRecovery: { check: () => identityWaiting }, recoverWorkbench: recovery, configStore: { get: configuration }, actualBuildWindow: undefined as (() => Promise<void>) | undefined }
   runInNewContext(implementation, context)
   const building = context.actualBuildWindow!(); const observed = building.catch(error => error)
   await Promise.resolve(); await Promise.resolve()
+  expect(configuration).not.toHaveBeenCalled()
+  expect(recovery).not.toHaveBeenCalled()
+  releaseIdentity()
+  await Promise.resolve(); await Promise.resolve()
+  expect(recovery).toHaveBeenCalledOnce()
   expect(configuration).not.toHaveBeenCalled()
   release()
   expect((await observed).message).toBe('Controlled next original owner boundary')

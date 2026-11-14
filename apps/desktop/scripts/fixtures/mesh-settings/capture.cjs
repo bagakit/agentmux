@@ -1,5 +1,5 @@
 const {app,BrowserWindow}=require('electron'),fs=require('node:fs/promises'),path=require('node:path'),assert=require('node:assert/strict')
-const [url,profile,output]=process.argv.slice(2)
+const [url,profile,output,scenario]=process.argv.slice(2)
 app.setPath('userData',path.resolve(profile));app.disableHardwareAcceleration()
 const delay=ms=>new Promise(r=>setTimeout(r,ms));const receipt={captureOnly:true,visualReview:'pending-independent-review',frames:[],console:[],passed:false,boundary:'Production Settings/components/theme using controlled observations; separate actual Unix Core/Native tests prove transport.'}
 let window
@@ -11,6 +11,18 @@ app.whenReady().then(async()=>{try{
  const openGateway=()=>evaluate(`document.querySelector('.settings-sidebar nav [data-settings-target="hosts:mesh-configuration"]')?.click()`)
  const paint=async()=>{await evaluate('document.fonts.ready');await delay(400)}
  const frame=async name=>{await paint();const file=name+'.png';await fs.writeFile(path.join(output,file),(await window.webContents.capturePage()).toPNG());receipt.frames.push(file)}
+ if (scenario === '--runtime-identity') {
+  await window.loadURL(url+'?scenario=runtime-identity');await openGateway()
+  for(let i=0;i<200;i++){if(await evaluate('Boolean(document.querySelector("[data-mesh-settings] .primary-button"))'))break;await delay(30)}
+  assert.match(await evaluate('document.querySelector("[data-mesh-settings] .primary-button")?.textContent'),/Restore from backup/u)
+  await frame('runtime-identity-dark')
+  window.setContentSize(520,900);await evaluate('meshFixture.theme("light")');await frame('runtime-identity-narrow-light')
+  await evaluate('document.querySelector("[data-mesh-settings] .primary-button").click()')
+  for(let i=0;i<200;i++){if(await evaluate('Boolean(document.querySelector("[aria-label=\\"Mesh network\\"]"))'))break;await delay(30)}
+  assert.match(await evaluate('document.querySelector("[data-mesh-settings]")?.textContent'),/Connect to a gateway/u)
+  receipt.passed=true
+  return
+ }
  const topologyGeometry=()=>evaluate(`(()=>{const canvas=document.querySelector('.mesh-explorer__canvas');if(!canvas)return null;const bounds=canvas.getBoundingClientRect(),nodes=Array.from(canvas.querySelectorAll('.mesh-explorer-node')).map(node=>{const rect=node.getBoundingClientRect();return{text:node.textContent,left:rect.left,right:rect.right,top:rect.top,bottom:rect.bottom,width:rect.width,effectiveFontSize:parseFloat(getComputedStyle(node.querySelector('strong')).fontSize)*rect.width/188}}),own=nodes.find(node=>node.text.includes('THIS CORE'));return{canvas:{left:bounds.left,right:bounds.right,top:bounds.top,bottom:bounds.bottom},nodes,own,arrangeVisible:Boolean(Array.from(document.querySelectorAll('button')).find(button=>button.getAttribute('aria-label')==='Rearrange observed topology')?.getBoundingClientRect().width)}})()`)
  const assertTopologyFits=geometry=>{assert.ok(geometry?.own,'the original This Core node exists in the real topology');assert.equal(geometry.nodes.length,3,'the controlled topology keeps every observed peer');for(const node of geometry.nodes)assert.ok(node.left>=geometry.canvas.left-1&&node.right<=geometry.canvas.right+1&&node.top>=geometry.canvas.top-1&&node.bottom<=geometry.canvas.bottom+1,node.text+' remains inside the responsive canvas');assert.ok(geometry.own.effectiveFontSize>=10,'responsive fitting retains at least 10px effective node label text');assert.ok(geometry.arrangeVisible,'Arrange remains available beside the fitted topology')}
  for(let i=0;i<250;i++){if(await evaluate('Boolean(document.querySelector(".mesh-paths-pane"))'))break;await delay(40)}
