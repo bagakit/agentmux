@@ -5,7 +5,7 @@ import type { MoteAvatarSeriesCatalog, MoteAvatarSeriesChoice, MoteAvatarSeriesD
   MoteAvatarSeriesParameters, MoteAvatarSeriesPrepared, MoteAvatarSeriesSource } from '@agentmux/core/mote-avatar-series'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../lib/api'
-import { createSeriesGlbRenderer, type SeriesGlbRenderer } from '../lib/mote-avatar-series-renderer'
+import type { SeriesGlbRenderer } from '../lib/mote-avatar-series-renderer'
 import { MoteFace } from './MoteFace'
 import { MoteAvatarSeriesCreateDialog } from './MoteAvatarSeriesCreateDialog'
 
@@ -176,8 +176,9 @@ export function MoteAvatarSeriesEditor({ targetKey, visible, disabled, initialCh
     const valid = () => current && alive.current && originalTarget.current === target
     const failed = (detail: string) => { if (valid()) renderFailure(source, detail) }
     if (source.definition.kind === 'glb' && source.payload.kind === 'glb') {
-      void createSeriesGlbRenderer(canvas.current, source.definition, source.payload.dataBase64, failed,
-        () => { if (valid()) { setIssue(null); setRenderVersion(value => value + 1) } }, abort.signal).then(value => {
+      const element = canvas.current, definition = source.definition, data = source.payload.dataBase64
+      void import('../lib/mote-avatar-series-renderer').then(({ createSeriesGlbRenderer }) => createSeriesGlbRenderer(element, definition, data, failed,
+        () => { if (valid()) { setIssue(null); setRenderVersion(value => value + 1) } }, abort.signal)).then(value => {
           if (!valid()) { value.dispose(); return }
           controller.current = value; setRenderVersion(version => version + 1)
         }).catch(error => { if (valid() && !abort.signal.aborted) failed(presentError(error)) })

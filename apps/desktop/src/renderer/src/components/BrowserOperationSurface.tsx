@@ -19,7 +19,7 @@ import { ResolvedAgentAvatar } from './AgentAvatar'
 import { useAppStore } from '../store'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { browserOperatorSession } from '../lib/browser-operator-identity'
-import { prepareBrowserOperatorAvatar, readBrowserOperatorAvatar, type BrowserOperatorAvatarInput } from '../lib/browser-operator-avatar'
+import type { BrowserOperatorAvatarInput } from '../lib/browser-operator-avatar'
 import { api } from '../lib/api'
 import { browserAssociatedAgentSession, browserTabAgentCandidates, sameBrowserAgent, type BrowserAgentSession } from '../lib/browser-agent-handoff'
 import { sessionStatusLabel } from '../lib/session-presentation'
@@ -131,13 +131,15 @@ export function BrowserOperatorPresence(props: Omit<BrowserOperationStatusProps,
         if (current) reportError(error, { kind: 'process-degraded' })
       })
     }
-    const ready = readBrowserOperatorAvatar(input)
-    if (ready) send(ready.dataUrl)
-    else void prepareBrowserOperatorAvatar(input).then(result => {
-      if (!current) return
-      if (result.status === 'ready') send(result.avatar.dataUrl)
-      else reportError(result.message, { kind: 'process-degraded' })
-    })
+    void import('../lib/browser-operator-avatar').then(({ readBrowserOperatorAvatar, prepareBrowserOperatorAvatar }) => {
+      const ready = readBrowserOperatorAvatar(input)
+      if (ready) send(ready.dataUrl)
+      else if (current) return prepareBrowserOperatorAvatar(input).then(result => {
+        if (!current) return
+        if (result.status === 'ready') send(result.avatar.dataUrl)
+        else reportError(result.message, { kind: 'process-degraded' })
+      })
+    }).catch(error => { if (current) reportError(error, { kind: 'process-degraded' }) })
     return () => { current = false }
     // Freeze the original appearance for this accepted operation. Step/config updates do not
     // restart decoding or cancel its first image; exact owner changes and unmount do cancel it.
