@@ -74,6 +74,14 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
   }
   let endpointState: Extract<AgentMuxClientEvent, { type: 'control-endpoint-state' }> | undefined
   let bootstrap: AgentMuxHostedBootstrap | undefined, stream: AgentMuxHostedSubscription | undefined
+  // The retained directory owns the records and their order. Point reads use only positions.
+  const sessionPositions = new Map<string, number>()
+  const indexSessions = (sessions: readonly AgentMuxAgentSession[]): void => {
+    sessionPositions.clear()
+    sessions.forEach((session, index) => {
+      if (!sessionPositions.has(session.agentSessionId)) sessionPositions.set(session.agentSessionId, index)
+    })
+  }
   let connecting: Promise<void> | undefined, disposed = false, retry: ReturnType<typeof setTimeout> | undefined
   let observationEnabled = true
   let directoryObservation: AbortController | undefined
@@ -178,8 +186,11 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
     if (event.type === 'run-removed' && bootstrap) {
       // A low-level Run stop does not retire its retained Agent Session. Only the
       // Core's explicit Session retirement fact may remove that durable projection.
-      if (event.agentSessionId) bootstrap.sessions = bootstrap.sessions.filter(value => !(
-        value.run.runId === event.run.runId && value.agentSessionId === event.agentSessionId))
+      if (event.agentSessionId) {
+        bootstrap.sessions = bootstrap.sessions.filter(value => !(
+          value.run.runId === event.run.runId && value.agentSessionId === event.agentSessionId))
+        indexSessions(bootstrap.sessions)
+      }
       attached.delete(event.run.runId)
     }
     if (event.type === 'agent-session' && bootstrap) {
@@ -187,9 +198,9 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
         bootstrap.sessionScope.missing = bootstrap.sessionScope.missing.filter(id => id !== event.session.agentSessionId)
         bootstrap.sessionScope.unavailable = bootstrap.sessionScope.unavailable.filter(issue => issue.agentSessionId !== event.session.agentSessionId)
       }
-      const index = bootstrap.sessions.findIndex(session => session.agentSessionId === event.session.agentSessionId)
-      if (index === -1) bootstrap.sessions.push(structuredClone(event.session))
-      else bootstrap.sessions[index] = structuredClone(event.session)
+      const id = event.session.agentSessionId, index = sessionPositions.get(id) ?? bootstrap.sessions.length
+      bootstrap.sessions[index] = structuredClone(event.session)
+      sessionPositions.set(id, index)
     }
     if (event.type === 'terminal-output') {
       const reading = attached.get(event.run.runId)
@@ -224,7 +235,7 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
   }
   const session = (id: string): AgentMuxAgentSession => {
     if (!stream) throw new AgentMuxError('Session ownership is unverified while its endpoint is unavailable.', 'RUNTIME_UNAVAILABLE')
-    const value = requireBootstrap().sessions.find(value => value.agentSessionId === id)
+    const value = requireBootstrap().sessions[sessionPositions.get(id) ?? -1]
     if (!value) throw new AgentMuxError('Unknown Agent Session.', 'UNKNOWN_AGENT_SESSION')
     return structuredClone(value)
   }
@@ -261,7 +272,10 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
       if (options.expectedStorePath !== undefined && observed.storePath !== options.expectedStorePath) throw new AgentMuxError(
         'This Host owns a different durable Session Store. The original workbench is retained.', 'CONTROL_OWNER_BUSY')
       // A concurrent event opening may already have newer Session facts. Never replace them.
-      bootstrap ??= { ...structuredClone(observed), owner: structuredClone(controlOwner) }
+      if (!bootstrap) {
+        bootstrap = { ...structuredClone(observed), owner: structuredClone(controlOwner) }
+        indexSessions(bootstrap.sessions)
+      }
     }
     let signal: AbortSignal | undefined, wireArgs = args
     let hostEnvironmentSelector: AgentMuxHostEnvironmentSelector | undefined
@@ -526,7 +540,9 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
                 const observed = parseHostedBootstrap(received.value, sessionProjection, selectedSessionIds)
                 if (observed.owner.runtimeId !== expected.runtimeId || observed.owner.ownerInstanceId !== expected.ownerInstanceId) throw new AgentMuxError('Runtime bootstrap belongs to another owner.', 'CONTROL_PROTOCOL_ERROR')
                 if (options.expectedStorePath !== undefined && observed.storePath !== options.expectedStorePath) throw new AgentMuxError('This Host owns a different durable Session Store. The original workbench is retained.', 'CONTROL_OWNER_BUSY')
-                bootstrap = structuredClone(observed); initialSeen = true
+                bootstrap = structuredClone(observed)
+                indexSessions(bootstrap.sessions)
+                initialSeen = true
                 if (controlOwner === owner) acceptOwner(observed.owner)
                 else bootstrap.owner = structuredClone(controlOwner!)
                 // The complete validated snapshot already owns this cache. Publish
@@ -998,7 +1014,7 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
       // A read receipt is not another mutation. Re-publishing the same Session
       // lets an observer's status read trigger its own next read indefinitely.
       // Before a directory snapshot there is no cache to update or compare.
-      const previous = updated?.kind === 'agent' ? bootstrap?.sessions.find(session => session.agentSessionId === updated.agentSessionId) : undefined
+      const previous = updated?.kind === 'agent' ? bootstrap.sessions[sessionPositions.get(updated.agentSessionId) ?? -1] : undefined
       const projected = updated?.kind === 'agent' && sessionProjection === 'summary' ? hostedAgentSessionSummary(updated) : updated
       if (projected?.kind === 'agent' && !dequal(previous, projected)) emit({ type: 'agent-session', session: projected })
     }
