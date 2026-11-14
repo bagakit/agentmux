@@ -1,4 +1,5 @@
 import { assertTailcatConfigurationWriter, parseTailcatConfigurationParams, parseTailcatConfigurationResult, type TailcatConfigurationMethod, type TailcatConfigurationPort } from './public-rpc-tailcat-configuration.js'
+import { parseTerminalControl, parseTerminalControlResult, parseTerminalControlInspect, parseTerminalControlInspection } from './terminal-control.js'
 import { parseGoalActivityHistoryParams, pageGoalActivity } from './goal-activity-history.js'
 import { parseNotesStorageParams, parseNotesStorageInspection, notesStorageOperationInspection, type NotesStorageMethod, type NotesStoragePort } from './public-rpc-notes-storage.js'
 import { parseProviderCatalogQuery, parseProviderCatalogObservation, type ProviderCatalogMethod } from './public-rpc-provider-catalog.js'
@@ -193,6 +194,8 @@ export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').Age
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'listMessages' | 'listMessageEvents' | 'inspectMessageBroadcast' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
   'readDeliveryAttempt' | 'readReadingDiagnostic' | 'findReadingDiagnostics' | 'readAgentStartupDiagnostic' | 'findAgentStartupDiagnostics' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'agentMessageAuthority' | 'listTrustedMessageSources' | 'trustMessageSource' | 'prepareFederatedMessage' | 'intakeFederatedMessage' | 'prepareFederatedRead' | 'exportFederatedThread' | 'readFederatedOutbox' | 'recordFederatedDispatchEvent' | 'intakeFederatedDispatchEvent' | 'recordFederatedInboxReceipt' | 'listHostExecutors' | 'configureHostExecutor' | 'removeHostExecutor' | 'hostEnvironment'> & {
+    controlTerminal?: AgentMuxClient['controlTerminal']
+    inspectTerminalControl?: AgentMuxClient['inspectTerminalControl']
     inspectAgentPosture?: AgentMuxClient['inspectAgentPosture']
     setAgentPosture?: AgentMuxClient['setAgentPosture']
     listTerminals?: AgentMuxClient['listTerminals']
@@ -420,6 +423,7 @@ const NATIVE_FIELDS = {
   'agent.execution.continue': ['bindingId', 'agentSessionId', 'createOperationId'],
   'agent.execution.binding': ['bindingId'],
   'agent.execution.rejoin': ['bindingId'],
+  'terminal.input': ['target', 'operationId', 'ownerInstanceId', 'expectedByte', 'dataBase64'], 'terminal.interrupt': ['target', 'operationId', 'ownerInstanceId'], 'terminal.stop': ['target', 'operationId', 'ownerInstanceId'], 'terminal.operation.inspect': ['hostId', 'run', 'operationId', 'runtimeId'],
   'agent.posture.set': ['target', 'operationId', 'controlId', 'modeId', 'expectedControlDigest'], 'agent.posture.inspect': ['hostId', 'agentSessionId', 'expectedRun', 'operationId'],
   'terminal.ls': ['hostId', 'cursor', 'limit'], 'terminal.inspect': ['target'], 'terminal.output': ['target', 'afterByte', 'follow'],
   'terminal.recover': ['hostId', 'expectedRun', 'runtimeId', 'workspacePath', 'operationId', 'action'],
@@ -2848,6 +2852,41 @@ export class AgentMuxRpcService {
           result = { ...value, target: { ...value.target, hostId: input.target.hostId } }
         }
         result = parsePostureSetResult(result, input); break
+      }
+      case 'terminal.input': case 'terminal.interrupt': case 'terminal.stop': case 'terminal.operation.inspect': {
+        if (caller || !context.principal || !['user', 'device'].includes(context.principal.kind))
+          throw new AgentMuxError('Raw Terminal control and original receipts require the original person/device, without a managed Agent caller.', 'CONTROL_PERMISSION_DENIED')
+        const inspection = method === 'terminal.operation.inspect'
+        const input = inspection ? parseTerminalControlInspect(p) : parseTerminalControl(p, method === 'terminal.input' ? 'terminal-input' : method === 'terminal.interrupt' ? 'terminal-interrupt' : 'terminal-stop')
+        const hostId = 'target' in input ? input.target.hostId : input.hostId
+        const scopes = (await this.clients()).filter(scope => scope.hostId === hostId)
+        if (scopes.length !== 1) throw new AgentMuxError('The exact original Terminal execution Host is unavailable or ambiguous.', 'CONTROL_UNAVAILABLE')
+        const scope = scopes[0]!
+        if (inspection) {
+          const query = input as import('./terminal-control.js').TerminalControlInspect, original = { ...query, hostId: 'local' }
+          const value = scope.client.forwardRpc || this.ports.callOriginalCore
+            ? parseTerminalControlInspection(this.ports.callOriginalCore ? await this.ports.callOriginalCore(hostId, 'terminal.operation.inspect', original, await this.inputForwardContext(context))
+              : await scope.client.forwardRpc!('terminal.operation.inspect', original, await this.inputForwardContext(context)), original)
+            : scope.client.inspectTerminalControl ? await scope.client.inspectTerminalControl(original)
+              : (() => { throw new AgentMuxError('The original Terminal receipt owner is unavailable.', 'CONTROL_UNAVAILABLE') })()
+          result = parseTerminalControlInspection({ ...value, hostId, operation: value.operation ? { ...value.operation, target: { ...value.operation.target, hostId } } : null }, query)
+        } else {
+          const request = input as import('./terminal-control.js').TerminalControlRequest, original = { ...request, target: { ...request.target, hostId: 'local' } }
+          let value: import('./terminal-control.js').TerminalControlReceipt
+          if (scope.client.forwardRpc || this.ports.callOriginalCore) {
+            const { action: _action, ...wire } = original
+            const nativeMethod = method as 'terminal.input' | 'terminal.interrupt' | 'terminal.stop'
+            value = parseTerminalControlResult(this.ports.callOriginalCore ? await this.ports.callOriginalCore(hostId, nativeMethod, wire, await this.inputForwardContext(context))
+              : await scope.client.forwardRpc!(nativeMethod, wire, await this.inputForwardContext(context)), original)
+          } else {
+            if (!scope.client.controlTerminal) throw new AgentMuxError('The original Terminal control owner is unavailable.', 'CONTROL_UNAVAILABLE')
+            const restriction = this.inputCallContext(context)
+            value = await scope.client.controlTerminal(original, { actor: context.principal,
+              ...(restriction.requestSignal ? { requestSignal: restriction.requestSignal } : {}), ...(restriction.assertCurrent ? { assertCurrent: restriction.assertCurrent } : {}) })
+          }
+          result = parseTerminalControlResult({ ...value, target: { ...value.target, hostId } }, request)
+        }
+        break
       }
       case 'terminal.ls': {
         if (caller || !context.principal || !['user', 'device'].includes(context.principal.kind))

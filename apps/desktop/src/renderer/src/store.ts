@@ -13393,10 +13393,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // already moved the Session answers STALE_AGENT_SESSION instead of a hidden wait.
     cancelMoteSessionRecovery(sessionId)
     if (session.kind === 'terminal') {
-      try { await api.sessions.stop(session.control); return { status: 'stopped' } }
+      try {
+        const receipt = await api.sessions.stop(session.control)
+        if (!receipt || !('action' in receipt) || receipt.action !== 'terminal-stop' || receipt.target.run.runId !== session.control.run.runId || !['applied', 'no-op'].includes(receipt.outcome))
+          throw new Error('The original raw Terminal Stop receipt is unconfirmed; its View is kept.')
+        if (receipt.diskDurability !== 'confirmed') get().reportError(new Error(`Native Stop ${receipt.operationId} is ${receipt.outcome}, but original receipt durability is unconfirmed. Read amux terminal operation inspect --host ${session.control.hostId} --run ${session.control.run.runId} --operation-id ${receipt.operationId}; do not resend to inspect.`))
+        return { status: 'stopped' }
+      }
       catch (error) {
         get().reportError(error)
-        return { status: 'unconfirmed', message: presentError(error), action: 'Stop this Terminal again; its View is kept.' }
+        return { status: 'unconfirmed', message: presentError(error), action: 'Inspect the retained raw Stop operation; Stop again reads that same intent and does not replay it.' }
       }
     }
     const intent = sessionStopIntentFor(session.control)

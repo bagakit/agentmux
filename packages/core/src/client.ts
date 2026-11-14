@@ -1,6 +1,8 @@
+import { parseTerminalControl, parseTerminalControlInspect, parseTerminalControlResult, terminalInputBytes, type TerminalControlRequest, type TerminalControlReceipt, type TerminalControlInspect, type TerminalStopResult } from './terminal-control.js'
+import { parseRunControlActor, type RunControlContext } from './run-control-context.js'
 import { captureExecutorInvocation, readExecutorInvocation } from './agent-executor-invocation.js'
 import { RunControlOperations } from './run-control-operations.js'
-import { parsePostureSet, parsePostureInspect, parseRunControlActor, postureControlDigest, type PostureInspect, type PostureInspection, type PostureReceipt, type RunControlContext } from './agent-posture.js'
+import { parsePostureSet, parsePostureInspect, postureControlDigest, type PostureInspect, type PostureInspection, type PostureReceipt } from './agent-posture.js'
 import type { AgentMuxAgentCreateInput, AgentMuxHostAgentCreateInput, AgentMuxTerminalCreateInput, AgentMuxAgentPromptInput, AgentMuxSessionQuestionReplyInput, AgentMuxAgentMessageInput, AgentMuxAgentInteractionInput, AgentMuxAgentPostureInput, AgentMuxAgentRespawnInput, AgentMuxAgentAttachment, AgentMuxClientOptions, AgentMuxAgentRuntimeStatus } from './client-contract.js'
 import { agentSessionRetirementRevision } from './agent-session-store.js'
 import { nativeSnapshotSigningKey } from './native-snapshot-key.js'
@@ -4768,9 +4770,76 @@ export class AgentMuxClient {
       if (acceptedThroughByte === null) {
         throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
       }
+      if (accepted.run.runId !== ref.runId || accepted.appliedByteRange.startByte !== operation.expectedByte || accepted.appliedByteRange.endByte - accepted.appliedByteRange.startByte !== Buffer.byteLength(operation.data) || acceptedThroughByte < accepted.appliedByteRange.endByte)
+        throw new AgentMuxError('The original Terminal byte ACK belongs to another operation.', 'CONTROL_PROTOCOL_ERROR')
       diagnostic.settle(true)
       return { runId: ref.runId, appliedByteRange: accepted.appliedByteRange, acceptedThroughByte }
     } catch (error) { diagnostic.settle(false); throw error }
+  }
+
+  async inspectTerminalControl(value: TerminalControlInspect): Promise<{ hostId: string; run: AgentMuxRunRef; operationId: string; operation: TerminalControlReceipt | null }> {
+    const input = parseTerminalControlInspect(value)
+    if (input.hostId !== 'local') throw new AgentMuxError('Inspect the exact original Terminal Core.', 'INVALID_CONTROL_REQUEST')
+    const held = await this.runControlOperations().inspect(input.operationId)
+    if (held && (held.action === 'agent-posture' || held.target.run.runId !== input.run.runId || input.runtimeId !== undefined && held.target.runtimeId !== input.runtimeId))
+      throw new AgentMuxError('The original operation belongs to another raw target or action.', 'RUN_CONTROL_OPERATION_CONFLICT')
+    return { hostId: 'local', run: { ...input.run }, operationId: input.operationId, operation: held as TerminalControlReceipt | null }
+  }
+
+  async controlTerminal(value: TerminalControlRequest, context: RunControlContext): Promise<TerminalControlReceipt> {
+    const input = parseTerminalControl(value), actor = parseRunControlActor(context?.actor), operations = this.runControlOperations()
+    const original = await operations.original(input, actor)
+    if (original) return original
+    if (input.target.hostId !== 'local') throw new AgentMuxError('Use the exact original Terminal Core.', 'INVALID_CONTROL_REQUEST')
+    this.requireConnected()
+    const runtime = this.terminalCreationRuntimeIdentity()
+    const assertCurrent = async () => {
+      context.requestSignal?.throwIfAborted(); await context.assertCurrent?.(); context.requestSignal?.throwIfAborted()
+      const current = this.terminalCreationRuntimeIdentity()
+      if (current.runtimeId !== input.target.runtimeId || current.instanceId !== input.ownerInstanceId || current.instanceId !== runtime.instanceId)
+        throw new AgentMuxError('The original raw Terminal Native owner changed; original Runs are retained.', 'TERMINAL_RUNTIME_MISMATCH')
+      await this.assertRawTerminal(input.target.run)
+      context.requestSignal?.throwIfAborted(); await context.assertCurrent?.(); context.requestSignal?.throwIfAborted()
+      if (this.terminalCreationRuntimeIdentity().instanceId !== runtime.instanceId) throw new AgentMuxError('The original Native owner changed before raw control.', 'TERMINAL_RUNTIME_MISMATCH')
+    }
+    await assertCurrent()
+    if (input.action === 'terminal-input') {
+      const status = await this.kernel.status(input.target.run.runId)
+      if (status.runId !== input.target.run.runId || status.acceptedInputBytes !== input.expectedByte)
+        throw new AgentMuxError('Keep the original input byte precondition; no refreshed cursor was substituted.', 'TERMINAL_INPUT_CURSOR_MISMATCH')
+    }
+    await operations.prepare(input, actor, runtime)
+    await assertCurrent()
+    const claim = await operations.claim(input, actor)
+    if (!claim.dispatched) return claim.receipt
+    try {
+      await assertCurrent()
+      let acknowledgement: NonNullable<TerminalControlReceipt['acknowledgement']>, outcome: 'applied' | 'no-op' = 'applied'
+      if (input.action === 'terminal-input') {
+        const bytes = terminalInputBytes(input.dataBase64)
+        if (!bytes.byteLength) {
+          outcome = 'no-op'; acknowledgement = { kind: 'input-noop', runId: input.target.run.runId, inputByte: input.expectedByte }
+        } else {
+          const ack = await this.writeTerminal(input.target.run, { ownerInstanceId: input.ownerInstanceId, operationId: claim.receipt.nativeOperationId!, expectedByte: input.expectedByte, data: bytes }, undefined,
+            { ...(context.requestSignal ? { requestSignal: context.requestSignal } : {}), assertCurrent })
+          acknowledgement = { kind: 'input', runId: ack.runId, appliedByteRange: ack.appliedByteRange!, acceptedThroughByte: ack.acceptedThroughByte! }
+        }
+      } else if (input.action === 'terminal-interrupt') {
+        acknowledgement = { kind: 'interrupt', ...await this.kernel.interrupt(input.target.run.runId) }
+      } else {
+        const prepared = await this.prepareTerminalStop(input.target.run, claim.receipt.nativeOperationId!)
+        if (prepared.ownerInstanceId !== input.ownerInstanceId) throw new AgentMuxError('The original Stop preparation changed Native owner.', 'TERMINAL_RUNTIME_MISMATCH')
+        await assertCurrent()
+        const stopped = await this.stopPreparedTerminal(prepared)
+        if (stopped.kind === 'absent') { outcome = 'no-op'; acknowledgement = { kind: 'stop-absent', runId: stopped.runId } }
+        else acknowledgement = { kind: 'stop', runId: stopped.runId, disposition: stopped.disposition, state: stopped.state }
+      }
+      return parseTerminalControlResult(await operations.settle(input, actor, { outcome, acknowledgement }), input)
+    } catch (error) {
+      const notApplied = error instanceof AgentMuxError && (error.detail === 'not_applied' || error.controlFailure?.disposition === 'not_applied')
+      return await operations.settle(input, actor, { outcome: notApplied ? 'not-applied' : 'unknown', acknowledgement: null,
+        issue: 'Original raw Terminal operation ' + input.operationId + ': ' + String(error) + '. Inspect this original operation; do not replay it.' })
+    }
   }
 
   async resizeTerminal(ref: AgentMuxRunRef, cols: number, rows: number): Promise<AgentMuxRunAppliedSize> {
@@ -4791,21 +4860,22 @@ export class AgentMuxClient {
     await this.stopPreparedTerminal(await this.prepareTerminalStop(ref))
   }
 
-  async prepareTerminalStop(ref: AgentMuxRunRef): Promise<AgentMuxPreparedTerminalStop> {
+  async prepareTerminalStop(ref: AgentMuxRunRef, operationId?: string): Promise<AgentMuxPreparedTerminalStop> {
     this.requireConnected()
-    const operation = await this.kernel.prepareStop(ref.runId)
+    const operation = await this.kernel.prepareStop(ref.runId, operationId)
     return parsePreparedTerminalStop({ run: { ...ref }, ownerInstanceId: operation.daemonInstance, operationId: operation.operationKey })
   }
 
-  async stopPreparedTerminal(value: AgentMuxPreparedTerminalStop): Promise<void> {
+  async stopPreparedTerminal(value: AgentMuxPreparedTerminalStop): Promise<TerminalStopResult> {
     this.requireConnected()
     const prepared = parsePreparedTerminalStop(value), ref = prepared.run
     // Reserve the operation before recording intent. A failed preparation must
     // not leave a stale "user stopped" marker that misclassifies a later exit.
     const operation = { runId: ref.runId, daemonInstance: prepared.ownerInstanceId, operationKey: prepared.operationId }
     this.stopRequestedRuns.add(ref.runId)
+    let acknowledged: Awaited<ReturnType<typeof this.kernel.stop>> | null = null
     try {
-      await this.kernel.stop(operation)
+      acknowledged = await this.kernel.stop(operation)
     } catch (error) {
       if (error instanceof AgentMuxError && error.code === 'CTXMUX_run_not_found') {
         // The Run is already terminal; continue with the same receipt path.
@@ -4816,12 +4886,18 @@ export class AgentMuxClient {
         throw error
       }
     }
+    if (acknowledged && (acknowledged.run.runId !== ref.runId || acknowledged.run.state.type === 'running'))
+      throw new AgentMuxError('The original Stop ACK does not confirm this Run quiescent.', 'CONTROL_PROTOCOL_ERROR')
     this.runPids.delete(ref.runId)
     this.publisher.publish({
       type: 'run-removed',
       run: { ...ref },
       evidence: { source: 'user', observedAt: Date.now(), run: { ...ref } }
     })
+    if (!acknowledged) return { kind: 'absent', runId: ref.runId }
+    const state = this.projectRun(acknowledged.run).state
+    if (state === 'running') throw new AgentMuxError('The original Stop did not confirm quiescence.', 'CONTROL_PROTOCOL_ERROR')
+    return { kind: 'acknowledged', runId: ref.runId, disposition: acknowledged.disposition, state }
   }
 
   /**
@@ -8220,8 +8296,8 @@ export class AgentMuxClient {
     if (input.hostId !== 'local') throw new AgentMuxError('Use the original Core for this posture observation.', 'INVALID_CONTROL_REQUEST')
     if (input.operationId !== undefined) {
       const operation = await this.runControlOperations().inspect(input.operationId)
-      if (operation && operation.target.agentSessionId !== input.agentSessionId) throw new AgentMuxError('The original posture operation belongs to another Session.', 'RUN_CONTROL_OPERATION_CONFLICT')
-      return { kind: 'operation', agentSessionId: input.agentSessionId, operationId: input.operationId, operation }
+      if (operation && (operation.action !== 'agent-posture' || operation.target.agentSessionId !== input.agentSessionId)) throw new AgentMuxError('The original posture operation belongs to another Session.', 'RUN_CONTROL_OPERATION_CONFLICT')
+      return { kind: 'operation', agentSessionId: input.agentSessionId, operationId: input.operationId, operation: operation as PostureReceipt | null }
     }
     this.requireConnected()
     const session = await this.registry.refresh(input.agentSessionId, input.expectedRun)

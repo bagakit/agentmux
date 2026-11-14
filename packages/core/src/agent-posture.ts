@@ -1,3 +1,4 @@
+import { parseRunControlActor, type RunControlActor } from './run-control-context.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord, rpcString } from './rpc-data.js'
@@ -9,9 +10,6 @@ export type PostureTarget = { hostId: string; runtimeId: string; agentSessionId:
 export type PostureSet = { target: PostureTarget; operationId: string; controlId: string; modeId: string; expectedControlDigest: string }
 export type PostureInspect = { hostId: string; agentSessionId: string } &
   ({ expectedRun: { runId: string }; operationId?: never } | { operationId: string; expectedRun?: never })
-export type RunControlActor = { kind: 'user' | 'device'; id: string }
-/** Host-only context. This object is never decoded from public business JSON. */
-export type RunControlContext = { actor: RunControlActor; requestSignal?: AbortSignal; assertCurrent?(): void | Promise<void> }
 export type PostureReceipt = {
   action: 'agent-posture'; operationId: string; target: PostureTarget; controlId: string; modeId: string;
   actor: RunControlActor; phase: 'prepared' | 'dispatching' | 'settled';
@@ -49,11 +47,7 @@ export function parsePostureInspect(value: unknown): PostureInspect {
     : { ...base, expectedRun: { runId: rpcString(rpcRecord(p.expectedRun, ['runId']).runId, 'Original Run') } }
 }
 
-export function parseRunControlActor(value: unknown): RunControlActor {
-  const p = rpcRecord(value, ['kind', 'id'])
-  if (p.kind !== 'user' && p.kind !== 'device') throw new AgentMuxError('This native intent requires its original person/device context.', 'CONTROL_PERMISSION_DENIED')
-  return { kind: p.kind, id: rpcString(p.id, 'Original native intent actor') }
-}
+
 function invalid(): never { throw new AgentMuxError('The original posture result is unconfirmed.', 'CONTROL_PROTOCOL_ERROR') }
 export function parsePostureReceipt(value: unknown): PostureReceipt {
   const r = rpcRecord(value, ['action', 'operationId', 'target', 'controlId', 'modeId', 'actor', 'phase', 'outcome', 'nativeOperationId', 'runtime', 'acknowledgement', 'diskDurability', 'issue'], 'CONTROL_PROTOCOL_ERROR')

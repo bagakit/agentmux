@@ -1781,9 +1781,11 @@ export class CtxmuxRunAdapter {
     }
   }
 
-  async interrupt(runId: string): Promise<void> {
+  async interrupt(runId: string): Promise<{ runId: string; signal: 'SIGINT' }> {
     try {
-      await this.requireClient().interrupt(runId)
+      const accepted = await this.requireClient().interrupt(runId)
+      if (accepted.run.id !== runId || accepted.receipt.signal !== 'interrupt') throw new AgentMuxError('The Native Interrupt receipt belongs to another Run or signal.', 'CONTROL_PROTOCOL_ERROR')
+      return { runId: accepted.run.id, signal: 'SIGINT' }
     } catch (error) {
       throw translateCtxmuxError(error)
     }
@@ -1806,15 +1808,15 @@ export class CtxmuxRunAdapter {
   }
 
   /** Returns the Runtime's own receipt for how the Run reached quiescence. */
-  async stop(operation: CtxmuxAdapterStopOperation): Promise<{ disposition: 'graceful' | 'forced' }> {
+  async stop(operation: CtxmuxAdapterStopOperation): Promise<{ disposition: 'graceful' | 'forced'; run: CtxmuxAdapterRun }> {
     let recovery: Awaited<ReturnType<CtxmuxClient['attachRecoverableStop']>> | null = null
     try {
-      await this.detach(operation.runId)
       recovery = await this.requireClient().attachRecoverableStop(
         operation as RecoverableStopOperation,
         0
       )
-      return { disposition: recovery.stop.receipt.disposition }
+      if (recovery.stop.run.id !== operation.runId) throw new AgentMuxError('The Native Stop receipt belongs to another original Run.', 'CONTROL_PROTOCOL_ERROR')
+      return { disposition: recovery.stop.receipt.disposition, run: this.projectRun(recovery.stop.run) }
     } catch (error) {
       throw translateCtxmuxError(error)
     } finally {

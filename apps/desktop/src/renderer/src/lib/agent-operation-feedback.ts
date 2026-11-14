@@ -49,9 +49,9 @@ export function settleAgentCreation(operation: AgentOperationFeedback, report: A
 }
 
 /** Core can join a pre-existing Stop; keep its canonical identity and each original caller. */
-export function acceptAgentStopReceipt(operation: Extract<AgentOperationFeedback, { kind: 'stop' }>, receipt: AgentMuxAgentStopReceipt | undefined) {
+export function acceptAgentStopReceipt(operation: Extract<AgentOperationFeedback, { kind: 'stop' }>, receipt: AgentMuxAgentStopReceipt | import('@agentmux/core').TerminalControlReceipt | undefined): receipt is AgentMuxAgentStopReceipt {
   const control = operation.control
-  if (!receipt || receipt.agentSessionId !== control.agentSessionId || receipt.expectedRun.runId !== control.run.runId ||
+  if (!receipt || !('agentSessionId' in receipt) || receipt.agentSessionId !== control.agentSessionId || receipt.expectedRun.runId !== control.run.runId ||
     receipt.operationId !== operation.operationId && receipt.admission !== 'retained' && receipt.admission !== 'joined') {
     updateAgentOperation(operation, { phase: 'unconfirmed', message: '停止回执尚未确认；原 Session、历史与草稿保留。' })
     return false

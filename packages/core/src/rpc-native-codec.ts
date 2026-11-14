@@ -1,4 +1,5 @@
 import { parseTailcatConfigurationParams, parseTailcatConfigurationResult } from './public-rpc-tailcat-configuration.js'
+import { parseTerminalControl, parseTerminalControlResult, parseTerminalControlInspect, parseTerminalControlInspection } from './terminal-control.js'
 import { parseGoalActivityHistoryParams, parseGoalActivityHistoryResult } from './goal-activity-history.js'
 import { parseNotesStorageParams, parseNotesStorageInspection, parseNotesStorageOperationInspection } from './public-rpc-notes-storage.js'
 import { parsePostureInspect, parsePostureSet, parsePostureInspection, parsePostureSetResult } from './agent-posture.js'
@@ -502,6 +503,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (isTopicMethod(method)) return parseTopicResult(method, value, parseTopicParams(method, params)) as unknown as Record<string, unknown>
     if (isAgentMuxRpcDeviceMethod(method)) return parseAgentMuxRpcDeviceResult(method, value,
       parseAgentMuxRpcDeviceParams(method, params)) as unknown as Record<string, unknown>
+    if (method === 'terminal.operation.inspect') return parseTerminalControlInspection(value, parseTerminalControlInspect(params)) as unknown as Record<string, unknown>
+    if (method === 'terminal.input' || method === 'terminal.interrupt' || method === 'terminal.stop') return parseTerminalControlResult(value, parseTerminalControl(params, method === 'terminal.input' ? 'terminal-input' : method === 'terminal.interrupt' ? 'terminal-interrupt' : 'terminal-stop')) as unknown as Record<string, unknown>
     if (method === 'agent.posture.inspect') return parsePostureInspection(value, parsePostureInspect(params)) as unknown as Record<string, unknown>
     if (method === 'agent.posture.set') return parsePostureSetResult(value, parsePostureSet(params)) as unknown as Record<string, unknown>
     const p = record(value), input = record(params)

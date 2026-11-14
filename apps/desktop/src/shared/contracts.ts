@@ -2085,7 +2085,7 @@ export type AgentMuxDesktopApi = {
      * Stop one exact Run. An Agent Stop answers with the Core receipt; a retry with the same
      * `operationId` continues that same Stop. A Terminal Stop has no receipt and no operation id.
      */
-    stop(session: SessionControl, operationId?: string): Promise<import('@agentmux/core').AgentMuxAgentStopReceipt | undefined>
+    stop(session: SessionControl, operationId?: string): Promise<import('@agentmux/core').AgentMuxAgentStopReceipt | import('@agentmux/core').TerminalControlReceipt | undefined>
     /** Read the original Stop receipt without reconnecting or repeating its side effect. */
     inspectStop(session: AgentSessionControl, operationId: string): Promise<import('@agentmux/core').AgentMuxAgentStopInspection>
     /** With control: this exact host/Run's terminal bytes and resize. Without: semantic/membership. */

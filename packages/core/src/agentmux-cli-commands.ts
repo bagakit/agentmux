@@ -1,5 +1,6 @@
 import { parseSettingsPreferenceParams } from './settings-preferences.js'
 import { parseTailcatConfigurationParams } from './public-rpc-tailcat-configuration.js'
+import { parseTerminalControl } from './terminal-control.js'
 import { expandCliOptionAssignments } from './cli-option-assignments.js'
 import { parseNotesStorageParams } from './public-rpc-notes-storage.js'
 import { SPACE_MEMBER_CLI_COMMANDS } from './space-member-cli.js'
@@ -766,6 +767,12 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     f => parseFileListParams({ ...parseFileReadCommand({ zoneId: value(f, '--zone', true)!, path: value(f, '--path') ?? '.', hostId: value(f, '--host', true)!, workspaceId: value(f, '--workspace', true)!, workspacePath: value(f, '--workspace-path', true)!,
       ...(f.values.has('--space') ? { spaceId: value(f, '--space', true)! } : {}) }), ...numbers(f, { '--limit': 'limit' }) }) as unknown as Record<string, unknown>,
     'Calls file.list. Results are relative to the requested directory. Git ignore rules apply; complete/partial and its reason are explicit. To continue with file open --zone, prepend the requested directory to each result for --path (omit the default dot prefix).'), rpcMethod: 'file.list' },
+  ...(['input', 'interrupt', 'stop'] as const).map(action => command(`terminal.${action}`, '--input FILE|-', `Apply one exact raw Terminal ${action} intent.`, { '--input': 'data' }, async f => {
+    const input = await readControlJsonInput(value(f, '--input', true)!, 'Original raw Terminal intent')
+    parseTerminalControl(input, `terminal-${action}`)
+    return input as Record<string, unknown>
+  }, 'JSON: {target:{hostId,runtimeId,run:{runId}},operationId,ownerInstanceId' + (action === 'input' ? ',expectedByte,dataBase64' : '') + '}. Keep Native identity and input cursor from terminal inspect; output afterByte is not an input cursor. Input is canonical base64 bytes without quoting or automatic newline; empty bytes return explicit no-op. Interrupt uses native SIGINT, never a Ctrl-C byte. Stop retains its original native token and quiescence ACK. Original person/device only, without managed Agent caller. Applied proves the original Native ACK; no-op is explicit non-effect. After unknown, inspect the same operation; never reinput or resignal to inspect.')),
+  command('terminal.operation.inspect', '--host ID --run ID --operation-id ID [--runtime ID]', 'Read one original raw Terminal control without Native activation or replay.', { '--host': 'data', '--run': 'data', '--operation-id': 'data', '--runtime': 'data' }, f => ({ hostId: id(f, '--host', true), run: { runId: id(f, '--run', true) }, operationId: id(f, '--operation-id', true), ...(f.values.has('--runtime') ? { runtimeId: id(f, '--runtime', true) } : {}) }), 'Original person/device read scope. The exact Host/Run/operation locates its retained Native target even when Native is unavailable; optional --runtime verifies a known original pin. Phase/native ACK and disk durability remain separate. Current status/bytes never certify a missing historical ACK; this read does not call an input, signal or Stop mutator.'),
   command('terminal.ls', '--host ID [--runtime ID --owner ID --after-run ID] [--limit N]', 'Discover raw Terminal targets on the original execution Host.', { '--host': 'data', '--runtime': 'data', '--owner': 'data', '--after-run': 'data', '--limit': 'value' }, f => {
     const cursor = ['--runtime', '--owner', '--after-run'].some(key => f.values.has(key))
     return { hostId: id(f, '--host', true), ...numbers(f, { '--limit': 'limit' }), ...(cursor ? { cursor: { runtimeId: id(f, '--runtime', true), ownerInstanceId: id(f, '--owner', true), afterRunId: id(f, '--after-run', true) } } : {}) }

@@ -2188,10 +2188,35 @@ export class RuntimeController {
     })
   }
 
+  // Request references only. Native state and durable intent/ACK live at original Core.
+  private readonly terminalStopRequests = new Map<string, string>()
+
+  private async terminalControlIntent(control: Extract<SessionControl, { kind: 'terminal' }>, action: 'terminal-stop' | 'terminal-interrupt', operationId: string): Promise<import('@agentmux/core').TerminalControlReceipt> {
+    if (control.runId !== control.run.runId) throw new AgentMuxError('The raw Terminal control has conflicting Run identities.', 'INVALID_CONTROL_REQUEST')
+    const client = await this.connectedClient(control.hostId, 'raw-input')
+    // Read the admitted original first: this path needs no Native activation,
+    // current Run or new owner identity merely to return a lost result.
+    const original = await callOriginalDesktopHost(client, 'terminal.operation.inspect', { hostId: 'local', run: control.run, operationId }, { transport: 'unix' })
+    let receipt = original.operation
+    if (receipt && receipt.action !== action) throw new AgentMuxError('The original operation is another raw control action.', 'RUN_CONTROL_OPERATION_CONFLICT')
+    if (!receipt) {
+      const native = await client.terminalCreationRuntimeIdentity()
+      receipt = await callOriginalDesktopHost(client, action === 'terminal-stop' ? 'terminal.stop' : 'terminal.interrupt', {
+        target: { hostId: 'local', runtimeId: native.runtimeId, run: { ...control.run } }, ownerInstanceId: native.instanceId, operationId
+      }, { transport: 'unix' })
+    }
+    return receipt
+  }
+
   async interrupt(control: SessionControl): Promise<void> {
+    if (control.kind === 'terminal') {
+      const receipt = await this.terminalControlIntent(control, 'terminal-interrupt', mintObjectId())
+      if (receipt.outcome !== 'applied' || receipt.diskDurability !== 'confirmed') throw new AgentMuxError(
+        `Raw Interrupt ${receipt.operationId}: Native outcome ${receipt.outcome}, receipt durability ${receipt.diskDurability}. Read amux terminal operation inspect --host ${control.hostId} --run ${control.run.runId} --operation-id ${receipt.operationId}; this read does not resignal.`, 'TERMINAL_CONTROL_UNCONFIRMED')
+      return
+    }
     const client = await this.connectedClient(control.hostId, 'runtime')
-    if (control.kind === 'agent') await client.signalAgent(control.agentSessionId, control.run, 'SIGINT')
-    else await client.signalTerminal(control.run, 'SIGINT')
+    await client.signalAgent(control.agentSessionId, control.run, 'SIGINT')
   }
 
   async observeStorage(control: SessionControl): Promise<import('@agentmux/core').AgentMuxRunStorageObservation> {
@@ -2402,7 +2427,18 @@ export class RuntimeController {
    * --operation-id` reads it. A failure keeps Core's own error and adds that identity and the stage
    * Core recorded as failed; the failed stage is read from Core's inspect, never guessed.
    */
-  async stopSession(control: SessionControl, operationId?: string): Promise<AgentMuxAgentStopReceipt | undefined> {
+  async stopSession(control: SessionControl, operationId?: string): Promise<AgentMuxAgentStopReceipt | import('@agentmux/core').TerminalControlReceipt | undefined> {
+    if (control.kind === 'terminal') {
+      const key = sessionAttachmentKey(control), held = operationId ?? this.terminalStopRequests.get(key) ?? mintObjectId()
+      this.terminalStopRequests.set(key, held)
+      const receipt = await this.terminalControlIntent(control, 'terminal-stop', held)
+      if (['applied', 'no-op'].includes(receipt.outcome)) {
+        this.forgetSessionAttachmentOwner(key)
+        this.terminalStopRequests.delete(key)
+      }
+      return { ...receipt, target: { ...receipt.target, hostId: control.hostId } }
+    }
+
     const attachmentKey = sessionAttachmentKey(control)
     // 停止**不排队**，其余附着操作照旧排队。
     //
@@ -2431,7 +2467,6 @@ export class RuntimeController {
           ...(inspection?.operationIdMatched && inspection.failure ? { stopStage: inspection.failure.stage } : {}) })
       }
     }
-    await client.stopTerminal(control.run)
     return undefined
   }
 

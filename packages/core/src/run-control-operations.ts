@@ -6,10 +6,15 @@ import { durableWriteFile } from './durable-write.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { mintObjectId } from './object-id.js'
-import { parsePostureSet, parsePostureReceipt, type PostureSet, type PostureReceipt, type RunControlActor } from './agent-posture.js'
+import { parsePostureSet, parsePostureSetResult, type PostureSet, type PostureReceipt } from './agent-posture.js'
+import { parseTerminalControl, parseTerminalControlResult, terminalInputDescriptor, type TerminalControlRequest, type TerminalControlReceipt } from './terminal-control.js'
+import type { RunControlActor } from './run-control-context.js'
 import type { AgentMuxCreationRuntime } from './terminal-creation-retirement.js'
 
-type Record = { schemaVersion: 1; request: PostureSet; requestDigest: string; receipt: PostureReceipt }
+type ControlRequest = PostureSet | TerminalControlRequest
+type ControlReceipt = PostureReceipt | TerminalControlReceipt
+type ReceiptFor<R extends ControlRequest> = R extends PostureSet ? PostureReceipt : TerminalControlReceipt
+type Record = { schemaVersion: 1; request: ControlRequest; requestDigest: string; receipt: ControlReceipt }
 const native = createRequire(import.meta.url)('fs-native-extensions') as { tryLock(fd: number): boolean }
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const conflict = () => new AgentMuxError('The original native control operation belongs to another actor or request. Keep its original ID.', 'RUN_CONTROL_OPERATION_CONFLICT')
@@ -39,13 +44,12 @@ export class RunControlOperations {
       return null
     }
     const p = rpcRecord(JSON.parse(raw), ['schemaVersion', 'request', 'requestDigest', 'receipt'])
-    const request = parsePostureSet(p.request), receipt = parsePostureReceipt(p.receipt)
-    if (p.schemaVersion !== 1 || request.operationId !== id || typeof p.requestDigest !== 'string' || !receipt ||
-      receipt.action !== 'agent-posture' || receipt.operationId !== id || !['prepared', 'dispatching', 'settled'].includes(receipt.phase) ||
-      !['not-dispatched', 'not-applied', 'applied', 'unknown'].includes(receipt.outcome)) throw new AgentMuxError('The original native control record is unconfirmed; no replacement was created.', 'RUN_CONTROL_RECORD_UNCONFIRMED')
-    const actor = receipt.actor
-    if (digest({ request, actor }) !== p.requestDigest || JSON.stringify(receipt.target) !== JSON.stringify(request.target) ||
-      receipt.controlId !== request.controlId || receipt.modeId !== request.modeId) throw conflict()
+    const action = rpcRecord(p.receipt).action
+    const request = action === 'agent-posture' ? parsePostureSet(p.request) : parseTerminalControl(p.request)
+    const receipt = 'action' in request ? parseTerminalControlResult(p.receipt, request) : parsePostureSetResult(p.receipt, request)
+    if (p.schemaVersion !== 1 || request.operationId !== id || receipt.operationId !== id || typeof p.requestDigest !== 'string')
+      throw new AgentMuxError('The original native control record is unconfirmed; no replacement was created.', 'RUN_CONTROL_RECORD_UNCONFIRMED')
+    if (digest({ request, actor: receipt.actor }) !== p.requestDigest) throw conflict()
     receipt.diskDurability = this.acknowledgedImages.get(id) === digest(raw) ? 'confirmed' : 'unconfirmed'
     return { schemaVersion: 1, request, requestDigest: p.requestDigest, receipt }
   }
@@ -71,38 +75,43 @@ export class RunControlOperations {
     await durableWriteFile(this.path(id), image, { mode: 0o600, requireDirectorySync: true })
     this.acknowledgedImages.set(id, digest(image)); record.receipt.diskDurability = 'confirmed'
   }
-  private same(record: Record, request: PostureSet, actor: RunControlActor): void { if (record.requestDigest !== digest({ request, actor })) throw conflict() }
-  async inspect(operationId: string): Promise<PostureReceipt | null> { return (await this.readRecord(operationId))?.receipt ?? null }
-  async original(request: PostureSet, actor: RunControlActor): Promise<PostureReceipt | null> {
+  private same(record: Record, request: ControlRequest, actor: RunControlActor): void { if (record.requestDigest !== digest({ request, actor })) throw conflict() }
+  async inspect(operationId: string): Promise<ControlReceipt | null> { return (await this.readRecord(operationId))?.receipt ?? null }
+  async original<R extends ControlRequest>(request: R, actor: RunControlActor): Promise<ReceiptFor<R> | null> {
     const previous = await this.readRecord(request.operationId)
     if (!previous) return null
-    this.same(previous, request, actor); return previous.receipt
+    this.same(previous, request, actor); return previous.receipt as ReceiptFor<R>
   }
-  async prepare(request: PostureSet, actor: RunControlActor, runtime: AgentMuxCreationRuntime): Promise<PostureReceipt> {
+  async prepare<R extends ControlRequest>(request: R, actor: RunControlActor, runtime: AgentMuxCreationRuntime): Promise<ReceiptFor<R>> {
     return this.locked(request.operationId, async newAdmission => {
       const prior = await this.readRecord(request.operationId, newAdmission)
-      if (prior) { this.same(prior, request, actor); return prior.receipt }
-      const receipt: PostureReceipt = { action: 'agent-posture', operationId: request.operationId, target: request.target, controlId: request.controlId,
-        modeId: request.modeId, actor, runtime, nativeOperationId: mintObjectId(), phase: 'prepared', outcome: 'not-dispatched', acknowledgement: null, diskDurability: 'confirmed' }
+      if (prior) { this.same(prior, request, actor); return prior.receipt as ReceiptFor<R> }
+      const common = { operationId: request.operationId, target: request.target, actor, runtime,
+        phase: 'prepared' as const, outcome: 'not-dispatched' as const, acknowledgement: null, diskDurability: 'confirmed' as const }
+      const receipt: ControlReceipt = 'action' in request
+        ? { ...common, target: request.target, action: request.action, ownerInstanceId: request.ownerInstanceId,
+          ...(request.action === 'terminal-input' ? { input: terminalInputDescriptor(request) } : {}),
+          nativeOperationId: request.action === 'terminal-interrupt' || request.action === 'terminal-input' && terminalInputDescriptor(request).bytes === 0 ? null : mintObjectId() }
+        : { ...common, target: request.target, action: 'agent-posture', controlId: request.controlId, modeId: request.modeId, nativeOperationId: mintObjectId() }
       const record: Record = { schemaVersion: 1, request, requestDigest: digest({ request, actor }), receipt }
-      await this.save(record); return structuredClone(receipt)
+      await this.save(record); return structuredClone(receipt) as ReceiptFor<R>
     })
   }
-  async claim(request: PostureSet, actor: RunControlActor): Promise<{ receipt: PostureReceipt; dispatched: boolean }> {
+  async claim<R extends ControlRequest>(request: R, actor: RunControlActor): Promise<{ receipt: ReceiptFor<R>; dispatched: boolean }> {
     return this.locked(request.operationId, async () => {
       const record = await this.readRecord(request.operationId)
       if (!record) throw new AgentMuxError('The original native operation preparation is unavailable.', 'RUN_CONTROL_RECORD_UNCONFIRMED')
       this.same(record, request, actor)
-      if (record.receipt.phase !== 'prepared') return { receipt: record.receipt, dispatched: false }
+      if (record.receipt.phase !== 'prepared') return { receipt: record.receipt as ReceiptFor<R>, dispatched: false }
       record.receipt = { ...record.receipt, phase: 'dispatching', outcome: 'unknown' }
-      await this.save(record); return { receipt: record.receipt, dispatched: true }
+      await this.save(record); return { receipt: record.receipt as ReceiptFor<R>, dispatched: true }
     })
   }
-  async settle(request: PostureSet, actor: RunControlActor, update: Pick<PostureReceipt, 'outcome' | 'acknowledgement'> & { issue?: string }): Promise<PostureReceipt> {
+  async settle<R extends ControlRequest>(request: R, actor: RunControlActor, update: Pick<ReceiptFor<R>, 'outcome' | 'acknowledgement'> & { issue?: string }): Promise<ReceiptFor<R>> {
     const record = await this.readRecord(request.operationId)
     if (!record) throw new AgentMuxError('The original dispatched native operation is unavailable.', 'RUN_CONTROL_RECORD_UNCONFIRMED')
     this.same(record, request, actor)
-    record.receipt = { ...record.receipt, ...update, phase: 'settled', diskDurability: 'unconfirmed' }
+    record.receipt = { ...record.receipt, ...update, phase: 'settled', diskDurability: 'unconfirmed' } as ControlReceipt
     // Retain the observed ACK even if admission to the receipt writer fails.
     // The durable dispatch claim already prevents any later reinput.
     this.observed.set(request.operationId, structuredClone(record))
@@ -115,6 +124,6 @@ export class RunControlOperations {
       record.receipt.issue = 'The original native receipt was observed; receipt persistence or writer release reported an error. ' + String(error)
       this.observed.set(request.operationId, structuredClone(record))
     }
-    return structuredClone(record.receipt)
+    return structuredClone(record.receipt) as ReceiptFor<R>
   }
 }

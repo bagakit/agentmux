@@ -326,9 +326,9 @@ export class AgentMuxHostedRuntimeService {
       context.signal?.throwIfAborted(); this.assertFence(p.fence)
     }
     const controlledInput = invocation.method === 'submitAgentPrompt' || invocation.method === 'submitAgentMessage' || invocation.method === 'broadcastMessages' || invocation.method === 'notifyMessages' || invocation.method === 'rejoinAgentInputWaiting' || invocation.method === 'respondAgentInteraction' || invocation.method === 'replySessionQuestion'
-    const postureInput = invocation.method === 'setAgentPosture'
+    const postureInput = invocation.method === 'setAgentPosture' || invocation.method === 'controlTerminal'
     if (postureInput && (invocation.args.length !== 1 || context.caller || !context.principal || !['user', 'device'].includes(context.principal.kind)))
-      throw new AgentMuxError('Posture intent requires one request and its original transport-approved person/device.', 'CONTROL_PERMISSION_DENIED')
+      throw new AgentMuxError('Native intent requires one request and its original transport-approved person/device.', 'CONTROL_PERMISSION_DENIED')
     const rawAgentInput = invocation.method === 'writeAgent' || invocation.method === 'pasteAgent'
     const rawTerminalInput = invocation.method === 'writeTerminal' || invocation.method === 'writeTerminalBytes'
     if ((controlledInput || rawAgentInput) && invocation.args.length !== 1 || rawTerminalInput && (invocation.args.length < 2 || invocation.args.length > 3)) throw new AgentMuxError('Input call context is supplied only by the original Host, never by wire arguments.', 'INVALID_CONTROL_REQUEST')
@@ -455,7 +455,7 @@ export class AgentMuxHostedRuntimeService {
         await context.assertCurrent?.()
         context.signal?.throwIfAborted(); this.assertFence(p.fence)
       }
-      const pending = operation.apply(this.client, postureInput ? [invocation.args[0], { actor: context.principal!, ...(context.signal ? { requestSignal: context.signal } : {}), ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {}) } satisfies import('./agent-posture.js').RunControlContext] : rawAgentInput ? [invocation.args[0], rawContext]
+      const pending = operation.apply(this.client, postureInput ? [invocation.args[0], { actor: context.principal!, ...(context.signal ? { requestSignal: context.signal } : {}), ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {}) } satisfies import('./run-control-context.js').RunControlContext] : rawAgentInput ? [invocation.args[0], rawContext]
         : rawTerminalInput ? [invocation.args[0], invocation.args[1], invocation.args[2], rawContext]
         : (invocation.method === 'readAgentInputMailbox' || invocation.method === 'readAgentInputChanges' || invocation.method === 'readAgentInputResource') ? [invocation.args[0], ...(context.caller ? [context.caller] : [])] : continuityControl || invocation.method === 'ensureAgentContinuity' ? [...invocation.args, {
         ...(context.signal ? { requestSignal: context.signal } : {}),

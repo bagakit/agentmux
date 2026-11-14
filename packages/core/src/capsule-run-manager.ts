@@ -320,9 +320,10 @@ export class CapsuleRunManager {
     }
     effect.invoked = true
     const original = effect
-    const work = Promise.resolve().then(async (): Promise<AgentMuxRun | void> => kind === 'start'
-      ? await this.client.createPreparedTerminal(original.launch)
-      : await this.client.stopPreparedTerminal(original.stop!))
+    const work = Promise.resolve().then(async (): Promise<AgentMuxRun | void> => {
+      if (kind === 'start') return await this.client.createPreparedTerminal(original.launch)
+      await this.client.stopPreparedTerminal(original.stop!)
+    })
     const settled = work.then(run => {
       if (run) original.run = run
       original.outcome = { disposition: 'applied' }

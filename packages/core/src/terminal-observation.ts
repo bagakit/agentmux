@@ -85,7 +85,7 @@ export function parseTerminalTarget(value: unknown): TerminalTarget {
   const r = rpcRecord(value, ['hostId', 'runtimeId', 'run'])
   const run = rpcRecord(r.run, ['runId'])
   if (![r.hostId, r.runtimeId, run.runId].every(id)) throw new AgentMuxError('Use the complete original Host, persistent Runtime and raw Run.', 'INVALID_CONTROL_REQUEST')
-  return structuredClone(r) as TerminalTarget
+  return { hostId: r.hostId as string, runtimeId: r.runtimeId as string, run: { runId: run.runId as string } }
 }
 export function parseTerminalOutputParams(value: unknown): TerminalOutputParams {
   const r = rpcRecord(value, ['target', 'afterByte', 'follow'])
