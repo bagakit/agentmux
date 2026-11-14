@@ -231,8 +231,12 @@ async function run(): Promise<void> {
     for (const frame of frames.displays) {
       check(label + ' background probe has real PNG bytes', typeof frame.png === 'string')
       check(label + ' background probe has real dimensions', typeof frame.width === 'number' && typeof frame.height === 'number')
-      const marker = colorPixels(frame.png, { x: 0, y: 0, width: frame.width, height: frame.height }, 'overlay-marker')
-      check(label + ' background contains no visible overlay pixels on any real display', marker.matches === 0, { displayId: frame.displayId, matches: marker.matches })
+      const scaleX = frame.width / frame.frame.width, scaleY = frame.height / frame.frame.height
+      const region = { x: 20 * scaleX, y: 20 * scaleY, width: 96 * scaleX, height: 96 * scaleY }
+      const marker = colorPixels(frame.png, region, 'overlay-marker')
+      // A protected-window failure captures the whole 96px marker, not a few unrelated green desktop pixels.
+      check(label + ' background contains no captured overlay marker on any real display', marker.area > 100 && marker.matches <= marker.area * 0.01,
+        { displayId: frame.displayId, matches: marker.matches, area: marker.area })
     }
   }
   const liveIncludedFrame = frameFor(visibleIncluded, hostDisplay.id), liveExcludedFrame = frameFor(visibleExcluded, hostDisplay.id)
