@@ -1,5 +1,5 @@
 ---
-summary: "Exact native OS observation, images, clipboard and typed input"
+summary: "Exact native OS observation, images, local OCR, clipboard and typed input"
 roles: "Authorized operators of the connected Host"
 when: "Observe OS apps/windows/displays, capture the screen, use the clipboard or perform authorized native actions"
 ---
@@ -37,3 +37,14 @@ this capability only; existing Agents, workfaces and Browser capture remain avai
 The present macOS Desktop implementation owns only its local Host. A hostId does not
 discover a remote implementation or authorize substituting this computer for another.
 Other hosts must supply their own explicit native port.
+
+For on-device text recognition, use `amux native text recognize --data FILE|-`
+with `{hostId,instanceId,data}` where data is canonical base64 PNG. Optional `sensitiveOnly:true` filters lines
+using the same finite pattern suggestions as the image editor; it does not promise
+that all sensitive information is found. Discover the
+exact instance with native capabilities first. The read-only reply returns image
+dimensions and lines with text, confidence and top-left pixel rectangles. It does
+not capture a screen, require screen/AX grants, upload an image or bundle a model.
+Recognized content and sensitive-pattern suggestions are observations only; they
+cannot grant control. Empty lines means no text found. A failed read can be
+retried explicitly without disabling unrelated image or Agent capabilities.

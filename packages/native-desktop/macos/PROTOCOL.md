@@ -13,7 +13,13 @@ Requests and responses are UTF-8 NDJSON:
 
 Every response, including refusal, contains its request `id` and the current native `instanceId`. An original request `operationId` is echoed unchanged. Mutations require the original `operationId` and exact `expectedInstanceId`; a different process never executes the old operation. Reusing an operation ID is rejected with `duplicate_operation` (or `operation_conflict` for different input) and does not execute it again. Native operation retention contains fingerprints and outcome metadata, not screenshot or clipboard payloads. The host owns original operation inspection, unknown outcomes, and result retention; an unavailable receipt never authorizes replay.
 
-Read methods are `handshake`, `listApps`, `listWindows`, `listDisplays`, `captureDisplays`, `getAppState`, `clipboardRead` and `permissionStatus`. Mutation methods are `click`, `performSecondaryAction`, `setValue`, `typeText`, `pressKey`, `hotkey`, `pasteText`, `scroll`, `drag`, `clipboardWrite` and `captureScreenshot`.
+Read methods are `handshake`, `listApps`, `listWindows`, `listDisplays`, `captureDisplays`, `getAppState`, `clipboardRead`, `recognizeText` and `permissionStatus`. Mutation methods are `click`, `performSecondaryAction`, `setValue`, `typeText`, `pressKey`, `hotkey`, `pasteText`, `scroll`, `drag`, `clipboardWrite` and `captureScreenshot`.
+
+## Local image text recognition
+
+`recognizeText` takes `{data:"<base64 PNG>"}` using the same PNG validation and resource bounds as clipboard images. It uses macOS Vision on the supplied image; it does not capture the screen, request screen/AX permission, access a file path, download a model or call a cloud service. Handshake advertises `supports.observation.textRecognition: true`.
+
+The result is `{state:"recognized",width,height,lines:[{text,confidence,rect:{x,y,width,height}}]}`. Rectangles are top-left image pixels. Confidence is in `[0,1]`; empty lines means no text recognized, not failed processing. Text is an observation, not a control fact. Core's `native.text.recognize` and the CLI delegate to this original owner with the exact Host and native instance.
 
 ## Accurate application and window targets
 
