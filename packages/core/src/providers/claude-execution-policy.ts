@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { mkdir, lstat, readFile, realpath } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { durableWriteFile } from '../durable-write.js'
+import { directoryMkdirAt, openDirectoryWriteParent, readDirectoryFile } from '../directory-write.js'
 import { AgentMuxError } from '../errors.js'
 import { CLAUDE_EXECUTION_TOOL_NAMES, CLAUDE_EXECUTION_SHELL_TASK_PREFIX } from './claude-execution-protocol.js'
 
@@ -124,12 +125,16 @@ function policyDirectoryEscape(): AgentMuxError {
   return new AgentMuxError('The generated execution plugin must remain in ordinary directories below the exact validated workspace.', 'EXECUTION_BINDING_CONFLICT')
 }
 
+function policyFileConflict(): AgentMuxError {
+  return new AgentMuxError('The generated execution plugin no longer matches its original content. The original Run remains retained.', 'EXECUTION_BINDING_CONFLICT')
+}
+
 /** Prove one existing Provider directory and bind subsequent writes to that exact inode. */
 export async function proveClaudeExecutionPolicyDirectory(input: PolicyDirectoryInput, path: string, expected?: ClaudeExecutionPolicyDirectoryProof): Promise<ClaudeExecutionPolicyDirectoryProof> {
   if (!input.assertWorkspace) throw policyDirectoryEscape()
   await input.assertWorkspace()
   const descendant = relative(input.workspacePath, path)
-  if (!descendant || isAbsolute(descendant) || descendant === '..' || descendant.startsWith('..' + sep)) throw policyDirectoryEscape()
+  if (isAbsolute(descendant) || descendant === '..' || descendant.startsWith('..' + sep)) throw policyDirectoryEscape()
   const [before, workspaceRealpath] = await Promise.all([lstat(path, { bigint: true }), realpath(input.workspacePath)])
   if (!before.isDirectory()) throw policyDirectoryEscape()
   const actualRealpath = await realpath(path)
@@ -146,12 +151,16 @@ async function preparePolicyDirectory(input: PolicyDirectoryInput, parent: strin
   if (!input.assertWorkspace) { await mkdir(parent, { recursive: true, mode: 0o700 }); return undefined }
   const descendant = relative(input.workspacePath, parent)
   if (!descendant || isAbsolute(descendant) || descendant === '..' || descendant.startsWith('..' + sep)) throw policyDirectoryEscape()
-  let current = input.workspacePath, proof: ClaudeExecutionPolicyDirectoryProof | undefined
+  let current = input.workspacePath
+  let proof = await proveClaudeExecutionPolicyDirectory(input, current)
   for (const component of descendant.split(sep)) {
-    if (proof) await proveClaudeExecutionPolicyDirectory(input, current, proof)
-    else await input.assertWorkspace()
+    const parent = await openDirectoryWriteParent(current, proof)
+    try {
+      try { directoryMkdirAt(parent, component, 0o700) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
+    } finally {
+      await parent.handle.close()
+    }
     current = join(current, component)
-    try { await mkdir(current, { mode: 0o700 }) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
     proof = await proveClaudeExecutionPolicyDirectory(input, current)
   }
   return proof
@@ -175,12 +184,26 @@ export async function prepareClaudeExecutionPolicy(input: { workspacePath: strin
     const path = join(directory, relativePath)
     const parent = dirname(path)
     const proof = await preparePolicyDirectory(input, parent)
-    if (proof) await proveClaudeExecutionPolicyDirectory(input, parent, proof)
-    const retained = await readFile(path, 'utf8').catch(error => { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; return undefined })
-    if (retained === content) continue
-    if (retained !== undefined) throw new AgentMuxError('The generated execution plugin no longer matches its original content. The original Run remains retained.', 'EXECUTION_BINDING_CONFLICT')
-    await durableWriteFile(path, content, { mode: 0o600,
-      ...(proof ? { assertDirectory: async () => { await proveClaudeExecutionPolicyDirectory(input, parent, proof) } } : {}) })
+    const parentHandle = proof ? await openDirectoryWriteParent(parent, proof) : undefined
+    try {
+      if (proof) await proveClaudeExecutionPolicyDirectory(input, parent, proof)
+      let retained: string | undefined
+      try {
+        retained = parentHandle ? await readDirectoryFile(parentHandle, relativePath.split('/').at(-1)!) : await readFile(path, 'utf8')
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          if (parentHandle) throw policyFileConflict()
+          throw error
+        }
+      }
+      if (retained === content) continue
+      if (retained !== undefined) throw policyFileConflict()
+      await durableWriteFile(path, content, { mode: 0o600,
+        ...(parentHandle ? { directory: parentHandle } : {}),
+        ...(proof ? { assertDirectory: async () => { await proveClaudeExecutionPolicyDirectory(input, parent, proof) } } : {}) })
+    } finally {
+      await parentHandle?.handle.close()
+    }
   }
   return directory
 }

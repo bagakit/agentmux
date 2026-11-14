@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto'
 import { constants, type BigIntStats } from 'node:fs'
-import { lstat, mkdir, open, readdir, realpath } from 'node:fs/promises'
+import { lstat, open, readdir, realpath } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join } from 'node:path'
 import { durableWriteFile } from './durable-write.js'
+import { directoryMkdirAt, openDirectoryWriteParent, syncDirectoryWriteParent, writeDirectoryFile, assertDirectoryWriteSupport, type DirectoryWriteParent } from './directory-write.js'
 import { AgentMuxError } from './errors.js'
 import type { AgentMuxAgentWorkspaceLocator } from './host-environment.js'
 
@@ -148,14 +149,10 @@ export class AgentWorkspaceDirectory {
     if (process.platform === 'win32' || typeof process.getuid !== 'function' || typeof constants.O_NOFOLLOW !== 'number') {
       throw refuse('This platform cannot prove same-UID no-follow directory ownership.')
     }
+    assertDirectoryWriteSupport()
     // Prove bigint identity support before touching the namespace. Directory-fsync
     // support is exercised by the actual allocation/parent acknowledgement below.
     await lstat(this.stateDirectory, { bigint: true })
-  }
-
-  private async syncDirectory(path: string): Promise<void> {
-    const handle = await open(path, 'r')
-    try { await handle.sync() } finally { await handle.close() }
   }
 
   private uid(): bigint {
@@ -191,15 +188,20 @@ export class AgentWorkspaceDirectory {
     return await this.proveDirectory(dirname(location.markerPath), expectedRealpath ?? join(stateRealpath, 'agent-workspace-identities'), expected)
   }
 
-  private async ensureNamespace(path: string, expectedRealpath: string): Promise<DirectoryProof> {
-    try { await mkdir(path, { mode: 0o700 }) } catch (error) {
+  private async ensureNamespace(path: string, expectedRealpath: string, stateParent: DirectoryWriteParent): Promise<DirectoryProof> {
+    try { directoryMkdirAt(stateParent, basename(path), 0o700) } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
     }
     const proof = await this.proveDirectory(path, expectedRealpath)
     // EEXIST may be another creator's unacknowledged entry. Every survivor
     // confirms the parent entry it depends on, not only its own mkdir winner path.
-    await this.syncDirectory(this.stateDirectory)
-    await this.syncDirectory(path)
+    const parent = await openDirectoryWriteParent(path, proof)
+    try {
+      await syncDirectoryWriteParent(stateParent)
+      await syncDirectoryWriteParent(parent)
+    } finally {
+      await parent.handle.close()
+    }
     return proof
   }
 
@@ -229,25 +231,38 @@ export class AgentWorkspaceDirectory {
   }
 
   private async reAckMarker(location: AgentWorkspaceDirectoryLocation): Promise<void> {
-    await this.proveMarkerNamespace(location)
-    const handle = await open(location.markerPath, constants.O_RDONLY | constants.O_NOFOLLOW)
+    const namespaceProof = await this.proveMarkerNamespace(location)
+    const parent = await openDirectoryWriteParent(dirname(location.markerPath), namespaceProof)
     try {
-      const stats = await handle.stat({ bigint: true })
-      if (!stats.isFile() || stats.uid !== this.uid()) throw refuse('The re-acknowledged workspace marker is not a same-UID ordinary file.')
-      await handle.sync()
+      const handle = await open(location.markerPath, constants.O_RDONLY | constants.O_NOFOLLOW)
+      try {
+        const stats = await handle.stat({ bigint: true })
+        if (!stats.isFile() || stats.uid !== this.uid()) throw refuse('The re-acknowledged workspace marker is not a same-UID ordinary file.')
+        await handle.sync()
+      } finally {
+        await handle.close()
+      }
+      await syncDirectoryWriteParent(parent)
     } finally {
-      await handle.close()
+      await parent.handle.close()
     }
-    await this.syncDirectory(dirname(location.markerPath))
   }
 
   private async reserve(location: AgentWorkspaceDirectoryLocation): Promise<string> {
     const stateRealpath = await realpath(this.stateDirectory)
-    // Only a genuinely absent reservation pays the allocation preflight barrier.
-    await this.syncDirectory(this.stateDirectory)
+    const stateProof = await this.proveDirectory(this.stateDirectory, stateRealpath)
+    const stateParent = await openDirectoryWriteParent(this.stateDirectory, stateProof)
     const rootPath = dirname(location.agentWorkspace.workspacePath)
-    const root = await this.ensureNamespace(rootPath, join(stateRealpath, 'agent-workspaces'))
-    await this.ensureNamespace(dirname(location.markerPath), join(stateRealpath, 'agent-workspace-identities'))
+    let root: DirectoryProof
+    let identityProof: DirectoryProof
+    try {
+      // Only a genuinely absent reservation pays the allocation preflight barrier.
+      await syncDirectoryWriteParent(stateParent)
+      root = await this.ensureNamespace(rootPath, join(stateRealpath, 'agent-workspaces'), stateParent)
+      identityProof = await this.ensureNamespace(dirname(location.markerPath), join(stateRealpath, 'agent-workspace-identities'), stateParent)
+    } finally {
+      await stateParent.handle.close()
+    }
     try {
       await lstat(location.agentWorkspace.workspacePath)
       throw refuse('An occupied leaf has no reservation marker; the unknown occupant was retained.')
@@ -263,21 +278,18 @@ export class AgentWorkspaceDirectory {
       root: root.identity,
       leaf: null
     }
-    let handle
+    const parent = await openDirectoryWriteParent(dirname(location.markerPath), identityProof)
     try {
-      handle = await open(location.markerPath,
-        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-      return await this.admitExisting(location)
-    }
-    try {
-      await handle.writeFile(JSON.stringify(pending) + '\n')
-      await handle.sync()
+      try {
+        await writeDirectoryFile(parent, basename(location.markerPath), JSON.stringify(pending) + '\n', 0o600)
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+        return await this.admitExisting(location)
+      }
+      await syncDirectoryWriteParent(parent)
     } finally {
-      await handle.close()
+      await parent.handle.close()
     }
-    await this.syncDirectory(dirname(location.markerPath))
     return await this.completePending(location)
   }
 
@@ -293,25 +305,36 @@ export class AgentWorkspaceDirectory {
     const pending = await this.readMarker(location)
     if (!pending || pending.value.phase !== 'pending') throw refuse('The retained helper record has no pending first-preparation reservation.')
     const root = await this.proveRoot(pending.value.root)
+    const rootParent = await openDirectoryWriteParent(dirname(location.agentWorkspace.workspacePath), root)
+    let witnessedLeaf: DirectoryProof
     try {
-      await mkdir(location.agentWorkspace.workspacePath, { mode: 0o700 })
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    }
-    const leaf = await this.proveLeaf(location, undefined, pending.value.root)
-    if ((await readdir(location.agentWorkspace.workspacePath)).length !== 0) {
-      throw refuse('A pending reservation names a nonempty unknown occupant; it was retained unchanged.')
-    }
-    await this.syncDirectory(location.agentWorkspace.workspacePath)
-    await this.syncDirectory(root.realpath)
-    const witnessedLeaf = await this.proveLeaf(location, leaf.identity, pending.value.root)
-    if ((await readdir(location.agentWorkspace.workspacePath)).length !== 0) {
-      throw refuse('The pending leaf became nonempty before publication; it was retained unchanged.')
+      try { directoryMkdirAt(rootParent, basename(location.agentWorkspace.workspacePath), 0o700) } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      }
+      const leaf = await this.proveLeaf(location, undefined, pending.value.root)
+      if ((await readdir(location.agentWorkspace.workspacePath)).length !== 0) {
+        throw refuse('A pending reservation names a nonempty unknown occupant; it was retained unchanged.')
+      }
+      const leafParent = await openDirectoryWriteParent(location.agentWorkspace.workspacePath, leaf)
+      try { await syncDirectoryWriteParent(leafParent) } finally { await leafParent.handle.close() }
+      await syncDirectoryWriteParent(rootParent)
+      witnessedLeaf = await this.proveLeaf(location, leaf.identity, pending.value.root)
+      if ((await readdir(location.agentWorkspace.workspacePath)).length !== 0) {
+        throw refuse('The pending leaf became nonempty before publication; it was retained unchanged.')
+      }
+    } finally {
+      await rootParent.handle.close()
     }
     const provisioned: Marker = { ...pending.value, phase: 'provisioned', leaf: witnessedLeaf.identity }
     const markerNamespace = await this.proveMarkerNamespace(location)
-    await durableWriteFile(location.markerPath, JSON.stringify(provisioned) + '\n', { mode: 0o600, requireDirectorySync: true,
-      assertDirectory: async () => { await this.proveMarkerNamespace(location, markerNamespace.identity, markerNamespace.realpath) } })
+    const markerParent = await openDirectoryWriteParent(dirname(location.markerPath), markerNamespace)
+    try {
+      await durableWriteFile(location.markerPath, JSON.stringify(provisioned) + '\n', { mode: 0o600, requireDirectorySync: true,
+        directory: markerParent,
+        assertDirectory: async () => { await this.proveMarkerNamespace(location, markerNamespace.identity, markerNamespace.realpath) } })
+    } finally {
+      await markerParent.handle.close()
+    }
     return await this.validateLocation(location)
   }
 

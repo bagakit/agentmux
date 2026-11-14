@@ -10,6 +10,7 @@ import { agentControlFailureCode, registerAgentExecutionInvocation } from '../ag
 
 import { inspectClaudeHookSettings } from './claude-hook-activation.js'
 import { prepareClaudeExecutionPolicy, proveClaudeExecutionPolicyDirectory } from './claude-execution-policy.js'
+import { openDirectoryWriteParent } from '../directory-write.js'
 export const CLAUDE_EXECUTION_MCP_SERVER = 'amux_exec'
 import { claudeLaunchValueOptions as valueOptions } from './claude-launch-options.js'
 
@@ -96,10 +97,16 @@ export async function prepareClaudeToolExecutionLaunch(plan: AgentLaunchPlan, co
     const policyProof = context.assertWorkspace
       ? await proveClaudeExecutionPolicyDirectory({ workspacePath: context.launchWorkspacePath, assertWorkspace: context.assertWorkspace }, policy)
       : undefined
-    await durableWriteFile(file, text, { mode: 0o600,
-      ...(policyProof ? { assertDirectory: async () => {
-        await proveClaudeExecutionPolicyDirectory({ workspacePath: context.launchWorkspacePath, assertWorkspace: context.assertWorkspace! }, policy, policyProof)
-      } } : {}) })
+    const policyParent = policyProof ? await openDirectoryWriteParent(policy, policyProof) : undefined
+    try {
+      await durableWriteFile(file, text, { mode: 0o600,
+        ...(policyParent ? { directory: policyParent } : {}),
+        ...(policyProof ? { assertDirectory: async () => {
+          await proveClaudeExecutionPolicyDirectory({ workspacePath: context.launchWorkspacePath, assertWorkspace: context.assertWorkspace! }, policy, policyProof)
+        } } : {}) })
+    } finally {
+      await policyParent?.handle.close()
+    }
     args.splice(fileAt, equal ? 1 : 2, '--append-system-prompt-file', file)
   } else args.unshift('--append-system-prompt', note)
   return { ...plan, command: executable, args }

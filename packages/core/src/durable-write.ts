@@ -1,6 +1,7 @@
 import { mintObjectId } from './object-id.js'
 import { open, rename, unlink } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { basename, dirname } from 'node:path'
+import { directoryRenameAt, directoryUnlinkAt, syncDirectoryWriteParent, writeDirectoryFile, type DirectoryWriteParent } from './directory-write.js'
 
 export interface DurableWriteOptions {
   /** 新文件的权限位。默认 0o600——状态文件只给属主读写。 */
@@ -10,6 +11,8 @@ export interface DurableWriteOptions {
   readonly requireDirectorySync?: boolean
   /** Re-prove the exact destination parent immediately before each publication effect. */
   readonly assertDirectory?: () => Promise<void>
+  /** Hold the proven parent descriptor for openat/renameat/unlinkat publication. */
+  readonly directory?: DirectoryWriteParent
 }
 
 /** Replacement is a producer fact; a failed directory ACK cannot undo it. */
@@ -56,35 +59,46 @@ export async function durableWriteFile(
   await options.assertDirectory?.()
   // 独立 ID 后缀让并发写各自拿到独立临时文件，wx（O_EXCL）保证不会误踩已存在的临时残留。
   const temporaryPath = `${path}.${process.pid}.${mintObjectId()}.tmp`
+  const temporaryName = basename(temporaryPath), targetName = basename(path)
   let committed = false
+  let directoryTemporaryCreated = false
   let failure: DurableWriteError | undefined
   const primary = (error: unknown) => failure ??= new DurableWriteError(path, committed ? 'after-replace' : 'before-replace', error)
   try {
-    const handle = await open(temporaryPath, 'wx', mode)
-    try {
-      await handle.writeFile(content)
-      // rename 之前先把这份新内容刷进磁盘，否则原子 rename 换上来的是一个可能还在页缓存里的空壳。
-      await handle.sync()
-    } catch (error) { throw primary(error) } finally {
-      try { await handle.close() } catch (error) {
-        if (failure) failure.addCleanupFailure('close', error)
-        else throw error
+    if (options.directory) {
+      await writeDirectoryFile(options.directory, temporaryName, content, mode, {
+        opened: () => { directoryTemporaryCreated = true },
+        closeFailed: (error, closeError) => { primary(error).addCleanupFailure('close', closeError) }
+      })
+    } else {
+      const handle = await open(temporaryPath, 'wx', mode)
+      try {
+        await handle.writeFile(content)
+        // rename 之前先把这份新内容刷进磁盘，否则原子 rename 换上来的是一个可能还在页缓存里的空壳。
+        await handle.sync()
+      } catch (error) { throw primary(error) } finally {
+        try { await handle.close() } catch (error) {
+          if (failure) failure.addCleanupFailure('close', error)
+          else throw error
+        }
       }
     }
     signal?.throwIfAborted()
     await options.assertDirectory?.()
-    await rename(temporaryPath, path)
+    if (options.directory) directoryRenameAt(options.directory, temporaryName, targetName)
+    else await rename(temporaryPath, path)
     committed = true
     await options.assertDirectory?.()
-    const directory = await open(dirname(path), 'r').catch(error => {
+    const directory = options.directory?.handle ?? await open(dirname(path), 'r').catch(error => {
       if (options.requireDirectorySync) throw error
       return undefined
     })
     try {
       await options.assertDirectory?.()
-      await directory?.sync()
+      if (options.directory) await syncDirectoryWriteParent(options.directory)
+      else await directory?.sync()
     } catch (error) { if (options.assertDirectory || options.requireDirectorySync) throw primary(error) } finally {
-      try { await directory?.close() } catch (error) {
+      try { if (!options.directory) await directory?.close() } catch (error) {
         if (failure) failure.addCleanupFailure('directory-close', error)
         else if (options.requireDirectorySync) throw error
       }
@@ -93,9 +107,15 @@ export async function durableWriteFile(
     throw primary(error)
   } finally {
     if (!committed) {
-      await unlink(temporaryPath).catch((error: NodeJS.ErrnoException) => {
-        if (error.code !== 'ENOENT') primary(error).addCleanupFailure('unlink', error)
-      })
+      if (options.directory) {
+        if (directoryTemporaryCreated) try { directoryUnlinkAt(options.directory, temporaryName) } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') primary(error).addCleanupFailure('unlinkat', error)
+        }
+      } else {
+        await unlink(temporaryPath).catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== 'ENOENT') primary(error).addCleanupFailure('unlink', error)
+        })
+      }
     }
   }
 }
