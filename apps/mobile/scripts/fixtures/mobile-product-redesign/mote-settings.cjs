@@ -25,16 +25,31 @@ module.exports = async ({ win, read, until, resize, button, capture, result, pha
     assert.equal(observed.settingsOverflow, false, 'Original settings sheet stays within its width')
     assert.equal(observed.appearance, 'light', 'Original theme runtime applies the captured appearance')
   }
+  const stableField = () => read(`(() => {
+    const input=document.querySelector(${JSON.stringify(field)})
+    const linked=name=>input.getAttribute(name)?.split(' ').map(id=>document.getElementById(id))
+    return {label:linked('aria-labelledby')?.map(node=>node?.textContent),
+      descriptions:linked('aria-describedby')?.map(node=>({text:node?.textContent,role:node?.getAttribute('role')})),
+      invalid:input.getAttribute('aria-invalid'),nativeLabel:input.closest('label').control===input,same:input===originalHeartbeatField,focus:document.activeElement===input,
+      overflow:mobileProductScene.facts().settingsOverflow}
+  })()`)
   await button('编辑快捷配置')
   await until("document.querySelector('.mobile-mote-quick-editor')?.textContent.includes('已核对当前配置')")
+  const retainField = () => read(`(()=>{window.originalHeartbeatField=document.querySelector(${JSON.stringify(field)})})()`)
+  await retainField()
   if (phase === 'restore') {
-    await until(`document.querySelector(${JSON.stringify(field)})?.value==='47'`)
+    await until(`document.querySelector(${JSON.stringify(field)})?.value==='0'`)
     const retained = await facts(), original = retained.record.moteQuickDrafts[0]
+    assert.equal(original.invalidHeartbeatInput,'0')
     assert.equal(original.values.presence.intervalMs, 2820000)
+    assert.equal((await stableField()).invalid,'true')
     assert.equal(original.attempts.at(-1).phase, 'unknown')
     assert.equal(original.blockedAttemptId, original.attempts.at(-1).input.operationId)
     assert.equal(original.attempts.at(-1).input.values.presence.intervalMs, 1020000)
-    await values(); await capture('mote-settings-restored-unknown-390-light')
+    await values(); await capture('mote-settings-restored-invalid-and-unknown-390-light')
+    await minutes('47')
+    await until("!Object.hasOwn(mobileProductScene.facts().record.moteQuickDrafts[0], 'invalidHeartbeatInput')")
+    assert.equal((await stableField()).invalid,null)
     await button('保存快捷配置')
     assert.equal((await facts()).calls.filter(call => call.method === 'space.mote.preferences.save').length, 0, 'Reopening never replays the original save')
     result.operations.push({ action: 'original-device-settings-restored', record: original, recordId: retained.record.recordId ?? null, host: retained.record.host })
@@ -49,15 +64,6 @@ module.exports = async ({ win, read, until, resize, button, capture, result, pha
   await resize(320, 740)
   await read("mobileSettingsTheme('dark')")
   await until("mobileProductScene.facts().appearance==='dark'")
-  await read(`(()=>{window.originalHeartbeatField=document.querySelector(${JSON.stringify(field)})})()`)
-  const stableField = () => read(`(() => {
-    const input=document.querySelector(${JSON.stringify(field)})
-    const linked=name=>input.getAttribute(name)?.split(' ').map(id=>document.getElementById(id))
-    return {label:linked('aria-labelledby')?.map(node=>node?.textContent),
-      descriptions:linked('aria-describedby')?.map(node=>({text:node?.textContent,role:node?.getAttribute('role')})),
-      invalid:input.getAttribute('aria-invalid'),nativeLabel:input.closest('label').control===input,same:input===originalHeartbeatField,focus:document.activeElement===input,
-      overflow:mobileProductScene.facts().settingsOverflow}
-  })()`)
   await typeMinutes('0')
   const validation = await stableField()
   assert.deepEqual(validation.label,['心跳间隔（分钟）'])
@@ -75,7 +81,19 @@ module.exports = async ({ win, read, until, resize, button, capture, result, pha
   assert.equal((await stableField()).focus,true,'Invalid submit returns to its original field')
   await read("originalHeartbeatField.scrollIntoView({block:'center'})")
   await capture('mote-settings-heartbeat-validation-320-dark')
+  await top()
+  await button('返回 Profile')
+  await until("!document.querySelector('.mobile-mote-quick-editor')")
+  await button('编辑快捷配置')
+  await until("document.querySelector('.mobile-mote-quick-editor')?.textContent.includes('已核对当前配置')")
+  assert.equal(await read("document.querySelector('input[name=heartbeatMinutes]').value"),'0','Closing the original Quick editor keeps the invalid heartbeat text')
+  const reopened = await facts()
+  assert.equal(reopened.record.moteQuickDrafts[0].invalidHeartbeatInput,'0')
+  assert.equal(reopened.record.moteQuickDrafts[0].values.presence.intervalMs,1800000)
+  await retainField()
+  assert.equal((await stableField()).invalid,'true')
   await minutes('7')
+  await until("!Object.hasOwn(mobileProductScene.facts().record.moteQuickDrafts[0], 'invalidHeartbeatInput')")
   const repaired = await stableField()
   assert.equal(repaired.same,true)
   assert.equal(repaired.focus,true)
@@ -133,7 +151,10 @@ module.exports = async ({ win, read, until, resize, button, capture, result, pha
   await button('保存快捷配置')
   await until("mobileProductScene.facts().record.moteQuickDrafts?.[0]?.attempts.at(-1)?.phase==='unknown'")
   await minutes('47'); await values(); await capture('mote-settings-unknown-keeps-later-draft-390-light')
+  await typeMinutes('0')
+  await until("mobileProductScene.facts().record.moteQuickDrafts?.[0]?.invalidHeartbeatInput==='0'")
   const retained = await facts(), original = retained.record.moteQuickDrafts[0]
+  assert.equal(original.invalidHeartbeatInput,'0')
   assert.equal(original.values.presence.intervalMs, 2820000)
   assert.equal(original.attempts.at(-1).input.values.presence.intervalMs, 1020000)
   assert.equal(original.attempts.at(-1).phase, 'unknown')

@@ -16,7 +16,7 @@ afterEach(async () => { for (const close of closes.splice(0).reverse()) await cl
 const sha = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex')
 async function body(request: IncomingMessage) { const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk)); return JSON.parse(Buffer.concat(chunks).toString()) }
 
-it.runIf(process.env.MOBILE_SETTINGS_CAPTURE === '1').each(['original', 'remove-composing-enter-guard'])(
+it.runIf(process.env.MOBILE_SETTINGS_CAPTURE === '1').each(['original', 'remove-composing-enter-guard', 'do-not-retain-invalid-heartbeat'])(
   'captures actual Mobile settings through the private Host (%s)', async variant => {
   const directory = resolve(root, '.local/mote-settings-robustness/mobile-capture-' + randomUUID()), compiled = join(directory, 'compiled')
   await mkdir(compiled, { recursive: true })
@@ -119,10 +119,14 @@ it.runIf(process.env.MOBILE_SETTINGS_CAPTURE === '1').each(['original', 'remove-
           if (!file.startsWith('apps/mobile/') && !file.startsWith('packages/client-ui/') && !file.startsWith('packages/core/')) return
           const bytes = await readFile(args.path); source.set(file, sha(bytes))
           let contents = bytes.toString()
-          if (variant === 'remove-composing-enter-guard' && file === 'apps/mobile/src/navigation/MobileMoteQuickEditor.tsx') {
-            const guard = "if (event.key === 'Enter' && isImeOwnedKeyboardEvent(event.nativeEvent)) event.preventDefault()"
-            expect(contents.split(guard)).toHaveLength(2)
-            contents = contents.replace(guard, '')
+          const replacement = variant === 'remove-composing-enter-guard' && file === 'apps/mobile/src/navigation/MobileMoteQuickEditor.tsx'
+            ? ["if (event.key === 'Enter' && isImeOwnedKeyboardEvent(event.nativeEvent)) event.preventDefault()", '']
+            : variant === 'do-not-retain-invalid-heartbeat' && file === 'apps/mobile/src/navigation/useMoteQuickDraft.ts'
+              ? ['void retain({ ...current.current, invalidHeartbeatInput: value })', 'display({ ...current.current, invalidHeartbeatInput: value })']
+              : null
+          if (replacement) {
+            expect(contents.split(replacement[0]!)).toHaveLength(2)
+            contents = contents.replace(replacement[0]!, replacement[1]!)
             receipt.loadedMutation = { file, original: sha(bytes), changed: sha(contents) }
             expect(receipt.loadedMutation.changed).not.toBe(receipt.loadedMutation.original)
           }
@@ -143,11 +147,13 @@ it.runIf(process.env.MOBILE_SETTINGS_CAPTURE === '1').each(['original', 'remove-
       const result = JSON.parse(await readFile(join(directory, phase === 'restore' ? 'renderer-result-restored.json' : 'renderer-result.json'), 'utf8'))
       receipt[phase] = result
       expect(processReceipt.exitConfirmed).toBe(true)
-      if (variant === 'remove-composing-enter-guard') {
+      if (variant !== 'original') {
         expect(receipt.loadedMutation).toBeDefined()
         expect(processReceipt.exitCode).toBe(1)
         expect(result.passed).toBe(false)
-        expect(result.error?.message).toContain('The actual Quick settings form owns the composing Enter guard')
+        expect(result.error?.message).toContain(variant === 'remove-composing-enter-guard'
+          ? 'The actual Quick settings form owns the composing Enter guard'
+          : 'Closing the original Quick editor keeps the invalid heartbeat text')
         expect(calls.some(call => call.method === 'space.mote.preferences.save')).toBe(false)
         receipt.passed = true
         return
@@ -163,7 +169,10 @@ it.runIf(process.env.MOBILE_SETTINGS_CAPTURE === '1').each(['original', 'remove-
     for (const key of ['record', 'recordId', 'host']) expect(after[key]).toEqual(before[key])
     const saves = calls.filter(call => call.method === 'space.mote.preferences.save')
     expect(saves).toHaveLength(3)
-    for (const save of saves) expect(save.params).not.toHaveProperty('destination')
+    for (const save of saves) {
+      expect(save.params).not.toHaveProperty('destination')
+      expect(save.params).not.toHaveProperty('values.invalidHeartbeatInput')
+    }
     expect(saves[1]!.result).toMatchObject({ status: 'refused-before-write', source: null })
     expect(saves[2]!.failure).toBe('HTTP response lost after the original Host receipt')
     expect(await readFile(host.motePath, 'utf8')).toContain('External source note kept by the original Host.')
@@ -186,7 +195,7 @@ it.runIf(process.env.MOBILE_SETTINGS_CAPTURE === '1').each(['original', 'remove-
     receipt.compiled = Object.fromEntries(await Promise.all((await readdir(compiled)).map(async file => [file, sha(await readFile(join(compiled, file)))])))
     await writeFile(join(directory, 'renderer.log'), logs.join('\n'))
     await writeFile(join(directory, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
-    const latest = variant === 'original' ? 'mobile-capture-latest.json' : 'mobile-capture-mutation-latest.json'
+    const latest = variant === 'original' ? 'mobile-capture-latest.json' : `mobile-capture-${variant}-latest.json`
     await writeFile(resolve(root, '.local/mote-settings-robustness', latest), JSON.stringify({ path: relative(root, directory), passed: receipt.passed }) + '\n')
     await rm(compiled, { recursive: true, force: true })
     if (receipt.processes.length && receipt.processes.every((value: any) => value.exitConfirmed)) {
