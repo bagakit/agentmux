@@ -650,8 +650,33 @@ it('mobile brand art appears only on the visible Goal directory and current prop
   await view.wait('从一个想法开始')
   expect(view.element.querySelector<HTMLImageElement>('.mobile-goals-start--empty img')?.src).toContain('/concepts/goals-companions.png')
   const filter = view.element.querySelector<HTMLSelectElement>('[aria-label="筛选工作状态"]')!
-  await act(async () => { filter.value = 'done'; filter.dispatchEvent(new Event('change', { bubbles: true })) })
+  await owner.create({ id: 'unfiltered-original-goal', title: 'Original unfiltered Goal', status: 'backlog' })
+  const currentGoals = await owner.list()
+  let releaseFiltered: ((value: typeof currentGoals) => void) | undefined
+  list.mockImplementationOnce(() => new Promise(resolve => { releaseFiltered = resolve }))
+  try {
+    await act(async () => { filter.value = 'done'; filter.dispatchEvent(new Event('change', { bubbles: true })) })
+    await vi.waitFor(() => expect(releaseFiltered).toBeTypeOf('function'))
+    expect(view.forwardRpc).toHaveBeenCalledWith('goal.ls', { limit: 1000, status: 'done' })
+  } finally {
+    await act(async () => { releaseFiltered?.(currentGoals); await Promise.allSettled([...inFlight]) })
+  }
   await view.wait('没有匹配的目标')
+  expect(view.element.querySelector('.mobile-goals-list li')).toBeNull()
+  expect(view.element.querySelector('.mobile-goals-start--empty')).toBeNull()
+  let releaseUnfiltered: ((value: typeof currentGoals) => void) | undefined
+  list.mockImplementationOnce(() => new Promise(resolve => { releaseUnfiltered = resolve }))
+  try {
+    await act(async () => { filter.value = ''; filter.dispatchEvent(new Event('change', { bubbles: true })) })
+    await vi.waitFor(() => expect(releaseUnfiltered).toBeTypeOf('function'))
+    expect(view.forwardRpc).toHaveBeenLastCalledWith('goal.ls', { limit: 1000 })
+    expect(view.element.querySelector('.mobile-goals-start--empty'), 'a cached filtered empty result cannot confirm the unfiltered directory while its read is pending').toBeNull()
+    expect(view.element.querySelector('.mobile-goals')?.textContent).not.toContain('还没有目标。')
+  } finally {
+    await act(async () => { releaseUnfiltered?.(currentGoals); await Promise.allSettled([...inFlight]) })
+  }
+  await view.wait('Original unfiltered Goal')
+  expect(view.element.querySelector('.mobile-goals-list li')?.textContent).toContain('Original unfiltered Goal')
   expect(view.element.querySelector('.mobile-goals-start--empty')).toBeNull()
   list.mockRejectedValue(new Error('Original list is unknown'))
   await view.click('刷新目标'); await view.wait('Original list is unknown')
