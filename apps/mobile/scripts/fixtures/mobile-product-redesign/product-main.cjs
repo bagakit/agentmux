@@ -91,6 +91,39 @@ app.whenReady().then(async () => {
     await until('!!document.querySelector(".mobile-conversation-panel:not([hidden]) [contenteditable=true]")')
     assert.equal(await read('mobileProductScene.facts().record.selectedSessionId'), 'session-mote')
   }
+  if (mode === 'topic-directory-search') {
+    const search = 'input[aria-label="查找 Topic 或分类"]'
+    const clear = 'button[aria-label="清除搜索"]'
+    const topicReads = () => read('mobileProductScene.facts().calls.filter(call=>["topic.category.ls","topic.ls","knowledge.search"].includes(call.method)).length')
+    await button('Topics', '.mobile-navigation')
+    await until('document.querySelector(".mobile-topics-list")?.textContent.includes("产品与研究")')
+    assert.ok(await topicReads() > 0, 'The original Topic directory was loaded')
+    for (const [width, appearance] of [[320, 'dark'], [390, 'light']]) {
+      await resize(width, 740)
+      await read(`mobileProductScene.setAppearance(${JSON.stringify(appearance)})`)
+      await tap(search, 'Edit the original Topic filter')
+      await read(`window.originalTopicFilter = document.querySelector(${JSON.stringify(search)})`)
+      const originalReads = await topicReads()
+      await win.webContents.debugger.sendCommand('Input.insertText', { text: '没有对应的主题' })
+      await until('document.querySelector(".mobile-topics-empty")?.textContent.includes("没有匹配")')
+      assert.equal(await visible('.mobile-topics-list'), false, 'An empty result leaves no empty card beneath the search')
+      const sizes = await read(`(() => {
+        const input = document.querySelector(${JSON.stringify(search)}), button = document.querySelector(${JSON.stringify(clear)})
+        const field = input.getBoundingClientRect(), target = button.getBoundingClientRect()
+        return { width: target.width, height: target.height, distinct: field.right <= target.left, inputWidth: field.width }
+      })()`)
+      assert.ok(sizes.width >= 44 && sizes.height >= 44 && sizes.distinct && sizes.inputWidth > 120, 'The clear target and text remain independently reachable')
+      await capture(`topic-search-${width}-${appearance}-no-match`)
+      await tap(clear, 'Clear only the Topic filter')
+      await until('document.querySelector(".mobile-topics-list")?.textContent.includes("产品与研究")')
+      assert.equal(await read('window.originalTopicFilter.value'), '')
+      assert.equal(await read('document.activeElement === window.originalTopicFilter'), true)
+      assert.equal(await topicReads(), originalReads, 'Typing and clearing use only the already loaded directory')
+      await capture(`topic-search-${width}-${appearance}-cleared`)
+    }
+    result.passed = true
+    return
+  }
   if (mode === 'question-receipts') {
     await require('./question-receipts.cjs')({ win, read, until, resize, tap, button, capture, result }); result.passed = true; return
   }

@@ -32,6 +32,12 @@ it('filters the original directory locally while retaining the untrimmed query a
   expect(vi.mocked(rpc).mock.calls).toHaveLength(1)
   await click(element, '工作笔记'); expect(rpc).toHaveBeenLastCalledWith('topic.ls', { categoryId: category.categoryId })
   expect(field.placeholder).toBe('查找 Topic 或分类'); expect(field.value).toBe('  工作  ')
+  const clear = element.querySelector<HTMLButtonElement>('button[aria-label="清除搜索"]')!
+  await act(async () => { clear.focus(); clear.click() })
+  expect(document.activeElement).toBe(field)
+  expect(field.value).toBe('')
+  expect(element.querySelector('.mobile-topics-list')?.textContent).toContain('参考资料')
+  expect(vi.mocked(rpc).mock.calls).toHaveLength(2)
 })
 
 it('keeps the exact organization draft and native attrs after an unknown original create without replaying it', async () => {
