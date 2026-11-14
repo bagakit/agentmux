@@ -155,3 +155,25 @@ it('a real managed-owner rejection keeps the original public shared service meas
   expect((await farm.rpc.call('settings.node.inspect',{})).policy.shareResources).toBe(true)
  } finally {await f.dispose()}
 })
+
+it('the original Main configured-client bridge consumes managed operator policy reads with its exact Runtime fence',async()=>{
+ const f=await fixture(),local=f.cores[0]!,farm=f.cores[1]!
+ const server=new AgentMuxControlServer({socketPath:join(local.issuer.root,'node-policy-main.sock'),coreClients:()=>[{hostId:'local',client:local.client},{hostId:'farm',client:farm.carrier as never}],hostedRuntime:()=>local.hosted,
+  hostConfiguration:id=>useAppStore.getState().config!.hosts.find(host=>host.id===id)??null,
+  callOriginalCore:f.runtime.callOriginalCore.bind(f.runtime)})
+ await server.start()
+ const rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:server.path},credentials:local.issuer.credentials})
+ try{
+  const forward=farm.carrier.forwardRpc
+  farm.carrier.forwardRpc=async(...args:Parameters<typeof forward>)=>{const reply=await forward(...args);if(args[0]==='runtime.owner.identity'){const config=useAppStore.getState().config!;useAppStore.setState({config:{...config,hosts:config.hosts.map(host=>host.id==='farm'?{...host,label:'Renamed display only'}:host)}})}return reply}
+  const result=await rpc.call('settings.node.inspect',{target:{hostId:'farm',expectedRuntimeId:'farm-runtime'}})
+  expect(result.node.runtimeId).toBe('farm-runtime');expect(result.policy.shareResources).toBe(false)
+  const call=farm.calls.filter(row=>row.method==='settings.node.inspect').at(-1)!
+  expect(call.fence).toEqual({runtimeId:'farm-runtime',ownerInstanceId:'farm-instance'})
+  const count=farm.calls.length
+  await expect(f.bridge.owner({hostId:'farm',expectedRuntimeId:'farm-runtime'},'settings.node.inspect',{target:{hostId:'local',expectedRuntimeId:'local-runtime'}})).rejects.toMatchObject({code:'INVALID_CONTROL_REQUEST'})
+  expect(farm.calls).toHaveLength(count)
+  await expect(f.runtime.callOriginalCore('farm','settings.node.inspect',{}, {runtimeFence:{runtimeId:'another-runtime',ownerInstanceId:'another-instance'}})).rejects.toMatchObject({code:'RUNTIME_OWNER_MISMATCH'})
+  expect(farm.calls.some(row=>row.method==='settings.node.configure')).toBe(false)
+ }finally{await rpc.dispose();await server.stop();await f.dispose()}
+})
