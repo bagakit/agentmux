@@ -46,7 +46,7 @@ async function fixture() {
   const source = async (version = '1.0.0', permissions = ['storage'], suppliedKey: string | undefined = key) => {
     const path = join(root, `package-${++prepared}`); await mkdir(path)
     await writeFile(join(path, 'manifest.json'), JSON.stringify({ manifest_version: 3, name: 'Form helper', version, permissions, host_permissions: ['https://forms.invalid/*'],
-      content_scripts: [{ matches: ['https://forms.invalid/*'], js: ['content.js'] }], ...(suppliedKey ? { key: suppliedKey } : {}), update_url: 'https://updates.invalid/package.xml', homepage_url: 'https://project.invalid/' }))
+      content_scripts: [{ matches: ['https://forms.invalid/*'], js: ['content.js'] }], ...(suppliedKey ? { key: suppliedKey } : {}), update_url: 'https://package-user:package-secret@updates.invalid/package.xml?token=package-token#private', homepage_url: 'https://project.invalid/?token=homepage-token' }))
     await writeFile(join(path, 'content.js'), `document.documentElement.dataset.extensionVersion=${JSON.stringify(version)}`)
     return path
   }
@@ -72,6 +72,9 @@ describe('Profile extensions share the original configuration and native Session
     const installed = (await f.manager.extensions.list(f.profile.id)).extensions[0]!
     expect(installed).toMatchObject({ id: review.extensionId, sha256: review.sha256, source: { label: 'package-1' }, application: { state: 'loaded' } })
     expect(installed).not.toHaveProperty('key'); expect(installed).not.toHaveProperty('reviewId')
+    expect(JSON.stringify({ review, installed })).not.toMatch(/package-secret|package-token|homepage-token|package-user/)
+    expect(JSON.stringify(installed)).not.toContain(f.root)
+    expect(await readFile(join(f.loadedCalls[0]!.path, 'manifest.json'), 'utf8')).toContain('package-token')
     expect(f.loadedCalls[0]!.path).not.toBe(path)
   })
   it('updates the exact extension identity while preserving unrelated installed extensions and exposing added scope', async () => {
