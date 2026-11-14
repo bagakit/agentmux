@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { mkdtemp, rm, mkdir, symlink, writeFile, readFile } from 'node:fs/promises'
 import { readFileSync, appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
@@ -43,6 +43,7 @@ import { connectWorkbenchCloseApiOwner } from './helpers/workbench-close-api-own
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
 import type { AgentLaunchResult } from '../src/shared/contracts'
 import { prepareSourceCoreCli } from './helpers/source-core-cli.mjs'
+import { parseAgentMuxControlRequest } from '../../../packages/core/src/control-codec'
 import '../scripts/fixtures/survey-tab-composition/native-listener.setup'
 
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
@@ -2307,4 +2308,200 @@ it('[headerless-drag] Portal menu, close and rename controls retain their own po
   await pointer(editor, 'pointerdown'); await pointer(document, 'pointermove'); expect(document.querySelector('.survey-page-list')?.hasAttribute('data-dragging')).toBe(false); await pointer(editor, 'pointerup')
   await act(async () => editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true })))
   expect(await core.read()).toEqual(graph); expect(useAppStore.getState().surveyOrganization).toEqual(before.surveyOrganization)
+})
+
+// The public Survey path consumes the original App navigator and the same private Core/file owner.
+let surveyPageCli: Awaited<ReturnType<typeof prepareSourceCoreCli>> | undefined
+let surveyPageCliBuilding: ReturnType<typeof prepareSourceCoreCli> | undefined
+afterAll(async () => { await surveyPageCli?.cleanup() })
+async function withSurveyPageCli(run: (command: (args: string[]) => Promise<{ code: number | null; receipt: ReturnType<typeof objectCliReceipt> }>) => Promise<void>) {
+  surveyPageCliBuilding ??= prepareSourceCoreCli()
+  surveyPageCli = await surveyPageCliBuilding
+  const socketDirectory = await mkdtemp('/tmp/asvc-'), socketPath = join(socketDirectory, 'control.sock')
+  const server = new AgentMuxControlServer({ socketPath, execute: request => useAppStore.getState().executeControl(request) })
+  const command = (args: string[]) => new Promise<{ code: number | null; receipt: ReturnType<typeof objectCliReceipt> }>((accept, reject) => {
+    const child = spawn(process.execPath, [surveyPageCli!.cliPath, ...args], { env: privateEnvironment({
+      AGENTMUX_RUNTIME_DIRECTORY: socketDirectory, AGENTMUX_STATE_DIRECTORY: join(socketDirectory, 'state'), AGENTMUX_RPC_ENDPOINT: 'unix:' + socketPath }), stdio: ['ignore', 'pipe', 'pipe'] })
+    let stdout = '', stderr = ''
+    child.stdout.on('data', value => { stdout += value }); child.stderr.on('data', value => { stderr += value })
+    const timeout = setTimeout(() => { child.kill(); reject(Error('Original private Survey CLI timed out')) }, 15_000)
+    child.once('error', error => { clearTimeout(timeout); reject(error) })
+    child.once('close', code => { clearTimeout(timeout); try {
+      const raw = stdout.trim() || stderr.split('\n').find(line => line.startsWith('{'))
+      expect(raw, stderr).toBeTruthy(); accept({ code, receipt: objectCliReceipt(JSON.parse(raw!)) })
+    } catch (error) { reject(error) } })
+  })
+  try { await server.start(); await run(command) } finally { await server.stop(); await rm(socketDirectory, { recursive: true, force: true }) }
+}
+async function showSurveyCliApp() {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, top: 0, left: 0, right: 1000, bottom: 700,
+    width: 1000, height: 700, toJSON: () => ({}) })
+  const page = { regionId: 'composition-page', browserId: 'composition-page' }
+  await useAppStore.getState().setSurveyPageCollected(page, true)
+  useAppStore.getState().setMainSurface('board')
+  await dom.render(<App />)
+  return page
+}
+
+it('[survey-cli] source CLI opens one default page with explicit registration without choosing it or collecting mixed task siblings', async () => {
+  await showSurveyCliApp()
+  const before = useAppStore.getState(), create = vi.spyOn(api.browser, 'create'), close = vi.spyOn(api.browser, 'close')
+  await withSurveyPageCli(async command => {
+    const output = await command(['browser', 'open', '--url', 'https://public.example.test/survey', '--in-region', 'target-region', '--survey', '--operation-id', 'survey-explicit-open'])
+    expect(output.code).toBe(0); expect(output.receipt.ok, JSON.stringify(output.receipt)).toBe(true)
+    if (!output.receipt.ok) throw Error('Original public creation receipt required')
+    const result = output.receipt.result as import('@agentmux/core/control').AgentMuxControlResult & { operation: 'open.browser' }
+    expect(result.survey).toMatchObject({ outcome: 'registered', reference: { regionId: result.region.regionId, browserId: result.region.browserId } })
+    expect(result.region.tabId).toBe('target-tab'); expect(result.region.regionId).toBe('target-region')
+    const current = useAppStore.getState()
+    expect(current.surveyCollectedZones).toEqual(before.surveyCollectedZones)
+    expect(current.surveyPageReferences).toEqual([...before.surveyPageReferences, result.survey.reference])
+    expect(current.surveyZoneSelection).toEqual(before.surveyZoneSelection)
+    expect(current.mainSurface).toBe(before.mainSurface); expect(current.workbenchSpaceSelection).toEqual(before.workbenchSpaceSelection)
+    expect(source().regions['composition-file']).toBe(before.tabs[source().id]!.regions['composition-file'])
+    expect(source().regions['composition-agent-region']).toBe(before.tabs[source().id]!.regions['composition-agent-region'])
+    const listed = await command(['space', 'survey-list'])
+    expect(listed.receipt.ok).toBe(true)
+    if (listed.receipt.ok) expect(listed.receipt.result).toMatchObject({ pageReferences: current.surveyPageReferences })
+  })
+  expect(create).toHaveBeenCalledOnce(); expect(close).not.toHaveBeenCalled()
+})
+
+it('[survey-cli] source CLI selects an exact saved page in the actual App while retaining Work choice, Browser and sibling drafts', async () => {
+  const page = await showSurveyCliApp(), before = useAppStore.getState()
+  await withSurveyPageCli(async command => {
+    const pending = command(['app', 'focus', '--surface', 'survey', '--browser', page.browserId, '--region', page.regionId,
+      '--display-workspace', resource.id, '--group', 'source-group', '--tab', source().id])
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 160)) })
+    const output = await pending
+    expect(output.receipt.ok, JSON.stringify(output.receipt)).toBe(true)
+    if (!output.receipt.ok) throw Error('Original focus receipt required')
+    expect(output.receipt.result).toMatchObject({ navigation: { state: 'applied', selection: { surface: 'survey', survey: { kind: 'page', ...page } } },
+      presentation: { state: 'main-visible', tabId: source().id, regionId: page.regionId } })
+    const current = useAppStore.getState()
+    expect(current.surveyZoneSelection).toEqual({ kind: 'page', ...page })
+    expect(current.workbenchSpaceSelection).toEqual(before.workbenchSpaceSelection); expect(current.activeWorkspaceId).toBe(before.activeWorkspaceId)
+    const originalPage = before.tabs[source().id]!.regions[page.regionId]!
+    expect(current.tabs[source().id]!.regions[page.regionId]).toMatchObject({ kind: 'browser', regionId: page.regionId,
+      browserId: page.browserId, workspaceId: originalPage.workspaceId })
+    expect(current.tabs[source().id]!.regions['composition-file']).toEqual(before.tabs[source().id]!.regions['composition-file'])
+    expect(current.tabs[source().id]!.regions['composition-agent-region']).toEqual(before.tabs[source().id]!.regions['composition-agent-region'])
+    expect(current.sessions).toEqual(before.sessions); expect(current.agentComposerDrafts).toEqual(before.agentComposerDrafts)
+    expect(document.querySelector('.global-survey-surface .survey-page-tab-header')).not.toBeNull()
+    expect(document.querySelector('.global-survey-surface [data-workbench-region-id="composition-page"]')).not.toBeNull()
+  })
+})
+
+it('[survey-cli] source CLI selects the saved research and its accurate File Region without importing membership or changing execution', async () => {
+  await showSurveyCliApp(); const before = useAppStore.getState()
+  await withSurveyPageCli(async command => {
+    const pending = command(['app', 'focus', '--surface', 'survey', '--zone', zones.source, '--display-workspace', resource.id,
+      '--group', 'source-group', '--tab', source().id, '--region', 'composition-file'])
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 160)) })
+    const output = await pending
+    expect(output.receipt.ok, JSON.stringify(output.receipt)).toBe(true)
+    if (!output.receipt.ok) throw Error('Original focus receipt required')
+    expect(output.receipt.result).toMatchObject({ navigation: { state: 'applied', selection: { surface: 'survey', survey: { zoneId: zones.source,
+      active: { tabId: source().id, regionId: 'composition-file' } } } }, presentation: { regionId: 'composition-file', state: 'main-visible' } })
+    expect(useAppStore.getState().workbenchSpaceSelection).toEqual(before.workbenchSpaceSelection)
+    expect(useAppStore.getState().surveyCollectedZones).toEqual(before.surveyCollectedZones)
+    expect(document.querySelector('.global-survey-surface [aria-label="Original file input"]')).not.toBeNull()
+    expect(useAppStore.getState().agentComposerDrafts).toEqual(before.agentComposerDrafts)
+  })
+})
+
+it('[survey-cli] wrong saved Browser pair and foreign research occurrence refuse only that navigation and never collect a target', async () => {
+  const page = await showSurveyCliApp(), before = useAppStore.getState()
+  await withSurveyPageCli(async command => {
+    for (const args of [ ['--browser', 'different-browser', '--region', page.regionId],
+      ['--zone', zones.target, '--display-workspace', resource.id, '--group', 'source-group', '--tab', source().id, '--region', page.regionId] ]) {
+      const output = await command(['app', 'focus', '--surface', 'survey', ...args])
+      expect(output.receipt.ok, JSON.stringify(output.receipt)).toBe(true)
+      if (output.receipt.ok) expect(output.receipt.result).toMatchObject({ navigation: { state: 'rejected' }, issues: [expect.objectContaining({ code: 'SURVEY_TARGET_UNCONFIRMED' })] })
+      expect(useAppStore.getState().surveyZoneSelection).toEqual(before.surveyZoneSelection)
+      expect(useAppStore.getState().mainSurface).toBe(before.mainSurface)
+      expect(useAppStore.getState().surveyPageReferences).toEqual(before.surveyPageReferences)
+      expect(useAppStore.getState().surveyCollectedZones).toEqual(before.surveyCollectedZones)
+    }
+  })
+})
+
+it('[survey-cli] a later choice during the original save is retained and the CLI does not claim its older Survey navigation still current', async () => {
+  const page = await showSurveyCliApp()
+  await withSurveyPageCli(async command => {
+    let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve })
+    vi.mocked(api.ui.requestStorageFlush).mockImplementation(() => gate)
+    const pending = command(['app', 'focus', '--surface', 'survey', '--browser', page.browserId, '--region', page.regionId])
+    await vi.waitFor(() => expect(useAppStore.getState().mainSurface).toBe('survey'))
+    await act(async () => useAppStore.getState().setMainSurface('board'))
+    release()
+    const output = await pending
+    expect(output.receipt.ok, JSON.stringify(output.receipt)).toBe(true)
+    if (output.receipt.ok) expect(output.receipt.result).toMatchObject({ navigation: { state: 'unconfirmed', selection: { surface: 'goals' } },
+      issues: expect.arrayContaining([expect.objectContaining({ code: 'NAVIGATION_CHANGED' })]) })
+    expect(useAppStore.getState().mainSurface).toBe('board')
+  })
+})
+
+it('[survey-cli] strict public input rejects false registration, incomplete occurrences and mismatched navigation fields before effects', () => {
+  const before = useAppStore.getState()
+  expect(() => parseAgentMuxControlRequest({ schemaVersion: 5, requestId: 'invalid-register', operation: 'open.browser',
+    url: 'https://public.example.test/', survey: false, destination: { kind: 'launcher', regionId: 'target-region' } })).toThrow()
+  expect(() => parseAgentMuxControlRequest({ schemaVersion: 5, requestId: 'invalid-selection', operation: 'focus', inputPolicy: 'preserve',
+    target: { kind: 'survey', selection: { kind: 'page', regionId: 'composition-page', browserId: 'composition-page' }, reference: { tabId: source().id } } })).toThrow()
+  expect(() => parseAgentMuxControlRequest({ schemaVersion: 5, requestId: 'invalid-extra', operation: 'focus', inputPolicy: 'preserve',
+    target: { kind: 'survey', selection: { kind: 'zone', zoneId: zones.source }, surface: 'space' } })).toThrow()
+  expect(useAppStore.getState()).toBe(before)
+})
+
+it('[survey-cli] selecting a saved page from another actual Profile reveals its row without rebinding the page environment', async () => {
+  await showSurveyCliApp()
+  const profileId = '11111111-1111-4111-8111-111111111111'
+  useAppStore.setState({ surveyProfileView: { kind: 'profile', profileId: '22222222-2222-4222-8222-222222222222' } })
+  const rebind = vi.spyOn(api.browser, 'switchProfile'), originalView = useAppStore.getState().surveyProfileView
+  await withSurveyPageCli(async command => {
+    const opened = await command(['browser', 'open', '--url', 'https://public.example.test/profile', '--in-region', 'target-region',
+      '--profile', profileId, '--survey', '--operation-id', 'survey-profile-open'])
+    expect(opened.receipt.ok, JSON.stringify(opened.receipt)).toBe(true)
+    if (!opened.receipt.ok) throw Error('Original page creation required')
+    const result = opened.receipt.result as Extract<import('@agentmux/core/control').AgentMuxControlResult, { operation: 'open.browser' }>
+    expect(result.region.profileId).toBe(profileId)
+    expect(useAppStore.getState().surveyProfileView).toEqual(originalView)
+    const pending = command(['app', 'focus', '--surface', 'survey', '--browser', result.region.browserId, '--region', result.region.regionId])
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 160)) })
+    const focused = await pending
+    expect(focused.receipt.ok, JSON.stringify(focused.receipt)).toBe(true)
+    expect(useAppStore.getState().surveyZoneSelection).toMatchObject({ kind: 'page', regionId: result.region.regionId, browserId: result.region.browserId })
+    await vi.waitFor(() => expect(document.querySelector(`[data-survey-page-region-id="${result.region.regionId}"]`)).not.toBeNull())
+    expect(useAppStore.getState().surveyProfileView).toEqual({ kind: 'profile', profileId })
+    expect(useAppStore.getState().tabs[result.region.tabId]!.regions[result.region.regionId]).toMatchObject({ browserId: result.region.browserId, profileId })
+  })
+  expect(rebind).not.toHaveBeenCalled()
+})
+
+it('[survey-cli] selecting a saved single-Profile research reveals its row without rebinding any member', async () => {
+  await showSurveyCliApp()
+  const profileId = '11111111-1111-4111-8111-111111111111'
+  useAppStore.setState({ surveyProfileView: { kind: 'profile', profileId: '22222222-2222-4222-8222-222222222222' } })
+  const rebind = vi.spyOn(api.browser, 'switchProfile'), originalView = useAppStore.getState().surveyProfileView
+  await withSurveyPageCli(async command => {
+    const opened = await command(['browser', 'open', '--url', 'https://public.example.test/research-profile', '--in-region', 'target-region',
+      '--profile', profileId, '--survey', '--operation-id', 'survey-research-profile-open'])
+    expect(opened.receipt.ok, JSON.stringify(opened.receipt)).toBe(true)
+    if (!opened.receipt.ok) throw Error('Original page creation required')
+    const result = opened.receipt.result as Extract<import('@agentmux/core/control').AgentMuxControlResult, { operation: 'open.browser' }>
+    expect(useAppStore.getState().surveyProfileView).toEqual(originalView)
+    const current = useAppStore.getState()
+    current.setSurveyZoneSelection({ ...surveyInitialZoneSelection(catalog(), zones.target, current.layouts, current.tabs, current.activeWorkspaceId), active: null })
+    const pending = command(['app', 'focus', '--surface', 'survey', '--zone', zones.target])
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 160)) })
+    const focused = await pending
+    expect(focused.receipt.ok, JSON.stringify(focused.receipt)).toBe(true)
+    expect(useAppStore.getState().surveyZoneSelection).toMatchObject({ zoneId: zones.target })
+    expect(useAppStore.getState().surveyProfileView).toEqual({ kind: 'profile', profileId })
+    await vi.waitFor(() => expect([...document.querySelectorAll('.survey-page-list [data-survey-zone-id]')]
+      .find(element => element.getAttribute('data-survey-zone-id') === zones.target)).toBeDefined())
+    expect(useAppStore.getState().tabs[result.region.tabId]!.regions[result.region.regionId]).toMatchObject({ browserId: result.region.browserId, profileId })
+  })
+  expect(rebind).not.toHaveBeenCalled()
 })

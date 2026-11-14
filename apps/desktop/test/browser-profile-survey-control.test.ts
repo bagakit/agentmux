@@ -44,6 +44,50 @@ const open = (profileId?: string, extra = {}) => useAppStore.getState().executeC
   ...(profileId ? { profileId } : {}), ...extra
 })
 
+it.each([{}, { mode: 'private' as const }, { capsuleId: 'AbCdEfGh1234' }])('[survey-cli] explicit Survey admission saves only the original default/private/Capsule page (%j)', async extra => {
+  const before = useAppStore.getState(), siblings = { ...before.tabs[tabId]!.regions }
+  const result = await open(undefined, { ...extra, survey: true })
+  if (result.operation !== 'open.browser') throw Error('Original Browser open result required')
+  expect(result.survey).toMatchObject({ outcome: 'registered', reference: { regionId: result.region.regionId, browserId: result.region.browserId } })
+  expect(useAppStore.getState().surveyPageReferences).toEqual([result.survey.reference])
+  expect(useAppStore.getState().surveyCollectedZones).toEqual({})
+  for (const [id, surface] of Object.entries(siblings)) expect(useAppStore.getState().tabs[tabId]!.regions[id]).toBe(surface)
+  expect(useAppStore.getState().mainSurface).toBe(before.mainSurface)
+  expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
+  expect(create).toHaveBeenCalledOnce(); expect(close).not.toHaveBeenCalled()
+})
+
+it('[survey-cli] explicit default registration save failure retains the same available page and repair edits only its reference', async () => {
+  fixture.flush.mockRejectedValue(Error('Exact Survey preference ACK unavailable'))
+  const result = await open(undefined, { survey: true })
+  if (result.operation !== 'open.browser') throw Error('Original Browser open result required')
+  expect(result.survey.outcome).toBe('partial')
+  const browser = useAppStore.getState().tabs[result.region.tabId]!.regions[result.region.regionId]
+  fixture.flush.mockResolvedValue(undefined)
+  const repaired = await useAppStore.getState().setSurveyPageCollected(result.survey.reference!, true)
+  expect(repaired.outcome).toBe('unchanged')
+  expect(repaired.save?.storageFlushRequested).toBe(true)
+  expect(useAppStore.getState().tabs[result.region.tabId]!.regions[result.region.regionId]).toBe(browser)
+  expect(create).toHaveBeenCalledOnce(); expect(close).not.toHaveBeenCalled()
+})
+
+it('[survey-cli] a later explicit withdrawal during default creation is not resurrected by admission', async () => {
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  fixture.flush.mockImplementation(() => gate)
+  const opening = open(undefined, { survey: true })
+  await vi.waitFor(() => expect(useAppStore.getState().surveyPageReferences).toHaveLength(1))
+  const reference = useAppStore.getState().surveyPageReferences[0]!
+  const removal = useAppStore.getState().setSurveyPageCollected(reference, false)
+  release()
+  const result = await opening; await removal
+  if (result.operation !== 'open.browser') throw Error('Original Browser open result required')
+  expect(result.survey.outcome).toBe('unknown')
+  expect(result.survey.issues.some(issue => issue.code === 'SURVEY_PAGE_MEMBERSHIP_SUPERSEDED')).toBe(true)
+  expect(useAppStore.getState().surveyPageReferences).toEqual([])
+  expect(create).toHaveBeenCalledOnce(); expect(close).not.toHaveBeenCalled()
+})
+
 it('explicit Profile creation registers only the exact Main-confirmed Browser/Region and retains mixed task siblings and navigation', async () => {
   const before = useAppStore.getState(), siblings = { ...before.tabs[tabId]!.regions }
   const result = await open(profileTwo)
