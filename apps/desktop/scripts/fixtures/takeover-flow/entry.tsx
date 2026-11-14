@@ -40,6 +40,8 @@ const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', la
   executors: Object.fromEntries(['codex', 'claude', 'gemini'].map(providerId => [providerId, { label: providerId[0]!.toUpperCase() + providerId.slice(1), providerId, command: providerId, args: [], env: {}, injectAgentMuxGuide: false }])),
   workspaces: [{ id: 'project', hostId: 'local', name: 'Design workspace', path: sourcePath, kind: 'folder' }, scratch],
   appearance: { terminalTheme: 'graphite' }, browser: { toolbar: {} }, promotion: { enabled: true } }
+const extraWorkspaces = Array.from({ length: 60 }, (_, index) => ({ id: 'extra-' + index, hostId: 'local', name: 'Reference project ' + index, path: sourcePath + '/extra-' + index, kind: 'folder' as const }))
+config.workspaces.push(...extraWorkspaces)
 const original: Extract<SessionSnapshot, { kind: 'agent' }> = { id: 'original-agent', kind: 'agent', hostId: 'local', providerId: 'codex', executorId: 'codex', workspacePath: sourcePath,
   control: { kind: 'agent', hostId: 'local', agentSessionId: 'original-agent', run: { runId: 'original-run' } },
   label: 'Design research · system architecture', createdAt: 1, updatedAt: 1, agentSessionUpdatedAt: 1, latestOutputBytes: 0,
@@ -53,7 +55,7 @@ const topics: ScratchTopicSnapshot[] = boot.topics ?? ['Design Club', 'Build Clu
 const tab = createWorkbenchTab(reference.tabId, { kind: 'agent', phase: 'attached', workspaceId: 'project', sessionId: original.id, regionId: reference.regionId })
 const forbidden: string[] = [], calls: Array<{ method: string; input: unknown }> = [], nativeReads: Array<{ operation: string; runId: string }> = []
 const sourceSpace = directoryIdentity('local', sourcePath)
-const initial = { config, loading: false, sessions: [original], tabs: { [tab.id]: tab }, layouts: { project: createWorkspaceLayout(reference.groupId, [tab.id]) },
+const initial = { config, loading: false, sessions: [original], tabs: { [tab.id]: tab }, layouts: { project: createWorkspaceLayout(reference.groupId, [tab.id]), ...Object.fromEntries(extraWorkspaces.map(workspace => [workspace.id, createWorkspaceLayout(workspace.id + '-group', [])])) },
   activeWorkspaceId: 'project', mainSurface: 'workbench' as const, agentComposerDrafts: { [original.id]: 'Keep the unsent original design notes.' },
   spaceZoneBindings: Object.fromEntries(topics.map(topic => { const spaceId = directoryIdentity('local', topic.identityDirectoryPath!); return [homeZoneId(spaceId), { spaceId, workspaceId: scratch.id, directoryPath: topic.physicalDirectoryPath!, topicId: topic.id, contentKind: 'mote' as const }] })),
   scratchTopicSnapshots: { [scratch.id]: { scope: scratchTopicsScope(scratch), topics, revision: 1, reading: false, error: null } },

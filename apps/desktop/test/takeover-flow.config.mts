@@ -4,6 +4,8 @@ import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { relative } from 'node:path'
 const mutations = {
+  'resume-default-missing': ['components/SessionTakeoverSurface.tsx', 'return exact.length === 1 ? exact[0]!.destination : undefined', 'return undefined'],
+  'cartesian-destinations': ['components/SessionTakeoverSurface.tsx', 'agentNewTabDestinations(catalog, facts.layouts, undefined, placement)', 'agentNewTabDestinations(catalog, facts.layouts)'],
   'source-run-dropped': ['lib/session-takeover.ts', 'const expectedRun = source.kind === \'session\' ? source.expectedRun : snapshot?.kind === \'agent\' ? snapshot.control.run : undefined', 'const expectedRun = undefined'],
   'request-not-checkpointed': ['lib/session-takeover.ts', 'await checkpointAgentOperations()\n    const result = await api.spatial.openAgent(request)', 'const result = await api.spatial.openAgent(request)'],
   'check-creates-agent': ['lib/session-takeover.ts', 'const result = await api.spatial.inspectOperation({ target: { operationId: requestId } })', 'await api.spatial.openAgent(source.coreRequest); const result = await api.spatial.inspectOperation({ target: { operationId: requestId } })'],

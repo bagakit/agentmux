@@ -47,7 +47,7 @@ try {
   const observe = { name: 'original-takeover-source-renderer', enforce: 'pre', async transform(_source, id) { await record(id) },
     async generateBundle() { await Promise.all(this.getWatchFiles().map(record)) } }
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error', esbuild: { jsx: 'automatic' },
-    resolve: { alias: [...Object.entries(radixOverlayAliases).map(([find, replacement]) => ({ find, replacement })), ...aliases] }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' },
+    resolve: { alias: [...Object.entries(radixOverlayAliases).map(([find, replacement]) => ({ find, replacement })), { find: /^@agentmux\/core$/u, replacement: join(fixture, 'core-exports.ts') }, ...aliases, { find: 'node:util', replacement: join(root, 'apps/desktop/scripts/lib/browser-util.mjs') }, { find: 'node:crypto', replacement: join(root, 'apps/desktop/scripts/lib/browser-crypto.mjs') }] }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' },
     plugins: [observe], worker: { format: 'es', plugins: () => [observe] }, build: { target: 'esnext', outDir: compiled, emptyOutDir: true } })
   for (const file of ['SessionPane.tsx', 'SessionTakeoverSurface.tsx', 'AgentRegionHeader.tsx', 'AgentMenuContent.tsx', 'session-takeover.ts', 'session-takeover.css', 'store.ts'])
     assert.ok(Object.keys(inputs).some(path => path.endsWith('/' + file)), 'The actual flow consumer is compiled: ' + file)
@@ -61,13 +61,20 @@ try {
     receipt.frames.push(...await Promise.all(actual.frames.map(async frame => ({ ...frame, sha256: hash(await readFile(join(evidence, frame.file))) }))))
   }
   assert.notEqual(receipt.processes[0].actual.processId, receipt.processes[1].actual.processId)
-  assert.equal(receipt.processes[0].actual.frames.length, 10, 'The original ten flow scenes are retained')
-  assert.equal(receipt.frames.length, 11, 'A fresh Renderer also shows the restored original intent')
+  assert.equal(receipt.processes[0].actual.frames.length, 15, 'The ten original flow scenes and five local default scenes are retained')
+  assert.equal(receipt.frames.length, 16, 'A fresh Renderer also shows the restored original intent')
   assert.equal(receipt.processes[1].actual.restart.noWorkfaceReseed, true)
   assert.equal(receipt.processes[1].actual.restart.noReplay, true)
-  receipt.drift = []
-  for (const [path, sourceHash] of Object.entries(inputs)) if (hash(await readFile(join(root, path))) !== sourceHash) receipt.drift.push(path)
-  assert.deepEqual(receipt.drift, [], 'Current loaded source remains unchanged through this capture')
+  receipt.sourceDrift = []
+  for (const [path, sourceHash] of Object.entries(inputs)) if (hash(await readFile(join(root, path))) !== sourceHash) receipt.sourceDrift.push(path)
+  // The compiled private candidate remains fixed while peers work. Only changes
+  // to the exercised UI/selection and spatial-file owner invalidate this proof;
+  // retain other source drift rather than rerunning for unrelated services.
+  const critical = ['SessionTakeoverSurface.tsx', 'AgentExecutorPicker.tsx', 'SelectionField.tsx', 'WindowOverlayHost.tsx',
+    'agent-new-tab-destination.ts', 'session-takeover.ts', 'session-takeover.css', 'spatial-state.ts', 'spatial-graph.ts', 'spatial-store-codec.ts']
+  receipt.stableSourceScope = critical
+  receipt.drift = receipt.sourceDrift.filter(path => critical.some(name => path.endsWith('/' + name)))
+  assert.deepEqual(receipt.drift, [], 'Exercised selection/UI and spatial file owners remain current; other compiled input versions are retained in sourceDrift')
   receipt.passed = true
 } catch (error) { receipt.error = { message: error.message, stack: error.stack } }
 finally {

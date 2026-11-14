@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { createWorkspaceLayout } from '@agentmux/layout'
 import { webcrypto } from 'node:crypto'
 import { writeFile } from 'node:fs/promises'
 import { act } from 'react'
@@ -287,4 +288,55 @@ it('a closed receiving Agent is shown before an explicit successor starts with t
   expect(requests).toHaveLength(2); expect(requests[1]!.operationId).not.toBe(first.requestId)
   expect(requests[1]!.destination).toEqual(requests[0]!.destination)
   expect(await f.client.readAgentSession(f.source.agentSessionId)).toEqual(f.source)
+})
+
+
+it('Resume with an unmounted Launcher defaults its exact local Workspace and shows Executors', async () => {
+  source = { ...source, kind: 'saved', origin: { ...source.origin, tabId: 'new-launcher-tab', regionId: 'new-launcher-region' } }
+  await dom.render(<SessionTakeoverSurface source={source} active onClose={() => {}} />)
+  const trigger = document.querySelector<HTMLButtonElement>('[aria-label="Takeover destination"]')!
+  expect(JSON.parse(trigger.dataset.value!)).toMatchObject({ zoneId: f.a.zoneId, spaceId: f.a.spaceId,
+    displayWorkspaceId: 'project-a', groupId: 'original-group' })
+  expect(document.querySelector('button.agent-pick[data-executor-id="codex"]')).not.toBeNull()
+  expect(f.started).toHaveLength(0)
+  expect(useAppStore.getState().agentComposerDrafts[original.id]).toBe('Keep the unsent original.')
+})
+
+it('destination menus grow by resource rather than unrelated display combinations and preserve explicit choices', async () => {
+  const state = useAppStore.getState(), count = 45
+  const extra = Array.from({ length: count }, (_, i) => ({ id: `unrelated-${i}`, hostId: 'local', path: `${f.root}/project-${i}`, name: `Unrelated ${i}`, kind: 'folder' as const }))
+  useAppStore.setState({ config: { ...state.config!, workspaces: [...state.config!.workspaces, ...extra] },
+    layouts: { ...state.layouts, ...Object.fromEntries(extra.map(w => [w.id, createWorkspaceLayout(`${w.id}-group`, [])])) } })
+  await dom.render(<SessionTakeoverSurface source={source} active onClose={() => {}} />)
+  const trigger = document.querySelector<HTMLButtonElement>('[aria-label="Takeover destination"]')!
+  await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })))
+  const options = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"][data-value]')].filter(item => item.dataset.value)
+  expect(options.length).toBeGreaterThan(count)
+  expect(options.length).toBeLessThan(count * 3)
+  expect(new Set(options.map(item => JSON.parse(item.dataset.value!).groupId))).toEqual(new Set(['original-group']))
+  const target = options.find(item => JSON.parse(item.dataset.value!).spaceId === f.b.spaceId)!
+  await act(async () => target.click())
+  expect(JSON.parse(trigger.dataset.value!).zoneId).toBe(f.b.zoneId)
+  await act(async () => useAppStore.setState({ executorDetections: {} }))
+  expect(JSON.parse(trigger.dataset.value!).zoneId).toBe(f.b.zoneId)
+  const display = document.querySelector<HTMLButtonElement>('[aria-label="Takeover display location"]')!
+  await act(async () => display.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })))
+  const place = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"][data-value]')]
+    .find(item => item.dataset.value === JSON.stringify(['unrelated-0', 'unrelated-0-group']))!
+  expect(place).toBeDefined()
+  await act(async () => place.click())
+  expect(JSON.parse(trigger.dataset.value!)).toMatchObject({ zoneId: f.b.zoneId, displayWorkspaceId: 'unrelated-0', groupId: 'unrelated-0-group' })
+  expect(f.started).toHaveLength(0)
+})
+
+
+it('Resume fills its local default when the original spatial facts arrive after mounting', async () => {
+  const held = useAppStore.getState()
+  useAppStore.setState({ config: { ...held.config!, workspaces: [] }, tabs: {}, layouts: {} })
+  await dom.render(<SessionTakeoverSurface source={source} active onClose={() => {}} />)
+  expect(document.querySelector('[aria-label="Takeover destination"]')?.getAttribute('data-value')).toBe('')
+  await act(async () => useAppStore.setState({ config: held.config, tabs: held.tabs, layouts: held.layouts }))
+  expect(JSON.parse(document.querySelector<HTMLElement>('[aria-label="Takeover destination"]')!.dataset.value!)).toMatchObject({
+    zoneId: f.a.zoneId, displayWorkspaceId: 'project-a', groupId: 'original-group' })
+  expect(document.querySelector('button.agent-pick[data-executor-id="codex"]')).not.toBeNull()
 })

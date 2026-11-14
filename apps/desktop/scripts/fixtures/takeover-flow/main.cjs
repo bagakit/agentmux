@@ -21,11 +21,34 @@ app.whenReady().then(async()=>{try{
  const size=async(width,height)=>{win.setContentSize(width,height);await wait(`innerWidth===${width}&&innerHeight===${height}`);await paint()}
  const click=async expression=>{const point=await read(`(()=>{const e=${expression};if(!e)throw Error('Missing actual flow control');e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}})()`);assert.equal(point.hit,true,'Flow control is actually visible');for(const type of ['mousePressed','mouseReleased'])await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type,x:point.x,y:point.y,button:'left',clickCount:1});await paint()}
  const text=label=>click(`([...document.querySelectorAll('.session-takeover button,[role=menuitem]')].find(n=>n.textContent.trim()===${JSON.stringify(label)}))`)
- const frame=async(file,label)=>{await paint();await new Promise(done=>setTimeout(done,300));const geometry=await read(`(()=>{const e=document.querySelector('.session-takeover'),r=e?.getBoundingClientRect();return{width:innerWidth,height:innerHeight,documentWidth:document.documentElement.scrollWidth,stage:r?{x:r.x,y:r.y,right:r.right,bottom:r.bottom}:null,facts:takeoverFlowProbe.facts()}})()`);assert.ok(geometry.documentWidth<=geometry.width+1,'No document overflow');if(geometry.stage){assert.ok(geometry.stage.x>=-1&&geometry.stage.right<=geometry.width+1);assert.ok(geometry.stage.y>=-1&&geometry.stage.bottom<=geometry.height+1)}assert.deepEqual(geometry.facts.forbidden,[]);await fs.writeFile(path.join(evidence,file),(await win.webContents.capturePage()).toPNG());report.frames.push({file,label,geometry})}
+ const frame=async(file,label,delay=300)=>{await paint();await new Promise(done=>setTimeout(done,delay));const geometry=await read(`(()=>{const e=document.querySelector('.session-takeover'),r=e?.getBoundingClientRect();return{width:innerWidth,height:innerHeight,documentWidth:document.documentElement.scrollWidth,stage:r?{x:r.x,y:r.y,right:r.right,bottom:r.bottom}:null,facts:takeoverFlowProbe.facts()}})()`);assert.ok(geometry.documentWidth<=geometry.width+1,'No document overflow');if(geometry.stage){assert.ok(geometry.stage.x>=-1&&geometry.stage.right<=geometry.width+1);assert.ok(geometry.stage.y>=-1&&geometry.stage.bottom<=geometry.height+1)}assert.deepEqual(geometry.facts.forbidden,[]);await fs.writeFile(path.join(evidence,file),(await win.webContents.capturePage()).toPNG());report.frames.push({file,label,geometry})}
  await win.loadFile(html);win.showInactive();win.webContents.debugger.attach('1.3')
  await wait('Boolean(window.takeoverFlowProbe?.ready&&document.querySelector(".agent-region-header__more"))')
  if(mode==='first'){
  const before=await read('takeoverFlowProbe.facts()')
+ await click(`document.querySelector('.agent-region-header__more')`);await wait('Boolean(document.querySelector("[data-agent-promotion]"))')
+ await click(`([...document.querySelectorAll('[role=menuitem]')].find(n=>n.textContent.trim()==='Take over'))`)
+ await wait('Boolean(document.querySelector(".session-takeover"))')
+ await frame('00-takeover-entering.png','Original Take over entry while its finite transition is in progress',30)
+ assert.equal(await read('Boolean(document.querySelector("button.agent-pick[data-executor-id=codex]"))'),true,'Exact local destination exposes its Executors without another choice')
+ await frame('00-local-default.png','Ordinary Take over selects the exact local destination and directly shows Executors')
+ const menuStart=Date.now()
+ await click(`document.querySelector('[aria-label="Takeover destination"]')`)
+ await wait('Boolean(document.querySelector("[role=menuitemradio][data-value]"))')
+ report.destinationMenu={elapsedMs:Date.now()-menuStart,...await read(`({options:document.querySelectorAll('[role=menuitemradio][data-value]').length,zones:takeoverFlowProbe.facts().catalog.zones.length,groups:Object.values(takeoverFlowProbe.facts().layouts).flatMap(layout=>layout.groups).length})`)}
+ assert.ok(report.destinationMenu.groups>=60)
+ assert.ok(report.destinationMenu.options<=report.destinationMenu.zones+1,'Resource menu is not multiplied by unrelated display Groups')
+ await frame('00-local-destinations.png','Resource choices are searchable and do not multiply across sixty unrelated display Groups')
+ await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27})
+ await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27})
+ await wait('!document.querySelector("[role=menuitemradio]")')
+ await size(540,760);await read('takeoverFlowProbe.theme(true)');await frame('00-local-narrow-light.png','Local default and optional display location remain readable on a narrow light workface')
+ await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]})
+ await frame('00-local-reduced-motion.png','Reduced motion retains the complete default choices')
+ await click(`document.querySelector('[aria-label="Cancel takeover"]')`)
+ await wait('!document.querySelector(".session-takeover")')
+ await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[]})
+ await read('takeoverFlowProbe.theme(false)');await size(1120,800)
  await click(`document.querySelector('.agent-region-header__more')`);await wait('Boolean(document.querySelector("[data-agent-promotion]"))')
  await frame('01-original-menu.png','Actual original Region menu uses the shared Promotion action')
  await click(`document.querySelector('[data-agent-promotion]')`);await wait('Boolean(document.querySelector(".session-takeover"))')
