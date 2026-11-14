@@ -1,6 +1,7 @@
 import { FOCUS_RECENT_ACTIVITY_HOURS, DEFAULT_FOCUS_RECENT_ACTIVITY_HOURS, resolveFocusRecentActivityHours, FOCUS_TOPIC_PRESENTATIONS, resolveFocusTopicPresentation, FOCUS_LINK_DESTINATIONS, DEFAULT_FOCUS_LINK_DESTINATION, resolveFocusLinkDestination, FOCUS_REPLY_LINES, resolveFocusReplyLines, FOCUS_PREVIEW_TRIGGERS, resolveFocusPreviewTrigger, FOCUS_RECENT_INPUTS, resolveFocusRecentInputs, FOCUS_MAP_MOTION, resolveFocusMapMotion } from '../../../shared/focus-preferences.js'
 import type { AppConfig } from '../../../shared/contracts.js'
 import { enumSetting, invalid, type ScalarSetting } from '../scalar-setting.js'
+import { parseFocusProjects } from '../../../shared/focus-project-preferences.js'
 
 export const focusSettings = [
   {
@@ -40,4 +41,13 @@ export const focusSettings = [
   enumSetting('focus.mapMotion', FOCUS_MAP_MOTION, 'system',
     config => resolveFocusMapMotion(config.focus?.mapMotion),
     (config, mapMotion) => ({ ...config, focus: { recentActivityHours: resolveFocusRecentActivityHours(config.focus?.recentActivityHours), ...config.focus, mapMotion } })),
+  {
+    key: 'focus.projects',
+    entry(config: AppConfig) { return { key: this.key, kind: 'string' as const, value: JSON.stringify(config.focus?.projects ?? []), default: '[]' } },
+    apply(config: AppConfig, value: string): AppConfig {
+      const projects = parseFocusProjects(JSON.parse(value))
+      if (JSON.stringify(projects) === this.entry(config).value) return config
+      return { ...config, focus: { recentActivityHours: resolveFocusRecentActivityHours(config.focus?.recentActivityHours), ...config.focus, projects } }
+    }
+  },
 ] satisfies readonly ScalarSetting[]

@@ -1,8 +1,9 @@
 import { resolveFocusMapPreferences, type FocusMapPreferences } from './focus-map-preferences'
+import type { FocusProjectPreference } from './focus-project-preferences'
 
 import { resolveFocusRecentActivityHours, type FocusRecentActivityHours } from '@agentmux/client-ui/focus-order'
 export { FOCUS_RECENT_ACTIVITY_HOURS, DEFAULT_FOCUS_RECENT_ACTIVITY_HOURS, resolveFocusRecentActivityHours, type FocusRecentActivityHours } from '@agentmux/client-ui/focus-order'
-export type FocusPreferences = { recentActivityHours: FocusRecentActivityHours; topicPresentation?: FocusTopicPresentation; linkDestination?: FocusLinkDestination; replyLines?: FocusReplyLines; previewTrigger?: FocusPreviewTrigger; recentInputs?: FocusRecentInputs; mapMotion?: FocusMapMotion; map?: FocusMapPreferences }
+export type FocusPreferences = { recentActivityHours: FocusRecentActivityHours; topicPresentation?: FocusTopicPresentation; linkDestination?: FocusLinkDestination; replyLines?: FocusReplyLines; previewTrigger?: FocusPreviewTrigger; recentInputs?: FocusRecentInputs; mapMotion?: FocusMapMotion; map?: FocusMapPreferences; projects?: readonly FocusProjectPreference[] }
 /** Minimum project visibility guarantee, independent of a shorter sorting preference. */
 export const FOCUS_RECENT_PROJECT_HOURS = 48
 
@@ -43,7 +44,8 @@ export type FocusMapMotion = typeof FOCUS_MAP_MOTION[number]
 export function resolveFocusMapMotion(value: unknown): FocusMapMotion {
   return FOCUS_MAP_MOTION.includes(value as FocusMapMotion) ? value as FocusMapMotion : 'system'
 }
-export function resolveFocusPreferences(value: FocusPreferences | undefined): Required<FocusPreferences> {
+/** General Focus choices do not own personal project notes, pin order or collapse intent. */
+export function resolveFocusPreferences(value: FocusPreferences | undefined): Required<Omit<FocusPreferences, 'projects'>> {
   return { recentActivityHours: resolveFocusRecentActivityHours(value?.recentActivityHours), topicPresentation: resolveFocusTopicPresentation(value?.topicPresentation), linkDestination: resolveFocusLinkDestination(value?.linkDestination),
     replyLines: resolveFocusReplyLines(value?.replyLines), previewTrigger: resolveFocusPreviewTrigger(value?.previewTrigger), recentInputs: resolveFocusRecentInputs(value?.recentInputs), mapMotion: resolveFocusMapMotion(value?.mapMotion), map: resolveFocusMapPreferences(value?.map) }
 }

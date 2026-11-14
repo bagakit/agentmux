@@ -51,7 +51,7 @@ const preferenceDomains = new Map<string, PreferenceDomain>(Object.entries({
   focus: { resolve: value => value ?? { recentActivityHours: resolveFocusRecentActivityHours(undefined) }, merge: 'resolved', fields: {
     recentActivityHours: resolveFocusRecentActivityHours, topicPresentation: resolveFocusTopicPresentation,
     linkDestination: resolveFocusLinkDestination, replyLines: resolveFocusReplyLines, previewTrigger: resolveFocusPreviewTrigger,
-    recentInputs: resolveFocusRecentInputs, mapMotion: resolveFocusMapMotion
+    recentInputs: resolveFocusRecentInputs, mapMotion: resolveFocusMapMotion, projects: value => value ?? []
   } },
   'focus.map': { resolve: value => resolveFocusMapPreferences(value as FocusMapPreferences | undefined), merge: 'resolved' },
   notes: { resolve: value => resolveNotesPreferences(value as NotesPreferences | undefined), merge: 'authored' },

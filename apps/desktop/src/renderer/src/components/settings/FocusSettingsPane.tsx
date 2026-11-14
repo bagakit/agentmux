@@ -14,7 +14,7 @@ import { FocusIntroduction } from './SettingsConceptIntro'
 import '../../styles/settings-focus.css'
 
 const PreviewIcon = semanticIconComponent('action.preview')
-export type FocusSettingsValues = Required<FocusPreferences>
+export type FocusSettingsValues = ReturnType<typeof resolveFocusPreferences>
 function Choices<T extends string | number>({ id, legend, value, options, onChange }: {
   id: string; legend: string; value: T; options: readonly { value: T; label: string; hint?: string }[]; onChange(value: T): void
 }) {
@@ -52,7 +52,7 @@ export function FocusSettingsPane({ preferences, active = true, onSave }: {
       <div className="focus-settings__controls">
         <section className="settings-group" data-settings-preview-group="project-scanning"><header><span>Project scanning</span></header>
           <Choices id="recent-activity" legend="Recent activity window" value={draft.value.recentActivityHours} options={FOCUS_RECENT_ACTIVITY_HOURS.map(value => ({ value, label: value === 168 ? '1 week' : `${value}h` }))} onChange={value => change('recentActivityHours', value, 'board')} />
-          <p className="focus-settings-description">Recent work moves forward. Attention and Working stay first; older projects remain available.</p>
+          <p className="focus-settings-description">Used when you choose Arrange by recent activity. Pinned projects keep your order; other positions stay fixed until you arrange them.</p>
           <Choices id="topic-presentation" legend="Topics in Collections" value={draft.value.topicPresentation} options={[{ value: 'cards', label: 'On Agent cards', hint: 'Keep the Topic beside each task' }, { value: 'sections', label: 'Topic sections', hint: 'Use light headings within each Collection' }]} onChange={value => change('topicPresentation', value, 'board')} />
           <Choices id="reply-lines" legend="Reply excerpt" value={draft.value.replyLines} options={FOCUS_REPLY_LINES.map(value => ({ value, label: `${value} ${value === 1 ? 'line' : 'lines'}`, hint: value === 1 ? 'Scan faster' : value === 2 ? 'Balanced' : 'More context' }))} onChange={value => change('replyLines', value, 'board')} />
           {previewButton('project-scanning', 'Project scanning', 'board')}

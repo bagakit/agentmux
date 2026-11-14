@@ -1,3 +1,4 @@
+import { parseFocusProjects } from '../shared/focus-project-preferences.js'
 import { parseGoalsCommonActions } from '@agentmux/core'
 import { validateReservedWorkspaceConfigEdit } from './workspace-location.js'
 import { SURVEY_THUMBNAIL_HEIGHT, SURVEY_THUMBNAIL_COLUMNS } from '../shared/survey-thumbnail-layout.js'
@@ -322,7 +323,7 @@ const configSchema = z
     workspaces: z.array(workspaceSchema),
     appearance: appearanceSchema,
     browser: browserSchema,
-    focus: z.object({ recentActivityHours: z.number().refine(value => (FOCUS_RECENT_ACTIVITY_HOURS as readonly number[]).includes(value)), topicPresentation: z.enum(FOCUS_TOPIC_PRESENTATIONS).optional(), linkDestination: z.enum(['region', 'tab']).optional(), replyLines: z.number().refine(value => (FOCUS_REPLY_LINES as readonly number[]).includes(value)).optional(), previewTrigger: z.enum(FOCUS_PREVIEW_TRIGGERS).optional(), recentInputs: z.number().refine(value => (FOCUS_RECENT_INPUTS as readonly number[]).includes(value)).optional(), mapMotion: z.enum(FOCUS_MAP_MOTION).optional(), map: focusMapSchema.optional() }).strict().optional(),
+    focus: z.object({ recentActivityHours: z.number().refine(value => (FOCUS_RECENT_ACTIVITY_HOURS as readonly number[]).includes(value)), topicPresentation: z.enum(FOCUS_TOPIC_PRESENTATIONS).optional(), linkDestination: z.enum(['region', 'tab']).optional(), replyLines: z.number().refine(value => (FOCUS_REPLY_LINES as readonly number[]).includes(value)).optional(), previewTrigger: z.enum(FOCUS_PREVIEW_TRIGGERS).optional(), recentInputs: z.number().refine(value => (FOCUS_RECENT_INPUTS as readonly number[]).includes(value)).optional(), mapMotion: z.enum(FOCUS_MAP_MOTION).optional(), map: focusMapSchema.optional(), projects: z.custom<import('../shared/focus-project-preferences').FocusProjectPreference[]>(value => { try { parseFocusProjects(value); return true } catch { return false } }, 'Invalid Focus project preferences').optional() }).strict().optional(),
     notes: z.object({ fontSize: z.number().refine(validNoteFontSize).optional(), contentWidth: z.enum(NOTE_CONTENT_WIDTHS).optional() }).strict().optional(),
     markdown: z.object({ readingWidth: z.enum(MARKDOWN_READING_WIDTHS).optional(), readingTypeface: z.enum(MARKDOWN_READING_TYPEFACES).optional(),
       readingFontSize: z.number().refine(validMarkdownReadingFontSize).optional() }).strict().optional(),
