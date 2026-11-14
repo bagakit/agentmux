@@ -8,7 +8,7 @@ import { MobileConnectionRoot } from '../src/connection/MobileConnectionRoot'
 import type { MobileConnection } from '../src/conversation/use-hosted-conversation'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { createBrowserPlatform } from '../src/platform/browser'
-import { button, click, deferred, mount, mounted } from './conversation-fixture'
+import { deferred, mount, mounted } from './conversation-fixture'
 import { fixturePath } from '../../../test/fixture-values.mjs'
 
 const ports = vi.hoisted(() => ({ connect: vi.fn(), observation: null as MobileConnection | null }))
@@ -62,42 +62,32 @@ afterEach(async () => {
 })
 
 describe('Mobile recovery usability connection', () => {
-  it('uses the actual Hosted unrecoverable state without automatic retries or identity replacement', async () => {
+  it('retains the original connection after directory loss and refuses a genuinely denied exact read', async () => {
     const f = originalHostedConsumer(); ports.connect.mockImplementation(() => f.connect())
     await mount(<MobileConnectionRoot platform={createBrowserPlatform()} native={false} offer={offer} />)
     await vi.waitFor(() => expect(ports.observation?.state).toBe('connected'))
     const saved = getDeviceWorkface().snapshot().record, savedOffer = localStorage.getItem('agentmux.connection-offer.v2')
     await act(async () => { f.deny() })
-    await act(async () => { await vi.waitFor(() => expect(ports.observation?.state).toBe('unavailable')) })
-    expect(document.body.textContent).toContain('自动重连已暂停')
-    expect(ports.observation?.issue).toContain('AGENT_CAPABILITY_INVALID')
-    expect(ports.observation?.issue).toContain('Original device authorization')
-    const requests = f.calls.length
-    await act(async () => { window.dispatchEvent(new Event('online')); document.dispatchEvent(new Event('visibilitychange')); await Promise.resolve() })
-    expect(f.calls).toHaveLength(requests)
+    expect(ports.observation?.state).toBe('connected')
+    await expect(clients[0]!.readAgentSession('original-session')).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
+    expect(ports.observation?.state).toBe('connected')
     expect(ports.connect).toHaveBeenCalledTimes(1)
-    expect(getDeviceWorkface().snapshot().record).toEqual(saved)
-    expect(localStorage.getItem('agentmux.connection-offer.v2')).toBe(savedOffer)
-    expect(button(document.body, '重新检查连接').disabled).toBe(false)
-    const repaired = originalHostedConsumer(); ports.connect.mockImplementation(() => repaired.connect())
-    await click(button(document.body, '重新检查连接'))
-    await vi.waitFor(() => expect(ports.observation?.state).toBe('connected'))
-    expect(ports.connect).toHaveBeenCalledTimes(2)
     expect(getDeviceWorkface().snapshot().record).toEqual(saved)
     expect(localStorage.getItem('agentmux.connection-offer.v2')).toBe(savedOffer)
   })
 
-  it('does not replace an unrecoverable observation with a late first workface save', async () => {
+  it('retains the same connection and draft when directory loss precedes the first workface save', async () => {
     const f = originalHostedConsumer(), saving = deferred<void>(), owner = getDeviceWorkface(), save = owner.confirmHost.bind(owner)
     ports.connect.mockImplementation(() => f.connect())
     vi.spyOn(owner, 'confirmHost').mockImplementation(async host => { await saving.promise; await save(host) })
     await mount(<MobileConnectionRoot platform={createBrowserPlatform()} native={false} offer={offer} />)
     await vi.waitFor(() => expect(clients).toHaveLength(1))
     await act(async () => { f.deny() })
-    await act(async () => { await vi.waitFor(() => expect(ports.observation?.state).toBe('unavailable')) })
+    expect(clients[0]!.sessionObservation().state).toBe('unavailable')
     await act(async () => { saving.resolve(); await saving.promise })
     await vi.waitFor(() => expect(owner.snapshotIdentity().host?.hostId).toBe('original-host'))
-    expect(ports.observation).toMatchObject({ state: 'unavailable', issue: expect.stringContaining('AGENT_CAPABILITY_INVALID') })
+    expect(ports.observation).toMatchObject({ state: 'connected' })
+    expect(owner.snapshot().record.conversation.drafts).toContainEqual(['original-session', 'Original unsent draft'])
   })
 
   it('keeps the original semantic connection available when Native observation needs attention', async () => {
@@ -109,4 +99,5 @@ describe('Mobile recovery usability connection', () => {
     expect(document.body.textContent).not.toContain('自动重连已暂停')
     expect(ports.connect).toHaveBeenCalledTimes(1)
   })
+
 })
