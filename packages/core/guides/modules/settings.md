@@ -300,3 +300,17 @@ for currently referenced Prompts, saved in the same ConfigOwner transaction. Ord
 Agents may edit these preferences; this grants no Host trust or maintenance authority. An unchanged
 broken reference stays visible as an issue. After an unknown reply read current values; this read
 does not prove the earlier save acknowledgement and never retries a write.
+
+## Channel header display
+
+`settings channels header inspect [--adapter ID]` discovers current first-party
+channel presentation IDs and retains any saved unknown adapters. Each row separates
+`authored` (true, false or null) from effective `visible`; null uses the visible default.
+
+`settings channels header configure --adapter ID --input FILE|-` accepts only
+`{expected:boolean|null,visible:boolean|null}`. For example, after reading authored=null,
+`{"expected":null,"visible":false}` hides that adapter in this App’s Agent header.
+null resets its authored preference. The original ConfigOwner checks only this adapter;
+other adapters and all Connection traffic/authority remain unchanged. Ordinary
+authenticated callers can edit this display preference. Inspection after an unknown
+reply reports current values, never a past acknowledgement or automatic retry.
