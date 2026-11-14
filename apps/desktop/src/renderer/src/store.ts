@@ -89,7 +89,7 @@ import { restoredMoteChatIntents, type MoteChatIntent } from './lib/mote-chat-in
 import { defaultNoteCanvasLayout, mergeNoteCanvasLayout, noteCanvasScopeKey, restoreNoteCanvasLayouts, type NoteCanvasLayout, type NoteCanvasScope } from './lib/note-canvas-state'
 import { projectInputReceipt as retainInputReceipt } from '@agentmux/client-ui/input-receipt-projection'
 import { restoredCapsuleQuestionEditors, type CapsuleQuestionEditor } from './lib/capsule-question-editors'
-import { restoredQuestionReplies, type DesktopQuestionReplies, type DesktopQuestionReplyAttempt, type DesktopQuestionDrafts } from './lib/conversation-question-intent'
+import { rejectedQuestionReply, restoredQuestionReplies, type DesktopQuestionReplies, type DesktopQuestionReplyAttempt, type DesktopQuestionDrafts } from './lib/conversation-question-intent'
 import { fileWorkbenchIdentity } from './lib/file-workbench-state'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { readAgentPromptPreparationWait } from '@agentmux/core/prompt-preparation'
@@ -4009,6 +4009,7 @@ function startSessionMembershipResync(
           const next = { ...reconciled, hostTransports, localHome: snapshot.localHome ?? state.localHome, sessionNameMetadata: snapshot.sessionNameMetadataWarning ? state.sessionNameMetadata : sessionNameMetadataRecord(snapshot.sessionNameMetadata ?? [], state.sessionNameMetadata), sessionNameMetadataWarning: snapshot.sessionNameMetadataWarning ?? null, sessions: projectRuntimeEndpointSessions(reconciled.sessions, runtimeEndpointWarnings), ...resolvedStartupNotice, runtimeEndpointWarnings, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [], environmentWarning: snapshot.environmentWarning ?? null, appIconIssue: snapshot.appIconIssue === undefined ? state.appIconIssue : snapshot.appIconIssue }
           return { ...next, ...resolvedNativeIdentityNotices({ ...state, ...next }) }
         })
+        reconcileRetainedQuestionReplies()
         if (!entry.historyReading && historyAttempts < MAX_STARTUP_OBSERVATION_ATTEMPTS && (entry.startupNotice?.startupSessionSnapshot || restoredHistory)) {
           historyAttempts++
           void readStartupHistorySources(entry)
@@ -4973,6 +4974,7 @@ export function adoptAgentRegionObservation(reference: AgentRegionReference & { 
       throw new Error('The original Region or Session changed during observation. Its work is retained.')
     return reduceDetachedAgentLaunch(state, result).state
   })
+  reconcileRetainedQuestionReplies([reference.agentSessionId])
 }
 
 function confirmedSurveyZones(state: AppState): (zoneId: string) => boolean {
@@ -5203,6 +5205,33 @@ export async function retainConversationQuestionReply(sessionId: string, key: st
   })
   if (!admitted) throw new Error('The original question reply record changed; this callback cannot replace it.')
   await flushMessageWorkbench(false)
+  if (attempt.phase === 'unknown') reconcileRetainedQuestionReplies([sessionId])
+}
+/** The original intent owner runs independently of how many Regions display this Session. */
+export function reconcileConversationQuestionReplies(control: AgentSessionControl, notApplied?: import('@agentmux/core/prompt-condition').AgentPromptNotApplied): void {
+  if (!notApplied) return
+  const replies = useAppStore.getState().questionReplies?.[control.agentSessionId]
+  if (!replies) return
+  for (const [key, attempt] of Object.entries(replies)) {
+    const rejected = rejectedQuestionReply(control, notApplied, key, attempt)
+    if (rejected) void retainConversationQuestionReply(control.agentSessionId, key, rejected, attempt)
+      .catch(error => {
+        // A stale callback did not write. Only the still-held result owns this save failure.
+        if (useAppStore.getState().questionReplies?.[control.agentSessionId]?.[key] === rejected)
+          useAppStore.getState().reportWorkbenchSaveFailure(error, 'local-storage')
+      })
+  }
+}
+function reconcileRetainedQuestionReplies(sessionIds: Iterable<string> = useAppStore.getState().sessions.map(session => session.id)): void {
+  const state = useAppStore.getState(), sessions = sessionPresentationById(state.sessions)
+  for (const id of sessionIds) {
+    // A durable presentation alias is not the Core Session identity used by its original intent.
+    const matching = sessions.get(id)
+    for (const session of matching ? [matching] : agentSessionPresentationIndex(state.sessions).get(id) ?? []) {
+      if (session.kind === 'agent' && state.questionReplies?.[session.control.agentSessionId])
+        reconcileConversationQuestionReplies(session.control, session.promptInputNotApplied)
+    }
+  }
 }
 /** Admit only the chosen recipient's correlation to the existing intent owner before queue input. */
 export async function retainRecoveryMessageIntent(binding: SpatialRequestBinding): Promise<AgentMuxSpatialSave | null> {
@@ -5628,6 +5657,7 @@ function openPersistWrites(): void {
   // Startup installed the restored state while writes were fenced. Admit that state now, rather than
   // retaining an earlier default write until the fence opens or relying on a later Runtime event.
   useAppStore.setState(useAppStore.getState())
+  reconcileRetainedQuestionReplies()
 }
 
 // Best-effort unload starts any remaining batch. Controlled quit/reload awaits
@@ -8289,6 +8319,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         throw controlFailure('LAUNCH_RESULT_MISMATCH', 'Explicit resume returned another Agent Session.')
       }
       set((current) => projectRecoveredSession(current, session.id, resumed))
+      reconcileRetainedQuestionReplies([session.id])
       void get().flushAgentSteerQueue(session.id)
       if (signal?.aborted) throw controlCancellation(signal)
       return { operation: request.operation, agentSessionId: resumed.id, runId: resumed.control.run.runId }
@@ -13790,6 +13821,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             !ownsOriginalView(state) || (live && !sessionOwnsControl(live, control))) return state
           return reduceDetachedAgentLaunch(state, result).state
         })
+        reconcileRetainedQuestionReplies([sessionId])
         return result.session
       } else {
         try {
@@ -13808,6 +13840,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             }
             return { sessions: [...state.sessions.filter((item) => item.id !== session.id), refreshed] }
           })
+          reconcileRetainedQuestionReplies([sessionId])
           return session
         } catch (error) { get().reportError(error); throw error }
       }
@@ -13866,6 +13899,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (reveal) {
       set(state => ({ ...projectRecoveredSession(state, reference.agentSessionId, session),
         viewModes: { ...state.viewModes, [reference.agentSessionId]: 'terminal' as const } }))
+      reconcileRetainedQuestionReplies([reference.agentSessionId])
       if (reveal()) get().selectSession(session.id)
       return session
     }
@@ -13877,6 +13911,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { ...projectRecoveredSession(state, reference.agentSessionId, session),
         viewModes: { ...state.viewModes, [reference.agentSessionId]: 'terminal' as const } }
     })
+    if (attached) reconcileRetainedQuestionReplies([reference.agentSessionId])
     // Closing the display while Core works does not authorize stopping the new healthy Run or
     // inventing a replacement Tab. Navigation and drafts remain owned by the original workbench.
     return attached ? session : undefined
@@ -13918,6 +13953,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       session = await api.sessions.refresh({ kind: 'agent', hostId: input.hostId, agentSessionId: managed.agentSessionId, run: managed.run })
       assertSource(session)
       set(state => ({ sessions: [...state.sessions.filter(item => item.id !== session!.id), session!] }))
+      reconcileRetainedQuestionReplies([session.id])
       const recovered = await get().recoverSession(managed.agentSessionId, input.createOperationId, { stillCurrent: reveal })
       if (recovered) assertSource(recovered)
       return recovered
@@ -13959,6 +13995,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     assertSource(session)
     set(state => ({ sessions: [...state.sessions.filter(item => item.id !== session!.id), session!] }))
+    reconcileRetainedQuestionReplies([session.id])
     if (reveal()) get().selectSession(session.id)
     return session
   },
@@ -14085,6 +14122,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ownerStillCurrent
       ) {
         set((state) => ({ ...projectRecoveredSession(state, sessionId, session), ...(options?.preserveView ? { agentFocus: state.agentFocus } : {}) }))
+        reconcileRetainedQuestionReplies([sessionId])
         if (priorFailure && get().notificationEvents.includes(priorFailure)) {
           set(state => settleNotificationRecords(state, [priorFailure]))
         }
@@ -14341,6 +14379,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const pendingLaunchAgentSessionId = pendingAgentLaunchEventId(get(), event)
       if (pendingLaunchAgentSessionId) {
         set((state) => projectRuntimeEvent(state, event).state)
+        if (core.type === 'agent-session' && get().questionReplies?.[core.session.agentSessionId])
+          reconcileRetainedQuestionReplies([pendingLaunchAgentSessionId])
         enqueueSessionMembershipEvent(sessionMembershipResync, event, pendingLaunchAgentSessionId)
         return
       }
@@ -14371,6 +14411,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           kind: 'agent', hostId: event.hostId, agentSessionId: core.session.agentSessionId, run: core.session.run
         }) } : next
     })
+    if (core.type === 'agent-session' && eventSourceId && get().questionReplies?.[core.session.agentSessionId])
+      reconcileRetainedQuestionReplies([eventSourceId])
     if (core.type === 'agent-timeline' && eventSourceId && get().agentSteerQueues[eventSourceId] !== pendingBefore &&
       !observationRefresh && !agentSteerDrains.has(eventSourceId)) void get().flushAgentSteerQueue(eventSourceId)
     if (sessionMembershipGap) startSessionMembershipResync(event)
@@ -14547,6 +14589,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   skipHydration: true,
   onRehydrateStorage: () => (_state, error) => {
     if (error) persistHydrationError = error
+    else if (workbenchWriteFence.isOpen()) reconcileRetainedQuestionReplies()
   },
   merge: (persisted, current) => {
     let local = (persisted ?? {}) as Partial<PersistedAppState>

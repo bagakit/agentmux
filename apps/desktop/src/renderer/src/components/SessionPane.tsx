@@ -52,7 +52,7 @@ import { unobservedRecoveryReference, rereadUnobservedSession, type RecoverySour
 import { errorIdentity, presentError } from '@agentmux/client-ui/error-presentation'
 import { AgentLifecycleFeedback } from './AgentLifecycleFeedback'
 import { AgentInteractionCard } from '@agentmux/client-ui/components/AgentInteractionCard'
-import { desktopQuestionReplyState, reconcileConversationQuestionReplies, editConversationQuestionDraft, sendConversationQuestionReply } from '../lib/conversation-question'
+import { desktopQuestionReplyState, editConversationQuestionDraft, sendConversationQuestionReply } from '../lib/conversation-question'
 import { ActivityView } from './ActivityView'
 import { OpenDestinationPopover } from './OpenDestinationBar'
 import { TerminalView } from './TerminalView'
@@ -320,15 +320,6 @@ export function SessionPane({
   const questionReplies = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => state.questionReplies?.[sessionId])
   const questionSaveWarning = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => state.workbenchSaveWarning)
   const questionDrafts = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => state.questionReplyDrafts?.[sessionId])
-  const questionControl = session?.kind === 'agent' ? session.control : undefined
-  const questionNotApplied = session?.kind === 'agent' ? session.promptInputNotApplied : undefined
-  const questionSessionId = questionControl?.agentSessionId, questionHostId = questionControl?.hostId, questionRunId = questionControl?.run.runId
-  const refusedQuestionOperation = questionNotApplied?.submissionId, refusedQuestionRun = questionNotApplied?.run.runId
-  useEffect(() => {
-    if (questionSessionId && questionHostId && questionRunId && refusedQuestionOperation && refusedQuestionRun) reconcileConversationQuestionReplies(
-      { kind: 'agent', agentSessionId: questionSessionId, hostId: questionHostId, run: { runId: questionRunId } },
-      { submissionId: refusedQuestionOperation, run: { runId: refusedQuestionRun } })
-  }, [questionSessionId, questionHostId, questionRunId, refusedQuestionOperation, refusedQuestionRun, questionReplies])
   const appendAgentComposerDraft = useAppStore.getState().appendAgentComposerDraft
   const terminalThemeId = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.config?.appearance.terminalTheme)
   const autoFocus = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => {
