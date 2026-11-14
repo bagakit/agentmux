@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { fitImageScale, imageOffsetAtScale, type ImageViewPoint } from '@agentmux/client-ui/image-view-geometry'
+import { useImagePan } from '@agentmux/client-ui/use-image-pan'
 import { formatFileBytes } from '../format-file-bytes'
 import '../styles/preview-common.css'
 import '../styles/image-preview.css'
@@ -16,7 +18,8 @@ export function ImageContent({ src, name, byteLength, onDecodeError }: {
   const [bounds, setBounds] = useState({ width: 0, height: 0 })
   const [zoom, setZoom] = useState<number | 'fit'>('fit')
   const [failed, setFailed] = useState(false)
-  const drag = useRef<{ x: number; y: number; left: number; top: number } | null>(null)
+  const { begin, move, end, dragging } = useImagePan()
+  const zoomOffset = useRef<ImageViewPoint | null>(null)
   useEffect(() => {
     const element = viewport.current
     if (!element) return
@@ -26,23 +29,30 @@ export function ImageContent({ src, name, byteLength, onDecodeError }: {
     observer.observe(element)
     return () => observer.disconnect()
   }, [])
-  const fit = natural ? Math.min(1, Math.max(1, bounds.width - 32) / natural.width, Math.max(1, bounds.height - 32) / natural.height) : 1
+  const fit = natural ? fitImageScale(Math.max(1, bounds.width - 32), Math.max(1, bounds.height - 32), natural.width, natural.height) : 1
   const scale = zoom === 'fit' ? fit : zoom
+  useLayoutEffect(() => {
+    const offset = zoomOffset.current
+    zoomOffset.current = null
+    if (!offset || !viewport.current) return
+    viewport.current.scrollLeft = -offset.x
+    viewport.current.scrollTop = -offset.y
+  }, [zoom])
   const changeZoom = (value: number | 'fit') => {
+    end()
+    const nextZoom = value === 'fit' ? value : Math.min(20, Math.max(0.1, value))
+    if (nextZoom === zoom) return
     const element = viewport.current
-    const nextScale = value === 'fit' ? fit : Math.min(20, Math.max(0.1, value))
-    const centerX = element ? (element.scrollLeft + element.clientWidth / 2) / scale : 0
-    const centerY = element ? (element.scrollTop + element.clientHeight / 2) / scale : 0
-    setZoom(value === 'fit' ? value : nextScale)
-    requestAnimationFrame(() => {
-      if (viewport.current !== element || !element) return
-      element.scrollLeft = centerX * nextScale - element.clientWidth / 2
-      element.scrollTop = centerY * nextScale - element.clientHeight / 2
-    })
+    const nextScale = nextZoom === 'fit' ? fit : nextZoom
+    if (element) zoomOffset.current = imageOffsetAtScale(
+      { x: -element.scrollLeft, y: -element.scrollTop },
+      { x: element.clientWidth / 2, y: element.clientHeight / 2 }, nextScale / scale,
+    )
+    setZoom(nextZoom)
   }
   return (
     <div className="image-preview" data-decode-state={failed ? 'error' : natural ? 'decoded' : 'loading'}>
-      <div className="image-preview__viewport" ref={viewport} tabIndex={0} aria-label={`Image ${name}`}
+      <div className="image-preview__viewport" ref={viewport} tabIndex={0} aria-label={`Image ${name}`} data-dragging={dragging || undefined}
         onKeyDown={event => {
           if (event.target !== event.currentTarget || event.metaKey || event.ctrlKey || event.altKey) return
           if (event.key === '+' || event.key === '=') changeZoom(scale * 1.25)
@@ -54,19 +64,18 @@ export function ImageContent({ src, name, byteLength, onDecodeError }: {
         }}
         onPointerDown={event => {
           const element = event.currentTarget
-          if (event.button !== 0 || (element.scrollWidth <= element.clientWidth && element.scrollHeight <= element.clientHeight)) return
-          drag.current = { x: event.clientX, y: event.clientY, left: element.scrollLeft, top: element.scrollTop }
-          element.setPointerCapture(event.pointerId)
-          element.focus()
+          if (element.scrollWidth <= element.clientWidth && element.scrollHeight <= element.clientHeight) return
+          if (!begin(event, { x: -element.scrollLeft, y: -element.scrollTop })) return
+          element.focus({ preventScroll: true })
           event.preventDefault()
         }}
         onPointerMove={event => {
-          const start = drag.current
-          if (!start) return
-          event.currentTarget.scrollLeft = start.left - event.clientX + start.x
-          event.currentTarget.scrollTop = start.top - event.clientY + start.y
+          const offset = move(event)
+          if (!offset) return
+          event.currentTarget.scrollLeft = -offset.x
+          event.currentTarget.scrollTop = -offset.y
         }}
-        onPointerUp={() => { drag.current = null }} onLostPointerCapture={() => { drag.current = null }}>
+        onPointerUp={end} onPointerCancel={end} onLostPointerCapture={end}>
         {failed ? <div className="file-preview-state" role="alert"><strong>Image could not be decoded</strong><span>The current engine cannot display these bytes. The original file is unchanged.</span></div> : <>
           {!natural ? <div className="file-preview-state" role="status">Decoding image…</div> : null}
           <div className="image-preview__stage" style={natural ? { minWidth: natural.width * scale + 32, minHeight: natural.height * scale + 32 } : undefined}>

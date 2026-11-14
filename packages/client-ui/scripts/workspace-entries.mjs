@@ -78,6 +78,8 @@ export const workspaceSources = {
     'WorkflowObservation'
   ]),
   ...entries('', 'lib', '.ts', [
+    'image-view-geometry',
+    'use-image-pan',
     'activity-autoscroll',
     'activity-record-time',
     'activity-step-summary',

@@ -415,6 +415,16 @@
       "browser": "./src/components/WorkflowObservation.tsx",
       "import": "./dist/components/WorkflowObservation.js"
     },
+    "./image-view-geometry": {
+      "types": "./src/lib/image-view-geometry.ts",
+      "browser": "./src/lib/image-view-geometry.ts",
+      "import": "./dist/lib/image-view-geometry.js"
+    },
+    "./use-image-pan": {
+      "types": "./src/lib/use-image-pan.ts",
+      "browser": "./src/lib/use-image-pan.ts",
+      "import": "./dist/lib/use-image-pan.js"
+    },
     "./activity-autoscroll": {
       "types": "./src/lib/activity-autoscroll.ts",
       "browser": "./src/lib/activity-autoscroll.ts",

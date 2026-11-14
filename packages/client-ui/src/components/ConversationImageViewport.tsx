@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent, type ReactNode, type Ref } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from 'react'
 import * as Dialog from './Modal.js'
 import { SemanticIcon } from '../theme/icons.js'
 import { constrainImageView, FIT_IMAGE, imageViewSize, zoomImageView, type ImageViewGeometry } from '../lib/image-view-transform.js'
+import { useImagePan } from '../lib/use-image-pan.js'
 
 /** Viewing state only. The parent still owns the exact bytes, source and decode failure. */
 export function ConversationImageViewport({ src, alt, name, onError, fallback, navigation }: {
@@ -13,17 +14,9 @@ export function ConversationImageViewport({ src, alt, name, onError, fallback, n
   const geometry = useRef<ImageViewGeometry>({ width: 0, height: 0, naturalWidth: 0, naturalHeight: 0 })
   const [size, setSize] = useState(() => imageViewSize(geometry.current))
   const [view, setView] = useState(FIT_IMAGE)
-  const [dragging, setDragging] = useState(false)
+  const { begin, move, end: endDrag, dragging } = useImagePan(4)
   const currentView = useRef(view)
   currentView.current = view
-  const drag = useRef<{ pointer: number; clientX: number; clientY: number; x: number; y: number } | null>(null)
-
-  const endDrag = useCallback(() => {
-    const pointer = drag.current?.pointer, host = viewport.current
-    drag.current = null
-    setDragging(false)
-    if (pointer !== undefined && host?.hasPointerCapture?.(pointer)) host.releasePointerCapture(pointer)
-  }, [])
 
   const measure = useCallback(() => {
     const host = viewport.current, img = image.current
@@ -63,10 +56,6 @@ export function ConversationImageViewport({ src, alt, name, onError, fallback, n
 
   const zoom = (factor: number) => { endDrag(); setView(previous => zoomImageView(previous, previous.scale * factor, { x: 0, y: 0 }, geometry.current)) }
   const fit = () => { endDrag(); setView(FIT_IMAGE) }
-  const finishDrag = (event: PointerEvent<HTMLDivElement>) => {
-    if (drag.current?.pointer !== event.pointerId) return
-    endDrag()
-  }
   return <div className="md-conversation-image__viewer" onKeyDown={event => {
     if (navigation && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
       event.preventDefault(); event.stopPropagation()
@@ -94,20 +83,14 @@ export function ConversationImageViewport({ src, alt, name, onError, fallback, n
           { x: event.clientX - rect.left - rect.width / 2, y: event.clientY - rect.top - rect.height / 2 }, geometry.current))
       }}
       onPointerDown={event => {
-        if (event.button !== 0 || view.scale === 1 || drag.current) return
+        if (view.scale === 1 || !begin(event, view)) return
         event.preventDefault()
         event.currentTarget.focus({ preventScroll: true })
-        drag.current = { pointer: event.pointerId, clientX: event.clientX, clientY: event.clientY, x: view.x, y: view.y }
-        event.currentTarget.setPointerCapture?.(event.pointerId)
       }}
       onPointerMove={event => {
-        const start = drag.current
-        if (!start || start.pointer !== event.pointerId) return
-        const dx = event.clientX - start.clientX, dy = event.clientY - start.clientY
-        if (!dragging && Math.hypot(dx, dy) < 4) return
-        setDragging(true)
-        setView(previous => constrainImageView({ ...previous, x: start.x + dx, y: start.y + dy }, geometry.current))
-      }} onPointerUp={finishDrag} onPointerCancel={finishDrag} onLostPointerCapture={() => { drag.current = null; setDragging(false) }}>
+        const offset = move(event)
+        if (offset) setView(previous => constrainImageView({ ...previous, ...offset }, geometry.current))
+      }} onPointerUp={endDrag} onPointerCancel={endDrag} onLostPointerCapture={endDrag}>
       {src ? <img ref={image} className="md-conversation-image__full" src={src} alt={alt} draggable={false}
         onLoad={measure} onError={onError} style={{ ...(size.width ? { width: size.width, height: size.height } : {}),
           transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }} /> : fallback}

@@ -1,6 +1,7 @@
 .image-preview { height:100%; flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; }
 .image-preview__viewport { flex:1; min-width:0; min-height:0; overflow:auto; position:relative; overscroll-behavior:contain; background:var(--surface-0); }
 .image-preview__viewport:focus-visible { outline:2px solid var(--text-2); outline-offset:-2px; }
+.image-preview__viewport[data-dragging] { cursor:grabbing; }
 .image-preview__stage { width:100%; height:100%; display:grid; place-items:center; padding:var(--sp-6); }
 .image-preview__stage img { display:block; max-width:none; max-height:none; flex-shrink:0; user-select:none; background-color:var(--surface-1); background-image:conic-gradient(var(--surface-2) 25%, transparent 0 50%, var(--surface-2) 0 75%, transparent 0); background-size:16px 16px; box-shadow:0 0 0 1px var(--line-soft); }
 .image-preview__viewport > .file-preview-state { position:absolute; inset:0; }
