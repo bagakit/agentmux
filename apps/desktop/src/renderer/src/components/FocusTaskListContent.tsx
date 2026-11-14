@@ -22,8 +22,9 @@ export function FocusTaskListContent({ context, identity, placeholder = false }:
   identity?: ReactNode
   placeholder?: boolean
 }) {
-  const mandatory = mandatoryAgentContextDetails(context, 'card')
-  const detail = mandatory && !context.detailIsRecap && context.detail !== context.stateLabel ? context.detail : null
+  const showStatus = context.bucket !== 'results' && mandatoryAgentContextDetails(context, 'card')
+  const showExplanation = showStatus || context.detailKind === 'service' || context.detailKind === 'observation'
+  const detail = showExplanation && !context.detailIsRecap && context.detail !== context.stateLabel ? context.detail : null
   const activity = context.lastActivityAt
   const hasTime = !placeholder && activity !== null && Number.isSafeInteger(activity) && activity > 0 && activity <= Date.now()
   return <>
@@ -36,8 +37,8 @@ export function FocusTaskListContent({ context, identity, placeholder = false }:
         <span className="focus-task-list__clock">{hasTime ? <LastActivity at={activity} /> : null}</span>
       </span>
     </span>
-    {mandatory ? <span className="focus-task-list__detail">
-      <span className="focus-task-list__state">{context.stateLabel}</span>
+    {showStatus || detail ? <span className="focus-task-list__detail">
+      {showStatus ? <span className="focus-task-list__state">{context.stateLabel}</span> : null}
       {detail ? <span className="focus-task-list__explanation">{detail}</span> : null}
     </span> : null}
   </>
