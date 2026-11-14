@@ -38,7 +38,7 @@ vi.mock('@monaco-editor/react', async () => {
         // save-focused test still mounts. (Their own behaviour is covered by editor-copy-wiring.)
         addAction: vi.fn(),
         createContextKey: vi.fn(() => ({ set: vi.fn() })),
-        onDidChangeCursorSelection: vi.fn(() => ({ dispose: vi.fn() })),
+        onDidCompositionStart: () => ({ dispose() {} }), onDidCompositionEnd: () => ({ dispose() {} }), onDidChangeCursorSelection: vi.fn(() => ({ dispose: vi.fn() })),
         onDidDispose: vi.fn(() => ({ dispose: vi.fn() })),
         revealLineInCenter: vi.fn(),
         setPosition: vi.fn(),

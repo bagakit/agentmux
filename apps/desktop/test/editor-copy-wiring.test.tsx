@@ -67,7 +67,7 @@ vi.mock('@monaco-editor/react', async () => {
           monacoSpy.contextKeys.push(entry)
           return entry
         },
-        onDidChangeCursorSelection: (cb: (event: { selection: { startLineNumber: number; endLineNumber: number } }) => void) => {
+        onDidCompositionStart: () => ({ dispose() {} }), onDidCompositionEnd: () => ({ dispose() {} }), onDidChangeCursorSelection: (cb: (event: { selection: { startLineNumber: number; endLineNumber: number } }) => void) => {
           monacoSpy.selectionListeners.push(cb)
           return { dispose: vi.fn() }
         },

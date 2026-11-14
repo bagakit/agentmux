@@ -25,7 +25,7 @@ vi.mock('@monaco-editor/react', () => ({
       const editor = {
         addCommand: vi.fn(), addAction: vi.fn(),
         createContextKey: () => ({ set: vi.fn() }),
-        onDidChangeCursorSelection: () => ({ dispose: vi.fn() }),
+        onDidCompositionStart: () => ({ dispose() {} }), onDidCompositionEnd: () => ({ dispose() {} }), onDidChangeCursorSelection: () => ({ dispose: vi.fn() }),
         onDidDispose: (callback: () => void) => { callbacks.push(callback); return { dispose: vi.fn() } },
         getModel: () => monaco.model,
         saveViewState: () => ({ cursor: 7, scrollTop: 133 }),

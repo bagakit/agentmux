@@ -36,7 +36,7 @@ function mount() {
   const editor = {
     focus: vi.fn(() => input.focus()), getContainerDomNode: () => host, addCommand: vi.fn(), addAction: vi.fn(),
     createContextKey: vi.fn(() => ({ set: vi.fn() })),
-    onDidChangeCursorSelection: vi.fn(), onDidDispose: vi.fn(),
+    onDidCompositionStart: () => ({ dispose() {} }), onDidCompositionEnd: () => ({ dispose() {} }), onDidChangeCursorSelection: vi.fn(), onDidDispose: vi.fn(),
     getModel: vi.fn(() => ({})), saveViewState: vi.fn(() => null),
     revealLineInCenter: vi.fn(), setPosition: vi.fn()
   }

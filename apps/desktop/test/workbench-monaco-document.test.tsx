@@ -33,7 +33,7 @@ it('moves the retained source consumer through public layout without recreating 
  const render=async(ownerDocument:Document)=>act(async()=>root.render(<WorkbenchDocumentContext.Provider value={{document:ownerDocument,window:null}}>{field}</WorkbenchDocumentContext.Provider>))
  await render(document)
  const node=document.createElement('div');host.append(node)
- const editor={layout:vi.fn(),focus:vi.fn(),getContainerDomNode:()=>node,addCommand:vi.fn(),addAction:vi.fn(),createContextKey:()=>({set:vi.fn()}),onDidChangeCursorSelection:vi.fn(),onDidDispose:vi.fn(),getModel:()=>({}),saveViewState:vi.fn()}
+ const editor={layout:vi.fn(),focus:vi.fn(),getContainerDomNode:()=>node,addCommand:vi.fn(),addAction:vi.fn(),createContextKey:()=>({set:vi.fn()}),onDidCompositionStart: () => ({ dispose() {} }), onDidCompositionEnd: () => ({ dispose() {} }), onDidChangeCursorSelection:vi.fn(),onDidDispose:vi.fn(),getModel:()=>({}),saveViewState:vi.fn()}
  await act(async()=>fixture.mount!(editor,monacoKeybindingConstants()))
  const child=frame.contentDocument!;child.body.append(child.adoptNode(host));await render(child)
  expect(editor.layout).toHaveBeenCalledOnce();expect(editor.saveViewState).not.toHaveBeenCalled();expect(editor.focus).not.toHaveBeenCalled();expect(viewState.current).toBeNull()

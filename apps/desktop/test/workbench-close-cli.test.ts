@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from 'vitest'
+import { act, createElement, createRef, Fragment } from 'react'
 import { spawn } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
@@ -20,8 +21,13 @@ import { DesktopControlIpcBridge } from '../src/main/control-ipc-bridge.js'
 import { createDesktopWorkbenchCloseOwner } from '../src/main/workbench-close-owner.js'
 import { providerCatalogReader, historySourcesReader } from './helpers/startup-observation-api-fixture.js'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
+import { monacoKeybindingConstants } from './helpers/editor-pane-store.js'
+import { createClientUiRoot } from './helpers/client-ui-render.js'
 
 vi.mock('electron', () => ({ app: { getPath: () => '/private-unused' } }))
+const sourceEditor = vi.hoisted(() => ({ mount: null as ((editor: any, monaco: any) => void) | null }))
+vi.mock('../src/renderer/src/monaco', () => ({}))
+vi.mock('@monaco-editor/react', () => ({ default: ({ onMount }: { onMount: typeof sourceEditor.mount }) => { sourceEditor.mount = onMount; return null } }))
 const nativeBranch = process.env.AGENTMUX_WORKBENCH_CLOSE_NATIVE === '1'
 const restartMode = process.env.AGENTMUX_WORKBENCH_CLOSE_RESTART
 const business = nativeBranch && !restartMode
@@ -101,6 +107,7 @@ async function fixture() {
   vi.spyOn(api.providers, 'list').mockImplementation(providerCatalogReader())
   vi.spyOn(api.sessions, 'historySources').mockImplementation(historySourcesReader())
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions, timelines: {}, recoveryCandidates: [] })
+  vi.spyOn(api.sessions, 'stop').mockImplementation((control, operationId) => runtime.stopSession(control, operationId))
   vi.spyOn(api.sessions, 'refresh').mockImplementation(async control => sessions.find(s => s.control.kind === control.kind && (control.kind === 'agent' ? s.control.kind === 'agent' && s.control.agentSessionId === control.agentSessionId : s.control.kind === 'terminal' && s.control.runId === control.runId))!)
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
   vi.spyOn(api.spatial, 'read').mockImplementation(() => spatial.readForLayout())
@@ -121,6 +128,7 @@ async function fixture() {
   let owner = createDesktopWorkbenchCloseOwner({ store: user, bridge, authority: () => authority, runtime, closeBrowser: browserClose })
   const server = new core.AgentMuxControlServer({ socketPath: paths.desktopSocketPath, exposedMethods: desktopRpcMethods(), forwardingPeer: { authoritySocketPath: paths.socketPath },
     coreClients: () => [{ hostId: 'local', client: host.client }], spaceClose: { call: (method, input, context) => owner.call(method, input, context) },
+    execute: request => store.getState().executeControl(request),
     callOriginalCore: (_host, method, params, context) => callOriginalDesktopHost(host.client as any, method, params, context) })
   await server.start(); cleanup.push(() => server.stop())
   const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: paths.socketPath } }); cleanup.push(() => rpc.dispose())
@@ -205,6 +213,17 @@ it.runIf(business)('exact Agent Stop keeps its discriminated Run fence, rejects 
   expect(() => rpcControlRequest('agent.stop', { target: { kind: 'agent-session', agentSessionId: f.agent.agentSessionId }, expectedRun: f.agent.run })).toThrow()
 })
 
+it.runIf(business).each([false, true])('compiled Agent Stop exact=%s preserves the original business operation receipt through both services', async exact => {
+  const f = await fixture(), operationId = exact ? 'exact-native-stop' : 'current-native-stop'
+  const result = await runCompiledObjectCli(['agent', 'stop', '--session', f.agent.agentSessionId, ...(exact ? ['--run', f.agent.run.runId] : []), '--operation-id', operationId],
+    objectCliEnvironment(f.root, { AGENTMUX_RPC_ENDPOINT: `unix:${join(f.root, 'control.sock')}` }))
+  expect(result.code, result.stderr || result.stdout).toBe(0)
+  expect(JSON.parse(result.stdout).result.receipt).toMatchObject({ operationId, agentSessionId: f.agent.agentSessionId, expectedRun: f.agent.run, admission: 'new' })
+  expect(f.stops).toHaveBeenCalledTimes(1)
+  expect((await f.native.client.status(f.other.runId)).state.type).toBe('exited')
+  expect((await f.rpc.call('agent.stop.inspect', { agentSessionId: f.agent.agentSessionId, expectedRun: f.agent.run, operationId })).operationIdMatched).toBe(true)
+})
+
 it.runIf(business && Boolean(process.env.AGENTMUX_WORKBENCH_LEGACY_BASE))('qualifies the exact mixed-version codec receiver against the current compiled CLI without a current-Run downgrade', async () => {
   const { f, current, next } = await successorFixture()
   // Compile the actual frozen pre-feature receiver codecs, with their original
@@ -273,6 +292,195 @@ it.runIf(business)('input typed during a real external Stop wait survives final 
   expect(f.store.getState().tabs['target-tab']?.regions['file-region']).toBeDefined()
   expect((await f.native.client.status(f.run.runId)).state.type).toBe('exited')
   expect(f.stops).toHaveBeenCalledTimes(1)
+})
+
+it.runIf(business)('wrong decisions, a new outside View and a single-Region target never authorize another resource or whole Tab', async () => {
+  const f = await fixture(), plan = f.prepared(await f.prepare('outside-view'))
+  await expect(f.rpc.call('space.close.apply', { operationId: plan.operationId, expectedPlanDigest: plan.planDigest, decisions: [] })).rejects.toMatchObject({ code: 'WORKBENCH_CLOSE_DECISIONS_REQUIRED' })
+  expect(f.stops).not.toHaveBeenCalled()
+  const { createWorkbenchTab } = await import('../src/renderer/src/lib/workbench-tabs.js')
+  const raw = f.store.getState().sessions.find(s => s.control.kind === 'terminal' && s.control.run.runId === f.run.runId)!
+  const outside = createWorkbenchTab('new-outside-view', { kind: 'terminal', phase: 'attached', workspaceId: 'W', regionId: 'outside-raw', sessionId: raw.id })
+  const state = f.store.getState(), layout = state.layouts.W!
+  f.store.setState({ tabs: { ...state.tabs, [outside.id]: outside }, layouts: { ...state.layouts, W: { ...layout, groups: layout.groups.map(g => ({ ...g, tabOrder: [...g.tabOrder, outside.id] })) } } })
+  expect((await f.apply(plan)).code).toBe(1)
+  expect(f.stops).not.toHaveBeenCalled(); expect(f.store.getState().tabs['target-tab']).toBeDefined()
+  expect((await f.native.client.status(f.run.runId)).state.type).toBe('running')
+  const region = f.prepared(await f.cli('prepare', { operationId: 'only-file-region', keepAgentSessions: false,
+    target: { kind: 'region', displayWorkspaceId: 'W', groupId: 'G', tabId: 'target-tab', regionId: 'file-region' } }))
+  expect(f.prepared(await f.apply(region)).clientProjection).toMatchObject({ removedRegions: ['file-region'], retainedRegions: [] })
+  expect(f.store.getState().tabs['target-tab']?.regions['raw-region']).toBeDefined()
+  const sole = await f.cli('prepare', { operationId: 'cannot-expand-region', keepAgentSessions: false,
+    target: { kind: 'region', displayWorkspaceId: 'W', groupId: 'G', tabId: 'target-tab', regionId: 'raw-region' } })
+  expect(sole.code).toBe(1); expect(f.stops).not.toHaveBeenCalled()
+  expect(f.store.getState().tabs['new-outside-view']).toBeDefined()
+})
+
+it.runIf(business)('obtained Native ACK survives a missing Main receipt member; a cold read lists that original ID as unconfirmed without replay', async () => {
+  const f = await fixture(), plan = f.prepared(await f.prepare('ack-before-member-loss'))
+  const path = f.user.path + '.close-operations/' + createHash('sha256').update(plan.operationId).digest('hex') + '.json'
+  const native = (f.host.client as any).kernel.client, actual = native.attachRecoverableStop.bind(native)
+  vi.spyOn(native, 'attachRecoverableStop').mockImplementationOnce(async (...args: any[]) => {
+    const ack = await actual(...args)
+    await rm(path)
+    return ack
+  })
+  const result = await f.apply(plan)
+  expect(result.code).toBe(1)
+  const record = JSON.parse(result.stdout).result.operation
+  expect(record).toMatchObject({ outcome: 'unknown', diskDurability: 'unconfirmed', resources: [{ outcome: 'acknowledged', receipt: { outcome: 'applied', acknowledgement: { kind: 'stop', runId: f.run.runId } } }] })
+  expect((await f.rpc.call('space.close.inspect', { operationId: plan.operationId })).operation).toEqual(record)
+  expect(f.store.getState().tabs['target-tab']).toBeDefined()
+  f.reopenOwner()
+  const list = await f.rpc.call('space.close.ls', {})
+  expect(list).toMatchObject({ availability: 'partial', items: [{ operationId: plan.operationId, phase: 'unconfirmed', outcome: 'unknown' }] })
+  await expect(f.rpc.call('space.close.inspect', { operationId: plan.operationId })).rejects.toMatchObject({ code: 'WORKBENCH_CLOSE_UNCONFIRMED' })
+  expect((await f.apply(plan)).code).toBe(1); expect(f.stops).toHaveBeenCalledTimes(1)
+})
+
+it.runIf(business)('a late real Stop ACK updates only the original facts and never consumes later input or removes the retained Region again', async () => {
+  const f = await fixture(), plan = f.prepared(await f.prepare('late-original-stop'))
+  let entered!: () => void, release!: () => void
+  const started = new Promise<void>(yes => { entered = yes }), held = new Promise<void>(yes => { release = yes })
+  const native = (f.host.client as any).kernel.client, actual = native.attachRecoverableStop.bind(native)
+  vi.spyOn(native, 'attachRecoverableStop').mockImplementationOnce(async (...args: any[]) => { entered(); await held; return actual(...args) })
+  const applying = f.apply(plan); await started
+  await f.host.client.writeAgent({ agentSessionId: f.agent.agentSessionId, expectedRun: f.agent.run, data: 'healthy-during-close-observation', source: 'user' })
+  const result = await applying
+  expect(result.code).toBe(1)
+  expect(JSON.parse(result.stdout).result.operation).toMatchObject({ outcome: 'partial', resources: [{ outcome: 'unknown' }], clientProjection: { retainedRegions: ['raw-region'] } })
+  f.store.getState().setAgentComposerDraft('healthy-region', 'New draft after unknown close')
+  release()
+  await vi.waitFor(async () => expect((await f.rpc.call('space.close.inspect', { operationId: plan.operationId })).operation?.resources[0]).toMatchObject({ outcome: 'acknowledged', receipt: { acknowledgement: { kind: 'stop' } } }), { timeout: 5000 })
+  expect(f.store.getState().tabs['target-tab']?.regions['raw-region']).toBeDefined()
+  expect(f.store.getState().agentComposerDrafts['healthy-region']).toBe('New draft after unknown close')
+  expect(f.stops).toHaveBeenCalledTimes(1)
+  expect((await f.apply(plan)).code).toBe(1); expect(f.stops).toHaveBeenCalledTimes(1)
+})
+
+it.runIf(business)('original managed preparation and transport-approved Device execution retain distinct actors through the real trusted child channel', async () => {
+  const f = await fixture(), input = { operationId: 'device-reviewed-close', target: { kind: 'tab-occurrence' as const, displayWorkspaceId: 'W', groupId: 'G', tabId: 'target-tab' }, keepAgentSessions: false }
+  const prepared = (await f.managed.call('space.close.prepare', input)).operation!
+  const authority = await f.host.deviceAuthority(), key = Buffer.alloc(32, 17).toString('base64'), device = await authority.authorizeKey(key)
+  const actor = { kind: 'device' as const, id: `${authority.hostId}:${device.deviceId}` }, observation = authority.observe(device)
+  cleanup.push(async () => observation.dispose())
+  let receive: ((frame: any) => void) | undefined
+  const frames = f.host.server.openAuthenticatedFrames({ authorization: { principal: actor, signal: observation.signal, assertCurrent: () => authority.assertCurrentKey(device, key) }, send: frame => { receive?.(frame) }, close: () => {} })
+  cleanup.push(async () => frames.dispose())
+  const result = await new Promise<any>((yes, no) => {
+    receive = frame => { if (frame.id === 1) frame.error ? no(frame.error) : yes(frame.result) }
+    void frames.receive({ jsonrpc: '2.0', id: 1, method: 'space.close.apply', params: { operationId: input.operationId, expectedPlanDigest: prepared.planDigest, decisions: core.spaceCloseDecisions(prepared.plan) } }).catch(no)
+  })
+  expect(result.operation).toMatchObject({ outcome: 'applied', preparedBy: { kind: 'agent', id: f.agent.agentSessionId }, approvedBy: actor,
+    resources: [{ receipt: { actor, target: { run: { runId: f.run.runId } } } }] })
+  expect(f.stops).toHaveBeenCalledTimes(1)
+})
+
+it.runIf(business)('Keep choice cannot broaden a human review after another Region or display occurrence appears between the two real preparations', async () => {
+  const f = await fixture()
+  const { samePreparedCloseReview } = await import('../src/renderer/src/lib/workbench-close-owner.js')
+  const { addWorkbenchRegion } = await import('../src/renderer/src/lib/workbench-tabs.js')
+  const stop = f.prepared(await f.prepare('review-before-new-region'))
+  const before = f.store.getState(), tab = before.tabs['target-tab']!
+  f.store.setState({ tabs: { ...before.tabs, [tab.id]: addWorkbenchRegion(tab, 'file-region', 'right', { kind: 'launcher', regionId: 'new-unreviewed-region', workspaceId: 'W' }) } })
+  const keep = f.prepared(await f.cli('prepare', { operationId: 'keep-after-new-region', target: stop.plan.target, keepAgentSessions: true }))
+  expect(samePreparedCloseReview(stop, keep)).toBe(false)
+  expect(f.store.getState().tabs['target-tab']?.regions['new-unreviewed-region']).toBeDefined()
+  // A second change to display membership also requires a current review even
+  // when every existing surface/draft still compares equal.
+  const current = f.store.getState(), layout = current.layouts.W!
+  f.store.setState({ layouts: { ...current.layouts, W: { ...layout, groups: [...layout.groups, { ...layout.groups[0]!, id: 'new-display-group', tabOrder: [tab.id], activeTabId: tab.id }] } } })
+  const another = f.prepared(await f.cli('prepare', { operationId: 'keep-after-new-occurrence', target: stop.plan.target, keepAgentSessions: true }))
+  expect(samePreparedCloseReview(keep, another)).toBe(false)
+  expect(f.stops).not.toHaveBeenCalled()
+})
+
+it.runIf(business)('real Renderer capture and portable RPC accept 513 existing lightweight Regions within the actual carrier byte budget', async () => {
+  const f = await fixture(), { createWorkbenchTab, addWorkbenchRegion } = await import('../src/renderer/src/lib/workbench-tabs.js')
+  let tab = createWorkbenchTab('many-regions', { kind: 'launcher', regionId: 'light-0', workspaceId: 'W' })
+  for (let i = 1; i <= 512; i++) tab = addWorkbenchRegion(tab, 'light-0', 'right', { kind: 'launcher', regionId: 'light-' + i, workspaceId: 'W' })
+  const current = f.store.getState(), layout = current.layouts.W!
+  f.store.setState({ tabs: { ...current.tabs, [tab.id]: tab }, layouts: { ...current.layouts, W: { ...layout, groups: layout.groups.map(g => ({ ...g, tabOrder: [...g.tabOrder, tab.id] })) } } })
+  const record = f.prepared(await f.cli('prepare', { operationId: 'original-large-lightweight-view', target: { kind: 'tab-occurrence', displayWorkspaceId: 'W', groupId: 'G', tabId: tab.id }, keepAgentSessions: false }))
+  expect(record.plan.projection.surfaces).toHaveLength(513)
+  expect(record.plan.children).toEqual([])
+  expect(f.stops).not.toHaveBeenCalled()
+  expect(Object.keys(f.store.getState().tabs[tab.id]!.regions)).toHaveLength(513)
+})
+
+it.runIf(business)('a late old Monaco dispose cannot clear a new editor composition or authorize discard of its original File Region', async () => {
+  const f = await fixture(), { FileSourceEditor } = await import('../src/renderer/src/components/FileSourceEditor.js')
+  const { hasNoteComposition } = await import('../src/renderer/src/lib/note-live-merge.js')
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const node = document.createElement('div'); document.body.append(node)
+  const root = createClientUiRoot(node)
+  cleanup.push(async () => { await act(async () => root.unmount()); node.remove() })
+  await act(async () => root.render(createElement(FileSourceEditor, { tabId: 'target-tab', surface: { kind: 'file', regionId: 'file-region', workspaceId: 'W', path: 'draft.txt' }, viewState: createRef() })))
+  const editor = () => {
+    let begin!: () => void, end!: () => void, dispose!: () => void
+    const object = { layout() {}, focus() {}, getContainerDomNode: () => node, addCommand() {}, addAction() {}, createContextKey: () => ({ set() {} }),
+      onDidChangeCursorSelection() {}, onDidCompositionStart(cb: () => void) { begin = cb }, onDidCompositionEnd(cb: () => void) { end = cb },
+      onDidDispose(cb: () => void) { dispose = cb }, getModel: () => null }
+    return { object, begin: () => begin(), end: () => end(), dispose: () => dispose() }
+  }
+  const old = editor(), next = editor()
+  await act(async () => sourceEditor.mount!(old.object, monacoKeybindingConstants()))
+  old.begin()
+  await act(async () => sourceEditor.mount!(next.object, monacoKeybindingConstants()))
+  next.begin(); old.dispose()
+  expect(hasNoteComposition(f.key)).toBe(true)
+  const request = { keepAgentSessions: false, target: { kind: 'region', displayWorkspaceId: 'W', groupId: 'G', tabId: 'target-tab', regionId: 'file-region' } }
+  const blocked = f.prepared(await f.cli('prepare', { ...request, operationId: 'new-editor-still-composing' }))
+  expect(blocked.plan.projection.surfaces[0]!.blocker).toBe('draft-busy')
+  expect((await f.apply(blocked)).code).toBe(1)
+  expect(f.store.getState().tabs['target-tab']?.regions['file-region']).toBeDefined()
+  expect(f.store.getState().documents[f.key]?.content).toBe('Original unsaved content')
+  next.end(); old.begin()
+  expect(hasNoteComposition(f.key)).toBe(false)
+  next.begin(); next.dispose()
+  expect(hasNoteComposition(f.key)).toBe(false)
+  const ended = f.prepared(await f.cli('prepare', { ...request, operationId: 'new-editor-ended' }))
+  expect(f.prepared(await f.apply(ended)).outcome).toBe('applied')
+  expect(f.store.getState().tabs['target-tab']?.regions['file-region']).toBeUndefined()
+  expect(f.stops).not.toHaveBeenCalled()
+})
+
+it.runIf(business).each(['Keep Session & Close', 'Stop & Close'])('actual GUI %s consumes the same original Main plan and resource owners as CLI', async choice => {
+  const f = await fixture(), { useWorkbenchTabsClose } = await import('../src/renderer/src/hooks/useWorkbenchTabsClose.js')
+  const { installNativePopover } = await import('./fixtures/mote-workface.js')
+  const restorePopover = installNativePopover(); cleanup.push(async () => restorePopover())
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const calls = vi.spyOn(f.api.workbenchClose, 'call').mockImplementation((method, input) => f.rpc.call(method, input))
+  const node = document.createElement('div'); document.body.append(node); const root = createClientUiRoot(node)
+  cleanup.push(async () => { await act(async () => root.unmount()); node.remove() })
+  function Consumer() {
+    const close = useWorkbenchTabsClose()
+    return createElement(Fragment, null, createElement('button', { onClick: () => void close.request({ workspaceId: 'W', group: { id: 'G', tabOrder: ['target-tab', 'healthy-tab'] }, tabIds: ['healthy-tab'], subject: 'Original Agent' }) }, 'Close original Agent View'), close.dialog)
+  }
+  await act(async () => root.render(createElement(Consumer)))
+  await act(async () => node.querySelector<HTMLButtonElement>('button')!.click())
+  await vi.waitFor(() => expect([...document.querySelectorAll('button')].some(b => b.textContent === choice), JSON.stringify({ error: f.store.getState().error, calls: calls.mock.calls, html: document.body.innerHTML })).toBe(true), { timeout: 5000 })
+  const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === choice)!
+  await act(async () => button.click())
+  await vi.waitFor(async () => {
+    const applied = calls.mock.calls.find(([method]) => method === 'space.close.apply')?.[1] as core.SpaceCloseParams['space.close.apply'] | undefined
+    const result = applied ? await f.rpc.call('space.close.inspect', { operationId: applied.operationId }) : null
+    expect(f.store.getState().tabs['healthy-tab'], JSON.stringify({ error: f.store.getState().error, result })).toBeUndefined()
+  }, { timeout: 5000 })
+  expect(calls.mock.calls.filter(([method]) => method === 'space.close.apply')).toHaveLength(1)
+  await calls.mock.results[calls.mock.calls.findIndex(([method]) => method === 'space.close.apply')]!.value
+  expect(f.store.getState().tabs['target-tab']?.regions['file-region']).toBeDefined()
+  expect(f.store.getState().documents[f.key]?.content).toBe('Original unsaved content')
+  if (choice === 'Keep Session & Close') {
+    expect(f.stops).not.toHaveBeenCalled()
+    await f.host.client.writeAgent({ agentSessionId: f.agent.agentSessionId, expectedRun: f.agent.run, data: 'healthy-kept-original-Agent', source: 'user' })
+    expect((await f.native.client.status(f.other.runId)).state.type).toBe('running')
+  } else {
+    expect(f.stops).toHaveBeenCalledTimes(1)
+    expect((await f.native.client.status(f.other.runId)).state.type).toBe('exited')
+    const apply = calls.mock.calls.find(([method]) => method === 'space.close.apply')![1] as core.SpaceCloseParams['space.close.apply']
+    expect((await f.rpc.call('space.close.inspect', { operationId: apply.operationId })).operation).toMatchObject({ outcome: 'applied', resources: [{ receipt: { agentSessionId: f.agent.agentSessionId, expectedRun: f.agent.run } }] })
+  }
 })
 
 it.runIf(Boolean(restartMode))('private restart worker restores the original workface and discovers retained close operations without replay', async () => {

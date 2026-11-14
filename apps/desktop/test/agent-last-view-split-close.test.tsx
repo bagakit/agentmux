@@ -24,9 +24,11 @@ import { AgentRegionHeader } from '../src/renderer/src/components/AgentRegionHea
 import { FocusContextRow } from '../src/renderer/src/components/FocusContextRow'
 import { createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
 import { regionExecutionHost } from '../src/renderer/src/lib/region-execution-host'
+import { connectWorkbenchCloseApiOwner } from './helpers/workbench-close-api-owner'
 
 const initial = useAppStore.getState()
 let root: Root, element: HTMLDivElement, overlay: HTMLDivElement
+let closeOwner: Awaited<ReturnType<typeof connectWorkbenchCloseApiOwner>>
 const lonely = composerSession('lonely')
 const shared = composerSession('shared')
 const file = { kind: 'file' as const, regionId: 'file-region', workspaceId: 'workspace', path: 'changed.txt' }
@@ -35,7 +37,8 @@ const split = addWorkbenchRegion(
   'lonely-region', 'right', file)
 const elsewhere = createWorkbenchTab('elsewhere', { kind: 'agent', regionId: 'shared-region', phase: 'attached', workspaceId: 'workspace', sessionId: shared.id })
 
-beforeEach(() => {
+beforeEach(async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   element = document.createElement('div'); overlay = document.createElement('div'); overlay.dataset.overlayHost = ''
   document.body.append(element, overlay); root = createRoot(element)
@@ -43,14 +46,17 @@ beforeEach(() => {
     tabs: { [split.id]: split, [elsewhere.id]: elsewhere }, layouts: { workspace: createWorkspaceLayout('group', [split.id, elsewhere.id]) },
     agentNames: { [lonely.id]: 'Lonely Reviewer' },
     closingWorkbenchViews: {}, closeTabRequest: null, closeRegionRequest: null, error: null, dirtyDocuments: {},
+    documents: { [documentKey('workspace', 'changed.txt')]: { path: 'changed.txt', content: 'Original changed editor content', revision: 'original-file-revision' } },
     agentOperations: {}, agentComposerDrafts: { [lonely.id]: 'Original unsent draft' }, prewarmTerminal: vi.fn() })
   useAppStore.getState().activateTab('workspace', 'group', split.id)
   vi.spyOn(api.sessions, 'stop').mockImplementation(async (control, operationId) =>
     control.kind === 'agent' ? sessionStopReceipt(control, operationId!) : undefined)
   vi.spyOn(api.browser, 'close').mockResolvedValue(undefined)
+  closeOwner = await connectWorkbenchCloseApiOwner()
 })
 afterEach(async () => {
   await act(async () => root.unmount()); element.remove(); overlay.remove()
+  await closeOwner.dispose()
   vi.restoreAllMocks(); vi.unstubAllGlobals(); useAppStore.setState(initial, true)
 })
 // Real presentation consumers read the original Store operation independently of the isolated PTY body.
@@ -70,12 +76,13 @@ async function mount(feedback = false) {
 }
 async function closeSplit(regionId: string) {
   const close = element.querySelector<HTMLElement>(`[data-workbench-region-id="${regionId}"] .workbench-region__close`)
-  expect(close, `Close split on ${regionId}`).not.toBeNull(); await act(async () => close!.click())
+  expect(close, `Close split on ${regionId}`).not.toBeNull(); await act(async () => { close!.click(); await closeOwner.settle() })
 }
-async function click(label: string) {
+async function click(label: string, settled = true) {
   const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === label)
   expect(button, `Actual close action ${label}`).toBeDefined(); expect(button!.disabled).toBe(false)
-  await act(async () => button!.click())
+  await act(async () => { button!.click(); if (settled) await closeOwner.settle() })
+  if (!settled) await vi.waitFor(() => expect(api.sessions.stop).toHaveBeenCalled())
 }
 const dialog = () => document.querySelector('[role="dialog"]')
 const regions = () => Object.keys(useAppStore.getState().tabs[split.id]!.regions)
@@ -199,7 +206,7 @@ async function askClose(kind: 'tab' | 'region') {
   else {
     const close = element.querySelector<HTMLElement>(`.workbench-tab[data-workbench-tab-id="${split.id}"] .workbench-tab__close`)
     expect(close).not.toBeNull()
-    await act(async () => close!.click())
+    await act(async () => { close!.click(); await closeOwner.settle() })
   }
   expect(dialog()?.textContent).toContain('Stop Agent Session?')
 }
@@ -209,7 +216,7 @@ it.each(['tab', 'region'] as const)('%s Stop & Close dismisses immediately while
   vi.mocked(api.sessions.stop).mockImplementationOnce((control, operationId) => new Promise(resolve => {
     release = () => resolve(control.kind === 'agent' ? sessionStopReceipt(control, operationId!) : undefined)
   }))
-  await mount(true); await askClose(kind); await click('Stop & Close')
+  await mount(true); await askClose(kind); await click('Stop & Close', false)
   const neighbor = element.querySelector<HTMLInputElement>('[aria-label="Neighboring work"]')!
   try {
     expect(dialog()).toBeNull()
@@ -220,7 +227,7 @@ it.each(['tab', 'region'] as const)('%s Stop & Close dismisses immediately while
     expect(useAppStore.getState().agentComposerDrafts[lonely.id]).toBe('Original unsent draft')
     neighbor.focus(); neighbor.value = 'Continue neighboring work'
     expect(document.activeElement).toBe(neighbor)
-  } finally { await act(async () => release()) }
+  } finally { await act(async () => { release(); await closeOwner.settle() }) }
   expect(dialog()).toBeNull()
   expect(useAppStore.getState().tabs[elsewhere.id]).toEqual(elsewhere)
   expect(useAppStore.getState().tabs[split.id]?.regions['lonely-region']).toBeUndefined()
@@ -249,13 +256,13 @@ it.each(['tab', 'region'] as const)('%s Stop & Close cannot remove a replacement
   vi.mocked(api.sessions.stop).mockImplementationOnce((control, operationId) => new Promise(resolve => {
     release = () => resolve(control.kind === 'agent' ? sessionStopReceipt(control, operationId!) : undefined)
   }))
-  await mount(true); await askClose(kind); await click('Stop & Close')
+  await mount(true); await askClose(kind); await click('Stop & Close', false)
   const replacement = { ...split.regions['lonely-region']!, sessionId: shared.id }
   try {
     expect(dialog()).toBeNull()
     await act(async () => useAppStore.setState(state => ({ tabs: { ...state.tabs,
       [split.id]: { ...state.tabs[split.id]!, regions: { ...state.tabs[split.id]!.regions, 'lonely-region': replacement } } } })))
-  } finally { await act(async () => release()) }
+  } finally { await act(async () => { release(); await closeOwner.settle() }) }
   expect(useAppStore.getState().tabs[split.id]?.regions['lonely-region']).toEqual(replacement)
   expect(useAppStore.getState().tabs[elsewhere.id]).toEqual(elsewhere)
   expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(lonely.control, expect.any(String))
@@ -312,10 +319,10 @@ it.each(['mouse', 'keyboard'] as const)('tab dirty file close uses the shared co
   useAppStore.setState({ tabs: { [original.id]: original, [elsewhere.id]: elsewhere },
     dirtyDocuments: { [documentKey('workspace', 'changed.txt')]: true } })
   await mount()
-  if (input === 'keyboard') await act(async () => useAppStore.getState().requestCloseTab('workspace', 'group', original.id))
+  if (input === 'keyboard') await act(async () => { useAppStore.getState().requestCloseTab('workspace', 'group', original.id); await closeOwner.settle() })
   else {
     const close = element.querySelector<HTMLButtonElement>('[data-workbench-tab-id="split"] .workbench-tab__close')!
-    await act(async () => close.click())
+    await act(async () => { close.click(); await closeOwner.settle() })
   }
   expect(dialog()?.textContent).toContain('Discard unsaved changes?')
   await click('Cancel')
@@ -329,7 +336,7 @@ it('tab discard confirms only the requested file Tab and keeps its neighbor', as
   useAppStore.setState({ tabs: { [original.id]: original, [elsewhere.id]: elsewhere },
     dirtyDocuments: { [documentKey('workspace', 'changed.txt')]: true } })
   await mount()
-  await act(async () => element.querySelector<HTMLButtonElement>('[data-workbench-tab-id="split"] .workbench-tab__close')!.click())
+  await act(async () => { element.querySelector<HTMLButtonElement>('[data-workbench-tab-id="split"] .workbench-tab__close')!.click(); await closeOwner.settle() })
   expect(dialog()?.textContent).toContain('Discard unsaved changes?')
   await click('Discard & Close')
   expect(useAppStore.getState().tabs[original.id]).toBeUndefined()
@@ -350,7 +357,7 @@ it('another View of the same Agent closes the split silently without Stop', asyn
 
 it('keyboard close of the Region takes the same confirmation', async () => {
   await mount()
-  await act(async () => useAppStore.getState().requestCloseRegion('workspace', split.id, 'lonely-region'))
+  await act(async () => { useAppStore.getState().requestCloseRegion('workspace', split.id, 'lonely-region'); await closeOwner.settle() })
   expect(dialog()?.textContent).toContain('Stop Agent Session?')
   expect(regions()).toEqual(['lonely-region', 'file-region'])
 })

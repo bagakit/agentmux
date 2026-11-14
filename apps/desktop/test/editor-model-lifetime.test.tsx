@@ -64,7 +64,7 @@ function createCanvas(host: HTMLElement, options: monaco.editor.IStandaloneEdito
     addCommand: vi.fn(), addAction: vi.fn(),
     getAction: () => ({ run: vi.fn() }),
     createContextKey: () => ({ set() {} }),
-    onDidChangeCursorSelection: () => ({ dispose() {} }),
+    onDidCompositionStart: () => ({ dispose() {} }), onDidCompositionEnd: () => ({ dispose() {} }), onDidChangeCursorSelection: () => ({ dispose() {} }),
     onDidDispose(listener: () => void) { disposed.push(listener); return { dispose() {} } },
     dispose() {
       canvas.disposed = true; change?.dispose(); disposing?.dispose()

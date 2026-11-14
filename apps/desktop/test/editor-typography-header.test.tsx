@@ -23,7 +23,7 @@ vi.mock('@monaco-editor/react', () => ({ default: function Canvas({ options, onM
     platform.mounts++
     onMount({ addCommand: (key: number, run: () => void) => platform.commands.push({ key, run }),
       addAction: vi.fn(), createContextKey: () => ({ set: vi.fn() }),
-      onDidChangeCursorSelection: () => ({ dispose: vi.fn() }), onDidDispose: () => ({ dispose: vi.fn() }),
+      onDidCompositionStart: () => ({ dispose() {} }), onDidCompositionEnd: () => ({ dispose() {} }), onDidChangeCursorSelection: () => ({ dispose: vi.fn() }), onDidDispose: () => ({ dispose: vi.fn() }),
       getModel: () => null, getDomNode: () => null, focus: vi.fn()
     } as unknown as Parameters<OnMount>[0], monacoKeybindingConstants() as unknown as Parameters<OnMount>[1])
   }, [])
