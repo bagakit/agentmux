@@ -1,5 +1,5 @@
 import { mintObjectId } from '@agentmux/core/object-id'
-import { TextInput } from '@agentmux/client-ui/input'
+import { SearchInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { DEFAULT_TOOLKIT_WORKSPACE_PATH, type ToolkitToolConfiguration, type ToolkitConfigurationFields, type ToolkitToolFields } from '@agentmux/core/control'
@@ -22,8 +22,6 @@ const ThemeObjectToolsIcon = semanticIconComponent('object.tool-library')
 
 const ThemeActionInstallPackageIcon = semanticIconComponent('action.install-package')
 const ThemeActionCreateToolIcon = semanticIconComponent('action.create-tool')
-const ThemeActionSearchIcon = semanticIconComponent('action.search')
-const ThemeActionClearIcon = semanticIconComponent('action.clear')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ThemeObjectPerformanceIcon = semanticIconComponent('object.performance')
 const ThemeStatusLockedIcon = semanticIconComponent('status.locked')
@@ -121,7 +119,8 @@ export function ToolkitSettingsPane({ performance, mobileConnection = DEFAULT_MO
     {metadata.error ? <p className="settings-inline-error" role="status">Package files could not be read: {metadata.error} Your configuration and drafts are kept. <Button type="button" onClick={() => void metadata.refresh()}>Refresh files</Button></p> : null}
     <div className="toolkit-workbench__body">
       <section className="toolkit-library" aria-label="Toolkit Library">
-        <label className="toolkit-library__search"><ThemeActionSearchIcon size={14} aria-hidden="true" /><TextInput ref={searchInput} aria-label="Search tools" placeholder="Find a tool…" value={query} onChange={event => setQuery(event.target.value)} />{query ? <button type="button" aria-label="Clear tool search" onClick={() => { setQuery(''); searchInput.current?.focus() }}><ThemeActionClearIcon size={12} /></button> : null}</label>
+        <SearchInput className="toolkit-library__search" ref={searchInput} aria-label="Search tools" clearLabel="Clear tool search"
+            placeholder="Find a tool…" value={query} onValueChange={setQuery} />
         <div ref={library} className="toolkit-library__items">
           <LiquidSelectionSurface selected={selectedId} active={active && (!narrow || view === 'library')} targetAttribute="data-tool-id" />
           <p className="toolkit-library__group">Custom</p>

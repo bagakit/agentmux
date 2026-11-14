@@ -11,11 +11,7 @@
 .prompt-workbench__body { flex: 1; min-height: 0; display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: var(--sp-6); align-items: stretch; }
 .prompt-library, .prompt-editor { min-width: 0; min-height: 0; background: var(--surface-0); }
 .prompt-library { display: flex; flex-direction: column; }
-.prompt-library__search { flex: none; display: flex; align-items: center; padding-inline: var(--sp-3); gap: var(--sp-3); min-height: 28px; margin-bottom: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text-3); background: var(--surface-1); }
-.prompt-library__search input { flex: 1; min-width: 0; width: 100%; padding: var(--sp-2) 0; border: 0; outline: none; background: transparent; color: var(--text); font: var(--fs-meta)/1.5 var(--font-sans); }
-.prompt-library__search:focus-within { border-color: var(--focus-line); }
-.prompt-library__search input:focus-visible { outline: none; }
-.prompt-library__search button { display: flex; flex: none; padding: var(--sp-1); border: 0; background: transparent; color: var(--text-2); cursor: pointer; }
+.prompt-library__search { flex: none; margin-bottom: var(--sp-3); }
 .prompt-library__items { flex: 1; min-height: 0; position: relative; isolation: isolate; display: flex; flex-direction: column; gap: var(--sp-1); overflow: auto; }
 .prompt-library__item { position: relative; z-index: 1; flex: none; display: grid; gap: var(--sp-1); min-width: 0; min-height: 42px; padding: var(--sp-2) var(--sp-4); border: 0; border-radius: var(--radius-sm); text-align: left; background: transparent; color: var(--text-2); cursor: pointer; font: var(--fs-body)/1.5 var(--font-sans); }
 .prompt-library__item:hover { background: var(--surface-1); }
@@ -38,16 +34,14 @@
 .prompt-editor__status > svg { flex: none; }
 .prompt-editor__status[data-prompt-status='unsaved'] { color: var(--amber-text); }
 .prompt-editor__status[data-prompt-status='invalid'] { color: var(--red-text); }
-.prompt-editor__name input { min-height: 28px; padding: var(--sp-2) var(--sp-3); font: 600 var(--fs-title)/1.4 var(--font-sans); }
-.prompt-editor__instruction { padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
-.prompt-editor__instruction:focus-within { border-color: var(--focus-line); }
-.prompt-editor__fields .prompt-editor__instruction textarea { padding: var(--sp-3) 0; min-height: 144px; border: 0; border-radius: 0; box-shadow: none; background: transparent; font-size: var(--fs-prose); line-height: 1.6; }
+.prompt-editor__name input { font: 600 var(--fs-title)/1.4 var(--font-sans); }
 .prompt-editor__instruction > span { font-weight: 550; }
-.prompt-editor__instruction small { color: var(--text-3); }
+.prompt-editor__instruction > small:not(.settings-inline-error), .prompt-editor__reach small:not(.settings-inline-error) { color: var(--text-3); }
+.prompt-editor__instruction textarea { width: 100%; min-height: 144px; max-height: 42vh; padding: var(--sp-3); field-sizing: content; resize: vertical; font-size: var(--fs-prose); line-height: 1.6; }
 .prompt-editor__fields { padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-5); background: var(--surface-0); border-top: 0; }
 .prompt-editor__fields label { min-width: 0; }
-.prompt-editor__fields > label > span { color: var(--text-2); }
-.prompt-editor__fields :is(input:not([type='checkbox']), select) { min-height: 28px; padding-block: var(--sp-2); }
+.prompt-editor__fields > label { display: grid; gap: var(--sp-2); }
+.prompt-editor__fields > label > span, .prompt-editor__reach label > span { color: var(--text-2); font-size: var(--fs-meta); }
 .prompt-editor__fields label small { font-size: var(--fs-meta); line-height: 1.5; }
 .prompt-editor__reach { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-5); }
 .prompt-editor__reach label { display: flex; flex-direction: column; gap: var(--sp-2); }
@@ -63,7 +57,6 @@
 .prompt-editor__fields .prompt-state-settings__choices label { padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text-3); }
 .prompt-editor__fields .prompt-state-settings__choices label:hover { background: var(--surface-1); }
 .prompt-editor__fields .prompt-state-settings__choices label:has(input:checked) { border-color: var(--green-line); background: var(--green-bg); color: var(--text); }
-.prompt-editor__fields .prompt-state-settings__choices label:focus-within { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 .prompt-editor__fields small { line-height: 1.5; }
 .prompt-editor__filtered { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin: 0 0 var(--sp-4); color: var(--text-2); font-size: var(--fs-meta); }
 .prompt-usage { padding-top: var(--sp-4); border-top: 1px solid var(--line-soft); display: grid; gap: var(--sp-3); color: var(--text-2); font-size: var(--fs-meta); }

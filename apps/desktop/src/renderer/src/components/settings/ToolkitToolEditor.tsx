@@ -1,5 +1,5 @@
 import { mintObjectId } from '@agentmux/core/object-id'
-import { TextInput } from '@agentmux/client-ui/input'
+import { Switch, TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import type { ToolkitAction, ToolkitToolDefinition, ToolkitToolFields, ToolkitInlineToolConfiguration } from '@agentmux/core/control'
@@ -60,8 +60,9 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, palette,
   const action = actionId === null ? null : actions.find(item => item.id === actionId)
   const args = displayOpen ? tool.display?.args ?? [] : actionId === null ? tool.args : action?.args ?? []
   const scriptTitle = displayOpen ? 'Display script' : actionId === null ? tui ? 'Shell command' : 'Main script' : action?.label.trim() || 'Action script'
+  const missingName = !tool.name.trim()
   const missingFields = [
-    ...(!tool.name.trim() ? ['a name'] : []),
+    ...(missingName ? ['a name'] : []),
     ...(!tui && !tool.script.trim() ? ['a main script'] : []),
     ...(actions.some(item => !item.label.trim()) ? ['a label for each result action'] : []),
     ...(actions.some(item => !item.script.trim()) ? ['a script for each result action'] : []),
@@ -115,7 +116,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, palette,
     {entry.missing ? <p className="settings-inline-error" role="status">The saved tool is no longer available. Your draft is kept.</p> : null}
     <div className="toolkit-editor__identity">
       <ToolkitIconPicker icon={tool.icon} onChange={icon => onEdit({ icon })} />
-      <label className="toolkit-editor__name"><span>Name <small>Required</small></span><TextInput aria-required="true" ref={nameInput} value={tool.name} onChange={event => onEdit({ name: event.target.value })} placeholder="Workspace summary" /></label>
+      <label className="toolkit-editor__name"><span>Name <small>Required</small></span><TextInput aria-required="true" aria-invalid={missingName || undefined} ref={nameInput} value={tool.name} onChange={event => onEdit({ name: event.target.value })} placeholder="Workspace summary" /></label>
     </div>
     <fieldset className="toolkit-editor__mode"><legend>Tool type</legend>
       {(['script', 'tui'] as const).map(mode => <label key={mode}><input type="radio" name={`${uid}-mode`} value={mode} checked={(tool.mode ?? 'script') === mode} onChange={() => changeMode(mode)} /><span>{mode === 'tui' ? 'TUI · interactive terminal' : 'Script · text and results'}</span></label>)}
@@ -123,7 +124,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, palette,
     <ToolkitWorkingDirectoryField directory={directory} saveError={directorySaveError} active={active} onChange={workspacePath => onEdit({ workspacePath })} />
     {displayOpen || actionId !== null ? <div className="toolkit-editor__action-heading">
       <Button type="button" onClick={() => { setActionId(null); setDisplayOpen(false) }}><ThemeNavigationBackIcon size={13} /> Main script</Button>
-      {displayOpen ? <p className="settings-hint">Runs once when the tool is displayed, including a hover that opens its panel. Refresh runs it again. Use a script that is safe to repeat.</p> : action ? <label><span>Action button label</span><TextInput ref={actionLabel} value={action.label} onChange={event => editScript({ label: event.target.value })} placeholder="Refresh identity" /></label> : <p className="settings-inline-error" role="status">This action is no longer in the current draft. Choose the main script or another action.</p>}
+      {displayOpen ? <p className="settings-hint">Runs once when the tool is displayed, including a hover that opens its panel. Refresh runs it again. Use a script that is safe to repeat.</p> : action ? <label><span>Action button label</span><TextInput ref={actionLabel} aria-required="true" aria-invalid={!action.label.trim() || undefined} value={action.label} onChange={event => editScript({ label: event.target.value })} placeholder="Refresh identity" /></label> : <p className="settings-inline-error" role="status">This action is no longer in the current draft. Choose the main script or another action.</p>}
     </div> : null}
     <section className="toolkit-editor__script" aria-label={tui ? 'Shell command' : displayOpen ? 'Display JavaScript script' : actionId === null ? 'JavaScript script' : 'Action JavaScript script'}>
       <header><span><ThemeObjectSourceCodeIcon size={13} /> {scriptTitle}</span><span>{tui ? 'Shell' : 'JavaScript'}</span></header>
@@ -145,10 +146,10 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, palette,
     {entry.expected ? <TuiToolkitSettings definition={entry.expected} active={active} /> : null}
     <details className="toolkit-editor__scope"><summary>Local execution scope</summary><p>Your script can read and write local files, environment variables and the network. It uses your current user account; it is not sandboxed.</p></details>
     <div className="toolkit-editor__fields">
-      <label className="toolkit-editor__toggle"><span><strong>Show in status bar</strong><small>Hide the entry and prevent new runs when off. An existing run keeps its captured version.</small></span><input type="checkbox" checked={tool.enabled} onChange={event => onEdit({ enabled: event.target.checked })} /></label>
-      <label className="toolkit-editor__toggle"><span><strong>Run at startup</strong><small>When enabled, run once as AgentMux starts. Creating or enabling this tool also runs it. Turn off to run manually.</small></span><input type="checkbox" aria-label="Run at startup" checked={tool.autoStart !== false} onChange={event => onEdit({ autoStart: event.target.checked })} /></label>
+      <label className="toolkit-editor__toggle"><span><strong>Show in status bar</strong><small>Hide the entry and prevent new runs when off. An existing run keeps its captured version.</small></span><Switch checked={tool.enabled} onChange={event => onEdit({ enabled: event.target.checked })} /></label>
+      <label className="toolkit-editor__toggle"><span><strong>Run at startup</strong><small>When enabled, run once as AgentMux starts. Creating or enabling this tool also runs it. Turn off to run manually.</small></span><Switch aria-label="Run at startup" checked={tool.autoStart !== false} onChange={event => onEdit({ autoStart: event.target.checked })} /></label>
       {!tui ? <div className="toolkit-editor__display">
-        <label className="toolkit-editor__toggle"><span><strong>Evaluate when displayed</strong><small>Run a separate display script when its panel opens. No background polling.</small></span><input type="checkbox" aria-label="Evaluate when displayed" checked={Boolean(tool.display)} onChange={event => { onEdit({ display: event.target.checked ? { script: "console.log('Display ready')\n", args: [] } : null }); if (!event.target.checked) setDisplayOpen(false) }} /></label>
+        <label className="toolkit-editor__toggle"><span><strong>Evaluate when displayed</strong><small>Run a separate display script when its panel opens. No background polling.</small></span><Switch aria-label="Evaluate when displayed" checked={Boolean(tool.display)} onChange={event => { onEdit({ display: event.target.checked ? { script: "console.log('Display ready')\n", args: [] } : null }); if (!event.target.checked) setDisplayOpen(false) }} /></label>
         {tool.display ? <button type="button" className="small-button" aria-pressed={displayOpen} onClick={() => { setActionId(null); setDisplayOpen(true) }}><ThemeObjectSourceCodeIcon size={13} /> Edit display script</button> : null}
       </div> : null}
       <fieldset className="toolkit-settings__layout"><legend>Status bar appearance</legend><div className="toolkit-settings__choices">
@@ -160,7 +161,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, palette,
       </div></fieldset>
       {(displayOpen ? Boolean(tool.display) : actionId === null || action) ? <details className="toolkit-editor__arguments"><summary>{displayOpen ? 'Display arguments' : actionId === null ? 'Arguments' : 'Action arguments'} <span>{args.length ? `· ${args.length}` : '· optional'}</span></summary>
         <p className="settings-hint">{tui ? tool.script.trim() ? 'Passed as separate shell positional arguments: $1, $2, and so on. Quote them in your command to preserve spaces.' : 'Passed directly to the Host’s default shell as separate arguments.' : 'Each argument is a separate value. No shell expansion or interpolation.'}</p>
-        {args.map((arg, index) => <label className="toolkit-argument" key={index}><span>Argument {index + 1}</span><TextInput value={arg} onChange={event => editScript({ args: args.map((value, i) => i === index ? event.target.value : value) })} /><Button type="button" aria-label={`Remove argument ${index + 1}`} onClick={() => editScript({ args: args.filter((_, i) => i !== index) })}><ThemeActionRemoveArgumentIcon size={13} /></Button></label>)}
+        {args.map((arg, index) => <div className="toolkit-argument" key={index}><label htmlFor={`${uid}-arg-${index}`}>Argument {index + 1}</label><TextInput id={`${uid}-arg-${index}`} value={arg} onChange={event => editScript({ args: args.map((value, i) => i === index ? event.target.value : value) })} /><Button type="button" aria-label={`Remove argument ${index + 1}`} onClick={() => editScript({ args: args.filter((_, i) => i !== index) })}><ThemeActionRemoveArgumentIcon size={13} /></Button></div>)}
         <Button type="button" disabled={args.length >= 32} onClick={() => editScript({ args: [...args, ''] })}><ThemeActionAddArgumentIcon size={13} /> Add argument</Button>
       </details> : null}
     </div>
