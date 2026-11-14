@@ -59,7 +59,7 @@ function MainFocusFixture({ navigate, regionOnly = false }: { navigate: (id: str
 /** Real original Core/Space and scoped Unix→Main→IPC→Preload→Renderer.
  * Native process state is the existing source fixture leaf. No unified hook,
  * Context, lane, card, filter, menu or preview implementation is mocked. */
-async function fixture(options: { foreign?: boolean; unavailable?: boolean; nativeUnavailable?: boolean; metadataUnknown?: boolean; sourceOnly?: boolean; legacyNoAdmission?: boolean; multiple?: boolean; missing?: boolean } = {}) {
+async function fixture(options: { foreign?: boolean; unavailable?: boolean; nativeUnavailable?: boolean; metadataUnknown?: boolean; sourceOnly?: boolean; legacyNoAdmission?: boolean; multiple?: boolean; missing?: boolean; unconfirmed?: boolean } = {}) {
   const privateCleanup: Array<() => unknown | Promise<unknown>> = []
   const original = await createSpaceSessionsFixture(privateCleanup)
   const privateRoots = new Set([original.b.root, original.d.root])
@@ -121,15 +121,19 @@ async function fixture(options: { foreign?: boolean; unavailable?: boolean; nati
   const { creationOperationId: _creation, ...retainedRegion } = originalRegion
   const secondRegion = options.multiple ? { ...retainedRegion, regionId: 'another-original-position' }
     : { regionId: 'original-browser-position', tabId: originalTab.tabId, kind: 'browser' as const, agentSessionId: null, runId: null, execution: null }
+  const unconfirmedRegion = { ...retainedRegion, regionId: 'unknown-original-position', execution: null, runId: null }
+  const otherUnconfirmedRegion = { ...unconfirmedRegion, regionId: 'another-unknown-position' }
   // Seed the complete original owner's business graph and private split together;
   // Source business apply intentionally does not carry another client's layout.
   const originalLayout = sourceDocument.graph.tabLayouts[originalTab.tabId]!
   await original.b.spatial.commit({ expectedRevision: sourceDocument.revision, graph: { ...sourceDocument.graph,
-    tabs: sourceDocument.graph.tabs.map(tab => tab.tabId === originalTab.tabId ? { ...tab, regionIds: [...tab.regionIds, secondRegion.regionId] } : tab),
-    regions: [...sourceDocument.graph.regions, secondRegion],
-    tabLayouts: { ...sourceDocument.graph.tabLayouts, [originalTab.tabId]: splitWorkbenchRegion(originalLayout, originalLayout.activeRegionId, 'right', secondRegion.regionId) } } })
+    tabs: sourceDocument.graph.tabs.map(tab => tab.tabId === originalTab.tabId ? { ...tab, regionIds: [...tab.regionIds, secondRegion.regionId, ...(options.unconfirmed ? [unconfirmedRegion.regionId, otherUnconfirmedRegion.regionId] : [])] } : tab),
+    regions: [...sourceDocument.graph.regions, secondRegion, ...(options.unconfirmed ? [unconfirmedRegion, otherUnconfirmedRegion] : [])],
+    tabLayouts: { ...sourceDocument.graph.tabLayouts, [originalTab.tabId]: options.unconfirmed
+      ? splitWorkbenchRegion(splitWorkbenchRegion(splitWorkbenchRegion(originalLayout, originalLayout.activeRegionId, 'right', secondRegion.regionId), secondRegion.regionId, 'right', unconfirmedRegion.regionId), unconfirmedRegion.regionId, 'right', otherUnconfirmedRegion.regionId)
+      : splitWorkbenchRegion(originalLayout, originalLayout.activeRegionId, 'right', secondRegion.regionId) } } })
   const nameTarget = { reference: original.reference, regionId: admitted.address.regionId, runtimeId: owner.owner.runtimeId, agentSessionId: SID, expectedAdmission: { kind: 'creation' as const, operationId: creationId } }
-  if (!options.missing) await main.api.call('memberNameChange', { hostId: 'source-route', reference: original.reference, name: { object: 'agent', target: nameTarget, change: { kind: 'rename', operationId: 'source-name-operation', name: options.foreign ? '真正远端的独立任务' : localName, expectedNameRevision: 0, source: 'manual' } } })
+  if (!options.missing && !options.unconfirmed) await main.api.call('memberNameChange', { hostId: 'source-route', reference: original.reference, name: { object: 'agent', target: nameTarget, change: { kind: 'rename', operationId: 'source-name-operation', name: options.foreign ? '真正远端的独立任务' : localName, expectedNameRevision: 0, source: 'manual' } } })
   if (options.legacyNoAdmission) {
     const before = (await original.b.spatial.read())!, legacyRegionId = 'original-legacy-region'
     const { creationOperationId: _pin, ...legacy } = before.graph.regions.find(region => region.regionId === admitted.address.regionId)!
@@ -181,7 +185,7 @@ async function fixture(options: { foreign?: boolean; unavailable?: boolean; nati
   useAppStore.getState().mountSpace(target, false)
   const navigate = vi.fn()
   await dom.render(<MainFocusFixture navigate={navigate} />)
-  const settle = async (count: number) => { await vi.waitFor(async () => { await act(async () => {}); expect(useAppStore.getState().mountedSpaceObservations[spaceMountKey(target.reference)]?.snapshot).toBeDefined(); expect(Object.keys(useAppStore.getState().mountedSpaceSessions[spaceMountKey(target.reference)]?.members ?? {})).toHaveLength(1); expect(cards()).toHaveLength(count) }, { timeout: 10000 }) }
+  const settle = async (count: number) => { await vi.waitFor(async () => { await act(async () => {}); expect(useAppStore.getState().mountedSpaceObservations[spaceMountKey(target.reference)]?.snapshot).toBeDefined(); const members = Object.keys(useAppStore.getState().mountedSpaceSessions[spaceMountKey(target.reference)]?.members ?? {}); if (options.unconfirmed) expect(members.length).toBeGreaterThan(0); else expect(members).toHaveLength(1); expect(cards()).toHaveLength(count) }, { timeout: 10000 }) }
   return { ...original, owner, session, admitted, main, config, target, key: spaceMountKey(target.reference), member, navigate, settle, local, sessionsRead, missingRead, beginOriginalCheck, finishOriginalCheck,
     emitMetadataError: () => { for (const listener of sessionListeners) listener({ type: 'error', error: { code: 'ORIGINAL_METADATA_READER_UNAVAILABLE', message: 'The original metadata stream is unavailable; the independent member remains healthy.' } }) } }
 }
@@ -321,6 +325,22 @@ it('a late original name read cannot overwrite a newer explicit rename during re
   await act(async () => release())
   expect(cardWith('原任务的新名称').querySelector('strong')?.textContent).toBe('原任务的新名称')
   expect(cardWith('原任务的新名称').querySelector('.focus-context__recap')?.textContent).toContain(foreignRecap)
+})
+
+it('legacy unknown original member remains identifiable without borrowing the same SID local Session', async () => {
+  const f = await fixture({ unconfirmed: true }); await f.settle(3)
+  const unknownId = JSON.stringify(['unconfirmed-region', f.reference, 'unknown-original-position'])
+  const unknown = cards().find(node => node.dataset.sessionId === unknownId)!
+  expect(unknown).toBeDefined()
+  expect(unknown.textContent).toContain(`Agent · ${SID}`)
+  expect(unknown.textContent).not.toContain(localName)
+  expect(unknown.textContent).not.toContain(localRecap)
+  expect(unknown.textContent).toContain('Position unknown-original-position')
+  const otherId = JSON.stringify(['unconfirmed-region', f.reference, 'another-unknown-position'])
+  expect(cards().find(node => node.dataset.sessionId === otherId)?.textContent).toContain('Position another-unknown-position')
+  expect(unknown.getAttribute('aria-label')).toMatch(/unknown|unconfirmed|unavailable|not arrived/i)
+  expect(useAppStore.getState().agentComposerDrafts[SID]).toBe('Keep this original local draft')
+  expect((await f.b.spatial.read())!.graph.regions.find(region => region.regionId === 'unknown-original-position')).toMatchObject({ agentSessionId: SID, execution: null, runId: null })
 })
 
 it('project, type, state and text compose over the one real local task rather than keeping a bypass source list', async () => {

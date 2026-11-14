@@ -5,6 +5,8 @@ import { createHash } from 'node:crypto'
 import assert from 'node:assert/strict'
 import source from './vitest.mote-context.config.mts'
 const mutations: Record<string, [string, string, string]> = {
+  'unconfirmed-name': ['apps/desktop/src/renderer/src/lib/focus-source-model.ts', 'name: name ?? `Agent · ${sid}`', "name: name ?? 'Agent task'"],
+  'unconfirmed-position': ['apps/desktop/src/renderer/src/lib/focus-source-model.ts', 'const detail = !runtimeId && access.locations.length === 1 ? `Position ${access.locations[0]!.regionId} · ${observation}` : observation', 'const detail = observation'],
   'borrow-sid': ['apps/desktop/src/renderer/src/lib/focus-source-model.ts', 'runtimeByHost.get(context.control?.hostId ?? context.hostId) === runtimeId', 'true'],
   'disconnect-source': ['apps/desktop/src/renderer/src/components/GlobalFocusSurface.tsx', 'const executionRows = useMemo(() => [...ordinaryRows, ...sourceFacts.contexts]', 'const executionRows = useMemo(() => [...ordinaryRows]'],
   'qualified-projection': ['apps/desktop/src/renderer/src/store.ts', '    if (reference) {', '    if (selected && reference) {'],
