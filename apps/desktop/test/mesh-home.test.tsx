@@ -11,6 +11,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import type { AppConfig } from '../src/shared/contracts'
 import type { SettingsNavigationRequest } from '../src/renderer/src/components/SettingsNavigation'
 import type { MeshNetworkInspection, MeshNetworkSettings } from '@agentmux/core/mesh-network'
+import type { MacMapLocationResult } from '../src/shared/mesh-map-locations'
 const dom = composerDOM()
 const configuration: MeshNetworkSettings['configuration'] = { role: 'disabled', networkId: 'my-devices', members: [], peers: [{ peerId: 'saved-gateway-peer', endpoints: [{ endpoint: 'saved-gateway.internal:8444', useTls: true }] }], publishers: [], advertisedIngress: [], endpointAccess: { allowedClientKeys: [] } }
 const saved: MeshNetworkSettings = { owner: { runtimeId: 'original-home-runtime', ownerInstanceId: 'original-home-instance' }, identity: null, revision: 'r1', configuration, operation: null }
@@ -31,7 +32,7 @@ async function ready() { await vi.waitFor(() => expect(dom.container.querySelect
 it('the actual SettingsPanel opens a continuous Mesh homepage with saved connection nodes, gateways and machines when Mesh is disabled', async () => {
   await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} />); await ready()
   expect(dom.container.querySelector('[data-mesh-home-view]')?.getAttribute('data-mesh-home-view')).toBe('paths')
-  expect([...dom.container.querySelectorAll('.settings-nav-children button')].map(button => button.textContent)).toEqual(['Gateways', 'Machines', 'Device connections'])
+  expect([...dom.container.querySelectorAll('.settings-nav-children[aria-label="Mesh"] button')].map(button => button.textContent)).toEqual(['Gateways', 'Machines', 'Device connections'])
   const map = dom.container.querySelector('[aria-label="Network relationship canvas"]')!
   expect(map).not.toBeNull()
   expect(map.closest('[hidden]')).toBeNull()
@@ -262,6 +263,58 @@ it('continues to show saved routes when Mesh has only a local peer', async () =>
   await ready()
   await vi.waitFor(() => expect(dom.container.querySelector('.mesh-explorer__heading')?.textContent).toContain('No Relay peers observed'))
   expect(dom.container.querySelector('[aria-label="Network relationship canvas"] [data-host-node="selected-farm"]')).not.toBeNull()
+})
+
+it('fills only the local Mac map draft after an explicit OS location read and saves only the client annotation', async () => {
+  const locate = vi.fn(async (): Promise<MacMapLocationResult> => ({ state: 'located', latitude: 0, longitude: 45 }))
+  const saveConfig = vi.spyOn(api.config, 'save').mockImplementation(async next => next)
+  const publish = vi.spyOn(api.nodePublishing, 'owner')
+  api.ui.requestMacMapLocation = locate
+  try {
+    await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} />)
+    await dom.click('.mesh-explorer__header > button:first-of-type')
+    const action = '.mesh-locations-panel__position button'
+    const field = () => dom.container.querySelector<HTMLInputElement>('[aria-label="Latitude, longitude"]')!
+    expect(locate).not.toHaveBeenCalled()
+    await dom.click(action)
+    expect(locate).toHaveBeenCalledTimes(1)
+    expect(field().value).toBe('0.0000, 45.0000')
+    expect(dom.container.querySelector('.mesh-location-picker .mesh-geography__pin')?.getAttribute('cx')).toBe('625')
+    expect(dom.container.querySelector('[data-geographic-point="saved:client"]')).toBeNull()
+    expect(saveConfig).not.toHaveBeenCalled()
+    await dom.click('.mesh-locations-panel [data-settings-save-bar] button')
+    await vi.waitFor(() => expect(dom.container.querySelector('[data-geographic-point="saved:client"] circle')?.getAttribute('cx')).toBe('625'))
+    expect(useAppStore.getState().config?.meshMapLocations).toEqual({ local: '0.0000, 45.0000' })
+    expect(publish).not.toHaveBeenCalled()
+  } finally { delete api.ui.requestMacMapLocation }
+})
+
+it('a Mac location result after switching devices leaves the original and remote drafts untouched', async () => {
+  let complete!: (result: MacMapLocationResult) => void
+  const locate = vi.fn(() => new Promise<MacMapLocationResult>(resolve => { complete = resolve }))
+  api.ui.requestMacMapLocation = locate
+  try {
+    await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} />)
+    await dom.click('.mesh-explorer__header > button:first-of-type')
+    await dom.click('.mesh-locations-panel__position button')
+    await dom.click('[data-host-node="neighbor-farm"]')
+    await dom.click('[aria-label="Selected saved connection"] .mesh-explorer__detail-actions button:first-child')
+    expect(dom.container.querySelector('.mesh-locations-panel__position button')).toBeNull()
+    await act(async () => complete({ state: 'located', latitude: 40, longitude: 35 }))
+    const field = () => dom.container.querySelector<HTMLInputElement>('[aria-label="Latitude, longitude"]')!
+    expect(field().value).toBe('')
+    await dom.click('.mesh-explorer__header > button:first-of-type')
+    expect(field().value).toBe('')
+    locate.mockResolvedValueOnce({ state: 'denied' })
+    await input(field(), '12, 34')
+    await dom.click('.mesh-locations-panel__position button')
+    expect(field().value).toBe('12, 34')
+    expect(dom.container.querySelector('.mesh-locations-panel__position [role=status]')?.textContent).toContain('allow AgentMux')
+    await dom.click('.mesh-locations-panel__position button')
+    await input(field(), '56, 78')
+    await act(async () => complete({ state: 'located', latitude: 40, longitude: 35 }))
+    expect(field().value).toBe('56, 78')
+  } finally { delete api.ui.requestMacMapLocation }
 })
 
 it('saves the exact selected device map location, projects it alongside zero and leaves unplaced devices visible', async () => {

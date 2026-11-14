@@ -15,7 +15,8 @@ const own = { peerId: peer, publicKey: 'public-key-fixture', epoch: 3 }
 let settings: MeshNetworkSettings = { owner: { runtimeId: 'core-original-review', ownerInstanceId: 'instance-review' }, identity: own, revision: 'saved-8', operation: null,
  configuration: { role: 'gateway', networkId: 'work-machines', endpointAccess: { allowedClientKeys: [] }, members: [], peers: [{ peerId: 'saved-gateway-original', endpoints: [{ endpoint: 'regional-gateway.internal:8444', useTls: true }] }], publishers: [], listen: { host: '127.0.0.1', port: 8444 }, advertisedIngress: [{ endpoint: 'cn1.example.com', useTls: true }] } }
 const originalOffer = { v: 2 as const, serverId: target, daemonPublicKeyB64: 'Hx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8=', relay: { endpoint: 'original-edge.local:7443', useTls: true } }
-let state = new URLSearchParams(location.search).get('scenario') ?? 'active'
+const scenario = new URLSearchParams(location.search).get('scenario') ?? 'active'
+let state = scenario === 'mac-location' ? 'initial' : scenario
 if (state === 'initial') settings = { ...settings, configuration: { ...settings.configuration, role: 'disabled', networkId: 'my-devices', listen: undefined, advertisedIngress: [] } }
 function observation(): MeshNetworkInspection {
  const record = (originPeerId: string, neighbors: number[], index: number) => ({ version: 1 as const, networkId: 'work-machines', originPeerId, epoch: 3, revision: 8, signature: 'fixture', publishers: index === 2 ? [{ serverId: target, generation: 'generation-original' }] : [], advertisedIngress: [{endpoint:['this-device.internal:8444','farm-gateway.internal:443','studio.internal:443','build-agent.internal:443','gateway-secondary.internal:443'][index]!,useTls:true}], neighbors: neighbors.map(n => ({ peerId: ids[n]!, peerEpoch: 3, connectionId: `link-${Math.min(index,n)}-${Math.max(index,n)}`, rttMs: 23 })) })
@@ -70,6 +71,14 @@ useAppStore.setState({ config: { version: 9, hosts: [{ id: 'local', kind: 'local
  } })
 createRoot(document.getElementById('root')!).render(<DesktopClientUiProvider><div className="mesh-review-shell"><SettingsPanel onClose={() => {}} initialSection="hosts" /><footer className="mesh-review-footer">Visual fixture · production Settings · controlled topology/resource observations; not live host telemetry</footer></div></DesktopClientUiProvider>)
 Object.assign(window, { meshFixture: { originalOffer, endpoint: () => { state = 'endpoint' }, relayOff: () => { state = 'initial' }, theme: (mode: 'dark' | 'light') => updateThemeSelection({ appAppearance: mode }), failure: () => { state = 'failure'; settings = { ...settings, revision: 'saved-9' } } } })
+if (scenario === 'mac-location') {
+ let denied = false
+ api.ui.requestMacMapLocation = async () => {
+   await new Promise(resolve => setTimeout(resolve, 1000))
+   return denied ? { state: 'denied' } : { state: 'located', latitude: 49.2819, longitude: -123.1184 }
+ }
+ Object.assign(window, { denyFixtureLocation: () => { denied = true } })
+}
 if (state === 'device') {
  const offer = { ...originalOffer, serverId: 'office-workstation', relay: { endpoint: 'gateway.example', useTls: true } }
  useAppStore.setState({ meshDeviceLinks: { draft: '', saved: [connectionLinkUrl('https://gateway.example', offer)] } })

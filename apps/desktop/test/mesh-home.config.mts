@@ -22,6 +22,7 @@ const mutations: Record<string, [string, string, string]> = {
   'join-unlocated-edges': ['MeshNetworkMap.tsx', 'points.has(source) && points.has(target)', 'true'],
   'flat-location-projection': ['MeshGeography.tsx', '(90 - latitude) * WORLD_HEIGHT / 180', 'WORLD_HEIGHT / 2'],
   'mirrored-location-picker': ['MeshGeography.tsx', 'longitude: x * 360 / WORLD_WIDTH - 180', 'longitude: 180 - x * 360 / WORLD_WIDTH'],
+  'stale-mac-location': ['MeshLocationsPanel.tsx', 'if (request.current !== original) return', ''],
   'wrong-map-device': ['MeshSavedConnections.tsx', 'onClick={() => onDevice(host.id)}', 'onClick={() => onDevice("selected-farm")}'],
   'hidden-machines': ['MeshSettingsPane.tsx', "mounted('paths') || mounted('machines')", "view === 'machines'"],
   'hidden-saved-gateways': ['MeshPathsPane.tsx', 'savedTargets={savedTargets}', 'savedTargets={undefined}'],

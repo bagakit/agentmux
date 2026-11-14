@@ -16,9 +16,47 @@ app.whenReady().then(async()=>{try{
  const pathVisibility=async name=>{const value=await evaluate("(()=>{const c=document.querySelector('.mesh-explorer__canvas').getBoundingClientRect();return Array.from(document.querySelectorAll('.react-flow__node')).filter(e=>e.querySelector('[data-on-path]')).map(e=>{const r=e.getBoundingClientRect();return {id:e.dataset.id,inside:r.left>=c.left-1&&r.right<=c.right+1&&r.top>=c.top-1&&r.bottom<=c.bottom+1}})})()");assert.ok(value.length>=3&&value.every(e=>e.inside),'the selected '+name+' must be fully visible beside the inspector');receipt.pathVisibility??={};receipt.pathVisibility[name]=value}
  const top=()=>evaluate("document.querySelector('[data-mesh-view]:not([hidden])').scrollTop=0")
  await fs.mkdir(output,{recursive:true})
+ if (scope === 'mac-location') {
+  await window.loadURL(url+'?scenario=mac-location')
+  await wait('.mesh-explorer__canvas .mesh-geography__atlas')
+  await button('Device locations')
+  const status = '.mesh-locations-panel__position [role="status"]'
+  const request = 'Use this Mac’s location'
+  const pin = '[data-geographic-point="saved:client"]'
+  const field = '[aria-label="Latitude, longitude"]'
+  const coordinates = () => evaluate('document.querySelector('+JSON.stringify(field)+').value')
+  await frame('mac-location-ready-dark')
+  await button(request)
+  await frame('mac-location-reading-dark')
+  await wait('.mesh-location-picker .mesh-geography__pin')
+  assert.equal(await coordinates(),'49.2819, -123.1184')
+  assert.equal(await evaluate('Boolean(document.querySelector('+JSON.stringify(pin)+'))'),false)
+  await frame('mac-location-draft-dark')
+  await button('Save locations')
+  await wait(pin)
+  assert.equal(await evaluate('document.querySelector('+JSON.stringify(status)+').textContent'),'')
+  await frame('mac-location-saved-dark')
+  await evaluate('denyFixtureLocation()')
+  await evaluate('meshFixture.theme("light")')
+  window.setContentSize(560,950)
+  await button(request)
+  await delay(1000)
+  assert.match(await evaluate('document.querySelector('+JSON.stringify(status)+').textContent'),/allow AgentMux/)
+  assert.equal(await coordinates(),'49.2819, -123.1184')
+  await frame('mac-location-denied-narrow-light')
+  await click('.mesh-explorer__canvas [data-host-node="farm-cn1"]')
+  await button('Set map location')
+  assert.equal(await evaluate("Boolean(document.querySelector('.mesh-locations-panel__position'))"),false)
+  assert.equal(await coordinates(),'')
+  assert.equal(await evaluate("Boolean(document.querySelector('.mesh-locations-panel .settings-save-feedback').textContent.match(/^Changes saved/))"),false)
+  await frame('mac-location-remote-narrow-light')
+  assert.equal(Object.values(receipt.frameOverflow).some(Boolean),false)
+  receipt.passed=true
+  return
+ }
  if(scope!=='geography'){
  await window.loadURL(url);await wait('[data-mesh-topology]');await delay(1100)
- assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('.settings-nav-children button')).map(e=>e.textContent.trim())"),['Gateways','Machines','Device connections'])
+ assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('.settings-nav-children[aria-label=\"Mesh\"] button')).map(e=>e.textContent.trim())"),['Gateways','Machines','Device connections'])
  assert.equal(await evaluate("document.querySelectorAll('[data-cluster-host]').length"),6)
  assert.equal(await evaluate("Boolean(document.querySelector('[aria-label=\"Selected network object\"]'))"),false)
  await button('Connections');await wait('.mesh-explorer-edge path')
