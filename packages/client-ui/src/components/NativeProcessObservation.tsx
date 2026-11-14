@@ -65,9 +65,9 @@ function groupRecordTime(records: ConversationProcessProps['records']): Workflow
 }
 
 /** Read-only observations over Core records. A native reference is never a Desktop Session. */
-export function NativeProcessObservation({ id, records: sourceRecords, entries, renderRecord, metrics, disclosure, compact = false, actions, renderSummary }: ConversationProcessProps & { compact?: boolean; actions?: ReactNode; renderSummary?: (observation: RecordedProcessObservation) => ReactNode }) {
+export function NativeProcessObservation({ id, records: sourceRecords, entries, renderRecord, metrics, disclosure, initiallyExpanded, compact = false, actions, renderSummary }: ConversationProcessProps & { compact?: boolean; actions?: ReactNode; renderSummary?: (observation: RecordedProcessObservation) => ReactNode }) {
   const processId = useId()
-  const [localExpanded, setExpanded] = useState(!compact)
+  const [localExpanded, setExpanded] = useState(initiallyExpanded ?? !compact)
   const expanded = disclosure?.expanded ?? localExpanded
   const [readOnce, setReadOnce] = useState(expanded)
   useEffect(() => { if (expanded) setReadOnce(true) }, [expanded])

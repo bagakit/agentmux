@@ -80,12 +80,11 @@ export function ObservationSurfaceGallery() {
   return (
     <section className="observation-gallery" aria-label="Existing observation surfaces">
       <header className="observation-gallery__heading">
-        <span className="observation-gallery__eyebrow">Existing surface language</span>
+        <span className="observation-gallery__eyebrow">Production components · static records</span>
         <h2><SemanticIcon name="object.conversation" size={16} />对话、状态和服务窗</h2>
-        <p>复用原有组件的事实边界，用 Workflow 的层级、密度和观察节奏呈现。</p>
+        <p>与正式对话使用同一套组件和默认披露；这里只提供静态原记录，不读取真实 Session。</p>
       </header>
       <div className="observation-gallery__grid">
-        <AgentLinksSample />
         <article className="observation-sample observation-sample--conversation">
           <div className="observation-sample__label">Conversation · example states</div>
           <div className="observation-sample__body">
@@ -96,6 +95,7 @@ export function ObservationSurfaceGallery() {
             {conversationAction ? <p role="status">{conversationAction}</p> : null}
           </div>
         </article>
+        <AgentLinksSample />
         <article className="observation-sample">
           <div className="observation-sample__label">Live status</div>
           <div className="observation-sample__status"><StatusDot status={workingStatus} withLabel /> <span>持续观察中</span></div>

@@ -92,20 +92,21 @@ export function WorkflowComponentGallery() {
       <div className="wf-gallery__examples" data-inspect-bounds={boundaries} style={{ width: previewWidth === 'fit' ? undefined : `${previewWidth}px` }}>
       <section className="wf-gallery__intro">
         <div className="wf-gallery__intro-mark"><SemanticIcon name="object.workflow" size={18} /></div>
-        <h1>Reusable Workflow surfaces</h1>
-        <p>只展示组件公开 props；不读取 Chat Store、Provider 或 Runtime。先把观察组件炼化，再决定聊天页的接入边界。</p>
+        <h1>对话与 Workflow 表面组件</h1>
+        <p>先看正式对话共用的记录组件。下方完整 Workflow 的阶段与进度使用静态示例，不代表真实对话已具备这些执行事实。</p>
       </section>
       <nav className="wf-gallery__map" aria-label="Gallery 内容导航">
+        <a href="#existing-surfaces"><SemanticIcon name="object.conversation" />正式对话组件</a>
         <a href="#workflow-context"><SemanticIcon name="object.context" />上下文</a>
         <a href="#workflow-states"><SemanticIcon name="status.completed" />终态与恢复</a>
         <a href="#workflow-scale"><SemanticIcon name="object.workflow" />规模与降级</a>
         <a href="#workflow-dock"><SemanticIcon name="layout.dock" />输入框上方 dock</a>
-        <a href="#existing-surfaces"><SemanticIcon name="object.branch" />聊天表面</a>
         <a href="#composer-details"><SemanticIcon name="object.composer-details" />Composer 细节</a>
         <a href="#inline-rename"><ThemeActionEditIcon size={13} />原位改名</a>
       </nav>
+      <div id="existing-surfaces"><ObservationSurfaceGallery /></div>
       <section id="workflow-context" className="wf-gallery__section">
-        <p className="wf-gallery__caption"><SemanticIcon name="object.context" /><b>A · 时间线上下文</b><span>Workflow 与普通 tool 行共用低干扰的时间线语言。</span></p>
+        <p className="wf-gallery__caption"><SemanticIcon name="object.context" /><b>A · 完整 Workflow 静态示例</b><span>示范阶段与 Agent 进度的呈现；真实对话保留原记录已有的事实。</span></p>
         <div className="wf-gallery__timeline">
           <div className="wf-gallery__message">我先看一下事件定义，然后跑一轮 review。</div>
           <WorkflowToolRow title="Read docs/events.md" workflowName="review-changes" status="running" duration="0m 18s" notice="" />
@@ -136,7 +137,6 @@ export function WorkflowComponentGallery() {
         <p className="wf-gallery__caption">真实对话复用的记录摘要壳，不要求阶段或总进度。</p>
         <RecordedDockExample />
       </section>
-      <div id="existing-surfaces"><ObservationSurfaceGallery /></div>
       <section id="inline-rename" className="wf-gallery__section">
         <p className="wf-gallery__caption"><ThemeActionEditIcon size={13} /><b>原位改名</b><span>名称、选区、等待和错误共用一套交互。</span></p>
         <InlineRenameExample />
