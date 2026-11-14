@@ -56,6 +56,8 @@ const otherTab = createWorkbenchTab('focus-editor-other-tab', { kind: 'agent', p
   regionId: 'focus-editor-other-region', sessionId: otherAgent.id })
 const reference = { displayWorkspaceId: workspace.id, groupId: 'focus-editor-group', tabId: originalTab.id, regionId: originalTab.layout.activeRegionId }
 let root: Root, host: HTMLDivElement, restorePopover: () => void, dispose: (() => void) | undefined
+// The Map entry suite reuses this exact mounted App and its native leaf fixture.
+export const focusEditorAppFixture = { get host() { return host }, originalAgent, settle, until }
 async function settle() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 35)) }) }
 async function until(predicate: () => boolean) {
   for (let attempt = 0; attempt < 100 && !predicate(); attempt++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
