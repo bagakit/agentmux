@@ -20,11 +20,11 @@ export type AttachmentPageOwner = {
 }
 /** One document-local owner; unmounting a presentation does not discard its original bytes or continuations. */
 export function createAttachmentPageOwner(onChange: () => void = () => {}): AttachmentPageOwner {
-  const workface = getDeviceWorkface(), original = workface.snapshot().record.fileUploads ?? [], listeners = new Set<() => void>()
+  const { uploads: original, recordId } = getDeviceWorkface().snapshotUploads(), listeners = new Set<() => void>()
   const owner: AttachmentPageOwner = {
     revision: 0,
     uploads: { current: original.map(item => item.phase === 'sending' ? { ...item, phase: 'unknown', issue: '还没确认上传结果，不会自动重传。可以核对这次上传。' } : item) },
-    recordIds: { current: new Map(original.map(item => [item.identity.operationId, workface.recordIdentity()])) },
+    recordIds: { current: new Map(original.map(item => [item.identity.operationId, recordId])) },
     originalEntries: { current: new Map(original.map(item => [item.identity.operationId, item])) }, bytes: { current: new Map() }, exports: { current: new Map() }, busy: { current: new Map() },
     pickerOpen: { current: null }, selectionTail: { current: Promise.resolve() }, selections: { current: new Map() }, nextSelection: { current: 0 },
     current: { current: { client: null, session: null, connected: false, promptOperationId: null } },

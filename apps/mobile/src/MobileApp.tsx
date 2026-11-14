@@ -95,8 +95,7 @@ type Workface = Navigation
 function loadWorkface(): { workface: Workface; presentation?: MobilePresentationRoute; issue: string | null } {
   const empty: Workface = { selectedSessionId: null, hostUrl: '', panel: 'conversation' }
   try {
-    const { record, issue } = getDeviceWorkface().snapshot()
-    return { issue, ...(record.presentation ? { presentation: record.presentation } : {}), workface: { selectedSessionId: record.selectedSessionId, hostUrl: record.hostUrl, panel: record.panel } }
+    return getDeviceWorkface().snapshotNavigation()
   } catch {
     return { workface: empty, issue: '这台设备暂时读不到导航记录，Mac 上的对话不受影响。' }
   }

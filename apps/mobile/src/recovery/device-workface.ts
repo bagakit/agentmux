@@ -385,6 +385,15 @@ export class DeviceWorkfaceStore {
   snapshot(): { record: DeviceWorkface; issue: string | null } {
     this.refresh(); return { record: structuredClone(this.value), issue: this.issue }
   }
+  snapshotNavigation(): { workface: Navigation; presentation?: MobilePresentationRoute; issue: string | null } {
+    this.refresh()
+    return { workface: { selectedSessionId: this.value.selectedSessionId, hostUrl: this.value.hostUrl, panel: this.value.panel },
+      ...(this.value.presentation ? { presentation: structuredClone(this.value.presentation) } : {}), issue: this.issue }
+  }
+  snapshotUploads(): { uploads: MobileFileUpload[]; recordId: string | null; issue: string | null } {
+    this.refresh()
+    return { uploads: structuredClone(this.value.fileUploads ?? []), recordId: this.value.recordId ?? null, issue: this.issue }
+  }
   private tail: Promise<unknown> = Promise.resolve()
   private pending: Array<(value: DeviceWorkface) => DeviceWorkface> = []
   private writeRevision = 0

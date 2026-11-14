@@ -81,11 +81,11 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
     get hasUnconfirmedSave() { return saveRevision !== durableRevision } }
   let baseline: DraftRecord = { version: 1, drafts: [], attempts: [], responses: [] }
   let durableBaseline = baseline
-  let originalRecord: DeviceWorkface = owner.snapshot().record
+  const snapshot = owner.snapshot()
+  let originalRecord: DeviceWorkface = snapshot.record
   let recordId: string | null = null
   let saveRevision = 0, durableRevision = 0
   try {
-    const snapshot = owner.snapshot()
     if (snapshot.issue) {
       state.canSave = false
       state.notice = '暂时读不到这台手机上的草稿，已存的记录尚未覆盖。当前草稿和未确认输入都还在，可以继续编辑和复制，恢复设备存储后再保存当前工作面。'
