@@ -27,4 +27,6 @@ jobs:
           node-version: 24.14.1
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Survey opening boundaries
+        run: pnpm verify:survey-opening
       - run: pnpm check

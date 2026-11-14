@@ -26,6 +26,7 @@
     "benchmark:daemon-cutover": "pnpm --filter @agentmux/core benchmark:daemon-cutover",
     "benchmark:daemon-cutover:smoke": "pnpm --filter @agentmux/core benchmark:daemon-cutover:smoke",
     "check": "pnpm typecheck && pnpm test && pnpm build",
+    "verify:survey-opening": "node apps/desktop/scripts/verify-survey-opening.mjs",
     "update:renderer": "pnpm --filter @agentmux/client-ui... build && pnpm --filter @agentmux/desktop build && node apps/desktop/scripts/update-renderer.mjs",
     "update:renderer:rollback": "node apps/desktop/scripts/update-renderer.mjs --rollback",
     "update:local": "pnpm --filter @agentmux/client-ui... build && pnpm --filter @agentmux/desktop build && node apps/desktop/scripts/update-local.mjs",
