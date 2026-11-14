@@ -31,6 +31,7 @@ const doms: Array<{ window: DomWindow }> = [], disposers: Array<() => void> = []
 let frameId = 0
 class Frame {
   parent: Frame | null = null; detached = false; destroyed = false; frameToken = `frame-${++frameId}`
+  reload = vi.fn(() => true)
   evaluateHook: ((code: string) => Promise<unknown>) | undefined
   readonly dom = { window: new DomWindow({ url: 'https://generic.invalid/' }) }
   constructor() { this.dom.window.document.body.innerHTML = '<input id="original"><input id="other"><textarea id="textarea"></textarea><div id="editable" tabindex="0">editable text</div><p id="text">Selected plain text</p>'; doms.push(this.dom) }
@@ -331,5 +332,34 @@ describe('actual definition-external consumers', () => {
     manager.setBounds('source', null)
     await click(stale, 'Open Link in Split')
     expect(projections()).toHaveLength(2)
+  })
+
+  it('reloads only the original embedded frame even when it shares the page address', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'agentmux-context-frame-test-')); roots.push(root)
+    const window = new Window()
+    const manager = new BrowserViewManager(window as never,
+      { defaultProfileId: () => 'profile', resolvePartition: () => 'persist:context-frame' }, new BrowserRefLedgerStore(join(root, 'refs.json')),
+      { rememberedSchemes: async () => ({}), rememberScheme: async () => {}, openExternal() {} })
+    disposers.push(() => manager.dispose())
+    const pageURL = 'https://generic.invalid/shared'
+    await manager.create('source', pageURL, 'workspace')
+    manager.setBounds('source', { x: 40, y: 50, width: 500, height: 400 })
+    const contents = native.contents[0] as Contents, top = contents.mainFrame, child = new Frame()
+    child.parent = top
+    native.frames.set(child, contents); native.focused = contents
+    const hit = { pageURL, frameURL: pageURL, mediaType: 'none', isEditable: false }
+    const fixture = { contents, window, owner: { current: true }, frame: top }
+    const topMenu = await open(fixture, hit)
+    expect(topMenu.items.map((item: { label: string }) => item.label)).not.toContain('Reload Frame')
+    const embedded = await open({ ...fixture, frame: child }, hit)
+    expect(embedded.items.map((item: { label: string }) => item.label)).toContain('Open Frame in New Tab')
+    await click(embedded, 'Reload Frame')
+    expect(child.reload).toHaveBeenCalledTimes(1)
+    expect(top.reload).not.toHaveBeenCalled()
+    expect(contents.reload).not.toHaveBeenCalled()
+    const stale = await open({ ...fixture, frame: child }, hit)
+    child.detached = true
+    await click(stale, 'Reload Frame')
+    expect(child.reload).toHaveBeenCalledTimes(1)
   })
 })

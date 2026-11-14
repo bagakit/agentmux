@@ -40,7 +40,7 @@ export async function startProfileSurveyOrigins() {
       html(response, 'Context actions', '<label>Page draft<input aria-label="Page draft"></label><p><a id="main-link" href="/work?context=main#main-target">Open from main document</a></p><iframe id="context-frame" src="/context-frame" title="Embedded document" style="width:400px;height:160px;border:0"></iframe>'); return
     }
     if (url.pathname === '/context-frame') {
-      html(response, 'Embedded actions', '<a id="frame-link" href="/work?context=frame&amp;exact=1#frame-target">Open from embedded document</a>'); return
+      html(response, 'Embedded actions', '<a id="frame-link" href="/work?context=frame&amp;exact=1#frame-target">Open from embedded document</a><p id="frame-background" style="user-select:none">Embedded document background</p>'); return
     }
     if (url.pathname === '/work' || url.pathname === '/child') {
       html(response, url.pathname === '/child' ? 'Related page' : 'Profile workface', '<h1>Website workface</h1><p>Signed in as <output id="identity">' + escape(user ?? 'signed-out') + '</output></p><label>Page draft<input aria-label="Page draft" value="Keep this original page input"></label><a target="_blank" href="' + secondaryOrigin + '/child">Open related page</a><a href="' + primaryOrigin + '/download">Download result</a>'); return

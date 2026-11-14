@@ -231,6 +231,7 @@ try {
   assert.equal(first.businessPassed, true, 'Boot or gallery rendering cannot qualify admission')
   if (selectedCase === 'context-menu') {
     assert.ok(first.cases.some(item => item.kind === 'context-menu-profile-admission' && item.passed), 'The native Menu and Store must complete the exact Profile admission oracle')
+    assert.ok(first.cases.some(item => item.kind === 'context-menu-original-frame-reload' && item.passed), 'The native Menu must reload the embedded document without reloading its host')
   } else {
     const restart = await execute('restart')
     assert.notEqual(first.pid, restart.pid, 'Recovery uses a second physical process')

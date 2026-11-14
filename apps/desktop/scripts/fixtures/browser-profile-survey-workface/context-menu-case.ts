@@ -54,11 +54,11 @@ export async function contextMenuCase({ window, observation, evaluate, result, c
   Menu.prototype.popup = function (options) { if (options?.window === window) menu = this }
   window.isFocused = () => true
   webContents.getFocusedWebContents = () => contents
-  const selectLink = async (embedded: boolean, address: string, itemLabel: string, submenu?: string) => {
+  const openHit = async (embedded: boolean, id: string) => {
     menu = undefined; hit = undefined
     const point = await nativeUntil(() => contents.executeJavaScript(`(() => {
       const frame = ${embedded} ? document.getElementById('context-frame') : null;
-      const target = (frame ? frame.contentDocument : document)?.getElementById('${embedded ? 'frame-link' : 'main-link'}');
+      const target = (frame ? frame.contentDocument : document)?.getElementById(${JSON.stringify(id)});
       if (!target) return null;
       const offset = frame?.getBoundingClientRect(), rect = target.getBoundingClientRect();
       return { x: rect.x + rect.width / 2 + (offset?.x ?? 0), y: rect.y + rect.height / 2 + (offset?.y ?? 0) };
@@ -73,8 +73,11 @@ export async function contextMenuCase({ window, observation, evaluate, result, c
     const nativeHit = hit! as ContextMenuParams
     assert.ok(nativeHit.frame)
     assert.equal(nativeHit.frame === contents.mainFrame, !embedded)
+    return { nativeHit, nativeMenu: menu! as Menu }
+  }
+  const selectLink = async (embedded: boolean, address: string, itemLabel: string, submenu?: string) => {
+    const { nativeHit, nativeMenu } = await openHit(embedded, embedded ? 'frame-link' : 'main-link')
     assert.equal(nativeHit.linkURL, address)
-    const nativeMenu = menu! as Menu
     const item = (submenu ? nativeMenu.items.find(item => item.label === submenu)?.submenu : nativeMenu)?.items.find(item => item.label === itemLabel)
     assert.ok(item?.enabled)
     display.hits.push({ frame: nativeHit.frame.url, url: nativeHit.linkURL, menu: nativeMenu.items.map(item => item.label), selection: itemLabel })
@@ -87,6 +90,18 @@ export async function contextMenuCase({ window, observation, evaluate, result, c
     return { child, view, reference: { regionId: child.browser.id, browserId: child.browser.id } }
   }
   try {
+    const { nativeMenu, nativeHit } = await openHit(true, 'frame-background')
+    assert.equal(nativeHit.linkURL, '')
+    const reloadFrame = nativeMenu.items.find(item => item.label === 'Reload Frame')
+    assert.ok(reloadFrame?.enabled)
+    await contents.executeJavaScript(`document.querySelector('iframe').contentDocument.body.dataset.beforeReload = 'original-frame'`)
+    reloadFrame.click()
+    await nativeUntil(() => contents.executeJavaScript(`(() => {
+      const loaded = document.querySelector('iframe')?.contentDocument;
+      return Boolean(loaded?.getElementById('frame-background') && !loaded.body.dataset.beforeReload);
+    })()`), 'the actual embedded document reloads without replacing its host')
+    assert.equal(await contents.executeJavaScript('document.querySelector("input").value'), 'Keep the source page draft')
+    receipt.cases.push({ kind: 'context-menu-original-frame-reload', passed: true, frame: nativeHit.frameURL })
     const ordinary = await selectLink(false, pageUrl + '?context=main#main-target', 'Open Link in New Tab')
     assert.equal(ordinary.view.webContents.session, contents.session)
     assert.equal(await ordinary.view.webContents.executeJavaScript('document.querySelector("#identity").textContent'), 'source-profile')
