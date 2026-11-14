@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
+import { realpathSync } from 'node:fs'
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -47,14 +48,34 @@ async function listInnerCore(archive) {
   } finally { await rm(scratch, { recursive: true, force: true }) }
 }
 
-const options = parse(process.argv.slice(2))
-const selected = options.archive ? { archive: options.archive, sha256: null, generation: null } : await newestLinuxArchive()
-const names = await listInnerCore(selected.archive)
-const linux = names.filter(name => name.includes('koffi-linux-x64') || /linux_x64\/koffi\.node$/.test(name))
-const darwin = names.filter(name => name.includes('koffi-darwin-arm64') || /darwin_arm64\/koffi\.node$/.test(name))
-assert.ok(linux.some(name => name.endsWith('koffi.node') || name.includes('koffi-linux-x64')), `${selected.archive} must ship @koromix/koffi-linux-x64`)
-assert.equal(darwin.length, 0, `${selected.archive} must not ship Darwin koffi: ${darwin.slice(0, 8).join(', ')}`)
-process.stdout.write(JSON.stringify({
-  archive: selected.archive, generation: selected.generation, sha256: selected.sha256,
-  linuxNative: linux, darwinNative: darwin, passed: true
-}) + '\n')
+export function assertLinuxReleaseNativeNames(names, archive = 'archive') {
+  const linuxNode = names.filter(name => /(^|\/)linux_x64\/koffi\.node$/.test(name))
+  const darwinNode = names.filter(name => /(^|\/)darwin_arm64\/koffi\.node$/.test(name))
+  const darwinPackage = names.filter(name => name.includes('koffi-darwin-arm64'))
+  assert.ok(linuxNode.length > 0, `${archive} must ship linux_x64/koffi.node`)
+  assert.equal(darwinNode.length, 0, `${archive} must not ship Darwin koffi.node: ${darwinNode.slice(0, 8).join(', ')}`)
+  assert.equal(darwinPackage.length, 0, `${archive} must not ship Darwin koffi: ${darwinPackage.slice(0, 8).join(', ')}`)
+  return { linuxNode, darwinNode, darwinPackage }
+}
+
+async function main() {
+  const options = parse(process.argv.slice(2))
+  const selected = options.archive ? { archive: options.archive, sha256: null, generation: null } : await newestLinuxArchive()
+  const names = await listInnerCore(selected.archive)
+  const natives = assertLinuxReleaseNativeNames(names, selected.archive)
+  process.stdout.write(JSON.stringify({
+    archive: selected.archive, generation: selected.generation, sha256: selected.sha256,
+    linuxNative: natives.linuxNode, darwinNative: natives.darwinNode, passed: true
+  }) + '\n')
+}
+
+function invokedAsCli() {
+  if (!process.argv[1]) return false
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1])
+  } catch {
+    return fileURLToPath(import.meta.url) === resolve(process.argv[1])
+  }
+}
+
+if (invokedAsCli()) await main()
