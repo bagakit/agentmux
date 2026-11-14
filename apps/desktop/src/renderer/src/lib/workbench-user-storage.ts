@@ -53,11 +53,11 @@ export function createWorkbenchUserDocument(port: UserStatePort, original: () =>
       await hydrate()
       if (key === WORKBENCH_USER_STATE_KEY) {
         const { desktopFragments: _private, ...projection } = requireDocument()
-        return JSON.stringify(projection)
+        return projection
       }
       const name = names.find(name => fragmentKey(name) === key)
       if (!name) throw new Error('Unknown Desktop document member')
-      return JSON.stringify({ state: fragments()[name], version: 1 })
+      return { state: fragments()[name], version: 1 }
     },
     async setItem(key, raw) {
       const captured = JSON.parse(raw), current = requireDocument()

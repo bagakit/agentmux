@@ -1,17 +1,20 @@
-import { createJSONStorage, type PersistStorage, type StorageValue } from 'zustand/middleware'
+import type { PersistStorage, StorageValue } from 'zustand/middleware'
 
 // Bound both encoding and browser storage work to one batch. Continuous input
 // replaces the immutable pending projection without postponing its save deadline.
 const DEFAULT_BATCH_MS = 400
 export const USER_SAVE_REPLY_MS = 15_000
 
-type StateStorage = {
-  getItem(name: string): string | null | Promise<string | null>
+type StoredValue<State> = string | StorageValue<State> | null
+type StateStorage<State> = {
+  getItem(name: string): StoredValue<State> | Promise<StoredValue<State>>
   setItem(name: string, value: string): void | Promise<unknown>
   removeItem(name: string): void | Promise<unknown>
 }
 const asynchronous = <T>(value: T | Promise<T>): value is Promise<T> =>
   value !== null && typeof value === 'object' && typeof (value as Promise<T>).then === 'function'
+const decodeStoredValue = <State>(value: StoredValue<State>): StorageValue<State> | null =>
+  typeof value === 'string' ? JSON.parse(value) as StorageValue<State> : value
 
 type FlushablePersistentStorage<State> = {
   storage: PersistStorage<State>
@@ -25,7 +28,7 @@ type FlushablePersistentStorage<State> = {
  * Ordinary unload flushes the latest input; abrupt exit cannot run that handler.
  */
 export function createBatchedPersistentStorage<State>(
-  base: StateStorage,
+  base: StateStorage<State>,
   delayMs: number = DEFAULT_BATCH_MS,
   onError?: (error: unknown) => void,
   onRecovered?: (error: unknown) => void
@@ -34,7 +37,6 @@ export function createBatchedPersistentStorage<State>(
   // Input identity does not imply that its pending write has reached storage.
   const inputs = new Map<string, StorageValue<State>>()
   const removals = new Map<string, number>()
-  const jsonStorage = createJSONStorage<State>(() => base)!
   let timer: ReturnType<typeof setTimeout> | null = null
   let timerDue = 0
   let flushing: Promise<void> | null = null
@@ -50,7 +52,7 @@ export function createBatchedPersistentStorage<State>(
         // An ACK belongs to its captured input; newer edits remain pending.
         if (generation === attempt && pending.get(name) === value) pending.delete(name)
       }
-      const save = (current: string | null, confirm = false): void | Promise<void> => {
+      const save = (current: StoredValue<State>, confirm = false): void | Promise<void> => {
         if (generation !== attempt) return
         // A native read may observe an earlier replacement whose directory ACK
         // failed. Let that owner reconfirm equal bytes through its write API.
@@ -121,7 +123,8 @@ export function createBatchedPersistentStorage<State>(
   const storage: PersistStorage<State> = {
     getItem: name => {
       inputs.delete(name)
-      return jsonStorage.getItem(name)
+      const stored = base.getItem(name)
+      return asynchronous(stored) ? stored.then(decodeStoredValue<State>) : decodeStoredValue(stored)
     },
     setItem: (name, value) => {
       const previous = inputs.get(name)
