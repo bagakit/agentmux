@@ -4,8 +4,7 @@ import { WindowReturnButton } from './SpatialWindowGrip'
 import { KnowledgeSurfaceTitlebar, useKnowledgeWindowChrome } from './KnowledgeSurfaceWindow'
 import { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-format'
 import { surveyThumbnailStyle } from '../../../shared/survey-thumbnail-layout'
-import * as Menu from '@radix-ui/react-dropdown-menu'
-import { DocumentOverlayPortal } from './WindowOverlayHost'
+import * as Menu from './DropdownMenu'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { recordNotebookChanges, retryNotebookRecoveries, useNotebookLibrary } from '../lib/notebook-library'
 import { surveyExplorationName } from '../lib/survey-exploration-name'
@@ -732,7 +731,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
   const selectionControls = selectingContent ? <div className="survey-composition-toolbar" role="group" aria-label="Select content to combine">
     {selectingContent ? <><span role="status">{selectedSources.length} selected</span><Menu.Root modal={false}>
       <Menu.Trigger asChild><button type="button" disabled={!selectedSources.length} aria-label="Actions for selected content">Actions</button></Menu.Trigger>
-      <DocumentOverlayPortal component={Menu.Portal}><Menu.Content className="tab-context-menu" align="start" sideOffset={4}>
+      <Menu.Portal><Menu.Content className="tab-context-menu" align="start" sideOffset={4}>
         <Menu.Item className="tab-context-menu__item" onSelect={() => { setMovingIntent(null); setMovingSources([...selectedSources]) }}>Move selected to research…</Menu.Item>
         <Menu.Item className="tab-context-menu__item" onSelect={() => { setMovingIntent({ intent: { kind: 'new-research', zoneId: mintObjectId() }, requestId: mintObjectId() }); setMovingSources([...selectedSources]) }}>New research from selected…</Menu.Item>
         <Menu.Sub><Menu.SubTrigger className="tab-context-menu__item" disabled={!canGroupContent(selectedSources)} title="Select one complete Tab or one complete research to organize">Move selected to list group</Menu.SubTrigger>
@@ -742,7 +741,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
               dropComposition({ kind: 'list-group', groupId: group.groupId })
             }}>{group.name || 'Unnamed group'}</Menu.Item>)}</Menu.SubContent>
         </Menu.Sub>
-      </Menu.Content></DocumentOverlayPortal></Menu.Root>
+      </Menu.Content></Menu.Portal></Menu.Root>
       <button type="button" aria-label="Cancel content selection" onClick={() => { setSelectingContent(false); setSelectedSources([]) }}>Cancel</button>
     </> : null}
   </div> : null
@@ -807,9 +806,9 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
       <div className="survey-sidebar-actions"><button type="button" className="survey-new-page" aria-label="New webpage" title="New browser" disabled={opening} onClick={() => void openBrowser('about:blank', true)}><ThemeActionCreateBrowserIcon size={16} /><span>New browser</span></button>
         <Menu.Root modal={false} open={visible && !controlsCoverPage && createMenuOpen} onOpenChange={setCreateMenuOpen}>
           <Menu.Trigger asChild><button type="button" className="survey-icon-button" aria-label="New browser options" title="New browser options" disabled={opening}><ThemeNavigationDisclosureIcon size={12} /></button></Menu.Trigger>
-          <DocumentOverlayPortal component={Menu.Portal}><Menu.Content className="tab-context-menu" align="start" side="top" sideOffset={4} collisionPadding={8}>
+          <Menu.Portal><Menu.Content className="tab-context-menu" align="start" side="top" sideOffset={4} collisionPadding={8}>
             <Menu.Item className="tab-context-menu__item" onSelect={() => void openBrowser('about:blank', true, 'private')}><ThemeObjectBrowserIcon size={14} /><span>New private page</span></Menu.Item>
-          </Menu.Content></DocumentOverlayPortal>
+          </Menu.Content></Menu.Portal>
         </Menu.Root>
       </div>
       <div className="survey-item-actions" role="group" aria-label="Current exploration actions">{options}

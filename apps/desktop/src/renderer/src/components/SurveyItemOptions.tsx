@@ -1,4 +1,4 @@
-import * as Menu from '@radix-ui/react-dropdown-menu'
+import * as Menu from '@agentmux/client-ui/components/DropdownMenu'
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState, type ReactNode } from 'react'

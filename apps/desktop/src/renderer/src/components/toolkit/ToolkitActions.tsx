@@ -1,4 +1,4 @@
-import * as Menu from "@radix-ui/react-dropdown-menu";
+import * as Menu from "../DropdownMenu";
 import {
   Children,
   isValidElement,

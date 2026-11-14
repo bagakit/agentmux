@@ -1,5 +1,5 @@
 import { mintObjectId } from '@agentmux/core/object-id'
-import * as Menu from '@radix-ui/react-dropdown-menu'
+import * as Menu from './DropdownMenu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { IconButton } from '@agentmux/client-ui/components/IconButton'
@@ -15,7 +15,6 @@ import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { useAppStore } from '../store'
 import { AgentExecutorPicker } from './AgentExecutorPicker'
 import { ConversationMessageAvatar } from './ConversationMessageAvatar'
-import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const ThemeActionCreateAgentIcon = semanticIconComponent('action.create-agent')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
@@ -136,7 +135,7 @@ export function ConversationAnnotationDelivery({ sessionId, origin, annotation, 
         {current ? <RecipientAvatar recipient={current} /> : <ThemeActionCreateAgentIcon size={16} aria-hidden="true" />}
         <span>{recipient.kind === 'new' ? '新建 Agent' : current?.name ?? recipient.id}{current?.current ? <small>当前</small> : null}</span><ThemeNavigationDownIcon size={12} aria-hidden="true" />
       </button></Menu.Trigger>
-      <DocumentOverlayPortal component={Menu.Portal}><div className="window-overlay-host__entry" data-overlay-layer="popover">
+      <Menu.Portal><div className="window-overlay-host__entry" data-overlay-layer="popover">
         <Menu.Content className="tab-context-menu conversation-annotation-delivery__menu" align="start" sideOffset={5} collisionPadding={8} aria-label="批注接收者">
           <Menu.RadioGroup value={recipient.kind === 'new' ? 'new-agent' : `agent:${recipient.id}`} onValueChange={value => {
             if (locked || !activeRef.current) return
@@ -159,7 +158,7 @@ export function ConversationAnnotationDelivery({ sessionId, origin, annotation, 
             </Menu.Group>)}
           </Menu.RadioGroup>
         </Menu.Content>
-      </div></DocumentOverlayPortal>
+      </div></Menu.Portal>
     </Menu.Root>
     {recipient.kind === 'new' && active ? <AgentExecutorPicker presentation="field" label="新 Agent 配置" unsetLabel="选择 Agent 配置" executors={choices}
       selected={executor} onSelect={value => { if (activeRef.current) setExecutor(value || null) }} disabled={locked || !active} /> : null}

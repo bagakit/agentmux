@@ -1,4 +1,4 @@
-import * as Menu from '@radix-ui/react-dropdown-menu'
+import * as Menu from './DropdownMenu'
 import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, closestCenter, pointerWithin, useDndContext, useDroppable, useSensor, useSensors, type DragEndEvent, type DragStartEvent, type KeyboardCoordinateGetter, type Modifier } from '@dnd-kit/core'
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { getEventCoordinates, CSS } from '@dnd-kit/utilities'
@@ -6,7 +6,6 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { TextInput } from '@agentmux/client-ui/input'
 import type { AgentMuxSurveyOrganization } from '@agentmux/core/control'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { DocumentOverlayPortal } from './WindowOverlayHost'
 import type { SurveyContentDrag, SurveyPageDrop, SurveyContentReference, SurveyCompositionDropTarget } from '../lib/survey-composition-drag'
 import type { SurveyListOrganizationModel } from '../hooks/useSurveyListOrganization'
 import { moveSurveyListItem } from '../lib/survey-list'
@@ -276,7 +275,7 @@ function SurveyListGroup({ group, model, children, visible, selected, compositio
         }}><DisclosureIcon size={12} /><strong>{group.name || 'Unnamed group'}</strong><span>{group.zoneIds.length}</span></button>
         <Menu.Root modal={false} open={visible && menuOpen} onOpenChange={open => { if (open) menuBaseline.current = { expected: model.stored, editable: model.editable }; setMenuOpen(open) }}>
           <Menu.Trigger asChild><button type="button" className="survey-group-options" aria-label={`Options for survey group: ${group.name}`}><MoreIcon size={14} /></button></Menu.Trigger>
-          <DocumentOverlayPortal component={Menu.Portal}><Menu.Content className="tab-context-menu survey-item-menu" align="start" sideOffset={4} collisionPadding={8}>
+          <Menu.Portal><Menu.Content className="tab-context-menu survey-item-menu" align="start" sideOffset={4} collisionPadding={8}>
             <Menu.Label className="survey-topic-menu__label">{group.name}</Menu.Label>
             <Menu.Item className="tab-context-menu__item" onSelect={() => { ++generation.current; setEdit({ draft: group.name, ...menuBaseline.current }); model.setRenamingGroupId(group.groupId) }}><EditIcon size={14} /><span>Rename group</span></Menu.Item>
             <Menu.Item className="tab-context-menu__item" onSelect={() => {
@@ -284,7 +283,7 @@ function SurveyListGroup({ group, model, children, visible, selected, compositio
               const members = editable.groups.find(original => original.groupId === group.groupId)?.zoneIds ?? []
               void model.commit({ ungrouped: [...editable.ungrouped, ...members], groups: editable.groups.filter(original => original.groupId !== group.groupId) }, expected)
             }}><RemoveIcon size={14} /><span>Ungroup all items</span></Menu.Item>
-          </Menu.Content></DocumentOverlayPortal>
+          </Menu.Content></Menu.Portal>
         </Menu.Root>
       </>}
     </div>

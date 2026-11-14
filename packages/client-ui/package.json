@@ -33,6 +33,11 @@
       "browser": "./src/components/Modal.tsx",
       "import": "./dist/components/Modal.js"
     },
+    "./components/DropdownMenu": {
+      "types": "./src/components/DropdownMenu.tsx",
+      "browser": "./src/components/DropdownMenu.tsx",
+      "import": "./dist/components/DropdownMenu.js"
+    },
     "./components/HoverDropdownMenu": {
       "types": "./src/components/HoverDropdownMenu.tsx",
       "browser": "./src/components/HoverDropdownMenu.tsx",

@@ -3,15 +3,12 @@ import {
   createContext, forwardRef, useContext, useEffect, useRef, useState,
   type ComponentPropsWithoutRef, type PointerEvent
 } from 'react'
-import { useClientUiOverlayHost, useClientUiOwnerDocument } from '../overlay-host.js'
+import { useClientUiOwnerDocument } from '../overlay-host.js'
 
 // Radix owns selection, dismissal, keyboard navigation and portals. Hosts supply
 // their original document and Portal placement; disclosure has one shared owner.
 export { Group, Separator, Label, RadioGroup, ItemIndicator } from '@radix-ui/react-dropdown-menu'
-export function Portal({ container, ...props }: ComponentPropsWithoutRef<typeof Menu.Portal>) {
-  const host = useClientUiOverlayHost()
-  return <Menu.Portal {...props} container={container ?? host?.overlayContainer()} />
-}
+export { Portal } from './DropdownMenu.js'
 const OPEN_EVENT = 'agentmux:hover-menu-open'
 const Context = createContext<{
   open: boolean

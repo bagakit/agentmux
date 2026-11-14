@@ -1,9 +1,9 @@
 /* Shared menu surface for workbench and independent image windows. */
 .tab-context-menu {
-  min-width: 176px;
+  min-width: min(176px, var(--radix-dropdown-menu-content-available-width, 100vw));
   z-index: var(--layer-popover);
   pointer-events: auto;
-  max-height: var(--radix-context-menu-content-available-height);
+  max-height: var(--radix-context-menu-content-available-height, var(--radix-dropdown-menu-content-available-height));
   overflow-x: hidden;
   overflow-y: auto;
   padding:var(--sp-2);

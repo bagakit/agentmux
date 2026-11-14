@@ -28,6 +28,7 @@ export const supportedExamples = {
   overlays: {
     entries: {
       './components/Modal': 'components/Modal.tsx',
+      './components/DropdownMenu': 'components/DropdownMenu.tsx',
       './components/HoverDropdownMenu': 'components/HoverDropdownMenu.tsx',
       './overlay-host': 'overlay-host.tsx'
     },

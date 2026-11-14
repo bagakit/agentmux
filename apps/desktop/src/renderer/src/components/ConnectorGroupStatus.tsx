@@ -1,5 +1,5 @@
 import { isValidElement, useEffect, useRef, useState, type ReactNode } from 'react'
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import * as DropdownMenu from './DropdownMenu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { ChannelProfileAvatar } from '@agentmux/client-ui/components/ChannelProfileAvatar'
 import { sameConnectionApplication, channelMetadataSubjectKey, connectionDiagnosisActorKey, groupTarget, type ConnectionRecord, type ConnectionMemberAccess, type GroupDiagnosis, type RoomBinding } from '@agentmux/core/connections'

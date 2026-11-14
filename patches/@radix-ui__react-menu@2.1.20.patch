@@ -1,32 +1,42 @@
 diff --git a/dist/index.js b/dist/index.js
-index 36e8941b97..5501d74f40 100644
+index 36e8941b97..882871fe50 100644
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -113,27 +113,38 @@ var usePopperScope = (0, import_react_popper.createPopperScope)();
+@@ -113,35 +113,59 @@ var usePopperScope = (0, import_react_popper.createPopperScope)();
  var useRovingFocusGroupScope = (0, import_react_roving_focus.createRovingFocusGroupScope)();
  var [MenuProvider, useMenuContext] = createMenuContext(MENU_NAME);
  var [MenuRootProvider, useMenuRootContext] = createMenuContext(MENU_NAME);
-+// Keyboard modality belongs to this document, not to every retained menu.
-+var menuKeyboardModality = { current: false };
-+var menuKeyboardObservers = 0;
-+function handleMenuPointer() {
-+  menuKeyboardModality.current = false;
++// Maintain one keyboard observation per actual trigger document.
++var menuKeyboardModality = new WeakMap();
++var noDocumentMenuModality = { current: false };
++function getMenuKeyboardModality(ownerDocument) {
++  if (!ownerDocument) return noDocumentMenuModality;
++  let modality = menuKeyboardModality.get(ownerDocument);
++  if (!modality) {
++    modality = { current: false, observers: 0 };
++    modality.reset = () => {
++      modality.current = false;
++    };
++    modality.keydown = () => {
++      modality.current = true;
++      ownerDocument.addEventListener("pointerdown", modality.reset, { capture: true, once: true });
++      ownerDocument.addEventListener("pointermove", modality.reset, { capture: true, once: true });
++    };
++    menuKeyboardModality.set(ownerDocument, modality);
++  }
++  return modality;
 +}
-+function handleMenuKeyDown() {
-+  menuKeyboardModality.current = true;
-+  document.addEventListener("pointerdown", handleMenuPointer, { capture: true, once: true });
-+  document.addEventListener("pointermove", handleMenuPointer, { capture: true, once: true });
-+}
-+function observeMenuKeyboardModality() {
-+  if (menuKeyboardObservers++ === 0) {
-+    document.addEventListener("keydown", handleMenuKeyDown, { capture: true });
++function observeMenuKeyboardModality(ownerDocument, modality) {
++  if (!ownerDocument) return;
++  if (modality.observers++ === 0) {
++    ownerDocument.addEventListener("keydown", modality.keydown, { capture: true });
 +  }
 +  return () => {
-+    if (--menuKeyboardObservers === 0) {
-+      document.removeEventListener("keydown", handleMenuKeyDown, { capture: true });
-+      document.removeEventListener("pointerdown", handleMenuPointer, { capture: true });
-+      document.removeEventListener("pointermove", handleMenuPointer, { capture: true });
-+      menuKeyboardModality.current = false;
++    if (--modality.observers === 0) {
++      ownerDocument.removeEventListener("keydown", modality.keydown, { capture: true });
++      ownerDocument.removeEventListener("pointerdown", modality.reset, { capture: true });
++      ownerDocument.removeEventListener("pointermove", modality.reset, { capture: true });
++      modality.current = false;
 +    }
 +  };
 +}
@@ -35,7 +45,9 @@ index 36e8941b97..5501d74f40 100644
    const popperScope = usePopperScope(__scopeMenu);
    const [content, setContent] = React.useState(null);
 -  const isUsingKeyboardRef = React.useRef(false);
-+  const isUsingKeyboardRef = menuKeyboardModality;
++  const [anchorDocument, setAnchorDocument] = React.useState();
++  const ownerDocument = anchorDocument ?? content?.ownerDocument ?? globalThis.document;
++  const isUsingKeyboardRef = getMenuKeyboardModality(ownerDocument);
    const handleOpenChange = (0, import_react_use_callback_ref.useCallbackRef)(onOpenChange);
    const direction = (0, import_react_direction.useDirection)(dir);
 -  React.useEffect(() => {
@@ -52,11 +64,44 @@ index 36e8941b97..5501d74f40 100644
 -      document.removeEventListener("pointermove", handlePointer, { capture: true });
 -    };
 -  }, []);
-+  React.useEffect(observeMenuKeyboardModality, []);
++  React.useEffect(() => observeMenuKeyboardModality(ownerDocument, isUsingKeyboardRef), [ownerDocument, isUsingKeyboardRef]);
    React.useEffect(() => {
      if (!open) {
        return;
-@@ -274,7 +285,7 @@ var MenuContentImpl = React.forwardRef(
+     }
+     const handleBlur = () => handleOpenChange(false);
+-    window.addEventListener("blur", handleBlur);
+-    return () => window.removeEventListener("blur", handleBlur);
+-  }, [open, handleOpenChange]);
++    const ownerWindow = ownerDocument?.defaultView;
++    ownerWindow?.addEventListener("blur", handleBlur);
++    return () => ownerWindow?.removeEventListener("blur", handleBlur);
++  }, [open, handleOpenChange, ownerDocument]);
+   return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(PopperPrimitive.Root, { ...popperScope, children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+     MenuProvider,
+     {
+@@ -150,6 +174,7 @@ var Menu = (props) => {
+       onOpenChange: handleOpenChange,
+       content,
+       onContentChange: setContent,
++      onAnchorDocumentChange: setAnchorDocument,
+       children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+         MenuRootProvider,
+         {
+@@ -170,7 +195,11 @@ var MenuAnchor = React.forwardRef(
+   (props, forwardedRef) => {
+     const { __scopeMenu, ...anchorProps } = props;
+     const popperScope = usePopperScope(__scopeMenu);
+-    return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(PopperPrimitive.Anchor, { ...popperScope, ...anchorProps, ref: forwardedRef });
++    const { onAnchorDocumentChange } = useMenuContext(ANCHOR_NAME, __scopeMenu);
++    const ref = (0, import_react_compose_refs.useComposedRefs)(forwardedRef, React.useCallback(node => {
++      if (node) onAnchorDocumentChange?.(node.ownerDocument);
++    }, [onAnchorDocumentChange]));
++    return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(PopperPrimitive.Anchor, { ...popperScope, ...anchorProps, ref });
+   }
+ );
+ MenuAnchor.displayName = ANCHOR_NAME;
+@@ -274,7 +303,7 @@ var MenuContentImpl = React.forwardRef(
      const handleTypeaheadSearch = (key) => {
        const search = searchRef.current + key;
        const items = getItems().filter((item) => !item.disabled);
@@ -65,7 +110,7 @@ index 36e8941b97..5501d74f40 100644
        const currentMatch = items.find((item) => item.ref.current === currentItem)?.textValue;
        const values = items.map((item) => item.textValue);
        const nextMatch = getNextMatch(values, search, currentMatch);
-@@ -859,11 +870,11 @@ function getCheckedState(checked) {
+@@ -859,11 +888,11 @@ function getCheckedState(checked) {
    return isIndeterminate(checked) ? "indeterminate" : checked ? "checked" : "unchecked";
  }
  function focusFirst(candidates) {
@@ -80,34 +125,44 @@ index 36e8941b97..5501d74f40 100644
  }
  function wrapArray(array, startIndex) {
 diff --git a/dist/index.mjs b/dist/index.mjs
-index c3cbde4ff1..d052b14337 100644
+index c3cbde4ff1..ba0889c762 100644
 --- a/dist/index.mjs
 +++ b/dist/index.mjs
-@@ -46,27 +46,38 @@ var usePopperScope = createPopperScope();
+@@ -46,35 +46,59 @@ var usePopperScope = createPopperScope();
  var useRovingFocusGroupScope = createRovingFocusGroupScope();
  var [MenuProvider, useMenuContext] = createMenuContext(MENU_NAME);
  var [MenuRootProvider, useMenuRootContext] = createMenuContext(MENU_NAME);
-+// Keyboard modality belongs to this document, not to every retained menu.
-+var menuKeyboardModality = { current: false };
-+var menuKeyboardObservers = 0;
-+function handleMenuPointer() {
-+  menuKeyboardModality.current = false;
++// Maintain one keyboard observation per actual trigger document.
++var menuKeyboardModality = new WeakMap();
++var noDocumentMenuModality = { current: false };
++function getMenuKeyboardModality(ownerDocument) {
++  if (!ownerDocument) return noDocumentMenuModality;
++  let modality = menuKeyboardModality.get(ownerDocument);
++  if (!modality) {
++    modality = { current: false, observers: 0 };
++    modality.reset = () => {
++      modality.current = false;
++    };
++    modality.keydown = () => {
++      modality.current = true;
++      ownerDocument.addEventListener("pointerdown", modality.reset, { capture: true, once: true });
++      ownerDocument.addEventListener("pointermove", modality.reset, { capture: true, once: true });
++    };
++    menuKeyboardModality.set(ownerDocument, modality);
++  }
++  return modality;
 +}
-+function handleMenuKeyDown() {
-+  menuKeyboardModality.current = true;
-+  document.addEventListener("pointerdown", handleMenuPointer, { capture: true, once: true });
-+  document.addEventListener("pointermove", handleMenuPointer, { capture: true, once: true });
-+}
-+function observeMenuKeyboardModality() {
-+  if (menuKeyboardObservers++ === 0) {
-+    document.addEventListener("keydown", handleMenuKeyDown, { capture: true });
++function observeMenuKeyboardModality(ownerDocument, modality) {
++  if (!ownerDocument) return;
++  if (modality.observers++ === 0) {
++    ownerDocument.addEventListener("keydown", modality.keydown, { capture: true });
 +  }
 +  return () => {
-+    if (--menuKeyboardObservers === 0) {
-+      document.removeEventListener("keydown", handleMenuKeyDown, { capture: true });
-+      document.removeEventListener("pointerdown", handleMenuPointer, { capture: true });
-+      document.removeEventListener("pointermove", handleMenuPointer, { capture: true });
-+      menuKeyboardModality.current = false;
++    if (--modality.observers === 0) {
++      ownerDocument.removeEventListener("keydown", modality.keydown, { capture: true });
++      ownerDocument.removeEventListener("pointerdown", modality.reset, { capture: true });
++      ownerDocument.removeEventListener("pointermove", modality.reset, { capture: true });
++      modality.current = false;
 +    }
 +  };
 +}
@@ -116,7 +171,9 @@ index c3cbde4ff1..d052b14337 100644
    const popperScope = usePopperScope(__scopeMenu);
    const [content, setContent] = React.useState(null);
 -  const isUsingKeyboardRef = React.useRef(false);
-+  const isUsingKeyboardRef = menuKeyboardModality;
++  const [anchorDocument, setAnchorDocument] = React.useState();
++  const ownerDocument = anchorDocument ?? content?.ownerDocument ?? globalThis.document;
++  const isUsingKeyboardRef = getMenuKeyboardModality(ownerDocument);
    const handleOpenChange = useCallbackRef(onOpenChange);
    const direction = useDirection(dir);
 -  React.useEffect(() => {
@@ -133,11 +190,44 @@ index c3cbde4ff1..d052b14337 100644
 -      document.removeEventListener("pointermove", handlePointer, { capture: true });
 -    };
 -  }, []);
-+  React.useEffect(observeMenuKeyboardModality, []);
++  React.useEffect(() => observeMenuKeyboardModality(ownerDocument, isUsingKeyboardRef), [ownerDocument, isUsingKeyboardRef]);
    React.useEffect(() => {
      if (!open) {
        return;
-@@ -207,7 +218,7 @@ var MenuContentImpl = React.forwardRef(
+     }
+     const handleBlur = () => handleOpenChange(false);
+-    window.addEventListener("blur", handleBlur);
+-    return () => window.removeEventListener("blur", handleBlur);
+-  }, [open, handleOpenChange]);
++    const ownerWindow = ownerDocument?.defaultView;
++    ownerWindow?.addEventListener("blur", handleBlur);
++    return () => ownerWindow?.removeEventListener("blur", handleBlur);
++  }, [open, handleOpenChange, ownerDocument]);
+   return /* @__PURE__ */ jsx(PopperPrimitive.Root, { ...popperScope, children: /* @__PURE__ */ jsx(
+     MenuProvider,
+     {
+@@ -83,6 +107,7 @@ var Menu = (props) => {
+       onOpenChange: handleOpenChange,
+       content,
+       onContentChange: setContent,
++      onAnchorDocumentChange: setAnchorDocument,
+       children: /* @__PURE__ */ jsx(
+         MenuRootProvider,
+         {
+@@ -103,7 +128,11 @@ var MenuAnchor = React.forwardRef(
+   (props, forwardedRef) => {
+     const { __scopeMenu, ...anchorProps } = props;
+     const popperScope = usePopperScope(__scopeMenu);
+-    return /* @__PURE__ */ jsx(PopperPrimitive.Anchor, { ...popperScope, ...anchorProps, ref: forwardedRef });
++    const { onAnchorDocumentChange } = useMenuContext(ANCHOR_NAME, __scopeMenu);
++    const ref = useComposedRefs(forwardedRef, React.useCallback(node => {
++      if (node) onAnchorDocumentChange?.(node.ownerDocument);
++    }, [onAnchorDocumentChange]));
++    return /* @__PURE__ */ jsx(PopperPrimitive.Anchor, { ...popperScope, ...anchorProps, ref });
+   }
+ );
+ MenuAnchor.displayName = ANCHOR_NAME;
+@@ -207,7 +236,7 @@ var MenuContentImpl = React.forwardRef(
      const handleTypeaheadSearch = (key) => {
        const search = searchRef.current + key;
        const items = getItems().filter((item) => !item.disabled);
@@ -146,7 +236,7 @@ index c3cbde4ff1..d052b14337 100644
        const currentMatch = items.find((item) => item.ref.current === currentItem)?.textValue;
        const values = items.map((item) => item.textValue);
        const nextMatch = getNextMatch(values, search, currentMatch);
-@@ -792,11 +803,11 @@ function getCheckedState(checked) {
+@@ -792,11 +821,11 @@ function getCheckedState(checked) {
    return isIndeterminate(checked) ? "indeterminate" : checked ? "checked" : "unchecked";
  }
  function focusFirst(candidates) {

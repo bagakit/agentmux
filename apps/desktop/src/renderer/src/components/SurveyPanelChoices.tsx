@@ -7,8 +7,7 @@ import { useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import type { WorkbenchSurface } from '../lib/workbench-tabs'
 import type { useAppStore } from '../store'
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { DocumentOverlayPortal } from './WindowOverlayHost'
+import * as DropdownMenu from './DropdownMenu'
 
 const ThemeObjectLauncherIcon = semanticIconComponent('object.launcher')
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
@@ -98,12 +97,12 @@ export function SurveyPanelChoices<T extends WorkbenchProjectionSelection>({ cho
   const contents = <PanelChoiceItems choices={choices} facts={facts} topic={topic} onSelect={onSelect} />
   return mode === 'submenu' ? <DropdownMenu.Sub>
     <DropdownMenu.SubTrigger className="tab-context-menu__item" aria-label={label}><ThemeObjectLauncherIcon size={14} aria-hidden="true" /><span>Choose panel</span><ThemeNavigationDisclosureIcon size={12} aria-hidden="true" /></DropdownMenu.SubTrigger>
-    <DocumentOverlayPortal component={DropdownMenu.Portal}><DropdownMenu.SubContent className="tab-context-menu survey-topic-menu survey-panel-menu" sideOffset={4} collisionPadding={8}>{contents}</DropdownMenu.SubContent></DocumentOverlayPortal>
+    <DropdownMenu.Portal><DropdownMenu.SubContent className="tab-context-menu survey-topic-menu survey-panel-menu" sideOffset={4} collisionPadding={8}>{contents}</DropdownMenu.SubContent></DropdownMenu.Portal>
   </DropdownMenu.Sub> : <DropdownMenu.Root modal={false} open={open} onOpenChange={change}>
     <DropdownMenu.Trigger asChild><button type="button" className="survey-topic-trigger" aria-label={label}>
       <span>{topic ? 'Topic locations' : 'Choose panel…'}</span><ThemeNavigationDownIcon size={12} aria-hidden="true" />
     </button></DropdownMenu.Trigger>
-    <DocumentOverlayPortal component={DropdownMenu.Portal}><DropdownMenu.Content className="tab-context-menu survey-topic-menu survey-panel-menu" align="end" sideOffset={4} collisionPadding={8}
-      onCloseAutoFocus={event => { if (!visible) event.preventDefault() }}>{contents}</DropdownMenu.Content></DocumentOverlayPortal>
+    <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu survey-topic-menu survey-panel-menu" align="end" sideOffset={4} collisionPadding={8}
+      onCloseAutoFocus={event => { if (!visible) event.preventDefault() }}>{contents}</DropdownMenu.Content></DropdownMenu.Portal>
   </DropdownMenu.Root>
 }

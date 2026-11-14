@@ -2,7 +2,7 @@ import { usePathDisplay } from '../hooks/usePathDisplay'
 import type { AgentMuxSpaceFact, AgentMuxZoneFact } from '@agentmux/core/control'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ReactNode } from 'react'
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import * as DropdownMenu from './DropdownMenu'
 
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeControlCheckboxMixedIcon = semanticIconComponent('control.checkbox-mixed')

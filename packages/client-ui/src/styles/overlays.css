@@ -18,3 +18,14 @@
 .modal-presentation-note > div { display: flex; flex-wrap: wrap; gap: var(--sp-3, 6px); margin-top: var(--sp-4, 8px); }
 .modal-presentation-note button { min-height: 28px; padding: 4px 10px; border: 0; border-radius: var(--radius-sm, 6px); color: var(--text); background: var(--surface-3); cursor: pointer; font: inherit; }
 .modal-presentation-note button:focus-visible { outline: 2px solid var(--focus-line, currentColor); outline-offset: 2px; }
+
+/* Keep the reading area inside the space measured by the actual positioned menu. */
+.agent-dropdown-menu {
+  box-sizing: border-box;
+  max-block-size: var(--radix-dropdown-menu-content-available-height);
+  max-inline-size: var(--radix-dropdown-menu-content-available-width);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  transform-origin: var(--radix-dropdown-menu-content-transform-origin);
+}

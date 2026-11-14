@@ -1,5 +1,5 @@
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import * as Menu from '@radix-ui/react-dropdown-menu'
+import * as Menu from './DropdownMenu'
 import type { SurveyProfileView } from '../lib/survey-profile-view'
 import type { BrowserProfilesState } from '../lib/browser-profiles'
 import { useBrowserDirectory } from '../lib/use-browser-directory'

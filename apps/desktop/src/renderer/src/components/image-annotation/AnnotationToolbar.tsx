@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import * as DropdownMenu from '../DropdownMenu'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
-import { DocumentOverlayPortal } from '../WindowOverlayHost'
 import { RovingToolbar, RovingToolbarButton, RovingToolbarItem } from '../RovingToolbar'
 import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -50,14 +49,14 @@ export function AnnotationToolbar({ active = true, tool, busy, undoable, redoabl
       <DropdownMenu.Trigger asChild><RovingToolbarButton type="button" className="image-annotation-toolbar__compact" aria-label="Markup tool" title="Choose a markup tool">
         {current ? <current.icon size={16} /> : null}<span>{current?.label ?? 'Tools'}</span><DownIcon size={12} />
       </RovingToolbarButton></DropdownMenu.Trigger>
-      <DocumentOverlayPortal component={DropdownMenu.Portal}><DropdownMenu.Content className="tab-context-menu image-annotation-tools-menu" align="start" sideOffset={4} collisionPadding={8}
+      <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu image-annotation-tools-menu" align="start" sideOffset={4} collisionPadding={8}
         onCloseAutoFocus={event => { if (!active) event.preventDefault() }}
         onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault(); else event.stopPropagation() }}>
         <DropdownMenu.RadioGroup value={tool}>{ANNOTATION_TOOLS.map(item => <DropdownMenu.RadioItem className="tab-context-menu__item" key={item.id} value={item.id} aria-label={item.label} aria-keyshortcuts={item.key}
           disabled={busy && item.id !== 'pan'} onSelect={() => onTool(item.id)}><item.icon size={16} /><span>{item.label}</span><kbd>{item.key}</kbd>
           <span className="image-annotation-tools-menu__selection" aria-hidden="true"><DropdownMenu.ItemIndicator asChild><SelectionIcon size={12} /></DropdownMenu.ItemIndicator></span>
         </DropdownMenu.RadioItem>)}</DropdownMenu.RadioGroup>
-      </DropdownMenu.Content></DocumentOverlayPortal>
+      </DropdownMenu.Content></DropdownMenu.Portal>
     </DropdownMenu.Root>
     <div className="image-annotation-toolbar__tools">{TOOL_GROUPS.map(group => <div key={group.label} className="image-annotation-toolbar__group" role="group" aria-label={group.label}>
       {ANNOTATION_TOOLS.filter(item => group.tools.includes(item.id)).map(item => {
