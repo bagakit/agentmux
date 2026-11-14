@@ -73,7 +73,8 @@ async function legacyHost(state: 'working' | 'done' = 'working') {
   await sdk.statusAgent(original.agentSessionId)
   await until(() => store.readMetadata(original.agentSessionId), value => value?.semanticStatus?.state === state, 'original native activity')
   const launches = join(durable, 'native-launches.ndjson')
-  await until(() => rows(launches), value => value.length === 1, 'original Native launch')
+  const initialLaunches = await until(() => rows(launches), value => value.length === 1, 'original Native launch')
+  expect(initialLaunches).toEqual([['original-native', expect.stringMatching(/(?:^|\n\n)ORIGINAL_PROMPT_DO_NOT_REPLAY$/u)]])
   // Produce the old policy receipt through its actual former admission path,
   // then discard that owner and load the candidate from unchanged source.
   await sdk.dispose(); await scope.stopOwner(); await scope.restartNativeDaemon()
@@ -97,7 +98,7 @@ async function legacyHost(state: 'working' | 'done' = 'working') {
   expect((await store.readMetadata(original.agentSessionId))!.continuityOperations!['legacy-startup']).toEqual(journal)
   expect(await rows(launches)).toHaveLength(1)
   const request = { agentSessionId: original.agentSessionId, expectedRun: original.run, operationId: 'fresh-startup', trigger: 'startup' as const, policy }
-  return { scope, durable, sdk, store, original, journal, launches, request }
+  return { scope, durable, sdk, store, original, journal, launches, initialLaunches, request }
 }
 
 it.each(['working', 'done'] as const)('a fresh %s startup consumes the retained native facts after a real Host restart and preserves the old policy journal', async state => {
@@ -111,7 +112,7 @@ it.each(['working', 'done'] as const)('a fresh %s startup consumes the retained 
   expect(stored.continuityOperations!['fresh-startup']).toMatchObject({ kind: 'resumed', previousRun: f.original.run,
     newRun: stored.run, supervision: { attemptCount: 1, attemptLimit: 1 }, recoveryInputs: { reminder: '', continuation: '' } })
   await until(() => rows(f.launches), value => value.length === 2, 'one candidate resume')
-  expect(await rows(f.launches)).toEqual([['original-native', 'ORIGINAL_PROMPT_DO_NOT_REPLAY'], ['original-native']])
+  expect(await rows(f.launches)).toEqual([...f.initialLaunches, ['original-native']])
   await f.sdk.writeAgent({ agentSessionId: f.original.agentSessionId, expectedRun: stored.run, source: 'user', data: 'same-original-context' })
   await until(() => f.sdk.readRunReplay(stored.run), value => value.replay.some(chunk => chunk.data.includes('LIVE:same-original-context')), 'usable original resumed TUI')
   await expect(f.sdk.ensureAgentContinuity(f.request)).resolves.toMatchObject({ kind: 'resumed' })
