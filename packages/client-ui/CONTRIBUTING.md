@@ -46,8 +46,16 @@ Add portable entries and their styles to `scripts/supported-entries.mjs`. Run `p
 
 Add a runnable example under `examples/` and link to it from the README. After building, run `node scripts/verify-supported-entries.mjs`. It resolves the examples against source and compiled types, measures the actual browser inputs, and runs their actions with Chromium. The reference browser host supplies one sprite and switches the shared theme. Record licensing and external installation evidence separately for a distribution candidate.
 
-## Prepare a standalone release
+## Qualify a standalone archive
 
-The current distribution is a private workspace package. For a standalone candidate, build and pack it, then install the resulting archive in a clean app outside the monorepo. Try the documented imports, types and CSS with the declared peer versions. Render a basic field and drive a pattern through a neutral host adapter. Measure the entry's actual import graph and bundle cost. The basic field should work without an AgentMux runtime, terminal or rich editor.
+From the package directory, run the private archive gate after installing the repository dependencies.
 
-Review changes to public types, CSS tokens, roles, keyboard behavior, meanings of states and host events as compatibility changes. For an incompatible change, document the affected entry, a consumer migration and the intended version before release. Keep a list of supported hosts and known gaps alongside release evidence. Before distributing publicly, record the license decision and the redistribution terms for shipped artwork, fonts and third-party marks.
+```sh
+node scripts/verify-standalone-tarball.mjs
+```
+
+The gate builds the portable entries and declarations from the supported entry definitions. It installs the resulting archive with ordinary npm dependencies in a separate React app. The app exercises the documented styles, the theme model in Node, the location pattern, and focus and scroll locks across two documents. The site supplies its own React and React DOM, theme mounting and location adapter. Install the private archive in place of a workspace dependency and keep imports on the named portable entries.
+
+The archived provenance and notices record the bundled dependency versions, local patches, and the origin of included vector glyphs. Brand artwork, Provider portraits and fonts stay in the workspace. The qualification gate leaves a local archive and receipt and cleans up its external test app. Public distribution requires the project license decision and a separate release review.
+
+Review changes to public types, CSS tokens, roles, keyboard behavior, meanings of states and host events as compatibility changes. Document the affected entry and sequence of consumer changes before release.

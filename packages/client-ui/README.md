@@ -11,6 +11,7 @@ The package is private to the AgentMux workspace. The portable entries below use
 | Use a button, text field or compact editor | [Native actions](#native-actions) and [Inputs](#inputs) cover the import, stylesheet and who owns the value. |
 | Apply a pattern in another interface | [Find an Agent's work](docs/patterns/agent-work-location.md) gives the question, required inputs, actions and observable results. It includes cases a host can run with its own data. [Original interaction receipts](docs/patterns/interaction-receipts.md) describes request, delivery and recovery states. |
 | Plan a component or pattern migration | Start with the [target architecture](ROADMAP.md#target-architecture), [control families](ROADMAP.md#controls-to-extract-strengthen-and-adopt), [pattern catalog](ROADMAP.md#patterns-to-promote) and [priorities](ROADMAP.md#priority-and-dependencies). |
+| Qualify an archive in an independent React app | [Standalone archive qualification](CONTRIBUTING.md#qualify-a-standalone-archive) covers local install, dependency provenance and the verification command. |
 | Add a control, propose a pattern or change a public behavior | The [maintainer guide](CONTRIBUTING.md) covers ownership, evidence and compatibility. |
 
 For example, a host can label a field and submit its current value. The host supplies its theme tokens and owns the draft.
