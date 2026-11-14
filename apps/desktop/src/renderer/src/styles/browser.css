@@ -316,6 +316,8 @@
 .browser-profile-chip__failure { flex: none; color: var(--amber-text); font-size: var(--fs-meta); white-space: nowrap; }
 .browser-profile-chip__failure button { border: 0; padding: 0; background: transparent; color: var(--text-2); text-decoration: underline; font: inherit; cursor: pointer; }
 .browser-profile-chip__failure button[aria-label='Dismiss'] { margin-left: var(--sp-2); text-decoration: none; color: var(--text-3); }
+.browser-profile-service { flex: none; min-width: 0; }
+.browser-profile-service:empty { display: none; }
 .browser-profile-chip--unknown { cursor: default; color: var(--text-3); padding-left: var(--sp-2); }
 
 .browser-site-permissions { flex: none; padding: 8px 12px; border-bottom: 1px solid var(--line-soft); font-size: var(--fs-micro); background: var(--surface-1); }

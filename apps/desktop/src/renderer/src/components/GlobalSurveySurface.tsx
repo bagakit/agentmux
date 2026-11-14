@@ -618,10 +618,17 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     </nav>
     <div className="survey-content">
       <div className="survey-page-content" inert={controlsCoverPage} aria-hidden={controlsCoverPage}>
-        {error ? <p className="survey-error" role="alert">{error}{failedCreation.current?.createdBrowser ? <button type="button" disabled={opening} onClick={showOriginalPage}>Show original page</button> : null}{failedCreation.current && !failedCreation.current.admission?.issues.some(issue => issue.code === 'SURVEY_PAGE_MEMBERSHIP_SUPERSEDED') ? <button type="button" disabled={opening} onClick={() => void openBrowser(query.trim() ? query : 'about:blank')}>{failedCreation.current.admission ? 'Retry Survey registration' : 'Retry original item'}</button> : null}</p> : null}
-        {Object.entries(itemBrowserRecoveries).map(([key, recovery]) => <p key={key} className="survey-error" role="alert" data-survey-browser-recovery={recovery.preparation.reference?.regionId}>
-          {recovery.message}<button type="button" disabled={recovery.pending} onClick={() => void createItemBrowser(recovery.preparation)}>{recovery.pending ? 'Retrying original page…' : 'Retry original page'}</button>
-        </p>)}
+        {error ? <div className="survey-error" role="alert">
+          <span>{error}</span>
+          <div className="survey-error__actions">
+            {failedCreation.current?.createdBrowser ? <button type="button" className="small-button" disabled={opening} onClick={showOriginalPage}>Show original page</button> : null}
+            {failedCreation.current && !failedCreation.current.admission?.issues.some(issue => issue.code === 'SURVEY_PAGE_MEMBERSHIP_SUPERSEDED') ? <button type="button" className="small-button" disabled={opening} onClick={() => void openBrowser(query.trim() ? query : 'about:blank')}>{failedCreation.current.admission ? 'Retry Survey registration' : 'Retry original item'}</button> : null}
+          </div>
+        </div> : null}
+        {Object.entries(itemBrowserRecoveries).map(([key, recovery]) => <div key={key} className="survey-error" role="alert" data-survey-browser-recovery={recovery.preparation.reference?.regionId}>
+          <span>{recovery.message}</span>
+          <div className="survey-error__actions"><button type="button" className="small-button" disabled={recovery.pending} onClick={() => void createItemBrowser(recovery.preparation)}>{recovery.pending ? 'Retrying original page…' : 'Retry original page'}</button></div>
+        </div>)}
         {pageSelection ? <>{projection ? <WorkspaceWorkbench workspaceId={projection.displayWorkspaceId}
           projection={projection} viewOwnership="projection" viewTargets={viewTargets} visible={visible && !controlsCoverPage}
           leadingChrome={windowControlsInset} onCreateTab={groupId => void newBrowserTab(projection.displayWorkspaceId, groupId)} />

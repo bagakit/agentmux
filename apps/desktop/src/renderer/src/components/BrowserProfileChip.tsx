@@ -1,6 +1,7 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useContext, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useAppStore } from '../store'
 import type { SurveyProfileBindingReceipt } from '../lib/survey-profile-binding'
 import type { AgentMuxBrowserControl } from '@agentmux/core'
@@ -9,6 +10,7 @@ import * as Menu from './HoverDropdownMenu'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { ProfileMark } from './ProfileMark'
 import { SettingsNavigation } from './SettingsNavigation'
+import { ServiceWindowNotice } from './ServiceWindowNotice'
 
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
@@ -20,11 +22,12 @@ const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosu
  * Profile, so an Agent-held Browser lists Profiles but cannot switch. The new mark shows at once,
  * the old page stays until the new one commits, and a failure returns to the original Profile.
  */
-export function BrowserProfileChip({ browserId, regionId, profileId, control }: {
+export function BrowserProfileChip({ browserId, regionId, profileId, control, noticeHost }: {
   browserId: string
   regionId: string
   profileId: string | null
   control: AgentMuxBrowserControl | undefined
+  noticeHost: HTMLElement | null
 }) {
   const list = useBrowserProfiles()
   const settings = useContext(SettingsNavigation)
@@ -56,6 +59,24 @@ export function BrowserProfileChip({ browserId, regionId, profileId, control }: 
     } catch (cause) { if (operation.current === token) setFailure({ target, message: presentError(cause) }) }
     finally { if (operation.current === token) setPending(null) }
   }
+  const superseded = registration?.admission.issues.some(issue => issue.code === 'SURVEY_PAGE_MEMBERSHIP_SUPERSEDED')
+  const registrationNotice = registration ? <div data-survey-profile-registration={browserId}>
+    <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+      step: 'Survey registration unconfirmed',
+      mode: registration.switchOutcome === 'unconfirmed' ? 'Switch reply unconfirmed; current environment observed' : 'Environment changed',
+      restore: registration.admission.issues.map(issue => `${issue.message} ${issue.recovery}`).join('\n')
+    } }} summary={{
+      step: superseded ? 'Later Survey choice kept' : 'Survey save unconfirmed',
+      mode: registration.switchOutcome === 'unconfirmed' ? 'Switch reply unconfirmed; current environment observed' : 'Environment changed',
+      restore: superseded ? 'The original page stays available. Its withdrawn reference is not added again.' : 'The page is available. Retry only its Survey reference.'
+    }} actions={!superseded ? <button type="button" className="small-button" disabled={repairing} onClick={() => {
+      const original = registration
+      setRepairing(true)
+      void useAppStore.getState().repairSurveyProfileAdmission(original).then(receipt => {
+        setRegistration(current => current !== original ? current : receipt.admission.issues.length ? receipt : null)
+      }).finally(() => setRepairing(false))
+    }}>{repairing ? 'Saving Survey reference…' : 'Retry Survey registration'}</button> : null} />
+  </div> : null
   return (
     <>
       <Menu.Root>
@@ -89,18 +110,7 @@ export function BrowserProfileChip({ browserId, regionId, profileId, control }: 
           </Menu.Content>
         </DocumentOverlayPortal>
       </Menu.Root>
-      {registration ? <span className="browser-profile-chip__failure" role="status" data-survey-profile-registration={browserId}
-        title={registration.admission.issues.map(issue => issue.message).join(' ')}>
-        {registration.switchOutcome === 'unconfirmed' ? 'Switch reply unconfirmed; current environment observed' : 'Environment changed'} · {registration.admission.issues.some(issue => issue.code === 'SURVEY_PAGE_MEMBERSHIP_SUPERSEDED') ? 'Later Survey choice kept' : <>
-          Survey save unconfirmed · <button type="button" disabled={repairing} onClick={() => {
-            const original = registration
-            setRepairing(true)
-            void useAppStore.getState().repairSurveyProfileAdmission(original).then(receipt => {
-              setRegistration(current => current !== original ? current : receipt.admission.issues.length ? receipt : null)
-            }).finally(() => setRepairing(false))
-          }}>{repairing ? 'Saving Survey reference…' : 'Retry Survey registration'}</button>
-        </>}
-      </span> : null}
+      {noticeHost ? createPortal(registrationNotice, noticeHost) : null}
       {failure ? <span className="browser-profile-chip__failure" role="status" title={failure.message}>
         Couldn’t switch · <button type="button" onClick={() => void switchTo(failure.target)}>Retry</button>
         <button type="button" aria-label="Dismiss" onClick={() => setFailure(null)}>×</button>

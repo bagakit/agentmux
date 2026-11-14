@@ -100,6 +100,9 @@
 .survey-page-content { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: hidden; background: var(--surface-0); }
 :is(.global-survey-surface, .global-recall-surface) .browser-toolbar { border-bottom: 1px solid var(--survey-edge); }
 .survey-error, .browser-address-error { flex: none; margin: 0; padding: var(--sp-3) var(--sp-4); color: var(--red-text); background: var(--red-bg); font-size: var(--fs-meta); line-height: 1.45; }
+.survey-error { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); overflow-wrap: anywhere; }
+.survey-error__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
+.survey-error__actions:empty { display: none; }
 .survey-restore-notice { margin: auto; max-width: 420px; padding: var(--sp-5); color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; }
 .survey-restore-notice p { color: var(--text-3); }
 .survey-management { border-radius: var(--radius-lg); flex: 0 0 340px; min-width: 0; min-height: 0; overflow: auto; padding: var(--sp-3) var(--sp-4); border-left: 1px solid var(--survey-edge); }

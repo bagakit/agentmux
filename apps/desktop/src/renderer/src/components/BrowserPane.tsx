@@ -490,6 +490,7 @@ function BrowserPaneContent({
   const [find, setFind] = useState<{ key: string; request: number } | null>(null)
   const openFind = (key: string) => setFind(current => ({ key, request: (current?.request ?? 0) + 1 }))
   const [capsuleToolbarHost, setCapsuleToolbarHost] = useState<HTMLSpanElement | null>(null)
+  const [profileNoticeHost, setProfileNoticeHost] = useState<HTMLDivElement | null>(null)
   const [customViewport, setCustomViewport] = useState<string | null>(null)
   const [managementOpen, setManagementOpen] = useState(false)
   const [managementVisited, setManagementVisited] = useState(false)
@@ -1425,7 +1426,7 @@ function BrowserPaneContent({
         }}
       >
         {tab.mode === 'private' ? <span className="browser-private-badge" aria-label="Private session" title="Temporary website data ends when this page closes. Network identity is not hidden; explicit saves, downloads and Agent operation records follow their normal retention.">Private</span> : null}
-        {tab.mode !== 'private' ? <BrowserProfileChip browserId={tab.browserId} regionId={tab.regionId} profileId={tab.profileId || null} control={tab.control} /> : null}
+        {tab.mode !== 'private' ? <BrowserProfileChip browserId={tab.browserId} regionId={tab.regionId} profileId={tab.profileId || null} control={tab.control} noticeHost={profileNoticeHost} /> : null}
         {tab.source ? <BrowserSourceNavigation source={tab.source} onOpenChange={setMenuOpen} /> : null}
         <button
           type="button"
@@ -1635,6 +1636,7 @@ function BrowserPaneContent({
           </DropdownMenu.Root>
         {regionCloseButton}
       </form>
+      <div className="browser-profile-service" ref={setProfileNoticeHost} />
       {find?.key === key ? <BrowserFindBar key={tab.browserId} browserId={tab.browserId} navigationId={tab.navigationId} loading={tab.loading}
         agentControlled={tab.control?.owner === 'agent'} focusRequest={find.request} onClose={() => setFind(null)} /> : null}
       {tab.capsuleId ? <CapsuleInteractionChrome key={tab.capsuleId} browserId={tab.id} capsuleId={tab.capsuleId} active={tab.capsuleActive === true} visible={visible} toolbarHost={capsuleToolbarHost} /> : null}
