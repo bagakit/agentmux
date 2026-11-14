@@ -8,11 +8,12 @@ app.whenReady().then(async()=>{try{
  window.webContents.on('console-message',(_event,_level,text)=>{if(receipt.console.length<40)receipt.console.push(text.slice(0,500))})
  const evaluate=code=>window.webContents.executeJavaScript(code,true)
  await window.loadURL(url)
+ const openGateway=()=>evaluate('Array.from(document.querySelectorAll(".mesh-overview-actions button")).find(button=>button.textContent==="Gateway")?.click()')
+ await openGateway()
  for(let i=0;i<250;i++){if(await evaluate('Boolean(document.querySelector("[aria-label=\\"Mesh network\\"]"))'))break;await delay(40)}
  assert.equal(await evaluate('Boolean(document.querySelector("[data-mesh-settings]"))'),true,'actual Settings Mesh editor mounted')
  const paint=async()=>{await evaluate('document.fonts.ready');await delay(400)}
  const frame=async name=>{await paint();const file=name+'.png';await fs.writeFile(path.join(output,file),(await window.webContents.capturePage()).toPNG());receipt.frames.push(file)}
- await evaluate('document.querySelector(".mesh-route-list button").click()')
  await frame('wide-dark')
  await evaluate('meshFixture.theme("light")');await frame('wide-light')
  window.setContentSize(520,900);await evaluate('meshFixture.theme("dark")');await frame('narrow-dark')
@@ -20,9 +21,9 @@ app.whenReady().then(async()=>{try{
  window.webContents.debugger.attach('1.3'); const point=await evaluate('(()=>{const r=document.querySelector("[data-mesh-view=network]").getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()'); await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseWheel',...point,deltaY:2400,deltaX:0});await paint();assert.ok(await evaluate('document.querySelector("[data-mesh-view=network]").scrollTop>0'),'actual native wheel scrolls the Mesh network fields');await frame('lower-fields')
  await evaluate('document.querySelector(".mesh-access-links").open=true;meshFixture.endpoint();document.querySelector(".mesh-network-heading button").click()');await paint();await evaluate('document.querySelector("[data-settings-field=mesh-link]").scrollIntoView({block:"end"})');await frame('original-host-endpoint')
  await evaluate(`(()=>{const e=document.querySelector('[aria-label="Original Mesh endpoint offer"]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(e,JSON.stringify(meshFixture.originalOffer));e.dispatchEvent(new Event('input',{bubbles:true}))})()`);await paint();await evaluate('document.querySelector("[data-settings-field=mesh-link]>button").click()');await paint();await evaluate('document.querySelector(".mesh-link-result details").open=true;document.querySelector(".mesh-link-result").scrollIntoView({block:"center"})');await frame('original-link-identity')
- await evaluate('document.querySelectorAll(".mesh-view-tabs button")[1].click()');await frame('saved-connections')
+ await evaluate('document.querySelector(".mesh-editor-navigation button").click();Array.from(document.querySelectorAll(".mesh-overview-actions button")).find(button=>button.textContent==="Manage devices").click()');await frame('saved-connections')
  for (const scenario of ['initial','unavailable','settings-error']) {
-  window.setContentSize(1280,980);await window.loadURL(url+'?scenario='+scenario)
+  window.setContentSize(1280,980);await window.loadURL(url+'?scenario='+scenario);await openGateway()
   const selector=scenario==='initial'?'[aria-label="Mesh network"]':'.mesh-availability details';for(let i=0;i<200;i++){if(await evaluate('Boolean(document.querySelector('+JSON.stringify(selector)+'))'))break;await delay(30)}
   await frame(scenario+'-dark')
   if(scenario!=='settings-error') {
