@@ -61,7 +61,7 @@ describe('built-in agent providers', () => {
       {
         id: 'traex', executable: 'traex', expectedProcess: 'traex',
         promptDelivery: 'positional-argv', readySignal: 'foreground-process',
-        hook: 'none', permission: 'none', resume: 'none', acp: 'none',
+        hook: 'none', permission: 'none', resume: 'provider-native', acp: 'none',
         replyCorrelation: 'none'
       },
       {
@@ -287,9 +287,9 @@ describe('built-in agent providers', () => {
   // `--resume [chatId]` 同样来自读 bundle（`else fe=o.resume` 直传 chat id）。三者的 resume argv 分别在
   // test/providers/{grok,gemini,cursor}.test.ts 里断言。
   //
-  // 这一组必须留着**真的没有** native resume 的 Provider，否则它会退化成一个不守任何东西的空壳。
-  // traex 与 hermes 就是：两者的 `--help` 里都没有任何恢复旗标（hermes 的 resumeStrategy 因此是 none）。
-  it.each(['traex', 'hermes'] as const)('exposes %s as not supporting provider-native resume', (id) => {
+  // TraeX now contributes its native resume subcommand. Hermes still has no
+  // Provider-native resume contribution; do not infer it from other Providers.
+  it.each(['hermes'] as const)('exposes %s as not supporting provider-native resume', (id) => {
     expect(providers.get(id).catalog.capabilities.providerResume).toBe(false)
     expect(() => providers.get(id).buildResumeLaunch({
       workspacePath: fixturePath("tmp/work"),
@@ -298,6 +298,20 @@ describe('built-in agent providers', () => {
       args: [],
       env: {}
     })).toThrow('does not support')
+  })
+
+  it('resumes the exact TraeX native conversation with its configured invocation and optional prompt', () => {
+    const traex = providers.get('traex')
+    expect(traex.catalog.capabilities.providerResume).toBe(true)
+    const context = { workspacePath: fixturePath('tmp/work'), commandOverride: 'configured-traex',
+      nativeHandle: { kind: 'provider' as const, providerId: 'traex', sessionId: 'exact-original' },
+      args: ['--model', 'original-model'], env: { ORIGINAL: 'kept' } }
+    expect(traex.buildResumeLaunch(context)).toEqual({ command: 'configured-traex',
+      args: ['resume', 'exact-original', '--model', 'original-model'], env: context.env })
+    expect(traex.buildResumeLaunch({ ...context, prompt: 'continue "quoted"\non another line' })).toEqual({
+      command: 'configured-traex', args: ['resume', 'exact-original', 'continue "quoted"\non another line', '--model', 'original-model'], env: context.env })
+    expect(() => traex.buildResumeLaunch({ ...context, nativeHandle: { ...context.nativeHandle, providerId: 'codex' } }))
+      .toThrow(expect.objectContaining({ code: 'INVALID_NATIVE_SESSION_HANDLE' }))
   })
 
   it('publishes grok as the only built-in with an addressable posture control, drawn from its declaration', () => {
@@ -358,7 +372,7 @@ describe('built-in agent providers', () => {
       frameEnd: '\u001b[?2026l'
     })
     expect(providers.get('codex').planPromptInput('continue')).toEqual({
-      kind: 'render-then-submit', payload: 'continue', renderedText: 'continue', submit: '\r'
+      kind: 'render-then-submit', payload: '\u001b[200~continue\u001b[201~', renderedText: 'continue', submit: '\r'
     })
     expect(providers.get('codex').planPromptInput('line1\nline2')).toEqual({
       kind: 'render-then-submit',
@@ -371,7 +385,7 @@ describe('built-in agent providers', () => {
     })
     expect(providers.get('codex').planPromptInput('text with \u001b escape')).toEqual({
       kind: 'render-then-submit',
-      payload: 'text with \u241b escape',
+      payload: '\u001b[200~text with \u241b escape\u001b[201~',
       renderedText: 'text with \u241b escape',
       submit: '\r'
     })

@@ -7,7 +7,7 @@ import { afterEach, expect, it } from 'vitest'
 import { discoverAppServerNativeSession } from '../src/providers/app-server-native-session.js'
 import { discoverClaudeNativeSession } from '../src/providers/claude-native-session.js'
 import { codexMainNativeRecord } from '../src/providers/codex-native-record-role.js'
-import type { AgentProviderNativeSessionDiscovery } from '../src/types.js'
+import type { AgentProviderNativeSessionDiscovery, AgentProviderNativeSessionDiscoveryContext } from '../src/types.js'
 
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
@@ -42,11 +42,27 @@ async function fixture(provider: 'codex' | 'claude', opened = [0, 1]) {
   cleanup.push(async () => { if (child.exitCode === null && child.signalCode === null) { const ended = once(child, 'exit'); child.kill('SIGTERM'); await ended }; await rm(root, { recursive: true }) })
   await once(child.stdout!, 'data')
   const controller = new AbortController()
-  const context = { processId: child.pid!, command: process.execPath, args: [], env: {}, workspacePath: root, signal: controller.signal }
+  const context: AgentProviderNativeSessionDiscoveryContext = { processId: child.pid!, command: process.execPath, args: [], env: {}, workspacePath: root, signal: controller.signal }
   const discover = () => provider === 'codex' ? discoverAppServerNativeSession(context, 'codex', codexMainNativeRecord) : discoverClaudeNativeSession(context)
   const control = async (action: 'open' | 'close', index: number) => { const answered = once(child.stdout!, 'data'); child.stdin!.write(`${action} ${index}\n`); await answered }
-  return { paths, write, discover, control, controller, child }
+  return { paths, write, discover, control, controller, child, context }
 }
+
+it('a retained Codex locator cannot replace current process evidence, and the same original source can be reacquired', async () => {
+  const f = await fixture('codex', [0]), original = await f.discover()
+  expect(original?.handle?.sessionId).toBe('main-a')
+  if (!original?.handle || !original.assertCurrent) throw new Error('Expected the original current source')
+  f.context.nativeHandle = original.handle
+  await f.control('close', 0)
+  await expect(f.discover()).resolves.toBeNull()
+  await expect(original.assertCurrent()).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE' })
+  expect(f.child.exitCode).toBeNull()
+  await f.control('open', 0)
+  const reacquired = await f.discover()
+  expect(reacquired?.handle).toEqual(original.handle)
+  await expect(reacquired!.assertCurrent!()).resolves.toBeUndefined()
+  expect(f.child.exitCode).toBeNull()
+})
 
 it.each(['codex', 'claude'] as const)('%s offers verified main choices and keeps selected membership when another main closes', async provider => {
   const f = await fixture(provider, [0, 1, 2, 3, 4]), candidates = candidateList(await f.discover())
