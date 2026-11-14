@@ -75,7 +75,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --config vitest.config.ts",
-    "build": "tsc -p tsconfig.build.json && node scripts/generate-theme-defaults.mjs --check",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-assets.mjs && node scripts/generate-theme-defaults.mjs --check",
     "generate:theme": "tsc -p tsconfig.build.json && node scripts/generate-theme-defaults.mjs"
   },
   "dependencies": {
