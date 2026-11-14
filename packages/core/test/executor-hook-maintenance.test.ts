@@ -46,6 +46,27 @@ it('checks the exact Host and preserves coexisting legacy entries through a mana
     await mkdir(dirname(mutation.path), { recursive: true })
     await writeFile(mutation.path, broken)
 
+    const { workspacePath: _workspace, ...userScope } = target
+    const relativeRead = await client.call('settings.executors.hooks-inspect', userScope)
+    expect(relativeRead).toMatchObject({ health: 'unknown', canUpdate: false,
+      inspection: { status: 'skipped', code: 'HOOK_WORKSPACE_REQUIRED', targets: [] } })
+    const relativeUpdate = await client.call('settings.executors.hooks-update', userScope)
+    expect(relativeUpdate.update.status).toBe('not-applicable')
+    expect(await readFile(mutation.path, 'utf8')).toBe(broken)
+
+    await client.call('settings.executors.register', { hostId: 'target', executorId: 'user-scope',
+      input: { config: { ...config, env: { GROK_HOME: join(fixture.root, 'private-grok') } } } })
+    const absoluteInventory = await client.call('settings.executors.discover', {
+      hostId: 'target', executorId: 'user-scope', refresh: false
+    })
+    const absoluteCheck = await runCompiledObjectCli(['--endpoint', 'unix:' + server.path, 'settings', 'executors', 'hooks-inspect',
+      '--host', target.hostId, '--runtime', target.runtimeId, '--executor', 'user-scope',
+      '--config-revision', absoluteInventory.executors[0]!.configRevision], objectCliEnvironment(fixture.root))
+    expect(absoluteCheck.code, absoluteCheck.stderr).toBe(0)
+    expect(JSON.parse(absoluteCheck.stdout).result).toMatchObject({ executorId: 'user-scope', health: 'issue',
+      inspection: { targets: [{ path: mutation.path, legacyDeclarations: 1, missingLegacyEntrypoints: 1 }] } })
+    expect(JSON.parse(absoluteCheck.stdout).result).not.toHaveProperty('workspacePath')
+
     const noted = await client.call('settings.executors.hooks-inspect', target)
     expect(noted).toMatchObject({ routeHostId: target.hostId, health: 'issue', update: { status: 'not-requested' },
       inspection: { status: 'partial', code: 'MANAGED_HOOK_LEGACY_CARRIER', targets: [{ path: mutation.path, legacyDeclarations: 1 }] } })
