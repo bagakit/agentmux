@@ -13,6 +13,8 @@ app.setPath('userData', join(import.meta.dirname, 'user-data'))
 app.on('window-all-closed', () => {})
 const protectionAtShow = new WeakMap<BrowserWindow, boolean[]>()
 app.on('browser-window-created', (_event, window) => {
+  // CDP still exercises the real page input path; physical mouse input passes through instead of racing the controlled gestures.
+  window.setIgnoreMouseEvents(true)
   const showInactive = window.showInactive.bind(window)
   window.showInactive = () => {
     const states = protectionAtShow.get(window) ?? []
@@ -53,8 +55,7 @@ async function key(key: string, code: string, virtual: number, modifiers = 0) {
 async function click(name: string) {
   const point = await evaluate(`(()=>{const b=[...document.querySelectorAll('button,[role=menuitem]')].find(b=>b.getAttribute('aria-label')===${JSON.stringify(name)}||b.textContent.trim()===${JSON.stringify(name)});if(!b)throw Error('Missing control '+${JSON.stringify(name)});const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,disabled:b.disabled}})()`)
   assert.equal(point.disabled, false, name + ' is available')
-  await mouse('mouseMoved', point.x, point.y); await mouse('mousePressed', point.x, point.y, 1)
-  await mouse('mouseReleased', point.x, point.y).catch(error => { if (!current.isDestroyed()) throw error })
+  await mouse('mouseMoved', point.x, point.y); await pointerClick(point)
   if (!current.isDestroyed() && !['Done', 'Cancel', 'Expand editor'].includes(name)) await settle()
 }
 async function sourcePoint(x: number, y: number) {
@@ -66,9 +67,15 @@ async function drag(x: number, y: number, width: number, height: number) {
   for (let step = 1; step <= 8; step++) await mouse('mouseMoved', a.x + (b.x-a.x)*step/8, a.y + (b.y-a.y)*step/8, 1)
   await mouse('mouseReleased', b.x, b.y); await settle()
 }
+async function pointerClick(point: { x: number; y: number }) {
+  const pressed = current.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x: point.x, y: point.y, button: 'left', buttons: 1, clickCount: 1 })
+  const released = current.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x: point.x, y: point.y, button: 'left', buttons: 0, clickCount: 1 })
+  // CDP preserves this command order; do not yield between a click's press and release for a native move to turn it into a drag.
+  await Promise.all([pressed, released.catch(error => { if (!current.isDestroyed()) throw error })])
+}
 async function clickPoint(x: number, y: number) {
   const point = await sourcePoint(x, y)
-  await mouse('mouseMoved', point.x, point.y); await mouse('mousePressed', point.x, point.y, 1); await mouse('mouseReleased', point.x, point.y); await settle()
+  await mouse('mouseMoved', point.x, point.y); await pointerClick(point); await settle()
 }
 async function switchedTo(background: CaptureBackground) {
   await key('Tab', 'Tab', 9)
@@ -150,7 +157,7 @@ async function waitOpen(background: CaptureBackground, before: Set<BrowserWindow
   }
   current.webContents.debugger.attach('1.3')
   current.webContents.on('console-message', event => process.stdout.write('renderer: '+event.message+'\n'))
-  await evaluate(`window.captureEvents=[];for(const type of ['pointerdown','pointerup','lostpointercapture'])document.addEventListener(type,event=>window.captureEvents.push({type,x:event.clientX,y:event.clientY,target:event.target.tagName,button:event.button}),true)`)
+  await evaluate(`window.captureEvents=[];for(const type of ['pointermove','pointerdown','pointerup','lostpointercapture'])document.addEventListener(type,event=>window.captureEvents.push({type,x:event.clientX,y:event.clientY,target:event.target.tagName,button:event.button,trusted:event.isTrusted}),true)`)
   await settle()
   assert.equal(await evaluate('typeof window.agentmux'), 'undefined', 'capture never receives the full application bridge')
   return { overlays, infos }
@@ -248,13 +255,16 @@ async function run() {
   await switchedTo('excluded')
   assert.equal(await evaluate(`window.originalCaptureCanvas===document.querySelector('canvas')`), true, 'Tab preserves the same editor canvas and document')
   assert.equal(await evaluate(`document.querySelector('[aria-label="Selection size"]')?.textContent`), '690 × 380 px', 'Tab preserves the original selection')
-  const marksAfter = await sceneMarkPixels()
+  let marksAfter = 0
+  await waitFor('the new frozen source paints the existing annotations', async () => (marksAfter = await sceneMarkPixels()) >= marksBefore * .95 ? marksAfter : null)
   assert.ok(marksAfter >= marksBefore * .95, 'Tab preserves the existing annotation pixels')
-  await key('z', 'KeyZ', 90, 4); await settle()
-  const undone = await sceneMarkPixels()
+  await key('z', 'KeyZ', 90, 4)
+  let undone = 0
+  await waitFor('Undo paints without the previous mark', async () => (undone = await sceneMarkPixels()) < marksAfter / 4 ? true : null)
   assert.ok(undone < marksAfter / 4, 'Undo still removes the mark created before Tab')
-  await key('Z', 'KeyZ', 90, 4 | 8); await settle()
-  const redone = await sceneMarkPixels()
+  await key('Z', 'KeyZ', 90, 4 | 8)
+  let redone = 0
+  await waitFor('Redo paints the same mark again', async () => (redone = await sceneMarkPixels()) >= marksAfter * .95 ? redone : null)
   assert.ok(redone >= marksAfter * .95, 'Redo restores the same mark after Tab')
   assert.equal(receipt.grabs.length, grabCount, 'Tab/Undo/Redo never ask Native for another frame')
   assert.equal(receipt.opacityChanges.length, opacityCount, 'Tab/Undo/Redo never alter the host opacity')
@@ -344,13 +354,15 @@ async function run() {
   const retaken = await waitOpen('included', beforeRetake, { displayId: 1, crop: { x: 130, y: 178, width: 690, height: 380 } }, retakeGrab)
   assert.equal(retaken.infos[0].initialState, undefined, 'the Retake surface receives crop only, not editor shapes or Undo')
   await shot('retake-continuation')
-  await key('Escape', 'Escape', 27)
+  const retakeCancelled = waitFor('Retake cancellation destroys every overlay', () => retaken.overlays.every(window => window.isDestroyed()) ? true : null)
+  await Promise.race([retakeCancelled, evaluate('window.captureSurface.load().then(i=>window.captureSurface.cancel(i.requestId))')])
+  await retakeCancelled
   assert.equal(productEditor.isDestroyed(), false, 'cancelling Retake returns to the original editor')
   current = productEditor
   await key('Escape', 'Escape', 27)
   await productPending
   const fresh = await open('included')
-  await key('Escape', 'Escape', 27)
+  await Promise.race([fresh.outcome, evaluate('window.captureSurface.load().then(i=>window.captureSurface.cancel(i.requestId))')])
   assert.deepEqual(await fresh.outcome, { state: 'cancelled' })
   assert.equal(receipt.reportedIssues, undefined)
   receipt.cases.push({ label: 'actual-expand-copy-retake-continuation-then-empty-fresh-capture', crop: retaken.infos[0].initialCrop })
@@ -363,7 +375,7 @@ async function run() {
 void run().catch(async error => {
   receipt.failure = { name: error.name, message: error.message, stack: error.stack }
   process.stderr.write(JSON.stringify(receipt.failure) + '\n')
-  try { if (current && !current.isDestroyed()) { receipt.failure.dom = await evaluate('document.body.innerText'); await shot('failure') } } catch {}
+  try { if (current && !current.isDestroyed()) { receipt.failure.dom = await evaluate('document.body.innerText'); receipt.failure.events = await evaluate('window.captureEvents'); await shot('failure') } } catch {}
 }).finally(async () => {
   surface?.dispose(); editor?.dispose()
   for (const window of BrowserWindow.getAllWindows()) window.destroy()
