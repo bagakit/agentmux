@@ -1,0 +1,5 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "noEmit": true, "allowJs": true, "rootDir": "../../.." },
+  "include": ["goal-responsibility-observation.test.ts", "vitest.goal-responsibility-observation.config.mts"]
+}
