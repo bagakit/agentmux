@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '../../..')
@@ -10,6 +10,11 @@ const vitest = require.resolve('vitest/vitest.mjs')
 const evidence = mkdtempSync(join(root, '.tmp/ui-selection-field-verification-'))
 const receipt = { schema: 'agentmux.ui-selection-field-verification.v1', passed: false, cases: [] }
 const mutants = ['saved-inference', 'drop-description', 'disable-missing']
+const expectedAssertions = {
+  'saved-inference': ['does not infer a saved selection from a missing option', 'Saved selection'],
+  'drop-description': ['uses the caller-provided missing identity and field description', 'runtime-hint'],
+  'disable-missing': ['keeps an unknown missing value visible and selectable without marking it disabled', 'aria-disabled'],
+}
 
 function run(label, mutant) {
   const directory = join(evidence, label)
@@ -20,7 +25,9 @@ function run(label, mutant) {
   })
   writeFileSync(join(directory, 'process.log'), (result.stdout ?? '') + (result.stderr ?? ''))
   assert.ifError(result.error)
-  const loaded = readFileSync(join(directory, 'loaded-source.jsonl'), 'utf8').trim().split('\n').map(JSON.parse)
+  const loadedPath = join(directory, 'loaded-source.jsonl')
+  const loaded = existsSync(loadedPath) ? readFileSync(loadedPath, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : []
+  const log = (result.stdout ?? '') + (result.stderr ?? '')
   const applied = loaded.filter(item => item.applied)
   receipt.cases.push({ label, mutant, exitCode: result.status, applied })
   if (mutant === 'baseline') {
@@ -30,6 +37,7 @@ function run(label, mutant) {
     assert.equal(result.status, 1, `${label}: production mutant must fail its targeted assertion`)
     assert.equal(applied.length, 1, `${label}: exactly one loaded production mutation`)
     assert.notEqual(applied[0].originalSHA256, applied[0].consumedSHA256, `${label}: loaded source must actually change`)
+    for (const text of expectedAssertions[mutant]) assert.ok(log.includes(text), `${label}: targeted assertion is required: ${text}`)
   }
 }
 

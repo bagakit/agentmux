@@ -22,10 +22,14 @@ function validate(review, directory) {
   assert.equal(capture.sourceIdentity, review.sourceIdentity, 'Review and capture must share sourceIdentity')
   for (const [file, digest] of Object.entries(review.sourceHashes ?? {})) {
     assert.equal(capture.sources?.[file], digest, `Reviewed source hash must match capture: ${file}`)
+    assert.equal(sha(readFileSync(resolve(root, file))), digest, `Reviewed source must match the current candidate: ${file}`)
   }
   const actual = [...review.actualViews].sort()
   const declared = review.images.map(image => image.path).sort()
   assert.deepEqual(actual, declared, 'Every declared image must be actually viewed, with no extras')
+  const captured = (capture.images ?? []).map(image => image.path ?? image.image).filter(Boolean).sort()
+  assert.ok(captured.length > 0, 'Capture must declare its actual image set')
+  assert.deepEqual(declared, captured, 'Review must cover exactly every captured image and no unrelated file')
   for (const image of review.images) {
     const path = resolve(directory, image.path)
     assert.equal(sha(readFileSync(path)), image.sha256, `Reviewed PNG must be unchanged: ${image.path}`)
@@ -38,10 +42,10 @@ function selfTest() {
   const directory = mkdtempSync(join(root, '.tmp/ui-selection-visual-self-test-'))
   const image = join(directory, 'node.png')
   writeFileSync(image, Buffer.from('controlled-png-content'))
-  const source = { 'apps/desktop/src/renderer/src/components/SelectionField.tsx': sha('selection-source') }
+  const source = { 'apps/desktop/src/renderer/src/components/SelectionField.tsx': sha(readFileSync(resolve(root, 'apps/desktop/src/renderer/src/components/SelectionField.tsx'))) }
   const sourceIdentity = sha(JSON.stringify(source))
   const receiptPath = join(directory, 'capture.json')
-  writeFileSync(receiptPath, JSON.stringify({ sourceIdentity, sources: source }))
+  writeFileSync(receiptPath, JSON.stringify({ sourceIdentity, sources: source, images: [{ path: 'node.png' }] }))
   const receiptSHA = sha(readFileSync(receiptPath))
   const review = {
     schema: 'agentmux.ui-selection-visual-review.v1', reviewer: 'independent-ui-reviewer', verdict: 'approved', mustFix: [], unconfirmed: ['controlled fixture only'],

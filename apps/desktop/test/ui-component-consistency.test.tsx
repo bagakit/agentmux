@@ -7,6 +7,13 @@ import { join, resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '../../..')
 const script = join(root, 'apps/desktop/scripts/inventory-ui-components.mjs')
 const output = join(root, 'docs/reviews/ui-component-inventory.json')
+const expectedSelectionConsumers = [
+  'AgentConnectorDialog', 'AgentCurrentForkControls', 'AgentExecutorPicker', 'AgentWorkModeSetup', 'ConnectorRoomSelection',
+  'GlobalBoardSurface', 'GoalAgentPicker', 'GoalProperties', 'GoalRelationAccessFields', 'GoalSourceCreation',
+  'LaunchOptionControls', 'MailboxCollaboration', 'MoteBotSetup', 'MoteConnectionIdentity', 'MoteCurrentWork', 'MotePrivateChat',
+  'MoteQuickMode', 'NoteConflictReview', 'RetainedDocumentDraftNotice', 'SessionLearningSurface', 'SessionTakeoverSurface',
+  'SourceAgentTargetSetup', 'SurveyMoveTabsDialog', 'SurveyProfilePicker', 'settings/BotEnrollmentPane', 'settings/BrowserSettingsPane',
+].map(name => `apps/desktop/src/renderer/src/components/${name}.tsx`)
 let inventory
 
 beforeAll(() => {
@@ -17,12 +24,13 @@ beforeAll(() => {
 describe('production UI component inventory', () => {
   it('derives real shared components and every SelectionField consumer form', () => {
     const components = new Set(inventory.components.map(item => item.name))
-    for (const name of ['Button', 'IconButton', 'FormRow', 'SelectionField', 'AgentExecutorPicker', 'AgentComposer', 'ConversationMessage', 'MobileGoalsSurface']) expect(components.has(name)).toBe(true)
+    for (const name of ['Button', 'IconButton', 'FormRow', 'SelectionField', 'AgentExecutorPicker', 'AgentComposer', 'ConversationMessage', 'MobileGoalsSurface', 'WorkflowSemanticIcon', 'GoalStageMark']) expect(components.has(name)).toBe(true)
     const selection = inventory.consumers.filter(item => item.component === 'SelectionField')
     expect(selection.length).toBeGreaterThanOrEqual(26)
     for (const kind of ['import', 'jsx', 'literal-path', 'dynamic-path']) expect(selection.some(item => item.kind === kind)).toBe(true)
     for (const file of ['apps/desktop/src/renderer/src/components/AgentWorkModeSetup.tsx', 'apps/desktop/src/renderer/src/components/SurveyProfilePicker.tsx', 'apps/desktop/scripts/capture-space-launcher.mjs'])
       expect(selection.some(item => item.file === file)).toBe(true)
+    for (const file of expectedSelectionConsumers) expect(selection.some(item => item.kind === 'import' && item.file === file), `Missing known SelectionField consumer: ${file}`).toBe(true)
   })
 
   it('covers native select surfaces and names independently verifiable follow-up work', () => {

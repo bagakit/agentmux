@@ -27,8 +27,34 @@ it('uses the caller-provided missing identity and field description without repl
   expect(ids).toContain('runtime-hint')
   expect(ids.length).toBeGreaterThan(1)
   const internalId = ids.find(id => id !== 'runtime-hint')!
+  expect(document.getElementById(internalId)?.textContent).toContain('Previous Agent selection unavailable')
   expect(document.getElementById(internalId)?.textContent).toContain('Unsaved draft · identity not confirmed')
   expect(trigger.title).toContain('host-original')
+})
+
+it('keeps search results ahead of an enabled unknown placeholder for keyboard selection', async () => {
+  const changed = vi.fn(), many = Array.from({ length: 10 }, (_, index) => ({ value: `option-${index}`, label: `Option ${index}` }))
+  await act(async () => root.render(<SelectionField label="Original choice" value="unsaved-draft" options={many} onValueChange={changed} />)); await settle()
+  const trigger = container.querySelector<HTMLButtonElement>('button')!
+  await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))); await settle()
+  const input = document.querySelector<HTMLInputElement>('.selection-field__search input')!
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Option 3'); input.dispatchEvent(new Event('input', { bubbles: true })) }); await settle()
+  await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))); await settle()
+  expect(document.activeElement?.dataset.value).toBe('option-3')
+  await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))); await settle()
+  expect(changed).toHaveBeenCalledExactlyOnceWith('option-3')
+  expect(trigger.dataset.value).toBe('unsaved-draft')
+})
+
+it('marks the unknown placeholder disabled when the whole field is disabled', async () => {
+  const changed = vi.fn()
+  await act(async () => root.render(<SelectionField label="Original choice" value="unsaved-draft" options={options} onValueChange={changed} />)); await settle()
+  const trigger = container.querySelector<HTMLButtonElement>('button')!
+  await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))); await settle()
+  await act(async () => root.render(<SelectionField label="Original choice" value="unsaved-draft" options={options} onValueChange={changed} disabled />)); await settle()
+  const missing = document.querySelector<HTMLElement>('.selection-field__menu [role="menuitemradio"][aria-checked="true"]')!
+  expect(missing.getAttribute('aria-disabled')).toBe('true')
+  expect(changed).not.toHaveBeenCalled()
 })
 
 it('keeps an unknown missing value visible and selectable without marking it disabled', async () => {

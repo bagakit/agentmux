@@ -13,7 +13,7 @@ const file = 'apps/desktop/src/renderer/src/components/SelectionField.tsx'
 const edits = {
   'saved-inference': { before: "missingOptionLabel = 'Not in current options'", after: "missingOptionLabel = 'Saved selection · not in current options'" },
   'drop-description': { before: 'aria-describedby={describedByIds} aria-labelledby={labelledBy}', after: 'aria-describedby={descriptionId} aria-labelledby={labelledBy}' },
-  'disable-missing': { before: '<Menu.RadioItem className="tab-context-menu__item selection-field__option" value={value}>', after: '<Menu.RadioItem className="tab-context-menu__item selection-field__option" value={value} disabled>' },
+  'disable-missing': { before: '<Menu.RadioItem className="tab-context-menu__item selection-field__option" value={value} data-missing disabled={disabled}>', after: '<Menu.RadioItem className="tab-context-menu__item selection-field__option" value={value} data-missing disabled>' },
 }
 assert.ok(mutant === 'baseline' || edits[mutant], 'Known SelectionField mutation')
 const sha = text => createHash('sha256').update(text).digest('hex')
