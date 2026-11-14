@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve, relative, extname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from '../../probe-process.mjs'
+import { createCssSourceOverlay } from './css-source-overlay.mjs'
 
 const fixture = import.meta.dirname, root = resolve(fixture, '../../../../..'), desktop = join(root, 'apps/desktop')
 assert.ok(process.argv.length === 3, 'Use capture-shared-motion.mjs <empty-evidence-directory>')
@@ -35,13 +36,15 @@ try {
       aliases.push({ find: new RegExp('^' + pattern + '$'), replacement: resolve(root, 'packages', name, source).replace('*', '$1') })
     }
   }
-  receipt.harness = Object.fromEntries(await Promise.all(['capture-shared-motion.mjs', 'shared-motion.html', 'shared-motion.tsx', 'shared-motion-main.cjs'].map(async file => [file, hash(await readFile(join(fixture, file)))])))
+  receipt.harness = Object.fromEntries(await Promise.all(['capture-shared-motion.mjs', 'shared-motion.html', 'shared-motion.tsx', 'shared-motion-main.cjs', 'css-source-overlay.mjs'].map(async file => [file, hash(await readFile(join(fixture, file)))])))
   const { build } = await import(pathToFileURL(require.resolve('vite')).href)
   const sourcePlugin = { name: 'shared-motion-source-bytes', enforce: 'pre', load(id) { if (!id.includes('?') && overlays.has(id)) return overlays.get(id).toString('utf8') }, transform(source, id) { if (id.startsWith(root + '/') && !id.includes('/node_modules/') && !id.includes('?') && /\.(?:tsx?|jsx?|css)$/.test(id)) receipt.inputs[relative(root, id)] = hash(source) } }
-  await build({ configFile: false, root: fixture, logLevel: 'error', worker: { format: 'es', plugins: () => [sourcePlugin] }, esbuild: { jsx: 'automatic' }, resolve: { alias: aliases, conditions: ['browser', 'import', 'production', 'default'], dedupe: ['react', 'react-dom'] },
+  const css = await createCssSourceOverlay({ root, privateRoot, overlays, inputs: receipt.inputs, vitePackage: require.resolve('vite/package.json') })
+  await build({ configFile: false, root: fixture, logLevel: 'error', worker: { format: 'es', plugins: () => [sourcePlugin, css.plugin] }, css: { postcss: { plugins: [css.observer] } }, esbuild: { jsx: 'automatic' }, resolve: { alias: aliases, conditions: ['browser', 'import', 'production', 'default'], dedupe: ['react', 'react-dom'] },
     build: { outDir: compiled, target: 'esnext', minify: false, rollupOptions: { input: join(fixture, 'shared-motion.html') } },
-    plugins: [sourcePlugin] })
-  async function outputs(directory) { for (const entry of await readdir(directory, { withFileTypes: true })) { const file = join(directory, entry.name); if (entry.isDirectory()) await outputs(file); else receipt.outputs[relative(compiled, file)] = hash(await readFile(file)) } }
+    plugins: [sourcePlugin, css.plugin] })
+  receipt.cssSourceProof = { ...css.verify(), outputs: {} }
+  async function outputs(directory) { for (const entry of await readdir(directory, { withFileTypes: true })) { const file = join(directory, entry.name); if (entry.isDirectory()) await outputs(file); else { const bytes = await readFile(file); receipt.outputs[relative(compiled, file)] = hash(bytes); if (file.endsWith('.css')) receipt.cssSourceProof.outputs[relative(compiled, file)] = css.emitted(bytes) } } }
   await outputs(compiled)
   server = createServer(async (request, response) => { try { const file = resolve(compiled, '.' + new URL(request.url, 'http://fixture.test').pathname); assert.ok(file.startsWith(compiled + '/')); response.setHeader('Content-Type', ({ '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2' })[extname(file)] ?? 'application/octet-stream'); response.end(await readFile(file)) } catch { response.writeHead(404); response.end() } })
   await new Promise(done => server.listen(0, '127.0.0.1', done))

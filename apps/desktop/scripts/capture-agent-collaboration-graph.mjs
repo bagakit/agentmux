@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os'
 import { resolve, relative, extname, sep, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
+import { createCssSourceOverlay } from './fixtures/agent-collaboration-graph/css-source-overlay.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'apps/desktop')
 const fixture = join(desktop, 'scripts/fixtures/agent-collaboration-graph')
@@ -74,6 +75,7 @@ const privateRoot = compiling ? resolve(process.argv[3]) : await mkdtemp(join(tm
 assert.ok(privateRoot.startsWith(join(tmpdir(), 'amux-collaboration-capture-')) && !relative(tmpdir(), privateRoot).includes(sep), 'Compilation stays in its own private capture root')
 const require = createRequire(join(desktop, 'package.json')), hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const sources = {}, foreignWorkspaceSources = {}, isolated = [], instrumented = [], logs = []
+let cssSourceProof
 const sourceRef = process.env.COLLABORATION_CAPTURE_SOURCE_REF
 const sourceOverlay = { revision: sourceRef ? execFileSync('git', ['rev-parse', '--verify', sourceRef + '^{commit}'], { cwd: root, encoding: 'utf8' }).trim() : null, files: {} }
 const overlayBytes = new Map()
@@ -167,17 +169,28 @@ async function compileRenderer() {
     }, async generateBundle() {
       for (const file of this.getWatchFiles()) if (file.startsWith(root + sep) && !file.includes('/node_modules/') && file.endsWith('.css')) sources[relative(root, file)] = hash(await sourceBytes(file))
     } }
-  await build({ configFile: false, logLevel: 'error', root: fixture, worker: { format: 'es', plugins: () => [sourcePlugin] },
+  const css = await createCssSourceOverlay({ root, privateRoot, overlays: overlayBytes, inputs: sources, vitePackage: require.resolve('vite/package.json') })
+  await build({ configFile: false, logLevel: 'error', root: fixture, worker: { format: 'es', plugins: () => [sourcePlugin, css.plugin] },
+    css: { postcss: { plugins: [css.observer] } },
     define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, esbuild: { jsx: 'automatic' },
     resolve: { alias: [...aliases, { find: '@agentmux/identity', replacement: join(root, 'packages/identity/src/index.ts') }], conditions: ['browser', 'import', 'production', 'default'], dedupe: ['react', 'react-dom'] },
     build: { outDir: compiled, emptyOutDir: true, target: 'esnext', minify: false },
-    plugins: [sourcePlugin] })
+    plugins: [sourcePlugin, css.plugin] })
+  cssSourceProof = { ...css.verify(), outputs: {} }
+  async function bindCSSOutputs(directory) {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const file = join(directory, entry.name)
+      if (entry.isDirectory()) await bindCSSOutputs(file)
+      else if (file.endsWith('.css')) cssSourceProof.outputs[relative(compiled, file)] = css.emitted(await readFile(file))
+    }
+  }
+  await bindCSSOutputs(compiled)
 }
 if (compiling) {
   await publishCompilation({ phase: 'starting', transformed: 0 })
   try {
     await compileRenderer()
-    await publishCompilation({ phase: 'complete', inputs: sources, foreignWorkspaceSources, isolated, instrumented, sourceOverlay })
+    await publishCompilation({ phase: 'complete', inputs: sources, foreignWorkspaceSources, isolated, instrumented, sourceOverlay, cssSourceProof })
     process.exit(0)
   } catch (error) {
     await publishCompilation({ phase: 'failed', failure: error.message })
@@ -188,7 +201,7 @@ const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key
 Object.assign(env, { AGENTMUX_DESKTOP_USER_DATA: join(privateRoot, 'user-data'), AGENTMUX_RUNTIME_DIRECTORY: join(privateRoot, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(privateRoot, 'state'), COLLABORATION_CAPTURE_NODE: process.execPath })
 let server
 try {
-  const harnessFiles = ['index.html', 'entry.tsx', 'main.cjs', 'perception.cjs', 'terrain.cjs', 'adaptive.cjs', 'adaptive-observer.ts', 'settings.cjs', 'server-host.mjs', 'scenario.md', ...(scenario === 'endpoints' ? ['endpoints.cjs'] : []), ...(scenario === 'dispatch-motion' ? ['dispatch-motion.cjs', 'dispatch-motion.md'] : [])].map(name => join(fixture, name)).concat([scriptPath, join(desktop, 'scripts/probe-process.mjs'), join(desktop, 'scripts/fixtures/desktop-map/source-loader.mjs'), join(desktop, 'scripts/fixtures/performance-failure-evidence/source-loader.mjs'), join(desktop, 'test/helpers/desktop-map-source-mutations.mjs'), join(root, 'packages/core/dist/control-endpoint-listener-worker.js'), join(root, 'packages/core/src/control-endpoint-listener-worker.ts')])
+  const harnessFiles = ['index.html', 'entry.tsx', 'main.cjs', 'perception.cjs', 'terrain.cjs', 'adaptive.cjs', 'adaptive-observer.ts', 'settings.cjs', 'server-host.mjs', 'scenario.md', 'css-source-overlay.mjs', ...(scenario === 'endpoints' ? ['endpoints.cjs'] : []), ...(scenario === 'dispatch-motion' ? ['dispatch-motion.cjs', 'dispatch-motion.md'] : [])].map(name => join(fixture, name)).concat([scriptPath, join(desktop, 'scripts/probe-process.mjs'), join(desktop, 'scripts/fixtures/desktop-map/source-loader.mjs'), join(desktop, 'scripts/fixtures/performance-failure-evidence/source-loader.mjs'), join(desktop, 'test/helpers/desktop-map-source-mutations.mjs'), join(root, 'packages/core/dist/control-endpoint-listener-worker.js'), join(root, 'packages/core/src/control-endpoint-listener-worker.ts')])
   receipt.harness = Object.fromEntries(await Promise.all(harnessFiles.map(async file => [relative(root, file), hash(await readFile(file))])))
   receipt.publicTransport = ['endpoints', 'dispatch-motion'].includes(scenario) ? { boundary: 'No public transport or lifecycle operation is exercised by the isolated presentation increment. CLI navigation is separately owned evidence, not claimed by these frames.' } : { boundary: 'Original Core source publication spawns its existing compiled listener asset; only listener transport uses dist. Its bytes and corresponding source are bound in harness; CLI, Core business and Renderer remain original source.', file: 'packages/core/dist/control-endpoint-listener-worker.js' }
   receipt.phase = 'compiling'; await writeFile(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
@@ -216,6 +229,11 @@ try {
     }
   }
   await recordOutputs(compiled)
+  if (sourceRef && scenario === 'dispatch-motion') {
+    const names = [...new Set(Object.values(receipt.compilation.cssSourceProof.outputs).flatMap(output => output.packetAnimationNames))]
+    assert.equal(names.length, 1, 'The original emitted packet animation must be unambiguous before Native observation')
+    env.COLLABORATION_CAPTURE_EXPECT_PACKET_ANIMATION = names[0]
+  }
   const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.woff': 'font/woff', '.wasm': 'application/wasm' }
   server = createServer(async (request, response) => {
     try { const pathname = decodeURIComponent(new URL(request.url, 'http://fixture.test').pathname)

@@ -35,6 +35,9 @@ function assertNativeTravel(stages) {
   const paths = first.before.animations.filter(animation => animation.tag === 'path' && animation.target?.split(' ').includes('collaboration-edge__packet'))
   if (!paths.length) {
     assert.ok(first.before.activity.packets.length > 0, 'The original baseline packet is actually present')
+    const beforeDistance = first.before.activity.packets[0].distance, afterDistance = middle.before.activity.packets[0]?.distance
+    assert.ok(beforeDistance.endsWith('%') && afterDistance?.endsWith('%'), 'The original circle must expose its native offset-distance percentage')
+    assert.ok(parseFloat(afterDistance) > parseFloat(beforeDistance) + 1, 'The original circle must actually advance along its native path')
     return
   }
   const numeric = value => {
@@ -99,6 +102,15 @@ module.exports = async function dispatchMotion({ win, result, read, click, key, 
       await frame(name, { motion: true })
       const after = await read('performance.now()')
       data.stages.push({ label: name, events, requestedMS: offset, before, captureRangeMS: [before.at - start, after - start] })
+      if (label === 'dispatch-dark-normal' && phase === 'start' && process.env.COLLABORATION_CAPTURE_EXPECT_PACKET_ANIMATION) {
+        const expected = process.env.COLLABORATION_CAPTURE_EXPECT_PACKET_ANIMATION, packets = before.activity.packets
+        assert.ok(packets.length > 0, 'The original CSS packet must be observed before the remaining matrix')
+        for (const packet of packets) assert.equal(packet.animationName, expected, 'Native packet animation must match the original emitted CSS, not physical candidate CSS')
+        const native = before.animations.filter(animation => animation.target?.split(' ').includes('collaboration-edge__packet'))
+        assert.ok(native.length > 0)
+        if (native[0].tag === 'circle') assert.equal(native[0].duration, await read('window.graphCapture.activityMS'), 'The original circle keeps its original observation-duration animation')
+        data.baselineNativeCSS = { expectedAnimation: expected, actualAnimation: packets[0].animationName, tag: native[0].tag, durationMS: native[0].duration }
+      }
       if (label === 'dispatch-dark-normal' && phase === 'middle') assertNativeTravel(data.stages)
     }
   }

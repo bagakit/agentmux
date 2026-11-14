@@ -1,8 +1,9 @@
 const assert = require('node:assert/strict'), fs = require('node:fs/promises'), path = require('node:path'), { gzipSync } = require('node:zlib')
 const { app, BrowserWindow } = require('electron')
 const [url, privateRoot, evidence] = process.argv.slice(2)
+const costOnly = process.env.COLLABORATION_CAPTURE_SHARED_COST_ONLY === '1'
 for (const name of ['home', 'appData', 'userData', 'sessionData']) app.setPath(name, path.join(privateRoot, name))
-const result = { schema: 'agentmux.shared-motion-native.v1', passed: false, frames: [], observations: [], rendererErrors: [], transitions: [], nativeGuards: [], electron: process.versions.electron, chromium: process.versions.chrome, physicalRefreshQualified: false }
+const result = { schema: 'agentmux.shared-motion-native.v1', passed: false, captureSubset: costOnly ? 'cost-only' : 'visual-and-cost', frames: [], observations: [], rendererErrors: [], transitions: [], nativeGuards: [], electron: process.versions.electron, chromium: process.versions.chrome, physicalRefreshQualified: false }
 let win
 app.whenReady().then(async () => {
   const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -13,13 +14,14 @@ app.whenReady().then(async () => {
     const settle = () => read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
     const until = async predicate => { const end = Date.now() + 8000; do { if (await predicate()) return; await pause(30) } while (Date.now() < end); throw Error('Shared native consumer did not reach the declared state') }
     const facts = async () => read(`(()=>{const bounds=element=>{const rect=element.getBoundingClientRect();return{x:rect.x,y:rect.y,width:rect.width,height:rect.height}},panels=[...document.querySelectorAll('.conversation-disclosure')].map(element=>({open:element.dataset.open,inert:element.inert,hidden:element.getAttribute('aria-hidden'),...bounds(element)}));return{at:performance.now(),...window.sharedMotion.facts(),panels,animations:document.getAnimations().map(animation=>({target:animation.effect?.target?.getAttribute('class'),time:animation.currentTime,progress:animation.effect?.getComputedTiming().progress,duration:animation.effect?.getComputedTiming().duration})),reduced:matchMedia('(prefers-reduced-motion: reduce)').matches,appearance:document.documentElement.dataset.appearance,viewport:[innerWidth,innerHeight]}})()`)
-    const frame = async label => { const before = await facts(), file = label + '.png'; await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG()); const after = await read('performance.now()'); result.frames.push({ label, file, viewport: win.getContentSize(), captureRangeMS: [before.at, after] }); result.observations.push({ label, ...before }) }
+    const frame = async label => { if (costOnly && label !== 'shared-cost-before' && label !== 'shared-cost-after') return; const before = await facts(), file = label + '.png'; await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG()); const after = await read('performance.now()'); result.frames.push({ label, file, viewport: win.getContentSize(), captureRangeMS: [before.at, after] }); result.observations.push({ label, ...before }) }
     const point = async selector => read(`(()=>{const element=document.querySelector(${JSON.stringify(selector)});if(!element)throw Error('Missing original shared control: '+${JSON.stringify(selector)});element.scrollIntoView({block:'center'});const rect=element.getBoundingClientRect();return{x:rect.x+rect.width/2,y:rect.y+rect.height/2}})()`)
     const pointer = async (selector, type) => { const position = await point(selector); await send('Input.dispatchMouseEvent', { type, ...position, ...(type === 'mouseMoved' ? {} : { button: 'left', clickCount: 1 }) }) }
     const click = async selector => { await pointer(selector, 'mouseMoved'); await pointer(selector, 'mousePressed'); await pointer(selector, 'mouseReleased'); await settle() }
     const key = async (value, modifiers = 0) => { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: value, code: value, modifiers, ...(value === 'Tab' ? { windowsVirtualKeyCode: 9 } : {}) }) }
     const markButton = async (text, attribute) => { assert.ok(await read(`(()=>{const button=[...document.querySelectorAll('button')].find(element=>element.textContent.trim()===${JSON.stringify(text)}||element.getAttribute('aria-label')===${JSON.stringify(text)});if(!button)return false;button.setAttribute(${JSON.stringify(attribute)},'');return true})()`), text); return '[' + attribute + ']' }
     const transition = async (label, action) => {
+      if (costOnly) { const before = await facts(); await action(); await pause(420); result.transitions.push({ label, before, after: await facts(), nativeFrames: 0, captureSkipped: true }); return }
       let count = 0, pending = Promise.resolve()
       const listener = (_event, method, params) => {
         if (method !== 'Page.screencastFrame') return
@@ -74,6 +76,7 @@ app.whenReady().then(async () => {
     await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] }); await transition('shared-reduced-tool-close', () => click(tool)); await frame('shared-reduced-static')
     win.setContentSize(1100, 1060); await settle()
     await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] })
+    if (costOnly) await frame('shared-cost-before')
     let resolveTrace, stream, tracing = false
     const traceDone = new Promise(resolve => { resolveTrace = resolve })
     const traceListener = (_event, method, params) => { if (method === 'Tracing.tracingComplete') resolveTrace(params) }
@@ -106,7 +109,8 @@ app.whenReady().then(async () => {
         boundary: 'One original shared tree, natural open/close transitions and native input. Inclusive pipeline categories overlap and are not added; task union is occupied wall time, not CPU or total GPU cost. Native tracing/protocol/query overhead is uncalibrated and not subtracted. No screenshots or screencast inside this cost window. Unrelated-scale evidence belongs to the separate original Focus App scene, not this bounded component scene.' }
     } finally { win.webContents.debugger.off('message', traceListener); if (tracing) await send('Tracing.end').catch(() => {}); if (stream) await send('IO.close', { handle: stream }).catch(() => {}) }
     result.finalFacts = await facts(); result.inputValue = await read(`document.querySelector('[aria-label="Unsent review note"]').value`); assert.ok(result.inputValue.includes('retained'))
-    assert.deepEqual(result.rendererErrors, []); assert.ok(result.frames.length >= 20)
+    if (costOnly) await frame('shared-cost-after')
+    assert.deepEqual(result.rendererErrors, []); assert.ok(result.frames.length >= (costOnly ? 2 : 20))
     result.nativeGuardStatus = result.nativeGuards.length ? 'observed' : 'not-applicable-original-baseline'
     if (!process.env.COLLABORATION_CAPTURE_SOURCE_REF) assert.ok(result.nativeGuards.length >= 2, 'Candidate native focus guards must actually execute')
     result.passed = true

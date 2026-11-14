@@ -19,7 +19,7 @@ const receipt = { schema: 'agentmux.dispatch-navigation-capture.v1', captureOnly
   boundary: 'Original App/Store and isolated source Core public server/source CLI app.focus/app.inspect via existing server-host and App admission callback. No installed App, user focus, live Provider, Run lifecycle or restart.' }
 let server
 try {
-  receipt.harness = Object.fromEntries(await Promise.all(['capture-dispatch-navigation.mjs', 'dispatch-navigation-main.cjs', 'entry.tsx', 'server-host.mjs'].map(async file => [file, hash(await readFile(join(fixture, file)))])))
+  receipt.harness = Object.fromEntries(await Promise.all(['capture-dispatch-navigation.mjs', 'dispatch-navigation-main.cjs', 'entry.tsx', 'server-host.mjs', 'css-source-overlay.mjs', '../../capture-agent-collaboration-graph.mjs', '../../probe-process.mjs'].map(async file => [file, hash(await readFile(join(fixture, file)))])))
   receipt.compilationProcess = await runProbeProcess(process.execPath, [join(desktop, 'scripts/capture-agent-collaboration-graph.mjs'), '--compile', privateRoot, evidence, '--scenario', 'dispatch-motion'], { temporaryRoot: privateRoot, env, cwd: root, timeoutMs: 120000 })
   receipt.compilation = JSON.parse(await readFile(join(evidence, 'compilation.json')))
   assert.equal(receipt.compilation.phase, 'complete'); assert.equal(receipt.compilationProcess.exitCode, 0); assert.equal(receipt.compilationProcess.exitConfirmed, true)
