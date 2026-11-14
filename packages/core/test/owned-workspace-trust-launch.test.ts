@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -7,6 +7,7 @@ import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import { AgentProviderRegistry, type AgentProvider, type AgentWorkspaceTrustContext, type AgentWorkspaceTrustReceipt } from '../src/agent-provider.js'
 import type { AgentMuxClientEvent, AgentMuxStoredAgentSession } from '../src/types.js'
 import type { CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
+import { parseRpcAgentSession } from '../src/rpc-native-codec.js'
 
 /**
  * A Mote's first question used to land in Claude's "trust this folder?" prompt and exit the Run.
@@ -42,6 +43,7 @@ beforeEach(async () => {
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(root, 'runtime'))
   vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'state'))
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
+  vi.stubEnv('CURSOR_DATA_DIR', join(root, 'cursor-data'))
   trust = vi.fn(async (context: AgentWorkspaceTrustContext): Promise<AgentWorkspaceTrustReceipt> =>
     ({ status: 'trusted', trustKey: context.workspacePath, configPath: join(root, '.claude.json'), code: 'CLAUDE_TRUST_RECORDED' }))
   // The Host's directory-identity owner answers for exactly one home.
@@ -49,7 +51,8 @@ beforeEach(async () => {
   const claude = new AgentProviderRegistry().get('claude')
   const provider: AgentProvider = { ...claude, prepareOwnedWorkspaceTrust: context => trust(context) }
   store = new AgentMuxFileAgentSessionStore(join(root, 'sessions.json'))
-  client = new AgentMuxClient({ store, providers: [provider], ownedWorkspaceRoots: () => owned() })
+  const cursor = new AgentProviderRegistry().get('cursor')
+  client = new AgentMuxClient({ store, providers: [provider, cursor], ownedWorkspaceRoots: () => owned() })
   const inner = client as unknown as Internals
   await inner.registry.load('local')
   inner.connected = true
@@ -80,8 +83,8 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true })
 })
 
-const create = (workspacePath: string, id = 'private-session') => client.createAgentWithDelivery({ agentSessionId: id, createOperationId: `create-${id}`,
-  providerId: 'claude', executorId: 'private-executor', workspacePath, injectAgentMuxGuide: false })
+const create = (workspacePath: string, id = 'private-session', providerId = 'claude') => client.createAgentWithDelivery({ agentSessionId: id, createOperationId: `create-${id}`,
+  providerId, executorId: 'private-executor', workspacePath, injectAgentMuxGuide: false })
 
 describe('Core pre-trusts a Host-confirmed home before creating a Provider there', () => {
   it('prepares trust for the confirmed Mote home before the Run starts', async () => {
@@ -93,6 +96,14 @@ describe('Core pre-trusts a Host-confirmed home before creating a Provider there
     expect(events.filter(event => event.type === 'agent-error')).toEqual([])
   })
 
+  it('consumes the same exact-home Provider seam on a Cursor creation', async () => {
+    const created = await create(home, 'cursor-session', 'cursor')
+    expect(created.creation.workspaceTrust).toMatchObject({ status: 'trusted', step: 'trust-record', trustKey: home, code: 'CURSOR_TRUST_RECORDED' })
+    const { cursorTrustMarkerPath } = await import('../src/providers/cursor.js')
+    expect(JSON.parse(await readFile(cursorTrustMarkerPath(home, { CURSOR_DATA_DIR: join(root, 'cursor-data') }), 'utf8')).workspacePath).toBe(home)
+    expect(trust).not.toHaveBeenCalled()
+  })
+
   it('leaves a folder the Host does not confirm to the Provider\'s own prompt', async () => {
     await create(project)
     expect(owned).toHaveBeenCalled()
@@ -100,12 +111,47 @@ describe('Core pre-trusts a Host-confirmed home before creating a Provider there
     expect(start).toHaveBeenCalledTimes(1)
   })
 
+  it('does not trust a foreign repository nested inside a confirmed home', async () => {
+    const foreign = join(home, 'refs', 'foreign')
+    await mkdir(join(foreign, '.git'), { recursive: true })
+    await create(foreign)
+    expect(trust).not.toHaveBeenCalled()
+    expect(start).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not trust a symlink escaping from a confirmed home', async () => {
+    const alias = join(home, 'external')
+    await symlink(project, alias)
+    await create(alias)
+    expect(trust).not.toHaveBeenCalled()
+    expect(start).toHaveBeenCalledTimes(1)
+  })
+
+  it('trusts the exact confirmed home through its legitimate alias', async () => {
+    const alias = join(root, 'retained-home')
+    await symlink(home, alias)
+    await create(alias)
+    expect(trust).toHaveBeenCalledTimes(1)
+    expect(trust.mock.calls[0]![0]).toMatchObject({ ownedRoot: home, workspacePath: home })
+  })
+
   it('launches anyway and names the unconfirmed trust when preparation cannot confirm it', async () => {
     trust.mockResolvedValueOnce({ status: 'unconfirmed', trustKey: home, configPath: null, code: 'CLAUDE_TRUST_UNCONFIRMED', issue: 'lock busy' })
-    await create(home)
+    const created = await create(home)
     expect(start).toHaveBeenCalledTimes(1)
     expect(events).toContainEqual(expect.objectContaining({ type: 'agent-error', code: 'CLAUDE_TRUST_UNCONFIRMED',
       message: expect.stringContaining('the Agent launch continues') }))
+    const preparation = { step: 'trust-record', status: 'unconfirmed', workspacePath: home,
+      trustKey: home, code: 'CLAUDE_TRUST_UNCONFIRMED', issue: 'lock busy' }
+    expect(created.session.creation?.workspaceTrust).toMatchObject(preparation)
+    expect(created.session.creation?.createdRun).toEqual(created.session.run)
+    // A fresh owner reads the same exact creation receipt after the event has passed.
+    const retained = await new AgentMuxFileAgentSessionStore(store.path).readMetadata(created.session.agentSessionId)
+    expect(retained?.creation?.workspaceTrust).toEqual(created.session.creation?.workspaceTrust)
+    expect(parseRpcAgentSession(JSON.parse(JSON.stringify(created.session))).creation?.workspaceTrust).toMatchObject(preparation)
+    const forged = structuredClone(created.session)
+    forged.creation!.workspaceTrust!.step = 'guessed-screen' as never
+    expect(() => parseRpcAgentSession(forged)).toThrow()
   })
 
   it('launches anyway when preparation throws', async () => {
@@ -156,6 +202,12 @@ describe('Core pre-trusts a Host-confirmed home before resuming a Provider there
     expect(resumed).toMatchObject({ run: { runId: 'resumed-run' }, nativeHandle: { sessionId: 'native-original' } })
     expect(startPrepared).toHaveBeenCalledTimes(1)
     expect(events).toContainEqual(expect.objectContaining({ type: 'agent-error', agentSessionId: 'resumed-session', code: 'AGENT_WORKSPACE_TRUST_UNCONFIRMED' }))
+    expect(resumed.continuity?.workspaceTrust).toMatchObject({ step: 'trust-record', status: 'unconfirmed', workspacePath: home })
+    expect(resumed.continuity?.newRun).toEqual(resumed.run)
+    expect(resumed.continuityOperations?.['resume-original']?.workspaceTrust).toEqual(resumed.continuity?.workspaceTrust)
+    const retained = await new AgentMuxFileAgentSessionStore(store.path).readMetadata(resumed.agentSessionId)
+    expect(retained?.continuity?.workspaceTrust).toEqual(resumed.continuity?.workspaceTrust)
+    expect(parseRpcAgentSession(JSON.parse(JSON.stringify(resumed))).continuity?.workspaceTrust).toEqual(resumed.continuity?.workspaceTrust)
   })
 
   it('leaves a resumed user Project to the Provider\'s own prompt', async () => {
@@ -165,15 +217,12 @@ describe('Core pre-trusts a Host-confirmed home before resuming a Provider there
   })
 })
 
-describe('a Core launch starts the native start window for its Hook binding', () => {
-  it('records when the created Run’s Hook binding became active, and forgets it with the binding', async () => {
+describe('a Core launch keeps the exact Hook binding without a timeout-based input grant', () => {
+  it('registers the created Run binding and forgets only that binding', async () => {
     await create(home)
-    const inner = client as unknown as { hookBindings: Map<string, unknown>; hookBindingActivatedAt: Map<string, number>; forgetHookBinding(runId: string): void }
+    const inner = client as unknown as { hookBindings: Map<string, unknown>; forgetHookBinding(runId: string): void }
     expect(inner.hookBindings.has('private-run')).toBe(true)
-    const at = inner.hookBindingActivatedAt.get('private-run')
-    expect(typeof at).toBe('number')
-    expect(Date.now() - at!).toBeLessThan(10_000)
     inner.forgetHookBinding('private-run')
-    expect(inner.hookBindingActivatedAt.has('private-run')).toBe(false)
+    expect(inner.hookBindings.has('private-run')).toBe(false)
   })
 })

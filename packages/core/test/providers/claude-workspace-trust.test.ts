@@ -16,7 +16,7 @@ describe('Claude owned-workspace trust', () => {
   const env = () => ({ HOME: home })
   const read = async (path = config) => JSON.parse(await readFile(path, 'utf8')) as { projects: Record<string, Record<string, unknown>>; [key: string]: unknown }
   const prepare = (workspacePath = workspace, environment: Record<string, string> = env()) =>
-    prepareClaudeOwnedWorkspaceTrust({ workspacePath, env: environment })
+    prepareClaudeOwnedWorkspaceTrust({ ownedRoot: workspacePath, workspacePath, env: environment })
 
   beforeEach(async () => {
     // A real temporary root: on macOS tmpdir() itself sits behind the /var -> /private/var symlink.
@@ -93,6 +93,15 @@ describe('Claude owned-workspace trust', () => {
     const before = await readFile(config, 'utf8')
     const receipt = await prepare(join(motes, 'missing-home'))
     expect(receipt).toMatchObject({ status: 'unconfirmed', trustKey: null, code: 'CLAUDE_TRUST_UNCONFIRMED' })
+    expect(await readFile(config, 'utf8')).toBe(before)
+  })
+
+  it('refuses a different directory even when a caller supplies a home ancestor', async () => {
+    const nested = join(workspace, 'foreign')
+    await mkdir(nested)
+    const before = await readFile(config, 'utf8')
+    const receipt = await prepareClaudeOwnedWorkspaceTrust({ ownedRoot: workspace, workspacePath: nested, env: env() })
+    expect(receipt).toMatchObject({ status: 'not-applicable', code: 'CLAUDE_TRUST_HOME_MISMATCH' })
     expect(await readFile(config, 'utf8')).toBe(before)
   })
 

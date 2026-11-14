@@ -97,6 +97,18 @@ function harness(submit: (call: SubmitCall) => Promise<void>): {
 }
 
 describe('起来之后补送那份 prompt——行为验收（不是源码扫描）', () => {
+  it('keeps a new lifecycle first question when native initialization is still unknown', async () => {
+    const calls: SubmitCall[] = []
+    const { internals, dispose, errors } = harness(async call => { calls.push(call) })
+    const original = session()
+    original.creation = { createOperationId: 'original-create', createdRun: original.run, initialPrompt: 'unknown' }
+    try {
+      await expect(internals.deliverPostLaunchPrompt(KIMI, original, RUN, 'original-lifecycle', 'Retained first question')).resolves.toBe(false)
+      expect(calls).toEqual([])
+      expect(errors()).toEqual([])
+    } finally { await dispose() }
+  })
+
   it('真的把 deferred 文本提交了一次，键是这次生命周期操作', async () => {
     // 这条对「整个方法变 no-op」和「调用点被掐断」都变红：它数的是 submit 真的发生过。
     const calls: SubmitCall[] = []

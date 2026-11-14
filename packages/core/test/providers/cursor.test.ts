@@ -267,16 +267,15 @@ describe('Cursor provider', () => {
     })
   })
 
-  describe('装到 user 层的 hooks.json，并预置 workspace trust marker', () => {
+  describe('Hook 安装与准确目录信任分别授权', () => {
     const fixtureSlugPrefix = fixturePath('').split(/[^A-Za-z0-9]+/u).filter(Boolean).join('-') + '-'
     const plan = (new AgentProviderRegistry().get('cursor').planManagedHooks?.({ workspacePath: fixturePath("repo/app") }) ?? null)
 
-    it('两个 mutation 同时下发：hooks 配置 + trust marker', () => {
-      // 缺了 marker，Cursor 会用一个交互式 trust 提示吃掉第一个 prompt——用户看到的是
-      // 「AgentMux 把我的第一句话弄丢了」。两者必须在同一时刻成立。
-      expect(plan?.mutations).toHaveLength(2)
+    it('Hook 安装不为任意工作目录授信，信任使用标准 Provider seam', () => {
+      expect(plan?.mutations).toHaveLength(1)
       expect(plan!.mutations[0]!.path.endsWith(sep + join('.cursor', 'hooks.json'))).toBe(true)
-      expect(plan!.mutations[1]!.path.endsWith(sep + '.workspace-trusted')).toBe(true)
+      expect(plan!.mutations.some(mutation => mutation.path.endsWith('.workspace-trusted'))).toBe(false)
+      expect(cursor.prepareOwnedWorkspaceTrust).toBeDefined()
     })
 
     it('计划真的能被启动路径那道门取到，而不只是一个导出的函数', () => {
@@ -326,26 +325,6 @@ describe('Cursor provider', () => {
     it('CURSOR_DATA_DIR 覆盖被尊重——忽略它会写出一个 Cursor 永远不读的 marker', () => {
       const overridden = createCursorManagedHookPlan(fixturePath("repo/app"), { CURSOR_DATA_DIR: fixturePath("tmp/cursor-data") })
       expect(overridden.mutations[0]!.path).toBe(fixturePath("tmp/cursor-data/hooks.json"))
-      expect(overridden.mutations[1]!.path).toBe(join(fixturePath('tmp/cursor-data'), 'projects', fixtureSlugPrefix + 'repo-app', '.workspace-trusted'))
-    })
-
-    it('marker 内容对同一个 workspace 恒定——真实时钟会让每次启动都重写它', () => {
-      // installer 靠「内容 hash 未变」判定无需重写；`new Date()` 会让 preview 与 install 两次渲染
-      // 结果不同，直接撞上 HOOK_TARGET_CHANGED。
-      const once = createCursorManagedHookPlan(fixturePath("repo/app"), {}).mutations[1]!.content
-      const twice = createCursorManagedHookPlan(fixturePath("repo/app"), {}).mutations[1]!.content
-      expect(twice).toBe(once)
-      const marker = JSON.parse(once) as { trustedAt: string; workspacePath: string }
-      expect(marker.workspacePath).toBe(fixturePath("repo/app"))
-      // 是一个真实可解析的 ISO 时间戳，而不是占位字符串。
-      expect(Number.isFinite(Date.parse(marker.trustedAt))).toBe(true)
-      // 不冒用 Cursor 自己那两种来源标签（cli-flag / inherited）——AgentMux 走的是第三条路。
-      expect(Object.keys(marker).sort()).toEqual(['trustedAt', 'workspacePath'])
-      // 不同 workspace 得到不同的值，否则这个字段就只是个常量。
-      const other = JSON.parse(createCursorManagedHookPlan(fixturePath("repo/other"), {}).mutations[1]!.content) as {
-        trustedAt: string
-      }
-      expect(other.trustedAt).not.toBe(marker.trustedAt)
     })
 
     it('合并保留用户在 hooks.json 里的既有条目与其他顶层键', () => {

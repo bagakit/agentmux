@@ -98,8 +98,8 @@ describe('moteOwnedWorkspaceRoots returns the resolved paths of all Host-owned h
 
   it('includes both a Mote home and a Topic home', async () => {
     const result = await roots()
-    expect(result).toContain(mote)
-    expect(result).toContain(topic)
+    expect(result).toContain(await realpath(mote))
+    expect(result).toContain(await realpath(topic))
   })
 
   it('returns an empty array when the Scratch workspace is remote or absent', async () => {
@@ -109,9 +109,21 @@ describe('moteOwnedWorkspaceRoots returns the resolved paths of all Host-owned h
     expect(await roots()).toEqual([])
   })
 
-  it('returns an empty array when the configuration is missing', async () => {
+  it('retains unknown when the original configuration is missing', async () => {
     const missing = config + '.missing'
-    expect(await moteOwnedWorkspaceRoots(missing)).toEqual([])
+    await expect(moteOwnedWorkspaceRoots(missing)).rejects.toThrow()
+  })
+
+  it('confirms only the targeted physical home and its alias without listing other homes', async () => {
+    const physical = await realpath(mote), alias = join(cleanupRoot, 'retained-alias')
+    await symlink(physical, alias)
+    expect(await moteOwnedWorkspaceRoots(config, mote)).toEqual([physical])
+    expect(await moteOwnedWorkspaceRoots(config, alias)).toEqual([physical])
+    const foreign = join(mote, 'foreign'); await mkdir(foreign)
+    expect(await moteOwnedWorkspaceRoots(config, foreign)).toEqual([])
+    const outside = join(cleanupRoot, 'outside'); await mkdir(outside)
+    const escape = join(mote, 'escape'); await symlink(outside, escape)
+    expect(await moteOwnedWorkspaceRoots(config, escape)).toEqual([])
   })
 })
 
@@ -165,7 +177,7 @@ describe('the real Host hands its home decision to Core', () => {
 
     await create('mote-agent', home)
     expect(trust).toHaveBeenCalledTimes(1)
-    expect(trust.mock.calls[0]![0]).toMatchObject({ workspacePath: home })
+    expect(trust.mock.calls[0]![0]).toMatchObject({ workspacePath: await realpath(home) })
     expect(trust.mock.invocationCallOrder[0]!).toBeLessThan(start.mock.invocationCallOrder[0]!)
 
     await create('project-agent', project)
