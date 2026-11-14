@@ -48,6 +48,7 @@ function agent(id: string, label: string, state: SessionSnapshot['status']['stat
     label,
     createdAt: 1,
     updatedAt: observedAt,
+    agentSessionUpdatedAt: observedAt,
     processState: 'running',
     status: { state, source: 'native-hook', observedAt },
     latestOutputBytes: 0,
