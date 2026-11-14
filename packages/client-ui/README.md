@@ -50,7 +50,7 @@ Use these exact import paths under `@agentmux/client-ui/`. Each example imports 
 | Fields | `input`, `components/FormRow` | `input/styles.css`. [Label, help, error and multiline draft](examples/fields.tsx). |
 | Selection | `components/Tabs`, `components/SegmentedControl`, `components/SelectionIndicator` | `styles/segmented-control.css` and `styles/selection-indicator.css`. [Panel navigation, a single setting and a current reading position](examples/selection.tsx). |
 | Overlays | `components/Modal`, `components/DropdownMenu`, `components/HoverDropdownMenu`, `overlay-host` | `styles/overlays.css` for the stack and attachment slots. [Host document, panel layout and focus](examples/overlays.tsx). |
-| Readable feedback | `components/ActionFeedback`, `components/InlineRenameField` | `styles/buttons.css` for bounded feedback. `input/styles.css`, `styles/semantic-icons.css` and `styles/inline-rename-field.css` for [rename, pending receipt and retryable error](examples/feedback.tsx). |
+| Readable feedback | `components/ActionFeedback`, `components/Notice`, `components/InlineRenameField` | `styles/notice.css` for notice surfaces. See the [feedback example](examples/feedback.tsx) for the style imports and a rename with a confirmed result. |
 | Work location | `patterns/agent-work-location` | `patterns/agent-work-location.css` and `styles/semantic-icons.css`. [Shared summary and distinct routes](examples/locations.tsx). |
 | Theme | `theme`, `theme/model`, `icons` | `styles/theme-defaults.css` for initial tokens, `styles/palette.css` for semantic surfaces and `styles/semantic-icons.css` for icon motion. [Light, dark and reduced motion](examples/theme.tsx). |
 
@@ -145,6 +145,8 @@ Import `Button` and `IconButton` from `@agentmux/client-ui/components/Button` an
 `Button` accepts `variant="secondary" | "primary" | "danger"` (default `secondary`). `IconButton` requires `aria-label`, uses it as the default native title, and accepts `intent="neutral" | "danger"`; an explicit title is kept. The `.small-button`, `.primary-button`, `.danger-button` and `.icon-button` classes have one owner in `styles/buttons.css`; include `@agentmux/client-ui/styles/buttons.css` when importing individual styles. Hosts keep surface-specific geometry and supply the theme tokens.
 
 Use `ActionFeedback` next to an action whose result can change in place. Set `bounded` to reserve two text lines and allow longer messages to scroll. Pass `role="status"` for ordinary progress, `role="alert"` for errors that need immediate announcement, and `tabIndex={0}` for a scrollable error the reader needs to reach by keyboard. The caller supplies the message and owns the operation.
+
+Use `Notice` for an inline message with an optional heading and actions. `NoticeSurface` and `NoticeIcon` let an inbox row or recorded failure use the same presentation with its existing structure. Set `messageRole` to announce the message while keeping the action labels out of that announcement. Import `styles/notice.css` and `styles/semantic-icons.css` with individual exports. The caller owns the message's lifetime, actions and status.
 
 ### Action menu
 
