@@ -18,13 +18,14 @@ import type { ScrollingCaptureSurface } from './capture-surface'
 
 type Selection = { image: BrowserPng; source: ScreenshotCaptureSource; background?: import('../shared/capture-surface').CaptureBackground; startImmediately?: boolean; surface?: ScrollingCaptureSurface }
 type Record = { receipt: CaptureSequenceResult; actor: CaptureSequenceContext['actor']; window?: BrowserWindow; frame?: BrowserWindow; input?: CaptureSequenceInput; baselinePending?: boolean; surface?: ScrollingCaptureSurface; reviewSurface?: ScrollingCaptureSurface;
-  timer?: ReturnType<typeof setTimeout>; inflight?: Promise<void>; fps: number; artifact?: { sha256: string; bytes: number }; journal?: { frames: unknown[]; source: ScreenshotCaptureSource }; size?: { width: number; height: number }; files?: string[]; persisting?: Promise<void>; resolve?(value: BrowserPng | string | null): void; attached?: string; ending?: boolean; retaking?: boolean }
+  timer?: ReturnType<typeof setTimeout>; inflight?: Promise<void>; fps: number; artifact?: { sha256: string; bytes: number }; journal?: { frames: unknown[]; source: ScreenshotCaptureSource }; size?: { width: number; height: number }; files?: string[]; persisting?: Promise<void>; resolve?(value: BrowserPng | string | null): void; attached?: string; ending?: boolean; retaking?: boolean; provisional?: boolean }
 const MAX_FRAME_BYTES = 64 * 1024 * 1024
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 
 /** Desktop owns each original sequence, pixels and window. Recording never issues input to the captured app. */
 export class CaptureSequenceOwner {
   private records = new Map<string, Record>()
+  private windows = new WeakMap<Electron.WebContents, Record>()
   constructor(private readonly ports: { directory: string; home: string; appearance(): AppearanceConfig;
     native(): Pick<NativeDesktop, 'captureScreenshot'>; select(mode: CaptureSequenceMode): Promise<Selection | null> }) {
     ipcMain.handle(CAPTURE_SEQUENCE_CHANNEL, (event, action, input) => this.invoke(event, action, input))
@@ -35,6 +36,8 @@ export class CaptureSequenceOwner {
     return { requestId, state, issue, frameCount: frames.length }
   }
   private persist(record: Record): Promise<void> {
+    // A replacement selection may write its own frames, but the reviewed receipt stays authoritative until handoff.
+    if (record.provisional) return Promise.resolve()
     if (record.surface && record.input) record.surface.update(this.liveProgress(record))
     if (record.input) record.journal = { frames: record.input.frames.map((frame, i) => ({ file: record.files?.[i], width: frame.image.width, height: frame.image.height, capturedAt: frame.capturedAt, delayMs: frame.delayMs })), source: record.input.source }
     // Per-frame journals are atomically published without syncing the directory on the capture hot path.
@@ -59,6 +62,8 @@ export class CaptureSequenceOwner {
       if (!['completed', 'cancelled', 'failed'].includes(saved.receipt.state)) {
         saved.receipt.state = 'unknown'; saved.receipt.issue = 'The original capture producer is no longer attached here. Saved frames remain in its capture directory; recording was not restarted.'
       }
+      const existing = this.records.get(id)
+      if (existing) return existing
       saved.fps = 5
       this.records.set(id, saved)
       return saved
@@ -67,7 +72,9 @@ export class CaptureSequenceOwner {
   async call(method: CaptureSequenceMethod, input: CaptureSequenceParams[CaptureSequenceMethod], context: CaptureSequenceContext): Promise<CaptureSequenceResult> {
     if (input.hostId !== 'local') throw new AgentMuxError('This sequence belongs to another exact Host.', 'CONTROL_PERMISSION_DENIED')
     context.signal?.throwIfAborted(); await context.assertCurrent?.()
-    let record = await this.load(input.operationId)
+    const loaded = await this.load(input.operationId)
+    // A concurrent open may have claimed the ID while the journal was being read.
+    let record = this.records.get(input.operationId) ?? loaded
     if (record && (record.actor.kind !== context.actor.kind || record.actor.id !== context.actor.id)) throw new AgentMuxError('This original sequence belongs to another actor.', 'CONTROL_PERMISSION_DENIED')
     if (method === 'capture.sequence.open') {
       const mode = (input as CaptureSequenceParams['capture.sequence.open']).mode
@@ -75,7 +82,7 @@ export class CaptureSequenceOwner {
       if (!record) {
         record = this.create(input.operationId, mode, context.actor)
         // Save admission before opening. Caller disconnect does not cancel or replay this original operation.
-        await this.persist(record)
+        try { await this.persist(record) } catch (error) { await this.fail(record, error); throw error }
         const original = record
         void this.ports.select(mode).then(selection => selection ? this.present(original, selection) : this.end(original, 'cancelled')).catch(error => this.fail(original, error))
       }
@@ -120,6 +127,7 @@ export class CaptureSequenceOwner {
     return window
   }
   private observeWindow(record: Record, window: BrowserWindow) {
+    this.windows.set(window.webContents, record)
     window.on('close', event => {
       if (record.window === window && !record.ending && record.input?.mode === 'scroll' && !['recording', 'stopping'].includes(record.receipt.state)) {
         event.preventDefault()
@@ -339,8 +347,8 @@ export class CaptureSequenceOwner {
     try { await this.persist(record) } catch (error) { console.warn('Capture sequence receipt:', error) }
   }
   private async invoke(event: IpcMainInvokeEvent, action: string, input?: { requestId?: string; fps?: number; afterFrames?: number; image?: BrowserPng; data?: number[] }): Promise<unknown> {
-    const record = [...this.records.values()].find(r => r.window && !r.window.isDestroyed() && r.window.webContents === event.sender && event.senderFrame === event.sender.mainFrame)
-    if (!record?.input || !record.window) throw new Error('This capture request does not belong to the original window.')
+    const record = this.windows.get(event.sender)
+    if (!record?.input || !record.window || record.window.isDestroyed() || record.window.webContents !== event.sender || event.senderFrame !== event.sender.mainFrame) throw new Error('This capture request does not belong to the original window.')
     if (action === 'load') return this.snapshot(record)
     if (input?.requestId !== record.receipt.operationId) throw new Error('Keep the exact original capture sequence.')
     if (action === 'inspect') {
@@ -348,23 +356,51 @@ export class CaptureSequenceOwner {
       return { ...record.input, frames: record.input.frames.slice(Math.max(0, offset - 1)), frameOffset: Math.max(0, offset - 1) }
     }
     if (action === 'stop') { this.stop(record, true); return this.snapshot(record) }
-    if (action === 'cancel') { const window = record.window; await this.end(record, 'cancelled'); record.resolve?.(null); delete record.resolve; if (!window.isDestroyed()) window.close(); return }
+    if (action === 'cancel') {
+      const window = record.window
+      if (record.receipt.state !== 'completed') await this.end(record, 'cancelled')
+      record.resolve?.(null); delete record.resolve
+      if (!window.isDestroyed()) window.close()
+      return
+    }
     if (action === 'retake') {
       if (record.input.mode !== 'scroll' || record.inflight || record.retaking || !['ready', 'review'].includes(record.receipt.state)) throw new Error('Finish the current sampling step before retaking this screenshot. Your image is kept.')
       const previous = record.window
       record.retaking = true
-      // Retake is an explicit new selection. Keep the review and frames until it is accepted.
+      // Release the original selector so the user can select again. The review still owns its exact source and frames.
       const surface = record.surface ?? record.reviewSurface
       delete record.surface; delete record.reviewSurface
       surface?.close(false)
       previous.hide()
       try {
         const selection = await this.ports.select('scroll')
-        if (selection && !record.ending) {
-          record.baselinePending = true
-          await this.present(record, selection, true)
-          previous.destroy()
-        } else if (selection) selection.surface?.close(false)
+        if (!selection || record.ending || selection.surface?.window.isDestroyed()) {
+          selection?.surface?.close(false)
+          return
+        }
+        const replacement: Record = { receipt: { ...record.receipt }, actor: record.actor, fps: record.fps, provisional: true }
+        try {
+          await this.present(replacement, selection, true)
+          if (replacement.ending || replacement.surface && replacement.baselinePending) throw new Error(replacement.receipt.issue ?? 'The replacement capture did not start. The previous screenshot is kept.')
+          delete replacement.provisional
+          await this.persist(replacement)
+        } catch (error) {
+          replacement.provisional = true
+          replacement.ending = true
+          clearTimeout(replacement.timer)
+          await replacement.inflight?.catch(() => {})
+          this.closeFrame(replacement)
+          const failed = replacement.window
+          delete replacement.window
+          selection.surface?.close(false)
+          if (failed && !failed.isDestroyed()) failed.destroy()
+          throw error
+        }
+        if (record.resolve) replacement.resolve = record.resolve
+        delete record.resolve
+        this.records.set(record.receipt.operationId, replacement)
+        delete record.window
+        previous.destroy()
       } finally {
         delete record.retaking
         if (record.window === previous && !record.ending && !previous.isDestroyed()) { previous.show(); previous.focus() }
@@ -401,7 +437,7 @@ export class CaptureSequenceOwner {
       const bytes = Uint8Array.from(input.data); const gif = inspectGif(bytes)
       if (!gif.metadata) throw new Error('Keep the GIF keyframe metadata with the exported animation.')
       if (action === 'save-gif') {
-        const choice = await dialog.showSaveDialog(record.window, { defaultPath: screenshotFileName(record.input.source.capturedAt).replace(/\\.png$/, '.gif'), filters: [{ name: 'GIF animation', extensions: ['gif'] }] })
+        const choice = await dialog.showSaveDialog(record.window, { defaultPath: screenshotFileName(record.input.source.capturedAt).replace(/\.png$/, '.gif'), filters: [{ name: 'GIF animation', extensions: ['gif'] }] })
         if (choice.canceled || !choice.filePath) return { status: 'cancelled' }
         await publishNewGif(choice.filePath, bytes)
         await writeScreenshotFile(join(this.directory(record.receipt.operationId), 'result.gif'), bytes)

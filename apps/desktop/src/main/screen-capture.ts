@@ -45,15 +45,6 @@ export class ScreenCapture {
     // Read after any countdown and before the source picker or selection takes focus: the app in
     // front at that moment is the one the user is capturing and returns to.
     const returnFocus = !this.ports.appActive()
-    if (mode === 'scroll' || mode === 'gif') {
-      if (!this.ports.sequence) throw new Error('Continuous capture is unavailable in this host. Ordinary screenshots remain available.')
-      let selected: { image: BrowserPng; source: import('../shared/system-screenshot-editor').ScreenshotCaptureSource; background?: CaptureBackground; startImmediately?: boolean; surface?: import('./capture-surface').ScrollingCaptureSurface } | null = null
-      const outcome = await this.ports.present({ attachToDraft: false, expandable: false, returnFocus: false, background, timing, ...(mode === 'scroll' ? { sequenceMode: 'scroll' as const } : {}),
-        complete: async (image, source, _engine, frozenBackground) => { selected = { image, source, background: frozenBackground ?? background } } })
-      if (outcome.state === 'sequence') selected = outcome
-      if (!selected) return null
-      return await this.sequence(attachToDraft, mode, selected, returnFocus)
-    }
     const native = this.ports.native()
     let path: string | null = null
     // This is one capture's destination receipt, never a second image/document store.
@@ -89,7 +80,24 @@ export class ScreenCapture {
       void result.catch(() => {}) // The editor consumes this same receipt; closing it cannot erase submission.
       return result
     }
-    if (mode === 'selection') {
+    const sequence = async (sequenceMode: 'scroll' | 'gif', selection: Parameters<NonNullable<Ports['sequence']>>[1]) => {
+      if (!this.ports.sequence) throw new Error('Continuous capture is unavailable in this host. Ordinary screenshots remain available.')
+      const result = await this.ports.sequence(sequenceMode, selection)
+      if (typeof result === 'string') {
+        if (attachToDraft && !originalDelivered) path = result
+      } else if (result) {
+        await this.ports.edit(result, attachToDraft && !originalDelivered, complete, { ...(returnFocus ? { returnFocus } : {}) })
+      }
+    }
+    if (mode === 'scroll' || mode === 'gif') {
+      if (!this.ports.sequence) throw new Error('Continuous capture is unavailable in this host. Ordinary screenshots remain available.')
+      let selected: Parameters<NonNullable<Ports['sequence']>>[1] | null = null
+      const outcome = await this.ports.present({ attachToDraft: false, expandable: false, returnFocus: false, background, timing, ...(mode === 'scroll' ? { sequenceMode: 'scroll' as const } : {}),
+        complete: async (image, source, _engine, frozenBackground) => { selected = { image, source, background: frozenBackground ?? background } } })
+      if (outcome.state === 'sequence') selected = outcome
+      if (!selected) return null
+      await sequence(mode, selected)
+    } else if (mode === 'selection') {
       // A failed delivery keeps the surface, its selection and marks; Done retries only the unconfirmed destination.
       // Retake in the window editor presents the surface again for this same consumer. Its surface gives focus back to
       // that editor, which a cancel returns to and a completion closes, so the editor's own close returns focus as before.
@@ -106,7 +114,7 @@ export class ScreenCapture {
         if (outcome.state === 'source') {
           path = await this.perform(attachToDraft && !originalDelivered, typeof outcome.mode === 'number' ? 'selection' : outcome.mode, typeof outcome.mode === 'number' ? { delaySeconds: outcome.mode } : {}, outcome.background, startCaptureRequestTiming()); return 'completed'
         }
-        if (outcome.state === 'sequence') { path = await this.sequence(attachToDraft && !originalDelivered, outcome.mode, outcome, returnFocus); return 'completed' }
+        if (outcome.state === 'sequence') { await sequence(outcome.mode, outcome); return 'completed' }
         if (outcome.state !== 'expanded') return outcome.state
         // Only the confirmed independent-editor Copy creates a continuation; shapes and Undo stay in that editor.
         const deliverHere = (final: BrowserPng) => complete(final).then(() => { continuation = outcome.delivered() })
@@ -141,18 +149,7 @@ export class ScreenCapture {
     if (submitted) await Promise.resolve(submitted).catch(() => {})
     return path
   }
-  private async sequence(attachToDraft: boolean, mode: 'scroll' | 'gif', selected: { image: BrowserPng; source: import('../shared/system-screenshot-editor').ScreenshotCaptureSource; background?: CaptureBackground; startImmediately?: boolean; surface?: import('./capture-surface').ScrollingCaptureSurface }, returnFocus: boolean): Promise<string | null> {
-    const result = await this.ports.sequence!(mode, selected)
-    selected.surface?.close(false)
-    if (typeof result === 'string') return attachToDraft ? result : null
-    if (!result) return null
-    let path: string | null = null
-    await this.ports.edit(result, attachToDraft, async final => {
-      await this.ports.native().writeClipboardImage(final)
-      if (attachToDraft && !path) path = (await savePastedImage(this.ports.home, { bytes: pngBytes(final), extension: 'png' })).path
-    }, { ...(returnFocus ? { returnFocus } : {}) })
-    return path
-  }
+
 }
 
 function unknownWrite(error: unknown): boolean {

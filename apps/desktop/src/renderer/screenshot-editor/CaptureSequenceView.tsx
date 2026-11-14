@@ -171,7 +171,7 @@ export function CaptureSequenceView({ input, api }: { input: CaptureSequenceInpu
   if (!gif) return <main className="capture-sequence capture-sequence--scroll-review" onKeyDown={event => {
     if (event.key === 'Escape') { event.preventDefault(); setDiscarding(value => !value) }
   }}>
-    <header className="capture-review__header">
+    <header className="capture-review__header" inert={discarding}>
       <div><h1>Review screenshot</h1><p>{longImage ? `${longImage.width} × ${longImage.height} px` : 'Scrolling screenshot'}<span aria-hidden="true"> · </span>{frames.length} {frames.length === 1 ? 'frame' : 'frames'}</p></div>
       <button className="capture-review__close" aria-label="Close review" onClick={() => setDiscarding(true)}><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg></button>
     </header>
@@ -179,7 +179,7 @@ export function CaptureSequenceView({ input, api }: { input: CaptureSequenceInpu
       {longImage ? <img src={longImage.dataUrl} alt="Scrolling capture preview" style={{ maxWidth: longImage.width }} /> : <p role="status">{preparing ? 'Preparing preview…' : 'Preview could not be composed. Adjust the last frame or retake the screenshot.'}</p>}
     </div>
     {issue || snapshot.issue ? <p className="capture-sequence__issue" role="status">{issue ?? snapshot.issue}</p> : null}
-    <footer className="capture-review__footer">
+    <footer className="capture-review__footer" inert={discarding}>
       <div className="capture-review__secondary">
         <button className="capture-review__text-button" disabled={busy || preparing} onClick={() => void action(() => api.retake(input.requestId))}>Retake</button>
         <details className="capture-review__adjust"><summary>Adjust frames</summary><div>
@@ -190,7 +190,7 @@ export function CaptureSequenceView({ input, api }: { input: CaptureSequenceInpu
       </div>
       <button className="primary-button capture-review__confirm" disabled={busy || preparing || !longImage} onClick={() => void action(async () => { await api.finishScroll(input.requestId, longImage!) })}>{busy ? 'Working…' : 'Confirm'}</button>
     </footer>
-    {discarding ? <section role="alertdialog" aria-labelledby="capture-discard-title" aria-describedby="capture-discard-description" className="capture-review__discard">
+    {discarding ? <section role="alertdialog" aria-modal="true" aria-labelledby="capture-discard-title" aria-describedby="capture-discard-description" className="capture-review__discard">
       <h2 id="capture-discard-title">Discard this screenshot?</h2><p id="capture-discard-description">It has not been confirmed yet.</p>
       <div><button disabled={busy} onClick={() => void action(() => api.cancel(input.requestId))}>Discard</button><button ref={keepReview} onClick={() => setDiscarding(false)}>Continue review</button></div>
     </section> : null}
