@@ -177,6 +177,9 @@ export function MediaPlayer({ lease, name, onRetry, resume, readStatus }: { leas
     const element = media.current
     if (released.current || !element?.error) return
     const code = element.error.code, asked = lease.id
+    // The engine has failed; stop the auxiliary decoder before asking the File owner why.
+    // An aborted load is not a playback failure, and a no-picture audio card keeps its presentation.
+    if (code !== 1) setDecode(current => current === 'ready' ? 'error' : current)
     const fact = await readStatus(asked).then(value => value.state, () => 'unknown' as const)
     if (released.current || currentLease.current !== asked) return
     const view = describeMediaFailure(fact, code, decodedOnce.current, lease.kind === 'playlist' ? 'playlist' : 'file')
