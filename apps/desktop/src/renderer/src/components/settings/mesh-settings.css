@@ -6,7 +6,7 @@
 .mesh-view-tabs { flex: none; display: flex; gap: 4px; padding-bottom: var(--sp-4); margin-bottom: var(--sp-4); border-bottom: 1px solid var(--line-soft); }
 .mesh-view-tabs button { color: var(--text-3); background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 6px 12px; font: inherit; cursor: pointer; }
 .mesh-view-tabs button[aria-current] { color: var(--text); background: var(--surface-2); border-color: var(--line-soft); font-weight: 600; }
-.mesh-network-settings { display: grid; gap: var(--sp-5); min-width: 0; }
+.mesh-network-settings { display: grid; gap: var(--sp-4); min-width: 0; max-width: 1060px; padding-right: 2px; container-type: inline-size; }
 .mesh-network-heading, .mesh-network-section > header, .mesh-network-map > header { display: flex; justify-content: space-between; align-items: start; gap: var(--sp-3); }
 .mesh-network-settings h3, .mesh-network-settings h4, .mesh-network-settings h5 { margin: 0; font-weight: 600; }
 .mesh-network-settings h3 { font-size: var(--fs-h3); }
@@ -63,7 +63,7 @@
 .mesh-link-result dl { display: grid; gap: 6px; }
 .mesh-link-result dt { color: var(--text-3); }
 .mesh-link-result dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
-.mesh-network-settings { container-type: inline-size; }
+
 .mesh-topology-list { display: none; list-style: none; margin: 0; padding: 0 12px 12px; gap: 8px; }
 .mesh-topology-list li { display: grid; gap: 4px; padding: 8px 0; border-bottom: 1px solid var(--line-soft); font-size: var(--fs-meta); }
 .mesh-topology-list strong { font-weight: 550; }
@@ -73,3 +73,42 @@
 
 @container (max-width: 620px) { .mesh-map-actions { display: none; } }
 @media (max-width: 680px) { .mesh-map-actions { display: none; } }
+
+/* The setup task has a reading width; topology keeps the same continuous surface. */
+
+.mesh-network-heading { align-items: start; position: relative; }
+.mesh-network-heading > .small-button { flex: none; margin-top: 4px; }
+.mesh-connection-intro { display: grid; grid-template-columns: minmax(0, 1fr) 248px; gap: var(--sp-4); align-items: center; flex: 1; min-width: 0; }
+.mesh-connection-intro h3 { font-size: var(--fs-title); letter-spacing: -.025em; line-height: 1.35; margin: 3px 0 6px; }
+.mesh-connection-intro p { max-width: 44ch; color: var(--text-2); font-size: var(--fs-body); line-height: 1.6; }
+.mesh-section-kicker { font-size: var(--fs-meta); color: var(--text-3); letter-spacing: .04em; }
+.mesh-connection-concept { margin: 0; min-width: 0; }
+.mesh-connection-concept svg { display: block; width: 100%; height: auto; }
+.mesh-connection-concept figcaption { text-align: center; color: var(--text-3); font-size: var(--fs-meta); }
+.mesh-availability { display: grid; justify-items: start; gap: var(--sp-3); padding: 20px; border-radius: var(--radius); background: var(--surface-1); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 5%, transparent); }
+.mesh-availability h3 { font-size: var(--fs-h3); }
+.mesh-availability p { max-width: 66ch; color: var(--text-2); font-size: var(--fs-body); overflow-wrap: anywhere; }
+.mesh-availability .mesh-advanced { width: 100%; }
+.mesh-task-options { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+.mesh-task-options > button { display: grid; gap: 7px; text-align: left; align-content: start; padding: 14px 16px; font: inherit; color: var(--text-2); background: var(--surface-1); border: 1px solid transparent; border-radius: var(--radius); cursor: pointer; box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 5%, transparent); }
+.mesh-task-options > button:hover { background: var(--surface-2); }
+.mesh-task-options > button[aria-pressed=true] { border-color: color-mix(in srgb, var(--green) 55%, var(--line-soft)); background: var(--surface-2); color: var(--text); }
+.mesh-task-options > button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.mesh-task-options > button > span:last-child { font-size: var(--fs-body); line-height: 1.6; color: var(--text-2); }
+.mesh-task-label { display: flex; justify-content: space-between; gap: 8px; align-items: center; font-size: var(--fs-body); }
+.mesh-task-label > strong { font-weight: 600; }
+.mesh-task-label > span { font-size: 16px; }
+.mesh-code-action { display: grid; gap: 6px; align-content: end; justify-items: start; min-width: 0; }
+.mesh-network-settings .field-hint { font-size: var(--fs-body); line-height: 1.6; }
+.mesh-network-section > header { align-items: center; }
+.mesh-gateway-fields { padding: 14px 16px; border-radius: var(--radius); background: var(--surface-1); }
+.mesh-gateway-fields > header { display: grid; gap: 4px; }
+.mesh-device-access, .mesh-access-links { border-top: 1px solid var(--line-soft); padding-top: 6px; }
+.mesh-advanced > summary { color: var(--text-2); font-size: var(--fs-body); padding: 8px 0; }
+.mesh-advanced p { overflow-wrap: anywhere; }
+.mesh-network-settings [data-settings-field="mesh-link"] > button { justify-self: start; }
+.mesh-network-settings .mesh-map-actions { align-self: center; }
+.mesh-network-status { padding: 10px 12px; border-radius: var(--radius); background: var(--surface-1); }
+@container (max-width: 760px) { .mesh-connection-intro { grid-template-columns: minmax(0, 1fr) 180px; } }
+@container (max-width: 580px) { .mesh-connection-intro { display: block; } .mesh-connection-concept { display: none; } .mesh-task-options { grid-template-columns: 1fr; } .mesh-network-heading { gap: 8px; } .mesh-availability { padding: 16px; } }
+.mesh-recovery-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

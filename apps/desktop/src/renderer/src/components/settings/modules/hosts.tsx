@@ -15,7 +15,7 @@ export const hostsSettingsModule = {
   id: 'hosts', archetype: 'console',
   group: 'cluster',
   title: 'Mesh',
-  description: 'Connect nodes, inspect network routes, and manage saved connections.',
+  description: 'Connect your devices through gateways and manage saved connections.',
   icon: ThemeObjectHostIcon,
   keywords: 'mesh gateway participant peer network route topology monitor runtime host hosts ssh tailcat tunnel listener remote hostname user port key test connection apps access trust permission environment project folder workspace worktree register open',
   searchTargets: [{ id: 'mesh-configuration', title: 'Mesh participation', description: 'Network role, peer trust and device access.', kind: 'field' }, { id: 'mesh-link', title: 'Original node access link', description: 'Reach an original endpoint through this Mesh gateway.', kind: 'action' }],
