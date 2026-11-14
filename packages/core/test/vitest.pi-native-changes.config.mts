@@ -9,9 +9,9 @@ const root = resolve(import.meta.dirname, '../../..')
 const mutations: Record<string, { owner: string; from: string; to: string }> = {
   'omit-pi-changes': { owner: 'packages/core/src/providers/pi.ts',
     from: '    readConversationChanges: readPiConversationChanges,', to: '' },
-  'flat-pi-branches': { owner: 'packages/core/src/providers/pi-native-history.ts',
+  'flat-pi-branches': { owner: 'packages/providers/src/pi/native-history.ts',
     from: 'if (identity.parentId !== leaf) {', to: 'if (false && identity.parentId !== leaf) {' },
-  'detach-pi-page-cut': { owner: 'packages/core/src/providers/pi-native-history.ts',
+  'detach-pi-page-cut': { owner: 'packages/providers/src/pi/native-history.ts',
     from: 'changesCursor: await reader.historyChangesCursor()', to: 'changesCursor: undefined' }
 }
 const selected = process.env.AGENTMUX_PI_CHANGES_MUTATION ?? ''

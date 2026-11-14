@@ -163,7 +163,7 @@ it('aborts on signal cancellation and client disposal without mutating transcrip
   ])
   const controller = new AbortController()
   controller.abort()
-  const { readPiSessionHistoryPage } = await import('../src/providers/pi-native-history.js')
+  const readPiSessionHistoryPage = f.client.providers.get('pi').readSessionHistoryPage!
   await expect(readPiSessionHistoryPage({
     source: { providerId: 'pi', nativeSessionId: 'native-main' },
     limit: 10,
