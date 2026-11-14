@@ -26,13 +26,14 @@ const cardFor = (runtimeId: string) => [...dom.container.querySelectorAll<HTMLEl
 /** Original label owner → public RPC → trusted Main/IPC/preload → real Focus.
  * Only the unavailable metadata/Native observation edges are substituted.
  * No Context, name receipt, hook or card is mocked. */
-async function fixture(options: { foreign?: boolean; clear?: boolean; history?: boolean } = {}) {
+async function fixture(options: { foreign?: boolean; clear?: boolean; history?: boolean; name?: string } = {}) {
   const f = await createSpaceSessionsFixture(cleanup), sourceSession = await f.b.put(SID), foreignSession = await f.d.put(SID)
+  const originalName = options.name ?? savedName
   const nameContext = { actor: { kind: 'user' as const, id: 'private-original-user', verified: true },
     source: 'private-owner-fixture', entryPoint: 'original-name-intent', transport: null, location: {} }
   // Seed the original historical intent at its private persistence owner, before
   // making Session/Native observations unavailable. The consumer never writes it.
-  for (const [owner, value] of [[f.b, savedName], [f.d, decoyName]] as const) await owner.spatial.mutateDisplayLabel({
+  for (const [owner, value] of [[f.b, originalName], [f.d, decoyName]] as const) await owner.spatial.mutateDisplayLabel({
     operationId: 'original-saved-name', target: { kind: 'agent-session', id: SID }, value, source: 'manual', expectedNameRevision: 0
   }, nameContext, { initializeAgentLabel: true })
   if (options.clear) {
@@ -87,10 +88,10 @@ async function fixture(options: { foreign?: boolean; clear?: boolean; history?: 
   vi.spyOn(api.workspaces, 'listBranches').mockResolvedValue({ kind: 'not-a-git-repository', hostId: 'local', workspacePath: '/b/project' })
   vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([])
   const decoy = { ...composerSession(SID), workspacePath: '/b/project' }
-  useAppStore.setState({ config, sessions: [decoy], agentNames: { [SID]: options.foreign ? savedName : decoyName }, timelines: {}, tabs: {}, layouts: {},
+  useAppStore.setState({ config, sessions: [decoy], agentNames: { [SID]: options.foreign ? originalName : decoyName }, timelines: {}, tabs: {}, layouts: {},
     mainSurface: 'agents', focusView: 'list', loading: false, mountedSpaceInputs: {}, mountedSpaceObservations: {}, mountedSpaceSessions: {},
     agentFocus: { execution: { sessionId: null, history: options.history ? [{ sessionId: focusSourceContextId(runtimeId, SID), focusedAt: 1,
-      identity: { kind: 'agent', name: savedName, providerId: 'codex', hostId: 'original-reading', workspacePath: '/b/project', source: { runtimeId, agentSessionId: SID } } }] : [] }, pmo: { sessionId: null } },
+      identity: { kind: 'agent', name: originalName, providerId: 'codex', hostId: 'original-reading', workspacePath: '/b/project', source: { runtimeId, agentSessionId: SID } } }] : [] }, pmo: { sessionId: null } },
     scratchTopicSnapshots: {}, agentComposerDrafts: { [SID]: 'Keep original unsent draft' }, agentSteerQueues: {} })
   const target = { hostId: 'source-route', reference: f.reference, zoneId: admitted.address.zoneId!, workspaceId: admitted.address.workspaceId! }
   useAppStore.getState().mountSpace(target, false)
@@ -148,7 +149,15 @@ it('a later read failure retains the last confirmed original name and its readin
   await vi.waitFor(() => expect(f.card().querySelector('strong')?.textContent).toBe(savedName))
   const id = f.card().dataset.sessionId, originalAccess = await access(f)
   f.failRead(); await act(async () => originalAccess.refresh())
-  await vi.waitFor(() => expect(f.card().textContent).toContain('Original name read temporarily unavailable'))
+  // main keeps the card concise; its existing Session details menu owns the
+  // exact observation diagnostic. Open that real consumer instead of scraping
+  // the old card wording or treating a hidden Context fact as accessible UI.
+  await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  await act(async () => f.card().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2, clientX: 20, clientY: 20 })))
+  let details: HTMLElement | undefined
+  await vi.waitFor(() => { details = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent?.includes('Session details')); expect(details).toBeDefined() })
+  await act(async () => { details!.focus(); details!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })) })
+  await vi.waitFor(() => expect(document.querySelector('.agent-region-menu__diagnostic')?.textContent).toContain('Original name read temporarily unavailable'))
   expect(f.card().querySelector('strong')?.textContent).toBe(savedName)
   expect(f.card().dataset.sessionId).toBe(id)
   await f.assertPreserved()
@@ -162,4 +171,25 @@ it('unrelated Session output does not repeat original label reads or reclassify 
   expect(f.call.mock.calls.filter(([method]) => method === 'agentNameInspect')).toHaveLength(count)
   expect(f.card()).toBe(original); expect(f.card().querySelector('strong')?.textContent).toBe(savedName)
   expect((await access(f)).session).toBeUndefined()
+})
+
+it('the mounted Source page reads the full saved name and separates original Host, Runtime and Session without an empty Run', async () => {
+  const name = '核对发布版本、业务数据与长期保留的原始分析记录 / Review the complete investigation context across reconnects'
+  const f = await fixture({ name })
+  await vi.waitFor(() => expect(f.card().querySelector('strong')?.textContent).toBe(name))
+  const originalAccess = await access(f)
+  expect(originalAccess.executionHostId).toBe('local')
+  const sourceButton = [...document.querySelectorAll<HTMLButtonElement>('.agent-information-reader__service button')].find(button => button.textContent === 'Source')
+  expect(sourceButton).toBeDefined()
+  await act(async () => sourceButton!.click())
+  await vi.waitFor(() => expect(document.querySelector('.agent-information-reader__source')).not.toBeNull())
+  const rows = new Map([...document.querySelectorAll('.agent-information-reader__source > div')].map(row => [row.querySelector('dt')?.textContent, row.querySelector('dd')?.textContent]))
+  expect(rows.get('Name')).toBe(name)
+  expect(rows.get('Host')).toBe('local')
+  expect(rows.get('Runtime')).toBe(f.b.owner.runtimeId)
+  expect(rows.get('Session')).toBe(SID)
+  expect(rows.has('Run')).toBe(false)
+  expect(document.querySelector('.agent-information-details__tabs [aria-current="page"]')?.textContent).toBe('Source')
+  expect(originalAccess.rename).toBeUndefined()
+  await f.assertPreserved()
 })
