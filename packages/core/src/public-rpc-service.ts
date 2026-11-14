@@ -16,6 +16,7 @@ import { MOTE_INPUT_GUIDANCE } from './mote-input-source.js'
 import { isMoteDialogueMethod, parseMoteDialogueParams, parseMoteDialogueResult, sameMoteMainEntrySource, unconfirmedMoteMainEntryOperation, type MoteDialoguePort, type MoteDialogueMethod } from './mote-dialogue.js'
 import { moteInputObservationId } from './mote-input.js'
 import { parseCreationContinueParams, parseCreationContinueReceipt, parseCreationContinueResult } from './agent-creation-continue.js'
+import { parseAgentExecutionReference } from './errors.js'
 import { AGENT_EXECUTION_CREATE_FIELDS, parseAgentExecutionCreate, parseAgentExecutionBinding } from './public-rpc-agent-execution.js'
 import { parseAgentInputResourceRead } from './agent-input-resource.js'
 import { isConnectionApiMethod, parseConnectionApiParams } from './connection-api-codec.js'
@@ -187,7 +188,7 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   /** Borrow the original UI-free Capsule owner; no content or configuration is stored here. */
   capsules?: { call<M extends CapsuleMethod>(method: M, params: CapsuleParamsMap[M], context?: CapsuleCallContext,
     originalContext?: AgentMuxRpcCallContext): Promise<CapsuleResultMap[M]> }
-  executionBindings?: Pick<import('./agent-execution-coordinator.js').AgentExecutionCoordinator, 'create' | 'rejoin'> & {
+  executionBindings?: Pick<import('./agent-execution-coordinator.js').AgentExecutionCoordinator, 'create' | 'rejoin' | 'continueOriginal'> & {
     inspect(bindingId: string): import('./agent-execution-coordinator.js').AgentExecutionInspection | null | Promise<import('./agent-execution-coordinator.js').AgentExecutionInspection | null>
   }
   capsuleInput?: CapsuleInputPort
@@ -373,6 +374,7 @@ const NATIVE_FIELDS = {
   'agent.creation.continue': ['hostId', 'createOperationId', 'agentSessionId'],
   'agent.execution.inspect': ['hostId', 'bindingId', 'streamGeneration', 'nativeRequestId'],
   'agent.execution.create': AGENT_EXECUTION_CREATE_FIELDS,
+  'agent.execution.continue': ['bindingId', 'agentSessionId', 'createOperationId'],
   'agent.execution.binding': ['bindingId'],
   'agent.execution.rejoin': ['bindingId'],
   'terminal.recover': ['hostId', 'expectedRun', 'runtimeId', 'workspacePath', 'operationId', 'action'],
@@ -1509,16 +1511,17 @@ export class AgentMuxRpcService {
         context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
       }
     }
-    if (method === 'agent.execution.create' || method === 'agent.execution.binding' || method === 'agent.execution.rejoin') {
+    if (method === 'agent.execution.create' || method === 'agent.execution.continue' || method === 'agent.execution.binding' || method === 'agent.execution.rejoin') {
       if (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind) ||
           typeof context.principal.id !== 'string' || !context.principal.id.trim() || context.principal.id.includes('\0')) {
         throw new AgentMuxError('Execution binding operations require a transport-approved user or device.', 'CONTROL_PERMISSION_DENIED')
       }
-      const input = method === 'agent.execution.create' ? parseAgentExecutionCreate(params) : parseAgentExecutionBinding(params)
+      const input = method === 'agent.execution.create' ? parseAgentExecutionCreate(params) : method === 'agent.execution.continue' ? parseAgentExecutionReference(params) : parseAgentExecutionBinding(params)
       const owner = this.ports.executionBindings
       if (!owner) throw new AgentMuxError('The original execution binding owner is unavailable. No helper or Agent was replaced.', 'CONTROL_UNAVAILABLE')
       context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
       const result = method === 'agent.execution.create' ? await owner.create(input as import('./agent-execution-coordinator.js').AgentExecutionOpenInput)
+        : method === 'agent.execution.continue' ? await owner.continueOriginal(input as import('./agent-execution-contract.js').AgentExecutionReference)
         : method === 'agent.execution.rejoin' ? await owner.rejoin(input.bindingId) : await owner.inspect(input.bindingId)
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
       return parseRpcNativeResult(method, result, input) as AgentMuxRpcResult<M>

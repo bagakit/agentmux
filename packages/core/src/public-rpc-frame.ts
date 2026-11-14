@@ -1,8 +1,9 @@
 import { parseBrowserOpenMismatch } from './control-browser-targets.js'
 import { validateDeliveryLogId } from './delivery-attempt.js'
 import { JSONRPCErrorCode, createJSONRPCErrorResponse, type JSONRPCRequest, type JSONRPCResponse, type JSONRPCID } from 'json-rpc-2.0'
-import { AgentMuxError, parseAgentMuxCreationFailure, parseAgentMuxStorageFailure,
+import { AgentMuxError, parseAgentMuxCreationFailure, parseAgentMuxStorageFailure, parseAgentExecutionFailure,
   type AgentMuxControlFailure, type AgentMuxCreationFailure, type AgentMuxStorageFailure } from './errors.js'
+import type { AgentExecutionFailure } from './agent-execution-contract.js'
 import { rpcRecord } from './rpc-data.js'
 export { rpcRecord } from './rpc-data.js'
 export type { JSONRPCRequest, JSONRPCResponse, JSONRPCID } from 'json-rpc-2.0'
@@ -13,7 +14,7 @@ export class AgentMuxRpcError extends AgentMuxError {
   constructor(message: string, code: string, readonly rpcCode: number,
     readonly details?: unknown, readonly candidates?: unknown, detail?: string,
     controlFailure?: AgentMuxControlFailure, logId?: string, creationFailure?: AgentMuxCreationFailure,
-    storageFailure?: AgentMuxStorageFailure) { super(message, code, detail, controlFailure, logId, creationFailure, storageFailure) }
+    storageFailure?: AgentMuxStorageFailure, executionFailure?: AgentExecutionFailure) { super(message, code, detail, controlFailure, logId, creationFailure, storageFailure, executionFailure) }
 }
 export function parseRpcControlFailure(value: unknown): AgentMuxControlFailure {
   const failure = rpcRecord(value, ['disposition', 'confirmedInputBytes'], 'CONTROL_PROTOCOL_ERROR')
@@ -24,7 +25,7 @@ export function parseRpcControlFailure(value: unknown): AgentMuxControlFailure {
   return failure as AgentMuxControlFailure
 }
 export function rpcFailure(id: JSONRPCID, error: unknown): JSONRPCResponse {
-  const source = error instanceof Error ? error as Error & { code?: string; detail?: string; details?: unknown; candidates?: unknown; controlFailure?: AgentMuxControlFailure; logId?: string; creationFailure?: AgentMuxCreationFailure; storageFailure?: AgentMuxStorageFailure } : null
+  const source = error instanceof Error ? error as Error & { code?: string; detail?: string; details?: unknown; candidates?: unknown; controlFailure?: AgentMuxControlFailure; logId?: string; creationFailure?: AgentMuxCreationFailure; storageFailure?: AgentMuxStorageFailure; executionFailure?: AgentExecutionFailure } : null
   const code = source?.code ?? 'CONTROL_FAILED'
   const numeric = code === 'INVALID_CONTROL_REQUEST' ? JSONRPCErrorCode.InvalidParams
     : code === 'RPC_METHOD_NOT_FOUND' ? JSONRPCErrorCode.MethodNotFound : -32000
@@ -34,6 +35,7 @@ export function rpcFailure(id: JSONRPCID, error: unknown): JSONRPCResponse {
     ...(source?.controlFailure === undefined ? {} : { controlFailure: parseRpcControlFailure(source.controlFailure) }),
     ...(source?.creationFailure === undefined ? {} : { creationFailure: parseAgentMuxCreationFailure(source.creationFailure) }),
     ...(source?.storageFailure === undefined ? {} : { storageFailure: parseAgentMuxStorageFailure(source.storageFailure) }),
+    ...(source?.executionFailure === undefined ? {} : { executionFailure: parseAgentExecutionFailure(source.executionFailure) }),
     ...(source?.candidates === undefined ? {} : { candidates: source.candidates })
   })
 }
@@ -63,7 +65,7 @@ export function parseRpcResponse(value: unknown): JSONRPCResponse {
       throw new AgentMuxError('Invalid JSON-RPC error.', 'CONTROL_PROTOCOL_ERROR')
     }
     if (error.data !== undefined) {
-      const data = rpcRecord(error.data, ['code', 'detail', 'details', 'candidates', 'controlFailure', 'logId', 'creationFailure', 'storageFailure'], 'CONTROL_PROTOCOL_ERROR')
+      const data = rpcRecord(error.data, ['code', 'detail', 'details', 'candidates', 'controlFailure', 'logId', 'creationFailure', 'storageFailure', 'executionFailure'], 'CONTROL_PROTOCOL_ERROR')
       if (typeof data.code !== 'string' || data.detail !== undefined && typeof data.detail !== 'string') throw new AgentMuxError('Invalid typed RPC error.', 'CONTROL_PROTOCOL_ERROR')
       if (data.details && typeof data.details === 'object' &&
           ['browser-open-profile-mismatch', 'browser-open-identity-mismatch'].includes(Object.getOwnPropertyDescriptor(data.details, 'kind')?.value)) {
@@ -74,6 +76,7 @@ export function parseRpcResponse(value: unknown): JSONRPCResponse {
       if (data.controlFailure !== undefined) parseRpcControlFailure(data.controlFailure)
       if (data.creationFailure !== undefined) parseAgentMuxCreationFailure(data.creationFailure)
       if (data.storageFailure !== undefined) parseAgentMuxStorageFailure(data.storageFailure)
+      if (data.executionFailure !== undefined) parseAgentExecutionFailure(data.executionFailure)
       if (data.code === 'MESSAGE_TARGET_NOT_UNIQUE') {
         if (!Array.isArray(data.candidates) || !data.candidates.length) throw new AgentMuxError('Ambiguous target lacks candidates.', 'CONTROL_PROTOCOL_ERROR')
         const ids = new Set<string>()
@@ -91,13 +94,14 @@ export function parseRpcResponse(value: unknown): JSONRPCResponse {
 }
 export function rpcResponseError(response: JSONRPCResponse): AgentMuxRpcError | null {
   if (!response.error) return null
-  const data = response.error.data as { code?: string; detail?: string; details?: unknown; candidates?: unknown; controlFailure?: AgentMuxControlFailure; logId?: string; creationFailure?: AgentMuxCreationFailure; storageFailure?: AgentMuxStorageFailure } | undefined
+  const data = response.error.data as { code?: string; detail?: string; details?: unknown; candidates?: unknown; controlFailure?: AgentMuxControlFailure; logId?: string; creationFailure?: AgentMuxCreationFailure; storageFailure?: AgentMuxStorageFailure; executionFailure?: AgentExecutionFailure } | undefined
   return new AgentMuxRpcError(response.error.message, data?.code ??
     (response.error.code === -32601 ? 'RPC_METHOD_NOT_FOUND' : 'CONTROL_PROTOCOL_ERROR'),
     response.error.code, data?.details, data?.candidates, data?.detail,
     data?.controlFailure === undefined ? undefined : parseRpcControlFailure(data.controlFailure), data?.logId,
     data?.creationFailure === undefined ? undefined : parseAgentMuxCreationFailure(data.creationFailure),
-    data?.storageFailure === undefined ? undefined : parseAgentMuxStorageFailure(data.storageFailure))
+    data?.storageFailure === undefined ? undefined : parseAgentMuxStorageFailure(data.storageFailure),
+    data?.executionFailure === undefined ? undefined : parseAgentExecutionFailure(data.executionFailure))
 }
 export function rpcEncode(frame: unknown): string {
   const json = JSON.stringify(frame)

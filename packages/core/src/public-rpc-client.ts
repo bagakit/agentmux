@@ -21,7 +21,7 @@ import { AgentMuxRpcRemoteTransport, agentMuxRpcTailcatArguments } from './rpc-r
 import type { AgentMuxRpcRemoteEndpoint } from './public-rpc.js'
 import { rpcTransportError as transportError } from './rpc-transport-error.js'
 import { JSONRPCClient, type JSONRPCRequest, type JSONRPCResponse } from 'json-rpc-2.0'
-import { AgentMuxError, parseAgentMuxCreationFailure, parseAgentMuxStorageFailure } from './errors.js'
+import { AgentMuxError, parseAgentMuxCreationFailure, parseAgentMuxStorageFailure, parseAgentExecutionFailure } from './errors.js'
 import { isAgentMuxRpcDeviceMethod } from './public-rpc-device.js'
 import { agentMuxControlTimeoutMs } from './control.js'
 import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
@@ -261,13 +261,14 @@ function streamEvent(method: AgentMuxRpcStreamMethod, value: unknown, initial: u
   if (event.type === 'end') { rpcRecord(event, ['type', 'data'], 'CONTROL_PROTOCOL_ERROR'); return event }
   if (event.type === 'error') {
     rpcRecord(event, ['type', 'error'], 'CONTROL_PROTOCOL_ERROR')
-    const error = rpcRecord(event.error, ['code', 'message', 'detail', 'details', 'candidates', 'controlFailure', 'logId', 'creationFailure', 'storageFailure', 'evidence'], 'CONTROL_PROTOCOL_ERROR')
+    const error = rpcRecord(event.error, ['code', 'message', 'detail', 'details', 'candidates', 'controlFailure', 'logId', 'creationFailure', 'storageFailure', 'executionFailure', 'evidence'], 'CONTROL_PROTOCOL_ERROR')
     if (typeof error.code !== 'string' || !error.code || typeof error.message !== 'string' ||
       error.detail !== undefined && typeof error.detail !== 'string') throw new AgentMuxError('Invalid reader error.', 'CONTROL_PROTOCOL_ERROR')
     if (error.logId !== undefined) validateDeliveryLogId(error.logId)
     if (error.controlFailure !== undefined) parseRpcControlFailure(error.controlFailure)
     if (error.creationFailure !== undefined) parseAgentMuxCreationFailure(error.creationFailure)
     if (error.storageFailure !== undefined) parseAgentMuxStorageFailure(error.storageFailure)
+    if (error.executionFailure !== undefined) parseAgentExecutionFailure(error.executionFailure)
     if (error.evidence !== undefined) {
       const evidence = parseOutputGapEvidence(error.evidence)
       if (method === 'agent.output' && evidence.run && evidence.run.runId !== (initial as import('./public-rpc.js').AgentMuxRpcOutputInitial).run.runId) {
@@ -343,7 +344,7 @@ class RpcClient implements AgentMuxRpcClient {
       // Establishment has not opened the business channel or sent its request.
       throw failure instanceof AgentMuxError
         ? new AgentMuxError(failure.message, failure.code, failure.detail,
-          { disposition: 'not_applied', confirmedInputBytes: null }, failure.logId, failure.creationFailure, failure.storageFailure)
+          { disposition: 'not_applied', confirmedInputBytes: null }, failure.logId, failure.creationFailure, failure.storageFailure, failure.executionFailure)
         : failure
     }
   }
@@ -392,7 +393,7 @@ class RpcClient implements AgentMuxRpcClient {
             { disposition: sharedDispatch === 'queued' ? 'not_applied' : 'unknown', confirmedInputBytes: null }, failure.logId)
         }
         if (isAgentMuxRpcDeviceMethod(method) && failure instanceof AgentMuxError) {
-          failure = new AgentMuxError(failure.message + ' ' + deviceRecovery(), failure.code, failure.detail, failure.controlFailure, failure.logId, failure.creationFailure, failure.storageFailure)
+          failure = new AgentMuxError(failure.message + ' ' + deviceRecovery(), failure.code, failure.detail, failure.controlFailure, failure.logId, failure.creationFailure, failure.storageFailure, failure.executionFailure)
         }
         // A local connection absence is not a refusal returned by the owner.
         // Preserve that distinction for callers retaining available local facts.
@@ -445,11 +446,12 @@ class RpcClient implements AgentMuxRpcClient {
           if (finished) return
           handlers!.onEvent(event as AgentMuxRpcStreamEvent<AgentMuxRpcStreamMethod>)
           if (event.type === 'end') end()
-          if (event.type === 'error') { const failure = event.error as { code: string; message: string; detail?: string; details?: unknown; candidates?: unknown; controlFailure?: unknown; logId?: string; creationFailure?: unknown; storageFailure?: unknown };
+          if (event.type === 'error') { const failure = event.error as { code: string; message: string; detail?: string; details?: unknown; candidates?: unknown; controlFailure?: unknown; logId?: string; creationFailure?: unknown; storageFailure?: unknown; executionFailure?: unknown };
             end(new AgentMuxRpcError(failure.message, failure.code, -32000, failure.details, failure.candidates, failure.detail,
               failure.controlFailure === undefined ? undefined : parseRpcControlFailure(failure.controlFailure), failure.logId,
               failure.creationFailure === undefined ? undefined : parseAgentMuxCreationFailure(failure.creationFailure),
-              failure.storageFailure === undefined ? undefined : parseAgentMuxStorageFailure(failure.storageFailure))) }
+              failure.storageFailure === undefined ? undefined : parseAgentMuxStorageFailure(failure.storageFailure),
+              failure.executionFailure === undefined ? undefined : parseAgentExecutionFailure(failure.executionFailure))) }
         }
       } catch (error) { end(transportError(error)) }
     }

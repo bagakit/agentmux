@@ -4428,6 +4428,7 @@ export class AgentMuxClient {
     const provider = this.providers.get(input.providerId)
     if (!provider.prepareExecutionHelper) throw new AgentMuxError('This Provider has no qualified native tool execution transport.', 'EXECUTION_PROVIDER_UNSUPPORTED')
     if (input.role === 'frontend') {
+      if (!provider.prepareToolExecutionLaunch) throw new AgentMuxError('This Provider has no qualified native tool execution launch.', 'EXECUTION_PROVIDER_UNSUPPORTED')
       safeId(input.agentSessionId ?? '', 'Original execution Agent Session id')
       input.toolExecution = parseAgentToolExecutionBinding(input.toolExecution)
       if (input.toolExecution.bindingId !== input.bindingId) throw new AgentMuxError('Frontend and resource binding identities differ.', 'EXECUTION_BINDING_MISMATCH')

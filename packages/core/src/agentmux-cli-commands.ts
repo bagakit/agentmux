@@ -1,3 +1,4 @@
+import { parseAgentExecutionReference } from './errors.js'
 import { NODE_LOCATOR_CLI_COMMAND } from './node-locator-cli.js'
 import { NODE_PUBLISHING_CLI_COMMANDS } from './node-publishing-cli.js'
 import { BROWSER_PROFILE_COOKIE_FILE_OPERATIONS, parseBrowserProfileCookieFilePayload } from './browser-profile-cookie-files.js'
@@ -355,12 +356,13 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('agent.refresh', '--session ID', 'Re-read the canonical original Session using its complete Session ID.',
     { '--session': 'data' }, f => ({ agentSessionId: id(f, '--session', true) }),
     'No Run is started, resumed or stopped and no input is sent. Passive native identity observation may confirm and persist metadata asynchronously; this reply does not promise identity recovery or reopen a retired Session. Use agent inspect for diagnostic inspection.'),
-  ...(['agent.execution.create', 'agent.execution.binding', 'agent.execution.rejoin'] as const).map(method => command(method, '--input FILE|-',
+  ...(['agent.execution.create', 'agent.execution.continue', 'agent.execution.binding', 'agent.execution.rejoin'] as const).map(method => command(method, '--input FILE|-',
     method === 'agent.execution.create' ? 'Create one fixed Agent/resource Host binding through the original Core owner.'
+      : method === 'agent.execution.continue' ? 'Explicitly continue the original frozen execution intent, without supplying new launch input.'
       : method === 'agent.execution.rejoin' ? 'Reattach readers to the retained helper pair without starting an Agent.' : 'Read one original execution binding and its service diagnostic.',
     { '--input': 'data' }, async f => {
       const input = await readControlJsonInput(value(f, '--input', true)!, 'Execution binding')
-      return method === 'agent.execution.create' ? { ...parseAgentExecutionCreate(input) } : parseAgentExecutionBinding(input)
+      return method === 'agent.execution.create' ? { ...parseAgentExecutionCreate(input) } : method === 'agent.execution.continue' ? { ...parseAgentExecutionReference(input) } : parseAgentExecutionBinding(input)
     }, 'Requires a transport-authenticated user or device. create JSON names bindingId, agentHostId, agentRuntimeId, resourceHostId, resourceRuntimeId, resourceWorkspacePath, resourceGrant {scope:"host-user",bindingId}, and agent with original agentSessionId/createOperationId, Executor ID/revision and launch workspacePath. Other Host creation options remain with that Core; command/env/toolExecution overrides are forbidden. binding and rejoin take {bindingId} on the receiving coordinator endpoint. Keep the complete original packet after an unknown creation reply. rejoin attaches only retained helpers; it never recreates a lost helper, resumes the Agent CLI or replays a tool operation. binding can return null; an unavailable owner is an error. Use execution inspect with the original diagnostic operation key to query tool metadata.')),
   command('agent.execution.inspect', '--host ID --binding ID --generation ID --request-json JSON', 'Inspect metadata for one original tool operation without replaying it.',
     { '--host': 'data', '--binding': 'data', '--generation': 'data', '--request-json': 'data' }, f => {

@@ -1,5 +1,5 @@
 import { isAbsolute } from 'node:path'
-import { AgentMuxError } from './errors.js'
+import { AgentMuxError, parseAgentExecutionReference } from './errors.js'
 import { parseAgentExecutionNotices } from './agent-execution-helper.js'
 import { rpcRecord } from './rpc-data.js'
 import { normalizeLaunchOptionSelection } from './agent-launch-option.js'
@@ -64,12 +64,23 @@ export function parseAgentExecutionBinding(value: unknown): { bindingId: string 
 export function parseAgentExecutionInspection(value: unknown, expected: { bindingId: string } & Partial<Pick<AgentExecutionInspection,
   'agentHostId' | 'resourceHostId' | 'agentSessionId' | 'resourceWorkspacePath'>>): AgentExecutionInspection {
   const code = 'CONTROL_PROTOCOL_ERROR'
-  const result = rpcRecord(value, ['bindingId', 'agentHostId', 'resourceHostId', 'agentSessionId', 'resourceWorkspacePath', 'state', 'diagnostic', 'diagnostics', 'notices'], code)
+  const result = rpcRecord(value, ['bindingId', 'agentHostId', 'resourceHostId', 'agentSessionId', 'resourceWorkspacePath', 'state', 'diagnostic', 'diagnostics', 'notices', 'continuation', 'helperStarts'], code)
   for (const field of ['bindingId', 'agentHostId', 'resourceHostId', 'agentSessionId']) identity(result[field], code)
   workspace(result.resourceWorkspacePath, code)
   for (const [field, original] of Object.entries(expected)) if (result[field] !== original) invalid('Execution observation belongs to another original binding.', code)
   if (result.state !== 'connected' && result.state !== 'unavailable' || (result.state === 'connected') === (result.diagnostic !== undefined)) invalid('Execution observation has inconsistent service state.', code)
   if (result.notices !== undefined) parseAgentExecutionNotices(result.notices, {}, code)
+  if (result.continuation !== undefined) {
+    const original = parseAgentExecutionReference(result.continuation)
+    if (original.bindingId !== result.bindingId || original.agentSessionId !== result.agentSessionId) invalid('Continuation identifies another original execution.', code)
+  }
+  if (result.helperStarts !== undefined) {
+    const starts = rpcRecord(result.helperStarts, ['executor', 'frontend'], code)
+    for (const role of ['executor', 'frontend']) {
+      const start = rpcRecord(starts[role], ['outcome', 'runId'], code)
+      if (!['not-submitted', 'unknown', 'confirmed'].includes(String(start.outcome)) || (start.outcome === 'confirmed' ? typeof start.runId !== 'string' || !start.runId : start.runId !== null)) invalid('Original helper Start facts are invalid.', code)
+    }
+  }
   const validateDiagnostic = (value: unknown, local: boolean): void => {
     const diagnostic = rpcRecord(value, local ? ['code', 'message', 'generation', 'operation', 'scope', 'side', 'runId'] : ['code', 'message', 'generation', 'operation'], code)
     if (local) {

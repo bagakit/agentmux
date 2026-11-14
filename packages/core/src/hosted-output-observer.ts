@@ -73,7 +73,7 @@ export function createHostedOutputObservation(rpc: AgentMuxHostedOutputRpcPort,
               }
               fail(new AgentMuxError(event.error.message, event.error.code,
                 event.error.detail ?? (typeof event.error.details === 'string' ? event.error.details : undefined), event.error.controlFailure,
-                event.error.logId, event.error.creationFailure, event.error.storageFailure), event.error.evidence); return
+                event.error.logId, event.error.creationFailure, event.error.storageFailure, event.error.executionFailure), event.error.evidence); return
             }
             if (event.type === 'output') {
               const output = event.data

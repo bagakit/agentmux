@@ -1,3 +1,4 @@
+import { parseAgentExecutionReference } from './errors.js'
 import { parseNodeLocateParams, parseNodeLocateResult } from './node-locator.js'
 import { isNodePublishingMethod, parseNodePublishingParams, parseNodePublishingResult } from './node-publishing.js'
 import { parseAgentSessionRecordInspection, parseAgentSessionRecordReceipt, type AgentSessionRecordInput, type AgentSessionRecordDeleteInput } from './agent-session-record.js'
@@ -397,6 +398,13 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       const input = parseAgentExecutionBinding(params)
       if (method === 'agent.execution.binding' && value === null) return value as unknown as Record<string, unknown>
       return parseAgentExecutionInspection(value, input) as unknown as Record<string, unknown>
+    }
+    if (method === 'agent.execution.continue') {
+      const input = parseAgentExecutionReference(params), result = record(value, ['session', 'execution'])
+      const session = parseRpcAgentSession(result.session), execution = parseAgentExecutionInspection(result.execution, { bindingId: input.bindingId, agentSessionId: input.agentSessionId })
+      if (session.agentSessionId !== input.agentSessionId || session.creation?.createOperationId !== input.createOperationId ||
+          session.toolExecution?.bindingId !== input.bindingId || execution.continuation?.createOperationId !== input.createOperationId) fail()
+      return { session, execution }
     }
     if (method === 'agent.execution.create') {
       const input = parseAgentExecutionCreate(params), result = record(value, ['session', 'execution'])

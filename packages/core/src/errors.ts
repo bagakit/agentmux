@@ -1,4 +1,19 @@
 import { isDeliveryLogId } from './delivery-log-id.js'
+import type { AgentExecutionFailure, AgentExecutionReference } from './agent-execution-contract.js'
+
+export function parseAgentExecutionReference(value: unknown): AgentExecutionReference {
+  const fields = failureRecord(value, ['bindingId', 'agentSessionId', 'createOperationId'])
+  if (Object.values(fields).some(value => typeof value !== 'string' || !value.trim() || /[\0\r\n]/u.test(value))) return invalidFailure()
+  return fields as AgentExecutionReference
+}
+
+export function parseAgentExecutionFailure(value: unknown): AgentExecutionFailure {
+  const fields = failureRecord(value, ['reference', 'hostId', 'role', 'stage'])
+  if (typeof fields.hostId !== 'string' || !fields.hostId.trim() || /[\0\r\n]/u.test(fields.hostId) ||
+      !['executor', 'frontend', 'agent'].includes(String(fields.role)) ||
+      !['resolve', 'inventory', 'prepare', 'start', 'attach', 'create'].includes(String(fields.stage))) return invalidFailure()
+  return { ...fields, reference: parseAgentExecutionReference(fields.reference) } as AgentExecutionFailure
+}
 
 /** Exact command failure boundary. A known prefix never authorizes replay of the remainder. */
 export type AgentMuxControlFailure = {
@@ -62,11 +77,12 @@ export type AgentMuxErrorData = {
   logId?: string
   creationFailure?: AgentMuxCreationFailure
   storageFailure?: AgentMuxStorageFailure
+  executionFailure?: AgentExecutionFailure
 }
 
 export function parseAgentMuxErrorData(value: unknown): AgentMuxErrorData {
   const invalid = () => { throw new AgentMuxError('Original error data is invalid.', 'CONTROL_PROTOCOL_ERROR') }
-  const source = errorRecord(value, ['code', 'message', 'detail', 'controlFailure', 'logId', 'creationFailure', 'storageFailure'])
+  const source = errorRecord(value, ['code', 'message', 'detail', 'controlFailure', 'logId', 'creationFailure', 'storageFailure', 'executionFailure'])
   if (typeof source.code !== 'string' || !source.code.trim() || source.code.length > 256 || /[\0\r\n]/u.test(source.code) ||
       typeof source.message !== 'string' || source.message.length > 64 * 1024 * 1024 ||
       source.detail !== undefined && (typeof source.detail !== 'string' || source.detail.length > 64 * 1024 * 1024) ||
@@ -81,7 +97,8 @@ export function parseAgentMuxErrorData(value: unknown): AgentMuxErrorData {
   return { code: source.code, message: source.message, ...(source.detail === undefined ? {} : { detail: source.detail }),
     ...(controlFailure === undefined ? {} : { controlFailure }), ...(source.logId === undefined ? {} : { logId: source.logId }),
     ...(source.creationFailure === undefined ? {} : { creationFailure: parseAgentMuxCreationFailure(source.creationFailure) }),
-    ...(source.storageFailure === undefined ? {} : { storageFailure: parseAgentMuxStorageFailure(source.storageFailure) }) }
+    ...(source.storageFailure === undefined ? {} : { storageFailure: parseAgentMuxStorageFailure(source.storageFailure) }),
+    ...(source.executionFailure === undefined ? {} : { executionFailure: parseAgentExecutionFailure(source.executionFailure) }) }
 }
 
 export class AgentMuxError extends Error {
@@ -92,7 +109,8 @@ export class AgentMuxError extends Error {
     readonly controlFailure?: AgentMuxControlFailure,
     readonly logId?: string,
     readonly creationFailure?: AgentMuxCreationFailure,
-    readonly storageFailure?: AgentMuxStorageFailure
+    readonly storageFailure?: AgentMuxStorageFailure,
+    readonly executionFailure?: AgentExecutionFailure
   ) {
     super(message)
     this.name = 'AgentMuxError'
@@ -106,7 +124,8 @@ export function agentMuxCancellationError(message: string, code: string, reason:
       ...(reason.detail === undefined ? {} : { detail: reason.detail }),
       ...(reason.controlFailure === undefined ? {} : { controlFailure: reason.controlFailure }),
       ...(reason.creationFailure === undefined ? {} : { creationFailure: reason.creationFailure }),
-      ...(reason.storageFailure === undefined ? {} : { storageFailure: reason.storageFailure }) }
+      ...(reason.storageFailure === undefined ? {} : { storageFailure: reason.storageFailure }),
+      ...(reason.executionFailure === undefined ? {} : { executionFailure: reason.executionFailure }) }
     : { code: reason instanceof Error ? reason.name : 'unknown', message: reason instanceof Error ? reason.message : String(reason) })
   const error = new AgentMuxError(message, code, detail)
   if (reason !== undefined) Object.defineProperty(error, 'cause', { value: reason, configurable: true })

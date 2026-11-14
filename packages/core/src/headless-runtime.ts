@@ -112,7 +112,9 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
         const scopes = [{ hostId: 'local', client: client! }, ...(options.coreClients?.() ?? [])].filter(scope => scope.hostId === hostId)
         if (scopes.length !== 1) throw new AgentMuxError('Execution requires one exact configured Host route.', 'UNKNOWN_HOST')
         const original = scopes[0]!.client
-        await original.connect()
+        // Hosted control RPCs carry their own exact owner fence; unrelated event
+        // subscription availability cannot become creation admission.
+        if (!('runtimeOwnerIdentity' in original) || typeof original.runtimeOwnerIdentity !== 'function') await original.connect()
         const identity = await original.agentCreationAuthority()
         return { runtimeId: identity.runtimeId, client: original }
       }

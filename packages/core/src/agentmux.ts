@@ -294,6 +294,7 @@ function reportFailure(error: unknown): void {
       ...(source?.controlFailure === undefined ? {} : { controlFailure: source.controlFailure }),
       ...(source?.creationFailure === undefined ? {} : { creationFailure: source.creationFailure }),
       ...(source?.storageFailure === undefined ? {} : { storageFailure: source.storageFailure }),
+      ...(source?.executionFailure === undefined ? {} : { executionFailure: source.executionFailure }),
       ...(source?.logId === undefined ? {} : { logId: source.logId }),
       ...(source?.candidates === undefined ? {} : { candidates: source.candidates })
     }

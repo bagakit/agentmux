@@ -8,7 +8,8 @@ import { AgentExecutionBridge, type AgentExecutionBridgeState, type AgentExecuti
 import type { AgentMuxClient } from './client.js';
 import type { AgentMuxHostAgentCreateInput } from "./client-contract.js";
 import type { AgentMuxAgentSession } from './types.js'
-import { AgentMuxError } from './errors.js'
+import { AgentMuxError, parseAgentExecutionReference } from './errors.js'
+import type { AgentExecutionReference, AgentExecutionFailure, AgentExecutionHelperStart } from './agent-execution-contract.js'
 import { parseAgentExecutionNotices, type AgentExecutionNotice } from './agent-execution-helper.js'
 
 export type AgentExecutionHostPort = AgentExecutionBridgePort & Pick<AgentMuxClient,
@@ -44,6 +45,8 @@ export interface AgentExecutionInspection {
   agentSessionId: string
   resourceWorkspacePath: string
   state: 'unavailable' | 'connected'
+  continuation?: AgentExecutionReference
+  helperStarts?: Record<'executor' | 'frontend', AgentExecutionHelperStart>
   notices?: AgentExecutionNotice[]
   /** Current original helper/reader connection only; not native tool qualification. */
   diagnostic?: Diagnostic
@@ -53,6 +56,15 @@ export interface AgentExecutionInspection {
 const nativeLock = createRequire(import.meta.url)('fs-native-extensions') as { tryLock(fd: number): boolean }
 const fail = (message: string, code = 'EXECUTION_BINDING_CONFLICT') => new AgentMuxError(message, code)
 const creationId = (binding: string, role: string) => createHash('sha256').update(JSON.stringify([binding, role])).digest('hex')
+const reference = (input: AgentExecutionOpenInput): AgentExecutionReference => ({ bindingId: input.bindingId, agentSessionId: input.agent.agentSessionId, createOperationId: input.agent.createOperationId })
+function executionFailure(error: unknown, input: AgentExecutionOpenInput, step: Omit<AgentExecutionFailure, 'reference'>): AgentMuxError {
+  if (error instanceof AgentMuxError && error.executionFailure) return error
+  const original = error instanceof AgentMuxError ? error : undefined
+  const result = new AgentMuxError(error instanceof Error ? error.message : String(error), original?.code ?? 'EXECUTION_CREATION_UNCONFIRMED',
+    original?.detail, original?.controlFailure, original?.logId, original?.creationFailure, original?.storageFailure, { reference: reference(input), ...step })
+  Object.defineProperty(result, 'cause', { value: error, configurable: true })
+  return result
+}
 
 export interface AgentExecutionCoordinatorOptions {
   resolveHost(hostId: string): Promise<{ runtimeId: string; client: AgentExecutionHostPort }>
@@ -162,6 +174,12 @@ export class AgentExecutionCoordinator {
     }
     return undefined
   }
+  private operationFacts(record: RecordValue): Pick<AgentExecutionInspection, 'continuation' | 'helperStarts'> {
+    const start = (role: 'executor' | 'frontend'): AgentExecutionHelperStart => record[role]
+      ? { outcome: 'confirmed', runId: record[role]!.runId }
+      : { outcome: record.attempts?.[role] ? 'unknown' : 'not-submitted', runId: null }
+    return { continuation: reference(record.input), helperStarts: { executor: start('executor'), frontend: start('frontend') } }
+  }
   private observe(input: AgentExecutionOpenInput, failure?: Diagnostic, notices?: AgentExecutionNotice[]): void {
     if (failure) this.connectionFailures.set(input.bindingId, failure)
     const retained = this.read(input.bindingId)
@@ -170,7 +188,7 @@ export class AgentExecutionCoordinator {
     const diagnostics = retained ? this.localDiagnostics(retained) : []
     const value: AgentExecutionInspection = { bindingId: input.bindingId, agentHostId: input.agentHostId, resourceHostId: input.resourceHostId,
       agentSessionId: input.agent.agentSessionId, resourceWorkspacePath: input.resourceWorkspacePath,
-      state: diagnostic ? 'unavailable' : 'connected', ...(notices === undefined ? {} : { notices }), ...(diagnostic ? { diagnostic } : {}),
+      ...(retained ? this.operationFacts(retained) : {}), state: diagnostic ? 'unavailable' : 'connected', ...(notices === undefined ? {} : { notices }), ...(diagnostic ? { diagnostic } : {}),
       ...(diagnostics.length ? { diagnostics } : {}) }
     this.observations.set(input.bindingId, value)
     try { this.options.onObservation?.(structuredClone(value)) } catch { /* A reader cannot change this operation or healthy helpers. */ }
@@ -178,12 +196,12 @@ export class AgentExecutionCoordinator {
   inspect(bindingId: string): AgentExecutionInspection | null {
     const record = this.read(bindingId)
     if (!record) return null
-    return structuredClone(this.observations.get(bindingId) ?? { bindingId, agentHostId: record.input.agentHostId,
+    return structuredClone({ ...(this.observations.get(bindingId) ?? { bindingId, agentHostId: record.input.agentHostId,
       resourceHostId: record.input.resourceHostId, agentSessionId: record.input.agent.agentSessionId,
       resourceWorkspacePath: record.input.resourceWorkspacePath, state: 'unavailable',
       ...(record.notices === undefined ? {} : { notices: this.qualificationNotices(record)! }),
       ...(this.localDiagnostics(record).length ? { diagnostics: this.localDiagnostics(record) } : {}),
-      diagnostic: { code: 'EXECUTION_OBSERVATION_UNCONFIRMED', message: 'The original helpers have not been observed by this Core connection.' } })
+      diagnostic: { code: 'EXECUTION_OBSERVATION_UNCONFIRMED', message: 'The original helpers have not been observed by this Core connection.' } }), ...this.operationFacts(record) })
   }
   /** Resume only retained bridge readers. This never creates or restores an Agent Run. */
   async rejoin(bindingId: string): Promise<AgentExecutionInspection> {
@@ -202,9 +220,13 @@ export class AgentExecutionCoordinator {
       message: error instanceof Error ? error.message : String(error) }, this.read(input.bindingId)?.notices)
   }
   private async hosts(input: AgentExecutionOpenInput) {
-    const [agent, resource] = await Promise.all([this.options.resolveHost(input.agentHostId), this.options.resolveHost(input.resourceHostId)])
-    if (agent.runtimeId !== input.agentRuntimeId || resource.runtimeId !== input.resourceRuntimeId)
-      throw fail('The original Agent or resource Core identity changed; no work was rerouted.', 'EXECUTION_HOST_CHANGED')
+    const resolve = async (hostId: string, role: 'agent' | 'executor') => {
+      try { return await this.options.resolveHost(hostId) }
+      catch (error) { throw executionFailure(error, input, { hostId, role, stage: 'resolve' }) }
+    }
+    const [agent, resource] = await Promise.all([resolve(input.agentHostId, 'agent'), resolve(input.resourceHostId, 'executor')])
+    for (const [host, expected, hostId, role] of [[agent, input.agentRuntimeId, input.agentHostId, 'agent'], [resource, input.resourceRuntimeId, input.resourceHostId, 'executor']] as const)
+      if (host.runtimeId !== expected) throw executionFailure(fail('The original Agent or resource Core identity changed; no work was rerouted.', 'EXECUTION_HOST_CHANGED'), input, { hostId, role, stage: 'resolve' })
     return { agent: agent.client, resource: resource.client }
   }
   private async attach(record: RecordValue, hosts: { agent: AgentExecutionHostPort; resource: AgentExecutionHostPort }): Promise<void> {
@@ -275,68 +297,95 @@ export class AgentExecutionCoordinator {
       let record = this.read(input.bindingId)
       if (record && !isDeepStrictEqual(record.input, input)) throw fail('This execution binding already names another original creation.')
       if (!record) { record = { input }; this.save(record) }
-      try {
-        const hosts = await this.hosts(input)
-        const toolExecution = { bindingId: input.bindingId, resourceHostId: input.resourceHostId,
-          resourceRuntimeId: input.resourceRuntimeId, workspacePath: input.resourceWorkspacePath }
-        const existing = await hosts.agent.readAgentSession(input.agent.agentSessionId)
-        if (existing) {
-          // The target Core validates the complete original creation digest and
-          // retained receipt before consulting a possibly changed Executor.
-          const created = await hosts.agent.createHostAgentWithDelivery({ ...input.agent, toolExecution })
-          if (record.bridge && !this.bridges.has(input.bindingId)) {
-            try { await this.attach(record, hosts) } catch (error) { this.observeFailure(input, error) }
-          }
-          return { session: created.session, execution: this.inspect(input.bindingId)! }
-        }
-        const inventory = await hosts.agent.listHostExecutors()
-        const selected = inventory.executors.find(executor => executor.executorId === input.agent.executorId)
-        if (!selected || selected.configRevision !== input.agent.executorRevision) throw fail('The selected Agent Host Executor configuration changed.', 'EXECUTOR_REVISION_CONFLICT')
-        for (const role of ['executor', 'frontend'] as const) {
-          const client = role === 'executor' ? hosts.resource : hosts.agent
-          const original = await client.prepareAgentExecutionHelper({ bindingId: input.bindingId, agentSessionId: input.agent.agentSessionId,
-            providerId: selected.providerId, role, workspacePath: role === 'executor' ? input.resourceWorkspacePath : input.agent.workspacePath,
-            createOperationId: creationId(input.bindingId, role), ...(role === 'executor' ? { grant: input.resourceGrant } : { toolExecution }) })
-          if (original.notices !== undefined) {
-            const notices = parseAgentExecutionNotices(original.notices, { providerId: selected.providerId, role })
-            record.notices = [...(record.notices ?? []).filter(notice => notice.role !== role), ...notices]
-            this.save(record)
-          }
-          const retained = record[role]
-          if (retained) {
-            const observed = await client.inspectPreparedTerminal(original.prepared, { runId: retained.runId })
-            if (!observed || observed.state !== 'running' || client.runtimeIdentity().instanceId !== retained.ownerInstanceId)
-              throw fail('The original execution helper is unavailable; no replacement was started.', 'EXECUTION_HELPER_UNAVAILABLE')
-          } else {
-            const ownerInstanceId = client.runtimeIdentity().instanceId
-            const attempt = record.attempts?.[role]
-            if (attempt && attempt.ownerInstanceId !== ownerInstanceId) throw fail('The original helper Start owner changed; its outcome remains unknown.', 'EXECUTION_HELPER_UNAVAILABLE')
-            let run = await client.inspectPreparedTerminal(original.prepared)
-            if (!run) {
-              if (attempt) throw fail('The original helper Start has no confirmed receipt; it was not submitted again.', 'EXECUTION_HELPER_UNAVAILABLE')
-              record.attempts = { ...record.attempts, [role]: { ownerInstanceId } }; this.save(record)
-              run = await client.createPreparedTerminal(original.prepared)
-            }
-            if (run.state !== 'running' || client.runtimeIdentity().instanceId !== ownerInstanceId)
-              throw fail('The original helper is not confirmed serving on its original Runtime.', 'EXECUTION_HELPER_UNAVAILABLE')
-            record[role] = { runId: run.runId, ownerInstanceId, inputByte: 0, outputByte: 0 }
-            this.save(record)
-          }
-        }
-        if (this.bridges.has(input.bindingId)) {
-          await this.bridges.get(input.bindingId)!.close()
-          Object.assign(record, this.read(input.bindingId)!)
-        }
-        record.bridge ??= { bindingId: input.bindingId, frontend: record.frontend!, executor: record.executor! }
-        this.save(record)
-        await this.attach(record, hosts)
-        // Endpoint pinning reads the exact original frontend receipt. A not-yet
-        // ready helper is returned as unavailable, never silently recreated.
-        const created = await hosts.agent.createHostAgentWithDelivery({ ...input.agent, toolExecution })
-        return { session: created.session, execution: this.inspect(input.bindingId)! }
-      } catch (error) { this.observeFailure(input, error); throw error }
+      return await this.advance(record)
     })
   }
+  async continueOriginal(value: AgentExecutionReference): Promise<{ session: AgentMuxAgentSession; execution: AgentExecutionInspection }> {
+    const original = parseAgentExecutionReference(value)
+    return await this.serialize(original.bindingId, async () => {
+      const record = this.read(original.bindingId)
+      if (!record) throw fail('The original frozen execution intent is unavailable. Keep its original request; no input was reconstructed.', 'EXECUTION_INTENT_UNCONFIRMED')
+      if (!isDeepStrictEqual(reference(record.input), original)) throw fail('Continuation names another original Session or creation operation.')
+      return await this.advance(record)
+    })
+  }
+  private async advance(record: RecordValue): Promise<{ session: AgentMuxAgentSession; execution: AgentExecutionInspection }> {
+    const input = record.input
+    let step: Omit<AgentExecutionFailure, 'reference'> = { hostId: input.agentHostId, role: 'agent', stage: 'resolve' }
+    try {
+      const hosts = await this.hosts(input)
+      const toolExecution = { bindingId: input.bindingId, resourceHostId: input.resourceHostId,
+        resourceRuntimeId: input.resourceRuntimeId, workspacePath: input.resourceWorkspacePath }
+      const existing = await hosts.agent.readAgentSession(input.agent.agentSessionId)
+      if (existing) {
+        // The target Core validates the complete original creation digest and
+        // retained receipt before consulting a possibly changed Executor.
+        step = { hostId: input.agentHostId, role: 'agent', stage: 'create' }
+        const created = await hosts.agent.createHostAgentWithDelivery({ ...input.agent, toolExecution })
+        if (record.bridge && !this.bridges.has(input.bindingId)) {
+          try { await this.attach(record, hosts) } catch (error) { this.observeFailure(input, error) }
+        }
+        return { session: created.session, execution: this.inspect(input.bindingId)! }
+      }
+      step = { hostId: input.agentHostId, role: 'agent', stage: 'inventory' }
+      const inventory = await hosts.agent.listHostExecutors()
+      const selected = inventory.executors.find(executor => executor.executorId === input.agent.executorId)
+      if (!selected || selected.configRevision !== input.agent.executorRevision) throw fail('The selected Agent Host Executor configuration changed.', 'EXECUTOR_REVISION_CONFLICT')
+      const preparations = {} as Record<'executor' | 'frontend', import('./agent-execution-helper.js').AgentExecutionHelperPreparation>
+      // Both endpoint owners acknowledge required preparation before either Start.
+      for (const role of ['executor', 'frontend'] as const) {
+        step = { hostId: role === 'executor' ? input.resourceHostId : input.agentHostId, role, stage: 'prepare' }
+        const client = role === 'executor' ? hosts.resource : hosts.agent
+        const original = await client.prepareAgentExecutionHelper({ bindingId: input.bindingId, agentSessionId: input.agent.agentSessionId,
+          providerId: selected.providerId, role, workspacePath: role === 'executor' ? input.resourceWorkspacePath : input.agent.workspacePath,
+          createOperationId: creationId(input.bindingId, role), ...(role === 'executor' ? { grant: input.resourceGrant } : { toolExecution }) })
+        if (original.notices !== undefined) {
+          const notices = parseAgentExecutionNotices(original.notices, { providerId: selected.providerId, role })
+          record.notices = [...(record.notices ?? []).filter(notice => notice.role !== role), ...notices]
+          this.save(record)
+        }
+        preparations[role] = original
+      }
+      for (const role of ['executor', 'frontend'] as const) {
+        step = { hostId: role === 'executor' ? input.resourceHostId : input.agentHostId, role, stage: 'start' }
+        const client = role === 'executor' ? hosts.resource : hosts.agent, original = preparations[role]
+        const retained = record[role]
+        if (retained) {
+          const observed = await client.inspectPreparedTerminal(original.prepared, { runId: retained.runId })
+          if (!observed || observed.state !== 'running' || client.runtimeIdentity().instanceId !== retained.ownerInstanceId)
+            throw fail('The original execution helper is unavailable; no replacement was started.', 'EXECUTION_HELPER_UNAVAILABLE')
+        } else {
+          const ownerInstanceId = client.runtimeIdentity().instanceId
+          const attempt = record.attempts?.[role]
+          if (attempt && attempt.ownerInstanceId !== ownerInstanceId) throw fail('The original helper Start owner changed; its outcome remains unknown.', 'EXECUTION_HELPER_UNAVAILABLE')
+          let run = await client.inspectPreparedTerminal(original.prepared)
+          if (!run) {
+            if (attempt) throw fail('The original helper Start has no confirmed receipt; it was not submitted again.', 'EXECUTION_HELPER_UNAVAILABLE')
+            record.attempts = { ...record.attempts, [role]: { ownerInstanceId } }; this.save(record)
+            run = await client.createPreparedTerminal(original.prepared)
+          }
+          if (run.state !== 'running' || client.runtimeIdentity().instanceId !== ownerInstanceId)
+            throw fail('The original helper is not confirmed serving on its original Runtime.', 'EXECUTION_HELPER_UNAVAILABLE')
+          record[role] = { runId: run.runId, ownerInstanceId, inputByte: 0, outputByte: 0 }
+          this.save(record)
+        }
+      }
+      if (this.bridges.has(input.bindingId)) {
+        await this.bridges.get(input.bindingId)!.close()
+        Object.assign(record, this.read(input.bindingId)!)
+      }
+      record.bridge ??= { bindingId: input.bindingId, frontend: record.frontend!, executor: record.executor! }
+      this.save(record)
+      step = { hostId: input.agentHostId, role: 'frontend', stage: 'attach' }
+      await this.attach(record, hosts)
+      // Endpoint pinning reads the exact original frontend receipt. A not-yet
+      // ready helper is returned as unavailable, never silently recreated.
+      step = { hostId: input.agentHostId, role: 'agent', stage: 'create' }
+      const created = await hosts.agent.createHostAgentWithDelivery({ ...input.agent, toolExecution })
+      return { session: created.session, execution: this.inspect(input.bindingId)! }
+    } catch (error) { this.observeFailure(input, error); throw executionFailure(error, input, step) }
+  }
+
   async restoreReaders(): Promise<void> {
     const ids = this.db.prepare('SELECT id FROM bindings').all().map(row => String(row.id))
     await Promise.allSettled(ids.map(id => this.rejoin(id)))
@@ -375,6 +424,10 @@ export class AgentExecutionBindingService {
   }
   async create(input: AgentExecutionOpenInput): ReturnType<AgentExecutionCoordinator['create']> {
     return await (await this.coordinator()).create(input)
+  }
+  async continueOriginal(input: AgentExecutionReference): ReturnType<AgentExecutionCoordinator['continueOriginal']> {
+    if (!this.owner && !await this.retained()) throw fail('The original frozen execution intent is unavailable.', 'EXECUTION_INTENT_UNCONFIRMED')
+    return await (await this.coordinator()).continueOriginal(input)
   }
   async inspect(bindingId: string): Promise<AgentExecutionInspection | null> {
     if (!this.owner && !await this.retained()) return null
