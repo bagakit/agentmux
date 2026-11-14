@@ -8,6 +8,13 @@ import type { BrowserPng } from '../src/shared/contracts'
 
 const compose = vi.hoisted(() => vi.fn())
 const raster = vi.hoisted(() => ({ renderCommittedLayer: vi.fn(), renderScreenshotScene: vi.fn() }))
+const editorHarness = vi.hoisted(() => ({ props: null as any }))
+// Keep the real shared editor, while exposing its host callbacks for the no-crop defense-in-depth case.
+vi.mock('../src/renderer/src/components/image-annotation/ImageAnnotationEditor', async importOriginal => {
+  const actual = await importOriginal<typeof import('../src/renderer/src/components/image-annotation/ImageAnnotationEditor')>()
+  const { createElement } = await import('react')
+  return { ...actual, ImageAnnotationEditor: (props: any) => { editorHarness.props = props; return createElement(actual.ImageAnnotationEditor, props) } }
+})
 // The overlay host and the shared editor are production code; raster drawing and pixel composition are replaced.
 vi.mock('../src/renderer/src/components/image-annotation/canvas-render', () => raster)
 vi.mock('../src/renderer/src/components/image-annotation/compose', async importOriginal => ({
@@ -30,7 +37,7 @@ beforeEach(() => {
   windowOutline.mockClear()
   const context = new Proxy({ measureText: () => ({ width: 20 }), strokeRect: windowOutline, getImageData: () => ({ data: new Uint8ClampedArray([255, 0, 0, 255]) }) }, { get: (target, key) => key in target ? target[key as keyof typeof target] : () => {}, set: () => true })
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context as unknown as CanvasRenderingContext2D)
-  compose.mockResolvedValue(image); raster.renderCommittedLayer.mockClear(); raster.renderScreenshotScene.mockClear()
+  compose.mockResolvedValue(image); raster.renderCommittedLayer.mockClear(); raster.renderScreenshotScene.mockClear(); editorHarness.props = null
   node = document.createElement('div'); document.body.append(node); root = createClientUiRoot(node)
 })
 afterEach(async () => { await act(async () => root.unmount()); node.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
@@ -63,16 +70,37 @@ async function mount(owned: boolean, background: CaptureBackground = 'included',
   return { api, key, input, send: async (event: CaptureSurfaceEvent) => { await act(async () => listener?.(event)) }, allowLoad: () => node.removeEventListener('load', stopAutomaticLoad, true) }
 }
 
-it('a remembered selection claims the capture only when the person outputs it, then delivers that selection', async () => {
+it('a continued selection claims the capture only when the person outputs it, then delivers that selection', async () => {
   const { api, key } = await mount(true)
-  expect(node.querySelector('.image-annotation-editor__capture-bar'), 'the overlay opens on the remembered selection at rest').not.toBeNull()
+  expect(node.querySelector('.image-annotation-editor__capture-bar'), 'the overlay opens on the continued selection at rest').not.toBeNull()
   expect([api.select.mock.calls.length, api.finish.mock.calls.length], 'opening claims and delivers nothing').toEqual([0, 0])
   await key('s', { metaKey: true })
   expect(api.select, 'Save PNG claims the selection before its output').toHaveBeenCalledExactlyOnceWith('original-request')
   expect(api.select.mock.invocationCallOrder[0]!).toBeLessThan(api.savePng.mock.invocationCallOrder[0]!)
   await key('Enter')
-  expect(api.finish, 'Enter delivers exactly the remembered selection').toHaveBeenCalledExactlyOnceWith('original-request', 'included', image, remembered)
+  expect(api.finish, 'Enter delivers exactly the continued selection').toHaveBeenCalledExactlyOnceWith('original-request', 'included', image, remembered)
   expect(api.select, 'Main never releases an owner, so the one answer serves every later output').toHaveBeenCalledOnce()
+})
+
+it('an empty selection produces no claim, composition, delivery, file or pin from any output path', async () => {
+  const { api, key } = await mount(true, 'included', true, undefined, false, null)
+  for (const [keyName, init] of [['Enter', {}], ['c', { metaKey: true }], ['s', { metaKey: true }], ['p', { metaKey: true }]] as const) await key(keyName, init)
+  const edit = { image, shapes: [], crop: null, displayWidth: image.width, displayHeight: image.height }
+  await act(async () => {
+    // The shared editor already refuses these keys without a crop. The host must also refuse an unexpected no-crop callback.
+    await editorHarness.props.onComplete(edit)
+    await editorHarness.props.onSavePng(edit)
+    await editorHarness.props.onPin(edit)
+  })
+  for (const label of ['Done', 'Save PNG', 'Pin image']) {
+    const button = [...node.querySelectorAll('button')].find(candidate => candidate.textContent?.trim() === label)
+    if (button) await act(async () => button.click())
+  }
+  expect(api.select, 'no output may manufacture a selection owner').not.toHaveBeenCalled()
+  expect(compose, 'no output may compose the full display as a fallback').not.toHaveBeenCalled()
+  expect(api.finish).not.toHaveBeenCalled()
+  expect(api.savePng).not.toHaveBeenCalled()
+  expect(api.pin).not.toHaveBeenCalled()
 })
 
 it('a remembered selection whose claim another display won outputs nothing and locks this display', async () => {
@@ -91,7 +119,7 @@ it.each(['included', 'excluded'] as const)('the %s background supplies the froze
   const { api, key, input } = await mount(true, background)
   expect(node.querySelector('img')!.getAttribute('src')).toBe(input.backgrounds[background].image!.dataUrl)
   await key('s', { metaKey: true })
-  expect(api.savePng).toHaveBeenCalledExactlyOnceWith('original-request', background, image)
+  expect(api.savePng).toHaveBeenCalledExactlyOnceWith('original-request', background, image, remembered)
   await key('e', { metaKey: true })
   expect(api.expand).toHaveBeenCalledExactlyOnceWith('original-request', background, expect.objectContaining({ crop: remembered }))
 })

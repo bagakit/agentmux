@@ -254,17 +254,26 @@ it('a retake started in the window editor gives focus back to that editor, not t
   await pending
 })
 
-it('the selection the window editor delivers is where the next capture opens', async () => {
+it('Copy in the window editor supplies only the same capture Retake continuation; the next fresh capture is empty', async () => {
   const f = await fixture(), pending = f.action.run(), first = await f.overlay()
   const crop = { x: 0, y: 0, width: 1, height: 1 }
-  await first.invoke('expand', { requestId: first.input.requestId, handoff: { shapes: [], crop, tool: 'rect' } })
+  const handoff = { shapes: [{ id: 'mark', kind: 'rect', color: '#ff0000', width: 2, x: 0, y: 0, w: 1, h: 1 }], crop, tool: 'rect' }
+  await first.invoke('expand', { requestId: first.input.requestId, handoff })
   const editor = await f.editing()
   expect(await editor.invoke('finish', { requestId: editor.input.requestId, operationId: 'editor-copy', image: edited })).toEqual({ status: 'completed' })
+  const retaken = editor.invoke('retake', { requestId: editor.input.requestId })
+  const second = await f.overlay(2)
+  expect(second.input.initialCrop, 'the delivered crop is passed explicitly to this same capture Retake').toEqual(crop)
+  expect(second.input, 'no shapes or Undo history cross into the new surface').not.toHaveProperty('initialState')
+  await second.invoke('cancel', { requestId: second.input.requestId })
+  expect(await retaken).toEqual({ status: 'cancelled' })
+  expect(await editor.invoke('load'), 'the original editor keeps its own document history').toMatchObject({ initialState: { shapes: handoff.shapes, crop } })
   await editor.invoke('cancel', { requestId: editor.input.requestId })
   await pending
-  const next = f.action.run(), second = await f.overlay(2)
-  expect(second.input.initialCrop, 'the next capture opens on the selection the window editor delivered').toEqual(crop)
-  await second.invoke('cancel', { requestId: second.input.requestId })
+
+  const next = f.action.run(), fresh = await f.overlay(3)
+  expect(fresh.input.initialCrop, 'a new ScreenCapture.capture call never consumes the previous continuation').toBeUndefined()
+  await fresh.invoke('cancel', { requestId: fresh.input.requestId })
   await next
 })
 
@@ -278,6 +287,7 @@ it('a retake after the editor already copied keeps the same consumer: the clipbo
   const retaken = editor.invoke('retake', { requestId: editor.input.requestId })
   const second = await f.overlay(2)
   expect(second.input.attachToDraft, 'the retaken overlay no longer offers to attach to the delivered draft').toBe(false)
+  expect(second.input.initialCrop, 'the actual expanded.delivered continuation supplies this same Retake crop').toEqual(selection)
   expect(await second.invoke('finish', { requestId: second.input.requestId, image: original, selection })).toEqual({ status: 'completed' })
   expect(second.window.isDestroyed(), 'Done closed the overlay').toBe(true)
   expect(await retaken).toEqual({ status: 'completed' })
