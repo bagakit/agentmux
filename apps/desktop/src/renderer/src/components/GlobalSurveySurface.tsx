@@ -324,10 +324,10 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
     const document = ownerDocument
     if (!visible) { if (surface?.contains(document.activeElement)) (document.activeElement as HTMLElement).blur(); return }
     const focused = document.activeElement
-    // Clearing an incompatible page can mount the start page while the person
-    // is still typing in the environment select. That input intent stays put.
+    // The picker returns focus to its trigger before changing the environment.
+    // Keep that focus if the newly filtered view mounts the start page.
     if (!toolsOpen && !selection && focused && surface?.contains(focused) &&
-        focused.matches('input, select, textarea, [contenteditable]:not([contenteditable="false"])')) return
+        focused.matches('input, select, textarea, [contenteditable]:not([contenteditable="false"]), .survey-profile-picker__trigger')) return
     const findTarget = () => {
       const reference = selection?.active
       const hostId = reference && projection ? (projection.entity.kind === 'region' ? workbenchRegionProjectionSlotId : workbenchProjectionSlotId)(`${projection.presentationId}-slot`, reference) : null

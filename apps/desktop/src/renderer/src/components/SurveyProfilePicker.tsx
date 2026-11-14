@@ -1,5 +1,4 @@
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import * as Menu from './DropdownMenu'
 import type { SurveyProfileView } from '../lib/survey-profile-view'
 import type { BrowserProfilesState } from '../lib/browser-profiles'
 import { useBrowserDirectory } from '../lib/use-browser-directory'
@@ -60,17 +59,20 @@ export function SurveyProfilePicker({ value, profiles, collapsed, active = true,
   return <div ref={picker} className="survey-profile-picker" title={detail}>
     <SelectionField label="Survey environment" value={selected} options={options} searchable open={open && active && !collapsed} onOpenChange={setOpen}
       className="survey-profile-picker__trigger" menuClassName="survey-profile-picker__menu"
-      onValueChange={next => onChange(next === 'default' ? { kind: 'default' } : { kind: 'profile', profileId: next.slice('profile:'.length) })}
+      onValueChange={next => {
+        picker.current?.querySelector<HTMLButtonElement>('.survey-profile-picker__trigger')?.focus({ preventScroll: true })
+        onChange(next === 'default' ? { kind: 'default' } : { kind: 'profile', profileId: next.slice('profile:'.length) })
+      }}
       footer={settings || directory.notice ? <>
         {directory.notice ? <>
           <p className="survey-profile-picker__observation" role="status">{directory.notice}</p>
-          <Menu.Item className="tab-context-menu__item survey-profile-picker__manage" onSelect={event => { event.preventDefault(); void directory.refresh() }}>
+          <button type="button" className="selection-field__option survey-profile-picker__manage" onClick={() => void directory.refresh()}>
             <RefreshIcon size={14} /><span>Refresh browser use</span>
-          </Menu.Item>
+          </button>
         </> : null}
-        {settings ? <Menu.Item className="tab-context-menu__item survey-profile-picker__manage" onSelect={() => settings.open('browser-profiles')}>
+        {settings ? <button type="button" className="selection-field__option survey-profile-picker__manage" onClick={() => { setOpen(false); settings.open('browser-profiles') }}>
           <SettingsIcon size={14} /><span>Manage environments…</span>
-        </Menu.Item> : null}
+        </button> : null}
       </> : undefined} />
     {profiles.error ? <p role="status">Environment list unconfirmed. Default browsing is available.
       <button type="button" className="survey-icon-button" aria-label="Refresh Survey environments" onClick={onRefresh}><RefreshIcon size={13} /></button>
