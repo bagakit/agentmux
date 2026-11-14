@@ -114,7 +114,7 @@ Hook、Permission、Usage 与问题回答各自单独声明；history reader 可
 
 公开消息的 `messagePhase` 由各 Provider 解释，公共 `agent.history`、`agent.conversation.inspect/changes` 与共同 UI 直接消费这些记录与阶段，不按厂商另分消息呈现，也不从正文推断完成：
 
-- [Claude](../../packages/core/src/providers/claude-native-history.ts) 对未中断的真实助手消息读取 `message.stop_reason`，把 `tool_use` 映射为 progress、`end_turn` 映射为 final；未知原因保留为未分类的正文。
+- [Claude](../../packages/providers/src/claude/native-history.ts) 对未中断的真实助手消息读取 `message.stop_reason`，把 `tool_use` 映射为 progress、`end_turn` 映射为 final；未知原因保留为未分类的正文。
 - [Codex](../../packages/core/src/providers/codex-saved-history.ts) 消费消息的 `commentary`／`final_answer`。
 - [Grok](../../packages/providers/src/grok/native-history.ts) 把同一 Session／prompt 的连续公开文本块组成一条消息：首块的字节位置持有稳定身份，之后的文字与成功终局更新这条消息；工具、思考与其他原生记录各保用途。 原 `user_message_chunk` 的 `_meta.syntheticPrompt === true` 明确标记原生合成输入，Provider 将其投影为 `activity` 并贡献既有 `recordPurpose: system-event`；`hideFromScrollback` 单独出现不改变分类，原正文标签不参与判定，`hostTurn` 的私有内容资格保持。组装只存在于本次 Provider 读取中：历史页保留快照切点，精确读取沿字节位置定位，旧的成功终局引用仍能读到完整回复。
 
