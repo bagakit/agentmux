@@ -496,7 +496,7 @@ test('Source contract metadata requires its own exact read grant and reports the
   await expect(sdk.call('agent.open.describe',{expectedRuntimeId:f.d.identity.runtimeId})).rejects.toMatchObject({code:'HOST_ROUTE_NOT_DELEGATED'})
   for (const [node,delegator] of [[f.c,f.b.identity],[f.d,f.c.identity]] as const)
     await f.configure(node,[],[{...f.grant('source-metadata',delegator),scopes:['agent.open.describe']}])
-  expect(await sdk.call('agent.open.describe',{expectedRuntimeId:f.d.identity.runtimeId})).toEqual({source:{runtimeId:f.d.identity.runtimeId,ownerInstanceId:'fixture-instance'},contracts:{ordinaryLaunch:null,externalAssociation:null}})
+  expect(await sdk.call('agent.open.describe',{expectedRuntimeId:f.d.identity.runtimeId})).toEqual({source:{runtimeId:f.d.identity.runtimeId,ownerInstanceId:'fixture-instance'},contracts:{ordinaryLaunch:null,externalAssociation:null,takeover:null}})
   expect(f.arrivals.at(-1)!.actor).toEqual({source:f.b.identity,...principal})
   await expect(sdk.call('agent.open.describe',{expectedRuntimeId:'another-Source'})).rejects.toMatchObject({code:'RUNTIME_OWNER_MISMATCH'})
 })

@@ -42,7 +42,7 @@ test('the actual target public Hosted creation codec carries both notes to the o
   const forward = vi.fn(async () => {throw new AgentMuxError('The original legacy prompt-only creator was reached.','FIXTURE_LEGACY_FORWARD')})
   const server = new AgentMuxControlServer({hostedRuntime:()=>service,forwardControl:forward},join(root,'rpc.sock')); await server.start();cleanups.push(()=>server.stop())
   const rpc = await connectAgentMuxRpc({endpoint:{transport:'unix',path:server.path}});cleanups.push(()=>rpc.dispose())
-  expect(await rpc.call('agent.open.describe',{expectedRuntimeId:owner.runtimeId})).toEqual({source:{runtimeId:owner.runtimeId,ownerInstanceId:owner.ownerInstanceId},contracts:{ordinaryLaunch:null,externalAssociation:null}})
+  expect(await rpc.call('agent.open.describe',{expectedRuntimeId:owner.runtimeId})).toEqual({source:{runtimeId:owner.runtimeId,ownerInstanceId:owner.ownerInstanceId},contracts:{ordinaryLaunch:null,externalAssociation:null,takeover:null}})
   await expect(rpc.call('agent.open.describe',{expectedRuntimeId:'another-Source'})).rejects.toMatchObject({code:'RUNTIME_OWNER_MISMATCH'})
   const open = {operationId:'unassembled-open',content:{kind:'new-agent' as const,executorId:provider.id,agentMuxNote:'caller note'},destination:{spaceId:'source-space',zoneId:'source-zone',newTab:true as const},focus:false}
   await expect(rpc.call('agent.open',open)).rejects.toMatchObject({code:'AGENT_OPEN_CONTRACT_UNCONFIRMED'})

@@ -11,7 +11,7 @@ const saved = { id: 'saved-source', kind: 'ssh', label: 'Original', hostname: 'l
 beforeEach(() => { vi.clearAllMocks() })
 function fixture(record: Record<string, unknown> = saved) {
   const configuration = { call: vi.fn(async () => ({ hosts: [record] })), dispose: vi.fn(async () => {}) }
-  const source = { call: vi.fn(async () => ({ source: fence, contracts: { ordinaryLaunch: null, externalAssociation: null } })),
+  const source = { call: vi.fn(async () => ({ source: fence, contracts: { ordinaryLaunch: null, externalAssociation: null, takeover: null } })),
     subscribe: vi.fn(async () => ({ subscriptionId: 'original-reader', dispose: async () => {} })), dispose: vi.fn(async () => {}) }
   mock.connect.mockResolvedValueOnce(configuration).mockResolvedValueOnce(source)
   return { configuration, source }
