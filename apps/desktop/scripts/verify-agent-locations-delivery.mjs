@@ -12,6 +12,8 @@ const receipt = { passed: false, evidence: {} }
 await mkdir(directory, { recursive: true })
 await writeFile(path.join(directory, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
 try {
+  const candidate = await read('.tmp/agent-locations/candidate/receipt.json')
+  assert.equal(candidate.passed, true, 'Candidate verification failed; no delivery wait or operation is appropriate')
   // Root publishes this exact record only after the independent review and real
   // installation finish. Waiting is observation, never approval or an install retry.
   let ready
@@ -23,8 +25,6 @@ try {
     if (!ready) await new Promise(resolve => setTimeout(resolve, 1000))
   }
   assert.ok(ready, 'Original delivery records have not arrived; delivery remains unconfirmed')
-  const candidate = await read('.tmp/agent-locations/candidate/receipt.json')
-  assert.equal(candidate.passed, true)
   assert.equal(candidate.sourceCommit, execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim())
   assert.equal(ready.sourceCommit, candidate.sourceCommit)
   const target = await read('.tmp/agent-locations/before/targets.json')

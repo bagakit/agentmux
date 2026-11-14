@@ -47,6 +47,7 @@ try {
   assert.equal(git('status', '--porcelain', '--untracked-files=all'), '', 'Validate a clean committed candidate')
   git('merge-base', '--is-ancestor', receipt.sourceCommit, 'main')
   const commands = [
+    ['workspace-files-helper', ['--filter', '@agentmux/desktop', 'build:workspace-move-helper']],
     ['mobile-default-matrix', ['--filter', '@agentmux/mobile', 'test']],
     ['mobile-typecheck', ['--filter', '@agentmux/mobile', 'typecheck']],
     ['desktop-typecheck', ['--filter', '@agentmux/desktop', 'typecheck']],
