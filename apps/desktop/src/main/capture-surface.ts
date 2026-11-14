@@ -43,7 +43,6 @@ export type CaptureSurfaceTiming = {
   /** Null when no visible host required a second exposure. */
   excludedMs: number | null
   dataReadyMs: number | null
-  settleMs: number
   framesMs: number | null
   presentedMs: Array<number | null>
   shownMs: number
@@ -74,7 +73,6 @@ type Active = {
   includedMs: number | null
   excludedMs: number | null
   dataReadyMs: number | null
-  settleMs: number
   framesMs: number | null
   /** The display whose overlay holds the selection; the others only show their frozen frame and cancel. */
   owner: number | null
@@ -82,8 +80,8 @@ type Active = {
   /** A primary delivery is in flight; a second one would write the clipboard again. */
   finishing: boolean
   fallback: ReturnType<typeof setTimeout> | undefined
-  /** AgentMux windows faded out of the grab with the opacity each had (a pin keeps its own), and the one that had focus. */
-  faded: Array<{ window: BrowserWindow; opacity: number }>
+  /** Visible, unminimized, non-transparent hosts at capture start decide whether native exclusion needs a second exposure. */
+  visibleHosts: number
   focused: BrowserWindow | null
   end(outcome: CaptureSurfaceOutcome | Error): void
 }
@@ -116,19 +114,17 @@ export class CaptureSurface {
         app.removeListener('before-quit', cancel)
         clearTimeout(active.fallback)
         for (const overlay of active.overlays) if (!overlay.window.isDestroyed()) overlay.window.destroy()
-        // Focus goes back before the faded windows return, so a workbench that is about to hide never flashes.
         if (outcome instanceof Error || outcome.state !== 'expanded') {
           if (session.returnFocus) this.ports.returnFocus()
           else if (active.focused && !active.focused.isDestroyed()) active.focused.focus()
         }
-        for (const { window, opacity } of active.faded) if (!window.isDestroyed()) window.setOpacity(opacity)
         if (outcome instanceof Error) reject(outcome)
         else resolve(outcome)
       }
     })
     const active: Active = { session, overlays: [], background: session.background ?? 'included', startedAt: performance.now(), inputsReady, releaseInputs,
-      windowsStartedMs: null, includedMs: null, excludedMs: null, dataReadyMs: null, settleMs: 0, framesMs: null,
-      owner: null, shown: false, finishing: false, fallback: undefined, faded: [], focused: null, end }
+      windowsStartedMs: null, includedMs: null, excludedMs: null, dataReadyMs: null, framesMs: null,
+      owner: null, shown: false, finishing: false, fallback: undefined, visibleHosts: 0, focused: null, end }
     const changed = () => active.end(Object.assign(new Error('The display layout changed during this capture, so its selection no longer matches the screen. Take the screenshot again.'),
       { code: 'display_configuration_changed' }))
     // A work area change (Dock or menu bar) leaves every frozen frame where it was; bounds, scale or rotation do not.
@@ -143,10 +139,7 @@ export class CaptureSurface {
 
   private async start(active: Active): Promise<void> {
     active.focused = BrowserWindow.getFocusedWindow()
-    // Step out without leaving the stacking order or focus, so nothing flashes in the Dock or Mission Control.
-    // A window already at opacity 0 is out of the grab and keeps its own value.
-    active.faded = BrowserWindow.getAllWindows().filter(window => !window.isDestroyed() && window.isVisible() && !window.isMinimized())
-      .map(window => ({ window, opacity: window.getOpacity() })).filter(({ opacity }) => opacity > 0)
+    active.visibleHosts = BrowserWindow.getAllWindows().filter(window => !window.isDestroyed() && window.isVisible() && !window.isMinimized() && window.getOpacity() > 0).length
     const native = this.ports.native()
     // Each result belongs to its actual exposure, including its window geometry and timestamp.
     // A failure of one exposure cannot take away the other usable background.
@@ -157,18 +150,11 @@ export class CaptureSurface {
     }
     const includedPending = freeze(true)
     if (this.active !== active) return
-    // The new windows stay hidden while their Renderer boots, in parallel with this capture's pixels.
-    // The faded-host snapshot above predates these shells, and hidden windows are absent from native capture content.
+    // The visible-host snapshot predates these shells; hidden, content-protected overlays stay out of both native exposures.
     this.prepareWindows(active)
     const included = await includedPending
     if (this.active !== active) return
-    for (const { window } of active.faded) window.setOpacity(0)
-    if (active.faded.length && process.platform === 'darwin') {
-      await new Promise(resolve => setTimeout(resolve, stepOutSettleMs()))
-      active.settleMs = since(active.startedAt)
-    }
-    if (this.active !== active) return
-    const excluded = active.faded.length ? await freeze(false) : included
+    const excluded = active.visibleHosts > 0 ? await freeze(false) : included
     if (this.active !== active) return
     if (included instanceof Error && excluded instanceof Error) throw active.background === 'included' ? included : excluded
     active.framesMs = since(active.startedAt)
@@ -210,7 +196,7 @@ export class CaptureSurface {
     }
     active.dataReadyMs = since(active.startedAt)
     active.releaseInputs()
-    // A renderer that never reports presented must not leave the workbench faded out with no visible overlay to cancel.
+    // A renderer that never reports presented must not leave this capture hidden with no visible overlay to cancel.
     active.fallback = setTimeout(() => this.show(active), PRESENT_FALLBACK_MS)
   }
 
@@ -224,6 +210,7 @@ export class CaptureSurface {
         alwaysOnTop: true, enableLargerThanScreen: true, title: 'Screenshot', ...(process.platform === 'darwin' ? { type: 'panel' } : {}),
         webPreferences: { preload: join(import.meta.dirname, '../preload/capture-surface.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false }
       })
+      window.setContentProtection(true)
       const overlay: Overlay = { window, display, loadedMs: null, presented: false, presentedMs: null }
       active.overlays.push(overlay)
       raise(window, display.bounds)
@@ -254,7 +241,7 @@ export class CaptureSurface {
     keys?.window.focus()
     const timing: CaptureSurfaceTiming = { schema: 'agentmux.capture-timing.v1', recordedAt: Date.now(), windowsStartedMs: active.windowsStartedMs,
       windowsLoadedMs: active.overlays.map(overlay => overlay.loadedMs), includedMs: active.includedMs, excludedMs: active.excludedMs,
-      dataReadyMs: active.dataReadyMs, settleMs: active.settleMs, framesMs: active.framesMs,
+      dataReadyMs: active.dataReadyMs, framesMs: active.framesMs,
       presentedMs: active.overlays.map(overlay => overlay.presentedMs), shownMs: since(active.startedAt), displays: active.overlays.length }
     // Keep the terminal diagnostic, and persist only after the workface has become usable.
     console.info('capture-surface timing ' + JSON.stringify(timing))
@@ -422,10 +409,4 @@ function send(overlay: Overlay, event: CaptureSurfaceEvent): void {
   if (!overlay.window.isDestroyed()) overlay.window.webContents.send(CAPTURE_SURFACE_EVENT, event)
 }
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error) }
-/** setOpacity(0) commits to WindowServer at the end of this run loop turn and is composited on the next refresh;
- *  a second refresh covers a commit that just missed one. Counted on the slowest display, never shorter than two 60 Hz frames. */
-function stepOutSettleMs(): number {
-  const hz = Math.min(60, ...screen.getAllDisplays().map(display => display.displayFrequency).filter(frequency => frequency > 0))
-  return Math.ceil(2000 / hz)
-}
 function since(start: number): number { return Math.round(performance.now() - start) }
