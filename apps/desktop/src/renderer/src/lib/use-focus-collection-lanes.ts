@@ -37,12 +37,14 @@ function heldProjection(lanes: readonly FocusProjectLane[], previous: readonly F
       const key = JSON.stringify([Boolean(original), source.hostId, source.id])
       let segment = segments.get(key)
       if (!segment) {
-        segment = { lane: { ...source, contextRefs: [], activeAgentRefs: [], lastActivityAt: null }, index: original ? priorIndex : currentIndex }
+        const { orderPriority: _previousRank, ...heldScope } = source
+        segment = { lane: { ...heldScope, contextRefs: [], activeAgentRefs: [], lastActivityAt: null }, index: original ? priorIndex : currentIndex }
         segments.set(key, segment)
       }
       segment.lane.contextRefs.push(ref)
       if (active.has(focusTopicContextKey(ref.hostId, ref.id))) segment.lane.activeAgentRefs.push(ref)
       segment.lane.lastActivityAt = Math.max(segment.lane.lastActivityAt ?? 0, lane.lastActivityAt ?? 0) || null
+      if (lane.orderPriority !== undefined) segment.lane.orderPriority = Math.min(segment.lane.orderPriority ?? lane.orderPriority, lane.orderPriority)
     }
   }
   const result = new Map<string, { lane: FocusScanLane; topics: FocusProjectLane[]; issues: Set<string> }>()
@@ -56,6 +58,7 @@ function heldProjection(lanes: readonly FocusProjectLane[], previous: readonly F
         entry.lane.contextRefs.push(...projected.contextRefs)
         entry.lane.activeAgentRefs.push(...projected.activeAgentRefs)
         entry.lane.lastActivityAt = Math.max(entry.lane.lastActivityAt ?? 0, projected.lastActivityAt ?? 0) || null
+        if (projected.orderPriority !== undefined) entry.lane.orderPriority = Math.min(entry.lane.orderPriority ?? projected.orderPriority, projected.orderPriority)
       }
       if (projected.collection) entry.topics.push(...projected.collection.topics)
       if (projected.summary) entry.issues.add(projected.summary)

@@ -22,7 +22,7 @@ import { SessionObservationRegions } from './SessionObservationRegions'
 import { AgentTopologySummary } from './AgentTopologySummary'
 import { FocusProjectLanes, FocusRetainedProjects } from './FocusProjectLanes'
 import { FocusScanLaneContent } from './FocusScanLaneContent'
-import { focusTopicContextKey } from '../lib/focus-collection-lanes'
+import { filterFocusScanLanes, focusTopicContextKey } from '../lib/focus-collection-lanes'
 import { useFocusCollectionLanes } from '../lib/use-focus-collection-lanes'
 import { useFocusProjectOrder } from '../lib/use-focus-project-order'
 import { FocusGroupDiscussion } from './FocusGroupDiscussion'
@@ -334,7 +334,6 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   observedProjectLanes.current = allLanes
   const coordinationLanes = useMemo(() => deriveFocusProjectLanes(coordinationContexts, config, undefined, contextIdentities, Date.now(), topicSnapshots), [coordinationContexts, config, tabs, topicSnapshots, contextIdentities])
   const filterLanes = useMemo(() => [...allLanes, ...coordinationLanes], [allLanes, coordinationLanes])
-  const orderedLanes = useFocusProjectOrder(allLanes, visible, boardRowsRef, scanInteraction, config?.focus?.projects, arrangeProjects)
   const survey = useAppStore(useShallow(state => ({ surveyCollectedZones: state.surveyCollectedZones, surveyOrganization: state.surveyOrganization, surveyExplorationNames: state.surveyExplorationNames })))
   const originContent = useAppStore(useShallow(state => ({ bindings: state.spaceZoneBindings, categories: state.topicCategories })))
   const surveyItems = useMemo(() => readSurveyPresentation({ ...survey, surveyPageReferences: [], surveyZoneSelection: null, tabs }, navigationCatalog).items, [survey, tabs, navigationCatalog])
@@ -412,9 +411,10 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const mapContext = revealedContext?.context ?? selected
   const selectedContextKey = sourceSelection ? focusContextIdentityKey(sourceSelection.context.hostId, sourceSelection.context.id) : agentReveal && revealedContext ? JSON.stringify([revealedContext.context.hostId, revealedContext.context.id]) : undefined
   const filteredIds = new Set(filtered.map(row => focusTopicContextKey(row.hostId, row.id)))
-  const focusProjectLanes = orderedLanes.filter(lane => (filters.projects.length === 0 || focusMatchesProject(focusLaneProjectKey(lane), filters.projects)) && lane.contextRefs.some(ref => filteredIds.has(focusTopicContextKey(ref.hostId, ref.id))))
-    .map(lane => ({ ...lane, contextRefs: lane.contextRefs.filter(ref => filteredIds.has(focusTopicContextKey(ref.hostId, ref.id))), activeAgentRefs: lane.activeAgentRefs.filter(ref => filteredIds.has(focusTopicContextKey(ref.hostId, ref.id))) }))
-  const boardLanes = useFocusCollectionLanes(focusProjectLanes, navigationCatalog, originContent, boardRowsRef, scanInteraction, visible)
+  const collectedLanes = useFocusCollectionLanes(allLanes, navigationCatalog, originContent, boardRowsRef, scanInteraction, visible)
+  const orderedLanes = useFocusProjectOrder(collectedLanes, visible, boardRowsRef, scanInteraction, config?.focus?.projects, arrangeProjects)
+  const boardLanes = filterFocusScanLanes(orderedLanes,
+    lane => filters.projects.length === 0 || focusMatchesProject(focusLaneProjectKey(lane), filters.projects), filteredIds)
   const scansByContext = new Map<string, { scanId: string; originalId: string }[]>()
   for (const lane of boardLanes) for (const original of lane.collection?.topics ?? [lane]) for (const ref of original.contextRefs) {
     const key = focusTopicContextKey(ref.hostId, ref.id), entries = scansByContext.get(key) ?? []

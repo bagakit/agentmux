@@ -1,18 +1,22 @@
 import { useEffect, useRef, type RefObject } from 'react'
-import { focusLaneOrderKey, type FocusProjectLane } from './focus-project-lanes'
+import { focusScanOrderKey, type FocusScanLane } from './focus-collection-lanes'
 import { EMPTY_FOCUS_PROJECTS, type FocusProjectPreference } from '../../../shared/focus-project-preferences'
+import { compareFocusLaneActivity } from './focus-project-lanes'
 
-/** Identity is the route. Activity stays live; only an explicit arrangement replaces that route. */
-export function useFocusProjectOrder(lanes: readonly FocusProjectLane[], visible: boolean, rows: RefObject<HTMLElement | null>, interaction?: RefObject<boolean>,
-  preferences: readonly FocusProjectPreference[] = EMPTY_FOCUS_PROJECTS, arrangeRevision = 0): FocusProjectLane[] {
-  const route = useRef({ revision: arrangeRevision, projects: [] as string[], lanes: [] as string[] })
-  if (route.current.revision !== arrangeRevision) route.current = { revision: arrangeRevision, projects: [], lanes: [] }
+/** Establish one route at actual entry or explicit arrangement; activity stays live within it. */
+export function useFocusProjectOrder<T extends FocusScanLane>(lanes: readonly T[], visible: boolean, rows: RefObject<HTMLElement | null>, interaction?: RefObject<boolean>,
+  preferences: readonly FocusProjectPreference[] = EMPTY_FOCUS_PROJECTS, arrangeRevision = 0): T[] {
+  const route = useRef({ visible: false, revision: arrangeRevision, projects: [] as string[], lanes: [] as string[] })
+  const entering = visible && !route.current.visible
+  const arrange = visible && (entering || route.current.revision !== arrangeRevision || (route.current.projects.length === 0 && lanes.length > 0))
+  if (arrange) route.current = { visible, revision: arrangeRevision, projects: [], lanes: [] }
+  route.current.visible = visible
   const projectRanks = new Map(route.current.projects.map((id, index) => [id, index]))
   const laneRanks = new Map(route.current.lanes.map((id, index) => [id, index]))
-  for (const lane of lanes) {
-    const project = focusLaneOrderKey(lane)
-    if (!projectRanks.has(project)) { projectRanks.set(project, projectRanks.size); route.current.projects.push(project) }
-    if (!laneRanks.has(lane.id)) { laneRanks.set(lane.id, laneRanks.size); route.current.lanes.push(lane.id) }
+  for (const lane of arrange ? [...lanes].sort(compareFocusLaneActivity) : lanes) {
+    const project = focusScanOrderKey(lane)
+    if (!projectRanks.has(project)) { projectRanks.set(project, projectRanks.size); if (visible) route.current.projects.push(project) }
+    if (!laneRanks.has(lane.id)) { laneRanks.set(lane.id, laneRanks.size); if (visible) route.current.lanes.push(lane.id) }
   }
   useEffect(() => {
     if (!visible || !interaction) return
@@ -29,7 +33,7 @@ export function useFocusProjectOrder(lanes: readonly FocusProjectLane[], visible
     }
   }, [visible, rows, interaction])
   const pins = new Map(preferences.filter(item => item.pinned).map((item, index) => [item.key, index]))
-  return [...lanes].sort((a, b) => (pins.get(focusLaneOrderKey(a)) ?? pins.size) - (pins.get(focusLaneOrderKey(b)) ?? pins.size)
-    || projectRanks.get(focusLaneOrderKey(a))! - projectRanks.get(focusLaneOrderKey(b))!
+  return [...lanes].sort((a, b) => (pins.get(focusScanOrderKey(a)) ?? pins.size) - (pins.get(focusScanOrderKey(b)) ?? pins.size)
+    || projectRanks.get(focusScanOrderKey(a))! - projectRanks.get(focusScanOrderKey(b))!
     || laneRanks.get(a.id)! - laneRanks.get(b.id)!)
 }

@@ -2,8 +2,9 @@ import type { ReactNode } from 'react'
 import type { AgentMuxSpaceCatalog, TopicCategory } from '@agentmux/core/control'
 import { homeZoneId, type SpaceZoneBindings } from '../../../shared/space-addresses'
 import type { FocusContext } from './focus-context'
-import type { FocusProjectLane } from './focus-project-lanes'
+import { focusLaneOrderKey, type FocusProjectLane } from './focus-project-lanes'
 import { focusContextIdentityKey } from './focus-context-identity'
+import { focusCollectionPreferenceKey } from '../../../shared/focus-project-preferences'
 
 export type FocusTopicHeading = { id: string; name: string; summary: string | null; kind?: 'worktree'; content?: ReactNode; tagContent?: ReactNode; notice?: ReactNode }
 export type FocusZoneHeadingView = { section: ReactNode; tag: ReactNode; notice?: ReactNode }
@@ -16,6 +17,16 @@ export type FocusScanLane = FocusProjectLane & {
   collection?: { categories: readonly TopicCategory[]; topics: readonly FocusProjectLane[]; confirmed: boolean; pending?: boolean }
 }
 export const focusTopicContextKey = focusContextIdentityKey
+
+/** Only confirmed original container identities can own a saved personal preference. */
+export function focusScanPreferenceKey(lane: FocusScanLane): string | undefined {
+  if (!lane.collection) return !lane.topicId && !lane.locationUnconfirmed ? focusLaneOrderKey(lane) : undefined
+  const { confirmed, categories } = lane.collection
+  return confirmed && categories.length > 0 && categories.every(category => category.hostId === lane.hostId)
+    ? focusCollectionPreferenceKey(lane.hostId, categories.map(category => category.spaceId)) : undefined
+}
+
+export const focusScanOrderKey = (lane: FocusScanLane) => focusScanPreferenceKey(lane) ?? (lane.collection ? lane.id : focusLaneOrderKey(lane))
 
 /** Disposable lookup built from the same immutable spatial facts as the catalog. */
 export function createFocusCollectionIndex(catalog: AgentMuxSpaceCatalog,
@@ -81,12 +92,33 @@ export function projectFocusCollectionLanes(lanes: readonly FocusProjectLane[], 
     for (const ref of lane.contextRefs) { const key = focusTopicContextKey(ref.hostId, ref.id)
       if (!entry.contexts.has(key)) { entry.contexts.add(key); entry.lane.contextRefs.push(ref) } }
     if (lane.lastActivityAt != null) entry.lane.lastActivityAt = Math.max(entry.lane.lastActivityAt ?? 0, lane.lastActivityAt)
+    if (lane.orderPriority !== undefined) entry.lane.orderPriority = Math.min(entry.lane.orderPriority ?? lane.orderPriority, lane.orderPriority)
   }
   return result
 }
 
 export function focusCollectionTopicCount(lane: FocusScanLane): number {
   return new Set(lane.collection?.topics.map(topic => JSON.stringify([topic.hostId, topic.workspaceId, topic.topicId])) ?? []).size
+}
+
+/** Filter the visible cohort without recomputing its original scope, rank or activity. */
+export function filterFocusScanLanes(lanes: readonly FocusScanLane[], matches: (lane: FocusProjectLane) => boolean,
+  references: ReadonlySet<string>): FocusScanLane[] {
+  const trim = (lane: FocusProjectLane): FocusProjectLane[] => {
+    if (!matches(lane)) return []
+    const contextRefs = lane.contextRefs.filter(ref => references.has(focusTopicContextKey(ref.hostId, ref.id)))
+    if (contextRefs.length === 0) return []
+    return [{ ...lane, contextRefs, activeAgentRefs: lane.activeAgentRefs.filter(ref => references.has(focusTopicContextKey(ref.hostId, ref.id))) }]
+  }
+  return lanes.flatMap(lane => {
+    if (!lane.collection) return trim(lane)
+    const topics = lane.collection.topics.flatMap(trim)
+    if (topics.length === 0) return []
+    const shown = new Set(topics.flatMap(topic => topic.contextRefs.map(ref => focusTopicContextKey(ref.hostId, ref.id))))
+    return [{ ...lane, collection: { ...lane.collection, topics },
+      contextRefs: lane.contextRefs.filter(ref => shown.has(focusTopicContextKey(ref.hostId, ref.id))),
+      activeAgentRefs: lane.activeAgentRefs.filter(ref => shown.has(focusTopicContextKey(ref.hostId, ref.id))) }]
+  })
 }
 
 /** Original Context references and Topic titles; no reader, navigation choice or duplicated Session. */

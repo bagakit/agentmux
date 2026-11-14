@@ -49,9 +49,16 @@ export type FocusProjectLane = {
   objectKind?: 'topic' | 'mote' | 'unknown'; objectIconKey?: string
   activeAgentRefs: FocusContextReference[]; contextRefs: FocusContextReference[]
   lastActivityAt?: number | null
+  /** Passive rank from the original task facts, shared by every checkout in this group. */
+  orderPriority?: number
 }
 /** Topic containers stay independent; only ordinary project checkouts share a rank. */
 export const focusLaneOrderKey = (lane: FocusProjectLane) => lane.topicId ? lane.id : focusProjectKey(lane.hostId, lane.projectId)
+/** The existing rank formula also compares composed Collection facts at route entry. */
+export function compareFocusLaneActivity(a: FocusProjectLane, b: FocusProjectLane): number {
+  return compareFocusWork({ priority: a.orderPriority ?? Infinity, lastActivityAt: a.lastActivityAt },
+    { priority: b.orderPriority ?? Infinity, lastActivityAt: b.lastActivityAt })
+}
 /** Preserve the last observed branch/path association when Git confirms its checkout was removed. */
 export function retainedWorktreeFacts(previous: readonly FocusWorktreeFact[], snapshot: WorkspaceBranchesSnapshot): FocusWorktreeFact[] {
   if (snapshot.kind !== 'git-repository') return [...previous]
@@ -130,10 +137,14 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: P
       priorities.set(projectKey, Math.min(priorities.get(projectKey) ?? priority, priority))
     }
   }
-  for (const lane of lanes.values()) lane.lastActivityAt = activity.get(focusLaneOrderKey(lane)) ?? null
+  for (const lane of lanes.values()) {
+    const key = focusLaneOrderKey(lane)
+    lane.lastActivityAt = activity.get(key) ?? null
+    lane.orderPriority = priorities.get(key)!
+  }
   return [...lanes.values()].sort((a, b) => {
     const first = focusLaneOrderKey(a), second = focusLaneOrderKey(b)
-    return compareFocusWork({ priority: priorities.get(first)!, lastActivityAt: a.lastActivityAt }, { priority: priorities.get(second)!, lastActivityAt: b.lastActivityAt })
+    return compareFocusLaneActivity(a, b)
       || groupRanks.get(first)! - groupRanks.get(second)!
   })
 }
