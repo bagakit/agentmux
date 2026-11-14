@@ -1,0 +1,28 @@
+.mote-calendar__filter-tools, .mote-calendar__filters, .mote-calendar__filter-empty {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.mote-calendar__filter-tools button, .mote-calendar__filters button, .mote-calendar__filter-empty button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  min-height: 30px; padding: 0 8px; border: 0; border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-meta); cursor: pointer;
+}
+.mote-calendar__filter-tools button:is(:hover, [aria-expanded="true"], [aria-pressed="true"], [data-applied="true"]),
+.mote-calendar__filters button:hover, .mote-calendar__filter-empty button:hover { background: var(--surface-3); color: var(--text); }
+.mote-calendar__filters, .mote-calendar__filter-empty {
+  flex-wrap: wrap; flex: none; padding: var(--sp-2) var(--sp-4); border-bottom: 1px solid var(--line-soft);
+  color: var(--text-2); font-size: var(--fs-meta);
+}
+.mote-calendar .mote-calendar__filters :is(input, select) {
+  box-sizing: border-box; width: auto; min-width: 0; height: 30px; padding: 0 8px;
+  border: 1px solid var(--line-soft); border-radius: var(--radius-sm);
+  background: var(--surface-1); color: var(--text); font: inherit;
+}
+.mote-calendar__filters input { flex: 1 1 16ch; max-width: 40ch; }
+.mote-calendar__filters select, .mote-calendar__filters button { flex: none; }
+@container mote-calendar (max-width: 650px) {
+  .mote-calendar__toolbar .mote-calendar__navigation { grid-column: 1; }
+  .mote-calendar__filter-tools { justify-self: end; grid-column: 2; grid-row: 1; gap: 2px; }
+  .mote-calendar__filter-tools button > span { display: none; }
+}

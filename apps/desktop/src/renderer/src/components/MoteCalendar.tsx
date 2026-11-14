@@ -24,9 +24,11 @@ import { calendarCellLines, calendarDayWindow, calendarHourWindows, calendarRece
 import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 import { ScheduleArrangementRow, scheduleCalendarLabel, scheduleStateLabel } from './ScheduleArrangementRow'
 import { ScheduleCreateForm, type CalendarCreateSelection } from './ScheduleCreateForm'
+import '../styles/mote-calendar-filter.css'
 import { MoteCalendarTimes } from './MoteCalendarTimes'
 import { MoteCalendarEvents } from './MoteCalendarEvents'
 
+const Search = semanticIconComponent('action.search')
 const ChevronLeft = semanticIconComponent('navigation.back')
 const ChevronRight = semanticIconComponent('navigation.forward')
 const Plus = semanticIconComponent('action.create')
@@ -67,6 +69,16 @@ export function MoteCalendar({ scope, reference, active, openRequest, onSelectDi
   const [selectedHour, setSelectedHour] = useState(() => DateTime.fromMillis(now, { zone: timezone }).hour)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const detailsInvoker = useRef<HTMLElement | null>(null)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<ContinuousProgressLoop['status'] | 'all'>('all')
+  const [hideHeartbeat, setHideHeartbeat] = useState(false)
+  const searchTrigger = useRef<HTMLButtonElement>(null)
+  const searchInput = useRef<HTMLInputElement>(null)
+  const normalizedSearch = search.trim().toLocaleLowerCase()
+  const filtering = Boolean(normalizedSearch || hideHeartbeat || statusFilter !== 'all')
+  function clearFilters() { setSearch(''); setStatusFilter('all'); setHideHeartbeat(false) }
+  useEffect(() => { if (searchOpen) searchInput.current?.focus() }, [searchOpen])
   const [showEnded, setShowEnded] = useState(false), [navigationIssue, setNavigationIssue] = useState<string>()
   const [createRequest, setCreateRequest] = useState<CalendarCreateSelection>()
   const createTrigger = useRef<HTMLButtonElement>(null)
@@ -130,9 +142,23 @@ export function MoteCalendar({ scope, reference, active, openRequest, onSelectDi
     if (choice) requestDesktopFocusWorkfaceReveal(choice)
     state.setMainSurface('workbench'); contentPresentation?.collapse()
   }
-  const records = useMemo(() => source.records.filter(record => record.status !== 'stopped'), [source.records])
-  const ended = source.records.length - records.length
-  const byId = useMemo(() => new Map(source.records.map((record, index) => [record.loopId, { record, discussion: labels[index] }])), [source.records, labels])
+  const byId = useMemo(() => {
+    const rows = new Map<string, { record: ContinuousProgressLoop; discussion: string | undefined }>()
+    source.records.forEach((record, index) => {
+      const discussion = labels[index]
+      if (statusFilter !== 'all' && record.status !== statusFilter) return
+      const heartbeat = isMoteHeartbeatSchedule(record, heartbeatSourceId)
+      if (hideHeartbeat && heartbeat) return
+      if (normalizedSearch && ![record.prompt, discussion, heartbeat ? 'Heartbeat 心跳' : '']
+        .some(text => text?.toLocaleLowerCase().includes(normalizedSearch))) return
+      rows.set(record.loopId, { record, discussion })
+    })
+    return rows
+  }, [source.records, labels, hideHeartbeat, heartbeatSourceId, normalizedSearch, statusFilter])
+  const visibleRecords = useMemo(() => Array.from(byId.values(), item => item.record), [byId])
+  const records = useMemo(() => visibleRecords.filter(record => record.status !== 'stopped'), [visibleRecords])
+  const ended = visibleRecords.length - records.length
+  const emptyFilter = filtering && source.observed && source.records.length > 0 && !visibleRecords.length
   const periodDate = DateTime.fromISO(period, { zone: timezone })
   const start = periodDate.startOf('month')
   const selectedDate = DateTime.fromISO(selected, { zone: timezone })
@@ -142,9 +168,9 @@ export function MoteCalendar({ scope, reference, active, openRequest, onSelectDi
   const windowFrom = gridStart.startOf('day').toMillis(), windowTo = gridStart.plus({ days: cellCount }).startOf('day').toMillis()
   const minute = Math.floor(now / 60000) * 60000
   const occurrences = useMemo(() => active && mode !== 'upcoming'
-    ? projectScheduleOccurrences(source.records, { from: windowFrom, to: windowTo }, minute)
+    ? projectScheduleOccurrences(visibleRecords, { from: windowFrom, to: windowTo }, minute)
       .filter(item => item.kind === 'last-accepted' || byId.get(item.scheduleId)?.record.status !== 'stopped') : [],
-  [active, mode, source.records, byId, windowFrom, windowTo, minute])
+  [active, mode, visibleRecords, byId, windowFrom, windowTo, minute])
   const visibleDates = useMemo(() => Array.from({ length: cellCount }, (_, index) => DateTime.fromMillis(windowFrom, { zone: timezone }).plus({ days: index }).startOf('day')), [windowFrom, cellCount, timezone])
   const days = useMemo(() => {
     return new Map(visibleDates.map(date => {
@@ -159,7 +185,7 @@ export function MoteCalendar({ scope, reference, active, openRequest, onSelectDi
     return [key, { items, window, groups: calendarScheduleGroups(items, byId, minute) }]
   }) : []), [active, hourWindows, occurrences, byId, minute])
   const bucketStarts = useMemo(() => timed ? Array.from(hourWindows.values(), window => window.from) : visibleDates.map(date => date.toMillis()), [timed, hourWindows, visibleDates])
-  const history = useCalendarReceipts(source.records, bucketStarts, windowTo, JSON.stringify(retained.current), active && mode !== 'upcoming' && queries.length > 0 && source.observed && windowFrom <= now)
+  const history = useCalendarReceipts(visibleRecords, bucketStarts, windowTo, JSON.stringify(retained.current), active && mode !== 'upcoming' && queries.length > 0 && source.observed && windowFrom <= now)
   const receiptLines = useMemo(() => calendarReceiptLines(history.rows, byId), [history.rows, byId])
   function openPeriod(invoker: HTMLElement) {
     detailsInvoker.current = invoker
@@ -228,7 +254,7 @@ export function MoteCalendar({ scope, reference, active, openRequest, onSelectDi
     if (!active || !openRequest || requested.current === openRequest) return
     requested.current = openRequest
     pendingReveal.current = openRequest.scheduleId
-    setMode('upcoming'); setShowEnded(true)
+    setMode('upcoming'); setShowEnded(true); clearFilters()
     // Any later input owns attention, even if the original read is still pending.
     const cancel = () => { pendingReveal.current = undefined }
     document.addEventListener('pointerdown', cancel, true)
@@ -254,7 +280,7 @@ export function MoteCalendar({ scope, reference, active, openRequest, onSelectDi
   const selectedEvents = useMemo(() => eventWindow ? sliceScheduleOccurrences(occurrences, eventWindow) : [],
     [occurrences, eventWindow?.from, eventWindow?.to])
   const selectedPlans = useMemo(() => selectedEvents.filter(item => item.kind !== 'last-accepted'), [selectedEvents])
-  const ordered = [...(showEnded ? source.records : records)].sort((a, b) => a.nextCheckAt - b.nextCheckAt || a.loopId.localeCompare(b.loopId))
+  const ordered = [...(showEnded || statusFilter === 'stopped' ? visibleRecords : records)].sort((a, b) => a.nextCheckAt - b.nextCheckAt || a.loopId.localeCompare(b.loopId))
   const previousRange = useRef(windowFrom)
   useLayoutEffect(() => {
     const direction = Math.sign(windowFrom - previousRange.current)
@@ -288,6 +314,7 @@ export function MoteCalendar({ scope, reference, active, openRequest, onSelectDi
     element?.scrollIntoView?.({ block: 'nearest' })
   }
   function showSaved(record: ContinuousProgressLoop) {
+    if (!byId.has(record.loopId)) clearFilters()
     setMode('upcoming'); chooseDate(DateTime.fromMillis(record.nextCheckAt, { zone: timezone }))
     if (byId.get(record.loopId)?.record.status === 'stopped') setShowEnded(true)
     if (focusFrame.current !== undefined) cancelAnimationFrame(focusFrame.current)
@@ -320,17 +347,33 @@ export function MoteCalendar({ scope, reference, active, openRequest, onSelectDi
       <div className="mote-calendar__navigation">{mode !== 'upcoming' ? <><button type="button" aria-label={'Previous ' + mode.replace('-', ' ')} onClick={() => movePeriod(-1)}><ChevronLeft size={16} aria-hidden /></button>
         <button type="button" aria-label={'Next ' + mode.replace('-', ' ')} onClick={() => movePeriod(1)}><ChevronRight size={16} aria-hidden /></button>
         </> : null}<h4>{title}</h4>{mode !== 'upcoming' ? <button type="button" className="mote-calendar__today" onClick={() => { const date = DateTime.fromMillis(now, { zone: timezone }); chooseDate(date, false, true); setSelectedHour(date.hour) }}>Today</button> : null}</div>
+      <div className="mote-calendar__filter-tools">
+        <button type="button" ref={searchTrigger} aria-label="Search and filter arrangements" title="Search and filter arrangements" aria-expanded={searchOpen} data-applied={Boolean(normalizedSearch || statusFilter !== 'all')}
+          onClick={() => setSearchOpen(open => !open)}><Search size={15} aria-hidden /></button>
+        <button type="button" aria-label="Hide heartbeats" title={hideHeartbeat ? 'Show heartbeats' : 'Hide heartbeats'} aria-pressed={hideHeartbeat}
+          onClick={() => setHideHeartbeat(hidden => !hidden)}><Heartbeat size={15} aria-hidden /><span>{hideHeartbeat ? 'Heartbeats hidden' : 'Hide heartbeats'}</span></button>
+      </div>
       <SurfaceModeSwitch value={mode} active={active} ariaLabel="Calendar view" options={[{ value: 'day', label: 'Day' }, { value: 'three-days', label: '3 Days' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'upcoming', label: 'Upcoming' }]} onChange={changeMode} />
       <Button variant="primary" className="mote-calendar__create" ref={createTrigger} aria-haspopup="dialog" aria-label="New arrangement" title="New arrangement" onClick={event => prepare(event.currentTarget)}><Plus size={14} aria-hidden /><span>New<span className="mote-calendar__create-label"> arrangement</span></span></Button>
     </header>
+    {searchOpen ? <div className="mote-calendar__filters" role="search" aria-label="Find calendar arrangements" onKeyDown={event => {
+      if (event.key === 'Escape') { event.stopPropagation(); setSearchOpen(false); searchTrigger.current?.focus() }
+    }}>
+      <input type="search" aria-label="Search arrangements" placeholder="Search arrangements or discussions" ref={searchInput} value={search} onChange={event => setSearch(event.target.value)} />
+      <select aria-label="Arrangement status" value={statusFilter} onChange={event => setStatusFilter(event.target.value as typeof statusFilter)}>
+        <option value="all">All statuses</option><option value="active">Active</option><option value="paused">Paused</option><option value="stopped">Ended</option>
+      </select>
+      {filtering ? <button type="button" onClick={clearFilters}>Clear filters</button> : null}
+    </div> : null}
+    {emptyFilter ? <div role="status" className="mote-calendar__filter-empty">No matching arrangements {!searchOpen ? <button type="button" onClick={clearFilters}>Show all</button> : null}</div> : null}
     {!queries.length || source.error ? <div className="calendar-schedules__notice" role="status"><p>{!queries.length ? scope.issue || scope.topic.readError || 'The current arrangement scope is unconfirmed.' : source.error} Last confirmed arrangements are kept.</p>{queries.length ? <Button type="button" onClick={source.refresh}>Retry arrangements</Button> : null}</div> : null}
     {navigationIssue ? <p role="status" className="calendar-schedules__notice">{navigationIssue}</p> : null}
     {mode !== 'upcoming' && queries.length > 0 && !source.error && source.observed && !source.records.length ? <div className="mote-calendar__empty"><strong>No arrangements yet</strong><p>Choose a date and prepare a reminder for an original discussion.</p></div> : null}
     {mode === 'upcoming' ? <section aria-label="Upcoming arrangements">
       {ordered.length ? <ol className="calendar-schedules__list" aria-label="Upcoming arrangements">{ordered.map(record => row(record))}</ol>
-        : queries.length > 0 && !source.error && source.observed ? <div className="mote-calendar__empty"><strong>{ended ? 'No upcoming arrangements' : 'Time for a first arrangement'}</strong><p>{ended ? 'Ended arrangements are available below.' : 'Save a reminder or countdown for a Mote discussion. It will appear here.'}</p></div>
+        : emptyFilter ? null : queries.length > 0 && !source.error && source.observed ? <div className="mote-calendar__empty"><strong>{ended ? 'No upcoming arrangements' : 'Time for a first arrangement'}</strong><p>{ended ? 'Ended arrangements are available below.' : 'Save a reminder or countdown for a Mote discussion. It will appear here.'}</p></div>
           : <p className="continuous-progress-control__help">{source.error || !queries.length ? 'Arrangements have not been confirmed.' : 'Reading arrangements…'}</p>}
-      {ended ? <label className="mote-calendar__ended"><input type="checkbox" checked={showEnded} onChange={event => setShowEnded(event.target.checked)} />Show ended ({ended})</label> : null}
+      {ended && statusFilter !== 'stopped' ? <label className="mote-calendar__ended"><input type="checkbox" checked={showEnded} onChange={event => setShowEnded(event.target.checked)} />Show ended ({ended})</label> : null}
     </section> : <div className="mote-calendar__workspace" data-detail={detailsOpen}>
       <div className="mote-calendar__canvas" ref={grid} data-days={timed ? cellCount : 7} style={{ '--mote-calendar-days': timed ? cellCount : 7 } as CSSProperties}>
         {!timed ? <div className="mote-calendar__weekdays" aria-hidden="true">{visibleDates.slice(0, 7).map(date => <span key={date.weekday}>{date.toFormat('ccc')}</span>)}</div> : null}
