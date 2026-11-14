@@ -56,6 +56,50 @@ describe('civil calendar', () => {
 })
 
 describe('original schedule owner', () => {
+  it.each(['claim', 'prepared-input', 'busy-check'] as const)('retains the due schedule through storage failure at %s', async stage => {
+    const dispatched = vi.fn(async () => 'sent' as const)
+    const h = await owner(dispatched)
+    const { schedule } = await h.manager.call('schedule.create', { target, everyMs: 60_000, prompt: 'next', operationId: 'storage-create' })
+    const due = schedule.nextCheckAt
+    h.set({ now: due, working: stage === 'busy-check' })
+    const save = h.store.save.bind(h.store)
+    const fault = vi.spyOn(h.store, 'save').mockImplementation(async loops => {
+      const candidate = loops.find(loop => loop.loopId === schedule.loopId)!
+      if (stage === 'prepared-input' && !candidate.pendingCompletion) return save(loops)
+      throw Object.assign(new Error('Injected write failure'), { code: 'ENOSPC' })
+    })
+    await expect(h.manager.check(due)).rejects.toMatchObject({ code: 'ENOSPC' })
+    expect(fault).toHaveBeenCalled()
+    expect(dispatched).not.toHaveBeenCalled()
+    const held = (await h.manager.call('schedule.inspect', { scheduleId: schedule.loopId })).schedule!
+    expect(held).toMatchObject({ status: 'active', nextCheckAt: due, lastOutcome: 'skipped' })
+    expect(held.pendingCompletion).toBeUndefined()
+    expect(held.lastInputRef).toBeUndefined()
+    fault.mockClear()
+    await h.manager.check(due)
+    expect(fault).not.toHaveBeenCalled()
+    fault.mockRestore()
+    h.set({ now: due + 1_000, working: false })
+    await h.manager.check(due + 1_000)
+    expect(dispatched).toHaveBeenCalledOnce()
+    expect((await h.reload())[0]).toMatchObject({ loopId: schedule.loopId, status: 'active', nextCheckAt: due + 60_000 })
+  })
+
+  it('reads original schedules from a cold Host without requiring a write', async () => {
+    const h = await owner()
+    const { schedule } = await h.manager.call('schedule.create', { target, everyMs: 60_000, prompt: 'next', operationId: 'readable-original' })
+    const restored = new ContinuousProgressLoopManager(h.store, vi.fn(), () => 0, vi.fn())
+    const save = vi.spyOn(h.store, 'save').mockRejectedValue(Object.assign(new Error('Injected write failure'), { code: 'ENOSPC' }))
+    try {
+      await expect(restored.call('schedule.inspect', { scheduleId: schedule.loopId })).resolves.toMatchObject({ schedule })
+      await expect(restored.call('schedule.list', {})).resolves.toMatchObject({ schedules: [schedule] })
+      expect(save).not.toHaveBeenCalled()
+    } finally {
+      save.mockRestore()
+      await restored.stop()
+    }
+  })
+
   it.each(['occupied','working','permission','missing'] as const)('keeps the occurrence due while %s', async blocked => {
     let calls = 0
     const h = await owner(async () => { calls++; return 'sent' })
