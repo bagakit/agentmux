@@ -275,6 +275,10 @@ export class CaptureSurface {
     if (action === 'switch-background') {
       const next = params.background
       if (next !== 'included' && next !== 'excluded') throw new Error('Choose the exact frozen screenshot background.')
+      if (active.session.allowBackgroundFallback === false && next !== active.background) {
+        send(overlay, { kind: 'notice', message: 'This public capture requires its original excluded screenshot background.' })
+        return
+      }
       if (active.finishing) { send(overlay, { kind: 'notice', message: 'The current screenshot output is still in progress. Keep its background until that output finishes.' }); return }
       if (active.owner !== null && active.owner !== frameInput.displayId) { send(overlay, { kind: 'notice', message: 'Change the screenshot background on the display that holds the selection.' }); return }
       if (!frameInput.backgrounds[next].image) { send(overlay, { kind: 'notice', message: frameInput.backgrounds[next].issue! }); return }
