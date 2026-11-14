@@ -12,9 +12,9 @@ From the Desktop that starts or views the work:
 | Mode | Agent runs | Project files and commands |
 | --- | --- | --- |
 | Local | On this device | On this device |
-| Remote Project | On this device | On the remote Host |
-| Remote Agent | On the remote Host | On this device |
-| Remote Workspace | Remotely | Remotely, on the Agent Host by default |
+| Reach · Remote Project | On this device | On the remote Host |
+| Relay · Remote Agent | On the remote Host | On this device |
+| Orbit · Remote Workspace | Remotely | Remotely, on the Agent Host by default |
 
 Remote Workspace keeps computation and the project off this device. It does not enable
 continuous autonomous tasks or change access permissions. Existing arrangements with two
@@ -27,7 +27,7 @@ authenticated user or device; do not assume that identity.
 ## Start work
 
 Open New Tab or New Agent for the project, then use the work-mode entry beside Agent
-to edit its arrangement. Settings → Remote → Remote work offers the same preparation.
+to edit its arrangement. Settings → Environment → Remote offers the same preparation under Start work.
 Choose a mode, an exact registered project and the Agent device. For separate execution,
 the Agent startup directory defaults to that Host's confirmed home and may be another
 registered directory there; it does not need a project copy. Register a missing project
@@ -51,7 +51,7 @@ keep their original execution binding.
 
 Every non-local Agent identity shows its relative work mode; inspect that label to read
 the exact Agent and Project Hosts and paths. Moving its display does not move execution.
-The Remote work list includes both split-tool bindings and ordinary remote Sessions.
+The Existing work view in Remote includes both split-tool bindings and ordinary remote Sessions.
 Open original work returns to that exact Session. Resume original and tool rejoin keep
 the original identities; Refresh observation only rereads the relevant facts.
 

@@ -84,7 +84,7 @@ Remote 管理首先帮助用户回答四个问题：我连接了哪些环境；�
 
 ## 入口与观察范围
 
-Remote 在 Settings 中有可发现的独立管理入口，搜索、Overview、Host 身份入口及原设置深链都能到达准确对象。原连接、项目和信任管理能力沿同一 Host owner 承接，不以增加 Remote 为由出现两套可编辑 Host 清单。Settings 用 Environment → Hosts 表达设备身份与连接拓扑的基础层，用 Remote → Remote work 表达使用这些连接的工作能力层。两页均能独立直达，Remote 不复制 Host 编辑器，Host 也不被归为某一种远程工作模式。Host 工作台保留原 `hosts` 对象与准确导航身份。Phone、外部对话应用和全局 Executor 模板继续由原 owner 管理。
+Remote 在 Settings 中有可发现的独立管理入口，搜索、Overview、Host 身份入口及原设置深链都能到达准确对象。原连接、项目和信任管理能力沿同一 Host owner 承接，不以增加 Remote 为由出现两套可编辑 Host 清单。Settings 的同一 Environment 分组依次提供 Hosts、Remote 和 Mobile；Hosts 表达设备身份与连接拓扑的基础层，Remote 表达使用这些连接的工作能力层，不用两个导航分组代替对象边界。两页均能独立直达，Remote 不复制 Host 编辑器，Host 也不被归为某一种远程工作模式。Host 工作台保留原 `hosts` 对象与准确导航身份。Phone、外部对话应用和全局 Executor 模板继续由原 owner 管理。
 
 同一 Host 工作台按总览与监控、项目、应用与访问、连接配置组织任务。切换任务仍持有同一个准确 Host、原草稿与已访问操作，不建立三套选择器、清单或配置副本。总览承接拓扑与分源观察；连接配置承接原编辑、Test 与 Core 维护；应用与访问承接该 Host 的真实执行器盘点及跨 Host 来源核验、真人批准。全局模板不冒充远端已安装应用。
 
@@ -98,19 +98,19 @@ Remote 在 Settings 中有可发现的独立管理入口，搜索、Overview、H
 
 ## 独立 Remote execution 工作台
 
-用户可见页面名为 **Remote work**，稳定模块身份保持原 `remote-execution`。页面目的，是让用户明确“Agent 在哪里运行、项目与工具在哪里、怎样开始或继续这项工作”。它与 Hosts 同层参与 Settings 导航、Overview 和搜索；详情复用原 Host 的准确对象深链，不要求先进入某台 Host 才能找到执行入口。本节持有行为合同；设置、创建与观察的源码入口见[实现基线](#公共能力与当前实现基线)，源码入口不代签特定运行实例或 Provider 资格。
+用户可见页面名为 **Remote**，稳定模块身份保持原 `remote-execution`。页面目的，是让用户明确“Agent 在哪里运行、项目与工具在哪里、怎样开始或继续这项工作”。它与 Hosts 同层参与 Settings 导航、Overview 和搜索；详情复用原 Host 的准确对象深链，不要求先进入某台 Host 才能找到执行入口。本节持有行为合同；设置、创建与观察的源码入口见[实现基线](#公共能力与当前实现基线)，源码入口不代签特定运行实例或 Provider 资格。
 
 工作模式以这次发起或观察的 Desktop 原本机 Host 为参照，不以当前项目、展示 Workspace、远端 Core 的局部 `local` 路由或 Agent 创建者记录替代。本机与另外节点的三种方向均为首层能力：
 
 | 模式 | Agent 运行端 | 项目文件与工具端 |
 | --- | --- | --- |
-| Remote Project | 发起端 | 远端 |
-| Remote Agent | 远端 | 发起端 |
-| Remote Workspace | 远端 | 远端，默认与 Agent 同一 Host |
+| Reach · Remote Project | 发起端 | 远端 |
+| Relay · Remote Agent | 远端 | 发起端 |
+| Orbit · Remote Workspace | 远端 | 远端，默认与 Agent 同一 Host |
 
 普通 Local 是两端均在发起端。Remote Workspace 表达本机提供访问工作面，计算与项目在远端；它不代表只读 ACL、自动持续推进或新常驻服务。已有两端分别位于不同远端的安排继续保留，明确显示各自原 Host。模式是原两端事实的相对投影，不是持久枚举、权限、连接状态或新的执行协议；原 Agent 发起来源不冒充人类客户端本机。
 
-用户先选择方向，再明确准确的已登记项目与 Agent 设备，检查同一处两端摘要后进入原 Launcher。分端时默认 Agent 启动目录来自该 Host 的权威 home，按需选该 Host 的已登记目录；同 Host 原普通执行不强建工具 binding。准备不启动 Agent、不发送任务、不安装、升级或授信，不猜 `~` 或任意同名目录。准备失败保留原选择和草稿，迟到结果不能覆盖新对象、配置或后续输入。没有匹配项目时提供准确 Host 的原项目登记入口，不把未知清单当空列表。
+Remote 将“开始工作”与“已有工作”呈现为两个明确任务面；切换保留原准备选择、所选 Session 和搜索，不运行准备、清除草稿或重绑。模式品牌名在设置、Launcher、Goal 创建和非本地 Agent 标签中一致，紧邻或在身份详情保留 Remote Project／Remote Agent／Remote Workspace 及准确两端说明。品牌名不成为持久模式值、权限或连接事实。用户先选择方向，再明确准确的已登记项目与 Agent 设备，检查同一处两端摘要后进入原 Launcher。分端时默认 Agent 启动目录来自该 Host 的权威 home，按需选该 Host 的已登记目录；同 Host 原普通执行不强建工具 binding。准备不启动 Agent、不发送任务、不安装、升级或授信，不猜 `~` 或任意同名目录。准备失败保留原选择和草稿，迟到结果不能覆盖新对象、配置或后续输入。没有匹配项目时提供准确 Host 的原项目登记入口，不把未知清单当空列表。
 
 日常项目工作沿 Space 中的[原 Launcher](workface-launcher.md#agent-运行端与项目工具端)开始，Settings 同时保留准备原 Launcher 与管理已有绑定的入口。操作正文唯一在[Core 使用指南](../../../packages/core/guides/actions/remote-execution.md)，由设置页和原 CLI 帮助同源消费。指南覆盖登记环境与目录、选择准确两端、显式启动和继续原工作，说明浏览一台机器与选定其项目是两个动作；不在本页或 UI 另写一套步骤及能力清单。
 

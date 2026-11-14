@@ -37,7 +37,7 @@ to be a Git repository. Registration, navigation and Agent creation have separat
 
 ## Tailcat transport
 
-Settings → Remote → Hosts → Connection holds the original Host's transport selection:
+Settings → Environment → Hosts → Connection holds the original Host's transport selection:
 SSH (the default), SSH with Tailcat backup, or Tailcat only. A remote Host keeps its existing
 id, kind=ssh record, SSH fields and Runtime binding. transport selects the carrier;
 tailcat holds {address, keyFile}. Turning Tailcat off leaves the original SSH route intact.
@@ -85,7 +85,7 @@ Private Tailcat addresses, key paths and raw process errors are never connection
 
 ## Review a remote Core update
 
-The Core maintenance section in Desktop Settings → Remote → Hosts → Connection compares
+The Core maintenance section in Desktop Settings → Environment → Hosts → Connection compares
 the current deployment with the candidate bundled in this App. It is not an online
 latest-version check. Package versions, source commits,
 deployment digests, Core owner API protocol and required Native Runtime protocol
