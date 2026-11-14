@@ -14,7 +14,7 @@ import { api } from '../../lib/api'
 import type { MoteWorkfaceScope } from '../../lib/mote-workface'
 import { useAppStore } from '../../store'
 import { SpaceObjectIcon } from '../SpaceObjectIcon'
-import type { MoteLarkSettingsOrigin } from '../SettingsNavigation'
+import type { MoteConnectionSettingsOrigin } from '../SettingsNavigation'
 
 export type MoteIdentityReading = {
   scope: MoteWorkfaceScope
@@ -71,7 +71,7 @@ const NextIcon = semanticIconComponent('navigation.forward')
 
 function MoteIdentityCard({ reading, records, recordsIssue, onOpen, onRetry }: {
   reading: MoteIdentityReading; records: ConnectionRecord[]; recordsIssue: string
-  onOpen(origin: MoteLarkSettingsOrigin, create: boolean): void; onRetry(): void
+  onOpen(origin: MoteConnectionSettingsOrigin, create: boolean): void; onRetry(): void
 }) {
   const { scope, target, saved, issue } = reading
   const icon = useAppStore(state => target ? state.spaceObjectIcons[target.spaceId] ?? null : null)
@@ -100,7 +100,7 @@ function MoteIdentityCard({ reading, records, recordsIssue, onOpen, onRetry }: {
 
 /** Cards consume the same bounded readings as the saved identity list. */
 export function MoteIdentityCards({ readings, records, recordsIssue, onOpen }: {
-  readings: MoteIdentityReadings; records: ConnectionRecord[]; recordsIssue: string; onOpen(origin: MoteLarkSettingsOrigin, create: boolean): void
+  readings: MoteIdentityReadings; records: ConnectionRecord[]; recordsIssue: string; onOpen(origin: MoteConnectionSettingsOrigin, create: boolean): void
 }) {
   return <section className="connector-mote-identities" aria-label="Choose a Mote">
     <header><div><h3>Choose a Mote</h3><p>Manage its default bot for new groups, or create an identity from its saved profile. Private chat is configured separately in the Mote Profile.</p></div><span className="connector-identity-count">{readings.items.length || null}</span></header>

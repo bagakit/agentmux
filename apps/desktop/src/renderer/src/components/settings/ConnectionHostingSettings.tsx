@@ -18,7 +18,7 @@ const HostIcon = semanticIconComponent('object.host')
 export function ConnectionHostingSettings(props: { active: boolean; platform: { adapterId: string; title: string }; channel?: string; onClose?: (() => void) | undefined; navigationRequest?: SettingsNavigationRequest | undefined }) {
   const channel = props.channel ?? 'lark', hosts = useAppStore(state => state.config?.hosts)
   const intents = useAppStore(state => state.manualConnectionIntents)
-  const origin = props.navigationRequest?.channelOrigin ?? props.navigationRequest?.moteLarkOrigin
+  const origin = props.navigationRequest?.channelOrigin ?? props.navigationRequest?.moteConnectionOrigin
   const [target, setTarget] = useState<ConnectionHostingTarget | null | undefined>(() => {
     if (origin) return origin.hostingTarget ?? null
     const state = useAppStore.getState(), retained = channel === 'lark' ? restoredManagementTask(state.botTaskSelections) ?? readBotTaskLocator(state.botTaskSelections[botTaskSelectionKey({ kind: 'enrollment' })]) : null

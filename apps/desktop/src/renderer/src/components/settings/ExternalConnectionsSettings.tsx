@@ -6,7 +6,7 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { ConnectionConfigureInput, ConnectionRecord, ConnectionSetupEnrollmentSource } from '@agentmux/core/connections'
-import { SettingsNavigation, type SettingsNavigationRequest, type MoteLarkSettingsOrigin } from '../SettingsNavigation'
+import { SettingsNavigation, type SettingsNavigationRequest, type MoteConnectionSettingsOrigin } from '../SettingsNavigation'
 import { retainManualConnectionIntent, setBotTaskSelection, useAppStore } from '../../store'
 import type { ConnectionHostingTarget } from '../../../../shared/contracts'
 import { manualConnectionScope } from '../../lib/manual-connection-intent'
@@ -72,11 +72,11 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
   }
   const [records, setRecords] = useState<ConnectionRecord[]>([]), [issue, setIssue] = useState(''), [busy, setBusy] = useState(false)
   const [listIssue, setListIssue] = useState('')
-  const [restoration, setRestoration] = useState(() => !manualOnly && !navigationRequest?.moteLarkOrigin && !origin ? ownManagement : null)
+  const [restoration, setRestoration] = useState(() => !manualOnly && !navigationRequest?.moteConnectionOrigin && !origin ? ownManagement : null)
   const [restoreReading, setRestoreReading] = useState({ pending: !!restoration, issue: '' }), [restoreAttempt, setRestoreAttempt] = useState(0)
   const [view, setView] = useState<'loading' | 'library' | 'enrollment' | 'new' | 'saved' | 'edit' | 'management' | 'mote' | 'motes'>(() =>
-    initial.current?.view ?? (restoration ? 'management' : !manualOnly && !navigationRequest?.moteLarkOrigin && !origin && ownEnrollment ? 'enrollment' : 'loading'))
-  const [moteSelection, setMoteSelection] = useState<{ origin: MoteLarkSettingsOrigin; create: boolean } | null>(null)
+    initial.current?.view ?? (restoration ? 'management' : !manualOnly && !navigationRequest?.moteConnectionOrigin && !origin && ownEnrollment ? 'enrollment' : 'loading'))
+  const [moteSelection, setMoteSelection] = useState<{ origin: MoteConnectionSettingsOrigin; create: boolean } | null>(null)
   // The pane stays mounted while another section is shown, so drafts survive; a typed secret is private
   // material and never outlives leaving, it is asked for again on return.
   useEffect(() => { if (!active) { setMoteSelection(current => current?.create ? { ...current, create: false } : current); setSecret('') } }, [active])
@@ -201,7 +201,7 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
   }
   const existing = () => { clearManagementRoute(); setContinuation(null); appliedRoute.current = navigationRequest; if (selected && !pending) edit(null); else setView('new') }
   const startEnrollment = () => { clearManagementRoute(); setContinuation(null); appliedRoute.current = navigationRequest; setMoteSelection(null); enrollment.startAnother(); setView('enrollment') }
-  const openMote = (origin: MoteLarkSettingsOrigin, create = false) => { clearManagementRoute(); setContinuation(null); appliedRoute.current = navigationRequest; setMoteSelection({ origin, create }); setView('mote'); setIssue('') }
+  const openMote = (origin: MoteConnectionSettingsOrigin, create = false) => { clearManagementRoute(); setContinuation(null); appliedRoute.current = navigationRequest; setMoteSelection({ origin, create }); setView('mote'); setIssue('') }
   const library = () => { clearManagementRoute(); setContinuation(null); returnMote.current = moteSelection?.origin.topicId ?? null; appliedRoute.current = navigationRequest; setRouteIssue(''); setView(moteSelection ? 'motes' : 'library'); setMoteSelection(null); setIssue(''); setLibraryRevision(value => value + 1) }
   useLayoutEffect(() => {
     const scroll = pane.current?.closest<HTMLElement>('.settings-content__scroll')
@@ -237,8 +237,8 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
   const continueMoteSetup = (record: ConnectionRecord, source: ConnectionSetupEnrollmentSource, original = hostingTarget) => {
     if (!original) { setIssue('The original bot Host is not recorded. This setup is kept.'); return }
     if (JSON.stringify(original) !== ownerKey) {
-      const origin = moteSelection?.origin ?? navigationRequest?.moteLarkOrigin
-      if (origin && navigation) navigation.openMoteLark({ ...origin, hostingTarget: original, setup: { connectionId: record.config.connectionId, source } })
+      const origin = moteSelection?.origin ?? navigationRequest?.moteConnectionOrigin
+      if (origin && navigation) navigation.openMoteConnection({ ...origin, hostingTarget: original, setup: { connectionId: record.config.connectionId, source } })
       else { onOpenOriginalHost?.(original); setIssue('Choose this bot’s original hosting Host to continue its saved setup.') }
       return
     }
@@ -247,16 +247,16 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
     setContinuation({ connectionId: record.config.connectionId, source })
   }
   useEffect(() => {
-    if (active && navigationRequest?.moteLarkOrigin && appliedRoute.current !== navigationRequest) openMote(navigationRequest.moteLarkOrigin)
+    if (active && navigationRequest?.moteConnectionOrigin && appliedRoute.current !== navigationRequest) openMote(navigationRequest.moteConnectionOrigin)
   }, [active, navigationRequest])
   const appliedContinuation = useRef<SettingsNavigationRequest | undefined>(undefined)
   useEffect(() => {
-    const setup = navigationRequest?.moteLarkOrigin?.setup
+    const setup = navigationRequest?.moteConnectionOrigin?.setup
     if (!active || !setup || appliedContinuation.current === navigationRequest) return
     const record = records.find(item => item.config.connectionId === setup.connectionId)
     if (!record) return
     appliedContinuation.current = navigationRequest
-    continueMoteSetup(record, setup.source, navigationRequest?.moteLarkOrigin?.hostingTarget ?? null)
+    continueMoteSetup(record, setup.source, navigationRequest?.moteConnectionOrigin?.hostingTarget ?? null)
   }, [active, navigationRequest, records])
   useEffect(() => {
     if (!active || appliedRoute.current === navigationRequest || !origin) return

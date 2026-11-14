@@ -36,7 +36,7 @@ function unmatchedChannel(request: SettingsNavigationRequest | undefined): strin
 
 function sameNormalizedNavigationRequest(a: SettingsNavigationRequest | undefined, b: SettingsNavigationRequest | undefined): boolean {
   return a === b || Boolean(a && b && a.section === b.section && a.field === b.field && a.executorId === b.executorId
-    && a.toolId === b.toolId && a.hostId === b.hostId && a.channelOrigin === b.channelOrigin && a.moteLarkOrigin === b.moteLarkOrigin)
+    && a.toolId === b.toolId && a.hostId === b.hostId && a.channelOrigin === b.channelOrigin && a.moteConnectionOrigin === b.moteConnectionOrigin)
 }
 
 function SettingsPanelView({ onClose, visible = true, initialSection = 'overview', executorId, toolId, navigationRequest, observationRef, inputPolicy = 'target' }: {

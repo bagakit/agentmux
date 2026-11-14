@@ -116,7 +116,7 @@ function MotePrivateChatPanel({ scope, target: initialTarget, active, reference,
     } catch (error) { if (lifetime.current === epoch) setIssue((useAppStore.getState().moteChatIntents[operationId] ? 'Chat settings were not confirmed. Your draft and original request are kept. ' : 'Chat settings were not saved. Your draft is kept. ') + presentError(error)) }
     finally { writing.current = false; setSaving(false) }
   }
-  const openSettings = () => settings?.openMoteLark({ target, hostingTarget, topicId: scope.topic.id, moteName: scope.topic.title })
+  const openSettings = () => settings?.openMoteConnection({ target, hostingTarget, topicId: scope.topic.id, moteName: scope.topic.title })
   const update = (values: MoteChatValues) => { edited.current++; setDraft(values); setNotice('') }
   return <section className="mote-private-chat" aria-label="Feishu private chat" data-mote-private-chat={scope.topic.id}>
     <header><div><h3><ChatIcon size={15} />Feishu chat</h3><p>Talk to this Mote directly in Feishu.</p></div><span role="status" data-mote-chat-saved={ready ? configuration?.values.enabled ? 'on' : 'off' : 'unknown'}>{ready ? configuration?.values.enabled ? 'On' : 'Off' : 'Not confirmed'}</span></header>

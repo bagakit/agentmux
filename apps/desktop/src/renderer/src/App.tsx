@@ -7,7 +7,7 @@ import { workspaceZoneContext } from './lib/workspace-zone-context'
 import { observeNotebookLibrary } from './lib/notebook-library'
 import { observeLastSeenBrowserFavicons } from './lib/browser-last-seen-favicons'
 import { ExecutorIdentityContext } from './components/AgentAvatar'
-import { SettingsNavigation, normalizeSettingsNavigationRequest, type SettingsNavigationRequest, type MoteLarkSettingsOrigin, type ChannelSettingsOrigin } from './components/SettingsNavigation'
+import { SettingsNavigation, normalizeSettingsNavigationRequest, type SettingsNavigationRequest, type MoteConnectionSettingsOrigin, type ChannelSettingsOrigin } from './components/SettingsNavigation'
 import { settingsCatalog, settingsModules } from './components/settings/settings-modules'
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
@@ -141,7 +141,7 @@ function DesktopApp() {
     const presentation = settingsCatalog.channelPresentation(connection.application, connection.adapterId)
     navigateSettings({ section: presentation?.section ?? 'overview', channelOrigin })
   }, [navigateSettings])
-  const openMoteLark = useCallback((moteLarkOrigin: MoteLarkSettingsOrigin): void => navigateSettings({ section: 'lark', moteLarkOrigin }), [navigateSettings])
+  const openMoteConnection = useCallback((moteConnectionOrigin: MoteConnectionSettingsOrigin): void => navigateSettings({ section: 'lark', moteConnectionOrigin }), [navigateSettings])
   const [windowResizeActive, setWindowResizeActive] = useState(false)
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false)
   const sessionLocationRequestId = useAppStore(state => state.sessionLocationRequest?.requestId)
@@ -150,7 +150,7 @@ function DesktopApp() {
   const quickSwitchFocusEpoch = useRef(0)
   useLayoutEffect(() => { quickSwitchFocusEpoch.current++ }, [quickSwitchVisible, sessionLocationRequestId])
   const chooseAgent = useCallback(() => { setSettingsOpen(false); setQuickSwitchOpen(true) }, [])
-  const settingsNavigation = useMemo(() => ({ open: openSettings, openToolkit, openHost: openHostSettings, openHostExecutors, openChannel, channelPresentation: settingsCatalog.channelPresentation, channelEntries: settingsCatalog.channelEntries, openMoteLark, chooseAgent }), [openSettings, openToolkit, openHostSettings, openHostExecutors, openChannel, openMoteLark, chooseAgent])
+  const settingsNavigation = useMemo(() => ({ open: openSettings, openToolkit, openHost: openHostSettings, openHostExecutors, openChannel, channelPresentation: settingsCatalog.channelPresentation, channelEntries: settingsCatalog.channelEntries, openMoteConnection, chooseAgent }), [openSettings, openToolkit, openHostSettings, openHostExecutors, openChannel, openMoteConnection, chooseAgent])
   const quickSwitchOrigin = useRef<{ element: HTMLElement | null; navigation: string } | null>(null)
   const initialize = useAppStore((state) => state.initialize)
   const loading = useAppStore((state) => state.loading)
