@@ -9,6 +9,7 @@ import { AgentCollaborationGraph } from '../src/renderer/src/components/AgentCol
 import { agentContextForSession } from '../src/renderer/src/lib/focus-context'
 import { collaborationAgents, collaborationSubjectKey } from '../src/renderer/src/lib/agent-collaboration'
 import { COLLABORATION_ACTIVITY_MS } from '../src/renderer/src/lib/collaboration-map-presentation'
+import { COLLABORATION_TRANSFER_MS } from '../src/renderer/src/components/CollaborationDispatchSignal'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { applyConfigEdit } from '../src/shared/config-edit'
@@ -57,15 +58,16 @@ it('honors explicit map motion through the actual reduced-motion cascade without
   await dom.click('[aria-label="Map animations"]')
   await settleCollaborationCanvas(() => expect(dom.container.querySelector('.collaboration-edge__packet')).not.toBeNull())
   expect(config.focus?.mapMotion).toBe('on')
-  for (const selector of ['.collaboration-activity', '.collaboration-edge__pulse', '.collaboration-edge__packet']) {
-    expect(duration(dom.container.querySelector(selector)!)).toBe(COLLABORATION_ACTIVITY_MS)
+  expect(duration(dom.container.querySelector('.collaboration-activity')!)).toBe(COLLABORATION_ACTIVITY_MS)
+  for (const selector of ['.collaboration-edge__pulse', '.collaboration-edge__packet']) {
+    expect(duration(dom.container.querySelector(selector)!)).toBe(COLLABORATION_TRANSFER_MS)
   }
   expect(getComputedStyle(dom.container.querySelector('.collaboration-edge')!).transitionDuration).toBe('150ms')
   expect(duration(dom.container.querySelector('.collaboration-canvas__controls')!)).toBe(0)
   expect(duration(document.body)).toBe(0)
   // Stylesheet order must not defeat the explicit choice either.
   await act(async () => { stylesheet.textContent = baseCSS + '\n' + collaborationCSS })
-  expect(duration(dom.container.querySelector('.collaboration-edge__packet')!)).toBe(COLLABORATION_ACTIVITY_MS)
+  expect(duration(dom.container.querySelector('.collaboration-edge__packet')!)).toBe(COLLABORATION_TRANSFER_MS)
   expect(getComputedStyle(dom.container.querySelector('.collaboration-edge')!).transitionDuration).toBe('150ms')
 
   await dom.click('[aria-label="Map animations"]')

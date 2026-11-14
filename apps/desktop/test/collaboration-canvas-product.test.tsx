@@ -2158,7 +2158,7 @@ it('shows immediate source and recipient activity while the original new path is
   const relation: CollaborationRelation = { id: 'new-message', source: subject('canvas-0'), target: subject('canvas-1'), kind: 'communication', evidence: [] }
   holdResponses = true
   await dom.render(graph(scene, null, [relation], [pulse]))
-  expect(nodeElement(source)!.querySelector('[aria-label="Message sent"]')).not.toBeNull()
+  expect(nodeElement(source)!.querySelector('[aria-label="Observed message activity · source"]')).not.toBeNull()
   expect(dom.container.querySelector('[aria-label="Relation legend"]')!.textContent).toContain('Messages')
   expect(dom.container.querySelector('.collaboration-edge__pulse')).toBeNull()
   await settleCollaborationCanvas(() => expect(heldResponses.some(item => item.response.type === 'complete')).toBe(true))
@@ -2166,25 +2166,25 @@ it('shows immediate source and recipient activity while the original new path is
   await settleCollaborationCanvas(() => expect(dom.container.querySelector('.collaboration-edge__pulse')).not.toBeNull())
   const flow = dom.container.querySelector<SVGPathElement>('.collaboration-edge__pulse')!
   expect(Number.parseFloat(flow.style.animationDelay)).toBeLessThan(0)
-  const packet = dom.container.querySelector<SVGCircleElement>('.collaboration-edge__packet')!
+  const packet = dom.container.querySelector<SVGPathElement>('.collaboration-edge__packet')!
   expect(packet).not.toBeNull()
   expect(packet.getAttribute('data-kind')).toBe('communication')
-  expect(packet.style.offsetPath).toBe(`path("${flow.getAttribute('d')}")`)
+  expect(packet.getAttribute('d')).toBe(flow.getAttribute('d'))
   expect(packet.style.animationDelay).toBe(flow.style.animationDelay)
   expect(dom.container.querySelector<HTMLElement>('.collaboration-canvas')!.style.getPropertyValue('--collaboration-activity-duration')).toBe(`${COLLABORATION_ACTIVITY_MS}ms`)
-  expect(Number(packet.getAttribute('r'))).toBe(4)
+  expect(packet.getAttribute('pathLength')).toBe('1')
   await focusNode(target)
-  expect(nodeElement(target)!.querySelector('[aria-label="Message received"]')).not.toBeNull()
+  expect(nodeElement(target)!.querySelector('[aria-label="Observed message activity · destination"]')).not.toBeNull()
   const edge = dom.container.querySelector<SVGGElement>('.collaboration-connections .react-flow__edge')!
   await act(async () => edge.dispatchEvent(new FocusEvent('focusin', { bubbles: true })))
   expect(document.getElementById(edge.getAttribute('aria-describedby')!)!.querySelector('strong')?.textContent).toBe('Messages')
   expect(document.getElementById(edge.getAttribute('aria-describedby')!)!.querySelector('span')?.textContent).toContain('Agent 0 → Agent 1')
   const operations = requests.length, camera = captured.store!.getState().transform
   await viewport(camera[0] * .25, camera[1] * .25, 20000, 20000, .25)
-  const overviewPacket = dom.container.querySelector<SVGCircleElement>('.collaboration-edge__packet')!
+  const overviewPacket = dom.container.querySelector<SVGPathElement>('.collaboration-edge__packet')!
   const overviewPath = dom.container.querySelector<SVGPathElement>('.collaboration-edge__pulse')!
-  expect(Number(overviewPacket.getAttribute('r')) * .25).toBe(4)
-  expect(overviewPacket.style.offsetPath).toBe(`path("${overviewPath.getAttribute('d')}")`)
+  expect(overviewPacket.getAttribute('pathLength')).toBe('1')
+  expect(overviewPacket.getAttribute('d')).toBe(overviewPath.getAttribute('d'))
   expect(overviewPacket.style.animationDelay).toBe(overviewPath.style.animationDelay)
   expect(requests).toHaveLength(operations)
 })
@@ -2323,7 +2323,7 @@ it('tracks a transformed original SVG path through real FloatingUI without follo
   await dom.render(graph(scene, null, scene.relations, [{ id: 1, startedAt: Date.now(), hostId: 'local', sender: from.sessionId!, recipient: to.sessionId!, kind: 'communication' }]))
   await revealWorld()
   const edge = edgeElement(connection.id)!, path = edge.querySelector<SVGPathElement>('.react-flow__edge-path')!
-  const packet = edge.querySelector<SVGCircleElement>('.collaboration-edge__packet')!
+  const packet = edge.querySelector<SVGPathElement>('.collaboration-edge__packet')!
   expect(packet).not.toBeNull()
   const readPacket = vi.spyOn(packet, 'getBoundingClientRect').mockImplementation(() => new DOMRect(900, 80, 8, 8))
   let screen = new DOMRect(120, 100, 160, 40)
@@ -2496,18 +2496,19 @@ it('the formal motion control changes only original event presentation and resum
   expect(dom.container.querySelector('.collaboration-edge__packet')).toBeNull()
   expect(dom.container.querySelector('.collaboration-edge__pulse')).toBeNull()
   expect(dom.container.querySelector('.react-flow__edge[data-recent="true"]')).not.toBeNull()
-  expect(dom.container.querySelector('[aria-label="Message received"]')).not.toBeNull()
+  expect(dom.container.querySelector('[aria-label="Observed message activity · destination"]')).not.toBeNull()
   clock.mockReturnValue(10800)
   await dom.click('[aria-label="Map animations"]')
   expect(control.getAttribute('aria-pressed')).toBe('true'); expect(config.focus?.mapMotion).toBe('on')
-  expect(dom.container.querySelector<SVGPathElement>('.collaboration-edge__pulse')?.style.animationDelay).toBe('-1200ms')
+  expect(dom.container.querySelector('.collaboration-edge__pulse')).toBeNull()
+  expect(dom.container.querySelector('.react-flow__edge[data-recent="true"]')).not.toBeNull()
   expect(captured.store!.getState().transform).toBe(camera)
   expect(captured.nodes.map(node => node.data.box)).toEqual(geometry); expect(requests).toHaveLength(operations)
   expect(select).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled()
   // The original reading owner expires activity. Preferences never retain or replay it.
   await dom.render(graph(scene, selected)); await dom.click('[aria-label="Map animations"]'); await dom.click('[aria-label="Map animations"]')
   expect(dom.container.querySelector('.collaboration-edge__packet')).toBeNull()
-  expect(dom.container.querySelector('[aria-label="Message received"]')).toBeNull()
+  expect(dom.container.querySelector('[aria-label="Observed message activity · destination"]')).toBeNull()
   expect(requests).toHaveLength(operations)
 })
 
