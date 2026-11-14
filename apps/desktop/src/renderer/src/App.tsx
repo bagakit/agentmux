@@ -1,5 +1,5 @@
 import { SpaceSourceReaders } from './components/SpaceSourceReaders'
-import { AgentCollaborationMap } from './components/AgentCollaborationMap'
+import { AgentCollaborationMap } from './components/AgentCollaborationMapEntry'
 import { workbenchDocuments, subscribeWorkbenchWindows, workbenchDocumentIdentity } from './lib/workbench-window-registry'
 import { useWorkbenchWindows, WorkbenchWindowNotices, focusWorkbenchWindow } from './lib/workbench-windows'
 import { GitHistoryProvider } from './features/git/history/GitHistoryContext'
