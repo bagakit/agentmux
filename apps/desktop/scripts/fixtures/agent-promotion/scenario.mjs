@@ -60,7 +60,7 @@ try {
  assert.equal((await inspect()).promotion.operationId,input.operationId)
  await stop(); await config(false); await unlink(join(root,'fail-spatial')); await writeFile(join(root,'fail-completion'),''); await start()
  const unrecorded=(await apply()).promotion
- assert.equal(unrecorded.state,'partial');assert.equal(unrecorded.stage,'main','completion marker failure retains the original operation')
+ assert.equal(unrecorded.state,'partial');assert.equal(unrecorded.diskDurability,'unconfirmed');assert.equal(unrecorded.stage,'main','completion marker failure retains the original operation')
  assert.equal((await inspect()).promotion.state,'partial','readback does not fabricate completion without a durable record')
  await stop()
  const interrupted=JSON.parse(await readFile(join(root,'spatial.json'),'utf8'))
@@ -71,7 +71,7 @@ try {
  await stop()
  interrupted.graph.regions.find(r=>r.regionId===unrecorded.conversation.regionId).execution.runtimeId='fixture-runtime'
  await writeFile(join(root,'spatial.json'),JSON.stringify(interrupted));await unlink(join(root,'fail-completion'));await writeFile(join(root,'fail-completion-sync'),'');await start()
- const visible=(await apply()).promotion;assert.equal(visible.state,'partial');assert.equal(visible.stage,'main','visible marker without fsync is not a durable completion')
+ const visible=(await apply()).promotion;assert.equal(visible.state,'partial');assert.equal(visible.diskDurability,'unconfirmed');assert.equal(visible.stage,'main','visible marker without fsync is not a durable completion')
  assert.equal((await inspect()).promotion.state,'partial','readable marker cannot replace failed durability ACK')
  await stop();await unlink(join(root,'fail-completion-sync'));await start()
  const complete=(await apply()).promotion
