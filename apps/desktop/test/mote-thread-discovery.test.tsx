@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act } from 'react'
+import { act, useState } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { MoteWorkThreads } from '@agentmux/client-ui/components/MoteConversationThreads'
@@ -98,6 +98,39 @@ it('shared Threads searches original titles and executors, filters exact report 
   expect(original?.getAttribute('data-expanded')).toBe('true'); expect(read).toHaveBeenCalledTimes(3)
   await click(button(original!, '继续原工作')); expect(open).toHaveBeenCalledExactlyOnceWith(sources[0])
   await search(container, '不存在'); expect(shown(container)).toHaveLength(0); expect(container.textContent).toContain('没有匹配的已载入工作')
+})
+
+it('hidden member view pauses searched work reads until the original work view returns', async () => {
+  const read = vi.fn(async (source: Work) => dispatch(source))
+  function Threads() {
+    const [value, setValue] = useState(page)
+    return <MoteWorkThreads page={value} issue={null} loading={false} visible readWork={read} memberName={() => '资料研究员'}
+      onRefresh={() => setValue(previous => ({ ...previous }))} onOpenWork={() => {}}
+      members={{ count: null, content: <p>原成员目录</p> }} />
+  }
+  await act(async () => root.render(<Threads />))
+  await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(3))
+  await click(container.querySelector<HTMLElement>('[data-mote-work-event="login"] .mote-work-event__summary')!)
+  const original = container.querySelector('[data-mote-work-event="login"]')
+  const reply = original?.querySelector('.mote-work-event__reply')
+  expect(reply?.textContent).toContain('登录方案的原回复')
+  await search(container, '方案')
+  await click(button(container, '成员'))
+  expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('成员')
+  expect(container.querySelector('.mote-threads__work')?.hasAttribute('hidden')).toBe(true)
+  await click(button(container, '刷新'))
+  expect(read).toHaveBeenCalledTimes(3)
+  expect(container.querySelector('[data-mote-work-event="login"]')).toBe(original)
+  expect(original?.querySelector('.mote-work-event__reply')).toBe(reply)
+  expect(original?.getAttribute('data-expanded')).toBe('true')
+  await click(container.querySelector<HTMLElement>('[role="tab"][aria-selected="false"]')!)
+  await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(6))
+  expect(read.mock.calls.slice(3).map(([source]) => source.origin.messageId).sort()).toEqual(['cache', 'foreign', 'login'])
+  expect(container.querySelector<HTMLInputElement>('[aria-label="查找工作标题或执行者"]')?.value).toBe('方案')
+  expect(shown(container)).toEqual(['login'])
+  expect(container.querySelector('[data-mote-work-event="login"]')).toBe(original)
+  expect(original?.querySelector('.mote-work-event__reply')).toBe(reply)
+  expect(original?.getAttribute('data-expanded')).toBe('true')
 })
 
 it('actual Mobile Threads adapter uses the same search and report filters with exact public source reads', async () => {

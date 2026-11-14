@@ -6,11 +6,12 @@ import base from './mote-discussion-threads.config.mts'
 const root = resolve(import.meta.dirname, '../../..')
 const variants: Record<string, [string, string, string]> = {
   'search-disconnected': ['packages/client-ui/src/components/MoteConversationThreads.tsx', '(!search || summary.search.includes(search))', 'true'],
-  'report-filter-disconnected': ['packages/client-ui/src/components/MoteConversationThreads.tsx', "filter === 'all' || filter === 'question' && summary.question ||", 'true ||'],
+  'report-filter-disconnected': ['packages/client-ui/src/components/MoteConversationThreads.tsx', "value === 'question' ? summary.question : value === 'reported' ? summary.reported : !summary.read", 'true'],
   'inline-wrong-host': ['packages/client-ui/src/components/MoteConversationThreads.tsx', 'event.sources.some(source => sameActor(source.main, actor))', 'event.sources.some(source => source.main.agentSessionId === actor.agentSessionId)'],
   'inline-disconnected': ['packages/client-ui/src/components/MoteConversationThreads.tsx', 'current && page && work ? <InlineWorkThreads', 'false ? <InlineWorkThreads'],
   'dispatch-count-is-worker-count': ['packages/client-ui/src/components/MoteConversationThreads.tsx', 'const workerCount = new Set(event.sources.map(source => JSON.stringify([source.origin.hostId, source.origin.recipientSessionId]))).size', 'const workerCount = event.sources.length'],
-  'search-ignores-foreground': ['packages/client-ui/src/components/MoteConversationThreads.tsx', 'discovering={discovering && viewport.visible}', 'discovering={discovering}']
+  'search-ignores-foreground': ['packages/client-ui/src/components/MoteConversationThreads.tsx', 'discovering={discovering && viewport.visible}', 'discovering={discovering}'],
+  'hidden-work-reading': ['packages/client-ui/src/components/MoteConversationThreads.tsx', "visible={visible && view === 'work'}", 'visible={visible}']
 }
 const mutation = process.env.AGENTMUX_THREAD_DISCOVERY_MUTATION
 if (mutation && !variants[mutation]) throw Error('Unknown thread discovery mutation')
