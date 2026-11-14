@@ -20,6 +20,8 @@ export const MoteWorkfaceContext = createContext<(MoteWorkfaceScope & {
   presentation?: 'conversation' | 'workface'
   section?: 'discussion' | 'threads'
   bodyVisible?: boolean
+  /** Exact Main's shared service chrome only; no input or lifecycle qualification. */
+  mainService?: { hostId: string; agentSessionId: string; runId: string; composerHint: string } | undefined
   memberIntent?: boolean
   /** Presentation and draft address only; Core still qualifies the logical Main input. */
   composer?: { draftKey: string; sourceKey: string; active: boolean; reference: MoteDefaultConversation | null; connection?: ComposerConnection | null | undefined } | undefined

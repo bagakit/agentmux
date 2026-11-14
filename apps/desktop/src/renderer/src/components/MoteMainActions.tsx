@@ -22,12 +22,13 @@ export type MoteStartActions = { reading: MoteMainActionReading | null; result: 
   restoringInput?: boolean; restoreInput?(): Promise<boolean>;
   submit(query: MoteMainDeferredInput, rollover?: MoteMainRolloverDecision, onRetained?: (query: MoteMainDeferredInput) => void | Promise<void>): Promise<void>;
   inspect(id: string): void; advance(id: string): void; refresh(): void }
-export function MoteMainActions({ scope, active, entryToken, onConfigure, onCreated, onRefresh, onOpenWorkspace, onOpenCreated, presentation, renderStart, onQueryResult, onStartNew, onResult }: {
+export function MoteMainActions({ scope, active, entryToken, onConfigure, onCreated, onRefresh, onOpenWorkspace, onOpenCreated, presentation, renderStart, onQueryResult, onStartNew, onResult, onPending }: {
   scope: MoteWorkfaceScope; active: boolean; presentation?: 'menu' | 'setup' | undefined; entryToken?: string | undefined
   onConfigure(invoker?: HTMLElement | null): void; onCreated?(reference: MoteDefaultConversation): void; onOpenCreated?: ((reference: MoteDefaultConversation) => void) | undefined; onRefresh?: (() => void) | undefined; onOpenWorkspace?: (() => void) | undefined
   onStartNew?: (() => void) | undefined; renderStart?: ((state: MoteStartActions) => ReactNode) | undefined
   onQueryResult?: ((result: MoteMainActionResult, query: MoteMainDeferredInput, mayNavigate: () => boolean) => void) | undefined
   onResult?: ((result: MoteMainActionResult, mayNavigate: () => boolean) => void) | undefined
+  onPending?: ((operationIds: string[]) => void) | undefined
 }) {
   const model = useMoteDialogueView()
   const [reading, setReading] = useState<MoteMainActionReading | null>(null), [result, setResult] = useState<MoteMainActionResult | null>(null)
@@ -128,9 +129,11 @@ export function MoteMainActions({ scope, active, entryToken, onConfigure, onCrea
     catch (cause) { if (lifetime.current === token) setIssue(presentError(cause)); return false }
     finally { restoring.current = false; setRestoringInput(false) }
   }
-  if (!active) return null
   const pending = [...new Set([...(reading?.pendingStarts ?? []), ...(reading?.pendingOperationId ? [reading.pendingOperationId] : []), ...(result?.binding === 'unconfirmed' ? [result.operationId] : []),
     ...(retained && (!result || result.operationId !== retained.operationId || result.binding === 'unconfirmed') ? [retained.operationId] : [])])]
+  const pendingKey = JSON.stringify(pending)
+  useEffect(() => { if (active) onPending?.(pending) }, [active, identity, pendingKey, onPending])
+  if (!active) return null
   const notice = [issue, retained?.deferredInputIssue].filter(Boolean).join('\n') || null
   const retainedInput = retained?.deferredInput && !originalMainCreationRetainsInput(retained, result) ? { ...retained.deferredInput, creationOperationId: retained.operationId } : undefined
   if (renderStart) return renderStart({ reading, result, issue: notice, busy, checking, pending, originalPosition,

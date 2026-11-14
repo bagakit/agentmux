@@ -143,7 +143,7 @@ export function ActivityView({
   onContinue,
   onSelectAnnotation,
   describeSpeaker: describeBaseSpeaker,
-  moteConversation = false,
+  moteConversation = false, moteMainService = false,
   questionReplyRoute, questionReplyTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange, onQuestionReply,
   renderMessageActions, renderRecordActions, renderReadingTools
 }: {
@@ -178,6 +178,7 @@ export function ActivityView({
    * this accepted reading window; without represented external actors the default stays unchanged.
    */
   describeSpeaker?: DescribeSpeaker
+  moteMainService?: boolean
   moteConversation?: boolean
   renderRecordActions?: (reference: ConversationItemRef, active: boolean, routeHostId?: string) => ReactNode
   renderReadingTools?: (active: boolean, revealLoaded: RevealConversationItem) => ReactNode
@@ -804,16 +805,17 @@ export function ActivityView({
         {conversationReading.opened && conversationReading.onClose ? <button ref={returnRef} type="button"
           className="activity-feed__reading-action" aria-label={`Return to ${conversationReading.returnLabel ?? 'Activity'}`}
           onClick={conversationReading.onClose}><ThemeNavigationBackIcon size={12} aria-hidden="true" />Return</button> : null}
-        {!moteConversation ? readingAction : null}
+        {!moteConversation || moteMainService ? readingAction : null}
       </div>
     </div>
   ) : null
-  const readNotice = <>
+  const originalReadNotice = <>
     {readingNotice}
     {conversationReading ? (!fullReadFailure || moteConversation) && readingIssues.length > 0 ? <ConversationReadFailure
       scope={readingServiceScope} issues={readingIssues} visible={readingEnabled} /> : null : readingWindow.error ? <div role="status" className="activity-feed__read-notice"><span>{readingWindow.error}</span>
       <button type="button" className="small-button" disabled={readingWindow.loading} onClick={readingWindow.retry}>{readingWindow.retryLabel}</button></div> : null}
   </>
+  const readNotice = moteMainService ? null : originalReadNotice
   const collapseTraces = (nativeHistoryPage?.items.some(item => item.contentParts.some(part =>
     part.kind === 'reasoning' || part.kind === 'tool-call' || part.kind === 'tool-result')) || conversationRecords.some(record =>
     record.original.kind === 'deferred' && record.original.item.kind === 'native' && record.original.item.parts.some(part =>
@@ -854,11 +856,12 @@ export function ActivityView({
   const renderReadingHeader = (tools: ReactNode, rulerContent?: ReactNode): JSX.Element => {
     const moteInitialReading = moteConversation && !hasReadContent && !emptyReadFailed && !earlierReadPending && initialReadPending
     const header = <div key="reading-header" className="activity-feed__reading-header" data-has-ruler={rulerContent ? 'true' : undefined}>
+      {moteMainService ? originalReadNotice : null}
       {rulerContent ?? (moteInitialReading ? null : emptyReadStatus)}
       {readingEntry}
       {!rulerContent ? <div className="reading-find__floating-trigger">{tools}</div> : null}
     </div>
-    return moteConversation ? <>{readingAction ? <div className="activity-feed__session-actions" aria-label="原 Agent 会话操作" data-original-session-actions><span>原 Agent 会话</span>{readingAction}</div> : null}{moteInitialReading ? <div className="activity-feed__reading-header" data-mote-initial-reading>{emptyReadStatus}</div> : null}<details className="mote-conversation__reading-tools"><summary>阅读与来源</summary>{header}</details></> : header
+    return moteConversation ? <>{readingAction && !moteMainService ? <div className="activity-feed__session-actions" aria-label="原 Agent 会话操作" data-original-session-actions><span>原 Agent 会话</span>{readingAction}</div> : null}{moteInitialReading && !moteMainService ? <div className="activity-feed__reading-header" data-mote-initial-reading>{emptyReadStatus}</div> : null}<details className="mote-conversation__reading-tools"><summary>{moteMainService ? '详情与原会话' : '阅读与来源'}</summary>{header}</details></> : header
   }
 
   const renderSurface = (content: (findTrigger: ReactNode) => JSX.Element): JSX.Element => {

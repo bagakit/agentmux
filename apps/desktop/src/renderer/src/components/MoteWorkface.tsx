@@ -6,6 +6,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type ContextType } from 'react'
 import { useAppStore } from '../store'
 import { MoteWorkfaceContext, useMoteWorkfaceScope, type MoteWorkfaceScope, type MoteRolloverStart } from '../lib/mote-workface'
+import { moteMainServicePolicy, moteMainServicePresentation } from '../lib/mote-main-service'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { showMoteConversation } from '../lib/mote-conversation-mode'
 import { confirmedMoteReference } from '../lib/mote-materials-actions'
@@ -218,13 +219,26 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
   useEffect(() => { if (entry === 'unconfirmed' && entryHold.held) entryHold.release() }, [entry, entryHold.held, entryHold.release])
   const composerActive = visible && section === 'discussion' && presentation === 'conversation' && !memberIntent && !currentLocal.period
   const composerSource = readingMain && showOriginal ? moteComposerSessionKey(readingMain, main?.roleRevision) : entry === 'welcome' ? 'welcome' : 'reading'
-  const context = useMemo(() => scope ? { ...scope, floating, defaultConversation: defaults.conversation, presentation, section, memberIntent, entryToken, bodyVisible: showOriginal,
+  const [pendingStarts, setPendingStarts] = useState<{ owner: string; ids: string[] }>({ owner, ids: [] })
+  const pendingOwner = useRef(owner); pendingOwner.current = owner
+  const reportPending = useCallback((ids: string[]) => {
+    if (pendingOwner.current === owner) setPendingStarts(previous => previous.owner === owner && JSON.stringify(previous.ids) === JSON.stringify(ids) ? previous : { owner, ids })
+  }, [owner])
+  const serviceSession = mainOccurrence?.session
+  const service = scope && main && entryRecovery.issue && showOriginal && selectedMain && presentation === 'conversation' && section === 'discussion' &&
+    readingMain?.hostId === currentMain?.hostId && readingMain?.sessionId === currentMain?.sessionId && serviceSession?.kind === 'agent' &&
+    serviceSession.control.hostId === currentMain?.hostId && serviceSession.control.agentSessionId === currentMain?.sessionId &&
+    (entryRecovery.status === 'unavailable' || entryRecovery.status === 'unconfirmed')
+    ? moteMainServicePresentation(entryRecovery.status, moteMainServicePolicy(scope, main), pendingStarts.owner === owner && pendingStarts.ids.length > 0) : null
+  const mainService = service && serviceSession?.kind === 'agent' ? { hostId: serviceSession.control.hostId, agentSessionId: serviceSession.control.agentSessionId,
+    runId: serviceSession.control.run.runId, composerHint: service.hint } : undefined
+  const context = useMemo(() => scope ? { ...scope, floating, defaultConversation: defaults.conversation, presentation, section, memberIntent, entryToken, bodyVisible: showOriginal, mainService,
     composer: { draftKey: moteEntryDraftKey(scope), sourceKey: composerSource, active: composerActive, reference: readingMain ?? null },
     showOriginalWorkface: () => setLocal(previous => ({ ...previous, owner, original: true })),
     showConversation: showDiscussion, startRollover, showThreads, showThread, selectReference, heldInput, settleHeldInput,
     selectTab: (tabId: string, groupId: string) => onTabSelect ? onTabSelect(tabId, groupId) : useAppStore.getState().activateTab(workspaceId, groupId, tabId, 'local')
   } : null, [scope, floating, defaults.conversation, presentation, section, memberIntent, entryToken, showOriginal, owner, selectReference, onTabSelect, workspaceId, startRollover,
-    heldInput?.operationId, settleHeldInput, composerSource, composerActive, readingMain])
+    heldInput?.operationId, settleHeldInput, composerSource, composerActive, readingMain, mainService?.hostId, mainService?.agentSessionId, mainService?.runId, mainService?.composerHint])
   const issue = scope?.issue ?? defaults.issue
   const selectedReference = selected?.groupId && selected.tabId && selected.regionId ? {
     displayWorkspaceId: 'displayWorkspaceId' in selected ? selected.displayWorkspaceId : selected.workspaceId,
@@ -252,15 +266,13 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
         sharedFrame?.select('discussion')
       }} /> : null}
       {selectedMain && currentMain && readingMain?.sessionId !== currentMain.sessionId ? <div className="mote-workface__handoff" role="status">主 Agent 已更换，原对话和草稿保留。<button type="button" onClick={showDiscussion}>返回当前主对话</button></div> : null}
-      {entryRecovery.issue && showOriginal && selectedMain && readingMain?.hostId === currentMain?.hostId && readingMain?.sessionId === currentMain?.sessionId ? <section role="status" className="mote-main-recovery" data-mote-main-recovery>
-        <p>{entryRecovery.issue}</p><div className="mote-main-recovery__actions">
-          {entryRecovery.status !== 'unavailable' ? <button type="button" className="small-button" onClick={entryRecovery.inspect}>核对原恢复</button> : null}
-          <button type="button" className={entryRecovery.status === 'unavailable' ? 'primary-button' : 'small-button'} onClick={showNewRound}>开始新一轮</button>
-          <button type="button" className="small-button" onClick={event => openSettings(event.currentTarget)}>更换主 Agent…</button>
-        </div></section> : null}
+      {service ? <div className="mote-main-service" data-mote-main-service>
+        <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: service.title, mode: service.mode, restore: service.restore } }}
+          actions={service.action ? <button type="button" className="small-button" onClick={service.action === 'inspect' ? entryRecovery.inspect : service.action === 'settings' ? event => openSettings(event.currentTarget) : showNewRound}>{service.label}</button> : undefined} />
+      </div> : null}
       {scope && (floating ? floatingActionsHost : sharedFrame?.actionsHost) ? createPortal(<>
         {!floating && visible ? conversations : null}
-        <MoteMainActions scope={scope} active={visible && section === 'discussion' && showOriginal && (!sharedFrame || sharedFrame.section === 'discussion')} entryToken={entryToken} presentation="menu" onConfigure={openSettings} onCreated={openMain} onStartNew={showNewRound} onOpenCreated={created => { showThread(created) }} onOpenWorkspace={() => setLocal(previous => ({ ...previous, owner, original: true }))} onRefresh={dialogue?.refresh} />
+        <MoteMainActions scope={scope} active={visible && section === 'discussion' && showOriginal && (!sharedFrame || sharedFrame.section === 'discussion')} entryToken={entryToken} presentation="menu" onConfigure={openSettings} onCreated={openMain} onStartNew={showNewRound} onOpenCreated={created => { showThread(created) }} onOpenWorkspace={() => setLocal(previous => ({ ...previous, owner, original: true }))} onRefresh={dialogue?.refresh} onPending={reportPending} />
       </>, (floating ? floatingActionsHost : sharedFrame?.actionsHost)!) : null}
       {scope && entry === 'reading' ? <MoteEntryReading scope={scope} active={visible} held={entryHold.held} onHold={entryHold.hold} onRelease={entryHold.release} /> : null}
       {scope && entry === 'current' && currentMain ? <p role="status" className="mote-conversation__issue">{scope.topic.title} 已有当前主对话，原对话和草稿都在。{entryHold.held ? '读取中写下的那条消息会在打开主对话后发出。' : null}<button type="button" className="small-button" onClick={() => openMain(currentMain)}>打开当前主对话</button></p> : null}

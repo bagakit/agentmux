@@ -1,5 +1,6 @@
 import { LocalRetainedInputs } from './LocalRetainedInputs'
 import { SessionRecordDetails } from './SessionRecordDetails'
+import { MoteWorkfaceContext } from '../lib/mote-workface'
 import { useMoteDialogueView } from '../lib/mote-dialogue-view'
 import { MoteInputReceipt } from './MoteInputReceipt'
 import { moteInputSource } from '../lib/mote-input-source'
@@ -14,7 +15,7 @@ import { useConversationReactions } from '../lib/conversation-reactions'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { ConversationMessageAvatar } from './ConversationMessageAvatar'
 import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
-import { cloneElement, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type ReactElement, type ComponentProps, type RefObject } from 'react'
+import { cloneElement, useContext, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type ReactElement, type ComponentProps, type RefObject } from 'react'
 import { agentRegionExecution, useAppStore, currentCoreSpatialGraph } from '../store'
 import type { AgentDerivedAction } from '@agentmux/core/agent-derived-actions'
 import { sessionNameMetadataFor } from '../lib/session-name-metadata'
@@ -306,6 +307,7 @@ export function SessionPane({
   const moteOwner = useMoteConversationOwner(linkOrigin.workspaceId, linkOrigin.tabId,
     visible || presentations.some(target => target.visible !== false))
   const moteDialogue = useMoteDialogueView()
+  const moteWorkface = useContext(MoteWorkfaceContext)
   const mainSources = useMemo(() => {
     const page = moteDialogue?.page, current = page?.main.current
     return new Set([...(current ? [JSON.stringify([current.hostId, current.sessionId])] : []),
@@ -1242,7 +1244,10 @@ export function SessionPane({
     ...(fileContext.kind !== 'unconfirmed' && fileContext.kind !== 'unassigned' ? { openWorkspaceFile: openProjectFile } : {}),
     readPastedImage, readHistoryResource, openHttpLink: onProseLinkClick,
     ...(hasAgentComposer ? { onSelectAnnotation: selectAnnotation } : {}), describeSpeaker,
-    moteConversation: moteOwner !== null, renderMessageActions,
+    moteConversation: moteOwner !== null,
+    moteMainService: Boolean(moteWorkface?.mainService && moteWorkface.bodyVisible && moteWorkface.section === 'discussion' &&
+      session.kind === 'agent' && moteWorkface.mainService.hostId === session.control.hostId && moteWorkface.mainService.agentSessionId === session.control.agentSessionId &&
+      moteWorkface.mainService.runId === session.control.run.runId), renderMessageActions,
     ...(session.kind === 'agent' ? { renderRecordActions: renderConversationLandmarkAction,
       renderReadingTools: (active: boolean) => <ConversationLandmarkList reference={session.control} active={active} reveal={reference => revealConversationItem(reference)}/> } : {}),
     ...(hasAgentComposer ? { questionReplyRoute: session.capabilities.asyncQuestionReply,

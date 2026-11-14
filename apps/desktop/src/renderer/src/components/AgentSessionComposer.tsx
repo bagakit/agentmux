@@ -488,7 +488,9 @@ export function AgentSessionComposer({
         {...(!source && session?.hostId === 'local' ? { onCapture: attachments.capture } : {})} runAction={feedback.run} />}
       value={text}
       disabled={!submitMode.canType}
-      placeholder={nativeQueuePending ? 'Message the Agent; the request stays open…' : submitMode.placeholder}
+      placeholder={nativeQueuePending ? 'Message the Agent; the request stays open…' : moteWorkface?.mainService && session?.kind === 'agent' &&
+        moteWorkface.mainService.hostId === session.control.hostId && moteWorkface.mainService.agentSessionId === session.control.agentSessionId &&
+        moteWorkface.mainService.runId === session.control.run.runId ? moteWorkface.mainService.composerHint : submitMode.placeholder}
       primaryAction={submitMode.primaryAction}
       {...(requestPending && !nativeQueuePending ? { submitLabel: SEND_AFTER_REQUEST_ENDS } : {})}
       onHistoryRecall={historyRecall}

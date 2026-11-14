@@ -169,7 +169,7 @@ export function MoteConversationStart({ scope, active, mode, onConfigure, onOpen
         {state.reading?.preferences.status === 'ready' && !state.reading.executor && (mode === 'new' || !state.reading.dialogue.main.current)
           ? <> <button type="button" className="small-button" onClick={event => onConfigure(event.currentTarget)}>配置 Agent</button></> : null}
       </p>}{notice && <p role="status">{notice}</p>}{persistenceIssue && <p role="status">{persistenceIssue}</p>}
-        {automatic && <div role="status">{automatic.decision.policy.kind === 'executor-change' ? '正在用新选择的 Executor 承接本次输入。' : '正在按此 Mote 的空闲策略承接原输入。'}<details><summary>本次输入</summary><p>{automatic.query.prompt}</p></details></div>}
+        {automatic && <div role="status">{automatic.decision.policy.kind === 'executor-change' ? '这条新问题将由所选 Agent 承接。' : automatic.decision.policy.kind === 'continuity-unavailable' ? '保存的接续策略为这条新问题选择新对话；旧消息留在原处。' : '这条新问题按保存的空闲策略接续；旧消息留在原处。'}<details><summary>这条新问题</summary><p>{automatic.query.prompt}</p></details></div>}
         {mode !== 'new' && state.reading?.dialogue.main.current && <p role="status">已有当前主对话，这里不会另建主 Agent；草稿保留，可从「对话选项」返回当前主对话。</p>}
         {state.busy && !(sent && sent.key === key) && <p role="status">正在接通这次对话…</p>}
         <details><summary>{state.pending.length ? '原开始请求待核对' : '对话选项'}</summary>
