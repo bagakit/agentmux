@@ -85,3 +85,32 @@ it('label: missing reports lookup rather than installation, retaining distinct c
     cause: { code: 'EXECUTABLE_NOT_FILE', message: 'Directory' } } } as never)).toBe('Not available')
   expect(executorDetectionLabel({ state: 'error', detail: 'EIO' })).toBe('Check failed')
 })
+
+it('host: Remove uses the selected registration generation, refreshes current facts and never offers deletion of defaults', async () => {
+  const host = config.hosts[0]!
+  const base = { executorId: 'original-registered', label: 'Original registered command', providerId: 'codex', command: '/private/command', configRevision: 'original-content-digest', availability: 'unknown' as const }
+  const registered = { ...base, source: 'registered' as const, registrationRevision: 'original-publication' }
+  const defaults = { ...base, executorId: 'provider-default', label: 'Provider default', source: 'provider-default' as const }
+  useAppStore.setState({ hostExecutorInventories: { [host.id]: { state: 'ready', input: host, result: { routeHostId: host.id, runtimeId: 'original-runtime', executors: [registered, defaults] } } } })
+  const remove = vi.spyOn(api.executors, 'unregister').mockRejectedValueOnce(new Error('Original Session still depends on this registration'))
+    .mockResolvedValue({ routeHostId: host.id, runtimeId: 'original-runtime', executorId: registered.executorId, removedRegistration: true, registrationRevision: registered.registrationRevision, effectiveExecutor: null })
+  await dom.render(<HostExecutorSettings config={config} active />)
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-resource-row="original-registered"]')!.click())
+  const button = () => [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === 'Remove registration')!
+  expect(button()).toBeTruthy()
+  await act(async () => button().click())
+  expect(dom.container.querySelector('[role="alert"]')!.textContent).toContain('Original Session still depends')
+  expect(useAppStore.getState().discoverHostExecutors).not.toHaveBeenCalled()
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-resource-row="provider-default"]')!.click())
+  expect(button()).toBeUndefined(); expect(dom.container.querySelector('[role="alert"]')).toBeNull()
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-resource-row="original-registered"]')!.click())
+  expect(dom.container.querySelector('[role="alert"]')!.textContent).toContain('Original Session still depends')
+  await act(async () => button().click())
+  expect(remove).toHaveBeenCalledWith({ hostId: host.id, executorId: registered.executorId, expectedRegistrationRevision: registered.registrationRevision })
+  expect(useAppStore.getState().discoverHostExecutors).toHaveBeenCalledWith(host.id)
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-resource-row="provider-default"]')!.click())
+  expect(button()).toBeUndefined()
+  expect(dom.container.querySelector('[role="alert"]')).toBeNull()
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-resource-row="original-registered"]')!.click())
+  expect(dom.container.querySelector('[role="alert"]')).toBeNull() // A confirmed later removal superseded the original refusal.
+})
