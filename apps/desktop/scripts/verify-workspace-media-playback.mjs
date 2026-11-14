@@ -23,7 +23,7 @@ const receiptOnly = process.argv.includes('--receipt')
 // Every file whose change can alter playback or a captured frame, so a review is never reused across them.
 const sourceFiles = ['apps/desktop/src/main/workspace-media-streams.ts', 'apps/desktop/src/main/workspace-files.ts', 'apps/desktop/src/main/preview-paths.ts',
   'apps/desktop/src/preload/index.ts', 'apps/desktop/src/renderer/index.html',
-  'packages/editor-extensions/src/ui/MediaPlayer.tsx', 'apps/desktop/src/renderer/src/components/FilePreviewPane.tsx',
+  'packages/editor-extensions/src/ui/MediaPlayer.tsx', 'packages/editor-extensions/src/ui/MediaTimeline.tsx', 'apps/desktop/src/renderer/src/components/FilePreviewPane.tsx',
   'apps/desktop/src/renderer/src/components/file-preview/PlaylistFilePreview.tsx', 'packages/editor-extensions/src/engines/media-player.ts',
   'apps/desktop/src/renderer/src/lib/use-workspace-media-stream.ts', 'packages/editor-extensions/src/styles/media-player.css', 'packages/editor-extensions/src/styles/preview-common.css', 'packages/editor-extensions/src/format-file-bytes.ts',
   'apps/desktop/src/renderer/src/styles/tokens.css', 'apps/desktop/src/shared/workspace-file-preview.ts', 'packages/editor-extensions/src/catalog.ts',
@@ -52,6 +52,17 @@ if (receiptOnly) {
   const verdict = JSON.parse(await readFile(review, 'utf8'))
   assert.equal(verdict.mustFix?.length ?? 1, 0, 'Independent image review has no must-fix items')
   assert.deepEqual([...verdict.reviewed].sort(), receipt.frames.map(frame => frame.sha256).sort(), 'The review covers exactly these frames')
+  const checks = receipt.processes[0].render.checks
+  for (const key of ['previewVisibility', 'previewCrossing', 'previewWindows', 'previewPositions', 'previewCentre', 'previewReturn', 'previewRelease', 'previewMainUnchanged',
+    'previewBytes', 'previewStatus', 'previewFirst', 'previewEdge', 'previewSweep', 'sweepMain', 'previewIdleRelease', 'drag', 'pressAccuracy', 'previewReduced',
+    'previewShort', 'previewTooShort', 'previewNarrow', 'hlsDrag', 'frameCallbacks']) assert.ok(checks[key] !== undefined, 'The capture recorded ' + key)
+  assert.equal(checks.previewPositions.length, 3, 'Three pointed positions were measured')
+  assert.ok(checks.previewPositions.every(position => position.requests.length > 0 && position.presented), 'Every pointed position has its own reads and a frame callback record')
+  assert.ok(checks.frameCallbacks.length > 0, 'Frame callback records were taken')
+  assert.ok(checks.sweepMain.longTaskControl.some(ms => ms >= 50), 'The long-task watch recorded its deliberate task')
+  assert.deepEqual(checks.drag.pauseAnnounced, ['Paused'], 'Since the drag began, the announcement watch heard only a pause outside it')
+  for (const name of ['preview-first-dark', 'preview-mid-dark', 'preview-edge-dark', 'preview-narrow-dark', 'preview-short-dark', 'preview-too-short-dark', 'drag-held-dark', 'preview-reduced-dark'])
+    assert.ok(receipt.frames.some(frame => frame.name === name), 'The capture includes frame ' + name)
   console.log(JSON.stringify({ passed: true, frames: receipt.frames.length, checks: receipt.processes[0].render.checks }))
   process.exit(0)
 }
@@ -91,7 +102,7 @@ try {
     runtimeRoot: join(privateRoot, 'runtime'), readyFile: join(privateRoot, 'ready.json') })
   for (const directory of [env.HOME, env.TMPDIR, join(profile, 'app-data')]) await mkdir(directory, { recursive: true })
   for (const phase of ['capture', 'restart']) {
-    const lines = [], outcome = await runProbeProcess(require('electron'), [main, join(outDir, 'index.html'), profile, evidence, phase, nativeModule, workspace, process.execPath], { temporaryRoot: privateRoot, cwd: repository, env, timeoutMs: 240000, onLine: line => lines.push(line) })
+    const lines = [], outcome = await runProbeProcess(require('electron'), [main, join(outDir, 'index.html'), profile, evidence, phase, nativeModule, workspace, process.execPath], { temporaryRoot: privateRoot, cwd: repository, env, timeoutMs: 480000, onLine: line => lines.push(line) })
     await writeFile(join(evidence, phase + '-process.log'), lines.join('\n'))
     const render = JSON.parse(await readFile(join(evidence, phase + '-render.json'), 'utf8'))
     result.processes.push({ phase, outcome, render: { ...render, requests: undefined, requestCount: render.requests.length } })
