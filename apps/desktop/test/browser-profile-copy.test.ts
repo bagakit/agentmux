@@ -100,7 +100,7 @@ describe('copying saved Profile settings into a new identity', () => {
       expect(() => parseBrowserProfileControlPayload(value, ['operation'])).toThrow()
     }
     const receipt = { operationId: request.operationId, actor: profileCreationTestActor, action: request.operation, requestDigest: 'sha256:' + 'a'.repeat(64), createdId: 'new-id', createdKind: 'profile' as const, committedAt: 2, source: { profileId: request.profileId, expectedRevision: request.expectedRevision } }
-    const copied = { operation: request.operation, revision: 4, creation: { operationId: request.operationId, receipt, current: { state: 'present' as const, createdId: 'new-id' }, durability: 'confirmed' as const } }
+    const copied = { operation: request.operation, revision: 4, creation: { operationId: request.operationId, receipt, current: { state: 'present' as const, createdId: 'new-id' }, durability: 'confirmed' as const, confirmation: 'original-write' as const } }
     expect(parseBrowserProfileControlResult(request.operation, { revision: 4, creation: copied.creation })).toMatchObject({ creation: { receipt: { createdId: 'new-id' } } })
     expect(() => assertBrowserProfileControlTarget(request, copied)).not.toThrow()
     for (const changed of [{ ...receipt, source: { ...receipt.source, profileId: 'wrong-source' } }, { ...receipt, createdId: request.profileId }, { ...receipt, source: { ...receipt.source, expectedRevision: 'later-source' } }]) {

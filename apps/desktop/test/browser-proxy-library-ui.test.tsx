@@ -3,12 +3,14 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BrowserProxyAsset } from '@agentmux/core/control'
-const port = vi.hoisted(() => ({ saveProxy: vi.fn(), deleteProxy: vi.fn(), assignProxy: vi.fn(), flush: vi.fn() }))
+const port = vi.hoisted(() => ({ saveProxy: vi.fn(), confirm: vi.fn(), loseReply: false, deleteProxy: vi.fn(), assignProxy: vi.fn(), flush: vi.fn() }))
 vi.mock('../src/renderer/src/lib/api', () => ({ api: { browser: { ...port,
-  createProfileIdentity: async (input: any) => { const saved = await port.saveProxy(input.edit); (port as any).createdProxy = saved.proxy; return { revision: saved.revision, creation: { operationId: input.operationId, receipt: { createdId: saved.proxy.id }, current: { state: 'present' }, durability: 'confirmed' } } },
-  inspectProfileCreation: async (operationId: string) => ({ revision: 4, creation: { operationId, receipt: (port as any).createdProxy ? { createdId: (port as any).createdProxy.id } : null, current: { state: 'present' } } }),
+  createProfileIdentity: async (input: any) => { const saved = await port.saveProxy(input.edit); (port as any).createdProxy = saved.proxy; if (port.loseReply) throw new Error('Injected lost creation reply'); return { revision: saved.revision, creation: { operationId: input.operationId, receipt: { createdId: saved.proxy.id }, current: { state: 'present' }, durability: 'confirmed' } } },
+  inspectProfileCreation: async (operationId: string) => ({ revision: 4, creation: { operationId, receipt: (port as any).createdProxy ? { createdId: (port as any).createdProxy.id } : null, current: { state: 'present' }, durability: 'unconfirmed', confirmation: 'observation' } }),
+  confirmProfileCreation: (input: any) => port.confirm(input),
   readProfiles: async () => ({ revision: 4, proxies: [(port as any).createdProxy] })
 }, ui: { requestStorageFlush: port.flush } } }))
+import { BrowserProfilePendingCreations } from '../src/renderer/src/components/settings/BrowserProfilePendingCreations'
 import { BrowserProxyLibrary } from '../src/renderer/src/components/settings/BrowserProxyLibrary'
 import { browserProxyDrafts } from '../src/renderer/src/lib/browser-proxy-drafts'
 import { DESKTOP_FRAGMENT_KEYS } from '../src/renderer/src/lib/desktop-user-fragments'
@@ -18,12 +20,14 @@ const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = n
 let root: Root, container: HTMLDivElement
 const field = (label: string) => container.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(`[aria-label="${label}"]`)!
 const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === label)!
-async function render(assets = [a, b]) { await act(async () => root.render(createElement(BrowserProxyLibrary, { assets, active: true }))) }
+async function render(assets = [a, b]) { await act(async () => root.render(createElement('div', null, createElement(BrowserProfilePendingCreations), createElement(BrowserProxyLibrary, { assets, active: true })))) }
 async function input(label: string, text: string) { await act(async () => { const element = field(label), prototype = element.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : element.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(element, text); element.dispatchEvent(new Event(element.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })) }) }
 async function click(label: string) { expect(button(label), label).toBeDefined(); await act(async () => button(label).click()) }
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); localStorage.clear(); vi.resetAllMocks()
   ;(port as any).createdProxy = undefined
+  port.loseReply = false
+  port.confirm.mockImplementation(async (input: any) => { if (!(port as any).createdProxy) throw new Error('No original receipt observed'); return { revision: 4, creation: { operationId: input.operationId, receipt: { createdId: (port as any).createdProxy.id }, current: { state: 'present' }, durability: 'confirmed', confirmation: 'current-metadata-sync' } } })
   port.flush.mockResolvedValue(undefined)
   port.saveProxy.mockImplementation(async (edit, id) => ({ proxy: { ...edit, id: id ?? 'new-asset', revision: 'saved-v2' }, revision: 4 }))
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
@@ -105,5 +109,34 @@ describe('original proxy library editor and Desktop draft owner', () => {
     expect(JSON.parse(localStorage.getItem(DESKTOP_FRAGMENT_KEYS.browserProfileCreations)!)['browser.profile.proxy.create'].operationId).toBeTruthy()
     await click('Save proxy')
     expect(port.saveProxy).toHaveBeenCalledTimes(1); expect(field('Saved proxy asset').value).toBe('new-asset')
+    expect(JSON.parse(localStorage.getItem(DESKTOP_FRAGMENT_KEYS.browserProfileCreations)!)['browser.profile.proxy.create']).toBeTruthy()
+    await click('Confirm creation')
+    expect(JSON.parse(localStorage.getItem(DESKTOP_FRAGMENT_KEYS.browserProfileCreations)!)).toEqual({})
+  })
+  it('keeps confirmation unavailable while the original creation is in flight, then enables it after the lost reply is observed', async () => {
+    await render(); await input('Proxy asset name', 'Original in-flight proxy'); await input('Proxy asset server', a.server)
+    const saving = deferred<{ proxy: BrowserProxyAsset; revision: number }>()
+    port.saveProxy.mockImplementationOnce(() => saving.promise); port.loseReply = true
+    await click('Save proxy')
+    expect(button('Confirm creation').disabled).toBe(true)
+    await click('Confirm creation'); expect(port.confirm).not.toHaveBeenCalled()
+    await act(async () => saving.resolve({ proxy: { ...a, id: 'in-flight-original' }, revision: 4 }))
+    expect(button('Confirm creation').disabled).toBe(false)
+    await click('Confirm creation')
+    expect(port.saveProxy).toHaveBeenCalledTimes(1); expect(port.confirm).toHaveBeenCalledTimes(1)
+  })
+  it('keeps the full original request after a read-only unknown recovery and confirms only that request without consuming newer input', async () => {
+    await render(); await input('Proxy asset name', 'Original submitted proxy'); await input('Proxy asset server', a.server)
+    port.loseReply = true
+    await click('Save proxy')
+    const original = JSON.parse(localStorage.getItem(DESKTOP_FRAGMENT_KEYS.browserProfileCreations)!)['browser.profile.proxy.create']
+    expect(original.edit.label).toBe('Original submitted proxy')
+    expect(port.saveProxy).toHaveBeenCalledTimes(1)
+    await input('Proxy asset name', 'Keep newer name input')
+    await click('Confirm creation')
+    expect(port.confirm).toHaveBeenCalledExactlyOnceWith(original)
+    expect(port.saveProxy).toHaveBeenCalledTimes(1)
+    expect(field('Proxy asset name').value).toBe('Keep newer name input')
+    expect(JSON.parse(localStorage.getItem(DESKTOP_FRAGMENT_KEYS.browserProfileCreations)!)).toEqual({})
   })
 })

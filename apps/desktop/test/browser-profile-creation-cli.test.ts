@@ -7,7 +7,7 @@ import { createRequire } from 'node:module'
 const { build } = createRequire(new URL('../../host/package.json', import.meta.url))('esbuild')
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 
-const fault = vi.hoisted(() => ({ path: '', phase: 'none' as 'none' | 'before-replace' | 'after-replace' }))
+const fault = vi.hoisted(() => ({ path: '', phase: 'none' as 'none' | 'before-replace' | 'after-replace' | 'replace-during-confirm' }))
 vi.mock('node:fs/promises', async original => {
   const fs = await original<typeof import('node:fs/promises')>()
   return { ...fs, open: async (path: any, ...args: any[]) => {
@@ -17,6 +17,10 @@ vi.mock('node:fs/promises', async original => {
     const handle = await (fs.open as any)(path, ...args)
     if (fault.phase === 'after-replace' && String(path) === dirname(fault.path) && args[0] === 'r') {
       fault.phase = 'none'; handle.sync = async () => { throw new Error('Injected after-replace directory ACK failure') }
+    }
+    if (fault.phase === 'replace-during-confirm' && String(path) === dirname(fault.path) && args[0] === 'r') {
+      fault.phase = 'none'; const sync = handle.sync.bind(handle)
+      handle.sync = async () => { const bytes = await fs.readFile(fault.path); await fs.writeFile(fault.path + '.swap', bytes); await fs.rename(fault.path + '.swap', fault.path); await sync() }
     }
     return handle
   } }
@@ -141,6 +145,30 @@ describe('Profile creation original identity transactions', () => {
     facts.push({ scenario: 'before-after-replace', operationId: request.operationId, createdId: inspection.receipt!.createdId, beforeReplaceUnchanged: true, afterReplaceUnconfirmed: true, repeatPreservedBytes: true })
   })
 
+  it('explicit confirmation never creates a missing identity and refuses a same-bytes file replacement during synchronization', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'amux-profile-creation-confirm-')); cleanup.push(() => rm(root, { recursive: true, force: true }))
+    const path = join(root, 'browser-profiles.json'), store = new BrowserProfileStore(path)
+    await store.list()
+    const request = { operation: 'browser.profile.create' as const, operationId: 'confirm-original', label: 'Confirm the original' }
+    const initial = await readFile(path)
+    await expect(store.confirmIdentity(request, actor)).rejects.toMatchObject({ code: 'BROWSER_PROFILE_CREATION_NOT_OBSERVED' })
+    expect(await readFile(path)).toEqual(initial)
+    const created = await store.createIdentity(request, actor), before = await readFile(path)
+    fault.path = path; fault.phase = 'after-replace'
+    await expect(store.confirmIdentity(request, actor)).rejects.toMatchObject({ code: 'BROWSER_PROFILE_CREATION_UNCONFIRMED' })
+    expect(await readFile(path)).toEqual(before)
+    fault.phase = 'replace-during-confirm'
+    await expect(store.confirmIdentity(request, actor)).rejects.toThrow('witness changed')
+    expect(await readFile(path)).toEqual(before)
+    const confirmed = await store.confirmIdentity(request, actor)
+    expect(confirmed.creation).toMatchObject({ receipt: created.creation.receipt, durability: 'confirmed', confirmation: 'current-metadata-sync' })
+    expect(confirmed.snapshot.revision).toBe(created.snapshot.revision)
+    expect(await readFile(path)).toEqual(before)
+    expect((await store.inspectCreation(request.operationId, actor)).confirmation).toBe('observation')
+    facts.push({ scenario: 'explicit-current-metadata-confirmation', operationId: request.operationId, createdId: created.creation.receipt!.createdId,
+      missingReceiptCreatedNothing: true, directoryFailureRetainedBytes: true, sameBytesDifferentInodeRefused: true, confirmedWithoutMetadataWriteOrRevisionAdvance: true })
+  })
+
   it('a real original-owner process reopens the same receipt after rename/removal and same-label concurrent creation', async () => {
     const root = await mkdtemp(join(tmpdir(), 'amux-profile-creation-process-')); cleanup.push(() => rm(root, { recursive: true, force: true }))
     const path = join(root, 'browser-profiles.json'), bundle = join(root, 'original-owner.mjs')
@@ -207,8 +235,9 @@ describe('Profile creation original identity transactions', () => {
         writeWorkbenchState:value=>nativeDocument.write(value)},()=>storage);
       const submit=createProfileCreationClient({createProfileIdentity:async input=>{created++;const result=await store.createIdentity(input,actor);
           if(mode==='lost')throw new Error('Injected lost original reply');return {revision:result.snapshot.revision,creation:result.creation}},
-        inspectProfileCreation:async operationId=>{if(mode==='lost')throw new Error('Injected unavailable reader');return {revision:(await store.list()).revision,creation:await store.inspectCreation(operationId,actor)}}},owner);
-      let result,error;try{result=await submit({operation:'browser.profile.create',label})}catch(cause){error=cause.message}
+        inspectProfileCreation:async operationId=>{if(mode==='lost')throw new Error('Injected unavailable reader');return {revision:(await store.list()).revision,creation:await store.inspectCreation(operationId,actor)}},
+        confirmProfileCreation:async input=>{const result=await store.confirmIdentity(input,actor);return {revision:result.snapshot.revision,creation:result.creation}}},owner);
+      let result,error;try{result=mode==='confirm' ? await submit.confirm('browser.profile.create') : await submit({operation:'browser.profile.create',label})}catch(cause){error=cause.message}
       process.stdout.write(JSON.stringify({result,error,created,document:JSON.parse(await readFile(document,'utf8')),profiles:(await store.list()).profiles}));
     ` }, outfile: bundle, bundle: true, platform: 'node', format: 'esm', packages: 'external', define: { __AGENTMUX_WEB_PREVIEW__: 'false' },
       plugins: [{ name: 'original-client-host-ports', setup(builder: any) {
@@ -228,12 +257,19 @@ describe('Profile creation original identity transactions', () => {
     expect(next.result.creation.operationId).toBe(pending.operationId)
     expect(next.profiles).toHaveLength(2)
     expect(next.document.state).toEqual({ originalDraft: 'retained later input' })
-    expect(JSON.parse(next.document.desktopFragments.browserProfileCreations)).toEqual({})
+    expect(JSON.parse(next.document.desktopFragments.browserProfileCreations)['browser.profile.create']).toEqual(pending)
+    const metadataBeforeConfirmation = await readFile(metadata)
+    const confirmed = await run('confirm')
+    expect(confirmed.created).toBe(0)
+    expect(confirmed.result.creation).toMatchObject({ durability: 'confirmed', confirmation: 'current-metadata-sync', receipt: { createdId: next.result.creation.receipt.createdId } })
+    expect(await readFile(metadata)).toEqual(metadataBeforeConfirmation)
+    expect(JSON.parse(confirmed.document.desktopFragments.browserProfileCreations)).toEqual({})
     // A different later draft does not get cleared or adopted as the older creation's payload.
     const again = await run('lost', 'Earlier proxy-free input')
     const later = await run('reopen', 'Keep later name input')
     expect(later.created).toBe(0); expect(later.error).toContain('Your later input is retained')
     expect(later.profiles).toHaveLength(3)
+    expect(JSON.parse(later.document.desktopFragments.browserProfileCreations)['browser.profile.create'].label).toBe('Earlier proxy-free input')
     expect(again.created).toBe(1)
     facts.push({ scenario: 'real-client-document-process-reopen', operationId: pending.operationId, createdId: next.result.creation.receipt.createdId, reopenedCreatedCalls: next.created, originalDraftPreserved: true, laterDifferentDraftNotConsumed: true })
   })

@@ -50,7 +50,7 @@ describe('browser profile built CLI reaches the public Control owner', () => {
             profiles = [...profiles, created]; revision += 1
             return { operation: request.operation, revision, creation: { operationId: request.operationId,
               receipt: { operationId: request.operationId, actor: nameContext!.actor as never, action: request.operation, requestDigest: 'sha256:' + 'a'.repeat(64), createdId: created.id, createdKind: 'profile', committedAt: 9 },
-              current: { state: 'present', createdId: created.id }, durability: 'confirmed' } }
+              current: { state: 'present', createdId: created.id }, durability: 'confirmed', confirmation: 'original-write' } }
           }
           case 'browser.profile.update': {
             if (request.expectedRevision !== find(request.profileId).revision) throw new AgentMuxError(`Browser Profiles changed since revision was read; current revision is ${revision}.`, 'BROWSER_PROFILE_REVISION_CONFLICT')
