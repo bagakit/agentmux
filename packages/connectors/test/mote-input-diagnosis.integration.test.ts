@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest'
 import { AgentMuxError, type AgentMuxStoredAgentSession, type AgentProviderInputInitialization } from '@agentmux/core'
 import { DEFAULT_AGENT_CONTINUITY_POLICY } from '../../core/src/agent-session-recovery/continuity-contract.js'
-import { moteChatDiagnosisKey } from '@agentmux/core/mote-chat'
+import { moteChatDiagnosisKey, moteChatInputFailureCode } from '@agentmux/core/mote-chat'
 import { nativeInputCorrelationKey } from '../../core/src/native-input-correlation.js'
 import { MoteChatStore } from '../src/mote-chat-store.js'
 import { moteChatJourneyFixture as fixture } from './fixtures/mote-chat-journey.js'
@@ -15,9 +15,14 @@ it('projects an actual original Core initialization wait through public RPC and 
   const rejoin = vi.spyOn(f.client, 'rejoinAgentInputWaiting')
   expect(await f.wire.post(f.message('original-initialization'))).toBe(202)
   const record = await f.claimed('original-initialization'), key = moteChatDiagnosisKey(f.target, record.ingressId)
-  await vi.waitFor(async () => expect((await f.services.ingress!.inspect({ ingressId: record.ingressId })).inputReceipt)
-    .toMatchObject({ status: 'waiting', control: { waiting: { phase: 'service', observation: { phase: 'native-initialization' },
-      failure: { code: 'AGENT_INITIAL_INPUT_UNCONFIRMED' }, initialization } } }))
+  await vi.waitFor(async () => {
+    const receipt = (await f.services.ingress!.inspect({ ingressId: record.ingressId })).inputReceipt, waiting = receipt?.control.waiting
+    expect(receipt, JSON.stringify({ status: receipt?.status, phase: waiting?.phase, reason: waiting?.reason,
+      observationPhase: waiting && 'observation' in waiting ? waiting.observation?.phase : null,
+      failureCode: receipt ? moteChatInputFailureCode(receipt) : null, initializationReads: observed.mock.calls.length }))
+      .toMatchObject({ status: 'waiting', control: { waiting: { phase: 'service', observation: { phase: 'native-initialization' },
+        failure: { code: 'AGENT_INITIAL_INPUT_UNCONFIRMED' }, initialization } } })
+  }, { timeout: 5_000 })
   const store = new MoteChatStore(f.services.database!), admission = store.admissionByIngress(record.ingressId), configuration = store.configuration(f.target.spaceId)
   const people = store.people(f.target.spaceId, '', 5)
   expect(people.length).toBeGreaterThan(0)
