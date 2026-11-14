@@ -61,7 +61,7 @@ export class ContinuousProgressLoopManager {
   private readonly maintenanceChecks = new Set<Promise<{ owner: MaintenanceSourceOwner; error: unknown } | null>>()
   private maintenanceController: AbortController | undefined
   /** In memory only: a restarted Host asks every source again. */
-  private readonly deferredMaintenance = new Map<string, { until: number; waitMs: number }>()
+  private readonly deferredChecks = new Map<string, { until: number; waitMs: number }>()
   setMaintenanceOwner(owner: MaintenanceSourceOwner): () => void {
     if (this.maintenanceOwner) throw new Error('The original scheduler already has a maintenance source owner.')
     this.maintenanceOwner = owner
@@ -121,7 +121,6 @@ export class ContinuousProgressLoopManager {
     this.scheduler.restore(loops)
     this.goalLoops.clear()
     for (const loop of loops) this.indexGoalLoop(loop)
-    await this.store.save(this.scheduler.list())
     this.running = true
     if (!this.timer) this.timer = setInterval(() => { void this.check().catch(() => {}) }, 1000)
   }
@@ -477,11 +476,10 @@ export class ContinuousProgressLoopManager {
     catch (error) { decision = { action: 'defer', reason: error instanceof Error ? error.message : String(error) } }
     if (!isCurrent() || owner !== this.maintenanceOwner) return false
     switch (decision.action) {
-      case 'continue': this.deferredMaintenance.delete(loop.loopId); return true
-      case 'pause': this.deferredMaintenance.delete(loop.loopId); await this.pauseForSource(loop, decision); return false
+      case 'continue': return true
+      case 'pause': this.deferredChecks.delete(loop.loopId); await this.pauseForSource(loop, decision); return false
       case 'defer': {
-        const waitMs = Math.min((this.deferredMaintenance.get(loop.loopId)?.waitMs ?? MAINTENANCE_RETRY_MS / 2) * 2, MAINTENANCE_RETRY_LIMIT_MS)
-        this.deferredMaintenance.set(loop.loopId, { until: checkAt + waitMs, waitMs })
+        this.deferCheck(loop.loopId, checkAt)
         const reason = 'This occurrence waits because its maintenance source is unconfirmed; the arrangement stays active and is checked again. ' + decision.reason
         if (this.require(loop.loopId).lastDecision !== reason) { this.patch(loop.loopId, { lastDecision: reason }); await this.persist(loop.loopId) }
         return false
@@ -885,6 +883,25 @@ export class ContinuousProgressLoopManager {
   private saveLoops(): Promise<void> {
     return this.store.save(this.scheduler.list())
   }
+  private deferCheck(loopId: string, now: number): void {
+    const waitMs = Math.min((this.deferredChecks.get(loopId)?.waitMs ?? MAINTENANCE_RETRY_MS / 2) * 2, MAINTENANCE_RETRY_LIMIT_MS)
+    this.deferredChecks.set(loopId, { until: now + waitMs, waitMs })
+  }
+  /** No input crossed the boundary. Keep the due work eligible and retry its actual save. */
+  private async saveBeforeDispatch(loopId: string, checkAt: number, beforePreparation?: ContinuousProgressLoop): Promise<void> {
+    const saving = this.require(loopId)
+    try { await this.saveLoops() }
+    catch (error) {
+      const current = this.require(loopId)
+      if (current.status === 'active' && isDeepStrictEqual(current, saving)) {
+        if (beforePreparation) this.scheduler.replace(loopId, beforePreparation)
+        this.deferCheck(loopId, checkAt)
+        this.patch(loopId, { lastOutcome: 'skipped', lastDecision: 'The original schedule could not save this check before dispatch. It remains due and will be checked again. ' + String(error) })
+        for (const listener of this.listeners) listener(this.require(loopId))
+      }
+      throw error
+    }
+  }
   private persistenceFailed(loopId: string, error: unknown): void {
     const original = this.require(loopId)
     const status = original.managedSource && original.status === 'active' && !original.pendingCompletion ? 'active' : original.taskSource?.kind === 'goal' && original.status === 'stopped' ? 'stopped' : 'paused'
@@ -912,7 +929,7 @@ export class ContinuousProgressLoopManager {
     }
   }
   private async runDue(checkAt: number, now: number | undefined, onlyLoopId?: string): Promise<void> {
-    const pending = this.scheduler.due(checkAt, onlyLoopId, id => !this.checks.has(id)).map(selected => {
+    const pending = this.scheduler.due(checkAt, onlyLoopId, id => !this.checks.has(id) && (this.deferredChecks.get(id)?.until ?? 0) <= checkAt).map(selected => {
       const controller = new AbortController(), target = this.targetKey(selected)
       this.activeDeliveries.set(selected.loopId, controller)
       const previous = this.targetChecks.get(target)
@@ -945,7 +962,7 @@ export class ContinuousProgressLoopManager {
     if (!loop || loop.status !== 'active' || loop.nextCheckAt > checkAt) return
     if (this.adoptingDefinitions.has(loopId) || loop.guidanceAdoptions?.some(value => value.publishedAt !== undefined && value.state !== 'adopted')) return
     const preparingCurrent = () => this.running && !controller.signal.aborted && isDeepStrictEqual(this.scheduler.get(loopId), loop)
-    if (loop.managedSource && ((this.deferredMaintenance.get(loop.loopId)?.until ?? 0) > checkAt || !await this.admitMaintenance(loop, checkAt, controller.signal, preparingCurrent))) return
+    if (loop.managedSource && !await this.admitMaintenance(loop, checkAt, controller.signal, preparingCurrent)) return
     if (!preparingCurrent()) return
     const refreshLatest = () => {
       const current = this.require(loopId)
@@ -971,8 +988,10 @@ export class ContinuousProgressLoopManager {
         if (decision.kind === 'skip' && ['working', 'stale-working', 'user-input-changed', 'interaction-pending'].includes(decision.reason)) {
           if (candidate.lastDecision !== decision.reason || candidate.lastOutcome !== 'skipped' || candidate.nextCheckAt !== loop.nextCheckAt) {
             this.patch(loop.loopId, { lastDecision: decision.reason, lastOutcome: 'skipped', lastTickAt: checkAt })
-            await this.persist(loop.loopId)
+            await this.saveBeforeDispatch(loop.loopId, checkAt)
+            for (const listener of this.listeners) listener(this.require(loop.loopId))
           }
+          this.deferredChecks.delete(loop.loopId)
           return
         }
       }
@@ -982,8 +1001,9 @@ export class ContinuousProgressLoopManager {
     const claim = this.scheduler.claimTick(loop.loopId, checkAt)
     if (!claim) return
     // Claim and persist before invoking provider code. A crash or unknown callback result cannot replay a tick.
-    try { await this.store.save(this.scheduler.list()) }
-    catch (error) {
+    if (isAgentSchedule(claim.loop) && !claim.loop.pendingCompletion) {
+      await this.saveBeforeDispatch(loop.loopId, checkAt)
+    } else try { await this.saveLoops() } catch (error) {
       const status = claim.loop.managedSource && !claim.loop.pendingCompletion ? this.require(claim.loop.loopId).status : 'paused'
       if (status === 'paused') this.pauseWithReason(claim.loop.loopId, 'persistence-unconfirmed')
       this.patch(claim.loop.loopId, { status, lastDecision: `Automatic claim persistence is unconfirmed. Manual input remains available. ${error instanceof Error ? error.message : String(error)}` })
@@ -996,6 +1016,7 @@ export class ContinuousProgressLoopManager {
     let outcome: LoopTickOutcome = pending && claim.loop.lastOutcome === 'unknown' ? 'unknown' : 'skipped'
     let goalContinuation: string | undefined
     let newCheckInClaim = false
+    let preparationSaveFailure: { error: unknown } | undefined
     // Until a pending send is saved and handed to the input owner, a failure proves nothing was
     // sent: the tick is skipped and the next one retries. Afterwards the result stays unknown.
     let dispatched = Boolean(pending)
@@ -1035,7 +1056,7 @@ export class ContinuousProgressLoopManager {
             if (!isCurrent()) break delivery
             const eligibility = decideCheckIn(this.require(claim.loop.loopId), human, checkAt)
             this.patch(claim.loop.loopId, { lastDecision: eligibility.reason, ...(!eligibility.send ? { checkInState: eligibility.state } : {}) })
-            if (!eligibility.send) { await this.persist(claim.loop.loopId); break delivery }
+            if (!eligibility.send) break delivery
             this.patch(claim.loop.loopId, { checkInState: eligibility.state })
             newCheckInClaim = true
           }
@@ -1066,8 +1087,12 @@ export class ContinuousProgressLoopManager {
                 inputKey, futureIntent: pending.futureIntent, definitionOperationId, preparedAt: checkAt,
                 ...(claim.loop.managedSource ? { managedSource: claim.loop.managedSource } : {}) } : undefined
             this.patch(claim.loop.loopId, { pendingCompletion: pending, ...(lastInputRef ? { lastInputRef } : {}) })
-            await this.store.save(this.scheduler.list())
+            if (isAgentSchedule(claim.loop) && !dispatched) {
+              try { await this.saveBeforeDispatch(loopId, checkAt, claim.loop) }
+              catch (error) { preparationSaveFailure = { error }; break delivery }
+            } else await this.saveLoops()
             if (!isCurrent()) break delivery
+            this.deferredChecks.delete(loopId)
             dispatched = true
             outcome = await this.onTick({ ...claim.loop, pendingCompletion: pending }, pending.operationId, isCurrent, controller.signal)
           }
@@ -1077,6 +1102,7 @@ export class ContinuousProgressLoopManager {
       outcome = dispatched && !(error instanceof AutomaticInputNotDispatchedError && claim.loop.lastOutcome !== 'unknown') ? 'unknown' : 'skipped'
       this.patch(claim.loop.loopId, { lastDecision: error instanceof Error ? error.message : String(error) })
     } }
+    if (preparationSaveFailure) throw preparationSaveFailure.error
     const current = this.scheduler.get(claim.loop.loopId)
     if (current) {
       if (outcome === 'unknown') {
@@ -1107,7 +1133,11 @@ export class ContinuousProgressLoopManager {
         this.scheduler.replace(current.loopId, { ...settled, lastOutcome: outcome, ...(outcome === 'sent' && pending ? { lastCompletionId: pending.id } : {}) })
       }
     }
-    await this.persist(claim.loop.loopId)
+    if (isAgentSchedule(claim.loop) && !dispatched && this.require(loopId).status === 'active') {
+      await this.saveBeforeDispatch(loopId, checkAt)
+      this.deferredChecks.delete(loopId)
+      for (const listener of this.listeners) listener(this.require(loopId))
+    } else await this.persist(claim.loop.loopId)
   }
   private cancelDelivery(loopId: string, reason?: Error): void {
     for (const controller of this.activations.get(loopId) ?? []) controller.abort(reason)
