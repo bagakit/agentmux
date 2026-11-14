@@ -85,13 +85,12 @@ export const DEFAULT_NOTIFICATION_SOUND = false
 
 export type NotificationPresentation = 'as-requested' | 'downgraded'
 
-/**
- * The delivery result. `shown` distinguishes "presented in the mode you asked for" from "the platform
- * downgraded it to an ordinary transient banner", so a caller can be honest instead of assuming success.
- */
+/** Native `show` confirms presentation, never user reading. An observation gap is not a refusal. */
 export type NotificationDelivery =
   | { status: 'shown'; presentation: NotificationPresentation }
   | { status: 'unsupported'; reason: string }
+  | { status: 'failed'; reason: string }
+  | { status: 'unknown'; reason: string }
 
 function tierFor(id: NotificationModeId | undefined): NotificationTier {
   return NOTIFICATION_TIERS.find((tier) => tier.id === id)
