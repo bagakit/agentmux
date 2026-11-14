@@ -27,6 +27,7 @@ try {
   assert.equal(candidate.passed, true)
   assert.equal(candidate.sourceCommit, execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim())
   assert.equal(ready.sourceCommit, candidate.sourceCommit)
+  const target = await read('.tmp/agent-locations/before/targets.json')
   for (const [name, file] of Object.entries(ready.records)) {
     assert.equal(typeof file, 'string')
     receipt.evidence[name] = { file, sha256: sha(await readFile(path.resolve(root, file))) }
@@ -39,16 +40,27 @@ try {
   assert.equal(installed.sourceTree, candidate.sourceTree)
   assert.deepEqual(afterApp.main.package, installed)
   assert.notEqual(afterApp.main.pid, beforeApp.main.pid, 'A new UI OS process has not been observed')
-  assert.ok(afterApp.main.renderer.id)
+  const renderer = await record('rendererRelease')
+  assert.ok(renderer.id && renderer.identity && Object.keys(renderer.files).length > 0)
+  assert.equal(afterApp.main.renderer.id, renderer.id)
+  assert.deepEqual(afterApp.main.renderer.identity, renderer.identity)
   const beforeAgent = (await record('agentBefore')).result
   const afterAgent = (await record('agentAfter')).result
   assert.equal(afterAgent.session.agentSessionId, beforeAgent.session.agentSessionId)
   assert.deepEqual(afterAgent.session.run, beforeAgent.session.run)
+  for (const agent of [beforeAgent, afterAgent]) {
+    assert.equal(agent.session.hostId, target.hostId)
+    assert.equal(agent.session.agentSessionId, target.agentSessionId)
+    assert.equal(agent.session.run.runId, target.runId)
+    assert.equal(agent.status.run.runId, target.runId)
+  }
   assert.equal(afterAgent.status.run.state, 'running')
   assert.equal(afterAgent.status.run.pid, beforeAgent.status.run.pid)
   const beforeTab = (await record('tabBefore')).result.catalog
   const afterTab = (await record('tabAfter')).result.catalog
   assert.ok(beforeTab.regions.length > 0 && beforeTab.locations.length > 0)
+  assert.ok(beforeTab.regions.some(region => region.kind === 'agent' && region.agentSessionId === target.agentSessionId && region.runId === target.runId && region.execution?.hostId === target.hostId))
+  assert.ok(beforeTab.regions.some(region => region.kind === 'browser' && region.browserId === target.browserId))
   for (const region of beforeTab.regions) {
     const current = afterTab.regions.find(value => value.tabId === region.tabId && value.regionId === region.regionId)
     assert.ok(current, 'Original Region missing')
@@ -59,6 +71,7 @@ try {
   const mobile = await record('mobilePage')
   assert.equal(mobile.ok, true)
   assert.equal(mobile.result.outcome.kind, 'completed')
+  assert.equal(mobile.result.runOperation.browserId, target.browserId)
   const identity = mobile.result.result.identity
   assert.equal(identity.page.buildId, candidate.mobileRelease.buildId)
   assert.equal(identity.page.namespaceDigest, candidate.mobileRelease.digest)
@@ -66,6 +79,11 @@ try {
   assert.equal(identity.loaded.buildId, identity.page.buildId)
   assert.equal(identity.loaded.namespaceDigest, identity.page.namespaceDigest)
   assert.equal(identity.loaded.producer.documentId, identity.page.documentId)
+  assert.equal(identity.loaded.hostId, target.hostId)
+  assert.equal(identity.loaded.producer.devicePrincipalId, target.devicePrincipalId)
+  assert.equal(identity.inspection.hostId, target.hostId)
+  assert.equal(identity.inspection.client.availability, 'found')
+  assert.deepEqual(identity.inspection.client.target, identity.loaded.producer)
   assert.deepEqual(identity.inspection.client.loaded, identity.loaded)
   assert.equal(identity.inspection.active.digest, identity.page.namespaceDigest)
   const reviewPath = ready.records.visualReview
