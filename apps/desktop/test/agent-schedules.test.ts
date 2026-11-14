@@ -434,7 +434,7 @@ describe('due busy schedule pre-observation', () => {
     await h.manager.call('schedule.pause', { scheduleId: created.schedule.loopId, expectedRevision: 1, operationId: 'pause-original' })
     release.resolve(); await checking
     expect(sent).toBe(0)
-    expect(h.manager.list()[0]).toMatchObject({ loopId: created.schedule.loopId, status: 'paused', nextCheckAt: created.schedule.nextCheckAt, lastDecision: 'Paused by you.' })
+    expect(h.manager.list()[0]).toMatchObject({ loopId: created.schedule.loopId, status: 'paused', nextCheckAt: created.schedule.nextCheckAt, lastDecision: 'Explicitly paused.', pause: { reason: 'manual', episodeId: expect.any(String), pausedAt: created.schedule.nextCheckAt } })
     expect(h.manager.list()[0]!.lastTickId).toBeUndefined()
   })
   it('checks only the requested loop and does not observe or mutate an unrelated due target', async () => {
