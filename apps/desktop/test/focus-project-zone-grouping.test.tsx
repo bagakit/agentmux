@@ -61,12 +61,13 @@ afterEach(async () => {
 it('scans rootless project branches together through actual Focus filters and current/history tracks', async () => {
   const original = useAppStore.getState(), controls = original.sessions.map(session => session.control)
   await act(async () => root.render(createElement(GlobalFocusSurface)))
-  expect(boardRows().map(row => row.dataset.projectKey)).toEqual([projectKey, projectKey, focusProjectKey('local', 'other')])
-  expect(boardRows().map(headingLabels)).toEqual([[repoPath, 'feature/a'], [repoPath, 'feature/b'], ['Other project']])
+  expect(boardRows().map(row => row.dataset.projectKey)).toEqual([projectKey, focusProjectKey('local', 'other')])
+  expect(boardRows().map(headingLabels)).toEqual([[repoPath, 'feature/a', 'feature/b'], ['Other project']])
   const options = await focusFilterOptions(container, 'project')
   expect(options.filter(option => option.value === projectKey)).toHaveLength(1)
   await chooseFocusFilter(container, 'project', projectKey)
-  expect(boardRows()).toHaveLength(2)
+  expect(boardRows()).toHaveLength(1)
+  expect(boardRows()[0]!.querySelectorAll('[data-focus-zone-id] button[data-focus-project-scope-control]')).toHaveLength(2)
   expect([...container.querySelectorAll<HTMLElement>('.focus-context[data-session-id]')].map(row => row.dataset.sessionId)).toEqual(['branch-a', 'branch-b'])
   await act(async () => { useAppStore.getState().focusExecutionSession('branch-a', undefined, { navigate: false }) })
   const state = useAppStore.getState(), entry = state.agentFocus.execution.history[0]!
