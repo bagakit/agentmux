@@ -39,7 +39,7 @@ type Frame = { id?: unknown; method?: string; params?: Record<string, unknown>; 
 type Request = { connection: number; frame: Frame; at: number }
 
 /** Actual Host/headless/LocalRelay/DeviceAuthority; only the original native Runtime I/O is controlled. */
-export async function actualRelayOwner() {
+export async function actualRelayOwner(configuration: { outboundRelay?: { relay: { endpoint: string; useTls: boolean }; publisherToken: string; allowedClientKeys: string[] } } = {}) {
   const original = await rpcOwnerFixture(['caller'], core)
   cleanups.push(original.close)
   roots.push(original.root)
@@ -68,7 +68,7 @@ export async function actualRelayOwner() {
     }
   })
   const native = original.inner.kernel
-  const connect = vi.spyOn(core.AgentMuxClient.prototype, 'connect').mockImplementationOnce(async function () {
+  const connect = vi.spyOn(core.AgentMuxClient.prototype, 'connect').mockImplementationOnce(async function (this: core.AgentMuxClient) {
     const inner = this as unknown as typeof original.inner
     await inner.registry.load('local')
     inner.connected = true
@@ -80,11 +80,11 @@ export async function actualRelayOwner() {
   let inFlight = 0
   const requests: Request[] = []
   const replies: Request[] = []
-  let sendReply: ((frame: Frame, connection: number, send: (frame: unknown) => Promise<void>) => Promise<void>) | undefined
+  let sendReply: ((frame: Frame, connection: number, send: Parameters<core.AgentMuxControlServer['openAuthenticatedFrames']>[0]['send']) => Promise<void>) | undefined
   const authenticated = core.AgentMuxControlServer.prototype.openAuthenticatedFrames
-  vi.spyOn(core.AgentMuxControlServer.prototype, 'openAuthenticatedFrames').mockImplementation(function (options) {
+  vi.spyOn(core.AgentMuxControlServer.prototype, 'openAuthenticatedFrames').mockImplementation(function (this: core.AgentMuxControlServer, options) {
     const connection = ++connections
-    const send = async (frame: unknown) => {
+    const send: Parameters<core.AgentMuxControlServer['openAuthenticatedFrames']>[0]['send'] = async (frame) => {
       replies.push({ connection, frame: frame as Frame, at: performance.now() })
       if (sendReply) await sendReply(frame as Frame, connection, options.send)
       else await options.send(frame)
@@ -96,7 +96,10 @@ export async function actualRelayOwner() {
       try { await port.receive(frame) } finally { inFlight-- }
     } }
   })
+  const outboundRelayConfigurationPath = join(original.root, 'outbound-relay.json')
+  if (configuration.outboundRelay) await writeFile(outboundRelayConfigurationPath, JSON.stringify(configuration.outboundRelay), { mode: 0o600 })
   const host = await startAgentMuxHost({ store: original.store, socketPath: join(original.root, 'host.sock'),
+    ...(configuration.outboundRelay ? { outboundRelayConfigurationPath } : {}),
     desktopSocketPath: join(original.root, 'absent-desktop.sock'), mobileBuildDirectory: assets, mobilePort: 0 })
   connect.mockRestore()
   const journal = Reflect.get(host.client, 'messageQueue') as { messageChanges(): Promise<unknown> }
