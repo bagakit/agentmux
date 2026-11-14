@@ -1,4 +1,5 @@
-import { ConversationImage, useClientUiOwnerDocument, type BrowserSelectionImageInput, type ReadPastedImage } from '@agentmux/client-ui'
+import { useClientUiOwnerDocument } from '@agentmux/client-ui/overlay-host'
+import { ConversationImage, type BrowserSelectionImageInput, type ReadPastedImage } from '@agentmux/client-ui'
 import { useMemo } from 'react'
 import { api } from '../lib/api'
 

@@ -7,7 +7,6 @@ import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { ComposerLayoutToggle, type ComposerToolPhase } from '@agentmux/client-ui/components/ComposerLayoutToggle'
 import { ComposerToolMenu } from '@agentmux/client-ui/components/ComposerToolMenu'
 import * as DropdownMenu from '@agentmux/client-ui/components/HoverDropdownMenu'
-import { useClientUiPlatform } from '@agentmux/client-ui/platform'
 
 export function MobilePosturePicker({ control, disabled, onSet }: {
   control: AgentPostureControl | undefined
@@ -15,7 +14,6 @@ export function MobilePosturePicker({ control, disabled, onSet }: {
   onSet(modeId: string): void
 }) {
   const [open, setOpen] = useState(false)
-  const platform = useClientUiPlatform()
   if (!control) return null
   return <span className="mobile-posture-picker">
     <DropdownMenu.Root open={open && !disabled} onOpenChange={setOpen}>
@@ -26,7 +24,7 @@ export function MobilePosturePicker({ control, disabled, onSet }: {
         onClick={() => setOpen(value => !value)}>
         <SemanticIcon name="status.authorized" size={15} /><span className="composer-tool__label">{control.label}</span>
       </DropdownMenu.Trigger>
-      <DropdownMenu.Portal container={platform.overlayContainer()}>
+      <DropdownMenu.Portal>
         <DropdownMenu.Content className="mobile-posture-menu" side="top" align="start" sideOffset={6} collisionPadding={8}
           onPointerEnter={event => event.preventDefault()}>
           {control.modes.map(mode => <DropdownMenu.Item key={mode.id} className="mobile-posture-menu__item"

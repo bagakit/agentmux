@@ -1,6 +1,6 @@
 import { selectedConversationReadingNode } from './conversation-reading-anchor.js'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useClientUiOwnerDocument } from '../platform.js'
+import { useClientUiOwnerDocument } from '../overlay-host.js'
 import { ConversationBodyWork, conversationReadingNode, conversationScrollParent, type ConversationReadingGeometry } from './conversation-body-work.js'
 import { conversationRecordId, conversationRevision } from '@agentmux/core/conversation'
 import type { ConversationRecord } from './conversation-records.js'

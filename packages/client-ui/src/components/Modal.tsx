@@ -2,7 +2,7 @@ import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { Root as DismissableLayer, Branch as DismissableLayerBranch } from '@radix-ui/react-dismissable-layer'
 import { Children, cloneElement, createContext, forwardRef, useCallback, useContext, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ComponentPropsWithoutRef, type HTMLAttributes, type ReactElement, type Ref, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
-import { useClientUiOwnerDocument } from '../platform.js'
+import { useClientUiOverlayHost } from '../overlay-host.js'
 import { isImeOwnedKeyboardEvent } from '../lib/ime-keyboard-event.js'
 
 export * from '@radix-ui/react-dialog'
@@ -95,9 +95,10 @@ export function ModalPortal({ container, children, ...props }: ComponentProps<ty
   const parentAttachment = useContext(ModalAttachmentContext)
   const [admitted, setAdmitted] = useState(parentAttachment === null)
   const inheritedContainer = useModalOverlayContainer(container)
-  const presentationDocument = useClientUiOwnerDocument()
-  const ownerDocument = container?.ownerDocument ?? presentationDocument ?? globalThis.document
-  const windowContainer = container ?? ownerDocument?.body
+  const overlayHost = useClientUiOverlayHost()
+  const hostContainer = container ?? overlayHost?.overlayContainer()
+  const ownerDocument = hostContainer?.ownerDocument ?? overlayHost?.ownerDocument ?? globalThis.document
+  const windowContainer = hostContainer ?? ownerDocument?.body
   const [host, setHost] = useState<HTMLDivElement | null>(null)
   const [placement, setPlacement] = useState<{ host: HTMLElement; container: Element | DocumentFragment; document: Document } | null>(null)
   const placed = host !== null && placement?.host === host && placement.container === windowContainer && placement.document === ownerDocument && host.ownerDocument === ownerDocument && host.parentNode === windowContainer

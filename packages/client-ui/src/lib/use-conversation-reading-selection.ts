@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useSyncExternalStore, type RefObject } from 'react'
-import { useClientUiOwnerDocument } from '../platform.js'
+import { useClientUiOwnerDocument } from '../overlay-host.js'
 
 type Endpoints = { start: Node; startOffset: number; end: Node; endOffset: number }
 type ReadingSelection = { rangeCount: number; isCollapsed: boolean; ranges: readonly Endpoints[]; focused: Element | null }

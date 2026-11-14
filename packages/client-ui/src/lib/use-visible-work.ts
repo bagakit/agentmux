@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { useClientUiOwnerDocument } from '../platform.js'
+import { useClientUiOwnerDocument } from '../overlay-host.js'
 
 /** Shared realm fencing for one or many targets. Consumers own activity and scheduling. */
 export function observeVisibleWork(owner: Document, update: (entries: IntersectionObserverEntry[]) => void, options?: IntersectionObserverInit): IntersectionObserver | undefined {

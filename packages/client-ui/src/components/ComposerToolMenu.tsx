@@ -1,6 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
-import { useClientUiPlatform } from '../platform.js'
 import * as Dialog from './Modal.js'
 
 /** Tool menus leave the toolbar's scroll strip while retaining its trigger and focus owner. */
@@ -12,7 +11,6 @@ export function ComposerToolMenu({ open, onOpenChange, label, trigger, className
   className?: string
   children: ReactNode
 }) {
-  const platform = useClientUiPlatform()
   const anchor = useRef<HTMLButtonElement>(null)
   const [panel, setPanel] = useState<HTMLDivElement | null>(null)
   useLayoutEffect(() => {
@@ -31,7 +29,7 @@ export function ComposerToolMenu({ open, onOpenChange, label, trigger, className
   }, [open, panel])
   return <Dialog.Root modal={false} open={open} onOpenChange={onOpenChange}>
     <Dialog.Trigger asChild ref={anchor}>{trigger}</Dialog.Trigger>
-    <Dialog.Portal container={platform.overlayContainer()}>
+    <Dialog.Portal>
       <Dialog.Content ref={setPanel} role="menu" aria-label={label} aria-describedby={undefined} className={className}
         style={{ position: 'fixed', top: 0, left: 0, bottom: 'auto', margin: 0, visibility: 'hidden', overflowY: 'auto', zIndex: 'var(--layer-popover)' }}>
         <Dialog.Title hidden>{label}</Dialog.Title>

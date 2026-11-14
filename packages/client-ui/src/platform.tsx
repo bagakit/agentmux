@@ -5,6 +5,7 @@ import type { AmuxObjectLinkTarget } from '@agentmux/core/sharing'
 import type { BrowserInputImageReference } from '@agentmux/core/browser-input-context'
 import type { ConversationSenderDetails, ConversationSpeaker } from './lib/conversation-speaker.js'
 import type { NoteResource } from '@agentmux/core/notebook-catalog'
+import { ClientUiOverlayProvider, type ClientUiOverlayHost } from './overlay-host.js'
 
 export type ClientUiIconName = 'neutral' | 'working' | 'failed'
 export type ObjectLinkReference = { uri: string; target: AmuxObjectLinkTarget; label?: string }
@@ -28,13 +29,11 @@ const defaultConversationToolLabels: ConversationToolLabels = {
 }
 
 /** Client-owned IO and presentation. Nothing here discovers a Runtime or retains its facts. */
-export type ClientUiPlatform = {
+export type ClientUiPlatform = ClientUiOverlayHost & {
   /** Client-owned reading preference; never an input or Runtime capability. */
   conversationDetailLevel?: import('./lib/conversation-detail-level.js').ConversationDetailLevel
   conversationShowSendReceipts?: boolean
   conversationConfirmedSendReceipt?: import('./lib/conversation-send-receipts.js').ConversationConfirmedSendReceipt
-  /** Current presentation document; moving a retained editor does not replace its state. */
-  ownerDocument?: Document
   /** Host-owned wording for shared conversation copy and payload controls. */
   conversationToolLabels?: ConversationToolLabels
   /** How a person's own message bubble arranges its rows. 'stacked' puts the words first and copy
@@ -43,7 +42,6 @@ export type ClientUiPlatform = {
 
   /** A failed copy must call reportError and return false; success alone returns true. */
   copyText(text: string, reportError: (error: unknown) => void): Promise<boolean>
-  overlayContainer(): HTMLElement | Element | DocumentFragment
   /** Register this editor with the host's focus policy; unregister when disabled or unmounted. */
   bindComposerFocus(element: HTMLElement, focus: () => boolean): () => void
   renderMessageAvatar(input: {
@@ -114,14 +112,9 @@ export function useMarkdownCopyText(): ClientUiPlatform['copyText'] | undefined 
   return useMemo(() => platform?.copyText ? platform.copyText.bind(platform) : undefined, [platform, platform?.copyText])
 }
 
-/** Optional presentation scope; standalone content can still observe its own DOM document. */
-export function useClientUiOwnerDocument(): Document | undefined {
-  return useContext(PlatformContext)?.ownerDocument
-}
-
 /** Each application supplies one explicit adapter; there is no Desktop or browser IO default. */
 export function ClientUiProvider({ platform, children }: { platform: ClientUiPlatform; children: ReactNode }) {
-  return <PlatformContext.Provider value={platform}>{children}</PlatformContext.Provider>
+  return <PlatformContext.Provider value={platform}><ClientUiOverlayProvider host={platform}>{children}</ClientUiOverlayProvider></PlatformContext.Provider>
 }
 
 export function useClientUiPlatform(): ClientUiPlatform {

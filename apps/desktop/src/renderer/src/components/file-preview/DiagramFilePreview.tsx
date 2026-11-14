@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useClientUiOwnerDocument } from '@agentmux/client-ui/platform'
+import { useClientUiOwnerDocument } from '@agentmux/client-ui/overlay-host'
 import { DiagramFilePreview as Diagram, type DiagramHost } from '@agentmux/editor-extensions/ui/DiagramFilePreview'
 import { DrawioFilePreview as Drawio } from '@agentmux/editor-extensions/ui/DrawioFilePreview'
 import { PlantUmlFilePreview as PlantUml } from '@agentmux/editor-extensions/ui/PlantUmlFilePreview'

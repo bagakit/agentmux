@@ -50,6 +50,11 @@
       "browser": "./src/platform.tsx",
       "import": "./dist/platform.js"
     },
+    "./overlay-host": {
+      "types": "./src/overlay-host.tsx",
+      "browser": "./src/overlay-host.tsx",
+      "import": "./dist/overlay-host.js"
+    },
     "./styles.css": "./src/styles/index.css",
     "./styles/*": "./src/styles/*",
     "./note/*": {
