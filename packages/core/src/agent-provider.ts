@@ -438,7 +438,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
   if (catalogSeed.capabilities.providerResume !== Boolean(definition.buildResumeArgs)) {
     throw new AgentMuxError('Native resume capability and its launch contribution must be declared together.', 'INVALID_AGENT_PROVIDER')
   }
-  if (catalogSeed.capabilities.permission === 'respond' && !definition.interaction && !definition.hook.permissionDecision) {
+  if (catalogSeed.capabilities.permission === 'respond' && catalogSeed.acpStrategy.kind !== 'adapter' && !definition.interaction && !definition.hook.permissionDecision) {
     throw new AgentMuxError('Permission response capability requires a native response contribution.', 'INVALID_AGENT_PROVIDER')
   }
   if (Boolean(catalogSeed.capabilities.providerFork?.current) !== Boolean(definition.buildForkArgs)) {

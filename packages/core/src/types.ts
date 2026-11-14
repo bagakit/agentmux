@@ -386,6 +386,8 @@ export type AgentMuxEvidence = {
   hookReceiptId?: string
   acpAdapterId?: string
   acpSessionId?: string
+  /** Original Core-owned ACP binding incarnation; never a permission grant. */
+  acpBindingId?: string
 }
 
 /**

@@ -1,15 +1,15 @@
 import { AgentMuxError } from './errors.js'
+import { mintObjectId } from './object-id.js'
 import type {
   AgentMuxAcpEvent,
   AgentMuxEvidence,
   AgentMuxPermissionDecision,
   AgentMuxPermissionRequest,
-  AgentNativeSessionHandle
+  AgentNativeSessionHandle,
+  AgentMuxRunRef
 } from './types.js'
 
 const MAX_ACP_EVENT_BYTES = 128 * 1024
-const PERMISSION_RESPONSE_TIMEOUT_MS = 30_000
-const PERMISSION_DELIVERY_TIMEOUT_MS = 30_000
 
 export type AgentMuxAcpBinding = {
   readonly adapterId: string
@@ -24,35 +24,50 @@ export type AgentMuxAcpBinding = {
 }
 
 export type AgentMuxAcpBridgeCallbacks = {
-  onEvent(agentSessionId: string, event: AgentMuxAcpEvent, evidence: AgentMuxEvidence): void | Promise<void>
-  onNativeHandle(agentSessionId: string, handle: AgentNativeSessionHandle): void | Promise<void>
-  onInteraction(request: AgentMuxPermissionRequest): void | Promise<void>
+  /** Permission IDs are Core-qualified; native IDs remain only on the original binding. */
+  onEvent(agentSessionId: string, event: AgentMuxAcpEvent, evidence: AgentMuxEvidence, signal: AbortSignal): void | Promise<void>
+  onNativeHandle(agentSessionId: string, handle: AgentNativeSessionHandle, evidence: AgentMuxEvidence, signal: AbortSignal): void | Promise<void>
+  onInteraction(request: AgentMuxPermissionRequest, signal: AbortSignal): void | Promise<void>
   onInteractionSettled(request: AgentMuxPermissionRequest): void | Promise<void>
+  /** Report an exact failed observation or unknown delivery; never closes the binding. */
+  onError(agentSessionId: string, error: unknown, evidence: AgentMuxEvidence): void | Promise<void>
 }
 
 type PendingAcpPermission = {
   request: AgentMuxPermissionRequest
-  resolveDecision: (decision: AgentMuxPermissionDecision | undefined) => void
+  event: Extract<AgentMuxAcpEvent, { type: 'permission' }>
   completion: Promise<void>
   resolveCompletion: () => void
   rejectCompletion: (error: unknown) => void
   responded: boolean
+  ready: boolean
+  publicationFailed: boolean
+  decision?: AgentMuxPermissionDecision
+  delivery?: { controller: AbortController; finished: Promise<void> }
 }
 
 type BoundAcpSession = {
+  id: string
+  run?: AgentMuxRunRef
+  lifetime: AbortController
   binding: AgentMuxAcpBinding
   unsubscribe: () => void
   nativeSessionId: string
   pendingEvents: AgentMuxAcpEvent[] | null
   eventTail: Promise<void>
   pendingPermission: PendingAcpPermission | null
+  permissionQueue: PendingAcpPermission[]
 }
 
-function rejectDecision(request: AgentMuxPermissionRequest): AgentMuxPermissionDecision {
-  const option = request.options.find(
-    (candidate) => candidate.kind === 'reject-once' || candidate.kind === 'reject-always'
-  )
-  return option ? { outcome: 'selected', optionId: option.id } : { outcome: 'cancelled' }
+function permissionCompletion(): Pick<PendingAcpPermission, 'completion' | 'resolveCompletion' | 'rejectCompletion'> {
+  let resolveCompletion!: () => void
+  let rejectCompletion!: (error: unknown) => void
+  const completion = new Promise<void>((resolve, reject) => {
+    resolveCompletion = resolve
+    rejectCompletion = reject
+  })
+  void completion.catch(() => {})
+  return { completion, resolveCompletion, rejectCompletion }
 }
 
 function explicitDecision(
@@ -83,7 +98,7 @@ export class AgentMuxAcpBridge {
     private readonly callbacks: AgentMuxAcpBridgeCallbacks
   ) {}
 
-  async bind(agentSessionId: string, binding: AgentMuxAcpBinding): Promise<void> {
+  async bind(agentSessionId: string, binding: AgentMuxAcpBinding, run?: Readonly<AgentMuxRunRef>): Promise<void> {
     if (this.bindings.has(agentSessionId)) {
       throw new AgentMuxError('Agent Session already has an ACP binding.', 'ACP_ALREADY_BOUND')
     }
@@ -93,12 +108,16 @@ export class AgentMuxAcpBridge {
       sessionId: binding.sessionId
     }
     const bound: BoundAcpSession = {
+      id: mintObjectId(),
+      ...(run ? { run: { ...run } } : {}),
+      lifetime: new AbortController(),
       binding,
       unsubscribe: () => {},
       nativeSessionId: binding.sessionId,
       pendingEvents: [],
       eventTail: Promise.resolve(),
-      pendingPermission: null
+      pendingPermission: null,
+      permissionQueue: []
     }
     this.bindings.set(agentSessionId, bound)
     try {
@@ -111,12 +130,13 @@ export class AgentMuxAcpBridge {
         this.enqueueEvent(agentSessionId, bound, event)
       })
       bound.unsubscribe = unsubscribe
-      await this.callbacks.onNativeHandle(agentSessionId, nativeHandle)
+      await this.callbacks.onNativeHandle(agentSessionId, nativeHandle, this.evidence(bound), bound.lifetime.signal)
       const pendingEvents = bound.pendingEvents ?? []
       while (pendingEvents.length > 0) await this.accept(agentSessionId, bound, pendingEvents.shift()!)
       bound.pendingEvents = null
     } catch (error) {
-      this.bindings.delete(agentSessionId)
+      bound.lifetime.abort(error)
+      if (this.bindings.get(agentSessionId) === bound) this.bindings.delete(agentSessionId)
       bound.pendingEvents = null
       bound.unsubscribe()
       await binding.close().catch(() => {})
@@ -128,21 +148,34 @@ export class AgentMuxAcpBridge {
     const bound = this.bindings.get(agentSessionId)
     if (!bound) return
     this.bindings.delete(agentSessionId)
+    bound.lifetime.abort(new AgentMuxError('The original ACP binding was explicitly closed.', 'CONTROL_CANCELLED'))
     bound.unsubscribe()
-    bound.pendingPermission?.resolveDecision(undefined)
     let eventError: unknown
     try {
       await bound.eventTail
     } catch (error) {
       eventError = error
     }
-    bound.pendingPermission = null
+    const permissions = [bound.pendingPermission, ...bound.permissionQueue].filter((pending): pending is PendingAcpPermission => pending !== null)
+    for (const pending of permissions) {
+      // Closing this exact binding is a cancellation, never a permission choice.
+      if (!pending.responded) {
+        pending.responded = true
+        pending.decision = { outcome: 'cancelled' }
+      }
+      pending.ready = true
+      this.dispatchPermission(agentSessionId, bound, pending)
+      pending.delivery?.controller.abort(new AgentMuxError('The original ACP binding was explicitly closed.', 'CONTROL_CANCELLED'))
+    }
     try {
       await bound.binding.close()
     } catch (error) {
       if (eventError === undefined) eventError = error
       else eventError = new AggregateError([eventError, error], 'ACP event drain and binding close both failed.')
     }
+    await Promise.all(permissions.map(pending => pending.delivery?.finished))
+    bound.pendingPermission = null
+    bound.permissionQueue = []
     if (eventError !== undefined) throw eventError
   }
 
@@ -164,12 +197,43 @@ export class AgentMuxAcpBridge {
       throw new AgentMuxError('ACP permission request was already answered.', 'UNKNOWN_AGENT_INTERACTION')
     }
     pending.responded = true
-    pending.resolveDecision(explicit)
+    pending.decision = explicit
+    if (pending.publicationFailed) {
+      // Only a new explicit response retries publication of this unsent request.
+      // Unknown adapter delivery remains under its original custody below.
+      return this.publishPermission(agentSessionId, bound, pending).then(() => pending.completion, async error => {
+        await this.callbacks.onError(agentSessionId, error, pending.request.evidence)
+        throw error
+      })
+    }
+    this.dispatchPermission(agentSessionId, bound!, pending)
     return pending.completion
   }
 
   hasPendingPermission(agentSessionId: string, requestId: string): boolean {
     return this.bindings.get(agentSessionId)?.pendingPermission?.request.id === requestId
+  }
+
+  /** Retry only publication of this original unanswered request on an explicit exact read. */
+  async refreshPendingPermission(agentSessionId: string, run: Readonly<AgentMuxRunRef>): Promise<boolean> {
+    const bound = this.bindings.get(agentSessionId)
+    if (!bound || bound.run?.runId !== run.runId) return false
+    const pending = bound.pendingPermission
+    if (!pending?.publicationFailed || pending.responded || pending.delivery) return false
+    const recovered = bound.eventTail.catch(() => {}).then(async () => {
+      if (this.bindings.get(agentSessionId) !== bound || bound.lifetime.signal.aborted ||
+          bound.pendingPermission !== pending || !pending.publicationFailed || pending.responded || pending.delivery) return false
+      try {
+        await this.publishPermission(agentSessionId, bound, pending)
+        return true
+      } catch (error) {
+        await this.callbacks.onError(agentSessionId, error, pending.request.evidence)
+        return false
+      }
+    })
+    bound.eventTail = recovered.then(() => {})
+    void bound.eventTail.catch(() => {})
+    return await recovered
   }
 
   async dispose(): Promise<void> {
@@ -184,13 +248,16 @@ export class AgentMuxAcpBridge {
     bound: BoundAcpSession,
     event: AgentMuxAcpEvent
   ): void {
-    const accepted = bound.eventTail.then(async () => await this.accept(agentSessionId, bound, event))
-    bound.eventTail = accepted
-    void accepted.catch(() => {
-      // If a rejecting Permission response cannot be delivered, close the ACP
-      // binding instead of leaving the Agent waiting on an ambiguous approval.
-      void this.unbind(agentSessionId).catch(() => {})
-    })
+    const accepted = bound.eventTail.catch(() => {}).then(async () => await this.accept(agentSessionId, bound, event))
+    bound.eventTail = accepted.catch(error => this.callbacks.onError(agentSessionId, error, this.evidence(bound)))
+    // The required error callback owns diagnostics; a failed callback is retained
+    // on eventTail for explicit unbind, without poisoning later observations.
+    void bound.eventTail.catch(() => {})
+  }
+
+  private evidence(bound: BoundAcpSession): AgentMuxEvidence {
+    return { source: 'acp', observedAt: Date.now(), acpAdapterId: bound.binding.adapterId,
+      acpSessionId: bound.nativeSessionId, acpBindingId: bound.id, ...(bound.run ? { run: { ...bound.run } } : {}) }
   }
 
   private async accept(
@@ -202,28 +269,22 @@ export class AgentMuxAcpBridge {
     assertBoundedEvent(event)
     const previousNativeSessionId = bound.nativeSessionId
     if (event.type === 'native-session') bound.nativeSessionId = event.sessionId
-    const binding = bound.binding
-    const evidence: AgentMuxEvidence = {
-      source: 'acp',
-      observedAt: Date.now(),
-      acpAdapterId: binding.adapterId,
-      acpSessionId: bound.nativeSessionId
-    }
+    const evidence = this.evidence(bound)
     if (event.type !== 'permission') {
-      await this.callbacks.onEvent(agentSessionId, event, evidence)
+      await this.callbacks.onEvent(agentSessionId, event, evidence, bound.lifetime.signal)
       if (event.type === 'native-session' && event.sessionId !== previousNativeSessionId) {
         await this.callbacks.onNativeHandle(agentSessionId, {
           kind: 'acp',
-          adapterId: binding.adapterId,
+          adapterId: bound.binding.adapterId,
           sessionId: event.sessionId
-        })
+        }, evidence, bound.lifetime.signal)
       }
       return
     }
 
     const request: AgentMuxPermissionRequest = {
       kind: 'permission',
-      id: event.requestId,
+      id: mintObjectId(),
       agentSessionId,
       title: event.title,
       options: event.options.map((option) => ({ ...option })),
@@ -231,107 +292,81 @@ export class AgentMuxAcpBridge {
       ...(event.toolName !== undefined ? { toolName: event.toolName } : {}),
       ...(event.toolInput !== undefined ? { toolInput: event.toolInput } : {})
     }
-    const pending = this.permissionDecision(bound, request)
+    const pending = this.permissionDecision(bound, request, event)
+    if (bound.pendingPermission === pending) await this.publishPermission(agentSessionId, bound, pending)
+  }
+
+  private async publishPermission(agentSessionId: string, bound: BoundAcpSession, pending: PendingAcpPermission): Promise<void> {
+    pending.publicationFailed = false
     try {
-      await this.callbacks.onEvent(agentSessionId, event, evidence)
-      await this.callbacks.onInteraction(request)
-      let decision: AgentMuxPermissionDecision | null = null
-      try {
-        decision = explicitDecision(request, await pending.decision)
-      } catch {
-        decision = null
-      }
-      try {
-        await this.deliverPermission(
-          binding,
-          event.requestId,
-          decision ?? rejectDecision(request)
-        )
-      } finally {
-        await this.callbacks.onInteractionSettled(request)
-      }
-      pending.state.resolveCompletion()
+      await this.callbacks.onEvent(agentSessionId, { ...pending.event, requestId: pending.request.id }, pending.request.evidence, bound.lifetime.signal)
+      await this.callbacks.onInteraction(pending.request, bound.lifetime.signal)
+      pending.ready = true
+      this.dispatchPermission(agentSessionId, bound, pending)
     } catch (error) {
-      pending.state.rejectCompletion(error)
+      pending.publicationFailed = true
+      if (pending.responded && !pending.delivery) {
+        pending.responded = false
+        delete pending.decision
+        pending.rejectCompletion(error)
+        Object.assign(pending, permissionCompletion())
+      }
       throw error
-    } finally {
-      if (bound.pendingPermission === pending.state) bound.pendingPermission = null
     }
   }
 
-  private async deliverPermission(
-    binding: AgentMuxAcpBinding,
-    requestId: string,
-    decision: AgentMuxPermissionDecision
-  ): Promise<void> {
+  private dispatchPermission(agentSessionId: string, bound: BoundAcpSession, pending: PendingAcpPermission): void {
+    if (!pending.ready || !pending.decision || pending.delivery) return
     const controller = new AbortController()
-    const timeoutError = new AgentMuxError(
-      'ACP permission response delivery timed out.',
-      'ACP_PERMISSION_RESPONSE_TIMEOUT'
-    )
-    let timer: NodeJS.Timeout | undefined
-    const delivery = binding.respondPermission(requestId, decision, controller.signal)
-    void delivery.catch(() => {})
-    try {
-      await Promise.race([
-        delivery,
-        new Promise<never>((_resolve, reject) => {
-          timer = setTimeout(() => reject(timeoutError), PERMISSION_DELIVERY_TIMEOUT_MS)
-          timer.unref()
-        })
-      ])
-    } catch (error) {
-      if (error === timeoutError) controller.abort(timeoutError)
-      throw error
-    } finally {
-      if (timer) clearTimeout(timer)
-    }
+    // Install custody before invoking the adapter, which may synchronously emit.
+    const custody = { controller, finished: Promise.resolve() }
+    pending.delivery = custody
+    custody.finished = (async () => {
+      let abort!: () => void
+      const cancelled = new Promise<never>((_resolve, reject) => {
+        abort = () => reject(controller.signal.reason)
+        controller.signal.addEventListener('abort', abort, { once: true })
+      })
+      try {
+        await Promise.race([bound.binding.respondPermission(pending.event.requestId, pending.decision!, controller.signal), cancelled])
+        await this.callbacks.onInteractionSettled(pending.request)
+        pending.resolveCompletion()
+        if (bound.pendingPermission === pending) {
+          const next = bound.permissionQueue.shift()
+          bound.pendingPermission = next ?? null
+          if (next && this.bindings.get(agentSessionId) === bound) {
+            const published = bound.eventTail.catch(() => {}).then(() => this.publishPermission(agentSessionId, bound, next))
+            bound.eventTail = published.catch(error => this.callbacks.onError(agentSessionId, error, next.request.evidence))
+            void bound.eventTail.catch(() => {})
+          }
+        }
+      } catch (error) {
+        // The original decision may have applied. Keep its request and unknown
+        // completion; neither an observer failure nor another event retries it.
+        pending.rejectCompletion(error)
+        await this.callbacks.onError(agentSessionId, error, { ...pending.request.evidence, observedAt: Date.now() })
+      } finally {
+        controller.signal.removeEventListener('abort', abort)
+      }
+    })()
+    void custody.finished.catch(() => {})
   }
 
   private permissionDecision(
     bound: BoundAcpSession,
-    request: AgentMuxPermissionRequest
-  ): {
-    state: PendingAcpPermission
-    decision: Promise<AgentMuxPermissionDecision | undefined>
-  } {
-    if (bound.pendingPermission) {
-      throw new AgentMuxError('ACP session already has a pending permission.', 'AGENT_INTERACTION_BUSY')
-    }
-    let timer: NodeJS.Timeout | undefined
-    let resolveDecision!: (decision: AgentMuxPermissionDecision | undefined) => void
-    const decision = new Promise<AgentMuxPermissionDecision | undefined>((resolve) => {
-      resolveDecision = resolve
-    })
-    let resolveCompletion!: () => void
-    let rejectCompletion!: (error: unknown) => void
-    const completion = new Promise<void>((resolve, reject) => {
-      resolveCompletion = resolve
-      rejectCompletion = reject
-    })
-    void completion.catch(() => {})
+    request: AgentMuxPermissionRequest,
+    event: Extract<AgentMuxAcpEvent, { type: 'permission' }>
+  ): PendingAcpPermission {
     const state: PendingAcpPermission = {
       request,
-      resolveDecision,
-      completion,
-      resolveCompletion,
-      rejectCompletion,
-      responded: false
+      event: { ...event, options: event.options.map(option => ({ ...option })) },
+      ...permissionCompletion(),
+      responded: false,
+      ready: false,
+      publicationFailed: false
     }
-    bound.pendingPermission = state
-    const boundedDecision = (async () => {
-      try {
-        return await Promise.race([
-          decision,
-          new Promise<undefined>((resolve) => {
-            timer = setTimeout(() => resolve(undefined), PERMISSION_RESPONSE_TIMEOUT_MS)
-            timer.unref()
-          })
-        ])
-      } finally {
-        if (timer) clearTimeout(timer)
-      }
-    })()
-    return { state, decision: boundedDecision }
+    if (bound.pendingPermission) bound.permissionQueue.push(state)
+    else bound.pendingPermission = state
+    return state
   }
 }

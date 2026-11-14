@@ -325,6 +325,7 @@ function interactionEvidence(value: unknown): AgentMuxEvidence {
       source.acpSessionId,
       'pendingInteraction.request.evidence.acpSessionId'
     )
+    if (source.acpBindingId !== undefined) evidence.acpBindingId = string(source.acpBindingId, 'pendingInteraction.request.evidence.acpBindingId')
   }
   return evidence
 }

@@ -1233,46 +1233,53 @@ export class AgentMuxClient {
     this.ownedWorkspaceRoots = options.ownedWorkspaceRoots ?? (async () => [])
     this.acp = new AgentMuxAcpBridge(
       {
-        onEvent: async (agentSessionId, event, evidence) => {
+        onEvent: async (agentSessionId, event, evidence, signal) => {
+          signal.throwIfAborted()
           const session = this.registry.get(agentSessionId)
+          if (!evidence.run || !sameRun(session.run, evidence.run)) throw new AgentMuxError('The original ACP Run is no longer current.', 'STALE_AGENT_SESSION')
           // 与 acceptHookEvent 同一条判据、同一份台账：进程已终结的 run 不许再写语义状态、也不许再发状态
           // 事件。ACP 是喂状态的**第二条**入口，两条路对「进程已死还能不能被点亮」必须判得一样——只修
           // 一条会留下同形的第二个缺陷。今天没有 Provider 声明 acpStrategy: adapter，所以这条路上还看不
           // 到那个 bug；接上第一个 ACP Provider 的那天它就会原样复现，届时这里已经站着人了。
           if (this.endedRuns.has(session.run.runId)) return
-          const observed = {
-            ...evidence,
-            run: { ...session.run }
-          }
+          const observed = { ...evidence, run: { ...evidence.run } }
           const mutation = agentTimelineMutationFromAcpEvent(agentSessionId, event, observed)
-          if (mutation) await this.persistAndPublishTimeline(mutation, observed, session.hostId)
+          if (mutation) {
+            const result = await this.registry.updateWithTimeline(agentSessionId, evidence.run, current => ({ session: current, mutation }), signal)
+            const history = result.timeline
+            if (history) {
+              if ('timelineFailure' in history) throw history.timelineFailure
+              if (history.timeline.changed) this.publisher.publishTimeline(history.timeline, observed, session.hostId)
+            }
+          }
           if (event.type === 'status' && event.state !== 'unknown') {
-            await this.persistSemanticStatus(agentSessionId, session.run, {
+            await this.persistSemanticStatus(agentSessionId, evidence.run, {
               state: event.state,
               source: 'acp',
               observedAt: observed.observedAt,
               ...(event.detail === undefined ? {} : { detail: event.detail })
-            })
+            }, signal)
           }
           this.publisher.publishAcp(agentSessionId, event, observed)
         },
-        onNativeHandle: async (agentSessionId, handle) => {
-          await this.updateNativeHandle(agentSessionId, handle)
+        onNativeHandle: async (agentSessionId, handle, evidence, signal) => {
+          if (!evidence.run) throw new AgentMuxError('The ACP binding omitted its original Run.', 'INVALID_AGENT_INTERACTION')
+          await this.updateNativeHandle(agentSessionId, handle, evidence.run, signal)
         },
-        onInteraction: async (request) => {
-          const session = this.requireAgentSession(request.agentSessionId)
-          const observedRequest = {
-            ...request,
-            evidence: { ...request.evidence, run: { ...session.run } }
-          }
-          const next = await this.persistPendingInteraction(observedRequest)
-          this.publisher.publishInteraction(observedRequest)
+        onInteraction: async (request, signal) => {
+          const next = await this.persistPendingInteraction(request, signal)
+          this.publisher.publishInteraction(request)
           this.publishSession(next)
         },
         onInteractionSettled: async (request) => {
-          const session = this.requireAgentSession(request.agentSessionId)
-          const next = await this.clearPendingInteraction(session, request.id)
+          if (!request.evidence.run) throw new AgentMuxError('The original ACP request omitted its Run.', 'INVALID_AGENT_INTERACTION')
+          const next = await this.clearPendingInteraction({ agentSessionId: request.agentSessionId, run: request.evidence.run }, request.id, request)
           this.publishSession(next)
+        },
+        onError: (agentSessionId, error, evidence) => {
+          this.publisher.publish({ type: 'agent-error', agentSessionId, code: 'ACP_OBSERVATION_UNCONFIRMED',
+            message: `The original ACP observation or response is unconfirmed. Read this exact Agent Session again to retry publication of an unanswered request; inspect any original response before another decision. Its original identity and any operation are retained. ${error instanceof Error ? error.message : String(error)}`,
+            evidence })
         }
       }
     )
@@ -2483,6 +2490,10 @@ export class AgentMuxClient {
       if (canonical) {
         if (canonical.agentSessionId !== agentSessionId) throw new AgentMuxError(
           'The original Session metadata belongs to another identity. Existing Runs are retained.', 'AGENT_SESSION_STORE_READ_UNCONFIRMED')
+        if (await this.acp.refreshPendingPermission(agentSessionId, canonical.run)) {
+          await this.registry.readMetadata(agentSessionId, session => { canonical = session })
+          if (!canonical) return null
+        }
         return this.projectSession(await this.registry.readStartedResume(canonical))
       }
       const started = this.registry.has(agentSessionId) ? this.registry.get(agentSessionId) : undefined
@@ -9228,7 +9239,7 @@ export class AgentMuxClient {
     if (this.providers.get(session.providerId).catalog.acpStrategy.kind !== 'adapter') {
       throw new AgentMuxError('Provider does not declare an ACP adapter.', 'ACP_UNSUPPORTED')
     }
-    await this.acp.bind(agentSessionId, binding)
+    await this.acp.bind(agentSessionId, binding, session.run)
   }
 
   private async recoverStaleLifecycles(): Promise<void> {
@@ -9297,10 +9308,8 @@ export class AgentMuxClient {
       const pending = session.pendingInteraction
       if (!pending || session.nativeSourceObservation) continue
       if (pending.request.evidence.source === 'acp') {
-        if (!this.acp.hasPendingPermission(session.agentSessionId, pending.request.id)) {
-          const settled = await this.clearPendingInteraction(session, pending.request.id)
-          this.publishSession(settled)
-        }
+        // This reader's absent binding is not the original request's terminal
+        // fact. Keep its exact request and durable unknown response inspectable.
         continue
       }
       if (pending.response?.acknowledged) {
@@ -9413,6 +9422,9 @@ export class AgentMuxClient {
     const frontend = this.terminalFrontendWatches.get(session.agentSessionId)?.frontend
     if (frontend && sameRun(frontend.run, session.run)) projected.terminalFrontend = structuredClone(frontend)
     const pending = projected.pendingInteraction
+    if (pending?.request.evidence.source === 'acp' && !this.acp.hasPendingPermission(session.agentSessionId, pending.request.id)) {
+      pending.request.responseUnavailableReason = 'The original ACP binding is unavailable to this reader. The request and any unknown response were retained; inspect the original operation or use its original connection.'
+    }
     if (pending) {
       const requests = [pending.request, ...(pending.additionalRequests ?? [])]
       for (const request of requests) if (request.kind === 'permission' && request.permissionHook &&
@@ -10543,17 +10555,18 @@ export class AgentMuxClient {
     expectedRun: AgentMuxRunRef,
     update: (current: AgentMuxStoredAgentSession) => AgentMuxStoredAgentSession,
     futureIntentId?: string,
-    author?: Readonly<AgentCapabilityBinding>
+    author?: Readonly<AgentCapabilityBinding>,
+    signal?: AbortSignal
   ): Promise<AgentMuxStoredAgentSession> {
     try {
-      return await this.registry.update(agentSessionId, expectedRun, update, undefined, futureIntentId, author)
+      return await this.registry.update(agentSessionId, expectedRun, update, signal, futureIntentId, author)
     } catch (error) {
       if (!(error instanceof AgentMuxError) || error.code !== 'STALE_AGENT_SESSION') throw error
-      const canonical = await this.registry.refresh(agentSessionId, expectedRun)
+      const canonical = await this.registry.refresh(agentSessionId, expectedRun, undefined, signal)
       if (!sameRun(canonical.run, expectedRun)) {
         throw new AgentMuxError('Agent Session changed while semantic state was persisted.', 'STALE_AGENT_SESSION')
       }
-      return await this.registry.update(agentSessionId, expectedRun, update, undefined, futureIntentId, author)
+      return await this.registry.update(agentSessionId, expectedRun, update, signal, futureIntentId, author)
     }
   }
 
@@ -10871,7 +10884,8 @@ export class AgentMuxClient {
   private async persistSemanticStatus(
     agentSessionId: string,
     expectedRun: AgentMuxRunRef,
-    status: AgentStatus
+    status: AgentStatus,
+    signal?: AbortSignal
   ): Promise<AgentMuxStoredAgentSession> {
     const next = await this.updateExactAgentSession(agentSessionId, expectedRun, (current) => {
       if (
@@ -10894,7 +10908,7 @@ export class AgentMuxClient {
         } : {}),
         updatedAt: Math.max(current.updatedAt, status.observedAt)
       }
-    })
+    }, undefined, undefined, signal)
     if (next.activityCommit?.latest.createdAt === status.observedAt && !next.activityCommit.latestCommitted) {
       await this.flushAgentActivity(next)
     }
@@ -10903,7 +10917,8 @@ export class AgentMuxClient {
   }
 
   private async persistPendingInteraction(
-    request: AgentMuxInteractionRequest
+    request: AgentMuxInteractionRequest,
+    signal?: AbortSignal
   ): Promise<AgentMuxStoredAgentSession> {
     const expectedRun = request.evidence.run
     if (!expectedRun) {
@@ -10922,17 +10937,21 @@ export class AgentMuxClient {
         pendingInteraction: { request: structuredClone(request) },
         updatedAt: Math.max(current.updatedAt, request.evidence.observedAt)
       }
-    })
+    }, undefined, undefined, signal)
   }
 
   private async clearPendingInteraction(
-    session: AgentMuxAgentSession,
-    requestId: string
+    session: Pick<AgentMuxAgentSession, 'agentSessionId' | 'run'>,
+    requestId: string,
+    expectedRequest?: AgentMuxInteractionRequest
   ): Promise<AgentMuxStoredAgentSession> {
     return await this.updateExactAgentSession(session.agentSessionId, session.run, (current) => {
       if (!current.pendingInteraction) return current
       if (current.pendingInteraction.request.id !== requestId) {
         throw new AgentMuxError('Agent interaction changed before settlement.', 'UNKNOWN_AGENT_INTERACTION')
+      }
+      if (expectedRequest && !isDeepStrictEqual(agentInteractionRequestTarget(current.pendingInteraction.request), agentInteractionRequestTarget(expectedRequest))) {
+        throw new AgentMuxError('The original interaction binding or request changed before settlement.', 'UNKNOWN_AGENT_INTERACTION')
       }
       const completion = current.pendingInteraction.nativeCompleted
       let next = { ...current, updatedAt: Date.now() }
@@ -12391,13 +12410,15 @@ export class AgentMuxClient {
 
   private async updateNativeHandle(
     agentSessionId: string,
-    handle: AgentNativeSessionHandle
+    handle: AgentNativeSessionHandle,
+    expectedRun: AgentMuxRunRef,
+    signal: AbortSignal
   ): Promise<void> {
-    const session = this.requireAgentSession(agentSessionId)
     const next = await this.registry.update(
       agentSessionId,
-      session.run,
-      (current) => ({ ...current, nativeHandle: handle, updatedAt: Date.now() })
+      expectedRun,
+      (current) => ({ ...current, nativeHandle: handle, updatedAt: Date.now() }),
+      signal
     )
     this.publishSession(next)
 

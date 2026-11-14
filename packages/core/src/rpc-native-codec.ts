@@ -1,4 +1,5 @@
-import { parseRpcAgentSession } from './agent-session-codec.js'
+import { parseRpcAgentSession, normalizeAgentInteractionRequest } from './agent-session-codec.js'
+import { agentInteractionRequestTarget } from './agent-interaction-state.js'
 import { parseGoalInputEpoch, parseGoalInputEpochInput } from './goal-input-epoch.js'
 import { parseCreationInspectParams, parseCreationResolveParams } from './agent-creation-resolution.js'
 import { parseCreationInspectionResult } from './agent-creation-inspection.js'
@@ -654,7 +655,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (raw === null && method === 'agent.interaction.inspect') break
         const receipt = normalizeInteractionOperationReceipt(raw)
         if (!isDeepStrictEqual(raw, receipt) || !rpcSessionTargetMatches(input.agentSessionId, receipt.agentSessionId) || receipt.operationId !== input.operationId) fail()
-        if (method === 'agent.interaction.respond' && (!isDeepStrictEqual(receipt.run, input.expectedRun) || !isDeepStrictEqual(receipt.response, input.response) || !isDeepStrictEqual(receipt.externalAction, input.externalAction))) fail()
+        if (method === 'agent.interaction.respond' && (!isDeepStrictEqual(receipt.run, input.expectedRun) || !isDeepStrictEqual(receipt.response, input.response) || !isDeepStrictEqual(receipt.externalAction, input.externalAction) ||
+          !isDeepStrictEqual(agentInteractionRequestTarget(receipt.expectedRequest), agentInteractionRequestTarget(normalizeAgentInteractionRequest(input.expectedRequest))))) fail()
         break
       }
       case 'agent.question.reply': {
