@@ -7,6 +7,9 @@ import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingOpen } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
+import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
+import { moteEntryDraftKey } from '../src/renderer/src/lib/mote-entry-hold'
+import { scratchTopicLogicalPath } from '@agentmux/host/mote-model'
 import { promptCarrierWaiting } from './helpers/prompt-carrier-receipt'
 import { connectWorkbenchCloseApiOwner } from './helpers/workbench-close-api-owner'
 import { createWorkspaceLayout } from '@agentmux/layout'
@@ -20,8 +23,15 @@ let sourceUnconfirmed = false
 const page = (target: any): MoteDialoguePage => ({ main: { target, identity: { hostId: 'local', moteId: moteTopics[0]!.id }, status: 'ready', resource: null, documentRevision: 'original-doc', roleRevision: 'role-' + currentMain.sessionId, current: currentMain, issue: null }, links: [...links].sort((a,b) => b.sequence-a.sequence), incarnation: 'original-links', throughSequence: Math.max(0, ...links.map(link => link.sequence)), next, coverage: 'linked-sources-only', sourceStatus: 'read', sourceIssue: null })
 const button = (root: ParentNode, label: string) => [...root.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === label || node.getAttribute('aria-label') === label)!
 const visibleBody = () => app.panel().querySelector<HTMLElement>('[data-mote-workface] .mote-workface__original:not([hidden])')
+const mainComposer = () => app.panel().querySelector<HTMLElement>('.mote-composer-surface')!
+const mainEditor = () => mainComposer().querySelector<HTMLElement>('[aria-label="Message Agent"]')!
+const mainDraftKey = moteEntryDraftKey({ workspace: scratchWorkspace, topic: moteTopics[0]!,
+ rootPath: scratchTopicLogicalPath(scratchWorkspace, moteTopics[0]!)! })
+let formerDrafts: ReturnType<typeof useLauncherState.getState>['drafts']
 beforeEach(() => {
  failRead = false; typedUnconfirmed = false; currentMain = main; links = []; next = null; sourceUnconfirmed = false; app = createMoteApp()
+ formerDrafts = useLauncherState.getState().drafts
+ useLauncherState.setState({ drafts: {} })
  const topics = moteTopics.map((topic, i) => i ? topic : { ...topic, quickMode: { status: 'saved' as const, version: 'original-doc', defaults: { conversation: main } } })
  useAppStore.setState({ scratchTopicSnapshots: { [scratchWorkspace.id]: { scope: scratchTopicsScope(scratchWorkspace), topics, revision: 0, error: null, reading: false } } })
  vi.mocked(api.scratch.listTopics).mockResolvedValue(topics); vi.mocked(api.scratch.readTopic).mockImplementation(async (_w, id) => topics.find(topic => topic.id === id) ?? null)
@@ -31,7 +41,10 @@ beforeEach(() => {
  vi.spyOn(api.moteDialogue, 'ensureRecovery').mockRejectedValue(Error('Controlled recovery boundary'))
  vi.spyOn(api.files, 'readDirectory').mockResolvedValue([])
 })
-afterEach(async () => { await app.dispose() })
+afterEach(async () => {
+ try { await app.dispose() }
+ finally { useLauncherState.setState({ drafts: formerDrafts }) }
+})
 async function open() { await app.mount(); await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTopicId: moteTopics[0]!.id })); await settleMoteApp(); await vi.waitFor(() => expect(visibleBody()?.querySelector('[data-activity-session="' + defaultAgent.id + '"]')).not.toBeNull()) }
 async function openMemberWorkspace() {
  await moteClick(button(app.panel(), '成员'))
@@ -61,8 +74,7 @@ it.each([false, true])('keeps the original Mote discussion while closing the exa
  const owner = await connectWorkbenchCloseApiOwner()
  try {
   const body = visibleBody()!, panel = app.panel()
-  const composer = () => panel.querySelector<HTMLElement>('.mote-composer-surface [aria-label="Message Agent"]')
-  const editor = composer()!
+  const editor = mainEditor()
   await moteType(editor, '分栏关闭后保留这段草稿')
   const selectionBefore = useAppStore.getState().workbenchSpaceSelection
   const finishBrowserClose = api.browser.close.bind(api.browser)
@@ -105,7 +117,7 @@ it.each([false, true])('keeps the original Mote discussion while closing the exa
   expect(readPmoTeamsTopicFloatingState()).toMatchObject({ open: true, reference: { ...ref, regionId: main.regionId } })
   expect(app.panel()).toBe(panel)
   expect(visibleBody()).toBe(body)
-  expect(composer()).toBe(editor)
+  expect(mainEditor()).toBe(editor)
   expect(editor.textContent).toContain('分栏关闭后保留这段草稿')
   expect(useAppStore.getState().workbenchSpaceSelection).toBe(selectionBefore)
   expect(useAppStore.getState().sessions.find(session => session.id === defaultAgent.id)?.control.run).toEqual(defaultAgent.control.run)
@@ -197,11 +209,12 @@ it('real compact entry opens exact Main, Threads selects a worker and Discussion
  expect(useAppStore.getState().tabs).toBe(original.tabs); expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled()
 })
 it('unknown role refresh retains the exact readable Main and Composer DOM', async () => {
- await open(); const body = visibleBody(), composer = body!.querySelector('[aria-label="Message Agent"]')
+ await open(); const body = visibleBody(), composer = mainEditor()
+ expect(composer).not.toBeNull()
  failRead = true
  await moteClick(button(app.panel(), '工作')); await moteClick(button(app.panel(), '返回主对话'))
  await vi.waitFor(() => expect(reading.mock.calls.length).toBeGreaterThan(1))
- expect(visibleBody()).toBe(body); expect(visibleBody()!.querySelector('[aria-label="Message Agent"]')).toBe(composer)
+ expect(visibleBody()).toBe(body); expect(mainEditor()).toBe(composer)
  expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent')
 })
 
@@ -239,16 +252,15 @@ it('known Main B cannot silently downgrade a newly authored logical Main input t
  vi.spyOn(api.sessions, 'inspectInput').mockResolvedValue(null)
  const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(async (control, _body, id) => promptCarrierWaiting(control.agentSessionId, control.run.runId, id))
  await open()
- const surface = visibleBody()!.querySelector('[data-activity-session="' + defaultAgent.id + '"]')!.closest('.agent-surface')!
- const editor = surface.querySelector<HTMLElement>('[aria-label="Message Agent"]')!
- await moteType(editor, '原主对话的新问题，保留原稿')
+ await moteType(mainEditor(), '原主对话的新问题，保留原稿')
  currentMain = { ...main, sessionId: neighborAgent.id, tabId: neighborTab.id, regionId: neighborTab.layout.activeRegionId }
  await act(async () => useAppStore.setState(state => ({ scratchTopicSnapshots: Object.fromEntries(Object.entries(state.scratchTopicSnapshots).map(([id, value]) => [id, { ...value,
   topics: value.topics === null ? null : value.topics.map(topic => topic.id === moteTopics[0]!.id ? { ...topic, quickMode: { status: 'saved', version: 'confirmed-role-B', defaults: { conversation: currentMain } } } : topic) }])) })))
  await vi.waitFor(async () => expect((await reading.mock.results.at(-1)!.value).main.current).toEqual(currentMain))
- await moteClick(button(surface, 'Send'))
+ await moteClick(button(mainComposer(), 'Send'))
  expect(submit).not.toHaveBeenCalled()
- expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toContain('原主对话的新问题，保留原稿')
+ expect(useLauncherState.getState().drafts[mainDraftKey]?.prompt).toContain('原主对话的新问题，保留原稿')
+ expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent')
  expect(document.body.textContent).toContain('主 Agent 已更换')
  expect(app.stop).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled()
 })
@@ -265,16 +277,18 @@ it('typed unconfirmed Main source never silently sends a new logical Main input 
  useAppStore.setState({ send: actualSend })
  const submit = vi.spyOn(api.sessions, 'submitPrompt')
  await open()
- const body = visibleBody(), editor = body!.querySelector<HTMLElement>('[aria-label="Message Agent"]')!
+ const body = visibleBody(), editor = mainEditor()
  await moteType(editor, '主角色暂未确认时保留原稿')
  typedUnconfirmed = true
  await moteClick(button(app.panel(), '工作')); await moteClick(button(app.panel(), '返回主对话'))
  await vi.waitFor(() => expect(app.panel().textContent).toContain('原文件读取暂不可用'))
  expect(visibleBody()).toBe(body)
- await moteClick(button(body!, 'Send'))
+ await moteClick(button(mainComposer(), 'Send'))
  expect(submit).not.toHaveBeenCalled()
- expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toContain('主角色暂未确认时保留原稿')
- expect(app.panel().textContent).toContain('主对话的原角色来源暂未确认')
+ expect(useLauncherState.getState().drafts[mainDraftKey]?.prompt).toContain('主角色暂未确认时保留原稿')
+ expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent')
+ expect(app.panel().textContent).toContain('原文件读取暂不可用')
+ expect(mainEditor()).toBe(editor)
  expect(editor.getAttribute('contenteditable')).toBe('true')
  expect(app.stop).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled()
 })
@@ -291,9 +305,9 @@ it('explicit Discussion restores Main input intent when the already selected mem
  await settleMoteApp()
  await moteClick(button(app.panel(), '返回主对话')); await settleMoteApp()
  await vi.waitFor(() => expect(readPmoTeamsTopicFloatingState()).toMatchObject({ conversationIntent: 'main', reference: { tabId: neighborTab.id } }))
- const surface = visibleBody()!.querySelector('[data-activity-session="' + neighborAgent.id + '"]')!.closest('.agent-surface')!
- await moteType(surface.querySelector<HTMLElement>('[aria-label="Message Agent"]')!, '明确回到现在的主对话')
- await moteClick(button(surface, 'Send'))
+ expect(visibleBody()?.querySelector('[data-activity-session="' + neighborAgent.id + '"]')).not.toBeNull()
+ await moteType(mainEditor(), '明确回到现在的主对话')
+ await moteClick(button(mainComposer(), 'Send'))
  await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1))
  expect(submit.mock.calls[0]![0].agentSessionId).toBe(neighborAgent.id)
  expect(submit.mock.calls[0]![4]?.moteMain).toEqual({ target: expect.any(Object), expectedRoleRevision: 'role-' + neighborAgent.id })

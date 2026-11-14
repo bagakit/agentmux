@@ -29,10 +29,14 @@ it('keeps private reading through a late work-source read and honors a later exp
   const read = vi.fn(dispatch), privateChats = (visible: boolean) => <p data-private-reader={String(visible)}>原私聊</p>
   const render = (source: MoteDialoguePage | null, requestedEvent?: { eventId: string; token: string }) => <MoteWorkThreads page={source} issue="原工作未确认" loading={false} visible readWork={read} onRefresh={() => {}} onOpenWork={() => {}} privateChats={privateChats} requestedEvent={requestedEvent} />
   await act(async () => root.render(render(null)))
-  await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(button => button.textContent === '私聊')!.click())
+  const privateTab = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(button => button.textContent === '私聊')!
+  await act(async () => privateTab.click())
   await act(async () => root.render(render(page)))
   expect(container.querySelector('[data-private-reader]')?.getAttribute('data-private-reader')).toBe('true')
-  expect(container.querySelector('[role="tabpanel"][aria-label="私聊"]')?.hasAttribute('hidden')).toBe(false)
+  const privatePanel = document.getElementById(privateTab.getAttribute('aria-controls')!)
+  expect(privatePanel?.getAttribute('role')).toBe('tabpanel')
+  expect(privatePanel?.getAttribute('aria-labelledby')).toBe(privateTab.id)
+  expect(privatePanel?.hasAttribute('hidden')).toBe(false)
   expect(container.querySelector('.mote-conversation__issue')).toBeNull()
   await act(async () => root.render(render(page, { eventId: first.eventId, token: 'later-explicit-work' })))
   expect(container.querySelector('[data-private-reader]')?.getAttribute('data-private-reader')).toBe('false')
