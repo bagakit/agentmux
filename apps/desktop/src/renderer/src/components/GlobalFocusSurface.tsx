@@ -134,7 +134,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const laneContexts = useMemo(() => [...ordinaryLaneContexts, ...sourceFacts.contexts], [ordinaryLaneContexts, sourceFacts.contexts])
   const selectedSourceKey = useAppStore(state => {
     const choice = state.workbenchSpaceSelection, tab = choice?.tabId ? state.tabs[choice.tabId] : undefined
-    return tab && !tab.source ? null : originalSourceEntryForSelection(state)?.key ?? null
+    return tab?.source ? spaceMountKey(tab.source.reference) : tab ? null : originalSourceEntryForSelection(state)?.key ?? null
   })
   const sourceChoice = useAppStore(state => state.workbenchSpaceSelection), tabs = useAppStore(state => state.tabs)
   const sourceSelection = useMemo(() => {
