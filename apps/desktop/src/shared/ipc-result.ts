@@ -21,7 +21,7 @@ export function unwrapIpcResult<T>(result: IpcResult<T>): T {
 }
 
 /** The Profile GUI methods whose Main handlers return an IpcResult; reads and writes alike. */
-export const BROWSER_PROFILE_RESULT_METHODS = ['switchProfile', 'saveProxy', 'deleteProxy', 'assignProxy', 'listProfiles', 'readProfiles', 'readProfileTrash', 'restoreProfile', 'setProfileTrashRetention', 'purgeProfile', 'inspectProfilePurge', 'updateProfile', 'setDefaultProfile', 'createProfileIdentity', 'inspectProfileCreation', 'saveProfileView', 'deleteProfileView', 'bulkUpdateProfiles', 'renameProfileFolder', 'deleteProfileFolder',
+export const BROWSER_PROFILE_RESULT_METHODS = ['switchProfile', 'saveProxy', 'deleteProxy', 'assignProxy', 'listProfiles', 'readProfiles', 'readProfileTrash', 'restoreProfile', 'setProfileTrashRetention', 'purgeProfile', 'inspectProfilePurge', 'updateProfile', 'setDefaultProfile', 'createProfileIdentity', 'confirmProfileCreation', 'inspectProfileCreation', 'saveProfileView', 'deleteProfileView', 'bulkUpdateProfiles', 'renameProfileFolder', 'deleteProfileFolder',
   'prepareProfileCookieImport', 'importProfileCookies', 'exportProfileCookies', 'inspectProfileCookieFiles', 'discardProfileCookieImport', 'revealProfileCookieFile',
   'listProfileBookmarks', 'editProfileBookmark', 'importProfileBookmarks', 'exportProfileBookmarks', 'openProfileBookmark',
   'listProfileExtensions', 'prepareProfileExtension', 'applyProfileExtension', 'removeProfileExtension', 'loadProfileExtension', 'deleteProfile', 'listProfileSites', 'clearProfileSite', 'checkProfileExit', 'probeProfileNetwork', 'profileNetworkHistory', 'readProfileProxySignIn', 'setProfileProxySignIn', 'detectProfileImportSources', 'importProfile'] as const

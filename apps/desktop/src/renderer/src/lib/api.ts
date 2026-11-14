@@ -1462,6 +1462,7 @@ const mockApi: AgentMuxDesktopApi = {
       browserListeners.forEach((listener) => listener({ type: 'updated', browser: structuredClone(browser) }))
       return structuredClone(browser)
     },
+    confirmProfileCreation: async () => { throw new Error('Original creation confirmation requires the connected Desktop owner.') },
     createProfileIdentity: async () => { throw new Error('Profile identity creation requires the connected Desktop owner.') },
     inspectProfileCreation: async () => { throw new Error('Original Profile creation receipts require the connected Desktop owner.') },
     saveProxy: async () => { throw new Error('Proxy library editing needs the connected Desktop Profile owner.') },

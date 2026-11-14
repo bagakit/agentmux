@@ -1,4 +1,4 @@
-import { submitProfileCreation, profileCreationObservationNotice } from '../../lib/browser-profile-creations'
+import { submitProfileCreation } from '../../lib/browser-profile-creations'
 import { BrowserProxyLibrary } from './BrowserProxyLibrary'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { parseBrowserProfileQuery, queryBrowserProfiles, type BrowserProfileQuery, type BrowserProfileBulkAction, type BrowserProfileBulkItemResult } from '@agentmux/core/control'
@@ -62,7 +62,6 @@ export function BrowserProfileLibrary({ list, active, selectedId, onSelect, focu
     void run(async () => {
       const receipt = id === undefined ? await (async () => {
         const result = await submitProfileCreation({ operation: 'browser.profile.view.create', label, query, expectedRevision })
-        const observation = profileCreationObservationNotice(result.creation); if (observation) setError(observation)
         if (result.creation.current.state !== 'present') throw new Error('The original saved view is now ' + result.creation.current.state + '. Its creation receipt is retained.')
         return { view: { id: result.creation.receipt!.createdId }, revision: result.revision }
       })() : await api.browser.saveProfileView(label, query, expectedRevision, id)

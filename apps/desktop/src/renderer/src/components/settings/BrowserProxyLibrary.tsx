@@ -1,4 +1,4 @@
-import { submitProfileCreation, profileCreationObservationNotice } from '../../lib/browser-profile-creations'
+import { submitProfileCreation } from '../../lib/browser-profile-creations'
 import { normalizeBrowserProfileNetwork } from '../../../../shared/browser-profile-network'
 import { useEffect, useRef, useState } from 'react'
 import { parseBrowserProxyEdit, type BrowserProxyAsset } from '@agentmux/core/control'
@@ -71,8 +71,7 @@ export function BrowserProxyLibrary({ assets, active }: { assets: BrowserProxyAs
     try {
       const receipt = submitted.assetId === null ? await (async () => {
         const result = await submitProfileCreation({ operation: 'browser.profile.proxy.create', edit: input! })
-        const observation = profileCreationObservationNotice(result.creation); if (observation) setIssue(observation)
-        const snapshot = await api.browser.readProfiles()
+                const snapshot = await api.browser.readProfiles()
         const proxy = snapshot.proxies?.find(value => value.id === result.creation.receipt!.createdId)
         if (!proxy) throw new Error('The original created proxy is now unavailable. Its creation receipt is retained.')
         return { proxy, revision: snapshot.revision }

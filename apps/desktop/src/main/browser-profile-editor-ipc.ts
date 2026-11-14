@@ -1,3 +1,4 @@
+import { parseBrowserProfileControlPayload, isBrowserProfileCreationOperation, type AgentMuxNameActor, type BrowserProfileControlPayload, type BrowserProfileCreationOperation } from '@agentmux/core/control'
 import type { IpcMainInvokeEvent } from 'electron'
 import type { BrowserProfileManager } from './browser-profile-manager.js'
 import type { BrowserProfileEdit, BrowserProfileList } from '../shared/contracts.js'
@@ -21,8 +22,25 @@ export function registerBrowserProfileEditorIpc(ports: {
     listener: (event: IpcMainInvokeEvent, ...args: Args) => Result | Promise<Result>
   ): void
   profiles: BrowserProfileManager
+  actor?: () => AgentMuxNameActor | undefined
   openBookmark?: (input: import('./browser-profile-bookmark-open.js').BrowserProfileBookmarkOpen, url: string) => Promise<void>
 }): void {
+  const creationInput = (raw: unknown) => {
+    const input = parseBrowserProfileControlPayload(raw as Record<string, unknown>, ['operation'])
+    if (!isBrowserProfileCreationOperation(input.operation)) throw new Error('An exact Profile creation request is required.')
+    return input as Extract<BrowserProfileControlPayload, { operation: BrowserProfileCreationOperation }>
+  }
+  ports.handle('browser:createProfileIdentity', (_event, raw: unknown) => ipcResult(async () => {
+    const input = creationInput(raw); await ports.profiles.initialize()
+    return ports.profiles.createIdentity(input, ports.actor?.())
+  }))
+  ports.handle('browser:confirmProfileCreation', (_event, raw: unknown) => ipcResult(async () => {
+    const input = creationInput(raw); await ports.profiles.initialize()
+    return ports.profiles.confirmIdentity(input, ports.actor?.())
+  }))
+  ports.handle('browser:inspectProfileCreation', (_event, operationId: string) => ipcResult(async () => {
+    await ports.profiles.initialize(); return ports.profiles.inspectCreation(operationId, ports.actor?.())
+  }))
   ports.handle('browser:prepareProfileCookieImport',(_event,profileId:string,operationId:string,source:import('@agentmux/core/control').BrowserProfileCookieFileLocation,scope:import('@agentmux/core/control').BrowserProfileCookieScope)=>ipcResult(async()=>{await ports.profiles.initialize();return ports.profiles.cookieFiles.prepareImport(profileId,operationId,source,scope)}))
   ports.handle('browser:importProfileCookies',(_event,profileId:string,reviewId:string)=>ipcResult(async()=>{await ports.profiles.initialize();return ports.profiles.cookieFiles.import(profileId,reviewId)}))
   ports.handle('browser:exportProfileCookies',(_event,profileId:string,operationId:string,destination:import('@agentmux/core/control').BrowserProfileCookieFileLocation,scope:import('@agentmux/core/control').BrowserProfileCookieScope)=>ipcResult(async()=>{await ports.profiles.initialize();return ports.profiles.cookieFiles.export(profileId,operationId,destination,scope)}))

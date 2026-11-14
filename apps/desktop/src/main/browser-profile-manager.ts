@@ -447,6 +447,14 @@ export class BrowserProfileManager implements BrowserProfileResolver {
       return { revision: snapshot.revision, creation }
     })())
   }
+  async confirmIdentity(input: Extract<BrowserProfileControlPayload, { operation: BrowserProfileCreationOperation }>, actor: AgentMuxNameActor | undefined) {
+    this.assertInitialized()
+    return this.trackMutation((async () => {
+      const { snapshot, creation } = await this.store.confirmIdentity(input, actor)
+      if (snapshot.sequence > this.sequence) this.adopt(snapshot)
+      return { revision: snapshot.revision, creation }
+    })())
+  }
   async inspectCreation(operationId: string, actor: AgentMuxNameActor | undefined) {
     this.assertInitialized()
     const { snapshot, creation } = await this.store.readCreation(operationId, actor)

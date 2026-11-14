@@ -2141,6 +2141,7 @@ export type AgentMuxDesktopApi = {
     loadProfileExtension(profileId: string, extensionId: string): Promise<{ profileId: string; extensionId: string; application: import('@agentmux/core/control').BrowserProfileExtensionApplication }>
 
     createProfileIdentity(input: Extract<import('@agentmux/core/control').BrowserProfileControlPayload, { operation: import('@agentmux/core/control').BrowserProfileCreationOperation }>): Promise<{ revision: number; creation: import('@agentmux/core/control').BrowserProfileCreationInspection }>
+    confirmProfileCreation(input: Extract<import('@agentmux/core/control').BrowserProfileControlPayload, { operation: import('@agentmux/core/control').BrowserProfileCreationOperation }>): Promise<{ revision: number; creation: import('@agentmux/core/control').BrowserProfileCreationInspection }>
     inspectProfileCreation(operationId: string): Promise<{ revision: number; creation: import('@agentmux/core/control').BrowserProfileCreationInspection }>
     saveProxy(edit: import('@agentmux/core/control').BrowserProxyEdit, proxyId: string, expectedRevision: string): Promise<{ proxy: import('@agentmux/core/control').BrowserProxyAsset; revision: number }>
     deleteProxy(proxyId: string, expectedRevision: string): Promise<{ proxyId: string; revision: number; deleted: true }>

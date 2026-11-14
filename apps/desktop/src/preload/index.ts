@@ -838,6 +838,7 @@ const api: AgentMuxPreloadApi = {
     applyProfileExtension: (id, revision, reviewId) => ipcRenderer.invoke('browser:applyProfileExtension', id, revision, reviewId),
     removeProfileExtension: (id, revision, extensionId, operationId) => ipcRenderer.invoke('browser:removeProfileExtension', id, revision, extensionId, operationId),
     loadProfileExtension: (id, extensionId) => ipcRenderer.invoke('browser:loadProfileExtension', id, extensionId),
+    confirmProfileCreation: input => ipcRenderer.invoke('browser:confirmProfileCreation', input),
     createProfileIdentity: input => ipcRenderer.invoke('browser:createProfileIdentity', input),
     inspectProfileCreation: operationId => ipcRenderer.invoke('browser:inspectProfileCreation', operationId),
     saveProxy: (edit, proxyId, expectedRevision) => ipcRenderer.invoke('browser:saveProxy', edit, proxyId, expectedRevision),

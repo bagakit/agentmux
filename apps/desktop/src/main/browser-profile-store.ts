@@ -7,7 +7,8 @@ import { parseBrowserProxyProbe, type BrowserProxyProbe, type BrowserProxyProbeH
 import { mintObjectId, isObjectId } from '@agentmux/core/object-id'
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
-import { mkdir, readFile } from 'node:fs/promises'
+import { mkdir, readFile, open, lstat, stat } from 'node:fs/promises'
+import { constants, type BigIntStats } from 'node:fs'
 import { dirname, join, isAbsolute } from 'node:path'
 import { app } from 'electron'
 import { durableWriteFile, DurableWriteError } from '@agentmux/core'
@@ -566,21 +567,26 @@ export class BrowserProfileStore {
     })
   }
 
-  /** All five new-identity actions commit their fixed producer receipt beside the identity. */
-  createIdentity(input: Extract<BrowserProfileControlPayload, { operation: import('@agentmux/core/control').BrowserProfileCreationOperation }>, given: AgentMuxNameActor | undefined): Promise<{ snapshot: BrowserProfileSnapshot; creation: BrowserProfileCreationInspection }> {
+  private creationRequest(input: Extract<BrowserProfileControlPayload, { operation: import('@agentmux/core/control').BrowserProfileCreationOperation }>, given: AgentMuxNameActor | undefined) {
     const actor = browserProfileCreationActor(given), operationId = browserProfileCreationOperationId(input.operationId)
     const normalized = parseBrowserProfileControlPayload(input as unknown as Record<string, unknown>, ['operation', 'schemaVersion', 'requestId']) as typeof input
     if ('label' in normalized) normalized.label = validateBrowserProfileLabel(normalized.label)
     if (normalized.operation === 'browser.profile.view.create') normalized.query = parseBrowserProfileQuery(normalized.query)
     if (normalized.operation === 'browser.profile.proxy.create') normalized.edit = parseBrowserProxyEdit(normalized.edit)
     const requestDigest = 'sha256:' + createHash('sha256').update(browserProfileCreationCanonical({ actor, input: normalized })).digest('hex')
+    return { actor, operationId, normalized, requestDigest }
+  }
+
+  /** All five new-identity actions commit their fixed producer receipt beside the identity. */
+  createIdentity(input: Extract<BrowserProfileControlPayload, { operation: import('@agentmux/core/control').BrowserProfileCreationOperation }>, given: AgentMuxNameActor | undefined): Promise<{ snapshot: BrowserProfileSnapshot; creation: BrowserProfileCreationInspection }> {
+    const { actor, operationId, normalized, requestDigest } = this.creationRequest(input, given)
     return this.enqueue(async () => {
       const metadata = normalized.operation === 'browser.profile.create' ? await this.readOrInitialize() : await this.readMetadata()
       const previous = (metadata.creationReceipts ?? []).find(value => value.operationId === operationId)
       if (previous) {
         if (previous.requestDigest !== requestDigest || !isDeepStrictEqual(previous.actor, actor) || previous.action !== normalized.operation)
           throw Object.assign(new Error('This Profile creation operation belongs to a different original actor or request. Keep the original identity and inspect its receipt.'), { code: 'BROWSER_PROFILE_CREATION_CONFLICT' })
-        return { snapshot: snapshotOf(metadata), creation: this.creationObservation(metadata, operationId, actor) }
+        return this.confirmCreationMetadata(metadata, previous, actor)
       }
       const id = this.createUnusedProfileId(metadata), committedAt = Date.now()
       let next = metadata, kind: BrowserProfileCreationReceipt['createdKind']
@@ -623,8 +629,53 @@ export class BrowserProfileStore {
         ...(normalized.operation === 'browser.profile.folder.create' || normalized.operation === 'browser.profile.view.create' ? { expectedCollectionRevision: normalized.expectedRevision } : {}) }
       next = { ...next, creationReceipts: [...(metadata.creationReceipts ?? []), receipt] }
       const snapshot = await this.commit(next, true, undefined, true)
-      return { snapshot, creation: { ...this.creationObservation(next, operationId, actor), durability: 'confirmed' as const } }
+      return { snapshot, creation: { ...this.creationObservation(next, operationId, actor), durability: 'confirmed' as const, confirmation: 'original-write' as const } }
     })
+  }
+
+  /** Explicit existing-request confirmation can never enter a new-identity branch. */
+  confirmIdentity(input: Extract<BrowserProfileControlPayload, { operation: import('@agentmux/core/control').BrowserProfileCreationOperation }>, given: AgentMuxNameActor | undefined): Promise<{ snapshot: BrowserProfileSnapshot; creation: BrowserProfileCreationInspection }> {
+    const { actor, operationId, normalized, requestDigest } = this.creationRequest(input, given)
+    return this.enqueue(async () => {
+      const metadata = await this.readMetadata()
+      const receipt = (metadata.creationReceipts ?? []).find(value => value.operationId === operationId)
+      if (!receipt) throw Object.assign(new Error('No original creation receipt is observed. Confirmation did not create an identity; retain the original request.'), { code: 'BROWSER_PROFILE_CREATION_NOT_OBSERVED' })
+      if (receipt.requestDigest !== requestDigest || !isDeepStrictEqual(receipt.actor, actor) || receipt.action !== normalized.operation)
+        throw Object.assign(new Error('The original creation belongs to another actor or request.'), { code: 'BROWSER_PROFILE_CREATION_CONFLICT' })
+      return this.confirmCreationMetadata(metadata, receipt, actor)
+    })
+  }
+
+  private fileWitness(info: BigIntStats): string {
+    return [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(':')
+  }
+
+  /** Confirm the currently retained original record; this never claims that a historical reply arrived. */
+  private async confirmCreationMetadata(expected: BrowserProfileMetadata, receipt: BrowserProfileCreationReceipt, actor: AgentMuxNameActor): Promise<{ snapshot: BrowserProfileSnapshot; creation: BrowserProfileCreationInspection }> {
+    const file = await open(this.path, constants.O_RDONLY | constants.O_NOFOLLOW)
+    try {
+      const before = await file.stat({ bigint: true }), raw = await file.readFile('utf8')
+      const current = metadataSchema.parse(JSON.parse(raw))
+      if (!before.isFile() || !isDeepStrictEqual(current, expected)) throw new Error('The original metadata changed before confirmation.')
+      await file.sync()
+      const directory = await open(dirname(this.path), 'r')
+      try {
+        const parent = await directory.stat({ bigint: true })
+        await directory.sync()
+        const named = await lstat(this.path, { bigint: true }), after = await file.stat({ bigint: true })
+        const finalRaw = await readFile(this.path, 'utf8'), finalNamed = await lstat(this.path, { bigint: true })
+        const finalParent = await stat(dirname(this.path), { bigint: true })
+        if (this.fileWitness(before) !== this.fileWitness(named) || this.fileWitness(before) !== this.fileWitness(after) ||
+          this.fileWitness(before) !== this.fileWitness(finalNamed) || finalRaw !== raw || parent.dev !== finalParent.dev || parent.ino !== finalParent.ino)
+          throw new Error('The original metadata file or parent witness changed during confirmation.')
+        const final = metadataSchema.parse(JSON.parse(finalRaw))
+        const original = (final.creationReceipts ?? []).find(value => value.operationId === receipt.operationId)
+        if (!isDeepStrictEqual(original, receipt)) throw new Error('The original creation receipt changed during confirmation.')
+        return { snapshot: snapshotOf(final), creation: { ...this.creationObservation(final, receipt.operationId, actor), durability: 'confirmed', confirmation: 'current-metadata-sync' } }
+      } finally { await directory.close() }
+    } catch (cause) {
+      throw Object.assign(new Error('The original creation storage confirmation is unconfirmed. No identity was created or replayed. ' + (cause instanceof Error ? cause.message : String(cause)), { cause }), { code: 'BROWSER_PROFILE_CREATION_UNCONFIRMED' })
+    } finally { await file.close() }
   }
 
   inspectCreation(operationId: string, given: AgentMuxNameActor | undefined): Promise<BrowserProfileCreationInspection> {
@@ -644,14 +695,14 @@ export class BrowserProfileStore {
     const receipt = (metadata.creationReceipts ?? []).find(value => value.operationId === operationId)
     if (receipt && actor.kind === 'agent' && !isDeepStrictEqual(receipt.actor, actor))
       throw Object.assign(new Error('A managed Agent may inspect only its own original Profile creation.'), { code: 'CONTROL_PERMISSION_DENIED' })
-    if (!receipt) return { operationId, receipt: null, current: { state: 'unknown' }, durability: 'unconfirmed' }
+    if (!receipt) return { operationId, receipt: null, current: { state: 'unknown' }, durability: 'unconfirmed', confirmation: 'observation' }
     const id = receipt.createdId
     const present = receipt.createdKind === 'profile' ? metadata.profiles.some(value => value.id === id)
       : receipt.createdKind === 'folder' ? (metadata.folders ?? []).some(value => value.id === id)
       : receipt.createdKind === 'view' ? (metadata.views ?? []).some(value => value.id === id)
       : (metadata.proxyAssets ?? []).some(value => value.id === id)
     const archived = receipt.createdKind === 'profile' && (metadata.trash ?? []).some(value => value.profile.id === id)
-    return { operationId, receipt: structuredClone(receipt), current: { createdId: id, state: present ? 'present' : archived ? 'archived' : 'removed' }, durability: 'unconfirmed' }
+    return { operationId, receipt: structuredClone(receipt), current: { createdId: id, state: present ? 'present' : archived ? 'archived' : 'removed' }, durability: 'unconfirmed', confirmation: 'observation' }
   }
 
   async createProfile(label: string, operationId: string, actor: AgentMuxNameActor): Promise<{ snapshot: BrowserProfileSnapshot; profile: BrowserProfileSummary }> {

@@ -2244,7 +2244,7 @@ export async function registerIpc(args: {
   browserProfiles.onEnvironmentApplicationChange(() => {
     if (!contents.isDestroyed()) contents.send('browser:profilesChanged', readBrowserProfileSnapshot(browserProfiles))
   })
-  registerBrowserProfileEditorIpc({ handle: handleWithEvent, profiles: browserProfiles, openBookmark: openProfileBookmark })
+  registerBrowserProfileEditorIpc({ handle: handleWithEvent, profiles: browserProfiles, openBookmark: openProfileBookmark, actor: () => nameChangeRequests.getStore()?.context.actor })
   // Profile handlers return their refusals as data so the Renderer keeps each error code.
   handleWithEvent('browser:listProfiles', (event) => ipcResult(async () => {
     await browserProfiles.initialize()
@@ -2269,17 +2269,6 @@ export async function registerIpc(args: {
   }))
   handleWithEvent('browser:restoreProfile', (_event, archiveId: string, expectedRevision: string, folderId?: string | null) =>
     ipcResult(() => browserProfiles.restoreProfile(archiveId, expectedRevision, folderId)))
-  handleWithEvent('browser:createProfileIdentity', (_event, raw: unknown) => ipcResult(async () => {
-    const { parseBrowserProfileControlPayload } = await import('@agentmux/core/control')
-    const input = parseBrowserProfileControlPayload(raw as Record<string, unknown>, ['operation'])
-    if (!['browser.profile.create','browser.profile.copy','browser.profile.folder.create','browser.profile.view.create','browser.profile.proxy.create'].includes(input.operation)) throw new Error('An exact Profile creation request is required.')
-    await browserProfiles.initialize()
-    return browserProfiles.createIdentity(input as Extract<import('@agentmux/core/control').BrowserProfileControlPayload, { operation: import('@agentmux/core/control').BrowserProfileCreationOperation }>, nameChangeRequests.getStore()?.context.actor)
-  }))
-  handleWithEvent('browser:inspectProfileCreation', (_event, operationId: string) => ipcResult(async () => {
-    await browserProfiles.initialize()
-    return browserProfiles.inspectCreation(operationId, nameChangeRequests.getStore()?.context.actor)
-  }))
   handleWithEvent('browser:saveProfileView', (_event, label: string, query: import('@agentmux/core/control').BrowserProfileQuery, expectedRevision: number, viewId?: string) => ipcResult(() => browserProfiles.saveView(label, query, expectedRevision, viewId)))
   handleWithEvent('browser:deleteProfileView', (_event, viewId: string, expectedRevision: number) => ipcResult(() => browserProfiles.deleteView(viewId, expectedRevision)))
   handleWithEvent('browser:bulkUpdateProfiles', (_event, items: import('@agentmux/core/control').BrowserProfileSelectionItem[], action: import('@agentmux/core/control').BrowserProfileBulkAction) => ipcResult(() => browserProfiles.bulkUpdate(items, action)))

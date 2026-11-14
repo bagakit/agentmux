@@ -1,4 +1,5 @@
-import { submitProfileCreation, profileCreationObservationNotice } from '../../lib/browser-profile-creations'
+import { BrowserProfilePendingCreations } from './BrowserProfilePendingCreations'
+import { submitProfileCreation } from '../../lib/browser-profile-creations'
 import { BrowserProfileCookieFiles } from './BrowserProfileCookieFiles'
 import { BrowserProfileBookmarks } from './BrowserProfileBookmarks'
 import { BrowserProfileExtensions } from './BrowserProfileExtensions'
@@ -152,7 +153,7 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
     while (taken.has(`Profile ${n}`)) n += 1
     const label = `Profile ${n}`
     let created: string | null = null
-    if (await run('create', async () => { const result = await submitProfileCreation({ operation: 'browser.profile.create', label }); created = result.creation.receipt!.createdId; const observation = profileCreationObservationNotice(result.creation); if (observation) setNotice(observation); if (result.creation.current.state !== 'present') throw new Error('The original created Profile is now ' + result.creation.current.state + '. Its creation receipt is retained.') })) {
+    if (await run('create', async () => { const result = await submitProfileCreation({ operation: 'browser.profile.create', label }); created = result.creation.receipt!.createdId; if (result.creation.current.state !== 'present') throw new Error('The original created Profile is now ' + result.creation.current.state + '. Its creation receipt is retained.') })) {
       setSelectedId(created!); setView('editor'); setRenameRequest(created!)
     }
   }
@@ -162,11 +163,11 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
     const taken = new Set(profiles.map(value => value.label))
     let n = 1, label: string
     do { const suffix = n === 1 ? ' copy' : ` copy ${n}`; label = profile.label.slice(0, 128 - suffix.length).trimEnd() + suffix; n += 1 } while (taken.has(label))
-    let copied: string | null = null, observation: string | null = null
-    if (await run('copy', async () => { const result = await submitProfileCreation({ operation: 'browser.profile.copy', profileId: profile.id, label, expectedRevision: revision }); copied = result.creation.receipt!.createdId; observation = profileCreationObservationNotice(result.creation); if (result.creation.current.state !== 'present') throw new Error('The original copied Profile is now ' + result.creation.current.state + '. Its creation receipt is retained.') })) {
+    let copied: string | null = null
+    if (await run('copy', async () => { const result = await submitProfileCreation({ operation: 'browser.profile.copy', profileId: profile.id, label, expectedRevision: revision }); copied = result.creation.receipt!.createdId; if (result.creation.current.state !== 'present') throw new Error('The original copied Profile is now ' + result.creation.current.state + '. Its creation receipt is retained.') })) {
       // Keep the source editor mounted: its unsaved route/sign-in inputs belong to the person.
       setCopyTarget({ id: copied!, label })
-      setNotice(observation ?? `Copied saved settings to “${label}”. Sign-ins, site data and approvals stay with the original Profile.`)
+      setNotice(`Copied saved settings to “${label}”. Sign-ins, site data and approvals stay with the original Profile.`)
     }
   }
 
@@ -174,6 +175,7 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
     <div className="settings-resource-workbench settings-browser-profiles" data-resource-view={view} data-settings-field="browser-profiles">
       <SettingsConceptSummary icon="object.settings-browser-use" title="Sign-ins, pages and environment"
         description="Choose a Profile to continue its pages. Network and device settings stay with that same environment." />
+      <BrowserProfilePendingCreations />
       <div className="settings-pane-toolbar">
         <strong>Profiles <span>{list.profiles ? profiles.length : '…'}</span></strong>
         <button className="small-button" type="button" aria-label="New Profile" title="New Profile" disabled={busy !== null || !list.profiles} onClick={() => void create()}>

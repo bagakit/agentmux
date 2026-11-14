@@ -15,7 +15,7 @@ export type BrowserProfileCreationInspection = {
   operationId: string; receipt: BrowserProfileCreationReceipt | null;
   current: { state: 'present' | 'archived' | 'removed' | 'unknown'; createdId?: string };
   /** A read can observe a committed producer record, but cannot prove its original directory ACK. */
-  durability: 'confirmed' | 'unconfirmed'
+  durability: 'confirmed' | 'unconfirmed'; confirmation: 'original-write' | 'current-metadata-sync' | 'observation'
 }
 export function isBrowserProfileCreationOperation(value: unknown): value is BrowserProfileCreationOperation {
   return (BROWSER_PROFILE_CREATION_OPERATIONS as readonly unknown[]).includes(value)
@@ -60,13 +60,13 @@ export function parseBrowserProfileCreationReceipt(value: unknown, code = 'CONTR
   return { ...p, operationId } as BrowserProfileCreationReceipt
 }
 export function parseBrowserProfileCreationInspection(value: unknown, code = 'CONTROL_PROTOCOL_ERROR'): BrowserProfileCreationInspection {
-  const p = rpcRecord(value, ['operationId','receipt','current','durability'], code)
+  const p = rpcRecord(value, ['operationId','receipt','current','durability','confirmation'], code)
   const operationId = browserProfileCreationOperationId(p.operationId)
   const receipt = p.receipt === null ? null : parseBrowserProfileCreationReceipt(p.receipt, code)
   const current = rpcRecord(p.current, ['state','createdId'], code)
-  if (!['present','archived','removed','unknown'].includes(current.state as string) || !['confirmed','unconfirmed'].includes(p.durability as string) ||
+  if (!['original-write','current-metadata-sync','observation'].includes(p.confirmation as string) || (p.durability === 'confirmed') === (p.confirmation === 'observation') || !['present','archived','removed','unknown'].includes(current.state as string) || !['confirmed','unconfirmed'].includes(p.durability as string) ||
     receipt && (receipt.operationId !== operationId || current.createdId !== receipt.createdId) ||
-    !receipt && (current.state !== 'unknown' || current.createdId !== undefined))
+    !receipt && (current.state !== 'unknown' || current.createdId !== undefined || p.durability !== 'unconfirmed'))
     throw new AgentMuxError('Profile creation observation names another original operation or identity.', code)
-  return { operationId, receipt, current: current as BrowserProfileCreationInspection['current'], durability: p.durability as BrowserProfileCreationInspection['durability'] }
+  return { operationId, receipt, current: current as BrowserProfileCreationInspection['current'], durability: p.durability as BrowserProfileCreationInspection['durability'], confirmation: p.confirmation as BrowserProfileCreationInspection['confirmation'] }
 }

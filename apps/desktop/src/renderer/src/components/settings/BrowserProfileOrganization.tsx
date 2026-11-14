@@ -1,4 +1,4 @@
-import { submitProfileCreation, profileCreationObservationNotice } from '../../lib/browser-profile-creations'
+import { submitProfileCreation } from '../../lib/browser-profile-creations'
 import { useRef, useState } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -31,10 +31,9 @@ export function BrowserProfileOrganization({ profile, folders, revision, busy, r
   const saveFolder = async () => {
     const draft = folderDraft
     if (!draft?.name.trim()) return
-    let observation: string | null = null
-    if (await run('folder', () => draft.kind === 'new' ? submitProfileCreation({ operation: 'browser.profile.folder.create', label: draft.name.trim(), expectedRevision: revision }).then(result => { observation = profileCreationObservationNotice(result.creation); return result })
+    if (await run('folder', () => draft.kind === 'new' ? submitProfileCreation({ operation: 'browser.profile.folder.create', label: draft.name.trim(), expectedRevision: revision })
       : api.browser.renameProfileFolder(draft.id, draft.name.trim(), revision))) {
-      setFolderDraft(null); setNotice(observation ?? (draft.kind === 'new' ? 'Folder created. Choose it to assign this Profile.' : 'Folder renamed.'))
+      setFolderDraft(null); setNotice(draft.kind === 'new' ? 'Folder created. Choose it to assign this Profile.' : 'Folder renamed.')
     }
   }
   const deleteFolder = async (folder: BrowserProfileFolder) => {
