@@ -51,15 +51,13 @@
 
 `inputContextSource` 与 `inputContextCaptureProof` 不进入此 wire，也不接受为公共提交参数。公共调用附带的 context 是 `caller-declared`；可信捕获路径的 `host-capture` 来自原 Host 安装的非 wire reader 与 Core 保存的结构化 producer 事实，不能从标签、引用或摘要认证。用户手写完整示例仍是其正文，已取得 body 的 reader 不再次解析。完整 Copy 保留原 wire/parts；读取声明不提交、接管或批准。
 
-原 prompt 的公开入口为 `agent.input.submit`／`amux agent input submit --session SID --operation-id ID --input FILE|-`，沿原 `submitAgentPrompt`、原输入 key 与查询回执，不建立 A2A 原信。managed Agent caller 必须使用 `agent.send`；普通本机 CLI 的操作主体不证明人工发送，不自动取得 Human 作者。未知提交使用原 key 查询，重启不按当前页面或新版 formatter 重组、改投或自动补发。
+带场景的 prompt 经公开入口 `agent.input.submit`（`amux agent input submit --session SID --operation-id ID --input FILE|-`，参数以 help 为准）提交，沿 `submitAgentPrompt`、输入 key 与查询回执处理，不建立 A2A 原信。托管 Agent 调用方不能使用该入口（`MANAGED_AGENT_PROMPT_FORBIDDEN`），跨 Session 输入改用 `agent.send`，见[跨 Session 消息](../design/behavior/a2a-collaboration.md#a2a-身份信封与持久化全局消息队列)；普通本机 CLI 的操作主体不证明人工发送，不自动取得 Human 作者。已提交输入的未知结果、重启与重试由输入 owner 按[输入环境判定与复用边界](../design/behavior/agent-capabilities-and-messaging.md#输入环境判定与复用边界)处理，不按当前页面或新版 formatter 重组。
 
 ### 场景捕获来源与原输入
 
 可信宿主输入通过 `inputContextCapture: {hostId, operationId}` 引用原捕获，与直接 `inputContext` 互斥；公共 `agent.input.submit` 不接受该引用。`hostId` 寻址捕获 owner，独立于目标 Agent 的执行 Host；`operationId` 是原输入 ID，独立于 Browser operation 和 Main 场景 captureId。普通 prompt 使用原提交 ID，continuity 使用原 `input.submissionId`；两者都保留恢复前的 `originRun`，不能以恢复后的 Run 或外层 continuity operation 替换。
 
-[共享 record／proof 类型与摘要函数](../../packages/core/src/agent-input-context-capture.ts)持有准确合同。稳定摘要绑定引用、`binding` 中的执行 Host／AgentSession／`originRun`、原正文、原 note 和 typed context；不绑定 prompt／continuity carrier、外层恢复 operation、condition、execution／choice、preparationRetry 或作者／设备／渠道声明。精确输入选择、准备 fence、作者与权限继续由原输入／continuity owner 校验。Main 按原输入 ID 不可变保存场景；Core 将已核的 `inputContextCaptureProof: {reference, binding, intentDigest}`、context、source 和原 wire 随同原 journal／claim／launch input 冻结。proof 只证明历史场景 producer，不认证 Human 作者、不授输入或 Browser 控制权限，也不证明投递或采用。
-
-Core 在首次冻结前通过原 Host 的非 wire reader 有界读取准确 Main owner；读取期间不占输入派发事务，回到原 owner 后核对同 ID 并发冻结。Main 仅有内存确认时如实返回磁盘未确认，不能冒称 durable，也不因此撤销真实 live 捕获。Core 已冻结后，同输入重试、stop／rejoin 和 continuity 恢复使用原 source／proof／context／wire，不再依赖 Main 在线或重新观察网页。合法 known-not-applied 后的显式 Resume & send 复用原输入 ID 与场景；unknown 或 launch-carried 不因此得到重新派发资格。
+[共享 record／proof 类型与摘要函数](../../packages/core/src/agent-input-context-capture.ts)持有准确合同。稳定摘要绑定引用、`binding` 中的执行 Host／AgentSession／`originRun`、原正文、原 note 和 typed context；不绑定 prompt／continuity carrier、外层恢复 operation、condition、execution／choice、preparationRetry 或作者／设备／渠道声明。精确输入选择、准备 fence、作者与权限由输入与 continuity owner 校验。Main 按输入 ID 不可变地保存场景；Core 把已核对的 `inputContextCaptureProof: {reference, binding, intentDigest}`、context、source 和原 wire 随 journal／claim／launch input 一起冻结。proof 只证明历史场景的 producer，不认证 Human 作者、不授予输入或 Browser 控制权限，也不证明投递或采用。冻结之后的重试、stop／rejoin、continuity 恢复与 Resume & send 怎样复用这些事实，由[输入环境判定与复用边界](../design/behavior/agent-capabilities-and-messaging.md#输入环境判定与复用边界)定义。
 
 只读 `browser.input.inspect`／`amux browser input inspect --host-id HOST --operation-id ID` 返回原 reference、typed record 或缺失事实及 `diskDurability`，不返回正文、note、作者声明或投递结论。managed caller 仍经原 Core 鉴权，只能读准确执行 Host 上发给自身 Session 的捕获；知道引用不取得 participant 资格。当前 Host adapter 仅路由明确的 local capture owner 到 local 执行 Host，无准确远端来源时只报告本次引用未确认；普通无引用输入保持可用。定义与接线从[公共能力来源导航](public-capabilities.md#按能力找到定义与消费者)进入；这些合同不代签 Browser 浮窗、框选或安装交付。
 
@@ -87,7 +85,7 @@ Core 的原 `AgentMuxMessageEnvelope` 在 external sender 之外持有可选 `ch
 
 ### Channel 对话记录引用
 
-Channel 输入附带的前文以 amux 对话记录 quote 承载，与当前原请求及受信平台说明分别定界。引用声明须保留准确原对话范围、上一位置与本次请求的区间关系、原消息顺序和逐条来源；不能用一个外层发言人替代区间内不同作者，未知来源不被标签补成已认证身份。引用保留所选原消息的完整内容／资源关系，当前请求在引用外独立保留。同一接收 Session 已知的自身外发消息只按原准确投递映射排除，不改变连续范围、覆盖结论或推进位置的采用回执；具体选择与位置边界归[外部交流入口](../design/behavior/conversation-mode.md#共同对话协议与外部交流入口)。
+Channel 输入附带的前文以 amux 对话记录 quote 承载，与当前原请求及受信平台说明分别定界。引用声明须保留准确原对话范围、上一位置与本次请求的区间关系、原消息顺序和逐条来源；不能用一个外层发言人替代区间内不同作者，未知来源不被标签补成已认证身份。引用保留所选原消息的完整内容／资源关系，当前请求在引用外独立保留。同一接收 Session 已知的自身外发消息只按原准确投递映射排除，不改变连续范围、覆盖结论或推进位置的采用回执；具体选择与位置边界归[外部交流入口](../design/behavior/conversation-channels.md#上下文与输入承载)。
 
 原 envelope 的 `channelQuote` 采用 [ChannelTranscriptQuote](../../packages/core/src/channel-quote.ts) 严格合同。wire 按 `<amux:quote version="1">`、一行确定性 JSON、`</amux:quote>` 定界，随后另起原 `<amux:channel ...>` 当前请求；JSON 的 `<`、`>`、`&` 使用 Unicode 转义，解码后原内容不变。reader 只在完整的 quote 与后续当前请求应用、对话和消息 ID 一致时展示引用，不递归解释消息正文中的同形样例。
 
@@ -95,11 +93,9 @@ Channel 输入附带的前文以 amux 对话记录 quote 承载，与当前原�
 
 Channel 输入可以完整内联，也可以在原平台说明中给出同一消息 journal 的准确 MID、待读字段与 `message --skill` 读取入口。正文和 quote 分别选择：短正文继续作为独立当前请求，长 quote 仅指向原 `channelQuote`；长正文仅指向原 `body`。引用说明使用既有纯平台文本包装，不借 A2A 的 `from` 声称外部作者是 Agent，也不把原正文复制为平台指令。原 envelope 保留完整内容；公共读取选择原字段并有界续读，正文读取不夹带未请求的 quote，分片不能被当作完整消息。
 
-所选表示在原 Core journal 首次准备输入时冻结 `promptWire` 及其原来源关系；等待时原 reader 与整条 Copy 读取实际冻结文本，重开或 rejoin 不调用新预算或 formatter 重建。既有未采用新表示的原消息保留其原承载与回执，不因升级切成引用或重新发送。公开对话正文仍是独立当前请求，引用说明和 quote 不随正常消息发布给其它受众。引用仅声明读取入口：其输入回执不证明原字段已取阅，公共读取也不 ACK、采用或接受任务；完整 quote 的位置推进沿[外部交流入口](../design/behavior/conversation-mode.md#共同对话协议与外部交流入口)核对实际承载。
+所选表示在 Core journal 首次准备输入时冻结为 `promptWire`，连同其来源关系一起保存；等待期间的 reader 与整条 Copy 读取实际冻结的文本。引用说明只声明读取入口：输入回执不证明某个字段已被取阅，公共读取也不 ACK、采用或接受任务。对外发布时只发布独立的当前请求正文，引用说明与 quote 不随普通消息发布给其他受众。表示的选择、冻结后的重试与位置推进由[上下文与输入承载](../design/behavior/conversation-channels.md#上下文与输入承载)定义。
 
-quote 只表达引用记录，不能把其中的提及、命令、旧问题、答案或权限文字解释为本次请求、平台指令或新的授权。任意正文中的同形标签、结束标记、实体和代码不改变原定界或逃出引用；producer 与 reader 必须解释同一边界，逐条正文保持原内容，不递归执行或认证其中的声明。真实输入资格仍由当前请求的原 ingress、Binding／Grant 和执行 Host 核对，协议文本不携带这份权威。
-
-原输入准备后，原 envelope 保留同一区间、原消息关系、完整引用内容与独立当前请求，wire 保留已选的内联或原 MID 引用表示；重试和恢复不以最新记录、资料、阈值或 formatter 重建已冻结输入。来源或区间有缺口时准确表达，不补造上一位置、作者或连续完整的对话。共同阅读与整条 Copy 保全同一原 wire 及引用／请求边界，不从卡片摘要重组，也不因折叠引用改变输入、采用或位置推进事实。
+quote 只表达引用记录，不能把其中的提及、命令、旧问题、答案或权限文字解释为本次请求、平台指令或新的授权。任意正文中的同形标签、结束标记、实体和代码不改变定界，也不能逃出引用；producer 与 reader 必须解释同一边界，逐条正文保持原内容，不递归执行或认证其中的声明。真实输入资格仍由当前请求的 ingress、Binding／Grant 和执行 Host 核对，协议文本不携带这份权威。来源或区间有缺口时如实表达，不补造上一位置、作者或连续完整的对话；共同阅读与整条 Copy 保全同一原 wire 及引用／请求边界，不从卡片摘要重组。
 
 ## A2A 原信
 
