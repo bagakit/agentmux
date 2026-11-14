@@ -9,7 +9,7 @@ import { questionReplyKey } from '@agentmux/client-ui/conversation-question-repl
 import { DeliveryLogDetails } from '@agentmux/client-ui/components/DeliveryLogDetails'
 import { initFollowState, onContentChange, onScroll, shouldShowJumpToLatest } from '@agentmux/client-ui/activity-autoscroll'
 import { currentAgentSemanticStatus, nativeTargetSourceUnconfirmed } from '@agentmux/core/agent-status'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createMobileMoteInputReader } from './mote-input-reader'
 import { createPortal } from 'react-dom'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
@@ -49,6 +49,9 @@ import { DELIVERY_DISMISSAL_STORAGE, MobileNotice, MobileNoticeScope, useMobileN
 import { useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
 import { mobileInteractionLabels } from '../presentation/interaction'
 
+const inShellSlot = (target: HTMLElement | null | undefined, node: ReactNode) =>
+  target === undefined ? node : target && node ? createPortal(node, target) : null
+
 const mobileConversationToolLabels: NonNullable<ClientUiPlatform['conversationToolLabels']> = {
   copy: '复制', copying: '正在复制…', copied: '已复制', retryCopy: '重新复制',
   formatJson: '格式化 JSON', formatJsonHint: '格式化便于阅读；复制时保留原文', self: '我'
@@ -66,6 +69,9 @@ export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
   onShowTerminal?: () => void
   onShowGoals?: (trigger: HTMLButtonElement) => void
   toolbarTarget?: HTMLElement | null
+  /** Header slots owned by the shell. Omitted renders inline; null renders nothing until the slot mounts. */
+  statusTarget?: HTMLElement | null
+  noticeTarget?: HTMLElement | null
   visible?: boolean
   displayName?: string
   moteMemberName?: ClientUiPlatform['moteMemberName'] | undefined
@@ -83,7 +89,7 @@ export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
   onReturnMoteMain?(reference?: MoteDefaultConversation): void
 }
 /** A first-party SDK reader and input client. Core owns ordering, authorship and admission. */
-export function MobileConversationSurface({ client, agentSessionId, moteSource, connection, platform, onAttach, onShowTerminal, onShowGoals, toolbarTarget, visible = true, displayName, moteMemberName, moteTarget, moteDialogue, moteDirectAgent, moteName, moteAppearance, moteWorkMemberName, onOpenMoteWork, onShowMoteThreads, moteConfigurationIssue, onRefreshMoteConfiguration, onMoteRolloverRequired, onReturnMoteMain,
+export function MobileConversationSurface({ client, agentSessionId, moteSource, connection, platform, onAttach, onShowTerminal, onShowGoals, toolbarTarget, statusTarget, noticeTarget, visible = true, displayName, moteMemberName, moteTarget, moteDialogue, moteDirectAgent, moteName, moteAppearance, moteWorkMemberName, onOpenMoteWork, onShowMoteThreads, moteConfigurationIssue, onRefreshMoteConfiguration, onMoteRolloverRequired, onReturnMoteMain,
   openWorkspaceFile, readPastedImage, openHttpLink }: MobileConversationSurfaceProps) {
   const conversationIoPlatform = useMemo(() => ({ ...platform,
     readA2AMessage: async (reference: { hostId: string; agentSessionId: string }, messageId: string, notificationId?: string) => {
@@ -458,10 +464,10 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
       }}>
         {(reading.page?.nextCursor || reading.capturedHasMore) && <button className="mobile-reading-action" disabled={reading.reading} onClick={() => { follow.current.following = false; void reading.older() }}>更早消息</button>}
         {reading.hasNewer && <button className="mobile-reading-action" disabled={reading.reading} onClick={() => { void reading.newer() }}>较新消息</button>}
-        {workingObservedAt !== undefined ? <p className="mobile-active-state" role="status" data-activity-current={currentActivity}
-          title={`最后观察：${new Date(workingObservedAt).toLocaleString()}`}><SemanticIcon name="status.presence-working" size={5} />{currentActivity ? '正在执行' : '最近观察：执行中'}</p> : null}
-        {!moteDirectAgent && moteTarget && <MobileMoteSourceNotice roleIssue={moteMainIssue} readingIssue={moteDialogue?.issue} configurationIssue={moteConfigurationIssue}
-          refresh={() => { moteDialogue?.refresh(); onRefreshMoteConfiguration?.() }} onMain={onReturnMoteMain} />}
+        {inShellSlot(statusTarget, workingObservedAt !== undefined ? <span className="mobile-active-state" role="status" data-activity-current={currentActivity}
+          title={`最后观察：${new Date(workingObservedAt).toLocaleString()}`}><SemanticIcon name="status.presence-working" size={5} />{currentActivity ? '正在执行' : '最近观察：执行中'}</span> : null)}
+        {inShellSlot(noticeTarget, !moteDirectAgent && moteTarget ? <MobileMoteSourceNotice roleIssue={moteMainIssue} readingIssue={moteDialogue?.issue} configurationIssue={moteConfigurationIssue}
+          refresh={() => { moteDialogue?.refresh(); onRefreshMoteConfiguration?.() }} onMain={onReturnMoteMain} /> : null)}
         {agentSessionId ? <MobileMoteConversation client={pageClient ?? null} agentSessionId={pageSessionId ?? agentSessionId} hostId={reading.pageOwner?.hostId}
           issuePresented={!moteDirectAgent && Boolean(moteTarget)} target={!moteDirectAgent && pageClient === client && pageSessionId === agentSessionId ? moteTarget : undefined} dialogue={moteDialogue} name={moteName ?? 'Mote'}
           visible={visible} describeSpeaker={describeSpeaker}

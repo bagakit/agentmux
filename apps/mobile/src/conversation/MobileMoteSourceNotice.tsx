@@ -9,7 +9,7 @@ export function MobileMoteSourceNotice({ roleIssue, readingIssue, configurationI
   if (!count) return null
   // One quiet status chip; the explanations and recovery actions stay one tap away.
   return <details className="mobile-mote-source-status"><summary aria-label={`主对话信息待核对 · ${count} 项`}>
-      <span className="mobile-mote-source-status__dot" aria-hidden="true" /><span>主对话信息待核对</span>
+      <span className="mobile-mote-source-status__dot" aria-hidden="true" /><span className="mobile-mote-source-status__label"><span className="mobile-mote-source-status__subject">主对话信息</span>待核对</span>
       {count > 1 ? <span className="mobile-mote-source-status__count" aria-hidden="true">{count}</span> : null}
       <SemanticIcon className="mobile-mote-source-status__chevron" name="navigation.disclosure" size={12} aria-hidden="true" /></summary>
     <div className="mobile-mote-source-status__panel">

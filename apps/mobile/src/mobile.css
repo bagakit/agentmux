@@ -228,13 +228,8 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-session-tool-slot[hidden] { display: none; }
 .mobile-header:has(> .mobile-session-header-actions) { grid-template-columns: 44px minmax(0,1fr) auto; }
 .mobile-session-view-toggle { flex: none; }
-.mobile-session-toolbar .mobile-session-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: var(--fs-body); font-weight: 550; text-align: left; }
 @media (max-width: 390px) {
   .mobile-session-toolbar:has(.mobile-session-tool-slot:not([hidden])) { gap: 0; }
-}
-@media (max-width: 360px) {
-  .mobile-session-toolbar > .mobile-session-origin > span { display: none; }
-  .mobile-session-toolbar .mobile-session-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; line-height: 1.25; }
 }
 .mobile-connect-mark { display: inline-flex; padding: 14px; border: 1px solid var(--mobile-border); border-radius: var(--mobile-radius-group); color: var(--green); background: var(--surface-1); }
 .mobile-home-settings { margin: 18px 0; padding: 0; border: 0; }
@@ -392,7 +387,6 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-goal-recovery summary { overflow-wrap: anywhere; }
 .mobile-goal-recovery pre { font-size: var(--fs-meta); line-height: 1.45; }
 .mobile-drawer .mobile-sheet-title h2 { margin: 8px 0; font-size: var(--fs-title); }
-.mobile-session-toolbar > .mobile-session-origin { flex: none; font-size: var(--fs-meta); color: var(--text-3); }
 .mobile-sheet-title > h2 { flex: 1; min-width: 0; }
 
 .mobile-mote-quick-editor { min-width: 0; max-width: 100%; display: grid; gap: 12px; }
@@ -523,7 +517,7 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-mote-period-view { flex: 1; min-height: 0; min-width: 0; overflow: auto; padding: 12px; }
 .mobile-mote-period-view > button { margin-block-end: 12px; }
 
-.mobile-mote-navigation button { white-space: nowrap; }
+.mobile-mote-sections > button { white-space: nowrap; }
 .mobile-mote-source-status { flex: none; align-self: flex-start; margin-block: 2px 6px; margin-inline: 12px; color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
 .mobile-mote-source-status > summary { display: inline-flex; align-items: center; gap: 7px; min-height: 44px; padding-inline: 0 10px; cursor: pointer; list-style: none; color: var(--text-2); border-radius: 999px; }
 .mobile-mote-source-status > summary::-webkit-details-marker { display: none; }

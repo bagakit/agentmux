@@ -2,26 +2,86 @@
  * docked composer. First-screen styling, imported by MobileApp; shared components keep their
  * Desktop defaults and are adapted only under .mobile-app. */
 
+/* Conversation header: one 52px row. Back is the chevron alone (its name says where it goes), then
+ * a 30px identity whose lower-right corner carries the status dot, the name and one meta line,
+ * then the icon group. A Mote strip below shares the header's material and takes its hairline. */
 .mobile-app .mobile-header--session { position: relative; z-index: 3; border-bottom: 1px solid var(--mobile-hairline); }
+.mobile-app .mobile-header--session:has(+ .mobile-mote-context) { border-bottom-color: transparent; }
 .mobile-app .mobile-session-toolbar { min-height: 52px; padding-block: 4px; border-bottom: 0; gap: var(--sp-1); }
-.mobile-app .mobile-session-toolbar > .mobile-session-origin { gap: 0; min-width: 44px; padding: 0 6px 0 2px; border-radius: var(--mobile-radius); color: var(--text-2);
-  font-size: var(--fs-meta); font-weight: 500; transition: transform var(--dur-fast) ease, background-color var(--dur-fast) ease; }
-.mobile-app .mobile-session-toolbar > .mobile-session-origin > svg { color: var(--text); }
-.mobile-app .mobile-session-toolbar > .mobile-session-origin > span:not(.mobile-back-badge) { max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-app .mobile-session-toolbar > .mobile-session-origin { position: relative; justify-content: center; gap: 0; width: 44px; min-width: 44px; padding: 0; border-radius: var(--mobile-radius);
+  color: var(--text); transition: transform var(--dur-fast) ease, background-color var(--dur-fast) ease; }
 .mobile-app .mobile-session-toolbar > .mobile-session-origin:active { transform: scale(.94); background: var(--mobile-group); }
-.mobile-app .mobile-session-toolbar .mobile-session-title { color: var(--text); font-size: var(--fs-title); font-weight: 650; letter-spacing: -.01em; }
-.mobile-app .mobile-session-toolbar > .mobile-session-identity { gap: var(--sp-4); border-radius: var(--mobile-radius); transition: background-color var(--dur-fast) ease; }
-.mobile-app .mobile-session-toolbar > .mobile-session-identity:active { background: var(--mobile-group); }
-@media (max-width: 360px) { .mobile-app .mobile-session-toolbar > .mobile-session-origin > span:not(.mobile-back-badge) { display: none; } }
+.mobile-app .mobile-session-toolbar > .mobile-session-origin > .mobile-back-badge { position: absolute; top: 4px; left: 25px; margin: 0; box-shadow: 0 0 0 2px var(--mobile-page); }
+.mobile-app .mobile-session-toolbar > .mobile-session-identity { position: relative; display: flex; align-items: center; gap: 10px; flex: 1; width: auto; min-width: 0; min-height: 44px;
+  padding: 0 6px 0 2px; border: 0; border-radius: var(--mobile-radius); background: transparent; color: inherit; text-align: left; transition: background-color var(--dur-fast) ease; }
+.mobile-app .mobile-session-toolbar > button.mobile-session-identity:active { background: var(--mobile-group); }
+.mobile-app .mobile-session-heading { display: flex; flex: 1; flex-direction: column; justify-content: center; gap: 1px; min-width: 0; }
+.mobile-app .mobile-session-toolbar .mobile-session-title { display: block; flex: none; overflow: hidden; color: var(--text); font-size: var(--fs-lead); font-weight: 650;
+  letter-spacing: -.01em; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-app .mobile-session-meta { display: flex; align-items: center; min-width: 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.3; white-space: nowrap; }
+.mobile-app .mobile-session-meta:not(:has(.mobile-session-status:not([hidden]) .mobile-active-state, .mobile-session-context)) { display: none; }
+.mobile-app .mobile-session-status:is([hidden], :empty) { display: none; }
+.mobile-app .mobile-session-status:not([hidden]):has(.mobile-active-state) + .mobile-session-context::before { content: '·'; margin: 0 4px; }
+.mobile-app .mobile-session-context { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mobile-app .mobile-session-meta .mobile-active-state { display: inline; margin: 0; color: var(--green); font-size: inherit; font-weight: 600; }
+.mobile-app .mobile-session-meta .mobile-active-state[data-activity-current='false'] { color: var(--text-3); font-weight: 500; }
+.mobile-app .mobile-session-meta .mobile-active-state > svg { display: none; }
+/* An avatar warning owns the same corner, so the dot yields to it; the status word still reads. */
+.mobile-app .mobile-session-identity:has(.mobile-session-status:not([hidden]) .mobile-active-state)::after { content: ''; position: absolute; top: calc(50% + 7px); left: 24px;
+  width: 9px; height: 9px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 2px var(--mobile-page); pointer-events: none; }
+.mobile-app .mobile-session-identity:has(.mobile-session-status:not([hidden]) .mobile-active-state[data-activity-current='false'])::after { background: var(--text-3); }
+.mobile-app .mobile-session-identity:has(.mobile-avatar-issue)::after { display: none; }
 
-/* Mote sections: a segmented control instead of an underline strip. */
-.mobile-app .mobile-mote-navigation { gap: var(--sp-4); min-height: 48px; padding: 6px var(--mobile-gutter); border-bottom: 1px solid var(--mobile-hairline); background: var(--mobile-page); }
-.mobile-app .mobile-mote-navigation > button[role='tab'] { min-height: 36px; padding: 0 14px; border-radius: 999px; color: var(--text-2); font-size: var(--fs-body); font-weight: 550;
-  box-shadow: none; transition: background-color var(--dur-fast) ease, color var(--dur-fast) ease; }
-.mobile-app .mobile-mote-navigation > button[role='tab'][aria-selected='true'] { color: var(--text); background: var(--mobile-group); box-shadow: none; font-weight: 650; }
-.mobile-app .mobile-mote-navigation > .mobile-mote-team-button { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin-left: auto; padding: 0 12px;
-  border-radius: 999px; color: var(--text-2); font-size: var(--fs-meta); font-weight: 600; }
-.mobile-app .mobile-mote-navigation > .mobile-mote-team-button:active { background: var(--mobile-group); }
+/* Mote context strip: 44px in the header's material, never a second card. The main conversation
+ * carries Discussion／Threads, a member carries its role; both end with the team entry. */
+.mobile-app .mobile-mote-context { grid-row: 2; position: relative; z-index: 2; display: flex; align-items: center; gap: var(--sp-2); min-width: 0; min-height: 44px;
+  padding: 0 max(var(--sp-3), env(safe-area-inset-right)) 0 max(var(--sp-3), env(safe-area-inset-left)); border-bottom: 1px solid var(--mobile-hairline);
+  background: var(--mobile-bar); -webkit-backdrop-filter: var(--mobile-bar-blur); backdrop-filter: var(--mobile-bar-blur); font-size: var(--fs-meta); }
+[data-mobile-workface='mote'] .mobile-mote-context { background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.mobile-app .mobile-mote-sections { display: flex; flex: none; align-items: center; gap: 2px; }
+.mobile-app .mobile-mote-sections > button { position: relative; isolation: isolate; min-height: 44px; padding: 0 12px; border: 0; background: transparent; box-shadow: none;
+  color: var(--text-2); font-size: var(--fs-body); font-weight: 550; transition: color var(--dur-fast) ease; }
+.mobile-app .mobile-mote-sections > button::before { content: ''; position: absolute; inset: 7px 0; z-index: -1; border-radius: 999px; background: transparent;
+  transition: background-color var(--dur-fast) ease; }
+.mobile-app .mobile-mote-sections > button[aria-selected='true'] { color: var(--text); font-weight: 650; }
+.mobile-app .mobile-mote-sections > button[aria-selected='true']::before { background: var(--mobile-group); }
+.mobile-app .mobile-mote-context__role { flex: none; padding: 3px 8px; border-radius: 999px; background: var(--mobile-group); color: var(--text-2); font-size: var(--fs-micro); font-weight: 600; }
+.mobile-app .mobile-mote-context__notice { display: flex; flex: 0 1 auto; min-width: 0; }
+.mobile-app .mobile-mote-context__notice:empty { display: none; }
+.mobile-app .mobile-mote-team-button { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 44px; min-height: 44px; margin-left: auto; padding: 0 10px; border: 0; border-radius: 999px;
+  background: transparent; box-shadow: none; color: var(--text-2); font-size: var(--fs-meta); font-weight: 600; font-variant-numeric: tabular-nums; }
+.mobile-app .mobile-mote-team-button:active { background: var(--mobile-group); }
+.mobile-app .mobile-mote-team-button__issue { color: var(--amber); }
+.mobile-app .mobile-mote-main-return { flex: none; min-height: 44px; padding: 0 4px; border: 0; background: transparent; color: var(--green); font-size: var(--fs-meta); font-weight: 600; }
+/* The source entry is a named pill on a full touch row; its detail drops below the strip. Under width
+ * pressure the pill shortens its own label and never slides over the team entry. */
+.mobile-app .mobile-mote-context .mobile-mote-source-status { min-width: 0; margin: 0; color: var(--text-2); }
+.mobile-app .mobile-mote-context .mobile-mote-source-status > summary { position: relative; isolation: isolate; min-width: 0; min-height: 44px; padding: 0 10px 0 8px; gap: 6px; background: transparent; }
+.mobile-app .mobile-mote-context .mobile-mote-source-status > summary::before { content: ''; position: absolute; inset: 8px 0; z-index: -1; border-radius: 999px; background: var(--mobile-attention-wash); }
+.mobile-app .mobile-mote-context .mobile-mote-source-status__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-app .mobile-mote-context .mobile-mote-source-status__subject, .mobile-app .mobile-mote-context .mobile-mote-source-status__chevron { display: none; }
+.mobile-app .mobile-mote-context .mobile-mote-source-status__panel { position: absolute; top: calc(100% + 4px); right: var(--sp-3); left: var(--sp-3); z-index: 4; max-height: 60vh; margin: 0;
+  overflow: auto; border-radius: var(--mobile-radius-group); background: var(--mobile-page); box-shadow: var(--elev-3); }
+@media (max-width: 399px) {
+  .mobile-app .mobile-mote-context:has(.mobile-mote-source-status) .mobile-mote-team-button__label { display: none; }
+}
+@media (max-width: 360px) {
+  .mobile-app .mobile-mote-context .mobile-mote-source-status__count { display: none; }
+  .mobile-app .mobile-mote-sections > button { padding-inline: 10px; }
+  .mobile-app .mobile-mote-team-button { padding-inline: 6px; }
+}
+/* At the narrowest widths the name keeps its room: the identity stays the Profile entry and keeps its status word. */
+@media (max-width: 359px) {
+  .mobile-app .mobile-session-toolbar > .mobile-session-identity > .mobile-object-avatar,
+  .mobile-app .mobile-session-toolbar > .mobile-session-identity::after { display: none; }
+}
+
+/* The tab bar returns with the root page it belongs to; drilled pages own the bottom safe area. */
+.mobile-navigation-bar[data-motion='enter'] { animation: mobile-bar-enter var(--dur-screen) var(--ease-enter); }
+@keyframes mobile-bar-enter { from { transform: translateY(100%); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .mobile-navigation-bar[data-motion] { animation: none; } }
+.mobile-app .mobile-terminal { padding-bottom: env(safe-area-inset-bottom); }
+.mobile-app .mobile-goal-work { padding-bottom: max(16px, calc(env(safe-area-inset-bottom) + 8px)); }
 
 /* Composer dock: the measured composer geometry stays with conversation.css; the dock only adds a
  * hairline and lets the editor read as one rounded field on the group surface. */

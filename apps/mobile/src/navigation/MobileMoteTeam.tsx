@@ -14,20 +14,27 @@ export function mobileMoteRecipient(team: MobileMoteTeam | null, sessionId: stri
   return team.main.reference.sessionId === sessionId && team.main.reference.hostId === hostId ? '主 Agent' : '成员'
 }
 
-export function MobileMoteTeamSummary({ team, recipient, role, issue, onOpen, onMain, showMain }: {
-  team: MobileMoteTeam | null; recipient: string; role: string; issue: string | null
-  onOpen(): void; onMain(): void; showMain: boolean
+/** The strip under a Mote conversation header. The header already names the conversation; this row never repeats it. */
+export function MobileMoteContext({ variant, team, issue, role, section, noticeRef, showMain, onDiscussion, onThreads, onTeam, onMain }: {
+  variant: 'main' | 'member'; team: MobileMoteTeam | null; issue: string | null; role: string
+  section: 'discussion' | 'threads'; noticeRef(node: HTMLSpanElement | null): void; showMain: boolean
+  onDiscussion(): void; onThreads(): void; onTeam(): void; onMain(): void
 }) {
-  const requests = team?.members.filter(member => member.request).length ?? 0
+  const waiting = team?.members.filter(member => member.request).length ?? 0
   const known = team?.members.filter(member => member.hostId).length ?? 0, unknown = (team?.members.length ?? 0) - known
-  return <div className="mobile-mote-team-summary" aria-label="当前收件人与团队">
-    <span className="mobile-mote-recipient" title={`${role} · ${recipient}`}><small>{role}</small><strong>{recipient}</strong></span>
-    <button type="button" className="mobile-mote-team-trigger" aria-label="查看本 Mote 团队" onClick={onOpen}>
-      <SemanticIcon name="object.collaboration" size={14} /><span>团队{team ? ` ${known}${unknown ? ` · ${unknown} 待确认` : ''}` : ''}</span>
-      {requests > 0 && <span className="mobile-mote-needs">{requests} 需要你</span>}
-      {issue && <SemanticIcon name="status.warning" size={12} />}
+  const facts = [waiting ? `${waiting} 个需要你` : '', unknown ? `${unknown} 位执行端待确认` : '', issue ?? ''].filter(Boolean).join('；')
+  return <div className="mobile-mote-context" data-variant={variant}>
+    {variant === 'main' ? <div className="mobile-mote-sections" role="tablist" aria-label="Mote 导航">
+      <button type="button" role="tab" aria-selected={section === 'discussion'} onClick={onDiscussion}>Discussion</button>
+      <button type="button" role="tab" aria-selected={section === 'threads'} onClick={onThreads}>Threads</button>
+    </div> : <span className="mobile-mote-context__role">{role}</span>}
+    <span ref={noticeRef} className="mobile-mote-context__notice" />
+    <button type="button" className="mobile-mote-team-button" aria-label="查看本 Mote 团队" {...(facts ? { 'aria-description': facts } : {})} onClick={onTeam}>
+      <SemanticIcon name="object.collaboration" size={16} /><span className="mobile-mote-team-button__label">团队{team ? ` ${known}` : ''}</span>
+      {issue || unknown ? <SemanticIcon className="mobile-mote-team-button__issue" name="status.warning" size={12} /> : null}
+      {waiting ? <span className="mobile-tab-badge" aria-hidden="true" data-count={waiting}>{waiting > 99 ? '99+' : waiting}</span> : null}
     </button>
-    {showMain && <button type="button" className="mobile-mote-main-return" onClick={onMain}>回主对话</button>}
+    {variant === 'member' && showMain ? <button type="button" className="mobile-mote-main-return" onClick={onMain}>回主对话</button> : null}
   </div>
 }
 
