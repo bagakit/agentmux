@@ -12,6 +12,7 @@ import { createClientUiRoot } from './helpers/client-ui-render'
 import { ChannelHeaderControl } from '../src/renderer/src/components/settings/ChannelHeaderControl'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
+import { configureChannelHeader } from '../src/main/settings-preferences-control'
 
 const f = connectorJourneyFixture({ platform: async request => {
   if (request.url?.endsWith('/members')) return { code: 0, data: { items: [], has_more: false } }
@@ -32,7 +33,7 @@ it('hides an actually bound platform through ConfigOwner while retaining its ori
   const publish = config.publish.getMockImplementation()!
   config.publish.mockImplementation(saved => { publish(saved); useAppStore.getState().setConfig(saved) })
   useAppStore.getState().setConfig(config.owner.current)
-  vi.spyOn(api.config, 'save').mockImplementation((next, expected) => config.owner.edit(expected!, next))
+  vi.spyOn(api.config, 'configureChannelHeader').mockImplementation(input => configureChannelHeader(config.owner, input))
   const node = document.createElement('div'); document.body.append(node); const root = createClientUiRoot(node)
   try {
     await act(async () => root.render(<ChannelHeaderControl platform={{ adapterId: 'feishu', title: 'Lark' }} />))
@@ -57,3 +58,25 @@ it('hides an actually bound platform through ConfigOwner while retaining its ori
     if (process.env.PLATFORM_CONTROL_FACTS) await writeFile(process.env.PLATFORM_CONTROL_FACTS + '.binding.json', JSON.stringify({ passed: true, binding: original[0]?.bindingId, bindingsUnchanged: true, policyUnchanged: true, serviceWrites: writes().length - before, noOtherEntry: true, restored: true, preservedConcurrentFont: disk.appearance.editorFontSize }, null, 2) + '\n')
   } finally { await act(async () => root.unmount()); node.remove() }
 }, 20_000)
+
+it('a valid adapter named constructor begins at authored absence and saves through the original GUI owner', async () => {
+  const config = await configOwnerFixture({ appearance: { terminalTheme: 'graphite', channelHeaderVisibility: {} } })
+  const previous = useAppStore.getState().config
+  const publish = config.publish.getMockImplementation()!
+  config.publish.mockImplementation(saved => { publish(saved); useAppStore.getState().setConfig(saved) })
+  useAppStore.getState().setConfig(config.owner.current)
+  const call = vi.spyOn(api.config, 'configureChannelHeader').mockImplementation(input => configureChannelHeader(config.owner, input))
+  const node = document.createElement('div'); document.body.append(node); const root = createClientUiRoot(node)
+  try {
+    await act(async () => root.render(<ChannelHeaderControl platform={{ adapterId: 'constructor', title: 'Original extension' }} />))
+    expect(node.querySelector<HTMLInputElement>('input')!.checked).toBe(true)
+    await act(async () => node.querySelector<HTMLInputElement>('input')!.click())
+    await act(async () => node.querySelector<HTMLButtonElement>('[data-settings-save-bar] button')!.click())
+    expect(call).toHaveBeenCalledWith({ adapterId: 'constructor', expected: null, visible: false })
+    await vi.waitFor(async () => expect((await config.disk()).appearance.channelHeaderVisibility).toEqual({ constructor: false }))
+    await act(async () => node.querySelector<HTMLInputElement>('input')!.click())
+    await act(async () => node.querySelector<HTMLButtonElement>('[data-settings-save-bar] button')!.click())
+    expect(call).toHaveBeenLastCalledWith({ adapterId: 'constructor', expected: false, visible: true })
+    await vi.waitFor(async () => expect((await config.disk()).appearance.channelHeaderVisibility).toEqual({ constructor: true }))
+  } finally { await act(async () => root.unmount()); node.remove(); useAppStore.setState({ config: previous }) }
+})

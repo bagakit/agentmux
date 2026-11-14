@@ -82,6 +82,8 @@ export class ObjectCliProbe {
 export function objectCliSeed(method: string, input: string): string[] {
   const ids = { agent: 'SID', region: 'R', zone: 'Z', space: 'S', goal: 'G' }
   const fixed: Record<string, string[]> = {
+    'settings.channels.header.inspect': [],
+    'settings.channels.header.configure': ['--adapter','example','--input','-'],
     'settings.goals.common-actions.inspect': [],
     'settings.goals.common-actions.configure': ['--input','-'],
     'runtime.owner.identity': [],
