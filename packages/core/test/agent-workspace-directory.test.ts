@@ -336,6 +336,51 @@ it('first pending reentry re-acknowledges the marker file and parent before leaf
   expect(events.indexOf('parent-sync')).toBeLessThan(events.indexOf('leaf-mkdir'))
 })
 
+it.each(['temp', 'rename', 'sync'] as const)('marker publication refuses parent replacement before %s without an external operation', async stage => {
+  const h = await ownedFixture()
+  await seedPending(h)
+  const externalRoot = await mkdtemp(join(tmpdir(), 'amx-marker-publication-escape-'))
+  cleanup.push(async () => { await rm(externalRoot, { recursive: true, force: true }) })
+  const identity = dirname(h.markerPath), externalOperations: string[] = []
+  let escaped = false
+  const escape = async () => {
+    if (escaped) return
+    await originalRename(identity, join(externalRoot, 'identities'))
+    await symlink(join(externalRoot, 'identities'), identity)
+    escaped = true
+  }
+  const write = durable.durableWriteFile
+  vi.spyOn(durable, 'durableWriteFile').mockImplementationOnce(async (path, content, options) => {
+    if (stage === 'temp') await escape()
+    await write(path, content, options)
+  })
+  const fs = createRequire(import.meta.url)('node:fs/promises') as typeof import('node:fs/promises')
+  const originalOpen = fs.open.bind(fs), originalRename = fs.rename.bind(fs)
+  vi.spyOn(fs, 'open').mockImplementation((async (path: any, flags: any, mode?: any) => {
+    if (escaped && String(path).startsWith(h.markerPath + '.') && String(path).endsWith('.tmp')) externalOperations.push('temp')
+    if (escaped && String(path) === identity && flags === 'r') externalOperations.push('sync')
+    const handle = await originalOpen(path, flags, mode)
+    if (stage === 'rename' && String(path).startsWith(h.markerPath + '.') && String(path).endsWith('.tmp')) {
+      const close = handle.close.bind(handle)
+      vi.spyOn(handle, 'close').mockImplementation(async () => { await close(); await escape() })
+    }
+    return handle
+  }) as any)
+  vi.spyOn(fs, 'rename').mockImplementation((async (from: any, to: any) => {
+    if (stage === 'rename' && escaped) externalOperations.push('rename')
+    await originalRename(from, to)
+    if (stage === 'sync') await escape()
+  }) as any)
+  syncBuiltinESMExports()
+  const prepareTerminal = vi.spyOn(h.client, 'prepareTerminal')
+  const outcome = await h.client.prepareAgentExecutionHelper(h.input).then(value => ({ value }), error => ({ error }))
+  expect(outcome).toHaveProperty('error')
+  expect((outcome as { error: Error }).error).toMatchObject({ code: 'AGENT_WORKSPACE_OWNERSHIP_UNCONFIRMED' })
+  expect(prepareTerminal).not.toHaveBeenCalled()
+  expect(escaped).toBe(true)
+  expect(externalOperations).not.toContain(stage)
+})
+
 it('retries a before-replace publication interruption through first admission only', async () => {
   const h = await ownedFixture()
   vi.spyOn(durable, 'durableWriteFile').mockImplementationOnce(async () => { throw new Error('before-replace publication interrupted') })
