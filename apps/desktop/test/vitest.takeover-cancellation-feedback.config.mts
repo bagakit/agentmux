@@ -6,6 +6,8 @@ import assert from 'node:assert/strict'
 import source from './vitest.mote-context.config.mts'
 
 const mutations: Record<string, [string, string, string]> = {
+  'desktop-owner-unavailable': ['public-rpc-service.ts', "method === 'runtime.owner.identity' && !this.ports.hostedRuntime && this.ports.callOriginalCore", "method === 'runtime.owner.identity' && this.ports.hostedRuntime && this.ports.callOriginalCore"],
+  'desktop-cancellation-unavailable': ['public-rpc-service.ts', 'if (this.ports.callOriginalCore) {\n          const result = await this.ports.callOriginalCore<', 'if (false && this.ports.callOriginalCore) {\n          const result = await this.ports.callOriginalCore<'],
   'unknown-write-replayed': ['session-takeover-cancellation.ts', "if (held.cancellation?.dispatch === 'unconfirmed' && !continueOriginal) return inspectTakeoverCancellation(held)", ''],
   'inspection-writes': ['session-takeover-cancellation.ts', 'api.sessions.takeoverCancelInspect(cancellation.input)', 'api.sessions.takeoverCancel(cancellation.input)'],
   'effect-requires-lost-write-ack': ['session-takeover-cancellation.ts', "phase: accepted.outcome === 'cancelled' ? 'cancelled'", "phase: accepted.outcome === 'cancelled' && accepted.diskDurability === 'confirmed' ? 'cancelled'"],

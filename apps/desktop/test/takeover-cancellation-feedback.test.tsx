@@ -7,8 +7,10 @@ import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxPreloadApi } from '../src/shared/contracts'
 import type { AgentTakeoverCancellationInput, AgentTakeoverCancellationResult } from '@agentmux/core/agent-takeover'
+import { AgentMuxControlServer, connectAgentMuxRpc, type AgentMuxRpcMethod } from '@agentmux/core'
 import { createTakeoverOwnerFixture } from '../../../packages/core/test/helpers/takeover-owner'
 import { registerAgentTakeoverIpc } from '../src/main/agent-takeover-ipc'
+import { desktopRpcMethods } from '../src/main/desktop-rpc-exposure'
 import { WorkbenchUserStateStore } from '../src/main/workbench-user-state'
 import { assertAppDocumentSender } from '../src/main/ipc-sender-trust'
 import { testAppDocumentSources } from './helpers/app-document-fixture'
@@ -39,9 +41,12 @@ import * as storeModule from '../src/renderer/src/store'
 type Takeover = Extract<Operation, { kind: 'takeover' }>
 type Owner = Awaited<ReturnType<typeof createTakeoverOwnerFixture>>
 const dom = composerDOM(), cleanup: Array<() => unknown | Promise<unknown>> = []
+const preloadSpatialOwner = api.spatial.owner
 const originalFailure = 'Original Takeover admission unavailable; preserve this complete diagnostic.'
 let f: Owner, original: ReturnType<typeof composerSession>, operation: Takeover, writer: WorkbenchUserStateStore
 let inputCalls: Array<{ method: string; input: AgentTakeoverCancellationInput }>
+let originalCalls: Array<{ hostId: string; method: AgentMuxRpcMethod }>
+let desktopRpc: Awaited<ReturnType<typeof connectAgentMuxRpc>>
 let onCall: ((method: string, input: AgentTakeoverCancellationInput, call: () => Promise<AgentTakeoverCancellationResult>) => Promise<AgentTakeoverCancellationResult>) | undefined
 let untrustRenderer: () => void
 let checkpointWrites: Promise<unknown>[]
@@ -108,7 +113,7 @@ beforeEach(async () => {
     return write
   })
   vi.spyOn(storeModule, 'currentCoreSpatialGraph').mockImplementation(() => graph)
-  vi.spyOn(api.spatial, 'owner').mockImplementation(() => f.rpc.call('runtime.owner.identity', {}))
+  vi.spyOn(api.spatial, 'owner').mockImplementation(preloadSpatialOwner)
   vi.spyOn(api.spatial, 'read').mockImplementation(() => f.spatial.readForLayout())
   vi.spyOn(api.spatial, 'inspectOperation').mockImplementation(input => f.rpc.call('space.inspect', input))
   vi.spyOn(api.spatial, 'openAgent').mockImplementation(input => f.rpc.call('agent.open', input))
@@ -116,16 +121,32 @@ beforeEach(async () => {
   vi.spyOn(useAppStore.getState(), 'refreshSpatialState').mockResolvedValue(undefined)
   vi.spyOn(useAppStore.getState(), 'renameAgent').mockResolvedValue(undefined)
   inputCalls = []; onCall = undefined
+  originalCalls = []
+  // The Desktop publishes the same public methods but borrows the semantic Host.
+  const desktop = new AgentMuxControlServer({ exposedMethods: desktopRpcMethods(), spatialState: f.spatial,
+    callOriginalCore: async (hostId, method, input, context) => {
+      originalCalls.push({ hostId, method })
+      return f.rpc.call(method, input, { ...(context.signal ? { signal: context.signal } : {}),
+        ...(context.runtimeFence ? { runtimeFence: context.runtimeFence } : {}) })
+    } }, join(f.root, 'desktop.sock'))
+  await desktop.start()
+  cleanup.push(() => desktop.stop())
+  desktopRpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: desktop.path } })
+  cleanup.push(() => desktopRpc.dispose())
   const sender = {}, sources = testAppDocumentSources(sender), frame = Reflect.get(sender, 'mainFrame')
   let event = { sender, senderFrame: frame } as IpcMainInvokeEvent
   untrustRenderer = () => { event = { sender, senderFrame: { ...frame } } as IpcMainInvokeEvent }
   const handlers = new Map<string, (event: IpcMainInvokeEvent, ...args: unknown[]) => Promise<unknown>>()
+  handlers.set('spatial:owner', async event => {
+    assertAppDocumentSender(event, sender as never, sources())
+    return desktopRpc.call('runtime.owner.identity', {})
+  })
   registerAgentTakeoverIpc({ runtime: { callOriginalCore: async () => ({ owner: f.owner }) } as never,
     call: async (method, input) => {
       if (method === 'agent.takeover.ls') return f.rpc.call(method, input) as never
       const frozen = structuredClone(input) as AgentTakeoverCancellationInput
       inputCalls.push({ method, input: frozen })
-      const call = () => f.rpc.call(method, frozen)
+      const call = () => desktopRpc.call(method, frozen)
       return (onCall ? onCall(method, frozen, call) : call()) as never
     }, handleWithEvent(channel, handler) { handlers.set(channel, async (event, ...args) => {
       assertAppDocumentSender(event, sender as never, sources())
@@ -143,6 +164,34 @@ afterEach(async () => {
   for (const dispose of cleanup.splice(0).reverse()) await dispose()
 })
 afterAll(() => vi.unstubAllGlobals())
+
+it('restored Takeover without a Runtime pin cancels and checks through the Desktop public facade', async () => {
+  const before = useAppStore.getState()
+  expect(operation.takeoverSource.coreRuntimeId).toBeUndefined()
+  await render()
+  await press('取消接手')
+  await vi.waitFor(() => expect(current().cancellation?.result?.outcome).toBe('cancelled'))
+  const input = current().cancellation!.input
+  expect(input.expectedRuntimeId).toBe(f.owner.runtimeId)
+  expect(input.request).toEqual(operation.takeoverSource.coreRequest)
+  await press('检查取消结果')
+  await vi.waitFor(() => expect(originalCalls.map(call => call.method)).toEqual(['runtime.owner.identity', 'agent.takeover.cancel', 'agent.takeover.cancel.inspect']))
+  expect(originalCalls.every(call => call.hostId === 'local')).toBe(true)
+  expect(inputCalls.map(call => call.input)).toEqual([input, input])
+  expect(current().phase).toBe('cancelled')
+  preserved(before)
+  expect(await f.client.readAgentSession(f.source.agentSessionId)).toEqual(f.source)
+})
+
+it('Desktop does not forward Takeover cancellation from a managed Agent or to a different Runtime', async () => {
+  const input = { expectedRuntimeId: f.owner.runtimeId, operationId: 'actor-bound-cancel', request: operation.takeoverSource.coreRequest! }
+  const credentials = { agentSessionId: f.source.agentSessionId, capability: 'agent-cannot-cancel' }
+  await expect(desktopRpc.call('runtime.owner.identity', {}, { credentials })).rejects.toBeDefined()
+  await expect(desktopRpc.call('agent.takeover.cancel', input, { credentials })).rejects.toBeDefined()
+  expect(originalCalls).toEqual([])
+  await expect(desktopRpc.call('agent.takeover.cancel', { ...input, expectedRuntimeId: 'another-runtime' })).rejects.toMatchObject({ code: 'RUNTIME_OWNER_MISMATCH' })
+  expect(await desktopRpc.call('agent.takeover.cancel.inspect', input)).toMatchObject({ cancellationAdmission: 'not-observed' })
+})
 
 it('coalesces simultaneous feedback cancellation through the real preload, Main and original public Core', async () => {
   let release!: () => void
