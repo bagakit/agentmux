@@ -61,7 +61,7 @@ function seed() {
   return { session, observation, clear: { ...clear, updatedAt: 3 } }
 }
 
-it.each(['Focus', 'Workspace'])('the mounted %s consumer releases obsolete frozen input after unchanged presentation cache hits', async consumer => {
+it.each(['Focus', 'Hidden Focus', 'Workspace'])('the mounted %s consumer releases obsolete frozen input after unchanged presentation cache hits', async consumer => {
   expect(globalThis.gc, 'GC belongs only to this private test fork').toBeTypeOf('function')
   const before = useAppStore.getState(), stackTraceLimit = Error.stackTraceLimit
   // Development React retains creation stacks; shipped production does not.
@@ -69,12 +69,24 @@ it.each(['Focus', 'Workspace'])('the mounted %s consumer releases obsolete froze
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   const container = document.body.appendChild(document.createElement('div')), root = createRoot(container)
   try {
+    let inactiveRetirements = 0
+    vi.stubGlobal('__agentmuxFocusSnapshotRetired', () => inactiveRetirements++)
     const { session, observation, clear } = seed()
-    await act(async () => root.render(consumer === 'Focus' ? <GlobalFocusSurface />
-      : <WorkspaceAgentsTool workspace={composerConfig.workspaces[0]!} onOpen={() => {}} />))
+    await act(async () => root.render(consumer === 'Workspace'
+      ? <WorkspaceAgentsTool workspace={composerConfig.workspaces[0]!} onOpen={() => {}} /> : <GlobalFocusSurface />))
     const row = container.querySelector(`[data-session-id="${session.id}"]`)
     expect(row).not.toBeNull()
     let selected: HTMLInputElement | null = null
+    let selectedName: string | undefined
+    if (consumer === 'Hidden Focus') {
+      const name = row!.querySelector('strong')!
+      expect(name).not.toBeNull()
+      selectedName = name.textContent!
+      const range = document.createRange(); range.selectNodeContents(name)
+      window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range)
+      await act(async () => root.render(<GlobalFocusSurface visible={false} />))
+      expect(inactiveRetirements).toBe(1)
+    }
     if (consumer === 'Workspace') {
       await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Select Agents"]')!.click())
       selected = container.querySelector<HTMLInputElement>('[aria-label="Select Agent Original mounted card"]')
@@ -98,6 +110,22 @@ it.each(['Focus', 'Workspace'])('the mounted %s consumer releases obsolete froze
     }
     await collect(observation)
     expect(observation.collected, 'The mounted original consumer must release an obsolete Session input graph after consuming the cleared authoritative record').toBe(true)
+    if (consumer === 'Hidden Focus') {
+      expect(inactiveRetirements, 'Stable hidden events never rescan the retired comparison cache').toBe(1)
+      expect(window.getSelection()!.toString()).toBe(selectedName)
+      await act(async () => useAppStore.getState().applyEvent({ type: 'core', hostId: session.hostId, event: {
+        type: 'agent-status', agentSessionId: session.id, state: 'error', detail: 'Current hidden observation',
+        evidence: { source: 'native-hook', run: session.control.run, observedAt: 20 }
+      } }))
+      expect(inactiveRetirements).toBe(1)
+      await act(async () => root.render(<GlobalFocusSurface />))
+      expect(container.querySelector(`[data-session-id="${session.id}"]`)).toBe(row)
+      expect((row as HTMLElement).dataset.state).toBe('error')
+      expect(window.getSelection()!.toString()).toBe(selectedName)
+      expect(useAppStore.getState().agentComposerDrafts[session.id]).toBe('Keep original draft')
+      expect(useAppStore.getState().sessions.find(item => item.id === session.id)!.control).toEqual(session.control)
+      window.getSelection()!.removeAllRanges()
+    }
     if (process.env.FOCUS_SESSION_CACHE_FACTS) appendFileSync(process.env.FOCUS_SESSION_CACHE_FACTS, JSON.stringify({
       consumer, collectedWhileMounted: observation.collected, updates: 5, cardDOMPreserved: true,
       draftAndControlPreserved: true, workspaceSelectionPreserved: consumer === 'Workspace',
