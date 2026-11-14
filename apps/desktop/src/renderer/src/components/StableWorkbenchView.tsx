@@ -134,7 +134,7 @@ class WorkbenchReadingSnapshot extends Component<{ host: HTMLElement; active: bo
 }
 
 /** One React/terminal tree; only its existing DOM host changes spatial parent. */
-export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegionId, active, visible = true, retainedRegionId, homeNotice, surface, moteInputIntent, moteContextKey, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference, returnSelection, windowTarget, kind = 'tab', children }: {
+export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegionId, active, visible = true, retainHiddenPlacement = true, retainedRegionId, homeNotice, surface, moteInputIntent, moteContextKey, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference, returnSelection, windowTarget, kind = 'tab', children }: {
   homeId: string
   /** Only the unique primary View carries an input-retention identity. */
   primaryTabId?: string | undefined
@@ -144,6 +144,8 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
   targetId: string | null
   active: boolean
   visible?: boolean
+  /** A content-role handoff can require its exact slot even while hidden. Ordinary reading keeps its placement. */
+  retainHiddenPlacement?: boolean
   retainedRegionId: string | null
   surface?: import('../lib/workbench-presentation').WorkbenchViewTarget['surface']
   moteInputIntent?: 'main' | 'member' | undefined
@@ -253,7 +255,7 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
         // browser move destroys its scroll/selection even with moveBefore.
         // Keep the actual placement until reveal; explicit/window and detached
         // placements still run below and keep their original confirmations.
-        if (!presentedVisible && wasVisible.current && !crossDocument && host.isConnected && parent?.isConnected && parent.id === placedHostId &&
+        if (retainHiddenPlacement && !presentedVisible && wasVisible.current && !crossDocument && host.isConnected && parent?.isConnected && parent.id === placedHostId &&
           oldDocument.getElementById(placedHostId) === parent &&
           !windowPlacement && placementWaiters.current.length === 0) return true
         const hadDocumentFocus = crossDocument && oldDocument.hasFocus()

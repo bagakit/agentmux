@@ -190,6 +190,8 @@ function BrowserPresentationView({ presentation, primary, primaryHomeId, slotId,
     </StableWorkbenchView> : null}
     <StableWorkbenchView key="content" kind="region" homeId={`${slotId}:parked`} targetId={targetId}
       reference={presentation.occurrence.location} active={presentation.active} visible={presentation.visible}
+      // Secondary content must yield the shared home to the new primary, even while hidden.
+      retainHiddenPlacement={primary}
       retainedRegionId={presentation.occurrence.location.regionId} surface={presentation.target.surface}
       moteContextKey={presentation.target.moteContextKey} moteInputIntent={presentation.target.moteInputIntent}
       survey={presentation.target.surface === 'survey'} controlsOpen={presentation.target.controlsOpen} projection={presentation.target.projection}>
