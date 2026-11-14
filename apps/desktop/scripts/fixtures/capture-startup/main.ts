@@ -120,7 +120,7 @@ async function capture(iteration: number, warmup = false) {
   row.startedAt = performance.now()
   const callback = background === 'included' ? 0 : 1
   shortcutCallbacks[callback]!()
-  await until('the actual GlobalScreenshot promise exists', () => row.globalPromise)
+  await until('the actual GlobalScreenshot promise exists', () => Boolean(row.globalPromise))
   void row.globalPromise.catch((error: unknown) => { captureError = error })
   const overlays = await until('selected current overlays shown with their current frame', async () => {
     if (captureError) throw captureError
