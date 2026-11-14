@@ -8,7 +8,8 @@ import { createHash } from 'node:crypto'
 import { basename, dirname, isAbsolute, join, sep } from 'node:path'
 import { ensureScratchStorageRoot, resolveScratchTopicDirectory, scratchDirectoryAddress, scratchDirectoryIdentity, scratchStorageTopicIds, scratchIdentityContext, scratchConfirmedDirectoryPaths, type ScratchStorageIds } from './mote-directories.js'
 import { DirectoryIdentityUpgradeRequiredError, normalizeDirectoryIdentity, retainDirectoryIdentity, inspectDirectoryIdentity, moteDirectoryName, type DirectoryIdentityWriteOptions } from './mote-directory-identity.mjs'
-import { AgentMuxError, durableWriteFile, type AgentProviderId, type AgentExecutorConfig } from '@agentmux/core'
+import { AgentMuxError, type AgentProviderId, type AgentExecutorConfig } from '@agentmux/core'
+import { OrdinaryWorkspaceFiles, revisionFor } from './ordinary-files.js'
 export type ScratchWorkspace = { id: string; hostId: string; path: string }
 type WorkspaceRecord = ScratchWorkspace
 export interface ScratchNameAudit { run<T>(changes: readonly { target: import('@agentmux/core/control').AgentMuxNameTarget; before: string | null; requested: string | null; ownerRevision?: string | number | null; location?: Record<string, string | null> }[], apply: () => Promise<T>, observe?: (result: T) => { actual: string | null; ownerRevision?: string | number | null }): Promise<T> }
@@ -253,7 +254,14 @@ const pendingEnsures = new Map<string, Promise<ScratchTopicSnapshot>>()
 const pendingBehaviorScaffolds = new Set<string>()
 
 export class ScratchTopics {
-  constructor(private readonly options: { directoryIdentityHelper?: string } = {}) {}
+  private readonly files: Pick<OrdinaryWorkspaceFiles, 'writeContent'>
+  constructor(private readonly options: {
+    directoryIdentityHelper?: string
+    files?: Pick<OrdinaryWorkspaceFiles, 'writeContent'>
+  } = {}) {
+    this.files = options.files ?? new OrdinaryWorkspaceFiles(options.directoryIdentityHelper === undefined
+      ? {} : { helperPath: options.directoryIdentityHelper })
+  }
   private nameAudit: NameChangeAudit | undefined
   setNameAudit(audit: NameChangeAudit): void { this.nameAudit = audit }
 
@@ -314,21 +322,30 @@ export class ScratchTopics {
   }
 
   private async readMoteArchive(directory: string, topicId: string): Promise<MoteArchiveState> {
+    return (await this.observeMoteArchive(directory, topicId)).archive
+  }
+
+  private async observeMoteArchive(directory: string, topicId: string): Promise<{
+    archive: MoteArchiveState; revision: string | null
+  }> {
     const absent: MoteArchiveState = { state: 'active', version: topicId === PMO_TEAMS_TOPIC_ID ? 'primary' : 'unwritten' }
     try {
       const metadata = await lstat(join(directory, '.agentmux'))
       if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error('Mote metadata is not a regular directory.')
-      let content: string
-      try { content = await readRegularFile(join(directory, MOTE_STATE_PATH)) }
-      catch (error) { if (errorCode(error) === 'ENOENT') return absent; throw error }
-      const value = JSON.parse(content)
+      const file = await open(join(directory, MOTE_STATE_PATH), constants.O_RDONLY | constants.O_NOFOLLOW)
+      let bytes: Buffer
+      try {
+        if (!(await file.stat()).isFile()) throw new Error('Mote archive metadata is not a regular file.')
+        bytes = await file.readFile()
+      } finally { await file.close() }
+      const value = JSON.parse(bytes.toString('utf8'))
       if (typeof value.archived !== 'boolean' || !(isObjectId(value.version) || typeof value.version === 'string' && /^[0-9a-f-]{36}$/.test(value.version)))
         throw new Error('Mote archive metadata is invalid.')
       if (topicId === PMO_TEAMS_TOPIC_ID && value.archived) throw new Error('The primary Mote cannot be archived. Its existing work remains available; repair its archive metadata and retry the directory read.')
-      return { state: value.archived ? 'archived' : 'active', version: value.version }
+      return { archive: { state: value.archived ? 'archived' : 'active', version: value.version }, revision: revisionFor(bytes) }
     } catch (error) {
-      if (errorCode(error) === 'ENOENT') return absent
-      return { state: 'unknown', issue: error instanceof Error ? error.message : String(error) }
+      if (errorCode(error) === 'ENOENT') return { archive: absent, revision: null }
+      return { archive: { state: 'unknown', issue: error instanceof Error ? error.message : String(error) }, revision: null }
     }
   }
 
@@ -343,12 +360,22 @@ export class ScratchTopics {
     const job = Promise.resolve(previous).catch(() => {}).then(async () => {
       await this.requireAvatarObject(workspace, topicId, objectKey)
       if (await this.avatarMoteDirectory(workspace, topicId) !== directory) throw new Error('The original Mote directory changed.')
-      const current = await this.readMoteArchive(directory, topicId)
+      const observed = await this.observeMoteArchive(directory, topicId)
+      const current = observed.archive
       if (current.state === 'unknown') throw new Error('Mote archive state is unconfirmed: ' + current.issue)
       if (current.version !== expectedVersion) throw new Error('Mote archive state changed. Refresh this Mote before retrying.')
       await ensureDirectory(join(directory, '.agentmux'))
       const version = mintObjectId()
-      await durableWriteFile(join(directory, MOTE_STATE_PATH), JSON.stringify({ archived, version }) + '\n', { mode: 0o600 })
+      const saved = await this.files.writeContent(workspace, {
+        path: join(scratchTopicDirectoryName(topicId), MOTE_STATE_PATH),
+        content: JSON.stringify({ archived, version }) + '\n',
+        expectedRevision: observed.revision,
+        ...(observed.revision === null ? { exclusive: true as const, createMode: 0o600 } : {})
+      })
+      if (saved.status === 'conflict') throw new Error('Mote archive state changed. Refresh this Mote before retrying.')
+      if (saved.status !== 'written') throw Object.assign(new Error('Mote archive write is unconfirmed: ' + saved.message), {
+        code: saved.code, ...(saved.status === 'unknown' ? { writeOutcomeUnknown: true } : {})
+      })
       const confirmed = await this.readMoteArchive(directory, topicId)
       if (confirmed.state === 'unknown' || confirmed.version !== version || confirmed.state !== (archived ? 'archived' : 'active'))
         throw new Error('The archive write could not be confirmed. Refresh this Mote to inspect its saved state.')

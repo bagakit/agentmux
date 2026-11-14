@@ -29,7 +29,7 @@ export function createHostContent(options: {
 }): ContentPorts {
   const storage = options.storage ?? new AgentMuxNotesStorage()
   const ordinary = options.files ?? new OrdinaryWorkspaceFiles()
-  const scratch = new ScratchTopics()
+  const scratch = new ScratchTopics({ files: ordinary })
   const history = new TopicSearchHistoryOwner(join(dirname(options.configurationPath), 'topic-search-history.json'))
   const configuration = async (): Promise<{ workspaces: WorkspaceRecord[]; complete: boolean }> => {
     const raw = await readOriginalMoteConfiguration(options.configurationPath)
