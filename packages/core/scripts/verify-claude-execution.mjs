@@ -2,12 +2,15 @@ import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
+import { createReadStream } from 'node:fs'
 import { mkdir, mkdtemp, readFile, readdir, realpath, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
 import { connectAgentMuxRpc } from '../dist/public-rpc-client.js'
 import { connectHostedAgentMux } from '../dist/hosted-client.js'
+import { resolveClaudeExecutionExecutable } from '../dist/providers/claude-tool-execution-launch.js'
+import { runProcess } from '../dist/process-runner.js'
 import { createClaudeExecutionProofModel, CLAUDE_PROOF_PNG_BASE64 } from './fixtures/claude-execution-proof-model.mjs'
 import { createExecutionProofCleanup } from './fixtures/execution-proof-cleanup.mjs'
 
@@ -16,7 +19,7 @@ const packageRoot = fileURLToPath(new URL('../', import.meta.url))
 const root = await realpath(await mkdtemp('/tmp/amx-claude-'))
 const sourcePaths = ['src/agent-execution-frontend.ts', 'src/agent-execution-helper-run.ts', 'src/agent-execution-bridge.ts', 'src/recoverable-input-frame.ts',
   'src/agent-execution-executor.ts', 'src/agent-execution-coordinator.ts', 'src/agent-execution-protocol.ts',
-  'src/providers/claude.ts', 'src/providers/claude-tool-execution-launch.ts', 'src/providers/claude-execution-helper.ts',
+  'src/providers/claude.ts', 'src/providers/claude-launch-options.ts', 'src/providers/claude-hook-activation.ts', 'src/providers/claude-tool-execution-launch.ts', 'src/providers/claude-execution-helper.ts',
   'src/providers/claude-execution-run.ts', 'src/providers/claude-execution-protocol.ts', 'src/providers/claude-execution-policy.ts', 'src/providers/claude-execution-shell.ts', 'src/providers/claude-execution-operations.ts']
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const fingerprint = async paths => Object.fromEntries(await Promise.all(paths.map(async path => [path, hash(await readFile(join(packageRoot, path)))])))
@@ -39,8 +42,21 @@ const deadline = async (promise, label, ms = 30000) => {
   try { return await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(label)), ms) })]) }
   finally { clearTimeout(timer) }
 }
+const metadataHome = join(root, 'metadata-home'), metadataConfig = join(root, 'metadata-claude')
+await mkdir(metadataHome); await mkdir(metadataConfig)
+const metadataEnv = Object.fromEntries(['PATH', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL'].flatMap(key => process.env[key] ? [[key, process.env[key]]] : []))
+Object.assign(metadataEnv, { HOME: metadataHome, CLAUDE_CONFIG_DIR: metadataConfig, DISABLE_AUTOUPDATER: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' })
+const executable = await resolveClaudeExecutionExecutable('claude', { env: metadataEnv, workspacePath: root })
+// Observation for this proof's attribution, never a production creation prerequisite.
+const version = await deadline(runProcess(executable, ['--version'], { cwd: root, env: metadataEnv, timeoutMs: 30000, maxOutputBytes: 4096 }), 'Proof CLI identity observation')
+assert.equal(version.exitCode, 0)
+const executableDigest = createHash('sha256')
+for await (const bytes of createReadStream(executable)) executableDigest.update(bytes)
+const nativeExecutable = { path: executable, realPath: await realpath(executable), sha256: executableDigest.digest('hex'), version: version.stdout.trim() }
 const workspace = join(root, 'resource/workspace')
-const { model, port, steps, finalNames, modelRequests, diagnostics, releaseFirstAnswer, stopResourceTask, close: closeModel } = await createClaudeExecutionProofModel({ root, workspace, nativeTools: process.env.AGENTMUX_CLAUDE_PROOF_NATIVE_TOOLS === '1' })
+const permission = process.env.AGENTMUX_CLAUDE_PROOF_PERMISSION
+assert(permission === undefined || permission === 'ask' || permission === 'deny', 'Only the two isolated permission scenarios are supported')
+const { model, port, steps, finalNames, modelRequests, diagnostics, releaseFirstAnswer, stopResourceTask, close: closeModel } = await createClaudeExecutionProofModel({ root, workspace, nativeTools: process.env.AGENTMUX_CLAUDE_PROOF_NATIVE_TOOLS === '1', permission: Boolean(permission) })
 async function startOwner(name, agentOwner) {
   const base = join(root, name)
   for (const directory of ['home', 'claude', 'runtime', 'state', 'workspace']) await mkdir(join(base, directory), { recursive: true, mode: 0o700 })
@@ -104,8 +120,8 @@ try {
   await writeFile(join(workspace, 'fixture.png'), Buffer.from(CLAUDE_PROOF_PNG_BASE64, 'base64'))
   await writeFile(join(workspace, 'input.txt'), 'PRIVATE_RESOURCE_INPUT\n')
   await writeFile(join(workspace, 'fixture.ipynb'), JSON.stringify({ cells: [{ cell_type: 'code', id: 'cell-original', metadata: {}, source: ['print("original")'], outputs: [], execution_count: null }], metadata: {}, nbformat: 4, nbformat_minor: 5 }))
-  const configured = await agent.client.configureHostExecutor({ executorId: 'claude-native-proof', config: { label: 'Claude native execution proof', providerId: 'claude', command: 'claude',
-    args: ['--print', '--output-format=stream-json', '--verbose', '--model=claude-sonnet-4-6', '--max-turns=16', process.env.AGENTMUX_CLAUDE_PROOF_NATIVE_TOOLS === '1' ? '--allowedTools=Read,Write,Edit,NotebookEdit,Bash,TaskStop,mcp__amux_exec__*' : '--allowedTools=mcp__amux_exec__*'], env: {}, injectAgentMuxGuide: false } })
+  const configured = await agent.client.configureHostExecutor({ executorId: 'claude-native-proof', config: { label: 'Claude native execution proof', providerId: 'claude', command: executable,
+    args: ['--print', '--output-format=stream-json', '--verbose', '--model=claude-sonnet-4-6', '--max-turns=16', (permission !== 'ask') && process.env.AGENTMUX_CLAUDE_PROOF_NATIVE_TOOLS === '1' ? '--allowedTools=Read,Write,Edit,NotebookEdit,Bash,TaskStop,mcp__amux_exec__*' : '--allowedTools=mcp__amux_exec__*', ...(permission === 'deny' ? ['--settings', JSON.stringify({ permissions: { deny: ['Write'] } })] : [])], env: {}, injectAgentMuxGuide: false } })
   bindingId = randomUUID(); const agentSessionId = randomUUID()
   const creation = { bindingId, agentHostId: 'agent', agentRuntimeId: agent.client.runtimeOwnerIdentity().runtimeId, resourceHostId: 'local', resourceRuntimeId: resource.client.runtimeOwnerIdentity().runtimeId,
     resourceWorkspacePath: workspace, resourceGrant: { scope: 'host-user', bindingId }, agent: { agentSessionId, createOperationId: randomUUID(), executorId: configured.executor.executorId,
@@ -123,6 +139,41 @@ try {
   const created = reply.packet.result.session; assert.equal(created.agentSessionId, agentSessionId); agent.sessions.push(created)
   const original = pair(resource, bindingId), helpers = original.bridge
   agent.runs.push(helpers.frontend.runId); resource.runs.push(helpers.executor.runId)
+  if (permission) {
+    let pending, permissionAnswer
+    if (permission === 'ask') {
+      await wait(async () => { pending = (await agent.client.readAgentSession(agentSessionId))?.pendingInteraction?.request; return pending?.kind === 'permission' }, 'Original native permission callback')
+      assert(pending.permissionHook, 'Native ask remains on its original callback')
+      await assert.rejects(readFile(join(workspace, 'permission-forbidden.txt')), { code: 'ENOENT' })
+      assert.equal((await frames(agent, helpers.frontend.runId)).filter(frame => frame.type === 'request' && frame.payload?.method === 'tools/call' && frame.payload.params?.name === 'Write').length, 0, 'Ask cannot execute before an original decision')
+      const responseInput = join(root, 'reject-original-permission.json')
+      await writeFile(responseInput, JSON.stringify({ agentSessionId, expectedRun: created.run, expectedRequest: pending, operationId: randomUUID(), response: { kind: 'permission', requestId: pending.id, decision: { outcome: 'selected', optionId: 'reject-once' } } }))
+      permissionAnswer = await cli(agent, ['agent', 'interaction', 'respond', '--input', responseInput])
+      assert.equal(permissionAnswer.code, 0, JSON.stringify(permissionAnswer.packet))
+      assert.equal(permissionAnswer.packet.result.delivery, 'hook-written')
+    }
+    await wait(async () => (await agent.client.statusAgent(agentSessionId)).run.state === 'exited', 'Native permission scenario natural exit')
+    const replay = await agent.client.readRunReplay(created.run, 0, 'raw')
+    const raw = Buffer.concat(replay.replay.map(chunk => Buffer.from(chunk.dataBytes))).toString()
+    const nativeFrames = raw.split('\n').flatMap(line => { try { return [JSON.parse(line)] } catch { return [] } })
+    const result = nativeFrames.find(frame => frame.type === 'result')
+    assert(result, 'The actual native producer returns its final structured result')
+    const refused = nativeFrames.find(frame => frame.type === 'user' && frame.message?.content?.some(item => item.type === 'tool_result' && item.tool_use_id === 'toolu_permission_write' && item.is_error === true))
+    assert(refused, 'Original native Write must be refused despite transport alias grant')
+    if (permission === 'ask') assert(refused.tool_result_meta?.some(item => item.id === 'toolu_permission_write' && item.non_execution_kind === 'permission-rule'), 'The original callback refusal returns Native non-execution evidence')
+    else {
+      const init = nativeFrames.find(frame => frame.type === 'system' && frame.subtype === 'init')
+      assert(!init.tools.includes('Write') && init.tools.includes('mcp__amux_exec__Write'), 'Native explicit deny removes original Write while leaving the granted transport alias')
+    }
+    await assert.rejects(readFile(join(workspace, 'permission-forbidden.txt')), { code: 'ENOENT' })
+    await assert.rejects(readFile(join(agent.base, 'workspace/permission-forbidden.txt')), { code: 'ENOENT' })
+    const machine = await frames(agent, helpers.frontend.runId)
+    assert.equal(machine.filter(frame => frame.type === 'request' && frame.payload?.method === 'tools/call' && frame.payload.params?.name === 'Write').length, 0, 'No resource execution before native approval')
+    await writeFile(join(root, 'native-frames.json'), JSON.stringify(nativeFrames, null, 2))
+    await writeFile(join(root, 'binding-frames.json'), JSON.stringify(machine, null, 2))
+    await writeFile(join(root, 'summary.json'), JSON.stringify({ passed: true, permission, originalRequest: pending, permissionAnswer: permissionAnswer?.packet, nativeExecutable, nativeToolRouting: true, explicitTransportGrant: 'mcp__amux_exec__*', originalNativeWriteGranted: false, nativePermissionDenials: result.permission_denials, nativeNonExecution: refused.tool_result_meta, effects: 0, routedWriteRequests: 0, sourceHashes, compiledHashes, harnessHashes, scope: 'Actual CLI with a controlled offline model, two private Core/ctxmux owners. The original ask callback is answered deny through public interaction API; no PTY answer or production human authorization is simulated.' }, null, 2))
+    success = { passed: true, permission, evidence: root }
+  } else {
   await wait(async () => await readFile(join(workspace, 'background.txt'), 'utf8').catch(() => null) === 'background-complete', 'All real resource tools')
   assert.equal(await readFile(join(workspace, 'note.txt'), 'utf8'), 'modified\n')
   assert(JSON.stringify(JSON.parse(await readFile(join(workspace, 'fixture.ipynb'), 'utf8')).cells).includes('modified'))
@@ -192,12 +243,13 @@ try {
   const finalPair = pair(resource, bindingId); assert.equal(finalPair.bridge.frontend.runId, helpers.frontend.runId); assert.equal(finalPair.bridge.executor.runId, helpers.executor.runId)
   assert.deepEqual(await fingerprint(harnessPaths), harnessHashes); assert.deepEqual(await fingerprint(sourcePaths), sourceHashes); assert.deepEqual(await fingerprint(Object.keys(compiledHashes)), compiledHashes); assert.equal(hash(await readFile(driver.path)), driver.sha256)
   await writeFile(join(root, 'native-frames.json'), JSON.stringify(machine, null, 2), { mode: 0o600 })
-  await writeFile(join(root, 'summary.json'), JSON.stringify({ passed: true, sourceHashes, compiledHashes, harnessHashes, driver, actualMachines: 1, controlledOfflineModel: true, actualNativeCli: 'Claude Code 2.1.314', explicitTestToolGrants: { native: ['Read', 'Write', 'Edit', 'NotebookEdit', 'Bash', 'TaskStop'], transport: 'mcp__amux_exec__*', productionAutoAllowClaim: false },
+  await writeFile(join(root, 'summary.json'), JSON.stringify({ passed: true, sourceHashes, compiledHashes, harnessHashes, driver, actualMachines: 1, controlledOfflineModel: true, actualNativeCli: nativeExecutable.version, nativeExecutable, nativeToolRouting: process.env.AGENTMUX_CLAUDE_PROOF_NATIVE_TOOLS === '1', explicitTestToolGrants: { native: ['Read', 'Write', 'Edit', 'NotebookEdit', 'Bash', 'TaskStop'], transport: 'mcp__amux_exec__*', productionAutoAllowClaim: false },
     originalCoreSession: agentSessionId, nativeConversationId: nativeId, transcript, originalContextRetained: true, originalEffectCount: 1, resourceBackgroundStopped: true, backgroundStoppedAfterNativeResume: true, backgroundTaskId, coreObserverHooksConfirmed: true, resourceCoreRestarted: true,
     automaticReadersRestored: true, originalHelperPidsRetained: true, originalHelpers: helpers, firstRun: created.run, resumedRun: resumed.run,
     resourceTools: steps.map(step => step.name), resourceWorkspace: workspace, launchWorkspace: join(agent.base, 'workspace'), publicCreation: true,
     cliActions: cliReceipts.map(value => value.args.slice(0, 3).join(' ')), errors: [], scope: 'Single machine, two isolated real Core/ctxmux owners with actual Claude MCP/native CLI and an offline controlled Anthropic model. This does not qualify two-machine execution, interactive approval or full Provider parity.' }, null, 2), { mode: 0o600 })
   success = { passed: true, evidence: root, originalCoreSession: agentSessionId, nativeConversationId: nativeId, modelRequests: modelRequests.length }
+  }
 } catch (error) {
   failure = error
   for (const owner of owners) {

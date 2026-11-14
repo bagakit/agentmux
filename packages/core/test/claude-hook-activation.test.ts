@@ -95,7 +95,8 @@ describe('Claude launch-carried Hook activation sources', () => {
 
   it('recognizes explicit safe mode without interpreting prompt text as a flag', async () => {
     expect(await inspect(['--safe-mode'])).toMatchObject({ active: false })
-    expect(await inspect([], { CLAUDE_CODE_SAFE_MODE: '1' })).toMatchObject({ active: false })
+    for (const value of ['1', 'true', 'yes', 'on', ' TRUE ']) expect(await inspect([], { CLAUDE_CODE_SAFE_MODE: value })).toMatchObject({ active: false })
+    for (const value of ['0', 'false', 'no', 'off', 'unrelated']) expect(await inspect([], { CLAUDE_CODE_SAFE_MODE: value })).toMatchObject({ active: true })
     expect(await inspect(['--', '--safe-mode'])).toMatchObject({ active: true })
   })
 })

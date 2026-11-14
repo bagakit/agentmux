@@ -6,7 +6,7 @@ import { join } from 'node:path'
 /** Deterministic Anthropic protocol endpoint; executes no tools and uses no external model. */
 export const CLAUDE_PROOF_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNwaDjwHwAFBAKAPJ4DgAAAAABJRU5ErkJggg=='
 
-export async function createClaudeExecutionProofModel({ root, workspace, nativeTools = false }) {
+export async function createClaudeExecutionProofModel({ root, workspace, nativeTools = false, permission = false }) {
   const modelRequests = [], diagnostics = [], modelSockets = new Set()
   let releaseFirstAnswer, stopTask
   const firstAnswer = new Promise(resolve => { releaseFirstAnswer = resolve })
@@ -27,6 +27,11 @@ export async function createClaudeExecutionProofModel({ root, workspace, nativeT
     const messages = body.messages ?? [], encoded = JSON.stringify(messages), resumed = encoded.includes('PRIVATE_CLAUDE_RESUMED_CONTEXT')
     const results = messages.flatMap(message => Array.isArray(message.content) ? message.content : []).filter(value => value.type === 'tool_result')
     const called = new Set(results.map(value => value.tool_use_id))
+    if (permission) {
+      if (!called.has('toolu_permission_write')) return { content: [{ type: 'tool_use', id: 'toolu_permission_write', name: 'Write', input: { file_path: join(workspace, 'permission-forbidden.txt'), content: 'forbidden\n' } }], stop_reason: 'tool_use' }
+      assert.equal(results.find(result => result.tool_use_id === 'toolu_permission_write')?.is_error, true, 'The actual native permission query refuses the original Write')
+      return { content: [{ type: 'text', text: 'PRIVATE_CLAUDE_PERMISSION_REFUSED' }], stop_reason: 'end_turn' }
+    }
     for (const result of results) assert(result.is_error !== true, `Native tool ${result.tool_use_id} failed: ${JSON.stringify(result.content)}`)
     if (resumed) {
       if (!called.has('toolu_remote_resumed_read')) return { content: [{ type: 'tool_use', id: 'toolu_remote_resumed_read', name: modelToolPrefix + 'Read', input: { file_path: join(workspace, 'note.txt') } }], stop_reason: 'tool_use' }

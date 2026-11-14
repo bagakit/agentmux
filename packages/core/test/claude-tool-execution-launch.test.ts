@@ -1,25 +1,39 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, rm, readFile, writeFile, chmod } from 'node:fs/promises'
+import { mkdtemp, rm, readFile, writeFile, chmod, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { prepareClaudeToolExecutionLaunch } from '../src/providers/claude-tool-execution-launch.js'
+import { prepareClaudeToolExecutionLaunch, resolveClaudeExecutionExecutable } from '../src/providers/claude-tool-execution-launch.js'
 import { prepareClaudeExecutionHelper } from '../src/providers/claude-execution-helper.js'
 import { parseClaudeExecutionRunArguments } from '../src/providers/claude-execution-run.js'
 
 const roots: string[] = []
-afterEach(async () => { vi.restoreAllMocks(); for (const path of roots.splice(0)) await rm(path, { recursive: true, force: true }) })
+afterEach(async () => { vi.restoreAllMocks(); vi.unstubAllEnvs(); for (const path of roots.splice(0)) await rm(path, { recursive: true, force: true }) })
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'amux-claude-launch-')); roots.push(root)
+  vi.stubEnv('HOME', root); vi.stubEnv('CLAUDE_CONFIG_DIR', join(root, 'claude-config'))
   const command = join(root, 'claude')
-  await writeFile(command, '#!/bin/sh\n[ "$1" = "--version" ] || exit 99\nprintf "2.1.314 (Claude Code)\\n"\n'); await chmod(command, 0o700)
+  await writeFile(command, '#!/bin/sh\n[ "$1" = "--version" ] || exit 99\nprintf "2.1.319 (Claude Code)\\n"\n'); await chmod(command, 0o700)
   const context = { binding: { bindingId: 'original-binding', resourceHostId: 'resource-host', resourceRuntimeId: 'resource-runtime', workspacePath: '/original/resource/project' }, url: 'ws://127.0.0.1:12345/original-private-endpoint', launchWorkspacePath: root }
   return { root, command, context }
 }
 describe('Claude original execution launch', () => {
+  it('resolves the original workspace and PATH executable without launching a metadata subprocess', async () => {
+    const f = await fixture(), bin = join(f.root, 'bin'), marker = join(f.root, 'metadata-probe')
+    await mkdir(bin)
+    const command = join(bin, 'claude')
+    await writeFile(command, `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(marker)}, process.argv.slice(2).join(' ')); setTimeout(() => console.log('2.1.319 (Claude Code)'), 3000)\n`)
+    await chmod(command, 0o700)
+    await expect(resolveClaudeExecutionExecutable('claude', { workspacePath: f.root, env: { PATH: 'bin' } })).resolves.toBe(command)
+    const plan = await prepareClaudeToolExecutionLaunch({ command, args: [], env: {} }, f.context)
+    expect(plan.command).toBe(command)
+    await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
   it('selects the fixed native MCP endpoint without replacing authentication, prompt or resume identity', async () => {
     const f = await fixture(), args = ['--resume', 'original-native-session', '--permission-mode', 'default', '--', 'literal --mcp-config prompt']
     const env = { CLAUDE_CONFIG_DIR: '/original/config', ANTHROPIC_BASE_URL: 'http://controlled.invalid', ORIGINAL_VALUE: 'retained' }
-    const plan = await prepareClaudeToolExecutionLaunch({ command: f.command, args, env }, f.context)
+    const prepared = prepareClaudeToolExecutionLaunch({ command: f.command, args, env }, f.context)
+    await expect(prepared).resolves.toMatchObject({ command: f.command })
+    const plan = await prepared
     expect(plan.command).toBe(f.command); expect(plan.env).toEqual(env)
     expect(plan.args[plan.args.indexOf('--resume') + 1]).toBe('original-native-session')
     expect(plan.args[plan.args.indexOf('--permission-mode') + 1]).toBe('default')
@@ -28,6 +42,32 @@ describe('Claude original execution launch', () => {
     expect(JSON.parse(plan.args[at + 1]!)).toEqual({ mcpServers: { amux_exec: { type: 'ws', url: f.context.url } } })
     expect(plan.args).not.toContain('--dangerously-skip-permissions')
     expect(plan.args.join(' ')).toContain('/original/resource/project')
+  })
+  it('rejects only this bound launch when native safe mode disables the routing carrier', async () => {
+    const f = await fixture()
+    await expect(prepareClaudeToolExecutionLaunch({ command: f.command, args: ['--safe-mode'], env: {} }, f.context)).rejects.toThrow('resource tools')
+    for (const value of ['1', 'true', 'yes', 'on', ' TRUE '])
+      await expect(prepareClaudeToolExecutionLaunch({ command: f.command, args: [], env: { CLAUDE_CODE_SAFE_MODE: value } }, f.context)).rejects.toThrow('resource tools')
+    for (const value of ['', '0', 'false', 'no', 'off', 'unrelated'])
+      await expect(prepareClaudeToolExecutionLaunch({ command: f.command, args: ['--system-prompt', '--safe-mode', '--', '--safe-mode'], env: { CLAUDE_CODE_SAFE_MODE: value } }, f.context)).resolves.toMatchObject({ command: f.command })
+    vi.stubEnv('CLAUDE_CODE_SAFE_MODE', '1')
+    await expect(prepareClaudeToolExecutionLaunch({ command: f.command, args: [], env: {} }, f.context)).rejects.toThrow('resource tools')
+    await expect(prepareClaudeToolExecutionLaunch({ command: f.command, args: [], env: { CLAUDE_CODE_SAFE_MODE: '0' } }, f.context)).resolves.toMatchObject({ command: f.command })
+    vi.unstubAllEnvs()
+  })
+  it('uses the original settings owner for confirmed conflicts and rejects only the unconfirmed bound target', async () => {
+    const f = await fixture()
+    await expect(prepareClaudeToolExecutionLaunch({ command: f.command, args: ['--settings', '{"disableAllHooks":true}'], env: {} }, f.context)).rejects.toThrow('resource tools')
+    const config = join(f.root, 'claude-config')
+    await mkdir(config); await writeFile(join(config, 'settings.json'), '{"disableAllHooks":true}')
+    await expect(prepareClaudeToolExecutionLaunch({ command: f.command, args: [], env: {} }, f.context)).rejects.toThrow('resource tools')
+    await expect(prepareClaudeToolExecutionLaunch({ command: f.command, args: ['--settings', '{"disableAllHooks":false}'], env: {} }, f.context)).resolves.toMatchObject({ command: f.command })
+    await writeFile(join(config, 'settings.json'), '{')
+    await expect(prepareClaudeToolExecutionLaunch({ command: f.command, args: [], env: {} }, f.context)).rejects.toMatchObject({ code: 'EXECUTION_ROUTING_CONFIGURATION_UNCONFIRMED', cause: { code: 'HOOK_TARGET_UNPARSEABLE' } })
+    const originalIssue = { code: 'ORIGINAL_HOOK_ISSUE', message: 'Retain this original issue' }
+    const original = { command: f.command, args: [], env: {}, hookLaunchIssue: originalIssue }
+    await expect(prepareClaudeToolExecutionLaunch(original, f.context)).rejects.toMatchObject({ code: 'EXECUTION_ROUTING_CONFIGURATION_UNCONFIRMED' })
+    expect(original.hookLaunchIssue).toBe(originalIssue)
   })
   it.each(['ws://elsewhere.invalid:2/capability', 'ws://127.0.0.1:2/', 'http://127.0.0.1:2/capability'])('rejects another endpoint only for this launch: %s', async url => {
     const f = await fixture()
