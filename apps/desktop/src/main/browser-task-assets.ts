@@ -1229,13 +1229,17 @@ export class BrowserTaskAssets {
     }
   }
   private async load(): Promise<void> {
+    let restored = false
     try {
       this.document = normalizeDocument(await this.store.load() ?? { version: 1, assets: [], runs: [] })
+      restored = true
       for (const record of this.document.parallel ?? []) this.confirmedParallel.add(record.operationId)
       if (this.interruptRestoredExecutions()) await this.persist()
     } catch {
-      this.loadUnavailable = true
-      this.warning = 'Task assets could not be restored. The existing file was retained; restore storage to review it. Browser and Agent work remain available.'
+      this.loadUnavailable = !restored
+      this.warning = restored
+        ? 'Original task records were restored. Saving their restart status is unconfirmed; inspect the original operations and restore storage before another execution. Browser and Agent work remain available.'
+        : 'Task assets could not be restored. The existing file was retained; restore storage to review it. Browser and Agent work remain available.'
     }
   }
   /** Storage becoming readable later still restores execution facts through the same owner. */
