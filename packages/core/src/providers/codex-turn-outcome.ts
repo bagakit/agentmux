@@ -1,5 +1,5 @@
 import type { AgentTurnOutcome } from '../types.js'
-import { codexFailure } from './codex-errors.js'
+import { codexFailure } from '@agentmux/providers/codex/errors'
 
 /** One native result decoder for observation, history and changes. No presentation inference. */
 export function codexTurnOutcome(record: Record<string, unknown>, nativeSessionId: string): AgentTurnOutcome | undefined {

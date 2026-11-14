@@ -1,5 +1,3 @@
-import type { AgentFailure } from '../types.js'
-
 const classifications: Record<string, [string, string]> = {
   server_overloaded: ['AGENT_MODEL_OVERLOADED', 'Wait before retrying, or choose another model.'],
   server_is_overloaded: ['AGENT_MODEL_OVERLOADED', 'Wait for the reported retry delay, or choose another model.'],
@@ -54,7 +52,7 @@ const publicMessages: Record<string, string> = {
 }
 
 /** Only native error fields are classified; neither messages nor HTTP codes are guessed. */
-export function codexFailure(value: unknown, nativeTurnId: string): AgentFailure {
+export function codexFailure(value: unknown, nativeTurnId: string) {
   const error = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
   const info = error.codex_error_info ?? error.codexErrorInfo
   const nativeCode = typeof info === 'string' ? info : info && typeof info === 'object' && !Array.isArray(info)

@@ -127,6 +127,34 @@
     "./traex/provider": {
       "types": "./dist/traex/provider.d.ts",
       "import": "./dist/traex/provider.js"
+    },
+    "./codex/native-rpc": {
+      "types": "./dist/codex/native-rpc.d.ts",
+      "import": "./dist/codex/native-rpc.js"
+    },
+    "./codex/native-record-role": {
+      "types": "./dist/codex/native-record-role.d.ts",
+      "import": "./dist/codex/native-record-role.js"
+    },
+    "./codex/managed-diagnostics": {
+      "types": "./dist/codex/managed-diagnostics.d.ts",
+      "import": "./dist/codex/managed-diagnostics.js"
+    },
+    "./codex/execution-protocol": {
+      "types": "./dist/codex/execution-protocol.d.ts",
+      "import": "./dist/codex/execution-protocol.js"
+    },
+    "./codex/errors": {
+      "types": "./dist/codex/errors.d.ts",
+      "import": "./dist/codex/errors.js"
+    },
+    "./codex/launch-hooks": {
+      "types": "./dist/codex/launch-hooks.d.ts",
+      "import": "./dist/codex/launch-hooks.js"
+    },
+    "./codex/hook-activation": {
+      "types": "./dist/codex/hook-activation.d.ts",
+      "import": "./dist/codex/hook-activation.js"
     }
   },
   "files": [
@@ -143,6 +171,8 @@
   },
   "dependencies": {
     "@noble/hashes": "2.4.0",
-    "json-rpc-2.0": "1.8.1"
+    "json-rpc-2.0": "1.8.1",
+    "smol-toml": "1.9.1",
+    "ws": "8.21.3"
   }
 }

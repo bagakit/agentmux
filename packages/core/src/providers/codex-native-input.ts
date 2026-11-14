@@ -10,9 +10,9 @@ import { runProcess } from '../process-runner.js'
 import { nativeProcessBirth, nativeProcessTcpListeners } from '../agent-native-process.js'
 import type { AgentProvider } from '../agent-provider.js'
 import type { CodexManagedThreadConfiguration, CodexManagedRunPlan } from './codex-managed-run.js'
-import { connectCodexNativeActor } from './codex-native-rpc.js'
+import { connectCodexNativeActor } from '@agentmux/providers/codex/native-rpc'
 import { prepareCodexDurableQueueInput } from './codex-native-queue.js'
-import { isCodexManagedHookConfig } from './codex-launch-hooks.js'
+import { isCodexManagedHookConfig } from './codex-hook-services.js'
 
 // Persisted contract identity, not the currently installed CLI version. Both
 // qualified releases use this exact actor/input wire; old claims keep their ID.

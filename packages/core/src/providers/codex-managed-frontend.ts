@@ -5,7 +5,7 @@ import { once } from 'node:events'
 import type { AgentProvider } from '../agent-provider.js'
 import { AgentMuxError } from '../errors.js'
 import { nativeProcessBirth, nativeProcessTcpListeners } from '../agent-native-process.js'
-import { connectCodexNativeActor } from './codex-native-rpc.js'
+import { connectCodexNativeActor } from '@agentmux/providers/codex/native-rpc'
 import { parseTerminalFrontendObservation, type AgentTerminalFrontendObservation, type AgentTerminalFrontendRecoveryRequest } from '../agent-terminal-frontend.js'
 
 export const CODEX_NATIVE_TOKEN_ENV = 'AGENTMUX_CODEX_ACTOR_TOKEN'

@@ -8,8 +8,8 @@ import { CODEX_NATIVE_TOKEN_ENV, CODEX_ACTOR_ID_ENV, CODEX_ACTOR_LIFECYCLE_ENV, 
 import type { AgentTerminalFrontendObservation, AgentTerminalInitialization } from '../agent-terminal-frontend.js'
 import { resolve } from 'node:path'
 import { nativeProcessTcpListeners } from '../agent-native-process.js'
-import { connectCodexNativeActor } from './codex-native-rpc.js'
-import { codexDiagnosticStream, formatCodexManagedDiagnostic } from './codex-managed-diagnostics.js'
+import { connectCodexNativeActor } from '@agentmux/providers/codex/native-rpc'
+import { codexDiagnosticStream, formatCodexManagedDiagnostic } from '@agentmux/providers/codex/managed-diagnostics'
 
 export { CODEX_NATIVE_TOKEN_ENV } from './codex-managed-frontend.js'
 export type CodexManagedThreadConfiguration = { sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access'; approvalPolicy?: 'on-request' | 'never'; model?: string; cwd?: string }

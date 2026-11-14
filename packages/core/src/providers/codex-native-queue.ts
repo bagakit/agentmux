@@ -11,7 +11,7 @@ import { nativeProcessBirth, nativeProcessExecutable, nativeProcessFiles, type N
 import { AgentMuxError } from '../errors.js'
 import { nativeInputSourceId } from '../native-input-correlation.js'
 import { locateAppServerNativeSession } from './app-server.js'
-import { codexMainNativeRecord } from './codex-native-record-role.js'
+import { codexMainNativeRecord } from '@agentmux/providers/codex/native-record-role'
 
 // Frozen claims retain this original wire identity. Qualification comes from the
 // original process/store and native protocol, not the executable's version label.

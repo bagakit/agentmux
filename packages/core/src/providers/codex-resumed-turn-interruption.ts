@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto'
 import type { AgentProvider } from '../agent-provider.js'
 import { nativeProcessBirth, nativeProcessTcpListeners } from '../agent-native-process.js'
 import { readCodexPromptExecutionEvidence } from './codex-prompt-execution-evidence.js'
-import { connectCodexNativeActor } from './codex-native-rpc.js'
-import { codexFailure } from './codex-errors.js'
+import { connectCodexNativeActor } from '@agentmux/providers/codex/native-rpc'
+import { codexFailure } from '@agentmux/providers/codex/errors'
 
 /** The resumed actor can close a saved in-progress turn without appending turn_aborted.
  * A separate history helper cannot establish whether this actor is still active.

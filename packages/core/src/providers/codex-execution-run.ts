@@ -3,7 +3,7 @@ import { pathToFileURL } from 'node:url'
 import type { AgentToolContextState } from '../agent-tool-context.js'
 import type { AgentExecutionHelperContext } from '../agent-execution-helper.js'
 import { runAgentExecutionHelper, runAgentExecutionHelperCli, type AgentExecutionHelperIo } from '../agent-execution-helper-run.js'
-import { buildCodexNativeExecutorLaunchSpec, parseCodexExecutionMessage, parseCodexExecutionServerMessage } from './codex-execution-protocol.js'
+import { buildCodexNativeExecutorLaunchSpec, parseCodexExecutionMessage, parseCodexExecutionServerMessage } from '@agentmux/providers/codex/execution-protocol'
 
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && !value.includes('\0')
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
