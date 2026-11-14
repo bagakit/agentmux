@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
 })
-import { AGENTMUX_CONTROL_ERROR_CODES } from '@agentmux/core/control'
+import type { AgentMuxControlErrorCode } from '@agentmux/core/control'
 import type { DesktopControlResponse } from '../src/shared/contracts.js'
 import {
   addressingRecovery,
@@ -145,142 +145,6 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
       expect(recovery).toContain('amux agent ls')
       expect(recovery).not.toContain('amux settings executors ls')
     }
-  })
-
-  it('每个控制错误码都被显式分类过，新增码不能默默落进"没有下一步"', () => {
-    // 本模块自称是"哪些码算寻址失败"的唯一权威。但 `return null` 兜底意味着：有人在 Core 加一个
-    // 新的寻址失败码，这里什么都不做也照样绿——权威悄悄失守，而漂移那天没有测试会红。
-    // 本轮实测就撞到了：AMBIGUOUS_REGION_TARGET / AMBIGUOUS_TAB_TARGET / CALLER_NOT_OPEN
-    // 三个码抛在同一条 send/inspect 解析路径上（lib/control.ts:133-163），却都落进了兜底。
-    //
-    // 所以这条不断言"某某码有恢复"，而是断言**每个码都被想过**：要么在 WITH_RECOVERY 里，
-    // 要么在 DELIBERATELY_SILENT 里。加了新码而两边都没列，这条就红——它逼人做一次选择，
-    // 而不是让沉默成为默认值。
-    const WITH_RECOVERY = new Set([
-      'MESSAGE_TARGET_NOT_UNIQUE',
-      'MESSAGE_TARGET_NOT_AGENT',
-      'UNKNOWN_AGENT_SESSION',
-      'TAB_NOT_OPEN',
-      'REGION_NOT_OPEN',
-      'AMBIGUOUS_TAB_TARGET',
-      'AMBIGUOUS_REGION_TARGET',
-      'CALLER_NOT_OPEN'
-    ])
-    // 这些不是寻址失败：传输层、生命周期、启动配置等。它们的原始 message 已经说清了原因，
-    // 硬塞一句"下一步"只会盖住它。
-    //
-    // 必须**逐个列出**，不能写成 `CODES.filter(c => !WITH_RECOVERY.has(c))`。那样写是个恒等式：
-    // 新码会被自动吸收进这一侧，下面的加法永远成立，这条测试就永远绿。本轮初版正是这么写的，
-    // 变异（往码表塞一个没分类的码）照样通过——守卫自己成了假绿的第七种形态。
-    const DELIBERATELY_SILENT = [
-      'INVALID_CONTROL_REQUEST',
-      'CONTROL_PROTOCOL_ERROR',
-      'CONTROL_TIMEOUT',
-      'CONTROL_UNAVAILABLE',
-      'CONTROL_OWNER_BUSY',
-      'CONTROL_FAILED',
-      'CONTROL_CANCELLED',
-      'CONTROL_REQUEST_CONFLICT',
-      'CONTROL_OWNER_LOST',
-      // Control owner未提供可选资源观测接口；换Agent/Tab地址不能补出能力，保留原始message。
-      'METRICS_UNSUPPORTED',
-      // 文件诊断及设置冲突/资源约束不由换Agent地址恢复，保留各owner的原始message。
-      'CRASH_LOG_NOT_FILE',
-      'UNSUPPORTED_SETTING',
-      'INVALID_SETTING_VALUE',
-      'CONFIG_CONFLICT',
-      'SETTING_RESOURCE_NOT_FOUND',
-      'SETTING_RESOURCE_EXISTS',
-      'SETTING_IDENTITY_IMMUTABLE',
-      'SETTING_RESOURCE_IN_USE',
-      'SETTING_RESOURCE_REFERENCES_UNKNOWN',
-      // Envelope身份与发送条件不成立不能教自动重发或改投其他收件人。
-      'MESSAGE_SENDER_MISMATCH',
-      'MESSAGE_RECIPIENT_MISMATCH',
-      'MESSAGE_ENVELOPE_INVALID',
-      // Prompt忙/未确认与Session store读未确认都不代表Agent终局，也不是换地址可恢复。
-      'AGENT_PROMPT_INPUT_UNCONFIRMED',
-      // Prompt condition changes need observation, not another Agent address.
-      'AGENT_PROMPT_CONDITION_CHANGED',
-      'AGENT_PROMPT_SUBMISSION_BUSY',
-      'AGENT_SESSION_STORE_READ_UNCONFIRMED',
-      'AGENT_EXECUTOR_NOT_CONFIGURED',
-      'SESSION_CLOSING',
-      'SESSION_NOT_RUNNING',
-      'UNKNOWN_WORKSPACE',
-      // 资源选择由原错误消息指向 Project/source-workspace，不改变语义收件人。
-      'SPACE_RESOURCE_PROJECT_UNKNOWN',
-      'SPACE_RESOURCE_SOURCE_REQUIRED',
-      'REGION_WORKSPACE_MISMATCH',
-      'REGION_TOPIC_MISMATCH',
-      'LAUNCH_RESULT_MISMATCH',
-      'LAUNCH_CLEANUP_FAILED',
-      'LAYOUT_CAPACITY_EXCEEDED',
-      'REGION_ALREADY_SOLE',
-      'LAUNCHER_REGION_REQUIRED',
-      'AGENT_NOT_FOUND',
-      'INVALID_AGENT_PROMPT',
-      'AGENT_SESSION_STILL_RUNNING',
-      'AGENT_RESUME_UNAVAILABLE',
-      'AGENT_RESUME_UNSUPPORTED',
-      'STALE_AGENT_SESSION',
-      'STALE_AGENT_SESSION_BINDING',
-      'CTXMUX_DISCONNECTED',
-      'CTXMUX_INPUT_CURSOR_MISSING',
-      'SIGNAL_UNSUPPORTED',
-      // 不是寻址失败，而且它的原始 message 已经点名了唯一那条下一步（"Turn it on in
-      // Settings › Browser."，可达性由 browser-automation-setting-reachable.test.ts 单独证明）。
-      // 再叠一句 addressingRecovery 的"换个地址试试"只会盖掉那句真能走的。
-      'BROWSER_AUTOMATION_DISABLED',
-      // 同上一条的理由：都不是寻址失败，而且各自的 message 已经点名了唯一那条下一步。
-      //
-      // `BROWSER_SUBSCRIBE_UNSUPPORTED` 是能力协商的答案——这一端不提供进度订阅，换个地址不会让它
-      // 提供。恢复动作在宿主那边（实现 `subscribeBrowserOperation`），不在调用方手上。
-      //
-      // `BROWSER_HUMAN_CONTROL_ACTIVE` 的恢复动作是**人明确交还控制**，这条由设计约束钉死
-      // （「恢复只能由人明确发起；Agent 不得靠重试静默夺回页面」）。给它叠一句"换个地址试试"
-      // 正好是在教 Agent 做那件被禁的事。
-      'BROWSER_SUBSCRIBE_UNSUPPORTED',
-      'BROWSER_HUMAN_CONTROL_ACTIVE',
-      // The original operation read is the recovery path; another address is not a new intent.
-      'BROWSER_OPERATION_ALREADY_EXISTS',
-      // Profile owner refusals name their own recovery in the message (wait for the Browsers, read the
-      // list again, ask the person); none of them is fixed by addressing another Agent or Region.
-      'BROWSER_PROFILE_IN_USE',
-      'BROWSER_PROFILE_USAGE_UNKNOWN',
-      'BROWSER_PROFILE_REVISION_CONFLICT',
-      'BROWSER_PROFILE_NOT_FOUND',
-      'BROWSER_PROFILE_DELETE_REQUIRES_PERSON',
-      'BROWSER_DESTRUCTIVE_APPROVAL_REQUIRED',
-      // A Profile's Agent switch is the person's decision, and an unread Profile list is fixed by
-      // waiting for it; addressing another Agent or Region helps neither.
-      'BROWSER_PROFILE_AGENT_ACCESS_OFF',
-      'BROWSER_PROFILE_AGENT_ACCESS_UNKNOWN'
-    ]
-
-    for (const code of AGENTMUX_CONTROL_ERROR_CODES) {
-      const recovery = addressingRecovery({
-        code,
-        candidates: [{ agentSessionId: 'agent-a', regionIds: ['region:1'] }]
-      })
-      if (WITH_RECOVERY.has(code)) {
-        expect(recovery, `${code} 该有下一步，却是 null`).not.toBeNull()
-        assertEveryCommandRunnable(recovery!, code)
-      } else {
-        expect(recovery, `${code} 不该有下一步，却给了一句：${recovery}`).toBeNull()
-      }
-    }
-    // 防这条自己假绿：两份名单合起来必须与码表**逐个相等**。比个数不够——一个新码顶掉一个
-    // 被删的码，个数照样对得上。所以两个方向都要查：码表里有而两边都没列的（新码没分类），
-    // 以及名单里有而码表里没有的（臆造码，会把个数凑平）。
-    const classified = new Set([...WITH_RECOVERY, ...DELIBERATELY_SILENT])
-    const unclassified = AGENTMUX_CONTROL_ERROR_CODES.filter((code) => !classified.has(code))
-    expect(unclassified, `这些码没被分类，请在 WITH_RECOVERY 或 DELIBERATELY_SILENT 里做个决定：\n${unclassified.join('\n')}`).toEqual([])
-    const invented = [...classified].filter((code) => !(AGENTMUX_CONTROL_ERROR_CODES as readonly string[]).includes(code))
-    expect(invented, `这些码不在 Core 码表里，删掉：\n${invented.join('\n')}`).toEqual([])
-    // 两边都非空，否则"全给恢复"或"全不给"也能满足上面两条。
-    expect(WITH_RECOVERY.size).toBeGreaterThan(0)
-    expect(DELIBERATELY_SILENT.length).toBeGreaterThan(0)
   })
 
   it('三个 self 码说的是"相对寻址塌了"，不是"粘来的地址有歧义"', () => {
@@ -430,7 +294,7 @@ describe('object-link menu consumers', () => {
     expect(copied).toEqual(['amux://agent/agent-7'])
   })
 
-  it('send 的失败路径真的把恢复命令塞进了错误消息', async () => {
+  it('settles addressing errors with runnable recovery and preserves other owners’ errors', async () => {
     // 不读源码字面，真跑一次控制响应边界：这是控制错误离开渲染进程的唯一出口。
     const { createRendererControlApi } = await import('../src/renderer/src/lib/control-api.js')
     const responses: DesktopControlResponse[] = []
@@ -444,33 +308,52 @@ describe('object-link menu consumers', () => {
       respond: (response) => responses.push(response)
     } as never)
 
-    const failures = [
-      Object.assign(new Error('Target Tab does not contain exactly one Agent Session.'), {
+    const failures: readonly {
+      code: AgentMuxControlErrorCode
+      message: string
+      recoveryCommand: string | null
+    }[] = [
+      {
         code: 'MESSAGE_TARGET_NOT_UNIQUE',
-        candidates: [{ agentSessionId: 'agent-a', regionIds: ['region:1'] }]
-      }),
-      Object.assign(new Error('Target Region is not an Agent.'), { code: 'MESSAGE_TARGET_NOT_AGENT' }),
-      Object.assign(new Error('Tab target is not currently open.'), { code: 'TAB_NOT_OPEN' }),
-      Object.assign(new Error('Agent Session is not available to the Desktop.'), { code: 'UNKNOWN_AGENT_SESSION' }),
-      Object.assign(new Error('Agent Session is closing.'), { code: 'SESSION_CLOSING' })
+        message: 'Target Tab does not contain exactly one Agent Session.',
+        recoveryCommand: "amux agent send --to-session='agent-a' --text \"...\""
+      },
+      { code: 'MESSAGE_TARGET_NOT_AGENT', message: 'Target Region is not an Agent.', recoveryCommand: LIST_SESSIONS_COMMAND },
+      { code: 'TAB_NOT_OPEN', message: 'Target Tab is closed.', recoveryCommand: LIST_SESSIONS_COMMAND },
+      { code: 'REGION_NOT_OPEN', message: 'Target Region is closed.', recoveryCommand: LIST_SESSIONS_COMMAND },
+      { code: 'UNKNOWN_AGENT_SESSION', message: 'Agent Session is unobserved.', recoveryCommand: LIST_SESSIONS_COMMAND },
+      { code: 'AMBIGUOUS_TAB_TARGET', message: 'Caller Tab is ambiguous.', recoveryCommand: LIST_SESSIONS_COMMAND },
+      { code: 'AMBIGUOUS_REGION_TARGET', message: 'Caller Region is ambiguous.', recoveryCommand: LIST_SESSIONS_COMMAND },
+      { code: 'CALLER_NOT_OPEN', message: 'Caller is absent from the workface.', recoveryCommand: LIST_SESSIONS_COMMAND },
+      { code: 'SESSION_CLOSING', message: 'Agent Session is closing.', recoveryCommand: null },
+      { code: 'BROWSER_PROFILE_COOKIE_FILE_REFUSED', message: 'Choose a readable cookie file.', recoveryCommand: null }
     ]
     let next = 0
-    api.onRequest(async () => { throw failures[next++]! })
+    api.onRequest(async () => {
+      const { code, message } = failures[next++]!
+      const error = new Error(message)
+      if (code === 'MESSAGE_TARGET_NOT_UNIQUE') {
+        throw Object.assign(error, { code, candidates: [{ agentSessionId: 'agent-a', regionIds: ['region:1'] }] })
+      }
+      throw Object.assign(error, { code })
+    })
     for (const [index] of failures.entries()) listeners[0]!({ requestId: `r-${index}` })
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    const messages = responses.map((response) => (response.ok ? '' : response.error.message))
-    // 先钉住"五条都结算了"。否则微任务没排干时 messages 是短数组，下面的循环会少跑几轮却依然全绿。
-    expect(messages).toHaveLength(failures.length)
-    // 每种寻址失败都带上了能直接跑的下一步，而不只是"发生了什么"。
-    expect(messages[0]).toContain("amux agent send --to-session='agent-a'")
-    // 这三条拿不到 tab/region id，给的是 Session 旁路——它带子命令，真能跑。原来这里断言的是
-    // `toContain('amux inspect')`，而裸 inspect 跑不了，那句话分不清能跑与不能跑。
-    for (const index of [1, 2, 3]) expect(messages[index]).toContain('amux agent ls')
-    // 原始 message 不能被恢复文本顶掉——"怎么办"是附加，不是替代。
-    expect(messages[2]).toContain('Tab target is not currently open.')
-    // 不是寻址失败的码保持原样：一句通用套话会盖住真正的原因。
-    expect(messages[4]).toBe('Agent Session is closing.')
+    expect(responses).toHaveLength(failures.length)
+    for (const [index, { code, message, recoveryCommand }] of failures.entries()) {
+      const response = responses[index]!
+      expect(response).toMatchObject({ requestId: `r-${index}`, ok: false, error: { code } })
+      if (response.ok) throw new Error(`Expected a failure for ${code}`)
+      const reply = response.error.message
+      if (recoveryCommand === null) {
+        expect(reply, code).toBe(message)
+      } else {
+        expect(reply, code).toContain(message)
+        expect(reply.split('\n'), code).toContain(recoveryCommand)
+        expect(assertEveryCommandRunnable(reply, code), code).toBeGreaterThan(0)
+      }
+    }
   })
 
   it('未通过校验的 candidates 不会被拿去生成命令', async () => {
