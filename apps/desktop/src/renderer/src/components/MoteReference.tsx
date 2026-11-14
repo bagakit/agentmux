@@ -82,7 +82,7 @@ export function MoteReference(reference: Reference) {
   const { uri, target, label } = reference
   const facts = useAppStore(useShallow(state => ({ config: state.config, scratchTopicSnapshots: state.scratchTopicSnapshots,
     spaceZoneBindings: state.spaceZoneBindings, spaceObjectIcons: state.spaceObjectIcons })))
-  const identity = useMemo(() => moteReferenceIdentity(facts, target.spaceId), [facts.config, facts.scratchTopicSnapshots, facts.spaceZoneBindings, target.spaceId])
+  const identity = useMemo(() => target.spaceId === undefined ? null : moteReferenceIdentity(facts, target.spaceId), [facts.config, facts.scratchTopicSnapshots, facts.spaceZoneBindings, target.spaceId])
   const visibility = useVisibleWork<HTMLSpanElement>()
   const name = identity?.topic.title ?? 'Mote'
   const inline = label ? name + ' · ' + label : target.eventId === undefined ? name : name + ' · 工作 thread'
