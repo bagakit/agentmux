@@ -11,6 +11,36 @@ import type { AgentMuxHostedBootstrap } from '../src/hosted-client-contract.js'
 afterEach(() => vi.restoreAllMocks())
 const bytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value))
 
+it('locates and updates the original Hosted Session without scanning its directory', async () => {
+  const originals = Array.from({ length: 64 }, (_, index) => {
+    const { continuityOperations: _history, promptCompletionAdmission: _admission, ...session } = continuitySession('directory-item-' + index)
+    return session
+  })
+  const f = await hostedContinuityFixture(originals)
+  try {
+    const client = await f.connect('summary')
+    const last = originals.at(-1)!
+    const find = vi.spyOn(Array.prototype, 'find')
+    const findIndex = vi.spyOn(Array.prototype, 'findIndex')
+    let targetDirectoryScans: unknown[]
+    try {
+      const copied = client.agentSession(last.agentSessionId)
+      expect(copied.run).toEqual(last.run)
+      expect(copied.run).not.toBe(last.run)
+      await f.update({ ...last, updatedAt: last.updatedAt + 1 })
+      await vi.waitFor(() => expect(client.agentSession(last.agentSessionId).updatedAt).toBe(last.updatedAt + 1))
+      targetDirectoryScans = [...find.mock.contexts, ...findIndex.mock.contexts].filter(context =>
+        Array.isArray(context) && context.length === originals.length &&
+        context[0]?.sessionProjection === 'summary' && context[0]?.agentSessionId === originals[0]!.agentSessionId)
+    } finally {
+      find.mockRestore()
+      findIndex.mockRestore()
+    }
+    expect(targetDirectoryScans).toHaveLength(0)
+    expect(client.agentSessions().map(session => session.agentSessionId)).toEqual(originals.map(session => session.agentSessionId))
+  } finally { await f.dispose() }
+})
+
 it('shrinks historical continuity ledgers in actual bootstrap while retaining current continuity', async () => {
   const originals = Array.from({ length: 16 }, (_, index) => continuitySession('continuity-' + index)), f = await hostedContinuityFixture(originals)
   const fence = { runtimeId: f.owner.runtimeId, ownerInstanceId: f.owner.ownerInstanceId }
