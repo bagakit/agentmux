@@ -10,6 +10,7 @@ import { objectCliEnvironment, runCompiledObjectCli } from '../../../core/test/h
 import { createConnectionServices } from '../../src/connection-services.js'
 import { ScratchTopics, createMoteChatResources, readMoteResourceConfiguration } from '@agentmux/host/mote-resources'
 import { createMoteChatAgents as createHostMoteChatAgents } from '@agentmux/host/mote-chat-agents'
+import { createHostMoteMembership } from '@agentmux/host/mote-membership'
 import { directoryIdentity, homeZoneId } from '@agentmux/host/mote-model'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import type { AppConfig, WorkspaceRecord } from '../../../../apps/desktop/src/shared/contracts.js'
@@ -153,7 +154,7 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
   const agents = { ...desktopAgents, prepare }
   async function open() {
     services = await createConnectionServices({ directory: join(original.root, 'connectors'), adapters: [adapter],
-      bindings: { spatial, checkpoint }, moteChat: { agents, assertTarget: desktopAgents.assertTarget, assertReady: desktopAgents.assertReady },
+      bindings: { spatial, checkpoint }, moteChat: { agents, assertTarget: desktopAgents.assertTarget, assertReady: desktopAgents.assertReady, member: createHostMoteMembership(spatial) },
       publication: createPublicationConversationPort(clients), ingress: { core: host => host === 'local' ? original.client : undefined } })
     server = new core.AgentMuxControlServer({ socketPath: join(original.root, 'public.sock'), connections: services.connections, moteChat: services.moteChat!, spatialState: spatial, coreClients: clients })
     await server.start()
@@ -161,9 +162,12 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
   }
   async function close() { await sdk?.dispose(); await server?.stop(); services?.close() }
   await open(); cleanup.push(close)
-  const cli = async (command: 'configure' | 'history' | 'diagnose', input: unknown, credentials?: core.AgentMuxRpcCredentials) => {
+  const cliRaw = async (command: 'configure' | 'allocate' | 'history' | 'diagnose' | 'events' | 'review', input: unknown, credentials?: core.AgentMuxRpcCredentials) => {
     const overrides = credentials ? { AGENTMUX_AGENT_SESSION_ID: credentials.agentSessionId, AGENTMUX_AGENT_CAPABILITY: credentials.capability } : {}
-    const result = await runCompiledObjectCli(['--endpoint', 'unix:' + server.path, 'space', 'mote', 'chat', command, '--input', '-'], objectCliEnvironment(original.root, overrides), JSON.stringify(input))
+    return await runCompiledObjectCli(['--endpoint', 'unix:' + server.path, 'space', 'mote', 'chat', command, '--input', '-'], objectCliEnvironment(original.root, overrides), JSON.stringify(input))
+  }
+  const cli = async (...args: Parameters<typeof cliRaw>) => {
+    const result = await cliRaw(...args)
     expect(result.code, result.stdout + result.stderr).toBe(0)
     return JSON.parse(result.stdout).result
   }
@@ -193,7 +197,7 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
     if (!source.transcriptPath) throw new Error('Original native path is missing')
     await appendFile(source.transcriptPath, nativeProvider === 'grok' ? [grokChunk(source.sessionId, text, id), grokDone(source.sessionId, id)].map(row => JSON.stringify(row)).join('\n') + '\n' : JSON.stringify({ sessionId: source.sessionId, uuid: id, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } }) + '\n')
   }
-  return { ...original, feishu, agents, config, configurationPath, graph, workspace, get services() { return services }, get sdk() { return sdk }, topic, target, creator, guest, wire, message, records, claimed, reply, start, prepare, submission,
-    cli, publicationRefresh, credentials(index: number) { const env = start.mock.calls[index]![0].env!; return { agentSessionId: env.AGENTMUX_AGENT_SESSION_ID!, capability: env.AGENTMUX_AGENT_CAPABILITY! } },
+  return { ...original, feishu, agents, config, configurationPath, graph, spatial, workspace, get services() { return services }, get sdk() { return sdk }, topic, target, creator, guest, wire, message, records, claimed, reply, start, prepare, submission,
+    cli, cliRaw, publicationRefresh, credentials(index: number) { const env = start.mock.calls[index]![0].env!; return { agentSessionId: env.AGENTMUX_AGENT_SESSION_ID!, capability: env.AGENTMUX_AGENT_CAPABILITY! } },
     submissionErrors, async restart() { await close(); await open(); await vi.waitFor(() => expect(wire.endpoint).toBeDefined()) } }
 }
