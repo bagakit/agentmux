@@ -21,18 +21,18 @@ export interface GoalRoleGuidanceContext {
   source?: string | GoalRoleGuidanceSource
 }
 
-const shared = /* @__PURE__ */ guideText(guideSharedGoalCommon, { 'goal-skill-entry': AGENTMUX_GOAL_SKILL_ENTRY })
+const shared = /* @__PURE__ */ guideText(guideSharedGoalCommon)
 
 const executor = /* @__PURE__ */ guideText(guideSharedGoalExecutor)
 
 const manager = /* @__PURE__ */ guideText(guideSharedGoalManager)
 
 export function goalRoleGuidanceContract(): string {
-  return guideText(guideSharedGoalContract, { 'goal-skill-entry': AGENTMUX_GOAL_SKILL_ENTRY })
+  return guideText(guideSharedGoalContract)
 }
 
 /** Application-authored context; callers retain the original user text separately. */
 export function goalRoleGuidance(context: GoalRoleGuidanceContext): string {
   const { role, ...identity } = context
-  return `Goal role: ${role}\nKnown original context: ${JSON.stringify(identity)}\n\n${role === 'manager' ? manager : executor}\n\n${shared}`
+  return `Goal role: ${role}\nKnown original context: ${JSON.stringify(identity)}\n\n${role === 'manager' ? manager : executor}\n\n${shared}\n\nOperation details: ${AGENTMUX_GOAL_SKILL_ENTRY}`
 }
