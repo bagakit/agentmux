@@ -56,17 +56,18 @@ Use the named entry for the control or capability you need. The `components/` en
 
 ## Platform adapter
 
-Views that need platform services use `ClientUiProvider` with an explicit `ClientUiPlatform`. The adapter supplies clipboard error reporting, an overlay target, editor focus registration and identity rendering. File opening, HTTP navigation, pasted-image IO, send, queue, interrupt and permission responses are typed callbacks. A host can supply a rendered avatar through `DescribeSpeaker`.
+Agent views that need platform services import `ClientUiProvider` and `ClientUiPlatform` from `@agentmux/client-ui/platform`. The adapter supplies clipboard error reporting, an overlay target, editor focus registration and identity rendering. File opening, HTTP navigation, pasted-image IO, send, queue, interrupt and permission responses are typed callbacks. A host can supply a rendered avatar through `DescribeSpeaker`.
 
 ## Node consumers
 
-The package builds ESM JavaScript for Node consumers, and its `browser` export condition gives browser bundlers the TypeScript source. Node support belongs to the selected entry and its purpose:
+The package builds ESM JavaScript for Node consumers, and its `browser` export condition gives browser bundlers the TypeScript source. Each Node entry has a specific purpose.
 
 | Entry | Node responsibility and dependencies |
 | --- | --- |
+| `theme/model` | Read and validate the theme catalog, its serialized format, icon metadata and terminal palettes in Node. Browser mounting and theme observation of a document live in `theme`. |
 | `pasted-images`, `terminal-path-link` | Pure value helpers; their import graphs contain no React, Tiptap or DOM runtime. |
 | `agent-avatar-svg`, `mote-avatar-svg` and their static artwork dependencies | Shared static avatar rendering, including React and `react-dom/server` where needed. The Host supplies saved appearance and owned raster resources; rendering does not mount an editor or browser DOM. |
-| `note/*` document codecs, merge and provenance helpers, including `note-content-schema` | Read and serialize the shared Note format and validate it with the same Tiptap schema as the editor. These work without an editor DOM. The host owns file IO, revision checks, compare-and-swap and write receipts. |
+| `note/note-document`, `note/note-content-schema` and `note/note-provenance` | Read and serialize the shared Note format and validate it with the same Tiptap schema as the editor. The schema and codecs work without an editor DOM. Editor transactions use `note/note-editor-extensions` for reference ID authoring and history boundaries. The host owns file IO, revision checks, compare-and-swap and write receipts. |
 
 Node consumers import a supported subpath directly. Interactive components require a rendering host.
 
