@@ -118,6 +118,20 @@ process.stdout.write(path.resolve(process.cwd(),home||os.tmpdir(),'.gemini','set
       .toBe(join(privateHome, '.config/opencode/plugin/agentmux.js'))
   })
 
+  it.each([
+    ['OPENCODE_CONFIG_DIR', '', 'home', '.config/opencode/plugin/agentmux.js'],
+    ['OPENCODE_CONFIG_DIR', '  ', 'workspace', '  /plugin/agentmux.js'],
+    ['OPENCODE_CONFIG_DIR', 'relative root ', 'workspace', 'relative root /plugin/agentmux.js'],
+    ['XDG_CONFIG_HOME', '', 'home', '.config/opencode/plugin/agentmux.js'],
+    ['XDG_CONFIG_HOME', '  ', 'workspace', '  /opencode/plugin/agentmux.js'],
+    ['XDG_CONFIG_HOME', 'relative root ', 'workspace', 'relative root /opencode/plugin/agentmux.js']
+  ] as const)('keeps native OpenCode %s=%j literal path semantics', (key, value, base, suffix) => {
+    // Native 1.18.25 debug config/paths, with private HOME and localhost-only networking:
+    // empty overrides fall back; whitespace and trailing spaces remain path content.
+    const env = { HOME: privateHome, OPENCODE_CONFIG_DIR: undefined, XDG_CONFIG_HOME: undefined, [key]: value }
+    expect(plan('opencode', env).mutations[0]!.path).toBe(join(base === 'home' ? privateHome : workspace, suffix))
+  })
+
   it('uses the same launch home for Cursor Hook data and native inspection roots', () => {
     vi.stubEnv('CURSOR_DATA_DIR', join(root, 'inherited-data'))
     vi.stubEnv('CURSOR_CONFIG_DIR', join(root, 'inherited-config'))

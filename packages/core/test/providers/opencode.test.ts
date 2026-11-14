@@ -174,9 +174,11 @@ describe('OpenCode provider', () => {
       expect(plan.mutations[0]?.mode).toBe(0o600)
     })
 
-    it('OPENCODE_CONFIG_DIR 被尊重，空串等于没设', () => {
-      const withEmpty = createOpenCodeManagedHookPlan({ OPENCODE_CONFIG_DIR: '  ' })
-      expect(withEmpty.mutations[0]?.path).not.toContain('  ')
+    it('OPENCODE_CONFIG_DIR 空串回默认，空白保留为目录内容', () => {
+      const withEmpty = createOpenCodeManagedHookPlan({ OPENCODE_CONFIG_DIR: '' })
+      expect(withEmpty.mutations[0]?.path).toBe(createOpenCodeManagedHookPlan({ OPENCODE_CONFIG_DIR: undefined }).mutations[0]?.path)
+      const literal = createOpenCodeManagedHookPlan({ OPENCODE_CONFIG_DIR: '  ' }, fixturePath("repo/app"))
+      expect(literal.mutations[0]?.path).toBe(fixturePath("repo/app/  /plugin/agentmux.js"))
     })
 
     it('XDG_CONFIG_HOME 决定默认目录', () => {
