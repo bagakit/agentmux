@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { spawn, spawnSync, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { mkdir, mkdtemp, readFile, readdir, writeFile, symlink, rm, copyFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, readdir, writeFile, symlink, rm, copyFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { dirname, join, resolve, relative } from 'node:path'
 import { release } from 'node:os'
@@ -112,13 +112,19 @@ try {
     for (const path of [join(tree, 'packages/native-desktop/macos/Package.swift'), join(tree, 'packages/native-desktop/scripts/build-macos.mjs'), ...await sourceFiles(join(tree, 'packages/native-desktop/macos/Sources'))]) consumed[relative(tree, path)] = sha(await readFile(path))
     for (const required of ['apps/desktop/src/main/capture-surface.ts', 'apps/desktop/src/main/screen-capture.ts', 'apps/desktop/src/main/global-screenshot.ts', 'apps/desktop/src/main/screenshot-shortcut.ts', 'apps/desktop/src/preload/capture-surface.ts', 'apps/desktop/src/renderer/screenshot-editor/entry.tsx', 'packages/native-desktop/src/client.ts']) assert.ok(consumed[required], variant + ': production input missing: ' + required)
     const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
-    const built = await command(variant + '-native-build', process.execPath, [join(tree, 'packages/native-desktop/scripts/build-macos.mjs'), '--bare', '--configuration', 'debug', '--scratch-path', join(out, variant + '-native-scratch')], env, 180000)
+    const scratch = join(out, variant + '-native-scratch')
+    const built = await command(variant + '-native-build', process.execPath, [join(tree, 'packages/native-desktop/scripts/build-macos.mjs'), '--bare', '--configuration', 'debug', '--scratch-path', scratch], env, 180000)
     assert.equal(built.code, 0, variant + ': native build failed')
     const buildReceipt = built.log.split('\n').find(line => line.startsWith('{"schema":"agentmux.native-build.v1"'))
     assert.ok(buildReceipt, variant + ': native build receipt is missing')
     const nativeBuild = JSON.parse(buildReceipt)
-    variants[variant] = { appRoot, executablePath: nativeBuild.executablePath }
-    receipt.productionInputs[variant] = { ref, files: consumed, nativeBinarySha256: sha(await readFile(nativeBuild.executablePath)) }
+    const executablePath = join(out, variant + '-native')
+    const nativeBinarySha256 = sha(await readFile(nativeBuild.executablePath))
+    await copyFile(nativeBuild.executablePath, executablePath); await chmod(executablePath, 0o755)
+    assert.equal(sha(await readFile(executablePath)), nativeBinarySha256, variant + ': copied native helper differs from the compiled binary')
+    await rm(scratch, { recursive: true, force: true })
+    variants[variant] = { appRoot, executablePath }
+    receipt.productionInputs[variant] = { ref, files: consumed, nativeBinarySha256 }
   }
   let index = 0
   for (const background of smoke ? ['included'] : ['included', 'excluded']) for (const iteration of smoke ? [2] : [1, 2]) for (const pair of smoke ? [1] : [1, 2, 3]) {
@@ -175,9 +181,9 @@ try {
   receipt.cleanup.nativeHelpersRemaining = helpers
   if (helpers?.length === 0) {
     for (const path of temporaryUserData) await rm(path, { recursive: true, force: true })
-    for (const name of ['baseline-app', 'candidate-app', 'baseline-native-scratch', 'candidate-native-scratch']) await rm(join(out, name), { recursive: true, force: true })
+    for (const name of ['baseline-app', 'candidate-app', 'baseline-native-scratch', 'candidate-native-scratch', 'baseline-native', 'candidate-native']) await rm(join(out, name), { recursive: true, force: true })
   } else { receipt.passed = false; process.exitCode = 1 }
-  receipt.cleanup.generatedArtifactsRemoved = [...temporaryUserData].every(path => !existsSync(path)) && ['baseline-app', 'candidate-app', 'baseline-native-scratch', 'candidate-native-scratch'].every(name => !existsSync(join(out, name)))
+  receipt.cleanup.generatedArtifactsRemoved = [...temporaryUserData].every(path => !existsSync(path)) && ['baseline-app', 'candidate-app', 'baseline-native-scratch', 'candidate-native-scratch', 'baseline-native', 'candidate-native'].every(name => !existsSync(join(out, name)))
   await writeFile(join(out, 'receipt.json'), JSON.stringify(receipt, null, 2))
 }
 process.stdout.write(JSON.stringify({ passed: receipt.passed, developmentSmokePassed: receipt.developmentSmokePassed, failure: receipt.failure, receipt: join(out, 'receipt.json') }) + '\n')
