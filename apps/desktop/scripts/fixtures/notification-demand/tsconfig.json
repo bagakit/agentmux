@@ -5,6 +5,9 @@
       "@agentmux/core": [
         "../../../../../packages/core/src/index.ts"
       ],
+      "@agentmux/core/mote-*": [
+        "../../../../../packages/core/src/mote/*"
+      ],
       "@agentmux/core/*": [
         "../../../../../packages/core/src/*"
       ],

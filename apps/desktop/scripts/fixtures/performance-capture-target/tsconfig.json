@@ -3,7 +3,7 @@
   "compilerOptions": {
     "paths": {
       "@agentmux/core": ["../../../../../packages/core/src/index.ts"],
-      "@agentmux/core/*": ["../../../../../packages/core/src/*"],
+      "@agentmux/core/mote-*": ["../../../../../packages/core/src/mote/*"],       "@agentmux/core/*": ["../../../../../packages/core/src/*"],
       "@agentmux/core/agent-input-mailbox": ["../../../../../packages/core/src/agent-input-mailbox-codec.ts"],
       "@agentmux/core/files": ["../../../../../packages/core/src/public-rpc-files.ts"],
       "@agentmux/core/schedule": ["../../../../../packages/core/src/agent-schedule.ts"],

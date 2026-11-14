@@ -69,8 +69,13 @@ async function checkCallers() {
     assert.equal(config.error, undefined, 'The actual desktop TypeScript configuration must be readable.')
     const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, join(root, 'apps/desktop'))
     assert.equal(parsed.errors.length, 0, 'The actual desktop TypeScript configuration must parse.')
+    const coreExports = JSON.parse(await readFile(join(root, 'packages/core/package.json'), 'utf8')).exports
+    const corePaths = Object.fromEntries(Object.entries(coreExports).map(([key, entry]) => [
+      key === '.' ? '@agentmux/core' : '@agentmux/core/' + key.slice(2),
+      [relative(root, resolve(root, 'packages/core', entry.import.replace('./dist/', './src/').replace(/\.js$/u, '.ts')))]
+    ]))
     const program = ts.createProgram(callerFiles.map(file => join(root, file)), { ...parsed.options, baseUrl: root,
-      paths: { '@agentmux/core': ['packages/core/src/index.ts'], '@agentmux/core/*': ['packages/core/src/*'], '@agentmux/layout': ['packages/layout/src/index.ts'] } })
+      paths: { ...corePaths, '@agentmux/layout': ['packages/layout/src/index.ts'] } })
     const checker = program.getTypeChecker()
     const path = file => relative(root, file).replaceAll('\\', '/')
     const productionFile = file => !file.endsWith('.d.ts') && !/(^|\/)(test|tests|node_modules)(\/|$)|\.test\.[cm]?[jt]sx?$/.test(file)
@@ -78,7 +83,7 @@ async function checkCallers() {
     assert.ok(sourceFiles.length > 0, 'The actual typed production-source scan must not be empty.')
     const sha = bytes => createHash('sha256').update(bytes).digest('hex')
     receipt.inputsBefore = Object.fromEntries(sourceFiles.map(source => [path(source.fileName), sha(source.text)]))
-    for (const file of ['apps/desktop/tsconfig.json', 'tsconfig.base.json', 'apps/desktop/scripts/verify-survey-browser-workface-mutations.mjs']) receipt.inputsBefore[file] = sha(await readFile(join(root, file)))
+    for (const file of ['apps/desktop/tsconfig.json', 'tsconfig.base.json', 'packages/core/package.json', 'apps/desktop/scripts/verify-survey-browser-workface-mutations.mjs']) receipt.inputsBefore[file] = sha(await readFile(join(root, file)))
     const symbolAt = node => {
       const symbol = checker.getSymbolAtLocation(node)
       return symbol && symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol

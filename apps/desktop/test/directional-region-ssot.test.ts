@@ -587,7 +587,13 @@ type ProofProbe = {
 
 /** desktop 的真实编译配置。反事实探针必须用它，否则「诚实树上零错误」这个前提说的不是生产的事。 */
 function owningSourceOptions(options: ts.CompilerOptions): ts.CompilerOptions {
-  return {...options,baseUrl:DESKTOP_DIR,paths:{'@agentmux/core':['../../packages/core/src/index.ts'],'@agentmux/core/*':['../../packages/core/src/*.ts'],'@agentmux/layout':['../../packages/layout/src/index.ts']}}
+  const coreRoot = path.resolve(DESKTOP_DIR, '../../packages/core')
+  const exports = JSON.parse(readFileSync(path.join(coreRoot, 'package.json'), 'utf8')).exports as Record<string, { import: string }>
+  const corePaths = Object.fromEntries(Object.entries(exports).map(([key, entry]) => [
+    key === '.' ? '@agentmux/core' : '@agentmux/core/' + key.slice(2),
+    [path.relative(DESKTOP_DIR, path.resolve(coreRoot, entry.import.replace('./dist/', './src/').replace(/\.js$/u, '.ts')))]
+  ]))
+  return { ...options, baseUrl: DESKTOP_DIR, paths: { ...corePaths, '@agentmux/layout': ['../../packages/layout/src/index.ts'] } }
 }
 function desktopParsedConfig(): ts.ParsedCommandLine {
   const configFile = ts.readConfigFile(path.join(DESKTOP_DIR, 'tsconfig.json'), ts.sys.readFile)

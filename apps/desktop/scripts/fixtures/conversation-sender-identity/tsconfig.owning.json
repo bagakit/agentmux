@@ -15,6 +15,9 @@
       "@agentmux/core": [
         "packages/core/src/index.ts"
       ],
+      "@agentmux/core/mote-*": [
+        "packages/core/src/mote/*.ts"
+      ],
       "@agentmux/core/*": [
         "packages/core/src/*.ts"
       ],
