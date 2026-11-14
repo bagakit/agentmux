@@ -1,29 +1,39 @@
+import type { GoalResponsibilityRow } from '@agentmux/core/goal-responsibility'
+import type { GoalNextStepSource } from '../lib/goal-presentation'
+import { GoalExecutionResponsibility } from './GoalResponsibilitySummary'
 import { GoalEvidence } from './GoalEvidence'
 import type { GoalStartRow } from '../lib/goal-start-presentation'
 import { GoalContinuationAgent } from './GoalContinuationControl'
 
 /** Shares the Goal's original observation, navigation and result review; never invents an A2A report. */
-export function GoalStartWork({ rows, supervisorSessionId, active, openAgent, review }: {
+export function GoalStartWork({ rows, supervisorSessionId, active, openAgent, review, responsibilities, focus, primary, embedded = false }: {
+  responsibilities?: ReadonlyMap<string, GoalResponsibilityRow> | undefined; focus?: GoalNextStepSource | undefined; primary?: boolean; embedded?: boolean;
   rows: GoalStartRow[]; supervisorSessionId: string | null | undefined; active: boolean
   openAgent: (sessionId: string, hostId?: string) => Promise<void>; review: () => Promise<void>
 }) {
-  return rows.map(({ start, observation, next, issue }) => <article className="goal-delegation__item" key={start.operationId}>
-    <strong>{next}</strong>
-    <p className="goal-delegation__identity">Agent <span><GoalContinuationAgent agentSessionId={start.agentSessionId} hostId={start.hostId} active={active} size={14} /></span> · Follow-up {supervisorSessionId
-      ? <span><GoalContinuationAgent agentSessionId={supervisorSessionId} active={active} size={14} /></span> : 'needs an assigned Supervisor'}</p>
-    {issue && (observation?.attention?.state === 'confirmed' || issue !== observation?.attention?.reason) ? <p className="goals-service" role="status">{issue}</p> : null}
-    {observation?.goalResult ? <p className="goals-service">Goal-level results are available. Their association with this Start is unknown.</p> : null}
-    {observation?.attention?.state === 'confirmed' ? <details className="goal-delegation__notice"><summary>Supervisor reminder received</summary><p>{observation.attention.reason} Goal results and human review remain separate.</p></details> : observation?.attention ? <p className="goals-service" role="status">Supervisor reminder {observation.attention.state}. {observation.attention.reason} Reminder receipt does not accept this Goal.
+  return rows.map(({ start, observation, next, issue }) => <article className="goal-delegation__item" key={start.operationId} data-goal-work-operation={start.operationId} data-goal-work-kind="start">
+    <strong data-goal-current-conclusion={focus?.kind === 'start' && focus.operationId === start.operationId ? true : undefined} data-goal-current-source={focus?.kind === 'start' && focus.operationId === start.operationId ? 'start' : undefined}>{next}</strong>
+    <p className="goal-delegation__identity">Agent <span><GoalContinuationAgent agentSessionId={start.agentSessionId} hostId={start.hostId} active={active} size={14} /></span>{!embedded ? <> · Follow-up {supervisorSessionId
+      ? <span><GoalContinuationAgent agentSessionId={supervisorSessionId} active={active} size={14} /></span> : 'needs an assigned Supervisor'}</> : null}</p>
+    <GoalExecutionResponsibility row={responsibilities?.get(`start:${start.operationId}`)} />
+    {!embedded && issue && issue !== responsibilities?.get(`start:${start.operationId}`)?.reason && (observation?.attention?.state === 'confirmed' || issue !== observation?.attention?.reason) ? <p className="goals-service" role="status">{issue}</p> : null}
+    {embedded && observation?.input.state !== 'confirmed' && (!responsibilities?.get(`start:${start.operationId}`) || responsibilities.get(`start:${start.operationId}`)?.binding === 'confirmed') ? <p className="goals-caption">Original input unconfirmed</p> : null}
+    {observation?.goalResult ? <p className={embedded ? 'goals-caption' : 'goals-service'}>Goal-level results are available. Their association with this Start is unknown.</p> : null}
+    {embedded && observation?.attention ? <p className="goals-caption">Supervisor reminder {observation.attention.state === 'confirmed' ? 'received' : observation.attention.state}.
+      {start.attention && observation.attention.state !== 'confirmed' ? <button type="button" className="small-button" onClick={() => void openAgent(start.attention!.supervisorAgentSessionId, start.attention!.hostId)}>Open original Supervisor</button> : null}
+    </p> : !embedded && observation?.attention?.state === 'confirmed' ? <details className="goal-delegation__notice"><summary>Supervisor reminder received</summary><p>{observation.attention.reason} Goal results and human review remain separate.</p></details> : !embedded && observation?.attention ? <p className="goals-service" role="status">Supervisor reminder {observation.attention.state}. {observation.attention.reason} Reminder receipt does not accept this Goal.
       {start.attention ? <button type="button" className="small-button"
         onClick={() => void openAgent(start.attention!.supervisorAgentSessionId, start.attention!.hostId)}>Open original Supervisor</button> : null}
     </p> : null}
     <div className="goal-delegation__actions">
-      <button type="button" className="small-button" title={`Host ${start.hostId} · Session ${start.agentSessionId}`}
+      <button type="button" className={primary !== false && focus?.kind === 'start' && focus.operationId === start.operationId && !observation?.goalResult ? 'primary-button' : 'small-button'} title={`Host ${start.hostId} · Session ${start.agentSessionId}`}
         onClick={() => void openAgent(start.agentSessionId, start.hostId)}>Open original Agent</button>
-      {observation?.goalResult ? <button type="button" className="primary-button" onClick={() => void review()}>Review results</button> : null}
+      {observation?.goalResult ? <button type="button" className={primary !== false && (focus === undefined || focus.kind === 'start' && focus.operationId === start.operationId) ? 'primary-button' : 'small-button'} onClick={() => void review()}>Review results</button> : null}
     </div>
     <details className="goal-delegation__source"><summary>Original Start and input</summary>
-      <dl><dt>Host</dt><dd>{start.hostId}</dd><dt>Worker</dt><dd>{start.agentSessionId}</dd><dt>Original Run</dt><dd>{start.runId}</dd>
+      {embedded && issue && issue !== responsibilities?.get(`start:${start.operationId}`)?.reason && issue !== observation?.attention?.reason ? <p>{issue}</p> : null}
+      {embedded && observation?.attention ? <p>Supervisor reminder {observation.attention.state}. {observation.attention.reason} Reminder receipt does not accept this Goal.</p> : null}
+      <dl>{embedded ? <><dt>Follow-up</dt><dd>{supervisorSessionId ?? 'Needs an assigned Supervisor'}</dd></> : null}<dt>Host</dt><dd>{start.hostId}</dd><dt>Worker</dt><dd>{start.agentSessionId}</dd><dt>Original Run</dt><dd>{start.runId}</dd>
         <dt>Start operation</dt><dd>{start.operationId}</dd><dt>Input observation</dt><dd>{observation?.input.state ?? 'unknown'}</dd>
         {start.receipt ? <><dt>Retained Core receipt</dt><dd>{start.receipt.itemId}</dd></> : null}
         <dt>Result basis</dt><dd>{start.resultBasis ? 'Captured at this Start' : 'Unknown for this original Start'}</dd></dl>

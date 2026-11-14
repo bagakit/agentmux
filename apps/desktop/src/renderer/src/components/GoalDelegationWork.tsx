@@ -1,6 +1,6 @@
 import { GoalEvidence } from './GoalEvidence'
 import { mintObjectId } from '@agentmux/core/object-id'
-import { useRef, useState } from 'react'
+import { useRef, useState, Fragment, type ReactNode } from 'react'
 import { delegationWorkerHostId } from '@agentmux/demand/delegations'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import { api } from '../lib/api'
@@ -8,14 +8,15 @@ import type { DemandRecord } from '../lib/global-demand-board'
 import { goalDelegationRows } from '../lib/goal-delegation-presentation'
 import { goalStartRows } from '../lib/goal-start-presentation'
 import { GoalStartWork } from './GoalStartWork'
-import { GoalResponsibilitySummary } from './GoalResponsibilitySummary'
+import type { GoalNextStepSource } from '../lib/goal-presentation'
+import { GoalExecutionResponsibility, GoalResponsibilitySummary } from './GoalResponsibilitySummary'
 import { GoalContinuationAgent } from './GoalContinuationControl'
 import { applyGoalDelegationResult, beginGoalDelegationRead, refreshGoalDelegations, useGoalDelegationObservation } from '../lib/goal-delegation-work'
 import { useAppStore } from '../store'
 
 /** Same original Goal reports and actions in Goal details and a Mote's current work. */
-export function GoalDelegationWork({ demand, active = true, compact = false }: {
-  demand: DemandRecord; active?: boolean; compact?: boolean
+export function GoalDelegationWork({ demand, active = true, compact = false, embedded = false, primary = true, focus, beforeRecords, afterRecords, plan, onRevealResults }: {
+  demand: DemandRecord; active?: boolean; compact?: boolean; embedded?: boolean; primary?: boolean; focus?: GoalNextStepSource | undefined; beforeRecords?: ReactNode; afterRecords?: ReactNode; plan?: ReactNode; onRevealResults?: (() => void) | undefined
 }) {
   const current = useAppStore(state => active ? state.demands[demand.id] ?? demand : demand)
   useGoalDelegationObservation(current, active)
@@ -23,7 +24,9 @@ export function GoalDelegationWork({ demand, active = true, compact = false }: {
   const collecting = useRef(new Set<string>())
   const rows = goalDelegationRows(current)
   const starts = goalStartRows(current)
-  if (compact || !rows.length && !starts.length) return <GoalResponsibilitySummary demand={current} compact={compact} active={active} />
+  const represented = new Set([...starts.map(row => `start:${row.start.operationId}`), ...rows.map(row => `delegation:${row.delegation.operationId}`)])
+  const responsibilities = new Map(current.responsibility?.executions.map(row => [`${row.execution.kind}:${row.execution.operationId}`, row]))
+  if (compact || !embedded && !rows.length && !starts.length) return <GoalResponsibilitySummary demand={current} compact={compact} active={active} />
   async function refresh() {
     await refreshGoalDelegations(demand.id)
     if (!useAppStore.getState().demands[demand.id]?.delegationObservationIssue) setIssue(null)
@@ -61,31 +64,30 @@ export function GoalDelegationWork({ demand, active = true, compact = false }: {
     catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
   }
   async function review() {
+    if (onRevealResults) { onRevealResults(); return }
     try {
       const result = await useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
         requestId: mintObjectId(), operation: 'focus', target: { kind: 'goal', goalId: demand.id }, inputPolicy: 'preserve' })
       if (result.operation === 'focus' && result.navigation.state === 'rejected') setIssue(result.issues.map(item => item.message).join(' '))
     } catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
   }
-  return <><GoalResponsibilitySummary demand={current} active={active} /><section id={`goal-work-${demand.id}`} tabIndex={-1} className="goal-delegation" aria-label="Delegated work">
-    <div className="goal-delegation__heading"><strong>Delegated work</strong><button type="button" className="small-button" onClick={() => void refresh()}>Refresh reports</button></div>
-    {current.delegationObservationIssue || issue ? <p className="goals-service" role="status">{issue ?? current.delegationObservationIssue} Original Agents, tasks and last confirmed reports are kept.</p> : null}
-    <GoalStartWork rows={starts} supervisorSessionId={current.supervisorSessionId} active={active} openAgent={openAgent} review={review} />
-    {rows.map(row => <article className="goal-delegation__item" key={row.delegation.operationId} data-goal-attempt={row.previousAttempt ? 'previous' : undefined}>
+  const startRecords = starts.map(row => ({ key: `start:${row.start.operationId}`, element: <GoalStartWork key={row.start.operationId} rows={[row]} supervisorSessionId={current.supervisorSessionId} active={active} openAgent={openAgent} review={review} embedded={embedded} responsibilities={embedded ? responsibilities : undefined} focus={focus} primary={primary} /> }))
+  const delegationRecords = rows.map(row => ({ key: `delegation:${row.delegation.operationId}`, element: <article className="goal-delegation__item" key={row.delegation.operationId} data-goal-work-operation={row.delegation.operationId} data-goal-work-kind="delegation" data-goal-attempt={row.previousAttempt ? 'previous' : undefined}>
       {row.previousAttempt ? <span className="goals-caption">Previous attempt</span> : null}
-      <strong>{row.next}</strong>
+      <strong data-goal-current-conclusion={focus?.kind === 'delegation' && focus.operationId === row.delegation.operationId ? true : undefined} data-goal-current-source={focus?.kind === 'delegation' && focus.operationId === row.delegation.operationId ? 'delegation' : undefined}>{row.next}</strong>
       <p className="goal-delegation__identity">Agent <span><GoalContinuationAgent agentSessionId={row.delegation.workerAgentSessionId} hostId={delegationWorkerHostId(row.delegation)} active={active} size={14} /></span> · Follow-up {current.supervisorSessionId
         ? <span><GoalContinuationAgent agentSessionId={current.supervisorSessionId} active={active} size={14} /></span> : 'needs an assigned Supervisor'}</p>
+      {embedded ? <GoalExecutionResponsibility row={responsibilities.get(`delegation:${row.delegation.operationId}`)} /> : null}
       {row.report ? <p className="goal-delegation__summary">{row.report.grounding.summary}</p> : null}
       {row.issue && row.issue !== current.delegationObservationIssue ? <p className="goals-service" role="status">{row.issue}</p> : null}
       {row.attention?.state === 'confirmed' ? <details className="goal-delegation__notice"><summary>Supervisor reminder received</summary><p>{row.attention.reason} The report and human review remain separate.</p></details> : row.attention ? <p className="goals-service" role="status">Supervisor reminder {row.attention.state === 'prepared' ? 'prepared' : 'unknown'}. {row.attention.reason} Reminder receipt does not accept this Goal.
         {row.delegation.attention ? <button type="button" className="small-button" onClick={() => void openAgent(row.delegation.attention!.supervisorAgentSessionId, row.delegation.attention!.hostId)}>Open original Supervisor</button> : null}
       </p> : null}
       <div className="goal-delegation__actions">
-        {row.state === 'report' ? <button type="button" className="primary-button" disabled={busy.has(row.delegation.operationId)}
+        {row.state === 'report' ? <button type="button" className={!embedded || primary && focus?.kind === 'delegation' && focus.operationId === row.delegation.operationId ? 'primary-button' : 'small-button'} disabled={busy.has(row.delegation.operationId)}
           onClick={() => void collect(row.delegation.operationId, row.report!.replyMessageId)}>{busy.has(row.delegation.operationId) ? 'Collecting…' : 'Collect report'}</button> : null}
-        {row.state === 'collected' ? <button type="button" className="primary-button" onClick={() => void review()}>Review results</button> : null}
-        <button type="button" className="small-button" title={`Host ${delegationWorkerHostId(row.delegation)} · Session ${row.delegation.workerAgentSessionId}`}
+        {row.state === 'collected' ? <button type="button" className={!embedded || primary && focus?.kind === 'delegation' && focus.operationId === row.delegation.operationId ? 'primary-button' : 'small-button'} onClick={() => void review()}>Review results</button> : null}
+        <button type="button" className={embedded && primary && focus?.kind === 'delegation' && focus.operationId === row.delegation.operationId && !['report', 'collected'].includes(row.state) ? 'primary-button' : 'small-button'} title={`Host ${delegationWorkerHostId(row.delegation)} · Session ${row.delegation.workerAgentSessionId}`}
           onClick={() => void openAgent(row.delegation.workerAgentSessionId, delegationWorkerHostId(row.delegation))}>Open original Agent</button>
         <button type="button" className="small-button" title={`Host ${row.delegation.hostId} · Session ${row.delegation.ownerAgentSessionId}`}
           onClick={() => void openAgent(row.delegation.ownerAgentSessionId, row.delegation.hostId)}>Open task owner</button>
@@ -106,6 +108,22 @@ export function GoalDelegationWork({ demand, active = true, compact = false }: {
             {check.note ? <p>{check.note}</p> : null}<GoalEvidence evidence={check.evidence} criterion={check.criterionId} /></div>)}
         </div> : null}
       </details>
-    </article>)}
-  </section></>
+    </article> }))
+  const records = [...startRecords, ...delegationRecords]
+  const focusedKey = focus?.kind === 'start' || focus?.kind === 'delegation' ? `${focus.kind}:${focus.operationId}` : embedded && focus?.kind === 'patrol' && records.length === 1 ? records[0]!.key : null
+  const others = records.filter(record => record.key !== focusedKey)
+  const attentionKeys = new Set([...starts.filter(row => row.state !== 'working').map(row => `start:${row.start.operationId}`), ...rows.filter(row => ['unknown', 'exited', 'question', 'report', 'collected'].includes(row.state)).map(row => `delegation:${row.delegation.operationId}`)])
+  const needsAttention = others.filter(record => attentionKeys.has(record.key) || responsibilities.get(record.key)?.alert).length
+  const recordNodes = embedded ? [
+    ...records.filter(record => record.key === focusedKey).map(record => <Fragment key={record.key}>{record.element}</Fragment>),
+    ...(others.length ? [<p key="other-work-summary" className="goals-caption" data-goal-other-work>{others.length} other original {others.length === 1 ? 'execution' : 'executions'}{needsAttention ? ` · ${needsAttention} need checking` : ''}</p>] : []),
+    <Fragment key="original-plan">{plan}</Fragment>,
+    ...others.map(record => <Fragment key={record.key}>{record.element}</Fragment>)
+  ] : records.map(record => <Fragment key={record.key}>{record.element}</Fragment>)
+  return <>{beforeRecords}<GoalResponsibilitySummary demand={current} active={active} embedded={embedded} represented={embedded ? represented : undefined} primary={embedded ? primary && focus?.kind === 'patrol' : undefined} />{rows.length || starts.length || current.delegationObservationIssue || issue || embedded && plan ? <section id={`goal-work-${demand.id}`} tabIndex={-1} className="goal-delegation" aria-label={embedded ? 'Original work records' : 'Delegated work'}>
+    <div className="goal-delegation__heading">{!embedded ? <strong>Delegated work</strong> : null}{rows.length || starts.length ? <button type="button" className="small-button" onClick={() => void refresh()}>Refresh reports</button> : null}</div>
+    {current.delegationObservationIssue || issue ? <p className="goals-service" role="status">{issue ?? current.delegationObservationIssue} Original Agents, tasks and last confirmed reports are kept.</p> : null}
+    {recordNodes}
+
+  </section> : null}{afterRecords}</>
 }

@@ -5,7 +5,7 @@ import { useAppStore } from '../store'
 import type { DemandProjection } from '../lib/global-demand-board'
 import { useIconFeedback } from '../lib/use-icon-feedback'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
-import { goalResultExplanation } from '../lib/goal-presentation'
+import { goalNextStepFact, goalResultExplanation } from '../lib/goal-presentation'
 import { GoalEvidence } from './GoalEvidence'
 import { useGoalDiscussionRecipient } from '../lib/goal-discussion-recipient'
 import dialogueArtworkUrl from '@agentmux/client-ui/brand/illustrations/goals/demand-dialogue.png'
@@ -21,7 +21,7 @@ const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
 type Acknowledgement = { kind: 'confirm'; revision: number } | { kind: 'accept'; revision: number; submissionId: string; gaps: boolean; finish?: boolean }
 export type GoalAcknowledgementFeedback = { pending: boolean; failure: { attempt: Acknowledgement; message: string } | null; reloadError: string | null }
 export const EMPTY_GOAL_ACKNOWLEDGEMENT: GoalAcknowledgementFeedback = { pending: false, failure: null, reloadError: null }
-export function GoalAlignment({ demand, children, onGrill, onGrounding, onOpenMote, motePending = null, feedback, onFeedbackChange }: { demand: DemandProjection; children?: ReactNode; onGrill: () => void; onGrounding: () => void; onOpenMote: () => void; motePending?: 'open' | 'grill' | 'grounding' | 'plan' | null; feedback: GoalAcknowledgementFeedback; onFeedbackChange: (patch: Partial<GoalAcknowledgementFeedback>) => void }) {
+export function GoalAlignment({ demand, emphasis, children, onGrill, onGrounding, onOpenMote, motePending = null, feedback, onFeedbackChange }: { demand: DemandProjection; emphasis?: 'definition' | 'results' | null; children?: ReactNode; onGrill: () => void; onGrounding: () => void; onOpenMote: () => void; motePending?: 'open' | 'grill' | 'grounding' | 'plan' | null; feedback: GoalAcknowledgementFeedback; onFeedbackChange: (patch: Partial<GoalAcknowledgementFeedback>) => void }) {
   const confirmDemandGoal = useAppStore((state) => state.confirmDemandGoal)
   const acceptDemandResult = useAppStore((state) => state.acceptDemandResult)
   const refreshDemand = useAppStore((state) => state.refreshDemand)
@@ -30,6 +30,7 @@ export function GoalAlignment({ demand, children, onGrill, onGrounding, onOpenMo
   const active = useWorkbenchPresentationActive()
   const heading = useRef<HTMLHeadingElement>(null)
   const cue = useIconFeedback(JSON.stringify([demand.id, alignment?.revision]), active, heading)
+  const focus = emphasis === undefined ? goalNextStepFact(demand).source.kind : emphasis
   const confirmIssue = alignmentConfirmationIssue(alignment)
   const gapIssue = groundingAcceptanceIssue(alignment, grounding, true)
   const stale = Boolean(alignment && grounding && grounding.alignmentRevision !== alignment.revision)
@@ -62,9 +63,9 @@ export function GoalAlignment({ demand, children, onGrill, onGrounding, onOpenMo
   }
   const checks = new Map(grounding?.checks.map(check => [check.criterionId, check]) ?? [])
   const resultExplanation = goalResultExplanation(demand)
-  const goalRequestButton = <button type="button" className={!failure && (!alignment || confirmIssue) ? 'primary-button' : 'small-button'} data-goal-grill disabled={Boolean(motePending)} onClick={onGrill}>{motePending === 'grill' ? 'Sending request…' : recipient.requestLabel('grill')}</button>
+  const goalRequestButton = <button type="button" className={!failure && focus === 'definition' && (!alignment || confirmIssue) ? 'primary-button' : 'small-button'} data-goal-grill disabled={Boolean(motePending)} onClick={onGrill}>{motePending === 'grill' ? 'Sending request…' : recipient.requestLabel('grill')}</button>
   const goalRequestNote = <span className="goals-request-action"><img className="goals-request-action__art" src={dialogueArtworkUrl} alt="" aria-hidden="true" onError={(event) => { event.currentTarget.hidden = true }} /><span className="goals-caption">{recipient.description}</span></span>
-  const resultRequest = alignment?.confirmedAt ? <button type="button" className={!failure && demand.status === 'done' && !grounding ? 'primary-button' : 'small-button'} data-goal-grounding disabled={Boolean(motePending)} onClick={onGrounding}>{motePending === 'grounding' ? 'Sending request…' : recipient.requestLabel('grounding')}</button> : null
+  const resultRequest = alignment?.confirmedAt ? <button type="button" className={!failure && focus === 'results' && demand.status === 'done' && !grounding ? 'primary-button' : 'small-button'} data-goal-grounding disabled={Boolean(motePending)} onClick={onGrounding}>{motePending === 'grounding' ? 'Sending request…' : recipient.requestLabel('grounding')}</button> : null
   return <>
     {alignment ? <section className="goals-alignment" aria-label="Goal definition" data-goal-id={demand.id} data-goal-alignment-revision={alignment.revision} data-goal-confirmation-state={alignment.confirmedAt ? 'confirmed' : 'unconfirmed'}>
       <div className="goals-section-heading"><h2 ref={heading}><ThemeObjectGoalIcon key={cue.key} size={14} aria-hidden="true" animation={cue.animation} onAnimationEnd={cue.stop} /> Goal definition</h2><span className="goals-caption">{alignment.confirmedAt ? 'Confirmed by you' : confirmIssue ? alignment.openQuestions.length ? 'Decisions needed' : 'Define success criteria' : 'Needs your confirmation'}</span></div>
@@ -74,7 +75,7 @@ export function GoalAlignment({ demand, children, onGrill, onGrounding, onOpenMo
       </details>
       {alignment.openQuestions.length ? <div className="goals-open-questions"><h3>Decisions needed</h3><ul>{alignment.openQuestions.map((question, i) => <li key={i}>{question}</li>)}</ul></div> : null}
       {confirmIssue && alignment.openQuestions.length ? <p className="goals-condition">Resolve these decisions before confirming the goal.</p> : null}
-      <div className="goals-inline-actions">{!failure && !alignment.confirmedAt && !confirmIssue ? <button type="button" className="primary-button" data-goal-confirm disabled={pending} onClick={() => void acknowledge({ kind: 'confirm', revision: alignment.revision })}>{pending ? 'Saving…' : 'Confirm goal'}<ThemeActionConfirmIcon size={13} /></button> : null}{goalRequestButton}{goalRequestNote}</div>
+      <div className="goals-inline-actions">{!failure && !alignment.confirmedAt && !confirmIssue ? <button type="button" className={focus === 'definition' ? 'primary-button' : 'small-button'} data-goal-confirm disabled={pending} onClick={() => void acknowledge({ kind: 'confirm', revision: alignment.revision })}>{pending ? 'Saving…' : 'Confirm goal'}<ThemeActionConfirmIcon size={13} /></button> : null}{goalRequestButton}{goalRequestNote}</div>
     </section> : <div className="goals-clarification" aria-label="Clarify goal" data-goal-id={demand.id} data-goal-confirmation-state="unconfirmed">
       <p className="goals-muted">Clarify the outcome and what success looks like with the agent.</p><div className="goals-inline-actions">{goalRequestButton}{goalRequestNote}</div>
     </div>}
@@ -88,8 +89,8 @@ export function GoalAlignment({ demand, children, onGrill, onGrounding, onOpenMo
       {accepted && hasGaps ? <p className="goals-condition">You accepted this result with the reported gaps. Those gaps remain part of the record.</p> : null}
       {accepted ? <p className="goals-caption" data-goal-completion-state>{demand.status === 'done' ? 'Goal finished · Results and original work are kept.' : 'Results accepted · Goal remains open.'}</p> : null}
       <div className="goals-inline-actions">
-        {!failure && alignment && gapIssue === null && demand.status !== 'done' ? <button type="button" className="primary-button" data-goal-finish disabled={pending} onClick={() => void acknowledge({ kind: 'accept', revision: alignment.revision, submissionId: grounding.submissionId, gaps: hasGaps, finish: true })}>{pending ? 'Saving…' : accepted ? 'Finish goal' : hasGaps ? 'Accept with gaps and finish' : 'Accept and finish'}<ThemeActionAcceptResultsIcon size={13} /></button> : null}
-        {!failure && !accepted && alignment && gapIssue === null ? <button type="button" className={demand.status === 'done' ? 'primary-button' : 'small-button'} {...(hasGaps ? { 'data-goal-accept-gaps': true } : { 'data-goal-accept': true })} disabled={pending} onClick={() => void acknowledge({ kind: 'accept', revision: alignment.revision, submissionId: grounding.submissionId, gaps: hasGaps })}>{pending ? 'Saving…' : hasGaps ? 'Accept results, keep gaps' : 'Accept results'}<ThemeActionAcceptResultsIcon size={13} /></button> : null}
+        {!failure && alignment && gapIssue === null && demand.status !== 'done' ? <button type="button" className={focus === 'results' ? 'primary-button' : 'small-button'} data-goal-finish disabled={pending} onClick={() => void acknowledge({ kind: 'accept', revision: alignment.revision, submissionId: grounding.submissionId, gaps: hasGaps, finish: true })}>{pending ? 'Saving…' : accepted ? 'Finish goal' : hasGaps ? 'Accept with gaps and finish' : 'Accept and finish'}<ThemeActionAcceptResultsIcon size={13} /></button> : null}
+        {!failure && !accepted && alignment && gapIssue === null ? <button type="button" className={focus === 'results' && demand.status === 'done' ? 'primary-button' : 'small-button'} {...(hasGaps ? { 'data-goal-accept-gaps': true } : { 'data-goal-accept': true })} disabled={pending} onClick={() => void acknowledge({ kind: 'accept', revision: alignment.revision, submissionId: grounding.submissionId, gaps: hasGaps })}>{pending ? 'Saving…' : hasGaps ? 'Accept results, keep gaps' : 'Accept results'}<ThemeActionAcceptResultsIcon size={13} /></button> : null}
         {resultRequest}
       </div>
       {!accepted && gapIssue === null && demand.status !== 'done' ? <p className="goals-caption">Accept and finish also closes the goal.</p> : null}

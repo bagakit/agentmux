@@ -1,4 +1,5 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import type { GoalFiniteStartIntent } from './goal-finite-start'
 import type { DemandProjection } from './global-demand-board'
 import { GOAL_STAGES, goalNextStepFact, type GoalStage } from './goal-presentation'
 
@@ -26,10 +27,10 @@ export type GoalGroup = { stage: GoalStage; goals: DemandProjection[] }
  * One projection of the filtered collection. The acknowledgement failure a person still has to
  * resolve belongs to them, whatever the owner fact says.
  */
-export function groupGoals(goals: readonly DemandProjection[], acknowledgementFailed: (id: string) => boolean): GoalGroup[] {
+export function groupGoals(goals: readonly DemandProjection[], acknowledgementFailed: (id: string) => boolean, retainedStart: (id: string) => GoalFiniteStartIntent | undefined = () => undefined): GoalGroup[] {
   const buckets = new Map<GoalStage, DemandProjection[]>()
   for (const goal of goals) {
-    const stage = acknowledgementFailed(goal.id) ? 'you' : goalNextStepFact(goal).stage
+    const stage = acknowledgementFailed(goal.id) ? 'you' : goalNextStepFact(goal, retainedStart(goal.id)).stage
     buckets.set(stage, [...buckets.get(stage) ?? [], goal])
   }
   return GOAL_GROUP_ORDER.flatMap(stage => buckets.get(stage)?.length ? [{ stage, goals: buckets.get(stage)! }] : [])

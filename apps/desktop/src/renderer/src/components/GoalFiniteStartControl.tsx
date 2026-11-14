@@ -12,7 +12,7 @@ import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
 import { GoalAgentFace, GoalAgentPicker } from './GoalAgentPicker'
 
 /** An explicit one-time task. The existing Start owner retains all input and execution facts. */
-export function GoalFiniteStartControl({ demand, primary = false }: { demand: DemandRecord; primary?: boolean }) {
+export function GoalFiniteStartControl({ demand, primary = false, embedded = false, conclusion }: { demand: DemandRecord; primary?: boolean; embedded?: boolean; conclusion?: string | undefined }) {
   const ids = useMemo(() => [...new Set(demand.assigneeSessionIds ?? [])], [demand.assigneeSessionIds])
   const facts = useAppStore(useShallow(state => {
     const index = agentSessionPresentationIndex(state.sessions)
@@ -76,9 +76,9 @@ export function GoalFiniteStartControl({ demand, primary = false }: { demand: De
     <div className="goals-inline-actions"><button type="button" className={primary && !hasOriginalTask ? 'primary-button' : 'small-button'} disabled={busy || rows.length > 0 && !target} onClick={() => { if (!rows.length) setPicker(true); else void run(start) }}>{busy ? 'Submitting…' : target ? `Start with ${target.name}` : rows.length ? 'Choose an Agent for this task' : 'Choose execution Agent'}</button>
       {rows.length ? <button type="button" className="small-button" onClick={() => setPicker(true)}>Manage assignees</button> : null}</div></>
   return <section className="goal-finite-start" data-goal-finite-start={demand.id} aria-label="One-time Goal execution">
-    <div className="goals-section-heading"><h2>{hasOriginalTask ? 'Task execution' : 'Execute task'}</h2><span className="goals-caption">One-time task</span></div>
-    {pending ? <div className="goals-inline-actions"><span className="goals-caption">Original request retained</span><button className="small-button" type="button" disabled={busy} onClick={() => void run(() => intent?.phase === 'not-attempted' ? start() : inspect(pending.operationId))}>{busy ? 'Checking…' : intent?.phase === 'not-attempted' ? 'Submit retained task' : 'Inspect original Start'}</button></div>
-      : hasOriginalTask ? <><a className="small-button" href={`#goal-work-${demand.id}`}>View original work</a><details className="goal-finite-start__another"><summary>Start another one-time task</summary>{newTask}</details></> : newTask}
+    {!embedded ? <div className="goals-section-heading"><h2>{hasOriginalTask ? 'Task execution' : 'Execute task'}</h2><span className="goals-caption">One-time task</span></div> : null}
+    {pending ? <div className="goals-inline-actions"><span className="goals-caption" data-goal-current-conclusion={conclusion ? true : undefined} data-goal-current-source={conclusion ? 'start' : undefined}>{conclusion ?? 'Original request retained'}</span><button className={primary ? 'primary-button' : 'small-button'} type="button" disabled={busy} onClick={() => void run(() => intent?.phase === 'not-attempted' ? start() : inspect(pending.operationId))}>{busy ? 'Checking…' : intent?.phase === 'not-attempted' ? 'Submit retained task' : 'Inspect original Start'}</button></div>
+      : hasOriginalTask ? <>{!embedded ? <a className="small-button" href={`#goal-work-${demand.id}`}>View original work</a> : null}<details className="goal-finite-start__another"><summary>Start another one-time task</summary>{newTask}</details></> : newTask}
     {message ? <p className="goals-service" role="status">{message}</p> : null}
     {picker ? <GoalAgentPicker demand={demand} role="assignees" onSave={async (patch, expectedUpdatedAt) => { await useAppStore.getState().updateDemand(demand.id, patch, undefined, expectedUpdatedAt); return true }} onClose={() => setPicker(false)} /> : null}
   </section>

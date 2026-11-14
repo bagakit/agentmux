@@ -11,10 +11,10 @@ async function operation(kind: string, original: readonly unknown[]): Promise<st
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([kind, ...original])))
   return kind + '-' + Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
 }
-const labels = { prepared: '请求已保存 · 等待 PMO 输入', delivered: '已投递 · 等待实际巡查', unknown: '原输入回执待确认', missing: '请求已保存 · 尚未投递', stale: '原巡查范围已变化', reported: '巡查已回填', planned: '计划已保存' }
+const labels = { prepared: 'Inspection saved · Awaiting input', delivered: 'Delivered · Awaiting inspection', unknown: 'Original input unconfirmed', missing: 'Saved · Not delivered', stale: 'Inspection scope changed', reported: 'Inspection recorded', planned: 'Plan saved' }
 
 /** One explicit action targets the original business owner; navigation and input are separate. */
-export function GoalPatrolControl({ demand, compact = false }: { demand: DemandRecord; compact?: boolean }) {
+export function GoalPatrolControl({ demand, compact = false, embedded = false, primary }: { demand: DemandRecord; compact?: boolean; embedded?: boolean; primary?: boolean | undefined }) {
   const [busy, setBusy] = useState(false), [issue, setIssue] = useState<string | null>(null)
   const [supervisorGoalId, setSupervisorGoalId] = useState<string | null>(null)
   const flight = useRef(false), scope = useRef(demand.id); scope.current = demand.id
@@ -76,34 +76,35 @@ export function GoalPatrolControl({ demand, compact = false }: { demand: DemandR
   const needsSupervisor = !manager || !['available', 'busy'].includes(manager.state)
   const canContinue = pending && patrol?.supervisorAgentSessionId && manager?.agentSessionId === patrol.supervisorAgentSessionId && manager.runId &&
     manager.state !== 'ended' && manager.state !== 'unknown' && !patrol.attempts.some(a => a.attemptedAt) && (!attempt || attempt.target.runId !== manager.runId)
-  const openConversation = targetSessionId ? <button type="button" className="small-button" onClick={() => requestAgentConversationFloatingOpen(targetSessionId, targetHostId, undefined, undefined, entryContext)}>{compact ? '打开原对话' : targetName ? `打开 ${targetName} 的对话` : '打开原负责人对话'}</button> : null
+  const openConversation = targetSessionId ? <button type="button" className="small-button" onClick={() => requestAgentConversationFloatingOpen(targetSessionId, targetHostId, undefined, undefined, entryContext)}>{targetName ? `Open ${targetName} conversation` : 'Open owner conversation'}</button> : null
   return <div className={`goal-patrol${compact ? ' goal-patrol--compact' : ''}`} aria-label="PMO 巡查" onClick={event => event.stopPropagation()}>
     <div className="goal-patrol__actions">
-      <button type="button" className={pending ? 'small-button' : 'primary-button'} aria-busy={busy}
-        aria-label={pending ? '核对原巡查' : targetName ? `请 ${targetName} 巡查` : '请求原负责人巡查'} onClick={() => {
+      <button type="button" className={(primary ?? !pending) && !needsSupervisor ? 'primary-button' : 'small-button'} aria-busy={busy}
+        aria-label={pending ? 'Check original inspection' : targetName ? `Request inspection from ${targetName}` : 'Request owner inspection'} onClick={() => {
         const entry = requestAgentConversationFloatingOpen(targetSessionId, targetHostId,
           pending ? observed?.reason ?? '原巡查请求已保存；正在读取原回执。' : '正在请求原 PMO 巡查；实际工作状态以原 Agent 为准。', undefined, entryContext)
         void run(pending ? () => refreshGoalDelegations(demand.id) : () => request(entry), entry)
-      }}>{busy ? '核对原巡查…' : compact ? pending ? '核对原巡查' : '请求巡查' : pending ? '巡查请求已保存' : targetName ? `请 ${targetName} 巡查` : '请求原负责人巡查'}</button>
-      {!compact && patrol ? <button type="button" className="small-button" disabled={busy} onClick={() => void run(() => refreshGoalDelegations(demand.id))}>读取原巡查</button> : null}
-      {canContinue ? <button type="button" className="small-button" disabled={busy} onClick={() => void run(continueOriginal)}>接续原巡查</button> : null}
-      {!compact || needsSupervisor ? openConversation : null}
-      {needsSupervisor ? <button type="button" className="small-button" onClick={() => setSupervisorGoalId(demand.id)}>选择 Supervisor</button> : null}
+      }}>{busy ? 'Checking original inspection…' : pending ? 'Check original inspection' : targetName ? `Request inspection from ${targetName}` : 'Request owner inspection'}</button>
+      {!compact && !embedded && patrol ? <button type="button" className="small-button" disabled={busy} onClick={() => void run(() => refreshGoalDelegations(demand.id))}>Read inspection</button> : null}
+      {canContinue ? <button type="button" className="small-button" disabled={busy} onClick={() => void run(continueOriginal)}>Continue original inspection</button> : null}
+      {!embedded && (!compact || needsSupervisor) ? openConversation : null}
+      {needsSupervisor ? <button type="button" className={primary ? 'primary-button' : 'small-button'} onClick={() => setSupervisorGoalId(demand.id)}>Choose Supervisor</button> : null}
     </div>
-    {observed ? <p className="goal-patrol__feedback" role="status"><strong>{labels[observed.state]}</strong>{!compact || !['delivered', 'reported'].includes(observed.state) ? <span>{observed.reason}</span> : null}</p> : null}
-    {observed?.state === 'missing' ? <p className="goal-patrol__feedback">原 PMO 尚未确认，巡查尚未开始。恢复原 PMO 后接续原巡查，或明确选择 Supervisor；选择不会自动发送。</p> : null}
-    {manager?.state === 'ended' ? <p className="goal-patrol__feedback">原管理 Run 已结束；打开原 PMO 恢复同一 Session，再接续或回报实际巡查。</p> : null}
-    {patrol?.report ? <p className="goal-patrol__feedback"><span className="goal-patrol__report-summary">{patrol.report.summary}</span><span>下一步：{patrol.report.nextOwner.agentSessionId ?? patrol.report.nextOwner.kind} · {patrol.report.nextOwner.action}</span></p> : null}
+    {observed ? <p className="goal-patrol__feedback" role="status"><strong data-goal-current-conclusion={primary ? true : undefined} data-goal-current-source={primary ? 'patrol' : undefined}>{labels[observed.state]}</strong>{!compact || !['delivered', 'reported'].includes(observed.state) ? <span>{observed.reason}</span> : null}</p> : null}
+    {!embedded && observed?.state === 'missing' ? <p className="goal-patrol__feedback">原 PMO 尚未确认，巡查尚未开始。恢复原 PMO 后接续原巡查，或明确选择 Supervisor；选择不会自动发送。</p> : null}
+    {!embedded && manager?.state === 'ended' ? <p className="goal-patrol__feedback">原管理 Run 已结束；打开原 PMO 恢复同一 Session，再接续或回报实际巡查。</p> : null}
+    {patrol?.report ? <p className="goal-patrol__feedback"><span className="goal-patrol__report-summary">{patrol.report.summary}</span><span>Next: {patrol.report.nextOwner.agentSessionId ?? patrol.report.nextOwner.kind} · {patrol.report.nextOwner.action}</span></p> : null}
     {issue ? <p className="goal-patrol__feedback" role="status">{issue}</p> : null}
     {supervisorGoalId === demand.id ? <GoalAgentPicker key={demand.id} demand={demand} role="supervisor" onSave={saveSupervisor} onClose={() => setSupervisorGoalId(null)} /> : null}
-    {patrol || compact && targetSessionId && !needsSupervisor ? <details className="goal-patrol__source"><summary>{compact ? '巡查详情' : '原巡查与输入'}</summary>
+    {patrol || embedded || compact && targetSessionId && !needsSupervisor ? <details className="goal-patrol__source"><summary>{compact ? 'Inspection details' : 'Original inspection and input'}</summary>
+      {embedded ? <><div className="goal-patrol__secondary">{openConversation}</div>{manager ? <p>Supervisor: {manager.agentSessionId ?? 'Unassigned'} · {manager.state}. {manager.reason}</p> : null}{observed?.state === 'missing' ? <p>The original inspection has not started. Restore its original Supervisor or explicitly choose a Supervisor; selection never sends input.</p> : null}</> : null}
       {compact ? <div className="goal-patrol__secondary">
-        {patrol ? <button type="button" className="small-button" disabled={busy} onClick={() => void run(() => refreshGoalDelegations(demand.id))}>读取原巡查</button> : null}
+        {patrol ? <button type="button" className="small-button" disabled={busy} onClick={() => void run(() => refreshGoalDelegations(demand.id))}>Read inspection</button> : null}
         {!needsSupervisor ? openConversation : null}
       </div> : null}
-      {patrol ? <dl><dt>巡查 operation</dt><dd>{patrol.operationId}</dd>
-      {patrol.attempts.map(a => <div key={a.operationId}><dt>原输入</dt><dd>{a.operationId}</dd><dt>PMO Host / Session / Run</dt><dd>{a.target.hostId} / {a.target.agentSessionId} / {a.target.runId}</dd><dt>尝试</dt><dd>{a.attemptedAt ? '已尝试 · 只对账' : a.supersededAt ? '显式接续 · 原引用保留' : '尚未尝试'}</dd></div>)}
-      {patrol.report ? <><dt>实际回报 Run</dt><dd>{patrol.report.reportingRunId}</dd><dt>业务回填</dt><dd>{patrol.report.applied ? '已应用；人的接受仍独立' : '仅留历史；未覆盖当前工作'}</dd></> : null}</dl> : null}
+      {patrol ? <dl><dt>Inspection operation</dt><dd>{patrol.operationId}</dd>
+      {patrol.attempts.map(a => <div key={a.operationId}><dt>Original input</dt><dd>{a.operationId}</dd><dt>PMO Host / Session / Run</dt><dd>{a.target.hostId} / {a.target.agentSessionId} / {a.target.runId}</dd><dt>Attempt</dt><dd>{a.attemptedAt ? 'Attempted · Inspect only' : a.supersededAt ? 'Explicit continuation · Original reference kept' : 'Not attempted'}</dd></div>)}
+      {patrol.report ? <><dt>Reporting Run</dt><dd>{patrol.report.reportingRunId}</dd><dt>Business update</dt><dd>{patrol.report.applied ? 'Applied · Human acceptance is separate' : 'History only · Current work was not overwritten'}</dd></> : null}</dl> : null}
     </details> : null}
   </div>
 }

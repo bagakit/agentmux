@@ -1,6 +1,8 @@
 import { alignmentConfirmationIssue, groundingAcceptanceIssue, isDemandEvidenceReference, isCurrentGroundingAccepted } from '@agentmux/demand/goals'
+import { delegationWorkerHostId } from '@agentmux/demand/delegations'
 import type { DemandRecord } from './global-demand-board'
 import { goalDelegationNextRow, type GoalDelegationRow } from './goal-delegation-presentation'
+import type { GoalFiniteStartIntent } from './goal-finite-start'
 import { goalStartNextRow, type GoalStartRow } from './goal-start-presentation'
 
 /**
@@ -15,8 +17,15 @@ import { goalStartNextRow, type GoalStartRow } from './goal-start-presentation'
  */
 export const GOAL_STAGES = ['you', 'attention', 'define', 'agents', 'unknown', 'finished'] as const
 export type GoalStage = (typeof GOAL_STAGES)[number]
-export type GoalNextStepFact = { stage: GoalStage; text: string }
-type GoalNextStepInput = Pick<DemandRecord, 'alignment' | 'grounding' | 'status' | 'delegations' | 'delegationObservations' | 'delegationObservationIssue' | 'dispatches' | 'startObservations'>
+export type GoalNextStepSource =
+  | { kind: 'definition'; revision: number | null }
+  | { kind: 'results'; submissionId: string | null; revision: number | null }
+  | { kind: 'start'; operationId: string; hostId?: string; agentSessionId: string; runId?: string }
+  | { kind: 'delegation'; operationId: string; sourceMessageId: string; hostId: string; agentSessionId: string; runId: string; replyMessageId?: string }
+  | { kind: 'patrol'; operationId: string }
+  | { kind: 'goal' }
+export type GoalNextStepFact = { stage: GoalStage; text: string; source: GoalNextStepSource }
+type GoalNextStepInput = Pick<DemandRecord, 'id' | 'alignment' | 'grounding' | 'status' | 'delegations' | 'delegationObservations' | 'delegationObservationIssue' | 'dispatches' | 'startObservations' | 'patrols' | 'patrolObservations'>
 
 const DELEGATION_STAGE: Record<GoalDelegationRow['state'], GoalStage> = {
   // A worker report is collected and verified by the Supervisor Agent before a person reviews it.
@@ -25,34 +34,54 @@ const DELEGATION_STAGE: Record<GoalDelegationRow['state'], GoalStage> = {
 }
 const START_STAGE: Record<GoalStartRow['state'], GoalStage> = { review: 'attention', continuation: 'attention', working: 'agents', unknown: 'unknown' }
 
+/** Reading budget only; these retained objects do not grant input or completion. */
+export function goalHasOriginalWork(demand: Pick<DemandRecord, 'id' | 'dispatches' | 'delegations' | 'patrols' | 'responsibility'>, retainedStart?: GoalFiniteStartIntent): boolean {
+  return Boolean(demand.dispatches?.some(item => item.execution === 'finite') || demand.delegations?.length ||
+    (retainedStart && retainedStart.goalId === demand.id) || demand.patrols?.some(item => item.purpose !== 'plan') || demand.responsibility?.executions.length)
+}
+
 /** Display the owner facts. Business status is not an acknowledgement. */
 export function goalNextStep(demand: GoalNextStepInput): string {
   return goalNextStepFact(demand).text
 }
 
 /** One branch decides both the sentence and its stage, so they cannot drift apart. */
-export function goalNextStepFact(demand: GoalNextStepInput): GoalNextStepFact {
+export function goalNextStepFact(demand: GoalNextStepInput, retainedStart?: GoalFiniteStartIntent): GoalNextStepFact {
   const { alignment, grounding } = demand
+  const resultSource: GoalNextStepSource = { kind: 'results', submissionId: grounding?.submissionId ?? null, revision: alignment?.revision ?? null }
+  const definitionSource: GoalNextStepSource = { kind: 'definition', revision: alignment?.revision ?? null }
   if (isCurrentGroundingAccepted(alignment, grounding)) {
     const result = grounding!.checks.some(check => check.outcome === 'gap') ? 'Accepted with gaps' : 'Accepted'
-    return { stage: 'finished', text: demand.status === 'done' ? `${result} · Finished` : result }
+    return { stage: 'finished', text: demand.status === 'done' ? `${result} · Finished` : result, source: resultSource }
   }
-  if (demand.status === 'done' && !grounding) return { stage: 'attention', text: 'Results not verified' }
+  if (demand.status === 'done' && !grounding) return { stage: 'attention', text: 'Results not verified', source: resultSource }
   if (demand.status !== 'done') {
+    if (retainedStart && retainedStart.goalId === demand.id && !demand.dispatches?.some(start => start.operationId === retainedStart.operationId && start.stage === 'confirmed'))
+      return { stage: retainedStart.phase === 'not-attempted' ? 'attention' : 'unknown',
+        text: retainedStart.phase === 'not-attempted' ? 'Original task retained · Not submitted' : 'Original task input unconfirmed',
+        source: { kind: 'start', operationId: retainedStart.operationId, agentSessionId: retainedStart.sessionId } }
+    const patrol = demand.patrols?.filter(item => item.purpose !== 'plan').at(-1)
+    const observed = patrol && demand.patrolObservations?.find(item => item.operationId === patrol.operationId)
+    if (patrol && !patrol.report && observed && observed.state !== 'stale' && observed.state !== 'reported' && observed.state !== 'planned') {
+      const text = { unknown: 'Original inspection input unconfirmed', missing: 'Inspection saved · Not delivered',
+        prepared: 'Inspection prepared · Awaiting input', delivered: 'Inspection delivered · Awaiting report' }[observed.state]
+      return { stage: observed.state === 'unknown' ? 'unknown' : observed.state === 'missing' ? 'attention' : 'agents', text,
+        source: { kind: 'patrol', operationId: patrol.operationId } }
+    }
     const delegated = goalDelegationNextRow(demand)
-    if (delegated) return { stage: DELEGATION_STAGE[delegated.state], text: delegated.next }
+    if (delegated) return { stage: DELEGATION_STAGE[delegated.state], text: delegated.next, source: { kind: 'delegation', operationId: delegated.delegation.operationId, sourceMessageId: delegated.delegation.sourceMessageId, hostId: delegationWorkerHostId(delegated.delegation), agentSessionId: delegated.delegation.workerAgentSessionId, runId: delegated.delegation.workerRunId, ...(delegated.replyMessageId ? { replyMessageId: delegated.replyMessageId } : {}) } }
     const start = goalStartNextRow(demand)
-    if (start) return { stage: START_STAGE[start.state], text: start.next }
+    if (start) return { stage: START_STAGE[start.state], text: start.next, source: { kind: 'start', operationId: start.start.operationId, hostId: start.start.hostId, agentSessionId: start.start.agentSessionId, runId: start.start.runId } }
   }
-  if (!alignment) return { stage: 'define', text: 'Goal needs an outline' }
-  if (alignmentConfirmationIssue(alignment)) return { stage: 'define', text: alignment.openQuestions.length ? 'Decision needed' : 'Success criteria needed' }
-  if (alignment.confirmedAt === null) return { stage: 'you', text: 'Goal ready for confirmation' }
-  if (!grounding) return { stage: 'agents', text: 'Goal agreed · No result report' }
-  if (grounding.alignmentRevision !== alignment.revision) return { stage: 'attention', text: 'Results need updating' }
+  if (!alignment) return { stage: 'define', text: 'Goal needs an outline', source: definitionSource }
+  if (alignmentConfirmationIssue(alignment)) return { stage: 'define', text: alignment.openQuestions.length ? 'Decision needed' : 'Success criteria needed', source: definitionSource }
+  if (alignment.confirmedAt === null) return { stage: 'you', text: 'Goal ready for confirmation', source: definitionSource }
+  if (!grounding) return { stage: 'agents', text: 'Goal agreed · No result report', source: { kind: 'goal' } }
+  if (grounding.alignmentRevision !== alignment.revision) return { stage: 'attention', text: 'Results need updating', source: resultSource }
   const gapsAllowed = groundingAcceptanceIssue(alignment, grounding, true) === null
   const hasGaps = grounding.checks.some(check => check.outcome === 'gap')
-  if (gapsAllowed) return { stage: 'you', text: hasGaps ? 'Results have known gaps' : 'Results ready for review' }
-  return { stage: 'attention', text: 'Results need checking' }
+  if (gapsAllowed) return { stage: 'you', text: hasGaps ? 'Results have known gaps' : 'Results ready for review', source: resultSource }
+  return { stage: 'attention', text: 'Results need checking', source: resultSource }
 }
 
 /** Short reading feedback only. Acceptance authority remains in the domain validator. */
