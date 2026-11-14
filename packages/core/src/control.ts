@@ -1,3 +1,4 @@
+export type { BrowserResultReadInput, BrowserResultReadProjection } from './browser-result-read.js'
 export * from './agent-promotion.js'
 export type { GoalRelationAccess, GoalRuntimeAccess, GoalQualifiedAccess, GoalInspectionAccess } from './goal-agent-reference.js'
 import type { DemandAgentReference, DemandSpaceMemberReference } from '@agentmux/demand/relations'
@@ -704,6 +705,7 @@ export type AgentMuxControlBrowserStopRequest = RequestBase & {
  */
 export type AgentMuxControlBrowserOperationRequest = RequestBase & {
   operation: 'browser.operation'; operationId: string
+  resultRead?: import('./browser-result-read.js').BrowserResultReadInput
 }
 /**
  * 订阅一条操作的进度事件流。
@@ -984,7 +986,7 @@ export type AgentMuxControlResult =
    */
   | { operation: 'browser.stop'; runOperation: AgentMuxControlBrowserOperation | null }
   /** 问一条操作的当下事实。查不到答 null——那是一次成功的回答，不是错误。 */
-  | { operation: 'browser.operation'; runOperation: AgentMuxControlBrowserOperation | null }
+  | { operation: 'browser.operation'; runOperation: AgentMuxControlBrowserOperation | null; resultRead?: import('./browser-result-read.js').BrowserResultReadProjection }
   /**
    * 订阅的**开场帧**——不是终局回执。事件跟在它后面从同一条 socket 流出来。
    *

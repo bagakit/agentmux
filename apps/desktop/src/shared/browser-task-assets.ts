@@ -33,7 +33,7 @@ export type BrowserTaskAssertion =
 export type BrowserTaskStepFailure = 'stop' | 'continue' | { goto: string }
 export type BrowserTaskStep = {
   id: string
-  kind: 'click' | 'fill' | 'upload' | 'navigate' | 'checkpoint' | 'branch' | 'wait' | 'assert' | 'press' | 'hover' | 'scroll' | 'drag' | 'tap' | 'longPress' | 'swipe' | 'pinch' | 'subflow'
+  kind: 'extract' | 'click' | 'fill' | 'upload' | 'navigate' | 'checkpoint' | 'branch' | 'wait' | 'assert' | 'press' | 'hover' | 'scroll' | 'drag' | 'tap' | 'longPress' | 'swipe' | 'pinch' | 'subflow'
   /** Redacted page identity, never a stored input value. */
   url: string
   target?: BrowserReplayTarget
@@ -49,6 +49,8 @@ export type BrowserTaskStep = {
   /** Answer only the dialog opened during this click, in its original operation. */
   dialog?: { type: 'alert' | 'confirm' | 'prompt' | 'beforeunload'; action: 'accept' | 'dismiss'; promptParameterKey?: string }
   subflow?: BrowserTaskSubflow
+  /** Saved schema only; withinRef belongs to one live program and cannot be retained. */
+  extraction?: Omit<import('@agentmux/browser/model/browser-structured-output').BrowserStructuredOutputRequest, 'withinRef'>
   label?: string
   branch?: BrowserTaskBranch
   wait?: BrowserTaskWait
@@ -77,6 +79,7 @@ export function renameBrowserTaskParameter(step: BrowserTaskStep, from: string, 
     ...(step.dialog?.promptParameterKey === from ? { dialog: { ...step.dialog, promptParameterKey: to } } : {}) }
 }
 export type BrowserTaskCompletion = { criteria: (
+  | { kind: 'field-equals'; stepId: string; key: string; expected: string | number | boolean }
   | { kind: 'download-readable'; stepId: string; path: string }
   | { kind: 'human-checkpoint'; checkpointId: string }
 )[] }
@@ -141,7 +144,7 @@ export type BrowserTaskBatchInput = {
   parameters: Record<string, string>
 }
 export type BrowserTaskAssetDocument = { version: 1; assets: BrowserTaskAsset[]; runs: BrowserTaskAssetRun[]; batches?: BrowserTaskBatchRun[]; selectedRuns?: { browserId: string; runId: string }[]; parallel?: BrowserTaskParallelRecord[]; selectedParallel?: BrowserTaskParallelSelection[] }
-export type BrowserTaskAssetState = { assets: BrowserTaskAsset[]; runs: BrowserTaskAssetRun[]; batches?: BrowserTaskBatchRun[]; selectedRunId?: string | null; activeBatchId?: string | null; parallel?: BrowserTaskParallelSummary | null; warning?: string }
+export type BrowserTaskAssetState = { completion?: import('@agentmux/core/control').BrowserTaskRunCompletion; assets: BrowserTaskAsset[]; runs: BrowserTaskAssetRun[]; batches?: BrowserTaskBatchRun[]; selectedRunId?: string | null; activeBatchId?: string | null; parallel?: BrowserTaskParallelSummary | null; warning?: string }
 export type BrowserTaskAssetRunInput = {
   assetId: string
   version: number

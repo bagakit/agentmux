@@ -78,7 +78,14 @@ export type BrowserPageContext = {
   /** Result source identity lives in storage; a continuation run supplies only its current authorization. */
   resultArtifacts?: { store: BrowserResultArtifactStore; owner: BrowserResultCurrentOwner }
   /** Main supplies the actual operation and live-entry facts; scripts cannot relabel observations. */
-  structuredOutput?: { source(): BrowserResultContext; isCurrent(navigationId: string): boolean }
+  structuredOutput?: {
+    source(): BrowserResultContext
+    isCurrent(navigationId: string): boolean
+    /** Main-owned explicit saved extraction; page code cannot turn off private retention. */
+    protectedValues?: readonly string[]
+    protectSensitiveInputs?: boolean
+    beforeRead?(request: import('./model/browser-structured-output.js').BrowserStructuredOutputRequest): void
+  }
   uploads?: BrowserUploadPort
   downloads?: BrowserDownloadPort
   /**
@@ -1020,6 +1027,7 @@ export function createBrowserPageDispatch(
   async function extractStructured(input: unknown): Promise<unknown> {
     const request = parseBrowserStructuredOutputRequest(input)
     if (!context.structuredOutput) throw new Error('Structured observation ownership is unavailable for this Browser.')
+    context.structuredOutput.beforeRead?.(request)
     const owner = context.structuredOutput.source()
     const info = context.pageInfo()
     let send = session.sendCommand
@@ -1040,6 +1048,8 @@ export function createBrowserPageDispatch(
     })
     try {
       const receipt = await extractBrowserStructuredOutput(request, {
+        ...(context.structuredOutput.protectedValues === undefined ? {} : { protectedValues: context.structuredOutput.protectedValues }),
+        ...(context.structuredOutput.protectSensitiveInputs === undefined ? {} : { protectSensitiveInputs: context.structuredOutput.protectSensitiveInputs }),
         source: { ...owner, url: info.url, document: target.document,
           scope: { kind: request.within || request.withinRef ? 'subtree' : 'page',
             ...(request.within ? { within: request.within } : {}), ...(request.withinRef ? { withinRef: request.withinRef } : {}) } },

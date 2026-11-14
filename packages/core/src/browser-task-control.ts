@@ -24,7 +24,18 @@ export * from './browser-task-parallel.js'
 export type BrowserTaskReliabilityResult = 'passed' | 'not-met' | 'unavailable' | 'unknown' | 'failed' | 'stopped' | 'interrupted'
 export type BrowserTaskRunParent = { runId: string; stepId: string; itemId: string }
 export type BrowserTaskCallProgress = { stepId: string; assetId: string; version: number; nextItem: number; items: { id: string; runId?: string }[] }
-export type AgentMuxBrowserTaskInspection = { rootRunId: string; currentRunId: string; runs: AgentMuxBrowserTaskRun[]; operationCount: number; executedMillis: number }
+/** A projection of original producer checks, never another stored success fact. */
+export type BrowserTaskRunCompletion = {
+  runId: string; browserId: string; assetId: string; version: number
+  status: 'passed' | 'not-met' | 'unavailable'
+  conditions: { criterion: (
+    | { kind: 'field-equals'; stepId: string; key: string; expected: string | number | boolean }
+    | { kind: 'download-readable'; stepId: string; path: string }
+    | { kind: 'human-checkpoint'; checkpointId: string }
+  ); status: 'passed' | 'not-met' | 'unavailable'; reason: string; operationId?: string }[]
+  warning?: string
+}
+export type AgentMuxBrowserTaskInspection = { rootRunId: string; currentRunId: string; runs: AgentMuxBrowserTaskRun[]; operationCount: number; executedMillis: number; completions?: BrowserTaskRunCompletion[]; warning?: string }
 
 /**
  * Typed Client facts only. Core neither interprets steps nor owns workflow execution.
@@ -57,6 +68,7 @@ export type AgentMuxBrowserTaskState = {
   batches?: AgentMuxBrowserTaskBatch[]
   activeBatchId?: string | null
   selectedRunId?: string | null
+  completion?: BrowserTaskRunCompletion
   parallel?: BrowserTaskParallelSummary | null
   warning?: string
 }
@@ -366,7 +378,7 @@ export function parseBrowserTaskCallProgress(value: unknown): BrowserTaskCallPro
   return calls
 }
 function inspection(value: unknown): AgentMuxBrowserTaskInspection {
-  const row = rpcRecord(value, ['rootRunId', 'currentRunId', 'runs', 'operationCount', 'executedMillis'], 'CONTROL_PROTOCOL_ERROR')
+  const row = rpcRecord(value, ['rootRunId', 'currentRunId', 'runs', 'operationCount', 'executedMillis', 'completions', 'warning'], 'CONTROL_PROTOCOL_ERROR')
   const runs = bounded(row.runs, 33).map(run), rootRunId = identifier(row.rootRunId), currentRunId = identifier(row.currentRunId)
   const byId = new Map(runs.map(run => [run.id, run]))
   if (byId.size !== runs.length || !byId.has(rootRunId) || byId.get(rootRunId)!.parent || !byId.has(currentRunId)) bad('Task inspection has no exact original root or cursor.')
@@ -387,7 +399,9 @@ function inspection(value: unknown): AgentMuxBrowserTaskInspection {
   const operationCount = integer(row.operationCount), executedMillis = time(row.executedMillis)
   if (visited.size !== runs.length || operationCount !== runs.reduce((sum, run) => sum + run.operationIds.length, 0) ||
       executedMillis !== runs.reduce((sum, run) => sum + (run.executedMillis ?? 0), 0)) bad('Task inspection costs do not match its original runs.')
-  return { rootRunId, currentRunId, runs, operationCount, executedMillis }
+  const completionRead = row.completions === undefined ? undefined : completionObservations(row.completions, runs)
+  return { rootRunId, currentRunId, runs, operationCount, executedMillis, ...(completionRead ? { completions: completionRead.values } : {}),
+    ...((row.warning !== undefined || completionRead?.warning) ? { warning: [row.warning === undefined ? '' : note(row.warning), completionRead?.warning].filter(Boolean).join(' ') } : {}) }
 }
 function batch(value: unknown): AgentMuxBrowserTaskBatch {
   const source = record(value), items = bounded(source.items, 16).map(value => {
@@ -403,6 +417,70 @@ function batch(value: unknown): AgentMuxBrowserTaskBatch {
   if (updatedAt < startedAt) bad('Browser task batch timestamps are inconsistent.')
   return { id: identifier(source.id), browserId: identifier(source.browserId), assetId: identifier(source.assetId), version: integer(source.version, false, 1),
     items, nextItem, status: source.status as BrowserTaskRunStatus, operationCount, executedMillis: time(source.executedMillis), startedAt, updatedAt, ...notices(source) }
+}
+export function parseBrowserTaskRunCompletion(value: unknown): BrowserTaskRunCompletion {
+  const row = rpcRecord(value, ['runId', 'browserId', 'assetId', 'version', 'status', 'conditions', 'warning'], 'CONTROL_PROTOCOL_ERROR')
+  const status = (value: unknown): BrowserTaskRunCompletion['status'] => {
+    if (value !== 'passed' && value !== 'not-met' && value !== 'unavailable') bad('Task completion status is invalid.')
+    return value
+  }
+  const conditions = bounded(row.conditions, 8).map(value => {
+    const condition = rpcRecord(value, ['criterion', 'status', 'reason', 'operationId'], 'CONTROL_PROTOCOL_ERROR')
+    const raw = record(condition.criterion)
+    let criterion: BrowserTaskRunCompletion['conditions'][number]['criterion']
+    if (raw.kind === 'field-equals') {
+      rpcRecord(raw, ['kind', 'stepId', 'key', 'expected'], 'CONTROL_PROTOCOL_ERROR')
+      if (!(typeof raw.expected === 'string' && raw.expected.length <= 16_384) &&
+          !(typeof raw.expected === 'number' && Number.isFinite(raw.expected)) && typeof raw.expected !== 'boolean') bad('Task expected scalar is invalid.')
+      criterion = { kind: raw.kind, stepId: identifier(raw.stepId), key: identifier(raw.key), expected: raw.expected }
+    } else if (raw.kind === 'download-readable') {
+      rpcRecord(raw, ['kind', 'stepId', 'path'], 'CONTROL_PROTOCOL_ERROR')
+      criterion = { kind: raw.kind, stepId: identifier(raw.stepId), path: note(raw.path) }
+    } else if (raw.kind === 'human-checkpoint') {
+      rpcRecord(raw, ['kind', 'checkpointId'], 'CONTROL_PROTOCOL_ERROR')
+      criterion = { kind: raw.kind, checkpointId: identifier(raw.checkpointId) }
+    } else bad('Task completion criterion is invalid.')
+    return { criterion, status: status(condition.status), reason: note(condition.reason),
+      ...(condition.operationId === undefined ? {} : { operationId: identifier(condition.operationId) }) }
+  })
+  const aggregate = !conditions.length || conditions.some(item => item.status === 'unavailable') ? 'unavailable'
+    : conditions.every(item => item.status === 'passed') ? 'passed' : 'not-met'
+  if (status(row.status) !== aggregate) bad('Task completion aggregate disagrees with its conditions.')
+  return { runId: identifier(row.runId), browserId: identifier(row.browserId), assetId: identifier(row.assetId), version: integer(row.version, false, 1),
+    status: aggregate, conditions, ...notices(row) }
+}
+function strictCompletionForRun(value: unknown, runs: AgentMuxBrowserTaskRun[]): BrowserTaskRunCompletion {
+  const completion = parseBrowserTaskRunCompletion(value)
+  const run = runs.find(run => run.id === completion.runId && run.browserId === completion.browserId && run.assetId === completion.assetId && run.version === completion.version)
+  if (!run || completion.conditions.some(condition => condition.operationId !== undefined && !run.operationIds.includes(condition.operationId)) ||
+      run.status !== 'completed' && completion.status !== 'unavailable') bad('Task completion belongs to another original run or producer.')
+  return completion
+}
+const COMPLETION_OBSERVATION_WARNING = 'Some recorded task completion observations are unavailable. Original runs and operation identities remain; no data was extracted again.'
+function unavailableCompletion(run: AgentMuxBrowserTaskRun): BrowserTaskRunCompletion {
+  return { runId: run.id, browserId: run.browserId, assetId: run.assetId, version: run.version, status: 'unavailable', conditions: [], warning: COMPLETION_OBSERVATION_WARNING }
+}
+function completionObservations(value: unknown, runs: AgentMuxBrowserTaskRun[]): { values: BrowserTaskRunCompletion[]; warning?: string } {
+  if (!Array.isArray(value) || value.length > 33) return { values: [], warning: COMPLETION_OBSERVATION_WARNING }
+  let unavailable = false
+  const byRun = new Map<string, BrowserTaskRunCompletion>()
+  for (const item of value) {
+    let completion: BrowserTaskRunCompletion
+    try { completion = strictCompletionForRun(item, runs) }
+    catch {
+      unavailable = true
+      const runId = item && typeof item === 'object' ? (item as Record<string, unknown>).runId : undefined
+      const run = runs.find(run => run.id === runId)
+      if (!run) continue
+      completion = unavailableCompletion(run)
+    }
+    if (byRun.has(completion.runId)) {
+      unavailable = true
+      completion = unavailableCompletion(runs.find(run => run.id === completion.runId)!)
+    }
+    byRun.set(completion.runId, completion)
+  }
+  return { values: [...byRun.values()], ...(unavailable ? { warning: COMPLETION_OBSERVATION_WARNING } : {}) }
 }
 function state(value: unknown): AgentMuxBrowserTaskState {
   const source = record(value)
@@ -422,7 +500,15 @@ function state(value: unknown): AgentMuxBrowserTaskState {
     if (batch.operationCount !== related.reduce((sum, run) => sum + run.operationIds.length, 0) ||
         batch.executedMillis !== related.reduce((sum, run) => sum + (run.executedMillis ?? 0), 0)) bad('Browser task batch costs are not bound to original runs.')
   }
-  return { assets, runs, ...(source.parallel === undefined ? {} : { parallel: source.parallel === null ? null : parseBrowserTaskParallelSummary(source.parallel) }), ...(batches === undefined ? {} : { batches }), ...(selectedRunId === undefined ? {} : { selectedRunId }), ...(activeBatchId === undefined ? {} : { activeBatchId }), ...notices(source) }
+  const completionRead = source.completion === undefined ? undefined : completionObservations([source.completion], runs)
+  if (completionRead?.values[0] && completionRead.values[0].runId !== selectedRunId) {
+    const selected = runs.find(run => run.id === selectedRunId)
+    completionRead.values = selected ? [unavailableCompletion(selected)] : []
+    completionRead.warning = COMPLETION_OBSERVATION_WARNING
+  }
+  const noticesRead = notices(source)
+  if (completionRead?.warning) noticesRead.warning = [noticesRead.warning, completionRead.warning].filter(Boolean).join(' ')
+  return { assets, runs, ...(completionRead?.values[0] ? { completion: completionRead.values[0] } : {}), ...(source.parallel === undefined ? {} : { parallel: source.parallel === null ? null : parseBrowserTaskParallelSummary(source.parallel) }), ...(batches === undefined ? {} : { batches }), ...(selectedRunId === undefined ? {} : { selectedRunId }), ...(activeBatchId === undefined ? {} : { activeBatchId }), ...noticesRead }
 }
 function reliability(value: unknown): AgentMuxBrowserTaskReliability {
   const source = record(value), population = record(source.population), counts = record(source.counts)

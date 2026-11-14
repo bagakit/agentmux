@@ -9,6 +9,7 @@ const element = (target: { role: string; name: string }) => `${target.role} "${t
 
 /** One readable line per step: what it does and its key parameter, never a raw kind alone. */
 export function browserTaskStepSummary(step: BrowserTaskStep): string {
+  if (step.kind === 'extract') return `Extract · ${step.extraction?.fields.map(field => field.key).join(', ') || 'Fields need definition'}`
   if (step.kind === 'wait' && step.wait) {
     const subject = step.wait.kind === 'url-is' ? step.wait.url : element(step.wait.target)
     return `Wait ${WAIT_LABEL[step.wait.kind]} · ${subject} · ${(step.timeoutMs ?? 0) / 1000} s`

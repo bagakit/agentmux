@@ -24,6 +24,8 @@ import { installNativeBrowserWindows } from './browser-native-windows.js'
 import { BROWSER_RECOVERY_PREVIEW_JPEG_PREFIX, BROWSER_RECOVERY_PREVIEW_MAX_WIDTH, BROWSER_RECOVERY_PREVIEW_MAX_HEIGHT,
   BROWSER_RECOVERY_PREVIEW_MAX_IMAGE_BYTES, type BrowserRecoveryPreviewScope } from '../shared/browser-recovery-preview.js'
 import { readScreenshotViewport, screenshotSource, SCREENSHOT_VIEWPORT_SCRIPT } from '@agentmux/browser/browser-screenshot-source'
+import { browserTaskProducerCriteria } from '../shared/browser-task-completion.js'
+import { getBrowserTaskRunCompletion } from '../shared/browser-task-reliability.js'
 import { evaluateBrowserOutcomeCriteria } from './browser-outcome-criteria.js'
 import { parseBrowserStructuredOutputRequest } from '@agentmux/browser/browser-structured-output'
 import { resolveBrowserStructuredTarget } from '@agentmux/browser/browser-structured-target'
@@ -300,7 +302,7 @@ type PresentationCapture = {
   trackIds: readonly string[] | null
 }
 
-type BrowserTaskPageExecution = { cursor: BrowserTaskStepExecution; step?: BrowserTaskStep; dialogPrompt?: string; authorize?: () => Promise<void> }
+type BrowserTaskPageExecution = { cursor: BrowserTaskStepExecution; step?: BrowserTaskStep; privateValues?: string[]; dialogPrompt?: string; authorize?: () => Promise<void> }
 
 const BROWSER_WAIT_PAGE_CALLS = new Set(browserPageCapabilityNames('wait'))
 const BROWSER_DOCUMENT_PAGE_CALLS = new Set(BROWSER_PAGE_CAPABILITY_NAMES.filter(name =>
@@ -3374,16 +3376,17 @@ export class BrowserViewManager {
       throw new Error('This step has no retained structured result.')
     }
     const evidence = await this.getStepEvidence(operationId, sequence)
-    const item = evidence.items.find(value => value.content.kind === 'structured-output')
-    if (!item || item.content.kind !== 'structured-output') throw new Error('The recorded structured result is unavailable.')
+    const items = evidence.items.filter(value => value.content.kind === 'structured-output')
+    const item = items[0]
+    if (items.length !== 1 || !item || item.content.kind !== 'structured-output') throw new Error('The recorded structured result is unavailable.')
     const { source, artifact, artifactStatus } = item.content.receipt
-    const entry = this.require(operation.browserId)
+    // The journal-linked Main evidence owns the original scope, including after native release.
     if (artifactStatus !== 'available' || !artifact || source.operationId !== operationId ||
-        source.browserId !== operation.browserId || source.workspaceId !== entry.workspaceId ||
+        source.browserId !== operation.browserId || !source.workspaceId ||
         source.navigationId !== item.reference.navigationId || artifact.operationId !== source.operationId ||
         artifact.browserId !== source.browserId || artifact.workspaceId !== source.workspaceId ||
         artifact.navigationId !== source.navigationId) throw new Error('The result does not belong to this recorded extraction.')
-    return await this.resultArtifacts.read(artifact, { workspaceId: entry.workspaceId, browserId: entry.id }, options)
+    return await this.resultArtifacts.read(artifact, { workspaceId: source.workspaceId, browserId: source.browserId }, options)
   }
 
   /** Main registers a finite condition before its sole, read-only extraction producer. */
@@ -3432,7 +3435,9 @@ export class BrowserViewManager {
         throw new Error('The registered execution no longer owns this Browser.')
       }
       if (registration.assetRun) {
-        const run = await this.taskAssets?.currentRun(entry.id)
+        const selected = await this.taskAssets?.currentRun(entry.id)
+        const tree = selected && await this.taskAssets?.inspect(entry.id, selected.id)
+        const run = tree?.runs.find(run => run.id === registration.assetRun!.runId)
         if (!this.owns(entry, view) || view.webContents.isDestroyed()) throw new Error('The original Browser owner changed while reading its asset facts.')
         if (!run || run.completionWarning || run.id !== registration.assetRun.runId || run.assetId !== registration.assetRun.assetId ||
             run.version !== registration.assetRun.version || !run.operationIds.includes(operationId) ||
@@ -3546,9 +3551,24 @@ export class BrowserViewManager {
   }
 
   /** Saved run facts do not need a native page or presentation lease. */
-  async inspectTaskRun(id: string, runId?: string): Promise<Awaited<ReturnType<BrowserTaskAssets['inspect']>>> {
+  async inspectTaskRun(id: string, runId?: string): Promise<(NonNullable<Awaited<ReturnType<BrowserTaskAssets['inspect']>>> & { completions: import('@agentmux/core/control').BrowserTaskRunCompletion[] }) | null> {
     if (!this.taskAssets) throw new Error('Task asset storage is unavailable. The Browser remains usable.')
-    return await this.taskAssets.inspect(id, runId)
+    const inspection = await this.taskAssets.inspect(id, runId)
+    if (!inspection) return null
+    const completions = (await Promise.all(inspection.runs.map(run => this.recordedTaskCompletion(run)))).filter((value): value is NonNullable<typeof value> => value !== null)
+    return { ...inspection, completions }
+  }
+
+  private async recordedTaskCompletion(run: BrowserTaskAssetRun): Promise<import('@agentmux/core/control').BrowserTaskRunCompletion | null> {
+    const asset = await this.taskAssets?.get(run.assetId)
+    const version = asset?.versions.find(version => version.version === run.version)
+    if (!version) return null
+    const operations: BrowserOperation[] = []
+    for (const id of run.operationIds) {
+      try { const operation = await this.getOperation(id); if (operation) operations.push(operation) }
+      catch { /* The original summary marks the missing producer unavailable. */ }
+    }
+    return getBrowserTaskRunCompletion(run, version, operations)
   }
 
   async getTaskAssets(id: string): Promise<BrowserTaskAssetState> {
@@ -3557,6 +3577,9 @@ export class BrowserViewManager {
     if (!this.taskAssets) return { assets: [], runs: [], warning: 'Task asset storage is unavailable. The Browser remains usable.' }
     try {
       const state = await this.taskAssets.state(id)
+      const selected = state.runs.find(run => run.id === state.selectedRunId)
+      const completion = selected ? await this.recordedTaskCompletion(selected) : null
+      if (completion) state.completion = completion
       if (this.owns(entry, view) && !view.webContents.isDestroyed()) { entry.taskAssets = state; this.emit(entry) }
       return state
     } catch {
@@ -3773,9 +3796,10 @@ export class BrowserViewManager {
             if (parallel && (entry.storage.mode !== 'normal' || entry.storage.profileId !== parallel.profileId || !this.owns(entry, view))) throw new Error('The original execution Profile or native page changed; no action was sent to its replacement.')
           }
           await authorizePage()
-          const taskPage: BrowserTaskPageExecution = { cursor: { ...cursor }, ...(authorize ? { authorize: authorizePage } : {}) }
+          const taskPage: BrowserTaskPageExecution = { cursor: { ...cursor }, privateValues: Object.values(frame?.parameters ?? input.parameters).filter(value => value.length > 0), ...(authorize ? { authorize: authorizePage } : {}) }
           try {
-            return await this.runScript(id, code, undefined, undefined, undefined, async operation => {
+            let registrationSaved = false
+            const report = await this.runScript(id, code, undefined, undefined, undefined, async operation => {
               execution.operationId = operation.id
               const version = await this.taskAssets!.executionVersion(cursor)
               const immutableStep = version?.steps.find(step => step.id === cursor.stepId)
@@ -3783,22 +3807,22 @@ export class BrowserViewManager {
                 taskPage.step = structuredClone(immutableStep)
                 const key = immutableStep.dialog?.promptParameterKey
                 const values = frame?.parameters ?? input.parameters
+                taskPage.privateValues = version!.parameters.filter(parameter => parameter.secret || parameter.key === key).flatMap(parameter => values[parameter.key] === undefined ? [] : [values[parameter.key]!]).filter(value => value.length > 0)
                 if (key && values[key] !== undefined) taskPage.dialogPrompt = values[key]
               }
               const bound = await this.taskAssets!.bindOperation(cursor, operation.id)
-              const declaration = version?.completion
-              const download = declaration?.criteria.find(item => item.kind === 'download-readable')
-              const producer = download?.stepId ?? version?.steps.find(isPageStep)?.id
-              if (declaration && producer === cursor.stepId && this.operationJournal) {
+              const criteria = version ? browserTaskProducerCriteria(version, cursor.stepId) : []
+              if (criteria.length && this.operationJournal) {
                 const registration: BrowserOutcomeRegistration = {
                   context: { workspaceId: entry.workspaceId, browserId: entry.id, operationId: operation.id, navigationId: entry.navigationId },
                   assetRun: { runId: cursor.runId, assetId: cursor.assetId, version: cursor.version },
-                  criteria: declaration.criteria.map(item => item.kind === 'download-readable'
-                    ? { kind: item.kind, path: item.path, producer: { operationId: operation.id, navigationId: entry.navigationId } }
-                    : { kind: item.kind, checkpointId: item.checkpointId })
+                  criteria: criteria.map(item => item.kind === 'field-equals'
+                    ? { ...item, producer: { operationId: operation.id, navigationId: entry.navigationId, sequence: 1, request: immutableStep!.extraction! } }
+                    : item.kind === 'download-readable' ? { ...item, producer: { operationId: operation.id, navigationId: entry.navigationId } } : item)
                 }
                 const saved = await this.operationJournal.registerOutcome(operation.id, registration)
                 if (saved?.operation.outcome) operation.outcome = saved.operation.outcome
+                registrationSaved = bound && saved?.saved === true
                 if (!bound || !saved?.saved) {
                   await this.taskAssets!.markCompletionUnavailable(cursor)
                   const warning = 'Completion recording is unavailable. Existing Browser and Agent work remains; restore local storage before verifying again.'
@@ -3810,6 +3834,12 @@ export class BrowserViewManager {
               // Hand that intent to the existing operation cancellation owner before any page work.
               if (execution.stopRequested) void this.stopOperationById(operation.id)
             }, frame?.sensitive ?? privateTaskParameters, taskPage)
+            // A saved data result describes this extraction, not a later document. Check now.
+            const producer = await this.getOperation(report.runOperation.id)
+            if (producer?.outcome) {
+              await this.evaluateOutcome(entry, view, producer.outcome.registration, producer.id, registrationSaved)
+            }
+            return report
           } finally { execution.operationId = undefined }
         }
       }, budget, parallel)
@@ -4111,6 +4141,10 @@ export class BrowserViewManager {
           } }
       } }) } : {}),
       structuredOutput: {
+        ...(taskPage?.step?.kind === 'extract' ? { protectedValues: taskPage.privateValues ?? [], protectSensitiveInputs: true,
+          beforeRead: (request: import('@agentmux/browser/model/browser-structured-output').BrowserStructuredOutputRequest) => {
+            if (JSON.stringify(request) !== JSON.stringify(taskPage.step!.extraction) || safeBrowserUrl(observingView.webContents.getURL()) !== taskPage.step!.url) throw new Error('The original reviewed extraction page or schema changed. No replacement was read.')
+          } } : {}),
         source: () => { requireLive(); if (entry.view !== observingView) throw new Error('The Browser view changed before structured observation.'); return { workspaceId: entry.workspaceId, browserId: entry.id,
           operationId: operation.id, navigationId: entry.navigationId } },
         isCurrent: navigationId => this.entries.get(entry.id) === entry && entry.view === observingView && !observingView.webContents.isDestroyed() &&
@@ -4186,7 +4220,7 @@ export class BrowserViewManager {
       }
       const saveEvidence = async (content: BrowserStepEvidenceContent, navigationId: string, first = false): Promise<boolean> => {
         if (!this.stepEvidence) return false
-        if ((content.kind === 'page' || content.kind === 'structured-output') && privateTaskParameters) {
+        if ((content.kind === 'page' || content.kind === 'structured-output' && taskPage?.step?.kind !== 'extract') && privateTaskParameters) {
           step.evidenceWarning = 'Automatic page observations were not retained because this task uses private invocation parameters. Inspect the live page for its current state.'
           return false
         }
@@ -4296,7 +4330,8 @@ export class BrowserViewManager {
           const capture = value as BrowserScreenshotCapture
           await saveEvidence(screenshotStepEvidence(capture), capture.navigationId)
         } else if (this.stepEvidence && name === 'extractStructured') {
-          const receipt = value as BrowserStructuredOutputReceipt
+          const original = value as BrowserStructuredOutputReceipt
+          const receipt = taskPage?.step?.kind === 'extract' ? { ...original, fields: original.fields.map(({ value: _value, actual: _actual, preview: _preview, detail: _detail, ...field }) => ({ ...field, inline: false, ...(field.status === 'observed' ? {} : { detail: `Recorded field status: ${field.status}. Read the original result for details.` }) })) } : original
           await saveEvidence({ kind: 'structured-output', receipt }, receipt.source.navigationId)
         }
         if (this.operationJournal) await this.operationJournal.finishStep(operation.id, step.sequence, {

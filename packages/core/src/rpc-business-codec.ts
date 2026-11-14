@@ -169,6 +169,15 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
     try { return resolveAgentSessionId(selector, [actual]) === actual } catch { return false }
   }
   if (request.operation !== result.operation) fail()
+  if (request.operation === 'browser.operation' && result.operation === 'browser.operation' && request.resultRead) {
+    const read = result.resultRead
+    if (read?.status === 'available') {
+      if (read.sequence !== request.resultRead.sequence) return fail()
+      const chunk = read.chunk
+      if (!chunk || chunk.offset !== (request.resultRead.offset ?? 0) || chunk.reference.operationId !== request.operationId ||
+          chunk.returnedBytes > (request.resultRead.maxBytes ?? 16384)) return fail()
+    } else if (read && read.sequence !== null && read.sequence !== request.resultRead.sequence) return fail()
+  }
   if (isToolkitRequest(request)) { assertToolkitResultTarget(request, result as ToolkitResult); return }
   if (isBrowserTaskControlOperation(request.operation)) {
     assertBrowserTaskControlTarget(parseBrowserTaskControlPayload(request), parseBrowserTaskControlResult(request.operation, result))
@@ -488,6 +497,9 @@ export function parseRpcControlResult(method: keyof typeof AGENTMUX_RPC_CONTROL_
     if (resource) identity.resource = resource[1]
     if (method === 'settings.browser-links.forget') identity.scheme = rpcRecord(p.input).scheme
     const request = { ...identity, operation, requestId: p.operationId ?? ('requestId' in result ? result.requestId : '') } as AgentMuxControlRequest
+    if (request.operation === 'browser.operation' && result.operation === 'browser.operation' && request.resultRead && !result.resultRead) {
+      result.resultRead = { sequence: null, status: 'unavailable', warning: 'The original operation was read, but its optional step-result observation is unavailable. No page was read again.' }
+    }
     assertControlResultTarget(request, result)
   }
   const canonical = rpcControlResult(method, result)

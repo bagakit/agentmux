@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { safeBrowserUrl } from './browser-operation-step.js'
 import { BROWSER_RESULT_MAX_READ_BYTES, type BrowserResultArtifactReference } from './model/browser-result-artifact.js'
 import { BROWSER_STRUCTURED_LIMITS, type BrowserStructuredDocument, type BrowserStructuredField,
   type BrowserStructuredFieldSummary, type BrowserStructuredOutputReceipt, type BrowserStructuredOutputRequest,
@@ -20,6 +21,19 @@ const requestSchema = z.object({
 }).strict().refine(request => !(request.within && request.withinRef), 'within and withinRef are mutually exclusive')
   .refine(request => new Set(request.fields.map(field => field.key)).size === request.fields.length, 'field keys must be unique')
 
+/** Exact known invocation values, not a classifier for arbitrary website data. */
+export function containsKnownBrowserPrivateValue(value: unknown, protectedValues: readonly string[]): boolean {
+  const candidates = protectedValues.filter(value => value.length > 0).flatMap(value => [value, encodeURIComponent(value)])
+  const visit = (item: unknown): boolean => {
+    if (typeof item === 'string') return candidates.some(value => item.includes(value))
+    if (typeof item === 'number' || typeof item === 'boolean') return candidates.some(value => String(item) === value)
+    if (Array.isArray(item)) return item.some(visit)
+    if (item && typeof item === 'object') return Object.values(item).some(visit)
+    return false
+  }
+  return visit(value)
+}
+
 export function parseBrowserStructuredOutputRequest(value: unknown): BrowserStructuredOutputRequest {
   const parsed = requestSchema.parse(value)
   return { ...(parsed.within !== undefined ? { within: parsed.within } : {}),
@@ -35,7 +49,7 @@ type DomField = { key: string; status: 'read'; value: string | boolean } | {
 type DomRead = { documentUrl: string; current: boolean; complete: boolean; fields: DomField[]; work: BrowserStructuredWork }
 
 /** Self-contained: executed on the existing T002-resolved Document/Element in its actual frame. */
-function readStructuredDom(this: Document | Element, request: BrowserStructuredOutputRequest, limits: typeof BROWSER_STRUCTURED_LIMITS): DomRead {
+function readStructuredDom(this: Document | Element, request: BrowserStructuredOutputRequest, limits: typeof BROWSER_STRUCTURED_LIMITS & { protectSensitiveInputs?: boolean }): DomRead {
   const root = this
   const doc = root.nodeType === 9 ? root as Document : root.ownerDocument!
   const documentUrl = doc.URL
@@ -80,6 +94,10 @@ function readStructuredDom(this: Document | Element, request: BrowserStructuredO
     if (!complete) return { ...identity, status: 'truncated', detail: 'Element scan budget ended before uniqueness or absence was established.' }
     if (found.length === 0) return { ...identity, status: 'missing', detail: 'No element matched in the complete rooted scan.' }
     const target = found[0]!
+    if (limits.protectSensitiveInputs && target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'password' &&
+        (field.source.read === 'value' || field.source.read === 'attribute' && field.source.attribute === 'value')) {
+      return { ...identity, status: 'unavailable', detail: 'Sensitive input values are not retained as saved task data.' }
+    }
     const state = { text: '', bytes: 0 }
     work.reads += 1
     try {
@@ -114,8 +132,8 @@ function readStructuredDom(this: Document | Element, request: BrowserStructuredO
 }
 
 /** Budgets are trusted constants embedded by Main, not extra script options. */
-export function buildBrowserStructuredReadDeclaration(): string {
-  return `function(request) { return (${readStructuredDom.toString()}).call(this, request, ${JSON.stringify(BROWSER_STRUCTURED_LIMITS)}); }`
+export function buildBrowserStructuredReadDeclaration(protectSensitiveInputs = false): string {
+  return `function(request) { return (${readStructuredDom.toString()}).call(this, request, ${JSON.stringify({ ...BROWSER_STRUCTURED_LIMITS, ...(protectSensitiveInputs ? { protectSensitiveInputs: true } : {}) })}); }`
 }
 
 const workSchema = z.object({
@@ -216,6 +234,8 @@ function summarize(field: BrowserStructuredField): BrowserStructuredFieldSummary
 
 export type BrowserStructuredOutputContext = {
   source: Omit<BrowserStructuredSource, 'documentUrl'>
+  protectedValues?: readonly string[]
+  protectSensitiveInputs?: boolean
   /** Existing authorized rooted target and frame sender; CDP exceptions must throw. */
   read(declaration: string, request: BrowserStructuredOutputRequest): Promise<unknown>
   /** Actual current entry/view/navigation and resolved document, checked before and after work. */
@@ -230,14 +250,14 @@ export async function extractBrowserStructuredOutput(input: unknown, context: Br
   const owner = structuredClone(context.source)
   let source: BrowserStructuredSource = { ...owner, documentUrl: null }
   const failed = (status: 'page-changed' | 'unavailable', warning: string, work: BrowserStructuredWork | null = null): BrowserStructuredOutputReceipt => ({
-    kind: 'browser-structured-output', status, source, work, artifactStatus: 'not-recorded', warning,
+    kind: 'browser-structured-output', status, source: context.protectedValues === undefined ? source : { ...source, url: safeBrowserUrl(source.url), documentUrl: source.documentUrl === null ? null : safeBrowserUrl(source.documentUrl) }, work, artifactStatus: 'not-recorded', warning,
     fields: request.fields.map(field => ({ ...field, status, inline: false, detail: warning }))
   })
   let currentWarning: string | null = null
   const awaitCurrent = async () => {
     try { return await context.isCurrent() }
     catch (error) {
-      currentWarning = `Current Browser document could not be verified: ${String(error instanceof Error ? error.message : error).slice(0, 512)}`
+      currentWarning = context.protectedValues === undefined ? `Current Browser document could not be verified: ${String(error instanceof Error ? error.message : error).slice(0, 512)}` : 'The saved task document could not be verified. Raw failure text was not retained.'
       return false
     }
   }
@@ -250,16 +270,25 @@ export async function extractBrowserStructuredOutput(input: unknown, context: Br
   if (!(await awaitCurrent())) return failedCurrent('The Browser document changed before extraction; no fields were read.')
   let read: DomRead
   try {
-    read = domReadSchema.parse(await context.read(buildBrowserStructuredReadDeclaration(), request))
+    read = domReadSchema.parse(await context.read(buildBrowserStructuredReadDeclaration(context.protectSensitiveInputs), request))
     if (read.fields.length !== request.fields.length || read.fields.some((field, index) => field.key !== request.fields[index]!.key)) throw new Error('DOM field identities do not match the requested schema.')
   } catch (error) {
     if (!(await awaitCurrent())) return failedCurrent('The Browser document changed before the DOM read could be verified.')
-    return failed('unavailable', `Structured DOM read is unavailable: ${String(error instanceof Error ? error.message : error).slice(0, 512)}`)
+    return failed('unavailable', context.protectedValues === undefined ? `Structured DOM read is unavailable: ${String(error instanceof Error ? error.message : error).slice(0, 512)}` : 'The saved task extraction could not observe its original document. Raw failure text was not retained.')
   }
   source = { ...owner, documentUrl: read.documentUrl }
   if (!read.current) return failed('page-changed', 'The rooted Browser document changed during extraction; old fields were not registered as current.', read.work)
   if (!(await awaitCurrent())) return failedCurrent('The Browser document changed during extraction; old fields were not registered as current.', read.work)
-  const fields = request.fields.map((field, index) => typedField(field, read.fields[index]!))
+  if (context.protectedValues !== undefined && containsKnownBrowserPrivateValue({ urls: [source.url, source.documentUrl], fields: read.fields.map(field => 'value' in field ? field.value : { preview: field.preview, detail: field.detail }) }, context.protectedValues)) return failed('unavailable', 'The selected data contains a private invocation value. No result or preview was retained.', read.work)
+  const fields = request.fields.map((field, index) => {
+    const captured = typedField(field, read.fields[index]!)
+    if (context.protectedValues !== undefined && captured.status === 'truncated') {
+      const { preview: _preview, ...identity } = captured
+      return { ...identity, detail: 'The bounded field was incomplete; no partial task value was retained.' }
+    }
+    if (context.protectedValues !== undefined && captured.status === 'unavailable') return { ...captured, detail: 'This saved task field could not be observed. Raw failure text was not retained.' }
+    return captured
+  })
   const document: BrowserStructuredDocument = { schema: 'browser-structured-output.v1', request, source, fields, work: read.work }
   const receipt: BrowserStructuredOutputReceipt = { kind: 'browser-structured-output',
     status: fields.every(field => field.status === 'observed') ? 'complete' : 'partial', source,
@@ -276,6 +305,6 @@ export async function extractBrowserStructuredOutput(input: unknown, context: Br
     return { ...receipt, artifactStatus: 'available', artifact }
   } catch (error) {
     if (!(await awaitCurrent())) return failedCurrent('The Browser document changed before the artifact could be verified.', read.work)
-    return { ...receipt, status: 'partial', warning: `Observed fields remain available, but their result artifact could not be registered: ${String(error instanceof Error ? error.message : error).slice(0, 512)}` }
+    return { ...receipt, status: 'partial', warning: context.protectedValues === undefined ? `Observed fields remain available, but their result artifact could not be registered: ${String(error instanceof Error ? error.message : error).slice(0, 512)}` : 'The saved task data was observed, but its original artifact could not be saved. Restore storage and inspect the original operation; extraction was not repeated.' }
   }
 }

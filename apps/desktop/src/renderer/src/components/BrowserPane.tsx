@@ -681,7 +681,8 @@ function BrowserPaneContent({
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState<string | null>(null)
   const [selectedOperationId, setSelectedOperationId] = useState<string | null>(null)
-  const [selectedStep, setSelectedStep] = useState<{ operationId: string; sequence: number } | null>(null)
+  const [selectedStep, setSelectedStep] = useState<{ operationId: string; sequence: number; reveal?: { presentation: string; request: number; trigger: HTMLButtonElement } } | null>(null)
+  const stepRevealRequest = useRef(0)
   const [demonstrationBusy, setDemonstrationBusy] = useState(false)
   const demonstrationRequest = useRef(0)
   const [taskBusy, setTaskBusy] = useState(false)
@@ -1678,6 +1679,17 @@ function BrowserPaneContent({
             dialogTypes={tab.dialogTypes}
             asset={taskAsset}
             assets={tab.taskAssets?.assets ?? []}
+            completion={tab.taskAssets?.completion ?? null}
+            onShowResult={async (operationId, trigger) => {
+              const revealTrigger = trigger
+              const operation = await api.browser.getOperation(operationId)
+              const step = operation?.steps.find(step => step.method === 'extractStructured')
+              if (!operation || operation.browserId !== tab.browserId || !taskRun?.operationIds.includes(operationId) || !step) throw new Error('The original task extraction is unavailable.')
+              setOperationHistory(current => [...current.filter(item => item.id !== operation.id), operation])
+              setSelectedOperationId(operation.id)
+              setSelectedStep({ operationId: operation.id, sequence: step.sequence,
+                reveal: { presentation: key, request: ++stepRevealRequest.current, trigger: revealTrigger } })
+            }}
             {...(taskAssetReview ? { reviewRequest: taskAssetReview } : {})}
             onReviewRequestConsumed={() => setTaskAssetReview(null)}
             recording={tab.demonstration?.draft ?? null}
@@ -1724,10 +1736,10 @@ function BrowserPaneContent({
             onVerify={async (runId, event) => {
               const result = await taskAction(event, async () => {
                 const operations = await api.browser.listOperationHistory()
-                const original = operations.find(operation => operation.browserId === tab.browserId && operation.outcome?.registration.assetRun?.runId === runId &&
+                const matches = operations.filter(operation => operation.browserId === tab.browserId && operation.outcome?.registration.assetRun?.runId === runId &&
                   operation.outcome.registration.assetRun.assetId === taskAsset?.id && operation.outcome.registration.assetRun.version === taskRun?.version)
-                if (!original) throw new Error('The declared producer is unavailable. Existing work remains; no action was repeated.')
-                const result = await api.browser.verifyOutcome(tab.browserId, original.id)
+                if (matches.length !== 1) throw new Error('The declared producer is unavailable. Existing work remains; no action was repeated.')
+                const result = await api.browser.verifyOutcome(tab.browserId, matches[0]!.id)
                 taskReliabilityRefresh.markVerified(result)
                 await loadOperationHistory()
                 return result
@@ -1796,7 +1808,8 @@ function BrowserPaneContent({
           /> : null}
           {timelineOperation && timelineSelectedStep ? <button type="button" className="small-button" onClick={event => { discussionOrigin.current = key; discussion.open(event.currentTarget as HTMLButtonElement, { operationId: timelineOperation.id, sequence: timelineSelectedStep.sequence }, traceAnchors.current.get(key)) }}>Comment on step {timelineSelectedStep.sequence}</button> : null}
           {timelineOperation && timelineSelectedStep
-            ? <BrowserStepEvidence operation={timelineOperation} step={timelineSelectedStep} /> : null}
+            ? <BrowserStepEvidence operation={timelineOperation} step={timelineSelectedStep}
+                {...(selectedStep?.reveal?.presentation === key ? { revealRequest: selectedStep.reveal.request, revealTrigger: selectedStep.reveal.trigger } : {})} /> : null}
           {replayPlan ? (
             <BrowserReplayPreview
               plan={replayPlan}

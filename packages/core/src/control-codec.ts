@@ -32,6 +32,7 @@ import { parseGoalContinuationLoop } from './continuous-progress-scheduler.js'
 import { isPendingMessageOperation, parsePendingMessage } from './pending-message-control.js'
 import { parseAlignment, parseAlignmentProposal, parseGrounding, parseGroundingProposal } from '@agentmux/demand/goals'
 import { validateAgentPromptCondition } from './agent-prompt-condition.js'
+import { parseBrowserResultReadInput, parseBrowserResultReadProjection } from './browser-result-read.js'
 import { BROWSER_COMPLETION_UNAVAILABLE_WARNING, parseBrowserCompletionFacts } from './browser-completion-facts.js'
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
@@ -867,11 +868,13 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     }
   }
   if (source.operation === 'browser.operation') {
+    const resultRead = source.resultRead === undefined ? undefined : parseBrowserResultReadInput(source.resultRead)
     return {
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId,
       operation: source.operation,
-      operationId: identity(source.operationId, 'Browser operation id is invalid.', 'INVALID_CONTROL_REQUEST')
+      operationId: identity(source.operationId, 'Browser operation id is invalid.', 'INVALID_CONTROL_REQUEST'),
+      ...(resultRead ? { resultRead } : {})
     }
   }
   if (source.operation === 'browser.subscribe') {
@@ -1825,6 +1828,14 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     }
   }
   if (operation === 'browser.stop' || operation === 'browser.operation') {
+    const original = result.runOperation === null || result.runOperation === undefined ? null : browserOperation(result.runOperation)
+    let resultRead: import('./browser-result-read.js').BrowserResultReadProjection | undefined
+    if (operation === 'browser.operation' && result.resultRead !== undefined) {
+      try { resultRead = parseBrowserResultReadProjection(result.resultRead, original?.id ?? '', original?.browserId) }
+      catch {
+        resultRead = { sequence: null, status: 'unavailable', warning: 'The retained result projection could not be verified. The original operation remains available.' }
+      }
+    }
     // 两条的回执形状相同（一个可为 null 的 operation），所以合成一条臂：分开写两遍同样的解析是
     // 第二份事实，改一处忘另一处时两条会对同一份 wire 数据给出不同答案。
     //
@@ -1836,9 +1847,7 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
       ok: true,
       operation,
       result: {
-        runOperation: result.runOperation === null || result.runOperation === undefined
-          ? null
-          : browserOperation(result.runOperation)
+        runOperation: original, ...(resultRead ? { resultRead } : {})
       }
     }
   }

@@ -1,6 +1,8 @@
 import type { BrowserOperation } from '@agentmux/browser/model/browser-operation'
 import type { BrowserOutcomeAssetRun, BrowserOutcomeCriterion, BrowserRegisteredOutcomeCriterion } from '@agentmux/browser/model/browser-outcome-criteria'
 import type { BrowserTaskAssetRun, BrowserTaskAssetState, BrowserTaskVersion } from './browser-task-assets.js'
+import type { BrowserTaskRunCompletion } from '@agentmux/core/control'
+import { browserTaskProducerCriteria } from './browser-task-completion'
 import { browserTaskNextIndex } from './browser-task-path.js'
 
 export type BrowserTaskReliabilityResult = 'passed' | 'not-met' | 'unavailable' | 'unknown' | 'failed' | 'stopped' | 'interrupted'
@@ -154,30 +156,74 @@ function classify(run: BrowserTaskAssetRun, version: BrowserTaskVersion, operati
   if (run.stepExecutions !== undefined ? !path : nonlinear || operationIds.length < version.steps.filter(step => step.kind !== 'checkpoint').length || boundJournal.some(operation => !completed(operation))) {
     return { result: 'unavailable', reason: 'The original completed execution path could not be joined.' }
   }
-  const declared = version.completion?.criteria.map(criterion => criterion.kind === 'download-readable'
-    ? { kind: criterion.kind, path: criterion.path } : { kind: criterion.kind, checkpointId: criterion.checkpointId })
-  if (!declared?.length) return { result: 'unknown', reason: 'Script completed without a declared business outcome.' }
-  const producingStep = version.completion?.criteria.find(criterion => criterion.kind === 'download-readable')?.stepId ??
-    version.steps.find(step => step.kind !== 'checkpoint' && step.kind !== 'branch')?.id
-  const producerIndex = version.steps.filter(step => step.kind !== 'checkpoint').findIndex(step => step.id === producingStep)
-  const producerOperationId = path ? path.get(producingStep ?? '') : operationIds[producerIndex]
-  if (!producerOperationId) return { result: 'unavailable', reason: 'The declared outcome producing step was not executed on this path.' }
-  const outcomes = journal.flatMap(operation => operation?.outcome ? [{ operation: operation!, outcome: operation.outcome }] : [])
-    .filter(({ outcome }) => sameRun(outcome.registration.assetRun, run))
-  if (outcomes.length !== 1) return { result: 'unavailable', reason: 'The exact complete outcome registration is missing or ambiguous.' }
-  const { operation, outcome } = outcomes[0]!
-  const registration = outcome.registration, evaluation = outcome.evaluation
-  if (!evaluation || registration.context.browserId !== run.browserId || registration.context.operationId !== operation.id ||
-      !registration.context.workspaceId || !registration.context.navigationId || producerIndex < 0 || producerOperationId !== operation.id ||
-      !run.operationIds.includes(operation.id) || !sameRun(evaluation.assetRun, run) ||
-      JSON.stringify(evaluation.context) !== JSON.stringify(registration.context) ||
-      !sameConditions(declared, registration.criteria) || !sameConditions(declared, evaluation.conditions.map(condition => condition.criterion)) ||
-      registration.criteria.some(criterion => criterion.kind !== 'human-checkpoint' &&
-        (criterion.producer.operationId !== operation.id || criterion.producer.navigationId !== registration.context.navigationId))) {
-    return { result: 'unavailable', reason: 'Outcome identity or all original version conditions could not be joined.' }
+  const outcome = getBrowserTaskRunCompletion(run, version, [...boundJournal])
+  if (!outcome) return { result: 'unknown', reason: 'Script completed without a declared business outcome.' }
+  return { result: outcome.status, reason: 'All original conditions from the bound retained outcome.' }
+}
+
+/** Recorded data checks only. Reading never extracts, re-verifies today's DOM or writes facts. */
+export function getBrowserTaskRunCompletion(run: BrowserTaskAssetRun, version: BrowserTaskVersion,
+  operations: readonly BrowserOperation[]): BrowserTaskRunCompletion | null {
+  const declared = version.completion?.criteria
+  if (!declared?.length) return null
+  const byId = new Map<string, BrowserOperation>()
+  const conflicts = new Set<string>()
+  for (const operation of operations) {
+    if (!run.operationIds.includes(operation.id)) continue
+    const previous = byId.get(operation.id)
+    if (previous && JSON.stringify(previous) !== JSON.stringify(operation)) conflicts.add(operation.id)
+    else byId.set(operation.id, operation)
   }
-  const status = evaluation.conditions.some(condition => condition.status === 'unavailable') ? 'unavailable'
-    : evaluation.conditions.every(condition => condition.status === 'passed') ? 'passed' : 'not-met'
-  if (evaluation.status !== status) return { result: 'unavailable', reason: 'Recorded outcome summary disagrees with its complete conditions.' }
-  return { result: status, reason: 'All original conditions from the bound retained outcome.' }
+  const journal = run.operationIds.map(id => byId.get(id))
+  const validJournal = journal.every((item): item is BrowserOperation => !!item && !conflicts.has(item.id) && item.browserId === run.browserId)
+  const linear = version.steps.filter(step => step.kind !== 'checkpoint')
+  const path = !validJournal ? null : run.stepExecutions !== undefined ? executedPath(run, version, journal)
+    : !version.steps.some(step => step.kind === 'branch' || step.kind === 'subflow' || step.nextStepId !== undefined) &&
+      journal.length === linear.length && journal.every(completed)
+      ? new Map(linear.map((step, index) => [step.id, journal[index]!.id])) : null
+  const anchor = declared.find(item => item.kind === 'download-readable')?.stepId ??
+    version.steps.find(step => step.kind !== 'checkpoint' && step.kind !== 'branch' && step.kind !== 'subflow')?.id
+  const conditions: BrowserTaskRunCompletion['conditions'] = declared.map(criterion => {
+    const stepId = criterion.kind === 'human-checkpoint' ? anchor : criterion.stepId
+    const operationId = stepId ? path?.get(stepId) : undefined
+    const unavailable = (reason: string): BrowserTaskRunCompletion['conditions'][number] => ({ criterion, status: 'unavailable', reason,
+      ...(operationId ? { operationId } : {}) })
+    if (run.status !== 'completed' || run.completionWarning || !path || !operationId) return unavailable('The exact completed path or producer recording is unavailable. Existing work remains.')
+    const operation = byId.get(operationId)!, registration = operation.outcome?.registration, evaluation = operation.outcome?.evaluation
+    const expected = browserTaskProducerCriteria(version, stepId!)
+    if (!registration || !sameRun(registration.assetRun, run) || registration.context.browserId !== run.browserId ||
+        registration.context.operationId !== operationId || !registration.context.workspaceId || !registration.context.navigationId ||
+        !sameConditions(expected, registration.criteria)) return unavailable('The exact immutable producer declaration is unavailable.')
+    for (const registered of registration.criteria) {
+      if (registered.kind === 'human-checkpoint') continue
+      if (registered.producer.operationId !== operationId || registered.producer.navigationId !== registration.context.navigationId) return unavailable('The producer belongs to another operation or document.')
+      if (registered.kind === 'field-equals') {
+        const extraction = version.steps.find(step => step.id === stepId)?.extraction
+        if (!extraction || JSON.stringify(extraction) !== JSON.stringify(registered.producer.request) ||
+            operation.steps.find(step => step.sequence === registered.producer.sequence)?.method !== 'extractStructured') return unavailable('The registered extraction differs from this saved step.')
+      }
+    }
+    if (criterion.kind === 'human-checkpoint') {
+      const index = version.steps.findIndex(step => step.kind === 'checkpoint' && step.id === criterion.checkpointId)
+      const facts = run.humanCheckpoints?.filter(fact => fact.checkpointId === criterion.checkpointId)
+      if (!facts) return unavailable('Trusted checkpoint recording is unavailable.')
+      if (!facts.length) return { criterion, operationId, status: 'not-met', reason: 'This checkpoint has no recorded trusted Continue event.' }
+      if (facts.length !== 1 || index < 0 || facts[0]!.pendingCursor !== index + 1 || facts[0]!.pendingCursor > run.nextStep ||
+          !sameRun(facts[0], run) || facts[0]!.browserId !== run.browserId || facts[0]!.origin !== 'trusted-ui' || facts[0]!.controlBefore !== 'human') return unavailable('The trusted checkpoint is not bound to this exact run and cursor.')
+      return { criterion, operationId, status: 'passed', reason: 'The original trusted Continue was recorded for this exact run and checkpoint.' }
+    }
+    if (!evaluation || evaluation.warning || !sameRun(evaluation.assetRun, run) || JSON.stringify(evaluation.context) !== JSON.stringify(registration.context) ||
+        !sameConditions(expected, evaluation.conditions.map(item => item.criterion))) return unavailable('The producer has no confirmed recorded data check.')
+    const aggregate = evaluation.conditions.some(item => item.status === 'unavailable') ? 'unavailable'
+      : evaluation.conditions.every(item => item.status === 'passed') ? 'passed' : 'not-met'
+    if (evaluation.status !== aggregate) return unavailable('The recorded check disagrees with its complete conditions.')
+    const key = conditionKey(criterion.kind === 'field-equals' ? { kind: criterion.kind, key: criterion.key, expected: criterion.expected }
+      : { kind: criterion.kind, path: criterion.path })
+    const result = evaluation.conditions.find(item => conditionKey(item.criterion) === key)
+    return result ? { criterion, operationId, status: result.status, reason: result.reason } : unavailable('The declared condition was not checked by this producer.')
+  })
+  const status = conditions.some(item => item.status === 'unavailable') ? 'unavailable'
+    : conditions.every(item => item.status === 'passed') ? 'passed' : 'not-met'
+  return { runId: run.id, browserId: run.browserId, assetId: run.assetId, version: run.version, status, conditions,
+    ...(run.completionWarning ? { warning: run.completionWarning } : {}) }
 }

@@ -62,15 +62,14 @@
 .browser-task-batch > small { display: block; margin-block: var(--sp-1); color: var(--text-3); line-height: 1.4; }
 .browser-task-batch__item { display: grid; min-width: 0; gap: var(--sp-1); margin-block: var(--sp-2); }
 .browser-task-batch__item > small { color: var(--text-3); overflow-wrap: anywhere; }
-.browser-task-step-failure { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: var(--sp-2); }
-.browser-task-step-failure .browser-task-asset__field { grid-template-columns: auto minmax(0, 1fr); padding-inline: 0; }
+.browser-task-step-failure { min-width: 0; display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.browser-task-asset .browser-rsi-replay__steps .browser-task-step-failure > .browser-task-asset__field { flex: 1 1 150px; grid-template-columns: auto minmax(0, 1fr); padding-inline: 0; }
 
 /* Native gesture declarations keep readable target fields in the details pane. */
 .browser-task-asset li:is([data-task-kind="drag"], [data-task-kind="tap"], [data-task-kind="longPress"], [data-task-kind="swipe"], [data-task-kind="pinch"]) { grid-template-columns: 20px minmax(0, 1fr); }
 .browser-task-asset li:is([data-task-kind="drag"], [data-task-kind="tap"], [data-task-kind="longPress"], [data-task-kind="swipe"], [data-task-kind="pinch"]) > .browser-task-asset__step-actions { grid-column: 2; justify-self: end; }
 .browser-task-drag, .browser-task-gesture { min-width: 0; display: grid; gap: var(--sp-2); }
 .browser-task-drag > small, .browser-task-gesture > small { white-space: normal; overflow-wrap: anywhere; }
-.browser-task-asset li:is([data-task-kind="drag"], [data-task-kind="tap"], [data-task-kind="longPress"], [data-task-kind="swipe"], [data-task-kind="pinch"]) .browser-task-step-failure { grid-template-columns: minmax(0, 1fr); }
 
 /* File bindings and dialog explanations stay inside their actual Browser details column. */
 .browser-task-asset .browser-rsi-replay__steps li:is([data-task-kind="upload"], [data-task-dialog]) { grid-template-columns: 20px minmax(0, 1fr); }
@@ -78,8 +77,6 @@
 .browser-task-file-dialog { min-width: 0; display: grid; gap: var(--sp-1); }
 .browser-task-file-dialog > small, .browser-task-dialog > small { overflow: visible; white-space: normal; text-overflow: clip; overflow-wrap: anywhere; line-height: 1.4; }
 .browser-task-asset li:is([data-task-kind="upload"], [data-task-dialog]) :is(input, select) { box-sizing: border-box; max-width: 100%; }
-.browser-task-asset li:is([data-task-kind="upload"], [data-task-dialog]) .browser-task-step-failure { display: flex; flex-wrap: wrap; }
-.browser-task-asset li:is([data-task-kind="upload"], [data-task-dialog]) .browser-task-step-failure .browser-task-asset__field { flex: 1 1 150px; }
 
 .browser-task-asset li[data-task-kind="subflow"] { grid-template-columns: 20px minmax(0, 1fr); align-items: start; }
 .browser-task-asset li[data-task-kind="subflow"] > .browser-task-asset__step-actions { grid-column: 2; justify-self: end; }
@@ -104,3 +101,13 @@
 .browser-task-parallel__continue small, .browser-task-parallel__continue p { overflow-wrap: anywhere; }
 .browser-task-parallel__progress li > span { display: block; margin-block: 4px; }
 .browser-task-parallel__progress li > button { margin: 4px 5px 0 0; }
+
+.browser-task-extract { min-inline-size: 0; margin: var(--sp-2) 0; padding: var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); display: grid; gap: var(--sp-2); }
+.browser-task-extract legend { padding-inline: var(--sp-1); color: var(--text-2); }
+.browser-task-extract small { color: var(--text-3); line-height: 1.45; }
+.browser-task-extract__field { min-width: 0; padding-block: var(--sp-2); border-top: 1px solid var(--line-soft); }
+.browser-task-extract .browser-task-asset__field { padding-inline: 0; }
+.browser-task-extract button, .browser-task-asset__progress button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.browser-task-asset__progress [data-task-recorded-outcome] { display: grid; gap: var(--sp-1); padding: var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); }
+.browser-task-asset__progress [data-task-recorded-outcome] ul { margin: 0; padding-left: var(--sp-5); }
+.browser-task-asset__progress [data-task-recorded-outcome] small { display: block; color: var(--text-3); }

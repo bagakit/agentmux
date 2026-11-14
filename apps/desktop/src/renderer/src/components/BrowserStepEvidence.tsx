@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { BrowserOperation, BrowserOperationStep } from '@agentmux/browser/model/browser-operation'
 import type { BrowserStepEvidenceRead } from '@agentmux/browser/model/browser-step-evidence'
 import { api } from '../lib/api'
 import { BrowserStructuredFields } from './BrowserStructuredFields'
 
 /** Reads saved facts for the selected step; never takes a new snapshot of today's page. */
-export function BrowserStepEvidence({ operation, step }: { operation: BrowserOperation; step: BrowserOperationStep }) {
+export function BrowserStepEvidence({ operation, step, revealRequest, revealTrigger }: { operation: BrowserOperation; step: BrowserOperationStep; revealRequest?: number; revealTrigger?: HTMLElement }) {
+  const surface = useRef<HTMLElement | null>(null)
+  const revealed = useRef<number | undefined>(undefined)
   const [read, setRead] = useState<BrowserStepEvidenceRead | null>(null)
   const [loading, setLoading] = useState(true)
   const [retry, setRetry] = useState(0)
@@ -29,10 +31,18 @@ export function BrowserStepEvidence({ operation, step }: { operation: BrowserOpe
     }).finally(() => { if (current) setLoading(false) })
     return () => { current = false }
   }, [operation.id, operation.browserId, step.sequence, step.finishedAt, retry])
+  useLayoutEffect(() => {
+    if (revealRequest === undefined || revealed.current === revealRequest || loading ||
+        read?.operationId !== operation.id || read.sequence !== step.sequence || !surface.current) return
+    if (revealTrigger?.isConnected && revealTrigger.ownerDocument === surface.current.ownerDocument &&
+        revealTrigger.ownerDocument.activeElement === revealTrigger) surface.current.focus({ preventScroll: true })
+    surface.current.scrollIntoView({ block: 'start', inline: 'nearest' })
+    revealed.current = revealRequest
+  }, [revealRequest, revealTrigger, loading, read, operation.id, step.sequence])
 
   const item = read?.items.find(value => value.reference.id === selected) ??
     read?.items.find(value => step.status === 'failed' && value.content.kind === 'diagnostic') ?? read?.items[0]
-  return <section className="browser-step-evidence" aria-label={`Evidence for step ${step.sequence}: ${step.label}`}>
+  return <section ref={surface} tabIndex={-1} className="browser-step-evidence" aria-label={`Evidence for step ${step.sequence}: ${step.label}`}>
     <header>{item?.content.kind !== 'structured-output' ? <strong>{step.label}</strong> : null}<span>{step.status}</span></header>
     {step.target ? <p className="browser-step-evidence__target">{step.target.role} · {step.target.name}</p> : null}
     {loading ? <p role="status">Reading recorded evidence…</p> : null}

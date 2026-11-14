@@ -154,6 +154,7 @@ import { projectBrowserControlEvent, projectBrowserControlOperation, projectBrow
 import { WorkbenchUserStateStore } from './workbench-user-state.js'
 import type { DesktopLoadedRenderer, DesktopPackageIdentity } from '../shared/client-observation.js'
 import { projectAppearance } from './project-appearance.js'
+import { readBrowserOperationResult } from '@agentmux/browser/browser-operation-result'
 import { executeBrowserTaskControl } from './browser-task-control.js'
 import { createBrowserAutomationGate } from './browser-automation-gate.js'
 import { discoverAgentSkills, mintAgentSessionId, runProcess } from '@agentmux/core'
@@ -872,9 +873,17 @@ export async function registerIpc(args: {
     generation: () => args.runtime.rendererGeneration(contents),
     execute: (request, signal) => controlBridge.execute(request, signal)
   })
+  const readRetainedStepResult = async (operationId: string, sequence: number, options?: BrowserResultReadOptions) => {
+    const operation = await browserOperationJournal.get(operationId)
+    return operation && externalBrowsers.has(operation.browserId)
+      ? await externalBrowsers.readStepResult(operationId, sequence, options)
+      : await browsers.readStepResult(operationId, sequence, options)
+  }
   const executeControlOwner = async (
     request: AgentMuxControlRequest, signal?: AbortSignal
   ): Promise<AgentMuxControlResult> => {
+    if (request.operation === 'browser.operation' && request.resultRead) return projectBrowserControlResult({ operation: request.operation,
+      ...await readBrowserOperationResult(request.operationId, request.resultRead, { getOperation: id => browsers.getOperation(id), readStepResult: readRetainedStepResult }) })
     if (request.operation === 'browser.release') return { operation: request.operation,
       receipt: await browsers.release(request.browserId, request.navigationId) }
     if (request.operation === 'browser.task.parallel-continue' || request.operation === 'browser.task.parallel-stop' || request.operation === 'browser.task.parallel-list' || request.operation === 'browser.task.parallel' || request.operation === 'browser.task.parallel-inspect' || request.operation === 'browser.task.inspect' || request.operation === 'browser.task.export' || request.operation === 'browser.task.import' || request.operation === 'browser.task.import-inspect' || request.operation === 'browser.task.edit' || request.operation === 'browser.task.publish' || request.operation === 'browser.task.source' || request.operation === 'browser.task.draft' || request.operation === 'browser.task.create' || request.operation === 'browser.task.create-inspect') return await controlBrowserTask(request)
@@ -2546,9 +2555,7 @@ export async function registerIpc(args: {
     return await browsers.getStepEvidence(operationId, sequence)
   })
   handleWithEvent('browser:readStepResult', async (event, operationId: string, sequence: number, options?: BrowserResultReadOptions) => {
-    const operation = await browserOperationJournal.get(operationId)
-    if (operation && externalBrowsers.has(operation.browserId)) return await externalBrowsers.readStepResult(operationId, sequence, options)
-    return await browsers.readStepResult(operationId, sequence, options)
+    return await readRetainedStepResult(operationId, sequence, options)
   })
   // 取消不过 `agentAutomation` 闸，而 runScript 过。这不是漏了：那个闸挡的是「让 Agent 去驱动页面」，
   // 而这条是**停下**驱动。开关关掉之后仍然能停掉一个正在跑的操作，否则用户一旦关掉总开关就再也

@@ -62,7 +62,7 @@ export function BrowserStructuredFields({ receipt, readResult }: {
     </p> : null}
     <dl className="browser-structured-fields__values">
       {receipt.fields.map(field => <div key={field.key} data-field-status={field.status}>
-        <dt>{field.key}</dt><dd>{fieldValue(field, receipt.warning)}</dd>
+        <dt>{field.key}</dt><dd>{fieldValue(field, receipt.warning, Boolean(reference))}</dd>
       </div>)}
     </dl>
     <details><summary>Field sources</summary><dl className="browser-structured-fields__sources">
@@ -84,8 +84,8 @@ export function BrowserStructuredFields({ receipt, readResult }: {
   </div>
 }
 
-function fieldValue(field: BrowserStructuredFieldSummary, warning: string | undefined) {
-  if (field.status === 'observed') return field.inline ? <code>{JSON.stringify(field.value)}</code> : <FieldPreview field={field} />
+function fieldValue(field: BrowserStructuredFieldSummary, warning: string | undefined, retained: boolean) {
+  if (field.status === 'observed') return field.inline ? <code>{JSON.stringify(field.value)}</code> : field.preview !== undefined ? <FieldPreview field={field} /> : <span className="browser-structured-fields__state">{retained ? 'Saved in recorded JSON' : 'Value was not saved'}</span>
   if (field.status === 'type-error') return <>
     <span className="browser-structured-fields__state">Type mismatch</span>
     {field.actual !== undefined ? <code>{JSON.stringify(field.actual)}</code> : field.preview !== undefined ? <FieldPreview field={field} /> : null}

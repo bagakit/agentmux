@@ -1,3 +1,4 @@
+import { readBrowserOperationResult } from '@agentmux/browser/browser-operation-result'
 import { parseFocusTaskReference, type AgentMuxFocusTaskReference } from '@agentmux/core/focus-control'
 import { focusTaskHandoffNote } from '@agentmux/core/focus-task-guidance'
 import { agentInputGuidance } from '@agentmux/core/agent-input-submit'
@@ -8361,6 +8362,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     }
     if (request.operation === 'browser.operation') {
+      if (request.resultRead) return { operation: request.operation, ...await readBrowserOperationResult(request.operationId, request.resultRead, api.browser) }
       return {
         operation: request.operation,
         runOperation: await api.browser.getOperation(request.operationId)

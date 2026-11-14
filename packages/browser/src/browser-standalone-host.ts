@@ -1,3 +1,4 @@
+import { readBrowserOperationResult } from './browser-operation-result.js'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { mkdir, open, readFile, stat, type FileHandle } from 'node:fs/promises'
@@ -315,7 +316,12 @@ export class StandaloneBrowserHost {
       case 'browser.run': if (!this.browser && this.engine) await this.reobserveOriginalEngine(); return { operation: request.operation, ...await this.programs.runScript(request.browserId, request.code, undefined, request.operationId) }
       case 'browser.stop': return { operation: request.operation, runOperation: await this.programs.stopOperationById(request.operationId) ?? await this.journal.get(request.operationId) }
       case 'browser.history': return { operation: request.operation, operations: (await this.journal.list()).filter(op => !request.browserId || op.browserId === request.browserId) }
-      case 'browser.operation': return { operation: request.operation, runOperation: await this.journal.get(request.operationId) }
+      case 'browser.operation': return request.resultRead
+        ? { operation: request.operation, ...await readBrowserOperationResult(request.operationId, request.resultRead, {
+          getOperation: id => this.journal.get(id),
+          readStepResult: (id, sequence, options) => this.programs.readStepResult(id, sequence, options)
+        }) }
+        : { operation: request.operation, runOperation: await this.journal.get(request.operationId) }
       default: throw Object.assign(new Error('This operation has no standalone Browser host capability. Existing Browser and Agent capabilities remain available.'), { code: 'BROWSER_HOST_CAPABILITY_UNAVAILABLE' })
     }
   }

@@ -44,18 +44,19 @@ export class BrowserProgramOwner {
   async readStepResult(operationId: string, sequence: number, options?: BrowserResultReadOptions): Promise<BrowserResultArtifactChunk> {
     const operation = await this.stores.journal.get(operationId)
     if (!operation) throw new Error('This operation has no retained structured result.')
-    const binding = this.bridge.require(operation.browserId)
     const step = operation.steps.find(item => item.sequence === sequence)
     if (step?.method !== 'extractStructured') throw new Error('This step has no retained structured result.')
-    const reference = step.evidence?.find(item => item.kind === 'structured-output')
-    if (!reference || reference.operationId !== operationId || reference.sequence !== sequence || reference.browserId !== binding.id) throw new Error('The recorded structured result is unavailable.')
+    const references = step.evidence?.filter(item => item.kind === 'structured-output') ?? []
+    const reference = references[0]
+    if (references.length !== 1 || !reference || reference.operationId !== operationId || reference.sequence !== sequence || reference.browserId !== operation.browserId) throw new Error('The recorded structured result is unavailable.')
     const item = await this.stores.evidence.read(reference)
     if (item.content.kind !== 'structured-output') throw new Error('The recorded result is not a structured extraction.')
     const { source, artifact, artifactStatus } = item.content.receipt
-    if (artifactStatus !== 'available' || !artifact || source.operationId !== operationId || source.browserId !== binding.id ||
-      source.workspaceId !== binding.workspaceId || source.navigationId !== reference.navigationId || artifact.operationId !== source.operationId ||
+    if (artifactStatus !== 'available' || !artifact || source.operationId !== operationId || source.browserId !== operation.browserId ||
+      !source.workspaceId || source.navigationId !== reference.navigationId || artifact.operationId !== source.operationId ||
       artifact.browserId !== source.browserId || artifact.workspaceId !== source.workspaceId || artifact.navigationId !== source.navigationId) throw new Error('The result does not belong to this recorded extraction.')
-    return await this.stores.results.read(artifact, { workspaceId: binding.workspaceId, browserId: binding.id }, options)
+    // The original host-generated, journal-linked source remains authoritative without a live connection.
+    return await this.stores.results.read(artifact, { workspaceId: source.workspaceId, browserId: source.browserId }, options)
   }
   private async navigate(binding: BrowserProgramTarget, session: BrowserProgramSession, url: string, signal: AbortSignal): Promise<void> {
     let expected: string | undefined

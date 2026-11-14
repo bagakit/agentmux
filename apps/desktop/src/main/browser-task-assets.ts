@@ -26,6 +26,7 @@ import type {
 } from '../shared/browser-task-assets.js'
 import { compileBrowserSteps } from './browser-replay-compiler.js'
 import { compileBrowserTaskCheck } from './browser-task-check.js'
+import { parseBrowserStructuredOutputRequest } from '@agentmux/browser/browser-structured-output'
 import { parseBrowserOutcomeCriteriaRequest } from '@agentmux/browser/model/browser-outcome-criteria'
 import { browserTaskNextIndex, browserTaskSegment, browserTaskReachedCheckpoints, validateBrowserTaskPath, BROWSER_TASK_MAX_EXECUTED_MILLIS, BROWSER_TASK_MAX_OPERATIONS, BROWSER_TASK_MAX_RETRIES, BROWSER_TASK_WAIT_MAX_MILLIS } from '../shared/browser-task-path.js'
 import { compileBrowserTaskBranchObservation, evaluateBrowserTaskBranch } from './browser-task-branch.js'
@@ -41,7 +42,7 @@ function parallelResultStatus(counts: BrowserTaskParallelCounts): BrowserTaskAss
 }
 const MAX_STEPS = 128
 const MAX_PARAMETERS = 32
-const STEP_KINDS: readonly BrowserTaskStep['kind'][] = ['click', 'fill', 'upload', 'navigate', 'checkpoint', 'branch', 'wait', 'assert', 'press', 'hover', 'scroll', 'drag', 'tap', 'longPress', 'swipe', 'pinch', 'subflow']
+const STEP_KINDS: readonly BrowserTaskStep['kind'][] = ['extract', 'click', 'fill', 'upload', 'navigate', 'checkpoint', 'branch', 'wait', 'assert', 'press', 'hover', 'scroll', 'drag', 'tap', 'longPress', 'swipe', 'pinch', 'subflow']
 const HUMAN_FACT_UNAVAILABLE = 'Trusted checkpoint confirmation is unavailable for this exact run. Existing Browser and Agent work remains; restore the recorded facts before verifying completion.'
 const HUMAN_FACT_SAVE_FAILED = 'Trusted Continue occurred, but its checkpoint fact could not be saved. Verification is unavailable; Browser and Agent work remains. Restore local storage before verifying again.'
 const copy = <T>(value: T): T => structuredClone(value)
@@ -342,7 +343,7 @@ export class BrowserTaskAssets {
         ...(step.nextStepId === undefined ? {} : { nextStepId: remap(step.nextStepId) }),
         ...(typeof step.onFail === 'object' ? { onFail: { goto: remap(step.onFail.goto)! } } : {}),
         ...(step.branch ? { branch: { ...step.branch, onTrue: remap(step.branch.onTrue), onFalse: remap(step.branch.onFalse) } } : {}) }))
-      const completion = definition.completion && { criteria: definition.completion.criteria.map(item => item.kind === 'download-readable'
+      const completion = definition.completion && { criteria: definition.completion.criteria.map(item => item.kind !== 'human-checkpoint'
         ? { ...item, stepId: remap(item.stepId)! } : { ...item, checkpointId: remap(item.checkpointId)! }) }
       const at = this.now(), asset: BrowserTaskAsset = { id: request.assetId, browserId: request.browserId, revision: 1,
         importedFrom: copy(request.bundle.source), creation: binding, draft: content({ ...definition, steps, ...(completion ? { completion } : {}) }), versions: [], createdAt: at, updatedAt: at }
@@ -1377,10 +1378,14 @@ function afterStepFailure(step: BrowserTaskStep, attempts: number, report: Brows
 
 /** Page steps that send exactly one existing Browser page function; the replay compiler checks it against the real page API. */
 const PAGE_STEP_METHOD = { click: 'click', fill: 'fillInput', upload: 'uploadFiles', navigate: 'gotoUrl', press: 'pressKey', hover: 'hover', scroll: 'scroll', drag: 'drag', tap: 'tap', longPress: 'longPress', swipe: 'swipe', pinch: 'pinch' } as const satisfies
-  Record<Exclude<BrowserTaskStep['kind'], 'checkpoint' | 'branch' | 'wait' | 'assert' | 'subflow'>, string>
+  Record<Exclude<BrowserTaskStep['kind'], 'checkpoint' | 'branch' | 'wait' | 'assert' | 'subflow' | 'extract'>, string>
 
 function compileAssetStep(step: BrowserTaskStep, parameters: Record<string, string>, downloadPath?: string): string {
   if (!step.reviewed) throw new Error('Review the demonstrated step before executing it.')
+  if (step.kind === 'extract') {
+    if (!step.extraction || !step.url) throw new Error('A reviewed extraction needs its saved schema and page identity.')
+    return `await extractStructured(${JSON.stringify(step.extraction)}); return { taskStepId: ${JSON.stringify(step.id)} }`
+  }
   // Wait and assert only read the page; they need no element handle of their own.
   if (step.kind === 'wait' || step.kind === 'assert') return compileBrowserTaskCheck(step)
   if (step.kind === 'checkpoint' || step.kind === 'branch' || step.kind === 'subflow') throw new Error('Checkpoints, conditions and subflows keep their own continuation; they are not page calls.')
@@ -1501,7 +1506,7 @@ function content(value: unknown): BrowserTaskContent {
   })
   if (new Set(parameters.map(item => item.key)).size !== parameters.length) throw new Error('Duplicate task parameter')
   const steps: BrowserTaskStep[] = raw.steps.map(step => {
-    draftFields(step, ['id', 'kind', 'url', 'target', 'destination', 'durationMs', 'scale', 'parameterKey', 'parameterKeys', 'dialog', 'subflow', 'label', 'branch', 'wait', 'timeoutMs', 'assert', 'key', 'onFail', 'retry', 'nextStepId', 'reviewed', 'warning'])
+    draftFields(step, ['id', 'kind', 'url', 'target', 'destination', 'durationMs', 'scale', 'parameterKey', 'parameterKeys', 'dialog', 'subflow', 'extraction', 'label', 'branch', 'wait', 'timeoutMs', 'assert', 'key', 'onFail', 'retry', 'nextStepId', 'reviewed', 'warning'])
     if (!step || !STEP_KINDS.includes(step.kind)) throw new Error('Invalid task step')
     if (typeof step.url !== 'string' || typeof step.reviewed !== 'boolean' || (step.label !== undefined && typeof step.label !== 'string') || (step.warning !== undefined && typeof step.warning !== 'string')) throw new Error('Invalid task step field')
     const url = safeUrl(step.url)
@@ -1513,6 +1518,9 @@ function content(value: unknown): BrowserTaskContent {
       if (step.dialog.type === 'beforeunload' && step.dialog.action === 'accept') throw new Error('Only the person can approve leaving a page with unsaved input.')
       if (step.dialog.promptParameterKey !== undefined && (step.dialog.type !== 'prompt' || step.dialog.action !== 'accept')) throw new Error('Only an accepted prompt takes a fresh answer parameter.')
     }
+    if ((step.kind === 'extract') !== (step.extraction !== undefined)) throw new Error('An extraction schema belongs only to its extraction step.')
+    if (step.kind === 'extract' && (step.target || step.destination || step.parameterKey || step.parameterKeys || step.dialog || step.subflow)) throw new Error('An extraction declares only its reviewed page and field schema.')
+    if (step.extraction) draftFields(step.extraction, ['within', 'fields'])
     if (step.destination && step.kind !== 'drag' && step.kind !== 'swipe') throw new Error('Only drag and swipe steps have a destination.')
     if (step.durationMs !== undefined && (step.kind !== 'longPress' || !Number.isFinite(step.durationMs) || step.durationMs <= 0)) throw new Error('Only long press steps declare a positive finite contact duration.')
     if (step.scale !== undefined && (step.kind !== 'pinch' || !Number.isFinite(step.scale) || step.scale <= 0)) throw new Error('Only pinch steps declare a positive finite scale.')
@@ -1522,6 +1530,7 @@ function content(value: unknown): BrowserTaskContent {
       ...(step.scale !== undefined ? { scale: step.scale } : {}),
       ...(step.parameterKeys ? { parameterKeys: step.parameterKeys.map(parameterKey) } : {}),
       ...(step.dialog ? { dialog: { type: step.dialog.type, action: step.dialog.action, ...(step.dialog.promptParameterKey !== undefined ? { promptParameterKey: parameterKey(step.dialog.promptParameterKey) } : {}) } } : {}),
+      ...(step.extraction !== undefined ? { extraction: parseBrowserStructuredOutputRequest(step.extraction) } : {}),
       ...(step.subflow !== undefined ? { subflow: subflowCall(step.subflow) } : {}),
       ...(step.parameterKey ? { parameterKey: parameterKey(step.parameterKey) } : {}), ...(step.label ? { label: text(step.label) } : {}),
       ...(step.branch !== undefined ? { branch: branch(step.branch) } : {}),
@@ -1551,24 +1560,33 @@ function content(value: unknown): BrowserTaskContent {
   if (completion !== undefined) {
     if (!completion || typeof completion !== 'object' || Object.keys(completion).some(key => key !== 'criteria') || !Array.isArray(completion.criteria)) throw new Error('Invalid completion declaration')
     const criteria = completion.criteria
-    for (const item of criteria) {
-      if (item?.kind === 'download-readable' && Object.keys(item).some(key => !['kind', 'stepId', 'path'].includes(key))) throw new Error('Unknown download completion field')
-    }
-    parseBrowserOutcomeCriteriaRequest({ criteria: criteria.map(item => item.kind === 'download-readable'
-      ? { kind: item.kind, path: item.path } : item) })
+    for (const item of criteria) draftFields(item, item.kind === 'field-equals'
+      ? ['kind', 'stepId', 'key', 'expected'] : item.kind === 'download-readable'
+        ? ['kind', 'stepId', 'path'] : ['kind', 'checkpointId'])
+    parseBrowserOutcomeCriteriaRequest({ criteria: criteria.map(item => item.kind === 'field-equals'
+      ? { kind: item.kind, key: item.key, expected: item.expected } : item.kind === 'download-readable'
+        ? { kind: item.kind, path: item.path } : item) })
     const downloads = criteria.filter(item => item.kind === 'download-readable')
-    if (downloads.length > 1) throw new Error('Declare one download producer per version; checkpoints may accompany it.')
+    if (downloads.length > 1) throw new Error('Declare one download producer per version; field conditions and checkpoints may accompany it.')
     const producer = downloads[0]?.stepId ?? steps.find(isPageStep)?.id
     const producerIndex = steps.findIndex(step => step.id === producer)
     if (producerIndex < 0 || !isPageStep(steps[producerIndex]!)) throw new Error('Completion needs a real page producer before its checkpoint.')
     for (const item of criteria) {
-      if (item.kind === 'download-readable' && (steps[producerIndex]?.dialog !== undefined || steps[producerIndex]?.kind !== 'click' || !item.path.trim() || item.path.length > 512)) throw new Error('Download completion needs a reviewed click and a Workspace path.')
+      const step = item.kind === 'human-checkpoint' ? undefined : steps.find(step => step.id === item.stepId)
+      if (item.kind === 'field-equals') {
+        const field = step?.extraction?.fields.find(field => field.key === item.key)
+        if (step?.kind !== 'extract' || !field || field.type !== typeof item.expected) throw new Error('A field condition needs its exact extraction step, key and declared type.')
+      }
+      if (item.kind === 'download-readable' && (step?.dialog !== undefined || step?.kind !== 'click' || !item.path.trim() || item.path.length > 512)) throw new Error('Download completion needs a reviewed click and a Workspace path.')
       if (item.kind === 'human-checkpoint' && !steps.some((step, index) => step.kind === 'checkpoint' && step.id === item.checkpointId && index > producerIndex)) throw new Error('Declare the checkpoint after its real producer.')
     }
-    if (new Set(criteria.map(item => item.kind === 'download-readable' ? item.stepId : item.checkpointId)).size !== criteria.length) throw new Error('Duplicate completion condition')
-    completion = { criteria: criteria.map(item => item.kind === 'download-readable'
-      ? { kind: item.kind, stepId: identity(item.stepId), path: item.path }
-      : { kind: item.kind, checkpointId: identity(item.checkpointId) }) }
+    const keys = criteria.map(item => item.kind === 'field-equals' ? JSON.stringify([item.kind, item.stepId, item.key])
+      : item.kind === 'download-readable' ? JSON.stringify([item.kind, item.stepId]) : JSON.stringify([item.kind, item.checkpointId]))
+    if (new Set(keys).size !== keys.length) throw new Error('Duplicate completion condition')
+    completion = { criteria: criteria.map(item => item.kind === 'field-equals'
+      ? { kind: item.kind, stepId: identity(item.stepId), key: item.key, expected: item.expected }
+      : item.kind === 'download-readable' ? { kind: item.kind, stepId: identity(item.stepId), path: item.path }
+        : { kind: item.kind, checkpointId: identity(item.checkpointId) }) }
   }
   return { name: text(raw.name), url: safeUrl(raw.url), steps, parameters, ...(completion ? { completion: copy(completion) } : {}) }
 }

@@ -1,3 +1,5 @@
+import { BrowserTaskExtractEditor } from './BrowserTaskExtractEditor'
+import type { BrowserTaskRunCompletion } from '@agentmux/core/control'
 import { browserTaskStepParameterKeys, renameBrowserTaskParameter } from '../../../shared/browser-task-assets'
 import { BrowserTaskFileDialogEditor, newBrowserTaskParameter } from './BrowserTaskFileDialogEditor'
 import { mintObjectId } from '@agentmux/core/object-id'
@@ -50,6 +52,8 @@ type Props = {
   onReviewRequestConsumed?: () => void
   warning?: string
   busy?: boolean
+  completion?: BrowserTaskRunCompletion | null
+  onShowResult?: (operationId: string, trigger: HTMLButtonElement) => Promise<void>
   onImport: (event: ActionEvent) => void
   onSaveDraft: (draft: BrowserTaskContent, event: ActionEvent) => Promise<void>
   onSaveVersion: (draft: BrowserTaskContent, event: ActionEvent) => Promise<void>
@@ -60,7 +64,7 @@ type Props = {
 }
 
 /** An editable Client asset inside existing Browser details. Values never enter its draft or versions. */
-export function BrowserTaskAssetEditor({ dialogTypes, asset, assets = [], recording, suggestions, run, renderReliability, renderParallel, batch, batchRuns = [], onRunBatch, onStopBatch, reviewRequest, onReviewRequestConsumed, warning, busy = false, onImport, onSaveDraft, onSaveVersion, onLocateStep, onRun, onStop, onVerify }: Props) {
+export function BrowserTaskAssetEditor({ dialogTypes, asset, assets = [], recording, suggestions, run, renderReliability, renderParallel, batch, batchRuns = [], onRunBatch, onStopBatch, reviewRequest, onReviewRequestConsumed, warning, busy = false, completion: recordedCompletion, onShowResult, onImport, onSaveDraft, onSaveVersion, onLocateStep, onRun, onStop, onVerify }: Props) {
   const [draft, setDraft] = useState<BrowserTaskContent | null>(asset?.draft ?? null)
   const [versionNumber, setVersionNumber] = useState(asset?.versions.at(-1)?.version ?? 0)
   const [values, setValues] = useState<Record<string, string>>({})
@@ -122,6 +126,19 @@ export function BrowserTaskAssetEditor({ dialogTypes, asset, assets = [], record
     void previous
     change({ ...content, ...(criteria.length ? { completion: { criteria } } : {}) })
   }
+  function conditionLabel(criterion: BrowserTaskRunCompletion['conditions'][number]['criterion']): string {
+    if (criterion.kind === 'download-readable') return 'Download'
+    if (criterion.kind === 'human-checkpoint') return 'Human checkpoint'
+    const { stepId, key } = criterion
+    const index = runningVersion?.steps.findIndex(step => step.id === stepId) ?? -1
+    return `${runningVersion?.steps[index]?.label || `Step ${index + 1}`} · ${key}`
+  }
+  function removeStep(stepId: string): void {
+    if (!draft) return
+    const { completion: previous, ...content } = draft
+    const criteria = previous?.criteria.filter(item => item.kind === 'human-checkpoint' ? item.checkpointId !== stepId : item.stepId !== stepId)
+    change({ ...content, steps: draft.steps.filter(item => item.id !== stepId), ...(criteria?.length ? { completion: { criteria } } : {}) })
+  }
   async function save(event: ActionEvent, asVersion: boolean): Promise<void> {
     if (!draft) return
     try { await (asVersion ? onSaveVersion : onSaveDraft)(draft, event); setError(undefined) }
@@ -157,7 +174,9 @@ export function BrowserTaskAssetEditor({ dialogTypes, asset, assets = [], record
       {actualRun.completionWarning ? <p>{actualRun.completionWarning}</p> : null}
       <BrowserTaskSubflowProgress run={actualRun} assets={availableAssets} runs={batchRuns} />
       {actualRun.branchDecisions?.map(fact => <small key={fact.stepId} data-task-condition-result={fact.result}>{runningVersion?.steps.find(step => step.id === fact.stepId)?.label || 'Condition'} · {fact.result}{fact.result !== 'unknown' ? fact.nextStepId ? ` → ${runningVersion?.steps.find(step => step.id === fact.nextStepId)?.label || fact.nextStepId}` : ' → finished path' : ' · no path chosen'}</small>)}
-      {runningVersion?.completion && onVerify ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy}
+      {recordedCompletion?.runId === actualRun.id ? <div data-task-recorded-outcome={recordedCompletion.status}><strong>Recorded task outcome · {recordedCompletion.status}</strong><small>Checks recorded for this version. This does not describe today’s page.</small><ul>{recordedCompletion.conditions.map((item, index) => <li key={index}>{conditionLabel(item.criterion)} · {item.status}<small>{item.reason}</small></li>)}</ul></div> : null}
+      {onShowResult ? actualRun.stepExecutions?.filter(item => runningVersion?.steps.find(step => step.id === item.stepId)?.kind === 'extract').map(item => <button key={item.operationId} type="button" className="browser-rsi-button browser-rsi-button--quiet" data-task-result-operation={item.operationId} onClick={event => { void onShowResult(item.operationId, event.currentTarget).catch(() => setError('The original recorded result is unavailable. The page and task remain.')) }}>View recorded fields · {runningVersion?.steps.find(step => step.id === item.stepId)?.label || `Extraction step ${(runningVersion?.steps.findIndex(step => step.id === item.stepId) ?? -1) + 1}`}</button>) : null}
+      {runningVersion?.completion && !runningVersion.completion.criteria.some(item => item.kind === 'field-equals') && onVerify ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy}
         onClick={event => { void onVerify(actualRun.id, event).then(setEvaluation).catch(() => setError('Verification is unavailable. Existing Browser work remains; inspect its recorded facts.')) }}>Verify task evidence</button> : null}
       {evaluation && evaluation.assetRun?.runId === actualRun.id ? <div data-task-completion={evaluation.status}>
         <strong>{evaluation.status === 'passed' ? 'Satisfied' : evaluation.status === 'not-met' ? 'Not satisfied' : 'Verification unavailable'}</strong>
@@ -191,10 +210,15 @@ export function BrowserTaskAssetEditor({ dialogTypes, asset, assets = [], record
           {step.kind === 'branch' ? <BrowserTaskBranchEditor step={step} laterSteps={draft.steps.slice(index + 1)} index={index} onChange={next => change({ ...draft, steps: draft.steps.map(item => item.id === step.id ? next : item) })} /> : null}
           {draft.steps.some(item => item.kind === 'branch') && step.kind !== 'checkpoint' && step.kind !== 'branch' ? <label className="browser-task-asset__field"><span>Then</span><select aria-label={`Task step ${index + 1} next path`} value={step.nextStepId === null ? 'finish' : step.nextStepId ?? 'ordered'} onChange={event => { const { nextStepId: previous, ...original } = step; void previous; change({ ...draft, steps: draft.steps.map(item => item.id === step.id ? { ...original, ...(event.target.value === 'ordered' ? {} : { nextStepId: event.target.value === 'finish' ? null : event.target.value }) } : item) }) }}><option value="ordered">Next ordered step</option><option value="finish">Finish this path</option>{draft.steps.slice(index + 1).map((item, offset) => <option key={item.id} value={item.id}>{index + offset + 2} · {item.label || item.target?.name || item.kind}</option>)}</select></label> : null}
           {step.kind !== 'checkpoint' && step.kind !== 'branch' && step.kind !== 'subflow' ? <BrowserTaskStepFailureEditor step={step} laterSteps={draft.steps.slice(index + 1)} index={index} onChange={next => change({ ...draft, steps: draft.steps.map(item => item.id === step.id ? next : item) })} /> : null}
-          {step.kind !== 'checkpoint' ? <label className="browser-task-asset__check"><input type="checkbox" aria-label={`Review task step ${index + 1}`} checked={step.reviewed} disabled={step.kind === 'subflow' ? !browserTaskSubflowVersion(step, availableAssets) : step.kind === 'branch' ? !step.branch || (step.branch.condition.kind === 'page-url-is' ? !step.branch.condition.url : !step.branch.condition.target.role) : step.kind !== 'navigate' && step.kind !== 'wait' && step.kind !== 'assert' && (!step.target || !step.target.role || step.target.count !== 1 || (step.kind === 'drag' || step.kind === 'swipe') && (!step.destination || !step.destination.role || step.destination.count !== 1))} onChange={event => change({ ...draft, steps: draft.steps.map(item => item.id === step.id ? { ...item, reviewed: event.target.checked } : item) })} />Reviewed</label> : <><small>Hands control to the person; never approves itself</small><TextInput aria-label={`Checkpoint ${index + 1} label`} value={step.label ?? ''} maxLength={240} onChange={event => change({ ...draft, steps: draft.steps.map(item => item.id === step.id ? { ...item, label: event.target.value } : item) })} /></>}
+          {step.kind === 'extract' ? <BrowserTaskExtractEditor step={step} criteria={draft.completion?.criteria ?? []} busy={busy}
+            onChange={(next, criteria) => { const { completion: previous, ...content } = draft; change({ ...content, steps: draft.steps.map(item => item.id === step.id ? next : item), ...(criteria === undefined ? previous ? { completion: previous } : {} : criteria.length ? { completion: { criteria } } : {}) }) }}
+            onCriteria={completion} /> : null}
+          {step.kind !== 'checkpoint' ? <label className="browser-task-asset__check"><input type="checkbox" aria-label={`Review task step ${index + 1}`} checked={step.reviewed} disabled={step.kind === 'subflow' ? !browserTaskSubflowVersion(step, availableAssets) : step.kind === 'branch' ? !step.branch || (step.branch.condition.kind === 'page-url-is' ? !step.branch.condition.url : !step.branch.condition.target.role) : step.kind !== 'navigate' && step.kind !== 'wait' && step.kind !== 'assert' && step.kind !== 'extract' && (!step.target || !step.target.role || step.target.count !== 1 || (step.kind === 'drag' || step.kind === 'swipe') && (!step.destination || !step.destination.role || step.destination.count !== 1))} onChange={event => change({ ...draft, steps: draft.steps.map(item => item.id === step.id ? { ...item, reviewed: event.target.checked } : item) })} />Reviewed</label> : <><small>Hands control to the person; never approves itself</small><TextInput aria-label={`Checkpoint ${index + 1} label`} value={step.label ?? ''} maxLength={240} onChange={event => change({ ...draft, steps: draft.steps.map(item => item.id === step.id ? { ...item, label: event.target.value } : item) })} /></>}
         </span>
-        <span className="browser-task-asset__step-actions">{step.kind !== 'checkpoint' && step.kind !== 'subflow' && (step.kind !== 'branch' || step.branch?.condition.kind === 'element-present') ? <button type="button" className="browser-rsi-icon-button" aria-label={`Locate task step ${index + 1}`} title={`Locate task step ${index + 1}`} onClick={event => onLocateStep(step.id, event)} disabled={busy}><ThemeActionLocateIcon size={11} aria-hidden="true" /></button> : null}<button type="button" className="browser-rsi-icon-button" aria-label={`Insert checkpoint after task step ${index + 1}`} title={`Insert checkpoint after task step ${index + 1}`} disabled={busy || draft.steps.length >= 128} onClick={() => change({ ...draft, steps: [...draft.steps.slice(0, index + 1), { id: mintObjectId(), kind: 'checkpoint', url: step.url, label: 'Human checkpoint', reviewed: true }, ...draft.steps.slice(index + 1)] })}><ThemeActionCreateCheckpointIcon size={11} aria-hidden="true" /></button><button type="button" className="browser-rsi-icon-button" aria-label={`Delete task step ${index + 1}`} title={`Delete task step ${index + 1}`} disabled={busy} onClick={() => change({ ...draft, steps: draft.steps.filter(item => item.id !== step.id) })}><ThemeActionRemoveIcon size={11} aria-hidden="true" /></button></span>
+        <span className="browser-task-asset__step-actions">{step.kind !== 'checkpoint' && step.kind !== 'subflow' && step.kind !== 'extract' && (step.kind !== 'branch' || step.branch?.condition.kind === 'element-present') ? <button type="button" className="browser-rsi-icon-button" aria-label={`Locate task step ${index + 1}`} title={`Locate task step ${index + 1}`} onClick={event => onLocateStep(step.id, event)} disabled={busy}><ThemeActionLocateIcon size={11} aria-hidden="true" /></button> : null}<button type="button" className="browser-rsi-icon-button" aria-label={`Insert checkpoint after task step ${index + 1}`} title={`Insert checkpoint after task step ${index + 1}`} disabled={busy || draft.steps.length >= 128} onClick={() => change({ ...draft, steps: [...draft.steps.slice(0, index + 1), { id: mintObjectId(), kind: 'checkpoint', url: step.url, label: 'Human checkpoint', reviewed: true }, ...draft.steps.slice(index + 1)] })}><ThemeActionCreateCheckpointIcon size={11} aria-hidden="true" /></button><button type="button" className="browser-rsi-icon-button" aria-label={`Delete task step ${index + 1}`} title={`Delete task step ${index + 1}`} disabled={busy} onClick={() => removeStep(step.id)}><ThemeActionRemoveIcon size={11} aria-hidden="true" /></button></span>
       </li>) : <li className="browser-rsi-timeline__empty">No steps · deleted steps stay deleted</li>}</ol>
+      <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy || draft.steps.length >= 128} onClick={() => change({ ...draft, steps: [...draft.steps, { id: mintObjectId(), kind: 'extract', url: draft.url, reviewed: false,
+        extraction: { fields: [{ key: 'result', type: 'string', source: { selector: '', read: 'text' } }] } }] })}>Add extraction</button>
       <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy || draft.steps.length >= 128} onClick={() => {
         const parameter = newBrowserTaskParameter(draft.parameters, 'file', 'Workspace file')
         change({ ...draft, parameters: [...draft.parameters, parameter], steps: [...draft.steps, { id: mintObjectId(), kind: 'upload', url: draft.url, parameterKeys: [parameter.key], reviewed: false }] })
@@ -210,7 +234,7 @@ export function BrowserTaskAssetEditor({ dialogTypes, asset, assets = [], record
       <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy || draft.steps.length >= 128 || draft.steps.filter(step => step.kind === 'branch').length >= 16} onClick={() => change({ ...draft, steps: [{ id: mintObjectId(), kind: 'branch', url: draft.url, reviewed: false, branch: { condition: { kind: 'page-url-is', url: draft.url }, onTrue: draft.steps[0]?.id ?? null, onFalse: null } }, ...draft.steps] })}><ThemeActionCreateConditionIcon size={11} aria-hidden="true" />Add condition</button>
       <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy || draft.steps.length >= 128} onClick={() => change({ ...draft, steps: [...draft.steps, { id: mintObjectId(), kind: 'checkpoint', url: draft.url, label: 'Human checkpoint', reviewed: true }] })}><ThemeActionCreateCheckpointIcon size={11} aria-hidden="true" />Add checkpoint</button>
       <details className="browser-task-asset__parameters"><summary>Completion conditions · {draft.completion?.criteria.length ?? 0}</summary>
-        <small>Saved with the version before it runs. A file uses its declared click; confirmation uses the existing Continue action.</small>
+        <small>Saved with the version before it runs. Fields use their declared extraction; a file uses its declared click; confirmation uses the existing Continue action.</small>
         {draft.steps.filter(step => step.kind === 'click').map(step => <label key={step.id} className="browser-task-asset__field"><span>Download · {step.target?.name ?? 'Locate target'}</span>
           <TextInput aria-label={`Download path for ${step.id}`} placeholder="Workspace path" maxLength={512}
             value={draft.completion?.criteria.filter(item => item.kind === 'download-readable').find(item => item.stepId === step.id)?.path ?? ''}
