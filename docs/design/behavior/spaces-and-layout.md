@@ -53,6 +53,8 @@ flowchart LR
 
 各端的挂载选择、窗口布局、DOM 焦点和私有未发送草稿沿各自原 owner 保留，共享业务状态不覆盖它们。Core 持有的稳定空间实体、业务拓扑与绑定继续受原合同约束，不因跨端查看转成 Renderer 私有事实；窗口的展示分组、分割比例和选择由各端自己的持久呈现 owner 保存，不随源 Space 的业务更新覆盖另一窗口。新工作由明确 Space authority 协调其业务放置及准确 Agent 端；已存在的分端绑定仍沿原 Coordinator 的 route／Runtime／冻结意图，不因项目位于另一设备就搬库、重算绑定或更换原恢复入口。
 
+业务 Space 与执行 Coordinator 可以分属原设备。只有 A→B 连接时，A Agent 使用 B 项目仍由 A 原 Coordinator 持有创建与执行绑定；B 的原空间 writer 只保存准确外部 Coordinator／Agent 引用和本机业务位置，不伪造 B→A 路线、复制 Session 或新增执行 journal。B 关联操作与 A 原创建操作分别保留；旧创建定位不改义，业务关联回执不证明 A 的 Run、输入或权限。没有 A 观察载体的客户端保留成员引用并明确不可达；有独立原 A 资格的客户端才沿 A SDK 核对原 Runtime、Session、创建与资源绑定后继续。未知关联只查或明确补同一原关联，不重新创建 Agent。
+
 客户端只订阅已加载、相关的 Space 与 Session，读取同一来源的版本化快照及后续变化；历史、PTY Replay 和资源详情向原 owner 按需获取。隐藏／卸载只释放本客户端相应 UI reader，不断开执行 helper 或其他消费者。网络延迟与缺测保留最后确认事实、原成员和重读入口，不以不可达清空 Space。源 owner 上的写入沿原权限和原子 CAS，冲突保留两边修改；过滤的 Space 快照不是整图写入，不能覆盖无关 Space。工作量随相关状态和实际消费者增长，不因全网所有 Session 放大。
 
 打开、挂载、卸载和导航不迁移项目、Space authority 或 Agent，不复制文件或重启 Run。真正跨机器迁移是另一个显式事务，须保原身份、数据与恢复引用；本节不授权自动迁移或把已有客户端私有状态静默提升为远端权威。

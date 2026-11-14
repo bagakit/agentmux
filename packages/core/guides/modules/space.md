@@ -67,6 +67,27 @@ changing a frozen creation or granting access to a different Core. Source/Agent 
 and transport permissions still apply. An unknown result retains the same operation;
 inspect it before an explicit continuation and never send its first input again.
 
+Before a new shared launch, read the selected Source's actual owner contracts once.
+ordinaryLaunch names the source-zone-background contract: an existing Source-owned Zone,
+background focus, and a new Tab or its original Region. It does not advertise the legacy
+focused creator. This metadata never gates an original request's inspect/continue or a healthy Agent.
+An unavailable/old owner leaves this new shared operation unconfirmed; it does not
+mean that its CLI is missing or its existing Run died.
+
+<!-- amux:generated command:agent.open.describe -->
+
+For a direct target, settings executors discover --host HOST --executor EXECUTOR
+--refresh false reads only that selected Executor without checking an executable. The
+route.executors JSON selector uses the same executorId and original target owner.
+The selected target's Executor inventory may include its Provider's safe launchOptions
+and actual creationContract. Missing declarations stay unconfirmed. Executable availability
+does not establish native routing qualification. For new work, agent open accepts
+--launch-options FILE|- (option/choice IDs), --agentmux-note TEXT and --cols/--rows.
+Core preserves the caller's prompt and note independently from Source business context;
+only its final outbound owner composes platform context. The immutable request and
+adopted-route parent/child bind these exact contributions. After an unknown result retain
+the original operation and full input; changed choices, notes or dimensions need a new intent.
+
 <!-- amux:generated command:space.snapshot -->
 <!-- amux:generated command:space.watch -->
 <!-- amux:generated command:space.apply -->
