@@ -81,7 +81,7 @@ try {
     assert.equal(processReport.exitCode, 0, JSON.stringify(actual.failure))
     assert.equal(processReport.timedOut, false); assert.deepEqual(remaining, []); assert.equal(actual.passed, true)
     assert.ok(Number.isSafeInteger(actual.pid) && actual.pid > 0)
-    assert.ok(actual.cases.length >= (phase === 'first' ? 3 : 1), 'Every private process consumes nonempty business cases')
+    assert.ok(actual.cases.length >= (phase === 'first' ? 4 : 2), 'Every private process consumes nonempty business cases')
     assert.ok(actual.cli.length > 0, 'Both processes consume actual public CLI'); if (phase === 'first') assert.ok(actual.approvals.some(event => event.confirmed === false) && actual.approvals.some(event => event.kind === 'update' && event.confirmed), 'The original host confirmation port receives exact source/permission review')
   }
   assert.notEqual(reports[0].pid, reports[1].pid, 'Actual second process has a distinct PID')

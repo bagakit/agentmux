@@ -65,7 +65,8 @@ async function apply(profileId: string, review: any, success = true) { return cl
 async function main() {
   try {
     host = new BrowserWindow({ show: false, width: 760, height: 640, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } }); await host.loadURL('data:text/html,Private extension workbench')
-    profiles = new BrowserProfileManager(new BrowserProfileStore(join(home, 'profiles.json'))); await profiles.initialize()
+    const store = new BrowserProfileStore(join(home, 'profiles.json'))
+    profiles = new BrowserProfileManager(store); await profiles.initialize()
     const retained = phase === 'second' ? JSON.parse(await readFile(join(home, 'retained.json'), 'utf8')) : null
     const profileId = retained?.profileId ?? profiles.defaultProfileId()
     profiles.extensions.setConfirmationHandler(async request => { receipt.approvals.push({ ...request, actualHumanReviewFixture: true, confirmed: consent }); return consent })
@@ -76,6 +77,14 @@ async function main() {
       assert.equal(profiles.sessions.observedSession?.(profileId), undefined)
       const cold = await cli(['ls', '--profile', profileId]); assert.equal(cold.extensions[0].application.state, 'unknown')
       assert.equal(profiles.sessions.observedSession?.(profileId), undefined)
+      const originalApprovals = receipt.approvals.length
+      const pendingUpdate = await cli(['ls', '--profile', profileId, '--operation-id', retained.unknownReview.reviewId])
+      assert.equal(pendingUpdate.receipt, null); assert.equal(pendingUpdate.pending[0].sha256, retained.unknownReview.sha256); assert.equal(pendingUpdate.pending[0].version, '5.0.0')
+      const blockedUpdate = await apply(profileId, retained.unknownReview, false); assert.equal(blockedUpdate.error.code, 'BROWSER_PROFILE_EXTENSION_UNCONFIRMED')
+      const blockedRemoval = await cli(['remove', '--profile', profileId, '--expected-revision', retained.unknownRemoveRevision, '--extension', retained.extensionId, '--operation-id', 'actual-unknown-remove'], false)
+      assert.equal(blockedRemoval.error.code, 'BROWSER_PROFILE_EXTENSION_UNCONFIRMED')
+      assert.equal(receipt.approvals.length, originalApprovals); assert.equal(profiles.sessions.observedSession?.(profileId), undefined)
+      const pendingProof = { kind: 'second-process-original-pending-intents-no-confirmation-or-native-replay', originalProfileId: profileId, extensionId: retained.extensionId, pendingUpdate: pendingUpdate.pending, updateCode: blockedUpdate.error.code, removalCode: blockedRemoval.error.code, originalNativeSessionNotAcquired: true }
       await browsers.create(originalBrowserId, base, undefined, profileId); browsers.setBounds(originalBrowserId, { x: 0, y: 0, width: 660, height: 500 })
       let facts: any
       for (let index = 0; index < 300; index++) { facts = await contents().executeJavaScript('({...document.documentElement.dataset})'); if (facts.extensionBackground) break; await pause(25) }
@@ -85,7 +94,7 @@ async function main() {
       assert.equal((await contents().session.cookies.get({ name: 'profile-signin' }))[0]?.value, 'private-cookie-preserved')
       assert.equal(await contents().executeJavaScript('localStorage.getItem("profile-note")'), 'original-note-kept')
       assert.equal(profiles.listProfiles().length, retained.profileCount)
-      receipt.cases.push({ kind: 'second-process-approved-original-extension-storage-and-signin', extensionId: retained.extensionId, nativeId: retained.nativeId, facts, sameBrowserId: originalBrowserId, originalProfileId: profileId })
+      receipt.cases.push({ kind: 'second-process-approved-original-extension-storage-and-signin', extensionId: retained.extensionId, nativeId: retained.nativeId, facts, sameBrowserId: originalBrowserId, originalProfileId: profileId }); receipt.cases.push(pendingProof)
     } else {
       const independent = await profiles.createProfile('Independent Profile')
       await browsers.create(originalBrowserId, base, undefined, profileId); browsers.setBounds(originalBrowserId, { x: 0, y: 0, width: 660, height: 500 })
@@ -118,8 +127,33 @@ async function main() {
       const final = await cli(['ls', '--profile', profileId, '--operation-id', 'actual-remove'])
       assert.equal(final.extensions.length, 1); assert.equal(final.extensions[0].id, extensionId); assert.equal(final.receipt.kind, 'remove')
       receipt.cases.push({ kind: 'exact-removal-keeps-other-extension-and-profile', extensionId: temporary.extensionId, remaining: extensionId })
+      const unknownReview = await prepare(profileId, await source('5.0.0'), 'actual-unknown-update', extensionId)
+      const save = store.setExtensions.bind(store), nativeSession = profiles.sessions.nativeSession(profileId)
+      let updateNativeAcknowledged = false, removalNativeAcknowledged = false
+      store.setExtensions = async (...args) => {
+        if (args[3].operationId === unknownReview.reviewId) {
+          const actual = nativeSession.extensions.getExtension(nativeId)
+          assert.equal(actual?.version, '5.0.0'); assert.equal(actual?.id, nativeId); updateNativeAcknowledged = true
+          throw Error('Private before-save failure after actual native update acknowledgement')
+        }
+        if (args[3].operationId === 'actual-unknown-remove') {
+          assert.equal(nativeSession.extensions.getExtension(nativeId), null); removalNativeAcknowledged = true
+          throw Error('Private before-save failure after actual native removal acknowledgement')
+        }
+        return save(...args)
+      }
+      assert.equal((await apply(profileId, unknownReview, false)).error.code, 'BROWSER_PROFILE_EXTENSION_UNCONFIRMED')
+      assert.equal(updateNativeAcknowledged, true); assert.equal(nativeSession.extensions.getExtension(nativeId)?.version, '2.0.0')
+      const unknownRemoveRevision = token(profileId)
+      assert.equal((await cli(['remove', '--profile', profileId, '--expected-revision', unknownRemoveRevision, '--extension', extensionId, '--operation-id', 'actual-unknown-remove'], false)).error.code, 'BROWSER_PROFILE_EXTENSION_UNCONFIRMED')
+      assert.equal(removalNativeAcknowledged, true); assert.equal(nativeSession.extensions.getExtension(nativeId)?.version, '2.0.0')
+      store.setExtensions = save
+      const pending = await cli(['ls', '--profile', profileId])
+      assert.ok(pending.pending.some((intent: any) => intent.operationId === unknownReview.reviewId && intent.sha256 === unknownReview.sha256 && intent.version === '5.0.0'))
+      assert.ok(pending.pending.some((intent: any) => intent.operationId === 'actual-unknown-remove' && intent.nativeId === nativeId))
+      receipt.cases.push({ kind: 'actual-native-update-and-removal-before-save-failures-durable-pending', updateNativeAcknowledged, removalNativeAcknowledged, pending: pending.pending, restoredNativeVersion: '2.0.0' })
       await contents().session.cookies.flushStore(); contents().session.flushStorageData()
-      const saved = { profileId, extensionId, nativeId, sha256: final.extensions[0].sha256, profileCount: profiles.listProfiles().length }
+      const saved = { profileId, extensionId, nativeId, unknownReview, unknownRemoveRevision, sha256: final.extensions[0].sha256, profileCount: profiles.listProfiles().length }
       await writeFile(join(home, 'retained.json'), JSON.stringify(saved)); receipt.retained = saved
     }
     receipt.passed = true

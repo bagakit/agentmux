@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { createHash, generateKeyPairSync, sign } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, writeFile, rm, symlink, readdir } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, writeFile, rm, symlink, readdir, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { zipSync, strToU8 } from 'fflate'
+import { writeFileSync } from 'node:fs'
+const sourceRace = vi.hoisted(() => ({ swap: undefined as undefined | (() => void) }))
+vi.mock('node:fs', async original => { const fs = await original<typeof import('node:fs')>(); return { ...fs, createReadStream: (...args: Parameters<typeof fs.createReadStream>) => { const stream = fs.createReadStream(...args); if (sourceRace.swap) { const swap = sourceRace.swap; sourceRace.swap = undefined; stream.once('end', swap) } return stream } } })
 vi.mock('electron', () => ({ app: { getLocale: () => 'en-US' }, BrowserWindow: class {}, session: { fromPartition: () => { throw Error('No implicit Session') } }, webContents: { getAllWebContents: () => [] } }))
 import { BrowserProfileStore } from '../src/main/browser-profile-store.js'
 import { BrowserProfileManager } from '../src/main/browser-profile-manager.js'
@@ -15,7 +18,7 @@ import { privateRpcCorePort } from '../../../packages/core/test/helpers/private-
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
 import { executeBrowserProfileControl } from '../src/main/browser-profile-control.js'
 const roots: string[] = []
-afterEach(async () => { vi.restoreAllMocks(); await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
+afterEach(async () => { vi.restoreAllMocks(); sourceRace.swap = undefined; await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
 const identity = generateKeyPairSync('rsa', { modulusLength: 2048 }), key = identity.publicKey.export({ type: 'spki', format: 'der' }).toString('base64')
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'amx-profile-extensions-')); roots.push(root)
@@ -70,7 +73,7 @@ describe('Profile extensions share the original configuration and native Session
     expect(saved).toMatchObject({ outcome: 'applied', receipt: { operationId: review.reviewId, extensionId: review.extensionId, kind: 'install' }, application: { state: 'loaded' } })
     expect(f.reviews).toHaveLength(2); expect(f.reviews.at(-1).localSourcePath).toBe(path); expect(f.loadedCalls).toHaveLength(1); expect(f.targets.has(f.other.id)).toBe(false)
     const installed = (await f.manager.extensions.list(f.profile.id)).extensions[0]!
-    expect(installed).toMatchObject({ id: review.extensionId, sha256: review.sha256, source: { label: 'package-1' }, application: { state: 'loaded' } })
+    expect(installed).toMatchObject({ id: review.extensionId, sha256: review.sha256, source: { label: 'Unpacked extension' }, application: { state: 'loaded' } })
     expect(installed).not.toHaveProperty('key'); expect(installed).not.toHaveProperty('reviewId')
     expect(JSON.stringify({ review, installed })).not.toMatch(/package-secret|package-token|homepage-token|package-user/)
     expect(JSON.stringify(installed)).not.toContain(f.root)
@@ -106,6 +109,13 @@ describe('Profile extensions share the original configuration and native Session
     const list = await f.manager.extensions.list(f.profile.id, review.reviewId)
     expect(list.extensions[0]).toMatchObject({ id, version: fault === 'before' ? '1.0.0' : '2.0.0', application: { state: 'loaded' } })
     expect(list.receipt?.operationId ?? null).toBe(fault === 'before' ? null : review.reviewId)
+    expect(list.pending).toHaveLength(fault === 'before' ? 1 : 0)
+    const replacement = new BrowserProfileManager(new BrowserProfileStore(join(f.root, 'profiles.json')), f.manager.sessions, () => f.root); await replacement.initialize()
+    replacement.extensions.setConfirmationHandler(async () => { throw Error('Unknown original operation must not prompt again') })
+    if (fault === 'before') {
+      expect((await replacement.extensions.list(f.profile.id, review.reviewId)).pending[0]).toMatchObject({ operationId: review.reviewId, sha256: review.sha256, version: '2.0.0', previousSha256: list.extensions[0]!.sha256 })
+      await expect(replacement.extensions.apply(f.profile.id, review.expectedRevision, review.reviewId)).rejects.toMatchObject({ code: 'BROWSER_PROFILE_EXTENSION_UNCONFIRMED' })
+    }
     const calls = f.loadedCalls.length
     if (fault === 'after') expect(await f.manager.extensions.apply(f.profile.id, review.expectedRevision, review.reviewId)).toMatchObject({ receipt: { operationId: review.reviewId } })
     else await expect(f.manager.extensions.apply(f.profile.id, review.expectedRevision, review.reviewId)).rejects.toMatchObject({ code: 'BROWSER_PROFILE_EXTENSION_UNCONFIRMED' })
@@ -143,6 +153,10 @@ describe('Profile extensions share the original configuration and native Session
     expect((await f.manager.extensions.list(f.profile.id, 'unknown-removal'))).toMatchObject({ receipt: null, extensions: [{ id: original.id, application: { state: 'loaded' } }] })
     const removals = f.native(f.profile.id).extensions.removeExtension.mock.calls.length
     await expect(f.manager.extensions.remove(f.profile.id, revision, original.id, 'unknown-removal')).rejects.toMatchObject({ code: 'BROWSER_PROFILE_EXTENSION_UNCONFIRMED' })
+    expect(f.native(f.profile.id).extensions.removeExtension.mock.calls).toHaveLength(removals)
+    const replacement = new BrowserProfileManager(new BrowserProfileStore(join(f.root, 'profiles.json')), f.manager.sessions, () => f.root); await replacement.initialize()
+    replacement.extensions.setConfirmationHandler(async () => { throw Error('Unknown original removal must not prompt again') })
+    await expect(replacement.extensions.remove(f.profile.id, revision, original.id, 'unknown-removal')).rejects.toMatchObject({ code: 'BROWSER_PROFILE_EXTENSION_UNCONFIRMED' })
     expect(f.native(f.profile.id).extensions.removeExtension.mock.calls).toHaveLength(removals)
     expect(installed.receipt).toBeTruthy()
   })
@@ -200,6 +214,60 @@ describe('Profile extensions share the original configuration and native Session
     const request = { operation: 'browser.profile.extension.remove', profileId: 'exact-profile', expectedRevision: 'current-revision', extensionId: 'exact-extension', operationId: 'original-review' } as const
     const result = parseBrowserProfileControlResult(request.operation, { ...base, receipt: { ...receipt, extensionId: 'another-extension' } })
     expect(() => assertBrowserProfileControlTarget(request, result)).toThrow()
+  })
+  it.each(['before', 'after'] as const)('does not dispatch native code when the durable intent write fails %s its storage acknowledgement', async fault => {
+    const f = await fixture(), review = await f.prepare(await f.source()), begin = f.store.beginExtensionChange.bind(f.store)
+    vi.spyOn(f.store, 'beginExtensionChange').mockImplementationOnce(async (...args) => { if (fault === 'after') await begin(...args); throw Error('Private intent write acknowledgement lost') })
+    await expect(f.manager.extensions.apply(f.profile.id, review.expectedRevision, review.reviewId)).rejects.toMatchObject({ code: 'BROWSER_PROFILE_EXTENSION_UNCONFIRMED' })
+    expect(f.loadedCalls).toEqual([])
+    const list = await f.manager.extensions.list(f.profile.id, review.reviewId)
+    expect(list.receipt).toBeNull(); expect(list.pending).toHaveLength(fault === 'after' ? 1 : 0)
+    if (fault === 'after') {
+      const replacement = new BrowserProfileManager(new BrowserProfileStore(join(f.root, 'profiles.json')), f.manager.sessions, () => f.root); await replacement.initialize()
+      replacement.extensions.setConfirmationHandler(async () => { throw Error('The original pending request must not prompt again') })
+      await expect(replacement.extensions.apply(f.profile.id, review.expectedRevision, review.reviewId)).rejects.toMatchObject({ code: 'BROWSER_PROFILE_EXTENSION_UNCONFIRMED' })
+      expect(f.loadedCalls).toEqual([])
+    }
+  })
+  it('keeps local source names and owned filesystem errors inside the trusted Main confirmation boundary', async () => {
+    const f = await fixture(), original = await f.source(), sensitive = join(f.root, 'customer-private-token-FILENAME_SECRET')
+    await rename(original, sensitive)
+    const review = await f.prepare(sensitive)
+    expect(JSON.stringify(review)).not.toContain('FILENAME_SECRET')
+    await f.manager.extensions.apply(f.profile.id, review.expectedRevision, review.reviewId)
+    expect(f.reviews.at(-1).localSourcePath).toBe(sensitive)
+    expect(JSON.stringify(await f.manager.extensions.list(f.profile.id))).not.toContain('FILENAME_SECRET')
+    const next = await f.prepare(await f.source('2.0.0'), review.extensionId)
+    const owned = join(f.native(f.profile.id).storagePath, 'AgentMux Extensions')
+    await rm(join(owned, review.extensionId, next.sha256), { recursive: true, force: true })
+    const folder = join(owned, review.extensionId), retained = folder + '-preserved'; await rename(folder, retained); await writeFile(folder, 'blocks owned directory creation')
+    const cause = await f.manager.extensions.apply(f.profile.id, next.expectedRevision, next.reviewId).catch(error => error)
+    expect(cause).toMatchObject({ code: 'BROWSER_PROFILE_EXTENSION_SOURCE_UNAVAILABLE' }); expect(cause.message).not.toContain(f.root)
+    await rm(folder); await rename(retained, folder)
+    const staging = join(owned, '.staging'); await rm(staging, { recursive: true, force: true }); await writeFile(staging, 'blocks staging creation')
+    const staged = await f.prepare(await f.source('3.0.0'), review.extensionId).catch(error => error)
+    expect(staged).toMatchObject({ code: 'BROWSER_PROFILE_EXTENSION_SOURCE_UNAVAILABLE' }); expect(staged.message).not.toContain(f.root)
+    expect(f.loadedCalls).toHaveLength(1)
+  })
+  it.each([2, 3])('verifies and extracts the same owned CRX%s snapshot when the original source changes between reads', async version => {
+    const f = await fixture(), source = await f.source(), files = { 'manifest.json': await readFile(join(source, 'manifest.json')), 'content.js': Buffer.from('approved original code') }
+    const zip = Buffer.from(zipSync(files)), replacement = Buffer.from(zipSync({ ...files, 'content.js': Buffer.from('unsigned replacement code') }))
+    const publicKey = Buffer.from(key, 'base64'); let prefix: Buffer
+    if (version === 2) { const signature = sign('sha1', zip, identity.privateKey), header = Buffer.alloc(16); header.write('Cr24'); header.writeUInt32LE(2, 4); header.writeUInt32LE(publicKey.length, 8); header.writeUInt32LE(signature.length, 12); prefix = Buffer.concat([header, publicKey, signature]) }
+    else {
+      const varint = (value: number): Buffer => { const result: number[] = []; do { const next = value % 128; value = Math.floor(value / 128); result.push(next | (value ? 128 : 0)) } while (value); return Buffer.from(result) }
+      const field = (tag: number, data: Buffer) => Buffer.concat([varint(tag * 8 + 2), varint(data.length), data])
+      const signed = field(1, createHash('sha256').update(publicKey).digest().subarray(0, 16)), length = Buffer.alloc(4); length.writeUInt32LE(signed.length)
+      const signature = sign('sha256', Buffer.concat([Buffer.from('CRX3 SignedData\0'), length, signed, zip]), identity.privateKey)
+      const proof = Buffer.concat([field(2, Buffer.concat([field(1, publicKey), field(2, signature)])), field(10000, signed)]), header = Buffer.alloc(12); header.write('Cr24'); header.writeUInt32LE(3, 4); header.writeUInt32LE(proof.length, 8); prefix = Buffer.concat([header, proof])
+    }
+    const path = join(f.root, 'sensitive-SNAPSHOT_SECRET.crx'); await writeFile(path, Buffer.concat([prefix, zip]))
+    sourceRace.swap = () => writeFileSync(path, Buffer.concat([prefix, replacement]))
+    const review = await f.prepare(path)
+    expect(sourceRace.swap).toBeUndefined(); expect(review.source).toMatchObject({ signature: 'package-verified', label: 'CRX package' }); expect(JSON.stringify(review)).not.toContain('SNAPSHOT_SECRET')
+    await f.manager.extensions.apply(f.profile.id, review.expectedRevision, review.reviewId)
+    expect(await readFile(join(f.loadedCalls[0]!.path, 'content.js'), 'utf8')).toBe('approved original code')
+    expect(f.loadedCalls).toHaveLength(1)
   })
   it('consumes the actual compiled CLI/RPC and original Manager; request text cannot supply human approval', async () => {
     const f = await fixture(), core = await privateRpcCorePort(join(f.root, 'sessions.json'), join(f.root, 'messages.ndjson'))
