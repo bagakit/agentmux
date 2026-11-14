@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { pathToFileURL } from 'node:url'
-import { AgentMuxControlServer, parseFileWriteResult } from '@agentmux/core'
+import { AgentMuxControlServer, parseFileReadResult, parseFileWriteResult } from '@agentmux/core'
 import { OrdinaryWorkspaceFiles } from '../../host/src/ordinary-files.js'
 import { FileReadOwner } from '../../host/src/file-read-owner.js'
 import { WorkspaceFiles } from '../src/main/workspace-files.js'
@@ -83,11 +83,14 @@ it('fresh package Node imports in either original Files order preserve the stric
  expect(saved.status).toBe('written');expect(saved).not.toHaveProperty('readIdentity')
  const resource={hostId:'local',workspaceId:f.workspace.id,workspacePath:f.root,zoneId:'z',zonePath:f.root,path:'one/value.txt'}
  expect(()=>parseFileWriteResult({resource,result:{status:'written',revision:document.revision,readIdentity:document.readIdentity}},{zoneId:'z',path:'one/value.txt',expectedResource:resource,content:document.content,expectedRevision:document.revision})).toThrow()
+ for(const identity of [{...document.readIdentity,ancestorWitnesses:[]},{...document.readIdentity,extra:true}])expect(()=>parseFileReadResult({resource,result:{status:'read',document:{...document,readIdentity:identity}}},{zoneId:'z',path:'one/value.txt',expectedResource:resource})).toThrow()
+ const created=await f.files.write(f.workspace,{path:'new.note.md',content:'Original note witness',expectedRevision:null});if(created.status!=='written'||!created.fileWitness)throw Error('Original exclusive five-field witness missing')
+ expect(Object.keys(created.fileWitness).sort()).toEqual(['ctimeNs','device','inode','mtimeNs','size'])
  const reread=body(await f.files.read(f.workspace,'one/value.txt'));expect(reread.revision).toBe(document.revision);expect(reread.readIdentity?.entry.inode).not.toBe(document.readIdentity?.entry.inode)
 })
 it('oversized, duplicate or incomplete helper metadata cannot revoke successful original bytes or grant an identity',async()=>{
  const f=await fixture(),valid=body(await f.files.read(f.workspace,'one/value.txt')).readIdentity!
- for(const frames of ['AGENTMUX_WORKSPACE_READ_IDENTITY:'+JSON.stringify({...valid,ancestorWitnesses:Array(257).fill(valid.entry)})+'\n',('AGENTMUX_WORKSPACE_READ_IDENTITY:'+JSON.stringify(valid)+'\n').repeat(2),'AGENTMUX_WORKSPACE_READ_IDENTITY:'+('x'.repeat(70*1024))+'\n','AGENTMUX_WORKSPACE_READ_IDENTITY:'+JSON.stringify(valid),'AGENTMUX_WORKSPACE_READ_IDENTITY:'+JSON.stringify(valid)+'\nAGENTMUX_WORKSPACE_READ_IDENTITY:'+JSON.stringify(valid)]){
+ for(const frames of ['AGENTMUX_WORKSPACE_READ_IDENTITY:'+JSON.stringify({...valid,entry:{...valid.entry,birthtimeNs:null}})+'\n','AGENTMUX_WORKSPACE_READ_IDENTITY:'+JSON.stringify({...valid,ancestorWitnesses:Array(257).fill(valid.entry)})+'\n',('AGENTMUX_WORKSPACE_READ_IDENTITY:'+JSON.stringify(valid)+'\n').repeat(2),'AGENTMUX_WORKSPACE_READ_IDENTITY:'+('x'.repeat(70*1024))+'\n','AGENTMUX_WORKSPACE_READ_IDENTITY:'+JSON.stringify(valid),'AGENTMUX_WORKSPACE_READ_IDENTITY:'+JSON.stringify(valid)+'\nAGENTMUX_WORKSPACE_READ_IDENTITY:'+JSON.stringify(valid)]){
   const fake=join(f.root,'private-helper');await writeFile(fake,'#!'+process.execPath+'\nprocess.stderr.write("AGENTMUX_WORKSPACE_READY\\n");process.stdin.resume();process.stdin.on("end",()=>{process.stderr.write('+JSON.stringify(frames)+');process.stdout.write("Original body")})\n');await chmod(fake,0o755)
   const files=new OrdinaryWorkspaceFiles({helperPath:fake}),document=body(await files.read(f.workspace,'one/value.txt'))
   expect(document.content).toBe('Original body');expect(document.readIdentity).toBeUndefined()
