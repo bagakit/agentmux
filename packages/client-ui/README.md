@@ -48,12 +48,12 @@ Use these exact import paths under `@agentmux/client-ui/`. Each example imports 
 | --- | --- | --- |
 | Actions | `components/Button`, `components/IconButton` | `styles/buttons.css`. [Toggle, disabled action and pending save](examples/actions.tsx). |
 | Fields | `input`, `components/FormRow` | `input/styles.css`. [Label, help, error and multiline draft](examples/fields.tsx). |
-| Overlays | `components/Modal`, `components/HoverDropdownMenu`, `overlay-host` | `styles/overlays.css` for the stack and attachment slots. [Host document, panel layout and focus](examples/overlays.tsx). |
+| Overlays | `components/Modal`, `components/DropdownMenu`, `components/HoverDropdownMenu`, `overlay-host` | `styles/overlays.css` for the stack and attachment slots. [Host document, panel layout and focus](examples/overlays.tsx). |
 | Readable feedback | `components/ActionFeedback`, `components/InlineRenameField` | `styles/buttons.css` for bounded feedback. `input/styles.css`, `styles/semantic-icons.css` and `styles/inline-rename-field.css` for [rename, pending receipt and retryable error](examples/feedback.tsx). |
 | Work location | `patterns/agent-work-location` | `patterns/agent-work-location.css` and `styles/semantic-icons.css`. [Shared summary and distinct routes](examples/locations.tsx). |
 | Theme | `theme`, `theme/model`, `icons` | `styles/theme-defaults.css` for initial tokens, `styles/palette.css` for semantic surfaces and `styles/semantic-icons.css` for icon motion. [Light, dark and reduced motion](examples/theme.tsx). |
 
-Mount `mountThemeRuntime(window)` from `theme` once per browser document to install the shared sprite and tokens. The feedback and location components render glyph references into that sprite. Import the shared palette for error and feedback colors. The host sets density and layout, as in [the example host stylesheet](examples/host.css). Keep Overlay focus and Portal targets in the owning document.
+Mount `mountThemeRuntime(window)` from `theme` once per browser document to install the shared sprite and tokens. The feedback and location components render glyph references into that sprite. Import the shared palette for error and feedback colors. The host sets density and layout, as in [the example host stylesheet](examples/host.css). Keep Overlay focus and Portal targets in the owning document. Use `DropdownMenu` for ordinary actions that open on click, touch or keyboard. Use `HoverDropdownMenu` where pointer entry should disclose the actions without taking focus.
 
 Node consumers can import the theme model to resolve light and dark tokens without a DOM. Interactive entries render in a React host. Import CSS through a CSS-aware browser bundler.
 
@@ -70,7 +70,7 @@ Imports in the table use the prefix `@agentmux/client-ui/`. The package manifest
 | Notes | `note/note-document`, `note/note-wikilinks`, `note/note-live-merge`, `components/NoteReader` | The `.note.md` Markdown codec, wiki links, live three-way merge and a read-only Note reader |
 | Theme and icons | `theme`, `icons` | Theme catalog and built-in themes, semantic icons and their animations |
 | Native controls | `components/Button`, `components/IconButton`, `components/FormRow`, `input`, `components/Modal` | Buttons, form rows, text inputs and dialogs with one shared style owner |
-| Menu and avatars | `components/HoverDropdownMenu`, `components/AvatarGroup` | Menu disclosure and keyboard focus in the host document, plus avatar stacking and overflow |
+| Menu and avatars | `components/DropdownMenu`, `components/HoverDropdownMenu`, `components/AvatarGroup` | Menu disclosure and keyboard focus in the host document, plus avatar stacking and overflow |
 | Brand assets | `brand/` resource paths | App icons, hero art and illustrations ([brand sources](brand/README.md)) |
 
 Use the named entry for the control or capability you need. The `components/` entries render UI, and `input` owns native field primitives. Import component CSS or the shared stylesheet. Hosts supply their theme, overlay container and actions.
