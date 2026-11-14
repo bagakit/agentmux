@@ -51,10 +51,10 @@ it('keeps no-match, clear and IME local, then returns focus through the original
 it('preserves unknown and disabled original choices and searches descriptions without granting eligibility', async () => {
   const changed = vi.fn()
   await dom.render(<SelectionField label="Original choices" value="original-unknown" options={options} onValueChange={changed} />)
-  await key(field('Original choices'), 'ArrowDown'); expect(document.querySelector('[aria-checked=true]')?.textContent).toContain('Saved selection')
+  await key(field('Original choices'), 'ArrowDown'); expect(document.querySelector('[aria-checked=true]')?.textContent).toContain('Not in current options')
   await fill('Distinct original'); expect(items().map(item => item.dataset.value)).toEqual(['project-7']); expect(field('Original choices').dataset.value).toBe('original-unknown')
   await fill('Project 5'); expect(items()).toHaveLength(1); expect(items()[0]!.getAttribute('aria-disabled')).toBe('true'); await act(async () => items()[0]!.click()); expect(changed).not.toHaveBeenCalled()
-  await key(input(), 'ArrowDown'); expect(document.activeElement).toBe(input()); expect(changed).not.toHaveBeenCalled()
+  await key(input(), 'ArrowDown'); expect(document.activeElement?.getAttribute('aria-checked')).toBe('true'); expect(document.activeElement?.textContent).toContain('Not in current options'); expect(changed).not.toHaveBeenCalled()
 })
 it('retains an unavailable Goal project as original saved identity while filtering other current projects', async () => {
   const changed = await mountGoal({ ...goal(), projectId: 'unavailable-project', projectName: 'Original project' })

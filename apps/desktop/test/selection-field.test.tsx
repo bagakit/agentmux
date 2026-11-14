@@ -55,9 +55,9 @@ it('a compact change trigger keeps the original selected identity, keyboard choi
 })
 it('unknown current identity stays visible and never becomes the first choice', async () => {
   const { trigger, changed } = await mount({ value: 'original-unknown' })
-  expect(document.getElementById(trigger.getAttribute('aria-describedby')!)?.textContent).toContain('original-unknown'); expect(trigger.title).toContain('original-unknown'); expect(trigger.textContent).toContain('not in current options')
+  expect(document.getElementById(trigger.getAttribute('aria-describedby')!)?.textContent).toContain('original-unknown'); expect(trigger.title).toContain('original-unknown'); expect(trigger.textContent).toContain('Not in current options')
   await key(trigger, 'ArrowDown')
-  expect(document.querySelector('[aria-checked="true"]')?.textContent).toContain('Saved selection')
+  expect(document.querySelector('[aria-checked="true"]')?.textContent).toContain('Not in current options')
   expect(changed).not.toHaveBeenCalled()
   await chooseField(trigger, 'a'); expect(changed).toHaveBeenCalledExactlyOnceWith('a')
 })
@@ -67,7 +67,7 @@ it('a removed selected option preserves its raw identity and requires a fresh ex
   const trigger = container.querySelector<HTMLButtonElement>('button')!
   await key(trigger, 'ArrowDown')
   await act(async () => root.render(<SelectionField label="Original choice" value="b" options={[choices[0]!]} onValueChange={changed} />)); await settle()
-  expect(document.querySelector('[data-value="b"]')?.textContent).toContain('Saved selection')
+  expect(document.querySelector('[data-value="b"]')?.textContent).toContain('Not in current options')
   expect(changed).not.toHaveBeenCalled()
   await key(document.activeElement as HTMLElement, 'Escape'); expect(trigger.dataset.value).toBe('b')
 })
