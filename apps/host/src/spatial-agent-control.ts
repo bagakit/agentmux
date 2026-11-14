@@ -114,6 +114,7 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
         context.signal?.throwIfAborted(); await context.assertCurrent?.()
         return report
       }
+      if (session.kind !== 'agent') throw new AgentMuxError('The original creation is not a committed Session. Its exact prepared or closed receipt is retained.', 'AGENT_CREATION_UNCONFIRMED')
       const creation = session.creation
       if (record.takeover && !record.executionBinding && !isDeepStrictEqual(record.takeover, creation?.takeover) || !creation || session.agentSessionId !== record.agentSessionId || creation.createOperationId !== record.requestId ||
           session.executorId !== record.executorId || session.workspacePath !== record.execution.workspacePath ||
