@@ -23,7 +23,7 @@ export function MobileSheetHandle({ onClose }: { onClose(): void }) {
   }
   const down = (event: ReactPointerEvent<HTMLDivElement>) => {
     const sheet = event.currentTarget.closest<HTMLElement>('.mobile-sheet')
-    if (!sheet || event.button !== 0) return
+    if (!sheet || event.button !== 0 || drag.current) return
     event.currentTarget.setPointerCapture?.(event.pointerId)
     drag.current = { id: event.pointerId, y: event.clientY, lastY: event.clientY, lastT: event.timeStamp, previousY: event.clientY, previousT: event.timeStamp, sheet }
   }
@@ -44,6 +44,11 @@ export function MobileSheetHandle({ onClose }: { onClose(): void }) {
     place(current.sheet, null)
     if (sheetDragCloses(distance, velocity)) onClose()
   }
-  const cancel = () => { if (drag.current) place(drag.current.sheet, null); drag.current = null }
-  return <div className="mobile-sheet-handle" aria-hidden="true" data-draggable="" onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={cancel} />
+  const cancel = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const current = drag.current
+    if (!current || current.id !== event.pointerId) return
+    drag.current = null
+    place(current.sheet, null)
+  }
+  return <div className="mobile-sheet-handle" aria-hidden="true" data-draggable="" onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={cancel} onLostPointerCapture={cancel} />
 }
