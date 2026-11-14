@@ -2,6 +2,7 @@ import { configureChannelHeader, configureGoalsCommonActions, executeSettingsPre
 import { isSettingsPreferenceMethod } from '@agentmux/core'
 import { SettingsTailcatConfiguration } from './settings-tailcat-configuration.js'
 import { notesStorageInspection } from '@agentmux/core'
+import { registerSpaceMountIpc } from './space-mount-ipc.js'
 import { registerBrowserTaskParallelIpc } from './browser-task-parallel-ipc.js'
 import { createProfileCookieFileIo } from './browser-profile-cookie-file-io.js'
 import { confirmProfileCookieFile } from './browser-profile-cookie-file-confirmation.js'
@@ -977,6 +978,7 @@ export async function registerIpc(args: {
   handle('config:get', () => config)
   // A conflict crosses IPC with its code; the Renderer offers recovery from that fact, never from wording.
   handle('config:save', (next: AppConfig, expected: AppConfig) => sessionInputOperationResult(() => configOwner.edit(expected, next)))
+  const spaceMountReads = registerSpaceMountIpc({ handle: handleWithEvent, runtime: args.runtime, config: () => configOwner.current })
   const nodePublishingReads = registerNodePublishingIpc({ handle: handleWithEvent, call: callUserRpc, owner: (target, method, params, context) => args.runtime.callNodeOwner(target, method, params, context) })
   const hostRouteReads = registerHostRoutesIpc({ handle: handleWithEvent, call: (target, method, params, signal) => args.runtime.callHostRoute(target, method, params, signal) })
   const hostRuntimeReads = registerHostRuntimeObservationIpc({ handle: handleWithEvent,
@@ -2748,7 +2750,7 @@ export async function registerIpc(args: {
       { owner: 'channel-metadata', dispose: () => channelMetadata?.dispose() },
       { owner: 'runtime-attachment', dispose: () => detach() },
       { owner: 'history-observations', dispose: () => historyObservations.dispose() },
-      { owner: 'host-runtime-reads', dispose: () => { hostRuntimeReads.dispose(); nodePublishingReads.dispose(); hostRouteReads.dispose() } },
+      { owner: 'host-runtime-reads', dispose: () => { hostRuntimeReads.dispose(); nodePublishingReads.dispose(); hostRouteReads.dispose(); spaceMountReads.dispose() } },
       { owner: 'search-reads', dispose: () => searchReads.dispose() },
       { owner: 'history-reads', dispose: () => historyReads.dispose() },
       { owner: 'conversation-reads', dispose: () => conversationReads.dispose() },

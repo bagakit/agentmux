@@ -1,5 +1,6 @@
 import { unwrapIpcResult } from '../shared/ipc-result'
 import { createPreloadHostRoutes } from './host-routes'
+import { createPreloadSpaceMount } from './space-mount'
 import { executeRendererCache } from './renderer-cache'
 import { createExecutionBindingApi } from './execution-binding'
 import { unwrapSessionInputOperationResult } from '../shared/session-input-result.js'
@@ -105,6 +106,7 @@ const initialTheme: ThemeBootstrap | null = process.isMainFrame ? (() => {
 projectInitialTheme(initialTheme)
 
 const api: AgentMuxPreloadApi = {
+  spaceMounts: createPreloadSpaceMount(ipcRenderer),
   hostRoutes: createPreloadHostRoutes(ipcRenderer),
   clientIncidents: {
     open: () => ipcRenderer.invoke('clientIncidents:open'),

@@ -1,3 +1,4 @@
+import { createRendererSpaceMount } from './space-mount-api'
 import { createRendererNodePublishing } from './node-publishing-client'
 import { createRendererHostRoutes } from './host-routes-client'
 import { createRendererSessionRecovery } from './session-recovery-api'
@@ -512,6 +513,7 @@ const mockApi: AgentMuxDesktopApi = {
       return () => configListeners.delete(listener)
     }
   },
+  spaceMounts: { member: async () => { throw new Error('The original source-qualified member control requires the connected Desktop Host. Its Space, Session and input are retained.') }, call: async () => { throw new Error('Shared Spaces require their original authenticated Core. No local copy was substituted.') }, watch: async () => { throw new Error('The original Space observation transport is unavailable. Its mount and input are retained.') }, sessions: async () => { throw new Error('The original Space Session observation is unavailable. Its members and input are retained.') } },
   nodePublishing: { call: async () => { throw new Error('Node publishing requires the original authenticated Desktop Host. Saved publication and existing work are retained.') }, owner: async () => { throw new Error('Node owner access requires the original authenticated Desktop Host. Original inputs and requests are retained.') } },
   hostRoutes: { call: async () => { throw new Error('Route settings require the original authenticated Desktop Host. Original routes and drafts are retained.') } },
   hosts: { configureTailcat: async () => { throw new Error('Incoming configuration requires its original Desktop owner and trusted user. Your connection draft is retained.') }, agentResources: async () => { throw new Error('Agent record measurements require the original Host. This preview does not invent counts.') }, prepareTailcatKey: async () => { throw new Error('Tailcat key preparation requires the original Desktop Host and an authenticated local user. Your connection draft is retained.') }, home: async () => { throw new Error('Device home requires its original authenticated Host. This preview does not invent home paths.') }, network: async () => { throw new Error('Network observation requires the original desktop Host. No network facts are simulated in this preview.') }, inspect: async () => { throw new Error('Runtime observation requires the original desktop Host. This preview does not simulate live Runtime facts.') }, check: async (host) => ({ input: structuredClone(host), outcome: host.kind === 'ssh' ? 'unsupported' : 'ready',
@@ -1713,6 +1715,7 @@ function requireDesktopApi(): AgentMuxDesktopApi {
     toolkit: createToolkitConfigurationApi(preload.toolkit),
     applications: { call: async (method, params) => unwrapSessionInputOperationResult(await preload.applications.call(method, params)) },
     conversation: createConversationReadApi(preload.conversation),
+    spaceMounts: createRendererSpaceMount(preload.spaceMounts),
     nodePublishing: createRendererNodePublishing(preload.nodePublishing),
     hostRoutes: createRendererHostRoutes(preload.hostRoutes),
     hosts: { ...preload.hosts, agentResources: createRendererHostAgentResources(preload.hosts.agentResources), home: createRendererHostObservation(preload.hosts.home), inspect: createRendererHostObservation(preload.hosts.inspect), network: createRendererHostObservation(preload.hosts.network) },
