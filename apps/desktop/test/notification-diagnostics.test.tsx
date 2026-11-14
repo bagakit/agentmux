@@ -2,7 +2,6 @@ import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 // @vitest-environment happy-dom
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { EventEmitter } from 'node:events'
-import { once } from 'node:events'
 import { spawn } from 'node:child_process'
 import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -22,7 +21,7 @@ const fixture = vi.hoisted(() => ({  root: '', socket: '', generation: 1, loadin
 }))
 vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   globalShortcut: { register: vi.fn(() => true), unregister: vi.fn(), isRegistered: vi.fn(() => false) },
-  app: { getPath: () => fixture.root || tmpdir(), getAppPath: () => fixture.root || tmpdir(), once: vi.fn() },
+  app: { getPath: () => fixture.root || tmpdir(), getAppPath: () => fixture.root || tmpdir(), on: vi.fn(), off: vi.fn(), once: vi.fn() },
   ipcMain: { handle: (name: string, handler: (...args: any[]) => unknown) => fixture.handlers.set(name, handler),
     removeHandler: (name: string) => fixture.handlers.delete(name),
     on: (name: string, handler: (...args: any[]) => void) => fixture.events.set(name, handler),
@@ -41,10 +40,15 @@ vi.mock('@agentmux/core', async original => {
 })
 vi.mock('@agentmux/demand', async original => ({ ...await original<typeof import('@agentmux/demand')>(),
   openDemandStore: () => ({ list: async () => [], snapshot: async () => ({ demands: [] }), subscribe: () => () => {} }) }))
-vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
+vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class {
+  readonly cookieFiles = { setFileOwner() {}, setConfirmationHandler() {} }
+  readonly extensions = { setConfirmationHandler() {} }
+  onChange() { return () => {} } onEnvironmentApplicationChange() { return () => {} }
+  async initialize() {} async dispose() {}
+} }))
 vi.mock('@agentmux/browser/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private-journal.json', BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('@agentmux/browser/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
-vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { setPresentationWindowOwner() {} async release() {} dispose() {} } }))
+vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { setPresentationWindowOwner() {} async release() {} async flushProfileActivity() {} dispose() {} } }))
 vi.mock('../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ notify: () => ({ status: 'shown' }), dispose() {} }) }))
 vi.mock('../src/main/notes-storage-owner', () => ({ NotesStorageOwner: class { async initialize() {} } }))
 
@@ -106,14 +110,16 @@ async function main() {
   const runtime = { resourceSampler: { setObservationSources: () => () => {} }, setContinuousProgressInputObserver: () => () => {},
     setTerminalViewColors: () => {}, prepare: async () => ({}), commit: () => {}, attach: () => () => {},
     observeCoreEvents: () => () => {}, observeInputOccupation: () => () => {},
-    rpcClients: () => [], connectedRuntimeIdentities: () => [], rendererGeneration: () => fixture.generation }
+    rpcClients: () => [], connectedRuntimeIdentities: () => [], rendererGeneration: () => fixture.generation,
+    callOriginalCore: async () => { throw new Error('Notification diagnostics must not call a Capsule Core') } }
   const config = useAppStore.getState().config!
   const dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(fixture.sender), initialConfig: config,
     window: { setBackgroundColor: vi.fn(), id: 99, isDestroyed: () => false, webContents: fixture.sender } as unknown as BrowserWindow,
     workbenchWindows: { setNativeOwner: () => () => {} } as never,
     runtime: runtime as never, configStore: { get: async () => config } as never,
     scratchTopics: { setNameAudit: () => {}, normalizeDirectoryIdentities: async () => {} } as never,
-    workspaceFiles: { read: vi.fn(), listFiles: vi.fn(), write: vi.fn(), dispose: async () => {} } as never,
+    workspaceFiles: { read: vi.fn(), listFiles: vi.fn(), readDirectory: async () => { throw new Error('Notification diagnostics must not query file directories') },
+      write: vi.fn(), dispose: async () => {} } as never,
     progressLoops: { subscribe: () => () => {} } as never,
     loadedPackage: { schema: 'agentmux.package-identity.v1', sourceCommit: 'private-package', sourceTree: 'private-tree', appVersion: '1', platform: 'darwin', arch: 'arm64' },
     loadedRenderer: () => renderer })
@@ -139,7 +145,7 @@ beforeEach(async () => {
   useAppStore.setState({ loading: false, sessions: [], tabs: {}, notificationEvents: [], noticeReadReceipts: {},
     error: null, lastError: null, errorNoticeContext: null, environmentWarning: '', runtimeOwnershipWarnings: [], runtimeEndpointWarnings: [],
     displacedAgentSessionIds: [], agentSteerQueues: {}, agentSteerInFlight: {}, sessionNameMetadataWarning: null,
-    workbenchSaveWarning: null, nameSaveUnconfirmed: null, nameEditFailure: null, desktopNavigationNotice: null,
+    workbenchSaveWarning: null, nameSaveUnconfirmed: null, nameEditFailure: null, desktopNavigationNotice: null, appIconIssue: null,
     startupAgentAvailability: undefined } as never)
 })
 afterEach(async () => {
@@ -157,10 +163,21 @@ it('runtime lifecycle provenance: real Native/Core and Hosted events reach origi
   const daemon = spawn(resolve('packages/core/vendor/ctxmux/darwin-arm64/bin/ctxmuxd'),
     ['--socket', join(fixture.root, 'ctxmux.sock'), '--state-dir', join(stateDir, 'ctxmux'), '--readiness-fd', '3'],
     { stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
-  const closed = once(daemon, 'close'); let ready = '', stderr = ''
-  daemon.stdio[3]!.on('data', data => { ready += data }); daemon.stderr!.on('data', data => { stderr += data })
-  cleanup.push(async () => { daemon.kill('SIGTERM'); await closed })
-  await vi.waitFor(() => expect(ready, stderr).toContain('\n'))
+  const closed = new Promise<void>(done => daemon.once('close', () => done())); let stderr = ''
+  daemon.stderr!.on('data', data => { stderr += data })
+  cleanup.push(async () => { if (daemon.exitCode === null && daemon.signalCode === null) daemon.kill('SIGTERM'); await closed })
+  await new Promise<void>((done, fail) => {
+    let ready = ''
+    const finish = (error?: Error) => {
+      clearTimeout(timer); daemon.stdio[3]!.off('data', onReady); daemon.off('error', onError); daemon.off('exit', onExit)
+      if (error) fail(error); else done()
+    }
+    const onReady = (data: Buffer) => { ready += data; if (ready.includes('\n')) finish() }
+    const onError = (error: Error) => finish(error)
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => finish(new Error(`Private Native exited before readiness (${code ?? signal}): ${stderr}`))
+    const timer = setTimeout(() => finish(new Error(`Private Native readiness was not observed: ${stderr}`)), 15_000)
+    daemon.stdio[3]!.on('data', onReady); daemon.once('error', onError); daemon.once('exit', onExit)
+  })
   const store = new AgentMuxMemoryAgentSessionStore(), core = new AgentMuxClient({ store }), inner = core as any
   const runs: Array<{ runId: string }> = []
   cleanup.push(async () => { for (const run of runs) await core.stopTerminal(run).catch(() => {}); await core.dispose() })

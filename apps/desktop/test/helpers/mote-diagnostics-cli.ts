@@ -1,4 +1,3 @@
-import { browserSourceBuild } from '../../../../packages/browser/scripts/source-build.mjs'
 import { createRequire, findPackageJSON, isBuiltin } from 'node:module'
 import { appendFileSync, existsSync, readFileSync, realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
@@ -6,6 +5,9 @@ import { join, relative, resolve, dirname } from 'node:path'
 import { spawn } from 'node:child_process'
 import { mkdir, symlink, writeFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
+
+// This Node build wrapper must keep its file URL outside happy-dom/Vite's module rewriting.
+const { browserSourceBuild } = createRequire(resolve(import.meta.dirname, '../../../../package.json'))('./packages/browser/scripts/source-build.mjs')
 
 /** The identity package deliberately generates this string asset; it has no TS source counterpart. */
 function publicSourceEntry(directory: string, specifier: string, target: string): string {
