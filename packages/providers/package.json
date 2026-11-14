@@ -231,6 +231,10 @@
     "./claude/tool-edit": {
       "types": "./dist/claude/tool-edit.d.ts",
       "import": "./dist/claude/tool-edit.js"
+    },
+    "./claude/native-history": {
+      "types": "./dist/claude/native-history.d.ts",
+      "import": "./dist/claude/native-history.js"
     }
   },
   "files": [
