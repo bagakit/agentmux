@@ -932,6 +932,8 @@ export type AgentSessionHistoryItem = {
   turnId?: string
   /** System messages describe read-only native history; they grant no input, identity or permission authority. */
   kind: 'user-message' | 'assistant-message' | 'system-message' | 'activity'
+  /** Provider-confirmed machine-event purpose for reading only; not current state or input authority. */
+  recordPurpose?: 'system-event'
   messagePhase?: AgentSessionHistoryMessagePhase
   questionRequest?: AgentSessionHistoryQuestionRequest
   questionAnswers?: AgentSessionHistoryQuestionAnswer[]

@@ -12,7 +12,7 @@ export type ConversationProcessPart = (
       content?: NonNullable<Extract<AgentSessionHistoryContentPart, { kind: 'resource' }>['content']> }
 ) & Pick<AgentSessionHistoryContentPart, 'contentEligibility' | 'contentRole'>
 export type ConversationProcessHeader =
-  | { kind: 'native'; item: Pick<AgentSessionHistoryItem, 'id' | 'kind' | 'turnId' | 'title' | 'startedAt' | 'completedAt' | 'conversation' | 'metrics' | 'metricsDiagnostic' | 'turnOutcome' | 'turnOutcomeDiagnostic'>;
+  | { kind: 'native'; item: Pick<AgentSessionHistoryItem, 'id' | 'kind' | 'recordPurpose' | 'turnId' | 'title' | 'startedAt' | 'completedAt' | 'conversation' | 'metrics' | 'metricsDiagnostic' | 'turnOutcome' | 'turnOutcomeDiagnostic'>;
       parts: ConversationProcessPart[]; collaboration?: AgentSessionHistoryItem['collaboration'] }
   | { kind: 'captured'; item: Pick<AgentTimelineItem, 'id' | 'agentSessionId' | 'kind' | 'status' | 'source' | 'createdAt' | 'updatedAt' | 'title' | 'toolName' | 'eventName' | 'activityState' | 'turnOutcome' | 'conversation' | 'authorAgentSessionId' | 'authorHuman' | 'authorExternal' | 'sourceChannel'>;
       fields: Array<'content' | 'toolInput' | 'toolOutput'> }
@@ -32,7 +32,7 @@ export function deferConversationProcessRecord(record: ConversationSourceRecord)
   let header: ConversationProcessHeader
   if (original.kind === 'native') {
     const item = original.item, collaboration = item.collaboration
-    header = { kind: 'native', item: pick(item, ['id', 'kind', 'turnId', 'title', 'startedAt', 'completedAt', 'conversation', 'metrics', 'metricsDiagnostic', 'turnOutcome', 'turnOutcomeDiagnostic']),
+    header = { kind: 'native', item: pick(item, ['id', 'kind', 'recordPurpose', 'turnId', 'title', 'startedAt', 'completedAt', 'conversation', 'metrics', 'metricsDiagnostic', 'turnOutcome', 'turnOutcomeDiagnostic']),
       parts: item.contentParts.map(part => part.kind === 'tool-call' ? pick(part, ['kind', 'name', 'callId', 'contentEligibility', 'contentRole'])
         : part.kind === 'tool-result' ? pick(part, ['kind', 'name', 'callId', 'failed', 'contentEligibility', 'contentRole'])
         : part.kind === 'reasoning' ? pick(part, ['kind', 'redacted', 'contentEligibility', 'contentRole'])

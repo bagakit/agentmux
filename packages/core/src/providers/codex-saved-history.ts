@@ -216,6 +216,9 @@ function item(record: Record<string, unknown>, start: number, nativeSessionId: s
   const conversation = input ? { ...invocation, nativeInput: input } : invocation
   return { id, kind, contentParts: parts.map(part => ({ ...part, contentEligibility: mcpParts ? part.contentEligibility ?? 'unconfirmed'
       : contentEligibility === 'public' ? part.contentEligibility ?? 'public' : contentEligibility })),
+    ...(record.type === 'token_usage_record' || record.type === 'event_msg' &&
+      (type === 'task_started' || type === 'task_complete' || type === 'turn_aborted')
+      ? { recordPurpose: 'system-event' as const } : {}),
     ...(conversation ? { conversation } : {}),
     ...(collaboration === undefined ? {} : { collaboration }),
     ...(conversationDiagnostic === undefined ? {} : { conversationDiagnostic }),

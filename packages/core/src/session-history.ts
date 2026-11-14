@@ -299,6 +299,7 @@ export function normalizeSessionHistoryPage(
     if (questionDiagnostic && item.kind !== 'assistant-message' && item.kind !== 'user-message') return invalid()
     const collaborationMetadata = item.collaboration === undefined ? {} : collaborationFields(item.collaboration, source)
     return { id, kind: item.kind, contentParts,
+      ...(item.kind === 'activity' && item.recordPurpose === 'system-event' ? { recordPurpose: 'system-event' as const } : {}),
       ...conversationProvenanceFields(item),
       ...collaborationMetadata,
       ...normalizeSessionHistoryMetrics(item),
