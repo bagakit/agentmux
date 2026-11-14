@@ -1,4 +1,4 @@
-# Agent card operations: exact-candidate native scene
+# Stop and Fork feedback: exact-candidate native scene
 
 Run from the repository root:
 
@@ -12,13 +12,15 @@ Prepare without executing an Electron candidate:
 node apps/desktop/scripts/fixtures/session-takeover/native.mjs --agent-operations --preflight --evidence=.local/agent-card-operations/fixture-preflight
 ```
 
-The latter only builds the actual current production Renderer and validates a nonempty production/style input set. It writes `preflight.json`, never a passed final-candidate receipt. The final gate must run after the integrated candidate has been pinned. A prior takeover-only receipt cannot certify this mode.
+The latter only builds the actual current production Renderer and validates a nonempty production/style input set. It writes `preflight.json`, never a passed final-candidate receipt. The final gate must run after the integrated candidate has been pinned. Receipts from the former combined Takeover/Fork scene cannot certify this mode.
+
+Default `verify-session-takeover.mjs --native` delegates the public Takeover flow to `fixtures/takeover-flow/capture.mjs::runTakeoverFlow`; its qualification is `public-takeover-renderer-recovery-v1`. This Stop/Fork fixture adds no Takeover creator. `--live-adoption` remains a separate fixture and qualification.
 
 ## Real consumers and controlled boundary
 
 The fixture mounts actual `WorkspaceWorkbench`, `SessionPane`, xterm and shared product styles. Beside the original workface it mounts the original `createFocusProjectionSelector` → `FocusContextRow` consumers for three exact controlled Native sources. The fixture layout only places those production consumers; it does not copy a card, operation phase, dialog or controller. Native launch/stop/inspect, exact capability/nativeHandle facts and ordered bytes are controlled. Creation requests, their destination admission, spatial Core file owner, original production controllers, drafts, UI persistence, body and focus remain real. No vendor CLI/real ctxmux execution or user Session is claimed.
 
-The first source remains healthy with ongoing ordered output. Its actual xterm receives native mouse-wheel and keyboard events during card feedback. Two other sources have separately confirmed Stops, then independently confirm retirement or lose their receipt. Takeover and Fork use original context-menu items and selection buttons. The Fork has a real created target with initial-input confirmation missing; the production spatial owner produces partial completion. Read-only buttons inspect original requests without additional launches or Stops.
+The first source remains healthy with ongoing ordered output. Its actual xterm receives native mouse-wheel and keyboard events during card feedback. Two other sources have separately confirmed Stops, then independently confirm retirement or lose their receipt. Fork uses the original context-menu item and destination button. It has a real created target with initial-input confirmation missing; the production spatial owner produces partial completion. Read-only buttons inspect original requests without additional launches or Stops.
 
 ## Candidate scenes
 
@@ -29,10 +31,10 @@ The first source remains healthy with ongoing ordered output. Its actual xterm r
 - Reduced-motion media, hidden cards and offscreen cards pause their original shared animation consumer. Native getAnimations/currentTime/computed offsetDistance are sampled twice; zero actual running/moving edge work is the visibility oracle, not data-motion-active.
 - Fixed visible sources with 0/384 unrelated retained Sessions. Three alternating samples record native Chromium style/Layout/Paint trace events, actual xterm input latency, mouse-wheel movement, stream continuity and visible card DOM mutation deltas. The comparison rejects work growing linearly with unrelated membership, using normalized repeated samples and observed noise, not an invented absolute latency threshold.
 - Independent Stop completion and static unknown with a real inspect button.
-- Takeover in-flight/success and Fork in-flight/partial with real new Agent identity.
+- Fork in-flight/partial with real new Agent identity; its original request is the only creation request in this qualification.
 - An ordinary second Electron process reads real profile/Core workface persistence, unresolved original operation references and drafts without reseeding; confirmed completion decorations stay omitted. Reconciliation uses actual buttons; no Stop/Start/input is replayed. Both Renderer and controlled Native surviving Host/Session/Run identities are compared before and after checks, and the separate Native input log must be empty on both sides. Attachment observation validates exact Host/Session/Run before choosing a known controlled representation; arbitrary attach errors never trigger a catch-all fallback.
 
-The `agent-operations-v1` qualification and scene/cost/motion collections are required and nonempty. Production sources, CSS, every fixture input, the Core spatial module inputs, compiled files and image hashes bind the same candidate. Cleanup remains the original isolated process/root owner. Independent visual review consumes the final generated frames; no reviewer is allowed to treat preflight or old prototype images as this product proof.
+The `stop-fork-feedback-v1` qualification requires the exact first-process and restart scenario sets defined by `agent-operations-main.cjs::assertStopForkScenarios`, plus measured cost/motion collections. It uses schema `agentmux.stop-fork-feedback-native.v1`; source negatives use qualification `stop-fork-feedback-mutation-v1`. Production sources, CSS, every fixture input, the Core spatial module inputs, compiled files and image hashes bind the same candidate. Cleanup remains the original isolated process/root owner. Independent visual review consumes the final generated frames; no reviewer is allowed to treat preflight or old prototype images as this product proof.
 
 ## Falsifiable isolation oracles
 
