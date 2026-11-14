@@ -91,6 +91,20 @@ test('saved route edge choices expose a stable edge ID beside the connection lab
   await flush(() => expect(document.querySelector('.selection-field__menu [data-value="C"]')).not.toBeNull())
   expect(document.querySelector('.selection-field__menu [data-value="C"]')?.textContent).toContain('Compute · C')
 })
+test('does not inspect a stale edge after the route path changes', async () => {
+  const f = await fixture(); await newRoute(f)
+  await button('Save policy'); await flush(() => expect(dom.container.textContent).toContain('Route policy saved'))
+  await button('New route'); await field('Next saved route connection', 'C')
+  const inspections = f.calls.filter(call => call.method === 'route.edge.inspect').length
+  await dom.click('[data-resource-row="0"]')
+  const trigger = dom.container.querySelector<HTMLButtonElement>('[aria-label="Next saved route connection"]')!
+  await flush(() => expect(trigger.dataset.value).toBe(''))
+  const add = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === 'Inspect & add')!
+  expect(add.disabled).toBe(true)
+  await button('Inspect & add')
+  expect(f.calls.filter(call => call.method === 'route.edge.inspect')).toHaveLength(inspections)
+  expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Route name"]')!.value).toBe('compute')
+})
 test('actual Remote route editor browses saved edges without probes or writes and explicitly saves to its original Core', async () => {
   const f = await fixture(); await newRoute(f)
   expect(f.probes).toEqual(['B/C']); expect(f.calls.filter(call => call.method === 'route.configure')).toEqual([])
