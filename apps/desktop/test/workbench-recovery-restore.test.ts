@@ -161,16 +161,20 @@ it('the original Main restore port is consumed by a second real Host process thr
 it('the original Main restores a SQLite cut including cold archive rows through the real Host', async () => {
   const root = await fixture(), store = new WorkbenchUserStateStore(join(root, 'user.json')), socket = join(root, 'desktop.sock')
   const raw = JSON.parse(document())
+  const run = { runId: 'original-run' }
+  const key = { kind: 'prompt', agentSessionId: 'original', submissionId: 'retained-archived', expectedRun: run }
+  const ref = { key, waitGeneration: 1 }
   const archived = {
     operationId: 'retained-archived', text: 'Independent original archive', archived: true, enqueuedAt: 2,
-    directInputControl: { kind: 'agent', hostId: 'local', agentSessionId: 'original', run: { runId: 'original-run' } },
-    directInputBinding: { expectedRun: { runId: 'original-run' } },
-    inputReceipt: { status: 'terminal-confirmed', persistence: 'confirmed', key: {
-      kind: 'prompt', agentSessionId: 'original', submissionId: 'retained-archived', expectedRun: { runId: 'original-run' }
-    } }
+    directInputControl: { kind: 'agent', hostId: 'local', agentSessionId: 'original', run },
+    directInputBinding: { expectedRun: run },
+    inputReceipt: { status: 'terminal-confirmed', persistence: 'confirmed', observation: 'closed', key, ref,
+      control: { state: 'dispatch-authorized', ref } }
   }
   raw.state.agentSteerQueues.original.push(archived)
   await store.write(JSON.stringify(raw))
+  expect((await store.readInputArchive({ ownerKey: 'original', operationId: archived.operationId })).entries)
+    .toEqual([{ ownerKey: 'original', entry: archived }])
   const output = join(root, 'capture'); await mkdir(output)
   const cut = await store.recoverySource().capture(output)
   expect(cut.gaps).toEqual([])
