@@ -81,7 +81,43 @@
       "types": "./src/theme/icons.tsx",
       "browser": "./src/theme/icons.tsx",
       "import": "./dist/theme/icons.js"
-    }
+    },
+    "./components/Button": {
+      "types": "./src/components/Button.tsx",
+      "browser": "./src/components/Button.tsx",
+      "import": "./dist/components/Button.js"
+    },
+    "./components/IconButton": {
+      "types": "./src/components/IconButton.tsx",
+      "browser": "./src/components/IconButton.tsx",
+      "import": "./dist/components/IconButton.js"
+    },
+    "./styles/buttons.css": "./src/styles/buttons.css",
+    "./components/FormRow": {
+      "types": "./src/components/FormRow.tsx",
+      "browser": "./src/components/FormRow.tsx",
+      "import": "./dist/components/FormRow.js"
+    },
+    "./components/Modal": {
+      "types": "./src/components/Modal.tsx",
+      "browser": "./src/components/Modal.tsx",
+      "import": "./dist/components/Modal.js"
+    },
+    "./styles/overlays.css": "./src/styles/overlays.css",
+    "./components/InlineRenameField": {
+      "types": "./src/components/InlineRenameField.tsx",
+      "browser": "./src/components/InlineRenameField.tsx",
+      "import": "./dist/components/InlineRenameField.js"
+    },
+    "./styles/semantic-icons.css": "./src/styles/semantic-icons.css",
+    "./styles/inline-rename-field.css": "./src/styles/inline-rename-field.css",
+    "./styles/theme-defaults.css": "./src/styles/theme-defaults.css",
+    "./components/HoverDropdownMenu": {
+      "types": "./src/components/HoverDropdownMenu.tsx",
+      "browser": "./src/components/HoverDropdownMenu.tsx",
+      "import": "./dist/components/HoverDropdownMenu.js"
+    },
+    "./styles/palette.css": "./src/styles/palette.css"
   },
   "files": [
     "CONTRIBUTING.md",
@@ -94,7 +130,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --config vitest.config.ts",
-    "build": "tsc -p tsconfig.build.json && node scripts/copy-assets.mjs && node scripts/generate-theme-defaults.mjs --check",
+    "build": "node scripts/supported-entries.mjs --check && tsc -p tsconfig.build.json && node scripts/copy-assets.mjs && node scripts/generate-theme-defaults.mjs --check",
+    "generate:entries": "node scripts/supported-entries.mjs --write",
     "generate:theme": "tsc -p tsconfig.build.json && node scripts/generate-theme-defaults.mjs"
   },
   "dependencies": {
