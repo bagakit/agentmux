@@ -47,6 +47,7 @@ export type WorkbenchViewCloseTarget = Pick<WorkbenchViewClosePlan, 'tabId' | 's
  * Region (`regionId`) and the Sessions it is stopping.
  */
 export type WorkbenchViewCloseReservation = {
+  operationId?: string
   tabId: string
   regionId?: string
   reservedSessionIds: readonly string[]
@@ -170,6 +171,12 @@ export function workbenchRegionCloseTarget(input: {
     tabs: input.tabs, sessions: input.sessions, isClosing: (tab, regionId) =>
       closing(tab, regionId) || input.closing?.(tab, regionId) === true
   }).sessions.map(workbenchSessionCloseResource)
+  if (surface.kind === 'terminal' && surface.phase === 'attached') {
+    const session = input.sessions.find(s => s.id === surface.sessionId && s.kind === 'terminal')
+    const outside = sessionsShownOutsideClosingViews({ tabs: input.tabs, sessions: input.sessions,
+      isClosing: (tab, regionId) => closing(tab, regionId) || input.closing?.(tab, regionId) === true })
+    if (session && session.processState !== 'exited' && !outside.has(session.id)) resources.push(workbenchSessionCloseResource(session))
+  }
   if (surface.kind === 'browser') resources.push({ key: `browser:${surface.browserId}`, kind: 'browser', browserId: surface.browserId })
   return freezeCloseTarget({ tabId: input.tabId,
     surfaces: [{ owner: surfaceOwner(surface, new Map(input.sessions.map(session => [session.id, session])), true), resourceKeys: resources.map(resource => resource.key) }], resources })

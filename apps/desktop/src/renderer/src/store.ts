@@ -4,6 +4,9 @@ import { editMountedSpaceInput, editMountedSpaceDraftInput, editMountedRegistrat
 import { observeMountedSessions, type MountedSessionObservation, type MountedSessionUpdate } from './lib/space-mount-sessions'
 import { spaceMountKey, type SpaceMountRecord, type SpaceMountView } from '../../shared/space-mount'
 import type { SpaceSnapshot } from '@agentmux/core'
+import { parseSpaceCloseReceipt, parseSpaceCloseResult, spaceCloseDecisions, type SpaceClosePrepare, type SpaceCloseReceipt, type SpaceCloseCommitResult } from '@agentmux/core/space-close'
+import { isWorkbenchCloseRendererRequest, type WorkbenchCloseRendererRequest, type WorkbenchCloseRendererResult } from '../../shared/workbench-close-control'
+import { captureWorkbenchClose, validateWorkbenchClose, reconcileWorkbenchClose } from './lib/workbench-close-owner'
 import { refreshGoalDelegations } from './lib/goal-delegation-work'
 import { bindAgentConversationFloatingTarget, requestAgentConversationFloatingOpen } from './lib/pmo-teams-topic-floating'
 import { retainedSessionRecordDelete, sessionRecordDeleteKey, sameSessionRecordDelete } from './lib/session-record-delete'
@@ -446,24 +449,11 @@ import {
 import { assertUnreachableSurface, isAgentOrLauncherSurface, isSessionSurface, surfaceCloseObligations } from './lib/workbench-surface-kinds'
 import { resolveSpatialCommit } from './lib/control-spatial-commit'
 import {
-  agentSessionsWithoutViewsAfterClosing,
   applyWorkbenchViewCloseTopology,
-  closingWorkbenchRegion,
-  closingWorkbenchReservations,
-  hasAttachedSessionOutsideClosingViews,
-  planWorkbenchViewClose,
-  reconcileWorkbenchViewClose,
   sameWorkbenchSurfaceOwner,
   workbenchViewCloseAllowsSession,
-  workbenchSessionCloseResource,
   workbenchViewCloseAllowsView,
-  workbenchRegionCloseTarget,
-  workbenchViewCloseStillApproved,
-  type WorkbenchViewClosePlan,
-  type WorkbenchViewCloseTarget,
-  type WorkbenchViewCloseReceipt,
   type WorkbenchViewCloseReservation,
-  type WorkbenchViewCloseResource
 } from './lib/workbench-view-close'
 import { isPathWithinSubtree, remapPathWithinSubtree } from './lib/workspace-paths'
 import {
@@ -1448,13 +1438,16 @@ export type AppState = GitReadingActions & {
     /** Claim an empty Group's original input in its new real Region, without navigating another surface. */
     initialInputs?: { prompt: string; names: LauncherNames; optionsByProvider: LauncherProviderOptions; sourceLauncherId?: string }
   }): string | undefined
+  prepareWorkbenchClose(input: Omit<SpaceClosePrepare, 'operationId'> & { operationId?: string }): Promise<SpaceCloseReceipt>
+  applyWorkbenchClose(record: SpaceCloseReceipt): Promise<boolean>
+  executeWorkbenchClose(request: WorkbenchCloseRendererRequest): Promise<WorkbenchCloseRendererResult>
   /** Human close admission, repeated by closeTab when a confirmation is committed. */
-  checkTabClose(workspaceId: string, tabGroupId: string, tabId: string): boolean
+  checkTabClose(workspaceId: string, tabGroupId: string, tabId: string, regionId?: string): boolean
   closeTab(
     workspaceId: string,
     tabGroupId: string,
     tabId: string,
-    options?: { keepAgentSessions?: boolean; approved?: WorkbenchViewClosePlan }
+    options?: { keepAgentSessions?: boolean; approved?: SpaceCloseReceipt }
   ): Promise<boolean>
   moveTab(
     workspaceId: string,
@@ -1516,7 +1509,7 @@ export type AppState = GitReadingActions & {
   // 唯一一格，落在源 Tab 紧邻其后的位置并激活。只剩一格的 Tab 促升无意义（它已经就是一张 Tab），是 no-op。
   promoteRegionToTab(workspaceId: string, tabId: string, regionId: string): void
   // Closing an Agent's last View stops its Run unless `keepAgentSessions`; the Region confirmation asks first.
-  closeRegion(workspaceId: string, tabId: string, regionId: string, options?: { keepAgentSessions?: boolean; approved?: WorkbenchViewCloseTarget }): Promise<void>
+  closeRegion(workspaceId: string, tabId: string, regionId: string, options?: { keepAgentSessions?: boolean; approved?: SpaceCloseReceipt }): Promise<void>
   // 键盘关 Tab 的入口：只投意图，真正的关闭（含确认）由活动 Tab 组件消费。见 closeTabRequest 状态注释。
   requestCloseTab(workspaceId: string, tabGroupId: string, tabId: string): void
   clearCloseTabRequest(nonce: number): void
@@ -1864,71 +1857,6 @@ function normalizeHttpLinkUrl(rawUrl: string): string {
     throw new Error(`Link URL protocol is not allowed: ${url.protocol}`)
   }
   return url.toString()
-}
-
-async function settleWorkbenchViewCloseResources<Resource extends WorkbenchViewCloseResource>(
-  resources: readonly Resource[],
-  close: (resource: Resource) => Promise<void>
-): Promise<WorkbenchViewCloseReceipt[]> {
-  const results = await Promise.allSettled(resources.map((resource) => {
-    const pending = close(resource)
-    return new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(
-        `The ${resource.kind} close result is unknown after 5 seconds. Its View is retained; review it before retrying.${resource.kind === 'session' ? ` You can keep the Session and close only its display; the original Stop${unconfirmedStopSuffix(resource.control)} remains unconfirmed.` : ''}`
-      )), 5_000)
-      // Observe the original operation after our UI deadline; it has not been cancelled.
-      // A late settlement cannot apply this completed View plan again.
-      void pending.then(resolve, reject).finally(() => clearTimeout(timer))
-    })
-  }))
-  return results.map((result, index) => result.status === 'fulfilled'
-    ? { key: resources[index]!.key, status: 'fulfilled' }
-    : { key: resources[index]!.key, status: 'rejected', reason: result.reason })
-}
-
-/** Names the operation a timed-out View close sent, so inspect reads that same Stop. */
-function unconfirmedStopSuffix(control: SessionControl): string {
-  const intent = control.kind === 'agent' ? unconfirmedStopFor(control) : undefined
-  return intent ? ` ${intent.operationId} (${sessionStopInspectCommand(intent)})` : ''
-}
-
-/** The one stop step of every View close (Tab or split): exact Run, rechecked against other Views. */
-async function stopLastViewSession(
-  current: Pick<AppState, 'tabs' | 'sessions' | 'closingWorkbenchViews'>,
-  resource: Extract<WorkbenchViewCloseResource, { kind: 'session' }>
-): Promise<void> {
-  if (!current.sessions.some((session) => (
-    session.id === resource.sessionId && sessionOwnsControl(session, resource.control)
-  ))) return
-  if (hasAttachedSessionOutsideClosingViews({
-    tabs: current.tabs,
-    sessions: current.sessions,
-    isClosing: closingWorkbenchReservations(current.closingWorkbenchViews),
-    sessionId: resource.sessionId
-  })) {
-    throw new Error(`Session gained another View while closing: ${resource.sessionId}`)
-  }
-  if (resource.control.kind !== 'agent') { await api.sessions.stop(resource.control); return }
-  // Closing the View again resends this same Stop, so Core continues it.
-  const intent = sessionStopIntentFor(resource.control)
-  const operation = retainUnconfirmedStop(intent)
-  try {
-    const receipt = await api.sessions.stop(intent.control, intent.operationId)
-    if (!receipt || !acceptAgentStopReceipt(operation, receipt)) throw new Error('The original Agent Stop receipt could not be confirmed. Its Session and View are kept.')
-    settleSessionStop({ ...intent, operationId: receipt.operationId })
-  } catch (error) {
-    if (sessionStopErrorCode(error) === STALE_STOP_CODE) settleSessionStop(intent)
-    throw sessionStopFailure(error, intent)
-  }
-}
-
-function workbenchViewCloseFailure(receipts: readonly WorkbenchViewCloseReceipt[]): Error {
-  const reasons = receipts.flatMap((receipt) => receipt.status === 'rejected'
-    ? [receipt.reason instanceof Error ? receipt.reason : new Error(String(receipt.reason))]
-    : [])
-  return reasons.length === 1
-    ? reasons[0]!
-    : new AggregateError(reasons, 'Multiple View resources could not be closed.')
 }
 
 function sessionOwnsControl(session: SessionSnapshot, control: SessionControl): boolean {
@@ -6179,7 +6107,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       else get().applyBrowserEvent(event)
     })
-    const disposeControl = api.control.onRequest((request, signal) => request.operation === 'worktree.closeout.prepare'
+    const disposeControl = api.control.onRequest((request, signal) => isWorkbenchCloseRendererRequest(request) ? get().executeWorkbenchClose(request) : request.operation === 'worktree.closeout.prepare'
       ? (async () => {
           if (!coreSpatialPersistence?.ready) throw new Error('Original workface storage is unconfirmed. Keep the worktree and restore storage before closing it.')
           await coreSpatialPersistence.flush()
@@ -7529,7 +7457,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     }
     if (request.operation === 'interrupt' || request.operation === 'resume' || request.operation === 'stop') {
-      const session = agentSession(request.target, request.caller)
+      const session = agentSession(request.target.kind === 'agent-run' ? { kind: 'agent-session', agentSessionId: request.target.agentSessionId } : request.target, request.caller)
+      if (request.operation === 'stop' && request.expectedRun && session.control.run.runId !== request.expectedRun.runId) throw controlFailure('STALE_AGENT_SESSION', 'The original Stop Run changed. The new Run and original workface are retained.')
       requireActive()
       if (request.operation === 'interrupt') {
         await api.sessions.interrupt(session.control)
@@ -7537,8 +7466,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       if (request.operation === 'stop') {
         // The control request is the Stop's identity: a retried request continues the same Stop.
-        await api.sessions.stop(session.control, request.requestId)
-        return { operation: request.operation, agentSessionId: session.id }
+        const receipt = await api.sessions.stop(session.control, request.requestId)
+        return { operation: request.operation, agentSessionId: session.id, ...(receipt && 'agentSessionId' in receipt ? { receipt } : {}) }
       }
       const resumed = await api.sessions.resume(session.control, request.text, request.requestId)
       if (resumed.kind !== 'agent' || resumed.id !== session.id) {
@@ -8122,7 +8051,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       initialInputs.sourceLauncherId ?? warmLauncherId({ tabGroupId: targetTabGroupId, regionId: undefined }), initialInputs)
     return tab.id
   },
-  checkTabClose(workspaceId, tabGroupId, tabId) {
+  checkTabClose(workspaceId, tabGroupId, tabId, regionId) {
     const state = get(), tab = state.tabs[tabId]
     if (!tab) return true // An already closed original Tab needs no further cleanup.
     const layout = state.layouts[workspaceId]
@@ -8134,7 +8063,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, owner) ?? []
       return topics.some(topic => {
         const original = topic.quickMode?.status === 'saved' ? topic.quickMode.defaults.conversation : undefined
-        if (!original || original.displayWorkspaceId !== workspaceId || original.groupId !== tabGroupId || original.tabId !== tabId || scratchTopicKind(topic.id, topics) !== 'mote') return false
+        if (!original || original.displayWorkspaceId !== workspaceId || original.groupId !== tabGroupId || original.tabId !== tabId || regionId !== undefined && original.regionId !== regionId || scratchTopicKind(topic.id, topics) !== 'mote') return false
         // The preference owner can differ from the Tab's resource; its resolver checks Region, Session and Host.
         return Boolean(moteDefaultConversation(state, topic, owner.id).conversation)
       })
@@ -8143,124 +8072,96 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     state.reportError(new Error('The main Agent conversation stays open here. Unset it in this Mote’s Profile → Quick mode to close it; its Agent is unchanged.'), { kind: 'indeterminate' })
     return false
   },
-  closeTab(workspaceId, tabGroupId, tabId, options) {
-    const state = get()
-    if (!state.checkTabClose(workspaceId, tabGroupId, tabId)) return Promise.resolve(false)
-    const errorBeforeClose = state.error
-    if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, tabId)) {
-      return Promise.resolve(false)
+  async prepareWorkbenchClose(input) {
+    const request: SpaceClosePrepare = { ...input, operationId: input.operationId ?? mintObjectId() }
+    const result = parseSpaceCloseResult('space.close.prepare', await api.workbenchClose.call('space.close.prepare', request), request)
+    if (!result.operation || result.operation.diskDurability !== 'confirmed') throw new Error('The original close plan has no confirmed save. Its ID, workface and drafts are retained; inspect the same operation.')
+    return result.operation
+  },
+  async applyWorkbenchClose(record) {
+    const request = { operationId: record.operationId, expectedPlanDigest: record.planDigest, decisions: spaceCloseDecisions(record.plan) }
+    const result = parseSpaceCloseResult('space.close.apply', await api.workbenchClose.call('space.close.apply', request), request).operation!
+    if (result.outcome !== 'applied' || result.diskDurability !== 'confirmed') {
+      get().reportError(new Error(`Original close ${result.operationId} is ${result.outcome}; retained Regions: ${result.clientProjection.retainedRegions.join(', ') || 'see original projection'}. Inspect with amux space close inspect --operation-id ${result.operationId}. ${result.issue ?? ''}`), { kind: 'indeterminate' })
+      return false
     }
-    const plan = planWorkbenchViewClose({
-      tabs: state.tabs,
-      layouts: state.layouts,
-      sessions: state.sessions,
-      workspaceId,
-      tabGroupId,
-      tabId,
-      keepAgentSessions: options?.keepAgentSessions === true,
-      closing: closingWorkbenchReservations(state.closingWorkbenchViews)
+    return true
+  },
+  async executeWorkbenchClose(request) {
+    if (request.operation === 'workbench.close.capture') {
+      const { target } = request.input
+      if (!get().checkTabClose(target.displayWorkspaceId, target.groupId, target.tabId, target.kind === 'region' ? target.regionId : undefined)) throw new Error('The original workface close is pinned or its exact display scope is unconfirmed. Its resources and drafts are retained.')
+      return { operation: request.operation, requestId: request.requestId, projection: captureWorkbenchClose(get(), request.input) }
+    }
+    const record = parseSpaceCloseReceipt(request.record), target = record.plan.target
+    const held = () => get().closingWorkbenchViews[target.tabId]?.operationId === record.operationId
+    if (request.operation === 'workbench.close.release') {
+      set(current => {
+        if (current.closingWorkbenchViews[target.tabId]?.operationId !== record.operationId) return current
+        const closingWorkbenchViews = { ...current.closingWorkbenchViews }; delete closingWorkbenchViews[target.tabId]
+        return { closingWorkbenchViews }
+      })
+      return { operation: request.operation, requestId: request.requestId }
+    }
+    if (request.operation === 'workbench.close.reserve') {
+      if (get().closingWorkbenchViews[target.tabId] && !held()) throw new Error('Another exact close still owns this workface observation. Its original operation and healthy input are retained.')
+      if (!get().checkTabClose(target.displayWorkspaceId, target.groupId, target.tabId, target.kind === 'region' ? target.regionId : undefined)) throw new Error('The original close target is pinned or unconfirmed.')
+      validateWorkbenchClose(get(), record)
+      set(current => ({ closingWorkbenchViews: { ...current.closingWorkbenchViews, [target.tabId]: {
+        operationId: record.operationId, tabId: target.tabId, ...(target.kind === 'region' ? { regionId: target.regionId } : {}),
+        reservedSessionIds: [] } } }))
+      return { operation: request.operation, requestId: request.requestId }
+    }
+    if (!held()) throw new Error('The original close reservation is unavailable. The current workface and drafts are retained.')
+    if (request.operation === 'workbench.close.validate') {
+      validateWorkbenchClose(get(), record, request.key)
+      return { operation: request.operation, requestId: request.requestId }
+    }
+    const previousTabs = get().tabs
+    let removedTab: WorkbenchTab | undefined, removedTabOrder: readonly string[] = [], collectionChanged = false
+    let projection = { applied: false, removedRegions: [] as string[], retainedRegions: record.plan.projection.surfaces.map(s => s.owner.regionId), save: null as SpaceCloseCommitResult['clientProjection']['save'] }
+    // All final dirty/content/lifetime/consumer witnesses are checked within this exact state replacement.
+    set(current => {
+      if (current.closingWorkbenchViews[target.tabId]?.operationId !== record.operationId) return current
+      const reconciled = reconcileWorkbenchClose(current, record)
+      const topology = applyWorkbenchViewCloseTopology(current, reconciled.plan, reconciled.tab)
+      const committed = { ...reconcileWorkbenchFileProjection(current, topology), ...surveyPresentationAfterClose(current, topology.tabs),
+        workbenchSpaceSelection: desktopSpaceSelectionAfterClose(current.workbenchSpaceSelection, topology,
+          { workspaceId: target.displayWorkspaceId, tabId: target.tabId, groupId: target.groupId, ...(target.kind === 'region' ? { regionId: target.regionId } : {}) }) }
+      removedTab = current.tabs[target.tabId] && !committed.tabs[target.tabId] ? current.tabs[target.tabId] : undefined
+      removedTabOrder = current.layouts[target.displayWorkspaceId]?.groups.find(g => g.id === target.groupId)?.tabOrder ?? []
+      collectionChanged = committed.surveyCollectedZones !== current.surveyCollectedZones
+      recordClosedWorkbenchEntities(current.tabs, committed.tabs)
+      const closesView = record.plan.projection.closesView
+      projection = { ...projection, applied: topology !== current, removedRegions: closesView ? record.plan.projection.surfaces.filter(s => !committed.tabs[target.tabId]?.regions[s.owner.regionId]).map(s => s.owner.regionId) : [],
+        retainedRegions: closesView ? record.plan.projection.surfaces.filter(s => committed.tabs[target.tabId]?.regions[s.owner.regionId]).map(s => s.owner.regionId) : [] }
+      if (!removedTab) return committed
+      return { ...committed, recentMoteAgents: Object.fromEntries(Object.entries(current.recentMoteAgents).filter(([, agent]) => agent.tabId !== removedTab!.id)) }
     })
-    if (!plan) return Promise.resolve(true)
-    if (options?.approved && (options.approved.workspaceId !== workspaceId || options.approved.tabGroupId !== tabGroupId ||
-      !workbenchViewCloseStillApproved(options.approved, plan, state.tabs[tabId]))) {
-      state.reportError(new Error('The content changed while its close confirmation was open. The current content and Sessions are kept. Close it again to review the current targets.'), { kind: 'indeterminate' })
-      return Promise.resolve(false)
-    }
-    // Publish only the exact View deletion committed here, independently of cleanup receipts.
-    const commitClose = (tab: WorkbenchTab | null): void => {
-      let removedTab: WorkbenchTab | undefined
-      let removedTabOrder: readonly string[] = []
-      let collectionChanged = false
-      set((current) => {
-        const topology = applyWorkbenchViewCloseTopology(current, plan, tab)
-        const committed = { ...reconcileWorkbenchFileProjection(current, topology),
-          ...surveyPresentationAfterClose(current, topology.tabs),
-          workbenchSpaceSelection: desktopSpaceSelectionAfterClose(current.workbenchSpaceSelection, topology,
-            { workspaceId, tabId, groupId: tabGroupId }) }
-        removedTab = current.tabs[tabId] && !committed.tabs[tabId] ? current.tabs[tabId] : undefined
-        removedTabOrder = current.layouts[workspaceId]?.groups.find(group => group.id === tabGroupId)?.tabOrder ?? []
-        collectionChanged = committed.surveyCollectedZones !== current.surveyCollectedZones
-        recordClosedWorkbenchEntities(current.tabs, committed.tabs)
-        const removedTabId = removedTab?.id
-        if (!removedTabId) return committed
-        // Closing a presentation does not reassign its original discussion Session.
-        return { ...committed,
-          recentMoteAgents: Object.fromEntries(Object.entries(current.recentMoteAgents).filter(([, agent]) => agent.tabId !== removedTabId)) }
-      })
-      if (removedTab && !get().tabs[removedTab.id]) publishWorkbenchTabRemoved(removedTab, { displayWorkspaceId: workspaceId, groupId: tabGroupId, tabOrder: removedTabOrder }, error => get().reportError(error))
-      if (collectionChanged) void saveWorkbenchSelection(false)
-    }
-    if (!plan.closesView) {
-      commitClose(null)
-      pruneEditorRegionState(get().tabs)
-      return Promise.resolve(true)
-    }
-    if (plan.resources.length === 0) {
-      const reconciliation = reconcileWorkbenchViewClose({
-        plan,
-        currentTab: state.tabs[tabId],
-        currentSessions: state.sessions,
-        receipts: []
-      })
-      const previousTabs = state.tabs
-      commitClose(reconciliation.tab)
-      pruneEditorRegionState(get().tabs)
-      return disposeClosedFileOwners(previousTabs, get().tabs).then(
-        () => true,
-        (error) => {
-          get().reportError(error)
-          return false
-        }
-      )
-    }
-    set((current) => ({
-      closingWorkbenchViews: {
-        ...current.closingWorkbenchViews,
-        [tabId]: plan
-      }
-    }))
-    return (async () => {
+    if (removedTab && !get().tabs[removedTab.id]) publishWorkbenchTabRemoved(removedTab,
+      { displayWorkspaceId: target.displayWorkspaceId, groupId: target.groupId, tabOrder: removedTabOrder }, error => get().reportError(error))
+    pruneEditorRegionState(get().tabs)
+    await disposeClosedFileOwners(previousTabs, get().tabs).catch(error => get().reportError(error))
+    if (collectionChanged) void saveSurveyPreferences()
+    const save = async (owner: 'client' | 'spatial') => {
+      const value = { layoutApplied: projection.applied, clientStateWritten: false, storageFlushRequested: false, diskDurability: 'unconfirmed' as const, reason: null as string | null }
       try {
-        const [browserReceipts, sessionReceipts] = await Promise.all([
-          settleWorkbenchViewCloseResources(
-            plan.resources.filter((resource) => resource.kind === 'browser'),
-            async (resource) => await api.browser.close(resource.browserId)
-          ),
-          settleWorkbenchViewCloseResources(
-            plan.resources.filter((resource) => resource.kind === 'session'),
-            async (resource) => await stopLastViewSession(get(), resource)
-          )
-        ])
-        const reconciliation = reconcileWorkbenchViewClose({
-          plan,
-          currentTab: get().tabs[tabId],
-          currentSessions: get().sessions,
-          receipts: [...browserReceipts, ...sessionReceipts]
-        })
-        const previousTabs = get().tabs
-        commitClose(reconciliation.tab)
-        await disposeClosedFileOwners(previousTabs, get().tabs)
-        pruneEditorRegionState(get().tabs)
-        if (reconciliation.failures.length > 0) {
-          get().reportError(workbenchViewCloseFailure(reconciliation.failures))
-        } else if (reconciliation.changedWhileClosing) {
-          if (get().error === errorBeforeClose) {
-            get().reportError(new Error('The View changed while it was closing. Review it and close it again.'))
-          }
-        }
-        return reconciliation.failures.length === 0 && !reconciliation.changedWhileClosing
-      } catch (error) {
-        get().reportError(error)
-        return false
-      } finally {
-        set((current) => {
-          if (current.closingWorkbenchViews[tabId] !== plan) return current
-          const closingWorkbenchViews = { ...current.closingWorkbenchViews }
-          delete closingWorkbenchViews[tabId]
-          return { closingWorkbenchViews }
-        })
-      }
-    })()
+        if (owner === 'client') { if (!workbenchWriteFence.isOpen()) throw new Error('The original user document is still restoring.'); await checkpointWorkbenchUserDocument() }
+        else await checkpointSpatialWorkbench()
+        return { ...value, clientStateWritten: true, storageFlushRequested: true, diskDurability: !__AGENTMUX_WEB_PREVIEW__ || owner === 'spatial' ? 'confirmed' as const : 'unconfirmed' as const }
+      } catch (error) { get().reportWorkbenchSaveFailure(error, owner === 'client' ? 'local-storage' : 'workbench'); return { ...value, reason: presentError(error) } }
+    }
+    const [client, spatial] = await Promise.all([save('client'), save('spatial')])
+    return { operation: 'workbench.close.commit', requestId: request.requestId, result: { clientProjection: { ...projection, save: client }, spatialContribution: { save: spatial } } }
+  },
+  async closeTab(workspaceId, tabGroupId, tabId, options) {
+    if (!get().tabs[tabId]) return true
+    try {
+      const record = options?.approved ?? await get().prepareWorkbenchClose({ target: { kind: 'tab-occurrence', displayWorkspaceId: workspaceId, groupId: tabGroupId, tabId }, keepAgentSessions: options?.keepAgentSessions === true })
+      if (record.plan.target.kind !== 'tab-occurrence' || record.plan.target.displayWorkspaceId !== workspaceId || record.plan.target.groupId !== tabGroupId || record.plan.target.tabId !== tabId || record.plan.keepAgentSessions !== (options?.keepAgentSessions === true)) throw new Error('The original close approval belongs to another target or Keep Session decision.')
+      if (!options?.approved && (record.plan.projection.drafts.length || record.plan.projection.resources.some(r => r.kind === 'session' && r.control.kind === 'agent'))) throw new Error('Review the original prepared close plan before discarding drafts or stopping Agent Sessions.')
+      return await get().applyWorkbenchClose(record)
+    } catch (error) { get().reportError(error); return false }
   },
   moveTab(workspaceId, tabId, sourcePaneId, targetPaneId, visibleTargetIndex) {
     const current = get()
@@ -8484,79 +8385,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }))
   },
   async closeRegion(workspaceId, tabId, regionId, options) {
-    const current = get()
-    if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, tabId)) return
-    const tab = current.tabs[tabId]
-    const surface = tab?.regions[regionId]
-    if (!tab || tab.workspaceId !== workspaceId || !surface) return
-    if (!removeWorkbenchRegion(tab, regionId)) return
-    const target = workbenchRegionCloseTarget({ tabs: current.tabs, sessions: current.sessions, tabId, regionId,
-      keepAgentSessions: options?.keepAgentSessions, closing: closingWorkbenchReservations(current.closingWorkbenchViews) })
-    if (options?.approved) {
-      if (!target || !workbenchViewCloseStillApproved(options.approved, target, tab)) {
-        current.reportError(new Error('The content changed while its close confirmation was open. The current content and Sessions are kept. Close it again to review the current targets.'), { kind: 'indeterminate' })
-        return
-      }
-    }
-    // An Agent whose last View this Region is stops through the same step as Tab close. Only Sessions
-    // confirmed in `sessions` are stopped; an unconfirmed one was named in the confirmation and is kept.
-    const stops = target?.resources.filter((resource): resource is Extract<WorkbenchViewCloseResource, { kind: 'session' }> => resource.kind === 'session') ?? []
-    if (stops.length > 0) {
-      const reservation: WorkbenchViewCloseReservation = {
-        tabId, regionId, reservedSessionIds: stops.map((resource) => resource.sessionId)
-      }
-      set((state) => ({ closingWorkbenchViews: { ...state.closingWorkbenchViews, [tabId]: reservation } }))
-      try {
-        const receipts = await settleWorkbenchViewCloseResources(stops, async (resource) => await stopLastViewSession(get(), resource))
-        // A Stop that failed or stayed unconfirmed keeps this Region: it is the Agent's only View and
-        // the place its retry or Keep Session lives. The error names the step and the Session.
-        if (receipts.some((receipt) => receipt.status === 'rejected')) {
-          get().reportError(workbenchViewCloseFailure(receipts))
-          return
-        }
-      } finally {
-        set((state) => {
-          if (state.closingWorkbenchViews[tabId] !== reservation) return state
-          const closingWorkbenchViews = { ...state.closingWorkbenchViews }
-          delete closingWorkbenchViews[tabId]
-          return { closingWorkbenchViews }
-        })
-      }
-    }
-    // What this surface owns outside the tree is decided once, exhaustively (workbench-surface-kinds).
-    // Asking `kind === 'browser'` / `kind === 'file'` here instead would let a sixth resource-bearing
-    // kind answer "nothing to release" and leak with no compile error.
-    const obligations = surfaceCloseObligations(surface)
-    if (obligations.browserViewId !== null) {
-      try {
-        await api.browser.close(obligations.browserViewId)
-      } catch (error) {
-        get().reportError(error)
-        return
-      }
-    }
-    const settled = get(), settledTarget = workbenchRegionCloseTarget({ tabs: settled.tabs, sessions: settled.sessions, tabId, regionId, keepAgentSessions: options?.keepAgentSessions })
-    if (!target || !settledTarget || !workbenchViewCloseStillApproved(target, settledTarget, settled.tabs[tabId])) {
-      settled.reportError(new Error('The content changed while it was closing. The current content and Sessions are kept. Close it again to review the current targets.'), { kind: 'indeterminate' })
-      return
-    }
-    const previousTabs = settled.tabs
-    set((state) => {
-      const liveTab = state.tabs[tabId]
-      if (!liveTab || !sameWorkbenchSurfaceOwner(liveTab.regions[regionId], surface)) return state
-      const nextTab = removeWorkbenchRegion(liveTab, regionId)
-      if (!nextTab) return state
-      coreSpatialPersistence?.removeEntity(regionId)
-      const tabs = { ...state.tabs, [tabId]: nextTab }
-      return { ...(obligations.releasesDocument
-        ? reconcileWorkbenchFileProjection(state, { tabs, layouts: state.layouts })
-        : { tabs }),
-        ...surveyPresentationAfterClose(state, tabs),
-        workbenchSpaceSelection: desktopSpaceSelectionAfterClose(state.workbenchSpaceSelection, { tabs, layouts: state.layouts },
-          { workspaceId, tabId, regionId }) }
-    })
-    pruneEditorRegionState(get().tabs)
-    if (obligations.releasesDocument) await disposeClosedFileOwners(previousTabs, get().tabs)
+    try {
+      const occurrences = Object.entries(get().layouts).flatMap(([displayWorkspaceId, layout]) => layout.groups.flatMap(g => g.tabOrder.includes(tabId) ? [{ displayWorkspaceId, groupId: g.id }] : []))
+      const location = options?.approved?.plan.target ?? (occurrences.length === 1 ? occurrences[0] : undefined)
+      if (!location) throw new Error('This Region has multiple or unconfirmed display occurrences. Choose its exact original close plan.')
+      const record = options?.approved ?? await get().prepareWorkbenchClose({ target: { kind: 'region', ...location, tabId, regionId }, keepAgentSessions: options?.keepAgentSessions === true })
+      if (record.plan.target.kind !== 'region' || record.plan.target.tabId !== tabId || record.plan.target.regionId !== regionId || record.plan.keepAgentSessions !== (options?.keepAgentSessions === true)) throw new Error('The original close approval belongs to another Region or Keep Session decision.')
+      if (!options?.approved && (record.plan.projection.drafts.length || record.plan.projection.resources.some(r => r.kind === 'session' && r.control.kind === 'agent'))) throw new Error('Review the original prepared close plan before discarding drafts or stopping Agent Sessions.')
+      await get().applyWorkbenchClose(record)
+    } catch (error) { get().reportError(error) }
   },
   requestCloseTab(workspaceId, tabGroupId, tabId) {
     // 只投意图，不在这里关：真正的关闭要经组件的 requestTabsClose（未保存/在跑 Agent 的确认对话框只活在

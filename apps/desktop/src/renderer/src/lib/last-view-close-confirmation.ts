@@ -67,7 +67,7 @@ export function lastViewCloseCopy(confirmation: LastViewCloseConfirmation, scope
     const many = agents.length > 1
     return {
       title: many ? `Stop ${agents.length} Agent Sessions?` : 'Stop Agent Session?',
-      description: `This closes the last View of ${list(agents.map((agent) => agent.name))}. Stop & Close stops ${many ? 'their Runs' : 'its Run'}; Keep ${many ? 'Sessions' : 'Session'} & Close leaves ${many ? 'them' : 'it'} running in the background.${unconfirmedSentence}${unsaved}`,
+      description: `This closes the last View of ${list(agents.map((agent) => agent.name))}. Stop & Close stops ${many ? 'their Runs' : 'its Run'}; Keep ${many ? 'Sessions' : 'Session'} & Close sends no new Stop; it does not cancel an earlier Stop.${unconfirmedSentence}${unsaved}`,
       confirmLabel: 'Stop & Close',
       secondaryLabel: many ? 'Keep Sessions & Close' : 'Keep Session & Close'
     }
@@ -93,4 +93,21 @@ export function lastViewCloseCopy(confirmation: LastViewCloseConfirmation, scope
 function list(names: readonly string[]): string {
   if (names.length <= 1) return names[0] ?? ''
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+}
+
+/** Human copy consumes the Main-frozen plan, never a freshly inferred execution target. */
+export function preparedCloseConfirmation(record: import('@agentmux/core').SpaceCloseReceipt, input: {
+  sessions: readonly SessionSnapshot[]; timelines: Readonly<Record<string, AgentTimelineSnapshot>>; agentNames: Readonly<Record<string, string>>
+}): LastViewCloseConfirmation | null {
+  const projection = record.plan.projection
+  const agents = projection.resources.flatMap(resource => {
+    if (resource.kind !== 'session' || resource.control.kind !== 'agent') return []
+    const session = input.sessions.find(s => s.id === resource.sessionId)
+    return [{ sessionId: resource.sessionId, name: session?.kind === 'agent' ? agentDisplayName({ userName: input.agentNames[session.id],
+      firstPrompt: firstPromptFromTimeline(input.timelines[session.id]), fallbackLabel: session.label, providerLabel: session.providerId }) : resource.control.agentSessionId }]
+  })
+  const unconfirmed = projection.closesView ? projection.surfaces.filter(s => s.bindingAvailability === 'unconfirmed').map(s => s.binding?.agentSessionId ??
+    (s.owner.kind === 'agent' ? s.owner.sessionId : 'the original Browser Agent')) : []
+  const dirtyCount = projection.drafts.length
+  return agents.length || unconfirmed.length || dirtyCount ? { agents, unconfirmed, dirtyCount } : null
 }

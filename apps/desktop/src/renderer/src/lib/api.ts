@@ -1,5 +1,6 @@
 import { createRendererSpaceMount } from './space-mount-api'
 import { createRendererNodePublishing } from './node-publishing-client'
+import { createPreviewWorkbenchClose } from './preview-workbench-close'
 import { createRendererHostRoutes } from './host-routes-client'
 import { createRendererSessionRecovery } from './session-recovery-api'
 import { SCREENSHOT_SHORTCUT, SCREENSHOT_SHORTCUT_ALTERNATE, screenshotShortcutAccelerator } from '../../../shared/screenshot-shortcut'
@@ -1026,6 +1027,7 @@ const mockApi: AgentMuxDesktopApi = {
       return () => mockControlListeners.delete(listener)
     }
   },
+  workbenchClose: createPreviewWorkbenchClose(),
   continuousProgress: {
     goals: async () => { throw new Error('Goal continuation facts require the original background Host.') },
     goalAction: async () => { throw new Error('Goal continuation actions require the original background Host.') },
@@ -1735,6 +1737,7 @@ function requireDesktopApi(): AgentMuxDesktopApi {
       return Object.assign(result.topics, result.issues.length ? { issues: result.issues } : {})
     } },
     control: createRendererControlApi(preload.control),
+    workbenchClose: { call: (method, input) => preload.workbenchClose.call(method, input).then(unwrapSessionObservationResult) },
     browser: {
       ...unwrapIpcResultMethods<AgentMuxDesktopApi['browser'], typeof BROWSER_PROFILE_RESULT_METHODS[number]>(preload.browser as never, BROWSER_PROFILE_RESULT_METHODS),
       runScript: (...args) => preload.browser.runScript(...args).then(unwrapBrowserRunResult)

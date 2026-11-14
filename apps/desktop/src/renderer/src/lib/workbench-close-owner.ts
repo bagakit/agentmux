@@ -1,0 +1,130 @@
+import { AgentMuxError } from '@agentmux/core/control'
+import { spaceCloseDigest, type SpaceClosePrepare, type SpaceCloseProjection, type SpaceCloseReceipt } from '@agentmux/core/space-close'
+import type { AppState } from '../store'
+import { documentKey, removeWorkbenchRegion, workbenchSurfaces } from './workbench-tabs'
+import { planWorkbenchViewClose, workbenchRegionCloseTarget, reconcileWorkbenchViewClose, workbenchViewCloseStillApproved,
+  closingWorkbenchReservations, type WorkbenchViewClosePlan, type WorkbenchViewCloseSurfaceOwner } from './workbench-view-close'
+import { documentLifetime, fileSaveTails } from './file-document-bookkeeping'
+import { hasFileDocumentConsumer } from './file-document-consumers'
+import { hasNoteComposition } from './note-live-merge'
+import { readNoteMarkdownHeader } from '@agentmux/core/note-format'
+
+type State = Pick<AppState, 'tabs' | 'layouts' | 'sessions' | 'documents' | 'dirtyDocuments' | 'documentGenerations' |
+  'documentObservationGenerations' | 'savingDocuments' | 'closingWorkbenchViews' | 'config'>
+const stale = () => new AgentMuxError('The original close target, Run, last View or draft changed. Its current content and healthy work are retained; prepare its current plan.', 'WORKBENCH_CLOSE_STALE')
+function originalPlan(state: State, input: SpaceClosePrepare): WorkbenchViewClosePlan {
+  const t = input.target, tab = state.tabs[t.tabId], layout = state.layouts[t.displayWorkspaceId]
+  if (!tab || !layout?.groups.some(g => g.id === t.groupId && g.tabOrder.includes(t.tabId))) throw stale()
+  if (t.kind === 'tab-occurrence') {
+    const plan = planWorkbenchViewClose({ tabs: state.tabs, layouts: state.layouts, sessions: state.sessions,
+      workspaceId: t.displayWorkspaceId, tabGroupId: t.groupId, tabId: t.tabId, keepAgentSessions: input.keepAgentSessions,
+      closing: closingWorkbenchReservations(state.closingWorkbenchViews) })
+    if (!plan) throw stale(); return plan
+  }
+  if (!tab.regions[t.regionId] || !removeWorkbenchRegion(tab, t.regionId)) throw new AgentMuxError('A single Region cannot close its entire Tab. Prepare that exact Tab occurrence instead.', 'WORKBENCH_CLOSE_TARGET_REQUIRED')
+  const selected = workbenchRegionCloseTarget({ tabs: state.tabs, sessions: state.sessions, tabId: t.tabId, regionId: t.regionId, keepAgentSessions: input.keepAgentSessions,
+    closing: closingWorkbenchReservations(state.closingWorkbenchViews) })
+  if (!selected) throw stale()
+  return { ...selected, workspaceId: t.displayWorkspaceId, tabGroupId: t.groupId, closesView: true,
+    reservedSessionIds: selected.resources.flatMap(r => r.kind === 'session' ? [r.sessionId] : []) }
+}
+function draftBusy(state: State, workspaceId: string, path: string): boolean {
+  const key = documentKey(workspaceId, path), editing = state.documents[key]?.noteEditing
+  return state.savingDocuments[key] === true || fileSaveTails.has(key) || hasNoteComposition(key) || Boolean(editing?.attempt || editing?.input || editing?.share || editing?.shareUndo)
+}
+function fileWitness(state: State, workspaceId: string, path: string, cache?: Map<string, string>): string {
+  const key = documentKey(workspaceId, path), document = state.documents[key], workspace = state.config?.workspaces.find(w => w.id === workspaceId)
+  const held = cache?.get(key); if (held !== undefined) return held
+  const witness = spaceCloseDigest({ workspace: workspace ? { id: workspace.id, hostId: workspace.hostId, path: workspace.path } : null,
+    document: document ?? null, generation: state.documentGenerations[key] ?? null, observation: state.documentObservationGenerations[key] ?? null,
+    lifetime: documentLifetime(key), dirty: state.dirtyDocuments[key] === true, saving: state.savingDocuments[key] === true,
+    consumer: hasFileDocumentConsumer(key), composition: hasNoteComposition(key) })
+  cache?.set(key, witness); return witness
+}
+function surfaceWitness(state: State, plan: WorkbenchViewClosePlan, owner: WorkbenchViewCloseSurfaceOwner, cache?: Map<string, string>): string {
+  const surface = state.tabs[plan.tabId]?.regions[owner.regionId]
+  const hasOwnStop = plan.surfaces.find(s => s.owner.regionId === owner.regionId)?.resourceKeys.some(k => k.startsWith('session:'))
+  return spaceCloseDigest({ owner: owner.kind === 'agent' || owner.kind === 'terminal' ? { ...owner, runId: hasOwnStop ? owner.runId : null } : owner,
+    binding: binding(state, plan, owner).binding,
+    source: !surface ? null : surface.kind === 'browser' ? { browserId: surface.browserId, navigationId: surface.navigationId, agent: surface.agent ?? null }
+      : surface.kind === 'file' ? fileWitness(state, surface.workspaceId, surface.path, cache) : null })
+}
+function binding(state: State, plan: WorkbenchViewClosePlan, owner: WorkbenchViewCloseSurfaceOwner): Pick<SpaceCloseProjection['surfaces'][number], 'binding' | 'bindingAvailability'> {
+  if (owner.kind === 'agent') {
+    const session = state.sessions.find(s => s.id === owner.sessionId)
+    return session?.control.kind === 'agent' ? { binding: { hostId: session.control.hostId, agentSessionId: session.control.agentSessionId }, bindingAvailability: 'known' }
+      : { binding: null, bindingAvailability: 'unconfirmed' }
+  }
+  const surface = state.tabs[plan.tabId]?.regions[owner.regionId]
+  if (surface?.kind === 'browser' && surface.agent) {
+    const original = { hostId: surface.agent.hostId, agentSessionId: surface.agent.agentSessionId }
+    return { binding: original, bindingAvailability: state.sessions.some(s => s.control.kind === 'agent' && s.control.hostId === original.hostId && s.control.agentSessionId === original.agentSessionId) ? 'known' : 'unconfirmed' }
+  }
+  return { binding: null, bindingAvailability: null }
+}
+/** Same GUI planner, with frozen machine witnesses. Bodies never leave the original document. */
+export function captureWorkbenchClose(state: State, input: SpaceClosePrepare): SpaceCloseProjection {
+  const witnesses = new Map<string, string>(), plan = originalPlan(state, input), drafts: SpaceCloseProjection['drafts'] = []
+  if (plan.closesView) for (const { owner } of plan.surfaces) {
+    if (owner.kind !== 'file') continue
+    const key = documentKey(owner.workspaceId, owner.path), document = state.documents[key]
+    if (!document || !state.dirtyDocuments[key]) continue
+    // Other occurrences/independent shared consumers retain the original document.
+    const outside = Object.values(state.tabs).some(tab => workbenchSurfaces(tab).some(s => s.kind === 'file' && documentKey(s.workspaceId, s.path) === key &&
+      (tab.id !== plan.tabId || !plan.surfaces.some(p => p.owner.regionId === s.regionId))))
+    const header = readNoteMarkdownHeader(document.content)
+    if (outside || hasFileDocumentConsumer(key) || document.noteEditing?.share || document.noteEditing?.shareUndo || header.status === 'valid' && header.kind === 'shared-block') continue
+    const found = drafts.find(d => d.document.workspaceId === owner.workspaceId && d.document.path === owner.path)
+    if (found) { found.regionIds.push(owner.regionId); continue }
+    const workspace = state.config?.workspaces.find(w => w.id === owner.workspaceId)
+    if (!workspace) throw stale()
+    drafts.push({ document: { hostId: workspace.hostId, workspaceId: workspace.id, path: owner.path, noteId: header.status === 'valid' ? header.noteId : null },
+      witness: fileWitness(state, owner.workspaceId, owner.path, witnesses), regionIds: [owner.regionId] })
+  }
+  return { ...plan, surfaces: plan.surfaces.map(s => ({ owner: { ...s.owner }, resourceKeys: [...s.resourceKeys], witness: surfaceWitness(state, plan, s.owner, witnesses), ...binding(state, plan, s.owner),
+    blocker: s.owner.kind === 'file' && draftBusy(state, s.owner.workspaceId, s.owner.path) ? 'draft-busy' : (s.owner.kind === 'agent' || s.owner.kind === 'terminal') && s.owner.phase === 'attached' && s.owner.runId === null && plan.closesView && (s.owner.kind === 'terminal' || !input.keepAgentSessions) ? 'session-unconfirmed' : null })),
+    resources: structuredClone([...plan.resources]), reservedSessionIds: [...plan.reservedSessionIds], drafts, otherOccurrences: Object.entries(state.layouts).flatMap(([displayWorkspaceId, layout]) => layout.groups.flatMap(g => g.tabOrder.includes(plan.tabId) && (displayWorkspaceId !== plan.workspaceId || g.id !== plan.tabGroupId) ? [{ displayWorkspaceId, groupId: g.id }] : [])) }
+}
+function plannerProjection(record: SpaceCloseReceipt): WorkbenchViewClosePlan {
+  // The strict shared codec has already checked these exact resource-key forms.
+  return record.plan.projection as WorkbenchViewClosePlan
+}
+/** Immediately before every child, not only before the first external await. */
+export function validateWorkbenchClose(state: State, record: SpaceCloseReceipt, resourceKey?: string): void {
+  const witnesses = new Map<string, string>(), approved = plannerProjection(record), current = originalPlan(state, record.request)
+  if (!workbenchViewCloseStillApproved(approved, current, state.tabs[approved.tabId])) throw stale()
+  const relevant = resourceKey === undefined ? approved.surfaces.filter(s => record.plan.projection.surfaces.find(p => p.owner.regionId === s.owner.regionId)?.blocker !== 'draft-busy') : approved.surfaces.filter(s => s.resourceKeys.includes(resourceKey as never))
+  if (resourceKey && !current.resources.some(r => r.key === resourceKey)) throw stale()
+  for (const surface of relevant) {
+    const frozen = record.plan.projection.surfaces.find(s => s.owner.regionId === surface.owner.regionId)!
+    const now = current.surfaces.find(s => s.owner.regionId === surface.owner.regionId)
+    if (!now || frozen.blocker === 'draft-busy' || frozen.blocker === 'session-unconfirmed' && frozen.bindingAvailability !== 'unconfirmed' || now.owner.kind === 'file' && draftBusy(state, now.owner.workspaceId, now.owner.path) || surfaceWitness(state, approved, now.owner, witnesses) !== frozen.witness) throw stale()
+  }
+}
+/** Call inside the one original state transaction: external waits can never consume new dirty input. */
+export function reconcileWorkbenchClose(state: State, record: SpaceCloseReceipt): { plan: WorkbenchViewClosePlan; tab: AppState['tabs'][string] | null } {
+  const approved = plannerProjection(record), currentTab = state.tabs[approved.tabId]
+  if (!approved.closesView) { validateWorkbenchClose(state, record); return { plan: approved, tab: null } }
+  let current: WorkbenchViewClosePlan | undefined
+  try { current = originalPlan(state, record.request) } catch { /* The original surface may already be gone; no replacement is adopted. */ }
+  if (!current || !current.closesView) return { plan: approved, tab: currentTab ?? null }
+  const witnesses = new Map<string, string>()
+  const eligible = approved.surfaces.filter(s => {
+    const frozen = record.plan.projection.surfaces.find(p => p.owner.regionId === s.owner.regionId)!, now = current?.surfaces.find(p => p.owner.regionId === s.owner.regionId)
+    return now && frozen.blocker !== 'draft-busy' && !(frozen.blocker === 'session-unconfirmed' && frozen.bindingAvailability !== 'unconfirmed') && !(now.owner.kind === 'file' && draftBusy(state, now.owner.workspaceId, now.owner.path)) && surfaceWitness(state, approved, now.owner, witnesses) === frozen.witness
+  })
+  const result = reconcileWorkbenchViewClose({ plan: { ...approved, surfaces: eligible }, currentTab, currentSessions: state.sessions,
+    receipts: record.resources.map(r => ({ key: r.key as never, status: r.outcome === 'acknowledged' ? 'fulfilled' : 'rejected' })) })
+  return { plan: approved, tab: result.tab }
+}
+
+/** Both GUI choices are prepared before confirmation; Keep cannot consume a newer draft or binding. */
+export function samePreparedCloseReview(left: SpaceCloseReceipt, right: SpaceCloseReceipt): boolean {
+  return spaceCloseDigest(left.plan.projection.drafts) === spaceCloseDigest(right.plan.projection.drafts) &&
+    left.plan.projection.surfaces.every(surface => {
+      const other = right.plan.projection.surfaces.find(s => s.owner.regionId === surface.owner.regionId)
+      return other && spaceCloseDigest(surface.binding) === spaceCloseDigest(other.binding) &&
+        (surface.owner.kind === 'agent' ? other.owner.kind === 'agent' && surface.owner.sessionId === other.owner.sessionId && surface.owner.phase === other.owner.phase
+          : surface.witness === other.witness)
+    })
+}

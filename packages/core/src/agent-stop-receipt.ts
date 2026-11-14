@@ -108,7 +108,7 @@ function object(value: unknown, what: string): Record<string, unknown> {
   return value as Record<string, unknown>
 }
 function id(value: unknown, what: string): string {
-  if (typeof value !== 'string' || !value.trim() || Buffer.byteLength(value) > 512 || /[\0\r\n]/u.test(value)) invalid(what)
+  if (typeof value !== 'string' || !value.trim() || new TextEncoder().encode(value).byteLength > 512 || /[\0\r\n]/u.test(value)) invalid(what)
   return value as string
 }
 function time(value: unknown, what: string): number {
@@ -120,7 +120,7 @@ function member<T extends string>(value: unknown, allowed: readonly T[], what: s
   return value as T
 }
 function text(value: unknown, what: string): string {
-  if (typeof value !== 'string' || Buffer.byteLength(value) > 4096) invalid(what)
+  if (typeof value !== 'string' || new TextEncoder().encode(value).byteLength > 4096) invalid(what)
   return value as string
 }
 

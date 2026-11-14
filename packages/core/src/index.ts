@@ -279,3 +279,5 @@ export type { GoalsCommonActionRef, GoalsCommonActionsConfig, CommonActionsConfi
 export * from './public-rpc-tailcat-configuration.js'
 export * from './run-control-context.js'
 export * from './terminal-control.js'
+
+export * from './space-close.js'

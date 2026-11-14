@@ -698,18 +698,25 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
       ...(owner ? { caller: owner } : {})
     }
   }
-  if (source.operation === 'interrupt' || source.operation === 'resume' || source.operation === 'stop') {
-    const target = sessionSelector(source.target)
+  if (source.operation === 'stop') {
+    settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'target', 'caller', 'expectedRun'], 'INVALID_CONTROL_REQUEST')
     const owner = optionalCaller(source.caller)
+    if (source.expectedRun !== undefined) {
+      const target = rpcRecord(source.target, ['kind', 'agentSessionId']), run = rpcRecord(source.expectedRun, ['runId'])
+      if (target.kind !== 'agent-run') throw new AgentMuxError('An exact Stop uses the agent-run target; a current Session target cannot silently consume a Run fence.', 'INVALID_CONTROL_REQUEST')
+      return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: 'stop',
+        target: { kind: 'agent-run', agentSessionId: identity(target.agentSessionId, 'Keep the exact original Agent Session ID.', 'INVALID_CONTROL_REQUEST') },
+        expectedRun: { runId: identity(run.runId, 'Keep the original Stop Run identity.', 'INVALID_CONTROL_REQUEST') }, ...(owner ? { caller: owner } : {}) }
+    }
+    const target = sessionSelector(source.target)
     if (target.kind === 'self' && !owner) throw new AgentMuxError('A self target requires a managed caller.', 'INVALID_CONTROL_REQUEST')
-    return {
-      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-      requestId,
-      operation: source.operation,
-      target,
-      ...(source.operation === 'resume' ? { text: source.text === undefined ? '' : text(source.text, 'Resume text') } : {}),
-      ...(owner ? { caller: owner } : {})
-    } as AgentMuxControlRequest
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: 'stop', target, ...(owner ? { caller: owner } : {}) }
+  }
+  if (source.operation === 'interrupt' || source.operation === 'resume') {
+    const target = sessionSelector(source.target), owner = optionalCaller(source.caller)
+    if (target.kind === 'self' && !owner) throw new AgentMuxError('A self target requires a managed caller.', 'INVALID_CONTROL_REQUEST')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, target,
+      ...(source.operation === 'resume' ? { text: source.text === undefined ? '' : text(source.text, 'Resume text') } : {}), ...(owner ? { caller: owner } : {}) } as AgentMuxControlRequest
   }
   if (source.operation === 'focus') return parseDesktopFocusRequest(source)
   if (source.operation === 'browser.create' || source.operation === 'browser.close') {

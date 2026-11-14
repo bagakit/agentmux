@@ -14,6 +14,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./space-close": {
+      "types": "./dist/space-close.d.ts",
+      "import": "./dist/space-close.js"
+    },
     "./remote-transport-observation": {
       "types": "./dist/remote-transport-observation.d.ts",
       "import": "./dist/remote-transport-observation.js"

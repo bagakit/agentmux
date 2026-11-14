@@ -1,4 +1,5 @@
 import '../monaco'
+import { setNoteComposition } from '../lib/note-live-merge'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
@@ -60,6 +61,7 @@ export function FileSourceEditor({ tabId, surface, visible = true, viewState }: 
   const visibleRef = useRef(visible)
   visibleRef.current = visible
   useLayoutEffect(() => () => {
+    setNoteComposition(key, `file-source:${surface.regionId}`, false)
     unregisterFormatter.current?.()
     unregisterFormatter.current = null
     const editor = editorRef.current
@@ -192,6 +194,8 @@ export function FileSourceEditor({ tabId, surface, visible = true, viewState }: 
     // agent-context item must appear only for a multi-line selection, so we own that key and refresh
     // it whenever the selection changes. Same key name as the action's precondition (one constant).
     const multiline = editor.createContextKey<boolean>(MULTILINE_SELECTION_CONTEXT_KEY, false)
+    editor.onDidCompositionStart(() => setNoteComposition(key, `file-source:${surface.regionId}`, true))
+    editor.onDidCompositionEnd(() => setNoteComposition(key, `file-source:${surface.regionId}`, false))
     editor.onDidChangeCursorSelection((event) => {
       multiline.set(hasMultilineSelection(event.selection.startLineNumber, event.selection.endLineNumber))
     })
@@ -275,6 +279,7 @@ export function FileSourceEditor({ tabId, surface, visible = true, viewState }: 
       // Monaco owns the editor lifetime. Clear only the instance that disposed itself so a
       // late dispose from an old Region cannot erase a newer editor reference after restore.
       editor.onDidDispose(() => {
+        setNoteComposition(key, `file-source:${surface.regionId}`, false)
         unregister()
         if (editorRef.current === editor) editorRef.current = null
       })

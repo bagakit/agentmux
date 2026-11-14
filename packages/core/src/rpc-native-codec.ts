@@ -1,4 +1,5 @@
 import { isObjectAvatarMethod, parseObjectAvatarParams, parseObjectAvatarResult } from './object-avatar.js'
+import { SPACE_CLOSE_METHODS, parseSpaceCloseParams, parseSpaceCloseResult, type SpaceCloseMethod } from './space-close.js'
 import { parseTailcatConfigurationParams, parseTailcatConfigurationResult } from './public-rpc-tailcat-configuration.js'
 import { parseTerminalControl, parseTerminalControlResult, parseTerminalControlInspect, parseTerminalControlInspection } from './terminal-control.js'
 import { parseFileStatParams, parseFileStatResult, parseFileMkdirParams, parseFileMkdirResult, parseFileMutationInspectParams, parseFileMutationInspectResult } from './public-rpc-file-path.js'
@@ -510,6 +511,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (isTopicMethod(method)) return parseTopicResult(method, value, parseTopicParams(method, params)) as unknown as Record<string, unknown>
     if (isAgentMuxRpcDeviceMethod(method)) return parseAgentMuxRpcDeviceResult(method, value,
       parseAgentMuxRpcDeviceParams(method, params)) as unknown as Record<string, unknown>
+    if (Object.hasOwn(SPACE_CLOSE_METHODS, method)) { const selected = method as SpaceCloseMethod; return parseSpaceCloseResult(selected, value, parseSpaceCloseParams(selected, params)) as unknown as Record<string, unknown> }
     if (method === 'terminal.operation.inspect') return parseTerminalControlInspection(value, parseTerminalControlInspect(params)) as unknown as Record<string, unknown>
     if (method === 'terminal.input' || method === 'terminal.interrupt' || method === 'terminal.stop') return parseTerminalControlResult(value, parseTerminalControl(params, method === 'terminal.input' ? 'terminal-input' : method === 'terminal.interrupt' ? 'terminal-interrupt' : 'terminal-stop')) as unknown as Record<string, unknown>
     if (method === 'agent.posture.inspect') return parsePostureInspection(value, parsePostureInspect(params)) as unknown as Record<string, unknown>

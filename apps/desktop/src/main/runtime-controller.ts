@@ -2191,6 +2191,13 @@ export class RuntimeController {
   // Request references only. Native state and durable intent/ACK live at original Core.
   private readonly terminalStopRequests = new Map<string, string>()
 
+  /** Freeze only already-known Native owner facts for one explicit close child; never start Native. */
+  async prepareWorkbenchCloseTerminal(control: Extract<SessionControl, { kind: 'terminal' }>, operationId: string): Promise<Extract<import('@agentmux/core').TerminalControlRequest, { action: 'terminal-stop' | 'terminal-interrupt' }>> {
+    if (control.runId !== control.run.runId) throw new AgentMuxError('The original Terminal control has conflicting Run identities.', 'INVALID_CONTROL_REQUEST')
+    const native = await this.configuredClient(control.hostId).terminalCreationRuntimeIdentity()
+    return { action: 'terminal-stop', operationId, target: { hostId: control.hostId, runtimeId: native.runtimeId, run: { ...control.run } }, ownerInstanceId: native.instanceId }
+  }
+
   private async terminalControlIntent(control: Extract<SessionControl, { kind: 'terminal' }>, action: 'terminal-stop' | 'terminal-interrupt', operationId: string): Promise<import('@agentmux/core').TerminalControlReceipt> {
     if (control.runId !== control.run.runId) throw new AgentMuxError('The raw Terminal control has conflicting Run identities.', 'INVALID_CONTROL_REQUEST')
     const client = await this.connectedClient(control.hostId, 'raw-input')

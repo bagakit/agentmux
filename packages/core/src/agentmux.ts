@@ -55,6 +55,9 @@ function partial(method: AgentMuxRpcMethod, result: unknown): boolean {
   if (!result || typeof result !== 'object') return false
   const body = result as Record<string, unknown>
   if (['terminal.input', 'terminal.interrupt', 'terminal.stop'].includes(method) && ((!['applied', 'no-op'].includes(String(body.outcome))) || body.diskDurability !== 'confirmed')) return true
+  if (method === 'space.close.apply' && ((body.operation as { outcome?: string; diskDurability?: string } | null)?.outcome !== 'applied' || (body.operation as { diskDurability?: string } | null)?.diskDurability !== 'confirmed')) return true
+  if (method === 'space.close.prepare' && (body.operation as { diskDurability?: string } | null)?.diskDurability !== 'confirmed') return true
+  if (method === 'space.close.ls' && body.availability !== 'complete') return true
   if (method === 'agent.posture.set' && (body.outcome !== 'applied' || body.diskDurability !== 'confirmed')) return true
   if (method === 'node.locate' && body.status === 'unconfirmed') return true
   if (method === 'settings.node.configure' && (body.operation as { status?: string } | undefined)?.status !== 'confirmed') return true

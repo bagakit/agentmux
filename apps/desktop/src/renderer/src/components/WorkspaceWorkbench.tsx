@@ -1,3 +1,5 @@
+import type { SpaceCloseReceipt } from '@agentmux/core'
+import { samePreparedCloseReview } from '../lib/workbench-close-owner'
 import { WorkbenchRegionOwner } from './WorkbenchRegionOwners'
 import { useWorkbenchTabsClose } from '../hooks/useWorkbenchTabsClose'
 import { AgentWorkModeBadge } from './AgentWorkModeBadge'
@@ -104,9 +106,8 @@ import {
   type WorkbenchTab
 } from '../lib/workbench-tabs'
 import { assertUnreachableSurface, isSessionSurface } from '../lib/workbench-surface-kinds'
-import { closingWorkbenchRegion, workbenchRegionCloseTarget, type WorkbenchViewCloseTarget } from '../lib/workbench-view-close'
 import {
-  lastViewCloseConfirmation,
+  preparedCloseConfirmation,
   lastViewCloseCopy,
   lastViewCloseStops,
   type LastViewCloseConfirmation
@@ -745,16 +746,14 @@ function WorkbenchRegionContent({
   const actualDefaults = useMoteDefaultConversation(actualTopic, tab.workspaceId, surfaceVisible)
   const focusRegion = useAppStore.getState().focusRegion
   const retainedRegionId = useWorkbenchRetainedRegionId()
-  const closeRegion = useAppStore.getState().closeRegion
   const splitRegion = useAppStore.getState().splitRegion
   const arrangeTabRegions = useAppStore.getState().arrangeTabRegions
   const swapRegions = useAppStore.getState().swapRegions
   const promoteRegionToTab = useAppStore.getState().promoteRegionToTab
-  const dirtyDocuments = useAppStore((state) => state.dirtyDocuments)
   const closeRegionRequest = useAppStore((state) => state.closeRegionRequest)
   const clearCloseRegionRequest = useAppStore.getState().clearCloseRegionRequest
   const reportError = useAppStore.getState().reportError
-  const [confirmingClose, setConfirmingClose] = useState<{ confirmation: LastViewCloseConfirmation; target: WorkbenchViewCloseTarget } | null>(null)
+  const [confirmingClose, setConfirmingClose] = useState<{ confirmation: LastViewCloseConfirmation; record: SpaceCloseReceipt; keep: SpaceCloseReceipt | null } | null>(null)
   const [closingRegion, setClosingRegion] = useState(false)
   const surface = tab.regions[node.regionId]
   const connector = useAgentConnectorMenu(node.regionId, surface ? addressableAgentSessionId(surface) : null, tab.id)
@@ -765,45 +764,39 @@ function WorkbenchRegionContent({
   // 候选数一起喂进去：只有一格时环不表达任何选择，画出来就是整个界面镶一圈绿边。
   const focus = regionFocusExpression(retainedRegionId ?? tab.layout.activeRegionId, node.regionId, regionCount)
   const canClose = regionCount > 1
-  const dirty = surface?.kind === 'file' && Boolean(
-    dirtyDocuments[documentKey(surface.workspaceId, surface.path)]
-  )
 
-  // 关这一格的唯一决定出口：脏文件或「这一格是某个在跑 Agent 的最后一个 View」（含 Browser 绑定的 Agent）
-  // 就先弹与关 Tab 同一族的确认，否则直接关。鼠标点 X、键盘 Cmd+W（经 requestCloseRegion 意图落到这里）与
-  // Browser 自己的关闭都走它——「关这一格要不要确认」只此一处判定。
-  function requestRegionClose(): void {
+  // Every close surface reviews the same Main-owned frozen plan as the CLI.
+  async function requestRegionClose(): Promise<void> {
     const pinned = browserPresentation.surface === 'mote' ? actualDefaults.conversation : browserPresentation.surface ? undefined : mote?.defaultConversation
     if (pinned && pinned.tabId === tab.id && pinned.regionId === node.regionId && groupId &&
       motePinnedTab(pinned, browserPresentation.reference?.displayWorkspaceId ?? tab.workspaceId, groupId, tab.id)) {
       reportError(new Error('The main Agent conversation stays open here. Unset it in this Mote’s Profile → Quick mode before closing its Region.'), { kind: 'indeterminate' }); return
     }
     if (closingRegion) return
-    const state = useAppStore.getState()
-    const confirmation = lastViewCloseConfirmation({
-      tabs: state.tabs,
-      sessions: state.sessions,
-      timelines: state.timelines,
-      agentNames: state.agentNames,
-      isClosing: closingWorkbenchRegion(tab.id, node.regionId),
-      dirtyCount: dirty ? 1 : 0
-    })
-    const target = confirmation && workbenchRegionCloseTarget({ tabs: state.tabs, sessions: state.sessions, tabId: tab.id, regionId: node.regionId })
-    if (confirmation && target) setConfirmingClose({ confirmation, target })
-    else void closeRegion(tab.workspaceId, tab.id, node.regionId)
+    setClosingRegion(true)
+    try {
+      const state = useAppStore.getState(), reference = browserPresentation.reference
+      const occurrences = Object.entries(state.layouts).flatMap(([displayWorkspaceId, layout]) => layout.groups.flatMap(group => group.tabOrder.includes(tab.id) ? [{ displayWorkspaceId, groupId: group.id }] : []))
+      const matches = occurrences.filter(o => (!groupId || o.groupId === groupId) && (!reference || o.displayWorkspaceId === reference.displayWorkspaceId && o.groupId === reference.groupId))
+      if (matches.length !== 1) throw new Error('Choose this Region’s exact original display occurrence before closing it. Its content and resources are retained.')
+      const record = await state.prepareWorkbenchClose({ target: { kind: 'region', ...matches[0]!, tabId: tab.id, regionId: node.regionId }, keepAgentSessions: false })
+      const confirmation = preparedCloseConfirmation(record, useAppStore.getState())
+      if (!confirmation) { await state.applyWorkbenchClose(record); return }
+      const keep = lastViewCloseStops(confirmation) ? await state.prepareWorkbenchClose({ target: record.plan.target, keepAgentSessions: true }) : null
+      if (keep && !samePreparedCloseReview(record, keep)) throw new Error('The draft or binding changed while preparing the close choices. Review this Region again.')
+      setConfirmingClose({ confirmation, record, keep })
+    } catch (error) { reportError(error) }
+    finally { setClosingRegion(false) }
   }
 
   async function confirmRegionClose(keepAgentSessions: boolean): Promise<void> {
     if (closingRegion || !confirmingClose) return
-    const original = confirmingClose
-    if (!keepAgentSessions && lastViewCloseStops(original.confirmation)) setConfirmingClose(null)
-    setClosingRegion(true)
-    try {
-      await closeRegion(tab.workspaceId, tab.id, node.regionId, { keepAgentSessions, approved: original.target })
-    } finally {
-      setClosingRegion(false)
-      setConfirmingClose(current => current === original ? null : current)
-    }
+    const original = confirmingClose, record = keepAgentSessions ? original.keep : original.record
+    if (!record) return
+    setConfirmingClose(null); setClosingRegion(true)
+    try { await useAppStore.getState().applyWorkbenchClose(record) }
+    catch (error) { reportError(error) }
+    finally { setClosingRegion(false) }
   }
   const regionCloseCopy = confirmingClose ? lastViewCloseCopy(confirmingClose.confirmation, 'split') : null
 
@@ -973,7 +966,7 @@ function WorkbenchRegionContent({
           : {})}
         busy={closingRegion}
         onCancel={() => !closingRegion && setConfirmingClose(null)}
-        onConfirm={() => void confirmRegionClose(!lastViewCloseStops(confirmingClose?.confirmation ?? null))}
+        onConfirm={() => void confirmRegionClose(false)}
       />
   </>
 }

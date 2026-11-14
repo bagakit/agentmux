@@ -1,6 +1,8 @@
 import { SpaceObjectAvatarOwner } from './space-object-avatar.js'
 import { createSpaceObjectAvatarResolver } from './space-object-avatar-target.js'
 import { isObjectAvatarMethod } from '@agentmux/core/object-avatar'
+import { createDesktopWorkbenchCloseOwner } from './workbench-close-owner.js'
+import { parseSpaceCloseParams, spaceCloseDigest, SPACE_CLOSE_METHODS, type SpaceCloseMethod, type SpaceCloseContext } from '@agentmux/core'
 import { configureChannelHeader, configureGoalsCommonActions, executeSettingsPreferencesControl } from './settings-preferences-control.js'
 import { isSettingsPreferenceMethod } from '@agentmux/core'
 import { SettingsTailcatConfiguration } from './settings-tailcat-configuration.js'
@@ -760,6 +762,31 @@ export async function registerIpc(args: {
     sendRequest: (request) => contents.send(CONTROL_REQUEST_CHANNEL, request),
     sendCancellation: (cancellation) => contents.send(CONTROL_CANCEL_CHANNEL, cancellation)
   })
+  const closeBrowserResource = async (id: string): Promise<void> => {
+    // Existing native owners retire synchronously along their original Close path.
+    if (browsers.recoveryPreviewScope(id)) return await browsers.close(id)
+    let scope: BrowserRecoveryPreviewScope | null = null
+    try {
+      scope = await resolveRecoveryPreviewScope(id)
+      if (!scope) console.warn('The cold Browser preview Profile is unconfirmed. The original Close still proceeds.')
+    }
+    catch { console.warn('The cold Browser preview scope is unconfirmed. The original Close still proceeds.') }
+    try {
+      // This must run after the await too: a native owner may have appeared during the cold read.
+      await browsers.close(id)
+    } finally {
+      if (scope) {
+        // Enqueue retirement now; optional cache IO must not delay the original Close ACK.
+        void browserRecoveryPreviews.remove(scope).then(removed => {
+          if (removed.warning) console.warn(removed.warning)
+        }).catch(error => console.warn('Browser closed; its historical preview cleanup is unconfirmed:', error))
+      }
+    }
+  }
+  const workbenchClose = createDesktopWorkbenchCloseOwner({ store: workbenchUserState, bridge: controlBridge, runtime: args.runtime,
+    authority: () => ({ ownerId: spaceCloseDigest(workbenchUserState.path), endpoint: `unix:${desktopBusinessSocketPath()}`,
+      documentGeneration: spaceCloseDigest(args.runtime.rendererGeneration(contents)) }),
+    closeBrowser: closeBrowserResource })
   contents.on('render-process-gone', releaseRendererResources)
   contents.on('did-start-navigation', releaseNavigatedHtmlPreviews)
   const currentRendererCaptureTarget = () => {
@@ -1566,6 +1593,13 @@ export async function registerIpc(args: {
   }))
   handleWithEvent('ui:writeFileViewReading', (_event, record: import('../shared/workbench-user-state').FileViewReadingRecord) => ipcResult(() => {
     return workbenchUserState.writeFileViewReading(record)
+  }))
+  handleWithEvent('workbenchClose:call', async (event, method: SpaceCloseMethod, value: unknown) => ipcResult(async () => {
+    if (!Object.hasOwn(SPACE_CLOSE_METHODS, method)) throw new AgentMuxError('Choose one original workface close operation.', 'INVALID_CONTROL_REQUEST')
+    const actor = { kind: 'user' as const, id: `local-user:${process.getuid?.() ?? 'current'}` }
+    const assertCurrent = () => assertAppDocumentSender(event, contents, args.appDocumentSources())
+    const context: SpaceCloseContext = { actor, assertCurrent, originalContext: { principal: actor, transport: 'unix', assertCurrent } }
+    return await workbenchClose.call(method, parseSpaceCloseParams(method, value), context)
   }))
   handleWithEvent('ui:readWorkbenchState', () => workbenchUserState.read())
   handleWithEvent('ui:importWorkbenchState', (_event, value: string) => workbenchUserState.importIfAbsent(value))
@@ -2586,27 +2620,7 @@ export async function registerIpc(args: {
       return target
     })
   })
-  handle('browser:close', async (id: string) => {
-    // Existing native owners retire synchronously along their original Close path.
-    if (browsers.recoveryPreviewScope(id)) return await browsers.close(id)
-    let scope: BrowserRecoveryPreviewScope | null = null
-    try {
-      scope = await resolveRecoveryPreviewScope(id)
-      if (!scope) console.warn('The cold Browser preview Profile is unconfirmed. The original Close still proceeds.')
-    }
-    catch { console.warn('The cold Browser preview scope is unconfirmed. The original Close still proceeds.') }
-    try {
-      // This must run after the await too: a native owner may have appeared during the cold read.
-      await browsers.close(id)
-    } finally {
-      if (scope) {
-        // Enqueue retirement now; optional cache IO must not delay the original Close ACK.
-        void browserRecoveryPreviews.remove(scope).then(removed => {
-          if (removed.warning) console.warn(removed.warning)
-        }).catch(error => console.warn('Browser closed; its historical preview cleanup is unconfirmed:', error))
-      }
-    }
-  })
+  handle('browser:close', closeBrowserResource)
   const detach = args.runtime.attach(contents)
   const rpcHttp = agentMuxRpcHttpOptions()
   channelMetadata = registerConnectorIpc({ handleWithEvent, runtime: args.runtime,
@@ -2670,6 +2684,7 @@ export async function registerIpc(args: {
     goalChanges: desktopGoalChanges(args.runtime),
     goalControl: (request, _name, originalContext) => executeGoal(request, originalContext),
     applicationAccess: args.applicationAccess,
+    spaceClose: workbenchClose,
     hostMaintenance,
     hostConfiguration: hostId => structuredClone(configOwner.current.hosts.find(host => host.id === hostId) ?? null),
     nodeLocatorHosts: () => configOwner.current.hosts.map(host => host.id),

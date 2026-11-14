@@ -65,6 +65,7 @@ export class DesktopControlIpcBridge {
   execute(request: SystemWebUrlRequest, signal?: AbortSignal): Promise<SystemWebUrlResult>
   execute(request: SystemWebFileRequest, signal?: AbortSignal): Promise<SystemWebFileResult>
   execute(request: Extract<DesktopControlRequest, { operation: 'worktree.closeout.prepare' }>, signal?: AbortSignal): Promise<Extract<DesktopControlResult, { operation: 'worktree.closeout.prepare' }>>
+  execute(request: import('../shared/workbench-close-control.js').WorkbenchCloseRendererRequest, signal?: AbortSignal): Promise<import('../shared/workbench-close-control.js').WorkbenchCloseRendererResult>
   async execute(request: DesktopControlRequest, signal?: AbortSignal): Promise<DesktopControlResult> {
     if (!this.transport.isAvailable()) {
       throw bridgeError('CONTROL_UNAVAILABLE', 'Desktop Control owner is unavailable.')
@@ -86,7 +87,7 @@ export class DesktopControlIpcBridge {
           request.requestId,
           bridgeError('CONTROL_TIMEOUT', 'Desktop Control request timed out.')
         )
-      }, agentMuxControlTimeoutMs(request.operation === 'worktree.closeout.prepare' ? 'space.mv' : request.operation === 'metrics.renderer' ? 'metrics.get' : request.operation === 'browser.openFromSystem' || request.operation === 'browser.openFileFromSystem' ? 'open.browser' : request.operation))
+      }, agentMuxControlTimeoutMs(request.operation === 'workbench.close.capture' || request.operation === 'workbench.close.reserve' || request.operation === 'workbench.close.validate' || request.operation === 'workbench.close.release' || request.operation === 'workbench.close.commit' || request.operation === 'worktree.closeout.prepare' ? 'space.mv' : request.operation === 'metrics.renderer' ? 'metrics.get' : request.operation === 'browser.openFromSystem' || request.operation === 'browser.openFileFromSystem' ? 'open.browser' : request.operation))
       this.pending.set(request.requestId, { request: structuredClone(request),
         nameRequest: nameChangeRequests.getStore(), resolve, reject, timeout })
       signal?.addEventListener('abort', abort, { once: true })

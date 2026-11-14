@@ -1,4 +1,5 @@
 import { avatarActorIdentity, isObjectAvatarMethod, parseObjectAvatarParams, parseObjectAvatarResult, parseAvatarActor, type AvatarExecutionContext, type ObjectAvatarMethod, type ObjectAvatarPort } from './object-avatar.js'
+import { SPACE_CLOSE_METHODS, parseSpaceCloseParams, parseSpaceCloseResult, type SpaceCloseMethod, type SpaceCloseActor } from './space-close.js'
 import { assertTailcatConfigurationWriter, parseTailcatConfigurationParams, parseTailcatConfigurationResult, type TailcatConfigurationMethod, type TailcatConfigurationPort } from './public-rpc-tailcat-configuration.js'
 import { parseTerminalControl, parseTerminalControlResult, parseTerminalControlInspect, parseTerminalControlInspection } from './terminal-control.js'
 import { parseFileStatParams, parseFileStatResult, parseFileMkdirParams, parseFileMkdirResult, parseFileMutationInspectParams, parseFileMutationInspectResult } from './public-rpc-file-path.js'
@@ -196,6 +197,7 @@ export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').Age
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'listMessages' | 'listMessageEvents' | 'inspectMessageBroadcast' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
   'readDeliveryAttempt' | 'readReadingDiagnostic' | 'findReadingDiagnostics' | 'readAgentStartupDiagnostic' | 'findAgentStartupDiagnostics' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'agentMessageAuthority' | 'listTrustedMessageSources' | 'trustMessageSource' | 'prepareFederatedMessage' | 'intakeFederatedMessage' | 'prepareFederatedRead' | 'exportFederatedThread' | 'readFederatedOutbox' | 'recordFederatedDispatchEvent' | 'intakeFederatedDispatchEvent' | 'recordFederatedInboxReceipt' | 'listHostExecutors' | 'configureHostExecutor' | 'removeHostExecutor' | 'hostEnvironment'> & {
+    stopAgent?: AgentMuxClient['stopAgent']
     controlTerminal?: AgentMuxClient['controlTerminal']
     inspectTerminalControl?: AgentMuxClient['inspectTerminalControl']
     inspectAgentPosture?: AgentMuxClient['inspectAgentPosture']
@@ -296,6 +298,7 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   /** Read the selected Host's original listener owner. Missing observation remains unknown. */
   hostTailcat?(hostId: string, signal?: AbortSignal): import('./host-runtime-observation.js').TailcatListenerObservation | undefined | Promise<import('./host-runtime-observation.js').TailcatListenerObservation | undefined>
   /** Original configuration owner's exact maintenance requests; this grants no standing Agent authority. */
+  spaceClose?: import('./space-close.js').SpaceClosePort
   hostMaintenance?: import('./public-rpc-host-maintenance.js').HostMaintenanceAdministration
   /** The answering App’s original ConfigOwner; Host listener adoption stays with the Host. */
   tailcatConfiguration?: TailcatConfigurationPort
@@ -398,6 +401,8 @@ export function boundedFileShareUndoResult(parsed: import('./public-rpc-file-sha
   return { ...parsed, destination: compact(parsed.destination), collections: parsed.collections.map(item => ({ ...item, source: compact(item.source) })) }
 }
 const NATIVE_FIELDS = {
+  'space.close.ls': ['limit', 'cursor'],
+  'space.close.prepare': ['operationId', 'target', 'keepAgentSessions'], 'space.close.apply': ['operationId', 'expectedPlanDigest', 'decisions'], 'space.close.inspect': ['operationId'],
   'app.capture': ['target'], 'app.record.start': ['operationId', 'target', 'durationMs', 'fps'],
   'app.record.inspect': ['operationId'], 'app.record.stop': ['operationId'], 'app.record.read': ['operationId'],
   'system.metrics.host-profile.capture': ['hostId', 'fence', 'processId', 'durationMs'],
@@ -881,6 +886,25 @@ export class AgentMuxRpcService {
       const { owner } = await endpoint.call('runtime.owner.identity', { expectedRuntimeId: input.runtimeId })
       if (owner.runtimeId !== input.runtimeId) throw new AgentMuxError('This directory belongs to another original Source Runtime.', 'RUNTIME_OWNER_MISMATCH')
       return await directory.inspect(input, { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }, this.folderDirectoryContext(owner,context)) as AgentMuxRpcResult<M>
+    }
+    if (Object.hasOwn(SPACE_CLOSE_METHODS, method)) {
+      const selected = method as SpaceCloseMethod, input = parseSpaceCloseParams(selected, params)
+      const caller = await this.authenticated(context)
+      if (selected === 'space.close.apply' && context.caller !== undefined) throw new AgentMuxError(
+        'Closing workface resources or discarding drafts requires the original transport-approved person/device. The plan and healthy work are retained.', 'CONTROL_PERMISSION_DENIED')
+      if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError('Read the original workface plan with an authenticated actor.', 'CONTROL_PERMISSION_DENIED')
+      const actor: SpaceCloseActor = caller ? { kind: 'agent', id: caller.agentSessionId, hostId: caller.hostId }
+        : { kind: context.principal!.kind as 'user' | 'device', id: rpcString(context.principal!.id, 'Original transport principal') }
+      const assertCurrent = async () => {
+        context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+        if (context.caller) await this.authenticated(context)
+      }
+      await assertCurrent()
+      if (!this.ports.spaceClose) {
+        if (this.ports.forwardControl) return parseSpaceCloseResult(selected, await this.ports.forwardControl<SpaceCloseMethod>(selected, input, context), input) as AgentMuxRpcResult<M>
+        throw new AgentMuxError('The original Desktop workface close owner is unavailable. Original views, drafts and Runs are retained.', 'CONTROL_UNAVAILABLE')
+      }
+      return parseSpaceCloseResult(selected, await this.ports.spaceClose.call(selected, input, { actor, originalContext: context, assertCurrent, ...(context.signal ? { signal: context.signal } : {}) }), input) as AgentMuxRpcResult<M>
     }
     if (method === 'space.folder.register') {
       const input = parseFolderSpaceRegisterInput(params), caller = await this.authenticated(context)
@@ -2428,6 +2452,19 @@ export class AgentMuxRpcService {
               ...(method === 'space.inspect' && typeof target.spaceId === 'string' ? { imageSpaceId: target.spaceId } : {}) }, context))
           return rpcControlResult(method, { operation: method, catalog }) as AgentMuxRpcResult<M>
         }
+      }
+      if (method === 'agent.stop' && p.expectedRun !== undefined) {
+        const request = rpcControlRequest('agent.stop', params, internalCaller)
+        if (request.operation !== 'stop' || request.target.kind !== 'agent-run' || !request.expectedRun) throw new AgentMuxError('The original Stop Run is unconfirmed.', 'INVALID_CONTROL_REQUEST')
+        const selected = await this.owner(request.target.agentSessionId, true)
+        context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+        if (context.caller) await this.authenticated(context)
+        const exact = { target: { kind: 'agent-run' as const, agentSessionId: selected.agentSessionId }, expectedRun: request.expectedRun, operationId: request.requestId }
+        if (this.ports.callOriginalCore) return await this.ports.callOriginalCore(selected.hostId, 'agent.stop', exact, await this.inputForwardContext(context)) as AgentMuxRpcResult<M>
+        if (selected.client.forwardRpc) return await selected.client.forwardRpc('agent.stop', exact, await this.inputForwardContext(context)) as AgentMuxRpcResult<M>
+        if (!selected.client.stopAgent) throw new AgentMuxError('The original exact-Run Stop owner is unavailable. Original work is retained.', 'CONTROL_UNAVAILABLE')
+        const receipt = await selected.client.stopAgent(selected.agentSessionId, request.expectedRun, { operationId: request.requestId })
+        return rpcControlResult('agent.stop', { operation: 'stop', agentSessionId: selected.agentSessionId, receipt }) as AgentMuxRpcResult<M>
       }
       if (this.ports.forwardControl && !independentResume && !(this.ports.spatialAgentControl && independentSpatial) && !(this.ports.goalControl && method.startsWith('goal.') && method !== 'goal.focus')) return await this.ports.forwardControl(method, params, context)
       let body = p

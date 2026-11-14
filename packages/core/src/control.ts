@@ -435,9 +435,10 @@ export type AgentMuxControlInterruptRequest = RequestBase & {
 export type AgentMuxControlResumeRequest = RequestBase & {
   operation: 'resume'; target: AgentMuxSessionSelector; text: string; caller?: AgentMuxControlCaller
 }
-export type AgentMuxControlStopRequest = RequestBase & {
-  operation: 'stop'; target: AgentMuxSessionSelector; caller?: AgentMuxControlCaller
-}
+export type AgentMuxControlStopRequest = RequestBase & { operation: 'stop'; caller?: AgentMuxControlCaller } & (
+  | { target: AgentMuxSessionSelector; expectedRun?: never }
+  | { target: { kind: 'agent-run'; agentSessionId: string }; expectedRun: import('./types.js').AgentMuxRunRef }
+)
 
 export const AGENTMUX_DEMAND_STATUSES = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'] as const
 export type AgentMuxDemandStatus = typeof AGENTMUX_DEMAND_STATUSES[number]

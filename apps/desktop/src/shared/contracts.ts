@@ -1289,9 +1289,9 @@ export type ExecutorDetection = { input: ExecutorDetectionInput } & (
 export type HostExecutorInventory = import('@agentmux/core').AgentMuxHostExecutorInventory & { routeHostId: string }
 export type HostExecutorConfiguration = import('@agentmux/core').AgentMuxHostExecutorConfiguration & { routeHostId: string }
 
-export type DesktopControlRequest = AgentMuxControlRequest | import('@agentmux/core/control').MetricsRendererRequest | import('./system-web-url').SystemWebUrlRequest | import('./system-web-file').SystemWebFileRequest
+export type DesktopControlRequest = import('./workbench-close-control').WorkbenchCloseRendererRequest | AgentMuxControlRequest | import('@agentmux/core/control').MetricsRendererRequest | import('./system-web-url').SystemWebUrlRequest | import('./system-web-file').SystemWebFileRequest
   | { operation: 'worktree.closeout.prepare'; requestId: string }
-export type DesktopControlResult = AgentMuxControlResult | import('@agentmux/core/control').MetricsRendererResult | import('./system-web-url').SystemWebUrlResult | import('./system-web-file').SystemWebFileResult
+export type DesktopControlResult = import('./workbench-close-control').WorkbenchCloseRendererResult | AgentMuxControlResult | import('@agentmux/core/control').MetricsRendererResult | import('./system-web-url').SystemWebUrlResult | import('./system-web-file').SystemWebFileResult
   | { operation: 'worktree.closeout.prepare'; requestId: string; diskDurability: 'confirmed' }
 
 export type DesktopControlResponse =
@@ -1983,6 +1983,7 @@ export type AgentMuxDesktopApi = {
       signal: AbortSignal
     ) => DesktopControlResult | Promise<DesktopControlResult>): () => void
   }
+  workbenchClose: { call<M extends import('@agentmux/core').SpaceCloseMethod>(method: M, input: import('@agentmux/core').SpaceCloseParams[M]): Promise<import('@agentmux/core').SpaceCloseResults[M]> }
   continuousProgress: ContinuousProgressApi
   schedule: {
     list(params: AgentMuxRpcParams<'schedule.list'>): Promise<AgentMuxRpcResult<'schedule.list'>>
@@ -2298,7 +2299,8 @@ export type AgentMuxDesktopApi = {
   }
 }
 
-export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks' | 'search' | 'browser' | 'hosts' | 'nodePublishing' | 'hostRoutes' | 'spaceMounts' | 'applications' | 'conversation' | 'landmarks' | 'toolkit'> & {
+export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks' | 'search' | 'browser' | 'hosts' | 'nodePublishing' | 'hostRoutes' | 'spaceMounts' | 'applications' | 'conversation' | 'landmarks' | 'toolkit' | 'workbenchClose'> & {
+  workbenchClose: { call<M extends import('@agentmux/core').SpaceCloseMethod>(method: M, input: import('@agentmux/core').SpaceCloseParams[M]): Promise<import('./session-observation-result').SessionObservationResult<import('@agentmux/core').SpaceCloseResults[M]>> }
   hostRoutes: import('./host-routes.js').PreloadHostRoutes
   spaceMounts: import('./space-mount.js').SpaceMountPreloadApi
   toolkit: Omit<AgentMuxDesktopApi['toolkit'], 'add' | 'update' | 'remove'> & {

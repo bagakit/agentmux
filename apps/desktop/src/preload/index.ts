@@ -603,6 +603,7 @@ const api: AgentMuxPreloadApi = {
     },
     respond: (response: DesktopControlResponse) => ipcRenderer.send(CONTROL_RESPONSE_CHANNEL, response)
   },
+  workbenchClose: { call: (method, input) => ipcRenderer.invoke('workbenchClose:call', method, input) },
   continuousProgress: {
     goals: goalId => ipcRenderer.invoke('continuousProgress:goals', goalId),
     goalAction: (goalId, loopId, action, revision, operationId, caller) => ipcRenderer.invoke('continuousProgress:goalAction', goalId, loopId, action, revision, operationId, caller),
