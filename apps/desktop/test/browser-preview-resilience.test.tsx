@@ -184,6 +184,103 @@ it('T045 revoked pending media is stopped on arrival and cannot overwrite its re
   expect(container.textContent).toContain('Live preview source changed'); expect(display).toHaveBeenCalledTimes(1); originalPage()
 })
 
+async function renderPair(secondVisible = true) {
+  await act(async () => root.render(createElement('div', null,
+    createElement(LiveStage, { ...props, key: 'first' }),
+    createElement(LiveStage, { ...props, key: 'second', browserId: 'second-browser',
+      presentation: { ...presentation, visible: secondVisible, occurrence: { ...presentation.occurrence, presentationId: 'second-presentation' } } }))))
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+}
+
+it('serializes different Browser captures through the original media acknowledgement', async () => {
+  const first = deferred<MediaStream>(), second = previewMedia('second-track'), acknowledged = deferred<void>()
+  display.mockReturnValueOnce(first.promise).mockResolvedValueOnce(second.stream)
+  bridge.registerPresentation.mockImplementation(async request => ({ leaseId: request.browserId }))
+  let armed: string | null = null
+  bridge.armPresentationCapture.mockImplementation(async leaseId => {
+    if (armed) throw new Error('Another Browser presentation capture is still pending')
+    armed = leaseId
+    return { captureId: leaseId, browserId: leaseId }
+  })
+  bridge.ackPresentationCapture.mockImplementation(async (_id, ack) => {
+    if (ack.outcome === 'ready' && armed === 'original-browser') await acknowledged.promise
+    armed = null
+  })
+  await renderPair()
+  expect(bridge.armPresentationCapture.mock.calls).toEqual([['original-browser']])
+  await act(async () => first.resolve(acquired.stream))
+  expect(display).toHaveBeenCalledTimes(1)
+  await act(async () => acknowledged.resolve())
+  expect(bridge.armPresentationCapture.mock.calls).toEqual([['original-browser'], ['second-browser']])
+  expect([...container.querySelectorAll('video')].map(node => node.srcObject)).toEqual([acquired.stream, second.stream])
+  expect(container.textContent).not.toContain('Another Browser')
+})
+
+it('skips a queued presentation hidden before its capture turn without requesting media', async () => {
+  const first = deferred<MediaStream>()
+  display.mockReturnValueOnce(first.promise)
+  bridge.registerPresentation.mockImplementation(async request => ({ leaseId: request.browserId }))
+  await renderPair(); await renderPair(false)
+  await act(async () => first.resolve(acquired.stream))
+  expect(bridge.armPresentationCapture.mock.calls).toEqual([['original-browser']])
+  expect(display).toHaveBeenCalledTimes(1)
+  expect(container.querySelectorAll('video')).toHaveLength(1)
+  await renderPair(true)
+  expect(bridge.armPresentationCapture.mock.calls).toEqual([['original-browser'], ['second-browser']])
+})
+
+it('uses another still-visible occurrence when the queued occurrence of a shared Browser is hidden', async () => {
+  const first = deferred<MediaStream>(), shared = previewMedia('shared-track')
+  display.mockReturnValueOnce(first.promise).mockResolvedValueOnce(shared.stream)
+  bridge.registerPresentation.mockImplementation(async request => ({ leaseId: request.occurrence.presentationId }))
+  function Shared({ firstVisible }: { firstVisible: boolean }) {
+    const media = useBrowserPresentationCapture('shared-browser')
+    return createElement('div', null, ...['queued', 'visible'].map(id => createElement(BrowserPresentationStage, {
+      ...props, key: id, browserId: 'shared-browser', inputSelected: false, media,
+      presentation: { ...presentation, visible: id === 'visible' || firstVisible,
+        occurrence: { ...presentation.occurrence, presentationId: id } }
+    })))
+  }
+  const pair = async (firstVisible: boolean) => {
+    await act(async () => root.render(createElement('div', null, createElement(LiveStage, props), createElement(Shared, { firstVisible }))))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  }
+  await pair(true); await pair(false)
+  await act(async () => first.resolve(acquired.stream))
+  expect(bridge.armPresentationCapture.mock.calls).toEqual([['original-presentation'], ['visible']])
+  expect(display).toHaveBeenCalledTimes(2)
+  expect(container.querySelector<HTMLVideoElement>('[data-browser-presentation-id="visible"] video')?.srcObject).toBe(shared.stream)
+})
+
+it('continues another Browser after an actual media failure without retrying the failed page', async () => {
+  const first = deferred<MediaStream>(), second = previewMedia('second-track')
+  display.mockReturnValueOnce(first.promise).mockResolvedValueOnce(second.stream)
+  await renderPair()
+  await act(async () => first.reject(new Error('Actual capture denied')))
+  expect(display).toHaveBeenCalledTimes(2)
+  expect(container.textContent).toContain('Actual capture denied')
+  expect(container.querySelector('video')?.srcObject).toBe(second.stream)
+  width = 700; await act(async () => window.dispatchEvent(new Event('resize')))
+  expect(display).toHaveBeenCalledTimes(2)
+})
+
+it('reconnects a quickly reshown original page after stopping its late hidden capture', async () => {
+  const first = deferred<MediaStream>(), old = acquired, fresh = previewMedia('fresh-track')
+  display.mockReturnValueOnce(first.promise).mockResolvedValueOnce(fresh.stream)
+  await render(); await render({ presentation: { ...presentation, visible: false } })
+  await emit({ type: 'capture-revoked', browserId: 'original-browser', captureId: 'capture-1', reason: 'no-visible-presentations' })
+  await render({ presentation })
+  expect(display).toHaveBeenCalledTimes(1)
+  expect(container.textContent).toContain('Connecting live preview')
+  await act(async () => first.resolve(old.stream))
+  expect(old.track.stop).toHaveBeenCalledTimes(1)
+  expect(bridge.ackPresentationCapture).toHaveBeenCalledWith('capture-1', { outcome: 'stopped', trackIds: [old.track.id] })
+  expect(display).toHaveBeenCalledTimes(2)
+  expect(container.querySelector('video')?.srcObject).toBe(fresh.stream)
+  expect(bridge.registerPresentation).toHaveBeenCalledTimes(1)
+  expect(container.textContent).not.toContain('needs attention'); originalPage()
+})
+
 /** Invoke the actual registered React handler with trusted native pointer facts; happy-dom dispatch is untrusted. */
 async function previewPress() {
   const stage = container.querySelector<HTMLDivElement>('[data-native-browser-stage]')!
