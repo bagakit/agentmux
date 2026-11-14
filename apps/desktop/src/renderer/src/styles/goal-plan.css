@@ -1,9 +1,12 @@
 /* Goal plan graph. Facts and states come from the plan projection; this sheet only presents them. */
-.goal-plan { container: goal-plan / inline-size; display: grid; min-width: 0; gap: var(--sp-4); padding: var(--sp-5); margin-bottom: var(--sp-6); border: 1px solid var(--line-soft); border-radius: var(--radius-lg); background: var(--surface-1); }
-.goal-plan--empty { box-sizing: border-box; max-width: calc(880px + var(--sp-5) * 2 + 2px); }
+.goal-plan { container: goal-plan / inline-size; display: grid; min-width: 0; gap: var(--sp-4); padding: var(--sp-5); margin-bottom: var(--sp-6); border: 1px solid transparent; border-radius: var(--radius-lg); background: var(--surface-1); }
+.goal-plan--empty { box-sizing: border-box; background: var(--surface-1); }
 .goal-plan .goals-section-heading h2 { display: flex; align-items: center; gap: var(--sp-4); }
-.goal-plan__origin { display: grid; grid-template-columns: minmax(220px, 320px) minmax(0, 1fr); align-items: center; gap: var(--sp-6); max-width: 880px; }
-.goal-plan__goal { display: flex; align-items: flex-start; gap: var(--sp-4); box-sizing: border-box; width: 100%; margin: 0; padding: var(--sp-5); border: 1px solid var(--line-soft); border-radius: var(--radius-lg); background: var(--surface-0); box-shadow: var(--hl); }
+.goal-plan__origin { display: grid; grid-template-columns: minmax(220px, .9fr) minmax(0, 1fr); align-items: center; gap: clamp(24px, 5cqw, 64px); padding: var(--sp-6); border-radius: var(--radius); background-image: radial-gradient(var(--line-soft) .75px, transparent .75px); background-size: 18px 18px; }
+.goal-plan__goal { position: relative; display: flex; align-items: flex-start; gap: var(--sp-4); box-sizing: border-box; width: 100%; margin: 0; padding: var(--sp-5); border: 1px solid color-mix(in srgb, var(--green) 28%, var(--line-soft)); border-radius: var(--radius-lg); background: var(--surface-0); box-shadow: var(--hl), 0 6px 24px color-mix(in srgb, var(--text) 4%, transparent); }
+.goal-plan__goal::before { content: ''; position: absolute; width: 5px; height: 5px; border: 2px solid var(--surface-0); background: var(--green); border-radius: 50%; right: -5px; top: calc(50% - 4px); }
+.goal-plan--compact .goal-plan__origin { padding: var(--sp-3); gap: var(--sp-6); }
+.goal-plan--compact .goal-plan__goal { padding: var(--sp-4); }
 .goal-plan__goal-icon { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: var(--radius); color: var(--green-text); background: color-mix(in srgb, var(--green) 12%, transparent); }
 .goal-plan__goal-body { min-width: 0; }
 .goal-plan__goal-label { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-3); margin: 0 0 var(--sp-3); color: var(--text); font-size: var(--fs-meta); font-weight: 600; }
@@ -12,6 +15,9 @@
 /* The complete editable title is above; its repeated diagram label stays compact. */
 @container goal-plan (max-width: 720px) {
   .goal-plan__origin { grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); }
+}
+@container goal-plan (min-width: 560px) {
+  .goal-plan--compact .goal-plan__origin { grid-template-columns: minmax(200px, .9fr) minmax(0, 1fr); gap: var(--sp-5); }
 }
 .goal-plan__empty-body { display: grid; gap: var(--sp-3); min-width: 0; }
 .goal-plan__empty-title { margin: 0; color: var(--text); font: 600 var(--fs-body)/1.45 var(--font-sans); }

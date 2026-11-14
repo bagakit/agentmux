@@ -171,9 +171,9 @@ function NodeDetail({ item, dependencyNames, onIssue }: { item: GoalPlanNodeView
  * dependency, joined to what it depends on by a smooth connector. State comes only from the
  * Goal owner's derivation; this view never decides it.
  */
-export function GoalPlanGraph({ demand, onRequestPlan, pending = false, busy = false }: {
+export function GoalPlanGraph({ demand, onRequestPlan, pending = false, busy = false, compact = false }: {
   demand: DemandProjection
-  onRequestPlan?: () => void; pending?: boolean; busy?: boolean
+  onRequestPlan?: () => void; pending?: boolean; busy?: boolean; compact?: boolean
 }) {
   const projection = useMemo(() => goalPlanProjection(demand), [demand.plan, demand.planState, demand.delegations])
   const [open, setOpen] = useState<string | null>(null)
@@ -196,16 +196,16 @@ export function GoalPlanGraph({ demand, onRequestPlan, pending = false, busy = f
   const stateService = stateIssue ? <p className="goals-service" role="status" data-goal-plan-states-unavailable>{stateIssue}{' '}
     <button type="button" className="small-button" disabled={readingState} onClick={() => void readState()}>{readingState ? 'Reading Goal…' : 'Read Goal again'}</button>
   </p> : null
-  if (!projection) return <section className="goal-plan goal-plan--empty" aria-label="Goal plan" data-goal-plan-empty>
-    <div className="goals-section-heading"><h2><ThemeObjectWorkflowIcon size={14} aria-hidden="true" /> Execution plan</h2><span className="goals-caption">Starting point</span></div>
+  if (!projection) return <section className={`goal-plan goal-plan--empty${compact ? ' goal-plan--compact' : ''}`} aria-label="Goal plan" data-goal-plan-empty>
+    <div className="goals-section-heading"><h2><ThemeObjectWorkflowIcon size={14} aria-hidden="true" /> Execution plan</h2><span className="goals-caption">Not saved yet</span></div>
     {stateService}{issue ? <p className="goals-service" role="status">{issue}</p> : null}
     <div className="goal-plan__origin">
       <article className="goal-plan__goal" data-goal-plan-origin={demand.id} aria-label="Goal starting point">
         <span className="goal-plan__goal-icon" aria-hidden="true"><ThemeObjectGoalIcon size={24} /></span>
         <div className="goal-plan__goal-body"><p className="goal-plan__goal-label">Goal <span>Starting point</span></p><h3>{demand.title}</h3></div>
       </article>
-      <div className="goal-plan__empty-body"><p className="goal-plan__empty-title">No execution plan yet</p>
-      <p className="goals-muted">{demand.alignment ? 'Shape the tasks, dependencies and checks.' : 'Clarify the outcome and success criteria first.'}</p>
+      <div className="goal-plan__empty-body"><p className="goal-plan__empty-title">No saved execution plan</p>
+      <p className="goals-muted">{compact ? 'A saved plan will connect this goal to its tasks, dependencies and checks.' : demand.alignment ? 'Turn the agreed outcome into tasks, dependencies and checks.' : 'Shape the outcome and success criteria, then build the plan with your Supervisor.'}</p>
       <div className="goals-inline-actions">{requestAction}
       </div>
       </div>

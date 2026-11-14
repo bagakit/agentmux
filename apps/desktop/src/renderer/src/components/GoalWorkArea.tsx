@@ -19,7 +19,7 @@ export function GoalWorkArea({ demand, plan, onRevealResults, active = true, pri
   const another = !current.dispatches?.some(item => item.execution === 'finite' && item.stage === 'confirmed')
     ? <details><summary>Start a one-time task</summary>{finite}</details> : finite
   return <section className="goal-work-area" data-goal-work-area={current.id} data-goal-work-context={hasWork ? 'recorded' : 'fresh'} aria-label="Goal work">
-    <div className="goals-section-heading"><h2>Work</h2><span className="goals-caption">{hasWork ? 'Original execution and requests' : 'Ready when you are'}</span></div>
+    <div className="goals-section-heading"><h2>Work</h2><span className="goals-caption">{hasWork ? 'Original execution and requests' : 'Planning and execution'}</span></div>
     {!hasWork ? plan : null}
     <GoalDelegationWork demand={current} active={active} embedded focus={fact.source} primary={primary && !finitePrimary}
       beforeRecords={pending || !hasWork ? finite : undefined} afterRecords={hasWork && !pending ? another : undefined} plan={hasWork ? plan : undefined} onRevealResults={onRevealResults} />
