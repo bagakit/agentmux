@@ -3,6 +3,7 @@ import { api } from './api'
 import { checkpointMountedSpaceInputs, useAppStore } from '../store'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { sourceCoordinatorInput, sourceCoordinatorInputKey, type SourceCoordinatorInput } from './source-coordinator-input'
+import { applyOriginalLaunchNames } from './original-launch-names'
 
 // Only coalesce concurrent explicit sends of this exact retained request. Core
 // remains the operation owner; this promise carries no persisted outcome.
@@ -34,6 +35,7 @@ export async function associateCreatedSourceCoordinator(input: SourceCoordinator
   retain(current => current.acknowledged ? current : { ...current, acknowledged: { target, run: { ...created.run } } })
   const retained = sourceCoordinatorInput(useAppStore.getState().mountedSpaceInputs, key)
   if (!retained || retained.request !== original) return
+  void applyOriginalLaunchNames({ kind: 'reach', input: retained }, ['agent'])
   return await sendOriginalSourceAssociation(retained)
 }
 
@@ -75,6 +77,8 @@ async function sendAssociation(input: SourceCoordinatorInput) {
     if (receipt.operationId !== input.association.operationId) throw Error('This reply belongs to another project-link operation. Keep and check the original L.')
     retain(value => ({ ...value, association: { ...value.association,
       originalReceipt: Object.hasOwn(value.association, 'originalReceipt') ? value.association.originalReceipt : value.association.receipt ?? receipt, receipt } }))
+    const retained = current()
+    if (retained) void applyOriginalLaunchNames({ kind: 'reach', input: retained }, ['tab'])
     return receipt
   } catch (cause) {
     retain(value => ({ ...value, association: { ...value.association, submitted: input.association.submitted || dispatched,

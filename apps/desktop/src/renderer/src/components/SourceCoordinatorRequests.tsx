@@ -7,6 +7,7 @@ import { sourceCoordinatorInputs, sourceCoordinatorInputKey, type SourceCoordina
 import { associateCreatedSourceCoordinator, sendOriginalSourceAssociation } from '../lib/source-coordinator-request'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { configValuesEqual } from '../../../shared/config-edit'
+import { OriginalLaunchNames } from './OriginalLaunchNames'
 
 /** Private original C/L intentions. Every action retains the original carrier,
  * request and operation; a read never creates or replays a first message. */
@@ -92,7 +93,7 @@ function OriginalSourceCoordinator({ input }: { input: SourceCoordinatorInput })
       {!originalComplete && (input.acknowledged || target) ? <button type="button" className="small-button" disabled={busy} onClick={() => void continueOriginal()}>
         {busy ? 'Continuing…' : input.acknowledged ? 'Continue original project link' : 'Continue original Coordinator request'}</button> : null}
     </div></div>
-    {input.origin.names.agentName || input.origin.names.tabName ? <p className="agent-work-setup__note">Original Agent and Tab names are retained; their owner confirmation is pending.</p> : null}
+    <OriginalLaunchNames owner={{ kind: 'reach', input, ...(observed ? { observation: observed } : {}) }} />
     <details><summary>Original request details</summary><pre>{JSON.stringify({ request: original, association: input.association, names: input.origin.names, observation: report }, null, 2)}</pre></details>
   </details>
 }

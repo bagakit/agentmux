@@ -18,6 +18,8 @@ export type SourceCoordinatorInput = {
   submitted: boolean
   acknowledged?: { target: AgentExecutionRecoveryReference; run: { runId: string } }
   issue?: string
+  /** Original private name operations, independent of C/L and current observations. */
+  nameInputs?: unknown
   association: { operationId: string; submitted: boolean;
     request?: AgentMuxRpcParams<'agent.open'> & { operationId: string }; receipt?: AgentMuxRpcResult<'agent.open'>;
     /** The first producer response stays historical when an explicit same-L continuation responds later. */

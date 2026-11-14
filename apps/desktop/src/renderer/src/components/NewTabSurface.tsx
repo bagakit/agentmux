@@ -509,7 +509,7 @@ export function NewTabSurface({
       {sourceMode ? sourceSupportIssue ? <div className="launcher-source-contract" role="status">{sourceSupportIssue}
         {settings && workspace ? <button type="button" className="agent-work-text-action" onClick={() => settings.openHost(workspace.hostId)}>{sourceLauncher.description && !sourceLauncher.description.contracts.ordinaryLaunch ? `Open ${host?.label ?? 'project device'} to update Core` : 'Project device settings'}</button> : null}
       </div> : <details className="agent-work-startup"><summary>Launch compatibility</summary><p>The project device and selected Agent accept complete launch fields. Native tool qualification is unconfirmed here and checked during Launch preparation.</p></details> : null}
-      {retainedSourceRequests.inputs.map(input => <SourceLauncherRequest key={`${mountedAgentOpenKey(input.target, input.slot)}:${input.request.operationId}`} input={input} busy={busy !== null}
+      {retainedSourceRequests.inputs.map(input => <SourceLauncherRequest key={`${mountedAgentOpenKey(input.target, input.slot)}:${input.request.operationId}`} input={input} busy={busy !== null} active={motionActive && !moteId}
         onContinue={original => { if (original.slot.kind === 'region') void run('agent', () => launchAtSource({ tabId: original.slot.kind === 'region' ? original.slot.tabId : '', regionId: original.slot.kind === 'region' ? original.slot.regionId : '' }, original)) }} />)}
       {retainedSourceRequests.issue ? <p role="status">{retainedSourceRequests.issue}</p> : null}
       <SourceCoordinatorRequests active={motionActive && !moteId} origin={{ launcherId }} />

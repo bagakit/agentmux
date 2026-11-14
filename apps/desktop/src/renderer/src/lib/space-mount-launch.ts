@@ -8,6 +8,7 @@ export type MountedLauncherSelection = { agentHostId: string; agentTarget?: Host
 /** Original user intent, retained beside this Window's private view; never a source Session or phase. */
 export type MountedAgentOpenInput = { kind: 'agent-open'; target: SpaceMountRecord; slot: MountedLauncherSlot;
   request: AgentMuxRpcParams<'agent.open'> & { operationId: string }; submitted: boolean; receipt?: AgentMuxRpcResult<'agent.open'>; issue?: string
+  nameInputs?: unknown
   /** Private original names/slot, never sent as cross-Runtime rename authority. */
   origin?: { kind: 'ordinary-launcher'; launcherId: string; project: import('./launcher-source').LauncherSourceExecution['project']; names: import('./launcher-name-draft').LauncherNames }
 }

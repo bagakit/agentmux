@@ -4,9 +4,10 @@ import type { AgentMuxRpcResult } from '@agentmux/core'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { MountedAgentOpenInput } from '../lib/space-mount-launch'
 import { openSourceLauncherWork } from '../lib/source-launcher-request'
+import { OriginalLaunchNames } from './OriginalLaunchNames'
 
 /** Historical request receipts and fresh original-owner reads remain separate. */
-export function SourceLauncherRequest({ input, busy, onContinue }: { input: MountedAgentOpenInput; busy: boolean; onContinue(input: MountedAgentOpenInput): void }) {
+export function SourceLauncherRequest({ input, busy, onContinue, active = true }: { input: MountedAgentOpenInput; busy: boolean; active?: boolean; onContinue(input: MountedAgentOpenInput): void }) {
   const [inspection, setInspection] = useState<AgentMuxRpcResult<'space.inspect'>>(), [issue, setIssue] = useState<string>()
   const reader = useRef<AbortController | undefined>(undefined)
   useEffect(() => () => reader.current?.abort(), [input.request])
@@ -28,7 +29,7 @@ export function SourceLauncherRequest({ input, busy, onContinue }: { input: Moun
       {report?.to ? <button type="button" className="small-button" onClick={() => void openSourceLauncherWork(input, report).catch(cause => setIssue(presentError(cause)))}>Open original work</button> : null}
     </div></div>
     {issue ? <p className="agent-work-setup__error" role="status">{issue}</p> : null}
-    {input.origin && (input.origin.names.agentName || input.origin.names.tabName) ? <p className="agent-work-setup__note">Original names are retained. Saving them to the original Agent and Tab is pending.</p> : null}
+    <OriginalLaunchNames owner={{ kind: 'source', input, ...(observed ? { observation: observed } : {}) }} active={active} />
     <details><summary>Original request</summary><p>Continuing uses this same operation and frozen target. Checking does not replay its first input.</p><pre>{JSON.stringify({ request: input.request,
       receipt: input.receipt, names: input.origin?.names, ...(input.issue ? { historicalIssue: input.issue } : {}), inspection }, null, 2)}</pre></details>
   </div>

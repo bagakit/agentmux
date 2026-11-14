@@ -4,6 +4,7 @@ import { mountedAgentOpenInput, mountedAgentOpenKey, type MountedAgentOpenInput 
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { acceptsMountedSnapshot, mountedSpaceInput, mountedSpaceInputs, projectMountedSpaceView } from './space-mount-view'
 import { spaceMountKey } from '../../../shared/space-mount'
+import { applyOriginalLaunchNames } from './original-launch-names'
 
 /** A changed Source carrier/selection never hides this original ordinary slot's request. */
 export function ordinarySourceLauncherRequests(value: unknown, launcherId: string): MountedAgentOpenInput[] {
@@ -24,8 +25,11 @@ export async function sendSourceLauncherRequest(input: MountedAgentOpenInput, co
   const before = mountedAgentOpenInput(store.mountedSpaceInputs, key)
   if (before && before.request !== input.request) throw Error('Another original request occupies this Launcher. Its complete input is retained.')
   let dispatched = false
-  const retained = { ...input, submitted: true }; delete retained.issue
-  store.retainSpaceMountAgentOpen(key, current => current && current.request !== input.request ? current : retained)
+  store.retainSpaceMountAgentOpen(key, current => {
+    if (current && current.request !== input.request) return current
+    const retained = { ...(current ?? input), submitted: true }; delete retained.issue
+    return retained
+  })
   try {
     await checkpointMountedSpaceInputs()
     if (mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs, key)?.request !== input.request) throw Error('The original request changed before dispatch. No substitute was sent.')
@@ -33,6 +37,8 @@ export async function sendSourceLauncherRequest(input: MountedAgentOpenInput, co
     const receipt = await api.spaceMounts.call('open', { hostId: input.target.hostId, reference: input.target.reference, request: input.request })
     if (receipt.operationId !== input.request.operationId) throw Error('This receipt belongs to another original operation. Keep the original request and check its owner.')
     store.retainSpaceMountAgentOpen(key, current => current?.request === input.request ? { ...current, receipt } : current)
+    const retained = mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs, key)
+    if (retained?.request === input.request) void applyOriginalLaunchNames({ kind: 'source', input: retained })
     return receipt
   } catch (cause) {
     store.retainSpaceMountAgentOpen(key, current => current?.request === input.request ? { ...current, submitted: input.submitted || dispatched,
