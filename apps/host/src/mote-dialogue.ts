@@ -79,7 +79,7 @@ import { MoteDialogueStore } from '@agentmux/core/mote-dialogue-store'
 import { parseMoteDialogueParams, parseMoteDialogueResult, sameMoteDialogue, type MoteDialoguePort,
   type MoteDialogueCallContext, type MoteDialogueRead, type MoteDialogueWrite, type MoteDialogueLink } from '@agentmux/core/mote-dialogue'
 import type { AgentMuxClient } from '@agentmux/core'
-import { motePresenceSourceId } from './mote-presence.js'
+import { motePresenceSourceId } from '@agentmux/core/mote-preferences'
 
 /** Compose original Files/space, source relationships and message owners; never send, restore or assign a role. */
 export function createHostMoteDialogue(options: {

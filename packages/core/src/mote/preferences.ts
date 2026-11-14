@@ -1,4 +1,8 @@
 import { dequal } from 'dequal'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
+import type { ContinuousProgressLoop } from '../continuous-progress-scheduler.js'
+import type { MoteDialogueIdentity } from './dialogue.js'
 import { parseContinuousProgressInputReading, type ContinuousProgressInputReading } from '../continuous-progress-input.js'
 export * from '../continuous-progress-input.js'
 import { parseContinuousProgressDefinitionReference, parseContinuousProgressDefinition, parseContinuousProgressGuidanceAdoption, parseContinuousProgressGuidanceAdoptions, type ContinuousProgressDefinitionReference, type ContinuousProgressDefinition, type ContinuousProgressGuidanceAdoption } from '../continuous-progress-definition.js'
@@ -25,6 +29,15 @@ export type MoteMainRolloverPolicy = { kind: 'keep-current' } | { kind: 'idle'; 
 export type MoteMainTransitionMarker = { operationId: string; intentDigest: string; effectiveAt: number }
 export type MotePresencePreferences = { enabled: boolean; intervalMs: number }
 export const DEFAULT_MOTE_PRESENCE: Readonly<MotePresencePreferences> = Object.freeze({ enabled: true, intervalMs: 1_800_000 })
+
+/** The stable source that issued this Mote's heartbeats across role revisions. */
+export function motePresenceSourceId({ hostId, moteId }: MoteDialogueIdentity): string {
+  return 'mote-main:' + bytesToHex(sha256(utf8ToBytes(JSON.stringify({ hostId, moteId }))))
+}
+export function isMoteHeartbeatSchedule(record: Pick<ContinuousProgressLoop, 'managedSource'>, sourceId: string): boolean {
+  return record.managedSource?.sourceId === sourceId
+}
+
 /** A typed decimal minute count, as positive whole milliseconds, or null. Only plain decimals are read:
  * an exponent or a hex prefix is not a duration someone typed. The product is rounded so binary floating
  * point cannot reject an ordinary value such as 0.27, which Core then stores as an exact safe integer. */

@@ -5,7 +5,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { watch, type FSWatcher } from 'node:fs'
 import { dirname, basename } from 'node:path'
 import { spatialCatalog, AgentMuxError, type AgentMuxSpatialStateStore } from '@agentmux/core'
-import { DEFAULT_MOTE_PRESENCE, type MotePreferencesTarget, type MotePresenceReading, type MoteQuickPreferencesSaveParams, type MoteQuickPreferencesSaveResult } from '@agentmux/core/mote-preferences'
+import { DEFAULT_MOTE_PRESENCE, motePresenceSourceId, type MotePreferencesTarget, type MotePresenceReading, type MoteQuickPreferencesSaveParams, type MoteQuickPreferencesSaveResult } from '@agentmux/core/mote-preferences'
 import type { ConnectionEnrollmentCallContext } from '@agentmux/core/connections'
 import { MOTE_SUPERVISION_GUIDANCE, moteHeartbeatFaultPause, type MoteMainReader, type MoteMainSnapshot } from '@agentmux/core/mote-dialogue'
 import type { AgentMuxRpcFilesOwner } from '@agentmux/core/files'
@@ -24,7 +24,6 @@ const heartbeat = (target: MotePreferencesTarget) => 'Mote main heartbeat.\n\n' 
   '\n\nRead the original supervision page with this exact input:\n' + JSON.stringify({ target })
 export const moteGuidanceRevision = () => 'sha256:' + digest(MOTE_SUPERVISION_GUIDANCE)
 const key = (target: MotePreferencesTarget) => JSON.stringify(target)
-export const motePresenceSourceId = (identity: NonNullable<MoteMainSnapshot['identity']>) => 'mote-main:' + digest(identity)
 
 /** Mote policy adapts original files/roles to the one Host scheduler. No timer or input queue lives here. */
 export function createHostMotePresence(options: {
