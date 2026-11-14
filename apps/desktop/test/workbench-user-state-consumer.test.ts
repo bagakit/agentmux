@@ -104,6 +104,35 @@ it('question owner converges bootstrap and intent-after-fact through the origina
   await vi.waitFor(async () => expect(JSON.parse((await f.user.read())!).state.questionReplies[f.session.id][key].phase).toBe('rejected'))
 })
 
+it('question owner settles a late intent from its exact Host when another presentation has the same SID', async () => {
+  const f = await fixture('Original unsent draft')
+  const owner = await import('../src/renderer/src/store')
+  const matching = vi.spyOn(await import('../src/renderer/src/lib/conversation-question-intent'), 'rejectedQuestionReply')
+  const reply = vi.spyOn(f.api.sessions, 'replyQuestion'), submit = vi.spyOn(f.api.sessions, 'submitPrompt')
+  const remoteRun = { runId: 'original-remote-run' }
+  const remote = { ...f.session, id: 'original-remote-presentation', hostId: 'original-remote-host',
+    control: { kind: 'agent' as const, hostId: 'original-remote-host', agentSessionId: f.session.id, run: remoteRun } } as Extract<SessionSnapshot, { kind: 'agent' }>
+  f.store.setState({ sessions: [f.session, remote], questionReplies: {} })
+  const local = f.store.getState().sessions[0]
+  f.store.getState().applyEvent(questionRefusalEvent(remote, questionInput.operationId))
+  const accepted = f.store.getState().sessions.find(session => session.id === remote.id) as Extract<SessionSnapshot, { kind: 'agent' }>
+  expect(accepted.promptInputNotApplied).toEqual({ submissionId: questionInput.operationId, run: remoteRun })
+  const attempt: DesktopQuestionReplyAttempt = { ...unknownQuestion, hostId: remote.control.hostId,
+    input: { ...questionInput, expectedRun: remoteRun } }
+  const key = questionReplyKey(f.session.id, attempt.input)
+  await owner.retainConversationQuestionReply(f.session.id, key, attempt, undefined)
+  expect(f.store.getState().questionReplies[f.session.id]![key]?.phase,
+    'The canonical SID must not select a different Host ahead of the original reply').toBe('rejected')
+  expect(f.store.getState().questionReplies[f.session.id]![key]?.input).toEqual(attempt.input)
+  expect(matching).toHaveBeenCalledTimes(1)
+  expect(matching.mock.calls[0]![0]).toEqual(accepted.control)
+  expect(f.store.getState().sessions.find(session => session.id === f.session.id)).toBe(local)
+  expect(f.store.getState().sessions.find(session => session.id === remote.id)?.control).toEqual(remote.control)
+  await vi.waitFor(async () => expect(JSON.parse((await f.user.read())!).state.questionReplies[f.session.id][key].phase).toBe('rejected'))
+  expect(f.store.getState().agentComposerDrafts['original-region']).toBe('Original unsent draft')
+  expect(reply).not.toHaveBeenCalled(); expect(submit).not.toHaveBeenCalled(); expect(f.api.sessions.stop).not.toHaveBeenCalled()
+})
+
 it('question owner consumes an accepted explicit refresh without a Pane or later Runtime event', async () => {
   const f = await fixture('Original draft', false, { attempt: unknownQuestion })
   const key = questionReplyKey(f.session.id, questionInput)
