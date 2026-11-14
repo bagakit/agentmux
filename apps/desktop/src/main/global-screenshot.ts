@@ -1,4 +1,4 @@
-import type { CaptureBackground } from '../shared/capture-surface.js'
+import { startCaptureRequestTiming, type CaptureBackground, type CaptureRequestTiming } from '../shared/capture-surface.js'
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { BrowserWindow, WebContents, WebFrameMain } from 'electron'
 import { SCREENSHOT_ATTACHMENT_RECEIVER } from '../shared/screenshot-attachment.js'
@@ -9,7 +9,7 @@ type Ports = {
   contents: Pick<WebContents, 'isDestroyed' | 'mainFrame'>
   focusedWindow(): BrowserWindow | null
   windowForDocument(document: WorkbenchWindowDocument): BrowserWindow
-  capture(attachToDraft: boolean, background: CaptureBackground): Promise<string | null>
+  capture(attachToDraft: boolean, background: CaptureBackground, timing: CaptureRequestTiming): Promise<string | null>
   /** The shortcut was pressed again while this capture is open; show the user where it is. */
   remindPending(): void
   reportIssue(error: unknown): void
@@ -20,20 +20,23 @@ export class GlobalScreenshot {
   private pending: Promise<void> | null = null
   constructor(private readonly ports: Ports) {}
 
-  run(background: CaptureBackground = 'included'): Promise<void> {
+  run(background: CaptureBackground = 'included', timing = startCaptureRequestTiming()): Promise<void> {
     if (this.pending) {
       try { this.ports.remindPending() } catch (error) { this.ports.reportIssue(error) }
       return this.pending
     }
-    const action = this.runOnce(background).finally(() => { if (this.pending === action) this.pending = null })
+    const action = this.runOnce(background, timing).finally(() => { if (this.pending === action) this.pending = null })
     this.pending = action
     return action
   }
 
-  private async runOnce(background: CaptureBackground): Promise<void> {
+  private async runOnce(background: CaptureBackground, timing: CaptureRequestTiming): Promise<void> {
+    const prepareStarted = performance.now()
+    timing.callbackToPrepareMs = prepareStarted - timing.startedAt
     const attachment = await this.prepare()
+    timing.prepareMs = performance.now() - prepareStarted
     let path: string | null = null
-    try { path = await this.ports.capture(attachment !== null, background) }
+    try { path = await this.ports.capture(attachment !== null, background, timing) }
     finally {
       // Exactly the original frame and operation receive the final path or cancellation.
       // Failure here cannot undo an independent clipboard write or retarget another draft.

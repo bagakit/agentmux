@@ -1,4 +1,4 @@
-import type { CaptureBackground } from '../shared/capture-surface.js'
+import { startCaptureRequestTiming, type CaptureBackground, type CaptureRequestTiming } from '../shared/capture-surface.js'
 import type { CaptureParams, NativeDesktop } from '@agentmux/native-desktop'
 import { pngBytes } from '@agentmux/native-desktop/image'
 import type { BrowserPng } from '../shared/contracts.js'
@@ -27,9 +27,10 @@ export class ScreenCapture {
   private busy = false
   constructor(private readonly ports: Ports) {}
 
-  async capture(attachToDraft: boolean, mode: ScreenshotCaptureMode = 'selection', { delaySeconds }: ScreenshotCaptureOptions = {}, background: CaptureBackground = 'included'): Promise<string | null> {
+  async capture(attachToDraft: boolean, mode: ScreenshotCaptureMode = 'selection', { delaySeconds }: ScreenshotCaptureOptions = {}, background: CaptureBackground = 'included', timing = startCaptureRequestTiming()): Promise<string | null> {
     if (this.busy) throw new Error('A screen capture is already in progress. Finish or cancel that selection or editor, then try again.')
     this.busy = true
+    timing.screenCaptureMs ??= performance.now() - timing.startedAt
     try {
       if (!['selection', 'display', 'window'].includes(mode)) throw new Error('Choose a supported screenshot source. Your draft is kept.')
       if (delaySeconds !== undefined) {
@@ -85,7 +86,8 @@ export class ScreenCapture {
         const surface = async (retaking: boolean): Promise<CaptureSurfaceOutcome['state']> => {
           // Once the original draft has its image, a retaken surface and its editor only copy; the draft is never attached twice.
           const attaching = attachToDraft && !originalDelivered
-          const outcome = await this.ports.present({ attachToDraft: attaching, expandable: true, returnFocus: returnFocus && !retaking, complete, background,
+          timing.presentMs ??= performance.now() - timing.startedAt
+          const outcome = await this.ports.present({ attachToDraft: attaching, expandable: true, returnFocus: returnFocus && !retaking, complete, background, timing,
             ...(retaking && continuation ? { continuation } : {}) })
           if (outcome.state !== 'expanded') return outcome.state
           // Only the confirmed independent-editor Copy creates a continuation; shapes and Undo stay in that editor.

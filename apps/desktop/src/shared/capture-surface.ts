@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import type { BrowserPng } from './contracts'
 import type { ThemeBootstrap } from './theme-bootstrap'
 import type { ScreenshotFileResult } from './screenshot-output'
@@ -15,15 +16,32 @@ export type CaptureSurfaceRect = { x: number; y: number; width: number; height: 
 /** Which already frozen desktop is displayed; switching never captures again. */
 export type CaptureBackground = 'included' | 'excluded'
 
+/** Main-only request clock. The physical OS keydown before the registered callback is deliberately not guessed. */
+export type CaptureRequestTiming = {
+  requestId: string
+  startedAt: number
+  callbackToPrepareMs: number | null
+  prepareMs: number | null
+  screenCaptureMs: number | null
+  presentMs: number | null
+}
+export function startCaptureRequestTiming(): CaptureRequestTiming {
+  return { requestId: mintObjectId(), startedAt: performance.now(), callbackToPrepareMs: null, prepareMs: null, screenCaptureMs: null, presentMs: null }
+}
+export type CaptureRendererTiming = { loadMs: number; decodeMs: number; paintMs: number; presentedMs: number }
+
 /** One background of one display, retaining its own capture source. */
-export type CaptureSurfaceFrame = { capturedAt: number } & (
+export type CaptureSurfaceFrame =
   /** Windows are front to back, in this frozen frame's pixels clipped to the frame. */
-  | { image: BrowserPng; windows: CaptureSurfaceRect[]; engine: string; issue?: undefined }
-  | { image?: undefined; windows?: undefined; engine?: undefined; issue: string })
+  | { status: 'ready'; capturedAt: number; image: BrowserPng; windows: CaptureSurfaceRect[]; engine: string; issue?: undefined }
+  | { status: 'pending'; capturedAt: 0; image?: undefined; windows?: undefined; engine?: undefined; issue?: undefined }
+  | { status: 'failed'; capturedAt: number; image?: undefined; windows?: undefined; engine?: undefined; issue: string }
 
 /** One display's overlay and both backgrounds frozen for this request. */
 export type CaptureSurfaceInput = {
   requestId: string
+  /** Atomic snapshot generation; deferred frames never resend the already displayed PNG. */
+  revision: number
   displayId: number
   frame: CaptureSurfaceRect
   /** Device pixels per point of the frozen frame. */
@@ -43,6 +61,7 @@ export type CaptureSurfaceInput = {
 }
 
 export type CaptureSurfaceEvent = { kind: 'locked' } | { kind: 'notice'; message: string } | { kind: 'background'; background: CaptureBackground }
+  | { kind: 'snapshot'; requestId: string; revision: number; background: CaptureBackground; frame: CaptureSurfaceFrame }
 
 /** The marks ⌘E carries into the window editor; coordinates are this display's frozen-frame pixels. */
 export type CaptureSurfaceHandoff = { shapes: ScreenshotShape[]; crop: NormalizedRect; tool: AnnotationTool }
@@ -51,7 +70,7 @@ export type CaptureSurfaceHandoff = { shapes: ScreenshotShape[]; crop: Normalize
 export type CaptureSurfaceApi = {
   load(): Promise<CaptureSurfaceInput>
   /** The frozen frame is painted; Main shows every overlay once all displays reported. */
-  presented(requestId: string, background: CaptureBackground): Promise<void>
+  presented(requestId: string, background: CaptureBackground, timing?: CaptureRendererTiming): Promise<void>
   /** A selection starts here. False when another display already owns the selection. */
   select(requestId: string): Promise<boolean>
   /** Explicitly selects the named already frozen background; never recaptures. */

@@ -1689,10 +1689,13 @@ export async function registerIpc(args: {
   const returnScreenshotFocus = () => { if (!screenshotPins.hasOpenPins()) app.hide() }
   const copyScreenshotText = (text: string) => getDesktopNativeUiOwner().writeClipboardText(text)
   let captureTimingWrite = Promise.resolve()
+  let latestCaptureTimingRequest = ''
   const captureSurface = new CaptureSurface({ native: getNativeDesktopOwner, appearance: () => config.appearance, pin: pinScreenshot,
     copyText: copyScreenshotText, returnFocus: returnScreenshotFocus, recordTiming: timing => {
+      if (!timing.final) latestCaptureTimingRequest = timing.requestId
       // Keep captures ordered even when a previous diagnostic write is slow; failure is reported by CaptureSurface.
-      const write = captureTimingWrite.then(() => writeFile(join(app.getPath('userData'), 'capture-timing.json'), JSON.stringify(timing) + '\n'))
+      const write = captureTimingWrite.then(() => timing.requestId === latestCaptureTimingRequest
+        ? writeFile(join(app.getPath('userData'), 'capture-timing.json'), JSON.stringify(timing) + '\n') : undefined)
       captureTimingWrite = write.catch(() => {})
       return write
     } })
@@ -1729,7 +1732,7 @@ export async function registerIpc(args: {
     chooseSource: mode => screenshotSources.choose(mode), countdown: seconds => screenshotCountdown.wait(seconds) })
   const globalScreenshot = new GlobalScreenshot({ contents, focusedWindow: () => BrowserWindow.getFocusedWindow(),
     windowForDocument: document => args.workbenchWindows.windowForDocument(document),
-    capture: (attachToDraft, background) => screenCapture.capture(attachToDraft, 'selection', {}, background), reportIssue: reportScreenshotIssue,
+    capture: (attachToDraft, background, timing) => screenCapture.capture(attachToDraft, 'selection', {}, background, timing), reportIssue: reportScreenshotIssue,
     remindPending: () => { if (!captureSurface.notice('Finish or cancel this screenshot first')) screenshotEditor.notice('Finish or cancel this screenshot first') } })
   registerNativeDesktopIpc({ capture: (mode, options) => screenCapture.capture(true, mode, options), native: getDesktopNativeUiOwner,
     handle: handleWithEvent,})
@@ -2789,7 +2792,7 @@ export async function registerIpc(args: {
   const disposeThemeBootstrap = registerThemeBootstrap(ipcMain, args.window, () => config.appearance, () => nativeTheme.shouldUseDarkColors)
   const disposeTerminalBrightness = observeTerminalBrightness(nativeTheme, updateTerminalBrightness)
   const screenshotShortcut = registerScreenshotShortcut({ platform: process.platform, shortcuts: globalShortcut,
-    request: background => { void globalScreenshot.run(background).catch(reportScreenshotIssue) } })
+    request: (background, timing) => { void globalScreenshot.run(background, timing).catch(reportScreenshotIssue) } })
   handleWithEvent('ui:screenshotShortcutStatus', event => {
     return screenshotShortcut.status
   })
