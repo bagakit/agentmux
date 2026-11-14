@@ -1,21 +1,13 @@
 # common
 
 <!-- amux:content -->
-Read [Current goal-skill-entry](../../../dist/goal-role-guidance.js "amux:generated goal-skill-entry") before working on or managing a Goal; use amux goal --help
-for this version's exact operations and arguments. The original Goal owner holds accepted
-scope, criteria, execution bindings, progress, reports and business state. Core owns the
-authenticated Session, exact Run, original input and delivery facts; ctxmux owns process state.
-Keep the original Goal, alignment revision, execution operation, Host, Session, Run and source
-message/thread identities. Assignees, titles, an open view and displayed status are not execution proof.
-Do not replace an original Goal or Session to repair an unknown observation. Unknown/stale/
-unavailable facts remain visible; inspect the original request and input before another write.
-Never blindly resend unknown or partial input, and retain the healthy Agent's input and work surface.
-An execution authorization does not confirm Goal alignment or accept results for the person.
-Idle, exit, delivery, acknowledgement, worker_done and Tracker archival do not complete a Goal.
+The original Goal owner holds criteria, execution bindings, progress and reports.
+Core supplies authenticated Session, Run, input and delivery facts. ctxmux owns process state.
+Keep the same Goal, version, operation, Host, Session, Run and message/thread after uncertain
+results. Inspect those originals before another write. Preserve healthy Agents and their input.
 
-A person can accept the exact current report without closing the Goal, or explicitly
-accept and finish it with goal accept --finish. Finishing uses the same atomic
-alignment/submission check, keeps reported gaps and original execution history, and
-ends this Goal’s scheduled follow-up without stopping its original Agents. Agent
-credentials cannot supply either human choice. A Done Goal without current human
-acceptance still needs review; business status alone never supplies acceptance.
+A person confirms the exact proposal and accepts the exact current report. Execution
+permission grants neither choice. `goal accept` accepts without closing the Goal.
+`goal accept --finish` also ends this Goal's scheduled follow-up and preserves gaps,
+execution history and the original Agents. Idle, exit, delivery, `worker_done` and a
+Done status alone do not establish acceptance.

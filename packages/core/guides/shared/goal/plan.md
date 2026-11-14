@@ -1,89 +1,53 @@
 # plan
 
 <!-- amux:content -->
-A large Goal keeps one outcome and splits its work into a plan inside the Goal, not into
-many small Goals. Read goal plan --goal ID first; it returns nodes, dependencies, named
-executors, reviews, the plan revision and every node delegation. Node state is derived
-from those facts: waiting, ready, working, review, changes, done, cancelled or unknown.
-planState carries that derivation as the Goals page shows it, with each node's current
-attempt ({delegationOperationId, reported}) and every unknown reason; use it instead of
-deriving state yourself. Read that operation's source, thread and worker from the original
-delegation in the same response. Goal records carry the same planState with their plan.
-Without a valid planState, node states are unknown to you. planStateIssue explains a missing
-or invalid derivation and how to read this Goal again or update its Host. The plan,
-delegations and saved write receipt remain available; never repeat a saved write to fix a
-reading issue. Older strict readers must upgrade with the Host.
-goal discuss --goal ID --mode plan --operation-id OP explicitly asks the current Supervisor
-to save a plan through the original Host request owner. With no Supervisor, choose one
-explicitly before sending; selection itself sends nothing. As the Supervisor, read and
-revise the plan directly instead of requesting it from yourself. Planning waits for eligible
-input, retaining its original request and target. Read goal plan for the saved request and
-its observation: delivered still waits for a saved newer plan revision. A never-attempted
-request may use goal patrol continue after same-Session recovery; a planning request never
-uses goal patrol report. Old frozen or claimed dedicated-discussion requests only reconcile
-their original input, without resending or redirecting. A new explicit operation may ask the
-current Supervisor independently. open only navigates. Keep OP after an unknown input result;
-an acknowledgement or a textual breakdown does not prove that a plan was saved. Read the
-same Goal plan to observe its actual revision and nodes. Planning does not start work,
-enable continuous progress, confirm the Goal or accept results.
-Use the current alignment revision; human confirmation is not a prerequisite for planning.
-If the proposal or meaningful criteria are missing, clarify the real intent and propose
-alignment for this same Goal first, without inventing standards or a placeholder graph.
-The discussion Agent is not automatically the Supervisor. Only the exact current Supervisor
-or a person may revise the plan; otherwise preserve the original discussion and explain the
-explicit management selection or coordination needed. Never assign yourself or impersonate
-a person to make the graph appear.
-As Supervisor, write the plan with goal plan revise against the revision you read. An
-operation replay must keep the original author, expected revision, proposal revision and
-nodes. If a later revision exists, the refusal names where the original operation applied;
-read the current plan instead of repeating that old write. Name each node's outcome,
-dependencies, covered criteria, a check another party can repeat, and its executor
-(Host and AgentSession) when known. Cancel a node with work instead of removing it.
-Once a node has work, keep its outcome, check and criterion set; cancel it and add a
-new node for a different task. New nodes and changed criterion sets on unrecorded nodes
-must cover at least one criterion and only criteria in the current proposal. Unchanged old
-criterion sets remain readable and may need reconciliation. A node delegation carries the
-complete node criterion set. Explicitly changing a non-null executor supersedes the newest
-unreviewed attempt and permits the new executor once dependencies pass; clearing the
-executor does not supersede it. An old report stays on its original delegation and thread,
-but cannot receive the current node's review. A passed node stays done after reassignment.
-Delegate only a ready node, or one whose review asked for changes, with goal delegate and
-intent.planNodeId, to the executor the plan names. Parallel ready nodes go out together.
-A node is done only after goal plan review by someone other than its executor: run the
-node's check yourself and record the command, its actual result and evidence locations.
-A changes verdict says what to change; send the rework to the same executor on the same
-thread. An unknown node names why it needs reconciliation. dispatch-link: read the original
-delegation receipt before acting and never resend that delivery. criteria: the node names no
-criterion, names one the current proposal no longer has, or one whose text changed since its
-attempt was sent; revise the plan or the proposal. Changed or missing criteria keep the old
-review readable without completing the current work; unchanged criteria keep their accepted
-work. Each new continuous-progress input on this Goal freezes the same owner snapshot that
-qualified the check: plan revision, every ready, working, review, changes or unknown node,
-its named executor, original delegation/source/thread and all unknown reasons. Read node
-outcomes and checks through goal plan; manage this work as Supervisor rather than taking
-over every node. An unconfirmed input keeps that frozen handoff and manager guidance even
-after the plan changes. Progress pauses when every node passed review; a person still
-accepts the Goal results. A node review or plan
-completion never accepts the Goal.
+1. **Read.** Use `goal plan --goal ID`. Read the owner's `planState`, then match
+   the node's current `delegationOperationId` to its original report, worker and thread.
+   If `planStateIssue` is present, read the Goal again or update its serving Host.
+   Node states stay unknown while the derivation is unavailable. Keep the saved plan,
+   delegations and any write receipt. For all state fields use `goal plan --help`.
+2. **Delegate.** Use `goal delegate` with `intent.planNodeId` and the complete node
+   criteria. A ready node or a node with changes requested can go to its named executor.
+   Independent ready nodes can run in parallel. For rework, preserve the node and original
+   thread. Use `intent.workerHostId` for the exact worker route on another Host.
+3. **Review.** In Desktop choose **Plan → Ready for review → Record review**, or use
+   `goal plan review --input FILE`. Judge the current reported attempt. The reviewer
+   runs the declared check independently. A pass records the actual check, result and
+   evidence. A dependent task becomes ready once all its dependencies pass.
+   A changes verdict records what to fix. An executor cannot approve its work through a Host alias.
+   After a lost receipt, read `goal plan --goal ID` and match the saved review operation,
+   node and delegation. Node review and the person's Goal acceptance are separate decisions.
 
-The plan's executor Host can differ from the Supervisor's Host. A delegation intent.hostId
-selects the original Supervisor route; intent.workerHostId selects the executor route.
-When workerHostId is absent in an original local record, its original hostId names both.
-Each signed original source freezes the actual owner and worker Runtime identities: a route
-alias is not a different executor or reviewer. Independent review compares Runtime and
-Session identity, so the worker cannot approve itself through another Host alias.
+### Create or revise a plan
 
-The remote worker reports from its received source MID as described in the executor section.
-The Supervisor reads goal delegations and uses goal collect on the original Goal; collection
-retrieves signed replies through the original connection before recording the verified report.
-If retrieval is unavailable, retain the source and report identities and inspect the same
-operation; locally verified replies remain readable. Submission, delivery, collection and
-independent review are separate facts. Only the independent passing review releases a
-node's dependents, and a person still accepts the Goal.
+`goal discuss --goal ID --mode plan --operation-id OP` asks the current
+Supervisor to save a plan. Choose a Supervisor explicitly when none exists. As the
+Supervisor, use `goal plan revise` directly against the version you read. Planning can
+use a real unconfirmed proposal. Clarify missing criteria first. Discussion and planning
+grant neither execution nor human confirmation. A delivered request or textual breakdown
+does not prove a plan was saved. Read the current plan revision and keep OP when receipt
+is uncertain. Never-attempted requests can continue on the recovered same Session using
+`goal patrol continue`. Frozen or claimed older requests only reconcile their original
+input. A saved plan revision completes planning.
 
-An unlinked remote outbox remains unknown: it proves only the original owner save. After
-restoring the exact route or message trust, explicitly repeat goal delegate with the same
-operation, source MID and frozen intent to reconcile the worker receipt. Reading or observing
-the Goal never retries the original delivery. goal delegation bind never sends; it links a
-remote source only after an exact read of the worker inbox confirms that original source.
-A later offline worker does not erase an already confirmed original link.
+A node names its outcome, dependencies, criteria, repeatable check and optional executor.
+Once it has work, preserve its outcome, check and criterion set. Cancel it and add a new
+node for different work. Explicit reassignment to a different executor supersedes the
+newest unreviewed attempt. Clearing the executor does not. A passed node stays done.
+The previous attempt and its thread remain readable. For input and revision rules use
+`goal plan revise --help`.
+
+### Reconcile before advancing
+
+- `dispatch-link` unknown means read the original Core delivery receipt. Keep the same
+  operation and source. For a remote outbox, see `goal delegate --help` to reconcile
+  the same operation after restoring its route or trust. `goal delegation bind` links
+  a confirmed worker inbox entry without sending it.
+- `criteria` unknown means missing or changed criteria. Read the current proposal.
+  An old passing review remains history. Unchanged criteria retain their accepted work.
+- The Supervisor uses `goal collect` to retrieve original signed replies through the
+  existing worker connection. An outbox receipt is local custody. A verified collection
+  records the original report. Preserve those identities if retrieval is unavailable.
+- Continuous progress freezes the plan revision, actionable nodes and original attempt
+  references for each input. Follow that frozen scope after an uncertain input.
+  When every node passes, wait for the person's Goal acceptance.
