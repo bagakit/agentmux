@@ -26,7 +26,7 @@ const mutations = [
  {id:'retained-selection-remount',file:files[0],before:'const raw = useAppStore(state => state.goalAgentSelectionDrafts[goalCreationDraftKey(demand.id, role)])',after:'const raw = undefined'},
  {id:'unknown-inspect-only',file:files[0],before:"{ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: `goal-agent-inspect-${mintObjectId()}`, operation: 'space.inspect', target: { requestId: original.operationId } }",after:'original.request'},
  {id:'not-dispatched-first-recovery',file:files[0],before:'await dispatchOriginal(original)',after:'await inspectOriginal(original)'},
- {id:'mote-original-directory',file:files[0],before:"...(mode === 'agent' ? { executionWorkspaceId: workspace!.id } : {})",after:"...{ executionWorkspaceId: workspaceId || '__scratch__' }"}
+ {id:'mote-original-directory',file:files[0],before:'destination: { spaceId, zoneId: homeZoneId(spaceId), newTab: true }',after:"destination: { spaceId: '__scratch__', zoneId: homeZoneId(spaceId), newTab: true }"}
 ]
 await fs.mkdir(evidence,{recursive:true})
 const receipt={schema:'agentmux.demand-picker.proof.v1',passed:false,candidate:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),source:await hashes(),mutations:[],boundary:'Actual Source GoalDetail and picker -> Store -> original preload/Main -> durable Domain/Core creation and original operation inspection. Private controlled Native I/O and Electron IPC only; no installed App or user Run. Visual and real Native process proof are separate.'}
