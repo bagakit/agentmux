@@ -19,10 +19,12 @@ export function GoalRow({ demand, selected, selectedSessionId, acknowledgementFa
   const teamDescriptionId = useId()
   const execution = useAppStore(useShallow((state) => {
     const byId = agentSessionPresentationIndex(state.sessions)
-    let count = 0, unconfirmed = 0; const statuses = new Set<string>()
+    const actors = new Set<string>()
+    let unconfirmed = 0
     for (const id of demand.sessionIds) {
-      const matches = typeof id === 'string' ? byId.get(id) : undefined, session = matches?.length === 1 ? matches[0] : undefined
-      if (session) { count++; statuses.add(session.status.state.replaceAll('_', ' ')) } else unconfirmed++
+      const matches = typeof id === 'string' ? byId.get(id) : undefined
+      const identities = new Set(matches?.map(session => JSON.stringify([session.control.hostId, session.control.agentSessionId])))
+      if (identities.size === 1) actors.add(identities.values().next().value!); else unconfirmed++
     }
     const focused = selectedSessionId ? byId.get(selectedSessionId) : undefined
     const source = focused?.length === 1 && focused[0]?.kind === 'agent' ? focused[0] : undefined
@@ -30,7 +32,7 @@ export function GoalRow({ demand, selected, selectedSessionId, acknowledgementFa
     const fact = work?.goals.find(goal => goal.goalId === demand.id)
     const context = !fact ? null : work?.state === 'current' && fact.confirmed ? 'Current execution'
       : fact.confirmed ? work?.state === 'ambiguous' ? fact.attributionAmbiguous ? 'Multiple original executions' : 'Multiple confirmed Goals' : 'Last confirmed input · input unconfirmed' : 'Input unconfirmed'
-    return { count, unconfirmed, status: [...statuses].join(' / '), context }
+    return { count: actors.size, unconfirmed, context }
   }))
   const retainedStart = useAppStore(state => state.goalFiniteStartIntents[demand.id])
   const fact = goalNextStepFact(demand, retainedStart)
@@ -41,7 +43,7 @@ export function GoalRow({ demand, selected, selectedSessionId, acknowledgementFa
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect() }
   }}>
     <GoalStageMark stage={stage} />
-    <div className="goals-row__copy"><strong title={demand.title}>{demand.title}</strong><span className="goals-row__next">{nextStep}</span><div className="goals-row__footer"><span className="goals-row__facts"><GoalPlanRing demand={demand} />{demand.projectName ? <span title={demand.projectName}>{demand.projectName}</span> : null}{execution.count ? <span>{execution.count} linked · {execution.status}</span> : null}{!compact && execution.unconfirmed ? <span>{execution.unconfirmed} linked {execution.unconfirmed === 1 ? 'Session' : 'Sessions'} unconfirmed</span> : null}{execution.context ? <span>{execution.context}</span> : null}</span><GoalAgentGroup demand={demand} descriptionId={teamDescriptionId} /></div>{!compact ? <GoalResponsibilitySummary demand={demand} compact /> : null}</div>
+    <div className="goals-row__copy"><strong title={demand.title}>{demand.title}</strong><span className="goals-row__next">{nextStep}</span><div className="goals-row__footer"><span className="goals-row__facts"><GoalPlanRing demand={demand} />{demand.projectName ? <span title={demand.projectName}>{demand.projectName}</span> : null}{execution.count ? <span>{execution.count} related {execution.count === 1 ? 'Agent' : 'Agents'}</span> : null}{!compact && execution.unconfirmed ? <span>{execution.unconfirmed} linked {execution.unconfirmed === 1 ? 'Session' : 'Sessions'} unconfirmed</span> : null}{execution.context ? <span>{execution.context}</span> : null}</span><GoalAgentGroup demand={demand} descriptionId={teamDescriptionId} /></div>{!compact ? <GoalResponsibilitySummary demand={demand} compact /> : null}</div>
     {selected ? <ThemeStatusSelectedIcon className="goals-row__selected" size={13} aria-label="Selected goal" /> : <ThemeNavigationDisclosureIcon className="goals-row__open" size={14} aria-hidden="true" />}
   </div>
 }
