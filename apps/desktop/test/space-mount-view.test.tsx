@@ -374,8 +374,8 @@ it('unknown mounted creation retains its original request and later draft; remou
   const select = dom.container.querySelector<HTMLSelectElement>('[aria-label="Original Space Agent configuration"]')!
   await act(async () => { select.value = 'b-executor'; select.dispatchEvent(new Event('change', { bubbles: true })) })
   const host = dom.container.querySelector<HTMLSelectElement>('[aria-label="Original Space Agent device"]')!
-  await vi.waitFor(async () => { await act(async () => {}); expect(host.textContent).toContain(f.b.id + '-original-remote') })
-  await act(async () => { host.value = f.b.id + '-original-remote'; host.dispatchEvent(new Event('change', { bubbles: true })) })
+  await vi.waitFor(async () => { await act(async () => {}); expect(Array.from(host.options).some(option => option.value === JSON.stringify(['host', f.b.id + '-original-remote']))).toBe(true) })
+  await act(async () => { host.value = JSON.stringify(['host', f.b.id + '-original-remote']); host.dispatchEvent(new Event('change', { bubbles: true })) })
   await vi.waitFor(async () => { await act(async () => {}); expect(select.textContent).toContain('Original executor') })
   await act(async () => { select.value = 'b-executor'; select.dispatchEvent(new Event('change', { bubbles: true })) })
   await setMountedTaskDraft('Original frozen task')
@@ -470,7 +470,7 @@ it('a foreign original project defaults to its own B-realm Agent device instead 
   await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.textContent).toContain('C original project') })
   await act(async () => Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === 'New work')!.click())
   await vi.waitFor(async () => { await act(async () => {}); expect(requested).toEqual(['C-in-B']) })
-  expect(dom.container.querySelector<HTMLSelectElement>('[aria-label="Original Space Agent device"]')!.value).toBe('C-in-B')
+  expect(dom.container.querySelector<HTMLSelectElement>('[aria-label="Original Space Agent device"]')!.value).toBe(JSON.stringify(['host', 'C-in-B']))
   expect(dom.container.textContent).toContain(project.path)
   expect(await f.cores[0]!.store.read()).toBeNull()
 })
