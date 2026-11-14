@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 
 const integer = (value, message) => assert.ok(Number.isSafeInteger(value) && value >= 0, message)
 const nonempty = (values, message) => assert.ok(Array.isArray(values) && values.length > 0, message)
-const terminal = event => event.event.type === 'phase-changed' && event.event.phase === 'completed'
+const terminal = event => event.event.type === 'operation-finished' && event.event.operation.phase === 'completed'
 
 /** Exact physical reads and returned slices from the original saved extraction. */
 export function summarizeBrowserOutcomeCollection(recorded, operation) {
@@ -53,7 +53,9 @@ function validateJournalSample(sample, expectedOperationId) {
     last = item.sequence
   }
   nonempty(sample.ends, 'Require the observed public stream close after disposal')
-  assert.ok(sample.ends.every(end => end.reason === 'closed' && !end.error), 'Public stream errors cannot sign zero delivery')
+  assert.ok(sample.ends.every(end => end.reason === 'closed' && !end.error ||
+    end.reason === 'error' && end.errorCode === 'CONTROL_CANCELLED' && end.disposalRequested === true && end.at >= sample.disposedAt),
+  'Public stream errors cannot sign zero delivery; only this reader’s explicit disposal may cancel its observation')
   assert.ok(Number.isSafeInteger(sample.opened.at) && Number.isSafeInteger(sample.disposedAt) && sample.disposedAt >= sample.opened.at)
 }
 
@@ -96,12 +98,16 @@ export async function collectBrowserCapabilityMeasurements(ctx, { relatedOperati
   nonempty(history.operations, 'Require an existing actual sibling operation; the caller owns any explicit baseline observation')
   const sibling = history.operations.find(item => item.browserId === siblingBrowserId && item.phase === 'completed')
   assert.ok(sibling, 'Require an existing completed sibling operation')
-  const open = async (actual, afterSequence) => {
-    const sample = { operationId: actual.id, browserId: actual.browserId, afterSequence, events: [], ends: [] }
+  const observation = ctx.receipt.capabilityMeasurementObservation = {
+    selection: { related: structuredClone(operation), sibling: structuredClone(sibling) }, journal: {}
+  }
+  const open = async (actual, afterSequence, label) => {
+    const sample = observation.journal[label] = { operationId: actual.id, browserId: actual.browserId, afterSequence, events: [], ends: [] }
     const stream = await ctx.rpc.subscribe('browser.follow', { operationId: actual.id, afterSequence }, {
       onInitial: initial => { sample.opened = { at: Date.now(), runOperation: structuredClone(initial.runOperation), gap: structuredClone(initial.gap) } },
       onEvent: event => { if (event.type === 'progress') sample.events.push(structuredClone(event.data)) },
-      onEnd: error => sample.ends.push({ at: Date.now(), reason: error ? 'error' : 'closed', ...(error ? { error: String(error.message) } : {}) })
+      onEnd: error => sample.ends.push({ at: Date.now(), reason: error ? 'error' : 'closed',
+        disposalRequested: sample.disposedAt !== undefined, ...(error ? { error: String(error.message), errorCode: error.code } : {}) })
     })
     return { sample, dispose: async () => { sample.disposedAt = Date.now(); await stream.dispose() } }
   }
@@ -109,14 +115,14 @@ export async function collectBrowserCapabilityMeasurements(ctx, { relatedOperati
     await item.dispose()
     await ctx.waitFor('the actual public cost stream close after disposal', () => item.sample.ends.length ? true : null)
   }
-  const preparation = await open(sibling, 0)
+  const preparation = await open(sibling, 0, 'preparation')
   let related, unrelated
   try {
     await ctx.waitFor('the actual prior sibling replay completed', () => preparation.sample.events.some(terminal) ? true : null)
     await close(preparation)
     const afterSequence = preparation.sample.events.at(-1).sequence, startedAt = Date.now()
-    unrelated = await open(sibling, afterSequence)
-    related = await open(operation, 0)
+    unrelated = await open(sibling, afterSequence, 'unrelated')
+    related = await open(operation, 0, 'related')
     const bothOpenedAt = Date.now()
     await ctx.waitFor('the actual original producer callback replay completed', () => related.sample.events.some(terminal) ? true : null)
     while (Date.now() - bothOpenedAt < 100) {
