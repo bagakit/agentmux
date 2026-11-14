@@ -341,7 +341,7 @@ function TerminalViewOwner({
   const acceptsInput = true
   const acceptsInputRef = useRef(acceptsInput)
   acceptsInputRef.current = acceptsInput
-  const searchAddonRef = useRef<SearchAddon | null>(null)
+  const searchOwnerRef = useRef<{ forQuery(query: string): SearchAddon | null; release(): void } | null>(null)
   const pasteTargetRef = useRef<TerminalPasteTarget | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const rememberedSelectionRef = useRef('')
@@ -697,9 +697,6 @@ function TerminalViewOwner({
       scrollback: 5_000
     })
     const fit = new FitAddon()
-    // highlightLimit 显式传入而不是吃 addon 的默认值：计数文案要在命中上限时说「1000+」而不是
-    // 「1000」，那个判据和这个数必须是同一个来源。不传就得靠"库的默认恰好是 1000"这条无人守的假设。
-    const search = new SearchAddon({ highlightLimit: TERMINAL_SEARCH_HIGHLIGHT_LIMIT })
     // xterm has separate providers for bare URIs and OSC 8 declarations. Both
     // reach this handler: target protocol, never representation, selects the owner.
     // An explicit OSC 8 handler also avoids xterm's confirm/window.open default.
@@ -851,17 +848,11 @@ function TerminalViewOwner({
       }
     }
     terminal.loadAddon(fit)
-    terminal.loadAddon(search)
     terminal.loadAddon(webLinks)
     terminal.open(root)
     terminalDocumentRef.current = root.ownerDocument
     terminalRef.current = terminal
     consumeCaretFocus()
-    searchAddonRef.current = search
-    // 「第 3 个 / 共 47 个」。订阅在 addon 加载之后立刻建立，而不是等面板打开：addon 在关闭状态下
-    // 也不会发结果事件，等到打开再订阅只是多一处生命周期，且会漏掉打开那一瞬的首次结果。
-    // 投影逻辑（截断下界、位置未知）在 lib 里，这里只剩这一句转发——见 terminal-search-count.ts 的说明。
-    const searchCounter = subscribeTerminalSearchCount(search, setSearchCount)
 
     // 宽度表必须在**任何回放字节写入之前**激活：单元格宽度在字节写入那一刻按当时的
     // Unicode 版本定型，先写进去的 CJK/emoji 会按默认的 v6 宽度串行，之后再切版本也救不回来。
@@ -947,15 +938,46 @@ function TerminalViewOwner({
     })
 
     const resourceOwners = acquireTerminalResourceOwners({
-      addons: 3,
-      // onData 与 onBinary 是两个独立的 xterm 订阅（见 subscribeTerminalInput），
-      // 加上 search addon 的结果计数和 onScroll 读出清理；各自都在 cleanup 里释放。
-      // 少数一个就等于把一条泄漏账瞒下去。
-      // Natural interaction observation owns two passive capture listeners.
-      listeners: 11
+      addons: 2,
+      listeners: 10
     })
+    let search: {
+      addon: SearchAddon
+      counter: { dispose(): void }
+      releaseAddon: () => void
+      releaseListener: () => void
+    } | null = null
+    const searchOwner = {
+      forQuery(query: string): SearchAddon | null {
+        if (search) return search.addon
+        if (!query) return null
+        // SearchAddon subscribes to parsed output as soon as it is loaded.
+        const addon = new SearchAddon({ highlightLimit: TERMINAL_SEARCH_HIGHLIGHT_LIMIT })
+        terminal.loadAddon(addon)
+        search = {
+          addon,
+          counter: subscribeTerminalSearchCount(addon, setSearchCount),
+          releaseAddon: resourceOwners.acquireAddon(),
+          releaseListener: resourceOwners.acquireListeners(1)
+        }
+        return addon
+      },
+      release() {
+        const active = search
+        search = null
+        if (!active) return
+        let failure: { error: unknown } | undefined
+        try { active.counter.dispose(); active.releaseListener() }
+        catch (error) { failure = { error } }
+        try { active.addon.dispose(); active.releaseAddon() }
+        catch (error) { failure ??= { error } }
+        if (failure) throw failure.error
+      }
+    }
+    searchOwnerRef.current = searchOwner
     let webgl: WebglAddon | null = null
     let webglContextLoss: { dispose(): void } | null = null
+    let releaseWebglAccounting: (() => void) | undefined
     const observeDisposal = (operation: RendererTerminalCleanupContext['operation'], dispose: () => void): void => {
       let start: number | undefined, context: Omit<RendererTerminalCleanupContext, 'outcome'> | undefined
       try {
@@ -976,16 +998,17 @@ function TerminalViewOwner({
     }
     const releaseWebgl = (): void => {
       // Fence old callbacks before independently releasing the listener and GPU owner.
-      const listener = webglContextLoss, addon = webgl
+      const listener = webglContextLoss, addon = webgl, releaseAccounting = releaseWebglAccounting
       webglContextLoss = null
       webgl = null
+      releaseWebglAccounting = undefined
       let failure: { error: unknown } | undefined
       try { listener?.dispose() }
       catch (error) { failure = { error } }
       try {
         if (addon) {
           observeDisposal('webgl-dispose', () => addon.dispose())
-          resourceOwners.setAddons(3)
+          releaseAccounting?.()
         }
       } catch (error) { failure ??= { error } }
       if (failure) throw failure.error
@@ -1008,7 +1031,7 @@ function TerminalViewOwner({
           incidents?.capture('terminal-context-lost', 'context-lost')
           releaseWebgl()
         })
-        resourceOwners.setAddons(4)
+        releaseWebglAccounting = resourceOwners.acquireAddon()
       } catch (error) {
         releaseWebgl()
         console.warn('[terminal] WebGL unavailable; xterm DOM renderer remains active', error)
@@ -2112,14 +2135,14 @@ function TerminalViewOwner({
       }))
       if (terminalRef.current === terminal) { terminalRef.current = null; terminalDocumentRef.current = null }
       if (viewportRef.current === viewport) viewportRef.current = null
-      if (searchAddonRef.current === search) searchAddonRef.current = null
+      if (searchOwnerRef.current === searchOwner) searchOwnerRef.current = null
       cleanup(() => viewport.dispose())
       cleanup(() => renderReady?.dispose())
       if (webglVisibilityRef.current === synchronizeWebglVisibility) webglVisibilityRef.current = null
       // Each retired owner releases independently; preserve the first original failure.
       cleanup(releaseWebgl)
       cleanup(() => oscHandlers.dispose())
-      cleanup(() => searchCounter.dispose())
+      cleanup(searchOwner.release)
       cleanup(() => selection.dispose())
       cleanup(() => linkPreviewScroll.dispose())
       cleanup(() => pathLinks.dispose())
@@ -2255,14 +2278,9 @@ function TerminalViewOwner({
   }
 
   function closeSearch(): void {
-    searchAddonRef.current?.clearDecorations()
+    searchOwnerRef.current?.release()
     setSearchOpen(false)
-    // 提示是对**这一次**输入的说明，关掉就过期了。留着它，下次打开面板会挂着一句上次的
-    // 「正则还不完整」——那时用户还没输任何东西，这句话就成了假话。开关本身不重置：
-    // 成熟编辑器都记住它们，打开搜索发现上次的条件还在才是符合预期的。
     setSearchNotice(undefined)
-    // 计数同理，而且必须显式清：clearDecorations 只擦掉高亮，addon 不会为"擦干净了"再发一次
-    // 结果事件。不清的话，下次打开面板会先亮着上次的「3 of 47」，而那时输入框里什么都没有。
     setSearchCount(undefined)
     terminalRef.current?.focus()
   }
@@ -2286,7 +2304,7 @@ function TerminalViewOwner({
     previous = false
   ): void {
     searchTerminalFromSurface({
-      addon: searchAddonRef.current,
+      addon: searchOwnerRef.current?.forQuery(query) ?? null,
       query,
       toggles,
       direction: previous ? 'previous' : 'next',
