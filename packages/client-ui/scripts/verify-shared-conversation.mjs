@@ -149,6 +149,8 @@ try {
         await cp(resolve(root, 'packages/client-ui', name), resolve(isolatedPackage, name), { recursive: true })
       }
       await cp(resolve(root, 'tsconfig.base.json'), resolve(isolatedRoot, 'tsconfig.base.json'))
+      await mkdir(resolve(isolatedRoot, 'test'), { recursive: true })
+      await cp(resolve(root, 'test/fixture-values.mjs'), resolve(isolatedRoot, 'test/fixture-values.mjs'))
       await symlink(resolve(root, 'node_modules'), resolve(isolatedRoot, 'node_modules'), 'dir')
       // A concurrent Core build may replace dist. Freeze that existing compiled dependency;
       // all unrelated installed dependencies remain read-only links to the workspace.
