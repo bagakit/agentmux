@@ -110,7 +110,7 @@ export class GoalPatrolOwner {
     if (!goal) throw new AgentMuxError('The original Goal is unavailable.', 'CONTROL_UNAVAILABLE')
     if (purpose !== 'plan' && authority.actor.kind === 'agent' && authority.actor.id !== goal.supervisorSessionId && !demandExecutionReferences(goal).some(ref => ref.agentSessionId === authority.actor.id))
       throw new AgentMuxError('Only this Goal’s original execution or management authority can request inspection.', 'CONTROL_PERMISSION_DENIED')
-    const original = goal.patrols?.find(item => item.operationId === operationId)
+    const original = goal.patrols?.find(item => item.operationId === operationId || item.requestOperationIds?.includes(operationId))
     if (original) {
       if (original.purpose !== purpose) throw new AgentMuxError('This original operation belongs to another Goal request purpose. Its original input is retained.', 'CONTROL_REQUEST_CONFLICT')
       await this.check(goalId, original.operationId); return original
