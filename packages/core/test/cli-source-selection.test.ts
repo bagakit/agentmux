@@ -19,7 +19,7 @@ function fixture(record: Record<string, unknown> = saved) {
 
 it.each([
   { ...saved, transport: 'ssh-tailcat', tailcat: { address: 'tcORIGINAL', keyFile: 'original-client-key' } },
-  { ...saved, hostname: '', transport: 'tailcat', tailcat: { address: 'tcORIGINAL', keyFile: '/private/client-key' } }
+  { ...saved, hostname: '', identityFile: 'unused/ssh-identity', transport: 'tailcat', tailcat: { address: 'tcORIGINAL', keyFile: '/private/client-key' } }
 ])('projects the complete original backup/direct Tailcat target without reading a key: $transport', async record => {
   const f = fixture(record), port = await connectAgentMuxCliSource({ endpoint: { transport: 'unix', path: '/private/configuration.sock' }, sourceHost: saved.id, credentials })
   const actual = mock.connect.mock.calls[1]![0]
@@ -54,6 +54,17 @@ it('the default/explicit endpoint retains its original connection without any sa
   const endpoint = { transport: 'unix' as const, path: '/private/original.sock' }
   expect(await connectAgentMuxCliSource({ endpoint, credentials })).toBe(source)
   expect(mock.connect).toHaveBeenCalledExactlyOnceWith({ endpoint, credentials }); expect(source.call).not.toHaveBeenCalled()
+})
+
+it('does not reinterpret an owner-relative SSH identity path in the CLI directory, while preserving SSH home references', async () => {
+  const f = fixture({ ...saved, identityFile: 'keys/id' })
+  await expect(connectAgentMuxCliSource({ endpoint: { transport: 'unix', path: '/private/configuration.sock' }, sourceHost: saved.id, credentials })).rejects.toMatchObject({ code: 'SSH_IDENTITY_PATH_UNCONFIRMED' })
+  expect(mock.connect).toHaveBeenCalledTimes(1); expect(f.configuration.dispose).toHaveBeenCalledTimes(1)
+  mock.connect.mockReset()
+  fixture({ ...saved, identityFile: '~/.ssh/original-key' })
+  const port = await connectAgentMuxCliSource({ endpoint: { transport: 'unix', path: '/private/configuration.sock' }, sourceHost: saved.id, credentials })
+  expect(mock.connect.mock.calls[1]![0].endpoint.identityFile).toBe('~/.ssh/original-key')
+  await port.dispose()
 })
 
 it('parses only leading selectors and keeps option-looking IDs as explicit literal values', () => {

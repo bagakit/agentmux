@@ -176,10 +176,21 @@ it('offline help and static/invalid selection do not connect or disclose saved c
   }
   expect(f.reads).toBe(0); await expect(readFile(f.sshLog)).rejects.toMatchObject({ code: 'ENOENT' })
   const remote = await runCompiledObjectCli(['--source-host', 'source-b', 'agent', 'ls'], { ...f.env, AGENTMUX_RPC_ENDPOINT: 'https://example.invalid/' })
-  expect(remote.code).toBe(1); expect(f.reads).toBe(0)
+  expect(remote.code).toBe(1); expect(JSON.parse(remote.stderr).error.code).toBe('INVALID_CLI_ARGUMENT'); expect(f.reads).toBe(0)
   await f.setHosts([{ id: 'local', kind: 'local', label: 'Local' }, { ...f.hosts[1], runtimeId: undefined }])
   for (const id of ['local', 'source-b', 'missing']) expect((await f.cli(['--source-host', id, 'agent', 'ls'])).code).toBe(1)
   await expect(readFile(f.sshLog)).rejects.toMatchObject({ code: 'ENOENT' })
+})
+
+it('an original valid saved relative identity path stays intact and is not interpreted in the CLI cwd', async () => {
+  const f = await fixture(), relative = { ...f.hosts[1], identityFile: 'keys/id' }
+  await f.setHosts([relative])
+  const result = await f.cli(['--source-host', 'source-b', 'agent', 'inspect', '--session', 'source-agent'])
+  expect(result.code).toBe(1); expect(JSON.parse(result.stderr).error.code).toBe('SSH_IDENTITY_PATH_UNCONFIRMED')
+  expect(f.reads).toBe(1)
+  await expect(readFile(f.sshLog)).rejects.toMatchObject({ code: 'ENOENT' })
+  // The actual configuration owner still accepts and retains this original record.
+  expect(await readHostSettingsHosts(join(f.a.original.root, 'selector-configuration.json'))).toContainEqual(relative)
 })
 
 it('wrong bound Runtime is rejected before Native and an alias edit after a positive effect cannot erase its ACK', async () => {
