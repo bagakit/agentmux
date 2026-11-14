@@ -65,17 +65,17 @@ describe('actual Core disk observations consumed by Doctor', () => {
     expect(await readFile(resolved.mutations[0]!.path, 'utf8')).toBe('{private-credential-do-not-report')
   })
 
-  it('reports unsupported, unmanaged, missing workspace and binding context as explicit skipped facts', async () => {
+  it('reports unsupported, unmanaged and missing workspace explicitly while code-only plans need no binding', async () => {
     expect(await client.inspectManagedHooks('traex', { workspacePath: root })).toMatchObject({ status: 'skipped', code: 'HOOKS_UNSUPPORTED', targets: [] })
     expect(await client.inspectManagedHooks('kimi', { workspacePath: root })).toMatchObject({ status: 'skipped', code: 'HOOKS_NOT_MANAGED', targets: [] })
     expect(await client.inspectManagedHooks('claude')).toMatchObject({ status: 'skipped', code: 'HOOK_WORKSPACE_REQUIRED', workspacePath: null, targets: [] })
     const provider = new AgentProviderRegistry().get('opencode')
     const other = new AgentMuxClient({ providers: [provider], hookInstaller: installer, store: new AgentMuxMemoryAgentSessionStore() })
-    try { expect(await other.inspectManagedHooks('opencode', { workspacePath: root })).toMatchObject({ status: 'skipped', code: 'HOOK_PLAN_CONTEXT_UNAVAILABLE', targets: [] }) }
+    try { expect(await other.inspectManagedHooks('opencode', { workspacePath: root, env: { OPENCODE_CONFIG_DIR: join(root, 'uninstalled-opencode') } })).toMatchObject({ status: 'not_installed', code: 'MANAGED_HOOK_ABSENT' }) }
     finally { await other.dispose() }
   })
 
-  it('checks an existing exact plugin binding context without exposing its generated credential', async () => {
+  it('checks one credential-free plugin independently of the supplied existing binding', async () => {
     const provider = new AgentProviderRegistry().get('opencode')
     const other = new AgentMuxClient({ providers: [provider], hookInstaller: installer, store: new AgentMuxMemoryAgentSessionStore() })
     const env = { OPENCODE_CONFIG_DIR: join(root, 'private-opencode') }
@@ -84,9 +84,9 @@ describe('actual Core disk observations consumed by Doctor', () => {
     await installer.ensure(resolved)
     try {
       const result = await other.inspectManagedHooks('opencode', { workspacePath: root, env, endpoint })
-      expect(result).toMatchObject({status:'installed',targets:[{path:resolved.mutations[0]!.path,status:'current'}]})
+      expect(result).toMatchObject({status:'partial',code:'HOOK_ACTIVATION_NEEDS_EVIDENCE',targets:[{path:resolved.mutations[0]!.path,status:'current'}]})
       expect(JSON.stringify(result)).not.toContain(endpoint.token)
-      expect(await other.inspectManagedHooks('opencode', { workspacePath: root, env, endpoint: {...endpoint,token:'other-binding-token'} })).toMatchObject({status:'partial'})
+      expect(await other.inspectManagedHooks('opencode', { workspacePath: root, env, endpoint: {...endpoint,token:'other-binding-token'} })).toMatchObject({status:'partial',code:'HOOK_ACTIVATION_NEEDS_EVIDENCE',targets:[{path:resolved.mutations[0]!.path,status:'current'}]})
     } finally { await other.dispose() }
   })
 

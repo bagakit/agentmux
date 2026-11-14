@@ -1,6 +1,7 @@
 import { parse as parseToml } from 'smol-toml'
 import { fixturePath } from './helpers/fixture-values.js'
 import { Readable } from 'node:stream'
+import { createServer, type Server } from 'node:http'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -43,6 +44,9 @@ let privateState: string
 beforeEach(async () => {
   privateState = await mkdtemp(join(tmpdir(), 'amux-event-source-state-'))
   vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(privateState, 'state'))
+  // These cases exercise existing unscoped callbacks, rather than inheriting the
+  // scope of the real AgentMux Run that happens to execute this test process.
+  vi.stubEnv('AGENTMUX_HOOK_LAUNCH_SCOPED', '0')
 })
 afterEach(async () => {
   vi.unstubAllEnvs()
@@ -274,6 +278,9 @@ describe('每个 explicit-managed 原生 Provider 都声明了事件名来源，
         `${providerId} 的生成代码必须有可驱动的入口（pi 走 default 导出、opencode 走 server 导出）`
       ).not.toBe('unknown')
 
+      const launch = provider.buildLaunch({ workspacePath: fixturePath("repo/app"), prompt: '', args: [], env: {} })
+      vi.stubEnv('AGENTMUX_ENV', '1'); vi.stubEnv('AGENTMUX_PROVIDER_ID', providerId)
+      for (const [key, value] of Object.entries(launch.env)) if (key.startsWith('AGENTMUX_')) vi.stubEnv(key, value)
       const posted = await drivePostsFromGeneratedCode(module, declared)
 
       expect(
@@ -356,6 +363,7 @@ describe('每个 explicit-managed 原生 Provider 都声明了事件名来源，
 describe('投递面端到端：按每个 Provider 声明的来源喂信封，POST 必须真的发出', () => {
   let restoreStdin: (() => void) | null = null
   let restoreArgv: (() => void) | null = null
+  let ingress: Server | undefined
 
   function feedStdin(json: string): void {
     const descriptor = Object.getOwnPropertyDescriptor(process, 'stdin')
@@ -379,20 +387,21 @@ describe('投递面端到端：按每个 Provider 声明的来源喂信封，POS
     }
   }
 
-  function captureHookPost(): { bodies: Array<Record<string, unknown>> } {
+  async function captureHookPost(): Promise<{ bodies: Array<Record<string, unknown>> }> {
     const bodies: Array<Record<string, unknown>> = []
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (_url: unknown, init: { body: string }) => {
-        bodies.push(JSON.parse(init.body) as Record<string, unknown>)
-        return { ok: true } as Response
-      })
-    )
+    ingress = createServer(async (request, response) => {
+      let body = ''; for await (const bytes of request) body += bytes
+      bodies.push(JSON.parse(body) as Record<string, unknown>)
+      response.writeHead(200, { 'x-agentmux-hook-mode': 'observer' }).end('{}')
+    })
+    await new Promise<void>(resolve => ingress!.listen(0, '127.0.0.1', resolve))
+    vi.stubEnv('AGENTMUX_HOOK_URL', `http://127.0.0.1:${(ingress.address() as { port: number }).port}/hook`)
     vi.spyOn(process.stdout, 'write').mockReturnValue(true)
     return { bodies }
   }
 
-  afterEach(() => {
+  afterEach(async () => {
+    if (ingress) { await new Promise<void>((resolve, reject) => ingress!.close(error => error ? reject(error) : resolve())); ingress = undefined }
     restoreStdin?.()
     restoreStdin = null
     restoreArgv?.()
@@ -447,7 +456,7 @@ describe('投递面端到端：按每个 Provider 声明的来源喂信封，POS
           expect.unreachable(`${providerId} 是 generated-code，不该走子进程投递面`)
         }
 
-        const { bodies } = captureHookPost()
+        const { bodies } = await captureHookPost()
         feedStdin(JSON.stringify(payload))
 
         await runAgentHookCommand()
@@ -466,7 +475,7 @@ describe('投递面端到端：按每个 Provider 声明的来源喂信封，POS
     vi.stubEnv('AGENTMUX_HOOK_TOKEN', 'test-token')
     vi.stubEnv('AGENTMUX_HOOK_EVENT', '')
     vi.stubEnv('AGENTMUX_USAGE_TRANSCRIPT_FORMAT', '')
-    const { bodies } = captureHookPost()
+    const { bodies } = await captureHookPost()
     // Copilot 的真实负载形状：camelCase 键，没有 hook_event_name/hookEventName/eventName 里的任何一个。
     feedStdin(JSON.stringify({ toolName: 'bash', toolArgs: { command: 'ls' }, sessionId: 's-1' }))
 
@@ -482,7 +491,7 @@ describe('投递面端到端：按每个 Provider 声明的来源喂信封，POS
     vi.stubEnv('AGENTMUX_HOOK_URL', 'http://127.0.0.1:65535/hook')
     vi.stubEnv('AGENTMUX_HOOK_TOKEN', 'test-token')
     vi.stubEnv('AGENTMUX_HOOK_EVENT', '')
-    const { bodies } = captureHookPost()
+    const { bodies } = await captureHookPost()
     feedStdin(JSON.stringify({ toolName: 'bash', sessionId: 'foreign-1' }))
 
     await runAgentHookCommand()

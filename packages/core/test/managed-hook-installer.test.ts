@@ -178,28 +178,41 @@ describe('explicit managed Hook installation', () => {
         provider.catalog.hookStrategy.kind === 'native' &&
         provider.catalog.hookStrategy.installation === 'explicit-managed'
     )
-    // 挡板：这一族读成空则下面循环一条不跑、整条静默通过。11 家是当前实际家数
-    // （九家写命令 + pi/opencode 两家写投递代码）。
-    expect(managed.length).toBeGreaterThanOrEqual(11)
+    // The catalog's thirteen Providers include one launch-carried, one unmanaged and one
+    // no-Hook strategy. Only the ten explicit-managed Providers own file mutations here.
+    expect(Object.fromEntries(BUILT_IN_AGENT_PROVIDERS.map(provider => [provider.id, provider.catalog.hookStrategy])))
+      .toEqual({
+        codex: { kind: 'native', installation: 'launch-carried' },
+        claude: { kind: 'native', installation: 'explicit-managed' },
+        grok: { kind: 'native', installation: 'explicit-managed' },
+        gemini: { kind: 'native', installation: 'explicit-managed' },
+        antigravity: { kind: 'native', installation: 'explicit-managed' },
+        cursor: { kind: 'native', installation: 'explicit-managed' },
+        copilot: { kind: 'native', installation: 'explicit-managed' },
+        droid: { kind: 'native', installation: 'explicit-managed' },
+        hermes: { kind: 'native', installation: 'explicit-managed' },
+        pi: { kind: 'native', installation: 'explicit-managed' },
+        opencode: { kind: 'native', installation: 'explicit-managed' },
+        kimi: { kind: 'native', installation: 'unmanaged' },
+        traex: { kind: 'none' }
+      })
+    expect(managed).toHaveLength(10)
 
     const workspacePath = fixturePath("tmp/agentmux-plan-stability")
-    // 每次都给 endpoint：写**投递代码**的那一族（opencode 的 JS 插件跑在 OpenCode 自己的进程里，
-    // 读不到 AgentMux 注入 PTY 的环境变量）没有 endpoint 时会如实弃权返回 null——那是刻意设计，
-    // 内联一个死 token 比不装更坏。不给 endpoint 的话它在这里是 null，而本条要守的是**恒定性**，
-    // 不该因为「这一家在缺 endpoint 时弃权」就把它从恒定性判据里漏掉。
-    // endpoint 本身必须逐次相同，否则内容里内联的 url/token 会跟着变，把本条判成不恒定。
-    const endpoint = { url: 'http://127.0.0.1:65535/hook', token: 'stable-token' }
+    const registry = new AgentProviderRegistry()
+    expect(registry.get('codex').planManagedHooks?.({ workspacePath, env: {} }) ?? null,
+      'Launch-carried Codex must not acquire a managed file mutation').toBeNull()
     try {
       vi.useFakeTimers()
       vi.setSystemTime(new Date(fixtureDay(1) + "T" + fixtureClock(0, 0, 0, "000") + "Z"))
       const before = Date.now()
-      const first = managed.map((provider) => (new AgentProviderRegistry().get(provider.id).planManagedHooks?.({ workspacePath: workspacePath, env: {}, endpoint: endpoint }) ?? null))
+      const first = managed.map(provider => registry.get(provider.id).planManagedHooks?.({ workspacePath, env: {} }) ?? null)
 
       vi.setSystemTime(new Date(fixtureDay(551) + "T" + fixtureClock(12, 34, 56, "789") + "Z"))
       // 挡板：假时钟必须真的动了。若 vitest 某天不再伪造 Date，上面两次取值会相同，
       // 这条判据就退化成「同一时刻调两次」——恒真。让那种失明响亮变红。
       expect(Date.now()).toBeGreaterThan(before)
-      const second = managed.map((provider) => (new AgentProviderRegistry().get(provider.id).planManagedHooks?.({ workspacePath: workspacePath, env: {}, endpoint: endpoint }) ?? null))
+      const second = managed.map(provider => registry.get(provider.id).planManagedHooks?.({ workspacePath, env: {} }) ?? null)
 
       for (const [index, provider] of managed.entries()) {
         // 声明了 explicit-managed 就必须真能解析出计划：解析器表漏一家会在这里露出来，

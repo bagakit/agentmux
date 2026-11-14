@@ -63,6 +63,22 @@ describe('Claude launch-carried Hook activation sources', () => {
       plan: { providerId: 'claude', mutations: [] }, signal: new AbortController().signal })).toMatchObject({ active: false })
   })
 
+  it('keeps an explicitly unset inherited user root and resolves HOME relative to the launch workspace', async () => {
+    vi.stubEnv('HOME', '/private/core-home')
+    vi.stubEnv('CLAUDE_CONFIG_DIR', '/private/core-claude-config')
+    const target = workspacePath + '/private-home/.claude/settings.json'
+    put(target, { disableAllHooks: true })
+    expect(await inspectClaudeHookActivation({ workspacePath, args: [], env: {
+      HOME: 'private-home', CLAUDE_CONFIG_DIR: undefined, CLAUDE_CODE_SAFE_MODE: ''
+    }, command: 'claude', plan: { providerId: 'claude', mutations: [] }, signal: new AbortController().signal }))
+      .toMatchObject({ active: false, code: 'HOOK_CONFIGURATION_DISABLED' })
+    const reads = vi.mocked(readFile).mock.calls
+    expect(reads.length).toBeGreaterThan(0)
+    expect(reads.some(([path]) => path === target)).toBe(true)
+    expect(reads.some(([path]) => String(path).startsWith('/private/core-home/') ||
+      String(path).startsWith('/private/core-claude-config/'))).toBe(false)
+  })
+
   it.each(['disableAllHooks', 'allowManagedHooksOnly', 'disableSideloadFlags'])('keeps managed %s authoritative over launch settings', async key => {
     const managed = process.platform === 'darwin' ? '/Library/Application Support/ClaudeCode/managed-settings.json'
       : process.platform === 'win32' ? (process.env.ProgramFiles || 'C:\\Program Files') + '\\ClaudeCode\\managed-settings.json'

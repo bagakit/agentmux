@@ -1,32 +1,55 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { Readable, PassThrough } from 'node:stream'
-import { EventEmitter } from 'node:events'
+import { Readable } from 'node:stream'
+import { createServer, type Server } from 'node:http'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { hookResponseFor, resolveHookProvider, runAgentHookCommand } from '../src/agent-hook-command.js'
 import { BUILT_IN_AGENT_PROVIDERS } from '../src/agent-provider.js'
 
-// The observer worker now asks the owner for mode on its first HTTP request. Keep these
-// existing payload/retry unit tests on their controlled observation port; real HTTP mode,
-// no-retry decision/unknown, and stdout are exercised by permission-hook-callback/core.
-vi.mock('node:http', async importOriginal => ({
-  ...await importOriginal<typeof import('node:http')>(),
-  request: (url: string, options: { headers: Record<string, string> }, receive: (response: PassThrough) => void) => {
-    const request = new EventEmitter() as EventEmitter & { end(body: string): void; destroy(error: Error): void }
-    request.destroy = error => { request.emit('error', error) }
-    request.end = body => { void (async () => {
-      try {
-        const result = await fetch(url, { method: 'POST', headers: options.headers, body })
-        const response = Object.assign(new PassThrough(), { statusCode: result.status ?? (result.ok ? 204 : 503),
-          headers: { 'x-agentmux-hook-mode': 'observer', 'retry-after': result.headers?.get('retry-after') } })
-        receive(response)
-        if (!response.destroyed) response.end()
-      } catch (error) { request.emit('error', error) }
-    })() }
-    return request
+const servers: Server[] = []
+beforeEach(() => {
+  // Exercise an existing unscoped callback, independently of the Run hosting Vitest.
+  vi.stubEnv('AGENTMUX_HOOK_LAUNCH_SCOPED', '0')
+  for (const key of ['AGENTMUX_HOOK_PROVIDER', 'AGENTMUX_ANTIGRAVITY_EVENT', 'AGENTMUX_HOOK_EVENT',
+    'HOOK_EVENT_NAME', 'AGENTMUX_HOOK_EVENT_NAME_SOURCE', 'AGENTMUX_HOOK_PAYLOAD_KEY',
+    'AGENTMUX_HOOK_URL', 'AGENTMUX_HOOK_TOKEN', 'AGENTMUX_USAGE_TRANSCRIPT_FORMAT',
+    'AGENTMUX_HOOK_USAGE_EVENTS', 'AGENTMUX_TOOL_CONTEXT']) vi.stubEnv(key, undefined)
+})
+afterEach(async () => {
+  await Promise.all(servers.splice(0).map(server => new Promise<void>((resolve, reject) => {
+    server.close(error => error ? reject(error) : resolve())
+  })))
+  vi.unstubAllEnvs()
+  vi.restoreAllMocks()
+})
+
+/** The first request uses node:http; an explicitly observational retry uses fetch. */
+async function captureHookPost(behaviours: ReadonlyArray<{ status?: number; disconnect?: boolean }> = []) {
+  const bodies: Array<Record<string, unknown>> = [], stderr: string[] = []
+  const server = createServer((request, response) => {
+    if (request.headers.authorization !== 'Bearer test-token') { response.writeHead(401); response.end(); return }
+    const chunks: Buffer[] = []
+    request.on('data', chunk => chunks.push(Buffer.from(chunk)))
+    request.on('end', () => {
+      const behaviour = behaviours[bodies.length]
+      bodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>)
+      if (behaviour?.disconnect) { request.socket.destroy(); return }
+      response.writeHead(behaviour?.status ?? 200, { 'content-type': 'application/json', 'x-agentmux-hook-mode': 'observer' })
+      response.end('{}')
+    })
+  })
+  await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
+  servers.push(server)
+  // Preserve the deliberately absent URL in the authentication-gate case.
+  if (process.env.AGENTMUX_HOOK_URL) {
+    const address = server.address() as { port: number }
+    vi.stubEnv('AGENTMUX_HOOK_URL', `http://127.0.0.1:${address.port}/hook`)
   }
-}))
+  vi.spyOn(process.stdout, 'write').mockReturnValue(true)
+  vi.spyOn(process.stderr, 'write').mockImplementation(chunk => { stderr.push(String(chunk)); return true })
+  return { bodies, stderr }
+}
 
 describe('agent hook command response contract', () => {
   it('gates Antigravity: PreToolUse defers with "ask", Stop clears, other events emit {}', () => {
@@ -81,6 +104,7 @@ describe('agent hook command usage relay', () => {
   })
 
   function feedStdin(json: string): void {
+    restoreStdin?.()
     const descriptor = Object.getOwnPropertyDescriptor(process, 'stdin')
     Object.defineProperty(process, 'stdin', {
       value: Readable.from([Buffer.from(json, 'utf8')]),
@@ -90,20 +114,6 @@ describe('agent hook command usage relay', () => {
       if (descriptor) Object.defineProperty(process, 'stdin', descriptor)
       else delete (process as unknown as { stdin?: unknown }).stdin
     }
-  }
-
-  // 拦下 fetch，把 POST body 解析出来供断言；stdout 也吞掉避免污染测试输出。
-  function captureHookPost(): { bodies: Array<Record<string, unknown>> } {
-    const bodies: Array<Record<string, unknown>> = []
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (_url: unknown, init: { body: string }) => {
-        bodies.push(JSON.parse(init.body) as Record<string, unknown>)
-        return { ok: true } as Response
-      })
-    )
-    vi.spyOn(process.stdout, 'write').mockReturnValue(true)
-    return { bodies }
   }
 
   afterEach(() => {
@@ -124,7 +134,7 @@ describe('agent hook command usage relay', () => {
       vi.stubEnv('AGENTMUX_HOOK_EVENT', 'Stop')
       vi.stubEnv('AGENTMUX_USAGE_TRANSCRIPT_FORMAT', 'claude-jsonl')
       vi.stubEnv('AGENTMUX_HOOK_USAGE_EVENTS', JSON.stringify(['Stop', 'StopFailure']))
-      const { bodies } = captureHookPost()
+      const { bodies } = await captureHookPost()
       feedStdin(JSON.stringify({ session_id: 'sess-real', transcript_path: transcriptPath }))
 
       await runAgentHookCommand()
@@ -145,7 +155,7 @@ describe('agent hook command usage relay', () => {
     vi.stubEnv('AGENTMUX_HOOK_URL', 'http://127.0.0.1:65535/hook')
     vi.stubEnv('AGENTMUX_HOOK_TOKEN', 'test-token')
     vi.stubEnv('AGENTMUX_HOOK_EVENT', 'Stop')
-    const { bodies } = captureHookPost()
+    const { bodies } = await captureHookPost()
     feedStdin(JSON.stringify({ session_id: 'external-provider' }))
 
     await runAgentHookCommand()
@@ -161,7 +171,7 @@ describe('agent hook command usage relay', () => {
       vi.stubEnv('AGENTMUX_HOOK_TOKEN', 'test-token')
       vi.stubEnv('AGENTMUX_HOOK_EVENT', 'Stop')
       vi.stubEnv('AGENTMUX_HOOK_USAGE_EVENTS', JSON.stringify(['Stop']))
-      const { bodies } = captureHookPost()
+      const { bodies } = await captureHookPost()
       for (const sample of [
         { provider: 'claude', format: 'claude-jsonl', record: JSON.parse(CLAUDE_TRANSCRIPT), total: 7 },
         { provider: 'codex', format: 'codex-rollout', record: { type: 'event_msg', payload: { type: 'token_count', info: {
@@ -195,7 +205,7 @@ describe('agent hook command usage relay', () => {
       vi.stubEnv('AGENTMUX_HOOK_EVENT', 'Stop')
       // 关键：不声明 AGENTMUX_USAGE_TRANSCRIPT_FORMAT——这就是未接入 usage 的 7 家的情形。
       vi.stubEnv('AGENTMUX_USAGE_TRANSCRIPT_FORMAT', '')
-      const { bodies } = captureHookPost()
+      const { bodies } = await captureHookPost()
       feedStdin(JSON.stringify({ session_id: 'sess-undeclared', transcript_path: transcriptPath }))
 
       await runAgentHookCommand()
@@ -225,7 +235,7 @@ describe('agent hook command usage relay', () => {
       vi.stubEnv('AGENTMUX_HOOK_EVENT', 'Stop')
       vi.stubEnv('AGENTMUX_USAGE_TRANSCRIPT_FORMAT', 'claude-jsonl')
       vi.stubEnv('AGENTMUX_HOOK_USAGE_EVENTS', JSON.stringify(['Stop', 'StopFailure']))
-      const { bodies } = captureHookPost()
+      const { bodies } = await captureHookPost()
       feedStdin(JSON.stringify({ session_id: 'sess-noturn', transcript_path: transcriptPath }))
 
       await runAgentHookCommand()
@@ -248,7 +258,7 @@ describe('agent hook command usage relay', () => {
       vi.stubEnv('AGENTMUX_HOOK_EVENT', 'PostToolUse')
       vi.stubEnv('AGENTMUX_USAGE_TRANSCRIPT_FORMAT', 'claude-jsonl')
       vi.stubEnv('AGENTMUX_HOOK_USAGE_EVENTS', JSON.stringify(['Stop', 'StopFailure']))
-      const { bodies } = captureHookPost()
+      const { bodies } = await captureHookPost()
       feedStdin(JSON.stringify({ session_id: 'sess-midturn', transcript_path: transcriptPath }))
 
       await runAgentHookCommand()
@@ -283,7 +293,7 @@ describe('agent hook command usage relay', () => {
         vi.stubEnv('AGENTMUX_USAGE_TRANSCRIPT_FORMAT', 'claude-jsonl')
       vi.stubEnv('AGENTMUX_HOOK_USAGE_EVENTS', JSON.stringify(['Stop', 'StopFailure']))
         vi.stubEnv('AGENTMUX_HOOK_PAYLOAD_KEY', key)
-        const { bodies } = captureHookPost()
+        const { bodies } = await captureHookPost()
         feedStdin(JSON.stringify({ [key]: 'Stop', session_id: 'sess-spelling', transcript_path: transcriptPath }))
 
         await runAgentHookCommand()
@@ -313,7 +323,7 @@ describe('agent hook command usage relay', () => {
         vi.stubEnv('AGENTMUX_HOOK_EVENT', eventName)
         vi.stubEnv('AGENTMUX_USAGE_TRANSCRIPT_FORMAT', 'claude-jsonl')
       vi.stubEnv('AGENTMUX_HOOK_USAGE_EVENTS', JSON.stringify([eventName]))
-        const { bodies } = captureHookPost()
+        const { bodies } = await captureHookPost()
         feedStdin(JSON.stringify({ session_id: 'sess-snake', transcript_path: transcriptPath }))
 
         await runAgentHookCommand()
@@ -356,7 +366,7 @@ describe('agent hook command usage relay', () => {
       vi.stubEnv('AGENTMUX_ENV', '1')
     vi.stubEnv('AGENTMUX_PROVIDER_ID', 'claude')
       for (const [key, value] of Object.entries(scenario.env)) vi.stubEnv(key, value)
-      const { bodies } = captureHookPost()
+      const { bodies } = await captureHookPost()
       feedStdin(JSON.stringify({ session_id: 'sess-gate' }))
 
       await runAgentHookCommand()
@@ -375,7 +385,7 @@ describe('agent hook command usage relay', () => {
     vi.stubEnv('AGENTMUX_HOOK_TOKEN', 'test-token')
     vi.stubEnv('AGENTMUX_HOOK_EVENT', '')
     vi.stubEnv('AGENTMUX_USAGE_TRANSCRIPT_FORMAT', '')
-    const { bodies } = captureHookPost()
+    const { bodies } = await captureHookPost()
     feedStdin(JSON.stringify({ session_id: 'sess-unknown-trace' }))
 
     await runAgentHookCommand()
@@ -389,7 +399,7 @@ describe('agent hook command usage relay', () => {
 /**
  * 瞬时失败时的那一次重试。
  *
- * 为什么单独一族：上面每个 fetch stub 都在**第一次**调用就返回 `{ok:true}`，于是循环体的第二次迭代
+ * 为什么单独一族：上面的私有 HTTP observer 都在**第一次**调用就返回成功，于是循环体的第二次迭代
  * 在任何测试里都不执行。把 `attempt < 2` 改成 `attempt < 1`（退回单次投递、重试彻底消失）时，
  * 那 21 条照旧全绿——首次 POST 仍发出、`bodies).toHaveLength(1)` 仍满足。只有 `< 0`（一个 POST 都不发）
  * 才有人发红。也就是说：**重试的存在**有守，**重试本身**无守。
@@ -418,38 +428,6 @@ describe('POST 失败后真的重投一次', () => {
     }
   }
 
-  /**
-   * 让第 N 次 fetch 按 `behaviours[N]` 行事，之后一律成功。捕获每次 POST 的 body 与 stderr。
-   *
-   * `behaviours` 只描述**失败**：`{ status }` 是收到了响应但不 ok（真 503 的形状），`{ throws }` 是
-   * 连接层抛出或 AbortSignal 超时（fetch reject 的形状）。实现里这两条走不同的分支——前者先
-   * `response = 那个响应` 再 throw，后者压根没赋上——所以两种都要各喂一次。
-   */
-  function captureHookPost(behaviours: ReadonlyArray<{ status?: number; throws?: boolean }>): {
-    bodies: Array<Record<string, unknown>>
-    stderr: string[]
-  } {
-    const bodies: Array<Record<string, unknown>> = []
-    const stderr: string[] = []
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (_url: unknown, init: { body: string }) => {
-        const index = bodies.length
-        bodies.push(JSON.parse(init.body) as Record<string, unknown>)
-        const behaviour = behaviours[index]
-        if (behaviour?.throws) throw new Error('fetch failed')
-        if (behaviour?.status) return { ok: false, status: behaviour.status } as Response
-        return { ok: true } as Response
-      })
-    )
-    vi.spyOn(process.stdout, 'write').mockReturnValue(true)
-    vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
-      stderr.push(String(chunk))
-      return true
-    })
-    return { bodies, stderr }
-  }
-
   function hookEnv(): void {
     vi.stubEnv('AGENTMUX_HOOK_URL', 'http://127.0.0.1:65535/hook')
     vi.stubEnv('AGENTMUX_HOOK_TOKEN', 'test-token')
@@ -468,7 +446,7 @@ describe('POST 失败后真的重投一次', () => {
 
   it('首次 503 后重投，第二次成功——事件没丢，也不报错', async () => {
     hookEnv()
-    const { bodies, stderr } = captureHookPost([{ status: 503 }])
+    const { bodies, stderr } = await captureHookPost([{ status: 503 }])
     feedStdin(JSON.stringify({ session_id: 'sess-retry-503' }))
 
     await runAgentHookCommand()
@@ -481,21 +459,21 @@ describe('POST 失败后真的重投一次', () => {
   })
 
   it('首次连接失败且 mode 未知时保留无决定，不重新创建可能已采用的 callback', async () => {
-    // 与上一条走实现里的**另一条**分支：fetch reject 时 response 压根没被赋上。
+    // 原始 HTTP 连接在 mode 响应头之前断开，不能确认这是可重投的 observer。
     hookEnv()
-    const { bodies, stderr } = captureHookPost([{ throws: true }])
+    const { bodies, stderr } = await captureHookPost([{ disconnect: true }])
     feedStdin(JSON.stringify({ session_id: 'sess-retry-throw' }))
 
     await runAgentHookCommand()
 
     expect(bodies, 'unknown mode cannot recreate the original callback').toHaveLength(1)
     expect(stderr).toHaveLength(1)
-    expect(stderr[0]).toContain('fetch failed')
+    expect(stderr[0]).toContain('socket hang up')
   })
 
   it('两次都失败时放弃，并把最后那个错误响亮写进 stderr（不静默、也不无限重投）', async () => {
     hookEnv()
-    const { bodies, stderr } = captureHookPost([{ status: 503 }, { status: 500 }])
+    const { bodies, stderr } = await captureHookPost([{ status: 503 }, { status: 500 }])
     feedStdin(JSON.stringify({ session_id: 'sess-retry-giveup' }))
 
     await runAgentHookCommand()
@@ -515,7 +493,7 @@ describe('POST 失败后真的重投一次', () => {
     // 重投就会带着**新** id 再落一条，同一个事实在时间轴上出现两次。这是重试引入的新风险，
     // 由「id 在两次之间稳定」这条性质来守。
     hookEnv()
-    const { bodies } = captureHookPost([{ status: 503 }])
+    const { bodies } = await captureHookPost([{ status: 503 }])
     feedStdin(JSON.stringify({ session_id: 'sess-retry-receipt' }))
 
     await runAgentHookCommand()

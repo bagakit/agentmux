@@ -23,7 +23,7 @@ const post = (binding: AgentHookBinding, receiptId: string, payload: unknown = {
 describe('Hook admission, receipt and observation recovery', () => {
   it.each(['pi', 'opencode'] as const)('retries the generated %s sender with the same receipt after backpressure', async provider => {
     const source = provider === 'pi' ? createPiManagedHookPlan({ PI_CODING_AGENT_DIR: fixturePath("isolated") }).mutations[0]!.content
-      : createOpenCodeManagedHookPlan('http://127.0.0.1/isolated', 'isolated-token', { OPENCODE_CONFIG_DIR: fixturePath("isolated") }).mutations[0]!.content
+      : createOpenCodeManagedHookPlan({ OPENCODE_CONFIG_DIR: fixturePath("isolated") }).mutations[0]!.content
     const module = await import(/* @vite-ignore */ `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)
     const originalFetch = globalThis.fetch, url = process.env.AGENTMUX_HOOK_URL, token = process.env.AGENTMUX_HOOK_TOKEN
     const attempts: Array<{ body: string; at: number }> = []
@@ -38,7 +38,10 @@ describe('Hook admission, receipt and observation recovery', () => {
         const handlers = new Map<string, (event: unknown, ctx: unknown) => void>()
         module.default({ on: (name: string, handler: (event: unknown, ctx: unknown) => void) => handlers.set(name, handler) })
         handlers.get('agent_start')!({}, {})
-      } else await (await module.server()).event({ event: { type: 'session.status', properties: { status: { type: 'busy' } } } })
+      } else {
+        vi.stubEnv('AGENTMUX_ENV', '1'); vi.stubEnv('AGENTMUX_PROVIDER_ID', 'opencode'); vi.stubEnv('AGENTMUX_OPENCODE_HOOK_HOST', 'owned')
+        await (await module.server()).event({ event: { type: 'session.status', properties: { status: { type: 'busy' } } } })
+      }
       await vi.waitFor(() => expect(attempts).toHaveLength(2), { timeout: 1_000, interval: 5 })
       expect(attempts).toHaveLength(2)
       expect(attempts[1]!.body).toBe(attempts[0]!.body)
@@ -46,6 +49,7 @@ describe('Hook admission, receipt and observation recovery', () => {
       expect(attempts[1]!.at - attempts[0]!.at).toBeGreaterThanOrEqual(240)
     } finally {
       globalThis.fetch = originalFetch
+      vi.unstubAllEnvs()
       if (url === undefined) delete process.env.AGENTMUX_HOOK_URL; else process.env.AGENTMUX_HOOK_URL = url
       if (token === undefined) delete process.env.AGENTMUX_HOOK_TOKEN; else process.env.AGENTMUX_HOOK_TOKEN = token
     }

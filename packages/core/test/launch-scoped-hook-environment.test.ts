@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RunSpec } from '@ctxmux/sdk'
 import { AgentMuxError } from '../src/errors.js'
 import { AgentMuxClient } from '../src/client.js'
+import * as managedRuntime from '../src/managed-hook-runtime.js'
 import { CtxmuxRunAdapter, type CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { retiredReopenFixture } from './fixtures/retired-reopen.js'
@@ -36,6 +37,38 @@ function failInstallation(client: AgentMuxClient) {
 }
 
 describe('public Agent lifecycle carries launch-scoped Hook environment to Runtime', () => {
+  it('keeps a native Run available after runtime preparation fails, and retries preparation for the next Run', async () => {
+    const f = await rpcOwnerFixture([]); cleanup.push(f.close)
+    const client = f.client, inner = client as any
+    inheritedScope()
+    const events: AgentMuxClientEvent[] = []
+    client.onEvent(event => events.push(event))
+    inner.hookServer.isRunning = () => true
+    inner.hookServer.createBinding = () => ({ bindingId: 'private-scope-binding', endpoint: {
+      url: 'http://127.0.0.1:0/hook', token: 'private-scope-token' }, bindRun: async () => {}, close: async () => {} })
+    inner.ensureTerminalHandshakeOrDegrade = async (session: unknown) => session
+    vi.spyOn(inner, 'probePreparedAgent').mockResolvedValue({ providerId: 'claude', executable: 'claude', installed: true,
+      capabilities: client.providers.get('claude').catalog.capabilities })
+    const prepare = vi.spyOn(managedRuntime, 'prepareManagedHookRuntime').mockRejectedValueOnce(
+      new Error('The private Hook interpreter could not be published.'))
+    const installation = vi.spyOn(inner.hookInstaller, 'ensure')
+    const { starts } = captureStart(inner.kernel, f.run)
+    const input = { providerId: 'claude', executorId: 'claude', workspacePath: f.root, injectAgentMuxGuide: false }
+    const first = await client.createAgent({ ...input, agentSessionId: 'private-runtime-failed', createOperationId: 'private-runtime-failed-create' })
+    expect(first.run).toEqual({ runId: 'launch-scope-run-1' })
+    expect(installation).not.toHaveBeenCalled()
+    expect(starts[0]!.env).toMatchObject({ AGENTMUX_HOOK_LAUNCH_SCOPED: '0', AGENTMUX_HOOK_NODE: '', AGENTMUX_HOOK_RUNNER: '' })
+    expect(events).toContainEqual(expect.objectContaining({ type: 'agent-error', code: 'HOOK_INSTALL_FAILED',
+      message: expect.stringContaining('The Agent continues; status Hook delivery is unconfirmed.') }))
+    const second = await client.createAgent({ ...input, agentSessionId: 'private-runtime-retry', createOperationId: 'private-runtime-retry-create' })
+    expect(second.run).toEqual({ runId: 'launch-scope-run-2' })
+    expect(prepare).toHaveBeenCalledTimes(2)
+    expect(events.filter(event => event.type === 'agent-error' && event.code === 'HOOK_INSTALL_FAILED')).toHaveLength(1)
+    expect(installation).toHaveBeenCalledTimes(1)
+    expect(starts[1]!.env.AGENTMUX_HOOK_LAUNCH_SCOPED).toBe('1')
+    expect(starts[1]!.env.AGENTMUX_HOOK_RUNNER).toContain('/hook-runtime/workers/')
+  })
+
   it.each([
     { providerId: 'claude', failed: false, scope: '1' },
     { providerId: 'claude', failed: true, scope: '0' },
@@ -60,12 +93,14 @@ describe('public Agent lifecycle carries launch-scoped Hook environment to Runti
       providerId, executorId: providerId, workspacePath: f.root, injectAgentMuxGuide: false, ...('args' in testCase ? { args: testCase.args } : {}) })
     expect(created.run).toEqual({ runId: 'launch-scope-run-1' })
     expect(starts).toHaveLength(1)
+    if (scope === '1') expect(events.filter(event => event.type === 'agent-error' && event.code === 'HOOK_INSTALL_FAILED')).toEqual([])
     expect(starts[0]!.env.AGENTMUX_HOOK_LAUNCH_SCOPED).toBe(scope)
-    if (providerId === 'claude' || providerId === 'codex') {
-      expect(starts[0]!.env.AGENTMUX_HOOK_NODE).toBe(process.execPath)
-      expect(starts[0]!.env.AGENTMUX_HOOK_RUNNER).toContain('agentmux-hook.js')
+    if ((providerId === 'claude' || providerId === 'codex') && !('args' in testCase)) {
+      expect(starts[0]!.env.AGENTMUX_HOOK_NODE).toContain('/hook-runtime/interpreters/')
+      expect(starts[0]!.env.AGENTMUX_HOOK_RUNNER).toContain('/hook-runtime/workers/')
       expect(starts[0]!.env.AGENTMUX_HOOK_RUNNER).not.toBe('/another-core/agentmux-hook.js')
     }
+    if ('args' in testCase) expect(starts[0]!.env.AGENTMUX_HOOK_RUNNER).toBe('')
     if ('args' in testCase) expect(events).toContainEqual(expect.objectContaining({ type: 'agent-error', code: 'HOOK_LAUNCH_CONFIGURATION_UNCONFIRMED' }))
     if (failed) expect(events).toContainEqual(expect.objectContaining({ type: 'agent-error',
       code: 'HOOK_TARGET_UNPARSEABLE', message: expect.stringContaining('The Agent continues') }))
@@ -88,8 +123,8 @@ describe('public Agent lifecycle carries launch-scoped Hook environment to Runti
     expect(reopened.run).toEqual({ runId: 'launch-scope-run-1' })
     expect(starts).toHaveLength(1)
     expect(starts[0]!.env.AGENTMUX_HOOK_LAUNCH_SCOPED).toBe(failed ? '0' : '1')
-    expect(starts[0]!.env.AGENTMUX_HOOK_RUNNER).toContain('agentmux-hook.js')
-    expect(starts[0]!.env.AGENTMUX_HOOK_NODE).toBe(process.execPath)
+    expect(starts[0]!.env.AGENTMUX_HOOK_RUNNER).toContain('/hook-runtime/workers/')
+    expect(starts[0]!.env.AGENTMUX_HOOK_NODE).toContain('/hook-runtime/interpreters/')
     expect(starts[0]!.env.AGENTMUX_AGENT_SESSION_ID).toBe(f.old.agentSessionId)
     expect(starts[0]!.args).toContain('--plugin-dir')
     expect(f.stops).toEqual([])

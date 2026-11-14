@@ -106,7 +106,7 @@ it('executes generated Pi and OpenCode senders with per-event common IDs and one
   for (const provider of ['pi', 'opencode'] as const) {
     const root = await directory()
     const source = provider === 'pi' ? createPiManagedHookPlan({ PI_CODING_AGENT_DIR: root }).mutations[0]!.content
-      : createOpenCodeManagedHookPlan('http://127.0.0.1/private', 'original-private-token', { OPENCODE_CONFIG_DIR: root }).mutations[0]!.content
+      : createOpenCodeManagedHookPlan({ OPENCODE_CONFIG_DIR: root }).mutations[0]!.content
     const file = join(root, 'hook.mjs'); await writeFile(file, source)
     const module = await import(/* @vite-ignore */ pathToFileURL(file).href)
     const attempts: Array<{ receiptId: string }> = []
@@ -117,6 +117,7 @@ it('executes generated Pi and OpenCode senders with per-event common IDs and one
         { status: attempts.length === 1 ? 429 : 204, headers: { 'retry-after': '0' } })
     }) as typeof fetch
     vi.stubEnv('AGENTMUX_HOOK_URL', 'http://127.0.0.1/private'); vi.stubEnv('AGENTMUX_HOOK_TOKEN', 'original-private-token')
+    if (provider === 'opencode') { vi.stubEnv('AGENTMUX_ENV', '1'); vi.stubEnv('AGENTMUX_PROVIDER_ID', 'opencode'); vi.stubEnv('AGENTMUX_OPENCODE_HOOK_HOST', 'owned') }
     try {
       let event: () => unknown
       if (provider === 'pi') {

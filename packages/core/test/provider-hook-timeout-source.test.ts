@@ -11,6 +11,7 @@ import {
 } from '../src/providers/shared.js'
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '../src/agent-provider-id.js'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
+import { parse as parseToml } from 'smol-toml'
 
 // ---------------------------------------------------------------------------
 // 「受管 Hook 命令超时只有一个 SSOT——值与键都是」的守卫（F6）。
@@ -180,6 +181,10 @@ function isNumericLiteral(finding: Finding): boolean {
 
 type CheckerCtx = { checker: ts.TypeChecker; sourceFile: ts.SourceFile; targetSymbol: ts.Symbol | undefined }
 
+function originalSymbol(checker: ts.TypeChecker, symbol: ts.Symbol | undefined): ts.Symbol | undefined {
+  return symbol && symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol
+}
+
 /** 建一个覆盖 shared.ts 的真 Program。可选地在内存里替换它的源码，用来跑「注入变异」自检。 */
 function programForShared(sourceOverride?: string): CheckerCtx {
   const configPath = ts.findConfigFile(join(here, '..'), ts.sys.fileExists, 'tsconfig.json')
@@ -213,7 +218,7 @@ function programForShared(sourceOverride?: string): CheckerCtx {
   const targetSymbol = moduleSymbol
     ? checker.getExportsOfModule(moduleSymbol).find((s) => s.getName() === CONST_NAME)
     : undefined
-  return { checker, sourceFile, targetSymbol }
+  return { checker, sourceFile, targetSymbol: originalSymbol(checker, targetSymbol) }
 }
 
 /**
@@ -237,7 +242,7 @@ function analyzeHelper(ctx: CheckerCtx): {
         for (const prop of obj.properties) {
           if (ts.isPropertyAssignment(prop)) {
             result.valueKind = ts.SyntaxKind[prop.initializer.kind]
-            const valueSymbol = checker.getSymbolAtLocation(prop.initializer)
+            const valueSymbol = originalSymbol(checker, checker.getSymbolAtLocation(prop.initializer))
             result.valueIsTargetSymbol = !!valueSymbol && !!targetSymbol && valueSymbol === targetSymbol
             if (ts.isComputedPropertyName(prop.name) && ts.isElementAccessExpression(prop.name.expression)) {
               const base = prop.name.expression.expression
@@ -297,7 +302,7 @@ function programForProviders(overrides?: ReadonlyMap<string, string>): {
   const targetSymbol = moduleSymbol
     ? checker.getExportsOfModule(moduleSymbol).find((s) => s.getName() === CONST_NAME)
     : undefined
-  return { checker, program, targetSymbol }
+  return { checker, program, targetSymbol: originalSymbol(checker, targetSymbol) }
 }
 
 /** 该计算键的**类型**是否是（或其 union 分支含）某个禁区键的字面量类型。 */
@@ -325,7 +330,7 @@ function badComputedKeyTimeoutSites(overrides?: ReadonlyMap<string, string>): {
       if (ts.isPropertyAssignment(node) && ts.isComputedPropertyName(node.name)) {
         if (keyTypeIsForbidden(checker, node.name.expression)) {
           total += 1
-          const valueSymbol = checker.getSymbolAtLocation(node.initializer)
+          const valueSymbol = originalSymbol(checker, checker.getSymbolAtLocation(node.initializer))
           const valueIsSSOT = !!valueSymbol && !!targetSymbol && valueSymbol === targetSymbol
           if (!valueIsSSOT) {
             offenders.push({
@@ -463,11 +468,7 @@ describe('受管 Hook 超时只有一个 SSOT——值与键都是（F6）', () 
     // 先证判据 A（AST 键名归一）确实看不见它，再证判据 A2（类型检查器）抓得住。
     const geminiPath = join(providersDir, 'gemini.ts')
     const original = readFileSync(geminiPath, 'utf8')
-    const mutated = original
-      .replace(
-        `import { catalog, managedHookCommand, hookCommandTimeout } from './shared.js'`,
-        `import { catalog, managedHookCommand, hookCommandTimeout, ${FIELD_MAP_NAME} } from './shared.js'`
-      )
+    const mutated = `import { ${FIELD_MAP_NAME} } from './shared.js'\n` + original
       .replace(`...${HELPER_NAME}('gemini')`, `[${FIELD_MAP_NAME}['gemini']]: 10`)
     expect(mutated, '注入替换没生效——被测锚点文本变了').not.toBe(original)
     // 判据 A 的 AST 扫描对这种非字面量计算键失明（这正是需要判据 A2 的原因）：
@@ -549,13 +550,14 @@ describe('受管 Hook 超时只有一个 SSOT——值与键都是（F6）', () 
     expect(typeof HOOK_COMMAND_TIMEOUT_SECONDS).toBe('number')
     expect(HOOK_COMMAND_TIMEOUT_SECONDS).toBe(10)
     // 值仍是那个数字字面量 SSOT——正面证明它存在。
-    const shared = readFileSync(sharedTsPath, 'utf8')
-    const decl = parse(sharedTsPath, shared).statements.find(
+    const constantPath = join(here, '../src/hook-command-timeout.ts')
+    const shared = readFileSync(constantPath, 'utf8')
+    const decl = parse(constantPath, shared).statements.find(
       (s): s is ts.VariableStatement =>
         ts.isVariableStatement(s) &&
         s.declarationList.declarations.some((d) => ts.isIdentifier(d.name) && d.name.text === CONST_NAME)
     )
-    expect(decl, `${CONST_NAME} 的 const 定义在 shared.ts 里找不到了`).toBeTruthy()
+    expect(decl, `${CONST_NAME} 的叶子 owner 中缺少唯一常量定义`).toBeTruthy()
     // 逐家：copilot 必须派生出 timeoutSec、其余非 null 家派生出 timeout，值都等于常量。
     expect(hookCommandTimeout('copilot')).toEqual({ timeoutSec: HOOK_COMMAND_TIMEOUT_SECONDS })
     expect(hookCommandTimeout('claude')).toEqual({ timeout: HOOK_COMMAND_TIMEOUT_SECONDS })
@@ -609,6 +611,7 @@ interface CommandBearingObject {
   readonly file: string
   readonly value: Record<string, unknown>
   nativeDecision?: boolean
+  nativeTimeout?: number
 }
 
 function collectCommandBearing(
@@ -649,7 +652,17 @@ function planCommandObjects(providerId: string): {
   const plan = provider.planManagedHooks?.({ workspacePath: PROBE_WORKSPACE }) ?? null
   const parsed: CommandBearingObject[] = []
   const unparsedFiles: string[] = []
-  for (const mutation of plan?.mutations ?? []) {
+  const mutations = [...(plan?.mutations ?? [])]
+  if (provider.catalog.hookStrategy.kind === 'native' && provider.catalog.hookStrategy.installation === 'launch-carried') {
+    const launch = provider.buildLaunch({ workspacePath: PROBE_WORKSPACE, prompt: '', args: [], env: {} })
+    // Codex carries native TOML declarations as session flags rather than file mutations.
+    for (let index = 0; index < launch.args.length - 1; index++) {
+      if (launch.args[index] === '-c' && launch.args[index + 1]!.startsWith('hooks.')) {
+        mutations.push({ path: 'native-session-flags', content: JSON.stringify(parseToml(launch.args[index + 1]!)) } as typeof mutations[number])
+      }
+    }
+  }
+  for (const mutation of mutations) {
     let document: unknown
     try {
       document = JSON.parse(mutation.content)
@@ -658,6 +671,16 @@ function planCommandObjects(providerId: string): {
       continue
     }
     collectCommandBearing(document, providerId, mutation.path, parsed)
+    if (mutation.path === 'native-session-flags') {
+      const hooks = (document as { hooks: Record<string, unknown> }).hooks
+      for (const [event, definitions] of Object.entries(hooks)) {
+        const declared: CommandBearingObject[] = []
+        collectCommandBearing(definitions, providerId, mutation.path, declared)
+        for (const entry of parsed) if (declared.some(value => value.value === entry.value)) {
+          entry.nativeTimeout = event === 'PermissionRequest' ? 600 : event === 'Interrupt' ? 3 : HOOK_COMMAND_TIMEOUT_SECONDS
+        }
+      }
+    }
     // The Provider-declared synchronous decision waits for a person. The short
     // observer timeout cannot close that exact callback while the person is reading.
     const event = provider.hook.permissionDecision?.eventName
@@ -688,7 +711,8 @@ describe('判据 D：生成出的 hook 配置里，超时该在的在、该不�
       }
       for (const definition of definitions) {
         checkedDefinitions += 1
-        if (definition.nativeDecision ? definition.value[field] !== undefined : definition.value[field] !== HOOK_COMMAND_TIMEOUT_SECONDS) {
+        if (definition.nativeTimeout !== undefined ? definition.value[field] !== definition.nativeTimeout
+          : definition.nativeDecision ? definition.value[field] !== undefined : definition.value[field] !== HOOK_COMMAND_TIMEOUT_SECONDS) {
           offenders.push(
             `${providerId}（${definition.file}）：hook 定义缺少 ${field}=${HOOK_COMMAND_TIMEOUT_SECONDS}，` +
               `实际键集合 ${JSON.stringify(Object.keys(definition.value))}`
