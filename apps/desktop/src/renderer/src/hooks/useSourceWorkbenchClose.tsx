@@ -80,7 +80,11 @@ export function useSourceWorkbenchClose() {
     if (!value || running.current) return
     if (value.applied) { finish(true); return }
     if (value.reviewRequired) { finish(false); return }
-    if (!value.request) { if (value.selected) await prepare(value); return }
+    if (!value.request) {
+      if (value.selected) { await prepare(value); return }
+      if (value.issue) finish(false)
+      return
+    }
     setBusy(true)
     try {
       const record = value.record
