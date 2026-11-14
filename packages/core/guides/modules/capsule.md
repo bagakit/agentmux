@@ -48,6 +48,13 @@ the link; share an ordinary link there. For conversation pages prefer "mode":"in
 independent styling. The card loads only while visible and never starts a stopped service;
 the person can Hide, Expand or Open in Browser, and hiding never deletes the page or draft.
 
+Bare `amux://capsule/ID` addresses the current local Capsule namespace. To share a page
+with a viewer on another node, use the original published Node-qualified Capsule link
+and retain its Runtime pin. A Host label or a bare Capsule ID cannot name that remote
+owner. Use the confirmed Node address; do not invent an alias or replace the pin with
+the viewer's local Runtime. Node-qualified links request a local access view, rather
+than silently embedding a remote loopback URL as a local conversation page.
+
 ## Ask the person on a page
 
 A page question lets the person look, compare, choose or fill in, then send one confirmed
@@ -63,7 +70,7 @@ the answer arrives as ordinary input text.
    {capsuleId,operationId,question,draft?}. The returned interaction must have a target.
    Questions work on isolated and injected pages; on an injected page, page script may also
    ask with window.capsule.request() after checking capabilities().interaction.
-3. Post amux://capsule/ID and tell the person to answer through the page's Questions
+3. In the original local namespace, post amux://capsule/ID and tell the person to answer through the page's Questions
    button. End your turn and keep your Session running; do not poll.
 4. The person edits and confirms in trusted App chrome. It arrives as your next input:
    <amux:capsule-answer version="1">
@@ -93,13 +100,42 @@ dispatch. After an unknown result, call inspectOperation(originalId); never mint
 or resend. The SDK derives its page and target from the exact native document and has no
 reply or approval method.
 
+## Pages from another configured node
+
+Desktop can present an authorized Capsule from another configured node through its
+original Runtime identity. The original node still owns its content, revision, service
+instance, requests, drafts and operations. Its `127.0.0.1` address is not an address on
+your computer. Desktop carries authorized asset bytes through a private local loopback
+endpoint; the remote service remains loopback-only. Relative files, MIME types, SPA
+navigation and GET/HEAD retain the original Capsule rules. The local carrier is not a
+general file server, arbitrary URL proxy or permission grant.
+
+`capsule asset read --input FILE|-` reads one bounded chunk from an existing Capsule:
+use its exact `capsuleId`, `expectedRevision`, `expectedInstanceId`, URL `path`, byte
+`offset` and `length`. Obtain the revision and service instance from `capsule inspect`.
+Continue with the returned `assetStamp` until `eof`; retain the same stamp throughout
+one asset. A changed asset or owner requires a fresh read of that same page, not mixed
+bytes from different versions. The single-message bound does not limit total asset size.
+This method uses the same authenticated public transport as other Capsule operations.
+
+Remote isolated pages have no SDK. Remote injected pages retain the native document
+checks and SDK request/read/saveDraft/inspectOperation capabilities on the original
+node. Neither the link, page script, asset carrier nor an Agent can certify Human
+input. Cross-node Human confirmation is not provided: review and confirm in the
+original node's trusted App. The remote Questions panel retains and saves original
+drafts without submitting Agent input. Existing local Capsules keep their original
+storage partition and data; new remote containers use Runtime-plus-Capsule identity and
+restore their original local origin. An unavailable original port or Host retains the
+same Browser workface and recovery path rather than silently changing its data origin.
+
 ## Service and recovery
 
 The Capsule runtime is one independent service carried by an ordinary ctxmux Run. Core
 keeps its running/stopped intent and keepalive; headless Core provides the same. Closing
 the App or stopping Core only detaches management; a healthy service keeps serving. Paths
-and 127.0.0.1 belong to the execution Host; a remote Core does not create a tunnel, and
-remote Browser display needs a confirmed presentation route. Only the first capsule create
+and 127.0.0.1 belong to the execution Host; a remote Core does not expose its loopback
+server or create a network tunnel. Desktop presentation uses the authorized carrier
+described above. Only the first capsule create
 or an explicit runtime start sets running intent; other calls on an unconfigured namespace
 return CAPSULE_RUNTIME_UNCONFIGURED. Reads never start, stop or rebind the service. For
 start, stop, unknown results and stranded-creation recovery, read capsule runtime inspect,
