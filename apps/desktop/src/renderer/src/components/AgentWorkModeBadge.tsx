@@ -28,5 +28,5 @@ export function AgentWorkModeBadge({ source, hosts: suppliedHosts, embedded = fa
   const Icon = mode === 'unknown' ? UnknownIcon : mode === 'remote-project' ? ProjectIcon : mode === 'remote-agent' ? AgentIcon : RemoteIcon
   return <><span className="agent-work-mode-badge" data-work-mode={mode} data-agent-host-id={placement?.agentHostId ?? ''}
     data-project-host-id={placement?.projectHostId ?? ''} aria-label={`${label}; ${detail}`} title={embedded ? `${label}\n${detail}` : undefined}
-    tabIndex={embedded ? undefined : 0} {...(embedded ? {} : tooltip.props)}><Icon size={11} aria-hidden="true" /><span>{label}</span></span>{tooltip.content}</>
+    tabIndex={embedded ? undefined : 0} {...(embedded ? {} : tooltip.props)}><Icon size={11} aria-hidden="true" /><span className="agent-work-mode-badge__label">{label}</span></span>{tooltip.content}</>
 }

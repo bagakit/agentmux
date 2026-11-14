@@ -4,10 +4,10 @@ import type { SettingsModule } from '../settings-catalog'
 
 export const remoteExecutionSettingsModule = {
   id: 'remote-execution', archetype: 'console',
-  group: 'remote',
-  title: 'Remote work',
-  description: 'Choose where your Agent and project work.',
-  keywords: 'remote agents agent runs on remote execution agent runtime tools binding workspace project guide how start Space 双向 远程执行 运行端 工具 操作指南',
+  group: 'environment',
+  title: 'Remote',
+  description: 'Your work, across devices.',
+  keywords: 'Reach Relay Orbit remote agents agent runs on remote execution agent runtime tools binding workspace project guide how start Space 双向 远程执行 运行端 工具 操作指南',
   icon: semanticIconComponent('object.remote-execution'),
   savedSummary: () => 'Project · Agent · Work',
   searchTargets: [

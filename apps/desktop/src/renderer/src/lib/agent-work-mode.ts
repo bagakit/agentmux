@@ -3,11 +3,11 @@ import type { AgentWorkPlacement, AppConfig, SessionSnapshot, WorkspaceRecord } 
 export type AgentWorkMode = 'local' | 'remote-project' | 'remote-agent' | 'remote-workspace'
 export type ObservedAgentWorkMode = AgentWorkMode | 'unknown'
 export const AGENT_WORK_MODES = [
-  { id: 'local', label: 'Local', description: 'Agent and project on this device.' },
-  { id: 'remote-project', label: 'Remote Project', description: 'Agent here · project remotely.' },
-  { id: 'remote-agent', label: 'Remote Agent', description: 'Project here · Agent remotely.' },
-  { id: 'remote-workspace', label: 'Remote Workspace', description: 'Agent and project remotely.' }
-] as const satisfies readonly { id: AgentWorkMode; label: string; description: string }[]
+  { id: 'local', brand: 'Local', label: 'Local', description: 'Agent and project here.' },
+  { id: 'remote-project', brand: 'Reach', label: 'Remote Project', description: 'Agent here · project remotely.' },
+  { id: 'remote-agent', brand: 'Relay', label: 'Remote Agent', description: 'Project here · Agent remotely.' },
+  { id: 'remote-workspace', brand: 'Orbit', label: 'Remote Workspace', description: 'Agent and project remotely.' }
+] as const satisfies readonly { id: AgentWorkMode; brand: string; label: string; description: string }[]
 
 /** The current Desktop's configured local route, never a displayed project's Host. */
 export function workReferenceHostId(hosts: AppConfig['hosts']): string | null {
@@ -45,7 +45,9 @@ export function launcherWorkPlacement(project: WorkspaceRecord | undefined, agen
 }
 
 export function agentWorkModeLabel(mode: ObservedAgentWorkMode): string {
-  return mode === 'unknown' ? 'Placement unknown' : AGENT_WORK_MODES.find(item => item.id === mode)!.label
+  if (mode === 'unknown') return 'Placement unknown'
+  const item = AGENT_WORK_MODES.find(item => item.id === mode)!
+  return item.brand === item.label ? item.label : `${item.brand} · ${item.label}`
 }
 
 /** Labels help distinguish the original objects; they never change an address. */

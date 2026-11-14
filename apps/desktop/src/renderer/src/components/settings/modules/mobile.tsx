@@ -4,7 +4,7 @@ import type { SettingsModule } from '../settings-catalog'
 
 export const mobileSettingsModule = {
   id: 'mobile', archetype: 'console',
-  group: 'remote',
+  group: 'environment',
   title: 'Mobile',
   description: 'Connect your phone or browser and manage device access.',
   icon: semanticIconComponent('object.phone'),

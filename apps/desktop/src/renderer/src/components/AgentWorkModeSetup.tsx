@@ -5,6 +5,7 @@ import { configValuesEqual } from '../../../shared/config-edit'
 import { fileNavigationSelection, useAppStore, type LauncherExecutionSelection } from '../store'
 import { AGENT_WORK_MODES, agentWorkMode, workHostLabel, workReferenceHostId, type AgentWorkMode } from '../lib/agent-work-mode'
 import { SelectionField } from './SelectionField'
+import { AgentWorkModePlacement } from './AgentWorkModePlacement'
 import { SettingsNavigation } from './SettingsNavigation'
 import './agent-work-mode.css'
 
@@ -96,8 +97,9 @@ export function AgentWorkModeSetup({ config, active, initialSelection, initialMo
       <legend>Work mode <span>From {workHostLabel(config.hosts, reference)}</span></legend>
       <div className="agent-work-mode-choices__options">{AGENT_WORK_MODES.filter(item => allowLocal || item.id !== 'local').map(item =>
         <label className="agent-work-mode-choice" data-selected={mode === item.id || undefined} key={item.id}>
-          <input type="radio" name={group} value={item.id} checked={mode === item.id} onChange={() => changeMode(item.id)} />
-          <span><strong>{item.label}</strong><small>{item.description}</small></span>
+          <AgentWorkModePlacement mode={item.id} />
+          <span className="agent-work-mode-choice__copy"><span className="agent-work-mode-choice__name"><strong>{item.brand}</strong>{item.brand !== item.label ? <span>{item.label}</span> : null}</span><small>{item.description}</small></span>
+          <input type="radio" name={group} value={item.id} checked={mode === item.id} aria-label={`${item.brand === item.label ? item.label : `${item.brand} · ${item.label}`}: ${item.description}`} onChange={() => changeMode(item.id)} />
         </label>)}</div>
     </fieldset>
     <div className="agent-work-ends" aria-label="Project and Agent placement">
@@ -112,7 +114,7 @@ export function AgentWorkModeSetup({ config, active, initialSelection, initialMo
           ? <SelectionField label="Agent runs on" value={agentId} options={agentOptions} disabled={disabled || !active}
             onValueChange={id => { invalidate(); setAgentId(id); setStartupId('') }} />
           : <span className="agent-work-end__fixed">{workHostLabel(config.hosts, reference)}</span>}
-        <span className="agent-work-end__host">{agentHost ? workHostLabel(config.hosts, agentHost.id) : 'Choose the Agent device'}</span>
+        {!agentHost ? <span className="agent-work-end__empty">Choose the Agent device</span> : null}
         <code>{startup?.path ?? (agentHostId && agentHostId === project?.hostId ? project.path : 'Confirmed device home at preparation')}</code>
       </div>
     </div>
