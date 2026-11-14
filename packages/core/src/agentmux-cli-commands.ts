@@ -1,3 +1,4 @@
+import { NODE_PUBLISHING_CLI_COMMANDS } from './node-publishing-cli.js'
 import { BROWSER_PROFILE_COOKIE_FILE_OPERATIONS, parseBrowserProfileCookieFilePayload } from './browser-profile-cookie-files.js'
 import { parseBrowserTaskControlPayload } from './browser-task-control.js'
 import { BROWSER_PROFILE_BOOKMARK_OPERATIONS, parseBrowserProfileBookmarkPayload } from './browser-profile-bookmarks.js'
@@ -225,6 +226,7 @@ function goal(method: string, usage: string, summary: string, specs: FlagSpec, b
 
 /** Actual executable registration. Help, skill and playbooks enumerate this same source. */
 export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
+  ...NODE_PUBLISHING_CLI_COMMANDS,
   ...AGENTMUX_CAPSULE_CLI_COMMANDS,
   ...(['list','create','action','update'] as const).map(action => ({ method: `agent.progress.${action}` as AgentProgressMethod,
     usage: '--data <FILE|->', summary: `Read or explicitly ${action} original continuous progress. Creation, update, resume and check require an authenticated person or device; Agent callers may read, pause or stop an authorized exact target.`,

@@ -1,3 +1,4 @@
+import { isNodePublishingMethod, parseNodePublishingParams, parseNodePublishingResult } from './node-publishing.js'
 import { parseAgentSessionRecordInspection, parseAgentSessionRecordReceipt, type AgentSessionRecordInput, type AgentSessionRecordDeleteInput } from './agent-session-record.js'
 import { parseAgentSessionUsagePage, type AgentSessionUsageInput } from './agent-session-usage.js'
 import { parseSignedMessage, parseFederatedThread, parseSignedDispatchEvent, assertSignedDispatchLineage, parseRecipientInboxReceipt } from './agent-message-federation.js'
@@ -444,6 +445,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (isMoteConnectionMethod(method)) return parseMoteConnectionResult(method,value,parseMoteConnectionParams(method,params)) as unknown as Record<string,unknown>
     if (isConnectionMethod(method)) return parseConnectionResult(method, value, parseConnectionParams(method, params)) as unknown as Record<string, unknown>
     if (isApplicationAccessMethod(method)) return parseApplicationAccessResult(method,value,parseApplicationAccessParams(method,params)) as unknown as Record<string,unknown>
+    if (isNodePublishingMethod(method)) return parseNodePublishingResult(method, value, parseNodePublishingParams(method, params)) as unknown as Record<string, unknown>
     if (isHostSettingsMethod(method)) return parseHostSettingsResult(method, value, parseHostSettingsParams(method, params)) as unknown as Record<string, unknown>
     if (isTailcatKeyMethod(method)) return parseTailcatKeyResult(value, parseTailcatKeyParams(params)) as unknown as Record<string, unknown>
     if (isAgentProgressMethod(method)) return parseAgentProgressResult(method, value, parseAgentProgressParams(method, params)) as unknown as Record<string, unknown>

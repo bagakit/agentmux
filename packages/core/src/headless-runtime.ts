@@ -1,3 +1,4 @@
+import { NodePublishingOwner } from './node-publishing-owner.js'
 import { AgentExecutionBindingService } from './agent-execution-coordinator.js'
 import { mintObjectId } from './object-id.js'
 import { createHash } from 'node:crypto'
@@ -123,6 +124,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
       capsuleRuntime: options.service?.capsuleRuntime ?? capsules.runtime,
       deliveryAttempts: options.service?.deliveryAttempts ?? { hostId: 'local', store: new DeliveryAttemptStore(join(stateDirectory, 'client-delivery-attempts'), { clientJournal: true }) },
       diagnosticCoreAuthority: options.service?.diagnosticCoreAuthority ?? (() => ({ authority: { kind: 'core-runtime', id: runtimeId, lifetime: storePath === null ? 'instance' : 'durable' }, status: 'verified', causeCode: null })),
+      nodePublishing: new NodePublishingOwner({ stateDirectory, runtimeId, ownerInstanceId }),
       coreClients: () => [{ hostId: 'local', client: client! }, ...(options.coreClients?.() ?? [])],
       hostedRuntime: () => hosted!,
       onControlEndpointState: state => hosted?.publishControlEndpointState(state) })

@@ -24,29 +24,15 @@ import { AGENTMUX_RPC_CONTROL_METHODS, type AgentMuxRpcMethod } from './public-r
 
 import { parseMotePreferencesReadResult, parseMotePreferencesSaveResult } from './mote-preferences.js'
 import { parseClientNotificationsObservation } from './client-notifications.js'
-import { rpcRecord } from './rpc-data.js'
-export { rpcRecord } from './rpc-data.js'
+import { rpcRecord, rpcString, rpcCount } from './rpc-data.js'
+export { rpcRecord, rpcString, rpcCount } from './rpc-data.js'
 
-export function rpcString(value: unknown, label: string): string {
-  if (typeof value !== 'string' || !value || /[\0\r\n]/u.test(value) || Buffer.byteLength(value) > 4096) {
-    throw new AgentMuxError(`${label} is invalid.`, 'INVALID_CONTROL_REQUEST')
-  }
-  return value
-}
 export function rpcText(value: unknown, label: string): string {
   if (typeof value !== 'string' || !value.trim() || value.includes('\0') || Buffer.byteLength(value) > 16 * 1024 * 1024) {
     throw new AgentMuxError(`${label} is invalid.`, 'INVALID_CONTROL_REQUEST')
   }
   return value
 }
-export function rpcCount(value: unknown, fallback: number, max = Number.MAX_SAFE_INTEGER): number {
-  if (value === undefined) return fallback
-  if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) > max) {
-    throw new AgentMuxError('RPC numeric parameter is invalid.', 'INVALID_CONTROL_REQUEST')
-  }
-  return value as number
-}
-
 /** Adapt public named params into the original owner DTO, never an old wire. */
 export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METHODS,
   value: unknown, caller?: AgentMuxControlCaller): AgentMuxControlRequest {

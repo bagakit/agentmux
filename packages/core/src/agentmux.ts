@@ -51,6 +51,7 @@ let outputAbandoned = false
 function partial(method: AgentMuxRpcMethod, result: unknown): boolean {
   if (!result || typeof result !== 'object') return false
   const body = result as Record<string, unknown>
+  if (method === 'settings.node.configure' && (body.operation as { status?: string } | undefined)?.status !== 'confirmed') return true
   if (method.startsWith('image.')) {
     const operation = body.recordedOperation as { state: string } | null
     if (body.state === 'unknown' || operation && operation.state !== 'completed') return true

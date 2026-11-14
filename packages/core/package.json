@@ -421,6 +421,10 @@
     "./note-format-metadata": {
       "types": "./dist/note-format-metadata.d.ts",
       "import": "./dist/note-format-metadata.js"
+    },
+    "./node-publishing": {
+      "types": "./dist/node-publishing.d.ts",
+      "import": "./dist/node-publishing.js"
     }
   },
   "bin": {

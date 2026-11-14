@@ -17,3 +17,18 @@ export function rpcRecord(value: unknown, fields?: readonly string[], code = 'IN
   }
   return record
 }
+
+export function rpcString(value: unknown, label: string): string {
+  if (typeof value !== 'string' || !value || /[\0\r\n]/u.test(value) || new TextEncoder().encode(value).byteLength > 4096) {
+    throw new AgentMuxError(`${label} is invalid.`, 'INVALID_CONTROL_REQUEST')
+  }
+  return value
+}
+export function rpcCount(value: unknown, fallback: number, max = Number.MAX_SAFE_INTEGER): number {
+  if (value === undefined) return fallback
+  if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) > max) {
+    throw new AgentMuxError('RPC numeric parameter is invalid.', 'INVALID_CONTROL_REQUEST')
+  }
+  return value as number
+}
+

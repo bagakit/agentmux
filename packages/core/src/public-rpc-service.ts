@@ -1,3 +1,4 @@
+import { isNodePublishingMethod, parseNodePublishingParams, parseNodePublishingResult, type NodePublishingMethod, type NodePublishingPort } from './node-publishing.js'
 import { sessionSemanticResumeSourceRuns } from './agent-session-resume-sources.js'
 import { parseAgentSessionRecordInput, deletedAgentSessionRecord, parseAgentSessionRecordInspection, parseAgentSessionRecordReceipt, type AgentSessionRecordDeleteInput } from './agent-session-record.js'
 import { parseAgentSessionUsageInput, parseAgentSessionUsagePage } from './agent-session-usage.js'
@@ -251,6 +252,7 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   endpoint?: import('./public-rpc.js').AgentMuxRpcEndpoint
   endpointPublication?(): import('./control-endpoint-state.js').AgentMuxControlEndpointState
   /** Borrow existing SDK clients. Their lifecycle remains with their host. */
+  nodePublishing?: NodePublishingPort
   coreClients?(): readonly AgentMuxRpcCoreClient[] | Promise<readonly AgentMuxRpcCoreClient[]>
   /** Borrow the configured Host's original public transport, preserving its caller and Runtime fence. */
   callOriginalCore?<M extends AgentMuxRpcMethod>(hostId: string, method: M, params: AgentMuxRpcParams<M>,
@@ -443,7 +445,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | NodePublishingMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod>, readonly string[]>
 
 /** Home follows an exact execution route; its display name does not identify that route. */
 function homeHostRoute(configuration: import('./control.js').AgentMuxControlSettingsResourceFields | null) {
@@ -1304,6 +1306,34 @@ export class AgentMuxRpcService {
       context.signal?.throwIfAborted()
       const result = await this.ports.hostTailcatKey({ role: input.role, key: input.key ?? AGENTMUX_TAILCAT_DEFAULT_KEYS[input.role] }, context.signal)
       return parseTailcatKeyResult(result, input) as AgentMuxRpcResult<M>
+    }
+    if (isNodePublishingMethod(method)) {
+      const nodeMethod: NodePublishingMethod = method
+      const input = parseNodePublishingParams(nodeMethod, params)
+      const caller = await this.authenticated(context)
+      const ownerMethod = nodeMethod.startsWith('settings.node.')
+      if (ownerMethod && (caller || context.principal?.kind !== 'user' || !context.principal.id.trim())) {
+        throw new AgentMuxError('Node owner settings require the original transport-authenticated person; managed callers cannot grant publication.', 'CONTROL_PERMISSION_DENIED')
+      }
+      context.signal?.throwIfAborted(); await context.assertCurrent?.()
+      const hostId = ownerMethod ? 'local' : (input as import('./node-publishing.js').NodeRoute).hostId
+      let result: unknown
+      if (hostId === 'local' && this.ports.nodePublishing) result = await this.ports.nodePublishing.call(nodeMethod, input, context.signal)
+      else if (this.ports.callOriginalCore) {
+        result = await this.ports.callOriginalCore(hostId, nodeMethod, (ownerMethod ? input : { ...input, hostId: 'local' }) as import('./node-publishing.js').NodePublishingParams[NodePublishingMethod], ownerMethod ? context : { ...(context.signal ? { signal: context.signal } : {}) })
+      } else {
+        const routes = (await this.clients()).filter(route => route.hostId === hostId)
+        if (routes.length !== 1 || !routes[0]!.client.forwardRpc) throw new AgentMuxError('The exact original Node route is unavailable or ambiguous. Existing Agents and owner access remain available.', 'UNKNOWN_HOST')
+        const client = routes[0]!.client
+        if (ownerMethod) result = await client.forwardRpc!(nodeMethod, input, context)
+        else {
+          // Only this finite publication read borrows the authenticated carrier.
+          // The target applies its committed policy for every caller. This cannot
+          // be used to launder managed credentials into an arbitrary owner RPC.
+          result = await client.forwardRpc!(nodeMethod, { ...input, hostId: 'local' }, { ...(context.signal ? { signal: context.signal } : {}) })
+        }
+      }
+      return parseNodePublishingResult(nodeMethod, result, input) as AgentMuxRpcResult<M>
     }
     if (isHostSettingsMethod(method)) {
       const input = parseHostSettingsParams(method, params)

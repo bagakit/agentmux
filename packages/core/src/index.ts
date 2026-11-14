@@ -242,3 +242,5 @@ export { parseBrowserLifecycleIntent, parseBrowserLifecycleReceipt } from './bro
 
 export * from './browser-sdk.js'
 export { sessionSemanticResumeSourceRuns } from './agent-session-resume-sources.js'
+
+export * from './node-publishing.js'
