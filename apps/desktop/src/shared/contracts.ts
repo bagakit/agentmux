@@ -531,6 +531,7 @@ export type AppConfig = {
 }
 
 export type FileDocument = {
+  readIdentity?: import('@agentmux/core/files').FileReadIdentity
   path: string
   content: string
   revision: string

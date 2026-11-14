@@ -67,6 +67,68 @@ static int path_identity_equal(const path_info *a, const path_info *b) {
     (a->file.st_mode & S_IFMT) == (b->file.st_mode & S_IFMT) && a->birthtime_known == b->birthtime_known && (!a->birthtime_known || path_birth_ns(a) == path_birth_ns(b));
 }
 
+/* Optional body provenance only. Failed/over-budget observation never fails IO. */
+#define WORKSPACE_READ_ANCESTORS 256
+#define WORKSPACE_READ_METADATA_BYTES 65536
+struct workspace_read_scope {
+  int root, parent;
+  char root_path[PATH_MAX];
+  path_info file, root_info, ancestors[WORKSPACE_READ_ANCESTORS];
+  size_t count;
+};
+static size_t workspace_read_ancestors(int parent, const path_info *root, path_info *items) {
+  int cursor = dup(parent);
+  if (cursor < 0) return 0;
+  for (size_t i = 0; i < WORKSPACE_READ_ANCESTORS; i++) {
+    if (path_fd_info(cursor, &items[i]) || !items[i].birthtime_known || !S_ISDIR(items[i].file.st_mode)) break;
+    if (path_identity_equal(&items[i], root)) { close(cursor); return i + 1; }
+    const int next = openat(cursor, "..", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    path_info above;
+    if (next < 0) break;
+    if (path_fd_info(next, &above) || path_identity_equal(&above, &items[i])) { close(next); break; }
+    close(cursor); cursor = next;
+  }
+  close(cursor); return 0;
+}
+static void workspace_read_scope_close(workspace_read_scope *scope) {
+  if (!scope) return;
+  if (scope->root >= 0) close(scope->root);
+  if (scope->parent >= 0) close(scope->parent);
+  free(scope);
+}
+static workspace_read_scope *workspace_read_scope_open(const char *root, int fd) {
+  if (strlen(root) >= PATH_MAX) return NULL;
+  workspace_read_scope *scope = calloc(1, sizeof(*scope));
+  if (!scope) return NULL;
+  scope->root = scope->parent = -1; strcpy(scope->root_path, root);
+  scope->root = open(root, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+  scope->parent = open(".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (scope->root < 0 || scope->parent < 0 || path_fd_info(fd, &scope->file) || !scope->file.birthtime_known ||
+      path_fd_info(scope->root, &scope->root_info) || !scope->root_info.birthtime_known ||
+      !(scope->count = workspace_read_ancestors(scope->parent, &scope->root_info, scope->ancestors))) {
+    workspace_read_scope_close(scope); return NULL;
+  }
+  return scope;
+}
+static void workspace_read_scope_finish(workspace_read_scope *scope, int fd) {
+  if (!scope) return;
+  path_info file, root, ancestors[WORKSPACE_READ_ANCESTORS];
+  if (path_fd_info(fd, &file) || !path_same_entry(&file, &scope->file) ||
+      path_entry_info(AT_FDCWD, scope->root_path, &root) || !path_identity_equal(&root, &scope->root_info) ||
+      workspace_read_ancestors(scope->parent, &scope->root_info, ancestors) != scope->count) return;
+  for (size_t i = 0; i < scope->count; i++) if (!path_identity_equal(&ancestors[i], &scope->ancestors[i])) return;
+  char *body = NULL; size_t length = 0;
+  FILE *output = open_memstream(&body, &length);
+  if (!output) return;
+  fputs("{\"entry\":", output); path_witness_output(output, &file); fputs(",\"ancestorWitnesses\":[", output);
+  for (size_t i = 0; i < scope->count; i++) { if (i) fputc(',', output); path_witness_output(output, &scope->ancestors[i]); }
+  fputs("]}", output);
+  if (!fclose(output) && length <= WORKSPACE_READ_METADATA_BYTES) {
+    fputs("AGENTMUX_WORKSPACE_READ_IDENTITY:", stderr); fwrite(body, 1, length, stderr); fputc('\n', stderr);
+  }
+  free(body);
+}
+
 static int path_witness_equal(const path_info *info, const char *expected) {
   char actual[256]; path_witness_text(info, actual, sizeof(actual)); return !strcmp(actual, expected);
 }

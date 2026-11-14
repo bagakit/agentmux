@@ -16,6 +16,7 @@ export type WorkspaceFileReadBudget = {
 }
 
 export type WorkspaceFileByteRead = {
+  readIdentity?: import('@agentmux/core/files').FileReadIdentity
   bytes: Uint8Array
   totalBytes: number
   revision: string

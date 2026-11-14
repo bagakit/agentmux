@@ -6,6 +6,7 @@ import { parseNoteProvenanceSnapshot, noteProvenanceResourceKey, type NoteProven
 import { NOTE_FILE_EXTENSION, readNoteMarkdownHeader } from './note-format.js'
 import type { AgentMuxRpcFilePathsOwner, FileStatParams, FileStatResult, FileMkdirParams, FileMkdirResult, FileMutationInspectParams, FileMutationInspectResult, FileMoveParams, FileMoveResult, FileDeleteParams, FileDeleteResult, FileDeleteSnapshotsParams, FileDeleteSnapshotsResult } from './public-rpc-file-path.js'
 export * from './public-rpc-file-path.js'
+import { parseFileReadIdentity, type FileReadIdentity } from './public-rpc-file-path.js'
 import type { FileShareParams, FileShareResult, FileShareInspectParams, FileShareInspectResult, FileShareUndoParams, FileShareUndoResult, AgentMuxRpcFileShareOwner } from './public-rpc-file-share.js'
 export * from './public-rpc-file-share.js'
 import type { FileImportParams, FileImportResult } from './public-rpc-file-import.js'
@@ -16,7 +17,7 @@ export { parseFileHistoryParams, parseFileHistoryResult, type FileHistoryParams,
 /** The original Files owner and resource, independent of display occurrences. */
 export type FileResource = { hostId: string; workspaceId: string; workspacePath: string }
 export type FileReadResource = FileResource & { zoneId: string; zonePath: string; path: string; logicalDirectory?: string }
-export type FileDocument = { path: string; content: string; revision: string; noteProvenance?: NoteProvenanceSnapshot }
+export type FileDocument = { path: string; content: string; revision: string; noteProvenance?: NoteProvenanceSnapshot; readIdentity?: FileReadIdentity }
 export type FileDocumentReadResult =
   | { status: 'read'; document: FileDocument }
   | { status: 'binary'; path: string; revision: string; byteLength: number }
@@ -218,9 +219,10 @@ export function parseFileReadResult(value: unknown, params: FileReadParams): Fil
     if (original.path !== mapped) invalid('Another File path was returned.', code)
   }
   if (r.status === 'read') {
-    const d = rpcRecord(r.document, ['path', 'content', 'revision', 'noteProvenance'], code)
+    const d = rpcRecord(r.document, ['path', 'content', 'revision', 'noteProvenance', 'readIdentity'], code)
     string(d.path, code); revision(d.revision, code)
     if (typeof d.content !== 'string') invalid('File content must be text.', code)
+    if (d.readIdentity !== undefined) parseFileReadIdentity(d.readIdentity, code)
     if (params.maxBytes !== undefined && new TextEncoder().encode(d.content).byteLength > params.maxBytes) invalid('The original File read exceeded its requested byte cap.', code)
     if ((p.resource as FileReadResource | null)?.path !== d.path) invalid('Another File document was returned.', code)
     if (d.noteProvenance !== undefined) validateFileNoteProvenance(d.noteProvenance, d.revision, p.resource as FileReadResource, d.content as string)

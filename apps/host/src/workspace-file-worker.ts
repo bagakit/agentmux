@@ -4,7 +4,9 @@ import type { NoteFileWitness } from '@agentmux/core/note-history'
 import type { FilePathScopeWitness, FileEntryWitness, FileMoveEntry } from '@agentmux/core/files'
 import type { WorkspaceFileByteRead } from './workspace-file-bytes.js'
 const LOCAL_WORKER_READY = 'AGENTMUX_WORKSPACE_READY'
+import { parseFileReadIdentity, FILE_READ_IDENTITY_MAX_BYTES, type FileReadIdentity } from '@agentmux/core/files'
 const LOCAL_WORKER_ERROR = 'AGENTMUX_WORKSPACE_ERROR:'
+const LOCAL_READ_IDENTITY = 'AGENTMUX_WORKSPACE_READ_IDENTITY:'
 
 export type WorkspaceFileWorkerRequest =
   | { action: 'path-stat'; path: string; includeRevision?: boolean; fault?: string }
@@ -14,8 +16,8 @@ export type WorkspaceFileWorkerRequest =
   | { action: 'path-delete'; path: string; stage: string; expected: FilePathScopeWitness & { entry: FileMoveEntry }; expectedRevision?: string; recursive?: boolean; fault?: string }
   | { action: 'path-mkdir'; path: string; stage: string; digest: string; expected: FilePathScopeWitness; fault?: string }
   | { action: 'path-inspect'; path: string; stage: string; digest: string; expected: FilePathScopeWitness; createdWitness: FileEntryWitness }
-  | { action: 'read'; name: string }
-  | { action: 'read-bytes'; name: string; offset: number; maxBytes: number; maxFileBytes: number; expectedRevision?: string }
+  | { action: 'read'; name: string; fault?: 'after-read-open-barrier' }
+  | { action: 'read-bytes'; name: string; offset: number; maxBytes: number; maxFileBytes: number; expectedRevision?: string; fault?: 'after-read-open-barrier' }
   | { action: 'list' }
   | { action: 'list-files'; limit: number }
   | { action: 'reveal'; name: string | null }
@@ -37,7 +39,7 @@ export async function runWorkspaceFileWorker(
   cwd: string,
   root: string,
   request: WorkspaceFileWorkerRequest,
-  options: { helperPath: string; workerSource: string; spawnFiniteFileProducer?: (spawn: (fd: number) => ChildProcess) => ChildProcess },
+  options: { helperPath: string; workerSource: string; spawnFiniteFileProducer?: (spawn: (fd: number) => ChildProcess) => ChildProcess; onReadIdentity?: (identity: FileReadIdentity | undefined) => void },
   input?: string | Uint8Array,
   signal?: AbortSignal,
   barriers?: { before?: () => Promise<void>; after?: () => Promise<void>; stage?: (value: unknown) => Promise<void>; snapshot?: (value: unknown) => Promise<string | null> }
@@ -69,7 +71,7 @@ export async function runWorkspaceFileWorker(
     request.action === 'write' ? request.expectedRevision ?? 'null' : request.action === 'create' ? request.kind : 'null',
     request.action === 'write' && request.exclusive ? '1' : '0',
     request.action === 'write' && request.textOnly ? '1' : '0',
-    request.action === 'write' ? request.fault ?? '' : '',
+    request.action === 'write' || request.action === 'read' || request.action === 'read-bytes' ? request.fault ?? '' : '',
     request.action === 'read-bytes' ? String(request.offset) : '0',
     request.action === 'read-bytes' ? String(request.maxBytes) : '0',
     request.action === 'read-bytes' ? String(request.maxFileBytes) : '0',
@@ -96,6 +98,8 @@ export async function runWorkspaceFileWorker(
 
   const stdout: Buffer[] = []
   let stderr = ''
+  let pendingDiagnostic = '', oversizedDiagnostic = false, identityFrames = 0
+  let readIdentity: FileReadIdentity | undefined
   let inputSent = false
   let inputError: Error | undefined
   let barrierError: Error | undefined, claimed = false
@@ -135,11 +139,31 @@ export async function runWorkspaceFileWorker(
   child.stdin!.on('error', error => { inputError = error })
   child.stdout!.on('data', (chunk: Buffer) => stdout.push(Buffer.from(chunk)))
   child.stderr!.setEncoding('utf8')
+  const diagnosticLine = (line: string) => {
+    if (line.startsWith(LOCAL_READ_IDENTITY)) {
+      identityFrames++; readIdentity = undefined
+      if (identityFrames === 1 && (request.action === 'read' || request.action === 'read-bytes')) {
+        try { readIdentity = parseFileReadIdentity(JSON.parse(line.slice(LOCAL_READ_IDENTITY.length))) } catch { /* Optional provenance cannot revoke the original bytes. */ }
+      }
+      return
+    }
+    if (Buffer.byteLength(stderr) + Buffer.byteLength(line) < FILE_READ_IDENTITY_MAX_BYTES) stderr += line + '\n'
+    if (!inputSent && line === LOCAL_WORKER_READY) { inputSent = true; child.stdin!.end(input ?? '') }
+  }
   child.stderr!.on('data', (chunk: string) => {
-    stderr += chunk
-    if (!inputSent && stderr.split('\n').includes(LOCAL_WORKER_READY)) {
-      inputSent = true
-      child.stdin!.end(input ?? '')
+    const parts = chunk.split('\n')
+    for (let i = 0; i < parts.length; i++) {
+      if (!oversizedDiagnostic) {
+        pendingDiagnostic += parts[i]!
+        if (Buffer.byteLength(pendingDiagnostic) > FILE_READ_IDENTITY_MAX_BYTES + LOCAL_READ_IDENTITY.length) {
+          if (pendingDiagnostic.startsWith(LOCAL_READ_IDENTITY)) { identityFrames++; readIdentity = undefined }
+          pendingDiagnostic = ''; oversizedDiagnostic = true
+        }
+      }
+      if (i < parts.length - 1) {
+        if (!oversizedDiagnostic) diagnosticLine(pendingDiagnostic)
+        pendingDiagnostic = ''; oversizedDiagnostic = false
+      }
     }
   })
 
@@ -150,7 +174,11 @@ export async function runWorkspaceFileWorker(
     child.once('error', error => { childError = error })
     child.once('close', (code, signal) => resolve({ code, signal }))
   })
-  if (result.code === 0 && !inputError && !barrierError && !childError) return Buffer.concat(stdout)
+  if (pendingDiagnostic.startsWith(LOCAL_READ_IDENTITY)) readIdentity = undefined
+  if (result.code === 0 && !inputError && !barrierError && !childError) {
+    options.onReadIdentity?.(readIdentity)
+    return Buffer.concat(stdout)
+  }
   const record = stderr.split('\n').find((line) => line.startsWith(LOCAL_WORKER_ERROR))
   if (record) {
     const detail = JSON.parse(record.slice(LOCAL_WORKER_ERROR.length)) as {

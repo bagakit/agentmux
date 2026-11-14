@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { realpath, stat } from 'node:fs/promises'
 import { basename, dirname, relative, resolve, sep, posix } from 'node:path'
 import type { FileDocumentReadResult, FileWriteReceipt, FileNameListing, FilePathObservation, FilePathScopeWitness, FilePathMutationReceipt, FileEntryWitness, FileMoveReceipt, FileMoveParams, FileDeleteParams, FileDeleteReceipt } from '@agentmux/core/files'
+import type { FileReadIdentity } from '@agentmux/core/files'
 import type { NoteFileWitness } from '@agentmux/core/note-history'
 import { SCRATCH_WORKSPACE_ID, scratchTopicIdFromDirectoryName, scratchTopicDirectoryName } from './mote-topic-model.js'
 import { resolveScratchTopicDirectory, scratchStorageTopicIds } from './mote-directories.js'
@@ -16,11 +17,12 @@ import { LOCAL_FILE_LIST_SOURCE } from './workspace-file-list.js'
 export { LOCAL_FILE_LIST_SOURCE } from './workspace-file-list.js'
 export { runWorkspaceFileWorker, type WorkspaceFileWorkerRequest } from './workspace-file-worker.js'
 
-type LocalExistingPath = { root: string; target: string }
+type LocalExistingPath = { root: string; target: string; identityWithinWorkspace?: boolean }
 type LocalMutablePath = { root: string; parent: string; name: string }
 export type OrdinaryFileWriteInput = { path: string; content: string; expectedRevision: string | null; baseContent?: string; operationId?: string }
 export type OrdinaryFileWriteResult = FileWriteReceipt & { fileWitness?: NoteFileWitness }
 export type OrdinaryWorkspaceFilesOptions = {
+  beforeRead?: () => Promise<void>
   beforeStatRevision?: () => Promise<void>
   beforeDeleteClaim?: () => Promise<void>
   beforeDeleteUnlink?: () => Promise<void>
@@ -130,7 +132,8 @@ export async function localReadablePath(owner: string | FileWorkspace, requested
     seen.add(target)
   }
   // The worker pins the already resolved read location. No write operation uses this boundary.
-  return { target, root: target === realRoot || target.startsWith(realRoot + sep) ? realRoot : (await stat(target)).isDirectory() ? target : dirname(target) }
+  const identityWithinWorkspace = realRoot === sep || target === realRoot || target.startsWith(realRoot + sep)
+  return { target, identityWithinWorkspace, root: identityWithinWorkspace ? realRoot : (await stat(target)).isDirectory() ? target : dirname(target) }
 }
 
 
@@ -189,8 +192,11 @@ export class WorkspaceFileWriteScope {
 /** The original confined local ordinary IO. Its embedding qualifies the exact owning Host. */
 export class OrdinaryWorkspaceFiles {
   constructor(private readonly options: OrdinaryWorkspaceFilesOptions = {}, readonly scope = new WorkspaceFileWriteScope()) {}
-  private run(cwd: string, root: string, request: WorkspaceFileWorkerRequest, input?: string | Uint8Array, signal?: AbortSignal) {
-    return runWorkspaceFileWorker(cwd, root, request, { helperPath: this.options.helperPath ?? helperPath, workerSource: FILE_NAME_WORKER_SOURCE }, input, signal)
+  private run(cwd: string, root: string, request: WorkspaceFileWorkerRequest, input?: string | Uint8Array, signal?: AbortSignal, onReadIdentity?: (value: FileReadIdentity | undefined) => void) {
+    const before = (request.action === 'read' || request.action === 'read-bytes') ? this.options.beforeRead : undefined
+    return runWorkspaceFileWorker(cwd, root, before ? { ...request, fault: 'after-read-open-barrier' } as WorkspaceFileWorkerRequest : request,
+      { helperPath: this.options.helperPath ?? helperPath, workerSource: FILE_NAME_WORKER_SOURCE, ...(onReadIdentity ? { onReadIdentity } : {}) },
+      input, signal, before ? { before } : undefined)
   }
   /** Public path operations run on their original Host, never through an SSH shell. */
   private async pathScope(workspace: FileWorkspace, path: string) {
@@ -289,10 +295,11 @@ export class OrdinaryWorkspaceFiles {
         offset: 0, maxBytes: budget.maxFileBytes, maxFileBytes: budget.maxFileBytes, ...(budget.signal ? { signal: budget.signal } : {})
       }) : null
       if (snapshot) budget?.onReadCost?.(snapshot.readCost)
+      let readIdentity = snapshot?.readIdentity
       const bytes = snapshot ? Buffer.from(snapshot.bytes) : await this.run(dirname(resolved.target), resolved.root, {
         action: 'read',
         name: basename(resolved.target)
-      })
+      }, undefined, undefined, value => { if (resolved.identityWithinWorkspace) readIdentity = value })
       if (fileBytesAreBinary(bytes)) {
         return { status: 'binary', path: requestedPath, revision: snapshot?.revision ?? revisionFor(bytes), byteLength: bytes.byteLength }
       }
@@ -301,7 +308,8 @@ export class OrdinaryWorkspaceFiles {
         document: {
           path: requestedPath,
           content: budget ? new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) : bytes.toString('utf8'),
-          revision: snapshot?.revision ?? revisionFor(bytes)
+          revision: snapshot?.revision ?? revisionFor(bytes),
+          ...(readIdentity ? { readIdentity } : {})
         }
       }
     } catch (error) {
@@ -406,12 +414,13 @@ export class OrdinaryWorkspaceFiles {
   async readByteRange(workspace: FileWorkspace, requestedPath: string, options: WorkspaceFileByteReadOptions & { offset: number; maxBytes: number; maxFileBytes?: number; signal?: AbortSignal; expectedWitness?: FileEntryWitness }): Promise<WorkspaceFileByteRead> {
     const { offset, maxBytes } = options
     const resolved = await localExistingPathWithin(workspace, requestedPath)
+    let readIdentity: FileReadIdentity | undefined
     const document = JSON.parse((await this.run(dirname(resolved.target), resolved.root, {
       action: 'read-bytes', name: basename(resolved.target), offset, maxBytes, maxFileBytes: options.maxFileBytes ?? WORKSPACE_FILE_MAX_BYTES,
       ...(options.expectedRevision !== undefined ? { expectedRevision: options.expectedRevision } : {})
-    }, options.expectedWitness ? [options.expectedWitness.device, options.expectedWitness.inode, options.expectedWitness.size, options.expectedWitness.ctimeNs, options.expectedWitness.mtimeNs].join(':') : undefined, options.signal)).toString('utf8')) as Omit<WorkspaceFileByteRead, 'bytes'> & { data: string }
+    }, options.expectedWitness ? [options.expectedWitness.device, options.expectedWitness.inode, options.expectedWitness.size, options.expectedWitness.ctimeNs, options.expectedWitness.mtimeNs].join(':') : undefined, options.signal, value => { readIdentity = value })).toString('utf8')) as Omit<WorkspaceFileByteRead, 'bytes'> & { data: string }
     const { data, ...result } = document
-    return { ...result, bytes: Buffer.from(data, 'base64') }
+    return { ...result, bytes: Buffer.from(data, 'base64'), ...(readIdentity ? { readIdentity } : {}) }
   }
 
   async writeContent(

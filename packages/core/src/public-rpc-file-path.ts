@@ -12,6 +12,10 @@ import { parseFileReadParams, parseFileReadResource, parseFileReadResult,
 
 /** An observation of one original directory entry, never an authorization token. */
 export type FileEntryWitness = { device: string; inode: string; size: string; ctimeNs: string; mtimeNs: string; birthtimeNs: string | null }
+/** Provenance of this body, not a current path observation or mutation receipt. */
+export type FileReadIdentity = { entry: FileEntryWitness; ancestorWitnesses: FileEntryWitness[] }
+export const FILE_READ_IDENTITY_MAX_BYTES = 64 * 1024
+export const FILE_READ_IDENTITY_MAX_ANCESTORS = 256
 export type FilePathScopeWitness = { root: FileEntryWitness; parent: FileEntryWitness }
 export type FileStatParams = Omit<FileReadParams, 'maxBytes'> & { includeRevision?: boolean }
 export type FilePathObservation = FilePathScopeWitness & {
@@ -104,6 +108,14 @@ export function parseFileEntryWitness(value: unknown, code = 'INVALID_CONTROL_RE
   const p = rpcRecord(value, [...keys], code)
   for (const key of keys) if (!(key === 'birthtimeNs' && p[key] === null) && (typeof p[key] !== 'string' || !(key.endsWith('Ns') ? /^-?\d{1,30}$/u : /^\d{1,30}$/u).test(p[key]))) invalid('An original native entry witness is required.', code)
   return p as FileEntryWitness
+}
+export function parseFileReadIdentity(value: unknown, code = 'CONTROL_PROTOCOL_ERROR'): FileReadIdentity {
+  const p = rpcRecord(value, ['entry', 'ancestorWitnesses'], code)
+  if (!Array.isArray(p.ancestorWitnesses) || !p.ancestorWitnesses.length || p.ancestorWitnesses.length > FILE_READ_IDENTITY_MAX_ANCESTORS ||
+      JSON.stringify(value).length > FILE_READ_IDENTITY_MAX_BYTES) invalid('The original body read scope is unavailable.', code)
+  const entry = parseFileEntryWitness(p.entry, code), ancestorWitnesses = (p.ancestorWitnesses as unknown[]).map(item => parseFileEntryWitness(item, code))
+  if (entry.birthtimeNs === null || ancestorWitnesses.some(item => item.birthtimeNs === null)) invalid('The original body generation is unavailable.', code)
+  return { entry, ancestorWitnesses }
 }
 export function parseFilePathScopeWitness(value: unknown, code = 'INVALID_CONTROL_REQUEST'): FilePathScopeWitness {
   const p = rpcRecord(value, ['root', 'parent'], code)

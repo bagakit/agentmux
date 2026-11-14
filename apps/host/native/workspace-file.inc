@@ -5,6 +5,12 @@
 #include <sys/resource.h>
 #include <sys/wait.h>
 
+/* Defined beside the original path identity algorithm, after this include. */
+typedef struct workspace_read_scope workspace_read_scope;
+static workspace_read_scope *workspace_read_scope_open(const char *root, int fd);
+static void workspace_read_scope_finish(workspace_read_scope *scope, int fd);
+static void workspace_read_scope_close(workspace_read_scope *scope);
+
 static int workspace_write_published = 0;
 static char *workspace_temporary = NULL;
 static long long workspace_read_cost = -1;
@@ -151,13 +157,15 @@ static void workspace_witness(const struct stat *info) {
     workspace_ctime(info), workspace_mtime(info));
 }
 
-static void workspace_byte_range(const char *name, size_t offset, size_t max_bytes,
-                                 size_t max_file, const char *expected, const unsigned char *expected_witness, size_t witness_size) {
+static void workspace_byte_range(const char *root, const char *name, size_t offset, size_t max_bytes,
+                                 size_t max_file, const char *expected, const unsigned char *expected_witness, size_t witness_size, const char *fault) {
   workspace_read_cost = 0;
   const int fd = workspace_regular(name);
   if (fd < 0) workspace_errno();
   struct stat before, after;
   if (fstat(fd, &before)) workspace_errno();
+  workspace_read_scope *scope = workspace_read_scope_open(root, fd);
+  commit_barrier(!strcmp(fault, "after-read-open-barrier"), 3, 4, "after-read-open");
   if (witness_size) {
     char actual[256];
     snprintf(actual, sizeof(actual), "%llu:%llu:%llu:%lld:%lld", (unsigned long long)before.st_dev, (unsigned long long)before.st_ino,
@@ -184,9 +192,9 @@ static void workspace_byte_range(const char *name, size_t offset, size_t max_byt
     position += (size_t)count; workspace_read_cost = (long long)position;
   }
   if (fstat(fd, &after)) workspace_errno();
-  close(fd);
   if (before.st_size != after.st_size || workspace_mtime(&before) != workspace_mtime(&after) || workspace_ctime(&before) != workspace_ctime(&after))
     workspace_error("WORKSPACE_FILE_CHANGED_WHILE_READING", "Workspace file changed while reading its bytes");
+  workspace_read_scope_finish(scope, fd); workspace_read_scope_close(scope); close(fd);
   native_sha256_final(digest, &context);
   char revision[72]; strcpy(revision, "sha256:");
   for (size_t index = 0; index < sizeof(digest); index++) snprintf(revision + 7 + index * 2, 3, "%02x", digest[index]);
@@ -586,6 +594,8 @@ static int workspace_file_operation(int argc, char **argv) {
   if (!strcmp(action, "read")) {
     const int fd = workspace_regular(name);
     if (fd < 0) workspace_errno();
+    workspace_read_scope *scope = workspace_read_scope_open(root, fd);
+    commit_barrier(!strcmp(argv[8], "after-read-open-barrier"), 3, 4, "after-read-open");
     unsigned char buffer[65536];
     for (;;) {
       const ssize_t count = read(fd, buffer, sizeof(buffer));
@@ -593,10 +603,10 @@ static int workspace_file_operation(int argc, char **argv) {
       if (!count) break;
       workspace_write_all(STDOUT_FILENO, buffer, (size_t)count);
     }
-    close(fd);
+    workspace_read_scope_finish(scope, fd); workspace_read_scope_close(scope); close(fd);
   } else if (!strcmp(action, "read-bytes")) {
-    workspace_byte_range(name, (size_t)parse_identity(argv[9], "byte offset"),
-      (size_t)parse_identity(argv[10], "byte length"), (size_t)parse_identity(argv[11], "file byte limit"), argv[12], input, length);
+    workspace_byte_range(root, name, (size_t)parse_identity(argv[9], "byte offset"),
+      (size_t)parse_identity(argv[10], "byte length"), (size_t)parse_identity(argv[11], "file byte limit"), argv[12], input, length, argv[8]);
   } else if (!strcmp(action, "write")) {
     workspace_write(name, argv[5], !strcmp(argv[6], "1"), !strcmp(argv[7], "1"), argv[8], input, length, create_mode);
   #if defined(__APPLE__)
