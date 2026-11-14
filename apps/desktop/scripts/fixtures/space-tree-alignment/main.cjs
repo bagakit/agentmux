@@ -212,7 +212,7 @@ app.whenReady().then(async () => {
     result.pinNavigation=await read('window.spaceTreeOpenCalls')
     assert.deepEqual(result.pinNavigation,[{kind:'folder',id:'alpha-review'}],'actual branch pin reaches its registered worktree')
     await read('window.spaceTreeOpenCalls.length=0')
-    for (const label of ['Create Mote', 'Create Topic', 'Open Folder']) await click(`[aria-label="${label}"]`)
+    for (const label of ['Create Club', 'Create Topic', 'Open Folder']) await click(`[aria-label="${label}"]`)
     result.creationCalls = await read('window.spaceTreeOpenCalls')
     assert.deepEqual(result.creationCalls, [{kind:'mote'}, {kind:'topic'}, {kind:'open-folder'}])
     assert.deepEqual(await read('window.spaceTreeDisclosure()'), originalDisclosure)

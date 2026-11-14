@@ -38,14 +38,14 @@ it('both actual presentations retain identical original Mote nodes, selection, d
 })
 it('icon/count archive filter reveals the original archived object and keeps unknown and main objects', async () => {
   seed(); await dom.render(tree())
-  const archive = dom.container.querySelector<HTMLButtonElement>('[aria-label="Show archived Motes in Space"]')!
+  const archive = dom.container.querySelector<HTMLButtonElement>('[aria-label="Show archived Clubs in Space"]')!
   expect(archive.textContent).toBe('1'); expect(archive.querySelector('svg')).not.toBeNull()
   expect(archive.getAttribute('aria-pressed')).toBe('false')
   expect(dom.container.querySelector('[data-space-nav="topic:' + quietMoteId + '"]')).toBeNull()
-  await dom.click('[aria-label="Show archived Motes in Space"]')
+  await dom.click('[aria-label="Show archived Clubs in Space"]')
   expect(dom.container.querySelector('[data-space-nav="topic:' + quietMoteId + '"]')).not.toBeNull()
   expect(archive.getAttribute('aria-pressed')).toBe('true')
-  await dom.click('[aria-label="Show archived Motes in Space"]')
+  await dom.click('[aria-label="Show archived Clubs in Space"]')
   expect(dom.container.querySelector('[data-space-nav="topic:' + quietMoteId + '"]')).toBeNull()
 })
 it('more affordance opens the original exact object menu and rename without navigating or rewriting a healthy Run', async () => {
@@ -78,7 +78,7 @@ it('search filters the same Mote list and zero archived remains a discoverable i
   topics.forEach(t => { if (t.soul) t.moteArchive = { state: 'active', version: 'fixture' } })
   await dom.render(tree('Analyst'))
   expect(dom.container.querySelectorAll(selector + ' [data-space-nav]')).toHaveLength(1)
-  expect(dom.container.querySelector('[aria-label="Show archived Motes in Space"]')?.textContent).toBe('0')
+  expect(dom.container.querySelector('[aria-label="Show archived Clubs in Space"]')?.textContent).toBe('0')
 })
 it('actual Settings panel retains dirty choice on real save failure and saves only its authored config field', async () => {
   const f = await configOwnerFixture({ workspaces: [scratchWorkspace] })

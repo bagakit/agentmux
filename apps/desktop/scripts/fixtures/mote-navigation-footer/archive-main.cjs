@@ -144,7 +144,7 @@ app.whenReady().then(async () => {
     const geometry = async () => read(`(() => {
       const panel=${node(panel)},rect=n=>{const r=n.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom}};
       if(!panel?.matches(':popover-open'))throw new Error('Original Mote workface absent');const outer=rect(panel);
-      const selectors={input:'[aria-label="Message Agent"]',newTab:'button[title="New tab"]',rail:'[aria-label="Show Mote avatars only"]',space:'[aria-label="Open Mote Space"]',close:'[aria-label="Close Mote"]',archived:'[aria-label="Show archived Motes"]'};
+      const selectors={input:'[aria-label="Message Agent"]',newTab:'button[title="New tab"]',rail:'[aria-label="Show Mote avatars only"]',space:'[aria-label="Open Mote Space"]',close:'[aria-label="Close Mote"]',archived:'[aria-label="Show archived Clubs"]'};
       const values=Object.fromEntries(Object.entries(selectors).map(([name,selector])=>{const n=panel.querySelector(selector);if(!n)throw new Error('Missing required '+name);const r=rect(n),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);if(!(r.width>0&&r.height>0&&r.x>=outer.x-1&&r.right<=outer.right+1&&r.y>=outer.y-1&&r.bottom<=outer.bottom+1&&(n===hit||n.contains(hit))))throw new Error('Required original control unavailable '+name);return [name,r]}));
       const buttons=['newTab','rail','space','close','archived'];for(let i=0;i<buttons.length;i++)for(let j=i+1;j<buttons.length;j++){const a=values[buttons[i]],b=values[buttons[j]];if(Math.min(a.right,b.right)-Math.max(a.x,b.x)>1&&Math.min(a.bottom,b.bottom)-Math.max(a.y,b.y)>1)throw new Error('Original controls overlap');}
       return {outer,controls:values};
@@ -242,7 +242,7 @@ app.whenReady().then(async () => {
       assert.ok(!archived.ui.choices.includes(custom), 'Archived leaves common discovery without losing the target')
       assert.ok(archived.snapshot.topics.some(one => one.id === custom && one.soul), 'Raw original catalogue stays complete')
       await locate(node(`${panel} [data-mote-archived="${custom}"] button`))
-      await until(`document.activeElement===${node(`${panel} [data-mote-archived="${custom}"] button`)}||document.activeElement===${node(`${panel} [aria-label="Show archived Motes"]`)}`, 'filtered archived row hands focus to its original local recovery control')
+      await until(`document.activeElement===${node(`${panel} [data-mote-archived="${custom}"] button`)}||document.activeElement===${node(`${panel} [aria-label="Show archived Clubs"]`)}`, 'filtered archived row hands focus to its original local recovery control')
       result.checks.push({ name: 'trusted-menu-archive-keeps-current-input-target-raw-identity', passed: true, archive: (await topics.read(scratch, custom)).moteArchive })
       win.setContentSize(420, 820); await pause(100)
       await click(node(`${panel} [aria-label="Show Mote avatars only"]`))
@@ -255,7 +255,7 @@ app.whenReady().then(async () => {
       protectedEqual(fromSettings, archived, 'Settings/Footer return preserves original workface and drafts')
       assert.equal(fromSettings.ui.topicId, custom); assert.equal(fromSettings.ui.tabId, archived.ui.tabId)
       await locate(node(`${panel} [data-mote-archived="${custom}"] button`))
-      await click(node(`${panel} [aria-label="Show archived Motes"]`))
+      await click(node(`${panel} [aria-label="Show archived Clubs"]`))
       await until(`${row(custom)}!==null`, 'archived original choice discoverable from Settings')
       await click(row(custom), 'right'); await until(`${menuItem('Restore Mote')}!==undefined`, 'actual Restore menu above Settings')
       await locate(menuItem('Restore Mote')); await key('Escape', 27)
@@ -263,14 +263,14 @@ app.whenReady().then(async () => {
       assert.equal(await read(`document.activeElement===${row(custom)}`), true, 'Archived menu restores its reachable row focus')
       result.checks.push({ name: 'narrow-Settings-Footer-avatars-archive-and-Restore-operable', passed: true, geometry: await geometry(), facts: await facts() })
       await capture('archive-narrow-avatars-current')
-      await click(node(`${panel} [aria-label="Show archived Motes"]`))
+      await click(node(`${panel} [aria-label="Show archived Clubs"]`))
       await click(node(`${panel} [aria-label="Close Mote"]`)); await until('!window.moteArchiveProof.facts().ui.visible', 'Mote close keeps original Settings')
       assert.equal((await facts()).ui.settings, true)
       await click(node(settings)); await until('!window.moteArchiveProof.facts().ui.settings', 'return from original Settings')
       win.setContentSize(980, 820); await pause(100); await open()
       await call('showSpaceNavigation'); await click(node(`${panel} [aria-label="Open Mote Space"]`))
-      await until(`!window.moteArchiveProof.facts().ui.visible&&${node('[aria-label="Show archived Motes in Space"]')}`, 'original Space recovery entry')
-      await click(node('[aria-label="Show archived Motes in Space"]'))
+      await until(`!window.moteArchiveProof.facts().ui.visible&&${node('[aria-label="Show archived Clubs in Space"]')}`, 'original Space recovery entry')
+      await click(node('[aria-label="Show archived Clubs in Space"]'))
       const spaceRow = node(`[data-space-nav="topic:${custom}"]`)
       await locate(spaceRow); assert.match(await read(`${spaceRow}.getAttribute('aria-label')`), /Archived/)
       await click(spaceRow, 'right'); await until(`${menuItem('Restore Mote')}!==undefined`, 'same archived Space object has Restore menu')

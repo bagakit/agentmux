@@ -194,7 +194,7 @@ app.whenReady().then(async () => {
         await allMotes(one)
         const controls = one.ui.actions
         assert.deepEqual(one.ui.actions.map(action => action.label).sort(),
-          ['Show archived Motes', 'Show Mote avatars only', 'Open Mote Space', 'Close Mote'].sort())
+          ['Show archived Clubs', 'Show Mote avatars only', 'Open Mote Space', 'Close Mote'].sort())
         assert.ok(one.ui.workfaceControls.length > 0, 'Original Tab actions and Composer consumers are nonempty')
         for (const control of controls) {
           const r = control.rect

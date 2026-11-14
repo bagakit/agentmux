@@ -88,7 +88,7 @@ it('reveals matching descendants through all original disclosures and restores c
   expect([...container.querySelectorAll('[data-space-parent="space:topics"] strong')].map((node) => node.textContent)).toEqual(['Knowledge'])
   expect(container.querySelectorAll('.space-topic-row')).toHaveLength(0)
   await search('nothing-available')
-  expect([...container.querySelectorAll('[role="status"]')].map((node) => node.textContent)).toEqual(['No matching Motes', 'No matching Topics', 'No matching Folders'])
+  expect([...container.querySelectorAll('[role="status"]')].map((node) => node.textContent)).toEqual(['No matching Clubs', 'No matching Topics', 'No matching Folders'])
   expect(container.querySelectorAll('[data-workspace-id]')).toHaveLength(0)
   await act(async () => button('[aria-label="Clear Space search"]').click())
   expect(container.querySelectorAll('.space-topic-row')).toHaveLength(0)

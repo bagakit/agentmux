@@ -25,7 +25,7 @@ app.whenReady().then(async () => {
     for (const view of ['collaborators', 'list']) for (const narrow of [false, true]) for (const light of [false, true]) {
       win.setContentSize(narrow ? 720 : 1180, 760)
       await read(`directoryScene.view(${JSON.stringify(view)});directoryScene.theme(${light})`); await pause(250)
-      const facts = await read(`(()=>{const roster=document.querySelector('[data-mote-directory-view]');const names=[...roster.querySelectorAll('[data-space-nav]')].map(n=>n.getAttribute('data-space-nav'));return {view:roster.dataset.moteDirectoryView,names,appearance:document.documentElement.dataset.appearance,portrait:roster.querySelector('.space-object-icon')?.getBoundingClientRect().width,archive:document.querySelector('[aria-label="Show archived Motes in Space"]').textContent,overflow:document.body.scrollWidth>innerWidth,...directoryScene.facts()}})()`)
+      const facts = await read(`(()=>{const roster=document.querySelector('[data-mote-directory-view]');const names=[...roster.querySelectorAll('[data-space-nav]')].map(n=>n.getAttribute('data-space-nav'));return {view:roster.dataset.moteDirectoryView,names,appearance:document.documentElement.dataset.appearance,portrait:roster.querySelector('.space-object-icon')?.getBoundingClientRect().width,archive:document.querySelector('[aria-label="Show archived Clubs in Space"]').textContent,overflow:document.body.scrollWidth>innerWidth,...directoryScene.facts()}})()`)
       assert.equal(facts.view,view); assert.equal(facts.names.length,5); assert.equal(facts.archive,'1'); assert.equal(facts.overflow,false)
       if (view === 'collaborators') assert.ok(facts.portrait>=32 && facts.portrait<54, 'Readable compact round portraits')
       assert.deepEqual(facts.drafts,original.drafts); assert.deepEqual(facts.selection,original.selection); assert.deepEqual(facts.forbidden,[])
@@ -33,7 +33,7 @@ app.whenReady().then(async () => {
       await fs.writeFile(path.join(evidence,file),(await win.webContents.capturePage()).toPNG());result.images.push(file);result.operations.push({file,...facts})
     }
     await read('directoryScene.view("collaborators");directoryScene.theme(false)'); win.setContentSize(1180,760); await pause(150)
-    await click('[aria-label="Show archived Motes in Space"]')
+    await click('[aria-label="Show archived Clubs in Space"]')
     assert.equal(await read('document.querySelectorAll("[data-mote-directory-view] [data-space-nav]").length'),6)
     await click('[aria-label="More actions for Research and systems design"]')
     assert.ok(await read('document.querySelector("[role=menu]")?.textContent.includes("Rename Mote")'))
@@ -54,7 +54,7 @@ app.whenReady().then(async () => {
     const anchor=await read('(()=>{const r=document.querySelector("[data-pmo-teams-topic-launcher] button").getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()')
     win.webContents.sendInputEvent({type:'mouseMove',x:Math.round(anchor.x),y:Math.round(anchor.y)});await pause(400)
     if (!(await read('!!document.querySelector("[data-pmo-teams-topic-floating][data-state=open]")'))) await click('[data-pmo-teams-topic-launcher] button')
-    const floating=await read('(()=>{const panel=document.querySelector("[data-pmo-teams-topic-floating][data-state=open]");return {open:!!panel,archive:panel?.querySelector("[aria-label=\\"Show archived Motes\\"]")?.textContent,...directoryScene.facts()}})()')
+    const floating=await read('(()=>{const panel=document.querySelector("[data-pmo-teams-topic-floating][data-state=open]");return {open:!!panel,archive:panel?.querySelector("[aria-label=\\"Show archived Clubs\\"]")?.textContent,...directoryScene.facts()}})()')
     assert.equal(floating.open,true);assert.equal(floating.archive,'1');assert.deepEqual(floating.forbidden,[])
     const floatingFile='directory-floating-archive.png'
     await fs.writeFile(path.join(evidence,floatingFile),(await win.webContents.capturePage()).toPNG());result.images.push(floatingFile);result.operations.push({file:floatingFile,...floating})

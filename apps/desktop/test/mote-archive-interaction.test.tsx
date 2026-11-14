@@ -232,14 +232,14 @@ it('Space keyboard Archive returns to the same visible Motes disclosure after it
   const content = await menu(original!, true), item = [...content.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent === 'Archive Mote')
   expect(item).toBeDefined(); await moteClick(item!)
   expect(document.querySelector(`[data-space-nav="topic:${customMoteId}"]`)).toBeNull()
-  expect(document.activeElement).toBe(button('Show archived Motes in Space'))
+  expect(document.activeElement).toBe(button('Show archived Clubs in Space'))
 })
 it('Space Show archived finds the same hidden object and real Restore returns its original pin, icon and order without selecting or replacing work', async () => {
   selected(true); useAppStore.setState({ projectRailOpen: true, spaceObjectIcons: { [topicSpaceIconTarget(scratchWorkspace, catalog[1]!).key]: 'book' },
     pinnedItems: { [SCRATCH_WORKSPACE_ID]: [customMoteId] }, scratchTopicOrder: [quietMoteId, customMoteId] })
   await app.mount(); const before = useAppStore.getState()
   expect(document.querySelector(`[data-space-nav="topic:${customMoteId}"]`)).toBeNull()
-  await moteClick(button('Show archived Motes in Space'))
+  await moteClick(button('Show archived Clubs in Space'))
   const row = document.querySelector<HTMLElement>(`[data-space-nav="topic:${customMoteId}"]`)
   expect(row).not.toBeNull(); expect(row!.textContent).toContain('Archived'); expect(row!.querySelector('[data-space-icon="book"]')).not.toBeNull()
   await moteClick(button('Restore Mote ' + catalog[1]!.title))
@@ -250,7 +250,7 @@ it('Space Show archived finds the same hidden object and real Restore returns it
 it('the real 180px Space Mote keyboard menu pins and unpins the same archived object in the original persistence projection', async () => {
   selected(true); localStorage.setItem(savedMoteKey, JSON.stringify({ open: false, targetTopicId: customMoteId, targetTabId: customTab.id }))
   useAppStore.setState({ projectRailOpen: true, projectRailWidth: 180 }); await app.mount()
-  await moteClick(button('Show archived Motes in Space'))
+  await moteClick(button('Show archived Clubs in Space'))
   const original = document.querySelector<HTMLElement>(`[data-space-nav="topic:${customMoteId}"]`)!
   expect(original.closest('.space-mote-entry')).not.toBeNull(); const before = useAppStore.getState()
   for (const [label, pinned] of [['Pin Mote', true], ['Unpin Mote', false]] as const) {
@@ -272,7 +272,7 @@ it('the real narrow Space Mote keyboard menu edits its exact original SOUL owner
   const read = vi.spyOn(api.files, 'read').mockImplementation(async (_workspace, originalPath) => ({ status: 'read', document: {
     path: originalPath, content: '# Original archived persona', revision: 'original-persona' } }))
   useAppStore.setState({ projectRailOpen: true, projectRailWidth: 180 }); await app.mount()
-  await moteClick(button('Show archived Motes in Space')); app.ensureMote.mockClear()
+  await moteClick(button('Show archived Clubs in Space')); app.ensureMote.mockClear()
   const original = document.querySelector<HTMLElement>(`[data-space-nav="topic:${customMoteId}"]`)!
   await act(async () => original.focus()); const content = await menu(original, true)
   const item = [...content.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent === 'Edit persona')

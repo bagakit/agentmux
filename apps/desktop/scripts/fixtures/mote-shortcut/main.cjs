@@ -98,7 +98,7 @@ app.whenReady().then(async () => {
       assert.deepEqual(current.ui.choices.map(one => one.topicId).sort(), ['launcher:custom-coordinator', 'launcher:custom-research', 'launcher:leader'])
       assert.equal(current.ui.choices.length, 3, 'One choice per real object, regardless of Tab/Session count')
       assert.deepEqual(current.ui.actions.map(action => action.label).sort(),
-        ['Show archived Motes', 'Show Mote avatars only', 'Close Mote'].sort())
+        ['Show archived Clubs', 'Show Mote avatars only', 'Close Mote'].sort())
       assert.equal(current.ui.spaceActions.length, 1, 'The original Tab row has exactly one Open in Space action')
       assert.equal(current.ui.spaceActions[0].label, 'Open in Space')
       for (const action of [...current.ui.actions, ...current.ui.spaceActions]) {
