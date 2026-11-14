@@ -327,7 +327,7 @@ it('the pre-effect Native observation does not hold the original key lock and th
   const raw=f.owner().retireInitial(value.createOperationId,source.runtimeId).then(value=>({value,error:null}),error=>({error}))
   try {
     await vi.waitFor(()=>expect(entered).toBe(true))
-    const adoption=registry.reserveNew('original-agent',value.createOperationId).then(()=>{saved=true})
+    const adoption=registry.reserveNew('original-agent',value.createOperationId).then(()=>{saved=true},error=>({error}))
     await vi.waitFor(()=>expect(saved).toBe(true))
     release();await adoption
     expect((await raw).error?.message).toContain('Agent adopted')
