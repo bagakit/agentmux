@@ -105,12 +105,16 @@ app.whenReady().then(async () => {
     await press('Escape')
     assert.equal(await read('document.activeElement?.getAttribute("aria-label")'), 'Connection transport', 'Native Escape returns focus to Connection transport')
     assert.equal(await read('document.querySelector(\'[aria-label="Connection transport"]\')?.dataset.value'), 'tailcat', 'Escape preserves the transport draft')
+    await read('document.querySelector(\'[aria-label="Connection transport"]\').scrollIntoView({block:"center"})'); await settle()
+    const selectedVisible = await read(`(()=>{const n=document.querySelector('[aria-label="Connection transport"]'),r=n.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return n.checkVisibility()&&!!hit&&(hit===n||n.contains(hit))})()`)
+    assert.ok(selectedVisible, 'The selected transport field is visible in its capture')
+    await shot('connection-transport-selected-420-dark.png', 420, 'dark', 'connection-selected')
     await read('document.querySelector(\'[aria-label="Tailcat address"]\').scrollIntoView({block:"center"})'); await settle()
     await until('document.querySelector(\'[aria-label="Tailcat address"]\').checkVisibility() && [...document.querySelectorAll("button")].find(node => node.textContent === "Save hosts")?.checkVisibility()', 'Tailcat draft and save action are visible together')
-    await shot('connection-transport-selected-420-dark.png', 420, 'dark', 'connection-selected')
+    await shot('connection-transport-draft-420-dark.png', 420, 'dark', 'connection-draft')
     assert.equal(await read('window.connectionsProof.calls.filter(call => call.kind === "preview-config-save").length'), 0, 'Selection never saves configuration')
     assert.equal(await read('window.connectionsProof.calls.filter(call => call.kind === "controlled-node-configure").length'), 0, 'Selection never configures Node policy')
-    assert.equal(result.images.length, 12)
+    assert.equal(result.images.length, 13)
     result.completed = true
   } catch (error) {
     result.failure = { name: error.name, message: error.message, stack: error.stack, stage: result.stage }
