@@ -1,3 +1,4 @@
+import { dequal } from 'dequal'
 import { detachedFileSurface, knowledgeSurfacePresented } from './lib/knowledge-surface-navigation'
 import { isWorkbenchSurfaceDetached, type WorkbenchSurface as KnowledgeSurface } from './lib/workbench-window-registry'
 import { readBrowserOperationResult } from '@agentmux/browser/browser-operation-result'
@@ -1015,17 +1016,21 @@ function projectResumeInputReceipts(state: AppState, sessionId: string): Partial
 
 function projectInputReceipt(state: AppState, sessionId: string, receipt: AgentInputSubmissionReceipt): Partial<AppState> {
   const queue = state.agentSteerQueues[sessionId], ownerSessionId = queue?.find(entry => entry.originalMember)?.originalMember?.target.agentSessionId ?? sessionId
-  if (!queue || receipt.key.kind !== 'prompt' || receipt.key.agentSessionId !== ownerSessionId) return {}
+  if (!queue || receipt.key.kind !== 'prompt' || receipt.key.agentSessionId !== ownerSessionId) return state
   const key = receipt.key
-  return { agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: queue.map(entry => {
+  let next: AgentSteerQueueEntry[] | undefined
+  for (const [index, entry] of queue.entries()) {
     if (entry.operationId !== key.submissionId || entry.directInputBinding?.expectedRun.runId !== key.expectedRun.runId ||
-        entry.inputReceipt && entry.inputReceipt.ref.waitGeneration > receipt.ref.waitGeneration) return entry
+        entry.inputReceipt && entry.inputReceipt.ref.waitGeneration > receipt.ref.waitGeneration) continue
     const projected = retainInputReceipt(entry.inputReceipt, receipt)
-    if (projected === entry.inputReceipt) return entry
+    // IPC and direct reads can return the same accepted facts as fresh objects.
+    if (dequal(projected, entry.inputReceipt)) continue
     const { preparationWait: _wait, awaitingExplicitSend: _paused, error: _error, errorCode: _code, ...original } = entry
-    return { ...original, inputReceipt: projected, status: 'deferred' as const,
+    next ??= queue.slice()
+    next[index] = { ...original, inputReceipt: projected, status: 'deferred',
       ...(originalInputDeliveryConfirmed(projected) ? { archived: true as const } : {}) }
-  }) } }
+  }
+  return next ? { agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: next } } : state
 }
 
 /** Projection conflicts are observations, never a new writer or a replacement receipt. */
