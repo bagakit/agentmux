@@ -66,7 +66,7 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
     setTask(next)
     if (next === 'start') setPrepareVisited(true)
     if (next === 'routes') setRoutesVisited(true)
-    setView('library')
+    if (navigationRequest?.field) setView('library')
   }, [active, navigationRequest])
   const [narrow, setNarrow] = useState(false)
   const [returnFocus, setReturnFocus] = useState<{ id: string | null } | null>(null)
