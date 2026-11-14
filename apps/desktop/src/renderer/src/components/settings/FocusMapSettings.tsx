@@ -8,6 +8,7 @@ import type { FocusContext } from '../../lib/focus-context'
 import { AgentContextContent } from '../AgentContextContent'
 import { ResolvedAgentAvatar } from '../AgentAvatar'
 import { CollaborationCompactState, CollaborationEssentialState } from '../CollaborationCompactState'
+import { SelectionField } from '../SelectionField'
 
 const forms = { point: 'Icon', compact: 'Compact identity', card: 'Card' }, information = { identity: 'Identity', status: 'Identity + status', summary: 'Identity + status + summary' }
 const member = (id: string, x: number, y: number): CollaborationLayoutBox => ({ kind: 'agent', id, areaId: 'example', folded: false, x, y, width: 248, height: 94 })
@@ -28,17 +29,17 @@ export function FocusMapSettings({ value, onChange }: { value: FocusMapPreferenc
       <input type="radio" name="focus-map-boundary" checked={value.boundary === boundary} onChange={() => onChange({ ...value, boundary })} />
       <svg viewBox="0 0 400 290" aria-hidden="true"><path d={collaborationEnvelope(area, members, boundary)} />{members.map(box => <rect key={box.id} x={box.x} y={box.y} width={box.width} height={box.height} rx="8" />)}</svg><span>{boundary === 'bezier' ? 'Bezier curves' : 'Polygon'}</span>
     </label>)}</fieldset>
-    <label className="focus-map-settings__field" data-settings-field="map.levelCount" data-settings-preview-label="LOD levels"><span>LOD levels</span><select aria-label="LOD levels" value={value.levels.length} onChange={event => onChange({ ...value, levels: focusMapPreset(Number(event.target.value) as 2 | 3 | 4) })}>{FOCUS_MAP_LEVEL_COUNTS.map(count => <option key={count} value={count}>{count} levels</option>)}</select></label>
+    <label className="focus-map-settings__field" data-settings-field="map.levelCount" data-settings-preview-label="LOD levels"><span>LOD levels</span><SelectionField label="LOD levels" value={String(value.levels.length)} options={FOCUS_MAP_LEVEL_COUNTS.map(count => ({ value: String(count), label: `${count} levels` }))} searchable={false} onValueChange={count => onChange({ ...value, levels: focusMapPreset(Number(count) as 2 | 3 | 4) })} /></label>
     <p className="focus-settings-description">Changing the count starts a new preset. Adjust each level below, from farthest to closest.</p>
     <div className="focus-map-settings__levels">{value.levels.map((level, index) => <details key={index} open={index === value.levels.length - 1} data-settings-field={`map.levels.${index}`}>
       <summary><strong>Level {index + 1}</strong><span>{forms[level.form]} · {information[level.information]}</span></summary>
-      <label className="focus-map-settings__field"><span>Form</span><select aria-label={`Level ${index + 1} form`} value={level.form} onChange={event => {
-        const form = event.target.value as FocusMapLodLevel['form'], choices = focusMapInformationChoices(form)
+      <label className="focus-map-settings__field"><span>Form</span><SelectionField label={`Level ${index + 1} form`} value={level.form} options={FOCUS_MAP_FORMS.map(form => ({ value: form, label: forms[form] }))} searchable={false} onValueChange={value => {
+        const form = value as FocusMapLodLevel['form'], choices = focusMapInformationChoices(form)
         // This visible authored batch keeps the chosen form and its compatible
         // information together; no other level or saved setting is changed.
         changeLevel(index, { form, information: choices.includes(level.information) ? level.information : choices.at(-1)! })
-      }}>{FOCUS_MAP_FORMS.map(form => <option key={form} value={form}>{forms[form]}</option>)}</select></label>
-      <label className="focus-map-settings__field"><span>Information</span><select aria-label={`Level ${index + 1} information`} value={level.information} onChange={event => changeLevel(index, { information: event.target.value as FocusMapLodLevel['information'] })}>{FOCUS_MAP_INFORMATION.filter(info => focusMapInformationChoices(level.form).includes(info)).map(info => <option key={info} value={info}>{information[info]}</option>)}</select></label>
+      }} /></label>
+      <label className="focus-map-settings__field"><span>Information</span><SelectionField label={`Level ${index + 1} information`} value={level.information} options={FOCUS_MAP_INFORMATION.filter(info => focusMapInformationChoices(level.form).includes(info)).map(info => ({ value: info, label: information[info] }))} searchable={false} onValueChange={info => changeLevel(index, { information: info as FocusMapLodLevel['information'] })} /></label>
       {index === 0 ? <p className="focus-settings-description">Fixed starting view at 5%. Requests for attention and unknown states remain visible.</p> : <div className="focus-map-settings__range">{(['from', 'to'] as const).map(key => <label key={key}><span>{key === 'from' ? 'Starts at' : 'Complete at'}</span><span><input type="number" aria-label={`Level ${index + 1} ${key === 'from' ? 'start' : 'complete'} zoom`} min="5" max="140" step="1" value={Number.isFinite(level[key]) ? Math.round(level[key] * 10000) / 100 : ''} onChange={event => changeLevel(index, { [key]: event.target.value === '' ? NaN : Number(event.target.value) / 100 })} /><small>%</small></span></label>)}</div>}
     </details>)}</div>
   </div>
