@@ -1,4 +1,5 @@
 import type { Session } from 'electron'
+import { isIP } from 'node:net'
 import type { BrowserProfileExitCheck } from '../shared/contracts.js'
 
 /**
@@ -29,9 +30,23 @@ export function validBrowserProfileExitCheckUrl(value: string): boolean {
 
 function plainAddress(body: string): string | undefined {
   const text = body.trim()
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(text) && text.split('.').every(part => Number(part) <= 255)) return text
-  if (/^[0-9a-fA-F:]+$/.test(text) && text.includes(':') && text.length <= 39) return text.toLowerCase()
-  return undefined
+  return isIP(text) ? text.toLowerCase() : undefined
+}
+
+async function responseAddress(response: Response): Promise<string | undefined> {
+  if (!response.body) return undefined
+  const reader = response.body.getReader(), parts: Uint8Array[] = []
+  let bytes = 0
+  try {
+    for (;;) {
+      const next = await reader.read()
+      if (next.done) break
+      bytes += next.value.byteLength
+      if (bytes > BODY_LIMIT) { void reader.cancel().catch(() => {}); return undefined }
+      parts.push(next.value)
+    }
+    return plainAddress(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(parts)))
+  } finally { reader.releaseLock() }
 }
 
 export type BrowserProfileExitCheckPorts = {
@@ -52,7 +67,7 @@ export function createBrowserProfileExitCheck(ports: BrowserProfileExitCheckPort
       const response = await target.fetch(address, { method: 'GET', cache: 'no-store', redirect: 'follow', signal: AbortSignal.timeout(CHECK_TIMEOUT_MS) })
       const latencyMs = ports.now() - started
       let ip: string | undefined
-      try { ip = plainAddress((await response.text()).slice(0, BODY_LIMIT)) } catch { /* the status alone is still the answer */ }
+      try { ip = await responseAddress(response) } catch { /* the status alone is still the answer */ }
       return { status: 'reachable', httpStatus: response.status, latencyMs, ...(ip ? { ip } : {}) }
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)
