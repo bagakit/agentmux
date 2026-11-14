@@ -5,6 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { connectAgentMuxRpc, defaultAgentMuxControlSocketPath } from '@agentmux/core'
 import { parseDesktopClientObservation, type DesktopClientObservation } from '../shared/client-observation.js'
 import type { RuntimeController } from './runtime-controller.js'
+import type { ResourceProbeTerminalReader } from './resource-probe.js'
 import {
   evaluateRepresentativeResourceBudget,
   REPRESENTATIVE_ACTIVITY_MS,
@@ -21,8 +22,8 @@ type Fixture = {
   runs: Terminal[]
 }
 
-async function waitFor<T>(description: string, read: () => Promise<T | undefined>): Promise<T> {
-  const deadline = performance.now() + 12_000
+async function waitFor<T>(description: string, read: () => Promise<T | undefined>, timeoutMs = 12_000): Promise<T> {
+  const deadline = performance.now() + timeoutMs
   while (performance.now() < deadline) {
     const value = await read()
     if (value !== undefined) return value
@@ -47,7 +48,8 @@ async function sampleWindow(window: BrowserWindow, destination: RepresentativeRe
   } while (true)
 }
 
-export async function measureRepresentativeWorkface(window: BrowserWindow, runtime: RuntimeController, fixturePath: string) {
+export async function measureRepresentativeWorkface(window: BrowserWindow, runtime: RuntimeController, fixturePath: string,
+  inspectTerminal: ResourceProbeTerminalReader) {
   const evidence: RepresentativeResourceEvidence = {
     hostMemoryBytes: totalmem(), rendererPid: 0, documentGenerationChanges: 0, fixtureRevision: 0,
     restoredTabs: 0, restoredRegions: 0, restoredWorkspaces: 0, restoredRuns: [],
@@ -64,19 +66,27 @@ export async function measureRepresentativeWorkface(window: BrowserWindow, runti
   window.webContents.on('did-start-navigation', navigation)
   let issue: string | null = null
   let loadedIdentity: DesktopClientObservation['main'] | null = null
+  let lastTerminalObservation: unknown = null
+  let originalRunCountAtRestore = 0
   try {
     const fixture: Fixture = JSON.parse(await readFile(fixturePath, 'utf8'))
     const [visible, , alternate] = fixture.runs
     if (!visible || !alternate || visible.workspaceId === alternate.workspaceId) throw new Error('Missing original Terminal fixture targets.')
     const snapshot = await waitFor('the restored Renderer workbench and Core topology revision', async () => {
-      const { observation } = await rpc.call('app.inspect', {}, { signal: AbortSignal.timeout(4_000) })
+      const signal = AbortSignal.timeout(4_000)
+      const receipt = await rpc.call('app.inspect', {}, { signal }).catch(error => {
+        if (signal.aborted || (error as { code?: string }).code === 'CONTROL_TIMEOUT') return undefined
+        throw error
+      })
+      if (!receipt) return undefined
+      const { observation } = receipt
       const inspected = parseDesktopClientObservation(observation)
       if (inspected.main.pid !== process.pid) throw new Error('Workbench observation belongs to a different Desktop Main process.')
       const state = inspected.workbench
       if (state.loading || (state.persistence?.spatial.revision ?? 0) < fixture.revision) return undefined
       loadedIdentity = inspected.main
       return state
-    })
+    }, 25_000)
     evidence.fixtureRevision = snapshot.persistence?.spatial.revision ?? 0
     const tabs = new Map(snapshot.tabs.map(tab => [tab.id, tab]))
     const projected = fixture.tabs.filter(expected => {
@@ -98,18 +108,19 @@ export async function measureRepresentativeWorkface(window: BrowserWindow, runti
       }
       return run
     }
+    originalRunCountAtRestore = (await Promise.all(fixture.runs.map(runFacts))).length
     const ready = async (terminal: Terminal) => await waitFor(`visible input-ready Terminal ${terminal.regionId}`, async () => {
-      const { presentation } = await rpc.call('space.inspect', { target: { regionId: terminal.regionId } }, { signal: AbortSignal.timeout(3_000) })
-      const view = presentation?.region?.terminalView
+      const view = await inspectTerminal(terminal.regionId, AbortSignal.timeout(3_000))
+      lastTerminalObservation = { regionId: terminal.regionId, view: view ?? null }
       return view?.runId === terminal.runId && view.visible && view.liveReady && view.acceptsInput && !view.readOnly &&
         view.buffer.baseY > 0 ? view : undefined
     })
-    const selectWorkspace = async (terminal: Terminal) => {
-      const selector = `.project-rail-row[data-workspace-id=${JSON.stringify(terminal.workspaceId)}]`
-      const clicked = await window.webContents.executeJavaScript(`(() => {
-        const row = document.querySelector(${JSON.stringify(selector)}); row?.click(); return Boolean(row)
-      })()`)
-      if (!clicked) throw new Error(`Original Workspace ${terminal.workspaceId} has no product navigation control.`)
+    const selectTerminal = async (terminal: Terminal) => {
+      const result = await rpc.call('space.focus', { target: { kind: 'space', regionId: terminal.regionId }, inputPolicy: 'target' },
+        { signal: AbortSignal.timeout(6_000) })
+      if (result.navigation.selection.space?.regionId !== terminal.regionId || result.navigation.state === 'rejected') {
+        throw new Error(`Original Terminal navigation did not select ${terminal.regionId}: ${JSON.stringify(result.issues)}`)
+      }
       return await ready(terminal)
     }
     const echo = async (terminal: Terminal, key: string) => {
@@ -130,11 +141,10 @@ export async function measureRepresentativeWorkface(window: BrowserWindow, runti
       })
     }
 
-    if (snapshot.activeWorkspaceId !== visible.workspaceId) await selectWorkspace(visible)
-    else await ready(visible)
     if (!window.isVisible()) throw new Error('The representative Desktop window is not visible.')
     window.focus()
     window.webContents.focus()
+    await selectTerminal(visible)
     evidence.visibleRunId = visible.runId
     evidence.alternateRunId = alternate.runId
     evidence.warmInputEcho = await echo(visible, 'w') > 0
@@ -146,9 +156,9 @@ export async function measureRepresentativeWorkface(window: BrowserWindow, runti
     const sampling = sampleWindow(window, activity, REPRESENTATIVE_ACTIVITY_MS, documentGeneration)
     try {
       evidence.burstOutputBytes = await echo(visible, 'p')
-      await selectWorkspace(alternate)
+      await selectTerminal(alternate)
       evidence.alternateInputEcho = await echo(alternate, 'a') > 0
-      await selectWorkspace(visible)
+      await selectTerminal(visible)
       evidence.returnedInputEcho = await echo(visible, 'r') > 0
       evidence.activityFinishedMs = Math.ceil(performance.now() - activityStart)
     } finally {
@@ -165,5 +175,5 @@ export async function measureRepresentativeWorkface(window: BrowserWindow, runti
     window.webContents.off('did-start-navigation', navigation)
     await rpc.dispose()
   }
-  return { ...evaluateRepresentativeResourceBudget(evidence), loadedIdentity, evidence, issue }
+  return { ...evaluateRepresentativeResourceBudget(evidence), loadedIdentity, originalRunCountAtRestore, lastTerminalObservation, evidence, issue }
 }

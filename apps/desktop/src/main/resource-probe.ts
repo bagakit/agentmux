@@ -1,5 +1,6 @@
 import { writeFile } from 'node:fs/promises'
 import { app, webContents, type BrowserWindow } from 'electron'
+import type { AgentMuxTerminalViewObservation } from '@agentmux/core'
 import {
   isScratchWorkspaceId,
   type AppConfig,
@@ -514,16 +515,20 @@ async function waitForReadyLauncherTerminal(options: {
   ownerPredicate?: (owners: ResourceOwners) => boolean
 }): Promise<SessionSnapshot> {
   let ready: SessionSnapshot | null = null
+  let sessionId: string | null = null
+  let running = false
+  let observedOwners: ResourceOwners | null = null
   await waitFor(options.description, async () => {
-    const sessionId = await launcherTerminalSessionId(options.window, options.workspaceId)
+    sessionId = await launcherTerminalSessionId(options.window, options.workspaceId)
     if (
       !sessionId ||
       options.usedSessionIds?.has(sessionId) ||
       (options.expectedSessionId && sessionId !== options.expectedSessionId)
     ) return false
     const current = runningTerminal((await options.runtime.snapshot(options.config)).sessions, sessionId)
+    running = current !== null
     if (!current) return false
-    const owners = await ownerCounts(options.window, options.runtime)
+    const owners = observedOwners = await ownerCounts(options.window, options.runtime)
     if (options.expectedOwners
       ? !ownersEqual(owners, options.expectedOwners)
       : options.ownerPredicate
@@ -533,6 +538,9 @@ async function waitForReadyLauncherTerminal(options: {
     }
     ready = current
     return true
+  }).catch(error => {
+    traceResourceProbe(`${options.description}: ${JSON.stringify({ sessionId, running, owners: observedOwners })}`)
+    throw error
   })
   if (!ready) throw new Error(`Desktop resource probe lost ${options.description}.`)
   return ready
@@ -594,10 +602,13 @@ function launcherOwnerPredicate(
   )
 }
 
+export type ResourceProbeTerminalReader = (regionId: string, signal: AbortSignal) => Promise<AgentMuxTerminalViewObservation | undefined>
+
 export async function runDesktopResourceProbe(options: {
   window: BrowserWindow
   runtime: RuntimeController
   configStore: ConfigStore
+  inspectTerminal?: ResourceProbeTerminalReader
   startup: {
     spawnedAtMs: number
     appReadyAtMs: number
@@ -609,8 +620,9 @@ export async function runDesktopResourceProbe(options: {
   if (!reportPath) return false
   const representativeFixture = process.env.AGENTMUX_DESKTOP_RESOURCE_WORKFACE
   if (representativeFixture) {
+    if (!options.inspectTerminal) throw new Error('The private resource probe did not receive the Desktop Terminal observer.')
     const { measureRepresentativeWorkface } = await import('./representative-resource-probe.js')
-    const representative = await measureRepresentativeWorkface(options.window, options.runtime, representativeFixture)
+    const representative = await measureRepresentativeWorkface(options.window, options.runtime, representativeFixture, options.inspectTerminal)
     await writeFile(reportPath, `${JSON.stringify({
       schema: 'agentmux.desktop-representative-resources.v1', measuredAt: new Date().toISOString(),
       mainPid: process.pid, identity: resourceIdentity(), representative

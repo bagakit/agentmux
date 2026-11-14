@@ -38,7 +38,7 @@ import { RuntimeController } from './runtime-controller.js'
 import { configuredDesktopAgentMuxHost, waitForDesktopHostConnection } from './desktop-host.js'
 import { ScratchTopics } from './scratch-topics.js'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
-import { runDesktopResourceProbe } from './resource-probe.js'
+import { runDesktopResourceProbe, type ResourceProbeTerminalReader } from './resource-probe.js'
 import { reportStartupFailureAndExit, startupFailureExitIo } from './startup-failure-exit.js'
 import { runDesktopFileEditingProbe, WorkspaceFileEditingProbeControl } from './file-editing-probe.js'
 import { WorkspaceFiles } from './workspace-files.js'
@@ -320,7 +320,10 @@ function startPrimaryInstance(): void {
     })
     window.once('closed', () => startupCapture.dispose())
     reportStartupStage('before-ipc')
+    let resourceProbeTerminalReader: ResourceProbeTerminalReader | undefined
     disposeIpc = await registerIpc({ window, appDocumentSources: () => appDocuments.read(), workbenchWindows: windows, configStore, initialConfig, runtime, applicationAccess, workbenchUserState, workbenchCloseOwner, storageRecoveryExports, runtimeIdentityRecovery, scratchTopics, workspaceFiles, spatialLinks, webLinks, webFiles, zoomCommands,
+      ...(process.env.AGENTMUX_DESKTOP_RESOURCE_WORKFACE
+        ? { resourceProbeTerminalReader: (read: ResourceProbeTerminalReader) => { resourceProbeTerminalReader = read } } : {}),
       ...(openIdentitySetup ? { openIdentitySetup } : {}),
       performanceScene, appMemory, performanceHeap, clientIncidents, loadedAppVersion: app.getVersion(), loadedPackage: packageIdentity, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
       onRendererStartupFailure: failure => startupCapture.recordRenderer(failure),
@@ -507,17 +510,23 @@ function startPrimaryInstance(): void {
         return
       }
     }
-    if (await runDesktopResourceProbe({
-      window,
-      runtime,
-      configStore,
-      startup: {
-        spawnedAtMs: Number(process.env.AGENTMUX_DESKTOP_SPAWNED_AT_MS),
-        appReadyAtMs,
-        windowCreationStartedAtMs,
-        rendererLoadedAtMs
-      }
-    })) app.quit()
+    try {
+      if (await runDesktopResourceProbe({
+        window,
+        runtime,
+        configStore,
+        ...(resourceProbeTerminalReader ? { inspectTerminal: resourceProbeTerminalReader } : {}),
+        startup: {
+          spawnedAtMs: Number(process.env.AGENTMUX_DESKTOP_SPAWNED_AT_MS),
+          appReadyAtMs,
+          windowCreationStartedAtMs,
+          rendererLoadedAtMs
+        }
+      })) app.quit()
+    } catch (error) {
+      console.error('Desktop resource probe failed:', error)
+      app.quit()
+    }
   }
 
   // 三处建窗触发点（whenReady 首建、second-instance 用户又双击、activate 全关后点 dock）都可能在
