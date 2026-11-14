@@ -238,6 +238,8 @@ Session 的工作、等待、权限请求、未知等状态沿[Core 语义与 Pr
 
 原 Runtime 资源采样、逻辑核口径、stale / pending / unavailable、共享采样及最后消费者释放沿[资源观察合同](settings-and-observation.md#status-bar-cpumemory-资源面板)。节点发布的整机 CPU、系统内存、磁盘卷与原 Core 进程的 CPU、RSS／heap、uptime 均由该服务实测并保留测量对象、单位、时刻与实例身份，不借用接收端读数。CPU 基于同源累计值的实际区间，首点不伪造百分比，重启后不跨代相减；保留终端输出 payload 不能冒充进程内存。
 
+Service status 的首层面向当前准确 Host 的服务观察，区分服务进程与整机公开资源。本服务的 Core CPU／RSS／heap／uptime 只消费原 serving Core 的结构化测量；Native Run、Attachment 与 retained output 沿原 Runtime 口径，运行 Run 数不冒称 Agent 数，输出 payload 不冒充磁盘 I/O。已获原 owner 读取资格的 Desktop 可沿准确 Host／Runtime 的既有私有 owner 入口读取；这不修改 Node 的 Share，也不把普通发布访问者提升为 owner。公开资源被 withheld 时明确未共享；旧 Core 或来源缺失只使该读数未知，原 Session 与其它成功来源仍可用。
+
 本管理台复用当前展开 Host 的顺序读取循环，不因缩放、图布局或节点渲染扫描无关 Session。展开、当前页且文档可见才读，折叠或隐藏取消自己的观察；图表故障不阻断读数与健康工作。近期曲线仅保留本次可见读取所得的有界内存样本，明确窗口、来源、单位与断点；缺测不填零、不平滑跨断线、不重复标旧值为新。长期历史、告警与可用性统计仍须独立采集及留存合同，网络吞吐、温度与逐跳延迟无真实来源时不画图凑数。
 
 ## 连接配置与测试
