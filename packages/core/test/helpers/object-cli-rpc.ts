@@ -85,6 +85,8 @@ export function objectCliSeedFixtures(input: string): Record<string, string[]> {
     'settings.executors.discover': ['--host', 'local'],
     'settings.executors.unregister': ['E', '--host', 'local', '--registration-revision', 'registration-original'],
     'settings.executors.register': ['E', '--host', 'local', '--input', input],
+    'settings.executors.hooks-inspect': ['--executor', 'E', '--host', 'local', '--runtime', 'runtime-original', '--config-revision', 'configuration-original', '--workspace', _historyFixturePath('workspace')],
+    'settings.executors.hooks-update': ['--executor', 'E', '--host', 'local', '--runtime', 'runtime-original', '--config-revision', 'configuration-original', '--workspace', _historyFixturePath('workspace')],
     'toolkit.install': ['TOOL', '--path', input],
     'settings.channels.header.inspect': [],
     'settings.channels.header.configure': ['--adapter','example','--input','-'],

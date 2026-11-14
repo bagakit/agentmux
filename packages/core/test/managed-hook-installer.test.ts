@@ -30,6 +30,25 @@ async function fixture() {
 }
 
 describe('explicit managed Hook installation', () => {
+  it('reports a legacy argv-tagged Hook in a root event carrier without claiming its ownership', async () => {
+    const { installer, existingPath } = await fixture()
+    const current = { PostToolUse: [{ command: 'current stable declaration' }] }
+    const legacy = {
+      command: "ELECTRON_RUN_AS_NODE=1 AGENTMUX_HOOK_PROVIDER='cursor' '" + process.execPath + "' '" +
+        fixturePath('older checkout/bin/agentmux-hook.js') + "' --event PostToolUse"
+    }
+    const user = { command: "echo AGENTMUX_HOOK_PROVIDER='cursor'" }
+    const actual = JSON.stringify({ PostToolUse: [legacy, user, ...current.PostToolUse] })
+    const plan = { providerId: 'cursor', retainPreviousDeclarations: true as const, mutations: [
+      { path: existingPath, content: JSON.stringify(current), merge: { kind: 'json-root-managed-events' as const } }
+    ] }
+    await writeFile(existingPath, actual)
+    expect(await installer.inspect(plan)).toMatchObject({ status: 'partial', code: 'MANAGED_HOOK_LEGACY_CARRIER',
+      targets: [{ path: existingPath, legacyDeclarations: 1 }] })
+    expect(await installer.ensure(plan)).toBeNull()
+    expect(await readFile(existingPath, 'utf8')).toBe(actual)
+  })
+
   it('previews exact files, installs once, and restores the previous generation on uninstall', async () => {
     const { installer, existingPath, createdPath } = await fixture()
     const preview = await installer.preview({
