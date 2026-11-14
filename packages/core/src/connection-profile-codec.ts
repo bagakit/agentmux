@@ -1,3 +1,4 @@
+import { parseConnectionApplication } from './room-binding-codec.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
@@ -16,7 +17,7 @@ function integer(v: unknown, max = Number.MAX_SAFE_INTEGER): number { if (!Numbe
 function choice<T extends string>(v: unknown, values: readonly T[]): T { if (!values.includes(v as T)) fail(); return v as T }
 const reasons: readonly ConnectionProfileReason[] = ['adapter-unavailable','credential-unavailable','connection-revised','source-unconfirmed','storage-unconfirmed','permission-required','creation-origin-unsupported','application-under-review','platform-rejected','effect-unconfirmed','online-unconfirmed']
 const reason = (v: unknown) => v === undefined ? {} : { reason: choice(v, reasons) }
-function application(v: unknown) { const p = object(v, ['domain','appId']), domain = text(p.domain); if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(domain)) fail(); return { domain, appId: id(p.appId) } }
+const application = parseConnectionApplication
 export function connectionProfileAvatarDigest(pngDataUrl: string): string {
   let bytes: Uint8Array
   try { bytes = Uint8Array.from(atob(pngDataUrl.slice(22)), char => char.charCodeAt(0)) } catch { return fail() }

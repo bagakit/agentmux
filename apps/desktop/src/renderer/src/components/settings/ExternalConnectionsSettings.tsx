@@ -1,3 +1,4 @@
+import { sameConnectionApplication } from '@agentmux/core/connections'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
@@ -86,7 +87,10 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
   const [continuation, setContinuation] = useState<{ connectionId: string; source: ConnectionSetupEnrollmentSource } | null>(null)
   const enrollment = useBotEnrollment(active && !manualOnly && view === 'enrollment', hostingTarget)
   const generation = useRef(0), reading = useRef(0), writing = useRef(false)
-  const draft = (input?: ConnectionConfigureInput) => ({ channel, target: hostingTarget, draft: { view: (['new','edit','saved'].includes(view) ? view : 'library') as 'new' | 'edit' | 'saved' | 'library', ...(selected ? { selectedConnectionId: selected.config.connectionId } : initial.current?.selectedConnectionId ? { selectedConnectionId: initial.current.selectedConnectionId } : {}), label, appId, domain, enabled }, ...(input ? { pending: input } : {}) })
+  const draft = (input?: ConnectionConfigureInput) => {
+    const issuer = selected?.config.application.issuer ?? initial.current?.issuer
+    return { channel, target: hostingTarget, draft: { view: (['new','edit','saved'].includes(view) ? view : 'library') as 'new' | 'edit' | 'saved' | 'library', ...(selected ? { selectedConnectionId: selected.config.connectionId } : initial.current?.selectedConnectionId ? { selectedConnectionId: initial.current.selectedConnectionId } : {}), label, appId, domain, ...(issuer === undefined ? {} : { issuer }), enabled }, ...(input ? { pending: input } : {}) }
+  }
   useEffect(() => { if (hostingTarget && ['new','edit','saved','library'].includes(view)) void retainManualConnectionIntent(draft()).catch(error => setIssue(presentError(error))) }, [view, label, appId, domain, enabled, selected])
   const read = async (epoch = generation.current) => {
     const request = ++reading.current
@@ -95,7 +99,7 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
       if (epoch === generation.current && request === reading.current) {
         setRecords(result.connections.filter(record => discord ? record.config.adapterId === 'discord' : record.config.adapterId !== 'discord')); setListIssue(''); setView(current => current === 'loading' ? 'library' : current)
         const originalId = initial.current?.selectedConnectionId
-        if (originalId) setSelected(previous => previous ?? result.connections.find(record => record.config.connectionId === originalId && record.config.application.domain === initial.current?.domain && record.config.application.appId === initial.current?.appId) ?? null)
+        if (originalId) setSelected(previous => previous ?? result.connections.find(record => record.config.connectionId === originalId && sameConnectionApplication(record.config.application, { domain: initial.current!.domain, appId: initial.current!.appId, ...(initial.current!.issuer === undefined ? {} : { issuer: initial.current!.issuer }) })) ?? null)
       }
     } catch (error) {
       if (epoch === generation.current && request === reading.current) {
@@ -139,7 +143,7 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
       ? current.map(item => item.config.connectionId === record.config.connectionId && item.revision <= record.revision ? record : item)
       : [...current, record])
     initial.current = undefined
-    void retainManualConnectionIntent({ channel, target: hostingTarget, draft: { view: 'saved', selectedConnectionId: record.config.connectionId, label: record.config.label, appId: record.config.application.appId, domain: record.config.application.domain, enabled: record.config.enabled } }, confirmedOperationId)
+    void retainManualConnectionIntent({ channel, target: hostingTarget, draft: { view: 'saved', selectedConnectionId: record.config.connectionId, label: record.config.label, appId: record.config.application.appId, domain: record.config.application.domain, ...(record.config.application.issuer === undefined ? {} : { issuer: record.config.application.issuer }), enabled: record.config.enabled } }, confirmedOperationId)
       .catch(error => setIssue(`The application save is confirmed. This App could not retain the saved view. ${presentError(error)}`))
     setSaveAbsent(false); setSelected(record); setLabel(record.config.label); setAppId(record.config.application.appId); setDomain(record.config.application.domain); setEnabled(record.config.enabled); setSecret(''); setSaveNotice(notice); setIssue(''); setView('saved')
   }
@@ -153,7 +157,7 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
       let input = pending
       if (!input) {
         const operationId = mintObjectId(), connectionId = selected?.config.connectionId ?? mintObjectId()
-        input = { operationId, expectedRevision: selected?.revision ?? null, connection: { connectionId, adapterId: selected?.config.adapterId ?? (discord ? 'discord' : 'feishu'), application: { domain, appId: appId.trim() }, label: label.trim() || `${platform(domain)} bot`, enabled, credentialRef: secret ? '' : selected?.config.credentialRef ?? '' } }
+        input = { operationId, expectedRevision: selected?.revision ?? null, connection: { connectionId, adapterId: selected?.config.adapterId ?? (discord ? 'discord' : 'feishu'), application: selected?.config.application ?? { domain, appId: appId.trim() }, label: label.trim() || `${platform(domain)} bot`, enabled, credentialRef: secret ? '' : selected?.config.credentialRef ?? '' } }
       }
       const retained = await retainManualConnectionIntent(draft(input))
       if (!retained.clientStateWritten) throw new Error('The original application input could not be saved. No credential or application request was sent.')
@@ -213,6 +217,12 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
     const card = [...pane.current.querySelectorAll<HTMLElement>('[data-mote-identity]')].find(card => card.dataset.moteIdentity === topicId)
     card?.querySelector<HTMLButtonElement>('.connector-mote-card__identity')?.focus({ preventScroll: true })
   }, [view])
+  const observedConnection = (observed: ConnectionRecord) => {
+    // The current exact owner reading also supplies the adjacent directory summary.
+    // A list request started before this reading cannot replace it afterwards.
+    reading.current++
+    setRecords(records => records.map(record => record.config.connectionId === observed.config.connectionId && sameConnectionApplication(record.config.application, observed.config.application) && record.revision <= observed.revision ? observed : record))
+  }
   const current = view === 'enrollment' ? JSON.stringify(enrollment.originalTarget) === ownerKey ? enrolled?.connection ?? null : null : selected && (records.find(record => record.config.connectionId === selected.config.connectionId) ?? selected)
   const management = useConnectionManagementSetup(current, !manualOnly && active && (view === 'saved' || view === 'management' || view === 'enrollment' && !!enrolled || view === 'mote' && !!continuation), view === 'management', hostingTarget)
   const continuationSupport = management.catalog?.value?.support
@@ -251,7 +261,7 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
     if (!active || appliedRoute.current === navigationRequest || !origin) return
     if (pending) { setRouteIssue('Check the current original save before opening another application. Your draft and original request are kept.'); return }
     const record = records.find(record => record.config.connectionId === origin.connection.connectionId && record.config.adapterId === origin.connection.adapterId &&
-      record.config.application.domain === origin.connection.application.domain && record.config.application.appId === origin.connection.application.appId)
+      sameConnectionApplication(record.config.application, origin.connection.application))
     if (!record) {
       if (view !== 'loading') setRouteIssue(`The requested application is not confirmed here: ${origin.connection.application.domain} · ${origin.connection.application.appId} · ${origin.connection.connectionId}. Refresh the bot list to read this exact identity again. Your existing draft and results are kept.`)
       return
@@ -262,7 +272,7 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
     if (!original) { setIssue('The original bot Host is not recorded. The original result is kept.'); return }
     if (JSON.stringify(original) === ownerKey) { saved(record, 'The original bot is saved.'); return }
     try {
-      await retainManualConnectionIntent({ channel, target: original, draft: { view: 'saved', selectedConnectionId: record.config.connectionId, label: record.config.label, appId: record.config.application.appId, domain: record.config.application.domain, enabled: record.config.enabled } })
+      await retainManualConnectionIntent({ channel, target: original, draft: { view: 'saved', selectedConnectionId: record.config.connectionId, label: record.config.label, appId: record.config.application.appId, domain: record.config.application.domain, ...(record.config.application.issuer === undefined ? {} : { issuer: record.config.application.issuer }), enabled: record.config.enabled } })
       if (onOpenOriginalHost) onOpenOriginalHost(original)
       else setIssue(`This bot belongs to ${original.hostId}. Choose its original hosting Host above to manage it.`)
     } catch (error) { setIssue(presentError(error)) }
@@ -349,7 +359,7 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
         <ChannelMetadataPanel connections={connections} key={JSON.stringify([ownerKey, current.config.connectionId, current.config.application])} connection={current} active={active} />
         {saveNotice ? <p className="settings-group-note" role="status">{saveNotice}</p> : null}
         {!manualOnly && (management.selectedId || management.supported || management.choices.length || management.catalog?.issue) ? <div className="connector-next-step"><div><strong>Bot setup</strong><p>Account, messages, permissions and publishing.</p></div><button className="primary-button" data-management-open onClick={() => { setView('management') }}>Manage setup</button></div> : null}
-        {discord ? <ConnectionSetupResult connections={connections} record={current} active={active} /> : <details className="connector-optional"><summary>Connection status and checks</summary><ConnectionSetupResult connections={connections} record={current} active={active} /></details>}
+        {discord ? <ConnectionSetupResult connections={connections} record={current} active={active} onObserved={observedConnection} /> : <details className="connector-optional"><summary>Connection status and checks</summary><ConnectionSetupResult connections={connections} record={current} active={active} onObserved={observedConnection} /></details>}
         <div className="connector-editor-actions"><button className="small-button" disabled={busy} onClick={() => edit(current)}><EditIcon size={14} />Edit connection</button>{management.catalog?.issue ? <button className="small-button" onClick={() => void management.list()}>Check setup support</button> : null}</div>
         {discord ? <details className="connector-setup-help" data-discord-setup><summary>Connect Discord channels</summary><ol><li>On the Bot page, enable Message Content Intent for ordinary channel text.</li><li>Install the bot in your server with View Channels, Send Messages and Read Message History. Attach Files is needed for files; threads also need Send Messages in Threads.</li><li>In an Agent’s menu, choose the exact channel to share. Member input grants are managed separately.</li></ol><p className="settings-group-note">Saving credentials does not confirm Gateway connection, channel access or message delivery. Check this connection and the selected channel separately.</p><button className="small-button" data-management-console onClick={() => void openConsole('discord.com')}>Open Developer Portal <LinkIcon size={12} /></button></details> : <><details className="connector-setup-help"><summary>Finish setup in {platform(current.config.application.domain)}</summary><ol><li>Enable the bot capability in your application.</li><li>In Events & Callbacks, choose persistent connection and add <code>im.message.receive_v1</code>.</li><li>Enable the messaging and group permissions required by the features you use, then publish the application.</li></ol><p className="settings-group-note">Keep this application enabled here while finishing event setup.</p><button className="small-button" data-management-console onClick={() => void openConsole(current.config.application.domain)}>Open {platform(current.config.application.domain)} console <LinkIcon size={12} /></button></details>{!manualOnly ? <ConnectionProfilePanel hostingTarget={hostingTarget} key={JSON.stringify([current.config.connectionId, current.config.application, current.revision])} record={current} /> : null}</>}
         {!manualOnly ? <ConnectionIdentityRemoval hostingTarget={hostingTarget} key={JSON.stringify([current.config.connectionId, current.config.application])} record={current} readings={identities} active={active} onDeleted={receipt => {

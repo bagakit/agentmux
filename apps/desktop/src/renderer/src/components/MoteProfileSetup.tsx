@@ -1,7 +1,7 @@
 import { ConnectorAccountSummary } from './ConnectorEntityIdentity'
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { useEffect, useRef, useState } from 'react'
-import { connectionSetupDecisionForAction, type ConnectionSetupAdvance, type ConnectionSetupAuthenticationAction, type ConnectionSetupConfigurationAction, type ConnectionSetupView } from '@agentmux/core/connections'
+import { sameConnectionApplication, connectionSetupDecisionForAction, type ConnectionSetupAdvance, type ConnectionSetupAuthenticationAction, type ConnectionSetupConfigurationAction, type ConnectionSetupView } from '@agentmux/core/connections'
 import type { MoteConnectionOperation } from '@agentmux/core/mote-connections'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -82,7 +82,7 @@ export function MoteProfileSetup({ operation, hostingTarget, automatic, onOperat
   const progress = reading.view?.profileUpdate
   function accept(value: ConnectionSetupView) {
     const target = operation.connection
-    if (value.operation && (!target || value.operation.operationId !== id || value.operation.goal.kind !== 'profile-update' || value.operation.connectionId !== target.connectionId || value.operation.application.appId !== target.application.appId || value.operation.application.domain !== target.application.domain)) throw new Error('This management result does not belong to the original bot.')
+    if (value.operation && (!target || value.operation.operationId !== id || value.operation.goal.kind !== 'profile-update' || value.operation.connectionId !== target.connectionId || !sameConnectionApplication(value.operation.application, target.application))) throw new Error('This management result does not belong to the original bot.')
     setReading(previous => previous.view?.operation && value.operation && previous.view.operation.revision > value.operation.revision ? previous : { view: value, issue: '' })
   }
   async function inspect(manual = false) {

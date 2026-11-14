@@ -1,3 +1,4 @@
+import { sameConnectionApplication } from '@agentmux/core/connections'
 import { readConnectionRequestTrace } from './connection-request-trace.js'
 import { mintObjectId, AgentMuxError } from '@agentmux/core'
 import {
@@ -119,7 +120,7 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
     if (!row || !sameEnrollmentActor(row.actor, { kind: 'agent', id: agentSessionId }) || row.operation.configuration !== 'configured') return false
     const current = this.options.connections.readConfiguration(connectionId), original = row.operation.configured?.connection
     return !!current && !!original && current.config.adapterId === original.config.adapterId &&
-      current.config.application.domain === original.config.application.domain && current.config.application.appId === original.config.application.appId
+      sameConnectionApplication(current.config.application, original.config.application)
   }
   private async authority(
     row: EnrollmentRow | null,
@@ -636,7 +637,7 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
       const current = this.store.read(source.operationId), operation = current?.operation, saved = operation?.configured
       if (!current || !sameEnrollmentActor(current.actor, context.actor)) throw issue('CONTROL_PERMISSION_DENIED')
       if (!row || current.version !== 2 || operation!.revision !== source.expectedRevision || current.operation.authentication?.attemptId !== row.operation.authentication?.attemptId) throw issue('CONNECTION_REVISION_CONFLICT')
-      if (operation!.configuration !== 'configured' || operation!.credential !== 'stored' || operation!.creation?.create !== 'confirmed' || operation!.authentication?.stage !== 'confirmed' || !saved || saved.operationId !== current.configureOperationId || operation!.connectionId !== target.connectionId || operation!.adapterId !== target.adapterId || operation!.domain !== target.application.domain || operation!.application?.domain !== target.application.domain || operation!.application?.appId !== target.application.appId || saved.connection.config.connectionId !== target.connectionId || saved.connection.config.adapterId !== target.adapterId || saved.connection.config.application.domain !== target.application.domain || saved.connection.config.application.appId !== target.application.appId) throw issue('CONNECTION_SETUP_SOURCE_UNCONFIRMED')
+      if (operation!.configuration !== 'configured' || operation!.credential !== 'stored' || operation!.creation?.create !== 'confirmed' || operation!.authentication?.stage !== 'confirmed' || !saved || saved.operationId !== current.configureOperationId || operation!.connectionId !== target.connectionId || operation!.adapterId !== target.adapterId || operation!.domain !== target.application.domain || (!operation!.application || !sameConnectionApplication(operation!.application, target.application)) || saved.connection.config.connectionId !== target.connectionId || saved.connection.config.adapterId !== target.adapterId || !sameConnectionApplication(saved.connection.config.application, target.application)) throw issue('CONNECTION_SETUP_SOURCE_UNCONFIRMED')
     }
     assertCurrent()
     const snapshot = await this.privateSnapshot(row!)

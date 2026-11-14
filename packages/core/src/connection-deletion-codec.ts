@@ -1,3 +1,4 @@
+import { parseConnectionApplication } from './room-binding-codec.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import type { ConnectionDeleteOperation, ConnectionDeletionMethod, ConnectionDeletionParamsMap, ConnectionDeletionResultMap } from './connection-deletion-contract.js'
@@ -15,10 +16,10 @@ function revision(value: unknown): number {
 }
 function operation(value: unknown): ConnectionDeleteOperation {
   const p = rpcRecord(value, ['operationId', 'status', 'connectionId', 'application', 'deletedRevision'], 'INVALID_CONNECTION_DATA')
-  const a = rpcRecord(p.application, ['domain', 'appId'], 'INVALID_CONNECTION_DATA')
-  if (p.status !== 'deleted' || typeof a.domain !== 'string' || !/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(a.domain)) fail()
+  const application = parseConnectionApplication(p.application)
+  if (p.status !== 'deleted') fail()
   return { operationId: id(p.operationId), status: 'deleted', connectionId: id(p.connectionId),
-    application: { domain: a.domain as string, appId: id(a.appId) }, deletedRevision: revision(p.deletedRevision) }
+    application, deletedRevision: revision(p.deletedRevision) }
 }
 export function parseConnectionDeletionParams<M extends ConnectionDeletionMethod>(method: M, value: unknown): ConnectionDeletionParamsMap[M] {
   const p = rpcRecord(value, method === 'connection.delete' ? ['operationId', 'connectionId', 'expectedRevision'] : ['operationId'], 'INVALID_CONNECTION_DATA')

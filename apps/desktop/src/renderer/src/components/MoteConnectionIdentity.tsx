@@ -8,7 +8,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { moteConnectionBaseline, parseMotePreferencesReadResult, parseMotePreferencesSaveResult, sameMotePreferencesTarget,
   type MoteConnectionPreferencesReadResult, type MoteConnectionPreferencesSaveParams,
   type MoteConnectionPreferencesSaveResult, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
-import type { ConnectionRecord, ConnectionSetupEnrollmentSource } from '@agentmux/core/connections'
+import type { ConnectionApplication, ConnectionRecord, ConnectionSetupEnrollmentSource } from '@agentmux/core/connections'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import { api } from '../lib/api'
 import { clearMoteConnectionSaveIntent, retainMoteConnectionSaveIntent, useAppStore } from '../store'
@@ -23,7 +23,7 @@ const CloseIcon = semanticIconComponent('action.close')
 const ForwardIcon = semanticIconComponent('navigation.forward')
 
 type Snapshot = { hostingTarget: ConnectionHostingTarget; saved: MoteConnectionPreferencesReadResult; connections: ConnectionRecord[]; connectionIssue: string | null }
-const choiceKey = (ref: { connectionId: string; application: { domain: string; appId: string } }) => JSON.stringify([ref.connectionId, ref.application.domain, ref.application.appId])
+const choiceKey = (ref: { connectionId: string; application: ConnectionApplication }) => JSON.stringify([ref.connectionId, ref.application.domain, ref.application.appId, ref.application.issuer ?? null])
 const sameHosting = (a: ConnectionHostingTarget | undefined, b: ConnectionHostingTarget) => a?.hostId === b.hostId && a.runtimeId === b.runtimeId
 async function read(target: MotePreferencesTarget, owner?: ConnectionHostingTarget | null): Promise<Snapshot> {
   if (owner === null) throw new Error('The original bot hosting owner is unconfirmed. The Mote choice and requests are kept.')

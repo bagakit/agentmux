@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ConnectionProfileObservation, ConnectionProfileOperation, ConnectionRecord } from '@agentmux/core/connections'
+import { sameConnectionApplication, type ConnectionProfileObservation, ConnectionProfileOperation, ConnectionRecord } from '@agentmux/core/connections'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { ConnectionHostingTarget } from '../../../../shared/contracts'
 import { connectionSettingsPort } from '../../lib/connection-settings-port'
@@ -16,7 +16,7 @@ export function ConnectionProfilePanel({ record, hostingTarget }: { record: Conn
   const generation = (key: string) => { const n = (order.current.get(key) ?? 0) + 1; order.current.set(key, n); return n }
   const key = JSON.stringify([record.config.connectionId, record.config.application, record.revision, ownerKey])
   function accept(operation: ConnectionProfileOperation) {
-    if (operation.connectionId !== record.config.connectionId || operation.application.appId !== record.config.application.appId || operation.application.domain !== record.config.application.domain) return
+    if (operation.connectionId !== record.config.connectionId || !sameConnectionApplication(operation.application, record.config.application)) return
     setOperations(current => current.some(item => item.operationId === operation.operationId) ? current.map(item => item.operationId === operation.operationId ? operation : item) : [operation, ...current])
   }
   async function list(cursor?: string) {

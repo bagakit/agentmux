@@ -1,3 +1,4 @@
+import { sameConnectionApplication } from './connections-contract.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseConnectionActor, parseConnectionApplication } from './room-binding-codec.js'
@@ -21,7 +22,7 @@ export function parseChannelMetadataSubject(value: unknown): ChannelMetadataSubj
 }
 export function parseChannelMetadataChange(value: unknown): ChannelMetadataChange {
   const p = object(value, ['connectionId', 'application', 'subject']), app = application(p.application), subject = parseChannelMetadataSubject(p.subject)
-  if (subject.kind === 'actor' && (subject.actor.application.domain !== app.domain || subject.actor.application.appId !== app.appId)) return fail()
+  if (subject.kind === 'actor' && (!sameConnectionApplication(subject.actor.application, app))) return fail()
   return { connectionId: text(p.connectionId), application: app, subject }
 }
 export function parseChannelConversationProfileObservation(value: unknown): ChannelConversationProfileObservation {
@@ -34,7 +35,7 @@ export function parseChannelMetadataEntry(value: unknown, app: ConnectionApplica
   const p = object(value, ['subject', 'observation', 'cacheRevision']), subject = parseChannelMetadataSubject(p.subject)
   const observation = subject.kind === 'actor' ? parseChannelActorProfileObservation(p.observation) : parseChannelConversationProfileObservation(p.observation)
   const observedApp = 'actor' in observation ? observation.actor.application : observation.application
-  if (observedApp.domain !== app.domain || observedApp.appId !== app.appId) return fail()
+  if (!sameConnectionApplication(observedApp, app)) return fail()
   if (subject.kind === 'actor' ? !('actor' in observation) || channelActorKey(subject.actor) !== channelActorKey(observation.actor)
     : !('externalConversationId' in observation) || subject.externalConversationId !== observation.externalConversationId) return fail()
   return { subject, observation, cacheRevision: p.cacheRevision === null ? null : text(p.cacheRevision) }

@@ -333,7 +333,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
   prepare(operation: Readonly<PublicationOperation>, identity = !!operation.mapping?.nativeCard): PreparedPublication {
     feishuIdentity(operation.target.externalConversationId)
     feishuIdentity(operation.target.application.appId)
-    if (!['open.feishu.cn', 'open.larksuite.com'].includes(operation.target.application.domain)) feishuFailure('FEISHU_APPLICATION_INVALID')
+    if (operation.target.application.issuer !== undefined || !['open.feishu.cn', 'open.larksuite.com'].includes(operation.target.application.domain)) feishuFailure('FEISHU_APPLICATION_INVALID')
     const mapping = operation.mapping
     if (mapping) feishuIdentity(mapping.messageId)
     if (operation.payload.kind === 'query-feedback') {

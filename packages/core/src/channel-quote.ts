@@ -1,3 +1,4 @@
+import { sameConnectionApplication } from './connections-contract.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseConnectionActor, parseConnectionApplication } from './room-binding-codec.js'
@@ -38,7 +39,7 @@ const id = (value: unknown): string => {
   return value as string
 }
 const time = (value: unknown): number => { if (!Number.isSafeInteger(value) || Number(value) < 0) fail(); return value as number }
-const sameApplication = (left: ConnectionApplication, right: ConnectionApplication) => left.domain === right.domain && left.appId === right.appId
+const sameApplication = sameConnectionApplication
 
 /** The same original range is visible while its quote is still being read. */
 export function parseChannelQuoteRange(value: unknown): ChannelQuoteRange {

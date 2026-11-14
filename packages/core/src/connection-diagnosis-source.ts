@@ -43,7 +43,7 @@ export function connectionDiagnosisEventKey(record: ConversationItemRef, event: 
 }
 export function connectionDiagnosisGapKey(target: ConnectionDiagnosisTarget, originalGapId: string): string {
   return hash(['gap', [target.executionHostId, target.agentSessionId, target.bindingId, target.bindingRevision,
-    target.connectionId, target.domain, target.appId, target.externalConversationId], originalGapId])
+    target.connectionId, target.domain, target.appId, ...(target.issuer === undefined ? [] : [target.issuer]), target.externalConversationId], originalGapId])
 }
 /** Equality with already-authorized members only; never an actor identity or access grant. */
 export function connectionDiagnosisActorKey(target: ConnectionDiagnosisTarget, actor: ConnectionActor): string {

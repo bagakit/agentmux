@@ -39,10 +39,11 @@ export function parseMoteConnectionMode(content: string): { status: 'valid'; val
   if (!isMap(connection)) return { status: 'unconfirmed', message: ISSUE }
   const app = connection.get('application', true)
   if (!isMap(app)) return { status: 'unconfirmed', message: ISSUE }
+  if (app.has('issuer') && !isScalar(app.get('issuer', true))) return { status: 'unconfirmed', message: ISSUE }
   const scalar = (node: unknown) => isScalar(node) ? node.value : undefined
   try {
     return { status: 'valid', values: parseMoteConnectionValues({ connection: { connectionId: scalar(connection.get('connectionId', true)),
-      application: { domain: scalar(app.get('domain', true)), appId: scalar(app.get('appId', true)) } } }) }
+      application: { domain: scalar(app.get('domain', true)), appId: scalar(app.get('appId', true)), ...(app.has('issuer') ? { issuer: scalar(app.get('issuer', true)) } : {}) } } }) }
   } catch { return { status: 'unconfirmed', message: ISSUE } }
 }
 /** One field in the original AST; Quick preferences and unknown nodes keep their owner. */
@@ -58,6 +59,8 @@ export function serializeMoteConnectionMode(content: string, values: MoteConnect
     document.setIn(['defaults', 'connection', 'connectionId'], values.connection.connectionId)
     document.setIn(['defaults', 'connection', 'application', 'domain'], values.connection.application.domain)
     document.setIn(['defaults', 'connection', 'application', 'appId'], values.connection.application.appId)
+    if (values.connection.application.issuer === undefined) document.deleteIn(['defaults', 'connection', 'application', 'issuer'])
+    else document.setIn(['defaults', 'connection', 'application', 'issuer'], values.connection.application.issuer)
   }
   return serializeFrontmatter(document, original)
 }

@@ -34,7 +34,7 @@ const revision = (v: unknown, code: Code) => v === null ? null : count(v, code, 
 const actor = (v: unknown, code: Code) => { try { return parseConnectionActor(v) } catch { return fail(code) } }
 const target = (v: unknown, code: Code) => parseMotePreferencesTarget(v, code)
 function application(v: unknown, code: Code) {
-  const a = fields(v, ['domain', 'appId'], ['domain', 'appId'], code)
+  const a = fields(v, ['domain', 'appId', 'issuer'], ['domain', 'appId'], code)
   const ref = parseMoteConnectionValues({ connection: { connectionId: 'application', application: a } }, code).connection!
   return ref.application
 }

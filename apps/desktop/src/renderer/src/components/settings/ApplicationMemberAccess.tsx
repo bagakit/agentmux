@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { channelMetadataSubjectKey, parseConnectionParams, type ChannelMetadataEntry, type ConnectionActor, type ConnectionApplicationAccess, type ConnectionApplicationAccessOperation, type ConnectionApplicationGrant, type ConnectionGrant, type ConnectionRecord } from '@agentmux/core/connections'
+import { sameConnectionApplication, channelMetadataSubjectKey, parseConnectionParams, type ChannelMetadataEntry, type ConnectionActor, type ConnectionApplicationAccess, type ConnectionApplicationAccessOperation, type ConnectionApplicationGrant, type ConnectionGrant, type ConnectionRecord } from '@agentmux/core/connections'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
 import { ConnectorEntityIdentity, ConnectorIdentityField, ConnectorProfileUpdates } from '../ConnectorEntityIdentity'
@@ -37,7 +37,7 @@ function ApplicationMemberAccessEditor({ record, hostingTarget, intent, active }
   const current = () => context.current.scope === scope && context.current.active
   const creatorReading = useConnectorCreatorInvitation(record, active, hostingTarget)
   const application = record.config.application, adapterId = record.config.adapterId
-  const sameApplication = (actor: ConnectionActor) => actor.application.domain === application.domain && actor.application.appId === application.appId
+  const sameApplication = (actor: ConnectionActor) => sameConnectionApplication(actor.application, application)
   const belongs = (value: { adapterId: string; actor: ConnectionActor }) => value.adapterId === adapterId && sameApplication(value.actor)
   const requests = Object.values(retained.requests).filter(value => belongs({ adapterId: value.adapterId, actor: value.input.actor }))
   const value = reading.scope === scope ? reading.value : null
@@ -53,7 +53,7 @@ function ApplicationMemberAccessEditor({ record, hostingTarget, intent, active }
     try {
       const result = await source.call('connection.application.access.get', { connectionId: record.config.connectionId })
       if (!current() || request !== order.current) return null
-      if (result.connectionId !== record.config.connectionId || result.connectionRevision !== record.revision || result.adapterId !== adapterId || result.application.domain !== application.domain || result.application.appId !== application.appId) throw new Error('This access reading does not describe the original bot configuration.')
+      if (result.connectionId !== record.config.connectionId || result.connectionRevision !== record.revision || result.adapterId !== adapterId || !sameConnectionApplication(result.application, application)) throw new Error('This access reading does not describe the original bot configuration.')
       setReading({ scope, value: result, issue: '' }); return result
     } catch (error) {
       if (current() && request === order.current) setReading(previous => ({ scope, value: previous.scope === scope ? previous.value : null, issue: presentError(error) }))
@@ -64,7 +64,7 @@ function ApplicationMemberAccessEditor({ record, hostingTarget, intent, active }
     try {
       const result = await source.call('connection.metadata.ls', { connectionId: record.config.connectionId, kind: 'actor', limit: 25, ...(cursor ? { cursor } : {}) })
       if (!current()) return
-      if (result.application.domain !== application.domain || result.application.appId !== application.appId) throw new Error('These saved profiles belong to another bot.')
+      if (!sameConnectionApplication(result.application, application)) throw new Error('These saved profiles belong to another bot.')
       setProfiles(previous => cursor ? [...previous, ...result.entries] : result.entries); setNext(result.next); setProfileIssue('')
     } catch (error) { if (current()) setProfileIssue(presentError(error)) }
   }

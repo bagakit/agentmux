@@ -96,7 +96,7 @@ export function ConnectorDeliveryDetails({ binding, connection, hostingTarget, o
       const result = await source('connection.ingress.inspect', { ingressId: row.ingressId })
       if (!accepts() || request !== epoch.current) return
       const ingress = result.ingress, saved = ingress?.kind !== 'action' ? ingress?.input : undefined, receipt = result.inputReceipt
-      const matches = ingress?.ingressId === row.ingressId && ingress.externalConversationId === target.externalConversationId && ingress.application.domain === target.domain && ingress.application.appId === target.appId &&
+      const matches = ingress?.ingressId === row.ingressId && ingress.externalConversationId === target.externalConversationId && ingress.application.domain === target.domain && ingress.application.appId === target.appId && ingress.application.issuer === target.issuer &&
         saved?.operationId === row.inputOperationId && saved.hostId === target.executionHostId && saved.agentSessionId === target.agentSessionId && saved.author.bindingId === target.bindingId && saved.author.bindingRevision === row.bindingRevision && saved.author.connectionId === target.connectionId &&
         receipt?.originalControlOperationId === saved.operationId && receipt.key.kind === 'message' && receipt.key.agentSessionId === saved.agentSessionId && receipt.key.expectedRun.runId === saved.expectedRun.runId && receipt.key.messageId === saved.messageId
       setInput(previous => ({ key, ingressId: row.ingressId, receipt: matches ? receipt! : previous?.key === key && previous.ingressId === row.ingressId ? previous.receipt : null, issue: !matches }))

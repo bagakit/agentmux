@@ -1,3 +1,4 @@
+import { connectionApplicationScope, parseConnectionApplication } from '@agentmux/core/connections'
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError } from '@agentmux/core'
@@ -30,7 +31,8 @@ export class ChannelStorage {
     }
   }
   namespace(scope: ChannelStorageScope): ChannelStoragePort {
-    const namespace = [key(scope.adapterId), key(scope.application.domain), key(scope.application.appId)]
+    const application = parseConnectionApplication(scope.application)
+    const namespace = [key(scope.adapterId), connectionApplicationScope(application), key(application.appId)]
     const get = (originalKey: string): ChannelStorageRecord | null => this.safe(() => {
       const row = this.database.prepare('SELECT revision,value_kind,value FROM channel_storage WHERE adapter_id=? AND domain=? AND app_id=? AND storage_key=?').get(...namespace, key(originalKey))
       if (!row) return null

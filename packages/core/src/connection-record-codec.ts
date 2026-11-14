@@ -1,3 +1,4 @@
+import { parseConnectionApplication } from './room-binding-codec.js'
 import { AgentMuxError } from './errors.js'
 import type { ConnectionConfig, ConnectionObservation, ConnectionRecord, ConnectionReceiverObservation } from './connections-contract.js'
 
@@ -13,9 +14,9 @@ function identity(value: unknown): string { const result = text(value); if (!/^[
 function revision(value: unknown): number { if (!Number.isSafeInteger(value) || (value as number) < 1) fail(); return value as number }
 export function parseConnectionConfig(value: unknown): ConnectionConfig {
   const p = object(value, ['connectionId', 'adapterId', 'application', 'label', 'enabled', 'credentialRef'])
-  const app = object(p.application, ['domain', 'appId']), domain = text(app.domain)
-  if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(domain) || typeof p.enabled !== 'boolean') fail()
-  return { connectionId: identity(p.connectionId), adapterId: identity(p.adapterId), application: { domain, appId: identity(app.appId) }, label: text(p.label), enabled: p.enabled as boolean, credentialRef: identity(p.credentialRef) }
+  const application = parseConnectionApplication(p.application)
+  if (typeof p.enabled !== 'boolean') fail()
+  return { connectionId: identity(p.connectionId), adapterId: identity(p.adapterId), application, label: text(p.label), enabled: p.enabled as boolean, credentialRef: identity(p.credentialRef) }
 }
 export function parseConnectionObservation(value: unknown): ConnectionObservation {
   const p = object(value, ['authentication', 'transport', 'intake', 'delivery'])

@@ -15,7 +15,7 @@ export type ApplicationAccessContinuation = {
   drafts: Record<string, ApplicationMemberDraft>
   requests: Record<string, ApplicationMemberRequest>
 }
-export const applicationMemberKey = (adapterId: string, actor: ConnectionActor) => JSON.stringify([adapterId, actor.application.domain, actor.application.appId, actor.idType, actor.userId])
+export const applicationMemberKey = (adapterId: string, actor: ConnectionActor) => JSON.stringify([adapterId, actor.application.domain, actor.application.appId, actor.idType, actor.userId, ...(actor.application.issuer === undefined ? [] : [actor.application.issuer])])
 export const emptyApplicationAccess = (): ApplicationAccessContinuation => ({ drafts: {}, requests: {} })
 
 export function editApplicationMemberDraft(previous: ApplicationMemberDraft | undefined, adapterId: string, actor: ConnectionActor, current: ConnectionApplicationGrant | null | undefined, capabilities: ConnectionGrant['capabilities']): ApplicationMemberDraft | undefined {

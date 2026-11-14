@@ -1,3 +1,4 @@
+import { connectionApplicationScope } from '@agentmux/core/connections'
 import { sourceReviewItems, recoveryRecordClosed } from './publication-source-review.js'
 import type { ConnectionSourceReview, ConnectionSourceReviewAction } from '@agentmux/core/connections'
 import { queryInputPosition, queryInputPage, queryInputPending, queryInputReceipt, type QueryInputPosition } from './publication-query-input.js'
@@ -379,13 +380,15 @@ export class PublicationStore {
       CREATE INDEX IF NOT EXISTS connector_publication_reply_record ON connector_publication_decision(binding_id,binding_revision,json_extract(decision_json,'$.kind'),json_extract(decision_json,'$.recordKey'))
         WHERE json_extract(decision_json,'$.kind') IN ('reply-fact','reply-projection');`)
 
-    try { database.exec(`CREATE INDEX IF NOT EXISTS connector_publication_context_message
+    try { database.exec(`CREATE INDEX IF NOT EXISTS connector_publication_context_message_scoped
       ON connector_publication_operation(
         json_extract(operation_json,'$.target.application.domain'),json_extract(operation_json,'$.target.application.appId'),
+        json_extract(operation_json,'$.target.application.issuer'),
         json_extract(operation_json,'$.target.externalConversationId'),json_extract(operation_json,'$.reference.hostId'),
         json_extract(operation_json,'$.reference.agentSessionId'),json_extract(operation_json,'$.reference.source.providerId'),
         json_extract(operation_json,'$.reference.source.nativeSessionId'),json_extract(operation_json,'$.mapping.messageId'))
-      WHERE state='confirmed' AND json_extract(operation_json,'$.effect')='upsert';`) }
+      WHERE state='confirmed' AND json_extract(operation_json,'$.effect')='upsert';
+      DROP INDEX IF EXISTS connector_publication_context_message;`) }
     catch { /* This optional observation must not prevent original input or Outbox ownership. Exact lookup reports it. */ }
     this.decisionWrite = database.prepare('INSERT INTO connector_publication_decision (binding_id,binding_revision,source_key,record_id,source_revision,reason,decision_json) VALUES (?,?,?,?,?,?,?) ON CONFLICT(binding_id,binding_revision,source_key,record_id,source_revision) DO UPDATE SET reason=excluded.reason,decision_json=excluded.decision_json')
   }
@@ -521,10 +524,10 @@ export class PublicationStore {
     const known = new Set<string>()
     if (!messageIds.length) return known
     const read = this.database.prepare(`SELECT candidate.value AS message_id FROM json_each(?) candidate WHERE EXISTS (
-      SELECT 1 FROM connector_publication_operation original INDEXED BY connector_publication_context_message
+      SELECT 1 FROM connector_publication_operation original INDEXED BY connector_publication_context_message_scoped
       WHERE original.state='confirmed' AND json_extract(original.operation_json,'$.effect')='upsert'
         AND json_extract(original.operation_json,'$.target.application.domain')=? AND json_extract(original.operation_json,'$.target.application.appId')=?
-        AND json_extract(original.operation_json,'$.target.externalConversationId')=? AND json_extract(original.operation_json,'$.reference.hostId')=?
+        AND json_extract(original.operation_json,'$.target.application.issuer') IS ? AND json_extract(original.operation_json,'$.target.externalConversationId')=? AND json_extract(original.operation_json,'$.reference.hostId')=?
         AND json_extract(original.operation_json,'$.reference.agentSessionId')=? AND json_extract(original.operation_json,'$.reference.source.providerId')=?
         AND json_extract(original.operation_json,'$.reference.source.nativeSessionId')=? AND json_extract(original.operation_json,'$.mapping.messageId')=candidate.value
         AND json_extract(original.operation_json,'$.reference.source.kind')='native'
@@ -535,7 +538,7 @@ export class PublicationStore {
             OR json_extract(source.value,'$.source.kind') IS NOT 'native' OR json_extract(source.value,'$.source.providerId') IS NOT ?
             OR json_extract(source.value,'$.source.nativeSessionId') IS NOT ?))`)
     for (let offset = 0; offset < messageIds.length; offset += 100) {
-      for (const row of read.all(JSON.stringify(messageIds.slice(offset, offset + 100)), recipient.application.domain, recipient.application.appId,
+      for (const row of read.all(JSON.stringify(messageIds.slice(offset, offset + 100)), recipient.application.domain, recipient.application.appId, recipient.application.issuer ?? null,
         recipient.externalConversationId, recipient.hostId, recipient.agentSessionId, recipient.source.providerId, recipient.source.nativeSessionId,
         recipient.hostId, recipient.agentSessionId, recipient.source.providerId, recipient.source.nativeSessionId)) known.add(String(row.message_id))
     }
@@ -937,7 +940,7 @@ export class PublicationStore {
     try {
       if (!this.publicationMember(boundary, author.bindingId, author.bindingRevision)) return
       const row = this.database.prepare('SELECT record_json FROM connection_ingress_message WHERE domain=? AND app_id=? AND message_id=?')
-        .get(boundary.application.domain, boundary.application.appId, author.externalMessageId)
+        .get(connectionApplicationScope(boundary.application), boundary.application.appId, author.externalMessageId)
       if (!row) return
       const ingress = JSON.parse(String(row.record_json))
       const target = ingress.group?.target
@@ -1648,8 +1651,8 @@ export class PublicationStore {
           WHERE json_array_length(json_extract(operation_json,'$.avatarUploads'))>0
             AND json_extract(operation_json,'$.avatarUploads[#-1].state') IN ('confirmed','dispatching')
             AND json_extract(operation_json,'$.target.connectionId')=? AND json_extract(operation_json,'$.target.application.domain')=?
-            AND json_extract(operation_json,'$.target.application.appId')=? AND json_extract(operation_json,'$.speaker.avatar.image.sha256')=?
-          ORDER BY CASE json_extract(operation_json,'$.avatarUploads[#-1].state') WHEN 'confirmed' THEN 0 ELSE 1 END, ordinal DESC LIMIT 1`).get(original.target.connectionId, original.target.application.domain, original.target.application.appId, imageHash))
+            AND json_extract(operation_json,'$.target.application.appId')=? AND json_extract(operation_json,'$.target.application.issuer') IS ? AND json_extract(operation_json,'$.speaker.avatar.image.sha256')=?
+          ORDER BY CASE json_extract(operation_json,'$.avatarUploads[#-1].state') WHEN 'confirmed' THEN 0 ELSE 1 END, ordinal DESC LIMIT 1`).get(original.target.connectionId, original.target.application.domain, original.target.application.appId, original.target.application.issuer ?? null, imageHash))
         if (previous && (previous.avatarUploads!.at(-1)!.state === 'confirmed' || inFlight?.(previous.operationId, previous.avatarUploads!.length))) {
           const receipt = previous.avatarUploads!.at(-1)!
           const { image: _bytes, ...avatar } = original.speaker.avatar

@@ -1,5 +1,5 @@
 import type { MotePreferencesTarget, MoteConnectionRef } from '@agentmux/core/mote-preferences'
-import type { ConnectionRecord } from '@agentmux/core/connections'
+import { sameConnectionApplication, type ConnectionRecord } from '@agentmux/core/connections'
 import { homeZoneId, originalTopicAddress, type SpaceZoneBindings } from '../../../shared/space-addresses'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { scratchTopicsForWorkspace } from './scratch-topic-snapshots'
@@ -21,7 +21,7 @@ export function moteConnectionChoice(ref: MoteConnectionRef, records: readonly C
   const matches = records.filter(record => record.config.connectionId === ref.connectionId)
   const record = matches.length === 1 ? matches[0]! : null
   if (!record) return { record: null, issue: 'The saved bot is unavailable here. Choose another saved bot or open bot settings.' }
-  if (record.config.application.domain !== ref.application.domain || record.config.application.appId !== ref.application.appId)
+  if (!sameConnectionApplication(record.config.application, ref.application))
     return { record: null, issue: 'This connection belongs to a different bot. Keep the original reference or choose another bot.' }
   return { record, issue: !record.config.enabled ? 'This bot is paused. Choose another saved bot or enable it in bot settings.'
     : connectionNeedsInitialSetup(record) ? 'This bot’s original setup is incomplete. Continue it in bot settings; the saved choice is kept.' : null }

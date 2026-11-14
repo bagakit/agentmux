@@ -75,8 +75,7 @@ export function parseConnectionIngressRecord(value: unknown): ConnectionIngressR
   }
   const p = object(value, ['ingressId', 'receivedAt', 'connectionId', 'application', 'eventId', 'externalMessageId', 'externalConversationId', 'conversationKind', 'actor', 'body', 'state', 'code', 'input', 'addressing', 'group'])
   if (p.receivedAt !== undefined && (!Number.isSafeInteger(p.receivedAt) || Number(p.receivedAt) < 0)) fail()
-  const actor = parseConnectionActor(p.actor), app = object(p.application, ['domain', 'appId'])
-  const application = { domain: text(app.domain), appId: text(app.appId) }
+  const actor = parseConnectionActor(p.actor), application = parseConnectionApplication(p.application)
   if (!equal(actor.application, application) || typeof p.body !== 'string' || p.state !== 'received' && p.state !== 'refused' && p.state !== 'claimed') fail()
   if (p.conversationKind !== undefined && p.conversationKind !== 'direct' && p.conversationKind !== 'group') fail()
   const base = { ingressId: text(p.ingressId), connectionId: text(p.connectionId), application, eventId: text(p.eventId), externalMessageId: text(p.externalMessageId), externalConversationId: text(p.externalConversationId), actor, body: p.body as string, ...(p.conversationKind === undefined ? {} : { conversationKind: p.conversationKind as 'direct' | 'group' }), ...(p.addressing === undefined ? {} : { addressing: addressing(p.addressing) }) }

@@ -18,7 +18,7 @@ export type ChannelActorProfileObservation = {
 
 /** Full issuer namespace, independent of Connection aliases, display names and grants. */
 export function channelActorKey(actor: ConnectionActor): string {
-  return JSON.stringify([actor.application.domain, actor.application.appId, actor.idType, actor.userId])
+  return JSON.stringify([actor.application.domain, actor.application.appId, ...(actor.application.issuer === undefined ? [] : [actor.application.issuer]), actor.idType, actor.userId])
 }
 
 export function parseChannelActorProfileObservation(value: unknown): ChannelActorProfileObservation {

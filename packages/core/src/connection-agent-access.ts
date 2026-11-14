@@ -1,3 +1,4 @@
+import { sameConnectionApplication } from './connections-contract.js'
 import { AgentMuxError } from './errors.js'
 import type { ConnectionPort, ConnectionMethod, ConnectionParamsMap } from './connections-contract.js'
 import type { ConnectionDelivery, ConnectionDeliveryParamsMap, ConnectionDeliveryResultMap } from './connection-delivery-contract.js'
@@ -9,8 +10,7 @@ export function agentConnectionIngressAuthorization(owner: ConnectionPort,
   session: { hostId: string; agentSessionId: string }, assertCurrent: () => Promise<void>) {
   const deny = (): never => { throw new AgentMuxError('Ingress inspection requires this authenticated Host and Session on its original target or current bound audience.', 'CONTROL_PERMISSION_DENIED') }
   if (!owner.ingress || !owner.bindings) throw new AgentMuxError('Original ingress or binding inspection is unavailable. Existing Agent capabilities remain available.', 'CONTROL_UNAVAILABLE')
-  const audience = (binding: RoomBinding, record: ConnectionIngressRecord) => binding.application.domain === record.application.domain &&
-    binding.application.appId === record.application.appId && binding.externalConversationId === record.externalConversationId
+  const audience = (binding: RoomBinding, record: ConnectionIngressRecord) => sameConnectionApplication(binding.application, record.application) && binding.externalConversationId === record.externalConversationId
   const self = (target: { hostId: string; agentSessionId: string }) => target.hostId === session.hostId && target.agentSessionId === session.agentSessionId
   const authorize = async (record: ConnectionIngressRecord | null) => {
     if (!record) return
@@ -63,8 +63,7 @@ export async function readAgentConnectionDelivery<M extends DeliveryReadMethod>(
       ? original.sourceFrontier?.sourceHostId : original.executionHostId
     if (sourceHostId !== undefined && delivery.reference.hostId !== sourceHostId || delivery.reference.agentSessionId !== session.agentSessionId ||
       delivery.bindingId !== original.bindingId || delivery.bindingRevision !== original.revision ||
-      delivery.target.connectionId !== original.connectionId || delivery.target.application.domain !== original.application.domain ||
-      delivery.target.application.appId !== original.application.appId || delivery.target.externalConversationId !== original.externalConversationId) deny()
+      delivery.target.connectionId !== original.connectionId || !sameConnectionApplication(delivery.target.application, original.application) || delivery.target.externalConversationId !== original.externalConversationId) deny()
   }
   if (method === 'connection.delivery.inspect') {
     const result = await owner.delivery.inspect(input as ConnectionDeliveryParamsMap['connection.delivery.inspect'])

@@ -2,7 +2,7 @@ import { isValidElement, useEffect, useRef, useState, type ReactNode } from 'rea
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { ChannelProfileAvatar } from '@agentmux/client-ui/components/ChannelProfileAvatar'
-import { channelMetadataSubjectKey, connectionDiagnosisActorKey, groupTarget, type ConnectionRecord, type ConnectionMemberAccess, type GroupDiagnosis, type RoomBinding } from '@agentmux/core/connections'
+import { sameConnectionApplication, channelMetadataSubjectKey, connectionDiagnosisActorKey, groupTarget, type ConnectionRecord, type ConnectionMemberAccess, type GroupDiagnosis, type RoomBinding } from '@agentmux/core/connections'
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { connectorConnectionPresentation } from '../lib/connector-connection-presentation'
@@ -19,7 +19,7 @@ const initial = (name: string) => Array.from(name.trim())[0]?.toLocaleUpperCase(
  * roving focus, so Enter runs it, and stays open on selection like a button in a panel. */
 const menuItem = (control: ReactNode) => isValidElement(control)
   ? <DropdownMenu.Item asChild disabled={(control.props as { disabled?: boolean }).disabled === true} onSelect={event => event.preventDefault()}>{control}</DropdownMenu.Item> : control
-const actorKey = (actor: ConnectionMemberAccess['actor']) => JSON.stringify([actor.application.domain, actor.application.appId, actor.idType, actor.userId])
+const actorKey = (actor: ConnectionMemberAccess['actor']) => JSON.stringify([actor.application.domain, actor.application.appId, actor.idType, actor.userId, actor.application.issuer ?? null])
 const clock = (value: number | null | undefined) => value === null || value === undefined ? 'Time not recorded' : new Date(value).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 const trafficTime = (value: number | null | undefined) => value === null || value === undefined ? 'Time not recorded' : <time dateTime={new Date(value).toISOString()} title={new Date(value).toLocaleString()}>{clock(value)}</time>
 const capabilities = { input: 'Chat', answer: 'Answer', permission: 'Approve' } as const
@@ -46,7 +46,7 @@ export function ConnectorGroupStatus({ binding, hostingTarget, report, onCheck, 
       const [connection, access, diagnosis] = results
       const c = connection.status === 'fulfilled' ? connection.value.connection : null
       const b = access.status === 'fulfilled' ? access.value.binding : null
-      const sameConnection = c?.config.connectionId === binding.connectionId && c.config.application.domain === binding.application.domain && c.config.application.appId === binding.application.appId
+      const sameConnection = c?.config.connectionId === binding.connectionId && sameConnectionApplication(c.config.application, binding.application)
       const sameBinding = b && JSON.stringify(groupTarget(b)) === JSON.stringify(target)
       const group = diagnosis.status === 'fulfilled' ? diagnosis.value.groups.value?.items.find(group => JSON.stringify(group.target) === JSON.stringify(target)) : null
       setRead({ identity, checkedAt: Date.now(), ...(sameConnection ? { connection: c } : {}), ...(sameBinding && access.status === 'fulfilled' && access.value.access ? { access: access.value.access } : {}), ...(group?.activity ? { activity: group.activity } : {}), issue: !sameConnection || !sameBinding || !group?.activity })

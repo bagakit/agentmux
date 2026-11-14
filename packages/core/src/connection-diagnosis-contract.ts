@@ -26,7 +26,7 @@ export type ConnectionGroupActivity = {
   }>
 }
 export type ConnectionDiagnosisTarget = {
-  bindingId: string; bindingRevision: number; publicationRevision: number; connectionId: string; domain: string; appId: string
+  bindingId: string; bindingRevision: number; publicationRevision: number; connectionId: string; domain: string; appId: string; issuer?: string
   externalConversationId: string; executionHostId: string; agentSessionId: string
 }
 export type ConnectionDiagnosisAssociation = { sourceKey: string | null; recordKey: string | null; eventKey: string | null; partKey: string | null }

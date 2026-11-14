@@ -7,7 +7,7 @@ import { TextInput, Textarea } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { SelectionField } from './SelectionField'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import { channelMetadataSubjectKey, parseConnectionParams, type ConnectionActor, type ConnectionGrant, type ConnectionMemberAccess, type ConnectionRecord, type RoomBinding, type RoomBindingInspection, type RoomBindingOperation, type RoomBindingTarget, type RoomLinkOperation, type RoomProvisioningOperation } from '@agentmux/core/connections'
+import { sameConnectionApplication, channelMetadataSubjectKey, parseConnectionParams, type ConnectionActor, type ConnectionGrant, type ConnectionMemberAccess, type ConnectionRecord, type RoomBinding, type RoomBindingInspection, type RoomBindingOperation, type RoomBindingTarget, type RoomLinkOperation, type RoomProvisioningOperation } from '@agentmux/core/connections'
 import type { AgentNativeSourceReference } from './AgentNativeSourceControls'
 import { api } from '../lib/api'
 import { clearConnectorRoomIntent, retainConnectorRoomIntent, useAppStore } from '../store'
@@ -134,7 +134,8 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
   const memberFlight = useRef(new Map<string, 'checking' | 'saving'>())
   const intents = useAppStore(state => state.connectorRoomIntents)
   const flight = useRef(false), epoch = useRef({}), content = useRef<HTMLDivElement>(null), initialFocus = useRef(true)
-  const connection = connections.find(item => item.config.connectionId === connectionId)
+  const binding = bindings.find(item => item.connectionId === connectionId && item.state !== 'detached' && (!selectedBindingId || item.bindingId === selectedBindingId))
+  const connection = connections.find(item => item.config.connectionId === connectionId && (!binding || sameConnectionApplication(item.config.application, binding.application)))
   const channel = settings?.channelEntries.find(entry => entry.adapterId === (connection?.config.adapterId ?? original.channel))
   const ChannelIcon = channel?.icon ?? ApplicationIcon
   const inChannel = (record: ConnectionRecord) => !original.channel || record.config.adapterId === original.channel
@@ -154,13 +155,12 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
   const roomIntent = relevant.find(intent => intent.method === 'connection.room.create')
   const room = roomIntent ? facts[roomIntent.input.operationId] : null
   const created = room && 'creation' in room && room.creation.state === 'created' ? room.creation.externalConversationId : null
-  const binding = bindings.find(item => item.connectionId === connectionId && item.state !== 'detached' && (!selectedBindingId || item.bindingId === selectedBindingId))
   const recentApplied = Object.values(facts).reverse().find((fact): fact is Extract<RoomBindingOperation, { state: 'applied' }> => !!fact && 'state' in fact && fact.state === 'applied' && 'action' in fact && fact.action !== 'grant')
   const detached = !binding && recentApplied?.binding.state === 'detached' && recentApplied.binding.connectionId === connectionId ? recentApplied.binding : null
   const memberKey = (actor: ConnectionActor) => binding ? connectorMemberKey(binding, actor) : ''
   const activeAudience = useRef(''); activeAudience.current = JSON.stringify([binding?.bindingId, binding?.revision])
   const currentGrants = actors && binding && actors.bindingId === binding.bindingId && actors.revision === binding.revision
-    ? actors.grants.filter(grant => grant.actor.application.domain === binding.application.domain && grant.actor.application.appId === binding.application.appId) : []
+    ? actors.grants.filter(grant => sameConnectionApplication(grant.actor.application, binding.application)) : []
   const creatingGroup = (mode === 'create' || !!roomIntent) && !binding && !detached
   const bindingIntent = relevant.find(intent => (intent.method === 'connection.bind' || intent.method === 'connection.binding.relink') && !recordedRepliesOnly(intent))
   const bindingFact = bindingIntent ? facts[bindingIntent.input.operationId] : null
@@ -333,7 +333,7 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
     const inspected = await api.connections.call('connection.binding.inspect', { bindingId: source.bindingId }, hostingTarget)
     if (!accepts() || epoch.current !== token || order !== memberReadOrder.current || activeAudience.current !== JSON.stringify([source.bindingId, source.revision])) return null
     observeBinding(source.bindingId, inspected.current)
-    if (!inspected.binding || inspected.binding.bindingId !== source.bindingId || inspected.binding.revision !== source.revision || inspected.current?.revision !== source.revision || !sameConnectorTarget(inspected.binding, source) || inspected.binding.application.domain !== source.application.domain || inspected.binding.application.appId !== source.application.appId) return null
+    if (!inspected.binding || inspected.binding.bindingId !== source.bindingId || inspected.binding.revision !== source.revision || inspected.current?.revision !== source.revision || !sameConnectorTarget(inspected.binding, source) || !sameConnectionApplication(inspected.binding.application, source.application)) return null
     // This is a complete current projection. Old immutable grant history must not recreate an inherited head.
     setActors({ bindingId: source.bindingId, revision: source.revision, grants: inspected.grants, access: inspected.access ?? null })
     return inspected
@@ -434,7 +434,7 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
   }
   function currentGrantIntent(intent: ConnectorRoomIntent): boolean {
     return (intent.method === 'connection.grant' || intent.method === 'connection.binding.member.inherit') && !!binding && intent.input.bindingId === binding.bindingId &&
-      intent.input.expectedBindingRevision === binding.revision && intent.input.actor.application.domain === binding.application.domain && intent.input.actor.application.appId === binding.application.appId
+      intent.input.expectedBindingRevision === binding.revision && sameConnectionApplication(intent.input.actor.application, binding.application)
   }
   function grant(actor: ConnectionActor, capabilities: ConnectionGrant['capabilities'], baseline: ConnectionGrant | null, source: 'room' | 'application') {
     if (!binding || binding.state !== 'active') return
@@ -513,7 +513,7 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
     {!binding || changingGroup || !sameFilters ? <label className="agent-connector-check"><input type="checkbox" checked={confirmed} disabled={busy} onChange={event => setConfirmed(event.target.checked)} />Share the complete new conversation with this group.</label> : null}
     {session.nativeHandle?.kind !== 'provider' ? <p role="status" className="agent-connector-note">The Agent’s conversation source is not confirmed yet. You can keep working locally.</p> : null}
   </section>
-  const applicationPeers = (record: ConnectionRecord) => connections.filter(item => item.config.application.domain === record.config.application.domain && item.config.application.appId === record.config.application.appId)
+  const applicationPeers = (record: ConnectionRecord) => connections.filter(item => sameConnectionApplication(item.config.application, record.config.application))
   const applicationLabel = (record: ConnectionRecord) => {
     const { application, connectionId } = record.config, peers = applicationPeers(record)
     const uses = linkedMoteUses(record, identityReadings)

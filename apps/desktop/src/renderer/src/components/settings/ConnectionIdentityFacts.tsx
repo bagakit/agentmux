@@ -1,3 +1,4 @@
+import { sameConnectionApplication } from '@agentmux/core/connections'
 import type { ConnectionRecord } from '@agentmux/core/connections'
 import type { MoteConnectionRef } from '@agentmux/core/mote-preferences'
 import { connectionInitialSetupLabel } from '../../lib/mote-connection-default'
@@ -6,7 +7,7 @@ import type { MoteIdentityReadings } from './MoteIdentityCards'
 
 export function linkedMoteUses(record: { config: Pick<ConnectionRecord['config'], 'connectionId' | 'application'> }, readings: MoteIdentityReadings): string[] {
   const matches = (ref: MoteConnectionRef | null | undefined) =>
-    ref?.connectionId === record.config.connectionId && ref.application.domain === record.config.application.domain && ref.application.appId === record.config.application.appId
+    ref?.connectionId === record.config.connectionId && sameConnectionApplication(ref.application, record.config.application)
   return readings.items.flatMap(item => {
     return [
       ...(matches(item.saved?.values?.connection) ? [`${item.scope.topic.title} · new groups`] : []),
@@ -22,12 +23,14 @@ export function ConnectionIdentityFacts({ record, readings, compact = false }: {
     : readings.complete ? 'No Mote association' : readings.reading ? 'Reading Mote associations…' : 'Mote associations not confirmed'
   if (compact) return <span className="connector-record__facts">
     <span className="connector-record__app"><code>{record.config.application.appId}</code></span>
+    {record.config.application.issuer ? <span className="connector-record__app"><code>{record.config.application.issuer}</code></span> : null}
     <span data-identity-setup={record.initialSetup?.state ?? 'not-recorded'}><small>Setup</small>{connectionInitialSetupLabel(record)}</span>
     <span data-identity-sync><small>Connection</small>{connectionSummary(record)}</span>
     <span data-identity-motes><small>Mote use</small>{linked}</span>
   </span>
-  return <dl className="connector-identity connector-identity-facts" aria-label="Saved identity facts">
-    <div><dt>App ID</dt><dd><code>{record.config.application.appId}</code></dd></div>
+  return <dl className={'connector-identity connector-identity-facts' + (record.config.application.issuer ? ' connector-identity-facts--scoped' : '')} aria-label="Saved identity facts">
+    <div className="connector-identity-facts__application"><dt>App ID</dt><dd><code>{record.config.application.appId}</code></dd></div>
+    {record.config.application.issuer ? <div className="connector-identity-facts__application"><dt>Service instance</dt><dd><code>{record.config.application.issuer}</code></dd></div> : null}
     <div><dt>Mote use</dt><dd data-identity-motes>{linked}</dd></div>
     <div><dt>Initial setup</dt><dd data-identity-setup={record.initialSetup?.state ?? 'not-recorded'}>{connectionInitialSetupLabel(record)}</dd></div>
     <div><dt>Automatic chat sync</dt><dd data-identity-sync>{connectionSummary(record)}</dd></div>

@@ -2,7 +2,7 @@ import { ConnectorEntityIdentity, ConnectorIdentityField, ConnectorProfileUpdate
 import { useEffect, useId, useState, type Dispatch, type SetStateAction } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { channelMetadataSubjectKey, type ConnectionActor, type ConnectionGrant, type ConnectionMemberAccess, type RoomBinding } from '@agentmux/core/connections'
+import { sameConnectionApplication, channelMetadataSubjectKey, type ConnectionActor, type ConnectionGrant, type ConnectionMemberAccess, type RoomBinding } from '@agentmux/core/connections'
 import type { ConnectorRoomIntent } from '../lib/connector-room-intent'
 import { connectorMemberBaselineCurrent, connectorMemberDirty, connectorMemberKey, editConnectorMemberDraft, savedMemberCapabilities, type ConnectorMemberDrafts } from '../lib/connector-member-draft'
 import type { useConnectorRoomFacts } from './ConnectorRoomSelection'
@@ -36,13 +36,13 @@ export function ConnectorMemberAccess(props: Props) {
   const editorId = useId()
   const [editing, setEditing] = useState<Set<string>>(() => new Set())
   const actor = (idType: string, userId: string): ConnectionActor => ({ application: binding.application, idType, userId })
-  const sameApplication = (value: ConnectionActor) => value.application.domain === binding.application.domain && value.application.appId === binding.application.appId
-  const observation = (value: ConnectionActor): ConnectionMemberAccess | undefined => access === null ? undefined : access.find(item => item.actor.idType === value.idType && item.actor.userId === value.userId) ?? { actor: value, local: { kind: 'none', previousDecision: false }, effective: null }
-  const localGrant = (value: ConnectionActor, observed = observation(value)) => observed ? observed.local.kind === 'none' ? null : observed.local.grant : grants === null ? undefined : grants.find(item => item.actor.idType === value.idType && item.actor.userId === value.userId) ?? undefined
+  const sameApplication = (value: ConnectionActor) => sameConnectionApplication(value.application, binding.application)
+  const observation = (value: ConnectionActor): ConnectionMemberAccess | undefined => access === null ? undefined : access.find(item => sameConnectionApplication(item.actor.application, value.application) && item.actor.idType === value.idType && item.actor.userId === value.userId) ?? { actor: value, local: { kind: 'none', previousDecision: false }, effective: null }
+  const localGrant = (value: ConnectionActor, observed = observation(value)) => observed ? observed.local.kind === 'none' ? null : observed.local.grant : grants === null ? undefined : grants.find(item => sameConnectionApplication(item.actor.application, value.application) && item.actor.idType === value.idType && item.actor.userId === value.userId) ?? undefined
   useEffect(() => {
     if (!props.creator || access === null) return
     const value = actor(props.creator.idType, props.creator.userId), key = connectorMemberKey(binding, value), original = observation(value)
-    if (!original || original.local.kind !== 'none' || original.local.previousDecision || original.effective || drafts[key] || props.requests.some(request => request.intent.input.actor.idType === value.idType && request.intent.input.actor.userId === value.userId)) return
+    if (!original || original.local.kind !== 'none' || original.local.previousDecision || original.effective || drafts[key] || props.requests.some(request => sameConnectionApplication(request.intent.input.actor.application, value.application) && request.intent.input.actor.idType === value.idType && request.intent.input.actor.userId === value.userId)) return
     props.changeDrafts(previous => previous[key] ? previous : editConnectorMemberDraft(previous, binding, value, null, ['input', 'answer', 'permission'], 'room'))
   }, [binding, props.creator, access, drafts, props.requests])
   const rows = new Map<string, { actor: ConnectionActor; name: string; observed: boolean }>()

@@ -42,7 +42,7 @@ export function externalConversationAuthor(author: AgentExternalMessageAuthor | 
 }
 /** Pure identity over original platform facts; no body, display label or input grant participates. */
 export function externalConversationRecordId(author: AgentExternalConversationAuthor): string {
-  return JSON.stringify(['external-message', author.actor.application.domain, author.actor.application.appId, author.externalConversationId, author.externalMessageId])
+  return JSON.stringify(['external-message', author.actor.application.domain, author.actor.application.appId, ...(author.actor.application.issuer === undefined ? [] : [author.actor.application.issuer]), author.externalConversationId, author.externalMessageId])
 }
 export function parseExternalConversationInputObservation(value: unknown): AgentExternalConversationInputObservation {
   const p = rpcRecord(value, ['ingressId', 'state', 'code'], 'INVALID_EXTERNAL_CONVERSATION')

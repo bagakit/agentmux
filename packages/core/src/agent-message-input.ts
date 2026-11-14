@@ -1,3 +1,4 @@
+import { sameConnectionApplication } from './connections-contract.js'
 import type { AgentMuxMessageEnvelope } from './agent-message-envelope.js'
 import { renderAgentMuxMessageEnvelope, channelQuoteWireMatchesEnvelope, parseAgentMuxMessagePrefix } from './agent-message-render.js'
 import { composeOutboundMessage } from './agent-outbound-message.js'
@@ -81,7 +82,7 @@ export function messageInputWireMatches(envelope: AgentMuxMessageEnvelope, sourc
   if (r.body === 'reference') return reading.body === '' && !reading.declaredChannel && !reading.declaredChannelQuote
   const channel = reading.declaredChannel, sender = envelope.sender
   return !!channel && reading.body === envelope.body &&
-    channel.actor.application.domain === sender.actor.application.domain && channel.actor.application.appId === sender.actor.application.appId &&
+    sameConnectionApplication(channel.actor.application, sender.actor.application) &&
     channel.actor.idType === sender.actor.idType && channel.actor.userId === sender.actor.userId &&
     channel.externalConversationId === sender.externalConversationId && channel.externalMessageId === sender.externalMessageId &&
     JSON.stringify(channel.profile) === JSON.stringify(envelope.channelProfile?.profile ?? undefined) &&

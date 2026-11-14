@@ -10,7 +10,7 @@
  */
 
 import type { AgentProviderId, AgentSessionUserMessage, AgentSessionHistoryCollaboration } from '@agentmux/core'
-import { channelActorKey, type ChannelActorProfileObservation, type ChannelConversationProfileObservation } from '@agentmux/core/connections'
+import { sameConnectionApplication, channelActorKey, type ChannelActorProfileObservation, type ChannelConversationProfileObservation } from '@agentmux/core/connections'
 import { parseAgentMuxMessagePrefix, type AgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import type { ReactNode } from 'react'
 
@@ -106,8 +106,7 @@ export function createSpeakerResolver(options?: {
       const observation = read?.observation
       const exact = observation && speaker.external && channelActorKey(observation.actor) === channelActorKey(speaker.external.actor) ? observation : undefined
       const room = read?.conversation, author = speaker.external
-      const conversation = room && author && room.application.domain === author.actor.application.domain &&
-        room.application.appId === author.actor.application.appId && room.externalConversationId === author.externalConversationId ? room : undefined
+      const conversation = room && author && sameConnectionApplication(room.application, author.actor.application) && room.externalConversationId === author.externalConversationId ? room : undefined
       return { name: exact?.profile?.name ?? externalSpeakerLabel(speaker), ...(exact ? { channelProfile: exact } : {}),
         ...(conversation ? { channelConversation: conversation } : {}), ...(read?.issue ? { channelProfileReadIssue: read.issue } : {}),
         ...(read?.conversationIssue ? { channelConversationReadIssue: read.conversationIssue } : {}) }
@@ -142,7 +141,7 @@ export function externalSpeakerLabel(speaker: ConversationSpeaker): string {
 }
 
 export function speakerOfExternalAuthor(author: Extract<AgentSessionUserMessage['author'], { kind: 'external' }>): ConversationSpeaker {
-  return { role: 'external', id: JSON.stringify([author.actor.application.domain, author.actor.application.appId, author.actor.idType, author.actor.userId]), external: author }
+  return { role: 'external', id: JSON.stringify([author.actor.application.domain, author.actor.application.appId, author.actor.idType, author.actor.userId, ...(author.actor.application.issuer === undefined ? [] : [author.actor.application.issuer])]), external: author }
 }
 
 export function speakerOfUserMessage(message: Pick<AgentSessionUserMessage, 'author'>): ConversationSpeaker {

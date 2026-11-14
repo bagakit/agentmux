@@ -1,3 +1,4 @@
+import { sameConnectionApplication } from '@agentmux/core/connections'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -84,7 +85,7 @@ function MoteIdentityCard({ reading, records, recordsIssue, onOpen, onRetry }: {
   const chat = reading.chat?.values.connection
   const privateChat = reading.chatIssue ? 'Private chat not confirmed'
     : !reading.chatRead ? 'Reading private chat…'
-    : chat ? `Private chat ${reading.chat?.values.enabled ? 'enabled' : 'paused'} · ${records.find(record => record.config.connectionId === chat.connectionId && record.config.application.appId === chat.application.appId && record.config.application.domain === chat.application.domain)?.config.label ?? chat.application.appId}`
+    : chat ? `Private chat ${reading.chat?.values.enabled ? 'enabled' : 'paused'} · ${records.find(record => record.config.connectionId === chat.connectionId && sameConnectionApplication(record.config.application, chat.application))?.config.label ?? chat.application.appId}`
     : 'Private chat not configured'
   return <article className="connector-mote-card" data-mote-identity={scope.topic.id} data-identity-state={unbound ? 'unbound' : ref ? 'bound' : 'unconfirmed'}>
     <button type="button" className="connector-mote-card__identity" aria-label={`View bot for ${scope.topic.title}`} onClick={() => onOpen(origin, false)}>

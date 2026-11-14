@@ -1,3 +1,4 @@
+import { connectionApplicationScope, sameConnectionApplication } from '@agentmux/core/connections'
 import { ApplicationAccessHost } from './application-access.js'
 import { parseConnectionDeletionParams, parseConnectionDeletionResult, type ConnectionDeleteInput, type ConnectionDeleteOperation } from '@agentmux/core/connections'
 import { ConnectionSetupHost } from './connection-setup.js'
@@ -396,7 +397,7 @@ export class ConnectionHost implements ConnectionPort {
   onChannelMetadataChanged(listener: (change: ChannelMetadataChange) => void): () => void { this.metadataListeners.add(listener); return () => { this.metadataListeners.delete(listener) } }
   private publishMetadata(change: ChannelMetadataChange): void { for (const listener of this.metadataListeners) try { listener(change) } catch { /* A display subscriber cannot gate native intake or metadata recovery. */ } }
   async observeChannelConversation(config: ConnectionConfig, externalConversationId: string): Promise<void> {
-    const identity = JSON.stringify([config.adapterId, config.application.domain, config.application.appId, externalConversationId])
+    const identity = JSON.stringify([config.adapterId, connectionApplicationScope(config.application), config.application.appId, externalConversationId])
     if (this.closed || this.conversationProfileReads.has(identity)) return
     this.conversationProfileReads.add(identity)
     try {
@@ -418,14 +419,14 @@ export class ConnectionHost implements ConnectionPort {
     const missing = (reason: ChannelProfileReason): ChannelActorProfileObservation => ({ actor, state: 'unknown', profile: null, checkedAt: Date.now(), freshness: 'unknown', reason })
     try {
       const config = this.readConfiguration(connectionId)?.config
-      if (!config || config.application.domain !== actor.application.domain || config.application.appId !== actor.application.appId) return missing('source-unconfirmed')
+      if (!config || !sameConnectionApplication(config.application, actor.application)) return missing('source-unconfirmed')
       const adapter = this.adapters.get(config.adapterId)?.channelProfiles
       return adapter ? adapter.readActor({ actor, storage: this.channelStorage(config) }) : missing('adapter-unavailable')
     } catch { return missing('storage-unconfirmed') }
   }
   /** Called after durable ACK, independently of the original input and platform response. */
   observeChannelActor(config: ConnectionConfig, actor: ConnectionActor): Promise<ChannelActorProfileObservation> {
-    const identity = JSON.stringify([config.adapterId, config.application.domain, config.application.appId, actor.idType, actor.userId])
+    const identity = JSON.stringify([config.adapterId, connectionApplicationScope(config.application), config.application.appId, actor.idType, actor.userId])
     const pending = this.channelProfileReads.get(identity)
     if (pending) return pending
     const read = async (): Promise<ChannelActorProfileObservation> => {
@@ -434,7 +435,7 @@ export class ConnectionHost implements ConnectionPort {
       const unavailable = (reason: ChannelProfileReason): ChannelActorProfileObservation => ({ ...cached, state: 'unavailable', freshness: cached.profile ? 'stale' : 'unknown', checkedAt: Date.now(), reason })
       try {
         const current = this.readConfiguration(config.connectionId)?.config
-        if (!current?.enabled || current.adapterId !== config.adapterId || current.application.domain !== actor.application.domain || current.application.appId !== actor.application.appId) return cached
+        if (!current?.enabled || current.adapterId !== config.adapterId || !sameConnectionApplication(current.application, actor.application)) return cached
         const adapter = this.adapters.get(current.adapterId)?.channelProfiles
         if (!adapter) return cached
         let credential: string | null

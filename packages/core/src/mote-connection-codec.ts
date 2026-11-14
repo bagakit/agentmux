@@ -1,3 +1,4 @@
+import { sameConnectionApplication } from './connections-contract.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import {
@@ -225,8 +226,7 @@ export function parseMoteConnectionOperation(v: unknown): MoteConnectionOperatio
       result.enrollment.preset?.description !== (snapshot.description ?? undefined) ||
       (connection &&
         (result.enrollment.connectionId !== connection.connectionId ||
-          result.enrollment.application?.domain !== connection.application.domain ||
-          result.enrollment.application.appId !== connection.application.appId)))
+          !result.enrollment.application || !sameConnectionApplication(result.enrollment.application, connection.application))))
   )
     fail()
   if (result.profile) {
@@ -235,8 +235,7 @@ export function parseMoteConnectionOperation(v: unknown): MoteConnectionOperatio
       pr.operationId !== result.profileOperationId ||
       !connection ||
       pr.connectionId !== connection.connectionId ||
-      pr.application.domain !== connection.application.domain ||
-      pr.application.appId !== connection.application.appId ||
+      !sameConnectionApplication(pr.application, connection.application) ||
       pr.desired.name !== snapshot.name ||
       pr.desired.description !== (snapshot.description ?? undefined) ||
       pr.desired.avatarSha256 !== (snapshot.avatarSha256 ?? undefined)
@@ -246,7 +245,7 @@ export function parseMoteConnectionOperation(v: unknown): MoteConnectionOperatio
   if (result.setup) {
     const setup = result.setup
     if (setup.operationId !== result.setupOperationId || !connection || setup.connectionId !== connection.connectionId ||
-      setup.application.domain !== connection.application.domain || setup.application.appId !== connection.application.appId ||
+      !sameConnectionApplication(setup.application, connection.application) ||
       setup.goal.kind !== 'profile-update' || setup.goal.desired.name !== snapshot.name ||
       setup.goal.desired.description !== (snapshot.description ?? '') || setup.goal.desired.avatarSha256 !== (snapshot.avatarSha256 ?? undefined)) fail()
   }

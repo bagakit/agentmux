@@ -1,3 +1,4 @@
+import { parseConnectionApplication } from '@agentmux/core/connections'
 import type { ConnectionConfigureInput } from '@agentmux/core/connections'
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { restoredApplicationAccess, type ApplicationAccessContinuation } from './application-member-intent'
@@ -8,6 +9,7 @@ export type ManualConnectionDraft = {
   label: string
   appId: string
   domain: string
+  issuer?: string
   enabled: boolean
 }
 /** UI request continuation only. No secret or owner receipt is retained here. */
@@ -43,8 +45,8 @@ export function restoredManualConnectionIntents(value: unknown): Record<string, 
     if (t !== null && (!record(t) || !targetId(t.hostId) || !targetId(t.runtimeId))) continue
     const target = t === null ? null : { hostId: t.hostId as string, runtimeId: t.runtimeId as string }
     if (key !== manualConnectionScope(raw.channel, target) || !record(d) || !['library','new','edit','saved'].includes(String(d.view)) ||
-      !text(d.label) || !text(d.appId) || !text(d.domain) || typeof d.enabled !== 'boolean' || d.selectedConnectionId !== undefined && !id(d.selectedConnectionId)) continue
-    const draft: ManualConnectionDraft = { view: d.view as ManualConnectionDraft['view'], label: d.label, appId: d.appId, domain: d.domain, enabled: d.enabled,
+      !text(d.label) || !text(d.appId) || !text(d.domain) || d.issuer !== undefined && (!text(d.issuer) || !d.issuer) || typeof d.enabled !== 'boolean' || d.selectedConnectionId !== undefined && !id(d.selectedConnectionId)) continue
+    const draft: ManualConnectionDraft = { view: d.view as ManualConnectionDraft['view'], label: d.label, appId: d.appId, domain: d.domain, enabled: d.enabled, ...(d.issuer === undefined ? {} : { issuer: d.issuer as string }),
       ...(d.selectedConnectionId === undefined ? {} : { selectedConnectionId: d.selectedConnectionId }) }
     let pending: ConnectionConfigureInput | undefined
     if (raw.pending !== undefined) {
@@ -52,8 +54,10 @@ export function restoredManualConnectionIntents(value: unknown): Record<string, 
       if (!record(p) || !id(p.operationId) || p.expectedRevision !== null && (!Number.isSafeInteger(p.expectedRevision) || (p.expectedRevision as number) < 1) || !record(p.connection)) continue
       const c = p.connection, a = c.application
       if (!id(c.connectionId) || !id(c.adapterId) || !record(a) || !text(a.domain) || !a.domain || !text(a.appId) || !a.appId || !text(c.label) || !c.label || typeof c.enabled !== 'boolean' || !text(c.credentialRef)) continue
+      let application
+      try { application = parseConnectionApplication(a) } catch { continue }
       pending = { operationId: p.operationId, expectedRevision: p.expectedRevision as number | null, connection: {
-        connectionId: c.connectionId, adapterId: c.adapterId, application: { domain: a.domain, appId: a.appId }, label: c.label, enabled: c.enabled, credentialRef: c.credentialRef } }
+        connectionId: c.connectionId, adapterId: c.adapterId, application, label: c.label, enabled: c.enabled, credentialRef: c.credentialRef } }
     }
     result[key] = { channel: raw.channel, target, draft, ...(pending ? { pending } : {}), ...(raw.applicationAccess ? { applicationAccess: restoredApplicationAccess(raw.applicationAccess) } : {}) }
   }

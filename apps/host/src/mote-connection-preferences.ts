@@ -1,3 +1,4 @@
+import { sameConnectionApplication } from '@agentmux/core/connections'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import { parseFileWriteResult, parseFileCreateResult, type AgentMuxRpcFilesOwner } from '@agentmux/core/files'
 import type { ConnectionEnrollmentCallContext, ConnectionPort } from '@agentmux/core/connections'
@@ -61,7 +62,7 @@ export class MoteConnectionPreferences {
         !sameMoteConnectionValues(current.values, baseline.values)) throw new Error('The original MOTE.md changed or is unconfirmed. Read its current revision before choosing another save.')
       if (input.values.connection) {
         const ref = input.values.connection, records = (await this.ports.connections()).connections.filter(record => record.config.connectionId === ref.connectionId)
-        if (records.length !== 1 || records[0]!.config.application.domain !== ref.application.domain || records[0]!.config.application.appId !== ref.application.appId)
+        if (records.length !== 1 || !sameConnectionApplication(records[0]!.config.application, ref.application))
           throw new Error('This exact robot is unavailable in the original Connection service. Keep the reference or choose another saved robot.')
       }
       if (current.document && sameMoteConnectionValues(current.values, input.values)) return result('unchanged', current, null)

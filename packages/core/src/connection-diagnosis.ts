@@ -11,7 +11,7 @@ import { connectionDiagnosisIntakeCodes, connectionDiagnosisRecordingCodes, conn
 export const groupWindowLimit = connectionDiagnosisWindowLimit
 export function groupTarget(binding: RoomBinding) {
   return { bindingId: binding.bindingId, bindingRevision: binding.revision, publicationRevision: roomPublicationReference(binding).revision, connectionId: binding.connectionId,
-    domain: binding.application.domain, appId: binding.application.appId, externalConversationId: binding.externalConversationId,
+    domain: binding.application.domain, appId: binding.application.appId, ...(binding.application.issuer === undefined ? {} : { issuer: binding.application.issuer }), externalConversationId: binding.externalConversationId,
     executionHostId: binding.executionHostId, agentSessionId: binding.agentSessionId }
 }
 type GroupTarget = ConnectionDiagnosisTarget
@@ -20,7 +20,7 @@ type Reading<T> = ConnectionDiagnosisReading<T>
 async function reading<T>(work: () => Promise<T>): Promise<Reading<T>> {
   try { return { value: await work(), issue: null } } catch { return { value: null, issue: 'read-unavailable' } }
 }
-const applicationMatches = (application: { domain: string; appId: string }, target: GroupTarget) => application.domain === target.domain && application.appId === target.appId
+const applicationMatches = (application: { domain: string; appId: string; issuer?: string }, target: GroupTarget) => application.domain === target.domain && application.appId === target.appId && application.issuer === target.issuer
 export function deliveryMatches(delivery: ConnectionDelivery, target: GroupTarget) {
   return delivery.bindingId === target.bindingId && delivery.bindingRevision === target.publicationRevision && delivery.target.connectionId === target.connectionId &&
     delivery.target.externalConversationId === target.externalConversationId && applicationMatches(delivery.target.application, target)
@@ -58,7 +58,7 @@ async function readGroup(owner: ConnectionPort, target: GroupTarget, window: Gro
     reading(() => owner.inspect({ connectionId: target.connectionId })),
     reading(() => owner.bindings!.inspect({ bindingId: target.bindingId })),
     reading(() => owner.delivery!.list({ connectionId: target.connectionId, bindingId: target.bindingId, bindingRevision: target.publicationRevision, order: 'newest', limit: groupWindowLimit, ...(window.after ? { after: window.after } : {}), ...(window.afterContent ? { afterContent: window.afterContent } : {}) })),
-    reading(() => owner.ingress!.listAudience!({ application: { domain: target.domain, appId: target.appId }, externalConversationId: target.externalConversationId, limit: groupWindowLimit, ...(window.beforeIngressId ? { beforeIngressId: window.beforeIngressId } : {}) }))
+    reading(() => owner.ingress!.listAudience!({ application: { domain: target.domain, appId: target.appId, ...(target.issuer === undefined ? {} : { issuer: target.issuer }) }, externalConversationId: target.externalConversationId, limit: groupWindowLimit, ...(window.beforeIngressId ? { beforeIngressId: window.beforeIngressId } : {}) }))
   ])
   const c = connection.value?.connection, b = binding.value?.binding
   const sameConnection = !!c && c.config.connectionId === target.connectionId && applicationMatches(c.config.application, target)

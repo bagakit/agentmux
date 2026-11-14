@@ -91,9 +91,9 @@ function activity(value: unknown): ConnectionGroupActivity {
   return { limit: connectionActivityWindowLimit, incoming, outgoing }
 }
 function group(value: unknown, request: ConnectionDiagnosisInput): ConnectionGroupDiagnosis {
-  const p = object(value, ['target', 'window', 'limit', 'adapterService', 'connection', 'binding', 'outgoing', 'incoming', 'activity']), t = object(p.target, ['bindingId', 'bindingRevision', 'publicationRevision', 'connectionId', 'domain', 'appId', 'externalConversationId', 'executionHostId', 'agentSessionId'])
+  const p = object(value, ['target', 'window', 'limit', 'adapterService', 'connection', 'binding', 'outgoing', 'incoming', 'activity']), t = object(p.target, ['bindingId', 'bindingRevision', 'publicationRevision', 'connectionId', 'domain', 'appId', 'issuer', 'externalConversationId', 'executionHostId', 'agentSessionId'])
   if ((p.activity !== undefined) !== (request.activity === true)) return fail()
-  const target = { bindingId: id(t.bindingId), bindingRevision: count(t.bindingRevision, 1), publicationRevision: count(t.publicationRevision, 1), connectionId: id(t.connectionId), domain: text(t.domain), appId: text(t.appId), externalConversationId: text(t.externalConversationId), executionHostId: id(t.executionHostId), agentSessionId: id(t.agentSessionId) }
+  const target = { bindingId: id(t.bindingId), bindingRevision: count(t.bindingRevision, 1), publicationRevision: count(t.publicationRevision, 1), connectionId: id(t.connectionId), domain: text(t.domain), appId: text(t.appId), ...(t.issuer === undefined ? {} : { issuer: text(t.issuer) }), externalConversationId: text(t.externalConversationId), executionHostId: id(t.executionHostId), agentSessionId: id(t.agentSessionId) }
   if (target.publicationRevision > target.bindingRevision) return fail()
   if (target.executionHostId !== request.executionHostId || target.agentSessionId !== request.agentSessionId || request.bindingId && target.bindingId !== request.bindingId || request.bindingRevision && target.bindingRevision !== request.bindingRevision || p.limit !== connectionDiagnosisWindowLimit) return fail()
   const window = object(p.window, ['after', 'afterContent', 'beforeIngressId'])

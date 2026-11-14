@@ -25,10 +25,11 @@ export function ConnectionBotList({ records, readings, listIssue, onManage }: {
     const presentation = navigation?.channelPresentation(record.config.application, record.config.adapterId)
     const Icon = presentation?.icon ?? BotIcon
     return <article className="connector-record" key={record.config.connectionId} data-connection={record.config.connectionId}>
-      <button type="button" className="connector-record__open" aria-label={`Manage ${record.config.label} · ${record.config.application.appId}`} onClick={() => onManage(record)}>
+      <button type="button" className="connector-record__open" aria-label={`Manage ${record.config.label} · ${record.config.application.appId}${record.config.application.issuer === undefined ? '' : ' · ' + record.config.application.issuer}`} onClick={() => onManage(record)}>
         <span className="connector-record__heading"><span className="connector-record__mark"><Icon size={22} /></span><span><strong className="connector-record__name">{record.config.label}</strong><small>{presentation?.title ?? record.config.application.domain}</small></span></span>
         {readings ? <ConnectionIdentityFacts record={record} readings={readings} compact /> : <span className="connector-record__facts">
           <span className="connector-record__app"><code>{record.config.application.appId}</code></span>
+          {record.config.application.issuer ? <span className="connector-record__app"><code>{record.config.application.issuer}</code></span> : null}
           <span data-identity-setup={record.initialSetup?.state ?? 'not-recorded'}><small>Setup</small>{connectionInitialSetupLabel(record)}</span>
           <span data-identity-sync><small>Connection</small>{connectionSummary(record)}</span>
         </span>}

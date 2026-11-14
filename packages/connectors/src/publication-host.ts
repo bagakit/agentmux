@@ -1,3 +1,4 @@
+import { sameConnectionApplication } from '@agentmux/core/connections'
 import { sourceReviewItems } from './publication-source-review.js'
 import { PublicationQueryInputObserver, type PublicationQueryInputPort } from './publication-query-input.js'
 import { publicationInputImages } from './publication-input-images.js'
@@ -176,7 +177,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
   refreshAccess(adapterId: string, application: RoomBinding['application'], bindingId?: string): void {
     if (this.closed) return
     for (const lane of this.lanes.values()) {
-      if (bindingId && lane.binding.bindingId !== bindingId || lane.binding.application.domain !== application.domain || lane.binding.application.appId !== application.appId) continue
+      if (bindingId && lane.binding.bindingId !== bindingId || !sameConnectionApplication(lane.binding.application, application)) continue
       const config = this.options.connections.readConfiguration(lane.binding.connectionId)?.config
       if (config?.adapterId === adapterId) this.wake(lane)
     }
@@ -195,8 +196,8 @@ export class PublicationHost implements ConnectionDeliveryPort {
     const binding = this.options.bindings.readExact(notice.bindingId, notice.bindingRevision)
     const connection = this.options.connections.readConfiguration(notice.target.connectionId)
     return !!binding && connection?.config.enabled === true && binding.connectionId === notice.target.connectionId &&
-      binding.application.domain === notice.target.application.domain && binding.application.appId === notice.target.application.appId &&
-      connection.config.application.domain === binding.application.domain && connection.config.application.appId === binding.application.appId &&
+      sameConnectionApplication(binding.application, notice.target.application) &&
+      sameConnectionApplication(connection.config.application, binding.application) &&
       binding.externalConversationId === notice.target.externalConversationId && binding.executionHostId === notice.reference.hostId && binding.agentSessionId === notice.reference.agentSessionId
   }
   private refreshNotices(): void {

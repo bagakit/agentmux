@@ -1,3 +1,4 @@
+import { sameConnectionApplication } from '@agentmux/core/connections'
 import { AgentMuxError } from '@agentmux/core'
 import { parseChannelMetadataParams, parseChannelMetadataResult, type ChannelMetadataPort, type ChannelMetadataInput, type ChannelMetadataGetInput, type ChannelMetadataListInput, type ChannelMetadataSubject, type ChannelMetadataChange } from '@agentmux/core/connections'
 import type { ConnectionHost, SecretPort } from './connection-host.js'
@@ -8,7 +9,7 @@ export function createChannelMetadata(connections: Pick<ConnectionHost, 'readCon
     const current = connections.readConfiguration(input.connectionId)
     if (!current || signal.aborted) throw new AgentMuxError('The original Channel metadata owner is unavailable. Existing input remains available.', 'CHANNEL_METADATA_UNAVAILABLE')
     if (input.expectedConnectionRevision !== undefined && current.revision !== input.expectedConnectionRevision) throw new AgentMuxError('Read the current original Connection before changing its metadata cache.', 'CONNECTION_REVISION_CONFLICT')
-    if (input.subject?.kind === 'actor' && (input.subject.actor.application.domain !== current.config.application.domain || input.subject.actor.application.appId !== current.config.application.appId)) throw new AgentMuxError('This actor belongs to another original application.', 'INVALID_CHANNEL_METADATA')
+    if (input.subject?.kind === 'actor' && (!sameConnectionApplication(input.subject.actor.application, current.config.application))) throw new AgentMuxError('This actor belongs to another original application.', 'INVALID_CHANNEL_METADATA')
     const adapter = connections.registeredAdapter(current.config.adapterId)?.channelProfiles
     if (!adapter?.getMetadata) throw new AgentMuxError('The original adapter does not expose typed metadata management.', 'CHANNEL_METADATA_UNAVAILABLE')
     return { current, adapter, storage: connections.channelStorage(current.config) }

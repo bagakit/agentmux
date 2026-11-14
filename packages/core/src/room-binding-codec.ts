@@ -12,9 +12,10 @@ export const isRoomBindingMethod = (value: unknown): value is RoomBindingMethod 
 const fail = (): never => { throw new AgentMuxError('Binding data does not describe the original authorized objects.', 'INVALID_ROOM_BINDING_DATA') }
 const object = (value: unknown, fields: string[]) => rpcRecord(value, fields, 'INVALID_ROOM_BINDING_DATA')
 function text(value: unknown): string { if (typeof value !== 'string' || !value || value.length > 16_384 || /[\u0000-\u001f\u007f]/u.test(value)) fail(); return value as string }
+function nativeIdentity(value: unknown): string { const result = text(value); if (/[\u0080-\u009f]/u.test(result)) fail(); return result }
 function id(value: unknown): string { const result = text(value); if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(result)) fail(); return result }
 function revision(value: unknown): number { if (!Number.isSafeInteger(value) || Number(value) < 1) fail(); return value as number }
-export function parseConnectionApplication(value: unknown): ConnectionApplication { const p = object(value, ['domain', 'appId']), domain = text(p.domain); if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(domain)) fail(); return { domain, appId: id(p.appId) } }
+export function parseConnectionApplication(value: unknown): ConnectionApplication { const p = object(value, ['domain', 'appId', 'issuer']), domain = text(p.domain); if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(domain)) fail(); const issuer = p.issuer === undefined ? undefined : nativeIdentity(p.issuer); if (issuer !== undefined && issuer.length > 4096) fail(); return { domain, appId: nativeIdentity(p.appId), ...(issuer === undefined ? {} : { issuer }) } }
 function source(value: unknown) { const p = object(value, ['providerId', 'nativeSessionId']); return { providerId: text(p.providerId), nativeSessionId: text(p.nativeSessionId) } }
 function inputTarget(value: unknown): import('./room-binding-contract.js').RoomBindingInputTarget {
   const target = validateAgentDirectedPromptTarget(value)

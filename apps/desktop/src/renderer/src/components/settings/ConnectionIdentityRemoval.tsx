@@ -1,6 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useRef, useState } from 'react'
-import type { ConnectionDeleteOperation, ConnectionRecord } from '@agentmux/core/connections'
+import { sameConnectionApplication, type ConnectionDeleteOperation, type ConnectionRecord } from '@agentmux/core/connections'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../../lib/api'
 import type { ConnectionHostingTarget } from '../../../../shared/contracts'
@@ -27,7 +27,7 @@ export function ConnectionIdentityRemoval({ record, readings, active, hostingTar
     if (current?.operationId === operationId && JSON.stringify(current.hostingTarget) === JSON.stringify(owner)) setBotTaskSelection(scope, null)
   }
   const accept = (operation: ConnectionDeleteOperation, scope: IdentityRemovalTaskScope, owner: ConnectionHostingTarget) => {
-    if (operation.connectionId !== record.config.connectionId || operation.application.domain !== record.config.application.domain || operation.application.appId !== record.config.application.appId || operation.deletedRevision !== scope.expectedRevision)
+    if (operation.connectionId !== record.config.connectionId || !sameConnectionApplication(operation.application, record.config.application) || operation.deletedRevision !== scope.expectedRevision)
       throw Error('The original removal receipt belongs to another identity. The original request is kept.')
     clearOriginal(scope, operation.operationId, owner)
     if (alive.current) { setOpen(false); onDeleted(operation) }
@@ -46,11 +46,19 @@ export function ConnectionIdentityRemoval({ record, readings, active, hostingTar
     if (!originalHost || flight.current) return
     const request = retained ?? { operationId: mintObjectId(), scope: { kind: 'identity-removal' as const,
       connectionId: record.config.connectionId, adapterId: record.config.adapterId, domain: record.config.application.domain,
-      appId: record.config.application.appId, expectedRevision: record.revision, hostingTarget: originalHost } }
+      appId: record.config.application.appId, ...(record.config.application.issuer === undefined ? {} : { issuer: record.config.application.issuer }), expectedRevision: record.revision, hostingTarget: originalHost } }
     flight.current = true; setBusy(true); setIssue(''); setNotRecorded(false)
     try {
-      const retained = await retainBotTaskSelection(request.scope, { operationId: request.operationId, hostingTarget: originalHost })
-      if (!retained.clientStateWritten) throw new Error('The original removal request could not be saved. No removal was sent.')
+      // A retained locator may outlive this connection's application. Never send its old
+      // operation to a replacement identity merely because the local ID is reused.
+      if (retained) {
+        const current = (await api.connections.call('connection.inspect', { connectionId: request.scope.connectionId }, originalHost)).connection
+        const originalApplication = { domain: request.scope.domain, appId: request.scope.appId, ...(request.scope.issuer === undefined ? {} : { issuer: request.scope.issuer }) }
+        if (!current || current.revision !== request.scope.expectedRevision || !sameConnectionApplication(current.config.application, originalApplication))
+          throw new Error('The original removal target is not confirmed. The original request is kept.')
+      }
+      const savedLocator = await retainBotTaskSelection(request.scope, { operationId: request.operationId, hostingTarget: originalHost })
+      if (!savedLocator.clientStateWritten) throw new Error('The original removal request could not be saved. No removal was sent.')
       accept(await api.connections.call('connection.delete', { operationId: request.operationId, connectionId: request.scope.connectionId, expectedRevision: request.scope.expectedRevision }, originalHost), request.scope, originalHost)
     } catch (error) {
       if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'CONNECTION_REVISION_CONFLICT') {
@@ -87,7 +95,7 @@ export function RetainedIdentityRemovals({ readings, active, hostingTarget, onDe
   if (!requests.length) return null
   return <section className="connector-identity-removals" aria-label="Original identity removals"><h3>Original identity removals</h3>
     {requests.map(({ scope, operationId, hostingTarget }) => <div key={operationId} data-identity-removal-request={operationId}>
-      <code>{scope.appId}</code><ConnectionIdentityRemoval hostingTarget={hostingTarget} record={{ config: { connectionId: scope.connectionId, adapterId: scope.adapterId, application: { domain: scope.domain, appId: scope.appId }, label: scope.appId }, revision: scope.expectedRevision }} readings={readings} active={active} onDeleted={onDeleted} />
+      <code>{scope.appId}</code><ConnectionIdentityRemoval hostingTarget={hostingTarget} record={{ config: { connectionId: scope.connectionId, adapterId: scope.adapterId, application: { domain: scope.domain, appId: scope.appId, ...(scope.issuer === undefined ? {} : { issuer: scope.issuer }) }, label: scope.appId }, revision: scope.expectedRevision }} readings={readings} active={active} onDeleted={onDeleted} />
     </div>)}
   </section>
 }

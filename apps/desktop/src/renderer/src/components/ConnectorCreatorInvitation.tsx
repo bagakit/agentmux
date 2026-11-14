@@ -1,6 +1,6 @@
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { useEffect, useState } from 'react'
-import type { ConnectionProfileObservation, ConnectionRecord } from '@agentmux/core/connections'
+import { sameConnectionApplication, type ConnectionProfileObservation, type ConnectionRecord } from '@agentmux/core/connections'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { api } from '../lib/api'
 
@@ -15,7 +15,7 @@ export function useConnectorCreatorInvitation(connection: ConnectionRecord | und
     if (!key || !connection) return
     let current = true
     void api.connections.call('connection.profile.get', { connectionId: connection.config.connectionId, expectedConnectionRevision: connection.revision }, hostingTarget ?? undefined)
-      .then(observation => { if (current) setRead({ key, observation: observation.connectionId === connection.config.connectionId && observation.connectionRevision === connection.revision && observation.application.domain === connection.config.application.domain && observation.application.appId === connection.config.application.appId ? observation : null }) })
+      .then(observation => { if (current) setRead({ key, observation: observation.connectionId === connection.config.connectionId && observation.connectionRevision === connection.revision && sameConnectionApplication(observation.application, connection.config.application) ? observation : null }) })
       .catch(() => { if (current) setRead({ key, observation: null }) })
     return () => { current = false }
   }, [key])

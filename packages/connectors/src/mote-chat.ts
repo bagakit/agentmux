@@ -1,3 +1,4 @@
+import { connectionApplicationScope } from '@agentmux/core/connections'
 import { effectiveRoomGrant } from './effective-grant.js'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { createHash } from 'node:crypto'
@@ -45,8 +46,8 @@ function fail(code: string, message: string): never { throw new AgentMuxError(me
 function dedicatedCreation(prepared: MoteChatPreparedLaunch): void {
   if ('forkSource' in prepared.input || 'nativeResumeSource' in prepared.input) fail('MOTE_CHAT_CREATE_MISMATCH', 'Private chat requires its original dedicated creation. The existing imported or copied conversation is retained without expanding its audience.')
 }
-const personKey = (spaceId: string, actor: ConnectionActor) => encode([spaceId, actor.application.domain, actor.application.appId, actor.idType, actor.userId])
-const laneKey = (spaceId: string, incoming: Pick<MoteChatIncoming, 'application' | 'externalConversationId' | 'actor'>) => encode([spaceId, incoming.application.domain, incoming.application.appId, incoming.externalConversationId, incoming.actor.idType, incoming.actor.userId])
+const personKey = (spaceId: string, actor: ConnectionActor) => encode([spaceId, connectionApplicationScope(actor.application), actor.application.appId, actor.idType, actor.userId])
+const laneKey = (spaceId: string, incoming: Pick<MoteChatIncoming, 'application' | 'externalConversationId' | 'actor'>) => encode([spaceId, connectionApplicationScope(incoming.application), incoming.application.appId, incoming.externalConversationId, incoming.actor.idType, incoming.actor.userId])
 const management = (context?: MoteChatCallContext) => {
   if (context?.actor.kind === 'agent') fail('CONTROL_PERMISSION_DENIED', 'Mote chat configuration and audience management require the original human or device. Chat history remains available to its own Agent.')
 }

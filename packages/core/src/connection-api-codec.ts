@@ -1,3 +1,4 @@
+import { parseConnectionApplication } from './room-binding-codec.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
@@ -84,10 +85,9 @@ function description(value: unknown): ConnectionApiDescription {
 }
 export function parseConnectionApiIdentity(value: unknown): ConnectionApiIdentity {
   const p = object(value, ['bindingId', 'bindingRevision', 'connectionId', 'connectionRevision', 'adapterId', 'application', 'label', 'executionHostId', 'agentSessionId', 'executionRuntimeId', 'externalConversationId', 'api'])
-  const application = object(p.application, ['domain', 'appId']), domain = text(application.domain, 253)
-  if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(domain)) fail()
+  const application = parseConnectionApplication(p.application)
   return { ...parseConnectionApiSelector({ bindingId: p.bindingId, bindingRevision: p.bindingRevision, connectionId: p.connectionId, connectionRevision: p.connectionRevision }),
-    adapterId: id(p.adapterId), application: { domain, appId: id(application.appId) }, label: text(p.label, 4096),
+    adapterId: id(p.adapterId), application, label: text(p.label, 4096),
     executionHostId: id(p.executionHostId), agentSessionId: id(p.agentSessionId), ...(p.executionRuntimeId === undefined ? {} : { executionRuntimeId: id(p.executionRuntimeId) }),
     externalConversationId: text(p.externalConversationId, 4096), api: description(p.api) }
 }

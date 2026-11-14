@@ -77,7 +77,7 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
   close(): void { this.closed = true; this.clientRetention = () => false; this.clients.clear() }
 
   private application(config: FeishuClientScope): void {
-    if (!['open.feishu.cn', 'open.larksuite.com'].includes(config.application.domain)) feishuFailure('FEISHU_APPLICATION_INVALID')
+    if (config.application.issuer !== undefined || !['open.feishu.cn', 'open.larksuite.com'].includes(config.application.domain)) feishuFailure('FEISHU_APPLICATION_INVALID')
     feishuIdentity(config.application.appId)
   }
   private configuration(config: ConnectionConfig): void {

@@ -1,3 +1,4 @@
+import { sameConnectionApplication } from './connections-contract.js'
 import { AgentMuxError } from './errors.js'
 import { parseAgentExternalMessageAuthor, type AgentExternalMessageAuthor } from './external-author.js'
 import type { AgentMuxMessageTarget } from './control.js'
@@ -104,8 +105,7 @@ export function validateAgentMuxMessageEnvelope(value: unknown): AgentMuxMessage
   const channelProfile = source.channelProfile === undefined ? undefined : parseChannelActorProfileObservation(source.channelProfile)
   if (channelProfile && (sender.kind !== 'external' || channelActorKey(sender.actor) !== channelActorKey(channelProfile.actor))) throw new AgentMuxError('Channel display metadata names another actor.', 'MESSAGE_ENVELOPE_INVALID')
   const channelQuote = source.channelQuote === undefined ? undefined : parseChannelTranscriptQuote(source.channelQuote)
-  if (channelQuote && (sender.kind !== 'external' || channelQuote.application.domain !== sender.actor.application.domain ||
-    channelQuote.application.appId !== sender.actor.application.appId || channelQuote.externalConversationId !== sender.externalConversationId ||
+  if (channelQuote && (sender.kind !== 'external' || !sameConnectionApplication(channelQuote.application, sender.actor.application) || channelQuote.externalConversationId !== sender.externalConversationId ||
     channelQuote.range.throughMessageId !== sender.externalMessageId)) throw new AgentMuxError('Channel quote belongs to another original request.', 'MESSAGE_ENVELOPE_INVALID')
   const target = recipient(source.recipient)
   return Object.freeze({

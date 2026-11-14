@@ -1,6 +1,6 @@
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { useEffect, useMemo, useState } from 'react'
-import { channelMetadataSubjectKey, type ChannelMetadataInput, type ChannelMetadataEntry, type ChannelMetadataResult, type ChannelMetadataSubject, type ConnectionApplication, type RoomBinding } from '@agentmux/core/connections'
+import { sameConnectionApplication, channelMetadataSubjectKey, type ChannelMetadataInput, type ChannelMetadataEntry, type ChannelMetadataResult, type ChannelMetadataSubject, type ConnectionApplication, type RoomBinding } from '@agentmux/core/connections'
 import { api } from './api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 
@@ -10,7 +10,7 @@ export type ConnectorEntityProfileRead = { observation?: ChannelMetadataEntry['o
 export type ConnectorProfileGroup = { connection: MetadataConnection; subjects: readonly ChannelMetadataSubject[]; hostingTarget?: ConnectionHostingTarget | null | undefined }
 const hostingKey = (target: ConnectionHostingTarget | null | undefined) => JSON.stringify(target === null ? null : target ? [target.hostId, target.runtimeId] : 'local')
 export const connectorProfileGroupKey = ({ connection, hostingTarget }: ConnectorProfileGroup) =>
-  JSON.stringify([hostingKey(hostingTarget), connection.connectionId, connection.application.domain, connection.application.appId])
+  JSON.stringify([hostingKey(hostingTarget), connection.connectionId, connection.application.domain, connection.application.appId, connection.application.issuer ?? null])
 
 // Only outstanding requests are shared. Completed observations remain in the Channel owner.
 const refreshes = new Map<string, Promise<ChannelMetadataResult>>()
@@ -47,7 +47,7 @@ export function useConnectorProfileGroups(groups: readonly ConnectorProfileGroup
       requests.set(key, request); pendingReads.set(key, request)
       const current = () => live && requests.get(key) === request
       const matches = (result: ChannelMetadataResult) => result.connectionId === connection.connectionId &&
-        result.application.domain === connection.application.domain && result.application.appId === connection.application.appId &&
+        sameConnectionApplication(result.application, connection.application) &&
         channelMetadataSubjectKey(result.entry.subject) === channelMetadataSubjectKey(subject)
       const finish = (observation?: ChannelMetadataEntry['observation'], loading = false, unconfirmed = !observation, error?: string) => {
         if (!current()) return
@@ -95,8 +95,7 @@ export function useConnectorProfileGroups(groups: readonly ConnectorProfileGroup
           if (!live) return
           for (const key of keys) {
             const { group: { connection }, subject } = selected.get(key)!
-            if (change.connectionId === connection.connectionId && change.application.domain === connection.application.domain &&
-              change.application.appId === connection.application.appId && channelMetadataSubjectKey(change.subject) === channelMetadataSubjectKey(subject)) void load(key, false)
+            if (change.connectionId === connection.connectionId && sameConnectionApplication(change.application, connection.application) && channelMetadataSubjectKey(change.subject) === channelMetadataSubjectKey(subject)) void load(key, false)
           }
         }, state => {
           if (!live) return

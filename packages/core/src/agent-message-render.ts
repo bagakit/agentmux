@@ -1,3 +1,4 @@
+import { sameConnectionApplication } from './connections-contract.js'
 import { DOMParser, onWarningStopParsing, type Element } from '@xmldom/xmldom'
 import type { AgentMuxMessageEnvelope } from './agent-message-envelope.js'
 import { channelTranscriptQuoteJson, parseChannelTranscriptQuote, type ChannelTranscriptQuote } from './channel-quote.js'
@@ -71,7 +72,7 @@ export type AgentMuxChannelDeclaration = {
 }
 
 function channelHeader(channel: Omit<AgentMuxChannelDeclaration, 'raw'>): string {
-  const fields = [ ['domain', channel.actor.application.domain], ['app-id', channel.actor.application.appId],
+  const fields = [ ['domain', channel.actor.application.domain], ['app-id', channel.actor.application.appId], ...(channel.actor.application.issuer === undefined ? [] : [['issuer', channel.actor.application.issuer]]),
     ['id-type', channel.actor.idType], ['user-id', channel.actor.userId], ['conversation-id', channel.externalConversationId], ['message-id', channel.externalMessageId],
     ...(channel.profile?.name === undefined ? [] : [['name', channel.profile.name]]),
     ...(channel.profile?.avatarUrl === undefined ? [] : [['avatar-url', channel.profile.avatarUrl]]),
@@ -86,8 +87,8 @@ function parseChannel(text: string): AgentMuxMessagePrefix | null {
   try {
     const document = new DOMParser({ onError: onWarningStopParsing }).parseFromString(`<channel ${header[1]}/>`, 'text/xml'), root = document.documentElement
     if (!root || root.tagName !== 'channel' || root.childNodes.length || Array.from(document.childNodes).some(node => node !== root) ||
-      !attributes(root, ['domain', 'app-id', 'id-type', 'user-id', 'conversation-id', 'message-id'], ['name', 'avatar-url', 'observed-at'])) return null
-    const actor = parseConnectionActor({ application: { domain: root.getAttribute('domain'), appId: root.getAttribute('app-id') }, idType: root.getAttribute('id-type'), userId: root.getAttribute('user-id') })
+      !attributes(root, ['domain', 'app-id', 'id-type', 'user-id', 'conversation-id', 'message-id'], ['issuer', 'name', 'avatar-url', 'observed-at'])) return null
+    const actor = parseConnectionActor({ application: { domain: root.getAttribute('domain'), appId: root.getAttribute('app-id'), ...(root.hasAttribute('issuer') ? { issuer: root.getAttribute('issuer') } : {}) }, idType: root.getAttribute('id-type'), userId: root.getAttribute('user-id') })
     const externalConversationId = root.getAttribute('conversation-id')!, externalMessageId = root.getAttribute('message-id')!
     if ([externalConversationId, externalMessageId].some(value => /[\u0000-\u001f\u007f]/u.test(value))) return null
     let profile: ChannelActorProfile | undefined
@@ -329,7 +330,7 @@ export function channelQuoteWireMatchesEnvelope(wire: string, envelope: Pick<Age
   const reading = parseAgentMuxMessagePrefix(wire), channel = reading?.declaredChannel
   return envelope.sender.kind === 'external' && !!envelope.channelQuote && !!reading?.declaredChannelQuote && !!channel && reading.kind === 'content' &&
     reading.body === envelope.body && channelTranscriptQuoteJson(reading.declaredChannelQuote.quote) === channelTranscriptQuoteJson(envelope.channelQuote) &&
-    channel.actor.application.domain === envelope.sender.actor.application.domain && channel.actor.application.appId === envelope.sender.actor.application.appId &&
+    sameConnectionApplication(channel.actor.application, envelope.sender.actor.application) &&
     channel.actor.idType === envelope.sender.actor.idType && channel.actor.userId === envelope.sender.actor.userId &&
     channel.externalConversationId === envelope.sender.externalConversationId && channel.externalMessageId === envelope.sender.externalMessageId &&
     JSON.stringify(channel.profile) === JSON.stringify(envelope.channelProfile?.profile ?? undefined)
@@ -342,7 +343,7 @@ function parseQuotedChannel(text: string): AgentMuxMessagePrefix | null {
     const quote = parseChannelTranscriptQuote(JSON.parse(match[1]!))
     if (renderChannelTranscriptQuote(quote) + '\n' !== match[0]) return null
     const current = parseChannel(text.slice(match[0].length)), channel = current?.declaredChannel
-    if (!current || !channel || quote.application.domain !== channel.actor.application.domain || quote.application.appId !== channel.actor.application.appId ||
+    if (!current || !channel || !sameConnectionApplication(quote.application, channel.actor.application) ||
       quote.externalConversationId !== channel.externalConversationId || quote.range.throughMessageId !== channel.externalMessageId) return null
     return { ...current, declaredChannelQuote: { quote, raw: match[0].slice(0, -1) } }
   } catch { return null }

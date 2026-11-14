@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
-import { channelMetadataSubjectKey, type ChannelMetadataSubject, type ConnectionActor, type ConnectionRecord, type RoomGetResult, type RoomListResult, type RoomMembersResult, type RoomSummary } from '@agentmux/core/connections'
+import { sameConnectionApplication, channelMetadataSubjectKey, type ChannelMetadataSubject, type ConnectionActor, type ConnectionRecord, type RoomGetResult, type RoomListResult, type RoomMembersResult, type RoomSummary } from '@agentmux/core/connections'
 import { api } from '../lib/api'
 import { SelectionField } from './SelectionField'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -85,7 +85,7 @@ export function useConnectorRoomFacts(connection: Connection | undefined, extern
     const represented = (people: RoomMembersResult | null | undefined) => {
       const subjects = new Map<string, ChannelMetadataSubject>()
       for (const actor of [...visibleActors, ...(people?.members ?? []).map(member => ({ application: connection.config.application, idType: member.idType, userId: member.userId }))]) {
-        if (actor.application.domain !== connection.config.application.domain || actor.application.appId !== connection.config.application.appId) continue
+        if (!sameConnectionApplication(actor.application, connection.config.application)) continue
         const subject: ChannelMetadataSubject = { kind: 'actor', actor }
         subjects.set(channelMetadataSubjectKey(subject), subject)
       }
@@ -121,7 +121,7 @@ export function useConnectorRoomFacts(connection: Connection | undefined, extern
   const facts = read?.identity === identity ? read : { room: null, people: null, issue: '' }
   const subjects: ChannelMetadataSubject[] = connection && externalConversationId ? [
     { kind: 'conversation', externalConversationId },
-    ...(peopleVisible ? visibleActors : []).filter(actor => actor.application.domain === connection.config.application.domain && actor.application.appId === connection.config.application.appId).map(actor => ({ kind: 'actor' as const, actor })),
+    ...(peopleVisible ? visibleActors : []).filter(actor => sameConnectionApplication(actor.application, connection.config.application)).map(actor => ({ kind: 'actor' as const, actor })),
     ...(peopleVisible ? facts.people?.members ?? [] : []).map(member => ({ kind: 'actor' as const, actor: { application: connection.config.application, idType: member.idType, userId: member.userId } }))
   ] : []
   const profiles = useConnectorEntityProfiles(connection?.config ?? null, subjects, hostingTarget)

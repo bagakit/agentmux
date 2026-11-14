@@ -1,4 +1,4 @@
-import { parseConnectionRequestTrace, type ConnectionEnrollmentDiagnostic, type ConnectionEnrollmentView, type ConnectionRequestTraceEntry, type ConnectionSetupView } from '@agentmux/core/connections'
+import { sameConnectionApplication, parseConnectionRequestTrace, type ConnectionApplication, type ConnectionEnrollmentDiagnostic, type ConnectionEnrollmentView, type ConnectionRequestTraceEntry, type ConnectionSetupView } from '@agentmux/core/connections'
 import type { MoteConnectionOperation } from '@agentmux/core/mote-connections'
 import { sameMotePreferencesTarget, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import type { DesktopLoadedIdentity } from '../../../shared/client-observation'
@@ -33,7 +33,7 @@ export function setupObservation(source: { kind: string; operationId: string } |
 function enrollmentFacts(view: ConnectionEnrollmentView): Facts {
   const o = view.operation!
   return { revision: o.revision, authorization: o.authorization, credential: o.credential, configuration: o.configuration,
-    ...(o.application ? { application: { domain: o.application.domain, appId: o.application.appId } } : {}),
+    ...(o.application ? { application: { ...o.application } } : {}),
     ...(o.authentication ? { authentication: { attemptId: o.authentication.attemptId, stage: o.authentication.stage } } : {}),
     ...(o.creation ? { creation: { upload: o.creation.upload, create: o.creation.create } } : {}), reason: o.reason ?? null,
     diagnostic: diagnostic(o.diagnostic) ?? 'not-recorded', actionKinds: view.actions.map(a => a.kind),
@@ -42,7 +42,7 @@ function enrollmentFacts(view: ConnectionEnrollmentView): Facts {
 }
 function setupFacts(view: ConnectionSetupView): Facts {
   const o = view.operation!, a = o.authentication, initial = view.initialSetup
-  return { revision: o.revision, application: { domain: o.application.domain, appId: o.application.appId }, request: o.request.state, secureStorage: o.secureStorage,
+  return { revision: o.revision, application: { ...o.application }, request: o.request.state, secureStorage: o.secureStorage,
     reason: view.reason ?? o.reason ?? null,
     ...(a ? { authentication: { attemptId: a.attemptId, stepId: a.stepId, stage: a.stage, request: a.request, secureStorage: a.secureStorage } } : {}),
     authenticationActionKinds: view.continuation?.actions.map(a => a.kind) ?? [],
@@ -79,13 +79,13 @@ export async function collectConnectionDiagnosis(target: ConnectionDiagnosisTarg
       traces.push({ kind, operationId, status: 'complete', entries })
     } catch { report.complete = false; traces.push({ kind, operationId, status: 'unavailable', entries: [] }) }
   }
-  async function setup(operationId: string, parent?: { enrollmentId?: string; connectionId?: string; appId?: string; domain?: string }) {
+  async function setup(operationId: string, parent?: { enrollmentId?: string; connectionId?: string; application?: ConnectionApplication }) {
     if (!options.current() || visited.has('setup:' + operationId)) return
     visited.add('setup:' + operationId)
     try {
       const v = await api.connections.call('connection.setup.inspect', { operationId }, originalHost()), o = v.operation
       if (!o) { observe({ kind: 'setup', operationId, status: 'not-recorded' }); return }
-      if (o.operationId !== operationId || parent?.enrollmentId && (o.source?.kind !== 'enrollment' || o.source.operationId !== parent.enrollmentId) || parent?.connectionId && o.connectionId !== parent.connectionId || parent?.appId && o.application.appId !== parent.appId || parent?.domain && o.application.domain !== parent.domain) { observe({ kind: 'setup', operationId, status: 'conflicting-target' }); return }
+      if (o.operationId !== operationId || parent?.enrollmentId && (o.source?.kind !== 'enrollment' || o.source.operationId !== parent.enrollmentId) || parent?.connectionId && o.connectionId !== parent.connectionId || parent?.application && !sameConnectionApplication(o.application, parent.application)) { observe({ kind: 'setup', operationId, status: 'conflicting-target' }); return }
       observe({ kind: 'setup', operationId, status: 'recorded', facts: displayedSetup?.operationId === operationId ? displayedSetup.facts : setupFacts(v) })
     } catch { observe({ kind: 'setup', operationId, status: 'unavailable' }) }
     await trace('setup', operationId)
@@ -93,16 +93,16 @@ export async function collectConnectionDiagnosis(target: ConnectionDiagnosisTarg
   async function enrollment(operationId: string, parent?: MoteConnectionOperation) {
     if (!options.current() || visited.has('enrollment:' + operationId)) return
     visited.add('enrollment:' + operationId)
-    let setupId: string | undefined, connectionId: string | undefined, appId: string | undefined, domain: string | undefined
+    let setupId: string | undefined, connectionId: string | undefined, application: ConnectionApplication | undefined
     try {
       const v = await api.connections.call('connection.enrollment.inspect', { operationId }, originalHost()), o = v.operation
       if (!o) { observe({ kind: 'enrollment', operationId, status: 'not-recorded' }); return }
-      if (o.operationId !== operationId || parent?.enrollmentOperationId !== undefined && parent.enrollmentOperationId !== operationId || parent?.connection && (o.connectionId !== parent.connection.connectionId || o.application && (o.application.appId !== parent.connection.application.appId || o.application.domain !== parent.connection.application.domain))) { observe({ kind: 'enrollment', operationId, status: 'conflicting-target' }); return }
+      if (o.operationId !== operationId || parent?.enrollmentOperationId !== undefined && parent.enrollmentOperationId !== operationId || parent?.connection && (o.connectionId !== parent.connection.connectionId || o.application && !sameConnectionApplication(o.application, parent.connection.application))) { observe({ kind: 'enrollment', operationId, status: 'conflicting-target' }); return }
       observe({ kind: 'enrollment', operationId, status: 'recorded', facts: displayedEnrollment?.operationId === operationId ? displayedEnrollment.facts : enrollmentFacts(v) })
-      setupId = o.initialSetup?.operationId; connectionId = o.connectionId; appId = o.application?.appId; domain = o.application?.domain
+      setupId = o.initialSetup?.operationId; connectionId = o.connectionId; application = o.application ?? undefined
     } catch { observe({ kind: 'enrollment', operationId, status: 'unavailable' }); setupId = parent?.enrollment?.initialSetup?.operationId }
     await trace('enrollment', operationId)
-    if (setupId) await setup(setupId, { enrollmentId: operationId, ...(connectionId ? { connectionId } : {}), ...(appId ? { appId } : {}), ...(domain ? { domain } : {}) })
+    if (setupId) await setup(setupId, { enrollmentId: operationId, ...(connectionId ? { connectionId } : {}), ...(application ? { application } : {}) })
   }
   if (target.kind === 'mote') {
     try {
@@ -110,9 +110,9 @@ export async function collectConnectionDiagnosis(target: ConnectionDiagnosisTarg
       if (!p) observe({ kind: 'mote', operationId: target.operationId, status: 'not-recorded', facts: { ...(target.action ? { action: target.action } : {}), clientPhase: target.phase ?? 'unknown', cause: 'not-recorded' } })
       else if (p.operationId !== target.operationId || !target.sourceTarget || !sameMotePreferencesTarget(p.source.target, target.sourceTarget)) observe({ kind: 'mote', operationId: target.operationId, status: 'conflicting-target' })
       else {
-        observe({ kind: 'mote', operationId: p.operationId, status: 'recorded', facts: { action: p.action, clientPhase: target.phase ?? 'unknown', issue: p.issue, defaultLink: p.defaultLink.state, enrollmentOperationId: p.enrollmentOperationId, setupOperationId: p.setupOperationId ?? null, ...(p.connection ? { application: { domain: p.connection.application.domain, appId: p.connection.application.appId } } : {}) } })
+        observe({ kind: 'mote', operationId: p.operationId, status: 'recorded', facts: { action: p.action, clientPhase: target.phase ?? 'unknown', issue: p.issue, defaultLink: p.defaultLink.state, enrollmentOperationId: p.enrollmentOperationId, setupOperationId: p.setupOperationId ?? null, ...(p.connection ? { application: { ...p.connection.application } } : {}) } })
         if (p.enrollmentOperationId) await enrollment(p.enrollmentOperationId, p)
-        if (p.setupOperationId) await setup(p.setupOperationId, p.connection ? { connectionId: p.connection.connectionId, appId: p.connection.application.appId, domain: p.connection.application.domain } : undefined)
+        if (p.setupOperationId) await setup(p.setupOperationId, p.connection ? { connectionId: p.connection.connectionId, application: p.connection.application } : undefined)
       }
     } catch { observe({ kind: 'mote', operationId: target.operationId, status: 'unavailable' }) }
   } else if (target.kind === 'enrollment') await enrollment(target.operationId)

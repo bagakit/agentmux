@@ -1,3 +1,5 @@
+import { sameConnectionApplication } from './connections-contract.js'
+import { parseConnectionApplication } from './room-binding-codec.js'
 import { parseConnectionSetupInitialPublication, parseConnectionSetupInitialProgress } from './connection-setup-codec.js'
 import { parseConnectionRequestTrace, parseConnectionRequestTraceSelector } from './connection-request-trace.js'
 import { sha256 } from '@noble/hashes/sha2.js'
@@ -241,8 +243,7 @@ export function parseConnectionEnrollmentOperation(value: unknown): ConnectionEn
     'reason',
     'diagnostic'
   ])
-  const app = p.application === null ? null : object(p.application, ['domain', 'appId']),
-    application = app ? { domain: domain(app.domain), appId: id(app.appId) } : null
+  const application = p.application === null ? null : parseConnectionApplication(p.application)
   const preset =
     p.preset === undefined
       ? undefined
@@ -365,8 +366,7 @@ export function parseConnectionEnrollmentOperation(value: unknown): ConnectionEn
       c.config.connectionId !== result.connectionId ||
       c.config.adapterId !== result.adapterId ||
       c.config.label !== result.label ||
-      c.config.application.domain !== application.domain ||
-      c.config.application.appId !== application.appId
+      !sameConnectionApplication(c.config.application, application)
     )
       fail()
   }

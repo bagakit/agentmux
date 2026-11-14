@@ -38,9 +38,9 @@ function authenticated(input: EnrollmentAdapterInput & { privateState: string })
   return saved
 }
 /** Only this owner interprets its Enrollment wrapper; no foreign Setup binding is stripped. */
-export function enrollmentAccountSession(privateState: string, application: { domain: string; appId: string }): Session['native'] | null {
+export function enrollmentAccountSession(privateState: string, application: { domain: string; appId: string; issuer?: string }): Session['native'] | null {
   const saved = snapshot(privateState), native = saved?.native
-  return application.domain === DOMAIN && saved?.value.appId === application.appId && native?.phase === 'account' && native.account && opaque(native.account.userId) && opaque(native.account.tenantId) && opaque(native.csrf) && isFeishuConsoleOrigin(native.consoleOrigin) ? native : null
+  return application.issuer === undefined && application.domain === DOMAIN && saved?.value.appId === application.appId && native?.phase === 'account' && native.account && opaque(native.account.userId) && opaque(native.account.tenantId) && opaque(native.csrf) && isFeishuConsoleOrigin(native.consoleOrigin) ? native : null
 }
 function png(value: string): { bytes: Buffer; width: number; height: number } | null {
   // Reuse the original profile PNG boundary; scale follows the actual IHDR, not a fixed icon size.
@@ -110,7 +110,7 @@ export function createFeishuEnrollment(): ConnectionEnrollmentAdapter {
     async credential(input, signal) {
       const saved = authenticated(input); if ('kind' in saved) return saved
       // A known creation receipt can precede its private snapshot ACK. The original Host owns that exact application.
-      if (input.application.domain !== DOMAIN || !applicationId(input.application.appId) || saved.value.appId !== undefined && input.application.appId !== saved.value.appId) return preparation('invalid-application')
+      if (input.application.issuer !== undefined || input.application.domain !== DOMAIN || !applicationId(input.application.appId) || saved.value.appId !== undefined && input.application.appId !== saved.value.appId) return preparation('invalid-application')
       const response = await request(input, saved, '/developers/v1/secret/' + encodeURIComponent(input.application.appId), {}, signal)
       if (response.kind === 'unknown') return response
       const data = response.payload.data === undefined || response.payload.data === null ? null : record(response.payload.data)

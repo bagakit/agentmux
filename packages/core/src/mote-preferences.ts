@@ -1,3 +1,5 @@
+import { sameConnectionApplication } from './connections-contract.js'
+import { parseConnectionApplication } from './room-binding-codec.js'
 import { deriveObjectId } from './object-id.js'
 import { parseScheduleRecord } from './public-rpc-schedules.js'
 import { AgentMuxError } from './errors.js'
@@ -131,14 +133,15 @@ export function parseMoteConnectionValues(value: unknown, code: Code = 'INVALID_
   const p = fields(value, ['connection'], ['connection'], code)
   if (p.connection === null) return { connection: null }
   const ref = fields(p.connection, ['connectionId', 'application'], ['connectionId', 'application'], code)
-  const app = fields(ref.application, ['domain', 'appId'], ['domain', 'appId'], code)
-  const connectionId = text(ref.connectionId, code), domain = text(app.domain, code), appId = text(app.appId, code)
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(connectionId) || !/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(domain) || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(appId)) fail('The original Connection reference is invalid.', code)
-  return { connection: { connectionId, application: { domain, appId } } }
+  const connectionId = text(ref.connectionId, code)
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(connectionId)) fail('The original Connection reference is invalid.', code)
+  let application: import('./connections-contract.js').ConnectionApplication
+  try { application = parseConnectionApplication(ref.application) } catch { return fail('The original Connection reference is invalid.', code) }
+  return { connection: { connectionId, application } }
 }
 export function sameMoteConnectionValues(a: MoteConnectionValues, b: MoteConnectionValues): boolean {
   return a.connection === b.connection || !!a.connection && !!b.connection && a.connection.connectionId === b.connection.connectionId &&
-    a.connection.application.domain === b.connection.application.domain && a.connection.application.appId === b.connection.application.appId
+    sameConnectionApplication(a.connection.application, b.connection.application)
 }
 export function parseMoteQuickDefaults(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): MoteQuickDefaults {
   const p = fields(value, ['executorId', 'conversation', 'conversationRevision', 'recovery', 'presence', 'conversationRollover', 'conversationTransition'], [], code), result: MoteQuickDefaults = {}

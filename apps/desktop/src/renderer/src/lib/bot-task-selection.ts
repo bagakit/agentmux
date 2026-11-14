@@ -1,10 +1,10 @@
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { readConnectionHostingTarget } from '../../../shared/connection-hosting-target'
-import type { ConnectionRecord } from '@agentmux/core/connections'
+import { sameConnectionApplication, type ConnectionRecord } from '@agentmux/core/connections'
 import type { MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 
-export type ManagementTaskScope = { kind: 'management'; connectionId: string; adapterId: string; domain: string; appId: string }
-export type IdentityRemovalTaskScope = { kind: 'identity-removal'; connectionId: string; adapterId: string; domain: string; appId: string; expectedRevision: number; hostingTarget?: ConnectionHostingTarget }
+export type ManagementTaskScope = { kind: 'management'; connectionId: string; adapterId: string; domain: string; appId: string; issuer?: string }
+export type IdentityRemovalTaskScope = { kind: 'identity-removal'; connectionId: string; adapterId: string; domain: string; appId: string; issuer?: string; expectedRevision: number; hostingTarget?: ConnectionHostingTarget }
 export type BotTaskScope = { kind: 'mote'; target: MotePreferencesTarget } | { kind: 'enrollment' } | ManagementTaskScope | IdentityRemovalTaskScope | { kind: 'management-route' }
 /** Presentation locators only. Original owners retain every outcome and private view. */
 export type BotTaskLocator = { operationId: string; hostingTarget: ConnectionHostingTarget }
@@ -22,8 +22,8 @@ export function readBotTaskLocator(value: unknown): { operationId: string; hosti
 export function botTaskSelectionKey(scope: BotTaskScope): string {
   if (scope.kind === 'enrollment') return 'enrollment'
   if (scope.kind === 'management-route') return 'management'
-  if (scope.kind === 'identity-removal') return JSON.stringify(['identity-removal', scope.connectionId, scope.adapterId, scope.domain, scope.appId, scope.expectedRevision, ...(scope.hostingTarget ? [scope.hostingTarget.hostId, scope.hostingTarget.runtimeId] : [])])
-  if (scope.kind === 'management') return JSON.stringify(['management', scope.connectionId, scope.adapterId, scope.domain, scope.appId])
+  if (scope.kind === 'identity-removal') return JSON.stringify(['identity-removal', scope.connectionId, scope.adapterId, scope.domain, scope.appId, scope.expectedRevision, ...(scope.hostingTarget ? [scope.hostingTarget.hostId, scope.hostingTarget.runtimeId] : []), ...(scope.issuer === undefined ? [] : [{ issuer: scope.issuer }])])
+  if (scope.kind === 'management') return JSON.stringify(['management', scope.connectionId, scope.adapterId, scope.domain, scope.appId, ...(scope.issuer === undefined ? [] : [{ issuer: scope.issuer }])])
   const target = scope.target
   return JSON.stringify(['mote', target.spaceId, target.zoneId, target.expectedResource.hostId, target.expectedResource.workspaceId, target.expectedResource.workspacePath])
 }
@@ -37,17 +37,20 @@ export function retainedIdentityRemovalTasks(selections: BotTaskSelections): Arr
       if (!locator) continue
       const { operationId } = locator
       const parts: unknown = JSON.parse(key)
-      if (!Array.isArray(parts) || (parts.length !== 6 && parts.length !== 8) || parts[0] !== 'identity-removal' || !parts.slice(1, 5).every(value => typeof value === 'string' && value.trim()) || !Number.isSafeInteger(parts[5]) || parts[5] < 1) continue
+      if (!Array.isArray(parts)) continue
+      const last = parts.at(-1), issuer = last && typeof last === 'object' && !Array.isArray(last) && typeof last.issuer === 'string' && last.issuer ? last.issuer : undefined
+      if (issuer !== undefined) parts.pop()
+      if ((parts.length !== 6 && parts.length !== 8) || parts[0] !== 'identity-removal' || !parts.slice(1, 5).every(value => typeof value === 'string' && value.trim()) || !Number.isSafeInteger(parts[5]) || parts[5] < 1) continue
       const [, connectionId, adapterId, domain, appId, expectedRevision] = parts as [string, string, string, string, string, number]
       const scopeOwner = parts.length === 8 ? readConnectionHostingTarget({ hostId: parts[6], runtimeId: parts[7] }) : null
       if (parts.length === 8 && (!scopeOwner || JSON.stringify(scopeOwner) !== JSON.stringify(locator.hostingTarget))) continue
-      result.push({ scope: { kind: 'identity-removal', connectionId, adapterId, domain, appId, expectedRevision, ...(scopeOwner ? { hostingTarget: scopeOwner } : {}) }, operationId, hostingTarget: locator.hostingTarget })
+      result.push({ scope: { kind: 'identity-removal', connectionId, adapterId, domain, appId, expectedRevision, ...(scopeOwner ? { hostingTarget: scopeOwner } : {}), ...(issuer === undefined ? {} : { issuer }) }, operationId, hostingTarget: locator.hostingTarget })
     } catch { /* Other saved task locators have their own shape and owner. */ }
   }
   return result
 }
 export function restoredIdentityRemovalTask(record: { config: Pick<ConnectionRecord['config'], 'connectionId' | 'adapterId' | 'application'> }, selections: BotTaskSelections, hostingTarget?: ConnectionHostingTarget | null) {
-  return retainedIdentityRemovalTasks(selections).find(({ scope, hostingTarget: owner }) => scope.connectionId === record.config.connectionId && scope.adapterId === record.config.adapterId && scope.domain === record.config.application.domain && scope.appId === record.config.application.appId && (hostingTarget === undefined || JSON.stringify(owner) === JSON.stringify(hostingTarget))) ?? null
+  return retainedIdentityRemovalTasks(selections).find(({ scope, hostingTarget: owner }) => scope.connectionId === record.config.connectionId && scope.adapterId === record.config.adapterId && sameConnectionApplication({ domain: scope.domain, appId: scope.appId, ...(scope.issuer === undefined ? {} : { issuer: scope.issuer }) }, record.config.application) && (hostingTarget === undefined || JSON.stringify(owner) === JSON.stringify(hostingTarget))) ?? null
 }
 
 export function restoredBotTaskSelections(value: unknown): BotTaskSelections {
@@ -61,7 +64,7 @@ export function restoredBotTaskSelections(value: unknown): BotTaskSelections {
 }
 
 export function managementTaskScope(record: ConnectionRecord): ManagementTaskScope {
-  return { kind: 'management', connectionId: record.config.connectionId, adapterId: record.config.adapterId, domain: record.config.application.domain, appId: record.config.application.appId }
+  return { kind: 'management', connectionId: record.config.connectionId, adapterId: record.config.adapterId, domain: record.config.application.domain, appId: record.config.application.appId, ...(record.config.application.issuer === undefined ? {} : { issuer: record.config.application.issuer }) }
 }
 
 /** The explicit navigation pointer contains only the exact saved target, never a reading. */
@@ -72,8 +75,11 @@ export function restoredManagementTask(selections: BotTaskSelections): { scope: 
   if (!locator) return null
   try {
     const parts: unknown = JSON.parse(key)
-    if (!Array.isArray(parts) || parts.length !== 5 || parts[0] !== 'management' || !parts.slice(1).every(value => typeof value === 'string' && value.trim())) return null
+    if (!Array.isArray(parts)) return null
+    const last = parts.at(-1), issuer = last && typeof last === 'object' && !Array.isArray(last) && typeof last.issuer === 'string' && last.issuer ? last.issuer : undefined
+    if (issuer !== undefined) parts.pop()
+    if (parts.length !== 5 || parts[0] !== 'management' || !parts.slice(1).every(value => typeof value === 'string' && value.trim())) return null
     const [, connectionId, adapterId, domain, appId] = parts as [string, string, string, string, string]
-    return { scope: { kind: 'management', connectionId, adapterId, domain, appId }, operationId: locator.operationId, hostingTarget: locator.hostingTarget }
+    return { scope: { kind: 'management', connectionId, adapterId, domain, appId, ...(issuer === undefined ? {} : { issuer }) }, operationId: locator.operationId, hostingTarget: locator.hostingTarget }
   } catch { return null }
 }

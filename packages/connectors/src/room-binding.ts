@@ -1,3 +1,4 @@
+import { connectionApplicationScope } from '@agentmux/core/connections'
 import { effectiveRoomGrant } from './effective-grant.js'
 import type { ConnectionMemberAccess, ConnectionEffectiveGrant, ConnectionEffectiveGrants, RoomBindingInheritInput, RoomBindingInspection, RoomBindingMappingConflict, RoomBindingMappingDifference } from '@agentmux/core/connections'
 import { AgentMuxError } from '@agentmux/core'
@@ -62,7 +63,7 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
     return this.safe(() => { const row = this.database.prepare('SELECT max(revision) AS revision FROM room_binding_revision WHERE binding_id=?').get(bindingId); return row?.revision ? this.readExact(bindingId, Number(row.revision)) : null })
   }
   private audience(input: { application: RoomBinding['application']; externalConversationId: string }): RoomBinding | null {
-    const row = this.database.prepare('SELECT binding_id FROM room_binding_head WHERE domain=? AND app_id=? AND room_id=?').get(input.application.domain, input.application.appId, input.externalConversationId)
+    const row = this.database.prepare('SELECT binding_id FROM room_binding_head WHERE domain=? AND app_id=? AND room_id=?').get(connectionApplicationScope(input.application), input.application.appId, input.externalConversationId)
     return row ? this.readCurrent(String(row.binding_id)) : null
   }
   findActiveAudience(input: { application: RoomBinding['application']; externalConversationId: string }): RoomBinding | null {
@@ -214,7 +215,7 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
     const b = parseRoomBinding(binding)
     this.database.prepare('INSERT INTO room_binding_revision (binding_id,revision,snapshot_json) VALUES (?,?,?)').run(b.bindingId, b.revision, JSON.stringify(b))
     if (b.state === 'detached') { this.database.prepare('DELETE FROM room_binding_head WHERE binding_id=?').run(b.bindingId); return }
-    this.database.prepare('INSERT INTO room_binding_head (binding_id,revision,connection_id,domain,app_id,room_id,host_id,session_id) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(binding_id) DO UPDATE SET revision=excluded.revision,connection_id=excluded.connection_id,domain=excluded.domain,app_id=excluded.app_id,room_id=excluded.room_id,host_id=excluded.host_id,session_id=excluded.session_id').run(b.bindingId, b.revision, b.connectionId, b.application.domain, b.application.appId, b.externalConversationId, b.executionHostId, b.agentSessionId)
+    this.database.prepare('INSERT INTO room_binding_head (binding_id,revision,connection_id,domain,app_id,room_id,host_id,session_id) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(binding_id) DO UPDATE SET revision=excluded.revision,connection_id=excluded.connection_id,domain=excluded.domain,app_id=excluded.app_id,room_id=excluded.room_id,host_id=excluded.host_id,session_id=excluded.session_id').run(b.bindingId, b.revision, b.connectionId, connectionApplicationScope(b.application), b.application.appId, b.externalConversationId, b.executionHostId, b.agentSessionId)
   }
   private notices(operationId: string, entries: Array<{ binding: RoomBinding; event: RoomBindingNoticeEvent }>): RoomBindingNotice[] | undefined {
     if (!this.options.lifecycle) return undefined

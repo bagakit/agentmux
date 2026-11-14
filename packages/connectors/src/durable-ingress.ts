@@ -1,3 +1,4 @@
+import { connectionApplicationScope } from '@agentmux/core/connections'
 import { grantAuthorReference } from './effective-grant.js'
 import { parseExternalConversationReference, type AgentExternalAuthoritySource, type AgentExternalConversationAuthority, type AgentExternalConversationReference } from '@agentmux/core'
 import { isDeepStrictEqual } from 'node:util'
@@ -212,7 +213,7 @@ export class DurableIngressHost implements ConnectionIngressPort {
       this.assertService(input.connectionId)
       const current = this.options.connections.readConfiguration(input.connectionId)
       if (!current?.config.enabled || current.revision !== connection.revision) fail('INGRESS_CONNECTION_REVISED')
-      const { domain, appId } = current.config.application, encoded = JSON.stringify(event)
+      const { appId } = current.config.application, domain = connectionApplicationScope(current.config.application), encoded = JSON.stringify(event)
       const originalEvent = this.database.prepare('SELECT ingress_id,event_json,raw_payload FROM connection_ingress_event WHERE domain=? AND app_id=? AND event_id=?').get(domain, appId, event.eventId)
       if (originalEvent) {
         if (String(originalEvent.event_json) !== encoded || event.kind === 'action' && String(originalEvent.raw_payload) !== input.raw) fail('INGRESS_EVENT_CONFLICT')
@@ -346,7 +347,7 @@ export class DurableIngressHost implements ConnectionIngressPort {
     let addressing: NonNullable<ConnectionIngressRecord['addressing']> = { replyToMessageId, state: 'unknown', reason: 'reply-unconfirmed' }
     if (!authenticator?.qualifyReply) addressing = { replyToMessageId, state: 'unavailable', reason: 'adapter-unavailable' }
     else {
-      const raw = this.safe(() => String(this.database.prepare('SELECT raw_payload FROM connection_ingress_event WHERE domain=? AND app_id=? AND event_id=?').get(record.application.domain, record.application.appId, record.eventId)!.raw_payload))
+      const raw = this.safe(() => String(this.database.prepare('SELECT raw_payload FROM connection_ingress_event WHERE domain=? AND app_id=? AND event_id=?').get(connectionApplicationScope(record.application), record.application.appId, record.eventId)!.raw_payload))
       let timer: ReturnType<typeof setTimeout> | undefined
       const controller = new AbortController()
       try {
@@ -657,7 +658,7 @@ export class DurableIngressHost implements ConnectionIngressPort {
     const ref = retained.input!, client = this.options.core(ref.hostId, ref.author.authoritySource?.executionRuntimeId)
     if (!client) return await this.inspect({ ingressId: record.ingressId })
     const envelope: AgentMuxMessageEnvelope = { schema: 'agentmux.a2a.v1', messageId: ref.messageId, operationId: ref.operationId, createdAt: ref.createdAt!,
-      sender: ref.author, ...(ref.channelProfile ? { channelProfile: ref.channelProfile } : {}), ...(ref.channelQuote ? { channelQuote: ref.channelQuote } : {}), recipient: { kind: 'agent-session', agentSessionId: ref.agentSessionId }, threadId: JSON.stringify(['external', record.application.domain, record.application.appId, record.externalConversationId]), correlationId: JSON.stringify(['external', record.application.domain, record.application.appId, record.externalMessageId]), replyTo: null, workspaceId: null, senderSessionId: null, senderRunId: null, recipientSessionId: ref.agentSessionId, recipientRunId: ref.expectedRun.runId, body: record.body }
+      sender: ref.author, ...(ref.channelProfile ? { channelProfile: ref.channelProfile } : {}), ...(ref.channelQuote ? { channelQuote: ref.channelQuote } : {}), recipient: { kind: 'agent-session', agentSessionId: ref.agentSessionId }, threadId: JSON.stringify(['external', record.application.domain, record.application.appId, ...(record.application.issuer === undefined ? [] : [record.application.issuer]), record.externalConversationId]), correlationId: JSON.stringify(['external', record.application.domain, record.application.appId, ...(record.application.issuer === undefined ? [] : [record.application.issuer]), record.externalMessageId]), replyTo: null, workspaceId: null, senderSessionId: null, senderRunId: null, recipientSessionId: ref.agentSessionId, recipientRunId: ref.expectedRun.runId, body: record.body }
     let refusal: AgentMuxError | undefined
     try {
       await client.submitAgentMessage({ agentSessionId: ref.agentSessionId, envelope, admissionIntent: ref.admissionIntent!, execution: 'immediate', sourceChannel: 'agent-message',
@@ -1037,7 +1038,7 @@ export class DurableIngressHost implements ConnectionIngressPort {
     const application = input.application, limit = input.limit ?? 5
     if (!application || ![application.domain, application.appId, input.externalConversationId].every(value => typeof value === 'string' && value.length > 0) || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) fail('INVALID_CONNECTION_INGRESS')
     return this.safe(() => {
-      const fields = [application.domain, application.appId, input.externalConversationId]
+      const fields = [connectionApplicationScope(application), application.appId, input.externalConversationId]
       const audienceRows = "SELECT sequence,ingress_id,record_json FROM connection_ingress_message WHERE domain=? AND app_id=? AND json_extract(record_json,'$.externalConversationId')=? UNION ALL SELECT intake_sequence AS sequence,ingress_id,record_json FROM connection_ingress_event WHERE domain=? AND app_id=? AND json_extract(record_json,'$.externalConversationId')=? AND record_json IS NOT NULL"
       const before = input.beforeIngressId ? this.database.prepare('SELECT sequence FROM (' + audienceRows + ') WHERE ingress_id=?').get(...fields, ...fields, input.beforeIngressId) : undefined
       if (input.beforeIngressId && !before) fail('INGRESS_CURSOR_MISMATCH')
@@ -1061,7 +1062,7 @@ export class DurableIngressHost implements ConnectionIngressPort {
     return this.safe(() => {
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) fail('INVALID_CONNECTION_INGRESS')
       const rows = this.database.prepare("SELECT record_json FROM connection_ingress_message WHERE domain=? AND app_id=? AND json_extract(record_json,'$.conversationKind')='direct' ORDER BY sequence DESC LIMIT ?")
-        .all(application.domain, application.appId, limit + 1)
+        .all(connectionApplicationScope(application), application.appId, limit + 1)
       const ingresses = rows.slice(0, limit).map(row => parseConnectionIngressRecord(JSON.parse(String(row.record_json))) as ConnectionIngressMessage)
       return { ingresses, more: rows.length > limit }
     })
@@ -1073,7 +1074,7 @@ export class DurableIngressHost implements ConnectionIngressPort {
       const backward = 'before' in input, bound = backward ? input.before : input.after
       if (!Number.isSafeInteger(bound) || bound < 0) fail('INVALID_CONNECTION_INGRESS')
       const rows = this.database.prepare(`SELECT sequence,event_json,record_json FROM connection_ingress_message WHERE domain=? AND app_id=? AND sequence${backward ? '<' : '>'}? ORDER BY sequence ${backward ? 'DESC' : 'ASC'} LIMIT ?`)
-        .all(application.domain, application.appId, bound, limit + 1)
+        .all(connectionApplicationScope(application), application.appId, bound, limit + 1)
       return { more: rows.length > limit, rows: rows.slice(0, limit).map(row => {
         const event = JSON.parse(String(row.event_json)) as Partial<VerifiedIngressMessage>
         return { sequence: Number(row.sequence), record: parseConnectionIngressRecord(JSON.parse(String(row.record_json))) as ConnectionIngressMessage,
@@ -1084,14 +1085,14 @@ export class DurableIngressHost implements ConnectionIngressPort {
   /** Bounded count after one intake position; `more` means the count stopped at `cap`. */
   countApplication(application: ConnectionIngressMessage['application'], after: number, cap: number): { count: number; more: boolean } {
     return this.safe(() => {
-      const row = this.database.prepare('SELECT COUNT(*) AS total FROM (SELECT 1 FROM connection_ingress_message WHERE domain=? AND app_id=? AND sequence>? LIMIT ?)').get(application.domain, application.appId, after, cap + 1)
+      const row = this.database.prepare('SELECT COUNT(*) AS total FROM (SELECT 1 FROM connection_ingress_message WHERE domain=? AND app_id=? AND sequence>? LIMIT ?)').get(connectionApplicationScope(application), application.appId, after, cap + 1)
       const total = Number(row?.total ?? 0)
       return { count: Math.min(total, cap), more: total > cap }
     })
   }
   newestApplication(application: ConnectionIngressMessage['application']): number | null {
     return this.safe(() => {
-      const row = this.database.prepare('SELECT MAX(sequence) AS newest FROM connection_ingress_message WHERE domain=? AND app_id=?').get(application.domain, application.appId)
+      const row = this.database.prepare('SELECT MAX(sequence) AS newest FROM connection_ingress_message WHERE domain=? AND app_id=?').get(connectionApplicationScope(application), application.appId)
       return row?.newest === null || row?.newest === undefined ? null : Number(row.newest)
     })
   }

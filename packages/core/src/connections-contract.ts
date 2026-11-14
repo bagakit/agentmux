@@ -1,5 +1,12 @@
 /** External application identity. Domain belongs to the issuer, never a local account alias. */
-export type ConnectionApplication = { domain: string; appId: string }
+export type ConnectionApplication = { domain: string; appId: string; /** Original authenticated service instance, when the protocol scopes an account to one. */ issuer?: string }
+/** Internal scoped lookup key; old unscoped identities retain their exact durable keys. */
+export function connectionApplicationScope(application: ConnectionApplication): string {
+  return application.issuer === undefined ? application.domain : JSON.stringify([application.domain, application.issuer])
+}
+export function sameConnectionApplication(a: ConnectionApplication, b: ConnectionApplication): boolean {
+  return a.domain === b.domain && a.appId === b.appId && a.issuer === b.issuer
+}
 export type ConnectionConfig = {
   connectionId: string
   adapterId: string

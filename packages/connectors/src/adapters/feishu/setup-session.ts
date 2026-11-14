@@ -22,7 +22,7 @@ function serializeSnapshot(input: SetupAdapterInput, state: NativeAccountInitial
   return JSON.stringify({ version, operationId: input.operationId, connectionId: input.connectionId, attemptId: input.attemptId, application: input.application, ...native })
 }
 export async function beginFeishuSession(input: SetupAdapterInput, signal?: AbortSignal): Promise<SetupChallengeReceipt> {
-  if (input.application.domain !== 'open.feishu.cn') return { kind: 'unknown' }
+  if (input.application.domain !== 'open.feishu.cn' || input.application.issuer !== undefined) return { kind: 'unknown' }
   const receipt = await beginFeishuNativeAccount(signal)
   return receipt.kind === 'challenge' ? { kind: 'challenge', challenge: receipt.challenge, privateState: serializeSnapshot(input, receipt.state) } : receipt
 }
@@ -33,7 +33,7 @@ export async function continueFeishuEnrollment(input: SetupAdapterInput & { priv
 }
 /** Setup retains its original scope; native authentication receives no fabricated application. */
 export async function advanceFeishuSession(input: SetupAdapterInput & { privateState: string }, signal?: AbortSignal): Promise<SetupAuthenticationReceipt> {
-  if (input.application.domain !== 'open.feishu.cn') return { kind: 'unknown' }
+  if (input.application.domain !== 'open.feishu.cn' || input.application.issuer !== undefined) return { kind: 'unknown' }
   try {
     const receipt = await advanceFeishuNativeAccount(snapshot(input), signal)
     return receipt.kind === 'progress' ? { kind: 'progress', stage: receipt.stage, challenge: receipt.challenge, account: receipt.account, privateState: serializeSnapshot(input, receipt.state) } : receipt
@@ -46,7 +46,7 @@ async function applicationEnvelope(input: SetupAdapterInput & { privateState: st
 }
 type ApplicationReply = { payload: Record<string, unknown> | null; authentication?: string; diagnostic?: ConnectionSetupRequestDiagnostic }
 export async function applicationRequest(input: SetupAdapterInput & { privateState: string; assertCurrent?: () => void }, path: string, body: Record<string, unknown> | FormData, signal?: AbortSignal, developerPanel = false): Promise<ApplicationReply> {
-  if (input.application.domain !== 'open.feishu.cn') return { payload: null }
+  if (input.application.domain !== 'open.feishu.cn' || input.application.issuer !== undefined) return { payload: null }
   let native: ReturnType<typeof readNativeAccountState>
   try { native = readNativeAccountState(snapshot(input)) } catch { return { payload: null } }
   const receipt = await requestFeishuConsole({ state: native.state, cookies: native.cookies, path, body, referer: '/app/' + encodeURIComponent(input.application.appId), developerPanel, ...(input.assertCurrent ? { assertCurrent: input.assertCurrent } : {}) }, signal)

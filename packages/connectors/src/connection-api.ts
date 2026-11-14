@@ -1,7 +1,7 @@
 import { AgentMuxError } from '@agentmux/core'
 import { connectionApiRequestDigest, parseConnectionApiIdentity, parseConnectionApiOperation, parseConnectionApiParams,
   type ConnectionApiCallContext, type ConnectionApiIdentity, type ConnectionApiJson, type ConnectionApiOperation, type ConnectionApiPort, type ConnectionApiRequestInput,
-  type RoomBinding, type RoomBindingListInput } from '@agentmux/core/connections'
+  type RoomBinding, type RoomBindingListInput, sameConnectionApplication } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import { ConnectionApiRedaction } from './connection-api-redaction.js'
 
@@ -12,7 +12,6 @@ type IdentityBindings = {
 }
 type Stored = { actor: string; digest: string; operation: ConnectionApiOperation }
 const fail = (code: string, message: string): never => { throw new AgentMuxError(message, code) }
-const sameApplication = (a: RoomBinding['application'], b: RoomBinding['application']) => a.domain === b.domain && a.appId === b.appId
 /** One original native business effect. Its unknown durable claim is inspect-only, never a retry queue. */
 export class ConnectionApiHost implements ConnectionApiPort {
   constructor(private readonly connections: ConnectionHost, private readonly bindings: IdentityBindings) {
@@ -33,7 +32,7 @@ export class ConnectionApiHost implements ConnectionApiPort {
     const binding = this.bindings.current(bindingId)
     if (!binding || binding.state === 'detached' || !this.owned(binding, context)) return null
     const connection = this.connections.readConfiguration(binding.connectionId)
-    if (!connection?.config.enabled || !sameApplication(binding.application, connection.config.application)) return null
+    if (!connection?.config.enabled || !sameConnectionApplication(binding.application, connection.config.application)) return null
     const adapter = this.connections.apiAdapter(connection.config.adapterId)
     if (!adapter) return null
     return parseConnectionApiIdentity({ bindingId, bindingRevision: binding.revision, connectionId: binding.connectionId, connectionRevision: connection.revision,

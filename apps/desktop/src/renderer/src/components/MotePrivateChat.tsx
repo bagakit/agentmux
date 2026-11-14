@@ -22,8 +22,8 @@ import { MoteChatRequests } from './MoteChatRequests'
 import { MoteQuickModeDialog } from './MoteQuickMode'
 
 const ChatIcon = semanticIconComponent('object.conversation'), LoadingIcon = semanticIconComponent('status.loading')
-const choice = (record: ConnectionRecord) => JSON.stringify([record.config.connectionId, record.config.application.domain, record.config.application.appId])
-const refChoice = (ref: MoteChatValues['connection']) => ref ? JSON.stringify([ref.connectionId, ref.application.domain, ref.application.appId]) : ''
+const choice = (record: ConnectionRecord) => JSON.stringify([record.config.connectionId, record.config.application.domain, record.config.application.appId, record.config.application.issuer ?? null])
+const refChoice = (ref: MoteChatValues['connection']) => ref ? JSON.stringify([ref.connectionId, ref.application.domain, ref.application.appId, ref.application.issuer ?? null]) : ''
 
 /** Profile configures a durable Mote route; opening or saving never creates an Agent. */
 export function MotePrivateChat({ scope, active, reference, onOpenPath }: { scope: MoteWorkfaceScope; active: boolean; reference?: WorkbenchProjectionSelection | null | undefined; onOpenPath(path: string): Promise<unknown> }) {

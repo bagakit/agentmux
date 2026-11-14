@@ -148,9 +148,9 @@ export class ConnectionProfileHost implements ConnectionProfilePort {
       if (!this.exists()) return null
       const record = this.connections.database
         .prepare(
-          "SELECT operation_id FROM connection_profile_operation WHERE json_extract(record_json,'$.application.domain')=? AND json_extract(record_json,'$.application.appId')=? AND json_extract(record_json,'$.patch.state') IN ('unknown','dispatching') ORDER BY ordinal DESC LIMIT 1"
+          "SELECT operation_id FROM connection_profile_operation WHERE json_extract(record_json,'$.application.domain')=? AND json_extract(record_json,'$.application.appId')=? AND json_extract(record_json,'$.application.issuer') IS ? AND json_extract(record_json,'$.patch.state') IN ('unknown','dispatching') ORDER BY ordinal DESC LIMIT 1"
         )
-        .get(application.domain, application.appId)
+        .get(application.domain, application.appId, application.issuer ?? null)
       if (!record) return null
       const row = this.read(String(record.operation_id))!
       return {

@@ -2,7 +2,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { ConnectionRecord, ConnectionSetupAction, ConnectionSetupPublicationDraft, ConnectionSetupPublicationEffect, ConnectionSetupAdvance, ConnectionSetupBegin, ConnectionSetupEnrollmentSource, ConnectionSetupInspect, ConnectionSetupConfigurationSelector, ConnectionSetupListing, ConnectionSetupOperation, ConnectionSetupView } from '@agentmux/core/connections'
-import { connectionSetupDecisionForAction } from '@agentmux/core/connections'
+import { sameConnectionApplication, connectionSetupDecisionForAction } from '@agentmux/core/connections'
 import { connectionManagementTask } from './connection-management-task'
 import { api } from '../../lib/api'
 import type { ConnectionHostingTarget } from '../../../../shared/contracts'
@@ -90,7 +90,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
 
   function sameApplication(operation: ConnectionSetupOperation) {
     return !!record && operation.connectionId === record.config.connectionId && operation.adapterId === record.config.adapterId &&
-      operation.application.domain === record.config.application.domain && operation.application.appId === record.config.application.appId &&
+      sameConnectionApplication(operation.application, record.config.application) &&
       operation.goal.kind === 'agent-conversation'
   }
   function matches(operation: ConnectionSetupOperation) { return sameApplication(operation) && operation.expectedConnectionRevision === record?.revision }

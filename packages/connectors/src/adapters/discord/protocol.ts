@@ -13,7 +13,7 @@ export function discordId(value: unknown): string {
   return value
 }
 export function discordConfig(config: ConnectionConfig): void {
-  if (config.adapterId !== DISCORD_ADAPTER_ID || config.application.domain !== DISCORD_DOMAIN) discordFailure('DISCORD_APPLICATION_MISMATCH')
+  if (config.adapterId !== DISCORD_ADAPTER_ID || config.application.domain !== DISCORD_DOMAIN || config.application.issuer !== undefined) discordFailure('DISCORD_APPLICATION_MISMATCH')
   discordId(config.application.appId)
 }
 export function discordAvatar(user: Pick<APIUser, 'id' | 'avatar'>): string | undefined {

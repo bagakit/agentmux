@@ -1,3 +1,4 @@
+import { parseConnectionApplication } from './room-binding-codec.js'
 import { parseDesiredConnectionProfile, connectionProfileAvatarDigest } from './connection-profile-codec.js'
 import { parseConnectionRequestTrace, parseConnectionRequestTraceSelector, parseConnectionSetupRequestDiagnostic } from './connection-request-trace.js'
 import { AgentMuxError } from './errors.js'
@@ -90,9 +91,8 @@ export function parseConnectionSetupChallenge(value: unknown): ConnectionSetupCh
 export function parseConnectionSetupOperation(value: unknown): ConnectionSetupOperation {
   const p = object(value, ['operationId', 'connectionId', 'expectedConnectionRevision', 'goal', 'source', 'initialPublication', 'revision', 'adapterId', 'application', 'request', 'secureStorage', 'reason', 'authentication'])
   const input = admission(Object.fromEntries(['operationId', 'connectionId', 'expectedConnectionRevision', 'goal', 'source', 'initialPublication'].map(k => [k, p[k]])), true)
-  const a = object(p.application, ['domain', 'appId']), r = object(p.request, ['kind', 'state', 'attemptId']), domain = text(a.domain)
-  if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(domain)) fail()
-  const result: ConnectionSetupOperation = { ...input, goal: input.goal as ConnectionSetupOperationGoal, revision: integer(p.revision), adapterId: id(p.adapterId), application: { domain, appId: id(a.appId) }, request: { state: choice(r.state, ['not-dispatched', 'dispatching', 'confirmed', 'unknown', 'refused']), attemptId: r.attemptId === null ? null : id(r.attemptId) }, secureStorage: choice(p.secureStorage, ['not-started', 'storing', 'stored', 'unknown']), ...(p.reason === undefined ? {} : { reason: choice(p.reason, ['adapter-unavailable', 'secure-storage-unavailable', 'request-unconfirmed', 'challenge-unconfirmed']) }) }
+  const application = parseConnectionApplication(p.application), r = object(p.request, ['kind', 'state', 'attemptId'])
+  const result: ConnectionSetupOperation = { ...input, goal: input.goal as ConnectionSetupOperationGoal, revision: integer(p.revision), adapterId: id(p.adapterId), application, request: { state: choice(r.state, ['not-dispatched', 'dispatching', 'confirmed', 'unknown', 'refused']), attemptId: r.attemptId === null ? null : id(r.attemptId) }, secureStorage: choice(p.secureStorage, ['not-started', 'storing', 'stored', 'unknown']), ...(p.reason === undefined ? {} : { reason: choice(p.reason, ['adapter-unavailable', 'secure-storage-unavailable', 'request-unconfirmed', 'challenge-unconfirmed']) }) }
   if (result.request.state === 'not-dispatched' && result.request.attemptId !== null || result.request.state !== 'not-dispatched' && result.request.attemptId === null || result.secureStorage === 'stored' && result.request.state !== 'confirmed') fail()
   if (input.source) result.request.kind = choice(r.kind, ['enrollment-handoff'])
   else if (r.kind !== undefined) fail()

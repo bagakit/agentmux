@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { channelMetadataSubjectKey, type ChannelMetadataEntry, type ConnectionRecord } from '@agentmux/core/connections'
+import { sameConnectionApplication, channelMetadataSubjectKey, type ChannelMetadataEntry, type ConnectionRecord } from '@agentmux/core/connections'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { ConnectorEntityIdentity, ConnectorIdentityField } from '../ConnectorEntityIdentity'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -13,7 +13,7 @@ export function ChannelMetadataPanel({ connection, active, connections = api.con
   const [open, setOpen] = useState(false), [kind, setKind] = useState<'actor' | 'conversation'>('actor')
   const [entries, setEntries] = useState<ChannelMetadataEntry[]>([]), [next, setNext] = useState<string | null>(null)
   const [busy, setBusy] = useState(''), [issue, setIssue] = useState('')
-  const scope = JSON.stringify([connection.config.connectionId, connection.config.application.domain, connection.config.application.appId, kind])
+  const scope = JSON.stringify([connection.config.connectionId, connection.config.application.domain, connection.config.application.appId, connection.config.application.issuer ?? null, kind])
   const current = useRef(scope), generation = useRef(0), revision = useRef(connection.revision)
   current.current = scope
   async function read(cursor?: string) {
@@ -22,6 +22,7 @@ export function ChannelMetadataPanel({ connection, active, connections = api.con
     try {
       const result = await connections.call('connection.metadata.ls', { connectionId: connection.config.connectionId, kind, limit: 10, ...(cursor ? { cursor } : {}) })
       if (current.current !== original || request !== generation.current) return
+      if (!sameConnectionApplication(result.application, connection.config.application)) throw new Error('This profile reading belongs to another application.')
       revision.current = result.connectionRevision
       setEntries(previous => cursor ? [...previous, ...result.entries] : result.entries); setNext(result.next)
     } catch (error) { if (current.current === original && request === generation.current) setIssue(presentError(error)) }
@@ -40,6 +41,7 @@ export function ChannelMetadataPanel({ connection, active, connections = api.con
       const input = { connectionId: connection.config.connectionId, expectedConnectionRevision: revision.current, subject: entry.subject }
       const result = action === 'refresh' ? await connections.call('connection.metadata.refresh', input)
         : await connections.call('connection.metadata.clear', { ...input, expectedCacheRevision: entry.cacheRevision })
+      if (!sameConnectionApplication(result.application, connection.config.application)) throw new Error('This profile result belongs to another application.')
       if (current.current === original && generation.current === request) setEntries(previous => previous.map(value => channelMetadataSubjectKey(value.subject) === key ? result.entry : value))
     } catch (error) { if (current.current === original && generation.current === request) setIssue(presentError(error)) }
     finally { if (current.current === original && generation.current === request) setBusy('') }

@@ -1,3 +1,4 @@
+import { connectionApplicationScope } from '@agentmux/core/connections'
 import { AgentMuxError } from '@agentmux/core'
 import { parseRoomBindingAuthority, parseConnectionApplicationAccessParams, parseConnectionApplicationAccessOperation, parseConnectionApplicationGrant, type ConnectionApplicationAccessPort, type ConnectionApplicationAccessConfigure, type ConnectionApplicationAccessGet, type ConnectionApplicationGrant, type RoomBindingCallContext, type ConnectionActor } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
@@ -27,7 +28,7 @@ export class ApplicationAccessHost implements ConnectionApplicationAccessPort {
       if (!config || actor && !equal(actor.application, config.application)) throw new AgentMuxError('The original application is unavailable or does not own this actor.', 'APPLICATION_ACCESS_SCOPE_CHANGED')
       const db = this.database()
       return db.prepare('SELECT r.snapshot_json FROM application_grant_head h JOIN application_grant_revision r ON r.grant_id=h.grant_id AND r.revision=h.revision WHERE h.adapter_id=? AND h.domain=? AND h.app_id=?' + (actor ? ' AND h.actor_json=?' : '') + ' ORDER BY h.grant_id')
-        .all(config.adapterId, config.application.domain, config.application.appId, ...(actor ? [JSON.stringify(actor)] : [])).map(row => parseConnectionApplicationGrant(JSON.parse(String(row.snapshot_json))))
+        .all(config.adapterId, connectionApplicationScope(config.application), config.application.appId, ...(actor ? [JSON.stringify(actor)] : [])).map(row => parseConnectionApplicationGrant(JSON.parse(String(row.snapshot_json))))
     })
   }
   async get(value: ConnectionApplicationAccessGet) {
@@ -74,7 +75,7 @@ export class ApplicationAccessHost implements ConnectionApplicationAccessPort {
         if (operation.state === 'applied') {
           const g = operation.grant
           db.prepare('INSERT INTO application_grant_revision VALUES (?,?,?)').run(g.grantId, g.revision, JSON.stringify(g))
-          db.prepare('INSERT INTO application_grant_head VALUES (?,?,?,?,?,?) ON CONFLICT(grant_id) DO UPDATE SET revision=excluded.revision').run(g.grantId, g.revision, g.adapterId, g.actor.application.domain, g.actor.application.appId, JSON.stringify(g.actor))
+          db.prepare('INSERT INTO application_grant_head VALUES (?,?,?,?,?,?) ON CONFLICT(grant_id) DO UPDATE SET revision=excluded.revision').run(g.grantId, g.revision, g.adapterId, connectionApplicationScope(g.actor.application), g.actor.application.appId, JSON.stringify(g.actor))
         }
         db.prepare('INSERT INTO application_grant_operation VALUES (?,?,?)').run(input.operationId, intent, JSON.stringify(operation))
         db.exec('COMMIT'); return operation
