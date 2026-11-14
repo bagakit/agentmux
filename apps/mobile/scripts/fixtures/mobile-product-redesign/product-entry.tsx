@@ -40,7 +40,7 @@ const restoreResponsiveWorkface = responsiveFixture && localStorage.getItem('mob
 const calls: Call[] = []
 const record = (method: string, params: unknown = {}) => calls.push({ sequence: calls.length + 1, observedAt: Date.now(), method, params: structuredClone(params) })
 const original = (id: string): AgentMuxAgentSession => ({ kind: 'agent', agentSessionId: id, providerId: 'codex', executorId: 'fixture-original',
-  hostId: 'host-original', workspacePath: fixturePath("execution-original"), run: { runId: `run-${id}` }, retiredRuns: [], createdAt: 1, updatedAt: 1 })
+  hostId: id === 'session-mote' && new URLSearchParams(location.search).has('agent-locations') ? 'local' : 'host-original', workspacePath: fixturePath("execution-original"), run: { runId: `run-${id}` }, retiredRuns: [], createdAt: 1, updatedAt: 1 })
 const main = original('session-mote'), waiting = original('session-waiting'), result = original('session-result')
 const moteDialogueCapture = new URLSearchParams(location.search).get('mote-dialogue') === '1' || composerFixture ? createMoteDialogueCapture() : null
 const ordinaryReply = '可以。我们先确认你想解决的问题，再比较这两种想法。\n\n我会保留原材料、已经确认的进展和还需要你决定的地方；不会把未知回执当作完成。'
@@ -375,7 +375,7 @@ const client = {
     return { agentSessionId: params.agentSessionId, operationId: params.operationId, run: params.expectedRun,
       expectedRequest: params.expectedRequest, response: params.response, delivery: 'connection-written' as const }
   },
-  forwardRpc: async (method: string, params: Record<string, unknown>) => {
+  forwardRpc: async (method: string, params: Record<string, unknown>, options?: { signal?: AbortSignal }) => {
     record(method, params)
     if (composerFixture && (method === 'space.ls' || method === 'space.mote.dialogue.read')) await composerReads
     if (!connected) throw Error('原 Host 连接中断；原对象、历史与草稿保留。')
@@ -429,6 +429,14 @@ const client = {
       return reply
     }
     if (method === 'space.inspect' && (params.target as { spaceId?: string }).spaceId === 'space-original') return { catalog: { ...catalog, appearance: [...catalog.appearance!, { spaceId: 'space-original', preset: __AGENTMUX_MOBILE_PROJECT_APPEARANCE__.kind, image: { dataUrl: __AGENTMUX_MOBILE_PROJECT_APPEARANCE__.icon } }] } }
+    const held = heldAgentLocation
+    if (method === 'space.inspect' && held?.pending && (params.target as { regionId?: string }).regionId === 'region-other') {
+      held.signal = options?.signal
+      const response = structuredClone(catalog)
+      await held.wait
+      held.pending = false
+      return { catalog: response }
+    }
     if ((method === 'space.ls' || method === 'space.inspect') && directoryReadFails) throw Error('本次目录读取失败 [DIRECTORY_READ_FAILED]；已读目录仍可使用，请核对 Mac 连接后重试。')
     if (method === 'space.ls' && focusPresentationMissing) {
       const { agentPresentation: _, ...directory } = catalog
@@ -518,6 +526,7 @@ const verifyWebUpdateConnection = async () => {
   return () => connected
 }
 const agentLocationsOriginal = structuredClone(catalog)
+let heldAgentLocation: { wait: Promise<void>; release(): void; signal?: AbortSignal; pending: boolean } | undefined
 function Scene() {
   const [, refresh] = useState(0)
   const [densityMount, remountDensity] = useState(0)
@@ -558,7 +567,9 @@ function Scene() {
     },
     prepareAgentLocations: (scene: 'multi' | 'zero' | 'one' | 'unknown' | 'long') => {
       Object.assign(catalog, structuredClone(agentLocationsOriginal))
-      for (const row of catalog.agentPresentation ?? []) if (row.projectGroup) row.projectGroup.hostId = 'host-original'
+      for (const region of catalog.regions) {
+        if (region.agentSessionId === main.agentSessionId && region.execution) region.execution.hostId = main.hostId
+      }
       const original = catalog.locations.find(place => place.regionId === 'region-mote')!
       const other = catalog.locations.find(place => place.regionId === 'region-other')!
       catalog.spaces.find(space => space.spaceId === 'other-space')!.name = '实验计划'
@@ -576,6 +587,13 @@ function Scene() {
       catalog.regions.push({ ...catalog.regions.find(region => region.regionId === 'region-mote')!, tabId: 'foreign-location-tab', regionId: 'foreign-location-region', execution: { hostId: 'another-host', cwd: fixturePath('other') } })
       catalog.locations.push({ ...other, tabId: 'foreign-location-tab', regionId: 'foreign-location-region' })
     },
+    holdAgentLocation: () => {
+      let release!: () => void
+      const wait = new Promise<void>(resolve => { release = resolve })
+      heldAgentLocation = { wait, release, pending: true }
+    },
+    agentLocationStatus: () => heldAgentLocation?.signal && { pending: heldAgentLocation.pending, aborted: heldAgentLocation.signal.aborted },
+    releaseAgentLocation: () => heldAgentLocation?.release(),
     invalidateAgentLocation: () => { catalog.locations = catalog.locations.filter(place => place.regionId !== 'region-other') },
     setConversationStatus: (state: typeof conversationStatusScene) => {
       conversationStatusScene = state

@@ -45,6 +45,7 @@ try {
     'posture-menu-no-return-focus': { file: 'packages/client-ui/src/components/HoverDropdownMenu.tsx',
       before: 'if (menu.hover.current) event.preventDefault()\n        onCloseAutoFocus?.(event)',
       after: 'event.preventDefault()\n        onCloseAutoFocus?.(event)' },
+    'agent-locations-stale-membership': { file: 'apps/mobile/src/navigation/mobile-agent-locations.ts', before: 'if (!catalog.locations.some(value => locationContextKey(value) === exact)) return false', after: 'void exact' },
     'agent-locations-transparent-sheet': { file: 'apps/mobile/src/navigation/agent-locations.css', before: "animation-name: mobile-agent-locations-enter;", after: 'animation-name: mobile-sheet-enter;' },
     'connection-inline-notice': { file: 'apps/mobile/src/conversation/MobileConversationSurface.tsx', before: '      {readers}', after: '      {readers}\n      {connection.issue ? <div className="mobile-conversation__connection">{connection.issue}</div> : null}' },
     'metadata-bottom-notice': { file: 'apps/mobile/src/MobileApp.tsx', before: '    <div className="mobile-notice-stack">', after: '    <div className="mobile-notice-stack">\n      {conversationStatus?.metadata.issue ? <div className="mobile-service-notice">{conversationStatus.metadata.issue}</div> : null}' },
@@ -116,10 +117,10 @@ try {
     }
     receipt.sourceOverride = { id: mutationId, file: variant.file, originalSha256: sha(original), sha256: sha(source) }
     overrides.push({ name: 'bounded-mobile-presentation-mutation', setup(plugin) {
-      plugin.onLoad({ filter: /\.(?:tsx|css)$/ }, args => {
+      plugin.onLoad({ filter: /\.(?:ts|tsx|css)$/ }, args => {
         if (args.path !== path.join(root, variant.file)) return
         loadedSource[variant.file] = sha(source)
-        return { contents: source, loader: variant.file.endsWith('.css') ? 'css' : 'tsx', resolveDir: path.dirname(args.path) }
+        return { contents: source, loader: path.extname(variant.file).slice(1), resolveDir: path.dirname(args.path) }
       })
     } })
   }
