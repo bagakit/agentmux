@@ -12,8 +12,8 @@ const mutations: Record<string, { path: string; before: string; after: string }>
   'cursor-scope': { path: 'packages/connectors/src/mote-chat.ts', before: "scope = ['events', input.target, order, application]", after: "scope = ['events', input.target]" },
   'mark-regression': { path: 'packages/connectors/src/mote-chat.ts', before: 'if (current && current.through >= input.through) return current', after: 'if (false) return current' },
   'application-scope': { path: 'packages/connectors/src/durable-ingress.ts', before: "FROM connection_ingress_message WHERE domain=? AND app_id=? AND sequence${backward ? '<' : '>'}?", after: "FROM connection_ingress_message WHERE ?<>'' AND ?<>'' AND sequence${backward ? '<' : '>'}?" },
-  'zone-membership': { path: 'apps/host/src/mote-membership.ts', before: 'tab.zoneId !== null && zones.has(tab.zoneId)', after: 'true' },
-  'region-host': { path: 'apps/host/src/mote-membership.ts', before: ' && region.execution?.hostId === agent.hostId', after: '' },
+  'zone-membership': { path: 'packages/core/src/spatial-state.ts', before: 'for (const spaceId of spacesByZone.get(zone) ?? [])', after: 'for (const spaceId of index.keys())' },
+  'region-host': { path: 'packages/core/src/spatial-state.ts', before: '[agent.hostId, agent.agentSessionId]', after: '[agent.agentSessionId]' },
   'application-index': { path: 'packages/connectors/src/durable-ingress.ts', before: 'CREATE INDEX IF NOT EXISTS connection_ingress_message_application ON connection_ingress_message(domain,app_id,sequence);', after: '' }
 }
 const name = process.env.MOTE_PERCEPTION_MUTANT, change = name ? mutations[name] : undefined

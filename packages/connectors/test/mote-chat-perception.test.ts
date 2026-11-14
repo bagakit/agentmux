@@ -142,7 +142,7 @@ it('lets the person and the Mote’s own Agents read every received message thro
   expect(await refused(f, 'configure', { operationId: 'agent-configure', target: f.target, expectedRevision: settings.revision, expectedConnectionRevision: 1, values: settings.values }, member)).toContain('CONTROL_PERMISSION_DENIED')
   expect(await refused(f, 'allocate', { operationId: 'agent-allocate', target: f.target, expectedConfigurationRevision: settings.revision, actor: f.guest, expectedPersonRevision: 1, total: 5 }, member)).toContain('CONTROL_PERMISSION_DENIED')
   // Without the spatial record the Host cannot place the caller, so its membership is unknown.
-  const unread = vi.spyOn(f.spatial, 'read').mockResolvedValue(null)
+  const unread = vi.spyOn(f.spatial, 'readSpaceAgentMembership').mockResolvedValue(null)
   expect(await refused(f, 'events', { target: f.target }, member)).toContain('MOTE_CHAT_MEMBERSHIP_UNCONFIRMED')
   unread.mockRestore()
 
