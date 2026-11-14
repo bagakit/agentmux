@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act } from 'react'
+import { act, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BrowserProfileList, BrowserProfileSummary } from '../src/shared/contracts'
@@ -31,10 +31,18 @@ const client: BrowserProfileSummary = { revision: 'client-token', id: 'p-client'
 const originalState = useAppStore.getState()
 let root: Root, container: HTMLDivElement
 const open = vi.fn()
-async function mount(props: Partial<Parameters<typeof BrowserProfileChip>[0]> = {}) {
-  await act(async () => root.render(<SettingsNavigation.Provider value={{ open } as never}>
-    <BrowserProfileChip browserId="b1" regionId="r1" profileId="p-client" control={undefined} {...props} /></SettingsNavigation.Provider>))
+function OriginalBrowserChrome({ props }: { props: Partial<Parameters<typeof BrowserProfileChip>[0]> }) {
+  const [host, setHost] = useState<HTMLDivElement | null>(null)
+  const surface = useAppStore(state => state.tabs.t1?.regions.r1)
+  return <SettingsNavigation.Provider value={{ open } as never}>
+    <form className="browser-toolbar"><BrowserProfileChip browserId="b1" regionId="r1" profileId={surface?.kind === 'browser' ? surface.profileId : 'p-client'} control={undefined} noticeHost={host} {...props} /></form>
+    <div className="browser-profile-service" ref={setHost} />
+  </SettingsNavigation.Provider>
 }
+async function mount(props: Partial<Parameters<typeof BrowserProfileChip>[0]> = {}) {
+  await act(async () => root.render(<OriginalBrowserChrome props={props} />))
+}
+
 async function openMenu() {
   const trigger = document.querySelector<HTMLButtonElement>('.browser-profile-chip')!
   await act(async () => {
@@ -107,6 +115,30 @@ describe('Browser toolbar Profile chip', () => {
     await act(async () => retry.click())
     expect(port.switchProfile).toHaveBeenNthCalledWith(2, 'b1', 'p-personal')
     expect(container.textContent).not.toContain('Couldn’t switch')
+    expect(useAppStore.getState().tabs.t1!.regions.r1).toMatchObject({ profileId: 'p-personal' })
+  })
+
+  it('keeps a failed Survey save in the original service row and repairs only metadata without replaying Native', async () => {
+    const reference = { regionId: 'r1', browserId: 'b1' }
+    const register = vi.fn()
+      .mockResolvedValueOnce({ reference, outcome: 'partial', save: null, issues: [{ step: 'save', code: 'SURVEY_PAGE_SAVE_UNCONFIRMED',
+        message: 'The original reference save reply is unavailable. '.repeat(12), recovery: 'Retry only this exact Survey reference; the confirmed page stays available.' }] })
+      .mockResolvedValue({ reference, outcome: 'registered', save: null, issues: [] })
+    useAppStore.setState({ registerSurveyBrowserPage: register })
+    await mount(); await openMenu()
+    await act(async () => items()[0]!.click())
+    const notice = container.querySelector('[data-survey-profile-registration="b1"]')!
+    expect(notice).toBeTruthy()
+    expect(notice.closest('.browser-toolbar')).toBeNull()
+    expect(container.querySelector('.browser-profile-service')!.contains(notice)).toBe(true)
+    expect(container.querySelector('.browser-toolbar')!.textContent).not.toContain('Survey save unconfirmed')
+    expect(notice.textContent).toContain('Survey save unconfirmed')
+    expect(notice.querySelector('details')?.textContent).toContain('The original reference save reply is unavailable.')
+    const retry = [...notice.querySelectorAll('button')].find(button => button.textContent === 'Retry Survey registration')!
+    await act(async () => retry.click())
+    expect(register).toHaveBeenCalledTimes(2)
+    expect(port.switchProfile).toHaveBeenCalledExactlyOnceWith('b1', 'p-personal')
+    expect(container.querySelector('[data-survey-profile-registration]')).toBeNull()
     expect(useAppStore.getState().tabs.t1!.regions.r1).toMatchObject({ profileId: 'p-personal' })
   })
 
