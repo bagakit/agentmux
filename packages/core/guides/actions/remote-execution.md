@@ -7,7 +7,11 @@ Hosts are the connection foundation in Settings → Cluster → Hosts. Remote wo
 uses those saved Hosts. Preparation can read the selected Host’s home through its
 saved connection; it does not automatically install, upgrade, approve or start an Agent.
 
-From the Desktop that starts or views the work:
+For project work, choose the project, then choose its Agent. The project Launcher
+defaults to an Agent on the project's own device, even when you view that project
+from another machine. Outpost selects an Agent elsewhere and keeps the project fixed.
+
+The global Remote setup also explains these access scenarios from this Desktop:
 
 | Mode | Agent runs | Project files and commands |
 | --- | --- | --- |
@@ -26,21 +30,17 @@ authenticated user or device; do not assume that identity.
 
 ## Working through another Host
 
-The mode describes where work happens; the route describes how you reach it.
-Suppose you view from A, A connects to B, and B connects to C. With access to both
-ends configured and authorized, the same modes describe work reached through B:
+Project and Agent placement, the tool execution path, and this viewer's access
+paths are different facts. Suppose A views a project on B, B connects to C, and
+C connects to D. The project remains on B. With an explicit authorized route to
+D, choosing Outpost for that project selects D's Agent; C is only an intermediate
+node. The workflow remains choose project, choose Agent. Viewing it from A does
+not change those two execution ends.
 
-| Mode from A | Agent runs | Project files and commands |
-| --- | --- | --- |
-| Reach · Remote Project | A | C |
-| Outpost · Remote Agent | C | A |
-| Orbit · Remote Workspace | C | C |
-| Orbit · Remote Workspace | B | C, or the reverse arrangement |
-
-B is not an execution end when it only carries the connection. When the two ends
-are B and C, both are remote from A; their exact names still matter. There is no
-fourth cascade mode. Connections do not pass on trust or permissions, and the
-Agent needs an authorized route to the project side, including back to A.
+The compact Run mode identity shows the project and Agent together. Its detail
+separates the execution route from this client's access channels. A known SSH
+channel or ProxyJump configuration cannot prove the tool route or its hop count.
+Unobserved paths remain unconfirmed. Connections do not pass on trust or permissions.
 
 Currently, B's public service can use C when C is configured there. A Desktop
 does not automatically import B's Hosts or establish an A/C workflow from those
@@ -50,9 +50,10 @@ configuration alone does not prove a working end-to-end connection.
 
 ## Start work
 
-Open New Tab or New Agent for the project, then use the work-mode entry beside Agent
-to choose where the Agent runs. A project Launcher keeps its working folder: local
-projects offer Local and Outpost; remote projects offer Reach and Orbit. Settings → Cluster → Remote first shows existing work;
+Open New Tab or New Agent for the project, then use Agent location beside Agent
+to choose Project device or Outpost. A project Launcher keeps its working folder;
+Project device uses that project's Host, and Outpost chooses another exact Agent
+Host. A remote project offers the same choices. Settings → Cluster → Remote first shows existing work;
 choose Set up new work when you want to prepare an Agent. Connecting to or browsing
 a Host does not require a project.
 
