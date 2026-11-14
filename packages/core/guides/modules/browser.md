@@ -20,7 +20,15 @@ Read only the matching local help:
   naming its exact ID and its opaque `profile.revision` token read from ls or inspect. Activity observations and edits to another Profile do not invalidate this token. It keeps the original
   Profile and pages; site data, sign-ins, proxy passwords, human approvals and prior
   runtime history do not move. Use the returned new Profile ID to inspect, edit or
-  open it. A missing reply leaves creation unknown; do not automatically repeat it.
+  open it. All five new-identity actions (profile create/copy, folder create, view create,
+  proxy create) require an explicit --operation-id ID. Keep the exact original input and ID.
+  Query a missing reply with browser profile creation inspect --operation-id ID; it returns
+  the original createdId independently of current rename/archive/removal. Never infer the
+  result from a matching label or time. Inspect is read-only; observed metadata does not
+  prove that the original reply or directory durability ACK reached its caller. An explicit
+  retry of the exact same actor/request/operation returns its original identity before
+  checking a later source/collection CAS; it never creates another one. Changed input or
+  another actor with that operation is rejected. Do not automatically replay unknown work.
   The root `revision` is the configuration collection stamp used by folder actions;
   `sequence` orders complete snapshots including confirmed activity checkpoints.
   Neither root stamp is the per-Profile configuration token. Activity is read-only: observed
@@ -228,7 +236,7 @@ Subdocuments, Workers and initial scripts remain unknown; Canvas/WebGL/fonts/TLS
 emulation are unsupported. Screen edits compose with the original execution Viewport.
 
 Proxy library: `browser profile proxy ls` reads stable non-secret assets and exact proxy revision tokens.
-Use `proxy create --edit JSON`, `proxy update --proxy ID --expected-revision TOKEN --edit JSON`, or
+Use `proxy create --operation-id ID --edit JSON`, `proxy update --proxy ID --expected-revision TOKEN --edit JSON`, or
 `proxy delete --proxy ID --expected-revision TOKEN`. Edit is {label,server,bypass?:string[],notes?:string};
 keep sign-in out of server lines. Each Profile retains its original encrypted credential owner, scoped to
 its saved proxy endpoint. Changing the route does not grant a replacement server the old password.
