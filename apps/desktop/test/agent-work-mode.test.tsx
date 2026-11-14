@@ -24,7 +24,7 @@ it.each([
   else {
     const badge = dom.container.querySelector('[data-work-mode]')!
     expect(badge.getAttribute('data-work-mode')).toBe(mode)
-    const label = { 'remote-project': 'Reach · Remote Project', 'remote-agent': 'Relay · Remote Agent', 'remote-workspace': 'Orbit · Remote Workspace', unknown: 'Placement unknown' }[mode]
+    const label = { 'remote-project': 'Reach · Remote Project', 'remote-agent': 'Outpost · Remote Agent', 'remote-workspace': 'Orbit · Remote Workspace', unknown: 'Placement unknown' }[mode]
     expect(badge.textContent).toBe(label); expect(badge.getAttribute('aria-label')).toContain(label)
   }
   expect(source).toEqual(before)
@@ -34,7 +34,7 @@ it('the real shared selector names each family and places its Agent and Project 
   await dom.render(<AgentWorkModeSetup config={{ hosts, workspaces: [] }} active initialMode="remote-agent" actionLabel="Prepare" onApply={vi.fn()} />)
   for (const [id, brand, descriptor, agent, project] of [
     ['remote-project', 'Reach', 'Remote Project', 'here', 'remote'],
-    ['remote-agent', 'Relay', 'Remote Agent', 'remote', 'here'],
+    ['remote-agent', 'Outpost', 'Remote Agent', 'remote', 'here'],
     ['remote-workspace', 'Orbit', 'Remote Workspace', 'remote', 'remote']
   ]) {
     const input = dom.container.querySelector<HTMLInputElement>(`input[value="${id}"]`)!, choice = input.closest('label')!
