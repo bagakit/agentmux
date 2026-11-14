@@ -499,6 +499,49 @@ it.runIf(business)('a lost directory registration reply keeps the original packe
   }
 }, 60000)
 
+it.runIf(business)('a changed directory with a lost registration reply has one read-only Files directory check', async () => {
+  const f = await fixture(), original = await f.store.getState().resolveFilesSource(f.workspace.id)
+  if (original.status !== 'registration-required') throw new Error('Original packet missing')
+  const register = f.bridge.spaces.call
+  let writes = 0
+  vi.mocked(f.api.spaceMounts.call).mockImplementation(async (method, request, signal) => {
+    const receipt = await register(method, request, signal)
+    if (method === 'register') { writes++; throw new Error('Original registration reply was lost') }
+    return receipt
+  })
+  await expect(f.store.getState().useFilesSourceFolder(f.workspace.id, original.registration)).rejects.toThrow('reply was lost')
+  expect((await f.store.getState().resolveFilesSource(f.workspace.id)).status).toBe('located')
+  await f.store.getState().openFile('original.txt', 'file-group', undefined, f.workspace.id)
+  await rename(f.source.project, f.source.project + '-original')
+  await mkdir(f.source.project)
+
+  const { SourceFilesAccess } = await import('../src/renderer/src/components/SourceFilesAccess.js')
+  const scene = await visualScene(f, 'folder-identity-changed', 'Files · the original folder needs checking')
+  const element = scene?.element ?? document.createElement('div')
+  if (!scene) {
+    const root = createRoot(element); document.body.append(element)
+    cleanup.push(async () => { await act(async () => root.unmount()); element.remove() })
+    await act(async () => root.render(createElement(SourceFilesAccess, { workspace: f.workspace, visible: true })))
+  }
+  await vi.waitFor(() => expect(element.querySelector('.surface-state__title')?.textContent).toBe('Folder identity changed'))
+  const notice = element.querySelector('.file-operation-service')!
+  const details = notice.querySelector('details')!
+  expect(details.open).toBe(false)
+  expect(details.textContent).toContain('The original directory changed')
+  expect(details.textContent).toContain('Choose current folder')
+  const checks = [...notice.querySelectorAll<HTMLButtonElement>('button')].filter(button => !button.closest('details'))
+  expect(checks.map(button => button.textContent?.trim())).toEqual(['Check original registration'])
+  vi.mocked(f.api.sourceFiles.resolve).mockClear()
+  await act(async () => checks[0]!.click())
+  await vi.waitFor(() => expect(checks[0]!.disabled).toBe(false))
+  expect(f.api.sourceFiles.resolve).toHaveBeenCalledTimes(1)
+  expect(writes).toBe(1)
+  expect(f.store.getState().sourceFilesInputs.selections[f.workspace.id]).toMatchObject({ registration: original.registration, registrationStatus: 'unknown' })
+  expect(f.store.getState().documents[f.workspace.id + '\0original.txt']?.content).toBe(f.source.id + ' original body')
+  await scene?.capture('folder-identity-changed')
+  if (scene) { details.open = true; await scene.capture('folder-identity-details') }
+}, 60000)
+
 it.runIf(business)('consecutive Source saves keep their original binding and refresh same-FD identity; another Runtime sharing the physical file cannot receive the old draft', async () => {
   const f = await fixture({ sharedProject: true }); await connectFolder(f)
   const other = f.sources[0]!, candidate = await f.bridge.files.resolve({ hostId: other.id, expectedRuntimeId: other.identity.runtimeId }, { kind: 'directory', path: other.project })
