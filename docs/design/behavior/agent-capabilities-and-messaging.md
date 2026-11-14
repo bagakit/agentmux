@@ -129,7 +129,7 @@ Provider 启动项的当前声明唯一见 [launch-options.ts](../../../packages
 - **native resume 整条闭环一起接通。** 二进制支持 native resume 的 Provider 须同时接通可信 native handle、resume argv、managed Hook 与事件字段归一化；resume 与扩展部署是两件事，只做 locator 不算支持 resume。没有 native resume 的 Provider 明确保持 unsupported（当前声明见各 Provider 的 `resumeStrategy`），不伪造恢复入口；各 Provider 的事件与信任细节按各自 CLI 合同接入。
 - Hook 入口按对应 Provider 原生协议实际提供且已确认的字段，在 Core 内收敛到同一 canonical event。工具输出与明确失败事实也由对应 Provider 解释，不借另一厂商的字段、嵌套或显示文本推断；原协议没有发出的结果保持未观察，不能补为空输出或当作成功。`sessionId` 等 provider-native handle 只能由对应 Provider 解释，不能由 ctxmux 或 Desktop 猜测。流程探测或 Hook 安装失败属于非阻断降级，必须在服务窗说明当前状态与恢复动作。
 - 尚未纳入的 Agent 分成三类：具备完整 Hook/session/resume 证据的优先纳入；只有 status/Hook 的按实际需要纳入；只有 launch 配置或宿主专属 wrapper 的明确记录为暂不纳入。**同名不等于同身份**：TraeX (`traex`) 与 Trae CLI (`traecli`) 是两个不同 Provider，二进制与合同都不同，不得合并身份。
-- 所有 Provider、Agent Session、Hook 与 semantic resume 逻辑归 `packages/core`；ctxmux 只持有 Run、PTY、ordered bytes、Replay、Gap、Attachment 与进程事实。Provider parity 不得在 ctxmux 复制第二套实现。
+- **Provider 实现的包边界。** 具体 Agent CLI 适配器归与 `packages/core` 平行的 `packages/providers`，每家有自己的目录，持有原生协议、配置规则、能力声明与适配测试。Core 持有公开适配及注册契约、AgentSession、Hook 编排、授权、持久化和语义恢复。Provider 通过同一公开契约接入 Core，包之间保持无环依赖，便于日后独立构建及在社区仓库维护。包迁移保留 Provider ID 和原会话的恢复入口。ctxmux 只持有 Run、PTY、ordered bytes、Replay、Gap、Attachment 与进程事实。
 - 原生会话切换后，旧会话晚到的 Hook 只能保留为原始观察，不能覆盖当前会话身份、状态、用量、交互或工具记录。当前已知 native handle 与真实协议中的转换引用共同决定归属；缺少引用时不能按到达顺序、时间或正文猜。真实 native ID 已知而新记录文件尚未落盘时，身份与可恢复性分别表达，不能沿用旧会话的路径或阻断同一健康 Run 的普通输入。已核子任务对主轮的聚合结束语义保留；没有真实 turn 身份时，同会话旧轮与 ABA 仍明确未知，不伪造完成。
 - 原生 reasoning 的空文本、缺失文本与被遮蔽文本要分清：合法空记录仍可查看，未知结构原样保留，不能借别家字段补正文。协议确有的 opaque signature 与 redacted 事实沿公共内容记录保全，不当可读正文或混入普通消息复制；只有可读复制内容时才提供 Copy，空或仅遮蔽的记录仍能展开，不能通过复制空字符串清空用户剪贴板。对话与历史仍复用原有 trace 折叠，工具结果只有图像时也保留真实调用关联与失败事实。
 
