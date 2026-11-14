@@ -48,7 +48,7 @@ async function click(text: string, within: ParentNode = panel()) {
   await act(async () => node.click()); await f.settle()
 }
 async function show() { await f.renderMotePanel(); await settle(() => expect(panel()?.querySelector('[data-mote-chat-saved]')?.getAttribute('data-mote-chat-saved')).toBe('on')); await click('People & conversations'); await settle(() => expect(panel().querySelectorAll('[data-mote-chat-person]')).toHaveLength(2)) }
-const person = (appId = application.appId) => [...panel().querySelectorAll<HTMLElement>('[data-mote-chat-person]')].find(row => row.querySelectorAll('code')[1]?.textContent === appId)!
+const person = (appId = application.appId) => [...panel().querySelectorAll<HTMLElement>('[data-mote-chat-person]')].find(row => row.querySelector('[data-identity-field="App ID"] .connector-identity-field__value')?.textContent === appId)!
 function seed(id: string, actor = alice, hostId = 'local'): MoteChatGeneration {
   const generation: MoteChatGeneration = { generationId: 'generation-' + id, target: f.target(), application: actor.application,
     externalConversationId: 'private-' + actor.application.appId, actor, executionHostId: hostId, agentSessionId: id,
@@ -255,7 +255,7 @@ it('refreshes people without unmounting a loaded second-page conversation or all
   await click('Refresh people'); await settle(() => expect(f.chatRequests.mock.calls.length).toBeGreaterThan(before))
   expect(panel().querySelector('[data-mote-chat-person="guest-21"]')).toBe(row)
   expect(row.querySelector('input')).toBe(total); expect(total.value).toBe('19')
-  expect(row.querySelector('details')?.open).toBe(true); expect(row.textContent).toContain('second-page-agent')
+  expect(row.querySelector<HTMLDetailsElement>('.mote-chat-person__history')?.open).toBe(true); expect(row.textContent).toContain('second-page-agent')
   expect(panel().querySelectorAll('[data-mote-chat-person]')).toHaveLength(24)
   expect(f.chatRequests.mock.calls.slice(before).filter(([method]) => method === 'space.mote.chat.audience')).toHaveLength(1)
   expect(f.chatRequests.mock.calls.some(([method]) => method === 'space.mote.chat.allocate')).toBe(false)
