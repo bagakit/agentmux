@@ -28,7 +28,8 @@ async function board() {
   const measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     const column = this.closest<HTMLElement>('[data-goal-plan-column]')
     const x = column ? (Number(column.dataset.goalPlanColumn) + 1) * 160 : this.dataset.goalPlanBoundary === 'finish' ? 880 : 0
-    return new DOMRect(x, 20, this.classList.contains('goal-plan__canvas') ? 1000 : 100, 60)
+    const lowerBranch = ['other', 'beta'].includes(this.dataset.goalPlanNode ?? '')
+    return new DOMRect(x, lowerBranch ? 112 : 20, this.classList.contains('goal-plan__canvas') ? 1000 : 100, 60)
   })
   useAppStore.setState({ demands: { [record.id]: record }, selectedDemandId: record.id, mainSurface: 'board' })
   await dom.render(<GlobalBoardSurface />)
@@ -77,7 +78,7 @@ it('traces only actual ancestors and descendants of a hovered node in the mounte
 it('keeps the inspected task while keyboard focus or pointer previews a different branch', async () => {
   const { canvas, head, card, reading } = await board()
   await act(async () => head('alpha').click())
-  expect(reading()?.textContent).toBe('alpha')
+  expect(reading()?.textContent, 'The reading pane belongs to the selected task.').toBe('alpha')
   expect(canvas.dataset.goalTrace).toBe('alpha')
   const selectedHeading = reading()!
   head('beta').focus()
@@ -96,4 +97,31 @@ it('keeps the inspected task while keyboard focus or pointer previews a differen
   expect(card('leaf').dataset.goalPath).toBe('downstream')
   head('other').dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'touch' }))
   expect(canvas.dataset.goalTrace).toBe('alpha')
+})
+
+
+it('draws distinct dependency ports on the original source and target cards', async () => {
+  const { edge, card, canvas } = await board()
+  const endpoints = (id: string) => {
+    const coordinates = edge(id).getAttribute('d')!.match(/[-+]?(?:\d*\.)?\d+/g)!.map(Number)
+    const first = coordinates.slice(0, 2), last = coordinates.slice(-2)
+    return { start: { x: first[0]!, y: first[1]! }, end: { x: last[0]!, y: last[1]! } }
+  }
+  const outgoing = [endpoints('source>alpha').start, endpoints('source>beta').start]
+  const incoming = [endpoints('leaf>join').end, endpoints('beta>join').end, endpoints('other>join').end]
+  for (const ports of [outgoing, incoming]) {
+    expect(new Set(ports.map(point => point.y)).size, 'Parallel dependencies need distinct ports on their shared task.').toBe(ports.length)
+  }
+  const origin = canvas.getBoundingClientRect()
+  const source = card('source').getBoundingClientRect(), join = card('join').getBoundingClientRect()
+  for (const port of outgoing) {
+    expect(port.x).toBe(source.right - origin.left)
+    expect(port.y).toBeGreaterThan(source.top - origin.top)
+    expect(port.y).toBeLessThan(source.bottom - origin.top)
+  }
+  for (const port of incoming) {
+    expect(port.x).toBe(join.left - origin.left)
+    expect(port.y).toBeGreaterThan(join.top - origin.top)
+    expect(port.y).toBeLessThan(join.bottom - origin.top)
+  }
 })

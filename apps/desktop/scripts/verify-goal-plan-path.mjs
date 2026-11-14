@@ -15,9 +15,16 @@ function run(mutation) {
   }
 }
 const baseline = run()
-if (baseline.status !== 0 || baseline.report.numPassedTests < 2) throw Error(JSON.stringify(baseline.report.testResults))
-const mutant = run('reverse-child')
-const killed = mutant.report.testResults.flatMap(file => file.assertionResults)
-  .find(test => test.status === 'failed' && test.failureMessages.some(message => message.includes('The child must follow the hovered task downstream.')))
-if (mutant.status !== 1 || !killed) throw Error('Reversing the child link escaped the dependency-path assertion.')
-console.log(`Mounted Desktop board: ${baseline.report.numPassedTests} tests passed. Reversing the saved child link failed “${killed.title}”.`)
+if (baseline.status !== 0 || baseline.report.numPassedTests < 3) throw Error(JSON.stringify(baseline.report.testResults))
+for (const [mutation, assertion] of [
+  ['collapse-ports', 'Parallel dependencies need distinct ports on their shared task.'],
+  ['reverse-child', 'The child must follow the hovered task downstream.'],
+  ['wrong-reader', 'The reading pane belongs to the selected task.']
+]) {
+  const mutant = run(mutation)
+  const killed = mutant.report.testResults.flatMap(file => file.assertionResults)
+    .find(test => test.status === 'failed' && test.failureMessages.some(message => message.includes(assertion)))
+  if (mutant.status !== 1 || !killed) throw Error(mutation + ' escaped its workbench assertion.')
+  console.log(mutation + ' failed the mounted Desktop assertion: ' + assertion)
+}
+console.log(baseline.report.numPassedTests + ' mounted Desktop board tests passed on the original source.')
