@@ -1,10 +1,9 @@
-import { browserSourceBuild } from '../../../packages/browser/scripts/source-build.mjs'
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawn } from 'node:child_process'
-import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { durableWriteFile, DurableWriteError } from '@agentmux/core'
 import { WorkbenchUserStateStore } from '../src/main/workbench-user-state'
 
@@ -23,28 +22,19 @@ async function fixture() {
 
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 10 }))) })
 
-let worker: string
-beforeAll(async () => {
-  const directory = resolve('.tmp/workbench-user-state-process')
-  const { mkdir } = await import('node:fs/promises'); await mkdir(directory, { recursive: true })
-  worker = join(directory, 'worker.mjs')
-  const { build } = browserSourceBuild(createRequire(resolve('packages/core/package.json'))('esbuild')) as typeof import('esbuild')
-  await build({ stdin: { resolveDir: process.cwd(), contents: `
-    import { WorkbenchUserStateStore } from './apps/desktop/src/main/workbench-user-state.ts';
-    const owner = new WorkbenchUserStateStore(process.argv[2]);
-    const result = process.argv[3] === 'write' ? await owner.write(process.argv[4]) : await owner.read();
-    await owner.flushDiagnostics();
-    process.stdout.write(JSON.stringify({ result, observation: owner.observe() }));` }, outfile: worker,
-    platform: 'node', format: 'esm', bundle: true,
-    alias: { '@agentmux/core': resolve('packages/core/src/durable-write.ts'),
-      '@agentmux/identity': resolve('packages/identity/src/index.ts') },
-    banner: { js: "import { createRequire as diagnosticCreateRequire } from 'node:module'; const require = diagnosticCreateRequire(import.meta.url);" },
-    logLevel: 'silent' })
-})
-
 function child(args: string[]): Promise<any> {
+  const source = pathToFileURL(resolve('apps/desktop/src/main/workbench-user-state.ts')).href
+  const worker = `
+    import { WorkbenchUserStateStore } from ${JSON.stringify(source)};
+    const [path, operation, value] = process.argv.slice(1);
+    const owner = new WorkbenchUserStateStore(path);
+    const result = operation === 'write' ? await owner.write(value) : await owner.read();
+    await owner.flushDiagnostics();
+    process.stdout.write(JSON.stringify({ result, observation: owner.observe() }));`
+  const loader = resolve('packages/core/scripts/helpers/core-source-loader.mjs')
   return new Promise((yes, no) => {
-    const process = spawn(globalThis.process.execPath, [worker, ...args], { stdio: ['ignore', 'pipe', 'pipe'] })
+    const process = spawn(globalThis.process.execPath, ['--import', loader, '--input-type=module', '--eval', worker, '--', ...args],
+      { stdio: ['ignore', 'pipe', 'pipe'] })
     let output = '', errors = ''
     process.stdout.on('data', data => { output += data }); process.stderr.on('data', data => { errors += data })
     process.on('error', no); process.on('close', code => {

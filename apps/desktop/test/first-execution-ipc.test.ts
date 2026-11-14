@@ -82,6 +82,37 @@ it('actual native save bridge requires a matching writer ACK and rejects a missi
   } finally { await dispose() }
 })
 
+it('actual native save bridge validates each new document only once', async () => {
+  const { workbenchUserState, dispose } = await owningBridge()
+  const document = (draft: string) => JSON.stringify({ state: { agentComposerDrafts: { original: draft } }, version: 1 })
+  const original = document('Original input'), edited = document('Edited input')
+  const parse = vi.spyOn(JSON, 'parse')
+  try {
+    await expect(bridge.api!.ui.writeWorkbenchState(original)).resolves.toMatchObject({ diskDurability: 'confirmed' })
+    await expect(bridge.api!.ui.writeWorkbenchState(edited)).resolves.toMatchObject({ diskDurability: 'confirmed' })
+    const parsed = parse.mock.calls.map(([input]) => input).filter(input => input === original || input === edited)
+    expect(parsed).toEqual([original, edited])
+    expect(await readFile(workbenchUserState.path, 'utf8')).toBe(edited)
+  } finally { parse.mockRestore(); await dispose() }
+})
+
+it('actual native save bridge protects a same-length document with a changed invalid envelope', async () => {
+  const { workbenchUserState, dispose } = await owningBridge()
+  const original = JSON.stringify({ state: { agentComposerDrafts: { original: 'Durable input' } }, version: 1 })
+  const damaged = original.replace('"state"', '"other"')
+  const edited = original.replace('Durable input', 'Edited input')
+  try {
+    const receipt = await bridge.api!.ui.writeWorkbenchState(original)
+    expect(damaged).not.toBe(original)
+    expect(Buffer.byteLength(damaged)).toBe(receipt.sizeBytes)
+    await writeFile(workbenchUserState.path, damaged)
+    await expect(bridge.api!.ui.writeWorkbenchState(edited)).rejects.toMatchObject({ code: 'WORKBENCH_USER_STATE_INVALID' })
+    expect(await readFile(workbenchUserState.path, 'utf8')).toBe(damaged)
+    expect(workbenchUserState.observe()).toMatchObject({ availability: 'unconfirmed', diskDurability: 'unconfirmed', lastConfirmedWrite: receipt })
+    await workbenchUserState.flushDiagnostics()
+  } finally { await dispose() }
+})
+
 it('a readable native document or replacement cannot manufacture the original writer ACK', async () => {
   const { workbenchUserState, dispose } = await owningBridge()
   const original = JSON.stringify({ state: { agentComposerDrafts: { original: 'Readable original' } }, version: 1 })
