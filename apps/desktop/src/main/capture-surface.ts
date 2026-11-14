@@ -387,7 +387,7 @@ export class CaptureSurface {
       return
     }
     if (action === 'source') {
-      if (!active.session.sourceChoices || !['display', 'window', 3, 5, 10].includes(params.mode as never)) throw new Error('Choose a source from this screenshot component.')
+      if (!active.session.sourceChoices || active.finishing || (active.owner !== null && active.owner !== frameInput.displayId) || !['display', 'window', 3, 5, 10].includes(params.mode as never)) throw new Error('Choose a source from this screenshot component.')
       active.end({ state: 'source', mode: params.mode as 'display' | 'window' | 3 | 5 | 10, background: active.background }); return
     }
     if (action === 'cancel') { active.end({ state: 'cancelled' }); return }
