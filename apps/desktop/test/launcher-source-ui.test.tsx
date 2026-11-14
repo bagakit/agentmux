@@ -99,7 +99,7 @@ async function routedLauncher(catalogue?: Promise<void>, explicit = true, observ
     // Only original Source identity/describe and final creation are controlled leaves.
     // D Provider options and selected inventory cross the real signed four-Core route.
     if (method === 'runtime.owner.identity') return { owner: { runtimeId: route.b.identity.runtimeId, ownerInstanceId: 'B-original-instance', protocolVersion: 2, processId: process.pid, ctxmux: null, availability: 'connected' } }
-    if (method === 'agent.open.describe') return { source: { runtimeId: route.b.identity.runtimeId, ownerInstanceId: 'B-original-instance' }, contracts: { ordinaryLaunch: supported ? { revision: 1, destination: 'source-zone-background' } : null, externalAssociation: null } }
+    if (method === 'agent.open.describe') return { source: { runtimeId: route.b.identity.runtimeId, ownerInstanceId: 'B-original-instance' }, contracts: { ordinaryLaunch: supported ? { revision: 1, destination: 'source-zone-background' } : null, externalAssociation: null, takeover: null } }
     if (method === 'agent.open') {
       const request = params as AgentMuxRpcParams<'agent.open'>; if (!request.operationId) throw Error('The original request must carry its operation.'); opens.push(request)
       return { operationId: request.operationId, outcome: 'unknown', from: null, to: null, agent: null, resource: null,

@@ -76,7 +76,7 @@ async function fixture() {
     calls.push({ method, input })
     if (method === 'executors') return inventory as SpaceMountMethods[M]['result']
     if (method === 'describe') return { source: { runtimeId: b.identity.runtimeId, ownerInstanceId: b.identity.ownerInstanceId },
-      contracts: { ordinaryLaunch: { revision: 1, destination: 'source-zone-background' }, externalAssociation: 1 } } as SpaceMountMethods[M]['result']
+      contracts: { ordinaryLaunch: { revision: 1, destination: 'source-zone-background' }, externalAssociation: 1, takeover: null } } as SpaceMountMethods[M]['result']
     return await f.api.call(method, input, signal)
   })
   return { ...f, a, b, config, project, coordinator, home, calls, inventory }
@@ -104,7 +104,7 @@ it('Reach recovery follows externalAssociation rather than ordinaryLaunch', asyn
   await initializeSpatialControlFixture()
   const sourceCalls = api.spaceMounts.call.bind(api.spaceMounts)
   vi.spyOn(api.spaceMounts, 'call').mockImplementation((method, input, signal) => method === 'describe'
-    ? Promise.resolve({ source: { runtimeId: f.b.identity.runtimeId, ownerInstanceId: f.b.identity.ownerInstanceId }, contracts: { ordinaryLaunch: { revision: 1, destination: 'source-zone-background' }, externalAssociation: null } }) as never
+    ? Promise.resolve({ source: { runtimeId: f.b.identity.runtimeId, ownerInstanceId: f.b.identity.ownerInstanceId }, contracts: { ordinaryLaunch: { revision: 1, destination: 'source-zone-background' }, externalAssociation: null, takeover: null } }) as never
     : sourceCalls(method, input, signal))
   await dom.render(<SourceAgentTargetSetup config={f.config} active fixedResourceWorkspaceId={f.project.id} actionLabel="Apply" presentation="anchored-editor" onChooseCustom={() => {}} onOpenHost={openHost} onApply={selected} />)
   await choose('independent-coordinator')
@@ -119,7 +119,7 @@ it('a healthy Reach does not inherit an ordinaryLaunch Core update requirement',
   await initializeSpatialControlFixture()
   const sourceCalls = api.spaceMounts.call.bind(api.spaceMounts)
   vi.spyOn(api.spaceMounts, 'call').mockImplementation((method, input, signal) => method === 'describe'
-    ? Promise.resolve({ source: { runtimeId: f.b.identity.runtimeId, ownerInstanceId: f.b.identity.ownerInstanceId }, contracts: { ordinaryLaunch: null, externalAssociation: 1 } }) as never
+    ? Promise.resolve({ source: { runtimeId: f.b.identity.runtimeId, ownerInstanceId: f.b.identity.ownerInstanceId }, contracts: { ordinaryLaunch: null, externalAssociation: 1, takeover: null } }) as never
     : sourceCalls(method, input, signal))
   await dom.render(<SourceAgentTargetSetup config={f.config} active fixedResourceWorkspaceId={f.project.id} actionLabel="Apply" presentation="anchored-editor" onChooseCustom={() => {}} onOpenHost={openHost} onApply={selected} />)
   await choose('independent-coordinator')

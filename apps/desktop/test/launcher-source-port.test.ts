@@ -14,7 +14,7 @@ it('ordinary Source discovery reaches the original Core through trusted Main/Pre
   const target = { hostId: b.id, reference: { runtimeId: b.identity.runtimeId, spaceId: 'original-space' } }
   const description = await f.api.call('describe', target)
   expect(description).toEqual({ source: { runtimeId: b.identity.runtimeId, ownerInstanceId: b.identity.ownerInstanceId },
-    contracts: { ordinaryLaunch: null, externalAssociation: null } })
+    contracts: { ordinaryLaunch: null, externalAssociation: null, takeover: null } })
   const source = { hostId: b.id, expectedRuntimeId: b.identity.runtimeId }
   expect(await f.api.call('describe', source)).toEqual(description)
   expect(await f.api.call('hostChoices', source)).toMatchObject({ runtimeId: b.identity.runtimeId, hosts: [
