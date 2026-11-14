@@ -48,6 +48,7 @@ it.runIf(!nativeBranch)('executes the shipping persistence branch in an isolated
     child.once('error', no); child.once('close', code => { clearTimeout(timer); yes({ code, text }) })
   })
   expect(result.code, result.text).toBe(0)
+  if (process.env.AGENTMUX_WORKBENCH_CLOSE_CONSUMER_LOG) await writeFile(process.env.AGENTMUX_WORKBENCH_CLOSE_CONSUMER_LOG, result.text)
   expect(result.text).toMatch(/[1-9]\d* passed/)
 }, 190_000)
 
@@ -634,9 +635,18 @@ it.runIf(Boolean(restartMode))('private restart worker restores the original wor
     expect(f.store.getState().sessions.find(s => s.control.kind === 'agent' && s.control.agentSessionId === f.agent.agentSessionId)?.control.run.runId).toBe(original.agentRun)
     const found = await f.rpc.call('space.close.ls', {})
     expect(found.items.map(x => x.operationId).sort()).toEqual(['restart-prepared', 'restart-unknown'])
+    expect(found.items.every(x => x.diskDurability === 'unconfirmed')).toBe(true)
     expect((await f.rpc.call('space.close.inspect', { operationId: 'restart-prepared' })).operation).toMatchObject({ phase: 'prepared', diskDurability: 'unconfirmed' })
+    const path = join(f.user.path + '.close-operations', createHash('sha256').update('restart-unknown').digest('hex') + '.json')
+    const beforeInspection = await readFile(path)
     const unknown = (await f.rpc.call('space.close.inspect', { operationId: 'restart-unknown' })).operation!
-    expect(unknown).toMatchObject({ outcome: 'partial', diskDurability: 'unconfirmed' })
+    expect(unknown.outcome).toBe('partial')
+    // The cold Main read above cannot borrow a previous writer ACK. An explicit
+    // original-child query may then persist new facts with its own current ACK
+    // (for example the reopened Core's unconfirmed journal observation).
+    const newlyWritten = !(await readFile(path)).equals(beforeInspection)
+    expect(unknown.diskDurability).toBe(newlyWritten ? 'confirmed' : 'unconfirmed')
+    if (newlyWritten) expect(unknown.resources[0]?.receipt).toMatchObject({ outcome: 'unknown', acknowledgement: null, diskDurability: 'unconfirmed' })
     expect((await f.apply(unknown)).code).toBe(1)
     expect(f.stops).not.toHaveBeenCalled()
     expect((await f.native.client.status(original.rawRun)).state.type).toBe('running')
