@@ -49,7 +49,7 @@ Use these exact import paths under `@agentmux/client-ui/`. Each example imports 
 | Actions | `components/Button`, `components/IconButton` | `styles/buttons.css`. [Toggle, disabled action and pending save](examples/actions.tsx). |
 | Fields | `input`, `components/FormRow` | `input/styles.css`. [Label, help, error and multiline draft](examples/fields.tsx). |
 | Overlays | `components/Modal`, `components/HoverDropdownMenu`, `overlay-host` | `styles/overlays.css` for the stack and attachment slots. [Host document, panel layout and focus](examples/overlays.tsx). |
-| Readable feedback | `components/InlineRenameField` | `input/styles.css`, `styles/semantic-icons.css` and `styles/inline-rename-field.css`. [Rename, pending receipt and retryable error](examples/feedback.tsx). |
+| Readable feedback | `components/ActionFeedback`, `components/InlineRenameField` | `styles/buttons.css` for bounded feedback. `input/styles.css`, `styles/semantic-icons.css` and `styles/inline-rename-field.css` for [rename, pending receipt and retryable error](examples/feedback.tsx). |
 | Work location | `patterns/agent-work-location` | `patterns/agent-work-location.css` and `styles/semantic-icons.css`. [Shared summary and distinct routes](examples/locations.tsx). |
 | Theme | `theme`, `theme/model`, `icons` | `styles/theme-defaults.css` for initial tokens, `styles/palette.css` for semantic surfaces and `styles/semantic-icons.css` for icon motion. [Light, dark and reduced motion](examples/theme.tsx). |
 
@@ -142,6 +142,8 @@ For a tree rendered into a separate document or a dedicated overlay container, i
 Import `Button` and `IconButton` from `@agentmux/client-ui/components/Button` and `@agentmux/client-ui/components/IconButton`. Both render a native button, default `type` to `button`, and forward native props and React 19 refs; use an explicit `type="submit"` for form submission. Callers keep their handlers, `disabled`, `aria-busy`, requests and drafts; busy presentation never disables an otherwise available action or retries an operation.
 
 `Button` accepts `variant="secondary" | "primary" | "danger"` (default `secondary`). `IconButton` requires `aria-label`, uses it as the default native title, and accepts `intent="neutral" | "danger"`; an explicit title is kept. The `.small-button`, `.primary-button`, `.danger-button` and `.icon-button` classes have one owner in `styles/buttons.css`; include `@agentmux/client-ui/styles/buttons.css` when importing individual styles. Hosts keep surface-specific geometry and supply the theme tokens.
+
+Use `ActionFeedback` next to an action whose result can change in place. Set `bounded` to reserve two text lines and allow longer messages to scroll. Pass `role="status"` for ordinary progress, `role="alert"` for errors that need immediate announcement, and `tabIndex={0}` for a scrollable error the reader needs to reach by keyboard. The caller supplies the message and owns the operation.
 
 ### Action menu
 
