@@ -83,7 +83,7 @@ it('mobile locations actual App folds aliases without folding context or cross-H
   await click(button(focus, '刷新空间目录'))
   expect(focus.querySelector('.mobile-agent-locations-entry')?.getAttribute('aria-label')).toBe('Original Agent · 位置待确认')
   await click(focus.querySelector('.mobile-agent-locations-entry')!)
-  expect(sheet().textContent).toContain('位置事实还没确认')
+  expect(sheet().textContent).toContain('位置还没确认，对话入口仍可使用')
   await click(button(sheet(), '关闭位置选择')); await click(focus.querySelector('.mobile-agent-row__open')!)
   expect(editor(view.element)).toBe(input); expect(attempts()).toEqual(retained)
   expect(f.submit).toHaveBeenCalledTimes(1); expect(f.signalAgent).not.toHaveBeenCalled(); expect(f.rejoinInput).not.toHaveBeenCalled()
@@ -146,9 +146,9 @@ it('mobile locations distinguishes zero one and unknown facts without closing th
     const entry = await waitForElement<HTMLButtonElement>(view.element, '.mobile-agent-locations-entry')
     expect(entry.getAttribute('aria-label')).toBe(`Original Agent · ${kind === 'unknown' ? '位置待确认' : `${kind === 'one' ? 1 : 0} 个位置`}`)
     await click(entry)
-    if (kind === 'zero') expect(sheet().textContent).toContain('当前目录没有已绑定的展示位置')
+    if (kind === 'zero') expect(sheet().textContent).toContain('当前目录没有展示位置')
     else expect(choices()).toHaveLength(2)
-    if (kind === 'unknown') { await click(choices()[0]!); expect(open).not.toHaveBeenCalled(); expect(sheet().textContent).toContain('来源或目录读取还没确认') }
+    if (kind === 'unknown') { await click(choices()[0]!); expect(open).not.toHaveBeenCalled(); expect(sheet().textContent).toContain('这个位置还没确认') }
     await click(button(sheet(), '关闭位置选择')); await click(view.element.querySelector('.mobile-agent-row__open')!)
     expect(open).toHaveBeenCalledOnce(); expect(f.submit).not.toHaveBeenCalled()
     await act(async () => mounted.pop()!.root.unmount()); view.element.remove()
