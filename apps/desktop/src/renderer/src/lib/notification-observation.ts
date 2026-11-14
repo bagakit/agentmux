@@ -21,11 +21,13 @@ export type NotificationProjection = {
   activityNotRetained: number
 }
 
+export type NotificationProjectionSection = AgentMuxClientNotificationRecord['section']
+
 // A borrowed reader of the committed notification owner, not another notification
 // store. Disposing that owner removes its reader; an absent owner is never empty.
 const instanceId = mintObjectId()
-const readers = new Set<() => NotificationProjection>()
-export function registerNotificationReader(read: () => NotificationProjection): () => void {
+const readers = new Set<(section?: NotificationProjectionSection) => NotificationProjection>()
+export function registerNotificationReader(read: (section?: NotificationProjectionSection) => NotificationProjection): () => void {
   readers.add(read)
   return () => { readers.delete(read) }
 }
@@ -40,12 +42,12 @@ export function observeNotifications(request: AgentMuxControlInspectNotification
     raw: { retention: 'unknown', returned: 'unavailable', truncated: null }, issue: 'source-unavailable'
   }
   if (readers.size !== 1) return result
-  const projection = readers.values().next().value!()
+  const list = 'list' in target ? target.list : null
+  const projection = readers.values().next().value!(list?.section)
   const entries = [
     ...projection.current.map(entry => ({ entry, section: 'current' as const })),
     ...projection.activity.map(entry => ({ entry, section: 'activity' as const }))
   ]
-  const list = 'list' in target ? target.list : null
   const selected = entries.map(({ entry, section }) => ({ entry, section, notificationId: digest([section, entry.id]) }))
     .filter(item => 'notificationId' in target ? item.notificationId === target.notificationId
       : (!list?.section || item.section === list.section) && (!list?.category || item.entry.category === list.category) &&
@@ -90,11 +92,12 @@ export function observeNotifications(request: AgentMuxControlInspectNotification
     }
     if (request.includeRaw) {
       // Original getters stay lazy for safe metadata reads and for off-page items.
+      const provenance = entry.observation.provenance
       record.original = { title: entry.title, detail: entry.detail,
         ...(entry.impact === undefined ? {} : { impact: entry.impact }),
         subjectLabel: entry.subject.label,
         ...(entry.subject.context === undefined ? {} : { subjectContext: entry.subject.context }),
-        ...(entry.observation.provenance === undefined ? {} : { provenance: entry.observation.provenance }) }
+        ...(provenance === undefined ? {} : { provenance }) }
       result.raw.returned = 'included'
       if (bytes(result) > request.maxBytes - 64) {
         record.original = null

@@ -122,6 +122,6 @@ export function useRunService(session: TerminalSessionSnapshot | undefined, proj
   return session ? projection.read(session) : null
 }
 
-export function useRunServiceHealthChanges(): void {
-  useSyncExternalStore(runServiceProjection.subscribeAll, runServiceProjection.globalVersion)
+export function useRunServiceHealthChanges(): number {
+  return useSyncExternalStore(runServiceProjection.subscribeAll, runServiceProjection.globalVersion)
 }
