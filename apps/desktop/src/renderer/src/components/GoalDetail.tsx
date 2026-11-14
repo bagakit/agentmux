@@ -32,7 +32,7 @@ const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
 const ThemeObjectGoalIcon = semanticIconComponent('object.goal')
 const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
 const QUEUE_NAMES: Record<GoalStage, string> = { you: 'needs you', attention: 'needs attention', define: 'needs defining', agents: 'is with agents', unknown: 'is unknown', finished: 'is finished' }
-
+type GoalReadingSection = 'overview' | 'plan' | 'activity'
 
 export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, onPlan, acknowledgementFeedback, onAcknowledgementFeedbackChange, motePending = null, moteError, onRetryMote, queue = null, onOpenGoal }: { queue?: GoalQueuePosition | null; onOpenGoal?: (id: string) => void; demand: DemandProjection; onClose: () => void; onOpenMote: () => void; onGrill: () => void; onGrounding: () => void; onPlan: () => void; acknowledgementFeedback: GoalAcknowledgementFeedback; onAcknowledgementFeedbackChange: (patch: Partial<GoalAcknowledgementFeedback>) => void; motePending?: 'open' | 'grill' | 'grounding' | 'plan' | null; moteError: { message: string; mode: 'open' | 'grill' | 'grounding' | 'plan' } | null; onRetryMote: () => void }) {
   const updateDemand = useAppStore((state) => state.updateDemand)
@@ -50,6 +50,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   const overviewRef = useRef<HTMLElement>(null)
   const planRef = useRef<HTMLDivElement>(null)
   const activityRef = useRef<HTMLDivElement>(null)
+  const [readingSection, setReadingSection] = useState<GoalReadingSection>('overview')
   const readingEntry = useAppStore(state => state.goalReadingEntry)
   const revealedEntry = useRef<string | null>(null)
   const [copied, setCopied] = useState<'goal' | 'plan' | null>(null)
@@ -59,11 +60,41 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   function revealSection(section: HTMLElement | null, focus = true) {
     const detail = detailRef.current
     if (!detail || !section) return
+    const destination = section.dataset.goalReadingSection as GoalReadingSection | undefined
+    if (destination) setReadingSection(destination)
     if (focus) useAppStore.setState({ goalReadingEntry: null })
     const margin = Number.parseFloat(getComputedStyle(section).scrollMarginTop) || 0
     detail.scrollTop = Math.max(0, detail.scrollTop + section.getBoundingClientRect().top - detail.getBoundingClientRect().top - margin)
     if (focus) section.focus({ preventScroll: true })
   }
+  useLayoutEffect(() => {
+    const detail = detailRef.current
+    if (!detail) return
+    let frame: number | null = null
+    function updateReadingSection() {
+      frame = null
+      const sections = [overviewRef.current, planRef.current, activityRef.current].filter((section): section is HTMLElement => Boolean(section))
+      const viewport = detail!.getBoundingClientRect()
+      if (!viewport.height || !sections.length) return
+      const margin = Number.parseFloat(getComputedStyle(sections[0]!).scrollMarginTop) || 0
+      const readingLine = viewport.top + margin + 2
+      const positions = sections.map(section => ({ id: section.dataset.goalReadingSection as GoalReadingSection, top: section.getBoundingClientRect().top }))
+      const passed = positions.filter(section => section.top <= readingLine)
+      const latestTop = Math.max(...passed.map(section => section.top))
+      // The brief and plan share a row on wide surfaces. Keep the reader's chosen anchor there.
+      const currentRow = passed.filter(section => Math.abs(section.top - latestTop) <= 2)
+      const activity = positions.find(section => section.id === 'activity')
+      const atEnd = detail!.scrollHeight > detail!.clientHeight && detail!.scrollHeight - detail!.scrollTop - detail!.clientHeight <= 2
+      setReadingSection(current => atEnd && activity && activity.top < viewport.bottom ? 'activity'
+        : currentRow.find(section => section.id === current)?.id ?? currentRow[0]?.id ?? 'overview')
+    }
+    function scheduleReadingSection() { if (frame === null) frame = requestAnimationFrame(updateReadingSection) }
+    detail.addEventListener('scroll', scheduleReadingSection, { passive: true })
+    const observer = new ResizeObserver(scheduleReadingSection)
+    observer.observe(detail)
+    for (const section of [overviewRef.current, planRef.current, activityRef.current]) if (section) observer.observe(section)
+    return () => { detail.removeEventListener('scroll', scheduleReadingSection); observer.disconnect(); if (frame !== null) cancelAnimationFrame(frame) }
+  }, [demand.id])
   useLayoutEffect(() => {
     if (!readingEntry || readingEntry.phase !== 'ready' || readingEntry.section !== 'plan' || readingEntry.goalId !== demand.id || revealedEntry.current === readingEntry.token) return
     const state = useAppStore.getState()
@@ -118,9 +149,9 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
         <div className="goals-detail__overview"><GoalMeta demand={demand} /><button type="button" className="goals-detail__team-link" onClick={() => revealSection(teamRef.current)}>Team<ThemeNavigationForwardIcon size={12} /></button></div>
         <p className="goals-detail__edit-status" aria-live="polite">{draft ? draftIssue ? 'Edits kept · Save unconfirmed' : 'Unsaved edits' : null}</p>
         <nav className="goals-detail__reading-nav" aria-label="Goal reading sections">
-          <button type="button" onClick={() => revealSection(overviewRef.current)}>Overview</button>
-          <button type="button" onClick={() => revealSection(planRef.current)}>Plan</button>
-          <button type="button" onClick={() => revealSection(activityRef.current)}>Activity</button>
+          <button type="button" aria-current={readingSection === 'overview' ? 'location' : undefined} onClick={() => revealSection(overviewRef.current)}>Overview</button>
+          <button type="button" aria-current={readingSection === 'plan' ? 'location' : undefined} onClick={() => revealSection(planRef.current)}>Plan</button>
+          <button type="button" aria-current={readingSection === 'activity' ? 'location' : undefined} onClick={() => revealSection(activityRef.current)}>Activity</button>
           {demand.address ? <button type="button" className="goals-detail__copy" onClick={() => void copyLink('goal')}>{copied === 'goal' ? 'Goal link copied' : 'Copy goal link'}</button> : null}
         </nav>
         {!demand.address ? <details className="goals-detail__address-issue"><summary>Goal address unconfirmed</summary><p className="goals-caption">{demand.addressIssue ?? 'The original Goal owner has not confirmed its address. You can keep reading and working with this goal.'}</p></details> : null}
@@ -136,7 +167,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
         </div>
         <aside ref={teamRef} tabIndex={-1} className="goals-detail__side" aria-label="Goal team and properties">
           <GoalExecution demand={demand} onUpdate={update} />
-          <section className="goals-detail__properties" aria-label="Goal properties"><h2>Properties</h2><GoalCommonProperties demand={demand} onUpdate={patch => void update(patch)} /><GoalProperties demand={demand} onUpdate={patch => void update(patch)} /></section>
+          <details className="goals-detail__properties" aria-label="Goal properties"><summary>Properties<span>Status, priority, project</span></summary><GoalCommonProperties demand={demand} onUpdate={patch => void update(patch)} /><GoalProperties demand={demand} onUpdate={patch => void update(patch)} /></details>
         </aside>
       </div>
     </article>
