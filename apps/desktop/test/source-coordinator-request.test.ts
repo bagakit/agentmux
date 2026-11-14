@@ -15,6 +15,17 @@ import { WORKBENCH_USER_STATE_KEY } from '../src/renderer/src/lib/workbench-user
 import { SourceCoordinatorRequests } from '../src/renderer/src/components/SourceCoordinatorRequests'
 import { createClientUiRoot } from './helpers/client-ui-render'
 
+// These consumers prove C/L. Name ports are an independent unavailable leaf here;
+// the Name suite drives their actual trusted Main and public Core owners.
+function originalSpaceCall(implementation: typeof api.spaceMounts.call) {
+  const original = vi.fn(implementation)
+  vi.spyOn(api.spaceMounts, 'call').mockImplementation((method, input, signal) => {
+    if (method === 'memberNameInspect' || method === 'memberNameChange' || method === 'agentNameInspect' || method === 'agentNameChange')
+      return Promise.reject(Error('Name observation is outside this original C/L fixture.'))
+    return original(method, input, signal)
+  })
+  return original
+}
 const initial = useAppStore.getState(), prompt = '  The exact original task\n', names = { agentName: '  Original Agent ', tabName: ' Original B Tab  ' }
 const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This device' }], executors: {}, workspaces: [],
   appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, saveBookmark: true, viewport: true, more: true } } }
@@ -96,7 +107,7 @@ it('confirmed original A creation reaches B association once; concurrent explici
   const rename = vi.spyOn(api.spatial, 'renameLabel'), witness = vi.spyOn(api.sessions, 'executionBinding')
   let input!: AgentLaunchInput
   vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async request => { input = request; witness.mockResolvedValue(acknowledgeWitness(request)); return creation(request) })
-  const open = vi.spyOn(api.spaceMounts, 'call').mockImplementation((method, _request) => {
+  const open = originalSpaceCall((method, _request) => {
     expect(method).toBe('open'); return source.promise as ReturnType<typeof api.spaceMounts.call<typeof method>>
   })
   await f.start(); await vi.waitFor(() => expect(open).toHaveBeenCalledOnce())
@@ -122,7 +133,7 @@ it('a wrong B Runtime in the original association witness refuses only L and pre
     witness.mockResolvedValue({ ...value, association: { ...value.association, resourceRuntimeId: 'another-B-Runtime' } })
     return creation(request)
   })
-  const open = vi.spyOn(api.spaceMounts, 'call').mockRejectedValue(Error('An unexpected L was dispatched'))
+  const open = originalSpaceCall(async () => { throw Error('An unexpected L was dispatched') })
   await f.start()
   await vi.waitFor(() => expect(Object.values(useAppStore.getState().mountedSpaceInputs as Record<string, import('../src/renderer/src/lib/source-coordinator-input').SourceCoordinatorInput>)[0]?.association.issue).toContain('has not confirmed this project resource'))
   expect(open).not.toHaveBeenCalled()
@@ -134,7 +145,7 @@ it('the actual original-request service can read B while A lookup is pending and
   await expect(f.start()).rejects.toThrow('lost')
   const input = Object.values(useAppStore.getState().mountedSpaceInputs as Record<string, import('../src/renderer/src/lib/source-coordinator-input').SourceCoordinatorInput>)[0]!
   const readA = vi.spyOn(api.sessions, 'resolveExecutionBinding').mockReturnValue(new Promise(() => {})), continuation = vi.spyOn(api.sessions, 'continueExecution')
-  const readB = vi.spyOn(api.spaceMounts, 'call').mockImplementation(async (method, query) => {
+  const readB = originalSpaceCall(async (method, query) => {
     expect(method).toBe('inspect'); expect(query).toMatchObject({ hostId: input.target.hostId, reference: input.target.reference, requestId: input.association.operationId })
     return { catalog: { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [] }, request: { known: false, operationId: input.association.operationId, report: null } } as Awaited<ReturnType<typeof api.spaceMounts.call<typeof method>>>
   })
@@ -156,7 +167,7 @@ it('explicit original-C continuation presents its confirmed Agent even when the 
   vi.spyOn(api.sessions, 'resolveExecutionBinding').mockResolvedValue({ target, inspection: acknowledgeWitness(input.request) })
   vi.spyOn(api.sessions, 'executionBinding').mockResolvedValue(acknowledgeWitness(input.request))
   const continuation = vi.spyOn(api.sessions, 'continueExecution').mockResolvedValue(creation(input.request))
-  const source = vi.spyOn(api.spaceMounts, 'call').mockImplementation(async method => {
+  const source = originalSpaceCall(async method => {
     if (method === 'open') throw Error('Original L reply lost')
     expect(method).toBe('inspect')
     return { catalog: { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [] }, request: { known: false, operationId: input.association.operationId, report: null } } as Awaited<ReturnType<typeof api.spaceMounts.call<typeof method>>>
@@ -187,7 +198,7 @@ it('one unreadable private C/L sibling keeps the valid original request controls
   const before = useAppStore.getState(), bytes = JSON.stringify(before.mountedSpaceInputs)
   const target = { coordinator: { hostId: input.request.hostId, runtimeId: input.request.sourceCoordinator.runtimeId }, reference: { bindingId: 'original-binding', agentSessionId: input.request.agentSessionId, createOperationId: input.request.createOperationId } }
   vi.spyOn(api.sessions, 'resolveExecutionBinding').mockResolvedValue({ target, inspection: acknowledgeWitness(input.request) })
-  vi.spyOn(api.spaceMounts, 'call').mockImplementation(async () => ({ catalog: { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [] },
+  originalSpaceCall(async () => ({ catalog: { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [] },
     request: { operationId: input.association.operationId, known: false, report: null } }))
   const continuation = vi.spyOn(api.sessions, 'continueExecution').mockRejectedValue(Error('This exact Coordinator observation remains unknown'))
   const container = document.createElement('div'); document.body.append(container); const root = createClientUiRoot(container)
@@ -244,7 +255,7 @@ it.each([{ saved: false, partial: false }, { saved: true, partial: false }, { sa
     agent: null, resource: null, issues: !producer && partial ? [{ step: 'placement', code: 'SPACE_ASSOCIATION_PLACEMENT_UNCONFIRMED',
       message: 'The current association has no matching original placement.', recovery: 'Inspect the original Source placement; retain its Agent and operation.' }] : [], save: { layoutApplied: producer, clientStateWritten: producer, storageFlushRequested: producer,
       diskDurability: producer && saved ? 'confirmed' : 'unconfirmed', reason: producer ? null : reason } })
-  const source = vi.spyOn(api.spaceMounts, 'call').mockImplementation(async (method, query) => {
+  const source = originalSpaceCall(async (method, query) => {
     if (method === 'open') return report((query as import('../src/shared/space-mount').SpaceMountMethods['open']['input']).request.operationId!, true) as Awaited<ReturnType<typeof api.spaceMounts.call<typeof method>>>
     expect(method).toBe('inspect'); const operationId = (query as import('../src/shared/space-mount').SpaceMountMethods['inspect']['input']).requestId
     return { catalog: { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [] }, request: { operationId, known: true, report: report(operationId, false) } } as Awaited<ReturnType<typeof api.spaceMounts.call<typeof method>>>
@@ -285,7 +296,7 @@ it('a user continues an unknown L with the exact frozen source and request, reta
   const continueC = vi.spyOn(api.sessions, 'continueExecution')
   const witness = vi.spyOn(api.sessions, 'executionBinding').mockImplementation(async () => acknowledgeWitness(original))
   let writes = 0
-  const source = vi.spyOn(api.spaceMounts, 'call').mockImplementation(async (method, query) => {
+  const source = originalSpaceCall(async (method, query) => {
     if (method === 'inspect') return delayedRead.promise as ReturnType<typeof api.spaceMounts.call<typeof method>>
     expect(method).toBe('open'); writes++
     const request = (query as import('../src/shared/space-mount').SpaceMountMethods['open']['input']).request
