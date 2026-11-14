@@ -72,7 +72,7 @@ export function MediaTimeline({ bounds, fraction, buffered, label, valueText, cl
     const thumb = thumbWidth.current ??= Number.parseFloat(getComputedStyle(input).getPropertyValue('--media-thumb')) || 0, travel = track.width - thumb
     if (travel <= 0) return null
     const along = Math.min(1, Math.max(0, (clientX - track.left - thumb / 2) / travel))
-    const x = thumb / 2 + along * travel, sides = preview && within.current ? within.current.getBoundingClientRect() : lane
+    const x = thumb / 2 + along * travel, sides = within.current ? within.current.getBoundingClientRect() : lane
     return { time: bounds.start + Math.round(along * TIMELINE_STEPS) / TIMELINE_STEPS * span, edge: x / track.width, x: track.left - lane.left + x,
       lo: sides.left - lane.left, hi: sides.right - lane.left, room: lane.top - sides.top }
   }
@@ -165,6 +165,7 @@ export function MediaTimeline({ bounds, fraction, buffered, label, valueText, cl
     ...(hover ? { '--media-hover': `${hover.edge * 100}%` } : {}) } as CSSProperties
   // Losing the preview, as when main playback fails, drops the decoder in that same render.
   const decoderShown = preview !== null && decoding
+  const pointedClock = hover ? clock(hover.time) : ''
   return <div className="media-player__timeline">
     <input ref={slider} className="media-player__slider" type="range" data-media-timeline="" aria-label={label} aria-valuetext={valueText}
       min={0} max={TIMELINE_STEPS} step={1} value={Math.round(fraction * TIMELINE_STEPS)} style={style}
@@ -174,12 +175,13 @@ export function MediaTimeline({ bounds, fraction, buffered, label, valueText, cl
     {hover || decoderShown ? <div className="media-player__preview" aria-hidden="true" data-idle={hover ? undefined : ''}
       data-frame={hover && decoderShown && frameShown ? '' : undefined}
       style={{ ...(preview ? { '--media-preview-ratio': preview.ratio } : {}), ...(hover ? { '--media-preview-x': `${hover.x}px`,
-        '--media-preview-lo': `${hover.lo}px`, '--media-preview-hi': `${hover.hi}px`, '--media-preview-room': `${hover.room}px` } : {}) } as CSSProperties}>
+        '--media-preview-lo': `${hover.lo}px`, '--media-preview-hi': `${hover.hi}px`, '--media-preview-room': `${hover.room}px`,
+        '--media-bubble-ch': pointedClock.length } : {}) } as CSSProperties}>
       {decoderShown ? <span className="media-player__preview-frame">
         <video ref={attachDecoder} src={preview.url} muted preload="metadata" playsInline tabIndex={-1} disablePictureInPicture disableRemotePlayback
           onLoadedMetadata={() => previewSeeks.current?.open()} onSeeked={onPreviewSeeked} onError={onPreviewError} />
       </span> : null}
-      {hover ? <output className="media-player__bubble">{clock(hover.time)}</output> : null}
+      {hover ? <output className="media-player__bubble">{pointedClock}</output> : null}
     </div> : null}
   </div>
 }
