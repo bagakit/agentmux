@@ -233,11 +233,17 @@ void run().catch(error => {
   receipt.failure = { name: error.name, message: error.message, stack: error.stack }
   process.stderr.write(JSON.stringify(receipt.failure) + '\n')
 }).finally(async () => {
+  process.stdout.write('public cleanup: dispose surface\n')
   surface?.dispose()
   for (const child of children) child.kill('SIGTERM')
+  process.stdout.write('public cleanup: stop server\n')
   await server?.stop()
+  process.stdout.write('public cleanup: remove endpoint\n')
   if (endpointDirectory) await rm(endpointDirectory, { recursive: true, force: true })
+  process.stdout.write('public cleanup: destroy windows\n')
   for (const window of BrowserWindow.getAllWindows()) window.destroy()
+  process.stdout.write('public cleanup: write receipt\n')
   await writeFile(join(out, 'native.json'), JSON.stringify(receipt, null, 2))
+  process.stdout.write('public cleanup: exit app\n')
   app.exit(receipt.passed ? 0 : 1)
 })
