@@ -10,7 +10,8 @@ import { mainMotePreview } from './main-mote'
 import { goalPlanPreview } from './plan'
 import { goalSpacePreview } from './space'
 import { goalHierarchyPreview } from './hierarchy'
-import { useAppStore, retainGoalFiniteStartIntent, checkpointSpatialWorkbench } from '../../../src/renderer/src/store'
+import { installGoalRealWorkReplay, goalRealWorkSynthetic } from './real-work'
+import { useAppStore, retainGoalFiniteStartIntent, checkpointSpatialWorkbench, prepareRendererUpdate } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import type { DemandRecord } from '../../../src/renderer/src/lib/global-demand-board'
@@ -21,11 +22,14 @@ import { projectWorkspaces } from '../../../src/renderer/src/lib/workspace-proje
 import { applyConfigEdit } from '../../../src/shared/config-edit'
 import type { ComposerShortcut, GoalsCommonActionRef } from '../../../src/shared/contracts'
 import '../../../src/renderer/src/styles/index.css'
+const nativeUser = (window as unknown as { goalEditNative?: typeof api.ui }).goalEditNative
+if (nativeUser) Object.assign(api.ui, nativeUser)
 // Only the private restart probe supplies this real, disk-backed Core owner bridge.
 const restartSpatial = (window as unknown as { goalsRestartSpatial?: Pick<typeof api.spatial, 'read' | 'commit'> }).goalsRestartSpatial
 if (restartSpatial) Object.assign(api.spatial, restartSpatial)
 const planningRestart = (window as unknown as { goalsPlanningRestart?: { phase: string; list: typeof api.demands.list; execute: typeof api.goals.execute; delegation: typeof api.demands.delegation; createGoal(goal: DemandRecord): Promise<void> } }).goalsPlanningRestart
 if (planningRestart) { api.demands.list = planningRestart.list; api.goals.execute = planningRestart.execute; api.demands.delegation = planningRestart.delegation }
+const realWorkReplay = installGoalRealWorkReplay()
 await useAppStore.getState().initialize()
 const initial = useAppStore.getState()
 function workflowRestartFacts() {
@@ -151,7 +155,8 @@ function seed(mode = 'many') {
     agentFocus: mode === 'recent' ? { execution: { sessionId: sessions[0]!.id, history: [{ sessionId: sessions[0]!.id, focusedAt: _hygiene_fixtureTime(23734400000), identity: { name: sessions[0]!.label, kind: sessions[0]!.kind, providerId: sessions[0]!.providerId, hostId: project.hostId, workspacePath: projectWorkspace.path, project: { id: projectWorkspace.id, name: projectWorkspace.name } } }] }, pmo: { sessionId: null } } : EMPTY_AGENT_FOCUS,
     layouts: {}, tabs: {}, error: null, toolsOpen: true, projectRailOpen: true }); root?.render(<App key={mode} />) })
 }
-if (planningRestart?.phase !== 'restore') seed()
+if (!realWorkReplay && planningRestart?.phase !== 'restore') seed()
+await realWorkReplay?.activate()
 root = createRoot(document.getElementById('root')!); root.render(<App key="many" />)
 Object.assign(window, { goalsVisual: { seed,
   workflowRestartFacts,
@@ -182,7 +187,7 @@ Object.assign(window, { goalsVisual: { seed,
     const next = { ...original, assigneeSessionIds: mode === 'multiple' ? sessions.map(session => session.control.agentSessionId) : [executor.control.agentSessionId], supervisorSessionId: executor.control.agentSessionId,
       ...(mode === 'finished' ? { status: 'done' as const } : {}),
       ...(original.grounding ? { grounding: { ...original.grounding, checks: original.grounding.checks.map((check, index) => ({ ...check, evidence: index ? check.evidence : [{ kind: 'file' as const, resource: { hostId: projectWorkspace.hostId, workspaceId: projectWorkspace.id, workspacePath: projectWorkspace.path, zoneId: 'workflow-zone', zonePath: projectWorkspace.path, path: 'artifacts/recovery/layout-check.log' }, revision: 'sha256:' + 'a'.repeat(64), location: { line: 18 } }] })) } } : {}) }
-    flushSync(() => { useAppStore.setState(state => ({ demands: { ...state.demands, [next.id]: next }, goalFiniteStartIntents: {}, agentNames: { ...state.agentNames, [executor.id]: 'Atlas · Execution lead', [discussion.id]: 'Mira · Goal discussion' }, demandPmoTabIds: { [next.id]: tab.id }, tabs: { [tab.id]: tab }, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('workflow-group', [tab.id]) } })); root?.render(<App key={`workflow-${mode}`} />) })
+    flushSync(() => { useAppStore.setState(state => ({ demands: { ...state.demands, [next.id]: next }, goalFiniteStartIntents: {}, agentNames: { ...state.agentNames, [executor.id]: 'Atlas · Execution lead', [discussion.id]: 'Mira · Goal discussion' }, demandPmoTabIds: { [next.id]: tab.id }, tabs: { [tab.id]: tab }, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('workflow-group', [tab.id]) }, agentComposerDrafts: { ...state.agentComposerDrafts, 'workflow-region': 'Keep this exact unsent discussion draft.\n  Original spacing  ' } })); root?.render(<App key={`workflow-${mode}`} />) })
   },
   seedDirect, directFacts, restoreDirectService: () => { directFailure = null },
   proposeDirectGoal: async () => { const id = useAppStore.getState().selectedDemandId; if (!id) throw new Error('No actual Goal selected'); await useAppStore.getState().updateDemand(id, { title: '让我从一个小项目开始了解 Agent', alignment: { summary: '先找到一个我愿意尝试的小项目，再判断下一步。', criteria: [{ id: 'first-try', text: '完成一次小尝试，并能说清楚想继续探索什么。' }], openQuestions: [] } }) },
@@ -210,3 +215,10 @@ Object.assign(window, { goalsMainMote: mainMotePreview(initial, () => root?.rend
 const planPreview = goalPlanPreview(seed, () => root?.render(<App key="goal-plan" />))
 const spacePreview = goalSpacePreview(seed, planPreview, () => root?.render(<App key="goal-space" />))
 Object.assign(window, { goalsPlan: planPreview, goalsSpace: spacePreview, goalsHierarchy: goalHierarchyPreview(spacePreview, () => root?.render(<App key="goal-hierarchy" />)) })
+if (!realWorkReplay) Object.assign(window, { goalsWorkScenes: goalRealWorkSynthetic(() => root?.render(<App key="goal-work-scenes" />)) })
+if (nativeUser) Object.assign(window, { goalEditProof: {
+  facts: () => { const state = useAppStore.getState(); return { drafts: state.goalEditDrafts, selected: state.selectedDemandId,
+    surface: state.mainSurface, tabs: state.tabs, layouts: state.layouts, composer: state.agentComposerDrafts } },
+  checkpoint: () => prepareRendererUpdate(),
+  surface: (mainSurface: 'board' | 'workbench') => useAppStore.getState().setMainSurface(mainSurface)
+} })
