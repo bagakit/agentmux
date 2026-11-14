@@ -13,7 +13,7 @@ vi.mock('@agentmux/editor-extensions/format-file-bytes', async original => {
 import { formatFileBytes } from '@agentmux/editor-extensions/format-file-bytes'
 import { MediaPlayer, type MediaLease } from '@agentmux/editor-extensions/ui/MediaPlayer'
 import { api } from '../src/renderer/src/lib/api'
-import { classifyStream, createSeekQueue, describeMediaFailure, liveEdgeState, resolveMediaKey, seekableWindow, type MediaKeyEvent } from '@agentmux/editor-extensions/engines/media-player'
+import { classifyStream, createSeekQueue, describeMediaFailure, liveEdgeState, resolveMediaKey, seekableWindow, timelinePreviewAvailable, type MediaKeyEvent } from '@agentmux/editor-extensions/engines/media-player'
 import { readStyleSheet, stripCssComments } from './helpers/styles'
 
 function ranges(...pairs: [number, number][]): TimeRanges {
@@ -86,6 +86,16 @@ describe('timeline seeks that follow a pointer', () => {
     // Landing where the element is already seeking still drops the older time waiting behind it.
     queue.request(40); queue.request(50); queue.land(40); queue.settle()
     expect(sent).toEqual([10, 30, 40])
+  })
+})
+
+describe('timeline frame preview', () => {
+  it('previews only a single on-demand video file with a decoded picture', () => {
+    expect(timelinePreviewAvailable('video', 'on-demand', true)).toBe(true)
+    for (const source of ['audio', 'playlist'] as const) expect(timelinePreviewAvailable(source, 'on-demand', true), source).toBe(false)
+    for (const stream of ['live', 'live-window', 'unknown'] as const) expect(timelinePreviewAvailable('video', stream, true), stream).toBe(false)
+    // A video without a picture and one whose main playback failed have no decoded picture to preview.
+    expect(timelinePreviewAvailable('video', 'on-demand', false)).toBe(false)
   })
 })
 
