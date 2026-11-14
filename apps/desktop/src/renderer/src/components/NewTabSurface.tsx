@@ -530,7 +530,7 @@ export function NewTabSurface({
     onClick={() => sourceMode ? sourceLauncher.refresh() : agentWorkspace && void checkAgents(agentWorkspace.hostId)}>{detecting ? 'Checking…' : 'Check again'}</button> : undefined} />
 
   const executorPicker = <AgentExecutorPicker executors={executors} selected={selectedExecutor?.id ?? null}
-    {...(compact ? { presentation: 'field' as const, label: 'Agent configuration', unsetLabel: 'Choose Agent' } : {})}
+    {...(compact ? { presentation: 'field' as const, label: 'Agent configuration', unsetLabel: 'Choose Agent' } : { presentation: 'catalog' as const })}
     active={visible && presentationActive} onSelect={chooseExecutor}
     onConfigure={usesHostInventory && agentWorkspace && settings ? () => settings.openHostExecutors
       ? settings.openHostExecutors(agentWorkspace.hostId) : settings.openHost(agentWorkspace.hostId) : undefined} />

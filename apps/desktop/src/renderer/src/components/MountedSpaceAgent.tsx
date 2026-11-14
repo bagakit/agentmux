@@ -152,7 +152,7 @@ export function SpaceMemberWorkface({ target, visible, active, interactiveResize
   const conversationIssue = readingIssue?.key === readingKey ? readingIssue.message : undefined
   return <div ref={surfaceRef} className="agent-surface mounted-space-agent" aria-label="Original member workface" data-agent-surface-mode={mode}>
     {hasIssue || (session?.kind === 'agent' && !session.semanticStatus) ? <ServiceWindowNotice
-      disclosure={{ scope: key, id: 'member-observation', cause: JSON.stringify([observed?.watchIssue, observed?.readIssue, session?.semanticStatus?.state ?? null]), visible }}
+      disclosure={{ scope: key, id: 'member-observation', cause: JSON.stringify([observed?.watchIssue, observed?.readIssue, session?.kind === 'agent' ? session.semanticStatus?.state ?? null : null]), visible }}
       title="Agent observation unconfirmed"
       notice={{ kind: 'indeterminate', notice: {
         step: 'Agent observation unconfirmed',
