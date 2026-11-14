@@ -143,7 +143,7 @@ const originalConfig = await api.config.get(), originalSnapshot = await api.sess
 const base = originalSnapshot.sessions.find((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.kind === 'agent')
 if (!base || !originalConfig.workspaces[0]) throw Error('Nonempty typed platform samples required')
 const scenario = new URLSearchParams(location.search).get('scenario')
-const compact = scenario === 'endpoints' || scenario === 'dispatch-motion'
+const compact = scenario === 'endpoints' || scenario === 'dispatch-motion' || scenario === 'region-headers'
 const perception = scenario === 'perception' || scenario === 'perception-scale'
 const now = Date.now(), hostId = 'local', incarnation = 'fixture-collaboration-journal'
 const projects: WorkspaceRecord[] = [

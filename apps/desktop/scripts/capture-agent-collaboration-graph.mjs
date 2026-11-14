@@ -3,12 +3,14 @@ import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { createServer } from 'node:http'
-import { mkdtemp, mkdir, readFile, writeFile, readdir, rm, rename } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, writeFile, readdir, rm, rename, link, realpath, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { resolve, relative, extname, sep, join } from 'node:path'
+import { resolve, relative, extname, sep, join, dirname, isAbsolute } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 import { createCssSourceOverlay } from './fixtures/agent-collaboration-graph/css-source-overlay.mjs'
+import { createCaptureSourcePin, pinnedSourceAfter, captureResolverMetadata } from './fixtures/agent-collaboration-graph/capture-source-pin.mjs'
+import { rendererCacheContext, loadRendererCache, saveRendererCache, rendererOutputHashes } from './fixtures/agent-collaboration-graph/renderer-cache.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'apps/desktop')
 const fixture = join(desktop, 'scripts/fixtures/agent-collaboration-graph')
@@ -17,7 +19,7 @@ const compiling = process.argv[2] === '--compile'
 const verifying = process.argv[2] === '--verify'
 const scenarioIndex = compiling ? 5 : 4
 const scenario = process.argv[scenarioIndex] === '--scenario' ? process.argv[scenarioIndex + 1] : 'readability'
-assert.ok(['readability', 'perception', 'perception-scale', 'endpoints', 'dispatch-motion'].includes(scenario), 'Use a declared capture scenario')
+assert.ok(['readability', 'perception', 'perception-scale', 'endpoints', 'dispatch-motion', 'region-headers'].includes(scenario), 'Use a declared capture scenario')
 assert.ok(compiling ? process.argv.length === 5 || process.argv.length === 7 && process.argv[5] === '--scenario' : ['--evidence', '--verify'].includes(process.argv[2]) && process.argv[3] && (process.argv.length === 4 || process.argv.length === 6 && process.argv[4] === '--scenario'), 'Use --evidence <new private evidence directory> or --verify <completed evidence directory> [--scenario perception|perception-scale|endpoints|dispatch-motion]')
 if (verifying) {
   // Join the exact completed native observation once; never recapture or turn a
@@ -32,6 +34,31 @@ if (verifying) {
   assert.deepEqual(receipt.actual.failures, []); assert.deepEqual(receipt.actual.rendererErrors, [])
   assert.ok(receipt.actual.checks?.length && receipt.actual.checks.every(check => check.passed === true))
   if (scenario === 'dispatch-motion') createRequire(import.meta.url)(join(fixture, 'dispatch-motion.cjs')).verify(receipt.actual.dispatchMotion, receipt.frames)
+  if (scenario === 'region-headers') {
+    createRequire(import.meta.url)(join(fixture, 'region-headers.cjs')).verify(receipt.actual.regionHeaders, receipt.frames)
+    assert.deepEqual(receipt.actual.regionHeaders.source, receipt.headerSource)
+    assert.equal(receipt.headerSource.revision, receipt.compilation.sourceOverlay.revision)
+    assert.equal(receipt.headerSource.cssSHA256, receipt.compilation.cssSourceProof.loaded['apps/desktop/src/renderer/src/styles/collaboration.css'].sourceSHA256)
+    for (const [file, sha] of Object.entries(receipt.headerSource.geometryInputs)) assert.equal(receipt.inputs[file], sha, 'The original geometry owner is bound to the actual consumed input')
+    assert.equal(receipt.actual.frameSettlements?.length, 1)
+    const foldedFrame = receipt.actual.frameSettlements[0]
+    assert.equal(foldedFrame.label, 'headers-mote-narrow-light-folded'); assert.equal(foldedFrame.owner, 'original-delivered-fold'); assert.equal(foldedFrame.observed.busy, false); assert.equal(foldedFrame.observed.transitioning, false); assert.equal(foldedFrame.observed.box.folded, true); assert.equal(foldedFrame.observed.applied, true); assert.equal(foldedFrame.observed.active, false)
+    assert.deepEqual(receipt.changedResolverMetadata, [])
+    const headerRules = Object.values(receipt.compilation.cssSourceProof.outputs).flatMap(output => output.headerRules ?? [])
+    const neutral = headerRules.find(rule => rule.selector === '.collaboration-area__overview-label')
+    assert.ok(neutral?.declarations.some(declaration => declaration.property === 'border' && declaration.value === '1px solid transparent'))
+    assert.ok(neutral.declarations.some(declaration => declaration.property === 'box-shadow' && declaration.value === 'none'))
+    assert.ok(headerRules.some(rule => rule.selector.includes('data-current') && rule.selector.endsWith('em::before') && rule.declarations.some(declaration => declaration.property === 'width' && declaration.value === '3px')))
+    if (receipt.headerMaterialReuse) {
+      const reuse = receipt.headerMaterialReuse, bytes = await readFile(join(directory, reuse.receiptFile)), original = JSON.parse(bytes)
+      assert.equal(digest(bytes), reuse.receiptSHA256); assert.equal(original.actual.checks.find(check => check.name === 'region-headers-native-material-and-placement')?.passed, true)
+      assert.deepEqual(receipt.inputs, original.inputs); assert.deepEqual(receipt.outputs, original.outputs)
+      assert.equal(original.headerSource.revision, receipt.headerSource.revision); assert.equal(original.headerSource.cssSHA256, receipt.headerSource.cssSHA256)
+      assert.equal(digest(await readFile(join(directory, reuse.manifestFile))), reuse.manifestSHA256)
+      for (const frame of receipt.frames.slice(0, 9)) { assert.equal(frame.capture, 'reused-qualified-material'); assert.equal(frame.originReceiptSHA256, reuse.receiptSHA256); assert.equal(frame.sha256, original.frames.find(old => old.label === frame.label)?.sha256) }
+      assert.equal(receipt.frames.filter(frame => frame.capture === 'reused-qualified-material').length, 9)
+    }
+  }
   const cameraWaits = receipt.actual.cameraWaits
   assert.ok(cameraWaits?.length && cameraWaits.some(wait => wait.kind === 'locate'), 'Original camera completion must be observed for actual locates')
   for (const wait of cameraWaits) {
@@ -45,10 +72,24 @@ if (verifying) {
       assert.equal(wait.final.agentId, JSON.stringify(['local', wait.id]))
     }
   }
-  for (const name of scenario === 'dispatch-motion' ? ['dispatch-native-stages', ...(receipt.actual.dispatchMotion.refresh ? [] : ['dispatch-native-motion-policies']), 'dispatch-native-cost'] : scenario === 'endpoints' ? ['endpoints-original-phases-parallel-and-input', 'endpoints-original-theme-point-and-static', 'endpoints-original-mixed-group-and-keyboard'] : ['initial-gui-entry-keeps-accurate-context-and-full-width', 'source-cli-original-app-admission-and-dom-inspect', 'focus-list-map-and-original-return', ...(scenario === 'perception-scale' ? ['perception-original-large-world-and-consumer-cost', 'terrain-original-nesting-fold-and-exact-reveal', 'terrain-native-continuous-lod-and-selection-cost', 'terrain-held-reader-keyboard-and-motion-choice'] : [])]) assert.ok(receipt.actual.checks.some(check => check.name === name && check.passed === true), 'Missing actual native check: ' + name)
+  for (const name of scenario === 'region-headers' ? ['region-headers-native-material-and-placement', 'region-headers-native-keyboard-and-fold', 'region-headers-native-css-counterfactuals'] : scenario === 'dispatch-motion' ? ['dispatch-native-stages', ...(receipt.actual.dispatchMotion.refresh ? [] : ['dispatch-native-motion-policies']), 'dispatch-native-cost'] : scenario === 'endpoints' ? ['endpoints-original-phases-parallel-and-input', 'endpoints-original-theme-point-and-static', 'endpoints-original-mixed-group-and-keyboard'] : ['initial-gui-entry-keeps-accurate-context-and-full-width', 'source-cli-original-app-admission-and-dom-inspect', 'focus-list-map-and-original-return', ...(scenario === 'perception-scale' ? ['perception-original-large-world-and-consumer-cost', 'terrain-original-nesting-fold-and-exact-reveal', 'terrain-native-continuous-lod-and-selection-cost', 'terrain-held-reader-keyboard-and-motion-choice'] : [])]) assert.ok(receipt.actual.checks.some(check => check.name === name && check.passed === true), 'Missing actual native check: ' + name)
+  const verifiedPinned = pinnedSourceAfter(root, receipt.compilation.sourceOverlay, receipt.inputs)
   for (const key of ['inputs', 'harness']) {
     const entries = Object.entries(receipt[key] ?? {}); assert.ok(entries.length, 'Nonempty exact ' + key)
-    for (const [file, sha] of entries) { const target = resolve(root, file); assert.ok(target.startsWith(root + sep)); const overlay = key === 'inputs' && receipt.compilation.sourceOverlay?.files[file]; assert.equal(digest(await readFile(overlay ? join(directory, overlay.file) : target)), sha, 'Changed candidate ' + key + ': ' + file) }
+    for (const [file, sha] of entries) { const target = resolve(root, file); assert.ok(target.startsWith(root + sep)); const snapshot = receipt.harnessSnapshot?.[file]; const overlay = key === 'inputs' && receipt.compilation.sourceOverlay?.files[file]; const actual = key === 'inputs' && verifiedPinned[file] ? verifiedPinned[file] : digest(await readFile(snapshot ? join(directory, snapshot) : overlay?.file ? join(directory, overlay.file) : target)); assert.equal(actual, sha, 'Changed declared ' + key + ': ' + file) }
+  }
+  if (receipt.rendererCache?.manifestFile) {
+    const bytes = await readFile(join(directory, receipt.rendererCache.manifestFile)), manifest = JSON.parse(bytes)
+    assert.equal(digest(bytes), receipt.rendererCache.manifestSHA256)
+    assert.equal(manifest.context.revision, manifest.compilation.sourceOverlay.revision)
+    assert.equal(manifest.context.revision, receipt.compilation.sourceOverlay.revision)
+    assert.deepEqual(manifest.compilation, receipt.compilation); assert.deepEqual(manifest.outputs, receipt.outputs)
+    assert.deepEqual(receipt.changedWatchInputs, [])
+    for (const [file, sha] of Object.entries(receipt.compilation.watchInputs)) assert.equal(receipt.watchInputsAfter[file], sha)
+    for (const [file, sha] of Object.entries(receipt.inputs)) {
+      if (receipt.compilation.sourceOverlay.files[file]?.origin === 'git-blob') assert.equal(receipt.compilation.sourceOverlay.files[file].sha256, sha)
+      else assert.equal(receipt.compilation.watchInputs[resolve(root, file)], sha)
+    }
   }
   assert.ok(receipt.frames?.length)
   assert.deepEqual(receipt.frames.map(({ sha256, ...frame }) => frame), receipt.actual.frames)
@@ -71,27 +112,24 @@ if (verifying) {
 }
 const evidence = resolve(process.argv[compiling ? 4 : 3]); await mkdir(evidence, { recursive: true })
 if (!compiling) assert.equal((await readdir(evidence)).length, 0, 'Keep prior captures; use an empty evidence directory')
-const privateRoot = compiling ? resolve(process.argv[3]) : await mkdtemp(join(tmpdir(), 'amux-collaboration-capture-')), compiled = join(privateRoot, 'compiled')
+const privateRoot = compiling ? resolve(process.argv[3]) : await mkdtemp(join(tmpdir(), 'amux-collaboration-capture-'))
+let compiled = join(privateRoot, 'compiled')
 assert.ok(privateRoot.startsWith(join(tmpdir(), 'amux-collaboration-capture-')) && !relative(tmpdir(), privateRoot).includes(sep), 'Compilation stays in its own private capture root')
 const require = createRequire(join(desktop, 'package.json')), hash = bytes => createHash('sha256').update(bytes).digest('hex')
-const sources = {}, foreignWorkspaceSources = {}, isolated = [], instrumented = [], logs = []
+const sources = {}, foreignWorkspaceSources = {}, watchInputs = {}, isolated = [], instrumented = [], logs = []
 let cssSourceProof
 const sourceRef = process.env.COLLABORATION_CAPTURE_SOURCE_REF
-const sourceOverlay = { revision: sourceRef ? execFileSync('git', ['rev-parse', '--verify', sourceRef + '^{commit}'], { cwd: root, encoding: 'utf8' }).trim() : null, files: {} }
+const sourcePin = createCaptureSourcePin({ root, revision: sourceRef })
+const sourceOverlay = { revision: sourcePin.revision, files: sourcePin.files, boundary: sourcePin.boundary }
 const overlayBytes = new Map()
 if (sourceRef) {
-  assert.equal(scenario, 'dispatch-motion', 'Git byte overlays are bounded to the declared dispatch capture')
-  const changed = execFileSync('git', ['diff', '--name-only', '--diff-filter=M', sourceOverlay.revision, '--', 'apps/desktop/src', 'packages'], { cwd: root, encoding: 'utf8' }).trim().split('\n').filter(file => /\/src\/.+\.(?:tsx?|jsx?|css|mjs)$/.test(file))
-  for (const file of changed) {
-    const bytes = execFileSync('git', ['show', sourceOverlay.revision + ':' + file], { cwd: root, maxBuffer: 16 * 1024 * 1024 })
-    const stored = join('source-overlay', file)
-    await mkdir(join(evidence, 'source-overlay', file, '..'), { recursive: true })
-    await writeFile(join(evidence, stored), bytes)
-    overlayBytes.set(join(root, file), bytes)
-    sourceOverlay.files[file] = { file: stored, sha256: hash(bytes), gitObject: execFileSync('git', ['rev-parse', sourceOverlay.revision + ':' + file], { cwd: root, encoding: 'utf8' }).trim() }
-  }
+  assert.ok(['dispatch-motion', 'region-headers', 'list-feedback'].includes(scenario), 'Git byte overlays are bounded to declared presentation captures')
+  const changed = execFileSync('git', ['diff', '--name-only', '--diff-filter=M', sourceOverlay.revision, '--', 'apps/desktop/src', 'packages'], { cwd: root, encoding: 'utf8' }).trim().split('\n').filter(file => /\/src\/.+\.css$/.test(file))
+  const leaves = new Set([...changed, 'apps/desktop/src/renderer/src/styles/collaboration.css', 'apps/desktop/src/renderer/src/styles/agent-operation-feedback.css'])
+  for (const file of leaves) overlayBytes.set(join(root, file), await sourcePin.read(join(root, file)))
 }
-const sourceBytes = file => overlayBytes.has(file) ? Promise.resolve(overlayBytes.get(file)) : readFile(file)
+const sourceBytes = file => sourcePin.read(file)
+const resolverMetadata = await captureResolverMetadata(root)
 const receipt = { schema: 'agentmux.collaboration-graph-capture.v1', scenario: 'focus-map-' + scenario, capturedPass: false, captureOnly: true, aestheticReview: 'not-performed',
   boundary: 'Current source App, actual initialization/Store, Focus List/Map and original Space workfaces, original area owners, Graph, shared Focus cards and sole AgentInformationPreviewHost/Reader. The distribution includes permanent empty areas, uneven populated groups, isolated members and observed dense cross-area relations. Only platform API facts and unrelated PTY/Monaco painting are controlled. Private synthetic identities, events and content; no live Core lifecycle, Provider, Runtime, real messages, restart or installed-product claim.' }
 let compilationWrites = Promise.resolve()
@@ -103,6 +141,14 @@ function publishCompilation(value) {
 }
 async function compileRenderer() {
   let transformed = 0
+  const privateCanonical = await realpath(privateRoot), packageDirectories = new Map()
+  const watchPackage = folder => {
+    if (!packageDirectories.has(folder)) packageDirectories.set(folder, (async () => {
+      const file = join(folder, 'package.json')
+      try { watchInputs[file] = hash(await readFile(file)) } catch (error) { if (error.code !== 'ENOENT') throw error; if (dirname(folder) !== folder) await watchPackage(dirname(folder)) }
+    })())
+    return packageDirectories.get(folder)
+  }
   const core = JSON.parse(await readFile(join(root, 'packages/core/package.json'), 'utf8'))
   const aliases = Object.entries(core.exports).map(([key, entry]) => ({
     find: new RegExp('^' + (key === '.' ? '@agentmux/core' : '@agentmux/core/' + key.slice(2)).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'),
@@ -122,11 +168,12 @@ async function compileRenderer() {
     }
   }
   const { build } = await import(pathToFileURL(require.resolve('vite')).href)
-  const sourcePlugin = { name: 'collaboration-source-and-unrelated-paint', enforce: 'pre', load(id) { const bytes = overlayBytes.get(id.split('?')[0]); if (bytes && !id.includes('?')) return bytes.toString('utf8') }, async transform(source, id) {
+  const sourcePlugin = { name: 'collaboration-source-and-unrelated-paint', enforce: 'pre', async load(id) { const file = id.split('?')[0]; if (sourcePin.owns(file) && /\.(?:[cm]?[jt]sx?|css|json)$/.test(file) && !id.includes('?')) return (await sourcePin.read(file)).toString('utf8') }, async transform(source, id) {
       const file = id.split('?')[0]
       if (!file.startsWith(root + sep) && !file.includes('/node_modules/') && /\/(?:packages|apps)\/[^/]+\/src\/.+\.(?:tsx?|jsx?|css)$/.test(file)) foreignWorkspaceSources[relative(root, file)] = hash(await readFile(file))
-      if (!file.startsWith(root + sep) || file.includes('/node_modules/') || !/\.(tsx?|css|mjs)$/.test(file)) return
+      if (!file.startsWith(root + sep) || file.includes('/node_modules/') || !/\.(?:[cm]?[jt]sx?|css)$/.test(file)) return
       if (id.includes('?')) { sources[relative(root, file)] = hash(await sourceBytes(file)); return }
+      if (sourcePin.owns(file)) assert.equal(hash(source), hash(await sourcePin.read(file)), 'Actual Vite product input is not the pinned Git bytes: ' + relative(root, file))
       sources[relative(root, id)] = hash(source)
       if (++transformed % 200 === 0) {
         const progress = { phase: 'transforming', transformed }
@@ -167,9 +214,18 @@ async function compileRenderer() {
         return `export function ${component.slice(0, -4)}(){return null}`
       }
     }, async generateBundle() {
+      if (process.env.COLLABORATION_CAPTURE_RENDERER_CACHE) await Promise.all(this.getWatchFiles().map(async watched => {
+        if (!isAbsolute(watched)) return
+        let file
+        try { file = await realpath(watched) } catch (error) { if (error.code === 'ENOENT') return; throw error }
+        if (file.startsWith(privateCanonical + sep) || !(await stat(file)).isFile()) return
+        if (sourcePin.files[relative(root, file)]?.origin === 'git-blob') return
+        watchInputs[file] = hash(await readFile(file))
+        if (file.includes('/node_modules/')) await watchPackage(dirname(file))
+      }))
       for (const file of this.getWatchFiles()) if (file.startsWith(root + sep) && !file.includes('/node_modules/') && file.endsWith('.css')) sources[relative(root, file)] = hash(await sourceBytes(file))
     } }
-  const css = await createCssSourceOverlay({ root, privateRoot, overlays: overlayBytes, inputs: sources, vitePackage: require.resolve('vite/package.json') })
+  const css = await createCssSourceOverlay({ root, privateRoot, overlays: overlayBytes, inputs: sources, sourcePin, vitePackage: require.resolve('vite/package.json') })
   await build({ configFile: false, logLevel: 'error', root: fixture, worker: { format: 'es', plugins: () => [sourcePlugin, css.plugin] },
     css: { postcss: { plugins: [css.observer] } },
     define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, esbuild: { jsx: 'automatic' },
@@ -190,7 +246,7 @@ if (compiling) {
   await publishCompilation({ phase: 'starting', transformed: 0 })
   try {
     await compileRenderer()
-    await publishCompilation({ phase: 'complete', inputs: sources, foreignWorkspaceSources, isolated, instrumented, sourceOverlay, cssSourceProof })
+    await publishCompilation({ phase: 'complete', inputs: sources, foreignWorkspaceSources, watchInputs, isolated, instrumented, sourceOverlay, cssSourceProof, resolverMetadata })
     process.exit(0)
   } catch (error) {
     await publishCompilation({ phase: 'failed', failure: error.message })
@@ -201,21 +257,40 @@ const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key
 Object.assign(env, { AGENTMUX_DESKTOP_USER_DATA: join(privateRoot, 'user-data'), AGENTMUX_RUNTIME_DIRECTORY: join(privateRoot, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(privateRoot, 'state'), COLLABORATION_CAPTURE_NODE: process.execPath })
 let server
 try {
-  const harnessFiles = ['index.html', 'entry.tsx', 'main.cjs', 'perception.cjs', 'terrain.cjs', 'adaptive.cjs', 'adaptive-observer.ts', 'settings.cjs', 'server-host.mjs', 'scenario.md', 'css-source-overlay.mjs', ...(scenario === 'endpoints' ? ['endpoints.cjs'] : []), ...(scenario === 'dispatch-motion' ? ['dispatch-motion.cjs', 'dispatch-motion.md'] : [])].map(name => join(fixture, name)).concat([scriptPath, join(desktop, 'scripts/probe-process.mjs'), join(desktop, 'scripts/fixtures/desktop-map/source-loader.mjs'), join(desktop, 'scripts/fixtures/performance-failure-evidence/source-loader.mjs'), join(desktop, 'test/helpers/desktop-map-source-mutations.mjs'), join(root, 'packages/core/dist/control-endpoint-listener-worker.js'), join(root, 'packages/core/src/control-endpoint-listener-worker.ts')])
+  const harnessFiles = ['index.html', 'entry.tsx', 'main.cjs', 'perception.cjs', 'terrain.cjs', 'adaptive.cjs', 'adaptive-observer.ts', 'settings.cjs', 'server-host.mjs', 'scenario.md', 'css-source-overlay.mjs', 'capture-source-pin.mjs', 'renderer-cache.mjs', ...(scenario === 'region-headers' ? ['region-headers.cjs'] : []), ...(scenario === 'endpoints' ? ['endpoints.cjs'] : []), ...(scenario === 'dispatch-motion' ? ['dispatch-motion.cjs', 'dispatch-motion.md'] : [])].map(name => join(fixture, name)).concat([scriptPath, join(desktop, 'scripts/probe-process.mjs'), join(desktop, 'scripts/fixtures/desktop-map/source-loader.mjs'), join(desktop, 'scripts/fixtures/performance-failure-evidence/source-loader.mjs'), join(desktop, 'test/helpers/desktop-map-source-mutations.mjs'), join(root, 'packages/core/dist/control-endpoint-listener-worker.js'), join(root, 'packages/core/src/control-endpoint-listener-worker.ts')])
   receipt.harness = Object.fromEntries(await Promise.all(harnessFiles.map(async file => [relative(root, file), hash(await readFile(file))])))
-  receipt.publicTransport = ['endpoints', 'dispatch-motion'].includes(scenario) ? { boundary: 'No public transport or lifecycle operation is exercised by the isolated presentation increment. CLI navigation is separately owned evidence, not claimed by these frames.' } : { boundary: 'Original Core source publication spawns its existing compiled listener asset; only listener transport uses dist. Its bytes and corresponding source are bound in harness; CLI, Core business and Renderer remain original source.', file: 'packages/core/dist/control-endpoint-listener-worker.js' }
+  receipt.harnessSnapshot = {}
+  for (const file of harnessFiles) { const name = relative(root, file), stored = join('harness-snapshot', name); await mkdir(join(evidence, stored, '..'), { recursive: true }); const bytes = await readFile(file); assert.equal(hash(bytes), receipt.harness[name]); await writeFile(join(evidence, stored), bytes); receipt.harnessSnapshot[name] = stored }
+  receipt.publicTransport = ['endpoints', 'dispatch-motion', 'region-headers'].includes(scenario) ? { boundary: 'No public transport or lifecycle operation is exercised by the isolated presentation increment. CLI navigation is separately owned evidence, not claimed by these frames.' } : { boundary: 'Original Core source publication spawns its existing compiled listener asset; only listener transport uses dist. Its bytes and corresponding source are bound in harness; CLI, Core business and Renderer remain original source.', file: 'packages/core/dist/control-endpoint-listener-worker.js' }
   receipt.phase = 'compiling'; await writeFile(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
-  receipt.compilationProcess = await runProbeProcess(process.execPath, [scriptPath, '--compile', privateRoot, evidence, '--scenario', scenario],
-    { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 120000, onLine: line => logs.push(line) })
-  const compilationText = await readFile(join(evidence, 'compilation.json'), 'utf8').catch(error => error.code === 'ENOENT' ? '' : Promise.reject(error))
-  if (compilationText.trim()) receipt.compilation = JSON.parse(compilationText)
-  assert.equal(receipt.compilationProcess.timedOut, false, 'Source compilation timed out; retain its phase receipt')
-  assert.equal(receipt.compilationProcess.exitConfirmed, true, 'The source compiler exit is unconfirmed')
-  assert.equal(receipt.compilationProcess.exitCode, 0, receipt.compilation?.failure ?? 'Source compilation failed')
+  const cacheDirectory = process.env.COLLABORATION_CAPTURE_RENDERER_CACHE ? resolve(process.env.COLLABORATION_CAPTURE_RENDERER_CACHE) : null
+  if (cacheDirectory) assert.equal(cacheDirectory, join(dirname(evidence), 'native-renderer-cache'), 'Only this task evidence parent owns the single renderer cache')
+  const cacheContext = cacheDirectory ? await rendererCacheContext({ root, revision: sourcePin.revision, compilerFiles: [scriptPath, ...['capture-source-pin.mjs', 'css-source-overlay.mjs', 'renderer-cache.mjs'].map(file => join(fixture, file)), require.resolve('vite/package.json'), require.resolve('typescript/package.json')], metadata: resolverMetadata }) : null
+  const cache = cacheDirectory ? await loadRendererCache({ directory: cacheDirectory, context: cacheContext, sourcePin }) : { reused: false, reason: 'disabled' }
+  receipt.rendererCache = { directory: cacheDirectory, reused: cache.reused, reason: cache.reason, context: cacheContext }
+  if (cache.reused) {
+    compiled = cache.compiled; receipt.compilation = cache.manifest.compilation
+    receipt.rendererCache.manifestSHA256 = cache.manifestSHA256
+    receipt.compilationReuse = { manifestSHA256: cache.manifestSHA256, originEvidence: cache.manifest.originEvidence, originalCompilationProcess: cache.manifest.compilationProcess, boundary: 'No compiler ran in this attempt; original qualified renderer bytes and actual inputs were revalidated. Observer/Native evidence is new.' }
+    await writeFile(join(evidence, 'compilation.json'), JSON.stringify(receipt.compilation))
+  } else {
+    receipt.compilationProcess = await runProbeProcess(process.execPath, [scriptPath, '--compile', privateRoot, evidence, '--scenario', scenario],
+      { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 120000, onLine: line => logs.push(line) })
+    const compilationText = await readFile(join(evidence, 'compilation.json'), 'utf8').catch(error => error.code === 'ENOENT' ? '' : Promise.reject(error))
+    if (compilationText.trim()) receipt.compilation = JSON.parse(compilationText)
+    assert.equal(receipt.compilationProcess.timedOut, false, 'Source compilation timed out; retain its phase receipt')
+    assert.equal(receipt.compilationProcess.exitConfirmed, true, 'The source compiler exit is unconfirmed')
+    assert.equal(receipt.compilationProcess.exitCode, 0, receipt.compilation?.failure ?? 'Source compilation failed')
+  }
   assert.equal(receipt.compilation?.phase, 'complete')
   assert.deepEqual(receipt.compilation.foreignWorkspaceSources, {}, 'The exact candidate must not consume another worktree source')
   Object.assign(sources, receipt.compilation.inputs); isolated.push(...receipt.compilation.isolated); instrumented.push(...receipt.compilation.instrumented)
   receipt.inputs = sources; receipt.isolated = isolated; receipt.instrumented = instrumented
+  for (const [name, sha] of Object.entries(sources)) if (!receipt.compilation.sourceOverlay.files[name] && !receipt.harness[name]) {
+    const file = join(root, name), bytes = await readFile(file); assert.equal(hash(bytes), sha, 'Current renderer fixture remains the actually consumed bytes')
+    const stored = join('harness-snapshot', name); await mkdir(join(evidence, stored, '..'), { recursive: true }); await writeFile(join(evidence, stored), bytes)
+    receipt.harness[name] = sha; receipt.harnessSnapshot[name] = stored; harnessFiles.push(file)
+  }
   for (const owner of ['App.tsx', 'GlobalFocusSurface.tsx', 'FocusToolbar.tsx', 'FocusViewSwitch.tsx', 'SurfaceToolDock.tsx', 'WorkspaceCollaboration.tsx', 'CollaborationMapToolbar.tsx', 'collaboration-areas.ts', 'collaboration-presentation.ts', 'collaboration-hierarchy.ts', 'workspace-agent-scope.ts', 'AgentCollaborationMap.tsx', 'AgentCollaborationGraph.tsx', 'collaboration-layout.worker.ts', 'collaboration-layout-engine.ts', 'collaboration-layout-refinement.ts', 'collaboration-map-transition.ts', 'collaboration-map-geometry.ts', 'desktop-presentation.ts', 'FocusContextCards.tsx', 'use-collaboration-layout.ts', 'FocusContextCardBody.tsx', 'FocusContextRow.tsx', 'AgentInformationPreview.tsx', 'AgentInformationReader.tsx', 'store.ts', 'collaboration.css']) {
     assert.ok(Object.keys(sources).some(file => file.endsWith('/' + owner)), 'Actual owning module must compile: ' + owner)
   }
@@ -229,6 +304,60 @@ try {
     }
   }
   await recordOutputs(compiled)
+  if (cacheDirectory && !cache.reused) {
+    assert.deepEqual(receipt.compilation.resolverMetadata, resolverMetadata)
+    const retained = await saveRendererCache({ directory: cacheDirectory, context: cacheContext, compiled, compilation: receipt.compilation, compilationProcess: receipt.compilationProcess, outputs: receipt.outputs, evidence: relative(root, evidence), sourcePin })
+    compiled = retained.compiled; receipt.rendererCache.retained = true; receipt.rendererCache.manifestSHA256 = retained.manifestSHA256
+  }
+  if (cacheDirectory) {
+    const bytes = await readFile(join(cacheDirectory, 'manifest.json'))
+    assert.equal(hash(bytes), receipt.rendererCache.manifestSHA256)
+    receipt.rendererCache.manifestFile = 'renderer-cache-manifest.json'; await writeFile(join(evidence, receipt.rendererCache.manifestFile), bytes)
+  }
+  if (scenario === 'region-headers') {
+    assert.ok(sourcePin.revision && process.env.COLLABORATION_CAPTURE_HEADER_BASE_REF, 'Declare the immutable heading candidate and geometry baseline refs')
+    const baseline = createCaptureSourcePin({ root, revision: process.env.COLLABORATION_CAPTURE_HEADER_BASE_REF })
+    const cssFile = 'apps/desktop/src/renderer/src/styles/collaboration.css', baselineBytes = await baseline.read(join(root, cssFile))
+    const postcss = createRequire(require.resolve('vite/package.json'))('postcss'), tree = postcss.parse(baselineBytes)
+    const stripes = []; tree.walkRules(rule => { if (rule.selector === '.collaboration-area__overview-label::before') stripes.push(rule.toString()) })
+    assert.equal(stripes.length, 1, 'One exact original left-line rule supplies the native CSS counterfactual')
+    const geometryInputs = {}
+    for (const file of ['components/AgentCollaborationGraph.tsx', 'components/CollaborationRegionLabels.tsx', 'lib/collaboration-map-camera.ts', 'lib/use-collaboration-layout.ts', 'lib/collaboration-layout.worker.ts', 'lib/collaboration-layout-engine.ts']) {
+      const path = 'apps/desktop/src/renderer/src/' + file, sha256 = hash(await sourcePin.read(join(root, path)))
+      assert.equal(sources[path], sha256, 'The actual heading geometry owner must consume the declared source')
+      assert.equal(sha256, hash(await baseline.read(join(root, path))), 'Headings retain the original geometry owner: ' + path)
+      geometryInputs[path] = sha256
+    }
+    receipt.headerSource = { revision: sourcePin.revision, cssSHA256: hash(await sourcePin.read(join(root, cssFile))), baselineRevision: baseline.revision, baselineCSSSHA256: hash(baselineBytes), stripeRule: stripes[0], geometryInputs,
+      boundary: 'Baseline CSS is used only for a declared temporary native left-line counterfactual, not a mixed-source baseline screenshot or cost arm. Product JS/CSS inputs are pinned; current fixture and resolver metadata stay separately hashed.' }
+    assert.equal(receipt.compilation.cssSourceProof.loaded[cssFile].sourceSHA256, receipt.headerSource.cssSHA256)
+    env.COLLABORATION_CAPTURE_HEADER_SOURCE = JSON.stringify(receipt.headerSource)
+    if (process.env.COLLABORATION_CAPTURE_HEADER_MATERIAL_EVIDENCE) {
+      const originalDirectory = resolve(process.env.COLLABORATION_CAPTURE_HEADER_MATERIAL_EVIDENCE), bytes = await readFile(join(originalDirectory, 'receipt.json')), original = JSON.parse(bytes)
+      assert.equal(original.scenario, 'focus-map-region-headers'); assert.equal(original.compilation.phase, 'complete')
+      assert.equal(original.actual.checks.find(check => check.name === 'region-headers-native-material-and-placement')?.passed, true)
+      assert.deepEqual(original.changedInputs, []); assert.deepEqual(original.changedHarness, []); assert.deepEqual(original.actual.rendererErrors, [])
+      assert.equal(original.headerSource.revision, receipt.headerSource.revision); assert.equal(original.headerSource.cssSHA256, receipt.headerSource.cssSHA256)
+      assert.deepEqual(original.inputs, sources); assert.deepEqual(original.outputs, receipt.outputs, 'Material reuse requires identical actual renderer input and output bytes')
+      const receiptSHA256 = hash(bytes), directory = join(evidence, 'reused-material'); await mkdir(directory)
+      const materialFrames = original.frames.slice(0, 9), stages = original.actual.regionHeaders.stages.slice(0, 9)
+      assert.equal(materialFrames.length, 9); assert.ok(materialFrames.slice(0, 6).every(frame => frame.label.endsWith('-static')) && materialFrames.slice(6).every(frame => frame.label.endsWith('-hover')))
+      assert.deepEqual(stages.map(stage => stage.label), materialFrames.map(frame => frame.label))
+      await link(join(originalDirectory, 'receipt.json'), join(directory, 'source-receipt.json'))
+      const frames = []
+      for (const frame of materialFrames) {
+        assert.equal(hash(await readFile(join(originalDirectory, frame.file))), frame.sha256)
+        const file = join('reused-material', frame.label + '.png'); await link(join(originalDirectory, frame.file), join(evidence, file))
+        const { sha256, ...descriptor } = frame
+        frames.push({ ...descriptor, file, capture: 'reused-qualified-material', originReceiptSHA256: receiptSHA256, originFile: frame.file })
+      }
+      const manifest = { receiptSHA256, originalEvidence: relative(root, originalDirectory), originalOverallPassed: original.capturedPass, frames, stages,
+        boundary: 'Only the original passed nine-frame material subset is reused. The original overall failure remains unchanged. Exact actual renderer inputs and outputs match; new native interaction/CSS counterfactuals are not inherited.' }
+      const manifestBytes = JSON.stringify(manifest), manifestFile = join('reused-material', 'material.json'); await writeFile(join(evidence, manifestFile), manifestBytes)
+      receipt.headerMaterialReuse = { receiptFile: join('reused-material', 'source-receipt.json'), receiptSHA256, manifestFile, manifestSHA256: hash(manifestBytes), originalEvidence: manifest.originalEvidence, originalOverallPassed: original.capturedPass, newPNGs: 3, reusedPNGs: 9 }
+      env.COLLABORATION_CAPTURE_HEADER_MATERIAL_FILE = join(evidence, manifestFile)
+    }
+  }
   if (sourceRef && scenario === 'dispatch-motion') {
     const names = [...new Set(Object.values(receipt.compilation.cssSourceProof.outputs).flatMap(output => output.packetAnimationNames))]
     assert.equal(names.length, 1, 'The original emitted packet animation must be unambiguous before Native observation')
@@ -252,18 +381,30 @@ try {
   assert.ok(receipt.actual, 'The original source capture did not publish scene evidence')
   const controlLoaded = await readFile(join(evidence, 'control-loaded.jsonl'), 'utf8').catch(error => error.code === 'ENOENT' ? '' : Promise.reject(error))
   receipt.controlInputs = controlLoaded.trim() ? controlLoaded.trim().split('\n').map(line => JSON.parse(line)) : []
-  if (!['endpoints', 'dispatch-motion'].includes(scenario)) assert.ok(receipt.controlInputs.some(input => input.path === 'packages/core/src/public-rpc-server.ts') && receipt.controlInputs.some(input => input.path === 'packages/core/src/agentmux-cli-commands.ts'), 'Original Core server and source CLI must load in the public App join')
+  if (!['endpoints', 'dispatch-motion', 'region-headers'].includes(scenario)) assert.ok(receipt.controlInputs.some(input => input.path === 'packages/core/src/public-rpc-server.ts') && receipt.controlInputs.some(input => input.path === 'packages/core/src/agentmux-cli-commands.ts'), 'Original Core server and source CLI must load in the public App join')
   for (const input of receipt.controlInputs) { assert.equal(input.originalSHA256, input.effectiveSHA256, 'Public join uses unmodified source'); if (sources[input.path]) assert.equal(sources[input.path], input.originalSHA256); sources[input.path] = input.originalSHA256 }
   receipt.frames = await Promise.all(receipt.actual.frames.map(async frame => ({ ...frame, sha256: hash(await readFile(join(evidence, frame.file))) })))
-  receipt.sourceAfter = Object.fromEntries(await Promise.all(Object.keys(sources).map(async file => [file, hash(await readFile(receipt.compilation.sourceOverlay.files[file] ? join(evidence, receipt.compilation.sourceOverlay.files[file].file) : join(root, file)))])))
+  const pinnedAfter = pinnedSourceAfter(root, receipt.compilation.sourceOverlay, sources)
+  receipt.sourceAfter = Object.fromEntries(await Promise.all(Object.keys(sources).map(async file => [file, pinnedAfter[file] ?? hash(await readFile(join(root, file)))])))
+  receipt.resolverMetadata = receipt.compilation.resolverMetadata
+  receipt.resolverMetadataAfter = await captureResolverMetadata(root)
+  receipt.changedResolverMetadata = Object.keys(receipt.resolverMetadata).filter(file => receipt.resolverMetadata[file] !== receipt.resolverMetadataAfter[file])
+  assert.deepEqual(receipt.changedResolverMetadata, [], 'Declared current resolver metadata changed during capture')
   receipt.harnessAfter = Object.fromEntries(await Promise.all(harnessFiles.map(async file => [relative(root, file), hash(await readFile(file))])))
   receipt.changedInputs = Object.keys(sources).filter(file => sources[file] !== receipt.sourceAfter[file])
   receipt.changedHarness = Object.keys(receipt.harness).filter(file => receipt.harness[file] !== receipt.harnessAfter[file])
+  if (cacheDirectory) {
+    receipt.watchInputsAfter = Object.fromEntries(await Promise.all(Object.keys(receipt.compilation.watchInputs ?? {}).map(async file => [file, hash(await readFile(file))])))
+    receipt.changedWatchInputs = Object.keys(receipt.compilation.watchInputs ?? {}).filter(file => receipt.compilation.watchInputs[file] !== receipt.watchInputsAfter[file])
+    assert.deepEqual(receipt.changedWatchInputs, [], 'Actual current renderer dependencies/assets changed during capture')
+    assert.deepEqual(await rendererOutputHashes(compiled), receipt.outputs, 'The served renderer bytes remain unchanged')
+  }
   assert.equal(receipt.process.exitCode, 0, JSON.stringify(receipt.actual.failures.map(({ name, message }) => ({ name, message })))); assert.equal(receipt.actual.passed, true)
   assert.equal(receipt.changedInputs.length, 0, 'Candidate changed during capture: ' + receipt.changedInputs.join(', '))
   assert.equal(receipt.changedHarness.length, 0, 'Capture harness changed during execution: ' + receipt.changedHarness.join(', '))
   if (scenario === 'endpoints') require(join(fixture, 'endpoints.cjs')).verify(receipt.actual.endpoints, receipt.frames, receipt.actual.nativeWorkers)
   if (scenario === 'dispatch-motion') require(join(fixture, 'dispatch-motion.cjs')).verify(receipt.actual.dispatchMotion, receipt.frames)
+  if (scenario === 'region-headers') require(join(fixture, 'region-headers.cjs')).verify(receipt.actual.regionHeaders, receipt.frames)
   receipt.capturedPass = true
 } catch (error) { receipt.failure = { name: error.name, message: error.message, stack: error.stack }; process.exitCode = 1 }
 finally {
