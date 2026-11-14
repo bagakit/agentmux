@@ -89,13 +89,29 @@ export function GoalPlanAssignment({ demand, item }: { demand: DemandProjection;
     return <p className="goals-service" role="status">The saved request belongs to a different Goal or node. Its original operation is retained.</p>
   const revision = plan.revision
 
-  async function observe(original: NodeAssignmentRequest, readOnly: boolean) {
+  async function observe(original: NodeAssignmentRequest, mode: 'submit' | 'check' | 'retry') {
     if (inFlight.current) return
     inFlight.current = true; setPending(true); setNotice(''); setReadRevision(undefined)
     const cut = beginGoalDelegationRead()
     try {
-      if (!readOnly) await checkpointAgentOperations()
-      const result = readOnly
+      if (mode !== 'check') {
+        // This object also distinguishes overlapping attempts after a detail remount.
+        // A late local failure can release only the fresh attempt that still owns the draft.
+        const prepared = { ...draft, request: original }
+        saveDraft(demand.id, key, prepared, mode === 'retry' ? original.operationId : undefined)
+        const currentDraft = () => useAppStore.getState().goalEditDrafts[demand.id]?.assignments?.[key]
+        if (currentDraft() !== prepared) return
+        try { await checkpointAgentOperations() }
+        catch (cause) {
+          if (currentDraft() !== prepared) return
+          if (mode === 'submit')
+            saveDraft(demand.id, key, prepared.choice ? { choice: prepared.choice } : undefined, original.operationId)
+          const issue = cause instanceof Error ? cause.message : String(cause)
+          throw new Error(mode === 'submit' ? `Assignment was not sent. ${issue}` : `Retry was not sent. Check the original request. ${issue}`, { cause })
+        }
+        if (currentDraft() !== prepared) return
+      }
+      const result = mode === 'check'
         ? await api.demands.delegation('goal.plan', { goalId: original.goalId, expectedOwner: original.expectedOwner })
         : await api.demands.delegation('goal.plan.assignment', original)
       if (result.goalId !== original.goalId || !result.plan) throw new Error('The original plan receipt is unavailable.')
@@ -108,7 +124,7 @@ export function GoalPlanAssignment({ demand, item }: { demand: DemandProjection;
         setNotice(original.assignment.kind === 'open' ? 'Opened for claims.' : original.assignment.kind === 'close' ? 'Claims closed.' : 'Agent assigned. Awaiting dispatch.')
       } else {
         // A different operation consuming this revision rules out a future commit of the frozen request.
-        setReadRevision(readOnly ? result.plan.revision : undefined)
+        setReadRevision(mode === 'check' ? result.plan.revision : undefined)
         setNotice('The original assignment is unconfirmed in the saved plan.')
       }
     } catch (error) { setNotice(error instanceof Error ? error.message : String(error)) }
@@ -118,8 +134,7 @@ export function GoalPlanAssignment({ demand, item }: { demand: DemandProjection;
   function submit(assignment: NodeAssignmentRequest['assignment'], expectedRevision = revision) {
     if (inFlight.current || useAppStore.getState().goalEditDrafts[demand.id]?.assignments?.[key]?.request) return
     const original = { goalId: demand.id, expectedOwner, nodeId: node.id, operationId: mintObjectId(), expectedRevision, assignment }
-    saveDraft(demand.id, key, { ...draft, request: original })
-    void observe(original, false)
+    void observe(original, 'submit')
   }
   return <section className="goal-node-assignment" aria-label="Node assignment" aria-busy={pending}>
     <h4>Assignment</h4>
@@ -128,8 +143,8 @@ export function GoalPlanAssignment({ demand, item }: { demand: DemandProjection;
         ? `Assign to ${request.assignment.executor.agentSessionId} on ${request.assignment.executor.hostId}`
         : request.assignment.kind === 'open' ? 'Open for claims' : 'Close claims'}</p>
       <div className="goal-node-assignment__actions">
-        <Button type="button" disabled={pending} onClick={() => void observe(request, true)}>Check original request</Button>
-        {readRevision === request.expectedRevision ? <Button type="button" disabled={pending} onClick={() => void observe(request, false)}>Retry original request</Button> : null}
+        <Button type="button" disabled={pending} onClick={() => void observe(request, 'check')}>Check original request</Button>
+        {readRevision === request.expectedRevision ? <Button type="button" disabled={pending} onClick={() => void observe(request, 'retry')}>Retry original request</Button> : null}
         {readRevision !== undefined && readRevision > request.expectedRevision ? <Button type="button" disabled={pending} onClick={() => {
           saveDraft(demand.id, key, draft?.choice ? { choice: { ...draft.choice, revision: readRevision } } : undefined, request.operationId)
           setReadRevision(undefined); setNotice('')
