@@ -14,10 +14,9 @@ function makeSession(id = 'session-1'): SessionSnapshot { return { id, hostId: '
 let root: Root, container: HTMLDivElement
 beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); container = document.createElement('div'); document.body.append(container); root = createRoot(container); useAppStore.setState({ config, sessions: [makeSession()], demands: { 'demand:one': { id: 'demand:one', title: 'Build auth flow', description: 'Keep the original intent.', status: 'in_progress', priority: 'normal', projectId: 'repo', projectName: 'Repo', sessionIds: ['session-1'], createdAt: 1, updatedAt: 2, source: 'default-topic' } }, selectedDemandId: null, mainSurface: 'board' }) })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(baseline, true); vi.restoreAllMocks() })
-// People and linked Sessions are read and edited only in the detail's facts sidebar.
-function relationships() { const people = container.querySelector<HTMLElement>('[aria-label="Goal facts"] .goal-collaboration')!; expect(people).not.toBeNull(); return people }
+// The Team is a single sidebar consumer, ahead of low-emphasis Goal properties.
+function relationships() { const people = container.querySelector<HTMLElement>('.goal-team')!; expect(people).not.toBeNull(); return people }
 async function editDescription() { await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Edit goal description"]')!.click()); return container.querySelector<HTMLTextAreaElement>('[aria-label="Goal description"]')! }
-function relatedLine() { const line = [...relationships().querySelectorAll<HTMLElement>('.goal-collaboration__line')].find(node => node.querySelector('strong')?.textContent === 'Related discussions'); expect(line).toBeDefined(); return line! }
 
 describe('Goal reading workspace', () => {
   it('keeps the default list beside the readable goal without mounting extra terminal views', async () => {
@@ -35,8 +34,8 @@ describe('Goal reading workspace', () => {
   it('preserves a missing Session identity and shows recovery when execution is requested', async () => {
     useAppStore.setState({ sessions: [], selectedDemandId: 'demand:one' }); await act(async () => root.render(createElement(GlobalBoardSurface)))
     // The missing Session stays readable by its identity, with recovery.
-    const missing = relatedLine().querySelector<HTMLButtonElement>('.goal-collaboration__member')!
-    expect(missing.textContent).toContain('session-1'); expect(missing.textContent).toContain('Identity unavailable · reference retained'); expect(missing.disabled).toBe(true)
+    const missing = relationships().querySelector<HTMLElement>('[data-goal-team-unconfirmed="session-1"]')!
+    expect(missing.textContent).toContain('session-1'); expect(missing.textContent).toContain('identity is not currently confirmed'); expect(missing.querySelector('.focus-context')).toBeNull()
     expect(container.querySelector<HTMLButtonElement>('[aria-label="Choose related Goal sessions"]')?.disabled).toBe(false)
     expect(useAppStore.getState().demands['demand:one'].sessionIds).toEqual(['session-1'])
   })
@@ -68,7 +67,9 @@ describe('Goal reading workspace', () => {
     expect(container.querySelectorAll('.goals-properties')).toHaveLength(1)
     await act(async () => { properties.open = true; properties.dispatchEvent(new Event('toggle')) })
     expect([...properties.querySelectorAll<HTMLElement>('.selection-field')].map(node => node.getAttribute('aria-label'))).toEqual(['Parent goal'])
-    expect(properties.querySelector<HTMLInputElement>('[aria-label="Goal tags"]')?.value).toBe('design'); expect(properties.querySelectorAll('input[type="date"]')).toHaveLength(2); expect(properties.querySelector('input[type="number"]')).toBeNull()
+    expect(properties.querySelector<HTMLInputElement>('[aria-label="Goal tags"]')?.value).toBe('design'); expect(properties.querySelectorAll('input[type="date"]')).toHaveLength(2)
+    expect(properties.querySelectorAll('input[type="number"]')).toHaveLength(1)
+    expect(properties.querySelector<HTMLInputElement>('[aria-label="Goal batch"]')).toMatchObject({ type: 'number', min: '0', step: '1' })
     // Assignment is chosen in Collaboration, not as a property select.
     expect(properties.querySelector('[aria-label="Goal assignee"]')).toBeNull(); expect(container.querySelector('[aria-label="Choose Goal assignees"]')).toBeTruthy()
     // No zero-Session filler: with no linked Session there is no arrangement disclosure or topology.
@@ -81,7 +82,7 @@ describe('Goal reading workspace', () => {
       control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: id + '-run' } } }) as SessionSnapshot
     const selectSession = vi.fn(); const sessions = [agent('session-1'), agent('session-2')]
     useAppStore.setState({ config: { ...config, executors: { codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true } }, appearance: { terminalTheme: 'graphite' } } as AppConfig, selectedDemandId: 'demand:one', selectSession, sessions, demands: { 'demand:one': { ...useAppStore.getState().demands['demand:one'], sessionIds: ['session-1', 'session-2'] } } }); await act(async () => root.render(createElement(GlobalBoardSurface)))
-    const rows = [...relatedLine().querySelectorAll<HTMLButtonElement>('.goal-collaboration__member')]; expect(rows).toHaveLength(2)
+    const rows = [...relationships().querySelectorAll<HTMLButtonElement>('button.focus-context')]; expect(rows).toHaveLength(2)
     expect(rows.every(row => !row.disabled)).toBe(true)
     for (const row of rows) await act(async () => row.click())
     expect(selectSession.mock.calls).toEqual([['session-1'], ['session-2']]); expect(useAppStore.getState().sessions).toEqual(sessions)
