@@ -2,6 +2,7 @@ import { AgentMuxError, spatialCatalog, selectSpatialCatalog, type AgentMuxHeadl
   type AgentMuxRpcServiceOptions, type AgentMuxSpatialStateStore, type AgentMuxControlResult } from '@agentmux/core'
 import { isBackgroundLocalAgentOpen, isHeadlessSpatialAgentOpen, spatialAgentOpenRecord, spatialAgentOpenDigest, spatialAgentFact, type AgentMuxSpatialAgentOpenRecord, type AgentMuxSpatialAgentOpenRequest } from '@agentmux/core/spatial-state'
 import { openSpatialAgentTarget } from './spatial-agent-target.js'
+import { parseAgentOpenLaunchFields } from '@agentmux/core/agent-open-contract'
 import type { AgentMuxSpaceMutationReport } from '@agentmux/core/control'
 import { configuredExecutor, readOriginalMoteConfiguration, ScratchTopics } from './mote-resources.js'
 import { SCRATCH_WORKSPACE_ID } from './mote-topic-model.js'
@@ -76,7 +77,7 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
     finally { try { await borrowed?.dispose?.() } catch (error) { report.issues.push(issue(error)); if (report.agent) report.outcome = 'partial' } }
     return report
   }
-  return async (request, context) => {
+  return Object.assign(async (request: Parameters<NonNullable<AgentMuxRpcServiceOptions['spatialAgentControl']>>[0], context: AgentMuxRpcCallContext): Promise<AgentMuxControlResult | undefined> => {
     const state = await options.spatial.read()
     if (request.operation === 'space.inspect') {
       if (!('requestId' in request.target)) return undefined
@@ -143,11 +144,12 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
       await client.createAgentWithDelivery({ providerId: executor.providerId, executorId: request.content.executorId,
         agentSessionId, createOperationId: request.requestId, workspacePath: execution.workspacePath, commandOverride: executor.command,
         args: executor.args, env: executor.env, injectAgentMuxGuide: executor.injectAgentMuxGuide,
-        ...(note ? { agentMuxNote: note } : {}), ...(prepared ? { optionalContext: prepared.optionalContext } : {}),
+        ...parseAgentOpenLaunchFields(request.content),
+        ...(note ? { sourceAgentMuxNote: note } : {}), ...(prepared ? { optionalContext: prepared.optionalContext } : {}),
         ...(request.content.prompt === undefined ? {} : { prompt: request.content.prompt }),
         ...(request.caller ? { creationCaller: { agentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' } } : {}),
         ...(request.caller && request.content.prompt !== undefined ? { initialMessage: { callerAgentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' } } : {}) })
       return { operation: 'agent.open', ...await reconcile(admission.record, context) }
     } catch (error) { return { operation: 'agent.open', ...await reconcile(admission.record, context, error) } }
-  }
+  }, { describe: () => ({ ordinaryLaunch: { revision: 1 as const, destination: 'source-zone-background' as const }, externalAssociation: null }) })
 }

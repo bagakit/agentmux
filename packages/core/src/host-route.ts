@@ -33,7 +33,7 @@ export const HOST_ROUTE_INVOCATIONS = [
 export const HOST_ROUTE_CALLS = [
   'route.edges', 'route.edge.inspect', 'route.choices', 'route.executors',
   'runtime.owner.identity', 'runtime.bootstrap', 'runtime.invoke', 'runtime.release-consumer',
-  'agent.open', 'space.ls', 'space.inspect', 'space.apply',
+  'agent.open', 'agent.open.describe', 'space.ls', 'space.inspect', 'space.apply',
   'space.member.call',
   'agent.execution.create', 'agent.execution.binding', 'agent.execution.continue', 'agent.execution.rejoin',
 ] as const
@@ -75,6 +75,7 @@ export type HostRouteExecutionScope = {
   kind: 'execution'; bindingId: string; agentSessionId: string; createOperationId: string
   agentRuntimeId: string; resourceRuntimeId: string; agentWorkspacePath: string; resourceWorkspacePath: string
   executorId: string; executorRevision: string; createDigest: string; promptDigest: string
+  launchDigest?: string
   agentRoute?: AdoptedHostRoute; resourceRoute?: AdoptedHostRoute
 }
 export type HostRoutePreparationScope = {
@@ -82,6 +83,7 @@ export type HostRoutePreparationScope = {
 }
 export type HostRouteSpatialOperation = {
   kind: 'spatial'; targetRuntimeId: string; createOperationId: string; executorId: string; promptDigest: string
+  launchDigest?: string
   destination: Record<string, string | boolean>; agentRoute?: AdoptedHostRoute
 }
 export type HostRouteReadOperation = { kind: 'space-reader'; runtimeId: string; spaceId: string } | { kind: 'creation-reader'; createOperationId: string }
@@ -225,19 +227,21 @@ export function parseHostRouteOperation(value: unknown): HostRouteOperation {
     return { kind, createOperationId: rpcString(p.createOperationId, 'Original creation operation') }
   }
   if (kind === 'spatial') {
-    const p = rpcRecord(value, ['kind','targetRuntimeId','createOperationId','executorId','promptDigest','destination','agentRoute'])
+    const p = rpcRecord(value, ['kind','targetRuntimeId','createOperationId','executorId','promptDigest','launchDigest','destination','agentRoute'])
     const destination = rpcRecord(p.destination, ['spaceId','zoneId','tabId','regionId','displayWorkspaceId','groupId','newTab'])
     for (const [key, value] of Object.entries(destination)) {
       if (key === 'newTab' ? typeof value !== 'boolean' : typeof value !== 'string' || !value) invalid('The original source destination is invalid.')
     }
     return { kind, targetRuntimeId: rpcString(p.targetRuntimeId, 'Original target Runtime'), createOperationId: originalString(p.createOperationId, 'Original CID'),
       executorId: originalString(p.executorId, 'Original Executor'), promptDigest: rpcString(p.promptDigest, 'Original input digest'), destination: destination as Record<string,string|boolean>,
+      ...(p.launchDigest === undefined ? {} : { launchDigest: originalString(p.launchDigest, 'Original launch contribution digest') }),
       ...(p.agentRoute === undefined ? {} : { agentRoute: parseAdoptedHostRoute(p.agentRoute) }) }
   }
   if (kind !== 'execution') invalid('This parent has no bounded execution operation.')
-  const p = rpcRecord(value, ['kind','bindingId','agentSessionId','createOperationId','agentRuntimeId','resourceRuntimeId','agentWorkspacePath','resourceWorkspacePath','executorId','executorRevision','createDigest','promptDigest','agentRoute','resourceRoute'])
+  const p = rpcRecord(value, ['kind','bindingId','agentSessionId','createOperationId','agentRuntimeId','resourceRuntimeId','agentWorkspacePath','resourceWorkspacePath','executorId','executorRevision','createDigest','promptDigest','launchDigest','agentRoute','resourceRoute'])
   const fields = ['bindingId','agentSessionId','createOperationId','agentRuntimeId','resourceRuntimeId','agentWorkspacePath','resourceWorkspacePath','executorId','executorRevision','createDigest','promptDigest'] as const
   const result = { kind: 'execution' as const, ...Object.fromEntries(fields.map(key => [key,originalString(p[key], `Original ${key}`)])) } as HostRouteExecutionScope
+  if (p.launchDigest !== undefined) result.launchDigest = originalString(p.launchDigest, 'Original launch contribution digest')
   if (p.agentRoute !== undefined) result.agentRoute = parseAdoptedHostRoute(p.agentRoute)
   if (p.resourceRoute !== undefined) result.resourceRoute = parseAdoptedHostRoute(p.resourceRoute)
   return result

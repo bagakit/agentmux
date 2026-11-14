@@ -281,7 +281,9 @@ export class HostRouteGateway {
     if (!input.agentRoute && !input.resourceRoute && !delegated && !retained) return undefined
     if (retained) {
       const original = verifyHostRouteExecutionAuthorization(retained)
-      if (!isDeepStrictEqual(original.coordinator, await this.identity()) || !isDeepStrictEqual(original.scope, executionRouteScope(input))) denied('The original route admission no longer matches this frozen binding.', 'HOST_ROUTE_DERIVATION_MISMATCH')
+      // Original scopes retain their signed shape. Their complete createDigest still
+      // binds every frozen input field; an old parent never authorizes new fields.
+      if (!isDeepStrictEqual(original.coordinator, await this.identity()) || !isDeepStrictEqual(original.scope, executionRouteScope(input, original.scope.kind === 'execution' && original.scope.launchDigest !== undefined))) denied('The original route admission no longer matches this frozen binding.', 'HOST_ROUTE_DERIVATION_MISMATCH')
       if (context) {
         const current = await this.origin(context)
         // A real local owner may explicitly inspect/continue its own admission.

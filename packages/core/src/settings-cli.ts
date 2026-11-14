@@ -20,8 +20,17 @@ export async function parseSettingsCommand(args: readonly string[]): Promise<Rec
     return { key: action, value: id, ...(args.length === 5 ? { operationId: args[4] } : {}) }
   }
   if (resource === 'executors' || resource === 'prompts' || resource === 'themes' || resource === 'derived-actions') {
-    if (resource === 'executors' && action === 'discover' && args.length === 4 && id === '--host' && args[3]?.length) {
-      return { hostId: args[3], refresh: true }
+    if (resource === 'executors' && action === 'discover') {
+      const options = new Map<string, string>()
+      for (let index = 2; index < args.length; index += 2) {
+        const flag = args[index]!, value = args[index + 1]
+        if (value === undefined) return invalid('Use discover --host ID [--executor ID] [--refresh true|false].')
+        if (!['--host','--executor','--refresh'].includes(flag) || !value.length || options.has(flag)) invalid('Use discover --host ID [--executor ID] [--refresh true|false].')
+        options.set(flag, value)
+      }
+      if (!options.has('--host') || options.has('--refresh') && !['true','false'].includes(options.get('--refresh')!)) invalid('Use discover --host ID [--executor ID] [--refresh true|false].')
+      return { hostId: options.get('--host')!, refresh: options.get('--refresh') !== 'false',
+        ...(options.has('--executor') ? { executorId: options.get('--executor')! } : {}) }
     }
     if (resource === 'executors' && action === 'unregister' && args.length === 7 && id?.length && args[3] === '--host' && args[4]?.length && args[5] === '--registration-revision' && args[6]?.length) {
       return { executorId: id, hostId: args[4], expectedRegistrationRevision: args[6] }

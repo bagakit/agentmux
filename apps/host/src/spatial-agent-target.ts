@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { parseAgentOpenLaunchFields } from '@agentmux/core/agent-open-contract'
 import { AgentMuxError, selectSpatialCatalog, spatialCatalog, type AgentMuxHeadlessRuntime, type AgentMuxRpcCallContext,
   type AgentMuxSpatialState, type AgentMuxSpatialStateStore } from '@agentmux/core'
 import { spatialAgentOpenDigest, spatialAgentOpenRecord, spatialAgentFact,
@@ -50,6 +51,9 @@ export async function openSpatialAgentTarget(options: {
     if (inventory && inventory.runtimeId !== host.runtimeId) throw new AgentMuxError('The executor inventory belongs to another original Agent Core.', 'RUNTIME_OWNER_MISMATCH')
     const matches = inventory?.executors.filter(executor => executor.executorId === request.content.executorId)
     if (matches && matches.length !== 1) throw new AgentMuxError('Choose an executor registered on the original Agent Core.', 'UNKNOWN_EXECUTOR')
+    const launch = parseAgentOpenLaunchFields(request.content), note = !previous ? await options.agentMuxContext?.(request) : undefined
+    if (!previous && (Object.keys(launch).length || Boolean(note)) && matches![0]!.creationContract?.ordinaryLaunch !== 1) throw new AgentMuxError(
+      'The selected execution Core has no confirmed handler for this complete launch input. Keep this request and update or confirm that Core; no Agent or helper was started.', 'AGENT_OPEN_CONTRACT_UNCONFIRMED')
     const execution = previous?.execution ?? { hostId: sameRuntime ? 'local' : target.hostId, runtimeId: host.runtimeId,
       workspacePath: sameRuntime ? placement.workspacePath : (await host.client.hostEnvironment()).homeDirectory,
       workspaceId: sameRuntime ? placement.workspaceId : null, executorRevision: matches![0]!.configRevision,
@@ -73,10 +77,11 @@ export async function openSpatialAgentTarget(options: {
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
       if (previous?.executionBinding) await runtime.executionBindings.continueOriginal(previous.executionBinding, context)
       else {
-        const note = await options.agentMuxContext?.(request)
+        const sourceNote = previous ? await options.agentMuxContext?.(request) : note
         const agent = { agentSessionId, createOperationId: request.requestId, executorId: request.content.executorId,
           executorRevision: execution.executorRevision, workspacePath: execution.workspacePath,
-          ...(request.content.prompt === undefined ? {} : { prompt: request.content.prompt }), ...(note ? { agentMuxNote: note } : {}) }
+          ...launch,
+          ...(request.content.prompt === undefined ? {} : { prompt: request.content.prompt }), ...(sourceNote ? { sourceAgentMuxNote: sourceNote } : {}) }
         context.signal?.throwIfAborted(); await context.assertCurrent?.()
         if (binding) await runtime.executionBindings.create({ bindingId: binding.bindingId, agentHostId: execution.hostId, agentRuntimeId: execution.runtimeId,
           ...(execution.adoptedRoute ? { agentRoute: execution.adoptedRoute } : {}),

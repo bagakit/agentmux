@@ -7,6 +7,7 @@ import { parseAgentForkSource } from './agent-fork.js'
 import { parseAgentSpawnCreator } from './agent-spawn.js'
 import { parseAgentNativeResumeSource } from './agent-native-sessions.js'
 import { parseMoteMainCreationIntent } from './spatial-agent-open-contract.js'
+import { AGENT_OPEN_LAUNCH_FIELDS, parseAgentOpenLaunchFields } from './agent-open-contract.js'
 import { parseNameChangeRecord } from './display-label.js'
 import { settingsResourceEnvelope } from './settings-resource-json.js'
 import { SPLIT_DIRECTIONS, isSplitDirection } from './split-direction-ssot.js'
@@ -212,11 +213,11 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
     request = { ...base, operation, binding: bindingTarget(source.binding, code) }
   } else if (operation === 'agent.open') {
     fields(source, ['schemaVersion', 'requestId', 'operation', 'content', 'destination', 'focus', 'caller', 'moteMain'], code)
-    const input = fields(source.content, ['kind', 'executorId', 'agentTarget', 'executionWorkspaceId', 'toolWorkspaceId', 'nativeResumeSource', 'prompt', 'agentSessionId', 'source', 'actionId'], code)
+    const input = fields(source.content, ['kind', 'executorId', 'agentTarget', 'executionWorkspaceId', 'toolWorkspaceId', 'nativeResumeSource', 'prompt', 'agentSessionId', 'source', 'actionId', ...AGENT_OPEN_LAUNCH_FIELDS], code)
     const target = destination(source.destination, code)
     let content!: Extract<AgentMuxSpaceControlRequest, { operation: 'agent.open' }>['content']
     if (input.kind === 'new-agent') {
-      fields(input, ['kind', 'executorId', 'agentTarget', 'executionWorkspaceId', 'toolWorkspaceId', 'nativeResumeSource', 'prompt'], code)
+      fields(input, ['kind', 'executorId', 'agentTarget', 'executionWorkspaceId', 'toolWorkspaceId', 'nativeResumeSource', 'prompt', ...AGENT_OPEN_LAUNCH_FIELDS], code)
       if (input.agentTarget !== undefined && (input.executionWorkspaceId !== undefined || input.toolWorkspaceId !== undefined || input.nativeResumeSource !== undefined || target.newZone || source.focus !== false)) fail('A source-owned Agent target uses an existing project Zone and background creation, without another Workspace or native-resume intent.', code)
       const agentTarget = input.agentTarget === undefined ? undefined : (() => {
         const target = fields(input.agentTarget, ['hostId', 'runtimeId', 'adoptedRoute'], code)
@@ -226,7 +227,7 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
       if (Object.hasOwn(input, 'toolWorkspaceId') && (!Object.hasOwn(input, 'executionWorkspaceId') || Object.hasOwn(input, 'nativeResumeSource') || target.newZone)) fail('A tool Workspace requires an explicit execution Workspace for a new Agent, without native resume or new Zone resources.', code)
       if (target.newZone && Object.hasOwn(input, 'executionWorkspaceId')) fail('An execution Workspace cannot be combined with new Zone resources.', code)
       if (target.newZone && Object.hasOwn(input, 'nativeResumeSource')) fail('Native resume retains its original execution directory; select an existing execution Workspace.', code)
-      content = { kind: 'new-agent', executorId: spaceControlId(input.executorId, 'Executor', code),
+      content = { kind: 'new-agent', executorId: spaceControlId(input.executorId, 'Executor', code), ...parseAgentOpenLaunchFields(input, code),
         ...(agentTarget ? { agentTarget } : {}),
         ...(Object.hasOwn(input, 'executionWorkspaceId') ? { executionWorkspaceId: spaceControlId(input.executionWorkspaceId, 'Execution Workspace', code) } : {}),
         ...(Object.hasOwn(input, 'toolWorkspaceId') ? { toolWorkspaceId: spaceControlId(input.toolWorkspaceId, 'Tool Workspace', code) } : {}),

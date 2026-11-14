@@ -31,7 +31,7 @@ export type HostSettingsParameterMap = {
   'settings.hosts.inspect': { hostId: string; expected?: AgentMuxControlSettingsResourceFields }
   'settings.hosts.agent-resources': { hostId: string; kind: 'records' | 'running'; expected?: AgentMuxControlSettingsResourceFields; expectedRuntimeId?: string }
   'settings.hosts.network': { hostId: string; expected?: AgentMuxControlSettingsResourceFields }
-  'settings.executors.discover': { hostId: string; refresh?: boolean }
+  'settings.executors.discover': { hostId: string; refresh?: boolean; executorId?: string }
   'settings.executors.unregister': { hostId: string; executorId: string; expectedRegistrationRevision: string }
   'settings.executors.register': { hostId: string; executorId: string; input: Omit<AgentMuxHostExecutorConfigureInput, 'executorId'> }
   'settings.hosts.trusted-sources': { hostId: string }
@@ -68,9 +68,10 @@ export function parseHostSettingsParams<M extends HostSettingsMethod>(method: M,
     return { hostId: rpcString(p.hostId, 'Route Host ID'), ...(p.expected === undefined ? {} : { expected: settingsResourceRecord(p.expected, 'INVALID_CONTROL_REQUEST') }) } as HostSettingsParameterMap[M]
   }
   if (method === 'settings.executors.discover') {
-    const p = rpcRecord(value, ['hostId', 'refresh'])
+    const p = rpcRecord(value, ['hostId', 'refresh', 'executorId'])
     if (p.refresh !== undefined && typeof p.refresh !== 'boolean') throw new AgentMuxError('Executor refresh must be boolean.', 'INVALID_CONTROL_REQUEST')
-    return { hostId: rpcString(p.hostId, 'Route Host ID'), ...(p.refresh === undefined ? {} : { refresh: p.refresh }) } as HostSettingsParameterMap[M]
+    return { hostId: rpcString(p.hostId, 'Route Host ID'), ...(p.refresh === undefined ? {} : { refresh: p.refresh }),
+      ...(p.executorId === undefined ? {} : { executorId: rpcString(p.executorId, 'Selected Executor ID') }) } as HostSettingsParameterMap[M]
   }
   if (method === 'settings.executors.unregister') {
     const p = rpcRecord(value, ['hostId', 'executorId', 'expectedRegistrationRevision'])
@@ -116,7 +117,10 @@ export function parseHostSettingsResult<M extends HostSettingsMethod>(method: M,
     const p = rpcRecord(value, method === 'settings.executors.discover' ? ['routeHostId', 'runtimeId', 'executors'] : method === 'settings.executors.unregister' ? ['routeHostId', 'runtimeId', 'executorId', 'removedRegistration', 'registrationRevision', 'effectiveExecutor'] : ['routeHostId', 'runtimeId', 'executor'], 'CONTROL_PROTOCOL_ERROR')
     if (p.routeHostId !== input.hostId || typeof p.runtimeId !== 'string' || !p.runtimeId || /[\0\r\n]/u.test(p.runtimeId)) fail()
     if (method === 'settings.executors.discover') {
-      return { routeHostId: input.hostId, ...parseHostExecutorInventory({ runtimeId: p.runtimeId, executors: p.executors }) } as HostSettingsResultMap[M]
+      const inventory = parseHostExecutorInventory({ runtimeId: p.runtimeId, executors: p.executors })
+      const query = input as HostSettingsParameterMap['settings.executors.discover']
+      if (query.executorId !== undefined && inventory.executors.some(executor => executor.executorId !== query.executorId)) fail()
+      return { routeHostId: input.hostId, ...inventory } as HostSettingsResultMap[M]
     }
     if (method === 'settings.executors.unregister') {
       const expected = input as HostSettingsParameterMap['settings.executors.unregister']

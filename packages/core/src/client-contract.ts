@@ -41,6 +41,8 @@ export type AgentMuxAgentCreateInput = {
    * 与 `prompt`（用户/发起者的原话，逐字节透传）分层：调用方分开传，信封组装由 Core 的出口负责。
    */
   agentMuxNote?: string
+  /** Source-owned business context; caller note stays independent until Core's final composer. */
+  sourceAgentMuxNote?: string
   /** Explicit non-human platform task; kept in generated context rather than the original request body. */
   agentMuxTask?: string
   /** Whole optional platform sources, selected against the final launch wire budget. */
@@ -60,7 +62,7 @@ export type AgentMuxAgentCreateInput = {
 
 /** Target-owned configuration, with a frozen revision; no source machine argv or environment. */
 export type AgentMuxHostAgentCreateInput = Pick<AgentMuxAgentCreateInput,
-  'toolExecution' | 'agentSessionId' | 'createOperationId' | 'executorId' | 'workspacePath' | 'prompt' | 'agentMuxNote' | 'agentMuxTask' | 'optionalContext' |
+  'toolExecution' | 'agentSessionId' | 'createOperationId' | 'executorId' | 'workspacePath' | 'prompt' | 'agentMuxNote' | 'sourceAgentMuxNote' | 'agentMuxTask' | 'optionalContext' |
   'launchOptions' | 'cols' | 'rows' | 'nativeResumeSource' | 'spatialIntent'> & {
   executorRevision: string
   /** Existing signed creation intent admission; an initial body is optional. */

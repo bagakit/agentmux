@@ -11,14 +11,20 @@ import type { SpaceMemberParams } from './space-member.js'
 import type { AgentExecutionOpenInput } from './agent-execution-coordinator.js'
 import type { HostRouteCall, HostRouteExecutionScope, HostRouteOperation, HostRouteExecutionAuthorization, HostRouteStatement, HostRouteMemberOperation } from './host-route.js'
 import { hostRouteExecutorOperation } from './host-route.js'
+import { parseAgentOpenLaunchFields } from './agent-open-contract.js'
 
 function deny(): never { throw new AgentMuxError('This child does not belong to the original authorized creation and exact target.', 'HOST_ROUTE_DERIVATION_MISMATCH') }
 export const executionCreationId = (bindingId: string, role: string) => createHash('sha256').update(JSON.stringify([bindingId, role])).digest('hex')
-export function executionRouteScope(input: AgentExecutionOpenInput): HostRouteExecutionScope {
+function launchContribution(input: Record<string, unknown>): { launchDigest?: string } {
+  const fields = parseAgentOpenLaunchFields(input)
+  return Object.keys(fields).length ? { launchDigest: digest(fields) } : {}
+}
+export function executionRouteScope(input: AgentExecutionOpenInput, includeLaunchContribution = true): HostRouteExecutionScope {
   const toolExecution = { bindingId: input.bindingId, resourceHostId: input.resourceHostId, resourceRuntimeId: input.resourceRuntimeId, workspacePath: input.resourceWorkspacePath }
   return { kind: 'execution', bindingId: input.bindingId, agentSessionId: input.agent.agentSessionId, createOperationId: input.agent.createOperationId,
     agentRuntimeId: input.agentRuntimeId, resourceRuntimeId: input.resourceRuntimeId, agentWorkspacePath: input.agent.workspacePath, resourceWorkspacePath: input.resourceWorkspacePath,
     executorId: input.agent.executorId, executorRevision: input.agent.executorRevision, createDigest: digest({ ...input.agent, toolExecution }), promptDigest: digest(input.agent.prompt ?? null),
+    ...(includeLaunchContribution ? launchContribution(input.agent) : {}),
     ...(input.agentRoute ? { agentRoute: input.agentRoute } : {}), ...(input.resourceRoute ? { resourceRoute: input.resourceRoute } : {}) }
 }
 export function memberRouteOperation(input: SpaceMemberParams[keyof SpaceMemberParams]): HostRouteMemberOperation {
@@ -46,6 +52,7 @@ export function hostRouteOperation(call: HostRouteCall): HostRouteOperation | un
   if (request.operation !== 'agent.open' || request.content.kind !== 'new-agent' || !request.content.agentTarget) return undefined
   return { kind: 'spatial', createOperationId: request.requestId, targetRuntimeId: request.content.agentTarget.runtimeId,
     executorId: request.content.executorId, promptDigest: digest(request.content.prompt ?? null), destination: request.destination as Record<string,string|boolean>,
+    ...launchContribution(request.content),
     ...(request.content.agentTarget.adoptedRoute ? { agentRoute: request.content.agentTarget.adoptedRoute } : {}) }
 }
 export function assertExecutionParent(authorization: HostRouteExecutionAuthorization): void {
@@ -76,7 +83,7 @@ export function assertExecutionParent(authorization: HostRouteExecutionAuthoriza
   } else if (operation.kind === 'execution') {
     if (!isDeepStrictEqual(scope, operation)) deny()
   } else if (scope.agentRuntimeId !== operation.targetRuntimeId || scope.resourceRuntimeId !== coordinator.runtimeId ||
-    scope.createOperationId !== operation.createOperationId || scope.executorId !== operation.executorId || scope.promptDigest !== operation.promptDigest ||
+    scope.createOperationId !== operation.createOperationId || scope.executorId !== operation.executorId || scope.promptDigest !== operation.promptDigest || scope.launchDigest !== operation.launchDigest ||
     !isDeepStrictEqual(scope.agentRoute, operation.agentRoute)) deny()
 }
 /** Original business/Native owners still validate their full DTO and effect receipt. This

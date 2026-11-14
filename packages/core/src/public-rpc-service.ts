@@ -1,3 +1,4 @@
+import { AGENT_OPEN_LAUNCH_FIELDS, parseAgentOpenDescribe, parseAgentOpenDescription } from './agent-open-contract.js'
 import { avatarActorIdentity, isObjectAvatarMethod, parseObjectAvatarParams, parseObjectAvatarResult, parseAvatarActor, type AvatarExecutionContext, type ObjectAvatarMethod, type ObjectAvatarPort } from './object-avatar.js'
 import { SPACE_CLOSE_METHODS, parseSpaceCloseParams, parseSpaceCloseResult, type SpaceCloseMethod, type SpaceCloseActor } from './space-close.js'
 import { assertTailcatConfigurationWriter, parseTailcatConfigurationParams, parseTailcatConfigurationResult, type TailcatConfigurationMethod, type TailcatConfigurationPort } from './public-rpc-tailcat-configuration.js'
@@ -285,7 +286,9 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
     register(input: import('./space-folder.js').FolderDirectoryRegistration, source: import('./space-authority.js').SpaceAuthoritySource, context: AgentMuxRpcCallContext): Promise<import('./space-folder.js').FolderSpaceReceipt>
   }
   /** Original Host policy over Core-owned spatial creation associations, without a screen. */
-  spatialAgentControl?(request: AgentMuxControlRequest, context: AgentMuxRpcCallContext): Promise<AgentMuxControlResult | undefined>
+  spatialAgentControl?: ((request: AgentMuxControlRequest, context: AgentMuxRpcCallContext) => Promise<AgentMuxControlResult | undefined>) & {
+    describe?(): import('./agent-open-contract.js').AgentOpenContracts
+  }
   /** Read only original host metadata; topology and execution remain with their Core owners. */
   spatialPresentation?(input: { graph: import('./spatial-graph.js').AgentMuxSpatialGraph;
     catalog: import('./space-control.js').AgentMuxSpaceCatalog; target: import('./space-control.js').AgentMuxSpaceSelector; imageSpaceId?: string },
@@ -420,6 +423,7 @@ const NATIVE_FIELDS = {
   'notebook.ls': [], 'notebook.inspect': ['notebookId','noteId','operationId','content','maxBytes'], 'notebook.graph': ['notebookId','noteId','maxBytes'], 'notebook.resolve': ['mode','query','limit','text','select','maxBytes'], 'notebook.apply': ['expectedRevision','operationId','change'],
   'space.folder.register': ['runtimeId','workspaceId','expectedResource','directory'],
   'space.folder.inspect': ['runtimeId','path','expectedResource'],
+  'agent.open.describe': ['expectedRuntimeId'],
   'space.member.call': ['target','call'], 'space.member.watch': ['target','call'],
   'space.sessions.watch': ['reference'],
   'space.snapshot': ['reference'], 'space.apply': ['reference','expectedRevision','changes'], 'space.watch': ['reference','after'],
@@ -875,6 +879,17 @@ export class AgentMuxRpcService {
       }
       if (method === 'route.watch' || method === 'route.receive-watch') throw new AgentMuxError('Use the original route subscription transport.', 'INVALID_CONTROL_REQUEST')
       return await routes.call(input as import('./host-route.js').HostRouteParams['route.call'] | import('./host-route.js').HostRouteParams['route.receive'], context, method === 'route.receive') as AgentMuxRpcResult<M>
+    }
+    if (method === 'agent.open.describe') {
+      const input = parseAgentOpenDescribe(params)
+      await this.authenticated(context)
+      context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+      if (this.ports.callOriginalCore) return await this.ports.callOriginalCore('local', 'agent.open.describe', input, context) as AgentMuxRpcResult<M>
+      const endpoint = await this.ports.hostedRuntime?.()
+      if (!endpoint) throw new AgentMuxError('The original Source launch owner is unconfirmed. Existing requests and healthy Agents remain available.', 'AGENT_OPEN_CONTRACT_UNCONFIRMED')
+      const { owner } = await endpoint.call('runtime.owner.identity', input, context)
+      const contracts = this.ports.spatialAgentControl?.describe?.() ?? { ordinaryLaunch: null, externalAssociation: null }
+      return parseAgentOpenDescription({ source: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }, contracts }, input) as AgentMuxRpcResult<M>
     }
     if (method === 'space.folder.inspect') {
       const input = parseFolderDirectoryInspectInput(params), caller = await this.authenticated(context)
@@ -1699,7 +1714,8 @@ export class AgentMuxRpcService {
       if (method !== 'settings.executors.discover' && method !== 'settings.executors.register' && method !== 'settings.executors.unregister') await client.connect()
       if (method === 'settings.executors.discover') {
         const query = parseHostSettingsParams('settings.executors.discover', params)
-        const result = { routeHostId: query.hostId, ...await client.listHostExecutors({ refresh: query.refresh ?? true }) }
+        const result = { routeHostId: query.hostId, ...await client.listHostExecutors({ refresh: query.refresh ?? true,
+          ...(query.executorId === undefined ? {} : { executorId: query.executorId }) }) }
         return parseHostSettingsResult(method, result, input) as AgentMuxRpcResult<M>
       }
       if (method === 'settings.executors.unregister') {
@@ -2406,8 +2422,15 @@ export class AgentMuxRpcService {
       const independentResume = originalResumeRequest?.operation === 'resume' && !originalResumeRequest.text.trim()
       let independentSpatial = originalSpatialRequest && (isHeadlessSpatialAgentOpen(originalSpatialRequest) ||
         originalSpatialRequest.operation === 'space.inspect' && 'requestId' in originalSpatialRequest.target)
+      const originalSpatialState = independentSpatial && originalSpatialRequest?.operation === 'agent.open' ? await this.spatial.readForLayout() : null
       if (independentSpatial && originalSpatialRequest?.operation === 'agent.open') independentSpatial =
-        isHeadlessSpatialAgentOpen(originalSpatialRequest, (await this.spatial.readForLayout())?.graph)
+        isHeadlessSpatialAgentOpen(originalSpatialRequest, originalSpatialState?.graph)
+      const retainedSpatialLaunch = originalSpatialRequest?.operation === 'agent.open' && originalSpatialState &&
+        spatialAgentOpenRecord(originalSpatialState.graph, originalSpatialRequest.requestId)
+      if (originalSpatialRequest?.operation === 'agent.open' && originalSpatialRequest.content.kind === 'new-agent' &&
+          AGENT_OPEN_LAUNCH_FIELDS.some(field => Object.hasOwn(originalSpatialRequest.content, field)) &&
+          (!independentSpatial || !this.ports.callOriginalCore && !retainedSpatialLaunch && this.ports.spatialAgentControl?.describe?.().ordinaryLaunch?.revision !== 1)) throw new AgentMuxError(
+        'This new launch contribution needs an existing Source-owned Zone and a background destination handled by its confirmed Source owner. The legacy focused creator cannot preserve these fields. Keep the complete original request; no creation was forwarded.', 'AGENT_OPEN_CONTRACT_UNCONFIRMED')
       if (independentSpatial && this.ports.callOriginalCore) return await this.ports.callOriginalCore('local', method, params, context)
       if (originalControlOperation === 'settings.resource.list' || originalControlOperation === 'settings.resource.get') {
         const request = rpcControlRequest(method as keyof typeof AGENTMUX_RPC_CONTROL_METHODS, params)

@@ -1,3 +1,4 @@
+import { parseAgentOpenDescribe, parseAgentOpenDescription } from './agent-open-contract.js'
 import { isObjectAvatarMethod, parseObjectAvatarParams, parseObjectAvatarResult } from './object-avatar.js'
 import { SPACE_CLOSE_METHODS, parseSpaceCloseParams, parseSpaceCloseResult, type SpaceCloseMethod } from './space-close.js'
 import { parseTailcatConfigurationParams, parseTailcatConfigurationResult } from './public-rpc-tailcat-configuration.js'
@@ -491,6 +492,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (method === 'notebook.storage.inspect' || method === 'notebook.storage.change') return parseNotesStorageInspection(value, parseNotesStorageParams(method, params).operationId) as unknown as Record<string, unknown>
     if (method === 'agent.provider.ls') return parseProviderCatalogObservation(value, parseProviderCatalogQuery(params)) as unknown as Record<string, unknown>
     if (isHostSettingsMethod(method)) return parseHostSettingsResult(method, value, parseHostSettingsParams(method, params)) as unknown as Record<string, unknown>
+    if (method === 'agent.open.describe') return parseAgentOpenDescription(value, parseAgentOpenDescribe(params)) as unknown as Record<string, unknown>
     if (method === 'space.folder.inspect') return parseFolderDirectoryInspection(value, parseFolderDirectoryInspectInput(params)) as unknown as Record<string, unknown>
     if (method === 'space.folder.register') return parseFolderSpaceReceipt(value, parseFolderSpaceRegisterInput(params)) as unknown as Record<string, unknown>
     if (isSpaceAuthorityMethod(method)) {

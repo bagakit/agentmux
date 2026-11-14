@@ -335,7 +335,7 @@ export type AgentMuxSpaceControlRequest = Base & (
   | { operation: 'space.ls'; target: AgentMuxSpaceSelector; presentation?: boolean }
   | { operation: 'space.inspect'; presentation?: boolean; target: AgentMuxSpaceSelector | { requestId: string } }
   | { operation: 'agent.open'; content:
-      | { kind: 'new-agent'; executorId: string; agentTarget?: AgentMuxSpaceAgentTarget; executionWorkspaceId?: string; toolWorkspaceId?: string; nativeResumeSource?: import('./types.js').AgentNativeResumeSource; prompt?: string }
+      | ({ kind: 'new-agent'; executorId: string; agentTarget?: AgentMuxSpaceAgentTarget; executionWorkspaceId?: string; toolWorkspaceId?: string; nativeResumeSource?: import('./types.js').AgentNativeResumeSource; prompt?: string } & import('./agent-open-contract.js').AgentOpenLaunchFields)
       | { kind: 'fork-agent'; source: import('./agent-fork.js').AgentMuxAgentForkSource; prompt?: string }
       /** A public request only: the Core service expands it into new-agent or fork-agent content before admission. */
       | { kind: 'derived-action'; actionId: string; source: { agentSessionId: string }; executorId?: string }

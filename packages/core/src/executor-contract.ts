@@ -1,4 +1,6 @@
 import type { AgentExecutorConfig, AgentProviderId } from './types.js'
+import type { LaunchOption } from './agent-launch-option.js'
+import { parseProviderLaunchOptions } from './public-rpc-provider-catalog.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 
@@ -21,6 +23,10 @@ export type AgentMuxHostExecutorDescriptor = {
   configRevision: string
   /** Exact registered publication witness; absent for defaults or unavailable metadata. */
   registrationRevision?: string
+  /** Present for an explicitly selected Executor, from its own Provider. Absence is unconfirmed. */
+  launchOptions?: LaunchOption[]
+  /** Actual target creation handler contract, not executable/Provider qualification. */
+  creationContract?: { ordinaryLaunch: 1 }
   availability: AgentMuxExecutorAvailability
   /** Absolute executable selected on this Host, present only after a successful check. */
   executable?: string
@@ -35,7 +41,7 @@ export type AgentMuxHostExecutorInventory = {
 function invalidInventory(): never { throw new AgentMuxError('Executor metadata does not match its original owner.', 'CONTROL_PROTOCOL_ERROR') }
 /** The same safe descriptor codec serves Settings and route readers. */
 export function parseHostExecutorDescriptor(value: unknown): AgentMuxHostExecutorDescriptor {
-  const d = rpcRecord(value, ['executorId', 'label', 'providerId', 'command', 'source', 'configRevision', 'registrationRevision', 'availability', 'executable', 'cause'], 'CONTROL_PROTOCOL_ERROR')
+  const d = rpcRecord(value, ['executorId', 'label', 'providerId', 'command', 'source', 'configRevision', 'registrationRevision', 'launchOptions', 'creationContract', 'availability', 'executable', 'cause'], 'CONTROL_PROTOCOL_ERROR')
   for (const key of ['executorId', 'label', 'providerId', 'command', 'configRevision']) if (typeof d[key] !== 'string' || !d[key] || /[\0\r\n]/u.test(d[key])) invalidInventory()
   if (!['registered', 'provider-default'].includes(d.source as string) || !isAgentMuxExecutorAvailability(d.availability)) invalidInventory()
   if (d.registrationRevision !== undefined && (d.source !== 'registered' || typeof d.registrationRevision !== 'string' || !d.registrationRevision || /[\0\r\n]/u.test(d.registrationRevision))) invalidInventory()
@@ -45,6 +51,8 @@ export function parseHostExecutorDescriptor(value: unknown): AgentMuxHostExecuto
     const cause = rpcRecord(d.cause, ['code', 'message'], 'CONTROL_PROTOCOL_ERROR')
     if (typeof cause.code !== 'string' || !cause.code || typeof cause.message !== 'string') invalidInventory()
   }
+  if (d.launchOptions !== undefined) parseProviderLaunchOptions(d.launchOptions)
+  if (d.creationContract !== undefined && rpcRecord(d.creationContract, ['ordinaryLaunch'], 'CONTROL_PROTOCOL_ERROR').ordinaryLaunch !== 1) invalidInventory()
   return d as AgentMuxHostExecutorDescriptor
 }
 export function parseHostExecutorInventory(value: unknown): AgentMuxHostExecutorInventory {

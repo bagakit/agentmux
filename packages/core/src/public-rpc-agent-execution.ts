@@ -11,7 +11,7 @@ import { parseAgentMuxCreationAdmission } from './agent-creation-admission.js'
 import type { AgentExecutionOpenInput, AgentExecutionInspection } from './agent-execution-coordinator.js'
 
 export const AGENT_EXECUTION_CREATE_FIELDS = ['bindingId', 'agentHostId', 'agentRuntimeId', 'resourceHostId', 'resourceRuntimeId', 'resourceWorkspacePath', 'resourceGrant', 'agent', 'agentRoute', 'resourceRoute'] as const
-const agentFields = ['agentSessionId', 'createOperationId', 'executorId', 'executorRevision', 'workspacePath', 'prompt', 'agentMuxNote', 'agentMuxTask',
+const agentFields = ['agentSessionId', 'createOperationId', 'executorId', 'executorRevision', 'workspacePath', 'prompt', 'agentMuxNote', 'sourceAgentMuxNote', 'agentMuxTask',
   'optionalContext', 'launchOptions', 'cols', 'rows', 'nativeResumeSource', 'spatialIntent', 'initialMessageAdmission', 'threadId'] as const
 const invalid = (message: string, code: string): never => { throw new AgentMuxError(message, code) }
 function identity(value: unknown, code: string): string {
@@ -42,7 +42,7 @@ export function parseAgentExecutionCreate(value: unknown): AgentExecutionOpenInp
   const agent = rpcRecord(input.agent, agentFields, code)
   for (const field of ['agentSessionId', 'createOperationId', 'executorId', 'executorRevision']) identity(agent[field], code)
   workspace(agent.workspacePath, code)
-  for (const field of ['prompt', 'agentMuxNote', 'agentMuxTask']) if (agent[field] !== undefined) text(agent[field], code)
+  for (const field of ['prompt', 'agentMuxNote', 'sourceAgentMuxNote', 'agentMuxTask']) if (agent[field] !== undefined) text(agent[field], code)
   if (agent.threadId !== undefined) identity(agent.threadId, code)
   for (const field of ['cols', 'rows']) if (agent[field] !== undefined && (!Number.isSafeInteger(agent[field]) || Number(agent[field]) <= 0)) invalid('Terminal dimensions must be positive safe integers.', code)
   if (agent.optionalContext !== undefined) {

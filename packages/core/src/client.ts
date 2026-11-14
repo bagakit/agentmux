@@ -643,7 +643,11 @@ export class AgentMuxClient {
 
   async listHostExecutors(input?: { refresh?: boolean; executorId?: string }) {
     if (!this.hostExecutorOwner) throw new AgentMuxError('Target Host Executor registry is unavailable.', 'CONTROL_UNAVAILABLE')
-    return await this.hostExecutorOwner.list(input)
+    const inventory = await this.hostExecutorOwner.list(input)
+    // Produced by the same target Core that handles createHostAgentWithDelivery.
+    // A calling SDK never adds this contract to another Core's old result.
+    return { ...inventory, executors: inventory.executors.map(executor => ({ ...executor,
+      ...(input?.executorId === executor.executorId ? { creationContract: { ordinaryLaunch: 1 as const } } : {}) })) }
   }
 
   /** A local Core owns no outgoing remote Runtime RPC carrier. */
@@ -705,9 +709,10 @@ export class AgentMuxClient {
     input = structuredClone(input)
     if (input?.spatialIntent !== undefined) input = { ...input, spatialIntent: parseAgentCreationSpatialIntent(input.spatialIntent) }
     const allowed = ['toolExecution', 'agentSessionId', 'createOperationId', 'executorId', 'executorRevision', 'workspacePath', 'prompt',
-      'agentMuxNote', 'agentMuxTask', 'optionalContext', 'launchOptions', 'cols', 'rows', 'initialMessageAdmission', 'threadId', 'nativeResumeSource', 'spatialIntent']
+      'agentMuxNote', 'sourceAgentMuxNote', 'agentMuxTask', 'optionalContext', 'launchOptions', 'cols', 'rows', 'initialMessageAdmission', 'threadId', 'nativeResumeSource', 'spatialIntent']
     if (!input || Object.keys(input).some(key => !allowed.includes(key)) || !input.agentSessionId || !input.createOperationId || !input.executorRevision ||
-      input.agentMuxTask !== undefined && typeof input.agentMuxTask !== 'string') {
+      input.agentMuxTask !== undefined && typeof input.agentMuxTask !== 'string' ||
+      input.sourceAgentMuxNote !== undefined && typeof input.sourceAgentMuxNote !== 'string') {
       throw new AgentMuxError('Target creation requires exact Session, operation and Executor revision, without command overrides.', 'INVALID_CONTROL_REQUEST')
     }
     let admitted: AgentCreationAdmission | undefined
@@ -765,6 +770,7 @@ export class AgentMuxClient {
           injectAgentMuxGuide: config.injectAgentMuxGuide, args: config.args, env: config.env, commandOverride: config.command,
           ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
           ...(input.agentMuxNote === undefined ? {} : { agentMuxNote: input.agentMuxNote }),
+          ...(input.sourceAgentMuxNote === undefined ? {} : { sourceAgentMuxNote: input.sourceAgentMuxNote }),
           ...(input.agentMuxTask === undefined ? {} : { agentMuxTask: input.agentMuxTask }),
           ...(input.optionalContext === undefined ? {} : { optionalContext: input.optionalContext }),
           ...(input.nativeResumeSource === undefined ? {} : { nativeResumeSource: input.nativeResumeSource }),
@@ -5496,7 +5502,7 @@ export class AgentMuxClient {
     const intentDigest = admitted?.intentDigest ?? creationIntentDigest(input, agentSessionId, executorId, createOperationId, initialAuthor, creator)
     const executorInvocation = admitted?.executorRevision ? undefined : captureExecutorInvocation(input.providerId, executorId, createOperationId, intentDigest, input)
     const contextRequested = !(nativeResumeSource && !input.prompt?.trim() && !input.agentMuxTask?.trim()) &&
-      Boolean(createdBy || forkSource || input.injectAgentMuxGuide || input.agentMuxNote?.trim() || input.agentMuxTask?.trim() || input.optionalContext?.length)
+      Boolean(createdBy || forkSource || input.injectAgentMuxGuide || input.agentMuxNote?.trim() || input.sourceAgentMuxNote?.trim() || input.agentMuxTask?.trim() || input.optionalContext?.length)
     const lifecycleOperationId = agentLifecycleOperationIdentity('create', agentSessionId, createOperationId)
     // A replay reads the original created identity and receipt before checking a now-changed parent.
     const existing = await preparation(() => this.readCreationSession(agentSessionId, createOperationId))
@@ -5584,7 +5590,7 @@ export class AgentMuxClient {
       // 它同时交出 deferred 的那一半，下面必须真的送出去（见 deliverPostLaunchPrompt）。
       const composed = nativeResumeSource && !originalPrompt?.trim() && !input.agentMuxTask?.trim() ? { text: '', systemContext: undefined } : composeAgentLaunchPrompt(originalPrompt, forkSource ? true : input.injectAgentMuxGuide,
         [forkSource ? agentForkIdentityReminder(agentSessionId, forkSource) : undefined,
-          createdBy ? agentSpawnContext(createdBy) : undefined, input.agentMuxNote].filter(Boolean).join('\n\n') || undefined, input.optionalContext, input.agentMuxTask)
+          createdBy ? agentSpawnContext(createdBy) : undefined, input.sourceAgentMuxNote, input.agentMuxNote].filter(Boolean).join('\n\n') || undefined, input.optionalContext, input.agentMuxTask)
       const { atLaunch: launchPrompt, deferred: deferredPrompt } = splitLaunchPromptByDelivery(
         provider.catalog, composed.text
       )

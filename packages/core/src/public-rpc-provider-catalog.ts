@@ -2,6 +2,7 @@ import { RISK_TIERS } from './risk-tier.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord, rpcString } from './rpc-data.js'
 import type { AgentCatalogEntry } from './types.js'
+import type { LaunchOption } from './agent-launch-option.js'
 
 export const PROVIDER_CATALOG_METHODS = { 'agent.provider.ls': 'long' } as const
 export type ProviderCatalogMethod = keyof typeof PROVIDER_CATALOG_METHODS
@@ -31,23 +32,12 @@ function catalogEntry(value: unknown): AgentCatalogEntry {
   rpcRecord(p.resumeStrategy, ['kind', 'locator'], 'CONTROL_PROTOCOL_ERROR')
   rpcRecord(p.acpStrategy, ['kind'], 'CONTROL_PROTOCOL_ERROR')
   rpcRecord(p.capabilities, ['terminal', 'timeline', 'permission', 'providerResume', 'turnOutcomes', 'nativeInterruption', 'providerFork', 'replyCorrelation', 'asyncQuestionReply', 'promptExecution', 'nativeConversationInput', 'usage'], 'CONTROL_PROTOCOL_ERROR')
-  const choice = (value: unknown) => {
-    const c = rpcRecord(value, ['id', 'label', 'description', 'tier'], 'CONTROL_PROTOCOL_ERROR')
-    wireString(c.id); wireString(c.label)
-    if (c.description !== undefined && typeof c.description !== 'string' || c.tier !== undefined && !RISK_TIERS.includes(c.tier as typeof RISK_TIERS[number])) invalid()
-  }
-  if (!Array.isArray(p.launchOptions)) invalid()
-  for (const value of p.launchOptions) {
-    const option = rpcRecord(value, ['id', 'label', 'description', 'choices'], 'CONTROL_PROTOCOL_ERROR')
-    wireString(option.id); wireString(option.label)
-    if (!Array.isArray(option.choices)) invalid()
-    option.choices.forEach(choice)
-  }
+  parseProviderLaunchOptions(p.launchOptions)
   if (p.postureControl !== undefined) {
     const control = rpcRecord(p.postureControl, ['id', 'label', 'modes'], 'CONTROL_PROTOCOL_ERROR')
     wireString(control.id); wireString(control.label)
     if (!Array.isArray(control.modes)) invalid()
-    control.modes.forEach(choice)
+    control.modes.forEach(parseChoice)
   }
   if (p.composer !== undefined) {
     const composer = rpcRecord(p.composer, ['skillRoots', 'commands'], 'CONTROL_PROTOCOL_ERROR')
@@ -58,6 +48,22 @@ function catalogEntry(value: unknown): AgentCatalogEntry {
     }
   }
   return structuredClone(p) as unknown as AgentCatalogEntry
+}
+function parseChoice(value: unknown): void {
+  const c = rpcRecord(value, ['id', 'label', 'description', 'tier'], 'CONTROL_PROTOCOL_ERROR')
+  wireString(c.id); wireString(c.label)
+  if (c.description !== undefined && typeof c.description !== 'string' || c.tier !== undefined && !RISK_TIERS.includes(c.tier as typeof RISK_TIERS[number])) invalid()
+}
+/** Shared safe DESCRIBE codec; never accepts private argv or environment. */
+export function parseProviderLaunchOptions(value: unknown): LaunchOption[] {
+  if (!Array.isArray(value)) invalid()
+  for (const item of value) {
+    const option = rpcRecord(item, ['id', 'label', 'description', 'choices'], 'CONTROL_PROTOCOL_ERROR')
+    wireString(option.id); wireString(option.label)
+    if (option.description !== undefined && typeof option.description !== 'string' || !Array.isArray(option.choices)) invalid()
+    option.choices.forEach(parseChoice)
+  }
+  return structuredClone(value) as LaunchOption[]
 }
 function wireString(value: unknown): string { try { return rpcString(value, 'Provider declaration') } catch { return invalid() } }
 function invalid(): never { throw new AgentMuxError('The original Host returned invalid Provider declarations.', 'CONTROL_PROTOCOL_ERROR') }

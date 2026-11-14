@@ -185,9 +185,11 @@ export class AgentMuxHostExecutorOwner {
   async list(input: { refresh?: boolean; executorId?: string } = {}): Promise<AgentMuxHostExecutorInventory> {
     const state = await this.read(), entries = this.entries(state.executors)
     const id = input.executorId === undefined ? undefined : text(input.executorId, 'Executor ID', 512)
+    const declarations = id === undefined ? undefined : new Map(this.options.catalog().map(provider => [provider.id, provider.launchOptions]))
     const selected = id === undefined ? [...entries] : entries.has(id) ? [[id, entries.get(id)!] as const] : []
     const executors = await Promise.all(selected.map(async ([id, { config, source }]) => ({
       ...this.descriptor(id, config, source, state.registrationRevisions[id]),
+      ...(declarations?.has(config.providerId) ? { launchOptions: structuredClone(declarations.get(config.providerId)!) } : {}),
       ...(input.refresh ? await this.observe(config) : {})
     })))
     return { runtimeId: this.options.runtimeId, executors }
