@@ -1,8 +1,20 @@
-/** Personal presentation only. The original Host/Project key is also used by Focus filters. */
+/** Personal presentation only. Legacy Host/Project keys retain their original identity. */
 export const FOCUS_PROJECT_COLORS = ['default', 'blue', 'green', 'amber', 'rose', 'violet'] as const
 export type FocusProjectColor = typeof FOCUS_PROJECT_COLORS[number]
 export type FocusProjectPreference = { key: string; pinned: boolean; note: string; color: FocusProjectColor; collapsed: boolean | null }
 export const EMPTY_FOCUS_PROJECTS: readonly FocusProjectPreference[] = []
+/** A preference addresses the complete original Collection scope, never its title or first member. */
+export const focusCollectionPreferenceKey = (hostId: string, categorySpaceIds: readonly string[]) =>
+  JSON.stringify(['collection', hostId, [...new Set(categorySpaceIds)].sort()])
+
+function validPreferenceIdentity(identity: unknown): boolean {
+  if (!Array.isArray(identity)) return false
+  const named = (value: unknown): value is string => typeof value === 'string' && value.length > 0
+  return identity.length === 2 && identity.every(named)
+    || identity.length === 3 && identity[0] === 'collection' && named(identity[1]) && Array.isArray(identity[2])
+      && identity[2].length > 0 && identity[2].every(named)
+      && JSON.stringify(identity) === focusCollectionPreferenceKey(identity[1], identity[2])
+}
 
 export function parseFocusProjects(value: unknown): FocusProjectPreference[] {
   if (!Array.isArray(value)) throw Error('Focus projects must be a JSON array of personal project preferences.')
@@ -15,8 +27,9 @@ export function parseFocusProjects(value: unknown): FocusProjectPreference[] {
     }
     let identity: unknown
     try { identity = JSON.parse(item.key) } catch { /* Report this exact setting below. */ }
-    if (!Array.isArray(identity) || identity.length !== 2 || !identity.every(part => typeof part === 'string' && part.length > 0)
-      || JSON.stringify(identity) !== item.key || seen.has(item.key)) throw Error('Focus project keys must be unique original [Host, Project] identities.')
+    if (!validPreferenceIdentity(identity) || JSON.stringify(identity) !== item.key || seen.has(item.key)) {
+      throw Error('Focus preference keys must be unique original [Host, Project] or ["collection", Host, sorted Category Space IDs] identities.')
+    }
     seen.add(item.key)
     return { key: item.key, pinned: item.pinned, note: item.note, color: item.color, collapsed: item.collapsed }
   })
