@@ -17,7 +17,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   if (originalMainFrame) Object.defineProperty(process, 'isMainFrame', originalMainFrame)
-  else delete (process as NodeJS.Process & { isMainFrame?: boolean }).isMainFrame
+  else Reflect.deleteProperty(process, 'isMainFrame')
 })
 
 const image = { mimeType: 'image/png' as const, dataUrl: 'data:image/png;base64,AA==', width: 1, height: 1, byteLength: 1 }
