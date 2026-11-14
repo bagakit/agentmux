@@ -9,6 +9,8 @@ import { useAppStore } from '../store'
 import { MoteTaskAction } from './MoteTaskAction'
 import { SelectionField } from './SelectionField'
 
+const taskIcons = { organize: 'object.list', analyze: 'action.inspect', learn: 'object.notebook' } as const
+
 /** The menu owns one retained discussion. It consumes loaded members, not a second directory. */
 export function FocusGroupDiscussion({ lane, contexts, active, container }: {
   lane: FocusScanLane; contexts: readonly FocusContext[]
@@ -25,7 +27,7 @@ export function FocusGroupDiscussion({ lane, contexts, active, container }: {
   const project = projects.find(project => focusGroupProjectKey(project) === selectedKey)
   const prepared = useRef(new Map<string, { target: FocusGroupLauncher; projectKey: string }>())
   return <MoteTaskAction scopeKey={scopeKey} orientation="vertical" active={active} portalContainer={container}
-    actions={FOCUS_GROUP_TASKS.map(action => ({ ...action, createTask: async recipient => focusGroupTask(action.id, lane, resources, recipient) }))}
+    actions={FOCUS_GROUP_TASKS.map(action => ({ ...action, icon: taskIcons[action.id], createTask: async recipient => focusGroupTask(action.id, lane, resources, recipient) }))}
     newAgent={{ key: selectedKey || JSON.stringify(['unselected-project', scopeKey]), label: '新 Agent',
       details: <div className="focus-group-discussion__project"><SelectionField label="Project for new Agent" value={selectedKey} menuContainer={container}
         options={projects.map(project => ({ value: focusGroupProjectKey(project), label: project.name,

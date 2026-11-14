@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { focusReadCommand, focusTaskReadInputs } from '@agentmux/core/focus-task-guidance'
 import { createPortal } from 'react-dom'
+import { SemanticIcon, type SemanticIconId } from '@agentmux/client-ui/icons'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath } from '@agentmux/host/mote-model'
 import { useScratchTopics } from '../hooks/useScratchTopics'
 import { scratchMoteTopics } from '../lib/scratch-topic-snapshots'
@@ -13,7 +14,7 @@ import { prepareMoteTask, type MoteTaskPacket, type PreparedMoteTask } from '../
 
 export type MoteTaskRecipient = { kind: 'mote'; topicId: string } | { kind: 'new-agent'; targetKey: string }
 export type MoteTaskActionItem = {
-  id: string; label: string; description?: string
+  id: string; label: string; description?: string; icon?: SemanticIconId
   createTask(recipient: MoteTaskRecipient): Promise<MoteTaskPacket>
 }
 type NewAgentTarget = { key: string; label?: string; details?: ReactNode
@@ -119,7 +120,7 @@ export function MoteTaskAction({ scopeKey, active = true, orientation = 'horizon
       : original?.state === 'unconfirmed' ? 'Check original task' : original?.draftSaved ? 'Open task draft' : action.label : action.label
     return <button type="button" key={action.id} className={orientation === 'vertical' ? 'tab-context-menu__item mote-task-action__button' : 'launcher-mote__create'} title={action.description} aria-description={action.description} data-mote-task-action-id={action.id}
       disabled={busy || Boolean(retainedAgent && !newAgent?.onOpen)} onClick={event => void handoff(action, event.currentTarget)}>
-      <span>{label}</span>{orientation !== 'vertical' && action.description ? <small>{action.description}</small> : null}
+      {orientation === 'vertical' && action.icon ? <SemanticIcon name={action.icon} size={13} /> : null}<span>{label}</span>{orientation !== 'vertical' && action.description ? <small>{action.description}</small> : null}
     </button>
   }
   const content = <div ref={root} className={`mote-task-action mote-task-action--${orientation}`} data-mote-task-action aria-busy={busy || undefined}>
