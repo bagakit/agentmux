@@ -5,7 +5,7 @@ import { effectiveRoomGrant } from './effective-grant.js'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
-import { AgentMuxError } from '@agentmux/core'
+import { AgentMuxError, AGENTMUX_SESSION_NAMING_ENTRY } from '@agentmux/core'
 import type { MoteMainReader } from '@agentmux/core/mote-dialogue'
 import type { AgentMuxAgentSession } from '@agentmux/core'
 import { sameMotePreferencesTarget } from '@agentmux/core/mote-preferences'
@@ -517,6 +517,7 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
       const recent = this.store.generations(row.generation.target.spaceId, row.sequence, 3, row.laneKey).map(value => value.generation)
       const systemContext = [
         'This is a dedicated private conversation for this Mote and the original authenticated external person. Talking does not grant administrative or permission-approval authority.',
+        AGENTMUX_SESSION_NAMING_ENTRY,
         'Earlier Agents in this same private-chat lane (newest first):',
         recent.length ? recent.map(g => `- amux://agent/${g.agentSessionId} (Host ${g.executionHostId})`).join('\n') : 'No earlier Agent in this lane.',
         'For more original Agent references run "$AGENTMUX_CLI" space mote chat history --input - with this JSON on standard input:', encode({ target: row.generation.target, actor: row.generation.actor, limit: 20 }),
