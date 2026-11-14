@@ -41,8 +41,32 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   result.operations.push({ action: 'tab-bar-soft-keyboard', ...keyboard })
   await tap('.mobile-spatial-panel .mobile-page-header [aria-label="手机设置与连接"]', 'Header menu')
   await until('!!document.querySelector(".mobile-drawer")')
-  await capture('mature-drawer-390-dark')
-  await tap('[aria-label="关闭面板"]', 'Close drawer')
+  await read('Promise.all(document.querySelector(".mobile-drawer").getAnimations().map(animation=>animation.finished))')
+  result.matureDrawer = []
+  for (const [width, height] of [[390, 844], [320, 760]]) for (const appearance of ['dark', 'light']) {
+    await resize(width, height); await read(`mobileProductScene.setAppearance(${JSON.stringify(appearance)})`)
+    // The connection card leads the drawer: brand, Mac address and the status dot, a full-width touch target.
+    const drawer = await read(`(()=>{const d=document.querySelector('.mobile-drawer'),r=n=>n?n.getBoundingClientRect().toJSON():null
+      const groups=[...d.children].filter(n=>!n.matches('.mobile-sheet-handle, .mobile-sheet-title, #mobile-sheet-description')),card=groups[0]
+      const dot=card?.querySelector('.mobile-status-dot'),address=card?.querySelector('.mobile-drawer-connection__address')
+      return {first:card?.className,drawer:r(d),card:r(card),icon:r(card?.querySelector('img.brand-icon')),dot:r(dot),dotColor:dot&&getComputedStyle(dot).backgroundColor,
+        address:address?.textContent,addressClipped:address?address.scrollWidth>address.clientWidth+1:null,state:card?.querySelector('.mobile-drawer-connection__state')?.textContent,
+        rows:[...d.querySelectorAll('.mobile-menu-row, .mobile-home-select')].map(n=>({text:n.innerText.split('\\n')[0],rect:r(n)})),overflow:d.scrollWidth>d.clientWidth}})()`)
+    assert.equal(drawer.first, 'mobile-drawer-connection', 'The connection card is the first drawer group')
+    assert.ok(drawer.card.height >= 64 && drawer.card.left >= drawer.drawer.left && drawer.card.right <= drawer.drawer.right, `Card fits the drawer: ${JSON.stringify(drawer.card)}`)
+    assert.ok(drawer.icon && drawer.icon.width >= 32 && drawer.dot && drawer.dot.width >= 6, 'Brand and status dot are drawn')
+    assert.equal(drawer.state, '已连接')
+    assert.deepEqual(drawer.rows.map(row => row.text), ['Survey', '默认目录', '提醒与诊断'], 'Survey, the default directory and diagnostics stay reachable')
+    for (const row of drawer.rows) assert.ok(row.rect.height >= 44, 'Drawer rows keep the touch target')
+    assert.equal(drawer.overflow, false)
+    result.matureDrawer.push({ width, height, appearance, drawer })
+    await capture(`mature-drawer-${width}-${appearance}`)
+  }
+  await resize(390, 844); await read('mobileProductScene.setAppearance("dark")')
+  await tap('.mobile-drawer-connection', 'Connection card')
+  await until('[...document.querySelectorAll(".mobile-sheet .mobile-sheet-title h2")].some(n=>n.textContent==="连接与设备")')
+  await tap('[aria-label="关闭面板"]', 'Close connection and devices')
+  await until('!document.querySelector("[role=dialog]")')
   // A permission that fits one tap answers on the card, through the same original request and Core receipt.
   await button('Focus', '.mobile-navigation')
   await until('!!document.querySelector(".mobile-needs-you-card .mobile-ticket-answer__choices button")')
@@ -177,9 +201,57 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   for (const turn of (await messageControls()).turns) assert.equal(turn.shown, 0, 'Every message returns to rest')
   result.matureMessageControls = { rest, personChosen, copying, keyboardFocus }
   await tap('.mobile-header .mobile-session-view-toggle', 'Terminal toggle')
-  await until('!!document.querySelector(".mobile-terminal-panel:not([hidden])")')
-  await read('new Promise(resolve=>setTimeout(resolve,300))')
-  await capture('mature-terminal-390-dark')
+  await until('!!document.querySelector(".mobile-terminal-panel:not([hidden]) .mobile-terminal[data-reading=reading]")&&document.querySelectorAll(".mobile-terminal-canvas .xterm-rows > div").length>0')
+  await until('!document.querySelector(".mobile-main[data-motion]")')
+  const terminalCost = () => read('mobileProductScene.facts().calls.filter(call=>["sdk.resizeAgent","sdk.writeAgent","sdk.reattachAgent"].includes(call.method)).map(call=>call.method)')
+  const terminalGrid = `(()=>{const screen=document.querySelector('.mobile-terminal-canvas .xterm-screen')
+    return {rows:document.querySelectorAll('.mobile-terminal-canvas .xterm-rows > div').length,screen:{width:Math.round(screen.getBoundingClientRect().width),height:Math.round(screen.getBoundingClientRect().height)},
+      first:document.querySelector('.mobile-terminal-canvas .xterm-rows > div')?.textContent}})()`
+  const originalGrid = await read(terminalGrid), originalCost = await terminalCost()
+  result.matureTerminal = []
+  for (const [width, height] of [[390, 844], [320, 760]]) for (const appearance of ['dark', 'light']) {
+    await resize(width, height); await read(`mobileProductScene.setAppearance(${JSON.stringify(appearance)})`)
+    // One header, then exactly one toolbar row, then the output; no Mote context strip or explanation row.
+    const geometry = await read(`(()=>{const r=n=>n?n.getBoundingClientRect().toJSON():null,shown=n=>n.getClientRects().length>0
+      const header=document.querySelector('.mobile-header'),section=document.querySelector('.mobile-terminal-panel:not([hidden]) .mobile-terminal'),canvas=section.querySelector('.mobile-terminal-canvas')
+      const kids=[...section.children],above=kids.slice(0,kids.indexOf(canvas)).filter(shown),toolbar=section.querySelector('.mobile-terminal-toolbar')
+      const chrome=[...document.querySelector('.mobile-app').children].filter(n=>shown(n)&&!n.matches('.mobile-main, .mobile-notice-stack'))
+      return {header:r(header),toolbar:r(toolbar),canvas:r(canvas),above:above.map(n=>n.className),chrome:chrome.map(n=>n.className),strip:!!document.querySelector('.mobile-mote-context'),
+        mode:toolbar.querySelector('.mobile-terminal-mode-state')?.textContent,state:r(toolbar.querySelector('.mobile-terminal-mode-state')),
+        buttons:[...toolbar.querySelectorAll('button')].map(b=>({label:b.getAttribute('aria-label')??b.textContent,rect:r(b)})),overflow:document.querySelector('.mobile-app').scrollWidth>innerWidth}})()`)
+    assert.equal(geometry.strip, false, 'The terminal carries no Mote context strip')
+    assert.deepEqual(geometry.chrome.map(name => name.includes('mobile-header--session')), [true], 'Only the conversation header sits above the terminal')
+    assert.deepEqual(geometry.above, ['mobile-terminal-toolbar'], 'Exactly one toolbar row precedes the output')
+    assert.ok(Math.abs(geometry.toolbar.top - geometry.header.bottom) <= 1 && Math.abs(geometry.canvas.top - geometry.toolbar.bottom) <= 1, `Header, toolbar and output stack without a gap: ${JSON.stringify(geometry)}`)
+    assert.ok(geometry.toolbar.height <= 46, 'The toolbar is one 44px row')
+    assert.ok(geometry.mode.startsWith('只读查看'), 'Watching is named as read-only')
+    for (const control of geometry.buttons) assert.ok(control.rect.height >= 44 && control.rect.width >= 44 && control.rect.right <= width + .5, `Toolbar control fits as a touch target: ${JSON.stringify(control)}`)
+    assert.ok(geometry.state.width > 40, 'The mode state keeps readable room')
+    assert.equal(geometry.overflow, false)
+    // Local layout height changes leave the original Run grid and its reading as they were.
+    const grid = await read(terminalGrid)
+    assert.ok(grid.rows === originalGrid.rows && grid.screen.width === originalGrid.screen.width && grid.screen.height === originalGrid.screen.height, `The Run grid is not refitted to the local layout: ${JSON.stringify(grid)}`)
+    result.matureTerminal.push({ width, height, appearance, geometry })
+    await capture(`mature-terminal-${width}-${appearance}`)
+  }
+  await resize(390, 844); await read('mobileProductScene.setAppearance("dark")')
+  assert.ok(originalGrid.rows === 40 && !originalGrid.first.includes('pnpm'), `The captured Run keeps its 40-row grid with history above: ${JSON.stringify(originalGrid)}`)
+  // Read upward with a real touch drag on the output, as a thumb does.
+  const start = await read(`(()=>{const r=document.querySelector('.mobile-terminal-canvas').getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+60)}})()`)
+  await win.webContents.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...start, id: 1 }] })
+  for (let step = 1; step <= 12; step++) await win.webContents.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: start.x, y: start.y + step * 40, id: 1 }] })
+  await win.webContents.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  await until(`document.querySelector('.mobile-terminal-canvas .xterm-rows > div')?.textContent.includes('pnpm')`)
+  for (const [width, height] of [[390, 640], [320, 760], [390, 844]]) {
+    await resize(width, height)
+    const grid = await read(terminalGrid)
+    assert.equal(grid.rows, originalGrid.rows, 'A different phone viewport keeps the original row count')
+    assert.deepEqual(grid.screen, originalGrid.screen, 'The xterm grid is not refitted to the local layout')
+    assert.ok(grid.first.includes('pnpm'), 'The reading position above the live output survives the layout change')
+  }
+  assert.deepEqual(await terminalCost(), originalCost, 'Reading and layout changes send no resize, input or second attachment')
+  result.matureTerminalReading = { originalGrid, cost: originalCost }
+  await capture('mature-terminal-history-390-dark')
   await tap('.mobile-header .mobile-session-view-toggle', 'Conversation toggle')
   await tap('.mobile-session-origin', 'Back')
   await until('!!document.querySelector(".mobile-spatial-panel:not([hidden]) .mobile-page-header")')
@@ -269,5 +341,34 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   assert.deepEqual(recoveredAttention.conversation, originalAttention.conversation)
   assert.equal(recoveredAttention.effects, originalAttention.effects, 'Read recovery sends no input, answer, upload or creation')
   result.matureAttentionRecovery = { original: originalAttention, collapsed: attentionCollapsed, workface: attentionWorkface, expanded: attentionExpanded, recovered: recoveredAttention }
+  // A fresh phone with no saved workface: the connect page shows progress from the typed connection state only.
+  result.matureConnect = []
+  const connectStates = [
+    ['connecting', { state: 'connecting', message: '正在连接 Mac', paired: true }, ['done', 'done', 'current']],
+    ['disconnected', { state: 'disconnected', message: '连接中断，正在自动重连。', paired: true }, ['done', 'done', 'attention']],
+    ['unpaired', { state: 'unavailable', message: '请在 Mac 的手机连接中复制链接，在这台设备打开。', paired: false }, ['current', 'pending', 'pending']]]
+  for (const appearance of ['dark', 'light']) {
+    for (const [name, connection, steps] of connectStates) {
+      await read(`mobileProductScene.showConnectScene(${JSON.stringify(connection)})`)
+      await until(`document.querySelector('.mobile-connect-page')?.dataset.connectState===${JSON.stringify(name)}`)
+      assert.equal(await read(`mobileProductScene.applyConnectAppearance(${JSON.stringify(appearance)})`), true, 'The observed theme applies before a connection')
+      for (const [width, height] of [[390, 844], [320, 568]]) {
+        await resize(width, height)
+        const page = await read(`(()=>{const p=document.querySelector('.mobile-connect-page'),r=n=>n?n.getBoundingClientRect().toJSON():null,main=document.querySelector('.mobile-main')
+          const header=document.querySelector('.mobile-header')
+          return {header:[...header.querySelectorAll('button, .mobile-brand')].map(n=>n.getAttribute('aria-label')??n.className),steps:[...p.querySelectorAll('.mobile-connect-steps > li')].map(n=>n.dataset.stepState),icon:r(p.querySelector('img.brand-icon')),title:p.querySelector('h1')?.textContent,
+            details:r([...p.querySelectorAll('button')].find(b=>b.textContent.trim()==='连接详情')),main:r(main),scrollable:main.scrollHeight>main.clientHeight,
+            dark:getComputedStyle(document.documentElement).colorScheme,overflow:document.querySelector('.mobile-app').scrollWidth>innerWidth}})()`)
+        assert.deepEqual(page.steps, steps, `${name} progress follows the typed state`)
+        assert.deepEqual(page.header, ['连接你的 Mac'], 'Before a connection the header holds only the menu; the page owns the brand')
+        assert.ok(page.icon?.width >= 64, 'The App icon leads the page')
+        assert.ok(page.details?.height >= 44, 'Connection details keeps its touch target')
+        assert.equal(page.dark, appearance, 'The connect page renders the requested observed appearance')
+        assert.equal(page.overflow, false)
+        result.matureConnect.push({ name, width, height, appearance, page })
+        await capture(`mature-connect-${name}-${width}-${appearance}`)
+      }
+    }
+  }
   result.matureShellBoundary = 'Actual MobileApp shell with controlled original catalog facts in private Chromium; physical phone, OS keyboard and live Host are not observed.'
 }

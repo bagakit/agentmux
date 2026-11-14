@@ -17,8 +17,9 @@ import { createMoteDialogueCapture } from './mote-dialogue-fixture'
 import { MobileWebUpdateSafetyProvider } from '../../../src/mobile-web/update-safety'
 import type { MobileWebPageObservation } from '../../../src/mobile-web/use-mobile-web-observation'
 import { createBrowserPlatform } from '../../../src/platform/browser'
-import { DeviceWorkfaceStore, getDeviceWorkface } from '../../../src/recovery/device-workface'
-import { DEFAULT_THEME_ID, GRAPHITE_THEME, themeValue } from '@agentmux/client-ui/theme'
+import { DeviceWorkfaceStore, emptyDeviceWorkface, getDeviceWorkface } from '../../../src/recovery/device-workface'
+import type { MobileConnection } from '../../../src/conversation/use-hosted-conversation'
+import { DEFAULT_THEME_ID, GRAPHITE_THEME, themeValue, updateObservedTheme, type ThemeDocument } from '@agentmux/client-ui/theme'
 import '@agentmux/client-ui/styles.css'
 
 type Call = { sequence: number; observedAt: number; method: string; params: unknown }
@@ -112,6 +113,18 @@ const appearanceSnapshot = (appAppearance: 'dark' | 'light') => ({
 const submittedBySession = new Map<string, Array<{ id: string; text: string }>>()
 const listeners = new Set<(event: AgentMuxClientEvent) => void>()
 const statusListeners = new Set<(event: AgentMuxClientEvent) => void>()
+const terminalBytes = new TextEncoder().encode(['\x1b[32m~/资料整理\x1b[0m $ pnpm test --filter notes', '',
+  ...Array.from({ length: 64 }, (_, index) => ` \x1b[32m✓\x1b[0m notes/${String(index + 1).padStart(2, '0')}-样本核对.test.ts \x1b[90m(${12 + index % 9} ms)\x1b[0m`),
+  '', '\x1b[32m 64 passed\x1b[0m  ·  1.84s', '', '\x1b[32m~/资料整理\x1b[0m $ '].join('\r\n'))
+const terminalAttachment = (id: string) => {
+  const session = sessions.find(value => value.agentSessionId === id)
+  if (!session) throw Error('Unknown original fixture Session')
+  const size = { cols: 80, rows: 40 }
+  return { run: { ...session.run, nativeService: null, kind: 'agent', agentSessionId: id, providerId: session.providerId, executorId: session.executorId, workspacePath: session.workspacePath,
+    pid: 1, state: 'running', ...size, observedAt: 1, latestOutputBytes: terminalBytes.length, acceptedInputBytes: 0 }, replay: [], gap: null, resizeRevision: 0,
+  terminal: { type: 'basic-vt', checkpoint: { runId: session.run.runId, throughByte: terminalBytes.length, resizeRevision: 0, size, restoreSize: size,
+    historyPolicy: { status: 'observed', scrollbackRows: 10_000 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 }, restoreBytes: terminalBytes, resizes: [] } }
+}
 function publishClientEvent(event: AgentMuxClientEvent) {
   for (const listener of listeners) listener(event)
   if (event.type === 'agent-session' || event.type === 'connection-state' || event.type === 'agent-error') {
@@ -121,6 +134,11 @@ function publishClientEvent(event: AgentMuxClientEvent) {
 const client = {
   agentSession: (id: string) => { record('sdk.agentSession', { id }); if (missingSessionMetadata && id === main.agentSessionId) throw Error('Original selected Session metadata unavailable'); const found = sessions.find(session => session.agentSessionId === id); if (!found) throw Error('Unknown original fixture Session'); return found },
   agentSessions: () => { record('sdk.agentSessions'); return structuredClone(sessions) },
+  runtimeIdentity: () => ({ hostId: 'host-original', instanceId: 'runtime-original', buildIdentity: 'fixture', protocolVersion: 1, processId: null }),
+  reattachAgent: async (id: string) => { record('sdk.reattachAgent', { id }); return { session: client.agentSession(id), attachment: terminalAttachment(id) } },
+  readRunReplay: async (run: { runId: string }) => { record('sdk.readRunReplay', { runId: run.runId }); return terminalAttachment(sessions.find(value => value.run.runId === run.runId)?.agentSessionId ?? '') },
+  releaseRunAttachment: async (run: { runId: string }) => { record('sdk.releaseRunAttachment', { runId: run.runId }) },
+  resizeAgent: async (id: string, run: { runId: string }, cols: number, rows: number) => { record('sdk.resizeAgent', { id, runId: run.runId, cols, rows }); throw Error('The captured terminal never resizes the Mac grid') },
   catalog: () => { record('sdk.catalog'); return __AGENTMUX_MOBILE_PROVIDER_CATALOG__ },
   onEvent: (listener: (event: AgentMuxClientEvent) => void) => { listeners.add(listener); record('sdk.onEvent'); return () => { listeners.delete(listener); record('sdk.releaseEvent') } },
   onStatusEvent: (listener: (event: AgentMuxClientEvent) => void) => { statusListeners.add(listener); record('sdk.onStatusEvent'); return () => { statusListeners.delete(listener); record('sdk.releaseStatusEvent') } },
@@ -349,6 +367,7 @@ function Scene() {
   const [densityMount, remountDensity] = useState(0)
   const [unconfirmedClient, setUnconfirmedClient] = useState(false)
   const [webUpdateScene, setWebUpdateScene] = useState(false)
+  const [connectScene, setConnectScene] = useState<MobileConnection | null>(null)
   Object.assign(window, { mobileProductScene: {
     configureSetupRetention: (surface: 'welcome' | 'profile') => {
       if (!moteDialogueCapture || !__AGENTMUX_MOBILE_SETUP_RETENTION__) throw Error('The exact real-consumer retention fixtures are required')
@@ -539,6 +558,13 @@ function Scene() {
       }) as typeof indexedDB.open
     },
     unknownNext: () => { unknownNext = true },
+    /** A fresh phone with no saved workface, before any connection. */
+    showConnectScene: async (connection: MobileConnection) => { await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()); setConnectScene(connection) },
+    /** Before a connection there is no Host appearance subscription; apply the same observed theme document directly. */
+    applyConnectAppearance: (mode: 'dark' | 'light') => {
+      const { values } = appearanceSnapshot(mode)
+      return updateObservedTheme({ ...(values.theme as object), id: values.themeId } as ThemeDocument, mode, window).applied
+    },
     setAppearance: (mode: 'dark' | 'light') => { appearanceSubscriber?.onEvent({ type: 'snapshot', data: appearanceSnapshot(mode) }) },
     offline: () => { connected = false; refresh(value => value + 1) },
     reconnect: () => { connected = true; refresh(value => value + 1) },
@@ -551,6 +577,8 @@ function Scene() {
       menuAgentName, expectedReply: ordinaryReply, copiedTexts, joinedNotice, controlledCopy: agentMenuScene || joinedNotice !== null, controlledSdk: true, physicalPhone: false,
       intendedOccurrence: catalog.locations.find(location => location.regionId === 'region-mote'), sessionIds: sessions.map(session => ({ sessionId: session.agentSessionId, runId: session.run.runId })) })
   } })
+  if (connectScene) return <MobileApp key={'connect-' + connectScene.state + String(connectScene.paired)} client={null} connection={connectScene} platform={platform}
+    connectionPanel={connectScene.paired === false ? undefined : connectScene.state === 'unavailable' ? <><p>请核对 Mac 的连接与授权，修复后重新检查。</p><button type="button">重新检查连接</button></> : <p>连接会自动恢复。Mac 和手机保持在同一局域网即可。</p>} />
   const app = <MobileApp key={densityMount} client={unconfirmedClient ? null : client} connection={connected ? { state: 'connected', message: '已连接原 Host' } : { state: 'disconnected', message: '连接中断；原工作面与草稿保留。' }} platform={platform} webObservation={webUpdateScene ? webUpdateObservation : null} />
   return webUpdateScene ? <MobileWebUpdateSafetyProvider verifyConnection={verifyWebUpdateConnection}>{app}</MobileWebUpdateSafetyProvider> : app
 }
