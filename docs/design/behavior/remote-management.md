@@ -10,7 +10,9 @@ Remote 管理是独立、完整的产品主题；设置提供明确入口，以�
 
 本文的观察层级、主流程和信息优先级是据此收敛的产品方案。分期是设计建议，不自动创建执行任务；新增采集、历史保存、通知策略、远端部署和控制能力须在对应 owner 明确合同后安排。已确认的管理范围包括完整管理工作台、所选 Host 的只读运行与网络观察、同身份路由修复，以及用户配置的应用授权同步；长期历史、主动告警、部署和批量运维仍按各自用户任务单独决策。本文定义目标合同，已落地能力另由下文实现基线核对。
 
-### 远程 Agent 的能力方向
+#原工具绑定中的 `resourceHostId` 属于创建协调端的 Host 命名空间，不能直接当成当前 Desktop 的路由。Desktop 在原 Session 快照、事件、恢复候选与历史描述的投影边界，以原 `resourceRuntimeId` 对照已有认证绑定和缓存的稳定 Runtime 身份，派生当前设备下的 Agent／项目位置；不修改原绑定，不增加探测或持久事实库。模式标签和文件资源上下文消费同一投影。未映射或有歧义时项目 Host 保持未知，仅阻止本次依赖该准确地址的文件操作，保留原 Agent 的输入、控制与恢复入口。
+
+## 远程 Agent 的能力方向
 
 远程 Agent 必须支持 Agent 程序及其模型访问在一个 Host、项目文件与工具执行在另一个 Host，使用户能够使用另一环境的 Agent 能力处理原项目。两个 Host 的角色可互换，两个执行方向都须支持；具体方向由新 Session 的准确 Agent Host 与资源 Host／Workspace 绑定决定。已有的远端工作区模式仍将 Agent 与工作目录放在同一目标 Host，不能用现有 SSH 连接、远端 Session 管理或应用授权同步证明跨 Host 工具执行已经交付。先完成这一执行闭环，再推进其他候选能力；具体 Provider 与原生协议覆盖须由真实能力发现和端到端验证确认，跨账号范围仍独立决策。
 
@@ -82,7 +84,7 @@ Remote 管理首先帮助用户回答四个问题：我连接了哪些环境；�
 
 ## 入口与观察范围
 
-Remote 在 Settings 中有可发现的独立管理入口，搜索、Overview、Host 身份入口及原设置深链都能到达准确对象。原连接、项目和信任管理能力沿同一 Host owner 承接，不以增加 Remote 为由出现两套可编辑 Host 清单。Settings 将 Remote 作为独立分组，Hosts 与 Remote Agents 是同层入口：前者管理环境，后者管理跨 Host 执行的开始与原工作理解。Host 工作台保留原 `hosts` 对象与准确导航身份。Phone、外部对话应用和全局 Executor 模板继续由原 owner 管理。
+Remote 在 Settings 中有可发现的独立管理入口，搜索、Overview、Host 身份入口及原设置深链都能到达准确对象。原连接、项目和信任管理能力沿同一 Host owner 承接，不以增加 Remote 为由出现两套可编辑 Host 清单。Settings 用 Environment → Hosts 表达设备身份与连接拓扑的基础层，用 Remote → Remote work 表达使用这些连接的工作能力层。两页均能独立直达，Remote 不复制 Host 编辑器，Host 也不被归为某一种远程工作模式。Host 工作台保留原 `hosts` 对象与准确导航身份。Phone、外部对话应用和全局 Executor 模板继续由原 owner 管理。
 
 同一 Host 工作台按总览与监控、项目、应用与访问、连接配置组织任务。切换任务仍持有同一个准确 Host、原草稿与已访问操作，不建立三套选择器、清单或配置副本。总览承接拓扑与分源观察；连接配置承接原编辑、Test 与 Core 维护；应用与访问承接该 Host 的真实执行器盘点及跨 Host 来源核验、真人批准。全局模板不冒充远端已安装应用。
 
@@ -96,13 +98,23 @@ Remote 在 Settings 中有可发现的独立管理入口，搜索、Overview、H
 
 ## 独立 Remote execution 工作台
 
-用户可见页面名为 **Remote Agents**，稳定模块身份保持原 `remote-execution`。页面目的，是让用户明确“Agent 在哪里运行、项目与工具在哪里、怎样开始或继续这项工作”。它与 Hosts 同层参与 Settings 导航、Overview 和搜索；详情复用原 Host 的准确对象深链，不要求先进入某台 Host 才能找到执行入口。本节持有行为合同；设置、创建与观察的源码入口见[实现基线](#公共能力与当前实现基线)，源码入口不代签特定运行实例或 Provider 资格。
+用户可见页面名为 **Remote work**，稳定模块身份保持原 `remote-execution`。页面目的，是让用户明确“Agent 在哪里运行、项目与工具在哪里、怎样开始或继续这项工作”。它与 Hosts 同层参与 Settings 导航、Overview 和搜索；详情复用原 Host 的准确对象深链，不要求先进入某台 Host 才能找到执行入口。本节持有行为合同；设置、创建与观察的源码入口见[实现基线](#公共能力与当前实现基线)，源码入口不代签特定运行实例或 Provider 资格。
 
-主路径表达“任务和文件留在本机，Agent 在所选设备运行”：先明确当前本机普通项目，再选择 Agent 运行设备，准备动作带着准确两端进入原 Launcher，由用户在那里选择配置、输入任务并启动。默认 Agent 启动目录取该 Host 权威 home，复用普通目录登记；不猜 `~`、不选任意远端项目，也不导航到远端工作面。没有当前本机项目时要求明确选择。异步准备结果只作用于原输入，不覆盖后来的设备、项目或草稿。高级入口保留反向和其他受支持组合，Agent 启动目录不再被叫作要开发的项目。
+工作模式以这次发起或观察的 Desktop 原本机 Host 为参照，不以当前项目、展示 Workspace、远端 Core 的局部 `local` 路由或 Agent 创建者记录替代。本机与另外节点的三种方向均为首层能力：
+
+| 模式 | Agent 运行端 | 项目文件与工具端 |
+| --- | --- | --- |
+| Remote Project | 发起端 | 远端 |
+| Remote Agent | 远端 | 发起端 |
+| Remote Workspace | 远端 | 远端，默认与 Agent 同一 Host |
+
+普通 Local 是两端均在发起端。Remote Workspace 表达本机提供访问工作面，计算与项目在远端；它不代表只读 ACL、自动持续推进或新常驻服务。已有两端分别位于不同远端的安排继续保留，明确显示各自原 Host。模式是原两端事实的相对投影，不是持久枚举、权限、连接状态或新的执行协议；原 Agent 发起来源不冒充人类客户端本机。
+
+用户先选择方向，再明确准确的已登记项目与 Agent 设备，检查同一处两端摘要后进入原 Launcher。分端时默认 Agent 启动目录来自该 Host 的权威 home，按需选该 Host 的已登记目录；同 Host 原普通执行不强建工具 binding。准备不启动 Agent、不发送任务、不安装、升级或授信，不猜 `~` 或任意同名目录。准备失败保留原选择和草稿，迟到结果不能覆盖新对象、配置或后续输入。没有匹配项目时提供准确 Host 的原项目登记入口，不把未知清单当空列表。
 
 日常项目工作沿 Space 中的[原 Launcher](workface-launcher.md#agent-运行端与项目工具端)开始，Settings 同时保留准备原 Launcher 与管理已有绑定的入口。操作正文唯一在[Core 使用指南](../../../packages/core/guides/actions/remote-execution.md)，由设置页和原 CLI 帮助同源消费。指南覆盖登记环境与目录、选择准确两端、显式启动和继续原工作，说明浏览一台机器与选定其项目是两个动作；不在本页或 UI 另写一套步骤及能力清单。
 
-页面以原 AgentSession 的双端执行绑定为主要对象；同一 Host 可以承载多个绑定，绑定不等于 Host 连接、全局执行模板或新的常驻服务开关。列表沿当前管理入口可确认的 Session 与绑定引用组织，并标明观察范围；没有全域发现事实时不声称列出所有机器或全部工作。名称帮助阅读，准确 Agent Host、资源 Host／Workspace、Session 与 binding 身份负责定位。工具桥接状态、Agent 运行状态与 Provider 分项能力分别呈现，`connected` 不能代签 Hooks、Skills、MCP 或 Agent control 全部可用。
+页面以当前客户端保存的非纯本地 AgentSession 为工作对象，包括显式双端绑定与无 binding 的普通远端同 Host 执行；同一 Host 可以承载多个绑定，绑定不等于 Host 连接、全局执行模板或新的常驻服务开关。列表沿当前管理入口可确认的 Session 与绑定引用组织，并标明观察范围；没有全域发现事实时不声称列出所有机器或全部工作。名称帮助阅读，准确 Agent Host、资源 Host／Workspace、Session 与 binding 身份负责定位。每个非纯 Local Agent 在身份标签持续显示当前相对工作模式，Region、Tab 对应 Agent 标记、Focus／Space 与恢复候选消费同一原绑定投影；多 Region Tab 不把活动 Agent 的 Host 冒充整张 Tab 的唯一归属。只有确认两端均本机时省略模式；缺失事实显式未知。名称、展示移动、观察失败与标签样式不改变 Session、Run、工具端或权限。工具桥接状态、Agent 运行状态与 Provider 分项能力分别呈现，`connected` 不能代签 Hooks、Skills、MCP 或 Agent control 全部可用。
 
 | 用户任务 | 页面动作与完成信号 | 复用与边界 |
 | --- | --- | --- |
