@@ -47,6 +47,7 @@ describe('production UI component inventory', () => {
       'apps/mobile/src/goals/MobileGoalsSurface.tsx',
       'apps/mobile/src/goals/MobileGoalCreate.tsx',
     ]) expect(nativeFiles.has(file)).toBe(true)
+    expect(inventory.nativeSelects.some(item => item.file === 'packages/client-ui/src/components/NoteInsertMenu.tsx' && item.owner === 'packages/client-ui')).toBe(true)
     const future = new Set(inventory.futureFeatures.map(item => item.id))
     for (const id of ['ui-shared-selection-package', 'ui-mobile-selection-consistency', 'ui-typography-consistency', 'ui-rich-composite-consistency', 'ui-component-directory-cohesion']) {
       expect(future.has(id)).toBe(true)
