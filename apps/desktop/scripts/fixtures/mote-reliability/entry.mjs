@@ -1,13 +1,16 @@
 // Complete production App and ordinary initialize, sharing the existing private public-port fixture.
 import { stagedMotePreferenceReader, bindMotePreferenceReader } from './ports.mjs'
 import '../mote-initialization/entry.mjs'
-import { useAppStore } from '../../../src/renderer/src/store'
+import { useAppStore, retainMoteMainCreationReference } from '../../../src/renderer/src/store'
+import { DEFAULT_AGENT_CONTINUITY_POLICY } from '@agentmux/core/agent-session-recovery'
 import { api } from '../../../src/renderer/src/lib/api'
 import { initializeLauncherState, useLauncherState } from '../../../src/renderer/src/lib/launcher-state'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { serializeMoteQuickMode, PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { parseScheduleRpcParams } from '@agentmux/core/schedule-rpc'
 import { moteMainRoleRevision } from '@agentmux/core/mote-dialogue'
+import { moteEntryDraftKey } from '../../../src/renderer/src/lib/mote-entry-hold'
+import { scratchTopicLogicalPath } from '@agentmux/host/mote-model'
 import { observeNotifications } from '../../../src/renderer/src/lib/notification-observation'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 
@@ -16,7 +19,7 @@ const original = useAppStore.getState(), session = original.sessions.find(value 
 if (!session || session.control.kind !== 'agent') throw Error('Original controlled Session required')
 const restoring = window.moteInit.phase === 'initialization-restore'
 const inputAtEntry = structuredClone({ drafts: useLauncherState.getState().drafts, agentDrafts: original.agentComposerDrafts,
-  tab: original.tabs['original-initialization-tab'], layouts: original.layouts, selection: original.workbenchSpaceSelection, focus: original.agentFocus, control: session.control })
+  tab: original.tabs['original-initialization-tab'], layouts: original.layouts, selection: original.workbenchSpaceSelection, focus: original.agentFocus, control: session.control, mainRequests: original.moteMainCreationReferences })
 const fixtureWrites = []
 let originalCreation = session.creation
 const refreshSession = api.sessions.refresh
@@ -70,7 +73,7 @@ const retainedKey = 'private-mote-reliability-original-draft'
 if (!restoring) { useLauncherState.getState().setDraft(retainedKey, 'prompt', 'Original retained Mote draft across a real Renderer restart.'); fixtureWrites.push('launcher-draft') }
 window.moteReliability = { ready: true, reference,
   facts: () => ({ ...window.moteInit.facts(), variant, inputAtEntry, fixtureWrites: [...fixtureWrites], agentDrafts: useAppStore.getState().agentComposerDrafts, focus: useAppStore.getState().agentFocus,
-    readingIssues: [...globalThis.document.querySelectorAll('.conversation-read-issues__source')].map(node => node.textContent), session: useAppStore.getState().sessions.find(value => value.id === session.id) }),
+    mainRequests: useAppStore.getState().moteMainCreationReferences, readingIssues: [...globalThis.document.querySelectorAll('.conversation-read-issues__source')].map(node => node.textContent), session: useAppStore.getState().sessions.find(value => value.id === session.id) }),
   editDrafts({ agent, launcher }) {
     if (restoring || !agent?.trim() || !launcher?.trim()) throw Error('Only the seed process can author nonempty original drafts')
     useAppStore.getState().setAgentComposerDraft(session.id, agent)
@@ -130,4 +133,36 @@ if (new URL(location.href).searchParams.has('heartbeat-surface')) {
   }
   window.moteHeartbeatSurface = { ready: true, saves, variant(value) { surface = value; variant = value === 'paused' ? 'paused' : 'active' }, pending: () => Object.entries(useLauncherState.getState().drafts).find(([, value]) => value.moteQuick?.pending) ?? null }
   variant = 'active'
+}
+
+
+// A controlled original Core failure. This scene changes no real Runtime or Provider.
+if (new URLSearchParams(location.search).get('main-recovery-escape') === '1') {
+  const tab = useAppStore.getState().tabs[tabId], workspace = useAppStore.getState().config.workspaces.find(value => value.id === SCRATCH_WORKSPACE_ID)
+  const target = { spaceId: tab.space.spaceId, zoneId: tab.space.zoneId, expectedResource: { hostId:workspace.hostId, workspaceId:workspace.id, workspacePath:workspace.path } }
+  const topic = await api.scratch.readTopic(SCRATCH_WORKSPACE_ID,PMO_TEAMS_TOPIC_ID)
+  if (!topic) throw Error('Original Mote draft scope is unavailable')
+  const draftKey = moteEntryDraftKey({workspace,topic,rootPath:scratchTopicLogicalPath(workspace,topic) ?? scratchTopicDirectoryName(topic.id)})
+  let mode = 'unavailable'
+  const originalRecovery = () => ({ operationId:'original-main-recovery',agentSessionId:session.id,previousRun:session.control.run,
+    trigger:'manual',policy:{...DEFAULT_AGENT_CONTINUITY_POLICY},admittedAt:1,observedAt:2,rechecks:1,
+    kind:mode === 'unknown' ? 'pending' : 'unavailable',reason:mode === 'unknown' ? 'operation-unconfirmed' : 'native-handle-unavailable',
+    evidence:mode === 'unknown' ? {kind:'run-unknown',observedAt:2,message:'Original recovery reply is unconfirmed'} : {kind:'run-ended',state:'exited',observedAt:2} })
+  const apply = () => useAppStore.setState(state => ({ sessions:state.sessions.map(value => value.id === session.id ? { ...value,processState:'exited',continuity:originalRecovery(),
+    status:{state:'error',source:'run-process',observedAt:2,exitCode:0,exitReason:'unknown',...(mode === 'unknown' ? {} : {continuity:'unavailable',continuityReason:'native-handle-unavailable'})} } : value) }))
+  apply()
+  const refresh = api.sessions.refresh
+  api.sessions.refresh = async control => control.agentSessionId === session.id ? useAppStore.getState().sessions.find(value => value.id === session.id) : refresh(control)
+  api.moteDialogue.inspectRecovery = async request => ({ operation:{...originalRecovery(),operationId:request.operationId,moteMainEntry:{target:request.target,expectedRoleRevision:request.expectedRoleRevision,reference:request.reference}} })
+  api.moteDialogue.ensureRecovery = async () => { throw Error('This read-only failure scene does not admit a recovery mutation') }
+  window.moteRecoveryEscape = { ready:true, target, draftKey,
+    variant(value) { mode=value;apply() },
+    async retainOriginal(prompt,draft) {
+      if (restoring || !prompt?.trim()) throw Error('Only the original seed process can author this retained request')
+      if (!draft?.trim() || !useLauncherState.getState().setDraft(draftKey,'prompt',draft)) throw Error('The original Mote draft is not retained')
+      await retainMoteMainCreationReference({target,operationId:'original-unknown-main-start',deferredInput:{operationId:'original-unknown-first-query',prompt}},null)
+      fixtureWrites.push('seed-original-unknown-request')
+    },
+    facts: () => ({ mainRequests:structuredClone(useAppStore.getState().moteMainCreationReferences),session:useAppStore.getState().sessions.find(value=>value.id===session.id) })
+  }
 }

@@ -12,7 +12,7 @@ app.whenReady().then(async () => {
     Menu.setApplicationMenu(null)
     win = new BrowserWindow({ width: 1180, height: 820, useContentSize: true, show: false, webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } })
     win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) result.errors.push(String(message)) })
-    await win.loadFile(html, { query: { phase: 'initialization-' + phase, ...(process.env.MOTE_HEARTBEAT_SURFACE === '1' ? { 'heartbeat-surface': '1' } : {}) } })
+    await win.loadFile(html, { query: { phase: 'initialization-' + phase, ...(process.env.MOTE_HEARTBEAT_SURFACE === '1' ? { 'heartbeat-surface': '1' } : {}), ...(process.env.MOTE_MAIN_RECOVERY_ESCAPE === '1' ? { 'main-recovery-escape':'1' } : {}) } })
     const read = expression => win.webContents.executeJavaScript(expression)
     const until = async expression => {
       const end = Date.now() + 15000
@@ -59,6 +59,55 @@ app.whenReady().then(async () => {
         await capture('legacy-checked-recovery-' + theme + '-' + (width > 600 ? 'wide' : 'narrow')); await escape()
       }
       win.setContentSize(1180, 820); await read('window.moteInit.theme("dark")')
+    }
+    if (process.env.MOTE_MAIN_RECOVERY_ESCAPE === '1') {
+      await until('window.moteRecoveryEscape?.ready')
+      const showMain = async () => {
+        const discussion = button('Discussion', 'document.querySelector(".mote-space-frame__header")')
+        if (await read('Boolean('+discussion+')')) await click(discussion)
+        const openMain = button('打开当前主对话')
+        if (await read('Boolean('+openMain+')')) await click(openMain)
+        await until(`[...document.querySelectorAll('[data-mote-main-recovery]')].some(e=>!e.closest('[hidden],[inert],[aria-hidden="true"]')&&e.getClientRects().length)`)
+      }
+      if (phase === 'seed') {
+        result.draftWitness = {agent:'Original Agent draft '+randomUUID(),launcher:'Original Mote draft '+randomUUID(),query:'Original unconfirmed question '+randomUUID(),mote:'Original Mote composer draft '+randomUUID()}
+        await read('window.moteReliability.editDrafts('+JSON.stringify(result.draftWitness)+')')
+        await read('window.moteRecoveryEscape.retainOriginal('+JSON.stringify(result.draftWitness.query)+','+JSON.stringify(result.draftWitness.mote)+')')
+      } else {
+        const seed=JSON.parse(await fs.readFile(path.join(evidence,'seed.json'),'utf8'))
+        result.draftWitness=seed.draftWitness
+        result.restored=await read('window.moteReliability.facts()')
+        assert.deepEqual(result.restored.inputAtEntry.agentDrafts,seed.original.agentDrafts)
+        assert.deepEqual(result.restored.inputAtEntry.drafts,seed.original.drafts)
+        assert.deepEqual(result.restored.inputAtEntry.mainRequests,seed.original.mainRequests)
+        assert.deepEqual(result.restored.mainRequests,seed.original.mainRequests)
+        assert.deepEqual(result.restored.fixtureWrites,[])
+        assert.deepEqual(result.restored.tabs,seed.original.tabs)
+        assert.deepEqual(result.restored.layouts,seed.original.layouts)
+        assert.deepEqual(result.restored.selection,seed.original.selection)
+        assert.deepEqual(result.restored.session.control,seed.original.session.control)
+        result.draftRecovery={originalNonempty:true,hydratedBeforeFixture:true,restoreFixtureWrites:0,exactOriginalRequest:true,exactWorkface:true}
+      }
+      await showMain()
+      await until(`[...document.querySelectorAll('[aria-label="Message Agent"]')].some(e=>!e.closest('[hidden],[inert],[aria-hidden="true"]')&&e.getClientRects().length&&e.textContent.includes(${JSON.stringify(result.draftWitness.mote)}))`)
+      result.originalMoteDraftVisible = true
+      const scenes = process.env.MOTE_MAIN_RECOVERY_PERSIST_ONLY === '1' ? [['dark',1180,'unavailable']] : [['dark',1180,'unavailable'],['light',420,'unavailable'],['light',1180,'unknown'],['dark',420,'unknown']]
+      for (const [theme,width,mode] of scenes) {
+        win.setContentSize(width,width>600?820:740)
+        await read('window.moteInit.theme('+JSON.stringify(theme)+');window.moteRecoveryEscape.variant('+JSON.stringify(mode)+')')
+        await pause(180)
+        const reach=await read(`(()=>{const e=[...document.querySelectorAll('[data-mote-main-recovery]')].find(e=>!e.closest('[hidden],[inert],[aria-hidden="true"]')&&e.getClientRects().length);if(!e)throw Error('Missing visible exact recovery');const actions=[...e.querySelectorAll('button')].map(b=>{const r=b.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return{text:b.textContent,rect:r.toJSON(),visible:r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&b.contains(hit)}});return{text:e.textContent,actions}})()`)
+        assert.ok(reach.actions.length>=2&&reach.actions.every(action=>action.visible),'Recovery choices are actually reachable')
+        result.reachability??=[];result.reachability.push({theme,width,mode,...reach})
+        await capture('main-'+mode+'-'+theme+'-'+(width>600?'wide':'narrow'))
+      }
+      await read('window.moteRecoveryEscape.variant("unavailable")');win.setContentSize(1180,820)
+      const end=Date.now()+15000
+      do {result.persistedInputs=await read('window.moteReliability.persistedInputs()');result.original=await read('window.moteReliability.facts()');if(JSON.stringify(result.persistedInputs)===JSON.stringify({drafts:result.original.drafts,agentDrafts:result.original.agentDrafts}))break;await pause(30)}while(Date.now()<end)
+      assert.deepEqual(result.persistedInputs,{drafts:result.original.drafts,agentDrafts:result.original.agentDrafts})
+      assert.equal(Object.values(result.original.mainRequests).find(value=>value.operationId==='original-unknown-main-start').deferredInput.prompt,result.draftWitness.query)
+      if(phase==='restore'){const seed=JSON.parse(await fs.readFile(path.join(evidence,'seed.json'),'utf8'));assert.deepEqual(result.original.mainRequests,seed.original.mainRequests);assert.deepEqual(result.original.session.control,seed.original.session.control)}
+      result.passed=true;return
     }
     if (process.env.MOTE_HEARTBEAT_SURFACE === '1') {
       await until('window.moteHeartbeatSurface?.ready')
