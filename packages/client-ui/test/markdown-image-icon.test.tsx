@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { expect, it, vi } from 'vitest'
 import { AgentMarkdown } from '../src/components/AgentMarkdown'
 import { GRAPHITE_THEME } from '../src/theme/catalog'
-import { updateIconSprite, removeIconSprite, semanticIconHref } from '../src/theme/icon-sprite'
+import { updateIconSprite, removeIconSprite, semanticIconHref } from '../src/theme/icons.js'
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 it('uses themed image semantics for all controlled fallback branches while preserving user labels and the original file action', async () => {
   const host = document.createElement('div'); document.body.append(host)

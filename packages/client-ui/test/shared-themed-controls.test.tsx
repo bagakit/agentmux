@@ -6,7 +6,7 @@ import { AgentAvatarBadgeIcon } from '../src/components/AgentAvatarBadgeIcon'
 import { MoteIcon } from '../src/components/MoteIcon'
 import { SPACE_ICON_CATALOG } from '../src/lib/space-icon-catalog'
 import { WorkflowStatusGlyph } from '../src/components/WorkflowObservation'
-import { updateIconSprite, removeIconSprite, semanticIconHref } from '../src/theme/icon-sprite'
+import { updateIconSprite, removeIconSprite, semanticIconHref } from '../src/theme/icons.js'
 import { GRAPHITE_THEME } from '../src/theme/catalog'
 
 let root: Root | undefined, host: HTMLDivElement | undefined

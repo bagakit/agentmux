@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { getSemanticIconCatalog } from '../../../packages/client-ui/src/theme/icon-catalog-metadata.js'
 import { ICON_GLYPHS, AUTHORED_ICON_GLYPH_IDS } from '../../../packages/client-ui/src/theme/icon-catalog.js'
-import { removeIconSprite, semanticIconHref } from '../../../packages/client-ui/src/theme/icon-sprite.js'
+import { removeIconSprite, semanticIconHref } from '../../../packages/client-ui/src/theme/icons.js'
 import { createReviewCatalog, sourceRoots } from '../scripts/icon-review/catalog.mjs'
 import { TOOLKIT_ICON_OPTIONS } from '../src/shared/toolkit-preferences.js'
 
