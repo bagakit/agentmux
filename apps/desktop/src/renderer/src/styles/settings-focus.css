@@ -48,6 +48,11 @@
 .focus-map-preview__detail { box-sizing: border-box; position: absolute; inset: 0; padding: 10px; }
 @container (max-width: 460px) { .focus-map-settings__field { grid-template-columns: minmax(0,1fr); gap: 4px; } .focus-map-settings__range { gap: 8px; } }
 .focus-settings-description { margin: var(--sp-2) 0 var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
+.focus-settings-selection { min-width: 0; margin: var(--sp-4) 0 0; padding: 0; border: 0; }
+.focus-settings-selection > legend { margin-bottom: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); font-weight: 500; }
+.focus-settings-emphasis { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--sp-1) var(--sp-3); margin-top: var(--sp-3); color: var(--text-2); font-size: var(--fs-meta); }
+.focus-settings-emphasis output { color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.focus-settings-emphasis input { grid-column: 1 / -1; width: 100%; margin: 0; accent-color: var(--green); }
 .focus-settings-window { display: grid; grid-template-columns: repeat(auto-fit, minmax(74px, 1fr)); gap: 5px; margin: var(--sp-4) 0 0; padding: 0; border: 0; min-width: 0; }
 .focus-settings-window legend { margin-bottom: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); font-weight: 500; }
 .focus-settings-window label { display: flex; align-items: flex-start; gap: 6px; min-height: 34px; padding: 8px 7px; border: 1px solid var(--line-soft); border-radius: var(--radius); color: var(--text-2); font-size: var(--fs-micro); cursor: pointer; transition: background var(--dur-fast), border-color var(--dur-fast); }

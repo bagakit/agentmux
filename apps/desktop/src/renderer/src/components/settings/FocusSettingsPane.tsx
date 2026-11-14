@@ -1,6 +1,6 @@
-import { useRef, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { FOCUS_RECENT_ACTIVITY_HOURS, FOCUS_REPLY_LINES, FOCUS_RECENT_INPUTS, resolveFocusPreferences, type FocusPreferences } from '../../../../shared/focus-preferences'
+import { FOCUS_RECENT_ACTIVITY_HOURS, FOCUS_REPLY_LINES, FOCUS_RECENT_INPUTS, FOCUS_SELECTION_FILL_PERCENT, FOCUS_SELECTION_BORDER_PERCENT, FOCUS_SELECTION_ACCENTS, resolveFocusPreferences, type FocusPreferences } from '../../../../shared/focus-preferences'
 import { useAppStore } from '../../store'
 import { FocusTimelineRulerSettings } from '../FocusTimelineRulerSettings'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
@@ -15,6 +15,13 @@ import '../../styles/settings-focus.css'
 
 const PreviewIcon = semanticIconComponent('action.preview')
 export type FocusSettingsValues = ReturnType<typeof resolveFocusPreferences>
+function Emphasis({ field, label, value, range, onChange }: { field: string; label: string; value: number; range: { min: number; max: number }; onChange(value: number): void }) {
+  const id = useId()
+  return <label className="focus-settings-emphasis" htmlFor={id} data-settings-field={field} data-settings-preview-label={label}>
+    <span>{label}</span><output htmlFor={id}>{value}%</output>
+    <input id={id} type="range" min={range.min} max={range.max} step={1} value={value} aria-label={label} onChange={event => onChange(Number(event.target.value))} />
+  </label>
+}
 function Choices<T extends string | number>({ id, legend, value, options, onChange }: {
   id: string; legend: string; value: T; options: readonly { value: T; label: string; hint?: string }[]; onChange(value: T): void
 }) {
@@ -55,6 +62,12 @@ export function FocusSettingsPane({ preferences, active = true, onSave }: {
           <p className="focus-settings-description">Used when you choose Arrange by recent activity. Pinned projects keep your order; other positions stay fixed until you arrange them.</p>
           <Choices id="topic-presentation" legend="Topics in Collections" value={draft.value.topicPresentation} options={[{ value: 'cards', label: 'On Agent cards', hint: 'Keep the Topic beside each task' }, { value: 'sections', label: 'Topic sections', hint: 'Use light headings within each Collection' }]} onChange={value => change('topicPresentation', value, 'board')} />
           <Choices id="reply-lines" legend="Reply excerpt" value={draft.value.replyLines} options={FOCUS_REPLY_LINES.map(value => ({ value, label: `${value} ${value === 1 ? 'line' : 'lines'}`, hint: value === 1 ? 'Scan faster' : value === 2 ? 'Balanced' : 'More context' }))} onChange={value => change('replyLines', value, 'board')} />
+          <fieldset className="focus-settings-selection"><legend>Selected cards</legend>
+            <Emphasis field="selection-fill" label="Background emphasis" value={draft.value.selectionFillPercent} range={FOCUS_SELECTION_FILL_PERCENT} onChange={value => change('selectionFillPercent', value, 'board')} />
+            <Emphasis field="selection-border" label="Fine-edge emphasis" value={draft.value.selectionBorderPercent} range={FOCUS_SELECTION_BORDER_PERCENT} onChange={value => change('selectionBorderPercent', value, 'board')} />
+            <Choices id="selection-accent" legend="Selection color" value={draft.value.selectionAccent} options={FOCUS_SELECTION_ACCENTS.map(value => ({ value, label: { neutral: 'Neutral', accent: 'Theme accent', blue: 'Blue', purple: 'Violet' }[value] }))} onChange={value => change('selectionAccent', value, 'board')} />
+          </fieldset>
+          <p className="focus-settings-description">Choose how selected cards stand out in the Focus list.</p>
           {previewButton('project-scanning', 'Project scanning', 'board')}
         </section>
         <section className="settings-group" data-settings-preview-group="agent-reading"><header><span>Agent reading</span></header>

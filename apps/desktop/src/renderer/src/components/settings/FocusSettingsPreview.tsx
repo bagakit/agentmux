@@ -21,6 +21,7 @@ import { focusContextIdentityKey, type FocusContextIdentity } from '../../lib/fo
 import { useAgentPreviewIntent } from '../../lib/use-agent-preview-intent'
 import { useWorkbenchDocument } from '../../lib/workbench-document'
 import { FocusMapPreview } from './FocusMapSettings'
+import { focusSelectionStyle } from '../../lib/focus-selection-style'
 
 export type FocusPreviewScene = 'board' | 'reading' | 'links' | 'map'
 const hour = 3_600_000
@@ -77,6 +78,7 @@ export function FocusSettingsPreview({ values, active, scene, onScene, previewRe
   }, [active, document])
   const enabled = active && documentVisible, [now] = useState(Date.now), id = useId()
   const contexts = useMemo(() => exampleContexts(now), [now])
+  const [selectedExampleId, setSelectedExampleId] = useState(contexts[0]!.id)
   const collectionExample = useMemo(() => exampleTopicCollection(now), [now])
   const boardContexts = useMemo(() => [...contexts, ...collectionExample.contexts], [contexts, collectionExample])
   const config = useMemo(() => ({ workspaces: [...contexts.map(context => context.workspace!), collectionExample.workspace], focus: { recentActivityHours: values.recentActivityHours } }), [contexts, collectionExample, values.recentActivityHours])
@@ -124,10 +126,11 @@ export function FocusSettingsPreview({ values, active, scene, onScene, previewRe
   const intent = useAgentPreviewIntent(() => openPeek(), values.previewTrigger, enabled && scene === 'reading')
   useEffect(() => { setPeek(false); setInspected(null); setResourceOpen(false); setAgentOpen(false) }, [scene])
   useEffect(() => { if (!enabled) { intent.cancel(); setPeek(false) } }, [enabled, intent.cancel])
-  const style = { '--focus-reply-lines': values.replyLines, '--focus-card-track-height': `${focusCardTrackHeight(values.replyLines)}px` } as CSSProperties
+  const style = { ...focusSelectionStyle(values), '--focus-reply-lines': values.replyLines, '--focus-card-track-height': `${focusCardTrackHeight(values.replyLines)}px` } as CSSProperties
   const card = (context: FocusContext, interactive = false) => {
     const content = <AgentContextContent context={context} presentation="card" identity={<ResolvedAgentAvatar label="Example Executor" providerId="codex" size={18} />} />
-    if (!interactive) return <div className="focus-context focus-context--card" data-example-agent={context.id} data-bucket={context.bucket}>{content}</div>
+    if (!interactive) return <button type="button" className={`focus-context focus-context--card${selectedExampleId === context.id ? ' is-selected' : ''}`} data-example-agent={context.id} data-bucket={context.bucket}
+      aria-pressed={selectedExampleId === context.id} onClick={() => setSelectedExampleId(context.id)}>{content}</button>
     return <button type="button" className="focus-context focus-context--card" tabIndex={interactive ? 0 : -1} data-example-agent={context.id} data-bucket={context.bucket} aria-label={`Example Agent: ${context.name}`} ref={interactive ? cardRef : undefined}
     onPointerEnter={interactive ? intent.schedule : undefined} onPointerLeave={interactive ? intent.cancel : undefined}
     onFocus={() => { if (interactive && enabled && !returningFocus.current && values.previewTrigger !== 'keyboard') setPeek(true) }} onClick={() => { if (interactive) { intent.cancel(); setPeek(false); setAgentOpen(true) } }} onKeyDown={event => { if (interactive && event.key === 'ArrowDown') { event.preventDefault(); intent.cancel(); openPeek(true) } }}>
@@ -148,7 +151,7 @@ export function FocusSettingsPreview({ values, active, scene, onScene, previewRe
               renderCards={(rows, columns, topics, sections) => <div className="focus-context-group__cards" style={{ '--focus-card-columns': columns } as CSSProperties}>
                 {rows.map(context => { const key = focusTopicContextKey(context.hostId, context.id), topic = topics?.get(key), section = sections?.get(key)
                   return <Fragment key={key}>{section ? <div className="focus-topic-section" data-focus-topic-section={section.id} aria-label={`Topic · ${section.name}`}>{section.content ?? <FocusTopicLabel topic={section} />}</div> : null}
-                    <div className="focus-context-card" data-example-card={context.id} style={{ display: 'flex', flexDirection: 'column', minHeight: focusCardTrackHeight(values.replyLines) + (topic ? 22 : 0) }}>{card(context)}{topic?.notice ? <div className="focus-zone-notices" data-focus-zone-notices="" role="status">{topic.notice}</div> : null}<FocusZoneFooter zone={topic} /></div></Fragment>
+                    <div className="focus-context-card" data-focus-card-key={key} data-focus-agent-selected={selectedExampleId === context.id ? 'true' : undefined} data-example-card={context.id} style={{ display: 'flex', flexDirection: 'column', minHeight: focusCardTrackHeight(values.replyLines) + (topic ? 22 : 0) }}>{card(context)}{topic?.notice ? <div className="focus-zone-notices" data-focus-zone-notices="" role="status">{topic.notice}</div> : null}<FocusZoneFooter zone={topic} /></div></Fragment>
                 })}
               </div>} />
           </div>} />

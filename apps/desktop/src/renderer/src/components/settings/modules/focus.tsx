@@ -8,12 +8,15 @@ const FocusIcon = semanticIconComponent('navigation.focus')
 export const focusSettingsModule = {
   id: 'focus', archetype: 'preference', group: 'work', title: 'Focus', icon: FocusIcon,
   selectionAnimation: true,
-  description: 'Project and Collection scanning, Topic presentation, Agent previews, Map contours and zoom levels, and where message and terminal links open.',
-  keywords: 'focus work recent activity hours window project collection topic card sections lanes timeline time ruler time zone reply excerpt density preview hover keyboard inputs links demo map motion animation reduced system polygon bezier contours LOD zoom levels information',
+  description: 'Project and Collection scanning, selected-card appearance, Topic presentation, Agent previews, Map contours and zoom levels, and where message and terminal links open.',
+  keywords: 'focus work recent activity hours window project collection topic card sections lanes timeline time ruler time zone reply excerpt density selection selected background fill edge border emphasis accent color preview hover keyboard inputs links demo map motion animation reduced system polygon bezier contours LOD zoom levels information',
   searchTargets: [
     { id: 'recent-activity', title: 'Recent activity window', keywords: 'hours projects timeline' },
     { id: 'topic-presentation', title: 'Topics in Collections', keywords: 'topic collection card source sections grouping layout' },
     { id: 'reply-lines', title: 'Reply excerpt lines', keywords: 'density card summary compact context' },
+    { id: 'selection-fill', title: 'Selected card background emphasis', keywords: 'selection highlight fill contrast strength' },
+    { id: 'selection-border', title: 'Selected card fine-edge emphasis', keywords: 'selection border outline contrast strength' },
+    { id: 'selection-accent', title: 'Selected card color', keywords: 'selection highlight neutral accent blue violet purple' },
     { id: 'preview-trigger', title: 'Automatic Agent preview', keywords: 'hover quick deliberate keyboard delay' },
     { id: 'recent-inputs', title: 'Recent inputs in a new preview', keywords: 'messages reading recall bookmark' },
     { id: 'link-destination', title: 'Message and terminal links', keywords: 'focus message terminal HTTP file beside agent new tab region destination' },
