@@ -6,5 +6,5 @@ const classes: Record<ButtonVariant, string> = { secondary: 'small-button', prim
 
 /** Native action presentation. The caller owns availability, busy state and the operation. */
 export function Button({ variant = 'secondary', type = 'button', className = '', ...props }: ButtonProps) {
-  return <button {...props} type={type} className={[classes[variant], className].filter(Boolean).join(' ')} />
+  return <button {...props} type={type} className={['agent-button', classes[variant], className].filter(Boolean).join(' ')} />
 }
