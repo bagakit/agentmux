@@ -240,7 +240,7 @@ describe('Host configuration through the compiled public CLI and registered Main
 })
 
 
-it('removes a never-bound offline draft through the real Runtime preparation, retaining original bound Sessions and Runs', async () => {
+it('edits and removes a never-bound offline draft through the real Runtime preparation, retaining original bound Sessions and Runs', async () => {
   const clients = new Map<string, { connect: ReturnType<typeof vi.fn>; connectRuntime: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn>; agentSessions: ReturnType<typeof vi.fn>; readAgentSessions: ReturnType<typeof vi.fn>; listRuns: ReturnType<typeof vi.fn>; sessionHistorySources: ReturnType<typeof vi.fn>; onEvent: ReturnType<typeof vi.fn> }>()
   const connector = vi.fn(async (host: HostConfig) => {
     const client = { connect: vi.fn(async () => {}), connectRuntime: vi.fn(async () => {}),
@@ -257,8 +257,16 @@ it('removes a never-bound offline draft through the real Runtime preparation, re
     runtime.commit(await runtime.prepare({ ...config, hosts: [...config.hosts, offline] }))
     const draft = clients.get(offline.id)!
     draft.connect.mockRejectedValue(new Error('Core is not installed'))
-    const removal = await runtime.prepare(config)
+    const corrected: HostConfig = { ...offline, hostname: 'corrected.invalid' }
+    const correction = await runtime.prepare({ ...config, hosts: [...config.hosts, corrected] })
     expect(draft.connect).not.toHaveBeenCalled()
+    expect(draft.listRuns).not.toHaveBeenCalled()
+    runtime.commit(correction)
+    expect(runtime.executionHost(offline.id)).toMatchObject({ id: offline.id })
+    const correctedClient = clients.get(offline.id)!
+    expect(correctedClient).not.toBe(draft)
+    const removal = await runtime.prepare(config)
+    expect(correctedClient.connect).not.toHaveBeenCalled()
     expect(draft.listRuns).not.toHaveBeenCalled()
     runtime.commit(removal)
     expect(() => runtime.executionHost(offline.id)).toThrow('not configured')
@@ -287,3 +295,36 @@ it('removes a never-bound offline draft through the real Runtime preparation, re
     expect(runtime.executionHost('local')).toBeDefined()
   } finally { await runtime.dispose() }
 })
+
+
+it('the compiled CLI corrects an unadopted offline Host through registered Main and real Runtime preparation', async () => {
+  const clients = new Map<string, { connect: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn> }[]>()
+  const connector = vi.fn(async (host: HostConfig) => {
+    const client = { connect: vi.fn(async () => { if (host.kind === 'ssh' && host.hostname === remote.hostname) throw new Error('Old SSH address is offline') }),
+      connectRuntime: vi.fn(async () => {}), dispose: vi.fn(async () => {}), onEvent: vi.fn(() => () => {}),
+      agentSessions: vi.fn(() => []), readAgentSessions: vi.fn(async () => []), listRuns: vi.fn(async () => []),
+      sessionHistorySources: vi.fn(async () => []), ...(host.kind === 'ssh' ? { runtimeOwnerIdentity: () => null } : {}) }
+    clients.set(host.id, [...(clients.get(host.id) ?? []), client])
+    return client as never
+  })
+  const f = await registered(connector)
+  f.prepare.mockRestore(); f.commit.mockRestore()
+  f.runtime.commit(await f.runtime.prepare(f.config))
+  const original = clients.get(remote.id)![0]!, local = clients.get('local')![0]!
+  await vi.waitFor(() => expect(original.connect).toHaveBeenCalledOnce())
+  const core = await vi.importActual<typeof import('@agentmux/core')>('@agentmux/core')
+  const socket = join(ipc.root, 'edit-real-runtime.sock'), server = new core.AgentMuxControlServer({ execute: f.execute, coreClients: () => [] }, socket)
+  await server.start()
+  try {
+    const candidate = { ...remote, hostname: 'corrected.invalid' }
+    const result = await runCompiledObjectCli(['settings', 'hosts', 'configure', remote.id, '--input', '-'],
+      objectCliEnvironment(ipc.root, { AGENTMUX_RPC_ENDPOINT: 'unix:' + socket }), JSON.stringify({ expected: remote, candidate }), 20_000)
+    expect(result.code, result.stderr).toBe(0)
+    expect(JSON.parse(result.stdout).result.host).toEqual(candidate)
+    expect(JSON.parse(await f.bytes()).hosts.find((host: HostConfig) => host.id === remote.id)).toEqual(candidate)
+    expect(original.connect).toHaveBeenCalledOnce()
+    expect(clients.get(remote.id)).toHaveLength(2)
+    expect(local.dispose).not.toHaveBeenCalled()
+    expect(f.runtime.executionHost('local')).toBeDefined()
+  } finally { await server.stop(); await f.dispose(); await f.runtime.dispose() }
+}, 30_000)
