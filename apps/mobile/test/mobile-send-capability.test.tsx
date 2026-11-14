@@ -289,8 +289,8 @@ describe('public Provider capability controls one fresh explicit mobile Send', (
     expect(view.element.querySelector('.composer__toolbar')!.contains(firstMode)).toBe(false)
     await click(firstMode)
     expect(f.setAgentPosture).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      agentSessionId: 'session-original',
-      expectedRun: { runId: 'run-original' }
+      target: expect.objectContaining({ agentSessionId: 'session-original', expectedRun: { runId: 'run-original' } }),
+      operationId: expect.any(String), expectedControlDigest: expect.stringMatching(/^sha256:/u)
     }))
     f.sessions.set('session-original', { ...f.sessions.get('session-original')!, run: { runId: 'changed-run' } })
     await click(button(view.element, 'Interrupt the current turn'))

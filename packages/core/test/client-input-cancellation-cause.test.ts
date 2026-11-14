@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
 import { afterEach, expect, it, vi } from 'vitest'
+import { postureControlDigest } from '../src/agent-posture.js'
 import { AgentMuxError } from '../src/errors.js'
 import { isObjectId } from '../src/object-id.js'
 import type { AgentProvider } from '../src/agent-provider.js'
@@ -223,9 +224,16 @@ it.each([
 
 it.each(['paste', 'posture'] as const)('records the actual public %s entry and eventual exact bytes', async kind => {
   const h = await fixture(), entered = preparation(h), prompt = submit(h); await entered
-  if (kind === 'posture') vi.spyOn(h.client.providers.get('codex'), 'planPostureSet').mockReturnValue({ data: '\x1b[Z' })
+  const provider = h.client.providers.get('codex'), previous = Object.getOwnPropertyDescriptor(provider, 'catalog')!
+  const control = { id: 'private-control', label: 'Private modes', modes: [{ id: 'fixture-declared-mode', label: 'One' }, { id: 'other', label: 'Two' }] }
+  if (kind === 'posture') {
+    vi.spyOn(provider, 'planPostureSet').mockReturnValue({ data: '\x1b[Z' })
+    Object.defineProperty(provider, 'catalog', { ...previous, value: { ...provider.catalog, postureControl: control } })
+    cleanup.push(async () => { Object.defineProperty(provider, 'catalog', previous) })
+    Object.assign(h.inner.kernel, { creationRuntimeIdentity: () => ({ runtimeId: 'private-runtime', instanceId: 'private-daemon', buildIdentity: 'private-fixture', protocolVersion: 18 }) })
+  }
   const raw = kind === 'paste' ? h.client.pasteAgent({ ...h.target, text: 'private pasted 雪', terminalData: 'ignored terminal data' })
-    : h.client.setAgentPosture({ ...h.target, modeId: 'fixture-declared-mode' })
+    : h.client.setAgentPosture({ target: { ...h.target, hostId: 'local', runtimeId: 'private-runtime', providerId: 'codex' }, operationId: 'private-posture-intent', controlId: control.id, modeId: 'fixture-declared-mode', expectedControlDigest: postureControlDigest(control) }, { actor: { kind: 'user', id: 'private-user' } })
   const snapshot = detail(await prompt).competingInput; await raw; const actual = h.writes[0]!
   expect(snapshot.inputKind).toBe(kind); expect(snapshot.operationId).toBe(h.causes().at(-1)!.operationId)
   if (kind === 'posture') expect(actual.transaction!.operationId).toBe(snapshot.operationId)

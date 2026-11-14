@@ -103,6 +103,8 @@ export function objectCliSeed(method: string, input: string): string[] {
     'connection.service.get': [], 'connection.service.configure': ['--input', '-'], 'connection.service.inspect': ['--operation-id', 'service-original'],
     'connection.diagnose': ['--host', 'local', '--session', 'SID'],
     'connection.ls': [], 'connection.inspect': ['--connection', 'connection-a'], 'connection.configure': ['--input', '-'], 'connection.test': ['--connection', 'connection-a'],
+    'agent.posture.inspect': ['--host', 'local', '--session', 'SID', '--run', 'RUN'],
+    'agent.posture.set': ['--input', '-'],
     'agent.interaction.respond': ['--input', '-'],
     'agent.interaction.inspect': ['--session', 'SID', '--operation-id', 'RESPONSE'],
     whoami: [], 'agent.ls': [], 'agent.inspect': ['--session', ids.agent], 'agent.refresh': ['--session', ids.agent],

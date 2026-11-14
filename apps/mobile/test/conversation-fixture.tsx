@@ -4,6 +4,7 @@ import { fixturePath } from '../../../test/fixture-values.mjs'
 import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { expect, vi } from 'vitest'
+import { postureControlDigest } from '../../../packages/core/src/agent-posture'
 import { AgentProviderRegistry } from '../../../packages/core/src/agent-provider'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentInputSubmissionReceipt, AgentMuxAgentSession, AgentMuxClientEvent, AgentSessionHistoryObservation, AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
@@ -35,7 +36,16 @@ export function fixture() {
   const rejoinInput = vi.fn<AgentMuxHostedClient['rejoinAgentInputWaiting']>()
   const stopInput = vi.fn<AgentMuxHostedClient['stopAgentInputWaiting']>()
   const signalAgent = vi.fn<AgentMuxHostedClient['signalAgent']>().mockResolvedValue(undefined)
-  const setAgentPosture = vi.fn<AgentMuxHostedClient['setAgentPosture']>().mockResolvedValue(undefined)
+  const inspectAgentPosture = vi.fn<AgentMuxHostedClient['inspectAgentPosture']>(async input => {
+    if (input.operationId !== undefined) return { kind: 'operation', agentSessionId: input.agentSessionId, operationId: input.operationId, operation: null }
+    const original = sessions.get(input.agentSessionId)!, control = new AgentProviderRegistry().get(original.providerId).catalog.postureControl ?? null
+    return { kind: 'declaration', target: { hostId: 'local', runtimeId: 'private-native-runtime', agentSessionId: original.agentSessionId, expectedRun: original.run, providerId: original.providerId },
+      control, controlDigest: control ? postureControlDigest(control) : null, currentMode: { status: 'unknown' } }
+  })
+  const setAgentPosture = vi.fn<AgentMuxHostedClient['setAgentPosture']>(async input => ({ action: 'agent-posture', operationId: input.operationId, target: input.target, controlId: input.controlId, modeId: input.modeId,
+    actor: { kind: 'device', id: 'private-device' }, phase: 'settled', outcome: 'applied', nativeOperationId: 'private-native-operation',
+    runtime: { runtimeId: 'private-native-runtime', instanceId: 'private-native-instance', protocolVersion: 18, buildIdentity: 'private-native' },
+    acknowledgement: { runId: input.target.expectedRun.runId, appliedByteRange: { startByte: 0, endByte: 1 }, acceptedThroughByte: 1 }, diskDurability: 'confirmed' }))
   const respond = vi.fn<AgentMuxHostedClient['respondAgentInteraction']>().mockRejectedValue(new Error('Agent interaction receipt is not configured in this fixture'))
   const readHistory = vi.fn<AgentMuxHostedClient['sessionHistoryPage']>(async id => page.agentSessionId === id ? page : history(id))
   const readTimeline = vi.fn<AgentMuxHostedClient['sessionTimeline']>(async id => timeline.agentSessionId === id
@@ -56,9 +66,9 @@ export function fixture() {
     }),
     sessionHistoryPage: readHistory, sessionTimeline: readTimeline, submitAgentPrompt: submit, respondAgentInteraction: respond,
     inspectAgentInput: inspectInput, rejoinAgentInputWaiting: rejoinInput, stopAgentInputWaiting: stopInput,
-    signalAgent, setAgentPosture
+    signalAgent, inspectAgentPosture, setAgentPosture
   } as unknown as AgentMuxHostedClient
-  const result = { client, sessions, submit, respond, readHistory, readTimeline, disposeHistory, unsubscribe, inspectInput, rejoinInput, stopInput, signalAgent, setAgentPosture,
+  const result = { client, sessions, submit, respond, readHistory, readTimeline, disposeHistory, unsubscribe, inspectInput, rejoinInput, stopInput, signalAgent, inspectAgentPosture, setAgentPosture,
     setPage(value: AgentSessionHistoryPage) { page = value },
     setTimeline(value: AgentTimelineSnapshot) { timeline = value },
     emit(event: AgentMuxClientEvent) {
