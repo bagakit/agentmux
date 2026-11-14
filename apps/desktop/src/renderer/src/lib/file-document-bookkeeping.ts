@@ -2,6 +2,7 @@ import { hasFileDocumentConsumer } from './file-document-consumers'
 import { api } from './api'
 import { isScratchWorkspaceId, type AppConfig } from '../../../shared/contracts'
 import { scratchTopicIdFromDirectoryName } from '@agentmux/host/mote-model'
+import { topicFileDirectory } from './topic-files-address'
 import { isPathWithinSubtree } from './workspace-paths'
 import {
   documentKey,
@@ -46,7 +47,14 @@ export async function withAdmittedFileSaves<T>(keys: readonly string[], work: ()
   try { return await work() }
   finally { keys.forEach(key => admittedFileSaves.delete(key)) }
 }
-export const workspaceFileMutationTails = new Map<string, Promise<void>>()
+const workspaceFileMutationTails = new Map<string, Promise<void>>()
+function mutationQueueKey(workspaceId: string, path: string): string {
+  const topic = topicFileDirectory(workspaceId, path)
+  return topic ? documentKey(workspaceId, topic) : workspaceId
+}
+export function fileMutationTail(workspaceId: string, path: string): Promise<void> {
+  return workspaceFileMutationTails.get(mutationQueueKey(workspaceId, path)) ?? Promise.resolve()
+}
 // Shared data verdicts: a document, a directory, or a failed read; no UI activation permission.
 export const fileOpenRequests = new Map<string, Promise<boolean | 'directory'>>()
 
@@ -116,11 +124,12 @@ export async function withWorkspaceFileMutation<T>(
   path: string,
   operation: () => Promise<T>
 ): Promise<T> {
-  const previousMutation = workspaceFileMutationTails.get(workspaceId) ?? Promise.resolve()
+  const ownerKey = mutationQueueKey(workspaceId, path)
+  const previousMutation = workspaceFileMutationTails.get(ownerKey) ?? Promise.resolve()
   let releaseMutation!: () => void
   const mutation = new Promise<void>((resolve) => { releaseMutation = resolve })
   const tail = previousMutation.catch(() => {}).then(async () => await mutation)
-  workspaceFileMutationTails.set(workspaceId, tail)
+  workspaceFileMutationTails.set(ownerKey, tail)
   const prefix = `${workspaceId}\0`
   const saves = [...fileSaveTails.entries()].flatMap(([key, save]) => (
     key.startsWith(prefix) && isPathWithinSubtree(key.slice(prefix.length), path) ? [save] : []
@@ -132,8 +141,8 @@ export async function withWorkspaceFileMutation<T>(
   } finally {
     releaseMutation()
     await tail
-    if (workspaceFileMutationTails.get(workspaceId) === tail) {
-      workspaceFileMutationTails.delete(workspaceId)
+    if (workspaceFileMutationTails.get(ownerKey) === tail) {
+      workspaceFileMutationTails.delete(ownerKey)
     }
   }
 }

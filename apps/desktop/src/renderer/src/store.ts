@@ -1,4 +1,4 @@
-import { topicFileDirectory } from './lib/topic-files-address'
+import { topicFileDirectory, topicFilesTarget } from './lib/topic-files-address'
 import { dequal } from 'dequal'
 import { detachedFileSurface, knowledgeSurfacePresented } from './lib/knowledge-surface-navigation'
 import { isWorkbenchSurfaceDetached, type WorkbenchSurface as KnowledgeSurface } from './lib/workbench-window-registry'
@@ -12,7 +12,7 @@ import type { GoalRelationAccess } from '@agentmux/core/control'
 import type { WorkbenchWindowDocument } from '../../shared/workbench-windows'
 import { demandAgentReferenceKey } from '@agentmux/demand/relations'
 import { noteHistoryCoreTarget, readNoteFileHistory } from './lib/note-history-source'
-import { createSourceFilesWorkbench, emptySourceFilesInputs, sourceFilesQuery, sourceFilesMappingMatches, sourceFilesWorkspaceMatches, type SourceFilesInputs } from './lib/source-files-workbench'
+import { createSourceFilesWorkbench, emptySourceFilesInputs, mutationQuery, selectedMutationLocation, type FileMutationLocation, sourceFilesQuery, sourceFilesMappingMatches, sourceFilesWorkspaceMatches, type SourceFilesInputs } from './lib/source-files-workbench'
 import { captureFileEffect, applyFileEffect } from './lib/file-mutation-projection'
 import type { SourceFilesLocator, SourceFilesResolution } from '../../shared/source-files'
 import type { FolderDirectoryRegistration } from '@agentmux/core/space-folder'
@@ -413,7 +413,7 @@ import {
   transferFileSaveTail,
   withWorkspaceFileMutation,
   withAdmittedFileSaves,
-  workspaceFileMutationTails
+  fileMutationTail
 } from './lib/file-document-bookkeeping'
 import {
   ownsSessionLaunch,
@@ -3142,7 +3142,10 @@ async function enqueueNoteShareSave(tabId: string, regionId?: string, explicit?:
   }
   const keys = [...new Set([key, ...selected.map(ticket => documentKey(ticket.copy.source.workspaceId, ticket.copy.source.path))])]
   const waits = keys.map(id => fileSaveTails.get(id) ?? Promise.resolve())
-  const mutations = [...new Set(keys.map(id => id.slice(0, id.indexOf('\0'))))].map(id => workspaceFileMutationTails.get(id) ?? Promise.resolve())
+  const mutations = keys.map(key => {
+    const separator = key.indexOf('\0')
+    return fileMutationTail(key.slice(0, separator), key.slice(separator + 1))
+  })
   const operation = (async () => {
     await Promise.all([...waits, ...mutations].map(wait => wait.catch(() => {})))
     return await withAdmittedFileSaves(keys, async () => {
@@ -3276,7 +3279,7 @@ async function enqueueFileSave(
   }
   const queuedLifetime = documentLifetime(key)
   const previous = fileSaveTails.get(key) ?? Promise.resolve()
-  const mutation = workspaceFileMutationTails.get(initialSurface.workspaceId) ?? Promise.resolve()
+  const mutation = fileMutationTail(initialSurface.workspaceId, initialSurface.path)
   const operation = Promise.all([previous.catch(() => {}), mutation.catch(() => {})]).then(async () => withAdmittedFileSaves([key], async () => {
     await drainNoteInput(initialSurface.workspaceId, initialSurface.path)
     const state = useAppStore.getState()
@@ -3447,7 +3450,7 @@ async function enqueueNoteHistoryAction(tabId: string, regionId: string, selecti
   const selected = structuredClone(selection), initial = fileSurface(useAppStore.getState().tabs[tabId], regionId)
   if (!initial) throw Error('The original Note file occurrence is unavailable.')
   const key = documentKey(initial.workspaceId, initial.path), lifetime = documentLifetime(key)
-  const previous = fileSaveTails.get(key) ?? Promise.resolve(), mutation = workspaceFileMutationTails.get(initial.workspaceId) ?? Promise.resolve()
+  const previous = fileSaveTails.get(key) ?? Promise.resolve(), mutation = fileMutationTail(initial.workspaceId, initial.path)
   const operation = Promise.all([previous.catch(() => {}), mutation.catch(() => {})]).then(async () => withAdmittedFileSaves([key], async () => {
     await drainNoteInput(initial.workspaceId, initial.path)
     const state = useAppStore.getState(), surface = fileSurface(state.tabs[tabId], regionId)
@@ -6145,6 +6148,12 @@ function sourceFilesWorkbenchOwner(): ReturnType<typeof createSourceFilesWorkben
         zoneId: choice.zoneId, workspaceId }
     },
     register: (hostId, registration) => api.spaceMounts.call('register', { hostId, registration }),
+    topicAddress: (workspaceId, directory) => {
+      const state = useAppStore.getState(), workspace = state.config?.workspaces.find(item => item.id === workspaceId)
+      if (!workspace) return undefined
+      const topic = scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace)?.find(item => scratchTopicLogicalPath(workspace, item) === directory)
+      return topic ? { workspace, zoneId: topicFilesTarget(workspace, topic).zoneId } : undefined
+    },
     prepareEffect: prepareSourceFileEffect
   })
 }
@@ -6153,8 +6162,12 @@ function sourceFilesWorkbenchOwner(): ReturnType<typeof createSourceFilesWorkben
 async function observeSourceFilesWorkspace(workspaceId: string): Promise<() => void> {
   const input = useAppStore.getState().sourceFilesInputs.selections[workspaceId]
   if (!input?.locator || !sourceFilesWorkspaceMatches(input.workspace, originalSpaceWorkspace(useAppStore.getState(), workspaceId, currentCoreSpatialGraph()))) return () => {}
+  const location = selectedMutationLocation(input, input.locator, () => {
+    const state = useAppStore.getState()
+    return state.sourceFilesInputs.selections[workspaceId] === input && sourceFilesWorkspaceMatches(input.workspace, originalSpaceWorkspace(state, workspaceId, currentCoreSpatialGraph()))
+  })
   const observer = await api.sourceFiles.watch(input.target, sourceFilesQuery(input.locator, ''), async event => {
-    if (event.type === 'effect') await prepareSourceFileEffect(workspaceId, input.locator!)(event.data)
+    if (event.type === 'effect') await prepareSourceFileEffect(location)(event.data)
     else if (event.type === 'error' || event.type === 'end') useAppStore.setState(state => {
       const selected = state.sourceFilesInputs.selections[workspaceId]
       if (selected !== input) return state
@@ -6166,24 +6179,22 @@ async function observeSourceFilesWorkspace(workspaceId: string): Promise<() => v
 }
 
 const projectedFileEffects = new WeakMap<object, Set<string>>()
-function prepareSourceFileEffect(workspaceId: string, locator: SourceFilesLocator): (effect: FileMutationEffect) => Promise<void> {
-  const before = useAppStore.getState(), selection = before.sourceFilesInputs.selections[workspaceId]
-  const lifetimes = new Map(Object.keys(before.documents).filter(key => key.startsWith(workspaceId + '\0')).map(key => [key, documentLifetime(key)]))
+function prepareSourceFileEffect(location: FileMutationLocation): (effect: FileMutationEffect) => Promise<void> {
+  const workspaceId = location.workspace.id, before = useAppStore.getState()
+  const prefix = workspaceId + '\0' + (location.displayRoot ? location.displayRoot + '/' : '')
+  const lifetimes = new Map(Object.keys(before.documents).filter(key => key.startsWith(prefix)).map(key => [key, documentLifetime(key)]))
   return async (effect: FileMutationEffect) => {
-    const owns = () => {
-      const state = useAppStore.getState(), selected = state.sourceFilesInputs.selections[workspaceId]
-      return selected === selection && selected?.locator === locator && sourceFilesWorkspaceMatches(selected.workspace, originalSpaceWorkspace(state, workspaceId, currentCoreSpatialGraph()))
-    }
-    if (!owns()) return // The original receipt still settles its request; later Source selection is never rewritten.
-    const held = captureFileEffect(before, workspaceId, locator, effect)
+    if (!location.current()) return // The original receipt still settles its request; later Source selection is never rewritten.
+    const held = captureFileEffect(before, workspaceId, location, effect)
     if (effect.type === 'path-mutation') held.candidates = held.candidates.filter(candidate => !projectedFileEffects.get(candidate.document)?.has(effect.request.operationId))
     const destinations = new Map<string, { identity: FileReadIdentity; resource: SourceFilesLocator['resource']; query: NonNullable<FileDocument['readSource']>['query'] }>()
     if (effect.type === 'path-mutation' && effect.action === 'move' && held.sourcePath !== undefined && held.destinationPath !== undefined) for (const candidate of held.candidates) {
       const nextPath = remapPathWithinSubtree(candidate.path, held.sourcePath, held.destinationPath)
-      const observed = await api.sourceFiles.call(selection!.target, 'file.read', sourceFilesQuery(locator, nextPath))
-      if (observed.carrierCurrent && observed.result.resource && observed.result.result.status === 'read' && observed.result.result.document.readIdentity) destinations.set(candidate.path, { identity: observed.result.result.document.readIdentity, resource: observed.result.resource, query: sourceFilesQuery(locator, nextPath) })
+      const query = mutationQuery(location, nextPath)
+      const observed = await api.sourceFiles.call(location.target, 'file.read', query)
+      if (observed.carrierCurrent && observed.result.resource && sourceFilesMappingMatches(location, observed.result.resource, query.path) && observed.result.result.status === 'read' && observed.result.result.document.readIdentity) destinations.set(candidate.path, { identity: observed.result.result.document.readIdentity, resource: observed.result.resource, query })
     }
-    if (!owns()) return
+    if (!location.current()) return
     const moved: Array<{ from: string; to: string }> = []
     useAppStore.setState(state => {
       held.candidates = held.candidates.filter(candidate => documentLifetime(documentKey(workspaceId, candidate.path)) === lifetimes.get(documentKey(workspaceId, candidate.path)))
