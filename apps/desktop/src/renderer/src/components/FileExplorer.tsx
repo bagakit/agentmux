@@ -104,7 +104,7 @@ const ThemeActionClearIcon = semanticIconComponent('action.clear')
 const ThemeActionDragIcon = semanticIconComponent('action.drag')
 
 
-type InlineEdit = { id: number; workspaceId: string; workspacePath: string; rootPath: string } & (
+type InlineEdit = { id: number; workspaceId: string; workspacePath: string; rootPath: string; sourceNamespace: string } & (
   | { kind: 'create-file' | 'create-directory'; parentPath: string }
   | { kind: 'rename'; node: TreeNode }
 )
@@ -420,7 +420,8 @@ export function FileExplorer({
   )
   const originalOpenFile = useAppStore((state) => state.openFileAndReveal)
   const fileRevealRef = useRef<AbortController | null>(null)
-  const openFile = (path: string, groupId?: string, location?: { line: number; column?: number }, resourceId = workspaceId) => {
+  const openFile = async (path: string, groupId?: string, location?: { line: number; column?: number }, resourceId = workspaceId) => {
+    tree.assertCurrent()
     if (onOpenPath) return onOpenPath(path)
     fileRevealRef.current?.abort()
     const intent = new AbortController()
@@ -477,12 +478,12 @@ export function FileExplorer({
   useEffect(() => { if (!active) fileRevealRef.current?.abort() }, [active])
   const editContextRef = useRef({ workspaceId, workspacePath, rootPath })
   editContextRef.current = { workspaceId, workspacePath, rootPath }
-  const [deleteRequest, setDeleteRequest] = useState<{ node: TreeNode; workspaceId: string; rootPath: string } | null>(null)
+  const [deleteRequest, setDeleteRequest] = useState<{ node: TreeNode; workspaceId: string; rootPath: string; sourceNamespace: string } | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [relinking, setRelinking] = useState(false)
   const [activeDrag, setActiveDrag] = useState<FileExplorerDragData | null>(null)
   const dragVisibilityRef = useRef<{ showHidden: boolean; showIgnored: boolean; query: string } | null>(null)
-  const activeDragScopeRef = useRef<{ workspaceId: string | null; rootPath: string } | null>(null)
+  const activeDragScopeRef = useRef<{ workspaceId: string | null; rootPath: string; sourceNamespace: string } | null>(null)
   const [scrollTarget, setScrollTarget] = useState<{
     path: string
     requestId: number
@@ -679,6 +680,7 @@ export function FileExplorer({
   }
 
   async function movePath(sourcePath: string, destinationPath: string): Promise<void> {
+    tree.assertCurrent()
     if (!fileExplorerContains(rootPath, sourcePath) || !fileExplorerContains(rootPath, destinationPath)) return
     await runFileExplorerMove({
       sourcePath,
@@ -697,7 +699,7 @@ export function FileExplorer({
   function handleDragStart(event: DragStartEvent): void {
     const data = event.active.data.current as FileExplorerDragData | undefined
     if (data?.kind === 'file-explorer-path' && fileExplorerContains(rootPath, data.path)) {
-      activeDragScopeRef.current = { workspaceId, rootPath }
+      activeDragScopeRef.current = { workspaceId, rootPath, sourceNamespace: tree.namespace }
       dragVisibilityRef.current = { showHidden, showIgnored, query }
       setSelection(createSingleFileExplorerSelection(data.path))
       setActiveDrag(data)
@@ -738,7 +740,7 @@ export function FileExplorer({
     clearHoverExpand()
     setActiveDrag(null)
     dragVisibilityRef.current = null
-    if (drag?.kind !== 'file-explorer-path' || drop?.kind !== 'file-explorer-directory' || scope?.workspaceId !== workspaceId || scope.rootPath !== rootPath) return
+    if (drag?.kind !== 'file-explorer-path' || drop?.kind !== 'file-explorer-directory' || scope?.workspaceId !== workspaceId || scope.rootPath !== rootPath || scope.sourceNamespace !== tree.namespace) return
     try {
       await movePathToDirectory(drag.path, drop.directoryPath)
     } catch {
@@ -782,7 +784,7 @@ export function FileExplorer({
     if (!workspaceId || editSubmissionRef.current) return
     fileRevealRef.current = new AbortController()
     setExpanded((current) => new Set(current).add(targetParent))
-    setInlineEdit({ id: ++editIntent.current, kind, parentPath: targetParent, workspaceId, workspacePath, rootPath })
+    setInlineEdit({ id: ++editIntent.current, kind, parentPath: targetParent, workspaceId, workspacePath, rootPath, sourceNamespace: tree.namespace })
     setEditValue('')
     setEditError(null)
   }
@@ -828,6 +830,7 @@ export function FileExplorer({
   }
 
   async function openDirectoryInTerminal(node: TreeNode): Promise<void> {
+    tree.assertCurrent()
     if (!node.isDirectory) return
     if (onOpenTerminal) { await onOpenTerminal(node.path); return }
     if (!workspace || !activePaneId) return
@@ -837,6 +840,7 @@ export function FileExplorer({
   }
 
   async function openDirectoryAsProject(node: TreeNode): Promise<void> {
+    tree.assertCurrent()
     if (!workspace || !node.isDirectory) return
     try {
       const projectInput = createDirectoryProjectInput({
@@ -892,7 +896,7 @@ export function FileExplorer({
     fileRevealRef.current?.abort()
     if (!workspaceId || editSubmissionRef.current || !canRenameFileExplorerNode(workspaceId, node)) return
     setSelection(createSingleFileExplorerSelection(node.path))
-    setInlineEdit({ id: ++editIntent.current, kind: 'rename', node, workspaceId, workspacePath, rootPath })
+    setInlineEdit({ id: ++editIntent.current, kind: 'rename', node, workspaceId, workspacePath, rootPath, sourceNamespace: tree.namespace })
     setEditValue(node.name)
     setEditError(null)
   }
@@ -912,6 +916,8 @@ export function FileExplorer({
     setEditPending(true)
     setEditError(null)
     try {
+      tree.assertCurrent()
+      if (edit.sourceNamespace !== tree.namespace) throw new Error('The original Files Source changed. This name input is kept; check its original folder.')
       if (edit.kind === 'rename') {
         const nextPath = joinPath(workspacePathParent(edit.node.path), name)
         if (nextPath !== edit.node.path) await movePath(edit.node.path, nextPath)
@@ -949,6 +955,8 @@ export function FileExplorer({
     const node = request.node
     setDeleting(true)
     try {
+      tree.assertCurrent()
+      if (request.sourceNamespace !== tree.namespace) throw new Error('The original Files Source changed. No replacement file was deleted.')
       await deletePath(node.path, request.workspaceId)
       await tree.refreshDir(workspacePathParent(node.path))
       setDeleteRequest(current => current === request ? null : current)
@@ -1020,7 +1028,7 @@ export function FileExplorer({
       if (workspaceId && canRenameFileExplorerNode(workspaceId, actionNode)) beginRename(actionNode)
     } else if (FILE_EXPLORER_DELETE_KEY.matches(event) && actionNode) {
       event.preventDefault()
-      if (workspaceId) setDeleteRequest({ node: actionNode, workspaceId, rootPath })
+      if (workspaceId) setDeleteRequest({ node: actionNode, workspaceId, rootPath, sourceNamespace: tree.namespace })
     }
   }
 
@@ -1177,7 +1185,7 @@ export function FileExplorer({
             }}
             onToggle={() => toggle(node)}
             onRename={() => beginRename(node)}
-            onDelete={() => setDeleteRequest({ node, workspaceId, rootPath })}
+            onDelete={() => setDeleteRequest({ node, workspaceId, rootPath, sourceNamespace: tree.namespace })}
             canOpenTerminal={workspace?.hostId === 'local'}
             canMove={canRenameFileExplorerNode(workspaceId, node)}
             dropDisabled={isMoveDropDisabled(fileExplorerDropDirectory(node))}

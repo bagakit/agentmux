@@ -2,8 +2,16 @@ import type { FileDirectoryListing, FileNameListing } from '@agentmux/core/files
 import type { AppState } from '../store'
 import { api } from './api'
 import { sourceFilesMappingMatches, sourceFilesQuery, sourceFilesWorkspaceMatches } from './source-files-workbench'
+import type { SourceFilesInput, SourceFilesInputs } from './source-files-workbench'
+import type { WorkspaceRecord } from '../../../shared/contracts'
 
 type State = Pick<AppState, 'config' | 'sourceFilesInputs' | 'documents'>
+/** Error/status updates invalidate an in-flight reader but do not change its cached namespace. */
+export function sourceFilesDiscoveryNamespace(workspaceId: string | null, workspace: WorkspaceRecord | undefined,
+  source: SourceFilesInput | undefined, pointers: SourceFilesInputs['readSources']): string {
+  return JSON.stringify([workspaceId, workspace?.hostId, workspace?.path, source?.target, source?.locator,
+    Object.entries(pointers ?? {}).filter(([, pointer]) => pointer.workspaceId === workspaceId).sort(([a], [b]) => a.localeCompare(b))])
+}
 const sourceUnavailable = () => new Error('The original Source directory is unconfirmed. Its files, editors and requests are kept; check that Source folder before discovering candidates.')
 /** Called only for an explicit directory/name observation, never on document input. */
 function hasOriginalSource(state: State, workspaceId: string): boolean {

@@ -7,7 +7,7 @@ import { fileNavigationSelection, useAppStore } from '../store'
 import { FilePathLabel } from './FilePathLabel'
 import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 import { quickFileQuery, rankQuickFiles } from '../lib/quick-open-files'
-import { listWorkspaceFileNames } from '../lib/source-files-discovery'
+import { listWorkspaceFileNames, sourceFilesDiscoveryNamespace } from '../lib/source-files-discovery'
 
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
 
@@ -20,9 +20,12 @@ export function QuickOpenFiles({ onClose }: { onClose: () => void }) {
   const source = useAppStore(state => workspaceId ? state.sourceFilesInputs.selections[workspaceId] : undefined)
   const readSources = useAppStore(state => state.sourceFilesInputs.readSources)
   const listingScope = useMemo(() => ({}), [workspace, source, readSources])
-  const previousScope = useRef<object | null>(null)
+  const namespace = useMemo(() => sourceFilesDiscoveryNamespace(workspaceId, workspace, source, readSources), [workspaceId, workspace?.hostId, workspace?.path, source?.target, source?.locator, readSources])
+  const previousScope = useRef<string | null>(null)
   const [query, setQuery] = useState(''), [activeIndex, setActiveIndex] = useState(0)
-  const [listing, setListing] = useState<FileNameListing | null>(null)
+  const [observation, setObservation] = useState<{ value: FileNameListing; namespace: string; scope: object; source: typeof source; pointers: typeof readSources } | null>(null)
+  // Source changes are visible during render, before a passive effect can clear state.
+  const listing = observation?.namespace === namespace ? observation.value : null
   const [error, setError] = useState<string | null>(null)
   const [reading, setReading] = useState(false), [retry, setRetry] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
@@ -31,16 +34,16 @@ export function QuickOpenFiles({ onClose }: { onClose: () => void }) {
     .flatMap(tab => Object.values(tab.regions).flatMap(surface => surface.kind === 'file' && surface.workspaceId === workspaceId ? [surface.path] : [])), [tabs, workspaceId])
   useEffect(() => {
     let current = true
-    if (previousScope.current !== listingScope) setListing(null)
-    previousScope.current = listingScope
+    if (previousScope.current !== namespace) setObservation(null)
+    previousScope.current = namespace
     setError(null); setActiveIndex(0)
     if (!workspace) { setReading(false); return }
     setReading(true)
-    void listWorkspaceFileNames(workspace.id, useAppStore.getState).then(result => { if (current) setListing(result) },
+    void listWorkspaceFileNames(workspace.id, useAppStore.getState).then(result => { if (current) setObservation({ value: result, namespace, scope: listingScope, source, pointers: readSources }) },
       failure => { if (current) setError(failure instanceof Error ? failure.message : String(failure)) })
       .finally(() => { if (current) setReading(false) })
     return () => { current = false }
-  }, [workspace, retry, listingScope])
+  }, [workspace, retry, listingScope, namespace])
   const parsed = useMemo(() => quickFileQuery(query, [...recent, ...listing?.files ?? []]), [query, listing, recent])
   const results = useMemo(() => rankQuickFiles(listing?.files ?? [], recent, parsed.query), [listing, recent, parsed.query])
   useEffect(() => setActiveIndex(0), [query])
@@ -48,7 +51,10 @@ export function QuickOpenFiles({ onClose }: { onClose: () => void }) {
 
   function activate(path: string | undefined) {
     if (!path || !workspace) return
-    const original = fileNavigationSelection(useAppStore.getState()), resource = workspace, selected = source, pointers = readSources
+    const listed = listing?.files.includes(path)
+    if (listed && observation?.scope !== listingScope) return
+    const original = fileNavigationSelection(useAppStore.getState()), resource = workspace,
+      selected = listed ? observation!.source : source, pointers = listed ? observation!.pointers : readSources
     onClose()
     // The original overlay owner commits uncovered before asking an already-warm File for caret.
     requestAnimationFrame(() => {

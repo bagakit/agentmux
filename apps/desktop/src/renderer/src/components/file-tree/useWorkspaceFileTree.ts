@@ -2,7 +2,7 @@
 // Local or system-SSH reads cannot cross a Workspace identity boundary.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { readWorkspaceDirectory } from '../../lib/source-files-discovery'
+import { readWorkspaceDirectory, sourceFilesDiscoveryNamespace } from '../../lib/source-files-discovery'
 import { useAppStore } from '../../store'
 import {
   createFileExplorerDirLoadScope,
@@ -43,16 +43,24 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
   const resource = useWorkspaceResource(workspaceId)
   const source = useAppStore(state => state.sourceFilesInputs.selections[workspaceId])
   const readSources = useAppStore(state => state.sourceFilesInputs.readSources)
+  const namespace = useMemo(() => sourceFilesDiscoveryNamespace(workspaceId, resource, source, readSources), [workspaceId, resource?.hostId, resource?.path, source?.target, source?.locator, readSources])
+  const cachedNamespace = useRef(namespace)
   const [dirCache, setDirCache] = useState<Record<string, DirCache>>({})
   const cacheRef = useRef(dirCache)
   const loadTrackerRef = useRef(createFileExplorerDirLoadTracker())
   const staleDirsRef = useRef(new Set<string>())
   const loadScope = useMemo(() => createFileExplorerDirLoadScope(workspaceId), [workspaceId, rootPath, resource?.hostId, resource?.path, source, readSources])
   cacheRef.current = dirCache
+  const isCurrent = useCallback(() => {
+    const state = useAppStore.getState(), current = state.config?.workspaces.find(value => value.id === workspaceId)
+    return state.sourceFilesInputs.selections[workspaceId] === source && state.sourceFilesInputs.readSources === readSources &&
+      current?.hostId === resource?.hostId && current?.path === resource?.path
+  }, [workspaceId, source, readSources, resource?.hostId, resource?.path])
+  const assertCurrent = () => { if (!isCurrent()) throw new Error('The original Files Source changed. Its candidates and input are kept; check that original folder before this action.') }
 
   const loadDir = useCallback(
     async (path: string, options?: { force?: boolean; failOnError?: boolean }) => {
-      if (!fileExplorerContains(rootPath, path)) return false
+      if (!isCurrent() || !fileExplorerContains(rootPath, path)) return false
       const cached = cacheRef.current[path]
       const decision = decideExpandedDirLoad(cached, staleDirsRef.current.has(path))
       if (!options?.force && decision === 'skip') return true
@@ -96,7 +104,7 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
         return !options?.failOnError
       }
     },
-    [loadScope, workspaceId, rootPath]
+    [loadScope, workspaceId, rootPath, isCurrent]
   )
 
   useLayoutEffect(() => {
@@ -107,13 +115,15 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
   }, [loadScope])
 
   useEffect(() => {
+    if (cachedNamespace.current === namespace) return
+    cachedNamespace.current = namespace
     staleDirsRef.current.clear()
     // The expanded-path effect runs in the same commit. Clear its synchronous
     // decision source before scheduling React state so it cannot reuse the
     // previous Workspace's loaded/loading entries.
     cacheRef.current = {}
     setDirCache({})
-  }, [loadDir, loadScope])
+  }, [loadDir, loadScope, namespace])
 
   useEffect(() => {
     if (active && !cacheRef.current[rootPath]) void loadDir(rootPath, { force: true })
@@ -155,11 +165,13 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
     [loadDir]
   )
 
+  const visibleCache = cachedNamespace.current === namespace ? dirCache : {}
   return {
-    dirCache,
-    rootCache: dirCache[rootPath],
+    namespace, assertCurrent,
+    dirCache: visibleCache,
+    rootCache: visibleCache[rootPath],
     // 根目录的错误从 cache 派生，而不是另存一份 state：它与子目录的错误是同一件事，两个写者必漂移。
-    rootError: dirCache[rootPath]?.error ?? null,
+    rootError: visibleCache[rootPath]?.error ?? null,
     loadDir,
     refreshDir,
     refreshTree,
