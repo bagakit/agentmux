@@ -148,6 +148,88 @@ it('keeps a positive-size parked stage invisible until its exact destination exi
   }
 })
 
+// Append to browser-presentation-host.test.tsx; reuse its original withPane and native API fixture.
+it.each(['initial-missing', 'retargeted-missing'] as const)(
+  '[browser-secondary-placement] keeps positive-size %s content Native-invisible until its exact frame arrives',
+  async mode => {
+    expect(__AGENTMUX_WEB_PREVIEW__).toBe(false)
+    const phases: unknown[] = []
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(12, 34, 640, 320))
+    const activate = vi.spyOn(api.browser, 'activatePresentation').mockResolvedValue({ outcome: 'selected' })
+    const arm = vi.spyOn(api.browser, 'armPresentationCapture').mockResolvedValue({ captureId: 'placement-capture', browserId: 'original-browser' })
+    const ack = vi.spyOn(api.browser, 'ackPresentationCapture').mockResolvedValue(undefined)
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+    const { track, stream } = previewMedia('placement-track')
+    const getDisplayMedia = vi.fn(async () => stream)
+    const priorMedia = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices')
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getDisplayMedia } })
+    const geometry = () => {
+      const updates = vi.mocked(api.browser.updatePresentation).mock.calls.filter(([id]) => id === 'survey-original-lease')
+      return updates.at(-1)?.[1] ?? vi.mocked(api.browser.registerPresentation).mock.calls
+        .find(([request]) => request.occurrence.presentationId === 'survey-original')?.[0].geometry
+    }
+    const record = (phase: string) => phases.push({ phase, currentSurveyGeometry: geometry(),
+      registrations: vi.mocked(api.browser.registerPresentation).mock.calls.map(([request]) => request),
+      updates: vi.mocked(api.browser.updatePresentation).mock.calls.map(([leaseId, value]) => ({ leaseId, geometry: value })),
+      activations: activate.mock.calls, captures: arm.mock.calls,
+      displayMediaRequests: getDisplayMedia.mock.calls.length })
+    let late: HTMLElement | undefined
+    try {
+      await withPane('page', mode === 'retargeted-missing', async ({ host, render, presentations, browser, create }) => {
+        const stage = document.querySelector<HTMLElement>('[data-browser-presentation-id="survey-original"]')
+        expect(stage).not.toBeNull()
+        expect(stage!.isConnected).toBe(true)
+        expect(stage!.getBoundingClientRect()).toMatchObject({ x: 12, y: 34, width: 640, height: 320 })
+        const input = stage!.closest('.browser-surface')!.querySelector<HTMLInputElement>('[aria-label="Browser address"]')!
+        expect(input).not.toBeNull()
+        const originalValue = input.value
+        if (mode === 'retargeted-missing') {
+          await vi.waitFor(() => expect(geometry()?.visible).toBe(true))
+          record('original-exact-host-visible')
+          late = document.createElement('div'); late.id = 'retargeted-exact-survey-slot'
+          await render([presentations[0]!, { ...presentations[1]!, stageHostId: late.id }]); await settle()
+          expect(host.isConnected).toBe(true) // The old destination still exists; its prior receipt cannot qualify the new frame.
+          expect(document.getElementById(late.id)).toBeNull()
+        } else {
+          late = host
+          expect(document.getElementById(host.id)).toBeNull()
+          expect(stage!.closest('.retained-workbench-parking')).not.toBeNull()
+          expect(stage!.closest('[inert]')).not.toBeNull()
+        }
+        record('missing-exact-host-positive-geometry')
+        expect(geometry()).toEqual({ visible: false })
+        if (mode === 'initial-missing') {
+          expect(vi.mocked(api.browser.registerPresentation).mock.calls.length).toBeGreaterThan(0)
+          expect(vi.mocked(api.browser.registerPresentation).mock.calls.find(([request]) =>
+            request.occurrence.presentationId === 'survey-original')?.[0].geometry).toEqual({ visible: false })
+          expect(vi.mocked(api.browser.updatePresentation).mock.calls.every(([, value]) => !value.visible)).toBe(true)
+          expect(activate).not.toHaveBeenCalled(); expect(arm).not.toHaveBeenCalled(); expect(getDisplayMedia).not.toHaveBeenCalled()
+        }
+        await act(async () => document.body.append(late!)); await settle()
+        await vi.waitFor(() => expect(geometry()?.visible).toBe(true))
+        record('exact-host-arrived-visible')
+        expect(late!.querySelector('[data-browser-presentation-id="survey-original"]')).toBe(stage)
+        expect(late!.querySelector('[aria-label="Browser address"]')).toBe(input)
+        expect(input.value).toBe(originalValue)
+        expect(geometry()).toMatchObject({ visible: true, bounds: { x: 12, y: 34, width: 640, height: 320 } })
+        expect(activate.mock.calls.every(([id]) => id === 'survey-original-lease')).toBe(true)
+        expect(useAppStore.getState().tabs['original-tab']!.regions['original-region']).toBe(browser)
+        expect(create).not.toHaveBeenCalled()
+      })
+    } finally {
+      late?.remove()
+      if (priorMedia) Object.defineProperty(navigator, 'mediaDevices', priorMedia)
+      else Reflect.deleteProperty(navigator, 'mediaDevices')
+      rect.mockRestore(); activate.mockRestore(); arm.mockRestore(); ack.mockRestore(); play.mockRestore()
+      if (process.env.BROWSER_PLACEMENT_PAYLOADS) {
+        const { appendFileSync } = await import('node:fs')
+        appendFileSync(process.env.BROWSER_PLACEMENT_PAYLOADS, JSON.stringify({ mode, nativeStageBranch: true, phases,
+          originalTrackStops: track.stop.mock.calls.length }) + '\n')
+      }
+    }
+  }
+)
+
 type Shape = 'error' | 'blank' | 'page'
 function assertPane(host: HTMLElement, shape: Shape) {
   expect(host.querySelectorAll('.browser-surface')).toHaveLength(1)

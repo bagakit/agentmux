@@ -519,3 +519,62 @@ it('[composition-page-occurrence] a clicked page keeps its same original display
   expect(unique).toHaveLength(1)
   expect(surveyPageProjection(page, { ...facts, locations: unique }, current.tabs, () => {}, original)?.selection).toEqual([{ displayWorkspaceId: target.id, groupId: 'target-group', tabId: moved.tabId, regionId: page.regionId }])
 })
+
+it('[composition-browser-secondary-same-resource] original page menu keeps the same visible Browser input in a separate existing research on the same resource', async () => {
+  const native = await api.browser.create('secondary-sibling', 'https://sibling.example.test/', resource.id)
+  const state = useAppStore.getState(), page = source().regions['composition-page']!
+  const paired = addWorkbenchRegion(createWorkbenchTab(source().id, page), page.regionId, 'right', {
+    ...native, kind: 'browser', regionId: 'secondary-sibling', browserId: native.id, workspaceId: resource.id })
+  const nearby = await state.createWorkbenchZone({ workspaceId: resource.id, spaceIds: [] })
+  expect(nearby.save.clientStateWritten).toBe(true)
+  useAppStore.setState({ surveyCollectedZones: { ...useAppStore.getState().surveyCollectedZones, [nearby.zone.zoneId]: true } })
+  useAppStore.setState({ tabs: { ...state.tabs, [paired.id]: paired }, surveyPageReferences: [{ regionId: page.regionId, browserId: 'composition-page' }],
+    surveyZoneSelection: { kind: 'page', regionId: page.regionId, browserId: 'composition-page' } })
+  await checkpointSpatialWorkbench(); await dom.render(<App />)
+  await vi.waitFor(() => expect(document.querySelector('.global-survey-surface [data-workbench-region-id="composition-page"] [aria-label="Browser address"]')).not.toBeNull())
+  const input = document.querySelector<HTMLInputElement>('.global-survey-surface [data-workbench-region-id="composition-page"] [aria-label="Browser address"]')!
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Unsubmitted original secondary address'); input.dispatchEvent(new Event('input', { bubbles: true })) })
+  await act(async () => input.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 9, button: 0 })))
+  input.setSelectionRange(3, 12)
+  const originalPage = useAppStore.getState().tabs[paired.id]!.regions[page.regionId]
+  const options = document.querySelector<HTMLElement>('[data-survey-page-region-id="composition-page"] [aria-haspopup="menu"]')!
+  await menu(options.getAttribute('aria-label')!); await click(named('Move page to research…'))
+  await chooseField(named('Destination research'), JSON.stringify([nearby.zone.zoneId, resource.id, 'source-group']))
+  vi.mocked(api.spatial.commit).mockClear(); await click(named('Move page'))
+  await vi.waitFor(() => expect(useAppStore.getState().surveyPageReferences).toEqual([]))
+  const moved = catalog().regions.find(region => region.regionId === page.regionId)!
+  expect(catalog().tabs.find(tab => tab.tabId === moved.tabId)!.zoneId).toBe(nearby.zone.zoneId)
+  expect(useAppStore.getState().tabs[moved.tabId]!.regions[page.regionId]).toBe(originalPage)
+  expect(Object.keys(source().regions)).toEqual(['secondary-sibling'])
+  expect(document.querySelector('.global-survey-surface [data-workbench-region-id="composition-page"] [aria-label="Browser address"]')).toBe(input)
+  expect(input.value).toBe('Unsubmitted original secondary address'); expect([input.selectionStart, input.selectionEnd]).toEqual([3, 12])
+  expect(vi.mocked(api.spatial.commit)).toHaveBeenCalledOnce()
+})
+
+it('[composition-browser-cross-resource] original page menu preserves the same visible Browser input while extracting from an all-Browser Tab', async () => {
+  const native = await api.browser.create('secondary-sibling', 'https://sibling.example.test/', resource.id)
+  const state = useAppStore.getState(), page = source().regions['composition-page']!
+  const paired = addWorkbenchRegion(createWorkbenchTab(source().id, page), page.regionId, 'right', {
+    ...native, kind: 'browser', regionId: 'secondary-sibling', browserId: native.id, workspaceId: resource.id })
+  useAppStore.setState({ tabs: { ...state.tabs, [paired.id]: paired }, surveyPageReferences: [{ regionId: page.regionId, browserId: 'composition-page' }],
+    surveyZoneSelection: { kind: 'page', regionId: page.regionId, browserId: 'composition-page' } })
+  await checkpointSpatialWorkbench(); await dom.render(<App />)
+  await vi.waitFor(() => expect(document.querySelector('.global-survey-surface [data-workbench-region-id="composition-page"] [aria-label="Browser address"]')).not.toBeNull())
+  const input = document.querySelector<HTMLInputElement>('.global-survey-surface [data-workbench-region-id="composition-page"] [aria-label="Browser address"]')!
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Unsubmitted original secondary address'); input.dispatchEvent(new Event('input', { bubbles: true })) })
+  await act(async () => input.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 9, button: 0 })))
+  input.setSelectionRange(3, 12)
+  const originalPage = useAppStore.getState().tabs[paired.id]!.regions[page.regionId]
+  const options = document.querySelector<HTMLElement>('[data-survey-page-region-id="composition-page"] [aria-haspopup="menu"]')!
+  await menu(options.getAttribute('aria-label')!); await click(named('Move page to research…'))
+  await chooseField(named('Destination research'), JSON.stringify([zones.target, target.id, 'target-group']))
+  vi.mocked(api.spatial.commit).mockClear(); await click(named('Move page'))
+  await vi.waitFor(() => expect(useAppStore.getState().surveyPageReferences).toEqual([]))
+  const moved = catalog().regions.find(region => region.regionId === page.regionId)!
+  expect(catalog().tabs.find(tab => tab.tabId === moved.tabId)!.zoneId).toBe(zones.target)
+  expect(useAppStore.getState().tabs[moved.tabId]!.regions[page.regionId]).toBe(originalPage)
+  expect(Object.keys(source().regions)).toEqual(['secondary-sibling'])
+  expect(document.querySelector('.global-survey-surface [data-workbench-region-id="composition-page"] [aria-label="Browser address"]')).toBe(input)
+  expect(input.value).toBe('Unsubmitted original secondary address'); expect([input.selectionStart, input.selectionEnd]).toEqual([3, 12])
+  expect(vi.mocked(api.spatial.commit)).toHaveBeenCalledOnce()
+})
