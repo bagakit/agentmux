@@ -3,6 +3,7 @@ import { parseAgentInputSubmissionReceipt } from '../src/agent-input-receipt-cod
 import type { AgentHookBinding } from '../src/hook-server.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
+import { DEFAULT_AGENT_CONTINUITY_POLICY } from '../src/agent-session-recovery/continuity-contract.js'
 
 /** Original automatic input stays saved until a positive conversation/input fact exists.
  * A missing observer or elapsed observation budget cannot grant TTY input authorization. */
@@ -173,4 +174,28 @@ it('lets the exact native input owner qualify its healthy transport without auxi
     expect(prepare).toHaveBeenCalledWith(expect.objectContaining({ processId: 1234 }), { providerId: 'claude', nativeSessionId: 'original-native' })
     expect(f.inputs()).toBe(0)
   } finally { if (originalPrepare) provider.prepareNativeInput = originalPrepare; else delete provider.prepareNativeInput; await f.close() }
+})
+
+
+it('retains same-Run startup after a healthy reattachment replaces the current continuity pointer', async () => {
+  const f = await fixture('codex')
+  f.inner.hookBindings.clear()
+  try {
+    const run = { runId: 'run-recipient' }, previous = { runId: 'original-ended-run' }
+    const resume = { operationId: 'original-native-resume', agentSessionId: 'recipient', trigger: 'input', policy: { ...DEFAULT_AGENT_CONTINUITY_POLICY },
+      previousRun: previous, newRun: run, nativeTarget: { kind: 'provider' as const, providerId: 'codex', sessionId: 'original-native-conversation' },
+      admittedAt: 1, observedAt: 2, rechecks: 0, kind: 'resumed' as const, reason: 'original-native-context', evidence: { kind: 'run-running' as const, observedAt: 2 } }
+    await f.startNative(at => ({ continuity: resume, continuityOperations: { [resume.operationId]: resume },
+      nativeHandle: resume.nativeTarget, nativeBinding: { source: 'semantic-resume-target', run, observedAt: at } }))
+    const attached = await f.client.ensureAgentContinuity({ agentSessionId: 'recipient', expectedRun: run, operationId: 'same-run-entry', trigger: 'view' })
+    expect(attached.kind).toBe('reattachable')
+    const current = (await f.store.readMetadata('recipient'))!
+    expect(current.continuity?.operationId).toBe('same-run-entry')
+    expect(current.continuity?.newRun).toBeUndefined()
+    expect(current.continuityOperations?.[resume.operationId]?.newRun).toEqual(run)
+    await f.submit('question-after-reattach')
+    await vi.waitFor(async () => expect((await f.client.inspectAgentInput({ key: { kind: 'prompt', agentSessionId: 'recipient', expectedRun: run,
+      submissionId: 'question-after-reattach' } }))?.control.waiting).toMatchObject({ reason: 'native-session-starting' }))
+    expect(f.inputs()).toBe(0)
+  } finally { await f.close() }
 })

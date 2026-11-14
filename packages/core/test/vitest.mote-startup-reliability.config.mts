@@ -7,6 +7,7 @@ const root = resolve(import.meta.dirname, '../../..')
 const mutations: Record<string, [string, string, string]> = {
   'trust-descendants': ['packages/core/src/client.ts', 'if (await realpath(resolve(root)) === target)', 'if (target.startsWith(await realpath(resolve(root))))'],
   'trust-spelled-path': ['packages/core/src/client.ts', 'const target = await realpath(resolve(workspacePath))', 'const target = resolve(workspacePath)'],
+  'drop-retained-resume-start': ['packages/core/src/client.ts', 'Object.values(session.continuityOperations ?? {}).some(operation =>', 'Object.values({}).some(operation =>'],
   'expire-start-gate': ['packages/core/src/client.ts', "if (intent.kind === 'manual-actor' || intent.kind === 'native-conversation') return false", 'return false'],
   'block-explicit-tty': ['packages/core/src/client.ts', "if (intent.kind === 'manual-actor' || intent.kind === 'native-conversation') return false", "if (intent.kind === 'native-conversation') return false"],
   'block-typed': ['packages/core/src/client.ts', "if (provider.prepareNativeInput && session.nativeHandle?.kind === 'provider') return false", "if (provider.prepareNativeInput && session.nativeHandle?.kind === 'provider') return true"],
