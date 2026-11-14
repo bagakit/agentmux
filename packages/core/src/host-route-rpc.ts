@@ -21,18 +21,24 @@ export function hostRouteTransport(rpc: RpcPort): HostRouteTransport {
       let tail: Promise<void> = opening
       const fail = async (error: unknown) => {
         if (closed) return; closed = true; release()
-        try { await emit({ type: 'error', error: { code: error instanceof AgentMuxError ? error.code : 'HOST_ROUTE_READER_UNAVAILABLE', message: error instanceof Error ? error.message : String(error) } }) }
-        finally { await reader?.dispose() }
+        try {
+          if (!signal.aborted) await emit({ type: 'error', error: { code: error instanceof AgentMuxError ? error.code : 'HOST_ROUTE_READER_UNAVAILABLE', message: error instanceof Error ? error.message : String(error) } })
+        } catch (cause) {
+          if (!signal.aborted) console.warn('[host-route] Original reader failure delivery unconfirmed', cause)
+        } finally {
+          try { await reader?.dispose() }
+          catch (cause) { console.warn('[host-route] Original reader release unconfirmed', cause) }
+        }
       }
       reader = await rpc.subscribe('route.receive-watch', params, { signal,
         onInitial: value => { initial = value },
         onEvent: event => {
-          if (closed) return
+          if (closed || signal.aborted) return
           const value = event.type === 'route-event' ? event.event : event
           const size = Buffer.byteLength(JSON.stringify(value)); bytes += size
           // Same per-reader transfer budget as Hosted; cumulative Space/history is not capped.
           if (bytes > AGENTMUX_HOSTED_TRANSFER_MAX_BYTES * 2) { void fail(new AgentMuxError('This exact route reader fell behind. Reattach its original cursor; Runs and admitted operations remain retained.', 'RUNTIME_READER_BUDGET_EXCEEDED')); return }
-          tail = tail.then(async () => { if (!closed) await emit(value) }).then(() => { bytes -= size }).catch(fail)
+          tail = tail.then(async () => { if (!closed && !signal.aborted) await emit(value) }).then(() => { bytes -= size }).catch(fail)
         },
         onEnd: error => { if (error && !signal.aborted) void fail(error) },
       })
