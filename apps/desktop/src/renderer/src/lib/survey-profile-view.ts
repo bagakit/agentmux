@@ -36,32 +36,56 @@ export function surveySelectionProfileMatch(view: SurveyProfileView, selection: 
   if (matches.includes('unknown')) return 'unknown'
   return matches.length && matches.every(match => match === 'other') ? 'other' : 'independent'
 }
+type SurveyCatalogScope = {
+  tabByRegion: Map<string, string | null>
+  tabsByZone: Map<string, string[]>
+  zoneIds: Set<string>
+}
+const catalogScopes = new WeakMap<AgentMuxSpaceCatalog, SurveyCatalogScope>()
+
+/** Original immutable topology only; live Browser/Profile facts stay in Tabs. */
+function surveyCatalogScope(catalog: AgentMuxSpaceCatalog): SurveyCatalogScope {
+  const known = catalogScopes.get(catalog)
+  if (known) return known
+  const tabByRegion = new Map<string, string | null>(), tabsByZone = new Map<string, string[]>()
+  for (const region of catalog.regions) {
+    tabByRegion.set(region.regionId, tabByRegion.has(region.regionId) ? null : region.tabId)
+  }
+  for (const tab of catalog.tabs) if (tab.zoneId !== null) {
+    const members = tabsByZone.get(tab.zoneId) ?? []
+    members.push(tab.tabId)
+    tabsByZone.set(tab.zoneId, members)
+  }
+  const scope = { tabByRegion, tabsByZone, zoneIds: new Set(catalog.zones.map(zone => zone.zoneId)) }
+  catalogScopes.set(catalog, scope)
+  return scope
+}
+
 /** A derived view over the original references. It never writes membership or creates entities. */
 export function surveyProfileReferences(view: SurveyProfileView, pages: readonly AgentMuxSurveyPageReference[], zoneIds: readonly string[],
   tabs: Readonly<Record<string, WorkbenchTab>>, defaultProfileId: string | undefined, catalog: AgentMuxSpaceCatalog | null) {
-  const wantedRegions = new Set(pages.map(page => page.regionId))
-  const surfaces = new Map<string, WorkbenchTab['regions'][string] | null>()
-  for (const tab of Object.values(tabs)) for (const surface of Object.values(tab.regions)) {
-    if (!wantedRegions.has(surface.regionId)) continue
-    surfaces.set(surface.regionId, surfaces.has(surface.regionId) ? null : surface)
-  }
-  const wantedZones = new Set(zoneIds), knownZones = new Set(catalog?.zones.map(zone => zone.zoneId))
+  // Missing topology cannot remove saved references or justify guessing another
+  // Region's identity. The original page/recovery consumer remains available.
+  if (!catalog || !pages.length && !zoneIds.length) return { pages: [...pages], zoneIds: new Set(zoneIds) }
+  const scope = surveyCatalogScope(catalog)
   const zoneMatches = new Map<string, Match[]>()
-  for (const member of catalog?.tabs ?? []) {
-    if (!member.zoneId || !wantedZones.has(member.zoneId)) continue
-    const matches = zoneMatches.get(member.zoneId) ?? []
-    const tab = tabs[member.tabId]
-    if (!tab) matches.push('unknown')
-    else for (const surface of Object.values(tab.regions)) if (surface.kind === 'browser') matches.push(browserMatch(view, surface, defaultProfileId))
-    zoneMatches.set(member.zoneId, matches)
+  for (const zoneId of zoneIds) {
+    const matches: Match[] = []
+    for (const tabId of scope.tabsByZone.get(zoneId) ?? []) {
+      const tab = tabs[tabId]
+      if (!tab) matches.push('unknown')
+      else for (const surface of Object.values(tab.regions)) if (surface.kind === 'browser') matches.push(browserMatch(view, surface, defaultProfileId))
+    }
+    zoneMatches.set(zoneId, matches)
   }
   return {
     pages: pages.filter(page => {
-      const surface = surfaces.get(page.regionId)
+      const tabId = scope.tabByRegion.get(page.regionId)
+      const surface = tabId ? tabs[tabId]?.regions[page.regionId] : undefined
       return !surface || surface.kind !== 'browser' || surface.browserId !== page.browserId || browserMatch(view, surface, defaultProfileId) !== 'other'
     }),
     zoneIds: new Set(zoneIds.filter(zoneId => {
-      if (!knownZones.has(zoneId)) return true
+      if (!scope.zoneIds.has(zoneId)) return true
       const matches = zoneMatches.get(zoneId) ?? []
       return !matches.length || matches.some(match => match !== 'other')
     }))

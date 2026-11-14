@@ -87,7 +87,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const explorationNames = useAppStore(state => state.surveyExplorationNames)
   const contextOrigin = useRef<HTMLElement | null>(null)
   const [contextZoneId, setContextZoneId] = useState<string | null>(null)
-  const contextZone = catalog?.zones.find(zone => zone.zoneId === contextZoneId)
+  const contextZone = useMemo(() => contextZoneId ? catalog?.zones.find(zone => zone.zoneId === contextZoneId) : undefined, [catalog, contextZoneId])
   const [renamingZoneId, setRenamingZoneId] = useState<string | null>(null)
   const itemNameDraft = useRef<(SurveyItemNameDraft & { zoneId: string }) | null>(null)
   function editItemName(zone: AgentMuxZoneFact, editing: boolean) {
@@ -118,7 +118,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const layouts = useStore(store, state => state.layouts)
   const sessions = useStore(store, state => state.sessions)
   const resourceWorkspaces = useMemo(() => new Map(config?.workspaces.map(workspace => [workspace.id, workspace]) ?? []), [config?.workspaces])
-  const currentZone = catalog?.zones.find(zone => zone.zoneId === (selection?.zoneId))
+  const currentZone = useMemo(() => selection ? catalog?.zones.find(zone => zone.zoneId === selection.zoneId) : undefined, [catalog, selection?.zoneId])
   const resourceWorkspaceId = currentZone?.workspaceId ?? (pageSelection
     ? surveyPageOwner(tabs, pageSelection)?.tab.workspaceId ?? null
     : !selection ? SCRATCH_WORKSPACE_ID : null)
@@ -500,7 +500,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   }
 
   function itemOptionsFor(zone: AgentMuxZoneFact | undefined, activityDetails = zone ? activity(zone).details : null): SurveyItemOptionsProps {
-    const bindings = catalog?.bindings.filter(binding => binding.zoneId === zone?.zoneId) ?? []
+    const bindings = zone ? catalog?.bindings.filter(binding => binding.zoneId === zone.zoneId) ?? [] : []
     return {
       visible: visible && !controlsCoverPage, title: zone ? itemTitle(zone) : selection ? 'Retained exploration' : 'New exploration',
       zone: zone ?? null, workspace: zone ? resourceWorkspaces.get(zone.workspaceId) ?? null : null,
