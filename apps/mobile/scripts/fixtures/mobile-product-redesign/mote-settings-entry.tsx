@@ -6,7 +6,7 @@ import { GRAPHITE_THEME, mountThemeRuntime, updateObservedTheme } from '@agentmu
 import { MobileMoteProfile } from '../../../src/navigation/MobileMoteProfile'
 import { MobileSheetHandle } from '../../../src/navigation/MobileSheetHandle'
 import { createBrowserPlatform } from '../../../src/platform/browser'
-import { getDeviceWorkface } from '../../../src/recovery/device-workface'
+import { DEVICE_WORKFACE_KEY, getDeviceWorkface } from '../../../src/recovery/device-workface'
 import '@agentmux/client-ui/styles.css'
 import '../../../src/mobile.css'
 
@@ -29,6 +29,10 @@ const identity = { name: '协作搭档', project: '原工作', mote: { name: '�
 Object.assign(window, { mobileProductScene: { facts: () => ({ record: owner.snapshot().record, recordIssue: owner.snapshot().issue, calls, appearance: document.documentElement.dataset.appearance, settingsText: document.querySelector('.mobile-mote-quick-editor')?.textContent,
   settingsOverflow: (() => { const sheet = document.querySelector<HTMLElement>('.mobile-sheet'); return !!sheet && sheet.scrollWidth > sheet.clientWidth })() }) },
   mobileSettingsTheme: (appearance: 'dark' | 'light') => updateObservedTheme(GRAPHITE_THEME, appearance),
+  mobileSettingsStorage: async (beforeExit = false) => {
+    const ready = beforeExit ? (await owner.preparePageReload())() : null
+    return { key: DEVICE_WORKFACE_KEY, origin: location.origin, ready, raw: localStorage.getItem(DEVICE_WORKFACE_KEY) }
+  },
   mobileSettingsScenario: async (change: unknown) => {
     const response = await fetch('/scenario', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(change) })
     if (!response.ok) throw Error('Private source control failed')

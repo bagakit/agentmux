@@ -33,6 +33,10 @@ module.exports = async ({ win, read, until, resize, button, capture, result, pha
       invalid:input.getAttribute('aria-invalid'),nativeLabel:input.closest('label').control===input,same:input===originalHeartbeatField,focus:document.activeElement===input,
       overflow:mobileProductScene.facts().settingsOverflow}
   })()`)
+  if (phase === 'restore') {
+    await until("typeof mobileSettingsStorage === 'function'")
+    result.originalStorage = await read('mobileSettingsStorage()')
+  }
   await button('编辑快捷配置')
   await until("document.querySelector('.mobile-mote-quick-editor')?.textContent.includes('已核对当前配置')")
   const retainField = () => read(`(()=>{window.originalHeartbeatField=document.querySelector(${JSON.stringify(field)})})()`)
@@ -160,5 +164,9 @@ module.exports = async ({ win, read, until, resize, button, capture, result, pha
   assert.equal(original.attempts.at(-1).phase, 'unknown')
   assert.equal(retained.recordIssue, null)
   result.operations.push({ action: 'original-device-settings-retained', record: original, recordId: retained.record.recordId ?? null, host: retained.record.host })
-  await win.webContents.session.flushStorageData()
+  result.originalStorage = await read('mobileSettingsStorage(true)')
+  assert.equal(result.originalStorage.ready,true,'Wait for the original DeviceWorkface write before restarting')
+  const committed = JSON.parse(result.originalStorage.raw)
+  assert.deepEqual(committed.moteQuickDrafts,[original],'Browser storage has the exact draft and unknown request before restart')
+  win.webContents.session.flushStorageData()
 }

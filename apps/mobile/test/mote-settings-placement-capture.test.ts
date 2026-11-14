@@ -163,6 +163,11 @@ it.runIf(process.env.MOBILE_SETTINGS_CAPTURE === '1').each(['original', 'remove-
       for (const image of result.images) receipt.images[relative(root, join(directory, image))] = sha(await readFile(join(directory, image)))
     }
     expect(receipt.initial.environment.pid).not.toBe(receipt.restore.environment.pid)
+    const written = receipt.initial.originalStorage, reopened = receipt.restore.originalStorage
+    expect(written.ready).toBe(true)
+    expect(reopened.key).toBe(written.key)
+    expect(reopened.origin).toBe(written.origin)
+    expect(reopened.raw).toBe(written.raw)
     const before = receipt.initial.operations.find((value: any) => value.action === 'original-device-settings-retained')
     const after = receipt.restore.operations.find((value: any) => value.action === 'original-device-settings-restored')
     expect(before).toBeDefined(); expect(after).toBeDefined()
