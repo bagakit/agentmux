@@ -114,3 +114,28 @@ it('a reviewed changes verdict follows the existing explicit reassignment rule',
   await revise('changes-to-b', [node({ executor: executor('worker-b') })]); await delegate('worker-b', 2)
   expect(await projected()).toMatchObject({ state: 'working', delegation: { operationId: 'attempt-2' }, attempts: 2 })
 })
+
+it('keeps claims explicit across full revisions, closures, delegation and ended Goals', async () => {
+  const vacant = node({ executor: null }), claimant = { kind: 'agent' as const, id: 'worker-a', hostId: 'local', runtimeId: 'runtime-a' }
+  const assign = (expectedRevision: number, operationId: string, kind: 'open' | 'close' | 'claim') =>
+    store.changePlanAssignment('goal', expectedRevision, operationId, { nodeId: 'node', assignment: { kind } }, claimant, () => {})
+  await expect(revise('implicit-open', [{ ...vacant, claimOpen: true }])).rejects.toThrow('explicit plan assignment')
+  await revise('vacant', [vacant])
+  await assign(2, 'open', 'open')
+  await expect(delegate()).rejects.toThrow('open for claim')
+  await expect(revise('implicit-assign')).rejects.toThrow('explicit plan assignment')
+  await assign(3, 'close', 'close')
+  await expect(assign(4, 'closed-claim', 'claim')).rejects.toThrow('not open for claim')
+  await assign(4, 'reopen', 'open')
+  await store.update('goal', { status: 'cancelled' })
+  await expect(assign(5, 'late-claim', 'claim')).rejects.toThrow('unfinished Goal')
+  expect((await store.get('goal'))!.plan?.nodes[0]).toMatchObject({ executor: null, claimOpen: true })
+  await store.update('goal', { status: 'in_progress' })
+  await assign(5, 'close-for-delegation', 'close')
+  await delegate('worker-a', 1, false)
+  await expect(assign(6, 'unknown-open', 'open')).rejects.toThrow('unknown')
+  await store.linkDelegation('goal', 'attempt-1', 'source-1', 'supervisor')
+  await expect(assign(6, 'active-open', 'open')).rejects.toThrow('working')
+  await revise('cancel', [{ ...vacant, cancelled: true }])
+  await expect(assign(7, 'cancel-open', 'open')).rejects.toThrow('cancelled')
+})

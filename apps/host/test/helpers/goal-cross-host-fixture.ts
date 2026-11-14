@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { expect, vi } from 'vitest'
 // The Host resolves Core by its package name. Any other copy is a second class whose
 // spies never reach the Host's client, which would then activate a real detached Runtime.
@@ -13,9 +13,27 @@ import { objectCliEnvironment, type CliResult } from '../../../../packages/core/
 import { startAgentMuxHost } from '../../src/host.js'
 
 export type CrossHostCleanup = Array<() => void | Promise<void>>
+// Give each new test namespace its actual semantic identity before the fixture
+// imports its first Session. Reopening a used database without that identity is
+// correctly refused by the product. Later Host restarts reuse these same bytes.
+class GoalFixtureStore extends core.AgentMuxFileAgentSessionStore {
+  private initialized = false
+  override async compareAndSwap(...args: Parameters<core.AgentMuxFileAgentSessionStore['compareAndSwap']>): Promise<void> {
+    if (!this.initialized) {
+      this.initialized = true
+      const connect = vi.spyOn(core.AgentMuxClient.prototype, 'connect').mockResolvedValue()
+      try {
+        const runtime = await core.startHeadlessAgentMux({ store: this, socketPath: join(dirname(this.path), 'initialize.sock') })
+        await runtime.stop()
+      } finally { connect.mockRestore() }
+    }
+    return super.compareAndSwap(...args)
+  }
+}
+
 /** Two genuine semantic owners; only the Native byte transport is deterministic. */
 export async function crossHostOwner(cleanup: CrossHostCleanup, name: string, ids: string[]) {
-  const original = await rpcOwnerFixture(ids, core, () => ({ providerId: 'claude', executorId: 'claude' }))
+  const original = await rpcOwnerFixture(ids, { AgentMuxClient: core.AgentMuxClient, AgentMuxFileAgentSessionStore: GoalFixtureStore }, () => ({ providerId: 'claude', executorId: 'claude' }))
   cleanup.push(async () => {
     const activated = existsSync(join(original.root, 'ctxmux.sock'))
     await original.close()
