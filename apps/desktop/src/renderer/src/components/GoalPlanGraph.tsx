@@ -9,6 +9,7 @@ import { Button } from '@agentmux/client-ui/components/Button'
 import { demandAgentReferenceLabel, type DemandAgentReference } from '@agentmux/demand/relations'
 import { agentSessionPresentationIndex } from '../lib/session-presentation'
 import { goalAgentPresentation } from '../lib/goal-agent-selection'
+import { useGoalPlanPath } from './useGoalPlanPath'
 import { GoalPlanAssignment } from './GoalPlanAssignment'
 import { AgentWorkModeBadge } from './AgentWorkModeBadge'
 import { useAppStore } from '../store'
@@ -110,7 +111,7 @@ type Edge = { from: string; to: string; d: string; live: boolean; boundary?: 'st
  * Edges are measured from the rendered cards, so they follow wrapping titles and opened details.
  * Only this graph's own layout changes trigger a re-measure; no global listener is installed.
  */
-function useEdges(root: React.RefObject<HTMLElement | null>, projection: GoalPlanView, layoutKey: string): { edges: Edge[]; width: number; height: number; scrollable: boolean } {
+function useEdges(root: React.RefObject<HTMLElement | null>, projection: GoalPlanView): { edges: Edge[]; width: number; height: number; scrollable: boolean } {
   const [state, setState] = useState<{ edges: Edge[]; width: number; height: number; scrollable: boolean }>({ edges: [], width: 0, height: 0, scrollable: false })
   useLayoutEffect(() => {
     const element = root.current
@@ -122,12 +123,12 @@ function useEdges(root: React.RefObject<HTMLElement | null>, projection: GoalPla
     const measure = () => {
       const box = element.getBoundingClientRect()
       const content = element.querySelector<HTMLOListElement>('.goal-plan__columns')!
-      const anchor = (card: HTMLElement, heading: Element = card) => {
-        const rect = card.getBoundingClientRect(), head = heading.getBoundingClientRect()
+      const anchor = (card: HTMLElement) => {
+        const rect = card.getBoundingClientRect()
         const left = rect.left - box.left + element.scrollLeft, right = rect.right - box.left + element.scrollLeft
-        return { left, right, y: head.top + head.height / 2 - box.top + element.scrollTop }
+        return { left, right, y: rect.top + rect.height / 2 - box.top + element.scrollTop }
       }
-      const anchors = new Map([...cards].map(card => [card.dataset.goalPlanNode!, anchor(card, card.querySelector('.goal-plan-node__head')!)]))
+      const anchors = new Map([...cards].map(card => [card.dataset.goalPlanNode!, anchor(card)]))
       const startAnchor = anchor(start), finishAnchor = anchor(finish)
       const edges: Edge[] = []
       const add = (source: typeof startAnchor | undefined, destination: typeof startAnchor, from: string, to: string, live = false, boundary?: Edge['boundary']) => {
@@ -157,7 +158,7 @@ function useEdges(root: React.RefObject<HTMLElement | null>, projection: GoalPla
     observer.observe(finish)
     for (const card of cards) observer.observe(card)
     return () => observer.disconnect()
-  }, [root, projection, layoutKey])
+  }, [root, projection])
   return state
 }
 
@@ -168,6 +169,7 @@ function TeamAssignment({ team, role = 'Assigned', compact = false }: { team: De
   const presentation = useGoalAgentPresentation(session?.control.agentSessionId, session?.control.hostId)
   const name = presentation.name ?? (typeof first === 'string' ? first : first.execution.agentSessionId)
   return <span className="goal-plan-node__who" title={`${role} · ${team.map(demandAgentReferenceLabel).join(', ')}`}><ThemeObjectAgentIcon size={11} aria-hidden="true" />
+    {compact && role !== 'Executor' ? <span className="goal-plan-node__role">{role} ·</span> : null}
     <span className="goal-plan-node__name">{name}{team.length > 1 ? ` +${team.length - 1}` : ''}</span>{compact ? null : <span className="goal-node-assignment__qualifier">{role}</span>}</span>
 }
 
@@ -176,7 +178,7 @@ function NodeExecutor({ item, compact = false }: { item: GoalPlanNodeView; compa
   const presentation = useGoalAgentPresentation(executor?.agentSessionId, executor?.hostId)
   const hosts = useAppStore(state => state.config?.hosts)
   if (!executor) {
-    if (item.team?.length) return <TeamAssignment team={item.team} role={item.teamRole} compact={compact} />
+    if (item.team?.length) return <TeamAssignment team={item.team} role={item.teamRole ?? 'Goal team'} compact={compact} />
     const available = item.claimable
     return <span className="goal-plan-node__who goal-plan-node__who--open" data-claim-open={available || undefined}>{available ? 'Open to claim' : 'Unassigned'}</span>
   }
@@ -184,6 +186,7 @@ function NodeExecutor({ item, compact = false }: { item: GoalPlanNodeView; compa
     !item.wholeGoal && !item.delegation ? (item.claimed ? 'Claimed' : 'Assigned') : null
   const detail = assignment === 'Task target' ? 'Dispatch unconfirmed' : assignment ? `${assignment} · Awaiting dispatch` : null
   if (compact) return <span className="goal-plan-node__who" title={`${executor.agentSessionId} · ${executor.hostId}${detail ? ` · ${detail}` : ''}`}><ThemeObjectAgentIcon size={11} aria-hidden="true" />
+    {assignment ? <span className="goal-plan-node__role">{assignment} ·</span> : null}
     <span className="goal-plan-node__name">{presentation.name ?? executor.agentSessionId}</span></span>
   const host = hosts?.find(host => host.id === executor.hostId)
   const toolsHost = presentation.toolExecution && hosts?.find(host => host.id === presentation.workPlacement?.resourceHostId)
@@ -265,7 +268,8 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, onOpenGo
   const canvas = useRef<HTMLDivElement>(null)
   const reading = useRef<HTMLDivElement>(null), readingId = useId(), arrowId = useId()
   const readingHeading = useRef<HTMLHeadingElement>(null)
-  const { edges, width, height, scrollable } = useEdges(canvas, projection, open ?? '')
+  const { edges, width, height, scrollable } = useEdges(canvas, projection)
+  useGoalPlanPath(canvas, projection.nodes, edges, open)
   useLayoutEffect(() => { if (reveal) setSelection(reveal) }, [reveal])
   useLayoutEffect(() => {
     // Retain the first automatic choice while its report becomes reviewed or new work arrives.

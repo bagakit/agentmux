@@ -31,12 +31,13 @@
 
 /* The canvas scrolls sideways on wide windows and never shrinks the type; edges share its coordinates. */
 .goal-plan__canvas { position: relative; max-height: clamp(280px, 49vh, 500px); overflow: auto; scroll-snap-type: x proximity;
-  padding: clamp(18px, 3cqw, 38px) clamp(12px, 2cqw, 28px);
-  background: radial-gradient(circle, color-mix(in srgb, var(--text-3) 15%, transparent) .8px, transparent 1px) 0 0 / 16px 16px, var(--surface-1); }
+  padding: clamp(18px, 2.3cqw, 32px) clamp(12px, 2cqw, 28px);
+  --goal-path-before: var(--blue); --goal-path-after: var(--green);
+  background: radial-gradient(circle, color-mix(in srgb, var(--text-3) 12%, transparent) .8px, transparent 1px) 0 0 / 18px 18px, var(--surface-1); }
 .goal-plan__canvas:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; border-radius: var(--radius-sm); }
 .goal-plan__scroll-hint { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
 .goal-plan__edges { position: absolute; inset: 0 auto auto 0; pointer-events: none; overflow: visible; }
-.goal-plan__edge { fill: none; stroke: color-mix(in srgb, var(--text-3) 70%, var(--line)); stroke-width: 1.25; stroke-linecap: round; transition: stroke .24s ease; }
+.goal-plan__edge { fill: none; stroke: color-mix(in srgb, var(--text-3) 70%, var(--line)); stroke-width: 1.25; stroke-linecap: round; transition: stroke 170ms var(--goal-motion-ease), opacity 170ms var(--goal-motion-ease), stroke-width 170ms var(--goal-motion-ease); }
 .goal-plan__edge--live { stroke: var(--green); stroke-width: 1.5; }
 .goal-plan__columns { position: relative; display: grid; grid-auto-flow: column; grid-template-columns: max-content repeat(var(--goal-plan-columns, 1), minmax(132px, 1fr)) max-content; gap: clamp(18px, 3cqw, 44px); align-items: center; margin: 0; padding: 0; list-style: none; }
 .goal-plan__column { scroll-snap-align: start; }
@@ -45,9 +46,9 @@
 .goal-plan__boundary small { grid-column: 2; font: inherit; color: var(--text-3); }
 .goal-plan__boundary[data-goal-finish-state="Succeeded"] { border-color: color-mix(in srgb, var(--green) 40%, var(--line)); color: var(--green); }
 .goal-plan__boundary[data-goal-finish-state="Closed with gaps"], .goal-plan__boundary[data-goal-finish-state="Unverified"] { color: var(--amber-text); }
-.goal-plan__nodes { display: grid; align-content: start; gap: var(--sp-3); margin: 0; padding: 0; list-style: none; }
+.goal-plan__nodes { display: grid; align-content: start; gap: var(--sp-4); margin: 0; padding: 0; list-style: none; }
 .goal-plan-node { position: relative; display: grid; box-sizing: border-box; width: 100%; gap: var(--sp-1); padding: var(--sp-4); border-radius: var(--radius-lg); background: var(--surface-0); color: var(--text-2);
-  box-shadow: inset 0 0 0 1px var(--line), 0 2px 5px color-mix(in srgb, var(--line) 22%, transparent); transition: background-color .24s ease, color .24s ease, box-shadow .24s ease, transform .24s cubic-bezier(.2, .8, .2, 1); }
+  box-shadow: inset 0 0 0 1px var(--line), 0 2px 5px color-mix(in srgb, var(--line) 22%, transparent); transition: background-color 170ms var(--goal-motion-ease), box-shadow 170ms var(--goal-motion-ease); }
 .goal-plan-node:hover { background: var(--surface-3, var(--surface-2)); }
 /* The one next step has a static mint surface; motion only follows actual changes. */
 .goal-plan-node--next { background: color-mix(in srgb, var(--green) 14%, var(--surface-2)); color: var(--text);
@@ -57,7 +58,8 @@
 .goal-plan-node__title { min-width: 0; overflow-wrap: anywhere; }
 .goal-plan-node__state, .goal-plan-node__who { padding-inline-start: calc(18px + var(--sp-3)); font-size: var(--fs-meta); line-height: 1.4; }
 .goal-plan-node__who { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); min-width: 0; color: var(--text-3); overflow-wrap: anywhere; }
-.goal-plan-node__name { min-width: 0; }
+.goal-plan-node__name { min-width: 0; color: var(--text-2); }
+.goal-plan-node__role { color: var(--text-3); }
 .goal-plan-node__who--open { font-style: italic; }
 .goal-plan-node__place { flex-basis: 100%; padding-inline-start: calc(11px + var(--sp-1)); color: var(--text-3); }
 .goal-plan-node__depends { display: none; padding-inline-start: calc(18px + var(--sp-3)); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.4; overflow-wrap: anywhere; }
@@ -76,7 +78,7 @@
 .goal-plan-node__mark[data-goal-plan-state='unknown'] { color: var(--amber); }
 .goal-plan-node[data-goal-plan-state='done'] { color: var(--text-3); }
 .goal-plan-node[data-goal-plan-state='done'] .goal-plan-node__head { color: var(--text-2); }
-.goal-plan-node[data-goal-plan-state='cancelled'] { opacity: .55; }
+.goal-plan-node[data-goal-plan-state='cancelled'] { color: var(--text-3); }
 .goal-plan-node[data-goal-plan-state='cancelled'] .goal-plan-node__title { text-decoration: line-through; text-decoration-color: var(--text-3); }
 .goal-plan-node[data-goal-plan-state='unknown'] .goal-plan-node__state { color: var(--amber-text); }
 .goal-plan-node[data-goal-plan-state='changes'] .goal-plan-node__state { color: var(--green-text); }
@@ -137,6 +139,20 @@
 .goal-plan__assignments button[aria-current='true'] { background: color-mix(in srgb, var(--green) 12%, var(--surface-2)); }
 .goal-plan__assignments button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 1px; }
 .goal-plan-node:has(.goal-plan-node__head[aria-expanded='true']) { box-shadow: inset 0 0 0 2px var(--green); background: color-mix(in srgb, var(--green) 7%, var(--surface-2)); }
+/* The path uses direction, arrowheads and two inks. Other task titles keep their full contrast. */
+.goal-plan__canvas[data-goal-trace] .goal-plan__edge:not([data-goal-path]) { opacity: .28; }
+.goal-plan__edge[data-goal-path='upstream'] { stroke: var(--goal-path-before); stroke-width: 1.8; }
+.goal-plan__edge[data-goal-path='downstream'] { stroke: var(--goal-path-after); stroke-width: 1.8; }
+.goal-plan-node[data-goal-path='upstream'] { --goal-path-ink: var(--goal-path-before); }
+.goal-plan-node[data-goal-path='downstream'] { --goal-path-ink: var(--goal-path-after); }
+.goal-plan-node[data-goal-path]:not([data-goal-path='current']) {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--goal-path-ink) 52%, var(--line));
+  background: color-mix(in srgb, var(--goal-path-ink) 4%, var(--surface-0));
+}
+.goal-plan-node[data-goal-path='current'] {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--text) 78%, var(--line)), 0 2px 6px color-mix(in srgb, var(--line) 24%, transparent);
+  background: var(--surface-2);
+}
 .goal-execution-time { border: 1px solid var(--line-soft); border-radius: var(--radius-lg); background: var(--surface-1); }
 .goals-document .goal-execution-time > h3 { display: flex; align-items: center; gap: var(--sp-2); margin: 0; padding: var(--sp-3); color: var(--text); font: 650 var(--fs-body)/1.35 var(--font-sans); }
 .goal-execution-time__scroll { overflow: auto; max-height: 264px; }
