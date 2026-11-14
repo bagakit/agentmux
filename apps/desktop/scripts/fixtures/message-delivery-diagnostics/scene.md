@@ -17,4 +17,6 @@ node apps/desktop/scripts/capture-message-delivery-diagnostics.mjs
 
 `--only=queued-editor` 从同一 WorkspaceWorkbench 的悬浮待发卡片打开编辑，在 640px 和 320px 分屏中分别采集明暗主题，核对编辑框通栏、底栏命中和原终端几何。长文在字段内滚动。真实复制、取消和保存经过现有 Renderer 与队列 owner。窄浅色另外复现保存冲突，检查原编辑稿、完整诊断及 Save 同时可达，再从邮箱的同一条 Inputs 记录打开共享编辑器，验证 Escape 取消后原队列不变。
 
+`--only=annotation-editor` 使用[原对话批注工作面](../conversation-annotation-note/entry.tsx)的 SessionPane、Core 阅读投影和产品样式，覆盖 640px／320px 明暗及窄面加草稿失败。选择原文第二处短语、打开批注并输入，核对共享底栏和发送主次。关闭重开后验证原稿，再调用真正的加入草稿入口。原文位于合成阅读页，私有适配器拒绝 Run 控制，不发送用户消息。
+
 同一真实 mounted Outbox 中，原 Core native-environment waiting receipt 带独立旧日志与完整收到的 stack/cause。640px 深色和320px 浅色依次键盘展开详情、默认摘要复制失败及成功、展开完整技术资料、完整复制失败及成功，最后键盘到完整资料尾部。摘要保准确输入引用/代次/原机器原因，不含 stack；完整 JSON 保实际 error 来源引用、Core 回执和独立日志，不重复扩写到 error。复制前后 Session、队列和两侧草稿原值不变。只断言收到的资料，不能代签原 Native 输送或上游未截断。

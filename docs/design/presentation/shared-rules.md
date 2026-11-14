@@ -33,6 +33,8 @@
 
 ## 对象、消息与工作面的共同呈现
 
+悬停动作菜单共享同一套指针、键盘与分支焦点交互。宿主提供原文档与浮层目标，调用者提供菜单内容与业务动作。
+
 本节收集跨多个专题出现的对象分享、消息阅读与工作面位置的呈现约束；行为、身份与资格仍只在所链接的交互合同中定义。
 
 Agent／Region／Tab／Category／Topic 的对象分享直接复制链接，菜单使用清楚的 Copy … Link 名称，同一对象不并列重复的名片或消息复制动作；沿既有菜单密度、图标与键盘焦点，不新增装饰或说明面。File／Browser 上下文分享保留原紧凑外框与正文阅读格式；身份、链接、命令发现及来源唯一引用[交互合同《寻址与复制》](../behavior/public-control.md#对象地址分享与方向)。普通路径、URL、选区及终端内容继续沿原复制语汇。
@@ -254,7 +256,7 @@ Settings 中的当前分区标题属于工具工作面的区块 header，使用�
 | 错误／未确认 | 沿原字段、保存区或服务窗显示准确范围；字段没有无效事实时不标 `aria-invalid`。保原值、草稿、已确认进度及恢复入口，不用颜色、toast 消失或忙态冒充错误已解除 |
 | 只读 | 原值可读、可选择与复制的内容继续可达；只读与禁用、权限不足分别表达，不用外观推断可编辑资格 |
 
-逐态核对从原实现开始：[按钮](../../../packages/client-ui/src/styles/buttons.css)、[输入](../../../packages/client-ui/src/input/input.css)、[原生选择控件](../../../packages/client-ui/src/styles/native-controls.css)、[菜单](../../../apps/desktop/src/renderer/src/styles/context-menu.css)与[共享 Modal](../../../packages/client-ui/src/components/Modal.tsx)。`Button`／`IconButton` 不自动推导忙碌或操作资格，[FormRow](../../../packages/client-ui/src/components/FormRow.tsx)只关联原控件、标签与说明，控件的值、校验、保存和恢复留在原调用者。当前 `.small-button` 未定义通用按下内阴影，不能据同表其他档位已有反馈宣称 Secondary 已满足按下要求；这是现有实现差异，不是新增豁免。
+逐态核对从原实现开始：[按钮](../../../packages/client-ui/src/styles/buttons.css)、[输入](../../../packages/client-ui/src/input/input.css)、[原生选择控件](../../../packages/client-ui/src/styles/native-controls.css)、[菜单](../../../apps/desktop/src/renderer/src/styles/context-menu.css)与[共享 Modal](../../../packages/client-ui/src/components/Modal.tsx)。`Button`／`IconButton` 不自动推导忙碌或操作资格，[FormRow](../../../packages/client-ui/src/components/FormRow.tsx)只关联原控件、标签与说明，控件的值、校验、保存和恢复留在原调用者。
 
 补充规则：
 
@@ -264,6 +266,7 @@ Settings 中的当前分区标题属于工具工作面的区块 header，使用�
 - hover 提升 Surface 明度；active 用内阴影表达按下，不靠边框位移。
 - 同类布尔设置行共用原生控件、标签和说明的关联与排列；整行点击沿原生 label，键盘与当前 checked、disabled 仍由原 input 和调用者持有，不自写第二套切换状态。说明可通过辅助技术读取，整体保存错误继续留在原保存区，没有字段无效事实时不把整次失败标成某个字段无效。
 - 文本输入聚焦统一使用 `--focus-line` 与 `--focus-ring`，形成一条清楚、克制的焦点边界，与原控件边缘对齐；内嵌提问、改名、创建和配置字段不叠粗亮外圈、内边与光晕。复合输入由整个输入容器表达焦点，内部文本框不再画第二圈；独立输入的键盘焦点仍须可辨。深浅主题和强制颜色下保留焦点、错误及禁用的区别，不改变原草稿、IME、保存与取消语义。基础单行、多行与组合输入使用共享 client-ui 输入模块；模块持有原生控件和呈现，入口持有草稿与业务动作。富文本消息编辑复用既有共享 Composer，保持与原生字段分层。
+- 紧凑多行编辑面共用正文大小、内距和单层焦点。正文随内容增高，达到所属编辑面的上限后在字段内滚读。底栏在正文之后，次要资料与当前可用动作各有对齐，主动作居右，窄面需要换行时仍可按原顺序到达。调用者提供原提示、动作和宿主可用高度。
 - Mote 等内嵌提问入口使用轻而可辨的组合输入：淡底色、单层完整边界，文字保留横向留白；单行约 38px、左留白 12px，不以零 padding 或仅底部细线表达可编辑区域。聚焦时完整边界与底色清楚响应，行动按钮位置固定且有轻底座，内容就绪后使用柔和 Mint 色；长问题自然增高并有界阅读。普通改名和搜索保留紧凑尺度。准备讨论的原业务语义不变，快捷键须尊重组字，在途与失败沿真实读取状态表达并保留问题；行内忙态复用共同 spinner。
 - 每档动作按钮在 Desktop 只有一个落地类名：Primary＝`.primary-button`、Secondary＝`.small-button`、Ghost/Icon＝`.icon-button`、Danger＝`.danger-button`。不按档位名另造类名（如 `.secondary-button`）：全局 `button` 重置只覆盖字体与颜色、不覆盖背景，没有规则的类名会让按钮落回平台原生样式。扫描方法与事故样本见[《界面规则与真实行为》](../../testing/strategy.md#界面规则与真实行为)。
 - `justify-content: space-between` 只用于子元素数量固定且已知的容器：它把剩余空间分摊到子元素之间，两簇时各靠一端，三个以上松散子元素会被推向两极、中间留空；组件测试不计算布局，这类错误不会让测试变红（验证方法见[《界面规则与真实行为》](../../testing/strategy.md#界面规则与真实行为)）。「首元素靠左、其余靠右」的工具栏与页脚改用 `justify-content: flex-end` 加首元素 `margin-right: auto`，子元素数量变化时仍成立。
