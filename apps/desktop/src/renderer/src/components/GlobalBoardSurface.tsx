@@ -1,6 +1,6 @@
 import { isCurrentGroundingAccepted } from '@agentmux/demand/goals'
 import { demandAgentReferenceKey, demandAgentReferenceLabel, mergeDemandAgentReferences } from '@agentmux/demand/relations'
-import { TextInput } from '@agentmux/client-ui/input'
+import { SearchInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useShallow } from 'zustand/react/shallow'
@@ -26,7 +26,6 @@ import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 import { resolveGoalsPreferences } from '@agentmux/host/goals-preferences'
 import goalsHeaderArtUrl from '@agentmux/client-ui/brand/illustrations/goals/goals-companions-header.png'
 
-const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ThemeActionClearIcon = semanticIconComponent('action.clear')
 const ThemeActionAdjustIcon = semanticIconComponent('action.adjust')
 const ThemeObjectListIcon = semanticIconComponent('object.list')
@@ -159,7 +158,8 @@ export function GlobalBoardSurface() {
         <GoalsCommonActions contextCompact={Boolean(selectedDemandId)} onReturnToCommon={() => setSelectedDemand(null)} />
       </header>
       <header className="goals-toolbar">
-        <label className="goals-search"><ThemeActionSearchIcon size={14} /><TextInput ref={searchRef} aria-label="Search goals" placeholder="Search goals…" value={query} onChange={(event) => setQuery(event.target.value)} />{query ? <button type="button" aria-label="Clear search" onClick={() => setQuery('')}><ThemeActionClearIcon size={12} /></button> : null}</label>
+        <SearchInput className="goals-search" ref={searchRef} aria-label="Search goals" placeholder="Search goals…"
+          clearLabel="Clear search" value={query} onValueChange={setQuery} />
         <button ref={filterRef} type="button" className={`small-button${appliedFilters.length ? ' small-button--active' : ''}`} aria-label="Goal filters" aria-expanded={filtersOpen} aria-controls="goals-filters" onClick={() => setFiltersOpen(!filtersOpen)}><ThemeActionAdjustIcon size={13} /><span>Filter</span>{appliedFilters.length ? <span>{appliedFilters.length}</span> : null}</button>
         {!selectedDemandId ? <SurfaceModeSwitch value={view} onChange={setView} active ariaLabel="Goal view" options={[{ value: 'list', label: <ThemeObjectListIcon size={14} />, ariaLabel: 'List view' }, { value: 'board', label: <ThemeLayoutColumns3Icon size={14} />, ariaLabel: 'Board view' }]} /> : null}
       </header>

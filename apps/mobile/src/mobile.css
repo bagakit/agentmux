@@ -167,12 +167,12 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-page-header > :is(h1, div) { flex: 1; min-width: 0; }
 .mobile-page-header > .mobile-section-actions { flex: none; margin-left: auto; }
 /* The native field owns the whole touch target; only its padding box is painted. */
-:is(.mobile-app .mobile-spatial-search input, .mobile-app .mobile-topics-search input, .mobile-app .mobile-goals-filters input, .mobile-app .mobile-goals-filters select, .mobile-home-select select) {
+:is(.mobile-app .mobile-spatial-search input, .mobile-app form.mobile-topics-search input, .mobile-app .mobile-goals-filters input, .mobile-app .mobile-goals-filters select, .mobile-home-select select) {
   height: 44px; min-height: 44px; padding: 0 6px; font-size: 16px;
   border: calc((44px - var(--mobile-control-surface)) / 2) solid transparent;
   border-radius: var(--mobile-radius-group); background-color: var(--surface-1); background-clip: padding-box;
 }
-:is(.mobile-app .mobile-spatial-search input, .mobile-app .mobile-topics-search input, .mobile-app .mobile-goals-filters input, .mobile-app .mobile-goals-filters select, .mobile-home-select select):focus-visible { outline-offset: -6px; }
+:is(.mobile-app .mobile-spatial-search input, .mobile-app form.mobile-topics-search input, .mobile-app .mobile-goals-filters input, .mobile-app .mobile-goals-filters select, .mobile-home-select select):focus-visible { outline-offset: -6px; }
 .mobile-sheet p { color: var(--text-2); margin: 4px 0 18px; font-size: var(--fs-meta); line-height: 1.6; }
 .mobile-address-label { display: block; font-size: var(--fs-meta); color: var(--text-2); margin: 25px 0 9px; }
 .mobile-address-input { width: 100%; min-height: 48px; border: 1px solid var(--line); border-radius: var(--mobile-radius); padding: 10px 12px; margin-bottom: 13px; background: var(--surface-0); color: var(--text); font-size: 16px; }

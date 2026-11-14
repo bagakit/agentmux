@@ -132,3 +132,38 @@ input.ui-switch[type="checkbox"]:disabled { cursor: default; opacity: .6; }
   input.ui-switch[type="checkbox"]:disabled { background: Canvas; border-color: GrayText; opacity: 1; }
   input.ui-switch[type="checkbox"]:disabled::before { background: GrayText; }
 }
+
+.ui-input-group.ui-search-field {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) var(--search-action-size, 22px);
+  align-items: center;
+  gap: var(--sp-2);
+  min-inline-size: 0;
+  padding-inline-start: var(--sp-3);
+  color: var(--text-3);
+}
+.ui-search-field > svg { pointer-events: none; }
+.ui-search-field > input { width: 100%; min-width: 0; color: var(--text); }
+.ui-search-field > input::-webkit-search-cancel-button { appearance: none; }
+.ui-search-field > input:focus-visible { outline: none; }
+.ui-search-field > .ui-search-clear {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  min-inline-size: 0;
+  inline-size: var(--search-action-size, 22px);
+  min-block-size: 0;
+  block-size: var(--search-action-size, 22px);
+  padding: 0;
+  background: transparent;
+  color: var(--text-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.ui-search-field > .ui-search-clear:hover { color: var(--text); background: var(--surface-2); }
+.ui-search-field > .ui-search-clear:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
+@media (forced-colors: active) {
+  .ui-search-field:focus-within { border-color: Highlight; }
+  .ui-search-field > .ui-search-clear:focus-visible { outline-color: Highlight; }
+}

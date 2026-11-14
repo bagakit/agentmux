@@ -18,6 +18,17 @@
 .mobile-topics-tabs button { min-width: 44px; padding: 0 8px; border: 6px solid transparent; border-radius: var(--mobile-radius-group); background: transparent; background-clip: padding-box; color: var(--text-3); font-size: var(--fs-meta); }
 .mobile-topics-tabs button[aria-pressed="true"] { font-weight: 600; color: var(--text); background-color: var(--surface-2); }
 .mobile-topics-search { display: flex; margin: 0 0 4px; }
+.mobile-topics-search.ui-search-field {
+  --search-action-size: 44px;
+  flex: none;
+  min-height: 44px;
+  border-color: var(--line-soft);
+  border-radius: var(--mobile-radius-group);
+  background: var(--surface-1);
+}
+.mobile-topics-search.ui-search-field:focus-within { border-color: var(--focus-line); }
+.mobile-topics-search.ui-search-field > input { min-height: 44px; padding: 0; font-size: 16px; }
+
 .mobile-topics input, .mobile-topics textarea, .mobile-topics select { min-height: 44px; border: 1px solid var(--line-soft); border-radius: var(--mobile-radius-sm); background: var(--surface-1); color: var(--text); padding: var(--sp-4); font: inherit; font-size: 16px; }
 .mobile-topics-search input { flex: 1; min-width: 0; }
 .mobile-topics-list { list-style: none; margin: var(--sp-4) 0; padding: 0; }

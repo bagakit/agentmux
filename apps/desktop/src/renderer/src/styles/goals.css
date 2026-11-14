@@ -86,10 +86,9 @@
 .goals-toolbar { display: flex; align-items: center; gap: var(--sp-3); flex: none; min-height: 40px; width: 100%; padding: var(--sp-2) var(--sp-6); border-bottom: 1px solid var(--line-soft); }
 .goals-surface--detail-open .goals-toolbar { flex-wrap: wrap; }
 .goals-surface--detail-open .goals-search { flex-basis: 100%; }
-.goals-search { display: flex; align-items: center; flex: 1; min-width: 64px; max-width: 420px; gap: var(--sp-3); height: 28px; padding: 0 var(--sp-4); border: 1px solid transparent; border-radius: var(--radius); color: var(--text-3); background: var(--surface-2); box-shadow: var(--hl); }
+.goals-search { flex: 1; min-width: 64px; max-width: 420px; gap: var(--sp-3); height: 28px; padding: 0 var(--sp-4); border: 1px solid transparent; border-radius: var(--radius); color: var(--text-3); background: var(--surface-2); box-shadow: var(--hl); }
 .goals-search:focus-within { border-color: var(--focus-line); background: var(--surface-0); }
 .goals-search input { min-width: 0; width: 100%; border: 0; color: var(--text); background: transparent; font: inherit; font-size: var(--fs-body); }
-.goals-search button { padding: var(--sp-2); display: flex; border: 0; background: transparent; color: var(--text-2); cursor: pointer; }
 .goals-filter-chips button { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-3); min-height: 28px; flex-shrink: 0; padding: 0 var(--sp-4); border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; font: inherit; font-size: var(--fs-body); cursor: pointer; white-space: nowrap; }
 /* Light appearance: the brand primary keeps its dark label, as in dark appearance (5.5:1 against --text). */
 :root[data-appearance='light'] .goals-surface .primary-button { color: var(--text); background: linear-gradient(180deg, color-mix(in srgb, var(--green) 52%, #fff), color-mix(in srgb, var(--green) 66%, #fff)); }

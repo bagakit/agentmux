@@ -3,7 +3,7 @@ import { MobileAvatarNoticeOutlet, MobileNotice, MobileNoticeScope } from '../no
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { TextInput } from '@agentmux/client-ui/input'
+import { SearchInput } from '@agentmux/client-ui/input'
 import type { KnowledgeTopic, TopicCategory, TopicKnowledgeSource } from '@agentmux/core/control'
 import type { OpenHttpLink } from '@agentmux/client-ui/components/AgentMarkdown'
 import { MobileTopicKnowledge, type TopicsRpc } from './MobileTopicKnowledge'
@@ -114,8 +114,9 @@ export function MobileTopicsSurface({ rpc, navigation, client, connected, render
     <div className="mobile-topics-tabs" hidden={Boolean(organizationBack) || sourceActive && !wide} role="group" aria-label="Topic 内容"><button aria-pressed={mode === 'topics'} onClick={() => send({ type: 'mode', scope: selectedTopicId, mode: 'discussion' })}>{inTopic ? '讨论' : 'Topics'}</button><button aria-pressed={mode === 'knowledge'} onClick={() => send({ type: 'mode', scope: selectedTopicId, mode: 'knowledge' })}>知识</button></div>
     <MobileWorkfaceFrame className="mobile-topics-workspace" presentation={panes} data-knowledge={mode === 'knowledge' || undefined} data-source-active={sourceActive || undefined} hidden={Boolean(organizationBack)}>
     <MobileWorkfacePane className="mobile-topics-directory" pane="navigation" presentation={panes.navigation} aria-label="Topic 导航">
-      <label className="mobile-topics-search"><TextInput aria-label="查找 Topic 或分类" value={query} placeholder="查找 Topic 或分类" onChange={event => send({ type: 'directory-query', query: event.target.value })} /></label>
-      <ul className="mobile-topics-list mobile-topics-tree" aria-label="Topic 分类目录">{matchingCategories.map(value => {
+      <SearchInput className="mobile-topics-search" aria-label="查找 Topic 或分类" placeholder="查找 Topic 或分类"
+        clearLabel="清除搜索" value={query} onValueChange={query => send({ type: 'directory-query', query })} />
+      <ul className="mobile-topics-list mobile-topics-tree" aria-label="Topic 分类目录" hidden={!matchingCategories.length}>{matchingCategories.map(value => {
         const expanded = categoryId === value.categoryId
         const children = topicDirectories[value.categoryId] ?? []
         const issue = topicIssues[value.categoryId]

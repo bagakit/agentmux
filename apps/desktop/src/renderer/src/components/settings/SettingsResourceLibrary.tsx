@@ -1,8 +1,7 @@
-import { TextInput } from '@agentmux/client-ui/input'
+import { SearchInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
-const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ScrollBackIcon = semanticIconComponent('navigation.back')
 const ScrollForwardIcon = semanticIconComponent('navigation.disclosure')
@@ -71,9 +70,8 @@ export function SettingsResourceLibrary({ label, items, selectedId, onSelect, qu
   const tabId = items.some((item) => item.id === focusedId) ? focusedId : items.some((item) => item.id === selectedId) ? selectedId : items[0]?.id
   return (
     <aside className={`settings-resource-library${layout === 'horizontal' ? ' settings-resource-library--horizontal' : ''}`}>
-      {onQuery ? <label className="settings-resource-search"><ThemeActionSearchIcon size={14} aria-hidden="true" />
-        <TextInput ref={search} type="search" aria-label={`Filter ${label.toLowerCase()}`} placeholder={`Find ${label.toLowerCase()}…`} value={query} onChange={(event) => onQuery(event.target.value)} />
-      </label> : null}
+      {onQuery ? <SearchInput className="settings-resource-search" ref={search} aria-label={`Filter ${label.toLowerCase()}`}
+        placeholder={`Find ${label.toLowerCase()}…`} clearLabel={`Clear ${label.toLowerCase()} filter`} value={query} onValueChange={onQuery} /> : null}
       <div className="settings-resource-library__viewport">
       {scrollable ? <button type="button" className="icon-button settings-resource-scroll" aria-label={`Previous ${label.toLowerCase()}`} disabled={!overflow.previous} onClick={() => scrollPage(-1)}><ScrollBackIcon size={13} /></button> : null}
       <div ref={list} className="settings-resource-library__list" role="listbox" aria-label={label} aria-multiselectable={selection ? true : undefined} aria-orientation={layout === 'horizontal' ? 'horizontal' : 'vertical'}>
