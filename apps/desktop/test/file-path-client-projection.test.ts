@@ -951,3 +951,27 @@ it.runIf(business)('a full Source read opened before a real deletion cannot clea
   expect(f.store.getState().dirtyDocuments[key]).not.toBe(true)
   await expect(readFile(join(f.source.project, 'original.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
 }, 60000)
+
+it.runIf(business)('a dirty Source baseline refresh adopts only physical identity while preserving its original Note metadata and unconfirmed receipt', async () => {
+  const f = await fixture(); await connectFolder(f)
+  const path = 'baseline.note.md', noteId = 'baseline-note', blockId = 'baseline-block', original = serializeNoteDocument(newNoteDocument('Original saved body', noteId, blockId, 'Baseline'))
+  await writeFile(join(f.source.project, path), original)
+  const locator = f.store.getState().sourceFilesInputs.selections[f.workspace.id]!.locator!, resource = { hostId: locator.resource.hostId, workspaceId: locator.resource.workspaceId, workspacePath: locator.resource.workspacePath, path }
+  const notes = new AgentMuxNotebookStore(undefined, new AgentMuxNotesStorage(join(f.source.state, 'notes-location.json'))), actor = { kind: 'user' as const, id: 'original-author' }
+  const created = { actor, at: 1 }, prior = await notes.recordProvenance({ noteId, resource, revision: noteHistoryRevision(original), blocks: { [blockId]: { created, lastEdited: created } } })
+  await f.store.getState().openFile(path, 'file-group', undefined, f.workspace.id)
+  const tab = Object.values(f.store.getState().tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === path))!, key = f.workspace.id + '\0' + path
+  expect(f.store.getState().documents[key]?.noteProvenance).toEqual(prior)
+  const draft = original.replace('Original saved body', 'Later unsaved body'), attribution = { status: 'unconfirmed' as const, reason: 'Original write receipt remains unconfirmed' }
+  f.store.getState().updateDocument(tab.id, draft)
+  // A prior client may have retained the body while its attribution observation
+  // was unavailable. A baseline-only refresh cannot certify its original receipt.
+  f.store.setState(state => { const { readIdentity: _old, noteProvenance: _unobserved, ...document } = state.documents[key]!; return { documents: { ...state.documents, [key]: { ...document, noteWriteAttribution: attribution } } } })
+  const generation = f.store.getState().documentGenerations[key], input = f.store.getState().documents[key]!.noteEditing
+  await f.store.getState().refreshDocument(f.workspace.id, path)
+  expect(f.store.getState().documents[key]).toMatchObject({ content: draft, revision: noteHistoryRevision(original), noteWriteAttribution: attribution })
+  expect(f.store.getState().documents[key]?.noteProvenance).toBeUndefined()
+  expect(f.store.getState().documents[key]?.readIdentity?.entry.inode).toBe(String((await stat(join(f.source.project, path), { bigint: true })).ino))
+  expect(f.store.getState().documents[key]?.noteEditing).toEqual(input)
+  expect(f.store.getState().dirtyDocuments[key]).toBe(true); expect(f.store.getState().documentGenerations[key]).toBe(generation)
+}, 60000)
