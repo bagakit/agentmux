@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterAll, afterEach, expect, it, vi } from 'vitest'
 import { join } from 'node:path'
-import { readFile } from 'node:fs/promises'
+import { writeFile } from 'node:fs/promises'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { AppConfig } from '../src/shared/contracts'
@@ -31,6 +31,12 @@ const originalQueue: AgentSteerQueueEntry = { operationId: 'history-original-inp
   directInputControl: { kind: 'agent', hostId: 'selected-host', agentSessionId: 'retired-original', run: { runId: 'old-run' } },
   directInputBinding: { expectedRun: { runId: 'old-run' }, admissionIntent: { kind: 'manual-actor' } } }
 const originalDraft = 'Synthetic unassociated Region draft 中🙂\n  exact end  '
+const archivedId = 'confirmed-original-input'
+const archivedKey = { kind: 'prompt' as const, agentSessionId: 'retired-original', expectedRun: { runId: 'old-run' }, submissionId: archivedId }
+const archivedRef = { key: archivedKey, waitGeneration: 1 }
+const originalArchive: AgentSteerQueueEntry = { ...originalQueue, operationId: archivedId, text: 'Synthetic cold archive body 中🙂\n  exact end  ',
+  inputReceipt: { key: archivedKey, ref: archivedRef, status: 'terminal-confirmed', persistence: 'confirmed', observation: 'closed', admission: null,
+    control: { ref: archivedRef, state: 'dispatch-authorized', gateId: 'original-gate', at: 2 } } }
 
 async function mount(content: React.ReactNode) {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
@@ -112,8 +118,8 @@ check('selected detail automatically pages exact usage and cancels the active re
 async function desktop(seed: boolean) {
   const { WorkbenchUserStateStore } = await import('../src/main/workbench-user-state')
   const owner = new WorkbenchUserStateStore(join(root, 'workbench-user-state.json'))
-  if (seed) await owner.write(JSON.stringify({ state: { agentComposerDrafts: { 'old-orphan-region': originalDraft },
-    agentSteerQueues: { 'retired-original': [originalQueue] } }, version: 1, desktopFragments: { exactUnknownFragment: { keep: true } } }))
+  if (seed) await writeFile(owner.path, JSON.stringify({ state: { agentComposerDrafts: { 'old-orphan-region': originalDraft },
+    agentSteerQueues: { 'retired-original': [originalQueue, originalArchive] } }, version: 1, desktopFragments: { exactUnknownFragment: { keep: true } } }))
   const { useAppStore: store, prepareRendererUpdate } = await import('../src/renderer/src/store')
   const { api } = await import('../src/renderer/src/lib/api')
   const { AgentMuxSpatialStateStore } = await import('@agentmux/core/spatial-state')
@@ -123,6 +129,7 @@ async function desktop(seed: boolean) {
   store.setState({ config, sessions: [], tabs: {}, layouts: {}, agentComposerDrafts: {}, agentSteerQueues: {} })
   const spatial = new AgentMuxSpatialStateStore(join(root, 'spatial.json'))
   vi.spyOn(api.ui, 'readWorkbenchState').mockImplementation(() => owner.read())
+  vi.spyOn(api.ui, 'readWorkbenchInputArchive').mockImplementation(query => owner.readInputArchive(query))
   vi.spyOn(api.ui, 'importWorkbenchState').mockImplementation(value => owner.importIfAbsent(value))
   vi.spyOn(api.ui, 'writeWorkbenchState').mockImplementation(value => owner.write(value))
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue(undefined)
@@ -142,30 +149,35 @@ async function desktop(seed: boolean) {
 check('original Main user-document hydrate and actual save keep unassociated input reachable without an active Session', async () => {
   const f = await desktop(true)
   const { LocalRetainedInputsPanel } = await import('../src/renderer/src/components/LocalRetainedInputs')
+  expect(f.api.ui.readWorkbenchInputArchive).not.toHaveBeenCalled()
   const element = await mount(<LocalRetainedInputsPanel />); await click(button(element, 'Drafts & queue'))
-  expect(element.querySelectorAll('.local-input-record').length).toBe(2)
+  await vi.waitFor(() => expect(element.querySelectorAll('.local-input-record')).toHaveLength(3))
   expect(f.store.getState().agentComposerDrafts['old-orphan-region']).toBe(originalDraft)
   expect(f.store.getState().agentSteerQueues['retired-original']![0]).toMatchObject(originalQueue)
   await f.prepareRendererUpdate('quit')
   expect(f.api.ui.writeWorkbenchState).toHaveBeenCalled(); expect(f.owner.observe().lastConfirmedWrite?.diskDurability).toBe('confirmed')
   const saved = JSON.parse((await f.owner.read())!)
   expect(saved.state.agentComposerDrafts['old-orphan-region']).toBe(originalDraft)
-  expect(saved.state.agentSteerQueues['retired-original'][0]).toMatchObject(originalQueue)
+  expect(saved.state.agentSteerQueues['retired-original']).toMatchObject([originalQueue])
+  expect(await f.owner.readInputArchive({ ownerKey: 'retired-original' })).toMatchObject({ entries: [{ ownerKey: 'retired-original', entry: originalArchive }], nextCursor: null })
   expect(saved.desktopFragments.exactUnknownFragment.keep).toBe(true)
   expect(f.api.sessions.submitPrompt).not.toHaveBeenCalled(); expect(f.api.sessions.stop).not.toHaveBeenCalled()
-})
+}, 20000)
 
 ;(reading ? it : it.skip)('fresh process discovers and copies the original saved draft and queue without reseeding', async () => {
-  const before = await readFile(join(root, 'workbench-user-state.json'), 'utf8')
-  expect(JSON.parse(before).state.agentComposerDrafts['old-orphan-region']).toBe(originalDraft)
   const f = await desktop(false)
+  const before = JSON.parse((await f.owner.read())!)
+  expect(before.state.agentComposerDrafts['old-orphan-region']).toBe(originalDraft)
+  expect(before.state.agentSteerQueues['retired-original']).toMatchObject([originalQueue])
   const { LocalRetainedInputsPanel } = await import('../src/renderer/src/components/LocalRetainedInputs')
   const copied = vi.spyOn(f.api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  expect(f.api.ui.readWorkbenchInputArchive).not.toHaveBeenCalled()
   const element = await mount(<LocalRetainedInputsPanel />); await click(button(element, 'Drafts & queue'))
+  await vi.waitFor(() => expect(element.querySelectorAll('.local-input-record')).toHaveLength(3))
   const records = [...element.querySelectorAll<HTMLDetailsElement>('.local-input-record')]
-  expect(records.length).toBe(2)
   await toggle(records[0]!); await click(button(records[0]!, 'Copy saved input')); expect(copied).toHaveBeenLastCalledWith(originalDraft)
   await toggle(records[1]!); await click(button(records[1]!, 'Copy saved input')); expect(copied).toHaveBeenLastCalledWith(originalQueue.text)
+  await toggle(records[2]!); await click(button(records[2]!, 'Copy saved input')); expect(copied).toHaveBeenLastCalledWith(originalArchive.text)
   expect(f.store.getState().sessions).toEqual([])
   expect(f.api.sessions.submitPrompt).not.toHaveBeenCalled(); expect(f.api.sessions.stop).not.toHaveBeenCalled()
-})
+}, 20000)

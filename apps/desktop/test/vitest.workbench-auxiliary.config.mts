@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto'
 
 const root = resolve(import.meta.dirname, '../../..'), mutation = process.env.AGENTMUX_AUXILIARY_MUTATION
 const mutations = {
-  'disconnect-native': ['apps/desktop/src/renderer/src/lib/workbench-user-storage.ts', 'await root.setItem(WORKBENCH_USER_STATE_KEY, JSON.stringify(submitted))', 'await Promise.resolve()'],
+  'disconnect-native': ['apps/desktop/src/renderer/src/lib/workbench-user-storage.ts', 'const receipt = await root.setItem(WORKBENCH_USER_STATE_KEY, encoded)', 'return'],
   'omit-action-ack': ['apps/desktop/src/renderer/src/lib/launcher-state.ts', "await desktopUserFragments.checkpoint('launcher')", 'await Promise.resolve()'],
   'omit-avatar-ack': ['apps/desktop/src/renderer/src/lib/mote-avatar-save-draft.ts', "await desktopUserFragments.checkpoint('moteAvatarSaveDrafts')", 'await Promise.resolve()'],
   'omit-patrol-ack': ['apps/desktop/src/renderer/src/lib/global-goal-patrol-state.ts', "await desktopUserFragments.checkpoint('globalGoalPatrolOperation')", 'await Promise.resolve()'],
@@ -15,7 +15,8 @@ const mutations = {
   'omit-progress-read': ['apps/desktop/src/renderer/src/components/ContinuousProgressControl.tsx', 'try { await initializeLauncherState() }', 'try { await Promise.resolve() }'],
   'unknown-is-absent': ['apps/desktop/src/renderer/src/lib/workbench-user-storage.ts', "if (!ready.has(name)) throw new Error('Original ' + name + ' data is not yet readable. Current input and original bytes are retained.')", "if (!ready.has(name)) return null as DesktopFragmentValues[N]"],
   'drop-fragments': ['apps/desktop/src/renderer/src/lib/workbench-user-storage.ts', "? { ...current, ...captured, ...(Object.hasOwn(current, 'desktopFragments') ? { desktopFragments: current.desktopFragments } : {}) }", '? captured'],
-  'ignore-native-ack': ['apps/desktop/src/renderer/src/lib/workbench-user-storage.ts', "throw new Error('Native Desktop write acknowledgement did not confirm the submitted document. Current input and original bytes are retained.')", 'return']
+  'ignore-native-ack': ['apps/desktop/src/renderer/src/lib/workbench-user-storage.ts', "throw new Error('Native Desktop write acknowledgement did not confirm the submitted document. Current input and original bytes are retained.')",
+    "return { path: 'unconfirmed', contentDigest: digest, sizeBytes: bytes.byteLength, confirmedAt: Date.now(), diskDurability: 'confirmed' }"]
 } as const
 if (mutation && !Object.hasOwn(mutations, mutation)) throw new Error('Unknown auxiliary source mutation')
 export default defineConfig({ ...base, cacheDir: resolve(root, '.tmp/workbench-auxiliary-' + (mutation ?? 'candidate')),

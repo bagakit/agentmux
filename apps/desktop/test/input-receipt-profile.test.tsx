@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
 import { afterAll, afterEach, expect, it, vi } from 'vitest'
 import { appendFileSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -10,6 +9,7 @@ import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentSteerQueueEntry } from '../src/renderer/src/store'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 import { profileReceipt, withoutProfile } from './input-receipt-profile.fixture'
+import '../../mobile/test/device-locks'
 
 const isolated = await vi.hoisted(async () => {
   const { mkdtempSync } = await import('node:fs')
@@ -24,7 +24,6 @@ const isolated = await vi.hoisted(async () => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
   await import('../src/renderer/src/lib/api')
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false)
-  await import('../../mobile/test/device-locks')
   return { directory, owned: !supplied }
 })
 const root = isolated.directory
@@ -77,6 +76,8 @@ async function desktop(seed: boolean) {
   const raw = profileReceipt(), rawBefore = structuredClone(raw)
   const entry: AgentSteerQueueEntry = { operationId: raw.key.kind === 'prompt' ? raw.key.submissionId : '',
     text: 'Synthetic queue body', runId: 'profile-run', status: 'deferred', archived: true, inputReceipt: raw,
+    // A retained platform-context input stays available to the live receipt consumer.
+    agentMuxNote: 'Synthetic original platform context',
     directInputBinding: { expectedRun: { runId: 'profile-run' }, admissionIntent: { kind: 'manual-actor' } },
     directInputControl: { kind: 'agent', hostId: 'local', agentSessionId: 'profile-session', run: { runId: 'profile-run' } } }
   if (seed) {
@@ -140,14 +141,14 @@ check('Desktop real agent-input event retains projected receipt instead of incom
   store.setState({ agentSteerQueues: { 'profile-session': [{ operationId: key.submissionId, text: 'Original event text', status: 'deferred',
     directInputBinding: { expectedRun: key.expectedRun, admissionIntent: { kind: 'manual-actor' } },
     directInputControl: { kind: 'agent', hostId: 'local', agentSessionId: key.agentSessionId, run: key.expectedRun } }] } })
-  store.getState().applyEvent({ hostId: 'local', event: { type: 'agent-input', receipt } })
+  store.getState().applyEvent({ type: 'core', hostId: 'local', event: { type: 'agent-input', receipt } })
   const entry = store.getState().agentSteerQueues['profile-session']![0]!
   expect(entry.inputReceipt, 'desktop-event-profile-removed').toEqual(plain)
   expect(entry.archived).toBe(true)
   expect(entry.text).toBe('Original event text')
   const queues = store.getState().agentSteerQueues, prior = entry.inputReceipt
   const older = structuredClone(receipt); older.ref.waitGeneration--
-  store.getState().applyEvent({ hostId: 'local', event: { type: 'agent-input', receipt: older } })
+  store.getState().applyEvent({ type: 'core', hostId: 'local', event: { type: 'agent-input', receipt: older } })
   expect(store.getState().agentSteerQueues['profile-session']![0]!.inputReceipt).toBe(prior)
   expect(receipt).toEqual(original)
   expect(queues['profile-session']![0]!.directInputBinding!.expectedRun).toEqual(key.expectedRun)
@@ -183,8 +184,8 @@ check('Desktop cold profile removal reaches original native save without losing 
   expect(f.api.sessions.submitPrompt).not.toHaveBeenCalled()
   expect(f.api.sessions.stop).not.toHaveBeenCalled()
   const observe = (receipt: AgentInputSubmissionReceipt) =>
-    f.store.getState().applyEvent({ hostId: 'local', event: { type: 'agent-input', receipt } })
-  f.store.getState().applyEvent({ hostId: 'another-host', event: { type: 'agent-input', receipt: f.raw } })
+    f.store.getState().applyEvent({ type: 'core', hostId: 'local', event: { type: 'agent-input', receipt } })
+  f.store.getState().applyEvent({ type: 'core', hostId: 'another-host', event: { type: 'agent-input', receipt: f.raw } })
   expect(f.store.getState().agentSteerQueues).toBe(queues)
   const older = structuredClone(f.raw)
   older.ref.waitGeneration--
@@ -200,7 +201,7 @@ check('Desktop cold profile removal reaches original native save without losing 
   expect(f.store.getState().agentSteerQueues).toBe(queues)
 
   observe({ ...f.raw, moteObservationId: archivedObservationId })
-  await vi.waitFor(async () => expect(JSON.parse(await readFile(f.user.path, 'utf8'))
+  await vi.waitFor(async () => expect(JSON.parse((await f.user.read())!)
     .state.agentSteerQueues['profile-session'][0].inputReceipt.moteObservationId).toBe(archivedObservationId))
   expect(f.api.ui.writeWorkbenchState).toHaveBeenCalledTimes(1)
   expect(f.store.getState().agentSteerQueues['synthetic-queue-0']).toBe(queues['synthetic-queue-0'])
@@ -210,9 +211,10 @@ check('Desktop cold profile removal reaches original native save without losing 
 }, 30_000)
 
 ;(reading ? it : it.skip)('fresh process reads original saved projection without reseeding or dispatch', async () => {
-  const before = await readFile(join(root!, 'workbench-user-state.json'), 'utf8')
+  const { WorkbenchUserStateStore } = await import('../src/main/workbench-user-state')
+  const before = await new WorkbenchUserStateStore(join(root!, 'workbench-user-state.json')).read()
   const expected = { ...withoutProfile(profileReceipt()), moteObservationId: archivedObservationId }
-  expect(JSON.parse(before).state.agentSteerQueues['profile-session'][0].inputReceipt).toEqual(expected)
+  expect(JSON.parse(before!).state.agentSteerQueues['profile-session'][0].inputReceipt).toEqual(expected)
   const f = await desktop(false)
   expect(f.store.getState().agentSteerQueues['profile-session']![0]!.inputReceipt).toEqual(expected)
   expect(f.store.getState().agentSteerQueues['synthetic-queue-0']).toHaveLength(9)

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act, createElement as h } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WorkbenchUserStateStore } from '../src/main/workbench-user-state'
@@ -18,7 +18,7 @@ function barrier() { let resolve!: () => void; const promise = new Promise<void>
 async function host() {
   const root = await mkdtemp(join(tmpdir(), 'amux-auxiliary-')); roots.push(root)
   const path = join(root, 'workbench-user-state.json'), user = new WorkbenchUserStateStore(path)
-  return { root, path, user, saved: async () => JSON.parse(await readFile(path, 'utf8')) }
+  return { root, path, user, saved: async () => JSON.parse((await user.read())!) }
 }
 async function fixture(importOld = false) {
   const f = await host(), values = auxiliaryUserValues()
@@ -125,11 +125,11 @@ it('unknown fragment read never becomes absence or overwrites original bytes aft
   await f.user.write(held)
   const doc = createWorkbenchUserDocument({ readWorkbenchState: async () => { throw Error('Host read unavailable') },
     writeWorkbenchState: raw => f.user.write(raw), importWorkbenchState: raw => f.user.importIfAbsent(raw) }, () => localStorage)
-  expect(doc.encodeProjection()).toBeNull()
+  expect(doc.confirmedProjectionDigest()).toBeNull()
   expect(() => doc.read('globalGoalPatrolOperation')).toThrow('not yet readable')
   await expect(doc.load('launcher', () => {})).rejects.toThrow('Host read unavailable')
   expect(() => doc.write('launcher', '{}')).toThrow('not yet readable')
-  expect(await readFile(f.path, 'utf8')).toBe(held)
+  expect(await f.saved()).toEqual(JSON.parse(held))
 })
 
 it('malformed original fragment stays untouched while unrelated original fragments remain usable', async () => {
@@ -217,7 +217,8 @@ it('a repaired original native fragment can be reread in place without replacing
   await launcher.initializeLauncherState(); await launcher.checkpointLauncherState()
   const saved = await f.saved(), draft = JSON.parse(saved.desktopFragments.launcher).state.drafts['original-launcher']
   expect(draft.prompt).toBe('Current input after failed original read'); expect(draft.note).toBe('Original unsaved Note')
-  expect(saved.state).toEqual({ original: true }); expect(saved.desktopFragments.moteAvatarSaveDrafts).toEqual(values.fragments.moteAvatarSaveDrafts)
+  expect(saved.state).toEqual({ original: true, agentSteerQueues: {} })
+  expect(saved.desktopFragments.moteAvatarSaveDrafts).toEqual(values.fragments.moteAvatarSaveDrafts)
 })
 
 it('quit cannot silently discard current auxiliary input while the original root hydration remains unknown', async () => {

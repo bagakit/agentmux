@@ -4,6 +4,11 @@ import { relative, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '../../..')
 const mutation = process.env.AGENTMUX_USER_STORAGE_MUTATION
+const queueMutations: Record<string, [string, string]> = {
+  'encode-cold-queue': ['JSON.stringify({ ...replacement, inputQueueDelta })', 'JSON.stringify({ ...replacement, state: submitted.state, inputQueueDelta })'],
+  'drop-uncertain-queue': ['clearing ? new Map() : uncertainInputs)', 'new Map())'],
+  'forget-archived-baseline': ['confirmedQueues = withoutArchivedInputs(queues, evictions)', 'confirmedQueues = queues']
+}
 export default defineConfig({ ...base,
   cacheDir: resolve(root, '.tmp/workbench-user-storage-cache-' + (mutation ?? 'candidate')),
   plugins: [...base.plugins ?? [], { name: 'native-user-storage-consumer', enforce: 'pre', transform(source, id) {
@@ -27,6 +32,12 @@ export default defineConfig({ ...base,
       const anchor = 'pending.get(name) === value'
       if (source.split(anchor).length !== 2) throw Error('Missing late ACK mutation anchor')
       return { code: source.replace(anchor, 'true'), map: null }
+    }
+    const queueMutation = mutation && queueMutations[mutation]
+    if (queueMutation && file === 'apps/desktop/src/renderer/src/lib/workbench-user-storage.ts') {
+      const [anchor, replacement] = queueMutation
+      if (source.split(anchor).length !== 2) throw Error('Missing queue delta mutation anchor')
+      return { code: source.replace(anchor, replacement), map: null }
     }
     if (mutation === 'bypass-atomic-import' && file === 'apps/desktop/src/renderer/src/lib/workbench-user-storage.ts') {
       const anchor = 'const imported = await port.importWorkbenchState(held)'

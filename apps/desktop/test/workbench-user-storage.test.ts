@@ -1,10 +1,12 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 import { WorkbenchUserStateStore } from '../src/main/workbench-user-state'
-import { createBatchedPersistentStorage } from '../src/renderer/src/lib/persisted-ui-writer'
-import { createWorkbenchUserStorage, WORKBENCH_USER_STATE_KEY as key } from '../src/renderer/src/lib/workbench-user-storage'
+import { createBatchedPersistentStorage, USER_SAVE_REPLY_MS } from '../src/renderer/src/lib/persisted-ui-writer'
+import { createWorkbenchUserDocument, createWorkbenchUserStorage, WORKBENCH_USER_STATE_KEY as key } from '../src/renderer/src/lib/workbench-user-storage'
+import type { WorkbenchUserStateReceipt } from '../src/shared/workbench-user-state'
 
 const encoded = (text: string) => JSON.stringify({ state: { agentComposerDrafts: { original: text } }, version: 1 })
 function source(value: string | null) {
@@ -15,15 +17,163 @@ afterEach(() => vi.useRealTimers())
 
 it('imports original bytes only on native absence and removes them after the durable acknowledgement', async () => {
   const original = source(encoded('Retained original'))
+  let native: string | null = null
   let acknowledge!: () => void
   const write = vi.fn((_value: string) => new Promise<void>(resolve => { acknowledge = resolve }))
-  const storage = createWorkbenchUserStorage({ readWorkbenchState: async () => null, importWorkbenchState: async value => { await write(value); return value }, writeWorkbenchState: write }, () => original)
+  const storage = createWorkbenchUserStorage({ readWorkbenchState: async () => native,
+    importWorkbenchState: async value => { await write(value); native = value; return value }, writeWorkbenchState: write }, () => original)
   const reading = storage.getItem(key)
   await vi.waitFor(() => expect(write).toHaveBeenCalledWith(encoded('Retained original')))
   expect(original.getItem(key)).toBe(encoded('Retained original'))
   acknowledge()
   expect(await reading).toBe(encoded('Retained original'))
   expect(original.getItem(key)).toBeNull()
+})
+
+it('hydrates the native hot projection after exact legacy bytes acquire durable custody', async () => {
+  const retained = JSON.stringify({ state: { draft: 'Original', agentSteerQueues: { session: [{ operationId: 'old', archived: true }] } }, version: 1 })
+  const hot = encoded('Original normalized by the owner')
+  const original = source(retained)
+  const read = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(hot)
+  const write = vi.fn()
+  const storage = createWorkbenchUserStorage({ readWorkbenchState: read, importWorkbenchState: async value => value, writeWorkbenchState: write }, () => original)
+  expect(await storage.getItem(key)).toBe(hot)
+  expect(original.getItem(key)).toBeNull()
+  expect(read).toHaveBeenCalledTimes(2)
+  expect(write).not.toHaveBeenCalled()
+})
+
+const receiptFor = (raw: string): WorkbenchUserStateReceipt => ({
+  path: 'original-user-document', diskDurability: 'confirmed', confirmedAt: Date.now(),
+  contentDigest: createHash('sha256').update(raw).digest('hex'), sizeBytes: Buffer.byteLength(raw)
+})
+const browser = (): Storage => ({ ...source(null), length: 0, key: () => null, clear() {}, setItem() {} })
+
+it('sends only changed queue operations and the same batch draft without encoding unrelated archived bytes', async () => {
+  const hugeArchive = { operationId: 'old-archive', archived: true, text: 'Stored archive '.repeat(700_000) }
+  const active = { operationId: 'hot-item', text: 'Current request' }
+  const unrelated = { operationId: 'other-item', text: 'Unrelated active request' }
+  const seed = JSON.stringify({ state: {
+    agentSteerQueues: { original: [hugeArchive, active], other: [unrelated] }, agentComposerDrafts: { original: 'Saved draft' }
+  }, version: 1 })
+  const write = vi.fn(async (raw: string) => receiptFor(raw))
+  const doc = createWorkbenchUserDocument({ readWorkbenchState: async () => seed, importWorkbenchState: async raw => raw,
+    writeWorkbenchState: write }, browser)
+  const hydrated = (await doc.persistent.storage.getItem(key))!.state as {
+    agentSteerQueues: Record<string, Record<string, unknown>[]>
+    agentComposerDrafts: Record<string, string>
+  }
+  const next = { ...hydrated, agentComposerDrafts: { original: 'Current request' }, agentSteerQueues: { ...hydrated.agentSteerQueues,
+    original: [hydrated.agentSteerQueues.original![0]!, { ...active, archived: true, movedToDraft: true }] } }
+  await doc.persistent.checkpoint(key, { state: next, version: 1 })
+  expect(write).toHaveBeenCalledOnce()
+  const raw = write.mock.calls[0]![0]
+  expect(Buffer.byteLength(seed)).toBeGreaterThan(9_600_000)
+  expect(Buffer.byteLength(raw)).toBeLessThan(1024)
+  expect(JSON.parse(raw)).toEqual({
+    state: { agentComposerDrafts: { original: 'Current request' } }, version: 1,
+    inputQueueDelta: { changes: [{ ownerKey: 'original', order: ['old-archive', 'hot-item'], remove: [],
+      upsert: [{ operationId: 'hot-item', entry: { ...active, archived: true, movedToDraft: true } }] }] }
+  })
+  expect(doc.confirmedProjectionDigest()).toBe(receiptFor(raw).contentDigest)
+
+  write.mockClear()
+  doc.persistent.storage.setItem(key, { version: 1, state: { ...next, agentComposerDrafts: { original: 'Temporary input' } } })
+  doc.persistent.storage.setItem(key, { version: 1, state: next })
+  await doc.persistent.flush()
+  expect(write).not.toHaveBeenCalled()
+  await doc.persistent.checkpoint(key, { state: next, version: 1 })
+  expect(write).toHaveBeenCalledOnce()
+  expect(JSON.parse(write.mock.calls[0]![0]).inputQueueDelta).toEqual({ changes: [] })
+})
+
+it('retries the previous queue value when an unacknowledged attempt may already have changed it', async () => {
+  vi.useFakeTimers()
+  const digest = vi.spyOn(crypto.subtle, 'digest').mockImplementation(async (_algorithm, bytes) =>
+    new Uint8Array(createHash('sha256').update(new Uint8Array(bytes as ArrayBuffer)).digest()).buffer)
+  const original = { operationId: 'reverted', text: 'Confirmed original' }
+  const other = { operationId: 'other-owner', text: 'New original input' }
+  const seed = JSON.stringify({ state: { agentSteerQueues: { first: [original] } }, version: 1 })
+  let started!: () => void
+  const entered = new Promise<void>(resolve => { started = resolve })
+  let release!: () => void
+  const first = new Promise<void>(resolve => { release = resolve })
+  const write = vi.fn(async (raw: string) => receiptFor(raw)).mockImplementationOnce(async raw => {
+    started()
+    await first
+    return receiptFor(raw)
+  })
+  const doc = createWorkbenchUserDocument({ readWorkbenchState: async () => seed, importWorkbenchState: async raw => raw,
+    writeWorkbenchState: write }, browser, vi.fn())
+  await doc.hydrate()
+  doc.persistent.storage.setItem(key, { state: { agentSteerQueues: { first: [{ ...original, text: 'Unconfirmed replacement' }] } }, version: 1 })
+  const outcome = Promise.resolve(doc.persistent.flush()).catch(error => error)
+  try {
+    await entered
+    doc.persistent.storage.setItem(key, { state: { agentSteerQueues: { first: [original], second: [other] } }, version: 1 })
+    await vi.advanceTimersByTimeAsync(USER_SAVE_REPLY_MS)
+    expect((await outcome).code).toBe('WORKBENCH_USER_STATE_REPLY_OVERDUE')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(write).toHaveBeenCalledTimes(2)
+    const raw = write.mock.calls[1]![0]
+    expect(JSON.parse(raw).inputQueueDelta.changes).toEqual([
+      { ownerKey: 'first', order: ['reverted'], remove: [], upsert: [{ operationId: 'reverted', entry: original }] },
+      { ownerKey: 'second', order: ['other-owner'], remove: [], upsert: [{ operationId: 'other-owner', entry: other }] }
+    ])
+    expect(doc.confirmedProjectionDigest()).toBe(receiptFor(raw).contentDigest)
+    release()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(doc.confirmedProjectionDigest()).toBe(receiptFor(raw).contentDigest)
+    expect(doc.persistent.pending()).toBe(false)
+  } finally { release(); vi.clearAllTimers(); digest.mockRestore() }
+})
+
+it.each([false, true])('uses exact archive ACK references without another save or erasing a later edit (%s)', async laterEdit => {
+  const archived = { operationId: 'archived-op', archived: true, text: 'Exact captured cold row' }
+  const later = { operationId: archived.operationId, text: 'A later revision on the same owner' }
+  let latest: Record<string, unknown>[] = [archived]
+  let entered!: () => void, release!: () => void
+  const started = new Promise<void>(resolve => { entered = resolve })
+  const waiting = new Promise<void>(resolve => { release = resolve })
+  const write = vi.fn(async (raw: string): Promise<WorkbenchUserStateReceipt> => receiptFor(raw))
+    .mockImplementationOnce(async raw => {
+      entered()
+      await waiting
+      return { ...receiptFor(raw), inputQueueArchived: [{ ownerKey: 'same-owner', operationId: archived.operationId }],
+        inputQueueArchiveOwners: ['same-owner'] }
+    })
+  const doc = createWorkbenchUserDocument({ readWorkbenchState: async () => null, importWorkbenchState: async raw => raw,
+    writeWorkbenchState: write }, browser)
+  await doc.hydrate()
+  const captured = () => ({ state: { agentSteerQueues: { 'same-owner': latest } }, version: 1 })
+  const observed = vi.fn((rows: { ownerKey: string; entry: Record<string, unknown> }[]) => {
+    expect(rows[0]?.entry).toBe(archived)
+    const next = latest.filter(item => !rows.some(row => row.ownerKey === 'same-owner' && row.entry === item))
+    if (next.length === latest.length) return
+    latest = next
+    doc.persistent.storage.setItem(key, captured())
+  })
+  const commit = vi.fn()
+  const stopEviction = doc.subscribeInputQueueEvictions(observed)
+  const stopCommit = doc.subscribeInputQueueCommits(commit)
+  const saving = doc.persistent.checkpoint(key, captured())
+  try {
+    await started
+    if (laterEdit) {
+      latest = [later]
+      doc.persistent.storage.setItem(key, captured())
+    }
+    release()
+    await saving
+    expect(observed).toHaveBeenCalledOnce()
+    expect(commit).toHaveBeenCalledExactlyOnceWith(new Set(['same-owner']))
+    expect(latest).toEqual(laterEdit ? [later] : [])
+    expect(write).toHaveBeenCalledTimes(laterEdit ? 2 : 1)
+    if (laterEdit) expect(JSON.parse(write.mock.calls[1]![0]).inputQueueDelta.changes).toEqual([
+      { ownerKey: 'same-owner', order: [later.operationId], upsert: [{ operationId: later.operationId, entry: later }], remove: [] }
+    ])
+    expect(doc.persistent.pending()).toBe(false)
+  } finally { release(); stopEviction(); stopCommit() }
 })
 
 it('preserves old bytes after unknown native import or read failure and never overwrites an existing native document', async () => {
@@ -57,8 +207,8 @@ it('hydrates the native queue winner and retains different original bytes after 
     await ready
     await owner.write(latest)
     release()
-    expect(await reading).toBe(latest)
-    expect(await readFile(path, 'utf8')).toBe(latest)
+    expect(JSON.parse((await reading)!)).toEqual(JSON.parse(latest))
+    expect(JSON.parse((await owner.read())!)).toEqual(JSON.parse(latest))
     expect(original.getItem(key)).toBe(held)
     expect(original.removeItem).not.toHaveBeenCalled()
   } finally { release(); await rm(root, { recursive: true, force: true }) }
