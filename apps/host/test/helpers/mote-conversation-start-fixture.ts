@@ -22,7 +22,19 @@ export async function createMoteConversationStartFixture(input:{providerId?:'cod
  const providerId=input.providerId??'codex'
  if(providerId==='claude'){
   const provider=h.client.providers.get('claude')
-  h.client.providers.replace({...provider,catalog:{...provider.catalog,promptDelivery:'post-launch-only'},prepareManagedLaunch:async(plan:any)=>({plan}),planPromptInput:(prompt:string)=>({kind:'single-phase',data:prompt+'\r'}),readPromptExecutionEvidence:async()=>({state:'idle',id:'fixture-execution-idle',sourceId:'fixture-native-execution'}),verifyPromptExecutionTransport:async()=>true})
+  // This deterministic Runtime must supply the same original process witness
+  // that native Hook and conversation consumers now qualify through the Provider.
+  const runtimeStatus=h.inner.kernel.status
+  h.inner.kernel.status=vi.fn(async(runId:string)=>({...await runtimeStatus(runId),pid:20000+Number(runId.replace('fixture-run-',''))}))
+  const discoverNativeSession:NonNullable<typeof provider.discoverNativeSession>=async context=>{
+   const session=h.client.agentSessions().find(value=>20000+Number(value.run.runId.replace('fixture-run-',''))===context.processId)
+   if(!session||session.workspacePath!==context.workspacePath)return null
+   return {handle:{kind:'provider',providerId:'claude',sessionId:'native-'+session.agentSessionId},assertCurrent:async()=>{
+    const run=await h.inner.kernel.status(session.run.runId)
+    expect(run.pid).toBe(context.processId);expect(run.state.type).toBe('running')
+   }}
+  }
+  h.client.providers.replace({...provider,discoverNativeSession,catalog:{...provider.catalog,promptDelivery:'post-launch-only'},prepareManagedLaunch:async(plan:any)=>({plan}),planPromptInput:(prompt:string)=>({kind:'single-phase',data:prompt+'\r'}),readPromptExecutionEvidence:async()=>({state:'idle',id:'fixture-execution-idle',sourceId:'fixture-native-execution'}),verifyPromptExecutionTransport:async()=>true})
   h.probe.mockResolvedValue({providerId:'claude',executable:'claude',installed:true,capabilities:provider.catalog.capabilities})
  }
  const workspace={id:'__scratch__',hostId:'local',path:join(h.root,'scratch'),name:'Original'};await mkdir(workspace.path)
@@ -64,7 +76,7 @@ export async function createMoteConversationStartFixture(input:{providerId?:'cod
   if(providerId!=='claude')throw Error('This fixture uses the real Claude native activity protocol; choose providerId:claude')
   const snapshot=await main.readCurrentMoteMain(target),reference=snapshot.current!
   const session=(await h.client.readAgentSession(reference.sessionId))!,nativeSessionId=session.nativeHandle?.kind==='provider'?session.nativeHandle.sessionId:'native-'+reference.sessionId
-  const hook=async(eventName:string,sequence:number,turnId='main-human-'+reference.sessionId)=>await h.inner.acceptHookEvent({agentSessionId:reference.sessionId,providerId:'claude',runId:session.run.runId,receiptId:'mote-idle-'+sequence+'-'+reference.sessionId,eventName,payload:{hook_event_name:eventName,session_id:nativeSessionId,sourceId:'mote-native-'+reference.sessionId,sequence,turnId,...(eventName==='turn.complete'?{reason:'answer',isAborted:false}:{})}},AbortSignal.timeout(5000))
+  const hook=async(eventName:string,sequence:number,turnId='main-human-'+reference.sessionId)=>await h.inner.acceptHookEvent({agentSessionId:reference.sessionId,providerId:'claude',runId:session.run.runId,receiptId:'mote-idle-'+sequence+'-'+reference.sessionId,eventName,payload:{hook_event_name:eventName,session_id:nativeSessionId,sourceId:'mote-native-'+reference.sessionId,sequence,turnId,...(eventName==='turn.complete'?{reason:'answer',isAborted:false,backgroundWork:'none'}:{})}},AbortSignal.timeout(5000))
   await hook('turn.start',1);await hook('turn.complete',2)
   const preferences=await quick.read({kind:'quick',target}),baseline=moteQuickBaseline(preferences)!
   const saved=await rpc.call('space.mote.preferences.save',{kind:'quick',target,operationId:'idle-policy-'+reference.sessionId,baseline,values:{...baseline.defaults,conversationRollover:{kind:'idle',idleMs}},destination:{kind:'occurrence',displayWorkspaceId:reference.displayWorkspaceId,groupId:reference.groupId,tabId:reference.tabId,regionId:reference.regionId}})

@@ -351,7 +351,15 @@ it('actual Mobile new Query follows the Core native-idle due decision, hands ove
   await paste(f.scene(), 'Qualify original human Query'); await wait(() => expect(button(f.scene(), 'Send').disabled).toBe(false)); await click(button(f.scene(), 'Send'))
   await wait(() => expect(f.owner.snapshot().record.selectedSessionId).not.toBeNull())
   const old = f.owner.snapshot().record.selectedSessionId!, slot = () => f.view.element.querySelector<HTMLElement>('.mobile-conversation-slot:not([hidden])')!
+  const setupIndex = f.rpc.mock.calls.findIndex(([method]) => method === 'space.mote.dialogue.setup.advance')
+  expect(setupIndex).toBeGreaterThanOrEqual(0)
+  const setup = await f.rpc.mock.results[setupIndex]!.value
+  expect(setup.reference.sessionId).toBe(old)
+  expect(['admitted', 'terminal-confirmed']).toContain(agentPromptSubmissionOutcome(setup.deferredInput?.record ?? null))
   await f.host.qualifyMainIdle(1)
+  const inspection = await f.host.rpc.call('agent.input.inspect', { key: setup.deferredInput!.route!.key, activity: true })
+  expect(inspection.record?.semanticIdle?.promptSubmissionId).toBe(setup.deferredInput!.route!.operationId)
+  expect(inspection.activity?.state, JSON.stringify(inspection)).toBe('idle')
   await paste(slot(), 'Exact next human Query through rollover'); await click(button(slot(), 'Send'))
   await wait(() => expect(f.rpc.mock.calls.filter(([method]) => method === 'agent.open')).toHaveLength(2))
   await wait(() => expect(f.owner.snapshot().record.selectedSessionId).not.toBe(old))
@@ -374,7 +382,15 @@ it('a Core due response arriving after later B editing leaves the healthy origin
   await paste(f.scene(), 'Original idle proof Query'); await wait(() => expect(button(f.scene(), 'Send').disabled).toBe(false)); await click(button(f.scene(), 'Send'))
   await wait(() => expect(f.owner.snapshot().record.selectedSessionId).not.toBeNull())
   const old = f.owner.snapshot().record.selectedSessionId!, slot = () => f.view.element.querySelector<HTMLElement>('.mobile-conversation-slot:not([hidden])')!
-  await f.host.qualifyMainIdle(1); const hold = f.holdDue()
+  const setupIndex = f.rpc.mock.calls.findIndex(([method]) => method === 'space.mote.dialogue.setup.advance')
+  expect(setupIndex).toBeGreaterThanOrEqual(0)
+  const setup = await f.rpc.mock.results[setupIndex]!.value
+  expect(setup.reference.sessionId).toBe(old)
+  expect(['admitted', 'terminal-confirmed']).toContain(agentPromptSubmissionOutcome(setup.deferredInput?.record ?? null))
+  await f.host.qualifyMainIdle(1)
+  const inspection = await f.host.rpc.call('agent.input.inspect', { key: setup.deferredInput!.route!.key, activity: true })
+  expect(inspection.record?.semanticIdle?.promptSubmissionId).toBe(setup.deferredInput!.route!.operationId)
+  expect(inspection.activity?.state, JSON.stringify(inspection)).toBe('idle'); const hold = f.holdDue()
   await paste(slot(), 'Original A Query'); await click(button(slot(), 'Send'))
   await wait(() => expect(f.rpc.mock.calls.some(([method]) => method === 'space.mote.dialogue.input.submit')).toBe(true))
   await act(async () => { editor(slot()).replaceChildren(document.createElement('p')); editor(slot()).dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' })) })
