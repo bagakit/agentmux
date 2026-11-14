@@ -118,6 +118,12 @@ export async function copyRuntimeFiles(copies, appResources) {
 }
 
 export async function copyRuntimePayload(payload, appResources, source) {
+  await materializeRuntimePayload(payload, appResources)
+  await writeRuntimeProvenance(payload, appResources, source)
+}
+
+/** Stage the same executable payload for release assembly and private product probes. */
+export async function materializeRuntimePayload(payload, appResources) {
   await copyRuntimeFiles(payload.copies, appResources)
   const avatar = payload.avatar, avatarDestination = join(appResources, avatar.destination)
   await mkdir(dirname(avatarDestination), { recursive: true })
@@ -132,7 +138,6 @@ export async function copyRuntimePayload(payload, appResources, source) {
     await mkdir(dirname(destination), { recursive: true }); await symlink(item.link, destination)
   }
   for (const item of payload.modes) await chmod(join(appResources, item.target), item.mode)
-  await writeRuntimeProvenance(payload, appResources, source)
 }
 
 export async function writeRuntimeProvenance(payload, appResources, source) {
