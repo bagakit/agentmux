@@ -68,8 +68,11 @@
     }
   },
   "files": [
+    "CONTRIBUTING.md",
+    "ROADMAP.md",
     "brand",
     "dist",
+    "docs/patterns",
     "src"
   ],
   "scripts": {
