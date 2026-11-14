@@ -15,9 +15,8 @@
   padding: var(--sp-2) 0 var(--sp-2) calc(10px + var(--sp-3) - 1px);
 }
 .native-process-observation__metrics > .conversation-metrics__details { padding: 0; }
-.native-process-observation__step { margin-block: 0; padding-block: var(--sp-1); }
-.native-process-observation__step:not(.native-process-observation__step + *) { padding-block-start: var(--sp-2); }
-.native-process-observation__step:not(:has(+ .native-process-observation__step)) { margin-block-end: var(--sp-4); padding-block-end: var(--sp-2); }
+.native-process-observation__step { margin: 0 var(--sp-2) 0 calc(var(--conversation-disclosure-padding, var(--sp-2)) + 10px); padding: 0 0 0 var(--sp-2); }
+.native-process-observation__step:not(:has(+ .native-process-observation__step)) { margin-block-end: var(--sp-2); }
 /* Deferred detail shells have no second title and therefore no second child level. */
 .wf-native-process[data-body-only] > .wf-native-process__body { margin: 0; }
 @media (pointer: coarse) {
@@ -26,7 +25,9 @@
 }
 
 /* A process heading belongs to the exact step, while its body keeps original actions and details. */
-.log-turn[data-process-content] { grid-template-columns: minmax(0, 1fr); }
+.log-turn[data-process-content] { grid-template-columns: minmax(0, 1fr); margin: 0; padding: 0; }
 .log-turn[data-process-content] > .log-turn__head,
 .log-turn[data-process-content] > .log-turn__meta,
 .log-turn[data-process-content] > .log-turn__body { grid-column: 1; }
+.log-turn[data-process-content] > .log-turn__body { margin-block-start: 0; }
+.log-turn[data-process-content] > .log-turn__body > .conversation-tool-trace__payload--direct { padding-block: var(--sp-1); }

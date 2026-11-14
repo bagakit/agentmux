@@ -52,6 +52,17 @@ type ObservedToolProps = {
   hidden?: boolean
 }
 
+/** Consume this element's finite feedback so retained workfaces do not replay it. */
+function finishDisclosureFeedback(element: Element | null, clear: () => void) {
+  let current = true
+  const finish = () => { if (current) clear() }
+  const animation = element?.getAnimations?.().find(animation =>
+    'animationName' in animation && animation.animationName === 'conversation-disclosure-enter' && animation.effect instanceof KeyframeEffect && animation.effect.target === element)
+  if (animation) void animation.finished.then(finish, finish)
+  else finish()
+  return () => { current = false }
+}
+
 export function WorkflowStatusGlyph({ status, size = 12, recorded = false }: { status: 'running' | 'completed' | 'failed' | 'interrupted' | 'killed' | 'paused' | 'queued'; size?: number; recorded?: boolean }) {
   return <SemanticIcon name={status === 'running' ? recorded ? 'status.running' : 'status.working' : `status.${status}`}
     size={size} animation={status === 'running' && !recorded ? 'work' : 'none'} className={`wf-ico wf-ico--${status}`} />
@@ -59,19 +70,26 @@ export function WorkflowStatusGlyph({ status, size = 12, recorded = false }: { s
 
 export function RecordedStepsCard({ observation, compact = false, keepContentVisible = false, expanded, onExpandedChange, notice, actions, children }: ObservationProps) {
   const contentId = useId()
+  const body = useRef<HTMLDivElement>(null)
   const [readOnce, setReadOnce] = useState(expanded)
+  const [userDisclosure, setUserDisclosure] = useState<boolean | null>(null)
+  if (userDisclosure !== null && userDisclosure !== expanded) setUserDisclosure(null)
   useLayoutEffect(() => { if (expanded) setReadOnce(true) }, [expanded])
+  useLayoutEffect(() => {
+    if (userDisclosure === true && expanded) return finishDisclosureFeedback(body.current, () => setUserDisclosure(null))
+  }, [userDisclosure, expanded])
   if (observation.stepCount === 0) return null
   const { recordedTime, status } = observation
   const description = [recordedTime ? `${recordedTime.from} – ${recordedTime.to} · ${recordedTime.offset}` : '',
     status === undefined && !observation.metrics ? compact ? '状态未记录' : 'Status not recorded' : ''].filter(Boolean).join(' · ')
-  return <article className="wf-card wf-card--observation" data-observation-id={observation.id} data-status={status}>
+  return <article className="wf-card wf-card--observation" data-observation-id={observation.id} data-status={status}
+    data-user-disclosure={userDisclosure === true && expanded || undefined} data-content-anchored={keepContentVisible || undefined}>
     <div className="wf-observation__header">
     <button type="button" className="log-fold wf-head" data-open={expanded ? '' : undefined}
       aria-expanded={expanded} aria-controls={contentId}
       title={description || undefined}
       aria-description={description || undefined}
-      onClick={() => onExpandedChange(!expanded)}>
+      onClick={() => { setUserDisclosure(!expanded); onExpandedChange(!expanded) }}>
       <span className="log-fold__node"><SemanticIcon name="navigation.disclosure" size={12} className="wf-chev log-fold__chevron" /></span>
       <span className="log-fold__label">
         {observation.label ? <span className="wf-observation__label">{observation.label}</span> : null}
@@ -99,7 +117,7 @@ export function RecordedStepsCard({ observation, compact = false, keepContentVis
       {observation.counts.failed > 0 ? <span className="wf-observation__stat" data-state="failed"><WorkflowStatusGlyph status="failed" />{observation.counts.failed} failed</span> : null}
       {observation.counts.unknown > 0 ? <span className="wf-observation__stat">{observation.counts.unknown} status not recorded</span> : null}
     </div> : null}
-    <div id={contentId} className="wf-body wf-observation__body" hidden={!expanded && !keepContentVisible} inert={!expanded && !keepContentVisible}>
+    <div ref={body} id={contentId} className="wf-body wf-observation__body" hidden={!expanded && !keepContentVisible} inert={!expanded && !keepContentVisible}>
       {expanded || readOnce || keepContentVisible ? children : null}
     </div>
   </article>
@@ -107,6 +125,11 @@ export function RecordedStepsCard({ observation, compact = false, keepContentVis
 
 export function RecordedToolRow({ observation, className, icon, expanded, onToggle, controls, missingStatusInDetails = false, hidden = false }: ObservedToolProps) {
   const row = useRef<HTMLElement | null>(null)
+  const [userDisclosure, setUserDisclosure] = useState<boolean | null>(null)
+  if (userDisclosure !== null && userDisclosure !== expanded) setUserDisclosure(null)
+  useLayoutEffect(() => {
+    if (userDisclosure === true && expanded) return finishDisclosureFeedback(row.current?.nextElementSibling ?? null, () => setUserDisclosure(null))
+  }, [userDisclosure, expanded])
   const document = row.current?.ownerDocument, selection = document?.defaultView?.getSelection()
   const focused = Boolean(document?.activeElement && row.current?.contains(document.activeElement))
   let selected = false
@@ -119,9 +142,9 @@ export function RecordedToolRow({ observation, className, icon, expanded, onTogg
   const { recordedTime, status } = observation
   const content = <>
     <span className="log-row__node">{icon}</span>
+    <span className="log-row__title" title={observation.title}>{observation.title}</span>
     {recordedTime ? onToggle ? <span className="log-row__time" title={recordedTime.offset}>{recordedTime.from}</span>
       : <time className="log-row__time" tabIndex={0} aria-description={recordedTime.offset} title={recordedTime.offset}>{recordedTime.from}</time> : null}
-    <span className="log-row__title">{observation.title}</span>
     <span className="log-row__meta">
       {observation.hasFailedResult && status !== 'failed' ? <span className="log-row__issue">含失败结果</span> : null}
       {status === 'streaming' ? <span className="log-row__chip"><SemanticIcon name="status.streaming" size={12} className="wf-ico" />Streaming</span> : null}
@@ -136,7 +159,8 @@ export function RecordedToolRow({ observation, className, icon, expanded, onTogg
   </>
   const rowClass = `${className} wf-tool-row wf-tool-row--observation`
   return onToggle ? <button ref={node => { row.current = node }} type="button" hidden={concealed} inert={concealed} className={rowClass} data-recorded-time={Boolean(recordedTime)} data-observation-step-id={observation.id}
-    data-status={status} data-open={expanded ? '' : undefined} data-expandable="" aria-expanded={expanded} aria-controls={controls} aria-description={recordedTime?.offset} onClick={onToggle}>{content}</button>
+    data-status={status} data-open={expanded ? '' : undefined} data-user-disclosure={userDisclosure === true && expanded || undefined} data-expandable="" aria-expanded={expanded} aria-controls={controls} aria-description={recordedTime?.offset}
+    onClick={() => { setUserDisclosure(!expanded); onToggle() }}>{content}</button>
     : <div ref={node => { row.current = node }} hidden={concealed} inert={concealed} className={rowClass} data-recorded-time={Boolean(recordedTime)} data-observation-step-id={observation.id} data-status={status}>{content}</div>
 }
 
@@ -150,6 +174,11 @@ export function RecordedAgentRow({ observation }: {
   }
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [feedback, setFeedback] = useState(false)
+  const detail = useRef<HTMLLIElement>(null)
+  useLayoutEffect(() => {
+    if (feedback) return finishDisclosureFeedback(detail.current, () => setFeedback(false))
+  }, [feedback])
   const detailId = useId()
   const state = observation.state
   const glyph = state === 'running' ? 'running' : state === 'completed' ? 'completed'
@@ -158,7 +187,7 @@ export function RecordedAgentRow({ observation }: {
   return <>
     <li className="wf-agent wf-agent--observation" data-recorded-agent-id={observation.id}>
       <button type="button" className="wf-agent__button" aria-expanded={expanded}
-        aria-controls={detailId} onClick={() => setExpanded(value => !value)}>
+        aria-controls={detailId} onClick={() => { setFeedback(!expanded); setExpanded(value => !value) }}>
         <span className="wf-agent__state">{state === undefined || state === 'not-found' ? <SemanticIcon name="status.neutral" size={12} className="semantic-icon" aria-hidden="true" /> : <WorkflowStatusGlyph status={glyph} recorded />}</span>
         <span className="wf-agent__label"><span className="wf-agent__name" title={observation.label}>{observation.label}</span></span>
         <span className="wf-agent__meta" title="Last recorded target state">
@@ -166,7 +195,7 @@ export function RecordedAgentRow({ observation }: {
         </span>
       </button>
     </li>
-    <li id={detailId} className="wf-detail" data-for-recorded-agent={observation.id} hidden={!expanded} inert={!expanded}>
+    <li ref={detail} id={detailId} className="wf-detail" data-for-recorded-agent={observation.id} data-enter-feedback={feedback || undefined} hidden={!expanded} inert={!expanded}>
       <dl><div><dt>Native reference</dt><dd>{observation.source}</dd></div>
         {state ? <div><dt>Last recorded state</dt><dd>{state}</dd></div> : null}</dl>
       {observation.message === undefined ? null : <pre className="wf-native-process__text">{observation.message}</pre>}
@@ -182,7 +211,12 @@ export function ObservedProcessDock({ title, source, summary, action, onClose }:
   action?: ReactNode
   onClose: () => void
 }) {
-  return <aside className="wf-observed-dock" aria-label={title}>
+  const element = useRef<HTMLElement>(null)
+  const [feedback, setFeedback] = useState(true)
+  useLayoutEffect(() => {
+    if (feedback) return finishDisclosureFeedback(element.current, () => setFeedback(false))
+  }, [feedback])
+  return <aside ref={element} className="wf-observed-dock" data-enter-feedback={feedback || undefined} aria-label={title}>
     <header className="wf-observed-dock__header">
       <strong>{title}</strong>
       <button type="button" className="wf-observed-dock__close" aria-label="取消固定过程摘要" onClick={onClose}>
