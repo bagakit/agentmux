@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import {act} from 'react'
+import {chooseField} from './helpers/selection-field'
 import {beforeAll,afterAll,expect,it,vi} from 'vitest'
 import type {NodeSettings,NodePublication} from '@agentmux/core/node-publishing'
 import {SettingsPanel} from '../src/renderer/src/components/SettingsPanel'
@@ -14,7 +15,7 @@ const publication=(published=false,id='local'):NodePublication=>({node:identity(
 const icon=()=>dom.container.querySelector<HTMLElement>('[data-settings-target="network-node"] [data-node-publication]')!
 async function input(value:string){await act(async()=>{const n=dom.container.querySelector<HTMLInputElement>('[aria-label="Node alias"]')!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(n,value);n.dispatchEvent(new Event('input',{bubbles:true}))})}
 async function paths(label:string,value:string){await act(async()=>{const n=dom.container.querySelector<HTMLTextAreaElement>(`[aria-label="${label}"]`)!;Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(n,value);n.dispatchEvent(new Event('input',{bubbles:true}))})}
-async function choose(value:string){await act(async()=>{const n=dom.container.querySelector<HTMLSelectElement>('[aria-label="Node to manage"]')!;n.value=value;n.dispatchEvent(new Event('change',{bubbles:true}))})}
+async function choose(value:string){const field=dom.container.querySelector<HTMLElement>('[aria-label="Node to manage"]')!;expect(field).not.toBeNull();await chooseField(field,value)}
 async function ready(){await vi.waitFor(()=>expect(dom.container.querySelector('[aria-label="Node alias"]')).not.toBeNull())}
 function leaves(published=false){const read=vi.spyOn(api.nodePublishing,'call').mockResolvedValue(publication(published) as never),owner=vi.spyOn(api.nodePublishing,'owner').mockResolvedValue(settings(published) as never);return{read,owner}}
 it('the real Settings sidebar and Overview share one publication read, accessible current facts and the authored semantic family',async()=>{
@@ -54,6 +55,28 @@ it('late target reads cannot recolor the selected original Node, and current fai
  await choose('farm');await vi.waitFor(()=>expect(icon().dataset.nodePublicationHost).toBe('farm'));expect(icon().dataset.nodePublication).toBe('unknown')
  await choose('local');await ready();await act(async()=>finish(settings(true,'farm')));expect(icon().dataset.nodePublicationHost).toBe('local');expect(icon().dataset.nodePublication).toBe('private')
  fail=true;await dom.click('[data-settings-field="publishing"] > header button');expect(icon().dataset.nodePublication).toBe('unknown');expect(icon().getAttribute('aria-label')).toContain('Last confirmed private');expect(icon().getAttribute('aria-label')).toContain('Original read unavailable')
+})
+it('a missing saved Host keeps its raw identity and never substitutes local policy until explicitly selected',async()=>{
+ const{read,owner}=leaves(false)
+ await dom.render(<SettingsPanel initialSection="network-node" navigationRequest={{section:'network-node',hostId:'missing-host'}} onClose={vi.fn()}/>)
+ const trigger=dom.container.querySelector<HTMLButtonElement>('[aria-label="Node to manage"]')!
+ await vi.waitFor(()=>expect(trigger.dataset.value).toBe('missing-host'))
+ expect(trigger.textContent).toContain('Original saved Host unavailable');expect(trigger.title).toContain('missing-host');expect(trigger.disabled).toBe(false)
+ expect(trigger.getAttribute('aria-labelledby')).toContain('node-to-manage-label');expect(trigger.getAttribute('aria-describedby')).toContain('node-to-manage-hint')
+ const hintId=trigger.getAttribute('aria-describedby')!.split(/\s+/).find(id=>id.startsWith('node-to-manage-hint-'))!
+ expect(document.getElementById(hintId)?.textContent).toContain('no replacement target is selected automatically')
+ expect(dom.container.querySelector('[aria-label="Node alias"]')).toBeNull();expect(read).not.toHaveBeenCalled();expect(owner).not.toHaveBeenCalled()
+ await choose('local');await ready();expect(trigger.dataset.value).toBe('local');expect(owner).toHaveBeenCalled()
+})
+it('Node menus distinguish duplicate Host labels by stable ID',async()=>{
+ const{read: _read,owner: _owner}=leaves(false)
+ useAppStore.setState({config:{...composerConfig,hosts:[composerConfig.hosts[0]!,{id:'farm',kind:'ssh',label:'Development',hostname:'private.invalid',runtimeId:'farm-runtime'},{id:'farm-2',kind:'ssh',label:'Development',hostname:'other.invalid',runtimeId:'farm-2-runtime'}]}})
+ await dom.render(<SettingsPanel initialSection="network-node" onClose={vi.fn()}/>)
+ const trigger=dom.container.querySelector<HTMLButtonElement>('[aria-label="Node to manage"]')!
+ await act(async()=>trigger.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})))
+ await vi.waitFor(()=>expect(document.querySelector('.selection-field__menu [data-value="farm-2"]')).not.toBeNull())
+ expect(document.querySelector('.selection-field__menu [data-value="farm"]')?.textContent).toBe('Development · Remote Host · farm')
+ expect(document.querySelector('.selection-field__menu [data-value="farm-2"]')?.textContent).toBe('Development · Remote Host · farm-2')
 })
 it('a hidden Settings releases its sole Overview reader and ignores its late publication result without sampling resources',async()=>{
  let finish!:(value:NodePublication)=>void,signal!:AbortSignal

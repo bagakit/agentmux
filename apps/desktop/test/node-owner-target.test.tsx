@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import {act} from 'react'
+import {chooseField} from './helpers/selection-field'
 import {beforeAll,afterAll,expect,it,vi} from 'vitest'
 import {EventEmitter} from 'node:events'
 import {mkdtemp,mkdir,rm} from 'node:fs/promises'
@@ -41,7 +42,7 @@ let dispose:(()=>void)|undefined
 beforeAll(async()=>{dispose=await useAppStore.getState().initialize()})
 afterAll(()=>dispose?.())
 async function input(value:string){await act(async()=>{const n=dom.container.querySelector<HTMLInputElement>('[aria-label="Node alias"]')!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(n,value);n.dispatchEvent(new Event('input',{bubbles:true}))})}
-async function choose(hostId:string){await act(async()=>{const n=dom.container.querySelector<HTMLSelectElement>('[aria-label="Node to manage"]')!;n.value=hostId;n.dispatchEvent(new Event('change',{bubbles:true}))})}
+async function choose(hostId:string){const field=dom.container.querySelector<HTMLElement>('[aria-label="Node to manage"]')!;expect(field).not.toBeNull();await chooseField(field,hostId)}
 async function alias(value:string){await vi.waitFor(()=>expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Node alias"]')?.value,dom.container.textContent??'').toBe(value))}
 const props=()=>({config:useAppStore.getState().config!,active:true,onClose:vi.fn(),onNavigate:vi.fn()})
 async function fixture(actor?: 'managed'){
@@ -124,7 +125,7 @@ it.each(['confirmed','unknown','route-changed'] as const)('switching Nodes prese
 it('an unavailable saved Node stays selected and never substitutes a local policy or listener',async()=>{
  const f=await fixture(),farm=f.cores[1]!
  farm.carrier.forwardRpc=async()=>{throw Object.assign(Error('Original Core has no Node owner interface. Upgrade this saved Host and refresh.'),{code:'RPC_METHOD_NOT_FOUND'})}
- try{await dom.render(<NetworkNodeSettingsPane {...props()} navigationRequest={{section:'network-node',hostId:'farm'}}/>);await vi.waitFor(()=>expect(dom.container.textContent).toContain('Original Core has no Node owner interface'));expect(dom.container.querySelector('[aria-label="Node alias"]')).toBeNull();expect(dom.container.querySelector('[data-settings-field="incoming"]')).toBeNull();expect(dom.container.querySelector<HTMLSelectElement>('[aria-label="Node to manage"]')?.value).toBe('farm');expect(f.cores[0]!.calls).toHaveLength(0)}finally{await f.dispose()}
+ try{await dom.render(<NetworkNodeSettingsPane {...props()} navigationRequest={{section:'network-node',hostId:'farm'}}/>);await vi.waitFor(()=>expect(dom.container.textContent).toContain('Original Core has no Node owner interface'));expect(dom.container.querySelector('[aria-label="Node alias"]')).toBeNull();expect(dom.container.querySelector('[data-settings-field="incoming"]')).toBeNull();expect(dom.container.querySelector<HTMLElement>('[aria-label="Node to manage"]')?.dataset.value).toBe('farm');expect(f.cores[0]!.calls).toHaveLength(0)}finally{await f.dispose()}
 })
 
 it.each(['Node editor','Host panel'] as const)('independent Host diagnostics failure cannot close an available %s or owner resource reader',async surface=>{

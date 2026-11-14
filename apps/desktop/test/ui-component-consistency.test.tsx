@@ -14,6 +14,7 @@ const expectedSelectionConsumers = [
   'MoteQuickMode', 'NoteConflictReview', 'RetainedDocumentDraftNotice', 'SessionLearningSurface', 'SessionTakeoverSurface',
   'SourceAgentTargetSetup', 'SurveyMoveTabsDialog', 'SurveyProfilePicker', 'settings/BotEnrollmentPane', 'settings/BrowserSettingsPane',
   'settings/FocusMapSettings', 'settings/AgentSettingsPane', 'FocusTimelineRulerSettings', 'settings/RemoteRoutesPane',
+  'settings/HostSettingsPane', 'settings/NetworkNodeSettingsPane',
 ].map(name => `apps/desktop/src/renderer/src/components/${name}.tsx`)
 let inventory
 
@@ -37,8 +38,6 @@ describe('production UI component inventory', () => {
   it('covers native select surfaces and names independently verifiable follow-up work', () => {
     const nativeFiles = new Set(inventory.nativeSelects.map(item => item.file))
     for (const file of [
-      'apps/desktop/src/renderer/src/components/settings/HostSettingsPane.tsx',
-      'apps/desktop/src/renderer/src/components/settings/NetworkNodeSettingsPane.tsx',
       'apps/mobile/src/goals/MobileGoalsSurface.tsx',
       'apps/mobile/src/goals/MobileGoalCreate.tsx',
     ]) expect(nativeFiles.has(file)).toBe(true)
