@@ -5,6 +5,9 @@ import type { ConversationProcessDetailReader } from '../lib/read-conversation-p
 import { projectConversationWindow } from '../lib/conversation-records.js'
 import { ConversationBodyWorkContext } from './ConversationProgressiveBody.js'
 import { ConversationReadingCommit } from './ConversationReadingCommit.js'
+import { ConversationDetailRecord, protectedConversationDetailRecords } from './ConversationDetailRecord.js'
+import { conversationRecordVisibleAtLevel, resolveConversationDetailLevel } from '../lib/conversation-detail-level.js'
+import { useClientUiPlatform } from '../platform.js'
 import type { ConversationReadingGeometry } from '../lib/conversation-body-work.js'
 import { ConversationCoverage } from './ConversationCoverage.js'
 import { CapturedProcessRecord } from './CapturedProcessRecord.js'
@@ -83,10 +86,14 @@ type Props = ReadingProps & {
 export const ConversationView = memo(function ConversationView({
   presentation, readingGeometry, readProcessDetail, page: acceptedPage, timeline, records: acceptedRecords, originalRecords: acceptedOriginals, coverage, coverageSummary, onLocateRecord, renderCapturedRecord, readActivity, questionAnswerContext, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary: acceptedBoundary, renderMessageActions, renderRecordActions, messageIdForRecord, showSource = false, insertions: acceptedInsertions, questionReplyRoute, questionReplyTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange, onQuestionReply, renderQuestionNotice, ...reading
 }: Props) {
+  const detailLevel = resolveConversationDetailLevel(useClientUiPlatform().conversationDetailLevel)
   const frame = useMemo(() => ({ records: acceptedRecords, originalRecords: acceptedOriginals ?? acceptedRecords,
     coverage: coverage ?? acceptedRecords[0]?.coverage ?? [], page: acceptedPage, recordBoundary: acceptedBoundary, insertions: acceptedInsertions }),
     [acceptedRecords, acceptedOriginals, coverage, acceptedPage, acceptedBoundary, acceptedInsertions])
   const sourceKey = JSON.stringify([reading.executionHostId, sessionId, timeline?.stream?.epoch])
+  const detailScope = JSON.stringify([sourceKey, detailLevel])
+  const [extraDetails, setExtraDetails] = useState({ scope: detailScope, expanded: false })
+  if (extraDetails.scope !== detailScope) setExtraDetails({ scope: detailScope, expanded: false })
   const boundaryRecord = acceptedRecords.find(record => record.source.kind === 'native' && record.rawId === acceptedBoundary?.beforeRecordId)
   const layout = useConversationRecordLayout(frame, sourceKey, { ...(boundaryRecord ? { beforeRecordId: boundaryRecord.presentationKey ?? boundaryRecord.id } : {}),
     ...(acceptedInsertions ? { anchors: acceptedInsertions } : {}), active: reading.active !== false, ...(readingGeometry ? { geometry: readingGeometry } : {}), ...(presentation ? { presentation, intent: presentation.intent } : {}) })
@@ -133,6 +140,12 @@ export const ConversationView = memo(function ConversationView({
   const locatedRecord = locatedMessageKey ? describedRecords.find(record => conversationMessageSourceKey(sessionId, record.source) === locatedMessageKey
     || record.deferred?.records.some(source => conversationMessageSourceKey(sessionId, source.reference!.source) === locatedMessageKey)
     || record.records?.some(source => originals.has(source.id) && conversationMessageSourceKey(sessionId, originals.get(source.id)!.source) === locatedMessageKey)) : undefined
+  const recordKey = (record: ConversationRecord) => record.presentationKey ?? record.id
+  const protectedRecords = protectedConversationDetailRecords(layout.root.current, new Set(describedRecords.map(recordKey)))
+  if (locatedRecord) protectedRecords.add(recordKey(locatedRecord))
+  const additional = describedRecords.filter(record => !conversationRecordVisibleAtLevel(record, detailLevel) && !protectedRecords.has(recordKey(record)))
+  const showAdditional = extraDetails.scope === detailScope && extraDetails.expanded
+  const isRecordVisible = (record: ConversationRecord) => showAdditional || conversationRecordVisibleAtLevel(record, detailLevel) || protectedRecords.has(recordKey(record))
   function renderCaptured(record: ConversationRecord, canonicalDisclosure?: ConversationProcessProps['disclosure'], feed = false): ReactNode {
     // Process disclosures keep the original record's source-qualified key.
     const key = record.presentationKey ?? record.id
@@ -195,9 +208,10 @@ export const ConversationView = memo(function ConversationView({
   }
   const renderRecord: ConversationRecordRenderer = (record, wrapBody, disclosure) => {
     const outcome = conversationRecordTurnOutcome(record)
-    return outcome?.status === 'failed' ? <ConversationTurnFailure record={record} failure={outcome.failure}>
+    const visible = isRecordVisible(record)
+    return <ConversationDetailRecord visible={visible}>{outcome?.status === 'failed' ? <ConversationTurnFailure record={record} failure={outcome.failure}>
       {() => renderRecordBody(record, undefined, disclosure)}
-    </ConversationTurnFailure> : renderRecordBody(record, wrapBody, disclosure)
+    </ConversationTurnFailure> : renderRecordBody(record, wrapBody, disclosure)}</ConversationDetailRecord>
   }
   const renderRecordBody: ConversationRecordRenderer = (record, wrapBody, disclosure) => record.original.kind === 'deferred'
     ? <DeferredConversationProcess key={conversationDeferredMountKey(record)}
@@ -296,12 +310,18 @@ export const ConversationView = memo(function ConversationView({
   return <ConversationBodyWorkContext.Provider value={bodyScope}><ConversationReadingCommit work={layout.bodyWork} preserve={layout.preserve}><section ref={layout.root} className="conversation-native-thread" aria-label="Conversation"
     data-native-provider={page?.source.providerId} data-native-source={describedRecords.some(record => record.original.kind === 'captured') || insertions?.length || !page ? undefined : JSON.stringify([page.source.providerId, page.source.nativeSessionId])}>
     <ConversationCoverage coverage={projection.coverage} summary={coverageSummary} {...(onLocateRecord ? { onLocate: onLocateRecord } : {})} />
+    {additional.length > 0 ? <div className="conversation-detail-summary">
+      <button type="button" aria-expanded={showAdditional} title="仅当前已加载窗口，不改变保存的详情档位"
+        onClick={() => setExtraDetails({ scope: detailScope, expanded: !showAdditional })}>
+        {showAdditional ? '收起附加内容' : `显示 ${additional.length} 条已加载附加内容`}
+      </button>
+    </div> : null}
     {layout.held ? <p className="conversation-metrics__notice" role="status">{layout.reason === 'anchor' ? '保留当前阅读位置，移开后更新消息。' : layout.reason === 'focus' ? '保留当前焦点，移开后更新消息。' : '保留选区，取消选择后更新已确认的消息关系。'}</p> : null}
     {showSource && page ? <div className="conversation-native-thread__source" title={`Native session ${page.source.nativeSessionId}`}>
       <span>{page.source.providerId} · Native conversation</span>
       <span>{describedRecords.length} {describedRecords.length === 1 ? 'record' : 'records'} · Current window</span>
     </div> : null}
-    <ConversationRecordSequence records={describedRecords} sequence={layout.sequence} sourceKey={sourceKey}
+    <ConversationRecordSequence records={describedRecords} sequence={layout.sequence} sourceKey={sourceKey} isRecordVisible={isRecordVisible}
       locatedRecordId={locatedRecord ? locatedRecord.presentationKey ?? locatedRecord.id : undefined}
       {...(page ? { nativeSourceKey: JSON.stringify([page.source.providerId, page.source.nativeSessionId]) } : {})}
       {...(insertions ? { insertions } : {})}

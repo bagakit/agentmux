@@ -27,8 +27,11 @@ function placements(frame: ConversationPresentationFrame, sequence: Conversation
   for (const row of sequence.rows) {
     if (row.kind === 'process') {
       result.set(row.id, { version: JSON.stringify(row.entries.map(entry => entry.kind === 'record'
-        ? [conversationPresentationKey(entry.record), version(entry.record)] : ['anchor', entry.insertion.key])), parent: undefined })
-      for (const entry of row.entries) if (entry.kind === 'anchor') anchor(entry.insertion.key, row.id)
+        ? [conversationPresentationKey(entry.record), version(entry.record)] : ['anchor', entry.kind === 'boundary' ? 'history-boundary' : entry.insertion.key])), parent: undefined })
+      for (const entry of row.entries) {
+        if (entry.kind === 'anchor') anchor(entry.insertion.key, row.id)
+        else if (entry.kind === 'boundary') anchor('history-boundary', row.id)
+      }
     } else if (row.kind === 'anchor') anchor(row.insertion.key)
     else if (row.kind === 'boundary') anchor('history-boundary')
   }
@@ -105,7 +108,8 @@ export function useConversationRecordLayout<T extends ConversationPresentationFr
   const anchorPositions = JSON.stringify(anchors.map(({ key, beforeRecordId }) => [key, beforeRecordId]))
   // Committing this projection changes the retained groups, not its structural input.
   // Reuse it for local disclosure/selection updates; only new records or slots reproject.
-  const sequence = useMemo(() => projectConversationRecordSequence(frame.records, sourceKey, prior?.sequence.groups, beforeRecordId, anchors),
+  const sequence = useMemo(() => projectConversationRecordSequence(frame.records, sourceKey, prior?.sequence.groups, beforeRecordId, anchors,
+    new Set(prior?.sequence.rows.flatMap(row => row.kind === 'record' ? [conversationPresentationKey(row.record)] : []))),
     [frame.records, sourceKey, beforeRecordId, anchorPositions])
   const incoming = useMemo(() => placements(frame, sequence), [frame.records, frame.originalRecords, sequence])
   const changedFrame = prior !== null && prior.frame !== frame
@@ -125,7 +129,8 @@ export function useConversationRecordLayout<T extends ConversationPresentationFr
         const boundary = candidate.records.find(record => conversationPresentationKey(record) === options?.beforeRecordId
           || record.source.kind === 'native' && record.rawId === options?.beforeRecordId)
         const next = projectConversationRecordSequence(candidate.records, sourceKey, accepted.sequence.groups,
-          boundary ? conversationPresentationKey(boundary) : undefined, anchors)
+          boundary ? conversationPresentationKey(boundary) : undefined, anchors,
+          new Set(accepted.sequence.rows.flatMap(row => row.kind === 'record' ? [conversationPresentationKey(row.record)] : [])))
         pendingReason.current = protection(root.current, accepted.placements, placements(candidate, next), options?.preserveAnchor !== false && !geometry?.following())
         return pendingReason.current === null
       }

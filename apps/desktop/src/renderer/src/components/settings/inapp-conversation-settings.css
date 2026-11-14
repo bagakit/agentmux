@@ -1,4 +1,9 @@
 .inapp-conversation { gap: 0; }
+.inapp-conversation__reading-detail { padding-bottom: var(--sp-5); margin-bottom: var(--sp-5); border-bottom: 1px solid var(--line-soft); }
+.inapp-conversation__reading-detail > label { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
+.inapp-conversation__reading-detail select { min-height: 28px; padding: var(--sp-1) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: inherit; }
+.inapp-conversation__reading-detail select:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }
+@media (pointer: coarse) { .inapp-conversation__reading-detail select { min-height: 44px; } }
 .inapp-conversation h3 { margin: 0 0 var(--sp-2); color: var(--text); font-size: var(--fs-body); font-weight: 600; }
 .inapp-conversation .settings-group-note { max-width: 70ch; margin: 0; font-size: var(--fs-meta); line-height: 1.6; }
 .inapp-conversation__intro { padding-bottom: var(--sp-5); }

@@ -7,22 +7,28 @@ import { DEFAULT_THEME_ID, getThemeCatalog } from '@agentmux/client-ui/theme'
 import { APP_APPEARANCE_DEFAULT, MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT } from '../../../../../shared/contracts'
 import type { SettingsModule } from '../settings-catalog'
 import { DocumentationNavigation } from '../../documentation/DocumentationNavigation'
+import { CONVERSATION_DETAIL_LEVELS, CONVERSATION_DETAIL_LABELS, isConversationDetailLevel, resolveConversationDetailLevel } from '@agentmux/client-ui/conversation-detail-level'
+import { useSettingDraftRecord } from '../use-setting-draft'
+import { SettingsSaveBar, useSettingsSave } from '../SettingsSaveBar'
+import { saveConfigSlice } from '../save-config-slice'
+import { configValuesEqual } from '../../../../../shared/config-edit'
 import '../inapp-conversation-settings.css'
 
 export const inappConversationSettingsModule = {
-  id: 'inapp-conversation', archetype: 'reference',
+  id: 'inapp-conversation', archetype: 'preference',
   group: 'conversation-channels',
   title: 'InApp',
   description: 'The app conversation view, shared input preferences and reading references.',
   icon: semanticIconComponent('object.conversations'),
   keywords: 'inapp in-app conversation activity terminal view reading input messages 对话 应用内 阅读 消息',
   searchTargets: [
+    { id: 'reading-detail', title: '阅读详情', keywords: 'detail simple snapshot subagent system usage 简洁 快照 协作 系统 用量' },
     { id: 'conversation-view', title: 'Conversation view', keywords: 'activity terminal switch mode', kind: 'info' },
     { id: 'input-preferences', title: 'User Input', keywords: 'layout shortcut input prefixes', kind: 'action' },
     { id: 'appearance-preferences', title: 'Appearance', keywords: 'theme application typography', kind: 'action' },
     { id: 'references', title: 'Keyboard shortcuts and amux Protocols', keywords: 'read-only reference message format', kind: 'action' },
   ],
-  savedSummary: () => 'Conversation view and shared preferences',
+  savedSummary: config => `阅读详情 · ${CONVERSATION_DETAIL_LABELS[resolveConversationDetailLevel(config.appearance.conversationDetailLevel)].title}`,
   Pane({ config, onNavigate }) {
     const documentation = useContext(DocumentationNavigation)!
     const host = useClientUiPlatform()
@@ -34,6 +40,7 @@ export const inappConversationSettingsModule = {
     const question = 'Summarize the proposed changes.'
     const answer = 'The input keeps your draft while you switch views. **Review the changes** before sending the next message.'
     return <div className="settings-pane-stack inapp-conversation" data-inapp-conversation-settings>
+      <ReadingDetailPreference value={config.appearance.conversationDetailLevel} />
       <section className="inapp-conversation__intro" data-settings-field="conversation-view">
         <h3>One Session, two views</h3>
         <p className="settings-group-note">Read messages and work in the same Agent Session. Use Show Activity or Show Terminal in its input toolbar to switch that Agent’s view.</p>
@@ -75,3 +82,26 @@ export const inappConversationSettingsModule = {
     </div>
   }
 } as const satisfies SettingsModule
+
+function ReadingDetailPreference({ value }: { value: unknown }) {
+  const draft = useSettingDraftRecord({ level: value }, configValuesEqual)
+  const save = useSettingsSave()
+  const selected = resolveConversationDetailLevel(draft.value.level)
+  const unrecognized = draft.value.level !== undefined && !isConversationDetailLevel(draft.value.level)
+  async function commit() {
+    const submitted = draft.beginSave()
+    const committed = await save.run(async () => {
+      await saveConfigSlice((current, level: unknown) => ({ ...current, appearance: { ...current.appearance, conversationDetailLevel: level } }), submitted.value.level, submitted.expected.level)
+    })
+    submitted.finish(committed)
+  }
+  return <section className="inapp-conversation__reading-detail" data-settings-field="reading-detail">
+    <label><span>阅读详情</span><select aria-label="阅读详情" value={unrecognized ? '' : selected} onChange={event => {
+      if (isConversationDetailLevel(event.target.value)) draft.setField('level', event.target.value)
+    }}>{unrecognized ? <option value="" disabled>未识别 · 暂显示全部</option> : null}{CONVERSATION_DETAIL_LEVELS.map(level => <option key={level} value={level}>{CONVERSATION_DETAIL_LABELS[level].title}</option>)}</select></label>
+    <p className="settings-group-note">{CONVERSATION_DETAIL_LABELS[selected].description}。较高档包含较低档内容，原文仍可按需查看。</p>
+    {value !== undefined && !isConversationDetailLevel(value) ? <p className="settings-group-note" role="status">保存的档位未识别，暂显示全部内容；可重新选择后保存。</p> : null}
+    <SettingsSaveBar save={save} dirty={draft.dirty} scopeLabel="阅读详情" label="保存" onSave={() => void commit()}
+      resolution={{ useSaved: draft.useSaved, keepMine: draft.keepMine }} />
+  </section>
+}

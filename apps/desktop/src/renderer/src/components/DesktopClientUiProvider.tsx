@@ -1,4 +1,5 @@
 import { ClientUiProvider, type ClientUiPlatform, type ConversationSenderDetails } from '@agentmux/client-ui'
+import { resolveConversationDetailLevel } from '@agentmux/client-ui/conversation-detail-level'
 import { lazy, Suspense, useMemo, type ReactNode } from 'react'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { useWorkbenchDocument } from '../lib/workbench-document'
@@ -97,10 +98,11 @@ const desktopPlatform: ClientUiPlatform = {
 
 /** Electron IO, the Desktop identity surface and its workface focus policy stay in this client. */
 export function DesktopClientUiProvider({ children, document: presentationDocument }: { children: ReactNode; document?: Document }) {
+  const detailLevel = useAppStore(state => state.config?.appearance.conversationDetailLevel)
   const contextDocument = useWorkbenchDocument()
   const ownerDocument = presentationDocument ?? contextDocument
-  const platform = useMemo<ClientUiPlatform>(() => ({ ...desktopPlatform, ownerDocument,
+  const platform = useMemo<ClientUiPlatform>(() => ({ ...desktopPlatform, ownerDocument, conversationDetailLevel: resolveConversationDetailLevel(detailLevel),
     overlayContainer: () => resolveOverlayContainer(undefined, ownerDocument)
-  }), [ownerDocument])
+  }), [ownerDocument, detailLevel])
   return <CapsuleQuestionEditorsContext.Provider value={capsuleQuestionEditors}><ClientUiProvider platform={platform}>{children}</ClientUiProvider></CapsuleQuestionEditorsContext.Provider>
 }

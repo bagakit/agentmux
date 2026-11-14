@@ -2,6 +2,11 @@
 .conversation-input-details__toggle { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); cursor: pointer; }
 .conversation-input-details__toggle:hover, .conversation-input-details__toggle[aria-expanded='true'] { color: var(--text); background: var(--wash-2); }
 .conversation-input-details__toggle:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }
+/* Keep the original target and tab stop; quiet metadata never changes touch geometry. */
+@media (hover: hover) and (pointer: fine) {
+  .log-turn:not([data-status='failed'], [data-status='unverified']):not(:hover, :focus-within) > .log-turn__head > .conversation-input-details > .conversation-input-details__toggle[aria-expanded='false'] { opacity: 0; }
+  .log-turn:is(:hover, :focus-within) > .log-turn__head > .conversation-input-details > .conversation-input-details__toggle { opacity: 1; }
+}
 .conversation-input-details__body { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); flex-basis: 100%; gap: var(--sp-3) var(--sp-5); min-width: 0; margin-top: var(--sp-1); padding: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text-2); font-size: var(--fs-meta); line-height: 1.45; overflow-wrap: anywhere; }
 .conversation-input-details__body dl { display: grid; grid-template-columns: minmax(0, 94px) minmax(0, 1fr); align-content: start; gap: var(--sp-1) var(--sp-3); margin: 0; }
 .conversation-input-details__body dt { color: var(--text-3); font-size: var(--fs-micro); }

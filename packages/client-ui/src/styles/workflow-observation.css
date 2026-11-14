@@ -20,6 +20,9 @@
 .wf-observation__actions > button:hover, .wf-observed-dock__actions > button:hover, .wf-observed-dock__close:hover { color: var(--text); background: var(--surface-2); }
 .wf-observation__actions > button { min-height: 24px; min-width: 24px; padding-block: 0; }
 .wf-observation__actions > button[aria-pressed='true'] { color: var(--text); background: var(--surface-2); }
+/* A folded loaded interval recedes; original issues and user attention stay explicit. */
+.wf-card--observation:not([data-status='failed'], [data-status='paused'], [data-status='queued']):not(:has(> [role='status'], > [role='alert'])) > .wf-observation__header:not(:hover, :focus-within) > .wf-head[aria-expanded='false'] :is(.wf-observation__label, .log-fold__steps) { color: var(--text-3); opacity: .65; font-weight: 400; }
+.wf-card--observation:not([data-status='failed'], [data-status='paused'], [data-status='queued']):not(:has(> [role='status'], > [role='alert'])) > .wf-observation__header:not(:hover, :focus-within):has(> .wf-head[aria-expanded='false']) > .wf-observation__actions > button:not([aria-pressed='true']) { opacity: .6; }
 .wf-observation__header > .wf-head:focus-visible, .wf-observation__actions > button:focus-visible, .wf-observed-dock button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }
 .wf-observation__summary { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); padding: var(--sp-2) var(--sp-3); color: var(--text-2); font-size: var(--fs-micro); }
 .wf-observation__caption { margin-right: auto; color: var(--text-3); }
@@ -30,6 +33,10 @@
 .native-process-observation__issue { display: flex; align-items: baseline; gap: var(--sp-2); margin: var(--sp-2) var(--sp-3) var(--sp-3) calc(var(--conversation-disclosure-padding) + 20px + var(--sp-2)); color: var(--red-text); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; }
 .native-process-observation__issue > .semantic-icon { flex: none; align-self: flex-start; margin-top: var(--sp-1); }
 .wf-card--observation > .wf-observation__body { margin: var(--sp-1) 0 var(--sp-2); border: 0; padding: 0; }
+/* Keep original reading slots, without an empty heading or padding at a lower tier. */
+.native-process-observation[data-no-visible-process] > .wf-card--observation { margin-block: 0; }
+.native-process-observation[data-no-visible-process] > .wf-card--observation > .wf-observation__header { display: none; }
+.native-process-observation[data-no-visible-process] > .wf-card--observation > .wf-observation__body { margin-block: 0; }
 
 .wf-tool-row.wf-tool-row--observation { display: grid; grid-template-columns: 16px minmax(0, 1fr) 56px auto; align-items: center; gap: var(--sp-2); width: 100%; min-width: 0; min-height: 24px; margin: 0; padding: var(--sp-1) var(--sp-4); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); box-shadow: none; font: var(--fs-meta)/1.5 var(--font-sans); text-align: left; }
 .wf-tool-row--observation[data-expandable] { cursor: pointer; }

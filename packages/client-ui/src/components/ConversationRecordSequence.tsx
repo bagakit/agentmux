@@ -23,8 +23,10 @@ export type ConversationProcessProps = {
   /** Initial disclosure of the latest loaded process; never a live execution state. */
   initiallyExpanded?: boolean
   records: readonly ConversationRecord[]
+  /** Presentation only: original records, parents, keys and metrics remain intact. */
+  isRecordVisible?: (record: ConversationRecord) => boolean
   renderRecord: ConversationRecordRenderer
-  entries: readonly ({ kind: 'record'; record: ConversationRecord } | { kind: 'anchor'; key: string; content: ReactNode })[]
+  entries: readonly ({ kind: 'record'; record: ConversationRecord; hasMetrics?: boolean } | { kind: 'anchor'; key: string; content: ReactNode } | { kind: 'boundary'; content: ReactNode })[]
   metrics?: ConversationMetricsObservation
   disclosure?: {
     expanded?: boolean
@@ -42,7 +44,7 @@ export type ConversationRecordInsertion = ConversationSequenceInsertion & { cont
 
 /** Only accepted rows enter this renderer. Disclosure uses one presentation identity. */
 export function ConversationRecordSequence({ records, sequence, sourceKey, renderRecord, renderProcess, recordBoundary,
-  insertions = [], nativeSourceKey, locatedRecordId
+  insertions = [], nativeSourceKey, locatedRecordId, isRecordVisible
 }: {
   records: readonly ConversationRecord[]
   sequence: ConversationSequence
@@ -53,6 +55,7 @@ export function ConversationRecordSequence({ records, sequence, sourceKey, rende
   insertions?: readonly ConversationRecordInsertion[]
   nativeSourceKey?: string
   locatedRecordId?: string | undefined
+  isRecordVisible?: (record: ConversationRecord) => boolean
 }) {
   const [disclosure, setDisclosure] = useState<{ source: string; groups: ReadonlyMap<string, boolean>; steps: ReadonlyMap<string, boolean> }>({ source: sourceKey, groups: new Map(), steps: new Map() })
   const choices = disclosure.source === sourceKey ? disclosure : { groups: new Map<string, boolean>(), steps: new Map<string, boolean>() }
@@ -105,22 +108,37 @@ export function ConversationRecordSequence({ records, sequence, sourceKey, rende
   }
   const anchors = new Map(insertions.map(entry => [entry.key, entry]))
   const renderAnchor = (key: string) => <div key={JSON.stringify(['anchor', key])} data-conversation-layout-key={JSON.stringify(['anchor', key])}>{anchors.get(key)?.content}</div>
+  const renderBoundary = () => <div key={JSON.stringify([sourceKey, 'boundary'])} data-conversation-layout-key={JSON.stringify(['anchor', 'history-boundary'])}>{recordBoundary?.content}</div>
   let latestProcessId: string | undefined
-  for (const row of sequence.rows) if (row.kind === 'process' && row.records.some(record => !conversationProcessPeer(record))) latestProcessId = row.id
-  return <>{sequence.rows.map(row => row.kind === 'record' ? renderOne(row.record)
-    : row.kind === 'anchor' ? renderAnchor(row.insertion.key)
-    : row.kind === 'boundary' ? <div key={JSON.stringify([sourceKey, 'boundary'])} data-conversation-layout-key={JSON.stringify(['anchor', 'history-boundary'])}>{recordBoundary?.content}</div>
-    : <div key={row.id} className="conversation-record-process" data-conversation-layout-key={row.id} data-conversation-process-key={row.id}
+  for (const row of sequence.rows) if (row.kind === 'process' && row.records.some(record => !conversationProcessPeer(record) && isRecordVisible?.(record) !== false)) latestProcessId = row.id
+  return <>{sequence.rows.map(row => {
+    if (row.kind === 'record') return renderOne(row.record)
+    if (row.kind === 'anchor') return renderAnchor(row.insertion.key)
+    if (row.kind === 'boundary') return renderBoundary()
+    const hidden = !row.entries.some(entry => entry.kind !== 'record') && !row.records.some(record => {
+      const item = record.original.kind === 'native' ? record.original.item : record.original.kind === 'deferred' && record.original.item.kind === 'native' ? record.original.item.item : undefined
+      return isRecordVisible?.(record) !== false || item && metrics.has(item.id)
+    })
+    return <div key={row.id} className="conversation-record-process" data-conversation-layout-key={row.id} data-conversation-process-key={row.id}
+      hidden={hidden} inert={hidden}
       data-native-source={nativeSourceKey} data-conversation-process-members={JSON.stringify(processMembers(row.records))}>
       {(() => {
         const disclosure = disclosureFor(row.records)
-        if (!renderProcess) return row.entries.map(entry => entry.kind === 'record' ? renderOne(entry.record, undefined, disclosure) : renderAnchor(entry.insertion.key))
+        if (!renderProcess) return row.entries.map(entry => entry.kind === 'record' ? renderOne(entry.record, undefined, disclosure)
+          : entry.kind === 'boundary' ? renderBoundary() : renderAnchor(entry.insertion.key))
         const observed = row.records.flatMap(record => !conversationProcessPeer(record) && record.source.kind === 'native' && metrics.has(record.rawId) ? [metrics.get(record.rawId)!] : [])
         const summary = observed.length === 1 && row.records.every(record => record.source.kind === 'native') ? observed[0] : undefined
         return renderProcess({ id: row.id, records: row.records, ...(row.id === latestProcessId ? { initiallyExpanded: true } : {}),
+          ...(isRecordVisible ? { isRecordVisible } : {}),
           renderRecord: (record, wrapBody, stepDisclosure) => renderOne(record, wrapBody, stepDisclosure ?? disclosure, conversationProcessPeer(record), !summary || conversationProcessPeer(record)),
-          entries: row.entries.map(entry => entry.kind === 'record' ? entry : { kind: 'anchor', key: entry.insertion.key, content: renderAnchor(entry.insertion.key) }),
+          entries: row.entries.map(entry => {
+            if (entry.kind === 'boundary') return { kind: 'boundary', content: renderBoundary() }
+            if (entry.kind === 'anchor') return { kind: 'anchor', key: entry.insertion.key, content: renderAnchor(entry.insertion.key) }
+            const item = entry.record.original.kind === 'native' ? entry.record.original.item : entry.record.original.kind === 'deferred' && entry.record.original.item.kind === 'native' ? entry.record.original.item.item : undefined
+            return { ...entry, ...((!summary || conversationProcessPeer(entry.record)) && item && metrics.has(item.id) ? { hasMetrics: true } : {}) }
+          }),
           disclosure, ...(summary ? { metrics: summary } : {}) })
       })()}
-    </div>)}</>
+    </div>
+  })}</>
 }

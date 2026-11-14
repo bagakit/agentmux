@@ -113,7 +113,7 @@ type MobileAppProps = {
 export function MobileApp(props: MobileAppProps) {
   return <MobileNoticeProvider><MobileAppContent {...props} /></MobileNoticeProvider>
 }
-function MobileAppContent({ client, connection, platform, native = false, focusComposer = () => false, connectionPanel, webObservation, restoreWorkface = false }: MobileAppProps) {
+function MobileAppContent({ client, connection, platform: basePlatform, native = false, focusComposer = () => false, connectionPanel, webObservation, restoreWorkface = false }: MobileAppProps) {
   const composeAfterClose = useRef<{ client: MobileAppProps['client']; sessionId: string } | null>(null)
   const composeScope = useRef({ client, sessionId: null as string | null, visible: false, focusComposer })
   const connected = connection.state === 'connected'
@@ -124,6 +124,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   navigationRecord.current ??= { recordId: getDeviceWorkface().recordIdentity() }
   const [hasConnected, setHasConnected] = useState(connection.state === 'connected' || initial.current.workface.selectedSessionId !== null || initial.current.presentation !== undefined)
   const hostAppearance = useHostAppearance(client, connection.state)
+  const platform = useMemo(() => ({ ...basePlatform, conversationDetailLevel: hostAppearance.conversationDetailLevel }), [basePlatform, hostAppearance.conversationDetailLevel])
   useEffect(() => { if (connection.state === 'connected') setHasConnected(true) }, [connection.state])
   const [workface, setWorkface] = useState<Workface>(() => restoreWorkface ? initial.current!.workface : { ...initial.current!.workface, panel: 'conversation' })
   const [canPersist, setCanPersist] = useState(initial.current.issue === null)

@@ -18,7 +18,7 @@ export function describeCapturedConversationSource(source: AgentMuxEvidenceSourc
   return capturedSources[source]
 }
 export type ConversationSourceDisplay = { labels: readonly { id: string; label: string; title: string }[]; unread?: boolean }
-export type ConversationSources = { main: ConversationSourceDisplay; parts: readonly ConversationSourceDisplay[]; fields: Partial<Record<'content' | 'toolInput' | 'toolOutput', ConversationSourceDisplay>>; collectedReply?: string; submissions?: readonly ConversationSourceRecord[]; unreadSubmissionTarget?: ConversationItemRef }
+export type ConversationSources = { main: ConversationSourceDisplay; parts: readonly ConversationSourceDisplay[]; fields: Partial<Record<'content' | 'toolInput' | 'toolOutput', ConversationSourceDisplay>>; collectedReply?: string; replyTargetReadable?: boolean; submissions?: readonly ConversationSourceRecord[]; unreadSubmissionTarget?: ConversationItemRef }
 /** One already accepted invocation, never an association inferred from a tool label or bare ID. */
 export function conversationInvocationReadingKey(record: { role?: ConversationEvent['role']; event?: ConversationEvent;
   records?: readonly Pick<ConversationSourceRecord, 'id' | 'revision'>[];
@@ -52,6 +52,7 @@ function display(records: readonly ConversationSourceRecord[], unread = false): 
 /** Disposable display lookup over accepted Core relations. It never changes event membership or reads a source. */
 export function conversationSourcePresenter(timeline: ConversationTimeline) {
   const inventory = new Map(timeline.records.map(record => [record.id, record]))
+  const messageAnchors = new Set(timeline.events.filter(event => event.role === 'message').map(event => event.anchorId))
   const invocationParts = new Map<string, Map<string, ConversationContentRef>>()
   const targetRelations = new Map<string, Set<string>>()
   const gapCodes = new Map<string, Set<string>>()
@@ -122,8 +123,17 @@ export function conversationSourcePresenter(timeline: ConversationTimeline) {
       && record.event.coalesces?.some(edge => edge.fromEventIds.includes(primary.id)) && unreadTarget && !relationConflict
       ? record.event.reference : undefined
     const collectedReply = record.role === 'observation' ? `事件回报附带的回复文本快照；不单独代表一次新发言。${unreadTarget ? '对应的原始记录尚未读到。' : relationConflict ? '记录的对应关系存在冲突。' : ''}` : undefined
-    return { main, parts: slots.map(slotDisplay), fields,
-      ...(collectedReply ? { collectedReply } : {}),
+    // Only this snapshot's accepted relation can establish a readable counterpart.
+    // An unrelated reply elsewhere in the window never proves it is redundant.
+    const replyTargetReadable = record.role === 'observation' && !unreadTarget && !relationConflict && originals.some(original =>
+      [...(targetRelations.get(original.id) ?? [])].some(id => {
+        const target = messageAnchors.has(id) ? inventory.get(id)?.original : undefined
+        return target?.kind === 'native' ? target.item.kind === 'assistant-message' && target.item.contentParts.some(part =>
+          part.kind === 'text' ? part.text.trim().length > 0 : part.kind === 'resource' && part.resourceType === 'image')
+          : target?.kind === 'captured' && target.item.kind === 'assistant_message' && !!target.item.content?.trim()
+      }))
+    return { main: unreadTarget || relationConflict ? { ...main, unread: true } : main, parts: slots.map(slotDisplay), fields,
+      ...(collectedReply ? { collectedReply, replyTargetReadable } : {}),
       ...(submissions.length ? { submissions } : {}),
       ...(unreadSubmissionTarget ? { unreadSubmissionTarget } : {}) }
   }

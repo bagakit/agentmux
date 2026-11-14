@@ -3,6 +3,13 @@
 .conversation-native-thread__source { margin-bottom: var(--sp-3); }
 .conversation-native-thread__source > span:last-child { margin-left: auto; }
 .conversation-native-thread__record { min-width: 0; }
+.conversation-detail-record { display: contents; }
+.conversation-detail-record[hidden] { display: none; }
+.conversation-detail-summary { display: flex; align-items: center; gap: var(--sp-2); margin-block: var(--sp-1); color: var(--text-3); font-size: var(--fs-meta); }
+.conversation-detail-summary > button { min-height: 24px; padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); color: inherit; background: transparent; font: inherit; cursor: pointer; }
+.conversation-detail-summary > button:hover { color: var(--text-2); background: var(--surface-1); }
+.conversation-detail-summary > button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }
+@media (pointer: coarse) { .conversation-detail-summary > button { min-height: 44px; } }
 
 /* Only real child slots carry an ownership edge. Interleaved originals remain peers. */
 .log-turn__collaboration-content,

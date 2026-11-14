@@ -29,6 +29,8 @@ const defaultConversationToolLabels: ConversationToolLabels = {
 
 /** Client-owned IO and presentation. Nothing here discovers a Runtime or retains its facts. */
 export type ClientUiPlatform = {
+  /** Client-owned reading preference; never an input or Runtime capability. */
+  conversationDetailLevel?: import('./lib/conversation-detail-level.js').ConversationDetailLevel
   /** Current presentation document; moving a retained editor does not replace its state. */
   ownerDocument?: Document
   /** Host-owned wording for shared conversation copy and payload controls. */

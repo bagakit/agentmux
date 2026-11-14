@@ -65,7 +65,7 @@ function groupRecordTime(records: ConversationProcessProps['records']): Workflow
 }
 
 /** Read-only observations over Core records. A native reference is never a Desktop Session. */
-export function NativeProcessObservation({ id, records: sourceRecords, entries, renderRecord, metrics, disclosure, initiallyExpanded, compact = false, actions, renderSummary }: ConversationProcessProps & { compact?: boolean; actions?: ReactNode; renderSummary?: (observation: RecordedProcessObservation) => ReactNode }) {
+export function NativeProcessObservation({ id, records: sourceRecords, entries, renderRecord, metrics, disclosure, initiallyExpanded, isRecordVisible, compact = false, actions, renderSummary }: ConversationProcessProps & { compact?: boolean; actions?: ReactNode; renderSummary?: (observation: RecordedProcessObservation) => ReactNode }) {
   const processId = useId()
   const [localExpanded, setExpanded] = useState(initiallyExpanded ?? !compact)
   const expanded = disclosure?.expanded ?? localExpanded
@@ -81,6 +81,7 @@ export function NativeProcessObservation({ id, records: sourceRecords, entries, 
     adjacent = undefined
   }
   for (const entry of layout) {
+    if (entry.kind === 'boundary') continue
     if (entry.kind !== 'record' || conversationProcessPeer(entry.record)) { flush(); continue }
     const invocation = entry.record.invocationKey
     if (!invocation) { flush(); continue }
@@ -96,9 +97,11 @@ export function NativeProcessObservation({ id, records: sourceRecords, entries, 
         onStepExpandedChange: (_key, expanded) => { for (const key of keys) disclosure.onStepExpandedChange(key, expanded) } } })
   }
   const records = sourceRecords.filter(record => !conversationProcessPeer(record))
+  const noVisibleProcess = !metrics && !layout.some(entry => entry.kind === 'record' && entry.hasMetrics)
+    && !records.some(record => isRecordVisible?.(record) !== false)
   const failureCount = records.filter(record => (record.deferred?.records ?? record.records ?? [record]).some(recordedFailure)).length
   const items = records.flatMap(record => record.original.kind === 'native' ? [record.original.item] : record.original.kind === 'deferred' && record.original.item.kind === 'native' ? [{ ...record.original.item.item, ...(record.original.item.collaboration ? { collaboration: record.original.item.collaboration } : {}) }] : [])
-  const anchored = layout.some(entry => entry.kind === 'anchor' || conversationProcessPeer(entry.record))
+  const anchored = layout.some(entry => entry.kind !== 'record' || conversationProcessPeer(entry.record))
   const nativeOnly = records.every(record => record.source.kind === 'native')
   const states = items.map(recordedStatus)
   const recordedStepStatus = states.includes('failed') ? 'failed' : states.includes('running') ? 'running'
@@ -121,7 +124,7 @@ export function NativeProcessObservation({ id, records: sourceRecords, entries, 
     ...(title ? { title } : {}),
     ...(metrics ? { metrics: <ConversationMetricsInline observation={metrics} /> } : {}),
     ...(status ? { status } : {}), ...(recordedTime ? { recordedTime } : {}) }
-  return <div className={compact ? 'native-process-observation native-process-observation--compact' : 'native-process-observation'}><WorkflowCard compact={compact} observation={observation} actions={actions}
+  return <div className={compact ? 'native-process-observation native-process-observation--compact' : 'native-process-observation'} data-no-visible-process={noVisibleProcess || undefined}><WorkflowCard compact={compact} observation={observation} actions={actions}
     keepContentVisible={anchored} expanded={expanded} onExpandedChange={open => { if (open) setReadOnce(true); setExpanded(open); disclosure?.onExpandedChange(open) }}
     notice={failureCount > 0 ? <p className="native-process-observation__issue" role="status">
       <SemanticIcon name="status.failed" size={12} />
@@ -129,9 +132,11 @@ export function NativeProcessObservation({ id, records: sourceRecords, entries, 
     </p> : null}>
     {metrics ? <div className="native-process-observation__metrics" hidden={!expanded}><ConversationMetricsDetails observation={metrics} /></div> : null}
     {layout.map(entry => {
+      if (entry.kind === 'boundary') return <div key="history-boundary">{entry.content}</div>
       if (entry.kind === 'anchor') return <div key={JSON.stringify(['anchor', entry.key])}>{entry.content}</div>
       const record = entry.record, key = conversationPresentationKey(record)
-      if (conversationProcessPeer(record)) return <div key={key}>{renderRecord(record)}</div>
+      const visible = isRecordVisible?.(record) !== false
+      if (conversationProcessPeer(record)) return <div key={key} hidden={!visible} inert={!visible}>{renderRecord(record)}</div>
       const item = record.original.kind === 'native' ? record.original.item : undefined
       const members = grouped.get(key), common = members && shared.get(members)
       const bodyId = `${processId}-${encodeURIComponent(key)}`
@@ -139,7 +144,7 @@ export function NativeProcessObservation({ id, records: sourceRecords, entries, 
         headerHidden: members[0] !== key && !recordedFailure(record), bodyId,
         controls: common.controls
       } } : disclosure
-      return <div key={key} className="native-process-observation__step" hidden={!expanded} inert={!expanded}>{expanded || readOnce ? item ? renderRecord(record, body =>
+      return <div key={key} className="native-process-observation__step" hidden={!expanded || !visible && !entry.hasMetrics} inert={!expanded || !visible && !entry.hasMetrics}>{expanded || readOnce ? item ? renderRecord(record, body =>
         <NativeProcessStep item={item} source={record.source.kind === 'native' ? record.source : undefined} {...(first?.startedAt === undefined ? {} : { origin: first.startedAt })}
           {...(stepDisclosure?.steps.get(key) === undefined ? {} : { expanded: stepDisclosure.steps.get(key)! })}
           {...(stepDisclosure ? { onExpandedChange: (open: boolean) => stepDisclosure.onStepExpandedChange(key, open) } : {})}

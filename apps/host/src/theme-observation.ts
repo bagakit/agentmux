@@ -5,9 +5,10 @@ import { AgentMuxError } from '@agentmux/core'
 import type { AppAppearanceId, TerminalThemeId } from '@agentmux/client-ui/theme'
 import { terminalPalette } from '@agentmux/client-ui/theme'
 import { DEFAULT_APP_ICON, isAppIconId } from '@agentmux/client-ui/app-icon-catalog'
+import { CONVERSATION_DETAIL_LEVEL_DEFAULT, isConversationDetailLevel } from '@agentmux/client-ui/conversation-detail-level'
 import { isDeepStrictEqual } from 'node:util'
 /** A brand choice may be newer than this client; it must not invalidate the independently readable theme. */
-export type ThemeConfiguration = { appearance: { themeId?: string; appAppearance?: AppAppearanceId; terminalTheme: TerminalThemeId; customThemes?: Record<string, unknown>; appIcon?: unknown } }
+export type ThemeConfiguration = { appearance: { themeId?: string; appAppearance?: AppAppearanceId; terminalTheme: TerminalThemeId; customThemes?: Record<string, unknown>; appIcon?: unknown; conversationDetailLevel?: unknown } }
 export type ThemeConfigurationReader = {
   inspect<T>(capture: (current: ThemeConfiguration) => T): Promise<T>
   subscribe(listener: (saved: ThemeConfiguration, previous: ThemeConfiguration) => void, onFailure?: (error: Error) => void): () => void
@@ -19,14 +20,18 @@ function projection(config: ThemeConfiguration) {
   const catalog = getThemeCatalog(Object.hasOwn(custom, requested) ? { [requested]: custom[requested] } : {})
   const selected = catalog.items.find(item => item.id === requested) ?? catalog.items[0]!
   const appIcon = config.appearance.appIcon
+  const detailLevel = config.appearance.conversationDetailLevel
   return {
     values: { themeId: selected.id, appAppearance: config.appearance.appAppearance ?? 'dark', theme: selected.value,
       // Keep unsupported string identities. Other malformed JSON becomes an explicit unsupported value, not a replacement default.
       appIcon: appIcon === undefined ? DEFAULT_APP_ICON : typeof appIcon === 'string' ? appIcon : null,
+      conversationDetailLevel: detailLevel === undefined ? CONVERSATION_DETAIL_LEVEL_DEFAULT : typeof detailLevel === 'string' ? detailLevel : null,
       terminalTheme: config.appearance.terminalTheme,
       ...(config.appearance.terminalTheme === 'workspace' ? {} : { terminalPalette: terminalPalette(config.appearance.terminalTheme) }) } as AgentMuxControlSettingsResourceFields,
     issues: [...catalog.issues.filter(issue => issue.id === requested), ...(appIcon === undefined || isAppIconId(appIcon) ? [] : [
       { id: 'app-icon', message: 'The selected App icon is unsupported. Clients retain their last confirmed brand; choose an App icon in Appearance.' }
+    ]), ...(detailLevel === undefined || isConversationDetailLevel(detailLevel) ? [] : [
+      { id: 'conversation-detail-level', message: 'The saved reading detail level is unsupported. Original records remain available; choose a level in InApp.' }
     ]), ...(selected.id === requested ? [] : [
       { id: requested, message: 'Selected theme is unavailable. Graphite remains usable; choose or import a valid theme in Appearance.' }
     ])]
@@ -34,7 +39,8 @@ function projection(config: ThemeConfiguration) {
 }
 function relevantChanged(next: ThemeConfiguration, previous: ThemeConfiguration): boolean {
   const a = next.appearance, b = previous.appearance
-  if (a.themeId !== b.themeId || a.appAppearance !== b.appAppearance || a.terminalTheme !== b.terminalTheme || !isDeepStrictEqual(a.appIcon, b.appIcon)) return true
+  if (a.themeId !== b.themeId || a.appAppearance !== b.appAppearance || a.terminalTheme !== b.terminalTheme || !isDeepStrictEqual(a.appIcon, b.appIcon)
+    || !isDeepStrictEqual(a.conversationDetailLevel, b.conversationDetailLevel)) return true
   const id = a.themeId ?? DEFAULT_THEME_ID
   return !isDeepStrictEqual(a.customThemes?.[id], b.customThemes?.[id])
 }

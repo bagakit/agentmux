@@ -5,9 +5,9 @@ export type ConversationSequenceInsertion = { key: string; beforeRecordId?: stri
 export type ConversationSequenceEntry =
   | { kind: 'record'; record: ConversationRecord }
   | { kind: 'anchor'; insertion: ConversationSequenceInsertion }
+  | { kind: 'boundary' }
 export type ConversationRecordSequenceRow = ConversationSequenceEntry
   | { kind: 'process'; id: string; records: readonly ConversationRecord[]; entries: readonly ConversationSequenceEntry[] }
-  | { kind: 'boundary' }
 export type ConversationSequence = { rows: readonly ConversationRecordSequenceRow[]; groups: ReadonlyMap<string, string> }
 export const conversationPresentationKey = (record: ConversationRecord): string => record.presentationKey ?? record.id
 /** Original peers stay exposed inside a process interval; their Core roles do not change. */
@@ -18,7 +18,7 @@ export const conversationProcessPeer = (record: ConversationRecord): boolean => 
 export function projectConversationRecordSequence(
   records: readonly ConversationRecord[], sourceKey: string,
   previous: ReadonlyMap<string, string> = new Map(), beforeRecordId?: string,
-  anchors: readonly ConversationSequenceInsertion[] = []
+  anchors: readonly ConversationSequenceInsertion[] = [], previousStandalone: ReadonlySet<string> = new Set()
 ): ConversationSequence {
   const groups = new Map<string, string>(), usedGroups = new Set<string>()
   const rows: ConversationRecordSequenceRow[] = []
@@ -26,12 +26,16 @@ export function projectConversationRecordSequence(
   let knownSource: string | undefined, knownTurn: string | undefined, priorGroup: string | undefined
   function flush(): void {
     if (!process.length) return
+    // A reading cut belongs inside a process only when actual members span it.
+    // A real source/turn/parent boundary keeps the separator between root rows.
+    const boundary = process.at(-1)?.kind === 'boundary' ? process.pop() : undefined
     const members = process.flatMap(entry => entry.kind === 'record' ? [entry.record] : [])
     const prior = members.map(record => previous.get(conversationPresentationKey(record))).find(id => id !== undefined && !usedGroups.has(id))
     const id = prior ?? JSON.stringify([sourceKey, 'process', conversationPresentationKey(members[0]!)])
     usedGroups.add(id)
     for (const record of members) groups.set(conversationPresentationKey(record), id)
     rows.push({ kind: 'process', id, records: members, entries: process })
+    if (boundary) rows.push(boundary)
     process = []; knownSource = undefined; knownTurn = undefined; priorGroup = undefined
   }
   const before = new Map<string | undefined, ConversationSequenceInsertion[]>()
@@ -49,9 +53,13 @@ export function projectConversationRecordSequence(
   for (const record of records) {
     const key = conversationPresentationKey(record)
     insert(key)
-    if (beforeRecordId === key) { flush(); rows.push({ kind: 'boundary' }) }
+    if (beforeRecordId === key) {
+      if (process.length) process.push({ kind: 'boundary' }); else rows.push({ kind: 'boundary' })
+    }
     // A recorded failure is readable even when the surrounding process is folded.
     if (conversationRecordTurnOutcome(record)?.status === 'failed') { flush(); rows.push({ kind: 'record', record }); continue }
+    // Loading earlier steps must not move an already independent peer into a parent.
+    if (conversationProcessPeer(record) && previousStandalone.has(key)) { flush(); rows.push({ kind: 'record', record }); continue }
     if (record.role === 'process' || record.role !== 'observation' && conversationProcessPeer(record)) {
       const native = record.original.kind === 'native' ? record.original.item : record.original.kind === 'deferred' && record.original.item.kind === 'native' ? record.original.item.item : undefined
       const source = record.source.kind === 'native'

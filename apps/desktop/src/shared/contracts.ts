@@ -337,6 +337,8 @@ export type AgentAvatarAppearance = { tint?: string; badge?: AgentAvatarBadge }
 export type AgentExecutorConfig = CoreAgentExecutorConfig & { avatar?: AgentAvatarAppearance }
 
 export type AppearanceConfig = {
+  /** Reading-only preference. Unsupported saved JSON is retained and remains fully readable. */
+  conversationDetailLevel?: unknown
   /** Application identity; independent of theme and object avatars. Absence uses the shared default. */
   appIcon?: import('@agentmux/client-ui/app-icon-catalog').AppIconId
   /** App header presentation only; absent platform entries are shown. */
