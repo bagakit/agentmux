@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act } from 'react'
+import { act, useRef } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
@@ -21,10 +21,14 @@ import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapsh
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
 import { deriveFocusProjectLanes, focusProjectKey, type FocusProjectLane } from '../src/renderer/src/lib/focus-project-lanes'
-import { deriveFocusCollectionLanes } from '../src/renderer/src/lib/focus-collection-lanes'
+import { deriveFocusCollectionLanes, filterFocusScanLanes, focusScanOrderKey, focusScanPreferenceKey, type FocusScanLane } from '../src/renderer/src/lib/focus-collection-lanes'
+import { focusGroupTaskReference } from '../src/renderer/src/lib/focus-group-reference'
+import { useFocusProjectOrder } from '../src/renderer/src/lib/use-focus-project-order'
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import { formatSessionAddress } from '../src/renderer/src/lib/agent-address'
 import type { WorkbenchProjectionSelection } from '../src/renderer/src/lib/workbench-projection'
+import { focusCollectionPreferenceKey, parseFocusProjects } from '../src/shared/focus-project-preferences'
+import { applyConfigEdit } from '../src/shared/config-edit'
 
 // Only adjacent history-timeline and PTY painting are outside this board proof.
 // Global, the actual Store/source joins, grouping, shared cards and menus stay real.
@@ -362,7 +366,7 @@ it('offscreen original pending cards still show their exact Topic without mounti
 it('keeps the original Collection discussion chooser while portaled focus defers a confirmed regroup', async () => {
   await render()
   const research = laneFor('a1'), originalCard = card('a1'), before = useAppStore.getState()
-  const trigger = research.querySelector<HTMLButtonElement>('[aria-label="Container preferences · Research"]')!
+  const trigger = research.querySelector<HTMLButtonElement>('[aria-label="Collection preferences · Research"]')!
   expect(trigger).toBeTruthy(); await act(async () => trigger.click()); await settle()
   const panel = document.querySelector<HTMLElement>('[data-focus-project-preferences]')!
   const chooser = panel.querySelector<HTMLButtonElement>('[aria-label^="Choose recipient:"]')!
@@ -386,7 +390,7 @@ it('keeps the original Collection discussion chooser while portaled focus defers
   expect(laneFor('a1')).not.toBe(research); expect(laneFor('a1').textContent).toContain('Engineering')
 })
 
-async function independentContainerScene() {
+async function independentContainerScene(visible = true, initialIds?: readonly string[]) {
   const at = Date.now() - 20_000, firstProject = composerConfig.workspaces[0]!
   const secondProject = { ...firstProject, id: 'second-project', name: 'Second project', path: fixturePath('second-project') }
   const checkout = { ...firstProject, id: 'project-checkout', path: fixturePath('project-checkout'), repoPath: firstProject.path, branch: 'review' }
@@ -411,8 +415,10 @@ async function independentContainerScene() {
     agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } })
   vi.mocked(api.spatial.read).mockResolvedValue({ schemaVersion: 1, revision: 1, graph: desktopSpatialGraph(useAppStore.getState(), topics) })
   await initializeSpatialControlFixture(topics)
-  await render()
-  return { at, firstProject, before: useAppStore.getState() }
+  // Core still owns every registered Session/Region; only this client's loaded snapshot arrives in parts.
+  if (initialIds) useAppStore.setState({ sessions: sessions.filter(session => initialIds.includes(session.id)) })
+  await render(null, visible)
+  return { at, firstProject, sessions, before: useAppStore.getState() }
 }
 function containerOrder() {
   return [...host.querySelectorAll<HTMLElement>('.focus-project-lanes__rows > div')].map(frame => {
@@ -425,6 +431,11 @@ async function arrange() {
   expect(control).not.toBeNull()
   await act(async () => control.click())
 }
+function OriginalFocusRoute({ lanes, visible }: { lanes: readonly FocusScanLane[]; visible: boolean }) {
+  const rows = useRef<HTMLOListElement>(null), ordered = useFocusProjectOrder(lanes, visible, rows)
+  return <ol ref={rows}>{ordered.map(lane => <li key={lane.id} data-original-route-key={focusScanOrderKey(lane)}>{lane.name}</li>)}</ol>
+}
+const renderedRouteKeys = () => [...new Set([...host.querySelectorAll<HTMLElement>('[data-original-route-key]')].map(element => element.dataset.originalRouteKey))]
 
 it('actual Global activity order keeps cold sibling Collections behind active Projects and changes routes only on Arrange', async () => {
   const { firstProject, before } = await independentContainerScene()
@@ -439,7 +450,7 @@ it('actual Global activity order keeps cold sibling Collections behind active Pr
   expect(containerOrder()).toEqual(expected)
   expect(laneFor('cold-topic').querySelector('time')?.dateTime).toBe(new Date(newer).toISOString())
   await render(null, false); await render(null, true)
-  expect(containerOrder()).toEqual(expected)
+  expect(containerOrder()).toEqual(['Engineering', 'Research', firstProject.id, 'second-project'])
   await arrange()
   expect(containerOrder()).toEqual(['Engineering', 'Research', firstProject.id, 'second-project'])
   for (const [id, body] of bodies) expect(card(id)).toBe(body)
@@ -459,4 +470,186 @@ it('actual Global pins keep their authored Project order without lending that ra
   expect(laneFor('checkout')).toBe(laneFor('project'))
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
   expect(useAppStore.getState().sessions).toBe(before.sessions)
+})
+
+it('actual Global shares Collection and Project pin order and keyboard movement without replacing cards', async () => {
+  const { firstProject, before } = await independentContainerScene()
+  const key = focusCollectionPreferenceKey('local', [categories[0]!.spaceId])
+  const projectPin = { key: focusProjectKey('local', firstProject.id), pinned: true, note: 'Original note', color: 'violet' as const, collapsed: null }
+  const collectionPin = { key, pinned: true, note: '', color: 'default' as const, collapsed: null }
+  const body = card('hot-topic')
+  await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, focus: { ...state.config!.focus!, projects: [projectPin, collectionPin] } } })))
+  expect(containerOrder()).toEqual([firstProject.id, 'Research', 'second-project', 'Engineering'])
+  vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => applyConfigEdit(useAppStore.getState().config!, expected!, next))
+  const handle = document.querySelector<HTMLButtonElement>('[aria-label="Reorder pinned collection · Research"]')!
+  expect(handle).not.toBeNull()
+  await act(async () => handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true, bubbles: true })))
+  expect(containerOrder()).toEqual(['Research', firstProject.id, 'second-project', 'Engineering'])
+  expect(useAppStore.getState().config?.focus?.projects).toEqual([collectionPin, projectPin])
+  await arrange()
+  expect(containerOrder()).toEqual(['Research', firstProject.id, 'second-project', 'Engineering'])
+  const destination = laneFor('project').parentElement!
+  vi.spyOn(destination, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 100, width: 300, height: 100, top: 100, left: 0, right: 300, bottom: 200, toJSON() {} })
+  const dataTransfer = new DataTransfer()
+  const drag = (type: string) => { const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientY: 175 }); Object.defineProperty(event, 'dataTransfer', { value: dataTransfer }); return event }
+  await act(async () => handle.dispatchEvent(drag('dragstart')))
+  await act(async () => destination.dispatchEvent(drag('dragover')))
+  expect(destination.dataset.projectDropTarget).toBe('after')
+  await act(async () => destination.dispatchEvent(drag('drop')))
+  expect(containerOrder()).toEqual([firstProject.id, 'Research', 'second-project', 'Engineering'])
+  expect(useAppStore.getState().config?.focus?.projects).toEqual([projectPin, collectionPin])
+  expect(card('hot-topic')).toBe(body)
+  for (const field of ['tabs', 'layouts', 'sessions', 'agentComposerDrafts', 'agentFocus'] as const) expect(useAppStore.getState()[field]).toBe(before[field])
+})
+
+it('Collection Pin save failure retains its exact draft and Project preferences for explicit retry', async () => {
+  const { firstProject } = await independentContainerScene()
+  const projectPin = { key: focusProjectKey('local', firstProject.id), pinned: true, note: 'Keep this route', color: 'green' as const, collapsed: false }
+  await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, focus: { ...state.config!.focus!, projects: [projectPin] } } })))
+  const save = vi.spyOn(api.config, 'save').mockRejectedValueOnce(Error('Original configuration disk failed'))
+    .mockImplementation(async (next, expected) => applyConfigEdit(useAppStore.getState().config!, expected!, next))
+  async function press(label: string) {
+    const button = document.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!
+    expect(button, label).not.toBeNull(); await act(async () => button.click())
+  }
+  await press('Collection preferences · Research'); await press('Collection appearance')
+  const checkbox = document.querySelector<HTMLInputElement>('[aria-label="Pin collection"]')!
+  expect(checkbox).not.toBeNull(); await act(async () => checkbox.click())
+  expect(document.querySelector('[aria-label="Project note"]')).toBeNull()
+  await press('Save collection preferences')
+  expect(document.querySelector('[data-focus-project-preferences]')?.textContent).toContain('Original configuration disk failed')
+  expect(checkbox.checked).toBe(true); expect(useAppStore.getState().config?.focus?.projects).toEqual([projectPin])
+  await press('Save collection preferences')
+  expect(save).toHaveBeenCalledTimes(2)
+  expect(useAppStore.getState().config?.focus?.projects).toEqual([projectPin, { key: focusCollectionPreferenceKey('local', [categories[0]!.spaceId]), pinned: true, note: '', color: 'default', collapsed: null }])
+  expect(document.querySelector('[data-focus-project-preferences]')).toBeNull()
+})
+
+it('Collection preference identity retains complete canonical membership and legacy authored values', () => {
+  const old = { key: focusProjectKey('local', 'original'), pinned: true, note: 'Original note', color: 'rose' as const, collapsed: false }
+  const key = focusCollectionPreferenceKey('local', ['category-b', 'category-a', 'category-b'])
+  expect(key).toBe(JSON.stringify(['collection', 'local', ['category-a', 'category-b']]))
+  const saved = { ...old, key }
+  expect(parseFocusProjects([old, saved])).toEqual([old, saved])
+  expect(focusCollectionPreferenceKey('remote', ['category-a', 'category-b'])).not.toBe(key)
+  for (const key of [JSON.stringify(['collection', 'local', []]), JSON.stringify(['collection', 'local', ['category-b', 'category-a']]),
+    JSON.stringify(['collection', 'local', ['category-a', 'category-a']]), JSON.stringify(['collection', '', ['category-a']]), JSON.stringify(['collection', 'local', 'unknown'])]) {
+    expect(() => parseFocusProjects([{ ...old, key }])).toThrow()
+  }
+  expect(() => parseFocusProjects([old, old])).toThrow()
+})
+
+it('actual Global ranks a Collection by minimum member priority and maximum trusted activity from different Topics', async () => {
+  const at = Date.now() - 10_000, newer = at + 3000, firstProject = composerConfig.workspaces[0]!
+  const idle = { state: 'done' as const, source: 'native-hook' as const, observedAt: Date.now(), stateEnteredAt: newer }
+  const sessions = [agent('a1', topicBy('a'), at + 1000), agent('project', null, at + 2000),
+    { ...agent('b1', topicBy('b'), newer), status: idle, semanticStatus: idle }]
+  const preferences = [{ key: focusProjectKey('local', 'retained-project'), pinned: true, note: 'Retained route', color: 'rose' as const, collapsed: false },
+    { key: focusCollectionPreferenceKey('local', [categories[0]!.spaceId]), pinned: false, note: '', color: 'default' as const, collapsed: null }]
+  useAppStore.setState({ sessions, config: { ...config, focus: { ...config.focus!, projects: preferences } } })
+  await render()
+  expect(card('a1').dataset.bucket).toBe('working'); expect(card('b1').dataset.bucket).toBe('idle')
+  expect(laneFor('a1')).toBe(laneFor('b1'))
+  const scope = laneFor('a1').dataset.focusCollection
+  expect(laneFor('a1').querySelector('time')?.dateTime).toBe(new Date(newer).toISOString())
+  expect(containerOrder()).toEqual(['Research', firstProject.id])
+  const original = [card('a1'), card('b1'), card('project')]
+  await arrange()
+  expect(containerOrder()).toEqual(['Research', firstProject.id])
+  expect([card('a1'), card('b1'), card('project')]).toEqual(original)
+  expect(useAppStore.getState().sessions).toBe(sessions)
+  await chooseFocusFilter(host, 'state', 'working')
+  expect(card('b1')).toBeNull()
+  expect(laneFor('a1').dataset.focusCollection).toBe(scope)
+  expect(useAppStore.getState().config?.focus?.projects).toBe(preferences)
+  expect(laneFor('a1').querySelector('time')?.dateTime).toBe(new Date(newer).toISOString())
+  expect(containerOrder()).toEqual(['Research', firstProject.id])
+  await chooseFocusFilter(host, 'state', 'all')
+  expect(laneFor('a1').querySelector('time')?.dateTime).toBe(new Date(newer).toISOString())
+})
+
+it('actual Global first entry ignores a hidden partial arrival route and uses current trusted group activity', async () => {
+  const { firstProject, sessions } = await independentContainerScene(false, ['hot-topic'])
+  const original = useAppStore.getState().sessions.find(session => session.id === 'hot-topic')!
+  expect(original).toBeDefined()
+  const newer = Date.now() - 1
+  await act(async () => useAppStore.setState({ sessions: sessions.map(session => session.id === 'cold-topic'
+    ? { ...session, semanticStatus: { ...session.semanticStatus!, stateEnteredAt: newer } } : session) }))
+  const before = useAppStore.getState()
+  await render(null, true)
+  expect(containerOrder(), JSON.stringify({ order: containerOrder(), shown: mainCards() })).toEqual(['Engineering', 'Research', firstProject.id, 'second-project'])
+  // First visibility also confirms the Collection index; that legitimate initial classification may reparent its pending slot.
+  expect(card('hot-topic')).not.toBeNull()
+  expect(laneFor('hot-topic').textContent).toContain('Research')
+  expect(host.querySelectorAll('[data-focus-presentation-session="hot-topic"]')).toHaveLength(1)
+  expect(useAppStore.getState().sessions.find(session => session.id === 'hot-topic')).toBe(original)
+  for (const field of ['tabs', 'layouts', 'sessions', 'agentComposerDrafts', 'agentSteerQueues', 'agentFocus'] as const) expect(useAppStore.getState()[field]).toBe(before[field])
+})
+
+it('the actual route hook does not freeze confirmed partial group facts received while hidden', async () => {
+  const { firstProject, sessions } = await independentContainerScene(false, ['hot-topic'])
+  const initial = readCollectionLanes().scan
+  const research = focusCollectionPreferenceKey('local', [categories[0]!.spaceId])
+  expect(initial.map(focusScanOrderKey)).toEqual([research])
+  await act(async () => root.render(<OriginalFocusRoute lanes={initial} visible={false} />))
+  const original = host.querySelector('[data-original-route-key]')
+  const newer = Date.now() - 1
+  await act(async () => useAppStore.setState({ sessions: sessions.map(session => session.id === 'cold-topic'
+    ? { ...session, semanticStatus: { ...session.semanticStatus!, stateEnteredAt: newer } } : session) }))
+  const current = readCollectionLanes().scan
+  await act(async () => root.render(<OriginalFocusRoute lanes={current} visible={false} />))
+  await act(async () => root.render(<OriginalFocusRoute lanes={current} visible />))
+  expect(renderedRouteKeys()).toEqual([focusCollectionPreferenceKey('local', [categories[1]!.spaceId]), research,
+    focusProjectKey('local', firstProject.id), focusProjectKey('local', 'second-project')])
+  expect([...host.querySelectorAll('[data-original-route-key]')].find(element => element.getAttribute('data-original-route-key') === research)).toBe(original)
+})
+
+it('the actual route hook arranges its first confirmed aggregate batch after an empty visible frame', async () => {
+  const at = Date.now() - 10_000, idle = { state: 'done' as const, source: 'native-hook' as const, observedAt: Date.now(), stateEnteredAt: at + 3000 }
+  useAppStore.setState({ sessions: [agent('a1', topicBy('a'), at + 1000), agent('project', null, at + 2000),
+    { ...agent('b1', topicBy('b'), at + 3000), status: idle, semanticStatus: idle }] })
+  const lanes = readCollectionLanes().scan, collection = lanes.find(lane => lane.collection)!, project = lanes.find(lane => !lane.collection)!
+  expect(lanes).toHaveLength(2); expect(collection.orderPriority).toBe(project.orderPriority)
+  expect(collection.lastActivityAt).toBeGreaterThan(project.lastActivityAt!)
+  await act(async () => root.render(<OriginalFocusRoute lanes={[]} visible />))
+  expect(renderedRouteKeys()).toEqual([])
+  await act(async () => root.render(<OriginalFocusRoute lanes={lanes} visible />))
+  expect(renderedRouteKeys()).toEqual([focusCollectionPreferenceKey('local', [categories[0]!.spaceId]), focusProjectKey('local', composerConfig.workspaces[0]!.id)])
+})
+
+it('the original filtered Collection projection keeps complete Pin and task scope with only displayed presentation references', () => {
+  const { state, scan } = readCollectionLanes(), complete = scan.find(lane => lane.collection?.categories.length === 2)!
+  expect(complete).toBeDefined()
+  const filtered = filterFocusScanLanes([complete], () => true, new Set([JSON.stringify(['local', 'c1'])]))
+  expect(filtered).toHaveLength(1)
+  const shown = filtered[0]!
+  expect(shown.collection?.categories).toBe(complete.collection!.categories)
+  expect(focusScanPreferenceKey(shown)).toBe(focusCollectionPreferenceKey('local', categories.slice(0, 2).map(category => category.spaceId)))
+  expect(shown.lastActivityAt).toBe(complete.lastActivityAt); expect(shown.orderPriority).toBe(complete.orderPriority)
+  const task = focusGroupTaskReference(shown, state.config!.workspaces)
+  expect(task.scope).toEqual({ kind: 'collection', hostId: 'local', categorySpaceIds: categories.slice(0, 2).map(category => category.spaceId).sort() })
+  expect(task.selection).toEqual({ kind: 'members', references: [{ hostId: 'local', contextId: 'c1' }] })
+  expect(shown.collection?.topics.flatMap(topic => topic.contextRefs)).toEqual([{ hostId: 'local', id: 'c1' }])
+})
+
+it('actual Global keeps one visible route through filtering and resets only at real reentry without replacing original work', async () => {
+  const { firstProject } = await independentContainerScene()
+  const reference = { displayWorkspaceId: scratchWorkspace.id, groupId: 'group-' + scratchWorkspace.id, tabId: 'tab-hot-topic', regionId: 'region-hot-topic' }
+  await render(reference)
+  const expected = ['Research', firstProject.id, 'second-project', 'Engineering'], kept = card('hot-topic')
+  const newer = Date.now() - 1
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === 'cold-topic' && session.kind === 'agent'
+    ? { ...session, semanticStatus: { ...session.semanticStatus!, stateEnteredAt: newer } } : session) })))
+  expect(containerOrder()).toEqual(expected)
+  await search('Task hot-topic'); expect(containerOrder()).toEqual(['Research'])
+  await search(''); expect(containerOrder()).toEqual(expected); expect(card('hot-topic')).toBe(kept)
+  const bodies = new Map(['hot-topic', 'cold-topic', 'project', 'second-project', 'checkout'].map(id => [id, card(id)]))
+  const rows = host.querySelector<HTMLElement>('.focus-project-lanes__rows')!; rows.scrollTop = 73
+  const before = useAppStore.getState()
+  await render(reference, false); await render(reference, true)
+  expect(containerOrder()).toEqual(['Engineering', 'Research', firstProject.id, 'second-project'])
+  expect(rows.scrollTop).toBe(73)
+  expect(laneFor('hot-topic').dataset.focusCurrent).toBe('true')
+  for (const [id, body] of bodies) expect(card(id)).toBe(body)
+  for (const field of ['tabs', 'layouts', 'sessions', 'agentComposerDrafts', 'agentSteerQueues', 'agentFocus'] as const) expect(useAppStore.getState()[field]).toBe(before[field])
 })

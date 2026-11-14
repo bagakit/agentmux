@@ -79,6 +79,8 @@ async function showGroup() {
   expect(document.querySelector('[data-mote-task-action]')).toBeNull()
   await click('[aria-label="Project preferences · Project"]')
   expect(document.querySelector('.mote-task-action--vertical')).not.toBeNull()
+  const icons = ['object.list', 'action.inspect', 'object.notebook']
+  expect([...document.querySelectorAll('[data-mote-task-action-id] > svg')].map(icon => icon.getAttribute('data-semantic-icon'))).toEqual(icons)
 }
 async function chooseNewAgent() {
   const chooser = document.querySelector<HTMLElement>('[aria-label^="Choose recipient:"]')!

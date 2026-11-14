@@ -140,7 +140,7 @@ it.each(['path', 'host', 'duplicate'] as const)('an already opened original menu
 it('the actual Collection menu does not borrow a member Project address or Space action', async () => {
   await dom.render(<Harness />)
   const collection = dom.container.querySelector<HTMLElement>('[data-focus-collection]')!; expect(collection).not.toBeNull()
-  const trigger = collection.querySelector<HTMLButtonElement>('[aria-label^="Container preferences"]')!; expect(trigger).not.toBeNull()
+  const trigger = collection.querySelector<HTMLButtonElement>('[aria-label^="Collection preferences"]')!; expect(trigger).not.toBeNull()
   await act(async () => trigger.click())
   expect(document.querySelector('[data-focus-project-preferences]')).not.toBeNull()
   expect(document.querySelector('[aria-label="Project appearance"]')).toBeNull()
