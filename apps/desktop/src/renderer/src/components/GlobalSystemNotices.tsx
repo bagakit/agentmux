@@ -1,7 +1,7 @@
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { getModalOverlayContainer, ModalAttachmentDismissal } from '@agentmux/client-ui/components/Modal'
 import { useWorkbenchDocument } from '../lib/workbench-document'
-import { useContext, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { autoUpdate, computePosition, offset, shift, size } from '@floating-ui/dom'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { ACTIVITY_RETENTION_LIMIT, notificationEventIdentity, projectNotifications, useAppStore, type NotificationEvent, type NotificationEventObject } from '../store'
@@ -23,6 +23,8 @@ import { notificationPreview } from '../lib/notification-preview'
 import { compactNotificationIdentity } from '../lib/notification-read-identity'
 import { registerNotificationReader, type ObservedNotificationEntry, type NotificationProjection } from '../lib/notification-observation'
 import type { AgentMuxClientNotificationSubject } from '@agentmux/core/control'
+import { useMoteHeartbeatNoticeReadings } from '../lib/mote-heartbeat-reading'
+import { moteHeartbeatNotice } from '../lib/mote-heartbeat-notice'
 
 const ThemeObjectNotificationsIcon = semanticIconComponent('object.notifications')
 const ThemeNavigationCollapseIcon = semanticIconComponent('action.close')
@@ -234,7 +236,27 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
     } }, ...(settings ? { action: { label: 'Open Appearance', run: () => settings.open('appearance') } } : {})
   })
   const chromeInbox = useServiceNotices('global:native-chrome', chrome, appIconIssue !== undefined)
-  const inboxes = [agentChecksInbox, environmentInbox, ownershipInbox, nameMetadataInbox, endpointInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox, currentErrorInbox]
+  const moteReadings = useMoteHeartbeatNoticeReadings()
+  const moteNotices = useMemo(() => moteReadings.flatMap(source => { const item = moteHeartbeatNotice(source); return item ? [item] : [] }), [moteReadings])
+  // Mounted readers are a partial view. Closing one never prunes the original
+  // episode's shared read receipt or authorizes its schedule to resume.
+  const moteInbox = useServiceNotices('global:mote-heartbeats', moteNotices, moteReadings.every(source => !source.unavailable), false)
+  // Notification delivery bookkeeping only: one latest announced episode per
+  // related Mote, never another schedule/health record or a history of polls.
+  const announcedMotes = useRef(new Map<string, string>())
+  const [moteAnnouncement, setMoteAnnouncement] = useState<{ ids: string[]; text: string } | null>(null)
+  const unreadMoteIds = new Set(moteInbox.unread.map(item => item.id))
+  const unreadMoteKey = JSON.stringify([...unreadMoteIds])
+  useEffect(() => {
+    const fresh = moteNotices.filter(item => unreadMoteIds.has(item.id) && announcedMotes.current.get(JSON.stringify(item.target)) !== item.id)
+    if (!fresh.length) {
+      if (moteAnnouncement && !moteAnnouncement.ids.some(id => unreadMoteIds.has(id))) setMoteAnnouncement(null)
+      return
+    }
+    for (const item of fresh) announcedMotes.current.set(JSON.stringify(item.target), item.id)
+    setMoteAnnouncement({ ids: fresh.map(item => item.id), text: fresh.map(item => `${item.label}: ${item.notice.notice.step}.`).join(' ') })
+  }, [moteNotices, unreadMoteKey, moteAnnouncement])
+  const inboxes = [agentChecksInbox, environmentInbox, ownershipInbox, nameMetadataInbox, endpointInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox, currentErrorInbox, moteInbox]
   const notices = inboxes.flatMap((inbox) => inbox.notices)
   const currentCount = notices.length + projection.current.length + endedSessions.length
   const unread = inboxes.reduce((total, inbox) => total + inbox.unread.length, eventInbox.unread.length + endedRunInbox.unread.length)
@@ -257,6 +279,11 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       ? { kind: session.kind, hostId: session.control.hostId, ...(session.kind === 'agent' ? { agentSessionId: session.id } : {}), runId: session.control.run.runId }
       : { kind: 'unknown' }
     const sourceSubjects = (scope: string, item: ServiceNoticeItem): AgentMuxClientNotificationSubject => {
+      if (scope === 'global:mote-heartbeats') {
+        const original = moteNotices.find(notice => notice.id === item.id)!.target
+        return { kind: 'zone', hostId: original.expectedResource.hostId, workspaceId: original.expectedResource.workspaceId,
+          objectKey: compactNotificationIdentity(JSON.stringify(original)) }
+      }
       if (scope === 'global:workflow') return { kind: 'unknown' }
       if (scope === 'global:sessions') return sessionIdentity(sessionOwners.get(item.id))
       if (scope === 'global:displaced-agents') return sessionIdentity(sessions.find(session => session.id === item.id))
@@ -265,7 +292,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       return { kind: 'application' }
     }
     const sources = ['startup-agent-availability', 'environment', 'runtime-ownership', 'session-names', 'runtime-endpoints',
-      'displaced-agents', 'sessions', 'workbench-save', 'native-chrome', 'desktop-navigation', 'workflow'] as const
+      'displaced-agents', 'sessions', 'workbench-save', 'native-chrome', 'desktop-navigation', 'workflow', 'events'] as const
     const unavailableSources: NotificationProjection['unavailableSources'] = inboxes.flatMap((inbox, index) => inbox.available ? [] : [sources[index]!])
     if (loading) unavailableSources.push('events')
     const eventPresentation = (event: NotificationEvent) => ({
@@ -328,6 +355,10 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       return { key: JSON.stringify(['displaced', session?.control.hostId, item.id]), label: session?.label ?? 'Retained Session' }
     })
     append(sessionInbox, 'agents', item => { const session = sessionOwners.get(item.id)!; return { key: JSON.stringify(['agent', session.control.hostId, session.id, session.control.run.runId]), label: session.label, context: config?.hosts.find(host => host.id === session.control.hostId)?.label ?? session.control.hostId } }, 'View Session')
+    append(moteInbox, 'operations', item => {
+      const original = moteNotices.find(notice => notice.id === item.id)!
+      return { key: JSON.stringify(['mote-heartbeat', original.target]), label: original.label, context: 'Mote heartbeat' }
+    })
     for (const session of endedSessions) {
       const key = endedRunKey(session)
       const presentation = sessionExitPresentation(session)!
@@ -431,6 +462,9 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
     eventInbox.acknowledge(events.filter(event => ids.has(event.id)).map(event => event.id))
   }
   return <div className="global-system-notices">
+    <span className="global-system-notices__announcement" role="status" aria-live="polite" data-mote-heartbeat-announcement>
+      {moteAnnouncement && moteAnnouncement.ids.some(id => unreadMoteIds.has(id)) ? <span key={JSON.stringify(moteAnnouncement.ids)}>{moteAnnouncement.text} Review system notifications for details.</span> : null}
+    </span>
     <span className="global-system-notices__announcement" role={liveVolume === 'assertive' ? 'alert' : 'status'} aria-live={liveVolume}>
       {latestUnreadEvent ? `${announcement}. Review system notifications for details.` : ''}
     </span>
