@@ -114,6 +114,7 @@ if (lockedSession()) {
       join(root, 'packages/native-desktop/scripts/build-macos.mjs'), ...await nativeSourceFiles(join(root, 'packages/native-desktop/macos/Sources'))]) files.add(file)
     receipt.inputs = Object.fromEntries(await Promise.all([...files].sort().map(async file => [file.slice(root.length + 1), sha(await readFile(file))])))
 
+    assert.equal(lockedSession(), false, 'The original macOS session locked before the real lifecycle capture')
     const result = await new Promise((done, reject) => {
       const env = { ...process.env, AGENTMUX_CAPTURE_LIVE_OUT: fixtureOut, AGENTMUX_CAPTURE_LIVE_EXECUTABLE: executablePath,
         AGENTMUX_CAPTURE_LIVE_USER_DATA: userData, ELECTRON_RENDERER_URL: '' }
@@ -125,6 +126,7 @@ if (lockedSession()) {
       child.once('error', error => { clearTimeout(timer); clearTimeout(kill); reject(error) })
       child.once('exit', (code, signal) => { clearTimeout(timer); clearTimeout(kill); done({ code, signal, timeout, log }) })
     })
+    assert.equal(lockedSession(), false, 'The original macOS session locked during the real lifecycle capture')
     await writeFile(receipt.log, result.log)
     assert.equal(result.timeout, false, 'A timed-out real capture is infrastructure failure, not a behavioral kill')
     assert.equal(result.signal, null, 'External termination is not a lifecycle result')

@@ -17,11 +17,14 @@ const smoke = process.argv.slice(2).join(' ') === '--smoke'
 assert.ok(process.argv.length === 2 || smoke, 'Usage: verify-capture-real-startup.mjs [--smoke]')
 assert.equal(process.platform, 'darwin', 'Real ScreenCaptureKit measurement requires macOS')
 assert.ok(Number(release().split('.')[0]) >= 23, 'Real host exclusion requires macOS 14 or later')
-const login = spawnSync('ioreg', ['-n', 'Root', '-d1', '-a'], { encoding: 'utf8', timeout: 10000, maxBuffer: 4 * 1024 * 1024 })
-assert.equal(login.status, 0, 'The original loginwindow state must be readable')
-const locked = login.stdout.match(/<key>IOConsoleLocked<\/key>\s*<(true|false)\s*\/>/)
-assert.ok(locked, 'The original loginwindow lock state is unavailable')
-assert.equal(locked[1], 'false', 'Unlock the original macOS session before real capture')
+function requireUnlocked() {
+  const login = spawnSync('ioreg', ['-n', 'Root', '-d1', '-a'], { encoding: 'utf8', timeout: 10000, maxBuffer: 4 * 1024 * 1024 })
+  assert.equal(login.status, 0, 'The original loginwindow state must be readable')
+  const locked = login.stdout.match(/<key>IOConsoleLocked<\/key>\s*<(true|false)\s*\/>/)
+  assert.ok(locked, 'The original loginwindow lock state is unavailable')
+  assert.equal(locked[1], 'false', 'Unlock the original macOS session before real capture')
+}
+requireUnlocked()
 assert.equal(execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: root, encoding: 'utf8' }).trim(), '', 'Pin a clean candidate before measuring')
 const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
 function baselinePath() {
@@ -127,7 +130,9 @@ try {
       const env = { ...process.env, AGENTMUX_CAPTURE_REAL_OUT: scene, AGENTMUX_CAPTURE_REAL_USER_DATA: userData, AGENTMUX_CAPTURE_REAL_EXECUTABLE: variants[variant].executablePath,
         AGENTMUX_CAPTURE_REAL_VARIANT: variant, AGENTMUX_CAPTURE_REAL_BACKGROUND: background, AGENTMUX_CAPTURE_REAL_ITERATION: String(iteration), ELECTRON_RENDERER_URL: '' }
       delete env.ELECTRON_RUN_AS_NODE
+      requireUnlocked()
       const result = await command(label, require('electron'), [variants[variant].appRoot], env, 120000)
+      requireUnlocked()
       const sample = JSON.parse(await readFile(join(scene, 'native.json'), 'utf8'))
       assert.equal(result.code, 0, JSON.stringify(sample.failure))
       assert.equal(sample.passed, true); assert.equal(sample.cleanup.nativeDisposed, true); assert.equal(sample.cleanup.windowsRemaining, 0)
