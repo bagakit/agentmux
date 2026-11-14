@@ -6,6 +6,7 @@ import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { settingsCatalog } from '../src/renderer/src/components/settings/settings-modules'
 import { NetworkNodeSettingsPane } from '../src/renderer/src/components/settings/NetworkNodeSettingsPane'
 import { HostRuntimePanel } from '../src/renderer/src/components/settings/HostRuntimePanel'
+import { MeshPathsPane } from '../src/renderer/src/components/settings/MeshPathsPane'
 import { HostPublishedResources } from '../src/renderer/src/components/settings/HostPublishedResources'
 import { HostResourceTrends } from '../src/renderer/src/components/settings/HostResourceTrends'
 import { nodeTrendPoints } from '../src/renderer/src/components/settings/node-resource-view'
@@ -286,6 +287,7 @@ it('real persisted Core owner → Unix public client → Main bridge → Rendere
  vi.spyOn(api.hosts,'inspect').mockResolvedValue({routeHostId:'local',owner:{state:'available',value:{runtimeId:'original-ui-runtime'}}} as never)
  try{
   await dom.render(<NetworkNodeSettingsPane {...props()}/>);await readyNode();await input('alias','real-ui-node')
+  await input('mapPlace','Original office');await input('mapCoordinates','0, 0')
   for(const[name,value]of[['allowedPaths',published],['deniedPaths',denied]]){
    await act(async()=>{const textarea=dom.container.querySelector<HTMLTextAreaElement>(`[name="${name}"]`)!;Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(textarea,value!);textarea.dispatchEvent(new Event('input',{bubbles:true}))})
    await act(async()=>dom.container.querySelector<HTMLTextAreaElement>(`[name="${name}"]`)!.dispatchEvent(new FocusEvent('focusout',{bubbles:true})))
@@ -303,5 +305,37 @@ it('real persisted Core owner → Unix public client → Main bridge → Rendere
   expect(dom.container.querySelector('pre')?.textContent).toBe('Original published bytes through Core')
   const privateRead=await bridge.owner({hostId:'local',expectedRuntimeId:saved.node.runtimeId},'settings.node.resources',{}),publicRead=await bridge.call('node.resources',{hostId:local.id,expectedRuntimeId:saved.node.runtimeId})
   expect(privateRead.status).toBe('available');expect(publicRead.status).toBe('withheld')
+  vi.spyOn(api.mesh,'call').mockRejectedValue(new Error('The optional network view is unavailable.'))
+  await dom.render(<MeshPathsPane active hosts={[local]} onGateway={vi.fn()} onDevice={vi.fn()}/>)
+  const marker=()=>dom.container.querySelector('[data-geographic-point="saved:client"] circle')
+  await vi.waitFor(()=>expect(marker()).not.toBeNull())
+  const atlas=dom.container.querySelector('.mesh-geography__marks')!
+  expect(Number(marker()!.getAttribute('cx'))).toBe(Number(atlas.getAttribute('width'))/2)
+  expect(Number(marker()!.getAttribute('cy'))).toBe(Number(atlas.getAttribute('height'))/2)
+
  }finally{await dom.render(<div/>);ipc.dispose();await rpc.dispose();await server.stop();await rm(directory,{recursive:true,force:true})}
 },20000)
+
+it('keeps an unfinished map coordinate draft, and submits its final policy to the selected Node', async () => {
+  const call = vi.spyOn(nodeCall, 'call').mockImplementation(async (method, request) => {
+    if (method === 'settings.node.configure') {
+      const input = request as { policy: NodeSettings['policy']; operationId: string; expectedRevision: string }
+      return { ...settings, policy: input.policy, policyRevision: 'changed',
+        operation: { status: 'confirmed', operationId: input.operationId, expectedRevision: input.expectedRevision, revision: 'changed', updatedAt: 1 } } as never
+    }
+    return structuredClone(settings) as never
+  })
+  await dom.render(<NetworkNodeSettingsPane {...props()} />)
+  await readyNode()
+  await input('mapCoordinates', '45,')
+  await dom.render(<NetworkNodeSettingsPane key="read-draft" {...props()} />)
+  await readyNode()
+  expect(dom.container.querySelector<HTMLInputElement>('[name="mapCoordinates"]')?.value).toBe('45,')
+  await input('mapCoordinates', '45, -90')
+  await input('mapPlace', 'Field office')
+  await dom.click('.network-node-save button')
+  await vi.waitFor(() => expect(call.mock.calls.filter(row => row[0] === 'settings.node.configure')).toHaveLength(1))
+  expect(call.mock.calls.find(row => row[0] === 'settings.node.configure')?.[1]).toMatchObject({ policy: { mapLocation: {
+    coordinates: '45, -90', label: 'Field office', estimatePublicEgress: false,
+  } } })
+})
