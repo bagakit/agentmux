@@ -296,6 +296,8 @@ Profile 创建／复制，以及其文件夹、保存视图、代理资产的新
 
 GUI与CLI消费同一创建 owner，并能按原operation只读取得原created identity与独立的当前对象观察。原对象后来改名、回收或删除不改写创建归属；丢完整reply不授权生成另一个新ID或按同名首项采用。新回执不含Cookie／凭据／站点内容，不进入普通Profile清单全量输出；原metadata无新字段时原样保留旧身份和数据，不伪造历史创建回执。GUI保原pending意图与查询路径，不能因重绘、双击或未知结果自动换operation。
 
+找到原created identity不等于原保存已获持久确认。只读查询给当前观察，不能清掉GUI保存的完整原请求；每动作一个pending，后来输入继续保留。原Store可以在明确的同原请求确认中，只同步当前同一metadata文件及目录，并最终核对文件witness、完整字节和原receipt；没有原receipt时绝不创建替身，确认不改对象、collection revision或原请求。该回执须标明当前记录同步确认，不能冒称当时reply已送达。GUI用明确的原存储确认动作消费同一owner；只在owner确认及原客户端保存ACK成立后清理该pending，再接受下一次明确新建。读、确认或客户端保存失败均保原请求、后来草稿及健康Browser，不自动重发创建。
+
 Profile 提供标签、文件夹、固定、状态/最近使用筛选、保存视图及准确选集的批量动作。元数据、最近使用和运行时长由原 Profile 与 Browser owner 记录，未知不记为零；独立编辑按准确 Profile 的版本核对，不能让无关身份的更新成为冲突来源。复制设置创建新身份，明确不复制登录态、凭据、人工批准或既有运行记录。
 
 公共 Profile 能力的回执与授权边界：

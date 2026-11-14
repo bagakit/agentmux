@@ -26,8 +26,12 @@ Read only the matching local help:
   the original createdId independently of current rename/archive/removal. Never infer the
   result from a matching label or time. Inspect is read-only; observed metadata does not
   prove that the original reply or directory durability ACK reached its caller. An explicit
-  retry of the exact same actor/request/operation returns its original identity before
-  checking a later source/collection CAS; it never creates another one. Changed input or
+  retry of the exact same actor/request/operation confirms the currently retained original
+  metadata and returns its original identity before checking a later source/collection CAS;
+  it never creates another one. confirmation:current-metadata-sync describes that current
+  file/parent sync, not delivery of the historical reply. confirmation:observation remains
+  read-only and unconfirmed. GUI pending requests keep their full input until the explicit
+  Confirm creation action and the client checkpoint are both acknowledged. Changed input or
   another actor with that operation is rejected. Do not automatically replay unknown work.
   The root `revision` is the configuration collection stamp used by folder actions;
   `sequence` orders complete snapshots including confirmed activity checkpoints.
