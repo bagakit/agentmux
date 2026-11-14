@@ -20,8 +20,8 @@ app.whenReady().then(async () => {
       result.console.push(...normalized)
     })
     await win.loadFile(html)
-    let until, settle, click
-    ;({ read, until, settle, click } = nativeRendererInput(win, result.interactions, '.settings-page'))
+    let until, settle, click, press
+    ;({ read, until, settle, click, press } = nativeRendererInput(win, result.interactions, '.settings-page'))
     await until('!!(window.connectionsProof?.ready&&document.querySelector(".settings-page"))')
     await read("window.__connectionsTrustedEvents=[];window.__captureErrorStacks=[];window.addEventListener('error',event=>window.__captureErrorStacks.push(String(event.error?.stack||event.message)));for(const type of ['click','keydown','keypress','keyup','input'])document.addEventListener(type,event=>window.__connectionsTrustedEvents.push({type,trusted:event.isTrusted,key:event.key,target:event.target.tagName}),true)")
     async function shot(name) {
@@ -52,7 +52,11 @@ app.whenReady().then(async () => {
       await click('[aria-label="Level 1 form"]'); await until('!!document.querySelector(".selection-field__menu")'); await shot(`focus-form-menu-${theme}.png`)
       await click('.selection-field__menu [data-value="compact"]')
       await click('[aria-label="Level 1 information"]'); await until('!!document.querySelector(".selection-field__menu")'); await shot(`focus-information-menu-${theme}.png`)
-      await read('document.activeElement?.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}))'); await settle()
+      result.stage = 'focus-native-escape'
+      await press('Escape')
+      assert.equal(await read('!!document.querySelector(".selection-field__menu")'), false, 'Native Escape closes the menu')
+      assert.equal(await read('document.activeElement?.getAttribute("aria-label")'), 'Level 1 information', 'Native Escape returns focus to the original trigger')
+      assert.equal(await read('!!document.querySelector(".settings-page")'), true, 'The owning Settings page remains open')
 
       await read('window.connectionsProof.reopen("remote-execution")')
       result.stage = 'routes-select-tab'
@@ -61,6 +65,17 @@ app.whenReady().then(async () => {
       await until('!!document.querySelector(\'[aria-label="Route policy device"]\')')
       result.stage = 'routes-open-device'
       await click('[aria-label="Route policy device"]'); await until('!!document.querySelector(".selection-field__menu")'); await shot(`routes-device-menu-${theme}.png`)
+      result.stage = 'routes-long-list-tail'
+      await press('Down'); await press('End')
+      const tail = await read(`(()=>{const item=document.querySelector('.selection-field__menu [data-value="host-23"]'),results=document.querySelector('.selection-field__results');if(!item||!results)return null;const r=item.getBoundingClientRect(),b=results.getBoundingClientRect();return {focused:document.activeElement===item,top:r.top,bottom:r.bottom,resultsTop:b.top,resultsBottom:b.bottom,scrollTop:results.scrollTop,scrollHeight:results.scrollHeight,clientHeight:results.clientHeight}})()`)
+      assert.ok(tail?.focused, 'Native End focuses the actual last Host')
+      assert.ok(tail.top >= tail.resultsTop - 1 && tail.bottom <= tail.resultsBottom + 1, 'The last Host is fully visible, not a clipped half row')
+      assert.ok(tail.scrollTop > 0 && tail.scrollTop + tail.clientHeight >= tail.scrollHeight - 1, 'The actual results reach their scroll endpoint')
+      result.interactions.push({ kind: 'native-long-list-tail', ...tail })
+      await shot(`routes-device-tail-${theme}.png`)
+      await click('.selection-field__menu [data-value="host-23"]')
+      await until('document.querySelector(\'[aria-label="Route policy device"]\')?.dataset.value==="host-23"')
+      await click('[aria-label="Route policy device"]'); await until('!!document.querySelector(".selection-field__menu")')
       result.stage = 'routes-select-host'
       await click('.selection-field__menu [data-value="host-02"]')
       result.stage = 'routes-wait-saved-connections'
@@ -84,7 +99,7 @@ app.whenReady().then(async () => {
       assert.equal(await read('window.connectionsProof.calls.filter(call=>call.kind==="preview-config-save").length'), 0, 'Selection never saves configuration')
       assert.equal(await read('window.connectionsProof.calls.filter(call=>call.kind==="original-select-session").length'), 0, 'Selection never opens an Agent or Session')
     }
-    assert.equal(result.images.length, 14)
+    assert.equal(result.images.length, 16)
     result.completed = true
   } catch (error) {
     result.failure = { name: error.name, message: error.message, stack: error.stack, stage: result.stage }

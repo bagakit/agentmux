@@ -21,6 +21,16 @@ const { build } = await import(pathToFileURL(desktopRequire.resolve('vite')).hre
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const receipt = { completed: false, boundary: 'Actual SettingsPanel/NetworkNodeSettingsPane and SelectionField with controlled Settings DTOs. No real SSH, installation, Runtime recovery or physical device claim.', images: [], sources: {} }
 const sources = {}
+for (const file of [
+  'apps/desktop/scripts/capture-ui-selection-field.mjs',
+  `apps/desktop/scripts/fixtures/ui-selection-field/${section}-main.cjs`,
+  'apps/desktop/scripts/fixtures/settings-connections/native-input.cjs',
+  'apps/desktop/scripts/fixtures/settings-connections/environment.mjs',
+  'apps/desktop/scripts/fixtures/settings-resource-library/environment.mjs',
+  'apps/desktop/scripts/candidate-package-resolve.mjs',
+  'apps/desktop/scripts/probe-process.mjs',
+  'apps/desktop/scripts/radix-overlay-aliases.ts',
+]) sources[file] = sha(readFileSync(resolve(root, file)))
 await mkdir(evidence, { recursive: true })
 try {
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error', resolve: { alias: [...aliases, { find: 'node:crypto', replacement: resolve(root, 'apps/desktop/scripts/lib/browser-crypto.mjs') }, { find: 'node:util', replacement: resolve(root, 'apps/desktop/scripts/lib/browser-util.mjs') }, { find: '@agentmux/core/browser-viewport', replacement: resolve(root, 'packages/core/src/browser-viewport.ts') }], }, esbuild: { jsx: 'automatic' },

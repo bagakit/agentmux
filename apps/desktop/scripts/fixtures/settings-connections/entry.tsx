@@ -97,8 +97,8 @@ api.hosts.upgradeCheck = async host => {
 api.executors.discover = async hostId => {
   calls.push({ kind: 'controlled-executor-discovery', input: { hostId } })
   return { routeHostId: hostId, runtimeId: 'controlled-executor-runtime', executors: [
-    { executorId: 'shared', label: 'Remote Agent', providerId: 'claude', command: _historyFixturePath("remote/claude"), configRevision: 'controlled-shared-revision', source: 'registered', availability: 'available' },
-    { executorId: 'remote-only', label: 'Remote exclusive Agent', providerId: 'codex', command: _historyFixturePath("remote/exclusive"), configRevision: 'controlled-exclusive-revision', source: 'registered', availability: 'available' }
+    { executorId: 'shared', label: 'Remote Agent', providerId: 'claude', command: _historyFixturePath("remote/claude"), executable: _historyFixturePath("remote/claude"), configRevision: 'controlled-shared-revision', source: 'registered', availability: 'available' },
+    { executorId: 'remote-only', label: 'Remote exclusive Agent', providerId: 'codex', command: _historyFixturePath("remote/exclusive"), executable: _historyFixturePath("remote/exclusive"), configRevision: 'controlled-exclusive-revision', source: 'registered', availability: 'available' }
   ] }
 }
 // Controlled public route DTOs let the real route editor render its saved-connection picker.
