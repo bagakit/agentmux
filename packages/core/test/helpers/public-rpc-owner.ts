@@ -3,6 +3,7 @@ import { fixturePath } from './fixture-values.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { vi } from 'vitest'
+import type { AgentMuxAgentSessionRegistry } from '../../src/agent-session-registry.js'
 import { AgentMuxClient as SourceClient } from '../../src/client.js'
 import { AgentMuxFileAgentSessionStore as SourceStore, type AgentMuxAgentSessionStore } from '../../src/agent-session-store.js'
 const ownerEntry = process.env.AGENTMUX_TEST_RPC_CORE_ENTRY
@@ -38,7 +39,7 @@ export async function rpcOwnerFixture<Client extends Pick<SourceClient, 'dispose
     await store.compareAndSwap(null, record)
   }
   const client = new Client({ store, ...clientOptions?.(root) })
-  const inner = client as unknown as { connected: boolean; registry: { load(hostId: string): Promise<void> }; kernel: Record<string, unknown> }
+  const inner = client as unknown as { connected: boolean; registry: Pick<AgentMuxAgentSessionRegistry, 'load' | 'refresh'>; kernel: Record<string, unknown> }
   await inner.registry.load('local'); inner.connected = true; inner.kernel.isConnected = () => true
   // The Runtime here is a deterministic port. A real connect would activate a detached ctxmuxd that,
   // by product contract, outlives its client and so outlives this fixture's private root.

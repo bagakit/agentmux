@@ -13,6 +13,7 @@ import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
 import { nativeInputCorrelationKey } from '../src/native-input-correlation.js'
 import type { AgentMuxAgentSession, AgentNativePromptInputPlan } from '../src/types.js'
+import type { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { runSourceObjectCli } from './helpers/source-object-cli.js'
 import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
@@ -45,11 +46,22 @@ async function fixture(selected = false) {
   const ended = new Set<string>()
   const run = (id: string) => ({ ...h.run(id), pid: 1234, state: id === currentRun && !ended.has(id) ? { type: 'running' as const } : { type: 'exited' as const, code: 0, signal: null } })
   h.inner.kernel.status = vi.fn(async id => run(id))
-  const start = vi.fn(async () => { currentRun = 'resumed-' + ++serial; return run(currentRun) })
-  Object.assign(h.inner.kernel, { start, list: async () => [run(currentRun)] })
+  const starts = new Map<string, ReturnType<typeof run>>()
+  const start = vi.fn(async (request?: { operationKey?: string }) => {
+    const previous = request?.operationKey && starts.get(request.operationKey)
+    if (previous) return previous
+    currentRun = 'resumed-' + ++serial
+    const value = { ...run(currentRun), lifecycleOperationId: request?.operationKey ?? null }
+    if (request?.operationKey) starts.set(request.operationKey, value)
+    return value
+  })
+  const runtime = { runtimeId: 'private-resumed-inbox-runtime', instanceId: 'review-daemon', buildIdentity: 'fixture', protocolVersion: 1 }
+  Object.assign(h.inner.kernel, { start, list: async () => [run(currentRun)], creationRuntimeIdentity: () => runtime,
+    startPrepared: async (...[request, operationKey, expected]: Parameters<CtxmuxRunAdapter['startPrepared']>) => { expect(expected).toEqual(runtime); return await start({ ...request, operationKey }) },
+    inspectPreparedStart: async (...[_request, operationKey]: Parameters<CtxmuxRunAdapter['inspectPreparedStart']>) => starts.get(operationKey) ?? null })
   const inner = h.client as any
   inner.hookServer.isRunning = () => true
-  inner.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43), endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })
+  inner.hookServer.createBinding = (_sessionId: string, _providerId: string, bindingId: string) => ({ bindingId, endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })
   inner.ensureManagedHooks = async () => {}; inner.ensureTerminalHandshakeOrDegrade = async (session: AgentMuxAgentSession) => session
   const providers = Reflect.get(h.client, 'providers') as AgentProviderRegistry, builtin = providers.get('codex')
   const { discoverNativeSession: _discovery, observeSessionStatus: _status, ...provider } = builtin
@@ -146,13 +158,27 @@ it.each([false, true])('automatically selects untouched historical references th
   expect(f.native.mock.calls[0]![1].operation).toBe('queue-idle'); expect(f.inner.kernel.input).not.toHaveBeenCalled()
 })
 
+it('keeps original automatic A2A notification eligibility after same-target confirmation', async () => {
+  const f = await fixture(), original = await f.append('historical-confirmed'), current = await f.resume()
+  const stored = (await f.store.readMetadata('recipient'))!
+  await f.store.compareAndSwapMetadata(stored, { ...stored, nativeBinding: { source: 'native-hook', run: current.run, observedAt: stored.updatedAt } })
+  await Reflect.get(f.client, 'registry').refresh('recipient', current.run)
+  f.idle(); await f.notifications.restore(); await f.settled()
+  const listed = await f.rpc.call('message.ls', { hostId: 'local', participantSessionId: 'recipient', direction: 'incoming' })
+  expect(listed.messages[0]?.notification, 'confirmed same-target binding must retain automatic original-MID eligibility')
+    .toMatchObject({ state: 'submitted', key: { expectedRun: current.run } })
+  expect((await f.queue.readNotification(listed.messages[0]!.notification!.notificationId!))?.messageIds).toEqual(['historical-confirmed'])
+  expect((await f.queue.readByMessageId('historical-confirmed'))?.envelope).toEqual(original.envelope)
+  expect(f.native).toHaveBeenCalledOnce(); expect(f.inner.kernel.input).not.toHaveBeenCalled()
+})
+
 it.each(['missing-chain', 'changed-target', 'changed-provider', 'wrong-binding', 'conflicting-predecessor'] as const)('does not expand automatic source Runs for %s while explicit user input remains available', async failure => {
   const f = await fixture(); await f.append('old-only'); const current = await f.resume()
   const altered = structuredClone(current)
   if (failure === 'missing-chain') { delete altered.continuity; delete altered.continuityOperations }
   else if (failure === 'changed-target') altered.nativeHandle = { ...f.nativeHandle, sessionId: 'another-native' }
   else if (failure === 'changed-provider') altered.nativeHandle = { ...f.nativeHandle, providerId: 'claude' }
-  else if (failure === 'wrong-binding') altered.nativeBinding = { source: 'native-hook', run: current.run, observedAt: Date.now() }
+  else if (failure === 'wrong-binding') altered.nativeBinding = { source: 'native-hook', run: { runId: 'unrelated-binding-run' }, observedAt: Date.now() }
   else altered.continuityOperations = { ...altered.continuityOperations, conflict: { ...altered.continuity!, operationId: 'conflict', previousRun: { runId: 'another-previous' } } }
   expect(sessionSemanticResumeSourceRuns(altered)).toEqual([current.run.runId])
   const before = await f.queue.pendingNotificationPosition('recipient', [current.run.runId])

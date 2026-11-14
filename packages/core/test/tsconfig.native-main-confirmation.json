@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "../../..", "module": "ESNext", "moduleResolution": "Bundler", "noEmit": true,
+    "allowImportingTsExtensions": true, "allowJs": true, "lib": ["ES2024", "DOM", "DOM.Iterable", "DOM.AsyncIterable"],
+    "baseUrl": "../../..",
+    "paths": { "@agentmux/core": ["packages/core/src/index.ts"], "@agentmux/core/*": ["packages/core/src/*.ts"],
+      "@agentmux/identity": ["packages/identity/src/index.ts"], "@agentmux/diagnostic-evidence": ["packages/diagnostic-evidence/src/index.ts"],
+      "@agentmux/diagnostic-evidence/*": ["packages/diagnostic-evidence/src/*.ts"] }
+  },
+  "include": ["native-main-confirmation.test.ts", "native-main-confirmation-restart.test.ts", "a2a-resumed-inbox.test.ts", "provider-startup-wait.test.ts", "native-main-confirmation.config.mts"]
+}
