@@ -1,12 +1,18 @@
-const { app, BrowserWindow } = require('electron')
+const { app, BrowserWindow, ipcMain } = require('electron')
 const assert = require('node:assert/strict')
 const fs = require('node:fs/promises'), path = require('node:path')
-const [html, privateRoot, evidence, phase] = process.argv.slice(2)
+const { pathToFileURL } = require('node:url')
+const [html, privateRoot, evidence, phase, spatialOwner] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data')); app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 app.whenReady().then(async () => {
   let win
   try {
-    win = new BrowserWindow({ show: false, webPreferences: { sandbox: false, backgroundThrottling: false } })
+    const { AgentMuxSpatialStateStore } = await import(pathToFileURL(spatialOwner).href)
+    const spatial = new AgentMuxSpatialStateStore(path.join(privateRoot, 'spatial.json'))
+    ipcMain.handle('goals-restart-spatial', (_event, request) => request.kind === 'read' ? spatial.read() : spatial.commit(request.input))
+    const preload = path.join(privateRoot, 'spatial-preload.cjs')
+    await fs.writeFile(preload, `const {contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('goalsRestartSpatial',{read:()=>ipcRenderer.invoke('goals-restart-spatial',{kind:'read'}),commit:input=>ipcRenderer.invoke('goals-restart-spatial',{kind:'commit',input})});`)
+    win = new BrowserWindow({ show: false, webPreferences: { preload, sandbox: false, backgroundThrottling: false } })
     await win.loadFile(html)
     const evaluate = expression => win.webContents.executeJavaScript(expression)
     for (let attempt = 0; !await evaluate('Boolean(window.goalsVisual)'); attempt++) {
@@ -24,7 +30,7 @@ app.whenReady().then(async () => {
       assert.equal(phase, 'restore')
       const first = JSON.parse(await fs.readFile(path.join(evidence, 'workflow-before-restart.json'), 'utf8'))
       assert.notEqual(first.pid, process.pid, 'A new Electron process owns the recovered workface')
-      const restored = await evaluate('goalsVisual.restoredWorkflow()')
+      const restored = JSON.parse(JSON.stringify(await evaluate('goalsVisual.restoredWorkflow()')))
       for (const field of ['intents', 'discussions', 'drafts', 'selected', 'surface']) assert.deepEqual(restored[field], first.original[field], 'Original ' + field + ' survived actual Chromium disk persistence')
       assert.deepEqual(restored.tabs['workflow-discussion'], first.original.tabs['workflow-discussion'], 'Original Tab, Region and Session binding remain')
       for (const [workspaceId, layout] of Object.entries(first.original.layouts)) assert.deepEqual(restored.layouts[workspaceId], layout, 'Original groups, focus and splits remain for ' + workspaceId)

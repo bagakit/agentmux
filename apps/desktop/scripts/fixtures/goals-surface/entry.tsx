@@ -167,6 +167,7 @@ Object.assign(window, { goalsVisual: { seed,
     const state = useAppStore.getState(), goal = state.demands[goals[0]!.id]!
     useAppStore.setState({ agentComposerDrafts: { ...state.agentComposerDrafts, 'workflow-region': 'Keep this original discussion draft.' },
       demandPmoTabIds: { ...state.demandPmoTabIds, 'goal:unobserved': 'original-unobserved-discussion' } })
+    await checkpointSpatialWorkbench()
     const saved = await retainGoalFiniteStartIntent({ goalId: goal.id, operationId: 'workflow-original-request', sessionId: sessions[0]!.control.agentSessionId,
       expectedUpdatedAt: goal.updatedAt, phase: 'may-have-dispatched' })
     if (!saved.clientStateWritten) throw new Error('Original workflow selection did not reach its actual localStorage owner.')

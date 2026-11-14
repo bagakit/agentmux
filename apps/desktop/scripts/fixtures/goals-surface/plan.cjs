@@ -6,9 +6,9 @@ module.exports = async ({ evaluate, size, click, pointer, capture, waitFor, pain
   const { demandExecutionReferences } = await import('@agentmux/demand')
   const states = ['done', 'ready', 'working', 'review', 'changes', 'unknown', 'waiting']
   const canvasGeometry = () => evaluate(`(()=>{const canvas=document.querySelector('.goal-plan__canvas'),columns=canvas.querySelector('.goal-plan__columns'),svg=canvas.querySelector('.goal-plan__edges');return {clientHeight:canvas.clientHeight,scrollHeight:canvas.scrollHeight,contentHeight:columns.getBoundingClientRect().height,svgHeight:Number(svg.getAttribute('height'))}})()`)
-  // The real pointer rests on a section heading, so no card carries a hover state into a frame.
-  const restOn = async heading => {
-    await pointer(`[...document.querySelectorAll('.goals-section-heading h2')].find(node=>node.textContent.trim()===${JSON.stringify(heading)})`)
+  // The sticky toolbar is visible in every reading position, including narrow dependency tails.
+  const restOn = async () => {
+    await pointer(`document.querySelector('.goals-detail__toolbar')`)
     assert.equal(await evaluate(`document.querySelectorAll('.goal-plan-node:hover').length`), 0, 'No plan card is hovered in the frame')
   }
   // Every written dependency name fits one line here, so none may be split across lines.
@@ -38,6 +38,11 @@ module.exports = async ({ evaluate, size, click, pointer, capture, waitFor, pain
     assert.ok(await evaluate(`[...document.querySelectorAll('.goal-plan-node__place')].every(node=>node.textContent==='Remote · Recovery worker')`),
       'Node locations name the configured remote Host, not only its route id')
     result.observations.push({ scene: 'plan', width, theme, facts })
+    const firstScreen = await evaluate(`(()=>{const plan=document.querySelector('.goal-plan').getBoundingClientRect(),head=document.querySelector('.goals-detail__head').getBoundingClientRect(),side=document.querySelector('.goals-detail__side').getBoundingClientRect();return {planTop:plan.top,headBottom:head.bottom,sideTop:side.top,planVisible:plan.top<innerHeight-100,wideFacts:side.left>plan.left+plan.width}})()`)
+    assert.ok(firstScreen.planVisible && firstScreen.planTop >= firstScreen.headBottom, 'The first screen reads the title then the actual plan')
+    if (width === 620) assert.ok(firstScreen.sideTop > firstScreen.planTop, 'Narrow facts do not push the actual plan down')
+    else assert.ok(firstScreen.wideFacts, 'Wide facts use the right column beside the plan')
+    result.observations.push({scene:'detail-first-screen',width,theme,firstScreen})
     await restOn('Goal definition')
     await capture(`${width}-${theme}-plan-context`, width)
     await evaluate(`(()=>{const graph=document.querySelector('.goal-plan'),detail=graph.closest('.goals-detail');graph.scrollIntoView({block:'start'});detail.scrollTop-=detail.querySelector('.goals-detail__toolbar').getBoundingClientRect().height+12})()`)
@@ -79,6 +84,19 @@ module.exports = async ({ evaluate, size, click, pointer, capture, waitFor, pain
     result.observations.push({ scene: 'plan-open-close', width, theme, closed, expanded, closedAgain })
     assert.ok(closedAgain.scrollHeight <= closed.scrollHeight + 1 && closedAgain.svgHeight <= closed.svgHeight + 1,
       'Closing the original node restores the original canvas extent instead of retaining the expanded SVG height')
+    if (theme === 'light') {
+      await evaluate(`document.querySelector('.goals-activity').scrollIntoView({block:'start'})`)
+      await click(`document.querySelector('.goals-activity__decision summary')`)
+      await restOn()
+      assert.equal(await evaluate(`document.querySelectorAll('.goals-activity__row').length`), 6, 'Recent activity reads directly while earlier records remain available')
+      await capture(`${width}-${theme}-detail-activity`, width)
+      await evaluate(`document.querySelector('[data-goal-attempt="previous"]').scrollIntoView({block:'center'})`)
+      await click(`document.querySelector('[data-goal-attempt="previous"] .goal-delegation__source summary')`)
+      await restOn()
+      const earlier = await evaluate(`document.querySelector('[data-goal-attempt="previous"]').textContent`)
+      assert.ok(earlier.includes('Previous attempt') && earlier.includes('Earlier guide author') && earlier.includes('thread:guide') && earlier.includes('request:guide'), 'The original previous worker, source and thread stay readable after reassignment')
+      await capture(`${width}-${theme}-previous-attempt`, width)
+    }
   }
   for (const [width, theme] of [[1280, 'dark'], [620, 'light']]) {
     await evaluate(`goalsPlan.seed(true);goalsVisual.appearance(${JSON.stringify(theme)})`)
@@ -102,5 +120,5 @@ module.exports = async ({ evaluate, size, click, pointer, capture, waitFor, pain
     await restOn('Results review')
     await capture(`${width}-${theme}-plan-unavailable-tail`, width)
   }
-  assert.equal(result.frames.length, 18, 'Four viewports/themes have context, graph and expanded-review frames, both narrow dependency tails, and a wide and a narrow plan without owner states with their tails')
+  assert.equal(result.frames.length, 22, 'Four viewports/themes, dependency tails, unavailable-state reading, activity timelines and retained previous attempts')
 }

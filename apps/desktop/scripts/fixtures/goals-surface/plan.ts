@@ -22,6 +22,9 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
       const worker = { ...originalWorker, id: 'plan-worker-session', hostId: 'plan-worker', control: {
         ...originalWorker.control, hostId: 'plan-worker', agentSessionId: 'plan-worker-session', run: { runId: 'plan-worker-run' }
       } }
+      const previousWorker = { ...originalWorker, id: 'plan-previous-worker-session', hostId: 'plan-worker', control: {
+        ...originalWorker.control, hostId: 'plan-worker', agentSessionId: 'plan-previous-worker-session', run: { runId: 'plan-previous-worker-run' }
+      } }
       const criterion = goal.alignment!.criteria[0]!
       const executor = { hostId: worker.control.hostId, agentSessionId: worker.control.agentSessionId }
       const node = (id: string, title: string, dependsOn: string[], outcome: string): GoalPlanNodeInput => ({
@@ -57,9 +60,19 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
       const plan = parseGoalPlan({ revision: 2, alignmentRevision: goal.alignment!.revision, nodes,
         reviews: [review('outline', 'pass'), review('history', 'changes')],
         history: [1, 2].map(revision => ({ operationId: `plan:revision-${revision}`, revision, author: { kind: 'agent', id: owner.control.agentSessionId }, revisedAt: revision })) })
+      const previousGuide = attempt('guide', true)
+      previousGuide.workerAgentSessionId = previousWorker.control.agentSessionId
+      previousGuide.workerRunId = previousWorker.control.run.runId
+      previousGuide.report = { ...previousGuide.report!, authorAgentSessionId: previousWorker.control.agentSessionId,
+        grounding: { ...previousGuide.report!.grounding, summary: 'The earlier guide result is retained after reassignment.' } }
       const next = { ...goal, title: 'Return to the same work, without rebuilding it', plan,
-        supervisorSessionId: owner.control.agentSessionId, sessionIds: [...new Set([...goal.sessionIds, executor.agentSessionId])], assigneeSessionIds: [executor.agentSessionId],
-        delegations: parseDemandDelegations([attempt('outline', true), attempt('workspace', false), attempt('drafts', true), attempt('history', true), attempt('reconnect', false, false)]) }
+        activities: Array.from({ length: 8 }, (_, index) => ({ id: `original-note:${index}`, kind: 'Progress',
+          message: index === 7 ? 'The original checks are ready for independent review.' : 'Kept the original workspace and recorded the recovery evidence.',
+          createdAt: goal.createdAt + index * 60000, actorId: worker.control.agentSessionId })),
+        decisions: [{ id: 'original-decision', question: 'Which work should the next check use?', decision: 'Continue from the same original workspace.',
+          rationale: 'The existing Sessions, reading anchors and unsent drafts belong to this work.', actorId: owner.control.agentSessionId, createdAt: goal.createdAt + 9 * 60000 }],
+        supervisorSessionId: owner.control.agentSessionId, sessionIds: [...new Set([...goal.sessionIds, executor.agentSessionId, previousWorker.control.agentSessionId])], assigneeSessionIds: [owner.control.agentSessionId, executor.agentSessionId],
+        delegations: parseDemandDelegations([attempt('outline', true), attempt('workspace', false), attempt('drafts', true), attempt('history', true), attempt('reconnect', false, false), previousGuide]) }
       const references = demandExecutionReferences(next)
       // The private Electron probe validates these DTOs with the production parser outside the browser.
       const responsibility: GoalResponsibilityObservation = { scope: demandResponsibilityScope(next), observedAt: next.updatedAt,
@@ -83,10 +96,10 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
         : originalDelegation(operation, input)
       flushSync(() => {
         useAppStore.setState({ demands: { [next.id]: observed },
-          sessions: [...state.sessions.filter(session => session.id !== worker.id), worker],
+          sessions: [...state.sessions.filter(session => session.id !== worker.id && session.id !== previousWorker.id), worker, previousWorker],
           config: { ...state.config!, hosts: [...state.config!.hosts.filter(host => host.id !== 'plan-worker'),
             { id: 'plan-worker', kind: 'ssh', label: 'Recovery worker', hostname: 'plan-worker.invalid' }] },
-          agentNames: { ...state.agentNames, [worker.id]: 'Atlas · Recovery engineer', [owner.id]: 'Mira · Independent review' } })
+          agentNames: { ...state.agentNames, [worker.id]: 'Atlas · Recovery engineer', [owner.id]: 'Mira · Independent review', [previousWorker.id]: 'Earlier guide author' } })
         render()
       })
     },
