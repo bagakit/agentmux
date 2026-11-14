@@ -993,6 +993,17 @@ export function runInterruptionFact(source: {
     : {}
 }
 
+/** Current Desktop routes for an original binding; never sent back as Core binding authority. */
+export type AgentWorkPlacement = { agentHostId: string; resourceHostId: string | null }
+
+/** Retained metadata with the same observer-relative route projection as live Sessions. */
+export type SessionHistoryDescriptor = AgentSessionHistoryDescriptor & { workPlacement?: AgentWorkPlacement }
+
+type DesktopRuntimeEvent = Exclude<AgentMuxClientEvent, { type: 'agent-session' }> |
+  (Omit<Extract<AgentMuxClientEvent, { type: 'agent-session' }>, 'session'> & {
+    session: AgentMuxAgentSession & { workPlacement?: AgentWorkPlacement }
+  })
+
 export type SessionSnapshot = SessionSnapshotBase & (
   | {
       kind: 'agent'
@@ -1004,6 +1015,7 @@ export type SessionSnapshot = SessionSnapshotBase & (
       nativeHandlePersistence?: NonNullable<AgentMuxAgentSession['nativeHandlePersistence']>
       nativeBinding?: NonNullable<AgentMuxAgentSession['nativeBinding']>
       toolExecution?: NonNullable<AgentMuxAgentSession['toolExecution']>
+      workPlacement?: AgentWorkPlacement
       observedNativeHandle?: NonNullable<AgentMuxAgentSession['observedNativeHandle']>
       nativeSourceObservation?: NonNullable<AgentMuxAgentSession['nativeSourceObservation']>
       hookIngressObservation?: NonNullable<AgentMuxAgentSession['hookIngressObservation']>
@@ -1066,7 +1078,7 @@ export type RuntimeEvent = {
   /** Original Main metadata order; independent of business event ordering. */
   hostTransportSequence?: number
   hostId: string
-  event: AgentMuxClientEvent
+  event: DesktopRuntimeEvent
   /** Present only when this endpoint's observation availability changes. */
   endpointWarning?: RuntimeEndpointWarning | null
   /** An observation owner clears only its own Host and step, including during startup. */
@@ -1092,7 +1104,7 @@ export type RuntimeEndpointWarning = {
 
 /** Only successful Host reads are in sources; warnings retain this cut's unresolved Hosts. */
 export type SessionHistorySourcesObservation = {
-  sources: AgentSessionHistoryDescriptor[]
+  sources: SessionHistoryDescriptor[]
   warnings: RuntimeEndpointWarning[]
 }
 
@@ -1100,7 +1112,7 @@ export type SessionHistorySourcesObservation = {
 export type SessionHistorySourceReference = SessionHistoryReference | { runtimeId: string; agentSessionId: string }
 export type SessionHistorySourceObservation = {
   reference: SessionHistorySourceReference
-  source: AgentSessionHistoryDescriptor | null
+  source: SessionHistoryDescriptor | null
   issue: { code: string; message: string; recovery: string } | null
 }
 
@@ -1166,6 +1178,7 @@ export type RuntimeSnapshot = {
 }
 
 export type AgentSessionRecoveryCandidate = {
+  workPlacement?: AgentWorkPlacement
   toolExecution?: NonNullable<AgentMuxAgentSession['toolExecution']>
   agentSessionId: string
   hostId: string
@@ -1953,7 +1966,7 @@ export type AgentMuxDesktopApi = {
     continueCreation(input: import('@agentmux/core').AgentMuxCreationContinueParams): Promise<import('@agentmux/core').AgentMuxCreationContinueResult>
     launchTerminal(input: TerminalLaunchInput): Promise<SessionSnapshot>
     historySource(reference: SessionHistorySourceReference): Promise<SessionHistorySourceObservation>
-    historySources(): Promise<AgentSessionHistoryDescriptor[]>
+    historySources(): Promise<SessionHistoryDescriptor[]>
     historySources(options: { observation: true }): Promise<SessionHistorySourcesObservation>
     timeline(session: SessionHistoryReference): Promise<AgentTimelineSnapshot>
     dispatches(session: SessionHistoryReference, options?: SessionDispatchPageOptions): Promise<AgentMuxRpcResult<'message.dispatch.ls'>>

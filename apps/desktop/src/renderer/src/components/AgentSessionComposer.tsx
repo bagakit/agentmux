@@ -183,7 +183,7 @@ export function AgentSessionComposer({
   ), [config, topics, session?.kind, session?.hostId, session?.workspacePath])
   const resource = useMemo(() => sessionResourceContext(config, session, topics, resourceWorkspaceId),
     [config, topics, resourceWorkspaceId, session?.kind, session?.hostId, session?.workspacePath,
-      toolExecution?.resourceHostId, toolExecution?.workspacePath])
+      toolExecution?.resourceHostId, toolExecution?.workspacePath, session?.kind === 'agent' ? session.workPlacement?.resourceHostId : undefined])
   const workspace = resource.workspace
   const activeFile = useObservedAppStore('composer', visible, consumerScope, (state) =>
     workspace ? state.lastActiveFileByWorkspace[workspace.id] : undefined

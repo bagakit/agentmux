@@ -851,6 +851,7 @@ export function projectRuntimeEvent(
     const item = existingEventSession
     if (!item || item.kind !== 'agent' || !acceptsAgentSessionTransition(item, core.session)) return { state }
     const {
+      workPlacement: _workPlacement,
       pendingInteraction: _pendingInteraction,
       completedInteractionResponse: _completedInteractionResponse,
       interactionResponseUnavailableReason: _interactionResponseUnavailableReason,
@@ -885,6 +886,7 @@ export function projectRuntimeEvent(
       ...current,
       providerId: core.session.providerId,
       ...projectNativeSourceFacts(core.session),
+      ...(core.session.workPlacement ? { workPlacement: { ...core.session.workPlacement } } : {}),
       ...(core.session.toolExecution ? { toolExecution: structuredClone(core.session.toolExecution) } : {}),
       ...(core.session.hookIngressObservation
         ? { hookIngressObservation: structuredClone(core.session.hookIngressObservation) }

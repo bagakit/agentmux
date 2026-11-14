@@ -20,7 +20,7 @@ export function AgentToolExecutionNotice({ session, visible, presentation = 'dis
   const [read, setRead] = useState<{ identity: string; inspection?: AgentExecutionInspection | null; error?: string }>({ identity })
   const [rejoinState, setRejoinState] = useState<{ identity: string; pending: boolean; error?: string }>({ identity, pending: false })
   const rejoining = useRef<string | null>(null)
-  const resourceHost = useAppStore(state => state.config?.hosts.find(host => host.id === binding?.resourceHostId)?.label)
+  const resourceHost = useAppStore(state => state.config?.hosts.find(host => host.id === session.workPlacement?.resourceHostId)?.label)
   function accept(value: AgentExecutionInspection | null) {
     if (latest.current.identity !== identity) return
     latest.current.revision++
@@ -105,7 +105,7 @@ export function AgentToolExecutionNotice({ session, visible, presentation = 'dis
     {recoveryDetails}
   </section>
   return <ServiceNoticeDisclosure scope={`local:tool-execution:${identity}`} notices={items} visible={visible}
-    available={inspection !== undefined && !current.error} persistentTitle title="Tool execution" detailsTitle={`Tools · ${resourceHost ?? binding.resourceHostId}`}
+    available={inspection !== undefined && !current.error} persistentTitle title="Tool execution" detailsTitle={`Tools · ${resourceHost ?? session.workPlacement?.resourceHostId ?? 'Host unknown'}`}
     actions={actions}>
     <p className="tool-execution-resource">{binding.workspacePath}</p>
     {items.map(item => <ServiceWindowNotice key={item.id} notice={item.notice} />)}

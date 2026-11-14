@@ -191,7 +191,7 @@ import {
   type AgentMuxSpaceAddress, type AgentMuxZoneFact, type AgentMuxSpaceBindingReport
 } from '@agentmux/core/control'
 import type { AgentMuxDemandDecision } from '@agentmux/core/control'
-import type { AgentCapabilities, AgentCatalogEntry, AgentMuxInteractionResponse, AgentSessionHistoryDescriptor } from '@agentmux/core'
+import type { AgentCapabilities, AgentCatalogEntry, AgentMuxInteractionResponse } from '@agentmux/core'
 import { EMPTY_LAUNCHER_OPTIONS, updateLauncherOption, type LauncherOptionDrafts, type LauncherProviderOptions } from './lib/launcher-option-draft'
 import { expandSemanticReferences } from '@agentmux/client-ui/composer-semantic-reference'
 import { primaryMoteExecutorChoice } from './lib/primary-mote-executor'
@@ -209,6 +209,7 @@ import type {
   CreateWorkspacePathInput,
   FileDocument,
   HostConfig,
+  SessionHistoryDescriptor,
   HostCheckResult,
   ExecutorDetection,
   ExecutorDetectionInput,
@@ -1688,7 +1689,7 @@ export type AppState = GitReadingActions & {
   controlSessionContinuity(sessionId: string, intentOperationId: string, action: 'continue' | 'cancel', additionalAttempts?: number): Promise<import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlResult>
   reconcileSessionContinuityControl(hostId: string, sessionId: string, operationId: string): Promise<import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlResult>
   refreshSession(sessionId: string): Promise<SessionSnapshot | undefined>
-  reopenRetiredSession(source: AgentSessionHistoryDescriptor, operationId?: string, observeOnly?: boolean): Promise<SessionSnapshot | undefined>
+  reopenRetiredSession(source: SessionHistoryDescriptor, operationId?: string, observeOnly?: boolean): Promise<SessionSnapshot | undefined>
   resumeNativeSession(input: import('../../shared/contracts').AgentLaunchInput, source: import('@agentmux/core').AgentNativeSessionCandidate, capabilities: AgentCapabilities, reveal?: () => boolean, retry?: boolean): Promise<SessionSnapshot | undefined>
   recoverSession(sessionId: string, operationId?: string, options?: { moteMain?: MoteMainInputSelection; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[]; preserveView?: boolean; stillCurrent?: () => boolean; trigger?: import('@agentmux/core/agent-session-recovery').AgentMuxContinuityTrigger; timingOverride?: 'startup' | 'on-open'; input?: NonNullable<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput['input']>; inputControl?: Extract<SessionSnapshot, { kind: 'agent' }>['control'] }): Promise<SessionSnapshot | undefined>
   restartSession(control: AgentSessionControl, operationId: string, observeOnly?: boolean): Promise<import('../../shared/contracts').SessionRestartResult>
@@ -3221,7 +3222,7 @@ type SessionMembershipEventBuffer = {
 type SessionMembershipResync = SessionMembershipEventBuffer & {
   generation: number
   historyReading: boolean
-  historyObservation?: { sources: readonly AgentSessionHistoryDescriptor[]; warnings: RuntimeEndpointWarning[]; sequence: number }
+  historyObservation?: { sources: readonly SessionHistoryDescriptor[]; warnings: RuntimeEndpointWarning[]; sequence: number }
   recoverSavedAgents: boolean
   restoredHostIds: Set<string>
   startupNotice: ErrorNoticeContext | null
@@ -3442,7 +3443,7 @@ function startupSnapshotConfirmsSessions(snapshot: RuntimeSnapshot, sessionIds: 
   return sessionIds.length > 0 && sessionIds.every(id => confirmed.has(id))
 }
 
-function retiredHistoryReferenceIds(sources: readonly AgentSessionHistoryDescriptor[], tabs: AppState['tabs'], config: AppConfig | null): Set<string> {
+function retiredHistoryReferenceIds(sources: readonly SessionHistoryDescriptor[], tabs: AppState['tabs'], config: AppConfig | null): Set<string> {
   const references = originalSavedSessionExecutions(tabs, config)
   const presentations = savedAgentPresentationIndex(references)
   return new Set(sources.flatMap(source => {
@@ -9123,7 +9124,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async openHostHome(hostId) {
     const host = get().config?.hosts.find(item => item.id === hostId)
     if (!host) throw new DeviceHomeError('read', Object.assign(new Error('Device configuration is unavailable.'), { code: 'DEVICE_HOME_TARGET_CHANGED' }))
-    const route = (value: HostConfig | undefined) => { if (!value) return null; const { label: _label, ...target } = value; return target }
+    const route = (value: HostConfig | undefined) => { if (!value) return null; if (value.kind === 'local') return { id: value.id, kind: value.kind }; const { label: _label, ...target } = value; return target }
     const target = structuredClone(route(host)), navigation = {}, selection = fileNavigationSelection(get())
     const sameTarget = () => configValuesEqual(route(get().config?.hosts.find(item => item.id === hostId)), target)
     let navigationChanged = false
@@ -13050,6 +13051,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   setConfig(config, preferredWorkspaceId) {
     if (Object.hasOwn(config.appearance, 'spaceObjectIcons')) retainedSpaceIconHandoff = undefined
     const iconProjection = restoreSpaceIconOverrides(config.appearance.spaceObjectIcons)
+    const placementRoutes = (hosts: HostConfig[] | undefined) => JSON.stringify(hosts?.map(host => { if (host.kind === 'local') return {id:host.id,kind:host.kind}; const { label: _label, ...route } = host; return route }))
+    const placementRoutesChanged = Boolean(get().config && placementRoutes(get().config?.hosts) !== placementRoutes(config.hosts))
     const runtimeConfigChanged = JSON.stringify(get().config?.hosts) !== JSON.stringify(config.hosts) ||
       JSON.stringify(get().config?.executors) !== JSON.stringify(config.executors)
     if (runtimeConfigChanged) {
@@ -13083,6 +13086,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return input && executorDetectionMatches(input, input.executorId, config.executors[input.executorId], config.hosts.find(host => host.id === input.host.id))
       })), hostChecks: {} } : {})
     }))
+    if (placementRoutesChanged && get().sessions.some(session => session.kind === 'agent' && session.toolExecution)) startSessionMembershipResync(undefined, { reportFailure: false })
   },
   reportError(error, context) {
     const message = presentError(error)

@@ -78,7 +78,8 @@ export function createSessionProjectFileContextSelector(sessionId: string, origi
       session?.hostId, session?.workspacePath, session?.control.run.runId,
       session?.kind === 'agent' ? session.toolExecution?.bindingId : undefined,
       session?.kind === 'agent' ? session.toolExecution?.resourceHostId : undefined,
-      session?.kind === 'agent' ? session.toolExecution?.workspacePath : undefined]
+      session?.kind === 'agent' ? session.toolExecution?.workspacePath : undefined,
+      session?.kind === 'agent' ? session.workPlacement?.resourceHostId : undefined]
     if (previous && relatedInputs && inputs.every((input, index) => input === relatedInputs![index])) return previous
     relatedInputs = inputs
     let canonical = false
@@ -114,7 +115,8 @@ export function createSessionProjectFileContextSelector(sessionId: string, origi
       const inputs = [state.config, navigationTabs, state.layouts, state.spaceZoneBindings, topics,
         state.spatialRequests, state.topicCategories, state.projectGroups,
         resourceWorkspace, session?.id, session?.hostId, session?.workspacePath, session?.control.run.runId, occurrence,
-        binding?.bindingId, binding?.resourceHostId, binding?.workspacePath]
+        binding?.bindingId, binding?.resourceHostId, binding?.workspacePath,
+        session?.kind === 'agent' ? session.workPlacement?.resourceHostId : undefined]
       if (!metadataInputs || inputs.some((input, index) => input !== metadataInputs![index])) {
         metadataInputs = inputs
         originalSpace = undefined
@@ -164,7 +166,7 @@ export function createSessionProjectFileContextSelector(sessionId: string, origi
     const root = kind === 'goal' ? project!.path : kind === 'session' && session
       ? binding?.workspacePath ?? topicDirectory?.root ?? workspaceRootForPath(state.config, session) ?? '' : ''
     const pathPrefix = kind === 'session' ? topicDirectory?.prefix : undefined
-    const hostId = kind === 'goal' ? project!.hostId : binding?.resourceHostId ?? session?.hostId
+    const hostId = kind === 'goal' ? project!.hostId : binding ? boundResource?.address?.hostId : session?.hostId
     const hosts = state.config?.hosts.filter(host => host.id === hostId) ?? []
     const homeDir = hosts.length === 1 && hosts[0]?.kind === 'local' ? state.localHome : ''
     const key = JSON.stringify([kind, goalId, goal?.projectId, project, root, pathPrefix, homeDir, issue,

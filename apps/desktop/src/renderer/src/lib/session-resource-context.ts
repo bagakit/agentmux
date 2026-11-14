@@ -1,4 +1,5 @@
 import type { AppConfig, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
+import { agentWorkPlacement } from './agent-work-mode'
 import { workspaceOwnsSessionPath, type ScratchTopicSnapshot } from '@agentmux/host/mote-model'
 
 export type SessionResourceContext = {
@@ -16,7 +17,9 @@ export function sessionResourceContext(config: AppConfig | null, session: Sessio
     const workspace = config?.workspaces.find(item => workspaceOwnsSessionPath(item, session, topics))
     return workspace ? { workspace, address: { hostId: workspace.hostId, path: workspace.path } } : {}
   }
-  const address = { hostId: binding.resourceHostId, path: binding.workspacePath }
+  const placement = agentWorkPlacement(session as Extract<SessionSnapshot, { kind: 'agent' }>, null)
+  if (!placement.projectHostId) return { issue: 'The original project Host is unconfirmed on this device. Your draft and Agent are kept; reconnect its original Host to use Files.' }
+  const address = { hostId: placement.projectHostId, path: binding.workspacePath }
   const matches = config?.workspaces.filter(item => item.hostId === address.hostId && item.path === address.path) ?? []
   const workspace = matches.find(item => item.id === preferredWorkspaceId) ?? (matches.length === 1 ? matches[0] : undefined)
   return workspace ? { workspace, address } : { address,

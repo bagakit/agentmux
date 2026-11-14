@@ -14,7 +14,7 @@ import type { ToolkitRunPort } from './toolkit-run-port.js'
 
 import { isAbsolute } from 'node:path'
 import { createHash } from 'node:crypto'
-import { AgentMuxError, readRoutedInputMailbox, createInputPerformanceRecorder, hostedCarrierPerformance, parseAgentNativeResumeSource, hostAgentCreationIntent, type AgentMuxHostAgentCreateInput, type AgentExecutionBindingService, agentPromptPredecessor, agentPromptNotApplied, validateAgentPromptCondition, validateAgentPromptInputBinding, type AgentPromptCondition, type AgentPromptInputBinding, type AgentInputSubmissionReceipt, type AgentPromptExecution, type AgentMessageChannel, type AgentSessionQuestionReplyReceipt, type AgentMuxRpcCallContext, type AgentMuxNativeSessionConfirmationInput, type AgentMuxNativeSessionConfirmation, runtimeStorageUsage, loadSessionHistorySources, agentInteractionResponseUnavailableReason, agentInteractionActiveRequest, type AgentCapabilities, type AgentCatalogEntry, type AgentExecutorId, type AgentProviderId, type AgentSessionHistoryPage, type AgentMuxSshHostedClient, type AgentSessionHistoryDescriptor, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult, type AgentSessionHistoryObservation, type AgentSessionHistoryObservationHandle, type AgentMuxClientEvent, type AgentMuxInteractionResponse, type AgentMuxAgentSessionStore, type AgentMuxRun, type AgentMuxRunInputData, type AgentMuxAgentWriteInput, type AgentMuxAgentStopReceipt, type AgentMuxRuntimeSubject, type AgentMuxRuntimeSubjectTarget, type ExecutionHost } from '@agentmux/core'
+import { AgentMuxError, readRoutedInputMailbox, createInputPerformanceRecorder, hostedCarrierPerformance, parseAgentNativeResumeSource, hostAgentCreationIntent, type AgentMuxHostAgentCreateInput, type AgentExecutionBindingService, agentPromptPredecessor, agentPromptNotApplied, validateAgentPromptCondition, validateAgentPromptInputBinding, type AgentPromptCondition, type AgentPromptInputBinding, type AgentInputSubmissionReceipt, type AgentPromptExecution, type AgentMessageChannel, type AgentSessionQuestionReplyReceipt, type AgentMuxRpcCallContext, type AgentMuxNativeSessionConfirmationInput, type AgentMuxNativeSessionConfirmation, runtimeStorageUsage, loadSessionHistorySources, agentInteractionResponseUnavailableReason, agentInteractionActiveRequest, type AgentCapabilities, type AgentCatalogEntry, type AgentExecutorId, type AgentProviderId, type AgentSessionHistoryPage, type AgentMuxSshHostedClient, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult, type AgentSessionHistoryObservation, type AgentSessionHistoryObservationHandle, type AgentMuxClientEvent, type AgentMuxInteractionResponse, type AgentMuxAgentSessionStore, type AgentMuxRun, type AgentMuxRunInputData, type AgentMuxAgentWriteInput, type AgentMuxAgentStopReceipt, type AgentMuxRuntimeSubject, type AgentMuxRuntimeSubjectTarget, type ExecutionHost } from '@agentmux/core'
 import { type AgentMuxAgentResumeInput } from '@agentmux/core/agent-session-recovery'
 import { agentPromptSubmissionOutcome, type MoteDialogueInputReference } from '@agentmux/core/mote-dialogue'
 import { callOriginalDesktopHost, subscribeOriginalDesktopHost } from './desktop-host.js'
@@ -42,6 +42,8 @@ import type {
   NativeAgentHistoryResourceInput,
   NativeAgentHistoryResourceResult,
   AgentSessionControl,
+  AgentWorkPlacement,
+  SessionHistoryDescriptor,
   AgentSessionRecoveryCandidate,
   AgentSessionNameMetadata,
   AppConfig,
@@ -219,6 +221,8 @@ function providerCapabilitiesFrom(
   return (providerId) => client.providers.get(providerId).catalog.capabilities
 }
 
+type WorkPlacementProjection = (agentHostId: string, binding: import('@agentmux/core').AgentMuxAgentSession['toolExecution']) => { workPlacement?: AgentWorkPlacement }
+
 function projectSession(
   subject: AgentMuxRuntimeSubject,
   config: AppConfig,
@@ -230,7 +234,8 @@ function projectSession(
   //
   // 换成 resolver 之后：agent 分支必须调它才拿得到能力（拿不到就是 UNKNOWN_PROVIDER 响亮地抛，不是
   // 静默退化成一份"什么都不支持"的假声明），terminal 分支根本不调，于是兜底字面量没有存在的理由。
-  capabilitiesFor: (providerId: AgentProviderId) => AgentCapabilities
+  capabilitiesFor: (providerId: AgentProviderId) => AgentCapabilities,
+  workPlacementFor: WorkPlacementProjection
 ): SessionSnapshot {
   const run = subject.run
   const observedAt = run.observedAt
@@ -268,6 +273,7 @@ function projectSession(
       executorId: subject.executorId,
       ...projectNativeSourceFacts(subject.agentSession),
       ...(subject.agentSession.toolExecution ? { toolExecution: structuredClone(subject.agentSession.toolExecution) } : {}),
+      ...workPlacementFor(subject.hostId, subject.agentSession.toolExecution),
       ...(subject.agentSession.hookIngressObservation
         ? { hookIngressObservation: structuredClone(subject.agentSession.hookIngressObservation) }
         : {}),
@@ -883,10 +889,11 @@ export class RuntimeController {
       }
       return []
     })
+    const workPlacementFor = this.workPlacementProjection()
     const sessions = projections.flatMap(({ hostId, client, projection, timelineFailures }) => {
       const failures = new Map(timelineFailures.map(failure => [failure.agentSessionId, failure.reason]))
       return projection.subjects.map((subject) => {
-        const session = projectSession({ ...subject, hostId }, config, providerCapabilitiesFrom(client))
+        const session = projectSession({ ...subject, hostId }, config, providerCapabilitiesFrom(client), workPlacementFor)
         if (session.kind !== 'agent' || !failures.has(session.id)) return session
         const error = failures.get(session.id)
         return { ...session, timelineObservation: {
@@ -913,6 +920,7 @@ export class RuntimeController {
           executorId: session.executorId,
           ...projectNativeSourceFacts(session),
           ...(session.toolExecution ? { toolExecution: structuredClone(session.toolExecution) } : {}),
+          ...workPlacementFor(hostId, session.toolExecution),
           ...(session.nativeHandle ? { nativeSessionId: session.nativeHandle.sessionId } : {}),
           capabilities: capabilitiesFor(session.providerId),
           ...(session.semanticStatus ? { semanticStatus: structuredClone(session.semanticStatus) } : {}),
@@ -1271,12 +1279,18 @@ export class RuntimeController {
       const subject = (await client.runtimeProjection()).subjects.find(candidate => (
         candidate.kind === 'agent' ? candidate.agentSession.agentSessionId === sessionId : candidate.run.runId === sessionId
       ))
-      return subject ? projectSession({ ...subject, hostId }, config, providerCapabilitiesFrom(client)) : null
+      return subject ? { subject, hostId, client } : null
     }))
-    const matches = results.flatMap(result => result.status === 'fulfilled' && result.value ? [result.value] : [])
+    const workPlacementFor = this.workPlacementProjection()
+    const projected = await Promise.allSettled(results.map(async result => {
+      if (result.status === 'rejected') throw result.reason
+      const value = result.value
+      return value ? projectSession({ ...value.subject, hostId: value.hostId }, config, providerCapabilitiesFrom(value.client), workPlacementFor) : null
+    }))
+    const matches = projected.flatMap(result => result.status === 'fulfilled' && result.value ? [result.value] : [])
     if (matches.length > 1) throw new AgentMuxError('Session identity is ambiguous across configured endpoints.', 'RUNTIME_OWNER_MISMATCH')
     if (matches[0]) return matches[0]
-    const failure = results.find(result => result.status === 'rejected')
+    const failure = projected.find(result => result.status === 'rejected')
     if (failure?.status === 'rejected') throw failure.reason
     return null
   }
@@ -1326,7 +1340,7 @@ export class RuntimeController {
         'The original metadata owner changed during this read. Retry the retained reference.', 'EXECUTOR_HOST_CHANGED')
       if (sources.length > 1 || sources.some(source => source.agentSessionId !== reference.agentSessionId)) throw new AgentMuxError(
         'The metadata owner returned another Session. The original reference is retained.', 'CONTROL_PROTOCOL_ERROR')
-      return { reference, source: sources[0] ? { ...sources[0], hostId } : null, issue: null }
+      return { reference, source: sources[0] ? { ...sources[0], hostId, ...this.workPlacementProjection()(hostId, sources[0].history?.toolExecution) } : null, issue: null }
     } catch (error) {
       return { reference, source: null, issue: { code: error instanceof AgentMuxError ? error.code : 'HISTORY_SOURCE_UNAVAILABLE',
         message: error instanceof Error ? error.message : String(error), recovery: 'Retry this original identity. Existing work remains available.' } }
@@ -1334,8 +1348,8 @@ export class RuntimeController {
   }
 
   async sessionHistorySources(options: { observation: true }): Promise<SessionHistorySourcesObservation>
-  async sessionHistorySources(): Promise<AgentSessionHistoryDescriptor[]>
-  async sessionHistorySources(options?: { observation: true }): Promise<AgentSessionHistoryDescriptor[] | SessionHistorySourcesObservation> {
+  async sessionHistorySources(): Promise<SessionHistoryDescriptor[]>
+  async sessionHistorySources(options?: { observation: true }): Promise<SessionHistoryDescriptor[] | SessionHistorySourcesObservation> {
     const hosts = [...this.hosts]
     const step = 'Reading retained History sources'
     const warnings = new Map<string, RuntimeEndpointWarning>()
@@ -1367,7 +1381,9 @@ export class RuntimeController {
         warnings.set(hostId, observationWarning(hostId, step, error, false))
       }
     }
+    const workPlacementFor = this.workPlacementProjection()
     const sources = current.flatMap(result => result.status === 'fulfilled' ? result.value : [])
+      .map(source => ({ ...source, ...workPlacementFor(source.hostId, source.history?.toolExecution) }))
     return options?.observation ? { sources, warnings: [...warnings.values()] } : sources
   }
 
@@ -2655,6 +2671,26 @@ export class RuntimeController {
     return [...this.hosts].map(([hostId, host]) => ({ hostId, client: host.client }))
   }
 
+  /** Build once per observation collection; this reads cached identity and performs no I/O. */
+  private workPlacementProjection(): WorkPlacementProjection {
+    const routes = new Map<string, string | null>()
+    for (const [hostId, host] of this.hosts) {
+      const observed = runtimeOwner(host.client)?.runtimeId
+      const configured = host.config.kind === 'ssh' ? host.config.runtimeId : undefined
+      // Both are stable authenticated identities, including a retained identity while offline.
+      // A conflict or multiple current routes must not turn a coordinator's alias into local files.
+      const conflict = observed !== undefined && configured !== undefined && observed !== configured
+      for (const runtimeId of new Set([observed, configured])) {
+        if (runtimeId === undefined) continue
+        const previous = routes.get(runtimeId)
+        routes.set(runtimeId, conflict || routes.has(runtimeId) && previous !== hostId ? null : hostId)
+      }
+    }
+    return (agentHostId, binding) => binding ? { workPlacement: {
+      agentHostId, resourceHostId: routes.get(binding.resourceRuntimeId) ?? null
+    } } : {}
+  }
+
   runtimeBindings(): Map<string, string> {
     return new Map([...this.hosts].flatMap(([hostId, host]) => {
       const identity = runtimeOwner(host.client)
@@ -2763,7 +2799,7 @@ export class RuntimeController {
     const subject = await client.runtimeSubject(target, knownRun)
     const hostId = [...this.hosts].find(([, host]) => host.client === client)?.[0]
     if (!hostId) throw new AgentMuxError('Session owner is no longer configured.', 'RUNTIME_UNAVAILABLE')
-    return projectSession({ ...subject, hostId }, config, providerCapabilitiesFrom(client))
+    return projectSession({ ...subject, hostId }, config, providerCapabilitiesFrom(client), this.workPlacementProjection())
   }
 
   private async serializeSessionAttachment<T>(key: string, operation: () => Promise<T>): Promise<T> {
@@ -2924,7 +2960,8 @@ export class RuntimeController {
         warningChange = null
       }
     }
-    const projectedEvent = event.type === 'agent-session' ? { ...event, session: { ...event.session, hostId } } : event
+    const projectedEvent = event.type === 'agent-session' ? { ...event, session: { ...event.session, hostId,
+      ...(event.session.toolExecution ? this.workPlacementProjection()(hostId, event.session.toolExecution) : {}) } } : event
     const runtimeEvent: RuntimeEvent = { type: 'core', hostId, event: projectedEvent,
       ...(event.type === 'connection-state' ? { hostTransport: this.hosts.has(hostId) ? hostTransportSnapshot(this.hosts.get(hostId)!.client) : null, hostTransportSequence: ++this.hostTransportSequence } : {}),
       ...(endpointObservation ? { endpointObservation } : {}),
