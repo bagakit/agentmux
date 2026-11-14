@@ -341,7 +341,7 @@ const FocusProjectObservation = memo(function FocusProjectObservation({ project,
       if (event.button !== 0) return
       event.stopPropagation(); event.preventDefault()
     }} onClick={() => { if (at !== null) onRead?.(at) }}>
-    <span className="focus-retained-projects__identity">{recent ? <ThemeObjectHistoryIcon size={13} aria-hidden="true" /> : null}<strong>{project.name}</strong><HostBadge context="Host" host={hostIdentityProjection(project.hostId, hosts?.find(host => host.id === project.hostId))} /></span>
+    <span className="focus-retained-projects__identity">{recent ? <ThemeObjectHistoryIcon size={13} aria-hidden="true" /> : null}<strong>{project.name}</strong>{project.identity.source ? <span className="focus-retained-projects__source" title={`Original Runtime: ${project.identity.source.runtimeId ?? 'unconfirmed'}`}>Original source</span> : <HostBadge context="Host" host={hostIdentityProjection(project.hostId, hosts?.find(host => host.id === project.hostId))} />}</span>
     <span className="focus-retained-projects__date">{activity ? 'Last active' : 'Last focused'} {at === null ? '· Time unknown' : <time dateTime={new Date(at).toISOString()}>{time.dateClock(at)}</time>}</span>
   </button>
     {showCards ? <FocusLaneGroups counts={[0, 0, 0, project.observations.length]} metrics={cardMetrics} replyLines={replyLines}>{layout =>

@@ -266,6 +266,7 @@
 .focus-retained-projects__row { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; min-width: 0; min-height: 36px; width: 100%; padding: 6px 12px; border: 0; background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-meta); text-align: left; cursor: pointer; }
 .focus-retained-projects__identity { display: flex; align-items: center; gap: 6px; flex: 1 1 180px; min-width: 0; }
 .focus-retained-projects__identity > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.focus-retained-projects__source { flex: none; color: var(--text-3); font-size: var(--fs-meta); }
 .focus-retained-projects__date { color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
 .focus-retained-projects__row:hover, .focus-retained-projects__toggle:hover { background: var(--surface-2); color: var(--text); }
 .focus-retained-projects__row:focus-visible, .focus-retained-projects__toggle:focus-visible { outline: 1px solid var(--green); outline-offset: -1px; }
