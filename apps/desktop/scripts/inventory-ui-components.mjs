@@ -6,7 +6,7 @@ const repository = resolve(import.meta.dirname, '../../..')
 const args = process.argv.slice(2)
 const root = args.includes('--root') ? resolve(args[args.indexOf('--root') + 1]) : repository
 const verify = args.includes('--verify')
-const output = args.includes('--output') ? resolve(args[args.indexOf('--output') + 1]) : resolve(repository, 'docs/reviews/ui-component-inventory.json')
+const output = args.includes('--output') ? resolve(args[args.indexOf('--output') + 1]) : resolve(root, 'docs/reviews/ui-component-inventory.json')
 const extensions = new Set(['.ts', '.tsx', '.mts', '.mjs', '.cjs', '.css', '.md'])
 const roots = ['apps/desktop/src', 'apps/desktop/scripts', 'apps/desktop/test', 'apps/mobile/src', 'apps/mobile/scripts', 'packages/client-ui/src']
 
@@ -27,13 +27,16 @@ const sources = new Map(files.map(file => [file, readFileSync(file, 'utf8')]))
 const relativeFile = file => relative(root, file).replaceAll('\\', '/')
 const lineAt = (source, index) => source.slice(0, index).split('\n').length
 
-const components = files.filter(file => /\.tsx$/u.test(file) && /^[A-Z]/.test(basename(file))).map(file => {
-  const name = basename(file, '.tsx')
-  const path = relativeFile(file)
-  const category = /(?:Picker|Composer|Conversation|Executor|Workbench|Surface|Pane)/u.test(name) ? 'domain-composite'
-    : /^(?:Mobile|Desktop)/u.test(name) ? 'host-adapter' : 'basic'
-  return { name, file: path, category, owner: path.startsWith('packages/client-ui/') ? 'packages/client-ui' : path.startsWith('apps/mobile/') ? 'apps/mobile' : 'apps/desktop' }
-}).sort((a, b) => a.file.localeCompare(b.file))
+const components = files.filter(file => /\.tsx$/u.test(file)).flatMap(file => {
+  const path = relativeFile(file), source = sources.get(file)
+  const exported = [...source.matchAll(/export\s+(?:async\s+)?(?:function|const)\s+([A-Z][A-Za-z0-9_]*)/g)].map(match => match[1])
+  const names = exported.length ? [...new Set(exported)] : (/^[A-Z]/.test(basename(file)) ? [basename(file, '.tsx')] : [])
+  return names.map(name => {
+    const category = /(?:Picker|Composer|Conversation|Executor|Workbench|Surface|Pane)/u.test(name) ? 'domain-composite'
+      : /^(?:Mobile|Desktop)/u.test(name) ? 'host-adapter' : 'basic'
+    return { name, file: path, category, owner: path.startsWith('packages/client-ui/') ? 'packages/client-ui' : path.startsWith('apps/mobile/') ? 'apps/mobile' : 'apps/desktop' }
+  })
+}).sort((a, b) => a.file.localeCompare(b.file) || a.name.localeCompare(b.name))
 
 const componentNames = ['SelectionField']
 const consumers = []
