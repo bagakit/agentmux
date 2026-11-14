@@ -44,8 +44,9 @@ let f: Owner, original: ReturnType<typeof composerSession>, operation: Takeover,
 let inputCalls: Array<{ method: string; input: AgentTakeoverCancellationInput }>
 let onCall: ((method: string, input: AgentTakeoverCancellationInput, call: () => Promise<AgentTakeoverCancellationResult>) => Promise<AgentTakeoverCancellationResult>) | undefined
 let untrustRenderer: () => void
+let checkpointWrites: Promise<unknown>[]
 const current = () => useAppStore.getState().agentOperations[agentOperationKey(operation)] as Takeover
-const buttons = (label: string) => [...document.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.textContent?.trim() === label)
+const buttons = (label: string) => [...document.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.textContent?.trim() === label || button.getAttribute('aria-label') === label)
 async function render(two = false) {
   await dom.render(<><input aria-label="Original draft" defaultValue="Keep the original draft and selection" />
     <div className="focus-context-card"><AgentOperationFeedback subject={operation.subject} /></div>
@@ -55,6 +56,12 @@ async function press(label: string) {
   const button = buttons(label)[0]
   expect(button, 'The actual feedback exposes ' + label).toBeDefined()
   await act(async () => button!.click())
+}
+async function openDetails() {
+  const trigger = dom.container.querySelector<HTMLButtonElement>('[data-operation-action="details"]')!
+  await act(async () => trigger.click())
+  await vi.waitFor(() => expect(document.querySelector('.agent-operation-feedback__popover')).not.toBeNull())
+  return document.querySelector<HTMLElement>('.agent-operation-feedback__popover')!
 }
 function preserved(before: ReturnType<typeof useAppStore.getState>) {
   const state = useAppStore.getState()
@@ -92,10 +99,13 @@ beforeEach(async () => {
       origin: { workspaceId: 'project-a', tabGroupId: 'original-group', tabId: 'original-tab', regionId: 'original-region' } } }
   beginAgentOperation(operation)
   writer = new WorkbenchUserStateStore(join(f.root, 'original-user-state.json'))
-  vi.spyOn(storeModule, 'checkpointAgentOperations').mockImplementation(async () => {
+  checkpointWrites = []
+  vi.spyOn(storeModule, 'checkpointAgentOperations').mockImplementation(() => {
     const state = useAppStore.getState()
-    await writer.write(JSON.stringify({ state: { agentOperations: persistedAgentOperations(state.agentOperations),
+    const write = writer.write(JSON.stringify({ state: { agentOperations: persistedAgentOperations(state.agentOperations),
       agentComposerDrafts: state.agentComposerDrafts, tabs: state.tabs, layouts: state.layouts }, version: 1 }))
+    checkpointWrites.push(write)
+    return write
   })
   vi.spyOn(storeModule, 'currentCoreSpatialGraph').mockImplementation(() => graph)
   vi.spyOn(api.spatial, 'owner').mockImplementation(() => f.rpc.call('runtime.owner.identity', {}))
@@ -129,6 +139,7 @@ beforeEach(async () => {
 })
 afterEach(async () => {
   await dom.render(null)
+  await Promise.allSettled(checkpointWrites)
   for (const dispose of cleanup.splice(0).reverse()) await dispose()
 })
 afterAll(() => vi.unstubAllGlobals())
@@ -148,6 +159,7 @@ it('coalesces simultaneous feedback cancellation through the real preload, Main 
   expect(input.expectedRuntimeId).toBe(f.owner.runtimeId)
   expect(input.operationId).not.toBe(operation.operationId)
   expect(current().phase).toBe('cancelled')
+  await Promise.all(checkpointWrites)
   const disk = JSON.parse(await readFile(writer.path, 'utf8'))
   expect(disk.state.agentOperations[agentOperationKey(operation)].cancellation.input).toEqual(input)
   expect(f.started).toHaveLength(starts); preserved(before)
@@ -181,33 +193,96 @@ it('keeps the observed cancellation effect separate from its unconfirmed storage
   expect(current().phase).toBe('cancelled')
   await render()
   expect(dom.container.textContent).toContain('已取消接手')
-  const item = dom.container.querySelector<HTMLDetailsElement>('.agent-operation-feedback__item')!
-  expect(item.open).toBe(false)
-  await act(async () => item.querySelector<HTMLElement>('.agent-operation-feedback__label')!.click())
-  expect(item.open).toBe(true)
-  const notice = dom.container.querySelector<HTMLElement>('.agent-operation-feedback__save-notice')!
+  expect(dom.container.textContent).toContain('原保存回执待确认')
+  expect(document.querySelector('.agent-operation-feedback__popover')).toBeNull()
+  const popup = await openDetails()
+  const notice = popup.querySelector<HTMLElement>('.agent-operation-feedback__save-notice')!
   expect(notice, 'Unconfirmed storage acknowledgement remains visible outside technical details').not.toBeNull()
-  expect(notice.textContent).toMatch(/保存.*未确认/u)
+  expect(notice.textContent).toMatch(/保存.*待确认/u)
   expect(notice.closest('.agent-operation-feedback__technical')).toBeNull()
   expect(notice.closest('[inert]')).toBeNull()
 })
 
-it('a failed pre-dispatch client checkpoint preserves a retryable original cancellation and cannot write Core', async () => {
-  vi.mocked(storeModule.checkpointAgentOperations).mockRejectedValueOnce(Error('Original user document write unavailable'))
+it.each(['failed', 'waiting'] as const)('a %s client checkpoint cannot block cancellation at its original Core', async mode => {
+  await storeModule.checkpointAgentOperations()
+  const originalDocument = await readFile(writer.path, 'utf8')
+  let release!: () => void
+  const barrier = new Promise<void>(resolve => { release = resolve })
+  const report = vi.spyOn(useAppStore.getState(), 'reportError').mockImplementation(() => {})
+  vi.mocked(storeModule.checkpointAgentOperations).mockImplementation(() => mode === 'waiting' ? barrier : Promise.reject(Error('Original user document write unavailable')))
   const before = useAppStore.getState()
-  await expect(cancelTakeoverOperation(operation)).rejects.toThrow('write unavailable')
-  expect(inputCalls).toEqual([])
-  expect(current().cancellation).toMatchObject({ pending: false, dispatch: 'not-submitted' })
-  expect(current().message).toBe(originalFailure)
-  const cancellationId = current().cancellation!.input.operationId
-  await act(async () => { await cancelTakeoverOperation(current()) })
-  expect(inputCalls[0]!.input.operationId).toBe(cancellationId)
-  expect(current().phase).toBe('cancelled'); expect(current().message).toBe(originalFailure); preserved(before)
+  let finished = false
+  const cancellation = cancelTakeoverOperation(operation).then(() => { finished = true })
+  try {
+    await vi.waitFor(() => expect(finished).toBe(true))
+    expect(inputCalls.map(call => call.method)).toEqual(['agent.takeover.cancel'])
+    expect(current().phase).toBe('cancelled')
+    expect(current().cancellation?.pending).toBe(false)
+    expect(current().message).toBe(originalFailure)
+    expect(await readFile(writer.path, 'utf8')).toBe(originalDocument)
+    if (mode === 'failed') await vi.waitFor(() => expect(report).toHaveBeenCalled())
+    preserved(before)
+  } finally { release(); await cancellation.catch(() => {}) }
+})
+
+it('an old document recovers the same original cancellation after an unsaved client projection', async () => {
+  await storeModule.checkpointAgentOperations()
+  const document = JSON.parse(await readFile(writer.path, 'utf8'))
+  vi.mocked(storeModule.checkpointAgentOperations).mockRejectedValue(Error('Client projection remains unavailable'))
+  vi.spyOn(useAppStore.getState(), 'reportError').mockImplementation(() => {})
+  await cancelTakeoverOperation(operation)
+  const sent = inputCalls[0]!.input, starts = f.started.length
+  useAppStore.setState({ agentOperations: restoredAgentOperations(document.state.agentOperations) })
+  const before = useAppStore.getState()
+  expect(current().cancellation).toBeUndefined()
+  await inspectAgentOperation(current())
+  expect(inputCalls.map(call => call.method)).toEqual(['agent.takeover.cancel', 'agent.takeover.cancel.inspect'])
+  expect(inputCalls[1]!.input).toEqual(sent)
+  expect(current().cancellation?.input).toEqual(sent)
+  expect(current().phase).toBe('cancelled')
+  expect(vi.mocked(api.spatial.inspectOperation)).not.toHaveBeenCalled()
+  expect(vi.mocked(api.spatial.openAgent)).not.toHaveBeenCalled()
+  expect(f.started).toHaveLength(starts); preserved(before)
+})
+
+it('an observed but unfinished original cancellation survives old-document read-only recovery', async () => {
+  await f.rpc.call('agent.open', operation.takeoverSource.coreRequest!)
+  await storeModule.checkpointAgentOperations()
+  const document = JSON.parse(await readFile(writer.path, 'utf8'))
+  const unavailable = vi.spyOn(f.client, 'cancelAgentCreation').mockRejectedValue(Error('Original execution owner is temporarily unavailable'))
+  await cancelTakeoverOperation(operation)
+  const sent = inputCalls[0]!.input
+  expect(current().cancellation?.result).toMatchObject({ outcome: 'unconfirmed', cancellationAdmission: 'observed' })
+  unavailable.mockRestore()
+  useAppStore.setState({ agentOperations: restoredAgentOperations(document.state.agentOperations) })
+  const before = useAppStore.getState(), starts = f.started.length
+  await inspectAgentOperation(current())
+  expect(inputCalls.map(call => call.method)).toEqual(['agent.takeover.cancel', 'agent.takeover.cancel.inspect'])
+  expect(inputCalls[1]!.input).toEqual(sent)
+  expect(current().cancellation?.result).toMatchObject({ outcome: 'unconfirmed', cancellationAdmission: 'observed' })
+  expect(current().cancellation?.input).toEqual(sent)
+  expect(vi.mocked(api.spatial.inspectOperation)).not.toHaveBeenCalled()
+  expect(f.started).toHaveLength(starts); preserved(before)
+})
+
+it('a captured legacy cancellation control takes precedence over a derived control', async () => {
+  const input = { expectedRuntimeId: f.owner.runtimeId, operationId: 'legacy-captured-cancellation', request: operation.takeoverSource.coreRequest! }
+  await f.rpc.call('agent.takeover.cancel', input)
+  operation = { ...operation, cancellation: { input, dispatch: 'unconfirmed', pending: false } }
+  useAppStore.setState({ agentOperations: { [agentOperationKey(operation)]: operation } })
+  await inspectAgentOperation(current())
+  await cancelTakeoverOperation(current())
+  expect(inputCalls.map(call => call.method)).toEqual(['agent.takeover.cancel.inspect', 'agent.takeover.cancel.inspect'])
+  expect(inputCalls.every(call => JSON.stringify(call.input) === JSON.stringify(input))).toBe(true)
+  expect(current().cancellation?.input).toEqual(input)
+  expect(current().phase).toBe('cancelled')
+  expect(vi.mocked(api.spatial.inspectOperation)).not.toHaveBeenCalled()
 })
 
 it('keeps a confirmed cancellation across restore and refuses late original success or continuation', async () => {
   await act(async () => { await cancelTakeoverOperation(operation) })
   expect(current().message).toBe(originalFailure)
+  await Promise.all(checkpointWrites)
   const disk = JSON.parse(await readFile(writer.path, 'utf8'))
   const restored = restoredAgentOperations(disk.state.agentOperations)
   useAppStore.setState({ agentOperations: restored })
@@ -226,6 +301,7 @@ it('keeps a confirmed cancellation across restore and refuses late original succ
 it('restores a lost cancellation receipt as an original read-only check, preserving its source workface and draft', async () => {
   onCall = async (method, _input, call) => { const result = await call(); if (method === 'agent.takeover.cancel') throw Error('Reply unavailable'); return result }
   await act(async () => { await cancelTakeoverOperation(operation) })
+  await Promise.all(checkpointWrites)
   const disk = JSON.parse(await readFile(writer.path, 'utf8'))
   useAppStore.setState({ agentOperations: restoredAgentOperations(disk.state.agentOperations) })
   const before = useAppStore.getState()
@@ -239,9 +315,8 @@ it('restores a lost cancellation receipt as an original read-only check, preserv
   expect(inputCalls[1]!.input).toEqual(inputCalls[0]!.input)
   expect(current().phase).toBe('cancelled'); expect(current().cancellation?.result?.diskDurability).toBe('unconfirmed'); expect(current().message).toBe(originalFailure); preserved(before)
   await render()
-  const item = dom.container.querySelector<HTMLDetailsElement>('.agent-operation-feedback__item')!
-  await act(async () => item.querySelector<HTMLElement>('.agent-operation-feedback__label')!.click())
-  const technical = item.querySelector<HTMLDetailsElement>('.agent-operation-feedback__technical')!
+  const popup = await openDetails()
+  const technical = popup.querySelector<HTMLDetailsElement>('.agent-operation-feedback__technical')!
   await act(async () => technical.querySelector('summary')!.click())
   expect(technical.textContent).toContain('原接手反馈：' + originalFailure)
 })
@@ -348,23 +423,70 @@ it('keeps check and cancel outside collapsed complete technical details, while c
   useAppStore.setState({ agentOperations: {} }); beginAgentOperation(operation)
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   await render()
-  const item = dom.container.querySelector<HTMLDetailsElement>('.agent-operation-feedback__item')!
-  const technical = item.querySelector<HTMLDetailsElement>('.agent-operation-feedback__technical')!
-  expect(item.open).toBe(true); expect(technical.open).toBe(false)
+  expect(document.querySelector('.agent-operation-feedback__popover')).toBeNull()
   for (const label of ['检查结果', '取消接手']) {
     expect(buttons(label)).toHaveLength(1)
-    expect(technical.contains(buttons(label)[0]!)).toBe(false)
+    expect(buttons(label)[0]!.closest('.agent-operation-feedback__popover')).toBeNull()
     expect(buttons(label)[0]!.closest('[inert]')).toBeNull()
   }
+  const popup = await openDetails()
+  const technical = popup.querySelector<HTMLDetailsElement>('.agent-operation-feedback__technical')!
+  expect(technical.open).toBe(false)
   await act(async () => technical.querySelector('summary')!.click())
   expect(technical.open).toBe(true)
-  const clipboard = item.querySelector<HTMLButtonElement>('[aria-label="复制原操作编号"]')!
+  const clipboard = popup.querySelector<HTMLButtonElement>('[aria-label="复制原操作编号"]')!
   expect(clipboard).not.toBeNull()
   await act(async () => clipboard.click())
   await vi.waitFor(() => expect(copy).toHaveBeenCalledExactlyOnceWith(operation.operationId))
-  await act(async () => item.querySelector<HTMLElement>('.agent-operation-feedback__label')!.click())
-  expect(item.open).toBe(false)
+  await press('关闭操作详情')
+  expect(document.querySelector('.agent-operation-feedback__popover')).toBeNull()
   expect(current().cancellation).toBeUndefined(); expect(inputCalls).toEqual([])
+})
+
+it('an unavailable original owner shows a retryable first-level cancellation result and retains its complete cause in details', async () => {
+  vi.mocked(api.spatial.owner).mockRejectedValue(Error('Original spatial owner cannot be located'))
+  const before = useAppStore.getState()
+  await render(); await press('取消接手')
+  await vi.waitFor(() => expect(dom.container.textContent).toContain('取消未提交，可重试或查看详情'))
+  expect(buttons('重试取消')).toHaveLength(1)
+  expect(buttons('检查结果')).toHaveLength(1)
+  expect(inputCalls).toEqual([])
+  expect(current().cancellation).toBeUndefined()
+  const popup = await openDetails()
+  expect(popup.textContent).toContain('Original spatial owner cannot be located')
+  expect(popup.textContent).toContain(originalFailure)
+  preserved(before)
+})
+
+it('a waiting original Check leaves direct cancellation usable and cannot overwrite its later result', async () => {
+  let release!: () => void, observed = false
+  const barrier = new Promise<void>(resolve => { release = resolve })
+  onCall = async (method, _input, call) => {
+    const result = await call()
+    if (method === 'agent.takeover.cancel.inspect') { observed = true; await barrier }
+    return result
+  }
+  await render(); await press('检查结果')
+  try {
+    await vi.waitFor(() => expect(observed).toBe(true))
+    expect(buttons('取消接手')[0]!.disabled).toBe(false)
+    await press('取消接手')
+    await vi.waitFor(() => expect(current().phase).toBe('cancelled'))
+    expect(inputCalls.map(call => call.method)).toEqual(['agent.takeover.cancel.inspect', 'agent.takeover.cancel'])
+  } finally { release() }
+  await vi.waitFor(() => expect(buttons('检查取消结果')[0]!.disabled).toBe(false))
+  expect(current().phase).toBe('cancelled')
+  expect(vi.mocked(api.spatial.inspectOperation)).not.toHaveBeenCalled()
+})
+
+it('a legacy record without the complete request keeps Check and explains its missing cancellation target before details', async () => {
+  operation = { ...operation, takeoverSource: { ...operation.takeoverSource, coreRequest: undefined } }
+  useAppStore.setState({ agentOperations: { [agentOperationKey(operation)]: operation } })
+  await render()
+  expect(dom.container.textContent).toContain('缺少原请求，只能检查')
+  expect(buttons('检查结果')).toHaveLength(1)
+  expect(buttons('取消接手')).toHaveLength(0)
+  expect(inputCalls).toEqual([])
 })
 
 it('two actual feedback projections share one cancellation while preserving the original draft focus', async () => {
@@ -404,21 +526,22 @@ it('an already-created target remains usable and only the existing explicit Stop
   await vi.waitFor(() => expect(current().cancellation?.result?.outcome).toBe('created'))
   expect(stop).not.toHaveBeenCalled()
   expect(await f.client.readAgentSession(child.control.agentSessionId)).toMatchObject({ run: child.control.run })
-  await press('查看接手 Agent')
+  await press('查看 Agent')
   await vi.waitFor(() => expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ tabId: target.tabId, regionId: target.regionId }))
+  await openDetails()
   vi.mocked(storeModule.currentCoreSpatialGraph).mockReturnValue({ ...graph, regions: graph.regions.map(region =>
     region.regionId === target.regionId ? { ...region, execution: { ...region.execution!, runtimeId: 'another-execution-runtime' } } : region) })
   await press('停止接手 Agent…')
   await vi.waitFor(() => expect(useAppStore.getState().error).toBeTruthy())
-  expect(document.querySelector('[role="dialog"]')).toBeNull(); expect(stop).not.toHaveBeenCalled()
+  expect(document.querySelector('[role="dialog"]:not(.agent-operation-feedback__popover)')).toBeNull(); expect(stop).not.toHaveBeenCalled()
   vi.mocked(storeModule.currentCoreSpatialGraph).mockReturnValue(graph)
   await act(async () => useAppStore.setState({ error: null, sessions: [original, { ...child, control: { ...child.control, run: { runId: 'later-original-agent-run' } } }] }))
   await press('停止接手 Agent…')
   await vi.waitFor(() => expect(useAppStore.getState().error).toContain('exact Run'))
-  expect(document.querySelector('[role="dialog"]')).toBeNull(); expect(stop).not.toHaveBeenCalled()
+  expect(document.querySelector('[role="dialog"]:not(.agent-operation-feedback__popover)')).toBeNull(); expect(stop).not.toHaveBeenCalled()
   await act(async () => useAppStore.setState({ error: null, sessions: [original, child] }))
   await press('停止接手 Agent…')
-  await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Stop Agent?'))
+  await vi.waitFor(() => expect(document.querySelector('[role="dialog"]:not(.agent-operation-feedback__popover)')?.textContent).toContain('Stop Agent?'))
   expect(stop).not.toHaveBeenCalled()
   await press('Stop Agent')
   await vi.waitFor(() => expect(stop).toHaveBeenCalledTimes(1))
@@ -428,15 +551,29 @@ it('an already-created target remains usable and only the existing explicit Stop
   expect(await f.client.readAgentSession(f.source.agentSessionId)).toEqual(f.source)
 })
 
-it('the actual original result check reads its owner without creating, renaming or sending another input', async () => {
+it.each(['not-observed', 'unqualified', 'unavailable'] as const)('the actual original result check remains read-only after an %s cancellation observation', async mode => {
   const created = await f.rpc.call('agent.open', operation.takeoverSource.coreRequest!)
   expect(created.outcome).toBe('opened')
   const before = useAppStore.getState(), starts = f.started.length
+  let cancellationCheck: AgentTakeoverCancellationResult | undefined
+  onCall = async (_method, _input, call) => {
+    cancellationCheck = await call()
+    if (mode === 'unavailable') throw Error('The original cancellation reader is unavailable')
+    if (mode === 'unqualified') {
+      const { cancellationAdmission: _admission, ...result } = cancellationCheck
+      return result
+    }
+    return cancellationCheck
+  }
   await render(); await press('检查结果')
   await vi.waitFor(() => expect(current().report?.agent?.agentSessionId).toBe(created.agent!.agentSessionId))
   expect(vi.mocked(useAppStore.getState().renameAgent)).not.toHaveBeenCalled()
   expect(vi.mocked(api.spatial.openAgent)).not.toHaveBeenCalled()
-  expect(inputCalls).toEqual([]); expect(f.started).toHaveLength(starts); preserved(before)
+  expect(inputCalls.map(call => call.method)).toEqual(['agent.takeover.cancel.inspect'])
+  expect(current().cancellation).toBeUndefined()
+  expect(inputCalls[0]!.input.request).toEqual(operation.takeoverSource.coreRequest)
+  expect(cancellationCheck).toMatchObject({ outcome: 'unconfirmed', cancellationAdmission: 'not-observed' })
+  expect(f.started).toHaveLength(starts); preserved(before)
 })
 
 it.each(['lost', 'waiting'] as const)('explicitly continues the inspected original control after its first transport is %s', async mode => {
