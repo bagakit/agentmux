@@ -1,26 +1,16 @@
 // @vitest-environment happy-dom
 import { act, createElement, type MouseEvent } from 'react'
-import { createRoot } from 'react-dom/client'
 import { expect, it, vi } from 'vitest'
 import type { BrowserWorkbenchSurface } from '../src/renderer/src/lib/workbench-tabs'
 import type { BrowserOutcomeEvaluation } from '@agentmux/browser/model/browser-outcome-criteria'
 import type { BrowserOperation } from '@agentmux/browser/model/browser-operation'
 import { getBrowserTaskReliability } from '../src/shared/browser-task-reliability'
+import { api } from '../src/renderer/src/lib/api'
+import { useAppStore } from '../src/renderer/src/store'
+import { createClientUiRoot } from './helpers/client-ui-render'
 
-const host = vi.hoisted(() => ({ executeControl: vi.fn(), verifyOutcome: vi.fn(), operations: [] as BrowserOperation[],
+const host = vi.hoisted(() => ({
   onVerify: undefined as undefined | ((runId: string, event: MouseEvent<HTMLButtonElement>) => Promise<BrowserOutcomeEvaluation>) }))
-vi.mock('../src/renderer/src/lib/api', () => ({ api: { browser: {
-  getDemonstration: async () => ({ draft: null }), getTaskAssets: async () => ({ assets: [], runs: [] }),
-  listOperationHistory: async () => host.operations, verifyOutcome: host.verifyOutcome,
-  onPresentationEvent: () => () => {},
-  cancelElementSelection: async () => {}, setAnnotationMarkers: async () => {}, setBounds: async () => {}
-}, ui: { getZoomFactor: () => 1 } } }))
-vi.mock('../src/renderer/src/store', () => ({ useAppStore: Object.assign((select: (value: unknown) => unknown) => select({
-  applyBrowserEvent: () => {}, executeControl: host.executeControl, reportError: () => {}, setWorkspaceTool: () => {},
-  saveBrowserBookmark: async () => {}, openFile: async () => {}, toolsOpen: false, config: { browser: { toolbar: { more: true } } },
-  browserAnnotationsByBrowserId: {}, addBrowserAnnotation: () => {}
-  , noticeReadReceipts: {}, markNoticeRead: () => {}, markNoticeUnread: () => {}
-}), { setState: () => {}, getState: () => ({ tabs: {}, layouts: {} }) }) }))
 vi.mock('../src/renderer/src/components/BrowserTaskAssetEditor', async importOriginal => {
   const original = await importOriginal<typeof import('../src/renderer/src/components/BrowserTaskAssetEditor')>()
   return { ...original, BrowserTaskAssetEditor: (props: Parameters<typeof original.BrowserTaskAssetEditor>[0]) => {
@@ -46,34 +36,71 @@ it('the real Pane Verify refreshes the selected older run read while current act
     steps: [{ sequence: 1, method: 'click', label: 'Create result', status: 'completed', startedAt: 1, finishedAt: 2 }],
     outcome: { registration: { context, assetRun, criteria: [{ ...criterion, producer: { operationId: context.operationId, navigationId: 'nav' } }] },
       evaluation: { context, assetRun, status: 'not-met', conditions: [{ criterion, status: 'not-met', reason: 'Original retained evidence' }] } } }
-  host.operations = [older]
-  host.executeControl.mockImplementation(async input => input.operation === 'browser.task.reliability'
-    ? { operation: input.operation, reliability: getBrowserTaskReliability({ ...input, state, operations: host.operations }) }
-    : { operation: 'browser.history', operations: host.operations })
-  host.verifyOutcome.mockImplementation(async () => {
+  const { outcome: _currentOutcome, ...currentFacts } = older
+  const current = { ...currentFacts, id: 'newer-current-operation' }
+  const listOperationHistory = vi.spyOn(api.browser, 'listOperationHistory').mockResolvedValue([current])
+  const getOperation = vi.spyOn(api.browser, 'getOperation').mockImplementation(async id => id === older.id ? older : null)
+  const executeControl = vi.fn<ReturnType<typeof useAppStore.getState>['executeControl']>(async input => {
+    if (input.operation === 'browser.task.reliability') return { operation: input.operation, reliability: getBrowserTaskReliability({ ...input, state, operations: [older] }) }
+    if (input.operation === 'browser.history') return { operation: input.operation, operations: [current] }
+    throw new Error('Unexpected control request')
+  })
+  const verifyOutcome = vi.spyOn(api.browser, 'verifyOutcome').mockImplementation(async () => {
     const result: BrowserOutcomeEvaluation = { context, assetRun, status: 'passed', conditions: [{ criterion, status: 'passed', reason: 'Updated original producer evidence' }] }
     older.outcome!.evaluation = result
     return result
   })
-  const { outcome: _currentOutcome, ...current } = older
   const tab: BrowserWorkbenchSurface = { kind: 'browser', regionId: 'region', workspaceId: 'workspace', browserId: 'browser', id: 'browser',
     navigationId: 'nav', profileId: 'profile', url: content.url, title: 'Preferences', loading: false, canGoBack: false, canGoForward: false,
     viewport: 'responsive', error: null, driving: false, appLinkPrompt: null, taskAssets: state,
-    activity: { operation: { ...current, id: 'newer-current-operation' }, control: 'human' } }
-  const container = document.createElement('div'); document.body.append(container); const root = createRoot(container)
+    activity: { operation: current, control: 'human' } }
+  const originalState = useAppStore.getState()
+  useAppStore.setState({ executeControl, toolsOpen: false })
+  const container = document.createElement('div'); document.body.append(container); const root = createClientUiRoot(container)
   try {
-    await act(async () => root.render(createElement(BrowserPane, { tab, visible: false })))
-    const trigger = container.querySelector<HTMLButtonElement>('[aria-label="More browser tools"]')!
-    await act(async () => trigger.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
-    const open = document.querySelector<HTMLElement>('[aria-label="Open human demonstration draft"]')!
-    await act(async () => { open.focus(); open.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
-    expect(container.textContent).toContain('0/1 outcomes passed')
+    await act(async () => root.render(createElement(BrowserPane, { tab, visible: true })))
+    const trigger = container.querySelector('.browser-operation-status__trigger')!
+    expect(trigger).not.toBeNull()
+    await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+    const open = document.querySelector('[role="menu"] [aria-label="Open browser activity timeline"]')!
+    expect(open).not.toBeNull()
+    await act(async () => open.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    expect(document.body.textContent).toContain('0/1 outcomes passed')
     expect(host.onVerify).toBeTypeOf('function')
     await act(async () => { await host.onVerify!('older', { nativeEvent: { isTrusted: true } } as MouseEvent<HTMLButtonElement>) })
-    expect(host.verifyOutcome).toHaveBeenCalledExactlyOnceWith('browser', 'older-operation')
-    const reads = host.executeControl.mock.calls.map(([request]) => request).filter(request => request.operation === 'browser.task.reliability')
+    expect(getOperation).toHaveBeenCalledExactlyOnceWith('older-operation')
+    expect(listOperationHistory).not.toHaveBeenCalled()
+    expect(verifyOutcome).toHaveBeenCalledExactlyOnceWith('browser', 'older-operation')
+    const reads = executeControl.mock.calls.map(([request]) => request).filter(request => request.operation === 'browser.task.reliability')
     expect(reads).toHaveLength(2); expect(reads[1]).toMatchObject({ browserId: 'browser', assetId: 'asset', version: 1 })
-    expect(container.textContent).toContain('1/1 outcomes passed')
+    expect(document.body.textContent).toContain('1/1 outcomes passed')
     expect(tab.activity!.operation!.id).toBe('newer-current-operation')
-  } finally { await act(async () => root.unmount()); container.remove() }
+    const trusted = { nativeEvent: { isTrusted: true } } as MouseEvent<HTMLButtonElement>
+    getOperation.mockClear()
+    await act(async () => {
+      await expect(host.onVerify!('another-run', trusted)).rejects.toThrow('The declared producer is unavailable.')
+      await expect(host.onVerify!('older', { nativeEvent: { isTrusted: false } } as MouseEvent<HTMLButtonElement>))
+        .rejects.toThrow('Verification requires the actual person')
+      expect(getOperation).not.toHaveBeenCalled()
+    })
+
+    const renderBoundRun = (operationIds: string[]) => act(async () => root.render(createElement(BrowserPane, { visible: true,
+      tab: { ...tab, taskAssets: { ...state, runs: [{ ...state.runs[0]!, operationIds }] } } })))
+    await renderBoundRun(['older-operation', 'older-operation', 'missing-operation'])
+    await act(async () => { await expect(host.onVerify!('older', trusted)).rejects.toThrow('The declared producer is unavailable.') })
+    expect(getOperation.mock.calls).toEqual([['older-operation'], ['missing-operation']])
+
+    getOperation.mockClear()
+    const secondId = 'second-matching-operation'
+    const second: BrowserOperation = { ...older, id: secondId, outcome: { registration: { assetRun,
+      context: { ...context, operationId: secondId }, criteria: [{ ...criterion, producer: { operationId: secondId, navigationId: 'nav' } }] } } }
+    getOperation.mockImplementation(async id => id === older.id ? older : id === second.id ? second : null)
+    await renderBoundRun([older.id, second.id])
+    await act(async () => { await expect(host.onVerify!('older', trusted)).rejects.toThrow('The declared producer is unavailable.') })
+    expect(getOperation.mock.calls).toEqual([[older.id], [second.id]])
+    expect(verifyOutcome).toHaveBeenCalledOnce()
+  } finally {
+    await act(async () => root.unmount()); container.remove()
+    useAppStore.setState(originalState, true); vi.restoreAllMocks()
+  }
 })
