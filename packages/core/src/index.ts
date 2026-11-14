@@ -1,3 +1,4 @@
+export * from './agent-promotion.js'
 export * from './host-route-rpc.js'
 export * from './host-route.js'
 export * from './host-route-gateway.js'

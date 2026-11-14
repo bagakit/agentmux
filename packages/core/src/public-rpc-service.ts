@@ -1,3 +1,4 @@
+import { isAgentPromotionMethod, parseAgentPromotionParams, parseAgentPromotionResult, type AgentPromotionPort, type AgentPromotionMethod } from './agent-promotion.js'
 import { isNameControlMethod, parseNameControlParams, parseNameControlResult, type NameControlParams } from './name-control.js'
 import { parseAgentMuxRelayInspection, type AgentMuxRelayInspection } from './public-rpc-relay-gateway.js'
 import { inspectOwnedName, changeOwnedName, sourceMemberName } from './name-control-owner.js'
@@ -269,6 +270,7 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   fileUploads?: AgentMuxRpcFileUploadsOwner
   objectAvatars?: ObjectAvatarPort
   moteAvatars?: AgentMuxRpcMoteAvatarsOwner
+  agentPromotions?: AgentPromotionPort
   topics?: AgentMuxRpcTopicsOwner
 
   appearance?: AgentMuxAppearanceObservationPort
@@ -533,7 +535,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [], 'system.relay.inspect': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | ObjectAvatarMethod | TailcatConfigurationMethod | NotesStorageMethod | ProviderCatalogMethod | HostSettingsMethod | NodePublishingMethod | NodeLocatorMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod | keyof typeof HOST_ROUTE_METHODS>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | AgentPromotionMethod | TopicMethod | ConnectionMethod | ObjectAvatarMethod | TailcatConfigurationMethod | NotesStorageMethod | ProviderCatalogMethod | HostSettingsMethod | NodePublishingMethod | NodeLocatorMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod | keyof typeof HOST_ROUTE_METHODS>, readonly string[]>
 
 /** Home follows an exact execution route; its display name does not identify that route. */
 function homeHostRoute(configuration: import('./control.js').AgentMuxControlSettingsResourceFields | null) {
@@ -2337,6 +2339,21 @@ export class AgentMuxRpcService {
       const result = this.ports.moteAvatars ? await this.ports.moteAvatars.call<MoteAvatarSeriesMethod>(method, input)
         : await this.ports.forwardControl!<MoteAvatarSeriesMethod>(method, input, context)
       return parseMoteAvatarSeriesResult(method, result, input) as AgentMuxRpcResult<M>
+    }
+    if (isAgentPromotionMethod(method)) {
+      const input = parseAgentPromotionParams(method, params)
+      const principal = context.principal
+      if (method === 'agent.promote.apply' && (caller || context.caller !== undefined || context.routeDelegation ||
+        !principal || !['user', 'device'].includes(principal.kind) || !principal.id.trim()))
+        throw new AgentMuxError('Promotion establishes a lasting Mote role and requires its original person or device. The Agent and original work remain available.', 'CONTROL_PERMISSION_DENIED')
+      if (method === 'agent.promote.inspect' && (caller ? caller.agentSessionId !== input.target.agentSessionId || caller.hostId !== input.target.hostId
+        : !principal || !['user', 'device'].includes(principal.kind) || !principal.id.trim()))
+        throw new AgentMuxError('Read a promotion only as its original person/device or the exact authenticated Agent.', 'CONTROL_PERMISSION_DENIED')
+      context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+      if (!this.ports.agentPromotions && !this.ports.forwardControl) throw new AgentMuxError('The original Agent promotion owner is unavailable. Keep the original operation and healthy Agent.', 'CONTROL_UNAVAILABLE')
+      const result = this.ports.agentPromotions ? await this.ports.agentPromotions.call(method, input, context)
+        : await this.ports.forwardControl!<AgentPromotionMethod>(method, input, context)
+      return parseAgentPromotionResult(method, result, input) as AgentMuxRpcResult<M>
     }
     if (isTopicMethod(method)) {
       const input = parseTopicParams(method, params)

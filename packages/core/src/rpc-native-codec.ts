@@ -1,3 +1,4 @@
+import { isAgentPromotionMethod, parseAgentPromotionParams, parseAgentPromotionResult } from './agent-promotion.js'
 import { isNameControlMethod, parseNameControlParams, parseNameControlResult } from './name-control.js'
 import { parseAgentMuxRelayInspection } from './public-rpc-relay-gateway.js'
 import { parseAgentOpenDescribe, parseAgentOpenDescription } from './agent-open-contract.js'
@@ -519,6 +520,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (isScheduleMethod(method)) return validateScheduleRpcResult(method, value, parseScheduleRpcParams(method, params)) as unknown as Record<string, unknown>
     if (isImageMethod(method)) return parseImageResult(method, value, parseImageParams(method, params)) as unknown as Record<string, unknown>
     if (isNativeDesktopMethod(method)) return parseNativeDesktopResult(method, value, parseNativeDesktopParams(method, params)) as unknown as Record<string, unknown>
+    if (isAgentPromotionMethod(method)) return parseAgentPromotionResult(method, value, parseAgentPromotionParams(method, params)) as unknown as Record<string, unknown>
     if (isTopicMethod(method)) return parseTopicResult(method, value, parseTopicParams(method, params)) as unknown as Record<string, unknown>
     if (isAgentMuxRpcDeviceMethod(method)) return parseAgentMuxRpcDeviceResult(method, value,
       parseAgentMuxRpcDeviceParams(method, params)) as unknown as Record<string, unknown>

@@ -1,3 +1,4 @@
+export * from './agent-promotion.js'
 export type { GoalRelationAccess, GoalRuntimeAccess, GoalQualifiedAccess, GoalInspectionAccess } from './goal-agent-reference.js'
 import type { DemandAgentReference, DemandSpaceMemberReference } from '@agentmux/demand/relations'
 import type { GoalQualifiedAccess, GoalRelationAccess, GoalInspectionAccess } from './goal-agent-reference.js'
