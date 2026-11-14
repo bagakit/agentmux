@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
+vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => null }))
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -17,14 +18,17 @@ import type { AgentMuxAgentSession } from '../../../packages/core/src/types'
 import type { HostRouteExecutionAccess } from '../../../packages/core/src/host-route-gateway'
 import type { AdoptedHostRoute } from '../../../packages/core/src/host-route'
 import type { SpaceMountRecord } from '../src/shared/space-mount'
-import { spaceMountKey } from '../src/shared/space-mount'
-import { MountedSpaceLauncher } from '../src/renderer/src/components/MountedSpaceLauncher'
+import type { Editor } from '@tiptap/core'
+import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { createWorkspaceLayout } from '@agentmux/layout'
+import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { mountedAgentOpenInput, mountedAgentOpenKey } from '../src/renderer/src/lib/space-mount-launch'
 import { api } from '../src/renderer/src/lib/api'
 import * as storeModule from '../src/renderer/src/store'
 import { useAppStore } from '../src/renderer/src/store'
 import { spaceMountTransport } from './helpers/space-mount-fixture'
-import { composerDOM } from './helpers/composer-dom-fixture'
+import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM(), cleanup: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks() })
@@ -93,7 +97,7 @@ test('a saved source route reaches original Host admission from the real Launche
   const before = await route.b.rpc.call('route.inspect', {})
   const saved = await route.b.rpc.call('route.configure', { expectedRevision: before.revision, operationId: 'save-source-launch-route', configuration: {
     routes: [{ id: 'collision', route: route.route }], grants: [route.grant('source-viewer', route.a.identity, route.b.identity,
-      ['runtime.owner.identity', 'route.choices', 'route.executors', 'agent.open', 'space.inspect', 'space.snapshot'])] } })
+      ['runtime.owner.identity', 'route.choices', 'route.executors', 'agent.open.describe', 'agent.open', 'space.inspect', 'space.snapshot'])] } })
   const retained = await route.b.rpc.call('route.inspect', {})
   expect(retained.routes).toEqual([{ id: 'collision', route: route.route }])
   expect(saved.settings.operation?.operationId).toBe('save-source-launch-route')
@@ -105,20 +109,38 @@ test('a saved source route reaches original Host admission from the real Launche
   const sourceProject = initialSnapshot.scope?.zones.find(zone => zone.zoneId === folder.zoneId)
   expect(sourceProject).toMatchObject({ workspaceId: project.id, hostId: 'local', directoryPath: '/source/project' })
   const transport = spaceMountTransport(cleanup, [{ id: target.hostId, carrier: carrier as never }])
-  vi.spyOn(api.spaceMounts, 'call').mockImplementation(transport.api.call)
-  const slot = { kind: 'new-work' as const, zoneId: folder.zoneId }, key = mountedAgentOpenKey(target, slot)
-  vi.spyOn(storeModule, 'checkpointMountedSpaceInputs').mockImplementation(async () => { expect(mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs, key)?.submitted).toBe(true) })
-  useAppStore.setState({ mountedSpaceInputs: {}, mountedSpaceObservations: {} }); useAppStore.getState().mountSpace(target)
-  await dom.render(<MountedSpaceLauncher target={target} project={sourceProject!} slot={slot} mountKey={spaceMountKey(target.reference)} active />)
-  const device = dom.container.querySelector<HTMLSelectElement>('[aria-label="Original Space Agent device"]')!
-  await vi.waitFor(() => expect(Array.from(device.options).some(option => option.textContent?.includes('2 hops'))).toBe(true))
-  await act(async () => { device.value = Array.from(device.options).find(option => option.textContent?.includes('2 hops'))!.value; device.dispatchEvent(new Event('change', { bubbles: true })) })
-  const executor = dom.container.querySelector<HTMLSelectElement>('[aria-label="Original Space Agent configuration"]')!
-  await vi.waitFor(() => expect(executor.textContent, dom.container.textContent ?? '').toContain('runtime-D original'))
-  await act(async () => { executor.value = 'same-executor'; executor.dispatchEvent(new Event('change', { bubbles: true })) })
-  const prompt = dom.container.querySelector<HTMLTextAreaElement>('[aria-label="New mounted Space task draft"]')!
-  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(prompt, 'Work in the original source project'); prompt.dispatchEvent(new Event('input', { bubbles: true })) })
-  await act(async () => { Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === 'Start in original Space')!.click() })
+  vi.spyOn(api.spaceMounts, 'call').mockImplementation(async (method, input, signal) => {
+    if (method === 'resources') return { hostId: target.hostId, runtimeId: owner.runtimeId,
+      workspaces: [{ workspaceId: project.id, hostId: 'local', path: project.path, name: project.name }] } as never
+    if (method === 'register') return { reference: target.reference, zoneId: target.zoneId, workspaceId: target.workspaceId } as never
+    return await transport.api.call(method, input, signal)
+  })
+  const originalProject = { ...project, kind: 'folder' as const, hostId: target.hostId }
+  const tab = createWorkbenchTab('ordinary-source-route-launcher', { kind: 'launcher', regionId: 'ordinary-source-route-region', workspaceId: project.id })
+  const slot = { kind: 'region' as const, tabId: tab.id, regionId: 'ordinary-source-route-region' }, key = mountedAgentOpenKey(target, slot)
+  const checkpoint = vi.spyOn(storeModule, 'checkpointMountedSpaceInputs').mockResolvedValue(undefined)
+  useAppStore.setState({ config: { ...composerConfig, hosts: [...composerConfig.hosts, { id: target.hostId, kind: 'ssh', hostname: 'private-source.invalid', label: 'Project B' }], workspaces: [originalProject] },
+    mountedSpaceInputs: {}, mountedSpaceObservations: {}, tabs: { [tab.id]: tab }, layouts: { [project.id]: createWorkspaceLayout('original-route-group', [tab.id]) }, activeWorkspaceId: project.id,
+    agentComposerDrafts: { [slot.regionId]: '' }, sessions: [], workbenchSpaceSelection: null })
+  useLauncherState.setState({ sections: {}, executors: {}, drafts: { ['region:' + slot.regionId]: { browser: '', note: '', sourceExecution: {
+    project: { id: originalProject.id, hostId: originalProject.hostId, path: originalProject.path }, target,
+    agentTarget: { hostId: 'local', runtimeId: owner.runtimeId } } } } })
+  await dom.render(<NewTabSurface tabGroupId="original-route-group" tabId={slot.tabId} regionId={slot.regionId} visible />)
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('[aria-label="Agent location"]')!.click())
+  const arrangement = await vi.waitFor(() => { const value = document.querySelector<HTMLElement>('[data-source-arrangement]'); expect(value).not.toBeNull(); return value! })
+  await act(async () => arrangement.querySelector<HTMLElement>('[aria-label="Agent runs on"]')!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse', ctrlKey: false })))
+  const routeOption = await vi.waitFor(() => { const option = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')).find(item => item.textContent?.includes('2 hops')); expect(option, document.body.textContent ?? '').toBeDefined(); return option! }, { timeout: 10000 })
+  await act(async () => routeOption.click())
+  await act(async () => Array.from(arrangement.querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === 'Apply')!.click())
+  await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('[aria-label="Agent location"]')?.textContent, document.body.textContent ?? '').toContain('collision') })
+  checkpoint.mockImplementation(async () => { expect(mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs, key)?.submitted).toBe(true) })
+  await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('[data-executor-id="same-executor"]')?.textContent).toContain('runtime-D original') })
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-executor-id="same-executor"]')!.click())
+  const prompt = dom.container.querySelector<HTMLElement & { editor: Editor }>('.launcher-composer .tiptap')!
+  await act(async () => { prompt.editor.commands.setContent('<p>Work in the original source project</p>') })
+  const start = dom.container.querySelector<HTMLButtonElement>('.launcher-launch-button')!
+  await vi.waitFor(async () => { await act(async () => {}); expect(start.disabled, dom.container.textContent ?? '').toBe(false) })
+  await act(async () => start.click())
   await vi.waitFor(() => expect(bindings.create).toHaveBeenCalledOnce())
   await vi.waitFor(() => expect(mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs, key)?.receipt?.outcome).toBe('partial'))
   const original = mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs, key)!

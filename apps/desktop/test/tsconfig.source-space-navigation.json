@@ -1,0 +1,62 @@
+{
+  "extends": "../tsconfig.test.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false,
+    "declaration": false
+  },
+  "include": [
+    "../src/renderer/src/global.d.ts",
+    "../src/renderer/src/App.tsx",
+    "../src/renderer/src/components/FileSurfaceView.tsx",
+    "../src/renderer/src/components/GlobalFocusSurface.tsx",
+    "../src/renderer/src/components/LauncherAgentDevice.tsx",
+    "../src/renderer/src/components/LauncherSecondarySurfaces.tsx",
+    "../src/renderer/src/components/MountedSpaceLauncher.tsx",
+    "../src/renderer/src/components/NewTabSurface.tsx",
+    "../src/renderer/src/components/OrdinarySpaceMemberViewport.tsx",
+    "../src/renderer/src/components/OriginalSourceMemberMetadata.tsx",
+    "../src/renderer/src/components/SourceAgentTargetSetup.tsx",
+    "../src/renderer/src/components/SourceFolderNavigation.tsx",
+    "../src/renderer/src/components/WorkspaceSidebar.tsx",
+    "../src/renderer/src/components/WorkspaceWorkbench.tsx",
+    "../src/renderer/src/components/settings/HostOriginalSpaces.tsx",
+    "../src/renderer/src/hooks/useWorkspaceResource.ts",
+    "../src/renderer/src/lib/desktop-focus-navigation.ts",
+    "../src/renderer/src/lib/desktop-spatial-state.ts",
+    "../src/renderer/src/lib/file-workbench-state.ts",
+    "../src/renderer/src/lib/launcher-inputs.ts",
+    "../src/renderer/src/lib/mounted-space-observation.ts",
+    "../src/renderer/src/lib/original-space-navigation.ts",
+    "../src/renderer/src/lib/source-files-discovery.ts",
+    "../src/renderer/src/lib/source-launcher-request.ts",
+    "../src/renderer/src/lib/space-mount-view.ts",
+    "../src/renderer/src/lib/use-focus-sources.tsx",
+    "../src/renderer/src/lib/workbench-persistence.ts",
+    "../src/renderer/src/lib/workbench-shortcuts.ts",
+    "../src/renderer/src/lib/workbench-tabs.ts",
+    "../src/renderer/src/store.ts",
+    "./focus-source-unification.test.tsx",
+    "./goal-source-creation.test.tsx",
+    "./host-original-spaces-navigation.test.tsx",
+    "./mounted-creation-recovery.test.tsx",
+    "./ordinary-source-admission.test.tsx",
+    "./ordinary-space-member.test.ts",
+    "./remote-route-admission.test.tsx",
+    "./source-coordinator-input.test.ts",
+    "./source-folder-navigation.test.tsx",
+    "./source-launcher-failure.test.tsx",
+    "./source-projection-reconciler.test.tsx",
+    "./space-mount-execution-path.test.tsx",
+    "./space-mount-route-launch.test.tsx",
+    "./space-mount-view.test.tsx",
+    "./terminal-checkpoint-continuation.test.tsx",
+    "./vitest.focus-source-unification.config.mts",
+    "./source-space-navigation-mutations.config.mts"
+  ],
+  "references": [
+    {
+      "path": "../../../packages/core/tsconfig.build.json"
+    }
+  ]
+}

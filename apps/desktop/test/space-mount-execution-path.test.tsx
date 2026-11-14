@@ -5,14 +5,18 @@ import type { SpaceSessionsObservation, SpaceSessionOccurrence } from '@agentmux
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { mountedSessionFacts, observeMountedSessions } from '../src/renderer/src/lib/space-mount-sessions'
-import { mountedSpaceRegions } from '../src/renderer/src/lib/space-mount-view'
+import { mountedSpaceRegions, mountedSpaceTarget } from '../src/renderer/src/lib/space-mount-view'
 import { MountedExecutionRelation } from '../src/renderer/src/components/MountedExecutionRelation'
-import { MountedSpaceWorkbench } from '../src/renderer/src/components/MountedSpaceWorkbench'
+import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
 import { spaceMountKey, type SpaceMountRecord } from '../src/shared/space-mount'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { spaceMountFixture } from './helpers/space-mount-fixture'
 
 const dom = composerDOM(), cleanup: Array<() => unknown | Promise<unknown>> = []
+function SourceWorkbench({ mountKey, visible }: { mountKey: string; visible: boolean }) {
+  const workspaceId = useAppStore(state => mountedSpaceTarget(state.mountedSpaceInputs, mountKey)?.workspaceId)
+  return workspaceId ? <WorkspaceWorkbench workspaceId={workspaceId} visible={visible} /> : null
+}
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
 
 /** Actual source Space registration/snapshot, Main/Preload/Renderer and mounted
@@ -52,7 +56,7 @@ test('the real Workbench badge retains the source execution chain and exclude th
     return { initial: { reference: f.event.reference, source: f.event.source, revision: f.event.revision }, dispose() {} }
   })
   useAppStore.getState().mountSpace(f.target)
-  await dom.render(<MountedSpaceWorkbench mountKey={f.key} visible />)
+  await dom.render(<SourceWorkbench mountKey={f.key} visible />)
   await vi.waitFor(() => expect(dom.container.querySelector('[data-path-state="cascade"]')?.textContent).toBe('2'))
   const badge = dom.container.querySelector('.agent-work-mode-badge')!
   expect(badge.getAttribute('aria-label')).toContain(`\n${f.target.reference.runtimeId} → runtime-C → runtime-D\nAccess to source`)
@@ -99,7 +103,7 @@ test('a completed metadata-only source cut keeps the same Workbench path without
     return { initial: { reference: f.event.reference, source: f.event.source, revision: f.event.revision }, dispose() { listeners.delete(emit) } }
   })
   useAppStore.getState().mountSpace(f.target)
-  await dom.render(<MountedSpaceWorkbench mountKey={f.key} visible />)
+  await dom.render(<SourceWorkbench mountKey={f.key} visible />)
   await vi.waitFor(() => expect(dom.container.querySelectorAll('[data-path-state="cascade"]')).toHaveLength(1))
   const metadata = useAppStore.getState().mountedSpaceSessions[f.key]!, prior = Object.values(metadata.members)[0]!
   const changed = await f.f.api.call('apply', { hostId: f.target.hostId, reference: f.target.reference, edit: { reference: f.target.reference, expectedRevision: f.snapshot.revision,

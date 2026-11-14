@@ -924,7 +924,7 @@ it('the ordinary Workbench consumes its original foreign Region through real Cor
     vi.spyOn(api.spatial, 'commit').mockImplementation(input => f.b.spatial.commit(input))
     const dispose = await useAppStore.getState().initialize(); cleanup.push(dispose)
     const inputBefore = useAppStore.getState().mountedSpaceInputs
-    useAppStore.setState({ sessions: [sameSidLocal], agentComposerDrafts: { [sid]: 'Unrelated local same-SID draft' }, selectedSpaceMount: null })
+    useAppStore.setState({ sessions: [sameSidLocal], agentComposerDrafts: { [sid]: 'Unrelated local same-SID draft' } })
     const tabId = admission.address.tabId!, regionId = admission.address.regionId
     const occurrence = ordinaryAgentSpaceMember({ tabId, regionId, sessionId: sid })
     expect(occurrence.kind).toBe('foreign')
@@ -942,14 +942,14 @@ it('the ordinary Workbench consumes its original foreign Region through real Cor
     expect(container.querySelector('.ordinary-space-member__header [data-execution-role="agent"]')?.hasAttribute('data-local')).toBe(false)
     expect(metadata).toHaveBeenCalledOnce(); expect(business).toHaveBeenCalledOnce()
     expect(useAppStore.getState().mountedSpaceInputs).toBe(inputBefore)
-    expect(useAppStore.getState().selectedSpaceMount).toBeNull()
+    expect(Object.hasOwn(useAppStore.getState(),'selectedSpaceMount')).toBe(false)
     expect(useAppStore.getState().sessions).toContainEqual(sameSidLocal)
     expect(container.querySelector('[aria-label="Send new message"]')).not.toBeNull()
     const rich = container.querySelector<HTMLElement & { editor: import('@tiptap/core').Editor }>('[role="textbox"]')!
     await act(async () => rich.editor.commands.setContent({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Only the original D member draft' }] }] }))
     expect(mountedMemberDraft(useAppStore.getState().mountedSpaceInputs, spaceMountKey(f.reference), tabId, occurrence.member)).toBe('Only the original D member draft')
     expect(useAppStore.getState().agentComposerDrafts[sid]).toBe('Unrelated local same-SID draft')
-    expect(useAppStore.getState().selectedSpaceMount).toBeNull()
+    expect(Object.hasOwn(useAppStore.getState(),'selectedSpaceMount')).toBe(false)
     fixture.terminals[0]!.input('x'); await vi.waitFor(() => expect(raw).toHaveBeenCalledOnce())
     expect(raw.mock.calls[0]![0]).toMatchObject({ agentSessionId: sid, expectedRun: original.run, data: 'x' })
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Send new message"]')!.click())
@@ -992,7 +992,7 @@ it('the ordinary Workbench consumes its original foreign Region through real Cor
     const focusInput = useAppStore.getState().mountedSpaceInputs
     await act(async () => sourceCard()!.click())
     expect(selectOriginal).toHaveBeenCalledExactlyOnceWith({ displayWorkspaceId: 'original-b-project', groupId: layout!.activeGroupId, tabId, regionId })
-    expect(useAppStore.getState().selectedSpaceMount).toBeNull()
+    expect(Object.hasOwn(useAppStore.getState(),'selectedSpaceMount')).toBe(false)
     expect(useAppStore.getState().mountedSpaceInputs).toBe(focusInput)
     expect(useAppStore.getState().sessions).toContainEqual(sameSidLocal)
     const newRun = await f.d.put(sid, 2, 'original-D-continued-run')
@@ -1079,7 +1079,7 @@ it('the ordinary Region viewer does not inherit A grants and a denied foreign me
     vi.spyOn(api.spatial, 'read').mockImplementation(() => f.b.spatial.readForLayout())
     vi.spyOn(api.spatial, 'commit').mockImplementation(input => f.b.spatial.commit(input))
     const dispose = await useAppStore.getState().initialize(); cleanup.push(dispose)
-    useAppStore.setState({ sessions: [session], agentComposerDrafts: { [session.id]: 'Healthy local input' }, selectedSpaceMount: null })
+    useAppStore.setState({ sessions: [session], agentComposerDrafts: { [session.id]: 'Healthy local input' } })
     await act(async () => root.render(<DesktopClientUiProvider>
       <OrdinarySpaceMemberViewport tabId={admission.address.tabId!} regionId={admission.address.regionId} sessionId={sid} visible active><div>Must not borrow a local Session</div></OrdinarySpaceMemberViewport>
       <SessionPane sessionId={session.id} surfaceKind="agent" linkOrigin={origin} visible />
@@ -1090,7 +1090,7 @@ it('the ordinary Region viewer does not inherit A grants and a denied foreign me
     expect(write.mock.calls[0]![0]).toEqual(session.control)
     expect(dWrite).not.toHaveBeenCalled(); expect(dRouteWrite).not.toHaveBeenCalled()
     expect(useAppStore.getState().sessions.map(current => current.id)).toEqual([session.id])
-    expect(useAppStore.getState().selectedSpaceMount).toBeNull()
+    expect(Object.hasOwn(useAppStore.getState(),'selectedSpaceMount')).toBe(false)
     expect(await f.d.core.readAgentSession(sid)).toMatchObject({ run: original.run })
     await act(async () => root.render(null))
   } finally { for (const close of cleanup.reverse()) await close() }

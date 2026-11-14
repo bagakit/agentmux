@@ -76,7 +76,7 @@ test('the mounted Launcher selects D through the original B route without a same
   expect(f.route.inventory).toHaveBeenCalledTimes(1); expect(f.route.creation).not.toHaveBeenCalled(); expect(f.route.native).not.toHaveBeenCalled()
   await act(async () => { f.executor.value = 'same-executor'; f.executor.dispatchEvent(new Event('change', { bubbles: true })) })
   expect(dom.container.textContent).toContain('/private/runtime-D/original-command')
-  const prompt = dom.container.querySelector<HTMLTextAreaElement>('[aria-label="New mounted Space task draft"]')!
+  const prompt = dom.container.querySelector<HTMLTextAreaElement>('[aria-label="New original Space task draft"]')!
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(prompt, 'Original B project task'); prompt.dispatchEvent(new Event('input', { bubbles: true })) })
   expect(f.route.inventory).toHaveBeenCalledTimes(1)
   const start = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === 'Start in original Space')!

@@ -7,11 +7,15 @@ import { spaceMountTransport } from './helpers/space-mount-fixture'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
-import { MountedSpaceWorkbench } from '../src/renderer/src/components/MountedSpaceWorkbench'
+import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
 import { spaceMountKey, type SpaceMountRecord } from '../src/shared/space-mount'
-import { mountedSpaceRegions } from '../src/renderer/src/lib/space-mount-view'
+import { mountedSpaceRegions, mountedSpaceTarget } from '../src/renderer/src/lib/space-mount-view'
 
 const dom = composerDOM(), cleanup: Array<() => unknown | Promise<unknown>> = []
+function SourceWorkbench({ mountKey, visible }: { mountKey: string; visible: boolean }) {
+  const workspaceId = useAppStore(state => mountedSpaceTarget(state.mountedSpaceInputs, mountKey)?.workspaceId)
+  return workspaceId ? <WorkspaceWorkbench workspaceId={workspaceId} visible={visible} /> : null
+}
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
 const button = (label: string) => Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === label)
 
@@ -45,7 +49,7 @@ async function fixture(strict = false) {
   useAppStore.getState().mountSpace(target)
   useAppStore.getState().editSpaceMountDraft(key, member.tab.tabId, member.region.regionId, 'Keep this private unsent task')
   const sessions = useAppStore.getState().sessions
-  const surface = <MountedSpaceWorkbench mountKey={key} visible />
+  const surface = <SourceWorkbench mountKey={key} visible />
   await dom.render(strict ? <StrictMode>{surface}</StrictMode> : surface)
   await vi.waitFor(() => expect(button('Continue original request')).toBeDefined())
   return { source, transport, target, snapshot, member, key, calls, delivery, sessions, admitted }

@@ -74,7 +74,7 @@ it('ordinary member input reuses the original user-document leaf without mountin
   if (fact.kind !== 'foreign') throw Error('Expected the actual original foreign admission')
   const key = spaceMountKey(fact.source.reference), before = useAppStore.getState()
   const originalInputs = { opaque: { future: ['original bytes'] } }
-  useAppStore.setState({ mountedSpaceInputs: originalInputs, selectedSpaceMount: null, agentComposerDrafts: { [reference.sessionId]: 'Other local raw-SID input' } })
+  useAppStore.setState({ mountedSpaceInputs: originalInputs, agentComposerDrafts: { [reference.sessionId]: 'Other local raw-SID input' } })
   try {
     expect(mountedMemberDraft(originalInputs, key, reference.tabId, fact.member, fact.source)).toBe('')
     expect(mountedMemberRequestBuckets(originalInputs, key, fact.member, fact.source)).toEqual({})
@@ -85,7 +85,7 @@ it('ordinary member input reuses the original user-document leaf without mountin
     expect(memberSpaceInputTarget(input, key)).toEqual(fact.source)
     expect(mountedMemberDraft(input, key, reference.tabId, fact.member)).toBe('Unsent source-qualified input')
     expect(input.opaque).toBe(originalInputs.opaque)
-    expect(useAppStore.getState().selectedSpaceMount).toBeNull()
+    expect(Object.hasOwn(useAppStore.getState(),'selectedSpaceMount')).toBe(false)
     expect(useAppStore.getState().agentComposerDrafts[reference.sessionId]).toBe('Other local raw-SID input')
     useAppStore.getState().mountSpace(fact.source)
     const promoted = useAppStore.getState().mountedSpaceInputs

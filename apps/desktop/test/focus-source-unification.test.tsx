@@ -20,6 +20,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
 import { spaceMountKey } from '../src/shared/space-mount'
+import { originalSourceRegionProjectionId, originalSourceTabProjectionId, originalSourceWorkspaceId } from '../src/renderer/src/lib/original-space-navigation'
 import { DEFAULT_CONFIG } from '../src/main/config-store'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { spaceMountTransport } from './helpers/space-mount-fixture'
@@ -124,7 +125,7 @@ async function fixture(options: { foreign?: boolean; unavailable?: boolean; mult
   const local = { ...composerSession(SID), workspacePath: '/b/project', label: 'Local fallback should not override real name', status: { state: 'working' as const, source: 'native-hook' as const, observedAt: now }, semanticStatus: { state: 'working' as const, source: 'native-hook' as const, observedAt: now, stateEnteredAt: now } }
   const tab = createWorkbenchTab('ordinary-tab', { regionId: 'ordinary-region', workspaceId: 'original-b-project', kind: 'agent', phase: 'attached', sessionId: SID })
   useAppStore.setState({ config, sessions: [local], agentNames: { [SID]: localName }, timelines: { [SID]: timeline(SID, localRecap) }, tabs: { [tab.id]: tab }, layouts: { 'original-b-project': createWorkspaceLayout('ordinary-group', [tab.id]) },
-    mainSurface: 'agents', focusView: 'list', loading: false, mountedSpaceInputs: {}, mountedSpaceObservations: {}, mountedSpaceSessions: {}, selectedSpaceMount: null, agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } }, scratchTopicSnapshots: {}, agentComposerDrafts: { [SID]: 'Keep this original local draft' } })
+    mainSurface: 'agents', focusView: 'list', loading: false, mountedSpaceInputs: {}, mountedSpaceObservations: {}, mountedSpaceSessions: {}, agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } }, scratchTopicSnapshots: {}, agentComposerDrafts: { [SID]: 'Keep this original local draft' } })
   const target = { hostId: 'source-route', reference: original.reference, zoneId: admitted.address.zoneId!, workspaceId: admitted.address.workspaceId! }
   useAppStore.getState().mountSpace(target, false)
   const navigate = vi.fn()
@@ -243,12 +244,12 @@ it('the ordinary foreign card opens its shared Reader and name menu against its 
   const original = await f.main.api.call('memberNameInspect', { hostId: f.target.hostId, reference: f.reference, name: { object: 'agent', target: { reference: f.reference, regionId: f.admitted.address.regionId, runtimeId: f.d.owner.runtimeId, agentSessionId: SID, expectedAdmission: { kind: 'creation', operationId: 'original-source-creation' } } } })
   expect(original.current.override).toBe('重命名原远端任务')
   await act(async () => cardWith('重命名原远端任务').click())
-  const state = useAppStore.getState(), selected = (state.mountedSpaceInputs as Record<string, { view?: { selection: unknown } }>)[f.key]
+  const state = useAppStore.getState(), selected = (state.mountedSpaceInputs as Record<string, { view?: unknown }>)[f.key]
+  const workspaceId = originalSourceWorkspaceId(f.target), tabId = originalSourceTabProjectionId(f.target, f.admitted.address.tabId), regionId = originalSourceRegionProjectionId(f.target, f.admitted.address.regionId)
+  expect(selected?.view).toBeUndefined()
   expect(state.mainSurface).toBe('agents')
-  expect(dom.container.querySelector('.global-session-workspace [data-focus-tab-id]')?.getAttribute('data-focus-tab-id')).toBe(f.admitted.address.tabId)
-  expect(dom.container.querySelectorAll('.global-session-workspace [data-source-region]')).toHaveLength(2)
-  expect(state.selectedSpaceMount).toBe(f.key)
-  expect(selected?.view?.selection).toMatchObject({ tabId: f.admitted.address.tabId, regionId: f.admitted.address.regionId })
+  expect(state.workbenchSpaceSelection).toMatchObject({ spaceId: f.target.reference.spaceId, zoneId: f.target.zoneId, workspaceId, tabId, regionId })
+  expect(state.layouts[workspaceId]).toBeDefined(); expect(state.tabs[tabId]?.layout.activeRegionId).toBe(regionId)
   expect(f.navigate).not.toHaveBeenCalled()
   expect(state.agentComposerDrafts[SID]).toBe('Keep this original local draft')
 })
@@ -271,7 +272,7 @@ it('the ordinary source projection preserves the complete mixed Tab, narrows onl
   expect(view).toBeDefined()
   await act(async () => view!.click())
   expect(useAppStore.getState().mainSurface).toBe('workbench')
-  expect(useAppStore.getState().selectedSpaceMount).toBe(f.key)
+  expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ spaceId: f.target.reference.spaceId, zoneId: f.target.zoneId, workspaceId: originalSourceWorkspaceId(f.target) })
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
   expect((await f.b.spatial.read())!.graph.regions).toHaveLength(2)
 })
@@ -287,15 +288,16 @@ it('several original positions are one Context and primary selection asks for an
   expect(choices).not.toBeNull()
   const buttons = [...choices.querySelectorAll<HTMLButtonElement>('.focus-location-choice')]
   expect(buttons).toHaveLength(2)
-  expect(useAppStore.getState().selectedSpaceMount).toBeNull()
+  expect(useAppStore.getState().workbenchSpaceSelection).toBeNull()
   expect(dom.container.querySelector('.global-session-workspace [data-focus-tab-id]')).toBeNull()
   const requested = buttons.find(node => node.textContent?.includes('another-original-position'))!
   expect(requested).toBeDefined()
   await act(async () => requested.click())
-  expect(useAppStore.getState().mainSurface).toBe('agents')
-  expect(useAppStore.getState().selectedSpaceMount).toBe(f.key)
-  expect((useAppStore.getState().mountedSpaceInputs as Record<string, { view: { selection: { regionId: string } } }>)[f.key]!.view.selection.regionId).toBe('another-original-position')
-  expect(dom.container.querySelector('.global-session-workspace [data-focus-tab-id]')?.getAttribute('data-focus-tab-id')).toBe(f.admitted.address.tabId)
+  const state = useAppStore.getState(), workspaceId = originalSourceWorkspaceId(f.target), tabId = originalSourceTabProjectionId(f.target, f.admitted.address.tabId), regionId = originalSourceRegionProjectionId(f.target, 'another-original-position')
+  expect((state.mountedSpaceInputs as Record<string, { view?: unknown }>)[f.key]?.view).toBeUndefined()
+  expect(state.mainSurface).toBe('agents')
+  expect(state.workbenchSpaceSelection).toMatchObject({ spaceId: f.target.reference.spaceId, zoneId: f.target.zoneId, workspaceId, tabId, regionId })
+  expect(state.layouts[workspaceId]).toBeDefined(); expect(state.tabs[tabId]?.layout.activeRegionId).toBe(regionId)
   expect(cards()).toHaveLength(2)
 })
 
@@ -330,11 +332,12 @@ it('a foreign task uses the same durable bookmark and execution-history owners w
   expect(useAppStore.getState().agentComposerDrafts[SID]).toBe('Keep this original local draft')
   const originalAccess = agentInformationPreview.get()!.context.access!
   await act(async () => {
-    useAppStore.setState({ selectedSpaceMount: null, mountedSpaceInputs: {} })
+    useAppStore.setState({ mountedSpaceInputs: {} })
     originalAccess.select()
   })
   expect(useAppStore.getState().mainSurface).toBe('agents')
-  expect(useAppStore.getState().selectedSpaceMount).toBeNull()
+  expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ spaceId: f.target.reference.spaceId, zoneId: f.target.zoneId, workspaceId: originalSourceWorkspaceId(f.target) })
+  expect(useAppStore.persist.getOptions().partialize!(useAppStore.getState())).not.toHaveProperty('selectedSpaceMount')
   expect(useAppStore.getState().agentFocus.execution).toBe(focus)
 })
 
@@ -356,7 +359,7 @@ it('an original missing Session opens the common parked stage and rechecks the s
   expect(stage().textContent).toContain('Original session unavailable')
   expect(stage().getAttribute('aria-busy')).toBe('false')
   expect(region().textContent).not.toMatch(/Restoring your session|Waiting for this session to reconnect/)
-  const draft = region().querySelector<HTMLTextAreaElement>('[aria-label="Mounted Space task draft"]')!
+  const draft = region().querySelector<HTMLTextAreaElement>('[aria-label="Original Space task draft"]')!
   expect(draft).not.toBeNull()
   expect(draft.closest('details')?.open).toBe(false)
   const heldDraft = `原设备未发送的草稿
@@ -375,7 +378,7 @@ it('an original missing Session opens the common parked stage and rechecks the s
   await vi.waitFor(async () => { await act(async () => {}); expect(f.sessionsRead.mock.calls.length).toBeGreaterThan(before); expect(stage().dataset.loadingPhase).toBe('loading') })
   expect(stage().getAttribute('aria-busy')).toBe('true')
   expect(stage().textContent).toContain('Checking the original session')
-  expect(region().querySelector<HTMLTextAreaElement>('[aria-label="Mounted Space task draft"]')!.value).toBe(heldDraft)
+  expect(region().querySelector<HTMLTextAreaElement>('[aria-label="Original Space task draft"]')!.value).toBe(heldDraft)
   expect(useAppStore.getState().sessions).toHaveLength(1)
   await act(async () => f.emitMetadataError())
   expect(stage().dataset.loadingPhase).toBe('parked')

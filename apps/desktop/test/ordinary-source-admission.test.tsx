@@ -19,10 +19,13 @@ import type { AdoptedHostRoute } from '../../../packages/core/src/host-route'
 import type { SpaceMountRecord } from '../src/shared/space-mount'
 import { spaceMountKey } from '../src/shared/space-mount'
 import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
+import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
+import { WorkspaceSidebar } from '../src/renderer/src/components/WorkspaceSidebar'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { mountedAgentOpenInput, mountedAgentOpenKey } from '../src/renderer/src/lib/space-mount-launch'
+import { originalSourceRegionProjectionId, originalSourceTabProjectionId, originalSourceWorkspaceId } from '../src/renderer/src/lib/original-space-navigation'
 import { api } from '../src/renderer/src/lib/api'
 import * as storeModule from '../src/renderer/src/store'
 import { useAppStore } from '../src/renderer/src/store'
@@ -126,7 +129,7 @@ test.each([false, true])('ordinary Source Start crosses the real Main, signed pu
   const start = () => Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === 'Launch')!
   await vi.waitFor(async () => { await act(async () => {}); expect(start().disabled, dom.container.textContent ?? '').toBe(false) })
   await act(async () => { start().click() })
-  await vi.waitFor(() => expect(bindings.create).toHaveBeenCalledOnce())
+  await vi.waitFor(() => expect(bindings.create,dom.container.textContent ?? '').toHaveBeenCalledOnce())
   await vi.waitFor(() => expect(mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs, key)?.receipt?.outcome).toBe('partial'))
   const original = mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs, key)!
   const state = (await spatial.read())!, admitted = spatialAgentOpenRecord(state.graph, original.request.operationId!)!
@@ -149,10 +152,31 @@ test.each([false, true])('ordinary Source Start crosses the real Main, signed pu
   const openOriginal = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === 'Open original work')!
   expect(openOriginal).toBeDefined()
   await act(async () => openOriginal.click())
-  await vi.waitFor(() => expect(useAppStore.getState().selectedSpaceMount).toBe(spaceMountKey(target.reference)))
-  const privateView = (useAppStore.getState().mountedSpaceInputs as Record<string, { view?: { selection?: unknown } }>)[spaceMountKey(target.reference)]?.view
-  expect(privateView?.selection).toMatchObject({ tabId: admitted.address.tabId, regionId: admitted.address.regionId })
-  expect(useAppStore.getState().tabs).toBe(observerTabs); expect(useAppStore.getState().layouts).toBe(observerLayouts)
+  await vi.waitFor(() => expect(useAppStore.getState().workbenchSpaceSelection?.zoneId,dom.container.textContent ?? '').toBe(target.zoneId))
+  const privateView = (useAppStore.getState().mountedSpaceInputs as Record<string, { view?: unknown }>)[spaceMountKey(target.reference)]?.view
+  expect(privateView).toBeUndefined()
+  expect(Object.hasOwn(useAppStore.getState(),'selectedSpaceMount')).toBe(false)
+  const projectionWorkspaceId = originalSourceWorkspaceId(target), projectionTabId = originalSourceTabProjectionId(target, admitted.address.tabId), projectionRegionId = originalSourceRegionProjectionId(target, admitted.address.regionId)
+  expect(useAppStore.getState().activeWorkspaceId).toBe(projectionWorkspaceId)
+  expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ sourceRuntimeId: target.reference.runtimeId, spaceId: target.reference.spaceId, zoneId: target.zoneId,
+    workspaceId: projectionWorkspaceId, tabId: projectionTabId, regionId: projectionRegionId })
+  for(const [id,originalTab] of Object.entries(observerTabs)) expect(useAppStore.getState().tabs[id]).toBe(originalTab)
+  for(const [id,originalLayout] of Object.entries(observerLayouts)) expect(useAppStore.getState().layouts[id]).toBe(originalLayout)
+  await dom.render(<WorkspaceWorkbench workspaceId={projectionWorkspaceId} visible />)
+  const region = (id: string) => [...dom.container.querySelectorAll<HTMLElement>('[data-workbench-region-id]')].find(element => element.dataset.workbenchRegionId === id)
+  const workbenchTab = (id: string) => [...dom.container.querySelectorAll<HTMLElement>('[data-workbench-tab-id]')].find(element => element.dataset.workbenchTabId === id)
+  await vi.waitFor(() => expect(region(projectionRegionId)).toBeDefined())
+  expect(workbenchTab(projectionTabId),dom.container.innerHTML).toBeDefined()
+  expect(dom.container.querySelectorAll('[data-mounted-space-nav], [data-mounted-space]')).toHaveLength(0)
+  for(const [id,originalTab] of Object.entries(observerTabs)) expect(useAppStore.getState().tabs[id]).toBe(originalTab)
+  for(const [id,originalLayout] of Object.entries(observerLayouts)) expect(useAppStore.getState().layouts[id]).toBe(originalLayout)
+  await dom.render(<WorkspaceSidebar />)
+  const originalRow = [...dom.container.querySelectorAll<HTMLButtonElement>('[data-workspace-id]')].find(row => row.dataset.workspaceId === projectionWorkspaceId)!
+  expect(originalRow).toBeDefined()
+  expect(originalRow.getAttribute('data-original-source-space')).toBe(target.reference.spaceId)
+  const openOriginalAction = vi.spyOn(useAppStore.getState(),'openOriginalSpaceLocation')
+  await act(async () => originalRow.click())
+  expect(openOriginalAction).toHaveBeenCalledWith(expect.objectContaining({ target: expect.objectContaining({ hostId: target.hostId }) }))
   expect(input).not.toHaveBeenCalled()
   const evidence = process.env.ADMISSION_EVIDENCE_DIR
   if (evidence) {

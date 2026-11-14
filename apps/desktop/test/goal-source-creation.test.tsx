@@ -134,7 +134,7 @@ it.each([{ carrier: 'local', agent: 'local' }, { carrier: 'local', agent: 'D-in-
   } else expect(f.d.hostEnvironment).not.toHaveBeenCalled()
   expect(f.frozen?.agent.prompt).toBeUndefined(); expect(f.forbidden).not.toHaveBeenCalled(); expect(oldMain).not.toHaveBeenCalled(); expect(save).not.toHaveBeenCalled()
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts); expect(useAppStore.getState().tabs).toBe(before.tabs)
-  expect(useAppStore.getState().layouts).toBe(before.layouts); expect(useAppStore.getState().selectedSpaceMount).toBe(before.selectedSpaceMount)
+  expect(useAppStore.getState().layouts).toBe(before.layouts); expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
 })
 
 it('an unsupported selected locator keeps the Goal request and composer draft without admission or a home retry', async () => {

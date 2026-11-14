@@ -17,7 +17,7 @@ function input(createOperationId = 'original-C'): SourceCoordinatorInput {
 
 it('the real native user-document projection keeps one complete C/L intention and opaque neighbors without registering mounted navigation', () => {
   const original = input(), key = sourceCoordinatorInputKey(original.request), opaque = { kind: 'future-private-input', bytes: [' Keep ', null, { unknown: true }] }
-  useAppStore.setState({ mountedSpaceInputs: { unrelated: opaque }, selectedSpaceMount: null })
+  useAppStore.setState({ mountedSpaceInputs: { unrelated: opaque } })
   const before = useAppStore.getState()
   useAppStore.getState().retainSourceCoordinatorInput(key, () => original)
   const retained = sourceCoordinatorInput(useAppStore.getState().mountedSpaceInputs, key)!
@@ -26,7 +26,7 @@ it('the real native user-document projection keeps one complete C/L intention an
   const recovered = JSON.parse(JSON.stringify(partialize(useAppStore.getState())))
   expect(sourceCoordinatorInput(recovered.mountedSpaceInputs, key)).toEqual(original)
   expect(recovered.mountedSpaceInputs.unrelated).toEqual(opaque)
-  expect(useAppStore.getState().selectedSpaceMount).toBeNull(); expect(useAppStore.getState().tabs).toBe(before.tabs)
+  expect(Object.hasOwn(useAppStore.getState(),'selectedSpaceMount')).toBe(false); expect(useAppStore.getState().tabs).toBe(before.tabs)
   expect(useAppStore.getState().sessions).toBe(before.sessions); expect(useAppStore.getState().layouts).toBe(before.layouts)
 })
 
