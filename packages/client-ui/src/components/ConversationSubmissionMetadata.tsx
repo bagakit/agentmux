@@ -56,7 +56,10 @@ export function ConversationSendReceipt({ record, nativeAccepted = false, native
   const confirmedMode = resolveConversationConfirmedSendReceipt(platform.conversationConfirmedSendReceipt)
   // A sole readable input always keeps its own full-text disclosure, even under Hide.
   const hide = !state.attention && nativeReadable && (!show || state.confirmed && confirmedMode === 'hide')
-  const compact = !original && (!show || state.confirmed && confirmedMode !== 'keep')
+  // Terminal delivery has its own truthful status; a compact receipt needs no
+  // guessed native counterpart and does not promote it to Agent acceptance.
+  const deliveredUnconfirmed = !state.confirmed && (item.inputSubmission?.status === 'terminal-confirmed' || item.inputSubmission?.status === 'launch-carried')
+  const compact = !original && (!show || deliveredUnconfirmed || state.confirmed && confirmedMode !== 'keep')
   return <div className="conversation-send-receipt" data-receipt-mode={compact ? 'compact' : 'keep'} data-receipt-confirmed={state.confirmed} data-receipt-attention={state.attention} data-receipt-active={active && show}
     data-message-source-key={conversationMessageSourceKey(item.agentSessionId, { kind: 'captured', recordId: item.id })} tabIndex={-1}>
     <ConversationMessageDisclosure preview={conversationSubmissionPreview(item.content ?? '', 96)} reveal={reveal}
