@@ -2123,6 +2123,9 @@ export type AgentMuxDesktopApi = {
     locateTaskAssetStep(id: string, assetId: string, expectedRevision: number, stepId: string): Promise<BrowserTaskAsset>
     runTaskBatch(input: BrowserTaskBatchInput): Promise<BrowserTaskBatchRun>
     stopTaskBatch(id: string, batchId: string): Promise<BrowserTaskBatchRun | null>
+    runTaskParallel(browserId: string, assetId: string, version: number, input: import('@agentmux/core/control').BrowserTaskParallelInput): Promise<import('@agentmux/core/control').BrowserTaskParallelSummary>
+    inspectTaskParallel(browserId: string, options?: { operationId?: string; after?: string; limit?: number }): Promise<import('@agentmux/core/control').BrowserTaskParallelInspection | null>
+    listTaskParallel(browserId: string, options?: { before?: string; limit?: number }): Promise<import('@agentmux/core/control').BrowserTaskParallelList>
     runTaskAsset(input: BrowserTaskAssetRunInput): Promise<BrowserTaskAssetRun>
     stopTaskAsset(id: string, runId: string): Promise<BrowserTaskAssetRun | null>
     /**

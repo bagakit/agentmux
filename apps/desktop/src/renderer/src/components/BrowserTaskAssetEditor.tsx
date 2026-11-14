@@ -40,6 +40,7 @@ type Props = {
   suggestions?: BrowserDemonstrationSuggestion[] | undefined
   run?: BrowserTaskAssetRun | null
   renderReliability?: (version: number) => ReactNode
+  renderParallel?: (version: number) => ReactNode
   batch?: BrowserTaskBatchRun | null
   batchRuns?: BrowserTaskAssetRun[]
   onRunBatch?: (input: { version: number; batchId?: string; items: { id: string; parameters: Record<string, string> }[]; parameters: Record<string, string> }, event: ActionEvent) => Promise<void>
@@ -59,14 +60,16 @@ type Props = {
 }
 
 /** An editable Client asset inside existing Browser details. Values never enter its draft or versions. */
-export function BrowserTaskAssetEditor({ dialogTypes, asset, assets = [], recording, suggestions, run, renderReliability, batch, batchRuns = [], onRunBatch, onStopBatch, reviewRequest, onReviewRequestConsumed, warning, busy = false, onImport, onSaveDraft, onSaveVersion, onLocateStep, onRun, onStop, onVerify }: Props) {
+export function BrowserTaskAssetEditor({ dialogTypes, asset, assets = [], recording, suggestions, run, renderReliability, renderParallel, batch, batchRuns = [], onRunBatch, onStopBatch, reviewRequest, onReviewRequestConsumed, warning, busy = false, onImport, onSaveDraft, onSaveVersion, onLocateStep, onRun, onStop, onVerify }: Props) {
   const [draft, setDraft] = useState<BrowserTaskContent | null>(asset?.draft ?? null)
   const [versionNumber, setVersionNumber] = useState(asset?.versions.at(-1)?.version ?? 0)
   const [values, setValues] = useState<Record<string, string>>({})
   const [calls, setCalls] = useState<BrowserTaskInvocationCalls>({})
   const [error, setError] = useState<string>()
   const [evaluation, setEvaluation] = useState<BrowserOutcomeEvaluation | null>(null)
-  useEffect(() => { setDraft(asset?.draft ?? null); setVersionNumber(asset?.versions.at(-1)?.version ?? 0) }, [asset?.id, asset?.revision])
+  useEffect(() => { setDraft(asset?.draft ?? null) }, [asset?.id, asset?.revision])
+  useEffect(() => { setVersionNumber(asset?.versions.at(-1)?.version ?? 0) }, [asset?.id])
+  useEffect(() => { setVersionNumber(current => current || asset?.versions.at(-1)?.version || 0) }, [asset?.id, asset?.revision])
   useEffect(() => { setValues({}); setError(undefined); setEvaluation(null) }, [asset?.id, run?.id])
   useEffect(() => {
     if (reviewRequest && reviewRequest.assetId === asset?.id && asset?.versions.some(item => item.version === reviewRequest.version)) {
@@ -227,6 +230,7 @@ export function BrowserTaskAssetEditor({ dialogTypes, asset, assets = [], record
       {asset.versions.length ? <div className="browser-task-asset__version">
         <label className="browser-task-asset__field"><span>Run saved version</span><select aria-label="Task asset version" value={versionNumber} onChange={event => { setVersionNumber(Number(event.target.value)); setValues({}) }}>{asset.versions.map(item => <option key={item.version} value={item.version}>v{item.version} · {item.name}</option>)}</select></label>
         {version ? renderReliability?.(version.version) : null}
+        {version ? renderParallel?.(version.version) : null}
         {version && !version.steps.some(step => step.kind === 'subflow') && onRunBatch && onStopBatch ? <BrowserTaskBatchEditor version={version} batch={batch ?? null} runs={batchRuns} busy={busy} onRun={onRunBatch} onStop={onStopBatch} /> : null}
         <details><summary>Preview v{versionNumber} · {version?.steps.length ?? 0} steps</summary><ol className="browser-rsi-replay__steps">{version?.steps.map((step, index) => <li key={step.id}><span>{index + 1}</span><span><strong>{step.label ?? browserTaskStepSummary(step)}</strong><small>{step.reviewed ? browserTaskStepParameterKeys(step).length ? `Fresh ${browserTaskStepParameterKeys(step).join(', ')}` : step.kind : 'Needs review'}</small></span></li>)}</ol></details>
         {!selectedBatch ? <>{version ? <BrowserTaskSubflowFields version={version} assets={availableAssets} run={continuing ? actualRun : null} runs={batchRuns} calls={calls} onChange={setCalls} busy={busy} /> : null}{parameters.map(parameter => <label key={parameter.key} className="browser-task-asset__field"><span>{parameter.label}</span><TextInput type={parameter.secret ? 'password' : 'text'} autoComplete="off" aria-label={`Task parameter ${parameter.label}`} maxLength={16_384} value={values[parameter.key] ?? ''} onChange={event => setValues(current => ({ ...current, [parameter.key]: event.target.value }))} /></label>)}

@@ -1,4 +1,17 @@
 .browser-task-asset { font-size: var(--fs-micro); }
+.browser-task-parallel { min-width: 0; margin-block: var(--sp-3); padding: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); }
+.browser-task-parallel p { margin-block: var(--sp-2); line-height: 1.5; color: var(--text-3); }
+.browser-task-parallel small { display: block; color: var(--text-3); overflow-wrap: anywhere; }
+.browser-task-parallel strong { overflow-wrap: anywhere; }
+.browser-task-parallel button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.browser-task-parallel__choices { min-width: 0; margin: var(--sp-3) 0; padding: var(--sp-2); border: 1px solid var(--line-soft); }
+.browser-task-parallel__choice { display: flex; align-items: start; gap: var(--sp-2); padding-block: var(--sp-2); }
+.browser-task-parallel__choice > span { min-width: 0; }
+.browser-task-parallel__target-input, .browser-task-parallel__progress, .browser-task-parallel__original { min-width: 0; padding: var(--sp-3) 0; border-top: 1px solid var(--line-soft); }
+.browser-task-parallel__original { margin-block: var(--sp-3); padding: var(--sp-3); background: var(--amber-bg, var(--surface-2)); border-radius: var(--radius-sm); }
+.browser-task-parallel ol { padding-left: var(--sp-5); }
+.browser-task-parallel li { min-width: 0; margin-block: var(--sp-3); }
+.browser-task-parallel__pagination { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .browser-task-creation { display: grid; gap: var(--sp-1); font-size: var(--fs-micro); line-height: 1.45; overflow-wrap: anywhere; }
 .browser-task-creation p { margin: 0; color: var(--text-2); }
 .browser-task-creation small { color: var(--text-3); }

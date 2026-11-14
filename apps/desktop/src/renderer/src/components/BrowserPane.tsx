@@ -55,6 +55,7 @@ import { BrowserViewportOptions, BrowserViewportSizeDialog } from './BrowserView
 import { selectedBrowserPresentationId } from '../lib/browser-presentation-selection'
 import { BrowserDemonstrationSurface } from './BrowserDemonstrationSurface'
 import { BrowserTaskAssetEditor } from './BrowserTaskAssetEditor'
+import { BrowserTaskParallel } from './BrowserTaskParallel'
 import { BrowserTaskReliability, useBrowserTaskReliabilityRefresh, type BrowserTaskReliabilityRequest } from './BrowserTaskReliability'
 import type { BrowserTaskContent } from '../../../shared/browser-task-assets'
 import { BrowserStepEvidence } from './BrowserStepEvidence'
@@ -1718,6 +1719,14 @@ function BrowserPaneContent({
             recording={tab.demonstration?.draft ?? null}
             suggestions={tab.demonstration?.suggestions}
             run={taskRun}
+            renderParallel={version => {
+              const fixed = taskAsset?.versions.find(item => item.version === version)
+              return taskAsset && fixed ? <BrowserTaskParallel active={visible} asset={taskAsset} version={fixed} assets={tab.taskAssets?.assets ?? []} current={tab.taskAssets?.parallel ?? null}
+                onStart={(request, event) => {
+                  if (event.nativeEvent.isTrusted !== true) throw new Error('Starting a parallel run requires the person using this Browser. The original action is kept.')
+                  return api.browser.runTaskParallel(request.browserId, request.assetId, request.version, request.input)
+                }} /> : null
+            }}
             renderReliability={version => taskAsset ? <BrowserTaskReliability browserId={tab.browserId} assetId={taskAsset.id} version={version}
               load={loadTaskReliability} refreshKey={JSON.stringify([
                 taskReliabilityRefresh.revisionFor(taskAsset.id, version),
