@@ -26,6 +26,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { DesktopClientUiProvider } from '../src/renderer/src/components/DesktopClientUiProvider'
 import { RuntimeController } from '../src/main/runtime-controller'
 import { sessionInputWriteResult, unwrapSessionInputWriteResult } from '../src/shared/session-input-result'
+import { restoredMoteMainCreationReferences } from '../src/shared/mote-main-action'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { MoteWorkface } from '../src/renderer/src/components/MoteWorkface'
 import { desktopWorkbenchFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
@@ -332,7 +333,152 @@ it('a lost creation reply and remount inspect the same Host request without clea
   expect(JSON.stringify(f.h.inner.kernel.input.mock.calls)).not.toContain(later)
 }, 45_000)
 
-it('a real unconfirmed deferred input keeps its welcome draft and never opens the newly bound Main', async () => {
+it('first Desktop input has durable original custody before a waiting Core read and can inspect that same operation beside later draft B', async () => {
+  const f = await originalWelcome(), query = 'Original A before the first Core observation', later = 'Later B keeps its own draft'
+  useLauncherState.getState().setDraft(f.key, 'prompt', query)
+  const view = await mounted(f.node())
+  await wait(() => expect(view.element.querySelector<HTMLButtonElement>('[aria-label=Send]')?.disabled).toBe(false))
+  let release!: () => void
+  const barrier = new Promise<void>(resolve => { release = resolve }); closes.push(() => release())
+  const read = vi.mocked(api.spatial.read).getMockImplementation()!
+  vi.mocked(api.spatial.read).mockImplementationOnce(async () => { await barrier; return read() })
+  await click(view.element, 'Send')
+  await wait(() => expect(useLauncherState.getState().drafts[f.key]?.prompt).toBe(''))
+  const reference = useAppStore.getState().moteMainCreationReferences[JSON.stringify(f.target)]!
+  expect(reference.deferredInput).toEqual(expect.objectContaining({ prompt: query }))
+  await originalMainActions.inspectMoteMainAction({ ...f.scope, workspace: { ...f.scope.workspace, path: '/changed-current-directory' }, rootPath: '/changed-current-directory/mote' }, reference.operationId)
+  expect(vi.mocked(api.moteDialogue.inspectSetup).mock.calls.at(-1)![0].target).toEqual(f.target)
+  expect(f.open).not.toHaveBeenCalled(); expect(f.h.started).toHaveLength(0)
+  expect(view.element.textContent?.split(query).length).toBe(2)
+  const editor = view.element.querySelector<HTMLElement>('[contenteditable=true]')!
+  await act(async () => { editor.replaceChildren(document.createTextNode(later)); editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' })) })
+  await wait(() => expect(useLauncherState.getState().drafts[f.key]?.prompt).toBe(later))
+  const check = [...view.element.querySelectorAll('button')].find(button => button.textContent === '核对')!
+  expect(check.disabled).toBe(false); await act(async () => check.click())
+  await wait(() => expect(view.element.querySelector('.mote-first-message')?.getAttribute('data-stage')).toBe('unconfirmed'))
+  expect(vi.mocked(api.moteDialogue.inspectSetup).mock.calls.at(-1)![0]).toEqual({ target: f.target, creation: { hostId: 'local', operationId: reference.operationId } })
+  expect(f.open).not.toHaveBeenCalled()
+  await view.render(null)
+  const cold = restoredMoteMainCreationReferences(JSON.parse(JSON.stringify(useAppStore.getState().moteMainCreationReferences)))
+  expect(restoredMoteMainCreationReferences({ [JSON.stringify(f.target)]: { ...reference, deferredInput: null } })[JSON.stringify(f.target)]).toEqual({ target: f.target, operationId: reference.operationId })
+  useAppStore.setState({ moteMainCreationReferences: cold })
+  await view.render(f.node())
+  await wait(() => expect(view.element.textContent).toContain(query))
+  expect(useLauncherState.getState().drafts[f.key]?.prompt).toBe(later)
+  expect(f.open).not.toHaveBeenCalled()
+  await act(async () => release())
+  await wait(() => expect(f.open).toHaveBeenCalledOnce())
+  await wait(() => expect(f.h.inner.kernel.input.mock.calls.map(call => JSON.stringify(call)).join('\n')).toContain(query))
+  expect(f.h.started).toHaveLength(1); expect(f.opened).not.toHaveBeenCalled()
+  expect(useLauncherState.getState().drafts[f.key]?.prompt).toBe(later)
+}, 45_000)
+
+it('first Desktop input custody confirmation cannot clear a later B draft typed while that confirmation waits', async () => {
+  const f = await originalWelcome(), query = 'Original A waiting for durable custody', later = 'B typed before custody confirmation'
+  useLauncherState.getState().setDraft(f.key, 'prompt', query)
+  const view = await mounted(f.node())
+  await wait(() => expect(view.element.querySelector<HTMLButtonElement>('[aria-label=Send]')?.disabled).toBe(false))
+  let release!: () => void
+  const barrier = new Promise<void>(resolve => { release = resolve }); closes.push(() => release())
+  vi.mocked(api.ui.requestStorageFlush).mockImplementation(async () => {
+    if (useAppStore.getState().moteMainCreationReferences[JSON.stringify(f.target)]?.deferredInput?.prompt === query) await barrier
+  })
+  await click(view.element, 'Send')
+  await wait(() => expect(useAppStore.getState().moteMainCreationReferences[JSON.stringify(f.target)]?.deferredInput?.prompt).toBe(query))
+  const editor = view.element.querySelector<HTMLElement>('[contenteditable=true]')!
+  await act(async () => { editor.replaceChildren(document.createTextNode(later)); editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' })) })
+  await wait(() => expect(useLauncherState.getState().drafts[f.key]?.prompt).toBe(later))
+  await act(async () => release())
+  await wait(() => expect(f.h.inner.kernel.input.mock.calls.map(call => JSON.stringify(call)).join('\n')).toContain(query))
+  expect(useLauncherState.getState().drafts[f.key]?.prompt).toBe(later)
+  expect(useAppStore.getState().moteMainCreationReferences[JSON.stringify(f.target)]?.deferredInput?.prompt).toBe(query)
+  expect(f.open).toHaveBeenCalledOnce(); expect(f.opened).not.toHaveBeenCalled()
+}, 45_000)
+
+it('first Desktop input keeps its text once and dispatches nothing when original intent persistence fails', async () => {
+  const f = await originalWelcome(), query = 'A remains with the original draft when custody is unconfirmed'
+  useLauncherState.getState().setDraft(f.key, 'prompt', query)
+  const view = await mounted(f.node())
+  await wait(() => expect(view.element.querySelector<HTMLButtonElement>('[aria-label=Send]')?.disabled).toBe(false))
+  vi.mocked(api.ui.requestStorageFlush).mockRejectedValue(Error('Original intent disk confirmation unavailable'))
+  await click(view.element, 'Send')
+  await wait(() => expect(view.element.textContent).toContain('Original intent disk confirmation unavailable'))
+  expect(useLauncherState.getState().drafts[f.key]?.prompt).toBe(query)
+  expect(view.element.querySelector('.mote-first-message .log-turn')).toBeNull()
+  expect(view.element.textContent?.split(query).length).toBe(2)
+  expect(f.open).not.toHaveBeenCalled(); expect(f.h.started).toHaveLength(0)
+}, 45_000)
+
+it('first Desktop input from a competing client stays readable and cannot be overwritten until its explicit durable draft transfer', async () => {
+  const f = await originalWelcome(), query = 'This client B first question', other = 'Another client A first question', later = 'Later separate C draft'
+  useLauncherState.getState().setDraft(f.key, 'prompt', query)
+  const view = await mounted(f.node())
+  await wait(() => expect(view.element.querySelector<HTMLButtonElement>('[aria-label=Send]')?.disabled).toBe(false))
+  const read = vi.mocked(api.spatial.read).getMockImplementation()!
+  vi.mocked(api.spatial.read).mockImplementationOnce(async () => {
+    const original = useAppStore.getState().moteMainCreationReferences[JSON.stringify(f.target)]!
+    const preferences = await f.rpc.call('space.mote.preferences.read', { kind: 'quick', target: f.target })
+    const dialogue = await f.rpc.call('space.mote.dialogue.read', { target: f.target })
+    await f.rpc.call('agent.open', { operationId: original.operationId, content: { kind: 'new-agent', executorId: 'saved' },
+      destination: { spaceId: f.target.spaceId, zoneId: f.target.zoneId, newTab: true }, focus: false,
+      moteMain: { target: f.target, baseline: moteMainBaseline(moteQuickBaseline(preferences)!), expectedRoleRevision: dialogue.main.roleRevision,
+        sourceOperationId: original.operationId + ':source', bindOperationId: original.operationId + ':bind', deferredInput: { operationId: 'other_client_first_query', prompt: other } } })
+    await f.setup(original.operationId)
+    return read()
+  })
+  await click(view.element, 'Send')
+  await wait(() => expect(view.element.textContent).toContain('移回草稿'))
+  const reference = useAppStore.getState().moteMainCreationReferences[JSON.stringify(f.target)]!
+  await wait(() => expect(view.element.querySelector('.mote-first-message')?.getAttribute('data-stage')).toBe('unconfirmed'))
+  const canonical = await f.setup(reference.operationId, false)
+  expect(canonical.record?.moteMain?.deferredInput?.prompt).toBe(other)
+  expect(reference.deferredInput?.prompt).toBe(query)
+  expect(JSON.stringify(f.h.inner.kernel.input.mock.calls)).toContain(other)
+  expect(JSON.stringify(f.h.inner.kernel.input.mock.calls)).not.toContain(query)
+  await view.render(null); await view.render(f.node())
+  await wait(() => expect(view.element.querySelector('.mote-first-message')?.textContent).toContain(query))
+  const fresh = await originalMainActions.readMoteMainAction(f.scope)
+  await expect(originalMainActions.createMoteMain(f.scope, fresh, { operationId: 'another-new-query', prompt: later })).rejects.toThrow('本设备仍保留')
+  expect(useAppStore.getState().moteMainCreationReferences[JSON.stringify(f.target)]).toEqual(reference)
+  useLauncherState.getState().setDraft(f.key, 'prompt', later)
+  await wait(() => expect(view.element.querySelector('[contenteditable=true]')?.textContent).toContain(later))
+  await click(view.element, '移回草稿')
+  await wait(() => expect(useAppStore.getState().moteMainCreationReferences[JSON.stringify(f.target)]?.deferredInput).toBeUndefined())
+  expect(useLauncherState.getState().drafts[f.key]?.prompt).toBe(query + '\n\n' + later)
+  expect(useAppStore.getState().moteMainCreationReferences[JSON.stringify(f.target)]).toEqual({ target: f.target, operationId: reference.operationId })
+  expect(f.open).not.toHaveBeenCalled(); expect(f.h.started).toHaveLength(1)
+  expect(JSON.stringify(f.h.inner.kernel.input.mock.calls)).not.toContain(query)
+}, 45_000)
+
+it('first Desktop input remains retained if later draft C changes during explicit transfer confirmation', async () => {
+  const f = await originalWelcome(), query = 'Original A custody', later = 'Original B draft', latest = 'Later C during the transfer confirmation'
+  useLauncherState.getState().setDraft(f.key, 'prompt', query)
+  const view = await mounted(f.node())
+  await wait(() => expect(view.element.querySelector<HTMLButtonElement>('[aria-label=Send]')?.disabled).toBe(false))
+  let releaseCore!: () => void, releaseSave!: () => void
+  const core = new Promise<void>(resolve => { releaseCore = resolve }), saving = new Promise<void>(resolve => { releaseSave = resolve })
+  closes.push(() => { releaseCore(); releaseSave() })
+  const read = vi.mocked(api.spatial.read).getMockImplementation()!
+  vi.mocked(api.spatial.read).mockImplementationOnce(async () => { await core; return read() })
+  await click(view.element, 'Send'); await wait(() => expect(useLauncherState.getState().drafts[f.key]?.prompt).toBe(''))
+  useLauncherState.getState().setDraft(f.key, 'prompt', later)
+  vi.mocked(api.ui.requestStorageFlush).mockImplementation(async () => { await saving })
+  await click(view.element, '移回草稿')
+  await wait(() => expect(useLauncherState.getState().drafts[f.key]?.prompt).toBe(query + '\n\n' + later))
+  const editor = view.element.querySelector<HTMLElement>('[contenteditable=true]')!
+  await act(async () => { editor.replaceChildren(document.createTextNode(latest)); editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' })) })
+  await act(async () => releaseSave())
+  await wait(() => expect(view.element.textContent).toContain('A later draft or original intent changed'))
+  expect(useLauncherState.getState().drafts[f.key]?.prompt).toBe(latest)
+  expect(useAppStore.getState().moteMainCreationReferences[JSON.stringify(f.target)]?.deferredInput?.prompt).toBe(query)
+  expect(f.open).not.toHaveBeenCalled()
+  await act(async () => releaseCore())
+  await wait(() => expect(JSON.stringify(f.h.inner.kernel.input.mock.calls)).toContain(query))
+  expect(useLauncherState.getState().drafts[f.key]?.prompt).toBe(latest)
+  expect(f.open).toHaveBeenCalledOnce(); expect(f.opened).not.toHaveBeenCalled()
+}, 45_000)
+
+it('a real unconfirmed deferred input keeps its original first-message intent and never opens the newly bound Main', async () => {
   const f = await originalWelcome(), query = 'Do not discard this unconfirmed original query'
   useLauncherState.getState().setDraft(f.key, 'prompt', query)
   const input = f.h.inner.kernel.input.getMockImplementation()!
@@ -348,7 +494,8 @@ it('a real unconfirmed deferred input keeps its welcome draft and never opens th
   await act(async () => {})
   expect(result.binding).toBe('confirmed')
   expect(agentPromptSubmissionOutcome(result.deferredInput?.record ?? null)).not.toMatch(/^(admitted|terminal-confirmed)$/u)
-  expect(useLauncherState.getState().drafts[f.key]?.prompt).toBe(query)
+  expect(useAppStore.getState().moteMainCreationReferences[JSON.stringify(f.target)]?.deferredInput).toMatchObject({ prompt: query })
+  expect(useLauncherState.getState().drafts[f.key]?.prompt).toBe('')
   expect(f.opened).not.toHaveBeenCalled()
   expect(f.open).toHaveBeenCalledOnce(); expect(f.h.started).toHaveLength(1)
   expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
@@ -455,8 +602,10 @@ it('a closed historical occurrence still opens its exact original Core Session r
   const source = page.links.find((link): link is Source => link.kind === 'main' && link.reference.sessionId === old.sessionId)!
   const inputWrites = f.h.inner.kernel.input.mock.calls.length
   const view = await mounted(<MoteWorkface workspaceId={f.scope.workspace.id} topicId={topic.id} floating reference={b.reference!} visible recoverOnOpen={false}><p>Original current workface</p></MoteWorkface>)
-  await wait(() => expect([...view.element.querySelectorAll('button')].some(button => button.textContent === '开始新一轮对话')).toBe(true))
-  await click(view.element, '开始新一轮对话')
+  await wait(() => expect([...view.element.querySelectorAll('button')].some(button => button.textContent === '主 Agent')).toBe(true))
+  await click(view.element, '主 Agent')
+  await wait(() => expect([...document.querySelectorAll('button')].some(button => button.textContent === '开始新一轮对话')).toBe(true))
+  await click(document.body, '开始新一轮对话')
   useLauncherState.getState().setDraft(f.key, 'prompt', 'Retain this unsent history draft')
   await wait(() => expect([...view.element.querySelectorAll<HTMLElement>('.mote-start-history li')].some(row => row.dataset.motePeriod === source.period!.id)).toBe(true))
   const row = [...view.element.querySelectorAll<HTMLElement>('.mote-start-history li')].find(row => row.dataset.motePeriod === source.period!.id)!
