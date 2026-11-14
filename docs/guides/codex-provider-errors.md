@@ -38,7 +38,7 @@ SDK 部分也须核对全部十类：`APIConnectionError`、`APITimeoutError`、
 
 ## 当前适配的原生信号
 
-当前实现直接读取准确原生 JSONL 的轮边界，不通过额外 app-server 查询模型、不扫描 TTY 文案。[`codexTurnRecordEvidence`](../../packages/core/src/providers/codex-prompt-execution-evidence.ts) 在沿原 `session_meta`、FD 文件身份与原生来源确认的记录中解释 `ordinal`、`turn_id` 和可选 `thread_id`；与主来源不符的显式 thread 不成为主轮状态。
+当前实现直接读取准确原生 JSONL 的轮边界，不通过额外 app-server 查询模型、不扫描 TTY 文案。[`codexTurnRecordEvidence`](../../packages/providers/src/codex/turn-evidence.ts) 在沿原 `session_meta`、FD 文件身份与原生来源确认的记录中解释 `ordinal`、`turn_id` 和可选 `thread_id`；与主来源不符的显式 thread 不成为主轮状态。
 
 | 原生信号 | 当前源码解释 | 暴露边界 |
 | --- | --- | --- |
@@ -52,7 +52,7 @@ SDK 部分也须核对全部十类：`APIConnectionError`、`APITimeoutError`、
 
 `codexFailure` 对 CLI 实际提供的 native 枚举和明确转发码给出恢复指引：容量／服务层级、速率、usage／budget、context、认证／请求、内部／连接／流中断、重试耗尽、策略／权限／sandbox、会话操作与 steer 资格各自解释。官方计费／消费／使用限额码若被转发也按其原码分类；只有 HTTP `429` 时保持通用请求限制，不冒具体速率原因。CLI 的 `server_overloaded` 保留为 nativeCode，不能改写成官方 API 的 `server_is_overloaded`；两者的分类解释相近不证明来源或字段相同。
 
-Provider 的 [`observeCodexSessionStatus`](../../packages/core/src/providers/codex-session-status.ts) 复用轮证据解码与准确原文件观察，初读有界，后续读取新增字节；[`createCodexProvider`](../../packages/core/src/providers/codex.ts) 贡献 `observeSessionStatus`。Core 的 [`ensureNativeStatusObservation`／`statusAgent`](../../packages/core/src/client.ts) 接准确 Run／native source、持久状态与公共事件，SDK／JSON-RPC／CLI 复用原 `agent.inspect`、`agent.ls`、`whoami`。实际消费与后续恢复按对应实现的验证来源和边界核实。
+Provider 的 [`observeCodexSessionStatus`](../../packages/providers/src/codex/session-status.ts) 复用轮证据解码与准确原文件观察，初读有界，后续读取新增字节；[`createCodexProvider`](../../packages/core/src/providers/codex.ts) 贡献 `observeSessionStatus`。Core 的 [`ensureNativeStatusObservation`／`statusAgent`](../../packages/core/src/client.ts) 接准确 Run／native source、持久状态与公共事件，SDK／JSON-RPC／CLI 复用原 `agent.inspect`、`agent.ls`、`whoami`。实际消费与后续恢复按对应实现的验证来源和边界核实。
 
 上述适配表限定为准确原生 JSONL 路径；状态观察与 saved-history 共用 `codexTurnOutcome`，共同对话和 publication 消费原记录上的 `turnOutcome`。目标字段、同源归并和共享摘要见[原生结果协议](../specs/conversation-protocol.md#native-request-and-turn-outcomes)，实际消费入口及 indexed history 的未知边界见[对话机制](../architecture/conversation.md#原生结果的接线与能力边界)。这些路径不表示官方 API、WebSocket 或 Python SDK 的所有错误在 CLI 都会出现，模型、完整 API error.type、Retry-After 等字段也不因此变成已暴露事实。真实支持按轮记录实际字段及对应实现的证明报告；没有原生终局记录或读取失败时保观察未知／明确诊断，不改健康 Run。
 
