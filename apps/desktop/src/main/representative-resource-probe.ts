@@ -5,7 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { connectAgentMuxRpc, defaultAgentMuxControlSocketPath } from '@agentmux/core'
 import { parseDesktopClientObservation, type DesktopClientObservation } from '../shared/client-observation.js'
 import type { RuntimeController } from './runtime-controller.js'
-import type { ResourceProbeTerminalReader } from './resource-probe.js'
+import { selectWorkspace, type ResourceProbeTerminalReader } from './resource-probe.js'
 import {
   evaluateRepresentativeResourceBudget,
   REPRESENTATIVE_ACTIVITY_MS,
@@ -68,6 +68,8 @@ export async function measureRepresentativeWorkface(window: BrowserWindow, runti
   let loadedIdentity: DesktopClientObservation['main'] | null = null
   let lastTerminalObservation: unknown = null
   let originalRunCountAtRestore = 0
+  let lastTarget: Terminal | undefined
+  let failedPresentation: unknown = null
   try {
     const fixture: Fixture = JSON.parse(await readFile(fixturePath, 'utf8'))
     const [visible, , alternate] = fixture.runs
@@ -116,11 +118,8 @@ export async function measureRepresentativeWorkface(window: BrowserWindow, runti
         view.buffer.baseY > 0 ? view : undefined
     })
     const selectTerminal = async (terminal: Terminal) => {
-      const result = await rpc.call('space.focus', { target: { kind: 'space', regionId: terminal.regionId }, inputPolicy: 'target' },
-        { signal: AbortSignal.timeout(6_000) })
-      if (result.navigation.selection.space?.regionId !== terminal.regionId || result.navigation.state === 'rejected') {
-        throw new Error(`Original Terminal navigation did not select ${terminal.regionId}: ${JSON.stringify(result.issues)}`)
-      }
+      lastTarget = terminal
+      await selectWorkspace(window, terminal.workspaceId)
       return await ready(terminal)
     }
     const echo = async (terminal: Terminal, key: string) => {
@@ -171,9 +170,19 @@ export async function measureRepresentativeWorkface(window: BrowserWindow, runti
     }))
   } catch (error) {
     issue = error instanceof Error ? error.message : String(error)
+    if (lastTarget && !window.isDestroyed()) {
+      const region = `[data-workbench-region-id=${JSON.stringify(lastTarget.regionId)}]`
+      const workspace = `.workspace-workbench-slot[data-workspace-id=${JSON.stringify(lastTarget.workspaceId)}]`
+      failedPresentation = await window.webContents.executeJavaScript(`(() => ({
+        documentVisibility: document.visibilityState, documentFocused: document.hasFocus(),
+        workspaceVisible: document.querySelector(${JSON.stringify(workspace)})?.getAttribute('data-visible') ?? null,
+        regionRects: document.querySelector(${JSON.stringify(region)})?.getClientRects().length ?? null
+      }))()`).catch(() => null)
+    }
   } finally {
     window.webContents.off('did-start-navigation', navigation)
     await rpc.dispose()
   }
-  return { ...evaluateRepresentativeResourceBudget(evidence), loadedIdentity, originalRunCountAtRestore, lastTerminalObservation, evidence, issue }
+  return { ...evaluateRepresentativeResourceBudget(evidence), loadedIdentity, originalRunCountAtRestore,
+    lastTerminalObservation, failedPresentation, evidence, issue }
 }

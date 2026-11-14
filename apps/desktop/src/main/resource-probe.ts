@@ -575,7 +575,7 @@ async function claimLauncherTerminal(
   ))
 }
 
-async function selectWorkspace(window: BrowserWindow, workspaceId: string): Promise<void> {
+export async function selectWorkspace(window: BrowserWindow, workspaceId: string): Promise<void> {
   await click(window, `document.querySelector(${JSON.stringify(`.project-rail-row[data-workspace-id=${JSON.stringify(workspaceId)}]`)})`)
   await waitFor(`Workspace ${workspaceId} to become visible`, () => rendererBoolean(
     window,
