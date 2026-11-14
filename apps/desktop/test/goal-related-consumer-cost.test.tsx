@@ -46,7 +46,8 @@ beforeEach(() => {
 it('the mounted planning request visits no Session inventory or target history on unrelated updates with 1 or 1000 Sessions', async () => {
   const evidence = []
   for (const count of [1, 1000]) {
-    const f = watched(count), record = goal(); seed(record, f.sessions, f.timeline)
+    const f = watched(count), record = { ...goal(), creationOrigin: { operationId: 'original-create', requesterAsSupervisor: true, requesterParticipationId: 'original-requester', supervisorDefaultPending: false },
+      participations: [{ id: 'original-requester', operationId: 'original-create', kind: 'create' as const, agentSessionId: canonical, hostId: 'owner-host', entryPoint: 'goal.create', recordedAt: 1 }] }; seed(record, f.sessions, f.timeline)
     await dom.render(<Profiler id="planning" onRender={() => f.costs.commits++}><GoalPlanRequest demand={record} onRequest={noop} pending={false} busy={false} /></Profiler>)
     expect(dom.container.textContent).toContain('Original planning context')
     f.reset(); await unrelated(); evidence.push({ sessions: count, ...f.costs })

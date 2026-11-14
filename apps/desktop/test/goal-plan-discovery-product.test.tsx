@@ -458,3 +458,128 @@ it('an original planning request with no confirmed Host keeps navigation unknown
   expect(repeated.requestId).toBe(request.requestId); expect(planningRequest()).toEqual(original)
   expect(fixture.core.writes).toEqual(writes)
 })
+
+it('a bare current Supervisor never borrows a foreign Open target and the same unaligned Goal still reaches its real Host owner', async () => {
+  await save(false); await nativeState('done'); await addPlanningNamesake()
+  const { goalSupervisorHostWitnesses } = await import('@agentmux/demand/relations')
+  expect(goalSupervisorHostWitnesses(useAppStore.getState().demands.discovery!)).toEqual([])
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.filter(session => session.id !== fixture.primary.agentSessionId),
+    agentNames: { ...state.agentNames, 'other-host-primary': 'Foreign namesake' }, agentComposerDrafts: { original: 'Keep the original unsent draft' } })))
+  await mountPlanningDestination()
+  const floating = await import('../src/renderer/src/lib/pmo-teams-topic-floating')
+  const open = () => [...container.querySelectorAll<HTMLButtonElement>('.goal-plan__request button')].find(button => button.textContent?.trim().endsWith('conversation'))!
+  expect(container.querySelector('.goal-plan__request')?.textContent).not.toContain('Foreign namesake')
+  expect(container.querySelector('[data-goal-plan-request]')?.textContent).toBe('Ask Supervisor to plan')
+  await act(async () => open().click())
+  expect(floating.readPmoTeamsTopicFloatingState()).toMatchObject({ agentTarget: { agentSessionId: null }, targetTabId: null })
+  expect(floating.readPmoTeamsTopicFloatingState()?.targetAgent).toBeUndefined()
+  const starts = fixture.core.start.mock.calls.length
+  const held = fixture.host.once('demand.discuss', { kind: 'hold-receipt' }, request => request.mode === 'plan')
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-goal-plan-request]')!.click())
+  try {
+    const receipt = await held.committed
+    expect(receipt.operation).toBe('demand.discuss')
+    expect(floating.readPmoTeamsTopicFloatingState()).toMatchObject({ agentTarget: { agentSessionId: null }, targetTabId: null })
+  } finally { held.release(); await act(async () => fixture.host.settle()) }
+  await vi.waitFor(() => expect(floating.readPmoTeamsTopicFloatingState()?.agentTarget).toEqual({ agentSessionId: fixture.primary.agentSessionId, hostId: 'local' }))
+  await act(async () => open().click())
+  expect(floating.readPmoTeamsTopicFloatingState()?.agentTarget).toEqual({ agentSessionId: fixture.primary.agentSessionId, hostId: 'local' })
+  const saved = (await fixture.host.demands.get('discovery'))!
+  expect(saved.alignment).toBeUndefined(); expect(saved.patrols).toHaveLength(1)
+  expect(saved.patrols![0]!.attempts[0]!.target).toMatchObject({ agentSessionId: fixture.primary.agentSessionId, hostId: 'local' })
+  expect(fixture.host.executed('demand.discuss')).toHaveLength(1)
+  expect(fixture.core.start.mock.calls.length).toBe(starts)
+  expect(useAppStore.getState().agentComposerDrafts.original).toBe('Keep the original unsent draft')
+})
+
+it.each(['same-entry', 'later-conversation'] as const)('an explicit first planning send keeps the original operation and respects the %s receipt entry', async choice => {
+  await save(false); await nativeState('done')
+  await useAppStore.getState().openDemandPmo('discovery')
+  const other = binding().recipient.agentSessionId
+  const agentSession = fixture.core.core.agentSession.bind(fixture.core.core)
+  let available = false
+  vi.spyOn(fixture.core.core, 'agentSession').mockImplementation(id => {
+    if (id === fixture.primary.agentSessionId && !available) throw Error('The original route is unavailable.')
+    return agentSession(id)
+  })
+  const before = [...fixture.core.writes], request = await requestPlan()
+  expect(planningRequest().attempts).toEqual([]); expect(fixture.core.writes).toEqual(before)
+  available = true
+  const { refreshGoalDelegations } = await import('../src/renderer/src/lib/goal-delegation-work')
+  await act(async () => refreshGoalDelegations('discovery'))
+  const floating = await import('../src/renderer/src/lib/pmo-teams-topic-floating')
+  const send = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Send planning request')
+  expect(send).toBeDefined(); expect(send!.disabled).toBe(false)
+  expect(container.querySelector('.goal-plan__request')?.textContent).toContain('First send to')
+  evidence.push({ phase: 'first-destination-candidate', goal: structuredClone(useAppStore.getState().demands.discovery),
+    sessions: structuredClone(useAppStore.getState().sessions), config: structuredClone(useAppStore.getState().config),
+    tabs: structuredClone(useAppStore.getState().tabs), layouts: structuredClone(useAppStore.getState().layouts) })
+  expect(planningRequest().attempts).toEqual([]); expect(fixture.core.writes).toEqual(before)
+  const open = [...container.querySelectorAll<HTMLButtonElement>('.goal-plan__request button')].find(button => button.textContent?.trim() === 'Open Supervisor conversation')!
+  expect(open).toBeDefined(); await act(async () => open.click())
+  expect(floating.readPmoTeamsTopicFloatingState()).toMatchObject({ agentTarget: { agentSessionId: null }, targetTabId: null })
+  const invoke = vi.mocked(api.demands.delegation).getMockImplementation()!
+  let release!: () => void, committed!: () => void
+  const returned = new Promise<void>(resolve => { committed = resolve }), held = new Promise<void>(resolve => { release = resolve })
+  vi.mocked(api.demands.delegation).mockImplementation(async (method, input) => {
+    const result = await invoke(method, input)
+    if (method === 'goal.patrol.continue') { committed(); await held }
+    return result
+  })
+  await act(async () => send!.click())
+  await returned
+  const index = vi.mocked(api.demands.delegation).mock.calls.findLastIndex(([method]) => method === 'goal.patrol.continue')
+  const pending = vi.mocked(api.demands.delegation).mock.results[index]!.value
+  expect(floating.readPmoTeamsTopicFloatingState()).toMatchObject({ agentTarget: { agentSessionId: null } })
+  if (choice === 'later-conversation') await act(async () => { floating.requestAgentConversationFloatingOpen(other, 'local') })
+  const selected = structuredClone(floating.readPmoTeamsTopicFloatingState())
+  const draft = document.createElement('textarea'); draft.value = 'Keep the later unsent draft'; container.append(draft); draft.focus()
+  try { await act(async () => { release(); await pending }) } finally { release() }
+  if (choice === 'same-entry') expect(floating.readPmoTeamsTopicFloatingState()?.agentTarget).toEqual({ agentSessionId: fixture.primary.agentSessionId, hostId: 'local' })
+  else expect(floating.readPmoTeamsTopicFloatingState()).toEqual(selected)
+  expect(document.activeElement).toBe(draft); expect(draft.value).toBe('Keep the later unsent draft')
+  expect(planningRequest().operationId).toBe(request.requestId); expect(planningRequest().attempts).toHaveLength(1)
+  expect(planningRequest().attempts[0]!.target).toMatchObject({ agentSessionId: fixture.primary.agentSessionId, hostId: 'local' })
+  expect(fixture.host.executed('demand.discuss').filter(request => request.mode === 'plan')).toHaveLength(1)
+  expect(vi.mocked(api.demands.delegation).mock.calls.filter(([method]) => method === 'goal.patrol.continue')).toHaveLength(1)
+})
+
+it('first planning send remains eligible when unrelated worker facts change before the responsibility snapshot refreshes', async () => {
+  await save(false); await nativeState('done')
+  const agentSession = fixture.core.core.agentSession.bind(fixture.core.core)
+  let available = false
+  vi.spyOn(fixture.core.core, 'agentSession').mockImplementation(id => {
+    if (id === fixture.primary.agentSessionId && !available) throw Error('The original route is unavailable.')
+    return agentSession(id)
+  })
+  const request = await requestPlan()
+  available = true
+  const { refreshGoalDelegations } = await import('../src/renderer/src/lib/goal-delegation-work')
+  const { demandPatrolScope } = await import('@agentmux/demand/goal-patrol')
+  const { demandResponsibilityScope } = await import('@agentmux/demand/responsibility')
+  await act(async () => refreshGoalDelegations('discovery'))
+  const original = structuredClone(planningRequest()), manager = structuredClone(useAppStore.getState().demands.discovery!.responsibility!)
+  const invoke = vi.mocked(api.demands.delegation).getMockImplementation()!
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  vi.mocked(api.demands.delegation).mockImplementation(async (method, input) => { if (method === 'goal.delegations') await held; return invoke(method, input) })
+  try {
+    await fixture.host.demands.update('discovery', { assigneeSessionIds: [fixture.primary.agentSessionId, 'unrelated-worker'], sessionIds: [fixture.primary.agentSessionId, 'unrelated-worker'] })
+    await fixture.host.demands.prepareDispatch('discovery', { operationId: 'unrelated-worker-intent', agentSessionId: 'unrelated-worker', hostId: 'local', runId: 'unrelated-worker-run', execution: 'finite', prompt: 'A separate retained task intent' })
+    await act(async () => useAppStore.getState().refreshDemand('discovery'))
+    const current = useAppStore.getState().demands.discovery!
+    expect(current.responsibility?.scope).toBe(manager.scope)
+    expect(current.responsibility?.scope).not.toBe(demandResponsibilityScope({ ...current, supervisorSessionId: current.supervisorSessionId ?? null }))
+    expect(demandPatrolScope((await fixture.host.demands.get('discovery'))!, 'plan')).toBe(original.expectedScope)
+    const send = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Send planning request')
+    expect(send, 'Unrelated worker facts are outside the original planning scope').toBeDefined()
+    const callsBefore = vi.mocked(api.demands.delegation).mock.calls.length
+    await act(async () => send!.click())
+    await vi.waitFor(() => expect(vi.mocked(api.demands.delegation).mock.calls.slice(callsBefore).some(([method]) => method === 'goal.patrol.continue')).toBe(true))
+    const index = vi.mocked(api.demands.delegation).mock.calls.findLastIndex(([method]) => method === 'goal.patrol.continue')
+    await act(async () => { await vi.mocked(api.demands.delegation).mock.results[index]!.value })
+    expect(planningRequest().operationId).toBe(request.requestId)
+    expect(planningRequest().attempts).toHaveLength(1)
+    expect(planningRequest().attempts[0]!.target).toMatchObject({ agentSessionId: fixture.primary.agentSessionId, hostId: manager.supervisor.hostId, runId: manager.supervisor.runId })
+  } finally { release(); await act(async () => refreshGoalDelegations('discovery')) }
+})

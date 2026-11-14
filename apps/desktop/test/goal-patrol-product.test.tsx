@@ -8,6 +8,7 @@ import type { GoalDelegationResult } from '@agentmux/core/goal-delegation'
 import { AGENTMUX_GOAL_SKILL_ENTRY, goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { GoalDelegationWork } from '../src/renderer/src/components/GoalDelegationWork'
 import { GoalResponsibilitySummary } from '../src/renderer/src/components/GoalResponsibilitySummary'
+import { GoalWorkArea } from '../src/renderer/src/components/GoalWorkArea'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { refreshGoalDelegations } from '../src/renderer/src/lib/goal-delegation-work'
@@ -295,10 +296,19 @@ describe('actual original PMO patrol CLI, Core Input and mounted business consum
     expect(await f.demands.snapshot()).toEqual(retained)
     f.patrolState.routeUnavailable = false
     await updated(async () => await refreshGoalDelegations('goal'), () => expect(current().responsibility!.supervisor.state).toBe('available'))
-    expect(button('Continue original inspection').disabled).toBe(false)
-    await updated(() => button('Continue original inspection').click(), () => expect(current().patrolObservations![0]!.state).toBe('delivered'))
+    await mount(createElement(GoalWorkArea, { demand: { ...current(), workspacePath: null, sessions: [] } }))
+    expect(button('Send first inspection').disabled).toBe(false)
+    expect([...container.querySelectorAll('.primary-button')].map(item => item.textContent?.trim())).toEqual(['Send first inspection'])
+    expect(patrolAction().classList.contains('primary-button')).toBe(false)
+    const floating = await import('../src/renderer/src/lib/pmo-teams-topic-floating')
+    await act(async () => button('Open owner conversation').click())
+    expect(floating.readPmoTeamsTopicFloatingState()).toMatchObject({ agentTarget: { agentSessionId: null }, targetTabId: null })
+    expect((await f.demands.get('goal'))!.patrols![0]!.attempts).toEqual([]); expect(f.attempts).toEqual([])
+    await updated(() => button('Send first inspection').click(), () => expect(current().patrolObservations![0]!.state).toBe('delivered'))
     expect(f.attempts).toHaveLength(1); expect((await f.demands.get('goal'))!.patrols).toHaveLength(1)
     expect(f.attempts[0]!.agentSessionId).toBe('owner'); expect(f.stop).not.toHaveBeenCalled()
+    expect((await f.demands.get('goal'))!.patrols![0]!.operationId).toBe(patrol.operationId)
+    expect(floating.readPmoTeamsTopicFloatingState()).toMatchObject({ agentTarget: { agentSessionId: 'owner', hostId: 'local' } })
     await evidence('unavailable-manager-first-route-actual-continuation', await f.proof(), 'patrol')
   }, 30_000)
 
