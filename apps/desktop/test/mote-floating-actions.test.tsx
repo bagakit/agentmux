@@ -2,7 +2,7 @@
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getWindowOverlayHost } from '../src/renderer/src/components/WindowOverlayHost'
-import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID } from '@agentmux/host/mote-model'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { requestPmoTeamsTopicFloatingOpen } from '../src/renderer/src/lib/pmo-teams-topic-floating'

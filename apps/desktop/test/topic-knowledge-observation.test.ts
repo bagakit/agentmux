@@ -1,6 +1,6 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it } from 'vitest'
-import { PMO_TEAMS_TOPIC_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID } from '@agentmux/host/mote-model'
 import type { SpaceZoneBindings } from '../src/shared/space-addresses'
 import { topicKnowledgeObservationKey as key } from '../src/renderer/src/lib/topic-knowledge-observation'
 

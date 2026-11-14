@@ -11,7 +11,7 @@ import { SpaceObjectIcon } from '../src/renderer/src/components/SpaceObjectIcon'
 import { MoteIcon } from '../src/renderer/src/components/MoteIcon'
 import { ConversationMessageAvatar } from '../src/renderer/src/components/ConversationMessageAvatar'
 import { DEFAULT_MOTE_FACE } from '../src/shared/mote-avatars'
-import { PMO_TEAMS_TOPIC_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID } from '@agentmux/host/mote-model'
 import { createMoteApp, moteClick, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
 import { customMoteId, defaultAgent, defaultTab, moteConfig, moteTopics, quietMoteId, savedMoteKey, scratchWorkspace } from './fixtures/mote-workface'
 

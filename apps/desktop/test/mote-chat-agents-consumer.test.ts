@@ -9,7 +9,7 @@ import { createMoteChatAgents } from '../src/main/mote-chat-agents.js'
 import { ScratchTopics } from '../src/main/scratch-topics.js'
 import type { AppConfig, WorkspaceRecord } from '../src/shared/contracts.js'
 import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses.js'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 
 const close: Array<() => void | Promise<void>> = []
 afterEach(async () => {

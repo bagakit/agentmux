@@ -9,7 +9,7 @@ import { ScratchTopics } from '../src/main/scratch-topics'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { api } from '../src/renderer/src/lib/api'
 import { prepareRendererUpdate, useAppStore } from '../src/renderer/src/store'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { createMoteApp, moteClick, type MoteAppFixture } from './fixtures/mote-app'
 import { defaultAgent, defaultTab, moteConfig, savedMoteKey } from './fixtures/mote-workface'
 let root: string, service: ScratchTopics, workspace: typeof moteConfig.workspaces[number], dispose: (() => void) | undefined, app: MoteAppFixture | undefined

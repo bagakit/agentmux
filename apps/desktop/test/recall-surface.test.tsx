@@ -76,7 +76,7 @@ import { addWorkbenchRegion, createWorkbenchTab, documentKey, workbenchSurfaces 
 import { collectTerminalColdParkCandidates } from '../src/renderer/src/lib/terminal-cold-parking-coordinator'
 import { projectPersistedWorkbench } from '../src/renderer/src/lib/workbench-persistence'
 import { NOTES_WORKSPACE_ID } from '@agentmux/host/notes-library'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import { surveyInitialZoneSelection, type SurveyZoneSelection } from '../src/renderer/src/lib/survey-workface'
 import { projectWorkbenchProjection, resolveWorkbenchZone, workbenchRegionProjectionSlotId, type WorkbenchProjection } from '../src/renderer/src/lib/workbench-projection'

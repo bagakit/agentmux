@@ -26,7 +26,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { moteAgent, moteTopics, scratchWorkspace, seedMoteWorkface } from './fixtures/mote-workface'
 import { openHostGoalTransport } from './helpers/host-goal-transport'
-import { PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 
 function delegation(): DemandDelegation {
   return { operationId: 'original-operation', sourceMessageId: 'original-message', hostId: 'original-host',

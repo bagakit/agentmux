@@ -7,7 +7,7 @@ import type { ContinuousProgressLoop, FileReadParams, FileReadResult } from '@ag
 import { DesktopClientUiProvider } from '../src/renderer/src/components/DesktopClientUiProvider'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { moteTopics, defaultAgent, neighborAgent, scratchWorkspace, seedMoteWorkface } from './fixtures/mote-workface'
-import { PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { SurfaceToolDock } from '../src/renderer/src/components/SurfaceToolDock'
 import { GoalContinuationControl } from '../src/renderer/src/components/GoalContinuationControl'
 import { MoteDetailsPanel } from '../src/renderer/src/components/MoteDetailsPanel'

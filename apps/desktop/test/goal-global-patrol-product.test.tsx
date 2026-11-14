@@ -21,7 +21,7 @@ import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingClose, subs
 import { publishWorkbenchTabRemoved } from '../src/renderer/src/lib/workbench-tab-removal'
 import { moteTopics, seedMoteWorkface, scratchWorkspace } from './fixtures/mote-workface'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
-import { PMO_TEAMS_TOPIC_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID } from '@agentmux/host/mote-model'
 import type { AgentLaunchInput, AgentLaunchResult, SessionSnapshot } from '../src/shared/contracts'
 
 afterEach(async () => { await act(async () => { localStorage.clear(); requestPmoTeamsTopicFloatingClose() }) })

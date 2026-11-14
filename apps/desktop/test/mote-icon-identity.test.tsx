@@ -21,7 +21,7 @@ import { QuickSwitcher } from '../src/renderer/src/components/QuickSwitcher'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 
 const initial = useAppStore.getState()
 const workspace = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', name: 'Topics', path: _hygiene_fixturePath("topics"), kind: 'folder' as const }

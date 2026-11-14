@@ -4,9 +4,10 @@ import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspaceRecord } from '../src/shared/contracts.js'
-import { DEFAULT_MOTE_BEHAVIOR, MOTE_BEHAVIOR_PATH, serializeMoteBehaviorDocument } from '../src/shared/mote-behavior.js'
-import { ScratchTopics } from '../src/main/scratch-topics.js'
 import {
+  DEFAULT_MOTE_BEHAVIOR,
+  MOTE_BEHAVIOR_PATH,
+  serializeMoteBehaviorDocument,
   DEFAULT_TOPIC_WIKI,
   SCRATCH_TOPIC_WIKI_PATH,
   SCRATCH_TOPIC_WIKI_STATE_PATH,
@@ -14,7 +15,8 @@ import {
   scratchTopicDirectoryName,
   scratchTopicIdFromWorkspacePath,
   workspaceOwnsSessionPath
-} from '../src/shared/scratch-topics.js'
+} from '@agentmux/host/mote-model'
+import { ScratchTopics } from '../src/main/scratch-topics.js'
 
 const fault = vi.hoisted(() => ({ withheld: false }))
 vi.mock('node:fs/promises', async importOriginal => {

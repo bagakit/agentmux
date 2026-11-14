@@ -8,8 +8,7 @@ const { build } = createRequire(resolve('packages/core/package.json'))('esbuild'
 import { tmpdir } from 'node:os'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ScratchTopics } from '../src/main/scratch-topics'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
-import { DEFAULT_MOTE_AGENT_INSTRUCTIONS, DEFAULT_TOPIC_AGENT_INSTRUCTIONS, DEFAULT_MOTE_MEMORY } from '../src/shared/topic-agent-instructions'
+import { SCRATCH_WORKSPACE_ID, DEFAULT_MOTE_AGENT_INSTRUCTIONS, DEFAULT_TOPIC_AGENT_INSTRUCTIONS, DEFAULT_MOTE_MEMORY } from '@agentmux/host/mote-model'
 import { goalRoleGuidanceContract } from '@agentmux/core/goal-role-guidance'
 import { AGENT_LAUNCH_CONTEXT_BUDGET_BYTES } from '@agentmux/core/agent-prompt-budget'
 import type { WorkspaceRecord } from '../src/shared/contracts'
@@ -351,8 +350,8 @@ it('starts with blank Mote defaults, then carries public Files corrections acros
   const { AgentMuxControlServer } = await import('../../../packages/core/src/public-rpc-server')
   const { connectAgentMuxRpc } = await import('../../../packages/core/src/public-rpc-client')
   const { FileReadOwner } = await import('@agentmux/host/file-read-owner'), { WorkspaceFiles } = await import('../src/main/workspace-files')
-  const { DEFAULT_MOTE_SOUL } = await import('../src/shared/scratch-topics')
-  const { DEFAULT_MOTE_BEHAVIOR } = await import('../src/shared/mote-behavior')
+  const { DEFAULT_MOTE_SOUL } = await import('@agentmux/host/mote-model')
+  const { DEFAULT_MOTE_BEHAVIOR } = await import('@agentmux/host/mote-model')
   const h = await fixture(), mote = await h.owner.ensureMote(h.workspace, 'launcher:public-memory')
   const {homeZoneId,directoryIdentity}=await import('../src/shared/space-addresses')
   const zone = {zoneId:homeZoneId(directoryIdentity('local',mote.identityDirectoryPath!)),kind:'temporary',workspaceId:h.workspace.id,hostId:'local',directoryPath:mote.physicalDirectoryPath!}

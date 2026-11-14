@@ -13,7 +13,7 @@ import { scratchDirectoryIdentity, scratchIdentityContext } from '../src/main/sc
 import { directoryIdentityRecord, normalizeDirectoryIdentity, moteDirectoryName, SCRATCH_DIRECTORY_IDENTITY_PATH, SCRATCH_DIRECTORY_IDENTITY_PENDING_PATH } from '../src/main/scratch-directory-identity.mjs'
 import { observeClientRpcSnapshot } from '@agentmux/host/snapshot-observation'
 import { originalTopicAddress, directoryIdentity, homeZoneId, spatialSources } from '../src/shared/space-addresses'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import type { AppConfig, WorkspaceRecord } from '../src/shared/contracts'
 import { controlledNativeImage, imageInput, imagePng } from './fixtures/mote-identity-image'
 import { migrateTopicDirectories } from '../scripts/migrate-topic-directories.mjs'

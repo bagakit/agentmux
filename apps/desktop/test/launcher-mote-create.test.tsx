@@ -11,7 +11,7 @@ import { createWorkbenchTab, addWorkbenchRegion } from '../src/renderer/src/lib/
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { requestPmoTeamsTopicFloatingClose, readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingOpen } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 import { api } from '../src/renderer/src/lib/api'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, type ScratchTopicSnapshot } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, type ScratchTopicSnapshot } from '@agentmux/host/mote-model'
 import { topicSpaceIconTarget } from '../src/renderer/src/lib/space-object-appearance'
 import { DEFAULT_MOTE_FACE } from '../src/shared/mote-avatars'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'

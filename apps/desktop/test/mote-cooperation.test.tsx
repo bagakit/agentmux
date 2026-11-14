@@ -7,7 +7,7 @@ import { createMoteApp, moteClick, settleMoteApp, type MoteAppFixture } from './
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { defaultAgent, defaultTab, customMoteId, customTab, scratchWorkspace, moteTopics } from './fixtures/mote-workface'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { openMoteDiscussionDraft } from '../src/renderer/src/lib/mote-materials-actions'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { MoteQuickMode } from '../src/renderer/src/components/MoteQuickMode'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
-import { serializeMoteQuickMode } from '../src/shared/mote-quick-mode'
+import { serializeMoteQuickMode } from '@agentmux/host/mote-model'
 import { createMoteApp, moteClick, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
 import { moteTopics, scratchWorkspace } from './fixtures/mote-workface'
 

@@ -13,7 +13,7 @@ import { WorkspaceFiles as SourceWorkspaceFiles } from '../src/main/workspace-fi
 import { TopicKnowledgeOwner as SourceTopicKnowledgeOwner } from '@agentmux/host/topic-knowledge'
 import { TopicSpatialOwner } from '@agentmux/host/topic-spatial-owner'
 import { FileReadOwner } from '@agentmux/host/file-read-owner'
-import { SCRATCH_TOPIC_WIKI_PATH, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName, scratchTopicPhysicalPath } from '../src/shared/scratch-topics'
+import { SCRATCH_TOPIC_WIKI_PATH, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName, scratchTopicPhysicalPath } from '@agentmux/host/mote-model'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc'
 const WorkspaceFiles: typeof SourceWorkspaceFiles = process.env.AGENTMUX_TEST_TOPIC_DOCUMENT_FILES

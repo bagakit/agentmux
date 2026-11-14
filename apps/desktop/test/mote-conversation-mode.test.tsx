@@ -9,7 +9,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import { showMoteConversation } from '../src/renderer/src/lib/mote-conversation-mode'
 import type { WorkbenchProjectionSelection } from '../src/renderer/src/lib/workbench-projection'
-import { scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { customAgent, customMoteId, customTab, defaultAgent, moteTopics, neighborAgent, scratchWorkspace, seedMoteWorkface } from './fixtures/mote-workface'
 
 const baseline = useAppStore.getState()

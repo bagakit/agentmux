@@ -14,7 +14,7 @@ import {
   initialWorkbenchRegionId
 } from '../src/renderer/src/lib/workbench-tabs.js'
 import { restorePersistedUiState, useAppStore } from '../src/renderer/src/store.js'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects.js'
 
 const initialState = useAppStore.getState()

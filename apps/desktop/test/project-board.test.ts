@@ -16,7 +16,7 @@ import {
   SCRATCH_WORKSPACE_ID,
   scratchTopicDirectoryName,
   type ScratchTopicSnapshot
-} from '../src/shared/scratch-topics.js'
+} from '@agentmux/host/mote-model'
 
 const main: WorkspaceRecord = {
   id: 'main',

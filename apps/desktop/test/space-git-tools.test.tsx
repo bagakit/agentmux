@@ -13,7 +13,7 @@ import { composerConfig, composerDOM, composerSession } from './helpers/composer
 import type { GitHistoryResult, GitStatusResult } from '../src/shared/git-contracts'
 import { fixturePath } from '../scripts/lib/fixture-values.mjs'
 import * as zoneFileActions from '../src/renderer/src/lib/workspace-zone-file-actions'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 

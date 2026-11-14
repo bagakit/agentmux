@@ -13,7 +13,7 @@ import { GRAPHITE_THEME, mountThemeRuntime, previewTheme } from '@agentmux/clien
 import { semanticIconHref } from '@agentmux/client-ui/icons'
 import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore, currentCoreSpatialGraph, prepareRendererUpdate } from '../src/renderer/src/store'
 import { readGoalDiscussionBinding } from '../../host/src/goal-discussion-bindings'

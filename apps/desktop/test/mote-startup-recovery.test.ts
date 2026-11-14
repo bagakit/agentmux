@@ -9,9 +9,9 @@ import { api } from '../src/renderer/src/lib/api'
 import { moteConfig, moteTopics, moteTabs, moteSessions, neighborAgent, neighborTab, customAgent, customTab, seedMoteWorkface } from './fixtures/mote-workface'
 import { providerCatalogReader, historySourcesReader } from './helpers/startup-observation-api-fixture'
 import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { createWorkspaceLayout } from '@agentmux/layout'
-import type { MoteRecoveryTiming } from '../src/shared/mote-quick-mode'
+import type { MoteRecoveryTiming } from '@agentmux/host/mote-model'
 import type { RuntimeEvent, SessionSnapshot } from '../src/shared/contracts'
 
 const baseline = useAppStore.getState()

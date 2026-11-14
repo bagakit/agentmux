@@ -8,7 +8,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { retainGoalFiniteStartIntent, useAppStore } from '../src/renderer/src/store'
 import { GoalFiniteStartControl } from '../src/renderer/src/components/GoalFiniteStartControl'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 
 const phase = process.env.AGENTMUX_GOAL_WORKFLOW_RESTART_PHASE, evidence = process.env.AGENTMUX_GOAL_WORKFLOW_RESTART_ROOT
 it.skipIf(!phase || !evidence)('retains finite intent and discussion close/unknown facts through two separate Renderer processes', async () => {

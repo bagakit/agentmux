@@ -2,7 +2,7 @@ import { fixturePath as _hygiene_fixturePath } from "../../scripts/lib/fixture-v
 import { vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import type { ScratchTopicSnapshot } from '../../src/shared/contracts'
-import { SCRATCH_WORKSPACE_ID } from '../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { api } from '../../src/renderer/src/lib/api'
 import { spatialCatalog } from '../../src/renderer/src/lib/space-agent-control'
 import { scratchTopicsScope } from '../../src/renderer/src/lib/scratch-topic-snapshots'

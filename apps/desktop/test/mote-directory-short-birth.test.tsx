@@ -12,7 +12,7 @@ import { moteWorkbenchProjection } from '../src/renderer/src/lib/mote-workbench-
 import { projectWorkbenchProjection } from '../src/renderer/src/lib/workbench-projection'
 import { desktopSpatialGraph, desktopWorkbenchFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
-import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 
 const initial = useAppStore.getState()
 const scratch = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: _hygiene_fixturePath("private/short-birth/topics"), name: 'Topics', kind: 'folder' as const }

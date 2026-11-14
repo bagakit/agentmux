@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { directoryIdentity } from '../src/shared/space-addresses'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, MOTE_STATE_PATH, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, MOTE_STATE_PATH, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { scratchMoteTopics, scratchTopicKind } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import type { AgentMuxPreloadApi } from '../src/shared/contracts'
 

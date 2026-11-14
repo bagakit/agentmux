@@ -16,7 +16,7 @@ import { inspectDirectoryIdentity, moteDirectoryName, retainDirectoryIdentity } 
 import { scratchIdentityContext } from '../src/main/scratch-topic-directories'
 import { observeClientRpcSnapshot } from '@agentmux/host/snapshot-observation'
 import { directoryIdentity, homeZoneId, originalTopicAddress } from '../src/shared/space-addresses'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName, scratchTopicIdFromWorkspacePath, workspaceOwnsSessionPath } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName, scratchTopicIdFromWorkspacePath, workspaceOwnsSessionPath } from '@agentmux/host/mote-model'
 import { topicIdForSession, workspaceForSession } from '../src/renderer/src/lib/workbench-tabs'
 import { moteConversationIdentity } from '../src/renderer/src/lib/mote-conversation-identity'
 import { buildTopicBoardRows } from '../src/renderer/src/lib/project-board'

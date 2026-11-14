@@ -82,7 +82,7 @@ import { WorkbenchPresentationContext, type WorkbenchPresentation } from '../src
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import * as sessionLinkOpening from '../src/renderer/src/lib/session-link-opening.js'
 import type { RuntimeEvent, SessionSnapshot } from '../src/shared/contracts.js'
-import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics.js'
+import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots.js'
 
 const initial = useAppStore.getState()

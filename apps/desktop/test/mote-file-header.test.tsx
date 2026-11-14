@@ -11,7 +11,7 @@ import { DesktopClientUiProvider } from '../src/renderer/src/components/DesktopC
 import { WindowOverlayHost } from '../src/renderer/src/components/WindowOverlayHost'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
-import { PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 let app: MoteAppFixture, root: ReturnType<typeof createClientUiRoot>, container: HTMLDivElement
 beforeEach(() => {
   app = createMoteApp(); container = document.createElement('div'); document.body.append(container); root = createClientUiRoot(container)

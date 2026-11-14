@@ -31,7 +31,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
 import { requestPmoTeamsTopicFloatingOpen } from '../src/renderer/src/lib/pmo-teams-topic-floating'
-import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { installNativePopover } from './fixtures/mote-workface'
 
 const initial = useAppStore.getState()

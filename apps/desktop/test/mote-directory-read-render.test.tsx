@@ -10,7 +10,7 @@ import { FileExplorer } from '../src/renderer/src/components/FileExplorer'
 import { api } from '../src/renderer/src/lib/api'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { useAppStore } from '../src/renderer/src/store'
-import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM()

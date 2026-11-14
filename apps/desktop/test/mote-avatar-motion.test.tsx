@@ -11,7 +11,7 @@ import { MobileIdentity, type MobileObjectIdentity } from '../../mobile/src/navi
 import { LiquidSelectionSurface } from '../src/renderer/src/components/LiquidSelectionSurface'
 import { MoteFaceEditor } from '../src/renderer/src/components/MoteFaceEditor'
 import { DEFAULT_MOTE_FACE } from '../src/shared/mote-avatars'
-import { PMO_TEAMS_TOPIC_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID } from '@agentmux/host/mote-model'
 import { api } from '../src/renderer/src/lib/api'
 import { ConversationMessageAvatar } from '../src/renderer/src/components/ConversationMessageAvatar'
 import { defaultAgent } from './fixtures/mote-workface'

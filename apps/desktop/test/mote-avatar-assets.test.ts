@@ -5,9 +5,8 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { decodeMoteAvatar } from '../src/main/mote-avatar-image'
 import { MOTE_AVATAR_INPUT_MAX_BYTES, isMoteAvatarRef } from '../src/shared/mote-avatars'
-import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, SCRATCH_TOPIC_WIKI_PATH } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, SCRATCH_TOPIC_WIKI_PATH, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { directoryIdentity } from '../src/shared/space-addresses'
-import { scratchTopicDirectoryName } from '../src/shared/scratch-topics'
 import { controlledNativeImage, imageInput, imagePng } from './fixtures/mote-identity-image'
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })

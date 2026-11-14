@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { useAppStore } from '../src/renderer/src/store'
 import { topicSpaceIconTarget } from '../src/renderer/src/lib/space-object-appearance'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'

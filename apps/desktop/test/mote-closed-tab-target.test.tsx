@@ -9,7 +9,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import type { WorkbenchProjectionSelection } from '../src/renderer/src/lib/workbench-projection'
 import { subscribeWorkbenchTabRemoved } from '../src/renderer/src/lib/workbench-tab-removal'
 import { directoryIdentity, homeZoneId, spatialSources } from '../src/shared/space-addresses'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { createMoteApp, moteClick, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
 import { customMoteId, customTab, defaultAgent, defaultTab, moteTopics, neighborTab, savedMoteKey } from './fixtures/mote-workface'
 

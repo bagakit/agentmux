@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { openSystemUrlInSurvey } from '../src/renderer/src/lib/survey-system-url'
 import { createSurveyBrowser } from '../src/renderer/src/lib/survey-browser-creation'
 

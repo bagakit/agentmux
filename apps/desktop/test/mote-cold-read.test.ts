@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { afterEach, expect, it } from 'vitest'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { scratchMoteTopics, scratchTopicKind } from '../src/renderer/src/lib/scratch-topic-snapshots'
-import { scratchWorkspaceFilePath } from '../src/shared/scratch-topics'
+import { scratchWorkspaceFilePath } from '@agentmux/host/mote-model'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })

@@ -20,7 +20,7 @@ import { MoteDialogueStore } from '../../../packages/core/src/mote-dialogue-stor
 import { ScratchTopics } from '../../host/src/mote-resources'
 import { creationInputOwner } from '../../../packages/core/test/helpers/creation-input-owner'
 import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
-import { parseMoteQuickMode, serializeMoteQuickMode } from '../src/shared/mote-quick-mode'
+import { parseMoteQuickMode, serializeMoteQuickMode } from '@agentmux/host/mote-model'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { seedMoteWorkface } from './fixtures/mote-workface'

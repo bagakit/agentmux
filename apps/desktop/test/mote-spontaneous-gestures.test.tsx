@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { SpaceObjectIcon } from '../src/renderer/src/components/SpaceObjectIcon'
 import { DEFAULT_MOTE_FACE } from '../src/shared/mote-avatars'
-import { PMO_TEAMS_TOPIC_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID } from '@agentmux/host/mote-model'
 import { defaultAgent } from './fixtures/mote-workface'
 import { useAppStore } from '../src/renderer/src/store'
 let root: Root, container: HTMLDivElement, commits: number, reduced: boolean

@@ -16,7 +16,7 @@ import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import { DesktopFocusFailure, resolveDesktopSpaceSelection } from '../src/renderer/src/lib/desktop-focus-navigation'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { SpatialLinkIngress } from '../src/main/spatial-link-ingress'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 
 const initial = useAppStore.getState()
 const workspace = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', name: 'Topics', path: _hygiene_fixturePath("private/topics"), kind: 'folder' as const }

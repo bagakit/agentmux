@@ -2,7 +2,7 @@ import { expect, it } from 'vitest'
 import { configOwnerFixture } from './helpers/config-owner-fixture.js'
 import { executeSettingsControl } from '../src/main/settings-control.js'
 import { applyConfigEdit } from '../src/shared/config-edit.js'
-import { DEFAULT_USER_PROFILE, profileAgentContext } from '../src/shared/user-profile.js'
+import { DEFAULT_USER_PROFILE, profileAgentContext } from '@agentmux/host/mote-model'
 import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service.js'
 import { settingsCliCommand as parseSettingsCommand } from '../../../packages/core/test/helpers/settings-command.js'
 

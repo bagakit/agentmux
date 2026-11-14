@@ -3,7 +3,7 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createMoteApp, type MoteAppFixture } from './fixtures/mote-app'
 import { moteTopics, scratchWorkspace, customMoteId } from './fixtures/mote-workface'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { prepareMoteCooperationDraft } from '../src/renderer/src/lib/mote-cooperation'
 import { prepareMoteIdeaDraft } from '../src/renderer/src/lib/mote-idea-request'

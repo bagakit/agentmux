@@ -10,7 +10,7 @@ import { WorkspaceFiles } from '../src/main/workspace-files'
 import { TopicKnowledgeOwner } from '@agentmux/host/topic-knowledge'
 import { TopicSpatialOwner } from '@agentmux/host/topic-spatial-owner'
 import { UNCLASSIFIED_TOPIC_CATEGORY_ID } from '@agentmux/host/topic-categories'
-import { MOTE_SOUL_PATH, SCRATCH_WORKSPACE_ID, scratchTopicPhysicalPath, scratchTopicStorageRoots } from '../src/shared/scratch-topics'
+import { MOTE_SOUL_PATH, SCRATCH_WORKSPACE_ID, scratchTopicPhysicalPath, scratchTopicStorageRoots } from '@agentmux/host/mote-model'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc'
 

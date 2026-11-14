@@ -19,7 +19,7 @@ import { agentPromptCondition } from '../../../packages/core/src/agent-prompt-co
 import type { AgentMuxStoredAgentSession, AgentTimelineSnapshot } from '../../../packages/core/src/types.js'
 import type { CtxmuxAdapterRun } from '../../../packages/core/src/ctxmux-run-adapter.js'
 import type { AppConfig, SessionSnapshot, ScratchTopicSnapshot, WorkspaceRecord } from '../src/shared/contracts'
-import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID } from '@agentmux/host/mote-model'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 

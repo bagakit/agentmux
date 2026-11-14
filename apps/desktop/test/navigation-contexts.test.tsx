@@ -18,7 +18,7 @@ import { mainFocusPresentation } from '../src/renderer/src/lib/focus-tab-project
 import { workbenchSelectionCatalog } from '../src/renderer/src/lib/desktop-focus-navigation'
 import { subscribePmoTeamsTopicFloatingState, readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingOpen, requestPmoTeamsTopicFloatingClose } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 import { seedMoteWorkface, defaultTab, neighborTab } from './fixtures/mote-workface'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 const initial = useAppStore.getState()
 let root: ReturnType<typeof createRoot> | undefined, host: HTMLDivElement, dispose: () => void
 beforeEach(async () => {

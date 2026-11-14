@@ -5,7 +5,7 @@ import { GRAPHITE_THEME,previewTheme } from '@agentmux/client-ui/theme'
 import { semanticIconHref } from '@agentmux/client-ui/icons'
 import { useAppStore } from '../src/renderer/src/store'
 import { requestPmoTeamsTopicFloatingOpen } from '../src/renderer/src/lib/pmo-teams-topic-floating'
-import { PMO_TEAMS_TOPIC_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID } from '@agentmux/host/mote-model'
 import { createMoteApp,settleMoteApp,type MoteAppFixture } from './fixtures/mote-app'
 import { defaultTab } from './fixtures/mote-workface'
 let app:MoteAppFixture

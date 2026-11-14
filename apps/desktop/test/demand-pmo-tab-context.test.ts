@@ -5,7 +5,7 @@ vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
 })
 import type { AppConfig } from '../src/shared/contracts.js'
-import { MOTE_COORDINATION_ROLE, PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
+import { MOTE_COORDINATION_ROLE, PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { addTabPlacement } from '@agentmux/layout'
 import { api } from '../src/renderer/src/lib/api.js'
 import { createWorkspaceLayout } from '@agentmux/layout'

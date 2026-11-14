@@ -19,7 +19,7 @@ import { readSpatialAppearance } from '../src/renderer/src/lib/mobile-presentati
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import { topicSpaceIconTarget } from '../src/renderer/src/lib/space-object-appearance'
 import { useAppStore } from '../src/renderer/src/store'
-import { PMO_TEAMS_TOPIC_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID } from '@agentmux/host/mote-model'
 import { moteConfig, moteTopics, scratchWorkspace } from './fixtures/mote-workface'
 import { composerDOM } from './helpers/composer-dom-fixture'
 

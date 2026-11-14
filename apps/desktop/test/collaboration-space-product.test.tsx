@@ -9,7 +9,7 @@ import { defaultAgent, neighborAgent, customAgent, customMoteId, moteSessions, m
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { topicSpatialAddress } from '../src/shared/space-addresses'
-import { PMO_TEAMS_TOPIC_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID } from '@agentmux/host/mote-model'
 import { WorkspaceAgentsTool } from '../src/renderer/src/components/SurfaceToolDock'
 
 const dom = composerDOM({ agentInformation: true }), open = vi.fn()

@@ -6,7 +6,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { WorkspaceSidebar } from '../src/renderer/src/components/WorkspaceSidebar'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects'
 import { allStyles } from './helpers/styles'
 const initial = useAppStore.getState()

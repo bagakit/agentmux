@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
 import type { ScratchTopicSnapshot, SessionSnapshot, WorkspaceRecord } from '../src/shared/contracts.js'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))

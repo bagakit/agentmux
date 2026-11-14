@@ -10,7 +10,7 @@ import { executionFocusPresentation } from '../src/renderer/src/lib/focus-tab-pr
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import { formatTabAddress } from '../src/renderer/src/lib/agent-address'
 import { requestPmoTeamsTopicFloatingOpen, requestPmoTeamsTopicFloatingPreview, requestPmoTeamsTopicFloatingClose, readPmoTeamsTopicFloatingState, usePmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating'
-import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID } from '@agentmux/host/mote-model'
 import { seedMoteWorkface, executionAgent, customAgent, customMoteId, quietMoteId, ordinaryTopicId, moteTopics, savedMoteKey } from './fixtures/mote-workface'
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => null }))
 vi.mock('../src/renderer/src/components/RecentFocusTimeline', () => ({ RecentFocusTimeline: () => null }))

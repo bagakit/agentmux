@@ -14,7 +14,7 @@ import { addWorkbenchRegion, createWorkbenchTab } from '../src/renderer/src/lib/
 import { dispatchWorkbenchCommand, focusedSessionId } from '../src/renderer/src/lib/workbench-shortcuts'
 import { layoutForLogicalRegionFocus } from '../src/renderer/src/lib/region-focus'
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { createBrowserAgent } from '../src/renderer/src/lib/browser-agent-creation'
 import { act, createElement } from 'react'
 import { createClientUiRoot } from './helpers/client-ui-render'

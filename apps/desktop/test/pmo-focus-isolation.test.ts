@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { createWorkspaceLayout } from '@agentmux/layout'
 import type { AppConfig, SessionSnapshot, WorkspaceRecord } from '../src/shared/contracts.js'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { useAppStore } from '../src/renderer/src/store.js'
 
 const baseline = useAppStore.getState()

@@ -7,7 +7,7 @@ vi.hoisted(() => {
 })
 
 import type { AppConfig, SessionSnapshot, WorkspaceRecord } from '../src/shared/contracts.js'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { api } from '../src/renderer/src/lib/api.js'
 import {
   addTab,

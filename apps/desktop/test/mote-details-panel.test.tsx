@@ -6,7 +6,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { customMoteId, customTab, defaultAgent, defaultTab, quietMoteId, quietTab, ordinaryTopicId, ordinaryTab } from './fixtures/mote-workface'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { requestPmoTeamsTopicFloatingOpen, readPmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: () => createElement('div', { 'data-original-editor': true }) }))
 let app: MoteAppFixture

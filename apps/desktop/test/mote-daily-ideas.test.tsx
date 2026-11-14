@@ -7,7 +7,7 @@ import type { AgentSessionHistoryPage, ContinuousProgressLoop, FileDocument, Fil
 import type { Demand } from '@agentmux/demand'
 import { createMoteApp, moteClick, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
 import { defaultAgent, defaultTab, neighborTab, customMoteId, customTab, scratchWorkspace, moteTopics } from './fixtures/mote-workface'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { prepareMoteIdeaDraft, prepareMoteIdeaSchedule } from '../src/renderer/src/lib/mote-idea-request'

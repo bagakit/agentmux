@@ -12,7 +12,7 @@ vi.hoisted(() => {
 import type { SessionSnapshot, ScratchTopicSnapshot, WorkspaceRecord } from '../src/shared/contracts.js'
 import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 
 type AgentSessionSnapshot = Extract<SessionSnapshot, { kind: 'agent' }>

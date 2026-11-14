@@ -812,7 +812,7 @@ it('a real typed socket client and actual Source CLI exercise inspect, initial b
 
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
-import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicLogicalPath } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicLogicalPath, scratchTopicIdentityPath } from '@agentmux/host/mote-model'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { originalTopicAddress } from '../src/shared/space-addresses'
 import { moteGoalContext, goalsForMote } from '../src/renderer/src/lib/mote-goals'
@@ -1390,7 +1390,6 @@ import { chooseField } from './helpers/selection-field'
 import { GoalAgentPicker } from '../src/renderer/src/components/GoalAgentPicker'
 import { goalAgentRows, goalCreationDraftKey, restoredGoalAgentCreationDrafts, restoredGoalAgentSelectionDrafts } from '../src/renderer/src/lib/goal-agent-selection'
 import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects'
-import { scratchTopicIdentityPath } from '../src/shared/scratch-topics'
 function PickerDetail() {
   const demand = useAppStore(state => state.demands.goal)!
   return <GoalDetail demand={{ ...demand, sessions: [], workspacePath: null }} onClose={() => {}} onOpenMote={() => {}} onGrill={() => {}} onGrounding={() => {}} acknowledgementFeedback={EMPTY_GOAL_ACKNOWLEDGEMENT} onAcknowledgementFeedbackChange={() => {}} moteError={null} onRetryMote={() => {}} />

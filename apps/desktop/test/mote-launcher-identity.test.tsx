@@ -12,7 +12,7 @@ import { createWorkbenchTab, type WorkbenchTab } from '../src/renderer/src/lib/w
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { useAppStore } from '../src/renderer/src/store'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { executionAgent, moteTopics, ordinaryTopicId, quietMoteId, scratchWorkspace, seedMoteWorkface } from './fixtures/mote-workface'
 

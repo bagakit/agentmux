@@ -6,7 +6,7 @@ import {
   scratchTopicIdFromDirectoryName,
   scratchTopicIdFromWorkspacePath,
   workspaceOwnsSessionPath
-} from '../src/shared/scratch-topics.js'
+} from '@agentmux/host/mote-model'
 
 describe('canonical Scratch Topic layout', () => {
   it('round-trips the fixed PMO teams topic directory', () => {

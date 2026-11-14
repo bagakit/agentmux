@@ -5,7 +5,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import * as spaceAgentControl from '../src/renderer/src/lib/space-agent-control'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { createMoteApp, moteClick, motePointer, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
 import { defaultTab, neighborTab, ordinaryTab, savedMoteKey } from './fixtures/mote-workface'
 

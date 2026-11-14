@@ -16,7 +16,7 @@ import { directoryIdentity, homeZoneId, projectResourceWorkspace, spatialSources
 import { createSpaceZoneResource, type SpaceZoneResourcePorts } from '../src/main/space-zone-resources'
 import { executeSpatialControl, spatialCatalog, type SpatialControlPorts, type SpatialWorkbench } from '../src/renderer/src/lib/space-agent-control'
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { WorktreeService } from '../src/main/worktree-service'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore, prepareRendererUpdate } from '../src/renderer/src/store'

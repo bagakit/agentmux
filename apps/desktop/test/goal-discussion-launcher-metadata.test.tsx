@@ -7,7 +7,7 @@ import { AgentMuxSpatialStateStore, type AgentMuxAgentCreationInspection } from 
 import { addTab, createWorkspaceLayout } from '@agentmux/layout'
 import { useAppStore, handoffOriginalGoalDiscussions, prepareRendererUpdate } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { api } from '../src/renderer/src/lib/api'
 
 // The real preload and registered Main handler remain in use. The existing Native launch

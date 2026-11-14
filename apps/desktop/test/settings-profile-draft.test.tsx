@@ -5,7 +5,7 @@ import { ProfileSettingsPane } from '../src/renderer/src/components/settings/Pro
 import { ConversationMessageAvatar } from '../src/renderer/src/components/ConversationMessageAvatar'
 import { ConversationSpeakerAvatar } from '../src/renderer/src/components/ConversationSpeakerAvatar'
 import { useAppStore } from '../src/renderer/src/store'
-import { DEFAULT_USER_PROFILE } from '../src/shared/user-profile'
+import { DEFAULT_USER_PROFILE } from '@agentmux/host/mote-model'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 import { renderToStaticMarkup } from 'react-dom/server'
 

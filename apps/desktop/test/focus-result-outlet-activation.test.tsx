@@ -5,7 +5,7 @@ import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { activateTab as activateLayoutTab, createWorkspaceLayout, moveTabToNewGroup } from '@agentmux/layout'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import type { BrowserSnapshot, SessionSnapshot } from '../src/shared/contracts.js'
 import type { GitFileDiff, GitStatusResult } from '../src/shared/git-contracts.js'
 

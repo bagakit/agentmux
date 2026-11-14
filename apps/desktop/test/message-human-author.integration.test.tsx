@@ -27,7 +27,7 @@ import type { AgentMuxPreloadApi, AppConfig, SessionSnapshot } from '../src/shar
 import { deliverContinuousProgress } from '@agentmux/host/continuous-progress-delivery'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 
 const { fakeTrustedSender, fakeUntrustedSender, bridge } = vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false)

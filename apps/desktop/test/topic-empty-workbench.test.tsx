@@ -17,7 +17,7 @@ import { projectWorkbenchProjection, resolveWorkbenchZone, type WorkbenchProject
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { topicSpatialAddress, directoryIdentity } from '../src/shared/space-addresses'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { installNativePopover, moteConfig, moteTopic, ordinaryAgent, scratchWorkspace } from './fixtures/mote-workface'
 
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => createElement('div', { 'data-original-agent': 'kept' }) }))

@@ -25,7 +25,7 @@ import { directoryIdentity, workspaceZoneId } from '../src/shared/space-addresse
 import { desktopWorkbenchObservationSchema } from '../src/shared/client-observation'
 import { restoreWorkbenchSpaceSelection } from '../src/renderer/src/lib/desktop-focus-navigation'
 import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingOpen, usePmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import { installNativePopover } from './fixtures/mote-workface'
 import { installCollaborationCanvasGeometry } from './helpers/collaboration-canvas-dom'

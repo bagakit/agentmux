@@ -15,7 +15,7 @@ import { ScratchTopics } from '../src/main/scratch-topics'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { SpaceObjectImages } from '../src/main/space-object-images'
 import { directoryIdentity } from '../src/shared/space-addresses'
-import { SCRATCH_WORKSPACE_ID, scratchTopicStorageRoots } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, scratchTopicStorageRoots } from '@agentmux/host/mote-model'
 import { AVATAR_INPUT_MAX_BYTES, AVATAR_OUTPUT_MAX_BYTES, type SpaceObjectImageTarget } from '@agentmux/host/object-avatars'
 import { controlledNativeImage, imageInput, imagePng } from './fixtures/mote-identity-image'
 

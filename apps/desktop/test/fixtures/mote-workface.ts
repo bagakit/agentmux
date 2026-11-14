@@ -1,7 +1,7 @@
 import { fixturePath as _hygiene_fixturePath } from "../../scripts/lib/fixture-values.mjs"
 import { createWorkspaceLayout } from '@agentmux/layout'
 import type { AppConfig, ScratchTopicSnapshot, SessionSnapshot } from '../../src/shared/contracts'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { createWorkbenchTab } from '../../src/renderer/src/lib/workbench-tabs'
 import { scratchTopicsScope } from '../../src/renderer/src/lib/scratch-topic-snapshots'
 import { moteWorkbenchProjection } from '../../src/renderer/src/lib/mote-workbench-projection'

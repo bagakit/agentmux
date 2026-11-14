@@ -14,7 +14,7 @@ import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { createScheduleRpcFixture } from './helpers/schedule-rpc-fixture'
 import { seedMoteWorkface, defaultAgent, neighborAgent, defaultTab, neighborTab, scratchWorkspace, moteTopics } from './fixtures/mote-workface'
-import { scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import type { MoteWorkfaceScope } from '../src/renderer/src/lib/mote-workface'
 
 const dom = composerDOM()

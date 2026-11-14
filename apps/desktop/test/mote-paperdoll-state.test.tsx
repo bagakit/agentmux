@@ -13,7 +13,7 @@ import { reduceTimelineSnapshot } from '../src/renderer/src/lib/session-state'
 import { topicSpaceIconTarget } from '../src/renderer/src/lib/space-object-appearance'
 import { createMoteApp, moteClick, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
 import { defaultAgent, defaultTab, executionAgent, moteConfig, moteTopics, quietMoteId, savedMoteKey, scratchWorkspace } from './fixtures/mote-workface'
-import { PMO_TEAMS_TOPIC_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID } from '@agentmux/host/mote-model'
 const key = topicSpaceIconTarget(scratchWorkspace, moteTopics[0]!).key
 let app: MoteAppFixture, dispose: (() => void) | undefined
 let intersections: Array<{ node: Element; emit(visible: boolean): void }> = [], mediaListeners: Array<() => void> = [], reduce = false

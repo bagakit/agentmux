@@ -12,7 +12,7 @@ import { ScratchTopics } from '../src/main/scratch-topics'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { TopicSpatialOwner } from '@agentmux/host/topic-spatial-owner'
 import { FileReadOwner } from '@agentmux/host/file-read-owner'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 
 const History: typeof SourceHistory = process.env.AGENTMUX_TEST_TOPIC_SEARCH_HISTORY_SOURCE

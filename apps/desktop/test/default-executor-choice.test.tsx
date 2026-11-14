@@ -3,7 +3,7 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => null }))
 import type { AppConfig } from '../src/shared/contracts'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
 import { BoardDiscussionCanvas } from '../src/renderer/src/components/BoardDiscussionCanvas'
 import { defaultExecutorChoice } from '../src/renderer/src/lib/executors'

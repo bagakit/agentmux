@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ScratchTopics } from '../src/main/scratch-topics'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import type { ScratchTopicSnapshot, WorkspaceRecord } from '../src/shared/contracts'
 import { scratchTopicsScope, type ScratchTopicsSnapshot } from '../src/renderer/src/lib/scratch-topic-snapshots'
 

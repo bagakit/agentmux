@@ -13,7 +13,7 @@ import type { WorkbenchProjectionSelection } from '../src/renderer/src/lib/workb
 import { readPmoTeamsTopicFloatingState, usePmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import { createWorkbenchTab, documentKey, fileTabId } from '../src/renderer/src/lib/workbench-tabs'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath, scratchTopicIdentityPath } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath, scratchTopicIdentityPath } from '@agentmux/host/mote-model'
 import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
 import { defaultAgent, defaultTab, moteTopics, scratchWorkspace, seedMoteWorkface } from './fixtures/mote-workface'
 

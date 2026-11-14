@@ -51,7 +51,7 @@ import { CONFIG_VERSION, type AppConfig, type WorkspaceRecord } from '../src/sha
 import { useAppStore } from '../src/renderer/src/store.js'
 import { joinWorkspacePath } from '../src/renderer/src/lib/workspace-paths.js'
 import { createWorkspaceLayout } from '@agentmux/layout'
-import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)

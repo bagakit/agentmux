@@ -16,7 +16,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { readFocusAgentPresentation } from '../src/renderer/src/lib/desktop-presentation'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { fixturePath } from '../../../test/fixture-values.mjs'
 const dom = composerDOM({ agentInformation: true }), initial = useAppStore.getState(), workspace = composerConfig.workspaces[0]!
 const working = (id: string) => ({ ...composerSession(id), status: { state: 'working' as const, source: 'native-hook' as const, observedAt: Date.now() } })

@@ -26,7 +26,7 @@ import {
 } from '@agentmux/core/agent-status'
 import type { WebContents } from 'electron'
 import type { AppConfig, SessionControl, SshHostConfig } from '../src/shared/contracts.js'
-import { MOTE_COORDINATION_ROLE, PMO_TEAMS_TOPIC_ID, SCRATCH_TOPIC_WIKI_PATH, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
+import { MOTE_COORDINATION_ROLE, PMO_TEAMS_TOPIC_ID, SCRATCH_TOPIC_WIKI_PATH, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { ScratchTopics } from '../src/main/scratch-topics.js'
 import { composeAgentLaunchPrompt } from '@agentmux/core/agent-outbound-message'
 import { recordGoalCoordinationEvidence } from './helpers/goal-coordination-evidence'

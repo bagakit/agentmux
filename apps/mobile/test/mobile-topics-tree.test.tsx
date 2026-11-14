@@ -14,7 +14,7 @@ import { ScratchTopics } from '../../desktop/src/main/scratch-topics'
 import { TopicKnowledgeOwner } from '@agentmux/host/topic-knowledge'
 import { TopicSpatialOwner } from '@agentmux/host/topic-spatial-owner'
 import { WorkspaceFiles } from '../../desktop/src/main/workspace-files'
-import { SCRATCH_WORKSPACE_ID } from '../../desktop/src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '../../host/src/mote-model'
 import { MobileTopicsSurface } from '../src/topics/MobileTopicsSurface'
 import type { TopicsRpc } from '../src/topics/MobileTopicKnowledge'
 

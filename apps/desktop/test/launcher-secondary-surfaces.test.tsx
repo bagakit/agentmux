@@ -13,7 +13,7 @@ import { addWorkbenchRegion, createWorkbenchTab } from '../src/renderer/src/lib/
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { api } from '../src/renderer/src/lib/api'
 import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingClose, usePmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { readNoteDocument } from '../src/shared/note-document'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 const dom = composerDOM(), initial = useLauncherState.getState()

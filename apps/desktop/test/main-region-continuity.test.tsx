@@ -20,7 +20,7 @@ import { surveyResolvedZoneSelection } from '../src/renderer/src/lib/survey-work
 // Unselected continuation actions do not participate in this Goal navigation counter.
 vi.mock('../src/renderer/src/components/GoalContinuationControl', () => ({ GoalContinuationControl: () => null }))
 import { FocusToolbar } from '../src/renderer/src/components/FocusToolbar'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { seedMoteWorkface, executionAgent, defaultAgent, ordinaryAgent, moteTopics } from './fixtures/mote-workface'
 
 const baseline = useAppStore.getState()

@@ -19,7 +19,7 @@ import { workbenchObjectLayout } from '../src/renderer/src/lib/desktop-focus-nav
 import { moveKnowledgeTopic } from '../src/renderer/src/lib/topic-knowledge-actions'
 import { createWorkbenchTab, addWorkbenchRegion } from '../src/renderer/src/lib/workbench-tabs'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { directoryIdentity } from '../src/shared/space-addresses'
 import type { AppConfig, WorkspaceRecord } from '../src/shared/contracts'
 import { initializeTopicSpatialClient } from './helpers/topic-spatial-client-fixture'

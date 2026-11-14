@@ -143,7 +143,7 @@ describe('names owned by existing Desktop objects', () => {
     const path = join(root, 'scratch'); await mkdir(path)
     const workspace = { id: 'workspace-scratch', name: 'Scratch', hostId: 'local', path, kind: 'folder' as const }
     // The product's stable scratch workspace ID is independent of a fixture's directory.
-    const { SCRATCH_WORKSPACE_ID } = await import('../src/shared/scratch-topics.js'); workspace.id = SCRATCH_WORKSPACE_ID
+    const { SCRATCH_WORKSPACE_ID } = await import('@agentmux/host/mote-model'); workspace.id = SCRATCH_WORKSPACE_ID
     const topics = new ScratchTopics(); const records = new Records(); topics.setNameAudit(new NameChangeAudit(records))
     const topic = await topics.ensure(workspace, 'view:audited')
     await Promise.all([topics.renameTitle(workspace, topic.id, 'First'), topics.renameTitle(workspace, topic.id, 'Second')])

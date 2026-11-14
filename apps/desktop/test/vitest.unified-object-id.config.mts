@@ -7,7 +7,7 @@ import original from '../../../vitest.config'
 const root = resolve(import.meta.dirname, '../../..')
 // This focused harness loads current public source exports. Shipping dist is verified separately.
 const coreManifest = JSON.parse(readFileSync(resolve(root,'packages/core/package.json'),'utf8'))
-const alias: Record<string,string> = {'@agentmux/identity':resolve(root,'packages/identity/src/index.ts')}
+const alias: Record<string,string> = {'@agentmux/identity':resolve(root,'packages/identity/src/index.ts'),'@agentmux/host/mote-model':resolve(root,'apps/host/src/mote-model.ts')}
 for (const [name,value] of Object.entries(coreManifest.exports) as [string,{import?:string}][]) {
   if (!value.import) continue
   const source=resolve(root,'packages/core',value.import.replace('./dist/','./src/').replace(/\.js$/,'.ts'))
@@ -17,7 +17,7 @@ assert.ok(Object.keys(alias).length>20 && alias['@agentmux/core/object-id'],'Non
 const rules: Record<string, [string,string,string]> = {
   'file-facts': ['apps/desktop/src/renderer/src/lib/file-workbench-state.ts', 'if (original) return { tabId: original.tab.id, regionId: original.surface.regionId }', 'if (false && original) return { tabId: original.tab.id, regionId: original.surface.regionId }'],
   'rename-identity': ['apps/desktop/src/renderer/src/lib/file-workbench-state.ts', 'tabs[tab.id] = {', 'delete tabs[tab.id]; tabs[fileTabId(workspaceId, nextPath)] = {'],
-  'topic-directory': ['apps/desktop/src/shared/scratch-topic-identity.mjs', 'if (isObjectId(id)) return id', 'if (isObjectId(id)) return null'],
+  'topic-directory': ['apps/host/src/mote-topic-identity.mjs', 'if (isObjectId(id)) return id', 'if (isObjectId(id)) return null'],
   'file-domain': ['apps/desktop/src/renderer/src/lib/workbench-tabs.ts', "deriveObjectId('workbench.file-tab', JSON.stringify([workspaceId, path, incarnation]))", "'file:' + workspaceId + ':' + path + ':' + incarnation"],
   'region-occupancy': ['apps/desktop/src/renderer/src/lib/workbench-tabs.ts', 'tabs[tabId] || occupiedRegions.has(regionId)', 'tabs[tabId]'],
   'session-owner': ['apps/desktop/src/renderer/src/store.ts', 'const { tabId, regionId } = availableWorkbenchTabIdentity(current.tabs, incarnation => sessionTabId(id, incarnation))', 'const tabId = sessionTabId(id), regionId = initialWorkbenchRegionId(tabId)'],

@@ -8,7 +8,7 @@ import { api } from '../src/renderer/src/lib/api.js'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab, initialWorkbenchRegionId } from '../src/renderer/src/lib/workbench-tabs.js'
 import { useAppStore } from '../src/renderer/src/store.js'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { readFileSync } from 'node:fs'
 
 const initialState = useAppStore.getState()

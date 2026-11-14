@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { allStyles } from './helpers/styles.js'
 import type { AppConfig, SessionSnapshot, ScratchTopicSnapshot } from '../src/shared/contracts.js'
 import { projectWorkspaces, removeProjectWorkspaces, projectGroupKey, workspaceProjectId } from '../src/renderer/src/lib/workspace-projects.js'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import type { SpaceIconOverrides } from '../src/renderer/src/lib/space-object-appearance.js'
 
 vi.hoisted(() => {

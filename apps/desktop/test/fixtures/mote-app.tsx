@@ -16,7 +16,7 @@ vi.mock('../../src/renderer/src/components/ActivityView', () => ({ ActivityView:
 import { App } from '../../src/renderer/src/App'
 import { api } from '../../src/renderer/src/lib/api'
 import { useAppStore } from '../../src/renderer/src/store'
-import { SCRATCH_WORKSPACE_ID } from '../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { defaultTab, installNativePopover, moteTopics, seedMoteWorkface } from './mote-workface'
 
 export async function settleMoteApp(): Promise<void> {

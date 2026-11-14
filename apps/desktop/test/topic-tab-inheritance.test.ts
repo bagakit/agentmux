@@ -18,7 +18,7 @@ import {
   type WorkbenchTab
 } from '../src/renderer/src/lib/workbench-tabs.js'
 import { useAppStore } from '../src/renderer/src/store.js'
-import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics.js'
+import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 
 const initialState = useAppStore.getState()
 const topicId = 'view:shared'

@@ -24,7 +24,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 // The registered vertical gate consumes the existing named-owner suite as well.
 import './name-change-owners.test'
 // The already-installed build tool belongs to Core; Desktop does not acquire a

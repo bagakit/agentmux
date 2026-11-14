@@ -17,7 +17,7 @@ import { App } from '../src/renderer/src/App'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
-import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { scratchTopicsScope, scratchTopicsForConfig } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { installNativePopover } from './fixtures/mote-workface'
 

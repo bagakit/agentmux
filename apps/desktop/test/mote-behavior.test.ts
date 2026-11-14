@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MOTE_BEHAVIOR_LINK, type MoteBehaviorPreferences } from '../src/shared/mote-behavior'
-import { linkMoteBehaviorFromSoul, moteSoulForBehaviorContext, parseMoteBehaviorBlock } from '../src/shared/mote-behavior-legacy'
+import { MOTE_BEHAVIOR_LINK, type MoteBehaviorPreferences, linkMoteBehaviorFromSoul, moteSoulForBehaviorContext, parseMoteBehaviorBlock } from '@agentmux/host/mote-model'
 
 const preferences: MoteBehaviorPreferences = { engagement: 'I', information: 'N', decisions: 'F', approach: 'J', custom: 'Keep my exact wording.\n\nUse examples.' }
 const block = `<!-- agentmux:mote-behavior:begin v1 INFJ -->

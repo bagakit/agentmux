@@ -20,7 +20,7 @@ import { goalProjectContextText } from '@agentmux/host/goal-project-context'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { BrowserToolsPanel } from '../src/renderer/src/components/BrowserToolsPanel'
 import { formatBrowserAnnotationsContext, type BrowserAnnotation } from '../src/renderer/src/lib/browser-annotations'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
 
 // Unrelated browser profile/settings controls do not own annotation handoff or Agent input.

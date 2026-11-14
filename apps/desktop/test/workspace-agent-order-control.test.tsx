@@ -8,7 +8,7 @@ import { EMPTY_WORKSPACE_AGENT_ORDER, executeWorkspaceAgentOrder, orderedWorkspa
 import { prepareRendererUpdate, restorePersistedUiState, useAppStore } from '../src/renderer/src/store'
 import { agent, config, neighborSid, protectedFacts, startWorkfaceFixture, targetSid } from './helpers/workface-control-fixture'
 import { directoryIdentity, homeZoneId, workspaceZoneId } from '../src/shared/space-addresses'
-import { scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
 import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'

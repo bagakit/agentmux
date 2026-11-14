@@ -15,7 +15,7 @@ import { DesktopControlIpcBridge } from '../src/main/control-ipc-bridge'
 import { openSystemFileInSurvey } from '../src/renderer/src/lib/survey-system-file'
 import { openSystemUrlInSurvey } from '../src/renderer/src/lib/survey-system-url'
 import { createSurveyBrowser } from '../src/renderer/src/lib/survey-browser-creation'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { isSystemWebFilePath } from '../src/shared/system-web-file'
 import type { DesktopControlRequest } from '../src/shared/contracts'
 

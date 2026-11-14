@@ -4,8 +4,7 @@ import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 vi.mock('electron', () => ({ nativeImage: { createFromBuffer: () => { throw Error('Avatar decoding is outside this file read test') } } }))
 import { ScratchTopics } from '../src/main/scratch-topics'
-import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID } from '../src/shared/scratch-topics'
-import { serializeMoteQuickMode } from '../src/shared/mote-quick-mode'
+import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, serializeMoteQuickMode } from '@agentmux/host/mote-model'
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
 async function originalMote() {

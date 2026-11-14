@@ -9,7 +9,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
 import { warmCandidates } from './helpers/reusable-shell-candidates'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 const dom = composerDOM()
 const original = useAppStore.getState()

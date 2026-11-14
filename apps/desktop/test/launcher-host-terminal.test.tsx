@@ -11,7 +11,7 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import type { WorkbenchProjection } from '../src/renderer/src/lib/workbench-projection'
 import type { WorkbenchViewTarget } from '../src/renderer/src/lib/workbench-presentation'
 import { useAppStore, warmTerminalKey } from '../src/renderer/src/store'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { ordinaryTopicId, quietMoteId, seedMoteWorkface } from './fixtures/mote-workface'
 

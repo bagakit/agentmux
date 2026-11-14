@@ -4,7 +4,7 @@ import { fixturePath } from '../../../test/fixture-values.mjs'
 import type { AppConfig, ScratchTopicSnapshot, SessionSnapshot, WorkspaceRecord } from '../src/shared/contracts'
 import type { AgentSessionHistoryDescriptor } from '@agentmux/core'
 import { directoryIdentity, homeZoneId, workspaceZoneId, type SpaceZoneBindings } from '../src/shared/space-addresses'
-import { scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { createWorkspaceAgentListSelector, workspaceAgentListMembers, type WorkspaceAgentExecutionResolver,

@@ -9,7 +9,7 @@ import { desktopSpatialGraph } from '../../src/renderer/src/lib/desktop-spatial-
 import { createWorkbenchTab } from '../../src/renderer/src/lib/workbench-tabs'
 import { useAppStore, prepareRendererUpdate } from '../../src/renderer/src/store'
 import type { AppConfig, SessionSnapshot } from '../../src/shared/contracts'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { scratchTopicsScope } from '../../src/renderer/src/lib/scratch-topic-snapshots'
 import { injectedContextCore } from './injected-context-core'
 import { openHostGoalTransport } from './host-goal-transport'

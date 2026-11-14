@@ -7,7 +7,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab, documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { NOTES_WORKSPACE_ID } from '@agentmux/host/notes-library'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 const original = useAppStore.getState()
 let release: (() => void) | undefined, dispose: (() => void) | undefined
 

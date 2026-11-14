@@ -7,7 +7,7 @@ import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import {composerConfig,composerSession} from './helpers/composer-dom-fixture'
 import {scratchTopicsScope} from '../src/renderer/src/lib/scratch-topic-snapshots'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 const draws = vi.hoisted(() => ({ lanes: 0 }))

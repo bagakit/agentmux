@@ -8,10 +8,10 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { beginMoteStartupRecovery, deferScratchConversationRecovery, recoverMoteConversationAtStartup, recoverScratchConversationsAtStartup, moteSessionStartupMode } from '../src/renderer/src/lib/mote-session-recovery'
 import { MoteWorkface } from '../src/renderer/src/components/MoteWorkface'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import type { ScratchTopicSnapshot } from '../src/shared/contracts'
-import type { MoteQuickDefaults } from '../src/shared/mote-quick-mode'
+import type { MoteQuickDefaults } from '@agentmux/host/mote-model'
 
 let app:MoteAppFixture,release:()=>void,host:HTMLDivElement,root:ReturnType<typeof createClientUiRoot>
 const originalRecover=useAppStore.getState().recoverSession

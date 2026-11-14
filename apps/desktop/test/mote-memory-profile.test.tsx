@@ -12,7 +12,7 @@ import { documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { DEFAULT_MOTE_BEHAVIOR } from '../src/renderer/src/lib/mote-behavior'
 import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
 import type { WorkspaceFileInvalidated } from '../src/shared/contracts'
-import { PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { customMoteId, defaultTab, moteTopics, scratchWorkspace, seedMoteWorkface } from './fixtures/mote-workface'
 
 const original = useAppStore.getState(), rootPath = scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID)

@@ -13,7 +13,7 @@ import { useLauncherState } from '../src/renderer/src/lib/launcher-state';
 import { api } from '../src/renderer/src/lib/api';
 import { composerDOM } from './helpers/composer-dom-fixture';
 import { scratchWorkspace, moteTopics } from './fixtures/mote-workface';
-import { scratchTopicDirectoryName } from '../src/shared/scratch-topics';
+import { scratchTopicDirectoryName } from '@agentmux/host/mote-model';
 const dom = composerDOM();
 it('actual QuickSwitcher key hints consume themed key meanings while original ArrowDown and Enter choose the same tab', async () => { const cleanup = mountThemeRuntime(window), initial = useAppStore.getState(), activate = vi.fn(), close = vi.fn(); try {
     useAppStore.setState({ config: await api.config.get(), scratchTopicSnapshots: {}, sessions: [], tabs: { one: createWorkbenchTab('one', { regionId: 'one-region', workspaceId: 'workspace', kind: 'file', path: 'original.txt' }, 'Original file'), two: createWorkbenchTab('two', { regionId: 'two-region', workspaceId: 'workspace', kind: 'file', path: 'second.txt' }, 'Second file') }, layouts: { workspace: createWorkspaceLayout('original-group', ['one', 'two']) }, activateTab: activate });

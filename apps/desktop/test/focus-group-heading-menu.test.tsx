@@ -17,7 +17,7 @@ import { categoriesFromSpatial, UNCLASSIFIED_TOPIC_CATEGORY_ID } from '@agentmux
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import type { AppConfig, ScratchTopicSnapshot, WorkspaceRecord } from '../src/shared/contracts'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'

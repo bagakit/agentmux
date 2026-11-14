@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ScratchTopics } from '../src/main/scratch-topics.js'
 import type { WorkspaceRecord } from '../src/shared/contracts.js'
-import { DEFAULT_TOPIC_WIKI, SCRATCH_TOPIC_WIKI_PATH, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
+import { DEFAULT_TOPIC_WIKI, SCRATCH_TOPIC_WIKI_PATH, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))) })

@@ -12,7 +12,7 @@ import { createHostGoals } from '../../../host/src/goals.js'
 import { createHostSpatialAgentControl } from '../../../host/src/spatial-agent-control.js'
 import { api } from '../../src/renderer/src/lib/api'
 import type { AppConfig } from '../../src/shared/contracts'
-import { SCRATCH_WORKSPACE_ID } from '../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 
 type GoalRequest = Extract<AgentMuxControlRequest, { operation: `demand.${string}` }>
 export type GoalOperation = GoalRequest['operation']

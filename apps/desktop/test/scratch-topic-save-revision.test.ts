@@ -38,7 +38,7 @@ import {
   initialWorkbenchRegionId,
   type WorkbenchTab
 } from '../src/renderer/src/lib/workbench-tabs.js'
-import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics.js'
+import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { useAppStore } from '../src/renderer/src/store.js'
 
 // ---------------------------------------------------------------------------

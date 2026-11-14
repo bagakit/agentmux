@@ -13,7 +13,7 @@ import { observeClientRpcSnapshot } from '@agentmux/host/snapshot-observation'
 import { inspectDirectoryIdentity, normalizeDirectoryIdentity, moteDirectoryName, SCRATCH_DIRECTORY_ALIAS_PENDING_PATH, SCRATCH_DIRECTORY_IDENTITY_PENDING_PATH } from '../src/main/scratch-directory-identity.mjs'
 import { scratchIdentityContext, resolveScratchTopicDirectory } from '../src/main/scratch-topic-directories'
 import { spatialSources, directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
-import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { controlledNativeImage } from './fixtures/mote-identity-image'
 import type { AppConfig, WorkspaceRecord } from '../src/shared/contracts'
 const repository = resolve(import.meta.dirname, '../../..'), roots: string[] = []

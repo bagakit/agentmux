@@ -34,7 +34,7 @@ import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapsh
 import { useAppStore } from '../src/renderer/src/store'
 import { resolveDesktopSpaceSelection, workbenchSelectionCatalog } from '../src/renderer/src/lib/desktop-focus-navigation'
 import { api } from '../src/renderer/src/lib/api'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import type { AppConfig, WorkspaceRecord } from '../src/shared/contracts'
 import { ordinaryAgent, moteAgent } from './fixtures/mote-workface'
 import { directoryIdentity } from '../src/shared/space-addresses'

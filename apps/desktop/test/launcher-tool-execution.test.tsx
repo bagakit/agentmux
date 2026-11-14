@@ -149,7 +149,7 @@ it('a Settings-prepared arrangement reads on the start page and returns to the p
 })
 it('explains unsupported Mote dual execution while retaining normal launch, all inputs and original selection', async () => {
   await mount(); await splitAt(remoteProject.id)
-  const { SCRATCH_WORKSPACE_ID } = await import('../src/shared/scratch-topics')
+  const { SCRATCH_WORKSPACE_ID } = await import('@agentmux/host/mote-model')
   const scratch = { ...composerConfig.workspaces[0]!, id: SCRATCH_WORKSPACE_ID, name: 'No Project' }
   await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, workspaces: [...state.config!.workspaces, scratch] } })))
   await act(async () => useAppStore.getState().setLauncherExecutionWorkspace(target, scratch.id))

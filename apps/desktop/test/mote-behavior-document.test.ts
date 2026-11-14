@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_MOTE_BEHAVIOR, deriveMoteBehaviorCode, moteBehaviorIntroduction, parseMoteBehaviorDocument,
   serializeMoteBehaviorDocument, type MoteBehaviorDraft, type MoteBehaviorPreferences
-} from '../src/shared/mote-behavior'
+} from '@agentmux/host/mote-model'
 import * as rendererBehavior from '../src/renderer/src/lib/mote-behavior'
 
 const preferences: MoteBehaviorPreferences = { engagement: 'I', information: 'N', decisions: 'F', approach: 'J', custom: '\n## My notes\nKeep my exact wording.\n\n---\nBody delimiters are Markdown.\n' }

@@ -17,7 +17,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { spaceObjectIdentityKey, topicSpaceIconTarget } from '../src/renderer/src/lib/space-object-appearance'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { customAgent, defaultAgent, defaultTab, installNativePopover, moteSessions, moteTopics, ordinaryAgent, ordinaryTab, seedMoteWorkface } from './fixtures/mote-workface'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 
 let root: Root, host: HTMLDivElement
 const original = useAppStore.getState()

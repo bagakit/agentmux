@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { WorkspaceRecord } from '../src/shared/contracts.js'
 import { ScratchTopics } from '../src/main/scratch-topics.js'
-import { DEFAULT_PMO_TEAMS_TOPIC_WIKI, DEFAULT_TOPIC_WIKI, MOTE_COORDINATION_ROLE, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
+import { DEFAULT_PMO_TEAMS_TOPIC_WIKI, DEFAULT_TOPIC_WIKI, MOTE_COORDINATION_ROLE, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 
 const roots: string[] = []
 

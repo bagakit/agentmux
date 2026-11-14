@@ -7,7 +7,7 @@ import { requestPmoTeamsTopicFloatingOpen } from '../src/renderer/src/lib/pmo-te
 import { createMoteApp, moteClick, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
 import { defaultTab, defaultAgent, neighborTab, neighborAgent, customTab, savedMoteKey } from './fixtures/mote-workface'
 import { desktopWorkbenchObservationSchema } from '../src/shared/client-observation'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { directoryIdentity, topicSpatialAddress } from '../src/shared/space-addresses'
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import { moteTopics, scratchWorkspace } from './fixtures/mote-workface'

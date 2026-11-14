@@ -16,7 +16,7 @@ import {
   titleWorkbenchSurface
 } from '../src/renderer/src/lib/workbench-tabs.js'
 import { useAppStore } from '../src/renderer/src/store.js'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics.js'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 
 const initialState = useAppStore.getState()
 

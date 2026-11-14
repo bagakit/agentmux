@@ -3,7 +3,7 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 import { afterEach, expect, it, vi } from 'vitest'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 const initial = useAppStore.getState()
 afterEach(() => { vi.restoreAllMocks(); useAppStore.setState(initial, true) })
 it('creates a durable Topic from a different Project before its independent Tab projection exists', async () => {

@@ -7,7 +7,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore, handoffOriginalGoalDiscussions, prepareRendererUpdate } from '../src/renderer/src/store'
 import { goalDiscussionTarget, useGoalDiscussionRecipient } from '../src/renderer/src/lib/goal-discussion-recipient'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 
 function Recipient() {
   const recipient = useGoalDiscussionRecipient('goal')

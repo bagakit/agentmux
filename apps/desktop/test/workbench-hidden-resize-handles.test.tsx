@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { createMoteApp, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
 import { defaultAgent, defaultTab, neighborTab } from './fixtures/mote-workface'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { useAppStore } from '../src/renderer/src/store'
 
 // Exercise the installed browser library and its actual registration effects.

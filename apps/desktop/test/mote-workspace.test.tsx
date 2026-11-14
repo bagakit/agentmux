@@ -8,7 +8,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { defaultAgent, customMoteId, customTab, scratchWorkspace } from './fixtures/mote-workface'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 
 vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: () => createElement('div', { 'data-original-editor': true }) }))
 

@@ -9,7 +9,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { seedMoteWorkface, defaultAgent, neighborAgent, executionAgent, defaultTab, scratchWorkspace, moteTopics } from './fixtures/mote-workface'
-import { scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import type { MoteWorkfaceScope } from '../src/renderer/src/lib/mote-workface'
 
 const dom = composerDOM()

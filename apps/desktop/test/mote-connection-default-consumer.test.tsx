@@ -6,12 +6,11 @@ import { moteClick, settleMoteApp } from './fixtures/mote-app'
 import { defaultAgent, defaultTab, customTab } from './fixtures/mote-workface'
 import { moteConnectionBaseline } from '@agentmux/core/mote-preferences'
 import { useAppStore } from '../src/renderer/src/store'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, serializeMoteConnectionMode } from '@agentmux/host/mote-model'
 import { agentMoteConnectionSource } from '../src/renderer/src/lib/mote-connection-default'
 import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { writeFile } from 'node:fs/promises'
-import { serializeMoteConnectionMode } from '../src/shared/mote-quick-mode'
 
 let f: Awaited<ReturnType<typeof moteConnectionJourney>>
 beforeEach(async () => { f = await moteConnectionJourney() })

@@ -18,7 +18,7 @@ import { applyGoalDelegationResult } from '../src/renderer/src/lib/goal-delegati
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
 import { moteGoalContext } from '../src/renderer/src/lib/mote-goals'
 import { useAppStore } from '../src/renderer/src/store'
-import { PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { moteTopics, scratchWorkspace, seedMoteWorkface } from './fixtures/mote-workface'
 
 describe('responsibility production owners, compiled public CLI and mounted consumers', () => {

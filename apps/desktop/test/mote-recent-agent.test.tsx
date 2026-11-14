@@ -10,7 +10,7 @@ import { addWorkbenchRegion, createWorkbenchTab } from '../src/renderer/src/lib/
 import { requestPmoTeamsTopicFloatingOpen, requestPmoTeamsTopicFloatingClose, readPmoTeamsTopicFloatingState,
   createPmoTeamsTopicTargetSelector } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 import { restoredRecentMoteAgents } from '../src/renderer/src/lib/mote-quick-preferences'
-import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID } from '@agentmux/host/mote-model'
 import { createMoteApp, moteClick, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
 import { customMoteId, customTab, defaultAgent, defaultTab, neighborAgent, neighborTab, ordinaryTab,
   quietTab, savedMoteKey, moteTopics } from './fixtures/mote-workface'

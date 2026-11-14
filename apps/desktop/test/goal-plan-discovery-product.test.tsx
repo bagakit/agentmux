@@ -10,7 +10,7 @@ import type { GoalPlanRevisionInput } from '@agentmux/demand/goal-plan'
 import type { AppConfig } from '../src/shared/contracts'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 import { WorkbenchUserStateStore } from '../src/main/workbench-user-state'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { readGoalDiscussionBinding } from '../../host/src/goal-discussion-bindings'
 
 // The original Unix Host, Core input journal and Demand file are real. Only

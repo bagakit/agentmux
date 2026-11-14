@@ -9,7 +9,7 @@ import {
   DEFAULT_MOTE_SOUL, DEFAULT_PMO_TEAMS_TOPIC_WIKI, DEFAULT_TOPIC_WIKI,
   MOTE_COORDINATION_ROLE, MOTE_SOUL_PATH, PMO_TEAMS_TOPIC_ID,
   SCRATCH_TOPIC_WIKI_PATH, SCRATCH_WORKSPACE_ID
-} from '../src/shared/scratch-topics'
+} from '@agentmux/host/mote-model'
 
 const roots: string[] = []
 afterEach(async () => {

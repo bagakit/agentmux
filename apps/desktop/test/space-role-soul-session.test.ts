@@ -15,7 +15,7 @@ import { ScratchTopics } from '../src/main/scratch-topics'
 import { RuntimeController } from '../src/main/runtime-controller'
 import { migrateTopicDirectories } from '../scripts/migrate-topic-directories.mjs'
 import type { AppConfig, WorkspaceRecord } from '../src/shared/contracts'
-import { DEFAULT_MOTE_SOUL, DEFAULT_PMO_TEAMS_TOPIC_WIKI, MOTE_COORDINATION_ROLE, MOTE_SOUL_PATH, PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { DEFAULT_MOTE_SOUL, DEFAULT_PMO_TEAMS_TOPIC_WIKI, MOTE_COORDINATION_ROLE, MOTE_SOUL_PATH, PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 
 // Keep the real Desktop controller, Core lifecycle, provider planning, outbound envelope,
 // Session store and filesystem. Only transport/host selection is isolated from user Runs.

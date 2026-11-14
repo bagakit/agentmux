@@ -1,6 +1,6 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import type { ScratchTopicSnapshot } from '../src/shared/contracts'
 import { api } from '../src/renderer/src/lib/api'
 import { focusLaneForSession, sanitizeAgentFocus } from '../src/renderer/src/lib/agent-focus'

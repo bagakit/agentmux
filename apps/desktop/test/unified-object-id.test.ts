@@ -4,7 +4,7 @@ import { mintObjectId, isObjectId } from '@agentmux/core/object-id'
 import { createWorkspaceLayout, removeTab } from '@agentmux/layout'
 import { createWorkbenchTab, addWorkbenchRegion, fileTabId, initialWorkbenchRegionId, sessionTabId, documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { fileWorkbenchIdentity, reduceFileSurfaceOpened, reduceFileRename, findFileRenameProjectionCollision, type FileWorkbenchState } from '../src/renderer/src/lib/file-workbench-state'
-import { scratchTopicDirectoryName, scratchTopicIdFromDirectoryName, isScratchTopicId } from '../src/shared/scratch-topics'
+import { scratchTopicDirectoryName, scratchTopicIdFromDirectoryName, isScratchTopicId } from '@agentmux/host/mote-model'
 import { createCommonActionPrompt } from '../src/renderer/src/lib/goals-common-actions'
 function state(): FileWorkbenchState {
   const tab = createWorkbenchTab('file:old-workspace:src/old.ts', { regionId: 'region:original', kind: 'file', workspaceId: 'old-workspace', path: 'src/old.ts' })

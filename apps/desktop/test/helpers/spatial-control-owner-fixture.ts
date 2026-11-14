@@ -1,7 +1,7 @@
 import { webcrypto } from 'node:crypto'
 import { vi } from 'vitest'
 import { providerCatalogReader } from './startup-observation-api-fixture'
-import type { ScratchTopicSnapshot } from '../../src/shared/scratch-topics'
+import type { ScratchTopicSnapshot } from '@agentmux/host/mote-model'
 import { api } from '../../src/renderer/src/lib/api'
 import { useAppStore } from '../../src/renderer/src/store'
 

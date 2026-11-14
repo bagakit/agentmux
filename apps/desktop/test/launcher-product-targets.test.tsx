@@ -12,7 +12,7 @@ import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavig
 import { api } from '../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { launcherResumeRows } from '../src/renderer/src/lib/launcher-resume'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM()

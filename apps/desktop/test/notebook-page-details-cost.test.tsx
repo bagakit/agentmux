@@ -7,7 +7,7 @@ import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-
 import { useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
 import * as pageTree from '../src/renderer/src/lib/notebook-page-tree'
 import * as addresses from '../src/shared/space-addresses'
-import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'

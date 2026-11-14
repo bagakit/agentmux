@@ -20,7 +20,7 @@ import { pinPmoTeamsTopicFloating, pmoTeamsTopicFloatingViewTargets, usePmoTeams
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { newNoteDocument, serializeNoteDocument } from '../src/shared/note-document'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { PmoTeamsTopicEntry } from '../src/renderer/src/components/PmoTeamsTopicEntry'
 import { PmoTeamsTopicFloatingPanel } from '../src/renderer/src/components/PmoTeamsTopicFloatingPanel'
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
