@@ -518,6 +518,101 @@ it.runIf(business)('loss of a namespace already confirmed by this Main is unknow
   expect(f.store.getState().tabs['target-tab']).toBeDefined()
 })
 
+it.runIf(business)('Browser binding uses the original control owner and unknown binding requires an exact view-only decision without stopping an Agent', async () => {
+  const f = await fixture(), { createWorkbenchTab } = await import('../src/renderer/src/lib/workbench-tabs.js')
+  const originalView = f.prepared(await f.cli('prepare', { operationId: 'keep-original-agent-before-page', target: { kind: 'tab-occurrence', displayWorkspaceId: 'W', groupId: 'G', tabId: 'healthy-tab' }, keepAgentSessions: true }))
+  f.prepared(await f.apply(originalView))
+  const browser = { kind: 'browser' as const, id: 'private-page', browserId: 'private-page', regionId: 'browser-region', navigationId: 'original-navigation', workspaceId: 'W', profileId: null,
+    url: 'about:blank', title: '', loading: false, canGoBack: false, canGoForward: false, viewport: 'responsive' as const, error: null,
+    agent: { hostId: 'stale-fallback-host', agentSessionId: 'stale-fallback-agent' },
+    control: { owner: 'human' as const, activeOperationId: null, revision: 1, inputIsolation: 'inactive' as const, agent: { hostId: 'local', agentSessionId: f.agent.agentSessionId } } }
+  const tab = createWorkbenchTab('browser-tab', browser), state = f.store.getState()
+  const { ['healthy-tab']: _oldAgentView, ...tabs } = state.tabs
+  f.store.setState({ tabs: { ...tabs, [tab.id]: tab }, layouts: { ...state.layouts, W: createWorkspaceLayout('G', ['target-tab', tab.id]) } })
+  const target = { kind: 'tab-occurrence', displayWorkspaceId: 'W', groupId: 'G', tabId: tab.id }
+  const original = f.prepared(await f.cli('prepare', { operationId: 'control-binding-original', target, keepAgentSessions: false }))
+  expect(original.plan.projection.surfaces[0]).toMatchObject({ binding: browser.control.agent, bindingAvailability: 'known' })
+  expect(original.plan.projection.resources.some(r => r.kind === 'session' && r.control.kind === 'agent' && r.control.agentSessionId === f.agent.agentSessionId), JSON.stringify({ projection: original.plan.projection, tabs: f.store.getState().tabs })).toBe(true)
+  f.store.setState(current => ({ tabs: { ...current.tabs, [tab.id]: { ...tab, regions: { ...tab.regions, 'browser-region': { ...browser, control: { ...browser.control, agent: undefined } } } } } }))
+  expect((await f.apply(original)).code).toBe(1)
+  expect(f.stops).not.toHaveBeenCalled(); expect(f.browserClose).not.toHaveBeenCalled()
+  const unknown = f.prepared(await f.cli('prepare', { operationId: 'explicit-unconfirmed-browser-view', target, keepAgentSessions: false }))
+  const decisions = core.spaceCloseDecisions(unknown.plan)
+  expect(decisions).toContainEqual({ action: 'close-view-only', regionId: 'browser-region', expectedWitness: unknown.plan.projection.surfaces[0]!.witness })
+  expect(decisions.some(d => d.action === 'stop')).toBe(false)
+  await expect(f.rpc.call('space.close.apply', { operationId: unknown.operationId, expectedPlanDigest: unknown.planDigest, decisions: decisions.filter(d => d.action !== 'close-view-only') })).rejects.toMatchObject({ code: 'WORKBENCH_CLOSE_DECISIONS_REQUIRED' })
+  expect(f.prepared(await f.apply(unknown)).outcome).toBe('applied')
+  expect(f.browserClose).toHaveBeenCalledExactlyOnceWith(browser.browserId)
+  expect(f.stops).not.toHaveBeenCalled()
+  expect((await f.native.client.status(f.other.runId)).state.type).toBe('running')
+})
+
+it.runIf(business)('the service window displays an opaque operation ID as data rather than interpolating it into executable shell text', async () => {
+  const f = await fixture(), id = "close with 'quotes' and $(literal)", prepared = f.prepared(await f.prepare(id))
+  vi.spyOn(f.api.workbenchClose, 'call').mockImplementation((method, input) => f.rpc.call(method, input))
+  f.stops.mockRejectedValueOnce(Error('Private original Stop unavailable'))
+  expect(await f.store.getState().applyWorkbenchClose(prepared)).toBe(false)
+  const message = String(f.store.getState().error)
+  expect(message).toContain('Private original Stop unavailable')
+  expect(message).toContain('--operation-id <ID>')
+  expect(message).toContain(JSON.stringify(id))
+  expect(message).not.toContain('--operation-id ' + id)
+  expect(f.store.getState().tabs['target-tab']?.regions['raw-region']).toBeDefined()
+})
+
+it.runIf(business)('an incomplete projection reply over the real Main bridge cannot certify a complete close or erase the obtained Native ACK', async () => {
+  const f = await fixture(), plan = f.prepared(await f.prepare('missing-projection-rows'))
+  const current = f.store.getState(), actual = current.executeWorkbenchClose
+  const save = { layoutApplied: false, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'confirmed' as const, reason: null }
+  const incomplete = { clientProjection: { applied: false, removedRegions: [], retainedRegions: [], save }, spatialContribution: { save } }
+  vi.spyOn(current, 'executeWorkbenchClose').mockImplementation(async request => request.operation === 'workbench.close.commit'
+    ? { operation: request.operation, requestId: request.requestId, result: incomplete } : actual(request))
+  const result = await f.apply(plan)
+  expect(result.code).toBe(1)
+  const record = JSON.parse(result.stdout).result.operation
+  expect(record).toMatchObject({ outcome: 'unknown', clientProjection: { applied: false, retainedRegions: ['raw-region', 'file-region'], save: null },
+    resources: [{ outcome: 'acknowledged', receipt: { acknowledgement: { kind: 'stop', runId: f.run.runId } } }] })
+  expect(f.store.getState().tabs['target-tab']?.regions['file-region']).toBeDefined()
+  expect(f.store.getState().documents[f.key]?.content).toBe('Original unsaved content')
+  expect(f.stops).toHaveBeenCalledTimes(1)
+  expect(() => core.parseSpaceCloseReceipt({ ...record, ...incomplete, outcome: 'applied' })).toThrow()
+  expect((await f.rpc.call('space.close.inspect', { operationId: plan.operationId })).operation?.resources[0]?.outcome).toBe('acknowledged')
+})
+
+it.runIf(business).each(['member', 'namespace'])('a cold owner keeps observed %s existence separate from prior writer durability after source loss', async lost => {
+  const f = await fixture(), prepared = f.prepared(await f.prepare('cold-observed-source-loss'))
+  f.reopenOwner()
+  expect((await f.rpc.call('space.close.inspect', { operationId: prepared.operationId })).operation).toMatchObject({ phase: 'prepared', diskDurability: 'unconfirmed' })
+  const directory = f.user.path + '.close-operations'
+  if (lost === 'namespace') await rm(directory, { recursive: true })
+  else {
+    const path = join(directory, createHash('sha256').update(prepared.operationId).digest('hex') + '.json')
+    await rm(path); await rm(path + '.prepare')
+  }
+  await expect(f.rpc.call('space.close.inspect', { operationId: prepared.operationId })).rejects.toMatchObject({ code: 'WORKBENCH_CLOSE_UNCONFIRMED' })
+  if (lost === 'namespace') await expect(f.rpc.call('space.close.ls', {})).rejects.toMatchObject({ code: 'WORKBENCH_CLOSE_UNCONFIRMED' })
+  else expect(await f.rpc.call('space.close.ls', {})).toMatchObject({ availability: 'partial', issues: [{ code: 'member-unconfirmed' }] })
+  expect((await f.apply(prepared)).code).toBe(1)
+  expect(f.stops).not.toHaveBeenCalled()
+  expect(f.store.getState().tabs['target-tab']).toBeDefined()
+})
+
+it.runIf(business)('one close snapshot indexes outside document consumers once rather than rescanning the whole topology per File View', async () => {
+  const f = await fixture(), { createWorkbenchTab, addWorkbenchRegion, documentKey } = await import('../src/renderer/src/lib/workbench-tabs.js')
+  const { captureWorkbenchClose } = await import('../src/renderer/src/lib/workbench-close-owner.js')
+  let tab = createWorkbenchTab('shared-file-views', { kind: 'file', regionId: 'shared-file-0', workspaceId: 'W', path: 'many.txt' })
+  for (let i = 1; i <= 512; i++) tab = addWorkbenchRegion(tab, 'shared-file-0', 'right', { kind: 'file', regionId: 'shared-file-' + i, workspaceId: 'W', path: 'many.txt' })
+  let enumerations = 0
+  const tabs = new Proxy({ [tab.id]: tab }, { ownKeys(target) { enumerations++; return Reflect.ownKeys(target) } }), key = documentKey('W', 'many.txt')
+  const projection = captureWorkbenchClose({ ...f.store.getState(), tabs, layouts: { W: createWorkspaceLayout('G', [tab.id]) },
+    documents: { [key]: { path: 'many.txt', content: 'Original shared dirty document', revision: 'original-many-file' } }, dirtyDocuments: { [key]: true } },
+    { operationId: 'related-document-cost', target: { kind: 'tab-occurrence', displayWorkspaceId: 'W', groupId: 'G', tabId: tab.id }, keepAgentSessions: false })
+  expect(core.parseSpaceCloseProjection(projection).surfaces).toHaveLength(513)
+  expect(projection.drafts).toHaveLength(1); expect(projection.drafts[0]!.regionIds).toHaveLength(513)
+  expect(enumerations).toBeGreaterThan(0); expect(enumerations).toBeLessThan(10)
+  expect(f.stops).not.toHaveBeenCalled()
+})
+
 it.runIf(Boolean(restartMode))('private restart worker restores the original workface and discovers retained close operations without replay', async () => {
   const f = await fixture()
   if (restartMode === 'writer') {
