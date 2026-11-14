@@ -4794,6 +4794,12 @@ export class BrowserViewManager {
     this.entriesByContents.set(view.webContents, entry)
     this.browserIdsByView.set(view, entry.id)
     const contents = view.webContents
+    // Pair Chromium's accepted page-close fact with destruction of this exact
+    // native page. Destruction alone remains an unavailable, recoverable owner.
+    let pageRequestedClose = false
+    // Electron emits CloseContents as `close`; its WebContents typings omit it.
+    const nativeEvents: NodeJS.EventEmitter = contents
+    nativeEvents.on('close', () => { if (this.owns(entry, view)) pageRequestedClose = true })
     contents.on('certificate-error', (event, url, error, certificate, callback, isMainFrame) => {
       if (!isMainFrame || !this.owns(entry, view)) return
       event.preventDefault()
@@ -4818,6 +4824,7 @@ export class BrowserViewManager {
       this.emit(entry)
     })
     contents.on('will-prevent-unload', () => {
+      pageRequestedClose = false
       // The same event can veto reload/navigation. Only a recorded Close intent
       // may ask to close this page; ordinary navigation never becomes Close.
       if (entry.nativeChild?.closing && this.owns(entry, view)) void this.confirmNativeChildClose(entry, view)
@@ -4948,6 +4955,7 @@ export class BrowserViewManager {
         entry.pendingSwitch.navigationId = mintObjectId()
       }
       if (!details.isMainFrame || !this.owns(entry, view)) return
+      pageRequestedClose = false
       if (!details.isSameDocument) this.sitePermissions?.cancel(entry.id, contents)
       entry.certificateDecision?.settle(false)
       this.cancelRecoveryPreview(entry)
@@ -5092,7 +5100,10 @@ export class BrowserViewManager {
       if (entry.view === view) entry.nativeChild?.closing?.settle(true)
       if (entry.view === view) this.cancelRecoveryPreview(entry)
       const attempt = entry.releaseAttempt
-      if (attempt?.view === view) attempt.settle('released', [])
+      // An earlier vetoed release no longer owns this destruction. Capture the
+      // active request before settling it, including an unconfirmed close still in flight.
+      const releasing = attempt?.view === view && attempt.pending
+      if (releasing) attempt.settle('released', [])
       if (this.owns(entry, view)) this.clearFavicon(entry)
 
       if (entry.pendingSwitch?.view === view) {
@@ -5107,7 +5118,7 @@ export class BrowserViewManager {
       }
       if (!this.owns(entry, view)) return
       const nativeWindow = entry.nativeChild ? this.windowForView(view) : null
-      const nativePreviewScope = entry.nativeChild ? this.recoveryPreviewScope(entry.id) : null
+      const closedPreviewScope = entry.nativeChild || pageRequestedClose ? this.recoveryPreviewScope(entry.id) : null
       // Native destruction is authoritative even if a separate resource's cleanup throws. Retain
       // only the existing metadata: a dead WebContents cannot supply a fresh live snapshot.
       const released: ReleasedBrowser = {
@@ -5141,20 +5152,20 @@ export class BrowserViewManager {
           cleanupErrors.push(error)
         }
       }
-      if (entry.releaseAttempt?.view === view) {
+      if (releasing) {
         this.send({ type: 'released', id: entry.id, navigationId: entry.navigationId })
         return
       }
-      if (entry.nativeChild) {
-        // The original child page ended, rather than becoming a restorable URL.
+      if (entry.nativeChild || pageRequestedClose) {
+        // The original page ended, rather than becoming a restorable URL.
         entry.recoveryPreviewRetired = true
         this.cancelRecoveryPreview(entry)
-        if (nativePreviewScope) void this.recoveryPreviews?.remove(nativePreviewScope).then(result => {
-          if (result.warning) console.warn('Browser child closed; its historical preview cleanup is unconfirmed:', result.warning)
-        }).catch(error => console.warn('Browser child closed; its historical preview cleanup is unconfirmed:', error))
+        if (closedPreviewScope) void this.recoveryPreviews?.remove(closedPreviewScope).then(result => {
+          if (result.warning) console.warn('Browser page closed; its historical preview cleanup is unconfirmed:', result.warning)
+        }).catch(error => console.warn('Browser page closed; its historical preview cleanup is unconfirmed:', error))
         released.cleanupOnly = true
         if (!released.inputShield && !released.pendingSwitch && !released.detachedView && !cleanupErrors.length) this.releasedEntries.delete(entry.id)
-        entry.nativeChild.closing?.settle(true)
+        entry.nativeChild?.closing?.settle(true)
         this.send({ type: 'closed', id: entry.id })
         if (nativeWindow && nativeWindow !== this.window && !nativeWindow.isDestroyed()) nativeWindow.close()
         return

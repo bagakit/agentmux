@@ -11478,6 +11478,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const retiredRegions = event.type === 'closed' ? Object.values(get().tabs).flatMap(tab =>
       workbenchSurfaces(tab).flatMap(surface => surface.kind === 'browser' && surface.browserId === event.id
         ? [{ tabId: tab.id, regionId: surface.regionId }] : [])) : []
+    let surveyChanged = false
     set((state) => {
       const topology = reduceBrowserEvent(state, event, expectedNavigationId)
       let choice = state.workbenchSpaceSelection
@@ -11496,8 +11497,19 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           }
         }
       }
+      const survey = event.type === 'closed' ? surveyPresentationAfterClose(state, topology.tabs) : null
+      let pages = state.surveyPageReferences
+      if (event.type === 'closed' && survey) {
+        const remaining = pages.filter(page => page.browserId !== event.id)
+        if (remaining.length !== pages.length) pages = remaining
+        if (isSurveyPage(survey.surveyZoneSelection) && survey.surveyZoneSelection.browserId === event.id) survey.surveyZoneSelection = null
+        surveyChanged = pages !== state.surveyPageReferences || survey.surveyCollectedZones !== state.surveyCollectedZones || survey.surveyZoneSelection !== state.surveyZoneSelection
+      }
       return {
         ...topology,
+        ...(survey ? { ...survey, surveyPageReferences: pages,
+          ...(pages !== state.surveyPageReferences && state.surveyPageReadRecovery
+            ? { surveyPageReadRecovery: { ...state.surveyPageReadRecovery } } : {}) } : {}),
         ...(event.type === 'closed' ? settleNativeBrowserProjectionNotice(state, event.id) : {}),
         workbenchSpaceSelection: choice,
         ...(event.type === 'closed'
@@ -11510,6 +11522,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           : {})
       }
     })
+    if (surveyChanged) void saveWorkbenchSelection(false, false)
     if (retiredRegions.length) void import('./lib/workbench-windows')
       .then(({ returnClosedWorkbenchWindows }) => returnClosedWorkbenchWindows(retiredRegions)).catch(error => get().reportError(error))
   },
