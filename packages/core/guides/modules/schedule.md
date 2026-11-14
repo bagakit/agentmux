@@ -42,7 +42,8 @@ An authenticated user or device can use `amux schedule history --data <FILE|->` 
 original schedule Host to read retained input receipts in one short window. Use
 `{scheduleId,from,to,limit?,cursor?}` with inclusive from and exclusive to in Unix
 milliseconds. Continue with the same window and returned nextCursor. Occurrence time,
-input delivery, and native outcome are distinct. Unconfirmed coverage leaves the
+input delivery, and native outcome are distinct. A receipt includes its original Run
+and a bounded excerpt of the frozen user-facing input, when available. Unconfirmed coverage leaves the
 original records available for a later read. History never starts or redelivers an input.
 
 Read amux schedule create --help for the complete current schema. The first creation of the original
