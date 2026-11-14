@@ -171,6 +171,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/ws": "8.18.1",
     "typescript": "^5.9.0"
   },
   "dependencies": {
