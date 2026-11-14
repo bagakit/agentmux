@@ -179,7 +179,7 @@ flowchart LR
 
 - 首次读取同时取得同一页的 changes cut，关闭 read→watch 之间的空隙；短暂的通知合并只唤醒变化读取。
 - 隐藏时取消观察而保留 frame，重新可见时按同一个 view 恢复；卸载或身份切换时显式释放 view。观察断开时，在仍相关的消费者内重开同一个 view，不更换来源，也不重放输入。
-- 首次读取与显式 Current 在同一次操作内先尝试取得当前来源的观察，再交给该窗口的观察；Core 的 `activeNativeHistoryBinding` 从观察资源借用尚未保存的 locator，来源参数贯穿页、切点与变化读取。固定 view、cursor 与记录定位沿各自来源读取，临时观察随操作释放，不形成会话级的来源缓存。
+- 首次读取与显式 Current 在同一次操作内先尝试取得当前来源的观察，再交给该窗口的观察；Core 的 `activeNativeHistoryBinding` 从观察资源借用尚未保存的 locator，来源参数贯穿页、切点与变化读取。没有 prior／record／anchor 的首次普通 latest 完整帧先经原 `beforeCommit` 与状态提交，再在同一 pending 操作内等待 view bind；来源观察仍持有到原 finally，观察失败保留正文并沿原重连恢复。记录定位的 prepared／cancel／admission 事务及其他导航顺序保持。固定 view、cursor 与记录定位沿各自来源读取，临时观察随操作释放，不形成会话级的来源缓存。
 - 阅读来源身份与确认操作身份分开：前者使用完整的原生 locator（Provider／Adapter、原生 ID 与记录路径），后者保留确认操作，以隔离并发选择与 A→B→A 的旧资格。对同一 locator 的重新确认不会把阅读窗误标为来源改变，已接受另一来源的窗口仍需显式导航（[session-conversation-window.ts](../../apps/desktop/src/renderer/src/lib/session-conversation-window.ts) 的 `bindingKey`）。宿主只收窄自己的来源变化提示，不清除 Core 的 scope、过期、held、错误或未知事实。
 
 Renderer 桥使用 Core [`conversation-changes`](../../packages/core/src/conversation-changes.ts) 的 `parseConversationReadPageForWindow`／`parseConversationChangesPageForWindow`，严格解析后持有本次响应的不可变副本。窗口组装只复用这个对象已完成的 unit 校验，不重复规范化记录或计算 revision；拷贝或 raw 页仍走严格校验，fragment 收齐后仍校验其内容。这份私有持有权不跨响应缓存、不进入 wire，不改变普通 SDK parser 返回可变 DTO 的行为，也不授予作者、输入或恢复权限。
