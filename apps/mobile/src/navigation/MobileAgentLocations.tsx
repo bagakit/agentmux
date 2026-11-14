@@ -56,8 +56,9 @@ export function MobileAgentLocations({ client, catalog, locations, agentSessionI
       now.onChoose(place); setOpen(false)
     } catch (error) {
       const owner = current.current.client?.runtimeOwnerIdentity()
-      if (stillCurrent() && runtime?.runtimeId === owner?.runtimeId && runtime?.ownerInstanceId === owner?.ownerInstanceId)
-        setIssue(`位置暂时读不到，原对话仍可打开。${error instanceof Error ? error.message : String(error)}`)
+      if (stillCurrent()) setIssue(runtime?.runtimeId !== owner?.runtimeId || runtime?.ownerInstanceId !== owner?.ownerInstanceId
+        ? '读取期间连接已改变，这次没有打开；请在当前目录重新选择。'
+        : `位置暂时读不到，原对话仍可打开。${error instanceof Error ? error.message : String(error)}`)
     }
     finally { if (stillCurrent()) setPending(false) }
   }

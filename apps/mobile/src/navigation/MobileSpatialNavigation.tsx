@@ -215,7 +215,8 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
   const matching = (value: string) => value.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())
   const locationGroup = (id: string, hostId?: string | null) => {
     const groups = directory.locationIndex.bySession.get(id) ?? []
-    return hostId ? directory.locationIndex.byAgent.get(agentLocationKey(hostId, id)) ?? { hostId, agentSessionId: id, addresses: [], count: 0 } : groups.length === 1 ? groups[0] : undefined
+    return hostId ? directory.locationIndex.byAgent.get(agentLocationKey(hostId, id)) ??
+      (groups.some(group => group.hostId === null) ? undefined : { hostId, agentSessionId: id, addresses: [], count: 0 }) : groups.length === 1 ? groups[0] : undefined
   }
   const locations = (id: string) => locationGroup(id, sessionById.get(id)?.hostId ?? directory.rows.get(id)?.projectGroup?.hostId)?.addresses ?? []
   const moteIdentity = (owner: Catalog['spaces'][number]): NonNullable<MobileObjectIdentity['mote']> => {
