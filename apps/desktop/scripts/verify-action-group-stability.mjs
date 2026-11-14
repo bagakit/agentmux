@@ -20,7 +20,8 @@ const editor = component('ComposerQueuedMessageEditor')
 const settings = component('settings/BrowserStartPageSettings')
 const styles = ['packages/client-ui/src/styles/buttons.css', 'apps/desktop/src/renderer/src/styles/settings-materials.css', 'apps/desktop/src/renderer/src/styles/surfaces.css', 'packages/client-ui/src/styles/composer.css']
 const product = [editor, settings, component('AgentSessionComposer'), component('ComposerPendingDelivery'), component('ComposerOutbox'),
-  component('SessionMailbox'), component('SettingsPanel'), component('settings/SettingsSaveBar'), 'packages/client-ui/src/components/Button.tsx', ...styles]
+  component('SessionMailbox'), component('SettingsPanel'), component('settings/SettingsSaveBar'), 'packages/client-ui/src/components/Button.tsx',
+  'packages/client-ui/src/components/ActionFeedback.tsx', ...styles]
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const variants = {
   normal: undefined,

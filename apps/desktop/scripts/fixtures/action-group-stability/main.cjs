@@ -194,7 +194,7 @@ app.whenReady().then(async () => {
         assert.equal(await read(`document.activeElement===${query(textarea)}`),true)
         await capture('pending-conflict')
         if (narrow) {
-          const feedback = editor + ' .agent-action-feedback'
+          const feedback = editor + ' [data-bounded-feedback]'
           assert.ok(await read(`${query(feedback)}.scrollHeight>${query(feedback)}.clientHeight`))
           await key('Tab','Tab',9)
           await until(`document.activeElement===${query(feedback)}`)
