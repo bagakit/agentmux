@@ -28,7 +28,8 @@ it.each([false, true])('the original member Skills use their native owner with N
   const native = vi.spyOn(owner.core, 'runtimeSubject').mockRejectedValue(Error('Native is unknown, not a Skills permission'))
   const target = { kind: 'conversation' as const, reference: f.reference, regionId: admitted.address.regionId,
     runtimeId: owner.owner.runtimeId, agentSessionId: sid, expectedAdmission: { kind: 'creation' as const, operationId: admitted.requestId } }
-  const result = await f.b.rpc.call('space.member.call', { target, call: { method: 'skill.ls', params: { hostId: 'local', agentSessionId: sid } } })
+  const result = await f.b.rpc.call('space.member.call', { target, call: { method: 'skill.ls', params: { hostId: 'local', agentSessionId: sid } } },
+    { runtimeFence: { runtimeId: f.b.owner.runtimeId, ownerInstanceId: f.b.owner.ownerInstanceId } })
   expect(result).toMatchObject({ hostId: 'local', agentSessionId: sid, workspacePath, skills: [{ name: 'Original exact skill', path: skillPath, source: 'project' }] })
   const readOwner = vi.spyOn(owner.core, 'readAgentSession')
   for (const [runtimeFence, code] of [[{ runtimeId: 'another-execution-Runtime', ownerInstanceId: owner.owner.ownerInstanceId }, 'RUNTIME_OWNER_MISMATCH'],
