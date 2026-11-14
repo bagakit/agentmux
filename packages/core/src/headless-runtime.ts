@@ -37,6 +37,7 @@ export type AgentMuxHeadlessRuntimeOptions = AgentMuxClientOptions & {
   coreClients?: () => readonly AgentMuxRpcCoreClient[]
   /** The original Host composes only its exact configured public edge transports. */
   routeEdge?: HostRouteGatewayOptions['edge']
+  routeEdges?: HostRouteGatewayOptions['edges']
   /** Borrow the original external input owner; the semantic Host never duplicates its grants or journal. */
   inputContextCaptureReader?: import('./agent-input-context-capture.js').AgentInputContextCaptureReader
   externalInputAuthority?: import('./external-author.js').AgentExternalInputAuthorityPort
@@ -119,6 +120,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
       }),
       creationAuthority })
     hostRoutes = options.service?.hostRoutes ? undefined : new HostRouteGateway({ stateDirectory, authority: creationAuthority,
+      ...(options.routeEdges ? { edges: options.routeEdges } : {}),
       edge: options.routeEdge ?? (() => { throw new AgentMuxError('The original Host has no configured route edge transport. Keep the exact route; other Core capabilities remain available.', 'HOST_ROUTE_EDGE_UNAVAILABLE') }),
       call: (method, params, context) => server!.callRpc(method, params, context),
       subscribe: (method, params, emit, context) => server!.subscribeRpc(method, params, emit, context),

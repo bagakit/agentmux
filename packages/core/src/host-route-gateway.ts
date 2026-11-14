@@ -4,9 +4,9 @@ import { isDeepStrictEqual } from 'node:util'
 import { AgentMuxError } from './errors.js'
 import { durableWriteFile } from './durable-write.js'
 import { agentCreationIntentDigest as digest, verifyHostRouteEnvelope, verifyHostRouteExecutionAuthorization, type AgentMuxCreationAuthority } from './agent-creation-authority.js'
-import { parseHostRouteConfiguration, parseHostRouteCall, parseHostRouteEnvelope, hostRouteScope,
+import { parseHostRouteConfiguration, parseHostRouteCall, parseHostRouteEnvelope, parseHostRouteEdge, hostRouteScope,
   type AdoptedHostRoute, type HostRouteActor, type HostRouteCall, type HostRouteEnvelope, type HostRouteSettings,
-  type HostRouteObservationScope, type HostRouteExecutionAuthorization, type HostRouteStatement, type HostRouteParams, type HostRouteObservation, type HostRouteIdentity, type HostRouteStreamInitial, type HostRouteConfiguration } from './host-route.js'
+  type HostRouteObservationScope, type HostRouteExecutionAuthorization, type HostRouteStatement, type HostRouteParams, type HostRouteObservation, type HostRouteIdentity, type HostRouteStreamInitial, type HostRouteConfiguration, type HostRouteEdge, type HostRouteEdges, type HostRouteEdgeInspection } from './host-route.js'
 import { hostRouteOperation, executionRouteScope, memberRouteOperation, assertExecutionChild } from './host-route-execution.js'
 import { parseSpaceMemberParams } from './space-member-codec.js'
 import type { SpaceMemberParams } from './space-member.js'
@@ -67,6 +67,8 @@ export type HostRouteGatewayOptions = {
   authority: AgentMuxCreationAuthority
   /** Borrow exact configured edge transports, never caller-provided endpoints. */
   edge(edgeId: string): HostRouteTransport | Promise<HostRouteTransport>
+  /** Read the original Host owner's safe saved-edge projection; never discover by connecting. */
+  edges?(): Promise<HostRouteEdge[]>
   call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>>
   subscribe<M extends AgentMuxRpcStreamMethod>(method: M, params: Record<string, unknown>, emit: (event: AgentMuxRpcStreamEvent<M>) => void | Promise<void>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcServiceSubscription<M>>
 }
@@ -103,6 +105,33 @@ export class HostRouteGateway {
     this.policy = policyIndex(state)
   }
   async identity(): Promise<HostRouteIdentity> { return await this.options.authority.identity() }
+  private async discovery(context: AgentMuxRpcCallContext) {
+    if (context.caller) denied('Managed callers retain their original limited capabilities.', 'HOST_ROUTE_ACTOR_REQUIRED')
+    context.signal?.throwIfAborted(); await context.assertCurrent?.()
+    const identity = await this.identity(), delegated = delegatedHostRouteActor(context)
+    const principal = delegated ? undefined : this.originalUser(context)
+    const actor = delegated ?? { source: identity, kind: principal!.kind, id: principal!.id }
+    return { identity, actor }
+  }
+  private async savedEdges(): Promise<HostRouteEdge[]> {
+    if (!this.options.edges) denied('The original Host saved-edge source is unavailable. Existing routes and Agents are retained.', 'HOST_ROUTE_EDGE_UNAVAILABLE')
+    return (await this.options.edges()).map(parseHostRouteEdge)
+  }
+  async edges(context: AgentMuxRpcCallContext): Promise<HostRouteEdges> {
+    const source = await this.discovery(context), edges = await this.savedEdges()
+    await context.assertCurrent?.(); context.signal?.throwIfAborted()
+    return { ...source, edges, observedAt: Date.now() }
+  }
+  async inspectEdge(input: HostRouteParams['route.edge.inspect'], context: AgentMuxRpcCallContext): Promise<HostRouteEdgeInspection> {
+    const source = await this.discovery(context)
+    const matching = (await this.savedEdges()).filter(edge => edge.edgeId === input.edgeId)
+    if (matching.length !== 1) denied('This exact saved outgoing edge is absent or ambiguous. Retain the route draft; no alternate Host was selected.', 'HOST_ROUTE_EDGE_UNAVAILABLE')
+    const edge = matching[0]!, target = await (await this.options.edge(input.edgeId)).identity(context.signal)
+    await context.assertCurrent?.(); context.signal?.throwIfAborted()
+    if (edge.runtimeId !== undefined && target.runtimeId !== edge.runtimeId)
+      denied('The selected edge no longer matches its saved Runtime pin. Retain that pin and inspect the original Host configuration.', 'HOST_ROUTE_TARGET_MISMATCH')
+    return { ...source, edge, target, observedAt: Date.now() }
+  }
   async inspect(): Promise<HostRouteSettings> {
     const state = await this.state()
     return structuredClone({ identity: await this.identity(), revision: state.revision, operation: state.operation, routes: state.routes, grants: state.grants })

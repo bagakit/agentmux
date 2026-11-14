@@ -1,5 +1,12 @@
-import { AgentMuxError, hostRouteTransport, type AgentMuxClient, type HostRouteTransport } from '@agentmux/core'
+import { AgentMuxError, hostRouteTransport, type AgentMuxClient, type HostRouteTransport, type HostRouteEdge } from '@agentmux/core'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import { readHostSettingsHosts } from './settings-hosts-read.js'
+
+/** Only saved remote edge labels and known pins leave the original configuration owner. */
+export async function configuredRouteEdges(configurationPath: string | undefined): Promise<HostRouteEdge[]> {
+  return (await readHostSettingsHosts(configurationPath)).flatMap(host => host.kind === 'ssh' ? [{ edgeId: host.id, label: host.label, kind: host.kind,
+    ...(host.runtimeId === undefined ? {} : { runtimeId: host.runtimeId }) }] : [])
+}
 
 /** Borrow only the Host's saved public transports; a route never supplies endpoint/credentials. */
 export function configuredRouteEdge(clients: (hostId?: string) => readonly { hostId: string; client: AgentMuxClient | AgentMuxHostedClient }[], edgeId: string): HostRouteTransport {

@@ -44,7 +44,7 @@ import { FileUploadOwner } from './file-upload-owner.js'
 import { createHostMoteAvatarRead } from './mote-avatar-read.js'
 import { configuredTailcatListener } from './tailcat-listener.js'
 import { prepareTailcatKey } from './tailcat-key.js'
-import { configuredRouteEdge } from './host-route-edges.js'
+import { configuredRouteEdge, configuredRouteEdges } from './host-route-edges.js'
 export type AgentMuxHostOptions = {
   prepareExecutionEnvironment?: () => Promise<void>
   store: AgentMuxAgentSessionStore
@@ -312,6 +312,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       ...(configurationPath && content?.files ? { moteInputResolver: createHostMoteInputSource({configurationPath,spatial:spatialState,files:content.files}) } : {}),
       ...(options.connections?.clients ? { coreClients: options.connections.clients } : {}),
       routeEdge: edgeId => configuredRouteEdge(hostId => options.connections?.clients?.(hostId) ?? [], edgeId),
+      routeEdges: () => configuredRouteEdges(configurationPath),
       ...(options.providers ? { providers: options.providers } : {}), service,
       forwardingPeer: { authoritySocketPath: desktopPath, bindAuthority: async principal => principal.kind === 'device'
         ? await (await getAuthority()).bindForwardedDevice(principal) : undefined },

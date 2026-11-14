@@ -430,6 +430,10 @@
       "types": "./dist/node-publishing.d.ts",
       "import": "./dist/node-publishing.js"
     },
+    "./host-route": {
+      "types": "./dist/host-route.d.ts",
+      "import": "./dist/host-route.js"
+    },
     "./space-identity": {
       "types": "./dist/space-identity.d.ts",
       "import": "./dist/space-identity.js"

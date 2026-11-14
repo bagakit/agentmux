@@ -10,6 +10,10 @@ export type AdoptedHostRoute = {
   hops: { edgeId: string; target: HostRouteIdentity }[]
 }
 export type HostRouteActor = { source: HostRouteIdentity; kind: 'user' | 'device'; id: string }
+/** A saved outgoing edge, without transport endpoints or credentials. */
+export type HostRouteEdge = { edgeId: string; label: string; kind: 'ssh'; runtimeId?: string }
+export type HostRouteEdges = { identity: HostRouteIdentity; actor: HostRouteActor; edges: HostRouteEdge[]; observedAt: number }
+export type HostRouteEdgeInspection = { identity: HostRouteIdentity; actor: HostRouteActor; edge: HostRouteEdge; target: HostRouteIdentity; observedAt: number }
 
 /** Only the real split-execution/Space consumers, not the Hosted SDK as a whole. */
 export const HOST_ROUTE_INVOCATIONS = [
@@ -20,6 +24,7 @@ export const HOST_ROUTE_INVOCATIONS = [
   ...SPACE_MEMBER_INVOCATIONS.filter(method => !['readAgentSession', 'runtimeSubject', 'attachTerminal', 'readRunReplay', 'releaseRunAttachment'].includes(method)),
 ] as const
 export const HOST_ROUTE_CALLS = [
+  'route.edges', 'route.edge.inspect',
   'runtime.owner.identity', 'runtime.bootstrap', 'runtime.invoke', 'runtime.release-consumer',
   'agent.open', 'space.ls', 'space.inspect', 'space.apply',
   'space.member.call',
@@ -97,11 +102,14 @@ export type HostRouteObservation = {
 }
 export const HOST_ROUTE_METHODS = {
   'route.identity': 'short', 'route.inspect': 'short', 'route.configure': 'long',
+  'route.edges': 'short', 'route.edge.inspect': 'long',
   'route.call': 'long', 'route.receive': 'long', 'route.watch': 'long', 'route.receive-watch': 'long',
 } as const
 export type HostRouteParams = {
   'route.identity': Record<string, never>
   'route.inspect': Record<string, never>
+  'route.edges': Record<string, never>
+  'route.edge.inspect': { edgeId: string }
   'route.configure': { expectedRevision: string; operationId: string; configuration: HostRouteConfiguration }
   'route.call': { routeId: string; adoptedRoute: AdoptedHostRoute; requestId: string; call: HostRouteCall }
   'route.watch': { routeId: string; adoptedRoute: AdoptedHostRoute; requestId: string; call: HostRouteCall }
@@ -111,6 +119,8 @@ export type HostRouteParams = {
 export type HostRouteResults = {
   'route.identity': HostRouteIdentity
   'route.inspect': HostRouteSettings
+  'route.edges': HostRouteEdges
+  'route.edge.inspect': HostRouteEdgeInspection
   'route.configure': { settings: HostRouteSettings; diskDurability: 'confirmed' }
   'route.call': { value: unknown; observation: HostRouteObservation }
   'route.receive': { value: unknown; observation: HostRouteObservation }
@@ -257,7 +267,11 @@ export function parseHostRouteEnvelope(value: unknown, parent = false): HostRout
 }
 
 export function parseHostRouteParams<M extends keyof HostRouteParams>(method: M, value: unknown): HostRouteParams[M] {
-  if (method === 'route.identity' || method === 'route.inspect') return rpcRecord(value, []) as HostRouteParams[M]
+  if (method === 'route.identity' || method === 'route.inspect' || method === 'route.edges') return rpcRecord(value, []) as HostRouteParams[M]
+  if (method === 'route.edge.inspect') {
+    const p = rpcRecord(value, ['edgeId'])
+    return { edgeId: rpcString(p.edgeId, 'Exact saved edge') } as HostRouteParams[M]
+  }
   if (method === 'route.configure') {
     const p = rpcRecord(value, ['expectedRevision', 'operationId', 'configuration'])
     return { expectedRevision: rpcString(p.expectedRevision, 'Original route revision'), operationId: rpcString(p.operationId, 'Original save operation'), configuration: parseHostRouteConfiguration(p.configuration) } as HostRouteParams[M]
@@ -276,6 +290,13 @@ export function parseHostRouteObservation(value: unknown): HostRouteObservation 
 }
 export function parseHostRouteResult(method: keyof HostRouteParams, value: unknown): unknown {
   if (method === 'route.identity') return parseHostRouteIdentity(value)
+  if (method === 'route.edges' || method === 'route.edge.inspect') {
+    const p = rpcRecord(value, method === 'route.edges' ? ['identity', 'actor', 'edges', 'observedAt'] : ['identity', 'actor', 'edge', 'target', 'observedAt'])
+    if (typeof p.observedAt !== 'number' || !Number.isFinite(p.observedAt)) invalid('The edge observation time is invalid.')
+    const base = { identity: parseHostRouteIdentity(p.identity), actor: parseHostRouteActor(p.actor), observedAt: p.observedAt }
+    return method === 'route.edges' ? { ...base, edges: list(p.edges, 'Saved outgoing edges').map(parseHostRouteEdge) }
+      : { ...base, edge: parseHostRouteEdge(p.edge), target: parseHostRouteIdentity(p.target) }
+  }
   if (method === 'route.configure') {
     const p = rpcRecord(value, ['settings', 'diskDurability'])
     if (p.diskDurability !== 'confirmed') invalid('This save did not return its original durable write acknowledgement.')
@@ -290,4 +311,11 @@ export function parseHostRouteResult(method: keyof HostRouteParams, value: unkno
   }
   const p = rpcRecord(value, ['value', 'observation'])
   return { value: p.value, observation: parseHostRouteObservation(p.observation) }
+}
+
+export function parseHostRouteEdge(value: unknown): HostRouteEdge {
+  const p = rpcRecord(value, ['edgeId', 'label', 'kind', 'runtimeId'])
+  if (p.kind !== 'ssh') invalid('An outgoing edge must be an original saved remote Host.')
+  return { edgeId: rpcString(p.edgeId, 'Exact saved edge'), label: rpcString(p.label, 'Saved Host label'), kind: 'ssh',
+    ...(p.runtimeId === undefined ? {} : { runtimeId: rpcString(p.runtimeId, 'Known saved Runtime') }) }
 }

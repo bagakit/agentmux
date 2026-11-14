@@ -810,6 +810,8 @@ export class AgentMuxRpcService {
       if (!routes) throw new AgentMuxError('This Core has no composed route owner; original capabilities remain available.', 'CONTROL_UNAVAILABLE')
       const input = parseHostRouteParams(method as keyof typeof HOST_ROUTE_METHODS, params)
       if (method === 'route.identity') return await routes.identity() as AgentMuxRpcResult<M>
+      if (method === 'route.edges') return await routes.edges(context) as AgentMuxRpcResult<M>
+      if (method === 'route.edge.inspect') return await routes.inspectEdge(input as import('./host-route.js').HostRouteParams['route.edge.inspect'], context) as AgentMuxRpcResult<M>
       if (method === 'route.inspect' || method === 'route.configure') {
         if (context.caller || context.routeDelegation || !context.principal) throw new AgentMuxError('Route policy requires its actual original user/device.', 'CONTROL_PERMISSION_DENIED')
         await context.assertCurrent?.()
