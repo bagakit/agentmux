@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { act } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
+import { LocalExecutionHost } from '@agentmux/core'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { ScratchTopics } from '../src/main/scratch-topics'
@@ -31,7 +32,8 @@ it('opens same-name documents in their original Motes while Scratch retains a se
   const workspace = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', kind: 'folder' as const, name: 'Scratch', path: join(temporaryRoot, 'scratch') }
   await mkdir(workspace.path)
   const topics = new ScratchTopics(controlledNativeImage)
-  const files = new WorkspaceFiles(() => composerConfig.hosts[0]!)
+  const host = new LocalExecutionHost()
+  const files = new WorkspaceFiles(() => host)
   const owners = await Promise.all(['view:first', 'view:second'].map(async id => {
     const topic = await topics.ensureMote(workspace, id)
     const root = scratchTopicDirectoryName(id)
