@@ -1,10 +1,10 @@
 import { AgentMuxError, spatialCatalog, selectSpatialCatalog, type AgentMuxHeadlessRuntime, type AgentMuxRpcCallContext,
-  type AgentMuxRpcServiceOptions, type AgentMuxSpatialStateStore, type AgentMuxControlResult } from '@agentmux/core'
+  type AgentMuxRpcServiceOptions, type AgentMuxSpatialStateStore, type AgentMuxControlResult, type AgentMuxHostAgentCreateInput } from '@agentmux/core'
 import { isBackgroundLocalAgentOpen, isHeadlessSpatialAgentOpen, isSpatialAgentAssociation, spatialAgentAssociationRecord, spatialAgentOpenRecord, spatialAgentOpenDigest, spatialAgentFact, type AgentMuxSpatialAgentAssociationRecord, type AgentMuxSpatialAgentOpenRecord, type AgentMuxSpatialAgentOpenRequest } from '@agentmux/core/spatial-state'
 import { openSpatialAgentTarget } from './spatial-agent-target.js'
 import { parseAgentOpenLaunchFields } from '@agentmux/core/agent-open-contract'
 import type { AgentMuxSpaceMutationReport } from '@agentmux/core/control'
-import { configuredExecutor, readOriginalMoteConfiguration, ScratchTopics } from './mote-resources.js'
+import { readOriginalMoteConfiguration, ScratchTopics } from './mote-resources.js'
 import { SCRATCH_WORKSPACE_ID } from './mote-topic-model.js'
 import { configuredProfileAgentContext } from './mote-user-profile.js'
 
@@ -45,7 +45,10 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
         content: originalRequest.content, destination: originalRequest.destination, focus: originalRequest.focus } } }
         : { context, observation: { kind: 'observation' as const, targetRuntimeId: record.execution.runtimeId!, agentSessionIds: [record.agentSessionId],
           source: { kind: 'creation-reader' as const, createOperationId: record.requestId } } }
-      const host = borrowed = record.execution.runtimeId ? await options.runtime().executionHost(record.execution.hostId, record.execution.adoptedRoute, access) : null
+      if (record.execution.hostId === 'local' && record.execution.runtimeId &&
+          (await options.runtime().client.agentCreationAuthority()).runtimeId !== record.execution.runtimeId) throw new AgentMuxError(
+        'The original local creation belongs to another Runtime. Keep its Session and request.', 'RUNTIME_OWNER_MISMATCH')
+      const host = borrowed = record.execution.runtimeId && record.execution.hostId !== 'local' ? await options.runtime().executionHost(record.execution.hostId, record.execution.adoptedRoute, access) : null
       if (host && host.runtimeId !== record.execution.runtimeId) throw new AgentMuxError('The original Agent route answers for another Runtime. Keep the original Session and request.', 'RUNTIME_OWNER_MISMATCH')
       if (host && originalRequest && record.execution.adoptedRoute && await host.client.resolveAgentCreationSessionId(record.requestId) !== record.agentSessionId) throw new AgentMuxError(
         'The original creation operation resolves to another Session. Keep both references; no current SID was substituted.', 'SPATIAL_CREATION_UNCONFIRMED')
@@ -113,25 +116,23 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
     if (previous) {
       if (previous.digest !== spatialAgentOpenDigest(request)) throw new AgentMuxError('This operation belongs to another original spatial creation intent.', 'SPACE_REQUEST_CONFLICT')
       const observed = await reconcile(previous, context)
-      if (observed.agent || observed.outcome === 'retired') return { operation: 'agent.open', ...observed }
-      // An explicit continuation enters the original idempotent Core creation
-      // owner. No observation error is interpreted here as permission to start.
+      // Inspection can reconcile the original Core prepared start. A retained
+      // spatial reservation alone never authorizes rebuilding its invocation
+      // from today's Executor settings or resending its original first input.
+      return { operation: 'agent.open', ...observed }
     }
     context.signal?.throwIfAborted(); await context.assertCurrent?.()
     const { spaceId, zoneId, tabId, regionId } = request.destination
     const catalog = selectSpatialCatalog(spatialCatalog(state.graph), { ...(spaceId ? { spaceId } : {}), ...(zoneId ? { zoneId } : {}), ...(tabId ? { tabId } : {}), ...(regionId ? { regionId } : {}) })
     if (catalog.zones.length !== 1) throw new AgentMuxError('Choose the exact original execution Zone.', 'SPACE_ZONE_REQUIRED')
     const zone = catalog.zones[0]!
-    const raw = await readOriginalMoteConfiguration(options.configurationPath)
-    if (!object(raw)) throw new AgentMuxError('The original launch configuration is unreadable. Saved settings and healthy Agents remain available.', 'EXECUTOR_CONFIGURATION_UNAVAILABLE')
-    const executor = configuredExecutor(raw, request.content.executorId)
     const execution = { hostId: zone.hostId ?? '', workspacePath: zone.directoryPath ?? '', workspaceId: zone.workspaceId }
     if (execution.hostId !== 'local') throw new AgentMuxError('This background local creator has no original foreign execution route. Its chosen target and existing Agents remain available.', 'UNKNOWN_HOST')
     if (!execution.workspacePath) throw new AgentMuxError('The selected original execution directory is unconfirmed. No Agent was started.', 'SPACE_RESOURCE_UNKNOWN')
     const client = options.runtime().client, agentSessionId = await client.resolveAgentCreationSessionId(request.requestId)
     // A Core creation can predate this spatial owner. Its missing placement is
     // unknown, never permission to dispatch or attach the same operation again.
-    if (!previous) try {
+    try {
       const original = await client.inspectAgentCreation(agentSessionId)
       return { operation: 'agent.open', requestId: request.requestId, outcome: original.kind === 'retired-agent' ? 'retired' : 'unknown',
         from: null, to: null, agent: original.kind === 'agent' ? spatialAgentFact(original, execution.hostId) : null, resource: null,
@@ -142,14 +143,23 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
       // Unknown is not absence. This permits recording only the spatial intent;
       // the original Core same-SID/operation claim alone decides any start.
     }
+    const inventory = await client.listHostExecutors({ refresh: false, executorId: request.content.executorId })
+    const authority = await client.agentCreationAuthority()
+    if (inventory.runtimeId !== authority.runtimeId) throw new AgentMuxError('The chosen Executor belongs to another original Runtime.', 'RUNTIME_OWNER_MISMATCH')
+    const executors = inventory.executors.filter(item => item.executorId === request.content.executorId)
+    if (executors.length !== 1) throw new AgentMuxError('Choose an Executor configured on the original execution Host.', 'UNKNOWN_EXECUTOR')
+    const executor = executors[0]!, frozenExecution = { ...execution, runtimeId: authority.runtimeId, executorRevision: executor.configRevision }
+    let raw: unknown, configurationIssue: unknown
+    try { raw = await readOriginalMoteConfiguration(options.configurationPath) } catch (error) { configurationIssue = error }
+    if (!object(raw)) configurationIssue ??= new AgentMuxError('The original Profile and Topic directory configuration is unconfirmed.', 'EXECUTOR_CONFIGURATION_UNAVAILABLE')
     const platformContext = await options.agentMuxContext?.(request)
     context.signal?.throwIfAborted(); await context.assertCurrent?.()
-    const admission = await options.spatial.admitAgentOpen({ request, agentSessionId, execution, regionResource: regionDescriptor({ agentSessionId, execution }, 'launching') })
+    const admission = await options.spatial.admitAgentOpen({ request, agentSessionId, execution: frozenExecution, regionResource: regionDescriptor({ agentSessionId, execution: frozenExecution }, 'launching') })
     try {
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
       let prepared: Awaited<ReturnType<ScratchTopics['prepareAgent']>> | undefined
       if (zone.kind === 'home' && zone.workspaceId === SCRATCH_WORKSPACE_ID) {
-        const workspaces = Array.isArray(raw.workspaces) ? raw.workspaces.filter(value => object(value) && value.id === SCRATCH_WORKSPACE_ID) : []
+        const workspaces = object(raw) && Array.isArray(raw.workspaces) ? raw.workspaces.filter(value => object(value) && value.id === SCRATCH_WORKSPACE_ID) : []
         const workspace = workspaces.length === 1 ? workspaces[0] : null
         if (!object(workspace) || typeof workspace.path !== 'string' || workspace.hostId !== 'local') throw new AgentMuxError('The original Topic resource Workspace is unconfirmed.', 'SPACE_RESOURCE_UNKNOWN')
         const original = await topics.readForDirectory({ id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: workspace.path }, execution.workspacePath)
@@ -157,17 +167,22 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
         prepared = await topics.prepareAgent({ id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: workspace.path }, original.id, { providerId: executor.providerId, sessionId: agentSessionId })
         if (prepared.absolutePath !== execution.workspacePath) throw new AgentMuxError('The original Topic directory changed. Its admitted identity is retained.', 'SPACE_RESOURCE_UNKNOWN')
       }
-      const note = [prepared?.prompt, platformContext, configuredProfileAgentContext(raw.profile)].filter(Boolean).join('\n\n')
+      const note = [prepared?.prompt, platformContext, configuredProfileAgentContext(object(raw) ? raw.profile : undefined)].filter(Boolean).join('\n\n')
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
-      await client.createAgentWithDelivery({ providerId: executor.providerId, executorId: request.content.executorId,
-        agentSessionId, createOperationId: request.requestId, workspacePath: execution.workspacePath, commandOverride: executor.command,
-        args: executor.args, env: executor.env, injectAgentMuxGuide: executor.injectAgentMuxGuide,
+      const create: AgentMuxHostAgentCreateInput = { executorId: request.content.executorId, executorRevision: executor.configRevision,
+        agentSessionId, createOperationId: request.requestId, workspacePath: execution.workspacePath,
+        spatialIntent: { tabId: admission.record.address.tabId, regionId: admission.record.address.regionId, executionWorkspaceId: execution.workspaceId },
         ...parseAgentOpenLaunchFields(request.content),
         ...(note ? { sourceAgentMuxNote: note } : {}), ...(prepared ? { optionalContext: prepared.optionalContext } : {}),
-        ...(request.content.prompt === undefined ? {} : { prompt: request.content.prompt }),
-        ...(request.caller ? { creationCaller: { agentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' } } : {}),
-        ...(request.caller && request.content.prompt !== undefined ? { initialMessage: { callerAgentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' } } : {}) })
-      return { operation: 'agent.open', ...await reconcile(admission.record, context) }
+        ...(request.content.prompt === undefined ? {} : { prompt: request.content.prompt }) }
+      if (request.caller) await client.createLocalHostAgentWithDelivery(create, { agentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' })
+      else await client.createHostAgentWithDelivery(create)
+      const observed = await reconcile(admission.record, context)
+      if (configurationIssue) {
+        observed.issues.push({ step: 'context', code: 'EXECUTOR_CONFIGURATION_UNAVAILABLE', message: 'The original Profile configuration could not be confirmed. The registered Executor and its original Run remain available.', recovery: 'Check the original Host configuration; no replacement settings were selected.' })
+        if (observed.agent) observed.outcome = 'partial'
+      }
+      return { operation: 'agent.open', ...observed }
     } catch (error) { return { operation: 'agent.open', ...await reconcile(admission.record, context, error) } }
   }, { describe: () => ({ ordinaryLaunch: { revision: 1 as const, destination: 'source-zone-background' as const }, externalAssociation: 1 as const }) })
 }

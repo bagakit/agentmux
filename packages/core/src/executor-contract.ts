@@ -18,7 +18,7 @@ export type AgentMuxHostExecutorDescriptor = {
   label: string
   providerId: AgentProviderId
   command: string
-  source: 'provider-default' | 'registered'
+  source: 'provider-default' | 'configured' | 'registered'
   /** Configuration digest used by original Session creation/recovery. */
   configRevision: string
   /** Exact registered publication witness; absent for defaults or unavailable metadata. */
@@ -43,7 +43,7 @@ function invalidInventory(): never { throw new AgentMuxError('Executor metadata 
 export function parseHostExecutorDescriptor(value: unknown): AgentMuxHostExecutorDescriptor {
   const d = rpcRecord(value, ['executorId', 'label', 'providerId', 'command', 'source', 'configRevision', 'registrationRevision', 'launchOptions', 'creationContract', 'availability', 'executable', 'cause'], 'CONTROL_PROTOCOL_ERROR')
   for (const key of ['executorId', 'label', 'providerId', 'command', 'configRevision']) if (typeof d[key] !== 'string' || !d[key] || /[\0\r\n]/u.test(d[key])) invalidInventory()
-  if (!['registered', 'provider-default'].includes(d.source as string) || !isAgentMuxExecutorAvailability(d.availability)) invalidInventory()
+  if (!['registered', 'configured', 'provider-default'].includes(d.source as string) || !isAgentMuxExecutorAvailability(d.availability)) invalidInventory()
   if (d.registrationRevision !== undefined && (d.source !== 'registered' || typeof d.registrationRevision !== 'string' || !d.registrationRevision || /[\0\r\n]/u.test(d.registrationRevision))) invalidInventory()
   if (d.executable !== undefined && (typeof d.executable !== 'string' || !d.executable.startsWith('/') || /[\0\r\n]/u.test(d.executable))) invalidInventory()
   if (d.availability === 'available' && (!d.executable || d.cause !== undefined) || d.availability === 'check-failed' && d.cause === undefined) invalidInventory()

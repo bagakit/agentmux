@@ -15,7 +15,7 @@ import { createHostSpatialAgentControl } from './spatial-agent-control.js'
 import { createHostGoals } from './goals.js'
 import { projectWorkspaces } from './workspace-projects.js'
 import { readPresentationConfiguration } from './presentation-configuration.js'
-import { moteOwnedWorkspaceRoots, readConfiguredExecutor, readConfiguredExecutorChoices } from './mote-resources.js'
+import { moteOwnedWorkspaceRoots, readConfiguredExecutor, readConfiguredExecutors, readConfiguredExecutorChoices } from './mote-resources.js'
 import { SCRATCH_WORKSPACE_ID } from './mote-topic-model.js'
 import { createHostSnapshotObservation } from './snapshot-observation.js'
 import { createHostSpatialPresentation } from './spatial-presentation.js'
@@ -333,6 +333,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     runtime = await startHeadlessAgentMux({ inputResources: { inspect: identity => fileUploads.inspect(identity), read: (identity, maxBytes) => fileUploads.read?.(identity, maxBytes) ?? Promise.resolve(null) }, ...(options.prepareExecutionEnvironment ? { prepareExecutionEnvironment: options.prepareExecutionEnvironment } : {}), store: options.store, socketPath: path, shutdown: options.shutdown ?? closeResources,
       ...(options.relayGateway === undefined ? {} : { relayGateway: options.relayGateway }),
       ...(configurationPath ? { sessionExecutorConfiguration: (executorId: string) => readConfiguredExecutor(configurationPath, executorId) } : {}),
+      ...(configurationPath ? { executorConfigurations: (id?: string) => readConfiguredExecutors(configurationPath, id) } : {}),
       ...(configurationPath ? { ownedWorkspaceRoots: workspacePath => moteOwnedWorkspaceRoots(configurationPath, workspacePath) } : {}),
       ...(configurationPath && content?.files ? { moteInputResolver: createHostMoteInputSource({configurationPath,spatial:spatialState,files:content.files}) } : {}),
       ...(options.connections?.clients ? { coreClients: options.connections.clients } : {}),

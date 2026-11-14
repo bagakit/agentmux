@@ -29,6 +29,8 @@ import { CapsuleRunManager, type CapsuleDesktopAdapters } from './capsule-run-ma
 export type AgentMuxHeadlessRuntimeOptions = AgentMuxClientOptions & {
   socketPath?: string
   stateDirectory?: string
+  /** Borrow the same original Host configuration used by its saved Executor settings. */
+  executorConfigurations?: (executorId?: string) => Promise<Readonly<Record<string, import('./types.js').AgentExecutorConfig>>>
   http?: AgentMuxRpcHttpOptions
   relayGateway?: import('./public-rpc-relay-gateway.js').AgentMuxRelayGatewaySource
   forwardingPeer?: AgentMuxControlServerOptions['forwardingPeer']
@@ -131,7 +133,8 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
       diagnosticOwner: { authority: { kind: 'core-runtime', id: runtimeId, lifetime: storePath === null ? 'instance' : 'durable' }, ownerInstanceId },
       ...(options.externalInputAuthority?.resolveConversationMessage ? { externalConversationAuthority: { resolveConversationMessage: ref => options.externalInputAuthority!.resolveConversationMessage!(ref) } } : {}),
       hostExecutorOwner: options.hostExecutorOwner ?? new AgentMuxHostExecutorOwner({
-        path: join(stateDirectory, 'host-executors.json'), runtimeId, catalog: () => client!.catalog()
+        path: join(stateDirectory, 'host-executors.json'), runtimeId, catalog: () => client!.catalog(),
+        ...(options.executorConfigurations ? { configurations: options.executorConfigurations } : {})
       }),
       creationAuthority })
     hostRoutes = options.service?.hostRoutes ? undefined : new HostRouteGateway({ stateDirectory, authority: creationAuthority,

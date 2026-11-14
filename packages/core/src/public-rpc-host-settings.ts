@@ -126,7 +126,7 @@ export function parseHostSettingsResult<M extends HostSettingsMethod>(method: M,
       const expected = input as HostSettingsParameterMap['settings.executors.unregister']
       if (p.executorId !== expected.executorId || p.removedRegistration !== true || p.registrationRevision !== expected.expectedRegistrationRevision) fail()
       const effectiveExecutor = p.effectiveExecutor === null ? null : parseHostExecutorDescriptor(p.effectiveExecutor)
-      if (effectiveExecutor && (effectiveExecutor.executorId !== expected.executorId || effectiveExecutor.source !== 'provider-default')) fail()
+      if (effectiveExecutor && (effectiveExecutor.executorId !== expected.executorId || effectiveExecutor.source === 'registered')) fail()
       return { routeHostId: input.hostId, runtimeId: p.runtimeId, executorId: p.executorId, removedRegistration: true,
         registrationRevision: p.registrationRevision, effectiveExecutor } as HostSettingsResultMap[M]
     }

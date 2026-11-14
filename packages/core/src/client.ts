@@ -288,10 +288,13 @@ type AgentStopAdmission = {
   stages: AgentMuxAgentStopStage[]
 }
 
+type LocalHostAgentCreateInput = AgentMuxHostAgentCreateInput & Pick<AgentMuxAgentCreateInput, 'initialMessage'> & {
+  creationCaller: NonNullable<AgentMuxAgentCreateInput['creationCaller']>
+}
 type ActiveAgentCreation = {
-  kind: 'direct' | 'host'
+  kind: 'direct' | 'host' | 'local-host'
   wake?: () => boolean
-  input: AgentMuxAgentCreateInput | AgentMuxHostAgentCreateInput
+  input: AgentMuxAgentCreateInput | AgentMuxHostAgentCreateInput | LocalHostAgentCreateInput
   agentSessionId?: string
   controller: AbortController
   pending: ReturnType<AgentMuxClient['createAgentWithDelivery']>
@@ -302,7 +305,7 @@ export function hostAgentCreationIntent(input: AgentMuxHostAgentCreateInput): st
   return agentCreationIntentDigest(intent)
 }
 
-function creationIntentDigest(input: AgentMuxAgentCreateInput, agentSessionId: string, executorId: string, createOperationId: string,
+function creationIntentDigest(input: Pick<AgentMuxAgentCreateInput, 'creationCaller' | 'initialMessage'> & object, agentSessionId: string, executorId: string, createOperationId: string,
   author?: AgentMuxStoredAgentSession, creator?: AgentMuxStoredAgentSession): string {
   const { initialMessage, creationCaller, ...intent } = input
   return agentCreationIntentDigest({ ...intent, agentSessionId, executorId, createOperationId,
@@ -770,6 +773,17 @@ export class AgentMuxClient {
   }
 
   async createHostAgentWithDelivery(input: AgentMuxHostAgentCreateInput) {
+    return await this.createConfiguredHostAgentWithDelivery(input)
+  }
+
+  /** Same-Core caller credentials never enter the Hosted or JSON-RPC SDK surface. */
+  async createLocalHostAgentWithDelivery(input: AgentMuxHostAgentCreateInput, caller: NonNullable<AgentMuxAgentCreateInput['creationCaller']>) {
+    if (!caller || typeof caller.agentSessionId !== 'string' || typeof caller.capability !== 'string' || input.initialMessageAdmission !== undefined) throw new AgentMuxError(
+      'A local target-owned creation requires its original local caller, without a foreign signed admission.', 'INVALID_CONTROL_REQUEST')
+    return await this.createConfiguredHostAgentWithDelivery(input, structuredClone(caller))
+  }
+
+  private async createConfiguredHostAgentWithDelivery(input: AgentMuxHostAgentCreateInput, caller?: NonNullable<AgentMuxAgentCreateInput['creationCaller']>) {
     if (!this.hostExecutorOwner) throw new AgentMuxError('Target Host Executor registry is unavailable.', 'CONTROL_UNAVAILABLE')
     // Freeze the whole original intent before registry admission can await another turn.
     input = structuredClone(input)
@@ -783,10 +797,13 @@ export class AgentMuxClient {
     }
     let admitted: AgentCreationAdmission | undefined
     let resolved: AgentMuxAgentCreateInput | undefined
-    return await this.runAgentCreation('host', input, async (request, execution) => {
+    const localInput: LocalHostAgentCreateInput | undefined = caller ? { ...input, creationCaller: caller,
+      ...(input.prompt?.trim() ? { initialMessage: { callerAgentSessionId: caller.agentSessionId, capability: caller.capability } } : {}) } : undefined
+    return await this.runAgentCreation(caller ? 'local-host' : 'host', localInput ?? input, async (request, execution) => {
       const input = request as AgentMuxHostAgentCreateInput
       const { preparation } = execution
-      const intentDigest = hostAgentCreationIntent(input)
+      const sources = caller ? await this.readCreationCallers(request as LocalHostAgentCreateInput, execution) : undefined
+      const intentDigest = sources ? creationIntentDigest(request as LocalHostAgentCreateInput, input.agentSessionId!, input.executorId, input.createOperationId!, sources.initialAuthor, sources.creator) : hostAgentCreationIntent(input)
       const authority = this.requireCreationAuthority()
       if (!admitted) {
         const identity = await preparation(() => authority.identity())
@@ -842,6 +859,10 @@ export class AgentMuxClient {
           ...(input.launchOptions === undefined ? {} : { launchOptions: input.launchOptions }),
           ...(input.cols === undefined ? {} : { cols: input.cols }), ...(input.rows === undefined ? {} : { rows: input.rows })
         }
+      }
+      if (sources) {
+        const local = request as LocalHostAgentCreateInput
+        resolved = { ...resolved!, creationCaller: local.creationCaller, ...(local.initialMessage ? { initialMessage: local.initialMessage } : {}) }
       }
       return await this.createAgentWithDeliveryAttempt(resolved!, admitted, execution)
     }, () => this.hostExecutorOwner!.retainLaunch(input.executorId))
@@ -5543,6 +5564,27 @@ export class AgentMuxClient {
       await this.createAgentWithDeliveryAttempt(frozen as AgentMuxAgentCreateInput, undefined, execution))
   }
 
+  /** The original local caller and Run fence shared by direct and target-owned local creation. */
+  private async readCreationCallers(input: Pick<AgentMuxAgentCreateInput, 'creationCaller' | 'initialMessage' | 'prompt'>, execution: AgentCreationExecution) {
+    const { preparation } = execution
+    let author: AgentMuxStoredAgentSession | undefined
+    if (input.initialMessage) {
+      if (!input.prompt?.trim()) throw new AgentMuxError('An initial Agent message needs a body.', 'INVALID_AGENT_PROMPT')
+      author = await preparation(() => this.currentStoredAgentSession(input.initialMessage!.callerAgentSessionId))
+      this.resolveMessageAuthor(input.initialMessage.capability, input.initialMessage.callerAgentSessionId, author)
+    }
+    let creator = author
+    if (input.creationCaller) {
+      creator = await preparation(() => this.currentStoredAgentSession(input.creationCaller!.agentSessionId))
+      this.resolveMessageAuthor(input.creationCaller.capability, input.creationCaller.agentSessionId, creator)
+    }
+    if (execution.sources && (!isDeepStrictEqual(execution.sources.author?.run, author?.run) ||
+      !isDeepStrictEqual(execution.sources.creator?.run, creator?.run))) throw new AgentMuxError(
+      'The original creation caller Run changed; the original request was retained.', 'AGENT_CREATION_SOURCE_CHANGED')
+    execution.sources ??= structuredClone({ author, creator })
+    return { initialAuthor: author, creator }
+  }
+
   /** Release only this original live creation's currently installed resource backoff. */
   async continueAgentCreation(input: AgentMuxCreationContinueInput): Promise<AgentMuxCreationContinueReceipt> {
     const request = parseCreationContinueInput(input)
@@ -5633,25 +5675,7 @@ export class AgentMuxClient {
     const createOperationId = input.createOperationId ?? mintObjectId()
     const agentSessionId = safeId(input.agentSessionId ?? await this.resolveAgentCreationSessionId(createOperationId), 'Agent Session id')
     const executorId = safeId(input.executorId, 'Agent Executor id')
-    const readCallers = async () => {
-      let author: AgentMuxStoredAgentSession | undefined
-      if (input.initialMessage) {
-        if (!input.prompt?.trim()) throw new AgentMuxError('An initial Agent message needs a body.', 'INVALID_AGENT_PROMPT')
-        author = await preparation(() => this.currentStoredAgentSession(input.initialMessage!.callerAgentSessionId))
-        this.resolveMessageAuthor(input.initialMessage.capability, input.initialMessage.callerAgentSessionId, author)
-      }
-      let creator = author
-      if (input.creationCaller) {
-        creator = await preparation(() => this.currentStoredAgentSession(input.creationCaller!.agentSessionId))
-        this.resolveMessageAuthor(input.creationCaller.capability, input.creationCaller.agentSessionId, creator)
-      }
-      if (execution.sources && (!isDeepStrictEqual(execution.sources.author?.run, author?.run) ||
-        !isDeepStrictEqual(execution.sources.creator?.run, creator?.run))) {
-        throw new AgentMuxError('The original creation caller Run changed; the original request was retained.', 'AGENT_CREATION_SOURCE_CHANGED')
-      }
-      execution.sources ??= structuredClone({ author, creator })
-      return { initialAuthor: author, creator }
-    }
+    const readCallers = () => this.readCreationCallers(input, execution)
     const { initialAuthor, creator } = await readCallers()
     const createdBy: AgentMuxSpawnCreator | undefined = creator
       ? { agentSessionId: creator.agentSessionId, run: { ...creator.run }, owner: { kind: 'local' } }

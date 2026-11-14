@@ -817,6 +817,17 @@ export async function readConfiguredExecutorChoices(path: string): Promise<Array
     return [{ id, name: typeof executor.label === 'string' ? executor.label : id, providerId: executor.providerId }]
   })
 }
+/** Fresh launch configurations from the original executing Host; no registration write or mirror. */
+export async function readConfiguredExecutors(path: string, executorId?: string): Promise<Record<string, AgentExecutorConfig>> {
+  let raw: unknown
+  try { raw = await readOriginalMoteConfiguration(path) }
+  catch { throw new AgentMuxError('The original Host Executor configuration could not be read. Its saved settings and healthy Agents are retained.', 'EXECUTOR_CONFIGURATION_UNAVAILABLE') }
+  const values = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>).executors : null
+  if (!values || typeof values !== 'object' || Array.isArray(values)) throw new AgentMuxError(
+    'The original Host Executor configuration is unconfirmed. Existing registrations and Agents are retained.', 'EXECUTOR_CONFIGURATION_UNAVAILABLE')
+  const ids = executorId === undefined ? Object.keys(values) : Object.hasOwn(values, executorId) ? [executorId] : []
+  return Object.fromEntries(ids.map(id => [id, configuredExecutor(raw, id)]))
+}
 export function configuredExecutor(raw: unknown, executorId: string): AgentExecutorConfig {
   const invalid = (): never => { throw new AgentMuxError('The original Executor launch configuration is unconfirmed. Keep its saved settings and conversations; inspect that exact Executor.', 'EXECUTOR_CONFIGURATION_UNAVAILABLE') }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return invalid()

@@ -58,6 +58,9 @@ function revision(config: AgentExecutorConfig): string {
 
 /** One target-Host command resolver for discovery and admitted launches. It never executes a program. */
 async function probeCommand(config: AgentExecutorConfig, environment: NodeJS.ProcessEnv): Promise<Probe> {
+  if (!isAbsolute(config.command) && config.command.includes('/')) return { availability: 'check-failed', cause: {
+    code: 'EXECUTABLE_WORKSPACE_REQUIRED', message: 'This saved Executor command is relative to its launch workspace. The inventory has no working directory; its original command and existing Agents are retained.'
+  } }
   const searchPath = config.env.PATH ?? environment.PATH
   const paths = isAbsolute(config.command) ? [config.command]
     : searchPath === undefined ? [] : searchPath.split(delimiter).map(directory => join(directory, config.command))
@@ -120,6 +123,8 @@ export class AgentMuxHostExecutorOwner {
     runtimeId: string
     catalog(): readonly AgentCatalogEntry[]
     environment?(): NodeJS.ProcessEnv
+    /** Original executing Host configuration; borrowed read, never copied into the registration journal. */
+    configurations?(executorId?: string): Promise<Readonly<Record<string, AgentExecutorConfig>>>
   }) {}
 
   private async read(): Promise<Registry> {
@@ -160,12 +165,18 @@ export class AgentMuxHostExecutorOwner {
     }
   }
 
-  private entries(configurations: Configurations): Map<string, { config: AgentExecutorConfig; source: AgentMuxHostExecutorDescriptor['source'] }> {
+  private async entries(configurations: Configurations, selectedId?: string): Promise<Map<string, { config: AgentExecutorConfig; source: AgentMuxHostExecutorDescriptor['source'] }>> {
     const entries = new Map(this.options.catalog().map(provider => [provider.id, {
       config: { label: provider.label, providerId: provider.id, command: provider.executable,
         args: [], env: {}, injectAgentMuxGuide: true } as AgentExecutorConfig,
       source: 'provider-default' as AgentMuxHostExecutorDescriptor['source']
     }]))
+    // An exact registered choice is already authoritative. An unrelated lower-priority
+    // configuration read cannot take away its existing execution capability.
+    if (!selectedId || !Object.hasOwn(configurations, selectedId)) {
+      const configured = await this.options.configurations?.(selectedId)
+      for (const [id, config] of Object.entries(configured ?? {})) entries.set(id, { config, source: 'configured' })
+    }
     for (const [id, config] of Object.entries(configurations)) entries.set(id, { config, source: 'registered' })
     return entries
   }
@@ -183,7 +194,7 @@ export class AgentMuxHostExecutorOwner {
   }
 
   async list(input: { refresh?: boolean; executorId?: string } = {}): Promise<AgentMuxHostExecutorInventory> {
-    const state = await this.read(), entries = this.entries(state.executors)
+    const state = await this.read(), entries = await this.entries(state.executors, input.executorId)
     const id = input.executorId === undefined ? undefined : text(input.executorId, 'Executor ID', 512)
     const declarations = id === undefined ? undefined : new Map(this.options.catalog().map(provider => [provider.id, provider.launchOptions]))
     const selected = id === undefined ? [...entries] : entries.has(id) ? [[id, entries.get(id)!] as const] : []
@@ -196,7 +207,8 @@ export class AgentMuxHostExecutorOwner {
   }
 
   async resolve(executorId: string): Promise<AgentMuxResolvedHostExecutor> {
-    const state = await this.read(), selected = this.entries(state.executors).get(text(executorId, 'Executor ID', 512))
+    const id = text(executorId, 'Executor ID', 512)
+    const state = await this.read(), selected = (await this.entries(state.executors, id)).get(id)
     if (!selected) throw new AgentMuxError('The requested Executor is not registered on this target Host. Register its existing command or choose a discovered Executor.', 'HOST_EXECUTOR_NOT_FOUND')
     const { config, source } = selected
     const observation = await this.observe(config)
@@ -208,7 +220,7 @@ export class AgentMuxHostExecutorOwner {
     const executorId = text(input.executorId, 'Executor ID', 512), config = parseConfig(input.config)
     const expectedRevision = input.expectedRevision === undefined ? undefined : text(input.expectedRevision, 'Expected Executor revision', 512)
     return await this.serialized(async () => {
-      const state = await this.read(), current = state.executors, selected = this.entries(current).get(executorId)
+      const state = await this.read(), current = state.executors, selected = (await this.entries(current, executorId)).get(executorId)
       if (!state.validRegistrationMetadata) throw new AgentMuxError('Original Executor registration metadata is unavailable. Restore its original file before changing it; existing configurations remain readable.', 'EXECUTOR_REGISTRATION_UNAVAILABLE')
       if (!this.options.catalog().some(provider => provider.id === config.providerId)) {
         throw new AgentMuxError('Executor Provider is not supported by this target Host.', 'UNKNOWN_PROVIDER')
@@ -246,8 +258,8 @@ export class AgentMuxHostExecutorOwner {
       await assertUnreferenced()
       const { [executorId]: _config, ...executors } = state.executors
       const { [executorId]: _token, ...registrationRevisions } = state.registrationRevisions
+      const effective = (await this.entries(executors, executorId)).get(executorId)
       await durableWriteFile(this.options.path, JSON.stringify({ schema: SCHEMA, runtimeId: this.options.runtimeId, executors, registrationRevisions }) + '\n')
-      const effective = this.entries(executors).get(executorId)
       return { runtimeId: this.options.runtimeId, executorId, removedRegistration: true, registrationRevision: expected,
         effectiveExecutor: effective ? this.descriptor(executorId, effective.config, effective.source) : null }
     })
