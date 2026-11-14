@@ -149,8 +149,7 @@
 .conversation-annotation-note__header strong { font-weight: 600; }
 .conversation-annotation-note__close.icon-button { flex: none; width: var(--sp-7); height: var(--sp-7); }
 .conversation-annotation-underline { height: 2px; background: var(--blue); pointer-events: none; }
-.conversation-annotation-note__location, .conversation-annotation-note__error { color: var(--text-2); font-size: var(--fs-micro); line-height: 1.45; }
-.conversation-annotation-note__error { color: var(--red-text); }
+.conversation-annotation-note__location { color: var(--text-2); font-size: var(--fs-micro); line-height: 1.45; }
 .conversation-annotation-status { color: var(--text-2); font-size: var(--fs-micro); padding: var(--sp-2) var(--sp-3); }
 .conversation-annotation-recovery { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); color: var(--text-2); font-size: var(--fs-meta); }
 .conversation-annotation-delivery { display: grid; gap: 8px; }

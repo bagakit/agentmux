@@ -10,6 +10,7 @@ import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { ComposerEditFooter } from '@agentmux/client-ui/components/ComposerEditFooter'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
+import { FormRow } from '@agentmux/client-ui/components/FormRow'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import { ConversationAnnotationDelivery } from './ConversationAnnotationDelivery'
 import { WindowOverlayPortal } from './WindowOverlayHost'
@@ -218,16 +219,20 @@ export function ConversationAnnotationNote({ ref, sessionId, regionRef, active, 
   }
   const selectionRef = useRef(selection); selectionRef.current = selection
   function accepted(message: string): void { setPending(false); close(); setEdit(null); setNote(''); setError(null); setStatus(message) }
-  function add(): void {
+  function add(trigger: HTMLButtonElement): void {
     if (!edit || !available || !note.trim() || !onAnnotate || pending) return
     try { onAnnotate({ messageId: edit.target.messageId, quote: edit.target.quote, note: note.trim() }) }
-    catch (failure) { setError(`无法将批注加入回复草稿：${failure instanceof Error ? failure.message : String(failure)}`); return }
+    catch (failure) {
+      setError(`无法将批注加入回复草稿：${failure instanceof Error ? failure.message : String(failure)}`)
+      if (trigger.ownerDocument.activeElement === trigger) inputRef.current?.focus({ preventScroll: true })
+      return
+    }
     accepted('批注已加入当前回复草稿。')
   }
 
   const annotation = edit ? { messageId: edit.target.messageId, quote: edit.target.quote, note: note.trim() } : null
   const renderFooter = (send?: ReactNode) => <ComposerEditFooter leading={<Button variant="danger" disabled={pending} onClick={discard}>丢弃批注</Button>}>
-    <Button variant={send ? 'secondary' : 'primary'} aria-label="将批注加入回复草稿" disabled={!note.trim() || pending} onClick={add}>
+    <Button variant={send ? 'secondary' : 'primary'} aria-label="将批注加入回复草稿" disabled={!note.trim() || pending} onClick={event => add(event.currentTarget)}>
       <ThemeActionAddToDraftIcon size={12} aria-hidden="true" />加入草稿
     </Button>
     {send}
@@ -255,8 +260,9 @@ export function ConversationAnnotationNote({ ref, sessionId, regionRef, active, 
           <header className="conversation-annotation-note__header"><strong>批注</strong><IconButton className="conversation-annotation-note__close" aria-label="关闭批注" title="关闭批注 · 保留草稿" onClick={close}><ThemeActionCloseIcon size={14} aria-hidden="true" /></IconButton></header>
           {!rects.length ? <span className="conversation-annotation-note__location" role="status">原选区位置暂不可用，批注已保留。</span> : null}
           <details className="conversation-annotation-note__passage"><summary aria-label="Selected passage"><span className="conversation-annotation-note__preview">{edit.target.quote}</span><ThemeNavigationDownIcon size={12} aria-hidden="true" /></summary><blockquote className="log-turn__annotation-quote" tabIndex={0} aria-label="Selected passage">{edit.target.quote}</blockquote></details>
-          <ComposerTextarea variant="compact" ref={inputRef} value={note} onValueChange={setNote} disabled={pending} aria-label="批注内容" placeholder="添加批注…" rows={2} />
-          {error ? <div className="conversation-annotation-note__error" role="alert">{error}</div> : null}
+          <FormRow layout="stacked" label="批注内容" description="回车换行，关闭后可继续。" error={error}>
+            {field => <ComposerTextarea {...field} variant="compact" ref={inputRef} value={note} onValueChange={setNote} readOnly={pending} rows={2} />}
+          </FormRow>
           {edit.origin && annotation
             ? <ConversationAnnotationDelivery key={edit.key} active={available && editing} sessionId={edit.sessionId} origin={edit.origin} annotation={annotation} onAccepted={accepted} onError={setError} onPendingChange={setPending} renderFooter={renderFooter} />
             : renderFooter()}
