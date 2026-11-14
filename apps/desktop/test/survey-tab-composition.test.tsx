@@ -1175,6 +1175,7 @@ it('[survey-pin-ui] original row menu pins and unpins research while preserving 
 })
 
 it('[survey-pin-ui] an ordinary page remains unpinned until its menu action and keeps its exact Close while pinned', async () => {
+  headerCloseOwner = await connectWorkbenchCloseApiOwner()
   const page = await horizontalPages(), before = useAppStore.getState(), oldFile = source().regions['composition-file'], oldAgent = source().regions['composition-agent-region']
   expect(document.querySelector('[aria-label="Pinned Survey items"]')).toBeNull()
   const options = document.querySelector<HTMLElement>('[data-survey-page-region-id="composition-page"] .survey-item-options')!
@@ -2071,7 +2072,7 @@ it.each([false, true, 'focus-local'] as const)('[window-return-app] original exa
   vi.spyOn(window, 'open').mockReturnValue(child)
   try {
     const page = await showHeaderPage(), before = useAppStore.getState()
-    const projection = surveyPageProjection({ kind: 'page', ...page }, catalog(), before.tabs, () => {})!, reference = projection.selection[0]!
+    const projection = surveyPageProjection(page, catalog(), before.tabs, () => {})!, reference = projection.selection[0]!
     const target = { kind: 'region' as const, ...reference }, identity = { windowId: 'return-app-child', documentGeneration: 'return-app-child-document' }
     const dispatch = async (action: object, id: string) => {
       expect(requestListener).toBeDefined()
@@ -2119,7 +2120,7 @@ it('[window-return-app] one automatic native-window intent retains its exact con
   vi.spyOn(api.ui.workbenchWindows, 'onRequest').mockImplementation(value => { listener = value; return () => { listener = undefined } })
   vi.spyOn(api.ui.workbenchWindows, 'ready').mockResolvedValue({ windowId: 'intent-main', documentGeneration: 'intent-document' })
   const replies = vi.spyOn(api.ui.workbenchWindows, 'respond').mockImplementation(() => {})
-  const page = await showHeaderPage(), state = useAppStore.getState(), reference = surveyPageProjection({ kind: 'page', ...page }, catalog(), state.tabs, () => {})!.selection[0]!
+  const page = await showHeaderPage(), state = useAppStore.getState(), reference = surveyPageProjection(page, catalog(), state.tabs, () => {})!.selection[0]!
   const target = { kind: 'region' as const, ...reference }, context = { surface: 'focus' as const, reference, view: 'region' as const }
   let finish!: (value: import('@agentmux/core/control').AppWindowPage) => void
   const calls = vi.spyOn(api.ui.workbenchWindows, 'call').mockImplementation(() => new Promise(resolve => { finish = resolve as typeof finish }))
@@ -2192,7 +2193,7 @@ it('[window-return-app] a sole Browser borrows the unique visible Survey occurre
   useAppStore.setState({ tabs: { ...state.tabs, [source().id]: createWorkbenchTab(source().id, browser), [sibling.id]: sibling }, layouts: { ...state.layouts,
     [resource.id]: addTabOccurrence(state.layouts[resource.id]!, 'source-group', sibling.id)! } })
   state.selectMainRegion({ displayWorkspaceId: resource.id, groupId: 'source-group', tabId: sibling.id, regionId: 'plain-return-sibling-region' })
-  const page = await showHeaderPage(), reference = surveyPageProjection({ kind: 'page', ...page }, catalog(), useAppStore.getState().tabs, () => {})!.selection[0]!
+  const page = await showHeaderPage(), reference = surveyPageProjection(page, catalog(), useAppStore.getState().tabs, () => {})!.selection[0]!
   const originalTarget = { kind: 'region' as const, ...reference }
   await act(async () => changes!({ issue: null, windows: [{ windowId: 'plain-return-shell', documentGeneration: 'plain-return-shell-document', target: originalTarget,
     presentation: 'pending', bounds: null, focused: null }] }))
@@ -2201,4 +2202,109 @@ it('[window-return-app] a sole Browser borrows the unique visible Survey occurre
   await vi.waitFor(() => expect(replies.mock.calls.some(([reply]) => reply.requestId === 'plain-survey-prepare')).toBe(true))
   expect(replies.mock.calls.find(([reply]) => reply.requestId === 'plain-survey-prepare')![0]).toMatchObject({ outcome: 'applied',
     returnContext: { surface: 'survey', reference, selection: { kind: 'page', ...page } } })
+})
+
+async function prepareHeaderlessResearch() {
+  const restores = vi.spyOn(api.browser, 'restore')
+  const state = useAppStore.getState(), extra = createWorkbenchTab('headerless-second-tab', { kind: 'file', workspaceId: resource.id, path: 'second-original.md', regionId: 'headerless-second-region' })
+  useAppStore.setState({ tabs: { ...state.tabs, [extra.id]: extra }, layouts: { ...state.layouts,
+    [resource.id]: addTabOccurrence(state.layouts[resource.id]!, 'source-group', extra.id)! }, surveyExplorationNames: {},
+    surveyOrganization: { ungrouped: [zones.source, zones.target], groups: [] } })
+  await checkpointSpatialWorkbench(); dragGeometry(); await dom.render(<App />)
+  const row = () => [...document.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(node => node.dataset.surveyZoneId === zones.source)!
+  await vi.waitFor(() => expect(row()?.dataset.headerless).toBe('true'))
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="Original file input"]')).not.toBeNull())
+  // The original Browser restore can publish its actual title after mount. Settle that ACK before the topology baseline.
+  await act(async () => { await Promise.all(restores.mock.results.map(result => result.value)) })
+  await checkpointSpatialWorkbench()
+  expect(useAppStore.getState().surveyOrganization.groups).toEqual([])
+  expect(row().querySelector('.survey-item')).toBeNull()
+  expect(row().querySelectorAll('.survey-tab-column')).toHaveLength(2)
+  return row()
+}
+
+it.each(['frame', 'grid gap'] as const)('[headerless-drag] original compact %s moves the complete research through the original Core owner', async surface => {
+  const row = await prepareHeaderlessResearch(), before = useAppStore.getState(), graphBefore = (await core.read())!.graph
+  const editor = document.querySelector<HTMLTextAreaElement>('[aria-label="Original file input"]')!; editor.value = 'Original compact research draft'
+  const originalRegions = Object.values(before.tabs['composition-tab']!.regions)
+  const destination = [...document.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(node => node.dataset.surveyZoneId === zones.target)!.getBoundingClientRect()
+  vi.mocked(api.spatial.commit).mockClear()
+  await dragPointer(surface === 'frame' ? row : row.querySelector<HTMLElement>('.survey-item-tabs')!, { x: destination.left + 90, y: destination.top + 45 })
+  await vi.waitFor(() => expect(catalog().tabs.filter(tab => ['composition-tab', 'headerless-second-tab'].includes(tab.tabId)).every(tab => tab.zoneId === zones.target)).toBe(true))
+  expect(vi.mocked(api.spatial.commit)).toHaveBeenCalledOnce()
+  const graph = (await core.read())!.graph
+  for (const region of originalRegions) {
+    expect(graph.resources['region:' + region.regionId]).toEqual(graphBefore.resources['region:' + region.regionId])
+    expect(useAppStore.getState().tabs['composition-tab']!.regions[region.regionId]).toEqual(region)
+  }
+  expect(useAppStore.getState().tabs['headerless-second-tab']!.regions['headerless-second-region']).toEqual(before.tabs['headerless-second-tab']!.regions['headerless-second-region'])
+  expect(document.querySelector('[aria-label="Original file input"]')).toBe(editor); expect(editor.value).toBe('Original compact research draft')
+  expect(useAppStore.getState().agentComposerDrafts).toEqual(before.agentComposerDrafts)
+})
+
+it('[headerless-drag] its independent grip changes only original list order and saves without a Core composition', async () => {
+  const commit = vi.spyOn(useAppStore.getState(), 'setSurveyOrganization'), row = await prepareHeaderlessResearch(), before = useAppStore.getState(), graph = await core.read()
+  const destination = [...document.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(node => node.dataset.surveyZoneId === zones.target)!.getBoundingClientRect()
+  vi.mocked(api.spatial.commit).mockClear()
+  await dragPointer(row.querySelector<HTMLElement>('.survey-drag-handle')!, { x: destination.left + 90, y: destination.top + 45 })
+  await vi.waitFor(() => expect(useAppStore.getState().surveyOrganization.ungrouped).toEqual([zones.target, zones.source]))
+  expect(commit).toHaveBeenCalledOnce(); expect(await commit.mock.results[0]!.value).toMatchObject({ changed: true, save: { clientStateWritten: true, storageFlushRequested: true } })
+  expect(vi.mocked(api.spatial.commit)).not.toHaveBeenCalled(); expect(await core.read()).toEqual(graph)
+  expect(useAppStore.getState().tabs).toEqual(before.tabs); expect(useAppStore.getState().surveyZoneSelection).toEqual(before.surveyZoneSelection)
+})
+
+it('[headerless-drag] a child thumbnail moves only its own complete Tab and keeps the research sibling', async () => {
+  const row = await prepareHeaderlessResearch(), before = useAppStore.getState()
+  const destination = [...document.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(node => node.dataset.surveyZoneId === zones.target)!.getBoundingClientRect()
+  await dragPointer(row.querySelector<HTMLElement>('[data-survey-tab-id="composition-tab"]')!, { x: destination.left + 90, y: destination.top + 45 })
+  await vi.waitFor(() => expect(catalog().tabs.find(tab => tab.tabId === 'composition-tab')!.zoneId).toBe(zones.target))
+  expect(catalog().tabs.find(tab => tab.tabId === 'headerless-second-tab')!.zoneId).toBe(zones.source)
+  expect(useAppStore.getState().tabs['headerless-second-tab']).toEqual(before.tabs['headerless-second-tab'])
+  expect(useAppStore.getState().tabs['composition-tab']!.regions).toEqual(before.tabs['composition-tab']!.regions)
+})
+
+it.each(['Escape', 'outside'] as const)('[headerless-drag] %s cancels the original whole-research pointer without any write', async cancellation => {
+  const row = await prepareHeaderlessResearch(), graph = await core.read(), before = useAppStore.getState(), commit = vi.spyOn(before, 'setSurveyOrganization')
+  const rect = row.getBoundingClientRect(), pointer = async (target: EventTarget, type: string, x: number, y: number) => act(async () => target.dispatchEvent(new PointerEvent(type,
+    { bubbles: true, cancelable: true, pointerId: 5, pointerType: 'mouse', isPrimary: true, button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: x, clientY: y })))
+  vi.mocked(api.spatial.commit).mockClear()
+  await pointer(row, 'pointerdown', rect.left + 90, rect.top + 8); await pointer(document, 'pointermove', rect.left + 100, rect.top + 8)
+  await vi.waitFor(() => expect(document.querySelector('.survey-page-list')?.getAttribute('data-dragging')).toBe('true'))
+  await pointer(document, 'pointermove', 700, 700)
+  if (cancellation === 'Escape') await act(async () => row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true })))
+  await pointer(document, 'pointerup', 700, 700)
+  expect(commit).not.toHaveBeenCalled(); expect(vi.mocked(api.spatial.commit)).not.toHaveBeenCalled(); expect(await core.read()).toEqual(graph)
+  expect(useAppStore.getState().surveyOrganization).toEqual(before.surveyOrganization); expect(useAppStore.getState().surveyZoneSelection).toEqual(before.surveyZoneSelection)
+})
+
+it.each(['research', 'tab'] as const)('[headerless-drag] keyboard pickup keeps the exact %s scope through the original Core owner', async scope => {
+  const row = await prepareHeaderlessResearch(), before = useAppStore.getState()
+  const activator = scope === 'research' ? row : row.querySelector<HTMLElement>('[data-survey-tab-id="composition-tab"]')!
+  if (scope === 'research') { expect(row.tabIndex).toBe(0); expect(row.getAttribute('role')).toBe('group') }
+  await act(async () => activator.focus()); expect(document.activeElement).toBe(activator)
+  const key = async (value: string, code: string) => act(async () => activator.dispatchEvent(new KeyboardEvent('keydown', { key: value, code, bubbles: true, cancelable: true })))
+  await key(' ', 'Space'); await vi.waitFor(() => expect(document.querySelector('.survey-page-list')?.getAttribute('data-dragging')).toBe('true'))
+  await new Promise(resolve => setTimeout(resolve, 30)); await key('ArrowDown', 'ArrowDown')
+  await new Promise(resolve => setTimeout(resolve, 30)); await key(' ', 'Space')
+  await vi.waitFor(() => expect(catalog().tabs.find(tab => tab.tabId === 'composition-tab')!.zoneId).toBe(zones.target))
+  expect(catalog().tabs.find(tab => tab.tabId === 'headerless-second-tab')!.zoneId).toBe(scope === 'research' ? zones.target : zones.source)
+  expect(useAppStore.getState().tabs['composition-tab']!.regions).toEqual(before.tabs['composition-tab']!.regions)
+})
+
+it('[headerless-drag] Portal menu, close and rename controls retain their own pointer scopes', async () => {
+  const row = await prepareHeaderlessResearch(), before = useAppStore.getState(), graph = await core.read()
+  const pointer = async (target: EventTarget, type: string) => act(async () => target.dispatchEvent(new PointerEvent(type,
+    { bubbles: true, cancelable: true, pointerId: 5, pointerType: 'mouse', isPrimary: true, button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: type === 'pointerdown' ? 100 : 112, clientY: 140 })))
+  const close = row.querySelector<HTMLElement>('.survey-tab-close')!
+  await pointer(close, 'pointerdown'); await pointer(document, 'pointermove'); expect(document.querySelector('.survey-page-list')?.hasAttribute('data-dragging')).toBe(false); await pointer(close, 'pointerup')
+  const options = row.querySelector<HTMLElement>('[aria-haspopup="menu"]')!; await menu(options.getAttribute('aria-label')!)
+  const rename = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Rename exploration')!
+  expect(row.contains(rename)).toBe(false)
+  await pointer(rename, 'pointerdown'); await pointer(document, 'pointermove'); expect(document.querySelector('.survey-page-list')?.hasAttribute('data-dragging')).toBe(false)
+  await pointer(rename, 'pointerup'); await act(async () => rename.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })))
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="Exploration name"]')).not.toBeNull())
+  const editor = document.querySelector<HTMLInputElement>('[aria-label="Exploration name"]')!
+  await pointer(editor, 'pointerdown'); await pointer(document, 'pointermove'); expect(document.querySelector('.survey-page-list')?.hasAttribute('data-dragging')).toBe(false); await pointer(editor, 'pointerup')
+  await act(async () => editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true })))
+  expect(await core.read()).toEqual(graph); expect(useAppStore.getState().surveyOrganization).toEqual(before.surveyOrganization)
 })
