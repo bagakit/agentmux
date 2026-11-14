@@ -212,6 +212,41 @@ it('a busy Supervisor retains coalesced planning operations and native eligibili
   expect((await f.goals.demands.get(goalId))!.patrols![0]!.report).toBeUndefined(); expect(f.io.stop).not.toHaveBeenCalled()
 })
 
+it.each(['changed-supervisor', 'removed-supervisor', 'changed-criteria', 'saved-plan'] as const)('a coalesced planning alias reconciles only its original request after %s', async change => {
+  const f = await fixture(), goalId = 'retained-planning-alias'
+  const next = await f.io.core.createAgent({ agentSessionId: 'next-manager', providerId: 'claude', executorId: 'claude', workspacePath: f.primary.workspacePath,
+    createOperationId: 'next-manager-create', injectAgentMuxGuide: false })
+  await f.goals.demands.create({ id: goalId, title: 'Original outcome', supervisorSessionId: f.primary.agentSessionId, assigneeSessionIds: [f.primary.agentSessionId, next.agentSessionId] })
+  await f.goals.demands.proposeAlignment(goalId, { summary: 'Original useful result', criteria: [{ id: 'result', text: 'Check the same outcome' }], openQuestions: [] })
+  await nativeState(f, 'working'); await f.goals.start()
+  const first = await f.rpc.call('goal.discuss', { goalId, mode: 'plan', operationId: 'planning-original' })
+  const merged = await f.rpc.call('goal.discuss', { goalId, mode: 'plan', operationId: 'planning-alias' })
+  expect(first.receipt).toMatchObject({ route: 'supervisor', requestOperationId: 'planning-original', agentSessionId: f.primary.agentSessionId })
+  expect(merged.receipt).toMatchObject({ route: 'supervisor', requestOperationId: 'planning-original' })
+  const original = (await f.goals.demands.get(goalId))!.patrols![0]!
+  expect(original.requestOperationIds).toEqual(['planning-alias'])
+  expect(original.attempts[0]!.attemptedAt).toBeUndefined()
+  if (change === 'changed-supervisor' || change === 'removed-supervisor') {
+    await f.goals.demands.update(goalId, { supervisorSessionId: change === 'changed-supervisor' ? next.agentSessionId : null })
+  } else if (change === 'changed-criteria') {
+    await f.goals.demands.proposeAlignment(goalId, { summary: 'Updated useful result', criteria: [{ id: 'updated', text: 'Check the updated outcome' }], openQuestions: [] })
+  } else {
+    const manager = await supervisor(f)
+    await manager.call('goal.plan.revise', { goalId, revision: { operationId: 'actual-supervisor-plan', expectedRevision: 0, alignmentRevision: 1,
+      nodes: [{ id: 'deliver', title: 'Deliver', outcome: 'Original outcome', dependsOn: [], criterionIds: ['result'], check: 'check original', executor: null }] } })
+  }
+  const before = (await f.goals.demands.get(goalId))!, writes = [...f.io.writes], starts = f.io.start.mock.calls.length
+  // A protocol/runtime rejection must become a semantic assertion failure, not an infrastructure RED.
+  const result = await f.rpc.call('goal.discuss', { goalId, mode: 'plan', operationId: 'planning-alias' })
+    .then(value => ({ value, error: null }), error => ({ value: null, error: String(error) }))
+  expect(result.error).toBeNull()
+  expect(result.value!.receipt).toMatchObject({ route: 'supervisor', operationId: 'planning-alias', requestOperationId: original.operationId,
+    hostId: 'local', agentSessionId: original.supervisorAgentSessionId })
+  expect(await f.goals.demands.get(goalId)).toEqual(before)
+  expect(before.patrols).toHaveLength(1); expect(before.patrols![0]!.attempts).toEqual(original.attempts)
+  expect(f.io.writes).toEqual(writes); expect(f.io.start.mock.calls.length).toBe(starts); expect(f.io.stop).not.toHaveBeenCalled()
+})
+
 it('a Supervisor change keeps the original planning request stale and only a new operation targets the new manager', async () => {
   const f = await fixture(), goalId = 'changed-planning-supervisor'
   const next = await f.io.core.createAgent({ agentSessionId: 'next-manager', providerId: 'claude', executorId: 'claude', workspacePath: f.primary.workspacePath,
