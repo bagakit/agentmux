@@ -77,14 +77,102 @@ async function click(label: string) {
     expect(assignment()?.getAttribute('aria-busy')).not.toBe('true')
   })
 }
-async function choose() {
-  await click('Assign agent…')
+async function selectExecutor(label: string) {
   await act(async () => assignment()!.querySelector<HTMLButtonElement>('[aria-label="Agent for this node"]')!.click())
   const options = [...document.querySelectorAll<HTMLButtonElement>('[role=option]')]
   expect(options.some(option => option.textContent?.includes('Remote engineer') && option.textContent.includes('remote · worker'))).toBe(true)
-  const option = options.find(item => item.textContent?.includes('Release engineer'))
+  const option = options.find(item => item.textContent?.includes(label))
   expect(option).toBeDefined(); await act(async () => option!.click())
 }
+
+async function choose() {
+  await click('Assign agent…')
+  await selectExecutor('Release engineer')
+}
+
+it('restores the selected executor after the first assignment checkpoint fails before IPC', async () => {
+  const f = await workbench()
+  await act(async () => entry('build').click())
+  await click('Assign agent…')
+  await selectExecutor('Remote engineer')
+  await act(async () => editGoalDraft(goalId, 'description', 'Keep this edit'))
+  vi.mocked(api.ui.requestStorageFlush).mockRejectedValue(Error('Desktop storage is busy'))
+  await click('Assign')
+  expect(f.calls.mock.calls.filter(([method]) => method === 'goal.plan.assignment')).toHaveLength(0)
+  expect(assignment()?.textContent).toContain('Assignment was not sent.')
+  const key = JSON.stringify([address.runtimeId, address.namespace, 'build'])
+  expect(useAppStore.getState().goalEditDrafts[goalId]?.assignments?.[key],
+    'A known-unsent choice must be editable').toEqual({ choice: { executor: { hostId: 'remote', agentSessionId: 'worker' }, revision: 1 } })
+  expect(assignment()?.querySelector('[aria-label="Agent for this node"]')?.textContent).toContain('Remote engineer')
+  vi.mocked(api.ui.requestStorageFlush).mockResolvedValue(undefined)
+  await selectExecutor('Release engineer')
+  await click('Assign')
+  const saved = (await f.store.get(goalId))!.plan!
+  expect(saved.revision).toBe(2)
+  expect(saved.nodes[0]!.executor).toEqual({ hostId: 'local', agentSessionId: 'worker' })
+  expect(f.calls.mock.calls.filter(([method]) => method === 'goal.plan.assignment')).toHaveLength(1)
+  expect(useAppStore.getState().goalEditDrafts[goalId]?.description?.value).toBe('Keep this edit')
+})
+
+it('preserves the original unknown assignment when a retry fails its own local checkpoint', async () => {
+  const f = await workbench()
+  await act(async () => entry('build').click())
+  // The renderer observes a lost transport before the owner receives this particular request.
+  f.calls.mockRejectedValueOnce(Error('Original assignment transport interrupted'))
+  await click('Open for claims')
+  const key = JSON.stringify([address.runtimeId, address.namespace, 'build'])
+  const original = useAppStore.getState().goalEditDrafts[goalId]?.assignments?.[key]?.request
+  expect(original?.operationId).toBeTruthy()
+  await click('Check original request')
+  vi.mocked(api.ui.requestStorageFlush).mockRejectedValue(Error('Desktop storage is busy'))
+  await click('Retry original request')
+  expect(useAppStore.getState().goalEditDrafts[goalId]?.assignments?.[key]?.request,
+    'A failed retry must keep the earlier unknown operation').toEqual(original)
+  expect(assignment()?.textContent).toContain('Retry was not sent.')
+  expect(f.calls.mock.calls.filter(([method]) => method === 'goal.plan.assignment')).toHaveLength(1)
+  vi.mocked(api.ui.requestStorageFlush).mockResolvedValue(undefined)
+  await click('Check original request')
+  await click('Retry original request')
+  expect(f.calls.mock.calls.filter(([method]) => method === 'goal.plan.assignment').map(([, request]) => request)).toEqual([original, original])
+  const saved = (await f.store.get(goalId))!.plan!
+  expect(saved.history).toHaveLength(2)
+  expect(saved.history[1]!.operationId).toBe(original!.operationId)
+})
+
+it('keeps the remounted retry when the older first checkpoint settles late', async () => {
+  const f = await workbench()
+  await act(async () => entry('build').click())
+  let release!: () => void, markReached!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  const reached = new Promise<void>(resolve => { markReached = resolve })
+  // The first flush is an observation. Delay the final durability acknowledgement of the first attempt.
+  vi.mocked(api.ui.requestStorageFlush).mockResolvedValueOnce(undefined).mockImplementationOnce(async () => {
+    markReached()
+    await held
+    throw Error('First checkpoint failed late')
+  })
+  const openButton = [...assignment()!.querySelectorAll('button')].find(button => button.textContent === 'Open for claims')!
+  await act(async () => { openButton.click(); await reached })
+  const key = JSON.stringify([address.runtimeId, address.namespace, 'build'])
+  const original = useAppStore.getState().goalEditDrafts[goalId]?.assignments?.[key]?.request
+  expect(original?.operationId).toBeTruthy()
+  try {
+    await dom.render(null)
+    await dom.render(<GlobalBoardSurface />)
+    await act(async () => entry('build').click())
+    await click('Check original request')
+    f.calls.mockRejectedValueOnce(Error('Retry lost its transport'))
+    await click('Retry original request')
+  } finally {
+    await act(async () => { release(); await held })
+  }
+  expect(useAppStore.getState().goalEditDrafts[goalId]?.assignments?.[key]?.request,
+    'A late completion cannot remove the remounted request').toEqual(original)
+  expect(f.calls.mock.calls.filter(([method]) => method === 'goal.plan.assignment')).toHaveLength(1)
+  await click('Check original request')
+  await click('Retry original request')
+  expect((await f.store.get(goalId))!.plan!.history[1]!.operationId).toBe(original!.operationId)
+})
 
 it('opens, closes and assigns the selected node through the board, trusted IPC and original Goal owner', async () => {
   const f = await workbench()
