@@ -14,6 +14,12 @@ display Workspace and process cwd are not interchangeable. Discover globally rat
 assuming the current Tab contains every resource or Agent.
 
 app window ls observes the original client windows and their opaque document generations.
+Use `app window open --kind surface --surface survey` for the whole Survey navigation and
+workface, or `--surface recall` for the notebook library and editor. Each surface has one
+window and keeps its current selection while the main window shows Focus or another surface.
+The native close button on a surface window preserves the main window's navigation.
+`app window return` presents its original surface in the main window by default.
+Use `--preserve-navigation` to keep the current main view while returning the content.
 A whole-Tab window uses --kind tab without --region. recordedOperation keeps the original
 operation's intent, author and receipt state; it does not prove the window is still in front.
 app window open moves one exact discovered Tab/Region occurrence; it does not clone content,
