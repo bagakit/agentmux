@@ -3345,8 +3345,8 @@ export class BrowserViewManager {
     return projected
   }
 
+  /** Saved run facts do not need a native page or presentation lease. */
   async inspectTaskRun(id: string, runId?: string): Promise<Awaited<ReturnType<BrowserTaskAssets['inspect']>>> {
-    this.require(id)
     if (!this.taskAssets) throw new Error('Task asset storage is unavailable. The Browser remains usable.')
     return await this.taskAssets.inspect(id, runId)
   }

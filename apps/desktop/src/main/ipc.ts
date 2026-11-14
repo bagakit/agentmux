@@ -725,7 +725,7 @@ export async function registerIpc(args: {
     importTaskAsset: (id, input) => browsers.importTaskAsset(id, input),
     inspectTaskAssetCreation: (id, input) => browsers.inspectTaskAssetCreation(id, input),
     getTaskAssets: async (id: string) => { await ensureBrowser(id); return await browsers.getTaskAssets(id) },
-    inspectTaskRun: async (id: string, runId?: string) => { await ensureBrowser(id); return await browsers.inspectTaskRun(id, runId) },
+    inspectTaskRun: (id: string, runId?: string) => browsers.inspectTaskRun(id, runId),
     saveTaskAssetDraft: (id: string, assetId: string, revision: number, content: unknown) => browsers.saveTaskAssetDraft(id, assetId, revision, content),
     publishTaskAsset: (id: string, assetId: string, revision: number) => browsers.publishTaskAsset(id, assetId, revision),
     getOperation: (id: string) => browsers.getOperation(id),
@@ -739,7 +739,7 @@ export async function registerIpc(args: {
   ): Promise<AgentMuxControlResult> => {
     if (request.operation === 'browser.release') return { operation: request.operation,
       receipt: await browsers.release(request.browserId, request.navigationId) }
-    if (request.operation === 'browser.task.export' || request.operation === 'browser.task.import' || request.operation === 'browser.task.import-inspect' || request.operation === 'browser.task.edit' || request.operation === 'browser.task.publish' || request.operation === 'browser.task.source' || request.operation === 'browser.task.draft' || request.operation === 'browser.task.create' || request.operation === 'browser.task.create-inspect') return await controlBrowserTask(request)
+    if (request.operation === 'browser.task.inspect' || request.operation === 'browser.task.export' || request.operation === 'browser.task.import' || request.operation === 'browser.task.import-inspect' || request.operation === 'browser.task.edit' || request.operation === 'browser.task.publish' || request.operation === 'browser.task.source' || request.operation === 'browser.task.draft' || request.operation === 'browser.task.create' || request.operation === 'browser.task.create-inspect') return await controlBrowserTask(request)
     if (request.operation === 'space.mote.preferences.read' || request.operation === 'space.mote.preferences.save') {
       if (request.kind === 'quick') return controlBridge.execute(request, signal)
       throw new AgentMuxError('Connection preferences belong to their original background Host. Use that Host endpoint; the Mote files and Agents are retained.', 'CONTROL_UNAVAILABLE')
