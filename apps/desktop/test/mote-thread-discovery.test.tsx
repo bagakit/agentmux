@@ -106,7 +106,7 @@ it('hidden member view pauses searched work reads until the original work view r
     const [value, setValue] = useState(page)
     return <MoteWorkThreads page={value} issue={null} loading={false} visible readWork={read} memberName={() => '资料研究员'}
       onRefresh={() => setValue(previous => ({ ...previous }))} onOpenWork={() => {}}
-      members={{ count: null, content: <p>原成员目录</p> }} />
+      members={{ count: null, content: () => <p>原成员目录</p> }} />
   }
   await act(async () => root.render(<Threads />))
   await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(3))
@@ -181,7 +181,7 @@ it('real Desktop App Threads searches the same original dispatch records and ret
   const read = prepareDesktop()
   await app!.mount(); await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTopicId: moteTopics[0]!.id })); await settleMoteApp()
   const body = app!.panel().querySelector('[data-activity-session="' + current.sessionId + '"]')
-  await moteClick(button(app!.panel(), 'Threads'))
+  await moteClick(button(app!.panel(), '工作'))
   expect(app!.panel().querySelector('.mote-threads-panel:not([hidden])')).not.toBeNull()
   await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(3))
   await search(app!.panel(), '缓存'); expect(shown(app!.panel())).toEqual(['cache'])

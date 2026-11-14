@@ -143,7 +143,7 @@ const bindings = { ...state.spaceZoneBindings, ...Object.fromEntries(topicRecord
   const spaceId = directoryIdentity(workspace.hostId, topic.directoryPath)
   return [homeZoneId(spaceId), { spaceId, workspaceId: workspace.id, topicId: topic.id, directoryPath: topic.directoryPath, contentKind: 'mote' as const }]
 })) }
-const originalDrafts = { ...state.agentComposerDrafts, 'mote-primary': '还有一个问题先留在这里，暂不发送。', 'mote-neighbor': '核对记录后再决定下一步。' }
+const originalDrafts = new URLSearchParams(location.search).get('phase') === 'restore' ? state.agentComposerDrafts : { ...state.agentComposerDrafts, 'mote-primary': '还有一个问题先留在这里，暂不发送。', 'mote-neighbor': '核对记录后再决定下一步。' }
 useAppStore.setState({ sessions: originalSessions, tabs: seededTabs, spaceZoneBindings: bindings, scratchTopicSnapshots: snapshots(),
   agentNames: Object.fromEntries(originalSessions.map(session => [session.id, session.label])), agentComposerDrafts: originalDrafts,
   viewModes: Object.fromEntries(originalSessions.map(session => [session.id, 'activity'])), demands: {}, error: null, lastError: null })
@@ -165,8 +165,8 @@ Object.assign(window, { moteCooperationCapture: { ready: true, facts, theme,
     useAppStore.setState({ scratchTopicSnapshots: snapshots(), sessions: useAppStore.getState().sessions.filter(session => session.id !== 'mote-neighbor') })
   },
   restore() { topicRecords = structuredClone(originalTopicRecords); useAppStore.setState({ scratchTopicSnapshots: snapshots(), sessions: originalSessions }) },
-  longNames() {
-    topicRecords = topicRecords.map(topic => topic.id === PMO_TEAMS_TOPIC_ID ? { ...topic, title: '长期合作伙伴：产品体验与可靠实现' } : topic)
+  longNames(includeCustom = false) {
+    topicRecords = topicRecords.map(topic => topic.id === PMO_TEAMS_TOPIC_ID || includeCustom && topic.id === 'launcher:reviewer' ? { ...topic, title: '长期合作伙伴：产品体验与可靠实现' } : topic)
     const sessions = originalSessions.map(session => ({ ...session, label: session.id === 'mote-neighbor' ? '实现与校验：跨客户端准确引用及原工作接续验证' : session.label }))
     useAppStore.setState({ sessions, tabs: Object.fromEntries(Object.entries(useAppStore.getState().tabs).map(([id, tab]) => [id, id === 'mote-neighbor-tab' ? { ...tab, name: '实现与校验：跨客户端准确引用及原工作接续验证' } : tab])), agentNames: Object.fromEntries(sessions.map(session => [session.id, session.label])), scratchTopicSnapshots: snapshots() })
   },
