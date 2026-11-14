@@ -8,7 +8,7 @@ const root = resolve(import.meta.dirname, '../../..')
 const dependencyRepository = resolve(realpathSync(resolve(root, 'node_modules')), '..')
 // The isolated worktree has no shipping dist. Exercise these current public sources explicitly.
 const aliases: Alias[] = []
-for (const name of ['core', 'demand', 'git', 'identity', 'layout', 'client-ui', 'relay', 'diagnostic-evidence', 'host']) {
+for (const name of ['core', 'browser', 'demand', 'git', 'identity', 'layout', 'client-ui', 'relay', 'diagnostic-evidence', 'host']) {
   const directory = resolve(root, name === 'host' ? 'apps' : 'packages', name)
   const manifest = JSON.parse(readFileSync(resolve(directory, 'package.json'), 'utf8'))
   const exports = (Object.entries(manifest.exports ?? {}) as [string, string | { import?: string; browser?: string }][])
