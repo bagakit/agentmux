@@ -116,7 +116,7 @@ async function original(initialPage = dialogue(), nativePending = false, unrelat
   f.client.forwardRpc = rpc
   const platform = createBrowserPlatform(), render = (client = f.client, restoreWorkface = false) => <MobileApp restoreWorkface={restoreWorkface} client={client} connection={{ state: 'connected', message: 'Original connected Host' }} platform={platform} />
   const view = await mount(render())
-  await wait(() => expect(view.element.querySelector(nativePending ? '.mobile-mote-navigation' : '[data-mote-discussion]')).not.toBeNull())
+  await wait(() => expect(view.element.querySelector(nativePending ? '.mobile-mote-sections' : '[data-mote-discussion]')).not.toBeNull())
   return { ...f, rpc, owner, view, render, facts, setPage(value: MoteDialoguePage) { page = value }, mainInput(mode: typeof inputMode) { inputMode = mode }, failDialogueRead() { readFailure = true }, setup(value: string | null, lost = false, pending = false) { setupExecutor = value; loseCreation = lost; pendingBinding = pending }, wrongWorkHost() { workResult = { ...workResult, hostId: 'foreign-host' } } }
 }
 
@@ -149,6 +149,8 @@ it('actual Mobile App separates Main-only Discussion and independent original Th
   await click(button(f.view.element, '继续原工作'))
   await wait(() => expect(f.owner.snapshot().record.selectedSessionId).toBe(worker))
   await paste(f.view.element, '成员原稿')
+  // The opened work is one layer below Threads; Discussion is a section of the Mote root.
+  await click(button(f.view.element, '返回 Threads'))
   await click(button(f.view.element, 'Discussion'))
   await wait(() => expect(f.owner.snapshot().record.selectedSessionId).toBe(sid))
   expect(editor(f.view.element).textContent).toBe('主对话原稿，不因查看工作而发送')
@@ -303,7 +305,7 @@ it('keeps explicit member navigation generic even if that exact member later bec
   await refreshMote(f)
   await wait(() => expect(f.view.element.querySelector('.mobile-mote-source-status')).toBeNull())
   await f.view.render(null); await f.view.render(f.render())
-  await wait(() => expect(f.view.element.querySelector('.mobile-mote-thread-return span')?.textContent).toMatch(/^Agent 对话 · /))
+  await wait(() => expect(f.view.element.querySelector('[data-mobile-back]')?.getAttribute('aria-label')).toBe('返回 Threads'))
   await paste(f.view.element, '明确给原成员的输入'); await click(button(f.view.element, 'Send'))
   await wait(() => expect(f.submit).toHaveBeenCalledOnce())
   expect(f.submit.mock.calls[0]![0].agentSessionId).toBe(worker)

@@ -14,6 +14,7 @@ import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { mobileKnowledgeDraftKey } from '../src/recovery/knowledge-drafts'
 import { button, click, fixture, mount, mounted } from './conversation-fixture'
+import { openPrimary } from './mobile-root-navigation'
 
 const connected = { state: 'connected' as const, message: 'Original mounted client' }
 const hostId = 'original-chat-source-host', workspaceId = 'original-chat-source-workspace'
@@ -98,7 +99,7 @@ describe('actual App Knowledge Chat source consumes original Files and Markdown'
     f.client.forwardRpc = rpc as NonNullable<typeof f.client.forwardRpc>
     const owner = getDeviceWorkface(), recordId = owner.recordIdentity()
     const { element } = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
-    await click(button(element.querySelector<HTMLElement>('.mobile-navigation')!, 'Topics'))
+    await openPrimary(element, 'Topics')
     const topics = element.querySelector<HTMLElement>('section[aria-label="Topics"]')!
     await waitFor(() => expect(topics.textContent).toContain(categories[1]!.title))
     await click(button(topics, categories[1]!.title))

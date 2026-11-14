@@ -16,6 +16,7 @@ import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-w
 import { button, click, fixture, mount, mounted, session } from './conversation-fixture'
 import { fixturePath } from '../../../test/fixture-values.mjs'
 import { mobileAgentStateLabel } from '../src/navigation/mobile-agent-status'
+import { openPrimary } from './mobile-root-navigation'
 
 type Row = NonNullable<AgentMuxSpaceCatalog['agentPresentation']>[number]
 const sid = 'session-original', hostId = 'host-original'
@@ -129,7 +130,7 @@ async function appMenu(missingPresentation = false) {
   await owner.updateConversation({ version: 1, drafts: [['peer', '原未发送草稿']], attempts: [], responses: [] })
   const originalWorkface = owner.snapshot().record.conversation
   const view = await mount(<MobileApp client={f.client} connection={{ state: 'connected', message: '原 Host 已连接' }} platform={createBrowserPlatform()} />)
-  await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Focus'))
+  await openPrimary(view.element, 'Focus')
   await wait(() => expect(view.element.querySelectorAll('.mobile-agent-row__open')).toHaveLength(rows.length))
   if (missingPresentation) {
     const summary = [...view.element.querySelectorAll('summary')].find(node => node.textContent === '其他已有会话')!

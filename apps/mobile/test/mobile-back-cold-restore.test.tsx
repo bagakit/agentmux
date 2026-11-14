@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { DEVICE_WORKFACE_KEY, getDeviceWorkface } from '../src/recovery/device-workface'
-import { button, click, fixture, mount, mounted } from './conversation-fixture'
+import { button, click, fixture, mount, mounted, waitForElement } from './conversation-fixture'
+import { openPrimary } from './mobile-root-navigation'
 
 afterEach(async () => {
   for (const view of mounted.splice(0)) { await act(async () => view.root.unmount()); view.element.remove() }
@@ -37,9 +38,9 @@ describe('original Space cold Back boundary', () => {
     const connection = { state: 'connected' as const, message: 'Connected to original Host' }
     const app = () => <MobileApp client={f.client} connection={connection} platform={createBrowserPlatform()} />
     const original = await mount(app())
-    await click(button(original.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Space'))
-    await click(original.element.querySelector('.mobile-space-row')!)
-    await click(original.element.querySelector('.mobile-spatial-tab button')!)
+    await openPrimary(original.element, 'Space')
+    await click(await waitForElement(original.element, '.mobile-space-row'))
+    await click(await waitForElement(original.element, '.mobile-spatial-tab button'))
     await vi.waitFor(() => expect(original.element.querySelector('.mobile-region-content h1')?.textContent).toBe('Original cold Space file'))
     const record = getDeviceWorkface().snapshot().record
     const raw = localStorage.getItem(DEVICE_WORKFACE_KEY)
@@ -61,7 +62,7 @@ describe('original Space cold Back boundary', () => {
     expect(getDeviceWorkface().snapshot().record).toEqual(record)
     expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe(raw)
     expect(restored.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(false)
-    await click(button(restored.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Space'))
+    await openPrimary(restored.element, 'Space')
     expect(restored.element.querySelector('.mobile-spatial-tab')).toBeNull()
     expect(restored.element.querySelector('.mobile-region-content h1')?.textContent).toBe('Original cold Space file')
     expect(window.history.state).toEqual(guard)

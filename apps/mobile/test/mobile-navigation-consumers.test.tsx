@@ -6,6 +6,7 @@ import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { saveMobileHome } from '../src/navigation/home-preference'
 import { button, click, evidence, fixture, mount, mounted, session, waitForElement } from './conversation-fixture'
+import { openPrimary } from './mobile-root-navigation'
 
 const connection = { state: 'connected' as const, message: '已连接' }
 beforeEach(async () => { window.history.replaceState(null, ''); localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
@@ -32,7 +33,7 @@ async function app(presentation: boolean | 'missing-provider' = true) {
   await owner.updateConversation({ version: 1, drafts: [['session-original', 'Original retained draft']], attempts: [], responses: [] })
   const original = owner.snapshot().record.conversation
   const view = await mount(<MobileApp client={f.client} connection={connection} platform={{ ...createBrowserPlatform(), copyText: copy }} />)
-  await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Focus'))
+  await openPrimary(view.element, 'Focus')
   await waitForElement(view.element, '.mobile-session-list')
   expect(view.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(true)
   return { ...f, ...view, fullDirectory, pointRead, copy, ensure, original, failCatalog: () => { catalogFails = true } }

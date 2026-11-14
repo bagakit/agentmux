@@ -5,6 +5,7 @@ import { expect, it } from 'vitest'
 import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
+import { returnToRoot } from './mobile-root-navigation'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -19,7 +20,7 @@ it('mounts the actual LAN workface without secure-context randomUUID and retains
     try { await act(async () => root.render(<MobileApp client={null} connection={{ state: 'disconnected', message: '原 Host 尚未连接' }} platform={createBrowserPlatform()} />)) }
     catch (error) { failure = error }
     expect(failure, 'LAN must mount the actual product instead of failing during Back ownership').toBeNull()
-    expect([...element.querySelectorAll('.mobile-navigation button')].map(value => value.textContent)).toEqual(['Goals', 'Topics', 'Mote', 'Focus', 'Space'])
+    expect([...(await returnToRoot(element)).querySelectorAll('button')].map(value => value.getAttribute('aria-label'))).toEqual(['Goals', 'Topics', 'Mote', 'Focus', 'Space'])
     expect(getDeviceWorkface().snapshot().record.presentation?.primary).toBe('focus')
   } finally { await act(async () => root.unmount()); element.remove() }
 })

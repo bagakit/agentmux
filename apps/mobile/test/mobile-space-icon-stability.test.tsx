@@ -5,6 +5,7 @@ import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { button, click, deferred, fixture, mount, mounted, waitForElement } from './conversation-fixture'
+import { openPrimary } from './mobile-root-navigation'
 
 // Dynamic directory module loading is part of this correctness journey.
 vi.setConfig({ testTimeout: 30000 })
@@ -45,7 +46,7 @@ it.each(['image', 'error'] as const)('keeps the original Space %s and avoids a r
   await getDeviceWorkface().updatePresentation({ selectedSessionId: 'session-original', hostUrl: '', panel: 'conversation' },
     { primary: 'space', showSession: false, showGoalWork: false, identity: null, profile: null })
   const view = await mount(<MobileApp client={f.client} connection={{ state: 'connected', message: '原 Host' }} platform={createBrowserPlatform()} native />)
-  await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Space'))
+  await openPrimary(view.element, 'Space')
   await waitForElement(view.element, '.mobile-space-row')
   const icon = () => view.element.querySelector<HTMLImageElement>('.mobile-space-row .mobile-space-icon img')
   const notice = () => [...document.querySelectorAll<HTMLElement>('.mobile-avatar-notice')].find(node => !node.closest('[hidden]'))

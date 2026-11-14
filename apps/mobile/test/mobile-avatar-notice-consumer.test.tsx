@@ -5,6 +5,7 @@ import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { button, click, deferred, editor, fixture, mount, mounted, paste, waitForElement, openAppMenu } from './conversation-fixture'
+import { openPrimary } from './mobile-root-navigation'
 
 // First-use deferred panels are awaited as product state, not a latency oracle.
 vi.setConfig({ testTimeout: 30000 })
@@ -50,6 +51,13 @@ function notice(): HTMLElement {
   const node = summary!.closest<HTMLElement>('.mobile-notice')
   expect(node).not.toBeNull()
   return node!
+}
+/** Text a person can see; hidden panels keep their own owners' facts out of view. */
+function visibleText(root: Node) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let text = ''
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) if (!node.parentElement?.closest('[hidden]')) text += node.textContent
+  return text
 }
 async function reveal() {
   const node = notice()
@@ -173,7 +181,7 @@ it('groups same-name Space failures into one notice and retries only the selecte
   await getDeviceWorkface().updatePresentation({ selectedSessionId: sid, hostUrl: '', panel: 'conversation' },
     { primary: 'space', showSession: false, showGoalWork: false, identity: null, profile: null })
   const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} native />)
-  await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Space'))
+  await openPrimary(view.element, 'Space')
   await waitForElement(view.element, '.mobile-space-row')
   const summaries = () => [...document.querySelectorAll<HTMLElement>('.mobile-avatar-notice > .mobile-notice__body > details > summary')]
   await vi.waitFor(() => expect(summaries()).toHaveLength(1))
@@ -261,14 +269,17 @@ it('does not carry an old Mote observation failure into a different selected Ses
   await waitForElement(document, '.mobile-avatar-notice')
   expect((await reveal()).textContent).toContain('旧会话头像失败')
   first = false
-  await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Focus'))
+  await openPrimary(view.element, 'Focus')
   await waitForElement(view.element, '.mobile-agent-row__open')
   expect(view.element.textContent).toContain('另一个会话')
   const row = [...view.element.querySelectorAll<HTMLButtonElement>('.mobile-agent-row__open')].find(value => value.textContent?.includes('另一个会话'))!
   expect(row).toBeDefined()
   await click(row)
   expect(getDeviceWorkface().snapshot().record.selectedSessionId).toBe('peer')
-  expect(document.body.textContent).not.toContain('旧会话头像失败')
+  // The avatar owner drops the earlier Session's failure. The same Mote's team reading keeps its own
+  // last read issue in the hidden Threads panel until its next read settles.
+  expect([...document.querySelectorAll('.mobile-avatar-notice')].map(node => node.textContent).join('')).not.toContain('旧会话头像失败')
+  expect(visibleText(document.body)).not.toContain('旧会话头像失败')
   expect([...document.querySelectorAll('summary')].filter(node => !node.closest('[hidden]') && node.textContent?.includes('头像外观未确认'))).toHaveLength(0)
   await act(async () => pending.reject(Error('新会话头像失败')))
   await waitForElement(document, '.mobile-avatar-notice')
@@ -289,7 +300,12 @@ it.each(['mote', 'space'] as const)('%s does not transfer a batched old-owner re
     retry.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     root.render(view.surface(next.client))
   })
-  await vi.waitFor(() => expect((next.client.forwardRpc as any).mock.calls.filter(([name, params]: any[]) => name === next.method && params?.target?.spaceId === spaceId)).toHaveLength(1))
+  // The new Host repeats only the original mount's first reads (a Mote's team reading uses the same
+  // public read as its avatar); the old owner's retry adds none, even after the batch settles.
+  const nextReads = () => (next.client.forwardRpc as any).mock.calls.filter(([name, params]: any[]) => name === next.method && params?.target?.spaceId === spaceId)
+  await vi.waitFor(() => expect(nextReads()).toHaveLength(oldReads))
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)) })
+  expect(nextReads()).toHaveLength(oldReads)
   expect((old.client.forwardRpc as any).mock.calls.filter(([name, params]: any[]) => name === old.method && params?.target?.spaceId === spaceId)).toHaveLength(oldReads)
   expect([...document.querySelectorAll('summary')].some(node => node.textContent?.includes('头像外观未确认'))).toBe(false)
   expect(old.submit).not.toHaveBeenCalled(); expect(next.submit).not.toHaveBeenCalled()
@@ -363,7 +379,7 @@ it('explicitly retries a Space appearance issue even when the original appearanc
   await getDeviceWorkface().updatePresentation({ selectedSessionId: sid, hostUrl: '', panel: 'conversation' },
     { primary: 'space', showSession: false, showGoalWork: false, identity: null, profile: null })
   const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} native />)
-  await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Space'))
+  await openPrimary(view.element, 'Space')
   await waitForElement(view.element, '.mobile-space-row')
   await waitForElement(document, '.mobile-avatar-notice')
   const item = await reveal()

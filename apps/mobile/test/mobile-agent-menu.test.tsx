@@ -10,6 +10,7 @@ import { saveMobileHome } from '../src/navigation/home-preference'
 import { MobileGoalSessions } from '../src/goals/MobileGoalSessions'
 import { MobileRegionContent } from '../src/navigation/MobileRegionContent'
 import { button, click, deferred, fixture, mount, mounted, session } from './conversation-fixture'
+import { openPrimary } from './mobile-root-navigation'
 
 beforeEach(async () => { window.history.replaceState(null, ''); localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => { vi.useRealTimers(); for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() }; document.body.replaceChildren(); vi.restoreAllMocks() })
@@ -103,7 +104,7 @@ async function appMenu(inspect: (id: string) => Promise<unknown>, initial = cach
   const original = owner.snapshot().record.conversation
   const app = () => <MobileApp client={f.client} connection={connection} platform={{ ...createBrowserPlatform(), copyText: copy }} />
   const view = await mount(app())
-  await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Focus'))
+  await openPrimary(view.element, 'Focus')
   await vi.waitFor(() => expect(button(view.element, '另一个原 Agent · 更多操作')).toBeDefined(), { timeout: 10000 })
   return { ...f, ...view, copy, ensure, original, app }
 }

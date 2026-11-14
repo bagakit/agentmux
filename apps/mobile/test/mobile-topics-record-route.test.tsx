@@ -6,7 +6,8 @@ import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { mobileKnowledgeDraftKey } from '../src/recovery/knowledge-drafts'
-import { button, click, deferred, fixture, mount, mounted } from './conversation-fixture'
+import { button, click, deferred, fixture, mount, mounted, waitForElement } from './conversation-fixture'
+import { openPrimary } from './mobile-root-navigation'
 
 const connected = { state: 'connected' as const, message: 'Original connected test client' }
 const hostId = 'original-topic-host', workspaceId = 'original-topic-workspace', zoneId = 'original-file-zone'
@@ -55,8 +56,8 @@ async function unmount(view: Awaited<ReturnType<typeof mount>>) {
 }
 async function enterKnowledge(f: ReturnType<typeof originalClient>) {
   const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
-  await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Topics'))
-  const topics = view.element.querySelector<HTMLElement>('section[aria-label="Topics"]')!
+  await openPrimary(view.element, 'Topics')
+  const topics = await waitForElement<HTMLElement>(view.element, 'section[aria-label="Topics"]')
   await vi.waitFor(() => expect(topics.textContent).toContain('Second Category'))
   await click(button(topics, 'Second Category')); await click(button(topics, 'Second Topic'))
   await click(button(topics.querySelector<HTMLElement>('[aria-label="Topic 内容"]')!, '知识'))
@@ -87,6 +88,7 @@ describe('actual App Topics route consumes original device fields', () => {
     await vi.waitFor(() => expect(owner.snapshot().record.knowledgeDrafts?.[0]?.content).toBe('Later body remains unsent'))
     await click(button(knowledge, '返回阅读'))
     await click(knowledge.querySelector('.mobile-topic-source')!)
+    await waitForElement(view.element, '.mobile-topic-source-reader')
     await vi.waitFor(() => expect(view.element.querySelector('.mobile-topic-source-reader')?.textContent).toContain('second.md'))
     await click(button(view.element.querySelector<HTMLElement>('.mobile-topic-source-reader')!, 'second.md'))
     await vi.waitFor(() => {
@@ -102,7 +104,7 @@ describe('actual App Topics route consumes original device fields', () => {
     await unmount(view)
     // Original stored record and draft are the only input to the new actual App.
     const restored = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
-    await click(button(restored.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Topics'))
+    await openPrimary(restored.element, 'Topics')
     await vi.waitFor(() => expect(restored.element.querySelector('.mobile-topic-source-reader h1')?.textContent).toBe('second.md'))
     const reader = restored.element.querySelector<HTMLElement>('.mobile-topic-source-reader')!
     await click(button(reader, '返回上层来源')); await click(button(reader, '返回知识'))

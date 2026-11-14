@@ -6,6 +6,7 @@ import { MobileHeaderMenuContext } from '../src/navigation/MobileHeaderMenu'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { button, click, editor, fixture, mount, mounted, waitForElement } from './conversation-fixture'
+import { openPrimary } from './mobile-root-navigation'
 
 // Only native canvas paint is outside this DOM test; navigation and every callback owner stay real.
 vi.mock('../src/terminal/MobileTerminalViewer', () => ({ MobileTerminalViewer: ({ agentSessionId }: { agentSessionId: string }) => <div data-terminal-session={agentSessionId} /> }))
@@ -31,7 +32,7 @@ it('pushes through the actual conversation Goal and mailbox Terminal callbacks a
   await import('../src/navigation/MobileGoalWork')
   const f = appFixture(), view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
   const main = view.element.querySelector<HTMLElement>('.mobile-main')!
-  await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Focus'))
+  await openPrimary(view.element, 'Focus')
   await click(await waitForElement(view.element, '.mobile-agent-row__open'))
   const original = editor(view.element)
   expect(main.dataset.motion).toBe('push')

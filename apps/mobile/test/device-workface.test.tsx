@@ -6,10 +6,11 @@ import { MobileRecoveryPanel } from '../src/recovery/MobileRecoveryPanel'
 import { MobileApp } from '../src/MobileApp'
 import { createLocalDrafts } from '../src/conversation/local-drafts'
 import { createBrowserPlatform } from '../src/platform/browser'
-import { button, click, editor, fixture, mount, mounted } from './conversation-fixture'
+import { button, click, editor, fixture, mount, mounted, openAppMenu } from './conversation-fixture'
 import { retainObjectReference } from '../src/recovery/presentation-route'
 import { parseAgentMuxControlReceipt } from '../../../packages/core/src/control-codec'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
+import { openPrimary, returnToRoot } from './mobile-root-navigation'
 
 const key = JSON.stringify(['draft', 'session-original'])
 function original(): DeviceWorkface {
@@ -77,9 +78,10 @@ describe('one durable mobile workface owner', () => {
     f.client.forwardRpc = rpc
     const app = () => <MobileApp client={f.client} connection={{ state: 'connected', message: '原 Host' }} platform={createBrowserPlatform()} />
     const view = await mount(app())
-    if (primary === 'space') await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Space'))
+    if (primary === 'space') await openPrimary(view.element, 'Space')
     else {
-      await click(view.element.querySelector('.mobile-settings-button')!)
+      // The directory header carries the app menu; the conversation's own sheet would read its Agent usage first.
+      await returnToRoot(view.element); await openAppMenu(view.element)
       const survey = document.body.querySelector('.mobile-drawer-workfaces button')!
       expect(survey.textContent).toContain('Survey'); await click(survey)
     }
@@ -301,7 +303,7 @@ describe('one durable mobile workface owner', () => {
     f.client.forwardRpc = vi.fn().mockImplementation(async () => ({ catalog: { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [],
       agentPresentation: [{ agentSessionId: 'session-original', name: 'Original Agent', project: '', group: 'working', state: 'working', detail: '', providerId: 'codex' }] } }))
     const view = await mount(<MobileApp client={f.client} connection={{ state: 'connected', message: '原 Mac 已连接' }} platform={createBrowserPlatform()} />)
-    await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Focus'))
+    await openPrimary(view.element, 'Focus')
     await click(view.element.querySelector<HTMLButtonElement>('.mobile-session-list button')!)
     await view.render(<MobileApp client={null} connection={{ state: 'disconnected', message: '原 Mac 暂不可达' }} platform={createBrowserPlatform()} />)
     expect(view.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(false)

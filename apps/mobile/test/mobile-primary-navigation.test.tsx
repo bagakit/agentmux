@@ -6,7 +6,8 @@ import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { freezeMobileGoalUpdateRequest } from '../src/recovery/goal-drafts'
-import { openTreeSession, button, click, deferred, editor, fixture, mount, mounted, paste, openAppMenu } from './conversation-fixture'
+import { button, click, deferred, editor, fixture, mount, mounted, paste, openAppMenu, waitForElement } from './conversation-fixture'
+import { openMoteAgent, openMoteMain, openPrimary, returnToRoot } from './mobile-root-navigation'
 const native = vi.hoisted(() => ({ back: null as (() => void) | null }))
 vi.mock('../src/platform/native/device', async importOriginal => ({ ...await importOriginal<Record<string, unknown>>(),
   bindNativeDevice: vi.fn((options: { onBack(): void }) => { native.back = options.onBack; return { dispose: async () => { native.back = null } } }) }))
@@ -50,7 +51,7 @@ describe('actual phone primary workfaces', () => {
     const owner = getDeviceWorkface(), record = owner.recordIdentity()
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
     for (const label of order) {
-      await click(button(nav(view.element), label))
+      await openPrimary(view.element, label)
       const headings = [...view.element.querySelectorAll<HTMLElement>('.mobile-page-header')].filter(value => !value.closest('[hidden]'))
       expect(headings).toHaveLength(1)
       expect(headings[0]!.querySelector('h1')?.textContent).toBe(label)
@@ -89,12 +90,14 @@ describe('actual phone primary workfaces', () => {
       operations: [{ request, ownerInstanceId: 'original-process', phase: 'sending', issue: null }] }, owner.recordIdentity())
     const originalRecordId = owner.recordIdentity()
     const view = await mount(<MobileApp client={null} connection={{ state: 'disconnected', message: '原Host离线' }} platform={createBrowserPlatform()} />)
-    const input = view.element.querySelector<HTMLTextAreaElement>('[aria-label="目标正文草稿"]')!
+    // Ordinary startup shows chat first; the retained Goal edit is one return away, not replaced.
+    await openPrimary(view.element, 'Goals')
+    const input = await waitForElement<HTMLTextAreaElement>(view.element, '[aria-label="目标正文草稿"]')
     expect(input.value).toBe('离线仍可编辑的完整草稿')
     expect(view.element.textContent).toContain('保存还没确认')
     await view.render(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
-    for (const label of order) { await click(button(nav(view.element), label)); expect(view.element.querySelector('[aria-label="目标正文草稿"]')).toBe(input) }
-    await click(button(nav(view.element), 'Goals'))
+    for (const label of order) { await openPrimary(view.element, label); expect(view.element.querySelector('[aria-label="目标正文草稿"]')).toBe(input) }
+    await openPrimary(view.element, 'Goals')
     expect(input.closest('[hidden]')).toBeNull()
     expect(owner.recordIdentity()).toBe(originalRecordId)
     expect(owner.snapshot().record.goalDrafts![0]!.operations[0]!.request).toEqual(request)
@@ -103,7 +106,8 @@ describe('actual phone primary workfaces', () => {
     mounted.splice(mounted.findIndex(value => value.element === view.element), 1); view.element.remove()
     // No replaceBackup or new draft writes between real React process mounts.
     const restored = await mount(<MobileApp client={null} connection={{ state: 'disconnected', message: '原Host离线' }} platform={createBrowserPlatform()} />)
-    expect(restored.element.querySelector<HTMLTextAreaElement>('[aria-label="目标正文草稿"]')?.value).toBe(input.value)
+    await openPrimary(restored.element, 'Goals')
+    expect((await waitForElement<HTMLTextAreaElement>(restored.element, '[aria-label="目标正文草稿"]')).value).toBe(input.value)
     expect(owner.recordIdentity()).toBe(originalRecordId)
     expect(owner.snapshot().record.presentation!.goals).toEqual({ goalId: 'original-goal', mode: 'edit', discussion: null })
   })
@@ -120,7 +124,7 @@ describe('actual phone primary workfaces', () => {
       return original(method, params)
     }) as any
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
-    await click(button(nav(view.element), 'Goals')); await click(view.element.querySelector('.mobile-goals-list button')!)
+    await openPrimary(view.element, 'Goals'); await click(await waitForElement(view.element, '.mobile-goals-list button'))
     await click(button(view.element, '打开目标讨论'))
     expect(view.element.querySelector('.mobile-session-toolbar')).not.toBeNull()
     expect(getDeviceWorkface().snapshot().record.presentation!.goals!.discussion).toEqual({ goalId: goal.id, tabId: 'original-tab', regionId: 'original-region', hostId: 'local', agentSessionId: 'session-original' })
@@ -135,11 +139,11 @@ describe('actual phone primary workfaces', () => {
   it('directly opens all five original surfaces in order and keeps auxiliary work in the actual menu', async () => {
     const f = originalClient(), overlay = document.createElement('div'); document.body.append(overlay)
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
-    expect([...nav(view.element).querySelectorAll('button')].map(value => value.textContent)).toEqual(order)
+    expect([...(await returnToRoot(view.element)).querySelectorAll('button')].map(value => value.textContent)).toEqual(order)
     for (const label of order) {
-      await click(button(nav(view.element), label)); expect(current(view.element)).toBe(label)
+      await openPrimary(view.element, label); expect(current(view.element)).toBe(label)
       const surface = label === 'Goals' ? '.mobile-goals' : label === 'Topics' ? '.mobile-topics' : '.mobile-spatial-panel'
-      const body = view.element.querySelector<HTMLElement>(surface)!
+      const body = await waitForElement<HTMLElement>(view.element, surface)
       expect(body.closest('[hidden]')).toBeNull(); expect(body.querySelector('h1')?.textContent).toBe(label)
     }
     expect(f.client.forwardRpc).toHaveBeenCalledWith('goal.ls', { limit: 1000 })
@@ -150,7 +154,7 @@ describe('actual phone primary workfaces', () => {
     expect([...menu.querySelectorAll('button')].map(value => value.textContent)).toEqual(['Survey研究与笔记'])
     expect([...overlay.querySelectorAll('select option')].map(value => value.textContent)).toEqual(order)
     await click(button(menu, 'Survey研究与笔记'))
-    expect(view.element.querySelector('.mobile-survey')?.closest('[hidden]')).toBeNull()
+    expect((await waitForElement(view.element, '.mobile-survey')).closest('[hidden]')).toBeNull()
     expect(current(view.element)).toBeUndefined()
     expect(f.submit).not.toHaveBeenCalled()
   })
@@ -158,19 +162,17 @@ describe('actual phone primary workfaces', () => {
   it('retains the exact composer, draft and Session while switching every primary workface and returning to the original Mote', async () => {
     const f = originalClient(), platform = createBrowserPlatform()
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={platform} />)
-    await click(button(nav(view.element), 'Mote'))
-    await openTreeSession(view.element)
+    await openMoteMain(view.element)
     const originalEditor = editor(view.element)
     await paste(view.element, '原 Mote 的未保存草稿')
     expect(current(view.element)).toBe('Mote')
     for (const label of order) {
-      await click(button(nav(view.element), label))
+      await openPrimary(view.element, label)
       expect(editor(view.element)).toBe(originalEditor)
       expect(originalEditor.textContent).toBe('原 Mote 的未保存草稿')
       expect(getDeviceWorkface().snapshot().record.selectedSessionId).toBe('session-original')
     }
-    await click(button(nav(view.element), 'Mote'))
-    await openTreeSession(view.element)
+    await openMoteMain(view.element)
     expect(editor(view.element)).toBe(originalEditor)
     expect(view.element.querySelector('.mobile-mote-heading')).not.toBeNull()
     expect(view.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(false)
@@ -184,8 +186,7 @@ describe('actual phone primary workfaces', () => {
   it('releases original conversation reading behind a sheet and resumes that owner only after closing it', async () => {
     const f = originalClient(), overlay = document.createElement('div'); document.body.append(overlay)
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
-    await click(button(nav(view.element), 'Mote'))
-    await openTreeSession(view.element)
+    await openMoteMain(view.element)
     const original = editor(view.element)
     await paste(view.element, '被面板遮住的原草稿')
     const releases = f.disposeHistory.mock.calls.length
@@ -204,6 +205,8 @@ describe('actual phone primary workfaces', () => {
   it.each(['goals', 'topics', 'mote', 'focus', 'space'])('opens the saved %s home without changing its original record', async home => {
     localStorage.setItem('agentmux-mobile-home', home)
     const view = await mount(<MobileApp client={originalClient().client} connection={connected} platform={createBrowserPlatform()} />)
+    // The launch conversation sits above the saved home; back reveals that home rather than a default.
+    await returnToRoot(view.element)
     expect(current(view.element)?.toLowerCase()).toBe(home)
     expect(localStorage.getItem('agentmux-mobile-home')).toBe(home)
   })
@@ -211,12 +214,12 @@ describe('actual phone primary workfaces', () => {
   it('keeps the Focus return context for a Mote member instead of applying the Mote-only conversation heading', async () => {
     const f = originalClient()
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
-    await click(button(nav(view.element), 'Focus'))
-    await click(view.element.querySelector('.mobile-session-list button')!)
+    await openPrimary(view.element, 'Focus')
+    await click(await waitForElement(view.element, '.mobile-focus-project .mobile-session-list button'))
     expect(view.element.querySelector('.mobile-app')?.getAttribute('data-mobile-workface')).toBe('workspace')
     const toolbar = view.element.querySelector<HTMLElement>('.mobile-session-toolbar')!
-    expect(toolbar.textContent).toContain('Focus')
-    expect(toolbar.textContent).toContain('Original Agent')
+    expect(toolbar.querySelector('[data-mobile-back]')?.getAttribute('aria-label')).toBe('返回 Focus')
+    expect(toolbar.querySelector('.mobile-session-title')?.textContent).toBe('Original Agent')
     expect(view.element.querySelector('.mobile-mote-heading')).not.toBeNull()
     expect(f.submit).not.toHaveBeenCalled()
   })
@@ -225,14 +228,13 @@ describe('actual phone primary workfaces', () => {
     const f = originalClient()
     f.submit.mockRejectedValueOnce(new Error('Acknowledgement is unknown after dispatch'))
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
-    await click(button(nav(view.element), 'Mote'))
-    await openTreeSession(view.element)
+    await openMoteAgent(view.element)
     await paste(view.element, '不能因为切换而重发的原输入')
     await click(button(view.element, 'Send'))
     const original = f.submit.mock.calls[0]![0]
-    for (const label of order) await click(button(nav(view.element), label))
-    await click(button(nav(view.element), 'Mote'))
-    await openTreeSession(view.element)
+    for (const label of order) await openPrimary(view.element, label)
+    // The Mote tab returns to its root; the same Agent is reopened explicitly from its Agents list.
+    await openMoteAgent(view.element)
     // The original-request retry remains reachable; navigation never authorizes it.
     expect(button(view.element, 'Send').disabled).toBe(false)
     expect(editor(view.element).textContent).toBe('不能因为切换而重发的原输入')
@@ -245,7 +247,7 @@ describe('actual phone primary workfaces', () => {
   it('keeps an unreadable preference while all five healthy workfaces remain usable', async () => {
     localStorage.setItem('agentmux-mobile-home', 'unknown-original')
     const view = await mount(<MobileApp client={originalClient().client} connection={connected} platform={createBrowserPlatform()} />)
-    await click(button(nav(view.element), 'Goals'))
+    await openPrimary(view.element, 'Goals')
     expect(current(view.element)).toBe('Goals')
     expect(localStorage.getItem('agentmux-mobile-home')).toBe('unknown-original')
   })
@@ -261,10 +263,10 @@ describe('actual phone primary workfaces', () => {
       : method === 'space.ls' ? Promise.resolve({ catalog }) : ordinary(method, params))
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
     await openAppMenu(view.element); await click(button(overlay, 'Survey研究与笔记'))
-    await click(button(view.element.querySelector('.mobile-survey') as HTMLElement, 'Original Research当前选择'))
+    await click(button(await waitForElement(view.element, '.mobile-survey'), 'Original Research当前选择'))
     await click(button(view.element.querySelector('.mobile-survey') as HTMLElement, 'Original Topic'))
     expect(f.client.forwardRpc).toHaveBeenCalledWith('space.inspect', { target: { spaceId: 'topic-space' } })
-    await click(button(nav(view.element), 'Goals'))
+    await openPrimary(view.element, 'Goals')
     await act(async () => read.resolve({ catalog }))
     expect(current(view.element)).toBe('Goals')
     expect(view.element.querySelector('.mobile-goals')?.closest('[hidden]')).toBeNull()
@@ -275,7 +277,7 @@ describe('actual phone primary workfaces', () => {
   it.each(['browser', 'native', 'direct'])('%s Back exits the original source, Profile, result and chat one layer at a time while keeping the same editor and input guard', async mode => {
     const f = originalClient(), overlay = document.createElement('div'); document.body.append(overlay)
     const view = await mount(<MobileApp client={f.client} connection={connected} native={mode === 'native'} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
-    await click(button(nav(view.element), 'Mote')); await openTreeSession(view.element)
+    await openMoteAgent(view.element)
     const originalEditor = editor(view.element)
     await paste(view.element, '逐层返回保留的原草稿')
     f.submit.mockRejectedValueOnce(new Error('original acknowledgement unknown'))
@@ -283,7 +285,7 @@ describe('actual phone primary workfaces', () => {
     const original = f.submit.mock.calls[0]![0]
     await click(button(view.element.querySelector<HTMLElement>('.mobile-conversation__floating-tools')!, '目标与结果'))
     await click(view.element.querySelector('.mobile-mote-heading')!)
-    await click(button(overlay, '合作方式 · BEHAVIOR.md'))
+    await click(await waitForElement(overlay, '[aria-label="合作方式 · BEHAVIOR.md"]'))
     expect(overlay.textContent).toContain('原依据保留')
     const back = async () => { await act(async () => {
       if (mode === 'direct') {
@@ -317,9 +319,9 @@ describe('actual phone primary workfaces', () => {
     const f = originalClient(), overlay = document.createElement('div'); document.body.append(overlay)
     const platform = createBrowserPlatform({ overlayContainer: () => overlay })
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={platform} />)
-    await click(button(nav(view.element), 'Mote')); await openTreeSession(view.element)
+    await openMoteMain(view.element)
     await paste(view.element, '刷新之前的原草稿')
-    await click(view.element.querySelector('.mobile-mote-heading')!); await click(button(overlay, '合作方式 · BEHAVIOR.md'))
+    await click(view.element.querySelector('.mobile-mote-heading')!); await click(await waitForElement(overlay, '[aria-label="合作方式 · BEHAVIOR.md"]'))
     const original = getDeviceWorkface().snapshot().record
     expect(original.presentation).toMatchObject({ primary: 'mote', showSession: true, profile: { sourcePath: 'BEHAVIOR.md' },
       identity: { context: { displayWorkspaceId: 'original-workspace', groupId: 'original-zone', tabId: 'original-tab', regionId: 'original-region' } } })

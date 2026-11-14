@@ -4,6 +4,7 @@ import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { button, click, fixture, mount, mounted, waitForElement } from './conversation-fixture'
+import { openPrimary } from './mobile-root-navigation'
 const pending = vi.hoisted(() => { let release!: () => void; const permit = new Promise<void>(resolve => { release = resolve }); return { permit, release } })
 vi.mock('../src/navigation/MobileSpatialNavigation', async original => { await pending.permit; return original() })
 afterEach(async () => { pending.release(); for (const view of mounted.splice(0)) { await act(async () => view.root.unmount()); view.element.remove() }; document.body.replaceChildren(); vi.restoreAllMocks(); localStorage.clear() })
@@ -18,7 +19,7 @@ it('names each real directory in its retained loading header instead of the gene
   })
   const view = await mount(<MobileApp client={f.client} connection={{ state: 'connected', message: '已连接' }} platform={createBrowserPlatform()} />)
   for (const label of ['Focus', 'Space', 'Mote']) {
-    await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, label))
+    await openPrimary(view.element, label)
     const heading = await waitForElement(view.element, '.mobile-deferred-header h1')
     expect(heading.textContent).toBe(label)
     const loading = heading.closest('[aria-busy="true"]')!

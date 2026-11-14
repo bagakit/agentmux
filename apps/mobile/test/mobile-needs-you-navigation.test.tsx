@@ -7,6 +7,7 @@ import type { MobileAgentPresentation } from '../src/navigation/mobile-agent-sta
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { click, fixture, mount, mounted } from './conversation-fixture'
+import { openPrimary } from './mobile-root-navigation'
 
 const connected = { state: 'connected' as const, message: '原 Host' }
 const now = Date.now()
@@ -86,7 +87,7 @@ describe('the needs-you Focus home', () => {
 })
 
 describe('the five-tab shell with typed counts', () => {
-  it('shows exactly five tabs, a typed Focus badge and a back badge that excludes the open conversation', async () => {
+  it('carries the count on back inside a conversation, and on the root shows five tabs with a typed Focus badge', async () => {
     const f = fixture()
     f.client.forwardRpc = vi.fn().mockImplementation(async (method: string) => {
       if (method === 'goal.ls') return { goals: [], unavailable: [] }
@@ -96,6 +97,11 @@ describe('the five-tab shell with typed counts', () => {
       return { catalog: catalog() }
     })
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
+    // The restored conversation is a drilled page: the bar yields and back counts the Agents that need the person.
+    const restoredBack = await vi.waitFor(() => { const value = view.element.querySelector<HTMLElement>('.mobile-session-origin .mobile-back-badge'); expect(value).not.toBeNull(); return value! })
+    expect(view.element.querySelector('.mobile-navigation')).toBeNull()
+    expect(restoredBack.getAttribute('data-count')).toBe('2')
+    await openPrimary(view.element, 'Focus')
     await vi.waitFor(() => expect(view.element.querySelector('.mobile-navigation .mobile-tab-badge')).not.toBeNull())
     const tabs = [...view.element.querySelectorAll<HTMLButtonElement>('.mobile-navigation button')]
     expect(tabs.map(value => value.getAttribute('aria-label'))).toEqual(['Goals', 'Topics', 'Mote', 'Focus', 'Space'])
@@ -104,10 +110,10 @@ describe('the five-tab shell with typed counts', () => {
     expect(focus.querySelector('.mobile-tab-badge')?.getAttribute('data-count')).toBe('2')
     expect(focus.getAttribute('aria-description')).toBe('2 个需要你')
     expect(tabs.filter(value => value !== focus).every(value => !value.querySelector('.mobile-tab-badge'))).toBe(true)
-    await click(focus)
     const ticket = await vi.waitFor(() => { const value = view.element.querySelector<HTMLButtonElement>('.mobile-needs-you-ticket[data-reason="waiting"]'); expect(value).not.toBeNull(); return value! })
     await click(ticket)
     const back = await vi.waitFor(() => { const value = view.element.querySelector<HTMLElement>('.mobile-session-origin'); expect(value).not.toBeNull(); return value! })
+    expect(view.element.querySelector('.mobile-navigation')).toBeNull()
     expect(back.querySelector('.mobile-back-badge')?.getAttribute('data-count')).toBe('1')
     expect(back.getAttribute('aria-description')).toBe('另有 1 个需要你')
     expect(f.submit).not.toHaveBeenCalled()
@@ -132,8 +138,7 @@ describe('gestures in the real shell', () => {
       return { catalog: catalog() }
     })
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
-    const focus = await vi.waitFor(() => { const value = [...view.element.querySelectorAll<HTMLButtonElement>('.mobile-navigation button')][3]; expect(value).toBeDefined(); return value! })
-    await click(focus)
+    await openPrimary(view.element, 'Focus')
     const main = view.element.querySelector<HTMLElement>('.mobile-main')!
     const swipe = async () => act(async () => {
       main.dispatchEvent(touch('touchstart', 6, 400, 0)); main.dispatchEvent(touch('touchmove', 60, 402, 60))

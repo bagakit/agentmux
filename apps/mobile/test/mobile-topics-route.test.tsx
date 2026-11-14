@@ -6,6 +6,7 @@ import { createBrowserPlatform } from '../src/platform/browser'
 import { DeviceWorkfaceStore, emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { mobileKnowledgeDraftKey } from '../src/recovery/knowledge-drafts'
 import { click, fixture, mount, mounted } from './conversation-fixture'
+import { openPrimary } from './mobile-root-navigation'
 
 const native = vi.hoisted(() => ({ back: null as (() => void) | null }))
 vi.mock('../src/platform/native/device', async original => ({ ...await original<Record<string, unknown>>(),
@@ -27,6 +28,14 @@ const presentation = { primary: 'topics' as const, showSession: false, showGoalW
 const visibleButton = (element: HTMLElement, label: string) => {
   const found = [...element.querySelectorAll<HTMLButtonElement>('button')].find(value => !value.closest('[hidden]') && value.textContent?.trim() === label)
   expect(found, label).toBeDefined(); return found!
+}
+/** Panels prepare their module and original reads on first use; later steps stay synchronous. */
+async function settled(check: () => void) {
+  await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) }); check() }, { timeout: 4000, interval: 10 })
+}
+async function waitForButton(element: HTMLElement, label: string) {
+  await settled(() => visibleButton(element, label))
+  return visibleButton(element, label)
 }
 beforeEach(async () => {
   localStorage.clear(); await getDeviceWorkface().replaceBackup({ ...emptyDeviceWorkface(), presentation,
@@ -76,19 +85,19 @@ it.each(['browser', 'native'])('%s Back leaves the exact cached source child bef
     throw new Error('Unexpected public operation: ' + method)
   })
   const view = await mount(<MobileApp client={f.client} connection={{ state: 'connected', message: '原连接' }} platform={createBrowserPlatform()} native={mode === 'native'} />)
-  await click(visibleButton(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Topics'))
-  await click(visibleButton(view.element, '原知识事实')); await click(visibleButton(view.element, '编辑知识'))
+  await openPrimary(view.element, 'Topics')
+  await click(await waitForButton(view.element, '原知识事实')); await click(await waitForButton(view.element, '编辑知识'))
   const draft = view.element.querySelector<HTMLTextAreaElement>('[aria-label="知识正文"]')!
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(draft, '原 Topic 未保存草稿')
     draft.dispatchEvent(new Event('input', { bubbles: true })); draft.dispatchEvent(new Event('change', { bubbles: true }))
   })
   await click(visibleButton(view.element, '返回阅读')); await click(visibleButton(view.element, source.path))
-  await act(async () => { await vi.waitFor(() => expect(view.element.querySelector('.mobile-topic-source-reader')?.textContent).toContain('original.md')) })
+  await settled(() => expect(view.element.querySelector('.mobile-topic-source-reader')?.textContent).toContain('original.md'))
   expect(getDeviceWorkface().snapshot().record.presentation!.topics!.sources).toEqual([{ source, origin: context,
     originKnowledge: knowledgeReference, content: { kind: 'file', trail: [pin('docs')] } }])
   await click(visibleButton(view.element, 'original.md'))
-  await act(async () => { await vi.waitFor(() => expect(view.element.querySelector('.mobile-topic-source-reader article h1')?.textContent).toBe('准确原来源正文')) })
+  await settled(() => expect(view.element.querySelector('.mobile-topic-source-reader article h1')?.textContent).toBe('准确原来源正文'))
   expect(f.client.forwardRpc).toHaveBeenCalledWith('file.read', { zoneId: zone.zoneId, path: 'docs/original.md', expectedResource: resource })
   const reads = vi.mocked(f.client.forwardRpc!).mock.calls.length
   const back = async () => {

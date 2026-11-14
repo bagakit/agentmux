@@ -6,6 +6,7 @@ import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { saveMobileHome } from '../src/navigation/home-preference'
 import { button, click, editor, fixture, mount, mounted, paste } from './conversation-fixture'
+import { openPrimary } from './mobile-root-navigation'
 
 const counter = vi.hoisted(() => ({ renders: 0 }))
 vi.mock('../src/navigation/MobileAgentRow', async importOriginal => {
@@ -41,7 +42,7 @@ it.each([20, 480])('keeps %i hidden Focus rows stable across conversation action
   await owner.updatePresentation({ selectedSessionId: 'session-original', hostUrl: '', panel: 'sessions' },
     { primary: 'focus', showSession: false, showGoalWork: false, identity: null, profile: null })
   const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
-  await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Focus'))
+  await openPrimary(view.element, 'Focus')
   await vi.waitFor(() => expect(view.element.querySelectorAll('.mobile-focus-project .mobile-agent-row__open')).toHaveLength(size))
   const search = view.element.querySelector<HTMLInputElement>('[aria-label="查找"]')!
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'Agent'); search.dispatchEvent(new Event('input', { bubbles: true })) })

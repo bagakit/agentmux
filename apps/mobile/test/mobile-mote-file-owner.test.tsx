@@ -16,6 +16,7 @@ import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { getDeviceWorkface, emptyDeviceWorkface, DeviceWorkfaceStore, DEVICE_WORKFACE_KEY } from '../src/recovery/device-workface'
 import { button, click, deferred, fixture, mount, mounted } from './conversation-fixture'
+import { openPrimary } from './mobile-root-navigation'
 
 const hostId = 'original-mote-files-host', workspaceId = 'original-mote-files-workspace'
 const normalBody = '# 第二 Mote 原稿\n\n原正文，不得换第一 Mote。'
@@ -109,7 +110,7 @@ describe('actual Mote Profile editor → public Files → original native owner'
     const platform = createBrowserPlatform({ overlayContainer: () => overlay })
     const conversationBefore = getDeviceWorkface().snapshot().record.conversation
     const view = await mount(<MobileApp client={f.f.client} connection={{ state: 'connected', message: '原私有 Host' }} platform={platform} />)
-    await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Mote'))
+    await openPrimary(view.element, 'Mote')
     await waitFor(() => expect(view.element.textContent).toContain('准确第二 Mote'))
     expect(f.reads).not.toHaveBeenCalled()
     await click(view.element.querySelector('.mobile-mote-choice[data-space-id="second-mote"]')!)

@@ -5,6 +5,7 @@ import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { button, click, editor, fixture, mount, mounted, paste } from './conversation-fixture'
+import { openPrimary } from './mobile-root-navigation'
 
 const observed = vi.hoisted(() => {
   let releaseTerminal!: () => void
@@ -67,20 +68,20 @@ it('loads only the first requested panel and retains real Goal and Composer inst
   expect(view.element.querySelector('.mobile-terminal')).not.toBeNull()
   expect(observed.counts.terminal).toBe(1)
 
-  await click(button(view.element.querySelector<HTMLElement>('[aria-label="手机导航"]')!, 'Goals'))
+  await openPrimary(view.element, 'Goals')
   expect(observed.counts.goals).toBe(1)
-  await click(button(view.element.querySelector<HTMLElement>('[aria-label="手机导航"]')!, 'Topics'))
+  await openPrimary(view.element, 'Topics')
   await act(async () => { observed.releaseGoals(); await vi.waitFor(() => expect(observed.goalsReady).toBe(true), { timeout: 10000 }) })
   expect(vi.mocked(f.client.forwardRpc!).mock.calls.filter(([method]) => method === 'goal.ls')).toHaveLength(0)
   const originalGoals = view.element.querySelector('.mobile-goals')!
-  await click(button(view.element.querySelector<HTMLElement>('[aria-label="手机导航"]')!, 'Goals'))
+  await openPrimary(view.element, 'Goals')
   const search = originalGoals.querySelector<HTMLInputElement>('[aria-label="搜索目标"]')!
   expect(search).not.toBeNull()
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, '保留的目标筛选'); search.dispatchEvent(new Event('input', { bubbles: true })) })
-  await click(button(view.element.querySelector<HTMLElement>('[aria-label="手机导航"]')!, 'Topics'))
+  await openPrimary(view.element, 'Topics')
   expect(editor(view.element)).toBe(originalEditor)
   expect(view.element.querySelector('.mobile-goals')).toBe(originalGoals)
-  await click(button(view.element.querySelector<HTMLElement>('[aria-label="手机导航"]')!, 'Goals'))
+  await openPrimary(view.element, 'Goals')
   expect(view.element.querySelector('.mobile-goals')).toBe(originalGoals)
   expect(originalGoals.querySelector('[aria-label="搜索目标"]')).toBe(search)
   expect(search.value).toBe('保留的目标筛选')

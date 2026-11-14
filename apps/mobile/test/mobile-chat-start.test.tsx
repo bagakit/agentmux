@@ -8,6 +8,7 @@ import { parsePresentationRoute } from '../src/recovery/presentation-route'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { button, click, deferred, fixture, mount, mounted, paste, waitForElement } from './conversation-fixture'
+import { openPrimary } from './mobile-root-navigation'
 
 const connected = { state: 'connected' as const, message: 'Connected' }
 export function chatCatalog(): AgentMuxSpaceCatalog {
@@ -71,7 +72,7 @@ describe('phone chat-first navigation through the actual App', () => {
     const f = original(), pending = deferred<{ catalog: AgentMuxSpaceCatalog }>()
     f.client.forwardRpc = vi.fn().mockImplementation((method: string) => method === 'space.ls' ? pending.promise : Promise.resolve({ agents: [], workspaces: [], projects: [], executors: [], unavailable: [] }))
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
-    await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Focus'))
+    await openPrimary(view.element, 'Focus')
     await act(async () => { pending.resolve({ catalog: chatCatalog() }) })
     expect(view.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(true)
     expect(getDeviceWorkface().snapshot().record.selectedSessionId).toBeNull()
@@ -116,7 +117,7 @@ describe('phone chat-first navigation through the actual App', () => {
   it('shows Motes as direct horizontal choices that open their Main, with a header Profile action, and remembers only explicit selection', async () => {
     const f = original()
     const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
-    await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Mote'))
+    await openPrimary(view.element, 'Mote')
     // The Mote entry opens the primary Main first; the choice row is one explicit step back.
     await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.selectedSessionId).toBe('session-original'))
     expect(getDeviceWorkface().snapshot().record.presentation?.recentMoteSpaceId).not.toBe('recent')
@@ -174,7 +175,7 @@ describe('Main discovery scope through the actual MobileApp', () => {
     const f = lookupFixture(), view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} restoreWorkface />)
     await waitForElement(view.element, '.mobile-session-list')
     f.rpc.mockClear()
-    await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Mote'))
+    await openPrimary(view.element, 'Mote')
     await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.presentation?.identity?.mote?.spaceId).toBe('primary'))
     expect(catalogCalls(f.rpc)[0]).toEqual({ target: {} })
     expect(catalogCalls(f.rpc).find(input => input.target?.spaceId)).toEqual({ target: { spaceId: 'primary' }, presentation: true })
@@ -228,7 +229,7 @@ describe('Main discovery scope through the actual MobileApp', () => {
         (stage === 'discovery' ? !input.presentation : input.target?.spaceId === 'primary') ? pending.promise : defaultRead(method, input))
       const platform = createBrowserPlatform(), view = await mount(<MobileApp client={f.client} connection={connected} platform={platform} />)
       await vi.waitFor(() => expect(catalogCalls(f.rpc).some(input => stage === 'discovery' ? !input.presentation : input.target?.spaceId === 'primary')).toBe(true))
-      if (change === 'navigation') await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Focus'))
+      if (change === 'navigation') await openPrimary(view.element, 'Focus')
       else if (change === 'client') {
         const next = lookupFixture({ ...chatCatalog(), spaces: [] })
         await view.render(<MobileApp client={next.client} connection={connected} platform={platform} />)

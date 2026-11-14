@@ -5,6 +5,7 @@ import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { button, click, editor, fixture, mount, mounted, paste, openAppMenu } from './conversation-fixture'
+import { openPrimary } from './mobile-root-navigation'
 
 beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => {
@@ -83,7 +84,7 @@ it('scopes missing selected-session metadata to that conversation while retainin
   await act(async () => f.emit({ type: 'connection-state', state: 'restored', observationOrigin: { kind: 'runtime-connection', boundary: 'consumer-core' } } as never))
   expect(view.element.querySelector('.mobile-service-notice')?.textContent).toContain('对话信息还没确认')
   for (const home of ['Focus', 'Mote', 'Space']) {
-    await click(button(view.element.querySelector('.mobile-navigation')!, home))
+    await openPrimary(view.element, home)
     expect(view.element.querySelector('.mobile-service-notice')?.textContent ?? '').not.toContain('对话信息还没确认')
     expect(editor(view.element)).toBe(originalEditor)
     expect(originalEditor.textContent).toBe('保留这段对话里的未发送正文')

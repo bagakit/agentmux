@@ -4,6 +4,7 @@ import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { button, click, editor, fixture, mount, mounted, paste } from './conversation-fixture'
+import { openPrimary } from './mobile-root-navigation'
 
 const sid = 'session-original', connected = { state: 'connected' as const, message: '原 Host' }
 const catalog = { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [], agentPresentation: [
@@ -58,8 +59,8 @@ it('does not focus a different client when the original dialog closes during a b
 it('does not focus a hidden conversation when its workface changes as the original dialog closes', async () => {
   const focus = vi.fn(() => true), { f, view, originalEditor } = await setup(focus)
   const action = document.querySelector<HTMLButtonElement>('[role="dialog"] [aria-label="撰写消息"]')!
-  const nav = button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Focus')
-  await act(async () => { action.click(); nav.click() })
+  const terminal = button(view.element.querySelector<HTMLElement>('.mobile-header')!, '查看终端')
+  await act(async () => { action.click(); terminal.click() })
   expect(focus).not.toHaveBeenCalled()
   expect(view.element.textContent).toContain('已切换到其他位置，未聚焦输入区。')
   expect(originalEditor.textContent).toContain('原始未发送草稿'); expect(f.submit).not.toHaveBeenCalled()
@@ -68,7 +69,7 @@ it('does not focus a hidden conversation when its workface changes as the origin
 it('does not focus a different Session when the original dialog closes in the same batch as a Session change', async () => {
   const focus = vi.fn(() => true), { f, owner, view } = await setup(focus)
   await click(document.querySelector('[role="dialog"] [aria-label="关闭面板"]')!)
-  await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Focus'))
+  await openPrimary(view.element, 'Focus')
   await vi.waitFor(() => expect(view.element.textContent).toContain('另一个原 Agent'))
   const originalRow = [...view.element.querySelectorAll<HTMLButtonElement>('.mobile-spatial-panel button')].find(value => value.textContent?.includes('原会话'))!
   expect(originalRow).toBeDefined(); await click(originalRow)
@@ -80,7 +81,7 @@ it('does not focus a different Session when the original dialog closes in the sa
   expect(focus).not.toHaveBeenCalled()
   expect(view.element.textContent).toContain('已切换到其他位置，未聚焦输入区。')
   expect(owner.snapshot().record.selectedSessionId).toBe('other')
-  await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Focus'))
+  await openPrimary(view.element, 'Focus')
   await click(originalRow)
   await vi.waitFor(() => expect(editor(view.element).textContent).toContain('原始未发送草稿'))
   expect(owner.snapshot().record.selectedSessionId).toBe(sid); expect(f.submit).not.toHaveBeenCalled()

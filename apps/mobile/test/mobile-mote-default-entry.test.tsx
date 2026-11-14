@@ -8,6 +8,7 @@ import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { button, click, deferred, editor, fixture, mount, mounted, paste, session, waitForElement } from './conversation-fixture'
+import { openPrimary } from './mobile-root-navigation'
 import { fixturePath } from '../../../test/fixture-values.mjs'
 
 const connected = { state: 'connected' as const, message: '原 Host 已连接' }
@@ -78,7 +79,7 @@ async function original(facts = catalog()) {
   const platform = createBrowserPlatform(), render = (client = f.client) => <MobileApp client={client} connection={connected} platform={platform} restoreWorkface />
   const view = await mount(render())
   const nav = () => view.element.querySelector<HTMLElement>('.mobile-navigation')!
-  await click(button(nav(), 'Focus'))
+  await openPrimary(view.element, 'Focus')
   await waitForElement(view.element, '.mobile-session-list')
   return { ...f, owner, rpc, ensure, view, render, facts, nav,
     delayEntry() { delayed = deferred(); return delayed },
@@ -88,7 +89,7 @@ async function wait(check: () => void) { await vi.waitFor(async () => { await ac
 function mainIsVisible(f: Awaited<ReturnType<typeof original>>) {
   expect(f.owner.snapshot().record.selectedSessionId).toBe(mainSid)
   expect(f.view.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(false)
-  expect(f.view.element.querySelector('.mobile-mote-navigation [aria-selected="true"]')?.textContent).toBe('Discussion')
+  expect(f.view.element.querySelector('.mobile-mote-sections [aria-selected="true"]')?.textContent).toBe('Discussion')
   expect(f.owner.snapshot().record.presentation?.moteView).toMatchObject({ spaceId, section: 'discussion', directAgent: false })
 }
 
@@ -98,7 +99,7 @@ it('opens the exact saved recent Mote Main from the actual bottom bar, retaining
   await waitForElement(f.view.element, '[contenteditable="true"]')
   const originalEditor = editor(f.view.element)
   await paste(f.view.element, '原 Session 的未发送草稿')
-  await click(button(f.nav(), 'Mote'))
+  await openPrimary(f.view.element, 'Mote')
   await wait(() => mainIsVisible(f))
   expect(f.rpc).toHaveBeenCalledWith('space.ls', { target: { spaceId }, presentation: true })
   expect(editor(f.view.element)).toBe(originalEditor)
@@ -112,7 +113,7 @@ it('uses the unique original primary Mote only when this device has no recent Mo
   await getDeviceWorkface().updatePresentation({ selectedSessionId: 'session-original', hostUrl: '', panel: 'conversation' },
     { primary: 'focus', showSession: false, showGoalWork: false, identity: null, profile: null })
   const f = await original()
-  await click(button(f.nav(), 'Mote'))
+  await openPrimary(f.view.element, 'Mote')
   await wait(() => expect(f.owner.snapshot().record.presentation?.moteView).toMatchObject({ spaceId: 'mote-primary', section: 'discussion', directAgent: false }))
   expect(f.owner.snapshot().record.selectedSessionId).toBe('session-original')
   expect(f.submit).not.toHaveBeenCalled()
@@ -120,7 +121,7 @@ it('uses the unique original primary Mote only when this device has no recent Mo
 
 it('opens a concrete Mote choice directly as Main and keeps explicit member input direct through background refresh', async () => {
   const f = await original()
-  await click(button(f.nav(), 'Mote')); await wait(() => mainIsVisible(f)); await f.directory()
+  await openPrimary(f.view.element, 'Mote'); await wait(() => mainIsVisible(f)); await f.directory()
   await click(button(f.view.element, '打开 Mote 主对话 · 原 Mote')); await wait(() => mainIsVisible(f))
   await paste(f.view.element, '主对话原稿')
   await click(button(f.view.element, 'Threads'))
@@ -134,6 +135,7 @@ it('opens a concrete Mote choice directly as Main and keeps explicit member inpu
   expect(f.owner.snapshot().record.selectedSessionId).toBe(workerSid)
   expect(f.owner.snapshot().record.presentation?.moteView).toMatchObject({ section: 'threads', directAgent: true })
   expect(editor(f.view.element).textContent).toBe('成员原稿'); expect(f.ensure).toHaveBeenCalledTimes(before)
+  await click(button(f.view.element, '返回 Threads'))
   await click(button(f.view.element, 'Discussion')); await wait(() => mainIsVisible(f))
   expect(editor(f.view.element).textContent).toBe('主对话原稿')
   expect(f.owner.snapshot().record.conversation.drafts).toContainEqual([JSON.stringify(['draft', workerSid]), '成员原稿'])
@@ -143,7 +145,7 @@ it('opens a concrete Mote choice directly as Main and keeps explicit member inpu
 it('opens the welcome input for the exact unbound Mote without borrowing the primary Mote or its first member', async () => {
   const facts = catalog(); facts.motePresentation![1]!.quickMode = { status: 'missing' }; facts.motePresentation![1]!.conversation = null
   const f = await original(facts)
-  await click(button(f.nav(), 'Mote'))
+  await openPrimary(f.view.element, 'Mote')
   await waitForElement(document.body, '.mote-start')
   expect(f.owner.snapshot().record.selectedSessionId).toBeNull()
   expect(f.owner.snapshot().record.presentation?.moteView).toEqual({ spaceId, section: 'discussion', detail: false, directAgent: false })
@@ -157,7 +159,7 @@ it('opens the welcome input for the exact unbound Mote without borrowing the pri
 it('keeps a saved Main reference navigable when Session metadata and its original place are unavailable', async () => {
   const facts = catalog(); facts.locations = []; facts.motePresentation![1]!.conversation = null
   const f = await original(facts); f.sessions.delete(mainSid)
-  await click(button(f.nav(), 'Mote')); await wait(() => mainIsVisible(f))
+  await openPrimary(f.view.element, 'Mote'); await wait(() => mainIsVisible(f))
   expect(f.owner.snapshot().record.presentation?.identity?.context).toBeUndefined()
   expect(f.owner.snapshot().record.presentation?.identity?.mote?.spaceId).toBe(spaceId)
   expect(f.ensure).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled()
@@ -165,7 +167,7 @@ it('keeps a saved Main reference navigable when Session metadata and its origina
 
 it('does not let a delayed explicit Main lookup replace later navigation or an explicit member selection', async () => {
   const f = await original(), pending = f.delayEntry()
-  await click(button(f.nav(), 'Mote')); await waitForElement(f.view.element, '.mobile-mote-agents')
+  await openPrimary(f.view.element, 'Mote'); await waitForElement(f.view.element, '.mobile-mote-agents')
   await click(f.view.element.querySelector<HTMLButtonElement>('.mobile-mote-agents .mobile-agent-row__open')!)
   await wait(() => expect(f.owner.snapshot().record.selectedSessionId).toBe(workerSid))
   await act(async () => pending.resolve({ catalog: f.facts }))
@@ -176,8 +178,8 @@ it('does not let a delayed explicit Main lookup replace later navigation or an e
 
 it('does not let the prior client or Runtime return take over a later primary workface', async () => {
   const f = await original(), pending = f.delayEntry()
-  await click(button(f.nav(), 'Mote'))
-  await click(button(f.nav(), 'Focus'))
+  await openPrimary(f.view.element, 'Mote')
+  await openPrimary(f.view.element, 'Focus')
   const second = fixture(); second.client.forwardRpc = vi.fn(async () => ({ catalog: f.facts })) as any
   await f.view.render(f.render(second.client))
   await act(async () => pending.resolve({ catalog: f.facts }))
@@ -189,7 +191,7 @@ it('does not let the prior client or Runtime return take over a later primary wo
 
 it.each(['client', 'runtime'] as const)('keeps the original reading when the %s owner changes during an explicit Main lookup', async change => {
   const f = await original(), pending = f.delayEntry()
-  await click(button(f.nav(), 'Mote'))
+  await openPrimary(f.view.element, 'Mote')
   if (change === 'client') {
     const second = fixture(); second.client.forwardRpc = vi.fn(async () => ({ catalog: f.facts })) as any
     await f.view.render(f.render(second.client))
@@ -207,7 +209,7 @@ it('retains an explicitly restored member route through discovery instead of aut
   const f = fixture(), ensure = vi.fn(); f.client.ensureAgentContinuity = ensure
   f.client.forwardRpc = vi.fn(async (method: string) => method === 'space.mote.dialogue.read' ? dialogue() : { catalog: catalog() }) as any
   const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} restoreWorkface />)
-  await waitForElement(view.element, '.mobile-mote-thread-return')
+  await waitForElement(view.element, '[data-mobile-back][aria-label="返回 Threads"]')
   await act(async () => f.emit({ type: 'connection-state', state: 'restored', evidence: { source: 'native-hook', observedAt: 2 } } as any))
   expect(getDeviceWorkface().snapshot().record.selectedSessionId).toBe(workerSid)
   expect(getDeviceWorkface().snapshot().record.presentation?.moteView).toMatchObject({ section: 'threads', directAgent: true })

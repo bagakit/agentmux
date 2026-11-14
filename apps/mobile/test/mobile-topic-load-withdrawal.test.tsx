@@ -7,6 +7,7 @@ import { createBrowserPlatform } from '../src/platform/browser'
 import { MobileWebUpdateSafetyProvider } from '../src/mobile-web/update-safety'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { button, click, deferred, editor, fixture, mount, mounted, paste } from './conversation-fixture'
+import { openPrimary } from './mobile-root-navigation'
 
 vi.mock('../src/navigation/defer-mobile-surface', async original => {
   const actual = await original<typeof import('../src/navigation/defer-mobile-surface')>()
@@ -43,7 +44,7 @@ it('withdraws a failed Topic reopening when its own discussion is hidden inside 
   </MobileWebUpdateSafetyProvider>)
   const originalEditor = editor(view.element)
   await paste(view.element, '返回后继续的草稿')
-  await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Topics'))
+  await openPrimary(view.element, 'Topics')
   await vi.waitFor(() => expect(button(view.element, '工作分类')).toBeDefined(), { timeout: 10000 })
   await click(button(view.element, '工作分类'))
   await vi.waitFor(() => expect(button(view.element, '讨论甲')).toBeDefined(), { timeout: 10000 })

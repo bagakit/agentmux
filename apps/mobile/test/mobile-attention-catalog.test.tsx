@@ -8,6 +8,7 @@ import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-w
 import { saveMobileHome } from '../src/navigation/home-preference'
 import type { MobileAgentPresentation } from '../src/navigation/mobile-agent-status'
 import { button, click, fixture, mount, mounted, waitForElement } from './conversation-fixture'
+import { openPrimary } from './mobile-root-navigation'
 
 const row: MobileAgentPresentation = { agentSessionId: 'peer', name: '等待中的工作', project: '项目', detail: '', group: 'attention', state: 'waiting', stateMark: 'attention', providerId: 'codex', recap: null }
 const catalog = () => ({ spaces: [], zones: [], tabs: [], regions: [], locations: [], bindings: [], agentPresentation: [structuredClone(row)] })
@@ -110,7 +111,7 @@ describe('actual MobileApp attention consumers', () => {
     })
     saveMobileHome(home)
     const view = await mount(<MobileApp client={f.client} connection={connection} platform={createBrowserPlatform()} />)
-    await click(button(view.element, home === 'mote' ? 'Mote' : 'Space'))
+    await openPrimary(view.element, home === 'mote' ? 'Mote' : 'Space')
     await waitForElement(view.element, '.mobile-spatial-panel')
     const before = read.mock.calls.length
     await timer.tick(10_000); await timer.tick(15_000)
@@ -127,16 +128,19 @@ describe('actual MobileApp attention consumers', () => {
     })
     saveMobileHome('focus')
     const view = await mount(<MobileApp client={f.client} connection={connection} platform={createBrowserPlatform()} />)
-    await click(button(view.element, 'Focus'))
+    await openPrimary(view.element, 'Focus')
     const ticket = await waitForElement<HTMLButtonElement>(view.element, '.mobile-needs-you-ticket')
-    await click(ticket)
-    await waitForElement(view.element, '.mobile-session-origin')
     fails = true
-    await timer.tick(15_000)
+    // The visible Focus directory owns the root catalog read here and pauses the shell reader.
+    await timer.tick(10_000)
     const focus = view.element.querySelector<HTMLButtonElement>('[data-workface="focus"]')!
     expect(focus.getAttribute('aria-description')).toContain('数量尚未确认')
     expect(focus.querySelector('.mobile-tab-badge')?.textContent).toBe('?')
     expect(focus.querySelector('.mobile-tab-badge')?.hasAttribute('data-count')).toBe(false)
+    // The unconfirmed list keeps its last membership, so the original ticket still opens its Session.
+    await click(ticket)
+    await waitForElement(view.element, '.mobile-session-origin')
+    expect(view.element.querySelector('[data-workface="focus"]')).toBeNull()
     expect(view.element.querySelector('.mobile-session-origin')?.getAttribute('aria-description')).toContain('尚未确认')
     expect(view.element.querySelector('.mobile-back-badge')?.textContent).toBe('?')
     const originalEditor = view.element.querySelector('[contenteditable="true"]')
@@ -148,8 +152,11 @@ describe('actual MobileApp attention consumers', () => {
     await click(button(view.element, '需要你列表尚未确认，查看原因和恢复操作'))
     fails = false
     await click(button(document.body, '重新读取需要你列表'))
-    expect(focus.querySelector('.mobile-tab-badge')?.textContent).toBe('1')
     expect(document.querySelector('.mobile-attention-details')).toBeNull()
+    // The open Session is the only one waiting, so back carries no count; the root tab counts it again.
+    expect(view.element.querySelector('.mobile-back-badge')).toBeNull()
+    await click(button(view.element, '返回 Focus'))
+    expect(view.element.querySelector('[data-workface="focus"] .mobile-tab-badge')?.textContent).toBe('1')
     expect(f.submit).not.toHaveBeenCalled(); expect(f.respond).not.toHaveBeenCalled()
   })
 })

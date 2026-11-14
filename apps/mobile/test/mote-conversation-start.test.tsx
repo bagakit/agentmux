@@ -13,6 +13,7 @@ import { agentPromptSubmissionOutcome } from '@agentmux/core/mote-dialogue'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { openPrimary } from './mobile-root-navigation'
 
 const closing: Array<() => Promise<unknown>> = []
 beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
@@ -259,7 +260,7 @@ it('an unconfirmed Mote directory read keeps the already selected healthy Main r
   await paste(f.scene(), 'Enter original healthy Main'); await wait(() => expect(button(f.scene(), 'Send').disabled).toBe(false)); await click(button(f.scene(), 'Send'))
   await wait(() => expect(f.owner.snapshot().record.selectedSessionId).not.toBeNull())
   const original = f.owner.snapshot().record.selectedSessionId
-  await click(button(f.view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Mote'))
+  await openPrimary(f.view.element, 'Mote')
   await wait(() => expect(f.view.element.textContent).toContain('主对话配置还没确认'))
   expect(f.owner.snapshot().record.selectedSessionId).toBe(original)
   expect(f.view.element.querySelector('.mote-start')).toBeNull()

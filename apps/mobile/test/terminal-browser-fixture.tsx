@@ -187,7 +187,7 @@ export async function runBrowserProof() {
   await until(() => document.querySelector('.mobile-terminal-panel .xterm-screen') !== null && calls.filter(value => value.method === 'reattachAgent').length === 4, 'actual MobileApp terminal panel consumes the viewer')
   assert(document.querySelector('.mobile-terminal-panel')!.hasAttribute('hidden') === false && document.querySelector('[aria-current="page"]')!.textContent === '终端', 'Actual app navigation mounts the real viewer')
   const canvasElement = document.querySelector('.xterm-screen')
-  document.querySelector<HTMLButtonElement>('.mobile-navigation button')!.click()
+  document.querySelector<HTMLButtonElement>('[data-mobile-back]')!.click()
   await until(() => calls.filter(value => value.method === 'releaseRunAttachment').length === 4, 'actual navigation releases its reader')
   assert(document.querySelector('.xterm-screen') === canvasElement, 'Navigation retains the existing local canvas')
   root.unmount(); await until(() => listeners.size === 0, 'actual app observation cleanup')

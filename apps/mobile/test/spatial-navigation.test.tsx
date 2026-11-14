@@ -4,7 +4,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
-import { openTreeSession, button, click, editor, fixture, mount, mounted, waitForElement, openAppMenu } from './conversation-fixture'
+import { button, click, editor, fixture, mount, mounted, waitForElement, openAppMenu } from './conversation-fixture'
+import { openMoteAgent, openPrimary } from './mobile-root-navigation'
+/** Directory rows arrive with the directory's first module and catalog reads. */
+async function waitForRow(element: HTMLElement, text: string): Promise<HTMLButtonElement> {
+  let row: HTMLButtonElement | undefined
+  await vi.waitFor(async () => {
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+    row = [...element.querySelectorAll<HTMLButtonElement>('.mobile-session-list button')].find(item => !item.closest('[hidden]') && item.textContent?.includes(text))
+    expect(row, `Actual directory row ${text}`).toBeDefined()
+  }, { timeout: 4000, interval: 10 })
+  return row!
+}
 const connection = { state: 'connected' as const, message: '已连接 Mac' }
 const catalog = { spaces: [{ spaceId: 'space', kind: 'folder', name: 'Actual Space', hostId: 'host-original', directoryPath: fixturePath("unrelated"), projectId: null }],
   zones: [], tabs: [{ tabId: 'tab', zoneId: 'zone', workspaceId: 'workspace', name: 'Original Agent', regionIds: ['region'] }],
@@ -18,12 +29,11 @@ describe('mobile production workspace navigation', () => {
     const f = fixture(); f.client.forwardRpc = vi.fn().mockImplementation(async (method: string) => method === 'app.snapshot' ? { agents: [] } : method === 'agent.inspect' ? { session: f.client.agentSession('session-original'), displayName: { override: null, availability: 'observed' } } : { catalog })
     const view = await mount(<MobileApp client={f.client} connection={connection} platform={createBrowserPlatform()} />)
     expect(view.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(false)
-    await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Space'))
+    await openPrimary(view.element, 'Space')
     expect(view.element.querySelector('h1')?.textContent).toBe('Space')
     expect(view.element.querySelector('.mobile-connect-page')).toBeNull()
-    const space = [...view.element.querySelectorAll<HTMLButtonElement>('.mobile-session-list button')].find(item => item.textContent?.includes('Actual Space'))!
-    await click(space)
-    await click(view.element.querySelector<HTMLButtonElement>('.mobile-spatial-tab .mobile-session-list button')!)
+    await click(await waitForRow(view.element, 'Actual Space'))
+    await click(await waitForElement(view.element, '.mobile-spatial-tab .mobile-session-list button'))
     expect(view.element.querySelector('[data-agent-session-id]')?.getAttribute('data-agent-session-id')).toBe('session-original')
     expect(view.element.querySelector('.mobile-conversation__window')).toBeNull()
     expect(view.element.querySelector('.conversation-native-thread__source')).toBeNull()
@@ -32,7 +42,7 @@ describe('mobile production workspace navigation', () => {
     expect(editor(view.element)).toBe(input)
     expect(view.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(false)
     expect(view.element.querySelector('.mobile-connect-page')).toBeNull()
-    await click(button(view.element.querySelector('.mobile-session-toolbar') as HTMLElement, 'Space'))
+    await click(button(view.element.querySelector('.mobile-session-toolbar') as HTMLElement, '返回 Space'))
     expect(editor(view.element)).toBe(input)
     expect(f.disposeHistory).toHaveBeenCalled()
     expect(f.submit).not.toHaveBeenCalled()
@@ -53,14 +63,13 @@ describe('mobile production workspace navigation', () => {
       : { catalog: originalCatalog })
     const overlay = document.createElement('div'); document.body.append(overlay)
     const view = await mount(<MobileApp client={f.client} connection={connection} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
-    await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Focus'))
-    const row = [...view.element.querySelectorAll<HTMLButtonElement>('.mobile-session-list button')].find(item => item.textContent?.includes('Original Project'))!
+    await openPrimary(view.element, 'Focus')
+    const row = await waitForRow(view.element, 'Original Project')
     expect(row.textContent).toContain('Chosen Agent')
     expect(row.textContent).toContain('执行中')
-    expect(row.textContent).toContain('codex')
+    expect(row.textContent).toContain('Codex')
     expect(row.textContent).not.toContain(fixturePath("workspace"))
-    await click(button(view.element.querySelector('.mobile-navigation') as HTMLElement, 'Mote'))
-    await openTreeSession(view.element)
+    await openMoteAgent(view.element)
     expect(view.element.querySelector('[data-agent-session-id]')?.getAttribute('data-agent-session-id')).toBe('session-original')
     expect(view.element.querySelector('.mobile-mote-heading strong')).toBeNull()
     expect(view.element.querySelector('.mobile-mote-heading')?.getAttribute('aria-label')).toContain('Chosen Agent')
@@ -105,9 +114,9 @@ it('keeps the locally selected Topic across a Session round trip after an extern
   })
   const view = await mount(<MobileApp client={f.client} connection={connection} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
   await openAppMenu(view.element); await click(button(overlay, 'Survey研究与笔记'))
-  await click(button(view.element.querySelector('.mobile-survey') as HTMLElement, '原研究当前选择'))
+  await click(button(await waitForElement(view.element, '.mobile-survey'), '原研究当前选择'))
   await click(button(view.element.querySelector('.mobile-survey') as HTMLElement, '外部 Topic A'))
-  const topics = view.element.querySelector('.mobile-topics') as HTMLElement
+  const topics = await waitForElement(view.element, '.mobile-topics')
   expect(topics.querySelector('h1')?.textContent).toBe('Topic A')
   await click(topics.querySelector<HTMLButtonElement>('[aria-label="返回分类目录"]')!)
   await click(button(topics, '分类')); await click(button(topics, 'Topic B'))
@@ -117,7 +126,7 @@ it('keeps the locally selected Topic across a Session round trip after an extern
   expect(view.element.querySelector('[data-agent-session-id]')?.getAttribute('data-agent-session-id')).toBe('session-original')
   const input = editor(view.element)
   const inspections = f.client.forwardRpc.mock.calls.filter(([method]) => method === 'topic.inspect').length
-  await click(button(view.element.querySelector('.mobile-session-toolbar') as HTMLElement, 'Topics'))
+  await click(button(view.element.querySelector('.mobile-session-toolbar') as HTMLElement, '返回 Topics'))
   expect(topics.querySelector('h1')?.textContent).toBe('Topic B')
   expect(editor(view.element)).toBe(input)
   expect(f.client.forwardRpc).toHaveBeenCalledWith('topic.ls', { categoryId: category.categoryId })
@@ -132,7 +141,7 @@ it('shows a presentation owner failure in a mounted directory without taking awa
   const failed = { ...catalog, spaces: [{ ...catalog.spaces[0], issue: '原头像读取失败：appearance owner unavailable；可刷新重试' }] }
   f.client.forwardRpc = vi.fn().mockResolvedValue({ catalog: failed })
   const view = await mount(<MobileApp client={f.client} connection={connection} platform={createBrowserPlatform()} />)
-  await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Space'))
+  await openPrimary(view.element, 'Space')
   await click(await waitForElement(view.element, '.mobile-directory-notice'))
   expect(document.body.querySelector('.mobile-directory-issues')?.textContent).toContain('appearance owner unavailable')
   expect(button(document.body, '重新读取目录')).toBeDefined()

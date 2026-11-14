@@ -52,21 +52,32 @@ async function setup(initial = catalog()) {
   f.client.forwardRpc = rpc; f.client.ensureAgentContinuity = vi.fn()
   const app = () => <MobileApp client={f.client} connection={connected} platform={platform} />
   const view = await mount(app())
-  await vi.waitFor(() => expect(view.element.querySelector('.mobile-mote-team-summary')?.textContent).toContain('团队 '))
+  await vi.waitFor(() => expect(view.element.querySelector('.mobile-mote-context .mobile-mote-team-button__label')?.textContent).toMatch(/^团队 \d+$/))
   return { ...f, owner, view, app, rpc, setCatalog(next: AgentMuxSpaceCatalog) { current = next }, fail() { failure = true } }
 }
+const strip = (element: HTMLElement) => element.querySelector<HTMLElement>('.mobile-mote-context')!
+const title = (element: HTMLElement) => element.querySelector('.mobile-header .mobile-session-title')?.textContent
 beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => { for (const view of mounted.splice(0)) { await act(async () => view.root.unmount()); view.element.remove() }; document.body.replaceChildren(); vi.restoreAllMocks() })
-const panel = () => document.querySelector<HTMLElement>('[aria-label="本 Mote 团队"]')!
+// The Threads page embeds a members-only copy; the team sheet is the panel these tests open.
+const panel = () => document.querySelector<HTMLElement>('[role="dialog"] [aria-label="本 Mote 团队"]')!
 
 it('actual chat-first App exposes its original main recipient and scoped team without changing the draft or dispatching input', async () => {
   const f = await setup()
-  const summary = f.view.element.querySelector('.mobile-mote-team-summary')!
-  expect(summary.textContent).toContain('主 Agent'); expect(summary.textContent).toContain('协调与执行搭档'); expect(summary.textContent).toContain('1 需要你')
-  expect(f.view.element.querySelector('.mobile-header .mobile-session-title')?.textContent).toBe('产品研究搭档')
+  // The Mote root names the Mote; its strip carries sections and the team, never the executing Agent's name.
+  expect(title(f.view.element)).toBe('产品研究搭档')
+  expect(strip(f.view.element).getAttribute('data-variant')).toBe('main')
+  expect(strip(f.view.element).querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Discussion')
+  expect(f.view.element.querySelector('.mobile-header')?.textContent).not.toContain('协调与执行搭档')
+  expect(strip(f.view.element).textContent).not.toContain('协调与执行搭档')
+  const team = button(strip(f.view.element), '查看本 Mote 团队')
+  expect(team.querySelector('.mobile-tab-badge')?.getAttribute('data-count')).toBe('1')
+  expect(team.getAttribute('aria-description')).toContain('1 个需要你')
   await paste(f.view.element, '保留主 Agent 未发送草稿')
   const originalEditor = editor(f.view.element)
   await click(button(f.view.element, '查看本 Mote 团队'))
+  // The team panel is where the main recipient is named.
+  expect(panel().querySelector('.mobile-mote-team-section:last-child [data-mote-member="session-original"]')?.textContent).toContain('协调与执行搭档主 Agent')
   expect(panel().textContent).toContain('请确认读取原资料范围'); expect(panel().textContent).toContain('正在整理下一步方案。')
   expect(panel().textContent).not.toContain('别的 Mote 成员'); expect(panel().textContent).not.toContain('不能混入当前团队')
   expect(panel().querySelectorAll('.mobile-mote-team-section:last-child [data-mote-member]')).toHaveLength(2)
@@ -80,8 +91,8 @@ it('actual member request navigation keeps original source and both drafts while
   await paste(f.view.element, '主对话的原草稿')
   await click(button(f.view.element, '查看本 Mote 团队')); await click(button(panel(), '打开成员 · 资料研究员'))
   expect(f.owner.snapshot().record.selectedSessionId).toBe(memberId)
-  expect(f.view.element.querySelector('.mobile-mote-recipient')?.textContent).toContain('成员资料研究员')
-  expect(f.view.element.querySelector('.mobile-header .mobile-session-title')?.textContent).toBe('产品研究搭档')
+  expect(title(f.view.element)).toBe('资料研究员')
+  expect(strip(f.view.element).querySelector('.mobile-mote-context__role')?.textContent).toBe('成员')
   expect(button(f.view.element, '允许本次原资料读取')).toBeDefined()
   await paste(f.view.element, '成员的原草稿')
   expect(f.submit).not.toHaveBeenCalled(); expect(f.respond).not.toHaveBeenCalled()
@@ -97,7 +108,7 @@ it('actual member request navigation keeps original source and both drafts while
 it('unknown main reference is not replaced with a first member and healthy original input stays available', async () => {
   const original = catalog(); original.motePresentation![0]!.quickMode = { status: 'unconfirmed', message: '原主引用尚未确认' }; original.motePresentation![0]!.conversation = null
   const f = await setup(original)
-  expect(f.view.element.querySelector('.mobile-mote-recipient small')?.textContent).toBe('对话')
+  expect(strip(f.view.element).textContent).not.toContain('主 Agent')
   expect(f.view.element.querySelector('.mobile-mote-main-return')).toBeNull()
   await click(button(f.view.element, '查看本 Mote 团队'))
   expect(button(panel(), '核对主 Agent')).toBeDefined(); expect(panel().querySelector('.mobile-mote-role')?.textContent).not.toBe('主 Agent')
@@ -118,7 +129,7 @@ it('multiple original positions remain explicit candidates and cold App reading 
   expect(f.owner.snapshot().record.presentation?.identity?.context?.regionId).toBe('second-region')
   await paste(f.view.element, '冷读后保留成员稿')
   await f.view.render(null); await f.view.render(f.app())
-  await vi.waitFor(() => expect(f.view.element.querySelector('.mobile-mote-recipient')?.textContent).toContain('资料研究员'))
+  await vi.waitFor(() => expect(title(f.view.element)).toBe('资料研究员'))
   expect(editor(f.view.element).textContent).toBe('冷读后保留成员稿')
   await click(button(f.view.element, '回主对话')); expect(editor(f.view.element).textContent).toBe('冷读后保留主稿')
   expect(f.owner.snapshot().record.selectedSessionId).toBe(sid)
@@ -127,7 +138,7 @@ it('multiple original positions remain explicit candidates and cold App reading 
 it('a foreign Host with the same Session ID cannot contribute a request or retarget original navigation', async () => {
   const f = await setup()
   await act(async () => f.emit({ type: 'agent-session', session: { ...f.sessions.get(memberId)!, hostId: 'foreign-host' } }))
-  await vi.waitFor(() => expect(f.view.element.querySelector('.mobile-mote-team-summary')?.textContent).not.toContain('需要你'))
+  await vi.waitFor(() => expect(strip(f.view.element).querySelector('.mobile-mote-team-button .mobile-tab-badge')).toBeNull())
   await click(button(f.view.element, '查看本 Mote 团队'))
   expect(panel().textContent).not.toContain('请确认读取原资料范围')
   const original = panel().querySelector<HTMLElement>('.mobile-mote-team-section:last-child [data-mote-member="other"][data-mote-host="host-original"]')!
@@ -215,7 +226,7 @@ it('unknown execution Hosts retain independent original Regions and never borrow
   expect(rows).toHaveLength(2)
   expect(panel().textContent).toContain('1 位 Agent · 2 处待确认')
   expect(new Set(rows.map(row => row.dataset.moteMemberKey)).size).toBe(2)
-  expect(panel().querySelector('.mobile-mote-team-section h3')?.textContent).not.toContain('需要你')
+  expect([...panel().querySelectorAll('.mobile-mote-team-section h3')].map(value => value.textContent).join()).not.toContain('需要你')
   for (const row of rows) {
     expect(row.dataset.moteHost).toBe(''); expect(row.textContent).not.toContain('资料研究员')
     expect(row.textContent).toContain('位置与恢复'); expect(row.querySelector('button')!.disabled).toBe(false)
