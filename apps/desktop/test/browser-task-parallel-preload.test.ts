@@ -21,3 +21,16 @@ it('the actual preload preserves exact parallel start, original lookup and both 
   expect(bridge.invoke).toHaveBeenLastCalledWith('browser:listTaskParallel', 'source-browser', { before: 'older-original', limit: 16 })
   expect(bridge.invoke).toHaveBeenCalledTimes(3)
 })
+
+it('the actual preload preserves exact group stop and independent target continuation identities', async () => {
+  const input = { continuationId: 'new-human-intent', expectedRevision: 'a'.repeat(64), parameters: { value: 'fresh' }, calls: { child: { parameters: {}, items: [{ id: 'original-item', parameters: { entry: 'fresh-child' } }] } } }
+  bridge.invoke.mockResolvedValueOnce(null)
+  expect(await bridge.api!.browser.stopTaskParallel('source-browser', 'original-group')).toBeNull()
+  expect(bridge.invoke).toHaveBeenLastCalledWith('browser:stopTaskParallel', 'source-browser', 'original-group')
+  const receipt = { run: { operationId: 'original-group' }, continuation: { id: input.continuationId } }
+  bridge.invoke.mockResolvedValueOnce(receipt)
+  expect(await bridge.api!.browser.continueTaskParallelTarget('source-browser', 'original-group', 'original-target', input)).toBe(receipt)
+  expect(bridge.invoke).toHaveBeenLastCalledWith('browser:continueTaskParallelTarget', 'source-browser', 'original-group', 'original-target', input)
+  await bridge.api!.browser.inspectTaskParallel('source-browser', { operationId: 'original-group', continuationId: input.continuationId, limit: 16 })
+  expect(bridge.invoke).toHaveBeenLastCalledWith('browser:inspectTaskParallel', 'source-browser', { operationId: 'original-group', continuationId: input.continuationId, limit: 16 })
+})

@@ -3,7 +3,7 @@ import { act, createElement, type ComponentProps } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { BrowserTaskParallelInspection, BrowserTaskParallelSummary } from '@agentmux/core/control'
-const ports = vi.hoisted(() => ({ listTargets: vi.fn(), onTargetsChanged: vi.fn(() => () => {}), listTaskParallel: vi.fn(), inspectTaskParallel: vi.fn(), controlTask: vi.fn() }))
+const ports = vi.hoisted(() => ({ listTargets: vi.fn(), onTargetsChanged: vi.fn(() => () => {}), listTaskParallel: vi.fn(), inspectTaskParallel: vi.fn(), controlTask: vi.fn(), stopTaskParallel: vi.fn() }))
 vi.mock('../src/renderer/src/lib/api', () => ({ api: { browser: ports } }))
 import { BrowserTaskParallel } from '../src/renderer/src/components/BrowserTaskParallel'
 import { BrowserTaskAssetEditor } from '../src/renderer/src/components/BrowserTaskAssetEditor'
@@ -31,7 +31,7 @@ afterEach(() => { vi.clearAllMocks(); vi.useRealTimers() })
 async function mount(extra: Partial<ComponentProps<typeof BrowserTaskParallel>> = {}, editorBusy = false) {
   ports.listTargets.mockResolvedValue({ targets, coverage: 'complete' }); ports.listTaskParallel.mockResolvedValue({ runs: [], page: { before: null, nextBefore: null, limit: 16 } }); ports.inspectTaskParallel.mockResolvedValue(null)
   const onStart = vi.fn<ComponentProps<typeof BrowserTaskParallel>['onStart']>(async request => summary(request.input.operationId, { version: request.version, targetCount: request.input.targets.length, concurrency: Math.min(request.input.concurrency ?? 1, request.input.targets.length), status: 'ready', counts: { queued: request.input.targets.length, preparing: 0, running: 0, waitingHuman: 0, ready: 0, completed: 0, interrupted: 0, failed: 0, stopped: 0 } }))
-  const props = { asset, version, assets: [asset, child], onStart, ...extra }
+  const props = { asset, version, assets: [asset, child], onStart, onContinue: vi.fn(async () => { throw new Error('No continuation result configured') }), ...extra }
   const host = document.createElement('div'); document.body.append(host); const root = createRoot(host)
   const render = async (patch: Partial<typeof props> = {}) => { Object.assign(props, patch); await act(async () => root.render(editorBusy ? createElement(BrowserTaskAssetEditor, {
     asset: props.asset, recording: null, busy: true, onImport: vi.fn(), onSaveDraft: vi.fn(), onSaveVersion: vi.fn(), onLocateStep: vi.fn(), onRun: vi.fn(), onStop: vi.fn(), renderParallel: saved => createElement(BrowserTaskParallel, { ...props, version: props.asset.versions.find(version => version.version === saved)! })
@@ -197,6 +197,156 @@ describe('parallel tasks in the original Browser asset editor', () => {
       expect(m.host.querySelector<HTMLInputElement>('[aria-label="browser-a parameter Root value"]')!.value).toBe('fixed-v1-input')
       await act(async () => button(m.host, 'Start new parallel run · 1 target').click())
       expect(m.onStart.mock.calls[0]![0].version).toBe(1)
+    } finally { await m.close() }
+  })
+})
+
+const continuationPage = (): BrowserTaskParallelInspection => ({ run: summary(), targets: [
+  { id: 'target-a', browserId: 'browser-a', profileId: 'profile-a', phase: 'bound', continuationRevision: 'a'.repeat(64), run: { id: 'original-root-run', status: 'waiting-human', nextStep: 0, operationCount: 3 } },
+  { id: 'target-b', browserId: 'browser-b', profileId: 'profile-b', phase: 'bound', continuationRevision: 'b'.repeat(64), run: { id: 'other-root-run', status: 'ready', nextStep: 0, operationCount: 0 } }
+], page: { after: null, limit: 16, nextAfter: null } })
+function originalTargetInspection(browserId = 'browser-a', runId = 'original-root-run') {
+  const root = { id: runId, browserId, assetId: asset.id, version: 1, status: 'waiting-human' as const, nextStep: 0, operationIds: ['already-applied'], startedAt: 1, updatedAt: 2,
+    calls: [{ stepId: 'child', assetId: child.id, version: 1, nextItem: 1, items: [{ id: 'completed-item', runId: 'completed-child' }, { id: 'unfinished-item', runId: 'unfinished-child' }] }] }
+  const children = ['completed', 'unfinished'].map((state, index) => ({ id: state + '-child', browserId, assetId: child.id, version: 1, status: index ? 'waiting-human' as const : 'completed' as const, nextStep: 0, operationIds: index ? [] : ['completed-child-operation'], startedAt: 1, updatedAt: 2 }))
+  return { rootRunId: runId, currentRunId: 'unfinished-child', runs: [root, ...children], operationCount: 3, executedMillis: 4 }
+}
+async function showOriginalContinue(m: Awaited<ReturnType<typeof mount>>, targetId = 'target-a') {
+  ports.inspectTaskParallel.mockResolvedValue(continuationPage())
+  ports.controlTask.mockImplementation(async (request: { browserId: string; runId: string }) => ({ operation: 'browser.task.inspect', inspection: originalTargetInspection(request.browserId, request.runId) }))
+  await act(async () => button(m.host, 'Refresh targets and progress').click())
+  await act(async () => button(m.host, `Review continue target ${targetId} · v1`).click())
+}
+describe('original parallel group stop and target continuation', () => {
+  it('stops the exact original group without automation, source-driving or Browser-close gates and keeps completed results visible', async () => {
+    const m = await mount({ current: summary() }, true)
+    try {
+      ports.inspectTaskParallel.mockResolvedValue(continuationPage()); ports.stopTaskParallel.mockResolvedValue(summary('original-operation', { status: 'stopped', counts: { queued: 0, preparing: 0, running: 0, waitingHuman: 0, ready: 0, completed: 1, interrupted: 0, failed: 0, stopped: 1 } }))
+      await act(async () => button(m.host, 'Refresh targets and progress').click()); await act(async () => button(m.host, 'Stop original parallel group').click())
+      expect(ports.stopTaskParallel).toHaveBeenCalledExactlyOnceWith(source, 'original-operation'); expect(m.onStart).not.toHaveBeenCalled()
+      expect(m.host.textContent).toContain('Stop request recorded'); expect(m.host.textContent).toContain('Completed actions stay done'); expect(m.host.textContent).toContain('Browsers stay open')
+      expect(m.host.textContent).toContain('1 waiting for you · 1 steps completed')
+    } finally { await m.close() }
+  })
+  it('keeps an unknown stop’s original group queryable without resending or locking new starts', async () => {
+    const m = await mount({ current: summary() })
+    try {
+      ports.inspectTaskParallel.mockResolvedValue(continuationPage()); ports.stopTaskParallel.mockRejectedValueOnce(new Error('Stop ACK lost'))
+      await act(async () => button(m.host, 'Refresh targets and progress').click()); await act(async () => button(m.host, 'Stop original parallel group').click())
+      expect(m.host.querySelector('[data-parallel-stop]')!.textContent).toContain('original-operation'); expect(button(m.host, 'Stop original parallel group').disabled).toBe(false)
+      await act(async () => button(m.host, 'Inspect original group after stop').click()); expect(ports.stopTaskParallel).toHaveBeenCalledTimes(1)
+      await m.select('browser-a'); await fill(m.host, 'browser-a parameter Root value', 'independent-start'); expect(button(m.host, 'Start new parallel run · 1 target').disabled).toBe(false)
+    } finally { await m.close() }
+  })
+  it('uses the original v1 schema, run and call item IDs while the editor currently selects v3', async () => {
+    const later = { ...version, version: 3, parameters: [{ key: 'other', label: 'v3 only', secret: false }], steps: [{ ...version.steps[0]!, parameterKey: 'other' }] }
+    const changed = { ...asset, versions: [version, later] }
+    const onContinue = vi.fn(async request => ({ run: summary(), continuation: { id: request.input.continuationId, targetId: request.targetId, admission: 'confirmed' as const } }))
+    const m = await mount({ current: summary(), asset: changed, assets: [changed, child], version: later, onContinue })
+    try {
+      await showOriginalContinue(m)
+      const form = m.host.querySelector('[data-continue-target]')!
+      expect(form.textContent).toContain('Continue original target · v1'); expect(form.querySelector('[aria-label="Continue target-a parameter v3 only"]')).toBeNull()
+      expect(form.querySelector('[data-task-subflow-input="completed-item"]')).toBeTruthy(); expect(form.querySelector('[data-task-subflow-input="completed-item"]')!.textContent).toContain('steps completed')
+      expect(form.querySelector('[aria-label="Continue target-a / Entries item 1 Entry value"]')).toBeNull()
+      await fill(m.host, 'Continue target-a parameter Root value', 'fresh-original-root')
+      await fill(m.host, 'Continue target-a / Entries fresh Child token', 'fresh-child-secret')
+      await fill(m.host, 'Continue target-a / Entries item 2 Entry value', 'fresh-second-item')
+      await act(async () => button(m.host, 'Return control and continue target').click())
+      expect(onContinue).toHaveBeenCalledOnce()
+      expect(onContinue.mock.calls[0]![0]).toMatchObject({ browserId: source, operationId: 'original-operation', targetId: 'target-a', input: { expectedRevision: 'a'.repeat(64), parameters: { root: 'fresh-original-root' }, calls: { child: { parameters: { token: 'fresh-child-secret' }, items: [{ id: 'completed-item', parameters: {} }, { id: 'unfinished-item', parameters: { value: 'fresh-second-item' } }] } } } })
+      expect(m.host.textContent).toContain('Continue request recorded'); expect(m.host.textContent).toContain('does not confirm that its steps completed')
+      expect((form.querySelector('[aria-label="Continue target-a parameter Root value"]') as HTMLInputElement).value).toBe(''); expect(m.onStart).not.toHaveBeenCalled()
+    } finally { await m.close() }
+  })
+  it('keeps fresh input on an authoritative refusal and mints a different ID only for another explicit continuation', async () => {
+    const onContinue = vi.fn(async request => ({ run: summary(), continuation: { id: request.input.continuationId, targetId: request.targetId, admission: 'refused' as const, warning: 'The original cursor changed; review its current run.' } }))
+    const m = await mount({ current: summary(), onContinue })
+    try {
+      await showOriginalContinue(m); await fill(m.host, 'Continue target-a parameter Root value', 'keep-correction')
+      await act(async () => button(m.host, 'Return control and continue target').click())
+      expect((m.host.querySelector('[aria-label="Continue target-a parameter Root value"]') as HTMLInputElement).value).toBe('keep-correction'); expect(button(m.host, 'Return control and continue target').disabled).toBe(false)
+      const first = onContinue.mock.calls[0]![0].input.continuationId
+      expect(m.host.textContent).toContain('Continuation was not admitted'); expect(onContinue).toHaveBeenCalledTimes(1)
+      await act(async () => button(m.host, 'Return control and continue target').click())
+      expect(onContinue).toHaveBeenCalledTimes(2); expect(onContinue.mock.calls[1]![0].input.continuationId).not.toBe(first)
+    } finally { await m.close() }
+  })
+  it('explicitly reads the original group cursor before correcting a refused continuation without losing fresh input', async () => {
+    const onContinue = vi.fn(async request => ({ run: summary(), continuation: { id: request.input.continuationId, targetId: request.targetId, admission: 'refused' as const, warning: 'Read the current original cursor.' } }))
+    const m = await mount({ current: summary(), onContinue })
+    try {
+      await showOriginalContinue(m); await fill(m.host, 'Continue target-a parameter Root value', 'keep-while-reading')
+      await act(async () => button(m.host, 'Return control and continue target').click())
+      const original = onContinue.mock.calls[0]![0].input.continuationId
+      const freshPage = continuationPage(); freshPage.targets[0]!.continuationRevision = 'c'.repeat(64)
+      ports.inspectTaskParallel.mockResolvedValue(freshPage)
+      await act(async () => button(m.host, 'Read original cursor').click())
+      expect(ports.inspectTaskParallel).toHaveBeenLastCalledWith(source, { operationId: 'original-operation', limit: 16 })
+      expect((m.host.querySelector('[aria-label="Continue target-a parameter Root value"]') as HTMLInputElement).value).toBe('keep-while-reading')
+      await act(async () => button(m.host, 'Return control and continue target').click())
+      expect(onContinue.mock.calls[1]![0].input.expectedRevision).toBe('c'.repeat(64)); expect(onContinue.mock.calls[1]![0].input.continuationId).not.toBe(original)
+    } finally { await m.close() }
+  })
+  it('keeps the fixed original review and input if a cursor read contradicts its immutable version', async () => {
+    const m = await mount({ current: summary() })
+    try {
+      await showOriginalContinue(m); await fill(m.host, 'Continue target-a parameter Root value', 'keep-original-v1')
+      ports.inspectTaskParallel.mockResolvedValue({ ...continuationPage(), run: summary('original-operation', { version: 3 }) })
+      const reads = ports.controlTask.mock.calls.length
+      await act(async () => button(m.host, 'Read original cursor').click())
+      expect(ports.controlTask).toHaveBeenCalledTimes(reads); expect(m.host.textContent).toContain('original group definition changed')
+      expect(m.host.querySelector('[data-continue-target]')!.textContent).toContain('Continue original target · v1')
+      expect((m.host.querySelector('[aria-label="Continue target-a parameter Root value"]') as HTMLInputElement).value).toBe('keep-original-v1')
+    } finally { await m.close() }
+  })
+  it('clears dispatched values on unknown, retains its exact ID across closing the review and never treats a null lookup as refusal', async () => {
+    const onContinue = vi.fn(async () => { throw new Error('Continue ACK unavailable') })
+    const m = await mount({ current: summary(), onContinue })
+    try {
+      await showOriginalContinue(m); await fill(m.host, 'Continue target-a parameter Root value', 'fresh-once')
+      await act(async () => button(m.host, 'Return control and continue target').click())
+      const id = onContinue.mock.calls[0]![0].input.continuationId
+      expect((m.host.querySelector('[aria-label="Continue target-a parameter Root value"]') as HTMLInputElement).value).toBe(''); expect(button(m.host, 'Return control and continue target').disabled).toBe(true)
+      await act(async () => button(m.host, 'Close review').click()); expect(m.host.querySelector('[data-retained-continuation-id]')!.getAttribute('data-retained-continuation-id')).toBe(id)
+      ports.inspectTaskParallel.mockResolvedValue({ ...continuationPage(), continuation: null }); await act(async () => button(m.host, 'Check original continuation').click())
+      expect(ports.inspectTaskParallel).toHaveBeenLastCalledWith(source, { operationId: 'original-operation', continuationId: id, limit: 16 }); expect(m.host.textContent).toContain('does not prove that the original request was refused or never arrived'); expect(onContinue).toHaveBeenCalledTimes(1)
+      ports.inspectTaskParallel.mockResolvedValue({ ...continuationPage(), continuation: { id, targetId: 'target-a', admission: 'confirmed' } }); await act(async () => button(m.host, 'Check original continuation').click())
+      expect(m.host.textContent).toContain('Continue request recorded'); expect(onContinue).toHaveBeenCalledTimes(1)
+    } finally { await m.close() }
+  })
+  it('keeps independent continuation intents in their exact source namespace when group and target strings coincide', async () => {
+    const onContinue = vi.fn(async () => { throw new Error('Original continuation ACK unavailable') })
+    const m = await mount({ current: summary(), onContinue })
+    try {
+      await showOriginalContinue(m); await fill(m.host, 'Continue target-a parameter Root value', 'first-source')
+      await act(async () => button(m.host, 'Return control and continue target').click())
+      const oldId = onContinue.mock.calls[0]![0].input.continuationId
+      const nextAsset = { ...asset, browserId: 'other-source' }, nextChild = { ...child, browserId: 'other-source' }
+      const otherGroup = summary('original-operation', { browserId: 'other-source' })
+      const otherPage = continuationPage(); otherPage.run = otherGroup; otherPage.targets[0]!.run!.id = 'other-source-root'; otherPage.targets[0]!.continuationRevision = 'd'.repeat(64)
+      ports.listTaskParallel.mockResolvedValue({ runs: [otherGroup], page: { before: null, limit: 16, nextBefore: null } })
+      ports.inspectTaskParallel.mockImplementation(async browserId => browserId === 'other-source' ? otherPage : continuationPage())
+      await m.render({ asset: nextAsset, assets: [nextAsset, nextChild], current: otherGroup })
+      await act(async () => button(m.host, 'Submit form · v1 · waiting for you').click())
+      await act(async () => button(m.host, 'Review continue target target-a · v1').click())
+      await fill(m.host, 'Continue target-a parameter Root value', 'second-source')
+      expect(button(m.host, 'Return control and continue target').disabled).toBe(false)
+      await act(async () => button(m.host, 'Return control and continue target').click())
+      expect(onContinue.mock.calls[1]![0].browserId).toBe('other-source')
+      expect(m.host.querySelector('[data-retained-continuation-id]')!.getAttribute('data-retained-continuation-id')).toBe(oldId)
+      expect(m.host.querySelector('[data-original-continuation-id]')!.getAttribute('data-original-continuation-id')).not.toBe(oldId)
+    } finally { await m.close() }
+  })
+  it('rejects a continuation receipt for another original target and leaves other targets reviewable', async () => {
+    const onContinue = vi.fn(async request => ({ run: summary(), continuation: { id: request.input.continuationId, targetId: 'wrong-target', admission: 'confirmed' as const } }))
+    const m = await mount({ current: summary(), onContinue })
+    try {
+      await showOriginalContinue(m); await fill(m.host, 'Continue target-a parameter Root value', 'fresh-original')
+      await act(async () => button(m.host, 'Return control and continue target').click()); expect(m.host.textContent).toContain('Original continuation is unconfirmed')
+      expect(button(m.host, 'Review continue target target-b · v1').disabled).toBe(false)
+      await act(async () => button(m.host, 'Review continue target target-b · v1').click()); expect(m.host.querySelector('[data-continue-target]')!.getAttribute('data-continue-target')).toBe('target-b')
+      expect(m.host.querySelector('[data-retained-continuation-id]')!.textContent).toContain('target-a'); expect(onContinue).toHaveBeenCalledTimes(1)
     } finally { await m.close() }
   })
 })
