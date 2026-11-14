@@ -741,11 +741,16 @@ it.each([['structured protocol', true, 'session-conversation'], ['terminal', fal
   'sends through the mounted original %s Composer input', async (label, structured, intent) => {
     const draft = `Original ${label} Composer input`
     const originalSession = composerSession()
-    const session = structured ? { ...originalSession, structuredPromptInput: true as const } : originalSession
+    const session = structured ? { ...originalSession, structuredPromptInput: true as const,
+      nativeConfiguration: { revision: 'native-revision', options: [
+        { id: 'details', type: 'boolean' as const, name: 'Details', currentValue: true }
+      ] } } : originalSession
     useAppStore.setState({ sessions: [session], agentSteerQueues: {}, agentComposerDrafts: { [sid]: draft } })
     vi.mocked(api.sessions.refresh).mockResolvedValue(session)
     const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
     await dom.render(<AgentSessionComposer sessionId={sid} />)
+    const settings = dom.container.querySelector('.composer-session-controls [aria-label="Session settings"]')
+    expect(Boolean(settings)).toBe(structured)
     await click(action(dom.container, 'Send'))
     await settled(() => expect(submit, JSON.stringify(queue().map(item => ({
       error: item.error, errorCode: item.errorCode, binding: item.directInputBinding, status: item.status
