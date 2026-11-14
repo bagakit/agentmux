@@ -195,6 +195,7 @@ const CONTROL_OPERATION_ANCHOR: Record<AgentMuxControlRequest['operation'], true
   'toolkit.stop': true,
   'toolkit.watch': true,
   'browser.task.assets': true,
+  'browser.task.inspect': true,
   'browser.task.reliability': true,
   'browser.task.run': true,
   'browser.task.stop': true,

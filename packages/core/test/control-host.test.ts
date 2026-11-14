@@ -993,7 +993,7 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
       'open.file': 'long', 'agent.view': 'long', 'space.view': 'long', 'space.swap': 'long',
       'agent.rename': 'long', 'agent.inspect': 'short', 'space.rename': 'long',
       'space.bind': 'long', 'space.unbind': 'long',
-      'browser.task.assets': 'short', 'browser.task.reliability': 'short',
+      'browser.task.assets': 'short', 'browser.task.inspect': 'short', 'browser.task.reliability': 'short',
       'browser.task.run': 'long', 'browser.task.stop': 'short',
       'agent.open': 'long',
       'space.mv': 'long',
