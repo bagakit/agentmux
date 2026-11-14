@@ -177,8 +177,7 @@ describe('original domain owners → typed public RPC → compiled CLI', () => {
     expect((await service.call('system.diagnostics.inspect', { target: { ...target, authority: { kind: identity.kind, id: identity.id } } })).reads[0]).toMatchObject({ availability: 'unavailable', data: null, issue: { code: 'DIAGNOSTIC_EVIDENCE_AUTHORITY_UNAVAILABLE' } })
     expect((await store.read(record.logId)).record).toEqual(record)
     // A new reader sees the same original bytes, independent of in-memory receipt confirmation.
-    expect((await new DeliveryAttemptStore(root).read(record.logId)).persistence).toBe('observed')
-    expect(JSON.parse(await readFile(join(root, record.logId + '.json'), 'utf8'))).toEqual(record)
+    expect(await new DeliveryAttemptStore(root).read(record.logId)).toMatchObject({ persistence: 'observed', record })
     const identityRead = vi.spyOn(store, 'readJournalAuthority').mockRejectedValue(Object.assign(Error('metadata only'), { code: 'EACCES' }))
     expect((await service.call('system.diagnostics.inspect', { target })).reads[0]).toMatchObject({ availability: 'found', issue: { causeCode: 'EACCES' } })
     identityRead.mockRejectedValue({ code: 'BEARER_SECRET_ABC123' })

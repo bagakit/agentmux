@@ -10,7 +10,7 @@ import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { durableWriteFile, DurableWriteError } from '../src/durable-write.js'
 
 const faults = vi.hoisted(() => ({
-  write: null as Error | null, link: null as Error | null, rename: null as Error | null, directorySyncAt: null as number | null, close: null as Error | null, unlink: null as Error | null,
+  write: null as Error | null, directorySyncAt: null as number | null, close: null as Error | null, unlink: null as Error | null,
   fileSync: null as Error | null, directorySync: null as Error | null,
   closeAfterSync: null as 'file' | 'directory' | null, closeAfterSyncError: null as Error | null,
   writes: 0, fileSyncs: 0, directorySyncs: 0
@@ -18,9 +18,9 @@ const faults = vi.hoisted(() => ({
 vi.mock('node:fs/promises', async original => {
   const actual = await original<typeof import('node:fs/promises')>()
   return { ...actual,
-    link: async (...args: Parameters<typeof actual.link>) => { if (faults.link) throw faults.link; return actual.link(...args) },
-    rename: async (...args: Parameters<typeof actual.rename>) => { if (faults.rename) throw faults.rename; return actual.rename(...args) },
     open: async (...args: Parameters<typeof actual.open>) => {
+      const reservation = String(args[0]).endsWith('/recent.sqlite') && args[1] === 'a'
+      if (reservation) { faults.writes++; if (faults.write) throw faults.write }
       const handle = await actual.open(...args), temporary = String(args[0]).endsWith('.tmp')
       const directory = (await handle.stat()).isDirectory()
       let syncAttempted = false
@@ -50,7 +50,7 @@ vi.mock('node:fs/promises', async original => {
 })
 const roots: string[] = []
 afterEach(async () => {
-  Object.assign(faults, { write: null, link: null, rename: null, directorySyncAt: null, close: null, unlink: null, fileSync: null, directorySync: null,
+  Object.assign(faults, { write: null, directorySyncAt: null, close: null, unlink: null, fileSync: null, directorySync: null,
     writes: 0, fileSyncs: 0, directorySyncs: 0, closeAfterSync: null, closeAfterSyncError: null })
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
 })
@@ -79,35 +79,36 @@ describe('resource-pressure diagnostics retain the original failure and recover'
     expect((await new DeliveryAttemptStore(root).read(original.logId)).record).toEqual(original)
     if (code === 'ENOSPC') {
       const bytes = execFileSync(process.execPath, ['--input-type=module', '-e',
-        'import { readFileSync } from "node:fs"; process.stdout.write(readFileSync(process.argv[1]))', join(root, `${original.logId}.json`)], { encoding: 'utf8' })
+        'import { DatabaseSync } from "node:sqlite"; const db = new DatabaseSync(process.argv[1], { readOnly: true }); process.stdout.write(db.prepare("SELECT content FROM attempt WHERE log_id = ?").get(process.argv[2]).content); db.close()',
+        join(root, 'recent.sqlite'), original.logId], { encoding: 'utf8' })
       expect(JSON.parse(bytes)).toEqual(original)
     }
   })
   it('exposes the diagnostic first cause and secondary cleanup in the existing public issue field', async () => {
     const store = new DeliveryAttemptStore(await directory()), original = record()
-    faults.write = errno('ENOSPC'); faults.close = errno('EACCES')
+    faults.directorySync = errno('ENOSPC'); faults.closeAfterSync = 'directory'; faults.closeAfterSyncError = errno('EACCES')
     const failed = await store.record(original)
     expect(failed.record).toEqual(original)
-    expect(failed.issue).toContain('ENOSPC'); expect(failed.issue).toContain('before-replace')
-    expect(failed.issue).toContain('close'); expect(failed.issue).toContain('EACCES')
-    faults.write = null; faults.close = null
+    expect(failed.issue).toContain('ENOSPC'); expect(failed.issue).toContain('after-replace')
+    expect(failed.issue).toContain('directory-close'); expect(failed.issue).toContain('EACCES')
+    faults.directorySync = null; faults.closeAfterSyncError = null
     expect((await store.record(original)).persistence).toBe('confirmed')
   })
-  it.each(['fileSync', 'link', 'rename'] as const)('recovers the same log after %s fails without substituting its contents', async operation => {
+  it('recovers the same log after file sync fails without substituting its contents', async () => {
     const root = await directory(), store = new DeliveryAttemptStore(root), original = record()
-    faults[operation] = errno('EIO')
+    faults.fileSync = errno('EIO')
     const failed = await store.record(original)
     expect(failed).toMatchObject({ persistence: 'unconfirmed', record: original })
     expect(failed.issue).toContain('EIO')
-    faults[operation] = null
+    faults.fileSync = null
     expect(await store.record(original)).toMatchObject({ persistence: 'confirmed', record: original })
     expect((await new DeliveryAttemptStore(root).read(original.logId)).record).toEqual(original)
   })
   it('reconfirms a published original after its parent directory ACK fails, without writing it again', async () => {
     const root = await directory(), store = new DeliveryAttemptStore(root), original = record()
-    faults.directorySync = errno('EIO'); faults.directorySyncAt = 2
+    faults.directorySync = errno('EIO'); faults.directorySyncAt = 1
     const failed = await store.record(original)
-    expect(faults.directorySyncs).toBe(2)
+    expect(faults.directorySyncs).toBe(1)
     expect(failed).toMatchObject({ persistence: 'unconfirmed', record: original })
     expect(failed.issue).toContain('EIO')
     expect((await new DeliveryAttemptStore(root).read(original.logId)).record).toEqual(original)

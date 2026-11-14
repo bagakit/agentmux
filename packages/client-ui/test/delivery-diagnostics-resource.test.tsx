@@ -109,6 +109,31 @@ it('retries local saving even if the original Host already confirmed the immutab
   expect(reports).toHaveBeenCalledOnce()
 })
 
+it('bounds the recent local cache and in-flight transport while retaining exact legacy diagnostics', async () => {
+  const legacy = seed(), old = { ...await new ClientDeliveryDiagnostics().failed(legacy, failure(), 'core-submit', null) }
+  localStorage.clear()
+  const legacyKey = `agentmux.delivery-attempt.${legacy.logId}`, oldBytes = JSON.stringify(old)
+  localStorage.setItem(legacyKey, oldBytes)
+  const journal = new ClientDeliveryDiagnostics()
+  const clicks = Array.from({ length: 40 }, seed)
+  for (const click of clicks) await journal.failed(click, failure(), 'core-submit', 'original-owner')
+  expect(localStorage.length).toBe(33)
+  expect(localStorage.getItem(legacyKey)).toBe(oldBytes)
+  const reopened = new ClientDeliveryDiagnostics()
+  expect(reopened.get(legacy.logId)?.record).toEqual(old.record)
+  expect(reopened.get(clicks[0]!.logId)).toBeUndefined()
+  expect(reopened.get(clicks.at(-1)!.logId)?.record.logId).toBe(clicks.at(-1)!.logId)
+  const gates: Array<() => void> = []
+  const report = vi.fn((record: DeliveryAttempt) => new Promise<DeliveryAttemptLookup>(resolve => {
+    gates.push(() => resolve(result(record)))
+  }))
+  try {
+    for (let batch = 0; batch < 3; batch++) await reopened.sync('original-owner', report)
+    expect(report).toHaveBeenCalledTimes(8)
+    expect(report.mock.calls.every(([record]) => record.logId !== legacy.logId)).toBe(true)
+  } finally { gates.forEach(resolve => resolve()) }
+}, 5000)
+
 it('reports the original client record through the actual SDK Unix RPC owner and inspects the same immutable ID', async () => {
   const root = await mkdtemp(join(tmpdir(), 'agentmux-client-diagnostic-')), endpoint = join(root, 'owner.sock')
   const store = new DeliveryAttemptStore(join(root, 'logs'))

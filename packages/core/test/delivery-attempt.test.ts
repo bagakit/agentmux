@@ -1,5 +1,5 @@
 import { fixturePath } from './helpers/fixture-values.js'
-import { mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -16,11 +16,11 @@ import { hostedTestOwner } from './helpers/hosted-runtime-port.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 
 const io = vi.hoisted(() => ({ gate: null as null | Promise<void> }))
-vi.mock('../src/durable-write.js', async original => {
-  const actual = await original<typeof import('../src/durable-write.js')>()
-  return { ...actual, durableWriteFile: async (...args: Parameters<typeof actual.durableWriteFile>) => {
-    await actual.durableWriteFile(...args)
-    if (io.gate) await io.gate
+vi.mock('node:fs/promises', async original => {
+  const actual = await original<typeof import('node:fs/promises')>()
+  return { ...actual, open: async (...args: Parameters<typeof actual.open>) => {
+    if (String(args[0]).endsWith('/recent.sqlite') && args[1] === 'a' && io.gate) await io.gate
+    return actual.open(...args)
   } }
 })
 const cleanup: Array<() => Promise<void>> = []
@@ -40,24 +40,72 @@ describe('durable delivery diagnostics observe failures without admitting Input'
     const [first, second] = await Promise.all([left.record(original), right.record({ ...original,
       reporter: { ...original.reporter, receivedAt: 11 } })])
     expect(first.record).toEqual(second.record); expect(first.availability).toBe('found')
-    expect((await stat(join(root, `${original.logId}.json`))).mode & 0o777).toBe(0o600)
+    expect((await stat(join(root, 'recent.sqlite'))).mode & 0o777).toBe(0o600)
     const reopened = new DeliveryAttemptStore(root)
     expect((await reopened.read(original.logId)).record).toEqual(first.record)
     await expect(reopened.record({ ...original, expectedRunId: 'replacement-run' })).rejects.toMatchObject({ code: 'DELIVERY_LOG_CONFLICT' })
-    expect(JSON.parse(await readFile(join(root, `${original.logId}.json`), 'utf8'))).toEqual(first.record)
+    expect(await readdir(root)).toEqual(['recent.sqlite'])
     await expect(reopened.read('../other-file')).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
   })
-  it('does not substitute an incoming payload when another process published a corrupt original', async () => {
+  it('does not substitute an incoming payload for a corrupt historical original', async () => {
     const root = await directory(), store = new DeliveryAttemptStore(root), original = record()
-    let release!: () => void; io.gate = new Promise<void>(yes => { release = yes })
-    const pending = store.record(original)
-    await vi.waitFor(async () => expect((await store.read(original.logId)).availability).toBe('found'))
     await writeFile(join(root, `${original.logId}.json`), '{corrupt-original', { mode: 0o600 })
-    io.gate = null; release()
-    expect((await pending).availability).toBe('unavailable')
+    await expect(store.record(original)).rejects.toMatchObject({ code: 'DELIVERY_LOG_UNAVAILABLE' })
     expect((await store.read(original.logId)).availability).toBe('unavailable')
     expect(await readFile(join(root, `${original.logId}.json`), 'utf8')).toBe('{corrupt-original')
   })
+  it('bounds new archive records and bytes, preserves legacy files, and exposes missing coverage through RPC', async () => {
+    const root = await directory(), store = new DeliveryAttemptStore(root), historical = record()
+    const legacyPath = join(root, `${historical.logId}.json`)
+    const originalBytes = JSON.stringify(historical)
+    await writeFile(legacyPath, originalBytes)
+    const server = new AgentMuxControlServer({ socketPath: join(root, 'owner.sock'), coreClients: () => [],
+      deliveryAttempts: { hostId: 'original-owner', store } })
+    await server.start(); cleanup.push(() => server.stop())
+    const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+    cleanup.push(async () => rpc.dispose())
+    const report = (input: DeliveryAttempt) => rpc.call('message.delivery.report', { hostId: 'original-owner', record: input })
+    const inspect = (logId: string) => rpc.call('message.delivery.inspect', { hostId: 'original-owner', logId })
+    const first = record()
+    expect(await report(first)).toMatchObject({ persistence: 'confirmed' })
+    const { DatabaseSync } = await import('node:sqlite')
+    const databasePath = join(root, 'recent.sqlite')
+    // Seed the same on-disk shape in one transaction. The real RPC below is
+    // responsible for admitting each pressure-boundary record and rotating.
+    function seed(entries: DeliveryAttempt[], reset = false) {
+      const db = new DatabaseSync(databasePath)
+      try {
+        db.exec('BEGIN IMMEDIATE')
+        if (reset) db.exec('DELETE FROM attempt')
+        const insert = db.prepare('INSERT INTO attempt (log_id, bytes, content) VALUES (?, ?, ?)')
+        for (const entry of entries) {
+          const json = JSON.stringify(entry)
+          insert.run(entry.logId, Buffer.byteLength(json), json)
+        }
+        db.exec('UPDATE retention SET records = (SELECT count(*) FROM attempt), bytes = (SELECT sum(bytes) FROM attempt); COMMIT')
+      } finally { db.close() }
+    }
+    seed(Array.from({ length: 511 }, () => record('core')))
+    expect(await report(record())).toMatchObject({ persistence: 'confirmed', issue: null })
+    expect(await inspect(first.logId)).toMatchObject({ availability: 'not-found', record: null, issue: expect.stringContaining('earlier coverage is incomplete') })
+    const filled = { name: 'Error', message: 'x'.repeat(8192), detail: 'y'.repeat(8192), stack: 'z'.repeat(12288) }
+    const perRecord = Buffer.byteLength(JSON.stringify({ ...record('core'), error: filled }))
+    const count = Math.floor(8 * 1024 * 1024 / perRecord)
+    seed(Array.from({ length: count }, () => ({ ...record('core'), error: filled })), true)
+    const latest = { ...record(), error: filled }
+    expect(await report(latest)).toMatchObject({ persistence: 'confirmed' })
+    const db = new DatabaseSync(databasePath, { readOnly: true })
+    try {
+      const totals = db.prepare('SELECT count(*) AS records, sum(bytes) AS bytes FROM attempt').get()!
+      expect(totals.records).toBeLessThanOrEqual(count)
+      expect(totals.bytes).toBeLessThanOrEqual(8 * 1024 * 1024)
+    } finally { db.close() }
+    expect((await stat(join(root, 'recent.sqlite'))).size).toBeLessThan(32 * 1024 * 1024)
+    expect((await new DeliveryAttemptStore(root).read(latest.logId)).record).toMatchObject(latest)
+    expect(await inspect(historical.logId)).toMatchObject({ availability: 'found', persistence: 'observed', record: historical })
+    expect(await readFile(legacyPath, 'utf8')).toBe(originalBytes)
+    expect((await readdir(root)).filter(name => name.endsWith('.json'))).toEqual([`${historical.logId}.json`])
+  }, 20_000)
   it('bounds diagnostic persistence independently of Input and retains exact late completion', async () => {
     const store = new DeliveryAttemptStore(await directory()), original = record('core')
     let release!: () => void; io.gate = new Promise<void>(yes => { release = yes })
