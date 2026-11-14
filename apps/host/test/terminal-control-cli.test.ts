@@ -249,3 +249,26 @@ it('actual Hosted control preserves original actor and refuses forged context or
   expect(await hosted.controlTerminal(input)).toMatchObject({ outcome: 'applied', actor: { kind: 'user' }, acknowledgement: { kind: 'input', appliedByteRange: { startByte: 0, endByte: 1 } } })
   expect(f.calls.input).toHaveBeenCalledTimes(1)
 })
+
+it('an original transport-approved Device keeps its actor and another actor cannot adopt its original operation', async () => {
+  const f = await fixture(), authority = await f.host.deviceAuthority()
+  const key = Buffer.alloc(32, 9).toString('base64'), device = await authority.authorizeKey(key)
+  const actor = { kind: 'device' as const, id: `${authority.hostId}:${device.deviceId}` }
+  const observation = authority.observe(device); cleanup.push(async () => observation.dispose())
+  let receive: ((frame: any) => void) | undefined, sequence = 0
+  const frames = f.host.server.openAuthenticatedFrames({ authorization: { principal: actor, signal: observation.signal,
+    assertCurrent: () => authority.assertCurrentKey(device, key) }, send: frame => receive?.(frame), close: () => {} })
+  cleanup.push(async () => frames.dispose())
+  const call = (method: core.AgentMuxRpcMethod, params: unknown) => new Promise<any>((resolve, reject) => {
+    const id = ++sequence
+    receive = frame => { if (frame.id === id) frame.error ? reject(frame.error) : resolve(frame.result) }
+    void frames.receive({ jsonrpc: '2.0', id, method, params }).catch(reject)
+  })
+  const input = { ...f.wire('original-device-input'), expectedByte: 0, dataBase64: 'Zg==' }
+  expect(await call('terminal.input', input)).toMatchObject({ actor, outcome: 'applied', acknowledgement: { kind: 'input', acceptedThroughByte: 1 } })
+  expect((await call('terminal.operation.inspect', { hostId: 'local', run: f.target.run, operationId: input.operationId })).operation).toMatchObject({ actor })
+  await expect(f.rpc.call('terminal.input', input)).rejects.toMatchObject({ code: 'RUN_CONTROL_OPERATION_CONFLICT' })
+  expect(f.calls.input).toHaveBeenCalledTimes(1)
+  await f.host.client.writeTerminalBytes(f.target.run, 'independent-human-input')
+  expect((await f.native.client.status(f.run.runId)).state.type).toBe('running')
+})
