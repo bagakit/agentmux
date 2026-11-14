@@ -53,7 +53,7 @@ function runTailcat(args: string[], environment: NodeJS.ProcessEnv, readOutput: 
     child.stdout?.setEncoding('utf8').on('data', (chunk: string) => { if (output.length < 4096) output += chunk })
     child.once('error', error => reject(signal?.aborted ? signal.reason
       : (error as NodeJS.ErrnoException).code === 'ENOENT'
-        ? unavailable('The official tailcat CLI is not installed in this Mac\'s PATH. Install it (for example with Homebrew) and try again.')
+        ? new AgentMuxError(`The serving AgentMux environment cannot find the official tailcat CLI in PATH. Install it or make it available to this service, then try again. ${unchanged}`, 'TAILCAT_CLI_MISSING')
         : unavailable('The official tailcat CLI could not start.')))
     child.once('close', code => resolve({ ok: code === 0, output }))
   })
