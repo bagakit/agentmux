@@ -1,3 +1,4 @@
+import '../styles/focus-project-menu.css'
 import * as Popover from '@agentmux/client-ui/components/Modal'
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
