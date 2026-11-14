@@ -5,6 +5,7 @@ import type { DemandQualifiedDispatchIntent } from '@agentmux/demand'
 import type { AgentInputSubmissionReceipt, AgentInputWaitRef } from '@agentmux/core'
 
 import { AutomaticInputNotDispatchedError } from './automatic-input-not-dispatched.js'
+import { sameAutomaticInputSource } from '@agentmux/core/automatic-input-source'
 import { MOTE_INPUT_GUIDANCE } from '@agentmux/core/mote-input-source'
 import { AgentMuxError, validateAgentPromptInputBinding, type AgentMuxClient,
   type AgentMuxAgentSession, type AgentMuxAgentCreationInspection, type AgentMuxAgentRuntimeStatus, type AgentMuxClientEvent,
@@ -61,7 +62,8 @@ export interface GoalRuntimePort {
   inspectGoalAttention(input: Attention): Promise<AgentPromptSubmissionRecord | null>
   inspectGoalStart(input: DemandDispatch): Promise<AgentPromptSubmissionRecord | null>
   authorizeFutureIntent(target: ContinuousProgressTarget, context?: AgentMuxRpcCallContext): Promise<void>
-  saveFutureIntent(loop: ContinuousProgressTarget & { futureIntentId?: string; creationOperationId?: string; managedSource?: import('@agentmux/core/automatic-input-source').AutomaticInputSource; prompt: string; checkIn?: AgentScheduleCheckInPolicy }, active: boolean, context?: AgentMuxRpcCallContext): Promise<void>
+  saveFutureIntent(loop: ContinuousProgressTarget & Pick<ContinuousProgressLoop, 'futureIntentId' | 'creationOperationId' | 'managedSource' | 'prompt' | 'checkIn' | 'currentDefinition' | 'guidanceAdoptions'>, active: boolean, context?: AgentMuxRpcCallContext): Promise<void>
+  inspectFutureIntent(loop: ContinuousProgressLoop): Promise<{ active: boolean }>
   observeCheckIn(target: ContinuousProgressTarget, now: number, signal: AbortSignal): Promise<CheckInObservation>
   inspectContinuousProgressInitial(loop: ContinuousProgressLoop): Promise<'confirmed' | 'pending' | 'unconfirmed'>
 }
@@ -221,13 +223,34 @@ export function createGoalRuntime(options: {
       if (observed.session.providerId !== loop.providerId || observed.session.workspacePath !== loop.workspacePath || !loop.futureIntentId || !loop.creationOperationId)
         throw new AgentMuxError('The original future-message target or intent is unconfirmed. Manual input remains available.', 'STALE_AGENT_SESSION')
       const original = await client.readAgentFuturePromptIntent(loop.agentSessionId, loop.futureIntentId)
-      if (original && (original.operationId !== loop.creationOperationId || original.message.userContent !== loop.prompt)) throw new AgentMuxError('The original future-message content changed. Inspect that saved arrangement.', 'AGENT_FUTURE_INTENT_CHANGED')
+      const operationId = loop.currentDefinition?.operationId ?? loop.creationOperationId
+      if (loop.currentDefinition && loop.currentDefinition.intentId !== loop.futureIntentId || original && (original.operationId !== operationId || original.message.userContent !== loop.prompt)) throw new AgentMuxError('The original future-message content changed. Inspect that saved arrangement.', 'AGENT_FUTURE_INTENT_CHANGED')
       await context?.assertCurrent?.()
-      const agentMuxNote = original ? original.message.systemContext : AGENTMUX_AGENT_MESSAGING_ENTRY + (loop.managedSource ? '\n\n' + MOTE_INPUT_GUIDANCE + '\nInternal maintenance source: ' + JSON.stringify(loop.managedSource) : '') + (loop.checkIn ? '\n\n' + AGENT_SCHEDULE_CHECK_IN_GUIDANCE : '')
-      await client.saveAgentFuturePromptIntent({ agentSessionId: loop.agentSessionId, intentId: loop.futureIntentId, operationId: loop.creationOperationId,
+      let agentMuxNote = original ? original.message.systemContext : AGENTMUX_AGENT_MESSAGING_ENTRY + (loop.managedSource ? '\n\n' + MOTE_INPUT_GUIDANCE + '\nInternal maintenance source: ' + JSON.stringify(loop.managedSource) : '') + (loop.checkIn ? '\n\n' + AGENT_SCHEDULE_CHECK_IN_GUIDANCE : '')
+      if (loop.currentDefinition) {
+        const definition = loop.currentDefinition, adoption = loop.guidanceAdoptions?.find(value => value.newDefinition.intentId === definition.intentId && value.newDefinition.operationId === definition.operationId)
+        const base = await client.readAgentFuturePromptIntent(loop.agentSessionId, definition.baseIntentId)
+        if (!adoption || adoption.newDefinition.guidanceRevision !== definition.guidanceRevision || !base || base.operationId !== loop.creationOperationId || base.message.userContent !== loop.prompt || !sameAutomaticInputSource(base.continuitySource, loop.managedSource)) throw new AgentMuxError('The original guidance base or frozen adoption is unconfirmed. Its original inputs remain retained.', 'AGENT_FUTURE_INTENT_CHANGED')
+        agentMuxNote = (base.message.systemContext ?? '') + '\n\n' + adoption.guidance
+      }
+      await client.saveAgentFuturePromptIntent({ agentSessionId: loop.agentSessionId, intentId: loop.futureIntentId, operationId,
         expectedRun: observed.session.run, ...(loop.managedSource ? { continuitySource: loop.managedSource } : {}),
         prompt: loop.prompt, ...(agentMuxNote === undefined ? {} : { agentMuxNote }),
         active, ...(context?.caller ? { caller: context.caller } : {}) })
+    },
+    inspectFutureIntent: async loop => {
+      const client = exact(loop.hostId), session = client.agentSession(loop.agentSessionId)
+      const original = loop.futureIntentId ? await client.readAgentFuturePromptIntent(loop.agentSessionId, loop.futureIntentId) : null
+      const operationId = loop.currentDefinition?.operationId ?? loop.creationOperationId
+      if (session.kind !== 'agent' || session.providerId !== loop.providerId || session.workspacePath !== loop.workspacePath || !original || original.operationId !== operationId || original.message.userContent !== loop.prompt || !sameAutomaticInputSource(original.continuitySource, loop.managedSource))
+        throw new AgentMuxError('The original future definition cannot be confirmed. Keep this operation for inspection.', 'AGENT_FUTURE_INTENT_CHANGED')
+      if (loop.currentDefinition) {
+        const definition = loop.currentDefinition, adoption = loop.guidanceAdoptions?.find(value => value.newDefinition.intentId === definition.intentId && value.newDefinition.operationId === definition.operationId)
+        const base = await client.readAgentFuturePromptIntent(loop.agentSessionId, definition.baseIntentId)
+        if (definition.intentId !== loop.futureIntentId || !adoption || !base || base.operationId !== loop.creationOperationId || base.message.userContent !== loop.prompt || !sameAutomaticInputSource(base.continuitySource, loop.managedSource) || original.message.systemContext !== (base.message.systemContext ?? '') + '\n\n' + adoption.guidance)
+          throw new AgentMuxError('The exact original guidance content is unconfirmed. Its saved intent is retained.', 'AGENT_FUTURE_INTENT_CHANGED')
+      }
+      return { active: original.active }
     },
     observeCheckIn: options.checkIn,
     inspectContinuousProgressInitial: async loop => {

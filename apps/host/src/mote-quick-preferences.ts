@@ -3,6 +3,7 @@ import { DEFAULT_MOTE_PRESENCE, effectiveMoteQuickSave, sameMoteQuickDefaults, p
 import type { MoteMainReader, MoteMainSnapshot } from '@agentmux/core/mote-dialogue'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { ConnectionEnrollmentCallContext } from '@agentmux/core/connections'
+import { AgentMuxError } from '@agentmux/core'
 import { PMO_TEAMS_TOPIC_ID } from './mote-topic-model.js'
 import { isDeepStrictEqual } from 'node:util'
 import { parseMoteQuickMode, serializeMoteQuickMode, sameMoteDefaultConversation } from './mote-quick-mode.js'
@@ -15,6 +16,7 @@ export class HostMoteQuickPreferences implements MoteQuickPreferencesPort {
     catalog(): Promise<AgentMuxSpaceCatalog | null>
     executors(): Promise<MoteQuickPreferencesReadResult['choices']['executors']>
     maintenance?(target: MoteQuickPreferencesReadInput['target']): MotePresenceReading
+    adoptGuidance?(input: MoteQuickPreferencesSaveParams, main: MoteMainSnapshot, context: ConnectionEnrollmentCallContext, options?: { reconcilePublished: true }): Promise<NonNullable<MoteQuickPreferencesSaveResult['maintenanceAdoption']>>
     changed?(target: MoteQuickPreferencesReadInput['target']): void
     prepareMainSource?(before:MoteMainSnapshot, roleRevision:string, reference:import('@agentmux/core/mote-preferences').MoteDefaultConversation|null, operationId:string):Promise<import('@agentmux/core/mote-preferences').MoteMainTransitionMarker>
     recordMainSource?(before: MoteMainSnapshot, after: MoteMainSnapshot, operationId: string): Promise<void>
@@ -52,7 +54,22 @@ export class HostMoteQuickPreferences implements MoteQuickPreferencesPort {
       const read = await this.read({ kind: 'quick', target: input.target }), baseline = input.baseline
       if (read.status !== 'ready' || !read.source?.resource || read.source.result.status !== 'read' && read.source.result.status !== 'deleted' || !read.defaults) throw new Error(read.issue ?? 'The original settings are unconfirmed.')
       const document = read.source.result.status === 'read' ? read.source.result.document : null
-      if (!isDeepStrictEqual(read.source.resource, baseline.resource) || document?.revision !== baseline.document?.revision || document?.content !== baseline.document?.content || !sameMoteQuickDefaults(read.defaults, baseline.defaults) || !isDeepStrictEqual(read.defaults.conversationTransition, baseline.defaults.conversationTransition)) throw new Error('The original MOTE.md changed. Reread its exact revision; your request is retained.')
+      const sameResource = isDeepStrictEqual(read.source.resource, baseline.resource), sameControls = isDeepStrictEqual(read.defaults, baseline.defaults)
+      const sameBaseline = sameResource && document?.revision === baseline.document?.revision && document?.content === baseline.document?.content && sameControls
+      // A new adoption still needs the complete File CAS. An already-published
+      // original operation may reconcile after a notes-only edit; its immutable
+      // request, actor, role, definition and controlling preferences stay exact.
+      if (!sameBaseline && !(input.action && sameResource && sameControls)) throw new Error('The original MOTE.md changed. Reread its exact revision; your request is retained.')
+      if (input.action) {
+        if (!context || !['user', 'device'].includes(context.actor.kind) || !context.actor.id.trim()) throw new Error('Adopting guidance requires the original authenticated person or device. The Agent and its inputs remain available.')
+        if (input.destination || !isDeepStrictEqual(input.values, baseline.defaults)) throw new Error('Guidance adoption must preserve the complete original settings and Main binding. Save preference changes separately.')
+        if (!this.ports.adoptGuidance) throw new Error('The original guidance adoption owner is unavailable.')
+        const before = await this.ports.main.readCurrentMoteMain(input.target, context.signal)
+        dispatched = true
+        const maintenanceAdoption = await this.ports.adoptGuidance(input, before, context, sameBaseline ? undefined : { reconcilePublished: true })
+        return parseMotePreferencesSaveResult({ kind: 'quick', target: input.target, operationId: input.operationId,
+          status: 'unchanged', source: baseline, message: null, maintenanceAdoption }, input)
+      }
       if (input.values.recovery !== undefined && input.values.recovery !== read.defaults.recovery) throw new Error('The original reconnect timing is retained history. Configure presence and heartbeat through the original Mote maintenance settings.')
       const roleChanged = !sameMoteDefaultConversation(values.conversation, read.defaults.conversation)
       if (roleChanged && !input.destination) throw new Error('Changing the original Main requires its exact legitimate destination.')
@@ -80,6 +97,9 @@ export class HostMoteQuickPreferences implements MoteQuickPreferencesPort {
         catch (error) { issue = 'Settings were saved; recording the original dialogue association is unconfirmed. ' + String(error) }
       }
       return result('saved', source, issue)
-    } catch (error) { return result(dispatched ? 'unconfirmed' : 'refused-before-write', null, String(error)) }
+    } catch (error) {
+      const refused = input.action && error instanceof AgentMuxError && ['CONTROL_PERMISSION_DENIED', 'UNKNOWN_SCHEDULE', 'SCHEDULE_REVISION_CONFLICT', 'SCHEDULE_OPERATION_CONFLICT', 'STALE_AGENT_SESSION'].includes(error.code)
+      return result(dispatched && !refused ? 'unconfirmed' : 'refused-before-write', null, String(error))
+    }
   }
 }

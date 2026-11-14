@@ -1,9 +1,11 @@
 import { awaitUntilCancelled } from './await-until-cancelled.js'
 import { createHash } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import { watch, type FSWatcher } from 'node:fs'
 import { dirname, basename } from 'node:path'
 import { spatialCatalog, AgentMuxError, type AgentMuxSpatialStateStore } from '@agentmux/core'
-import { DEFAULT_MOTE_PRESENCE, type MotePreferencesTarget, type MotePresenceReading } from '@agentmux/core/mote-preferences'
+import { DEFAULT_MOTE_PRESENCE, type MotePreferencesTarget, type MotePresenceReading, type MoteQuickPreferencesSaveParams, type MoteQuickPreferencesSaveResult } from '@agentmux/core/mote-preferences'
+import type { ConnectionEnrollmentCallContext } from '@agentmux/core/connections'
 import { MOTE_SUPERVISION_GUIDANCE, type MoteMainReader, type MoteMainSnapshot } from '@agentmux/core/mote-dialogue'
 import type { AgentMuxRpcFilesOwner } from '@agentmux/core/files'
 import type { ContinuousProgressLoop } from '@agentmux/core'
@@ -17,6 +19,7 @@ import { homeZoneId } from './mote-model.js'
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const heartbeat = (target: MotePreferencesTarget) => 'Mote main heartbeat.\n\n' + MOTE_SUPERVISION_GUIDANCE +
   '\n\nRead the original supervision page with this exact input:\n' + JSON.stringify({ target })
+export const moteGuidanceRevision = () => 'sha256:' + digest(MOTE_SUPERVISION_GUIDANCE)
 const key = (target: MotePreferencesTarget) => JSON.stringify(target)
 export const motePresenceSourceId = (identity: NonNullable<MoteMainSnapshot['identity']>) => 'mote-main:' + digest(identity)
 
@@ -42,6 +45,34 @@ export function createHostMotePresence(options: {
     return matches[0]!.client
   }
   const invalidate = (target: MotePreferencesTarget) => { const id = key(target); targets.set(id, target); dirty.add(id) }
+  async function adoptGuidance(input: MoteQuickPreferencesSaveParams, before: MoteMainSnapshot, context: ConnectionEnrollmentCallContext, mode?: { reconcilePublished: true }): Promise<NonNullable<MoteQuickPreferencesSaveResult['maintenanceAdoption']>> {
+    const action = input.action
+    if (!action || !['user', 'device'].includes(context.actor.kind) || !context.actor.id.trim()) throw new AgentMuxError('Adopting future guidance requires the original authenticated person or device.', 'CONTROL_PERMISSION_DENIED')
+    const loop = options.schedules.inspectLoop(action.expectedSchedule.loopId)
+    if (!loop) throw new AgentMuxError('The original Mote arrangement is unconfirmed.', 'UNKNOWN_SCHEDULE')
+    const prior = loop.guidanceAdoptions?.find(value => value.operationId === input.operationId)
+    if (!prior && action.guidanceRevision !== moteGuidanceRevision()) throw new AgentMuxError('The available guidance changed. Reread the original settings before adopting it.', 'SCHEDULE_REVISION_CONFLICT')
+    const qualify = async (current: ContinuousProgressLoop) => {
+      await options.main.assertCurrent(before, context.signal)
+      const fresh = await options.main.readCurrentMoteMain(input.target, context.signal)
+      if (fresh.status !== 'ready' || !fresh.identity || !fresh.current || fresh.roleRevision !== action.expectedMain.roleRevision ||
+          !isDeepStrictEqual(fresh.current, action.expectedMain.reference) || !isDeepStrictEqual(before.current, fresh.current) ||
+          current.managedSource?.sourceId !== motePresenceSourceId(fresh.identity) || current.managedSource.revision !== fresh.roleRevision ||
+          current.hostId !== fresh.current.hostId || current.agentSessionId !== fresh.current.sessionId)
+        throw new AgentMuxError('The original Mote Main or its role generation changed. Its existing Agent and inputs remain retained.', 'SCHEDULE_REVISION_CONFLICT')
+      const original = await exact(current.hostId).inspectAgentCreation(current.agentSessionId)
+      if (original.kind !== 'agent' || original.agentSessionId !== current.agentSessionId || original.providerId !== current.providerId || original.workspacePath !== current.workspacePath)
+        throw new AgentMuxError('The original Mote execution target is unconfirmed.', 'STALE_AGENT_SESSION')
+      await options.main.assertCurrent(fresh, context.signal)
+    }
+    const actor = { kind: context.actor.kind as 'user' | 'device', id: context.actor.id }
+    return await options.schedules.adoptGuidance({ loopId: loop.loopId, expectedRevision: action.expectedSchedule.revision,
+      expectedDefinition: action.expectedDefinition, operationId: input.operationId, requestDigest: digest({ input, actor }), actor,
+      ...(mode?.reconcilePublished ? { publishedOnly: true as const } : {}),
+      guidanceRevision: action.guidanceRevision,
+      guidance: 'The original person or device explicitly adopted this current application guidance for future Mote heartbeats. Current user corrections and authorization limits continue to govern this same task.\n\n' + MOTE_SUPERVISION_GUIDANCE + '\n\nRead the original supervision page with this exact input:\n' + JSON.stringify({ target: input.target }) },
+      qualify, { principal: actor, ...(context.signal ? { signal: context.signal } : {}), ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {}) })
+  }
   async function discover(signal?: AbortSignal) {
     const [configuration, state] = await Promise.all([readOriginalMoteConfiguration(options.configurationPath), options.spatial.read()])
     if (closed || signal?.aborted) return
@@ -134,7 +165,7 @@ export function createHostMotePresence(options: {
       await read(() => options.main.assertCurrent(main)); assertOpen()
       assertExecutionCurrent()
       const operationId = 'mote-maintain-' + digest([sourceId, main.roleRevision, observed.session.run])
-      const recovered = await awaitUntilCancelled(() => { assertExecutionCurrent(); return client.ensureAgentContinuity({ agentSessionId: original.agentSessionId, expectedRun: observed.session.run, operationId, trigger: 'standing-maintenance', standingIntent: { ...loop!.managedSource!, intentId: loop!.futureIntentId!, operationId: loop!.creationOperationId! }, policy: { continuationEnabled: false, reminderMode: 'off' } }) }, signal)
+      const recovered = await awaitUntilCancelled(() => { assertExecutionCurrent(); return client.ensureAgentContinuity({ agentSessionId: original.agentSessionId, expectedRun: observed.session.run, operationId, trigger: 'standing-maintenance', standingIntent: { ...loop!.managedSource!, intentId: loop!.futureIntentId!, operationId: loop!.currentDefinition?.operationId ?? loop!.creationOperationId! }, policy: { continuationEnabled: false, reminderMode: 'off' } }) }, signal)
       if (recovered.kind !== 'resumed' && recovered.kind !== 'reattachable') throw new Error(`Original maintenance recovery is ${recovered.kind}; inspect ${operationId}.`)
     } catch (error) { if (closed || signal.aborted) return; readings.set(id, { status: 'unconfirmed', schedule: readings.get(id)?.schedule ?? null, issue: String(error) }) }
   }
@@ -207,11 +238,14 @@ export function createHostMotePresence(options: {
     }) })
   }
   let releaseClients: (() => void) | undefined
-  return { invalidate, read(target: MotePreferencesTarget): MotePresenceReading {
-    if (serviceIssue) return { status: 'unconfirmed', schedule: readings.get(key(target))?.schedule ?? null, issue: serviceIssue }
-    const reading = readings.get(key(target)); if (!reading) return { status: 'unconfirmed', schedule: null, issue: 'The original Host maintenance observation has not completed.' }
+  return { invalidate, adoptGuidance, read(target: MotePreferencesTarget): MotePresenceReading {
+    const withGuidance = (value: MotePresenceReading): MotePresenceReading => ({ ...value, guidance: {
+      availableRevision: moteGuidanceRevision(), currentDefinition: value.schedule?.currentDefinition ?? (value.schedule?.futureIntentId && value.schedule.creationOperationId ? { intentId: value.schedule.futureIntentId, operationId: value.schedule.creationOperationId } : null),
+      adoptedRevision: value.schedule?.guidanceAdoptions?.find(record => record.state === 'adopted' && record.newDefinition.intentId === value.schedule?.futureIntentId)?.newDefinition.guidanceRevision ?? null, adoptions: value.schedule?.guidanceAdoptions ?? [] } })
+    if (serviceIssue) return withGuidance({ status: 'unconfirmed', schedule: readings.get(key(target))?.schedule ?? null, issue: serviceIssue })
+    const reading = readings.get(key(target)); if (!reading) return withGuidance({ status: 'unconfirmed', schedule: null, issue: 'The original Host maintenance observation has not completed.' })
     const schedule = reading.schedule ? options.schedules.inspectLoop(reading.schedule.loopId) ?? reading.schedule : null
-    return { ...reading, schedule, ...(schedule?.status === 'paused' && reading.status === 'active' ? { status: 'paused' as const, issue: schedule.lastDecision ?? reading.issue } : {}) }
+    return withGuidance({ ...reading, schedule, ...(schedule?.status === 'paused' && reading.status === 'active' ? { status: 'paused' as const, issue: schedule.lastDecision ?? reading.issue } : {}) })
   }, async start() {
       try {
         subscribeClients(); releaseClients = options.subscribeClients?.(() => { subscribeClients(); for (const id of targets.keys()) dirty.add(id) })

@@ -11,6 +11,7 @@ import { readContinuousProgressTaskSource, validateContinuousProgressTaskSource,
 import type { ContinuousProgressLoopStore } from './continuous-progress-loop-store.js'
 import { AGENT_SCHEDULE_CHECK_IN_GUIDANCE } from '@agentmux/core/schedule'
 import { decideCheckIn, type CheckInObservation } from './agent-schedule-check-in.js'
+import type { ContinuousProgressDefinitionReference, ContinuousProgressGuidanceAdoption } from '@agentmux/core'
 
 export type LoopTickOutcome = 'sent' | 'skipped' | 'unknown'
 export type LoopTickHandler = (loop: ContinuousProgressLoop, operationId: string, isCurrent: () => boolean, signal: AbortSignal) => Promise<LoopTickOutcome>
@@ -24,6 +25,7 @@ export type GoalProgressStart = ContinuousProgressTarget & { goalId: string; ali
 
 export type FutureProgressInputOwner = {
   saveFutureIntent(loop: ContinuousProgressLoop, active: boolean, context?: AgentMuxRpcCallContext): Promise<void>
+  inspectFutureIntent?(loop: ContinuousProgressLoop): Promise<{ active: boolean }>
   authorizeFutureIntent?(target: ContinuousProgressTarget, context?: AgentMuxRpcCallContext): Promise<void>
   observeCheckIn?(target: ContinuousProgressTarget, now: number, signal: AbortSignal): Promise<CheckInObservation>
 }
@@ -79,6 +81,7 @@ export class ContinuousProgressLoopManager {
   private readonly initialDeliveries = new Map<string, AbortController>()
   private readonly activations = new Map<string, Set<AbortController>>()
   private readonly activeDeliveries = new Map<string, AbortController>()
+  private readonly adoptingDefinitions = new Set<string>()
   private disposeGoals: (() => void) | undefined
   private readonly mutations = new Map<string, Promise<unknown>>()
   private readonly progressActions = new Map<string, { input: import('@agentmux/core').AgentProgressParams['agent.progress.action']; result: Promise<ContinuousProgressLoop> }>()
@@ -144,6 +147,152 @@ export class ContinuousProgressLoopManager {
   list(target?: Readonly<Partial<ContinuousProgressTarget>>): ContinuousProgressLoop[] { return this.scheduler.list(target) }
   listManaged(sourceId: string): ContinuousProgressLoop[] { return this.scheduler.listManaged(sourceId) }
   inspectLoop(loopId: string): ContinuousProgressLoop | undefined { return this.scheduler.get(loopId) }
+  /** Explicitly replace only an unclaimed future definition. Original inputs and
+   * creation identity stay with this same durable loop through every phase. */
+  async adoptGuidance(input: {
+    loopId: string; expectedRevision: number; expectedDefinition: ContinuousProgressDefinitionReference
+    operationId: string; requestDigest: string; actor: ContinuousProgressGuidanceAdoption['actor']
+    guidanceRevision: string; guidance: string
+    publishedOnly?: true
+  }, qualify: (loop: ContinuousProgressLoop) => Promise<void>, context?: AgentMuxRpcCallContext): Promise<ContinuousProgressGuidanceAdoption & { loopId: string }> {
+    return this.serialize(input.loopId, async () => {
+      await this.start()
+      if (context?.caller || !context?.principal || !['user', 'device'].includes(context.principal.kind) ||
+          context.principal.kind !== input.actor.kind || context.principal.id !== input.actor.id)
+        throw new AgentMuxError('Adopting future guidance requires its original authenticated person or device.', 'CONTROL_PERMISSION_DENIED')
+      let loop = this.require(input.loopId)
+      let adoption = loop.guidanceAdoptions?.find(value => value.operationId === input.operationId)
+      if (adoption && (adoption.requestDigest !== input.requestDigest || !isDeepStrictEqual(adoption.actor, input.actor)))
+        throw new AgentMuxError('The original guidance operation belongs to another request or actor.', 'SCHEDULE_OPERATION_CONFLICT')
+      if (input.publishedOnly && adoption?.publishedAt === undefined)
+        throw new AgentMuxError('A new or unpublished guidance adoption needs the complete current File baseline. The original operation is retained.', 'SCHEDULE_REVISION_CONFLICT')
+      const definition = (value: ContinuousProgressLoop) => ({ intentId: value.futureIntentId!, operationId: value.currentDefinition?.operationId ?? value.creationOperationId! })
+      const save = async (next: ContinuousProgressGuidanceAdoption) => {
+        adoption = next
+        const current = this.require(loop.loopId), records = current.guidanceAdoptions ?? []
+        this.patch(loop.loopId, { guidanceAdoptions: [...records.filter(value => value.operationId !== input.operationId), next] })
+        try { await this.persist(loop.loopId) }
+        catch (error) {
+          adoption = { ...next, state: 'unconfirmed', issue: 'Persisting the original guidance operation is unconfirmed: ' + String(error) }
+          this.patch(loop.loopId, { guidanceAdoptions: this.require(loop.loopId).guidanceAdoptions!.map(value => value.operationId === input.operationId ? adoption! : value) })
+          throw error
+        }
+      }
+      if (!adoption) {
+        await qualify(loop)
+        context.signal?.throwIfAborted(); await context.assertCurrent?.()
+        loop = this.require(input.loopId)
+        if (!loop.managedSource || !loop.futureIntentId || !loop.creationOperationId || !loop.everyMs || loop.status === 'stopped' || loop.revision !== input.expectedRevision || !isDeepStrictEqual(definition(loop), input.expectedDefinition))
+          throw new AgentMuxError('The original managed future definition changed. Read this same arrangement before adopting guidance.', 'SCHEDULE_REVISION_CONFLICT')
+        if (loop.creationOperationId === input.operationId || loop.lastMutation?.operationId === input.operationId || loop.pendingCompletion?.operationId === input.operationId || loop.lastTickId === input.operationId)
+          throw new AgentMuxError('This operation already belongs to another original schedule action or input.', 'SCHEDULE_OPERATION_CONFLICT')
+        for (const previous of loop.guidanceAdoptions?.filter(value => value.state !== 'adopted' && value.state !== 'refused') ?? []) {
+          if (previous.publishedAt !== undefined || !this.futureInputs)
+            throw new AgentMuxError('Inspect the original published guidance operation before starting another.', 'SCHEDULE_OPERATION_CONFLICT')
+          // A fresh explicit request can replace an unpublished preparation.
+          // Confirm that exact old intent inactive before retiring its receipt;
+          // an unknown deactivation never becomes permission for a new publish.
+          await this.futureInputs.saveFutureIntent({ ...loop, futureIntentId: previous.newDefinition.intentId, currentDefinition: previous.newDefinition }, false, context)
+          await qualify(this.require(loop.loopId))
+          context.signal?.throwIfAborted(); await context.assertCurrent?.()
+          loop = this.require(loop.loopId)
+          const original = loop.guidanceAdoptions?.find(value => value.operationId === previous.operationId)
+          if (!original || !isDeepStrictEqual(original, previous) || original.publishedAt !== undefined || loop.status === 'stopped' || loop.revision !== input.expectedRevision || !isDeepStrictEqual(definition(loop), input.expectedDefinition))
+            throw new AgentMuxError('The original unpublished preparation changed before replacement.', 'SCHEDULE_REVISION_CONFLICT')
+          this.patch(loop.loopId, { guidanceAdoptions: loop.guidanceAdoptions!.map(value => value.operationId === previous.operationId ? { ...value, state: 'refused' as const, issue: 'This unpublished adoption was superseded by the new explicit guidance operation ' + input.operationId + '. Its original inactive intent is retained.' } : value) })
+          await this.persist(loop.loopId)
+          loop = this.require(loop.loopId)
+        }
+        const intentId = mintObjectId()
+        try {
+          await save({ operationId: input.operationId, requestDigest: input.requestDigest, actor: input.actor,
+            expectedRevision: input.expectedRevision, oldDefinition: definition(loop),
+            newDefinition: { intentId, operationId: intentId + '-definition', baseIntentId: loop.currentDefinition?.baseIntentId ?? loop.futureIntentId!, guidanceRevision: input.guidanceRevision },
+            guidance: input.guidance, preparedAt: this.now(), state: 'prepared', issue: null })
+        } catch (error) {
+          // The Host write itself may have committed before losing its receipt.
+          // Keep these exact IDs for inspection; do not proceed to Core yet.
+          adoption = { ...adoption!, state: 'unconfirmed', issue: 'Preparing the original guidance operation is unconfirmed: ' + String(error) }
+          this.patch(loop.loopId, { guidanceAdoptions: (this.require(loop.loopId).guidanceAdoptions ?? []).map(value => value.operationId === input.operationId ? adoption! : value) })
+          return { ...adoption, loopId: loop.loopId }
+        }
+      }
+      if (adoption!.state === 'adopted' || adoption!.state === 'refused') {
+        // Reading the original terminal receipt is not another persistence or
+        // activation request. Routine disk failures cannot revoke this receipt.
+        return { ...adoption!, loopId: loop.loopId }
+      }
+      this.adoptingDefinitions.add(loop.loopId)
+      try {
+        if (!this.futureInputs) throw new AgentMuxError('The original future-input owner is unavailable.', 'SCHEDULE_INPUT_OWNER_UNAVAILABLE')
+        await qualify(this.require(loop.loopId))
+        context.signal?.throwIfAborted(); await context.assertCurrent?.()
+        // A prior publish may have lost its Host durability receipt. Confirm
+        // that same pointer before any later Core activation or settlement.
+        if (adoption!.publishedAt !== undefined) await this.persist(loop.loopId)
+        const candidate = () => ({ ...this.require(loop.loopId), futureIntentId: adoption!.newDefinition.intentId, currentDefinition: adoption!.newDefinition })
+        if (adoption!.publishedAt === undefined) {
+          // Core saves a new immutable, inactive definition. Retrying this exact
+          // ID reconciles a lost receipt without minting another message.
+          await this.futureInputs.saveFutureIntent(candidate(), false, context)
+          this.cancelDelivery(loop.loopId)
+          await this.checks.get(loop.loopId)
+          await qualify(this.require(loop.loopId))
+          context.signal?.throwIfAborted(); await context.assertCurrent?.()
+          loop = this.require(loop.loopId)
+          if (loop.status === 'stopped' || loop.revision !== input.expectedRevision || !isDeepStrictEqual(definition(loop), adoption!.oldDefinition))
+            throw new AgentMuxError('The original arrangement changed during guidance preparation. Its current state is retained.', 'SCHEDULE_REVISION_CONFLICT')
+          if (loop.pendingCompletion) {
+            await save({ ...adoption!, state: 'prepared', issue: 'The original claimed input is retained. Inspect its original operation before adopting this future definition.' })
+            return { ...adoption!, loopId: loop.loopId }
+          }
+          const publishedAt = this.now(), nextCheckAt = nextIntervalOccurrence(loop.nextCheckAt, publishedAt, loop.everyMs!)
+          if (nextCheckAt === null || nextCheckAt <= publishedAt) throw new AgentMuxError('A strictly future occurrence is unconfirmed.', 'SCHEDULE_NO_FUTURE_OCCURRENCE')
+          adoption = { ...adoption!, state: 'unconfirmed', publishedAt, issue: 'The future definition is published; Core activation is not yet confirmed.' }
+          this.patch(loop.loopId, { futureIntentId: adoption.newDefinition.intentId, currentDefinition: adoption.newDefinition,
+            revision: input.expectedRevision + 1, nextCheckAt,
+            guidanceAdoptions: (loop.guidanceAdoptions ?? []).map(value => value.operationId === input.operationId ? adoption! : value) })
+          await this.persist(loop.loopId)
+        }
+        loop = this.require(loop.loopId)
+        if (!isDeepStrictEqual(definition(loop), { intentId: adoption!.newDefinition.intentId, operationId: adoption!.newDefinition.operationId }))
+          throw new AgentMuxError('The adopted future definition was superseded or cancelled.', 'SCHEDULE_REVISION_CONFLICT')
+        if (loop.status === 'stopped' || loop.revision !== adoption!.expectedRevision + 1) {
+          // A later explicit pause/resume/interval action owns today's state.
+          // Reconcile its exact Core readback without activating on the old grant.
+          const revision = loop.revision, status = loop.status
+          if (!this.futureInputs.inspectFutureIntent) throw new AgentMuxError('The original future definition readback is unavailable.', 'SCHEDULE_INPUT_OWNER_UNAVAILABLE')
+          const observed = await this.futureInputs.inspectFutureIntent(loop)
+          await qualify(this.require(loop.loopId))
+          context.signal?.throwIfAborted(); await context.assertCurrent?.()
+          const current = this.require(loop.loopId)
+          if (current.revision !== revision || current.status !== status || !isDeepStrictEqual(definition(current), definition(loop)) || observed.active !== (status === 'active'))
+            throw new AgentMuxError('The later arrangement state and original Core intent are not yet confirmed together. Inspect that original explicit control.', 'SCHEDULE_REVISION_CONFLICT')
+          await save({ ...adoption!, state: 'adopted', issue: null })
+          return { ...adoption!, loopId: loop.loopId }
+        }
+        const activating = loop.status === 'active', revision = loop.revision, status = loop.status
+        const selected = candidate()
+        await this.futureInputs.saveFutureIntent(selected, activating, context)
+        try {
+          await qualify(this.require(loop.loopId))
+          context.signal?.throwIfAborted(); await context.assertCurrent?.()
+          const current = this.require(loop.loopId)
+          if (current.status !== status || current.revision !== revision || !isDeepStrictEqual(definition(current), definition(selected)))
+            throw new AgentMuxError('The original arrangement changed during activation.', 'SCHEDULE_REVISION_CONFLICT')
+        } catch (error) {
+          // A late Core ACK may never undo a later pause/cancel/role change.
+          await this.futureInputs.saveFutureIntent(selected, false, context)
+          throw error
+        }
+        await save({ ...adoption!, state: 'adopted', issue: null })
+      } catch (error) {
+        try { await save({ ...adoption!, state: 'unconfirmed', issue: String(error) }) }
+        catch { /* The original IDs and uncertainty already remain in memory. */ }
+      } finally { this.adoptingDefinitions.delete(loop.loopId) }
+      return { ...adoption!, loopId: loop.loopId }
+    })
+  }
   /** Initial Goal input and continuation share this original durable loop, never a second journal. */
   async prepareGoal(input: GoalProgressStart, context?: AgentMuxRpcCallContext): Promise<ContinuousProgressLoop> {
     return this.serialize(`goal-start-operation:${input.operationId}`, () => this.serialize(`goal-start-goal:${input.goalId}`, () => this.serialize(`goal-target:${input.hostId}:${input.agentSessionId}`, () => this.activation(this.targetKey(input), async assertCurrent => {
@@ -379,7 +528,7 @@ export class ContinuousProgressLoopManager {
     }
     if (method === 'schedule.inspect') {
       const p = params as ScheduleParamsMap['schedule.inspect']
-      return { ...scope, schedule: this.list().find(loop => isAgentSchedule(loop) && (p.scheduleId ? loop.loopId === p.scheduleId : loop.creationOperationId === p.operationId || loop.lastMutation?.operationId === p.operationId || loop.pendingCompletion?.operationId === p.operationId || loop.lastTickId === p.operationId)) ?? null } as ScheduleResultMap[M]
+      return { ...scope, schedule: this.list().find(loop => isAgentSchedule(loop) && (p.scheduleId ? loop.loopId === p.scheduleId : loop.creationOperationId === p.operationId || loop.guidanceAdoptions?.some(value => value.operationId === p.operationId) || loop.lastMutation?.operationId === p.operationId || loop.pendingCompletion?.operationId === p.operationId || loop.lastTickId === p.operationId)) ?? null } as ScheduleResultMap[M]
     }
     if (method === 'schedule.create') {
       const p = params as ScheduleParamsMap['schedule.create']
@@ -737,6 +886,7 @@ export class ContinuousProgressLoopManager {
   private async runLoop(loopId: string, checkAt: number, now: number | undefined, controller: AbortController): Promise<void> {
     const loop = this.scheduler.get(loopId)
     if (!loop || loop.status !== 'active' || loop.nextCheckAt > checkAt) return
+    if (this.adoptingDefinitions.has(loopId) || loop.guidanceAdoptions?.some(value => value.publishedAt !== undefined && value.state !== 'adopted')) return
     const preparingCurrent = () => this.running && !controller.signal.aborted && isDeepStrictEqual(this.scheduler.get(loopId), loop)
     if (loop.managedSource && ((this.deferredMaintenance.get(loop.loopId)?.until ?? 0) > checkAt || !await this.admitMaintenance(loop, checkAt, controller.signal, preparingCurrent))) return
     if (!preparingCurrent()) return
@@ -838,7 +988,7 @@ export class ContinuousProgressLoopManager {
             let agentMuxNote: string | undefined = AGENTMUX_AGENT_MESSAGING_ENTRY + (claim.loop.checkIn ? '\n\n' + AGENT_SCHEDULE_CHECK_IN_GUIDANCE : '') + (claim.loop.taskSource?.kind === 'goal' ? '\n\n' + goalRoleGuidance({ role: goalContinuation ? 'manager' : 'executor', goalId: claim.loop.taskSource.goalId, agentSessionId: claim.loop.agentSessionId, runId: observation.session.run.runId, source: { kind: 'goal-native-continuation', operationId: claim.tickId } }) : '')
             if (futureIntent) {
               const original = observation.session.futurePromptIntents?.[futureIntent.intentId]
-              if (!original || original.operationId !== claim.loop.creationOperationId || original.message?.userContent !== prompt) {
+              if (!original || original.operationId !== (claim.loop.currentDefinition?.operationId ?? claim.loop.creationOperationId) || original.message?.userContent !== prompt) {
                 throw new AgentMuxError('The original future-message operation or content is unconfirmed. Inspect the saved arrangement before retrying; manual input remains available.', 'AGENT_FUTURE_INTENT_CHANGED')
               }
               // Each occurrence belongs to the saved message, not the current producer's rules.

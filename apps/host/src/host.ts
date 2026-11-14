@@ -253,7 +253,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     ...(moteDialogue ? { recordMainSource: moteDialogue.recordMainSource, prepareMainSource:moteDialogue.prepareMainSource } : {}),
     catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null },
     executors: () => readConfiguredExecutorChoices(configurationPath!),
-    ...(motePresence ? { maintenance: motePresence.read, changed: motePresence.invalidate } : {}) }) : undefined
+    ...(motePresence ? { maintenance: motePresence.read, changed: motePresence.invalidate, adoptGuidance: motePresence.adoptGuidance } : {}) }) : undefined
   const service = {
     spatialState,
     ...(workspaceResources ? { spatialFolderDirectory: createHostFolderDirectoryOwner(workspaceResources,spatialState) } : {}),
