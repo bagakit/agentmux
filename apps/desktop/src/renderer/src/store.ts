@@ -139,7 +139,7 @@ import { executeWorkfaceFileOpen, resolveFileOpenTarget } from './lib/workface-f
 import { executeWorkfaceFileView } from './lib/workface-file-view'
 import type { WorkbenchProjectionSelection } from './lib/workbench-projection'
 import type { WorkbenchPresentation } from './lib/workbench-presentation'
-import { mainRegionReference, desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, resolveDesktopMoteSelection, resolveWorkbenchOccurrenceSelection, reconcileWorkbenchSpaceSelection, workbenchSelectionCatalog, sessionWorkbenchReferences, projectWorkbenchSpaceSelection, workbenchObjectLayout, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
+import { mainRegionReference, desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, resolveDesktopMoteSelection, resolveWorkbenchOccurrenceSelection, reconcileWorkbenchSpaceSelection, workbenchSelectionCatalog, sessionWorkbenchReferences, type SessionLocationReference, projectWorkbenchSpaceSelection, workbenchObjectLayout, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
 import type { FocusAgentReveal, FocusAgentTarget } from './lib/focus-agent-navigation'
 import { captureDesktopInput, readDesktopPresentation, readDesktopOverlays, requestDesktopSettingsNavigation, readFocusAgentPresentation, readMoteLinkPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
 import { notebookRelocations, refreshNotebookLibrary, recordNotebookChanges, restoreNotebookRecoveries, useNotebookLibrary, type NotebookRecovery } from './lib/notebook-library'
@@ -1378,10 +1378,11 @@ export type AppState = GitReadingActions & {
   ): Promise<AgentMuxControlResult>
   /** Whether the original display selection was committed. Refusal preserves the current context.
    * `keepSurface` places and selects the same occurrence without leaving the current main surface (Focus shows it in place). */
-  sessionLocationRequest: { requestId: string; sessionId: string; label: string; groupId?: string; keepSurface?: boolean; issue?: string } | null
+  sessionLocationRequest: { requestId: string; sessionId: string; label: string; groupId?: string; keepSurface?: boolean; subject?: { hostId: string; agentSessionId: string }; issue?: string } | null
+  requestSessionLocations(sessionId: string, options?: { keepSurface?: boolean }): void
   dismissSessionLocationRequest(requestId: string): void
-  chooseSessionLocation(requestId: string, reference: WorkbenchProjectionSelection): boolean
-  selectSession(id: string, tabGroupId?: string, options?: { keepSurface?: boolean; reference?: WorkbenchProjectionSelection }): boolean
+  chooseSessionLocation(requestId: string, reference: SessionLocationReference): boolean
+  selectSession(id: string, tabGroupId?: string, options?: { keepSurface?: boolean; reference?: SessionLocationReference }): boolean
   prepareWorkbenchLayout(workspaceId: string): WorkspaceLayout
   createWorkbenchZone(input: { workspaceId: string; spaceIds: readonly string[] }): Promise<{ zone: AgentMuxZoneFact; save: AgentMuxSpatialSave; issues: AgentMuxSpatialIssue[] }>
   setZoneSpaceRelation(zoneId: string, spaceId: string, linked: boolean): Promise<AgentMuxSpaceBindingReport>
@@ -4523,6 +4524,9 @@ const agentRegionExecutionIndex = new WeakMap<readonly import('@agentmux/core/sp
 export type AgentRegionReference = { tabId: string; regionId: string; agentSessionId: string }
 
 /** The existing Core document owns execution identity; display placement never supplies a Host. */
+/** Availability of the original spatial owner, not Agent or Run health. */
+export function agentRegionLocationsKnown(): boolean { return coreSpatialPersistence?.current !== null && coreSpatialPersistence?.current !== undefined }
+
 export function agentRegionExecution(reference: AgentRegionReference) {
   const regions = coreSpatialPersistence?.current?.graph.regions
   if (!regions) return null
@@ -7386,12 +7390,29 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       signal?.removeEventListener('abort', cancel)
     }
   },
+  requestSessionLocations(sessionId, options) {
+    const current = get(), original = sessionPresentationById(current.sessions).get(sessionId)
+    set({ sessionLocationRequest: { requestId: mintObjectId(), sessionId, label: original?.label ?? sessionId,
+      keepSurface: options?.keepSurface ?? current.mainSurface === 'agents',
+      ...(original?.control.kind === 'agent' ? { subject: { hostId: original.control.hostId, agentSessionId: original.control.agentSessionId } } : {}),
+      ...(!agentRegionLocationsKnown() ? { issue: 'Location sources are not confirmed yet. The original Agent and workface are kept.' } : {}) } })
+  },
   dismissSessionLocationRequest(requestId) {
     if (get().sessionLocationRequest?.requestId === requestId) set({ sessionLocationRequest: null })
   },
   chooseSessionLocation(requestId, reference) {
     const request = get().sessionLocationRequest
     if (request?.requestId !== requestId) return false
+    const original = sessionPresentationById(get().sessions).get(request.sessionId)
+    if (request.subject && original && (original.control.kind !== 'agent' || original.control.hostId !== request.subject.hostId || original.control.agentSessionId !== request.subject.agentSessionId)) {
+      set({ sessionLocationRequest: { ...request, issue: 'The original Agent identity has changed. Choose its confirmed location again.' } })
+      return false
+    }
+    const execution = request.subject ? agentRegionExecution({ tabId: reference.tabId, regionId: reference.regionId, agentSessionId: request.subject.agentSessionId }) : null
+    if (request.subject && execution?.hostId !== request.subject.hostId) {
+      set({ sessionLocationRequest: { ...request, issue: 'The original Agent binding at this location is unconfirmed. Its workface is kept; refresh the original Host or choose a confirmed location.' } })
+      return false
+    }
     return get().selectSession(request.sessionId, request.groupId, { ...(request.keepSurface !== undefined ? { keepSurface: request.keepSurface } : {}), reference })
   },
   selectSession(id, preferredTabGroupId, options) {
@@ -7438,8 +7459,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       const reference = references[0]!
       let choice: AgentMuxDesktopSpaceSelection
-      try { choice = resolveWorkbenchOccurrenceSelection(current, catalog, { workspaceId: reference.displayWorkspaceId,
-        groupId: reference.groupId, tabId: reference.tabId, regionId: reference.regionId }, 'navigation') }
+      try { choice = options?.reference?.spaceId ? resolveDesktopSpaceSelection(current, catalog, options.reference)
+        : resolveWorkbenchOccurrenceSelection(current, catalog, { workspaceId: reference.displayWorkspaceId,
+          groupId: reference.groupId, tabId: reference.tabId, regionId: reference.regionId }, 'navigation') }
       catch (error) { return fail(presentError(error), error) }
       set((state) => ({
         ...(state.sessionLocationRequest?.sessionId === id ? { sessionLocationRequest: null } : {}),

@@ -3,7 +3,7 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { agentRegionExecution, useAppStore } from '../store'
+import { agentRegionExecution, agentRegionLocationsKnown, useAppStore } from '../store'
 import { useShallow } from 'zustand/react/shallow'
 import { createFocusProjectionSelector, agentContextForSession, retainedFocusContext } from '../lib/focus-context'
 import { FocusContextCards } from './FocusContextCards'
@@ -244,8 +244,9 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const navigationCatalog = useAppStore(workbenchSelectionCatalog)
   const identityTabs = workbenchNavigationTabs(tabs)
   const identitySelector = useMemo(createFocusContextIdentitySelector, [])
-  const contextIdentities = useMemo(() => identitySelector(navigationCatalog, identityTabs, filterContexts, config, layouts, agentRegionExecution),
-    [identitySelector, navigationCatalog, identityTabs, filterContexts, config?.executors, config?.appearance.agentAvatars, config?.workspaces, layouts])
+  const locationsKnown = useAppStore(agentRegionLocationsKnown)
+  const contextIdentities = useMemo(() => identitySelector(navigationCatalog, identityTabs, filterContexts, config, layouts, agentRegionExecution, locationsKnown),
+    [identitySelector, navigationCatalog, identityTabs, filterContexts, config?.executors, config?.appearance.agentAvatars, config?.workspaces, layouts, locationsKnown])
   const survey = useAppStore(useShallow(state => ({ surveyCollectedZones: state.surveyCollectedZones, surveyOrganization: state.surveyOrganization, surveyExplorationNames: state.surveyExplorationNames })))
   const originContent = useAppStore(useShallow(state => ({ bindings: state.spaceZoneBindings, categories: state.topicCategories })))
   const surveyItems = useMemo(() => readSurveyPresentation({ ...survey, surveyZoneSelection: null, tabs }, navigationCatalog).items, [survey, tabs, navigationCatalog])

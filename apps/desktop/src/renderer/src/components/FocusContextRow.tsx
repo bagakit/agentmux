@@ -1,3 +1,4 @@
+import { AgentLocationsButton } from './AgentLocationsButton'
 import { AgentOperationFeedback } from './AgentOperationFeedback'
 import { TextInput } from '@agentmux/client-ui/input'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
@@ -64,5 +65,5 @@ export const FocusContextRow = memo(function FocusContextRow({ context, identity
     <AgentContextContent context={context} identity={hover.position} presentation="card" disclosure={disclosure} topic={topic} headingAccessory={goalLinks ? <span className="focus-goal__space" aria-hidden="true"><FocusGoalMark links={goalLinks} /></span> : undefined} />
   </button>
   const main = context.kind === 'agent' ? <FocusContextMenu open={active && menuOpen} context={context} onOpenChange={setMenuOpen} onRestoreFocus={hover.suppressRestoredFocus} onRename={() => { hover.close(); ++editGeneration.current; expectedNameRevision.current = { revision: currentDisplayNameRevision('agent-session', context.id) }; setDraft(context.name) }}>{card}</FocusContextMenu> : card
-  return <><div className="focus-context-card">{main}{context.kind === 'agent' && context.control ? <AgentOperationFeedback subject={{ hostId: context.control.hostId, agentSessionId: context.control.agentSessionId }} /> : null}{goalLinks ? <FocusGoalLinks links={goalLinks} onOpenChange={goalDisclosure} /> : null}</div></>
+  return <><div className={`focus-context-card${context.kind === 'agent' ? ' focus-context-card--locations' : ''}`}>{main}{context.kind === 'agent' ? <AgentLocationsButton sessionId={context.id} name={context.name} count={identity?.occurrenceCount} beforeOpen={hover.close} /> : null}{context.kind === 'agent' && context.control ? <AgentOperationFeedback subject={{ hostId: context.control.hostId, agentSessionId: context.control.agentSessionId }} /> : null}{goalLinks ? <FocusGoalLinks links={goalLinks} onOpenChange={goalDisclosure} /> : null}</div></>
 })

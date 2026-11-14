@@ -11,7 +11,7 @@ import {
   rankQuickSwitchItems,
   type QuickSwitchItem
 } from '../lib/quick-switch'
-import { sessionWorkbenchReferences, workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
+import { sessionWorkbenchLocationChoices, workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
 import { workbenchDocumentIdentity } from '../lib/workbench-window-registry'
 import { focusWorkbenchWindow } from '../lib/workbench-windows'
 import { tabGroupForTab } from '../lib/workbench-tabs'
@@ -121,8 +121,8 @@ export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; o
   }, [requestId, ownerDocument])
 
   const locationItems = useMemo(() => locationRequest ? buildSessionLocationItems({
-    label: locationRequest.label, config, tabs, layouts,
-    references: sessionWorkbenchReferences(tabs, workbenchSelectionCatalog(useAppStore.getState()), locationRequest.sessionId, locationRequest.groupId)
+    label: locationRequest.label, config, tabs, layouts, catalog: workbenchSelectionCatalog(useAppStore.getState()),
+    references: sessionWorkbenchLocationChoices(tabs, workbenchSelectionCatalog(useAppStore.getState()), locationRequest.sessionId, locationRequest.groupId)
   }) : NO_ITEMS, [requestId, config, tabs, layouts, scratchTopicSnapshots, spaceZoneBindings, topicCategories, projectGroups])
 
   const items = useMemo(

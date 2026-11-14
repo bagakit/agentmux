@@ -22,40 +22,54 @@ const same = (left: readonly unknown[], right: readonly unknown[]) => left.lengt
 export function createFocusContextIdentitySelector() {
   let tabCache = new Map<string, Cached<WorkbenchTabDetail>>()
   let subjectCache = new Map<string, Cached<FocusContextIdentity>>()
+  let locationCache: { inputs: readonly unknown[]; positions: Map<string, Map<string, Position>>;
+    occurrences: Map<string, Set<string>>; subjectsByRegion: Map<string, string>; unconfirmed: Set<string> } | undefined
   return (catalog: AgentMuxSpaceCatalog, tabs: Readonly<Record<string, WorkbenchTab>>,
     contexts: readonly FocusContext[], config: AppConfig | null, layouts: Readonly<Record<string, WorkspaceLayout>>,
-    executionFor: ExecutionFor): ReadonlyMap<string, FocusContextIdentity> => {
+    executionFor: ExecutionFor, locationsKnown = false): ReadonlyMap<string, FocusContextIdentity> => {
     const executors = config?.executors, retainedAvatars = config?.appearance.agentAvatars
     const contextsByKey = new Map(contexts.map(context => [focusContextIdentityKey(context.hostId, context.id), context]))
-    const regions = new Map(catalog.regions.map(region => [JSON.stringify([region.tabId, region.regionId]), region]))
-    const contextForRegion = new Map<string, FocusContext>()
-    const positions = new Map<string, Map<string, Position>>()
-    const occurrences = new Map<string, Set<string>>()
-    const displayNames = new Map(config?.workspaces.map(workspace => [workspace.id, workspace.name]))
-    const groupOrders = new Map<string, string[]>()
-    // Locations prove actual membership. A retained, detached Tab object is not a position.
-    for (const location of catalog.locations) {
-      const key = JSON.stringify([location.tabId, location.regionId])
-      const fact = regions.get(key), surface = tabs[location.tabId]?.regions[location.regionId]
-      if (fact?.kind !== 'agent' || !fact.agentSessionId || surface?.kind !== 'agent') continue
-      const execution = executionFor({ tabId: location.tabId, regionId: location.regionId, agentSessionId: fact.agentSessionId })
-      if (!execution) continue
-      const subject = focusContextIdentityKey(execution.hostId, surface.sessionId), context = contextsByKey.get(subject)
-      if (!context || (context.control?.agentSessionId ?? context.id) !== fact.agentSessionId) continue
-      const originalOccurrences = occurrences.get(subject) ?? new Set<string>()
-      originalOccurrences.add(JSON.stringify([location.displayWorkspaceId, location.groupId, location.tabId, location.regionId]))
-      occurrences.set(subject, originalOccurrences)
-      contextForRegion.set(key, context)
-      const occurrenceKey = JSON.stringify([location.displayWorkspaceId, location.groupId, location.tabId])
-      const layout = layouts[location.displayWorkspaceId], displayName = displayNames.get(location.displayWorkspaceId)
-      const order = groupOrders.get(location.displayWorkspaceId) ?? (layout ? groupIds(layout.root) : [])
-      groupOrders.set(location.displayWorkspaceId, order)
-      const groupIndex = order.indexOf(location.groupId)
-      const locationLabel = displayName && groupIndex >= 0 ? `${displayName} · Group ${groupIndex + 1}` : undefined
-      const subjectPositions = positions.get(subject) ?? new Map<string, Position>()
-      const position = subjectPositions.get(occurrenceKey) ?? { tabId: location.tabId, regionIds: new Set<string>(), ...(locationLabel ? { locationLabel } : {}) }
-      position.regionIds.add(location.regionId); subjectPositions.set(occurrenceKey, position); positions.set(subject, subjectPositions)
+    const signature = contexts.map(context => JSON.stringify([context.hostId, context.id, context.control?.agentSessionId])).sort().join('\n')
+    const inputs = [catalog, tabs, layouts, config?.workspaces, signature, executionFor, locationsKnown]
+    if (!locationCache || !same(locationCache.inputs, inputs)) {
+      const regions = new Map(catalog.regions.map(region => [JSON.stringify([region.tabId, region.regionId]), region]))
+      const subjectsByRegion = new Map<string, string>(), unconfirmed = new Set<string>()
+      const contextsById = new Map<string, FocusContext[]>()
+      for (const context of contexts) contextsById.set(context.id, [...(contextsById.get(context.id) ?? []), context])
+      const positions = new Map<string, Map<string, Position>>()
+      const occurrences = new Map<string, Set<string>>()
+      const displayNames = new Map(config?.workspaces.map(workspace => [workspace.id, workspace.name]))
+      const groupOrders = new Map<string, string[]>()
+      // Locations prove actual membership. A retained, detached Tab object is not a position.
+      for (const location of catalog.locations) {
+        const key = JSON.stringify([location.tabId, location.regionId])
+        const fact = regions.get(key), surface = tabs[location.tabId]?.regions[location.regionId]
+        if (fact?.kind !== 'agent' || !fact.agentSessionId || surface?.kind !== 'agent') continue
+        const candidates = contextsById.get(surface.sessionId) ?? []
+        const context = candidates.find(candidate => {
+          const execution = executionFor({ tabId: location.tabId, regionId: location.regionId, agentSessionId: candidate.control?.agentSessionId ?? fact.agentSessionId! })
+          return execution?.hostId === candidate.hostId
+        })
+        if (!context) { for (const candidate of candidates) unconfirmed.add(focusContextIdentityKey(candidate.hostId, candidate.id)); continue }
+        const subject = focusContextIdentityKey(context.hostId, surface.sessionId)
+        const originalOccurrences = occurrences.get(subject) ?? new Set<string>()
+        originalOccurrences.add(JSON.stringify([location.displayWorkspaceId, location.groupId, location.tabId, location.regionId]))
+        occurrences.set(subject, originalOccurrences)
+        subjectsByRegion.set(key, subject)
+        const occurrenceKey = JSON.stringify([location.displayWorkspaceId, location.groupId, location.tabId])
+        const layout = layouts[location.displayWorkspaceId], displayName = displayNames.get(location.displayWorkspaceId)
+        const order = groupOrders.get(location.displayWorkspaceId) ?? (layout ? groupIds(layout.root) : [])
+        groupOrders.set(location.displayWorkspaceId, order)
+        const groupIndex = order.indexOf(location.groupId)
+        const locationLabel = displayName && groupIndex >= 0 ? `${displayName} · Group ${groupIndex + 1}` : undefined
+        const subjectPositions = positions.get(subject) ?? new Map<string, Position>()
+        const position = subjectPositions.get(occurrenceKey) ?? { tabId: location.tabId, regionIds: new Set<string>(), ...(locationLabel ? { locationLabel } : {}) }
+        position.regionIds.add(location.regionId); subjectPositions.set(occurrenceKey, position); positions.set(subject, subjectPositions)
+      }
+      locationCache = { inputs, positions, occurrences, subjectsByRegion, unconfirmed }
     }
+    const { positions, occurrences, subjectsByRegion, unconfirmed } = locationCache
+    const contextForRegion = new Map([...subjectsByRegion].map(([key, subject]) => [key, contextsByKey.get(subject)!]))
     const nextTabs = new Map<string, Cached<WorkbenchTabDetail>>()
     for (const subjectPositions of positions.values()) for (const { tabId } of subjectPositions.values()) {
       if (nextTabs.has(tabId)) continue
@@ -85,6 +99,7 @@ export function createFocusContextIdentitySelector() {
     const nextSubjects = new Map<string, Cached<FocusContextIdentity>>()
     const result = new Map<string, FocusContextIdentity>()
     for (const [subject, subjectPositions] of positions) {
+      if (unconfirmed.has(subject)) continue
       const occurrenceCount = occurrences.get(subject)!.size
       const dependencies = [occurrenceCount, ...[...subjectPositions].flatMap(([occurrenceKey, { tabId, regionIds: ids, locationLabel }]) => [occurrenceKey, locationLabel, nextTabs.get(tabId)!.value, ...ids])]
       const previous = subjectCache.get(subject)
@@ -92,6 +107,12 @@ export function createFocusContextIdentitySelector() {
         : { tabs: [...subjectPositions].map(([occurrenceKey, { tabId, regionIds: ids, locationLabel }]) => ({ ...nextTabs.get(tabId)!.value, occurrenceKey,
           ...(locationLabel ? { locationLabel } : {}), highlightedRegionIds: [...ids] })), occurrenceCount }
       nextSubjects.set(subject, { dependencies, value }); result.set(subject, value)
+    }
+    if (locationsKnown) for (const subject of contextsByKey.keys()) {
+      if (result.has(subject) || unconfirmed.has(subject)) continue
+      const previous = subjectCache.get(subject)
+      const value = previous?.value.occurrenceCount === 0 ? previous.value : { tabs: [], occurrenceCount: 0 }
+      nextSubjects.set(subject, { dependencies: [], value }); result.set(subject, value)
     }
     tabCache = nextTabs; subjectCache = nextSubjects
     return result

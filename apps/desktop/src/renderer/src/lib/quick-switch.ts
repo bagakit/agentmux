@@ -9,7 +9,9 @@ import {
   type WorkbenchTab
 } from './workbench-tabs'
 import { assertUnreachableSurface, isSessionSurface } from './workbench-surface-kinds'
-import type { WorkbenchProjectionSelection } from './workbench-projection'
+import type { SessionLocationReference } from './desktop-focus-navigation'
+import type { AgentMuxSpaceCatalog } from '@agentmux/core'
+import { groupIds } from '@agentmux/layout'
 import { regionIds, type WorkspaceLayout } from '@agentmux/layout'
 
 // The quick switcher's data core. It fuses the window's open tabs and agent sessions into one ranked
@@ -22,7 +24,7 @@ import { regionIds, type WorkspaceLayout } from '@agentmux/layout'
 export type QuickSwitchTarget =
   | { kind: 'tab'; tabId: string; workspaceId: string; tabGroupId: string }
   | { kind: 'session'; sessionId: string }
-  | { kind: 'session-location'; reference: WorkbenchProjectionSelection }
+  | { kind: 'session-location'; reference: SessionLocationReference }
 
 export type QuickSwitchKind = 'session' | 'tab' | 'location'
 
@@ -51,7 +53,8 @@ export type QuickSwitchItem = {
 /** Labels describe an exact existing occurrence; they never resolve its identity. */
 export function buildSessionLocationItems(input: {
   label: string
-  references: readonly WorkbenchProjectionSelection[]
+  catalog?: AgentMuxSpaceCatalog
+  references: readonly SessionLocationReference[]
   config: AppConfig | null
   tabs: Readonly<Record<string, WorkbenchTab>>
   layouts: Readonly<Record<string, WorkspaceLayout>>
@@ -60,10 +63,15 @@ export function buildSessionLocationItems(input: {
     const workspace = input.config?.workspaces.find(one => one.id === reference.displayWorkspaceId)
     const host = input.config?.hosts.find(one => one.id === workspace?.hostId)
     const tab = input.tabs[reference.tabId]!
-    const groups = input.layouts[reference.displayWorkspaceId]?.groups ?? []
+    const layout = input.layouts[reference.displayWorkspaceId]
+    const groups = layout ? groupIds(layout.root) : []
+    const space = input.catalog?.spaces.find(one => one.spaceId === reference.spaceId)
     const regionIndex = regionIds(tab.layout.root).indexOf(reference.regionId)
-    return { id: JSON.stringify(reference), kind: 'location', title: tab.name || input.label,
-      subtitle: `${workspace?.name ?? reference.displayWorkspaceId} · ${host?.label ?? workspace?.hostId ?? 'Unknown machine'} · Group ${groups.findIndex(one => one.id === reference.groupId) + 1} · Region ${regionIndex + 1}`,
+    const title = tab.name && tab.name !== 'Tab' && tab.name !== input.label ? tab.name : space?.name ?? workspace?.name ?? input.label
+    return { id: JSON.stringify(reference), kind: 'location', title,
+      subtitle: [space?.name, workspace?.name ?? reference.displayWorkspaceId, host?.label ?? workspace?.hostId ?? 'Unknown machine',
+        groups.includes(reference.groupId) ? `Group ${groups.indexOf(reference.groupId) + 1}` : reference.groupId,
+        regionIndex >= 0 ? `Region ${regionIndex + 1}` : reference.regionId].filter(Boolean).join(' · '),
       providerId: null, state: null, observedAt: 0, surfaceKind: null,
       target: { kind: 'session-location', reference } }
   })

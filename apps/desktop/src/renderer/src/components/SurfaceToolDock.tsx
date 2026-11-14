@@ -30,7 +30,7 @@ import { createWorkspaceAgentListSelector, workspaceAgentListMembers } from '../
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { formatSessionAddress } from '../lib/agent-address'
 import { useWorkspaceAgentClose } from './WorkspaceAgentSelection'
-import { agentRegionExecution, useAppStore } from '../store'
+import { agentRegionExecution, agentRegionLocationsKnown, useAppStore } from '../store'
 import { LiquidSelectionSurface } from './LiquidSelectionSurface'
 import { WorkspaceFilesTool } from './WorkspaceFilesTool'
 import { WorkspaceGitTool } from './WorkspaceGitTool'
@@ -115,9 +115,10 @@ const WorkspaceAgentListView = memo(function WorkspaceAgentListView({ workspace,
   const goalLinks = useAppStore(state => goalSelector({ demands: state.demands, sessions: scoped }, active))
   const config = useAppStore(state => state.config), tabs = useAppStore(state => state.tabs), layouts = useAppStore(state => state.layouts)
   const catalog = useAppStore(workbenchSelectionCatalog), identitySelector = useMemo(createFocusContextIdentitySelector, [])
+  const locationsKnown = useAppStore(agentRegionLocationsKnown)
   const identityTabs = workbenchNavigationTabs(tabs)
-  const identities = useMemo(() => identitySelector(catalog, identityTabs, contexts, config, layouts, agentRegionExecution),
-    [identitySelector, catalog, identityTabs, contexts, config?.executors, config?.appearance.agentAvatars, config?.workspaces, layouts])
+  const identities = useMemo(() => identitySelector(catalog, identityTabs, contexts, config, layouts, agentRegionExecution, locationsKnown),
+    [identitySelector, catalog, identityTabs, contexts, config?.executors, config?.appearance.agentAvatars, config?.workspaces, layouts, locationsKnown])
   const openFocus = useAppStore(state => state.setMainSurface)
   const count = contexts.length
   const [filter, setFilter] = useState<'all' | FocusBucket>('all')

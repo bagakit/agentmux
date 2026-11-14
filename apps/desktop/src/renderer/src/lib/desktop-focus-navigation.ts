@@ -90,6 +90,34 @@ export function sessionWorkbenchReferences(tabs: Readonly<Record<string, Workben
   return [...references.values()]
 }
 
+/** A physical occurrence can have several original Space contexts. */
+export type SessionLocationReference = WorkbenchProjectionSelection & { spaceId?: string; zoneId?: string }
+export function sessionWorkbenchLocationChoices(tabs: Readonly<Record<string, WorkbenchTab>>, catalog: AgentMuxSpaceCatalog,
+  sessionId: string, groupId?: string): SessionLocationReference[] {
+  const choices = new Map<string, SessionLocationReference>()
+  for (const location of catalog.locations) {
+    const surface = tabs[location.tabId]?.regions[location.regionId]
+    if (!surface || !isSessionSurface(surface) || surface.sessionId !== sessionId || groupId && location.groupId !== groupId) continue
+    const choice: SessionLocationReference = { displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId,
+      tabId: location.tabId, regionId: location.regionId, ...(location.spaceId ? { spaceId: location.spaceId } : {}),
+      ...(location.zoneId ? { zoneId: location.zoneId } : {}) }
+    choices.set(JSON.stringify(choice), choice)
+  }
+  return [...choices.values()]
+}
+/** One structural pass for a roster, independent of Session output and row count. */
+export function sessionWorkbenchLocationCounts(tabs: Readonly<Record<string, WorkbenchTab>>, catalog: AgentMuxSpaceCatalog): ReadonlyMap<string, number> {
+  const positions = new Map<string, Set<string>>()
+  for (const location of catalog.locations) {
+    const surface = tabs[location.tabId]?.regions[location.regionId]
+    if (!surface || !isSessionSurface(surface)) continue
+    let occurrences = positions.get(surface.sessionId)
+    if (!occurrences) positions.set(surface.sessionId, occurrences = new Set())
+    occurrences.add(JSON.stringify([location.displayWorkspaceId, location.groupId, location.tabId, location.regionId]))
+  }
+  return new Map([...positions].map(([id, references]) => [id, references.size]))
+}
+
 /** A local focus keeps its explicit parent; an explicit jump can resolve another object. */
 export function resolveWorkbenchOccurrenceSelection(state: DesktopSelectionState, catalog: AgentMuxSpaceCatalog,
   reference: { workspaceId: string; groupId: string; tabId: string; regionId?: string }, intent: 'local' | 'navigation' = 'local'): AgentMuxDesktopSpaceSelection {
