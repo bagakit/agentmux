@@ -6,6 +6,7 @@ import { AgentWorkModeBadge } from '../src/renderer/src/components/AgentWorkMode
 import { AgentWorkModeSetup } from '../src/renderer/src/components/AgentWorkModeSetup'
 import { AgentRegionHeader } from '../src/renderer/src/components/AgentRegionHeader'
 import { LauncherAgentDevice } from '../src/renderer/src/components/LauncherAgentDevice'
+import { ExecutionRouteLink } from '../src/renderer/src/components/AgentExecutionRelation'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { chooseField } from './helpers/selection-field'
@@ -21,7 +22,8 @@ it('a retained missing Agent workspace stays unknown without changing the origin
   await dom.render(<LauncherAgentDevice hosts={hosts} workspace={project} agentWorkspace={undefined}
     explicitAgentWorkspaceId="retained-unavailable-agent" disabled={false} active onSelect={select} onPreparingChange={prepare} />)
   const trigger = dom.container.querySelector<HTMLButtonElement>('[aria-label="Agent location"]')!
-  expect(trigger.textContent).toContain('Agent location unknown')
+  expect(trigger.querySelector('[data-agent-host-id]')?.getAttribute('data-agent-host-id')).toBe('')
+  expect(trigger.querySelector('[data-path-state]')?.getAttribute('data-path-state')).toBe('unconfirmed')
   expect(trigger.title).toContain('Agent on Host unknown')
   expect(trigger.textContent).not.toContain('Project device')
   expect(select).not.toHaveBeenCalled()
@@ -58,12 +60,12 @@ it('a remote project starts with its own Agent and switching execution never off
   const apply = vi.fn(), home = vi.spyOn(api.hosts, 'home')
   await dom.render(<AgentWorkModeSetup config={config} active fixedResourceWorkspaceId={project.id}
     initialSelection={{ resourceWorkspaceId: project.id, agentWorkspaceId: null }} actionLabel="Prepare" onApply={apply} />)
-  expect(dom.container.querySelector<HTMLInputElement>('input[value="local"]')!.checked).toBe(true)
-  expect(dom.container.querySelector('input[value="remote-agent"]')).not.toBeNull()
+  expect(dom.container.querySelector('.agent-work-mode-choices')).toBeNull()
+  expect(dom.container.querySelector('[aria-label="Agent runs on"]')?.textContent).toContain('Other Mac')
   expect(dom.container.querySelector('input[value="remote-project"]')).toBeNull()
   expect(dom.container.querySelector('input[value="remote-workspace"]')).toBeNull()
   expect(dom.container.querySelector('[aria-label="Working folder for this arrangement"]')).toBeNull()
-  expect(dom.container.textContent).toContain('Project on Other Mac')
+  expect(dom.container.querySelector('.agent-work-project-anchor')?.textContent).toContain('Other Mac')
   await dom.click('.agent-work-setup__actions .primary-button')
   expect(apply).toHaveBeenCalledExactlyOnceWith({ resourceWorkspaceId: project.id, agentWorkspaceId: null })
   expect(home).not.toHaveBeenCalled()
@@ -76,10 +78,87 @@ it('Outpost for a remote project can select this viewer’s device while keeping
   const apply = vi.fn()
   await dom.render(<AgentWorkModeSetup config={config} active fixedResourceWorkspaceId={project.id}
     initialSelection={{ resourceWorkspaceId: project.id, agentWorkspaceId: local.id }} actionLabel="Prepare" onApply={apply} />)
-  expect(dom.container.querySelector<HTMLInputElement>('input[value="remote-agent"]')!.checked).toBe(true)
+  expect(dom.container.querySelector('.agent-work-mode-choices')).toBeNull()
   expect(dom.container.querySelector('[aria-label="Agent runs on"]')?.textContent).toContain(hosts[0]!.label)
   await dom.click('.agent-work-setup__actions .primary-button')
   expect(apply).toHaveBeenCalledExactlyOnceWith({ resourceWorkspaceId: project.id, agentWorkspaceId: local.id })
+})
+
+it.each([
+  ['local', 'other', 'agent'], ['other', 'local', 'project'], ['other', 'other', null]
+] as const)('compact Agent identity marks only the original local end (%s / %s)', async (agentHostId, resourceHostId, localRole) => {
+  const source = { hostId: agentHostId, workspacePath: '/agent', toolExecution: binding, workPlacement: { agentHostId, resourceHostId } }
+  const longHosts = hosts.map(host => ({ ...host, label: host.label + ' with a long device name' }))
+  await dom.render(<AgentWorkModeBadge source={source} hosts={longHosts} />)
+  const badge = dom.container.querySelector<HTMLElement>('.agent-work-mode-badge')!
+  expect(badge.textContent).toBe('')
+  expect(badge.querySelectorAll('[data-local]')).toHaveLength(localRole ? 1 : 0)
+  if (localRole) expect(badge.querySelector('[data-local]')?.getAttribute('data-execution-role')).toBe(localRole)
+  expect(badge.querySelector('svg[data-path-state] text')).toBeNull()
+  await act(async () => badge.focus())
+  const detail = document.querySelector('[role="tooltip"]')!
+  expect(detail.textContent).toContain(longHosts.find(host => host.id === agentHostId)!.label)
+  expect(detail.textContent).toContain(longHosts.find(host => host.id === resourceHostId)!.label)
+  expect(detail.textContent).toContain('/agent'); expect(detail.textContent).toContain('/project')
+})
+
+it.each([
+  [{ kind: 'same-device' } as const, 'same-device', ''],
+  [{ kind: 'direct' } as const, 'direct', ''],
+  [{ kind: 'unconfirmed' } as const, 'unconfirmed', ''],
+  [{ kind: 'cascade', hops: 3 } as const, 'cascade', '3'],
+  [{ kind: 'cascade', hops: 1 } as const, 'unconfirmed', '']
+])('draws the supplied route relation without a zero/one-hop number (%j)', async (relation, kind, count) => {
+  await dom.render(<ExecutionRouteLink relation={relation} />)
+  const line = dom.container.querySelector('svg')!
+  expect(line.getAttribute('data-path-state')).toBe(kind)
+  expect(line.querySelector('text')?.textContent ?? '').toBe(count)
+  expect(line.querySelector('path')).not.toBeNull()
+})
+
+it('one fixed-project device selection applies the other Agent end and retains the task without launching', async () => {
+  const local = composerConfig.workspaces[0]!, project = { ...local, id: 'project-b', hostId: 'other', path: '/B/project', name: 'Project B' }
+  const config = { ...composerConfig, hosts, workspaces: [local, project] }
+  useAppStore.setState({ config, agentComposerDrafts: { original: 'Keep the original task' } })
+  const before = useAppStore.getState(), apply = vi.fn(), launch = vi.spyOn(api.sessions, 'launchAgent')
+  vi.spyOn(api.hosts, 'home').mockResolvedValue({ routeHostId: local.hostId, homeDirectory: local.path })
+  await dom.render(<AgentWorkModeSetup config={config} active fixedResourceWorkspaceId={project.id}
+    initialSelection={{ resourceWorkspaceId: project.id, agentWorkspaceId: null }} actionLabel="Apply" onApply={apply} />)
+  await chooseField(dom.container.querySelector<HTMLElement>('[aria-label="Agent runs on"]')!, local.hostId)
+  expect(apply).not.toHaveBeenCalled(); expect(api.hosts.home).not.toHaveBeenCalled()
+  expect(dom.container.querySelector('.agent-work-project-anchor')?.textContent).toContain('Project B')
+  await dom.click('.agent-work-setup__actions .primary-button')
+  await vi.waitFor(() => expect(apply).toHaveBeenCalledExactlyOnceWith({ resourceWorkspaceId: project.id, agentWorkspaceId: local.id }))
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(useAppStore.getState().sessions).toBe(before.sessions); expect(launch).not.toHaveBeenCalled()
+})
+
+it('reselecting the same device preserves its explicit startup, while a different device uses its own home', async () => {
+  const local = composerConfig.workspaces[0]!, project = { ...local, id: 'project-b', hostId: 'other', path: '/B/project', name: 'Project B' }
+  const startup = { ...project, id: 'custom-startup', path: '/B/agent-settings', name: 'Agent settings' }
+  const config = { ...composerConfig, hosts, workspaces: [local, project, startup] }
+  useAppStore.setState({ config })
+  const apply = vi.fn(), home = vi.spyOn(api.hosts, 'home').mockResolvedValue({ routeHostId: local.hostId, homeDirectory: local.path })
+  await dom.render(<AgentWorkModeSetup config={config} active fixedResourceWorkspaceId={project.id}
+    initialSelection={{ resourceWorkspaceId: project.id, agentWorkspaceId: startup.id }} actionLabel="Apply" onApply={apply} />)
+  await chooseField(dom.container.querySelector<HTMLElement>('[aria-label="Agent runs on"]')!, project.hostId)
+  await dom.click('.agent-work-setup__actions .primary-button')
+  expect(apply).toHaveBeenLastCalledWith({ resourceWorkspaceId: project.id, agentWorkspaceId: startup.id })
+  expect(home).not.toHaveBeenCalled()
+  await chooseField(dom.container.querySelector<HTMLElement>('[aria-label="Agent runs on"]')!, local.hostId)
+  await dom.click('.agent-work-setup__actions .primary-button')
+  await vi.waitFor(() => expect(apply).toHaveBeenLastCalledWith({ resourceWorkspaceId: project.id, agentWorkspaceId: local.id }))
+  expect(home).toHaveBeenCalledExactlyOnceWith(hosts[0], expect.objectContaining({ signal: expect.any(AbortSignal) }))
+})
+
+it('a suppressed relation tooltip never adds an inactive focus stop inside its original button', async () => {
+  const source = { hostId: 'other', workspacePath: '/agent', toolExecution: binding, workPlacement: { agentHostId: 'other', resourceHostId: 'local' } }
+  await dom.render(<button type="button" aria-label="Original device action"><AgentWorkModeBadge source={source} hosts={hosts} hideTooltip /></button>)
+  const badge = dom.container.querySelector<HTMLElement>('.agent-work-mode-badge')!
+  expect(badge.hasAttribute('tabindex')).toBe(false)
+  await act(async () => dom.container.querySelector('button')!.focus())
+  expect(document.activeElement).toBe(dom.container.querySelector('button'))
+  expect(document.querySelector('[role="tooltip"]')).toBeNull()
 })
 
 it('a connected observer channel never becomes an execution route or hop count', async () => {
