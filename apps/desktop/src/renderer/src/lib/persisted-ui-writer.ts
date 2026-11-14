@@ -8,9 +8,9 @@ export const USER_SAVE_REPLY_MS = 15_000
 type StoredValue<State> = string | StorageValue<State> | null
 type StateStorage<State> = {
   getItem(name: string): StoredValue<State> | Promise<StoredValue<State>>
-  setItem(name: string, value: string): void | Promise<unknown>
   removeItem(name: string): void | Promise<unknown>
-}
+} & ({ setItem(name: string, value: string): void | Promise<unknown> }
+  | { writeProjection(name: string, value: StorageValue<State>): void | Promise<unknown> })
 const asynchronous = <T>(value: T | Promise<T>): value is Promise<T> =>
   value !== null && typeof value === 'object' && typeof (value as Promise<T>).then === 'function'
 const decodeStoredValue = <State>(value: StoredValue<State>): StorageValue<State> | null =>
@@ -47,17 +47,22 @@ export function createBatchedPersistentStorage<State>(
     if (generation !== attempt) return
     for (const [name, value] of pending) {
       if (removals.has(name)) continue
-      const encoded = JSON.stringify(value)
       const finish = () => {
         // An ACK belongs to its captured input; newer edits remain pending.
         if (generation === attempt && pending.get(name) === value) pending.delete(name)
       }
       const save = (current: StoredValue<State>, confirm = false): void | Promise<void> => {
         if (generation !== attempt) return
-        // A native read may observe an earlier replacement whose directory ACK
-        // failed. Let that owner reconfirm equal bytes through its write API.
-        if (current === encoded && !confirm) { finish(); return }
-        const result = base.setItem(name, encoded)
+        let result: void | Promise<unknown>
+        if ('writeProjection' in base) {
+          // Only the native document owner can confirm a durable write, even
+          // when a read sees bytes from an earlier unconfirmed replacement.
+          result = base.writeProjection(name, value)
+        } else {
+          const encoded = JSON.stringify(value)
+          if (current === encoded && !confirm) { finish(); return }
+          result = base.setItem(name, encoded)
+        }
         if (asynchronous(result)) return result.then(finish)
         finish()
       }

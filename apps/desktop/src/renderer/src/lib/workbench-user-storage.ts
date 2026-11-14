@@ -59,8 +59,8 @@ export function createWorkbenchUserDocument(port: UserStatePort, original: () =>
       if (!name) throw new Error('Unknown Desktop document member')
       return { state: fragments()[name], version: 1 }
     },
-    async setItem(key, raw) {
-      const captured = JSON.parse(raw), current = requireDocument()
+    async writeProjection(key, captured) {
+      const current = requireDocument()
       const name = names.find(name => fragmentKey(name) === key)
       // The active cache keeps later edits. Only this captured input is sent;
       // its late ACK never replaces the current cache or another member.
