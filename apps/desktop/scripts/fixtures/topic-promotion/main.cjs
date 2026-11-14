@@ -33,8 +33,8 @@ app.whenReady().then(async () => { try {
   const stable = async label => { const facts=await read('topicPromotionProbe.facts()'); for(const key of ['tabs','layouts','drafts','selection']) assert.deepEqual(facts[key], report.before[key], label + ' preserves original ' + key); return facts }
   const openPromotion = async title => {
     await click('[aria-label=' + JSON.stringify('Actions for ' + title) + ']')
-    await until('Topic action menu', '[...document.querySelectorAll("[role=menuitem]")].some(node=>node.textContent.trim()==="晋升为 Mote")')
-    await clickText('[role=menuitem]', '晋升为 Mote')
+    await until('Topic action menu', '[...document.querySelectorAll("[role=menuitem]")].some(node=>node.textContent.trim()==="Promote to Mote…")')
+    await clickText('[role=menuitem]', 'Promote to Mote…')
     await until('promotion dialog', 'document.querySelector(".topic-promotion-dialog")!==null')
     await until('promotion inspection', '![...document.querySelectorAll(".topic-promotion-dialog button")].some(node=>node.textContent.includes("读取")||node.textContent.includes("查看中"))')
   }
@@ -169,9 +169,9 @@ app.whenReady().then(async () => { try {
   if(scenario==='motion') { await motionScenario();report.passed=true;return }
   await click('[aria-label="Actions for 示例项目 数据运维"]')
   await until('original Topic actions menu opened', 'document.querySelectorAll("[role=menuitem]").length>0')
-  assert.equal(await read('[...document.querySelectorAll("[role=menuitem]")].some(node=>node.textContent.trim()==="晋升为 Mote")'),true,'Production Topic menu exposes the promotion action')
+  assert.equal(await read('[...document.querySelectorAll("[role=menuitem]")].some(node=>node.textContent.trim()==="Promote to Mote…")'),true,'Production Topic menu exposes the promotion action')
   await capture('promotion-menu-dark.png', 'Topic 的原菜单中提供晋升动作')
-  await clickText('[role=menuitem]', '晋升为 Mote')
+  await clickText('[role=menuitem]', 'Promote to Mote…')
   await until('light confirmation', 'document.querySelector(".topic-promotion-dialog")!==null && [...document.querySelectorAll(".topic-promotion-dialog button")].some(node=>node.textContent.trim()==="晋升为 Mote"&&!node.disabled)')
   assert.equal(await read('document.querySelectorAll(".topic-promotion-dialog input,.topic-promotion-dialog select,.topic-promotion-dialog textarea").length'), 0, 'No team, role or identity configuration form')
   await capture('promotion-confirm-dark.png', '深色：保留原名字，一句连续性说明与单一晋升动作')

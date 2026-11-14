@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { createClientUiRoot } from '../../../test/helpers/client-ui-render'
 import { SettingsNavigation } from '../../../src/renderer/src/components/SettingsNavigation'
 import { SettingsPanel } from '../../../src/renderer/src/components/SettingsPanel'
+import { TopicActionsMenu } from '../../../src/renderer/src/components/TopicContextMenu'
 import { AgentRegionHeader } from '../../../src/renderer/src/components/AgentRegionHeader'
 import { WorkbenchPresentationContext } from '../../../src/renderer/src/lib/workbench-presentation'
 import { useAppStore } from '../../../src/renderer/src/store'
@@ -49,6 +50,10 @@ function Scene() {
       <div style={{ border: '1px solid var(--line)', borderRadius: 12, overflow: 'hidden', background: 'var(--surface-1)' }}>
         <WorkbenchPresentationContext.Provider value={{ active: true, retainedRegionId: null, reference: source }}><AgentRegionHeader name={session.label} executorLabel="Codex" sessionId={session.id} sessionKind="agent" executionHost={{ id: 'local', label: 'This Mac', configured: true, cwd: session.workspacePath }} regionId={source.regionId} nativeSession={session} readOnly={false} onHistory={undefined} /></WorkbenchPresentationContext.Provider>
         <div style={{ padding: 24, minHeight: 240 }}><h2 style={{ fontWeight: 500 }}>The work continues here.</h2><p style={{ color: 'var(--text-2)' }}>Same Agent. Same conversation. A space for what comes next.</p><textarea aria-label="Original draft" defaultValue="Keep the original draft" style={{ width: '100%', marginTop: 30 }} /></div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
+        <span>A familiar Topic</span><TopicActionsMenu title="A familiar Topic" pinned={false}
+          onPromote={() => {}} onCopyPath={() => {}} onCopyLink={() => {}} onRename={() => {}} onReveal={() => {}} onTogglePin={() => {}} onEditWiki={() => {}} />
       </div>
       <button type="button" className="small-button" data-open-promotion-settings onClick={() => setSettings(true)}>Promotion settings</button>
     </div>

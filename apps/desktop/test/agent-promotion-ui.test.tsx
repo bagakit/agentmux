@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
+import { iconShapes } from '@agentmux/client-ui/icons'
+import { AUTHORED_ICON_DEFINITIONS } from '../../../packages/client-ui/src/theme/icon-authored'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import type { AgentPromotionReceipt, AgentPromotionApply } from '@agentmux/core/agent-promotion'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
@@ -9,6 +11,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { applyConfigEdit } from '../src/shared/config-edit'
 import { TopicDirectorySettingsPane } from '../src/renderer/src/components/settings/TopicDirectorySettingsPane'
 import { AgentPromotionDialog } from '../src/renderer/src/components/AgentPromotionDialog'
+import { TopicActionsMenu } from '../src/renderer/src/components/TopicContextMenu'
 import { TopicPromotionDialog } from '../src/renderer/src/components/TopicPromotionDialog'
 import { AgentRegionHeader } from '../src/renderer/src/components/AgentRegionHeader'
 import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-presentation'
@@ -109,9 +112,30 @@ it('the real Region Header menu opens promotion for its exact original Agent occ
   await act(async () => { more.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' })); more.click() })
   const action = document.querySelector<HTMLElement>('[data-agent-promotion]')!
   expect(action).not.toBeNull()
+  expect(action.textContent).toBe('Promote to Mote…')
+  expect(iconShapes('object.promotion')).toBe(AUTHORED_ICON_DEFINITIONS['promotion-rise'].shapes)
+  expect(action.querySelector('svg')?.getAttribute('data-semantic-icon')).toBe('object.promotion')
   await act(async () => action.click())
   expect(document.querySelector('.agent-promotion-dialog')).not.toBeNull()
   expect(call).toHaveBeenCalledWith('agent.promote.inspect', { target: selection.target })
   await click('晋升为 Mote')
   expect(call).toHaveBeenCalledWith('agent.promote.apply', expect.objectContaining(selection))
+})
+
+
+it('the Topic menu uses the same English promotion action and semantic icon, including its original result', async () => {
+  const promote = vi.fn(), noop = () => {}
+  for (const promoted of [false, true]) {
+    await dom.render(<TopicActionsMenu title="A familiar Topic" pinned={false} promoted={promoted} onPromote={promote}
+      onCopyPath={noop} onCopyLink={noop} onRename={noop} onReveal={noop} onTogglePin={noop} onEditWiki={noop} />)
+    const trigger = document.querySelector<HTMLButtonElement>('[aria-label="Actions for A familiar Topic"]')!
+    expect(trigger).not.toBeNull()
+    await act(async () => { trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' })); trigger.click() })
+    const entries = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+    expect(entries.length).toBeGreaterThan(0)
+    const item = entries.find(node => node.textContent === (promoted ? 'View promotion result' : 'Promote to Mote…'))
+    expect(item).toBeDefined()
+    expect(item!.querySelector('svg')?.getAttribute('data-semantic-icon')).toBe('object.promotion')
+    await dom.render(<div />)
+  }
 })
