@@ -77,6 +77,7 @@ Git、配置与空间持久化结果分别成立。失败保原事实和可接�
 - 平台资格按真实 helper／内核／文件系统能力逐项表达。Linux 使用已有 no-follow fd、statx birth generation 与 renameat2 no-replace；缺少真实代次或原子发布能力时只拒绝相应准确动作，保留 read、原文件和健康 Agent，不用 shell fallback 或 macOS 证明代签 Linux 运行。
 
 - Source 已选择后的 Explorer 与 Quick Open 候选也固定原 Source Runtime／resource mapping，不能继续由 display Workspace 的当前 Main alias 发现。未知时保原窗口／候选并说明失观，不以候选查询失败撤原 body/read/write 能力；未绑定旧 Main 导航保留。默认 `file.list` 保有界递归文件名；明确 directory mode 复用原一级 readDirectory owner，准确保空目录、symlink 和 partial，不从文件名推目录、不逐目录重扫子树。迟到发现结果消费原 selection／Runtime 最终 CAS；候选缓存不是文件身份、保存回执或写入权限。
+- 真实 Unix 文件路径的 CR/LF/backslash 属路径数据，不以机器 ID 校验拒绝；保原 NUL、绝对／越界路径与 Host Root／Native FD 约束，显式内部 logicalDirectory 的协议验证独立不变。发现结果的继续读取以本次原 Zone 请求目录加相对 filename／entry.name 定位，不能将 directory 输出的 Workspace-relative entry.path 误作 Zone-relative 输入。
 
 ### Revision-aware 保存与外部冲突
 

@@ -20,6 +20,11 @@ entry paths. It never infers directories from recursive names. `--limit` bounds 
 projection, not the original reader's enumeration cost. A partial result remains visibly partial.
 Source-bound Explorer and Quick Open use that same exact Source/Runtime mapping; an unavailable
 Source does not authorize discovering names through a replacement Main alias.
+Continue with the same Zone and `--path` equal to the original requested directory plus each
+relative filename. For directory mode use requested directory plus `entry.name`; its `entry.path`
+is Workspace-relative and is not a Zone-relative read/open input. Literal Unix CR/LF/backslash
+names remain data. Absolute paths, NUL, parent traversal and drive-prefixed requests are refused;
+an explicit `./` prefix can disambiguate a literal Unix drive-like filename inside the Zone.
 
 Use file stat --input FILE|- to observe one exact entry or absence. JSON is
 {zoneId,path,expectedResource:{hostId,workspaceId,workspacePath},spaceId?,includeRevision?}. It returns the
