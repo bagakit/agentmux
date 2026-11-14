@@ -26,16 +26,17 @@ describe('system web URL ingestion preserves individual page intents', () => {
   })
   it('does not replay a consumed interrupted request and retains undispatched requests for the new owner', async () => {
     const web = new WebUrlIngress(), report = vi.fn(), signals: AbortSignal[] = []
-    let finish!: (result: SystemWebUrlResult) => void, first!: SystemWebUrlRequest
+    const active: { request: SystemWebUrlRequest; finish(result: SystemWebUrlResult): void }[] = []
     const execute = vi.fn((request: SystemWebUrlRequest, signal: AbortSignal) => {
-      signals.push(signal); first = request; return new Promise<SystemWebUrlResult>(resolve => { finish = resolve })
+      signals.push(signal); return new Promise<SystemWebUrlResult>(resolve => { active.push({ request, finish: resolve }) })
     })
-    web.ready(execute, report); web.receive('https://first.example.test/'); web.receive('https://second.example.test/'); await tick()
-    web.unavailable(); expect(signals[0]!.aborted).toBe(true)
+    web.ready(execute, report); web.receive('https://first.example.test/'); web.receive('https://second.example.test/'); web.receive('https://third.example.test/'); await tick()
+    web.unavailable(); expect(signals).toHaveLength(2); expect(signals.every(signal => signal.aborted)).toBe(true)
     const next = vi.fn(async (request: SystemWebUrlRequest) => opened(request)); web.ready(next, report); await tick()
-    finish(opened(first)); await tick()
-    expect(execute).toHaveBeenCalledTimes(1); expect(next).toHaveBeenCalledTimes(1); expect(next.mock.calls[0]![0].url).toBe('https://second.example.test/')
-    expect(report).toHaveBeenCalledTimes(1); expect(report.mock.calls[0]![0]).toContain('interrupted before confirmation'); expect(report.mock.calls[0]![0]).toContain('https://first.example.test/'); expect(report.mock.calls[0]![0]).toContain(first.requestId)
+    for (const item of active) item.finish(opened(item.request)); await tick()
+    expect(execute).toHaveBeenCalledTimes(2); expect(next).toHaveBeenCalledTimes(1); expect(next.mock.calls[0]![0].url).toBe('https://third.example.test/')
+    expect(report).toHaveBeenCalledTimes(2)
+    for (const item of active) expect(report.mock.calls.some(([message]) => message.includes('interrupted before confirmation') && message.includes(item.request.url) && message.includes(item.request.requestId))).toBe(true)
   })
   it('reports the original synchronous owner failure and continues the next explicit request', async () => {
     const web = new WebUrlIngress(), report = vi.fn()
