@@ -105,7 +105,7 @@ PMO 请求必须使用所关联的真实 Project 与具体 Workspace 的身份�
 
 新 Goal 的专属讨论先在同一领域记录保存唯一创建操作引用，首次实际讨论冻结准确主 Mote、已确认 Executor、初始请求与平台 Goal 上下文。Tab／Region／Session 关联仍只有 Core 空间 owner 一份事实，Goal 不另存展示映射或创建日志；跨进程恢复沿原操作继续，Goal 后续修改不改写原首句。旧记录缺少创建来源时不补造创建或输入事实，原绑定的无损交接沿[专属 PMO Tab](#demand-的专属-pmo-tab)；原来源未知不能新建替代讨论。已知 bot 的选择继续遵循上文的准确来源与未确认服务窗。
 
-Grill/Grounding 的领域事实属于独立 Demand 文件系统包，同一份公开 API/CLI、Main 与 Renderer 投影可读；UI 只持有草稿和展示状态。Provider 与 Core/ctxmux 的生命周期事实保持原 owner，Goals 不新增第二套 Runtime、流程引擎或转录库。目标内的依赖只沿[Goal 计划](#goal-计划节点评审与盯盘)表达；结果只由人接受（见上文），Goals 不提供自动结果验收；自动审批、自定义字段与甘特图尚未确认为产品要求。
+Grill/Grounding 的领域事实属于独立 Demand 文件系统包，同一份公开 API/CLI、Main 与 Renderer 投影可读；UI 只持有草稿和展示状态。Provider 与 Core/ctxmux 的生命周期事实保持原 owner，Goals 不新增第二套 Runtime、流程引擎或转录库。目标内的依赖只沿[Goal 计划](#goal-计划节点评审与盯盘)表达；结果只由人接受（见上文），Goals 不提供自动结果验收；自动审批和自定义字段尚未确认为产品要求。
 
 ## Goals、Focus 与执行工作面
 
