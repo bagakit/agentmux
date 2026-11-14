@@ -30,7 +30,7 @@ export function SurveyTabColumn({ tab, selected, onSelect, onClose, unconfirmedB
   const Icon = surface.kind === 'file' ? document && parseNoteFile(document).status === 'valid' ? NoteIcon : FileIcon : BrowserIcon
   const customPrimary = surface.kind === 'browser' || surface.kind === 'file'
   const unknown = workbenchSurfaces(tab).some(region => region.kind === 'browser' && surveyBrowserControl(region, Boolean(unconfirmedBrowserRegionIds?.has(region.regionId))) === 'unknown')
-  const status = unknown ? 'Page status unavailable · open this Tab to check' : undefined
+  const status = unknown ? 'Page status unconfirmed · open this Tab to check' : undefined
   return <div className="survey-tab-cell"><button type="button" className="survey-tab-column" data-survey-tab-id={tab.id} aria-label={`Show survey tab: ${title}`}
     aria-current={selected ? 'true' : undefined} aria-description={status} title={status ? `${title}\n${status}` : title} onClick={onSelect}>
     <span className="survey-tab-column__marks" aria-hidden="true">
@@ -38,7 +38,7 @@ export function SurveyTabColumn({ tab, selected, onSelect, onClose, unconfirmedB
         ? <img key={surface.faviconDataUrl} src={surface.faviconDataUrl} alt="" onError={event => { event.currentTarget.hidden = true }} /> : null}</span> : null}
       <WorkbenchTabMarks marks={customPrimary ? marks.filter(mark => mark.regionId !== surface.regionId) : marks} />
     </span>
-    <span className="survey-tab-label"><span>{title}</span>{unknown ? <span className="survey-status-dot" aria-hidden="true" /> : null}</span>
+    <span className="survey-tab-label"><span>{title}</span>{unknown ? <span className="survey-status-label" aria-hidden="true">Unconfirmed</span> : null}</span>
   </button><button type="button" className="survey-tab-close" aria-label={`Close survey tab: ${title}`} title={`Close ${title}`}
     onClick={() => onClose(title)}><CloseIcon size={12} /></button></div>
 }

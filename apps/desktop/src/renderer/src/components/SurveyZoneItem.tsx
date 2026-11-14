@@ -13,12 +13,13 @@ const ThemeActionCloseIcon = semanticIconComponent('action.close')
 export type SurveyItemNameDraft = { value: string; focusOnMount: boolean; revision: { revision: number }; selection: { start: number; end: number; direction: 'forward' | 'backward' | 'none' } | null }
 
 /** Both navigation and shortcuts address this row’s original Zone. */
-export function SurveyZoneItem({ zone, title, glyph, selected, activity, editing = false, showTitle = true, tabColumns, options, dragHandle, nameDraft, onRename, onEdit, onSelect, onCloseSingleTab, onContextMenu }: {
+export function SurveyZoneItem({ zone, title, glyph, selected, activity, activityDescription, editing = false, showTitle = true, tabColumns, options, dragHandle, nameDraft, onRename, onEdit, onSelect, onCloseSingleTab, onContextMenu }: {
   zone: AgentMuxZoneFact
   title: string
   glyph: ReactNode
   selected: boolean
   activity: ReactNode
+  activityDescription?: string | undefined
   editing?: boolean
   showTitle?: boolean
   tabColumns?: ReactNode
@@ -39,7 +40,7 @@ export function SurveyZoneItem({ zone, title, glyph, selected, activity, editing
   useEffect(() => { ++editGeneration.current; if (editing && !nameDraft) { setDraft(title); draft.revision = { revision: currentDisplayNameRevision('zone', zone.zoneId) } } return () => { ++editGeneration.current; if (!nameDraft) draft.revision = { revision: 0 } } }, [editing, zone.zoneId, nameDraft])
   const beginEdit = () => { ++editGeneration.current; setDraft(title); onEdit?.(true) }
   const item = <button type="button" className="survey-item" aria-label={`Show survey item: ${title}`}
-      aria-current={selected ? 'true' : undefined} title={title} onClick={() => onSelect(zone.zoneId)} onDoubleClick={beginEdit} onKeyDown={event => {
+      aria-current={selected ? 'true' : undefined} aria-description={activityDescription} title={activityDescription ? `${title}\n${activityDescription}` : title} onClick={() => onSelect(zone.zoneId)} onDoubleClick={beginEdit} onKeyDown={event => {
         if (onContextMenu && (event.key === 'ContextMenu' || event.key === 'F10' && event.shiftKey)) {
           event.preventDefault()
           const rect = event.currentTarget.getBoundingClientRect()
@@ -82,8 +83,8 @@ export function SurveyZoneItem({ zone, title, glyph, selected, activity, editing
     {!editing ? tabColumns : null}
     {compact ? <span className="survey-item-compact-activity survey-item-activity" aria-label={`Activity in ${title}`}>{activity}</span> : null}
     {!editing ? <div className="survey-item-shortcuts" aria-label={`Actions for ${title}`}>
-      {options}
       {onCloseSingleTab ? <button type="button" className="survey-item-tab-close" aria-label={`Close survey tab: ${title}`} title={`Close ${title}`} onClick={onCloseSingleTab}><ThemeActionCloseIcon size={12} /></button> : null}
+      {options}
     </div> : null}
   </div>
   return onContextMenu && !editing ? <ContextMenu.Trigger asChild onContextMenu={event => {

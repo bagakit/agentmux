@@ -264,9 +264,10 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     const hint = [description, controls.includes('unknown') ? 'Control unknown · open affected page to check' : null, ...[...operators.values()].map(operator => operator.label)].filter(Boolean).join(' · ')
     return { summary: operators.size || Icon || unknown ? <span title={hint} aria-label={description}>
       <SelectorPresence agents={[...operators.values()]} />
-      {unknown ? <span className="survey-status-dot" role="img" aria-label="Page status unavailable · open page to check" title="Page status unavailable · open page to check" /> : null}
+      {unknown ? <span className="survey-status-label" title="Page status unconfirmed · open page to check">Unconfirmed</span> : null}
       {Icon ? <Icon size={12} aria-hidden="true" /> : null}
     </span> : null,
+      description: unknown ? 'Page status unconfirmed · open page to check' : undefined,
       details: <span>{description}{detail ? `\n${detail}` : ''}</span> }
   }
 
@@ -562,8 +563,8 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
             return <div className="survey-item-row" key={JSON.stringify(page)}
               data-survey-page-region-id={page.regionId} data-survey-page-browser-id={page.browserId}
               data-selected={pageSelection?.regionId === page.regionId && pageSelection.browserId === page.browserId}>
-              <button type="button" className="survey-item" onClick={() => setSelection({ kind: 'page', ...page })}>
-                <ThemeObjectBrowserIcon size={14} /><strong>{browser?.title || 'Retained page'}</strong>
+              <button type="button" className="survey-item" aria-label={`Show survey page: ${browser?.title || 'Retained page'}`} onClick={() => setSelection({ kind: 'page', ...page })}>
+                <span className="survey-item-glyph" aria-hidden="true"><span className="survey-page-favicon"><ThemeObjectBrowserIcon size={16} />{browser?.faviconDataUrl ? <img key={browser.faviconDataUrl} src={browser.faviconDataUrl} alt="" onError={event => { event.currentTarget.hidden = true }} /> : null}</span></span><strong>{browser?.title || 'Retained page'}</strong>
               </button>
               <div className="survey-item-shortcuts">
                 <button type="button" className="survey-icon-button" aria-label="Remove page from Survey"
@@ -592,7 +593,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
               tabColumns={itemTabs.length > 1 ? <div className="survey-item-tabs" aria-label={`Tabs in ${itemTitle(zone)}`}>{itemTabs.map(tabId => <SurveyTabColumn key={tabId} tab={tabs[tabId]!} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} selected={selection?.zoneId === zone.zoneId && selection.active?.tabId === tabId} onSelect={() => chooseTab(zone.zoneId, tabId)} onClose={title => closeItemTab(zone.zoneId, tabId, title)} />)}</div> : null}
               onCloseSingleTab={itemTabs.length === 1 ? () => closeItemTab(zone.zoneId, itemTabs[0]!, itemTitle(zone)) : undefined}
               options={<SurveyItemOptions {...itemOptions} rowAction compact />}
-              onContextMenu={button => { contextOrigin.current = button; contextOrganization.current = list.stored; setContextZoneId(zone.zoneId) }} activity={status.summary} editing={renamingZoneId === zone.zoneId} nameDraft={itemNameDraft.current?.zoneId === zone.zoneId ? itemNameDraft.current : undefined} onEdit={editing => editItemName(zone, editing)}
+              onContextMenu={button => { contextOrigin.current = button; contextOrganization.current = list.stored; setContextZoneId(zone.zoneId) }} activity={status.summary} activityDescription={status.description} editing={renamingZoneId === zone.zoneId} nameDraft={itemNameDraft.current?.zoneId === zone.zoneId ? itemNameDraft.current : undefined} onEdit={editing => editItemName(zone, editing)}
               onRename={async (name, revision) => { const applied = await useAppStore.getState().setSurveyExplorationName(zone.zoneId, name, revision); if (!applied) setError('The exploration source or name revision is unconfirmed. Your name draft is kept here.'); return applied }} onSelect={chooseZone} />
         }} />
         </SurveyItemContextMenu>

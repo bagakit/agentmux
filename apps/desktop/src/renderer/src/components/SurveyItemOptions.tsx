@@ -58,7 +58,7 @@ export function SurveyItemOptions(props: SurveyItemOptionsProps) {
   useEffect(() => setOpen(false), [zone?.zoneId])
   return <Menu.Root modal={false} open={visible && open} onOpenChange={value => { if (value) setGrouping(props.grouping); setOpen(value) }}>
     <Menu.Trigger asChild><button type="button" className={`survey-item-options ${rowAction ? '' : zone ? 'survey-tab-view' : 'survey-icon-button'}`} data-row-action={rowAction || undefined} data-compact={compact || undefined} aria-label={rowAction ? `Options for ${props.title}` : 'Exploration options'} title="Exploration options"><ThemeActionMoreIcon size={rowAction ? 14 : 16} aria-hidden="true" />{zone && !compact && !rowAction ? <span>Organize</span> : null}</button></Menu.Trigger>
-    <DocumentOverlayPortal component={Menu.Portal}><Menu.Content className="tab-context-menu survey-topic-menu survey-item-menu" align="start" sideOffset={4} collisionPadding={8}
+    <DocumentOverlayPortal component={Menu.Portal}><Menu.Content className="tab-context-menu survey-topic-menu survey-item-menu" align="end" sideOffset={4} collisionPadding={8}
       onCloseAutoFocus={event => { if (!visible) event.preventDefault() }}>
       <SurveyItemMenuItems {...props} grouping={grouping} primitives={Menu} />
     </Menu.Content></DocumentOverlayPortal>
