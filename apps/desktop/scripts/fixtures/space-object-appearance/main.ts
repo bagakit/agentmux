@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeImage } from 'electron'
 import { ScratchTopics } from '../../../src/main/scratch-topics'
 import { projectAppearance } from '../../../src/main/project-appearance'
 
@@ -60,7 +60,7 @@ ipcMain.handle('space-appearance:request', async (_event, operation, ...args) =>
       const registered = config.workspaces.find(one => one.id === args[0])
       assert.ok(registered && registered.id !== scratch.id, 'Only private registered Folders may be probed')
       if (holdAppearance && registered.id === folder.id) await new Promise<void>(resolve => appearanceWaiters.push(resolve))
-      return projectAppearance(registered.path)
+      return projectAppearance(registered.path, bytes => nativeImage.createFromBuffer(bytes))
     }
     case 'release-appearance':
       holdAppearance = false

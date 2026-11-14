@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { localRuntimeConnector } from '../../../test/helpers/local-runtime-connector'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeImage } from 'electron'
 import { AgentMuxFileAgentSessionStore } from '@agentmux/core'
 import { RuntimeController } from '../../../src/main/runtime-controller'
 import { projectAppearance } from '../../../src/main/project-appearance'
@@ -41,7 +41,7 @@ ipcMain.handle('project-history:request', async (event, operation, ...args) => {
     case 'resolve': return runtime.resolveSession(args[0], config)
     case 'refresh': return runtime.refresh(args[0], config)
     case 'recover': return runtime.recoverSession(args[0], config, args[1])
-    case 'appearance': return projectAppearance(config.workspaces.find(workspace => workspace.id === args[0])!.path)
+    case 'appearance': return projectAppearance(config.workspaces.find(workspace => workspace.id === args[0])!.path, bytes => nativeImage.createFromBuffer(bytes))
     case 'save-ids': await fs.writeFile(path.join(privateRoot, 'ids.json'), JSON.stringify(args[0])); return
     case 'flush': await win.webContents.session.flushStorageData(); return
     default: throw new Error(`Unsupported private Focus request: ${operation}`)

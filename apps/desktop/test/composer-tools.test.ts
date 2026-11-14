@@ -27,8 +27,8 @@ it('discovers actual project and user skills, resolves directory links and ignor
 it('project appearance discovers project assets and distinguishes a repository from a directory', async () => {
   const root = await mkdtemp(join(tmpdir(), 'amx-icon-')); roots.push(root)
   const { projectAppearance } = await import('../src/main/project-appearance')
-  expect(await projectAppearance(root)).toEqual({ kind: 'directory', icon: null })
+  expect(await projectAppearance(root, () => { throw Error('No raster decoding for the SVG fixture') })).toEqual({ kind: 'directory', icon: null })
   await mkdir(join(root, '.git')); await mkdir(join(root, 'public'))
   await writeFile(join(root, 'public/favicon.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
-  expect(await projectAppearance(root)).toMatchObject({ kind: 'repository', icon: expect.stringContaining('data:image/svg+xml;base64,') })
+  expect(await projectAppearance(root, () => { throw Error('No raster decoding for the SVG fixture') })).toMatchObject({ kind: 'repository', icon: expect.stringContaining('data:image/svg+xml;base64,') })
 })
