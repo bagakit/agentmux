@@ -1,0 +1,32 @@
+.mote-calendar { position: relative; }
+.schedule-create-popover {
+  position: absolute; left: var(--schedule-editor-left); top: var(--schedule-editor-top); z-index: 5; display: flex; flex-direction: column;
+  box-sizing: border-box; width: min(346px, calc(100% - 16px)); max-height: min(490px, calc(100% - 16px));
+  padding: var(--sp-5); gap: var(--sp-3); overflow: auto; overscroll-behavior: contain;
+  background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius-lg);
+  box-shadow: 0 10px 32px rgb(0 0 0 / 22%), var(--hl);
+  animation: schedule-editor-in 140ms ease-out;
+}
+.schedule-create-popover__heading, .schedule-create-popover__footer { display: flex; align-items: center; gap: var(--sp-3); }
+.schedule-create-popover__heading { justify-content: space-between; }
+.schedule-create-popover__heading h4 { font-size: var(--fs-body); }
+.schedule-create-popover__heading button { display: grid; place-items: center; border: 0; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; padding: var(--sp-2); cursor: pointer; }
+.schedule-create-popover__heading button:hover { color: var(--text); background: var(--surface-3); }
+.schedule-create-popover .calendar-schedules__form { display: flex; flex-direction: column; min-height: 0; gap: var(--sp-3); padding: 0; }
+.schedule-create-popover__body { display: grid; gap: var(--sp-4); overflow: auto; overscroll-behavior: contain; min-height: 0; }
+.schedule-create-popover .calendar-schedules__form textarea { min-height: 56px; }
+.schedule-create-popover .calendar-schedules__fields { grid-template-columns: repeat(auto-fit, minmax(min(88px, 100%), 1fr)); }
+.schedule-create-popover__footer { flex: none; justify-content: space-between; padding-top: var(--sp-3); border-top: 1px solid var(--line-soft); }
+.schedule-create-popover__footer > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: var(--fs-meta); }
+.schedule-create-popover__footer > button { flex: none; }
+.schedule-create-popover__kept { display: grid; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
+.schedule-create-popover__kept button { justify-self: start; }
+.schedule-create-popover [hidden] { display: none; }
+@keyframes schedule-editor-in { from { opacity: .3; translate: 0 3px; } to { opacity: 1; translate: 0 0; } }
+@container mote-calendar (max-width: 420px) {
+  .schedule-create-popover { inset: auto 6px 6px; width: auto; max-height: calc(100% - 12px); }
+}
+@media (prefers-reduced-motion: reduce) { .schedule-create-popover { animation: none; } }
+.schedule-create__fields { display: contents; }
+
+.schedule-create__fields > button[type="submit"]:not(.automation-submit) { justify-self: start; }

@@ -150,9 +150,6 @@
 .mote-calendar__empty { display: grid; gap: var(--sp-2); padding: var(--sp-4); }
 .mote-calendar__empty p, .mote-calendar__ended { color: var(--text-3); font-size: var(--fs-meta); }
 .mote-calendar__ended { display: flex; align-items: center; gap: var(--sp-2); padding-block: var(--sp-3) var(--sp-2); }
-.mote-calendar > .schedule-create { border-top: 1px solid var(--line-soft); padding-top: var(--sp-4); }
-.mote-calendar > .schedule-create:not([open], :has(.calendar-schedules__notice)) { display: none; }
-.mote-calendar > .schedule-create > summary { font-size: var(--fs-meta); }
 @container mote-calendar (min-width: 980px) {
   .mote-calendar__workspace { grid-template-columns: minmax(0, 1fr) clamp(320px, 24cqi, 340px); }
   .mote-calendar__day { contain: size; overflow: auto; overscroll-behavior: contain; border-top: 0; border-inline-start: 1px solid var(--line-soft); }

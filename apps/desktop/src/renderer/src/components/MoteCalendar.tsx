@@ -21,7 +21,7 @@ import { useSpaceContentPresentation } from '../lib/space-content-presentation'
 import { calendarDayWindow, calendarHourWindows, calendarScheduleGroups } from '../lib/mote-calendar-range'
 import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 import { ScheduleArrangementRow, scheduleCalendarLabel, scheduleDisplayTitle, scheduleRuleLabel, scheduleStateLabel } from './ScheduleArrangementRow'
-import { ScheduleCreateForm } from './ScheduleCreateForm'
+import { ScheduleCreateForm, type CalendarCreateSelection } from './ScheduleCreateForm'
 import { MoteCalendarTimes } from './MoteCalendarTimes'
 import { MoteCalendarEvents } from './MoteCalendarEvents'
 
@@ -62,7 +62,8 @@ export function MoteCalendar({ scope, reference, active, openRequest }: {
   const [selectedHour, setSelectedHour] = useState(() => DateTime.fromMillis(now, { zone: timezone }).hour)
   const [selectedSchedule, setSelectedSchedule] = useState<string>()
   const [showEnded, setShowEnded] = useState(false), [navigationIssue, setNavigationIssue] = useState<string>()
-  const [createRequest, setCreateRequest] = useState<{ sequence: number; date: string; time?: string }>()
+  const [createRequest, setCreateRequest] = useState<CalendarCreateSelection>()
+  const createTrigger = useRef<HTMLButtonElement>(null)
   const surface = useRef<HTMLDivElement>(null), grid = useRef<HTMLDivElement>(null), agenda = useRef<HTMLElement>(null), focusFrame = useRef<number | undefined>(undefined)
   const weekScroll = useRef<HTMLDivElement>(null), weekViewport = useRef<{ period: number; top: number } | undefined>(undefined)
   const visible = useRef(active); visible.current = active
@@ -74,7 +75,7 @@ export function MoteCalendar({ scope, reference, active, openRequest }: {
     let previous: readonly unknown[] | undefined
     let sessions: readonly SessionSnapshot[] | undefined
     let confirmed: WorkbenchProjectionSelection | null = null
-    let result: { target?: ContinuousProgressTarget; labels: (string | undefined)[] } = { labels: [] }
+    let result: { target?: ContinuousProgressTarget; discussion?: string; labels: (string | undefined)[] } = { labels: [] }
     return (state: ReturnType<typeof useAppStore.getState>) => {
       if (!active) return result
       const facts = [state.config, state.tabs, state.layouts, state.spaceZoneBindings,
@@ -98,8 +99,8 @@ export function MoteCalendar({ scope, reference, active, openRequest }: {
       })
       if (target?.hostId === result.target?.hostId && target?.workspacePath === result.target?.workspacePath &&
         target?.agentSessionId === result.target?.agentSessionId && target?.providerId === result.target?.providerId &&
-        labels.length === result.labels.length && labels.every((label, index) => label === result.labels[index])) return result
-      result = { ...(target ? { target } : {}), labels }
+        current?.label === result.discussion && labels.length === result.labels.length && labels.every((label, index) => label === result.labels[index])) return result
+      result = { ...(target ? { target } : {}), ...(current?.label ? { discussion: current.label } : {}), labels }
       return result
     }
   }, [active, scope, reference, queryKey, source.records]))
@@ -164,9 +165,9 @@ export function MoteCalendar({ scope, reference, active, openRequest }: {
   function movePeriod(direction: 1 | -1) {
     chooseDate(mode === 'month' ? start.plus({ months: direction }) : gridStart.plus({ days: direction * cellCount }), false, true)
   }
-  function prepare(date = selectedDate, time?: string) {
+  function prepare(anchor: HTMLElement, date = selectedDate, time = timed ? hourLabel(selectedHour) : undefined) {
     chooseDate(date)
-    setCreateRequest(previous => ({ sequence: (previous?.sequence ?? 0) + 1, date: date.toISODate()!, ...(time ? { time } : {}) }))
+    setCreateRequest(previous => ({ sequence: (previous?.sequence ?? 0) + 1, date: date.toISODate()!, timezone, anchor, ...(time ? { time } : {}) }))
   }
   function dateKey(event: KeyboardEvent<HTMLButtonElement>, date: DateTime) {
     const delta = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }[event.key]
@@ -286,7 +287,7 @@ export function MoteCalendar({ scope, reference, active, openRequest }: {
         <button type="button" aria-label={'Next ' + mode.replace('-', ' ')} onClick={() => movePeriod(1)}><ChevronRight size={16} aria-hidden /></button>
         </> : null}<h4>{title}</h4>{mode !== 'upcoming' ? <button type="button" className="mote-calendar__today" onClick={() => { const date = DateTime.fromMillis(now, { zone: timezone }); chooseDate(date, false, true); setSelectedHour(date.hour) }}>Today</button> : null}</div>
       <SurfaceModeSwitch value={mode} active={active} ariaLabel="Calendar view" options={[{ value: 'day', label: 'Day' }, { value: 'three-days', label: '3 Days' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'upcoming', label: 'Upcoming' }]} onChange={changeMode} />
-      <Button variant="primary" className="mote-calendar__create" aria-label="New arrangement" title="New arrangement" onClick={() => prepare()}><Plus size={14} aria-hidden /><span>New<span className="mote-calendar__create-label"> arrangement</span></span></Button>
+      <Button variant="primary" className="mote-calendar__create" ref={createTrigger} aria-haspopup="dialog" aria-label="New arrangement" title="New arrangement" onClick={event => prepare(event.currentTarget)}><Plus size={14} aria-hidden /><span>New<span className="mote-calendar__create-label"> arrangement</span></span></Button>
     </header>
     {!queries.length || source.error ? <div className="calendar-schedules__notice" role="status"><p>{!queries.length ? scope.issue || scope.topic.readError || 'The current arrangement scope is unconfirmed.' : source.error} Last confirmed arrangements are kept.</p>{queries.length ? <Button type="button" onClick={source.refresh}>Retry arrangements</Button> : null}</div> : null}
     {navigationIssue ? <p role="status" className="calendar-schedules__notice">{navigationIssue}</p> : null}
@@ -304,7 +305,7 @@ export function MoteCalendar({ scope, reference, active, openRequest }: {
             const key = date.toISODate()!, groups = days.get(key) ?? []
             const planned = groups.reduce((sum, group) => sum + group.planned, 0)
             return <div className="mote-calendar__cell" key={key} data-outside-month={mode === 'month' && date.month !== start.month} data-selected={selected === key} data-today={key === today}
-              onClick={event => { if (!(event.target as HTMLElement).closest('button')) prepare(date) }}>
+              onClick={event => { if (!(event.target as HTMLElement).closest('button')) prepare(event.currentTarget.querySelector('button') ?? event.currentTarget, date) }}>
               <button type="button" className="mote-calendar__date" data-mote-date={key}
                 aria-label={date.toFormat('cccc, LLLL d, yyyy') + ', ' + groups.length + ' arrangements, ' + planned + ' planned'} aria-pressed={selected === key} tabIndex={selected === key ? 0 : -1}
                 onClick={() => chooseDate(date)} onKeyDown={event => dateKey(event, date)}><span>{date.day}</span>{timed ? <strong>{date.toFormat('ccc')}</strong> : null}{planned ? <small>{formatCount.format(planned)}<span> planned</span></small> : null}</button>
@@ -343,7 +344,7 @@ export function MoteCalendar({ scope, reference, active, openRequest }: {
                   {groups.length > 2 ? <small className="mote-calendar__more">+{groups.length - 2} more</small> : null}
                   {!slot ? <small>Skipped hour</small> : null}
                 </button>
-                {slot ? <button type="button" className="mote-calendar__slot" tabIndex={-1} aria-label={'Prepare arrangement ' + date.toFormat('cccc, LLLL d') + ' at ' + hourLabel(hour)} onClick={() => { setSelectedHour(hour); prepare(date, hourLabel(hour)) }}><Plus size={12} aria-hidden /></button> : null}
+                {slot ? <button type="button" className="mote-calendar__slot" tabIndex={-1} aria-label={'Prepare arrangement ' + date.toFormat('cccc, LLLL d') + ' at ' + hourLabel(hour)} aria-haspopup="dialog" onClick={event => { setSelectedHour(hour); prepare(event.currentTarget, date, hourLabel(hour)) }}><Plus size={12} aria-hidden /></button> : null}
               </div>
             })}
           </div></div>)}
@@ -370,6 +371,6 @@ export function MoteCalendar({ scope, reference, active, openRequest }: {
     </div>}
     </div>
     <ScheduleCreateForm draftKey={'mote-schedule-create:' + JSON.stringify([scope.workspace.hostId, scope.workspace.id, scope.workspace.path, scope.topic.id])}
-      target={target} onReceipt={source.accept} records={source.records} initialDate={selected} defaultKind="once" openRequest={createRequest} onShowSaved={showSaved} />
+      target={target} onReceipt={source.accept} records={source.records} initialDate={selected} defaultKind="once" calendarEditor={{ active, selection: createRequest, trigger: createTrigger, discussion: related.discussion }} onShowSaved={showSaved} />
   </div>
 }
