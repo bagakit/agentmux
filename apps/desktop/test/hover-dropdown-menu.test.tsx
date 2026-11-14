@@ -90,6 +90,28 @@ it('keyboard opens and Escape dismisses the real Radix menu', async () => {
   await act(async () => menu()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
   expect(menu()).toBeNull()
 })
+it('action menu keyboard navigation skips unavailable actions', async () => {
+  const unavailable = vi.fn(), duplicate = vi.fn()
+  await act(async () => root.render(
+    <Menu.Root><Menu.Trigger>Item actions</Menu.Trigger><Menu.Portal><Menu.Content>
+      <Menu.Item disabled onSelect={unavailable}>Rename</Menu.Item>
+      <Menu.Item onSelect={duplicate}>Duplicate</Menu.Item>
+    </Menu.Content></Menu.Portal></Menu.Root>
+  ))
+  const trigger = container.querySelector('button')!
+  trigger.focus()
+  const key = (element: Element, key: string) => act(async () => {
+    element.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+  })
+  await key(trigger, 'ArrowDown')
+  const actions = [...menu()!.querySelectorAll('[role="menuitem"]')]
+  await vi.waitFor(() => expect(document.activeElement).toBe(actions[1]))
+  expect(unavailable).not.toHaveBeenCalled()
+  expect(duplicate).not.toHaveBeenCalled()
+  await key(actions[1]!, 'Enter')
+  expect(duplicate).toHaveBeenCalledOnce()
+  expect(unavailable).not.toHaveBeenCalled()
+})
 it('keeps a pinned submenu when a fast pointer crossing already targets its own item', async () => {
   const { action, trigger, submenu, item } = await nested()
   // A collision may place the submenu left even though no parent pointermove has
