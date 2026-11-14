@@ -142,8 +142,11 @@ export type AgentMuxSurveyListReport = AgentMuxWorkfaceReport & {
   effectiveOrganization: AgentMuxSurveyOrganization
   outcome: 'read' | 'changed' | 'unchanged' | 'partial' | 'unknown' | 'refused'
 }
+export type AgentMuxSurveyProfileView = { kind: 'default' } | { kind: 'profile'; profileId: string }
+
 /** Original Survey display preferences; missing topology does not retire these references. */
 export type AgentMuxSurveyPresentation = {
+  profileView: AgentMuxSurveyProfileView | null
   organization?: AgentMuxSurveyOrganization
   items: { zoneId: string; name: string; issue?: string }[]
   pages: (AgentMuxSurveyPageReference & { name: string; profileId?: string; issue?: string })[]

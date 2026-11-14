@@ -313,3 +313,13 @@
 .global-survey-surface .survey-navigation[data-collapsed="true"] .survey-list-group-toggle { flex: 1; justify-content: center; padding: 6px; }
 .survey-list-group-items[hidden] { display: none; }
 .survey-list-group[data-selected="true"][data-collapsed="true"] .survey-list-group-toggle { color: var(--text); background: var(--surface-3); border-radius: var(--radius-sm); }
+
+.survey-profile-picker { flex: none; min-width: 0; padding: var(--sp-2) var(--sp-1) var(--sp-3); }
+.survey-profile-picker > label { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.survey-profile-picker select { flex: 1; min-width: 0; width: 100%; height: 30px; padding: 0 var(--sp-2); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text); background: var(--surface-2); font: inherit; }
+.survey-profile-options { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--sp-3); margin-top: var(--sp-1); color: var(--text-3); font-size: var(--fs-meta); }
+.survey-profile-options > button, .survey-profile-options summary { padding: 2px 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.survey-profile-options details { min-width: 0; }
+.survey-profile-options details > span { display: block; overflow-wrap: anywhere; white-space: pre-line; }
+.survey-profile-picker p { margin: var(--sp-2) 0 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.survey-profile-collapsed { display: grid; place-items: center; width: 28px; height: 30px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); cursor: pointer; }

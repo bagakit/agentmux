@@ -143,7 +143,7 @@ import { AgentMuxRpcError, rpcEncode, rpcFailure, type JSONRPCID } from './publi
 import { isAgentMuxRpcDeviceMethod, parseAgentMuxRpcDeviceParams, parseAgentMuxRpcDeviceResult,
   type AgentMuxRpcDeviceAdministration } from './public-rpc-device.js'
 import { normalizeOperationDevice } from './operation-device.js'
-import { rpcControlRequest, rpcControlResult, assertControlResultTarget, rpcRecord, rpcString, rpcText, rpcCount } from './rpc-business-codec.js'
+import { rpcControlRequest, rpcControlResult, parseRpcControlResult, assertControlResultTarget, rpcRecord, rpcString, rpcText, rpcCount } from './rpc-business-codec.js'
 import { parseRpcNativeResult } from './rpc-native-codec.js'
 import { parseNativeHistoryParams, parseNativeHistoryResult, parseNativeHistoryResourceParams, parseNativeHistoryResourceResult } from './public-rpc-native-history.js'
 import { parseAgentRestartInput } from './agent-session-recovery/restart-contract.js'
@@ -2051,7 +2051,26 @@ export class AgentMuxRpcService {
             target.regionId !== 'self' && target.tabId !== 'self') {
           const request = rpcControlRequest(method, params)
           // Desktop borrows the original Host for domain reads even while its screen is present.
-          if (this.ports.callOriginalCore) return await this.ports.callOriginalCore('local', method, params, context)
+          if (this.ports.callOriginalCore) {
+            const original = await this.ports.callOriginalCore('local', method, params, context)
+            // The Host retains its domain catalog. Only an unfiltered, explicitly
+            // requested Survey observation comes from the original client owner.
+            if (method !== 'space.ls' || p.presentation !== true || Object.values(target).some(Boolean) || !this.ports.spatialPresentation) return original
+            const result = original as AgentMuxRpcResult<'space.ls'>
+            try {
+              const state = await this.spatial.readForLayout()
+              if (!state) throw new AgentMuxError('The original client spatial observation is unavailable. Host resources remain available.', 'CONTROL_UNAVAILABLE')
+              const observed = await this.ports.spatialPresentation({ graph: state.graph, catalog: result.catalog, target: {} }, context)
+              const candidate = { ...result.catalog, ...(observed.survey === undefined ? {} : { survey: observed.survey }) }
+              // An invalid weak client observation must not poison the healthy
+              // Host result when the actual public client consumes this DTO.
+              parseRpcControlResult('space.ls', { catalog: candidate }, params)
+              return { ...result, catalog: candidate } as AgentMuxRpcResult<M>
+            } catch (error) {
+              return { ...result, presentation: { region: null, tab: null,
+                unavailable: [...(result.presentation?.unavailable ?? []), unavailable(error)] } } as AgentMuxRpcResult<M>
+            }
+          }
           const state = await this.spatial.readForLayout()
           if (!state) throw new AgentMuxError('No durable spatial graph has been registered.', 'SPATIAL_STATE_ABSENT')
           const selector = request.operation === 'space.ls' || request.operation === 'space.inspect' ? request.target as import('./space-control.js').AgentMuxSpaceSelector : {}

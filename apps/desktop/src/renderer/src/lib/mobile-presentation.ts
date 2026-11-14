@@ -114,6 +114,8 @@ export async function readSpatialAppearance(state: State, catalog: AgentMuxSpace
 export function readSurveyPresentation(state: {
   surveyCollectedZones: Record<string, true>
   surveyPageReferences: import('@agentmux/core/control').AgentMuxSurveyPageReference[]
+  surveyProfileView?: import('@agentmux/core/control').AgentMuxSurveyProfileView
+  surveyProfileViewReadRecovery?: { issue: string } | null
   surveyPageReadRecovery?: { issue: string } | null
   surveyOrganization?: import('@agentmux/core/control').AgentMuxSurveyOrganization
   surveyExplorationNames: Record<string, string>
@@ -129,7 +131,8 @@ export function readSurveyPresentation(state: {
   const organization = effectiveSurveyOrganization(state.surveyOrganization, state.surveyCollectedZones)
   return {
     organization,
-    ...(state.surveyPageReadRecovery ? { issue: state.surveyPageReadRecovery.issue } : {}),
+    profileView: state.surveyProfileViewReadRecovery ? null : state.surveyProfileView ?? { kind: 'default' },
+    ...((state.surveyPageReadRecovery || state.surveyProfileViewReadRecovery) ? { issue: [state.surveyPageReadRecovery?.issue, state.surveyProfileViewReadRecovery?.issue].filter(Boolean).join(' ') } : {}),
     pages: state.surveyPageReferences.map(page => {
       const owner = surveyPageOwner(state.tabs, page)
       const browser = owner?.surface.kind === 'browser' ? owner.surface : null

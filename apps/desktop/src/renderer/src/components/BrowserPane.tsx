@@ -1425,7 +1425,7 @@ function BrowserPaneContent({
         }}
       >
         {tab.mode === 'private' ? <span className="browser-private-badge" aria-label="Private session" title="Temporary website data ends when this page closes. Network identity is not hidden; explicit saves, downloads and Agent operation records follow their normal retention.">Private</span> : null}
-        {tab.mode !== 'private' ? <BrowserProfileChip browserId={tab.browserId} profileId={tab.profileId || null} control={tab.control} /> : null}
+        {tab.mode !== 'private' ? <BrowserProfileChip browserId={tab.browserId} regionId={tab.regionId} profileId={tab.profileId || null} control={tab.control} /> : null}
         {tab.source ? <BrowserSourceNavigation source={tab.source} onOpenChange={setMenuOpen} /> : null}
         <button
           type="button"

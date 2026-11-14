@@ -71,3 +71,11 @@ export function parseSurveyOrganization(value: unknown, code = 'INVALID_CONTROL_
   settingsResourceBudget(organization, code)
   return organization
 }
+
+/** A display/new-page preference, never an applied Browser binding or permission. */
+export function parseSurveyProfileView(value: unknown, code = 'INVALID_CONTROL_REQUEST'): import('./space-control.js').AgentMuxSurveyProfileView {
+  const raw = settingsResourceEnvelope(value, ['kind', 'profileId'], code)
+  if (raw.kind === 'default' && Object.keys(raw).length === 1) return { kind: 'default' }
+  if (raw.kind === 'profile' && Object.keys(raw).length === 2) return { kind: 'profile', profileId: surveyPageId(raw.profileId, code) }
+  throw new AgentMuxError('Survey environment view requires default or an exact Profile ID.', code)
+}

@@ -422,9 +422,10 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
 export function parseRpcControlResult(method: keyof typeof AGENTMUX_RPC_CONTROL_METHODS,
   value: unknown, params?: unknown): Record<string, unknown> {
   const source = rpcRecord(value, undefined, 'CONTROL_PROTOCOL_ERROR')
-  const presentation = method === 'space.inspect' ? source.presentation : undefined
+  const hasPresentation = method === 'space.inspect' || method === 'space.ls'
+  const presentation = hasPresentation ? source.presentation : undefined
   const body = { ...source }
-  if (method === 'space.inspect') delete body.presentation
+  if (hasPresentation) delete body.presentation
   if (['schemaVersion', 'requestId', 'operation'].some(key => Object.hasOwn(body, key))) {
     throw new AgentMuxError('RPC result contains an internal Control envelope.', 'CONTROL_PROTOCOL_ERROR')
   }

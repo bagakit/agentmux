@@ -476,7 +476,7 @@ type PublicParameterMap = ApplicationAccessParameterMap & AgentLearningParamsMap
 } & { [M in ControlMethod]: ControlParams<M> & { operationId?: string } }
 export type AgentMuxRpcParams<M extends AgentMuxRpcMethod> = PublicParameterMap[M]
 type PublicResultMap = NativeResult & {
-  [M in ControlMethod]: M extends 'space.inspect' ? OperationKeys<BusinessResult<M>> & { presentation?: AgentMuxRpcSpacePresentation }
+  [M in ControlMethod]: M extends 'space.inspect' | 'space.ls' ? OperationKeys<BusinessResult<M>> & { presentation?: AgentMuxRpcSpacePresentation }
     : OperationKeys<GoalKeys<BusinessResult<M>>>
 }
 export type AgentMuxRpcResult<M extends AgentMuxRpcMethod> = PublicResultMap[M]

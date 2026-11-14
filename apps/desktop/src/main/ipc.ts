@@ -2596,6 +2596,15 @@ export async function registerIpc(args: {
     execute: (request, nameContext, originalContext) => executeControl(request, nameContext, originalContext?.signal),
     nameHistory: query => args.runtime.callOriginalCore('local', 'name.history', query, { principal: { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` } }),
     spatialState,
+    spatialPresentation: async ({ target }, context) => {
+      if (Object.values(target).some(Boolean)) return {}
+      const observed = await controlBridge.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+        requestId: mintObjectId(), operation: 'space.ls', target: {}, presentation: true }, context.signal)
+      if (observed.operation !== 'space.ls' || observed.catalog.survey === undefined) {
+        throw new AgentMuxError('The original Survey presentation is unavailable. Host resources and saved references are retained; retry presentation.', 'CONTROL_UNAVAILABLE')
+      }
+      return { survey: observed.catalog.survey }
+    },
     files: publicFiles,
     git: publicGit,
     fileUploads: new FileUploadOwner(),

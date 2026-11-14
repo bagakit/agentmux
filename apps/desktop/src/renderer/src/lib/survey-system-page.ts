@@ -15,7 +15,9 @@ export async function openSystemPageInSurvey(host: SystemPageHost, request: { ur
   let preparation: SurveyBrowserPreparation | null = null
   const reveal = (prepared: SurveyBrowserPreparation): void => {
     if (signal.aborted || !prepared.reference || navigationChanged || host.navigation() !== navigation) return
-    get().setSurveyZoneSelection({ zoneId: prepared.zone.zoneId, selection: [prepared.reference], active: prepared.reference })
+    const browser = get().tabs[prepared.reference.tabId]?.regions[prepared.reference.regionId]
+    if (browser?.kind !== 'browser' || prepared.createdBrowser?.id !== browser.browserId || prepared.admission?.outcome === 'unknown') return
+    get().setSurveyZoneSelection({ kind: 'page', regionId: prepared.reference.regionId, browserId: browser.browserId })
     get().setMainSurface('survey')
   }
   try {
@@ -23,6 +25,7 @@ export async function openSystemPageInSurvey(host: SystemPageHost, request: { ur
     const browser = get().tabs[prepared.reference.tabId]?.regions[prepared.reference.regionId]
     if (browser?.kind !== 'browser') throw new Error('The original Survey Browser attachment is unconfirmed.')
     reveal(prepared)
+    if (prepared.admission?.issues.length) return { state: 'unconfirmed', browserId: browser.browserId, reference: prepared.reference, message: 'The page is available. ' + prepared.admission.issues.map(issue => issue.message).join(' ') }
     return { state: 'opened', browserId: browser.browserId, reference: prepared.reference }
   } catch (error) {
     const prepared = preparation as SurveyBrowserPreparation | null

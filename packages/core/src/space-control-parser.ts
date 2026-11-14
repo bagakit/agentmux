@@ -1,5 +1,5 @@
 import { parseAgentToolExecutionBinding } from './agent-tool-execution.js'
-import { parseSurveyOrganization, parseSurveyCollectionChange, parseSurveyZoneIds, parseSurveyPageReferences } from './survey-organization.js'
+import { parseSurveyOrganization, parseSurveyCollectionChange, parseSurveyZoneIds, parseSurveyPageReferences, parseSurveyProfileView } from './survey-organization.js'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlSuccessReceipt } from './control.js'
 import { AgentMuxError } from './errors.js'
 import { parseAgentForkSource } from './agent-fork.js'
@@ -421,7 +421,7 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
       ...(avatar ? { avatar: { ...(Object.hasOwn(avatar, 'tint') ? { tint: string(avatar.tint, 'Avatar tint', code) } : {}), ...(Object.hasOwn(avatar, 'badge') ? { badge: string(avatar.badge, 'Avatar badge', code) } : {}) } } : {}) }
   }, 'Agent presentation', code), item => item.agentSessionId, 'Agent presentation', code) : undefined
   const survey = Object.hasOwn(source, 'survey') ? (() => {
-    const raw = fields(source.survey, ['items', 'pages', 'selection', 'issue', 'organization'], code)
+    const raw = fields(source.survey, ['items', 'pages', 'selection', 'issue', 'organization', 'profileView'], code)
     const reference = (value: unknown) => {
       const item = fields(value, ['tabId', 'regionId'], code)
       return { tabId: spaceControlId(item.tabId, 'Survey Tab', code, true), regionId: spaceControlId(item.regionId, 'Survey Region', code, true) }
@@ -447,6 +447,7 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
         ...(Object.hasOwn(item, 'issue') ? { issue: string(item.issue, 'Survey page issue', code) } : {}) }
     }, 'Survey pages', code), page => page.regionId, 'Survey pages', code)
     return {
+      profileView: raw.profileView === null ? null : parseSurveyProfileView(raw.profileView, code),
       ...(Object.hasOwn(raw, 'organization') ? { organization: parseSurveyOrganization(raw.organization, code) } : {}),
       items: unique(list(raw.items, value => {
         const item = fields(value, ['zoneId', 'name', 'issue'], code)

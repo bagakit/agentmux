@@ -44,6 +44,9 @@ import { api } from '../lib/api'
 import { useLauncherState } from '../lib/launcher-state'
 import { directoryIdentity } from '../../../shared/space-addresses'
 import { useWorkbenchTabsClose } from '../hooks/useWorkbenchTabsClose'
+import { useBrowserProfiles, browserProfiles } from '../lib/browser-profiles'
+import { surveyProfileReferences } from '../lib/survey-profile-view'
+import { SurveyProfilePicker } from './SurveyProfilePicker'
 
 const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
 const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
@@ -94,6 +97,9 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const list = useSurveyListOrganization()
   const contextOrganization = useRef(list.stored)
   const collected = useAppStore(state => state.surveyCollectedZones)
+  const profileView = useAppStore(state => state.surveyProfileView)
+  const profileViewRecovery = useAppStore(state => state.surveyProfileViewReadRecovery)
+  const profiles = useBrowserProfiles(visible)
   const pageReferences = useAppStore(state => state.surveyPageReferences)
   const pageReadRecovery = useAppStore(state => state.surveyPageReadRecovery)
   const setCollected = useAppStore(state => state.setSurveyZoneCollected)
@@ -181,11 +187,12 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const { containerRef: sidebarRef, isResizing, onResizeStart, onResizeReset } = useSidebarResize<HTMLElement>({
     isOpen: true, resizable: visible && !sidebarCollapsed, defaultWidth: SURVEY_SIDEBAR_DEFAULT_WIDTH, width: sidebarCollapsed ? 40 : sidebarWidth, setWidth: setSidebarWidth, deltaSign: 1, minWidth: sidebarCollapsed ? 40 : minWidth, maxWidth: sidebarCollapsed ? 40 : maxWidth, onDraftWidthChange: reportDraftWidth
   })
-  const selectionKey = selection ? JSON.stringify([selection.zoneId, selection.active]) : null
+  const selectionKey = pageSelection ? JSON.stringify(pageSelection) : selection ? JSON.stringify([selection.zoneId, selection.active]) : null
+  const profileViewKey = JSON.stringify(profileView)
   const intent = useRef(0)
   const failedCreation = useRef<SurveyBrowserPreparation | null>(null)
   const [itemBrowserRecoveries, setItemBrowserRecoveries] = useState<Record<string, { preparation: SurveyBrowserPreparation; message: string; pending: boolean }>>({})
-  useLayoutEffect(() => { intent.current += 1 }, [visible, selectionKey, activeWorkspaceId])
+  useLayoutEffect(() => { intent.current += 1 }, [visible, selectionKey, activeWorkspaceId, profileViewKey])
   useEffect(() => { if (toolsOpen) setToolsVisited(true) }, [toolsOpen])
   useEffect(() => {
     if (controlNavigation) return
@@ -278,21 +285,58 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
 
   async function openBrowser(input = 'about:blank', newItem = false, mode?: 'private'): Promise<void> {
     if (opening) return
+    if (profileViewRecovery && (newItem || !failedCreation.current)) {
+      setError('Choose an environment for this new page. Default browsing and existing pages remain available.')
+      return
+    }
     const before = useAppStore.getState()
     const startedIntent = intent.current
     setOpening(true); setError(null)
     try {
       const preparation = await before.createSurveyBrowser({ workspaceId: newItem ? SCRATCH_WORKSPACE_ID : failedCreation.current?.zone.workspaceId ?? workspace?.id ?? SCRATCH_WORKSPACE_ID, url: input,
-        ...(mode === undefined ? {} : { mode }), preparation: newItem ? null : failedCreation.current, onPrepared(value) { failedCreation.current = value } })
+        ...(mode === undefined ? {} : { mode }), ...(mode !== 'private' && profileView.kind === 'profile' ? { profileId: profileView.profileId } : {}), entry: 'page', preparation: newItem ? null : failedCreation.current, onPrepared(value) { failedCreation.current = value } })
       const reference = preparation.reference, current = useAppStore.getState()
-      failedCreation.current = null
+      const admission = preparation.admission
+      failedCreation.current = admission?.issues.length ? preparation : null
       setCreationNotice(null)
-      if (intent.current === startedIntent && current.mainSurface === 'survey' && current.surveyZoneSelection === before.surveyZoneSelection) { setSelection({ zoneId: preparation.zone.zoneId, selection: [reference], active: reference }) }
+      if (admission?.issues.length) setError('The page is available. ' + admission.issues.map(issue => issue.message).join(' '))
+      const browser = current.tabs[reference.tabId]?.regions[reference.regionId]
+      if (browser?.kind === 'browser' && admission?.outcome !== 'unknown' && intent.current === startedIntent &&
+          current.mainSurface === 'survey' && current.surveyZoneSelection === before.surveyZoneSelection) {
+        setSelection({ kind: 'page', regionId: reference.regionId, browserId: browser.browserId })
+      }
     } catch (cause) { setError(`Browser could not open: ${presentError(cause)}. Your input and original work surface are kept; retry here.`) }
     finally { setOpening(false) }
   }
 
+  function showOriginalPage(): void {
+    const preparation = failedCreation.current
+    const reference = preparation?.reference, expected = preparation?.createdBrowser
+    const state = useAppStore.getState()
+    const tab = reference && state.tabs[reference.tabId]
+    const browser = reference && tab?.regions[reference.regionId]
+    if (!reference || !expected || tab?.space?.zoneId !== preparation?.zone.zoneId || browser?.kind !== 'browser' ||
+        browser.browserId !== expected.id || browser.mode !== expected.mode || browser.profileId !== expected.profileId ||
+        browser.mode === 'normal' && !browser.profileId) {
+      setError('The original page binding is unconfirmed. Its exact reference is kept; this action cannot select a replacement Browser.')
+      return
+    }
+    intent.current += 1
+    const chosen: SurveyPageSelection = { kind: 'page', regionId: reference.regionId, browserId: expected.id }
+    // This explicit recovery changes only the view and selection. Membership
+    // withdrawn by a later person action remains withdrawn.
+    const save = browser.mode === 'normal' ? state.setSurveyProfileView({ kind: 'profile', profileId: browser.profileId! }) : null
+    setSelection(chosen)
+    const selected = useAppStore.getState().surveyZoneSelection
+    if (save) void save.then(report => {
+      if (useAppStore.getState().surveyZoneSelection === selected && report.reason) setError(report.reason)
+    }).catch(() => {
+      if (useAppStore.getState().surveyZoneSelection === selected) setError('The original page is shown. Saving its environment view is unconfirmed; retry the original preference save.')
+    })
+  }
+
   async function newBrowserTab(displayWorkspaceId: string, groupId: string): Promise<void> {
+    if (pageSelection) { await openBrowser('about:blank', true); return }
     if (!currentZone || !selection) return
     const before = useAppStore.getState(), held = before.surveyZoneSelection, startedIntent = intent.current
     // A direct entity Group is presentation, not an original durable placement.
@@ -300,7 +344,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       displayWorkspaceId = currentZone.workspaceId
       groupId = before.layouts[displayWorkspaceId]?.activeGroupId ?? ''
     }
-    const preparation = prepareItemTab(currentZone, { displayWorkspaceId, groupId })
+    const preparation = prepareItemTab(currentZone, { displayWorkspaceId, groupId }, true)
     if (!preparation) return
     setError(null)
     const created = await createItemBrowser(preparation)
@@ -392,12 +436,15 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     }
   }
 
-  function prepareItemTab(zone: AgentMuxZoneFact, target: Pick<WorkbenchProjectionSelection, 'displayWorkspaceId' | 'groupId'>) {
+  function prepareItemTab(zone: AgentMuxZoneFact, target: Pick<WorkbenchProjectionSelection, 'displayWorkspaceId' | 'groupId'>, needsEnvironment = false) {
+    if (needsEnvironment && profileViewRecovery) { setError('Choose an environment for this new page. Existing research and pages are kept.'); return null }
     const id = useAppStore.getState().openLauncher({ workspaceId: zone.workspaceId, displayWorkspaceId: target.displayWorkspaceId,
       tabGroupId: target.groupId, zoneId: zone.zoneId, reveal: false })
     const tab = id ? useAppStore.getState().tabs[id] : null
     if (!tab) { setError('The original display location is still restoring. Existing content is kept.'); return null }
-    return { zone, reference: { ...target, tabId: tab.id, regionId: tab.layout.activeRegionId }, surface: tab.regions[tab.layout.activeRegionId]! }
+    return { zone, mode: 'normal' as const, url: 'about:blank', entry: 'research' as const, membership: useAppStore.getState().surveyPageReferences,
+      ...(profileView.kind === 'profile' ? { profileId: profileView.profileId } : {}),
+      reference: { ...target, tabId: tab.id, regionId: tab.layout.activeRegionId }, surface: tab.regions[tab.layout.activeRegionId]! }
   }
 
   async function newItemTab(zoneId: string, kind: 'agent' | 'browser' | 'tab', chosen?: WorkbenchProjectionSelection) {
@@ -414,7 +461,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       ? { displayWorkspaceId: zone.workspaceId, groupId: layout.activeGroupId } : undefined
     const target = reference ?? emptyTarget
     if (!zone || !target) { setError('This item’s original display location is not confirmed. Its content is kept; restore that item and retry.'); return }
-    const preparation = prepareItemTab(zone, target)
+    const preparation = prepareItemTab(zone, target, kind === 'browser')
     if (!preparation) return
     setLocationChoice(null)
     if (kind === 'agent') useLauncherState.getState().setSection(zone.workspaceId, 'agents', 'expanded')
@@ -471,7 +518,10 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const options = <SurveyItemOptions key={String(sidebarCollapsed)} {...itemOptionsFor(currentZone)} onManageBrowsers={() => setToolsOpen(!toolsOpen)} />
   const displayedItems = new Map(items.filter(zone => !((notebooks.some(book => book.workface?.zoneId === zone.zoneId) || pages.some(page => page.workface?.zoneId === zone.zoneId)) &&
             (tabsByZone.get(zone.zoneId) ?? []).length > 0 && (tabsByZone.get(zone.zoneId) ?? []).every(tabId => !!tabs[tabId] && workbenchSurfaces(tabs[tabId]!).every(surface => surface.kind === 'file' && pages.some(member => member.resource.workspaceId === surface.workspaceId && member.resource.path === surface.path))))).map(zone => [zone.zoneId, zone]))
-  const itemTitles = new Map([...Object.keys(collected).filter(zoneId => !catalog?.zones.some(zone => zone.zoneId === zoneId)).map(zoneId => [zoneId, 'Retained exploration'] as const), ...[...displayedItems.values()].map(zone => [zone.zoneId, itemTitle(zone)] as const)])
+  const defaultProfileId = profiles.profiles?.find(profile => profile.isDefault)?.id
+  const profileReferences = useMemo(() => surveyProfileReferences(profileView, pageReferences, Object.keys(collected), tabs, defaultProfileId, catalog),
+    [profileView, pageReferences, collected, tabs, defaultProfileId, catalog])
+  const itemTitles = new Map([...Object.keys(collected).filter(zoneId => !catalog?.zones.some(zone => zone.zoneId === zoneId)).map(zoneId => [zoneId, 'Retained exploration'] as const), ...[...displayedItems.values()].map(zone => [zone.zoneId, itemTitle(zone)] as const)].filter(([zoneId]) => profileReferences.zoneIds.has(zoneId)))
   const windowControlsInset = isMacPlatform() ? <span className="survey-window-controls-inset" aria-hidden="true" /> : undefined
 
   return <section ref={surfaceRef} className="global-survey-surface" data-sidebar-collapsed={sidebarCollapsed} data-native-window-controls={isMacPlatform()}
@@ -481,14 +531,18 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         <button type="button" className="survey-icon-button" aria-label={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} title={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>{sidebarCollapsed ? <ThemeLayoutOpenLeftIcon size={16} /> : <ThemeLayoutCloseLeftIcon size={16} />}</button>
       </div>
       <aside className="survey-tabs" aria-label="Survey items" data-survey-workspace-id={resourceWorkspaceId ?? undefined}>
+        <SurveyProfilePicker value={profileView} profiles={profiles} unknown={Boolean(profileViewRecovery)} collapsed={sidebarCollapsed} onExpand={() => setSidebarCollapsed(false)}
+          onChange={view => { intent.current += 1; setError(null); void useAppStore.getState().setSurveyProfileView(view).then(save => { if (save.reason) setError('The environment view is kept; saving is unconfirmed. ' + save.reason) }).catch(cause => setError(presentError(cause))) }}
+          onRefresh={() => void browserProfiles.refresh()} />
+        {profileViewRecovery ? <p role="status" className="survey-relation-notice">{profileViewRecovery.issue}</p> : null}
         {pageReadRecovery ? <p className="survey-relation-notice" role="status" data-survey-page-read-recovery>
           {pageReadRecovery.issue}
           <button type="button" className="survey-tab-view" onClick={() => void useAppStore.getState().retrySurveyPagesRead()}>
             Read original page references again
           </button>
         </p> : null}
-        {pageReferences.length > 0 ? <div aria-label="Saved Survey pages">
-          {pageReferences.map(page => {
+        {profileReferences.pages.length > 0 ? <div aria-label="Saved Survey pages">
+          {profileReferences.pages.map(page => {
             const owner = surveyPageOwner(tabs, page)
             const browser = owner?.surface.kind === 'browser' ? owner.surface : null
             return <div className="survey-item-row" key={JSON.stringify(page)}
@@ -559,7 +613,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     </nav>
     <div className="survey-content">
       <div className="survey-page-content" inert={controlsCoverPage} aria-hidden={controlsCoverPage}>
-        {error ? <p className="survey-error" role="alert">{error}{failedCreation.current ? <button type="button" disabled={opening} onClick={() => void openBrowser(query.trim() ? query : 'about:blank')}>Retry original item</button> : null}</p> : null}
+        {error ? <p className="survey-error" role="alert">{error}{failedCreation.current?.createdBrowser ? <button type="button" disabled={opening} onClick={showOriginalPage}>Show original page</button> : null}{failedCreation.current && !failedCreation.current.admission?.issues.some(issue => issue.code === 'SURVEY_PAGE_MEMBERSHIP_SUPERSEDED') ? <button type="button" disabled={opening} onClick={() => void openBrowser(query.trim() ? query : 'about:blank')}>{failedCreation.current.admission ? 'Retry Survey registration' : 'Retry original item'}</button> : null}</p> : null}
         {Object.entries(itemBrowserRecoveries).map(([key, recovery]) => <p key={key} className="survey-error" role="alert" data-survey-browser-recovery={recovery.preparation.reference?.regionId}>
           {recovery.message}<button type="button" disabled={recovery.pending} onClick={() => void createItemBrowser(recovery.preparation)}>{recovery.pending ? 'Retrying original page…' : 'Retry original page'}</button>
         </p>)}
@@ -569,10 +623,10 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
           : <div role="status" className="survey-relation-notice">
             The original Browser Region is not confirmed. Its page reference is kept; inspect the same Region and Browser before choosing its original location.
           </div>}</> : !selection ? <BrowserStartPage config={resolveBrowserStartPage(config?.browser.startPage)} visible={visible && !controlsCoverPage} historyRevision={historyRevision}
-          historyTarget={workspace ? { kind: 'workspace', workspaceId: workspace.id } : null}
+          historyTarget={workspace && !profileViewRecovery && (profileView.kind === 'default' || profileView.profileId === defaultProfileId) ? { kind: 'workspace', workspaceId: workspace.id } : null}
           onChooseHistory={value => { setQuery(value); browserInput.current?.submit(value) }}>
           <form className="browser-start-page__input" onSubmit={event => { event.preventDefault(); browserInput.current?.submit() }}>
-            <BrowserAddressInput ref={browserInput} value={query} aria-label="Search or enter a web address" placeholder="Search or enter a web address" disabled={opening} historyTarget={workspace ? { kind: 'workspace', workspaceId: workspace.id } : null} onValueChange={value => { setQuery(value); setError(null) }} onSubmit={value => { if (value.trim()) void openBrowser(value) }} onHistoryNotice={setInputHistoryNotice} onHistoryChange={() => setHistoryRevision(value => value + 1)} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} />
+            <BrowserAddressInput ref={browserInput} value={query} aria-label="Search or enter a web address" placeholder="Search or enter a web address" disabled={opening} historyTarget={workspace && !profileViewRecovery && (profileView.kind === 'default' || profileView.profileId === defaultProfileId) ? { kind: 'workspace', workspaceId: workspace.id } : null} onValueChange={value => { setQuery(value); setError(null) }} onSubmit={value => { if (value.trim()) void openBrowser(value) }} onHistoryNotice={setInputHistoryNotice} onHistoryChange={() => setHistoryRevision(value => value + 1)} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} />
             <button type="submit" aria-label="Search or open page" disabled={opening || !query.trim()}>{opening ? <ThemeStatusLoadingIcon animation="spin" size={16} /> : <ThemeActionOpenExternalIcon size={16} />}</button></form>{inputHistoryNotice ? <p className="survey-relation-notice" role="status">{inputHistoryNotice}</p> : null}
         </BrowserStartPage> : <>
           {currentZone && !items.some(item => item.zoneId === currentZone.zoneId) ? <div className="survey-relation-notice" role="status">
