@@ -237,7 +237,7 @@ import { browserColdDescriptor, coldBrowserTargets } from './browser-cold-descri
 import { createBrowserProfileUsage } from './browser-profile-usage.js'
 import { createBrowserProfileSiteData } from './browser-profile-site-data.js'
 import { createBrowserProfileExitCheck } from './browser-profile-exit-check.js'
-import { createBrowserProfileProxyAuth } from './browser-profile-proxy-auth.js'
+import { createBrowserProfileProxyAuth, createBrowserProfileProxyLoginHandler } from './browser-profile-proxy-auth.js'
 import { BrowserSitePermissions } from './browser-site-permissions.js'
 import { BrowserRecoveryPreviewStore } from './browser-recovery-preview.js'
 import { BROWSER_LAST_SEEN_FAVICON_BATCH } from '../shared/browser-page-memory.js'
@@ -511,14 +511,12 @@ export async function registerIpc(args: {
     // The original owner retains the issue; Browser snapshots publish it without changing page health.
     report: profileId => browsers.refreshProfileProxySignIn(profileId)
   })
-  const answerProfileProxy = (event: Electron.Event, contents: WebContents | null, details: { firstAuthAttempt?: boolean },
-    authInfo: { isProxy: boolean; host: string; port: number }, callback: (username?: string, password?: string) => void): void => {
-    // Claim the challenge only for a Profile's own proxy, so every other sign-in keeps Chromium's default.
-    if (!authInfo.isProxy || !contents || !browserProfiles.profileOfSession(contents.session)) return
-    event.preventDefault()
-    if (browserProfiles.sessions.answerProxyTransport(contents.session, authInfo, callback)) return
-    void profileProxyAuth.answer(contents, authInfo, callback, details.firstAuthAttempt === true).then(answered => { if (!answered) callback() }, () => callback())
-  }
+  const answerProfileProxy = createBrowserProfileProxyLoginHandler({
+    profileOfSession: target => browserProfiles.profileOfSession(target),
+    proxyOf: profileId => browserProfiles.proxyOf(profileId),
+    answerProxyTransport: (target, authInfo, callback) => browserProfiles.sessions.answerProxyTransport(target, authInfo, callback),
+    proxyAuth: profileProxyAuth
+  })
   app.on('login', answerProfileProxy)
   browserProfiles.bindProxyCredentialsBeforeNetworkChange = profileId => profileProxyAuth.bindCurrentProxy(profileId)
   // A sign-in belongs to one Profile's proxy: forget it when that Profile is gone or no longer uses a proxy.

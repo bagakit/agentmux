@@ -234,3 +234,24 @@ export function createBrowserProfileProxyAuth(ports: BrowserProfileProxyAuthPort
   }
 }
 export type BrowserProfileProxyAuth = ReturnType<typeof createBrowserProfileProxyAuth>
+
+/** The same Profile-own app login entrypoint is used by Desktop and native consumers. */
+export function createBrowserProfileProxyLoginHandler(ports: {
+  profileOfSession: BrowserProfileProxyAuthPorts['profileOfSession']
+  proxyOf: BrowserProfileProxyAuthPorts['proxyOf']
+  answerProxyTransport(session: Session, authInfo: { isProxy: boolean; host: string; port: number }, callback: (username?: string, password?: string) => void): boolean
+  proxyAuth: Pick<BrowserProfileProxyAuth, 'answer'>
+}) {
+  return (event: { preventDefault(): void }, contents: WebContents | null, details: { firstAuthAttempt?: boolean },
+    authInfo: { isProxy: boolean; host: string; port: number }, callback: (username?: string, password?: string) => void): void => {
+    // Other Sessions and origin-server sign-ins retain Chromium's default handling.
+    if (!authInfo.isProxy || !contents) return
+    const profileId = ports.profileOfSession(contents.session)
+    if (!profileId) return
+    if (ports.answerProxyTransport(contents.session, authInfo, (username, password) => { event.preventDefault(); callback(username, password) })) return
+    const proxy = ports.proxyOf(profileId)
+    if (!proxy || proxy.host !== authInfo.host.toLowerCase() || proxy.port !== authInfo.port) return
+    event.preventDefault()
+    void ports.proxyAuth.answer(contents, authInfo, callback, details.firstAuthAttempt === true).then(answered => { if (!answered) callback() }, () => callback())
+  }
+}
