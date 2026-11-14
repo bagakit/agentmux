@@ -30,12 +30,12 @@ app.whenReady().then(async()=>{try{
   return { graphs: canvas.querySelectorAll('.react-flow').length, hosts: canvas.querySelectorAll('[data-host-node]').length, saved: saved.length, relay: relay.length,
     sharedLocal: canvas.querySelectorAll('[data-id="saved:client"] [data-shared-local]').length,
     savedAtLocal: saved.filter(touchesLocal).length, relayAtLocal: relay.filter(touchesLocal).length,
-    outline: getComputedStyle(canvas.querySelector('.mesh-explorer__map-outline, .mesh-geography__land')).maskImage.includes('mesh-world'),
+    geography: Boolean(canvas.querySelector('.mesh-geography__atlas')),
     savedDashed: saved.every(path => getComputedStyle(path).strokeDasharray !== 'none'),
     relaySolid: relay.every(path => getComputedStyle(path).strokeDasharray === 'none') }
  })()`)
  receipt.mixed = await graphFacts()
- assert.deepEqual(receipt.mixed,{graphs:1,hosts:5,saved:5,relay:5,sharedLocal:1,savedAtLocal:5,relayAtLocal:2,outline:true,savedDashed:true,relaySolid:true})
+ assert.deepEqual(receipt.mixed,{graphs:1,hosts:5,saved:5,relay:5,sharedLocal:1,savedAtLocal:5,relayAtLocal:2,geography:false,savedDashed:true,relaySolid:true})
  for(let i=0;i<150;i++){if(await evaluate('document.querySelector(".cluster-machines-coverage").textContent.includes("4 / 6")'))break;await delay(50)}
  await frame('overview-dark')
  window.setContentSize(560,930);await wait('.mesh-explorer__canvas[data-narrow]')
@@ -120,7 +120,7 @@ app.whenReady().then(async()=>{try{
  window.setContentSize(560,930);await frame('mesh-disabled-narrow-light')
  await evaluate('meshFixture.theme("dark")');await frame('mesh-disabled-narrow-dark')
  receipt.savedOnly = await graphFacts()
- assert.deepEqual(receipt.savedOnly,{graphs:1,hosts:8,saved:8,relay:0,sharedLocal:0,savedAtLocal:8,relayAtLocal:0,outline:true,savedDashed:true,relaySolid:true})
+ assert.deepEqual(receipt.savedOnly,{graphs:1,hosts:8,saved:8,relay:0,sharedLocal:0,savedAtLocal:8,relayAtLocal:0,geography:false,savedDashed:true,relaySolid:true})
  window.setContentSize(1440,950)
  await window.loadURL(url+'?scenario=empty');await wait('.mesh-explorer__no-connections')
  await frame('no-connections-dark')
@@ -128,11 +128,13 @@ app.whenReady().then(async()=>{try{
  } else {
   await window.loadURL(url+'?scenario=initial')
   await wait('.mesh-explorer__canvas [data-host-node]')
+  assert.equal(await evaluate("document.querySelector('.mesh-explorer__canvas .mesh-geography__atlas')"),null)
   await frame('logical-no-locations-dark')
  }
  await window.loadURL(url+'?scenario=geography')
  await wait('[data-geographic-point="saved:client"] circle')
  await wait('.mesh-explorer-edge--relay path')
+ await evaluate("document.querySelector('.mesh-explorer__canvas .mesh-geography__land').decode()")
  const geography = () => evaluate(`(() => {
   const atlas = document.querySelector('.mesh-geography__atlas').getBoundingClientRect()
   const canvas = document.querySelector('.mesh-explorer__canvas').getBoundingClientRect()
@@ -146,6 +148,7 @@ app.whenReady().then(async()=>{try{
   const saved = document.querySelector('[data-testid="rf__edge-saved:host:build"] .react-flow__edge-path').getAttribute('d')
   const loop = document.querySelector('[data-testid="rf__edge-saved:host:private"] .react-flow__edge-path').getAttribute('d')
   return { pins, atlasWidth: atlas.width, canvasWidth: canvas.width, atlasLeft: atlas.left, atlasTop: atlas.top,
+    trayFits: tray.bottom <= canvas.bottom + 1 && tray.left >= canvas.left - 1 && tray.right <= canvas.right + 1,
     trayBeside: tray.left >= atlas.right, trayBelow: tray.top >= atlas.bottom, panStart: [atlas.left + atlas.width * .23, atlas.top + atlas.height * .68],
     bothLabels: sameSite.bottom <= local.top || sameSite.top >= local.bottom,
     savedAtEquator: saved.endsWith('500,250'), sameSiteLink: loop.includes(' C '), tray: document.querySelector('.mesh-geography__tray').textContent }
@@ -185,12 +188,18 @@ app.whenReady().then(async()=>{try{
  await click('[aria-label="Fit observed topology"]')
  await evaluate('meshFixture.theme("light")');await frame('geographic-overview-light')
  window.setContentSize(560,950);await frame('geographic-narrow-light')
- assert.ok((await geography()).trayBelow)
+ assert.ok((await geography()).trayBelow && (await geography()).trayFits)
  await evaluate('meshFixture.theme("dark")');await frame('geographic-narrow-dark')
  window.setContentSize(1440,1050)
  await click('.mesh-explorer__canvas [data-host-node="studio"]')
  await click('[aria-label="Selected saved connection"] .mesh-explorer__detail-actions button:first-child')
  await wait('[aria-label="Latitude, longitude"]')
+ await evaluate(`(() => {
+  const picker = document.querySelector('.mesh-location-picker'), rect = picker.getBoundingClientRect()
+  picker.dispatchEvent(new MouseEvent('click', {bubbles:true,detail:1,clientX:rect.left+rect.width*.75,clientY:rect.top+rect.height*.25}))
+ })()`)
+ assert.equal(await evaluate('document.querySelector(\'[aria-label="Latitude, longitude"]\').value'), '45.0000, 90.0000')
+ assert.equal(await evaluate('document.querySelector(\'[data-geographic-point="saved:host:studio"] circle\').getAttribute("cx")'), String((13.405+180)*1000/360))
  await frame('geographic-location-editor')
  await type('[aria-label="Latitude, longitude"]','')
  await button('Save locations')
