@@ -72,7 +72,8 @@
 
 /* Native range inputs keep value, keys and hit area; the theme paints only the track and thumb. */
 .media-player__slider, .media-player__volume { appearance: none; height: 20px; margin: 0; padding: 0; background: transparent; cursor: pointer; }
-.media-player__slider { width: 100%; }
+/* --media-thumb also sets how far in from each end the thumb travels; the timeline reads it to show the time a press at the pointer lands on. */
+.media-player__slider { width: 100%; --media-thumb: 12px; }
 .media-player__slider::-webkit-slider-runnable-track, .media-player__volume::-webkit-slider-runnable-track {
   height: 4px; border-radius: 999px; transition: height var(--dur-fast) ease;
   background: linear-gradient(to right, var(--media-fill-color) var(--media-fill, 0%), transparent var(--media-fill, 0%)),
@@ -82,6 +83,7 @@
 .media-player__slider:hover::-webkit-slider-runnable-track, .media-player__slider:focus-visible::-webkit-slider-runnable-track { height: 6px; }
 .media-player__slider::-webkit-slider-thumb, .media-player__volume::-webkit-slider-thumb { appearance: none; width: 12px; height: 12px; translate: 0 -4px;
   border-radius: 50%; background: var(--media-ink); box-shadow: 0 1px 4px color-mix(in oklab, #000000 40%, transparent); opacity: 0; transition: opacity var(--dur-fast) ease; }
+.media-player__slider::-webkit-slider-thumb { width: var(--media-thumb); height: var(--media-thumb); }
 .media-player__slider:hover::-webkit-slider-thumb, .media-player__slider:focus-visible::-webkit-slider-thumb, .media-player__slider:active::-webkit-slider-thumb,
 .media-player__volume::-webkit-slider-thumb { opacity: 1; }
 .media-player__slider:hover::-webkit-slider-thumb, .media-player__slider:focus-visible::-webkit-slider-thumb { translate: 0 -3px; }
@@ -144,7 +146,8 @@
     linear-gradient(to right, color-mix(in oklab, var(--text) 14%, transparent) var(--media-buffered, 0%), transparent var(--media-buffered, 0%)),
     var(--surface-3); }
 .media-player--audio .media-player__slider:hover::-webkit-slider-runnable-track { height: 8px; }
-.media-player--audio .media-player__slider::-webkit-slider-thumb { width: 14px; height: 14px; translate: 0 -4px; background: var(--green); opacity: 1;
+.media-player--audio .media-player__slider { --media-thumb: 14px; }
+.media-player--audio .media-player__slider::-webkit-slider-thumb { translate: 0 -4px; background: var(--green); opacity: 1;
   box-shadow: 0 0 0 4px color-mix(in oklab, var(--green) 18%, transparent); }
 .media-player--audio .media-player__slider:hover::-webkit-slider-thumb { translate: 0 -3px; }
 .media-player--audio .media-player__volume { width: 72px; }
