@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { spawn, execFileSync } from 'node:child_process'
+import { spawn, spawnSync, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { cp, mkdir, open, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -8,6 +8,31 @@ const root = path.resolve(import.meta.dirname, '../../..')
 const directory = path.join(root, '.tmp/agent-locations/candidate')
 const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim()
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
+async function unchangedActivityBaseline(logPath) {
+  const baseline = path.join(root, '.tmp/agent-locations/before/activity-baseline')
+  const files = JSON.parse(await readFile(path.join(baseline, 'files.json'), 'utf8'))
+  assert.equal(Object.keys(files).length, 4)
+  for (const [file, digest] of Object.entries(files)) assert.equal(sha(await readFile(path.join(baseline, file))), digest)
+  const control = JSON.parse(await readFile(path.join(baseline, 'receipt.json'), 'utf8'))
+  const prior = JSON.parse(await readFile(path.join(baseline, 'diagnostics.json'), 'utf8'))
+  assert.equal(control.sourceAliasesRequested, false); assert.equal(control.mutationsRequested, false)
+  assert.equal(control.finalStatus, '')
+  assert.equal(control.commands.find(command => command.name === 'desktop-dependency-build')?.exitCode, 0)
+  assert.equal(control.commands.find(command => command.name === 'desktop-typecheck')?.exitCode, 1)
+  assert.equal(git('rev-parse', `${control.selectedMain.commit}^{tree}`), control.selectedMain.tree)
+  git('merge-base', '--is-ancestor', control.selectedMain.commit, 'HEAD')
+  for (const [file, digest] of Object.entries(control.checkerInputsSHA256)) assert.equal(sha(await readFile(path.join(root, file))), digest, 'Original compiler/checker/config changed')
+  const output = path.join(directory, 'desktop-type-baseline-comparison.json')
+  const parsed = spawnSync('python3', [path.join(baseline, 'normalize.py'), logPath, '--repo', root, '--previous-log', path.join(baseline, 'desktop-typecheck.log'), '--previous-repo', control.worktree, '--output', output], { encoding: 'utf8' })
+  assert.equal(parsed.status, 0, parsed.stderr)
+  const result = JSON.parse(await readFile(output, 'utf8'))
+  assert.ok(prior.totalDiagnostics > 0 && prior.checkerFooter.testRoots > 0)
+  assert.ok(result.checkerFooter?.testRoots >= prior.checkerFooter.testRoots, 'Original Activity callers cannot disappear')
+  assert.equal(result.comparison?.exactNormalizedMultisetEqual, true, 'Type errors changed from the committed-main control')
+  assert.deepEqual(result.comparison.added, []); assert.deepEqual(result.comparison.removed, [])
+  assert.equal(result.totalDiagnostics, prior.totalDiagnostics)
+  return { originalExitCode: 1, disposition: 'unchanged-existing-activity-test-errors', sourceCommit: control.selectedMain.commit, diagnostics: result.totalDiagnostics, comparison: path.relative(root, output) }
+}
 await mkdir(directory, { recursive: true })
 const receipt = { passed: false, commands: [] }
 await writeFile(path.join(directory, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
@@ -19,6 +44,7 @@ try {
     ['mobile-default-matrix', ['--filter', '@agentmux/mobile', 'test']],
     ['mobile-typecheck', ['--filter', '@agentmux/mobile', 'typecheck']],
     ['desktop-typecheck', ['--filter', '@agentmux/desktop', 'typecheck']],
+    ['desktop-location-test-types', ['--filter', '@agentmux/desktop', 'exec', 'node', 'scripts/typecheck-agent-location-tests.mjs']],
     ['desktop-build', ['--filter', '@agentmux/desktop', 'build']],
     ['mobile-build', ['--filter', '@agentmux/mobile', 'build']],
   ]
@@ -38,8 +64,9 @@ try {
       })
     } finally { await log.close() }
     Object.assign(result, exit, { finishedAt: new Date().toISOString(), logSHA256: sha(await readFile(logPath)) })
-    assert.equal(exit.code, 0, `${name} failed: inspect its original log`)
     assert.equal(exit.signal, null)
+    if (name === 'desktop-typecheck' && exit.code === 1) result.existingBaseline = await unchangedActivityBaseline(logPath)
+    else assert.equal(exit.code, 0, `${name} failed: inspect its original log`)
     if (name === 'mobile-default-matrix') {
       const output = (await readFile(logPath, 'utf8')).replace(/\x1b\[[0-9;]*m/g, '')
       const files = output.match(/Test Files\s+(\d+) passed/)
