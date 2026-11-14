@@ -36,6 +36,13 @@ async function pane(active = true) {
   const Pane = remoteExecutionSettingsModule.Pane
   await dom.render(<Pane config={config} active={active} onClose={close} onNavigate={() => {}} />)
 }
+async function selectWork(selector: string) {
+  const tab = dom.container.querySelector<HTMLButtonElement>('.remote-work-tasks [role=tab]:nth-child(2)')!
+  await act(async () => tab.click())
+  const row = dom.container.querySelector<HTMLElement>(selector)!
+  expect(row.closest('[hidden],[inert]')).toBeNull()
+  await dom.click(selector)
+}
 async function button(text: string) {
   const candidates = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].filter(node => node.textContent?.trim() === text)
   expect(candidates, `exact visible action ${text}`).toHaveLength(1)
@@ -75,7 +82,7 @@ describe('Remote execution Settings', () => {
     const launch = vi.spyOn(api.sessions, 'launchAgent'), resume = vi.spyOn(api.sessions, 'resume'), stop = vi.spyOn(api.sessions, 'stop')
     const first = { section: 'remote-execution' as const }
     await dom.render(<SettingsPanel initialSection="remote-execution" visible navigationRequest={first} onClose={close} />)
-    await dom.click('[data-resource-row="original-one"]')
+    await selectWork('[data-resource-row="original-one"]')
     expect(dom.container.querySelector<HTMLElement>('[data-settings-field="prepare"]')!.hidden).toBe(true)
     expect(dom.container.querySelector('[data-remote-binding="binding-one"]')).not.toBeNull()
     const drafts = useAppStore.getState().agentComposerDrafts
@@ -140,7 +147,7 @@ describe('Remote execution Settings', () => {
   })
 
   it('is one compiled Remote navigation contribution and its real page is reachable', async () => {
-    expect(settingsNavGroups('').find(group => group.id === 'remote')?.items.map(item => item.id)).toEqual(['remote-execution', 'mobile'])
+    expect(settingsNavGroups('').find(group => group.id === 'environment')?.items.map(item => item.id)).toEqual(['hosts', 'remote-execution', 'mobile'])
     expect(visibleSettingsSections('Remote execution').map(item => item.id)).toContain('remote-execution')
     await dom.render(<SettingsPanel initialSection="overview" onClose={close} />)
     await dom.click('nav [data-settings-target="remote-execution"]')
@@ -183,9 +190,9 @@ describe('Remote execution Settings', () => {
     const controlStop = vi.spyOn(api.sessions, 'stop')
     await pane()
     expect(dom.container.querySelector('[data-resource-row="ordinary"]')).toBeNull()
-    await dom.click('[data-resource-row="original-one"]')
+    await selectWork('[data-resource-row="original-one"]')
     expect(observe.mock.calls.at(-1)?.[0]).toBe('binding-one')
-    await dom.click('[data-resource-row="original-two"]')
+    await selectWork('[data-resource-row="original-two"]')
     expect(observe.mock.calls.at(-1)?.[0]).toBe('binding-two'); expect(stops[0]).toHaveBeenCalledOnce()
     await pane(false)
     expect(stops[1]).toHaveBeenCalledOnce(); expect(controlStop).not.toHaveBeenCalled()
@@ -199,7 +206,7 @@ describe('Remote execution Settings', () => {
     vi.spyOn(api.sessions, 'observeExecutionBinding').mockImplementation((_id, listener, error) => { emit = listener; fail = error; return vi.fn() })
     let resolve!: (value: AgentExecutionInspection | null) => void
     const read = vi.spyOn(api.sessions, 'executionBinding').mockImplementation(() => new Promise(done => { resolve = done }))
-    await pane(); await dom.click('[data-resource-row="original-one"]')
+    await pane(); await selectWork('[data-resource-row="original-one"]')
     await act(async () => emit(fact()))
     expect(dom.container.textContent).toContain('Tool connection · Connected')
     await act(async () => emit({ ...fact(), notices: [{ providerId: 'codex', role: 'executor', capability: 'hooks', state: 'unqualified',
@@ -225,7 +232,7 @@ describe('Remote execution Settings', () => {
     vi.spyOn(api.sessions, 'observeExecutionBinding').mockReturnValue(vi.fn())
     const select = vi.spyOn(useAppStore.getState(), 'selectSession').mockReturnValue(false)
     const launch = vi.spyOn(api.sessions, 'launchAgent')
-    await pane(); await dom.click('[data-resource-row="original-two"]'); await button('Open original work')
+    await pane(); await selectWork('[data-resource-row="original-two"]'); await button('Open original work')
     expect(select).toHaveBeenCalledWith('original-two'); expect(close).not.toHaveBeenCalled()
     select.mockReturnValue(true); await button('Open original work')
     expect(close).toHaveBeenCalledOnce(); expect(launch).not.toHaveBeenCalled()

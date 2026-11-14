@@ -34,7 +34,7 @@ const open = async (id: string) => {
 
 it('the real catalog and Overview expose Work and peer Mote; keyword discovery points to first-class modules', async () => {
   const groups = settingsNavGroups('')
-  expect(groups.map(group => group.id)).toEqual(['preferences', 'agents', 'mote', 'work', 'know', 'browser-use', 'message-tool', 'remote', 'conversation-channels', 'toolkit'])
+  expect(groups.map(group => group.id)).toEqual(['preferences', 'environment', 'agents', 'mote', 'work', 'know', 'browser-use', 'message-tool', 'conversation-channels', 'toolkit'])
   expect(settingsNavGroups('').find(group => group.id === 'mote')?.items.map(module => module.id)).toEqual(['mote', 'mote-promotion'])
   expect(settingsNavGroups('').find(group => group.id === 'work')?.items.map(module => module.id)).toEqual(['space', 'focus', 'goals'])
   expect(groups.find(group => group.id === 'know')?.items.map(module => module.id)).toEqual(['topic', 'survey', 'notes'])

@@ -27,7 +27,14 @@ beforeEach(() => {
     agentComposerDrafts: { retained: 'Keep the authored input' }, hostChecks: {} })
   vi.spyOn(api.hosts, 'network').mockRejectedValue(new Error('Controlled network observation unavailable'))
 })
-const pane = (visible = true) => dom.render(<SettingsPanel initialSection="remote-execution" visible={visible} onClose={close} />)
+async function task(value: 'start' | 'existing') {
+  const tab = dom.container.querySelector<HTMLButtonElement>(`.remote-work-tasks [role=tab]:nth-child(${value === 'start' ? 1 : 2})`)!
+  expect(tab).not.toBeNull(); await act(async () => tab.click())
+}
+async function pane(visible = true, initialTask: 'start' | 'existing' = 'existing') {
+  await dom.render(<SettingsPanel initialSection="remote-execution" visible={visible} onClose={close} />)
+  if (visible) await task(initialTask)
+}
 async function click(text: string) {
   const found = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].filter(node => !node.closest('[hidden],[inert]') && node.textContent?.trim() === text)
   expect(found).toHaveLength(1); await act(async () => found[0]!.click())
@@ -39,9 +46,9 @@ async function choose(label: string, value: string) {
   expect(item).not.toBeNull(); await act(async () => item!.click())
 }
 
-it('actual Settings catalog separates Environment foundations from Remote while visited Host drafts survive navigation', async () => {
+it('actual Settings catalog unifies Environment with distinct Host and Remote owners while visited Host drafts survive navigation', async () => {
   expect(settingsNavGroups('').slice(0, 3).map(group => [group.id, group.items.map(item => item.id)])).toMatchObject([
-    ['preferences', expect.any(Array)], ['environment', ['hosts']], ['remote', ['remote-execution', 'mobile']]])
+    ['preferences', expect.any(Array)], ['environment', ['hosts', 'remote-execution', 'mobile']], ['agents', expect.any(Array)]])
   expect(visibleSettingsSections('remote execution').map(item => item.id)).toContain('remote-execution')
   await dom.render(<SettingsPanel initialSection="hosts" navigationRequest={{ section: 'hosts', hostId: 'remote' }} onClose={close} />)
   const input = dom.container.querySelector<HTMLInputElement>('[data-host-name]')!
@@ -106,7 +113,7 @@ it('an unmapped resource keeps its original Session usable while only its unknow
 it('Remote Project uses the shared form and actual Store to prepare the exact two ends without starting work', async () => {
   vi.spyOn(api.hosts, 'home').mockResolvedValue({ routeHostId: 'local', homeDirectory: '/original/local' })
   const open = vi.spyOn(useAppStore.getState(), 'openLauncher'), launch = vi.spyOn(api.sessions, 'launchAgent')
-  await pane(); await mode('remote-project'); await choose('Project for this arrangement', 'remote-project'); await click('Open in Launcher')
+  await pane(true, 'start'); await mode('remote-project'); await choose('Project for this arrangement', 'remote-project'); await click('Open in Launcher')
   expect(open).toHaveBeenCalledExactlyOnceWith({ workspaceId: 'remote-project', reveal: true, initialExecution: { resourceWorkspaceId: 'remote-project', agentWorkspaceId: 'local-project' } })
   const state = useAppStore.getState(), tab = state.tabs[open.mock.results[0]!.value!]!
   expect(tab.regions[tab.layout.activeRegionId]).toMatchObject({ kind: 'launcher', workspaceId: 'remote-project', agentWorkspaceId: 'local-project' })
@@ -115,7 +122,7 @@ it('Remote Project uses the shared form and actual Store to prepare the exact tw
 
 it('same-device Remote Workspace keeps the original ordinary target without manufacturing a tool binding', async () => {
   const open = vi.spyOn(useAppStore.getState(), 'openLauncher'), home = vi.spyOn(api.hosts, 'home'), launch = vi.spyOn(api.sessions, 'launchAgent')
-  await pane(); await mode('remote-workspace'); await choose('Project for this arrangement', 'remote-project'); await click('Open in Launcher')
+  await pane(true, 'start'); await mode('remote-workspace'); await choose('Project for this arrangement', 'remote-project'); await click('Open in Launcher')
   expect(open).toHaveBeenCalledExactlyOnceWith({ workspaceId: 'remote-project', reveal: true, initialExecution: { resourceWorkspaceId: 'remote-project', agentWorkspaceId: null } })
   const tab = useAppStore.getState().tabs[open.mock.results[0]!.value!]!
   expect(tab.regions[tab.layout.activeRegionId]).toMatchObject({ kind: 'launcher', workspaceId: 'remote-project' }); expect(tab.regions[tab.layout.activeRegionId]).not.toHaveProperty('agentWorkspaceId')
@@ -142,4 +149,48 @@ it('Host service observation begins only when its disclosure is opened and close
   expect(inspect).toHaveBeenCalledOnce(); expect(signals[0]!.aborted).toBe(false)
   await act(async () => { disclosure.open = false; disclosure.dispatchEvent(new Event('toggle')) })
   expect(signals[0]!.aborted).toBe(true); expect(useAppStore.getState().agentComposerDrafts.retained).toBe('Keep the authored input')
+})
+
+it('task views keep the exact preparation nodes and authored arrangement without preparing or launching', async () => {
+  const home = vi.spyOn(api.hosts, 'home'), launch = vi.spyOn(api.sessions, 'launchAgent')
+  await pane(true, 'start'); await mode('remote-project'); await choose('Project for this arrangement', 'remote-project')
+  const setup = dom.container.querySelector('.agent-work-setup')!, project = setup.querySelector('[aria-label="Project for this arrangement"]')!
+  await task('existing')
+  expect(setup.isConnected, 'Changing tasks must keep the original preparation nodes mounted').toBe(true)
+  expect(setup.closest<HTMLElement>('[role=tabpanel]')!.hidden).toBe(true)
+  await task('start')
+  expect(dom.container.querySelector('.agent-work-setup')).toBe(setup)
+  expect(setup.querySelector('[aria-label="Project for this arrangement"]')).toBe(project)
+  expect(setup.getAttribute('data-work-mode')).toBe('remote-project')
+  expect(project.textContent).toContain('Atlas')
+  expect(setup.closest<HTMLElement>('[role=tabpanel]')!.hidden).toBe(false)
+  expect(useAppStore.getState().agentComposerDrafts.retained).toBe('Keep the authored input')
+  expect(home).not.toHaveBeenCalled(); expect(launch).not.toHaveBeenCalled()
+})
+
+it('switching tasks releases the visible binding reader and returns to the same selected detail and disclosure', async () => {
+  const stop = vi.fn(), observe = vi.spyOn(api.sessions, 'observeExecutionBinding').mockReturnValue(stop)
+  await pane(); await dom.click('[data-resource-row="split-project"]')
+  const detail = dom.container.querySelector('[data-remote-session="split-project"]')!, identities = detail.querySelector<HTMLDetailsElement>('details')!
+  identities.open = true
+  expect(observe).toHaveBeenCalledOnce()
+  await task('start'); expect(stop).toHaveBeenCalledOnce()
+  expect(detail.closest<HTMLElement>('[role=tabpanel]')!.hidden).toBe(true)
+  await task('existing')
+  expect(observe).toHaveBeenCalledTimes(2)
+  expect(dom.container.querySelector('[data-remote-session="split-project"]')).toBe(detail)
+  expect(identities.open).toBe(true)
+  expect(dom.container.querySelector('[data-resource-row="split-project"]')!.getAttribute('aria-selected')).toBe('true')
+})
+
+it('the task tabs support keyboard selection while precise field deep links reveal their original task', async () => {
+  await pane(true, 'start')
+  const start = dom.container.querySelector<HTMLButtonElement>('.remote-work-tasks [role=tab]')!
+  await act(async () => start.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })))
+  const existing = dom.container.querySelector<HTMLButtonElement>('.remote-work-tasks [role=tab]:nth-child(2)')!
+  expect(existing.getAttribute('aria-selected')).toBe('true'); expect(document.activeElement).toBe(existing)
+  await dom.render(<SettingsPanel initialSection="remote-execution" navigationRequest={{ section: 'remote-execution', field: 'prepare' }} onClose={close} />)
+  expect(start.getAttribute('aria-selected')).toBe('true')
+  await dom.render(<SettingsPanel initialSection="remote-execution" navigationRequest={{ section: 'remote-execution', field: 'bindings' }} onClose={close} />)
+  expect(existing.getAttribute('aria-selected')).toBe('true')
 })
