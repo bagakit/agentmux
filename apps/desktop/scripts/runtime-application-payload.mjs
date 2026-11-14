@@ -4,7 +4,7 @@ import { createReadStream } from 'node:fs'
 import { chmod, cp, lstat, mkdir, readFile, readdir, readlink, stat, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
-import { resolvePackageRoot, materializePackageClosure, runtimePackageSelection } from '../../../scripts/package-dependencies.mjs'
+import { resolvePackageRoot, visitRuntimePackageClosure, materializePackageClosure, runtimePackageSelection } from '../../../scripts/package-dependencies.mjs'
 import { inspectBrowserExtension } from './prepare-browser-extension-identity.mjs'
 import { inspectStaticAvatarRuntime } from './static-avatar-runtime.mjs'
 import { embeddedCoreCli } from './embedded-core-cli.mjs'
@@ -41,29 +41,37 @@ export async function inspectRuntimeApplicationPayload(repositoryRoot) {
     exports: coreManifest.exports, engines: coreManifest.engines, os: coreManifest.os, cpu: coreManifest.cpu,
     license: coreManifest.license, repository: coreManifest.repository, bin: coreManifest.bin
   })
-  async function dependencies(source, values, target) {
-    for (const name of Object.keys(values).sort()) await dependency(source, name, join(target, ...name.split('/')))
+  // Core is also extracted verbatim for remote distribution. Its stripped
+  // manifest requires a complete independent subtree, separate from Main roots.
+  const coreRoots = [{ sourceDirectory: core, target: coreTarget, includeRoot: false }], roots = []
+  function dependencies(sourceDirectory, target, includeRoot = false) {
+    roots.push({ sourceDirectory, target, includeRoot })
   }
-  async function dependency(owner, name, target) {
-    const source = await resolvePackageRoot(owner, name, repositoryRoot)
-    const pkg = JSON.parse(await readFile(join(source, 'package.json'), 'utf8'))
+  async function copyDependencies(selections) {
     // One owner decides which files of a dependency ship; workspace sources, tests and
     // development files never enter the App or the remote Core taken from it.
-    for (const file of await packageFiles(source)) copy(join(source, file), join(target, file))
-    await dependencies(source, pkg.dependencies ?? {}, join(target, 'node_modules'))
+    await visitRuntimePackageClosure(selections, async (source, destination) => {
+      if (selections.find(value => value.target === destination)?.includeRoot !== false) {
+        for (const file of await packageFiles(source)) copy(join(source, file), join(destination, file))
+      }
+    })
   }
-  await dependencies(core, coreManifest.dependencies ?? {}, join(coreTarget, 'node_modules'))
+  async function dependency(owner, name, target) {
+    await dependencies(await resolvePackageRoot(owner, name, repositoryRoot), target, true)
+  }
   const demandManifest = JSON.parse(await readFile(join(demand, 'package.json'), 'utf8'))
   clone(join(demand, 'dist'), join(demandTarget, 'dist'))
   json(join(demandTarget, 'package.json'), { name: demandManifest.name, version: demandManifest.version, type: demandManifest.type,
     main: demandManifest.main, exports: demandManifest.exports, bin: demandManifest.bin })
-  await dependencies(demand, demandManifest.dependencies ?? {}, join(demandTarget, 'node_modules'))
+  await dependencies(demand, demandTarget)
   for (const name of ['@agentmux/git', '@agentmux/capsule', '@agentmux/identity', '@noble/hashes', 'react', 'react-dom', 'fflate',
     'parse5', 'tldts', 'luxon', 'zod', 'ws', 'yaml']) await dependency(desktop, name, join('node_modules', ...name.split('/')))
   for (const name of ['fs-native-extensions', '@larksuiteoapi/node-sdk', '@discordjs/ws', '@discordjs/rest', 'discord-api-types']) {
     await dependency(connectors, name, join('node_modules', ...name.split('/')))
   }
   await dependency(core, '@agentmux/relay', 'node_modules/@agentmux/relay')
+  await copyDependencies(coreRoots)
+  await copyDependencies(roots)
   const avatar = await inspectStaticAvatarRuntime(repositoryRoot)
   copy(avatar.manifest.source, avatar.manifest.target); copy(avatar.icons.source, avatar.icons.target, true)
   links.push({ target: avatar.entry, link: avatar.link })
