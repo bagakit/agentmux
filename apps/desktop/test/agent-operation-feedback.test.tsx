@@ -105,6 +105,11 @@ it('hiding the workface pauses motion while retaining its original pending state
   beginAgentOperation(operation('hide-operation'))
   await render()
   expect(container.querySelector('[data-motion-active="true"]')).not.toBeNull()
+  const status = container.querySelector('[role="status"]')!
+  expect(status.textContent).toBe('停止中')
+  expect(container.querySelector('summary')!.textContent).toBe('停止中')
+  expect(status.getAttribute('data-text')).toBe(status.textContent)
+  expect(container.querySelector('.agent-operation-feedback__motion')).toBeNull()
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
   await act(async () => document.dispatchEvent(new Event('visibilitychange')))
   expect(container.querySelector('[data-motion-active="true"]')).toBeNull()
