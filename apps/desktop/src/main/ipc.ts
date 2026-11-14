@@ -1,3 +1,4 @@
+import { registerBrowserTaskParallelIpc } from './browser-task-parallel-ipc.js'
 import { parseBrowserTaskControlPayload } from '@agentmux/core/control'
 import { createBrowserProfileBookmarkOpener } from './browser-profile-bookmark-open.js'
 import { desktopRpcMethods } from './desktop-rpc-exposure.js'
@@ -754,7 +755,9 @@ export async function registerIpc(args: {
     getTaskAssets: async (id: string) => { await ensureBrowser(id); return await browsers.getTaskAssets(id) },
     inspectTaskRun: (id: string, runId?: string) => browsers.inspectTaskRun(id, runId),
     runControlledTaskParallel: (id, assetId, version, input, authorize) => browsers.runControlledTaskParallel(id, assetId, version, input, authorize),
-    inspectTaskParallel: (id, operationId, after, limit) => browsers.inspectTaskParallel(id, operationId, after, limit),
+    inspectTaskParallel: (id, operationId, after, limit, continuationId) => browsers.inspectTaskParallel(id, operationId, after, limit, continuationId),
+    continueControlledTaskParallelTarget: (id, operationId, targetId, input, authorize) => browsers.continueControlledTaskParallelTarget(id, operationId, targetId, input, authorize),
+    stopTaskParallel: (id, operationId) => browsers.stopTaskParallel(id, operationId),
     listTaskParallel: (id, before, limit) => browsers.listTaskParallel(id, before, limit),
     saveTaskAssetDraft: (id: string, assetId: string, revision: number, content: unknown) => browsers.saveTaskAssetDraft(id, assetId, revision, content),
     publishTaskAsset: (id: string, assetId: string, revision: number) => browsers.publishTaskAsset(id, assetId, revision),
@@ -769,7 +772,7 @@ export async function registerIpc(args: {
   ): Promise<AgentMuxControlResult> => {
     if (request.operation === 'browser.release') return { operation: request.operation,
       receipt: await browsers.release(request.browserId, request.navigationId) }
-    if (request.operation === 'browser.task.parallel-list' || request.operation === 'browser.task.parallel' || request.operation === 'browser.task.parallel-inspect' || request.operation === 'browser.task.inspect' || request.operation === 'browser.task.export' || request.operation === 'browser.task.import' || request.operation === 'browser.task.import-inspect' || request.operation === 'browser.task.edit' || request.operation === 'browser.task.publish' || request.operation === 'browser.task.source' || request.operation === 'browser.task.draft' || request.operation === 'browser.task.create' || request.operation === 'browser.task.create-inspect') return await controlBrowserTask(request)
+    if (request.operation === 'browser.task.parallel-continue' || request.operation === 'browser.task.parallel-stop' || request.operation === 'browser.task.parallel-list' || request.operation === 'browser.task.parallel' || request.operation === 'browser.task.parallel-inspect' || request.operation === 'browser.task.inspect' || request.operation === 'browser.task.export' || request.operation === 'browser.task.import' || request.operation === 'browser.task.import-inspect' || request.operation === 'browser.task.edit' || request.operation === 'browser.task.publish' || request.operation === 'browser.task.source' || request.operation === 'browser.task.draft' || request.operation === 'browser.task.create' || request.operation === 'browser.task.create-inspect') return await controlBrowserTask(request)
     if (request.operation === 'space.mote.preferences.read' || request.operation === 'space.mote.preferences.save') {
       if (request.kind === 'quick') return controlBridge.execute(request, signal)
       throw new AgentMuxError('Connection preferences belong to their original background Host. Use that Host endpoint; the Mote files and Agents are retained.', 'CONTROL_UNAVAILABLE')
@@ -2421,22 +2424,7 @@ export async function registerIpc(args: {
     await ensureBrowser(id)
     return await browsers.locateTaskAssetStep(id, assetId, revision, stepId)
   })
-  handleWithEvent('browser:runTaskParallel', async (_event, browserId: string, assetId: string, version: number, input: unknown) => {
-    const request = parseBrowserTaskControlPayload({ operation: 'browser.task.parallel', browserId, assetId, version, input })
-    if (request.operation !== 'browser.task.parallel') throw new Error('Task operation identity changed.')
-    return await browsers.runTaskParallel(request.browserId, request.assetId, request.version, request.input,
-      (id, profileId) => browserAutomation(id, undefined, profileId))
-  })
-  handleWithEvent('browser:inspectTaskParallel', async (_event, browserId: string, options: { operationId?: string; after?: string; limit?: number } = {}) => {
-    const request = parseBrowserTaskControlPayload({ ...options, operation: 'browser.task.parallel-inspect', browserId })
-    if (request.operation !== 'browser.task.parallel-inspect') throw new Error('Task operation identity changed.')
-    return await browsers.inspectTaskParallel(request.browserId, request.operationId, request.after, request.limit)
-  })
-  handleWithEvent('browser:listTaskParallel', async (_event, browserId: string, options: { before?: string; limit?: number } = {}) => {
-    const request = parseBrowserTaskControlPayload({ ...options, operation: 'browser.task.parallel-list', browserId })
-    if (request.operation !== 'browser.task.parallel-list') throw new Error('Task operation identity changed.')
-    return await browsers.listTaskParallel(request.browserId, request.before, request.limit)
-  })
+  registerBrowserTaskParallelIpc({ handle: handleWithEvent, browsers, authorize: (id, profileId) => browserAutomation(id, undefined, profileId) })
   handleWithEvent('browser:runTaskBatch', async (event, input: BrowserTaskBatchInput) => {
     await browserAutomation(input.browserId, undefined)
     await ensureBrowser(input.browserId)

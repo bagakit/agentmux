@@ -1,3 +1,4 @@
+import { parseBrowserTaskParallelContinuationInput, type BrowserTaskParallelContinuationInput, type BrowserTaskParallelContinuation, type BrowserTaskParallelContinuationReceipt } from '@agentmux/core/control'
 import { availableParallelism } from 'node:os'
 import { parseBrowserTaskParallelInput, parseBrowserTaskParallelBinding, type BrowserTaskParallelList, type BrowserTaskParallelInput, type BrowserTaskParallelSummary, type BrowserTaskParallelInspection, type BrowserTaskParallelCounts, type BrowserTaskParallelTargetProgress } from '@agentmux/core/control'
 import { normalizeBrowserTaskParallelRecords, type BrowserTaskParallelHost } from './browser-task-parallel.js'
@@ -34,9 +35,9 @@ export const BROWSER_TASK_ASSETS_FILE = 'browser-task-assets.json'
 /** Main-private child execution context; never accepted from a Client request. */
 type SubflowFrame = { sourceBrowserId: string; parent: BrowserTaskRunParent; rootId: string; depth: number; limits: { operations: number; timeMillis: number }; navigationGuard?: { runId: string; stepId: string; navigationId: string } }
 type TaskBrowserLease = { batchId?: string; parallelId?: string; target?: BrowserTaskParallelRecord['targets'][number]; sourceBrowserId?: string; observedStatus?: BrowserTaskAssetRun['status'] }
-type ActiveTaskParallel = { record: BrowserTaskParallelRecord; input: BrowserTaskParallelInput; host: BrowserTaskParallelHost; targets: Set<string>; finishing: boolean }
+type ActiveTaskParallel = { record: BrowserTaskParallelRecord; invocations: Map<string, { input: import('@agentmux/core/control').BrowserTaskParallelTarget; host: BrowserTaskParallelHost }>; targets: Set<string>; finishing: boolean }
 function parallelResultStatus(counts: BrowserTaskParallelCounts): BrowserTaskAssetRun['status'] {
-  return counts.waitingHuman ? 'waiting-human' : counts.ready ? 'ready' : counts.interrupted ? 'interrupted' : counts.failed ? 'failed' : counts.stopped ? 'stopped' : 'completed'
+  return counts.waitingHuman ? 'waiting-human' : counts.ready || counts.queued || counts.preparing ? 'ready' : counts.interrupted ? 'interrupted' : counts.failed ? 'failed' : counts.stopped ? 'stopped' : 'completed'
 }
 const MAX_STEPS = 128
 const MAX_PARAMETERS = 32
@@ -90,6 +91,8 @@ export class BrowserTaskAssets {
   private readonly activeParallel = new Map<string, ActiveTaskParallel>()
   private readonly parallelProfiles = new Map<string, TaskBrowserLease>()
   private readonly confirmedParallel = new Set<string>()
+  private readonly confirmedContinuations = new Set<string>()
+  private readonly unconfirmedContinuations = new Set<string>()
   private pumpingParallel = false
   private lastParallelAdmission: string | undefined
   private indexedRuns: BrowserTaskAssetRun[] | undefined
@@ -897,10 +900,88 @@ export class BrowserTaskAssets {
     const { record } = prepared
     // Existing operation ids are observations, even if their original write reply was lost.
     if (prepared.created) {
-      this.activeParallel.set(record.operationId, { record, input, host, targets: new Set(), finishing: false })
+      this.activeParallel.set(record.operationId, { record, invocations: new Map(input.targets.map(target => [target.id, { input: target, host }])), targets: new Set(), finishing: false })
       this.pumpParallel()
     }
     return this.parallelSummary(record)
+  }
+
+  /** Each explicit continuation retains its own request ID; repeats only read its original receipt. */
+  async continueParallel(browserId: string, operationId: string, targetId: string, supplied: BrowserTaskParallelContinuationInput, host: BrowserTaskParallelHost, intent: 'human' | 'control'): Promise<BrowserTaskParallelContinuationReceipt> {
+    const input = parseBrowserTaskParallelContinuationInput(supplied)
+    const prepared = await this.change(async () => {
+      if (this.loadUnavailable) throw new AgentMuxError(this.warning ?? 'Original task records are unavailable.', 'BROWSER_TASK_RUNS_UNAVAILABLE')
+      const record = this.findParallel(operationId), target = record?.targets.find(target => target.id === targetId)
+      if (!record || record.browserId !== browserId || !target) throw new AgentMuxError('The original continuation target could not be read; its identity was retained.', 'BROWSER_TASK_PARALLEL_NOT_FOUND')
+      const original = record.continuations?.find(item => item.id === input.continuationId)
+      if (original) {
+        if (original.targetId !== targetId || original.expectedRevision !== input.expectedRevision) throw new AgentMuxError('This continuation ID already belongs to another original intent. Inspect it before a new request.', 'BROWSER_TASK_PARALLEL_CONFLICT')
+        return { record, target, enqueue: false, info: this.continuationInfo(record, original) }
+      }
+      const refuse = (warning: string) => ({ record, target, enqueue: false, info: { id: input.continuationId, targetId, admission: 'refused' as const, warning } })
+      if (this.continuationRevision(record, target) !== input.expectedRevision || record.status === 'stopped') return refuse('The original target cursor or admission changed. No continuation was admitted; read its current facts before another explicit request.')
+      const run = this.findRun(target.runId)
+      if (run?.status === 'waiting-human' && intent !== 'human') return refuse('This original target is waiting for the person. Public control cannot approve its human checkpoint.')
+      const previousStatus = record.status
+      const originalIntent = { id: input.continuationId, targetId, expectedRevision: input.expectedRevision }
+      record.continuations = [...(record.continuations ?? []), originalIntent]
+      target.pendingContinuationId = input.continuationId
+      record.status = 'running'; record.updatedAt = this.now(); delete target.error
+      this.unconfirmedContinuations.add(this.continuationKey(record.operationId, input.continuationId))
+      try { await this.persist(browserId) }
+      catch {
+        record.status = previousStatus; delete target.pendingContinuationId; record.warning = 'Continuation admission saving is unconfirmed. Keep this original continuation ID and inspect it; no remaining work was automatically replayed.'
+        throw new AgentMuxError(record.warning, 'BROWSER_TASK_PARALLEL_UNCONFIRMED', JSON.stringify({ browserId, operationId, continuationId: input.continuationId }))
+      }
+      return { record, target, enqueue: true, info: this.continuationInfo(record, originalIntent) }
+    })
+    if (prepared.enqueue) {
+      const previous = this.activeParallel.get(operationId)
+      const context: ActiveTaskParallel = previous && !previous.finishing ? previous : { record: prepared.record, invocations: new Map(), targets: new Set(), finishing: false }
+      context.invocations.set(targetId, { input: { id: targetId, browserId: prepared.target.browserId, profileId: prepared.target.profileId, parameters: input.parameters, ...(input.calls === undefined ? {} : { calls: input.calls }) }, host })
+      this.activeParallel.set(operationId, context); this.pumpParallel()
+    }
+    return { run: this.parallelSummary(prepared.record), continuation: prepared.info }
+  }
+
+  private continuationKey(operationId: string, continuationId: string): string { return operationId + '\0' + continuationId }
+  private continuationInfo(record: BrowserTaskParallelRecord, intent: NonNullable<BrowserTaskParallelRecord['continuations']>[number]): BrowserTaskParallelContinuation {
+    return { id: intent.id, targetId: intent.targetId, admission: this.confirmedContinuations.has(this.continuationKey(record.operationId, intent.id)) ? 'confirmed' : 'unknown', ...(record.warning || this.warning ? { warning: record.warning ?? this.warning! } : {}) }
+  }
+  /** Revision is a compare-and-set token over original facts, never permission or a page observation. */
+  private continuationRevision(record: BrowserTaskParallelRecord, target: BrowserTaskParallelRecord['targets'][number]): string | undefined {
+    if (record.status === 'stopped' || this.activeParallel.get(record.operationId)?.invocations.has(target.id) || target.pendingContinuationId && record.status === 'running') return undefined
+    const active = this.activeBrowsers.get(target.browserId)
+    if (active?.target === target) return undefined
+    const run = this.findRun(target.runId)
+    if (target.phase !== 'queued' && (!run || run.status !== 'ready' && run.status !== 'waiting-human')) return undefined
+    return createHash('sha256').update(JSON.stringify({ source: [record.operationId, record.browserId, record.assetId, record.version], target: [target.id, target.browserId, target.profileId, target.runId ?? null],
+      runs: run ? this.treeRuns(run.id).map(item => [item.id, item.status, item.nextStep, item.operationIds, item.pendingCheckpointId ?? null, item.calls ?? []]) : [] })).digest('hex')
+  }
+
+  /** Stop the original target set; native cancellation belongs to the original Manager. */
+  async stopParallel(browserId: string, operationId: string, cancel: (target: { browserId: string; runId?: string }) => void): Promise<BrowserTaskParallelSummary | null> {
+    return await this.change(async () => {
+      if (this.loadUnavailable) throw new AgentMuxError(this.warning ?? 'Original task records are unavailable.', 'BROWSER_TASK_RUNS_UNAVAILABLE')
+      const record = this.findParallel(operationId)
+      if (!record || record.browserId !== browserId) return null
+      let changed = false
+      for (const target of record.targets) {
+        delete target.pendingContinuationId
+        const lease = this.activeBrowsers.get(target.browserId)
+        if (lease?.parallelId === operationId && lease.target === target) cancel({ browserId: target.browserId, ...(target.runId ? { runId: target.runId } : {}) })
+        if (!target.runId && (target.phase === 'queued' || target.phase === 'preparing')) { target.phase = 'stopped'; changed = true }
+        if (target.runId) for (const run of this.treeRuns(target.runId)) if (run.status === 'ready' || run.status === 'running' || run.status === 'waiting-human') {
+          run.status = 'stopped'; run.warning = 'The original parallel execution stopped. Completed and uncertain page effects remain in their original operations.'; run.updatedAt = this.now(); changed = true
+        }
+      }
+      if (changed) {
+        record.status = 'stopped'; this.activeParallel.get(operationId)?.invocations.clear(); record.updatedAt = this.now()
+        record.warning = 'No further target or task step will be sent. Completed and uncertain effects were not undone; inspect the original Browser operations.'
+        await this.persist(browserId)
+      }
+      return this.parallelSummary(record)
+    })
   }
 
   async listParallel(browserId: string, before?: string, limit = 32): Promise<BrowserTaskParallelList> {
@@ -914,7 +995,7 @@ export class BrowserTaskAssets {
     return copy({ runs, page: { before: before ?? null, limit, nextBefore: index + 1 + runs.length < records.length ? runs.at(-1)!.operationId : null } })
   }
 
-  async inspectParallel(browserId: string, operationId?: string, after?: string, limit = 32): Promise<BrowserTaskParallelInspection | null> {
+  async inspectParallel(browserId: string, operationId?: string, after?: string, limit = 32, continuationId?: string): Promise<BrowserTaskParallelInspection | null> {
     await this.ready()
     if (this.loadUnavailable) throw new AgentMuxError(this.warning ?? 'Original task records are unavailable.', 'BROWSER_TASK_RUNS_UNAVAILABLE')
     const selected = operationId ?? this.document.selectedParallel?.find(item => item.browserId === browserId)?.operationId
@@ -931,8 +1012,15 @@ export class BrowserTaskAssets {
         if (stored.parallel?.some(saved => saved.operationId === record.operationId && isDeepStrictEqual(parallelIntent(saved), parallelIntent(record)))) this.confirmedParallel.add(record.operationId)
       } catch { /* An unavailable observation is not an empty execution or permission to replay. */ }
     }
-    const targets = record.targets.slice(index + 1, index + 1 + limit).map(target => this.parallelTarget(target))
-    return copy({ run: this.parallelSummary(record), targets, page: { after: after ?? null, limit,
+    const continuation = continuationId ? record.continuations?.find(item => item.id === continuationId) : undefined
+    if (continuation && !this.confirmedContinuations.has(this.continuationKey(record.operationId, continuation.id))) {
+      try {
+        const stored = normalizeDocument(await this.store.load())
+        if (stored.parallel?.some(group => group.operationId === record.operationId && group.continuations?.some(item => isDeepStrictEqual(item, continuation)))) this.confirmedContinuations.add(this.continuationKey(record.operationId, continuation.id))
+      } catch { /* No observation of an ACK is permission to replay the request. */ }
+    }
+    const targets = record.targets.slice(index + 1, index + 1 + limit).map(target => this.parallelTarget(record, target))
+    return copy({ run: this.parallelSummary(record), targets, ...(continuationId === undefined ? {} : { continuation: continuation ? this.continuationInfo(record, continuation) : null }), page: { after: after ?? null, limit,
       nextAfter: index + 1 + targets.length < record.targets.length ? targets.at(-1)!.id : null } })
   }
 
@@ -949,6 +1037,9 @@ export class BrowserTaskAssets {
   }
 
   /** Main-private authority for a root admitted by this exact live target operation. */
+  assertParallelExecution(input: BrowserTaskAssetRunInput, execution: BrowserTaskParallelExecution): void {
+    this.parallelExecution(input, execution)
+  }
   private parallelExecution(input: BrowserTaskAssetRunInput, execution: BrowserTaskParallelExecution): BrowserTaskParallelRecord['targets'][number] {
     const active = this.activeParallel.get(execution.operationId), record = active?.record
     const target = record?.targets.find(target => target.id === execution.targetId)
@@ -959,11 +1050,12 @@ export class BrowserTaskAssets {
     return target
   }
 
-  private parallelTarget(target: BrowserTaskParallelRecord['targets'][number]): BrowserTaskParallelTargetProgress {
+  private parallelTarget(record: BrowserTaskParallelRecord, target: BrowserTaskParallelRecord['targets'][number]): BrowserTaskParallelTargetProgress {
     const run = this.findRun(target.runId), held = this.parallelProfiles.get(target.profileId)
+    const continuationRevision = this.continuationRevision(record, target)
     return { id: target.id, browserId: target.browserId, profileId: target.profileId, phase: target.phase,
       ...(run ? { run: { id: run.id, status: run.status, nextStep: run.nextStep, operationCount: this.treeCost(run.id).operations } } : {}),
-      ...(target.error ? { error: copy(target.error) } : {}),
+      ...(continuationRevision ? { continuationRevision } : {}), ...(target.error ? { error: copy(target.error) } : {}),
       ...(target.phase === 'queued' && held ? { waitingForProfile: { operationId: held.parallelId!, targetId: held.target!.id } } : {}) }
   }
   private parallelSummary(record: BrowserTaskParallelRecord): BrowserTaskParallelSummary {
@@ -971,7 +1063,7 @@ export class BrowserTaskAssets {
     for (const target of record.targets) {
       const run = this.findRun(target.runId)
       if (run) counts[run.status === 'waiting-human' ? 'waitingHuman' : run.status] += 1
-      else counts[target.phase === 'failed' ? 'failed' : target.phase === 'preparing' ? 'preparing' : 'queued'] += 1
+      else counts[target.phase === 'failed' ? 'failed' : target.phase === 'stopped' ? 'stopped' : target.phase === 'preparing' ? 'preparing' : 'queued'] += 1
     }
     const settled = !this.activeParallel.has(record.operationId) && !counts.queued && !counts.preparing
     const status = record.status === 'stopped' || !settled ? record.status : parallelResultStatus(counts)
@@ -991,7 +1083,7 @@ export class BrowserTaskAssets {
         for (let offset = 0; offset < contexts.length; offset += 1) {
           const context = contexts[(start + offset) % contexts.length]!, record = context.record
           if (context.finishing || record.status !== 'running' || context.targets.size >= record.concurrency) continue
-          const target = record.targets.find(target => target.phase === 'queued' && !context.targets.has(target.id) && !this.activeBrowsers.has(target.browserId) && !this.parallelProfiles.has(target.profileId))
+          const target = record.targets.find(target => (target.phase === 'queued' || target.pendingContinuationId !== undefined) && context.invocations.has(target.id) && !context.targets.has(target.id) && !this.activeBrowsers.has(target.browserId) && !this.parallelProfiles.has(target.profileId))
           if (!target) continue
           const lease: TaskBrowserLease = { parallelId: record.operationId, target, sourceBrowserId: record.browserId }
           context.targets.add(target.id); this.parallelProfiles.set(target.profileId, lease); this.activeBrowsers.set(target.browserId, lease)
@@ -999,7 +1091,7 @@ export class BrowserTaskAssets {
           void this.executeParallelTarget(context, target).finally(() => {
             if (this.activeBrowsers.get(target.browserId) === lease) this.activeBrowsers.delete(target.browserId)
             if (this.parallelProfiles.get(target.profileId) === lease) this.parallelProfiles.delete(target.profileId)
-            context.targets.delete(target.id); this.finishParallel(context); this.pumpParallel()
+            context.targets.delete(target.id); context.invocations.delete(target.id); this.finishParallel(context); this.pumpParallel()
           })
           break
         }
@@ -1011,13 +1103,18 @@ export class BrowserTaskAssets {
   private async executeParallelTarget(context: ActiveTaskParallel, target: BrowserTaskParallelRecord['targets'][number]): Promise<void> {
     const record = context.record
     try {
-      await this.change(async () => { target.phase = 'preparing'; record.updatedAt = this.now(); await this.persist(record.browserId) })
-      const values = context.input.targets.find(item => item.id === target.id)!
-      await context.host.runTask({ browserId: target.browserId, assetId: record.assetId, version: record.version, parameters: values.parameters,
+      const admitted = await this.change(async () => {
+        if (record.status === 'stopped') return false
+        target.phase = target.runId ? 'bound' : 'preparing'; delete target.pendingContinuationId; record.updatedAt = this.now(); await this.persist(record.browserId); return true
+      })
+      if (!admitted) return
+      const { input: values, host } = context.invocations.get(target.id)!
+      await host.runTask({ browserId: target.browserId, assetId: record.assetId, version: record.version, ...(target.runId ? { runId: target.runId } : {}), parameters: values.parameters,
         ...(values.calls === undefined ? {} : { calls: values.calls }) },
       { operationId: record.operationId, targetId: target.id, sourceBrowserId: record.browserId, profileId: target.profileId })
     } catch (error) {
       await this.change(async () => {
+        if (record.status === 'stopped') return
         if (!target.runId) target.phase = 'failed'
         target.error = { code: 'BROWSER_TASK_TARGET_FAILED', message: target.runId
           ? 'This target did not confirm completion. Inspect its original run and Browser operation receipts; other targets remain available.'
@@ -1028,14 +1125,14 @@ export class BrowserTaskAssets {
     }
   }
   private finishParallel(context: ActiveTaskParallel): void {
-    if (context.finishing || context.targets.size || context.record.targets.some(target => target.phase === 'queued' || target.phase === 'preparing')) return
+    if (context.finishing || context.targets.size || context.record.targets.some(target => context.invocations.has(target.id) && (target.phase === 'queued' || target.phase === 'preparing' || target.pendingContinuationId !== undefined))) return
     context.finishing = true
     void this.change(async () => {
       const summary = this.parallelSummary(context.record), counts = summary.counts
-      context.record.status = parallelResultStatus(counts)
+      if (context.record.status !== 'stopped') context.record.status = parallelResultStatus(counts)
       context.record.updatedAt = this.now()
       try { await this.persist(context.record.browserId) } catch { if (this.warning) context.record.warning = this.warning }
-    }).finally(() => { this.activeParallel.delete(context.record.operationId); this.pumpParallel() })
+    }).finally(() => { if (this.activeParallel.get(context.record.operationId) === context) this.activeParallel.delete(context.record.operationId); this.pumpParallel() })
   }
 
   /** The original execution lease also covers batch preparation and the gaps between its items. */
@@ -1207,7 +1304,7 @@ export class BrowserTaskAssets {
       batch.operationCount = related.reduce((sum, run) => sum + run.operationIds.length, 0)
       batch.executedMillis = related.reduce((sum, run) => sum + (run.executedMillis ?? 0), 0)
     }
-    try { await this.store.save(copy(this.document)); this.warning = undefined; for (const id of this.unconfirmedParallel) this.confirmedParallel.add(id); this.unconfirmedParallel.clear() }
+    try { await this.store.save(copy(this.document)); this.warning = undefined; for (const id of this.unconfirmedParallel) this.confirmedParallel.add(id); this.unconfirmedParallel.clear(); for (const id of this.unconfirmedContinuations) this.confirmedContinuations.add(id); this.unconfirmedContinuations.clear() }
     catch {
       this.warning = 'Task assets could not be saved. The live draft and previous Browser work remain; restore storage before executing another step.'
       throw new Error(this.warning)
@@ -1233,7 +1330,7 @@ export class BrowserTaskAssets {
     try {
       this.document = normalizeDocument(await this.store.load() ?? { version: 1, assets: [], runs: [] })
       restored = true
-      for (const record of this.document.parallel ?? []) this.confirmedParallel.add(record.operationId)
+      for (const record of this.document.parallel ?? []) { this.confirmedParallel.add(record.operationId); for (const item of record.continuations ?? []) this.confirmedContinuations.add(this.continuationKey(record.operationId, item.id)) }
       if (this.interruptRestoredExecutions()) await this.persist()
     } catch {
       this.loadUnavailable = !restored

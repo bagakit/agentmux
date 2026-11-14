@@ -4,7 +4,8 @@ import type { BrowserTaskParallelBinding, BrowserTaskParallelSummary, BrowserTas
 export type BrowserTaskParallelRecord = {
   operationId: string; browserId: string; assetId: string; version: number; requestedConcurrency: number; concurrency: number
   status: BrowserTaskRunStatus; startedAt: number; updatedAt: number; warning?: string
-  targets: { id: string; browserId: string; profileId: string; phase: BrowserTaskParallelTargetProgress['phase']; runId?: string; error?: { code: string; message: string } }[]
+  continuations?: { id: string; targetId: string; expectedRevision: string }[]
+  targets: { pendingContinuationId?: string; id: string; browserId: string; profileId: string; phase: BrowserTaskParallelTargetProgress['phase']; runId?: string; error?: { code: string; message: string } }[]
 }
 /** Main-private execution scope. Public callers can never supply this binding to an ordinary run. */
 export type BrowserTaskParallelExecution = BrowserTaskParallelBinding & { profileId: string }

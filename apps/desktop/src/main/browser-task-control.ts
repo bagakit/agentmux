@@ -1,4 +1,4 @@
-import type { BrowserTaskParallelList, BrowserTaskParallelInput, BrowserTaskParallelSummary, BrowserTaskParallelInspection } from '@agentmux/core/control'
+import type { BrowserTaskParallelList, BrowserTaskParallelInput, BrowserTaskParallelSummary, BrowserTaskParallelInspection, BrowserTaskParallelContinuationInput, BrowserTaskParallelContinuationReceipt } from '@agentmux/core/control'
 import { assertBrowserTaskControlTarget, parseBrowserTaskControlPayload, parseBrowserTaskControlResult, type BrowserTaskControlResult } from '@agentmux/core'
 import type { AgentMuxBrowserTaskSource, BrowserTaskCreateInput, BrowserTaskCreateStatus } from '@agentmux/core/control'
 import type { BrowserOperation } from '@agentmux/browser/model/browser-operation'
@@ -14,9 +14,11 @@ type BrowserTaskControlOwner = {
   importTaskAsset(browserId: string, input: BrowserTaskCreateInput): Promise<BrowserTaskAsset>
   inspectTaskAssetCreation(browserId: string, input: BrowserTaskCreateInput): Promise<BrowserTaskCreateStatus>
   getTaskAssets(browserId: string): Promise<BrowserTaskAssetState>
+  stopTaskParallel(browserId: string, operationId: string): Promise<BrowserTaskParallelSummary | null>
+  continueControlledTaskParallelTarget(browserId: string, operationId: string, targetId: string, input: BrowserTaskParallelContinuationInput, authorize: (browserId: string, profileId: string) => Promise<void>): Promise<BrowserTaskParallelContinuationReceipt>
   runControlledTaskParallel(browserId: string, assetId: string, version: number, input: BrowserTaskParallelInput, authorize: (browserId: string, profileId: string) => Promise<void>): Promise<BrowserTaskParallelSummary>
   listTaskParallel(browserId: string, before?: string, limit?: number): Promise<BrowserTaskParallelList>
-  inspectTaskParallel(browserId: string, operationId?: string, after?: string, limit?: number): Promise<BrowserTaskParallelInspection | null>
+  inspectTaskParallel(browserId: string, operationId?: string, after?: string, limit?: number, continuationId?: string): Promise<BrowserTaskParallelInspection | null>
   inspectTaskRun(browserId: string, runId?: string): Promise<{ rootRunId: string; currentRunId: string; runs: BrowserTaskAssetRun[]; operationCount: number; executedMillis: number } | null>
   saveTaskAssetDraft(browserId: string, assetId: string, expectedRevision: number, content: unknown): Promise<BrowserTaskAsset>
   publishTaskAsset(browserId: string, assetId: string, expectedRevision: number): Promise<BrowserTaskAsset>
@@ -67,10 +69,14 @@ export async function executeBrowserTaskControl(value: unknown, owner: BrowserTa
     raw = { state: { ...state, runs: state.runs.filter(run => !run.parent) } }
   } else if (request.operation === 'browser.task.parallel') {
     raw = { run: await owner.runControlledTaskParallel(request.browserId, request.assetId, request.version, request.input, (target, profileId) => allowRun(automation, target, caller, profileId)) }
+  } else if (request.operation === 'browser.task.parallel-stop') {
+    raw = { run: await owner.stopTaskParallel(request.browserId, request.operationId) }
+  } else if (request.operation === 'browser.task.parallel-continue') {
+    raw = await owner.continueControlledTaskParallelTarget(request.browserId, request.operationId, request.targetId, request.input, (target, profileId) => allowRun(automation, target, caller, profileId))
   } else if (request.operation === 'browser.task.parallel-list') {
     raw = { history: await owner.listTaskParallel(request.browserId, request.before, request.limit) }
   } else if (request.operation === 'browser.task.parallel-inspect') {
-    raw = { inspection: await owner.inspectTaskParallel(request.browserId, request.operationId, request.after, request.limit) }
+    raw = { inspection: await owner.inspectTaskParallel(request.browserId, request.operationId, request.after, request.limit, request.continuationId) }
   } else if (request.operation === 'browser.task.inspect') {
     raw = { inspection: await owner.inspectTaskRun(request.browserId, request.runId) }
   } else if (request.operation === 'browser.task.edit') {
