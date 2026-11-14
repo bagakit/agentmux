@@ -2,6 +2,7 @@ import { parseNativeSubagents, agentHasActiveSubagents, subagentScopeMatches } f
 import { sessionUsageWindow, sessionUsageMeasurement, type AgentSessionUsagePage } from './agent-session-usage.js'
 import { parseAgentSessionRecordDeletion, deletedAgentSessionRecord } from './agent-session-record.js'
 import { agentNativeTurnEnd } from './agent-session-identity.js'
+import { finalPromptNativeResult } from './prompt-native-result.js'
 import { parseResumeResolution, type AgentMuxResumeResolution } from './agent-session-recovery/resume-resolution.js'
 import { assertPreparedResumeBinding, parseResumeResolutionRequest, resumeResolutionDigest, type ResumeResolutionRequest } from './agent-prepared-resume.js'
 import { parseAutomaticInputSource } from './automatic-input-source.js'
@@ -394,7 +395,7 @@ export function agentSessionMetadata(session: AgentMuxStoredAgentSession): Agent
   return metadata
 }
 
-function promptAdmissionRecords(session: AgentMuxStoredAgentSession | null | undefined): AgentPromptSubmissionRecord[] {
+function promptAdmissionRecords(session: AgentMuxStoredAgentSession | null | undefined, captureNativeSource = false): AgentPromptSubmissionRecord[] {
   if (!session) return []
   const admission = session.promptCompletionAdmission, terminal = session.terminalPromptSubmission
   const shared = admission && terminal && admission.submissionId === terminal.submissionId
@@ -412,6 +413,13 @@ function promptAdmissionRecords(session: AgentMuxStoredAgentSession | null | und
     run: initial.key.expectedRun, launch: initial })
   const idle = session.recoveryActivity
   for (const original of originals) {
+    const native = original.admission?.transport === 'native' ? original.admission.native : undefined
+    const handle = session.nativeHandle
+    if (captureNativeSource && native && handle?.kind === 'provider' && handle.providerId === session.providerId && native.plan.threadId === handle.sessionId)
+      original.nativeSource = { nativeHandle: structuredClone(handle), actorId: native.plan.actorId }
+    original.nativeResult = original.admission?.intent && original.admission.inputKey
+      ? original.admission.transport === 'native' ? { state: 'unknown', reason: 'native-outcome-unconfirmed' }
+        : { state: 'unsupported', reason: 'uncorrelated-carrier' } : { state: 'unknown', reason: 'not-recorded' }
     const inputId = original.admission?.submissionId ?? original.launch?.key?.submissionId
     if (inputId && !(subagentScopeMatches(session.nativeSubagents, session) && (session.nativeSubagents.unconfirmed || agentHasActiveSubagents(session.nativeSubagents))) && idle?.state === 'idle' && idle.nativeTurnId && idle.promptSubmissionId === inputId &&
         original.run.runId === idle.run.runId) {
@@ -431,6 +439,11 @@ function promptAdmissionRecords(session: AgentMuxStoredAgentSession | null | und
   }
   return structuredClone(originals)
 }
+
+function newPromptClaim(previous: AgentMuxStoredAgentSession | null | undefined, next: AgentMuxStoredAgentSession | null | undefined): boolean {
+  const key = next?.promptCompletionAdmission?.inputKey
+  return key !== undefined && !isDeepStrictEqual(previous?.promptCompletionAdmission?.inputKey, key)
+}
 function promptAdmissionRecord(session: AgentMuxStoredAgentSession | null | undefined): AgentPromptSubmissionRecord | null {
   return promptAdmissionRecords(session)[0] ?? null
 }
@@ -441,8 +454,17 @@ function promptRecordId(value: AgentPromptSubmissionRecord): string {
   return id === undefined ? JSON.stringify(['original-slot', value.admission?.operationId]) : JSON.stringify(['submission', id])
 }
 
+/** Native observation metadata may advance independently of this original input's ACK. */
+function samePromptReceiptClaim(original: AgentPromptSubmissionRecord | null | undefined, expected: AgentPromptSubmissionRecord): original is AgentPromptSubmissionRecord {
+  if (!original || expected.nativeSource && !isDeepStrictEqual(original.nativeSource, expected.nativeSource)) return false
+  const { nativeResult: _result, nativeSource: _source, ...claim } = original
+  const { nativeResult: _expectedResult, nativeSource: _expectedSource, ...expectedClaim } = expected
+  return isDeepStrictEqual(claim, expectedClaim)
+}
 
 function assertPromptSettlement(expected: AgentPromptSubmissionRecord, next: AgentPromptSubmissionRecord): void {
+  const { nativeResult: _oldResult, ...oldInput } = expected, { nativeResult: _newResult, ...newInput } = next
+  if (isDeepStrictEqual(oldInput, newInput)) return
   const { acknowledged: _ack, notApplied: _notApplied, native: _native, launch: _launch, ...originalClaim } = expected.admission ?? {}
   const { acknowledged: _nextAck, notApplied: _nextNotApplied, native: _nextNative, launch: _nextLaunch, ...nextClaim } = next.admission ?? {}
   const original = expected.admission, settled = next.admission
@@ -463,12 +485,20 @@ function assertPromptSettlement(expected: AgentPromptSubmissionRecord, next: Age
 
 /** Routine Session writes cannot rebind or settle an already claimed native or launch input. */
 function assertPromptRecordWrite(original: AgentPromptSubmissionRecord | undefined, next: AgentPromptSubmissionRecord, receipt = false): void {
+  if (original) {
+    if (original.nativeSource) next.nativeSource = structuredClone(original.nativeSource)
+    else delete next.nativeSource
+  }
+  // A qualified original native result is immutable; later activity cannot renew it.
+  if (finalPromptNativeResult(original?.nativeResult)) next.nativeResult = structuredClone(original!.nativeResult!)
+  if (original?.nativeResult && !finalPromptNativeResult(original.nativeResult) && !finalPromptNativeResult(next.nativeResult))
+    next.nativeResult = structuredClone(original.nativeResult)
   // The original input's first exact native idle is immutable. Later platform turns cannot renew its clock.
   if(original?.semanticIdle)next.semanticIdle=structuredClone(original.semanticIdle)
-  if(original&&next.semanticIdle) {
+  if(original&&(next.semanticIdle || next.nativeResult)) {
     parsePromptSubmissionRecord(next)
-    const {semanticIdle:_previous,...before}=original,{semanticIdle:_next,...after}=next
-    if(isDeepStrictEqual(before,after)&&(!original.semanticIdle||isDeepStrictEqual(original.semanticIdle,next.semanticIdle)))return
+    const {semanticIdle:_previous,nativeResult:_oldResult,...before}=original,{semanticIdle:_next,nativeResult:_newResult,...after}=next
+    if(isDeepStrictEqual(before,after))return
   }
   if (!original || isDeepStrictEqual(original, next)) return
   if (original.launch || next.launch) throw new AgentMuxError('An original Runtime launch input cannot be replaced by another carrier or body.', 'AGENT_PROMPT_OPERATION_CONFLICT')
@@ -2120,10 +2150,12 @@ function nativeTurnEnds(value: unknown): NonNullable<AgentMuxStoredAgentSession[
     turns: Object.fromEntries(Object.entries(record(source.turns, 'nativeTurnEnds.turns')).map(([turnId, value]) => {
       string(turnId, 'nativeTurnEnds native turn ID')
       const end = record(value, 'nativeTurnEnds end')
-      if (Object.keys(end).some(key => !['recordId', 'observedAt', 'nativeObservedAt', 'sequence'].includes(key))) {
+      if (Object.keys(end).some(key => !['recordId', 'observedAt', 'nativeObservedAt', 'sequence', 'endReason'].includes(key)) ||
+          end.endReason !== undefined && !['completed', 'interrupted', 'failed'].includes(String(end.endReason))) {
         throw new AgentMuxError('Native turn end contains an unknown field.', 'INVALID_AGENT_SESSION_STORE')
       }
       return [turnId, { recordId: string(end.recordId, 'nativeTurnEnds.recordId'),
+        ...(end.endReason === undefined ? {} : { endReason: end.endReason as 'completed' | 'interrupted' | 'failed' }),
         ...(end.sequence === undefined ? {} : { sequence: positiveInteger(end.sequence, 'nativeTurnEnds.sequence') }),
         observedAt: timestamp(end.observedAt, 'nativeTurnEnds.observedAt'),
         ...(end.nativeObservedAt === undefined ? {} : { nativeObservedAt: timestamp(end.nativeObservedAt, 'nativeTurnEnds.nativeObservedAt') }) }]
@@ -2956,7 +2988,8 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
   }
 
   private stageSession(id: string, next: AgentMuxStoredAgentSession | null): () => void {
-    const originals = [...promptAdmissionRecords(this.sessions.get(id)), ...promptAdmissionRecords(next)]
+    const previous = this.sessions.get(id)
+    const originals = [...promptAdmissionRecords(previous), ...promptAdmissionRecords(next, newPromptClaim(previous, next))]
     const writes = new Map<string, AgentPromptSubmissionRecord>()
     for (const value of originals) {
       const key = this.promptRecordKey(value)
@@ -2986,9 +3019,10 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
   async settlePromptAdmission(expected: AgentPromptSubmissionRecord, next: AgentPromptSubmissionRecord, signal?: AbortSignal): Promise<void> {
     this.assertMemoryRecordReadable(expected.agentSessionId)
 
-    signal?.throwIfAborted(); assertPromptRecordWrite(expected, next, true); assertPromptSettlement(expected, next)
+    signal?.throwIfAborted()
     const key = this.promptRecordKey(expected), current = this.promptAdmissions.get(expected.agentSessionId)?.get(key)
-    if (!isDeepStrictEqual(current, expected)) throw new AgentMuxError('The original Native receipt changed.', 'STALE_AGENT_SESSION')
+    if (!samePromptReceiptClaim(current, expected)) throw new AgentMuxError('The original Native receipt changed.', 'STALE_AGENT_SESSION')
+    assertPromptRecordWrite(current, next, true); assertPromptSettlement(current, next)
     const latest = this.sessions.get(expected.agentSessionId), projected = promptAdmissionRecord(latest)
     this.saveMemoryPromptAdmission(structuredClone(next))
     if (latest && projected && this.promptRecordKey(projected) === key) {
@@ -4000,11 +4034,11 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   async settlePromptAdmission(expected: AgentPromptSubmissionRecord, next: AgentPromptSubmissionRecord, signal?: AbortSignal): Promise<void> {
-    assertPromptRecordWrite(expected, next, true); assertPromptSettlement(expected, next)
     await this.enqueue(async () => {
       const id = expected.admission!.submissionId!
       const original = this.promptAdmission(this.db, expected.agentSessionId, expected.run, id)
-      if (!isDeepStrictEqual(original, expected)) throw new AgentMuxError('The original Native receipt changed.', 'STALE_AGENT_SESSION')
+      if (!samePromptReceiptClaim(original, expected)) throw new AgentMuxError('The original Native receipt changed.', 'STALE_AGENT_SESSION')
+      assertPromptRecordWrite(original, next, true); assertPromptSettlement(original, next)
       const latest = this.sessionMetadata(this.db, expected.agentSessionId), projected = promptAdmissionRecord(latest)
       if (latest && projected && projected.run.runId === expected.run.runId && promptRecordId(projected) === promptRecordId(expected)) {
         this.saveSession(this.db, { ...latest, promptCompletionAdmission: structuredClone(next.admission!),
@@ -5018,10 +5052,12 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     db.prepare('INSERT INTO prompt_admissions VALUES (?, ?, ?, ?) ON CONFLICT(session_id,run_id,record_id) DO UPDATE SET json=excluded.json')
       .run(value.agentSessionId, value.run.runId, promptRecordId(value), JSON.stringify(value))
   }
-  private preservePromptAdmission(db: DatabaseSync, id: string): void {
+  private preservePromptAdmission(db: DatabaseSync, id: string): AgentMuxStoredAgentSession | null {
     const row = db.prepare('SELECT json FROM sessions WHERE id=?').get(id)
     // Keep original stored fields before any normalization of the replacement.
-    for (const original of row ? promptAdmissionRecords(JSON.parse(String(row.json)) as AgentMuxStoredAgentSession) : []) this.savePromptAdmission(db, original)
+    const previous = row ? JSON.parse(String(row.json)) as AgentMuxStoredAgentSession : null
+    for (const original of promptAdmissionRecords(previous)) this.savePromptAdmission(db, original)
+    return previous
   }
   private deleteSession(db: DatabaseSync, id: string): void {
     this.preservePromptAdmission(db, id)
@@ -5030,7 +5066,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     db.prepare('DELETE FROM run_bindings WHERE session_id=?').run(id)
     db.prepare('DELETE FROM native_bindings WHERE session_id=?').run(id)
   }
-  private saveSession(db: DatabaseSync, session: AgentMuxStoredAgentSession, replaceFuture: boolean, receipt = false): void {
+  private saveSession(db: DatabaseSync, session: AgentMuxStoredAgentSession, replaceFuture: boolean, receipt = false, captureNewInput = true): void {
     const id = session.agentSessionId, metadata = agentSessionMetadata(session)
     const retired = db.prepare('SELECT 1 FROM retired_sessions WHERE id=?').get(id)
     if (retired) throw new AgentMuxError('Retired Agent Session conflicts with current identity.', 'INVALID_AGENT_SESSION_STORE')
@@ -5049,8 +5085,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     }
     const present = replaceFuture || session.futurePromptIntents !== undefined ? Number(session.futurePromptIntents !== undefined)
       : Number(db.prepare('SELECT future_present FROM sessions WHERE id=?').get(id)?.future_present ?? 0)
-    this.preservePromptAdmission(db, id)
-    for (const original of promptAdmissionRecords(session)) this.savePromptAdmission(db, original, receipt)
+    const previous = this.preservePromptAdmission(db, id)
+    for (const original of promptAdmissionRecords(session, captureNewInput && newPromptClaim(previous, session))) this.savePromptAdmission(db, original, receipt)
     db.prepare('INSERT INTO sessions VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET json=excluded.json,future_present=excluded.future_present,creation_operation=excluded.creation_operation')
       .run(id, JSON.stringify(metadata), present, session.creation?.createOperationId ?? null)
     db.prepare('DELETE FROM run_bindings WHERE session_id=?').run(id)
@@ -5274,7 +5310,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     // Lifecycle transitions can exchange current/retired ownership in this same transaction.
     db.exec('DELETE FROM run_bindings; DELETE FROM native_bindings')
     for (const run of document.retiredRuns) db.prepare('INSERT INTO run_bindings VALUES (?, NULL)').run(run.runId)
-    for (const session of document.sessions) this.saveSession(db, session, false)
+    for (const session of document.sessions) this.saveSession(db, session, false, false, false)
   }
 
   private timelinePath(agentSessionId: string): string {

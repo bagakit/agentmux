@@ -1407,7 +1407,20 @@ export type AgentInputActivity = {
 }
 
 /** Original Session-owner record; legacy missing identity/source remains missing. */
+export type AgentPromptNativeResult =
+  | { state: 'unknown'; reason: 'not-recorded' | 'native-input-unconfirmed' | 'native-outcome-unconfirmed' }
+  | { state: 'unsupported'; reason: 'uncorrelated-carrier' }
+  | { state: 'completed' | 'failed' | 'interrupted'; run: AgentMuxRunRef; promptSubmissionId: string;
+      sourceId: string; nativeSessionId: string; nativeTurnId: string; recordId: string;
+      observedAt: number; nativeObservedAt?: number; sequence?: number;
+      correlation: { kind: 'native-ack'; clientCorrelation: string } |
+        { kind: 'native-adoption'; clientCorrelation: string; queuedSubmissionId: string; nativeRecordId: string } }
+
 export type AgentPromptSubmissionRecord = {
+  /** Frozen by the original native claim; later locator changes never fill or replace it. Private input receipt only. */
+  nativeSource?: { nativeHandle: Extract<AgentNativeSessionHandle, { kind: 'provider' }>; actorId: string }
+  /** Exact native input outcome, separate from returned-idle and task/Goal acceptance. Missing legacy data is unknown. */
+  nativeResult?: AgentPromptNativeResult
   /** Original ordered native idle on this exact admitted input; not live activity or task completion. */
   semanticIdle?: AgentPromptSemanticIdle
   /** Original Runtime launch carrier; never a PTY or Provider acceptance ACK. */
@@ -1660,7 +1673,9 @@ export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngress
     run: AgentMuxRunRef
     providerId: AgentProviderId
     nativeHandle: AgentNativeSessionHandle
-    turns: Record<string, { recordId: string; observedAt: number; nativeObservedAt?: number; sequence?: number }>
+    turns: Record<string, { recordId: string; observedAt: number; nativeObservedAt?: number; sequence?: number;
+      /** Only the original typed Provider end supplies this; old ends stay unknown. */
+      endReason?: NonNullable<AgentPromptExecutionEvidence['endReason']> }>
   }
   /** Exact native interaction completions; delayed Hook reports cannot reopen the same call. Private to Core. */
   nativeInteractionEnds?: {

@@ -10,6 +10,7 @@ import { agentPromptInputId, validateAgentLaunchPromptInputPlan, validateAgentPr
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { dequal } from 'dequal'
+import { nativeInputCorrelationKey } from './native-input-correlation.js'
 import type { AgentMuxRunRef, AgentMuxStoredAgentSession, AgentPromptInputPlan, AgentPromptSubmissionRecord, AgentTerminalPromptReadinessSource } from './types.js'
 
 /** Pure original-input record decoding, shared by durable storage and public receipts. */
@@ -82,6 +83,7 @@ export function parsePromptSubmissionRecord(value: unknown): AgentPromptSubmissi
   const r = record(value, 'original prompt record'), run = runRef(r.run)
   const parsed: AgentPromptSubmissionRecord = {
     agentSessionId: string(r.agentSessionId, 'original prompt Session'), run,
+    nativeResult: { state: 'unknown', reason: 'not-recorded' },
     ...(r.launch === undefined ? {} : { launch: normalizeAgentContinuityLaunchInput(r.launch) }),
     ...(r.admission === undefined ? {} : { admission: normalizePromptCompletionAdmission(r.admission) }),
     ...(r.terminalPromptSubmission === undefined ? {} : { terminalPromptSubmission: terminalPromptSubmission(r.terminalPromptSubmission, run) })
@@ -116,6 +118,50 @@ export function parsePromptSubmissionRecord(value: unknown): AgentPromptSubmissi
       (inputKey.agentSessionId !== parsed.agentSessionId || inputKey.expectedRun.runId !== run.runId ||
         agentPromptInputId(inputKey) !== parsed.admission?.submissionId)) throw new AgentMuxError(
     'The original input record changed its Session, Run or logical identity.', 'INVALID_AGENT_SESSION_STORE')
+  if (r.nativeSource !== undefined) {
+    const source = record(r.nativeSource, 'native input source'), handle = record(source.nativeHandle, 'native input locator')
+    const claim = parsed.admission
+    if (claim?.transport !== 'native' || source.actorId !== claim.native.plan.actorId || handle.kind !== 'provider' ||
+        handle.sessionId !== claim.native.plan.threadId || claim.native.plan.sourceId !== JSON.stringify([handle.providerId, handle.sessionId]) ||
+        Object.keys(source).some(key => !['nativeHandle', 'actorId'].includes(key)) ||
+        Object.keys(handle).some(key => !['kind', 'providerId', 'sessionId', 'transcriptPath'].includes(key)))
+      throw new AgentMuxError('The native locator does not belong to this original input.', 'INVALID_AGENT_SESSION_STORE')
+    parsed.nativeSource = { actorId: string(source.actorId, 'native input actor'), nativeHandle: { kind: 'provider',
+      providerId: string(handle.providerId, 'native input Provider'), sessionId: string(handle.sessionId, 'native input Session'),
+      ...(handle.transcriptPath === undefined ? {} : { transcriptPath: string(handle.transcriptPath, 'native input path', MAX_STORED_TEXT_BYTES) }) } }
+  }
+  if (r.nativeResult !== undefined) {
+    const result = record(r.nativeResult, 'original native result'), state = result.state
+    const invalid = () => { throw new AgentMuxError('The native result does not belong to this original input.', 'INVALID_AGENT_SESSION_STORE') }
+    if (state === 'unknown' || state === 'unsupported') {
+      if (Object.keys(result).some(key => !['state', 'reason'].includes(key)) ||
+          (state === 'unsupported' ? result.reason !== 'uncorrelated-carrier' :
+            !['not-recorded', 'native-input-unconfirmed', 'native-outcome-unconfirmed'].includes(String(result.reason)))) invalid()
+      parsed.nativeResult = result as NonNullable<AgentPromptSubmissionRecord['nativeResult']>
+    } else {
+      const claim = parsed.admission, plan = claim?.transport === 'native' ? claim.native.plan : undefined
+      const correlation = record(result.correlation, 'native result correlation')
+      if (!['completed', 'failed', 'interrupted'].includes(String(state)) || Object.keys(result).some(key =>
+          !['state', 'run', 'promptSubmissionId', 'sourceId', 'nativeSessionId', 'nativeTurnId', 'recordId', 'observedAt', 'nativeObservedAt', 'sequence', 'correlation'].includes(key)) ||
+          claim?.transport !== 'native' || claim.native.outcome !== 'admitted' || !claim.acknowledged || !plan?.clientCorrelation || !parsed.nativeSource ||
+          !dequal(nativeInputCorrelationKey(plan.clientCorrelation), inputKey) || !dequal(claim.intent?.plan, plan) ||
+          result.promptSubmissionId !== claim.submissionId || runRef(result.run).runId !== run.runId ||
+          result.sourceId !== plan.sourceId || result.nativeSessionId !== plan.threadId ||
+          correlation.clientCorrelation !== plan.clientCorrelation || !dequal(Object.keys(correlation).sort(),
+            (correlation.kind === 'native-ack' ? ['kind', 'clientCorrelation'] : ['kind', 'clientCorrelation', 'queuedSubmissionId', 'nativeRecordId']).sort()) ||
+          (correlation.kind === 'native-ack' ? claim.native.turnId !== result.nativeTurnId :
+            correlation.kind !== 'native-adoption' || !claim.native.queuedSubmissionId || correlation.queuedSubmissionId !== claim.native.queuedSubmissionId ||
+            typeof correlation.nativeRecordId !== 'string' || !correlation.nativeRecordId)) invalid()
+      parsed.nativeResult = { state: state as 'completed' | 'failed' | 'interrupted', run,
+        promptSubmissionId: string(result.promptSubmissionId, 'native result input'),
+        sourceId: string(result.sourceId, 'native result source'), nativeSessionId: string(result.nativeSessionId, 'native result conversation'),
+        nativeTurnId: string(result.nativeTurnId, 'native result turn'), recordId: string(result.recordId, 'native result record'),
+        observedAt: timestamp(result.observedAt, 'native result time'),
+        ...(result.nativeObservedAt === undefined ? {} : { nativeObservedAt: timestamp(result.nativeObservedAt, 'native result native time') }),
+        ...(result.sequence === undefined ? {} : { sequence: positiveInteger(result.sequence, 'native result sequence') }),
+        correlation: correlation as Extract<NonNullable<AgentPromptSubmissionRecord['nativeResult']>, { state: 'completed' | 'failed' | 'interrupted' }>['correlation'] }
+    }
+  }
   return parsed
 }
 

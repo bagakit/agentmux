@@ -55,7 +55,10 @@ export async function confirmNativeInputAdoption(item: AgentSessionHistoryItem, 
       target?.kind === 'exact-condition' && isDeepStrictEqual(target.condition.expectedRun, key.expectedRun) &&
       (intent.execution ?? 'default') === 'default' && plan.operation === 'queue-idle' && plan.expectedTurnId === undefined &&
       frozenContent
-    if (!addressed && !defaultInput && !sessionInput && !notification) return unconfirmed()
+    const future = key.kind === 'prompt' && claim.futureIntent !== undefined &&
+      target?.kind === 'exact-condition' && isDeepStrictEqual(target.condition.expectedRun, key.expectedRun) &&
+      (intent.execution ?? 'default') === 'default' && plan.operation === 'queue-idle' && plan.expectedTurnId === undefined && frozenContent
+    if (!addressed && !defaultInput && !sessionInput && !notification && !future) return unconfirmed()
     return { ...original, conversation: { ...conversation, adoptedInput: { key, ...(notification ? { purpose: 'a2a-notification' as const } : {}) } } }
   } catch {
     signal?.throwIfAborted()

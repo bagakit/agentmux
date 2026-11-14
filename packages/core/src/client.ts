@@ -175,6 +175,7 @@ import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
 import { observeMessageJournal } from './agent-message-observer.js'
 import { agentPromptCondition, agentPromptInputId, agentPromptNotApplied, validateAgentPromptAdmissionIntent, validateAgentPromptCondition, validateAgentPromptInputKey, type AgentPromptAdmissionIntent, type AgentPromptInputKey } from './agent-prompt-condition.js';
 import { agentTurnCompletionIdentity, agentTurnEndEvidence, agentNativeTurnEnd, nativeTurnEndScopeMatches, agentNativeInteractionEnd, nativeInteractionEndScopeMatches, cloneSession, sameNativeHandle, sameRun } from './agent-session-identity.js'
+import { finalPromptNativeResult, promptNativeResult, queuedPromptNativeResult } from './prompt-native-result.js'
 import { transitionAgentSemanticStatus } from './agent-semantic-state.js'
 import { agentEvidenceStale, observeAgent, currentAgentSemanticStatus } from './agent-status-freshness.js';
 import { runDisplayState } from './agent-run-status.js'
@@ -3887,8 +3888,14 @@ export class AgentMuxClient {
       controller.signal.throwIfAborted()
       await read(binding.assertCurrent())
       const normalized = normalizeSessionHistoryPage(source, page, limit)
+      const nativeInputCoverage = page.items.length === normalized.items.length && page.items.every((item, index) =>
+        isDeepStrictEqual(item.conversation?.nativeInput, normalized.items[index]?.conversation?.nativeInput))
       const items = await read(confirmNativeInputAdoptions(normalized.items, { hostId: binding.sourceHostId, agentSessionId }, source, key => this.inspectAgentPromptSubmission(key), controller.signal))
       await this.observeNotificationAdoptions(items)
+      // A single page/record is only an adoption candidate. Only this original
+      // whole cut may settle a queued input; no extra history scan is started.
+      if (nativeInputCoverage && options.cursor === undefined && normalized.nextCursor === null && normalized.changesCursor)
+        await this.observeQueuedPromptResults(agentSessionId, source, items, controller.signal, () => binding.assertCurrent())
       return { agentSessionId, sourceHostId: binding.sourceHostId, ...normalizeSessionHistoryPage(source, { ...normalized, items }, limit) }
     } finally {
       options.signal?.removeEventListener('abort', cancelled)
@@ -3942,6 +3949,36 @@ export class AgentMuxClient {
       await this.observeNotificationAdoptions(items)
       return { ...normalized, items: normalizeSessionHistoryPage(source, { source, items, nextCursor: null }, limit).items }
     } finally { options.signal?.removeEventListener('abort', cancel); lifetime.close() }
+  }
+
+  /** Persist only qualified original queue results already read in one complete native cut. */
+  private async observeQueuedPromptResults(agentSessionId: string, source: AgentSessionHistorySource,
+    items: readonly AgentSessionHistoryItem[], signal: AbortSignal, assertCurrent: () => Promise<void>): Promise<void> {
+    const keys = new Map<string, AgentPromptInputKey>()
+    for (const item of items) {
+      const key = item.conversation?.adoptedInput?.key
+      if (key?.agentSessionId === agentSessionId) keys.set(JSON.stringify(key), key)
+    }
+    for (const key of keys.values()) {
+      const run = key.expectedRun
+      try {
+        signal.throwIfAborted()
+        const record = await this.inspectAgentPromptSubmission(key)
+        if (!record || finalPromptNativeResult(record.nativeResult)) continue
+        const result = queuedPromptNativeResult(record, source, items)
+        if (!result) continue
+        await assertCurrent()
+        const session = await this.store.readMetadata(agentSessionId)
+        if (!session || !sameRun(session.run, run) || session.providerId !== source.providerId || session.nativeHandle?.kind !== 'provider' ||
+            session.nativeHandle.sessionId !== source.nativeSessionId || !record.nativeSource || !sameNativeHandle(record.nativeSource.nativeHandle, session.nativeHandle)) continue
+        await this.store.settlePromptAdmission(record, { ...record, nativeResult: result }, signal)
+      } catch (error) {
+        signal.throwIfAborted()
+        this.publisher.publish({ type: 'agent-error', agentSessionId, code: 'AGENT_NATIVE_RESULT_UNCONFIRMED',
+          message: 'The original queued input result could not be retained. Its original key and input remain available: ' + String(error),
+          evidence: { source: 'agentmux', run: { ...run }, observedAt: Date.now() } })
+      }
+    }
   }
 
   /** Read exact recorded content in its original native source; caller fields never authorize a path. */
@@ -6946,6 +6983,20 @@ export class AgentMuxClient {
       key = validateAgentPromptInputKey(key)
       const original = await this.store.readPromptAdmission(key.agentSessionId, key.expectedRun, agentPromptInputId(key))
       if (original?.admission?.inputKey && !isDeepStrictEqual(original.admission.inputKey, key)) throw new AgentMuxError('The input key names another original producer.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+      if (original?.admission?.transport === 'native' && original.nativeSource && !finalPromptNativeResult(original.nativeResult)) {
+        try {
+          const session = await this.store.readMetadata(key.agentSessionId)
+          const result = session && promptNativeResult(original, session)
+          if (result && finalPromptNativeResult(result)) {
+            const next = { ...original, nativeResult: result }
+            await this.store.settlePromptAdmission(original, next); return next
+          }
+        } catch (error) {
+          this.publisher.publish({ type: 'agent-error', agentSessionId: key.agentSessionId, code: 'AGENT_NATIVE_RESULT_UNCONFIRMED',
+            message: 'The original native result could not be observed or retained; its input remains readable: ' + String(error),
+            evidence: { source: 'agentmux', run: { ...key.expectedRun }, observedAt: Date.now() } })
+        }
+      }
       return original
     })
   }
@@ -10492,6 +10543,7 @@ export class AgentMuxClient {
                 const end = Object.hasOwn(previous, observation.nativeTurnId) ? previous[observation.nativeTurnId]! : {
                   recordId: observation.recordId, observedAt: Date.now(),
                   ...(observation.sequence === undefined || observation.sequence < 1 ? {} : { sequence: observation.sequence }),
+                  ...(observation.endReason === undefined ? {} : { endReason: observation.endReason }),
                   ...(observation.nativeObservedAt === undefined ? {} : { nativeObservedAt: observation.nativeObservedAt }) }
                 saved = { ...saved, nativeTurnEnds: { run: { ...saved.run }, providerId: saved.providerId,
                   nativeHandle: structuredClone(saved.nativeHandle!), turns: { ...previous, [observation.nativeTurnId]: end } } }
