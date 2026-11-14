@@ -31,7 +31,7 @@ export function MobileConversationStatusDetails({ status, onConnection }: {
   const connectionIssue = status.connection.issue ?? (status.connection.state !== 'connected' ? status.connection.message : null)
   return <section className="mobile-session-diagnostic" data-conversation-status={status.metadata.state}>
     <h3>{historical ? '历史对话' : status.metadata.state === 'deleted' ? '对话记录已删除' : '对话状态'}</h3>
-    {historical ? <p>这段对话已退役，保留的历史仍可阅读。原会话身份和本设备上的草稿仍保留。</p>
+    {historical ? <p>这段对话已转入历史，内容仍可阅读。原会话身份和当前草稿仍保留。</p>
       : status.metadata.state === 'deleted' ? <p>Core 已确认这段记录被删除。本设备保留的草稿和请求仍可查看。</p>
       : status.metadata.state === 'loading' ? <p>正在读取对话信息。</p>
       : status.metadata.state === 'unconfirmed' ? <p>暂时读不到对话信息。草稿会保留，可重新核对原对话。</p> : null}
