@@ -57,6 +57,8 @@ Run is online, an arrangement is active, or the model has adopted this guidance.
 
 ## Know your part in this Mote
 
+[supervision](../shared/mote-supervision.md "amux:include")
+
 New Mote launches and the next explicit human input from a confirmed Mote workface can
 carry a platform reminder to discover this guide. Reuse it if already read in this context;
 the reminder does not prove role adoption or change a Session by itself.
