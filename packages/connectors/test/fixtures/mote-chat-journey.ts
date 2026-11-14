@@ -39,7 +39,7 @@ const cleanup: Array<() => void | Promise<void>> = []
 afterEach(async () => { try { for (const close of cleanup.splice(0).reverse()) await close() } finally { vi.restoreAllMocks(); vi.unstubAllEnvs() } })
 type DirectMessage = SignedRoomMessage & { nativeKind: 'direct' | 'group' }
 
-export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversationIdleMs = 60_000, mode: 'desktop' | 'headless' = 'desktop', nativeAfterInput = false, nativeProvider: 'claude' | 'grok' | 'codex' = 'claude', publicationHttp?: (call: FeishuHttpCall) => FeishuHttpResponse | undefined, mainMode?: 'bound' | 'unbound', publicationMode: 'feishu' | 'signed-room' = 'feishu', execution: 'local' | 'remote' = 'local', native?: { adapter: ConnectionAdapter; application: ConnectionApplication; credential: string }) {
+export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversationIdleMs = 60_000, mode: 'desktop' | 'headless' = 'desktop', nativeAfterInput = false, nativeProvider: 'claude' | 'grok' | 'codex' = 'claude', publicationHttp?: (call: FeishuHttpCall) => FeishuHttpResponse | undefined, mainMode?: 'bound' | 'unbound', publicationMode: 'feishu' | 'signed-room' = 'feishu', execution: 'local' | 'remote' = 'local', native?: { adapter: ConnectionAdapter; application: ConnectionApplication; credential: string }, nativeProcessEnabled = Boolean(native)) {
   const publicationRefresh = vi.spyOn(PublicationHost.prototype, 'refresh')
   class FixtureHostClient extends core.AgentMuxClient {
     constructor(options: core.AgentMuxClientOptions) {
@@ -57,7 +57,7 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
   const feishu = nativeProvider !== 'claude' && publicationMode === 'feishu' ? await feishuPublicationHttp(publicationHttp) : undefined
   if (feishu) cleanup.push(feishu.close)
   const nativeProcesses: Array<Awaited<ReturnType<typeof moteChatNativeProcess>>> = []
-  if (native) cleanup.push(async () => { for (const process of nativeProcesses.splice(0).reverse()) await process.close() })
+  if (nativeProcessEnabled) cleanup.push(async () => { for (const process of nativeProcesses.splice(0).reverse()) await process.close() })
   cleanup.push(async () => {
     try { await original.close() } catch (error) {
       // Aborted original read observers can finish their owned receipt write after dispose.
@@ -93,7 +93,7 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
     const resumeIndex = input.args.indexOf('--resume'), resumed = resumeIndex < 0 ? undefined : [...sources.values()].find(source => source.id === input.args[resumeIndex + 1])
     if (resumeIndex >= 0 && !resumed) throw new Error('Resume must retain an existing original native conversation')
     const id = resumed?.id ?? `native-chat-${number}`
-    const nativeProcess = native ? await moteChatNativeProcess(id, topic.physicalDirectoryPath!, input.env ?? {}) : undefined
+    const nativeProcess = nativeProcessEnabled ? await moteChatNativeProcess(id, topic.physicalDirectoryPath!, input.env ?? {}) : undefined
     if (nativeProcess) nativeProcesses.push(nativeProcess)
     const pid = nativeProcess?.processId ?? 400_000 + number
     const path = nativeProcess?.source ?? resumed?.path ?? (nativeProvider === 'grok'
@@ -102,7 +102,7 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
       await mkdir(join(path, '..'), { recursive: true })
       await writeFile(join(path, '..', 'summary.json'), JSON.stringify({ info: { id, cwd: topic.physicalDirectoryPath! } }))
     }
-    if (!native && !resumed && !nativeAfterInput) await writeFile(path, JSON.stringify(nativeProvider === 'grok' ? grokUpdate(id, { sessionUpdate: 'current_mode_update', currentModeId: 'chat' }) : { sessionId: id, uuid: 'original-context', type: 'system', message: { role: 'system', content: 'Native system context' } }) + '\n')
+    if (!nativeProcessEnabled && !resumed && !nativeAfterInput) await writeFile(path, JSON.stringify(nativeProvider === 'grok' ? grokUpdate(id, { sessionUpdate: 'current_mode_update', currentModeId: 'chat' }) : { sessionId: id, uuid: 'original-context', type: 'system', message: { role: 'system', content: 'Native system context' } }) + '\n')
     const run = { ...original.run(runId), lifecycleOperationId: input.operationKey ?? null, program: nativeProvider, pid, workspacePath: topic.physicalDirectoryPath! }
     runs.set(runId, run); sources.set(pid, { id, path })
     if (nativeProvider === 'grok') {
@@ -132,7 +132,7 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
     return { ...receipt, run: { ...runs.get(args[0])!, acceptedInputBytes: receipt.run.acceptedInputBytes } }
   })
   const hookErrors: string[] = []
-  if (native || nativeProvider === 'grok') {
+  if (nativeProcessEnabled || nativeProvider === 'grok') {
     const hooks = new AgentHookServer((event, signal) => Reflect.get(client, 'acceptHookEvent').call(client, event, signal), 0)
     await hooks.start(); Reflect.set(client, 'hookServer', hooks)
     const observeOutput = inner.kernel.observeOutput as (id: string, after: number, listener: unknown) => Promise<Record<string, unknown>>

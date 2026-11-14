@@ -2,6 +2,7 @@ import { expect, it, vi } from 'vitest'
 import { AgentMuxError, type AgentMuxStoredAgentSession, type AgentProviderInputInitialization } from '@agentmux/core'
 import { DEFAULT_AGENT_CONTINUITY_POLICY } from '../../core/src/agent-session-recovery/continuity-contract.js'
 import { moteChatDiagnosisKey } from '@agentmux/core/mote-chat'
+import { nativeInputCorrelationKey } from '../../core/src/native-input-correlation.js'
 import { MoteChatStore } from '../src/mote-chat-store.js'
 import { moteChatJourneyFixture as fixture } from './fixtures/mote-chat-journey.js'
 
@@ -29,7 +30,7 @@ it('projects an actual original Core initialization wait through public RPC and 
   const cli = await f.cli('diagnose', { target: f.target }, f.credentials(0))
   expect(cli.incoming.rows.find((row: { key: string }) => row.key === key).input).toEqual(original)
   const denied = await f.cliRaw('inspect', { target: f.target }, f.credentials(0))
-  expect(denied.code).toBe(1); expect(JSON.parse(denied.stdout).error.code).toBe('CONTROL_PERMISSION_DENIED')
+  expect(denied.code).toBe(1); expect(JSON.parse(denied.stderr).error.code).toBe('CONTROL_PERMISSION_DENIED')
   for (const secret of [f.root, record.body, record.ingressId, record.input!.agentSessionId, record.input!.expectedRun.runId,
     record.input!.operationId, f.lanePerson.userId, 'observedAt', 'nativeSessionId', 'providerId', 'canRetry']) expect(JSON.stringify(cli)).not.toContain(secret)
   expect((await f.records()).find(row => row.ingressId === record.ingressId)!.input).toEqual(record.input)
@@ -42,7 +43,10 @@ it('projects an actual original Core initialization wait through public RPC and 
 it('relates each frozen input only through its exact Session snapshot and canonical resume sources', async () => {
   const f = await fixture(2, 60_000, 'headless')
   for (const id of ['original-one', 'original-two']) { expect(await f.wire.post(f.message(id))).toBe(202); await f.claimed(id) }
-  await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledTimes(2))
+  await vi.waitFor(async () => {
+    for (const row of await f.records()) expect((await f.services.ingress!.inspect({ ingressId: row.ingressId })).inputReceipt)
+      .toMatchObject({ status: 'waiting', control: { state: 'enabled' } })
+  })
   const records = await f.records(), frozen = records[0]!.input!, sid = frozen.agentSessionId
   const initial = (await f.store.readMetadata(sid))!, nextRun = { runId: 'diagnosis-successor' }, at = initial.updatedAt + 1
   if (initial.nativeHandle?.kind !== 'provider') throw Error('The original fixture must retain a native target')
@@ -81,7 +85,8 @@ it('relates each frozen input only through its exact Session snapshot and canoni
   await f.store.compareAndSwapMetadata(retiredOnly, { ...retiredOnly, continuity: { ...resumed.continuity!, operationId: 'diagnosis-wrong-native', nativeTarget: { ...nativeTarget, sessionId: 'different-native-target' } } })
   await report('unconfirmed', 'changed')
   const mismatch = (await f.store.readMetadata(sid))!
-  await f.store.compareAndSwapMetadata(mismatch, { ...mismatch, continuity: { ...resumed.continuity!, operationId: 'diagnosis-ambiguous-native' } })
+  await f.store.compareAndSwapMetadata(mismatch, { ...mismatch, continuity: { ...resumed.continuity!, operationId: 'diagnosis-ambiguous-native' },
+    continuityOperations: { 'diagnosis-wrong-native': mismatch.continuity!, 'diagnosis-ambiguous-native': { ...resumed.continuity!, operationId: 'diagnosis-ambiguous-native' } } })
   await report('unconfirmed', 'changed')
   const ambiguous = (await f.store.readMetadata(sid))!, confirmedRun = { runId: 'diagnosis-confirmed-successor' }
   await f.store.compareAndSwapMetadata(ambiguous, { ...ambiguous, run: confirmedRun,
@@ -101,21 +106,35 @@ it('relates each frozen input only through its exact Session snapshot and canoni
   read.mockRestore()
   expect((await f.records()).map(row => row.input)).toEqual(records.map(row => row.input))
   expect(records.map(row => store.admissionByIngress(row.ingressId))).toEqual(admissions); expect(store.configuration(f.target.spaceId)).toEqual(configuration)
-  expect(rejoin).not.toHaveBeenCalled(); expect(f.start).toHaveBeenCalledOnce(); expect(f.inner.kernel.input).toHaveBeenCalledTimes(2)
+  expect(rejoin).not.toHaveBeenCalled(); expect(f.start).toHaveBeenCalledOnce(); expect(f.inner.kernel.input).not.toHaveBeenCalled()
   expect(f.wire.effects).toHaveLength(0)
 }, 20_000)
 
 it('keeps an actual dispatch-authorized unknown receipt closed without target reads or replay', async () => {
-  const f = await fixture(1, 60_000, 'headless')
-  vi.mocked(f.inner.kernel.input as () => Promise<unknown>).mockRejectedValueOnce(new Error('PRIVATE_DISPATCH_RESULT_UNAVAILABLE'))
+  const f = await fixture(1, 60_000, 'headless', false, 'claude', undefined, undefined, 'feishu', 'local', undefined, true)
   expect(await f.wire.post(f.message('original-unknown'))).toBe(202)
   const record = await f.claimed('original-unknown')
-  await vi.waitFor(async () => expect((await f.services.ingress!.inspect({ ingressId: record.ingressId })).inputReceipt)
-    .toMatchObject({ status: 'unknown', observation: 'closed', control: { state: 'dispatch-authorized' } }))
+  await vi.waitFor(async () => {
+    const receipt = (await f.services.ingress!.inspect({ ingressId: record.ingressId })).inputReceipt
+    expect(receipt, JSON.stringify({ status: receipt?.status, waiting: receipt?.control.waiting, errors: f.submissionErrors }))
+      .toMatchObject({ status: 'unknown', observation: 'closed', control: { state: 'dispatch-authorized' } })
+  }, { timeout: 5_000 })
+  await vi.waitFor(() => expect(f.nativeInputs()).toHaveLength(1), { timeout: 5_000 })
+  const before = (await f.services.ingress!.inspect({ ingressId: record.ingressId })).inputReceipt!
+  const correlation = before.admission!.admission!.native!.plan.clientCorrelation
+  expect(nativeInputCorrelationKey(correlation!)).toEqual(before.key)
+  // A queue consumer witnesses this input; the no-ACK transport receipt remains unknown.
+  const history = await f.client.sessionHistoryPage(record.input!.agentSessionId, { limit: 5 })
+  const consumer = history.items.find(item => item.conversation?.nativeInput?.clientCorrelation === correlation)
+  expect(consumer?.conversation).toMatchObject({ nativeInput: { clientCorrelation: correlation, queuedSubmissionId: correlation }, adoptedInput: { key: before.key } })
+  const after = (await f.services.ingress!.inspect({ ingressId: record.ingressId })).inputReceipt!
+  expect(after).toEqual(before)
+  expect(after.admission).toMatchObject({ nativeResult: { state: 'unknown', reason: 'native-outcome-unconfirmed' }, admission: { transport: 'native', native: { outcome: 'unknown' } } })
   const runtime = vi.spyOn(f.services.ingress!, 'inspectInputRuntime'), rejoin = vi.spyOn(f.client, 'rejoinAgentInputWaiting')
   const cli = await f.cli('diagnose', { target: f.target }, f.credentials(0))
   expect(cli.incoming.rows[0].input).toMatchObject({ status: 'unknown', controlState: 'dispatch-authorized', receiptObservation: 'closed', runtime: null })
   expect(runtime).not.toHaveBeenCalled(); expect(rejoin).not.toHaveBeenCalled()
   expect((await f.records())[0]!.input).toEqual(record.input)
-  expect(f.inner.kernel.input).toHaveBeenCalledOnce(); expect(f.start).toHaveBeenCalledOnce(); expect(f.wire.effects).toHaveLength(0)
+  expect(f.nativeInputs()).toHaveLength(1); expect(f.inner.kernel.input).not.toHaveBeenCalled()
+  expect(f.start).toHaveBeenCalledOnce(); expect(f.wire.effects).toHaveLength(0)
 }, 20_000)

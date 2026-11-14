@@ -49,8 +49,6 @@
   },
   "include": [
     "../../core/test/mote-chat-diagnosis.test.ts",
-    "mote-chat-waiting.integration.test.ts",
-    "mote-chat-diagnosis.integration.test.ts",
     "mote-input-diagnosis.integration.test.ts",
     "vitest.mote-input-diagnosis.config.mts"
   ]

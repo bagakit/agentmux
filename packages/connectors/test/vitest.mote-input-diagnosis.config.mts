@@ -62,8 +62,6 @@ export default defineConfig({ ...original, root, cacheDir: resolve(root, '.local
     return { code: `import { appendFileSync as __moteInputTrace } from 'node:fs'; __moteInputTrace(${JSON.stringify(trace)}, JSON.stringify({ ...${facts}, consumerPid: process.pid }) + ${JSON.stringify('\n')});\n` + loaded, map: null }
   } }, ...original.plugins!], test: { ...original.test, include: [
     'packages/core/test/mote-chat-diagnosis.test.ts',
-    'packages/connectors/test/mote-chat-waiting.integration.test.ts',
-    'packages/connectors/test/mote-chat-diagnosis.integration.test.ts',
     'packages/connectors/test/mote-input-diagnosis.integration.test.ts'
   ], globalSetup: [], passWithNoTests: false, fileParallelism: false, maxWorkers: 1 }
 })

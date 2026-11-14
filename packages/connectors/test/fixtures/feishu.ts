@@ -1,7 +1,7 @@
 import { vi } from 'vitest'
 import { defaultHttpInstance, WSClient, type HttpInstance } from '@larksuiteoapi/node-sdk'
 import type { ConnectionConfig } from '@agentmux/core/connections'
-import type { ConnectionIngressTransport, DurableIngressHost } from '../../dist/index.js'
+import type { ConnectionIngressTransport, DurableIngressHost } from '../../src/index.js'
 
 export const feishuConfig: ConnectionConfig = { connectionId: 'feishu-connection', adapterId: 'feishu', application: { domain: 'open.feishu.cn', appId: 'cli_0123456789abcdef' }, label: 'Team bot', enabled: true, credentialRef: 'host-credential' }
 export const botOpenId = 'original-bot-open-id'
