@@ -1,3 +1,4 @@
+import { workbenchReturnContext } from '../lib/workbench-return-context'
 import type { SpaceCloseReceipt } from '@agentmux/core'
 import { samePreparedCloseReview } from '../lib/workbench-close-owner'
 import { WorkbenchRegionOwner } from './WorkbenchRegionOwners'
@@ -601,7 +602,9 @@ const SurfaceContentBody = memo(function SurfaceContentBody({
         regionSplitSurface={browserPresentation.surface ?? (browserPresentation.survey ? 'survey' : undefined)}
         onRegionClose={onBrowserRegionClose}
         presentations={presentedTargets.flatMap(target => target.reference?.tabId === tabId && (!target.projection || target.projection.entity.kind !== 'region' || target.projection.entity.regionId === surface.regionId)
-          ? [{ occurrence: { presentationId: workbenchBrowserStageHostId(target, surface.regionId), location: { ...target.reference, regionId: surface.regionId } },
+          ? [{ occurrence: { presentationId: workbenchBrowserStageHostId(target, surface.regionId), location: { ...target.reference, regionId: surface.regionId },
+              returnContext: workbenchReturnContext(independentDocument && Object.hasOwn(browserPresentation, 'returnContext')
+                ? { ...target, returnContext: browserPresentation.returnContext } : target, { ...target.reference, regionId: surface.regionId }) ?? undefined },
             stageHostId: workbenchBrowserStageHostId(target, surface.regionId), visible: target.visible !== false,
             active: target.active, yieldToFocusRing: focusForPresentation(target).nativeViewYieldsToRing, target }] : [])}
         renderPresentationFrame={browserFrame}
@@ -710,7 +713,7 @@ function WorkbenchRegionLeaf({ regionTarget, ...props }: WorkbenchRegionLeafProp
       surface={target?.surface ?? parent.surface} moteInputIntent={target?.moteInputIntent ?? parent.moteInputIntent} moteContextKey={target ? target.moteContextKey : parent.moteContextKey}
       survey={target ? target.surface === 'survey' : parent.survey} controlsOpen={target?.controlsOpen ?? parent.controlsOpen}
       onBrowserControlConfirmation={parent.onBrowserControlConfirmation} onSelectRegion={target?.onSelectRegion ?? parent.onSelectRegion}
-      projection={target?.projection ?? parent.projection} reference={target?.reference ?? parent.reference} windowTarget={windowTarget}
+      projection={target?.projection ?? parent.projection} reference={target?.reference ?? parent.reference} returnSelection={target?.returnSelection ?? parent.returnSelection} windowTarget={windowTarget}
       homeNotice={target && props.surfaceVisible ? <div role="status" className="workbench-restore-notice">This Region is shown in the selected presentation. Close that presentation to return it here.</div> : undefined}>
       <WorkbenchRegionContent {...props} primaryPresentationHostId={target?.hostId ?? parent.tabHostId} surfaceVisible={visible} nativeSurfacesVisible={detached || independentDocument ? visible : target ? visible : props.nativeSurfacesVisible}
         headerPortalTargetId={target?.surface === 'focus' ? null : target?.headerPortalTargetId ?? props.headerPortalTargetId} />
@@ -1669,7 +1672,7 @@ export function WorkbenchSecondaryView({ target, children }: { target: Workbench
   if (!presented.current) return null
   return <StableWorkbenchView homeId={`${target.hostId}:parked`} targetId={target.hostId}
     active={target.active} visible={target.visible !== false} surface={target.surface} moteInputIntent={target.moteInputIntent} moteContextKey={target.moteContextKey}
-    retainedRegionId={target.reference!.regionId} reference={target.reference}>{children}</StableWorkbenchView>
+    retainedRegionId={target.reference!.regionId} reference={target.reference} projection={target.projection} returnSelection={target.returnSelection}>{children}</StableWorkbenchView>
 }
 
 const WorkbenchContentHost = memo(function WorkbenchContentHost({ workspaceId, tab, targets, homeId, targetId,
@@ -1686,7 +1689,7 @@ const WorkbenchContentHost = memo(function WorkbenchContentHost({ workspaceId, t
           windowTarget={targets.find(target => target.windowTarget?.kind === 'tab' && target.windowTarget.tabId === tab.id)?.windowTarget}
           active={tabProjection?.active ?? true}
           visible={tabVisible}
-          surface={tabProjection?.surface} moteInputIntent={tabProjection?.moteInputIntent} moteContextKey={tabProjection?.moteContextKey}
+          surface={tabProjection?.surface} returnSelection={tabProjection?.returnSelection} moteInputIntent={tabProjection?.moteInputIntent} moteContextKey={tabProjection?.moteContextKey}
           survey={tabProjection?.surface === 'survey'} controlsOpen={tabProjection?.controlsOpen ?? false}
           onBrowserControlConfirmation={onBrowserControlConfirmation}
           homeNotice={tabProjection && showBorrowedNotice ? <div data-workbench-borrowed-view-notice>

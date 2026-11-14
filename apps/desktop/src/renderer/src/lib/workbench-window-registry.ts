@@ -1,11 +1,12 @@
 import { useCallback, useSyncExternalStore } from 'react'
 import type { AppWindowDescriptor, AppWindowTarget } from '@agentmux/core/control'
-import type { WorkbenchWindowDocument } from '../../../shared/workbench-windows'
+import type { WorkbenchReturnContext, WorkbenchWindowDocument } from '../../../shared/workbench-windows'
 
-export type WorkbenchWindowPlacement = { destination: HTMLElement; window: WorkbenchWindowDocument }
+export type WorkbenchWindowPlacement = { destination: HTMLElement; window: WorkbenchWindowDocument; returnContext?: WorkbenchReturnContext | null }
 export type WorkbenchHost = {
   target: AppWindowTarget
   host: HTMLElement
+  getReturnContext?(): WorkbenchReturnContext | null
   place(placement: WorkbenchWindowPlacement | null): Promise<void>
 }
 const hosts = new Map<string, WorkbenchHost>()
@@ -16,6 +17,13 @@ const documents = new Map<Document, WorkbenchWindowDocument>()
 const nativeVisibility = new Map<Document, boolean>()
 const visibilityListeners = new Map<Document, Set<() => void>>()
 const visibilityChanged = (doc: Document) => { for (const listener of visibilityListeners.get(doc) ?? []) listener() }
+// One read-only callback to the original App's local workface-view owner.
+let navigationStampReader: (() => object | undefined) | null = null
+export function registerWorkbenchNavigationStamp(read: () => object | undefined): () => void {
+  navigationStampReader = read
+  return () => { if (navigationStampReader === read) navigationStampReader = null }
+}
+export function workbenchNavigationStamp(): object | null { return navigationStampReader?.() ?? null }
 let revision = 0
 export const workbenchTargetKey = (target: AppWindowTarget): string => JSON.stringify(target)
 const changed = () => { revision++; for (const listener of listeners) listener() }

@@ -6,7 +6,7 @@ import { durableWriteFile } from '@agentmux/core'
 import { parseAppWindowOperation, parseAppWindowTarget, type AppWindowOperation, type AppWindowTarget } from '@agentmux/core/control'
 import type { WindowGeometry } from './window-geometry.js'
 
-export type StoredWorkbenchWindow = { windowId: string; target: AppWindowTarget; geometry: WindowGeometry }
+export type StoredWorkbenchWindow = { windowId: string; target: AppWindowTarget; geometry: WindowGeometry; returnContext?: unknown }
 export type StoredWorkbenchWindows = { mainWindowId: string; windows: StoredWorkbenchWindow[] }
 export type WorkbenchWindowLoad = { state: StoredWorkbenchWindows; issue: string | null; writable: boolean }
 
@@ -28,7 +28,8 @@ export function parseStoredWorkbenchWindows(value: unknown): StoredWorkbenchWind
         Number(geometry.width) <= 0 || Number(geometry.height) <= 0 || typeof geometry.maximized !== 'boolean') {
       throw new Error('Stored native window geometry is unconfirmed.')
     }
-    return { windowId: identity(item.windowId), target: parseAppWindowTarget(item.target), geometry: {
+    return { windowId: identity(item.windowId), target: parseAppWindowTarget(item.target),
+      ...(Object.hasOwn(item, 'returnContext') ? { returnContext: item.returnContext } : {}), geometry: {
       x: geometry.x as number, y: geometry.y as number, width: geometry.width as number, height: geometry.height as number,
       maximized: geometry.maximized
     } }

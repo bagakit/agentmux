@@ -39,7 +39,7 @@ import { MountedSpaceWorkbench } from './components/MountedSpaceWorkbench'
 import { SurfaceState } from './components/SurfaceState'
 import { GlobalRecallSurface } from './components/GlobalRecallSurface'
 import { GlobalSurveySurface } from './components/GlobalSurveySurface'
-import { isSurveyPage, surveyPageProjection } from './lib/survey-page-references'
+import { isSurveyPage, surveyPageProjection, surveySelectionPresentation } from './lib/survey-page-references'
 import { resolveBrowserStartPage } from '../../shared/browser-start-page'
 import { PmoTeamsTopicFloatingPanel } from './components/PmoTeamsTopicFloatingPanel'
 import { MoteWorkface } from './components/MoteWorkface'
@@ -68,7 +68,7 @@ import { StartupLoadingSurface } from './components/StartupLoadingSurface'
 import { surveySelectReference, surveyResolvedZoneSelection } from './lib/survey-workface'
 import { spatialCatalog } from './lib/space-agent-control'
 import { scratchTopicsForWorkspace } from './lib/scratch-topic-snapshots'
-import { resolveWorkbenchZone, sameWorkbenchProjectionSelection, projectWorkbenchProjection, workbenchProjectionSlotId, workbenchRegionProjectionSlotId, type WorkbenchProjection, type WorkbenchProjectionSelection } from './lib/workbench-projection'
+import { resolveWorkbenchZone, workbenchProjectionMatches, sameWorkbenchProjectionSelection, projectWorkbenchProjection, workbenchProjectionSlotId, workbenchRegionProjectionSlotId, type WorkbenchProjection, type WorkbenchProjectionSelection } from './lib/workbench-projection'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { WorkbenchViewTarget, WorkbenchViewTargets } from './lib/workbench-presentation'
 import { ordinaryWorkbenchViewTargets, workbenchResourceTabs, workbenchDisplayReferenceMatches } from './lib/workbench-resource-display'
@@ -152,7 +152,6 @@ function DesktopApp() {
   const quickSwitchOrigin = useRef<{ element: HTMLElement | null; navigation: string } | null>(null)
   const initialize = useAppStore((state) => state.initialize)
   const loading = useAppStore((state) => state.loading)
-  const workbenchWindows = useWorkbenchWindows(!loading)
   const startupProgress = useAppStore((state) => state.startupProgress)
   const runtimeEndpointWarnings = useAppStore((state) => state.loading ? state.runtimeEndpointWarnings : undefined)
   const error = useAppStore((state) => state.error)
@@ -369,6 +368,32 @@ function DesktopApp() {
     surveyOccurrence.current = reference
     state.setSurveyZoneSelection(surveySelectReference(state.surveyZoneSelection, reference))
   }, [surveySelection])
+  const restoreWindowContext = useCallback((context: import('../../shared/workbench-windows').WorkbenchReturnContext) => {
+    const state = useAppStore.getState(), reference = context.reference
+    if (context.surface === 'survey') {
+      const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) ?? []
+      const catalog = spatialCatalog(state, topics), selected = context.selection
+      const scope = 'zoneId' in selected
+        ? resolveWorkbenchZone(selected.zoneId, catalog, state.layouts, state.tabs, 'survey-workbench', [reference], () => {})
+        : surveyPageProjection(selected, catalog, state.tabs, () => {}, reference)
+      if (!scope?.catalog.locations.some(member => workbenchProjectionMatches(scope, member) && sameWorkbenchProjectionSelection(member, reference))) {
+        // Only this explicit return target is stale; retain the original shell and content.
+        throw new Error('The original Survey return location is unconfirmed. The window and Browser are kept; choose its exact location before returning.')
+      }
+      surveyOccurrence.current = reference
+      state.setSurveyZoneSelection(selected)
+      state.setMainSurface('survey')
+      return
+    }
+    if (!state.selectMainRegion(reference)) throw new Error('The original return Region is no longer confirmed. Its window and content are kept.')
+    if (context.surface === 'focus') {
+      setFocusWorkfaceView(context.view)
+      state.setFocusView('list')
+      state.setMainSurface('agents')
+    } else state.setMainSurface('workbench')
+  }, [])
+  const focusWindowNavigationStamp = useMemo(() => ({}), [focusWorkfaceView])
+  const workbenchWindows = useWorkbenchWindows(!loading, restoreWindowContext, focusWindowNavigationStamp)
   const surveyProjection = useMemo(() => {
     if (!surveySelection || !surveyCatalog) return null
     if (isSurveyPage(surveySelection)) {
@@ -479,7 +504,7 @@ function DesktopApp() {
         if (projected.unsupportedTabIds.has(reference.tabId)) continue
         append(reference.tabId, { hostId: (projection.entity.kind === 'region' ? workbenchRegionProjectionSlotId : workbenchProjectionSlotId)(`${projection.presentationId}-slot`, reference),
           active: !(surveyToolsOpen && narrowControls) && (surveyCurrentSelection?.active?.tabId !== reference.tabId ||
-            sameWorkbenchProjectionSelection(surveyCurrentSelection.active, reference)), visible: !(surveyToolsOpen && narrowControls), surface: 'survey', browserStartPage: resolveBrowserStartPage(config?.browser.startPage), controlsOpen: surveyToolsOpen,
+            sameWorkbenchProjectionSelection(surveyCurrentSelection.active, reference)), visible: !(surveyToolsOpen && narrowControls), surface: 'survey', returnSelection: surveySelectionPresentation(surveySelection) ?? undefined, browserStartPage: resolveBrowserStartPage(config?.browser.startPage), controlsOpen: surveyToolsOpen,
           projection, reference, retainedRegionId: reference.regionId, onSelectRegion: regionId => selectSurveyReference({ ...reference, regionId }) })
       }
     }
@@ -519,7 +544,7 @@ function DesktopApp() {
       else append(tab.id, { hostId: `workbench-window-host:${window.windowId}`, active: false, visible: false, surface: 'space', reference, windowTarget: target })
     }
     return targets
-  }, [config?.browser.startPage, moteViewTargets, surveyVisible, surveyProjection, surveyCurrentSelection, layouts, tabs, surveyToolsOpen, narrowControls, selectSurveyReference,
+  }, [config?.browser.startPage, moteViewTargets, surveyVisible, surveyProjection, surveySelection, surveyCurrentSelection, layouts, tabs, surveyToolsOpen, narrowControls, selectSurveyReference,
     focusVisible, focusProjection, focusTab, selectFocusReference, ordinaryTargets, recallVisible, recallProjection, recallCurrentSelection, selectRecallReference, workbenchWindows])
   const [recallVisited, setRecallVisited] = useState(mainSurface === 'recall')
   useEffect(() => { if (mainSurface === 'recall') setRecallVisited(true) }, [mainSurface])

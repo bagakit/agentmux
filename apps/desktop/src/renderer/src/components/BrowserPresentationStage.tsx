@@ -261,7 +261,6 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
       { x: parent.x, y: parent.y, width: parent.width, height: parent.height }, focusRingYieldOf(region!, facts.presentation.yieldToFocusRing)) : bounds, api.ui.getZoomFactor()) }
   }, [])
   const synchronizer = useRef<LatestBrowserBoundsSynchronizer | null>(null)
-  const geometryWriter = useRef<((bounds: BrowserBounds | null, intentRevision?: number | null) => Promise<void>) | null>(null)
   const visibleCurrent = useCallback((registered: BrowserPresentationLease) =>
     lease.current === registered && geometry().visible, [geometry])
   const inputCurrent = useCallback((registered: BrowserPresentationLease) =>
@@ -275,6 +274,7 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
       latest.current.presentation.visible && !latest.current.blocked) : () => {}
     update()
   }, [geometry])
+  const returnContextKey = JSON.stringify(presentation.occurrence.returnContext ?? null)
   useLayoutEffect(() => {
     let cancelled = false
     let registering = false, registrationFailed = false
@@ -322,7 +322,6 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
           }).catch(failure)
         }
       }
-      geometryWriter.current = writeGeometry
       synchronizer.current = new LatestBrowserBoundsSynchronizer((bounds, inputVisible) => writeGeometry(bounds, null, inputVisible), failure)
       observe() // Native geometry stays current while preview capture is pending.
       await media.registered(registered, latest.current.inputSelected, geometry().visible, () => !cancelled && inputCurrent(registered), selectionIntent.current,
@@ -332,11 +331,11 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
     // One task lets the stable host attach, including while hidden. Resource loading is not a trust gate.
     const mountTask = setTimeout(() => { if (!cancelled) void mount().catch(failure) }, 0)
     return () => { cancelled = true; clearTimeout(mountTask); if (registrationRetry.current === retry) registrationRetry.current = null
-      stopGeometry.current(); synchronizer.current?.dispose(); synchronizer.current = null; geometryWriter.current = null
+      stopGeometry.current(); synchronizer.current?.dispose(); synchronizer.current = null
       const current = lease.current; lease.current = null
       if (current) void api.browser.removePresentation(current.leaseId).then(() => removed.current?.(), () => removed.current?.())
       else if (!registering) removed.current?.() }
-  }, [browserId, windowDocument?.windowId, windowDocument?.documentGeneration, presentation.occurrence.presentationId, occurrenceLocationKey, geometry, observe, inputCurrent, media.registered, media.ensureCapture])
+  }, [browserId, windowDocument?.windowId, windowDocument?.documentGeneration, presentation.occurrence.presentationId, occurrenceLocationKey, returnContextKey, geometry, observe, inputCurrent, media.registered, media.ensureCapture])
   useLayoutEffect(() => { registrationRetry.current?.() }, [navigationId])
   useLayoutEffect(() => { if (lease.current) observe() }, [presentation.visible, presentation.yieldToFocusRing, blocked, observe])
   useLayoutEffect(() => {
@@ -344,11 +343,14 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
     if (!inputSelected || !current) return
     const next = geometry()
     if (!next.visible) return
-    // Selection is a separate fact: confirm geometry through the original writer even if its rectangle is unchanged.
-    void geometryWriter.current?.(next.bounds, selectionIntent.current).catch(error => {
+    // Selection confirms the latest geometry ACK before reusing this exact input intent.
+    const writer = synchronizer.current, intent = selectionIntent.current
+    if (!writer) return
+    void writer.confirm(next.bounds, next.inputVisible).then(() => media.registered(current, latest.current.inputSelected, geometry().visible,
+      () => lease.current === current && inputCurrent(current), intent, () => lease.current === current && visibleCurrent(current))).catch(error => {
       if (lease.current === current && latest.current.inputSelected) setNotice({ source: 'presentation', message: String(error) })
     })
-  }, [inputSelected, control?.owner, media.ownerClearedRevision, geometry])
+  }, [inputSelected, control?.owner, media.ownerClearedRevision, media.registered, geometry, inputCurrent, visibleCurrent])
   const [playbackRevision, setPlaybackRevision] = useState(0)
   const [playback, setPlayback] = useState<{ stream: MediaStream | null; phase: 'idle' | 'starting' | 'first-frame' | 'ready' | 'failed'; message?: string; retentionFailed?: true }>({ stream: null, phase: 'idle' })
   const nativeCovered = media.nativeCoverage !== null && media.nativeCoverage.captureId === media.captureId &&
@@ -474,7 +476,9 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
     setRetrying(true)
     try {
       const next = geometry()
-      await api.browser.updatePresentation(current.leaseId, next)
+      const writer = synchronizer.current
+      if (!writer) return
+      await writer.confirm(next.visible ? next.bounds : null, next.visible ? next.inputVisible : undefined)
       await media.registered(current, latest.current.inputSelected, next.visible, () => inputCurrent(current), null, () => visibleCurrent(current))
       if (next.visible) await media.retryCapture(current, () => visibleCurrent(current))
       setNotice(null)

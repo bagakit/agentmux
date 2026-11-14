@@ -2,17 +2,22 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { observeResolvedTheme } from '@agentmux/client-ui/theme'
 import { updateIconSprite, removeIconSprite } from '@agentmux/client-ui/icons'
 import { useNativeOverlayChrome } from '../hooks/useNativeOverlayChrome'
-import { useEffect, useSyncExternalStore } from 'react'
+import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import type { AppWindowDescriptor, AppWindowTarget, AppWindowOperation } from '@agentmux/core/control'
-import type { WorkbenchWindowRequest, WorkbenchWindowDocument } from '../../../shared/workbench-windows'
+import { readWorkbenchReturnContext, workbenchReturnLabel, type WorkbenchReturnContext, type WorkbenchWindowRequest, type WorkbenchWindowDocument } from '../../../shared/workbench-windows'
 import { api } from './api'
 import { useAppStore } from '../store'
-import { awaitOriginalWorkbenchHost, originalWorkbenchHost, placeWorkbenchWindow, registerWorkbenchDocument, workbenchTargetKey, workbenchDocumentReturning, observeWorkbenchNativeVisibility } from './workbench-window-registry'
+import { awaitOriginalWorkbenchHost, originalWorkbenchHost, placeWorkbenchWindow, registerWorkbenchDocument, workbenchTargetKey, workbenchDocumentReturning, observeWorkbenchNativeVisibility, registerWorkbenchNavigationStamp, workbenchNavigationStamp } from './workbench-window-registry'
 import { ServiceWindowNotice } from '../components/ServiceWindowNotice'
 
-type OpenWindow = { window: Window; document: Document; identity: WorkbenchWindowDocument; target: AppWindowTarget; slot: HTMLElement; returned: boolean; dispose(): void }
+type OpenWindow = { window: Window; document: Document; identity: WorkbenchWindowDocument; target: AppWindowTarget; returnContext: WorkbenchReturnContext | null; slot: HTMLElement; returned: boolean; dispose(): void }
 const opened = new Map<string, OpenWindow>()
+// Only unfinished original open calls retain their provenance until Main captures it.
+const openingContexts = new Map<string, { target: AppWindowTarget; context: WorkbenchReturnContext | null }>()
+function settleOpeningContext(operation: AppWindowOperation | null): void {
+  if (operation?.method === 'app.window.open' && (operation.state === 'confirmed' || operation.state === 'rejected')) openingContexts.delete(operation.input.operationId)
+}
 const listeners = new Set<() => void>()
 let snapshot: { windows: AppWindowDescriptor[]; issue: string | null; operation: AppWindowOperation | null } = { windows: [], issue: null, operation: null }
 type WindowTarget = Pick<AppWindowDescriptor, 'windowId' | 'target'>
@@ -25,10 +30,19 @@ const notify = () => {
 }
 const subscribe = (listener: () => void) => { listeners.add(listener); return () => listeners.delete(listener) }
 const publishIssue = (error: unknown) => { snapshot = { ...snapshot, issue: String(error) }; notify() }
+let contextNavigator: ((context: WorkbenchReturnContext) => void) | null = null
+/** Reuse the original App navigation owner, without another selection or focus Store. */
+export function revealWorkbenchContext(context: WorkbenchReturnContext): void {
+  if (contextNavigator) contextNavigator(context)
+  else publishIssue('The original scene navigation owner is unavailable. The original page and current selection remain.')
+}
 
-export async function openWorkbenchWindow(target: AppWindowTarget, options: { focus?: boolean } = {}): Promise<void> {
+export async function openWorkbenchWindow(target: AppWindowTarget, options: { focus?: boolean; returnContext?: WorkbenchReturnContext | null } = {}): Promise<void> {
+  const operationId = mintObjectId(), context = readWorkbenchReturnContext(options.returnContext, target)
+  if (Object.hasOwn(options, 'returnContext')) openingContexts.set(operationId, { target: structuredClone(target), context })
   try {
-    const page = await api.ui.workbenchWindows.call('app.window.open', { operationId: mintObjectId(), target, ...options })
+    const page = await api.ui.workbenchWindows.call('app.window.open', { operationId, target, ...(options.focus === undefined ? {} : { focus: options.focus }) })
+    settleOpeningContext(page.recordedOperation)
     snapshot = { ...snapshot, windows: page.windows, operation: page.recordedOperation }; notify()
     if (page.recordedOperation?.state !== 'confirmed') publishIssue(page.recordedOperation?.message ?? 'Original window presentation is unconfirmed. Original work remains.')
   } catch (error) { publishIssue(error) }
@@ -115,7 +129,12 @@ async function shellLoaded(child: Window, signal: AbortSignal): Promise<HTMLElem
     signal.addEventListener('abort', aborted, { once: true }); if (signal.aborted) aborted(); else check()
   })
 }
-async function apply(request: WorkbenchWindowRequest, signal: AbortSignal): Promise<void> {
+function returnNavigationStamp(): string {
+  const state = useAppStore.getState()
+  return JSON.stringify([state.mainSurface, state.activeWorkspaceId, state.workbenchSpaceSelection, state.surveyZoneSelection, state.focusView])
+}
+async function apply(request: WorkbenchWindowRequest, signal: AbortSignal, onReturn?: (context: WorkbenchReturnContext) => void): Promise<WorkbenchReturnContext | null | void> {
+  const navigationAtStart = returnNavigationStamp(), localNavigationAtStart = workbenchNavigationStamp()
   if (request.action === 'return' && !originalWorkbenchHost(request.target)) {
     const record = opened.get(request.windowId)
     if (!record || record.identity.documentGeneration !== request.documentGeneration) throw new Error('The exact original window document is not current.')
@@ -124,7 +143,15 @@ async function apply(request: WorkbenchWindowRequest, signal: AbortSignal): Prom
   }
   validateTarget(request.target)
   const host = await awaitOriginalWorkbenchHost(request.target, signal)
-  if (request.action === 'prepare') return
+  if (request.action === 'prepare') {
+    try {
+      const retained = request.operationId ? openingContexts.get(request.operationId) : undefined
+      const context = readWorkbenchReturnContext(retained && workbenchTargetKey(retained.target) === workbenchTargetKey(request.target)
+        ? retained.context : host.getReturnContext?.(), request.target)
+      if (!context) publishIssue('The original return context is unconfirmed. Opening remains available; returning will preserve current navigation.')
+      return context
+    } catch (error) { publishIssue('Original return-context observation failed. The original window remains available. ' + String(error)); return null }
+  }
   const identity = { windowId: request.windowId, documentGeneration: request.documentGeneration }
   if (request.action === 'open') {
     const existing = opened.get(request.windowId)
@@ -140,9 +167,9 @@ async function apply(request: WorkbenchWindowRequest, signal: AbortSignal): Prom
     slot.dataset.workbenchDocumentRoot = ''
     child.document.body.classList.add('workbench-detached-window')
     const disposeStyle = mirrorStyles(child.document), disposeDocument = registerWorkbenchDocument(child.document, identity), disposeEvents = documentEvents(child.document)
-    const record: OpenWindow = { window: child, document: child.document, identity, target: request.target, slot, returned: false, dispose: () => { disposeStyle(); disposeDocument(); disposeEvents() } }
+    const record: OpenWindow = { window: child, document: child.document, identity, target: request.target, returnContext: readWorkbenchReturnContext(request.returnContext, request.target), slot, returned: false, dispose: () => { disposeStyle(); disposeDocument(); disposeEvents() } }
     opened.set(request.windowId, record); child.addEventListener('unload', () => { if (opened.get(request.windowId) === record) { record.dispose(); notify() } }, { once: true }); notify()
-    try { await placeWorkbenchWindow(request.target, { destination: slot, window: identity }) }
+    try { await placeWorkbenchWindow(request.target, { destination: slot, window: identity, returnContext: record.returnContext }) }
     catch (error) { publishIssue(error); throw error }
     return
   }
@@ -153,19 +180,38 @@ async function apply(request: WorkbenchWindowRequest, signal: AbortSignal): Prom
     if (record.returned || host.host.ownerDocument !== record.document) throw new Error('The original content has returned from this native shell. Focus its current workface.')
     return
   }
-  if (!record.returned) { await awaitComposition(host.host, signal); useAppStore.getState().activateTab(request.target.displayWorkspaceId, request.target.groupId, request.target.tabId, 'navigation'); await placeWorkbenchWindow(request.target, null); workbenchDocumentReturning(record.document, document); record.returned = true; notify() }
+  if (!record.returned) {
+    await awaitComposition(host.host, signal)
+    // Explicit Return owns its original scene; a delayed/automatic return never supersedes later navigation.
+    const context = readWorkbenchReturnContext(request.returnContext, request.target)
+    if (request.navigate === true && context && returnNavigationStamp() === navigationAtStart && workbenchNavigationStamp() === localNavigationAtStart) {
+      if (onReturn) onReturn(context)
+      else publishIssue('The original workface is returning. Its navigation owner is unavailable; current navigation is kept.')
+    }
+    await placeWorkbenchWindow(request.target, null)
+    workbenchDocumentReturning(record.document, document); record.returned = true; notify()
+  }
 }
 
 /** One original Renderer owns every shell; no child starts an App or Store. */
-export function useWorkbenchWindows(ready: boolean): readonly WindowTarget[] {
+export function useWorkbenchWindows(ready: boolean, onReturn?: (context: WorkbenchReturnContext) => void, localNavigationStamp?: object): readonly WindowTarget[] {
+  const navigator = useRef(onReturn), localNavigation = useRef(localNavigationStamp)
+  useLayoutEffect(() => { navigator.current = onReturn; localNavigation.current = localNavigationStamp })
+  useLayoutEffect(() => ready ? registerWorkbenchNavigationStamp(() => localNavigation.current) : undefined, [ready])
   const windows = useSyncExternalStore(subscribe, () => windowTargets)
   useEffect(() => {
     if (!ready) return
     const abort = new AbortController()
+    const navigate = (context: WorkbenchReturnContext) => {
+      if (navigator.current) navigator.current(context)
+      else publishIssue('The original scene navigation owner is unavailable. The original page and current selection remain.')
+    }
+    contextNavigator = navigate
     const rootEvents = documentEvents(document)
     let rootDocument: (() => void) | null = null
     const stopRequests = api.ui.workbenchWindows.onRequest(request => {
-      void apply(request, abort.signal).then(() => api.ui.workbenchWindows.respond({ ...request, outcome: 'applied', message: null }),
+      void apply(request, abort.signal, navigate).then(returnContext => api.ui.workbenchWindows.respond({ requestId: request.requestId, windowId: request.windowId, documentGeneration: request.documentGeneration, outcome: 'applied', message: null,
+        ...(request.action === 'prepare' ? { returnContext: returnContext ?? null } : {}) }),
         error => { publishIssue(error); api.ui.workbenchWindows.respond({ requestId: request.requestId, windowId: request.windowId, documentGeneration: request.documentGeneration, outcome: 'rejected', message: String(error) }) })
     })
     const stopChanges = api.ui.workbenchWindows.onChanged(value => {
@@ -174,22 +220,26 @@ export function useWorkbenchWindows(ready: boolean): readonly WindowTarget[] {
       notify()
     })
     void api.ui.workbenchWindows.ready().then(identity => { if (identity && !abort.signal.aborted) rootDocument = registerWorkbenchDocument(document, identity) }).catch(publishIssue)
-    return () => { abort.abort(); stopRequests(); stopChanges(); rootEvents(); rootDocument?.(); for (const record of opened.values()) record.dispose(); opened.clear(); notify() }
+    return () => { if (contextNavigator === navigate) contextNavigator = null; abort.abort(); stopRequests(); stopChanges(); rootEvents(); rootDocument?.(); for (const record of opened.values()) record.dispose(); opened.clear(); notify() }
   }, [ready])
   return windows
 }
 function WorkbenchWindowToolbar({ record }: { record: OpenWindow }) {
   const warning = useNativeOverlayChrome(record.document, record.identity)
-  return <><header className="workbench-window-toolbar"><strong>AgentMux</strong><button className="small-button" onClick={() => void returnWorkbenchWindow(record.identity)}>Return to workspace</button></header>{warning ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Window overlay presentation', mode: warning, restore: 'Keep using the original Browser; close and reopen the floating control.' } }} /> : null}</>
+  return <><header className="workbench-window-toolbar"><strong>AgentMux</strong><button className="small-button" onClick={() => void returnWorkbenchWindow(record.identity)}>{workbenchReturnLabel(record.returnContext)}</button></header>{warning ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Window overlay presentation', mode: warning, restore: 'Keep using the original Browser; close and reopen the floating control.' } }} /> : null}</>
 }
 export function WorkbenchWindowNotices() {
   const state = useSyncExternalStore(subscribe, () => snapshot)
   // React portals keep the original event/context owner in each empty native shell.
   const windows = [...opened.values()].filter(record => !record.returned)
-  const inspect = async () => {
-    if (!state.operation) return
-    try { const page = await api.ui.workbenchWindows.call('app.window.ls', { operationId: state.operation.input.operationId }); snapshot = { ...snapshot, windows: page.windows, operation: page.recordedOperation }; notify() } catch (error) { publishIssue(error) }
+  const inspect = async (operationId = state.operation?.input.operationId) => {
+    if (!operationId) return
+    try { const page = await api.ui.workbenchWindows.call('app.window.ls', { operationId }); settleOpeningContext(page.recordedOperation); snapshot = { ...snapshot, windows: page.windows, operation: page.recordedOperation }; notify() } catch (error) { publishIssue(error) }
   }
-  return <>{state.issue ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Workbench window presentation needs attention', mode: state.issue, restore: 'Keep using the original workface. Inspect its window or return it before a new move.' } }} actions={state.operation ? <details><summary>Window action details</summary><pre>{JSON.stringify(state.operation, null, 2)}</pre><button className="small-button" onClick={() => void inspect()}>Inspect original action</button></details> : undefined} /> : null}
+  return <>{state.issue ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Workbench window presentation needs attention', mode: state.issue, restore: 'Keep using the original workface. Inspect its window or return it before a new move.' } }} actions={state.operation || openingContexts.size ? <details><summary>Window action details</summary>
+      {state.operation ? <><pre>{JSON.stringify(state.operation, null, 2)}</pre><button className="small-button" onClick={() => void inspect()}>Inspect original action</button></> : null}
+      {[...openingContexts].map(([operationId, original]) => <div key={operationId}><pre>{JSON.stringify({ operationId, target: original.target, returnContext: original.context }, null, 2)}</pre>
+        <button className="small-button" onClick={() => void inspect(operationId)}>Inspect original open</button></div>)}
+    </details> : undefined} /> : null}
     {windows.map(record => createPortal(<WorkbenchWindowToolbar record={record} />, record.document.body, record.identity.windowId))}</>
 }

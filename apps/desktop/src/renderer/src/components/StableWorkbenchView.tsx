@@ -1,9 +1,11 @@
 import { returnWorkbenchWindow, focusWorkbenchWindow, openWorkbenchWindow } from '../lib/workbench-windows'
 import { DesktopClientUiProvider } from './DesktopClientUiProvider'
-import { Component, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Component, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { MotePresentationContext } from '../lib/mote-presentation-context'
-import { WorkbenchPresentationContext, type BrowserControlConfirmation } from '../lib/workbench-presentation'
+import { WorkbenchPresentationContext, WorkbenchBrowserTargetsContext, type BrowserControlConfirmation } from '../lib/workbench-presentation'
+import { workbenchReturnContext } from '../lib/workbench-return-context'
+import { workbenchReturnLabel, type WorkbenchReturnSelection } from '../../../shared/workbench-windows'
 import { workbenchRegionProjectionSlotId } from '../lib/workbench-projection'
 import { tabSwitchObservation } from '../lib/tab-switch-observation'
 import { WorkbenchDocumentContext, useWorkbenchDocument } from '../lib/workbench-document'
@@ -132,7 +134,7 @@ class WorkbenchReadingSnapshot extends Component<{ host: HTMLElement; active: bo
 }
 
 /** One React/terminal tree; only its existing DOM host changes spatial parent. */
-export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegionId, active, visible = true, retainedRegionId, homeNotice, surface, moteInputIntent, moteContextKey, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference, windowTarget, kind = 'tab', children }: {
+export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegionId, active, visible = true, retainedRegionId, homeNotice, surface, moteInputIntent, moteContextKey, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference, returnSelection, windowTarget, kind = 'tab', children }: {
   homeId: string
   /** Only the unique primary View carries an input-retention identity. */
   primaryTabId?: string | undefined
@@ -153,6 +155,7 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
   projection?: import('../lib/workbench-projection').WorkbenchProjection | undefined
   reference?: import('../lib/workbench-projection').WorkbenchProjectionSelection | undefined
   /** The window owner requests this exact occurrence without changing the presentation selection. */
+  returnSelection?: WorkbenchReturnSelection | undefined
   windowTarget?: AppWindowTarget | undefined
   /** The existing projection owner describes a borrowed View at its original slot. */
   homeNotice?: ReactNode
@@ -176,9 +179,29 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
     ? kind === 'region' ? { kind: 'region', displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId, regionId: nativeRegionId! }
       : { kind: 'tab', displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId }
     : null), [kind, nativeRegionId, primaryTabId, reference?.displayWorkspaceId, reference?.groupId, reference?.tabId, windowTarget])
+  const returnTargets = useContext(WorkbenchBrowserTargetsContext)
+  const returnHint = useRef({ surface, survey, projection, reference, returnSelection, returnTargets, windowPlacement })
+  useLayoutEffect(() => { returnHint.current = { surface, survey, projection, reference, returnSelection, returnTargets, windowPlacement } })
   useLayoutEffect(() => {
     if (!originalTarget) return
-    return registerWorkbenchHost({ target: originalTarget, host, place: placement => new Promise<void>((resolve, reject) => {
+    return registerWorkbenchHost({ target: originalTarget, host, getReturnContext: () => {
+      const hint = returnHint.current
+      if (hint.windowPlacement) return workbenchReturnContext({ ...hint, returnContext: hint.windowPlacement.returnContext ?? null },
+        hint.reference && originalTarget.kind === 'region' ? { ...hint.reference, regionId: originalTarget.regionId } : hint.reference)
+      // Repeatable Browser content can keep its canonical tree parked in Space.
+      // Its unique visible occurrence, rather than that parking owner, is origin.
+      const sources = hint.returnTargets.filter(source => source.visible === true && source.reference &&
+        source.reference.displayWorkspaceId === originalTarget.displayWorkspaceId && source.reference.groupId === originalTarget.groupId &&
+        source.reference.tabId === originalTarget.tabId && (originalTarget.kind === 'tab' || source.projection?.entity.kind !== 'region' ||
+          source.projection.entity.regionId === originalTarget.regionId))
+      if (sources.length === 1) {
+        const source = sources[0]!, reference = source.reference!
+        return workbenchReturnContext(source, originalTarget.kind === 'region' ? { ...reference, regionId: originalTarget.regionId } : reference)
+      }
+      if (hint.returnTargets.length) return null
+      return workbenchReturnContext(hint, hint.reference && originalTarget.kind === 'region'
+        ? { ...hint.reference, regionId: originalTarget.regionId } : hint.reference)
+    }, place: placement => new Promise<void>((resolve, reject) => {
       frozenTarget.current = placement ? originalTarget : null
       placementWaiters.current.push({ placement, resolve, reject })
       // An equal desired value still requires its own physical placement commit.
@@ -194,8 +217,8 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
   const displayReference = useMemo(() => windowPlacement && frozenTarget.current && reference
     ? { ...reference, displayWorkspaceId: frozenTarget.current.displayWorkspaceId, groupId: frozenTarget.current.groupId, tabId: frozenTarget.current.tabId,
       ...(frozenTarget.current.kind === 'region' ? { regionId: frozenTarget.current.regionId } : {}) } : reference, [windowPlacement, reference])
-  const presentation = useMemo(() => ({ active: presentedActive, retainedRegionId, tabHostId: placedHostId, surface, moteInputIntent, moteContextKey, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference: displayReference }),
-    [presentedActive, retainedRegionId, placedHostId, surface, moteInputIntent, moteContextKey, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, displayReference])
+  const presentation = useMemo(() => ({ active: presentedActive, retainedRegionId, tabHostId: placedHostId, surface, returnSelection, ...(windowPlacement ? { returnContext: windowPlacement.returnContext ?? null } : {}), moteInputIntent, moteContextKey, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference: displayReference }),
+    [presentedActive, retainedRegionId, placedHostId, surface, returnSelection, windowPlacement, moteInputIntent, moteContextKey, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, displayReference])
   const parking = useRef<HTMLDivElement>(null)
   const showHomeNotice = Boolean(homeNotice)
   const [noticeHome, setNoticeHome] = useState<HTMLElement | null>(null)
@@ -297,7 +320,7 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
     <div ref={parking} className="retained-workbench-parking" aria-hidden="true" inert />{createPortal(<DesktopClientUiProvider document={hostDocument}><MotePresentationContext contextKey={moteContextKey} isolated={surface === 'mote'}>{children}</MotePresentationContext></DesktopClientUiProvider>, host)}
     {windowPlacement && noticeHome ? createPortal(<div className="workbench-restore-notice" role="status">Original {kind === 'tab' ? 'Tab' : 'Region'} is in its independent window.
       <button className="small-button" onClick={() => void focusWorkbenchWindow(windowPlacement.window)}>Show window</button>
-      <button className="small-button" onClick={() => void returnWorkbenchWindow(windowPlacement.window)}>Return here</button>
+      <button className="small-button" onClick={() => void returnWorkbenchWindow(windowPlacement.window)}>{workbenchReturnLabel(windowPlacement.returnContext)}</button>
       {originalTarget && workbenchDocumentIdentity(windowPlacement.destination.ownerDocument) === null ? <button className="small-button" onClick={() => void openWorkbenchWindow(originalTarget)}>Recover original window</button> : null}
     </div>, noticeHome) : targetId !== null && noticeHome && homeNotice ? createPortal(homeNotice, noticeHome) : null}
   </WorkbenchPresentationContext.Provider></WorkbenchDocumentContext.Provider></WorkbenchReadingSnapshot>

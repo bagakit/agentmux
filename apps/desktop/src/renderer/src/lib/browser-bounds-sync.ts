@@ -126,6 +126,8 @@ export class LatestBrowserBoundsSynchronizer {
   private applied: BrowserBounds | null | undefined
   private pendingInputVisible: boolean | undefined
   private appliedInputVisible: boolean | undefined
+  private confirmations = new Set<{ resolve(): void; reject(error: unknown): void }>()
+  private confirming = new Set<{ resolve(): void; reject(error: unknown): void }>()
 
   constructor(
     private readonly apply: (bounds: BrowserBounds | null, inputVisible?: boolean) => Promise<void>,
@@ -141,9 +143,19 @@ export class LatestBrowserBoundsSynchronizer {
     void this.drain()
   }
 
+  /** Confirm the latest geometry through this same serial writer, even when unchanged. */
+  confirm(bounds: BrowserBounds | null, inputVisible?: boolean): Promise<void> {
+    if (this.disposed) return Promise.reject(new Error('The original geometry consumer has retired.'))
+    const confirmed = new Promise<void>((resolve, reject) => this.confirmations.add({ resolve, reject }))
+    this.observe(bounds, inputVisible)
+    return confirmed
+  }
+
   dispose(): void {
     this.disposed = true
     this.pending = undefined
+    for (const confirmation of [...this.confirmations, ...this.confirming]) confirmation.reject(new Error('The original geometry consumer has retired.'))
+    this.confirmations.clear(); this.confirming.clear()
   }
 
   private async drain(): Promise<void> {
@@ -154,12 +166,24 @@ export class LatestBrowserBoundsSynchronizer {
         const next = this.pending
         const inputVisible = this.pendingInputVisible
         this.pending = undefined
-        if (sameBounds(this.applied, next) && inputVisible === this.appliedInputVisible) continue
+        const confirm = this.confirmations.size > 0
+        for (const confirmation of this.confirmations) this.confirming.add(confirmation)
+        this.confirmations.clear()
+        if (!confirm && sameBounds(this.applied, next) && inputVisible === this.appliedInputVisible) continue
         await this.apply(next, inputVisible)
         this.applied = next
         this.appliedInputVisible = inputVisible
       }
+      if (!this.disposed) {
+        for (const confirmation of this.confirming) confirmation.resolve()
+        this.confirming.clear()
+      }
     } catch (error) {
+      // A rejected transport may have changed the native surface before its ACK was lost.
+      this.applied = undefined; this.appliedInputVisible = undefined
+      // A later confirmation is not rejected by an older write that never covered it.
+      for (const confirmation of this.confirming) confirmation.reject(error)
+      this.confirming.clear()
       if (!this.disposed) this.onError(error)
     } finally {
       this.draining = false

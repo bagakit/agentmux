@@ -1503,6 +1503,8 @@ export type BrowserBounds = {
 
 export type BrowserPresentationOccurrence = {
   presentationId: string
+  /** Original client navigation provenance; this never grants Browser input. */
+  returnContext?: import('./workbench-windows').WorkbenchReturnContext | undefined
   location: Pick<import('@agentmux/core/control').AgentMuxSpaceLocation,
     'displayWorkspaceId' | 'groupId' | 'tabId' | 'regionId'> | { kind: 'inline' }
   /**
