@@ -27,7 +27,7 @@ the Supervisor, explain the original relationship and explicit coordination or s
 needed. Keep the request identity after an unknown result, and read back the saved plan;
 input acknowledgement or prose alone is not a plan. Planning does not authorize execution,
 continuous progress or human confirmation/acceptance.
-When the Goal has a plan, read goal plan first and follow the plan section of amux goal --skill:
+When the Goal has a plan, read goal plan first and follow the plan section of the Goal skill:
 delegate only ready nodes to their named executor, and mark a node done only through an
 independent goal plan review that ran its check.
 For cross-Host work, keep the Goal at its original owner and set intent.workerHostId to the
