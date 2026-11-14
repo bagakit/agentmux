@@ -58,7 +58,7 @@ it('opens same-name documents in their original Motes while Scratch retains a se
     resolveFilesSource: resolve, observeFilesSource: async () => () => {},
     sourceFilesInputs: { selections, pending: {}, creations: {}, folderRequests: {} } })
   async function show(rootPath: string, fileIssue?: string) {
-    await dom.render(<WorkspaceFilesFrame workspace={workspace} title={rootPath || workspace.name} fileIssue={fileIssue} visible
+    await dom.render(<WorkspaceFilesFrame workspace={workspace} title={rootPath || workspace.name} fileTopic={owners.find(owner => owner.root === rootPath)?.topic} fileIssue={fileIssue} visible
       presentation={contentSlotPresentation(false)} explorerKey={rootPath} explorer={{ rootPath }}><div /></WorkspaceFilesFrame>)
   }
   for (const { root, path, topic } of owners) {
@@ -94,4 +94,35 @@ it('opens same-name documents in their original Motes while Scratch retains a se
   expect(resolve).toHaveBeenCalledWith(workspace.id)
   expect(dom.container.textContent).toContain('Folder registration needs checking')
   expect(useAppStore.getState().sourceFilesInputs.selections).toBe(selections)
+})
+
+it('expands a same-named directory from a mounted Source using the Source that listed it', async () => {
+  installFileTreeGeometry()
+  const workspace = { ...composerConfig.workspaces[0]!, id: SCRATCH_WORKSPACE_ID }
+  const zoneId = 'source-zone', root = scratchTopicDirectoryName('view:first')
+  const resource = { workspaceId: workspace.id, hostId: workspace.hostId, workspacePath: workspace.path,
+    zoneId, zonePath: workspace.path + '/subfolder', path: 'subfolder' }
+  const mount = { workspaceId: workspace.id, hostId: workspace.hostId, zoneId, reference: { runtimeId: 'source-runtime', spaceId: 'source-space' } }
+  const locator = { mount, resource }
+  const input = { workspace, target: mount, selection: { kind: 'mount' as const, mount }, locator }
+  const main = vi.spyOn(api.files, 'readDirectory').mockRejectedValue(new Error('Unrelated Main folder'))
+  const source = vi.spyOn(api.sourceFiles, 'call').mockImplementation(async (_target, method, query) => {
+    if (method !== 'file.list' || !('path' in query)) throw new Error('Unexpected Source request')
+    const name = query.path === root ? 'nested' : 'from-source.md'
+    const path = resource.path + '/' + query.path
+    return { carrierCurrent: true, result: { resource: { ...resource, path }, result: {
+      status: 'directory-listed', complete: true, omitted: 'none', partialReason: null,
+      entries: [{ path: path + '/' + name, name, isDirectory: name === 'nested', isSymlink: false }] } } }
+  })
+  useAppStore.setState({ config: { ...composerConfig, workspaces: [workspace] }, activeWorkspaceId: workspace.id,
+    explorerCollapsed: { [workspace.id]: false }, resolveFilesSource: async () => ({ status: 'located', locator }),
+    observeFilesSource: async () => () => {}, sourceFilesInputs: { selections: { [workspace.id]: input }, pending: {}, creations: {}, folderRequests: {} } })
+  await dom.render(<WorkspaceFilesFrame workspace={workspace} title="Source" visible presentation={contentSlotPresentation(false)}
+    explorer={{ rootPath: root }}><div /></WorkspaceFilesFrame>)
+  await dom.click(`[data-tree-path="${root}/nested"] .tree-row__label`)
+  expect(dom.container.querySelector(`[data-tree-path="${root}/nested/from-source.md"]`)).toBeTruthy()
+  expect(source.mock.calls.map(([target, method, query]) => [target, method, 'path' in query && query.path])).toEqual([
+    [mount, 'file.list', root], [mount, 'file.list', root + '/nested']
+  ])
+  expect(main).not.toHaveBeenCalled()
 })
