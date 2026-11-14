@@ -5,6 +5,9 @@ import { AGENTMUX_HOSTED_RPC_FIELDS } from './hosted-client-contract.js'
 import { parseSpaceMemberIdentity, SPACE_MEMBER_CALLS, SPACE_MEMBER_STREAMS, SPACE_MEMBER_INVOCATIONS, parseSpaceMemberAdmission, type SpaceMemberTarget, type SpaceMemberRoute, type SpaceMemberParams } from './space-member.js'
 import { validateAgentInputControlId, validateAgentInputWaitRef } from './agent-input-wait.js'
 import { parseConversationTimelineReadInput, parseConversationCheckpointInput, parseConversationChangesInput, parseConversationWatchInput, parseConversationViewReleaseInput } from './conversation-changes.js'
+import { validateSessionHistoryReadInput, type AgentSessionHistoryReadInput } from './session-history-read-codec.js'
+import { parseSessionHistoryResourceParams } from './session-history-resource.js'
+import { parseAgentInputMailboxRead } from './agent-input-mailbox.js'
 
 function mismatch(): never { throw new AgentMuxError('This operation does not identify the original Space member and Run. Its Session and other controls are retained.', 'SPACE_MEMBER_TARGET_MISMATCH') }
 export { parseSpaceMemberIdentity } from './space-member.js'
@@ -61,6 +64,25 @@ export function assertSpaceMemberCall(target: SpaceMemberRoute, call: { method: 
     const ref = conversationParser(first)
     if (ref.hostId !== 'local' || ref.agentSessionId !== target.agentSessionId) mismatch()
     if (invocation.args.length === 2) rpcRecord(invocation.args[1], [])
+    return
+  }
+  if (invocation.method === 'readAgentSessionHistory') {
+    if (invocation.args.length < 1 || invocation.args.length > 2) mismatch()
+    const ref = rpcRecord(first, ['hostId', 'agentSessionId', 'source', 'limit', 'cursor', 'maxBytes', 'kind', 'query', 'scanLimit'])
+    validateSessionHistoryReadInput(ref as AgentSessionHistoryReadInput)
+    if (ref.hostId !== 'local' || ref.agentSessionId !== target.agentSessionId) mismatch()
+    if (invocation.args.length === 2) rpcRecord(invocation.args[1], [])
+    return
+  }
+  if (invocation.method === 'sessionHistoryResource') {
+    if (invocation.args.length !== 2 || first !== target.agentSessionId) mismatch()
+    // Source readers supply original record selectors, never Executor options.
+    const options = rpcRecord(invocation.args[1], ['source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes', 'representation', 'markdownImage'])
+    parseSessionHistoryResourceParams({ ...options, hostId: 'local', agentSessionId: target.agentSessionId })
+    return
+  }
+  if (invocation.method === 'readAgentInputMailbox') {
+    if (invocation.args.length !== 1 || parseAgentInputMailboxRead(first).agentSessionId !== target.agentSessionId) mismatch()
     return
   }
   if (invocation.method === 'readAgentInputEpoch') { if (invocation.args.length !== 0) mismatch(); return }

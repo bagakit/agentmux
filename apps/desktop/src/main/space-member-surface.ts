@@ -71,6 +71,24 @@ export async function createSpaceMemberSurface(input: SpaceMountMemberRoute, por
   }
   const actions: Actions = {
     read,
+    history: async (value, requestSignal) => {
+      const page = await client.readAgentSessionHistory({ ...conversationInput(value.input), ...conversationReference }, requestSignal ? { signal: requestSignal } : {})
+      check()
+      if (page.hostId !== 'local' || page.agentSessionId !== input.target.agentSessionId) throw new AgentMuxError('This history belongs to another original Agent.', 'SPACE_MEMBER_TARGET_MISMATCH')
+      return { ...page, hostId: initial.hostId }
+    },
+    historyResource: async (value, requestSignal) => {
+      const page = await client.sessionHistoryResource(input.target.agentSessionId, { ...conversationInput(value.input), ...(requestSignal ? { signal: requestSignal } : {}) })
+      check()
+      if (page.agentSessionId !== input.target.agentSessionId) throw new AgentMuxError('This history resource belongs to another original Agent.', 'SPACE_MEMBER_TARGET_MISMATCH')
+      return page
+    },
+    inputMailbox: async value => {
+      const page = await client.readAgentInputMailbox({ ...conversationInput(value.input), agentSessionId: input.target.agentSessionId })
+      check()
+      if (page.agentSessionId !== input.target.agentSessionId) throw new AgentMuxError('This input journal belongs to another original Agent.', 'SPACE_MEMBER_TARGET_MISMATCH')
+      return page
+    },
     conversationRead: async (value, requestSignal) => {
       const page = await client.readAgentConversation({ ...conversationInput(value.input), ...conversationReference }, requestSignal ? { signal: requestSignal } : {})
       if (closed) { if (page.window.view) await client.releaseConversationView({ ...conversationReference, view: page.window.view }); check() }
@@ -125,7 +143,7 @@ export async function createSpaceMemberSurface(input: SpaceMountMemberRoute, por
   if (signal.aborted) { await dispose(); signal.throwIfAborted() }
   return { initial, call: async (method, value, requestSignal) => {
     requestSignal?.throwIfAborted(); check()
-    if (readingOnly && !method.startsWith('conversation')) throw new AgentMuxError('This original surface grants conversation reading only.', 'CONTROL_PERMISSION_DENIED')
+    if (readingOnly && !method.startsWith('conversation') && method !== 'history' && method !== 'historyResource' && method !== 'inputMailbox') throw new AgentMuxError('This original surface grants conversation reading only.', 'CONTROL_PERMISSION_DENIED')
     const result = await actions[method](value, requestSignal); requestSignal?.throwIfAborted(); return result
   }, start: () => { if (!readingOnly) void client.connect().then(refresh).catch(report) }, dispose }
 }

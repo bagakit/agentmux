@@ -11,6 +11,7 @@ import type { AgentMuxSpatialStateStore } from './spatial-state.js'
 import type { HostRouteGateway } from './host-route-gateway.js'
 import type { AgentMuxRpcCallContext, AgentMuxRpcCoreClient } from './public-rpc-service.js'
 import type { SpaceMemberParams, SpaceMemberCallMethod, SpaceMemberStreamMethod } from './space-member.js'
+import { SPACE_MEMBER_INPUT_READING_INVOCATIONS } from './space-member.js'
 import type { AgentMuxHostedStreamEvent } from './hosted-client-contract.js'
 
 type RuntimePort = {
@@ -104,6 +105,14 @@ export async function spaceMemberRuntime(ports: {
     const session = parseHostedAgentSessionRead(decodeHostedValue(read.value), input.target.agentSessionId)
     if (!session || session.run.runId !== input.target.expectedRun.runId) throw new AgentMuxError('The original member now refers to another Run. Keep this input and refresh its exact source.', 'STALE_AGENT_SESSION_BINDING')
     await assertCurrent()
+  }
+  if (invocation && (SPACE_MEMBER_INPUT_READING_INVOCATIONS as readonly unknown[]).includes(invocation.method)) {
+    const originalPort = port
+    port = { ...originalPort, call: async (method, params, callContext) => {
+      const result = await originalPort.call(method, params, callContext)
+      await assertCurrent()
+      return result
+    } }
   }
   return { port, context, assertCurrent }
 }

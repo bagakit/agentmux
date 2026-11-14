@@ -12,7 +12,8 @@ export type SpaceMemberClient = Pick<AgentMuxHostedClient, 'connect' | 'dispose'
   'refreshRunAttachment' | 'readRunReplay' | 'releaseRunAttachment' | 'resizeTerminal' | 'writeAgent' | 'pasteAgent' |
   'submitAgentPrompt' | 'statusAgent' | 'inspectAgentInteractionOperation' | 'inspectAgentInput' | 'inspectAgentPromptSubmission' |
   'stopAgentInputWaiting' | 'signalAgent' |
-  'readAgentConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'releaseConversationView' | 'observeConversation'> & {
+  'readAgentConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'releaseConversationView' | 'observeConversation' |
+  'readAgentSessionHistory' | 'sessionHistoryResource' | 'readAgentInputMailbox'> & {
     /** Original exact-SID full metadata and Provider declarations, without an event lease prerequisite. */
     metadata(): Promise<import('./hosted-client-contract.js').AgentMuxHostedBootstrap>
     rejoinAgentInputWaiting(input: { ref: import('./agent-input-wait.js').AgentInputWaitRef }): ReturnType<AgentMuxHostedClient['rejoinAgentInputWaiting']>
@@ -21,7 +22,7 @@ export type SpaceMemberClient = Pick<AgentMuxHostedClient, 'connect' | 'dispose'
 
 /** Reuse the original exact-SID Hosted client and its reader/attachment machinery.
  * The carrier cannot invoke an arbitrary remote method or change this member. */
-export type SpaceMemberReadingClient = Pick<SpaceMemberClient, 'readAgentInputEpoch' | 'dispose' | 'readAgentConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'releaseConversationView' | 'observeConversation'>
+export type SpaceMemberReadingClient = Pick<SpaceMemberClient, 'readAgentInputEpoch' | 'dispose' | 'readAgentConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'releaseConversationView' | 'observeConversation' | 'readAgentSessionHistory' | 'sessionHistoryResource' | 'readAgentInputMailbox'>
 export function connectSpaceMember(rpc: Pick<AgentMuxRpcClient, 'call' | 'subscribe'>, value: SpaceMemberTarget): Promise<SpaceMemberClient>
 export function connectSpaceMember(rpc: Pick<AgentMuxRpcClient, 'call' | 'subscribe'>, value: SpaceMemberReadingTarget): Promise<SpaceMemberReadingClient>
 export function connectSpaceMember(rpc: Pick<AgentMuxRpcClient, 'call' | 'subscribe'>, value: SpaceMemberRoute): Promise<SpaceMemberClient | SpaceMemberReadingClient>

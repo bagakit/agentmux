@@ -4,7 +4,8 @@ import { createCapturedInputSelector } from './session-captured-inputs'
 import { useAgentInputHistory, type InputHistoryRead } from '@agentmux/client-ui/use-agent-input-history'
 import { inputHistoryText } from '@agentmux/client-ui/input-history-text'
 import type { ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
-import type { AgentSessionControl, AgentTimelineSnapshot } from '../../../shared/contracts'
+import type { AgentSessionControl, AgentTimelineSnapshot, SessionHistoryReference } from '../../../shared/contracts'
+import type { ConversationReadApi } from '../../../shared/conversation-read'
 import { api } from './api'
 import { copyTextToClipboard } from './clipboard-copy'
 import { useAppStore } from '../store'
@@ -14,6 +15,14 @@ import { projectSessionInputs } from '@agentmux/core/conversation'
 
 const EMPTY: readonly string[] = Object.freeze([])
 const EMPTY_MESSAGES: readonly AgentSessionUserMessage[] = Object.freeze([])
+/** A fixed original reader supplies data only; it is never a Session or input grant. */
+export type ComposerInputReading = {
+  reference: SessionHistoryReference
+  conversation: { reference: SessionHistoryReference; identity: string; port: ConversationReadApi }
+  readHistory: InputHistoryRead
+  resource: (request: AgentSessionHistoryResourceRequest) => ReturnType<typeof api.sessions.historyResource>
+  inputMailbox: (input: import('@agentmux/core/agent-input-mailbox').AgentInputMailboxRead) => Promise<import('@agentmux/core/agent-input-mailbox').AgentInputMailboxPage>
+}
 async function copyRecordedText(text: string): Promise<boolean> {
   let failure: unknown
   const copied = await copyTextToClipboard(text, error => { failure = error })
@@ -22,30 +31,32 @@ async function copyRecordedText(text: string): Promise<boolean> {
 }
 
 /** The current editor consumes original history; it owns neither transcripts nor input receipts. */
-export function useComposerInputHistory({ sessionId, control, visible, readOnly, insertion, timeline, draftOwner }: {
+export function useComposerInputHistory({ sessionId, control, visible, readOnly, insertion, timeline, draftOwner, originalReading }: {
   sessionId: string; draftOwner?: string | undefined
   control: AgentSessionControl | undefined; visible: boolean; readOnly: boolean
   insertion: RefObject<ComposerInsertionHandle | null>; timeline?: AgentTimelineSnapshot
+  originalReading?: ComposerInputReading | undefined
 }) {
   const [focused, setFocused] = useState(false), [mailboxOpen, setMailboxOpen] = useState(false)
-  const sid = control?.agentSessionId ?? sessionId
-  const scope = JSON.stringify([control?.hostId, sid, draftOwner ?? sid])
+  const reference = originalReading?.reference ?? control
+  const sid = reference?.agentSessionId ?? sessionId
+  const scope = JSON.stringify([reference?.hostId, sid, originalReading?.conversation.identity, draftOwner ?? sid])
   const latest = useRef({ scope, visible, readOnly })
   latest.current = { scope, visible, readOnly }
   const action = useRef<AbortController | null>(null)
   const read = useCallback<InputHistoryRead>((input, signal) => {
-    if (!control) return Promise.reject(new Error('当前 Agent 历史引用未提供。草稿仍可使用。'))
-    return api.sessions.readHistory({ hostId: control.hostId, agentSessionId: control.agentSessionId }, input, { signal }).then(page => {
-      if (page.hostId !== control.hostId || page.agentSessionId !== sid) throw new Error('历史结果不属于当前 Agent，原草稿和发送能力保留。')
+    if (!reference) return Promise.reject(new Error('当前 Agent 历史引用未提供。草稿仍可使用。'))
+    return (originalReading ? originalReading.readHistory(input, signal) : api.sessions.readHistory(reference, input, { signal })).then(page => {
+      if (page.hostId !== reference.hostId || page.agentSessionId !== sid) throw new Error('历史结果不属于当前 Agent，原草稿和发送能力保留。')
       return page
     })
-  }, [control?.hostId, sid])
-  const enabled = visible && Boolean(control) && (focused || mailboxOpen)
+  }, [reference?.hostId, sid, originalReading])
+  const enabled = visible && Boolean(reference) && (focused || mailboxOpen)
   // Reuse the existing scoped live reader. Both consumers share its original watch and page.
-  const native = useSessionUserMessages(control, { enabled })
+  const native = useSessionUserMessages(control, { enabled, ...(originalReading ? { reading: originalReading.conversation } : {}) })
   const selectCaptured = useMemo(createCapturedInputSelector, [])
-  const captured = useMemo(() => selectCaptured(sid, timeline, control?.hostId),
-    [selectCaptured, sid, timeline, timeline?.revision, control?.hostId])
+  const captured = useMemo(() => selectCaptured(sid, timeline, reference?.hostId),
+    [selectCaptured, sid, timeline, timeline?.revision, reference?.hostId])
   // The original live reader retains input facts independently of its clipped continuous page.
   const nativeMessages = native.sourceMessages.length ? native.sourceMessages : EMPTY_MESSAGES
   const initialMessages = useMemo(() => [...nativeMessages, ...captured], [nativeMessages, captured])
@@ -53,7 +64,7 @@ export function useComposerInputHistory({ sessionId, control, visible, readOnly,
   // Apply the current accepted entity membership after every original query/page,
   // including search. Raw source seeds never acquire an author of their own.
   const userMessages = useMemo(() => userInputHistoryMessages(history.messages, native.messages,
-    { hostId: control?.hostId ?? '', agentSessionId: sid }), [history.messages, native.messages, control?.hostId, sid])
+    { hostId: reference?.hostId ?? '', agentSessionId: sid }), [history.messages, native.messages, reference?.hostId, sid])
   const userHistory = { ...history, messages: userMessages, loading: history.loading || native.loading }
   // Recheck both original source-query records and their canonical membership.
   const refresh = useCallback(() => {
@@ -63,17 +74,18 @@ export function useComposerInputHistory({ sessionId, control, visible, readOnly,
   const sourceHosts = new Set([history.sourceHostId, native.conversation?.reading?.timeline.reference?.hostId,
     ...native.messages.map(input => input.sourceHostId)].filter((host): host is string => Boolean(host)))
   const sourceHostId = sourceHosts.size === 1 ? [...sourceHosts][0] : undefined
-  const groups = useMemo(() => projectSessionInputs({ hostId: control?.hostId ?? '', agentSessionId: sid,
+  const groups = useMemo(() => projectSessionInputs({ hostId: reference?.hostId ?? '', agentSessionId: sid,
     ...(sourceHostId ? { sourceHostId } : {}), messages: userMessages, inputs: native.messages }),
-  [control?.hostId, sid, sourceHostId, userMessages, native.messages])
+  [reference?.hostId, sid, sourceHostId, userMessages, native.messages])
   useEffect(() => () => action.current?.abort(), [scope, visible, mailboxOpen, history.query])
   const local = useAppStore(state => state.agentComposerHistory[sessionId] ?? EMPTY)
   const entries = useMemo(() => [...groups.flatMap(group => group.primary ? [group.primary] : []).filter(message =>
     message.contentParts.every(part => part.kind === 'text')).map(message => message.content).reverse(), ...local], [local, groups])
   const resourceReader = useCallback(async (request: AgentSessionHistoryResourceRequest) => {
+    if (originalReading) return originalReading.resource(request)
     if (!control) throw new Error('原 Agent 资源来源未提供。')
     return api.sessions.historyResource(control, request)
-  }, [control?.hostId, sid])
+  }, [control?.hostId, sid, originalReading])
   function beginAction(filling: boolean) {
     if (latest.current.scope !== scope) throw new Error('已切换 Agent，原记录保留。')
     if (!latest.current.visible) throw new Error('已离开原工作面，原记录与草稿保留。')
@@ -124,5 +136,6 @@ export function useComposerInputHistory({ sessionId, control, visible, readOnly,
   return { history: userHistory, localEntries: local.map((text, index) => ({ id: `local:${scope}:${index}`, text })).reverse(),
     fill, fillText, fillLocal, copy, canFill: visible && !readOnly, resourceReader,
     nativeReading: { error: native.error, observationError: native.observationError, windowFrozen: native.windowFrozen, refresh },
-    entries, messages: userMessages, sourceMessages: history.messages, inputs: native.messages, sourceHostId, setMailboxOpen, setFocused }
+    entries, messages: userMessages, sourceMessages: history.messages, inputs: native.messages, sourceHostId, reference,
+    inputMailboxRead: originalReading?.inputMailbox, setMailboxOpen, setFocused }
 }

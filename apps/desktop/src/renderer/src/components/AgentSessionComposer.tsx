@@ -44,7 +44,7 @@ import { ComposerFeedback, useComposerFeedback } from './ComposerFeedback'
 import { sessionServiceNotices } from '../lib/session-service-notices'
 import { useRunService } from '../lib/run-service-projection'
 import { SessionMailbox } from './SessionMailbox'
-import { useComposerInputHistory } from '../lib/use-composer-input-history'
+import { useComposerInputHistory, type ComposerInputReading } from '../lib/use-composer-input-history'
 import { confirmedSteerDelivery } from '../lib/steer-queue-delivery'
 import type { ConversationReadingProps } from '@agentmux/client-ui/components/ConversationMessage'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
@@ -138,7 +138,7 @@ export function AgentSessionComposer({
   mailboxOrigin?: OpenHttpLinkOrigin | undefined
   resultReview?: ((onNavigate: () => void) => ReactNode) | undefined
   /** Foreign execution facts and locator; drafts and queues still use sessionId as their canonical owner. */
-  source?: { target: SpaceMountMemberTarget; session?: SessionSnapshot | undefined } | undefined
+  source?: { target: SpaceMountMemberTarget; session?: SessionSnapshot | undefined; inputReading?: ComposerInputReading | undefined } | undefined
   visible?: boolean
 }) {
   const moteWorkface = useContext(MoteWorkfaceContext)
@@ -222,7 +222,7 @@ export function AgentSessionComposer({
   useObservedAppStore('composer', visible, consumerScope, state => state.timelines?.[sessionId]?.revision)
   const inputHistory = useComposerInputHistory({ sessionId: ownerKey, draftOwner,
     control: source ? undefined : session?.kind === 'agent' ? session.control : undefined, visible, readOnly: readOnly || disabled,
-    insertion: insertionRef, ...(timeline ? { timeline } : {}) })
+    insertion: insertionRef, ...(timeline ? { timeline } : {}), ...(source?.inputReading ? { originalReading: source.inputReading } : {}) })
   const firstPromptSelector = useMemo(() => createFirstPromptSelector(sessionId), [sessionId])
   const firstPrompt = useObservedAppStore('composer', visible, consumerScope, firstPromptSelector)
   const displayName = session?.kind === 'agent' ? agentDisplayName({
@@ -382,7 +382,7 @@ export function AgentSessionComposer({
   if (source) notices.push({ id: 'source-message-tools', occurrence: JSON.stringify(source.target), notice: {
     kind: 'indeterminate', notice: {
       step: 'Some message tools are unavailable on this connection',
-      mode: 'This original member connection supports messages and their waiting controls. Recorded input history, Agent mail, automation, Skills and image transfer are unavailable here.',
+      mode: `${source.inputReading ? 'Agent mail, automation, Skills and image transfer do not yet have an original route here.' : 'The original input history is not connected yet. Agent mail, automation, Skills and image transfer also need their original routes.'} Your draft and the existing message waiting controls are kept.`,
       restore: 'Continue editing, referencing confirmed project files and using this message queue. Open the original Agent workface for its other tools; this connection will not use another local Agent.'
     }
   } })

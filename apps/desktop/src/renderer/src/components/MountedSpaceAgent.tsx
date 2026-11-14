@@ -9,7 +9,7 @@ import { spaceMemberTerminalSource } from '../lib/space-member-terminal'
 import { AgentSessionComposer } from './AgentSessionComposer'
 import { TerminalView } from './TerminalView'
 import { ActivityView } from './ActivityView'
-import { sourceConversationPort } from '../lib/focus-source-conversation'
+import { sourceComposerInputReading, sourceConversationPort } from '../lib/focus-source-conversation'
 import { createSessionViewModeSelector, sessionStatusLabel } from '../lib/session-presentation'
 import { originalSourceInputOwnerKey } from '../lib/original-space-navigation'
 import { usePendingDeliveryLayout } from '../lib/pending-delivery-layout'
@@ -144,6 +144,10 @@ export function SpaceMemberWorkface({ target, visible, active, interactiveResize
   // conversation-only grant by inventing a missing C/L.
   const conversation = readingTarget ? originalReading?.port : original?.conversation
   const conversationIdentity = readingTarget ? readingKey : key
+  const inputReading = useMemo(() => originalReading
+    ? sourceComposerInputReading(originalReading.surface, originalReading.port, target.target.agentSessionId, readingKey)
+    : original ? sourceComposerInputReading(original.surface, original.conversation, target.target.agentSessionId, key) : undefined,
+  [originalReading, originalReading ? undefined : original])
   const conversationIssue = readingIssue?.key === readingKey ? readingIssue.message : undefined
   return <div ref={surfaceRef} className="agent-surface mounted-space-agent" aria-label="Original member workface" data-agent-surface-mode={mode}>
     {hasIssue || (session?.kind === 'agent' && !session.semanticStatus) ? <ServiceWindowNotice
@@ -192,7 +196,7 @@ export function SpaceMemberWorkface({ target, visible, active, interactiveResize
     </div></div>
     <SourceComposerRecovery target={target} tabId={sourceTabId} surfaceRef={recoveryRef} />
     <div className="agent-input-stack" data-input-surface={mode}><AgentSessionComposer sessionId={ownerKey}
-      source={{ target, ...(session ? { session } : {}) }} resourceWorkspaceId={privateInput?.workspaceId} {...(session?.label === undefined ? {} : { tabName: session.label })} pendingLayout={pendingLayout} visible={visible} /></div>
+      source={{ target, ...(session ? { session } : {}), ...(inputReading ? { inputReading } : {}) }} resourceWorkspaceId={privateInput?.workspaceId} {...(session?.label === undefined ? {} : { tabName: session.label })} pendingLayout={pendingLayout} visible={visible} /></div>
   </div>
 }
 export { SpaceMemberWorkface as MountedSpaceAgent }

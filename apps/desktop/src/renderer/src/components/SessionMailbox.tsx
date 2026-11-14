@@ -271,7 +271,8 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
   const effectiveControl: AgentSessionControl | undefined =
     propControl === null ? undefined : propControl ?? (storeSession?.kind === 'agent' ? storeSession.control : undefined)
 
-  const scope = JSON.stringify([effectiveControl?.hostId, effectiveControl?.agentSessionId, effectiveControl?.run.runId, timeline?.agentSessionId])
+  const scope = JSON.stringify([effectiveControl?.hostId, effectiveControl?.agentSessionId, effectiveControl?.run.runId, timeline?.agentSessionId,
+    inputHistory?.reference?.hostId, inputHistory?.reference?.agentSessionId])
   const previousScope = useRef(scope)
   const navigationGeneration = useRef(0)
   const [navigationFeedback, setNavigationFeedback] = useState<{ scope: string; key: string; message: string } | null>(null)
@@ -351,14 +352,15 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
 
   const effectiveUserMessages = propUserMessages ?? inputHistory?.sourceMessages ?? hookSourceMessages
 
-  const mailboxSessionId = effectiveControl?.agentSessionId ?? timeline?.agentSessionId
-  const inputMailboxHost = effectiveControl?.hostId ?? ''
+  const mailboxSessionId = effectiveControl?.agentSessionId ?? inputHistory?.reference?.agentSessionId ?? timeline?.agentSessionId
+  const inputMailboxHost = effectiveControl?.hostId ?? inputHistory?.reference?.hostId ?? ''
   const readInputMailbox = useCallback((input: import('@agentmux/core/agent-input-mailbox').AgentInputMailboxRead) =>
-    api.sessions.inputMailbox({ hostId: inputMailboxHost, agentSessionId: input.agentSessionId }, input), [inputMailboxHost])
+    inputHistory?.inputMailboxRead ? inputHistory.inputMailboxRead(input)
+      : api.sessions.inputMailbox({ hostId: inputMailboxHost, agentSessionId: input.agentSessionId }, input), [inputMailboxHost, inputHistory?.inputMailboxRead])
   const inputMailbox = useAgentInputMailbox({ hostId: inputMailboxHost, agentSessionId: mailboxSessionId ?? '',
     enabled: open && visible && folder === 'user' && Boolean(inputMailboxHost && mailboxSessionId), read: readInputMailbox })
   useEffect(() => {
-    if (!open || !visible || !inputMailboxHost || !mailboxSessionId) return
+    if (!open || !visible || !inputMailboxHost || !mailboxSessionId || inputHistory?.inputMailboxRead) return
     return api.sessions.onEvent(event => {
       if (event.type !== 'core' || event.hostId !== inputMailboxHost) return
       const fact = event.event
@@ -366,13 +368,13 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
           fact.type === 'agent-input' && fact.receipt.key.agentSessionId === mailboxSessionId ||
           fact.type === 'connection-state' && fact.state === 'restored') void inputMailbox.refresh()
     })
-  }, [open, visible, inputMailboxHost, mailboxSessionId, inputMailbox.refresh])
+  }, [open, visible, inputMailboxHost, mailboxSessionId, inputMailbox.refresh, inputHistory?.inputMailboxRead])
   const selectDisplayedMessages = useMemo(createMailboxMessagesSelector, [])
   const displayedMessages = useMemo(() => selectDisplayedMessages(mailboxSessionId,timeline,effectiveUserMessages,effectiveControl?.hostId),
     [selectDisplayedMessages,mailboxSessionId,timeline,timeline?.revision,effectiveUserMessages,effectiveControl?.hostId])
   const sent = useMemo(() => displayedMessages.filter(item => item.message.author.kind !== 'agent'), [displayedMessages])
   const messageReference = useMemo(() => ({ hostId: inputMailboxHost, agentSessionId: mailboxSessionId ?? '' }), [inputMailboxHost, mailboxSessionId])
-  const canReadMessages = Boolean(inputMailboxHost && mailboxSessionId)
+  const canReadMessages = Boolean(effectiveControl && inputMailboxHost && mailboxSessionId)
   const incomingWindow = useSessionMessages({ ...messageReference, direction: 'incoming', enabled: visible && canReadMessages })
   const outgoingWindow = useSessionMessages({ ...messageReference, direction: 'outgoing', enabled: open && visible && folder === 'outbox' && canReadMessages })
   // The public participant query includes self-addressed records; these two faces explicitly mean other Agents.

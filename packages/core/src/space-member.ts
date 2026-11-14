@@ -31,12 +31,14 @@ export type PinnedSpaceMemberIdentity = SpaceMemberIdentity & { expectedAdmissio
 /** Durable conversation access cannot grant Native observation, attachment or input. */
 export type SpaceMemberReadingTarget = PinnedSpaceMemberIdentity & { kind: 'conversation' }
 export type SpaceMemberRoute = SpaceMemberTarget | SpaceMemberReadingTarget
+export const SPACE_MEMBER_INPUT_READING_INVOCATIONS = ['readAgentSessionHistory', 'sessionHistoryResource', 'readAgentInputMailbox'] as const
 export const SPACE_MEMBER_INVOCATIONS = [
   'readAgentInputEpoch', 'readAgentSession', 'runtimeSubject', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
   'releaseRunAttachment', 'resizeTerminal', 'writeAgent', 'pasteAgent', 'submitAgentPrompt',
   'statusAgent', 'inspectAgentInteractionOperation', 'inspectAgentInput', 'inspectAgentPromptSubmission',
   'stopAgentInputWaiting', 'rejoinAgentInputWaiting', 'signalAgent',
   'readAgentConversation', 'conversationCheckpoint', 'readConversationChanges', 'releaseConversationView',
+  ...SPACE_MEMBER_INPUT_READING_INVOCATIONS,
 ] as const
 export type SpaceMemberInvocation = typeof SPACE_MEMBER_INVOCATIONS[number]
 export const SPACE_MEMBER_CALLS = ['runtime.owner.identity', 'runtime.bootstrap', 'runtime.invoke', 'runtime.release-consumer'] as const

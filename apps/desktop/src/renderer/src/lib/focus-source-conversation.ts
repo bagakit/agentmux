@@ -2,6 +2,22 @@ import { consumeConversationWindowPage, projectConversationWindow, type Conversa
   type ConversationWindowAssembly } from '@agentmux/core/conversation'
 import type { SpaceMountReadingSurface } from '../../../shared/space-mount'
 import type { ConversationReadApi } from '../../../shared/conversation-read'
+import type { ComposerInputReading } from './use-composer-input-history'
+
+/** The same original surface feeds the common input reader, without a configured-Host fallback. */
+export function sourceComposerInputReading(surface: SpaceMountReadingSurface, port: ConversationReadApi, agentSessionId: string, identity: string): ComposerInputReading {
+  return {
+    reference: { hostId: surface.initial.hostId, agentSessionId },
+    conversation: { reference: { hostId: 'local', agentSessionId }, identity, port },
+    readHistory: (input, signal) => surface.call('history', { input }, signal),
+    resource: input => surface.call('historyResource', { input }),
+    inputMailbox: input => {
+      if (input.agentSessionId !== agentSessionId) throw Error('This input journal belongs to another original Agent. The original draft is kept.')
+      const { agentSessionId: _sid, ...selection } = input
+      return surface.call('inputMailbox', { input: selection })
+    }
+  }
+}
 
 /** The common Reader's port, fixed to one original member; no observer-local fallback. */
 export function sourceConversationPort(surface: SpaceMountReadingSurface, agentSessionId: string,
