@@ -56,7 +56,7 @@ const mutations = [
   { id: 'retake-same-draft', source: producer, from: 'const attaching = attachToDraft && !originalDelivered', to: 'const attaching = attachToDraft && !originalDelivered && !retaking', expected: 'Retake from the window editor captures again for the same draft' },
   { id: 'retake-attaches-delivered-draft', source: producer, from: 'const attaching = attachToDraft && !originalDelivered', to: 'const attaching = attachToDraft', expected: 'a retake after the editor already copied keeps the same consumer' },
   { id: 'retake-editor-delivery-forgotten', source: producer, from: 'complete(final).then(() => { continuation = outcome.delivered() })', to: 'complete(final)', expected: 'Copy in the window editor supplies only the same capture Retake continuation' },
-  { id: 'surface-editor-continuation-wrong', source: surface, from: 'delivered: () => this.continuation(frameInput, source.rect)', to: 'delivered: () => this.continuation(frameInput, { ...source.rect, x: source.rect.x + 1 })', expected: 'an expanded editor delivery returns a pure continuation' },
+  { id: 'surface-editor-continuation-wrong', source: surface, from: 'continuation = this.continuation(frameInput, source.rect)', to: 'continuation = this.continuation(frameInput, { ...source.rect, x: source.rect.x + 1 })', expected: 'an expanded editor delivery returns a pure continuation' },
   { id: 'retake-focus-leaves-editor', source: producer, from: 'returnFocus: returnFocus && !retaking, complete, background,', to: 'returnFocus, complete, background,', expected: 'gives focus back to that editor' },
   { id: 'retake-editor-not-retakable', source: producer, from: '...(returnFocus ? { returnFocus } : {}), retake: () => surface(true) })', to: '...(returnFocus ? { returnFocus } : {}), ...(retaking ? {} : { retake: () => surface(true) }) })', expected: 'a retake that expands again replaces the old editor' },
   { id: 'retake-capture-ends-early', source: producer, from: '        for (let current = held.editor; current; current = held.editor === current ? null : held.editor) await current', to: '        if (held.editor) await held.editor', expected: 'a retake that expands again replaces the old editor' },
@@ -189,6 +189,7 @@ try {
     throw new Error('No passing exact-source proof in ' + directory + '; run its owning verifier before this gate.')
   }
   receipt.captureSurface = await consumeProof(resolve('.local/capture-surface'), 'agentmux.capture-surface-product-proof.v1')
+  receipt.publicSelection = await consumeProof(resolve('.local/capture-public-selection'), 'agentmux.capture-public-selection-proof.v1')
   receipt.shortcuts = await consumeProof(resolve('.local/state/screenshot-experience/shortcut'), 'agentmux.screenshot-shortcut-proof.v1')
   receipt.passed = true
 } finally {
