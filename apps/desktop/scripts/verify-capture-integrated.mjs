@@ -23,6 +23,7 @@ async function stage(name, script, args, receiptFromLog) {
     child.once('error', reject)
     child.once('exit', (code, signal) => { clearTimeout(timer); clearTimeout(kill); done({ code, signal, timedOut, log }) })
   })
+  await writeFile(join(dirname(out), 'integrated-' + name + '.log'), result.log)
   assert.equal(result.timedOut, false, name + ': timeout is not a passing receipt')
   assert.equal(result.signal, null, name + ': external termination is not a passing receipt')
   assert.equal(result.code, 0, name + ': command failed')
