@@ -64,6 +64,12 @@ executables, installs hooks or starts Native. An empty catalog is confirmed empt
 source is unavailable, and runtimeId=null means the semantic owner identity is unknown.
 Declarations do not prove current permissions or readiness.
 
+Use agent provider probe --host HOST --runtime RUNTIME --executor ID --config-revision REVISION
+--workspace ABSOLUTE_PATH to check ACP support on the saved Executor. Discover its current target
+with settings executors discover first. The probe reports the handshake and session service
+separately, including authentication-required. It starts a disposable process without submitting
+a prompt or creating a session. Existing Runs keep their own capabilities and state.
+
 Use agent posture inspect --host HOST --session SID --run RUN for the exact original
 Provider target/controlDigest. Set one declared intent with agent posture set --input FILE|-
 using that target, operationId, controlId, modeId and expectedControlDigest. Only the original
