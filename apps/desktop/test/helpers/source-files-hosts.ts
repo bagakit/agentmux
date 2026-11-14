@@ -12,7 +12,7 @@ import { RuntimeController } from '../../src/main/runtime-controller.js'
 /** Two actual Source services and private vendored Native daemons. All Zone and
  * Space identities come from Source folder registration, never a fixture graph.
  * Main uses its production local carrier factory; only the configured map is a leaf. */
-export async function sourceFilesHosts(cleanup: Array<() => unknown | Promise<unknown>>) {
+export async function sourceFilesHosts(cleanup: Array<() => unknown | Promise<unknown>>, options: { scratch?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'amx-source-files-'))
   cleanup.push(() => rm(root, { recursive: true, force: true }))
   for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key) && !key.startsWith('AGENTMUX_TEST_')) vi.stubEnv(key, undefined)
@@ -35,8 +35,11 @@ export async function sourceFilesHosts(cleanup: Array<() => unknown | Promise<un
     vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(state, 'messages.ndjson'))
     vi.stubEnv('AGENTMUX_SPATIAL_STATE_STORE', join(state, 'spatial.json'))
     const store = new AgentMuxFileAgentSessionStore(join(state, 'sessions.json')), configurationPath = join(directory, 'config.json')
+    const scratch = join(directory, 'scratch')
+    if (options.scratch) await mkdir(scratch)
     await writeFile(configurationPath, JSON.stringify({ hosts: [{ id: 'local', kind: 'local', label: id }],
-      workspaces: [{ id: 'same-workspace', hostId: 'local', path: project, name: id }], executors: {}, appearance: {} }))
+      workspaces: [{ id: 'same-workspace', hostId: 'local', path: project, name: id },
+        ...(options.scratch ? [{ id: '__scratch__', hostId: 'local', path: scratch, name: 'Original scratch' }] : [])], executors: {}, appearance: {} }))
     await writeFile(join(project, 'original.txt'), id + ' original body')
     const socketPath = join(runtimeDirectory, 'control.sock')
     const host = await startAgentMuxHost({ store, configurationPath, socketPath,
@@ -46,7 +49,7 @@ export async function sourceFilesHosts(cleanup: Array<() => unknown | Promise<un
     const identity = (await rpc.call('runtime.owner.identity', {})).owner
     const connect = configuredDesktopAgentMuxHost(configurationPath, join(state, 'connectors'))
     const client = await connect({ id: 'local', kind: 'local', label: id }, store); cleanup.push(() => client.dispose())
-    sources.push({ id, directory, state, project, socketPath, store, host, rpc, identity, client, configurationPath })
+    sources.push({ id, directory, state, project, scratch, socketPath, store, host, rpc, identity, client, configurationPath })
   }
   const routes = new Map(sources.map(source => [source.id, { client: source.client }]))
   const runtime = Object.assign(Object.create(RuntimeController.prototype), { hosts: routes, hostReconfigurationReservations: new Map() }) as RuntimeController

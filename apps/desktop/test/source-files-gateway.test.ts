@@ -1,11 +1,12 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { access, readFile, rename } from 'node:fs/promises'
+import { access, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
+import { AgentMuxControlServer, AgentMuxSpatialStateStore, connectAgentMuxRpc, readSpaceSnapshot } from '@agentmux/core'
 import { sourceFilesHosts } from './helpers/source-files-hosts.js'
 import { OrdinaryWorkspaceFiles } from '../../host/src/ordinary-files.js'
 import type { SpaceMountRecord } from '../src/shared/space-mount.js'
 import type { FileReadResource } from '@agentmux/core/files'
+import { mintObjectId } from '@agentmux/core/object-id'
 
 vi.mock('electron', () => ({ app: { getPath: () => 'unused-source-files-profile' }, nativeImage: {} }))
 const cleanup: Array<() => unknown | Promise<unknown>> = []
@@ -66,9 +67,32 @@ it('actual Source Native mkdir ACK survives a late carrier replacement and old O
   await access(join(f.b.project, path))
   f.routes.set(f.b.id, { client: f.b.client })
   await rename(join(f.b.project, path), join(f.b.project, 'moved-externally'))
+  const snapshot = await readSpaceSnapshot(f.b.rpc, f.mount.reference)
+  await f.b.rpc.call('space.apply', { reference: f.mount.reference, expectedRevision: snapshot.revision, changes: { bindings: [], remove: { zones: [f.mount.zoneId] } } })
+  expect((await readSpaceSnapshot(f.b.rpc, f.mount.reference)).scope.zones).toEqual([])
   const inspected = await f.runtime.sourceFilesCall(f.target, 'file.mutation.inspect', { operationId: request.operationId, zoneId: request.zoneId,
     spaceId: request.spaceId, path, expectedResource: request.expectedResource })
   expect(inspected.result).toMatchObject({ operationId: request.operationId, result: { filesystem: 'created' } })
+})
+
+it('a positive original folder registration is retained after carrier replacement and observing it never registers again', async () => {
+  const f = await sourceFilesHosts(cleanup), b = f.sources[1]!, target = { hostId: b.id, expectedRuntimeId: b.identity.runtimeId }
+  const real = AgentMuxSpatialStateStore.prototype.registerDirectory
+  const register = vi.spyOn(AgentMuxSpatialStateStore.prototype, 'registerDirectory').mockImplementation(async function (...args) {
+    const receipt = await real.call(this, ...args)
+    f.routes.set(b.id, { client: { ...b.client } as typeof b.client })
+    return receipt
+  })
+  const discovered = await f.runtime.resolveSourceFiles(target, { kind: 'directory', path: b.project })
+  expect(register).not.toHaveBeenCalled()
+  if (discovered.status !== 'registration-required') throw Error('No exact registration packet')
+  const receipt = await f.runtime.registerFolderSpace(b.id, discovered.registration)
+  expect(receipt).toMatchObject({ source: { runtimeId: target.expectedRuntimeId }, created: true, diskDurability: 'confirmed', resource: { workspacePath: b.project } })
+  expect(register).toHaveBeenCalledTimes(1)
+  f.routes.set(b.id, { client: b.client })
+  const recovered = await f.runtime.resolveSourceFiles(target, { kind: 'directory', path: b.project })
+  expect(recovered).toMatchObject({ status: 'located', locator: { mount: { reference: receipt.reference, zoneId: receipt.zoneId, workspaceId: receipt.workspaceId } } })
+  expect(register).toHaveBeenCalledTimes(1)
 })
 
 it('production-shaped client server borrows the real Core fence with no hostedRuntime and rejects wrong R or new I before Files', async () => {
@@ -114,4 +138,38 @@ it('original Files watch retains its exact fence without metadata bootstrap and 
   expect(metadata).not.toHaveBeenCalled()
   controller.abort()
   expect(await readFile(join(f.b.project, 'watch.txt'), 'utf8')).toBe('original watch body')
+})
+
+it('a cancelled late Source subscription is disposed without adopting its opening or bootstrapping Agent metadata', async () => {
+  const f = await located(), controller = new AbortController(), metadata = vi.spyOn(f.b.client, 'readAgentSessions').mockRejectedValue(new Error('Unrelated metadata unavailable'))
+  const real = f.b.client.subscribeRpc!.bind(f.b.client), dispose = vi.fn(), end = vi.fn()
+  vi.spyOn(f.b.client, 'subscribeRpc').mockImplementation(async (...args) => {
+    const reader = await real(...args)
+    controller.abort()
+    return { subscriptionId: reader.subscriptionId, dispose: async () => { dispose(); await reader.dispose() } }
+  })
+  await expect(f.runtime.watchSourceFiles(f.target, { zoneId: f.mount.zoneId, path: '.', expectedResource: workspaceResource(f.locator.resource) },
+    { signal: controller.signal, onInitial: () => {}, onEvent: () => { throw Error('Cancelled reader cannot consume another event') }, onEnd: end })).rejects.toMatchObject({ name: 'AbortError' })
+  expect(dispose).toHaveBeenCalledTimes(1)
+  expect(end).toHaveBeenCalledTimes(1)
+  expect(metadata).not.toHaveBeenCalled()
+  expect(await readFile(join(f.b.project, 'original.txt'), 'utf8')).toBe('source-b original body')
+})
+
+it('a real Source Topic Zone resolves its original Workspace root separately from its physical Zone directory', async () => {
+  const f = await sourceFilesHosts(cleanup, { scratch: true }), b = f.sources[1]!
+  const created = await b.rpc.call('topic.create', { topicId: mintObjectId(), title: 'Original Source child' })
+  expect(created.topic.zoneId).toBeTruthy()
+  expect(created.topic.directoryPath).not.toBe(b.scratch)
+  expect(created.topic.directoryPath.startsWith(b.directory + '/')).toBe(true)
+  await writeFile(join(created.topic.directoryPath, 'child.txt'), 'original Source Topic child body')
+  const mount = { hostId: b.id, reference: { runtimeId: b.identity.runtimeId, spaceId: created.topic.categorySpaceIds[0]! },
+    zoneId: created.topic.zoneId!, workspaceId: created.topic.workspaceId }
+  const result = await f.runtime.resolveSourceFiles({ hostId: b.id, expectedRuntimeId: b.identity.runtimeId }, { kind: 'mount', mount })
+  expect(result).toMatchObject({ status: 'located', locator: { resource: { workspaceId: '__scratch__', workspacePath: b.scratch, zoneId: created.topic.zoneId } } })
+  if (result.status !== 'located') throw Error('Original Topic Zone could not resolve')
+  const read = await f.runtime.sourceFilesCall({ hostId: b.id, expectedRuntimeId: b.identity.runtimeId }, 'file.read', {
+    zoneId: mount.zoneId, spaceId: mount.reference.spaceId, path: 'child.txt', expectedResource: workspaceResource(result.locator.resource) })
+  expect(read.result.resource).toMatchObject({ workspacePath: b.scratch, zoneId: mount.zoneId })
+  expect(read.result.result).toMatchObject({ status: 'read', document: { content: 'original Source Topic child body' } })
 })
