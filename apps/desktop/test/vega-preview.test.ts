@@ -99,3 +99,24 @@ it('the actual worker runs official dataflow, emits SVG and finalizes the owned 
   for (let i = 0; i < 100 && !finalize.mock.calls.length; i++) await new Promise(resolve => setTimeout(resolve, 2))
   expect(finalize).toHaveBeenCalledOnce()
 })
+
+it('updates only original inline datasets on the same actual worker View, preserving UI signal and disposal boundaries', async () => {
+  vi.resetModules()
+  const messages: any[] = [], port: { onmessage?: (event: any) => void; postMessage(value: any): void } = { postMessage: value => messages.push(value) }
+  vi.stubGlobal('self', port)
+  vi.stubGlobal('Image', undefined)
+  vi.stubGlobal('OffscreenCanvas', class { getContext() { return { pixelRatio: 1, setTransform() {} } } })
+  const engine = await import('vega'), finalize = vi.spyOn(engine.View.prototype, 'finalize')
+  await import('@agentmux/editor-extensions/engines/vega-chart.worker')
+  const spec = { width: 160, height: 60, data: [{ name: 'samples', values: [] }, { name: 'derived', source: 'samples' }], marks: [{ type: 'text', from: { data: 'samples' }, encode: { update: { text: { field: 'value' } } } }] }
+  port.onmessage!({ data: { action: 'start', content: JSON.stringify(spec), mode: 'vega', serial: 1 } })
+  await expect.poll(() => messages.some(message => message.snapshot)).toBe(true)
+  port.onmessage!({ data: { action: 'data', name: 'samples', values: [{ at: 1, value: 20 }, { at: 2, value: null }], serial: 2 } })
+  await expect.poll(() => messages.some(message => message.handled === 2)).toBe(true)
+  expect(messages.filter(message => message.snapshot).at(-1)?.snapshot.svg, JSON.stringify(messages)).toContain('>20<')
+  expect(finalize).not.toHaveBeenCalled()
+  port.onmessage!({ data: { action: 'data', name: 'derived', values: [{ value: 999 }], serial: 3 } })
+  await expect.poll(() => messages.some(message => message.error === 'Unknown inline chart dataset.')).toBe(true)
+  port.onmessage!({ data: { action: 'dispose', serial: 4 } })
+  await expect.poll(() => finalize.mock.calls.length).toBe(1)
+})

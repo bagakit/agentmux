@@ -69,7 +69,7 @@ function deferred<T>() { let resolve!: (value: T) => void; const promise = new P
 describe('Conversation Channels settings', () => {
   it('catalog: every navigation projection has the same conversation channel contributions without authorization guesses', async () => {
     const groups = settingsNavGroups(''), connections = groups.find(group => group.id === 'conversation-channels')
-    expect(groups.find(group => group.id === 'environment')?.items.map(item => item.id), 'Environment groups the distinct Host, Remote and device owners').toEqual(['hosts', 'remote-execution', 'mobile'])
+    expect(groups.find(group => group.id === 'environment')?.items.map(item => item.id), 'Environment groups the distinct Host, Remote and device owners').toEqual(['network-node', 'hosts', 'remote-execution', 'mobile'])
     expect(connections?.items.map(item => item.id), 'Conversation Channels owns only the in-app and external conversations').toEqual(['inapp-conversation', 'lark', 'discord', 'telegram'])
     expect(hostsSettingsModule.title).toBe('Hosts')
     expect(groups.find(group => group.id === 'toolkit')?.items.map(item => item.id)).not.toContain('lark')
@@ -89,7 +89,7 @@ describe('Conversation Channels settings', () => {
     expect([...dom.container.querySelectorAll<HTMLElement>('[aria-labelledby="settings-overview-conversation-channels"] [data-settings-section]')]
       .map(node => node.dataset.settingsSection)).toEqual(['inapp-conversation', 'lark', 'discord', 'telegram'])
     expect([...dom.container.querySelectorAll<HTMLElement>('[aria-labelledby="settings-overview-environment"] [data-settings-section]')]
-      .map(node => node.dataset.settingsSection)).toEqual(['hosts', 'remote-execution', 'mobile'])
+      .map(node => node.dataset.settingsSection)).toEqual(['network-node', 'hosts', 'remote-execution', 'mobile'])
     expect(dom.container.querySelectorAll('[data-settings-pane]')).toHaveLength(0)
     expect(api.deviceManagement.ls).not.toHaveBeenCalled()
   })
