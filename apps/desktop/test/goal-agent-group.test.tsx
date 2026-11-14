@@ -57,7 +57,7 @@ it('keeps same-SID Source references distinct and never borrows a local namesake
   await mount(goal({ supervisorSessionId: a, assigneeSessionIds: [structuredClone(a), b] }))
   expect(faces()).toHaveLength(2)
   expect(faces()[0]!.dataset.avatarGroupKey).not.toBe(faces()[1]!.dataset.avatarGroupKey)
-  expect(label()).toContain('Supervisor / Executor'); expect(label()).toContain('Current presentation unconfirmed')
+  expect(label()).toContain('Supervisor / Executor'); expect(label()).toContain('Location unconfirmed')
   expect(label()).toContain('source-a'); expect(label()).toContain('source-b')
   expect(label()).not.toContain('Original Agent 1')
   expect(group()!.querySelector('[data-executor-id]')).toBeNull()
@@ -70,7 +70,7 @@ it('keeps unavailable or ambiguous original references neutral and excludes hist
   expect(faces()).toHaveLength(2)
   expect(label()).toContain('missing-supervisor'); expect(label()).toContain('agent-1')
   expect(label()).not.toContain('historical-only'); expect(label()).not.toContain('agent-2')
-  expect(label()).toContain('Current presentation unconfirmed')
+  expect(label()).toContain('Location unconfirmed')
   expect(group()!.querySelector('.status--running')).toBeNull()
   expect(group()!.querySelector('[data-executor-id]')).toBeNull()
 })
@@ -131,13 +131,25 @@ it('reveals all current members with roles from Agents and overflow without open
   expect(menu.textContent).not.toContain('historical-only'); expect(useAppStore.getState().selectedDemandId).toBeNull()
 })
 
-it('keeps unresolved Source details readable without targeting the local namesake Reader', async () => {
+it('reads the unresolved member by role and reveals exact Source details without targeting a local namesake', async () => {
   await mount(goal({ supervisorSessionId: source('source-a') }))
   const trigger = faces()[0]!.querySelector<HTMLButtonElement>('button')!
   await act(async () => trigger.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' })))
   const menu = document.querySelector('.goal-agent-menu')!
-  expect(menu.textContent).toContain('source-a'); expect(menu.textContent).toContain('original-region')
-  expect(menu.textContent).toContain('Current presentation unconfirmed'); expect(menu.textContent).not.toContain('Original Agent 1')
-  expect(menu.querySelector('button')).toBeNull(); expect(document.querySelector('.agent-information-reader')).toBeNull()
+  const member = menu.querySelector<HTMLElement>('[role="menuitem"]')!
+  expect(member.querySelector('strong')?.textContent).toBe('Supervisor')
+  expect(member.textContent?.match(/agent-1/g)).toHaveLength(1)
+  expect(member.textContent?.match(/Location unconfirmed/g)).toHaveLength(1)
+  expect(menu.textContent).not.toContain('Original Agent 1')
+  expect(menu.querySelector('.goal-agent-menu__source')).toBeNull()
+  await act(async () => member.click())
+  expect(member.getAttribute('aria-expanded')).toBe('true')
+  const facts = new Map([...menu.querySelectorAll('.goal-agent-menu__source > div')].map(row => [
+    row.querySelector('dt')?.textContent, row.querySelector('dd')?.textContent
+  ]))
+  expect(facts.get('Session')).toBe('agent-1'); expect(facts.get('Source runtime')).toBe('source-a')
+  expect(facts.get('Execution runtime')).toBe('execution-runtime')
+  expect(facts.get('Space')).toBe('original-space'); expect(facts.get('Region')).toBe('original-region')
+  expect(document.querySelector('.agent-information-reader')).toBeNull()
   expect(useAppStore.getState().selectedDemandId).toBeNull()
 })
