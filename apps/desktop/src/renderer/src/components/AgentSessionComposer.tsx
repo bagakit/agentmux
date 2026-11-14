@@ -547,7 +547,7 @@ export function AgentSessionComposer({
       // while a request is pending it would land in the open native dialog and be recorded as native input
       // on that request, retiring the card's answer. It is offered only when no request owns the input.
       {...(nativeConfiguration?.options.length ? {
-        postureTool: <NativeConfigurationPicker snapshot={nativeConfiguration} disabled={!submitMode.canType}
+        configurationTool: <NativeConfigurationPicker snapshot={nativeConfiguration} disabled={!submitMode.canType}
           onSet={(configId, value) => void setConfiguration(sessionId, nativeConfiguration.revision, configId, value)} />
       } : postureControl && submitMode.canSubmit && session?.kind === 'agent' && !session.pendingInteraction &&
         session.processState === 'running' && session.status.state !== 'disconnected'

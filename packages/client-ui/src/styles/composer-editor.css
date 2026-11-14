@@ -206,6 +206,7 @@
   .composer-tool__label { display: none; }
   .composer-tool { padding-inline: var(--sp-2); gap: 0; flex-shrink: 0; }
 }
+.composer:has(.composer-tools[data-mode='collapsed']) .composer-tool--session-settings .composer-tool__label { display: none; }
 /* A narrow one-line editor keeps its full line; expanded tools stay on one scrollable row. */
 @container composer (max-width: 400px) {
   .composer:has(.composer-tools[data-mode='collapsed']) .composer-completion-editor { grid-column: 1 / -1; grid-row: 1; }

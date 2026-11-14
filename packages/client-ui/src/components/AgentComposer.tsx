@@ -34,6 +34,7 @@ export type AgentComposerProps = ComposerCompletionProps & {
   submitLabel?: string
   feedback?: ReactNode
   postureTool?: ReactNode
+  configurationTool?: ReactNode
   // The adapter atomically updates its draft and navigation. Non-null means handled; the shell
   // must not call the ordinary edit callback again, which would exit that navigation.
   historyNavigation?: 'browsing' | 'restored'
@@ -77,6 +78,7 @@ export function AgentComposer({
   submitLabel = 'Send',
   feedback,
   postureTool,
+  configurationTool,
   onChange,
   onSubmit,
   onQueue,
@@ -180,6 +182,7 @@ export function AgentComposer({
         </div>
         <div>
           <div className="composer-session-controls" role="group" aria-label="Session controls">
+            {configurationTool}
             {contextUsage}
             <button
               type="button"

@@ -3,6 +3,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentPostureControl } from '@agentmux/core'
 
 const ThemeStatusAuthorizedIcon = semanticIconComponent('status.authorized')
+const SessionSettingsIcon = semanticIconComponent('object.settings')
 
 
 /**
@@ -85,13 +86,13 @@ export function NativeConfigurationPicker({
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
-        <button type="button" className="composer-tool" disabled={disabled} aria-label="Session settings">
-          <ThemeStatusAuthorizedIcon size={14} /> <span className="composer-tool__label">Session settings</span>
+        <button type="button" className="composer-tool composer-tool--session-settings" disabled={disabled} aria-label="Session settings" title="Session settings">
+          <SessionSettingsIcon size={14} aria-hidden="true" /> <span className="composer-tool__label">Session settings</span>
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content className="tab-context-menu posture-menu" aria-label="Session settings"
-          align="start" side="top" sideOffset={6} collisionPadding={8}>
+          align="end" side="top" sideOffset={6} collisionPadding={8}>
           {snapshot.options.map(option => (
             <DropdownMenu.Sub key={option.id}>
               <DropdownMenu.SubTrigger className="tab-context-menu__item" title={option.description}>
