@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
-import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useVisibleWork } from '@agentmux/client-ui/use-visible-work'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import { useAppStore } from '../store'
@@ -10,11 +10,26 @@ import { agentOperationKey, dismissAgentOperation, inspectAgentOperation, type A
 import { stopSessionInBackground } from '../lib/session-stop-background'
 import { agentOperationsForSubject } from '../lib/agent-operation'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
+import type { FocusListActivity } from '../lib/focus-list-activity'
 
 const CheckIcon = semanticIconComponent('action.refresh')
 const StopIcon = semanticIconComponent('action.stop')
 const CloseIcon = semanticIconComponent('action.close')
 const titles = { stop: '停止', takeover: '接手', fork: 'Fork' }
+const activityLabels = { sent: '观察到发送', received: '观察到接收', self: '观察到自发自收', updated: '派发记录更新' }
+
+export const FocusCommunicationFeedback = memo(function FocusCommunicationFeedback({ activity }: { activity: FocusListActivity }) {
+  const active = useWorkbenchPresentationActive()
+  const { ref, visible } = useVisibleWork<HTMLDivElement>(active)
+  const delay = useMemo(() => Math.min(0, activity.pulse.startedAt - Date.now()), [activity.pulse, visible])
+  return <div ref={ref} className="focus-communication-feedback" role="status" data-activity-id={activity.pulse.id}
+    data-kind={activity.pulse.kind} data-direction={activity.direction} data-motion-active={visible}
+    style={{ '--activity-delay': `${delay}ms` } as CSSProperties}>
+    <span key={activity.pulse.id} className="focus-communication-feedback__mark" aria-hidden="true">
+      <SemanticIcon name={activity.direction === 'updated' ? 'action.refresh' : activity.direction === 'received' ? 'navigation.back' : 'action.send'} size={12} />
+    </span><span>{activityLabels[activity.direction]}</span>
+  </div>
+})
 // One original result can be read in a card and Header at once. Decoration in
 // either projection must not remove the other projection's open reading surface.
 const readers = new Map<string, Set<object>>()
@@ -58,9 +73,12 @@ function OperationFeedbackItem({ operation, compact, active, visible }: { operat
   const [open, setOpen] = useState(false)
   const [checking, setChecking] = useState(false)
   const reader = useRef({}), latest = useRef(operation)
+  const trigger = useRef<HTMLElement>(null), content = useRef<HTMLDivElement>(null)
+  const panelId = useId()
   latest.current = operation
   const key = agentOperationKey(operation)
   function changeOpen(next: boolean) {
+    if (!next && !compact && content.current?.contains(content.current.ownerDocument.activeElement)) trigger.current?.focus({ preventScroll: true })
     setReading(key, reader.current, next)
     setOpen(next)
     if (!next) dismissDecoration(operation)
@@ -68,11 +86,12 @@ function OperationFeedbackItem({ operation, compact, active, visible }: { operat
   useEffect(() => () => { setReading(key, reader.current, false); dismissDecoration(latest.current) }, [key])
   // Offscreen completion needs no decorative wait; open readers and unresolved references remain.
   useEffect(() => { if (!visible) dismissDecoration(operation) }, [operation, visible])
-  const status = <span role="status" data-text={label(operation)}>{label(operation)}</span>
+  const status = <><SemanticIcon name={operation.phase === 'pending' ? 'status.loading' : operation.phase === 'succeeded' ? 'action.confirm' : operation.phase === 'failed' ? 'status.failed' : 'status.unknown'}
+    size={12} {...(visible && operation.phase === 'pending' ? { animation: 'spin' as const } : {})} aria-hidden="true" /><span role="status" data-text={label(operation)}>{label(operation)}</span></>
   const onAnimationEnd = (event: { animationName: string }) => {
     if (event.animationName === 'agent-operation-settle') dismissDecoration(operation)
   }
-  const detail = <div className="agent-operation-feedback__detail">
+  const detail = <div ref={content} id={panelId} className="agent-operation-feedback__detail" inert={!open} aria-hidden={!open}>
     {operation.message ? <p>{operation.message}</p> : null}
     <p><code>{operation.operationId}</code></p>
     {operation.kind === 'stop' ? <p>原 Run：{operation.control.run.runId}</p> : null}
@@ -91,12 +110,12 @@ function OperationFeedbackItem({ operation, compact, active, visible }: { operat
         void import('../lib/session-takeover').then(({ continueTakeoverOperation }) => continueTakeoverOperation(operation))
           .catch(cause => useAppStore.getState().reportError(cause)).finally(() => setChecking(false))
       }}>继续原接手</button> : null}
-      {operation.phase === 'succeeded' ? <button type="button" onClick={() => changeOpen(false)}>收起</button> : null}
+      {!compact || operation.phase === 'succeeded' ? <button type="button" onClick={() => changeOpen(false)}>收起</button> : null}
     </div>
   </div>
   if (compact) return <CompactOperationDetail operation={operation} active={active} open={open} onOpenChange={changeOpen} status={status} onAnimationEnd={onAnimationEnd}>{detail}</CompactOperationDetail>
-  return <details className="agent-operation-feedback__item" data-phase={operation.phase} data-detail-open={open} open={open}>
-    <summary className="agent-operation-feedback__label" onAnimationEnd={onAnimationEnd}
+  return <details className="agent-operation-feedback__item" data-kind={operation.kind} data-phase={operation.phase} data-detail-open={open} open={open}>
+    <summary ref={trigger} className="agent-operation-feedback__label" onAnimationEnd={onAnimationEnd} aria-controls={panelId} aria-expanded={open}
       onClick={event => { event.preventDefault(); changeOpen(!open) }}>{status}</summary>
     {detail}
   </details>
@@ -132,7 +151,7 @@ function CompactOperationDetail({ operation, active, open, onOpenChange, status,
     const release = autoUpdate(anchor, content, () => { void position() })
     return () => { current = false; release() }
   }, [open, active, anchor, content])
-  return <div className="agent-operation-feedback__item" data-phase={operation.phase} data-detail-open={open}>
+  return <div className="agent-operation-feedback__item" data-kind={operation.kind} data-phase={operation.phase} data-detail-open={open}>
     <Dialog.Root modal={false} open={open && active} onOpenChange={next => { focusOnPlace.current = next; onOpenChange(next) }}>
       <Dialog.Trigger asChild><button ref={setAnchor} type="button" className="agent-operation-feedback__label" onAnimationEnd={onAnimationEnd}
         aria-label={`${label(operation)}，查看操作详情`}>{status}</button></Dialog.Trigger>

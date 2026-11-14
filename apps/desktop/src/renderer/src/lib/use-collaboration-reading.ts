@@ -28,7 +28,7 @@ type Action = 'refresh' | 'updates' | 'resume' | 'earlier' | 'created'
 export type CollaborationPulse = { id: number; startedAt: number; hostId: string; sender: string; recipient: string; kind: 'communication' | 'supervision' }
 
 /** Observe existing typed notifications independently of history/body demand. No reads or traffic are created here. */
-function useCollaborationActivity(scope: { current: ReadonlySet<string> }, enabled: boolean) {
+export function useCollaborationActivity(scope: { current: ReadonlySet<string> }, enabled: boolean) {
   const latestScope = useRef(scope); latestScope.current = scope
   const [pulses, setPulses] = useState<CollaborationPulse[]>([])
   const activity = useRef({ through: new Map<string, number>(), sequence: 0, pulses: [] as CollaborationPulse[] })

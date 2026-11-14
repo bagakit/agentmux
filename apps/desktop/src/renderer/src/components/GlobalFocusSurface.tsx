@@ -62,6 +62,8 @@ import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { groupIds, regionIds } from '@agentmux/layout'
 import { createFocusContextIdentitySelector, focusContextAtRegion } from '../lib/focus-context-identity'
 import { workbenchNavigationTabs } from '../lib/workbench-navigation-catalog'
+import { useCollaborationActivity } from '../lib/use-collaboration-reading'
+import { focusListActivityKey, indexFocusListActivity, type FocusListActivity } from '../lib/focus-list-activity'
 
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ArrangeProjectsIcon = semanticIconComponent('object.history')
@@ -448,6 +450,17 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     observe(); document.addEventListener('visibilitychange', observe)
     return () => document.removeEventListener('visibilitychange', observe)
   }, [])
+  const activitySubjects = useMemo(() => new Set([...filterContexts, ...(revealedContext ? [revealedContext.context] : [])]
+    .filter(context => context.kind === 'agent').map(focusListActivityKey)), [filterContexts, revealedContext])
+  const activityScope = useRef<ReadonlySet<string>>(activitySubjects)
+  activityScope.current = activitySubjects
+  const { pulses } = useCollaborationActivity(activityScope, visible && documentActive)
+  const previousActivity = useRef<ReadonlyMap<string, FocusListActivity>>(new Map())
+  const listActivity = useMemo(() => {
+    const next = indexFocusListActivity(pulses, previousActivity.current)
+    previousActivity.current = next
+    return next
+  }, [pulses])
   const hasBoardLanes = boardLanes.length > 0 || recentProjects.length > 0
   const hasBoardCards = hasBoardLanes || pastProjects.length > 0
   useLayoutEffect(() => {
@@ -551,13 +564,13 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     renderCards={(grouped, columns, topics, sections) => <FocusContextCards contexts={grouped} columns={columns} layoutReady={laneMetrics.measured}
       replyLines={replyLines} topics={topics} sections={sections} visits={focusVisits} scrollRef={boardRowsRef} visible={!compact && visible && documentActive}
       selectedId={shownSessionId} selectedKey={selectedContextKey} revealRequest={agentReveal} onRevealed={finishReveal}
-      goalLinks={goalLinks} identities={contextIdentities} onSelect={focusExecutionSession} />} />
+      goalLinks={goalLinks} identities={contextIdentities} activity={listActivity} onSelect={focusExecutionSession} />} />
   const leadingResults = coordinationResults.length || moteChoices ? <>
       {coordinationResults.length ? <section className="focus-coordination-results" aria-label="Matching Mote coordination contexts">
         <header><strong>Mote coordination</strong><span>{coordinationResults.length}</span><small>Independent coordination focus</small></header>
         <WorkbenchPresentationContext.Provider value={cardPresentation}><div>
           <FocusContextCards contexts={coordinationResults} columns={1} scrollRef={boardRowsRef} visible={visible && documentActive}
-            selectedId={selectedMoteId} goalLinks={goalLinks} identities={contextIdentities} onSelect={openMoteContext} />
+            selectedId={selectedMoteId} goalLinks={goalLinks} identities={contextIdentities} activity={listActivity} onSelect={openMoteContext} />
         </div></WorkbenchPresentationContext.Provider>
       </section> : null}
       {moteChoices ? <div ref={moteChoicesRef} className="focus-location-choices" role="group" aria-label="Choose original Mote location">
@@ -601,7 +614,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
         <WorkbenchPresentationContext.Provider value={cardPresentation}>
           <FocusContextCards contexts={[revealedContext.context]} columns={1} scrollRef={separateRevealRef} visible={visible && documentActive}
             selectedId={null} selectedKey={selectedContextKey} revealRequest={agentReveal} onRevealed={finishReveal}
-            goalLinks={goalLinks} identities={contextIdentities} onSelect={() => {}} />
+            goalLinks={goalLinks} identities={contextIdentities} activity={listActivity} onSelect={() => {}} />
         </WorkbenchPresentationContext.Provider>
       </div> : null}
       <FocusSearchLocations result={searchResult} onRead={historySearch.start}

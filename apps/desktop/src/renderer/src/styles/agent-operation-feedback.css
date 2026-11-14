@@ -1,13 +1,15 @@
 /* One operation surface for the existing Agent card and its Region entry. */
-.agent-operation-feedback { --operation-accent: var(--success); display: flex; align-items: start; flex-wrap: wrap; gap: var(--sp-2); padding: 0 var(--sp-2) var(--sp-1); font-size: var(--fs-meta); }
-.agent-operation-feedback[data-kind='stop'] { --operation-accent: var(--red); }
-.agent-operation-feedback[data-kind='fork'] { --operation-accent: var(--blue); }
-.agent-operation-feedback[data-phase='failed'], .agent-operation-feedback[data-phase='partial'], .agent-operation-feedback[data-phase='unconfirmed'] { --operation-accent: var(--amber); }
-.agent-operation-feedback[data-phase='retired'] { --operation-accent: var(--text-2); }
+.agent-operation-feedback { --operation-accent: var(--text-2); display: flex; align-items: start; flex-wrap: wrap; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); font-size: var(--fs-meta); }
+.agent-operation-feedback__item[data-kind='stop'] { --operation-accent: var(--red); }
+.agent-operation-feedback__item[data-kind='fork'] { --operation-accent: var(--blue); }
+.agent-operation-feedback__item[data-phase='failed'], .agent-operation-feedback__item[data-phase='partial'], .agent-operation-feedback__item[data-phase='unconfirmed'] { --operation-accent: var(--amber); }
+.agent-operation-feedback__item[data-phase='retired'] { --operation-accent: var(--text-2); }
 .agent-operation-feedback__item { min-width: 0; max-width: 100%; }
-.agent-operation-feedback__label { color: var(--operation-accent); cursor: pointer; list-style: none; white-space: nowrap; }
+.agent-operation-feedback__label { display: inline-flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-sm); background: var(--surface-1); box-shadow: var(--hl); color: var(--text-2); cursor: pointer; list-style: none; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; transition: background var(--dur-fast) ease, box-shadow var(--dur-fast) ease; }
+.agent-operation-feedback__label > :is(svg, .semantic-icon-motion) { flex: none; color: var(--operation-accent); }
+.agent-operation-feedback__label:hover { color: var(--text); background: var(--surface-2); }
+.agent-operation-feedback__label:active { box-shadow: inset 0 1px 2px var(--scrim-1); }
 .agent-operation-feedback__label::-webkit-details-marker { display: none; }
-/* Keep the original status readable. Generated light has no accessible text. */
 .agent-operation-feedback__label > [role='status'] { position: relative; display: inline-block; }
 .agent-operation-feedback__item[data-phase='pending'] .agent-operation-feedback__label > [role='status']::after {
   content: attr(data-text) / ''; position: absolute; inset: 0; pointer-events: none; color: transparent;
@@ -17,24 +19,35 @@
   animation-delay: var(--operation-phase); animation-play-state: paused;
 }
 .agent-operation-feedback[data-motion-active='true'] .agent-operation-feedback__item[data-phase='pending'] .agent-operation-feedback__label > [role='status']::after { animation-play-state: running; }
-.agent-operation-feedback__item[data-phase='succeeded'] .agent-operation-feedback__label { color: var(--success); animation: agent-operation-settle var(--dur-exit) ease-out 1; }
+.agent-operation-feedback__item[data-phase='succeeded'] .agent-operation-feedback__label { --operation-accent: var(--success); animation: agent-operation-settle var(--dur-exit) var(--ease-enter) 1; }
 .agent-operation-feedback__item[data-detail-open='true'] .agent-operation-feedback__label { animation: none; }
-.agent-operation-feedback__label::before { content: ''; display: inline-block; width: 5px; height: 5px; margin-right: var(--sp-1); border: 1px solid currentColor; border-radius: 1px; vertical-align: 1px; }
-.agent-operation-feedback__detail { color: var(--text-2); white-space: normal; overflow-wrap: anywhere; }
+.agent-operation-feedback__detail { padding: var(--sp-2); color: var(--text-2); white-space: normal; overflow-wrap: anywhere; }
+.agent-operation-feedback__item[open] > .agent-operation-feedback__detail { animation: agent-operation-detail-enter var(--dur-enter) var(--ease-enter) both; }
 .agent-operation-feedback__detail p { margin: var(--sp-1) 0; }
 .agent-operation-feedback__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
-.agent-operation-feedback__actions button { display: inline-flex; align-items: center; gap: var(--sp-1); padding: var(--sp-1); border: 0; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+.agent-operation-feedback__actions button { display: inline-flex; align-items: center; gap: var(--sp-1); min-height: 26px; padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); background: var(--surface-2); box-shadow: var(--hl); color: var(--text); font: inherit; line-height: 1.4; cursor: pointer; }
+.agent-operation-feedback__actions button:disabled { opacity: .5; cursor: default; }
+.agent-operation-feedback__actions button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 1px; }
 .agent-operation-feedback--compact { position: relative; align-items: center; padding: 0; pointer-events: auto; }
-.agent-operation-feedback--compact button.agent-operation-feedback__label { display: inline-flex; align-items: center; padding: 0; border: 0; background: transparent; font: inherit; }
+.agent-operation-feedback--compact button.agent-operation-feedback__label { padding: var(--sp-1); border: 0; background: transparent; box-shadow: none; font: inherit; }
 .agent-operation-feedback__label:focus-visible { outline: 1px solid currentColor; outline-offset: 3px; border-radius: 2px; }
 .agent-operation-feedback__popover { position: fixed; z-index: var(--layer-popover); box-sizing: border-box; width: 320px; max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); overflow: auto; padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); box-shadow: var(--elev-3), var(--hl-strong); color: var(--text); font-size: var(--fs-meta); }
 .agent-operation-feedback__popover-header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin-bottom: var(--sp-2); }
 .agent-operation-feedback__popover-title { margin: 0; font: inherit; font-weight: 600; }
 .agent-operation-feedback__popover-header .icon-button { flex: none; width: 24px; height: 24px; }
+.focus-communication-feedback { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; padding: var(--sp-1) var(--sp-3); color: var(--text-2); font-size: var(--fs-micro); line-height: 1.4; }
+.focus-communication-feedback__mark { display: inline-grid; place-items: center; flex: none; width: 14px; height: 14px; color: var(--green-text); animation: focus-list-communication-arrive var(--dur-enter) var(--ease-enter) both; animation-delay: var(--activity-delay); animation-play-state: paused; }
+.focus-communication-feedback[data-direction='received'] { --activity-offset: 4px; }
+.focus-communication-feedback[data-kind='supervision'] .focus-communication-feedback__mark { color: var(--text-2); }
+.focus-communication-feedback[data-motion-active='true'] .focus-communication-feedback__mark { animation-play-state: running; }
+@keyframes focus-list-communication-arrive { from { opacity: .45; transform: translateX(var(--activity-offset, -4px)); } to { opacity: 1; transform: none; } }
 @keyframes agent-operation-shine { from { background-position: 100% 0; } to { background-position: 0% 0; } }
-@keyframes agent-operation-settle { from { opacity: 1; } to { opacity: 0; } }
+@keyframes agent-operation-detail-enter { from { opacity: .5; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+@keyframes agent-operation-settle { from { opacity: .65; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
   .agent-operation-feedback__item[data-phase='pending'] .agent-operation-feedback__label > [role='status']::after { display: none; animation: none; }
+  .focus-communication-feedback__mark, .agent-operation-feedback__item[open] > .agent-operation-feedback__detail { animation: none; }
+  .agent-operation-feedback__label { transition: none; }
   .agent-operation-feedback__item[data-phase='succeeded'] .agent-operation-feedback__label { animation-duration: 0s; }
 }
 @media (forced-colors: active) {

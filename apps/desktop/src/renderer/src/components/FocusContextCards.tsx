@@ -5,6 +5,7 @@ import type { FocusContext } from '../lib/focus-context'
 import { focusContextIdentityKey, type FocusContextIdentity } from '../lib/focus-context-identity'
 import { focusGoalCardKey, type FocusGoalLinks } from '../lib/focus-goal-links'
 import { FocusContextCardBody } from './FocusContextCardBody'
+import { focusListActivityKey, type FocusListActivity } from '../lib/focus-list-activity'
 import type { FocusReplyLines } from '../../../shared/focus-preferences'
 import type { FocusAgentReveal } from '../lib/focus-agent-navigation'
 import { desktopPresentationCommitted } from '../lib/desktop-presentation'
@@ -18,7 +19,8 @@ const contextKey = (context: FocusContext) => JSON.stringify([context.hostId, co
 
 /** Slots stay in the natural CSS grid. Actual intersection controls only a
  * body's first creation; visited bodies retain their original React parent. */
-export function FocusContextCards({ contexts, columns, scrollRef, visible, layoutReady = true, replyLines = 2, selectedId, selectedKey, revealRequest, onRevealed, goalLinks, identities, onSelect, topics, sections, visits }: {
+export function FocusContextCards({ contexts, columns, scrollRef, visible, layoutReady = true, replyLines = 2, selectedId, selectedKey, revealRequest, onRevealed, goalLinks, identities, onSelect, topics, sections, visits, activity }: {
+  activity?: ReadonlyMap<string, FocusListActivity> | undefined
   visits?: ReadonlyMap<string, number>
   contexts: readonly FocusContext[]; columns: number; scrollRef: RefObject<HTMLDivElement | null>; visible: boolean
   layoutReady?: boolean
@@ -127,7 +129,7 @@ export function FocusContextCards({ contexts, columns, scrollRef, visible, layou
       data-focus-agent-host={context.control?.hostId ?? context.hostId} data-focus-agent-session={context.control?.agentSessionId ?? context.id}
       data-focus-presentation-session={context.id} data-focus-agent-selected={selected ? 'true' : undefined}>
       {full ? <FocusContextCardBody context={context} summaryActive={visible} goalLinks={goalLinks.get(focusGoalCardKey(context.hostId, context.id))}
-        identity={identities.get(focusContextIdentityKey(context.hostId, context.id))} selected={selected} onSelect={onSelect} />
+        identity={identities.get(focusContextIdentityKey(context.hostId, context.id))} selected={selected} activity={activity?.get(focusListActivityKey(context))} onSelect={onSelect} />
         : <button type="button" className={`focus-context focus-context--card${selected ? ' is-selected' : ''}`}
           data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic}
           aria-pressed={selected} aria-label={`${context.name} · ${context.stateLabel}${context.detailKind === 'service' ? ` · ${context.detail}` : ''}${topic ? ` · ${topic.kind === 'worktree' ? 'Zone' : 'Topic'} · ${topic.name}` : ''}`} aria-description={context.originAddress}
