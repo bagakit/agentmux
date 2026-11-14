@@ -215,6 +215,7 @@ describe('mounted player', () => {
     await act(async () => { timeline().dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX, pointerId: 1 })) })
   }
   const bubble = () => container.querySelector<HTMLElement>('.media-player__bubble')
+  const spot = () => container.querySelector<HTMLElement>('.media-player__preview')
   beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
     container = document.createElement('div'); document.body.append(container); root = createRoot(container)
@@ -560,7 +561,7 @@ describe('mounted player', () => {
     await point(206)
     expect(bubble()!.textContent).toBe('0:00')
     await point(794)
-    expect(bubble()!.textContent).toBe('10:00'); expect(bubble()!.style.left).toBe('602px')
+    expect(bubble()!.textContent).toBe('10:00'); expect(spot()!.style.getPropertyValue('--media-preview-x')).toBe('602px')
     expect(Number.parseFloat(timeline().style.getPropertyValue('--media-hover'))).toBeCloseTo(99)
     // 499.1px is step 498.47 of 1000, which the range rounds to 498: 298.8 s, not the 299.08 s in between.
     await point(499.1)
