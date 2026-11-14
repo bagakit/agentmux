@@ -3,7 +3,6 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentPostureControl } from '@agentmux/core'
 
 const ThemeStatusAuthorizedIcon = semanticIconComponent('status.authorized')
-const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 
 
 /**
@@ -51,17 +50,16 @@ export function PosturePicker({
           side="top"
           sideOffset={6}
           collisionPadding={8}
-          onCloseAutoFocus={(event) => event.preventDefault()}
         >
           {control.modes.map((mode) => (
             <DropdownMenu.Item
               key={mode.id}
               className="tab-context-menu__item posture-menu__item"
               data-tier={mode.tier ?? 'safe'}
+              textValue={mode.label}
               title={mode.description ?? mode.label}
               onSelect={() => onSet(mode.id)}
             >
-              <ThemeStatusSelectedIcon size={14} className="posture-menu__mark" />
               <span className="posture-menu__label">
                 <strong>{mode.label}</strong>
                 {mode.description ? <small>{mode.description}</small> : null}

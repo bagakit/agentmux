@@ -79,11 +79,15 @@
 .mobile-app :is(.mobile-conversation, .mobile-mote-composer) .composer-session-controls { box-shadow: none; background: transparent; }
 .mobile-app :is(.mobile-conversation, .mobile-mote-composer) .composer__editor .tiptap { font-size: 16px; line-height: 1.4; }
 .mobile-posture-picker, .mobile-command-picker { position: relative; display: inline-flex; align-items: center; }
-.mobile-posture-menu { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 20; min-width: 180px; max-width: min(86vw, 280px); display: grid; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: var(--mobile-radius); background: var(--surface-1); box-shadow: var(--elev-2); }
+.mobile-posture-menu { z-index: var(--layer-popover); min-width: 180px; max-width: min(86vw, 280px); display: grid; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: var(--mobile-radius); background: var(--surface-1); box-shadow: var(--elev-2); }
+.mobile-posture-menu[data-state] { min-width: min(180px, var(--radix-dropdown-menu-content-available-width)); max-width: min(86vw, 280px, var(--radix-dropdown-menu-content-available-width)); max-height: var(--radix-dropdown-menu-content-available-height); overflow-y: auto; outline: none; }
 .mobile-posture-menu__item { display: grid; gap: 2px; width: 100%; min-height: 44px; padding: 6px 10px; border: 0; border-radius: var(--mobile-radius-sm); background: transparent; color: var(--text); text-align: left; font-size: var(--fs-meta); }
+.mobile-posture-menu__item[data-highlighted] { background: var(--surface-2); }
+.mobile-posture-menu__item:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
 .mobile-posture-menu__item strong { font-weight: 550; }
 .mobile-posture-menu__item small { color: var(--text-3); font-size: var(--fs-meta); }
-.mobile-posture-menu__item[data-tier='elevated'] strong { color: var(--amber); }
+.mobile-posture-menu__item[data-tier='caution'] strong { color: var(--amber); }
+.mobile-posture-menu__item[data-tier='danger'] strong { color: var(--red); }
 .mobile-command-menu { min-width: 220px; gap: 6px; padding: 6px; }
 .mobile-command-menu input { width: 100%; min-height: 44px; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--mobile-radius-sm); background: var(--surface-0); color: var(--text); font-size: 16px; }
 .mobile-command-menu__list { max-height: min(32dvh, 220px); overflow-y: auto; display: grid; gap: 2px; }

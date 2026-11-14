@@ -6,6 +6,8 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { ComposerLayoutToggle, type ComposerToolPhase } from '@agentmux/client-ui/components/ComposerLayoutToggle'
 import { ComposerToolMenu } from '@agentmux/client-ui/components/ComposerToolMenu'
+import * as DropdownMenu from '@agentmux/client-ui/components/HoverDropdownMenu'
+import { useClientUiPlatform } from '@agentmux/client-ui/platform'
 
 export function MobilePosturePicker({ control, disabled, onSet }: {
   control: AgentPostureControl | undefined
@@ -13,19 +15,28 @@ export function MobilePosturePicker({ control, disabled, onSet }: {
   onSet(modeId: string): void
 }) {
   const [open, setOpen] = useState(false)
+  const platform = useClientUiPlatform()
   if (!control) return null
   return <span className="mobile-posture-picker">
-    <ComposerToolMenu open={open && !disabled} onOpenChange={setOpen} label={control.label} className="mobile-posture-menu" trigger={<button type="button" className="composer-tool" disabled={disabled} aria-label={control.label}
-      aria-expanded={open} title={control.label}>
-      <SemanticIcon name="status.authorized" size={15} /><span className="composer-tool__label">{control.label}</span>
-    </button>}>
-      {control.modes.map(mode => <button key={mode.id} type="button" role="menuitem" className="mobile-posture-menu__item"
-        data-tier={mode.tier ?? 'safe'} title={mode.description ?? mode.label}
-        onClick={() => { setOpen(false); onSet(mode.id) }}>
-        <strong>{mode.label}</strong>
-        {mode.description ? <small>{mode.description}</small> : null}
-      </button>)}
-    </ComposerToolMenu>
+    <DropdownMenu.Root open={open && !disabled} onOpenChange={setOpen}>
+      <DropdownMenu.Trigger className="composer-tool" disabled={disabled} aria-label={control.label} title={control.label}
+        onPointerEnter={event => event.preventDefault()}
+        // A finger can start scrolling the tool strip here. Only a completed tap opens the menu.
+        onPointerDown={event => event.preventDefault()}
+        onClick={() => setOpen(value => !value)}>
+        <SemanticIcon name="status.authorized" size={15} /><span className="composer-tool__label">{control.label}</span>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal container={platform.overlayContainer()}>
+        <DropdownMenu.Content className="mobile-posture-menu" side="top" align="start" sideOffset={6} collisionPadding={8}
+          onPointerEnter={event => event.preventDefault()}>
+          {control.modes.map(mode => <DropdownMenu.Item key={mode.id} className="mobile-posture-menu__item"
+            data-tier={mode.tier ?? 'safe'} textValue={mode.label} onSelect={() => onSet(mode.id)}>
+            <strong>{mode.label}</strong>
+            {mode.description ? <small>{mode.description}</small> : null}
+          </DropdownMenu.Item>)}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
   </span>
 }
 

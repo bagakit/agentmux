@@ -178,8 +178,9 @@ export function MobileConversationSurface({ client, agentSessionId, draftScope, 
   })
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
-  const current = useRef({ client, agentSessionId })
-  current.current = { client, agentSessionId }
+  const runId = reading.session?.run.runId
+  const current = useRef({ client, agentSessionId, runId })
+  current.current = { client, agentSessionId, runId }
   const refreshConversation = useCallback(async () => {
     if (current.current.client !== client || current.current.agentSessionId !== agentSessionId) return
     onRetryMember?.()
@@ -275,12 +276,21 @@ export function MobileConversationSurface({ client, agentSessionId, draftScope, 
     }
   }
   const postureAttempts = useRef(new Map<string, { operationId: string; pending: boolean }>())
+  const [postureNotice, setPostureNotice] = useState<(typeof current.current & { message: string }) | null>(null)
+  const postureMessage = postureNotice && postureNotice.client === client && postureNotice.agentSessionId === agentSessionId
+    && postureNotice.runId === runId ? postureNotice.message : null
   async function changePosture(modeId: string) {
     if (!client?.setAgentPosture || !session || !agentSessionId) return
+    const showResult = (message: string | null) => {
+      const target = current.current
+      if (mounted.current && target.client === client && target.agentSessionId === agentSessionId && target.runId === runId) {
+        setPostureNotice(message === null ? null : { ...target, message })
+      }
+    }
     try {
       const originalSession = mobileCapability(client, 'agentSession')(agentSessionId)
       if (originalSession.agentSessionId !== session.agentSessionId || originalSession.run.runId !== session.run.runId) {
-        setCopyNotice('对话已变化，没有切换模式。')
+        showResult('对话已变化，没有切换模式。')
         return
       }
       const key = JSON.stringify([agentSessionId, originalSession.run.runId, modeId])
@@ -299,9 +309,9 @@ export function MobileConversationSurface({ client, agentSessionId, draftScope, 
           throw new Error(`Original posture intent ${attempt.operationId}: ${receipt.outcome}; durable ${receipt.diskDurability}. Inspect the same operation.`)
         postureAttempts.current.delete(key)
       } finally { attempt.pending = false }
-      setCopyNotice(null)
+      showResult(null)
     } catch (error) {
-      setCopyNotice(`模式切换未完成：${errorMessage(error)}`)
+      showResult(`模式切换未完成：${errorMessage(error)}`)
     }
   }
   // A reader is scoped to its exact Host connection and persistent Agent, not to a replaceable Run.
@@ -643,7 +653,8 @@ export function MobileConversationSurface({ client, agentSessionId, draftScope, 
               connected={connection.state === 'connected' && !reading.disconnected} visible={visible} onSelect={item => { void insertSuggestion(item) }} />}
             {...(isWorking && available && Boolean(draft.trim()) ? { onInterrupt: () => { void interruptCurrentTurn() } } : {})} />}
           {...(postureControl && available && reading.activity?.process !== 'exited' && reading.activity?.process !== 'interrupted' ? { postureTool:
-            <MobilePosturePicker control={postureControl} disabled={!available} onSet={modeId => { void changePosture(modeId) }} />
+            <MobilePosturePicker key={JSON.stringify([historyScope, runId, postureControl.id])}
+              control={postureControl} disabled={!available} onSet={modeId => { void changePosture(modeId) }} />
           } : {})}
           {...(postureControl && available && !reading.activity ? { feedback: <MobileNotice identity={[session?.run.runId]} className="composer-feedback" role="status">运行状态未确认，模式切换以 Mac 的结果为准。</MobileNotice> } : {})}
           primaryAction={isWorking && !draft.trim() && !hasPendingAttachments ? 'stop' : 'send'}
@@ -668,6 +679,7 @@ export function MobileConversationSurface({ client, agentSessionId, draftScope, 
           {retainedAttempts.map(renderPromptAttempt)}
         </details> : null}
         {copyNotice ? <MobileNotice kind="feedback" identity={[copyNotice]} role="status">{copyNotice}</MobileNotice> : null}
+        {postureMessage ? <MobileNotice kind="feedback" identity={[agentSessionId, runId, postureMessage]} role="status">{postureMessage}</MobileNotice> : null}
         </div>
       </div>
     </section>
