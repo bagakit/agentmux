@@ -155,7 +155,7 @@ it('JSON-looking error prose never becomes a formal original Coordinator referen
 it('a replacement original reference cannot inherit the previous request helper facts when its reader fails', async () => {
   seed(); const b = bridge()
   b.inspect.mockResolvedValue({ ...observation(), helperStarts: { executor: { outcome: 'confirmed', runId: 'old-helper' }, frontend: { outcome: 'confirmed', runId: 'old-frontend' } } })
-  await dom.render(pane()); await vi.waitFor(() => expect(dom.container.textContent).toContain('Start receipt confirmed'))
+  await dom.render(pane()); await vi.waitFor(() => expect(dom.container.textContent).toContain('Project helper: start acknowledged'))
   b.inspect.mockRejectedValue(new Error('Replacement original observation unavailable'))
   const nextRef = { ...ref, bindingId: 'replacement-binding', createOperationId: 'replacement-operation' }
   await act(async () => useAppStore.setState(state => ({ pendingAgentLaunches: { ...state.pendingAgentLaunches, [ref.agentSessionId]: {
@@ -163,6 +163,36 @@ it('a replacement original reference cannot inherit the previous request helper 
     requestIssue: { message: 'Replacement original request is unconfirmed.', code: null, executionRecovery: { ...target, reference: nextRef, failure: { ...target.failure!, reference: nextRef } } }
   } } })))
   await vi.waitFor(() => expect(dom.container.textContent).toContain('Replacement original observation unavailable'))
-  expect(dom.container.textContent).not.toContain('Start receipt confirmed')
+  expect(dom.container.textContent).not.toContain('Project helper: start acknowledged')
+  expect(b.continuation).not.toHaveBeenCalled(); b.readers.dispose()
+})
+
+it('the current original connection diagnostic is visible beside acknowledged helper starts and clears when connected', async () => {
+  seed(); const b = bridge(), current = 'The original tool channel has not completed its handshake.'
+  const helperStarts = { executor: { outcome: 'confirmed' as const, runId: 'project-helper' }, frontend: { outcome: 'confirmed' as const, runId: 'agent-helper' } }
+  b.inspect.mockResolvedValue({ ...observation(), helperStarts, diagnostic: { code: 'EXECUTION_OBSERVATION_UNCONFIRMED', message: current } })
+  const original = useAppStore.getState()
+  await dom.render(pane()); await vi.waitFor(() => expect(b.inspect).toHaveBeenCalled())
+  await vi.waitFor(() => expect(dom.container.querySelector('.surface-state__description')?.textContent).toContain(current))
+  expect(dom.container.querySelector('.surface-state__description')?.textContent).toContain('do not confirm the connection or Agent result')
+  expect(b.continuation).not.toHaveBeenCalled()
+  expect(useAppStore.getState().pendingAgentLaunches).toBe(original.pendingAgentLaunches)
+  await act(async () => b.readers.publish({ ...observation(), state: 'connected', helperStarts }))
+  expect(dom.container.querySelector('.surface-state__description')?.textContent).not.toContain(current)
+  expect(dom.container.querySelector('.surface-state__title')?.textContent).toBe('Original tools are connected')
+  expect(b.continuation).not.toHaveBeenCalled(); b.readers.dispose()
+})
+it('a failed observation replaces the current diagnostic without erasing its original request or blocking explicit continuation', async () => {
+  seed(); const b = bridge(), old = 'The previous original channel observation is unavailable.'
+  b.inspect.mockResolvedValue({ ...observation(), diagnostic: { code: 'EXECUTION_OBSERVATION_UNCONFIRMED', message: old } })
+  const original = useAppStore.getState()
+  await dom.render(pane()); await vi.waitFor(() => expect(dom.container.querySelector('.surface-state__description')?.textContent).toContain(old))
+  b.inspect.mockRejectedValue(new Error('The latest original observation could not be read.'))
+  await click('Refresh original status')
+  await vi.waitFor(() => expect(dom.container.querySelector('.surface-state__description')?.textContent).toContain('The latest original observation could not be read.'))
+  expect(dom.container.querySelector('.surface-state__description')?.textContent).not.toContain(old)
+  expect([...dom.container.querySelectorAll('button')].find(button => button.textContent === 'Continue original request')?.disabled).toBe(false)
+  expect(useAppStore.getState().pendingAgentLaunches).toBe(original.pendingAgentLaunches)
+  expect(useAppStore.getState().sessions).toBe(original.sessions)
   expect(b.continuation).not.toHaveBeenCalled(); b.readers.dispose()
 })
