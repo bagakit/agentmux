@@ -226,7 +226,7 @@ export function AgentSessionComposer({
   const readTimeline = visible || Boolean(source) || session?.kind !== 'agent'
   const timeline = useObservedAppStore('composer', visible, consumerScope, (state) => readTimeline ? state.timelines?.[sessionId] : undefined)
   // A published preview revision may append to the same original timeline object.
-  useObservedAppStore('composer', visible, consumerScope, state => readTimeline ? state.timelines?.[sessionId]?.revision : undefined)
+  const timelineRevision = useObservedAppStore('composer', visible, consumerScope, state => readTimeline ? state.timelines?.[sessionId]?.revision : undefined)
   const inputHistory = useComposerInputHistory({ sessionId: ownerKey, draftOwner,
     control: source ? undefined : session?.kind === 'agent' ? session.control : undefined, visible, readOnly: readOnly || disabled,
     insertion: insertionRef, ...(timeline ? { timeline } : {}), ...(source?.inputReading ? { originalReading: source.inputReading } : {}) })
@@ -403,6 +403,45 @@ export function AgentSessionComposer({
     sourceKey: moteComposerSessionKey(moteComposer.reference!, moteMain?.expectedRoleRevision),
     enabled: Boolean(visible && moteComposer.active && moteMain && session?.kind === 'agent' && moteComposer.reference?.hostId === session.control.hostId) } : undefined
 
+  const control = session?.kind === 'agent' ? session.control : undefined
+  const capabilities = session?.kind === 'agent' ? session.capabilities : undefined
+  const runId = control?.run.runId
+  const canDrain = session?.kind === 'agent' && steerQueueCanEverDrain(session.processState)
+  const queued = useMemo(() => queuedEntries.map((entry) => ({
+    id: entry.operationId,
+    ...(entry.directInputControl && entry.directInputBinding ? { inputOrigin: {
+      hostId: entry.directInputControl.hostId, key: entry.inputReceipt?.key ?? { kind: 'prompt' as const,
+        agentSessionId: entry.directInputControl.agentSessionId, expectedRun: entry.directInputBinding.expectedRun, submissionId: entry.operationId }
+    } } : entry.resumeInputIntent && entry.resumeInputReceipt?.key ? { inputOrigin: {
+      hostId: entry.resumeInputIntent.control.hostId, key: entry.resumeInputReceipt.key
+    } } : {}),
+    text: entry.text,
+    ...(entry.archived ? { archived: true as const } : {}),
+    inputControlled: Boolean(entry.directInputBinding || entry.resumeInputIntent),
+    confirmed: Boolean(entry.resumeInputReceipt && ['launch-carried', 'terminal-confirmed'].includes(entry.resumeInputReceipt.state)) || (entry.inputReceipt?.status === 'admitted' || entry.inputReceipt?.status === 'terminal-confirmed' || entry.inputReceipt?.status === 'launch-carried') || !entry.directInputBinding && Boolean(confirmedSteerDelivery(timeline, control, entry.operationId)),
+    ...(entry.inputReceipt ? { inputReceipt: entry.inputReceipt } : {}),
+    ...(entry.resumeInputReceipt ? { resumeInputReceipt: entry.resumeInputReceipt } : {}),
+    ...(entry.inputStopReceipt ? { inputStopReceipt: entry.inputStopReceipt } : {}),
+    ...(entry.enqueuedAt !== undefined ? { enqueuedAt: entry.enqueuedAt } : {}),
+    status: entry.status,
+    editable: agentSteerCanEdit(entry, sendingId),
+    immediateSend: capabilities !== undefined && agentSteerExecution(entry, capabilities) === 'immediate',
+    preparing: !entry.archived && entry.operationId === sendingId && sendingPhase !== 'submitting',
+    sending: !entry.archived && entry.operationId === sendingId && sendingPhase === 'submitting',
+    unconfirmed: entry.resumeInputReceipt ? !['launch-carried', 'terminal-confirmed', 'not-applied'].includes(entry.resumeInputReceipt.state) : entry.inputReceipt ? entry.inputReceipt.status === 'unknown'
+      : Boolean(entry.inputIntakeStarted) || entry.promptCondition !== null && !entry.preparationInputNotApplied && (entry.status === 'deferred' || entry.status === 'failed'),
+    ...(entry.awaitingExplicitSend ? { awaitingExplicitSend: true as const } : {}),
+    wakesItself: runId !== undefined && steerEntryWakesItself(entry, runId),
+    deliverable: runId !== undefined && (entry.runId === undefined ||
+      canDrain && (steerEntryTargetsRun(entry, runId) ||
+        agentSteerCanEdit(entry, sendingId) && entry.goalContinuation === undefined)),
+    ...(entry.errorCode ? { errorCode: entry.errorCode } : {}),
+    ...(entry.logId ? { logId: entry.logId } : {}),
+    ...(entry.error ? { error: entry.error } : {}),
+    ...(entry.preparationWait ? { preparationWait: entry.preparationWait } : {}),
+  })), [queuedEntries, control, capabilities, runId, canDrain, sendingId, sendingPhase, timeline, timelineRevision])
+  const sendImmediately = useMemo(() => queued.some(entry => entry.immediateSend), [queued])
+
   return (
     <SessionMailbox pendingLayout={deliveryLayout} key={sessionId} inputHistory={inputHistory} historyResourceReader={inputHistory.resourceReader} userMessages={inputHistory.messages} onHistoryVisible={inputHistory.setMailboxOpen} mailboxOrigin={mailboxOrigin} reading={reading} onRevealMessage={onRevealMessage} visible={visible} system={inbox} timeline={timeline}
         noticePresentation={feedback.failure ? { id: 'tool', content: <ComposerFeedback compact failure={feedback.failure} onDismiss={feedback.dismiss} /> } : undefined}
@@ -410,40 +449,8 @@ export function AgentSessionComposer({
         originalProgress={!readOnly ? source?.originalProgress : undefined}
         originalMail={source?.originalMail}
         progressUnavailable={source && !source.originalProgress ? { message: 'The original Session Provider and workspace metadata are unconfirmed. Its exact automation target cannot be formed yet. Existing arrangements and your draft are kept.', onRefresh: source.onRefreshTools } : undefined}
-        control={source ? null : session?.kind === 'agent' ? session.control : undefined}
-        queued={queuedEntries.map((entry) => ({
-          id: entry.operationId,
-          ...(entry.directInputControl && entry.directInputBinding ? { inputOrigin: {
-            hostId: entry.directInputControl.hostId, key: entry.inputReceipt?.key ?? { kind: 'prompt' as const,
-              agentSessionId: entry.directInputControl.agentSessionId, expectedRun: entry.directInputBinding.expectedRun, submissionId: entry.operationId }
-          } } : entry.resumeInputIntent && entry.resumeInputReceipt?.key ? { inputOrigin: {
-            hostId: entry.resumeInputIntent.control.hostId, key: entry.resumeInputReceipt.key
-          } } : {}),
-          text: entry.text,
-          ...(entry.archived ? { archived: true as const } : {}),
-          inputControlled: Boolean(entry.directInputBinding || entry.resumeInputIntent),
-          confirmed: Boolean(entry.resumeInputReceipt && ['launch-carried', 'terminal-confirmed'].includes(entry.resumeInputReceipt.state)) || (entry.inputReceipt?.status === 'admitted' || entry.inputReceipt?.status === 'terminal-confirmed' || entry.inputReceipt?.status === 'launch-carried') || !entry.directInputBinding && Boolean(confirmedSteerDelivery(timeline, session?.kind === 'agent' ? session.control : undefined, entry.operationId)),
-          ...(entry.inputReceipt ? { inputReceipt: entry.inputReceipt } : {}),
-          ...(entry.resumeInputReceipt ? { resumeInputReceipt: entry.resumeInputReceipt } : {}),
-          ...(entry.inputStopReceipt ? { inputStopReceipt: entry.inputStopReceipt } : {}),
-          ...(entry.enqueuedAt !== undefined ? { enqueuedAt: entry.enqueuedAt } : {}),
-          status: entry.status,
-          editable: agentSteerCanEdit(entry, sendingId),
-          immediateSend: session?.kind === 'agent' && agentSteerExecution(entry, session.capabilities) === 'immediate',
-          preparing: !entry.archived && entry.operationId === sendingId && sendingPhase !== 'submitting',
-          sending: !entry.archived && entry.operationId === sendingId && sendingPhase === 'submitting',
-          unconfirmed: entry.resumeInputReceipt ? !['launch-carried', 'terminal-confirmed', 'not-applied'].includes(entry.resumeInputReceipt.state) : entry.inputReceipt ? entry.inputReceipt.status === 'unknown'
-            : Boolean(entry.inputIntakeStarted) || entry.promptCondition !== null && !entry.preparationInputNotApplied && (entry.status === 'deferred' || entry.status === 'failed'),
-          ...(entry.awaitingExplicitSend ? { awaitingExplicitSend: true as const } : {}),
-          wakesItself: session?.kind === 'agent' && steerEntryWakesItself(entry, session.control.run.runId),
-          deliverable: session?.kind === 'agent' && (entry.runId === undefined ||
-            steerQueueCanEverDrain(session.processState) && (steerEntryTargetsRun(entry, session.control.run.runId) ||
-              agentSteerCanEdit(entry, sendingId) && entry.goalContinuation === undefined)),
-          ...(entry.errorCode ? { errorCode: entry.errorCode } : {}),
-          ...(entry.logId ? { logId: entry.logId } : {}),
-          ...(entry.error ? { error: entry.error } : {}),
-          ...(entry.preparationWait ? { preparationWait: entry.preparationWait } : {}),
-        }))}
+        control={source ? null : control}
+        queued={queued}
         {...(!readOnly ? { onArchiveQueued: async (operationId: string, expectedText: string, archived: boolean) => {
           await feedback.run(async () => { await archiveAgentSteer(ownerKey, operationId, expectedText, archived) })
         } } : {})}
@@ -451,7 +458,7 @@ export function AgentSessionComposer({
           await feedback.run(async () => { await useAppStore.getState().moveQueuedAgentSteerToDraft(ownerKey, operationId, expectedText, session.control.run.runId, moteDraftKey) })
         } } : {})}
         onMoveQueued={(operationId, direction) => moveAgentSteer(ownerKey, operationId, direction)}
-        sendImmediately={session?.kind === 'agent' && queuedEntries.some(entry => agentSteerExecution(entry, session.capabilities) === 'immediate')}
+        sendImmediately={sendImmediately}
         pendingInteraction={session?.kind === 'agent' && Boolean(session.pendingInteraction)}
         {...(!readOnly ? { onSendQueued: (operationId: string) => { void feedback.run(async () => { await sendQueuedAgentSteer(ownerKey, operationId) }) } } : {})}
         {...(!readOnly ? { onCancelQueuedPreparation: (operationId: string) => { void feedback.run(async () => { await useAppStore.getState().cancelAgentSteerPreparation(ownerKey, operationId) }) } } : {})}
