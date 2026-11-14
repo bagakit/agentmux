@@ -675,13 +675,22 @@ function DesktopApp() {
   // untouched configured workspace does not allocate a hidden launcher/editor/browser tree at startup.
   // Scratch is a real wiki-first workspace with Topic Tabs and Regions, so it follows the same
   // registry rule as a project instead of being filtered out after a Topic click.
-  const workspaceCandidates = useMemo(() => {
+  const mountedWorkspaceIds = useMemo(() => {
     if (!config) return []
-    return workspace && !config.workspaces.some(candidate => candidate.id === workspace.id) ? [...config.workspaces, workspace] : config.workspaces
-  }, [config, workspace])
-  const mountedWorkspaces = workspaceCandidates.filter((candidate) => (
-    fileEditingProbe || candidate.id === activeWorkspaceId || resourceWorkspaces.has(candidate.id) || candidate.id === focusTab?.workspaceId || candidate.id === surveyCatalog?.zones.find(zone => zone.zoneId === surveySelection?.zoneId)?.workspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0)
-  ))
+    const ids = new Set<string>()
+    for (const candidate of config.workspaces) {
+      if (fileEditingProbe || candidate.id === activeWorkspaceId) ids.add(candidate.id)
+    }
+    if (workspace) ids.add(workspace.id)
+    for (const id of resourceWorkspaces.keys()) ids.add(id)
+    for (const [id, layout] of Object.entries(layouts)) {
+      if (layout.groups.some(group => group.tabOrder.length > 0)) ids.add(id)
+    }
+    if (focusTab) ids.add(focusTab.workspaceId)
+    const surveyWorkspaceId = surveyCatalog?.zones.find(zone => zone.zoneId === surveySelection?.zoneId)?.workspaceId
+    if (surveyWorkspaceId) ids.add(surveyWorkspaceId)
+    return [...ids]
+  }, [config, activeWorkspaceId, workspace, resourceWorkspaces, layouts, focusTab, surveyCatalog, surveySelection, fileEditingProbe])
   const toolsAvailable = mainSurface === 'workbench' && Boolean(workspace)
   const toolsVisible = toolsAvailable && (toolsOpen || spaceContent.expanded)
   const toolDockMinimumWidth = getToolDockMinimumWidth(projectRailOpen)
@@ -909,33 +918,33 @@ function DesktopApp() {
               {mainSurface === 'agents' || focusVisited ? <GlobalFocusSurface visible={focusVisible} workspaceOpen={focusWorkfaceView !== 'closed' && Boolean(workbenchSpaceSelection || focusWorkfaceView === 'unconfirmed')} onCloseWorkspace={() => setFocusWorkfaceView('closed')} onSelectContext={selectFocusContext} onSelectLocation={focusWorkfaceView === 'unconfirmed' ? undefined : selectFocusReference} regionOnly={focusRegionOnly} onToggleRegion={() => setFocusWorkfaceView(value => value === 'region' ? 'tab' : 'region')} presentation={focusPresentation} currentReference={timelineCurrentReference} directoryIssue={spatialDirectory.issue} viewTargets={viewTargets} /> : null}
               {mainSurface === 'board' ? <GlobalBoardSurface /> : null}
               {mapVisited || mapVisible ? <AgentCollaborationMap request={mapTarget} active={mapVisible} onViewInFocus={(subject, presentationSessionId) => useAppStore.getState().revealFocusAgent(subject, presentationSessionId)} onOpen={(context, reference) => { if (useAppStore.getState().focusExecutionSession(context.id, reference)) useAppStore.getState().setMainSurface('workbench') }} /> : null}
-              {config && mountedWorkspaces.length > 0 ? (
+              {config && mountedWorkspaceIds.length > 0 ? (
                 <div
                   className={`workspace-workbench-registry ${workbenchVisible || focusTab ? '' : 'workspace-workbench-registry--parked'}`}
                   aria-hidden={!workbenchVisible && !focusTab}
                   inert={!workbenchVisible && !focusTab}
                   >
-                  {mountedWorkspaces.map((candidate) => {
-                    const selected = workbenchVisible && candidate.id === activeWorkspaceId
+                  {mountedWorkspaceIds.map((workspaceId) => {
+                    const selected = workbenchVisible && workspaceId === activeWorkspaceId
                     const visible = selected && !spaceContent.expanded
-                    const focusSource = Boolean(focusVisible && focusTab && focusTab.workspaceId === candidate.id)
+                    const focusSource = Boolean(focusVisible && focusTab && focusTab.workspaceId === workspaceId)
                     const mounted = selected || focusSource
                     return (
                       <div
-                        key={candidate.id}
+                        key={workspaceId}
                         className={`workspace-workbench-slot ${mounted ? '' : 'workspace-workbench-slot--parked'} ${focusSource ? 'workspace-workbench-slot--focus-source' : ''}`}
-                        data-workspace-id={candidate.id}
-                        data-desktop-zone-id={workbenchSpaceSelection?.workspaceId === candidate.id ? workbenchSpaceSelection.zoneId : undefined}
+                        data-workspace-id={workspaceId}
+                        data-desktop-zone-id={workbenchSpaceSelection?.workspaceId === workspaceId ? workbenchSpaceSelection.zoneId : undefined}
                         data-visible={mounted ? 'true' : 'false'}
                         aria-hidden={!mounted}
                         inert={!mounted}
                       >
-                        <MoteWorkface workspaceId={candidate.id} visible={selected}
-                          topicId={workbenchSpaceSelection?.workspaceId === candidate.id ? workbenchSpaceSelection.topicId ?? undefined : undefined}>
+                        <MoteWorkface workspaceId={workspaceId} visible={selected}
+                          topicId={workbenchSpaceSelection?.workspaceId === workspaceId ? workbenchSpaceSelection.topicId ?? undefined : undefined}>
                         <WorkspaceWorkbench
                           projection={selected ? ordinaryProjection ?? undefined : undefined}
-                          workspaceId={candidate.id}
-                          {...(candidate.id === SCRATCH_WORKSPACE_ID && workbenchSpaceSelection?.workspaceId === candidate.id && workbenchSpaceSelection.topicId
+                          workspaceId={workspaceId}
+                          {...(workspaceId === SCRATCH_WORKSPACE_ID && workbenchSpaceSelection?.workspaceId === workspaceId && workbenchSpaceSelection.topicId
                             ? { topicId: workbenchSpaceSelection.topicId, topicIsolation: 'bound-only' as const } : {})}
                           visible={visible}
                           viewTargets={viewTargets}

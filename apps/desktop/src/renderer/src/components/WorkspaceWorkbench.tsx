@@ -76,7 +76,7 @@ import { opensContextMenuFromKeyboard } from '../lib/context-menu-key'
 import { SessionPane } from './SessionPane'
 import { OrdinarySpaceMemberViewport } from './OrdinarySpaceMemberViewport'
 import { SpaceSourceReaders, useSpaceSourceReader } from './SpaceSourceReaders'
-import { originalSourceEntryForSelection, originalSourceEntryByKey } from '../lib/original-space-navigation'
+import { originalSourceEntryForSelection, originalSourceEntryByKey, isOriginalSourceWorkspaceProjection } from '../lib/original-space-navigation'
 import { spaceMountKey } from '../../../shared/space-mount'
 import { mountedRegionKey, mountedSpaceRegions } from '../lib/space-mount-view'
 import { MountedExecutionRelation } from './MountedExecutionRelation'
@@ -1886,7 +1886,8 @@ export function WorkspaceWorkbench({
   const ordinaryLayout = storedLayout ?? retainedLayout.current
   const residentLayout = ordinaryLayout
   const ordinaryObjectLayout = useWorkbenchObjectLayout(workspaceId, ordinaryLayout, viewOwnership !== 'projection' && !projection)
-  const objectLayout = source ? { layout: ordinaryLayout ?? null, choice: null, confirmed: true, issues: [] } : ordinaryObjectLayout
+  const sourceWorkspace = source && isOriginalSourceWorkspaceProjection(workspaceId)
+  const objectLayout = sourceWorkspace ? { layout: ordinaryLayout ?? null, choice: null, confirmed: true, issues: [] } : ordinaryObjectLayout
   const categoryWorkspace = useAppStore(state => viewOwnership === 'owner' && workspaceId === SCRATCH_WORKSPACE_ID && state.workbenchSpaceSelection?.workspaceId === workspaceId && state.workbenchSpaceSelection.zoneId === null && state.workbenchSpaceSelection.topicId === null ? state.config?.workspaces.find(workspace => workspace.id === workspaceId) : undefined)
   const projectedMemberIds = useMemo(() => projection ? workbenchProjectionTabIds(projection) : null, [projection?.entity, projection?.catalog])
   const tabs = useAppStore(useShallow((state) => projection && viewOwnership !== 'owner'
@@ -1908,8 +1909,10 @@ export function WorkspaceWorkbench({
   const navigationInputPolicy = useAppStore(state => state.workbenchNavigationInputPolicy)
   const requestedInputRegionId = useAppStore(state => state.workbenchNavigationInputPolicy === 'target' ? state.workbenchSpaceSelection?.regionId : undefined)
   const mainSelection = useAppStore(state => state.workbenchSpaceSelection)
-  const zoneLayout = useMemo(() => projection && (!source || viewOwnership === 'projection') ? projectWorkbenchProjection(projection.composition ?? residentLayout, tabs, projection, projectionActiveGroupId, viewOwnership) : null,
-    [residentLayout, tabs, projection, projectionActiveGroupId, viewOwnership, source])
+  // Source registration describes the context, not the selected Tab occurrence.
+  // Every explicit presentation uses the same exact projection and slot owner.
+  const zoneLayout = useMemo(() => projection ? projectWorkbenchProjection(projection.composition ?? residentLayout, tabs, projection, projectionActiveGroupId, viewOwnership) : null,
+    [residentLayout, tabs, projection, projectionActiveGroupId, viewOwnership])
   const projectionContext = useMemo(() => projection && zoneLayout
     ? { ...projection, unsupportedTabIds: new Set([...zoneLayout.unsupportedTabIds, ...zoneLayout.layout?.groups.flatMap(group => {
         const tabId = group.activeTabId
@@ -1927,8 +1930,8 @@ export function WorkspaceWorkbench({
       } } : null, [projection, zoneLayout, viewTargets, effectiveViewHostPrefix, workspaceId, bodyScope])
   const layout = useMemo(
     () => {
-      if (source) return ordinaryLayout ?? null
       if (zoneLayout) return zoneLayout.layout
+      if (sourceWorkspace) return ordinaryLayout ?? null
       if (viewOwnership === 'projection' && residentLayout) {
         const navigation = layoutForActiveTopic(residentLayout, tabs, topicId ?? null, false, retainedTabId)
         // Existing members remain navigable without inventing a selected occurrence.
@@ -1936,7 +1939,7 @@ export function WorkspaceWorkbench({
       }
       return objectLayout.layout ? layoutForLogicalRegionFocus(objectLayout.layout, tabs, retainedSpatialFocus?.displayWorkspaceId === workspaceId ? retainedSpatialFocus : null) : null
     },
-    [zoneLayout, residentLayout, objectLayout.layout, viewOwnership, tabs, topicId, retainedTabId, retainedSpatialFocus, workspaceId, source]
+    [zoneLayout, residentLayout, objectLayout.layout, viewOwnership, tabs, topicId, retainedTabId, retainedSpatialFocus, workspaceId, sourceWorkspace]
   )
   const lastConfirmedBody = useRef<{ scope: string; layout: WorkspaceLayout; displayWorkspaceId: string;
     renderContext: Omit<NonNullable<typeof projectionContext>, 'onSelect'>; viewHostPrefix: string } | null>(null)
@@ -2317,7 +2320,7 @@ export function WorkspaceWorkbench({
         const targetsThisTab = navigationInputPolicy === 'target' && requestedInputRegionId && Object.hasOwn(tab.regions, requestedInputRegionId)
         const projection = repeatableContent && !targetsThisTab && confirmedReferenceGroup(proposedProjection) &&
           committedSecondaryWorkbenchTarget(tab, proposedProjection, homeId, homeReference) ? undefined : proposedProjection
-        const confirmedDisplayGroup = source ? bodyLayout?.groups.find(group => group.tabOrder.includes(tab.id))?.id : confirmedReferenceGroup(projection)
+        const confirmedDisplayGroup = confirmedReferenceGroup(projection)
         if (confirmedDisplayGroup) retainedOwners.current.set(tab.id, confirmedDisplayGroup)
         const originalOwnerId = ownerByTab.get(tab.id) ?? retainedOwners.current.get(tab.id)
         const ownerId = projection?.surface === 'space' && confirmedDisplayGroup ? confirmedDisplayGroup : originalOwnerId ?? confirmedDisplayGroup
