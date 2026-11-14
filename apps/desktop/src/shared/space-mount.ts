@@ -30,6 +30,10 @@ export type SpaceMountMethods = {
   executors: { input: SpaceMountSourceTarget & { agentHostId: string; executorId?: string }; result: import('@agentmux/core').AgentMuxRpcResult<'settings.executors.discover'> }
   open: { input: SpaceMountTarget & { request: import('@agentmux/core').AgentMuxRpcParams<'agent.open'> }; result: import('@agentmux/core').AgentMuxRpcResult<'agent.open'> }
   inspect: { input: SpaceMountTarget & { requestId: string }; result: import('@agentmux/core').AgentMuxRpcResult<'space.inspect'> }
+  memberNameInspect: { input: SpaceMountTarget & { name: import('@agentmux/core/name-control').NameControlParams['space.member.name.inspect'] }; result: import('@agentmux/core/name-control').NameObservation }
+  memberNameChange: { input: SpaceMountTarget & { name: import('@agentmux/core/name-control').NameControlParams['space.member.name.change'] }; result: import('@agentmux/core/name-control').NameChangeResult }
+  agentNameInspect: { input: { hostId: string; expectedRuntimeId: string; name: import('@agentmux/core/name-control').NameControlParams['agent.name.inspect'] }; result: import('@agentmux/core/name-control').NameObservation }
+  agentNameChange: { input: { hostId: string; expectedRuntimeId: string; name: import('@agentmux/core/name-control').NameControlParams['agent.name.change'] }; result: import('@agentmux/core/name-control').NameChangeResult }
 }
 export type SpaceMountWatch = SpaceMountTarget & { after?: SpaceWatch['after'] }
 export type SpaceMountEvent = { type: 'snapshot'; snapshot: SpaceSnapshot } | { type: 'error'; error: { code: string; message: string } }

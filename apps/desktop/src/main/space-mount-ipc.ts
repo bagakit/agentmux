@@ -1,5 +1,6 @@
 import { parseSpaceMemberTarget } from '@agentmux/core/space-member-codec'
 import { parseHostRouteAgentTarget } from '@agentmux/core/host-route'
+import { parseNameControlParams } from '@agentmux/core/name-control'
 import type { AppConfig } from '../shared/contracts.js'
 import type { IpcMainInvokeEvent } from 'electron'
 import { parseFolderSpaceRegistration } from '@agentmux/core/space-folder'
@@ -26,12 +27,22 @@ function sourceTarget(p: Record<string, unknown>): import('../shared/space-mount
 export function registerSpaceMountIpc(ports: {
   handle<T extends unknown[], R>(channel: string, listener: (event: IpcMainInvokeEvent, ...values: T) => R | Promise<R>): void
   config?(): AppConfig
-  runtime: Pick<RuntimeController, 'openMountedSpaceMember' | 'spaceMountResources' | 'describeMountedSpace' | 'mountedSpaceHostChoices' | 'mountedSpaceRouteChoices' | 'mountedSpaceRouteExecutors' | 'registerFolderSpace' | 'inspectFolderSpace' | 'readMountedSpace' | 'applyMountedSpace' | 'watchMountedSpace' | 'mountedSpaceExecutors' | 'openMountedSpace' | 'inspectMountedSpaceRequest' | 'watchMountedSpaceSessions'>
+  runtime: Pick<RuntimeController, 'openMountedSpaceMember' | 'spaceMountResources' | 'describeMountedSpace' | 'mountedSpaceHostChoices' | 'mountedSpaceRouteChoices' | 'mountedSpaceRouteExecutors' | 'registerFolderSpace' | 'inspectFolderSpace' | 'readMountedSpace' | 'applyMountedSpace' | 'watchMountedSpace' | 'mountedSpaceExecutors' | 'openMountedSpace' | 'inspectMountedSpaceRequest' | 'watchMountedSpaceSessions' | 'inspectMountedMemberName' | 'changeMountedMemberName' | 'inspectOriginalAgentName' | 'changeOriginalAgentName'>
 }) {
   const reads = new SessionHistoryReadOwners()
   const members = new Map<string, SpaceMountMemberSurface>()
   ports.handle('spaceMounts:call', (event, token: string, method: unknown, value: unknown) => sessionInputOperationResult(() => reads.read(event.sender, token, async signal => {
     if (method === 'resources') { const p = fields(value, ['hostId']); return await ports.runtime.spaceMountResources(host(p.hostId), signal) }
+    if (method === 'memberNameInspect' || method === 'memberNameChange') {
+      const p = fields(value, ['hostId', 'reference', 'name']), target = { hostId: host(p.hostId), reference: parseSpaceAuthorityRef(p.reference) }
+      return method === 'memberNameInspect' ? await ports.runtime.inspectMountedMemberName(target, parseNameControlParams('space.member.name.inspect', p.name), signal)
+        : await ports.runtime.changeMountedMemberName(target, parseNameControlParams('space.member.name.change', p.name), signal)
+    }
+    if (method === 'agentNameInspect' || method === 'agentNameChange') {
+      const p = fields(value, ['hostId', 'expectedRuntimeId', 'name']), target = { hostId: host(p.hostId), expectedRuntimeId: host(p.expectedRuntimeId) }
+      return method === 'agentNameInspect' ? await ports.runtime.inspectOriginalAgentName(target, parseNameControlParams('agent.name.inspect', p.name), signal)
+        : await ports.runtime.changeOriginalAgentName(target, parseNameControlParams('agent.name.change', p.name), signal)
+    }
     if (method === 'describe') { const p = fields(value, ['hostId', 'reference', 'expectedRuntimeId']); return await ports.runtime.describeMountedSpace(sourceTarget(p), signal) }
     if (method === 'hostChoices') { const p = fields(value, ['hostId', 'reference', 'expectedRuntimeId']); return await ports.runtime.mountedSpaceHostChoices(sourceTarget(p),signal) }
     if (method === 'routeChoices' || method === 'routeExecutors') {

@@ -26,6 +26,8 @@ import { agentPromptSubmissionOutcome, type MoteDialogueInputReference } from '@
 import { callOriginalDesktopHost, subscribeOriginalDesktopHost } from './desktop-host.js'
 import { parseHostConfigurations } from '@agentmux/host/host-configuration'
 import type { AgentMuxRpcMethod, AgentMuxRpcParams, AgentMuxRpcResult, AgentMuxRpcSubscriptionOptions, AgentMuxRpcSubscription } from '@agentmux/core'
+import { createNameControlClient } from '@agentmux/core/name-control-client'
+import type { NameControlParams } from '@agentmux/core/name-control'
 import type { ConnectionMethod } from '@agentmux/core/connections'
 import type { MoteConnectionMethod } from '@agentmux/core/mote-connections'
 import type { MoteChatMethod } from '@agentmux/core/mote-chat'
@@ -2751,6 +2753,30 @@ export class RuntimeController {
   async inspectMountedSpaceRequest(target: SpaceMountTarget, requestId: string, signal?: AbortSignal) {
     const { rpc, context } = await this.mountedSpaceControl(target, signal)
     return await rpc.call('space.inspect', { target: { operationId: requestId } }, context)
+  }
+  private async mountedNameClient(target: SpaceMountSourceTarget, signal?: AbortSignal) {
+    const { rpc, context } = await this.mountedSpaceControl(target, signal)
+    return createNameControlClient({ call: (method, input) => rpc.call(method, input, context) })
+  }
+  private assertMemberNameSource(target: SpaceMountTarget, input: NameControlParams['space.member.name.inspect']) {
+    if (input.target.reference.runtimeId !== target.reference.runtimeId || input.target.reference.spaceId !== target.reference.spaceId)
+      throw new AgentMuxError('This name belongs to another original Source. Its input is retained.', 'SPACE_PARENT_MISMATCH')
+  }
+  async inspectMountedMemberName(target: SpaceMountTarget, input: NameControlParams['space.member.name.inspect'], signal?: AbortSignal) {
+    this.assertMemberNameSource(target, input)
+    return await (await this.mountedNameClient(target, signal)).inspectMember(input)
+  }
+  async changeMountedMemberName(target: SpaceMountTarget, input: NameControlParams['space.member.name.change'], signal?: AbortSignal) {
+    this.assertMemberNameSource(target, input)
+    return await (await this.mountedNameClient(target, signal)).changeMember(input)
+  }
+  async inspectOriginalAgentName(target: { hostId: string; expectedRuntimeId: string }, input: NameControlParams['agent.name.inspect'], signal?: AbortSignal) {
+    if (target.expectedRuntimeId !== input.runtimeId) throw new AgentMuxError('This name belongs to another original Agent Runtime. Its input is retained.', 'RUNTIME_OWNER_MISMATCH')
+    return await (await this.mountedNameClient(target, signal)).inspectAgent(input)
+  }
+  async changeOriginalAgentName(target: { hostId: string; expectedRuntimeId: string }, input: NameControlParams['agent.name.change'], signal?: AbortSignal) {
+    if (target.expectedRuntimeId !== input.runtimeId) throw new AgentMuxError('This name belongs to another original Agent Runtime. Its input is retained.', 'RUNTIME_OWNER_MISMATCH')
+    return await (await this.mountedNameClient(target, signal)).changeAgent(input)
   }
   async watchMountedSpace(input: SpaceMountWatch, listener: (event: SpaceMountEvent) => void, signal?: AbortSignal) {
     const { rpc, assertCurrent } = this.spaceMountHost(input.hostId)
