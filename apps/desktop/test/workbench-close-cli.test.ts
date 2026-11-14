@@ -783,7 +783,89 @@ it.runIf(business)('one close snapshot indexes outside document consumers once r
   expect(f.stops).not.toHaveBeenCalled()
 })
 
-it.runIf(Boolean(restartMode))('private restart worker restores the original workface and discovers retained close operations without replay', async () => {
+it.runIf(Boolean(restartMode) && process.env.AGENTMUX_SOURCE_CLOSE_RESTART === '1')('private Source restart worker retains the exact applied close and original input without replay', async () => {
+  const f = await fixture(), source = JSON.parse(await readFile(join(f.root, 'source-restart-facts.json'), 'utf8'))
+  const { spaceMountTransport } = await import('./helpers/space-mount-fixture.js')
+  const { originalSourceInputOwnerKey, originalSourceWorkspaceId, originalSourceTabProjectionId, originalSourceRegionProjectionId } = await import('../src/renderer/src/lib/original-space-navigation.js')
+  const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: source.endpoint } }); cleanup.push(() => rpc.dispose())
+  const bridge = spaceMountTransport(cleanup, [{ id: source.target.hostId, carrier: { forwardRpc: rpc.call.bind(rpc), subscribeRpc: rpc.subscribe.bind(rpc) } }])
+  const calls = vi.spyOn(f.api.spaceMounts, 'call').mockImplementation(bridge.api.call)
+  vi.spyOn(f.api.workbenchClose, 'call').mockImplementation((method, input) => f.rpc.call(method, input))
+  const workspaceId = originalSourceWorkspaceId(source.target), tabId = originalSourceTabProjectionId(source.target, source.address.tabId)
+  const regionId = originalSourceRegionProjectionId(source.target, source.address.regionId), ownerKey = originalSourceInputOwnerKey(source.executionRuntimeId, f.agent.agentSessionId)
+  if (restartMode === 'writer') {
+    f.store.getState().mountSpace(source.target, false)
+    const snapshot = await bridge.api.call('snapshot', { hostId: source.target.hostId, reference: source.target.reference })
+    f.store.getState().observeSpaceMount(source.target, { snapshot, reading: false })
+    const groupId = f.store.getState().layouts[workspaceId]!.groups.find(group => group.tabOrder.includes(tabId))!.id
+    f.store.getState().setAgentComposerDraft(ownerKey, 'Original Source draft across process restarts')
+    f.store.setState(current => ({ agentSteerQueues: { ...current.agentSteerQueues, [ownerKey]: [{ operationId: 'original-unknown-source-input',
+      text: 'Original unknown input must not replay', status: 'deferred', awaitingExplicitSend: true, archived: true,
+      recoveredSourceInput: { originalId: 'retained-source-input', delivery: 'unknown' } }] } }))
+    const prepared = await f.store.getState().prepareWorkbenchClose({ operationId: 'restart-source-applied', target: { kind: 'tab-occurrence', displayWorkspaceId: workspaceId, groupId, tabId }, keepAgentSessions: false })
+    expect(await f.store.getState().applyWorkbenchClose(prepared)).toBe(true)
+    expect(f.store.getState().tabs[tabId]).toBeUndefined()
+    const { prepareRendererUpdate } = await import('../src/renderer/src/store.js'); await prepareRendererUpdate('quit')
+    await writeFile(join(f.root, 'source-writer-proof.json'), JSON.stringify({ pid: process.pid, tabId, regionId, ownerKey,
+      agentSessionId: f.agent.agentSessionId, agentRun: f.other.runId, queues: f.store.getState().agentSteerQueues[ownerKey],
+      sourceWriteCalls: calls.mock.calls.filter(([method]) => method === 'apply').length }))
+  } else {
+    const original = JSON.parse(await readFile(join(f.root, 'source-writer-proof.json'), 'utf8'))
+    expect(process.pid).not.toBe(original.pid)
+    // Check the cold document before any new Source observation: no reseeding.
+    expect(f.store.getState().tabs[tabId]).toBeUndefined()
+    expect(f.store.getState().agentComposerDrafts[ownerKey]).toBe('Original Source draft across process restarts')
+    expect(f.store.getState().agentSteerQueues[ownerKey]).toEqual(original.queues)
+    const inspected = (await f.rpc.call('space.close.inspect', { operationId: 'restart-source-applied' })).operation!
+    expect(inspected).toMatchObject({ phase: 'settled', outcome: 'applied', plan: { projection: { source: { hostId: source.target.hostId } } } })
+    expect(await f.store.getState().applyWorkbenchClose(inspected)).toBe(false)
+    const snapshot = await bridge.api.call('snapshot', { hostId: source.target.hostId, reference: source.target.reference })
+    f.store.getState().observeSpaceMount(source.target, { snapshot, reading: false })
+    expect(snapshot.scope.regions.some(region => region.regionId === source.address.regionId)).toBe(false)
+    expect(f.store.getState().tabs[tabId]).toBeUndefined()
+    expect(calls.mock.calls.some(([method]) => method === 'apply')).toBe(false)
+    expect(f.stops).not.toHaveBeenCalled()
+    await f.host.client.writeAgent({ agentSessionId: f.agent.agentSessionId, expectedRun: f.agent.run, data: 'healthy-after-source-close-restart', source: 'user' })
+    expect((await f.native.client.status(original.agentRun)).state.type).toBe('running')
+    const { prepareRendererUpdate } = await import('../src/renderer/src/store.js'); await prepareRendererUpdate('quit')
+    await writeFile(join(f.root, `source-reader-${process.env.AGENTMUX_SOURCE_CLOSE_READER}.json`), JSON.stringify({ pid: process.pid, writerPid: original.pid,
+      restored: true, tabId, originalInput: f.store.getState().agentSteerQueues[ownerKey], sourceWriteCalls: 0, stopCalls: f.stops.mock.calls.length }))
+  }
+})
+
+it.runIf(!nativeBranch)('an applied Source close survives two actual consumer process restarts without reopening or replaying original input', async () => {
+  const root = await mkdtemp('/tmp/wcsr-'), { createSpaceSessionsFixture } = await import('../../../packages/core/test/helpers/space-session-fixture.js')
+  cleanup.push(() => rm(root, { recursive: true, force: true }))
+  const source = await createSpaceSessionsFixture(cleanup), agent = await source.d.put('healthy-agent', 1, 'retained-original-source-run')
+  const nativeRead = vi.spyOn(source.d.core, 'runtimeSubject').mockRejectedValue(Error('Original Native observation unavailable across consumer restarts'))
+  const admitted = await source.admit('D-in-B', source.d.owner.runtimeId, agent.agentSessionId, 'source-restart-creation')
+  const target = { hostId: 'source-restart-route', reference: source.reference, zoneId: admitted.address.zoneId!, workspaceId: admitted.address.workspaceId! }
+  await writeFile(join(root, 'source-restart-facts.json'), JSON.stringify({ target, address: admitted.address, executionRuntimeId: source.d.owner.runtimeId, endpoint: source.b.server.path }))
+  await mkdir(join(root, 'state/ctxmux'), { recursive: true, mode: 0o700 })
+  const native = await activateRuntime({ executable: resolve('packages/core/vendor/ctxmux', `${process.platform}-${process.arch}`, 'bin/ctxmuxd'),
+    socketPath: join(root, 'ctxmux.sock'), stateDir: join(root, 'state/ctxmux'), childDisposition: { mode: 'detached', stderr: 'pipe' } })
+  cleanup.push(() => native.dispose({ shutdown: true }))
+  const pids: number[] = []
+  for (const [index, mode] of ['writer', 'reader', 'reader'].entries()) {
+    const result = await new Promise<{ code: number | null; text: string }>((yes, no) => {
+      const child = spawn(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', '--config', process.env.AGENTMUX_WORKBENCH_CLOSE_TEST_CONFIG ?? 'apps/desktop/test/vitest.workbench-close.config.mts', '-t', 'private Source restart worker'], {
+        cwd: resolve(import.meta.dirname, '../../..'), env: { ...process.env, AGENTMUX_WORKBENCH_CLOSE_NATIVE: '1', AGENTMUX_WORKBENCH_CLOSE_RESTART: mode,
+          AGENTMUX_SOURCE_CLOSE_RESTART: '1', AGENTMUX_SOURCE_CLOSE_READER: String(index), AGENTMUX_WORKBENCH_CLOSE_ROOT: root }, stdio: ['ignore', 'pipe', 'pipe'] })
+      let text = ''; const timer = setTimeout(() => { child.kill('SIGKILL'); no(Error('Private Source restart worker deadline.')) }, 90_000)
+      child.stdout.on('data', b => { text += b }); child.stderr.on('data', b => { text += b })
+      child.once('error', no); child.once('close', code => { clearTimeout(timer); yes({ code, text }) })
+    })
+    expect(result.code, mode + '\n' + result.text).toBe(0); expect(result.text).toMatch(/1 passed/)
+    const proof = JSON.parse(await readFile(join(root, index ? `source-reader-${index}.json` : 'source-writer-proof.json'), 'utf8')); pids.push(proof.pid)
+    expect((await source.d.core.readAgentSession(agent.agentSessionId))!.run).toEqual(agent.run)
+    expect((await source.b.spatial.read())!.graph.regions.some(region => region.regionId === admitted.address.regionId)).toBe(false)
+  }
+  expect(new Set(pids).size).toBe(3); expect(nativeRead).not.toHaveBeenCalled()
+  if (process.env.AGENTMUX_SOURCE_CLOSE_RESTART_PROOF) await writeFile(process.env.AGENTMUX_SOURCE_CLOSE_RESTART_PROOF, JSON.stringify({ pids, restarts: 2,
+    originalSessionId: agent.agentSessionId, originalRun: agent.run, sourceReference: source.reference, reopened: false, replayed: false, nativeReadCalls: 0 }))
+}, 280_000)
+
+it.runIf(Boolean(restartMode) && process.env.AGENTMUX_SOURCE_CLOSE_RESTART !== '1')('private restart worker restores the original workface and discovers retained close operations without replay', async () => {
   const f = await fixture()
   if (restartMode === 'writer') {
     f.prepared(await f.prepare('restart-prepared'))
