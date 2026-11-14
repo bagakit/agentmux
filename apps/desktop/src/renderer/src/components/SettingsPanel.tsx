@@ -71,6 +71,8 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
   const route = useMemo(() => ({}), [normalizedInitialSection, executorId, toolId, normalizedNavigationRequest])
   const searchOrigin = useRef<{ section: SettingsPageId; scrollTop: number; route: object } | null>(null)
   const restoreReading = useRef<number | null>(null)
+  const searchResultOrigin = useRef<{ section: SettingsPageId; target: string | undefined; scrollTop: number } | null>(null)
+  const restoreResultFocus = useRef(false)
   const [showResults, setShowResults] = useState(false)
   const [destination, setDestination] = useState<{ section: SettingsPageId; target?: string; route: object; request: SettingsNavigationRequest } | null>(null)
   const [targetIssue, setTargetIssue] = useState('')
@@ -101,6 +103,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
     const origin = searchOrigin.current
     if (origin?.route === route) { setActive(origin.section); restoreReading.current = origin.scrollTop }
     searchOrigin.current = null
+    searchResultOrigin.current = null
     setQuery('')
     setShowResults(false)
     setDestination(null)
@@ -110,6 +113,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
   function updateQuery(value: string): void {
     if (!value.trim()) { clearSearch(); setQuery(value); return }
     if (!searchOrigin.current) searchOrigin.current = { section: active, scrollTop: originalScroll(active)?.scrollTop ?? 0, route }
+    searchResultOrigin.current = null
     setQuery(value)
     setShowResults(true)
     setDestination(null)
@@ -125,8 +129,23 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
       request: normalizeSettingsNavigationRequest({ section, field }, config?.hosts ?? []) } : null)
   }
 
+  function chooseSearchResult(section: SettingsPageId, target?: string): void {
+    const results = page.current?.querySelector<HTMLElement>('[data-settings-search-results]')
+    searchResultOrigin.current = { section, target, scrollTop: results?.scrollTop ?? 0 }
+    chooseSection(section, target)
+  }
+
+  function returnToSearchResults(): void {
+    restoreResultFocus.current = true
+    setShowResults(true)
+    setDestination(null)
+    setTargetIssue('')
+  }
+
   useLayoutEffect(() => {
     searchOrigin.current = null
+    searchResultOrigin.current = null
+    restoreResultFocus.current = false
     restoreReading.current = null
     setQuery('')
     setShowResults(false)
@@ -152,6 +171,25 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
   }, [active, searching, visible, visited])
 
   useLayoutEffect(() => {
+    if (!visible || !searching || !showResults || !restoreResultFocus.current) return
+    restoreResultFocus.current = false
+    const origin = searchResultOrigin.current
+    const results = page.current?.querySelector<HTMLElement>('[data-settings-search-results]')
+    if (origin && results) {
+      results.scrollTop = origin.scrollTop
+      const result = Array.from(results.querySelectorAll<HTMLButtonElement>('[data-settings-search-result], [data-settings-search-section]'))
+        .find(button => origin.target === undefined ? button.dataset.settingsSearchSection === origin.section
+          : button.dataset.settingsSearchResult === `${origin.section}:${origin.target}`)
+      if (result) {
+        result.focus({ preventScroll: true })
+        result.scrollIntoView?.({ block: 'nearest' })
+        return
+      }
+    }
+    searchInput.current?.focus({ preventScroll: true })
+  }, [searching, showResults, visible])
+
+  useLayoutEffect(() => {
     if (preserveInput || !visible || showResults || !destination?.target || destination.route !== route || destination.section !== active) return
     const pane = originalScroll(active)
     if (!pane) return // The visited editor mounts on the following render.
@@ -175,17 +213,19 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
       for (let parent: HTMLElement | null = target; parent && parent !== pane; parent = parent.parentElement) {
         if (parent instanceof HTMLDetailsElement) parent.open = true
       }
-      const previousTabIndex = target.getAttribute('tabindex')
-      target.tabIndex = -1
-      target.focus({ preventScroll: true })
+      const control = target instanceof HTMLLabelElement ? target.control : null
+      const focusTarget = control instanceof HTMLElement && pane.contains(control) && !control.matches(':disabled') && desktopElementVisible(control)
+        ? control : target
+      const temporaryTabIndex = focusTarget.tabIndex < 0 && !focusTarget.hasAttribute('tabindex')
+      if (temporaryTabIndex) focusTarget.tabIndex = -1
+      focusTarget.focus({ preventScroll: true })
       pane.scrollTop += target.getBoundingClientRect().top - pane.getBoundingClientRect().top - 16
       target.dataset.settingsSearchHighlight = ''
       const timer = window.setTimeout(() => { delete target.dataset.settingsSearchHighlight }, 1400)
       cleanupTarget = () => {
         window.clearTimeout(timer)
         delete target.dataset.settingsSearchHighlight
-        if (previousTabIndex === null) target.removeAttribute('tabindex')
-        else target.setAttribute('tabindex', previousTabIndex)
+        if (temporaryTabIndex) focusTarget.removeAttribute('tabindex')
       }
     }
     if (pane.querySelector('[data-settings-editor-state="loading"]')) {
@@ -250,7 +290,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
     const paneNavigationRequest = destination?.route === route && destination.section === pane ? destination.request
       : normalizedNavigationRequest?.section === pane ? normalizedNavigationRequest : undefined
     return <div key={pane} className="settings-content__scroll" data-settings-pane={pane} hidden={!paneVisible} inert={!paneVisible}>
-      {paneVisible && searching ? <div className="settings-search-return"><Button type="button" onClick={() => { setShowResults(true); setDestination(null); setTargetIssue('') }}>Search results</Button><span>“{query}”</span>{targetIssue ? <span role="status">{targetIssue}</span> : null}</div>
+      {paneVisible && searching ? <div className="settings-search-return"><Button type="button" onClick={returnToSearchResults}>Search results</Button><span>“{query}”</span>{targetIssue ? <span role="status">{targetIssue}</span> : null}</div>
         : paneVisible && targetIssue ? <p className="settings-target-issue" role="status" data-settings-target-issue>{targetIssue}</p> : null}
       <Pane config={config} onClose={onClose} onNavigate={chooseSection} active={paneVisible} executorId={executorId} toolId={toolId} navigationRequest={paneNavigationRequest} onSubpageChange={paneVisible && module.subpages ? setActiveSubpage : undefined} />
     </div>
@@ -319,7 +359,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
             <IconButton className="settings-content__close" type="button" onClick={onClose} aria-label="Close settings" title="Close settings"><ThemeActionCloseIcon size={15} /></IconButton>
           </div>
         </header>
-        {searching && showResults ? <SettingsSearchResults results={searchResults} query={query} onChoose={chooseSection} /> : null}
+        {searching && showResults ? <SettingsSearchResults results={searchResults} query={query} onChoose={chooseSearchResult} /> : null}
         {active === 'overview' && !(searching && showResults) ? <SettingsOverviewPane config={config} groups={overviewGroups} onOpen={chooseSection} active={visible} notice={unmatchedChannel(navigationRequest)} /> : null}
         {visited.map(pane => pane !== 'goals' && pane !== 'prompts' ? renderPane(pane) : null)}
         <GoalsPromptDraftProvider config={config} enabled={active === 'goals' || active === 'prompts' || visited.includes('goals') || visited.includes('prompts')}>

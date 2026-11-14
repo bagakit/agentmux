@@ -9,7 +9,7 @@ export function SettingsSearchResults<Module extends SettingsModule>({ results, 
   query: string
   onChoose(section: Module['id'], target?: string): void
 }) {
-  return <div className="settings-content__scroll settings-search-results" aria-label="Settings search results">
+  return <div className="settings-content__scroll settings-search-results" aria-label="Settings search results" data-settings-search-results>
     {!results.length ? <p className="settings-nav-empty" role="status">No settings match “{query}”. Try a different word.</p> : null}
     {results.map(({ module, targets }) => {
       const Icon = module.icon
