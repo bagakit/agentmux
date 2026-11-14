@@ -77,18 +77,23 @@ export async function openSpatialAgentTarget(options: {
     const note = context.agentTakeover && sameRuntime ? preparedNote ?? '' : preparedNote
     if (!previous && !retained && (Object.keys(launch).length || Boolean(note)) && matches![0]!.creationContract?.ordinaryLaunch !== 1) throw new AgentMuxError(
       'The selected execution Core has no confirmed handler for this complete launch input. Keep this request and update or confirm that Core; no Agent or helper was started.', 'AGENT_OPEN_CONTRACT_UNCONFIRMED')
-    const execution = previous?.execution ?? { hostId: sameRuntime ? 'local' : target.hostId, runtimeId: host.runtimeId,
+    const executionHostId = previous?.execution.hostId ?? (sameRuntime ? 'local' : target.hostId)
+    if (!previous && !retained) try {
+      const original = await host.client.inspectAgentCreation(agentSessionId)
+      const retiredHistory = original.kind === 'retired-agent' && original.history?.creation?.createOperationId === request.requestId ? original.history : undefined
+      const agent = original.kind === 'agent' ? spatialAgentFact(original, executionHostId) : original.kind === 'retired-agent' && retiredHistory ? {
+        ...spatialAgentFact({ ...retiredHistory, agentSessionId: original.agentSessionId, run: original.run }, executionHostId),
+        retirement: { source: original.source, observedAt: original.observedAt } } : null
+      return response = { operation: 'agent.open' as const, requestId: request.requestId, outcome: retiredHistory ? 'retired' as const : 'unknown' as const,
+        from: null, to: null, agent, resource: null,
+        save: { layoutApplied: false, clientStateWritten: false, storageFlushRequested: false, diskDurability: 'unconfirmed' as const, reason: 'The original Agent has no confirmed association with this source Space.' },
+        issues: [{ step: 'creation', code: 'SPATIAL_CREATION_UNCONFIRMED', message: 'The original creation has no confirmed source placement.', recovery: 'Inspect the original creation; do not recreate or resend its input.' }] }
+    } catch (error) { if (!(error instanceof AgentMuxError) || error.code !== 'AGENT_CREATION_UNKNOWN') throw error }
+    const execution = previous?.execution ?? { hostId: executionHostId, runtimeId: host.runtimeId,
       workspacePath: originalAgent ? originalAgent.workspacePath : sameRuntime ? placement.workspacePath : (await host.client.hostEnvironment({ agentSessionId })).agentWorkspace.workspacePath,
       workspaceId: sameRuntime ? placement.workspaceId : null, executorRevision: originalAgent?.executorRevision ?? matches![0]!.configRevision,
       ...(adoptedRoute ? { adoptedRoute } : {}) }
     if (!execution.runtimeId || !execution.executorRevision) throw new AgentMuxError('The original target admission has no confirmed execution identity. Keep its request; no new target was chosen.', 'SPATIAL_CREATION_UNCONFIRMED')
-    if (!previous && !retained) try {
-      const original = await host.client.inspectAgentCreation(agentSessionId)
-      return response = { operation: 'agent.open' as const, requestId: request.requestId, outcome: original.kind === 'retired-agent' ? 'retired' as const : 'unknown' as const,
-        from: null, to: null, agent: original.kind === 'agent' ? spatialAgentFact(original, execution.hostId) : null, resource: null,
-        save: { layoutApplied: false, clientStateWritten: false, storageFlushRequested: false, diskDurability: 'unconfirmed' as const, reason: 'The original Agent has no confirmed association with this source Space.' },
-        issues: [{ step: 'creation', code: 'SPATIAL_CREATION_UNCONFIRMED', message: 'The original creation has no confirmed source placement.', recovery: 'Inspect the original creation; do not recreate or resend its input.' }] }
-    } catch (error) { if (!(error instanceof AgentMuxError) || error.code !== 'AGENT_CREATION_UNKNOWN') throw error }
     const admit = () => options.spatial.admitAgentOpen({ request, agentSessionId, placement, execution,
       ...(context.agentTakeover ? { takeover: { preparation: context.agentTakeover.preparation, requestDigest: context.agentTakeover.requestDigest, ...(note === undefined ? {} : { sourceAgentMuxNote: note }) } } : {}),
       ...(binding ? { executionBinding: binding } : {}), regionResource: options.descriptor({ agentSessionId, execution, placement }, 'launching') }, options.assertTakeover)
