@@ -1,3 +1,5 @@
+import { awaitUntilCancelled } from './await-until-cancelled.js'
+import { AutomaticInputNotDispatchedError } from './automatic-input-not-dispatched.js'
 import { MOTE_INPUT_GUIDANCE } from '@agentmux/core/mote-input-source'
 import { AgentMuxError, validateAgentPromptInputBinding, type AgentMuxClient,
   type AgentMuxAgentSession, type AgentMuxAgentCreationInspection, type AgentMuxAgentRuntimeStatus, type AgentMuxClientEvent,
@@ -121,27 +123,41 @@ export function createGoalRuntime(options: {
         observation: value.observation, inputByte: value.run.acceptedInputBytes, ...(inputOccupied === undefined ? {} : { inputOccupied }), tickId, now }
     },
     submitPrompt: async (control, prompt, operationId, condition, automation, choice, authorHuman, agentMuxNote, sourceChannel = 'message-tool', inputContextCapture, authority) => {
-      authority?.signal?.throwIfAborted(); await authority?.assertCurrent?.()
-      const binding = validateAgentPromptInputBinding(condition)
-      if (binding.expectedRun.runId !== control.run.runId) throw new AgentMuxError('The original Goal input names another Run.', 'STALE_AGENT_SESSION')
-      if (automation && !automation.isCurrent()) throw new AgentMuxError('The original automatic Goal input was cancelled. Manual input remains available.', 'AGENT_COMPLETION_CHANGED')
-      automation?.signal.throwIfAborted()
-      const signal = automation?.signal && authority?.signal ? AbortSignal.any([automation.signal, authority.signal]) : automation?.signal ?? authority?.signal
-      const client = exact(control.hostId)
-      const originalAuthority = authority && control.hostId === 'local' ? { assertCurrent: async () => { await authority.assertCurrent?.(); await runtime.authorizeFutureIntent({ ...control, providerId: client.agentSession(control.agentSessionId).providerId, workspacePath: client.agentSession(control.agentSessionId).workspacePath }, authority) } } : undefined
-      const submit = (input: import('@agentmux/core').AgentMuxAgentPromptInput) => originalAuthority ? client.submitAgentPrompt(input, originalAuthority) : client.submitAgentPrompt(input)
-      const content = { ...(signal ? { signal } : {}), agentSessionId: control.agentSessionId, prompt, operationId,
-        ...(agentMuxNote === undefined ? {} : { agentMuxNote }), ...(authorHuman ? { authorHuman: true } : {}), sourceChannel,
-        ...(inputContextCapture ? { inputContextCapture } : {}) }
-      if ('admissionIntent' in binding) {
-        if (automation || choice?.execution !== 'immediate' || choice.preparationRetry || choice.allowUncertainTurn) throw new AgentMuxError('The original automatic Goal input cannot become a new manual message.', 'INVALID_AGENT_PROMPT')
-        return await submit({ ...content, ...binding, execution: 'immediate' })
+      let dispatchStarted = false
+      try {
+        authority?.signal?.throwIfAborted(); await authority?.assertCurrent?.()
+        const binding = validateAgentPromptInputBinding(condition)
+        if (binding.expectedRun.runId !== control.run.runId) throw new AgentMuxError('The original Goal input names another Run.', 'STALE_AGENT_SESSION')
+        if (automation && !automation.isCurrent()) throw new AgentMuxError('The original automatic Goal input was cancelled. Manual input remains available.', 'AGENT_COMPLETION_CHANGED')
+        automation?.signal.throwIfAborted()
+        const signal = automation?.signal && authority?.signal ? AbortSignal.any([automation.signal, authority.signal]) : automation?.signal ?? authority?.signal
+        const client = exact(control.hostId)
+        const originalAuthority = authority && control.hostId === 'local' ? { assertCurrent: async () => { await authority.assertCurrent?.(); await runtime.authorizeFutureIntent({ ...control, providerId: client.agentSession(control.agentSessionId).providerId, workspacePath: client.agentSession(control.agentSessionId).workspacePath }, authority) } } : undefined
+        const submit = (input: import('@agentmux/core').AgentMuxAgentPromptInput) => {
+          const dispatch = () => {
+            automation?.signal.throwIfAborted()
+            dispatchStarted = true
+            return originalAuthority ? client.submitAgentPrompt(input, originalAuthority) : client.submitAgentPrompt(input)
+          }
+          // A cancelled Host wait cannot recall an entered Core operation. Its original receipt stays unknown.
+          return automation ? awaitUntilCancelled(dispatch, automation.signal) : dispatch()
+        }
+        const content = { ...(signal ? { signal } : {}), agentSessionId: control.agentSessionId, prompt, operationId,
+          ...(agentMuxNote === undefined ? {} : { agentMuxNote }), ...(authorHuman ? { authorHuman: true } : {}), sourceChannel,
+          ...(inputContextCapture ? { inputContextCapture } : {}) }
+        if ('admissionIntent' in binding) {
+          if (automation || choice?.execution !== 'immediate' || choice.preparationRetry || choice.allowUncertainTurn) throw new AgentMuxError('The original automatic Goal input cannot become a new manual message.', 'INVALID_AGENT_PROMPT')
+          return await submit({ ...content, ...binding, execution: 'immediate' })
+        }
+        return await submit({ ...content, ...binding,
+          ...(automation ? { signal: automation.signal, ...(automation.futureIntent ? { expectedFutureIntent: automation.futureIntent } : automation.completionId === undefined ? {} : { expectedCompletionId: automation.completionId }), ...(automation.inputByte === undefined ? {} : { expectedInputByte: automation.inputByte }) } : {}),
+          ...(!automation && choice?.execution ? { execution: choice.execution } : {}), ...(!automation && choice?.preparationRetry ? { preparationRetry: choice.preparationRetry } : {}),
+          ...(!automation && choice?.allowUncertainTurn ? { allowUncertainTurn: true } : {}),
+        })
+      } catch (error) {
+        if (automation && !dispatchStarted) throw new AutomaticInputNotDispatchedError(error)
+        throw error
       }
-      return await submit({ ...content, ...binding,
-        ...(automation ? { signal: automation.signal, ...(automation.futureIntent ? { expectedFutureIntent: automation.futureIntent } : automation.completionId === undefined ? {} : { expectedCompletionId: automation.completionId }), ...(automation.inputByte === undefined ? {} : { expectedInputByte: automation.inputByte }) } : {}),
-        ...(!automation && choice?.execution ? { execution: choice.execution } : {}), ...(!automation && choice?.preparationRetry ? { preparationRetry: choice.preparationRetry } : {}),
-        ...(!automation && choice?.allowUncertainTurn ? { allowUncertainTurn: true } : {}),
-      })
     },
     sessionTimeline: async target => await exact(target.hostId).sessionTimeline(target.agentSessionId),
     saveGoalAttention: async input => {

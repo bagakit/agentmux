@@ -580,6 +580,17 @@ export class AgentPromptSubmissionCoordinator {
     let newClaim: { admission: NonNullable<AgentMuxStoredAgentSession['promptCompletionAdmission']>;
       terminal: AgentMuxStoredAgentSession['terminalPromptSubmission'] } | undefined
     let inputAttempted = false
+    // Only this original input owner can confirm that a new operation has not reached any durable claim.
+    let nativeClaimAttempted = frozen?.submissionId === submissionId || Boolean(inputDispatch)
+    const nativePreparationFailure = (error: unknown): unknown => {
+      if (nativeClaimAttempted) return error
+      const original = error instanceof AgentMuxError ? error : undefined
+      const failure = new AgentMuxError(error instanceof Error ? error.message : String(error),
+        original?.code ?? 'AGENT_NATIVE_INPUT_UNAVAILABLE', original?.detail, { disposition: 'not_applied', confirmedInputBytes: 0 },
+        original?.logId, original?.creationFailure, original?.storageFailure, original?.executionFailure)
+      Object.defineProperty(failure, 'cause', { value: error })
+      return failure
+    }
     // Reuse the durable decoder before any journal dispatch claim. The selected
     // carrier plan and complete producer content must remain readable together.
     const freezeIntent = (selectedPlan: AgentPromptInputPlan | AgentNativePromptInputPlan) => normalizePromptInputIntent({
@@ -606,6 +617,7 @@ export class AgentPromptSubmissionCoordinator {
       if (control?.authorizeDispatch && !inputDispatch) assertAdmission(await refreshSession(id, expectedRun))
       await observeInput(diagnostic, 'input-authority', async () => { await control?.authority?.assertCurrent() })
       if (signal?.aborted) throw agentMuxCancellationError('Prompt delivery was cancelled before admission.', 'AGENT_PROMPT_CANCELLED', signal.reason)
+      nativeClaimAttempted = true
       beginClaim()
       if (control?.authorizeDispatch && !inputDispatch) {
         const link = await control.authorizeDispatch(control.claimLease!, selectedCarrier)
@@ -790,11 +802,11 @@ export class AgentPromptSubmissionCoordinator {
     // conversation. Its semantic message must keep that target even when unavailable.
     if ((control?.requiredNativeSource || control?.idleOnly || defaultSemanticInput && nativeOriginal &&
         (hasSelectedNativeTarget(nativeOriginal) && (!sessionConversation || provider.prepareNativeInput !== undefined) ||
-          sessionConversation && provider.prepareNativeInput !== undefined && nativeOriginal.nativeHandle?.kind === 'provider')) && !source) throw new AgentMuxError(
-      'The original native input source is unconfirmed. No input was sent; the Agent and terminal remain available.', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
+          sessionConversation && provider.prepareNativeInput !== undefined && nativeOriginal.nativeHandle?.kind === 'provider')) && !source) throw nativePreparationFailure(new AgentMuxError(
+      'The original native input source is unconfirmed. No input was sent; the Agent and terminal remain available.', 'AGENT_NATIVE_INPUT_UNAVAILABLE'))
     const target: { source: { providerId: string; nativeSessionId: string }; expectedTurnId?: string } | undefined =
       admissionIntent?.kind === 'native-conversation' ? admissionIntent : source ? { source } : undefined
-    if (target) {
+    if (target) { try {
       if (!nativeInputAvailable || run.pid === null || session.hostId !== 'local' || target.source.providerId !== session.providerId || !message) {
         throw new AgentMuxError('This exact native input target has no confirmed Provider transport. The original terminal remains available.', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
       }
@@ -890,7 +902,7 @@ export class AgentPromptSubmissionCoordinator {
             evidence: { source: 'agentmux', observedAt: Date.now(), run: { ...session.run } } })
         }
       }
-    }
+    } catch (error) { throw nativePreparationFailure(error) } }
     if (plan.kind === 'native-rpc' || carrier?.kind === 'launch') throw new AgentMuxError(
       'The original carrier is unavailable; its input cannot use another transport.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
     const intent = freezeIntent(plan)

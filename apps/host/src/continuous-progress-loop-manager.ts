@@ -1,3 +1,5 @@
+import { awaitUntilCancelled } from './await-until-cancelled.js'
+import { AutomaticInputNotDispatchedError } from './automatic-input-not-dispatched.js'
 import { sameAutomaticInputSource } from '@agentmux/core/automatic-input-source'
 import { isDeepStrictEqual } from 'node:util'
 import { createHash } from 'node:crypto'
@@ -51,28 +53,32 @@ const updateDigest = (input: unknown): string => {
 export type MaintenanceSourceDecision = { action: 'continue' } | { action: 'pause'; reason: string } | { action: 'defer'; reason: string }
 /** The first wait after an unconfirmed source, doubling to the limit. Shared by the scheduler and its maintenance owner. */
 export const MAINTENANCE_RETRY_MS = 1_000, MAINTENANCE_RETRY_LIMIT_MS = 60_000
-/** Background maintenance runs beside due occurrences, never ahead of them; `now` is the scheduler's own clock. */
-export type MaintenanceSourceOwner = { maintain(now: number): Promise<void>; qualify(loop: ContinuousProgressLoop): Promise<MaintenanceSourceDecision> }
+/** Background maintenance runs beside due occurrences. Its owner joins only exact in-flight targets; `now` is the scheduler's own clock. */
+export type MaintenanceSourceOwner = { maintain(now: number, signal: AbortSignal): Promise<void>; qualify(loop: ContinuousProgressLoop): Promise<MaintenanceSourceDecision> }
 
 /** Host owner: scheduler and durable store stay together; renderer only observes results. */
 export class ContinuousProgressLoopManager {
   private maintenanceOwner: MaintenanceSourceOwner | undefined
-  private maintenancePromise: Promise<{ owner: MaintenanceSourceOwner; error: unknown } | null> | undefined
+  private readonly maintenanceChecks = new Set<Promise<{ owner: MaintenanceSourceOwner; error: unknown } | null>>()
+  private maintenanceController: AbortController | undefined
   /** In memory only: a restarted Host asks every source again. */
   private readonly deferredMaintenance = new Map<string, { until: number; waitMs: number }>()
   setMaintenanceOwner(owner: MaintenanceSourceOwner): () => void {
     if (this.maintenanceOwner) throw new Error('The original scheduler already has a maintenance source owner.')
-    this.maintenanceOwner = owner; return () => { if (this.maintenanceOwner === owner) this.maintenanceOwner = undefined }
+    this.maintenanceOwner = owner
+    this.maintenanceController = new AbortController()
+    return () => { if (this.maintenanceOwner === owner) { this.maintenanceOwner = undefined; this.maintenanceController?.abort() } }
   }
   private readonly scheduler: ContinuousProgressScheduler
   private timer: ReturnType<typeof setInterval> | null = null
-  private checkPromise: Promise<void> | null = null
+  private readonly checks = new Map<string, Promise<void>>()
+  private readonly targetChecks = new Map<string, Promise<void>>()
   private running = false
   private started: Promise<void> | undefined
   private readonly listeners = new Set<(loop: ContinuousProgressLoop) => void>()
   private readonly initialDeliveries = new Map<string, AbortController>()
   private readonly activations = new Map<string, Set<AbortController>>()
-  private activeDelivery: { loopId: string; controller: AbortController } | undefined
+  private readonly activeDeliveries = new Map<string, AbortController>()
   private disposeGoals: (() => void) | undefined
   private readonly mutations = new Map<string, Promise<unknown>>()
   private readonly progressActions = new Map<string, { input: import('@agentmux/core').AgentProgressParams['agent.progress.action']; result: Promise<ContinuousProgressLoop> }>()
@@ -125,12 +131,13 @@ export class ContinuousProgressLoopManager {
     if (!starting) return
     try { await starting } catch { return }
     this.running = false
-    this.activeDelivery?.controller.abort()
+    for (const controller of this.activeDeliveries.values()) controller.abort()
     for (const controller of this.initialDeliveries.values()) controller.abort()
     if (this.timer) clearInterval(this.timer)
     this.timer = null
-    await this.checkPromise?.catch(() => {})
-    await this.maintenancePromise
+    await Promise.allSettled(this.checks.values())
+    this.maintenanceController?.abort()
+    await Promise.allSettled(this.maintenanceChecks)
     await this.store.save(this.scheduler.list())
   }
   list(target?: Readonly<Partial<ContinuousProgressTarget>>): ContinuousProgressLoop[] { return this.scheduler.list(target) }
@@ -313,10 +320,13 @@ export class ContinuousProgressLoopManager {
    * An observation gap keeps the arrangement active and the occurrence due; it is asked again after a growing
    * wait, so an unreadable source costs a bounded number of reads instead of one per second.
    */
-  private async admitMaintenance(loop: ContinuousProgressLoop, checkAt: number): Promise<boolean> {
+  private async admitMaintenance(loop: ContinuousProgressLoop, checkAt: number, signal: AbortSignal, isCurrent: () => boolean): Promise<boolean> {
+    const owner = this.maintenanceOwner
+    const observing = this.maintenanceController ? AbortSignal.any([signal, this.maintenanceController.signal]) : signal
     let decision: MaintenanceSourceDecision
-    try { decision = this.maintenanceOwner ? await this.maintenanceOwner.qualify(loop) : { action: 'defer', reason: 'The original configuration owner is unavailable.' } }
+    try { decision = owner ? await awaitUntilCancelled(() => owner.qualify(loop), observing) : { action: 'defer', reason: 'The original configuration owner is unavailable.' } }
     catch (error) { decision = { action: 'defer', reason: error instanceof Error ? error.message : String(error) } }
+    if (!isCurrent() || owner !== this.maintenanceOwner) return false
     switch (decision.action) {
       case 'continue': this.deferredMaintenance.delete(loop.loopId); return true
       case 'pause': this.deferredMaintenance.delete(loop.loopId); await this.pauseForSource(loop, decision); return false
@@ -633,7 +643,7 @@ export class ContinuousProgressLoopManager {
     await this.start()
     // A manual request must reach its own target, not join another target's tick.
     // The existing tick owns its failure; it must not prevent this target's check.
-    while (this.checkPromise) await this.checkPromise.catch(() => {})
+    while (this.checks.has(loopId)) await this.checks.get(loopId)!.catch(() => {})
     assertCurrent?.()
     if (this.require(loopId).status !== 'active') throw new Error('Resume this loop before checking it.')
     if (!isAgentSchedule(this.require(loopId))) this.scheduler.requestCheck(loopId)
@@ -668,23 +678,21 @@ export class ContinuousProgressLoopManager {
   }
   private persistenceFailed(loopId: string, error: unknown): void {
     const original = this.require(loopId)
-    this.patch(loopId, { status: original.taskSource?.kind === 'goal' && original.status === 'stopped' ? 'stopped' : 'paused', lastDecision: `Loop persistence is unconfirmed. Manual input remains available. ${error instanceof Error ? error.message : String(error)}` })
+    this.patch(loopId, { status: original.managedSource && original.status === 'active' && !original.pendingCompletion ? 'active' : original.taskSource?.kind === 'goal' && original.status === 'stopped' ? 'stopped' : 'paused', lastDecision: `Loop persistence is unconfirmed. Manual input remains available. ${error instanceof Error ? error.message : String(error)}` })
     for (const listener of this.listeners) listener(this.require(loopId))
   }
   async check(now?: number, onlyLoopId?: string): Promise<void> {
     if (!this.running) return
     const checkAt = now ?? this.now(), owner = this.maintenanceOwner
-    // Maintenance is single-flight beside scheduler checks. Holding its read must not hold
-    // checkPromise, which would prevent every subsequent due occurrence from running.
-    if (owner && !this.maintenancePromise) {
-      const maintenance = Promise.resolve().then(() => owner.maintain(checkAt))
-        .then(() => null, (error: unknown) => ({ owner, error }))
-        .finally(() => { if (this.maintenancePromise === maintenance) this.maintenancePromise = undefined })
-      this.maintenancePromise = maintenance
+    // The maintenance owner isolates its exact targets, so a held target cannot hold the next cadence.
+    const signal = this.maintenanceController?.signal
+    const maintenance = owner && signal ? Promise.resolve().then(() => owner.maintain(checkAt, signal))
+      .then(() => null, (error: unknown) => ({ owner, error })) : undefined
+    if (maintenance) {
+      this.maintenanceChecks.add(maintenance)
+      void maintenance.finally(() => { this.maintenanceChecks.delete(maintenance) })
     }
-    const maintenance = this.maintenancePromise
-    const checking = this.checkPromise ?? (this.checkPromise = this.runDue(checkAt, now, onlyLoopId)
-      .finally(() => { if (this.checkPromise === checking) this.checkPromise = null }))
+    const checking = this.runDue(checkAt, now, onlyLoopId)
     try { await checking } finally {
       // Callers still receive the original maintenance result, while later due checks run.
       // Releasing an owner does not assign its old result to the new owner.
@@ -693,168 +701,192 @@ export class ContinuousProgressLoopManager {
     }
   }
   private async runDue(checkAt: number, now: number | undefined, onlyLoopId?: string): Promise<void> {
-    const due = this.scheduler.due(checkAt, onlyLoopId)
-    for (const selected of due) {
-      const loop = this.scheduler.get(selected.loopId)
-      if (!loop || loop.status !== 'active' || loop.nextCheckAt > checkAt) continue
-      if (loop.managedSource && ((this.deferredMaintenance.get(loop.loopId)?.until ?? 0) > checkAt || !await this.admitMaintenance(loop, checkAt))) continue
-      if (loop.calendar && !loop.pendingCompletion) {
-        const latest = latestCalendarOccurrence(loop.calendar, loop.nextCheckAt, checkAt)
-        if (latest !== loop.nextCheckAt) this.patch(loop.loopId, { nextCheckAt: latest, lastDecision: 'Missed older occurrences; only the latest due occurrence is eligible.' })
-      }
-      if (loop.everyMs !== undefined && !loop.pendingCompletion) {
-        const latest = latestIntervalOccurrence(loop.nextCheckAt, checkAt, loop.everyMs)
-        if (latest !== loop.nextCheckAt) this.patch(loop.loopId, { nextCheckAt: latest, lastDecision: 'Missed older occurrences; only the latest due occurrence is eligible.' })
-      }
-      // A read-only probe can avoid a durable claim only for confirmed busy input.
-      // Everything else still follows the original claim and final admission fence.
-      let preflightFailure: unknown, preflightFailed = false
-      if (isAgentSchedule(loop) && !loop.pendingCompletion && loop.futureIntentId) {
-        const candidate = this.require(loop.loopId), controller = new AbortController()
-        this.activeDelivery = { loopId: loop.loopId, controller }
-        let observation: ContinuousProgressObservation | undefined
-        try { observation = await this.observe(candidate, mintObjectId(), now ?? Date.now(), controller.signal) }
-        catch (error) { preflightFailure = error; preflightFailed = true }
-        finally { if (this.activeDelivery?.controller === controller) this.activeDelivery = undefined }
-        const current = this.scheduler.get(loop.loopId)
-        if (!this.running || controller.signal.aborted || !current || !isDeepStrictEqual(current, candidate)) continue
-        if (!preflightFailed) {
-          const decision = decideFutureProgress(observation!, { intentId: candidate.futureIntentId!, occurrenceAt: candidate.nextCheckAt })
-          if (decision.kind === 'skip' && ['working', 'stale-working', 'user-input-changed', 'interaction-pending'].includes(decision.reason)) {
-            if (candidate.lastDecision !== decision.reason || candidate.lastOutcome !== 'skipped' || candidate.nextCheckAt !== loop.nextCheckAt) {
-              this.patch(loop.loopId, { lastDecision: decision.reason, lastOutcome: 'skipped', lastTickAt: checkAt })
-              await this.persist(loop.loopId)
-            }
-            continue
-          }
+    const pending = this.scheduler.due(checkAt, onlyLoopId).map(selected => {
+      const existing = this.checks.get(selected.loopId)
+      if (existing) return Promise.resolve()
+      const controller = new AbortController(), target = this.targetKey(selected)
+      this.activeDeliveries.set(selected.loopId, controller)
+      const previous = this.targetChecks.get(target)
+      const run = async () => {
+        if (previous) {
+          try { await awaitUntilCancelled(() => previous.catch(() => {}), controller.signal) }
+          catch { return }
         }
+        if (!controller.signal.aborted) await this.runLoop(selected.loopId, checkAt, now, controller)
       }
-      const claim = this.scheduler.claimTick(loop.loopId, checkAt)
-      if (!claim) continue
-      // Claim and persist before invoking provider code. A crash or unknown callback result cannot replay a tick.
-      try { await this.store.save(this.scheduler.list()) }
-      catch (error) {
-        this.patch(claim.loop.loopId, { status: 'paused', lastDecision: `Automatic claim persistence is unconfirmed. Manual input remains available. ${error instanceof Error ? error.message : String(error)}` })
-        for (const listener of this.listeners) listener(this.require(claim.loop.loopId))
-        throw error
-      }
-      const isCurrent = () => { const current = this.scheduler.get(claim.loop.loopId)
-        return this.running && current?.status === 'active' && current.lastTickId === claim.tickId }
-      const controller = new AbortController()
-      this.activeDelivery = { loopId: claim.loop.loopId, controller }
-      let outcome: LoopTickOutcome = 'skipped'
-      let pending = claim.loop.pendingCompletion
-      let goalContinuation: string | undefined
-      let newCheckInClaim = false
-      // Until a pending send is saved and handed to the input owner, a failure proves nothing was
-      // sent: the tick is skipped and the next one retries. Afterwards the result stays unknown.
-      let dispatched = Boolean(pending)
-      try {
-        if (!isCurrent()) continue
-        if (claim.loop.taskSource?.kind === 'goal') {
-          const source = await this.goalSource(this.require(claim.loop.loopId))
-          if (!isCurrent()) continue
-          if (source.action !== 'continue') { await this.pauseForSource(claim.loop, source); continue }
-          goalContinuation = source.continuation
-        }
-        if (claim.loop.managedSource && !await this.admitMaintenance(claim.loop, checkAt)) continue
-        if (pending && claim.loop.lastOutcome === 'unknown') {
-          outcome = await this.onTick(claim.loop, pending.operationId, isCurrent, controller.signal)
-        } else {
-          // Source truth qualifies only a new continuation, never an already-frozen unknown operation.
-          if (claim.loop.taskSource && claim.loop.taskSource.kind !== 'goal') {
-            const source = await readContinuousProgressTaskSource(claim.loop.taskSource, controller.signal)
-            if (!isCurrent()) continue
-            this.patch(claim.loop.loopId, { lastDecision: source.reason, ...(source.action === 'stop' ? { status: 'stopped' as const, lastOutcome: 'skipped' as const } : source.action === 'pause' ? { status: 'paused' as const, lastOutcome: 'skipped' as const } : {}) })
-            if (source.action !== 'continue') { await this.persist(claim.loop.loopId); continue }
-          }
-          if (preflightFailed) throw preflightFailure
-          const observation = await this.observe(claim.loop, claim.tickId, now ?? Date.now(), controller.signal)
-          if (!isCurrent()) continue
-          if (claim.loop.taskSource?.kind === 'goal' && observation.session.run.runId !== claim.loop.initialDelivery?.condition.expectedRun.runId) { await this.pauseForSource(claim.loop, { action: 'pause', reason: 'The original executing Run changed. Inspect this Goal before explicitly starting new work; manual input remains available.' }); continue }
-          const futureIntent = isAgentSchedule(claim.loop) && claim.loop.futureIntentId ? { intentId: claim.loop.futureIntentId, occurrenceAt: claim.loop.nextCheckAt } : undefined
-          const decision = futureIntent ? decideFutureProgress(observation, futureIntent) : decideContinuousProgress({ ...observation, ...(claim.loop.lastCompletionId ? { lastCompletionId: claim.loop.lastCompletionId } : {}) })
-          if (decision.kind === 'skip') this.patch(claim.loop.loopId, { lastDecision: decision.reason })
-          if (decision.kind === 'send' && observation.inputByte !== null) {
-            if (claim.loop.checkIn && !pending) {
-              let human: CheckInObservation
-              try { human = this.futureInputs?.observeCheckIn ? await this.futureInputs.observeCheckIn(claim.loop, checkAt, controller.signal) : { known: false, reason: 'The original conversation observation owner is unavailable.' } }
-              catch (error) { human = { known: false, reason: 'Current conversation facts are unconfirmed. ' + (error instanceof Error ? error.message : String(error)) } }
-              if (!isCurrent()) continue
-              const eligibility = decideCheckIn(this.require(claim.loop.loopId), human, checkAt)
-              this.patch(claim.loop.loopId, { lastDecision: eligibility.reason, ...(!eligibility.send ? { checkInState: eligibility.state } : {}) })
-              if (!eligibility.send) { await this.persist(claim.loop.loopId); continue }
-              this.patch(claim.loop.loopId, { checkInState: eligibility.state })
-              newCheckInClaim = true
-            }
-            // A pending operation is retried only by explicit resume and keeps its identity.
-            // If the observed completion changed, the old claim has no authority to send.
-            if (!pending) {
-              let prompt = goalContinuation ?? claim.loop.prompt
-              let agentMuxNote: string | undefined = AGENTMUX_AGENT_MESSAGING_ENTRY + (claim.loop.checkIn ? '\n\n' + AGENT_SCHEDULE_CHECK_IN_GUIDANCE : '') + (claim.loop.taskSource?.kind === 'goal' ? '\n\n' + goalRoleGuidance({ role: goalContinuation ? 'manager' : 'executor', goalId: claim.loop.taskSource.goalId, agentSessionId: claim.loop.agentSessionId, runId: observation.session.run.runId, source: { kind: 'goal-native-continuation', operationId: claim.tickId } }) : '')
-              if (futureIntent) {
-                const original = observation.session.futurePromptIntents?.[futureIntent.intentId]
-                if (!original || original.operationId !== claim.loop.creationOperationId || original.message?.userContent !== prompt) {
-                  throw new AgentMuxError('The original future-message operation or content is unconfirmed. Inspect the saved arrangement before retrying; manual input remains available.', 'AGENT_FUTURE_INTENT_CHANGED')
-                }
-                // Each occurrence belongs to the saved message, not the current producer's rules.
-                prompt = original.message.userContent
-                agentMuxNote = original.message.systemContext
-              }
-              pending = { id: futureIntent ? `${futureIntent.intentId}@${futureIntent.occurrenceAt}` : decision.completionId, operationId: claim.tickId,
-                condition: agentPromptCondition(observation.session), inputByte: observation.inputByte,
-                prompt, ...(agentMuxNote === undefined ? {} : { agentMuxNote }), ...(futureIntent ? { futureIntent } : {}) }
-            }
-            if (futureIntent || pending.id === decision.completionId) {
-              this.patch(claim.loop.loopId, { pendingCompletion: pending })
-              await this.store.save(this.scheduler.list())
-              if (!isCurrent()) continue
-              dispatched = true
-              outcome = await this.onTick({ ...claim.loop, pendingCompletion: pending }, pending.operationId, isCurrent, controller.signal)
-            }
-          }
-        }
-      } catch (error) {
-        outcome = dispatched ? 'unknown' : 'skipped'
-        this.patch(claim.loop.loopId, { lastDecision: error instanceof Error ? error.message : String(error) })
-      }
-      finally { this.activeDelivery = undefined }
-      const current = this.scheduler.get(claim.loop.loopId)
-      if (current) {
-        if (outcome === 'unknown') this.patch(current.loopId, {
-          ...(current.status === 'active' ? { status: 'paused' } : {}), lastOutcome: 'unknown'
-        })
-        else {
-          const { pendingCompletion: _, ...settled } = current
-          if (outcome === 'skipped' && newCheckInClaim && settled.checkInState) {
-            const { unanswered: _, ...state } = settled.checkInState
-            settled.checkInState = state
-            settled.lastDecision = 'This follow-up was not delivered. The original due occurrence remains available.'
-          }
-          if (outcome === 'sent') {
-            if (current.taskSource && settled.lastDecision) settled.lastDecision += ' Host accepted the request; a new Agent turn is not yet confirmed.'
-            else delete settled.lastDecision
-            if (isAgentSchedule(current) && pending?.futureIntent) {
-              const nextDue = current.calendar ? nextCalendarOccurrence(current.calendar, checkAt) : current.everyMs !== undefined ? nextIntervalOccurrence(pending.futureIntent.occurrenceAt, checkAt, current.everyMs) : null
-              settled.lastOccurrenceAt = pending.futureIntent.occurrenceAt
-              settled.nextCheckAt = nextDue ?? current.nextCheckAt
-              if (nextDue === null && current.everyMs !== undefined) settled.status = 'paused'
-              else if (nextDue === null) settled.status = 'stopped'
-              settled.lastDecision = nextDue === null && current.everyMs !== undefined
-                ? 'Host accepted the original message; the next occurrence is unrepresentable. Inspect the original arrangement.'
-                : 'Host accepted the original future message; a new Agent turn is not yet confirmed.'
-            }
-          }
-          this.scheduler.replace(current.loopId, { ...settled, lastOutcome: outcome, ...(outcome === 'sent' && pending ? { lastCompletionId: pending.id } : {}) })
-        }
-      }
-      await this.persist(claim.loop.loopId)
+      const checking = run().finally(() => {
+        if (this.checks.get(selected.loopId) === checking) this.checks.delete(selected.loopId)
+        if (this.targetChecks.get(target) === checking) this.targetChecks.delete(target)
+        if (this.activeDeliveries.get(selected.loopId) === controller) this.activeDeliveries.delete(selected.loopId)
+      })
+      this.checks.set(selected.loopId, checking); this.targetChecks.set(target, checking)
+      return checking
+    })
+    // An exact target owns its failure; unrelated due objects still finish their work.
+    const results = await Promise.allSettled(pending)
+    const failure = results.find(result => result.status === 'rejected')
+    if (failure?.status === 'rejected') throw failure.reason
+  }
+  private async runLoop(loopId: string, checkAt: number, now: number | undefined, controller: AbortController): Promise<void> {
+    const loop = this.scheduler.get(loopId)
+    if (!loop || loop.status !== 'active' || loop.nextCheckAt > checkAt) return
+    const preparingCurrent = () => this.running && !controller.signal.aborted && isDeepStrictEqual(this.scheduler.get(loopId), loop)
+    if (loop.managedSource && ((this.deferredMaintenance.get(loop.loopId)?.until ?? 0) > checkAt || !await this.admitMaintenance(loop, checkAt, controller.signal, preparingCurrent))) return
+    if (!preparingCurrent()) return
+    const refreshLatest = () => {
+      const current = this.require(loopId)
+      if (current.pendingCompletion) return
+      const latest = current.calendar ? latestCalendarOccurrence(current.calendar, current.nextCheckAt, checkAt)
+        : current.everyMs !== undefined ? latestIntervalOccurrence(current.nextCheckAt, checkAt, current.everyMs) : current.nextCheckAt
+      if (latest !== current.nextCheckAt) this.patch(loopId, { nextCheckAt: latest, lastDecision: 'Missed older occurrences; only the latest due occurrence is eligible.' })
     }
+    if (now === undefined) checkAt = Math.max(checkAt, this.now())
+    refreshLatest()
+    // A read-only probe can avoid a durable claim only for confirmed busy input.
+    // Everything else still follows the original claim and final admission fence.
+    let preflightFailure: unknown, preflightFailed = false
+    if (isAgentSchedule(loop) && !loop.pendingCompletion && loop.futureIntentId) {
+      const candidate = this.require(loop.loopId)
+      let observation: ContinuousProgressObservation | undefined
+      try { observation = await awaitUntilCancelled(() => this.observe(candidate, mintObjectId(), now ?? Date.now(), controller.signal), controller.signal) }
+      catch (error) { preflightFailure = error; preflightFailed = true }
+      const current = this.scheduler.get(loop.loopId)
+      if (!this.running || controller.signal.aborted || !current || !isDeepStrictEqual(current, candidate)) return
+      if (!preflightFailed) {
+        const decision = decideFutureProgress(observation!, { intentId: candidate.futureIntentId!, occurrenceAt: candidate.nextCheckAt })
+        if (decision.kind === 'skip' && ['working', 'stale-working', 'user-input-changed', 'interaction-pending'].includes(decision.reason)) {
+          if (candidate.lastDecision !== decision.reason || candidate.lastOutcome !== 'skipped' || candidate.nextCheckAt !== loop.nextCheckAt) {
+            this.patch(loop.loopId, { lastDecision: decision.reason, lastOutcome: 'skipped', lastTickAt: checkAt })
+            await this.persist(loop.loopId)
+          }
+          return
+        }
+      }
+    }
+    // An unclaimed read or an earlier exact-target tick may span many intervals.
+    if (now === undefined) { checkAt = Math.max(checkAt, this.now()); refreshLatest() }
+    const claim = this.scheduler.claimTick(loop.loopId, checkAt)
+    if (!claim) return
+    // Claim and persist before invoking provider code. A crash or unknown callback result cannot replay a tick.
+    try { await this.store.save(this.scheduler.list()) }
+    catch (error) {
+      this.patch(claim.loop.loopId, { status: claim.loop.managedSource && !claim.loop.pendingCompletion ? this.require(claim.loop.loopId).status : 'paused', lastDecision: `Automatic claim persistence is unconfirmed. Manual input remains available. ${error instanceof Error ? error.message : String(error)}` })
+      for (const listener of this.listeners) listener(this.require(claim.loop.loopId))
+      throw error
+    }
+    const isCurrent = () => { const current = this.scheduler.get(claim.loop.loopId)
+      return this.running && !controller.signal.aborted && current?.status === 'active' && current.lastTickId === claim.tickId }
+    let pending = claim.loop.pendingCompletion
+    let outcome: LoopTickOutcome = pending && claim.loop.lastOutcome === 'unknown' ? 'unknown' : 'skipped'
+    let goalContinuation: string | undefined
+    let newCheckInClaim = false
+    // Until a pending send is saved and handed to the input owner, a failure proves nothing was
+    // sent: the tick is skipped and the next one retries. Afterwards the result stays unknown.
+    let dispatched = Boolean(pending)
+    delivery: { try {
+      if (!isCurrent()) break delivery
+      if (claim.loop.taskSource?.kind === 'goal') {
+        const source = await awaitUntilCancelled(() => this.goalSource(this.require(claim.loop.loopId)), controller.signal)
+        if (!isCurrent()) break delivery
+        if (source.action !== 'continue') { await this.pauseForSource(claim.loop, source); break delivery }
+        goalContinuation = source.continuation
+      }
+      if (claim.loop.managedSource && !await this.admitMaintenance(claim.loop, checkAt, controller.signal, isCurrent)) break delivery
+      if (pending && claim.loop.lastOutcome === 'unknown') {
+        outcome = await this.onTick(claim.loop, pending.operationId, isCurrent, controller.signal)
+      } else {
+        // Source truth qualifies only a new continuation, never an already-frozen unknown operation.
+        if (claim.loop.taskSource && claim.loop.taskSource.kind !== 'goal') {
+          const source = await awaitUntilCancelled(() => readContinuousProgressTaskSource(claim.loop.taskSource!, controller.signal), controller.signal)
+          if (!isCurrent()) break delivery
+          this.patch(claim.loop.loopId, { lastDecision: source.reason, ...(source.action === 'stop' ? { status: 'stopped' as const, lastOutcome: 'skipped' as const } : source.action === 'pause' ? { status: 'paused' as const, lastOutcome: 'skipped' as const } : {}) })
+          if (source.action !== 'continue') { await this.persist(claim.loop.loopId); break delivery }
+        }
+        if (preflightFailed) throw preflightFailure
+        const observation = await awaitUntilCancelled(() => this.observe(claim.loop, claim.tickId, now ?? Date.now(), controller.signal), controller.signal)
+        if (!isCurrent()) break delivery
+        if (claim.loop.taskSource?.kind === 'goal' && observation.session.run.runId !== claim.loop.initialDelivery?.condition.expectedRun.runId) { await this.pauseForSource(claim.loop, { action: 'pause', reason: 'The original executing Run changed. Inspect this Goal before explicitly starting new work; manual input remains available.' }); break delivery }
+        const futureIntent = isAgentSchedule(claim.loop) && claim.loop.futureIntentId ? { intentId: claim.loop.futureIntentId, occurrenceAt: claim.loop.nextCheckAt } : undefined
+        const decision = futureIntent ? decideFutureProgress(observation, futureIntent) : decideContinuousProgress({ ...observation, ...(claim.loop.lastCompletionId ? { lastCompletionId: claim.loop.lastCompletionId } : {}) })
+        if (decision.kind === 'skip') this.patch(claim.loop.loopId, { lastDecision: decision.reason })
+        if (decision.kind === 'send' && observation.inputByte !== null) {
+          if (claim.loop.checkIn && !pending) {
+            let human: CheckInObservation
+            try { human = this.futureInputs?.observeCheckIn ? await awaitUntilCancelled(() => this.futureInputs!.observeCheckIn!(claim.loop, checkAt, controller.signal), controller.signal) : { known: false, reason: 'The original conversation observation owner is unavailable.' } }
+            catch (error) { human = { known: false, reason: 'Current conversation facts are unconfirmed. ' + (error instanceof Error ? error.message : String(error)) } }
+            if (!isCurrent()) break delivery
+            const eligibility = decideCheckIn(this.require(claim.loop.loopId), human, checkAt)
+            this.patch(claim.loop.loopId, { lastDecision: eligibility.reason, ...(!eligibility.send ? { checkInState: eligibility.state } : {}) })
+            if (!eligibility.send) { await this.persist(claim.loop.loopId); break delivery }
+            this.patch(claim.loop.loopId, { checkInState: eligibility.state })
+            newCheckInClaim = true
+          }
+          // A pending operation is retried only by explicit resume and keeps its identity.
+          // If the observed completion changed, the old claim has no authority to send.
+          if (!pending) {
+            let prompt = goalContinuation ?? claim.loop.prompt
+            let agentMuxNote: string | undefined = AGENTMUX_AGENT_MESSAGING_ENTRY + (claim.loop.checkIn ? '\n\n' + AGENT_SCHEDULE_CHECK_IN_GUIDANCE : '') + (claim.loop.taskSource?.kind === 'goal' ? '\n\n' + goalRoleGuidance({ role: goalContinuation ? 'manager' : 'executor', goalId: claim.loop.taskSource.goalId, agentSessionId: claim.loop.agentSessionId, runId: observation.session.run.runId, source: { kind: 'goal-native-continuation', operationId: claim.tickId } }) : '')
+            if (futureIntent) {
+              const original = observation.session.futurePromptIntents?.[futureIntent.intentId]
+              if (!original || original.operationId !== claim.loop.creationOperationId || original.message?.userContent !== prompt) {
+                throw new AgentMuxError('The original future-message operation or content is unconfirmed. Inspect the saved arrangement before retrying; manual input remains available.', 'AGENT_FUTURE_INTENT_CHANGED')
+              }
+              // Each occurrence belongs to the saved message, not the current producer's rules.
+              prompt = original.message.userContent
+              agentMuxNote = original.message.systemContext
+            }
+            pending = { id: futureIntent ? `${futureIntent.intentId}@${futureIntent.occurrenceAt}` : decision.completionId, operationId: claim.tickId,
+              condition: agentPromptCondition(observation.session), inputByte: observation.inputByte,
+              prompt, ...(agentMuxNote === undefined ? {} : { agentMuxNote }), ...(futureIntent ? { futureIntent } : {}) }
+          }
+          if (futureIntent || pending.id === decision.completionId) {
+            this.patch(claim.loop.loopId, { pendingCompletion: pending })
+            await this.store.save(this.scheduler.list())
+            if (!isCurrent()) break delivery
+            dispatched = true
+            outcome = await this.onTick({ ...claim.loop, pendingCompletion: pending }, pending.operationId, isCurrent, controller.signal)
+          }
+        }
+      }
+    } catch (error) {
+      outcome = dispatched && !(error instanceof AutomaticInputNotDispatchedError && claim.loop.lastOutcome !== 'unknown') ? 'unknown' : 'skipped'
+      this.patch(claim.loop.loopId, { lastDecision: error instanceof Error ? error.message : String(error) })
+    } }
+    const current = this.scheduler.get(claim.loop.loopId)
+    if (current) {
+      if (outcome === 'unknown') this.patch(current.loopId, {
+        ...(current.status === 'active' ? { status: 'paused' } : {}), lastOutcome: 'unknown'
+      })
+      else {
+        const { pendingCompletion: _, ...settled } = current
+        if (outcome === 'skipped' && newCheckInClaim && settled.checkInState) {
+          const { unanswered: _, ...state } = settled.checkInState
+          settled.checkInState = state
+          settled.lastDecision = 'This follow-up was not delivered. The original due occurrence remains available.'
+        }
+        if (outcome === 'sent') {
+          if (current.taskSource && settled.lastDecision) settled.lastDecision += ' Host accepted the request; a new Agent turn is not yet confirmed.'
+          else delete settled.lastDecision
+          if (isAgentSchedule(current) && pending?.futureIntent) {
+            const nextDue = current.calendar ? nextCalendarOccurrence(current.calendar, checkAt) : current.everyMs !== undefined ? nextIntervalOccurrence(pending.futureIntent.occurrenceAt, checkAt, current.everyMs) : null
+            settled.lastOccurrenceAt = pending.futureIntent.occurrenceAt
+            settled.nextCheckAt = nextDue ?? current.nextCheckAt
+            if (nextDue === null && current.everyMs !== undefined) settled.status = 'paused'
+            else if (nextDue === null) settled.status = 'stopped'
+            settled.lastDecision = nextDue === null && current.everyMs !== undefined
+              ? 'Host accepted the original message; the next occurrence is unrepresentable. Inspect the original arrangement.'
+              : 'Host accepted the original future message; a new Agent turn is not yet confirmed.'
+          }
+        }
+        this.scheduler.replace(current.loopId, { ...settled, lastOutcome: outcome, ...(outcome === 'sent' && pending ? { lastCompletionId: pending.id } : {}) })
+      }
+    }
+    await this.persist(claim.loop.loopId)
   }
   private cancelDelivery(loopId: string, reason?: Error): void {
     for (const controller of this.activations.get(loopId) ?? []) controller.abort(reason)
     this.initialDeliveries.get(loopId)?.abort(reason)
-    if (this.activeDelivery?.loopId === loopId) this.activeDelivery.controller.abort(reason)
+    this.activeDeliveries.get(loopId)?.abort(reason)
   }
   private patch(loopId: string, patch: Partial<ContinuousProgressLoop>): void {
     const loop = this.scheduler.get(loopId)

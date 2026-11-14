@@ -1,3 +1,4 @@
+import { awaitUntilCancelled } from './await-until-cancelled.js'
 import { createHash } from 'node:crypto'
 import { watch, type FSWatcher } from 'node:fs'
 import { dirname, basename } from 'node:path'
@@ -31,6 +32,8 @@ export function createHostMotePresence(options: {
   const readings = new Map<string, MotePresenceReading>(), watchers = new Map<string, { path: string; watcher: FSWatcher }>()
   // An unconfirmed Mote is read again after a doubling wait, not on every scheduler tick. Any change event reads it at once.
   const retries = new Map<string, { at: number; waitMs: number }>()
+  const targetChecks = new Map<string, Promise<void>>()
+  let discovering: Promise<void> | undefined
   let discovery = true, closed = false, watching: FSWatcher | undefined, serviceIssue: string | undefined
   const exact = (hostId: string) => {
     const matches = options.clients().filter(value => value.hostId === hostId)
@@ -38,8 +41,9 @@ export function createHostMotePresence(options: {
     return matches[0]!.client
   }
   const invalidate = (target: MotePreferencesTarget) => { const id = key(target); targets.set(id, target); dirty.add(id) }
-  async function discover() {
+  async function discover(signal?: AbortSignal) {
     const [configuration, state] = await Promise.all([readOriginalMoteConfiguration(options.configurationPath), options.spatial.read()])
+    if (closed || signal?.aborted) return
     const workspaces = configuration && typeof configuration === 'object' && 'workspaces' in configuration && Array.isArray(configuration.workspaces) ? configuration.workspaces : []
     const homes = workspaces.filter(value => value && typeof value === 'object' && value.id === SCRATCH_WORKSPACE_ID && value.hostId === 'local' && typeof value.path === 'string')
     if (homes.length !== 1 || !state) throw new Error('The original Mote configuration or spatial source is unconfirmed.')
@@ -60,10 +64,12 @@ export function createHostMotePresence(options: {
     await options.main.assertCurrent(main)
     return { action: 'continue' }
   }
-  async function reconcile(target: MotePreferencesTarget) {
+  async function reconcile(target: MotePreferencesTarget, signal: AbortSignal) {
     const id = key(target)
+    const assertOpen = () => { signal.throwIfAborted(); if (closed) throw new Error('The original Mote maintenance owner was closed.') }
+    const read = <T>(task: () => Promise<T>) => awaitUntilCancelled(task, signal)
     try {
-      const main = await options.main.readCurrentMoteMain(target)
+      const main = await read(() => options.main.readCurrentMoteMain(target))
       if (main.status !== 'ready' || !main.identity || !main.resource || !main.roleRevision) throw new Error(main.issue ?? 'The original main role is unconfirmed.')
       if (watchers.get(id)?.path !== main.resource.zonePath) {
         watchers.get(id)?.watcher.close(); watchers.delete(id)
@@ -71,9 +77,9 @@ export function createHostMotePresence(options: {
           const watcher = watch(main.resource.zonePath, (_event, name) => { if (name === null || String(name) === 'MOTE.md') dirty.add(id) })
           watcher.on('error', error => { readings.set(id, { status: 'unconfirmed', schedule: readings.get(id)?.schedule ?? null, issue: 'Observing original Mote settings failed: ' + String(error) }); dirty.add(id) })
           watchers.set(id, { path: main.resource.zonePath, watcher })
-        } catch (error) { readings.set(id, { status: 'unconfirmed', schedule: null, issue: 'Original Mote settings watcher is unavailable: ' + String(error) }) }
+        } catch (error) { if (closed || signal.aborted) return; readings.set(id, { status: 'unconfirmed', schedule: null, issue: 'Original Mote settings watcher is unavailable: ' + String(error) }) }
       }
-      const { mode } = await readMoteQuickModeSource(options.files, target)
+      const { mode } = await read(() => readMoteQuickModeSource(options.files, target))
       const preference = moteQuickModeDefaults(mode).presence ?? DEFAULT_MOTE_PRESENCE, sourceId = motePresenceSourceId(main.identity)
       sourceTargets.set(sourceId,id)
       const previous = targetExecutions.get(id), next = main.current ? executionKey(main.current.hostId,main.current.sessionId) : undefined
@@ -82,6 +88,7 @@ export function createHostMotePresence(options: {
         targetExecutions.delete(id)
         if (next) { const entries = executionTargets.get(next) ?? new Set<string>(); entries.add(id); executionTargets.set(next,entries); targetExecutions.set(id,next) }
       }
+      await read(() => options.main.assertCurrent(main)); assertOpen()
       const arrangements = options.schedules.listManaged(sourceId)
       // Rebinding revokes only future actions. Claimed/unknown records stay on their original target.
       for (const loop of arrangements) if (loop.status !== 'stopped' && (loop.managedSource!.revision !== main.roleRevision || !preference.enabled || !main.current)) {
@@ -92,57 +99,88 @@ export function createHostMotePresence(options: {
       const current = options.schedules.listManaged(sourceId).filter(value => value.managedSource?.revision === main.roleRevision)
       let loop = current.find(value => value.status !== 'stopped') ?? current[0]
       if (!preference.enabled || !main.current) { readings.set(id, { status: !preference.enabled ? 'disabled' : 'unbound', schedule: loop ?? null, issue: null }); return }
-      const client = exact(main.current.hostId), original = await client.inspectAgentCreation(main.current.sessionId)
+      const client = exact(main.current.hostId)
+      const assertExecutionCurrent = () => {
+        assertOpen()
+        if (exact(main.current!.hostId) !== client) throw new AgentMuxError('The original Mote execution owner changed during observation. Its Session and input are retained.', 'STALE_AGENT_SESSION')
+      }
+      const original = await read(() => client.inspectAgentCreation(main.current!.sessionId))
+      assertExecutionCurrent()
       if (original.kind !== 'agent') {
         if (loop?.status === 'active') await options.schedules.call('schedule.pause', { scheduleId: loop.loopId, expectedRevision: loop.revision!, operationId: 'mote-retired-' + digest([loop.loopId, loop.revision]) })
         throw new Error('The original main Agent was explicitly retired. Its identity is retained; select or explicitly restore that original role.')
       }
       if (original.agentSessionId !== main.current.sessionId || original.hostId !== 'local' && original.hostId !== main.current.hostId) throw new Error('The original main execution identity changed.')
-      await options.main.assertCurrent(main)
+      await read(() => options.main.assertCurrent(main)); assertOpen()
       if (!loop) loop = (await options.schedules.call('schedule.create', { target: { hostId: main.current.hostId, agentSessionId: original.agentSessionId, providerId: original.providerId, workspacePath: original.workspacePath }, everyMs: preference.intervalMs, prompt: heartbeat, managedSource: { sourceId, revision: main.roleRevision }, operationId: 'mote-presence-' + digest([sourceId, main.roleRevision]) })).schedule
+      else if (loop.status === 'paused' && loop.lastOutcome === 'unknown' && !loop.lastTickId && !loop.pendingCompletion && !loop.lastMutation) {
+        // This is the original unconfirmed configuration write, not an unknown input.
+        // Reuse its complete immutable request; the original scheduler converges the same Future Intent.
+        loop = (await options.schedules.call('schedule.create', { target: { hostId: loop.hostId, agentSessionId: loop.agentSessionId, providerId: loop.providerId, workspacePath: loop.workspacePath }, everyMs: loop.everyMs!, prompt: loop.prompt, managedSource: loop.managedSource!, operationId: loop.creationOperationId! })).schedule
+      }
       if (loop.status !== 'stopped' && loop.everyMs !== preference.intervalMs) loop = (await options.schedules.call('schedule.update', { scheduleId: loop.loopId, expectedRevision: loop.revision!, operationId: 'mote-interval-' + digest([loop.loopId, loop.revision, preference.intervalMs]), everyMs: preference.intervalMs })).schedule
       readings.set(id, { status: loop.status === 'active' ? 'active' : 'paused', schedule: loop, issue: loop.status === 'active' ? null : loop.status === 'stopped'
         ? 'The original automatic arrangement was stopped. Inspect its retained record and explicitly configure any future automatic work.'
         : loop.lastDecision ?? 'Original automatic maintenance is paused. Resume that exact arrangement explicitly.' })
       if (loop.status !== 'active') return
-      const observed = await client.statusAgent(original.agentSessionId)
+      const observed = await read(() => client.statusAgent(original.agentSessionId))
+      assertExecutionCurrent()
       if (observed.run.state === 'running') return
       if (observed.run.exitCode === 0 || observed.run.exitReason === 'user-stopped' || observed.session.continuity?.supervision?.cancellation) {
         loop = (await options.schedules.call('schedule.pause', { scheduleId: loop.loopId, expectedRevision: loop.revision!, operationId: 'mote-ended-' + digest([loop.loopId, observed.session.run]) })).schedule
         readings.set(id, { status: 'paused', schedule: loop, issue: 'The original Agent exited normally or was cancelled. Resume the original arrangement explicitly.' }); return
       }
-      await options.main.assertCurrent(main)
+      await read(() => options.main.assertCurrent(main)); assertOpen()
+      assertExecutionCurrent()
       const operationId = 'mote-maintain-' + digest([sourceId, main.roleRevision, observed.session.run])
-      const recovered = await client.ensureAgentContinuity({ agentSessionId: original.agentSessionId, expectedRun: observed.session.run, operationId, trigger: 'standing-maintenance', standingIntent: { ...loop.managedSource!, intentId: loop.futureIntentId!, operationId: loop.creationOperationId! }, policy: { continuationEnabled: false, reminderMode: 'off' } })
+      const recovered = await awaitUntilCancelled(() => { assertExecutionCurrent(); return client.ensureAgentContinuity({ agentSessionId: original.agentSessionId, expectedRun: observed.session.run, operationId, trigger: 'standing-maintenance', standingIntent: { ...loop!.managedSource!, intentId: loop!.futureIntentId!, operationId: loop!.creationOperationId! }, policy: { continuationEnabled: false, reminderMode: 'off' } }) }, signal)
       if (recovered.kind !== 'resumed' && recovered.kind !== 'reattachable') throw new Error(`Original maintenance recovery is ${recovered.kind}; inspect ${operationId}.`)
-    } catch (error) { readings.set(id, { status: 'unconfirmed', schedule: readings.get(id)?.schedule ?? null, issue: String(error) }) }
+    } catch (error) { if (closed || signal.aborted) return; readings.set(id, { status: 'unconfirmed', schedule: readings.get(id)?.schedule ?? null, issue: String(error) }) }
   }
-  const releaseScheduler = options.schedules.setMaintenanceOwner({ qualify, async maintain(now) {
-    if (closed) return
+  const releaseScheduler = options.schedules.setMaintenanceOwner({ qualify, async maintain(now, signal) {
+    if (closed || signal.aborted) return
     serviceIssue = undefined
-    if (discovery) { discovery = false; try { await discover() } catch (error) { discovery = true; for (const id of targets.keys()) readings.set(id, { status: 'unconfirmed', schedule: readings.get(id)?.schedule ?? null, issue: String(error) }) } }
-    // A headless Run need not have an output Attachment publishing exit events.
-    // The existing scheduler cadence observes only its active main roles; an
-    // ended Run still goes through the original source/role checks in reconcile.
-    for (const [id, reading] of readings) {
-      if (reading.status === 'unconfirmed' && now >= (retries.get(id)?.at ?? now)) dirty.add(id)
-      const loop = reading.schedule && options.schedules.inspectLoop(reading.schedule.loopId)
-      if (!loop || loop.status !== 'active' || dirty.has(id)) continue
-      try {
-        const observed = await exact(loop.hostId).statusAgent(loop.agentSessionId)
-        if (observed.run.state !== 'running') dirty.add(id)
-      } catch (error) {
-        readings.set(id, { status: 'unconfirmed', schedule: loop, issue: 'Observing the original main Run is unconfirmed. Its identity and manual input are retained: ' + String(error) })
-        dirty.add(id)
-      }
+    // Discovery is shared source work; existing exact targets continue while its next read is held.
+    if (discovery && !discovering) {
+      discovery = false
+      const observed = awaitUntilCancelled(() => discover(signal), signal).catch(error => {
+        if (closed || signal.aborted) return
+        discovery = true
+        for (const id of targets.keys()) readings.set(id, { status: 'unconfirmed', schedule: readings.get(id)?.schedule ?? null, issue: String(error) })
+      }).finally(() => { if (discovering === observed) discovering = undefined })
+      discovering = observed
+      await observed
     }
-    for (const id of [...dirty]) {
-      dirty.delete(id); const target = targets.get(id); if (!target) continue
-      await reconcile(target)
-      if (readings.get(id)?.status !== 'unconfirmed') { retries.delete(id); continue }
-      const waitMs = Math.min((retries.get(id)?.waitMs ?? MAINTENANCE_RETRY_MS / 2) * 2, MAINTENANCE_RETRY_LIMIT_MS)
-      retries.set(id, { at: now + waitMs, waitMs })
+    if (closed || signal.aborted) return
+    const jobs: Promise<void>[] = []
+    for (const [id, target] of targets) {
+      if (targetChecks.has(id)) continue
+      const checking = (async () => {
+        const reading = readings.get(id)
+        if (reading?.status === 'unconfirmed' && now >= (retries.get(id)?.at ?? now)) dirty.add(id)
+        const loop = reading?.schedule && options.schedules.inspectLoop(reading.schedule.loopId)
+        // A headless Run may not publish output events. Observe only this original active main.
+        if (loop?.status === 'active' && !dirty.has(id)) {
+          try {
+            const observed = await awaitUntilCancelled(() => exact(loop.hostId).statusAgent(loop.agentSessionId), signal)
+            if (observed.run.state !== 'running') dirty.add(id)
+          } catch (error) {
+            if (closed || signal.aborted) return
+            readings.set(id, { status: 'unconfirmed', schedule: loop, issue: 'Observing the original main Run is unconfirmed. Its identity and manual input are retained: ' + String(error) })
+            dirty.add(id)
+          }
+        }
+        if (closed || signal.aborted || !dirty.delete(id)) return
+        await reconcile(target, signal)
+        if (closed || signal.aborted) return
+        if (readings.get(id)?.status !== 'unconfirmed') { retries.delete(id); return }
+        const waitMs = Math.min((retries.get(id)?.waitMs ?? MAINTENANCE_RETRY_MS / 2) * 2, MAINTENANCE_RETRY_LIMIT_MS)
+        retries.set(id, { at: now + waitMs, waitMs })
+      })().finally(() => { if (targetChecks.get(id) === checking) targetChecks.delete(id) })
+      targetChecks.set(id, checking); jobs.push(checking)
     }
+    // Join new work only. A later cadence can maintain healthy targets while another read is held.
+    await Promise.all(jobs)
   } })
   const releaseScheduleEvents = options.schedules.subscribe(loop => {
     const id = loop.managedSource && sourceTargets.get(loop.managedSource.sourceId)
