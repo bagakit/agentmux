@@ -2,13 +2,14 @@ import assert from 'node:assert/strict'
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { workspaceAssets, workspaceSources } from './workspace-entries.mjs'
 
 const semanticIcons = './styles/semantic-icons.css'
 const fieldStyles = './input/styles.css'
 const actionStyles = './styles/buttons.css'
 
 // Public names stay the same in the workspace and in a compiled distribution.
-// Workspace-only entries remain in the package manifest until their consumers move.
+// Shared workspace domain entries are defined in workspace-entries.mjs.
 export const supportedExamples = {
   actions: {
     entries: {
@@ -50,16 +51,19 @@ export const supportedExamples = {
   }
 }
 
+function moduleExport(source, distribution) {
+  const module = source.replace(/\.tsx?$/, '.js')
+  if (distribution) return { types: './dist/' + module.replace(/\.js$/, '.d.ts'), import: './dist/' + module }
+  return { types: './src/' + source, browser: './src/' + source, import: './dist/' + module }
+}
+
 export function supportedExportMap(target) {
   assert.ok(target === 'workspace' || target === 'distribution', 'Choose workspace or distribution exports')
   const distribution = target === 'distribution'
   const entries = {}
   for (const { entries: modules, styles } of Object.values(supportedExamples)) {
     for (const [entry, source] of Object.entries(modules)) {
-      const module = source.replace(/\.tsx?$/, '.js')
-      entries[entry] = distribution
-        ? { types: './dist/' + module.replace(/\.js$/, '.d.ts'), import: './dist/' + module }
-        : { types: './src/' + source, browser: './src/' + source, import: './dist/' + module }
+      entries[entry] = moduleExport(source, distribution)
     }
     for (const entry of styles) {
       const source = entry === fieldStyles ? 'input/input.css' : entry.slice(2)
@@ -69,18 +73,33 @@ export function supportedExportMap(target) {
   return entries
 }
 
+export function workspaceExportMap() {
+  const entries = { ...workspaceAssets, ...supportedExportMap('workspace') }
+  for (const [name, source] of Object.entries(workspaceSources)) {
+    assert.ok(!Object.hasOwn(entries, name), 'Entry already has an owner ' + name)
+    entries[name] = source.endsWith('.css') ? './src/' + source : moduleExport(source, false)
+  }
+  return entries
+}
+
 export function verifyWorkspaceExportMap(exports) {
   assert.ok(Object.keys(exports).length > 0, 'Workspace export set cannot be empty')
-  for (const [name, expected] of Object.entries(supportedExportMap('workspace'))) {
-    assert.deepEqual(exports[name], expected, 'Missing or different exact export ' + name)
+  const expected = workspaceExportMap()
+  for (const [name, value] of Object.entries(expected)) {
+    assert.deepEqual(exports[name], value, 'Missing or different exact export ' + name)
+    if (typeof value === 'object') {
+      assert.deepEqual(Object.keys(exports[name]), Object.keys(value), 'Export conditions must keep their order ' + name)
+    }
   }
+  assert.deepEqual(Object.keys(exports).filter(name => !Object.hasOwn(expected, name)), [], 'Unregistered workspace exports')
 }
 
 async function updateWorkspaceExports(write) {
   const file = new URL('../package.json', import.meta.url)
   const manifest = JSON.parse(await readFile(file, 'utf8'))
+  assert.ok(!Object.hasOwn(manifest, 'main') && !Object.hasOwn(manifest, 'types'), 'Use the named Client UI exports')
   if (!write) { verifyWorkspaceExportMap(manifest.exports); return }
-  manifest.exports = { ...manifest.exports, ...supportedExportMap('workspace') }
+  manifest.exports = workspaceExportMap()
   await writeFile(file, JSON.stringify(manifest, null, 2) + '\n')
 }
 

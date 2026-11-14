@@ -3,97 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./src/index.ts",
   "exports": {
     "./agent-icons/*": "./src/assets/agent-icons/*",
     "./brand/*": "./brand/*",
-    "./input": {
-      "types": "./src/input/index.ts",
-      "browser": "./src/input/index.ts",
-      "import": "./dist/input/index.js"
-    },
-    "./input/styles.css": "./src/input/input.css",
-    ".": {
-      "types": "./src/index.ts",
-      "browser": "./src/index.ts",
-      "import": "./dist/index.js"
-    },
-    "./components/*": {
-      "types": "./src/components/*.tsx",
-      "browser": "./src/components/*.tsx",
-      "import": "./dist/components/*.js"
-    },
-    "./components/SelectionField": {
-      "types": "./src/components/SelectionField.tsx",
-      "browser": "./src/components/SelectionField.tsx",
-      "import": "./dist/components/SelectionField.js"
-    },
-    "./components/SearchChoiceDialog": {
-      "types": "./src/components/SearchChoiceDialog.tsx",
-      "browser": "./src/components/SearchChoiceDialog.tsx",
-      "import": "./dist/components/SearchChoiceDialog.js"
-    },
-    "./styles/selection-field.css": "./src/styles/selection-field.css",
-    "./styles/search-choice.css": "./src/styles/search-choice.css",
-    "./patterns/agent-work-location": {
-      "types": "./src/patterns/agent-work-location.tsx",
-      "browser": "./src/patterns/agent-work-location.tsx",
-      "import": "./dist/patterns/agent-work-location.js"
-    },
-    "./patterns/agent-work-location.css": "./src/patterns/agent-work-location.css",
-    "./terminal/*": {
-      "types": "./src/terminal/*.ts",
-      "browser": "./src/terminal/*.ts",
-      "import": "./dist/terminal/*.js"
-    },
-    "./conversation-send-receipts": {
-      "types": "./src/lib/conversation-send-receipts.ts",
-      "browser": "./src/lib/conversation-send-receipts.ts",
-      "import": "./dist/lib/conversation-send-receipts.js"
-    },
-    "./*": {
-      "types": "./src/lib/*.ts",
-      "browser": "./src/lib/*.ts",
-      "import": "./dist/lib/*.js"
-    },
-    "./platform": {
-      "types": "./src/platform.tsx",
-      "browser": "./src/platform.tsx",
-      "import": "./dist/platform.js"
-    },
-    "./overlay-host": {
-      "types": "./src/overlay-host.tsx",
-      "browser": "./src/overlay-host.tsx",
-      "import": "./dist/overlay-host.js"
-    },
-    "./styles.css": "./src/styles/index.css",
-    "./styles/*": "./src/styles/*",
-    "./note/*": {
-      "types": "./src/note/*.ts",
-      "browser": "./src/note/*.ts",
-      "import": "./dist/note/*.js"
-    },
-    "./components/NoteReader": {
-      "types": "./src/components/NoteReader.tsx",
-      "browser": "./src/components/NoteReader.tsx",
-      "import": "./dist/components/NoteReader.js"
-    },
-    "./theme/model": {
-      "types": "./src/theme/model.ts",
-      "browser": "./src/theme/model.ts",
-      "import": "./dist/theme/model.js"
-    },
-    "./theme": {
-      "types": "./src/theme/index.ts",
-      "browser": "./src/theme/index.ts",
-      "import": "./dist/theme/index.js"
-    },
-    "./icons": {
-      "types": "./src/theme/icons.tsx",
-      "browser": "./src/theme/icons.tsx",
-      "import": "./dist/theme/icons.js"
-    },
     "./components/Button": {
       "types": "./src/components/Button.tsx",
       "browser": "./src/components/Button.tsx",
@@ -105,15 +17,31 @@
       "import": "./dist/components/IconButton.js"
     },
     "./styles/buttons.css": "./src/styles/buttons.css",
+    "./input": {
+      "types": "./src/input/index.ts",
+      "browser": "./src/input/index.ts",
+      "import": "./dist/input/index.js"
+    },
     "./components/FormRow": {
       "types": "./src/components/FormRow.tsx",
       "browser": "./src/components/FormRow.tsx",
       "import": "./dist/components/FormRow.js"
     },
+    "./input/styles.css": "./src/input/input.css",
     "./components/Modal": {
       "types": "./src/components/Modal.tsx",
       "browser": "./src/components/Modal.tsx",
       "import": "./dist/components/Modal.js"
+    },
+    "./components/HoverDropdownMenu": {
+      "types": "./src/components/HoverDropdownMenu.tsx",
+      "browser": "./src/components/HoverDropdownMenu.tsx",
+      "import": "./dist/components/HoverDropdownMenu.js"
+    },
+    "./overlay-host": {
+      "types": "./src/overlay-host.tsx",
+      "browser": "./src/overlay-host.tsx",
+      "import": "./dist/overlay-host.js"
     },
     "./styles/overlays.css": "./src/styles/overlays.css",
     "./components/InlineRenameField": {
@@ -123,13 +51,895 @@
     },
     "./styles/semantic-icons.css": "./src/styles/semantic-icons.css",
     "./styles/inline-rename-field.css": "./src/styles/inline-rename-field.css",
-    "./styles/theme-defaults.css": "./src/styles/theme-defaults.css",
-    "./components/HoverDropdownMenu": {
-      "types": "./src/components/HoverDropdownMenu.tsx",
-      "browser": "./src/components/HoverDropdownMenu.tsx",
-      "import": "./dist/components/HoverDropdownMenu.js"
+    "./patterns/agent-work-location": {
+      "types": "./src/patterns/agent-work-location.tsx",
+      "browser": "./src/patterns/agent-work-location.tsx",
+      "import": "./dist/patterns/agent-work-location.js"
     },
-    "./styles/palette.css": "./src/styles/palette.css"
+    "./patterns/agent-work-location.css": "./src/patterns/agent-work-location.css",
+    "./theme": {
+      "types": "./src/theme/index.ts",
+      "browser": "./src/theme/index.ts",
+      "import": "./dist/theme/index.js"
+    },
+    "./theme/model": {
+      "types": "./src/theme/model.ts",
+      "browser": "./src/theme/model.ts",
+      "import": "./dist/theme/model.js"
+    },
+    "./icons": {
+      "types": "./src/theme/icons.tsx",
+      "browser": "./src/theme/icons.tsx",
+      "import": "./dist/theme/icons.js"
+    },
+    "./styles/palette.css": "./src/styles/palette.css",
+    "./styles/theme-defaults.css": "./src/styles/theme-defaults.css",
+    "./platform": {
+      "types": "./src/platform.tsx",
+      "browser": "./src/platform.tsx",
+      "import": "./dist/platform.js"
+    },
+    "./styles.css": "./src/styles/index.css",
+    "./components/AgentAsyncQuestionCard": {
+      "types": "./src/components/AgentAsyncQuestionCard.tsx",
+      "browser": "./src/components/AgentAsyncQuestionCard.tsx",
+      "import": "./dist/components/AgentAsyncQuestionCard.js"
+    },
+    "./components/AgentAvatarBadgeIcon": {
+      "types": "./src/components/AgentAvatarBadgeIcon.tsx",
+      "browser": "./src/components/AgentAvatarBadgeIcon.tsx",
+      "import": "./dist/components/AgentAvatarBadgeIcon.js"
+    },
+    "./components/AgentAvatarFace": {
+      "types": "./src/components/AgentAvatarFace.tsx",
+      "browser": "./src/components/AgentAvatarFace.tsx",
+      "import": "./dist/components/AgentAvatarFace.js"
+    },
+    "./components/AgentAvatarStaticArtwork": {
+      "types": "./src/components/AgentAvatarStaticArtwork.tsx",
+      "browser": "./src/components/AgentAvatarStaticArtwork.tsx",
+      "import": "./dist/components/AgentAvatarStaticArtwork.js"
+    },
+    "./components/AgentComposer": {
+      "types": "./src/components/AgentComposer.tsx",
+      "browser": "./src/components/AgentComposer.tsx",
+      "import": "./dist/components/AgentComposer.js"
+    },
+    "./components/AgentInteractionCard": {
+      "types": "./src/components/AgentInteractionCard.tsx",
+      "browser": "./src/components/AgentInteractionCard.tsx",
+      "import": "./dist/components/AgentInteractionCard.js"
+    },
+    "./components/AgentMarkdown": {
+      "types": "./src/components/AgentMarkdown.tsx",
+      "browser": "./src/components/AgentMarkdown.tsx",
+      "import": "./dist/components/AgentMarkdown.js"
+    },
+    "./components/AgentProviderIcon": {
+      "types": "./src/components/AgentProviderIcon.tsx",
+      "browser": "./src/components/AgentProviderIcon.tsx",
+      "import": "./dist/components/AgentProviderIcon.js"
+    },
+    "./components/AvatarGroup": {
+      "types": "./src/components/AvatarGroup.tsx",
+      "browser": "./src/components/AvatarGroup.tsx",
+      "import": "./dist/components/AvatarGroup.js"
+    },
+    "./components/BrandIcon": {
+      "types": "./src/components/BrandIcon.tsx",
+      "browser": "./src/components/BrandIcon.tsx",
+      "import": "./dist/components/BrandIcon.js"
+    },
+    "./components/CapturedConversationMessage": {
+      "types": "./src/components/CapturedConversationMessage.tsx",
+      "browser": "./src/components/CapturedConversationMessage.tsx",
+      "import": "./dist/components/CapturedConversationMessage.js"
+    },
+    "./components/CapturedProcessRecord": {
+      "types": "./src/components/CapturedProcessRecord.tsx",
+      "browser": "./src/components/CapturedProcessRecord.tsx",
+      "import": "./dist/components/CapturedProcessRecord.js"
+    },
+    "./components/ChannelProfileAvatar": {
+      "types": "./src/components/ChannelProfileAvatar.tsx",
+      "browser": "./src/components/ChannelProfileAvatar.tsx",
+      "import": "./dist/components/ChannelProfileAvatar.js"
+    },
+    "./components/ComposerCompletionEditor": {
+      "types": "./src/components/ComposerCompletionEditor.tsx",
+      "browser": "./src/components/ComposerCompletionEditor.tsx",
+      "import": "./dist/components/ComposerCompletionEditor.js"
+    },
+    "./components/ComposerEditFooter": {
+      "types": "./src/components/ComposerEditFooter.tsx",
+      "browser": "./src/components/ComposerEditFooter.tsx",
+      "import": "./dist/components/ComposerEditFooter.js"
+    },
+    "./components/ComposerHost": {
+      "types": "./src/components/ComposerHost.tsx",
+      "browser": "./src/components/ComposerHost.tsx",
+      "import": "./dist/components/ComposerHost.js"
+    },
+    "./components/ComposerLayoutToggle": {
+      "types": "./src/components/ComposerLayoutToggle.tsx",
+      "browser": "./src/components/ComposerLayoutToggle.tsx",
+      "import": "./dist/components/ComposerLayoutToggle.js"
+    },
+    "./components/ComposerReferenceTool": {
+      "types": "./src/components/ComposerReferenceTool.tsx",
+      "browser": "./src/components/ComposerReferenceTool.tsx",
+      "import": "./dist/components/ComposerReferenceTool.js"
+    },
+    "./components/ContentCopyButton": {
+      "types": "./src/components/ContentCopyButton.tsx",
+      "browser": "./src/components/ContentCopyButton.tsx",
+      "import": "./dist/components/ContentCopyButton.js"
+    },
+    "./components/ConversationCoverage": {
+      "types": "./src/components/ConversationCoverage.tsx",
+      "browser": "./src/components/ConversationCoverage.tsx",
+      "import": "./dist/components/ConversationCoverage.js"
+    },
+    "./components/ConversationFiles": {
+      "types": "./src/components/ConversationFiles.tsx",
+      "browser": "./src/components/ConversationFiles.tsx",
+      "import": "./dist/components/ConversationFiles.js"
+    },
+    "./components/ConversationImage": {
+      "types": "./src/components/ConversationImage.tsx",
+      "browser": "./src/components/ConversationImage.tsx",
+      "import": "./dist/components/ConversationImage.js"
+    },
+    "./components/ConversationInputDetails": {
+      "types": "./src/components/ConversationInputDetails.tsx",
+      "browser": "./src/components/ConversationInputDetails.tsx",
+      "import": "./dist/components/ConversationInputDetails.js"
+    },
+    "./components/ConversationMessage": {
+      "types": "./src/components/ConversationMessage.tsx",
+      "browser": "./src/components/ConversationMessage.tsx",
+      "import": "./dist/components/ConversationMessage.js"
+    },
+    "./components/ConversationProgressiveBody": {
+      "types": "./src/components/ConversationProgressiveBody.tsx",
+      "browser": "./src/components/ConversationProgressiveBody.tsx",
+      "import": "./dist/components/ConversationProgressiveBody.js"
+    },
+    "./components/ConversationReactionActions": {
+      "types": "./src/components/ConversationReactionActions.tsx",
+      "browser": "./src/components/ConversationReactionActions.tsx",
+      "import": "./dist/components/ConversationReactionActions.js"
+    },
+    "./components/ConversationRecordSequence": {
+      "types": "./src/components/ConversationRecordSequence.tsx",
+      "browser": "./src/components/ConversationRecordSequence.tsx",
+      "import": "./dist/components/ConversationRecordSequence.js"
+    },
+    "./components/ConversationResourceImage": {
+      "types": "./src/components/ConversationResourceImage.tsx",
+      "browser": "./src/components/ConversationResourceImage.tsx",
+      "import": "./dist/components/ConversationResourceImage.js"
+    },
+    "./components/ConversationResourceText": {
+      "types": "./src/components/ConversationResourceText.tsx",
+      "browser": "./src/components/ConversationResourceText.tsx",
+      "import": "./dist/components/ConversationResourceText.js"
+    },
+    "./components/ConversationToolTrace": {
+      "types": "./src/components/ConversationToolTrace.tsx",
+      "browser": "./src/components/ConversationToolTrace.tsx",
+      "import": "./dist/components/ConversationToolTrace.js"
+    },
+    "./components/ConversationView": {
+      "types": "./src/components/ConversationView.tsx",
+      "browser": "./src/components/ConversationView.tsx",
+      "import": "./dist/components/ConversationView.js"
+    },
+    "./components/DeliveryLogDetails": {
+      "types": "./src/components/DeliveryLogDetails.tsx",
+      "browser": "./src/components/DeliveryLogDetails.tsx",
+      "import": "./dist/components/DeliveryLogDetails.js"
+    },
+    "./components/DiagramImage": {
+      "types": "./src/components/DiagramImage.tsx",
+      "browser": "./src/components/DiagramImage.tsx",
+      "import": "./dist/components/DiagramImage.js"
+    },
+    "./components/FocusStateMark": {
+      "types": "./src/components/FocusStateMark.tsx",
+      "browser": "./src/components/FocusStateMark.tsx",
+      "import": "./dist/components/FocusStateMark.js"
+    },
+    "./components/InlineComposer": {
+      "types": "./src/components/InlineComposer.tsx",
+      "browser": "./src/components/InlineComposer.tsx",
+      "import": "./dist/components/InlineComposer.js"
+    },
+    "./components/InputChannelSummary": {
+      "types": "./src/components/InputChannelSummary.tsx",
+      "browser": "./src/components/InputChannelSummary.tsx",
+      "import": "./dist/components/InputChannelSummary.js"
+    },
+    "./components/InputHistoryList": {
+      "types": "./src/components/InputHistoryList.tsx",
+      "browser": "./src/components/InputHistoryList.tsx",
+      "import": "./dist/components/InputHistoryList.js"
+    },
+    "./components/InputMailboxRecords": {
+      "types": "./src/components/InputMailboxRecords.tsx",
+      "browser": "./src/components/InputMailboxRecords.tsx",
+      "import": "./dist/components/InputMailboxRecords.js"
+    },
+    "./components/MailboxRecordRow": {
+      "types": "./src/components/MailboxRecordRow.tsx",
+      "browser": "./src/components/MailboxRecordRow.tsx",
+      "import": "./dist/components/MailboxRecordRow.js"
+    },
+    "./components/MarkdownCodeBlock": {
+      "types": "./src/components/MarkdownCodeBlock.tsx",
+      "browser": "./src/components/MarkdownCodeBlock.tsx",
+      "import": "./dist/components/MarkdownCodeBlock.js"
+    },
+    "./components/MarkdownExcerpt": {
+      "types": "./src/components/MarkdownExcerpt.tsx",
+      "browser": "./src/components/MarkdownExcerpt.tsx",
+      "import": "./dist/components/MarkdownExcerpt.js"
+    },
+    "./components/MarkdownReadingLayout": {
+      "types": "./src/components/MarkdownReadingLayout.tsx",
+      "browser": "./src/components/MarkdownReadingLayout.tsx",
+      "import": "./dist/components/MarkdownReadingLayout.js"
+    },
+    "./components/MarkdownRemoteImage": {
+      "types": "./src/components/MarkdownRemoteImage.tsx",
+      "browser": "./src/components/MarkdownRemoteImage.tsx",
+      "import": "./dist/components/MarkdownRemoteImage.js"
+    },
+    "./components/MessageDeliveryFailure": {
+      "types": "./src/components/MessageDeliveryFailure.tsx",
+      "browser": "./src/components/MessageDeliveryFailure.tsx",
+      "import": "./dist/components/MessageDeliveryFailure.js"
+    },
+    "./components/MoteConversationStart": {
+      "types": "./src/components/MoteConversationStart.tsx",
+      "browser": "./src/components/MoteConversationStart.tsx",
+      "import": "./dist/components/MoteConversationStart.js"
+    },
+    "./components/MoteConversationThreads": {
+      "types": "./src/components/MoteConversationThreads.tsx",
+      "browser": "./src/components/MoteConversationThreads.tsx",
+      "import": "./dist/components/MoteConversationThreads.js"
+    },
+    "./components/MoteFace": {
+      "types": "./src/components/MoteFace.tsx",
+      "browser": "./src/components/MoteFace.tsx",
+      "import": "./dist/components/MoteFace.js"
+    },
+    "./components/MoteFirstMessage": {
+      "types": "./src/components/MoteFirstMessage.tsx",
+      "browser": "./src/components/MoteFirstMessage.tsx",
+      "import": "./dist/components/MoteFirstMessage.js"
+    },
+    "./components/MoteIcon": {
+      "types": "./src/components/MoteIcon.tsx",
+      "browser": "./src/components/MoteIcon.tsx",
+      "import": "./dist/components/MoteIcon.js"
+    },
+    "./components/MotePeriodConversation": {
+      "types": "./src/components/MotePeriodConversation.tsx",
+      "browser": "./src/components/MotePeriodConversation.tsx",
+      "import": "./dist/components/MotePeriodConversation.js"
+    },
+    "./components/NativeProcessObservation": {
+      "types": "./src/components/NativeProcessObservation.tsx",
+      "browser": "./src/components/NativeProcessObservation.tsx",
+      "import": "./dist/components/NativeProcessObservation.js"
+    },
+    "./components/NoteBlockAuthors": {
+      "types": "./src/components/NoteBlockAuthors.tsx",
+      "browser": "./src/components/NoteBlockAuthors.tsx",
+      "import": "./dist/components/NoteBlockAuthors.js"
+    },
+    "./components/NoteFileContext": {
+      "types": "./src/components/NoteFileContext.tsx",
+      "browser": "./src/components/NoteFileContext.tsx",
+      "import": "./dist/components/NoteFileContext.js"
+    },
+    "./components/NoteImage": {
+      "types": "./src/components/NoteImage.tsx",
+      "browser": "./src/components/NoteImage.tsx",
+      "import": "./dist/components/NoteImage.js"
+    },
+    "./components/NoteInlineLink": {
+      "types": "./src/components/NoteInlineLink.tsx",
+      "browser": "./src/components/NoteInlineLink.tsx",
+      "import": "./dist/components/NoteInlineLink.js"
+    },
+    "./components/NoteInsertMenu": {
+      "types": "./src/components/NoteInsertMenu.tsx",
+      "browser": "./src/components/NoteInsertMenu.tsx",
+      "import": "./dist/components/NoteInsertMenu.js"
+    },
+    "./components/NoteLinkActions": {
+      "types": "./src/components/NoteLinkActions.tsx",
+      "browser": "./src/components/NoteLinkActions.tsx",
+      "import": "./dist/components/NoteLinkActions.js"
+    },
+    "./components/NoteReader": {
+      "types": "./src/components/NoteReader.tsx",
+      "browser": "./src/components/NoteReader.tsx",
+      "import": "./dist/components/NoteReader.js"
+    },
+    "./components/NoteRichContent": {
+      "types": "./src/components/NoteRichContent.tsx",
+      "browser": "./src/components/NoteRichContent.tsx",
+      "import": "./dist/components/NoteRichContent.js"
+    },
+    "./components/NoteTableTools": {
+      "types": "./src/components/NoteTableTools.tsx",
+      "browser": "./src/components/NoteTableTools.tsx",
+      "import": "./dist/components/NoteTableTools.js"
+    },
+    "./components/ReadingFind": {
+      "types": "./src/components/ReadingFind.tsx",
+      "browser": "./src/components/ReadingFind.tsx",
+      "import": "./dist/components/ReadingFind.js"
+    },
+    "./components/SearchChoiceDialog": {
+      "types": "./src/components/SearchChoiceDialog.tsx",
+      "browser": "./src/components/SearchChoiceDialog.tsx",
+      "import": "./dist/components/SearchChoiceDialog.js"
+    },
+    "./components/SelectionField": {
+      "types": "./src/components/SelectionField.tsx",
+      "browser": "./src/components/SelectionField.tsx",
+      "import": "./dist/components/SelectionField.js"
+    },
+    "./components/SpaceAppearanceIcon": {
+      "types": "./src/components/SpaceAppearanceIcon.tsx",
+      "browser": "./src/components/SpaceAppearanceIcon.tsx",
+      "import": "./dist/components/SpaceAppearanceIcon.js"
+    },
+    "./components/StaticMarkupPreview": {
+      "types": "./src/components/StaticMarkupPreview.tsx",
+      "browser": "./src/components/StaticMarkupPreview.tsx",
+      "import": "./dist/components/StaticMarkupPreview.js"
+    },
+    "./components/WorkflowObservation": {
+      "types": "./src/components/WorkflowObservation.tsx",
+      "browser": "./src/components/WorkflowObservation.tsx",
+      "import": "./dist/components/WorkflowObservation.js"
+    },
+    "./activity-autoscroll": {
+      "types": "./src/lib/activity-autoscroll.ts",
+      "browser": "./src/lib/activity-autoscroll.ts",
+      "import": "./dist/lib/activity-autoscroll.js"
+    },
+    "./activity-record-time": {
+      "types": "./src/lib/activity-record-time.ts",
+      "browser": "./src/lib/activity-record-time.ts",
+      "import": "./dist/lib/activity-record-time.js"
+    },
+    "./activity-step-summary": {
+      "types": "./src/lib/activity-step-summary.ts",
+      "browser": "./src/lib/activity-step-summary.ts",
+      "import": "./dist/lib/activity-step-summary.js"
+    },
+    "./activity-working-state": {
+      "types": "./src/lib/activity-working-state.ts",
+      "browser": "./src/lib/activity-working-state.ts",
+      "import": "./dist/lib/activity-working-state.js"
+    },
+    "./agent-avatar-svg": {
+      "types": "./src/lib/agent-avatar-svg.ts",
+      "browser": "./src/lib/agent-avatar-svg.ts",
+      "import": "./dist/lib/agent-avatar-svg.js"
+    },
+    "./agent-interaction-plan": {
+      "types": "./src/lib/agent-interaction-plan.ts",
+      "browser": "./src/lib/agent-interaction-plan.ts",
+      "import": "./dist/lib/agent-interaction-plan.js"
+    },
+    "./agent-markdown": {
+      "types": "./src/lib/agent-markdown.ts",
+      "browser": "./src/lib/agent-markdown.ts",
+      "import": "./dist/lib/agent-markdown.js"
+    },
+    "./agent-presentation": {
+      "types": "./src/lib/agent-presentation.ts",
+      "browser": "./src/lib/agent-presentation.ts",
+      "import": "./dist/lib/agent-presentation.js"
+    },
+    "./app-icon-catalog": {
+      "types": "./src/lib/app-icon-catalog.ts",
+      "browser": "./src/lib/app-icon-catalog.ts",
+      "import": "./dist/lib/app-icon-catalog.js"
+    },
+    "./app-icon-url": {
+      "types": "./src/lib/app-icon-url.ts",
+      "browser": "./src/lib/app-icon-url.ts",
+      "import": "./dist/lib/app-icon-url.js"
+    },
+    "./attention-vocabulary": {
+      "types": "./src/lib/attention-vocabulary.ts",
+      "browser": "./src/lib/attention-vocabulary.ts",
+      "import": "./dist/lib/attention-vocabulary.js"
+    },
+    "./composer-choice-reading": {
+      "types": "./src/lib/composer-choice-reading.ts",
+      "browser": "./src/lib/composer-choice-reading.ts",
+      "import": "./dist/lib/composer-choice-reading.js"
+    },
+    "./composer-command-candidates": {
+      "types": "./src/lib/composer-command-candidates.ts",
+      "browser": "./src/lib/composer-command-candidates.ts",
+      "import": "./dist/lib/composer-command-candidates.js"
+    },
+    "./composer-composition": {
+      "types": "./src/lib/composer-composition.ts",
+      "browser": "./src/lib/composer-composition.ts",
+      "import": "./dist/lib/composer-composition.js"
+    },
+    "./composer-file-reference": {
+      "types": "./src/lib/composer-file-reference.ts",
+      "browser": "./src/lib/composer-file-reference.ts",
+      "import": "./dist/lib/composer-file-reference.js"
+    },
+    "./composer-input-config": {
+      "types": "./src/lib/composer-input-config.ts",
+      "browser": "./src/lib/composer-input-config.ts",
+      "import": "./dist/lib/composer-input-config.js"
+    },
+    "./composer-insertion": {
+      "types": "./src/lib/composer-insertion.ts",
+      "browser": "./src/lib/composer-insertion.ts",
+      "import": "./dist/lib/composer-insertion.js"
+    },
+    "./composer-keyboard": {
+      "types": "./src/lib/composer-keyboard.ts",
+      "browser": "./src/lib/composer-keyboard.ts",
+      "import": "./dist/lib/composer-keyboard.js"
+    },
+    "./composer-keywords": {
+      "types": "./src/lib/composer-keywords.ts",
+      "browser": "./src/lib/composer-keywords.ts",
+      "import": "./dist/lib/composer-keywords.js"
+    },
+    "./composer-semantic-reference": {
+      "types": "./src/lib/composer-semantic-reference.ts",
+      "browser": "./src/lib/composer-semantic-reference.ts",
+      "import": "./dist/lib/composer-semantic-reference.js"
+    },
+    "./conversation-annotation": {
+      "types": "./src/lib/conversation-annotation.ts",
+      "browser": "./src/lib/conversation-annotation.ts",
+      "import": "./dist/lib/conversation-annotation.js"
+    },
+    "./conversation-body-work": {
+      "types": "./src/lib/conversation-body-work.ts",
+      "browser": "./src/lib/conversation-body-work.ts",
+      "import": "./dist/lib/conversation-body-work.js"
+    },
+    "./conversation-detail-level": {
+      "types": "./src/lib/conversation-detail-level.ts",
+      "browser": "./src/lib/conversation-detail-level.ts",
+      "import": "./dist/lib/conversation-detail-level.js"
+    },
+    "./conversation-files": {
+      "types": "./src/lib/conversation-files.ts",
+      "browser": "./src/lib/conversation-files.ts",
+      "import": "./dist/lib/conversation-files.js"
+    },
+    "./conversation-image-references": {
+      "types": "./src/lib/conversation-image-references.ts",
+      "browser": "./src/lib/conversation-image-references.ts",
+      "import": "./dist/lib/conversation-image-references.js"
+    },
+    "./conversation-input-source": {
+      "types": "./src/lib/conversation-input-source.ts",
+      "browser": "./src/lib/conversation-input-source.ts",
+      "import": "./dist/lib/conversation-input-source.js"
+    },
+    "./conversation-message-location": {
+      "types": "./src/lib/conversation-message-location.ts",
+      "browser": "./src/lib/conversation-message-location.ts",
+      "import": "./dist/lib/conversation-message-location.js"
+    },
+    "./conversation-question-reply": {
+      "types": "./src/lib/conversation-question-reply.ts",
+      "browser": "./src/lib/conversation-question-reply.ts",
+      "import": "./dist/lib/conversation-question-reply.js"
+    },
+    "./conversation-reading-anchor": {
+      "types": "./src/lib/conversation-reading-anchor.ts",
+      "browser": "./src/lib/conversation-reading-anchor.ts",
+      "import": "./dist/lib/conversation-reading-anchor.js"
+    },
+    "./conversation-reading-diagnostics": {
+      "types": "./src/lib/conversation-reading-diagnostics.ts",
+      "browser": "./src/lib/conversation-reading-diagnostics.ts",
+      "import": "./dist/lib/conversation-reading-diagnostics.js"
+    },
+    "./conversation-recap": {
+      "types": "./src/lib/conversation-recap.ts",
+      "browser": "./src/lib/conversation-recap.ts",
+      "import": "./dist/lib/conversation-recap.js"
+    },
+    "./conversation-records": {
+      "types": "./src/lib/conversation-records.ts",
+      "browser": "./src/lib/conversation-records.ts",
+      "import": "./dist/lib/conversation-records.js"
+    },
+    "./conversation-reply-preview": {
+      "types": "./src/lib/conversation-reply-preview.ts",
+      "browser": "./src/lib/conversation-reply-preview.ts",
+      "import": "./dist/lib/conversation-reply-preview.js"
+    },
+    "./conversation-send-receipts": {
+      "types": "./src/lib/conversation-send-receipts.ts",
+      "browser": "./src/lib/conversation-send-receipts.ts",
+      "import": "./dist/lib/conversation-send-receipts.js"
+    },
+    "./conversation-sources": {
+      "types": "./src/lib/conversation-sources.ts",
+      "browser": "./src/lib/conversation-sources.ts",
+      "import": "./dist/lib/conversation-sources.js"
+    },
+    "./conversation-speaker": {
+      "types": "./src/lib/conversation-speaker.ts",
+      "browser": "./src/lib/conversation-speaker.ts",
+      "import": "./dist/lib/conversation-speaker.js"
+    },
+    "./conversation-time": {
+      "types": "./src/lib/conversation-time.ts",
+      "browser": "./src/lib/conversation-time.ts",
+      "import": "./dist/lib/conversation-time.js"
+    },
+    "./conversation-tool-diff": {
+      "types": "./src/lib/conversation-tool-diff.ts",
+      "browser": "./src/lib/conversation-tool-diff.ts",
+      "import": "./dist/lib/conversation-tool-diff.js"
+    },
+    "./conversation-trace-disclosure": {
+      "types": "./src/lib/conversation-trace-disclosure.ts",
+      "browser": "./src/lib/conversation-trace-disclosure.ts",
+      "import": "./dist/lib/conversation-trace-disclosure.js"
+    },
+    "./delivery-diagnostics": {
+      "types": "./src/lib/delivery-diagnostics.ts",
+      "browser": "./src/lib/delivery-diagnostics.ts",
+      "import": "./dist/lib/delivery-diagnostics.js"
+    },
+    "./diagram-svg-image": {
+      "types": "./src/lib/diagram-svg-image.ts",
+      "browser": "./src/lib/diagram-svg-image.ts",
+      "import": "./dist/lib/diagram-svg-image.js"
+    },
+    "./display-name": {
+      "types": "./src/lib/display-name.ts",
+      "browser": "./src/lib/display-name.ts",
+      "import": "./dist/lib/display-name.js"
+    },
+    "./error-presentation": {
+      "types": "./src/lib/error-presentation.ts",
+      "browser": "./src/lib/error-presentation.ts",
+      "import": "./dist/lib/error-presentation.js"
+    },
+    "./focus-order": {
+      "types": "./src/lib/focus-order.ts",
+      "browser": "./src/lib/focus-order.ts",
+      "import": "./dist/lib/focus-order.js"
+    },
+    "./focus-state-mark": {
+      "types": "./src/lib/focus-state-mark.ts",
+      "browser": "./src/lib/focus-state-mark.ts",
+      "import": "./dist/lib/focus-state-mark.js"
+    },
+    "./ime-keyboard-event": {
+      "types": "./src/lib/ime-keyboard-event.ts",
+      "browser": "./src/lib/ime-keyboard-event.ts",
+      "import": "./dist/lib/ime-keyboard-event.js"
+    },
+    "./input-history-text": {
+      "types": "./src/lib/input-history-text.ts",
+      "browser": "./src/lib/input-history-text.ts",
+      "import": "./dist/lib/input-history-text.js"
+    },
+    "./input-receipt-projection": {
+      "types": "./src/lib/input-receipt-projection.ts",
+      "browser": "./src/lib/input-receipt-projection.ts",
+      "import": "./dist/lib/input-receipt-projection.js"
+    },
+    "./interaction-receipt-presentation": {
+      "types": "./src/lib/interaction-receipt-presentation.ts",
+      "browser": "./src/lib/interaction-receipt-presentation.ts",
+      "import": "./dist/lib/interaction-receipt-presentation.js"
+    },
+    "./link-url": {
+      "types": "./src/lib/link-url.ts",
+      "browser": "./src/lib/link-url.ts",
+      "import": "./dist/lib/link-url.js"
+    },
+    "./markdown-file-reference": {
+      "types": "./src/lib/markdown-file-reference.ts",
+      "browser": "./src/lib/markdown-file-reference.ts",
+      "import": "./dist/lib/markdown-file-reference.js"
+    },
+    "./message-delivery-presentation": {
+      "types": "./src/lib/message-delivery-presentation.ts",
+      "browser": "./src/lib/message-delivery-presentation.ts",
+      "import": "./dist/lib/message-delivery-presentation.js"
+    },
+    "./mote-avatar-svg": {
+      "types": "./src/lib/mote-avatar-svg.ts",
+      "browser": "./src/lib/mote-avatar-svg.ts",
+      "import": "./dist/lib/mote-avatar-svg.js"
+    },
+    "./mote-face": {
+      "types": "./src/lib/mote-face.ts",
+      "browser": "./src/lib/mote-face.ts",
+      "import": "./dist/lib/mote-face.js"
+    },
+    "./mote-face-motion": {
+      "types": "./src/lib/mote-face-motion.ts",
+      "browser": "./src/lib/mote-face-motion.ts",
+      "import": "./dist/lib/mote-face-motion.js"
+    },
+    "./native-continuation": {
+      "types": "./src/lib/native-continuation.ts",
+      "browser": "./src/lib/native-continuation.ts",
+      "import": "./dist/lib/native-continuation.js"
+    },
+    "./pasted-image-reference": {
+      "types": "./src/lib/pasted-image-reference.ts",
+      "browser": "./src/lib/pasted-image-reference.ts",
+      "import": "./dist/lib/pasted-image-reference.js"
+    },
+    "./pasted-images": {
+      "types": "./src/lib/pasted-images.ts",
+      "browser": "./src/lib/pasted-images.ts",
+      "import": "./dist/lib/pasted-images.js"
+    },
+    "./presence-mark-corner": {
+      "types": "./src/lib/presence-mark-corner.ts",
+      "browser": "./src/lib/presence-mark-corner.ts",
+      "import": "./dist/lib/presence-mark-corner.js"
+    },
+    "./project-monogram": {
+      "types": "./src/lib/project-monogram.ts",
+      "browser": "./src/lib/project-monogram.ts",
+      "import": "./dist/lib/project-monogram.js"
+    },
+    "./project-rail-tree": {
+      "types": "./src/lib/project-rail-tree.ts",
+      "browser": "./src/lib/project-rail-tree.ts",
+      "import": "./dist/lib/project-rail-tree.js"
+    },
+    "./reading-find": {
+      "types": "./src/lib/reading-find.ts",
+      "browser": "./src/lib/reading-find.ts",
+      "import": "./dist/lib/reading-find.js"
+    },
+    "./reading-scroll": {
+      "types": "./src/lib/reading-scroll.ts",
+      "browser": "./src/lib/reading-scroll.ts",
+      "import": "./dist/lib/reading-scroll.js"
+    },
+    "./space-icon-catalog": {
+      "types": "./src/lib/space-icon-catalog.ts",
+      "browser": "./src/lib/space-icon-catalog.ts",
+      "import": "./dist/lib/space-icon-catalog.js"
+    },
+    "./space-icon-ids": {
+      "types": "./src/lib/space-icon-ids.ts",
+      "browser": "./src/lib/space-icon-ids.ts",
+      "import": "./dist/lib/space-icon-ids.js"
+    },
+    "./terminal-path-link": {
+      "types": "./src/lib/terminal-path-link.ts",
+      "browser": "./src/lib/terminal-path-link.ts",
+      "import": "./dist/lib/terminal-path-link.js"
+    },
+    "./use-agent-input-history": {
+      "types": "./src/lib/use-agent-input-history.ts",
+      "browser": "./src/lib/use-agent-input-history.ts",
+      "import": "./dist/lib/use-agent-input-history.js"
+    },
+    "./use-agent-input-mailbox": {
+      "types": "./src/lib/use-agent-input-mailbox.ts",
+      "browser": "./src/lib/use-agent-input-mailbox.ts",
+      "import": "./dist/lib/use-agent-input-mailbox.js"
+    },
+    "./use-conversation-record-layout": {
+      "types": "./src/lib/use-conversation-record-layout.ts",
+      "browser": "./src/lib/use-conversation-record-layout.ts",
+      "import": "./dist/lib/use-conversation-record-layout.js"
+    },
+    "./use-conversation-view": {
+      "types": "./src/lib/use-conversation-view.ts",
+      "browser": "./src/lib/use-conversation-view.ts",
+      "import": "./dist/lib/use-conversation-view.js"
+    },
+    "./use-mote-dialogue": {
+      "types": "./src/lib/use-mote-dialogue.ts",
+      "browser": "./src/lib/use-mote-dialogue.ts",
+      "import": "./dist/lib/use-mote-dialogue.js"
+    },
+    "./use-visible-work": {
+      "types": "./src/lib/use-visible-work.ts",
+      "browser": "./src/lib/use-visible-work.ts",
+      "import": "./dist/lib/use-visible-work.js"
+    },
+    "./note/note-content-schema": {
+      "types": "./src/note/note-content-schema.ts",
+      "browser": "./src/note/note-content-schema.ts",
+      "import": "./dist/note/note-content-schema.js"
+    },
+    "./note/note-corpus": {
+      "types": "./src/note/note-corpus.ts",
+      "browser": "./src/note/note-corpus.ts",
+      "import": "./dist/note/note-corpus.js"
+    },
+    "./note/note-document": {
+      "types": "./src/note/note-document.ts",
+      "browser": "./src/note/note-document.ts",
+      "import": "./dist/note/note-document.js"
+    },
+    "./note/note-document-validation": {
+      "types": "./src/note/note-document-validation.ts",
+      "browser": "./src/note/note-document-validation.ts",
+      "import": "./dist/note/note-document-validation.js"
+    },
+    "./note/note-draft-includes": {
+      "types": "./src/note/note-draft-includes.ts",
+      "browser": "./src/note/note-draft-includes.ts",
+      "import": "./dist/note/note-draft-includes.js"
+    },
+    "./note/note-edit-state": {
+      "types": "./src/note/note-edit-state.ts",
+      "browser": "./src/note/note-edit-state.ts",
+      "import": "./dist/note/note-edit-state.js"
+    },
+    "./note/note-editor-extensions": {
+      "types": "./src/note/note-editor-extensions.ts",
+      "browser": "./src/note/note-editor-extensions.ts",
+      "import": "./dist/note/note-editor-extensions.js"
+    },
+    "./note/note-format": {
+      "types": "./src/note/note-format.ts",
+      "browser": "./src/note/note-format.ts",
+      "import": "./dist/note/note-format.js"
+    },
+    "./note/note-knowledge": {
+      "types": "./src/note/note-knowledge.ts",
+      "browser": "./src/note/note-knowledge.ts",
+      "import": "./dist/note/note-knowledge.js"
+    },
+    "./note/note-legacy-document": {
+      "types": "./src/note/note-legacy-document.ts",
+      "browser": "./src/note/note-legacy-document.ts",
+      "import": "./dist/note/note-legacy-document.js"
+    },
+    "./note/note-legacy-draft": {
+      "types": "./src/note/note-legacy-draft.ts",
+      "browser": "./src/note/note-legacy-draft.ts",
+      "import": "./dist/note/note-legacy-draft.js"
+    },
+    "./note/note-live-merge": {
+      "types": "./src/note/note-live-merge.ts",
+      "browser": "./src/note/note-live-merge.ts",
+      "import": "./dist/note/note-live-merge.js"
+    },
+    "./note/note-live-merge.worker": {
+      "types": "./src/note/note-live-merge.worker.ts",
+      "browser": "./src/note/note-live-merge.worker.ts",
+      "import": "./dist/note/note-live-merge.worker.js"
+    },
+    "./note/note-merge-identity": {
+      "types": "./src/note/note-merge-identity.ts",
+      "browser": "./src/note/note-merge-identity.ts",
+      "import": "./dist/note/note-merge-identity.js"
+    },
+    "./note/note-metadata": {
+      "types": "./src/note/note-metadata.ts",
+      "browser": "./src/note/note-metadata.ts",
+      "import": "./dist/note/note-metadata.js"
+    },
+    "./note/note-provenance": {
+      "types": "./src/note/note-provenance.ts",
+      "browser": "./src/note/note-provenance.ts",
+      "import": "./dist/note/note-provenance.js"
+    },
+    "./note/note-share-range": {
+      "types": "./src/note/note-share-range.ts",
+      "browser": "./src/note/note-share-range.ts",
+      "import": "./dist/note/note-share-range.js"
+    },
+    "./note/note-snapshot-sync": {
+      "types": "./src/note/note-snapshot-sync.ts",
+      "browser": "./src/note/note-snapshot-sync.ts",
+      "import": "./dist/note/note-snapshot-sync.js"
+    },
+    "./note/note-snapshot.worker": {
+      "types": "./src/note/note-snapshot.worker.ts",
+      "browser": "./src/note/note-snapshot.worker.ts",
+      "import": "./dist/note/note-snapshot.worker.js"
+    },
+    "./note/note-wiki-input": {
+      "types": "./src/note/note-wiki-input.ts",
+      "browser": "./src/note/note-wiki-input.ts",
+      "import": "./dist/note/note-wiki-input.js"
+    },
+    "./note/note-wiki-view": {
+      "types": "./src/note/note-wiki-view.ts",
+      "browser": "./src/note/note-wiki-view.ts",
+      "import": "./dist/note/note-wiki-view.js"
+    },
+    "./note/note-wikilinks": {
+      "types": "./src/note/note-wikilinks.ts",
+      "browser": "./src/note/note-wikilinks.ts",
+      "import": "./dist/note/note-wikilinks.js"
+    },
+    "./terminal/input": {
+      "types": "./src/terminal/input.ts",
+      "browser": "./src/terminal/input.ts",
+      "import": "./dist/terminal/input.js"
+    },
+    "./terminal/live-output": {
+      "types": "./src/terminal/live-output.ts",
+      "browser": "./src/terminal/live-output.ts",
+      "import": "./dist/terminal/live-output.js"
+    },
+    "./terminal/replay": {
+      "types": "./src/terminal/replay.ts",
+      "browser": "./src/terminal/replay.ts",
+      "import": "./dist/terminal/replay.js"
+    },
+    "./terminal/unicode": {
+      "types": "./src/terminal/unicode.ts",
+      "browser": "./src/terminal/unicode.ts",
+      "import": "./dist/terminal/unicode.js"
+    },
+    "./styles/agent-avatar-face.css": "./src/styles/agent-avatar-face.css",
+    "./styles/avatar-group.css": "./src/styles/avatar-group.css",
+    "./styles/composer.css": "./src/styles/composer.css",
+    "./styles/content-copy.css": "./src/styles/content-copy.css",
+    "./styles/conversation-avatar.css": "./src/styles/conversation-avatar.css",
+    "./styles/conversation-capsule.css": "./src/styles/conversation-capsule.css",
+    "./styles/conversation-image.css": "./src/styles/conversation-image.css",
+    "./styles/conversation-input-details.css": "./src/styles/conversation-input-details.css",
+    "./styles/conversation-message-disclosure.css": "./src/styles/conversation-message-disclosure.css",
+    "./styles/conversation-message.css": "./src/styles/conversation-message.css",
+    "./styles/conversation-metrics.css": "./src/styles/conversation-metrics.css",
+    "./styles/conversation-native-thread.css": "./src/styles/conversation-native-thread.css",
+    "./styles/conversation-process-collapse.css": "./src/styles/conversation-process-collapse.css",
+    "./styles/conversation-reactions.css": "./src/styles/conversation-reactions.css",
+    "./styles/conversation-resource-file.css": "./src/styles/conversation-resource-file.css",
+    "./styles/conversation-resource-text.css": "./src/styles/conversation-resource-text.css",
+    "./styles/conversation-send-receipt.css": "./src/styles/conversation-send-receipt.css",
+    "./styles/conversation-tool-diff.css": "./src/styles/conversation-tool-diff.css",
+    "./styles/conversation-tool-payload.css": "./src/styles/conversation-tool-payload.css",
+    "./styles/conversation-tool-trace.css": "./src/styles/conversation-tool-trace.css",
+    "./styles/conversation-trace-feedback.css": "./src/styles/conversation-trace-feedback.css",
+    "./styles/conversation-turn-failure.css": "./src/styles/conversation-turn-failure.css",
+    "./styles/diagram-image.css": "./src/styles/diagram-image.css",
+    "./styles/input-history.css": "./src/styles/input-history.css",
+    "./styles/interaction.css": "./src/styles/interaction.css",
+    "./styles/markdown.css": "./src/styles/markdown.css",
+    "./styles/message-delivery-failure.css": "./src/styles/message-delivery-failure.css",
+    "./styles/mote-identity.css": "./src/styles/mote-identity.css",
+    "./styles/native-controls.css": "./src/styles/native-controls.css",
+    "./styles/note-authorship.css": "./src/styles/note-authorship.css",
+    "./styles/note-code-block.css": "./src/styles/note-code-block.css",
+    "./styles/note-image.css": "./src/styles/note-image.css",
+    "./styles/note-rich-content.css": "./src/styles/note-rich-content.css",
+    "./styles/note-static-markup.css": "./src/styles/note-static-markup.css",
+    "./styles/reading-find.css": "./src/styles/reading-find.css",
+    "./styles/search-choice.css": "./src/styles/search-choice.css",
+    "./styles/selection-field.css": "./src/styles/selection-field.css",
+    "./styles/theme-transition.css": "./src/styles/theme-transition.css",
+    "./styles/workflow-observation.css": "./src/styles/workflow-observation.css",
+    "./styles/workflow-status.css": "./src/styles/workflow-status.css"
   },
   "files": [
     "CONTRIBUTING.md",
