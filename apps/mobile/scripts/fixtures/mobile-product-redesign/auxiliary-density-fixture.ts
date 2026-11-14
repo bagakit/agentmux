@@ -3,7 +3,7 @@ import { normalizeAgentTimelineItem } from '../../../../../packages/core/src/ses
 import { fixtureEpoch } from '../../../../../test/fixture-values.mjs'
 
 /** Typed external history only; the actual Core projection decides record roles/order. */
-export function auxiliaryDensityTimeline(session: AgentMuxAgentSession): AgentTimelineItem[] {
+export function auxiliaryDensityTimeline(session: AgentMuxAgentSession, replies: readonly string[] = []): AgentTimelineItem[] {
   const items: AgentTimelineItem[] = [0, 1, 2].flatMap(group => {
     const at = fixtureEpoch(0, group + 1), prefix = `auxiliary-${group + 1}`
     const common = { agentSessionId: session.agentSessionId, source: 'native-hook' as const, status: 'complete' as const, createdAt: at, updatedAt: at }
@@ -20,5 +20,10 @@ export function auxiliaryDensityTimeline(session: AgentMuxAgentSession): AgentTi
         inputSubmission: { status: 'terminal-confirmed' as const, observation: 'owned' as const }, createdAt: at + 3, updatedAt: at + 3 }
     ]
   })
-  return items.map(item => normalizeAgentTimelineItem(item))
+  const tail: AgentTimelineItem[] = replies.map((content, index) => {
+    const at = fixtureEpoch(0, 8 + index)
+    return { agentSessionId: session.agentSessionId, id: `auxiliary-tail-${index + 1}`, source: 'native-hook',
+      kind: 'assistant_message', title: 'Original conversation update', content, status: 'complete', createdAt: at, updatedAt: at }
+  })
+  return [...items, ...tail].map(item => normalizeAgentTimelineItem(item))
 }

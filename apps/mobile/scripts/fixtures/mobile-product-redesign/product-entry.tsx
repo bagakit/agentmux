@@ -148,6 +148,8 @@ const responsiveKnowledge = () => responsiveWorkfaces ? { ...knowledge, sources:
 const responsiveSecondKnowledge = () => ({ ...knowledge, entryId: '33333333-3333-4333-8333-333333333333', title: '第二周的对照观察', content: '# 对照观察\n\n这是另一个准确条目的正文，左侧选择它后应回到本条阅读。', form: 'derived', sources: [] })
 let conversationStatusScene: 'active' | 'retired' | 'retired-reading' | 'unconfirmed' | 'parallel' = 'active'
 let agentMenuScene = false, densityScene = false, copyFails = false, auxiliaryDensityScene = false
+const auxiliaryReplies: string[] = []
+const auxiliaryObservers = new Set<() => void>()
 let holdNextPosture = false, settlePosture: (() => void) | undefined
 const postureReceipts = new Map<string, PostureReceipt>()
 let creationUpdateScene = false, rejectUpdatePreflight: (() => void) | null = null
@@ -305,7 +307,7 @@ const client = {
       kind: 'user-message', userMessages: messages, scan: { examined: input.cursor ? 32 : 200, complete: nextCursor === null },
       ...(input.source === 'native' ? { nativeSource: { providerId: 'codex', nativeSessionId: 'native-' + input.agentSessionId } } : {}) }
   },
-  sessionTimeline: async (id: string) => { record('sdk.sessionTimeline', { id }); if (auxiliaryDensityScene && id === main.agentSessionId) return { agentSessionId: id, revision: 1, items: auxiliaryDensityTimeline(main) }; return { agentSessionId: id, revision: joinedNotice && id === main.agentSessionId ? 2 : 1, items: joinedNotice && id === main.agentSessionId ? [joinedNotice.item] : [] } },
+  sessionTimeline: async (id: string) => { record('sdk.sessionTimeline', { id }); if (auxiliaryDensityScene && id === main.agentSessionId) return { agentSessionId: id, revision: 1 + auxiliaryReplies.length, items: auxiliaryDensityTimeline(main, auxiliaryReplies) }; return { agentSessionId: id, revision: joinedNotice && id === main.agentSessionId ? 2 : 1, items: joinedNotice && id === main.agentSessionId ? [joinedNotice.item] : [] } },
   inspectMoteInput: async (input: Parameters<AgentMuxHostedClient['inspectMoteInput']>[0]) => {
     record('sdk.inspectMoteInput', input)
     if (!joinedNotice || input.agentSessionId !== waiting.agentSessionId || input.observationId !== joinedNotice.observation.id) throw Error('Wrong original member observation read')
@@ -336,10 +338,15 @@ const client = {
     return page
   },
   readConversationChanges: async (input: Parameters<AgentMuxHostedClient['readConversationChanges']>[0]) => ({ ...await client.readAgentConversation(input), checkpoint: input.checkpoint, more: false }),
-  observeConversation: async (input: Parameters<AgentMuxHostedClient['observeConversation']>[0]) => {
+  observeConversation: async (...[input, onObservation]: Parameters<AgentMuxHostedClient['observeConversation']>) => {
     const frame = await client.readAgentConversation(input)
+    const source = frame.scope.sources.find(value => value.kind === 'captured')
+    const invalidate = () => {
+      if (source) onObservation({ hostId: frame.hostId, sourceHostId: frame.sourceHostId, agentSessionId: frame.agentSessionId, source, kind: 'invalidated' })
+    }
+    if (auxiliaryDensityScene && input.view && input.agentSessionId === main.agentSessionId) auxiliaryObservers.add(invalidate)
     return { hostId: frame.hostId, sourceHostId: frame.sourceHostId, agentSessionId: frame.agentSessionId,
-      scope: frame.scope, coverage: frame.coverage, closed: new AbortController().signal, dispose() {} }
+      scope: frame.scope, coverage: frame.coverage, closed: new AbortController().signal, dispose() { auxiliaryObservers.delete(invalidate) } }
   },
   releaseConversationView: async () => ({}),
   inspectAgentInput: async (params: unknown) => { record('sdk.inspectAgentInput', params); return null },
@@ -705,6 +712,11 @@ function Scene() {
     },
     prepareAgentMenu: () => { agentMenuScene = true; catalog.agentPresentation![0]!.name = menuAgentName },
     prepareAuxiliaryDensity: () => { auxiliaryDensityScene = true; agentMenuScene = true },
+    appendAuxiliaryReply: (text: string) => {
+      auxiliaryReplies.push(text)
+      for (const invalidate of auxiliaryObservers) invalidate()
+      return auxiliaryObservers.size
+    },
     prepareLocalConversationControls: () => {
       // Permission control belongs to the connected original Runtime. The
       // general directory fixture also includes foreign, read-only members.

@@ -36,6 +36,8 @@ try {
   } }
   const mutationId = process.argv.find(value => value.startsWith('--mutation='))?.slice('--mutation='.length)
   const variants = {
+    'tool-format-follows-tail': { file: 'packages/client-ui/src/lib/conversation-body-work.ts', before: '    pauseFollowing()\n    this.anchor = { node: control', after: '    this.anchor = { node: control' },
+    'tool-format-drops-state': { file: 'packages/client-ui/src/components/ConversationToolPayload.tsx', before: 'aria-pressed={formatted}', after: 'aria-pressed={false}' },
     'directory-retains-closed-issue': { file: 'apps/mobile/src/navigation/MobileDirectoryNotice.tsx', edits: [
       { before: 'return props.issues.length ? <DirectoryIssueDialog {...props} /> : null',
         after: 'return <DirectoryIssueDialog {...props} />' },
@@ -117,10 +119,10 @@ try {
     }
     receipt.sourceOverride = { id: mutationId, file: variant.file, originalSha256: sha(original), sha256: sha(source) }
     overrides.push({ name: 'bounded-mobile-presentation-mutation', setup(plugin) {
-      plugin.onLoad({ filter: /\.(?:ts|tsx|css)$/ }, args => {
+      plugin.onLoad({ filter: /\.(?:tsx?|css)$/ }, args => {
         if (args.path !== path.join(root, variant.file)) return
         loadedSource[variant.file] = sha(source)
-        return { contents: source, loader: path.extname(variant.file).slice(1), resolveDir: path.dirname(args.path) }
+        return { contents: source, loader: path.extname(args.path).slice(1), resolveDir: path.dirname(args.path) }
       })
     } })
   }
@@ -221,6 +223,12 @@ try {
   const built = await build({ absWorkingDir: root, entryPoints: [path.join(fixture, 'product-entry.tsx')], outdir: compiled, bundle: true,
     format: 'esm', platform: 'browser', target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [...overrides, clientSources, workspaceSources, workers, sourceProof],
     loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_MOBILE_SETUP_RETENTION__: JSON.stringify(retentionFixtures), __AGENTMUX_MOBILE_PROVIDER_CATALOG__: JSON.stringify(providerCatalog), __AGENTMUX_MOBILE_PROJECT_APPEARANCE__: JSON.stringify(projectAppearance), __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
+  if (process.argv.includes('--tool-action-pressed')) {
+    const worker = await build({ absWorkingDir: root, entryPoints: ['packages/client-ui/src/lib/markdown-render.worker.ts'],
+      outfile: path.join(compiled, 'markdown-render.worker.js'), bundle: true, platform: 'browser', format: 'esm', target: 'esnext',
+      metafile: true, logLevel: 'error', plugins: [clientSources, workspaceSources] })
+    Object.assign(workerInputs, worker.metafile.inputs)
+  }
   const inputs = { ...iconBuild.metafile.inputs, ...providerBuild.metafile.inputs, ...built.metafile.inputs, ...workerInputs }
   for (const file of Object.keys(inputs).filter(file => !file.startsWith('original-worker:') && !file.startsWith('original-url:') && !file.startsWith('original-identity-source:') && !file.startsWith('(disabled):') && !file.startsWith('<define:'))) receipt.source[file] = sha(await fs.readFile(path.resolve(root, file)))
   for (const file of ['packages/core/test/helpers/workspace-source-export.mjs', 'packages/identity/scripts/runtime-bundle.mjs', 'packages/identity/src/runtime-entry.ts', 'packages/identity/src/index.ts']) receipt.source[file] = sha(await fs.readFile(path.join(root, file)))
@@ -238,7 +246,7 @@ try {
   if (process.argv.includes('--quiet-run-status')) receipt.source['apps/mobile/scripts/fixtures/mobile-product-redesign/quiet-run-status.cjs'] = sha(await fs.readFile(path.join(fixture, 'quiet-run-status.cjs')))
   receipt.loadedSource = loadedSource
   receipt.virtualInputs = Object.fromEntries(Object.entries(inputs).filter(([name]) => name.startsWith('original-identity-source:') || name.startsWith('(disabled):') || name.startsWith('<define:')))
-  for (const name of ['capture-ui.mjs', 'product-main.cjs', ...(process.argv.includes('--mote-start') ? ['mote-start.cjs'] : []), ...(process.argv.includes('--mote-dialogue') ? ['mote-dialogue.cjs', 'thread-discovery.cjs'] : []), ...(process.argv.includes('--mote-main-setup') ? ['mote-main-setup.cjs'] : []), ...(process.argv.includes('--mote-discussion-restore') ? ['mote-discussion-restore.cjs'] : []), ...(process.argv.includes('--mote-notice-join') ? ['mote-notice-join.cjs'] : []), ...(process.argv.includes('--creation-update') ? ['creation-update.cjs'] : []), ...(process.argv.includes('--creation-recovery') ? ['creation-recovery.cjs'] : []), ...(process.argv.includes('--polish-followup') ? ['polish-followup.cjs'] : []), ...(process.argv.includes('--floating-tools') ? ['floating-tools.cjs'] : []), ...(process.argv.includes('--attachment-upload-exit') ? ['attachment-upload-exit.cjs'] : []), ...(process.argv.includes('--attachment-selection') ? ['attachment-selection.cjs'] : []), ...(process.argv.includes('--focus-state') ? ['focus-state.cjs'] : []), ...(process.argv.includes('--mature-shell') ? ['mature-shell.cjs'] : []), ...(process.argv.includes('--directory-notices') ? ['directory-notices.cjs'] : []), ...(process.argv.includes('--conversation-spacing') ? ['conversation-spacing.cjs'] : []), ...(process.argv.includes('--auxiliary-density') ? ['auxiliary-density.cjs', 'auxiliary-density-fixture.ts'] : []), ...(process.argv.includes('--web-update') ? ['web-update.cjs'] : []), ...(process.argv.includes('--goal-recovery') ? ['goal-recovery.cjs'] : []), ...(process.argv.includes('--goal-exit') ? ['goal-exit.cjs'] : []), ...(process.argv.includes('--chat-start') ? ['chat-start.cjs'] : []), ...(process.argv.includes('--conversation-controls') ? ['conversation-controls.cjs'] : []), ...(process.argv.includes('--conversation-density') ? ['conversation-density.cjs'] : []), ...(process.argv.includes('--conversation-density-hit') ? ['conversation-density-hit.cjs'] : []), ...(process.argv.includes('--conversation-attachments') ? ['conversation-attachments.cjs'] : [])]) receipt.source[path.relative(root, path.join(fixture, name))] = sha(await fs.readFile(path.join(fixture, name)))
+  for (const name of ['capture-ui.mjs', 'product-main.cjs', ...(process.argv.includes('--mote-start') ? ['mote-start.cjs'] : []), ...(process.argv.includes('--mote-dialogue') ? ['mote-dialogue.cjs', 'thread-discovery.cjs'] : []), ...(process.argv.includes('--mote-main-setup') ? ['mote-main-setup.cjs'] : []), ...(process.argv.includes('--mote-discussion-restore') ? ['mote-discussion-restore.cjs'] : []), ...(process.argv.includes('--mote-notice-join') ? ['mote-notice-join.cjs'] : []), ...(process.argv.includes('--creation-update') ? ['creation-update.cjs'] : []), ...(process.argv.includes('--creation-recovery') ? ['creation-recovery.cjs'] : []), ...(process.argv.includes('--polish-followup') ? ['polish-followup.cjs'] : []), ...(process.argv.includes('--floating-tools') ? ['floating-tools.cjs'] : []), ...(process.argv.includes('--attachment-upload-exit') ? ['attachment-upload-exit.cjs'] : []), ...(process.argv.includes('--attachment-selection') ? ['attachment-selection.cjs'] : []), ...(process.argv.includes('--focus-state') ? ['focus-state.cjs'] : []), ...(process.argv.includes('--mature-shell') ? ['mature-shell.cjs'] : []), ...(process.argv.includes('--directory-notices') ? ['directory-notices.cjs'] : []), ...(process.argv.includes('--conversation-spacing') ? ['conversation-spacing.cjs'] : []), ...(process.argv.includes('--auxiliary-density') ? [process.argv.includes('--tool-action-pressed') ? 'tool-action-pressed.cjs' : 'auxiliary-density.cjs', 'auxiliary-density-fixture.ts'] : []), ...(process.argv.includes('--web-update') ? ['web-update.cjs'] : []), ...(process.argv.includes('--goal-recovery') ? ['goal-recovery.cjs'] : []), ...(process.argv.includes('--goal-exit') ? ['goal-exit.cjs'] : []), ...(process.argv.includes('--chat-start') ? ['chat-start.cjs'] : []), ...(process.argv.includes('--conversation-controls') ? ['conversation-controls.cjs'] : []), ...(process.argv.includes('--conversation-density') ? ['conversation-density.cjs'] : []), ...(process.argv.includes('--conversation-density-hit') ? ['conversation-density-hit.cjs'] : []), ...(process.argv.includes('--conversation-attachments') ? ['conversation-attachments.cjs'] : [])]) receipt.source[path.relative(root, path.join(fixture, name))] = sha(await fs.readFile(path.join(fixture, name)))
   for (const file of ['apps/mobile/src/MobileApp.tsx', 'apps/mobile/src/conversation/MobileAttachments.tsx', 'apps/mobile/src/platform/native/device.ts', 'apps/mobile/src/recovery/device-workface.ts', 'apps/mobile/src/conversation/MobileConversationSurface.tsx']) assert.ok(receipt.source[file], 'Nonempty original product inputs are required')
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="product-entry.css"></head><body><div id="root"></div><script type="module" src="product-entry.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
@@ -260,9 +268,8 @@ try {
   if (subset === 'focus-availability') receipt.source[path.relative(root, path.join(fixture, 'focus-availability.cjs'))] = sha(await fs.readFile(path.join(fixture, 'focus-availability.cjs')))
   if (process.argv.includes('--positions-only')) receipt.captureMode = 'positions-only'
   let productPage = path.join(compiled, 'index.html')
-  if (['responsive-primary-workfaces', 'density-workfaces', 'exact-first-read'].includes(subset)) {
-    // Knowledge drafts use the same valid local HTTP origin across both private OS processes.
-    // file:// has an opaque origin and cannot exercise the actual persisted draft contract.
+  if (['responsive-primary-workfaces', 'density-workfaces', 'exact-first-read'].includes(subset) || process.argv.includes('--tool-action-pressed')) {
+    // A private HTTP origin supports persisted drafts and the shared Markdown Worker.
     privateServer = createServer(async (request, response) => {
       try {
         const file = new URL(request.url, 'http://127.0.0.1').pathname.slice(1) || 'index.html'
@@ -275,7 +282,7 @@ try {
     productPage = `http://127.0.0.1:${privateServer.address().port}/index.html?${subset}=1`
     receipt.privateOrigin = new URL(productPage).origin
   }
-  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'product-main.cjs'), productPage, directory, ...(subset ? [subset] : []), ...(process.argv.includes('--positions-only') ? ['positions-only'] : []), ...(process.argv.includes('--quiet-status-details-only') ? ['details-only'] : []), ...(process.argv.includes('--mote-start-visual-fixes') ? ['visual-fixes'] : [])],
+  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'product-main.cjs'), productPage, directory, ...(subset ? [subset] : []), ...(process.argv.includes('--tool-action-pressed') ? ['tool-action-pressed'] : []), ...(process.argv.includes('--positions-only') ? ['positions-only'] : []), ...(process.argv.includes('--quiet-status-details-only') ? ['details-only'] : []), ...(process.argv.includes('--mote-start-visual-fixes') ? ['visual-fixes'] : [])],
     { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
   if (['exact-first-read', 'mote-composer', 'responsive-primary-workfaces', 'compact-navigation', 'wide-agent-workface', 'spatial-resources', 'chat-start', 'goal-recovery', 'terminal-restore', 'mote-discussion-restore'].includes(subset) && !process.argv.includes('--positions-only') && JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8')).passed) {
     receipt.restartProcess = await runProbeProcess(require('electron'), [path.join(fixture, 'product-main.cjs'), productPage, directory, subset, 'restore'],

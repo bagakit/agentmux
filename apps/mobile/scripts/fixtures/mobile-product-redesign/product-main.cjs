@@ -16,7 +16,7 @@ app.whenReady().then(async () => {
   win.setContentSize(390, 844)
   result.environment.versions = process.versions
   win.webContents.on('console-message', event => { if (event.level === 'error') result.errors.push(event.message) })
-  if (['responsive-primary-workfaces', 'density-workfaces', 'exact-first-read', 'mote-settings-placement'].includes(mode)) await win.loadURL(html)
+  if (['responsive-primary-workfaces', 'density-workfaces', 'exact-first-read', 'mote-settings-placement'].includes(mode) || phase === 'tool-action-pressed') await win.loadURL(html)
   else await win.loadFile(html, ['agent-locations', 'focus-availability', 'mote-composer', 'mote-notice-join', 'mote-dialogue', 'mote-main-setup', 'mote-main-retention', 'mote-discussion-restore', 'mote-start'].includes(mode) ? { query: { [['mote-main-setup','mote-main-retention','mote-discussion-restore','mote-start'].includes(mode) ? 'mote-dialogue' : mode]: '1' } } : undefined)
   win.webContents.debugger.attach('1.3')
   await win.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
@@ -330,7 +330,8 @@ app.whenReady().then(async () => {
     result.passed = true; return
   }
   if (mode === 'auxiliary-density') {
-    await require('./auxiliary-density.cjs')({ win, read, until, resize, tap, button, capture, result }); result.passed = true; return
+    const scenario = phase === 'tool-action-pressed' ? './tool-action-pressed.cjs' : './auxiliary-density.cjs'
+    await require(scenario)({ win, read, until, resize, tap, button, capture, result }); result.passed = true; return
   }
   if (mode === 'conversation-density') {
     await require('./conversation-density.cjs')({ win, read, until, resize, tap, button, capture, result })
