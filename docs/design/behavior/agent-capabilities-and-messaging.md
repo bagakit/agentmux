@@ -120,6 +120,8 @@ Provider 启动项的当前声明唯一见 [launch-options.ts](../../../packages
 
 原 Host 的 Provider 声明须可通过同一个轻量公共目录读取，保留准确来源、能力与模式声明，不执行 probe、安装 Hook、连接 Native 或恢复 Session；不同 Host 的同名 Provider 不能 first-wins 合并。已可读取的声明不因 Runtime 身份观察暂缺而失去可读性，声明、可执行文件可用性与当前运行模式分别表达。
 
+支持结构化会话的 Provider 由用户在启动时明确选择通道。结构化连接由原 Run 保有，Core 重接同一连接时保留原生会话、正在执行的输入、未答权限与已观察的 Activity。续接必须先收到原目标的原生确认，才将新 Run 绑定到原 Session；普通重接沿健康原 Run。登录、连接和原生回执分别报告。探测仅核对当前 Executor 的真实原生能力与会话服务状态，认证前观察到的能力声明不能代签登录后的操作。具体入口与已证边界见 [ACP Provider 运行指南](../../guides/provider-acp.md)。
+
 运行中 Provider 模式设置沿原 Core／Provider 的姿态意图 owner，公开准确 Session、预期 Run、原控制／mode 声明与其修订、原 operation。读取复用同一 Provider catalog，不另存模式表；设置由原传输认证的人或设备发起，managed Agent不能自授权限。动作复用 Provider 的原生 plan、Core 输入串行与用户优先边界，不通过 prompt 或客户端硬编码按键模拟。原字节 ACK／派发结果不冒称当前模式已被原生协议确认；没有机器观测时 current mode 明确未知。丢回执沿原 ID 只读查询，不重新输入，不影响同 Session 已有健康能力。
 
 - **每个 Provider 的能力闭环分别可验证。** Provider 对照最新参考实现逐家完善，尤其是 Agent 的 Session 分析、对话模式与 trace 观察：原生 Session 身份与记录解析、完整对话与资源顺序、工具与推理等观察事实、恢复与交互能力不能只凭启动成功或 Hook 存在宣称完成。已有参考实现的能力应核验并复用；缺少协议依据时如实保留未知或不支持，不能把观察缺口变成健康 Agent 的阻断。完善任务按 Provider 分开验收，共享协议与展示只有一个 owner。
