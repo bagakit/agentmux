@@ -1595,7 +1595,7 @@ export async function registerIpc(args: {
   handleWithEvent('ui:writeFileViewReading', (_event, record: import('../shared/workbench-user-state').FileViewReadingRecord) => ipcResult(() => {
     return workbenchUserState.writeFileViewReading(record)
   }))
-  handleWithEvent('workbenchClose:call', async (event, method: SpaceCloseMethod, value: unknown): ReturnType<import('../shared/contracts.js').AgentMuxPreloadApi['workbenchClose']['call']> => sessionObservationResult(async () => {
+  handleWithEvent('workbenchClose:call', async (event, method: SpaceCloseMethod, value: unknown): ReturnType<import('../shared/contracts.js').AgentMuxPreloadApi['workbenchClose']['call']> => ipcResult(async () => {
     if (!Object.hasOwn(SPACE_CLOSE_METHODS, method)) throw new AgentMuxError('Choose one original workface close operation.', 'INVALID_CONTROL_REQUEST')
     const actor = { kind: 'user' as const, id: `local-user:${process.getuid?.() ?? 'current'}` }
     const assertCurrent = () => assertAppDocumentSender(event, contents, args.appDocumentSources())
