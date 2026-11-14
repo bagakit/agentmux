@@ -1,11 +1,12 @@
 import {
   CONNECTION_SETUP_READ_ACTIONS, connectionSetupPublicationSubjects, parseConnectionParams, parseConnectionResult,
   type ConnectionMethod, type ConnectionParamsMap, type ConnectionResultMap, type ConnectionRecord,
-  type ConnectionOperation, type ConnectionServiceOperation, type ConnectionSetupAction, type ConnectionSetupAdvance,
+  type ConnectionOperation, type ConnectionServiceOperation, type ConnectionServiceState, type ConnectionSetupAction, type ConnectionSetupAdvance,
   type ConnectionSetupConfigurationReceipt, type ConnectionSetupConfigurationSelector, type ConnectionSetupInspectionReceipt, type ConnectionSetupInspectionAction,
   type ConnectionSetupOperation, type ConnectionSetupPublicationReview, type ConnectionSetupReadSubject, type ConnectionSetupView
 } from '@agentmux/core/connections'
 import { api } from '../../../src/renderer/src/lib/api'
+import type { ConnectionHostingTarget } from '../../../src/shared/contracts'
 
 const botId = 'settings-preview-bot', setupId = 'settings-preview-setup'
 const permissions = [
@@ -21,6 +22,12 @@ const effectKinds = new Set<ConnectionSetupAction['kind']>([
 /** Controlled public DTOs, not a substitute Settings UI or a platform implementation. */
 export function installLarkPreview() {
   const original = api.connections.call
+  const owner: ConnectionHostingTarget = { hostId: 'local', runtimeId: 'settings-preview-runtime' }
+  const owns = (target: ConnectionHostingTarget | undefined) => target?.hostId === owner.hostId && target.runtimeId === owner.runtimeId
+  api.connections.hostingTarget = async source => {
+    if (source !== undefined && source !== owner.hostId) throw new Error('The Settings preview has only the original local hosting owner')
+    return { ...owner }
+  }
   const record: ConnectionRecord = {
     config: { connectionId: botId, adapterId: 'feishu', application: { domain: 'open.feishu.cn', appId: 'cli_preview_conversations' },
       label: 'Research and engineering assistant', enabled: false, credentialRef: 'preview-credential-reference' },
@@ -34,7 +41,7 @@ export function installLarkPreview() {
     request: { state: 'confirmed', attemptId: 'preview-sign-in' }, secureStorage: 'stored',
     authentication: { attemptId: 'preview-sign-in', stepId: 'preview-account-confirmed', stage: 'confirmed', request: 'confirmed', secureStorage: 'stored' }
   }
-  const calls: Array<{ method: string; input: unknown; actionKind: ConnectionSetupAction['kind'] | null; effect: boolean }> = []
+  const calls: Array<{ method: string; input: unknown; target: ConnectionHostingTarget; actionKind: ConnectionSetupAction['kind'] | null; effect: boolean }> = []
   const reads = new Map<ConnectionSetupReadSubject, ConnectionSetupInspectionReceipt>()
   const effects = new Map<string, ConnectionSetupConfigurationReceipt>()
   const saves = new Map<string, ConnectionOperation>(), serviceSaves = new Map<string, ConnectionServiceOperation>()
@@ -92,12 +99,13 @@ export function installLarkPreview() {
     const current = view()
     return [...(current.applicationInspection?.actions ?? []), ...(current.applicationConfiguration?.actions ?? [])].find(action => action.actionId === actionId) ?? null
   }
-  const probe = { botId, setupId, calls, credentialWrites: [] as Array<{ operationId: string }>,
+  const probe = { botId, setupId, owner, calls, credentialWrites: [] as Array<{ operationId: string }>,
     boundary: 'Controlled current public DTOs; real App and Settings owners. No platform, keychain, live Runtime or external messaging.',
     state: () => ({ service: structuredClone(service), records: [...records.values()].map(item => structuredClone(item)), setup: structuredClone(operation) }) }
-  api.connections.call = async <M extends ConnectionMethod>(method: M, raw: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
+  api.connections.call = async <M extends ConnectionMethod>(method: M, raw: ConnectionParamsMap[M], target?: ConnectionHostingTarget): Promise<ConnectionResultMap[M]> => {
+    if (!target || !owns(target)) return original(method, raw, target)
     const action = method === 'connection.setup.advance' ? offeredAction(raw) : null
-    calls.push({ method, input: structuredClone(raw), actionKind: action?.kind ?? null,
+    calls.push({ method, input: structuredClone(raw), target: { ...target }, actionKind: action?.kind ?? null,
       effect: method === 'connection.configure' || method === 'connection.service.configure' || method === 'connection.delete' || !!action && effectKinds.has(action.kind) })
     const input = parseConnectionParams(method, raw)
     let result: unknown
@@ -112,10 +120,14 @@ export function installLarkPreview() {
         observation: { authentication: { state: 'unknown', reason: 'not-tested' }, transport: { state: 'unknown', reason: 'not-tested' },
           intake: { state: 'unknown', reason: 'not-tested' }, delivery: { state: 'unknown', reason: 'not-tested' } } } }
       records.set(saved.connection.config.connectionId, saved.connection); saves.set(saved.operationId, saved); result = saved
-    } else if (method === 'connection.service.get') result = service
+    } else if (method === 'connection.owner.inspect') result = { ownership: 'local' }
+    else if (method === 'connection.service.get') {
+      const { adapterId } = input as ConnectionParamsMap['connection.service.get']
+      result = adapterId ? { adapterId, enabled: true, revision: 1 } satisfies ConnectionServiceState : service
+    }
     else if (method === 'connection.service.configure') {
       const request = input as ConnectionParamsMap['connection.service.configure']
-      if (request.expectedRevision !== service.revision) throw new Error('Controlled service revision changed')
+      if (request.adapterId || request.expectedRevision !== service.revision) throw new Error('The controlled request must retain the original global service revision')
       service = { enabled: request.service.enabled, revision: service.revision + 1 }
       const saved: ConnectionServiceOperation = { operationId: request.operationId, expectedRevision: request.expectedRevision, status: 'configured', service }
       serviceSaves.set(request.operationId, saved); result = saved
@@ -126,7 +138,7 @@ export function installLarkPreview() {
       support: { connectionRevision: 1, capabilities: ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'card-actions', 'application-publication'] } }
     else if (method === 'connection.setup.inspect') {
       const request = input as ConnectionParamsMap['connection.setup.inspect']
-      if (request.operationId !== setupId || request.requestTrace) return original(method, input)
+      if (request.operationId !== setupId || request.requestTrace) return original(method, input, target)
       if (request.applicationConfiguration) selection = request.applicationConfiguration
       result = view()
       if (!request.applicationConfiguration) delete (result as ConnectionSetupView).applicationConfiguration
@@ -150,11 +162,15 @@ export function installLarkPreview() {
         latestRead = { subject, stepId, input: request, request: 'confirmed', secureStorage: 'stored' }; reads.set(subject, latestRead)
       }
       result = { ...baseView(), receipt: { actionId: action.actionId, stepId, state: 'confirmed' } }
-    } else return original(method, input)
+    } else return original(method, input, target)
     return parseConnectionResult(method, structuredClone(result), input)
   }
-  api.connections.inspectCredential = async () => null
-  api.connections.storeCredential = async input => {
+  api.connections.inspectCredential = async (_operationId, target) => {
+    if (!owns(target)) throw new Error('Credential inspection must retain the original hosting owner')
+    return null
+  }
+  api.connections.storeCredential = async (input, target) => {
+    if (!owns(target)) throw new Error('Credential save must retain the original hosting owner')
     probe.credentialWrites.push({ operationId: input.operationId })
     return { operationId: input.operationId, credentialRef: 'preview-explicit-credential' }
   }

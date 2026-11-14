@@ -253,7 +253,7 @@ app.whenReady().then(async () => {
       await click(node(`nav[aria-label="Settings sections"] [data-settings-target="${id}"]`))
     }
     await until(id === 'overview' ? '!!document.querySelector("[data-settings-overview]")' : `!!document.querySelector('[data-settings-pane="${id}"]:not([hidden])')`)
-    assert.equal(await title(),entry.title,'The original navigation reaches its original editor')
+    assert.equal(await title(),id==='agents'?'Executors':entry.title,'The original navigation reaches its original editor')
   }
   const providerScroll = async () => {
     await nav('agents')
@@ -363,7 +363,8 @@ app.whenReady().then(async () => {
       if (!await read(`${node('[data-guided-management]')}.open`)) await click(node('[data-guided-management] > summary'))
       await until(`${node('[data-surface-mode="add-application-permissions"]')}?.checkVisibility()`)
     }
-    for (const [width,height] of mutation?[[1440,940]]:[[1440,940],[500,840],[900,540]]) for (const color of mutation||width===900?['dark']:['dark','light']) {
+    const viewports=mode==='lark-publication-density'?[]:mutation?[[1440,940]]:[[1440,940],[500,840],[900,540]]
+    for (const [width,height] of viewports) for (const color of mutation||width===900?['dark']:['dark','light']) {
       await resize(width,height); await nav('lark'); await theme(color)
       const start=(await calls()).length,label=`${width}-${height}-${color}`
       await until(`${node(bot)}?.checkVisibility()`)
@@ -409,11 +410,14 @@ app.whenReady().then(async () => {
     }
     await resize(1440,940); await theme('dark'); await nav('lark')
     const beforeService=(await calls()).filter(call=>call.method==='connection.service.configure').length
+    const globalService=pane+' .channel-environment__global'
+    if (!await read(`${node(globalService)}.open`)) await click(node(globalService+' > summary'))
+    await until(`${node('[aria-label="Enable external chat sync"]')}?.checkVisibility()`)
     await choose('[aria-label="Enable external chat sync"]')
     assert.equal((await calls()).filter(call=>call.method==='connection.service.configure').length,beforeService,'Lark service draft does not save')
     await captureSegments('lark-service-draft','lark','dark')
-    await click(node('[data-connector-service-save]'))
-    await until(`${node('[data-connector-service-state]')}?.dataset.connectorServiceState==='on'`)
+    await click(node(globalService+' [data-connector-service-save]'))
+    await until(`${node(globalService+' [data-connector-service-state]')}?.dataset.connectorServiceState==='on'`)
     assert.equal((await calls()).filter(call=>call.method==='connection.service.configure').length,beforeService+1,'Only explicit service Save configures the controlled service')
     assert.equal((await calls()).filter(call=>call.method==='connection.configure').length,0,'Global sync does not rewrite individual bots')
     await captureSegments('lark-service-saved','lark','dark')
@@ -430,16 +434,48 @@ app.whenReady().then(async () => {
     assert.equal(added.actionKind,'add-application-permissions');assert.equal(added.input.operationId,'settings-preview-setup')
     await captureSegments('lark-permissions-requested','lark','dark')
     await click(node('[data-surface-mode="enable-messaging"]'));await click(node('[data-management-publication-open]'))
-    await fill('[aria-label="Publication release notes"]','Enable conversations for the research team.')
+    const publicationDraft={kind:'create-version',version:'1.0.0',notes:'Enable team conversations.\nKeep the current audience.',
+      visibility:'current',reason:'Review message permissions.\nApproval covers the same audience.'}
+    const publicationFields=[
+      {selector:'[aria-label="Publication release notes"]',value:publicationDraft.notes,frame:'lark-publication-release-notes-focused'},
+      {selector:'[aria-label="Publication review reason"]',value:publicationDraft.reason,frame:'lark-publication-review-reason-focused'}
+    ]
+    for (const {selector,value,frame} of publicationFields) {
+      await until(`${node(selector)}?.checkVisibility()&&!${node(selector)}.disabled`)
+      await click(node(selector)); win.webContents.selectAll(); await key('Backspace')
+      await until(`${node(selector)}.value===''`)
+      const emptyHeight=await read(`${node(selector)}.getBoundingClientRect().height`)
+      await fill(selector,value)
+      const geometry=await read(`(() => {
+        const field=${node(selector)}, control=getComputedStyle(field), label=getComputedStyle(field.closest('label'))
+        const measuredHeight=field.getBoundingClientRect().height
+        const twoLineHeight=2*parseFloat(control.lineHeight)+parseFloat(control.paddingTop)+parseFloat(control.paddingBottom)
+          +parseFloat(control.borderTopWidth)+parseFloat(control.borderBottomWidth)
+        return {height:measuredHeight,twoLineHeight,scrolls:field.scrollHeight>field.clientHeight+1,focused:field===document.activeElement,
+          outline:[control.outlineStyle,control.outlineWidth,control.outlineOffset],shadows:[control.boxShadow,label.boxShadow],labelOutline:label.outlineStyle}
+      })()`)
+      assert.ok(Math.abs(emptyHeight-geometry.twoLineHeight)<=1 && Math.abs(geometry.height-geometry.twoLineHeight)<=1 && !geometry.scrolls,
+        'Publication editor fits two written lines in the compact height: '+JSON.stringify({selector,emptyHeight,...geometry}))
+      assert.ok(geometry.focused && geometry.labelOutline==='none','Only the Publication editor receives the focus outline: '+selector)
+      assert.deepEqual(geometry.outline,['solid','1px','-1px'],'Publication editor has one inset focus line: '+selector)
+      assert.deepEqual(geometry.shadows,['none','none'])
+      result.interactions.push({kind:'lark-publication-editor',selector,emptyHeight,...geometry})
+      await capture(frame,'lark','dark','focused two-line editor')
+    }
     const beforePublication=(await calls()).filter(call=>call.effect).length
     await click(node('[data-publication-review]'))
     await until(`${node('[data-publication-confirm]')}?.disabled===false`)
     assert.equal((await calls()).filter(call=>call.effect).length,beforePublication,'Publication review does not create or submit a version')
+    for (const {selector,value} of publicationFields) {
+      assert.equal(await read(`${node(selector)}.value`),value,'Publication review preserves both written lines: '+selector)
+    }
     await captureSegments('lark-publication-reviewed','lark','dark')
     await click(node('[data-publication-confirm]'))
     await until(`${node('[data-publication-review-created]')}?.checkVisibility()`)
     const created=(await calls()).filter(call=>call.effect).at(-1)
     assert.equal(created.actionKind,'create-application-version');assert.equal(created.input.operationId,'settings-preview-setup')
+    assert.deepEqual(created.target,await read('window.settingsHomeProbe.larkPreview.owner'),'Publication sends to the original bot hosting owner')
+    assert.deepEqual(created.input.publicationDraft,publicationDraft,'The original version request receives the exact authored notes and review reason')
     assert.equal((await calls()).some(call=>call.actionKind==='submit-application-version'),false,'Creating a version does not submit it')
     await captureSegments('lark-publication-created','lark','dark')
     await click(node('[data-management-back]'));await click(node(pane+' [data-connection-editor] .connector-back'))
@@ -897,7 +933,7 @@ app.whenReady().then(async () => {
     for (const state of ['collapsed','expanded']) {
       await click(node('[data-settings-group-toggle="preferences"]'))
       await settle()
-      const geometry = await read(`(() => {const target=document.querySelector('nav [data-settings-target="agents"]').getBoundingClientRect(),surface=document.querySelector('nav [data-liquid-selection="agents"]').getBoundingClientRect();return {target:target.toJSON(),surface:surface.toJSON()}})()`)
+      const geometry = await read(`(() => {const target=document.querySelector('nav [data-settings-target="agents:executors"]').getBoundingClientRect(),surface=document.querySelector('nav [data-liquid-selection="agents:executors"]').getBoundingClientRect();return {target:target.toJSON(),surface:surface.toJSON()}})()`)
       for (const key of ['x','y','width','height']) assert.ok(Math.abs(geometry.target[key]-geometry.surface[key])<1,'Current selection surface follows disclosure geometry: '+key)
       result.interactions.push({kind:'disclosure-selection-geometry',state,geometry})
       await capture('sidebar-'+state,'agents','dark')
@@ -933,7 +969,9 @@ app.whenReady().then(async () => {
     assert.deepEqual(await read('Array.from(document.querySelectorAll("[data-settings-directory] [data-settings-section]")).map(n=>n.dataset.settingsSection)'),catalog.map(item=>item.id))
     if (mode==='concept-intros') { await conceptIntroductions(); result.passed=true; return }
     if (mode==='navigation') { await disclosureGeometry(); result.passed=true; return }
-    if (mode==='lark-navigation') { await nav('lark'); await larkInteractions(true); result.passed=true; return }
+    if (mode==='lark-navigation'||mode==='lark-publication-density') {
+      await nav('lark'); await larkInteractions(mode==='lark-navigation'); result.passed=true; return
+    }
     if (mode==='provider-scroll') { await providerScroll(); result.passed=true; return }
     if (mode==='takeover-scroll') { await theme('dark'); await takeoverReachability(); result.passed=true; return }
     if (mode==='preview-return') {
@@ -1154,7 +1192,7 @@ app.whenReady().then(async () => {
     await until('!!document.querySelector(".agent-identity-popover header button")')
     await click(node('.agent-identity-popover header button'))
     await until('!!document.querySelector("[data-settings-pane=agents]:not([hidden])")')
-    assert.equal(await title(),'Agent CLIs','Actual Avatar direct entry bypasses Home')
+    assert.equal(await title(),'Executors','Actual Avatar direct entry bypasses Home')
     assert.equal(await read(`${node(`[data-resource-editor="${executorId}"]`)}?.isConnected`),true,'The original exact Executor editor is reached')
     result.exactTarget = {executorId,caller:'AgentAvatar -> SettingsNavigation -> App -> SettingsPanel -> AgentSettingsPane'}
     await capture('executor-direct-entry','agents','dark')

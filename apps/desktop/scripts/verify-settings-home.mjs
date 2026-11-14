@@ -24,10 +24,11 @@ const takeoverMutant = process.argv.includes('--takeover-scroll-mutation')
 const appearanceMutant = process.argv.includes('--appearance-contrast-mutation')
 const previewReturnMutant = process.argv.includes('--preview-return-mutation')
 const larkNavigationMutant = process.argv.includes('--lark-navigation-mutation')
+const larkPublicationMutant = process.argv.includes('--lark-publication-density-mutation')
 const focusContentMutant = process.argv.includes('--focus-content-mutation')
 const toolkitModelMutant = process.argv.includes('--toolkit-model-mutation')
-assert.ok([navigationMutant,providerMutant,takeoverMutant,appearanceMutant,previewReturnMutant,larkNavigationMutant,focusContentMutant,toolkitModelMutant,conceptIntroMutant,goalsArtMutant].filter(Boolean).length<=1,'One native source mutation per receipt')
-const nativeMutant = goalsArtMutant || conceptIntroMutant || navigationMutant || providerMutant || takeoverMutant || appearanceMutant || previewReturnMutant || larkNavigationMutant || focusContentMutant || toolkitModelMutant
+assert.ok([navigationMutant,providerMutant,takeoverMutant,appearanceMutant,previewReturnMutant,larkNavigationMutant,larkPublicationMutant,focusContentMutant,toolkitModelMutant,conceptIntroMutant,goalsArtMutant].filter(Boolean).length<=1,'One native source mutation per receipt')
+const nativeMutant = goalsArtMutant || conceptIntroMutant || navigationMutant || providerMutant || takeoverMutant || appearanceMutant || previewReturnMutant || larkNavigationMutant || larkPublicationMutant || focusContentMutant || toolkitModelMutant
 const pageArguments = process.argv.filter(argument => argument.startsWith('--pages='))
 assert.ok(pageArguments.length <= 1, 'One explicit page selection')
 const requestedPages = pageArguments.length ? pageArguments[0].slice('--pages='.length).split(',') : conceptIntros ? ['capsule','goals'] : null
@@ -38,6 +39,7 @@ if (requestedPages) {
 }
 let navigationMutationLoads = 0, providerMutationLoads = 0, takeoverMutationLoads = 0, appearanceMutationLoads = 0
 let previewReturnMutationLoads = 0, larkNavigationMutationLoads = 0
+let larkPublicationMutationLoads = 0
 let toolkitModelMutationLoads = 0, conceptIntroMutationLoads = 0
 let conceptIntroMutationReceipt = null, goalsArtMutationReceipt = null
 let goalsArtMutationLoads = 0
@@ -143,6 +145,15 @@ try {
         await fs.writeFile(path.join(evidence,'lark-navigation-mutation.json'),JSON.stringify({file:path.relative(root,file),original:sha(code),consumed:sha(mutated),owner:'inspectOriginal',change:'inspect becomes advance'},null,2))
         return {code:mutated,map:null}
       }
+      if(larkPublicationMutant&&file.endsWith('/components/settings/ConnectionManagementPublication.tsx')) {
+        const anchor='<ComposerTextarea variant="compact" aria-label="Publication release notes"'
+        assert.equal(code.split(anchor).length,2,'One original release notes editor')
+        const mutated=code.replace(anchor,'<ComposerTextarea variant="compact" style={{ minHeight: 88 }} aria-label="Publication release notes"')
+        larkPublicationMutationLoads++
+        await fs.writeFile(path.join(evidence,'lark-publication-density-mutant.tsx'),mutated)
+        await fs.writeFile(path.join(evidence,'lark-publication-density-mutation.json'),JSON.stringify({file:path.relative(root,file),original:sha(code),consumed:sha(mutated),change:'Restore the 88px minimum release notes height'},null,2))
+        return {code:mutated,map:null}
+      }
       if(previewReturnMutant&&file.endsWith('/components/settings/use-settings-preview-return.tsx')) {
         const anchor='previous.pane.scrollTop = previous.scrollTop'
         assert.equal(code.split(anchor).length,2,'One actual preview return scroll owner')
@@ -198,7 +209,7 @@ try {
   const visual = path.join(evidence,'visual'), stderr=[]
   await fs.mkdir(visual)
   if(takeoverMutant) assert.equal(takeoverMutationLoads,1,'One exact compact preview declaration is mutated')
-  const capture = await runProbeProcess(require('electron'),[path.join(fixture,'main.cjs'),path.join(compiled,'index.html'),owned,visual,conceptIntros?'concept-intros':toolkitModelMutant?'toolkit-model':focusContentMutant?'focus-content':larkNavigationMutant?'lark-navigation':previewReturnMutant?'preview-return':navigationMutant?'navigation':providerMutant?'provider-scroll':takeoverMutant?'takeover-scroll':'full',requestedPages?.join(',')??''],{
+  const capture = await runProbeProcess(require('electron'),[path.join(fixture,'main.cjs'),path.join(compiled,'index.html'),owned,visual,conceptIntros?'concept-intros':toolkitModelMutant?'toolkit-model':focusContentMutant?'focus-content':larkPublicationMutant?'lark-publication-density':larkNavigationMutant?'lark-navigation':previewReturnMutant?'preview-return':navigationMutant?'navigation':providerMutant?'provider-scroll':takeoverMutant?'takeover-scroll':'full',requestedPages?.join(',')??''],{
     cwd:root,env,timeoutMs:1200000,onLine:line=>stderr.push(line)
   })
   await fs.writeFile(path.join(visual,'stderr.log'),stderr.join('\n'))
@@ -225,6 +236,11 @@ try {
     assert.equal(capture.exitCode,1)
     assert.equal(render.failure?.name,'AssertionError')
     assert.match(render.failure.message,/Focus short examples fit their content/u,'Real content geometry kills the original CSS mutant')
+  } else if (larkPublicationMutant) {
+    assert.equal(larkPublicationMutationLoads,1,'The actual release notes editor mutant was consumed once')
+    assert.equal(capture.exitCode,1)
+    assert.equal(render.failure?.name,'AssertionError')
+    assert.match(render.failure.message,/Publication editor fits two written lines in the compact height/u)
   } else if (larkNavigationMutant) {
     assert.equal(larkNavigationMutationLoads,1,'The actual Lark inspection owner mutant was consumed once')
     assert.equal(capture.exitCode,1)
@@ -270,6 +286,9 @@ try {
       assert.ok(render.lark.calls.some(call=>call.method==='connection.setup.inspect'),'Lark consumes its actual original Setup path')
       assert.ok(render.interactions.some(event=>event.kind==='lark-read-only-navigation'&&event.calls>0&&event.implicitConnectorWrites===0))
       assert.ok(render.interactions.some(event=>event.kind==='lark-explicit-actions'&&event.serviceSaves===1&&event.botSaves===1&&event.permissionRequests===1&&event.versionCreations===1))
+      const publicationEditors=render.interactions.filter(event=>event.kind==='lark-publication-editor')
+      assert.deepEqual(publicationEditors.map(event=>event.selector),['[aria-label="Publication release notes"]','[aria-label="Publication review reason"]'])
+      assert.equal(render.frames.filter(frame=>frame.page==='lark'&&frame.position==='focused two-line editor').length,2)
     }
   }
   const ts=require('typescript'), callers=[]
