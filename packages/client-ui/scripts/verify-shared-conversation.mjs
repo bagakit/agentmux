@@ -119,7 +119,7 @@ async function callers(candidateRoot = root) {
 const tests = ['exec', 'vitest', 'run', '--config', 'packages/client-ui/vitest.config.ts']
 const receiptTests = ['shared-conversation', 'affectui-motion-consumers', 'message-delivery-failure']
 const desktopReceiptTests = ['exec', 'vitest', 'run', '--config', 'apps/desktop/test/vitest.interaction-receipts.config.mts',
-  'apps/desktop/test/attention-request-panel.test.tsx', 'apps/desktop/test/launch-input-consumers.test.tsx']
+  'apps/desktop/test/attention-request-panel.test.tsx', 'apps/desktop/test/interaction-receipt-outbox.test.tsx']
 const desktopReceiptTestNames = ['keeps .*attached to the original request', 'renders only the original Outbox']
 const selectedSharedTests = interactionReceipts
   ? [...tests, ...receiptTests.map(name => 'packages/client-ui/test/' + name + '.test.tsx')] : tests
