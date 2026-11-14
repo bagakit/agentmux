@@ -309,6 +309,130 @@ it('[survey-list-ui] dnd-kit keyboard movement sorts in both directions and Esca
   expect(organization().ungrouped).toEqual(fixture.zones); unchanged(before)
 })
 
+// These use the actual App/PointerSensor/organization owner. Rectangles are the explicit DOM
+// port above; the independent Chromium walk verifies real paint, hit targets and compatibility clicks.
+it.each([
+  { source: 'name', sourceCollapsed: false, target: 'expanded' },
+  { source: 'padding', sourceCollapsed: false, target: 'empty' },
+  { source: 'name', sourceCollapsed: true, target: 'collapsed' },
+  { source: 'empty header', sourceCollapsed: false, target: 'expanded' }
+] as const)('[survey-group-header] $source with collapsed=$sourceCollapsed reorders onto $target exactly once', async scenario => {
+  const next = groups()
+  next.groups[0]!.collapsed = scenario.sourceCollapsed
+  next.groups[1]!.collapsed = scenario.target === 'collapsed'
+  if (scenario.target === 'empty') { next.groups[1]!.zoneIds = []; next.ungrouped.push(fixture.zones[1]!) }
+  if (scenario.source === 'empty header') { next.groups[0]!.zoneIds = []; next.ungrouped.push(fixture.zones[0]!) }
+  await write(next); const commit = vi.spyOn(useAppStore.getState(), 'setSurveyOrganization'); await render()
+  const before = protectedFacts(), baseline = organization()
+  const heading = group('group-a').querySelector<HTMLElement>('.survey-list-group-heading')!
+  const source = scenario.source === 'name' ? heading.querySelector<HTMLElement>('strong')! : heading
+  const from = heading.getBoundingClientRect(), to = group('group-b').getBoundingClientRect()
+  await pickUp(source, from.left + 60, from.top + 20)
+  await drop(to.left + 60, to.top + 20)
+  await vi.waitFor(() => expect(organization().groups.map(value => value.groupId)).toEqual(['group-b', 'group-a']))
+  expect(commit).toHaveBeenCalledTimes(1)
+  expect(await commit.mock.results[0]!.value).toMatchObject({ changed: true, outcome: 'changed', save: { clientStateWritten: true, storageFlushRequested: true } })
+  expect(commit).toHaveBeenCalledWith({ ...baseline, groups: [baseline.groups[1], baseline.groups[0]] }, baseline)
+  expect(organization().groups.map(value => value.zoneIds)).toEqual([baseline.groups[1]!.zoneIds, baseline.groups[0]!.zoneIds])
+  expect(organization().groups.map(value => value.collapsed)).toEqual([baseline.groups[1]!.collapsed, baseline.groups[0]!.collapsed])
+  expect(JSON.parse(localStorage.getItem('agentmux-workbench-v1')!).state.surveyOrganization).toEqual(organization())
+  unchanged(before)
+})
+
+it('[survey-group-header] an activated short name drag suppresses the compatibility click instead of collapsing', async () => {
+  await write(groups()); const commit = vi.spyOn(useAppStore.getState(), 'setSurveyOrganization'); await render()
+  const before = protectedFacts(), baseline = organization()
+  const toggle = button('Collapse survey group: First group'), source = toggle.querySelector<HTMLElement>('strong')!
+  const from = source.getBoundingClientRect()
+  await pickUp(source, from.left + 60, from.top + 20)
+  await pointer(document, 'pointermove', from.left + 95, from.top + 22)
+  await act(async () => {
+    source.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, buttons: 0, pointerId: 7, pointerType: 'mouse', isPrimary: true, clientX: from.left + 95, clientY: from.top + 22 }))
+    // happy-dom does not synthesize a mouse compatibility click from PointerEvent.
+    source.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }))
+  })
+  expect(organization()).toBe(baseline); expect(commit).not.toHaveBeenCalled()
+  expect(toggle.getAttribute('aria-expanded')).toBe('true'); unchanged(before)
+})
+
+it('[survey-group-header] a pointer click without activation still collapses the original group once', async () => {
+  await write(groups()); const commit = vi.spyOn(useAppStore.getState(), 'setSurveyOrganization'); await render()
+  const before = protectedFacts(), source = button('Collapse survey group: First group')
+  const from = source.getBoundingClientRect()
+  await pointer(source, 'pointerdown', from.left + 60, from.top + 20)
+  await act(async () => {
+    source.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, buttons: 0, pointerId: 7, pointerType: 'mouse', isPrimary: true, clientX: from.left + 60, clientY: from.top + 20 }))
+    source.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }))
+  })
+  await vi.waitFor(() => expect(organization().groups[0]!.collapsed).toBe(true))
+  expect(commit).toHaveBeenCalledTimes(1); expect(dom.container.querySelector('.survey-page-list')?.hasAttribute('data-dragging')).toBe(false)
+  unchanged(before)
+})
+
+it.each(['outside', 'original position', 'Escape'] as const)('[survey-group-header] %s cancels a natural header gesture without an organization write', async destination => {
+  await write(groups()); const commit = vi.spyOn(useAppStore.getState(), 'setSurveyOrganization'); await render()
+  const before = protectedFacts(), baseline = organization()
+  const source = group('group-a').querySelector<HTMLElement>('.survey-list-group-heading')!, from = source.getBoundingClientRect()
+  await pickUp(source, from.left + 60, from.top + 20)
+  const to = group('group-b').getBoundingClientRect()
+  await pointer(document, 'pointermove', to.left + 60, to.top + 20)
+  if (destination === 'Escape') { await key(source, 'Escape'); await pointer(document, 'pointerup', to.left + 60, to.top + 20) }
+  else await drop(destination === 'outside' ? 700 : from.left + 60, destination === 'outside' ? 700 : from.top + 20)
+  expect(organization()).toBe(baseline); expect(commit).not.toHaveBeenCalled(); unchanged(before)
+})
+
+it('[survey-group-header] More opens its original menu without arming group sorting', async () => {
+  await write(groups()); await render()
+  const before = protectedFacts(), baseline = organization(), source = button('Options for survey group: First group')
+  const from = source.getBoundingClientRect()
+  await pointer(source, 'pointerdown', from.left + 220, from.top + 20)
+  await pointer(document, 'pointermove', from.left + 220, from.top + 60)
+  await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).not.toBeNull())
+  expect(dom.container.querySelector('.survey-page-list')?.hasAttribute('data-dragging')).toBe(false)
+  await pointer(document, 'pointerup', from.left + 220, from.top + 60)
+  await key(document.querySelector('[role="menu"]')!, 'Escape')
+  expect(organization()).toBe(baseline); unchanged(before)
+})
+
+it('[survey-group-header] a portal menu-item pointer gesture keeps the original rename action without starting a group drag', async () => {
+  await write(groups()); await render()
+  const before = protectedFacts(), baseline = organization()
+  await openMenu(button('Options for survey group: First group'))
+  const rename = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Rename group')!
+  expect(group('group-a').contains(rename)).toBe(false)
+  await pointer(rename, 'pointerdown', 110, 210)
+  await pointer(document, 'pointermove', 120, 210)
+  expect(dom.container.querySelector('.survey-page-list')?.hasAttribute('data-dragging')).toBe(false)
+  await act(async () => {
+    rename.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, buttons: 0, pointerId: 7, pointerType: 'mouse', isPrimary: true, clientX: 120, clientY: 210 }))
+    rename.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }))
+  })
+  await vi.waitFor(() => expect(field('Survey group name')).not.toBeNull())
+  await input(field('Survey group name'), 'Portal action original draft')
+  expect(field('Survey group name').value).toBe('Portal action original draft')
+  await key(field('Survey group name'), 'Escape')
+  expect(organization()).toBe(baseline); unchanged(before)
+})
+
+it('[survey-group-header] rename input, save and cancel controls keep their original pointer interaction', async () => {
+  await write(groups()); await render()
+  const before = protectedFacts(), baseline = organization()
+  await openMenu(button('Options for survey group: First group'))
+  const rename = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Rename group')!
+  await key(rename, 'Enter'); await vi.waitFor(() => expect(field('Survey group name')).not.toBeNull())
+  await input(field('Survey group name'), 'Unsubmitted original name')
+  for (const source of [field('Survey group name'), button('Save group name'), button('Cancel group rename')]) {
+    const from = source.getBoundingClientRect()
+    await pointer(source, 'pointerdown', from.left + 60, from.top + 20)
+    await pointer(document, 'pointermove', from.left + 60, from.top + 65)
+    expect(dom.container.querySelector('.survey-page-list')?.hasAttribute('data-dragging')).toBe(false)
+    await pointer(document, 'pointerup', from.left + 60, from.top + 65)
+  }
+  expect(field('Survey group name').value).toBe('Unsubmitted original name')
+  await key(field('Survey group name'), 'Escape')
+  expect(organization()).toBe(baseline); unchanged(before)
+})
+
 it('[survey-list-ui] keyboard dragging reorders complete groups through their dedicated handles', async () => {
   await write(groups()); await render(); const before = protectedFacts()
   await keyboardDrag(button('Move survey group: First group'), 'ArrowDown')
