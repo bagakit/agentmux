@@ -19,8 +19,11 @@ export function createExecutionBindingApi(ipc: Pick<IpcRenderer, 'invoke' | 'on'
     observeExecutionBinding(bindingId: string | AgentExecutionRecoveryReference, listener: (value: AgentExecutionInspection | null) => void, onError: (error: string) => void) {
       const watchId = mintObjectId()
       let closed = false
-      const changed = (_event: IpcRendererEvent, value: { watchId: string; inspection: AgentExecutionInspection | null }) => {
-        if (!closed && value.watchId === watchId) listener(value.inspection)
+      const changed = (_event: IpcRendererEvent, value: { watchId: string; inspection?: AgentExecutionInspection | null; error?: string }) => {
+        if (!closed && value.watchId === watchId) {
+          if (value.error !== undefined) onError(value.error)
+          else if ('inspection' in value) listener(value.inspection ?? null)
+        }
       }
       ipc.on('sessions:executionBindingChanged', changed)
       void ipc.invoke('sessions:observeExecutionBinding', bindingId, watchId).catch(error => { if (!closed) onError(error instanceof Error ? error.message : String(error)) })

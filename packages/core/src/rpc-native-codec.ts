@@ -35,7 +35,7 @@ import { MOTE_INPUT_GUIDANCE } from './mote-input-source.js'
 import { isMoteDialogueMethod, parseMoteDialogueParams, parseMoteDialogueResult } from './mote-dialogue.js'
 import { parseCreationContinueParams, parseCreationContinueResult } from './agent-creation-continue.js'
 import { parseMessageFieldPage, validateMessageFieldRead } from './agent-message-field.js'
-import { parseAgentExecutionCreate, parseAgentExecutionBinding, parseAgentExecutionInspection } from './public-rpc-agent-execution.js'
+import { parseAgentExecutionCreate, parseAgentExecutionBinding, parseAgentExecutionInspection, parseAgentExecutionBindingObservation } from './public-rpc-agent-execution.js'
 import { parseAgentInputResourceRead, parseAgentInputResourceResult } from './agent-input-resource.js'
 import { parseAgentInputJournalCut } from './agent-input-conversation.js'
 import { parseGoalParticipationConfirm } from './goal-participation.js'
@@ -427,6 +427,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     }
     if (Object.hasOwn(HOST_ROUTE_METHODS, method)) return parseHostRouteResult(method as keyof typeof HOST_ROUTE_METHODS, value) as Record<string, unknown>
     if (method === 'agent.creation.continue') return parseCreationContinueResult(value, parseCreationContinueParams(params)) as unknown as Record<string, unknown>
+    if (method === 'agent.execution.watch') return parseAgentExecutionBindingObservation(value, parseAgentExecutionBinding(params).bindingId) as unknown as Record<string, unknown>
     if (method === 'agent.execution.binding' || method === 'agent.execution.rejoin') {
       const input = parseAgentExecutionBinding(params, { associationView: method === 'agent.execution.binding' })
       if (method === 'agent.execution.binding' && value === null) return value as unknown as Record<string, unknown>

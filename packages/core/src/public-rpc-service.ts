@@ -46,7 +46,7 @@ import { isMoteDialogueMethod, parseMoteDialogueParams, parseMoteDialogueResult,
 import { moteInputObservationId } from './mote-input.js'
 import { parseCreationContinueParams, parseCreationContinueReceipt, parseCreationContinueResult } from './agent-creation-continue.js'
 import { parseAgentExecutionReference } from './errors.js'
-import { AGENT_EXECUTION_CREATE_FIELDS, parseAgentExecutionCreate, parseAgentExecutionBinding } from './public-rpc-agent-execution.js'
+import { AGENT_EXECUTION_CREATE_FIELDS, parseAgentExecutionCreate, parseAgentExecutionBinding, parseAgentExecutionBindingObservation } from './public-rpc-agent-execution.js'
 import { parseAgentInputResourceRead } from './agent-input-resource.js'
 import { isConnectionApiMethod, parseConnectionApiParams } from './connection-api-codec.js'
 import { isHeadlessSpatialAgentOpen } from './spatial-agent-open-contract.js'
@@ -237,7 +237,8 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   capsules?: { call<M extends CapsuleMethod>(method: M, params: CapsuleParamsMap[M], context?: CapsuleCallContext,
     originalContext?: AgentMuxRpcCallContext): Promise<CapsuleResultMap[M]> }
   executionBindings?: Pick<import('./agent-execution-coordinator.js').AgentExecutionCoordinator, 'create' | 'rejoin' | 'continueOriginal'> & {
-    inspect(bindingId: string, view?: 'association'): import('./agent-execution-coordinator.js').AgentExecutionInspection | null | Promise<import('./agent-execution-coordinator.js').AgentExecutionInspection | null>
+    inspect(bindingId: string, view?: 'association', context?: AgentMuxRpcCallContext): import('./agent-execution-coordinator.js').AgentExecutionInspection | null | Promise<import('./agent-execution-coordinator.js').AgentExecutionInspection | null>
+    watch?: import('./agent-execution-coordinator.js').AgentExecutionBindingService['watch']
   }
   capsuleInput?: CapsuleInputPort
   capsuleRuntime?: CapsuleRuntimePort
@@ -453,6 +454,7 @@ const NATIVE_FIELDS = {
   'agent.execution.create': AGENT_EXECUTION_CREATE_FIELDS,
   'agent.execution.continue': ['bindingId', 'agentSessionId', 'createOperationId'],
   'agent.execution.binding': ['bindingId','view'],
+  'agent.execution.watch': ['bindingId'],
   'agent.execution.rejoin': ['bindingId'],
   'terminal.input': ['target', 'operationId', 'ownerInstanceId', 'expectedByte', 'dataBase64'], 'terminal.interrupt': ['target', 'operationId', 'ownerInstanceId'], 'terminal.stop': ['target', 'operationId', 'ownerInstanceId'], 'terminal.operation.inspect': ['hostId', 'run', 'operationId', 'runtimeId'],
   'agent.posture.set': ['target', 'operationId', 'controlId', 'modeId', 'expectedControlDigest'], 'agent.posture.inspect': ['hostId', 'agentSessionId', 'expectedRun', 'operationId'],
@@ -569,6 +571,11 @@ function validateFilters(p: Record<string, unknown>): void {
 }
 
 /** All business orchestration lives here; transports carry messages, clients parse argv. */
+function assertExecutionBindingAuthority(context: AgentMuxRpcCallContext): void {
+  if (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind) ||
+      typeof context.principal.id !== 'string' || !context.principal.id.trim() || context.principal.id.includes('\0'))
+    throw new AgentMuxError('Execution binding operations require a transport-approved user or device.', 'CONTROL_PERMISSION_DENIED')
+}
 export class AgentMuxRpcService {
   private readonly diagnosticQuery = new DiagnosticEvidenceQuery()
   private readonly landmarks: ConversationLandmarkStore
@@ -1931,20 +1938,17 @@ export class AgentMuxRpcService {
         context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
       }
     }
-    if (method === 'agent.execution.create' || method === 'agent.execution.continue' || method === 'agent.execution.binding' || method === 'agent.execution.rejoin') {
-      if (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind) ||
-          typeof context.principal.id !== 'string' || !context.principal.id.trim() || context.principal.id.includes('\0')) {
-        throw new AgentMuxError('Execution binding operations require a transport-approved user or device.', 'CONTROL_PERMISSION_DENIED')
-      }
+    if (method === 'agent.execution.create' || method === 'agent.execution.continue' || method === 'agent.execution.binding' || method === 'agent.execution.rejoin' || method === 'agent.execution.watch') {
+      assertExecutionBindingAuthority(context)
       const input = method === 'agent.execution.create' ? parseAgentExecutionCreate(params) : method === 'agent.execution.continue' ? parseAgentExecutionReference(params) : parseAgentExecutionBinding(params, { associationView: method === 'agent.execution.binding' })
       const owner = this.ports.executionBindings
       if (!owner) throw new AgentMuxError('The original execution binding owner is unavailable. No helper or Agent was replaced.', 'CONTROL_UNAVAILABLE')
       context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
       const result = method === 'agent.execution.create' ? await owner.create(input as import('./agent-execution-coordinator.js').AgentExecutionOpenInput, context)
         : method === 'agent.execution.continue' ? await owner.continueOriginal(input as import('./agent-execution-contract.js').AgentExecutionReference, context)
-        : method === 'agent.execution.rejoin' ? await owner.rejoin(input.bindingId, context) : await owner.inspect(input.bindingId, 'view' in input && input.view === 'association' ? 'association' : undefined)
+        : method === 'agent.execution.rejoin' ? await owner.rejoin(input.bindingId, context) : await owner.inspect(input.bindingId, 'view' in input && input.view === 'association' ? 'association' : undefined, context)
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
-      return parseRpcNativeResult(method, result, input) as AgentMuxRpcResult<M>
+      return parseRpcNativeResult(method, method === 'agent.execution.watch' ? { bindingId: input.bindingId, inspection: result } : result, input) as AgentMuxRpcResult<M>
     }
     if (method === 'agent.execution.inspect') {
       if (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind) ||
@@ -4602,6 +4606,7 @@ export class AgentMuxRpcService {
     this.assertExposed(method)
     if (method === 'file.mutation.watch') params = structuredClone(parseFileMutationWatchParams(params)) as unknown as Record<string, unknown>
     await assertHostRouteDispatch(context, method, params, true)
+    if (method === 'agent.execution.watch') assertExecutionBindingAuthority(context)
     if (method === 'route.watch' || method === 'route.receive-watch') {
       if (!this.ports.hostRoutes) throw new AgentMuxError('The original route reader owner is unavailable.', 'CONTROL_UNAVAILABLE')
       return await this.ports.hostRoutes.watch(method === 'route.watch' ? parseHostRouteParams('route.watch', params) : parseHostRouteParams('route.receive-watch', params), event => onEvent((event && typeof event === 'object' && ['error', 'end'].includes(String((event as { type?: unknown }).type)) ? event : { type: 'route-event', event }) as AgentMuxRpcStreamEvent<M>), context, method === 'route.receive-watch') as AgentMuxRpcServiceSubscription<M>
@@ -4697,7 +4702,21 @@ export class AgentMuxRpcService {
     const emit = (event: unknown) => { if (!closed) return onEvent(event as AgentMuxRpcStreamEvent<M>) }
     try {
       let initial: unknown, start: (() => void | Promise<void>) | undefined
-      if (method === 'space.member.watch') {
+      if (method === 'agent.execution.watch') {
+        const input = parseAgentExecutionBinding(params)
+        const owner = this.ports.executionBindings
+        if (!owner?.watch) throw new AgentMuxError('The original execution binding observation is unavailable. Its intent and Runs are retained.', 'CONTROL_UNAVAILABLE')
+        const sub = await owner.watch(input.bindingId, async inspection => {
+          controller.signal.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+          await emit({ type: 'snapshot', data: parseAgentExecutionBindingObservation({ bindingId: input.bindingId, inspection }, input.bindingId) })
+        }, { ...context, signal: controller.signal, onError: error => {
+          void Promise.resolve(emit({ type: 'error', error: readerError(error) })).catch(() => {}).finally(() => dispose())
+        } })
+        cleanup = () => sub.dispose()
+        controller.signal.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+        initial = parseAgentExecutionBindingObservation(sub.initial, input.bindingId)
+        start = async () => { controller.signal.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context); sub.start() }
+      } else if (method === 'space.member.watch') {
         const input = parseSpaceMemberParams('space.member.watch', params)
         const original = await this.spaceMemberRuntime(input, { ...context, signal: controller.signal })
         const membership = await this.spaceAuthority.watch({ reference: input.target.reference }, async event => {

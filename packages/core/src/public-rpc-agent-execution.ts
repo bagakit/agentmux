@@ -8,7 +8,13 @@ import { normalizeLaunchOptionSelection } from './agent-launch-option.js'
 import { parseAgentNativeResumeSource } from './agent-native-sessions.js'
 import { parseAgentCreationSpatialIntent } from './agent-session-store.js'
 import { parseAgentMuxCreationAdmission } from './agent-creation-admission.js'
-import type { AgentExecutionOpenInput, AgentExecutionInspection } from './agent-execution-coordinator.js'
+import type { AgentExecutionOpenInput, AgentExecutionInspection, AgentExecutionBindingObservation } from './agent-execution-coordinator.js'
+
+export function parseAgentExecutionBindingObservation(value: unknown, bindingId: string): AgentExecutionBindingObservation {
+  const result = rpcRecord(value, ['bindingId', 'inspection'], 'CONTROL_PROTOCOL_ERROR')
+  if (result.bindingId !== bindingId) invalid('Execution observation belongs to another original binding.', 'CONTROL_PROTOCOL_ERROR')
+  return { bindingId, inspection: result.inspection === null ? null : parseAgentExecutionInspection(result.inspection, { bindingId }) }
+}
 
 export const AGENT_EXECUTION_CREATE_FIELDS = ['bindingId', 'agentHostId', 'agentRuntimeId', 'resourceHostId', 'resourceRuntimeId', 'resourceWorkspacePath', 'resourceGrant', 'agent', 'agentRoute', 'resourceRoute'] as const
 const agentFields = ['agentSessionId', 'createOperationId', 'executorId', 'executorRevision', 'workspacePath', 'prompt', 'agentMuxNote', 'sourceAgentMuxNote', 'agentMuxTask',

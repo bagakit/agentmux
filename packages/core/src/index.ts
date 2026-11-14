@@ -241,7 +241,7 @@ export type { AgentToolExecutionBinding } from './agent-tool-execution.js'
 export type { AgentExecutionOperationKey, AgentExecutionOperation } from './agent-execution-journal.js'
 
 export { AgentExecutionCoordinator, AgentExecutionBindingService } from './agent-execution-coordinator.js'
-export type { AgentExecutionOpenInput, AgentExecutionInspection, AgentExecutionHostPort, AgentExecutionCoordinatorOptions } from './agent-execution-coordinator.js'
+export type { AgentExecutionBindingObservation, AgentExecutionBindingWatch, AgentExecutionBindingWatchContext, AgentExecutionOpenInput, AgentExecutionInspection, AgentExecutionHostPort, AgentExecutionCoordinatorOptions } from './agent-execution-coordinator.js'
 export type { AgentExecutionReference, AgentExecutionFailure, AgentExecutionHelperStart } from './agent-execution-contract.js'
 export { parseAgentInputMoteSource, type AgentInputMoteSource } from './mote-input.js'
 export type { AgentInputMoteBinding, AgentInputMoteResolver, MoteInputInspection, MoteInputObservation, MoteInputSubmissionReference } from './mote-input.js'

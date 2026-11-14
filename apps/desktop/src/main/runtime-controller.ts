@@ -2661,6 +2661,15 @@ export class RuntimeController {
     return (method === 'message.read' || method === 'message.dispatch.read') ? { ...result, hostId } as AgentMuxRpcResult<M> : result
   }
 
+  async subscribeOriginalCore<M extends import('@agentmux/core').AgentMuxRpcStreamMethod>(hostId: string, method: M,
+    params: import('@agentmux/core').AgentMuxRpcStreamParams<M>, handlers: import('@agentmux/core').AgentMuxRpcSubscriptionOptions<M>, context: AgentMuxRpcCallContext) {
+    if (context.principal?.kind === 'device' && !context.forwarding) throw new AgentMuxError(
+      'The original device forwarding authority is unavailable. Its work and observations are retained.', 'CONTROL_UNAVAILABLE')
+    return await subscribeOriginalDesktopHost(this.configuredClient(hostId), method, params, { ...handlers,
+      ...(context.signal ? { signal: context.signal } : {}), ...(context.forwarding ? { forwarding: context.forwarding } : {}),
+      ...(context.caller ? { credentials: context.caller } : {}) }, context.runtimeFence)
+  }
+
   callHostRoute<M extends DesktopHostRouteMethod>(target: DesktopHostRouteTarget, method: M,
     params: import('@agentmux/core/host-route').HostRouteParams[M], signal?: AbortSignal
   ): Promise<import('@agentmux/core/host-route').HostRouteResults[M]> {

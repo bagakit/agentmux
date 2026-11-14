@@ -1,3 +1,4 @@
+import { parseAgentExecutionBindingObservation } from './public-rpc-agent-execution.js'
 import { parseFileMutationWatchParams, parseFileMutationWatchOpening, parseFileMutationEffect, type FileMutationWatchOpening } from './public-rpc-file-mutations.js'
 import { agentMuxRpcSshArguments } from './ssh-runtime-target.js'
 export { agentMuxRpcSshArguments } from './ssh-runtime-target.js'
@@ -61,6 +62,7 @@ export type AgentMuxRpcSubscriptionOptions<M extends AgentMuxRpcStreamMethod> = 
   signal?: AbortSignal
   runtimeFence?: AgentMuxRuntimeFence
   forwarding?: RpcForwardingSource
+  credentials?: AgentMuxRpcCredentials
 }
 export type AgentMuxRpcSubscription = { subscriptionId: string; dispose(): Promise<void> }
 export type AgentMuxPreparedSshRoute = {
@@ -223,6 +225,7 @@ function streamInitial(method: AgentMuxRpcStreamMethod, value: unknown, params: 
     } else if (typeof p.transferId !== 'string' || !p.transferId) throw new AgentMuxError('Runtime opening lacks its snapshot transfer identity.', 'CONTROL_PROTOCOL_ERROR')
     return p
   }
+  if (method === 'agent.execution.watch') return parseAgentExecutionBindingObservation(p, (params as { bindingId: string }).bindingId)
   if (method === 'terminal.output') { const input = parseTerminalOutputParams(params); return parseTerminalInspection(value, input.target, input) }
   if (method === 'agent.conversation.watch') return parseConversationWatchOpening(p, params as import('./conversation.js').ConversationRef)
   if (method === 'space.snapshot' || method === 'space.watch') return parseSpaceStreamOpening(p, params as SpaceWatch)
@@ -308,6 +311,7 @@ function streamEvent(method: AgentMuxRpcStreamMethod, value: unknown, initial: u
   }
   if (method === 'agent.conversation.watch' && event.type === 'snapshot') return { ...event, data: parseConversationObservation(event.data, initial as ConversationWatchOpening) }
   if ((method === 'space.snapshot' || method === 'space.watch' || method === 'space.sessions.watch') && event.type === 'snapshot') return { type: 'snapshot', data: parseHostedTransferChunk(event.data) }
+  if (method === 'agent.execution.watch' && event.type === 'snapshot') return { type: 'snapshot', data: parseAgentExecutionBindingObservation(event.data, (initial as import('./agent-execution-coordinator.js').AgentExecutionBindingObservation).bindingId) }
   if (method === 'file.mutation.watch' && event.type === 'effect') return { type: 'effect', data: parseFileMutationEffect(event.data, (initial as FileMutationWatchOpening).resource) }
   if (method === 'goal.watch' && event.type === 'change') return { type: 'change', data: parseGoalChanges(event.data) }
   if (method === 'connection.metadata.watch' && event.type === 'change') return { type: 'change', data: parseChannelMetadataChange(event.data) }
@@ -568,7 +572,7 @@ class RpcClient implements AgentMuxRpcClient {
   }
   async subscribe<M extends AgentMuxRpcStreamMethod>(method: M, params: AgentMuxRpcStreamParams<M>, handlers: AgentMuxRpcSubscriptionOptions<M>): Promise<AgentMuxRpcSubscription> {
     const exchange = await this.exchange(method, params, handlers as AgentMuxRpcSubscriptionOptions<AgentMuxRpcStreamMethod>, handlers.signal,
-      { ...(handlers.runtimeFence === undefined ? {} : { runtimeFence: handlers.runtimeFence }), ...(handlers.forwarding ? { forwarding: handlers.forwarding } : {}) })
+      { ...(handlers.runtimeFence === undefined ? {} : { runtimeFence: handlers.runtimeFence }), ...(handlers.forwarding ? { forwarding: handlers.forwarding } : {}), ...(handlers.credentials ? { credentials: handlers.credentials } : {}) })
     return { subscriptionId: exchange.subscriptionId!, dispose: async () => { await exchange.reader.dispose(); this.readers.delete(exchange.reader) } }
   }
   setSshRemoteCommand(command?: string): void {

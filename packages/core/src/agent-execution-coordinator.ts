@@ -85,6 +85,9 @@ export interface AgentExecutionCoordinatorOptions {
   authorize?(input: AgentExecutionOpenInput, context: AgentMuxRpcCallContext | undefined, retained: HostRouteExecutionAuthorization | undefined, existing: boolean): Promise<HostRouteExecutionAuthorization | undefined>
   onObservation?(value: AgentExecutionInspection): void
 }
+export type AgentExecutionBindingObservation = { bindingId: string; inspection: AgentExecutionInspection | null }
+export type AgentExecutionBindingWatch = { initial: AgentExecutionBindingObservation; start(): void; dispose(): void | Promise<void> }
+export type AgentExecutionBindingWatchContext = AgentMuxRpcCallContext & { onError?(error: unknown): void }
 
 /** One Core's related execution bindings. Helpers and Agents remain owned by their original Hosts. */
 type ResolvedHosts = { agent: AgentExecutionHostPort; resource: AgentExecutionHostPort; adopted: boolean; dispose(): Promise<void> }
@@ -490,6 +493,8 @@ export class AgentExecutionCoordinator {
 /** Optional service lifetime. Unused Hosts create no execution store; failed
  * observation affects this capability only, never the Host's other Sessions. */
 export class AgentExecutionBindingService {
+  private readonly observers = new Map<string, Set<(value: AgentExecutionInspection) => void>>()
+  private readonly readers = new Set<(error?: unknown) => void>()
   private owner: Promise<AgentExecutionCoordinator> | undefined
   private closed = false
   constructor(private readonly directory: string, private readonly options: AgentExecutionCoordinatorOptions) {}
@@ -505,7 +510,10 @@ export class AgentExecutionBindingService {
   private coordinator(): Promise<AgentExecutionCoordinator> {
     if (this.closed) return Promise.reject(fail('This execution service reader is closed.', 'EXECUTION_READER_UNAVAILABLE'))
     if (!this.owner) {
-      const pending = AgentExecutionCoordinator.open(this.directory, this.options)
+      const pending = AgentExecutionCoordinator.open(this.directory, { ...this.options, onObservation: value => {
+        try { this.options.onObservation?.(structuredClone(value)) } catch { /* Observation never changes a binding. */ }
+        for (const observe of this.observers.get(value.bindingId) ?? []) observe(structuredClone(value))
+      } })
       this.owner = pending
       void pending.catch(() => { if (this.owner === pending) this.owner = undefined })
     }
@@ -522,6 +530,39 @@ export class AgentExecutionBindingService {
     if (!this.owner && !await this.retained()) return null
     return (await this.coordinator()).inspect(bindingId, view)
   }
+  /** One related live snapshot reader, with at most one in-flight and one latest
+   * value. Reading or cancelling never advances or closes the Coordinator. */
+  async watch(bindingId: string, onSnapshot: (value: AgentExecutionInspection | null) => void | Promise<void>, context: AgentExecutionBindingWatchContext = {}): Promise<AgentExecutionBindingWatch> {
+    if (this.closed) throw fail('The original execution reader is closed.', 'EXECUTION_READER_UNAVAILABLE')
+    context.signal?.throwIfAborted()
+    let active = true, started = false, emitting = false, pending: AgentExecutionInspection | undefined
+    const dispose = (error?: unknown) => {
+      if (!active) return
+      active = false; pending = undefined
+      context.signal?.removeEventListener('abort', aborted)
+      this.readers.delete(dispose)
+      const group = this.observers.get(bindingId); group?.delete(observe)
+      if (!group?.size) this.observers.delete(bindingId)
+      if (error) try { context.onError?.(error) } catch { /* One reader cannot close another. */ }
+    }
+    const aborted = () => dispose()
+    const drain = () => {
+      if (!active || !started || emitting || pending === undefined) return
+      const value = pending; pending = undefined; emitting = true
+      void Promise.resolve().then(() => { if (active) return onSnapshot(value) }).catch(dispose).finally(() => { emitting = false; drain() })
+    }
+    const observe = (value: AgentExecutionInspection) => { pending = value; drain() }
+    const group = this.observers.get(bindingId) ?? new Set()
+    group.add(observe); this.observers.set(bindingId, group); this.readers.add(dispose)
+    context.signal?.addEventListener('abort', aborted, { once: true })
+    try {
+      const value = await this.inspect(bindingId)
+      context.signal?.throwIfAborted()
+      if (!active) throw fail('The original execution reader closed during inspection.', 'EXECUTION_READER_UNAVAILABLE')
+      const initial = { bindingId, inspection: pending ?? value }; pending = undefined
+      return { initial, start: () => { started = true; drain() }, dispose }
+    } catch (error) { dispose(); throw error }
+  }
   async rejoin(bindingId: string, context?: AgentMuxRpcCallContext): Promise<AgentExecutionInspection> {
     if (!this.owner && !await this.retained()) throw fail('The original execution binding is unavailable.', 'EXECUTION_HELPER_UNAVAILABLE')
     return await (await this.coordinator()).rejoin(bindingId, context)
@@ -532,6 +573,7 @@ export class AgentExecutionBindingService {
   }
   async dispose(): Promise<void> {
     this.closed = true
+    for (const close of [...this.readers]) close(fail('The original Core execution reader is closing. Its bindings and Runs are retained.', 'EXECUTION_READER_UNAVAILABLE'))
     const owner = await this.owner?.catch(() => undefined)
     await owner?.dispose()
   }

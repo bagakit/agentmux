@@ -24,8 +24,7 @@ import { createAppCapturePort } from './app-capture-owner.js'
 import { isTerminalMouseReportPayload } from '@agentmux/core'
 import { bindAppBrandIcon } from './app-brand-icon.js'
 import { registerExecutionBindingIpc } from './execution-binding-ipc.js'
-import { ExecutionBindingReaders } from './execution-binding-readers.js'
-import { AgentExecutionBindingService } from '@agentmux/core'
+import { createDesktopExecutionBindings } from './desktop-execution-bindings'
 import { preparePublicUserProfile } from '@agentmux/host/author-profile'
 import { fileUploadRevision, parseFileUploadIdentity, parseFileUploadResult } from '@agentmux/core/files'
 import { attachLauncherAgentPosition, captureGoalDiscussionLauncherLaunch, confirmGoalDiscussionLauncherLaunch, handoffGoalDiscussion, launcherCreationSpatialIntent } from './goal-discussion-handoff.js'
@@ -2654,17 +2653,12 @@ export async function registerIpc(args: {
   registerMoteConnectionIpc({ handleWithEvent, runtime: args.runtime })
   registerMoteDialogueIpc({ handleWithEvent, runtime: args.runtime })
   registerMotePreferencesIpc({ handleWithEvent, socketPath: desktopBusinessSocketPath(), runtime: args.runtime })
-  const executionBindingReaders = new ExecutionBindingReaders(bindingId => executionBindings.inspect(bindingId))
-  const executionBindings = new AgentExecutionBindingService(join(app.getPath('userData'), 'execution-bindings'), {
-    onObservation: inspection => executionBindingReaders.publish(inspection),
-    resolveHost: hostId => args.runtime.executionBindingHost(hostId)
-  })
+  const executionBindingTransport = createDesktopExecutionBindings(args.runtime)
+  const { bindings: executionBindings, readers: executionBindingReaders } = executionBindingTransport
   registerExecutionBindingIpc({ handle: handleWithEvent, bindings: executionBindings, readers: executionBindingReaders,
     coordinatorTarget: () => args.runtime.executionCoordinatorTarget(),
     coordinator: target => args.runtime.assertExecutionCoordinator(target),
     project: (hostId, session) => args.runtime.projectAgentCreation(hostId, session, config) })
-  // Rejoin only retained tool readers. Startup never creates or restores an Agent.
-  void executionBindings.restoreReaders().catch(error => console.warn('Original tool execution observation is unavailable:', error))
   const control = new AgentMuxControlServer({
     exposedMethods: desktopRpcMethods(),
     executionBindings,
@@ -2798,7 +2792,7 @@ export async function registerIpc(args: {
       { owner: 'control-listener', dispose: () => { ipcMain.removeListener(CONTROL_RESPONSE_CHANNEL, acceptControl) } },
       { owner: 'control-bridge', dispose: () => controlBridge.dispose() },
       { owner: 'control-server', dispose: () => control.stop() },
-      { owner: 'execution-binding-reader', dispose: () => { executionBindingReaders.dispose(); return executionBindings.dispose() } },
+      { owner: 'execution-binding-reader', dispose: () => executionBindingTransport.dispose() },
       { owner: 'channel-metadata', dispose: () => channelMetadata?.dispose() },
       { owner: 'runtime-attachment', dispose: () => detach() },
       { owner: 'history-observations', dispose: () => historyObservations.dispose() },
