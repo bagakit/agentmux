@@ -112,10 +112,18 @@ export async function prepareMoteCooperationDraft(scope: MoteWorkfaceScope,
 /** Only the explicitly inspected original material is read through the public typed file domain. */
 export function readMoteMaterial(scope: MoteWorkfaceScope, path: string): Promise<FileReadResult> {
   if (!fileExplorerContains(scope.rootPath, path) || path === scope.rootPath) throw new Error('Choose a file in this original Mote folder.')
-  const spaceId = directoryIdentity(scope.workspace.hostId, scratchTopicIdentityPath(scope.workspace, scope.topic))
-  const params = { zoneId: homeZoneId(spaceId), spaceId, path: path.slice(scope.rootPath.length + 1),
-    expectedResource: { hostId: scope.workspace.hostId, workspaceId: scope.workspace.id, workspacePath: scope.workspace.path } }
+  const params = { ...moteMaterialTarget(scope), path: path.slice(scope.rootPath.length + 1) }
   return api.files.readPublic(params).then(result => parseFileReadResult(result, params))
+}
+
+export function listMoteMaterials(scope: MoteWorkfaceScope) {
+  return api.files.listPublic({ ...moteMaterialTarget(scope), path: '.', mode: 'directory' })
+}
+
+function moteMaterialTarget(scope: MoteWorkfaceScope) {
+  const spaceId = directoryIdentity(scope.workspace.hostId, scratchTopicIdentityPath(scope.workspace, scope.topic))
+  return { zoneId: homeZoneId(spaceId), spaceId,
+    expectedResource: { hostId: scope.workspace.hostId, workspaceId: scope.workspace.id, workspacePath: scope.workspace.path } }
 }
 
 /** One original SOUL staging protocol for explicit preferences and note feedback. */

@@ -32,7 +32,7 @@ import { bindAppBrandIcon } from './app-brand-icon.js'
 import { registerExecutionBindingIpc } from './execution-binding-ipc.js'
 import { createDesktopExecutionBindings } from './desktop-execution-bindings'
 import { preparePublicUserProfile } from '@agentmux/host/author-profile'
-import { fileUploadRevision, parseFileUploadIdentity, parseFileUploadResult } from '@agentmux/core/files'
+import { fileUploadRevision, parseFileListParams, parseFileListResult, parseFileUploadIdentity, parseFileUploadResult } from '@agentmux/core/files'
 import { attachLauncherAgentPosition, captureGoalDiscussionLauncherLaunch, confirmGoalDiscussionLauncherLaunch, handoffGoalDiscussion, launcherCreationSpatialIntent } from './goal-discussion-handoff.js'
 import { desktopGoalControl, desktopGoalChanges, observeDesktopGoalChanges, readDesktopGoals, confirmDesktopGoalParticipation, reconcileDesktopGoalDispatch } from './desktop-goals.js'
 import { hostGoalRecord } from '@agentmux/host/goal-projection'
@@ -1324,6 +1324,10 @@ export async function registerIpc(args: {
   handleWithEvent('files:createPublic', async (event, input: import('@agentmux/core').FileCreateParams) => { return publicFiles.create(input, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } }) })
   handleWithEvent('files:readPublic', async (event, input: import('@agentmux/core').FileReadParams) => {
     return await publicFiles.read(input)
+  })
+  handle('files:listPublic', async (input: unknown) => {
+    const params = parseFileListParams(input)
+    return parseFileListResult(await publicFiles.list(params), params)
   })
   handleWithEvent('files:historyPublic', async (event, input: import('@agentmux/core').FileHistoryParams) => {
     const params = parseFileHistoryParams(input)

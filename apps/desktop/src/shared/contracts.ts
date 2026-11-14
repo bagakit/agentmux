@@ -1821,6 +1821,7 @@ export type AgentMuxDesktopApi = {
     shareUndoPublic(params: import('@agentmux/core/files').FileShareUndoParams): Promise<import('@agentmux/core/files').FileShareUndoResult>
     inspectSharePublic(params: import('@agentmux/core/files').FileShareInspectParams): Promise<import('@agentmux/core/files').FileShareInspectResult>
     readPublic(params: AgentMuxRpcParams<'file.read'>): Promise<AgentMuxRpcResult<'file.read'>>
+    listPublic(params: AgentMuxRpcParams<'file.list'>): Promise<AgentMuxRpcResult<'file.list'>>
     createPublic(params: AgentMuxRpcParams<'file.create'>): Promise<AgentMuxRpcResult<'file.create'>>
     importPublic(params: AgentMuxRpcParams<'file.import'>): Promise<AgentMuxRpcResult<'file.import'>>
     historyPublic(params: AgentMuxRpcParams<'file.history'>): Promise<AgentMuxRpcResult<'file.history'>>
