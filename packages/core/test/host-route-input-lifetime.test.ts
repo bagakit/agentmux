@@ -69,7 +69,8 @@ async function fixture(beforeD?: (context: AgentMuxRpcCallContext) => Promise<vo
   const call = (signal?: AbortSignal) => routedAgentMuxRpc(rpcB, 'D', route).call('runtime.invoke', { consumerId: 'original-viewer', fence: { runtimeId: 'runtime-D', ownerInstanceId: 'owner-D' },
     invocation: { method: 'submitAgentPrompt', args: [{ agentSessionId: key.agentSessionId, expectedRun: key.expectedRun, operationId: key.submissionId,
       prompt: 'Original explicit GUI input', admissionIntent: { kind: 'manual-actor' }, execution: 'immediate' }] } }, signal ? { signal } : {})
-  return { ...h, actor, arrivals, key, call, entered, hold, configureD, grant, gatewayD, policyPath: join(h.root, 'D', 'host-route-settings.json') }
+  const rejoin = (ref: import('../src/agent-input-wait.js').AgentInputWaitRef) => routedAgentMuxRpc(rpcB, 'D', route).call('runtime.invoke', { consumerId: 'original-viewer', fence: { runtimeId: 'runtime-D', ownerInstanceId: 'owner-D' }, invocation: { method: 'rejoinAgentInputWaiting', args: [{ ref }] } })
+  return { ...h, actor, arrivals, key, call, rejoin, entered, hold, configureD, grant, gatewayD, policyPath: join(h.root, 'D', 'host-route-settings.json') }
 }
 
 test('a real routed first-save reply does not retire the accepted Core input authority before deferred Native dispatch', async () => {
@@ -171,4 +172,26 @@ test('a stop that wins during authority handoff retains its original input and r
     expect(f.inner.kernel.input).not.toHaveBeenCalled()
     expect(f.inner.kernel.stop).not.toHaveBeenCalled()
   } finally { release.resolve(); await pending }
+})
+
+test.each([false,true])('routed original rejoin retains its exact accepted key after unary close (D revoked=%s)', async (revoked) => {
+ const f=await fixture();await f.configureD([{...f.grant,scopes:[...f.grant.scopes,'runtime.invoke/rejoinAgentInputWaiting']}])
+ const first=decodeHostedValue((await f.call()).value) as AgentInputSubmissionReceipt
+ await f.entered.pending
+ await f.client.stopAgentInputWaiting({ref:first.ref,cancelOperationId:'private-original-stop'})
+ f.hold.resolve();await expect.poll(()=>Reflect.get(f.client,'inputWaitingContexts').size).toBe(0)
+ expect(f.inner.kernel.input).not.toHaveBeenCalled()
+ const entered=barrier(),hold=barrier(),status=(f.inner.kernel.status as (id:string)=>Promise<ReturnType<typeof f.run>>).bind(f.inner.kernel)
+ cleanups.push(async()=>{hold.resolve()})
+ f.inner.kernel.status=async (id:string)=>{entered.resolve();await hold.pending;return await status(id)}
+ const resumed=decodeHostedValue((await f.rejoin(first.ref)).value) as AgentInputSubmissionReceipt
+ expect(resumed.key).toEqual(first.key);expect(resumed.ref.waitGeneration).toBeGreaterThan(first.ref.waitGeneration)
+ await entered.pending;expect(Reflect.get(f.gatewayD,'active').size).toBe(0)
+ if(revoked)await f.configureD([])
+ hold.resolve()
+ await expect.poll(async()=>{const current=await f.client.inspectAgentInput({key:f.key});return current?.status==='terminal-confirmed'||current?.control.state==='enabled'&&current.control.waiting?.failure?.code!==undefined}).toBe(true)
+ const current=await f.client.inspectAgentInput({key:f.key})
+ if(revoked){expect(current?.control.state==='enabled'?current.control.waiting?.failure?.code:undefined).toBe('HOST_ROUTE_NOT_DELEGATED');expect(f.inner.kernel.input).not.toHaveBeenCalled()}
+ else{expect(current?.status).toBe('terminal-confirmed');expect(f.inner.kernel.input).toHaveBeenCalled()}
+ expect(current?.key).toEqual(first.key);expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })

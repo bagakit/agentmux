@@ -11,7 +11,8 @@ import { spatialAgentOpenRecord, isHeadlessSpatialAgentOpen, isBackgroundLocalAg
 import { readSpaceSnapshot } from '../src/space-authority-stream.js'
 import { parseAgentMuxCliInvocation } from '../src/agentmux-cli-commands.js'
 import { rpcControlRequest } from '../src/rpc-business-codec.js'
-import { runSourceObjectCli } from './helpers/source-object-cli.js'
+import { runSourceObjectCli as originalSourceObjectCli } from './helpers/source-object-cli.js'
+const runSourceObjectCli: typeof originalSourceObjectCli = (args,env,stdin,timeout,loader) => originalSourceObjectCli(args,env,stdin,timeout,loader ?? (process.env.T012_CLI_LOADER ? new URL(process.env.T012_CLI_LOADER) : undefined))
 import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
 import { createHostSpatialAgentControl } from '../../../apps/host/src/spatial-agent-control.js'
 import type { AgentMuxHeadlessRuntime } from '../src/headless-runtime.js'
@@ -250,4 +251,14 @@ it('an original launch with ordinary fields continues its frozen binding without
   f.client.listHostExecutors.mockRejectedValue(Error('Current discovery cannot replace an original creation.'))
   expect(await f.rpc.call('agent.open',request)).toMatchObject({outcome:'opened',agent:{runId:'original-d-run'}})
   expect(f.bindings.create).toHaveBeenCalledTimes(1);expect(f.bindings.continueOriginal).toHaveBeenCalledTimes(1);expect(f.frozen()).toEqual(original)
+})
+
+it('the actual Host admissions keep two same-SID same-Run creation pins distinct at the Source resolver', async () => {
+ const f=await fixture(),one=await f.rpc.call('agent.open',f.input),two=await f.rpc.call('agent.open',{...f.input,operationId:'other-source-C'})
+ expect(one.agent?.agentSessionId).toBe(two.agent?.agentSessionId);expect(one.agent?.runId).toBe(two.agent?.runId)
+ const {resolveSpaceMember}=await import('../src/space-member-owner.js')
+ const target={reference:{runtimeId:'runtime-b',spaceId:f.folder.spaceId},regionId:one.to!.regionId,runtimeId:'runtime-d',agentSessionId:one.agent!.agentSessionId,expectedRun:{runId:one.agent!.runId!},expectedAdmission:{kind:'creation' as const,operationId:f.input.operationId}}
+ expect(await resolveSpaceMember(f.spatial,target)).toMatchObject({createOperationId:f.input.operationId})
+ await expect(resolveSpaceMember(f.spatial,{...target,expectedAdmission:{kind:'creation',operationId:'other-source-C'}})).rejects.toMatchObject({code:'SPACE_MEMBER_ADMISSION_UNCONFIRMED'})
+ expect(f.agentInput).not.toHaveBeenCalled();expect(f.create).toHaveBeenCalledTimes(1)
 })

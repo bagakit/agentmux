@@ -239,17 +239,18 @@ test('an exact current viewer member parent preserves A and refuses another payl
   const f = await fixture(), a = f.e, actor = { source: a.identity, ...principal }
   const parentRoute = { source: a.identity, hops: [{ edgeId: 'B', target: f.b.identity }] }
   const target = { reference: { runtimeId: f.b.identity.runtimeId, spaceId: 'original-space' }, regionId: 'original-region', runtimeId: f.d.identity.runtimeId,
-    agentSessionId: 'original-SID', expectedRun: { runId: 'original-agent-run' } }
+    agentSessionId: 'original-SID', expectedRun: { runId: 'original-agent-run' }, expectedAdmission: { kind: 'creation' as const, operationId: 'original-member-CID' } }
   const input = { target, call: { method: 'runtime.invoke' as const, params: { consumerId: 'original-viewer', fence: f.call.params.fence,
-    invocation: { method: 'writeAgent' as const, args: [{ agentSessionId: target.agentSessionId, expectedRun: target.expectedRun, source: 'user' as const, data: 'original-bytes' }] } } } }
+    invocation: { method: 'writeAgent' as const, args: [{ agentSessionId: target.agentSessionId, expectedRun: target.expectedRun, source: 'user' as const, data: 'original-bytes' }] } } } } satisfies import('../src/space-member.js').SpaceMemberParams['space.member.call']
   await f.configure(a, [{ id: 'B', route: parentRoute }], [])
   await f.configure(f.b, [{ id: 'D', route: f.route }], [{ id: 'A-member', delegator: a.identity, actor, destination: f.b.identity, scopes: ['space.member.call'] }])
   const cGrant = f.grant('B-member', f.b.identity, actor), dGrant = f.grant('C-member', f.c.identity, actor)
   cGrant.scopes.push('runtime.invoke/writeAgent'); dGrant.scopes.push('runtime.invoke/writeAgent')
   await f.configure(f.c, [], [cGrant]); await f.configure(f.d, [], [dGrant])
-  let change = false, wrongMember = false, wrongParent = false
+  let change = false, wrongMember = false, wrongParent = false, wrongAdmission = false
   f.intercept.set('B', async (_method, params, context) => {
     const request = structuredClone(params) as typeof input
+    if (wrongAdmission) request.target.expectedAdmission.operationId = 'another-C-same-SID-Run'
     if (wrongParent) request.call.params.invocation.args[0]!.data = 'not-the-original-A-input'
     const authorization = await f.b.gateway.authorizeMemberControl({ ...request, createOperationId: 'original-member-CID' }, context)
     const forwarded = structuredClone(request.call.params)
@@ -270,7 +271,10 @@ test('an exact current viewer member parent preserves A and refuses another payl
   wrongMember = false; wrongParent = true
   const invented = await sdk.call('space.member.call', input).then(() => ({ code: 'INCORRECTLY_DELIVERED' }), error => ({ code: error.code }))
   expect(invented).toEqual({ code: 'HOST_ROUTE_DERIVATION_MISMATCH' })
-  wrongParent = false
+  wrongParent = false; wrongAdmission = true
+  const otherCreation = await sdk.call('space.member.call', input).then(() => ({ code: 'INCORRECTLY_DELIVERED' }), error => ({ code: error.code }))
+  expect(otherCreation).toEqual({ code: 'HOST_ROUTE_DERIVATION_MISMATCH' });expect(f.arrivals.filter(value => value.consumer !== null)).toHaveLength(delivered)
+  wrongAdmission = false
   const human = structuredClone(input) as unknown as { target: typeof target; call: { method: string; params: Record<string, unknown> } }
   human.call.params.invocation = { method: 'respondAgentInteraction', args: [{ agentSessionId: target.agentSessionId, expectedRun: target.expectedRun, operationId: 'original-permission', decision: 'allow' }] }
   await expect(sdk.call('space.member.call', human as never)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
