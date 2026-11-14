@@ -66,7 +66,7 @@ async function toggleGuide(open: boolean) {
   return guide!
 }
 function guideText(content: string) {
-  return content.replace(/^#{1,6} /gmu, '').replace(/^\|(?:\s*:?-+:?\s*\|)+\s*$/gmu, '').replace(/\|/gu, '').replace(/^\d+\. /gmu, '').replace(/^\s*- /gmu, '')
+  return content.replace(/^```[^\n]*$/gmu, '').replace(/^#{1,6} /gmu, '').replace(/^\|(?:\s*:?-+:?\s*\|)+\s*$/gmu, '').replace(/\|/gu, '').replace(/^\d+\. /gmu, '').replace(/^\s*- /gmu, '')
     .replace(/\[([^\]]+)\]\([^)]*\)/gu, '$1').replace(/\*\*|`/gu, '').replace(/\s+/gu, '')
 }
 
