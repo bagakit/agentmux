@@ -203,7 +203,8 @@ function GoalFiniteStartWorkface({ demand, primary = false, embedded = false, co
   const newTask = <>{recipients}{connections}
     <div className="goals-inline-actions"><button type="button" className={primary && !hasOriginalTask ? 'primary-button' : 'small-button'} disabled={busy || rows.length > 0 && !target} onClick={() => { if (!rows.length) setPicker(true); else void run(start) }}>{busy ? 'Submitting…' : target ? `Start with ${target.name}` : rows.length ? 'Choose an Agent for this task' : 'Choose execution Agent'}</button>
       {rows.length ? <Button type="button" onClick={() => setPicker(true)}>Manage assignees</Button> : null}</div></>
-  return <section className="goal-finite-start" data-goal-finite-start={demand.id} aria-label="One-time Goal execution">
+  return <section className="goal-finite-start" data-goal-finite-start={demand.id} aria-label="One-time Goal execution"
+    tabIndex={conclusion ? -1 : undefined} data-goal-retained-operation={conclusion ? pending?.operationId : undefined}>
     {!embedded ? <div className="goals-section-heading"><h2>{hasOriginalTask ? 'Task execution' : 'Execute task'}</h2><span className="goals-caption">One-time task</span></div> : null}
     {pending ? connections : null}
     {rejected ? recipients : null}

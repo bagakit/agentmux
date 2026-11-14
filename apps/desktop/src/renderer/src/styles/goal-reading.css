@@ -10,6 +10,9 @@
 .goals-detail__reading-nav > .goals-detail__copy { margin-left: auto; color: var(--text-3); font-size: var(--fs-meta); }
 .goals-detail__brief, .goals-detail__plan, .goals-detail__activity { min-width: 0; scroll-margin-top: var(--goal-detail-reading-offset, 90px); }
 .goals-detail__brief:focus, .goals-detail__plan:focus, .goals-detail__activity:focus { outline: none; }
+.goals-detail__current-work { flex: none; margin-inline-end: auto; }
+.goals-detail :is([data-goal-work-operation], [data-goal-retained-operation]) { scroll-margin-top: var(--goal-detail-reading-offset, 90px); }
+.goals-detail :is([data-goal-work-operation], [data-goal-retained-operation]):focus { outline: 2px solid var(--focus-line); outline-offset: 3px; border-radius: var(--radius-sm); }
 .goal-work-area__overview { display: grid; align-items: start; gap: var(--sp-6); min-width: 0; padding: var(--sp-5) 0; }
 .goal-work-area__overview > .goals-detail__brief { margin: 0; padding: 0; border: 0; }
 .goals-detail__brief .goals-section-heading { margin-bottom: var(--sp-3); }
