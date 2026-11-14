@@ -73,11 +73,11 @@ export async function measureRepresentativeWorkface(window: BrowserWindow, runti
       const inspected = parseDesktopClientObservation(observation)
       if (inspected.main.pid !== process.pid) throw new Error('Workbench observation belongs to a different Desktop Main process.')
       const state = inspected.workbench
-      if (state.loading || (state.persistence.spatial.revision ?? 0) < fixture.revision) return undefined
+      if (state.loading || (state.persistence?.spatial.revision ?? 0) < fixture.revision) return undefined
       loadedIdentity = inspected.main
       return state
     })
-    evidence.fixtureRevision = snapshot.persistence.spatial.revision ?? 0
+    evidence.fixtureRevision = snapshot.persistence?.spatial.revision ?? 0
     const tabs = new Map(snapshot.tabs.map(tab => [tab.id, tab]))
     const projected = fixture.tabs.filter(expected => {
       const tab = tabs.get(expected.id)
