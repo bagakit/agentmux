@@ -312,6 +312,103 @@ it('an existing dedicated discussion is retained while a new plan request goes o
   expect((await fixture.host.demands.get('discovery'))!.delegations ?? []).toEqual([])
 })
 
+/** Mount the same destination hook consumed by the floating conversation workface. */
+async function mountPlanningDestination() {
+  const { usePmoTeamsTopicFloatingState } = await import('../src/renderer/src/lib/pmo-teams-topic-floating')
+  const { usePmoTeamsTopicTarget } = await import('../src/renderer/src/lib/pmo-teams-topic-target')
+  function Destination() {
+    const [floating] = usePmoTeamsTopicFloatingState(), target = usePmoTeamsTopicTarget(floating)
+    return <output data-planning-destination data-pmo-teams-topic-floating tabIndex={-1} data-host={target.session?.hostId ?? ''} data-session={target.session?.kind === 'agent' ? target.session.control.agentSessionId : ''}
+      data-tab={target.tabId ?? ''} data-issue={target.identityIssue ?? ''}>{target.label}</output>
+  }
+  await act(async () => root.render(<><GlobalBoardSurface /><Destination /></>))
+}
+async function addPlanningNamesake() {
+  const { createWorkbenchTab } = await import('../src/renderer/src/lib/workbench-tabs')
+  await act(async () => useAppStore.setState(state => {
+    const primary = state.sessions.find(session => session.id === fixture.primary.agentSessionId)!
+    if (primary.kind !== 'agent') throw Error('The original Supervisor presentation is required')
+    const duplicate = { ...primary, id: 'other-host-primary', hostId: 'other-host', control: { ...primary.control, hostId: 'other-host' } }
+    const original = state.tabs['primary-tab']!, region = original.regions['primary-region']!
+    if (region.kind !== 'agent') throw Error('The original Agent Region is required')
+    return { sessions: [...state.sessions, duplicate], tabs: { ...state.tabs, 'other-host-tab': createWorkbenchTab('other-host-tab', {
+      ...region, regionId: 'other-host-region', sessionId: duplicate.id
+    }) } }
+  }))
+}
+
+it.each(['another-supervisor', 'no-supervisor'] as const)('checking a retained planning request opens its original Supervisor and Host after the Goal chooses %s', async choice => {
+  await save(); await nativeState('done'); const request = await requestPlan()
+  await useAppStore.getState().openDemandPmo('discovery')
+  const replacement = binding().recipient.agentSessionId
+  expect(replacement).not.toBe(fixture.primary.agentSessionId)
+  await act(async () => useAppStore.getState().updateDemand('discovery', { supervisorSessionId: choice === 'no-supervisor' ? null : replacement, assigneeSessionIds: [fixture.primary.agentSessionId, replacement] }))
+  await addPlanningNamesake(); await mountPlanningDestination()
+  const before = structuredClone(planningRequest()), writes = [...fixture.core.writes], starts = fixture.core.start.mock.calls.length
+  expect(container.querySelector('[data-goal-plan-request]')?.textContent).toContain('Check request')
+  const { readPmoTeamsTopicFloatingState } = await import('../src/renderer/src/lib/pmo-teams-topic-floating')
+  const gate = fixture.host.once('demand.discuss', { kind: 'hold-receipt' }, request => request.mode === 'plan')
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-goal-plan-request]')!.click())
+  try {
+    await gate.committed
+    expect(readPmoTeamsTopicFloatingState()).toMatchObject({ agentTarget: { agentSessionId: fixture.primary.agentSessionId, hostId: 'local' }, targetTabId: 'primary-tab' })
+  } finally { gate.release(); await act(async () => fixture.host.settle()) }
+  const replay = fixture.host.executed('demand.discuss').at(-1)!
+  expect(replay.requestId).toBe(request.requestId)
+  expect(readPmoTeamsTopicFloatingState()).toMatchObject({ agentTarget: { agentSessionId: fixture.primary.agentSessionId, hostId: 'local' }, targetTabId: 'primary-tab' })
+  expect(container.querySelector('[data-planning-destination]')?.getAttribute('data-host')).toBe('local')
+  expect(container.querySelector('[data-planning-destination]')?.getAttribute('data-session')).toBe(fixture.primary.agentSessionId)
+  expect(container.querySelector('[data-planning-destination]')?.getAttribute('data-tab')).toBe('primary-tab')
+  expect(planningRequest()).toEqual(before); expect(fixture.core.writes).toEqual(writes); expect(fixture.core.start.mock.calls.length).toBe(starts)
+})
+
+it('a planning receipt binds the exact Host while an unknown destination never chooses a namesake from inventory', async () => {
+  await save(); await nativeState('done'); await addPlanningNamesake(); await mountPlanningDestination()
+  const { readPmoTeamsTopicFloatingState } = await import('../src/renderer/src/lib/pmo-teams-topic-floating')
+  const frames: FrameRequestCallback[] = []
+  vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation(callback => { frames.push(callback); return frames.length })
+  const gate = fixture.host.once('demand.discuss', { kind: 'hold-receipt' }, request => request.mode === 'plan')
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-goal-plan-request]')!.click())
+  try {
+    const result = await gate.committed
+    expect(result.operation).toBe('demand.discuss')
+    expect(readPmoTeamsTopicFloatingState()).toMatchObject({ open: true, agentTarget: { agentSessionId: null }, targetTabId: null })
+    expect(container.querySelector('[data-planning-destination]')?.getAttribute('data-session')).toBe('')
+    expect(container.querySelector('[data-planning-destination]')?.getAttribute('data-tab')).toBe('')
+  } finally { gate.release(); await act(async () => fixture.host.settle()) }
+  await vi.waitFor(() => expect(container.querySelector('[data-planning-destination]')?.getAttribute('data-session')).toBe(fixture.primary.agentSessionId))
+  expect(readPmoTeamsTopicFloatingState()).toMatchObject({ agentTarget: { agentSessionId: fixture.primary.agentSessionId, hostId: 'local' }, targetTabId: 'primary-tab' })
+  expect(container.querySelector('[data-planning-destination]')?.getAttribute('data-host')).toBe('local')
+  await act(async () => { for (const frame of frames.splice(0)) frame(0) })
+  expect(document.activeElement).toBe(container.querySelector('[data-planning-destination]'))
+  expect(planningRequest().attempts).toHaveLength(1)
+})
+
+it.each(['another-conversation', 'closed'] as const)('a late planning destination receipt preserves the later %s choice, focus and unsent draft', async choice => {
+  await save(); await nativeState('done'); await useAppStore.getState().openDemandPmo('discovery')
+  const other = binding().recipient.agentSessionId
+  await mountPlanningDestination()
+  const floating = await import('../src/renderer/src/lib/pmo-teams-topic-floating')
+  const gate = fixture.host.once('demand.discuss', { kind: 'hold-receipt' }, request => request.mode === 'plan')
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-goal-plan-request]')!.click())
+  await gate.committed
+  const writes = [...fixture.core.writes], original = structuredClone((await fixture.host.demands.get('discovery'))!.patrols!)
+  await act(async () => {
+    if (choice === 'another-conversation') floating.requestAgentConversationFloatingOpen(other, 'local')
+    else floating.requestPmoTeamsTopicFloatingClose({ restoreFocus: false })
+    await new Promise(resolve => requestAnimationFrame(resolve))
+  })
+  const selected = structuredClone(floating.readPmoTeamsTopicFloatingState())
+  const draft = document.createElement('textarea'); draft.value = 'Keep my exact unsent words\nand the original focus.'; container.append(draft); draft.focus()
+  gate.release(); await act(async () => fixture.host.settle())
+  await new Promise(resolve => requestAnimationFrame(resolve))
+  expect(floating.readPmoTeamsTopicFloatingState()).toEqual(selected)
+  expect(document.activeElement).toBe(draft); expect(draft.value).toBe('Keep my exact unsent words\nand the original focus.')
+  expect(fixture.core.writes).toEqual(writes)
+  expect((await fixture.host.demands.get('discovery'))!.patrols).toEqual(original)
+  expect(fixture.host.executed('demand.discuss').filter(request => request.mode === 'plan')).toHaveLength(1)
+})
+
 it('a late planning receipt never republishes an older Goal over a newer owner read', async () => {
   // An unopened Goal has no delegation read cut. Its real public write/refresh chain
   // must protect newer facts even without a mounted observer later healing a rollback.
@@ -338,3 +435,26 @@ it('a late planning receipt never republishes an older Goal over a newer owner r
   } finally { release() }
 })
 
+it('an original planning request with no confirmed Host keeps navigation unknown despite a lone foreign namesake', async () => {
+  await save(); await addPlanningNamesake()
+  // Observation fails at the real Host's Core port; the durable request and healthy Core remain.
+  const agentSession = fixture.core.core.agentSession.bind(fixture.core.core)
+  vi.spyOn(fixture.core.core, 'agentSession').mockImplementation(id => {
+    if (id === fixture.primary.agentSessionId) throw Error('The exact original Supervisor observation is unavailable.')
+    return agentSession(id)
+  })
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.filter(session => session.id !== fixture.primary.agentSessionId) })))
+  await mountPlanningDestination()
+  const { readPmoTeamsTopicFloatingState } = await import('../src/renderer/src/lib/pmo-teams-topic-floating')
+  const request = await requestPlan(), original = structuredClone(planningRequest()), writes = [...fixture.core.writes]
+  expect(original.attempts).toEqual([])
+  expect(readPmoTeamsTopicFloatingState()).toMatchObject({ open: true, agentTarget: { agentSessionId: null }, targetTabId: null })
+  const open = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Open Supervisor conversation')!
+  expect(open).toBeDefined(); await act(async () => open.click())
+  expect(readPmoTeamsTopicFloatingState()).toMatchObject({ open: true, agentTarget: { agentSessionId: null }, targetTabId: null })
+  expect(container.querySelector('[data-planning-destination]')?.getAttribute('data-session')).toBe('')
+  expect(container.querySelector('[data-planning-destination]')?.getAttribute('data-tab')).toBe('')
+  const repeated = await requestPlan()
+  expect(repeated.requestId).toBe(request.requestId); expect(planningRequest()).toEqual(original)
+  expect(fixture.core.writes).toEqual(writes)
+})
