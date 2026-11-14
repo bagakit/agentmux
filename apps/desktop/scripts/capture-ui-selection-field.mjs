@@ -29,7 +29,7 @@ for (const file of [
   'apps/desktop/scripts/fixtures/settings-resource-library/environment.mjs',
   'apps/desktop/scripts/candidate-package-resolve.mjs',
   'apps/desktop/scripts/probe-process.mjs',
-  'apps/desktop/scripts/radix-overlay-aliases.ts',
+  'packages/client-ui/scripts/radix-overlay-aliases.ts',
 ]) sources[file] = sha(readFileSync(resolve(root, file)))
 await mkdir(evidence, { recursive: true })
 try {

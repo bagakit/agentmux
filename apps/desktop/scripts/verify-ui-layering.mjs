@@ -8,7 +8,7 @@ import { resolve, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runProbeProcess, stopProbeProcesses, listProbeProcesses } from './probe-process.mjs'
 import { assertWorkspaceDistBuiltFromCurrentSource } from '../../../vitest.dist-freshness.ts'
-import { radixOverlayAliases } from './radix-overlay-aliases.ts'
+import { radixOverlayAliases } from '../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 import { privatePackageSmokeEnvironment } from './package-smoke-context.mjs'
 
 const repository = resolve(import.meta.dirname, '../../..'), desktop = join(repository, 'apps/desktop')
@@ -37,7 +37,7 @@ function candidateIdentity() {
 const candidate = { started: candidateIdentity(), finished: null, unchanged: false }
 const originalInputs = new Map(), dependencyInputs = new Map(), results = []
 const harnessInputs = {}
-for (const path of ['apps/desktop/scripts/verify-ui-layering.mjs', 'apps/desktop/scripts/probe-process.mjs', 'apps/desktop/scripts/package-smoke-context.mjs', 'apps/desktop/scripts/radix-overlay-aliases.ts',
+for (const path of ['apps/desktop/scripts/verify-ui-layering.mjs', 'apps/desktop/scripts/probe-process.mjs', 'apps/desktop/scripts/package-smoke-context.mjs', 'packages/client-ui/scripts/radix-overlay-aliases.ts',
   'apps/desktop/scripts/lib/fixture-values.mjs', 'vitest.dist-freshness.ts', 'pnpm-lock.yaml']) {
   const digest = hash(await readFile(join(repository, path))); originalInputs.set(path, digest); harnessInputs[path] = digest
 }

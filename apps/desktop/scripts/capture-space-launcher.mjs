@@ -6,7 +6,7 @@ import { createRequire } from 'node:module'
 import { createHash } from 'node:crypto'
 import { sourceAliases } from './fixtures/launcher-launchpad/vitest.owning.config.mts'
 import { runProbeProcess } from './probe-process.mjs'
-import { radixOverlayAliases } from './radix-overlay-aliases.ts'
+import { radixOverlayAliases } from '../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 
 const repository = resolve(import.meta.dirname, '../../..')
 const fixture = join(import.meta.dirname, 'fixtures/space-launcher')

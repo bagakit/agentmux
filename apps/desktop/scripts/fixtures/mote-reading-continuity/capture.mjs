@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto'
 import { mkdtemp } from 'node:fs/promises'
 import { aliases, root, desktopRequire, installedDependency } from '../conversation-style-entry/environment.mjs'
 import { workspaceSources } from '../topic-promotion/source-build.mjs'
-import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
+import { radixOverlayAliases } from '../../../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from '../../probe-process.mjs'
 const fixture = import.meta.dirname, sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const directory = path.join(root, '.bagakit/mote-floating-reading-continuity', 'physical-' + crypto.randomUUID())

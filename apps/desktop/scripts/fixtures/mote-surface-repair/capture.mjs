@@ -1,5 +1,5 @@
 import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
-import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
+import { radixOverlayAliases } from '../../../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { createHash } from 'node:crypto'
@@ -63,7 +63,7 @@ try {
       return [name, entries]
     }))
   }
-  for (const file of [import.meta.filename, path.join(sourceFixture, main), path.join(root, 'apps/desktop/scripts/radix-overlay-aliases.ts')]) receipt.source[path.relative(root, file)] = sha(await fs.readFile(file))
+  for (const file of [import.meta.filename, path.join(sourceFixture, main), path.join(root, 'packages/client-ui/scripts/radix-overlay-aliases.ts')]) receipt.source[path.relative(root, file)] = sha(await fs.readFile(file))
   for (const file of ['apps/desktop/src/renderer/src/components/MoteDetailsPanel.tsx', 'apps/desktop/src/renderer/src/lib/mote-cooperation.ts', 'apps/desktop/src/renderer/src/lib/mote-materials-actions.ts', 'apps/desktop/src/renderer/src/components/FileSurfaceView.tsx']) assert.ok(receipt.source[file], 'Nonempty original product inputs are required')
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="' + entry + '.css"></head><body><div id="root"></div><script type="module" src="' + entry + '.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE

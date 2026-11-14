@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { candidateAlias } from '../../candidate-package-resolve.mjs'
-import { radixOverlayAliases } from '../../radix-overlay-aliases'
+import { radixOverlayAliases } from '../../../../../packages/client-ui/scripts/radix-overlay-aliases'
 
 const root = fileURLToPath(new URL('../../../../../', import.meta.url))
 const identityRuntime = process.env.SURVEY_OPENING_IDENTITY_RUNTIME

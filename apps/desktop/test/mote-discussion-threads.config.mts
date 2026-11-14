@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { relative, resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
 import base from './vitest.mote-context.config.mts'
-import { radixOverlayAliases } from '../scripts/radix-overlay-aliases'
+import { radixOverlayAliases } from '../../../packages/client-ui/scripts/radix-overlay-aliases'
 const root = resolve(import.meta.dirname, '../../..')
 const variants: Record<string, [string, string, string]> = {
   'member-input-becomes-main': ['apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx', "motePresentation.moteInputIntent !== 'member' && !moteWorkface?.memberIntent && moteDialogue?.target", 'moteDialogue?.target'],

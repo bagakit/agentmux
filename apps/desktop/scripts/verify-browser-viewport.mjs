@@ -7,7 +7,7 @@ import { readFile, writeFile, mkdir, mkdtemp, rm, symlink } from 'node:fs/promis
 import { join, resolve, dirname, relative } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
-import { radixOverlayAliases } from './radix-overlay-aliases.ts'
+import { radixOverlayAliases } from '../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 
 const args = process.argv.slice(2)
 assert.ok(args.every(arg => ['--mutations', '--return-preflight'].includes(arg)), 'Unsupported Viewport proof option')
@@ -38,7 +38,7 @@ const inputs = [
   'apps/desktop/src/renderer/src/hooks/useNativeOverlayChrome.ts', 'apps/desktop/src/renderer/src/lib/native-overlay-regions.ts',
   'apps/desktop/src/renderer/src/styles/browser.css', 'apps/desktop/src/renderer/src/styles/base.css',
   'apps/desktop/src/renderer/src/styles/chrome.css', 'apps/desktop/src/renderer/src/styles/overlays.css',
-  'apps/desktop/scripts/radix-overlay-aliases.ts', 'apps/desktop/electron.vite.config.ts',
+  'packages/client-ui/scripts/radix-overlay-aliases.ts', 'apps/desktop/electron.vite.config.ts',
   'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/preload/index.ts',
   'apps/desktop/test/browser-view-manager.test.ts', 'apps/desktop/scripts/verify-browser-viewport.mjs',
   ...['main.ts', 'renderer.tsx', 'store.ts', 'preload.ts', 'fixture.css'].map(name => 'apps/desktop/scripts/fixtures/browser-viewport/' + name),

@@ -11,7 +11,7 @@ import { zip } from '../../../../../packages/editor-extensions/test/books/fixtur
 import { privatePackageSmokeEnvironment } from '../../../scripts/package-smoke-context.mjs'
 import { runProbeProcess, listProbeProcesses, signalOwnedProbeProcess } from '../../../scripts/probe-process.mjs'
 import { noteParsingAliases } from '../../../../../packages/client-ui/scripts/note-parsing-aliases'
-import { radixOverlayAliases } from '../../../scripts/radix-overlay-aliases'
+import { radixOverlayAliases } from '../../../../../packages/client-ui/scripts/radix-overlay-aliases'
 
 const repository=resolve(import.meta.dirname,'../../../../..')
 export async function runBookRestart(){

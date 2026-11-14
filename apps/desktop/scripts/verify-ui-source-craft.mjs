@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { loadConfigFromFile } from 'vite'
-import { radixOverlayAliases } from './radix-overlay-aliases.ts'
+import { radixOverlayAliases } from '../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 import { runProbeProcess } from './probe-process.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), fixture = join(root, 'apps/desktop/scripts/fixtures/ui-source-craft')

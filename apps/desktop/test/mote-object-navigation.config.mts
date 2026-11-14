@@ -3,7 +3,7 @@ import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { defineConfig } from 'vitest/config'
 import base from './vitest.mote-context.config.mts'
-import { radixOverlayAliases } from '../scripts/radix-overlay-aliases'
+import { radixOverlayAliases } from '../../../packages/client-ui/scripts/radix-overlay-aliases'
 const root = resolve(import.meta.dirname, '../../..')
 const variants: Record<string, [string, string, string]> = {
   'unqualified-mote-receipt': ['packages/core/src/desktop-focus-parser.ts', "if (requested.kind === 'mote' && (actual.surface", "if (false && (actual.surface"],

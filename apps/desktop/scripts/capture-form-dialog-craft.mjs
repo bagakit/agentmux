@@ -7,7 +7,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { loadConfigFromFile } from 'vite'
 import { runProbeProcess } from './probe-process.mjs'
 import { privatePackageSmokeEnvironment } from './package-smoke-context.mjs'
-import { radixOverlayAliases } from './radix-overlay-aliases.ts'
+import { radixOverlayAliases } from '../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 
 const root = resolve(import.meta.dirname, '../../..'), fixture = join(import.meta.dirname, 'fixtures/form-dialog-craft')
 const evidence = process.env.AGENTMUX_EVIDENCE_ROOT ?? join(root, '.tmp/form-dialog-native', randomUUID())

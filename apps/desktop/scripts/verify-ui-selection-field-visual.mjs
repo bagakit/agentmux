@@ -28,7 +28,7 @@ const requiredDriverSources = section => [
   'apps/desktop/scripts/fixtures/settings-resource-library/environment.mjs',
   'apps/desktop/scripts/candidate-package-resolve.mjs',
   'apps/desktop/scripts/probe-process.mjs',
-  'apps/desktop/scripts/radix-overlay-aliases.ts',
+  'packages/client-ui/scripts/radix-overlay-aliases.ts',
 ]
 
 function sourceIdentity(sources) {

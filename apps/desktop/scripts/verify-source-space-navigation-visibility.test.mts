@@ -12,7 +12,7 @@ import { sourceFolderFixture } from '../../../packages/core/test/helpers/space-f
 import { readSpaceSnapshot } from '../../../packages/core/src/space-authority-stream.ts'
 import { stopProbeProcesses } from './probe-process.mjs'
 import { sourceAliases } from './fixtures/launcher-launchpad/vitest.owning.config.mts'
-import { radixOverlayAliases } from './radix-overlay-aliases.ts'
+import { radixOverlayAliases } from '../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 
 async function freePort(){const server=createServer();await new Promise<void>((done,fail)=>server.listen(0,'127.0.0.1',done).once('error',fail));const address=server.address();if(!address||typeof address==='string')throw Error('No debugger port');const port=address.port;await new Promise<void>(done=>server.close(()=>done()));return port}
 

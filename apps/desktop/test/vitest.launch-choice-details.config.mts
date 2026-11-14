@@ -4,7 +4,7 @@ import {relative,resolve} from 'node:path'
 import assert from 'node:assert/strict'
 import type {Alias} from 'vite'
 import original from './vitest.mailbox-collaboration.config.mts'
-import {radixOverlayAliases} from '../scripts/radix-overlay-aliases'
+import {radixOverlayAliases} from '../../../packages/client-ui/scripts/radix-overlay-aliases'
 const root=resolve(import.meta.dirname,'../../..'),component='apps/desktop/src/renderer/src/components/LaunchOptionControls.tsx'
 const changes={
  description:[component,"...(item.description ? { description: item.description } : {})","...{}"],

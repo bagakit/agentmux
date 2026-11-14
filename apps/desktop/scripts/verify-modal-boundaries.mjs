@@ -8,7 +8,7 @@ import { execFile, execFileSync } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { runProbeProcess, stopProbeProcesses, listProbeProcesses } from './probe-process.mjs'
-import { radixOverlayAliases } from './radix-overlay-aliases.ts'
+import { radixOverlayAliases } from '../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 import { assertWorkspaceDistBuiltFromCurrentSource } from '../../../vitest.dist-freshness.ts'
 import { privatePackageSmokeEnvironment } from './package-smoke-context.mjs'
 
@@ -84,7 +84,7 @@ async function run(label, mutation) {
     })
   } }
   for (const file of ['pnpm-lock.yaml', 'apps/desktop/scripts/verify-modal-boundaries.mjs', 'apps/desktop/scripts/probe-process.mjs',
-    'apps/desktop/scripts/radix-overlay-aliases.ts', 'apps/desktop/scripts/package-smoke-context.mjs', 'vitest.dist-freshness.ts', ...(selected === 'shared' ? ['apps/desktop/scripts/fixtures/modal-boundaries/index.html'] : [])]) await observe(join(repository, file))
+    'packages/client-ui/scripts/radix-overlay-aliases.ts', 'apps/desktop/scripts/package-smoke-context.mjs', 'vitest.dist-freshness.ts', ...(selected === 'shared' ? ['apps/desktop/scripts/fixtures/modal-boundaries/index.html'] : [])]) await observe(join(repository, file))
   const electronModule = require.resolve('electron')
   await observe(electronModule); await observe(join(dirname(electronModule), 'path.txt'))
   const electronExecutable = require('electron'); await observe(electronExecutable)

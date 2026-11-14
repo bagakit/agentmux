@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
-import { radixOverlayAliases } from './radix-overlay-aliases.ts'
+import { radixOverlayAliases } from '../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 
 const repository = resolve(import.meta.dirname, '../../..'), desktop = join(repository, 'apps/desktop')
 const require = createRequire(join(desktop, 'package.json'))
@@ -96,7 +96,7 @@ async function runMode(mode) {
     'Actual production overlay primitive owner was compiled: ' + name)
   for (const source of ['apps/desktop/scripts/verify-performance-healthcheck.mjs',
     'apps/desktop/scripts/fixtures/performance-healthcheck/main.cjs', 'apps/desktop/scripts/probe-process.mjs',
-    'apps/desktop/scripts/radix-overlay-aliases.ts', 'apps/desktop/electron.vite.config.ts',
+    'packages/client-ui/scripts/radix-overlay-aliases.ts', 'apps/desktop/electron.vite.config.ts',
     'pnpm-workspace.yaml', 'pnpm-lock.yaml', patchPath]) inputs.set(source, sha(await readFile(join(repository, source))))
   dependencies.set(relative(repository, menuCjs), sha(await readFile(menuCjs)))
   const record = { mode, inputs: Object.fromEntries(inputs), dependencies: Object.fromEntries(dependencies),

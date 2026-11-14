@@ -6,7 +6,7 @@ import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, relative } from 'node:path'
 import { runProbeProcess, listProbeProcesses } from '../../probe-process.mjs'
-import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
+import { radixOverlayAliases } from '../../../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 import { currentWorkspaceAliases } from '../session-takeover/workspace-aliases.mjs'
 
 const fixture = import.meta.dirname, root = resolve(fixture, '../../../../..')

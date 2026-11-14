@@ -59,7 +59,7 @@ async function capture(options) {
   const require = createRequire(join(desktop, 'package.json'))
   const { build } = await import('vite')
   const react = (await import(pathToFileURL(require.resolve('@vitejs/plugin-react')).href)).default
-  const { radixOverlayAliases } = await import('./radix-overlay-aliases.ts')
+  const { radixOverlayAliases } = await import('../../../packages/client-ui/scripts/radix-overlay-aliases.ts')
   const { noteParsingAliases } = await import('../../../packages/client-ui/scripts/note-parsing-aliases.ts')
   const candidate = {
     head: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),

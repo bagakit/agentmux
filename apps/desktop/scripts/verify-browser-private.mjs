@@ -55,7 +55,7 @@ const inputs = [...new Set([...product, ...batches.flatMap(batch => batch.tests)
   'apps/desktop/src/renderer/src/lib/desktop-spatial-state.ts', 'apps/desktop/src/main/native-overlay-surfaces.ts',
   'apps/desktop/src/main/native-overlay-focus.ts', 'apps/desktop/src/preload/native-overlay-focus.ts',
   ...['index.js', 'agentmux.js', 'control-codec.js', 'control-browser-targets.js', 'browser-targets.js', 'agentmux-cli-commands.js', 'agentmux-cli-browser-guide.js'].map(name => 'packages/core/dist/' + name),
-  'apps/desktop/scripts/radix-overlay-aliases.ts', 'apps/desktop/electron.vite.config.ts', 'vitest.config.ts', 'vitest.dist-freshness.ts'])]
+  'packages/client-ui/scripts/radix-overlay-aliases.ts', 'apps/desktop/electron.vite.config.ts', 'vitest.config.ts', 'vitest.dist-freshness.ts'])]
 const fingerprint = async () => Object.fromEntries(await Promise.all(inputs.map(async path => [path, sha(await readFile(path))])))
 const evidence = { schema: 'agentmux.browser-private-proof.v1', scope: nativeOnly ? 'native-session-owners' : args.has('--restart') ? 'complete-product' : 'bounded-consumers', passed: false, sourceInputs: await fingerprint(), cases: [],
   boundary: 'Unit Session doubles prove Main ownership and callback wiring. Real Electron website isolation, public SDK/CLI and restart are separate required product consumers.' }

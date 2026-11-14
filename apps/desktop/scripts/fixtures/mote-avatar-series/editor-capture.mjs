@@ -1,5 +1,5 @@
 import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
-import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
+import { radixOverlayAliases } from '../../../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 import { runProbeProcess } from '../../probe-process.mjs'
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'

@@ -1,6 +1,6 @@
 import { defineConfig } from 'vitest/config'
 import original from '../../../vitest.config'
-import { radixOverlayAliases } from '../scripts/radix-overlay-aliases'
+import { radixOverlayAliases } from '../../../packages/client-ui/scripts/radix-overlay-aliases'
 import { createRequire } from 'node:module'
 
 const require = createRequire(new URL('../package.json', import.meta.url))

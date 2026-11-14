@@ -99,7 +99,7 @@ it('binds direct probe, fixture and alias inputs into the oracle manifest', () =
   const script = readFileSync(verifier, 'utf8')
   for (const file of [
     'apps/desktop/scripts/probe-process.mjs',
-    'apps/desktop/scripts/radix-overlay-aliases.ts',
+    'packages/client-ui/scripts/radix-overlay-aliases.ts',
     'apps/desktop/scripts/fixtures/space-launcher/index.html',
     'apps/desktop/scripts/fixtures/launcher-launchpad/index.html',
     'apps/desktop/scripts/fixtures/launcher-launchpad/vitest.owning.config.mts',

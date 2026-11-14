@@ -1,4 +1,4 @@
-import { radixOverlayAliases } from '../scripts/radix-overlay-aliases'
+import { radixOverlayAliases } from '../../../packages/client-ui/scripts/radix-overlay-aliases'
 import type { Alias } from 'vite'
 import { defineConfig } from 'vitest/config'
 import owning from '../scripts/fixtures/mote-navigation-footer/vitest.owning.config.mts'

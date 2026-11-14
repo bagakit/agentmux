@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { listProbeProcesses, runProbeProcess, stopProbeProcesses } from '../../probe-process.mjs'
-import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
+import { radixOverlayAliases } from '../../../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 const privateChat = process.argv.includes('--private-chat')
 const peopleOnly = privateChat && process.argv.includes('--people-only')
 const fixture = privateChat ? path.resolve(import.meta.dirname, '../mote-private-chat-history') : import.meta.dirname, root = path.resolve(fixture, '../../../../..')

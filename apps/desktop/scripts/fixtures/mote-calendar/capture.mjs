@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { runProbeProcess } from '../../probe-process.mjs'
-import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
+import { radixOverlayAliases } from '../../../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 
 const scenarios = { workspace: 'renderer-main.cjs', 'companion-navigation': 'renderer-navigation.cjs', 'discussion-files': 'renderer-discussion-files.cjs' }
 const scenario = process.argv.length === 2 ? 'workspace' : process.argv.length === 3 && process.argv[2].startsWith('--scenario=') ? process.argv[2].slice('--scenario='.length) : null
@@ -33,7 +33,7 @@ try {
     consumed.set(file, hash); return bytes
   }
   const runnerInputs = ['capture.mjs', rendererRunner, 'README.md'].map(file => path.join(fixture, file))
-  for (const file of [...runnerInputs, path.join(root, 'apps/desktop/package.json'), path.join(root, 'apps/desktop/scripts/probe-process.mjs'), path.join(root, 'apps/desktop/scripts/radix-overlay-aliases.ts')]) await readBound(file)
+  for (const file of [...runnerInputs, path.join(root, 'apps/desktop/package.json'), path.join(root, 'apps/desktop/scripts/probe-process.mjs'), path.join(root, 'packages/client-ui/scripts/radix-overlay-aliases.ts')]) await readBound(file)
   const loaders = { '.ts': 'ts', '.mts': 'ts', '.cts': 'ts', '.tsx': 'tsx', '.js': 'js', '.mjs': 'js', '.cjs': 'js', '.jsx': 'jsx', '.json': 'json', '.css': 'css',
     '.png': 'file', '.gif': 'file', '.svg': 'file', '.avif': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }
   const captureInputs = { name: 'capture-actual-input-bytes', setup(plugin) {

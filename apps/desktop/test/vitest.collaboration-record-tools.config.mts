@@ -4,7 +4,7 @@ import { relative, resolve } from 'node:path'
 import assert from 'node:assert/strict'
 import type { Alias } from 'vite'
 import original from './vitest.mailbox-collaboration.config.mts'
-import { radixOverlayAliases } from '../scripts/radix-overlay-aliases'
+import { radixOverlayAliases } from '../../../packages/client-ui/scripts/radix-overlay-aliases'
 const root = resolve(import.meta.dirname, '../../..')
 const changes = {
  evidenceScope: ["record: original", "record: { ...original, replies: [] }"],

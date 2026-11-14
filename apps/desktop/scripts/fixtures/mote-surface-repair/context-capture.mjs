@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
+import { radixOverlayAliases } from '../../../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 import { runProbeProcess } from '../../probe-process.mjs'
 
 const fixture = import.meta.dirname, root = path.resolve(fixture, '../../../../..')

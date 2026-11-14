@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { listProbeProcesses, runProbeProcess, stopProbeProcesses } from '../../probe-process.mjs'
-import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
+import { radixOverlayAliases } from '../../../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 const root = path.resolve(import.meta.dirname, '../../../../..')
 const navigation = process.argv.includes('--top-navigation')
 const fixture = navigation ? path.join(import.meta.dirname, '../mote-thread-navigation') : import.meta.dirname

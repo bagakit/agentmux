@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve, relative, dirname } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { runProbeProcess } from '../../probe-process.mjs'
-import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
+import { radixOverlayAliases } from '../../../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 const fixture = import.meta.dirname, root = resolve(fixture, '../../../../..')
 const settingsOnly = process.argv.includes('--settings-only')
 const mainRoot = dirname(resolve(root, execFileSync('git', ['rev-parse', '--git-common-dir'], { cwd: root, encoding: 'utf8' }).trim()))

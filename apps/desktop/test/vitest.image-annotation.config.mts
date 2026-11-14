@@ -2,7 +2,7 @@ import { mergeConfig } from 'vitest/config'
 import { createRequire } from 'node:module'
 import { dirname } from 'node:path'
 import base from '../../../vitest.config.ts'
-import { radixOverlayAliases } from '../scripts/radix-overlay-aliases.ts'
+import { radixOverlayAliases } from '../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 
 // The real Renderer shares Dialog's dismissal/focus owners across its menus and dialogs.
 // Source, private mutations and restored-source tests must consume that same library stack.

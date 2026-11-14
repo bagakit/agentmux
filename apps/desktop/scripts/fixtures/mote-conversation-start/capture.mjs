@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { listProbeProcesses, runProbeProcess, stopProbeProcesses } from '../../probe-process.mjs'
-import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
+import { radixOverlayAliases } from '../../../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 const root = path.resolve(import.meta.dirname, '../../../../..'), reliability = process.argv.includes('--reliability-only'), continuity = process.argv.includes('--continuity-only')
 const fixture = continuity ? path.join(import.meta.dirname, '../mote-composer-continuity') : reliability ? path.join(import.meta.dirname, '../mote-main-reliability') : import.meta.dirname
 const require = createRequire(path.join(root, 'apps/desktop/package.json'))

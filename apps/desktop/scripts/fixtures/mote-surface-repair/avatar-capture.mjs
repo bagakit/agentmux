@@ -1,5 +1,5 @@
 import { browserSourceBuild } from '../../../../../packages/browser/scripts/source-build.mjs'
-import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
+import { radixOverlayAliases } from '../../../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { createHash } from 'node:crypto'
@@ -62,7 +62,7 @@ try {
       return [name, entries]
     }))
   }
-  for (const file of [import.meta.filename, path.join(sourceFixture, main), path.join(root, 'apps/desktop/scripts/radix-overlay-aliases.ts')]) receipt.source[path.relative(root, file)] = sha(await fs.readFile(file))
+  for (const file of [import.meta.filename, path.join(sourceFixture, main), path.join(root, 'packages/client-ui/scripts/radix-overlay-aliases.ts')]) receipt.source[path.relative(root, file)] = sha(await fs.readFile(file))
   for (const file of ['apps/desktop/src/renderer/src/components/MoteDetailsPanel.tsx', 'apps/desktop/src/renderer/src/lib/mote-cooperation.ts', 'apps/desktop/src/renderer/src/lib/mote-materials-actions.ts', 'apps/desktop/src/renderer/src/components/FileSurfaceView.tsx']) assert.ok(receipt.source[file], 'Nonempty original product inputs are required')
   const assetBuilt = await build({absWorkingDir: root,entryPoints:[path.join(fixture,'avatar-files-entry.ts')],outfile:path.join(compiled,'avatar-files.cjs'),bundle:true,platform:'node',format:'cjs',metafile:true,logLevel:'error'})
   for(const file of Object.keys(assetBuilt.metafile.inputs)) receipt.source[file]=sha(await fs.readFile(path.resolve(root,file)))

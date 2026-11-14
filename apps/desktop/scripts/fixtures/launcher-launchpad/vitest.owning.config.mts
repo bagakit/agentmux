@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitest/config'
 import { resolve } from 'node:path'
 import { sourceAliases } from '../bookmark-local-link/vitest.owning.config.mts'
-import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
+import { radixOverlayAliases } from '../../../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 const repository = resolve(import.meta.dirname, '../../../../..')
 export { sourceAliases }
 export default defineConfig({

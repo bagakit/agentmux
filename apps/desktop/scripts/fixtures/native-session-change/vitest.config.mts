@@ -5,7 +5,7 @@ import { createRequire } from 'node:module'
 import assert from 'node:assert/strict'
 import { defineConfig } from 'vitest/config'
 import { candidateAlias, candidateModule } from '../../candidate-package-resolve.mjs'
-import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
+import { radixOverlayAliases } from '../../../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 import { noteParsingAliases } from '../../../../../packages/client-ui/scripts/note-parsing-aliases.ts'
 const root = resolve(import.meta.dirname, '../../../../..')
 const desktop = createRequire(resolve(root, 'apps/desktop/package.json'))

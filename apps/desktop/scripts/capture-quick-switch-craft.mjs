@@ -8,7 +8,7 @@ import { basename, join, resolve, relative } from 'node:path'
 import { loadConfigFromFile } from 'vite'
 import { pathToFileURL } from 'node:url'
 import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
-import { radixOverlayAliases } from './radix-overlay-aliases.ts'
+import { radixOverlayAliases } from '../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 
 export async function captureQuickSwitch({ scene = 'quick-switch-craft', requiredSources, requiredStyles } = {}) {
   const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'apps/desktop'), fixture = join(desktop, 'scripts/fixtures', scene)

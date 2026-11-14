@@ -100,7 +100,7 @@ const inputs = new Set([...baseline, config, 'apps/desktop/scripts/verify-screen
   source + 'renderer/src/main.tsx', source + 'renderer/src/lib/screenshot-attachment.ts', source + 'shared/screenshot-attachment.ts', source + 'renderer/src/lib/api.ts', source + 'renderer/src/lib/workbench-windows.tsx', source + 'renderer/src/lib/shortcut-registry.ts',
   source + 'renderer/src/lib/shortcut-cheat-sheet.ts', source + 'renderer/src/components/AgentComposerTools.tsx',
   source + 'renderer/src/components/settings/KeyboardShortcutsPane.tsx', tests + 'helpers/composer-dom-fixture.tsx', tests + 'helpers/client-ui-render.tsx',
-  'packages/client-ui/package.json', 'packages/client-ui/src/components/InlineComposer.tsx', 'apps/desktop/scripts/radix-overlay-aliases.ts'])
+  'packages/client-ui/package.json', 'packages/client-ui/src/components/InlineComposer.tsx', 'packages/client-ui/scripts/radix-overlay-aliases.ts'])
 const originals = new Map(await Promise.all([...inputs].map(async file => [file, await readFile(join(root, file))])))
 const receipt = { schema: 'agentmux.screenshot-shortcut-proof.v1', passed: false,
   candidate: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),

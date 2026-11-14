@@ -3,7 +3,7 @@ import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, mergeConfig } from 'vitest/config'
 import base from '../../../../../vitest.config.ts'
-import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
+import { radixOverlayAliases } from '../../../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 
 const coreDist = dirname(realpathSync(fileURLToPath(import.meta.resolve('@agentmux/core')))).replaceAll('\\', '/')
 const compiledCore = new RegExp('^' + coreDist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:/|$)')

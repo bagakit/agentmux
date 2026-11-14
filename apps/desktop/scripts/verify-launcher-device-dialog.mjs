@@ -21,7 +21,7 @@ const ORACLE_FILES = [
   'apps/desktop/scripts/fixtures/launcher-launchpad/vitest.owning.config.mts',
   'apps/desktop/scripts/fixtures/bookmark-local-link/vitest.owning.config.mts',
   'apps/desktop/scripts/probe-process.mjs',
-  'apps/desktop/scripts/radix-overlay-aliases.ts',
+  'packages/client-ui/scripts/radix-overlay-aliases.ts',
   'apps/desktop/scripts/lib/fixture-values.mjs',
   'apps/desktop/test/helpers/client-ui-render.tsx',
   'packages/core/package.json',

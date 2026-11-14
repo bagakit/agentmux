@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { relative, resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
 import base from './vitest.mote-context.config.mts'
-import { radixOverlayAliases } from '../scripts/radix-overlay-aliases'
+import { radixOverlayAliases } from '../../../packages/client-ui/scripts/radix-overlay-aliases'
 const root=resolve(import.meta.dirname,'../../..')
 const mutations:Record<string,[string,string,string]>={
  'main-role-selection':['apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx','main.current.sessionId === session.control.agentSessionId',"main.current.sessionId === 'unselected-original-role'"],

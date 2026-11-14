@@ -635,7 +635,7 @@ const inputs = [...tests, ...(slice === 'documents' ? [component + 'document.ts'
   'apps/desktop/src/main/workspace-files.ts', 'apps/host/native/workspace-move.c', 'apps/desktop/scripts/build-workspace-move-helper.mjs',
   'apps/desktop/src/shared/contracts.ts', 'apps/host/src/workspace-file-bytes.ts'] : [adapter, 'apps/desktop/src/renderer/src/components/BrowserPane.tsx',
   'apps/desktop/src/renderer/src/styles/browser.css', 'apps/desktop/test/helpers/client-ui-render.tsx']),
-  'apps/desktop/scripts/verify-image-annotation.mjs', owningConfig, 'apps/desktop/scripts/radix-overlay-aliases.ts',
+  'apps/desktop/scripts/verify-image-annotation.mjs', owningConfig, 'packages/client-ui/scripts/radix-overlay-aliases.ts',
   'apps/desktop/electron.vite.config.ts', 'vitest.config.ts', 'vitest.dist-freshness.ts']
 for (const mutation of specification.mutations) if (!inputs.includes(mutation.source)) inputs.push(mutation.source)
 for (const directory of directories) for (const name of await readdir(directory)) {

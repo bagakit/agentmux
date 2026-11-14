@@ -52,7 +52,7 @@ try {
     ...['core', 'demand', 'layout', 'identity', 'client-ui'].map(name => 'packages/' + name + '/src')]
   const selected = ['package.json', 'pnpm-lock.yaml', 'tsconfig.base.json', 'vitest.setup.ts', 'test/fixture-values.mjs',
     'apps/desktop/package.json', 'apps/desktop/tsconfig.json', 'apps/desktop/test/mote-startup-recovery.test.ts', 'apps/desktop/test/mote-session-recovery.test.tsx',
-    uiConfig, 'apps/desktop/test/selection-field.config.mts', 'apps/desktop/scripts/radix-overlay-aliases.ts',
+    uiConfig, 'apps/desktop/test/selection-field.config.mts', 'packages/client-ui/scripts/radix-overlay-aliases.ts',
     'apps/desktop/scripts/fixtures/mote-navigation-footer/vitest.owning.config.mts', 'apps/desktop/scripts/lib/fixture-values.mjs',
     ...['core', 'demand', 'layout', 'identity', 'client-ui'].flatMap(name => ['package.json', 'tsconfig.json'].map(file => 'packages/' + name + '/' + file))]
   const nativeInputs = [nativeConfig, 'apps/desktop/test/mote-recovery-native.test.ts',

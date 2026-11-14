@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { readFile, readdir, writeFile, mkdir, mkdtemp, rm, copyFile, symlink } from 'node:fs/promises'
 import { join, resolve, dirname } from 'node:path'
-import { radixOverlayAliases } from './radix-overlay-aliases.ts'
+import { radixOverlayAliases } from '../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 
 const args = process.argv.slice(2)
 assert.ok(args.every(arg => ['--mutations', '--visual', '--visual-pilot', '--editor', '--model', '--outputs'].includes(arg)), 'Unsupported screenshot proof option')
@@ -54,7 +54,7 @@ const sourceInputs = [
   ...['public-rpc-server.ts', 'public-rpc-client.ts', 'public-rpc-service.ts', 'rpc-business-codec.ts', 'control-codec.ts', 'agentmux.ts'].map(name => 'packages/core/src/' + name),
   ...['index.js', 'control-host.js', 'public-rpc.js', 'public-rpc-frame.js', 'public-rpc-client.js', 'public-rpc-service.js', 'public-rpc-server.js', 'public-rpc-wire.js', 'rpc-business-codec.js', 'control-codec.js', 'runtime-paths.js', 'agentmux-cli-commands.js', 'agentmux.js'].map(name => 'packages/core/dist/' + name),
   'apps/desktop/scripts/verify-browser-screenshot-workface.mjs',
-  'apps/desktop/scripts/radix-overlay-aliases.ts', 'apps/desktop/electron.vite.config.ts',
+  'packages/client-ui/scripts/radix-overlay-aliases.ts', 'apps/desktop/electron.vite.config.ts',
   ...['main.ts', 'renderer.tsx', 'bridge.ts', 'preload.cjs', 'fixture.css', 'scenario.md'].map(name => 'apps/desktop/scripts/fixtures/browser-screenshot-workface/' + name)
 ]
 for (const directory of screenshotDirectories) for (const name of await readdir(directory)) {

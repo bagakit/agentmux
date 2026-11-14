@@ -2,7 +2,7 @@ import { appendFileSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { relative, resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
-import { radixOverlayAliases } from '../scripts/radix-overlay-aliases'
+import { radixOverlayAliases } from '../../../packages/client-ui/scripts/radix-overlay-aliases'
 
 const root = resolve(import.meta.dirname, '../../..')
 const mutation = process.env.AGENTMUX_SCREENSHOT_SHORTCUT_MUTATION ? JSON.parse(process.env.AGENTMUX_SCREENSHOT_SHORTCUT_MUTATION) : null
