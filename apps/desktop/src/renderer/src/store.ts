@@ -20,7 +20,7 @@ import { associateCreatedSourceCoordinator } from './lib/source-coordinator-requ
 import { launcherSourceMatches, type SourceCoordinatorStart } from './lib/launcher-source'
 import { editMountedSpaceInput, editMountedSpaceDraftInput, editMountedRegistration, mountedSpaceInput, mountedSpaceInputs as mountedSpaceInputEntries, mountedSpaceTarget, acceptsMountedSnapshot, type MountedSpaceObservation, type MountedSpaceRegistrationInput } from './lib/space-mount-view'
 import { ordinarySpaceMember, type OrdinaryMemberReference } from './lib/ordinary-space-member'
-import { originalSourceMember, originalSpaceResource, originalSpaceWorkspace, originalSourceFileSurface, ensureOriginalSourceFilesInput, originalSourceActionUnavailable, isOriginalSourceFileWorkspace, isOriginalSourceWorkspaceProjection, reconcileOriginalSourceProjection, originalSourceScopeFromGraph, preserveOriginalSourceProjection, originalSourceEntryForSelection, originalSourceWorkspaceId, originalSourceLauncherTabId, originalSourceTabProjectionId, originalSourceRegionProjectionId, originalSourceGroupProjectionId, originalSourceLauncherRegionId, type OriginalSpaceLocation } from './lib/original-space-navigation'
+import { originalSourceMember, originalSpaceResource, originalSpaceWorkspace, originalSourceFileSurface, ensureOriginalSourceFilesInput, originalSourceActionUnavailable, isOriginalSourceFileWorkspace, isOriginalSourceWorkspaceProjection, reconcileOriginalSourceProjection, originalSourceScopeFromGraph, preserveOriginalSourceProjection, originalSourceEntryForSelection, originalRawSourceOccurrenceConfirmed, originalSourceWorkspaceId, originalSourceLauncherTabId, originalSourceTabProjectionId, originalSourceRegionProjectionId, originalSourceGroupProjectionId, originalSourceLauncherRegionId, originalSourceInputOwnerKey, type OriginalSpaceLocation } from './lib/original-space-navigation'
 import { observeMountedSessions, type MountedSessionObservation, type MountedSessionUpdate } from './lib/space-mount-sessions'
 import { spaceMountKey, type SpaceMountRecord, type SpaceMountView } from '../../shared/space-mount'
 import type { SpaceSnapshot } from '@agentmux/core'
@@ -462,6 +462,7 @@ import {
   sessionTabId,
   swapWorkbenchTabRegions,
   tabStillOpen,
+  sourceRegionProjectionReference,
   titleWorkbenchSurface,
   topicIdForSession,
   updateWorkbenchRegion,
@@ -4436,13 +4437,22 @@ export function restorePersistedUiState(
     | 'editorMinimap'
     | 'explorerShowHidden'
     | 'explorerShowIgnored'
-  >
+  >,
+  graph: import('@agentmux/core/spatial-graph').AgentMuxSpatialGraph | null = currentCoreSpatialGraph()
 ): RestoredUiState {
   const surveyPages = readSurveyPagePreferences(persisted.surveyPageReferences)
   const surveyView = readSurveyProfileView(persisted.surveyProfileView)
-  const workbenchSpaceSelection: AppState['workbenchSpaceSelection'] = restoreWorkbenchSpaceSelection(persisted.workbenchSpaceSelection)
-  const activeWorkspaceId = workbenchSpaceSelection?.sourceRuntimeId && isOriginalSourceWorkspaceProjection(workbenchSpaceSelection.workspaceId)
-    ? workbenchSpaceSelection.workspaceId : reseatActiveWorkspaceId(config, persisted.activeWorkspaceId)
+  const persistedSelection: AppState['workbenchSpaceSelection'] = restoreWorkbenchSpaceSelection(persisted.workbenchSpaceSelection)
+  const workbenchSpaceSelection: AppState['workbenchSpaceSelection'] = (() => {
+    const choice = persistedSelection
+    if (!choice?.sourceRuntimeId || isOriginalSourceWorkspaceProjection(choice.workspaceId) ||
+      originalRawSourceOccurrenceConfirmed({ ...persisted, config, workbenchSpaceSelection: choice }, graph)) return choice
+    if (!choice.spaceId || !choice.zoneId) return choice
+    const workspaceId = originalSourceWorkspaceId({ hostId: '', reference: { runtimeId: choice.sourceRuntimeId, spaceId: choice.spaceId },
+      zoneId: choice.zoneId, workspaceId: choice.workspaceId })
+    return { ...choice, workspaceId, tabId: null, groupId: null, regionId: null }
+  })()
+  const activeWorkspaceId = workbenchSpaceSelection?.sourceRuntimeId ? workbenchSpaceSelection.workspaceId : reseatActiveWorkspaceId(config, persisted.activeWorkspaceId)
   return {
     mountedSpaceInputs: persisted.mountedSpaceInputs === undefined ? {} : persisted.mountedSpaceInputs,
     workspaceAgentOrder: restoreWorkspaceAgentOrder(persisted.workspaceAgentOrder),
@@ -4553,7 +4563,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     noteCanvasLayouts: state.noteCanvasLayouts,
     dirtyDocuments: state.dirtyDocuments,
     tabs: coreSpatialReady ? undefined : state.tabs,
-    // Memo dependency for thin Source/legacy pointers; never another persisted layout.
+    // Memo dependencies for thin Source/legacy pointers; never another persisted layout.
     readNamespaceTopology: state.tabs,
     layouts: coreSpatialReady ? undefined : state.layouts,
     unclaimedTerminalSessionIds: state.unclaimedTerminalSessionIds,
@@ -4589,6 +4599,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     focusTimelineHeight: state.focusTimelineHeight,
     focusTimelineRuler: state.focusTimelineRuler,
     selectedDemandId: state.selectedDemandId,
+    readNamespaceLayout: state.layouts,
     demandArrangement: state.demandArrangement,
     ...(Object.keys(state.demandPmoTabIds).length ? { demandPmoTabIds: state.demandPmoTabIds } : {}),
     projectRailOpen: state.projectRailOpen,
@@ -4637,7 +4648,7 @@ function partializeAppState(state: AppState): PersistedAppState {
   if (previousPersistedInputs && previousPersistedProjection && previousCoreSpatialReady===coreSpatialReady && shallow(previousPersistedInputs, inputs)) {
     return previousPersistedProjection
   }
-  const { tabs, layouts, readNamespaceTopology, projectGroups, spaceZoneBindings, documents, dirtyDocuments, documentIssues, ...presentation } = inputs
+  const { tabs, layouts, readNamespaceTopology, readNamespaceLayout, projectGroups, spaceZoneBindings, documents, dirtyDocuments, documentIssues, ...presentation } = inputs
   const legacyMainNoteReferences = { ...state.legacyMainNoteReferences }
   const referenceKeys = new Set<string>()
   let hasSourcePointers = Boolean(Object.keys(state.sourceFilesInputs.readSources ?? {}).length)
@@ -4654,7 +4665,7 @@ function partializeAppState(state: AppState): PersistedAppState {
       (previous?.workspaceId === occurrence.workspaceId && previous.path === occurrence.path ? previous.source : undefined)
     if (source) readSources[occurrence.pointerKey] = { workspaceId: occurrence.workspaceId, path: occurrence.path, source }
   }
-  const hasSourceWorkface = Object.values(readNamespaceTopology).some(tab => tab.source)
+  const hasSourceWorkface = Object.values(readNamespaceTopology).some(tab => tab.source) || Object.keys(readNamespaceLayout).some(isOriginalSourceWorkspaceProjection)
   const projection: PersistedAppState = {
     ...presentation,
     sourceFilesInputs: { ...presentation.sourceFilesInputs, readSources },
@@ -4862,10 +4873,10 @@ export function agentRegionLocationsKnown(): boolean { return coreSpatialPersist
 
 /** The accepted Core document locates a foreign occurrence; the member Core still owns access. */
 export function ordinaryAgentSpaceMember(reference: OrdinaryMemberReference) {
-  const state = useAppStore.getState(), projected = originalSourceMember(state, reference)
+  const state = useAppStore.getState(), projected = originalSourceMember(state, reference, coreSpatialPersistence?.current?.graph)
   if (projected) return projected
   const locals = state.config?.hosts.filter(host => host.kind === 'local') ?? []
-  const observed = sessionPresentationById(state.sessions).get(reference.sessionId)
+  const observed = reference.sessionId === null ? undefined : sessionPresentationById(state.sessions).get(reference.sessionId)
   return ordinarySpaceMember(coreSpatialPersistence?.current?.graph, reference, locals.length === 1 ? locals[0]!.id : undefined,
     observed?.kind === 'agent' ? observed : undefined)
 }
@@ -4894,6 +4905,17 @@ export function agentRegionExecution(reference: AgentRegionReference) {
 /** An explicit related reader refreshes the original owner, without applying or resaving the graph. */
 export async function rereadAgentRegionExecution(reference: AgentRegionReference) {
   const owner = coreSpatialPersistence
+/** Confirmed raw occurrences stay in the ordinary workface; only absent/unknown occurrences gain a Source projection. */
+function confirmedOriginalRawLocations(state: AppState, target: SpaceMountRecord, graph = currentCoreSpatialGraph()) {
+  if (target.hostId !== 'local' || !graph || !originalSourceScopeFromGraph(target, graph)) return []
+  const locations = workbenchSelectionCatalog(state).locations.filter(location => location.spaceId === target.reference.spaceId &&
+    location.zoneId === target.zoneId && location.workspaceId === target.workspaceId && originalRawSourceOccurrenceConfirmed(state, graph, {
+      spaceId: location.spaceId, zoneId: location.zoneId, workspaceId: location.workspaceId, topicId: null,
+      groupId: location.groupId, tabId: location.tabId, regionId: location.regionId, sourceRuntimeId: target.reference.runtimeId
+    }, false))
+  return locations
+}
+
   if (!owner) throw new Error('The original Core spatial owner is not available. Its Region is retained.')
   await owner.read()
   if (coreSpatialPersistence !== owner) throw new Error('The original Core spatial owner changed during observation. Its Region is retained; re-read the current owner.')
@@ -5983,29 +6005,21 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const resource = input.resource ?? originalSpaceResource({ ...before, mountedSpaceInputs }, target, target.workspaceId, currentCoreSpatialGraph())
     if (resource && resource.id !== target.workspaceId) throw new Error('The original Folder resource does not match its Space Workspace. Existing input is retained.')
     const catalog = workbenchSelectionCatalog(before), graph = currentCoreSpatialGraph()
-    const localSourceAmbiguous = !graph && target.hostId === 'local' && (() => {
-      try { return Object.keys(mountedSpaceInputEntries(before.mountedSpaceInputs)).some(key => {
-        if (key === spaceMountKey(target.reference)) return false
-        try {
-          const other = mountedSpaceInput(before.mountedSpaceInputs, key)?.target
-          return other?.reference.spaceId === target.reference.spaceId && other.zoneId === target.zoneId && other.workspaceId === target.workspaceId
-        } catch { return false }
-      }) } catch { return true }
-    })()
-    const runtimeConfirmed = target.hostId === 'local' && (graph ? folderDirectoryFacts(graph).folders.some(fact =>
-      fact.runtimeId === target.reference.runtimeId && fact.spaceId === target.reference.spaceId && fact.zoneId === target.zoneId && fact.resource.id === target.workspaceId) : !localSourceAmbiguous)
-    const locations = runtimeConfirmed ? catalog.locations.filter(location => location.spaceId === target.reference.spaceId &&
-      location.zoneId === target.zoneId && location.workspaceId === target.workspaceId) : []
+    const locations = confirmedOriginalRawLocations(before, target, graph)
     const projectionWorkspaceId = originalSourceWorkspaceId(target)
-    const savedView = (mountedSpaceInput(mountedSpaceInputs, key) as (import('./lib/space-mount-view').MountedSpaceInput & { view?: SpaceMountView }) | undefined)?.view
+    let savedView: SpaceMountView | undefined
+    try { savedView = (mountedSpaceInput(mountedSpaceInputs, key) as (import('./lib/space-mount-view').MountedSpaceInput & { view?: SpaceMountView }) | undefined)?.view }
+    catch { savedView = undefined }
     const requested = input.occurrence ?? (savedView?.selection ? { tabId: savedView.selection.tabId, regionId: savedView.selection.regionId,
       displayWorkspaceId: target.workspaceId, groupId: savedView.selection.groupId } : undefined)
     const candidates = locations.filter(location => !requested || location.tabId === requested.tabId && location.regionId === requested.regionId &&
       (!requested.displayWorkspaceId || location.displayWorkspaceId === requested.displayWorkspaceId) &&
-      (!input.occurrence?.groupId || location.groupId === input.occurrence.groupId))
+      (!requested.groupId || location.groupId === requested.groupId))
     const selected = candidates.length === 1 ? candidates[0] : !requested && locations.length === 1 ? locations[0] : undefined
-    if (!selected && !before.layouts[projectionWorkspaceId] && savedView) {
-      const restoredScope = graph ? originalSourceScopeFromGraph(target, graph) : undefined
+    if (!selected && !locations.length && !before.layouts[projectionWorkspaceId] && savedView) {
+      const current = before.mountedSpaceObservations[key]?.snapshot
+      const observed = current?.scope.space ? current : before.mountedSpaceObservations[key]?.lastPresentSnapshot
+      const restoredScope = (graph ? originalSourceScopeFromGraph(target, graph) : undefined) ?? (observed?.scope.space && acceptsMountedSnapshot(target, observed) ? observed : undefined)
       if (restoredScope) {
         const restored = reconcileOriginalSourceProjection({ ...before, mountedSpaceInputs }, target, restoredScope)
         set(restored)
@@ -6021,7 +6035,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (!requested || requested.displayWorkspaceId && requested.displayWorkspaceId !== target.workspaceId && requested.displayWorkspaceId !== projectionWorkspaceId) return undefined
       const tabId = originalSourceTabProjectionId(target, requested.tabId)
       const regionId = originalSourceRegionProjectionId(target, requested.regionId), tab = before.tabs[tabId], region = tab?.regions[regionId]
-      const source = tab?.source, regionSource = region?.source, layout = before.layouts[projectionWorkspaceId]
+      const source = tab?.source, regionSource = sourceRegionProjectionReference(region), layout = before.layouts[projectionWorkspaceId]
       const groups = layout?.groups.filter(group => group.tabOrder.includes(tabId)) ?? []
       const group = (requested.groupId ? groups.find(group => group.id === originalSourceGroupProjectionId(target, requested.groupId!)) : undefined) ?? (groups.length === 1 ? groups[0] : undefined)
       if (!group || tab?.workspaceId !== projectionWorkspaceId || !source || !regionSource || source.reference.runtimeId !== target.reference.runtimeId ||
@@ -6054,7 +6068,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return
       } catch { /* A changed ordinary occurrence remains unknown; the original Zone stays selected below. */ }
     }
-    const workspaceId = projectionWorkspaceId
+    const workspaceId = locations.length ? target.workspaceId : projectionWorkspaceId
     set(state => {
       const next: AppState & { selectedSpaceMount?: unknown } = { ...state, mountedSpaceInputs, sourceFilesInputs, activeWorkspaceId: workspaceId, mainSurface: 'workbench', retainedSpatialFocus: null,
         workbenchNavigationInputPolicy: null, regionCaretFocus: null,
@@ -6119,8 +6133,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set(state => {
       const before = state.mountedSpaceObservations[key], snapshot = observation.snapshot
       if (snapshot && before?.snapshot?.source.ownerInstanceId === snapshot.source.ownerInstanceId && snapshot.revision < before.snapshot.revision) return state
-      const selectedTab = state.workbenchSpaceSelection?.tabId ? state.tabs[state.workbenchSpaceSelection.tabId] : undefined
-      const ordinaryLocalOccurrence = target.hostId === 'local' && state.activeWorkspaceId === target.workspaceId && selectedTab && !selectedTab.source
+      const ordinaryLocalOccurrence = confirmedOriginalRawLocations(state, target).length > 0
       const reconciled = snapshot?.scope.space ? reconcileOriginalSourceProjection(state, target, snapshot) : {}
       const projection = ordinaryLocalOccurrence ? { mountedSpaceInputs: reconciled.mountedSpaceInputs } : reconciled
       return { ...projection, mountedSpaceObservations: { ...state.mountedSpaceObservations, [key]: { ...before, ...observation,
@@ -6765,7 +6778,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const retainedDisplayNames = [
         ...Object.entries(hydrated.agentNames).map(([id, value]) => ({ target: { kind: 'agent-session', id }, value })),
         ...Object.entries(hydrated.surveyExplorationNames).map(([id, value]) => ({ target: { kind: 'zone', id }, value })),
-        ...Object.values(hydrated.restoredWorkbench?.tabs ?? hydrated.tabs).flatMap(tab => tab.name ? [{ target: { kind: 'tab', id: tab.id }, value: tab.name }] : [])
+        ...Object.values(hydrated.restoredWorkbench?.tabs ?? hydrated.tabs).filter(tab => !tab.source).flatMap(tab => tab.name ? [{ target: { kind: 'tab', id: tab.id }, value: tab.name }] : [])
       ]
       disposeCoreSpatial?.();disposeCoreSpatial=null
       if(api.spatial) {

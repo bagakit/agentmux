@@ -48,7 +48,7 @@ import { executionFocusSessionId, focusLaneForSession } from '../lib/agent-focus
 import { workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
 import { sameWorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { agentSessionPresentationIndex, sessionPresentationById } from '../lib/session-presentation'
-import { topicIdForSession, workspaceForSession, type WorkbenchTab } from '../lib/workbench-tabs'
+import { sourceRegionProjectionReference, topicIdForSession, workspaceForSession, type WorkbenchTab } from '../lib/workbench-tabs'
 import { useWorkbenchTabRecord, useWorkbenchTabNameMetadata, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
 import { workbenchTabDisplayName } from '../lib/workbench-tab-presentation'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
@@ -136,7 +136,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const sourceChoice = useAppStore(state => state.workbenchSpaceSelection), tabs = useAppStore(state => state.tabs)
   const sourceSelection = useMemo(() => {
     if (!selectedSourceKey || !sourceChoice?.tabId || !sourceChoice.regionId) return null
-    const tab = tabs[sourceChoice.tabId], region = tab?.regions[sourceChoice.regionId], source = tab?.source, regionSource = region?.source
+    const tab = tabs[sourceChoice.tabId], region = tab?.regions[sourceChoice.regionId], source = tab?.source, regionSource = sourceRegionProjectionReference(region)
     if (!source || !regionSource || spaceMountKey(source.reference) !== selectedSourceKey) return null
     const selected = { tabId: source.tabId, regionId: regionSource.regionId }
     for (const context of executionRows) {

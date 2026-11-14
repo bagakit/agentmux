@@ -108,6 +108,7 @@ import { useNoteFileName } from '../lib/note-source-name'
 import {
   activeWorkbenchSurface,
   documentKey,
+  sourceRegionProjectionReference,
   titleWorkbenchSurface,
   workbenchSurfaces,
   type WorkbenchSurface,
@@ -807,7 +808,8 @@ function WorkbenchRegionContent({
   const [confirmingClose, setConfirmingClose] = useState<{ confirmation: LastViewCloseConfirmation; record: SpaceCloseReceipt; keep: SpaceCloseReceipt | null } | null>(null)
   const [closingRegion, setClosingRegion] = useState(false)
   const surface = tab.regions[node.regionId]
-  const source = useAppStore(state => surface?.source ? originalSourceEntryByKey(state, spaceMountKey(surface.source.reference)) : undefined)
+  const projectionSource = sourceRegionProjectionReference(surface)
+  const source = useAppStore(state => projectionSource ? originalSourceEntryByKey(state, spaceMountKey(projectionSource.reference)) : undefined)
   const sourceSnapshot = useAppStore(state => source ? state.mountedSpaceObservations[source.key]?.snapshot : undefined)
   const connector = useAgentConnectorMenu(node.regionId, surface ? addressableAgentSessionId(surface) : null, tab.id)
   const regionCount = Object.keys(tab.regions).length
@@ -873,8 +875,8 @@ function WorkbenchRegionContent({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [closeRegionRequest, tab.id, tab.workspaceId, node.regionId, clearCloseRegionRequest])
 
-  const sourceMember = useMemo(() => surface?.source && sourceSnapshot ? mountedSpaceRegions(sourceSnapshot).find(member => member.tab.tabId === surface.source!.tabId && member.region.regionId === surface.source!.regionId) : undefined,
-    [surface?.source, sourceSnapshot])
+  const sourceMember = useMemo(() => projectionSource && sourceSnapshot ? mountedSpaceRegions(sourceSnapshot).find(member => member.tab.tabId === projectionSource.tabId && member.region.regionId === projectionSource.regionId) : undefined,
+    [projectionSource, sourceSnapshot])
   if (!surface) return null
 
   // 键盘打开这一格的右键菜单——补的是一个可达性缺口：纯键盘用户够不到右键，而 Radix 的 Trigger 只认
@@ -963,7 +965,7 @@ function WorkbenchRegionContent({
     <section
       className={`${REGION_CLASS} ${focusForPresentation(target).className}`}
       data-workbench-region-id={node.regionId}
-      data-source-region={surface.source ? mountedRegionKey(surface.source.reference, surface.source.tabId, surface.source.regionId) : undefined}
+      data-source-region={projectionSource ? mountedRegionKey(projectionSource.reference, projectionSource.tabId, projectionSource.regionId) : undefined}
       // tabIndex={-1}：可编程聚焦但不进 Tab 序（理由见 openRegionMenuFromKeyboard 上方注释）。
       tabIndex={-1}
       onKeyDown={openRegionMenuFromKeyboard}

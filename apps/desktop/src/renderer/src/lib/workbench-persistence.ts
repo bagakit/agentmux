@@ -457,10 +457,11 @@ export function persistedSessionSurfaceIds(
   persisted: PersistedWorkbench | null
 ): Set<string> {
   return new Set(persisted ? Object.values(persisted.tabs).flatMap((tab) => (
-    workbenchSurfaces(hydratePersistedTab(tab)).flatMap((surface) => (
-      surface.kind === 'agent' ? surface.phase === 'attached' || tab.space ? [surface.sessionId] : []
+    workbenchSurfaces(hydratePersistedTab(tab)).flatMap((surface) => {
+      if (tab.source || surface.source) return []
+      return surface.kind === 'agent' ? surface.phase === 'attached' || tab.space ? [surface.sessionId] : []
         : surface.kind === 'terminal' && surface.phase === 'attached' ? [surface.sessionId] : []
-    ))
+    })
   )) : [])
 }
 

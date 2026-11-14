@@ -12,7 +12,7 @@ type State = ReturnType<typeof useAppStore.getState>
 // A new fact read must join its notification owner here; actions are imperative.
 const sharedFacts = {
   composer: ['config', 'scratchTopicSnapshots', 'providerCatalog', 'errorNoticeContext', 'error', 'lastError', 'lastActiveFileByWorkspace'],
-  sessionPane: ['config', 'workbenchSaveWarning', 'scratchTopicSnapshots', 'runtimeEndpointWarnings',
+  sessionPane: ['config', 'workbenchSaveWarning', 'scratchTopicSnapshots', 'runtimeEndpointWarnings', 'providerCatalog',
     'localHome', 'demands', 'layouts', 'spaceZoneBindings', 'spatialRequests', 'topicCategories', 'projectGroups'],
   reactions: ['config'],
   avatar: [],

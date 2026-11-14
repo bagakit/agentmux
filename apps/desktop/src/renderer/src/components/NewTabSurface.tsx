@@ -9,7 +9,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { TERMINAL_FONT_SIZE_DEFAULT, isScratchWorkspaceId } from '../../../shared/contracts'
 import { lifecycleNotification, notificationEventIdentity, useAppStore, warmTerminalKey, currentCoreSpatialGraph } from '../store'
-import { originalSourceEntryForSelection, originalSourceLauncherExecution, originalSpaceWorkspace } from '../lib/original-space-navigation'
+import { originalSourceEntryForSelection, originalSourceLauncherExecution, originalSpaceWorkspace, originalRawSourceOccurrenceConfirmed, isOriginalSourceWorkspaceProjection } from '../lib/original-space-navigation'
 import { useWorkbenchBrowserPresentation, useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { mainRegionReference } from '../lib/desktop-focus-navigation'
 import { workbenchTabDisplayWorkspaceId } from '../lib/workbench-resource-display'
@@ -145,13 +145,16 @@ export function NewTabSurface({
     : warmLauncherId({ tabGroupId, regionId })
   const sourceValue = useLauncherState(state => state.drafts[launcherId]?.sourceExecution)
   const sourceInputs = useAppStore(state => state.mountedSpaceInputs)
-  const implicitSourceKey = useAppStore(state => originalSourceEntryForSelection(state)?.key)
+  const rawSourceSelection = useAppStore(state => Boolean(state.workbenchSpaceSelection?.sourceRuntimeId &&
+    !isOriginalSourceWorkspaceProjection(state.workbenchSpaceSelection.workspaceId)))
+  const rawSourceUnknown = useAppStore(state => rawSourceSelection && !originalRawSourceOccurrenceConfirmed(state, currentCoreSpatialGraph()))
+  const implicitSourceKey = useAppStore(state => rawSourceSelection ? undefined : originalSourceEntryForSelection(state)?.key)
   const implicitSourceObservation = useAppStore(state => implicitSourceKey ? state.mountedSpaceObservations[implicitSourceKey] : undefined)
   const implicitSource = useMemo(() => implicitSourceKey ? originalSourceLauncherExecution(useAppStore.getState(), tabId, regionId, currentCoreSpatialGraph()) : undefined,
     [implicitSourceKey, sourceInputs, implicitSourceObservation, tabId, regionId])
   let sourceExecution: ReturnType<typeof launcherSourceExecution>, sourceSelectionIssue: string | undefined
   try { sourceExecution = sourceValue === undefined ? implicitSource : launcherSourceExecution(sourceValue) } catch (cause) { sourceSelectionIssue = presentError(cause) }
-  const sourceMode = sourceValue !== undefined || implicitSource !== undefined
+  const sourceMode = sourceValue !== undefined || implicitSourceKey !== undefined || rawSourceUnknown
   const sourceUnavailable = sourceMode ? 'Mote discussion, Terminal, Browser and Note creation through this original Source are unavailable here. No local substitute will be created.' : undefined
   const sourceLauncher = useSourceLauncher(sourceExecution, motionActive && !moteId)
   const { prompt, setPrompt, names, setName, optionsByProvider, selectOption } = useLauncherInputs(regionId, launcherId)
@@ -218,7 +221,7 @@ export function NewTabSurface({
     activeWorkspaceId
   })
   const workspace = useMemo(() => originalSpaceWorkspace(useAppStore.getState(), resolvedWorkspaceId, currentCoreSpatialGraph()),
-    [resolvedWorkspaceId, config, sourceInputs, implicitSourceObservation])
+    [resolvedWorkspaceId, config, sourceInputs, implicitSourceObservation, rawSourceUnknown])
   const host = workspace ? config?.hosts.find((candidate) => candidate.id === workspace.hostId) : undefined
   const splitExecution = agentTarget?.agentWorkspaceId !== undefined
   const agentWorkspace = splitExecution ? config?.workspaces.find(item => item.id === agentTarget.agentWorkspaceId) : workspace
@@ -570,7 +573,7 @@ export function NewTabSurface({
               ? settings.openHostExecutors(agentWorkspace.hostId) : settings.openHost(agentWorkspace.hostId) : undefined} /></div>}
         <div className="launcher-composer composer" onFocusCapture={attachments.claimScreenshotTarget}><ComposerCompletionEditor completionConfig={completion.completionConfig} commands={completion.commands} skills={completion.skills}
           references={completion.references} promptKeywords={completion.promptKeywords} onCompletionQuery={completion.onCompletionQuery}
-          completionFeedback={completion.completionFeedback} active={visible && presentationActive} aria-label={implicitSource ? 'Original Space task draft' : 'Agent prompt'} disabled={false} readPastedImage={api.ui.readPastedImage} insertionRef={insertionRef}
+          completionFeedback={completion.completionFeedback} active={visible && presentationActive} aria-label={sourceMode ? 'Original Space task draft' : 'Agent prompt'} disabled={false} readPastedImage={api.ui.readPastedImage} insertionRef={insertionRef}
           onPasteImage={attachments.pasteImage} onDropFiles={attachments.dropFiles}
           autoFocus={visible && presentationActive && inputRegionActive && !controlNavigation} value={prompt} onValueChange={setPrompt}
           onKeyDown={event => { if (!launcherKeydownLaunches(event, isMacPlatform(), readiness)) return; event.preventDefault(); launchFromLauncher() }}

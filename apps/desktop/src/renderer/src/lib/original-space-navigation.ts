@@ -1,4 +1,4 @@
-import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
+import { spatialAgentOpenRecord, type AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
 import type { SpaceSnapshot } from '@agentmux/core'
 import type { AgentMuxDesktopSpaceSelection } from '@agentmux/core/control'
 import { folderDirectoryFacts } from '@agentmux/core/space-folder-resources'
@@ -9,7 +9,7 @@ import type { AppConfig, WorkspaceRecord } from '../../../shared/contracts'
 import type { SpaceMountRecord, SpaceMountView } from '../../../shared/space-mount'
 import { spaceMountKey } from '../../../shared/space-mount'
 import { mountedSpaceInput, mountedSpaceInputs, mountedSpaceRegions, mountedSpaceTarget, editMountedSpaceInput, type MountedSpaceInput } from './space-mount-view'
-import type { WorkbenchTab, FileWorkbenchSurface } from './workbench-tabs'
+import { sourceRegionProjectionReference, type WorkbenchTab, type FileWorkbenchSurface } from './workbench-tabs'
 import type { LauncherSourceExecution } from './launcher-source'
 import type { OrdinaryMemberReference, OrdinarySpaceMember } from './ordinary-space-member'
 
@@ -150,7 +150,7 @@ export function reconcileOriginalSourceProjection<T extends OriginalSpaceSelecti
     return retained
   }) : state.mountedSpaceInputs
   return { tabs, layouts: { ...state.layouts, [workspaceId]: composition }, mountedSpaceInputs,
-    ...(selectedHere || state.activeWorkspaceId === target.workspaceId ? { activeWorkspaceId: workspaceId } : {}),
+    ...(selectedHere || state.activeWorkspaceId === workspaceId ? { activeWorkspaceId: workspaceId } : {}),
     ...(nextSelection !== selection ? { workbenchSpaceSelection: nextSelection } : {}) } as Partial<T>
 }
 
@@ -201,6 +201,34 @@ export function originalSourceEntryForSelection(state: OriginalSpaceSelectionSta
 export function originalSourceEntryByKey(state: Pick<OriginalSpaceSelectionState, 'mountedSpaceInputs'>, key: string): OriginalSourceEntry | undefined {
   return readableEntry(state.mountedSpaceInputs, key)
 }
+function sameRawRegion(local: WorkbenchTab['regions'][string], original: AgentMuxSpatialGraph['regions'][number]): boolean {
+  if (local.kind !== original.kind) return false
+  if (original.kind === 'agent') return local.kind === 'agent' && local.sessionId === original.agentSessionId
+  if (original.kind === 'file') return local.kind === 'file' && local.path === original.file?.path && local.workspaceId === original.file?.workspaceId
+  return true
+}
+
+/** A raw persisted occurrence is ordinary only when its exact locator and current graph still agree. */
+export function originalRawSourceOccurrenceConfirmed(state: OriginalSpaceSelectionState, graph: AgentMuxSpatialGraph | null | undefined,
+  choice = state.workbenchSpaceSelection, requireCurrentGroup = true): boolean {
+  if (!graph || !choice?.sourceRuntimeId || !choice.spaceId || !choice.zoneId || isOriginalSourceWorkspaceProjection(choice.workspaceId)) return false
+  const entry = originalSourceEntryByKey(state, spaceMountKey({ runtimeId: choice.sourceRuntimeId, spaceId: choice.spaceId }))
+  if (!entry || entry.target.hostId !== 'local' || entry.target.zoneId !== choice.zoneId || entry.target.workspaceId !== choice.workspaceId ||
+    !graph.bindings.some(binding => binding.spaceId === choice.spaceId && binding.zoneId === choice.zoneId)) return false
+  const folderRuntimes = new Set(folderDirectoryFacts(graph).folders.filter(fact => fact.spaceId === choice.spaceId && fact.zoneId === choice.zoneId &&
+    fact.resource.id === choice.workspaceId).map(fact => fact.runtimeId))
+  if (folderRuntimes.size > 1 || folderRuntimes.size === 1 && !folderRuntimes.has(choice.sourceRuntimeId)) return false
+  if (choice.tabId === null && choice.groupId === null && choice.regionId === null) return folderRuntimes.size === 1
+  if (!choice.tabId || !choice.groupId || !choice.regionId) return false
+  const scope = sourceGraphSnapshot(entry.target, graph)
+  if (!scope) return false
+  const tab = scope.scope.tabs.find(candidate => candidate.tabId === choice.tabId && candidate.zoneId === choice.zoneId && candidate.workspaceId === choice.workspaceId)
+  const region = scope.scope.regions.find(candidate => candidate.tabId === choice.tabId && candidate.regionId === choice.regionId)
+  const localTab = state.tabs?.[choice.tabId], localSurface = localTab?.regions[choice.regionId]
+  return Boolean((!localTab || !localTab.source && localSurface && !sourceRegionProjectionReference(localSurface) && region && sameRawRegion(localSurface, region)) &&
+    tab?.regionIds.includes(choice.regionId) && region &&
+    (!requireCurrentGroup || graph.layouts[choice.workspaceId]?.groups.some(group => group.id === choice.groupId && group.tabOrder.includes(choice.tabId!))))
+}
 function graphFolder(target: SpaceMountRecord, graph: AgentMuxSpatialGraph | null | undefined, workspaceId: string): FolderSpaceResource | undefined {
   if (!graph) return undefined
   const scope = originalSourceScopeFromGraph(target, graph)
@@ -211,12 +239,27 @@ function graphFolder(target: SpaceMountRecord, graph: AgentMuxSpatialGraph | nul
   return matches.length === 1 ? matches[0]!.resource : undefined
 }
 export function originalSourceScopeFromGraph(target: SpaceMountRecord, graph: AgentMuxSpatialGraph): Pick<SpaceSnapshot, 'reference' | 'scope'> | undefined {
+  const folderRuntimes = new Set(folderDirectoryFacts(graph).folders.filter(fact => fact.spaceId === target.reference.spaceId && fact.zoneId === target.zoneId && fact.resource.id === target.workspaceId).map(fact => fact.runtimeId))
+  if (folderRuntimes.size > 1 || folderRuntimes.size === 1 && !folderRuntimes.has(target.reference.runtimeId)) return undefined
+  const folderConfirmed = folderRuntimes.size === 1
   const space = graph.spaces.find(candidate => candidate.spaceId === target.reference.spaceId)
   const bindings = graph.bindings.filter(binding => binding.spaceId === target.reference.spaceId), zoneIds = new Set(bindings.map(binding => binding.zoneId))
   if (!space || !zoneIds.has(target.zoneId)) return undefined
   const zones = graph.zones.filter(zone => zoneIds.has(zone.zoneId))
   if (!zones.some(zone => zone.zoneId === target.zoneId && zone.workspaceId === target.workspaceId)) return undefined
-  const tabs = graph.tabs.filter(tab => tab.zoneId !== null && zoneIds.has(tab.zoneId)), tabIds = new Set(tabs.map(tab => tab.tabId))
+  const tabs = graph.tabs.filter(tab => tab.zoneId !== null && zoneIds.has(tab.zoneId)).filter(tab => {
+    if (folderConfirmed) return true
+    return tab.regionIds.some(regionId => {
+      const region = graph.regions.find(candidate => candidate.tabId === tab.tabId && candidate.regionId === regionId)
+      if (region?.creationOperationId) {
+        try { return spatialAgentOpenRecord(graph, region.creationOperationId)?.placement?.runtimeId === target.reference.runtimeId }
+        catch { return false }
+      }
+      return region?.kind === 'launcher' && region.execution?.runtimeId === target.reference.runtimeId
+    })
+  })
+  if (!folderConfirmed && !tabs.length) return undefined
+  const tabIds = new Set(tabs.map(tab => tab.tabId))
   return { reference: { ...target.reference }, scope: { space, zones, tabs, regions: graph.regions.filter(region => tabIds.has(region.tabId)), bindings } }
 }
 function snapshotResource(target: SpaceMountRecord, snapshot: Pick<SpaceSnapshot, 'reference' | 'scope'> | undefined, workspaceId = target.workspaceId): FolderSpaceResource | undefined {
@@ -258,6 +301,9 @@ export function hasOriginalSourceFileSurface(state: OriginalSpaceSelectionState,
 /** Presentation resource only. The original Core owns the path and every file authority. */
 export function originalSpaceWorkspace(state: OriginalSpaceSelectionState, workspaceId: string | null, graph?: AgentMuxSpatialGraph | null): WorkspaceRecord | undefined {
   if (!workspaceId) return undefined
+  const choice = state.workbenchSpaceSelection
+  if (choice?.sourceRuntimeId && choice.workspaceId === workspaceId && !isOriginalSourceWorkspaceProjection(workspaceId) &&
+    !originalRawSourceOccurrenceConfirmed(state, graph)) return undefined
   const selected = originalSourceEntryForSelection(state)
   if (selected) {
     const projected = workspaceId === originalSourceWorkspaceId(selected.target)
@@ -311,22 +357,38 @@ export function originalSourceLauncherExecution(state: OriginalSpaceSelectionSta
 }
 
 const sourceSessionPrefix = 'original-source-member:'
+/** Canonical draft/queue owner: execution identity, never a movable Space/Tab/Region presentation address. */
+export function originalSourceInputOwnerKey(runtimeId: string, agentSessionId: string): string {
+  return JSON.stringify([runtimeId, agentSessionId])
+}
 export function originalSourceSessionId(target: SpaceMountRecord, tabId: string, regionId: string, agentSessionId: string): string {
   return sourceSessionPrefix + JSON.stringify([target.reference.runtimeId, target.reference.spaceId, tabId, regionId, agentSessionId])
 }
-function sourceObservation(state: OriginalSpaceSelectionState, key: string): SpaceSnapshot | undefined {
+type OriginalSourceSnapshot = Pick<SpaceSnapshot, 'reference' | 'scope'>
+function sourceObservation(state: OriginalSpaceSelectionState, key: string): OriginalSourceSnapshot | undefined {
   const observation = state.mountedSpaceObservations?.[key]
   return observation?.snapshot?.scope.space === null ? observation.lastPresentSnapshot ?? observation.snapshot : observation?.snapshot
 }
 const unconfirmedSourceMember: OrdinarySpaceMember = Object.freeze({ kind: 'unconfirmed', issue: 'The original Source member occurrence is not confirmed. Its Region and unsent input are retained; no local Session was selected.' })
-const sourceMemberCache = new WeakMap<SpaceSnapshot, Map<string, OrdinarySpaceMember>>()
-export function originalSourceMember(state: OriginalSpaceSelectionState, reference: OrdinaryMemberReference): OrdinarySpaceMember | undefined {
-  if (!reference.sessionId.startsWith(sourceSessionPrefix)) return undefined
+const sourceGraphCache = new WeakMap<AgentMuxSpatialGraph, Map<string, OriginalSourceSnapshot | undefined>>()
+function sourceGraphSnapshot(target: SpaceMountRecord, graph: AgentMuxSpatialGraph): OriginalSourceSnapshot | undefined {
+  const key = JSON.stringify([target.reference.runtimeId, target.reference.spaceId, target.zoneId, target.workspaceId])
+  let entries = sourceGraphCache.get(graph)
+  if (!entries) { entries = new Map(); sourceGraphCache.set(graph, entries) }
+  if (entries.has(key)) return entries.get(key)
+  const snapshot = originalSourceScopeFromGraph(target, graph)
+  entries.set(key, snapshot)
+  return snapshot
+}
+const sourceMemberCache = new WeakMap<OriginalSourceSnapshot, Map<string, OrdinarySpaceMember>>()
+export function originalSourceMember(state: OriginalSpaceSelectionState, reference: OrdinaryMemberReference, graph?: AgentMuxSpatialGraph | null): OrdinarySpaceMember | undefined {
+  if (!reference.sessionId?.startsWith(sourceSessionPrefix)) return undefined
   let parsed: unknown
   try { parsed = JSON.parse(reference.sessionId.slice(sourceSessionPrefix.length)) } catch { return unconfirmedSourceMember }
   if (!Array.isArray(parsed) || parsed.length !== 5 || !parsed.every(value => typeof value === 'string' && value.length > 0)) return unconfirmedSourceMember
   const [runtimeId, spaceId, tabId, regionId, agentSessionId] = parsed as [string, string, string, string, string]
-  const key = spaceMountKey({ runtimeId, spaceId }), entry = originalSourceEntryByKey(state, key), snapshot = sourceObservation(state, key)
+  const key = spaceMountKey({ runtimeId, spaceId }), entry = originalSourceEntryByKey(state, key), observed = sourceObservation(state, key)
+  const snapshot = observed ?? (entry && graph ? sourceGraphSnapshot(entry.target, graph) : undefined)
   if (!snapshot) return unconfirmedSourceMember
   let cache = sourceMemberCache.get(snapshot)
   if (!cache) { cache = new Map(); sourceMemberCache.set(snapshot, cache) }
@@ -335,9 +397,9 @@ export function originalSourceMember(state: OriginalSpaceSelectionState, referen
   if (prior) return prior
   const project = (): OrdinarySpaceMember => {
     const tab = snapshot.scope.tabs.find(tab => tab.tabId === tabId), region = snapshot.scope.regions.find(region => region.tabId === tabId && region.regionId === regionId)
-    const projectedTab = state.tabs?.[reference.tabId], projectedRegion = projectedTab?.regions[reference.regionId]
-    const occurrenceMatches = projectedTab?.source && projectedRegion?.source
-      ? projectedTab.source.tabId === tabId && projectedRegion.source.regionId === regionId && projectedRegion.source.agentSessionId === agentSessionId
+    const projectedTab = state.tabs?.[reference.tabId], projectedRegion = projectedTab?.regions[reference.regionId], projectedRegionSource = sourceRegionProjectionReference(projectedRegion)
+    const occurrenceMatches = projectedTab?.source && projectedRegionSource
+      ? projectedTab.source.tabId === tabId && projectedRegionSource.regionId === regionId && projectedRegionSource.agentSessionId === agentSessionId
       : reference.tabId === tabId && reference.regionId === regionId
     if (!entry || entry.target.reference.runtimeId !== runtimeId || entry.target.reference.spaceId !== spaceId || !tab || !region || region.kind !== 'agent' ||
       !occurrenceMatches || region.agentSessionId !== agentSessionId || !region.creationOperationId ||
@@ -346,7 +408,8 @@ export function originalSourceMember(state: OriginalSpaceSelectionState, referen
     if (!presentation) return unconfirmedSourceMember
     return { kind: 'foreign', source: entry.target, creationOperationId: region.creationOperationId, presentation,
       metadataMember: { hostId: region.execution.hostId, runtimeId: region.execution.runtimeId, agentSessionId },
-      member: { hostId: entry.target.hostId, target: { reference: entry.target.reference, regionId, runtimeId: region.execution.runtimeId, agentSessionId, expectedRun: { runId: region.runId ?? '' } } } }
+      member: { hostId: entry.target.hostId, target: { reference: entry.target.reference, regionId, runtimeId: region.execution.runtimeId, agentSessionId,
+        expectedRun: { runId: region.runId ?? '' }, expectedAdmission: { kind: 'creation', operationId: region.creationOperationId } } } }
   }
   const result = project(); cache.set(cacheKey, result); return result
 }

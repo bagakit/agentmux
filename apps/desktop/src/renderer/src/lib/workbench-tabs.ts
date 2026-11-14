@@ -134,16 +134,21 @@ export type BrowserWorkbenchSurface = BrowserSnapshot & {
   bookmarkOrigin?: { path: string; binary: boolean }
 }
 
-export type WorkbenchSurface = (
-  | AgentWorkbenchSurface
-  | TerminalWorkbenchSurface
-  | FileWorkbenchSurface
-  | GitDiffWorkbenchSurface
-  | GitWorkbenchSurface
-  | LauncherWorkbenchSurface
-  | BrowserWorkbenchSurface
-) & { /** View-only original Source address; never a local execution or graph identity. */
+type SourceProjectedSurface = { /** View-only original Source address; never a local execution or graph identity. */
   source?: SourceRegionProjectionReference
+}
+export type WorkbenchSurface =
+  | (AgentWorkbenchSurface & SourceProjectedSurface)
+  | (TerminalWorkbenchSurface & SourceProjectedSurface)
+  | (FileWorkbenchSurface & SourceProjectedSurface)
+  | (GitDiffWorkbenchSurface & SourceProjectedSurface)
+  | (GitWorkbenchSurface & SourceProjectedSurface)
+  | (LauncherWorkbenchSurface & SourceProjectedSurface)
+  | BrowserWorkbenchSurface
+
+export function sourceRegionProjectionReference(surface: WorkbenchSurface | null | undefined): SourceRegionProjectionReference | undefined {
+  const source = surface?.source
+  return source && 'reference' in source ? source : undefined
 }
 
 export type WorkbenchTab = {
