@@ -2,7 +2,7 @@ import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseRendererV8ProfileInput, sameRendererV8ProfileTarget, type RendererV8ProfileInput } from './renderer-v8-profile.js'
 
-export type RendererTraceInput = RendererV8ProfileInput
+export type RendererTraceInput = RendererV8ProfileInput & { purpose?: 'memory-allocators' }
 /** Original native gzip bytes, never a reconstructed event array. */
 export type RendererTrace = { encoding: 'base64'; data: string; bytes: number; sha256: string }
 export const RENDERER_TRACE_MAX_BYTES = 8 * 1024 * 1024
@@ -11,8 +11,17 @@ export const RENDERER_TRACE_MAX_GZIP_BYTES = 3 * Math.floor((RENDERER_TRACE_MAX_
 export const RENDERER_TRACE_CATEGORIES = ['toplevel', 'devtools.timeline', 'disabled-by-default-devtools.timeline',
   'disabled-by-default-devtools.timeline.stack',
   'blink', 'blink.user_timing', 'cc', 'gpu', 'viz', 'input', 'latencyInfo'] as const
+export const RENDERER_ALLOCATOR_TRACE_CATEGORIES = ['disabled-by-default-memory-infra'] as const
+export type RendererTraceMemoryDump = {
+  deterministic: false; levelOfDetail: 'light'; requested: boolean; acknowledged: boolean
+  /** Main dispatch/valid-ACK wall times, independent of native trace-point timestamps. */
+  requestedAt: number | null; acknowledgedAt: number | null
+  /** Native request acknowledgement, never joined to a JSON trace point by matching tokens. */
+  response: { dumpGuid: string; success: boolean } | null
+}
 export type RendererTraceResult = RendererTraceInput & {
-  schema: 'agentmux.renderer-trace.v2'; scope: 'chromium-target-related-timeline'; status: 'completed' | 'failed' | 'unknown'
+  schema: 'agentmux.renderer-trace.v2'; scope: 'chromium-target-related-timeline' | 'chromium-target-related-memory-allocators'; status: 'completed' | 'failed' | 'unknown'
+  memoryDump?: RendererTraceMemoryDump
   /** Requested filters, not proof of native support. Observed PID/category facts remain in the original events. */
   transferMode: 'ReturnAsStream'; streamFormat: 'json'; streamCompression: 'gzip'; traceTimeUnit: 'microseconds'; requestedCategories: string[]
   /** Main receive times: startedAt/startMonotonicMs mark start ACK, not the native trace's earliest event. */
@@ -45,7 +54,12 @@ function array(value: unknown): unknown[] {
   return value
 }
 export function parseRendererTraceInput(value: unknown, code = 'INVALID_CONTROL_REQUEST'): RendererTraceInput {
-  try { return parseRendererV8ProfileInput(value, code) } catch { return invalid(code) }
+  try {
+    const r = rpcRecord(value, ['target', 'durationMs', 'purpose'], code)
+    if (r.purpose !== undefined && r.purpose !== 'memory-allocators') return invalid(code)
+    const original = parseRendererV8ProfileInput({ target: r.target, durationMs: r.durationMs }, code)
+    return r.purpose === undefined ? original : { ...original, purpose: r.purpose }
+  } catch { return invalid(code) }
 }
 /** Canonical base64 shape/length only. Byte inflation belongs to explicit Node consumers. */
 function parseMaterial(value: unknown): RendererTrace {
@@ -66,11 +80,14 @@ export function parseRendererTraceResult(value: unknown, input?: RendererTraceIn
   if (envelope.schema !== 'agentmux.renderer-trace.v2') {
     throw new AgentMuxError('Renderer trace version is unsupported; the original stored material was not modified.', 'CONTROL_PROTOCOL_ERROR')
   }
+  const allocatorPurpose = envelope.purpose === 'memory-allocators'
   const r = fields(envelope, ['target', 'durationMs', 'schema', 'scope', 'status', 'transferMode', 'streamFormat', 'streamCompression', 'traceTimeUnit', 'requestedCategories',
-    'timing', 'sourceVerified', 'lifecycle', 'bufferUsage', 'receivedEvents', 'receivedTraceBytes', 'receivedGzipBytes', 'stream', 'trace', 'traceBytes', 'sha256', 'issues'])
-  const actual = parseRendererTraceInput({ target: r.target, durationMs: r.durationMs }, 'CONTROL_PROTOCOL_ERROR')
-  if (input && (!sameRendererV8ProfileTarget(actual.target, input.target) || actual.durationMs !== input.durationMs)) invalid()
-  if (r.schema !== 'agentmux.renderer-trace.v2' || r.scope !== 'chromium-target-related-timeline' ||
+    'timing', 'sourceVerified', 'lifecycle', 'bufferUsage', 'receivedEvents', 'receivedTraceBytes', 'receivedGzipBytes', 'stream', 'trace', 'traceBytes', 'sha256', 'issues',
+    ...(allocatorPurpose ? ['purpose', 'memoryDump'] : [])])
+  const actual = parseRendererTraceInput({ target: r.target, durationMs: r.durationMs,
+    ...(allocatorPurpose ? { purpose: r.purpose } : {}) }, 'CONTROL_PROTOCOL_ERROR')
+  if (input && (!sameRendererV8ProfileTarget(actual.target, input.target) || actual.durationMs !== input.durationMs || actual.purpose !== input.purpose)) invalid()
+  if (r.schema !== 'agentmux.renderer-trace.v2' || r.scope !== (allocatorPurpose ? 'chromium-target-related-memory-allocators' : 'chromium-target-related-timeline') ||
     !['completed', 'failed', 'unknown'].includes(String(r.status)) || r.transferMode !== 'ReturnAsStream' || r.streamFormat !== 'json' || r.streamCompression !== 'gzip' || r.traceTimeUnit !== 'microseconds' ||
     !array(r.requestedCategories).length || (r.requestedCategories as unknown[]).some(category => typeof category !== 'string' || !category.length)) invalid()
   // These are the original producer's filters, not this reader's current capture policy.
@@ -86,6 +103,18 @@ export function parseRendererTraceResult(value: unknown, input?: RendererTraceIn
   if (life.dataLossOccurred !== null && typeof life.dataLossOccurred !== 'boolean' || !['not-attached', 'confirmed', 'unconfirmed', 'owner-lost'].includes(String(life.detached)) ||
     life.startAcknowledged && !life.startRequested || life.endAcknowledged && !life.endRequested || life.endRequested && !life.startAcknowledged ||
     life.tracingComplete !== (typeof life.dataLossOccurred === 'boolean')) invalid()
+  if (allocatorPurpose) {
+    const dump = fields(r.memoryDump, ['deterministic', 'levelOfDetail', 'requested', 'acknowledged', 'requestedAt', 'acknowledgedAt', 'response'])
+    if (dump.deterministic !== false || dump.levelOfDetail !== 'light' || typeof dump.requested !== 'boolean' || typeof dump.acknowledged !== 'boolean' ||
+      dump.requested && !life.startAcknowledged || dump.acknowledged && !dump.requested || dump.acknowledged !== (dump.response !== null) ||
+      dump.requestedAt !== null && !numeric(dump.requestedAt) || dump.acknowledgedAt !== null && !numeric(dump.acknowledgedAt) ||
+      dump.requested !== (dump.requestedAt !== null) || dump.acknowledged !== (dump.acknowledgedAt !== null)) invalid()
+    if (dump.response !== null) {
+      const reply = fields(dump.response, ['dumpGuid', 'success'])
+      if (typeof reply.dumpGuid !== 'string' || !reply.dumpGuid.length || reply.dumpGuid.length > 128 || typeof reply.success !== 'boolean') invalid()
+    }
+    if (r.status === 'completed' && (!dump.requested || !dump.acknowledged || !(dump.response as { success: boolean } | null)?.success)) invalid()
+  }
   const usage = fields(r.bufferUsage, ['observations', 'maxFraction', 'fullObserved'])
   if (!count(usage.observations) || usage.maxFraction !== null && (!numeric(usage.maxFraction) || usage.maxFraction > 1) ||
     typeof usage.fullObserved !== 'boolean' || usage.fullObserved !== (usage.maxFraction === 1)) invalid()

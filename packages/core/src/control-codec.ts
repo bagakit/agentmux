@@ -325,9 +325,10 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, ...input } as AgentMuxControlMetricsRequest
   }
   if (source.operation === 'metrics.trace.capture') {
-    settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'target', 'durationMs'], 'INVALID_CONTROL_REQUEST')
+    settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'target', 'durationMs', 'purpose'], 'INVALID_CONTROL_REQUEST')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation,
-      ...parseRendererTraceInput({ target: source.target, durationMs: source.durationMs }) }
+      ...parseRendererTraceInput({ target: source.target, durationMs: source.durationMs,
+        ...(source.purpose === undefined ? {} : { purpose: source.purpose }) }) }
   }
   if (source.operation === 'metrics.animations.inspect') {
     settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'target'], 'INVALID_CONTROL_REQUEST')

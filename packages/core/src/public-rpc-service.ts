@@ -3080,7 +3080,8 @@ export class AgentMuxRpcService {
         : request.operation === 'metrics.memory.inspect' ? { operation: 'metrics.memory.inspect', observation: await this.inspectMemory({ target: request.target }, context.signal) }
         : request.operation === 'metrics.heap.capture' ? { operation: 'metrics.heap.capture', capture: await this.captureHeapSnapshot({ target: request.target, captureId: request.captureId }, context.signal) }
         : request.operation === 'metrics.heap.inspect' ? { operation: 'metrics.heap.inspect', inspection: await this.inspectHeapSnapshot(request.captureId === undefined ? {} : { captureId: request.captureId }, context.signal) }
-        : request.operation === 'metrics.trace.capture' ? { operation: 'metrics.trace.capture', capture: await this.captureTrace({ target: request.target, durationMs: request.durationMs }, context.signal) }
+        : request.operation === 'metrics.trace.capture' ? { operation: 'metrics.trace.capture', capture: await this.captureTrace({ target: request.target, durationMs: request.durationMs,
+          ...(request.purpose === undefined ? {} : { purpose: request.purpose }) }, context.signal) }
         : request.operation === 'metrics.profile.capture' ? { operation: 'metrics.profile.capture', capture: await this.captureProfile({ target: request.target, durationMs: request.durationMs }, context.signal) }
         : request.operation === 'metrics.get' ? { operation: 'metrics.get', observation: await this.metrics(context.signal) }
         : request.operation === 'metrics.app-memory.inspect' ? { operation: 'metrics.app-memory.inspect', evidence: await this.inspectAppMemory() }

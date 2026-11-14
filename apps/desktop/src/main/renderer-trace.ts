@@ -2,7 +2,7 @@ import type { WebContents } from 'electron'
 import { AgentMuxError } from '@agentmux/core'
 import { scanRendererTraceBytes } from '@agentmux/core/renderer-trace-bytes'
 import { agentMuxControlTimeoutMs, parseRendererTraceInput, parseRendererTraceResult,
-  sameRendererV8ProfileTarget, RENDERER_TRACE_MAX_GZIP_BYTES, RENDERER_TRACE_CATEGORIES,
+  sameRendererV8ProfileTarget, RENDERER_TRACE_MAX_GZIP_BYTES, RENDERER_TRACE_CATEGORIES, RENDERER_ALLOCATOR_TRACE_CATEGORIES,
   type RendererTraceInput, type RendererTraceResult, type RendererV8ProfileTarget } from '@agentmux/core/control'
 
 const READ_BYTES = 64 * 1024
@@ -17,7 +17,9 @@ export class RendererTimelineTracer {
     this.active?.abort(new AgentMuxError('Renderer trace owner ended.', 'CONTROL_OWNER_LOST'))
   }
   async capture(raw: RendererTraceInput, signal?: AbortSignal): Promise<RendererTraceResult> {
-    const parsed = parseRendererTraceInput(raw), input = { target: { ...parsed.target }, durationMs: parsed.durationMs }
+    const parsed = parseRendererTraceInput(raw), input: RendererTraceInput = { target: { ...parsed.target }, durationMs: parsed.durationMs,
+      ...(parsed.purpose === undefined ? {} : { purpose: parsed.purpose }) }
+    const allocatorPurpose = input.purpose === 'memory-allocators'
     const verify = () => {
       const current = this.currentTarget()
       if (!current || !sameRendererV8ProfileTarget(current, input.target)) {
@@ -32,8 +34,10 @@ export class RendererTimelineTracer {
       throw new AgentMuxError('This Renderer debugger is already owned. Only this trace request was refused; the original owner remains available.', 'CONTROL_UNAVAILABLE')
     }
     const controller = new AbortController(); this.active = controller
-    const result: RendererTraceResult = { ...input, schema: 'agentmux.renderer-trace.v2', scope: 'chromium-target-related-timeline', status: 'failed',
-      transferMode: 'ReturnAsStream', streamFormat: 'json', streamCompression: 'gzip', traceTimeUnit: 'microseconds', requestedCategories: [...RENDERER_TRACE_CATEGORIES],
+    const result: RendererTraceResult = { ...input, schema: 'agentmux.renderer-trace.v2', scope: allocatorPurpose ? 'chromium-target-related-memory-allocators' : 'chromium-target-related-timeline', status: 'failed',
+      ...(allocatorPurpose ? { memoryDump: { deterministic: false as const, levelOfDetail: 'light' as const, requested: false, acknowledged: false,
+        requestedAt: null, acknowledgedAt: null, response: null } } : {}),
+      transferMode: 'ReturnAsStream', streamFormat: 'json', streamCompression: 'gzip', traceTimeUnit: 'microseconds', requestedCategories: [...(allocatorPurpose ? RENDERER_ALLOCATOR_TRACE_CATEGORIES : RENDERER_TRACE_CATEGORIES)],
       timing: { requestedAt: Date.now(), startedAt: null, endAcknowledgedAt: null, completedAt: null, finishedAt: Date.now(),
         startMonotonicMs: null, endMonotonicMs: null, completeMonotonicMs: null },
       sourceVerified: { before: true, after: false }, lifecycle: { startRequested: false, startAcknowledged: false,
@@ -89,6 +93,9 @@ export class RendererTimelineTracer {
       current()
       if (method === 'Tracing.start') result.lifecycle.startRequested = true
       if (method === 'Tracing.end') result.lifecycle.endRequested = true
+      if (method === 'Tracing.requestMemoryDump' && result.memoryDump) {
+        result.memoryDump.requested = true; result.memoryDump.requestedAt = Date.now()
+      }
       return wait(debuggerClient.sendCommand(method, params))
     }
     // Cleanup is independent of the cancelled observation, but remains bounded and owner-bound.
@@ -117,9 +124,19 @@ export class RendererTimelineTracer {
       contents.on('destroyed', changed); contents.on('render-process-gone', changed); contents.on('did-start-navigation', changed)
       verify(); stage = 'start'
       await command('Tracing.start', { transferMode: 'ReturnAsStream', streamFormat: 'json', streamCompression: 'gzip', bufferUsageReportingInterval: 250,
-        traceConfig: { recordMode: 'recordUntilFull', includedCategories: [...RENDERER_TRACE_CATEGORIES],
-          excludedCategories: ['disabled-by-default-devtools.screenshot', 'disabled-by-default-memory-infra', 'disabled-by-default-v8.cpu_profiler'] } })
+        traceConfig: allocatorPurpose
+          ? { recordMode: 'recordUntilFull', includedCategories: [...RENDERER_ALLOCATOR_TRACE_CATEGORIES], excludedCategories: ['*'], memoryDumpConfig: { triggers: [] } }
+          : { recordMode: 'recordUntilFull', includedCategories: [...RENDERER_TRACE_CATEGORIES],
+            excludedCategories: ['disabled-by-default-devtools.screenshot', 'disabled-by-default-memory-infra', 'disabled-by-default-v8.cpu_profiler'] } })
       result.lifecycle.startAcknowledged = true; result.timing.startedAt = Date.now(); result.timing.startMonotonicMs = performance.now()
+      if (result.memoryDump) {
+        stage = 'memory-dump'
+        const reply = await command('Tracing.requestMemoryDump', { deterministic: false, levelOfDetail: 'light' })
+        if (typeof reply?.dumpGuid !== 'string' || !reply.dumpGuid.length || reply.dumpGuid.length > 128 || typeof reply.success !== 'boolean') invalid('Native memory dump acknowledgement is invalid.')
+        result.memoryDump.response = { dumpGuid: reply.dumpGuid, success: reply.success }; result.memoryDump.acknowledged = true
+        result.memoryDump.acknowledgedAt = Date.now()
+        if (!reply.success) issue(stage, new AgentMuxError('The native memory dump request did not succeed; original trace points remain separate from its acknowledgement.', 'CONTROL_UNAVAILABLE'))
+      }
       stage = 'recording'; await wait(new Promise<void>(resolve => { durationTimer = setTimeout(resolve, input.durationMs) }))
       stage = 'end'; await command('Tracing.end'); result.lifecycle.endAcknowledged = true
       result.timing.endAcknowledgedAt = Date.now(); result.timing.endMonotonicMs = performance.now()
