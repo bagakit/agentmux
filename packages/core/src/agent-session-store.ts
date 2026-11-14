@@ -265,6 +265,8 @@ export type AgentMuxRetiredAgentSession = {
   source: 'user'
   observedAt: number
   history?: AgentSessionHistoryMetadata
+  /** Original launch choices used to qualify the same native execution channel on reopen. */
+  originalLaunchOptions?: import('./agent-launch-option.js').LaunchOptionSelection
   /** Private original creation invocation retained for exact history/reopen only. */
   executorInvocation?: unknown
   activityCommit?: AgentActivityCommit
@@ -437,6 +439,7 @@ export type AgentMuxAgentSessionStore = {
   recordRestartStartNotApplied(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, failure: { code: string; message: string; observedAt: number }): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>>
   prepareResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, session: AgentMuxStoredAgentSession, dispatch?: AgentMuxPreparedResumeDispatch): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>>
   admitResumeResolution(original: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, request: ResumeResolutionRequest, claim: AgentMuxLifecycleClaim & { reservationId: string }): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>>
+  /** Release an executing resume or resolution without deleting its prepared Run custody. */
   releaseResumeResolutionOwner(original: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>): Promise<void>
   recordResumeResolutionFailure(original: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, failure: { code: string; message: string }): Promise<AgentMuxStoredAgentSession>
   handoffResumeResolution(original: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, successor: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, session: AgentMuxStoredAgentSession, dispatch: AgentMuxPreparedResumeDispatch, retirement: AgentMuxCreationRuntime): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>>
@@ -874,7 +877,7 @@ function canSupersedeRestartWithStop(
  */
 export function stoppablePreparedResume(holder: AgentMuxLifecycleReservation | null | undefined, ownerId: string,
   expectedRun: AgentMuxRunRef): Extract<AgentMuxLifecycleReservation, { kind: 'resume' }> | null {
-  return holder?.kind === 'resume' && holder.preparedSession && !holder.restart && holder.expectedRun.runId === expectedRun.runId &&
+  return holder?.kind === 'resume' && holder.preparedSession && (!holder.restart || holder.ownerReleased === true) && holder.expectedRun.runId === expectedRun.runId &&
     (holder.ownerId === ownerId || holder.ownerReleased === true || !processIsAlive(holder.ownerPid)) ? holder : null
 }
 
@@ -1007,6 +1010,7 @@ function retiredAgentSession(value: unknown): AgentMuxRetiredAgentSession {
     observedAt: timestamp(source.observedAt, 'retiredAgentSession.observedAt'),
     ...(source.recordDeletion === undefined ? {} : { recordDeletion: parseAgentSessionRecordDeletion(source.recordDeletion) }),
     ...(source.continuityControlReceipts === undefined ? {} : { continuityControlReceipts: parseAgentContinuityControlReceipts(source.continuityControlReceipts, String(source.agentSessionId)) }),
+    ...(source.originalLaunchOptions === undefined ? {} : { originalLaunchOptions: launchOptionSelection(source.originalLaunchOptions) }),
     ...(source.history === undefined ? {} : { history: normalizeSessionHistoryMetadata(source.history) }),
     ...(source.executorInvocation === undefined ? {} : { executorInvocation: structuredClone(source.executorInvocation) }),
     ...(source.activityCommit === undefined ? {} : { activityCommit: activityCommit(source.activityCommit, string(source.agentSessionId, 'retiredAgentSession.agentSessionId')) }),
@@ -2504,7 +2508,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
 
   async releaseResumeResolutionOwner(original: ResumeReservation) {
     const current = this.reservations.get(original.agentSessionId)
-    if (current?.kind === 'resume' && current.resolution && sameReservationOwner(current, original)) {
+    if (current?.kind === 'resume' && (current.resolution || current.preparedSession) && sameReservationOwner(current, original)) {
       this.reservations.set(original.agentSessionId, { ...current, ownerReleased: true })
     }
   }
@@ -2696,6 +2700,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
             source: 'user',
             observedAt: Date.now(),
             history: sessionHistoryMetadata(previous),
+            ...(previous.launchOptions ? { originalLaunchOptions: previous.launchOptions } : {}),
             nativeCreationKeys:committedNativeCreationKeys(currentReservation,previous),
             ...(previous.executorInvocation === undefined ? {} : { executorInvocation: structuredClone(previous.executorInvocation) }),
             continuityControlReceipts: continuityControlReceipts(previous),
@@ -3810,7 +3815,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     await this.enqueue(async () => {
       const row = this.db.prepare('SELECT json FROM reservations WHERE id=?').get(original.agentSessionId)
       const current = row ? lifecycleReservation(JSON.parse(String(row.json))) : null
-      if (current?.kind === 'resume' && current.resolution && sameReservationOwner(current, original)) {
+      if (current?.kind === 'resume' && (current.resolution || current.preparedSession) && sameReservationOwner(current, original)) {
         this.db.prepare('UPDATE reservations SET json=? WHERE id=?').run(JSON.stringify({ ...current, ownerReleased: true }), original.agentSessionId)
         this.dirty = true
       }
@@ -4101,6 +4106,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       source: 'user',
       observedAt: Date.now(),
       history: sessionHistoryMetadata(previous),
+      ...(previous.launchOptions ? { originalLaunchOptions: previous.launchOptions } : {}),
       nativeCreationKeys:committedNativeCreationKeys(current,previous),
             ...(previous.executorInvocation === undefined ? {} : { executorInvocation: structuredClone(previous.executorInvocation) }),
       continuityControlReceipts: continuityControlReceipts(previous),

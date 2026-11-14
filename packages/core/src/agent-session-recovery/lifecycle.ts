@@ -313,6 +313,7 @@ export class AgentSessionRunLifecycle {
       run.runId === reservation.expectedRetirement.run.runId) {
       throw this.reopenUnconfirmed('The original continue has no single confirmed matching Run. Keep its history and check again.')
     }
+    await this.confirmManagedAcpResume(prepared, run, false)
     const retirement = reservation.expectedRetirement
     const nativeBindingObservedAt = Date.now()
     const next: AgentMuxStoredAgentSession = { ...structuredClone(prepared), run: runRef(run.runId), retiredRuns: [...prepared.retiredRuns, retirement.run],
@@ -328,7 +329,9 @@ export class AgentSessionRunLifecycle {
     }
     await this.restoreReopenObservation(this.ports.sessions.registry.get(next.agentSessionId), run, reservation.operationId)
     this.ports.events.publisher.publish(lifecycleObserved(reservation, runRef(run.runId)))
-    return this.ports.sessions.registry.get(next.agentSessionId)
+    const restored = this.ports.sessions.registry.get(next.agentSessionId)
+    this.ports.terminal.queueNativeIdentityCapture(restored)
+    return restored
   }
 
   private async restoreReopenObservation(session: AgentMuxStoredAgentSession, run: CtxmuxAdapterRun, operationId: string): Promise<void> {
@@ -438,6 +441,10 @@ export class AgentSessionRunLifecycle {
       if (retirement && (!retirement.history || retirement.hostId !== 'local')) {
         throw new AgentMuxError('The original retired native identity is unavailable on this Host.', 'AGENT_RESUME_UNAVAILABLE')
       }
+      const retiredChoices = retirement?.originalLaunchOptions
+      const retiredAcp = retirement?.history && this.ports.providers.providers.get(retirement.history.providerId).managedAcp?.launchOption
+      const retainedAcpChoices = retiredAcp && retiredChoices?.[retiredAcp.id] === retiredAcp.choiceId ? retiredChoices : undefined
+      const reopenedOptions = reopening?.launchOptions || retainedAcpChoices ? { ...retainedAcpChoices, ...reopening?.launchOptions } : undefined
       const current = previous ?? {
         ...retirement!.history!, kind: 'agent' as const, agentSessionId: retirement!.agentSessionId,
         hostId: retirement!.hostId, run: retirement!.run, retiredRuns: reopenedPriorRuns(retirement!),
@@ -445,7 +452,7 @@ export class AgentSessionRunLifecycle {
         ...(retirement!.executorInvocation === undefined ? {} : { executorInvocation: structuredClone(retirement!.executorInvocation) }),
         ...(retirement!.activityCommit === undefined ? {} : { activityCommit: structuredClone(retirement!.activityCommit) }),
         ...(retirement!.continuityControlReceipts === undefined ? {} : { continuityControlReceipts: structuredClone(retirement!.continuityControlReceipts) }),
-        ...(reopening?.launchOptions === undefined ? {} : { launchOptions: reopening.launchOptions })
+        ...(reopenedOptions === undefined ? {} : { launchOptions: reopenedOptions })
       }
       if (!current.nativeHandle || current.nativeHandle.kind !== 'provider') {
         throw new AgentMuxError('Provider-native resume requires a verified provider session handle.', 'AGENT_RESUME_UNAVAILABLE')
@@ -507,9 +514,13 @@ export class AgentSessionRunLifecycle {
       }
       const originalExecutable = plan.command
       if (current.toolExecution && !this.ports.executors.prepareToolExecutionLaunch) throw new AgentMuxError('The original tool execution owner is unavailable; no local replacement was started.', 'EXECUTION_HELPER_UNAVAILABLE')
+      const originalLaunchOptions = previous?.launchOptions ?? retiredChoices
       const managedLaunch = current.toolExecution
         ? { plan: await this.ports.executors.prepareToolExecutionLaunch!(provider, plan, current.toolExecution, current.workspacePath, current.agentSessionId, { lifecycleOperationId, capability: invocationCapability }) }
-        : await provider.prepareManagedLaunch?.(plan, lifecycleOperationId, { kind: 'resume', ...(prompt === undefined ? {} : { prompt }) })
+        : await provider.prepareManagedLaunch?.(plan, lifecycleOperationId, { kind: 'resume', workspacePath: current.workspacePath,
+          ...(current.launchOptions ? { launchOptions: current.launchOptions } : {}), ...(prompt === undefined ? {} : { prompt }),
+          originalResume: { nativeHandle: current.nativeHandle, ...(originalLaunchOptions ? { launchOptions: originalLaunchOptions } : {}),
+            args: [...(input.args ?? []), ...provider.resolveLaunchArgv(current.launchOptions ?? {})] } })
       if (managedLaunch) plan = managedLaunch.plan
       if (managedLaunch?.promptDelivery === 'post-launch' && prompt) {
         deferredResumePrompt = frozenMessage ? '' : prompt
@@ -563,7 +574,7 @@ export class AgentSessionRunLifecycle {
       // A resumed Run receives its own binding through the Run environment. Prepare its
       // executable carrier and idempotently repair declarations in this exact execution scope;
       // shared files contain no per-Run endpoint or token.
-      const launchHooksReady = await this.ports.hooks.ensureManagedHooks(
+      const launchHooksReady = managedLaunch?.managedHooks === false ? false : await this.ports.hooks.ensureManagedHooks(
         provider,
         current.workspacePath,
         current.agentSessionId,
@@ -698,6 +709,13 @@ export class AgentSessionRunLifecycle {
         }
         throw error
       })
+      try { await this.confirmManagedAcpResume(nativeSession, run, true) }
+      catch (error) {
+        // Start owns an exact existing Run. A later explicit Stop can fence it once this observer releases custody.
+        preserveUnconfirmedRun = true
+        if (reservation.kind === 'resume') await this.ports.sessions.store.releaseResumeResolutionOwner(reservation)
+        throw error
+      }
       if (continuity) await this.settleContinuityMessageInput(continuity, { outcome: 'launch-carried', run: runRef(run.runId) })
       this.ports.events.publishExecutableCheckFailure(provider.label, current.agentSessionId, lifecycleOperationId, originalExecutable, capability, run)
       const nativeBindingObservedAt = Date.now()
@@ -1124,6 +1142,25 @@ export class AgentSessionRunLifecycle {
       'AGENT_STOP_BLOCKED_BY_UNCONFIRMED_RESUME')
   }
 
+  private async confirmManagedAcpResume(session: Pick<AgentMuxStoredAgentSession, 'providerId' | 'nativeActor' | 'workspacePath' | 'nativeHandle'>, run: CtxmuxAdapterRun, waitForReady: boolean): Promise<void> {
+    const nativeActor = session.nativeActor
+    const managed = this.ports.providers.providers.get(session.providerId).managedAcp
+    if (!nativeActor || managed?.protocolId !== nativeActor.protocolId) return
+    const signal = AbortSignal.any([this.signal, AbortSignal.timeout(waitForReady ? 10_000 : 1_000)])
+    try {
+      if (run.state.type !== 'running' || run.pid === null) throw new AgentMuxError('The original ACP successor Run could not be observed.', 'AGENT_ACP_ACTOR_UNCONFIRMED')
+      const binding = await managed.attach({ nativeActor, processId: run.pid, workspacePath: session.workspacePath,
+        signal, ...(waitForReady ? { waitForReady: true as const } : {}) })
+      try {
+        if (session.nativeHandle?.kind !== 'provider' || session.nativeHandle.providerId !== session.providerId ||
+            session.nativeHandle.sessionId !== binding.sessionId) throw new AgentMuxError('The native ACP resume response names another conversation.', 'AGENT_NATIVE_IDENTITY_CONFLICT')
+      } finally { await binding.close() }
+    } catch (error) {
+      throw new AgentMuxError(`The original ACP resume acknowledgement is unconfirmed. Its prepared Run and Session are retained. ${error instanceof Error ? error.message : String(error)}`,
+        'AGENT_RESUME_UNCONFIRMED', undefined, { disposition: 'unknown', confirmedInputBytes: null })
+    }
+  }
+
   async completePreparedResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>): Promise<AgentMuxStoredAgentSession | null> {
     const run = await this.inspectPreparedResume(reservation)
     return run ? await this.completeObservedPreparedResume(reservation, run) : null
@@ -1140,6 +1177,8 @@ export class AgentSessionRunLifecycle {
     if (run.runId === reservation.expectedRun.runId || run.workspacePath !== prepared.workspacePath) {
       throw new AgentMuxError('Original resume Run does not match the prepared target.', 'AGENT_SESSION_RUN_MISMATCH')
     }
+    try { await this.confirmManagedAcpResume(prepared, run, false) }
+    catch (error) { await this.ports.sessions.store.releaseResumeResolutionOwner(reservation); throw error }
     const observedAt = Date.now()
     const next: AgentMuxStoredAgentSession = { ...prepared, run: runRef(run.runId),
       retiredRuns: [...prepared.retiredRuns, prepared.run], updatedAt: Math.max(observedAt, prepared.updatedAt + 1),

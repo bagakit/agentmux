@@ -5,6 +5,12 @@
 // commands without restriction and honestly carries 'caution'. `--model` is a free string — no enum.
 export const ANTIGRAVITY_LAUNCH_OPTIONS = [
   {
+    id: 'interaction', label: 'Interaction', description: 'Choose the terminal or a structured ACP session.', choices: [
+      { id: 'terminal', label: 'Terminal', argv: [] },
+      { id: 'acp', label: 'ACP', description: 'Open a structured session.', argv: [] }
+    ]
+  },
+  {
     id: 'sandbox',
     argumentAliases: [{ flag: '-s', arity: 1 }, { flag: '--yolo', arity: 0 }, { flag: '--approve-for-me', arity: 0 }, { flag: '--dangerously-bypass-approvals-and-sandbox', arity: 0 }],
     label: 'Sandbox',

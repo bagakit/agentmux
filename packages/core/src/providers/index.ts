@@ -1,6 +1,12 @@
+import { randomBytes } from 'node:crypto'
+import { setTimeout as wait } from 'node:timers/promises'
+import { fileURLToPath } from 'node:url'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import { antigravityProvider } from '@agentmux/providers/antigravity/provider'
 import { createAntigravityAcpProbe } from '@agentmux/providers/antigravity/acp-probe'
+import { ACP_ACTOR_ID, ACP_ACTOR_LIFECYCLE, ACP_ACTOR_TOKEN, ANTIGRAVITY_ACP_ACTOR_PROTOCOL } from '@agentmux/providers/antigravity/acp-actor'
+import { antigravityAcpActor, antigravityAcpFraming } from './antigravity-acp-owner.js'
+import { mintObjectId } from '../object-id.js'
 import { formatHookToolOutput } from '../hook-tool-outcome.js'
 import { antigravityNativeHistory } from '@agentmux/providers/antigravity/native-history'
 import { antigravityNativeSession } from '@agentmux/providers/antigravity/native-session'
@@ -10,8 +16,6 @@ import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
 import { NativeJsonlHistoryReader, readNativeHistoryBytes } from '../native-jsonl-history-reader.js'
 import { isNativeText, nativeJsonStringify, nativeTextConcat, nativeTextHasSpeech, nativeTextJoin, nativeTextBase64, nativeTextTrim, type NativeText } from '../native-history-value.js'
 import { nativeTextBetween } from '../native-history-source.js'
-import { observeRead } from '../observation-read.js'
-import { AgentMuxRpcLines, isRpcId, rpcEncode } from '../public-rpc-frame.js'
 import type { AgentProviderSessionHistoryContext, AgentProviderSessionHistoryObservation, AgentProviderSessionHistoryObservationContext, AgentSessionHistoryItem } from '../types.js'
 import { executionEnvironmentValue, executionHomeDirectory, executionPath, executionTemporaryDirectory } from './execution-environment.js'
 import { catalog, hookCommandTimeout, hookToolFields, inspectHookDisableSetting, runScopedHookCommand } from './shared.js'
@@ -39,6 +43,8 @@ export type ProviderFactory = (definition: AgentProviderDefinition) => AgentProv
 
 const historyServices = { AgentMuxError, NativeJsonlHistoryReader, isNativeText, nativeJsonStringify, nativeTextConcat }
 
+const ACP_LAUNCH_OPTION = { id: 'interaction', choiceId: 'acp' } as const
+
 function createAntigravityProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   const { catalog: seed, planManagedHooks, ...provider } = antigravityProvider({
     formatHookToolOutput, hookToolFields, hookCommandTimeout, runScopedHookCommand
@@ -54,7 +60,54 @@ function createAntigravityProvider(defineAgentProvider: ProviderFactory): AgentP
   return defineAgentProvider({
     ...provider,
     catalog: catalog(seed),
-    probeAcp: createAntigravityAcpProbe({ observeRead, AgentMuxRpcLines, isRpcId, rpcEncode }),
+    probeAcp: createAntigravityAcpProbe(antigravityAcpFraming),
+    async prepareManagedLaunch(plan, lifecycleOperationId, context) {
+      const original = context.originalResume
+      const acp = context.launchOptions?.[ACP_LAUNCH_OPTION.id] === ACP_LAUNCH_OPTION.choiceId
+      const originalAcp = original?.launchOptions?.[ACP_LAUNCH_OPTION.id] === ACP_LAUNCH_OPTION.choiceId
+      if (context.kind === 'resume' && acp !== originalAcp) throw new AgentMuxError(
+        'The structured and terminal launch choices belong to their original conversation. Keep this original Session and its execution choice.',
+        'AGENT_ACP_RESUME_SOURCE_UNCONFIRMED')
+      if (!acp) return { plan }
+      if (context.kind === 'fork' || context.prompt?.trim()) throw new AgentMuxError(
+        'This structured launch currently accepts an empty create or resume request. Its original input and Session are retained.',
+        'AGENT_ACP_LAUNCH_INPUT_UNSUPPORTED')
+      const origin = original
+      if (context.kind === 'resume' && (origin?.nativeHandle.kind !== 'provider' || origin.nativeHandle.providerId !== 'antigravity')) throw new AgentMuxError(
+        'This resume target has no confirmed original Antigravity ACP execution context.', 'AGENT_ACP_RESUME_SOURCE_UNCONFIRMED')
+      const actor = { protocolId: ANTIGRAVITY_ACP_ACTOR_PROTOCOL, actorId: mintObjectId(), lifecycleOperationId,
+        token: randomBytes(32).toString('hex'), launch: { command: plan.command, args: [...(origin?.args ?? plan.args)] } }
+      return { nativeActor: actor, managedHooks: false, plan: { ...plan, command: process.execPath,
+        args: [fileURLToPath(new URL('./antigravity-acp-owner.js', import.meta.url)), JSON.stringify({ ...actor.launch, cwd: context.workspacePath,
+          ...(origin ? { resumeSessionId: origin.nativeHandle.sessionId } : {}) })],
+        env: { ...plan.env, ELECTRON_RUN_AS_NODE: '1', [ACP_ACTOR_TOKEN]: actor.token, [ACP_ACTOR_ID]: actor.actorId, [ACP_ACTOR_LIFECYCLE]: lifecycleOperationId } } }
+    },
+    managedAcp: {
+      protocolId: ANTIGRAVITY_ACP_ACTOR_PROTOCOL,
+      launchOption: ACP_LAUNCH_OPTION,
+      async attach({ nativeActor, processId, signal, waitForReady }) {
+        const { actorId, lifecycleOperationId, token } = nativeActor
+        const observe = () => antigravityAcpActor.inspect({ actorId, lifecycleOperationId, processId }, token, signal)
+        let snapshot
+        for (;;) {
+          try { snapshot = await observe() }
+          catch (error) {
+            if (!waitForReady || signal.aborted) throw error
+            await wait(100, undefined, { signal })
+            continue
+          }
+          if (snapshot.state !== 'initializing' || !waitForReady) break
+          await wait(100, undefined, { signal })
+        }
+        if (snapshot.state !== 'ready') throw new AgentMuxError(snapshot.state === 'initializing' ? 'The original ACP initialization is still pending.' :
+          snapshot.state === 'authentication-required' ? `Antigravity requires authentication at ${snapshot.stage}.` : `The original ACP step ${snapshot.stage} is unconfirmed.`,
+          snapshot.state === 'authentication-required' ? 'AGENT_ACP_AUTHENTICATION_REQUIRED' : 'AGENT_ACP_ACTOR_UNCONFIRMED')
+        return { adapterId: 'antigravity', sessionId: snapshot.sessionId,
+          onEvent(listener) { listener({ type: 'native-session', sessionId: snapshot.sessionId }); return () => {} },
+          async respondPermission() { throw new AgentMuxError('This ACP actor has no pending permission request.', 'UNKNOWN_AGENT_INTERACTION') },
+          async close() {} }
+      }
+    },
     planManagedHooks: ({ env, workspacePath }) => planManagedHooks(executionPath(executionHomeDirectory(env), workspacePath)),
     discoverNativeSession: discoverAntigravityNativeSession,
     readSessionHistoryPage: readAntigravitySessionHistoryPage,

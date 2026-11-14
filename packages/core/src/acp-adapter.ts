@@ -53,6 +53,7 @@ type BoundAcpSession = {
   binding: AgentMuxAcpBinding
   unsubscribe: () => void
   nativeSessionId: string
+  nativeProviderId?: string
   pendingEvents: AgentMuxAcpEvent[] | null
   eventTail: Promise<void>
   pendingPermission: PendingAcpPermission | null
@@ -98,14 +99,9 @@ export class AgentMuxAcpBridge {
     private readonly callbacks: AgentMuxAcpBridgeCallbacks
   ) {}
 
-  async bind(agentSessionId: string, binding: AgentMuxAcpBinding, run?: Readonly<AgentMuxRunRef>): Promise<void> {
+  async bind(agentSessionId: string, binding: AgentMuxAcpBinding, run?: Readonly<AgentMuxRunRef>, nativeProviderId?: string): Promise<void> {
     if (this.bindings.has(agentSessionId)) {
       throw new AgentMuxError('Agent Session already has an ACP binding.', 'ACP_ALREADY_BOUND')
-    }
-    const nativeHandle: AgentNativeSessionHandle = {
-      kind: 'acp',
-      adapterId: binding.adapterId,
-      sessionId: binding.sessionId
     }
     const bound: BoundAcpSession = {
       id: mintObjectId(),
@@ -114,6 +110,7 @@ export class AgentMuxAcpBridge {
       binding,
       unsubscribe: () => {},
       nativeSessionId: binding.sessionId,
+      ...(nativeProviderId !== undefined ? { nativeProviderId } : {}),
       pendingEvents: [],
       eventTail: Promise.resolve(),
       pendingPermission: null,
@@ -130,7 +127,7 @@ export class AgentMuxAcpBridge {
         this.enqueueEvent(agentSessionId, bound, event)
       })
       bound.unsubscribe = unsubscribe
-      await this.callbacks.onNativeHandle(agentSessionId, nativeHandle, this.evidence(bound), bound.lifetime.signal)
+      await this.callbacks.onNativeHandle(agentSessionId, this.nativeHandle(bound), this.evidence(bound), bound.lifetime.signal)
       const pendingEvents = bound.pendingEvents ?? []
       while (pendingEvents.length > 0) await this.accept(agentSessionId, bound, pendingEvents.shift()!)
       bound.pendingEvents = null
@@ -142,6 +139,10 @@ export class AgentMuxAcpBridge {
       await binding.close().catch(() => {})
       throw error
     }
+  }
+
+  hasBinding(agentSessionId: string, run: Readonly<AgentMuxRunRef>): boolean {
+    return this.bindings.get(agentSessionId)?.run?.runId === run.runId
   }
 
   async unbind(agentSessionId: string): Promise<void> {
@@ -255,6 +256,11 @@ export class AgentMuxAcpBridge {
     void bound.eventTail.catch(() => {})
   }
 
+  private nativeHandle(bound: BoundAcpSession): AgentNativeSessionHandle {
+    return bound.nativeProviderId === undefined ? { kind: 'acp', adapterId: bound.binding.adapterId, sessionId: bound.nativeSessionId }
+      : { kind: 'provider', providerId: bound.nativeProviderId, sessionId: bound.nativeSessionId }
+  }
+
   private evidence(bound: BoundAcpSession): AgentMuxEvidence {
     return { source: 'acp', observedAt: Date.now(), acpAdapterId: bound.binding.adapterId,
       acpSessionId: bound.nativeSessionId, acpBindingId: bound.id, ...(bound.run ? { run: { ...bound.run } } : {}) }
@@ -273,11 +279,7 @@ export class AgentMuxAcpBridge {
     if (event.type !== 'permission') {
       await this.callbacks.onEvent(agentSessionId, event, evidence, bound.lifetime.signal)
       if (event.type === 'native-session' && event.sessionId !== previousNativeSessionId) {
-        await this.callbacks.onNativeHandle(agentSessionId, {
-          kind: 'acp',
-          adapterId: bound.binding.adapterId,
-          sessionId: event.sessionId
-        }, evidence, bound.lifetime.signal)
+        await this.callbacks.onNativeHandle(agentSessionId, this.nativeHandle(bound), evidence, bound.lifetime.signal)
       }
       return
     }

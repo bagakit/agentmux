@@ -163,6 +163,10 @@
     "./codex/native-catalog": {
       "types": "./dist/codex/native-catalog.d.ts",
       "import": "./dist/codex/native-catalog.js"
+    },
+    "./antigravity/acp-actor": {
+      "types": "./dist/antigravity/acp-actor.d.ts",
+      "import": "./dist/antigravity/acp-actor.js"
     }
   },
   "files": [

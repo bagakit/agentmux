@@ -172,6 +172,8 @@ export type AgentProviderSessionStatusContext = AgentProviderPromptExecutionCont
 export type AgentProviderManagedLaunch = {
   plan: AgentLaunchPlan
   nativeActor?: AgentPrivateNativeActor
+  /** The original launch has its own machine observation channel. */
+  managedHooks?: false
   /** This exact prepared plan carries no input; Core owns its original deferred delivery. */
   promptDelivery?: 'post-launch'
 }
@@ -198,6 +200,12 @@ export type AgentProviderPreparedNativeInput = {
 export type AgentProviderSessionStatusObservationContext = AgentProviderSessionStatusContext & {
   onStatus(status: AgentProviderSessionStatus): void
   onUnavailable(code: string, message: string): void
+}
+
+export type AgentProviderManagedAcp = {
+  protocolId: string
+  launchOption: { id: string; choiceId: string }
+  attach(context: AgentProviderNativeInputContext & { waitForReady?: true }): Promise<import('./acp-adapter.js').AgentMuxAcpBinding>
 }
 
 export type AgentProvider = {
@@ -234,6 +242,7 @@ export type AgentProvider = {
   prepareOwnedWorkspaceTrust?(context: AgentWorkspaceTrustContext): Promise<AgentWorkspaceTrustReceipt>
   /** Observe the selected CLI’s ACP endpoint without creating or loading a Session. */
   probeAcp?(context: AgentProviderAcpProbeContext): Promise<AgentProviderAcpProbe>
+  managedAcp?: AgentProviderManagedAcp
   probeCapabilities(probe: AgentExecutableProbe, commandOverride?: string): Promise<AgentCapabilitySnapshot>
   buildLaunch(context: AgentProviderLaunchContext): AgentLaunchPlan
   buildResumeLaunch(context: AgentProviderResumeContext): AgentLaunchPlan
@@ -241,7 +250,7 @@ export type AgentProvider = {
   /** Original executable has already been probed; this final plan also enters original lifecycle preparation. */
   prepareToolExecutionLaunch?: import('./agent-tool-execution.js').PrepareAgentToolExecutionLaunch
   prepareExecutionHelper?: import('./agent-execution-helper.js').AgentExecutionHelperLaunch
-  prepareManagedLaunch?(plan: AgentLaunchPlan, lifecycleOperationId: string, context: { kind: 'create' | 'resume' | 'fork'; prompt?: string }): Promise<AgentProviderManagedLaunch>
+  prepareManagedLaunch?(plan: AgentLaunchPlan, lifecycleOperationId: string, context: { kind: 'create' | 'resume' | 'fork'; workspacePath: string; prompt?: string; launchOptions?: import('./agent-launch-option.js').LaunchOptionSelection; originalResume?: { nativeHandle: AgentNativeSessionHandle; launchOptions?: import('./agent-launch-option.js').LaunchOptionSelection; args: readonly string[] } }): Promise<AgentProviderManagedLaunch>
   /** Encode replies from an exact Provider-read record; no caller-supplied display text. */
   planQuestionReply?(record: AgentSessionHistoryItem, answers: readonly AgentSessionHistoryQuestionAnswer[]): string
   /** Qualify this exact operation, independently of healthy terminal input.
@@ -301,6 +310,7 @@ export type AgentProviderDefinition = {
   inspectHookActivation?: (context: AgentProviderHookActivationContext) => Promise<AgentProviderHookActivation>
   prepareOwnedWorkspaceTrust?: AgentProvider['prepareOwnedWorkspaceTrust']
   probeAcp?: AgentProvider['probeAcp']
+  managedAcp?: AgentProviderManagedAcp
   buildResumeArgs?: (
     sessionId: string,
     transcriptPath: string | undefined,
@@ -401,6 +411,10 @@ function assertManagedHookContribution(contribution: {
 function assertProviderContributions(contribution: AgentProviderDefinition | AgentProvider): void {
   assertManagedHookContribution(contribution)
   const { catalog } = contribution
+  if (contribution.managedAcp && (catalog.acpStrategy.kind !== 'adapter' || !contribution.prepareManagedLaunch ||
+      typeof contribution.managedAcp.attach !== 'function' || !contribution.managedAcp.protocolId)) {
+    throw new AgentMuxError('Managed ACP requires a matching adapter, launch and observation contribution.', 'INVALID_AGENT_PROVIDER')
+  }
   if ('id' in contribution && (contribution.id !== catalog.id || contribution.label !== catalog.label ||
       contribution.executable !== catalog.executable)) {
     throw new AgentMuxError('Provider identity must match its catalog.', 'INVALID_AGENT_PROVIDER')
@@ -559,6 +573,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.planManagedHooks ? { planManagedHooks: definition.planManagedHooks } : {}),
     ...(definition.inspectHookActivation ? { inspectHookActivation: definition.inspectHookActivation } : {}),
     ...(definition.probeAcp ? { probeAcp: definition.probeAcp } : {}),
+    ...(definition.managedAcp ? { managedAcp: definition.managedAcp } : {}),
     ...(definition.prepareOwnedWorkspaceTrust ? { prepareOwnedWorkspaceTrust: definition.prepareOwnedWorkspaceTrust } : {}),
     ...(definition.buildForkArgs ? { buildForkLaunch(context: AgentProviderForkContext): AgentLaunchPlan {
       const handle = context.nativeHandle

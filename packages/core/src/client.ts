@@ -2939,8 +2939,10 @@ export class AgentMuxClient {
     options: Pick<AgentSessionHistoryPageOptions, 'commandOverride' | 'args' | 'env'> = {}): void {
     const provider = this.providers.get(session.providerId)
     const unconfirmed = this.registry.isDurabilityUnconfirmed(session.agentSessionId)
+    const managedAcp = session.nativeActor && provider.managedAcp?.protocolId === session.nativeActor.protocolId ? provider.managedAcp : undefined
+    if (managedAcp && this.acp.hasBinding(session.agentSessionId, session.run)) return
     const enrichConfirmedIdentity = session.nativeActor?.initializationControl === true && (!session.nativeHandle || session.nativeHandle.kind === 'provider')
-    if (session.hostId !== 'local' || (!unconfirmed && (session.nativeHandle && (!enrichConfirmedIdentity || session.nativeHandle.kind !== 'provider' || session.nativeHandle.transcriptPath !== undefined) || !provider.discoverNativeSession ||
+    if (session.hostId !== 'local' || (!managedAcp && !unconfirmed && (session.nativeHandle && (!enrichConfirmedIdentity || session.nativeHandle.kind !== 'provider' || session.nativeHandle.transcriptPath !== undefined) || !provider.discoverNativeSession ||
       provider.catalog.resumeStrategy.kind !== 'provider-native')) || !this.connected || !this.kernel.isConnected()) return
     const previous = this.nativeIdentityCaptures.get(session.agentSessionId)
     if (previous && sameRun(previous.run, session.run)) return
@@ -2971,7 +2973,23 @@ export class AgentMuxClient {
               if (this.registry.isDurabilityUnconfirmed(session.agentSessionId)) {
                 const confirmed = await this.registry.confirmDurability(session.agentSessionId, session.run)
                 assertConnection()
-                if (confirmed.nativeHandle && (!enrichConfirmedIdentity || confirmed.nativeHandle.kind !== 'provider' || confirmed.nativeHandle.transcriptPath !== undefined) || !provider.discoverNativeSession) return confirmed
+                if (!managedAcp && (confirmed.nativeHandle && (!enrichConfirmedIdentity || confirmed.nativeHandle.kind !== 'provider' || confirmed.nativeHandle.transcriptPath !== undefined) || !provider.discoverNativeSession)) return confirmed
+              }
+              if (managedAcp && session.nativeActor) {
+                const run = await this.kernel.status(session.run.runId)
+                if (run.state.type !== 'running' || run.pid === null) throw new AgentMuxError('The original ACP Run is unavailable.', 'AGENT_ACP_ACTOR_UNCONFIRMED')
+                const binding = await managedAcp.attach({ processId: run.pid, nativeActor: session.nativeActor,
+                  workspacePath: session.workspacePath, signal: controller.signal })
+                try {
+                  assertConnection()
+                  const current = this.registry.get(session.agentSessionId)
+                  if (!sameRun(current.run, session.run) || !isDeepStrictEqual(current.nativeActor, session.nativeActor) ||
+                      current.nativeHandle && (current.nativeHandle.kind !== 'provider' || current.nativeHandle.providerId !== provider.id || current.nativeHandle.sessionId !== binding.sessionId)) {
+                    throw new AgentMuxError('The ACP observation belongs to a different original actor or native session.', 'AGENT_NATIVE_IDENTITY_CONFLICT')
+                  }
+                } catch (error) { await binding.close(); throw error }
+                await this.acp.bind(session.agentSessionId, binding, session.run, provider.id)
+                return this.registry.get(session.agentSessionId)
               }
               return await captureAgentNativeSessionIdentity({ session, provider, registry: this.registry,
                 kernel: this.kernel, signal: controller.signal, assertConnection,
@@ -2989,7 +3007,7 @@ export class AgentMuxClient {
             return
           } catch (error) {
             if (!controller.signal.aborted || failure === undefined) failure = error
-            if (controller.signal.aborted) throw error
+            if (controller.signal.aborted || error instanceof AgentMuxError && error.code === 'AGENT_ACP_AUTHENTICATION_REQUIRED') throw error
             try { if (!sameRun(this.registry.get(session.agentSessionId).run, session.run)) return }
             catch { return }
             // A healthy CLI can publish its main record after the first few observations.
@@ -3005,7 +3023,7 @@ export class AgentMuxClient {
       if (!sameRun(current.run, session.run)) return
       // Another capture or main Hook can durably confirm this Run while discovery is pending.
       // A retained locator with a source conflict or an unacknowledged save is not that fact.
-      if (current.nativeHandle && !current.nativeSourceObservation && !current.observedNativeHandle &&
+      if (!managedAcp && current.nativeHandle && !current.nativeSourceObservation && !current.observedNativeHandle &&
         (!enrichConfirmedIdentity || current.nativeHandle.kind === 'provider' && current.nativeHandle.transcriptPath !== undefined &&
           (!session.nativeHandle || matchesProviderNativeSessionTarget(session.nativeHandle, current.nativeHandle))) &&
         !this.registry.isDurabilityUnconfirmed(session.agentSessionId)) {
@@ -6321,9 +6339,12 @@ export class AgentMuxClient {
         throw executorUnavailableError(provider.label, capability)
       }
       const originalExecutable = plan.command
+      const acpSelection = provider.managedAcp?.launchOption
+      if (input.toolExecution && acpSelection && input.launchOptions?.[acpSelection.id] === acpSelection.choiceId) throw new AgentMuxError(
+        'This original structured ACP launch has no split tool execution channel.', 'AGENT_ACP_TOOL_EXECUTION_UNAVAILABLE')
       const managedLaunch = input.toolExecution
         ? { plan: await this.prepareToolExecutionLaunch(provider, plan, input.toolExecution, input.workspacePath, agentSessionId, { lifecycleOperationId, capability: invocationCapability }) }
-        : await provider.prepareManagedLaunch?.(plan, lifecycleOperationId, { kind: forkSource ? 'fork' : nativeResumeSource ? 'resume' : 'create', prompt: launchPrompt })
+        : await provider.prepareManagedLaunch?.(plan, lifecycleOperationId, { kind: forkSource ? 'fork' : nativeResumeSource ? 'resume' : 'create', workspacePath: input.workspacePath, prompt: launchPrompt, ...(input.launchOptions ? { launchOptions: input.launchOptions } : {}) })
       if (managedLaunch) plan = managedLaunch.plan
       const initialInput: AgentMuxContinuityLaunchInput | undefined = composed.text.trim() ? {
         ...optionalInputEpoch(input.inputEpoch),
@@ -6344,7 +6365,7 @@ export class AgentMuxClient {
         input.providerId,
         hookBindingIdentity(lifecycleOperationId)
       )
-      const launchHooksReady = await this.ensureManagedHooks(
+      const launchHooksReady = managedLaunch?.managedHooks === false ? false : await this.ensureManagedHooks(
         provider,
         input.workspacePath,
         agentSessionId,
@@ -6722,6 +6743,7 @@ export class AgentMuxClient {
     this.publishSession(ready)
     this.publisher.publishRunState(this.projectRun(run, ready), ready.agentSessionId)
     this.publisher.publish(lifecycleObserved(reservation, ready.run))
+    this.queueNativeIdentityCapture(ready)
     return ready
   }
 
@@ -8571,6 +8593,7 @@ export class AgentMuxClient {
           input.expectedCompletionId === undefined ? 'AGENT_TURN_END_UNCONFIRMED' : 'AGENT_COMPLETION_CHANGED')
       }
     }
+    this.assertTerminalInputCarrier(session)
     const ordinaryPlan = inputControl?.handoff && inputControl.handoff.carrier.kind !== 'launch' ? inputControl.handoff.carrier.plan : provider.planPromptInput(outbound,
       admissionIntent.kind === 'manual-actor' ? { currentTerminal: true } : admissionIntent.kind === 'session-conversation' || input.execution === undefined ? undefined : { execution: input.execution })
     const protocolInput: AgentPromptProtocolInputBoundary = { invalid: false }
@@ -9799,6 +9822,12 @@ export class AgentMuxClient {
 
   /** Both native exit events and reconnected terminal facts release the same exact Hook owner. */
   private releaseEndedRunHook(run: AgentMuxRunRef, session?: AgentMuxStoredAgentSession): void {
+    if (session && this.acp.hasBinding(session.agentSessionId, run)) {
+      void this.acp.unbind(session.agentSessionId).catch(error => this.publisher.publish({ type: 'agent-error',
+        agentSessionId: session.agentSessionId, code: 'ACP_BINDING_RELEASE_UNCONFIRMED',
+        message: `The original ACP Run ended. Its observation connection could not be released: ${error instanceof Error ? error.message : String(error)}`,
+        evidence: { source: 'agentmux', run: { ...run }, observedAt: Date.now() } }))
+    }
     const binding = this.hookBindings.get(run.runId)
     this.forgetHookBinding(run.runId)
     if (binding) void binding.close().catch(error => this.publisher.publish({ type: 'agent-error',
@@ -11395,6 +11424,14 @@ export class AgentMuxClient {
     } finally { releaseAdmission() }
   }
 
+  private assertTerminalInputCarrier(session: AgentMuxAgentSession): void {
+    const actor = this.registry.findByRun(session.run)?.nativeActor
+    if (actor && this.providers.get(session.providerId).managedAcp?.protocolId === actor.protocolId) {
+      throw new AgentMuxError('This original ACP Run has no terminal input channel. Its Session and protocol process are retained.',
+        'AGENT_ACP_TERMINAL_INPUT_UNAVAILABLE', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
+    }
+  }
+
   private async writeAgentInput(
     requestedSession: AgentMuxAgentSession,
     data: AgentMuxRunInputData,
@@ -11404,6 +11441,7 @@ export class AgentMuxClient {
     call: RawInputCall = this.rawInputCall(),
     retainedOperationId?: string
   ): Promise<AgentMuxRunInputAck> {
+    this.assertTerminalInputCarrier(requestedSession)
     // 空载荷在这里就地收掉，不下到 ctxmux。daemon 的 RecoverableInput 校验会拒绝空载荷
     // （`recoverable native Input must not be empty`），而「按了键但没有字节要发」是**正常**的终端
     // 事件：IME 组字途中的 onData('')、旧式鼠标上报越界时的零长字节。把它当失败上报，等于用户在
@@ -12739,7 +12777,12 @@ export class AgentMuxClient {
     const next = await this.registry.update(
       agentSessionId,
       expectedRun,
-      (current) => ({ ...current, nativeHandle: handle, updatedAt: Date.now() }),
+      (current) => {
+        const retained = current.nativeHandle
+        if (handle.kind === 'provider' && retained?.kind === 'provider' && retained.providerId === handle.providerId &&
+            retained.sessionId === handle.sessionId && retained.transcriptPath !== undefined && handle.transcriptPath === undefined) return current
+        return { ...current, nativeHandle: handle, updatedAt: Date.now() }
+      },
       signal
     )
     this.publishSession(next)

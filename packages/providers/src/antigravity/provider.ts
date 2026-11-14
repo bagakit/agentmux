@@ -86,7 +86,7 @@ export function antigravityProvider(services: ProviderHookServices<'antigravity'
       promptDelivery: 'flag-prompt-interactive',
       hookStrategy: { kind: 'native', installation: 'explicit-managed' },
       resumeStrategy: { kind: 'provider-native', locator: 'session-id' },
-      acpStrategy: { kind: 'none' },
+      acpStrategy: { kind: 'adapter' },
       capabilities: {
         terminal: true, timeline: 'complete-events', permission: 'observe',
         providerResume: true, replyCorrelation: 'none'
