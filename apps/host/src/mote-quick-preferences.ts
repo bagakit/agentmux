@@ -1,5 +1,5 @@
 import { parseFileWriteResult, parseFileCreateResult, type AgentMuxRpcFilesOwner } from '@agentmux/core/files'
-import { DEFAULT_MOTE_PRESENCE, effectiveMoteQuickSave, sameMoteQuickDefaults, parseMotePreferencesReadResult, parseMotePreferencesSaveParams, parseMotePreferencesSaveResult, type MoteQuickPreferencesPort, type MoteQuickPreferencesReadInput, type MoteQuickPreferencesReadResult, type MoteQuickPreferencesSaveParams, type MoteQuickPreferencesSaveResult, type MotePresenceReading } from '@agentmux/core/mote-preferences'
+import { DEFAULT_MOTE_PRESENCE, effectiveMoteQuickSave, sameMoteQuickDefaults, parseMotePreferencesReadResult, parseMotePreferencesSaveParams, parseMotePreferencesSaveResult, type MoteQuickChoices, type MoteQuickPreferencesPort, type MoteQuickPreferencesReadInput, type MoteQuickPreferencesReadResult, type MoteQuickPreferencesSaveParams, type MoteQuickPreferencesSaveResult, type MotePresenceReading } from '@agentmux/core/mote-preferences'
 import type { MoteMainReader, MoteMainSnapshot } from '@agentmux/core/mote-dialogue'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { ConnectionEnrollmentCallContext } from '@agentmux/core/connections'
@@ -14,34 +14,63 @@ export class HostMoteQuickPreferences implements MoteQuickPreferencesPort {
   constructor(private readonly ports: {
     files: AgentMuxRpcFilesOwner; main: MoteMainReader
     catalog(): Promise<AgentMuxSpaceCatalog | null>
-    executors(): Promise<MoteQuickPreferencesReadResult['choices']['executors']>
+    executors(): Promise<NonNullable<MoteQuickChoices['executors']>>
     maintenance?(target: MoteQuickPreferencesReadInput['target']): MotePresenceReading
     adoptGuidance?(input: MoteQuickPreferencesSaveParams, main: MoteMainSnapshot, context: ConnectionEnrollmentCallContext, options?: { reconcilePublished: true }): Promise<NonNullable<MoteQuickPreferencesSaveResult['maintenanceAdoption']>>
     changed?(target: MoteQuickPreferencesReadInput['target']): void
     prepareMainSource?(before:MoteMainSnapshot, roleRevision:string, reference:import('@agentmux/core/mote-preferences').MoteDefaultConversation|null, operationId:string):Promise<import('@agentmux/core/mote-preferences').MoteMainTransitionMarker>
     recordMainSource?(before: MoteMainSnapshot, after: MoteMainSnapshot, operationId: string): Promise<void>
   }) {}
-  async read(input: MoteQuickPreferencesReadInput): Promise<MoteQuickPreferencesReadResult> {
+  private async readOriginal(input: MoteQuickPreferencesReadInput): Promise<MoteQuickPreferencesReadResult> {
     input = { kind: 'quick', target: input.target }
     let source: MoteQuickPreferencesReadResult['source'] = null
     let defaults: MoteQuickPreferencesReadResult['defaults'] = null
-    const empty = { executors: [], conversations: [], destinations: [] }
     try {
       const main = await this.ports.main.readCurrentMoteMain(input.target)
       if (!main.identity) throw new Error(main.issue ?? 'The original Mote identity is unconfirmed.')
       const file = await readMoteQuickModeSource(this.ports.files, input.target)
       source = file.source
       defaults = moteQuickModeDefaults(file.mode)
-      const catalog = await this.ports.catalog(), locations = catalog?.locations.filter(value => value.spaceId === input.target.spaceId) ?? []
-      const conversations = locations.flatMap(location => {
-        const region = catalog!.regions.find(value => value.tabId === location.tabId && value.regionId === location.regionId)
-        return region?.kind === 'agent' && region.agentSessionId && region.execution ? [{ reference: { hostId: region.execution.hostId, sessionId: region.agentSessionId, displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId, tabId: location.tabId, regionId: location.regionId }, label: `${region.execution.hostId} · ${region.agentSessionId}` }] : []
-      })
-      const executors = await this.ports.executors()
       return parseMotePreferencesReadResult({ ...input, status: 'ready', source, defaults,
-        choices: { executors, conversations, destinations: locations.map(value => ({ reference: { kind: 'occurrence', displayWorkspaceId: value.displayWorkspaceId, groupId: value.groupId, tabId: value.tabId, regionId: value.regionId }, label: `${value.tabId} · ${value.regionId}` })) },
-        main: main.identity.moteId === PMO_TEAMS_TOPIC_ID, issue: null, ...(this.ports.maintenance ? { maintenance: this.ports.maintenance(input.target) } : {}) }, input)
-    } catch (error) { return parseMotePreferencesReadResult({ ...input, status: 'unconfirmed', source, defaults, choices: empty, main: null, issue: String(error) }, input) }
+        choices: null, main: main.identity.moteId === PMO_TEAMS_TOPIC_ID, issue: null }, { ...input, includeChoices: false })
+    } catch (error) { return parseMotePreferencesReadResult({ ...input, status: 'unconfirmed', source, defaults, choices: null, main: null, issue: String(error) }, { ...input, includeChoices: false }) }
+  }
+  private async readLocations(target: MoteQuickPreferencesReadInput['target']): Promise<{ conversations: NonNullable<MoteQuickChoices['conversations']>; destinations: NonNullable<MoteQuickChoices['destinations']> }> {
+    const catalog = await this.ports.catalog()
+    if (!catalog) throw new Error('The original Mote display discovery is unavailable. Its saved Main and settings are kept.')
+    const locations = catalog.locations.filter(value => value.spaceId === target.spaceId)
+    return {
+      conversations: locations.flatMap(location => {
+        const region = catalog.regions.find(value => value.tabId === location.tabId && value.regionId === location.regionId)
+        return region?.kind === 'agent' && region.agentSessionId && region.execution ? [{ reference: { hostId: region.execution.hostId, sessionId: region.agentSessionId, displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId, tabId: location.tabId, regionId: location.regionId }, label: `${region.execution.hostId} · ${region.agentSessionId}` }] : []
+      }),
+      destinations: locations.map(value => ({ reference: { kind: 'occurrence', displayWorkspaceId: value.displayWorkspaceId, groupId: value.groupId, tabId: value.tabId, regionId: value.regionId }, label: `${value.tabId} · ${value.regionId}` }))
+    }
+  }
+  async read(input: MoteQuickPreferencesReadInput): Promise<MoteQuickPreferencesReadResult> {
+    const original = await this.readOriginal(input)
+    let choices: MoteQuickChoices | null = null
+    if (input.includeChoices !== false) {
+      choices = { executors: input.includeChoices === 'locations' ? null : [], conversations: input.includeChoices === 'executors' ? null : [], destinations: input.includeChoices === 'executors' ? null : [] }
+      if (original.status === 'ready') {
+        const [locations, executors] = await Promise.allSettled([
+          input.includeChoices === 'executors' ? Promise.resolve(null) : this.readLocations(input.target),
+          input.includeChoices === 'locations' ? Promise.resolve(null) : Promise.resolve().then(() => this.ports.executors())
+        ])
+        const issues: NonNullable<MoteQuickChoices['issues']> = {}
+        if (locations.status === 'fulfilled' && locations.value) Object.assign(choices, locations.value)
+        else if (locations.status === 'rejected') issues.locations = String(locations.reason)
+        if (executors.status === 'fulfilled' && executors.value) choices.executors = executors.value
+        else if (executors.status === 'rejected') issues.executors = String(executors.reason)
+        if (Object.keys(issues).length) choices.issues = issues
+      }
+    }
+    let maintenance: MotePresenceReading | undefined
+    if (original.status === 'ready' && this.ports.maintenance) {
+      try { maintenance = this.ports.maintenance(input.target) }
+      catch (error) { maintenance = { status: 'unconfirmed', schedule: null, issue: String(error) } }
+    }
+    return parseMotePreferencesReadResult({ ...original, choices, ...(maintenance ? { maintenance } : {}) }, input)
   }
   async save(raw: MoteQuickPreferencesSaveParams, context?: ConnectionEnrollmentCallContext): Promise<MoteQuickPreferencesSaveResult> {
     return this.ports.main.withRole?await this.ports.main.withRole(raw.target,()=>this.saveInRole(raw,context)):await this.saveInRole(raw,context)
@@ -51,7 +80,7 @@ export class HostMoteQuickPreferences implements MoteQuickPreferencesPort {
     let dispatched = false
     const result = (status: MoteQuickPreferencesSaveResult['status'], source: MoteQuickPreferencesSaveResult['source'], message: string | null) => parseMotePreferencesSaveResult({ kind: 'quick', target: input.target, operationId: input.operationId, status, source, message }, input)
     try {
-      const read = await this.read({ kind: 'quick', target: input.target }), baseline = input.baseline
+      const read = await this.readOriginal({ kind: 'quick', target: input.target }), baseline = input.baseline
       if (read.status !== 'ready' || !read.source?.resource || read.source.result.status !== 'read' && read.source.result.status !== 'deleted' || !read.defaults) throw new Error(read.issue ?? 'The original settings are unconfirmed.')
       const document = read.source.result.status === 'read' ? read.source.result.document : null
       const sameResource = isDeepStrictEqual(read.source.resource, baseline.resource), sameControls = isDeepStrictEqual(read.defaults, baseline.defaults)
@@ -75,8 +104,14 @@ export class HostMoteQuickPreferences implements MoteQuickPreferencesPort {
       if (roleChanged && !input.destination) throw new Error('Changing the original Main requires its exact legitimate destination.')
       const presenceChanged = JSON.stringify(values.presence ?? DEFAULT_MOTE_PRESENCE) !== JSON.stringify(read.defaults.presence ?? DEFAULT_MOTE_PRESENCE)
       if (context?.actor.kind === 'agent' && (roleChanged || presenceChanged)) throw new Error('Standing maintenance and its current role require the original person or device configuration. Existing Agents remain available.')
-      if (values.executorId !== read.defaults.executorId && values.executorId && !read.choices.executors.some(value => value.id === values.executorId)) throw new Error('The selected original Executor is unconfirmed.')
-      if (roleChanged && values.conversation && !read.choices.conversations.some(value => sameMoteDefaultConversation(value.reference, values.conversation))) throw new Error('The selected original Agent and its Host/location are unconfirmed.')
+      if (values.executorId !== read.defaults.executorId && values.executorId) {
+        const executors = await this.ports.executors()
+        if (!executors.some(value => value.id === values.executorId)) throw new Error('The selected original Executor is unconfirmed.')
+      }
+      if (roleChanged && values.conversation) {
+        const locations = await this.readLocations(input.target)
+        if (!locations.conversations.some(value => sameMoteDefaultConversation(value.reference, values.conversation))) throw new Error('The selected original Agent and its Host/location are unconfirmed.')
+      }
       const before = await this.ports.main.readCurrentMoteMain(input.target, context?.signal)
       let preparationIssue:string|null=null
       if(roleChanged&&this.ports.prepareMainSource) {try{values.conversationTransition=await this.ports.prepareMainSource(before,values.conversationRevision!,values.conversation??null,input.operationId)}catch(error){preparationIssue='The original role boundary preparation is unconfirmed: '+String(error)}}

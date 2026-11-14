@@ -60,17 +60,18 @@ export type MotePreferencesDestination =
   | { kind: 'occurrence'; displayWorkspaceId: string; groupId: string; tabId: string; regionId: string }
   | { kind: 'empty'; displayWorkspaceId: string; groupId: string }
 export type MoteQuickChoices = {
-  executors: { id: string; name: string; providerId: string }[]
-  conversations: { reference: MoteDefaultConversation; label: string }[]
-  destinations: { reference: MotePreferencesDestination; label: string }[]
+  executors: { id: string; name: string; providerId: string }[] | null
+  conversations: { reference: MoteDefaultConversation; label: string }[] | null
+  destinations: { reference: MotePreferencesDestination; label: string }[] | null
+  issues?: { executors?: string; locations?: string }
 }
 export type MoteQuickBaseline = { resource: FileReadResource; document: FileDocument | null; defaults: MoteQuickDefaults }
-export type MoteQuickPreferencesReadInput = { kind: 'quick'; target: MotePreferencesTarget }
+export type MoteQuickPreferencesReadInput = { kind: 'quick'; target: MotePreferencesTarget; includeChoices?: boolean | 'executors' | 'locations' }
 export type MoteQuickPreferencesReadResult = MoteQuickPreferencesReadInput & {
   status: 'ready' | 'unconfirmed'; source: FileReadResult | null; defaults: MoteQuickDefaults | null
-  choices: MoteQuickChoices; main: boolean | null; issue: string | null; maintenance?: MotePresenceReading
+  choices: MoteQuickChoices | null; main: boolean | null; issue: string | null; maintenance?: MotePresenceReading
 }
-export type MoteQuickPreferencesSaveInput = MoteQuickPreferencesReadInput & {
+export type MoteQuickPreferencesSaveInput = Omit<MoteQuickPreferencesReadInput, 'includeChoices'> & {
   baseline: MoteQuickBaseline; values: MoteQuickDefaults; destination?: MotePreferencesDestination; action?: MoteGuidanceAdoptionAction
 }
 export type MoteQuickPreferencesSaveParams = MoteQuickPreferencesSaveInput & { operationId: string }
@@ -231,9 +232,15 @@ export function parseMoteConnectionBaseline(value: unknown, target: MotePreferen
   return { resource: read.resource!, document: read.result.status === 'read' ? read.result.document : null, values: parseMoteConnectionValues(p.values, code) }
 }
 export function parseMotePreferencesReadInput(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): MotePreferencesReadInput {
-  const p = fields(value, ['kind', 'target'], ['kind', 'target'], code)
+  const p = fields(value, ['kind', 'target', 'includeChoices'], ['kind', 'target'], code)
   if (p.kind !== 'quick' && p.kind !== 'connection') fail('This Mote preference kind is not available.', code)
-  return { kind: p.kind as 'quick' | 'connection', target: parseMotePreferencesTarget(p.target, code) }
+  const target = parseMotePreferencesTarget(p.target, code)
+  if (p.kind === 'connection') {
+    fields(p, ['kind', 'target'], [], code)
+    return { kind: 'connection', target }
+  }
+  if (p.includeChoices !== undefined && typeof p.includeChoices !== 'boolean' && p.includeChoices !== 'executors' && p.includeChoices !== 'locations') fail('Mote choice discovery must select its original source.', code)
+  return { kind: 'quick', target, ...(p.includeChoices === undefined ? {} : { includeChoices: p.includeChoices as NonNullable<MoteQuickPreferencesReadInput['includeChoices']> }) }
 }
 export function parseMotePreferencesSaveInput(value: MoteQuickPreferencesSaveInput, code?: Code): MoteQuickPreferencesSaveInput
 export function parseMotePreferencesSaveInput(value: MoteConnectionPreferencesSaveInput, code?: Code): MoteConnectionPreferencesSaveInput
@@ -291,11 +298,30 @@ export function parseMotePreferencesReadResult(value: unknown, input?: MotePrefe
   if (input && (base.kind !== input.kind || !sameMotePreferencesTarget(base.target, input.target))) fail('Mote preference read belongs to another original target.', code)
   const source = p.source === null ? null : parseFileReadResult(p.source, { ...base.target, path: 'MOTE.md' })
   const defaults = p.defaults === null ? null : parseMoteQuickDefaults(p.defaults, code)
-  const c = fields(p.choices, ['executors', 'conversations', 'destinations'], ['executors', 'conversations', 'destinations'], code)
-  const choices: MoteQuickChoices = {
-    executors: list(c.executors, value => { const e = fields(value, ['id', 'name', 'providerId'], ['id', 'name', 'providerId'], code); return { id: id(e.id, code), name: text(e.name, code), providerId: id(e.providerId, code) } }, value => value.id, code),
-    conversations: list(c.conversations, value => { const e = fields(value, ['reference', 'label'], ['reference', 'label'], code); return { reference: parseMoteQuickDefaults({ conversation: e.reference }, code).conversation!, label: text(e.label, code) } }, value => JSON.stringify(value.reference), code),
-    destinations: list(c.destinations, value => { const e = fields(value, ['reference', 'label'], ['reference', 'label'], code); return { reference: parseMotePreferencesDestination(e.reference, code), label: text(e.label, code) } }, value => JSON.stringify(value.reference), code)
+  if (input?.kind === 'quick' && (input.includeChoices === false ? p.choices !== null : p.choices === null)) fail('Mote choice discovery does not match the original read projection.', code)
+  const c = p.choices === null ? null : fields(p.choices, ['executors', 'conversations', 'destinations', 'issues'], ['executors', 'conversations', 'destinations'], code)
+  const choices: MoteQuickChoices | null = c === null ? null : {
+    executors: c.executors === null ? null : list(c.executors, value => { const e = fields(value, ['id', 'name', 'providerId'], ['id', 'name', 'providerId'], code); return { id: id(e.id, code), name: text(e.name, code), providerId: id(e.providerId, code) } }, value => value.id, code),
+    conversations: c.conversations === null ? null : list(c.conversations, value => { const e = fields(value, ['reference', 'label'], ['reference', 'label'], code); return { reference: parseMoteQuickDefaults({ conversation: e.reference }, code).conversation!, label: text(e.label, code) } }, value => JSON.stringify(value.reference), code),
+    destinations: c.destinations === null ? null : list(c.destinations, value => { const e = fields(value, ['reference', 'label'], ['reference', 'label'], code); return { reference: parseMotePreferencesDestination(e.reference, code), label: text(e.label, code) } }, value => JSON.stringify(value.reference), code)
+  }
+  if (c?.issues !== undefined && choices) {
+    const issues = fields(c.issues, ['executors', 'locations'], [], code)
+    choices.issues = {}
+    for (const key of ['executors', 'locations'] as const) {
+      if (issues[key] === undefined) continue
+      const issue = text(issues[key], code)
+      if (!issue.trim()) fail('Mote choice discovery requires its original failure reason.', code)
+      choices.issues[key] = issue
+    }
+  }
+  if (choices) {
+    if ((choices.conversations === null) !== (choices.destinations === null) || choices.executors === null && choices.destinations === null ||
+      choices.executors === null && choices.issues?.executors || choices.destinations === null && choices.issues?.locations) fail('Mote candidates require their exact discovery source.', code)
+    if (input?.kind === 'quick' && input.includeChoices !== false) {
+      const source = input.includeChoices
+      if ((source === 'locations') !== (choices.executors === null) || (source === 'executors') !== (choices.destinations === null)) fail('Mote candidates do not match the requested source.', code)
+    }
   }
   if (p.status !== 'ready' && p.status !== 'unconfirmed' || !(p.main === null || typeof p.main === 'boolean') || !(p.issue === null || typeof p.issue === 'string')) fail('Mote preference read status is invalid.', code)
   if (p.status === 'ready' && (!source?.resource || !['read', 'deleted'].includes(source.result.status) || defaults === null || p.main === null || p.issue !== null)) fail('Ready Mote preferences require actual original File facts.', code)
@@ -314,6 +340,16 @@ export function moteQuickBaseline(read: MotePreferencesReadResult): MoteQuickBas
   return read.kind === 'quick' && read.status === 'ready' && read.source?.resource && read.defaults ? {
     resource: read.source.resource, document: read.source.result.status === 'read' ? read.source.result.document : null, defaults: read.defaults
   } : null
+}
+/** Merge already-qualified reader projections; source selection grants no input or role authority. */
+export function mergeMoteQuickChoices(previous: MoteQuickChoices | null | undefined, next: MoteQuickChoices): MoteQuickChoices {
+  const issues: NonNullable<MoteQuickChoices['issues']> = {}
+  const executorsIssue = next.executors === null ? previous?.issues?.executors : next.issues?.executors
+  const locationsIssue = next.destinations === null ? previous?.issues?.locations : next.issues?.locations
+  if (executorsIssue) issues.executors = executorsIssue
+  if (locationsIssue) issues.locations = locationsIssue
+  return { executors: next.executors ?? previous?.executors ?? null, conversations: next.conversations ?? previous?.conversations ?? null,
+    destinations: next.destinations ?? previous?.destinations ?? null, ...(Object.keys(issues).length ? { issues } : {}) }
 }
 export function moteConnectionBaseline(read: MoteConnectionPreferencesReadResult): MoteConnectionBaseline | null {
   return read.status === 'ready' && read.source?.resource && read.values ? {
