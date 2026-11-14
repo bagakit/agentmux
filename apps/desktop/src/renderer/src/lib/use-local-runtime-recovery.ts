@@ -45,9 +45,11 @@ export function useLocalRuntimeRecovery(active: boolean, onRestored?: () => void
   useEffect(() => {
     const prior = previous.current
     previous.current = result
-    if (active && prior?.state === 'needs-backup' && (result?.state === 'restored' || result?.state === 'unchanged')) onRestored?.()
+    const restored = result?.state === 'restored' && prior?.state !== 'restored'
+    const foundOriginal = result?.state === 'unchanged' && prior?.state === 'needs-backup'
+    if (active && (restored || foundOriginal)) onRestored?.()
   }, [active, result, onRestored])
-  if (!active || result?.state !== 'needs-backup') return { notice: null, restoring }
+  if (!active || result?.state !== 'needs-backup') return { notice: null, restoring, refresh: observe }
   const guidance = result.code === 'IDENTITY_BACKUP_UNVERIFIED'
     ? 'That file couldn’t confirm this Mac’s original identity. Choose another backup.'
     : result.code === 'RUNTIME_OWNER_BUSY'
@@ -63,5 +65,5 @@ export function useLocalRuntimeRecovery(active: boolean, onRestored?: () => void
     detail: result.code,
     action: { label: restoring ? 'Restoring…' : 'Restore from backup…', run: () => { void choose() } }
   }
-  return { notice, restoring }
+  return { notice, restoring, refresh: observe }
 }
