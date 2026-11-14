@@ -1,3 +1,4 @@
+import { publishPackageArtifact } from '../../../scripts/package-artifact-publisher.mjs'
 import { copyRuntimePayload, inspectRuntimeApplicationPayload } from './runtime-application-payload.mjs'
 import { privatePackageSmokeEnvironment, preservePackageSmokeFailure } from './package-smoke-context.mjs'
 import { updateRoute } from '../src/shared/update-policy.ts'
@@ -1107,11 +1108,17 @@ async function main() {
     await mkdir(releaseRoot, { recursive: true })
     await rename(stagedApp, outputApp)
     if (!appOnly) await rename(stagedDmg, outputDmg)
+    const qualifiedDmgHash = appOnly ? null : await sha256(outputDmg)
+    if (!appOnly) {
+      const artifacts = await publishPackageArtifact({ repositoryRoot, target: 'darwin-arm64', archive: outputDmg, sha256: qualifiedDmgHash })
+      process.stdout.write(`package_artifact_publication=${JSON.stringify(artifacts.publication)}\n`)
+      process.stdout.write(`package_artifact_cleanup=${JSON.stringify(artifacts.cleanup)}\n`)
+    }
     if (installRequested) reportInstallTransaction(await installApplication(outputApp))
     if (!appOnly) await run(process.execPath, [join(desktopRoot, 'scripts', 'report-desktop-package.mjs')])
     const [appHash, dmgHash, appSizeResult, dmgInfo] = await Promise.all([
       sha256(join(outputApp, 'Contents', 'MacOS', PRODUCT_NAME)),
-      appOnly ? null : sha256(outputDmg),
+      qualifiedDmgHash,
       run('du', ['-sk', outputApp], { capture: true }),
       appOnly ? null : stat(outputDmg)
     ])

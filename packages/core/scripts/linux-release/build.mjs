@@ -8,6 +8,7 @@
 //
 // --node-archive supplies an already downloaded node-v<ver>-linux-x64.tar.gz; its
 // checksum is still verified against the pinned value below.
+import { publishPackageArtifact } from '../../../../scripts/package-artifact-publisher.mjs'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { chmod, cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
@@ -108,8 +109,9 @@ export async function buildLinuxRelease({ out, nodeArchive: supplied, release = 
     const archive = join(out, `${name}.tar.gz`)
     // A Linux tar warns about macOS extended attributes and AppleDouble files; omit them.
     const metadata = process.platform === 'darwin' ? ['--no-xattrs', '--no-mac-metadata'] : []
-    await exec('tar', [...metadata, '-czf', archive + '.partial', '-C', scratch, name], { env: { ...process.env, COPYFILE_DISABLE: '1' } })
-    await rename(archive + '.partial', archive)
+    const partial = join(scratch, `${name}.tar.gz.partial`)
+    await exec('tar', [...metadata, '-czf', partial, '-C', scratch, name], { env: { ...process.env, COPYFILE_DISABLE: '1' } })
+    await rename(partial, archive)
     const archiveSha256 = sha(await readFile(archive))
     await writeFile(archive + '.sha256', `${archiveSha256}  ${name}.tar.gz\n`)
     return { archive, archiveSha256, version, node: NODE_VERSION, coreDigest: artifact.digest, sourceCommit: artifact.sourceCommit, files: artifact.files.length }
@@ -120,5 +122,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const options = parse(process.argv.slice(2))
   if (!isAbsolute(options.out)) throw new Error('--out must resolve to an absolute directory')
   const result = await buildLinuxRelease(options)
-  process.stdout.write(JSON.stringify(result, null, 2) + '\n')
+  const artifacts = await publishPackageArtifact({ repositoryRoot: resolve(packageRoot, '../..'), target: 'linux-x64', archive: result.archive, sha256: result.archiveSha256 })
+  process.stdout.write(JSON.stringify({ ...result, artifacts }, null, 2) + '\n')
 }
