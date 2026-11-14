@@ -1,4 +1,26 @@
 /* Goal plan graph. Facts and states come from the plan projection; this sheet only presents them. */
+.goal-plan__deliveries { display: grid; gap: var(--sp-3); padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-2); }
+.goal-plan__deliveries button { white-space: normal; text-align: start; }
+.goal-delivery { display: grid; min-width: 0; gap: var(--sp-4); }
+.goal-delivery__byline { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
+.goal-delivery__byline > .goal-plan-node__who { margin: 0; }
+.goal-delivery__byline > span:last-child { margin-inline-start: auto; }
+.goal-delivery__summary { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.goal-delivery__checks { display: grid; gap: var(--sp-3); margin: var(--sp-3) 0 0; padding: 0; list-style: none; }
+.goal-delivery__checks > li { min-width: 0; padding-block: var(--sp-3); border-top: 1px solid var(--line-soft); }
+.goal-delivery__checks > li > div:first-child { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); }
+.goal-delivery__checks [data-goal-delivery-check] { font-size: var(--fs-meta); color: var(--text-2); }
+.goal-delivery__checks p { margin-block: var(--sp-2); }
+.goal-delivery__review { display: grid; min-width: 0; gap: var(--sp-3); padding-block: var(--sp-4); border-block: 1px solid var(--line-soft); }
+.goal-delivery__review h4, .goal-delivery__review > p { margin: 0; }
+.goal-delivery__review label { display: grid; min-width: 0; gap: var(--sp-1); font-size: var(--fs-meta); color: var(--text-2); }
+.goal-delivery__review input, .goal-delivery__review textarea { box-sizing: border-box; width: 100%; min-width: 0; padding: var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: inherit; }
+.goal-delivery__review textarea { resize: vertical; }
+.goal-delivery__form > summary { cursor: pointer; color: var(--text); }
+.goal-delivery__form[open] { display: grid; gap: var(--sp-3); }
+.goal-delivery__review pre { margin: var(--sp-2) 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.goal-delivery__history > article { padding-block: var(--sp-4); border-top: 1px solid var(--line-soft); }
+.goal-delivery__receipt { color: var(--green); outline-offset: 4px; }
 .goal-plan { container: goal-plan / inline-size; display: grid; min-width: 0; gap: var(--sp-4); padding: var(--sp-5); margin-bottom: var(--sp-6); border: 1px solid transparent; border-radius: var(--radius-lg); background: var(--surface-1); }
 .goal-plan--empty { box-sizing: border-box; gap: var(--sp-3); padding: var(--sp-4) 0; border: 0; border-top: 1px solid var(--line-soft); border-radius: 0; background: transparent; }
 .goal-plan .goals-section-heading h2 { display: flex; align-items: center; gap: var(--sp-4); }

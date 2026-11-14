@@ -1,10 +1,40 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useAppStore, setAuthoredWorkbench } from '../store'
+import type { GoalPlanReviewInput } from '@agentmux/demand/goal-plan'
 
 export type GoalEditField = 'title' | 'description' | 'tags'
 export type GoalEditDraft = { value: string; revision: string; issue?: string }
-export type GoalEditDrafts = Record<string, Partial<Record<GoalEditField, GoalEditDraft>>>
+export type GoalPlanReviewDraft = { command: string; result: string; evidence: string; note: string; request?: { goalId: string; review: GoalPlanReviewInput } }
+export type GoalEditDrafts = Record<string, Partial<Record<GoalEditField, GoalEditDraft>> & { planReviews?: Record<string, GoalPlanReviewDraft> }>
 const fields: readonly GoalEditField[] = ['title', 'description', 'tags']
+export const goalPlanReviewDraftKey = (nodeId: string, delegationOperationId: string) => JSON.stringify([nodeId, delegationOperationId])
+
+/** Retain human input and the exact request in the existing authored document;
+ * in-flight UI state and owner confirmation are never persisted as facts. */
+export function editGoalPlanReviewDraft(goalId: string, nodeId: string, delegationOperationId: string, value: GoalPlanReviewDraft): void {
+  const { command, result, evidence, note, request } = value, draft = { command, result, evidence, note, ...(request ? { request } : {}) }
+  const key = goalPlanReviewDraftKey(nodeId, delegationOperationId)
+  setAuthoredWorkbench(state => {
+    const original = state.goalEditDrafts[goalId] ?? {}
+    if (JSON.stringify(original.planReviews?.[key]) === JSON.stringify(draft)) return state
+    return { goalEditDrafts: { ...state.goalEditDrafts, [goalId]: { ...original, planReviews: { ...original.planReviews, [key]: draft } } } }
+  })
+}
+
+/** A matching owner record replaces only this exact submitted UI draft. */
+export function clearGoalPlanReviewDraft(goalId: string, nodeId: string, delegationOperationId: string, operationId: string): void {
+  const key = goalPlanReviewDraftKey(nodeId, delegationOperationId)
+  setAuthoredWorkbench(state => {
+    const original = state.goalEditDrafts[goalId]
+    if (original?.planReviews?.[key]?.request?.review.operationId !== operationId) return state
+    const { [key]: _review, ...planReviews } = original.planReviews
+    const { planReviews: _previous, ...edits } = original
+    const next = { ...edits, ...(Object.keys(planReviews).length ? { planReviews } : {}) }, goalEditDrafts = { ...state.goalEditDrafts }
+    if (Object.keys(next).length) goalEditDrafts[goalId] = next
+    else delete goalEditDrafts[goalId]
+    return { goalEditDrafts }
+  })
+}
 
 /** Unsent text belongs to the existing Desktop user document, separately from owner facts. */
 export function editGoalDraft(goalId: string, field: GoalEditField, value: string): void {

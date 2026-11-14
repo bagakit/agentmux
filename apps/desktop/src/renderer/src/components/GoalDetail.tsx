@@ -1,6 +1,7 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { useLayoutEffect, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../store'
 import type { DemandProjection } from '../lib/global-demand-board'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
@@ -37,7 +38,7 @@ type GoalReadingSection = 'overview' | 'plan' | 'activity'
 export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, onPlan, acknowledgementFeedback, onAcknowledgementFeedbackChange, motePending = null, moteError, onRetryMote, queue = null, onOpenGoal }: { queue?: GoalQueuePosition | null; onOpenGoal?: (id: string) => void; demand: DemandProjection; onClose: () => void; onOpenMote: () => void; onGrill: () => void; onGrounding: () => void; onPlan: () => void; acknowledgementFeedback: GoalAcknowledgementFeedback; onAcknowledgementFeedbackChange: (patch: Partial<GoalAcknowledgementFeedback>) => void; motePending?: 'open' | 'grill' | 'grounding' | 'plan' | null; moteError: { message: string; mode: 'open' | 'grill' | 'grounding' | 'plan' } | null; onRetryMote: () => void }) {
   const updateDemand = useAppStore((state) => state.updateDemand)
   const deleteDemand = useAppStore((state) => state.deleteDemand)
-  const draft = useAppStore(state => state.goalEditDrafts[demand.id])
+  const draft = useAppStore(useShallow(state => { const drafts = state.goalEditDrafts[demand.id]; return { title: drafts?.title, description: drafts?.description, tags: drafts?.tags } }))
   const retainedStart = useAppStore(state => state.goalFiniteStartIntents[demand.id])
   const title = draft?.title?.value ?? demand.title, description = draft?.description?.value ?? demand.description
   const titleDirty = Boolean(draft?.title), descriptionDirty = Boolean(draft?.description)
@@ -147,7 +148,9 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   const intentBody = <ComposerTextarea aria-label="Goal description" value={description} onValueChange={value => editGoalDraft(demand.id, 'description', value)} onBlur={() => { if (descriptionDirty) void saveGoalDrafts(demand.id, ['description']) }} rows={Math.max(3, Math.min(14, description.split('\n').length + 1))} placeholder="Describe the outcome in your own words…" />
   const recipient = useGoalDiscussionRecipient(demand.id)
   const intent = (lines: number) => <GoalIntent text={description} lines={lines} editor={intentBody} editing={intentEditing || descriptionDirty} onEditingChange={editing => { setIntentEditing(editing); if (!editing && descriptionDirty) void saveGoalDrafts(demand.id, ['description']) }} />
-  const draftIssue = Object.values(draft ?? {}).find(entry => entry?.issue)?.issue
+  const editDrafts = [draft?.title, draft?.description, draft?.tags]
+  const draftIssue = editDrafts.find(entry => entry?.issue)?.issue
+  const hasEditDraft = editDrafts.some(Boolean)
   const saveFeedback = saveError || draftIssue ? <div className="goals-service" role="status">Changes are not saved. Your draft is kept. <span>{saveError ?? draftIssue}</span><button type="button" className="small-button" onClick={() => void retrySave()}>Retry save</button></div> : null
   async function retrySave() {
     await saveGoalDrafts(demand.id)
@@ -176,7 +179,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
         <div className="goals-detail__stage-row"><p className="goals-detail__stage" data-goal-detail-stage><GoalStageMark stage={stage} /><span><small>{GOAL_GROUP_LABELS[stage]}</small><strong>{next}</strong></span></p>
           {queue && queue.total > 1 ? <span className="goals-detail__queue" data-goal-queue><span>{GOAL_GROUP_LABELS[queue.stage]} · {queue.index} of {queue.total}</span>{queue.nextId ? <button type="button" className="small-button" data-goal-queue-next aria-label={`Next goal that ${QUEUE_NAMES[queue.stage]}`} onClick={() => onOpenGoal?.(queue.nextId!)}>Next<ThemeNavigationForwardIcon size={13} /></button> : null}</span> : null}</div>
         <div className="goals-detail__overview"><GoalMeta demand={demand} /><button type="button" className="goals-detail__team-link" onClick={() => revealSection(teamRef.current)}>Team<ThemeNavigationForwardIcon size={12} /></button></div>
-        <p className="goals-detail__edit-status" aria-live="polite">{draft ? draftIssue ? 'Edits kept · Save unconfirmed' : 'Unsaved edits' : null}</p>
+        <p className="goals-detail__edit-status" aria-live="polite">{hasEditDraft ? draftIssue ? 'Edits kept · Save unconfirmed' : 'Unsaved edits' : null}</p>
       </header>
         <nav ref={readingNavRef} className="goals-detail__reading-nav" aria-label="Goal reading sections">
           <button type="button" aria-current={readingSection === 'overview' ? 'location' : undefined} onClick={() => revealSection(overviewRef.current)}>Overview</button>
