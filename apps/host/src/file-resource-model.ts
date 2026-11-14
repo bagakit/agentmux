@@ -17,10 +17,10 @@ export function zoneFileResource(workspace: Pick<FileWorkspace, 'id' | 'hostId' 
     homeZoneId(directoryIdentity(workspace.hostId, topic.identityDirectoryPath)) === zone.zoneId) : []
   if (outside && matches.length !== 1) throw new Error('The confirmed Zone directory is outside the original Files scope.')
   const relativeDirectory = outside ? scratchTopicDirectoryName(matches[0]!.id) : directoryPath === root ? '' : directoryPath.slice(prefix.length)
-  if (relativeDirectory.split('/').some(segment => segment === '.' || segment === '..' || segment.includes('\\'))) {
+  if (relativeDirectory.split('/').some(segment => segment === '.' || segment === '..' || outside && segment.includes('\\'))) {
     throw new Error('The confirmed Zone directory cannot be represented in the original Files scope.')
   }
-  if (requestedPath && (requestedPath.startsWith('/') || /^[A-Za-z]:/.test(requestedPath) || requestedPath.includes('\\') ||
+  if (requestedPath && (requestedPath.startsWith('/') || /^[A-Za-z]:/.test(requestedPath) ||
       requestedPath.includes('\0') || requestedPath.split('/').some(segment => segment === '..'))) throw new Error('Choose a relative path inside the selected Zone directory.')
   const relativePath = requestedPath.split('/').filter(segment => segment && segment !== '.').join('/')
   return { directoryPath, relativeDirectory, ...(outside ? { logicalDirectory: relativeDirectory } : {}), path: relativeDirectory && relativePath ? `${relativeDirectory}/${relativePath}` : relativeDirectory || relativePath || (requestedPath ? '.' : '') }

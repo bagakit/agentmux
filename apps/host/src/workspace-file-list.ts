@@ -33,7 +33,7 @@ async function listFileNames(limit) {
   for (let name of records) {
     if (++visited > 40000 || Date.now() >= deadline) { partialReason = partialReason || 'budget'; break }
     if (name.startsWith('./')) name = name.slice(2)
-    if (!name || name.length > 16384 || /[\0\r\n\\]/u.test(name) || name.startsWith('/') || name.split('/').some(part => !part || part === '.' || part === '..')) {
+    if (!name || name.length > 16384 || /\0/u.test(name) || name.startsWith('/') || name.split('/').some(part => !part || part === '.' || part === '..')) {
       partialReason = partialReason || 'unreadable'; continue
     }
     if (seen.has(name)) continue

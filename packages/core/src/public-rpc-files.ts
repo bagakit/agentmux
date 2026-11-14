@@ -153,9 +153,9 @@ export function parseFileReadResource(value: unknown, code = 'INVALID_CONTROL_RE
 }
 export function parseFileReadParams(value: unknown): FileReadParams {
   const code = 'INVALID_CONTROL_REQUEST', p = rpcRecord(value, ['zoneId', 'spaceId', 'path', 'expectedResource', 'maxBytes'], code)
-  string(p.zoneId, code); string(p.path, code)
+  string(p.zoneId, code); pathString(p.path, code)
   if (p.spaceId !== undefined) string(p.spaceId, code)
-  if ((p.path as string).startsWith('/') || /^[A-Za-z]:/u.test(p.path as string) || (p.path as string).includes('\\') ||
+  if ((p.path as string).startsWith('/') || /^[A-Za-z]:/u.test(p.path as string) ||
       (p.path as string).split('/').some(segment => segment === '..')) invalid('Choose a relative file path inside the original Zone.', code)
   resource(p.expectedResource, code)
   if (p.maxBytes !== undefined && (!Number.isSafeInteger(p.maxBytes) || (p.maxBytes as number) < 1 || (p.maxBytes as number) > 16 * 1024 * 1024)) invalid('A file read byte cap must be from 1 to 16 MiB.', code)
@@ -201,8 +201,8 @@ export function parseFileListResult(value: unknown, params: FileListParams): Fil
   if (r.complete !== (r.partialReason === null)) invalid('A partial File listing requires its original reason.', code)
   const names = new Set<string>()
   for (const path of r.files) {
-    string(path, code)
-    if (path.startsWith('/') || path.includes('\\') || path.split('/').some(part => !part || part === '.' || part === '..') || names.has(path)) invalid('File discovery must retain distinct confined relative paths.', code)
+    pathString(path, code)
+    if (path.startsWith('/') || path.split('/').some(part => !part || part === '.' || part === '..') || names.has(path)) invalid('File discovery must retain distinct confined relative paths.', code)
     names.add(path)
   }
   return p as FileListResult
@@ -242,23 +242,23 @@ export function parseFileReadResult(value: unknown, params: FileReadParams): Fil
       directory = zone === root ? '' : zone.slice(prefix.length)
     }
     const relative = params.path.split('/').filter(part => part && part !== '.').join('/')
-    if (directory.split('/').some(part => part === '.' || part === '..' || part.includes('\\'))) invalid('The returned File Zone is invalid.', code)
+    if (directory.split('/').some(part => part === '.' || part === '..')) invalid('The returned File Zone is invalid.', code)
     const mapped = directory && relative ? directory + '/' + relative : directory || relative || '.'
     if (original.path !== mapped) invalid('Another File path was returned.', code)
   }
   if (r.status === 'read') {
     const d = rpcRecord(r.document, ['path', 'content', 'revision', 'noteProvenance', 'readIdentity'], code)
-    string(d.path, code); revision(d.revision, code)
+    pathString(d.path, code); revision(d.revision, code)
     if (typeof d.content !== 'string') invalid('File content must be text.', code)
     if (d.readIdentity !== undefined) parseFileReadIdentity(d.readIdentity, code)
     if (params.maxBytes !== undefined && new TextEncoder().encode(d.content).byteLength > params.maxBytes) invalid('The original File read exceeded its requested byte cap.', code)
     if ((p.resource as FileReadResource | null)?.path !== d.path) invalid('Another File document was returned.', code)
     if (d.noteProvenance !== undefined) validateFileNoteProvenance(d.noteProvenance, d.revision, p.resource as FileReadResource, d.content as string)
   } else if (r.status === 'binary') {
-    string(r.path, code); revision(r.revision, code)
+    pathString(r.path, code); revision(r.revision, code)
     if (!Number.isSafeInteger(r.byteLength) || (r.byteLength as number) < 0 || (p.resource as FileReadResource | null)?.path !== r.path) invalid('The original binary File evidence is invalid.', code)
     if (params.maxBytes !== undefined && (r.byteLength as number) > params.maxBytes) invalid('The original binary File read exceeded its byte cap.', code)
-  } else if (r.status === 'error' || r.status === 'unknown') { string(r.code, code); string(r.message, code) }
+  } else if (r.status === 'error' || r.status === 'unknown') { string(r.code, code); pathString(r.message, code) }
   return p as FileReadResult
 }
 
