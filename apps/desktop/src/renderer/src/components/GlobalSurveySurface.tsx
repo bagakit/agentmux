@@ -13,7 +13,7 @@ import { spatialCatalog } from '../lib/space-agent-control'
 import { sessionPresentationById } from '../lib/session-presentation'
 import type { AgentMuxSpaceCatalog, AgentMuxZoneFact, TopicKnowledgeSource } from '@agentmux/core/control'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useStore } from 'zustand'
 import type { SurveyBrowserPreparation } from '../lib/survey-browser-creation'
 import { isSurveyPage, surveyCatalogScope, surveyPageOwner, type SurveyPageSelection } from '../lib/survey-page-references'
@@ -54,6 +54,7 @@ import { WorkbenchZone } from './WorkbenchZone'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { SURVEY_SIDEBAR_DEFAULT_WIDTH, surveySidebarBounds } from '../lib/survey-sidebar-width'
 import { clampSidebarResizeWidth, useSidebarResize } from '../hooks/useSidebarResize'
+import { SidebarResizeHandle } from './SidebarResizeHandle'
 import { isMacPlatform } from '../lib/host-platform'
 import { api } from '../lib/api'
 import { useLauncherState } from '../lib/launcher-state'
@@ -282,6 +283,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
   const nativeWindowControls = windowChrome?.nativeControls ?? (isMacPlatform() && ownerDocument === document)
   const surfaceRef = useRef<HTMLElement>(null)
   const managementRef = useRef<HTMLElement>(null)
+  const sidebarId = useId()
   const resizeHandle = useRef<HTMLDivElement>(null)
   const [availableWidth, setAvailableWidth] = useState(0)
   useLayoutEffect(() => {
@@ -752,7 +754,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
 
   return <section ref={surfaceRef} data-knowledge-surface="survey" className="global-survey-surface" data-sidebar-collapsed={sidebarCollapsed} data-native-window-controls={nativeWindowControls} data-windowed={windowChrome ? '' : undefined}
     style={{ ...surveyThumbnailStyle(config?.browser.surveyThumbnails), '--survey-navigation-width': `${sidebarCollapsed ? 40 : effectiveSidebarWidth}px` } as CSSProperties} aria-label="Survey" hidden={!visible} inert={!visible} aria-hidden={!visible}>
-    <nav ref={sidebarRef} className={`survey-navigation${isResizing ? ' survey-tabs--resizing' : ''}`} aria-label="Exploration navigation" data-collapsed={sidebarCollapsed} inert={windowChrome ? returnInTools : controlsCoverPage}>
+    <nav id={sidebarId} ref={sidebarRef} className={`survey-navigation${isResizing ? ' survey-tabs--resizing' : ''}`} aria-label="Exploration navigation" data-collapsed={sidebarCollapsed} inert={windowChrome ? returnInTools : controlsCoverPage}>
       <KnowledgeSurfaceTitlebar surface="survey" chrome={windowChrome} collapsed={sidebarCollapsed} windowAction={windowAction}
         onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} returnInTools={returnInTools} />
       <aside className="survey-tabs" aria-label="Survey items" data-survey-workspace-id={resourceWorkspaceId ?? undefined}>
@@ -817,15 +819,10 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
           <ThemeActionCollectSourcesIcon size={14} />{sidebarCollapsed ? null : <span>Save to Recall…</span>}
         </button> : null}
       </div>
-      <div ref={resizeHandle} className="survey-width-handle" role="separator" tabIndex={0} aria-label="Resize Survey items" title="Drag to resize Survey items · Double-click or Enter to reset"
-        hidden={sidebarCollapsed}
-        aria-orientation="vertical" aria-valuemin={minWidth} aria-valuemax={maxWidth} aria-valuenow={effectiveSidebarWidth} onMouseDown={onResizeStart} onDoubleClick={onResizeReset}
-        onKeyDown={event => {
-          if (event.key === 'Enter') { onResizeReset(event); return }
-          const next = event.key === 'Home' ? minWidth : event.key === 'End' ? maxWidth : event.key === 'ArrowLeft' ? effectiveSidebarWidth - 16 : event.key === 'ArrowRight' ? effectiveSidebarWidth + 16 : null
-          if (next === null) return
-          event.preventDefault(); event.stopPropagation(); setSidebarWidth(next)
-        }} />
+      <SidebarResizeHandle ref={resizeHandle} className="survey-width-handle" aria-controls={sidebarId}
+        aria-label="Resize Survey items" title="Drag to resize Survey items · Double-click or Enter to reset"
+        hidden={sidebarCollapsed} minWidth={minWidth} maxWidth={maxWidth} width={effectiveSidebarWidth} resizing={isResizing}
+        onWidthChange={setSidebarWidth} onResizeStart={onResizeStart} onResizeReset={onResizeReset} />
     </nav>
     <div className="survey-content">
       <div className="survey-page-content" inert={controlsCoverPage} aria-hidden={controlsCoverPage}>

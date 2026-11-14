@@ -1,0 +1,30 @@
+.sidebar-resize-handle { cursor: col-resize; }
+.sidebar-resize-handle::after {
+  content: '';
+  position: absolute;
+  inset-block: var(--sp-3);
+  inset-inline-start: calc(50% - .5px);
+  inline-size: 1px;
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+}
+.sidebar-resize-handle:is(:hover, :focus-visible, [data-resizing])::after {
+  background: var(--green-2);
+}
+.sidebar-resize-handle:focus-visible {
+  outline: none;
+}
+.sidebar-resize-handle:focus-visible::after {
+  inset-block: 50% auto;
+  inset-inline-start: calc(50% - 1px);
+  inline-size: 2px;
+  block-size: min(48px, 60%);
+  transform: translateY(-50%);
+  background: var(--focus-line);
+}
+@media (forced-colors: active) {
+  .sidebar-resize-handle:is(:hover, :focus-visible, [data-resizing])::after {
+    forced-color-adjust: none;
+    background: Highlight;
+  }
+}

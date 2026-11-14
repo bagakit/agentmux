@@ -7,7 +7,7 @@ import { resolveDesktopNoteFileLink } from '../lib/note-file-link'
 import { openNoteAgentLauncher } from '../lib/note-agent-context'
 import type { AgentMuxSpaceCatalog, TopicKnowledgeSource } from '@agentmux/core/control'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { NotebookHome, NotebookNavigation, NotebookCreateDialog } from './NotebookNavigation'
 import type { NotebookDirectoryView } from './NotebookViews'
 import { NotebookSelector } from './NotebookSelector'
@@ -29,6 +29,7 @@ import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { NOTES_WORKSPACE_ID } from '@agentmux/host/notes-library'
 import { SURVEY_SIDEBAR_DEFAULT_WIDTH, SURVEY_SIDEBAR_MIN_WIDTH, surveySidebarBounds } from '../lib/survey-sidebar-width'
 import { clampSidebarResizeWidth, useSidebarResize } from '../hooks/useSidebarResize'
+import { SidebarResizeHandle } from './SidebarResizeHandle'
 import { isMacPlatform } from '../lib/host-platform'
 import { api } from '../lib/api'
 import { directoryIdentity } from '../../../shared/space-addresses'
@@ -108,6 +109,7 @@ export const GlobalRecallSurface = memo(function GlobalRecallSurface({ windowAct
   const [recovering, setRecovering] = useState(false), [noteRecovery, setNoteRecovery] = useState(false)
   const pendingNote = useRef<{ zoneId: string; workspaceId: string; displayWorkspaceId: string; groupId: string; reference: WorkbenchProjectionSelection | null; notebook: NoteNotebookContext & { notebookId: string } } | null>(null)
   const [capture, setCapture] = useState<{ title: string; sources: TopicKnowledgeSource[]; noteIds: string[] } | null>(null)
+  const sidebarId = useId()
   const surfaceRef = useRef<HTMLElement>(null), resizeHandle = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
   useLayoutEffect(() => {
@@ -220,7 +222,7 @@ export const GlobalRecallSurface = memo(function GlobalRecallSurface({ windowAct
   return <section ref={surfaceRef} data-knowledge-surface="recall" className="global-recall-surface" aria-label="Recall" hidden={!visible} inert={!visible} aria-hidden={!visible} data-sidebar-collapsed={sidebarCollapsed} data-navigation-stacked={navigationStacked} data-native-window-controls={nativeWindowControls} data-windowed={windowChrome ? '' : undefined} style={{ '--survey-navigation-width': `${sidebarCollapsed ? 40 : effectiveWidth}px` } as CSSProperties}>
     <NotebookCreateDialog active={visible} open={visible && createOpen} onClose={() => setCreateOpen(false)} restoreFocus={() => notebookTrigger.current?.focus()} onCreateIntent={() => { createIntent.current = intent.current }} onCreated={id => { setCreateOpen(false); if (active.current && intent.current === createIntent.current) chooseNotebook(id) }} />
     <ConfirmationDialog open={visible && deleteOpen} title="Delete notebook?" subject={deleteTarget?.name ?? ''} description={deleteTarget?.pageCount ? `${deleteTarget.pageCount} ${deleteTarget.pageCount === 1 ? 'page will' : 'pages will'} move to 随手记. Contents, page hierarchy and archived status stay intact.` : 'This empty notebook will be removed.'} confirmLabel={deletion.pending ? 'Retry deletion' : 'Delete notebook'} busy={deletion.busy} onCancel={() => setDeleteOpen(false)} onConfirm={() => void removeNotebook()} feedback={deletion.issue ? <p className="notebook-create-issue" role="status">{deletion.issue}</p> : null} />
-    <nav ref={containerRef} className={`survey-navigation${isResizing ? ' survey-tabs--resizing' : ''}`} aria-label="Recall navigation" data-collapsed={sidebarCollapsed}>
+    <nav id={sidebarId} ref={containerRef} className={`survey-navigation${isResizing ? ' survey-tabs--resizing' : ''}`} aria-label="Recall navigation" data-collapsed={sidebarCollapsed}>
       <KnowledgeSurfaceTitlebar surface="recall" chrome={windowChrome} collapsed={sidebarCollapsed} windowAction={windowAction}
         onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
       {deletion.issue && !deleteOpen ? <div className="notebook-change-issue" role="status">{!sidebarCollapsed ? <span>Deletion of “{deleteTarget?.name}” is unconfirmed. {deletion.issue}</span> : null}<button className="note-text-button" aria-label="Check notebook deletion" onClick={() => setDeleteOpen(true)}>{sidebarCollapsed ? <ThemeStatusUnknownIcon size={15} /> : 'Check deletion'}</button></div> : null}
@@ -229,7 +231,10 @@ export const GlobalRecallSurface = memo(function GlobalRecallSurface({ windowAct
         <div className="survey-page-list" data-notebook-view={Boolean(activeNotebook)}><NotebookNavigation notebooks={notebooks} pages={pages} selectedId={notebookId} selectedNoteId={directoryOpen ? null : noteId} onSelect={() => { setDirectoryView('tree'); setDirectoryOpen(true) }} onOpenGraph={openGraph} graphActive={directoryOpen && directoryView === 'graph'} onOpen={page => void showPage(page)} onTalk={beginTalk} query={query} onQuery={setQuery} onCreateChild={page => { setQuery(''); void createPage(page.noteId) }} onCreate={() => void createPage()} pending={opening} actions={actions} archived={archived} onArchivedChange={value => { setArchived(value); setQuery('') }} /></div>
       </aside>
       {sidebarCollapsed && activeNotebook ? <div className="survey-item-actions"><button className="survey-icon-button" aria-label="Show notebook directory" onClick={() => { setDirectoryView('tree'); setDirectoryOpen(true) }}><NotebookIcon size={14} /></button><button type="button" className="survey-icon-button recall-collapsed-graph" aria-label="Notebook graph" title="Notebook graph" aria-pressed={directoryOpen && directoryView === 'graph'} onClick={openGraph}><RelationshipsIcon size={15} /></button>{actions}<button className="survey-icon-button" aria-label="New page" disabled={opening} onClick={() => void createPage()}><ThemeActionCreateNoteIcon size={14} /></button></div> : null}
-      <div ref={resizeHandle} className="survey-width-handle" role="separator" tabIndex={0} aria-label="Resize Recall items" title="Drag to resize Recall items · Double-click or Enter to reset" hidden={sidebarCollapsed || navigationStacked} aria-orientation="vertical" aria-valuemin={minWidth} aria-valuemax={maxWidth} aria-valuenow={effectiveWidth} onMouseDown={onResizeStart} onDoubleClick={onResizeReset} onKeyDown={event => { if (event.key === 'Enter') { onResizeReset(event); return }; const next = event.key === 'Home' ? minWidth : event.key === 'End' ? maxWidth : event.key === 'ArrowLeft' ? effectiveWidth - 16 : event.key === 'ArrowRight' ? effectiveWidth + 16 : null; if (next === null) return; event.preventDefault(); setSidebarWidth(next) }} />
+      <SidebarResizeHandle ref={resizeHandle} className="survey-width-handle" aria-controls={sidebarId}
+        aria-label="Resize Recall items" title="Drag to resize Recall items · Double-click or Enter to reset"
+        hidden={sidebarCollapsed || navigationStacked} minWidth={minWidth} maxWidth={maxWidth} width={effectiveWidth} resizing={isResizing}
+        onWidthChange={setSidebarWidth} onResizeStart={onResizeStart} onResizeReset={onResizeReset} />
     </nav>
     <div className="survey-content"><div className="survey-page-content">
       {error ? <p className="survey-error" role="alert">{error}</p> : null}

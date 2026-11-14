@@ -340,8 +340,7 @@
 
 .project-rail-shell { position: relative; min-height: 0; container: space-navigation / inline-size; }
 .project-rail-shell > .sidebar { height: 100%; width: 100%; }
-.project-rail-width-handle { position: absolute; inset: 0 calc(-1 * var(--sp-1)) 0 auto; width: var(--sp-2); cursor: col-resize; z-index: 2; -webkit-app-region: no-drag; }
-.project-rail-width-handle:hover, .project-rail-width-handle:focus-visible, .project-rail-shell--resizing .project-rail-width-handle { background: var(--line); outline: none; }
+.project-rail-width-handle { position: absolute; inset: 0 calc(-1 * var(--sp-1)) 0 auto; width: var(--sp-2); z-index: 2; -webkit-app-region: no-drag; }
 @container space-navigation (max-width: 210px) {
   .space-mote-entry > .project-rail-entry > :is(.space-pin, .space-mote-edit) { display: none; }
 }
