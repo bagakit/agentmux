@@ -195,6 +195,8 @@ Runtime 连接反复波动或短期重试耗尽后，停止高频重试并转为
 
 - **Agent 创建中的原工作面不能被空间保存回执退回初始页。** Launcher 提交后，原 Region 保留准确 Session 与创建操作的进行中或未知状态；持久图尚未确认 Agent 绑定时，同一 Launcher 的保存回执、重读及无关空间变更不能撤回本地原创建展示，也不能重新提供同一请求的新建入口。成功创建沿原操作接回准确工作面；已确认的关闭、替换或移动仍按原空间事实生效，晚创建回执保留 Session、健康 Run 与原请求，不复活旧展示或覆盖新目标。Focus 的运行事实与工作面可定位性分别确认，不能以条目仍显示 Working 代签原 Region 或 Terminal 已恢复。
 
+- **Source／Outpost 恢复也先还原普通工作面，再按原 owner 接回观察。** 客户端保存的 Source locator、原 Core 空间图和私有视图用于恢复普通 Tab／Group／Region、选择与 split ratio；限定 Runtime／Space／Zone／Workspace 的显示 ID 仅是呈现投影，不是第二份业务身份或 Space Store。同一本地 Core 已确认的普通 occurrence 直接复用，不能再复制一份 Source 投影；远程 carrier 或归属未确认时才使用限定投影，资源目录无法确认时保持未知，不能造空路径或本地替代。草稿、成员输入、未决操作和最后确认投影在观察 unknown／unavailable 时原样保留，具体归属与展示规则沿[跨节点 Space 的业务状态](spaces-and-layout.md#跨节点-space-的业务状态)与[统一概念与空间寻址](spaces-and-layout.md#统一概念与空间寻址)。
+
 - **应用重启必须先恢复持久化的 Tab Group/Region 拓扑，再恢复其中的 Session 投影**。Tab、分组、Region、焦点和 split ratio 是用户工作面的 durable 索引，不能因为 Runtime 首次快照暂时为空、恢复探测超时或恢复流程报错而被写回空布局；健康 Agent 的流程故障只留下可见服务窗告示并保留原 Region。已登记的创建中 Terminal 在 Run 或创建回执尚未确认时保留原定义、位置、分割树、顺序与焦点，明确原结果未知；普通创建只有准确未应用回执才返回原配置修复入口，观察失败或回执缺失保原请求身份、不自动重复 Start；缺少原请求身份只拒绝不安全的创建重放，不能删除投影、补新 operation／Run／Session 或拿走其它健康能力。原持久工作面和必要展示资源可读即先显示，完整 Runtime／Timeline 与恢复观察沿原消费者继续；晚来事实只更新对应观察，不重新覆盖期间用户选择或未发送稿。只有 Core 明确报告 Session 已退休，才能据此移除该 Region。应用重启与机器重启都以持久化布局为索引：健康 Run 自动接回，已结束或丢失的 Run 何时续接按[《冷启动按需恢复》](#冷启动按需恢复p0-末位)执行；用户不需要先点 `Resume` 才能看到原工作面和可读记录。恢复成功沿用原 Tab/Region，Run id 可以变化，Session id 不变。
 
 - **Agent 创建后的回执使用实际位置。** 创建后布局已经变化时，回执使用实际 Region/Tab；纯布局失败不停止仍健康的 Agent，保留其 Session 并给出持续可见的说明。
