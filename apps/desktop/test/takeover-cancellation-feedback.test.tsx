@@ -252,6 +252,49 @@ it('keeps the observed cancellation effect separate from its unconfirmed storage
   expect(notice.closest('[inert]')).toBeNull()
 })
 
+it('durably cancelled feedback clears both surfaces after reading and does not return on restore', async () => {
+  const before = useAppStore.getState()
+  await render(true)
+  await openDetails()
+  await press('取消接手')
+  const item = () => dom.container.querySelector('.agent-operation-feedback__readout')
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('[data-result-settling="true"]')).toHaveLength(2))
+  expect(item()?.textContent).toContain('已取消接手')
+  expect(current().cancellation?.result).toMatchObject({ outcome: 'cancelled', diskDurability: 'confirmed' })
+  const saved = persistedAgentOperations(useAppStore.getState().agentOperations)
+  expect((saved[agentOperationKey(operation)] as Takeover).cancellation).not.toHaveProperty('settlingFeedback')
+  await act(async () => item()!.dispatchEvent(Object.assign(new Event('animationend', { bubbles: true }), { animationName: 'agent-operation-settle' })))
+  expect(document.querySelector('.agent-operation-feedback__popover')).not.toBeNull()
+  await press('关闭操作详情')
+  await vi.waitFor(() => expect(dom.container.querySelector('.agent-operation-feedback')).toBeNull())
+  expect(current().cancellation?.input).toEqual(inputCalls[0]!.input)
+  await act(async () => useAppStore.setState({ agentOperations: restoredAgentOperations(saved) }))
+  expect(dom.container.querySelector('.agent-operation-feedback')).toBeNull()
+  await act(async () => inspectAgentOperation(current()))
+  expect(inputCalls.map(call => call.method)).toEqual(['agent.takeover.cancel', 'agent.takeover.cancel.inspect'])
+  expect(current().cancellation?.result?.diskDurability).toBe('confirmed')
+  expect(dom.container.querySelector('.agent-operation-feedback')).toBeNull()
+  preserved(before)
+})
+
+it('durably cancelled feedback clears automatically after the existing finite completion animation', async () => {
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(private callback: IntersectionObserverCallback) {}
+    observe(target: Element) {
+      this.callback([{ target, isIntersecting: !target.classList.contains('agent-operation-feedback--compact') } as IntersectionObserverEntry], this as unknown as IntersectionObserver)
+    }
+    disconnect() {}
+  })
+  await render(true)
+  await press('取消接手')
+  const label = () => dom.container.querySelector('[data-result-settling="true"] .agent-operation-feedback__label')
+  await vi.waitFor(() => expect(label()).not.toBeNull())
+  await act(async () => label()!.dispatchEvent(Object.assign(new Event('animationend', { bubbles: true }), { animationName: 'agent-operation-settle' })))
+  expect(dom.container.querySelector('.agent-operation-feedback')).toBeNull()
+  expect(current().cancellation?.result?.outcome).toBe('cancelled')
+  expect(inputCalls.map(call => call.method)).toEqual(['agent.takeover.cancel'])
+})
+
 it.each(['failed', 'waiting'] as const)('a %s client checkpoint cannot block cancellation at its original Core', async mode => {
   await storeModule.checkpointAgentOperations()
   const originalDocument = await readFile(writer.path, 'utf8')

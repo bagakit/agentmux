@@ -6,6 +6,9 @@ import assert from 'node:assert/strict'
 import source from './vitest.mote-context.config.mts'
 
 const mutations: Record<string, [string, string, string]> = {
+  'settle-unknown-save': ['agent-operation.ts', "result?.outcome === 'cancelled' && result.diskDurability === 'confirmed'", "result?.outcome === 'cancelled'"],
+  'settle-keeps-row': ['AgentOperationFeedback.tsx', "operation.kind !== 'takeover' || !isDurableTakeoverCancellation(operation.cancellation?.result) || operation.cancellation?.settlingFeedback", 'Boolean(operation)'],
+  'offscreen-consumes-settlement': ['AgentOperationFeedback.tsx', "if (operation.kind === 'takeover' && operation.cancellation?.settlingFeedback && visibleFeedback.has(agentOperationKey(operation))) return", ''],
   'desktop-owner-unavailable': ['public-rpc-service.ts', "method === 'runtime.owner.identity' && !this.ports.hostedRuntime && this.ports.callOriginalCore", "method === 'runtime.owner.identity' && this.ports.hostedRuntime && this.ports.callOriginalCore"],
   'desktop-cancellation-unavailable': ['public-rpc-service.ts', 'if (this.ports.callOriginalCore) {\n          const result = await this.ports.callOriginalCore<', 'if (false && this.ports.callOriginalCore) {\n          const result = await this.ports.callOriginalCore<'],
   'unknown-write-replayed': ['session-takeover-cancellation.ts', "if (held.cancellation?.dispatch === 'unconfirmed' && !continueOriginal) return inspectTakeoverCancellation(held)", ''],

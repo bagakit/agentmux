@@ -1,6 +1,8 @@
 const assert=require('node:assert/strict'),{createHash}=require('node:crypto'),fs=require('node:fs/promises'),path=require('node:path')
 module.exports=async({win,read,until,pause,settle,click,capture,captureIntermediate,result,privateRoot,restoreOnly})=>{
- await until('actual takeover card',()=>read('window.takeoverFeedbackProof?.ready&&!!document.querySelector(".focus-context-card:has(.focus-context[data-session-id=working]) > .agent-operation-feedback")'))
+ await until('actual takeover card',()=>read(restoreOnly
+  ? 'window.takeoverFeedbackProof?.ready&&!!document.querySelector(".focus-context[data-session-id=working]")'
+  : 'window.takeoverFeedbackProof?.ready&&!!document.querySelector(".focus-context-card:has(.focus-context[data-session-id=working]) > .agent-operation-feedback")'))
  const facts=()=>read('window.takeoverFeedbackProof.facts()')
  const card='.focus-context[data-session-id="working"]'
  const area='.focus-context-card:has('+card+') > .agent-operation-feedback:not(.agent-operation-feedback--compact)'
@@ -23,7 +25,8 @@ module.exports=async({win,read,until,pause,settle,click,capture,captureIntermedi
   assert.deepEqual(current.drafts,saved.facts.drafts)
   assert.deepEqual(current.tabs,saved.facts.tabs);assert.deepEqual(current.layouts,saved.facts.layouts)
   assert.equal(current.calls.length,0)
-  await frame('restored-consumer','A second real Electron process restores the original workface, draft and exact cancellation from the original saved user document')
+  assert.equal(await read('!!document.querySelector('+JSON.stringify(area)+')'),false)
+  await frame('restored-consumer','A second real Electron process restores the original workface, draft and exact cancellation without replaying the settled row')
   await click(card);await until('restored original draft workface',()=>read('!!document.querySelector(".global-session-workspace textarea")'))
   assert.equal(await read('document.querySelector(".global-session-workspace textarea").value'),saved.facts.drafts.working)
   await frame('restored-original-draft','Restored actual ordinary Focus workface retains the original draft without opening or sending an Agent')
@@ -112,6 +115,24 @@ module.exports=async({win,read,until,pause,settle,click,capture,captureIntermedi
  await until('cancelled with unknown save ACK',()=>read('window.takeoverFeedbackProof.facts().operation.cancellation?.result?.outcome==="cancelled"'))
  for(const[w,h,theme]of samples){win.setContentSize(w,h);await read(`window.unifiedFocusProof.theme(${JSON.stringify(theme)})`);await frame('cancelled-'+w+'-'+theme,'Cancelled original takeover with distinct unconfirmed save receipt')}
  await details();await captureIntermediate('feedback-card-reopening.png','Actual positioned detail reopens without changing neighboring card height');await closeDetails()
+ // An open reader keeps the real settlement visible long enough to capture.
+ win.setContentSize(1440,900);await read('window.unifiedFocusProof.theme("dark")');await settle()
+ await click(card)
+ await until('original compact operation reader',()=>read('!!document.querySelector('+JSON.stringify(compact)+')'))
+ await click(compact)
+ await until('open compact operation reader',()=>read('!!document.querySelector('+JSON.stringify(popup)+')'))
+ await read('window.takeoverFeedbackProof.observe("cancelled","confirmed")')
+ await press('检查取消结果',popup)
+ await until('durably confirmed cancellation',()=>read('!!document.querySelector('+JSON.stringify(area+' [data-result-settling="true"]')+')'))
+ await captureIntermediate('feedback-settled-confirmation.png','The exact cancelled workface briefly acknowledges durable cancellation')
+ await closeDetails()
+ await click('[aria-label="Close Focus workspace"]')
+ await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseMoved',x:120,y:40})
+ await until('durable cancellation row clears',()=>read('!document.querySelector('+JSON.stringify(area)+')'))
+ for(const[w,h,theme]of samples){win.setContentSize(w,h);await read(`window.unifiedFocusProof.theme(${JSON.stringify(theme)})`);await frame('dismissed-'+w+'-'+theme,'Cancelled row clears while the original Agent and adjacent actions remain')}
+ await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]})
+ await frame('dismissed-reduced-motion','Completed cancellation remains cleared with reduced motion')
+ await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[]})
  const savedState=await read('window.takeoverFeedbackProof.checkpoint()'),savedFacts=await facts();result.consumerCheckpoint={savedUserStateSHA256:createHash('sha256').update(savedState).digest('hex'),operation:savedFacts.operation,tabs:savedFacts.tabs,layouts:savedFacts.layouts,drafts:savedFacts.drafts};await fs.writeFile(path.join(privateRoot,'original-consumer-state.json'),JSON.stringify({pid:process.pid,serialized:savedState,facts:savedFacts}))
  // A separate alternative of the same unknown source checkpoint reports a created
  // Agent. A confirmed cancellation is never treated as subsequently created.
