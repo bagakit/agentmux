@@ -258,7 +258,7 @@ Settings 中的当前分区标题属于工具工作面的区块 header，使用�
 | 错误／未确认 | 沿原字段、保存区或服务窗显示准确范围；字段没有无效事实时不标 `aria-invalid`。保原值、草稿、已确认进度及恢复入口，不用颜色、toast 消失或忙态冒充错误已解除 |
 | 只读 | 原值可读、可选择与复制的内容继续可达；只读与禁用、权限不足分别表达，不用外观推断可编辑资格 |
 
-逐态核对从原实现开始：[按钮](../../../packages/client-ui/src/styles/buttons.css)、[输入](../../../packages/client-ui/src/input/input.css)、[原生选择控件](../../../packages/client-ui/src/styles/native-controls.css)、[菜单](../../../apps/desktop/src/renderer/src/styles/context-menu.css)与[共享 Modal](../../../packages/client-ui/src/components/Modal.tsx)。`Button`／`IconButton` 不自动推导忙碌或操作资格，[FormRow](../../../packages/client-ui/src/components/FormRow.tsx)只关联原控件、标签与说明，控件的值、校验、保存和恢复留在原调用者。
+逐态核对从原实现开始：[按钮](../../../packages/client-ui/src/styles/buttons.css)、[输入](../../../packages/client-ui/src/input/input.css)、[原生选择控件](../../../packages/client-ui/src/styles/native-controls.css)、[菜单](../../../apps/desktop/src/renderer/src/styles/context-menu.css)与[共享 Modal](../../../packages/client-ui/src/components/Modal.tsx)。`Button`／`IconButton` 不自动推导忙碌或操作资格，[FormRow](../../../packages/client-ui/src/components/FormRow.tsx)关联原控件、标签、说明和字段反馈，控件的值、校验、保存和恢复留在原调用者。
 
 补充规则：
 

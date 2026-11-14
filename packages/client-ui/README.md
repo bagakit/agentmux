@@ -18,6 +18,7 @@ For example, a host can label a field and submit its current value. The host sup
 ```tsx
 import { useState } from 'react'
 import { Button } from '@agentmux/client-ui/components/Button'
+import { FormRow } from '@agentmux/client-ui/components/FormRow'
 import { TextInput } from '@agentmux/client-ui/input'
 import '@agentmux/client-ui/input/styles.css'
 import '@agentmux/client-ui/styles/buttons.css'
@@ -29,7 +30,9 @@ export function DraftForm({ onSave }: { onSave: (text: string) => void }) {
       event.preventDefault()
       onSave(draft)
     }}>
-      <label>Draft <TextInput value={draft} onChange={event => setDraft(event.currentTarget.value)} /></label>
+      <FormRow layout="stacked" label="Draft" description="You can edit the draft after saving.">
+        {field => <TextInput {...field} value={draft} onChange={event => setDraft(event.currentTarget.value)} />}
+      </FormRow>
       <Button type="submit">Save draft</Button>
     </form>
   )
@@ -195,7 +198,7 @@ Two hosts can use this same field and footer with different drafts, error handli
 
 ### Labels and single fields
 
-`FormRow` from `@agentmux/client-ui/components/FormRow` renders one native label with a separate title and description. Its child callback supplies `id`, `aria-labelledby` and `aria-describedby`; spread them onto the native control. The whole row is the label, and only the title supplies the accessible name. `controlId` keeps an explicit field ID when needed. The caller keeps the input's ref, name, value, checked state, handlers and disabled state. FormRow has no field state or validation model, clones no control and adds no styles; pass the surface's row class. Whole-save errors stay with the caller's save feedback.
+Spread the callback attributes from `FormRow` onto one native control. The label supplies the accessible name, and `description` and `error` supply its descriptions when present. Set `invalid` when the caller confirms the field's value is invalid. Use `layout="stacked"` with the shared input stylesheet for a text field or short editor. The default inline layout fits a checkbox and its label. Keep whole-save feedback with the action group, and let the caller own the input value, validation and persistence.
 
 `src/input/` is the shared native field module: import `TextInput`, `Textarea` and `InputGroup` from `@agentmux/client-ui/input`, plus `@agentmux/client-ui/input/styles.css` when not using the full stylesheet. Each component forwards native props and React 19 refs; callers keep labels, values, validation and actions. `InputGroup` is the field container with one focus boundary, not an extra wrapper or form-state provider. Surface classes keep their own geometry.
 
