@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Handle, Position, ReactFlow, type Edge, type Node, type NodeProps, type ReactFlowInstance, type Viewport } from '@xyflow/react'
+import { Handle, Position, ReactFlow, useNodesState, type Edge, type Node, type NodeProps, type ReactFlowInstance, type Viewport } from '@xyflow/react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { HostConfig } from '../../../../shared/contracts'
 import type { HostCheckState } from '../../store'
@@ -92,11 +92,22 @@ export const HostTopology = memo(function HostTopology({ items, selectedId, onSe
     const start = Math.max(0, Math.min(selected - 1, items.length - 3))
     return [...(start === 0 ? [{ id: 'entry' }] : []), ...items.slice(start, start + 3).map(item => ({ id: `host:${item.host.id}` }))]
   }, [topologyKey])
-  const nodes: TopologyNode[] = useMemo(() => [
+  const projectedNodes: TopologyNode[] = useMemo(() => [
     { id: 'entry', type: 'entry', position: { x: 0, y: Math.min(1, Math.max(0, items.length - 1)) * 272 + 28 }, data: { label: 'AgentMux' }, selectable: false },
     ...items.map((item, index): HostNode => ({ id: `host:${item.host.id}`, type: 'host',
       position: { x: 310, y: index * 272 + 28 }, data: { ...item, selected: item.host.id === selectedId, onSelect } }))
   ], [items, selectedId, onSelect])
+  const [nodes, setNodes, onNodesChange] = useNodesState<TopologyNode>(projectedNodes)
+  useEffect(() => {
+    setNodes(previous => {
+      const byId = new Map(previous.map(node => [node.id, node]))
+      // Controlled nodes retain the library's measured geometry when their source data changes.
+      return projectedNodes.map(node => {
+        const measured = byId.get(node.id)?.measured
+        return { ...node, ...(measured ? { measured } : {}) }
+      })
+    })
+  }, [projectedNodes, setNodes])
   const edges = useMemo<Edge[]>(() => items.map(item => ({ id: `route:${item.host.id}`, source: 'entry', target: `host:${item.host.id}`,
     type: 'smoothstep', label: hostTransportLabel(item.host), selectable: false,
     className: item.host.id === selectedId ? 'remote-route remote-route--selected' : 'remote-route',
@@ -113,7 +124,7 @@ export const HostTopology = memo(function HostTopology({ items, selectedId, onSe
     <header className="remote-topology__header"><div className="remote-topology__caption"><span>HOST CONNECTIONS</span><small>{scope === 'fleet' ? 'Configured hosts' : 'One selected connection'}</small></div>
       {linkView ? <div className="remote-topology__scope" aria-label="Topology scope"><button type="button" aria-label="Fleet map" aria-pressed={scope === 'fleet'} onClick={() => changeScope('fleet')}>Fleet</button><button type="button" aria-label="Selected link" aria-pressed={scope === 'link'} onClick={() => changeScope('link')}>Selected link</button></div> : null}</header>
     {scope === 'link' && linkView ? <div className="remote-topology__link">{linkView}</div> : <>
-    <div className="remote-topology__viewport"><ReactFlow<TopologyNode, Edge> nodes={nodes} edges={edges} nodeTypes={nodeTypes}
+    <div className="remote-topology__viewport"><ReactFlow<TopologyNode, Edge> nodes={nodes} onNodesChange={onNodesChange} edges={edges} nodeTypes={nodeTypes}
       onInit={value => { instance.current = value }} {...(fleetViewport.current ? { defaultViewport: fleetViewport.current } : {})} fitView={fleetViewport.current === null} fitViewOptions={{ nodes: firstNodes, padding: .12, minZoom: .55, maxZoom: 1 }}
       nodesDraggable={false} nodesConnectable={false} nodesFocusable={false} edgesFocusable={false} edgesReconnectable={false}
       elementsSelectable={false} deleteKeyCode={null} zoomOnDoubleClick={false} minZoom={.1} maxZoom={1.4}
