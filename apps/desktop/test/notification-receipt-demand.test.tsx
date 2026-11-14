@@ -6,7 +6,7 @@ import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystem
 import { useAppStore } from '../src/renderer/src/store'
 import { useReadReceipts, useServiceNotices, type ServiceNoticeItem } from '../src/renderer/src/lib/use-service-notices'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
-import { notificationEventRows, notificationTrigger, toggleNotificationCenter, selectNotificationView, markShownNotificationsRead } from './helpers/notification-center'
+import { notificationEventAnnouncement, notificationEventRows, notificationTrigger, toggleNotificationCenter, selectNotificationView, markShownNotificationsRead } from './helpers/notification-center'
 
 const dom = composerDOM()
 beforeEach(() => useAppStore.setState({ loading: false, sessions: [], tabs: {}, notificationEvents: [], noticeReadReceipts: {},
@@ -57,7 +57,7 @@ it('updates closed announcements and read state for new history, exact receipt c
   await dom.render(<GlobalSystemNotices />)
   await act(async () => useAppStore.getState().reportError('First original failure'))
   expect(notificationTrigger(dom.container).getAttribute('aria-label')).toContain('1 unread')
-  const announcement = () => dom.container.querySelector('.global-system-notices__announcement')!
+  const announcement = () => notificationEventAnnouncement(dom.container)
   expect(announcement().textContent).toContain('First original failure')
   const first = useAppStore.getState().notificationEvents[0]!
   await act(async () => useAppStore.setState({ noticeReadReceipts: { 'global:events': { [first.id]: 'read' } } }))
@@ -84,7 +84,7 @@ it('keeps same-ID original message, summary and announcement urgency current', a
   useAppStore.getState().reportError('Original message')
   const event = useAppStore.getState().notificationEvents[0]!
   await dom.render(<GlobalSystemNotices />)
-  const announcement = () => dom.container.querySelector('.global-system-notices__announcement')!
+  const announcement = () => notificationEventAnnouncement(dom.container)
   await act(async () => useAppStore.setState({ notificationEvents: [{ ...event, message: 'Updated original message' }] }))
   expect(announcement().textContent).toContain('Updated original message')
   await act(async () => useAppStore.setState({ notificationEvents: [{ ...event, message: 'Updated original message', context: { kind: 'agent-broken', summary: 'Original urgent summary' } }] }))

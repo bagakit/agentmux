@@ -55,3 +55,9 @@ export function notificationTrigger(container: ParentNode) {
   expect(trigger, 'The window notification entry must be mounted').not.toBeNull()
   return trigger!
 }
+
+export function notificationEventAnnouncement(container: ParentNode) {
+  const announcement = container.querySelector('.global-system-notices__announcement:not([data-mote-heartbeat-announcement])')
+  expect(announcement, 'The original event announcement must be mounted').not.toBeNull()
+  return announcement!
+}

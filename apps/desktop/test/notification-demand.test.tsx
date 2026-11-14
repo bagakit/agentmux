@@ -5,10 +5,12 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
 import { NotificationItem } from '../src/renderer/src/components/NotificationItem'
 import { api } from '../src/renderer/src/lib/api'
+import { observeNotifications } from '../src/renderer/src/lib/notification-observation'
+import { runServiceProjection } from '../src/renderer/src/lib/run-service-projection'
 import { useAppStore } from '../src/renderer/src/store'
 import * as notificationStore from '../src/renderer/src/store'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
-import { notificationEventRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails, selectNotificationView } from './helpers/notification-center'
+import { notificationEventAnnouncement, notificationEventRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails, selectNotificationView } from './helpers/notification-center'
 
 const dom = composerDOM(), prefix = 'NOTIFICATION_COST '
 beforeEach(() => useAppStore.setState({ loading: false, sessions: [], tabs: {}, notificationEvents: [], noticeReadReceipts: {},
@@ -98,7 +100,7 @@ it.each([[1, 262144], [32, 1024]])('keeps closed history out of presentation and
     expect(dom.container.querySelector('.notification-item__original')).toBeNull()
     expect(measured.calls.points).toBeGreaterThan(0)
     expect(measured.calls.points).toBeLessThanOrEqual(101)
-    expect(dom.container.querySelector('.global-system-notices__announcement')!.textContent).toContain(prefix)
+    expect(notificationEventAnnouncement(dom.container).textContent).toContain(prefix)
     measured.calls.points = 0
     await act(async () => useAppStore.getState().applyEvent({ type: 'core', hostId: 'local', event: {
       type: 'agent-status', agentSessionId: session.id, state: 'working', evidence: { source: 'native-hook', observedAt: Date.now() }
@@ -123,6 +125,50 @@ it.each([[1, 262144], [32, 1024]])('keeps closed history out of presentation and
   } finally { measured.restore() }
 })
 
+it.each([2, 32])('keeps full notice history and unchanged Session scans outside %i live summaries', async count => {
+  const sessions = Array.from({ length: count }, (_, index) => ({ ...composerSession(`notice-owner-${index}`),
+    status: { state: 'working' as const, source: 'native-hook' as const, observedAt: Date.now() } }))
+  useAppStore.setState({ sessions })
+  for (let index = 0; index < count; index++) useAppStore.getState().reportError(`Original observation ${index}`)
+  const records = useAppStore.getState().notificationEvents.map(record => ({ ...record }))
+  const readHistory = vi.fn(() => [{ observedAt: Date.now(), message: 'Earlier original observation' }])
+  for (const record of records) Object.defineProperty(record, 'previousObservations', { get: readHistory })
+  useAppStore.setState({ notificationEvents: records })
+  const sessionReads = vi.spyOn(runServiceProjection, 'read')
+  try {
+    await dom.render(<GlobalSystemNotices />)
+    expect(sessionReads.mock.calls.length).toBeGreaterThanOrEqual(count)
+    sessionReads.mockClear()
+    expect(readHistory).not.toHaveBeenCalled()
+    expect(notificationTrigger(dom.container).getAttribute('aria-label')).toContain(`${count} recent events`)
+
+    await act(async () => useAppStore.setState({ environmentWarning: 'The original shell settings need attention.' }))
+    expect(notificationTrigger(dom.container).getAttribute('aria-label')).toContain('1 current')
+    expect(sessionReads).not.toHaveBeenCalled()
+    expect(readHistory).not.toHaveBeenCalled()
+    const current = observeNotifications({ operation: 'inspect.notifications', includeRaw: false, maxBytes: 32768,
+      target: { domain: 'client.notifications', hostId: 'local', list: { section: 'current' } } })
+    expect(current).toMatchObject({ availability: 'found', data: { total: 1, items: [{ section: 'current' }] } })
+    expect(readHistory).not.toHaveBeenCalled()
+    await toggleNotificationCenter(dom.container, 'open')
+    expect(dom.container.textContent).toContain('Local shell environment is incomplete')
+    expect(readHistory).not.toHaveBeenCalled()
+    await selectNotificationView(dom.container, 'history')
+    const rows = notificationEventRows(dom.container)
+    expect(rows).toHaveLength(count)
+    expect(readHistory).not.toHaveBeenCalled()
+    await toggleNotificationDetails(rows[0]!)
+    expect(readHistory).toHaveBeenCalled()
+    expect(rows[0]!.textContent).toContain('Earlier original observation')
+
+    sessionReads.mockClear()
+    await act(async () => useAppStore.setState({ sessions: sessions.slice(1) }))
+    expect(sessionReads.mock.calls.length).toBeGreaterThanOrEqual(count - 1)
+    expect(useAppStore.getState().notificationEvents).toBe(records)
+    expect(notificationTrigger(dom.container).getAttribute('aria-label')).toContain(`${count} recent events`)
+  } finally { sessionReads.mockRestore() }
+})
+
 it('keeps children lazy until the original native Details opens', async () => {
   const content = vi.fn(() => <p>Complete original child body</p>)
   const Content = content
@@ -142,7 +188,7 @@ it('bounds explicit summary announcements, reveals the complete original summary
   await act(async () => useAppStore.getState().reportError(message, { kind: 'indeterminate', summary }))
   const records = useAppStore.getState().notificationEvents
   await dom.render(<GlobalSystemNotices />)
-  expect(dom.container.querySelector('.global-system-notices__announcement')!.textContent).toBe(
+  expect(notificationEventAnnouncement(dom.container).textContent).toBe(
     `${Array.from(summary).slice(0, 100).join('')}. Review system notifications for details.`)
   await toggleNotificationCenter(dom.container, 'open'); await selectNotificationView(dom.container, 'history')
   const row = notificationEventRows(dom.container)[0]!
