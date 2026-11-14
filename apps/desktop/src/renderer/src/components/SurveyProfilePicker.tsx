@@ -41,7 +41,7 @@ export function SurveyProfilePicker({ value, profiles, collapsed, active = true,
   const nameCounts = new Map<string, number>()
   for (const profile of profiles.profiles ?? []) nameCounts.set(profile.label, (nameCounts.get(profile.label) ?? 0) + 1)
   const label = shown?.label ?? (value.kind === 'default' ? 'Default environment' : 'Unavailable environment')
-  const detail = unknown ? 'The saved environment view is unconfirmed. Choose an environment for a new page.' : value.kind === 'profile' ? `${label}\nProfile ID: ${value.profileId}` : `${label}\nUses Main’s current persistent default environment.`
+  const detail = unknown ? 'The saved environment view is unconfirmed. Choose an environment for a new page.' : value.kind === 'profile' ? `${label}\nProfile ID: ${value.profileId}` : `${label}\nUses the persistent default sign-in environment.`
   const option = (profile: NonNullable<BrowserProfilesState['profiles']>[number], optionValue: string): SelectionOption => ({
     value: optionValue,
     label: profile.label + ((nameCounts.get(profile.label) ?? 0) > 1 ? ` · ${profile.id.slice(0, 6)}` : ''),
