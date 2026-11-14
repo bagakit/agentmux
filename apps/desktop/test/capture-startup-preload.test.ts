@@ -3,7 +3,7 @@ import type { CaptureSurfaceApi, CaptureSurfaceEvent, CaptureSurfaceInput } from
 
 const wire = vi.hoisted(() => ({ api: null as CaptureSurfaceApi | null, invoke: vi.fn(), events: new Map<string, (...args: any[]) => void>() }))
 vi.mock('electron', () => ({
-  contextBridge: { exposeInMainWorld: (name: string, api: CaptureSurfaceApi) => { expect(name).toBe('captureSurface'); wire.api = api } },
+  contextBridge: { exposeInMainWorld: (name: string, api: CaptureSurfaceApi) => { expect(['captureSurface', 'captureSequence']).toContain(name); if (name === 'captureSurface') wire.api = api } },
   ipcRenderer: {
     invoke: wire.invoke,
     on: (name: string, listener: (...args: any[]) => void) => wire.events.set(name, listener),

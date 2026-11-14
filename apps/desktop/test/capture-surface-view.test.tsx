@@ -52,7 +52,7 @@ async function mount(owned: boolean, background: CaptureBackground = 'included',
   let listener: ((event: CaptureSurfaceEvent) => void) | undefined
   const api = { load: vi.fn(), switchBackground: vi.fn(async () => {}), presented: vi.fn(async () => {}), select: vi.fn(async () => owned), onEvent: (receive: (event: CaptureSurfaceEvent) => void) => { listener = receive; return () => {} },
     finish: vi.fn(async () => ({ status: 'completed' as const })), pin: vi.fn(), savePng: vi.fn(async () => ({ status: 'cancelled' as const })), copyText: vi.fn(),
-    expand: vi.fn(async () => {}), cancel: vi.fn(async () => {}) } satisfies CaptureSurfaceApi
+    source: vi.fn(), sequence: vi.fn(), liveInput: vi.fn(), expand: vi.fn(async () => {}), cancel: vi.fn(async () => {}) } satisfies CaptureSurfaceApi
   const initialImage = loaded ? image : { ...image, dataUrl: 'data:image/png;base64,' }
   const input: CaptureSurfaceInput = { requestId: 'original-request', revision: 1, displayId: 1, frame: { x: 0, y: 0, width: 800, height: 500 }, scale: 2, safeTop: 0,
     attachToDraft: false, expandable: true, theme: { status: 'unavailable', message: 'Private fixture appearance' }, background, backgrounds: {
