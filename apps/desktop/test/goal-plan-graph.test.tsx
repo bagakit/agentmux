@@ -160,17 +160,26 @@ describe('Goal plan graph', () => {
     expect(graph()!.querySelector('[data-goal-plan-node="release"] .goal-plan-node__depends')!.textContent).toBe('Depends on · Node ui, Node docs')
     const note = graph()!.querySelector('[data-goal-plan-states-unavailable]')!.textContent
     expect(note).toContain('The plan itself is unchanged')
-    expect(note).toContain("update that Host to see each node's state")
+    expect(note).toContain('Read this Goal again; update that Host')
     await act(async () => useAppStore.setState({ selectedDemandId: null }))
     expect(dom.container.querySelector('[data-demand-id="goal"]')).not.toBeNull()
     expect(dom.container.querySelector('[data-demand-id="goal"] [data-goal-plan-ring]')).toBeNull()
   })
 
-  it('makes the missing execution plan discoverable without inventing task nodes', async () => {
-    seed(goal({}))
+  it.each([alignment, undefined])('leads with the real Goal starting point without inventing task nodes (alignment %s)', async (alignment) => {
+    const record = goal({ description: '# The original outcome\n\nKeep the same goal and original words.' })
+    if (!alignment) delete record.alignment
+    seed(record)
     await dom.render(<GlobalBoardSurface />)
     expect(dom.container.querySelector('.goals-detail')).not.toBeNull()
+    expect(graph()).not.toBeNull()
     expect(graph()!.querySelector('[data-goal-plan-node]')).toBeNull()
+    expect(dom.container.querySelector('.goals-detail__main')!.firstElementChild).toBe(graph())
+    const origin = graph()!.querySelector('[data-goal-plan-origin="goal"]')!
+    expect(origin).not.toBeNull()
+    expect(origin.getAttribute('aria-label')).toBe('Goal starting point')
+    expect(origin.textContent).toContain('Ship the plan')
+    expect(graph()!.querySelector('[data-goal-plan-progress]')).toBeNull()
     expect([...graph()!.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Choose Supervisor to plan', 'Open goal discussion'])
     expect(graph()!.querySelector('h2')!.textContent).toContain('Execution plan')
     expect(graph()!.textContent).toContain('Tasks and dependencies')
