@@ -10,6 +10,16 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const read = path => JSON.parse(readFileSync(path, 'utf8'))
 const desktopScenes = ['focus-form-menu', 'focus-information-menu', 'focus-lod-menu', 'projects-executor-menu', 'projects-executor-selected', 'routes-device-menu', 'routes-device-tail', 'routes-edge-menu']
 const desktopImages = [...desktopScenes.map(scene => `${scene}-light.png`), ...desktopScenes.map(scene => `${scene}-dark.png`)].sort()
+const requiredDriverSources = section => [
+  'apps/desktop/scripts/capture-ui-selection-field.mjs',
+  `apps/desktop/scripts/fixtures/ui-selection-field/${section}-main.cjs`,
+  'apps/desktop/scripts/fixtures/settings-connections/native-input.cjs',
+  'apps/desktop/scripts/fixtures/settings-connections/environment.mjs',
+  'apps/desktop/scripts/fixtures/settings-resource-library/environment.mjs',
+  'apps/desktop/scripts/candidate-package-resolve.mjs',
+  'apps/desktop/scripts/probe-process.mjs',
+  'apps/desktop/scripts/radix-overlay-aliases.ts',
+]
 
 function sourceIdentity(sources) {
   return sha(JSON.stringify(Object.fromEntries(Object.entries(sources).sort(([a], [b]) => a.localeCompare(b)))))
@@ -28,6 +38,9 @@ function validate(review, directory, mode) {
   assert.equal(capture.execution?.exitCode, 0, 'Capture process must exit successfully')
   const captureSources = capture.sources ?? {}
   assert.ok(Object.keys(captureSources).length > 0, 'Capture must bind a nonempty source manifest')
+  const section = mode === 'settings' ? 'node' : mode === 'desktop' || mode === 'final' ? 'desktop' : undefined
+  for (const file of section ? requiredDriverSources(section) : []) assert.ok(captureSources[file], `Capture required source is missing: ${file}`)
+  assert.equal(sourceIdentity(captureSources), capture.sourceIdentity, 'Capture source identity must match its own manifest')
   const currentSources = Object.fromEntries(Object.keys(captureSources).map(file => [file, sha(readFileSync(resolve(root, file)))]))
   assert.equal(sourceIdentity(currentSources), capture.sourceIdentity, 'Capture source identity must match the current candidate')
   const receiptDirectory = dirname(receiptPath)
@@ -66,16 +79,16 @@ function selfTest() {
   const sourceFile = join(directory, 'fixture-input.ts')
   writeFileSync(sourceFile, 'controlled-source')
   const source = { [relative(root, sourceFile)]: sha(readFileSync(sourceFile)) }
-  const sourceIdentity = sha(JSON.stringify(source))
+  const identity = sha(JSON.stringify(source))
   const receiptPath = join(directory, 'capture.json')
-  writeFileSync(receiptPath, JSON.stringify({ completed: true, execution: { exitCode: 0 }, sourceIdentity, sources: source, images: [{ path: 'node.png', sha256: sha(readFileSync(image)) }] }))
+  writeFileSync(receiptPath, JSON.stringify({ completed: true, execution: { exitCode: 0 }, sourceIdentity: identity, sources: source, images: [{ path: 'node.png', sha256: sha(readFileSync(image)) }] }))
   const receiptSHA = sha(readFileSync(receiptPath))
   const review = {
     schema: 'agentmux.ui-selection-visual-review.v1', reviewer: 'independent-ui-reviewer', verdict: 'approved', mustFix: [], unconfirmed: ['controlled fixture only'],
-    sourceIdentity, captureReceipt: { path: 'capture.json', sha256: receiptSHA }, sourceHashes: source,
+    sourceIdentity: identity, captureReceipt: { path: 'capture.json', sha256: receiptSHA }, sourceHashes: source,
     actualViews: ['node.png'], images: [{ path: 'node.png', sha256: sha(readFileSync(image)), conclusion: 'Actual field and menu are readable' }],
   }
-  assert.deepEqual(validate(review, directory), { reviewer: 'independent-ui-reviewer', images: 1, sourceIdentity })
+  assert.deepEqual(validate(review, directory), { reviewer: 'independent-ui-reviewer', images: 1, sourceIdentity: identity })
   const declaredHashes = review.sourceHashes
   review.sourceHashes = {}
   writeFileSync(sourceFile, 'changed-source')
@@ -90,6 +103,19 @@ function selfTest() {
   assert.throws(() => validate(review, directory), /Capture PNG must match review/)
   writeFileSync(image, Buffer.from('controlled-png-content'))
   review.images[0].sha256 = sha(readFileSync(image))
+  const driverReceiptPath = join(directory, 'driver-capture.json')
+  const driverSources = Object.fromEntries([...requiredDriverSources('node'), relative(root, sourceFile)].map(file => [file, sha(readFileSync(resolve(root, file)))]))
+  const driverIdentity = sourceIdentity(driverSources)
+  const driverReceipt = { completed: true, execution: { exitCode: 0 }, sourceIdentity: driverIdentity, sources: driverSources, images: [{ path: 'node.png', sha256: sha(readFileSync(image)) }] }
+  writeFileSync(driverReceiptPath, JSON.stringify(driverReceipt))
+  const driverReview = { ...review, sourceIdentity: driverIdentity, sourceHashes: {}, captureReceipt: { path: 'driver-capture.json', sha256: sha(readFileSync(driverReceiptPath)) } }
+  assert.deepEqual(validate(driverReview, directory, 'settings'), { reviewer: 'independent-ui-reviewer', images: 1, sourceIdentity: driverIdentity })
+  delete driverReceipt.sources['apps/desktop/scripts/fixtures/settings-connections/native-input.cjs']
+  driverReceipt.sourceIdentity = sourceIdentity(driverReceipt.sources)
+  writeFileSync(driverReceiptPath, JSON.stringify(driverReceipt))
+  driverReview.sourceIdentity = driverReceipt.sourceIdentity
+  driverReview.captureReceipt.sha256 = sha(readFileSync(driverReceiptPath))
+  assert.throws(() => validate(driverReview, directory, 'settings'), /Capture required source/)
   review.actualViews = []
   assert.throws(() => validate(review, directory), /Every declared image must be actually viewed/)
   const nested = join(directory, 'nested')
@@ -97,9 +123,9 @@ function selfTest() {
   const nestedImage = join(nested, 'node.png')
   writeFileSync(nestedImage, Buffer.from('controlled-png-content'))
   const nestedReceiptPath = join(nested, 'capture.json')
-  writeFileSync(nestedReceiptPath, JSON.stringify({ completed: true, execution: { exitCode: 0 }, sourceIdentity, sources: source, images: [{ path: 'node.png', sha256: sha(readFileSync(nestedImage)) }] }))
+  writeFileSync(nestedReceiptPath, JSON.stringify({ completed: true, execution: { exitCode: 0 }, sourceIdentity: identity, sources: source, images: [{ path: 'node.png', sha256: sha(readFileSync(nestedImage)) }] }))
   const nestedReview = { ...review, actualViews: ['node.png'], captureReceipt: { path: 'nested/capture.json', sha256: sha(readFileSync(nestedReceiptPath)) }, images: [{ path: 'node.png', sha256: sha(readFileSync(nestedImage)), conclusion: 'Nested receipt owns its image root' }] }
-  assert.deepEqual(validate(nestedReview, directory), { reviewer: 'independent-ui-reviewer', images: 1, sourceIdentity })
+  assert.deepEqual(validate(nestedReview, directory), { reviewer: 'independent-ui-reviewer', images: 1, sourceIdentity: identity })
   return { selfTest: 'passed', directory: relative(root, directory) }
 }
 
