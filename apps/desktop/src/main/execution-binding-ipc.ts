@@ -33,8 +33,9 @@ export function registerExecutionBindingIpc(args: {
   args.handle('sessions:resolveExecutionBinding', (_event, input) => resolveOriginalExecutionBinding(input, {
     inspect: bindingId => args.bindings.inspect(bindingId), coordinatorTarget: args.coordinatorTarget, assertCoordinator: args.coordinator
   }))
-  args.handle('sessions:executionBinding', async (event, target) => {
-    return args.bindings.inspect(await binding(target))
+  args.handle('sessions:executionBinding', async (event, target, view) => {
+    if (view !== undefined && view !== 'association') throw new AgentMuxError('Choose the original binding or its association witness view.', 'INVALID_CONTROL_REQUEST')
+    return args.bindings.inspect(await binding(target), view)
   })
   args.handle('sessions:rejoinExecutionBinding', (event, bindingId) => {
     return args.bindings.rejoin(id(bindingId))

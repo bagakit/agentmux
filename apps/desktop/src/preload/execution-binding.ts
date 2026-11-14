@@ -6,7 +6,8 @@ import { unwrapSessionAgentLaunchResult, unconfirmedSessionAgentLaunch } from '.
 export function createExecutionBindingApi(ipc: Pick<IpcRenderer, 'invoke' | 'on' | 'off'>) {
   return {
     resolveExecutionBinding: (input: AgentExecutionLegacyLocator): Promise<AgentExecutionLegacyObservation | null> => ipc.invoke('sessions:resolveExecutionBinding', input),
-    executionBinding: (bindingId: string | AgentExecutionRecoveryReference): Promise<AgentExecutionInspection | null> => ipc.invoke('sessions:executionBinding', bindingId),
+    executionBinding: (bindingId: string | AgentExecutionRecoveryReference, view?: 'association'): Promise<AgentExecutionInspection | null> => view === undefined
+      ? ipc.invoke('sessions:executionBinding', bindingId) : ipc.invoke('sessions:executionBinding', bindingId, view),
     rejoinExecutionBinding: (bindingId: string): Promise<AgentExecutionInspection> => ipc.invoke('sessions:rejoinExecutionBinding', bindingId),
     async continueExecution(input: AgentExecutionRecoveryReference) {
       let result: SessionAgentLaunchResult

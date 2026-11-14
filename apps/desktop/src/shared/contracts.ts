@@ -826,6 +826,9 @@ export type AgentLaunchInput = {
   executionWorkspaceId?: string
   /** Frozen user-selected tool resource; Main verifies the exact configured Workspace. */
   toolWorkspace?: Pick<WorkspaceRecord, 'id' | 'hostId' | 'path'>
+  /** Explicit Reach: this Desktop's original Coordinator uses its own confirmed home.
+   * The tool Workspace remains on the separately pinned Source Runtime. */
+  sourceCoordinator?: { hostId: string; runtimeId: string; resourceRuntimeId: string; workingDirectory: 'device-home' }
   executorId: AgentExecutorId
   executorRevision?: string
   hostId: string
@@ -2003,7 +2006,7 @@ export type AgentMuxDesktopApi = {
     /** Current Desktop connection observations; never waits for Session membership. */
     endpointWarnings(): Promise<RuntimeEndpointWarning[]>
     resolveExecutionBinding(input: AgentExecutionLegacyLocator): Promise<AgentExecutionLegacyObservation | null>
-    executionBinding(bindingId: string | AgentExecutionRecoveryReference): Promise<import('@agentmux/core').AgentExecutionInspection | null>
+    executionBinding(bindingId: string | AgentExecutionRecoveryReference, view?: 'association'): Promise<import('@agentmux/core').AgentExecutionInspection | null>
     rejoinExecutionBinding(bindingId: string): Promise<import('@agentmux/core').AgentExecutionInspection>
     observeExecutionBinding(bindingId: string | AgentExecutionRecoveryReference, listener: (value: import('@agentmux/core').AgentExecutionInspection | null) => void, onError: (message: string) => void): () => void
     continueExecution(input: AgentExecutionRecoveryReference): Promise<AgentLaunchResult>

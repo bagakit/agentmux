@@ -1113,17 +1113,31 @@ export class RuntimeController {
     return await this.trackHostOperation(request.hostId, async () => {
       const client = await this.connectedClient(request.hostId, 'creation')
       const resource = request.toolWorkspace
+      const sourceCoordinator = request.sourceCoordinator
+      if (sourceCoordinator !== undefined && (!sourceCoordinator || typeof sourceCoordinator !== 'object' ||
+          Object.keys(sourceCoordinator).some(key => !['hostId', 'runtimeId', 'resourceRuntimeId', 'workingDirectory'].includes(key)) ||
+          sourceCoordinator.workingDirectory !== 'device-home' || sourceCoordinator.hostId !== 'local' || sourceCoordinator.hostId !== request.hostId ||
+          ![sourceCoordinator.runtimeId, sourceCoordinator.resourceRuntimeId].every(value => typeof value === 'string' && !!value && !/[\0\r\n]/u.test(value)) || !resource))
+        throw new AgentMuxError('This new Reach request requires its original local Coordinator and separate Source Runtime. Existing work is retained.', 'EXECUTION_BINDING_MISMATCH')
       if (resource) {
         if (!executionBindings || request.creationCaller || request.initialMessage || request.forkSource || request.nativeResumeSource || request.scratchTopicId) throw new AgentMuxError(
           'This explicit tool resource requires its original user-authorized creation owner.', 'EXECUTION_RESOURCE_NOT_AUTHORIZED')
         const selectedResource = config.workspaces.filter(workspace => workspace.id === resource.id)
         const selectedLaunch = config.workspaces.filter(workspace => workspace.id === request.executionWorkspaceId)
         if (selectedResource.length !== 1 || selectedResource[0]!.hostId !== resource.hostId || selectedResource[0]!.path !== resource.path ||
-            selectedLaunch.length !== 1 || selectedLaunch[0]!.hostId !== request.hostId || selectedLaunch[0]!.path !== request.workspacePath) throw new AgentMuxError(
+            !sourceCoordinator && (selectedLaunch.length !== 1 || selectedLaunch[0]!.hostId !== request.hostId || selectedLaunch[0]!.path !== request.workspacePath)) throw new AgentMuxError(
           'The original Agent or tool Workspace selection changed. Keep the original creation identity.', 'EXECUTION_BINDING_MISMATCH')
       }
+      if (sourceCoordinator) {
+        await this.assertExecutionCoordinator(sourceCoordinator)
+        const environment = await client.hostEnvironment()
+        if (this.configuredClient(sourceCoordinator.hostId) !== client || environment.homeDirectory !== request.workspacePath)
+          throw new AgentMuxError('The original Coordinator home or carrier changed. Keep this request and its project draft; no substitute directory was selected.', 'EXECUTION_BINDING_MISMATCH')
+      }
       const remoteCreation = Boolean(resource) || config.hosts.find(host => host.id === request.hostId)?.kind === 'ssh' && !request.forkSource
-      const inventory = remoteCreation ? await client.listHostExecutors() : undefined
+      const inventory = remoteCreation ? await client.listHostExecutors(sourceCoordinator ? { executorId: request.executorId } : undefined) : undefined
+      if (sourceCoordinator && inventory?.runtimeId !== sourceCoordinator.runtimeId) throw new AgentMuxError(
+        'The selected Executor belongs to a different Coordinator Runtime. The original request and draft are retained.', 'RUNTIME_OWNER_MISMATCH')
       const selected = inventory?.executors.find(executor => executor.executorId === request.executorId)
       const executor = remoteCreation ? selected : Object.hasOwn(config.executors, request.executorId) ? config.executors[request.executorId] : undefined
       if (!executor) throw new AgentMuxError(`Missing Executor on the selected Host: ${request.executorId}`, 'EXECUTOR_UNKNOWN')
@@ -1190,6 +1204,8 @@ export class RuntimeController {
           if (!agentSessionId || !createOperationId) throw new AgentMuxError(
             'The original split creation identity is unconfirmed. Its request is kept; no binding was created.', 'EXECUTION_INTENT_UNCONFIRMED')
           const resourceHost = await this.executionBindingHost(resource.hostId)
+          if (sourceCoordinator && resourceHost.runtimeId !== sourceCoordinator.resourceRuntimeId) throw new AgentMuxError(
+            'The original project Runtime changed. This request was not redirected to another Source.', 'RUNTIME_OWNER_MISMATCH')
           // Public operation IDs are opaque, not filesystem-safe binding IDs.
           // Keep the original intent intact and derive its stable private binding.
           const bindingId = originalExecutionBindingId(request.hostId, agentSessionId, createOperationId)
