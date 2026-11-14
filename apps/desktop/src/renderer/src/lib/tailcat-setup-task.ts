@@ -9,7 +9,7 @@ export type TailcatSetupFailure = { step: 'prepare-key'; code: TailcatPreparatio
 /** Explicit allowlist of nonsecret context. Host configuration and raw failures never become task payloads. */
 export function tailcatSetupContext(host: HostConfig, role: TailcatKeyRole, failure?: TailcatSetupFailure) {
   return { configuredHost: { id: host.id, label: host.label, kind: host.kind }, role,
-    settingsTarget: { section: role === 'server' ? 'network-node' : 'hosts', hostId: host.id, item: role === 'server' ? 'incoming' : 'connection' },
+    settingsTarget: { section: 'hosts', hostId: host.id, item: role === 'server' ? 'incoming' : 'connection' },
     ...(failure ? { failure: { step: failure.step, code: failure.code } } : {}),
     fields: { keyFieldFilled: Boolean(host.tailcat?.keyFile),
       privateDestinationFieldFilled: host.kind === 'ssh' && Boolean(host.tailcat?.address),

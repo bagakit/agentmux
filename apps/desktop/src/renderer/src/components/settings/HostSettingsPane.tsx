@@ -79,7 +79,8 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
     ? resource.selectedHostId : requestedHostId ?? config.hosts[0]?.id ?? null
   const setSelectedId = resource.selectHost
   const initialHost = requestedHostId ?? resource.selectedHostId
-  const [panel, setPanel] = useState<HostConnectionPanel>(() => initialHost == null ? 'overview' : 'connection')
+  const [selectedPanel, setPanel] = useState<HostConnectionPanel>(() => initialHost == null ? 'overview' : 'connection')
+  const panel = pendingHostNavigation ? navigationRequest?.field === 'resources' ? 'overview' : 'connection' : selectedPanel
   const [projectHosts, setProjectHosts] = useState<string[]>([])
   const [maintenanceHosts, setMaintenanceHosts] = useState<string[]>(() => initialHost == null ? [] : [initialHost])
   const [mode, setMode] = useState<'topology' | 'list'>('topology')
@@ -96,7 +97,8 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
     observer.observe(element)
     return () => observer.disconnect()
   }, [])
-  const [view, setView] = useState<'library' | 'editor'>(() => initialHost == null ? 'library' : 'editor')
+  const [selectedView, setView] = useState<'library' | 'editor'>(() => initialHost == null ? 'library' : 'editor')
+  const view = pendingHostNavigation ? 'editor' : selectedView
   const [filter, setFilter] = useState({ query: '', snapshot: [] as string[] })
   const [pendingEdit, setPendingEdit] = useState<{ id: string; select: boolean } | null>(null)
   const [returnFocus, setReturnFocus] = useState<{ id: string | null } | null>(null)
@@ -161,7 +163,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
       [sectionKey(id, 'service')]: true, [sectionKey(id, 'shared')]: true }))
     setView('editor')
     setFilter({ query: '', snapshot: [] })
-    setPendingEdit({ id, select: false })
+    setPendingEdit(navigationRequest.field === 'incoming' ? null : { id, select: false })
   }, [navigationRequest])
 
   useEffect(() => {
@@ -266,7 +268,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
 
   const selectedNetworkHost = hosts.find(host => host.id === selectedId)
   const selectedSavedLocal = config.hosts.find(host => host.kind === 'local' && host.id === selectedId)
-  const localConnectionVisible = active && view === 'editor' && !pendingHostNavigation && panel === 'connection' && selectedSavedLocal !== undefined && hosts.some(host => host.id === selectedSavedLocal.id && host.kind === 'local')
+  const localConnectionVisible = active && view === 'editor' && panel === 'connection' && selectedSavedLocal !== undefined && hosts.some(host => host.id === selectedSavedLocal.id && host.kind === 'local')
   return (
     <div ref={container} className="settings-pane-stack settings-resource-workbench remote-management" data-resource-view={view} data-remote-mode={showTopology ? 'topology' : 'list'} data-remote-wide={wide}
       data-settings-host={active && view === 'editor' && !pendingHostNavigation && hosts.some(host => host.id === selectedId) ? selectedId ?? undefined : undefined}>

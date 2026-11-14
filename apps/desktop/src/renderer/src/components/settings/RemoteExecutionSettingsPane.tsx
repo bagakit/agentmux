@@ -37,12 +37,18 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
   const initialSelection = initialProject ? { resourceWorkspaceId: initialProject.id, agentWorkspaceId: null } : undefined
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [view, setView] = useState<'library' | 'detail'>('library')
-  const [task, setTask] = useState<'start' | 'existing' | 'routes'>('routes')
+  const requestedTask = navigationRequest?.field === 'prepare' ? 'start' : navigationRequest?.field === 'routes' ? 'routes' : 'existing'
+  const [chosenTask, setTask] = useState<'start' | 'existing' | 'routes'>(() => navigationRequest?.field ? requestedTask : 'routes')
+  const appliedNavigation = useRef(navigationRequest)
+  const pendingNavigation = appliedNavigation.current !== navigationRequest
+  const task = active && pendingNavigation && navigationRequest?.field ? requestedTask : chosenTask
   const [routesVisited, setRoutesVisited] = useState(true)
   const [prepareVisited, setPrepareVisited] = useState(false)
   const taskId = useId()
   useLayoutEffect(() => {
-    if (!active || !navigationRequest?.field) return
+    if (!active) return
+    appliedNavigation.current = navigationRequest
+    if (!navigationRequest?.field) return
     const next = navigationRequest.field === 'prepare' ? 'start' : navigationRequest.field === 'routes' ? 'routes' : 'existing'
     setTask(next)
     if (next === 'start') setPrepareVisited(true)
@@ -116,7 +122,7 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
     </nav></div>
     <section hidden={task !== 'start'} id={`${taskId}-start`} role="tabpanel" aria-labelledby={`${taskId}-start-tab`} className="remote-execution-prepare" data-settings-field="prepare">
       <div className="remote-work-intro"><h3>A Space. An Agent. Your choice.</h3><p>Choose where the project lives and where the Agent runs, then continue in Launcher.</p></div>
-      {prepareVisited ? <AgentWorkModeSetup sourceTargets config={config} active={active && task === 'start'} initialMode={initialProject && initialProject.hostId !== referenceHostId ? 'remote-project' : 'remote-agent'} initialSelection={initialSelection} actionLabel="Open in Launcher" onApply={prepare} onOpenHost={openHost} /> : null}
+      {prepareVisited || task === 'start' ? <AgentWorkModeSetup sourceTargets config={config} active={active && task === 'start'} initialMode={initialProject && initialProject.hostId !== referenceHostId ? 'remote-project' : 'remote-agent'} initialSelection={initialSelection} actionLabel="Open in Launcher" onApply={prepare} onOpenHost={openHost} /> : null}
     </section>
     {actionError ? <p className="remote-execution-feedback" role="status">{actionError}</p> : null}
     <section hidden={task !== 'existing'} id={`${taskId}-existing`} role="tabpanel" aria-labelledby={`${taskId}-existing-tab`} className="remote-execution-bindings" data-settings-field="bindings">
@@ -142,7 +148,7 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
       </div>}
     </section>
     <section hidden={task !== 'routes'} id={`${taskId}-routes`} role="tabpanel" aria-labelledby={`${taskId}-routes-tab`} data-settings-field="routes">
-      {routesVisited ? <RemoteRoutesPane config={config} active={active && task === 'routes'} /> : null}
+      {routesVisited || task === 'routes' ? <RemoteRoutesPane config={config} active={active && task === 'routes'} /> : null}
     </section>
     <RemoteExecutionGuide active={active} />
   </div>

@@ -3,7 +3,7 @@ import * as DropdownMenu from './HoverDropdownMenu'
 import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { BrandIcon } from './BrandIcon'
-import type { SettingsNavigationRequest } from './SettingsNavigation'
+import { normalizeSettingsNavigationRequest, type SettingsNavigationRequest } from './SettingsNavigation'
 import { wasWindowOverlayDismissed } from './WindowOverlayHost'
 import { useAppStore } from '../store'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
@@ -34,6 +34,11 @@ function unmatchedChannel(request: SettingsNavigationRequest | undefined): strin
   return `No settings section manages ${application.domain} applications (${adapterId}) yet. Choose a section below; the original connection is unchanged.`
 }
 
+function sameNormalizedNavigationRequest(a: SettingsNavigationRequest | undefined, b: SettingsNavigationRequest | undefined): boolean {
+  return a === b || Boolean(a && b && a.section === b.section && a.field === b.field && a.executorId === b.executorId
+    && a.toolId === b.toolId && a.hostId === b.hostId && a.channelOrigin === b.channelOrigin && a.moteLarkOrigin === b.moteLarkOrigin)
+}
+
 function SettingsPanelView({ onClose, visible = true, initialSection = 'overview', executorId, toolId, navigationRequest, observationRef, inputPolicy = 'target' }: {
   onClose: () => void
   visible?: boolean
@@ -45,19 +50,28 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
   observationRef?: { current: { sectionId: string; visible: boolean; hostId?: string | null } | null } | undefined
 }) {
   const config = useAppStore((state) => state.config)
-  const [active, setActive] = useState<SettingsPageId>(initialSection)
+  const computedNavigationRequest = useMemo(() => navigationRequest
+    ? normalizeSettingsNavigationRequest(navigationRequest, config?.hosts ?? []) : undefined, [navigationRequest, config?.hosts])
+  const normalizedCache = useRef<{ source: SettingsNavigationRequest | undefined; result: SettingsNavigationRequest | undefined } | undefined>(undefined)
+  if (!normalizedCache.current || normalizedCache.current.source !== navigationRequest
+    || !sameNormalizedNavigationRequest(normalizedCache.current.result, computedNavigationRequest)) {
+    normalizedCache.current = { source: navigationRequest, result: computedNavigationRequest }
+  }
+  const normalizedNavigationRequest = normalizedCache.current.result
+  const normalizedInitialSection = normalizedNavigationRequest?.section ?? initialSection
+  const [active, setActive] = useState<SettingsPageId>(normalizedInitialSection)
   const [query, setQuery] = useState('')
   const searchInput = useRef<HTMLInputElement>(null)
   const opener = useRef(typeof document === 'undefined' ? null : document.activeElement)
   const opened = useRef(false)
   const [sectionMenuOpen, setSectionMenuOpen] = useState(false)
-  const [visited, setVisited] = useState<SettingsSectionId[]>(initialSection === 'overview' ? [] : [initialSection])
+  const [visited, setVisited] = useState<SettingsSectionId[]>(normalizedInitialSection === 'overview' ? [] : [normalizedInitialSection])
   const page = useRef<HTMLDivElement>(null)
-  const route = useMemo(() => ({}), [initialSection, executorId, toolId, navigationRequest])
+  const route = useMemo(() => ({}), [normalizedInitialSection, executorId, toolId, normalizedNavigationRequest])
   const searchOrigin = useRef<{ section: SettingsPageId; scrollTop: number; route: object } | null>(null)
   const restoreReading = useRef<number | null>(null)
   const [showResults, setShowResults] = useState(false)
-  const [destination, setDestination] = useState<{ section: SettingsPageId; target?: string; route: object } | null>(null)
+  const [destination, setDestination] = useState<{ section: SettingsPageId; target?: string; route: object; request: SettingsNavigationRequest } | null>(null)
   const [targetIssue, setTargetIssue] = useState('')
   const searching = query.trim().length > 0
   const preserveInput = inputPolicy === 'preserve'
@@ -101,7 +115,8 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
     setActive(section)
     setShowResults(false)
     setTargetIssue('')
-    setDestination(searching ? { section, ...(target ? { target } : {}), route } : null)
+    setDestination(searching ? { section, ...(target ? { target } : {}), route,
+      request: normalizeSettingsNavigationRequest({ section, ...(target ? { field: target } : {}) }, config?.hosts ?? []) } : null)
   }
 
   useLayoutEffect(() => {
@@ -109,10 +124,10 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
     restoreReading.current = null
     setQuery('')
     setShowResults(false)
-    setDestination(navigationRequest?.field ? { section: initialSection, target: navigationRequest.field, route } : null)
+    setDestination(normalizedNavigationRequest?.field ? { section: normalizedInitialSection, target: normalizedNavigationRequest.field, route, request: normalizedNavigationRequest } : null)
     setTargetIssue('')
-    setActive(initialSection)
-  }, [route, initialSection])
+    setActive(normalizedInitialSection)
+  }, [route, normalizedInitialSection])
   useEffect(() => {
     if (active === 'overview') return
     setVisited((current) => current.includes(active) ? current : [...current, active])
@@ -197,10 +212,12 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
   const renderPane = (pane: SettingsSectionId) => {
     const Pane = settingsModules.find((module) => module.id === pane)!.Pane
     const paneVisible = visible && active === pane && !(searching && showResults)
+    const paneNavigationRequest = destination?.route === route && destination.section === pane ? destination.request
+      : normalizedNavigationRequest?.section === pane ? normalizedNavigationRequest : undefined
     return <div key={pane} className="settings-content__scroll" data-settings-pane={pane} hidden={!paneVisible} inert={!paneVisible}>
       {paneVisible && searching ? <div className="settings-search-return"><button type="button" className="small-button" onClick={() => { setShowResults(true); setDestination(null); setTargetIssue('') }}>Search results</button><span>“{query}”</span>{targetIssue ? <span role="status">{targetIssue}</span> : null}</div>
         : paneVisible && targetIssue ? <p className="settings-target-issue" role="status" data-settings-target-issue>{targetIssue}</p> : null}
-      <Pane config={config} onClose={onClose} onNavigate={chooseSection} active={paneVisible} executorId={executorId} toolId={toolId} navigationRequest={navigationRequest?.section === pane ? navigationRequest : undefined} />
+      <Pane config={config} onClose={onClose} onNavigate={chooseSection} active={paneVisible} executorId={executorId} toolId={toolId} navigationRequest={paneNavigationRequest} />
     </div>
   }
 
@@ -241,7 +258,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
         <SettingsSidebarNavigation groups={navGroups} selected={showResults ? null : active} activeGroup={currentSection?.group}
-          navigationGroup={settingsModules.find(candidate => candidate.id === initialSection)?.group}
+          navigationGroup={settingsModules.find(candidate => candidate.id === normalizedInitialSection)?.group}
           searching={searching} visible={visible} navigationKey={route} onOpen={section => chooseSection(section as SettingsPageId)} />
       </aside>
       {/* The open pane names itself, so a wide resource pane can bring the page header out to its own gutter. */}
@@ -261,9 +278,9 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
         </header>
         {searching && showResults ? <SettingsSearchResults results={searchResults} query={query} onChoose={chooseSection} /> : null}
         {active === 'overview' && !(searching && showResults) ? <SettingsOverviewPane config={config} groups={overviewGroups} onOpen={chooseSection} active={visible} notice={unmatchedChannel(navigationRequest)} /> : null}
-        {visited.filter(pane => pane !== 'goals' && pane !== 'prompts').map(renderPane)}
+        {visited.map(pane => pane !== 'goals' && pane !== 'prompts' ? renderPane(pane) : null)}
         <GoalsPromptDraftProvider config={config} enabled={active === 'goals' || active === 'prompts' || visited.includes('goals') || visited.includes('prompts')}>
-          {visited.filter(pane => pane === 'goals' || pane === 'prompts').map(renderPane)}
+          {visited.map(pane => pane === 'goals' || pane === 'prompts' ? renderPane(pane) : null)}
         </GoalsPromptDraftProvider>
       </main>
     </div>

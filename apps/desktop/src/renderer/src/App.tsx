@@ -7,7 +7,7 @@ import { workspaceZoneContext } from './lib/workspace-zone-context'
 import { observeNotebookLibrary } from './lib/notebook-library'
 import { observeLastSeenBrowserFavicons } from './lib/browser-last-seen-favicons'
 import { ExecutorIdentityContext } from './components/AgentAvatar'
-import { SettingsNavigation, type SettingsNavigationRequest, type MoteLarkSettingsOrigin, type ChannelSettingsOrigin } from './components/SettingsNavigation'
+import { SettingsNavigation, normalizeSettingsNavigationRequest, type SettingsNavigationRequest, type MoteLarkSettingsOrigin, type ChannelSettingsOrigin } from './components/SettingsNavigation'
 import { settingsCatalog, settingsModules } from './components/settings/settings-modules'
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
@@ -128,7 +128,7 @@ function DesktopApp() {
   const settingsObservation = useRef<{ sectionId: string; visible: boolean; hostId?: string | null } | null>(null)
   const navigateSettings = useCallback((request: SettingsNavigationRequest, inputPolicy: 'preserve' | 'target' = 'target'): void => {
     setSettingsInputPolicy(inputPolicy)
-    setSettingsRoute(request)
+    setSettingsRoute(normalizeSettingsNavigationRequest(request, useAppStore.getState().config?.hosts ?? []))
     setSettingsOpen(true)
   }, [])
   const openSettings = useCallback((section: SettingsPageId, executorId?: string, field?: string, hostId?: string): void => navigateSettings({ section, executorId, field, ...(hostId === undefined ? {} : { hostId }) }), [navigateSettings])
