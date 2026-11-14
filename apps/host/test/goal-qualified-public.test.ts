@@ -20,16 +20,16 @@ import type { DemandSpaceMemberReference } from '@agentmux/demand/relations'
 
 const cleanup: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
-async function fixture() {
+async function fixture(localMember = false) {
   const d = await rpcOwnerFixture(['original-SID']); cleanup.push(d.close)
   expect(process.env.AGENTMUX_RUNTIME_DIRECTORY).toBe(d.root); expect(process.env.AGENTMUX_STATE_DIRECTORY).toBe(join(d.root, 'state'))
-  const b = await rpcOwnerFixture(['B-namesake']); cleanup.push(b.close)
+  const b = localMember ? d : await rpcOwnerFixture(['B-namesake']); if (!localMember) cleanup.push(b.close)
   expect(process.env.AGENTMUX_RUNTIME_DIRECTORY).toBe(b.root); expect(process.env.AGENTMUX_STATE_DIRECTORY).toBe(join(b.root, 'state'))
   expect(d.client.agentMessageQueuePath().startsWith(d.root + '/')).toBe(true)
   expect(b.client.agentMessageQueuePath().startsWith(b.root + '/')).toBe(true)
-  expect(d.client.agentMessageQueuePath()).not.toBe(b.client.agentMessageQueuePath())
+  if (!localMember) expect(d.client.agentMessageQueuePath()).not.toBe(b.client.agentMessageQueuePath())
   const bOwner = { runtimeId: 'runtime-b', ownerInstanceId: 'original-B-instance', protocolVersion: 2 as const, processId: process.pid, availability: 'connected' as const, ctxmux: null }
-  const dOwner = { ...bOwner, runtimeId: 'runtime-d', ownerInstanceId: 'original-D-instance' }
+  const dOwner = localMember ? bOwner : { ...bOwner, runtimeId: 'runtime-d', ownerInstanceId: 'original-D-instance' }
   const session = (await d.store.readMetadata('original-SID'))!, actor = { protocolId: 'public-goal-native', actorId: 'original-D-actor', lifecycleOperationId: 'original-lifecycle', token: 'b'.repeat(64), launch: { command: 'codex', args: [] } }
   await d.store.compareAndSwapMetadata(session, { ...session, nativeActor: actor, nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'original-D-native' } })
   await d.inner.registry.load('local')
@@ -39,9 +39,9 @@ async function fixture() {
   const send = vi.fn<NonNullable<Awaited<ReturnType<NonNullable<AgentProvider['prepareNativeInput']>>>>['send']>(async () => ({ outcome: 'admitted', turnId: 'original-public-turn' }))
   provider.prepareNativeInput = async (_context, selected) => ({ plan: { kind: 'native-rpc', protocolId: actor.protocolId, actorId: actor.actorId, sourceId: JSON.stringify([selected.providerId, selected.nativeSessionId]), threadId: selected.nativeSessionId, operation: 'start-or-steer' }, assertCurrent: async () => {}, send, dispose: async () => {} })
   cleanup.push(() => { if (previous) provider.prepareNativeInput = previous; else delete provider.prepareNativeInput })
-  const spatial = new AgentMuxSpatialStateStore(join(b.root, 'spatial.json')), folder = await spatial.registerFolder({ id: 'original-B-resource', hostId: 'local', name: 'Original B Project', path: '/original/B/project' })
-  const admitted = await spatial.admitAgentOpen({ request: { schemaVersion: 5, requestId: 'original-C', operation: 'agent.open', content: { kind: 'new-agent', executorId: 'codex', agentTarget: { hostId: 'D-in-B', runtimeId: dOwner.runtimeId } }, destination: { spaceId: folder.spaceId, zoneId: folder.zoneId, newTab: true }, focus: false }, agentSessionId: session.agentSessionId,
-    execution: { hostId: 'D-in-B', runtimeId: dOwner.runtimeId, executorRevision: 'original-executor-revision', workspacePath: d.root, workspaceId: null }, placement: { runtimeId: bOwner.runtimeId, hostId: 'local', workspacePath: '/original/B/project', workspaceId: 'original-B-resource' }, regionResource: {} })
+  const spatial = new AgentMuxSpatialStateStore(join(b.root, 'spatial.json')), folder = await spatial.registerFolder({ id: 'original-B-resource', hostId: 'local', name: 'Original B Project', path: localMember ? d.root : '/original/B/project' })
+  const admitted = await spatial.admitAgentOpen({ request: { schemaVersion: 5, requestId: 'original-C', operation: 'agent.open', content: { kind: 'new-agent', executorId: 'codex', ...(!localMember ? { agentTarget: { hostId: 'D-in-B', runtimeId: dOwner.runtimeId } } : {}) }, destination: { spaceId: folder.spaceId, zoneId: folder.zoneId, newTab: true }, focus: false }, agentSessionId: session.agentSessionId,
+    execution: { hostId: localMember ? 'local' : 'D-in-B', runtimeId: dOwner.runtimeId, executorRevision: 'original-executor-revision', workspacePath: d.root, workspaceId: localMember ? 'original-B-resource' : null }, ...(!localMember ? { placement: { runtimeId: bOwner.runtimeId, hostId: 'local', workspacePath: '/original/B/project', workspaceId: 'original-B-resource' } } : {}), regionResource: {} })
   const reference: DemandSpaceMemberReference = { kind: 'space-member', source: { runtimeId: bOwner.runtimeId, spaceId: folder.spaceId, regionId: admitted.record.address.regionId, admission: { kind: 'creation', operationId: 'original-C' } }, execution: { runtimeId: dOwner.runtimeId, agentSessionId: session.agentSessionId } }
   const bHosted = new AgentMuxHostedRuntimeService(b.client, b.store.path, () => bOwner), dHosted = new AgentMuxHostedRuntimeService(d.client, d.store.path, () => dOwner)
   cleanup.push(() => bHosted.dispose(), () => dHosted.dispose())
@@ -62,6 +62,33 @@ async function fixture() {
   const bInventory = vi.spyOn(b.client, 'readAgentSessions'), dInventory = vi.spyOn(d.client, 'readAgentSessions'), bRuns = vi.spyOn(b.client, 'listRuns'), dRuns = vi.spyOn(d.client, 'listRuns')
   return { sourceRoot: b.root, spatial, b: { inventory: bInventory, runs: bRuns }, d: { core: d.client, store: d.store, inner: d.inner, inventory: dInventory, runs: dRuns }, goal, goals, goalServer, configuredD, rpc, reference, access, send, raw, stop, session }
 }
+
+it('a public local-member Goal input outlives its temporary reader while retaining the original Core claim', async () => {
+  const f = await fixture(true), provider = f.d.core.providers.get('codex'), prepare = provider.prepareNativeInput!
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  provider.prepareNativeInput = async (...args) => { await held; return await prepare(...args) }
+  cleanup.push(() => { release(); provider.prepareNativeInput = prepare })
+  const operationId = 'original-reader-lifetime-input'
+  // The original Goal owner disposes its temporary SDK in finally after this
+  // waiting receipt. Native preparation deliberately finishes only afterwards.
+  await f.rpc.call('goal.start', { goalId: f.goal.id, operationId, agentReference: f.reference, access: f.access,
+    expectedUpdatedAt: f.goal.updatedAt }).catch(error => expect(error).toMatchObject({ code: 'CONTROL_UNAVAILABLE' }))
+  expect(f.send).not.toHaveBeenCalled()
+  release()
+  const key = { kind: 'prompt' as const, agentSessionId: f.session.agentSessionId, expectedRun: f.session.run, submissionId: operationId }
+  await expect.poll(async () => {
+    const receipt = await f.d.core.inspectAgentInput({ key })
+    return receipt?.status === 'admitted' || receipt?.status === 'not-applied' ||
+      receipt?.control.waiting?.phase === 'authorization' || receipt?.control.waiting?.phase === 'observer'
+  }).toBe(true)
+  expect((await f.d.core.inspectAgentInput({ key }))?.status).toBe('admitted')
+  const observed = await f.rpc.call('goal.inspect', { goalId: f.goal.id, dispatchOperationId: operationId, access: f.access })
+  expect(observed.goal?.dispatches?.find(row => row.operationId === operationId)).toMatchObject({ operationId, target: f.reference,
+    runId: f.session.run.runId, stage: 'confirmed', receipt: { kind: 'core-input', inputKey: key, outcome: 'admitted' } })
+  expect(f.send).toHaveBeenCalledTimes(1); expect(f.raw).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
+  expect(await f.d.core.readAgentSession(f.session.agentSessionId)).toMatchObject({ run: f.session.run })
+})
 
 it('public Goal Start obtains the exact Source C/current Run, uses the original member input owner and explicitly rejoins the same frozen operation', async () => {
   const f = await fixture(), operationId = 'original-public-Start'
