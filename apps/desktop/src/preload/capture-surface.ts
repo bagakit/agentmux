@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import './capture-sequence'
 import { CAPTURE_SURFACE_CHANNEL, CAPTURE_SURFACE_EVENT, type CaptureSurfaceApi, type CaptureSurfaceEvent, type CaptureSurfaceInput } from '../shared/capture-surface'
 
 if (process.isMainFrame) {
@@ -42,7 +43,8 @@ if (process.isMainFrame) {
     copyText: (requestId, text) => ipcRenderer.invoke(CAPTURE_SURFACE_CHANNEL, 'copy-text', { requestId, text }),
     expand: (requestId, background, handoff) => ipcRenderer.invoke(CAPTURE_SURFACE_CHANNEL, 'expand', { requestId, background, handoff }),
     source: (requestId, mode) => ipcRenderer.invoke(CAPTURE_SURFACE_CHANNEL, 'source', { requestId, mode }),
-    sequence: (requestId, background, image, selection, mode) => ipcRenderer.invoke(CAPTURE_SURFACE_CHANNEL, 'sequence', { requestId, background, image, selection, mode }),
+    sequence: (requestId, background, image, selection, mode, toolbar) => ipcRenderer.invoke(CAPTURE_SURFACE_CHANNEL, 'sequence', { requestId, background, image, selection, mode, toolbar }),
+    liveInput: (requestId, toolbar) => ipcRenderer.invoke(CAPTURE_SURFACE_CHANNEL, 'live-input', { requestId, toolbar }),
     cancel: requestId => ipcRenderer.invoke(CAPTURE_SURFACE_CHANNEL, 'cancel', { requestId })
   }
   contextBridge.exposeInMainWorld('captureSurface', api)

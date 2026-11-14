@@ -52,6 +52,7 @@ export type CaptureSurfaceInput = {
   /** Whether ⌘E may move these marks into the window editor. */
   expandable: boolean
   sourceChoices?: boolean
+  sequenceMode?: 'scroll'
   theme: ThemeBootstrap
   /** Explicit same-capture Retake geometry in frozen-frame pixels; a fresh capture omits it. */
   initialCrop?: NormalizedRect
@@ -61,8 +62,17 @@ export type CaptureSurfaceInput = {
   notice?: string
 }
 
+export type ScrollingProgress = {
+  requestId: string
+  state: import('./capture-sequence').SequenceSnapshot['state']
+  frameCount: number
+  issue: string | null
+}
+
 export type CaptureSurfaceEvent = { kind: 'locked' } | { kind: 'notice'; message: string } | { kind: 'background'; background: CaptureBackground }
   | { kind: 'snapshot'; requestId: string; revision: number; background: CaptureBackground; frame: CaptureSurfaceFrame }
+  | { kind: 'scroll-progress'; input: ScrollingProgress }
+  | { kind: 'scrolling'; input: ScrollingProgress; selection: CaptureSurfaceRect; toolbar: CaptureSurfaceRect }
 
 /** The marks ⌘E carries into the window editor; coordinates are this display's frozen-frame pixels. */
 export type CaptureSurfaceHandoff = { shapes: ScreenshotShape[]; crop: NormalizedRect; tool: AnnotationTool }
@@ -85,6 +95,7 @@ export type CaptureSurfaceApi = {
   copyText(requestId: string, text: string): Promise<SystemScreenshotEditorFinish>
   expand(requestId: string, background: CaptureBackground, handoff: CaptureSurfaceHandoff): Promise<void>
   source(requestId: string, mode: 'display' | 'window' | 3 | 5 | 10): Promise<void>
-  sequence(requestId: string, background: CaptureBackground, image: BrowserPng, selection: CaptureSurfaceRect, mode: 'scroll' | 'gif'): Promise<void>
+  sequence(requestId: string, background: CaptureBackground, image: BrowserPng, selection: CaptureSurfaceRect, mode: 'scroll' | 'gif', toolbar?: CaptureSurfaceRect): Promise<void>
+  liveInput(requestId: string, toolbar: CaptureSurfaceRect): Promise<void>
   cancel(requestId: string): Promise<void>
 }

@@ -7,16 +7,17 @@ import { pngBytes } from '@agentmux/native-desktop/image'
 import { AgentMuxError } from '@agentmux/core'
 import type { CaptureSequenceContext, CaptureSequenceMethod, CaptureSequenceParams, CaptureSequenceResult } from '@agentmux/core'
 import type { AppearanceConfig, BrowserPng } from '../shared/contracts'
-import { CAPTURE_SEQUENCE_CHANNEL, CAPTURE_SEQUENCE_CLOSE_REQUESTED, type CaptureSequenceInput, type CaptureSequenceMode, type SequenceSnapshot } from '../shared/capture-sequence'
+import { CAPTURE_SEQUENCE_CHANNEL, CAPTURE_SEQUENCE_CLOSE_REQUESTED, type CaptureSequenceInput, type CaptureSequenceMode } from '../shared/capture-sequence'
 import type { ScreenshotCaptureSource } from '../shared/system-screenshot-editor'
 import { matchScroll, ScrollOverlapError } from '../shared/scroll-stitch'
 import { inspectGif } from '../shared/gif-metadata'
 import { themeBootstrap } from './theme-bootstrap'
 import { savePastedImage } from './pasted-image-write'
 import { screenshotFileName, writeScreenshotFile } from './screenshot-files'
+import type { ScrollingCaptureSurface } from './capture-surface'
 
-type Selection = { image: BrowserPng; source: ScreenshotCaptureSource; background?: import('../shared/capture-surface').CaptureBackground; startImmediately?: boolean }
-type Record = { receipt: CaptureSequenceResult; actor: CaptureSequenceContext['actor']; window?: BrowserWindow; frame?: BrowserWindow; input?: CaptureSequenceInput; baselinePending?: boolean;
+type Selection = { image: BrowserPng; source: ScreenshotCaptureSource; background?: import('../shared/capture-surface').CaptureBackground; startImmediately?: boolean; surface?: ScrollingCaptureSurface }
+type Record = { receipt: CaptureSequenceResult; actor: CaptureSequenceContext['actor']; window?: BrowserWindow; frame?: BrowserWindow; input?: CaptureSequenceInput; baselinePending?: boolean; surface?: ScrollingCaptureSurface; reviewSurface?: ScrollingCaptureSurface;
   timer?: ReturnType<typeof setTimeout>; inflight?: Promise<void>; fps: number; artifact?: { sha256: string; bytes: number }; journal?: { frames: unknown[]; source: ScreenshotCaptureSource }; size?: { width: number; height: number }; files?: string[]; persisting?: Promise<void>; resolve?(value: BrowserPng | string | null): void; attached?: string; ending?: boolean; retaking?: boolean }
 const MAX_FRAME_BYTES = 64 * 1024 * 1024
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
@@ -29,7 +30,12 @@ export class CaptureSequenceOwner {
     ipcMain.handle(CAPTURE_SEQUENCE_CHANNEL, (event, action, input) => this.invoke(event, action, input))
   }
   private directory(id: string) { return join(this.ports.directory, createHash('sha256').update(id).digest('hex')) }
+  private liveProgress(record: Record) {
+    const { requestId, state, issue, frames } = record.input!
+    return { requestId, state, issue, frameCount: frames.length }
+  }
   private persist(record: Record): Promise<void> {
+    if (record.surface && record.input) record.surface.update(this.liveProgress(record))
     if (record.input) record.journal = { frames: record.input.frames.map((frame, i) => ({ file: record.files?.[i], width: frame.image.width, height: frame.image.height, capturedAt: frame.capturedAt, delayMs: frame.delayMs })), source: record.input.source }
     // Per-frame journals are atomically published without syncing the directory on the capture hot path.
     // Final exported artifacts use the synced file owner below; an interrupted journal remains unknown.
@@ -43,7 +49,7 @@ export class CaptureSequenceOwner {
     record.persisting = pending
     return pending
   }
-  private snapshot(record: Record): SequenceSnapshot { return structuredClone(record.input!) }
+  private snapshot(record: Record): CaptureSequenceInput { return structuredClone(record.input!) }
   private async load(id: string): Promise<Record | null> {
     const active = this.records.get(id)
     if (active) return active
@@ -93,28 +99,27 @@ export class CaptureSequenceOwner {
   }
   async edit(mode: CaptureSequenceMode, selection: Selection): Promise<BrowserPng | string | null> {
     const record = this.create(randomUUID(), mode, { kind: 'user', id: 'desktop' })
-    await this.persist(record)
+    try { await this.persist(record) } catch (error) { selection.surface?.close(true); throw error }
     return await new Promise((resolve, reject) => {
       record.resolve = resolve
       void this.present(record, selection, mode === 'scroll' && selection.startImmediately === true).catch(error => { void this.fail(record, error); reject(error) })
     })
   }
-  private async present(record: Record, selection: Selection, startImmediately = false): Promise<void> {
-    const { source, image, background = 'included' } = selection
+  private createWindow(record: Record, source: ScreenshotCaptureSource, focus = true): BrowserWindow {
     const area = screen.getDisplayMatching(source.rect).workArea
     const width = Math.min(860, area.width), height = Math.min(650, area.height)
     const window = new BrowserWindow({ title: record.receipt.mode === 'gif' ? 'Record GIF' : 'Scrolling screenshot', width, height, minWidth: 420, minHeight: 400,
       x: area.x + Math.round((area.width - width) / 2), y: area.y + Math.round((area.height - height) / 2), show: false, autoHideMenuBar: true, frame: record.receipt.mode !== 'scroll', acceptFirstMouse: true,
       webPreferences: { preload: join(import.meta.dirname, '../preload/capture-sequence.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false } })
-    record.window = window; record.size = { width: image.width, height: image.height }
-    record.input = { requestId: record.receipt.operationId, mode: record.receipt.mode!, state: 'ready', source, background,
-      theme: themeBootstrap(this.ports.appearance(), nativeTheme.shouldUseDarkColors), frames: [{ image, capturedAt: source.capturedAt, delayMs: 200 }], issue: null }
-    record.receipt.state = 'ready'; record.receipt.frameCount = 1; record.receipt.issue = null
     window.setContentProtection(true)
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     window.webContents.on('will-navigate', event => event.preventDefault())
     window.webContents.on('will-attach-webview', event => event.preventDefault())
-    window.once('ready-to-show', () => { if (!window.isDestroyed()) { if (record.receipt.state === 'recording' && record.receipt.mode === 'scroll') window.showInactive(); else window.show() } })
+    window.once('ready-to-show', () => { if (!window.isDestroyed()) { if (!focus || record.receipt.state === 'recording' && record.receipt.mode === 'scroll') window.showInactive(); else window.show() } })
+    this.observeWindow(record, window)
+    return window
+  }
+  private observeWindow(record: Record, window: BrowserWindow) {
     window.on('close', event => {
       if (record.window === window && !record.ending && record.input?.mode === 'scroll' && !['recording', 'stopping'].includes(record.receipt.state)) {
         event.preventDefault()
@@ -124,16 +129,32 @@ export class CaptureSequenceOwner {
     window.once('closed', () => {
       if (record.window !== window) return
       clearTimeout(record.timer); this.closeFrame(record)
-      if (record.receipt.state !== 'completed' && record.receipt.state !== 'failed') void this.end(record, 'cancelled')
+      if (!record.ending && record.receipt.state !== 'completed' && record.receipt.state !== 'failed') void this.end(record, 'cancelled')
       record.resolve?.(null); delete record.resolve
       // Disk owns retained frames; release this disposable window's image memory.
       if (!record.inflight) delete record.input
     })
-    await this.saveFrame(record, 0)
-    await this.persist(record)
-    if (startImmediately) await this.start(record, 2)
+  }
+  private async loadWindow(window: BrowserWindow) {
     if (process.env.ELECTRON_RENDERER_URL) await window.loadURL(new URL('screenshot-editor/index.html', process.env.ELECTRON_RENDERER_URL).href)
     else await window.loadFile(join(import.meta.dirname, '../renderer/screenshot-editor/index.html'))
+  }
+  private async present(record: Record, selection: Selection, startImmediately = false): Promise<void> {
+    if (selection.surface?.window.isDestroyed()) { await this.end(record, 'cancelled'); record.resolve?.(null); delete record.resolve; return }
+    const { source, image, background = 'included' } = selection
+    const window = selection.surface?.window ?? this.createWindow(record, source)
+    if (selection.surface) record.surface = selection.surface
+    if (record.surface) this.observeWindow(record, window)
+    record.window = window; record.size = { width: image.width, height: image.height }
+    record.input = { requestId: record.receipt.operationId, mode: record.receipt.mode!, state: 'ready', source, background,
+      theme: themeBootstrap(this.ports.appearance(), nativeTheme.shouldUseDarkColors), frames: [{ image, capturedAt: source.capturedAt, delayMs: 200 }], issue: null }
+    record.receipt.state = 'ready'; record.receipt.frameCount = 1; record.receipt.issue = null
+    await this.saveFrame(record, 0)
+    await this.persist(record)
+    if (startImmediately || record.surface) await this.start(record, 2)
+    if (record.ending || window.isDestroyed()) return
+    if (record.surface) { record.surface.begin(this.liveProgress(record)); return }
+    await this.loadWindow(window)
   }
   private async saveFrame(record: Record, index: number) {
     const frame = record.input!.frames[index]!
@@ -150,7 +171,7 @@ export class CaptureSequenceOwner {
       const windowId = Number(window.getMediaSourceId().split(':')[1])
       if (!Number.isSafeInteger(windowId) || windowId <= 0) throw new Error('The exact capture control window could not be excluded. Existing frames are kept.')
       const automaticScroll = input.mode === 'scroll' && ['recording', 'stopping'].includes(record.receipt.state)
-      const chrome = [window, record.frame].filter((w): w is BrowserWindow => !!w && !w.isDestroyed())
+      const chrome = [...new Set([window, record.frame, ...(record.surface?.windows ?? [])])].filter((w): w is BrowserWindow => !!w && !w.isDestroyed())
       const excluded = [...new Set(input.background === 'excluded' ? [...BrowserWindow.getAllWindows().filter(w => !w.isDestroyed() && w.isVisible()), ...chrome] : chrome)]
       const excludeWindowIds = excluded.map(w => Number(w.getMediaSourceId().split(':')[1]))
       if (excludeWindowIds.some(id => !Number.isSafeInteger(id) || id <= 0)) throw new Error('An exact host window could not be excluded. Existing frames remain available.')
@@ -195,28 +216,45 @@ export class CaptureSequenceOwner {
     if (record.receipt.state !== 'recording') return
     const start = Date.now()
     try { await this.sample(record) }
-    catch (error) { record.receipt.issue = message(error); if (record.input) record.input.issue = message(error); this.stop(record); return }
+    catch (error) { record.receipt.issue = message(error); if (record.input) record.input.issue = message(error); this.stop(record, false, false); return }
     if (record.receipt.state === 'recording') record.timer = setTimeout(() => void this.loop(record), Math.max(0, 1000 / record.fps - (Date.now() - start)))
     else if (record.receipt.state === 'stopping') { record.receipt.state = 'review'; if (record.input) record.input.state = 'review'; await this.persist(record) }
   }
-  private stop(record: Record, focus = false) {
+  private stop(record: Record, focus = false, presentReview = true) {
     clearTimeout(record.timer)
-    if (!['recording', 'stopping'].includes(record.receipt.state) || record.ending) return
-    record.receipt.state = record.inflight ? 'stopping' : 'review'
-    this.closeFrame(record); this.reviewWindow(record, focus)
+    const running = ['recording', 'stopping'].includes(record.receipt.state)
+    if (record.ending || !running && !(record.surface && presentReview)) return
+    if (running) record.receipt.state = record.inflight ? 'stopping' : 'review'
+    this.closeFrame(record)
+    if (!record.surface || presentReview) this.reviewWindow(record, focus)
     if (record.input) record.input.state = record.receipt.state as 'stopping' | 'review'
     void this.persist(record).catch(error => { record.receipt.issue = message(error) })
   }
   private async start(record: Record, fps: number) {
       if (record.receipt.state !== 'ready' && !(record.input!.mode === 'scroll' && record.receipt.state === 'review')) throw new Error('Finish the current capture before starting it again.')
       if (![2, 5, 10].includes(fps)) throw new Error('Choose 2, 5 or 10 frames per second.')
+      const surface = record.reviewSurface
+      if (surface?.window.isDestroyed()) throw new Error('The original selection window closed. Finish the retained image before choosing another region.')
+      const review = surface ? record.window : undefined
+      if (surface) { record.surface = surface; delete record.reviewSurface; record.window = surface.window }
       record.fps = fps
-      record.baselinePending = record.input!.mode === 'scroll' && record.receipt.state === 'ready'
+      record.baselinePending ??= record.input!.mode === 'scroll' && record.receipt.state === 'ready'
       if (record.input!.mode === 'gif') { record.input!.frames = []; record.files = []; record.receipt.frameCount = 0 }
       record.receipt.state = 'recording'; record.input!.state = 'recording'; record.input!.issue = null
-      this.compactWindow(record)
-      if (record.input!.mode === 'scroll') this.regionFrame(record)
-      await this.persist(record); void this.loop(record)
+      if (!record.surface) this.compactWindow(record)
+      if (!record.surface && record.input!.mode === 'scroll') this.regionFrame(record)
+      await this.persist(record)
+      if (record.surface && record.baselinePending) {
+        try { await this.sample(record) }
+        catch (error) {
+          if (record.ending) return
+          record.receipt.issue = message(error); if (record.input) record.input.issue = message(error)
+          this.stop(record, false, false)
+        }
+      }
+      if (record.ending) return
+      if (surface) { surface.begin(this.liveProgress(record)); if (review && !review.isDestroyed()) review.close() }
+      if (record.receipt.state === 'recording') void this.loop(record)
   }
   private regionFrame(record: Record) {
     this.closeFrame(record)
@@ -256,6 +294,20 @@ export class CaptureSequenceOwner {
     if (scroll) { window.setFocusable(false); if (window.isFocused()) window.blur() }
   }
   private reviewWindow(record: Record, focus: boolean) {
+    if (record.surface) {
+      const surface = record.surface
+      const open = () => {
+        // A new review must not appear inside an already-started native exposure.
+        if (record.surface !== surface || record.ending) return
+        delete record.surface; record.reviewSurface = surface
+        const review = this.createWindow(record, record.input!.source, focus); record.window = review
+        surface.hide()
+        void this.loadWindow(review).catch(error => this.fail(record, error))
+      }
+      if (record.inflight) void record.inflight.finally(open).catch(() => {})
+      else open()
+      return
+    }
     const window = record.window, source = record.input?.source.rect
     if (!window || window.isDestroyed() || !source) return
     const area = screen.getDisplayMatching(source).workArea, width = Math.min(860, area.width), height = Math.min(650, area.height)
@@ -266,10 +318,22 @@ export class CaptureSequenceOwner {
   }
   private async end(record: Record, state: 'completed' | 'cancelled') {
     record.ending = true; clearTimeout(record.timer); this.closeFrame(record); record.receipt.state = state
+    const surface = record.surface ?? record.reviewSurface; delete record.surface; delete record.reviewSurface
+    if (surface) {
+      const close = () => surface.close(true)
+      if (record.inflight) void record.inflight.finally(close).catch(() => {})
+      else close()
+    }
     await this.persist(record)
   }
   private async fail(record: Record, error: unknown) {
     clearTimeout(record.timer); this.closeFrame(record); record.receipt.state = 'failed'; record.receipt.issue = message(error)
+    if (record.reviewSurface) {
+      const failed = record.window; record.surface = record.reviewSurface; delete record.reviewSurface; record.window = record.surface.window
+      if (failed && !failed.isDestroyed()) failed.close()
+    }
+    if (record.input) record.input.issue = record.receipt.issue
+    if (record.surface && record.input) { try { record.surface.begin(this.liveProgress(record)) } catch { record.surface.close(true) } }
     try { await this.persist(record) } catch (error) { console.warn('Capture sequence receipt:', error) }
   }
   private async invoke(event: IpcMainInvokeEvent, action: string, input?: { requestId?: string; fps?: number; afterFrames?: number; image?: BrowserPng; data?: number[] }): Promise<unknown> {
@@ -282,12 +346,15 @@ export class CaptureSequenceOwner {
       return { ...record.input, frames: record.input.frames.slice(Math.max(0, offset - 1)), frameOffset: Math.max(0, offset - 1) }
     }
     if (action === 'stop') { this.stop(record, true); return this.snapshot(record) }
-    if (action === 'cancel') { await this.end(record, 'cancelled'); record.window.close(); return }
+    if (action === 'cancel') { const window = record.window; await this.end(record, 'cancelled'); record.resolve?.(null); delete record.resolve; if (!window.isDestroyed()) window.close(); return }
     if (action === 'retake') {
       if (record.input.mode !== 'scroll' || record.inflight || record.retaking || !['ready', 'review'].includes(record.receipt.state)) throw new Error('Finish the current sampling step before retaking this screenshot. Your image is kept.')
       const previous = record.window
       record.retaking = true
       // Retake is an explicit new selection. Keep the review and frames until it is accepted.
+      const surface = record.surface ?? record.reviewSurface
+      delete record.surface; delete record.reviewSurface
+      surface?.close(false)
       previous.hide()
       try {
         const selection = await this.ports.select('scroll')
@@ -295,7 +362,7 @@ export class CaptureSequenceOwner {
           record.baselinePending = true
           await this.present(record, selection, true)
           previous.destroy()
-        }
+        } else if (selection) selection.surface?.close(false)
       } finally {
         delete record.retaking
         if (record.window === previous && !record.ending && !previous.isDestroyed()) { previous.show(); previous.focus() }

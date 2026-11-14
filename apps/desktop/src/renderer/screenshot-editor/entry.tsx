@@ -20,7 +20,7 @@ const sources = (window as unknown as { screenshotSources?: ScreenshotSourceApi 
 const countdown = (window as unknown as { screenshotCountdown?: ScreenshotCountdownApi }).screenshotCountdown
 const surface = (window as unknown as { captureSurface?: CaptureSurfaceApi }).captureSurface
 const sequence = (window as unknown as { captureSequence?: CaptureSequenceApi }).captureSequence
-if (sequence) void sequence.load().then(input => {
+if (sequence && !surface) void sequence.load().then(input => {
   mountThemeRuntime(window, input.theme.status === 'available' ? { kind: 'observed', document: input.theme.document, appearance: input.theme.appearance } : {})
   root.render(<CaptureSequenceView input={input} api={sequence} />)
 }).catch(error => { root.render(<main role="alert">{String(error)}</main>) })

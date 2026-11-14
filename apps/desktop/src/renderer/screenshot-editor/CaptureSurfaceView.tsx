@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import type { CaptureSurfaceApi, CaptureSurfaceInput } from '../../shared/capture-surface'
+import type { CaptureSurfaceApi, CaptureSurfaceInput, CaptureSurfaceEvent } from '../../shared/capture-surface'
 import { ImageAnnotationEditor } from '../src/components/image-annotation/ImageAnnotationEditor'
+import { CaptureLiveSurface } from './CaptureLiveSurface'
 import { composeScreenshot } from '../src/components/image-annotation/compose'
 import type { ImageAnnotationInput } from '../src/components/image-annotation/types'
 
 /** One display's overlay. The shared editor draws selection, loupe, toolbar and marks; this host only routes outputs to Main. */
 export function CaptureSurfaceView({ input, api, diagnostic }: { input: CaptureSurfaceInput; api: CaptureSurfaceApi; diagnostic?: { startedAt: number; loadedAt: number } }) {
-  const [mode, setMode] = useState<'selection' | 'scroll' | 'gif'>('selection')
+  const [mode, setMode] = useState<'selection' | 'scroll' | 'gif'>(input.sequenceMode ?? 'selection')
+  const [live, setLive] = useState<Extract<CaptureSurfaceEvent, { kind: 'scrolling' }> | null>(null)
   const [busy, setBusy] = useState(false), [status, setStatus] = useState<string | null>(null)
   const trace = useRef<{ startedAt: number; loadedAt: number; decodedAt?: number } | null>(null)
   trace.current ??= { startedAt: diagnostic?.startedAt ?? performance.now(), loadedAt: diagnostic?.loadedAt ?? performance.now() }
@@ -27,6 +29,11 @@ export function CaptureSurfaceView({ input, api, diagnostic }: { input: CaptureS
   useEffect(() => {
     let current = true
     const unsubscribe = api.onEvent(event => {
+    if (event.kind === 'scroll-progress') {
+      setLive(current => current?.input.requestId === event.input.requestId ? { ...current, input: event.input } : current)
+      return
+    }
+    if (event.kind === 'scrolling') { setLive(event); return }
     if (event.kind === 'locked') setLocked(true)
     else if (event.kind === 'snapshot') {
       if (event.requestId !== input.requestId || event.revision <= revision.current) return
@@ -104,12 +111,15 @@ export function CaptureSurfaceView({ input, api, diagnostic }: { input: CaptureS
   async function output(edit: ImageAnnotationInput, kind: 'finish' | 'save' | 'pin'): Promise<boolean> {
     const selection = edit.crop
     if (!selection || pending.current || switching) return false
+    const toolbarRect = document.querySelector('.image-annotation-editor__capture-bar')?.getBoundingClientRect()
     pending.current = true; setBusy(true); setStatus(null)
     try {
       // A continued selection output unchanged was never claimed by a gesture.
       if (!await claim()) return false
       const image = await composeScreenshot({ ...edit, outputScale: 1, document: edit.image.ownerDocument })
-      if (kind === 'finish' && mode !== 'selection' && input.sourceChoices) { await api.sequence(input.requestId, background, image, selection, mode); return true }
+      if (kind === 'finish' && mode !== 'selection' && (input.sourceChoices || input.sequenceMode === mode)) {
+        await api.sequence(input.requestId, background, image, selection, mode, toolbarRect ? { x: toolbarRect.x, y: toolbarRect.y, width: toolbarRect.width, height: toolbarRect.height } : undefined); return true
+      }
       if (kind === 'finish') {
         const result = await api.finish(input.requestId, background, image, selection)
         if (result.status === 'failed') setStatus(result.message)
@@ -135,6 +145,7 @@ export function CaptureSurfaceView({ input, api, diagnostic }: { input: CaptureS
     } catch (cause) { setStatus(presentError(cause)) }
   }
 
+  if (live) return <CaptureLiveSurface capture={input} surfaceApi={api} live={live} />
   if (frame.status !== 'ready') return <main className="capture-surface capture-surface--issue" role={frame.status === 'failed' ? 'alert' : 'status'}>
     <p><strong>{frame.status === 'pending' ? 'This frozen background is still preparing.' : 'This display could not be captured.'}</strong> {frame.status === 'failed' ? frame.issue : 'The current document remains available.'}</p>
     {backgrounds[otherBackground].status === 'ready' ? <button type="button" disabled={switching} onClick={() => void requestSwitch()}>

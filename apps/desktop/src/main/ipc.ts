@@ -1461,8 +1461,8 @@ export async function registerIpc(args: {
   handleWithEvent('goals:execute', async (event, request: AgentMuxControlRequest) => {
     return executeGoal(parseAgentMuxControlRequest(request))
   })
-  handleWithEvent('demands:delegation', async (event, method: 'goal.delegations' | 'goal.collect' | 'goal.patrol' | 'goal.patrol.continue', input: GoalDelegationParamsMap['goal.delegations' | 'goal.collect' | 'goal.patrol' | 'goal.patrol.continue']) => {
-    if (!['goal.delegations', 'goal.collect', 'goal.patrol', 'goal.patrol.continue'].includes(method)) throw new AgentMuxError('This action requires its exact public Goal operation.', 'INVALID_CONTROL_REQUEST')
+  handleWithEvent('demands:delegation', async (event, method: 'goal.delegations' | 'goal.collect' | 'goal.patrol' | 'goal.patrol.continue' | 'goal.plan.review', input: GoalDelegationParamsMap['goal.delegations' | 'goal.collect' | 'goal.patrol' | 'goal.patrol.continue' | 'goal.plan.review']) => {
+    if (!['goal.delegations', 'goal.collect', 'goal.patrol', 'goal.patrol.continue', 'goal.plan.review'].includes(method)) throw new AgentMuxError('This action requires its exact public Goal operation.', 'INVALID_CONTROL_REQUEST')
     return callUserRpc(method, parseGoalDelegationParams(method, input))
   })
   handle('demands:list', async () => readDesktopGoals(args.runtime))
@@ -1751,11 +1751,11 @@ export async function registerIpc(args: {
       new Notification({ title: 'Screen capture needs attention', body: message }).show()
   }
   const captureSequences = new CaptureSequenceOwner({ directory: join(app.getPath('userData'), 'capture-sequences'), home: app.getPath('home'),
-    appearance: () => config.appearance, native: getDesktopNativeUiOwner, select: async () => {
+    appearance: () => config.appearance, native: getDesktopNativeUiOwner, select: async mode => {
       let selected: { image: import('../shared/contracts').BrowserPng; source: import('../shared/system-screenshot-editor').ScreenshotCaptureSource; background?: import('../shared/capture-surface').CaptureBackground } | null = null
-      await captureSurface.present({ attachToDraft: false, expandable: false, returnFocus: false,
+      const outcome = await captureSurface.present({ attachToDraft: false, expandable: false, returnFocus: false, ...(mode === 'scroll' ? { sequenceMode: 'scroll' as const } : {}),
         complete: async (image, source, _engine, background) => { selected = { image, source, background: background ?? 'included' } } })
-      return selected
+      return outcome.state === 'sequence' ? outcome : selected
     } })
   const screenCapture = new ScreenCapture({ home: app.getPath('home'), native: getDesktopNativeUiOwner, appActive: () => BrowserWindow.getFocusedWindow() !== null,
     edit: (image, attachToDraft, complete, context) => screenshotEditor.edit(image, attachToDraft, complete, context), present: session => captureSurface.present(session),

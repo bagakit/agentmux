@@ -9,6 +9,7 @@ import { CAPTURE_SURFACE_CHANNEL, CAPTURE_SURFACE_EVENT, startCaptureRequestTimi
 import type { ScreenshotCaptureSource, SystemScreenshotEditorFinish } from '../shared/system-screenshot-editor'
 import { themeBootstrap } from './theme-bootstrap'
 import { saveScreenshotPng } from './screenshot-files'
+import type { ScrollingProgress } from '../shared/capture-surface'
 
 /** Overlays are shown together once every display painted its frozen frame, or after this long at the latest. */
 const PRESENT_FALLBACK_MS = 1500
@@ -29,16 +30,26 @@ export type CaptureSurfaceSession = {
   allowBackgroundFallback?: boolean
   expandable: boolean
   sourceChoices?: boolean
+  sequenceMode?: 'scroll'
   /** Another app was in front at capture start; closing the surface gives it focus back. */
   returnFocus: boolean
   /** Primary delivery of the processed selection, with the native engine of its frozen frame. A rejection keeps the surface and shows the reason. */
   complete(image: BrowserPng, source: ScreenshotCaptureSource, engine: string, background?: CaptureBackground): Promise<void>
 }
+/** The existing selection overlay hosts live scrolling; ownership remains with this surface. */
+export type ScrollingCaptureSurface = {
+  window: BrowserWindow
+  windows: BrowserWindow[]
+  hide(): void
+  begin(input: ScrollingProgress): void
+  update(input: ScrollingProgress): void
+  close(restoreFocus: boolean): void
+}
 export type CaptureSurfaceOutcome =
   | { state: 'completed' }
   | { state: 'cancelled' }
   | { state: 'source'; mode: 'display' | 'window' | 3 | 5 | 10; background: CaptureBackground }
-  | { state: 'sequence'; mode: 'scroll' | 'gif'; startImmediately: boolean; image: BrowserPng; source: ScreenshotCaptureSource; background: CaptureBackground }
+  | { state: 'sequence'; mode: 'scroll' | 'gif'; startImmediately: boolean; image: BrowserPng; source: ScreenshotCaptureSource; background: CaptureBackground; surface?: ScrollingCaptureSurface }
   /** The marks move to the window editor on this display's full frozen frame; `source.rect` is the selection. */
   | { state: 'expanded'; image: BrowserPng; source: ScreenshotCaptureSource; handoff: CaptureSurfaceHandoff
       /** Returns the delivered geometry for an explicit Retake in the same capture call. No document history crosses into the new surface. */
@@ -116,6 +127,9 @@ type Active = {
   /** Visible, unminimized, non-transparent hosts at capture start decide whether native exclusion needs a second exposure. */
   visibleHosts: number
   focused: BrowserWindow | null
+  stopHitTest?(): void
+  live?: boolean
+  restoreFocusOnClose?: boolean
   end(outcome: CaptureSurfaceOutcome | Error): void
 }
 /** Desktop's one capture surface: a transparent overlay per display over that display's frozen frame. */
@@ -139,13 +153,19 @@ export class CaptureSurface {
     const result = new Promise<CaptureSurfaceOutcome>((resolve, reject) => {
       end = outcome => {
         if (this.active !== active) return
+        if (!(outcome instanceof Error) && outcome.state === 'sequence' && outcome.surface) {
+          active.live = true
+          resolve(outcome)
+          return
+        }
+        active.stopHitTest?.()
         this.active = null
         active.releaseInputs()
         screen.removeListener('display-added', changed); screen.removeListener('display-removed', changed); screen.removeListener('display-metrics-changed', resized)
         app.removeListener('before-quit', cancel)
         clearTimeout(active.fallback)
         for (const overlay of active.overlays) if (!overlay.window.isDestroyed()) overlay.window.destroy()
-        if (outcome instanceof Error || outcome.state !== 'expanded') {
+        if (active.restoreFocusOnClose !== false && (outcome instanceof Error || outcome.state !== 'expanded')) {
           if (session.returnFocus) this.ports.returnFocus()
           else if (active.focused && !active.focused.isDestroyed()) active.focused.focus()
         }
@@ -262,7 +282,7 @@ export class CaptureSurface {
     const placed = geometry.displays.map(frame => {
       const initialCrop = this.continued(frame, active.session.continuation)
       const input: CaptureSurfaceInput = { requestId: active.requestId, revision: active.revision, displayId: frame.displayId, frame: frame.frame, scale: frame.scale, safeTop: frame.safeTop,
-        attachToDraft: active.session.attachToDraft, expandable: active.session.expandable, sourceChoices: active.session.sourceChoices === true, theme, background: active.background,
+        attachToDraft: active.session.attachToDraft, expandable: active.session.expandable, sourceChoices: active.session.sourceChoices === true, ...(active.session.sequenceMode ? { sequenceMode: active.session.sequenceMode } : {}), theme, background: active.background,
         backgrounds: { [firstMode]: captureFrame(first, frame.displayId), [secondMode]: pendingSecond ? pendingFrame() : captureFrame(second, frame.displayId) } as CaptureSurfaceInput['backgrounds'],
         ...(initialCrop ? { initialCrop } : {}) }
       return { frame, input }
@@ -308,7 +328,7 @@ export class CaptureSurface {
       const display = { id: observed.id, bounds: { ...observed.bounds }, scaleFactor: observed.scaleFactor }
       const window = new BrowserWindow({
         ...display.bounds, show: false, frame: false, transparent: true, backgroundColor: '#00000000', hasShadow: false, roundedCorners: false,
-        resizable: false, movable: false, minimizable: false, maximizable: false, fullscreenable: false, skipTaskbar: true,
+        resizable: false, movable: false, minimizable: false, maximizable: false, fullscreenable: false, skipTaskbar: true, acceptFirstMouse: true,
         alwaysOnTop: true, enableLargerThanScreen: true, title: 'Screenshot', ...(process.platform === 'darwin' ? { type: 'panel' } : {}),
         webPreferences: { preload: join(import.meta.dirname, '../preload/capture-surface.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false }
       })
@@ -372,8 +392,31 @@ export class CaptureSurface {
     const frameInput = overlay.input
     if (this.active !== active || overlay.window.isDestroyed() || !frameInput) throw new Error('The original screenshot request is no longer current.')
     if (action === 'load') return frameInput
-    const params = input as { mode?: unknown; background?: unknown; requestId?: unknown; revision?: unknown; timing?: unknown; operationId?: unknown; image?: BrowserPng; selection?: CaptureSurfaceRect; text?: unknown; handoff?: CaptureSurfaceHandoff } | undefined
+    const params = input as { mode?: unknown; background?: unknown; requestId?: unknown; revision?: unknown; timing?: unknown; operationId?: unknown; image?: BrowserPng; selection?: CaptureSurfaceRect; toolbar?: CaptureSurfaceRect; text?: unknown; handoff?: CaptureSurfaceHandoff } | undefined
     if (params?.requestId !== frameInput.requestId) throw new Error('The original screenshot request is no longer current.')
+    if (action === 'live-input' && active.live && active.owner === frameInput.displayId) {
+      const rect = params.toolbar
+      if (!rect || ![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite) || rect.width <= 0 || rect.height <= 0) throw new Error('The original live toolbar bounds are unavailable.')
+      active.stopHitTest?.()
+      if (!overlay.window.isVisible()) return
+      const bounds = overlay.window.getBounds()
+      const left = bounds.x + rect.x, top = bounds.y + rect.y
+      let previous: boolean | undefined
+      // Ignored macOS panels do not reliably receive DOM enter/leave. Only the
+      // visible live toolbar needs the cursor, and only a boundary crossing changes routing.
+      const hitTest = () => {
+        const cursor = screen.getCursorScreenPoint()
+        const inside = cursor.x >= left && cursor.x < left + rect.width && cursor.y >= top && cursor.y < top + rect.height
+        if (previous !== inside) overlay.window.setIgnoreMouseEvents(!inside)
+        previous = inside
+      }
+      hitTest()
+      const timer = setInterval(hitTest, 32)
+      active.stopHitTest = () => { clearInterval(timer); delete active.stopHitTest }
+      return
+    }
+    if (active.live && action === 'cancel') { active.end({ state: 'cancelled' }); return }
+    if (active.live) throw new Error('This original selection is capturing live. Use its Stop or Cancel control.')
     if (action === 'frame-ack') {
       if (params.revision !== frameInput.revision) return
       return
@@ -438,8 +481,29 @@ export class CaptureSurface {
     pngBytes(params.image!)
     const source = this.source(active, frameInput, params.selection)
     if (action === 'sequence') {
-      if (!active.session.sourceChoices || !['scroll', 'gif'].includes(String(params.mode))) throw new Error('Choose an available sequence in this screenshot component.')
-      active.end({ state: 'sequence', mode: params.mode as 'scroll' | 'gif', startImmediately: params.mode === 'scroll', image: params.image!, source, background: active.background }); return
+      if (!(active.session.sourceChoices || active.session.sequenceMode === params.mode) || !['scroll', 'gif'].includes(String(params.mode))) throw new Error('Choose an available sequence in this screenshot component.')
+      const toolbar = params.toolbar
+      const surface: ScrollingCaptureSurface | undefined = params.mode === 'scroll' ? {
+        window: overlay.window, windows: active.overlays.map(row => row.window),
+        update: input => send(overlay, { kind: 'scroll-progress', input }),
+        hide: () => { active.stopHitTest?.(); for (const row of active.overlays) if (!row.window.isDestroyed()) row.window.hide() },
+        begin: sequence => {
+          if (this.active !== active || !active.live) throw new Error('The original live selection is no longer available.')
+          active.stopHitTest?.()
+          for (const row of active.overlays) {
+            row.window.setIgnoreMouseEvents(true)
+            if (row !== overlay) row.window.hide()
+          }
+          overlay.window.showInactive()
+          send(overlay, { kind: 'scrolling', input: sequence,
+            selection: { ...source.rect, x: source.rect.x - frameInput.frame.x, y: source.rect.y - frameInput.frame.y },
+            toolbar: toolbar && [toolbar.x, toolbar.y, toolbar.width, toolbar.height].every(Number.isFinite) ? toolbar
+              : { x: Math.max(8, source.rect.x - frameInput.frame.x), y: Math.min(frameInput.frame.height - 48, source.rect.y - frameInput.frame.y + source.rect.height + 8), width: 240, height: 36 } })
+          if (active.focused && !active.focused.isDestroyed()) active.focused.focus()
+        },
+        close: restoreFocus => { active.restoreFocusOnClose = restoreFocus; active.end({ state: 'cancelled' }) }
+      } : undefined
+      active.end({ state: 'sequence', mode: params.mode as 'scroll' | 'gif', startImmediately: params.mode === 'scroll', image: params.image!, source, background: active.background, ...(surface ? { surface } : {}) }); return
     }
     if (action === 'save-png') return await saveScreenshotPng(params.image!, overlay.window, { capturedAt: captured.capturedAt })
     if (action === 'pin') {

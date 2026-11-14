@@ -1,0 +1,11 @@
+.capture-surface--live { cursor: default; pointer-events: none; }
+.capture-live-region { position: absolute; box-sizing: border-box; border: 1px solid var(--green); box-shadow: 0 0 0 1px #11182780; }
+.capture-live-toolbar { position: absolute; max-width: min(440px, calc(100vw - 16px)); pointer-events: auto; color: var(--text); font: 12px/1.4 var(--font-sans); }
+.capture-live-toolbar__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-0); box-shadow: var(--elev-1); }
+.capture-live-toolbar span { padding: 0 4px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.capture-live-toolbar button { border: 1px solid var(--line); border-radius: 5px; padding: 5px 8px; color: var(--text); background: var(--surface-1); font: inherit; white-space: nowrap; cursor: pointer; }
+.capture-live-toolbar button:hover { background: var(--surface-2); }
+.capture-live-toolbar button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.capture-live-toolbar .primary-button { background: var(--green); border-color: transparent; color: var(--bg); }
+.capture-live-toolbar button:disabled { opacity: .5; cursor: default; }
+.capture-live-toolbar p { margin: 5px 0 0; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-0); box-shadow: var(--elev-1); overflow-wrap: anywhere; }
