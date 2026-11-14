@@ -7,6 +7,7 @@ import { APP_APPEARANCE_IDS } from '../src/shared/contracts'
 
 // Isolate Gallery's theme lifecycle; the actual controls and appearance owner remain in this test.
 vi.mock('../src/renderer/src/components/ObservationSurfaceGallery', () => ({ ObservationSurfaceGallery: () => null }))
+vi.mock('../src/renderer/src/components/ConversationReceiptGallery', () => ({ ConversationReceiptGallery: () => null }))
 vi.mock('../src/renderer/src/components/workflow', () => ({ WorkflowCard: () => null, WorkflowDock: () => null, WorkflowToolRow: () => null }))
 
 let container: HTMLDivElement, root: Root, dark: boolean
