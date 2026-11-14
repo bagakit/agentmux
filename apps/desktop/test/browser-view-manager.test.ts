@@ -343,7 +343,7 @@ describe('Browser public navigation observation', () => {
         code: 'return { page: await pageInfo(), native: await js("({readyState:document.readyState,origin:location.origin})") }',
         operationId: 'navigation-observation-' + trigger })
       expect(report.outcome.kind).toBe('completed')
-      expect(report.result).toEqual({ page: { url: originalUrl, title: contents.getTitle(), navigationId: failed.navigationId, navigation: expected },
+      expect(report.result).toEqual({ page: { url: originalUrl, title: contents.getTitle(), navigationId: failed.navigationId, navigation: expected, viewport: 'responsive' },
         native: { readyState: 'complete', origin: 'null' } })
       expect(manager.target(id)!.navigation).toEqual(expected)
       // A subsequent confirmed commit advances these exact facts, without
