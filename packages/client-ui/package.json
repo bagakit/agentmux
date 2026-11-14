@@ -24,6 +24,12 @@
       "browser": "./src/components/*.tsx",
       "import": "./dist/components/*.js"
     },
+    "./patterns/agent-work-location": {
+      "types": "./src/patterns/agent-work-location.tsx",
+      "browser": "./src/patterns/agent-work-location.tsx",
+      "import": "./dist/patterns/agent-work-location.js"
+    },
+    "./patterns/agent-work-location.css": "./src/patterns/agent-work-location.css",
     "./terminal/*": {
       "types": "./src/terminal/*.ts",
       "browser": "./src/terminal/*.ts",

@@ -1,0 +1,33 @@
+.agent-locations {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: 30px;
+  margin: var(--sp-2) 0;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: start;
+  cursor: pointer;
+}
+
+.agent-locations > span:last-child {
+  margin-inline-start: auto;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.agent-locations:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.agent-locations:focus-visible {
+  outline: 1px solid var(--focus-line);
+  outline-offset: -1px;
+}

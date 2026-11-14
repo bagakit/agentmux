@@ -1,32 +1,44 @@
-import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { AgentWorkLocationTrigger, type AgentWorkLocationSummary } from '@agentmux/client-ui/patterns/agent-work-location'
+import '@agentmux/client-ui/patterns/agent-work-location.css'
 import { useMemo, useState } from 'react'
-import { agentRegionExecution, agentRegionLocationBindings, agentRegionLocationsKnown, useAppStore } from '../store'
-import { sessionWorkbenchLocationCounts, workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
+import { agentRegionExecution, agentRegionLocationBindings, useAppStore } from '../store'
+import { sessionWorkbenchLocationSummary, workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
 import { workbenchNavigationTabs } from '../lib/workbench-navigation-catalog'
 import type { FocusContext } from '../lib/focus-context'
 
-const LocationIcon = semanticIconComponent('navigation.space')
+function locationLabel(summary: AgentWorkLocationSummary): string {
+  if (summary.state === 'confirmed') return `${summary.count} ${summary.count === 1 ? 'location' : 'locations'}`
+  return 'Locations unconfirmed'
+}
 
-/** Mounted by Source details only; original display facts never control a Run. */
-export function AgentLocationsButton({ context, subject = context.control, beforeOpen }: {
-  context: FocusContext; subject?: { hostId: string; agentSessionId: string } | undefined; beforeOpen?: () => void
+/** Mounted by Source details only. The existing Store owns the exact selection. */
+export function AgentLocationsButton({ context, subject = context.control, runtimeId, beforeOpen }: {
+  context: FocusContext
+  subject?: { hostId: string; agentSessionId: string } | undefined
+  runtimeId?: string | undefined
+  beforeOpen?: () => void
 }) {
   const [issue, setIssue] = useState<string | null>(null)
   const tabs = useAppStore(state => workbenchNavigationTabs(state.tabs))
   const catalog = useAppStore(workbenchSelectionCatalog)
-  const known = useAppStore(agentRegionLocationsKnown)
   const bindings = useAppStore(agentRegionLocationBindings)
-  const hostId = subject?.hostId ?? context.hostId, agentSessionId = subject?.agentSessionId
-  const observed = useMemo(() => sessionWorkbenchLocationCounts(tabs, catalog,
-    id => id === context.id && agentSessionId ? { hostId, agentSessionId } : null, agentRegionExecution).get(context.id),
-  [tabs, catalog, bindings, context.id, hostId, agentSessionId])
-  const count = known && agentSessionId && observed !== null ? observed ?? 0 : undefined
-  const quantity = count === undefined ? 'Locations unconfirmed' : `${count} ${count === 1 ? 'location' : 'locations'}`
-  const label = `${context.name} · ${quantity.toLowerCase()} · Choose location`
-  return <><button type="button" className="agent-locations" aria-label={label} onClick={() => {
-    if (useAppStore.getState().requestSessionLocations(context.id, { subject: subject ?? null })) {
-      setIssue(null); beforeOpen?.()
-    } else setIssue('The original Agent identity is no longer confirmed. This reading is kept; reopen the Agent’s current details to choose its location.')
-  }}><LocationIcon size={14} aria-hidden="true" /><span>{quantity}</span><span>Choose location</span></button>
-  {issue ? <p role="status">{issue}</p> : null}</>
+  const hostId = subject?.hostId, agentSessionId = subject?.agentSessionId
+  const summary = useMemo<AgentWorkLocationSummary>(() => {
+    if (!bindings || hostId === undefined || agentSessionId === undefined) return { state: 'unconfirmed' }
+    return sessionWorkbenchLocationSummary(tabs, catalog, context.id,
+      { hostId, agentSessionId, ...(runtimeId === undefined ? {} : { runtimeId }) }, agentRegionExecution)
+  }, [tabs, catalog, bindings, context.id, hostId, agentSessionId, runtimeId])
+  return <>
+    <AgentWorkLocationTrigger agentName={context.name} actionLabel="Choose location" summary={summary} describeSummary={locationLabel} onClick={() => {
+      const original = subject ? { hostId: subject.hostId, agentSessionId: subject.agentSessionId,
+        ...(runtimeId === undefined ? {} : { runtimeId }) } : null
+      if (useAppStore.getState().requestSessionLocations(context.id, { subject: original })) {
+        setIssue(null)
+        beforeOpen?.()
+      } else {
+        setIssue('The original Agent identity is no longer confirmed. This reading is kept; reopen the Agent’s current details to choose its location.')
+      }
+    }} />
+    {issue ? <p role="status">{issue}</p> : null}
+  </>
 }

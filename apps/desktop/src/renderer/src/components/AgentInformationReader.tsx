@@ -273,19 +273,19 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
     : request.bookmark?.sourceRuntimeId === undefined ? request.bookmark?.hostId ?? context.hostId : undefined
   const source = <>
     <h3>Status and source</h3><p>{currentContext.detail}</p>{context.access ? <><button type="button" onClick={context.access.refresh}>Refresh observation</button><button type="button" onClick={() => context.access!.open()}>View in Space</button></> : null}
-    {context.kind === 'agent' && !context.access ? <AgentLocationsButton context={context} subject={request.control ?? request.bookmark} beforeOpen={() => {
+    {context.kind === 'agent' && !context.access ? <AgentLocationsButton context={context} subject={request.control ?? request.bookmark} runtimeId={request.sourceRuntimeId ?? request.bookmark?.sourceRuntimeId} beforeOpen={() => {
       if (!request.pinned) { request.restoreFocus(); agentInformationPreview.dismiss(request.token) }
     }} /> : null}
     {context.access ? <p>Project · {context.workspaceName}</p> : affiliation?.mote ? <p>Mote · {affiliation.mote.name}</p> : affiliation?.project ? <p>Project · {affiliation.project.name}</p> : <p>Project or Mote affiliation is not confirmed. The Executor identity is retained.</p>}
     {currentContext.detail !== context.detail ? <p>At opening: {context.detail}</p> : null}
     <dl className="agent-information-reader__source">
       <div><dt>Name</dt><dd>{context.name}</dd></div>
-      {sourceHostId && <div><dt>Host</dt><dd>{sourceHostId}</dd></div>}
+      {sourceHostId && <div><dt>Execution host</dt><dd>{sourceHostId}</dd></div>}
       {sourceRuntimeId && <div><dt>Runtime</dt><dd>{sourceRuntimeId}</dd></div>}
       <div><dt>Session</dt><dd>{context.access?.identity.agentSessionId ?? request.control?.agentSessionId ?? request.bookmark?.agentSessionId ?? context.id}</dd></div>
       {context.runId && <div><dt>Run</dt><dd>{context.runId}</dd></div>}
       <div><dt>Project</dt><dd>{context.workspaceName}</dd></div>
-      {path && <div><dt>Directory</dt><dd>{path}</dd></div>}
+      {path && <div><dt>Execution directory</dt><dd>{path}</dd></div>}
       {context.originAddress && <div><dt>Origin</dt><dd>{context.originAddress}</dd></div>}
     </dl>
     {context.kind === 'agent' ? <AgentTakeoverRelations subject={request.control ?? request.bookmark} access={context.access} sourceRuntimeId={request.sourceRuntimeId ?? request.bookmark?.sourceRuntimeId}

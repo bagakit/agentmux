@@ -428,10 +428,6 @@
 .session-record-delete .danger-button:hover:not(:disabled) { background: color-mix(in srgb, var(--red) 22%, var(--surface-0)); }
 
 /* Separate hit targets retain the original full card and its primary action. */
-.agent-locations { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: 30px; margin: var(--sp-2) 0; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; text-align: left; cursor: pointer; }
-.agent-locations > span:last-child { margin-left: auto; color: var(--text-3); font-size: var(--fs-xs); }
-.agent-locations:hover, .agent-locations[data-highlighted] { background: var(--surface-3); color: var(--text); }
-.agent-locations:focus-visible { outline: 1px solid var(--green); outline-offset: -1px; }
 
 .recent-focus__title:has(.recent-focus__scope) { min-width: min(220px, 60%); }
 .recent-focus__scope {

@@ -8748,7 +8748,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       const reference = references[0]!
       let choice: AgentMuxDesktopSpaceSelection
-      try { choice = options?.reference?.spaceId ? resolveDesktopSpaceSelection(current, catalog, options.reference)
+      try { choice = options?.reference?.spaceId || options?.reference?.zoneId
+        ? resolveDesktopSpaceSelection(current, catalog, options.reference)
         : resolveWorkbenchOccurrenceSelection(current, catalog, { workspaceId: reference.displayWorkspaceId,
           groupId: reference.groupId, tabId: reference.tabId, regionId: reference.regionId }, 'navigation') }
       catch (error) { return fail(presentError(error), error) }

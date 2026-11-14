@@ -1,3 +1,4 @@
+import { summarizeAgentWorkLocations, type AgentWorkLocationSummary } from '@agentmux/client-ui/patterns/agent-work-location'
 import { selectSpatialCatalog } from '@agentmux/core/spatial-graph'
 import type { AgentMuxDesktopMainSurface, AgentMuxDesktopSelection, AgentMuxDesktopSpaceSelection,
   AgentMuxDesktopSurface, AgentMuxSpaceCatalog, AgentMuxSpaceSelector, AgentMuxSpatialIssue } from '@agentmux/core'
@@ -122,25 +123,26 @@ export function sessionWorkbenchLocationChoices(tabs: Readonly<Record<string, Wo
   }
   return [...choices.values()]
 }
-/** One structural pass for a roster, independent of Session output and row count. */
-export function sessionWorkbenchLocationCounts(tabs: Readonly<Record<string, WorkbenchTab>>, catalog: AgentMuxSpaceCatalog,
-  subjectFor: (sessionId: string) => { hostId: string; agentSessionId: string } | null,
-  executionFor: (reference: { tabId: string; regionId: string; agentSessionId: string }) => { hostId: string } | null): ReadonlyMap<string, number | null> {
-  const positions = new Map<string, Set<string>>(), unconfirmed = new Set<string>()
+/** Read original bindings only for the subject whose location disclosure is open. */
+export function sessionWorkbenchLocationSummary(
+  tabs: Readonly<Record<string, WorkbenchTab>>,
+  catalog: AgentMuxSpaceCatalog,
+  sessionId: string,
+  subject: { hostId: string; agentSessionId: string; runtimeId?: string },
+  executionFor: (reference: { tabId: string; regionId: string; agentSessionId: string }) => { hostId: string; runtimeId: string | null } | null
+): AgentWorkLocationSummary {
+  const positions = new Set<string>()
   for (const location of catalog.locations) {
     const surface = tabs[location.tabId]?.regions[location.regionId]
-    if (surface?.kind !== 'agent') continue
-    let occurrences = positions.get(surface.sessionId)
-    if (!occurrences) positions.set(surface.sessionId, occurrences = new Set())
+    if (surface?.kind !== 'agent' || surface.sessionId !== sessionId) continue
     const key = JSON.stringify([location.displayWorkspaceId, location.groupId, location.tabId, location.regionId])
-    if (occurrences.has(key)) continue
-    occurrences.add(key)
-    const subject = subjectFor(surface.sessionId)
-    const bound = subject ? executionFor({ tabId: location.tabId, regionId: location.regionId, agentSessionId: subject.agentSessionId }) : null
-    if (!subject || bound?.hostId !== subject.hostId) unconfirmed.add(surface.sessionId)
+    if (positions.has(key)) continue
+    const bound = executionFor({ tabId: location.tabId, regionId: location.regionId, agentSessionId: subject.agentSessionId })
+    if (bound?.hostId !== subject.hostId || subject.runtimeId !== undefined && bound.runtimeId !== subject.runtimeId)
+      return { state: 'unconfirmed' }
+    positions.add(key)
   }
-  // A partial observation cannot claim a complete count, including zero.
-  return new Map([...positions].map(([id, references]) => [id, unconfirmed.has(id) ? null : references.size]))
+  return summarizeAgentWorkLocations({ state: 'confirmed', positions })
 }
 
 /** A local focus keeps its explicit parent; an explicit jump can resolve another object. */
