@@ -190,3 +190,36 @@ it.each([false, true])('Show original page uses the frozen exact binding without
     }
   } finally { await act(async () => root.unmount()); element.remove() }
 })
+
+it('clearing an incompatible Survey page keeps the environment select focused for continued keyboard input', async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
+  browserProfiles.reset()
+  const f = fixture()
+  const profile = (id: string) => ({ id, label: 'Same name', createdAt: 1, isDefault: false, source: null })
+  vi.spyOn(api.browser, 'readProfiles').mockResolvedValue({ revision: 1, sequence: 1, profiles: [profile(a), profile(b)], folders: [], views: [] })
+  const create = vi.spyOn(api.browser, 'create'), switchProfile = vi.spyOn(api.browser, 'switchProfile')
+  useAppStore.setState({ config, tabs: f.tabs, layouts: { resource: f.layout }, surveyProfileView: { kind: 'profile', profileId: a }, surveyProfileViewReadRecovery: null,
+    surveyPageReferences: f.pages, surveyCollectedZones: {}, surveyZoneSelection: { kind: 'page', ...f.pages[0]! }, mainSurface: 'survey' })
+  function CurrentSurvey() {
+    const selected = useAppStore(state => state.surveyZoneSelection)
+    return <GlobalSurveySurface visible catalog={f.catalog} projection={null} selection={null} pageSelection={selected && 'kind' in selected && selected.kind === 'page' ? selected : null} />
+  }
+  const element = document.createElement('div'); document.body.append(element); const root = createRoot(element)
+  try {
+    await act(async () => root.render(<CurrentSurvey />))
+    const select = element.querySelector<HTMLSelectElement>('[aria-label="Survey environment"]')!
+    select.focus()
+    expect(document.activeElement).toBe(select)
+    await act(async () => { select.value = 'profile:' + b; select.dispatchEvent(new Event('change', { bubbles: true })) })
+    expect(useAppStore.getState().surveyZoneSelection).toBeNull()
+    expect(useAppStore.getState().surveyProfileView).toEqual({ kind: 'profile', profileId: b })
+    expect(document.activeElement).toBe(select)
+    // A following environment choice still belongs to that control, with no
+    // repeated focus call and no input escaping into the new start-page field.
+    await act(async () => { select.dispatchEvent(new KeyboardEvent('keydown', { key: 'S', bubbles: true })); select.value = 'profile:' + a; select.dispatchEvent(new Event('change', { bubbles: true })) })
+    expect(document.activeElement).toBe(select)
+    expect(useAppStore.getState().surveyProfileView).toEqual({ kind: 'profile', profileId: a })
+    expect(element.querySelector<HTMLInputElement>('[aria-label="Search or enter a web address"]')!.value).toBe('')
+    expect(create).not.toHaveBeenCalled(); expect(switchProfile).not.toHaveBeenCalled()
+  } finally { await act(async () => root.unmount()); element.remove() }
+})
