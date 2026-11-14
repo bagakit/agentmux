@@ -21,6 +21,13 @@ needs message-source trust and how the original sender synchronizes it.
 
 ## Register and edit a Host
 
+Host commands that require an input or original operation accept a standalone
+--help or -h without contacting a service. For an ID-only command such as
+settings hosts test or upgrade-check, that token can be the literal Host ID;
+read its help with amux --help settings hosts test (or upgrade-check). Adding
+--input keeps option-looking Host IDs literal.
+
+
 Use settings hosts create <id> --input <file|-> to save a complete new SSH
 record. The command ID and JSON id must match; kind is ssh, with label and hostname.
 Optional user, port and transport retain literal SSH configuration. Omit runtimeId:
