@@ -58,10 +58,14 @@ new MutationObserver(records => { for(const record of records) for(const node of
 const publish = () => update({ client, connection, visible })
 function Surface() {
   const [state, setState] = useState({ client, connection, visible }); update = setState
-  return <div className="mobile-app" data-connection={state.connection.state}><main className="mobile-main"><div className="mobile-conversation-panel" hidden={!state.visible}>
-    <MobileConversationSurface client={state.client} agentSessionId={setup.agentSessionId} connection={state.connection}
-      platform={platform} visible={state.visible} displayName="阅读验收" />
-  </div></main></div>
+  return <div className="mobile-app" data-connection={state.connection.state}>
+    <div className="mobile-primary-pane"><main className="mobile-main"><section className="mobile-conversation-panel" hidden={!state.visible}>
+      <div className="mobile-conversation-slot is-active">
+        <MobileConversationSurface client={state.client} agentSessionId={setup.agentSessionId} connection={state.connection}
+          platform={platform} visible={state.visible} displayName="阅读验收" />
+      </div>
+    </section></main></div>
+  </div>
 }
 async function connect() {
   result(await bridge.connect(setup.url,setup.token))
