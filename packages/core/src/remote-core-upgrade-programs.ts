@@ -127,7 +127,7 @@ for row in text(base+'/cgroup').splitlines():
  if '/user@'+str(uid)+'.service/' not in group or not group.endswith('.service'): continue
  unit=group.rsplit('/',1)[1]
  manager_env={**os.environ,'XDG_RUNTIME_DIR':user_runtime,'DBUS_SESSION_BUS_ADDRESS':'unix:path='+user_runtime+'/bus'}
- shown=subprocess.run(['systemctl','--user','show',unit,'--property=Id,MainPID,FragmentPath,ControlGroup,KillMode,ActiveState'],capture_output=True,text=True,env=manager_env,timeout=10)
+ shown=subprocess.run(['systemctl','--user','show',unit,'--property=Id,MainPID,FragmentPath,ControlGroup,KillMode,ActiveState'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,universal_newlines=True,env=manager_env,timeout=10)
  if shown.returncode!=0: raise RuntimeError('The original user service could not be inspected; no owner was stopped.')
  facts=dict(line.split('=',1) for line in shown.stdout.splitlines() if '=' in line)
  if facts.get('Id')!=unit or facts.get('MainPID')!=str(pid) or facts.get('ControlGroup')!=group or facts.get('ActiveState')!='active' or not os.path.isabs(facts.get('FragmentPath','')):

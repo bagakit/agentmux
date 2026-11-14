@@ -2,7 +2,7 @@
  * ExecutionHost; parameters arrive as JSON on stdin, never through shell text. */
 
 /** Read-only: can this Host take a first install under this prefix? Uses only
- * python3, which the upgrade inspection already requires on the remote. */
+ * Python 3.6-compatible stdlib, also used by the upgrade inspection. */
 export const PROBE_CORE_INSTALL = String.raw`
 import json,os,sys,platform,socket,subprocess,stat
 p=json.loads(sys.stdin.read()); home=os.path.expanduser('~')
@@ -24,7 +24,7 @@ def listening(path):
  finally: s.close()
 def systemd():
  unit_available=not os.path.lexists(os.path.join(home,'.config','systemd','user','agentmux-core.service'))
- run=lambda *args: subprocess.run(list(args),capture_output=True,text=True,timeout=10)
+ run=lambda *args: subprocess.run(list(args),stdout=subprocess.PIPE,stderr=subprocess.PIPE,universal_newlines=True,timeout=10)
  try:
   if run('systemctl','--user','show-environment').returncode!=0: return {'user':False,'linger':None,'unitAvailable':unit_available}
  except (FileNotFoundError,subprocess.TimeoutExpired): return {'user':False,'linger':None,'unitAvailable':unit_available}
