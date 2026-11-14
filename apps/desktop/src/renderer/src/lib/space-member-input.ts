@@ -1,8 +1,9 @@
 import type { AgentPromptInputBinding } from '@agentmux/core'
 import { validateAgentPromptInputBinding } from '@agentmux/core/prompt-condition'
-import type { SpaceMountMemberTarget } from '../../../shared/space-mount'
+import type { SpaceMountMemberTarget, SpaceMountRecord } from '../../../shared/space-mount'
+import { spaceMountKey } from '../../../shared/space-mount'
 import { configValuesEqual } from '../../../shared/config-edit'
-import { mountedSpaceInputs, mountedSpaceTarget } from './space-mount-view'
+import { mountedSpaceInputs, memberSpaceInputTarget, ensureMemberSpaceInput } from './space-mount-view'
 
 export type MountedMemberInput = { target: SpaceMountMemberTarget; request: { operationId: string; prompt: string; binding: AgentPromptInputBinding }; submitted: boolean; response?: unknown; issue?: string | undefined }
 const object = (v: unknown): v is Record<string, unknown> => Boolean(v && typeof v === 'object' && !Array.isArray(v))
@@ -12,8 +13,10 @@ export const mountedMemberInputScope = (v: SpaceMountMemberTarget) => JSON.strin
 const EMPTY_REQUESTS: Record<string, unknown> = Object.freeze({})
 export const mountedMemberIdentity = (v: SpaceMountMemberTarget) => JSON.stringify([v.target.reference.runtimeId,v.target.reference.spaceId,v.target.regionId,v.target.runtimeId,v.target.agentSessionId])
 const unavailable = (): never => { throw Error('Saved member input is unreadable. Its original data is kept; the terminal remains a separate original reader.') }
-export function mountedMemberRequestBuckets(value: unknown, mountKey: string, target: SpaceMountMemberTarget): Record<string, unknown> {
-  const entries = mountedSpaceInputs(value), mount = entries[mountKey], original = mountedSpaceTarget(value, mountKey)
+export function mountedMemberRequestBuckets(value: unknown, mountKey: string, target: SpaceMountMemberTarget, privateTarget?: SpaceMountRecord): Record<string, unknown> {
+  const entries = mountedSpaceInputs(value), mount = entries[mountKey]
+  if (mount === undefined && privateTarget && spaceMountKey(privateTarget.reference) === mountKey && privateTarget.reference.runtimeId === target.target.reference.runtimeId && privateTarget.reference.spaceId === target.target.reference.spaceId) return EMPTY_REQUESTS
+  const original = memberSpaceInputTarget(value, mountKey)
   if (!original || !object(mount) || original.reference.runtimeId !== target.target.reference.runtimeId || original.reference.spaceId !== target.target.reference.spaceId) return unavailable()
   if (mount.memberInputs === undefined) return EMPTY_REQUESTS
   return object(mount.memberInputs) ? mount.memberInputs : unavailable()
@@ -51,8 +54,8 @@ export function mountedMemberMessages(buckets: Record<string,unknown>, target: S
 }
 /** Only one private intent changes. The optional window layout and all opaque neighbours are untouched. */
 export function editMountedMemberInput(value: unknown, mountKey: string, target: SpaceMountMemberTarget, operationId: string,
-  update: (current: MountedMemberInput | undefined) => MountedMemberInput): Record<string, unknown> {
-  const entries = mountedSpaceInputs(value), mount = entries[mountKey]
+  update: (current: MountedMemberInput | undefined) => MountedMemberInput, privateTarget?: SpaceMountRecord): Record<string, unknown> {
+  const entries = privateTarget ? ensureMemberSpaceInput(value,mountKey,privateTarget) : mountedSpaceInputs(value), mount = entries[mountKey]
   if (!object(mount)) return unavailable()
   const before = mountedMemberRequests(value,mountKey,target), current = before[operationId] === undefined ? undefined : mountedMemberInput(before[operationId],target,operationId), next = update(current)
   mountedMemberInput(next,target,operationId)
@@ -65,10 +68,11 @@ export function sameMountedMemberInput(a: MountedMemberInput, b: MountedMemberIn
   return configValuesEqual(a.target,b.target) && configValuesEqual(a.request,b.request)
 }
 
-export function mountedMemberDraft(value: unknown, mountKey: string, tabId: string, target: SpaceMountMemberTarget): string {
+export function mountedMemberDraft(value: unknown, mountKey: string, tabId: string, target: SpaceMountMemberTarget, privateTarget?: SpaceMountRecord): string {
   const entries = mountedSpaceInputs(value), mount = entries[mountKey]
+  if (mount === undefined && privateTarget && spaceMountKey(privateTarget.reference) === mountKey && privateTarget.reference.runtimeId === target.target.reference.runtimeId && privateTarget.reference.spaceId === target.target.reference.spaceId) return ''
   // Checking the original locator is independent of an optional private layout.
-  const original = mountedSpaceTarget(value,mountKey)
+  const original = memberSpaceInputTarget(value,mountKey)
   if (!original || original.reference.runtimeId !== target.target.reference.runtimeId || original.reference.spaceId !== target.target.reference.spaceId) return unavailable()
   if (!object(mount) || !object(mount.drafts)) return unavailable()
   const key = JSON.stringify([target.target.reference.runtimeId,target.target.reference.spaceId,tabId,target.target.regionId])

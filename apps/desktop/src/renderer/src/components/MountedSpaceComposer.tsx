@@ -3,27 +3,28 @@ import { AgentComposer } from '@agentmux/client-ui/components/AgentComposer'
 import { projectInputReceipt } from '@agentmux/client-ui/input-receipt-projection'
 import type { AgentInputSubmissionReceipt } from '@agentmux/core'
 import type { RuntimeEvent, SessionSnapshot } from '../../../shared/contracts'
-import type { SpaceMountMemberTarget, SpaceMountMemberSurface } from '../../../shared/space-mount'
+import type { SpaceMountMemberTarget, SpaceMountMemberSurface, SpaceMountRecord } from '../../../shared/space-mount'
 import { api } from '../lib/api'
 import { originalInputExplanation } from '../lib/original-input-presentation'
 import { initialNativeComposerBinding } from '../lib/initial-native-composer-binding'
 import { editMountedMemberInput, mountedMemberInputScope, mountedMemberDraft, mountedMemberRequestBuckets, mountedMemberMessages, sameMountedMemberInput, type MountedMemberInput } from '../lib/space-member-input'
 import { checkpointMountedSpaceInputs, useAppStore } from '../store'
+import { editMountedSpaceDraftInput } from '../lib/space-mount-view'
 
 /** Private user intent and original receipts only; Core still owns dispatch, waiting and completion. */
-export function MountedSpaceComposer({ target, surface, subscribe, session, mountKey, tabId, active }: {
+export function MountedSpaceComposer({ target, surface, subscribe, session, mountKey, tabId, active, privateInput }: {
   target: SpaceMountMemberTarget; surface?: SpaceMountMemberSurface | undefined;
   subscribe(listener: (event: RuntimeEvent) => void): () => void;
-  session?: SessionSnapshot; mountKey: string; tabId: string; active: boolean
+  session?: SessionSnapshot; mountKey: string; tabId: string; active: boolean; privateInput?: SpaceMountRecord | undefined
 }) {
   const scope = mountedMemberInputScope(target), targetKey = JSON.stringify([scope,target.target.expectedRun.runId])
   const live = useRef({ scope, targetKey, mounted: true }); live.current.scope = scope; live.current.targetKey = targetKey
   const revision = useRef(0), preparing = useRef<symbol | null>(null)
   const raw = useAppStore(state => {
-    try { return mountedMemberRequestBuckets(state.mountedSpaceInputs,mountKey,target) } catch { return undefined }
+    try { return mountedMemberRequestBuckets(state.mountedSpaceInputs,mountKey,target,privateInput) } catch { return undefined }
   })
   const savedDraft = useAppStore(state => {
-    try { return mountedMemberDraft(state.mountedSpaceInputs,mountKey,tabId,target) } catch { return '' }
+    try { return mountedMemberDraft(state.mountedSpaceInputs,mountKey,tabId,target,privateInput) } catch { return '' }
   })
   const [buffer,setBuffer] = useState({ key:targetKey,text:savedDraft }), [issue,setIssue] = useState<string>(), [busy,setBusy] = useState(false)
   const receipts = useRef<Record<string,AgentInputSubmissionReceipt>>({})
@@ -33,12 +34,12 @@ export function MountedSpaceComposer({ target, surface, subscribe, session, moun
   useEffect(() => { live.current.mounted = true; return () => { live.current.mounted = false } },[])
   function retain(input: MountedMemberInput, update: (current:MountedMemberInput)=>MountedMemberInput) {
     useAppStore.setState(state => ({mountedSpaceInputs:editMountedMemberInput(state.mountedSpaceInputs,mountKey,input.target,input.request.operationId,
-      current => current && !sameMountedMemberInput(current,input) ? current : update(current ?? input))}))
+      current => current && !sameMountedMemberInput(current,input) ? current : update(current ?? input),privateInput)}))
   }
   function observe(receipt:AgentInputSubmissionReceipt, original?:MountedMemberInput) {
     const key=receipt.key
     if(key.kind!=='prompt'||key.agentSessionId!==target.target.agentSessionId)return
-    const candidates=original?[original]:mountedMemberMessages(mountedMemberRequestBuckets(useAppStore.getState().mountedSpaceInputs,mountKey,target),target)
+    const candidates=original?[original]:mountedMemberMessages(mountedMemberRequestBuckets(useAppStore.getState().mountedSpaceInputs,mountKey,target,privateInput),target)
       .flatMap(row=>row.input&&row.input.request.operationId===key.submissionId&&row.input.target.target.expectedRun.runId===key.expectedRun.runId?[row.input]:[])
     // Ambiguous retained carriers never choose a first request; each can be explicitly checked.
     if(candidates.length!==1)return
@@ -53,7 +54,7 @@ export function MountedSpaceComposer({ target, surface, subscribe, session, moun
   useEffect(()=>subscribe(event=>{if(event.event.type==='agent-input')try{observe(event.event.receipt)}catch(cause){setIssue(cause instanceof Error?cause.message:String(cause))}}),[subscribe,scope])
   function change(value:string) {
     ++revision.current;setBuffer({key:targetKey,text:value})
-    try{useAppStore.getState().editSpaceMountDraft(mountKey,tabId,target.target.regionId,value)}catch(cause){setIssue(cause instanceof Error?cause.message:String(cause))}
+    try{if(privateInput)useAppStore.setState(state=>({mountedSpaceInputs:editMountedSpaceDraftInput(state.mountedSpaceInputs,mountKey,tabId,target.target.regionId,value,undefined,privateInput)}));else useAppStore.getState().editSpaceMountDraft(mountKey,tabId,target.target.regionId,value)}catch(cause){setIssue(cause instanceof Error?cause.message:String(cause))}
   }
   async function send(input?:MountedMemberInput) {
     if(preparing.current)return

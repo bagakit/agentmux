@@ -1,5 +1,7 @@
+import { SpaceSourceReaders } from './SpaceSourceReaders'
 import { LocalRetainedInputsPanel } from './LocalRetainedInputs'
 import { MountedSpaceFocus } from './MountedSpaceFocus'
+import { OrdinarySpaceMemberFocus } from './OrdinarySpaceMemberFocus'
 import { TextInput } from '@agentmux/client-ui/input'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -453,7 +455,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
         <button type="button" className="small-button" onClick={dismissMoteChoices}>Dismiss location choices</button>
       </div> : null}
   </> : undefined
-  return <section className={`global-board-surface global-focus-surface ${showWorkspace ? 'global-board-surface--session-open' : ''}`} aria-label="Focus" data-desktop-focus-view="list" data-focus-reply-lines={replyLines} data-focus-topic-presentation={topicPresentation} hidden={!surfaceVisible} inert={!visible} aria-hidden={!surfaceVisible} style={{ display: surfaceVisible ? undefined : 'none', '--focus-workspace-width': `calc(${workspaceRatio * 100}% - 6px)`, '--focus-reply-lines': replyLines, '--focus-card-track-height': `${focusCardTrackHeight(replyLines)}px` } as CSSProperties}>
+  return <SpaceSourceReaders><section className={`global-board-surface global-focus-surface ${showWorkspace ? 'global-board-surface--session-open' : ''}`} aria-label="Focus" data-desktop-focus-view="list" data-focus-reply-lines={replyLines} data-focus-topic-presentation={topicPresentation} hidden={!surfaceVisible} inert={!visible} aria-hidden={!surfaceVisible} style={{ display: surfaceVisible ? undefined : 'none', '--focus-workspace-width': `calc(${workspaceRatio * 100}% - 6px)`, '--focus-reply-lines': replyLines, '--focus-card-track-height': `${focusCardTrackHeight(replyLines)}px` } as CSSProperties}>
     <FocusToolbar onOpenCollaboration={mapContext?.kind === 'agent' ? () => useAppStore.getState().openCollaborationMap({ kind: 'focus', subject: { hostId: mapContext.control?.hostId ?? mapContext.hostId, agentSessionId: mapContext.control?.agentSessionId ?? mapContext.id }, name: mapContext.name }) : undefined} active={visible} selectedId={shownSessionId} selected={selected} tab={selectedTab} reference={projection?.selection.length === 1 ? projection.selection[0] : undefined} onReview={() => setRequestId(shownSessionId)} onCloseWorkspace={closeWorkspace} regionOnly={regionOnly} onToggleRegion={projection ? onToggleRegion : undefined}>
       <div className="focus-filters">
         <div className="global-board-toolbar__controls">
@@ -470,6 +472,13 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     <div ref={focusLayoutRef} className="global-focus-layout">
       <div className="global-board-main global-focus-main" data-agent-reveal={agentReveal ? true : undefined}>
       <MountedSpaceFocus visible={visible} query={query} />
+      <OrdinarySpaceMemberFocus visible={visible} query={query} onSelect={reference => {
+        if (onSelectLocation) onSelectLocation(reference)
+        else {
+          const surface = tabs[reference.tabId]?.regions[reference.regionId]
+          if (surface?.kind === 'agent') focusExecutionSession(surface.sessionId, reference)
+        }
+      }} />
       {agentReveal ? <div className="focus-agent-reveal" role="status" aria-label="Focus Agent reveal">
         <span>{revealedContext ? revealOutsideFilters ? 'Showing ' + revealedContext.context.name + ' outside current filters.' : 'Located ' + revealedContext.context.name + '.'
           : 'Original Context is unconfirmed · ' + agentReveal.hostId + ' · ' + agentReveal.agentSessionId + '. The current filters and work are kept.'}</span>{' '}
@@ -563,5 +572,5 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     {visible && requestId ? <AttentionRequestPanel sessionId={requestId} onClose={() => setRequestId(null)} onReturnFocus={() => {
       if (useAppStore.getState().mainSurface === 'agents') searchRef.current?.focus()
     }} onSessionChange={focusExecutionSession} /> : null}
-  </section>
+  </section></SpaceSourceReaders>
 }

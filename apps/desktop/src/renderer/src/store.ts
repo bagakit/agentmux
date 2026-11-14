@@ -2,6 +2,7 @@ import { openSourceFolderInput } from './lib/space-mount-view'
 import { observeMountedSpaceWindow } from './lib/mounted-space-observation'
 import { editMountedAgentOpen, editMountedLauncherSelection, type MountedAgentOpenInput, type MountedLauncherSelection, type MountedLauncherSlot } from './lib/space-mount-launch'
 import { editMountedSpaceInput, editMountedSpaceDraftInput, editMountedRegistration, mountedSpaceInput, mountedSpaceTarget, acceptsMountedSnapshot, type MountedSpaceObservation, type MountedSpaceRegistrationInput } from './lib/space-mount-view'
+import { ordinarySpaceMember, type OrdinaryMemberReference } from './lib/ordinary-space-member'
 import { observeMountedSessions, type MountedSessionObservation, type MountedSessionUpdate } from './lib/space-mount-sessions'
 import { spaceMountKey, type SpaceMountRecord, type SpaceMountView } from '../../shared/space-mount'
 import type { SpaceSnapshot } from '@agentmux/core'
@@ -4563,6 +4564,14 @@ export type AgentRegionReference = { tabId: string; regionId: string; agentSessi
 /** The existing Core document owns execution identity; display placement never supplies a Host. */
 /** Availability of the original spatial owner, not Agent or Run health. */
 export function agentRegionLocationsKnown(): boolean { return coreSpatialPersistence?.current !== null && coreSpatialPersistence?.current !== undefined }
+
+/** The accepted Core document locates a foreign occurrence; the member Core still owns access. */
+export function ordinaryAgentSpaceMember(reference: OrdinaryMemberReference) {
+  const state = useAppStore.getState(), locals = state.config?.hosts.filter(host => host.kind === 'local') ?? []
+  const observed = sessionPresentationById(state.sessions).get(reference.sessionId)
+  return ordinarySpaceMember(coreSpatialPersistence?.current?.graph, reference, locals.length === 1 ? locals[0]!.id : undefined,
+    observed?.kind === 'agent' ? observed : undefined)
+}
 
 /** Immutable accepted Core bindings let structural consumers observe qualification changes. */
 export function agentRegionLocationBindings(): readonly import('@agentmux/core/spatial-graph').AgentMuxSpatialGraph['regions'][number][] | null {

@@ -1,3 +1,4 @@
+import { SpaceSourceReaders } from './components/SpaceSourceReaders'
 import { AgentCollaborationMap } from './components/AgentCollaborationMap'
 import { workbenchDocuments, subscribeWorkbenchWindows, workbenchDocumentIdentity } from './lib/workbench-window-registry'
 import { useWorkbenchWindows, WorkbenchWindowNotices, focusWorkbenchWindow } from './lib/workbench-windows'
@@ -104,7 +105,9 @@ function useStableWorkbenchViewTargets(current: WorkbenchViewTargets): Workbench
   return next
 }
 
-export function App() {
+export function App() { return <SpaceSourceReaders><AppBody /></SpaceSourceReaders> }
+
+function AppBody() {
   useEffect(() => observeNotebookLibrary(), [])
   useEffect(() => observeLastSeenBrowserFavicons(), [])
   const workflowComponentGallery = typeof window !== 'undefined' &&

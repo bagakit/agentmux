@@ -1,3 +1,4 @@
+import { useSpaceSourceReader as useMountedSpaceReader } from './SpaceSourceReaders'
 import { MountedSpaceAgent } from './MountedSpaceAgent'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Panel, PanelGroup, type ImperativePanelGroupHandle } from 'react-resizable-panels'
@@ -24,45 +25,7 @@ const AgentIcon = semanticIconComponent('object.agent')
 const RefreshIcon = semanticIconComponent('action.refresh')
 
 /** One visible reader per source Scope, shared by its Workbench and Focus presentation. */
-export function useMountedSpaceReader(target: SpaceMountRecord | undefined, active: boolean) {
-  const id = JSON.stringify(target), [refresh, setRefresh] = useState(0)
-  const foreground = useWorkbenchDocumentVisibility(useWorkbenchDocument())
-  useEffect(() => {
-    if (!target || !active || !foreground) return
-    const controller = new AbortController(), observe = useAppStore.getState().observeSpaceMount
-    observe(target, { reading: true, error: undefined })
-    let dispose: (() => void) | undefined
-    void api.spaceMounts.watch({ hostId: target.hostId, reference: target.reference }, event => {
-      if (controller.signal.aborted) return
-      if (event.type === 'snapshot') observe(target, { snapshot: event.snapshot, reading: false, error: undefined })
-      else observe(target, { reading: false, error: event.error.message })
-    }, controller.signal).then(reply => {
-      if (controller.signal.aborted) { reply.dispose(); return }
-      dispose = reply.dispose
-      observe(target, { snapshot: reply.initial, reading: false, error: undefined })
-    }).catch(error => {
-      if (!controller.signal.aborted) observe(target, { reading: false, error: error instanceof Error ? error.message : String(error) })
-    })
-    return () => { controller.abort(); dispose?.() }
-  }, [id, active, foreground, refresh])
-  useEffect(() => {
-    if (!target || !active || !foreground) return
-    const controller = new AbortController(), observe = useAppStore.getState().observeSpaceMountSessions
-    observe(target, { begin: true })
-    let dispose: (() => void) | undefined
-    void api.spaceMounts.sessions({ hostId: target.hostId, reference: target.reference }, event => {
-      if (controller.signal.aborted) return
-      try { if (event.type === 'observation') observe(target, { observation: event.observation }); else observe(target, { error: event.error.message }) }
-      catch (cause) { observe(target, { error: cause instanceof Error ? cause.message : String(cause) }) }
-    }, controller.signal).then(reply => {
-      if (controller.signal.aborted) { reply.dispose(); return }
-      dispose = reply.dispose; observe(target, { opening: reply.initial })
-    }).catch(cause => { if (!controller.signal.aborted) observe(target, { error: cause instanceof Error ? cause.message : String(cause) }) })
-    return () => { controller.abort(); dispose?.() }
-  }, [id, active, foreground, refresh])
-  return () => setRefresh(value => value + 1)
-}
-
+export { useSpaceSourceReader as useMountedSpaceReader } from './SpaceSourceReaders'
 /** The original panel/ratio gesture owner, writing only this client's qualified private view. */
 function MountedRegionSplit({ node, path, source, visible, commit, children }: {
   node: { ratio: number; direction: 'horizontal' | 'vertical' }; path: string; source: string; visible: boolean

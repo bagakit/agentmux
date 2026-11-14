@@ -69,6 +69,8 @@ import { workbenchNavigationTabs } from '../lib/workbench-navigation-catalog'
 import { useWorkbenchRetainedRegionId, useWorkbenchBrowserPresentation, focusedPrimaryWorkbenchTarget, focusedSecondaryWorkbenchTarget, committedPrimaryWorkbenchTarget, committedSecondaryWorkbenchTarget, workbenchHomePresentationReferences, workbenchBrowserWindowTarget, WorkbenchBrowserTargetsContext, workbenchBrowserStageHostId, workbenchSessionStageHostId, type BrowserControlConfirmation, type WorkbenchViewTarget, type WorkbenchViewTargets } from '../lib/workbench-presentation'
 import { opensContextMenuFromKeyboard } from '../lib/context-menu-key'
 import { SessionPane } from './SessionPane'
+import { OrdinarySpaceMemberViewport } from './OrdinarySpaceMemberViewport'
+import { SpaceSourceReaders } from './SpaceSourceReaders'
 import { SessionRegionHost } from './SessionRegionHost'
 import { WorkbenchTabContextMenu } from './WorkbenchTabContextMenu'
 import { tabRenameTargets, useWorkbenchTabRename, WorkbenchTabRenameFeedback } from './WorkbenchTabNaming'
@@ -545,7 +547,7 @@ const SurfaceContentBody = memo(function SurfaceContentBody({
   independentDocument: boolean
 }) {
   if (isSessionSurface(surface)) {
-    return (
+    const original = (
       <SessionPane
         sessionId={surface.sessionId}
         surfaceKind={surface.kind}
@@ -566,6 +568,8 @@ const SurfaceContentBody = memo(function SurfaceContentBody({
         }}
       />
     )
+    return surface.kind === 'agent' ? <OrdinarySpaceMemberViewport tabId={tabId} regionId={surface.regionId} sessionId={surface.sessionId}
+      visible={surfaceVisible && !parked} active={surfaceVisible && !parked}>{original}</OrdinarySpaceMemberViewport> : original
   }
   if (surface.kind === 'git') {
     return <Suspense fallback={<FullPageLoadingSurface scope="region" phase="loading" eyebrow="Git" title="Opening Git" detail="Restoring the saved Git reading target." />}>
@@ -2243,5 +2247,5 @@ export function WorkspaceWorkbench({
     </DndContext>
     </WorkbenchProjectionContext.Provider>
   )
-  return workbench
+  return <SpaceSourceReaders>{workbench}</SpaceSourceReaders>
 }

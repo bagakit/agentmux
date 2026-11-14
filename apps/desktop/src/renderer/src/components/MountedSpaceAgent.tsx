@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { RuntimeEvent, SessionSnapshot } from '../../../shared/contracts'
-import type { SpaceMountMemberSurface, SpaceMountMemberTarget } from '../../../shared/space-mount'
+import type { SpaceMountMemberSurface, SpaceMountMemberTarget, SpaceMountRecord } from '../../../shared/space-mount'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
 import { spaceMemberTerminalSource } from '../lib/space-member-terminal'
@@ -8,7 +8,7 @@ import { MountedSpaceComposer } from './MountedSpaceComposer'
 import { TerminalView } from './TerminalView'
 
 /** One exact member reader. Full Session facts stay here, never in the observer's Session map. */
-export function MountedSpaceAgent({ target, visible, active, mountKey, tabId }: { target: SpaceMountMemberTarget; visible: boolean; active: boolean; mountKey: string; tabId: string }) {
+export function SpaceMemberWorkface({ target, visible, active, mountKey, tabId, privateInput, onRefreshSource }: { target: SpaceMountMemberTarget; visible: boolean; active: boolean; mountKey: string; tabId: string; privateInput?: SpaceMountRecord | undefined; onRefreshSource?: (() => void) | undefined }) {
   const key = JSON.stringify([target.hostId, target.target.reference.runtimeId, target.target.reference.spaceId, target.target.regionId,
     target.target.runtimeId, target.target.agentSessionId, target.target.expectedRun.runId])
   const currentKey = useRef(key); currentKey.current = key
@@ -52,6 +52,7 @@ export function MountedSpaceAgent({ target, visible, active, mountKey, tabId }: 
   }, [key, visible, listeners, attempt, subscribe])
   const observed = read.key === key ? read : undefined, original = reader?.key === key ? reader : undefined
   async function refresh() {
+    onRefreshSource?.()
     if (!original) { setAttempt(value => value + 1); return }
     try {
       const session = await original.surface.call('read', {})
@@ -67,6 +68,7 @@ export function MountedSpaceAgent({ target, visible, active, mountKey, tabId }: 
     {observed?.session && original ? <div className="mounted-space-agent__terminal"><TerminalView session={observed.session} sessionSource={original.source}
       themeId={appearance?.terminalTheme ?? 'graphite'} {...(appearance?.terminalFontSize === undefined ? {} : { fontSize: appearance.terminalFontSize })} interactiveResize visible={visible} autoFocus={active} /></div>
       : <p role="status">{hasIssue ? 'The original member observation is unconfirmed.' : 'Reading the original Agent and terminal…'}</p>}
-    <MountedSpaceComposer target={target} {...(original?{surface:original.surface}:{})} subscribe={subscribe} {...(observed?.session?{session:observed.session}:{})} mountKey={mountKey} tabId={tabId} active={visible&&active} />
+    <MountedSpaceComposer target={target} {...(original?{surface:original.surface}:{})} subscribe={subscribe} {...(observed?.session?{session:observed.session}:{})} mountKey={mountKey} tabId={tabId} privateInput={privateInput} active={visible&&active} />
   </div>
 }
+export { SpaceMemberWorkface as MountedSpaceAgent }
