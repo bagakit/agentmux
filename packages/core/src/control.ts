@@ -592,6 +592,7 @@ export type AgentMuxControlDemandActivityAppendRequest = RequestBase & {
 export type AgentMuxControlDemandActivityInspectRequest = RequestBase & {
   operation: 'demand.activity.inspect'; demandId: string
 }
+export type AgentMuxControlDemandActivityCollectionRequest = RequestBase & { operation: 'demand.activity.collection'; demandIds: string[] }
 export type AgentMuxControlDemandActivityReadRequest = RequestBase & { operation: 'demand.activity.read'; demandId: string }
 /**
  * 在一个已经开着的 Browser 上跑一段 Agent 写的程序。
@@ -775,6 +776,7 @@ export type AgentMuxControlRequest =
   | AgentMuxControlDemandActivityAppendRequest
   | AgentMuxControlDemandActivityInspectRequest
   | AgentMuxControlDemandActivityReadRequest
+  | AgentMuxControlDemandActivityCollectionRequest
   | AgentMuxControlDemandAssignRequest
   | AgentMuxControlDemandStartRequest
   | AgentMuxControlDemandContinuationActionRequest
@@ -917,6 +919,7 @@ export type AgentMuxControlResult =
   | { operation: 'demand.decision-log'; demandId: string; decisions: import('@agentmux/demand').DemandDecision[] }
   | { operation: 'demand.activity.append'; demand: AgentMuxDemand; activity: AgentMuxDemandActivity; receipt: { demandId: string; requestId: string; activityId: string; diskDurability: 'confirmed'; replayed: boolean } }
   | { operation: 'demand.activity.inspect'; demandId: string; requestId: string; activity: AgentMuxDemandActivity | null; diskDurability: 'confirmed' }
+  | { operation: 'demand.activity.collection'; groups: Array<{ demandId: string; activities: AgentMuxDemandActivity[] }>; diskDurability: 'confirmed' }
   | { operation: 'demand.activity.read'; demandId: string; activities: AgentMuxDemandActivity[]; diskDurability: 'confirmed' }
   // result 是程序的返回值（任意 JSON 值，也可能没有）；logs 是它 console 出来的每一行，**失败时照样有**
   // ——程序炸掉之前打的那几行，往往正是 Agent 需要的。outcome 说清这是四类结局里的哪一类。
@@ -1304,6 +1307,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   , 'demand.decision-log': 'short'
   , 'demand.activity.append': 'short'
   , 'demand.activity.inspect': 'short'
+  , 'demand.activity.collection': 'short'
   , 'demand.activity.read': 'short'
 }
 

@@ -184,6 +184,7 @@ export type DemandActivityInspection = {
   diskDurability: 'confirmed'
 }
 export type DemandActivityRead = { demandId: string; activities: DemandActivity[]; diskDurability: 'confirmed' }
+export type DemandActivityCollection = { groups: Array<{ demandId: string; activities: DemandActivity[] }>; diskDurability: 'confirmed' }
 
 export type DemandNameChangePage = {
   revision: number

@@ -3297,15 +3297,18 @@ export class AgentMuxRpcService {
         }
         const { limit: _limit, since: _since, ...goalFilters } = p
         const goals = await this.goals({ ...goalFilters, all: true })
-        // The original Goal list carries one confirmed file snapshot. Re-reading
-        // it once per Goal would clone the whole Store repeatedly and mix revisions.
-        const records = goals.map(goal => {
-          if (!Array.isArray(goal.activities)) throw new AgentMuxError('The original Goal activity projection is unavailable. Original Goals and Agents remain available.', 'CONTROL_UNAVAILABLE')
-          return goal.activities.map(activity => ({ goalId: goal.id, ...activity }))
-        })
+        // Goal selection and durable activity confirmation are separate observations.
+        // Confirm the exact selected IDs once at the original Store, without repeated whole-Store reads.
+        const selected = goals.map(goal => goal.id)
+        const read = selected.length ? await this.execute(this.request('demand.activity.collection', { demandIds: selected })) : null
+        if (read && (read.operation !== 'demand.activity.collection' || read.diskDurability !== 'confirmed' ||
+          read.groups.length !== selected.length || read.groups.some((group, index) => group.demandId !== selected[index])))
+          throw new AgentMuxError('The original Goal activity collection returned another selected scope.', 'CONTROL_PROTOCOL_ERROR')
+        const records = read && read.operation === 'demand.activity.collection'
+          ? read.groups.map(group => group.activities.map(activity => ({ goalId: group.demandId, ...activity }))) : []
         const matching = records.flat().filter(activity => since === undefined || activity.createdAt >= since)
         const activity = matching.slice(-limit)
-        result = { activity, diskDurability: 'confirmed', coverage: { scope: 'matching-goals', order: 'goal-order-then-append',
+        result = { activity, diskDurability: 'confirmed', coverage: { scope: 'matching-goals', observation: 'selected-goals-then-confirmed-activity', order: 'goal-order-then-append',
           matchedGoalCount: goals.length, totalActivityCount: matching.length, returnedActivityCount: activity.length,
           limit, truncated: matching.length > activity.length } }; break
       }

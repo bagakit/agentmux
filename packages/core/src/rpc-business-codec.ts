@@ -115,12 +115,12 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
 }
 
 function goalKeys(value: Record<string, unknown>, inverse: boolean): Record<string, unknown> {
-  const pairs = inverse ? { goalId: 'demandId', parentGoalId: 'parentDemandId', goal: 'demand', goals: 'demands' }
-    : { demandId: 'goalId', parentDemandId: 'parentGoalId', demand: 'goal', demands: 'goals' }
+  const pairs = inverse ? { goalIds: 'demandIds', goalId: 'demandId', parentGoalId: 'parentDemandId', goal: 'demand', goals: 'demands' }
+    : { demandIds: 'goalIds', demandId: 'goalId', parentDemandId: 'parentGoalId', demand: 'goal', demands: 'goals' }
   return Object.fromEntries(Object.entries(value).map(([key, data]) => [
     (pairs as Record<string, string>)[key] ?? key,
     ['receipt', 'goal', 'demand', 'patch'].includes(key) && data && typeof data === 'object' ? goalKeys(data as Record<string, unknown>, inverse)
-      : ['decisions', 'goals', 'demands'].includes(key) && Array.isArray(data) ? data.map(item => goalKeys(item, inverse)) : data
+      : ['decisions', 'goals', 'demands', 'groups'].includes(key) && Array.isArray(data) ? data.map(item => goalKeys(item, inverse)) : data
   ]))
 }
 function operationKeys(value: Record<string, unknown>, inverse: boolean): Record<string, unknown> {
@@ -351,6 +351,11 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
       if (actual.resource !== request.resource || (actual.item as Record<string, unknown>).id !== request.id) fail()
       break
     case 'settings.resource.remove': if (actual.resource !== request.resource || actual.id !== request.id) fail(); break
+    case 'demand.activity.collection': {
+      const groups = actual.groups as Array<{ demandId: string }>
+      if (groups.length !== request.demandIds.length || groups.some((group, index) => group.demandId !== request.demandIds[index])) fail()
+      break
+    }
     case 'demand.discuss': case 'demand.confirm': case 'demand.accept':
     case 'demand.activity.read': case 'demand.continuation-action': case 'demand.show': case 'demand.update': case 'demand.assign': case 'demand.start': case 'demand.handoff':
     case 'demand.delete': case 'demand.link-session': case 'demand.link-project': case 'demand.decision-log':

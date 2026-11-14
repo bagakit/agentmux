@@ -185,6 +185,7 @@ export function createHostGoals(options: {
       const original = await demands.inspectActivity(req.demandId, req.requestId)
       return { operation: req.operation, demandId: original.demandId, requestId: original.operationId, activity: original.activity, diskDurability: original.diskDurability }
     }
+    if (req.operation === 'demand.activity.collection') return { operation: req.operation, ...await demands.readActivityCollection(req.demandIds) }
     if (req.operation === 'demand.activity.read') return { operation: req.operation, ...await demands.readActivities(req.demandId) }
     if (req.operation === 'demand.discuss') return await discussions.execute(req, context, name?.actor.verified && name.actor.id && ['agent', 'user', 'device'].includes(name.actor.kind)
       ? { actor: { kind: name.actor.kind as 'agent' | 'user' | 'device', id: name.actor.id }, ...(name.location.hostId ? { hostId: name.location.hostId } : {}), ...(name.location.callerRunId ? { runId: name.location.callerRunId } : {}) } : undefined)

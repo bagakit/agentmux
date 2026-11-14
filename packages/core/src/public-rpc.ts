@@ -105,7 +105,7 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'goal.start': 'demand.start', 'goal.continuation-action': 'demand.continuation-action', 'goal.handoff': 'demand.handoff',
   'goal.link-session': 'demand.link-session', 'goal.link-project': 'demand.link-project',
   'goal.decisions': 'demand.decision-log', 'goal.focus': 'focus',
-  'goal.activity.read': 'demand.activity.read', 'goal.activity.append': 'demand.activity.append', 'goal.activity.inspect': 'demand.activity.inspect',
+  'goal.activity.collection': 'demand.activity.collection', 'goal.activity.read': 'demand.activity.read', 'goal.activity.append': 'demand.activity.append', 'goal.activity.inspect': 'demand.activity.inspect',
   'app.inspect': 'inspect.client', 'app.focus': 'focus',
   'settings.inspect': 'settings.get', 'settings.set': 'settings.set',
   'settings.hosts.create': 'settings.hosts.create', 'settings.hosts.configure': 'settings.hosts.configure', 'settings.hosts.delete': 'settings.hosts.delete',
@@ -167,8 +167,8 @@ type BusinessParams<M extends ControlMethod> = OmitEach<OperationOwner<AgentMuxC
 type BusinessResult<M extends ControlMethod> = OmitEach<OperationOwner<AgentMuxControlResult,
   Owner<M>>, 'operation'>
 type GoalKeys<T> = T extends readonly (infer E)[] ? GoalKeys<E>[] : T extends object ? {
-  [K in keyof T as K extends 'demandId' ? 'goalId' : K extends 'parentDemandId' ? 'parentGoalId' : K extends 'demand' ? 'goal' : K extends 'demands' ? 'goals' : K]:
-    K extends 'receipt' | 'goal' | 'demand' | 'goals' | 'demands' | 'decisions' | 'patch' ? GoalKeys<T[K]> : T[K]
+  [K in keyof T as K extends 'demandIds' ? 'goalIds' : K extends 'demandId' ? 'goalId' : K extends 'parentDemandId' ? 'parentGoalId' : K extends 'demand' ? 'goal' : K extends 'demands' ? 'goals' : K]:
+    K extends 'receipt' | 'goal' | 'demand' | 'goals' | 'demands' | 'decisions' | 'groups' | 'patch' ? GoalKeys<T[K]> : T[K]
 } : T
 type OperationKeys<T> = T extends object ? {
   [K in keyof T as K extends 'requestId' ? 'operationId' : K]: K extends 'request' | 'report' | 'binding' | 'receipt' ? OperationKeys<T[K]> : T[K]
@@ -485,7 +485,7 @@ type NativeResult = HostRouteResults & SpaceMemberResults & SpaceSessionsResults
   'app.search': import('./search-contract.js').AgentMuxSearchPage
   'app.snapshot': AgentMuxRpcSnapshot
   'goal.activity.history': import('./goal-activity-history.js').GoalActivityHistory
-  'goal.activity': { activity: Array<import('./control.js').AgentMuxDemandActivity & { goalId: string }>; diskDurability: 'confirmed'; coverage: { scope: 'matching-goals'; order: 'goal-order-then-append'; matchedGoalCount: number; totalActivityCount: number; returnedActivityCount: number; limit: number; truncated: boolean } }
+  'goal.activity': { activity: Array<import('./control.js').AgentMuxDemandActivity & { goalId: string }>; diskDurability: 'confirmed'; coverage: { scope: 'matching-goals'; observation: 'selected-goals-then-confirmed-activity'; order: 'goal-order-then-append'; matchedGoalCount: number; totalActivityCount: number; returnedActivityCount: number; limit: number; truncated: boolean } }
   'system.storage': import('./run-storage-observation.js').AgentMuxRunStorageObservation
   'system.doctor': AgentMuxDoctorReport
   'system.endpoint': { protocol: 'jsonrpc-2.0'; framing: 'json-lines'; endpoint: AgentMuxRpcEndpoint; connection: 'responded'; publication: import('./control-endpoint-state.js').AgentMuxControlEndpointState | null; methods?: AgentMuxRpcMethod[] }

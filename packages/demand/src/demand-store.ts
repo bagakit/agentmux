@@ -22,6 +22,7 @@ import {
   type DemandActivity,
   type DemandActivityInspection,
   type DemandActivityRead,
+  type DemandActivityCollection,
   type DemandDecision,
   type DemandReceipt,
   type DemandStoreListener,
@@ -1228,14 +1229,24 @@ export class DemandStore {
   }
 
   async readActivities(id: string): Promise<DemandActivityRead> {
-    return enqueue(this.root, async () => {
-      return this.withWriterLock(async () => {
-        const snapshot = await this.readSnapshot()
-        const demand = findDemand(snapshot, id, this.storePath)
-        await this.confirmSnapshot()
-        return { demandId: id, activities: clone(demand.activities), diskDurability: 'confirmed' }
+    const read = await this.readActivityCollection([id])
+    return { ...read.groups[0]!, diskDurability: read.diskDurability }
+  }
+
+  /** One original file confirmation for the exact selected Goals, without cloning unrelated records per Goal. */
+  async readActivityCollection(ids: readonly string[]): Promise<DemandActivityCollection> {
+    const selected = [...ids]
+    if (!selected.length || new Set(selected).size !== selected.length || selected.some(id => typeof id !== 'string' || !id.trim()))
+      throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Activity collection needs unique exact Goal IDs.')
+    return enqueue(this.root, async () => this.withWriterLock(async () => {
+      const read = await this.readConfirmedSnapshot()
+      const groups = selected.map(id => {
+        const demand = read.demandsById.get(id) ?? findDemand(read.snapshot, id, this.storePath)
+        return { demandId: id, activities: clone(demand.activities) }
       })
-    })
+      await this.confirmSnapshot()
+      return { groups, diskDurability: 'confirmed' }
+    }))
   }
 
   async addDecision(id: string, input: Omit<DemandDecision, 'id' | 'createdAt'> & { id?: string; createdAt?: number }): Promise<DemandReceipt> {

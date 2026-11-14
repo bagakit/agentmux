@@ -1093,8 +1093,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       }
       case 'goal.activity': {
         record(p, ['activity', 'diskDurability', 'coverage']); activity(p.activity); member(p.diskDurability, ['confirmed'])
-        const coverage = record(p.coverage, ['scope', 'order', 'matchedGoalCount', 'totalActivityCount', 'returnedActivityCount', 'limit', 'truncated'])
-        member(coverage.scope, ['matching-goals']); member(coverage.order, ['goal-order-then-append'])
+        const coverage = record(p.coverage, ['scope', 'observation', 'order', 'matchedGoalCount', 'totalActivityCount', 'returnedActivityCount', 'limit', 'truncated'])
+        member(coverage.scope, ['matching-goals']); member(coverage.observation, ['selected-goals-then-confirmed-activity']); member(coverage.order, ['goal-order-then-append'])
         for (const key of ['matchedGoalCount', 'totalActivityCount', 'returnedActivityCount', 'limit']) count(coverage[key])
         if (coverage.returnedActivityCount !== (p.activity as unknown[]).length || Number(coverage.limit) < 1 || Number(coverage.limit) > 1000 ||
           Number(coverage.returnedActivityCount) > Number(coverage.limit) || Number(coverage.totalActivityCount) < Number(coverage.returnedActivityCount) ||

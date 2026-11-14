@@ -553,6 +553,12 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   if (source.operation === 'demand.list') {
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }
   }
+  if (source.operation === 'demand.activity.collection') {
+    if (!Array.isArray(source.demandIds)) throw new AgentMuxError('Activity collection needs unique exact Goal IDs.', 'INVALID_CONTROL_REQUEST')
+    const demandIds = source.demandIds.map(value => id(value, 'Activity Goal ID is invalid.', 'INVALID_CONTROL_REQUEST'))
+    if (!demandIds.length || new Set(demandIds).size !== demandIds.length) throw new AgentMuxError('Activity collection needs unique exact Goal IDs.', 'INVALID_CONTROL_REQUEST')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandIds }
+  }
   if (source.operation === 'demand.show' || source.operation === 'demand.decision-log' || source.operation === 'demand.activity.inspect' || source.operation === 'demand.activity.read') {
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'),
       ...(source.operation === 'demand.show' && source.dispatchOperationId !== undefined ? { dispatchOperationId: id(source.dispatchOperationId, 'Original Goal dispatch operation is invalid.', 'INVALID_CONTROL_REQUEST') } : {}) }
@@ -1664,6 +1670,16 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: {
       demandId: id(result.demandId, 'Goal ID is invalid.', 'CONTROL_PROTOCOL_ERROR'), requestId: id(result.requestId, 'Activity operation is invalid.', 'CONTROL_PROTOCOL_ERROR'),
       activity: result.activity === null ? null : parseControlDemandActivity(result.activity), diskDurability: 'confirmed' } }
+  }
+  if (operation === 'demand.activity.collection') {
+    if (result.diskDurability !== 'confirmed' || !Array.isArray(result.groups)) throw new AgentMuxError('Activity collection is unconfirmed.', 'CONTROL_PROTOCOL_ERROR')
+    const groups = result.groups.map(value => {
+      const group = object(value, 'Activity Goal group is invalid.', 'CONTROL_PROTOCOL_ERROR')
+      if (!Array.isArray(group.activities)) throw new AgentMuxError('Original Goal activities are unavailable.', 'CONTROL_PROTOCOL_ERROR')
+      return { demandId: id(group.demandId, 'Activity Goal ID is invalid.', 'CONTROL_PROTOCOL_ERROR'), activities: group.activities.map(parseControlDemandActivity) }
+    })
+    if (new Set(groups.map(group => group.demandId)).size !== groups.length) throw new AgentMuxError('Activity collection repeats a Goal.', 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { groups, diskDurability: 'confirmed' } }
   }
   if (operation === 'demand.activity.read') {
     if (result.diskDurability !== 'confirmed' || !Array.isArray(result.activities)) throw new AgentMuxError('Activity read is unconfirmed.', 'CONTROL_PROTOCOL_ERROR')
