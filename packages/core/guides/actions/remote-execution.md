@@ -3,7 +3,7 @@
 <!-- amux:content -->
 ## Choose where the project and Agent work
 
-Hosts are the connection foundation in Settings → Environment → Hosts. Remote work
+Hosts are the connection foundation in Settings → Cluster → Hosts. Remote work
 uses those saved Hosts. Preparation can read the selected Host’s home through its
 saved connection; it does not automatically install, upgrade, approve or start an Agent.
 
@@ -51,7 +51,7 @@ configuration alone does not prove a working end-to-end connection.
 ## Start work
 
 Open New Tab or New Agent for the project, then use the work-mode entry beside Agent
-to edit its arrangement. Settings → Environment → Remote first shows existing work;
+to edit its arrangement. Settings → Cluster → Remote first shows existing work;
 choose Set up new work when you want to prepare an Agent. Connecting to or browsing
 a Host does not require a project.
 

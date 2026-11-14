@@ -72,7 +72,7 @@ Remote 管理首先帮助用户回答四个问题：我连接了哪些环境；�
 | --- | --- | --- |
 | 管理入口 / Endpoint | 本客户端正在消费的原业务服务及其能力范围 | 原公共服务与客户端连接事实；CLI 所在机器、接收 Core 的机器和执行机器不混同 |
 | Host | 原 endpoint 范围内的本地或 SSH 稳定路由及连接配置 | 现配置 owner；名称、SSH alias 和地址可编辑，不是跨 endpoint 全局机器 ID，也不证明连接就绪 |
-| Network node / 组网节点 | 原 Core 向访问方发布的身份、资源与共享目录边界 | 原语义 Runtime 的持久身份与本机发布配置 owner；不是另一套 Runtime、物理机器 ID、路由或全网名册 |
+| Node / 组网节点 | 原 Core 向访问方发布的身份、资源与共享目录边界 | 原语义 Runtime 的持久身份与本机发布配置 owner；不是另一套 Runtime、物理机器 ID、路由或全网名册 |
 | ExecutionHost | 该环境上的文件、shell 与目录访问能力 | 原 Host 执行服务；目录可读不代签 Agent Runtime 可用 |
 | 语义 Runtime | 持有 Provider、AgentSession、权限与恢复语义的 Core 服务 | 原执行 Host 上的 Core；持久 Runtime 身份与当前服务进程代次分别表达 |
 | ctxmux Runtime | 服务 PTY、Run、Attachment、ordered bytes、Replay 与 Gap 的运行时 | ctxmux；其身份、物理运行事实和资源读数不由 Desktop 猜测 |
@@ -85,7 +85,7 @@ Remote 管理首先帮助用户回答四个问题：我连接了哪些环境；�
 
 ## 本节点的发布与访问边界
 
-Settings 的 **Network node** 管“这台设备对外提供什么”，**Hosts** 管“我连接谁、对方允许我看什么”，**Remote** 管“在哪里开始或继续工作”。连接、监控与浏览不以选择或登记项目为前提。每台运行 Core 的设备在自己的节点入口配置发布信息；当前 Desktop 的节点页明确本机范围，不把所选远端 Host 冒充自己。
+Settings 的 **Node** 管“这台设备对外提供什么”，**Hosts** 管“我连接谁、对方允许我看什么”，**Remote** 管“在哪里开始或继续工作”。连接、监控与浏览不以选择或登记项目为前提。每台运行 Core 的设备在自己的节点入口配置发布信息；当前 Desktop 的节点页明确本机范围，不把所选远端 Host 冒充自己。
 
 发布配置由原 Core 在自己的持久 Runtime 范围持有，包含规范别名、是否共享系统资源、共享目录白名单、禁止访问的路径以及访客默认进入目录。Desktop 是该公共能力的客户端，不能在 Renderer 配置第二份策略或靠隐藏 UI 实施权限。保存沿准确预期版本与真实持久确认；未知回复先检查原操作，不重放。未保存表单、其原版本基线和待确认操作属于 Desktop 编辑意图，沿[原用户状态持久 owner](persistence.md)保全；恢复只读取原操作，不因重开页面或进程而重新发布，另一 Runtime 不能消费这份意图。发布项失败不关闭健康 Agent、已有连接或原工作面。
 
@@ -99,7 +99,7 @@ Settings 的 **Network node** 管“这台设备对外提供什么”，**Hosts*
 
 ## 入口与观察范围
 
-Remote 在 Settings 中有可发现的独立管理入口，搜索、Overview、Host 身份入口及原设置深链都能到达准确对象。原连接、项目和信任管理能力沿同一 Host owner 承接，不以增加 Remote 为由出现两套可编辑 Host 清单。Settings 的同一 Environment 分组依次提供 Network node、Hosts、Remote 和 Mobile；节点发布、访问路由和工作能力的分工见[本节点的发布与访问边界](#本节点的发布与访问边界)。各页均能独立直达，Remote 不复制 Host 编辑器，Host 也不被归为某一种远程工作模式。Host 工作台保留原 `hosts` 对象与准确导航身份。Phone、外部对话应用和全局 Executor 模板继续由原 owner 管理。
+Remote 在 Settings 中有可发现的独立管理入口，搜索、Overview、Host 身份入口及原设置深链都能到达准确对象。原连接、项目和信任管理能力沿同一 Host owner 承接，不以增加 Remote 为由出现两套可编辑 Host 清单。Settings 的同一 Cluster 分组依次提供 Node、Hosts 和 Remote；节点发布、访问路由和工作能力的分工见[本节点的发布与访问边界](#本节点的发布与访问边界)。各页均能独立直达，Remote 不复制 Host 编辑器，Host 也不被归为某一种远程工作模式。Host 工作台保留原 `hosts` 对象与准确导航身份。Phone、外部对话应用和全局 Executor 模板继续由原 owner 管理。
 
 同一 Host 工作台按总览与监控、项目、应用与访问、连接配置组织任务。切换任务仍持有同一个准确 Host、原草稿与已访问操作，不建立三套选择器、清单或配置副本。总览承接拓扑与分源观察；连接配置承接原编辑、Test 与 Core 维护；应用与访问承接该 Host 的真实执行器盘点及跨 Host 来源核验、真人批准。全局模板不冒充远端已安装应用。
 
