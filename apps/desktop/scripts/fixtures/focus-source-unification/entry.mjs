@@ -7,6 +7,7 @@ import { api } from '../../../src/renderer/src/lib/api'
 import { checkpointAgentOperations, restorePersistedUiState, useAppStore } from '../../../src/renderer/src/store'
 import { restorePersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
+import { desktopSpatialGraph } from '../../../src/renderer/src/lib/desktop-spatial-state'
 import { spaceMountKey } from '../../../src/shared/space-mount'
 import '../../../src/renderer/src/styles/index.css'
 import { prepareTakeoverFeedback } from './feedback.mjs'
@@ -19,9 +20,22 @@ const config=await api.config.get(),initial=await api.sessions.snapshot(),base=i
 if(!base?.control?.run?.runId)throw Error('Existing typed preview Agent required')
 const {pendingInteraction:_pending,...agent}=base,now=Date.now(),path='/original/analysis-project'
 const workspace={id:'ordinary-analysis',hostId:'local',kind:'folder',path,name:'业务分析项目'}
+const branches = window.__taskLayoutScene ? [
+  { name: 'web', taskId: 'branch-web' },
+  { name: 'api', taskId: 'branch-api' },
+].map(({name, taskId}) => ({ workspace: { ...workspace, id: 'analysis-' + name, name,
+  path: path + '/.worktrees/' + name, repoPath: path, branch: name }, taskId })) : []
+const workspaces = [workspace, ...branches.map(branch => branch.workspace)]
 const definitions=[['working','核对发布版本与业务数据','working','running',now],['reading','核查跨版本分析记录','working','running',now-20*60000],['interrupted','继续上次保留的分析任务','disconnected','interrupted',now]]
 const sessions=definitions.map(([id,label,state,processState,at])=>({...agent,id,hostId:'local',workspacePath:path,label,processState,status:{state,source:'native-hook',observedAt:at},semanticStatus:{state:'working',source:'native-hook',observedAt:at,stateEnteredAt:at},control:{...agent.control,hostId:'local',agentSessionId:id,run:{runId:'original-run-'+id}}}))
 if(window.__taskLayoutScene){
+ for (const [index, {workspace: checkout, taskId}] of branches.entries()) {
+  const observedAt = now + index - 1000
+  sessions.push({...sessions[0], id: taskId, label: '核对灰度报告与原始数据', workspacePath: checkout.path,
+   status: {state:'working',source:'native-hook',observedAt},
+   semanticStatus: {state:'working',source:'native-hook',observedAt,stateEnteredAt:observedAt},
+   control: {...sessions[0].control,agentSessionId:taskId,run:{runId:'original-run-'+taskId}}})
+ }
  const scenario=[
   ['permission','核对付款回执的读取范围','waiting_permission'],
   ['coverage','补齐周报的渠道覆盖率','working'],
@@ -49,6 +63,10 @@ if(window.__taskLayoutScene){
 const localReply='已核对原始数据与发布记录，接下来定位异常项并给出可验证的结论。'
 const timelines=Object.fromEntries(sessions.map(s=>[s.id,{agentSessionId:s.id,revision:1,items:[{id:'original-answer-'+s.id,agentSessionId:s.id,kind:'assistant_message',title:'Original answer',source:'native-hook',status:'complete',content:s.id==='working'?localReply:'原始分析内容与恢复位置仍然保留。',createdAt:now-30000,updatedAt:now-30000}]}]))
 const tab=createWorkbenchTab('ordinary-tab',{regionId:'ordinary-region',workspaceId:workspace.id,kind:'agent',phase:'attached',sessionId:'working'})
+const originalTabs = [tab, ...(window.__taskLayoutScene ? sessions.filter(item => item.id !== 'working').map(item => {
+ const location = workspaces.find(candidate => candidate.path === item.workspacePath)
+ return createWorkbenchTab('tab-'+item.id,{regionId:'region-'+item.id,workspaceId:location.id,kind:'agent',phase:'attached',sessionId:item.id})
+}) : [])]
 window.presentationLeaves={mounts:[],unmounts:[]}
 api.workspaces.listBranches=async()=>({kind:'not-a-git-repository',hostId:'local',workspacePath:path})
 api.scratch.listTopics=async()=>[]
@@ -90,8 +108,12 @@ api.spaceMounts.member=async(input,_listener)=>{
 }
 const restoreLayout = window.__taskLayoutScene && localStorage.getItem('agentmux-workbench-v1') !== null
 const restoreWorkbench = window.__feedbackRestoreSerialized || restoreLayout
-useAppStore.setState({loading:false,initialize:async()=>()=>{},config:{...config,workspaces:[workspace],hosts:[{id:'local',kind:'local',label:'Original local device'}]},sessions,agentNames:Object.fromEntries(sessions.map(s=>[s.id,s.label])),timelines,
- tabs:restoreWorkbench?{}:{[tab.id]:tab},layouts:restoreWorkbench?{}:{[workspace.id]:createWorkspaceLayout('ordinary-group',[tab.id])},activeWorkspaceId:workspace.id,mainSurface:'agents',focusView:'list',toolsOpen:false,projectRailOpen:false,agentFocus:{execution:{sessionId:null,history:[]},pmo:{sessionId:null}},agentComposerDrafts:restoreWorkbench?{}:{working:'原未发送草稿'},mountedSpaceInputs:{[key]:{target,drafts:{}}},mountedSpaceObservations:{},mountedSpaceSessions:{},selectedSpaceMount:null})
+useAppStore.setState({loading:false,initialize:async()=>()=>{},config:{...config,workspaces,hosts:[{id:'local',kind:'local',label:'Original local device'}],
+ ...(window.__taskLayoutScene ? {focus:{...config.focus,previewTrigger:'keyboard'}} : {})},
+ sessions,agentNames:Object.fromEntries(sessions.map(s=>[s.id,s.label])),timelines,
+ tabs:restoreWorkbench?{}:Object.fromEntries(originalTabs.map(item => [item.id,item])),
+ layouts:restoreWorkbench?{}:Object.fromEntries(workspaces.map((item,index) => [item.id,createWorkspaceLayout(index ? item.id+'-group' : 'ordinary-group',originalTabs.filter(tab => tab.workspaceId === item.id).map(tab => tab.id))])),
+ activeWorkspaceId:workspace.id,mainSurface:'agents',focusView:'list',toolsOpen:false,projectRailOpen:false,agentFocus:{execution:{sessionId:null,history:[]},pmo:{sessionId:null}},agentComposerDrafts:restoreWorkbench?{}:{working:'原未发送草稿'},mountedSpaceInputs:{[key]:{target,drafts:{}}},mountedSpaceObservations:{},mountedSpaceSessions:{},selectedSpaceMount:null})
 if(window.__taskLayoutScene){
 
  api.ui.requestStorageFlush=async()=>{}
@@ -102,6 +124,15 @@ if(window.__taskLayoutScene){
    createTabGroupId:()=>{throw Error('Expected the original persisted Tab Group')},retiredSessionIds:new Set()})
   useAppStore.setState({...restorePersistedUiState(state.config,state),...topology,restoredWorkbench:null})
  }
+ const arranged = useAppStore.getState()
+ const originalSpatial = await api.spatial.read()
+ await api.spatial.commit({expectedRevision:originalSpatial?.revision??0,graph:desktopSpatialGraph(arranged,[])})
+ api.config.get = async () => arranged.config
+ api.sessions.snapshot = async () => ({...initial,sessions,timelines,recoveryCandidates:[]})
+ api.demands.list = async () => []
+ const dispose = await useAppStore.getInitialState().initialize()
+ dispose()
+ useAppStore.setState(arranged,true)
  globalThis.__taskLayoutAdmitWriter()
  window.taskLayoutProof={restored:restoreLayout,topology:()=>{const state=useAppStore.getState();return {tabs:state.tabs,layouts:state.layouts,drafts:state.agentComposerDrafts}},checkpoint:async()=>{await checkpointAgentOperations();return JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state.focusTaskLayout}}
 }

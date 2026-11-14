@@ -12,6 +12,12 @@ The scene captures wide/intermediate/narrow in dark and light, the shared filter
 
 A separate Agent must actually open all final PNGs and assess hierarchy, task/content/state clarity, consistent ordinary project/card language, narrow reading, source failure information and the original Reader. The capture receipt alone does not certify visual quality.
 
+## Cards and List
+
+Pass `--task-layout` to compare Cards with List. The actual Focus owns selection, keyboard walking, quick look, the selected workface and layout reflow. The private space graph holds two Agents with the same task title in different worktrees. Wide and narrow captures check that their original Tags remain legible, routine states stay compact, and a pending request keeps its explanation. Narrow split captures resize the window around the open workface and measure the List pane at 360 and 420 CSS pixels. A paused indicator transition and reduced-motion scenes document both motion modes.
+
+The two Electron processes share one private user-data directory. They compare the actual persisted layout choice, original Tabs, split layouts and the unsent draft. Session observations and PTY paint come from the fixture.
+
 ## Original Session observation states
 
 Run the same entry with `--member-state` to follow an unavailable original task from its actual ordinary Focus card into the shared Region stage. The controlled original Source delivers an authority-qualified `missing`, then real `pending` after the visible Check again action; a source IO error changes pending to parked, another check clears that error, and the exact same original target returns as observed. There is no create, resume, restart or input port in the scene.
