@@ -41,6 +41,8 @@ if (process.isMainFrame) {
     savePng: (requestId, background, image, selection) => ipcRenderer.invoke(CAPTURE_SURFACE_CHANNEL, 'save-png', { requestId, background, image, selection }),
     copyText: (requestId, text) => ipcRenderer.invoke(CAPTURE_SURFACE_CHANNEL, 'copy-text', { requestId, text }),
     expand: (requestId, background, handoff) => ipcRenderer.invoke(CAPTURE_SURFACE_CHANNEL, 'expand', { requestId, background, handoff }),
+    source: (requestId, mode) => ipcRenderer.invoke(CAPTURE_SURFACE_CHANNEL, 'source', { requestId, mode }),
+    sequence: (requestId, background, image, selection, mode) => ipcRenderer.invoke(CAPTURE_SURFACE_CHANNEL, 'sequence', { requestId, background, image, selection, mode }),
     cancel: requestId => ipcRenderer.invoke(CAPTURE_SURFACE_CHANNEL, 'cancel', { requestId })
   }
   contextBridge.exposeInMainWorld('captureSurface', api)

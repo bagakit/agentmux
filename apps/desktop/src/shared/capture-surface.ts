@@ -51,6 +51,7 @@ export type CaptureSurfaceInput = {
   attachToDraft: boolean
   /** Whether ⌘E may move these marks into the window editor. */
   expandable: boolean
+  sourceChoices?: boolean
   theme: ThemeBootstrap
   /** Explicit same-capture Retake geometry in frozen-frame pixels; a fresh capture omits it. */
   initialCrop?: NormalizedRect
@@ -83,5 +84,7 @@ export type CaptureSurfaceApi = {
   savePng(requestId: string, background: CaptureBackground, image: BrowserPng, selection: CaptureSurfaceRect): Promise<ScreenshotFileResult>
   copyText(requestId: string, text: string): Promise<SystemScreenshotEditorFinish>
   expand(requestId: string, background: CaptureBackground, handoff: CaptureSurfaceHandoff): Promise<void>
+  source(requestId: string, mode: 'display' | 'window' | 3 | 5 | 10): Promise<void>
+  sequence(requestId: string, background: CaptureBackground, image: BrowserPng, selection: CaptureSurfaceRect, mode: 'scroll' | 'gif'): Promise<void>
   cancel(requestId: string): Promise<void>
 }

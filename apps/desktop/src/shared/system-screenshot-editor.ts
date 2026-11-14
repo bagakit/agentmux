@@ -30,6 +30,7 @@ export type SystemScreenshotEditorInput = {
   source?: ScreenshotCaptureSource
   /** The image came from the capture surface, so Retake can take it again for the same consumer. */
   retakable?: true
+  textUnavailableReason?: string
 } & (ScreenshotEditMarks | { initialState?: undefined; initialTool?: undefined })
 export type SystemScreenshotEditorFinish = { status: 'completed' } | { status: 'failed'; message: string }
 /** completed: the new capture took over and this editor closes; cancelled: this editor is back with its marks. */
@@ -38,6 +39,7 @@ export type SystemScreenshotEditorRetake = { status: 'completed' } | { status: '
 /** This isolated bridge binds image outputs, file grants and completion to the original editor request. */
 export type SystemScreenshotEditorApi = {
   load(): Promise<SystemScreenshotEditorInput>
+  recognizeText(requestId: string, image: BrowserPng): Promise<import('@agentmux/native-desktop').NativeRecognizedText>
   /** Listen for Main notices; returns the unsubscribe. */
   onNotice(listener: (message: string) => void): () => void
   finish(requestId: string, operationId: string, image: BrowserPng): Promise<SystemScreenshotEditorFinish>

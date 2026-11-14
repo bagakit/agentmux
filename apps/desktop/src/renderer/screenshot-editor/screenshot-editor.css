@@ -71,3 +71,10 @@ html:has(.capture-surface), html:has(.capture-surface) body { background: transp
   background: rgb(0 0 0 / .62); color: #fff; font: var(--fs-body)/1.45 var(--font-sans); text-align: center; cursor: default; }
 .capture-surface--issue p { margin: 0; max-width: 520px; }
 .capture-surface--issue p + p { color: rgb(255 255 255 / .72); font-size: var(--fs-meta); }
+
+.capture-mode-bar { position: fixed; z-index: 20; left: 50%; transform: translateX(-50%); display: flex; gap: 3px; align-items: center; padding: 5px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-1); color: var(--text); box-shadow: 0 4px 20px #0004; font: 12px/1.3 system-ui; }
+.capture-mode-bar button, .capture-mode-bar select { font: inherit; color: inherit; background: transparent; border: 0; border-radius: 6px; padding: 7px 10px; white-space: nowrap; }
+.capture-mode-bar button:hover, .capture-mode-bar select:hover { background: var(--surface-2); }
+.capture-mode-bar button[aria-pressed="true"] { color: var(--bg); background: var(--green); font-weight: 600; }
+.capture-mode-bar select { max-width: 105px; cursor: pointer; }
+.capture-mode-bar .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }

@@ -36,6 +36,7 @@ export class SystemScreenshotEditor {
       copyText?(text: string): Promise<void>;
       /** Give the previous app focus back; called when the last editor of a capture taken from another app closes. */
       returnFocus?(): void;
+      recognizeText?(image: BrowserPng): Promise<import('@agentmux/native-desktop').NativeRecognizedText>;
       originalFiles?(window: BrowserWindow): ScreenshotOriginalApi & { dispose?(): void } }) {
     ipcMain.handle(SYSTEM_SCREENSHOT_EDITOR_CHANNEL, (event, action, input) => this.invoke(event, action, input))
   }
@@ -55,7 +56,7 @@ export class SystemScreenshotEditor {
     })
     let settle!: () => void
     const closed = new Promise<void>(resolve => { settle = resolve })
-    const request: EditRequest = { window, input: { requestId: mintObjectId(), image, attachToDraft, theme, ...(source ? { source } : {}), ...(retake ? { retakable: true } : {}),
+    const request: EditRequest = { window, input: { requestId: mintObjectId(), image, attachToDraft, theme, ...(!this.outputs?.recognizeText ? { textUnavailableReason: 'On-device text recognition is not supported by this host. Open this image on the macOS Desktop to use it.' } : {}), ...(source ? { source } : {}), ...(retake ? { retakable: true } : {}),
       ...(initialState ? { initialState, initialTool } : {}) }, complete, retake, settle,
       pending: false, attempts: new Map(), attemptFingerprints: new Map(), originals: this.outputs?.originalFiles?.(window), originalReads: new Map(), originalSaves: new Map(), contexts: new Map() }
     const contents = window.webContents
@@ -96,6 +97,10 @@ export class SystemScreenshotEditor {
     if (action === 'load') return request.input
     const params = input as { requestId?: unknown; operationId?: unknown; image?: BrowserPng; text?: unknown; grantId?: unknown; document?: ScreenshotOriginalSaveInput; logicalSize?: unknown } | undefined
     if (params?.requestId !== request.input.requestId) throw new Error('The original screenshot request is no longer current.')
+    if (action === 'recognize-text') {
+      if (!this.outputs?.recognizeText) throw new Error(request.input.textUnavailableReason)
+      pngBytes(params.image!); return await this.outputs.recognizeText(params.image!)
+    }
     if (action === 'cancel') { request.window.close(); return }
     if (action === 'retake') {
       if (!request.retake) throw new Error('This image did not come from a region capture, so it cannot be retaken here. Your image and editing remain available.')

@@ -3,6 +3,7 @@ import { SYSTEM_SCREENSHOT_EDITOR_CHANNEL, SYSTEM_SCREENSHOT_EDITOR_NOTICE, type
 
 if (process.isMainFrame) {
   const api: SystemScreenshotEditorApi = {
+    recognizeText: (requestId, image) => ipcRenderer.invoke(SYSTEM_SCREENSHOT_EDITOR_CHANNEL, 'recognize-text', { requestId, image }),
     load: () => ipcRenderer.invoke(SYSTEM_SCREENSHOT_EDITOR_CHANNEL, 'load'),
     onNotice: listener => {
       const receive = (_event: Electron.IpcRendererEvent, message: unknown) => { if (typeof message === 'string') listener(message) }

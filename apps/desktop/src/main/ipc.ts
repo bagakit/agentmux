@@ -1704,6 +1704,7 @@ export async function registerIpc(args: {
   // The editor returns focus only when no other AgentMux window has focus.
   const screenshotEditor = new SystemScreenshotEditor(() => config.appearance, { pin: pinScreenshot, inspectPin: inspectScreenshotPin,
     returnFocus: returnScreenshotFocus, copyText: copyScreenshotText,
+    ...(process.platform === 'darwin' ? { recognizeText: (image: import('../shared/contracts').BrowserPng) => getNativeDesktopOwner().recognizeText(image) } : {}),
     originalFiles: window => new ScreenshotOriginalFiles({
       chooseOpen: async () => { const choice = await dialog.showOpenDialog(window, { title: 'Open editable original', filters: [{ name: 'Editable annotation', extensions: ['json'] }], properties: ['openFile'] }); return choice.canceled ? null : choice.filePaths[0] ?? null },
       chooseSave: async defaultName => { const choice = await dialog.showSaveDialog(window, { title: 'Save editable original · contains the source image', defaultPath: defaultName, filters: [{ name: 'Editable annotation', extensions: ['json'] }] }); return choice.canceled ? null : choice.filePath ?? null },

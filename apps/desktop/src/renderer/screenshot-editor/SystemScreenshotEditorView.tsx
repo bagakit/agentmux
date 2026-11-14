@@ -96,6 +96,7 @@ export function SystemScreenshotEditorView({ input, api }: { input: SystemScreen
   return <main className="system-screenshot-editor">
     <ImageAnnotationEditor key={original.generation} image={original.image} busy={busy}
       {...(original.initialState ? { initialState: original.initialState } : input.initialState ? { initialState: input.initialState, initialStateKept: input.initialState.shapes.length === 0, initialTool: input.initialTool } : {})} title="Screenshot"
+      textTools={{ unavailableReason: input.textUnavailableReason, recognize: image => api.recognizeText(input.requestId, image), copy: async text => { const result = await api.copyContext(input.requestId, mintObjectId(), text); if (result.status === 'failed') throw new Error(result.message) } }}
       completeLabel={input.attachToDraft && !delivered ? 'Copy & attach' : 'Copy'} busyLabel="Copying…"
       documentStatus={status ?? (input.theme.status === 'unavailable' ? input.theme.message : null)}
       {...(pin.uncertain ? { onCheckPin: () => void checkPin() } : {})} {...(input.retakable ? { onRetake: () => void retake() } : {})}

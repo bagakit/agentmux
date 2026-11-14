@@ -1,3 +1,5 @@
+import { ImageTextTools, type ImageTextPort } from './ImageTextTools'
+import { composeScreenshot } from './compose'
 import { mintObjectId } from '@agentmux/core/object-id'
 // Portions adapted from Orca, MIT Copyright (c) 2026 Lovecast Inc.; see THIRD_PARTY_NOTICES.md.
 import { Textarea } from '@agentmux/client-ui/input'
@@ -122,6 +124,8 @@ const ACCENT = '#3b82f6', WINDOW_FILL = 'rgba(59, 130, 246, .12)', WINDOW_FADE_M
 const NO_WINDOWS: readonly NormalizedRect[] = []
 
 type EditorBase = {
+  textTools?: ImageTextPort
+  captureControls?: import('react').ReactNode
   image: AnnotationImage
   busy: boolean
   copied?: string | null
@@ -192,7 +196,7 @@ type CapturePresentation = {
 }
 export type ImageAnnotationEditorProps = EditorBase & (WindowPresentation | CapturePresentation)
 
-export function ImageAnnotationEditor({ image, busy, copied, active = true, initialState, initialStateKept = true, initialTool, documentStatus,
+export function ImageAnnotationEditor({ image, textTools, captureControls, busy, copied, active = true, initialState, initialStateKept = true, initialTool, documentStatus,
   ownerDocument, title = 'Screenshot', completeLabel, busyLabel = 'Copying…', presentation = 'window', pixelRatio = 1, origin = { x: 0, y: 0 }, windows = NO_WINDOWS, safeTop = 0, backgroundHint,
   locked = false, onCancel, onComplete, onCopyContext, onSaveOriginal, onOpenOriginal, onSavePng, onPin, onCheckPin, onRetake, onExpand, onCopyColor, onSelect: claimSelection, onEdited, onPresented, onError }: ImageAnnotationEditorProps) {
   const workbenchDocument = useWorkbenchDocument()
@@ -1168,6 +1172,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
           onExpand={expand} onCancel={requestClose} onComplete={() => complete()} />
         {hasProperties ? <div className="image-annotation-editor__capture-properties" role="group" aria-label="Markup properties" data-side={bar.side === 'below' ? 'below' : 'above'}>{propertyControls}</div> : null}
       </div> : null}
+      {captureControls}
       {hint ? <CaptureHint text={hint} onCancel={requestClose} /> : null}
       {loupe && loupeBox ? <div className="image-annotation-editor__loupe" aria-label="Pixel loupe" style={loupeBox}>
         <canvas ref={loupeRef} width={LOUPE_GRID} height={LOUPE_GRID} aria-hidden="true" />
@@ -1191,6 +1196,11 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       </div>
     </header>
     {toolbar}
+    {textTools ? <ImageTextTools port={textTools} loaded={loaded} busy={busy} revision={documentState} image={async () => {
+      const base = imageRef.current
+      if (!base || !loaded) throw new Error('The current image is not loaded.')
+      return { image: await composeScreenshot({ image: base, shapes: currentShapes(), crop: documentState.crop, displayWidth: image.width, displayHeight: image.height, outputScale: 1, document: base.ownerDocument }), origin: documentState.crop ?? { x: 0, y: 0 } }
+    }} apply={rects => { edit(doc => setShapes(doc, [...doc.shapes, ...rects.map(rect => ({ id: mintObjectId(), kind: 'cover' as const, color: '#000000', from: { x: rect.x, y: rect.y }, to: { x: rect.x + rect.width, y: rect.y + rect.height } }))])); schedulePaint() }} /> : null}
     <div className="image-annotation-editor__properties">
       <span className="image-annotation-editor__tool-name">{ANNOTATION_TOOLS.find(item => item.id === tool)?.label}</span>
       {propertyControls}

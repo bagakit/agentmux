@@ -8,6 +8,7 @@ import type { ImageAnnotationInput } from '../src/components/image-annotation/ty
 
 /** One display's overlay. The shared editor draws selection, loupe, toolbar and marks; this host only routes outputs to Main. */
 export function CaptureSurfaceView({ input, api, diagnostic }: { input: CaptureSurfaceInput; api: CaptureSurfaceApi; diagnostic?: { startedAt: number; loadedAt: number } }) {
+  const [mode, setMode] = useState<'selection' | 'scroll' | 'gif'>('selection')
   const [busy, setBusy] = useState(false), [status, setStatus] = useState<string | null>(null)
   const trace = useRef<{ startedAt: number; loadedAt: number; decodedAt?: number } | null>(null)
   trace.current ??= { startedAt: diagnostic?.startedAt ?? performance.now(), loadedAt: diagnostic?.loadedAt ?? performance.now() }
@@ -108,6 +109,7 @@ export function CaptureSurfaceView({ input, api, diagnostic }: { input: CaptureS
       // A continued selection output unchanged was never claimed by a gesture.
       if (!await claim()) return false
       const image = await composeScreenshot({ ...edit, outputScale: 1, document: edit.image.ownerDocument })
+      if (kind === 'finish' && mode !== 'selection' && input.sourceChoices) { await api.sequence(input.requestId, background, image, selection, mode); return true }
       if (kind === 'finish') {
         const result = await api.finish(input.requestId, background, image, selection)
         if (result.status === 'failed') setStatus(result.message)
@@ -144,7 +146,13 @@ export function CaptureSurfaceView({ input, api, diagnostic }: { input: CaptureS
   return <main className="capture-surface" onLoadCapture={event => { if (event.target instanceof HTMLImageElement) trace.current!.decodedAt ??= performance.now() }}>
     <ImageAnnotationEditor presentation="capture" image={frame.image} busy={busy || switching} pixelRatio={input.scale} origin={{ x: input.frame.x, y: input.frame.y }} windows={frame.windows} safeTop={input.safeTop} backgroundHint={background === 'included' ? 'Includes AgentMux · Tab to hide' : 'Excludes AgentMux · Tab to include'}
       {...(input.initialCrop ? { initialState: { shapes: [], crop: input.initialCrop } } : {})} locked={locked} onSelect={() => void claim()}
-      completeLabel="Done" busyLabel="Copying…" documentStatus={status ?? input.notice ?? (input.theme.status === 'unavailable' ? input.theme.message : null)}
+      captureControls={input.sourceChoices && !locked ? <nav className="capture-mode-bar" aria-label="Capture mode" style={{ top: Math.max(input.safeTop, 12) + 8 }}>
+        {([['selection', 'Screenshot'], ['scroll', 'Scrolling'], ['gif', 'GIF']] as const).map(([value, label]) => <button type="button" key={value} aria-pressed={mode === value} disabled={busy} onClick={() => setMode(value)}>{label}</button>)}
+        <label><span className="sr-only">Other capture source</span><select aria-label="Other capture source" value="" disabled={busy} onChange={event => { const value = event.target.value; void api.source(input.requestId, value === 'display' || value === 'window' ? value : Number(value) as 3 | 5 | 10).catch(cause => setStatus(presentError(cause))) }}>
+          <option value="" disabled>More...</option><option value="display">Entire display...</option><option value="window">Application window...</option>{[3, 5, 10].map(seconds => <option key={seconds} value={seconds}>Region in {seconds} s</option>)}
+        </select></label>
+      </nav> : null}
+      completeLabel={mode === 'scroll' ? 'Continue to scroll' : mode === 'gif' ? 'Continue to GIF' : 'Done'} busyLabel="Copying…" documentStatus={status ?? input.notice ?? (input.theme.status === 'unavailable' ? input.theme.message : null)}
       onComplete={edit => output(edit, 'finish')} onSavePng={edit => output(edit, 'save')} onPin={edit => output(edit, 'pin')}
       onCopyColor={hex => void copyColor(hex)} onExpand={handoff => void claim().then(owned => owned ? api.expand(input.requestId, background, handoff) : undefined).catch(cause => setStatus(presentError(cause)))}
       onPresented={reportPresented}

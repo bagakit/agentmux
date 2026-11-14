@@ -204,3 +204,19 @@
 .image-annotation-editor__loupe > span { display: flex; justify-content: space-between; gap: 6px; overflow: hidden; font-size: 10px; font-weight: 500; line-height: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .image-annotation-editor__loupe small { color: var(--capture-chrome-muted); font-size: inherit; }
 .image-annotation-editor--capture > .image-annotation-editor__status { position: absolute; left: 8px; bottom: 8px; width: auto; height: auto; max-width: 60%; padding: 2px 6px; border-radius: 4px; background: var(--capture-chrome); color: var(--capture-chrome-text); pointer-events: none; }
+
+.image-text-tools { flex: none; border-bottom: 1px solid var(--line); padding: 6px 10px; font-size: var(--fs-meta); background: var(--surface-0); }
+.image-text-tools__actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.image-text-tools button { font: inherit; border: 1px solid var(--line); border-radius: 5px; padding: 5px 8px; color: var(--text); background: var(--surface-1); cursor: pointer; }
+.image-text-tools button:disabled { opacity: .45; cursor: default; pointer-events: none; }
+.image-text-tools small, .image-text-tools p { color: var(--text-3); font-size: inherit; }
+.image-text-tools p { margin: 5px 0; }
+.image-text-tools__explain { position: relative; display: inline-flex; border-radius: 5px; }
+.image-text-tools__explain:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.image-text-tools__explain [role="tooltip"] { display: none; position: absolute; z-index: 100; top: calc(100% + 6px); left: 0; width: max-content; max-width: min(290px, 75vw); padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); color: var(--text); box-shadow: 0 4px 18px #0004; font-size: 12px; line-height: 1.5; }
+.image-text-tools__explain:hover [role="tooltip"], .image-text-tools__explain:focus-within [role="tooltip"] { display: block; }
+.image-text-tools__results { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; max-height: 190px; overflow: auto; padding-top: 6px; }
+.image-text-tools__results > p { width: 100%; }
+.image-text-tools__results textarea { resize: vertical; width: 100%; min-height: 65px; max-height: 110px; font: 12px/1.5 var(--font-mono); color: var(--text); background: var(--surface-1); border: 1px solid var(--line); border-radius: 5px; padding: 6px; }
+.image-text-tools__candidates { flex-basis: 100%; max-height: 85px; overflow: auto; }
+.image-text-tools__candidates label { display: flex; gap: 6px; padding: 3px 0; align-items: center; overflow-wrap: anywhere; }

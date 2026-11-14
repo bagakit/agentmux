@@ -28,6 +28,7 @@ export type CaptureSurfaceSession = {
   /** Public native selection requires its requested source; the GUI may explicitly switch frozen backgrounds. */
   allowBackgroundFallback?: boolean
   expandable: boolean
+  sourceChoices?: boolean
   /** Another app was in front at capture start; closing the surface gives it focus back. */
   returnFocus: boolean
   /** Primary delivery of the processed selection, with the native engine of its frozen frame. A rejection keeps the surface and shows the reason. */
@@ -36,6 +37,8 @@ export type CaptureSurfaceSession = {
 export type CaptureSurfaceOutcome =
   | { state: 'completed' }
   | { state: 'cancelled' }
+  | { state: 'source'; mode: 'display' | 'window' | 3 | 5 | 10; background: CaptureBackground }
+  | { state: 'sequence'; mode: 'scroll' | 'gif'; image: BrowserPng; source: ScreenshotCaptureSource; background: CaptureBackground }
   /** The marks move to the window editor on this display's full frozen frame; `source.rect` is the selection. */
   | { state: 'expanded'; image: BrowserPng; source: ScreenshotCaptureSource; handoff: CaptureSurfaceHandoff
       /** Returns the delivered geometry for an explicit Retake in the same capture call. No document history crosses into the new surface. */
@@ -259,7 +262,7 @@ export class CaptureSurface {
     const placed = geometry.displays.map(frame => {
       const initialCrop = this.continued(frame, active.session.continuation)
       const input: CaptureSurfaceInput = { requestId: active.requestId, revision: active.revision, displayId: frame.displayId, frame: frame.frame, scale: frame.scale, safeTop: frame.safeTop,
-        attachToDraft: active.session.attachToDraft, expandable: active.session.expandable, theme, background: active.background,
+        attachToDraft: active.session.attachToDraft, expandable: active.session.expandable, sourceChoices: active.session.sourceChoices === true, theme, background: active.background,
         backgrounds: { [firstMode]: captureFrame(first, frame.displayId), [secondMode]: pendingSecond ? pendingFrame() : captureFrame(second, frame.displayId) } as CaptureSurfaceInput['backgrounds'],
         ...(initialCrop ? { initialCrop } : {}) }
       return { frame, input }
@@ -369,7 +372,7 @@ export class CaptureSurface {
     const frameInput = overlay.input
     if (this.active !== active || overlay.window.isDestroyed() || !frameInput) throw new Error('The original screenshot request is no longer current.')
     if (action === 'load') return frameInput
-    const params = input as { background?: unknown; requestId?: unknown; revision?: unknown; timing?: unknown; operationId?: unknown; image?: BrowserPng; selection?: CaptureSurfaceRect; text?: unknown; handoff?: CaptureSurfaceHandoff } | undefined
+    const params = input as { mode?: unknown; background?: unknown; requestId?: unknown; revision?: unknown; timing?: unknown; operationId?: unknown; image?: BrowserPng; selection?: CaptureSurfaceRect; text?: unknown; handoff?: CaptureSurfaceHandoff } | undefined
     if (params?.requestId !== frameInput.requestId) throw new Error('The original screenshot request is no longer current.')
     if (action === 'frame-ack') {
       if (params.revision !== frameInput.revision) return
@@ -382,6 +385,10 @@ export class CaptureSurface {
       overlay.rendererMs ??= rendererTiming(params.timing)
       if (active.overlays.every(row => row.presented)) this.show(active)
       return
+    }
+    if (action === 'source') {
+      if (!active.session.sourceChoices || !['display', 'window', 3, 5, 10].includes(params.mode as never)) throw new Error('Choose a source from this screenshot component.')
+      active.end({ state: 'source', mode: params.mode as 'display' | 'window' | 3 | 5 | 10, background: active.background }); return
     }
     if (action === 'cancel') { active.end({ state: 'cancelled' }); return }
     if (action === 'switch-background') {
@@ -430,6 +437,10 @@ export class CaptureSurface {
     }
     pngBytes(params.image!)
     const source = this.source(active, frameInput, params.selection)
+    if (action === 'sequence') {
+      if (!active.session.sourceChoices || !['scroll', 'gif'].includes(String(params.mode))) throw new Error('Choose an available sequence in this screenshot component.')
+      active.end({ state: 'sequence', mode: params.mode as 'scroll' | 'gif', image: params.image!, source, background: active.background }); return
+    }
     if (action === 'save-png') return await saveScreenshotPng(params.image!, overlay.window, { capturedAt: captured.capturedAt })
     if (action === 'pin') {
       if (typeof params.operationId !== 'string' || !params.operationId.trim()) throw new Error('Keep the original pin operation.')

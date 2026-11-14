@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { SCREENSHOT_DELAYS } from '../../../shared/screenshot-countdown'
 import type { ComposerSuggestion } from '@agentmux/client-ui/components/AgentComposer'
 import { TextInput } from '@agentmux/client-ui/input'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
@@ -164,18 +163,7 @@ export function AgentComposerTools({ active = true, disabled, commands, loadSkil
     </span>
     {onCapture ? <span className="composer-tool-group" role="group" aria-label="Screen capture"><button type="button" className="composer-tool" disabled={disabled || capturing}
       aria-label="Capture a screen region" title={isMacPlatform() ? `Capture a screen region (${SCREENSHOT_SHORTCUTS.map(binding => `${formatChord(binding.chord, true).join('')} ${binding.background === 'included' ? 'includes' : 'hides'} AgentMux`).join(' · ')} · system-wide)` : 'Capture a screen region'} onClick={() => { void runAction(() => capture()) }}>{capturing ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionCaptureIcon size={14} />} <span className="composer-tool__label">Capture</span></button>
-      <DropdownMenu.Root><DropdownMenu.Trigger className="composer-tool" disabled={disabled || capturing} aria-label="Choose screenshot source" title="Choose screenshot source"><SemanticIcon name="control.select-open" size={11} /></DropdownMenu.Trigger>
-        <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu composer-menu" side="top" align="end" sideOffset={4} collisionPadding={8}>
-          <DropdownMenu.Item onSelect={() => { void runAction(() => capture()) }}>Screen region</DropdownMenu.Item>
-          {SCREENSHOT_DELAYS.map(delaySeconds => <DropdownMenu.Item key={delaySeconds} onSelect={() => { void runAction(() => capture('selection', { delaySeconds })) }}>Region in {delaySeconds} s</DropdownMenu.Item>)}
-          <DropdownMenu.Separator className="tab-context-menu__separator" />
-          <DropdownMenu.Item onSelect={() => { void runAction(() => capture('display')) }}>Entire display…</DropdownMenu.Item>
-          <DropdownMenu.Item onSelect={() => { void runAction(() => capture('window')) }}>Application window…</DropdownMenu.Item>
-          <DropdownMenu.Separator className="tab-context-menu__separator" />
-          <DropdownMenu.Item onSelect={() => { void runAction(() => capture('scroll')) }}>Scrolling screenshot…</DropdownMenu.Item>
-          <DropdownMenu.Item onSelect={() => { void runAction(() => capture('gif')) }}>Record GIF…</DropdownMenu.Item>
-        </DropdownMenu.Content></DropdownMenu.Portal>
-      </DropdownMenu.Root></span> : null}
+      </span> : null}
     </>}
   </span>
 }
