@@ -1,0 +1,12 @@
+{
+  "extends": "../../../tsconfig.test.json",
+  "compilerOptions": { "noEmit": true },
+  "include": [
+    "main.ts",
+    "renderer.tsx",
+    "../../../test/browser-proxy-probes.test.ts",
+    "../../../test/browser-proxy-probes-ui.test.tsx",
+    "../../../test/browser-profile-exit-check.test.ts",
+    "../../../src/renderer/src/global.d.ts"
+  ]
+}
