@@ -14,20 +14,13 @@ import inputCSS from '@agentmux/client-ui/input/styles.css?inline'
 import locationCSS from '@agentmux/client-ui/patterns/agent-work-location.css?inline'
 import iconsCSS from '@agentmux/client-ui/styles/semantic-icons.css?inline'
 import paletteCSS from '@agentmux/client-ui/styles/palette.css?inline'
+import exampleCSS from './examples/host.css?inline'
+import fixtureCSS from './host.css?inline'
 import { Locations } from './locations'
 
 function installStyles(owner: Document) {
   const style = owner.createElement('style')
-  style.textContent = [overlayCSS, buttonsCSS, inputCSS, locationCSS, iconsCSS, paletteCSS,
-    `body { margin: 0; padding: 16px; font: 1rem system-ui; background: var(--bg); color: var(--text); }
-    section { display: grid; justify-items: start; gap: 8px; margin-block: 12px; }
-    section[aria-label="Work locations"] { max-inline-size: 34rem; }
-    .dialog { pointer-events: auto; position: fixed; inset: max(3rem, 20%) 12% auto; display: grid; gap: 12px;
-      padding: 16px; color: var(--text); background: var(--surface-1); border-radius: var(--radius); }
-    [role="menu"] { pointer-events: auto; background: var(--surface-1); color: var(--text); border: 1px solid var(--line);
-      padding: 8px; z-index: var(--layer-popover); }
-    [role="menuitem"]:focus-visible { outline: 2px solid var(--focus-line); }`
-  ].join('\n')
+  style.textContent = [paletteCSS, exampleCSS, overlayCSS, buttonsCSS, inputCSS, locationCSS, iconsCSS, fixtureCSS].join('\n')
   owner.head.appendChild(style)
   mountThemeRuntime(owner.defaultView!)
 }
@@ -35,9 +28,9 @@ function installStyles(owner: Document) {
 function AttachedMenu({ owner }: { owner: Document }) {
   const container = Modal.useModalOverlayContainer(owner.body)
   return <Menu.Root>
-    <Menu.Trigger id="open-menu">Board actions</Menu.Trigger>
+    <Menu.Trigger asChild><Button id="open-menu">Board actions</Button></Menu.Trigger>
     <Menu.Portal container={container}>
-      <Menu.Content><Menu.Item>Rename board</Menu.Item></Menu.Content>
+      <Menu.Content className="fixture-menu" align="start" sideOffset={5}><Menu.Item>Rename board</Menu.Item></Menu.Content>
     </Menu.Portal>
   </Menu.Root>
 }
@@ -48,26 +41,36 @@ function Board({ owner, name }: { owner: Document; name: string }) {
   const [saved, setSaved] = useState(name)
   const [pressed, setPressed] = useState(false)
   return <ClientUiOverlayProvider host={{ ownerDocument: owner, overlayContainer: () => owner.body }}>
-    <h1>{name}</h1>
-    <Button id="pin-board" aria-pressed={pressed} onClick={() => setPressed(!pressed)}>Pin board</Button>
-    <output id="saved-title">{saved}</output>
-    <Modal.Root open={open} onOpenChange={setOpen}>
-      <Modal.Trigger id="open-board">Edit board</Modal.Trigger>
-      <Modal.Portal>
-        <Modal.Overlay style={{ position: 'fixed', inset: 0, background: 'var(--scrim-2)' }} />
-        <Modal.Content className="dialog">
-          <Modal.Title>Edit board</Modal.Title>
-          <Modal.Description>Enter a title for this board.</Modal.Description>
-          <form onSubmit={event => { event.preventDefault(); setSaved(draft); setOpen(false) }}>
-            <FormRow label="Title" layout="stacked" controlId="board-title">{field => <TextInput {...field}
-              value={draft} onChange={event => setDraft(event.currentTarget.value)} />}</FormRow>
-            <Button type="submit" variant="primary">Save title</Button>
-          </form>
-          <AttachedMenu owner={owner} />
-        </Modal.Content>
-      </Modal.Portal>
-    </Modal.Root>
-    {name === 'Primary board' ? <Locations /> : <input id="popup-draft" aria-label="Popup working draft" defaultValue="Keep the second board draft" />}
+    <main className="fixture-board">
+      <Modal.Root open={open} onOpenChange={setOpen}>
+        <header className="board-header">
+          <h1>{name}</h1>
+          <div className="board-actions">
+            <Button id="pin-board" aria-pressed={pressed} onClick={() => setPressed(!pressed)}>Pin board</Button>
+            <Modal.Trigger asChild><Button id="open-board">Edit board</Button></Modal.Trigger>
+          </div>
+          <output id="saved-title" aria-label="Saved board title">{saved}</output>
+        </header>
+        <Modal.Portal>
+          <Modal.Overlay style={{ position: 'fixed', inset: 0, background: 'var(--scrim-2)' }} />
+          <Modal.Content className="fixture-dialog">
+            <header>
+              <Modal.Title>Edit board</Modal.Title>
+              <Modal.Description>Enter a title for this board.</Modal.Description>
+            </header>
+            <form onSubmit={event => { event.preventDefault(); setSaved(draft); setOpen(false) }}>
+              <FormRow label="Title" layout="stacked" controlId="board-title">{field => <TextInput {...field}
+                value={draft} onChange={event => setDraft(event.currentTarget.value)} />}</FormRow>
+              <Button type="submit" variant="primary">Save title</Button>
+            </form>
+            <AttachedMenu owner={owner} />
+          </Modal.Content>
+        </Modal.Portal>
+      </Modal.Root>
+      {name === 'Primary board' ? <Locations /> : <label className="board-draft">Working draft
+        <TextInput id="popup-draft" defaultValue="Keep the second board draft" />
+      </label>}
+    </main>
   </ClientUiOverlayProvider>
 }
 

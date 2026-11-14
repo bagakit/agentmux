@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@agentmux/client-ui/components/Button'
+import { TextInput } from '@agentmux/client-ui/input'
 import { AgentWorkLocationTrigger, describeAgentWorkLocationChoices, summarizeAgentWorkLocations } from '@agentmux/client-ui/patterns/agent-work-location'
 
 type Agent = 'Mira' | 'Niko'
@@ -62,30 +63,42 @@ export function Locations() {
     destination.current?.focus()
   }
 
-  return <section aria-label="Work locations">
-    <Button id="switch-agent" onClick={() => {
-      active.current = null
-      setStatus('')
-      setOpen(false)
-      setAgent(agent === 'Mira' ? 'Niko' : 'Mira')
-    }}>Show {agent === 'Mira' ? 'Niko' : 'Mira'}</Button>
-    <Button id="toggle-observation" onClick={() => { active.current = null; setKnown(!known) }}>Toggle observations</Button>
-    <AgentWorkLocationTrigger id="location-trigger" ref={trigger} agentName={agent} actionLabel="Choose location"
-      aria-haspopup="dialog" aria-expanded={open} summary={summary}
-      describeSummary={value => value.state === 'confirmed' ? `${value.count} open locations` : 'Locations unconfirmed'}
-      onClick={() => { setOpen(true); setStatus('') }} />
-    {open ? <section ref={chooser} id="location-chooser" role="dialog" aria-label="Choose an exact view" onKeyDown={event => {
-      if (event.key === 'Escape') cancel()
-    }}>
-      {choices.map(choice => <Button key={choice.route} data-route={choice.route} onClick={() => choose(choice)}>
-        {choice.title} · {choice.detail}
-      </Button>)}
-      <Button id="cancel-location" onClick={cancel}>Cancel</Button>
-    </section> : null}
-    <Button id="deliver-location" onClick={deliver}>Deliver location check</Button>
-    <Button id="rebind-location" onClick={() => setRebound(true)}>Move Logs to another Agent</Button>
-    <output id="location-status" role="status">{status}</output>
-    <output ref={destination} tabIndex={-1} id="destination">{work}</output>
-    <label>Retained working draft <input id="work-draft" defaultValue="Keep the original board draft" /></label>
-  </section>
+  return <>
+    <section aria-labelledby="work-locations" className="fixture-panel">
+      <h2 id="work-locations">Work locations</h2>
+      <AgentWorkLocationTrigger id="location-trigger" ref={trigger} agentName={agent} actionLabel="Choose location"
+        aria-haspopup="dialog" aria-expanded={open} summary={summary}
+        describeSummary={value => value.state === 'confirmed' ? `${value.count} open locations` : 'Locations unconfirmed'}
+        onClick={() => { setOpen(true); setStatus('') }} />
+      {open ? <section ref={chooser} id="location-chooser" role="dialog" aria-labelledby="exact-view" className="location-choices" onKeyDown={event => {
+        if (event.key === 'Escape') cancel()
+      }}>
+        <p id="exact-view">Choose an exact view</p>
+        {choices.map(choice => <Button key={choice.route} data-route={choice.route} onClick={() => choose(choice)}>
+          {choice.title} · {choice.detail}
+        </Button>)}
+        <Button id="cancel-location" onClick={cancel}>Cancel</Button>
+      </section> : null}
+      <div className="location-result">
+        <span>Current work</span>
+        <output ref={destination} tabIndex={-1} id="destination">{work}</output>
+        <output id="location-status" role="status">{status}</output>
+      </div>
+      <label className="board-draft">Working draft <TextInput id="work-draft" defaultValue="Keep the original board draft" /></label>
+    </section>
+    <fieldset className="source-controls">
+      <legend>Simulated source</legend>
+      <div className="source-actions">
+        <Button id="switch-agent" onClick={() => {
+          active.current = null
+          setStatus('')
+          setOpen(false)
+          setAgent(agent === 'Mira' ? 'Niko' : 'Mira')
+        }}>Show {agent === 'Mira' ? 'Niko' : 'Mira'}</Button>
+        <Button id="toggle-observation" onClick={() => { active.current = null; setKnown(!known) }}>Toggle observations</Button>
+        <Button id="deliver-location" onClick={deliver}>Deliver location check</Button>
+        <Button id="rebind-location" onClick={() => setRebound(true)}>Move Logs to another Agent</Button>
+      </div>
+    </fieldset>
+  </>
 }

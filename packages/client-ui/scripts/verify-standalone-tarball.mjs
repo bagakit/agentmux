@@ -133,7 +133,7 @@ async function browser(variant, output, mode = 'normal') {
   await mkdir(output, { recursive: true })
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const electron = createRequire(join(root, 'apps/desktop/package.json'))('electron')
-  const result = await runProbeProcess(electron, [join(host, 'browser.cjs'), join(host, 'browser', variant, 'index.html'), output, mode],
+  const result = await runProbeProcess(electron, [join(host, 'browser.cjs'), join(host, 'browser', variant, 'index.html'), output, mode, join(host, 'profiles', variant)],
     { cwd: host, env, timeoutMs: 50_000, temporaryRoot: output })
   assert.equal(result.exitConfirmed, true)
   const observed = await readJSON(join(output, 'browser.json'))

@@ -3,8 +3,8 @@ const { writeFileSync } = require('node:fs')
 const { join } = require('node:path')
 const { app, BrowserWindow } = require('electron')
 
-const [html, evidence, variant] = process.argv.slice(2)
-app.setPath('userData', join(evidence, 'profile'))
+const [html, evidence, variant, profile] = process.argv.slice(2)
+app.setPath('userData', profile)
 const result = { chromium: process.versions.chrome, cases: [], images: [], passed: false }
 const dialog = 'document.querySelector("[data-overlay-modal-boundary][role=dialog]")'
 const lock = 'document.body.hasAttribute("data-scroll-locked") && getComputedStyle(document.body).overflow === "hidden"'
@@ -31,7 +31,7 @@ async function input(window) {
       throw Error(message + ': ' + JSON.stringify(value))
     },
     async key(key) {
-      const [code, windowsVirtualKeyCode] = { Tab: ['Tab', 9], Escape: ['Escape', 27], Enter: ['Enter', 13], ' ': ['Space', 32] }[key]
+      const [code, windowsVirtualKeyCode] = { Tab: ['Tab', 9], ArrowDown: ['ArrowDown', 40], Escape: ['Escape', 27], Enter: ['Enter', 13], ' ': ['Space', 32] }[key]
       for (const type of ['keyDown', 'keyUp']) await port.sendCommand('Input.dispatchKeyEvent', { type, key, code, windowsVirtualKeyCode })
     },
     async click(selector) {
@@ -50,15 +50,24 @@ async function input(window) {
       writeFileSync(join(evidence, name), (await window.webContents.capturePage()).toPNG())
       result.images.push(name)
     },
+    resize: (width, height) => window.setContentSize(width, height),
     type: value => window.webContents.insertText(value)
   }
 }
 
-async function locations({ click, key, read, expect, screenshot }) {
+async function locations({ click, key, read, expect, resize, screenshot }, capture) {
   await expect('document.querySelector("#location-trigger").getAttribute("aria-label").includes("2 open locations")')
   await click('#location-trigger')
   const labels = await read('[...document.querySelectorAll("[data-route]")].map(node => node.textContent.trim())')
   assert.deepEqual(labels, ['Review · Entrance Brief · Working board', 'Review · Entrance Recent · Working board', 'Review · Entrance Logs · Working board'])
+  if (capture) {
+    resize(360, 650)
+    await expect('innerWidth === 360 && document.documentElement.scrollWidth <= innerWidth')
+    await expect('[...document.querySelectorAll("[data-route]")].every(node => node.scrollWidth <= node.clientWidth)')
+    await screenshot('location-choices-narrow.png')
+    resize(660, 650)
+    await expect('innerWidth === 660')
+  }
   await key('Escape')
   await expect('!document.querySelector("#location-chooser") && document.activeElement.id === "location-trigger" && document.querySelector("#destination").value === "original-board"')
   result.cases.push('same-name-aliases-and-keyboard-cancel')
@@ -106,9 +115,14 @@ async function closeBoard(target) {
   await target.expect(`!${dialog} && document.activeElement?.id === "open-board" && ${unlocked}`, 'Escape restores the original trigger and releases its document')
 }
 
-async function closeMenu(target) {
+async function closeMenu(target, frame) {
   await target.click('#open-menu')
   await target.expect('Boolean(document.querySelector("[role=menuitem]"))', 'The attached menu opens in the original document')
+  if (frame) {
+    await target.key('ArrowDown')
+    await target.expect('document.activeElement?.matches("[role=menuitem]")', 'Keyboard focus reaches the menu item in the second document')
+    await target.screenshot(frame)
+  }
   await target.key('Escape')
   await target.expect(`!document.querySelector('[role=menu]') && ${dialog} && document.activeElement?.id === 'open-menu'`,
     'Only the attached menu closes and returns its original focus')
@@ -139,7 +153,7 @@ app.whenReady().then(async () => {
       await primary.expect(`!${dialog} && document.querySelector('#saved-title').value.includes('Retitled') && ${unlocked}`)
       result.cases.push('keyboard-action-shared-overlay-and-form')
     }
-    if (variant !== 'scroll') await locations(primary)
+    if (variant !== 'scroll') await locations(primary, variant === 'normal')
     if (variant !== 'locations') {
       assert.equal(await primary.read('window.openSecondDocument()'), true)
       popup = await secondWindow
@@ -148,7 +162,7 @@ app.whenReady().then(async () => {
       await openBoard(secondary)
       await secondary.expect(lock, 'The second scroll lock belongs to its original Document')
       await primary.expect(unlocked, 'A second-document modal leaves the first document usable')
-      await closeMenu(secondary)
+      await closeMenu(secondary, 'second-document-menu-focus.png')
       await secondary.screenshot('second-document-overlay.png')
       await closeBoard(secondary)
       await openBoard(secondary)
