@@ -8,6 +8,7 @@ const mode=process.env.AGENTMUX_CLUSTER_MUTANT
 const edits:Record<string,[string,string,string]>={
  'no-public-source':['cluster-resource-observation.ts',"access = 'published'; reply = await port.call('node.resources', { hostId: host.id, expectedRuntimeId: runtimeId! }, signal)","throw cause"],
  'wrong-runtime':['cluster-resource-observation.ts','if (reply.node.runtimeId !== runtimeId ||','if (false && (reply.node.runtimeId !== runtimeId ||'],
+ 'eager-overview':['ClusterMachinesPane.tsx','if (!compact) schedule()','if (true) schedule()'],
  'ignore-active':['ClusterMachinesPane.tsx','if (!active || !visible) return','if (!visible) return'],
 }
 if(mode&&!edits[mode])throw Error('Unknown cluster mutant')

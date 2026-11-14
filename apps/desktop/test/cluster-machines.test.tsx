@@ -95,3 +95,24 @@ it('the production SettingsPanel reveals and focuses the actual Machines discove
  expect(dom.container.textContent).not.toContain('This setting is not shown')
  expect(dom.container.querySelector('[data-settings-field="mesh-machines"]')?.closest('[hidden]')).toBeNull()
 })
+
+it('opens the Mesh home without sampling machines below the viewport', async () => {
+  const reads = instrument()
+  let visible: (() => void) | undefined
+  const disconnect = vi.fn()
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(notify: (entries: { isIntersecting: boolean }[]) => void) {
+      visible = () => notify([{ isIntersecting: true }])
+    }
+    observe() {}
+    disconnect = disconnect
+  })
+  try {
+    await dom.render(<ClusterMachinesPane hosts={hosts} active compact />)
+    expect(reads.owner).not.toHaveBeenCalled()
+    expect(visible).toBeDefined()
+    await act(async () => visible!())
+    await settle(() => reads.count.local === 2 && reads.count.farm === 2)
+    expect(disconnect).toHaveBeenCalled()
+  } finally { vi.unstubAllGlobals() }
+})
