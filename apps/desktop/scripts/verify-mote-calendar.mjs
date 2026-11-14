@@ -72,7 +72,7 @@ export async function verifyMoteCalendar() {
     mutations.push({ ...mutation, copy: relative(root, copy) }); runs.push(await test('red-' + change.name, mutation))
   }
   runs.push(await test('restored'))
-  const configuration = { extends: join(root, 'apps/desktop/tsconfig.json'), compilerOptions: { incremental: false, paths: { '@agentmux/core/schedule-rpc': [join(root, 'packages/core/src/public-rpc-schedules.ts')] }, types: ['node'], typeRoots: [resolve(require.resolve('@types/node/package.json'), '../..')] },
+  const configuration = { extends: join(root, 'apps/desktop/tsconfig.json'), compilerOptions: { incremental: false, types: ['node'], typeRoots: [resolve(require.resolve('@types/node/package.json'), '../..')] },
     include: [join(root, component('MoteCalendar')), join(root, 'apps/desktop/test/mote-calendar.test.tsx'), join(root, 'apps/desktop/src/renderer/src/global.d.ts'), resolve(require.resolve('vite'), '../../../client.d.ts')] }
   const typeConfig = join(directory, 'tsconfig.json'); await writeFile(typeConfig, JSON.stringify(configuration, null, 2))
   const types = await run(process.execPath, [require.resolve('typescript/bin/tsc'), '--noEmit', '-p', typeConfig], { cwd: root, timeout: 120000, maxBuffer: 4 * 1024 * 1024 })
