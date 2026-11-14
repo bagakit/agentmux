@@ -13,6 +13,7 @@ import { moteEntryDraftKey } from '../../../src/renderer/src/lib/mote-entry-hold
 import { requestPmoTeamsTopicFloatingOpen } from '../../../src/renderer/src/lib/pmo-teams-topic-floating'
 import { scratchTopicLogicalPath } from '@agentmux/host/mote-model'
 import { observeNotifications } from '../../../src/renderer/src/lib/notification-observation'
+import { topicSpaceIconTarget } from '../../../src/renderer/src/lib/space-object-appearance'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 
 await initializeLauncherState()
@@ -80,6 +81,16 @@ api.schedule.inspect = async input => {
 }
 bindMotePreferenceReader()
 await useAppStore.getState().refreshScratchTopics(SCRATCH_WORKSPACE_ID, true, PMO_TEAMS_TOPIC_ID)
+if (heartbeatIconPreview) {
+  const current = useAppStore.getState(), workspace = current.config.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
+  const topic = await api.scratch.readTopic(SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID)
+  const target = workspace && topic && topicSpaceIconTarget(workspace, topic, current.spaceZoneBindings)
+  if (!target) throw Error('The original avatar target is required for the heartbeat proof')
+  useAppStore.setState({ spaceObjectIcons: { ...current.spaceObjectIcons, [target.key]: {
+    kind: 'series', source: { origin: 'builtin', seriesId: 'mote-silhouettes', entryId: 'low-poly', revision: 'sha256:' + '1'.repeat(64) },
+    parameters: { kind: 'image', zoom: 1, offsetX: 0, offsetY: 0 }, image: { kind: 'image', fileName: 'a'.repeat(64) + '.png' },
+  } } })
+}
 const retainedKey = 'private-mote-reliability-original-draft'
 if (!restoring) { useLauncherState.getState().setDraft(retainedKey, 'prompt', 'Original retained Mote draft across a real Renderer restart.'); fixtureWrites.push('launcher-draft') }
 window.moteReliability = { ready: true, reference,

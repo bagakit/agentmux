@@ -47,7 +47,12 @@ app.whenReady().then(async () => {
     if (process.env.MOTE_HEARTBEAT_ICON === '1') {
       const cues = 'document.querySelectorAll(\'.mote-heartbeat-entry [data-icon-animation="feedback"], .mote-space-frame__header .mote-heartbeat-lamp__signal [data-icon-animation="feedback"]\')'
       const sprite = 'document.getElementById("agentmux-icon-object.heartbeat")'
-      assert.equal(await read(`${sprite}.querySelectorAll('[data-semantic-icon-part="heartbeat-curve"]').length`), 1)
+      assert.equal(await read(`${sprite}.querySelectorAll('[data-semantic-icon-part="heartbeat-pendulum"]').length`), 2)
+      const launcher = 'document.querySelector(".pmo-teams-topic-compact-launcher__surface")'
+      await until(`${launcher}?.querySelector('[data-space-silhouette="low-poly"]')`)
+      const fractions = await read(`(() => { const root = ${launcher}; const avatar = root.querySelector('.mote-silhouette-art').getBoundingClientRect(); const badge = root.querySelector('.mote-heartbeat-entry'); const outline = badge.getBoundingClientRect(); const online = root.querySelector('.pmo-teams-topic-compact-launcher__status').getBoundingClientRect();
+        return { noBacking: getComputedStyle(badge).backgroundColor === 'rgba(0, 0, 0, 0)' && getComputedStyle(badge).borderTopWidth === '0px', aboveAvatar: outline.top < avatar.top, rightOfCenter: outline.left > avatar.left + avatar.width / 2, separateFromOnline: outline.bottom < online.top } })()`)
+      assert.deepEqual(fractions, { noBacking: true, aboveAvatar: true, rightOfCenter: true, separateFromOnline: true })
       for (const [theme, width, facts, state, icon] of [
         ['dark', 1180, 'active', 'active', 'object.heartbeat'],
         ['light', 420, 'active', 'active', 'object.heartbeat'],
@@ -59,8 +64,8 @@ app.whenReady().then(async () => {
         await profile(); await refresh()
         await click(button('Discussion', 'document.querySelector(".mote-space-frame__header")'))
         const mark = `[data-mote-care="${state}"] svg[data-semantic-icon="${icon}"]`
-        for (const surface of ['.mote-heartbeat-entry', '.mote-space-frame__header .mote-heartbeat-lamp'])
-          await until(`document.querySelector(${JSON.stringify(surface + mark)})?.getBoundingClientRect().width === 12`)
+        for (const [surface, size] of [['.mote-heartbeat-entry', 13], ['.mote-space-frame__header .mote-heartbeat-lamp', 14]])
+          await until(`document.querySelector(${JSON.stringify(surface + mark)})?.getBoundingClientRect().width === ${size}`)
         assert.equal(await read(`${cues}.length`), 0)
         await capture('heartbeat-icon-' + state + '-' + theme)
       }
@@ -77,11 +82,11 @@ app.whenReady().then(async () => {
       await input('Animation.setPlaybackRate', { playbackRate: 0.1 })
       await read('window.moteReliability.advanceHeartbeatIcon()')
       await until(`${cues}.length === 2`)
-      assert.equal(beats.length, 2, 'Each original icon plays its authored middle once')
-      assert.ok(beats.every(beat => beat.source.iterations === 1 && beat.source.duration === 240), 'One finite authored motion')
+      assert.equal(beats.length, 4, 'Both parts of each original pendulum move')
+      assert.ok(beats.every(beat => beat.source.iterations === 1 && beat.source.duration === 220), 'One finite authored motion')
       const animations = beats.map(beat => beat.id)
       await input('Animation.setPaused', { animations, paused: true })
-      await input('Animation.seekAnimations', { animations, currentTime: 91 })
+      await input('Animation.seekAnimations', { animations, currentTime: 99 })
       await capture('heartbeat-motion-crest')
       await input('Animation.setPlaybackRate', { playbackRate: 1 })
       await input('Animation.setPaused', { animations, paused: false })
@@ -91,8 +96,8 @@ app.whenReady().then(async () => {
       await until(`${cues}.length === 2 && ${cues}[0] !== window.previousHeartbeatCue`)
       assert.equal(await read(`getComputedStyle(${cues}[0]).getPropertyValue('--icon-feedback-heartbeat').trim()`), 'none')
       await capture('heartbeat-motion-reduced')
-      assert.equal(beats.length, 2, 'Reduced motion does not start a new drawing animation')
-      result.heartbeatMotion = { carriers: beats.length, durationMs: beats[0].source.duration, iterations: beats[0].source.iterations, reducedMotionStarted: 0 }
+      assert.equal(beats.length, 4, 'Reduced motion does not start a new drawing animation')
+      result.heartbeatMotion = { carriers: await read(`${cues}.length`), movingParts: beats.length, durationMs: beats[0].source.duration, iterations: beats[0].source.iterations, reducedMotionStarted: 0 }
       result.passed = true; return
     }
     const checkedRecovery = async () => {

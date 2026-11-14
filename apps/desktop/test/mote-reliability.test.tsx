@@ -99,6 +99,10 @@ it.each([
     expect(lamp?.querySelector('[data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe(icon)
     expect(badge?.getAttribute('data-mote-care')).toBe(state)
     expect(badge?.querySelector('[data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe(icon)
+    if (state === 'active') {
+      const drawing = document.getElementById(badge?.querySelector('svg use')?.getAttribute('href')?.slice(1) ?? '')
+      expect(drawing?.querySelectorAll('[data-semantic-icon-part="heartbeat-pendulum"]')).toHaveLength(2)
+    }
   })
   retained()
 })
