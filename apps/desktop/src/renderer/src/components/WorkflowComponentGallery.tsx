@@ -7,6 +7,7 @@ import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { WorkflowCard, WorkflowDock, WorkflowToolRow } from './workflow'
 import { ObservedProcessDock } from '@agentmux/client-ui/components/WorkflowObservation'
 import { ObservationSurfaceGallery } from './ObservationSurfaceGallery'
+import { ConversationReceiptGallery } from './ConversationReceiptGallery'
 import {
   completedWorkflow,
   failedWorkflow,
@@ -96,6 +97,7 @@ export function WorkflowComponentGallery() {
         <p>先看正式对话共用的记录组件。下方完整 Workflow 的阶段与进度使用静态示例，不代表真实对话已具备这些执行事实。</p>
       </section>
       <nav className="wf-gallery__map" aria-label="Gallery 内容导航">
+        <a href="#send-receipts"><SemanticIcon name="action.send" />发送回执对照</a>
         <a href="#existing-surfaces"><SemanticIcon name="object.conversation" />正式对话组件</a>
         <a href="#workflow-context"><SemanticIcon name="object.context" />上下文</a>
         <a href="#workflow-states"><SemanticIcon name="status.completed" />终态与恢复</a>
@@ -104,6 +106,7 @@ export function WorkflowComponentGallery() {
         <a href="#composer-details"><SemanticIcon name="object.composer-details" />Composer 细节</a>
         <a href="#inline-rename"><ThemeActionEditIcon size={13} />原位改名</a>
       </nav>
+      <ConversationReceiptGallery />
       <div id="existing-surfaces"><ObservationSurfaceGallery /></div>
       <section id="workflow-context" className="wf-gallery__section">
         <p className="wf-gallery__caption"><SemanticIcon name="object.context" /><b>A · 完整 Workflow 静态示例</b><span>示范阶段与 Agent 进度的呈现；真实对话保留原记录已有的事实。</span></p>
