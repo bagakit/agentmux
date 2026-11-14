@@ -8,12 +8,17 @@ import { probeBrowserProxyProtocol } from './browser-proxy-probe.js'
 
 /** Shared Main operations consumed by the trusted Settings IPC and the public Profile dispatcher. */
 export function createBrowserProfileNetworkControl(ports: {
-  profiles: Pick<BrowserProfileManager, 'initialize' | 'resolvePartition' | 'proxyOf'> & Partial<Pick<BrowserProfileManager, 'listProfiles' | 'configurationRevision' | 'networkHistory' | 'recordNetworkDiagnostic'>>
-  proxyAuth: Pick<BrowserProfileProxyAuth, 'set' | 'clear'> & Partial<Pick<BrowserProfileProxyAuth, 'withProbeCredentials'>>
+  profiles: Pick<BrowserProfileManager, 'initialize' | 'resolvePartition' | 'proxyOf'> & Partial<Pick<BrowserProfileManager, 'refreshProxyTransport' | 'sessions' | 'listProfiles' | 'configurationRevision' | 'networkHistory' | 'recordNetworkDiagnostic'>>
+  proxyAuth: Pick<BrowserProfileProxyAuth, 'set' | 'clear'> & Partial<Pick<BrowserProfileProxyAuth, 'withProbeCredentials' | 'transportIssue' | 'hasTransportCredentials'>>
   checkExit: BrowserProfileExitChecker
   checkAddress(): string
   reconnect(profileId: string): Promise<void>
 }) {
+  if (ports.proxyAuth.withProbeCredentials && ports.proxyAuth.hasTransportCredentials) ports.profiles.sessions?.bindSocksTransport?.({
+    revision: id => ports.profiles.configurationRevision?.(id) ?? null,
+    credentials: { hasTransportCredentials: (id, expected) => ports.proxyAuth.hasTransportCredentials!(id, expected), withProbeCredentials: (id, expected, use) => ports.proxyAuth.withProbeCredentials!(id, expected, use),
+      ...(ports.proxyAuth.transportIssue ? { transportIssue: (id, expected, reason) => ports.proxyAuth.transportIssue!(id, expected, reason) } : {}) }
+  })
   const active = new Map<string, { id: string; result: Promise<BrowserProxyProbeReceipt> }>()
   return {
     async probe(profileId: string, operationId = mintObjectId()): Promise<BrowserProxyProbeReceipt> {
@@ -77,7 +82,7 @@ export function createBrowserProfileNetworkControl(ports: {
       }
       // A saved credential is committed even if reconnecting a page fails; never report that as an
       // unapplied secret write and invite a blind retry. The next request uses the saved sign-in.
-      try { await ports.reconnect(profileId); return { reconnected: true } }
+      try { if (await ports.profiles.refreshProxyTransport?.(profileId)) return { reconnected: true }; await ports.reconnect(profileId); return { reconnected: true } }
       catch { return { reconnected: false } }
     },
     async checkExit(profileId: string) {

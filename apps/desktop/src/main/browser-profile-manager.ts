@@ -154,6 +154,12 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     return network ? network.then(() => this.extensions.prepare(profileId)) : this.extensions.prepare(profileId)
   }
 
+  /** Credential changes refresh only this Profile's transport under its original configuration writer. */
+  async refreshProxyTransport(profileId: string): Promise<boolean> {
+    this.resolvePartition(profileId)
+    return this.configuration(profileId, async () => await this.sessions.refreshTransport?.(profileId) ?? false)
+  }
+
   environmentSettings(profileId: string): import('@agentmux/core/control').BrowserProfileEnvironment | undefined { const value = this.profiles.get(profileId)?.environment; return value && structuredClone(value) }
   preparePageEnvironment(profileId: string, browserId: string, contents: import('electron').WebContents, port: import('./browser-profile-page-environment.js').BrowserProfilePageEnvironmentPorts): Promise<void> { return this.sessions.preparePageEnvironment?.(profileId, browserId, contents, port) ?? Promise.resolve() }
   environmentApplication(profileId: string) { return this.sessions.environmentApplication?.(profileId) }
@@ -695,6 +701,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
         if (!window.isDestroyed()) window.destroy()
       }
       await Promise.allSettled(this.activeMutations)
+      this.sessions.dispose?.()
       this.importWindows.clear()
       this.profiles.clear()
       this.folders = []

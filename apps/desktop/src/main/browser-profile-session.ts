@@ -1,3 +1,4 @@
+import { createBrowserProfileSocksTransport, type BrowserProfileSocksTransportPorts } from './browser-profile-socks-transport.js'
 import type { BrowserProfileNetworkApplication, BrowserProfileEnvironment, BrowserProfileNativeUse } from '@agentmux/core/control'
 import type { BrowserProfilePageEnvironmentPorts } from './browser-profile-page-environment.js'
 import { createBrowserProfileEnvironment } from './browser-profile-environment.js'
@@ -77,21 +78,27 @@ export function createBrowserProfileSessions(ports: BrowserProfileSessionPorts) 
   const pending = new WeakMap<Session, { key: string; done: Promise<void> }>()
   // Sessions whose route is a proxy: their pages must not send WebRTC around it.
   const proxied = new WeakSet<Session>()
+  const portsNetwork = ports.network
+  let socks: ReturnType<typeof createBrowserProfileSocksTransport> | undefined
 
-  async function apply(target: Session, network: BrowserProfileNetwork | undefined, profileId: string): Promise<void> {
+  async function apply(target: Session, network: BrowserProfileNetwork | undefined, profileId: string, refresh = false): Promise<void> {
     const key = routeKey(network)
-    if (applied.get(target)?.key === key && applied.get(target)!.confirmed) return
+    if (!refresh && applied.get(target)?.key === key && applied.get(target)!.confirmed) return
     const running = pending.get(target)
     if (running?.key === key) return await running.done
     const done = (async () => {
       // One route at a time per session: a newer route waits for the one in flight, then wins.
       await running?.done.catch(() => {})
+      const previous = applied.get(target)
+      const transport = await socks?.route(profileId, target, network) ?? null
+      if (transport?.retainExisting && previous?.key === key && previous.confirmed) return
       applied.delete(target)
       try {
-        await target.setProxy(browserProfileProxyConfig(network ?? { mode: 'system' }))
+        await target.setProxy({ ...browserProfileProxyConfig(network ?? { mode: 'system' }), ...(transport ? { proxyRules: transport.proxyRules } : {}) })
         // Connections opened under the old route would keep using it.
         await target.closeAllConnections()
-      } catch (cause) { throw new BrowserProfileNetworkUnavailable(profileId, cause) }
+      } catch (cause) { socks?.discard(target, transport); throw new BrowserProfileNetworkUnavailable(profileId, cause) }
+      socks?.applied(target, transport)
       applied.set(target, { key, confirmed: true })
       if (network?.mode === 'proxy') proxied.add(target)
       else proxied.delete(target)
@@ -108,6 +115,11 @@ export function createBrowserProfileSessions(ports: BrowserProfileSessionPorts) 
     /** Session has no destroy API. Idle counts cannot replace this process-lifetime admission fact. */
     nativeSessionAdmitted(profileId: string): boolean { return nativeProfileSessions.has(profileId) },
     observedSession(profileId: string): Session | undefined { return nativeProfileSessions.get(profileId) },
+    bindSocksTransport(ports: Omit<BrowserProfileSocksTransportPorts, 'network'>): void { if (!socks) socks = createBrowserProfileSocksTransport({ ...ports, network: id => portsNetwork(id) }) },
+    async refreshTransport(profileId: string): Promise<boolean> { const network = ports.network(profileId); if (!socks || network?.mode !== 'proxy' || network.server.scheme !== 'socks5') return false; const target = ownedSession(profileId); await apply(target, network, profileId, true); return true },
+    answerProxyTransport(target: Session, auth: { isProxy: boolean; host: string; port: number }, callback: (username?: string, password?: string) => void): boolean { return socks?.answer(target, auth, callback) ?? false },
+    async fetch(profileId: string, address: string, signal?: AbortSignal): Promise<Response> { const target = ownedSession(profileId); return socks ? socks.fetch(target, address, signal) : target.fetch(address, { method: 'GET', cache: 'no-store', redirect: 'follow', ...(signal ? { signal } : {}) }) },
+    dispose(): void { socks?.dispose() },
     nativeSession(profileId: string): Session { return ownedSession(profileId) },
     retainedSession(profileId: string): Session { return ownedSession(profileId, true) },
     profileOfSession(target: Session): string | null { return nativeSessionObservations.get(target)?.profileId ?? null },

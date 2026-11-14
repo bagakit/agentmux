@@ -516,6 +516,7 @@ export async function registerIpc(args: {
     // Claim the challenge only for a Profile's own proxy, so every other sign-in keeps Chromium's default.
     if (!authInfo.isProxy || !contents || !browserProfiles.profileOfSession(contents.session)) return
     event.preventDefault()
+    if (browserProfiles.sessions.answerProxyTransport(contents.session, authInfo, callback)) return
     void profileProxyAuth.answer(contents, authInfo, callback, details.firstAuthAttempt === true).then(answered => { if (!answered) callback() }, () => callback())
   }
   app.on('login', answerProfileProxy)
@@ -2268,6 +2269,7 @@ export async function registerIpc(args: {
   const profileExitCheck = createBrowserProfileExitCheck({
     session: profileId => browserProfiles.sessions.nativeSession(profileId),
     prepare: profileId => browserProfiles.prepareSession(profileId),
+    fetch: (profileId, address, signal) => browserProfiles.sessions.fetch(profileId, address, signal),
     now: () => performance.now()
   })
   const profileNetworkControl = createBrowserProfileNetworkControl({ profiles: browserProfiles, proxyAuth: profileProxyAuth,

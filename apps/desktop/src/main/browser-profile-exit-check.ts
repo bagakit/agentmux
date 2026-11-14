@@ -53,6 +53,7 @@ export type BrowserProfileExitCheckPorts = {
   session(profileId: string): Session
   /** Applies the Profile's route first, so the check never runs on a route its pages would not use. */
   prepare(profileId: string): Promise<void> | undefined
+  fetch?(profileId: string, address: string, signal: AbortSignal): Promise<Response>
   now(): number
 }
 
@@ -64,7 +65,8 @@ export function createBrowserProfileExitCheck(ports: BrowserProfileExitCheckPort
     await ports.prepare(profileId)
     const started = ports.now()
     try {
-      const response = await target.fetch(address, { method: 'GET', cache: 'no-store', redirect: 'follow', signal: AbortSignal.timeout(CHECK_TIMEOUT_MS) })
+      const signal = AbortSignal.timeout(CHECK_TIMEOUT_MS)
+      const response = await (ports.fetch ? ports.fetch(profileId, address, signal) : target.fetch(address, { method: 'GET', cache: 'no-store', redirect: 'follow', signal }))
       const latencyMs = ports.now() - started
       let ip: string | undefined
       try { ip = await responseAddress(response) } catch { /* the status alone is still the answer */ }

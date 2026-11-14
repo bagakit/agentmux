@@ -117,6 +117,16 @@ export function createBrowserProfileProxyAuth(ports: BrowserProfileProxyAuthPort
       if (!current()) throw new BrowserProfileProxyAuthUnavailable('The original proxy configuration changed before the protocol request.')
       return await use({ username: entry.username, password })
     },
+    /** A private adapter is needed only for a sign-in bound to that exact proxy; no-auth SOCKS keeps its native path. */
+    async hasTransportCredentials(profileId: string, expected: { host: string; port: number }): Promise<boolean | undefined> {
+      try { const entry = (await read(profileId)).profiles[profileId]; return !!entry && (entry.proxy === undefined || sameProxy(entry.proxy, expected)) }
+      catch { return undefined }
+    },
+    /** Main's exact live transport can report a refusal; neither its capability nor password is published. */
+    transportIssue(profileId: string, expected: { host: string; port: number; configurationRevision: string }, reason: string | null): void {
+      if (ports.configurationRevision?.(profileId) !== expected.configurationRevision || !sameProxy(ports.proxyOf(profileId), expected)) return
+      report(profileId, reason, expected)
+    },
     /** The last recorded issue for this exact current proxy; absence is not proof of authentication. */
     issue(profileId: string): string | null {
       const issue = issues.get(profileId)
