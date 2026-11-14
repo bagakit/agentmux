@@ -40,7 +40,7 @@ export function createFocusGoalLinksSelector() {
   let qualifiedCards = new Map<string, Set<string>>(), unqualifiedCards = new Map<string, Set<string>>()
   let result: ReadonlyMap<string, FocusGoalLinks> = new Map()
   return (input: { demands: Readonly<Record<string, DemandRecord>>; sessions: readonly SessionSnapshot[] }, active = true) => {
-    if (!active) return result
+    if (!active) { previousSessions = undefined; return result }
     const affectedQualified = new Set<string>(), affectedBare = new Set<string>()
     if (input.demands !== previousGoals) {
       // The original record snapshot names no changed IDs: compare object identities once,

@@ -313,13 +313,21 @@ function sameLaneFacts(a: FocusContext, b: FocusContext): boolean {
  * requested coordination metadata. Coordination never enters execution history. */
 function createFocusProjectionCache() {
   let groupSequence = 0
-  const cache = new Map<string, { group: { key: string; enteredAt: number | null; sequence: number } | null; session: SessionSnapshot; activitySemantic: AgentObservation['semantic']; timeline: AgentTimelineSnapshot | undefined; stamp: FocusTimelineStamp | undefined; deferred: boolean; conversation: FocusConversationFacts | undefined; name: string | undefined; config: AppConfig | null; workspace: WorkspaceRecord | undefined; topicId: string | null; lane: AgentFocusLane | null; model: FocusContext | null; laneModel: FocusContext | null; coordinationModel: FocusContext | null }>()
+  const cache = new Map<string, { group: { key: string; enteredAt: number | null; sequence: number } | null; session: SessionSnapshot | undefined; activitySemantic: AgentObservation['semantic']; timeline: AgentTimelineSnapshot | undefined; stamp: FocusTimelineStamp | undefined; deferred: boolean; conversation: FocusConversationFacts | undefined; name: string | undefined; config: AppConfig | null; workspace: WorkspaceRecord | undefined; topicId: string | null; lane: AgentFocusLane | null; model: FocusContext | null; laneModel: FocusContext | null; coordinationModel: FocusContext | null }>()
   let previous: Inputs | undefined
   let previousMode: 'full' | 'metadata' | undefined
   let previousCoordination = false
   let result: FocusProjection = {contexts: [], laneContexts: [], pmoAttention: [], coordinationContexts: []}
   const select = (input: Inputs, active = true, mode?: 'full' | 'metadata', coordination = false): FocusProjection => {
-    if (!active) return result
+    if (!active) {
+      if (previous) {
+        previous = undefined
+        // Keep the rendered models/order. Raw Sessions are comparison inputs,
+        // not the retained reading surface, and may contain retired input bodies.
+        for (const entry of cache.values()) entry.session = undefined
+      }
+      return result
+    }
     if (sameFocusInputs(previous, input) && previousMode === mode && previousCoordination === coordination && (mode === undefined
       || [...cache].every(([id, row]) => row.timeline === input.timelines[id] && sameTimelineStamp(row.stamp, input.timelines[id])))) return result
     const rows: FocusContext[] = []
@@ -338,7 +346,7 @@ function createFocusProjectionCache() {
       // their result classification and detail never consume conversation text.
       const deferred = mode === 'metadata' && (session.processState === 'interrupted' || session.runUnobserved === true)
         && !session.pendingInteraction && !isNeedsYouState(session.status.state) && session.status.state !== 'error'
-      if (old && (!coordination || old.lane !== 'pmo' || old.coordinationModel) && old.deferred === deferred && old.activitySemantic === activitySemantic && sameSessionPresentation(old.session, session, now) && old.timeline === timeline && (mode !== undefined ? sameTimelineStamp(old.stamp, timeline) : !old.conversation || sameConversationFacts(old.conversation, timeline)) && old.name === name && old.config === input.config && previous?.scratchTopicSnapshots === input.scratchTopicSnapshots) {
+      if (old?.session && (!coordination || old.lane !== 'pmo' || old.coordinationModel) && old.deferred === deferred && old.activitySemantic === activitySemantic && sameSessionPresentation(old.session, session, now) && old.timeline === timeline && (mode !== undefined ? sameTimelineStamp(old.stamp, timeline) : !old.conversation || sameConversationFacts(old.conversation, timeline)) && old.name === name && old.config === input.config && previous?.scratchTopicSnapshots === input.scratchTopicSnapshots) {
         old.session = session
         if (old.model) { rows.push(old.model); laneRows.push(old.laneModel!) }
         else if (old.lane === 'pmo') {
@@ -347,7 +355,7 @@ function createFocusProjectionCache() {
         }
         continue
       }
-      const sameOwner = old && previous?.scratchTopicSnapshots === input.scratchTopicSnapshots && old.config === input.config && old.session.hostId === session.hostId && old.session.workspacePath === session.workspacePath
+      const sameOwner = old?.session && previous?.scratchTopicSnapshots === input.scratchTopicSnapshots && old.config === input.config && old.session.hostId === session.hostId && old.session.workspacePath === session.workspacePath
       const { workspace, topicId } = sameOwner ? old : focusScopeForSession(input, session)
       let group: { key: string; enteredAt: number | null; sequence: number } | null = null
       let model: FocusContext | null = null
