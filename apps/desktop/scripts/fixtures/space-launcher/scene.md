@@ -15,3 +15,20 @@ For the initial-page affordances, inspect the complete `Discuss with [avatar] Mo
 Trusted Chromium operations edit the real prompt, open Options, reach its name inputs and dismiss without losing the draft. They also edit and reopen Browser/Note, collapse and expand the original Terminal, and open the Mote target chooser. The fixture checks original targets and retained Terminal identity through controlled preview API facts.
 
 Independent subjective review is required; capture success does not approve aesthetics. The fixture uses an isolated profile and controlled external API seams. It does not operate the user's installed App, real Agent Sessions or native CLI, and does not prove durable Runtime recovery.
+# Planned execution relation
+
+Run `node apps/desktop/scripts/capture-space-launcher.mjs <evidence-directory> --execution-relation`
+for the existing production Workbench/Launcher with a controlled original Source inventory:
+one registered, unchecked configuration and two unchecked Provider defaults. The primary
+configuration remains distinct from the explicitly expandable default types.
+
+The slice captures a right-edge relation tooltip in wide dark/light, long names and
+addresses, narrow dark/light, and a short window. Native wheel input must reach the
+short tooltip's complete Runtime identities; keyboard focus and Escape use the original
+reading affordance. Expanded launch compatibility remains subordinate to the input.
+The receipt checks geometry, unknown-route wording and the retained unsent draft.
+`LAUNCHER_AFFORDANCE_MUTATION=tooltip-width` compiles an isolated CSS counterexample
+that must fail the no-horizontal-scroll assertion.
+
+External Source replies and Runtime I/O remain controlled preview facts. These frames
+do not prove an installed App, SSH, actual SG1 launch or original request recovery.
