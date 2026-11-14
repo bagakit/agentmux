@@ -5,6 +5,7 @@ import { recoverMobileAgent, mobileAgentRecoveryBusy } from '../src/conversation
 import { MobileAgentActions } from '../src/conversation/MobileAgentActions'
 import { emptyDeviceWorkface, getDeviceWorkface, DeviceWorkfaceStore } from '../src/recovery/device-workface'
 import { button, deferred, fixture, mount, mounted, session } from './conversation-fixture'
+import { hostedAgentSessionSummary } from '../../../packages/core/src/hosted-session-summary'
 
 beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => { for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() }; document.body.replaceChildren(); vi.restoreAllMocks() })
@@ -48,10 +49,14 @@ it('an original unknown main-entry request is only inspected on the next explici
   await recoverMobileAgent(f.request)
   const owner = getDeviceWorkface(), intent = owner.snapshot().record.agentResumes!.at(-1)!
   expect(intent.phase).toBe('unknown')
+  // Summary metadata cannot settle an unknown recovery from a stale cache. The same
+  // explicit opening still inspects the exact original Session and its operation.
+  f.sessions.set(f.original.agentSessionId, hostedAgentSessionSummary(f.original))
   vi.mocked(f.client.forwardRpc!).mockResolvedValueOnce({ routeHostId: 'original-route', session: { ...f.original, continuityOperations: {
     [intent.input.operationId]: { operationId: intent.input.operationId, agentSessionId: f.original.agentSessionId, previousRun: f.original.run, kind: 'reattachable' }
   } }, unavailable: [] } as never)
   await recoverMobileAgent(f.request)
+  expect(f.client.forwardRpc).toHaveBeenLastCalledWith('agent.inspect', { target: { kind: 'agent-session', agentSessionId: f.original.agentSessionId } })
   expect(f.client.ensureAgentContinuity).toHaveBeenCalledTimes(1)
   expect(owner.snapshot().record.agentResumes).toEqual([{ ...intent, phase: 'confirmed' }])
 })

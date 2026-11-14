@@ -47,7 +47,7 @@ describe('the saved connection link', () => {
     await mount(<MobileConnectionRoot platform={createBrowserPlatform()} native={false} offer={offer} />)
     expect(save).toHaveBeenCalledWith('agentmux.connection-offer.v2', JSON.stringify(offer))
     await vi.waitFor(() => expect(ports.connect).toHaveBeenCalledTimes(1))
-    expect(ports.connect.mock.calls[0]![0]).toMatchObject({ offer })
+    expect(ports.connect.mock.calls[0]![0]).toMatchObject({ offer, sessions: 'summary' })
     await vi.waitFor(() => expect(ports.observation).toMatchObject({ state: 'connected', paired: true, issue: expect.stringContaining('连接链接没有保存到这台设备') }))
     expect(localStorage.getItem('agentmux.connection-offer.v2')).toBeNull()
   })

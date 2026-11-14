@@ -4,6 +4,7 @@ import { MobileConversationSurface } from '../src/conversation/MobileConversatio
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { ClientDeliveryDiagnostics } from '@agentmux/client-ui/delivery-diagnostics'
+import { hostedAgentSessionSummary } from '../../../packages/core/src/hosted-session-summary'
 import { button, click, deferred, editor, fixture, mount, mounted, paste, plainEnter } from './conversation-fixture'
 
 const sid = 'session-original', key = JSON.stringify(['draft', sid]), body = 'Original explicitly refused input'
@@ -17,18 +18,19 @@ function consumer() {
     platform={createBrowserPlatform({ clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } })} />
   return { ...f, surface }
 }
-function originalRefusal(f: ReturnType<typeof consumer>, operationId: string) {
+function originalRefusal(f: ReturnType<typeof consumer>, operationId: string, summary = false) {
   const current = f.sessions.get(sid)!
   const refused = { ...current, promptCompletionAdmission: { operationId: 'native-original-phase', submissionId: operationId,
     startByte: 0, endByte: body.length, acknowledged: false, notApplied: true,
     intent: { run: current.run, ownerInstanceId: 'original-native', prompt: body,
       plan: { kind: 'single-phase' as const, data: body } } } }
-  f.sessions.set(sid, refused)
-  f.emit({ type: 'agent-session', session: refused })
+  const projected = summary ? hostedAgentSessionSummary(refused) : refused
+  f.sessions.set(sid, projected)
+  f.emit({ type: 'agent-session', session: projected })
 }
-async function firstRefusal(f: ReturnType<typeof consumer>) {
+async function firstRefusal(f: ReturnType<typeof consumer>, summary = false) {
   f.submit.mockImplementationOnce(async input => {
-    originalRefusal(f, input.operationId!)
+    originalRefusal(f, input.operationId!, summary)
     throw Object.assign(new Error('Native confirmed original whole input was not applied'), { code: 'AGENT_PROMPT_INPUT_NOT_APPLIED', detail: 'not_applied' })
   })
   const view = await mount(f.surface)
@@ -42,8 +44,8 @@ afterEach(async () => {
   vi.restoreAllMocks()
 })
 
-it('uses a new manual operation only on an explicit Send after an exact conditioned-input whole refusal, preserving the original request and diagnostic', async () => {
-  const f = consumer(), { view, original } = await firstRefusal(f)
+it.each([false, true])('uses a new manual operation only on an explicit Send after an exact conditioned-input whole refusal (summary=%s), preserving the original request and diagnostic', async summary => {
+  const f = consumer(), { view, original } = await firstRefusal(f, summary)
   expect(f.submit).toHaveBeenCalledOnce()
   await click(button(view.element, 'Send'))
   await vi.waitFor(() => expect(currentAttempt().phase).toBe('confirmed'))

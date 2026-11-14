@@ -1,6 +1,7 @@
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentMuxAgentSession } from '@agentmux/core'
+import { hostedAgentSessionSummary } from '../../../packages/core/src/hosted-session-summary'
 import { expandSemanticReferences } from '@agentmux/client-ui'
 import { MobileConversationSurface, type MobileConversationSurfaceProps } from '../src/conversation/MobileConversationSurface'
 import { createBrowserPlatform } from '../src/platform/browser'
@@ -36,6 +37,48 @@ afterEach(async () => {
   vi.unstubAllGlobals()
 })
 describe('explicit continuation of the retained original mobile request', () => {
+  it('re-reads the matching summary at the exact Session before continuing a restored unknown original after reconnect', async () => {
+    retainOriginal('新的编辑草稿', 'sending')
+    const f = fixture(), full = admitted(), read = vi.fn().mockResolvedValue(full)
+    f.sessions.set('session-original', hostedAgentSessionSummary(full))
+    Object.assign(f.client, { readAgentSession: read })
+    const view = await mount(<MobileConversationSurface {...props(f)} />)
+    await act(async () => { f.emit({ type: 'connection-state', state: 'lost', evidence }); f.emit({ type: 'connection-state', state: 'restored', evidence }) })
+    expect(read).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled()
+    await click(retry(view.element)!)
+    expect(read).toHaveBeenCalledExactlyOnceWith('session-original')
+    expect(f.submit).toHaveBeenCalledExactlyOnceWith({ agentSessionId: 'session-original', operationId: op,
+      expectedRun: { runId: 'run-original' }, afterSubmissionId: op, prompt: expanded, authorHuman: true, execution: 'immediate', allowUncertainTurn: true })
+    expect(editor(view.element).textContent).toBe('新的编辑草稿')
+    expect(f.client.agentSession('session-original').promptCompletionAdmission!.intent).toBeUndefined()
+  })
+
+  it('keeps the original unknown and its edited draft when the exact full read fails, with explicit retry still reachable', async () => {
+    retainOriginal('不能丢的新草稿')
+    const f = fixture(), full = admitted(), read = vi.fn().mockRejectedValueOnce(new Error('Original full read unavailable')).mockResolvedValue(full)
+    f.sessions.set('session-original', hostedAgentSessionSummary(full)); Object.assign(f.client, { readAgentSession: read })
+    const view = await mount(<MobileConversationSurface {...props(f)} />)
+    await click(retry(view.element)!)
+    expect(read).toHaveBeenCalledExactlyOnceWith('session-original'); expect(f.submit).not.toHaveBeenCalled()
+    expect(stored().attempts[0][1]).toMatchObject({ operationId: op, draft: body, phase: 'unknown' })
+    expect(editor(view.element).textContent).toBe('不能丢的新草稿')
+    expect(retry(view.element)).toBeDefined(); expect(button(view.element, 'Send').disabled).toBe(false)
+    await click(retry(view.element)!)
+    expect(read).toHaveBeenCalledTimes(2); expect(f.submit).toHaveBeenCalledOnce()
+    expect(f.submit.mock.calls[0]![0].operationId).toBe(op)
+    expect(editor(view.element).textContent).toBe('不能丢的新草稿')
+  })
+
+  it('does not fetch a full body for an unrelated summary operation', async () => {
+    retainOriginal(); const f = fixture(), other = admitted(), read = vi.fn()
+    other.promptCompletionAdmission!.submissionId = 'other-operation'
+    f.sessions.set('session-original', hostedAgentSessionSummary(other)); Object.assign(f.client, { readAgentSession: read })
+    const view = await mount(<MobileConversationSurface {...props(f)} />)
+    await click(retry(view.element)!)
+    expect(read).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled()
+    expect(stored().attempts[0][1]).toMatchObject({ operationId: op, draft: body, phase: 'unknown' })
+  })
+
   it.each(['default', 'immediate'] as const)('rejoins restored unknown %s with the original identity/body/mode and keeps the edited draft', async execution => {
     retainOriginal('新的编辑草稿', 'sending')
     const f = fixture(); f.sessions.set('session-original', admitted(execution))
@@ -70,7 +113,21 @@ describe('explicit continuation of the retained original mobile request', () => 
     expect(retry(view.element)).toBeDefined(); expect(f.submit).not.toHaveBeenCalled()
   })
 
-  it.each(['absent-admission', 'other-session', 'other-current-run', 'other-original-run', 'other-operation', 'other-prompt',
+  it('keeps the frozen wire separate from original human content when continuing the same Core operation', async () => {
+    retainOriginal(); const f = fixture(), value = admitted(), intent = value.promptCompletionAdmission!.intent!
+    // Core owns the immutable wire recipe; the phone owns the original producer
+    // content. Neither a changed formatter nor wire-shaped text becomes new input.
+    intent.prompt = 'Original opaque Core wire and platform context'
+    f.sessions.set('session-original', value)
+    const view = await mount(<MobileConversationSurface {...props(f)} />)
+    await click(retry(view.element)!)
+    expect(f.submit).toHaveBeenCalledExactlyOnceWith({ agentSessionId: 'session-original', operationId: op,
+      expectedRun: { runId: 'run-original' }, afterSubmissionId: op, prompt: expanded, authorHuman: true, execution: 'immediate', allowUncertainTurn: true })
+    expect(intent.prompt).toBe('Original opaque Core wire and platform context')
+    expect(f.submit.mock.calls[0]![0].prompt).not.toBe(intent.prompt)
+  })
+
+  it.each(['absent-admission', 'other-session', 'other-current-run', 'other-original-run', 'other-operation',
     'other-message', 'no-human', 'agent-author', 'system-context', 'missing-execution'] as const)(
     'keeps an explicit retry reachable but refuses unverifiable legacy %s input without replacing the original', async reason => {
       retainOriginal(); const f = fixture(), value = admitted(), intent = value.promptCompletionAdmission!.intent!
@@ -79,7 +136,6 @@ describe('explicit continuation of the retained original mobile request', () => 
       if (reason === 'other-current-run') value.run = { runId: 'new-run' }
       if (reason === 'other-original-run') intent.run = { runId: 'other-run' }
       if (reason === 'other-operation') value.promptCompletionAdmission!.submissionId = 'new-operation'
-      if (reason === 'other-prompt') intent.prompt = 'different'
       if (reason === 'other-message') intent.message!.userContent = 'different'
       if (reason === 'no-human') delete intent.message!.authorHuman
       if (reason === 'agent-author') intent.message!.authorAgentSessionId = 'peer'
