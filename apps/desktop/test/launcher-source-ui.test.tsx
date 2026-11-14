@@ -66,11 +66,11 @@ it('explicit ordinary preparation reads the original Source catalogue and regist
   await dom.render(<SourceAgentTargetSetup config={config} fixedResourceWorkspaceId={project.id} active actionLabel="Apply" onApply={selected} />)
   await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.textContent).toContain('Update AgentMux Core') })
   await vi.waitFor(async () => { await act(async () => {}); expect(button('Apply').disabled).toBe(false) })
-  await act(async () => dom.container.querySelector<HTMLElement>('[aria-label="Agent runs on"]')!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse', ctrlKey: false })))
-  const deviceChoices = document.querySelector('.selection-field__menu')!
+  await dom.click('[aria-label="Agent runs on"]')
+  const deviceChoices = document.querySelector('[role="listbox"][aria-label="Agent runs on"]')!
   expect(deviceChoices.textContent).not.toContain('Reading this project device')
   expect(deviceChoices.textContent).toContain('Project device')
-  await act(async () => [...deviceChoices.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(item => item.textContent?.startsWith('Project device'))!.click())
+  await act(async () => deviceChoices.querySelector<HTMLElement>('[role="option"][data-value=\'["host","local"]\']')!.click())
   expect(calls).not.toContain('register'); expect(await b.store.read()).toBeNull()
   await act(async () => button('Apply').click())
   await vi.waitFor(() => expect(selected).toHaveBeenCalledOnce())
@@ -85,7 +85,8 @@ it('explicit ordinary preparation reads the original Source catalogue and regist
 
 it('applies the project device for a retained Folder registration with multiple original Zones', async () => {
   const f = await spaceMountFixture(cleanup), local = f.cores[0]!, selected = vi.fn()
-  const config = { ...composerConfig, workspaces: [{ ...project, hostId: local.id }] }
+  const localProject = { ...project, hostId: local.id }
+  const config = { ...composerConfig, workspaces: [localProject] }
   const registration = { runtimeId: local.identity.runtimeId, workspaceId: local.workspace.id,
     expectedResource: { hostId: local.workspace.hostId, workspacePath: local.workspace.path, projectRootPath: local.workspace.path } }
   const saved = await f.api.call('register', { hostId: local.id, registration })
@@ -97,10 +98,24 @@ it('applies the project device for a retained Folder registration with multiple 
   const input = { kind: 'folder-registration' as const, hostId: local.id, registration, submitted: true }
   useAppStore.setState({ config, mountedSpaceInputs: { [mountedRegistrationKey(input)]: input } })
   const calls = vi.spyOn(api.spaceMounts, 'call').mockImplementation((method, params, signal) => f.api.call(method, params, signal))
-  await dom.render(<SourceAgentTargetSetup config={config} fixedResourceWorkspaceId={project.id} active actionLabel="Apply" onApply={selected} />)
+  await dom.render(<SourceAgentTargetSetup config={config} fixedResourceWorkspaceId={project.id} active actionLabel="Apply" onApply={selected}
+    initialSelection={{ resourceWorkspaceId: project.id, agentWorkspaceId: null, source: {
+      project: localProject,
+      target: { hostId: local.id, reference: saved.reference, zoneId: saved.zoneId, workspaceId: saved.workspaceId },
+      agentTarget: { hostId: 'local-original-remote', runtimeId: 'local-remote-runtime' }
+    } }} />)
+  await vi.waitFor(async () => {
+    await act(async () => {})
+    expect(calls.mock.calls.some(([method]) => method === 'resources')).toBe(true)
+    expect(dom.container.textContent).not.toContain('Reading launch support…')
+  })
+  await dom.click('[aria-label="Agent runs on"]')
+  const projectDevice = document.querySelector<HTMLElement>('[role="option"][data-value=\'["host","local"]\']')!
+  expect(projectDevice.getAttribute('aria-selected')).toBe('false')
+  await act(async () => projectDevice.click())
   await vi.waitFor(async () => { await act(async () => {}); expect(button('Apply').disabled).toBe(false) })
   await act(async () => button('Apply').click())
-  await vi.waitFor(() => expect(selected).toHaveBeenCalledOnce())
+  await vi.waitFor(async () => { await act(async () => {}); expect(selected).toHaveBeenCalledOnce() })
   expect(selected.mock.calls[0]![0]).toMatchObject({ source: {
     target: { hostId: local.id, reference: saved.reference, zoneId: saved.zoneId, workspaceId: saved.workspaceId },
     agentTarget: { hostId: 'local', runtimeId: local.identity.runtimeId }
