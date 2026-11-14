@@ -325,6 +325,32 @@ it.each([false, true])('capture_busy waits for the actual lease before the selec
   expect(await outcome).toEqual({ state: 'cancelled' })
 })
 
+it.each([false, true])('persistent capture_busy ends with an explicit unknown and allows the next request: public=%s', async publicCapture => {
+  const busy = Object.assign(new Error('the old display producer is still busy'), { code: 'capture_busy' })
+  const captureDisplays = vi.fn().mockRejectedValue(busy)
+  ports.native.mockReturnValue({ captureDisplays })
+  electron.workbench = [{ isDestroyed: () => false, isVisible: () => true, isMinimized: () => false, getOpacity: () => 1, setOpacity: vi.fn() }]
+  const outcome = publicCapture ? surface.captureSelection(false) : surface.present(session())
+  let settled = false
+  const observed = outcome.then(value => { settled = true; return value }, error => { settled = true; return error })
+  await vi.advanceTimersByTimeAsync(0)
+  expect(captureDisplays).toHaveBeenCalled()
+  await vi.advanceTimersByTimeAsync(9999)
+  expect(settled, 'the observation remains open only within the native producer observation window').toBe(false)
+  await vi.advanceTimersByTimeAsync(2)
+  expect(settled, 'persistent busy must not become a permanent hidden wait').toBe(true)
+  const result = await observed
+  if (publicCapture) expect(result).toMatchObject({ state: 'failed', error: { code: 'capture_busy', message: expect.stringMatching(/unknown|retry/i) } })
+  else expect(result).toMatchObject({ code: 'capture_busy', message: expect.stringMatching(/unknown|retry/i) })
+  captureDisplays.mockResolvedValue(frames())
+  const replacement = publicCapture ? surface.captureSelection(false) : surface.present(session())
+  await vi.advanceTimersByTimeAsync(0)
+  const window = electron.windows.at(-1)!, input = await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(loadEvent(window), 'load') as CaptureSurfaceInput
+  expect(input.backgrounds[input.background].status).toBe('ready')
+  await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(loadEvent(window), 'cancel', { requestId: input.requestId })
+  expect(await replacement).toEqual({ state: 'cancelled' })
+})
+
 it('cancel releases an early load and a late result cannot grab, revive or replace the next capture', async () => {
   const late = pending<ReturnType<typeof frames>>()
   const captureDisplays = vi.fn().mockImplementationOnce(() => late.promise).mockResolvedValue(frames())
