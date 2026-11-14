@@ -26,14 +26,14 @@ async function run(name, mutation) {
   })
   await writeFile(join(directory, name + '.log'), output)
   const value = JSON.parse(await readFile(report, 'utf8'))
-  assert.equal(value.numTotalTests, 7, 'All seven current consumer cases must be collected')
+  assert.equal(value.numTotalTests, 9, 'All nine current consumer cases must be collected')
   assert.equal(value.numPendingTests, 0)
   const loaded = mutation ? (await readFile(trace, 'utf8')).trim().split('\n').map(line => JSON.parse(line)) : []
   if (mutation) {
     assert.ok(loaded.length > 0 && loaded.every(item => item.original !== item.changed), 'The exact production source mutation must be loaded')
     const failed = value.testResults.flatMap(suite => suite.assertionResults).filter(test => test.status === 'failed')
     assert.ok(status !== 0 && failed.some(test => test.failureMessages.some(message => message.includes('AssertionError'))), 'A bearing consumer assertion must turn RED')
-  } else assert.ok(status === 0 && value.numPassedTests === 7, 'All baseline/restored consumer cases must pass')
+  } else assert.ok(status === 0 && value.numPassedTests === 9, 'All baseline/restored consumer cases must pass')
   runs.push({ name, status, total: value.numTotalTests, passed: value.numPassedTests, failed: value.numFailedTests, loaded })
   process.stdout.write(name + ': ' + value.numPassedTests + '/' + value.numTotalTests + (mutation ? ' (bearing RED)' : ' GREEN') + '\n')
 }

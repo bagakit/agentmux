@@ -17,7 +17,8 @@ app.whenReady().then(async () => {
   result.environment.versions = process.versions
   win.webContents.on('console-message', event => { if (event.level === 'error') result.errors.push(event.message) })
   if (['responsive-primary-workfaces', 'density-workfaces', 'exact-first-read', 'mote-settings-placement'].includes(mode) || phase === 'tool-action-pressed') await win.loadURL(html)
-  else await win.loadFile(html, ['agent-locations', 'question-receipts', 'focus-availability', 'mote-composer', 'mote-notice-join', 'mote-dialogue', 'mote-main-setup', 'mote-main-retention', 'mote-discussion-restore', 'mote-start'].includes(mode) ? { query: { [['mote-main-setup','mote-main-retention','mote-discussion-restore','mote-start'].includes(mode) ? 'mote-dialogue' : mode]: '1' } } : undefined)
+  else if (mode === 'mote-discussion-restore') await win.loadFile(html, { query: { 'mote-dialogue': '1', 'mote-thread-layout': '1' } })
+  else await win.loadFile(html, ['agent-locations', 'question-receipts', 'focus-availability', 'mote-composer', 'mote-notice-join', 'mote-dialogue', 'mote-main-setup', 'mote-main-retention', 'mote-start'].includes(mode) ? { query: { [['mote-main-setup','mote-main-retention','mote-start'].includes(mode) ? 'mote-dialogue' : mode]: '1' } } : undefined)
   win.webContents.debugger.attach('1.3')
   await win.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
   console.log('mobile_product_stage=renderer-loaded')

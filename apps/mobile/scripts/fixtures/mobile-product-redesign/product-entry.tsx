@@ -46,7 +46,7 @@ const record = (method: string, params: unknown = {}) => calls.push({ sequence: 
 const original = (id: string): AgentMuxAgentSession => ({ kind: 'agent', agentSessionId: id, providerId: 'codex', executorId: 'fixture-original',
   hostId: id === 'session-mote' && new URLSearchParams(location.search).has('agent-locations') ? 'local' : 'host-original', workspacePath: fixturePath("execution-original"), run: { runId: `run-${id}` }, retiredRuns: [], createdAt: 1, updatedAt: 1 })
 const main = original('session-mote'), waiting = original('session-waiting'), result = original('session-result')
-const moteDialogueCapture = new URLSearchParams(location.search).get('mote-dialogue') === '1' || composerFixture ? createMoteDialogueCapture() : null
+const moteDialogueCapture = new URLSearchParams(location.search).get('mote-dialogue') === '1' || composerFixture ? createMoteDialogueCapture(new URLSearchParams(location.search).has('mote-thread-layout')) : null
 const ordinaryReply = '可以。我们先确认你想解决的问题，再比较这两种想法。\n\n我会保留原材料、已经确认的进展和还需要你决定的地方；不会把未知回执当作完成。'
 waiting.pendingInteraction = { request: { kind: 'permission', id: 'request-original', agentSessionId: waiting.agentSessionId,
   title: '请确认本次资料读取', evidence: { source: 'native-hook', observedAt: 1, run: waiting.run },

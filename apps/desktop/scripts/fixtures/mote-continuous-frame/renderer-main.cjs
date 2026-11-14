@@ -428,7 +428,7 @@ async function evolutionScenes({ input }) {
   await click('js:' + surface + '.querySelector("[data-mote-threads-entry]")')
   await until(surface + '.querySelector(".mote-work-event__summary")', 'Original reduced-motion thread detail')
   if (!await read(surface + '.querySelector(".mote-work-event__thread")?.checkVisibility()')) await click('js:' + surface + '.querySelector(".mote-work-event__summary")')
-  result.reducedThread = await read(`[...${surface}.querySelectorAll('.mote-work-event__thread')].filter(n=>n.checkVisibility()).map(n=>({animation:getComputedStyle(n).animationName,layout:n.closest('.mote-threads')?.dataset.layout}))`)
+  result.reducedThread = await read(`[...${surface}.querySelectorAll('.mote-work-event__thread')].filter(n=>n.checkVisibility()).map(n=>({animation:getComputedStyle(n).animationName,layout:getComputedStyle(n.closest('.mote-threads')?.querySelector('.mote-threads__body') ?? n).display==='grid'?'split':'stack'}))`)
   assert.ok(result.reducedThread.length > 0 && result.reducedThread.every(item => item.animation === 'none'), 'Actual narrow thread detail also respects reduced motion')
   await main()
   await click('js:' + surface + '.querySelector(".mote-main-actions__trigger")')

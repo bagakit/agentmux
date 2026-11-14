@@ -49,6 +49,7 @@ async function search(parent: ParentNode, value: string) {
   const input = parent.querySelector<HTMLInputElement>('[aria-label="查找工作标题或执行者"]')!
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })) })
 }
+const detail = (parent: ParentNode, eventId: string) => parent.querySelector<HTMLElement>(`[data-mote-work-thread="${eventId}"]`)!
 const shown = (parent: ParentNode) => [...parent.querySelectorAll<HTMLElement>('.mote-threads__list > li:not([hidden]) [data-mote-work-event]')].map(node => node.dataset.moteWorkEvent)
 
 it('public agent.open first-task output reaches the real shared and Mobile Threads consumers through original Dispatch reads', async () => {
@@ -87,50 +88,80 @@ it('shared Threads searches original titles and executors, filters exact report 
   await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(3))
   await click(container.querySelector<HTMLElement>('[data-mote-work-event="login"] .mote-work-event__summary')!)
   const original = container.querySelector('[data-mote-work-event="login"]')
-  expect(original?.textContent).toContain('登录方案的原回复')
-  expect(original?.querySelector('.mote-work-event__reply strong')?.textContent).toBe('原回复')
+  const originalThread = detail(container, 'login')
+  expect(originalThread.textContent).toContain('登录方案的原回复')
+  expect(originalThread.querySelector('.mote-work-event__reply strong')?.textContent).toBe('原回复')
   await search(container, '登录'); expect(shown(container)).toEqual(['login'])
+  await search(container, '缓存'); expect(originalThread.hidden).toBe(true)
+  await search(container, '登录'); expect(detail(container, 'login')).toBe(originalThread)
+  expect(originalThread.hidden).toBe(false)
   await search(container, '研究员'); expect(shown(container)).toHaveLength(3)
   await search(container, ''); await click(button(container, '含问题')); expect(shown(container)).toEqual(['cache'])
   await click(button(container, '已回报')); expect(shown(container)).toEqual(['login'])
   await click(button(container, '事件历史'))
   expect(container.querySelector('[data-mote-work-event="login"]')).toBe(original)
   expect(original?.getAttribute('data-expanded')).toBe('true'); expect(read).toHaveBeenCalledTimes(3)
-  await click(button(original!, '继续原工作')); expect(open).toHaveBeenCalledExactlyOnceWith(sources[0])
+  await click(button(originalThread, '继续原工作')); expect(open).toHaveBeenCalledExactlyOnceWith(sources[0])
   await search(container, '不存在'); expect(shown(container)).toHaveLength(0); expect(container.textContent).toContain('没有匹配的已载入工作')
 })
 
 it('hidden member view pauses searched work reads until the original work view returns', async () => {
-  const read = vi.fn(async (source: Work) => dispatch(source))
+  const read = vi.fn(async (source: Work) => dispatch(source)), changeView = vi.fn()
   function Threads() {
     const [value, setValue] = useState(page)
     return <MoteWorkThreads page={value} issue={null} loading={false} visible readWork={read} memberName={() => '资料研究员'}
       onRefresh={() => setValue(previous => ({ ...previous }))} onOpenWork={() => {}}
+      onViewChange={changeView} privateChats={visible => <p data-private-visible={String(visible)}>原私聊</p>}
       members={{ count: null, content: () => <p>原成员目录</p> }} />
   }
   await act(async () => root.render(<Threads />))
   await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(3))
   await click(container.querySelector<HTMLElement>('[data-mote-work-event="login"] .mote-work-event__summary')!)
   const original = container.querySelector('[data-mote-work-event="login"]')
-  const reply = original?.querySelector('.mote-work-event__reply')
+  const reply = detail(container, 'login').querySelector('.mote-work-event__reply')
   expect(reply?.textContent).toContain('登录方案的原回复')
   await search(container, '方案')
-  await click(button(container, '成员'))
-  expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('成员')
+  const tabs = container.querySelector<HTMLElement>('[role="tablist"]')!
+  const workTab = tabs.querySelector<HTMLButtonElement>('[aria-selected="true"]')!
+  const privateTab = button(tabs, '私聊')
+  const membersTab = button(tabs, '成员')
+  tabs.style.direction = 'rtl'
+  const navigate = async (anchor: HTMLButtonElement, keyName: string, isComposing = false) => {
+    const key = new KeyboardEvent('keydown', { key: keyName, bubbles: true, cancelable: true, isComposing })
+    await act(async () => { anchor.focus(); anchor.dispatchEvent(key) })
+    return key
+  }
+  expect((await navigate(workTab, 'ArrowLeft', true)).defaultPrevented).toBe(false)
+  expect(workTab.getAttribute('aria-selected')).toBe('true')
+  await navigate(workTab, 'ArrowLeft')
+  expect(document.activeElement).toBe(privateTab)
+  expect(container.querySelector('[data-private-visible="true"]')).not.toBeNull()
+  await navigate(privateTab, 'ArrowLeft')
+  expect(document.activeElement).toBe(membersTab)
+  expect(membersTab.getAttribute('aria-selected')).toBe('true')
+  expect(tabs.querySelectorAll('[tabindex="0"]')).toHaveLength(1)
+  const membersPanel = document.getElementById(membersTab.getAttribute('aria-controls')!)!
+  expect(membersPanel.hidden).toBe(false)
+  expect(membersPanel.getAttribute('aria-labelledby')).toBe(membersTab.id)
+  expect(changeView.mock.calls).toEqual([['private'], ['members']])
   expect(container.querySelector('.mote-threads__work')?.hasAttribute('hidden')).toBe(true)
   await click(button(container, '刷新'))
   expect(read).toHaveBeenCalledTimes(3)
   expect(container.querySelector('[data-mote-work-event="login"]')).toBe(original)
-  expect(original?.querySelector('.mote-work-event__reply')).toBe(reply)
+  expect(detail(container, 'login').querySelector('.mote-work-event__reply')).toBe(reply)
   expect(original?.getAttribute('data-expanded')).toBe('true')
-  await click(container.querySelector<HTMLElement>('[role="tab"][aria-selected="false"]')!)
+  await navigate(membersTab, 'Home')
+  expect(document.activeElement).toBe(workTab)
   await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(6))
   expect(read.mock.calls.slice(3).map(([source]) => source.origin.messageId).sort()).toEqual(['cache', 'foreign', 'login'])
   expect(container.querySelector<HTMLInputElement>('[aria-label="查找工作标题或执行者"]')?.value).toBe('方案')
   expect(shown(container)).toEqual(['login'])
   expect(container.querySelector('[data-mote-work-event="login"]')).toBe(original)
-  expect(original?.querySelector('.mote-work-event__reply')).toBe(reply)
+  expect(detail(container, 'login').querySelector('.mote-work-event__reply')).toBe(reply)
   expect(original?.getAttribute('data-expanded')).toBe('true')
+  await navigate(workTab, 'End')
+  expect(document.activeElement).toBe(membersTab)
+  expect(changeView.mock.calls).toEqual([['private'], ['members'], ['work'], ['members']])
 })
 
 it('actual Mobile Threads adapter uses the same search and report filters with exact public source reads', async () => {
@@ -142,7 +173,7 @@ it('actual Mobile Threads adapter uses the same search and report filters with e
   await search(container, '缓存'); expect(shown(container)).toEqual(['cache'])
   expect(rpc).toHaveBeenCalledWith('message.dispatch.read', { hostId: 'local', sourceMessageId: 'cache' })
   await click(container.querySelector<HTMLElement>('[data-mote-work-event="cache"] .mote-work-event__summary')!)
-  await click(button(container.querySelector('[data-mote-work-event="cache"]')!, '继续原工作'))
+  await click(button(detail(container, 'cache'), '继续原工作'))
   expect(work).toHaveBeenCalledExactlyOnceWith(sources[1]); expect(open).not.toHaveBeenCalled()
 })
 
@@ -217,8 +248,8 @@ it('repeated dispatch sources preserve both originals without counting the same 
   expect(event.querySelector('.mote-work-event__summary')?.textContent).toContain('同一研究员')
   expect(event.querySelector('.mote-work-event__summary')?.textContent).not.toContain('2 位执行者')
   await click(event.querySelector<HTMLElement>('.mote-work-event__summary')!)
-  expect(event.querySelectorAll('.mote-work-event__actions button')).toHaveLength(2)
-  expect(event.textContent).toContain('repeat-source')
+  expect(detail(container, 'login').querySelectorAll('.mote-work-event__actions button')).toHaveLength(2)
+  expect(detail(container, 'login').textContent).toContain('repeat-source')
 })
 
 it('active search reads this loaded page only in the foreground and resumes that page when the document returns', async () => {

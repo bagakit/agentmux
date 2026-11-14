@@ -36,6 +36,11 @@ try {
   } }
   const mutationId = process.argv.find(value => value.startsWith('--mutation='))?.slice('--mutation='.length)
   const variants = {
+    'mote-thread-tabs-disconnected': { file: 'packages/client-ui/src/components/MoteConversationThreads.tsx',
+      before: 'value={view} onValueChange={setView}', after: 'value={view} onValueChange={() => {}}' },
+    'mote-thread-layout-remounts': { file: 'packages/client-ui/src/components/MoteConversationThreads.tsx',
+      before: 'detailHost={open === event.id ? pane : undefined}',
+      after: 'detailHost={open === event.id && window.innerWidth >= 640 ? pane : undefined}' },
     'sheet-close-stays-open': { file: 'apps/mobile/src/navigation/MobileSheetHeader.tsx',
       before: 'aria-label={closeLabel}', after: 'aria-label={closeLabel} onClick={event => event.preventDefault()}' },
     'tool-format-follows-tail': { file: 'packages/client-ui/src/lib/conversation-body-work.ts', before: '    pauseFollowing()\n    this.anchor = { node: control', after: '    this.anchor = { node: control' },
