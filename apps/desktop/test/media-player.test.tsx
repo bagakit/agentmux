@@ -849,16 +849,22 @@ describe('mounted player', () => {
         await point(500); await stay(1_000)
         expect(decoderElement(), label).toBeNull()
         expect(bubble()?.textContent, label).toMatch(/\d:\d\d/)
+        expect(spot()!.style.getPropertyValue('--media-bubble-ch'), label).toBe(String(bubble()!.textContent!.length))
+        // Without a frame the time still stops at the player's sides, not the timeline's.
+        expect([spot()!.style.getPropertyValue('--media-preview-lo'), spot()!.style.getPropertyValue('--media-preview-hi')], label).toEqual(['-192px', '808px'])
         await act(async () => root.render(<></>))
       }
     })
 
     it('a player with too little room above the timeline for a readable frame points at time only', async () => {
       await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
-      await engine(media(), { paused: true, duration: 600 }); layout(95)
+      await engine(media(), { paused: true, duration: 600 }); layout(119)
       await point(500); await stay(1_000)
       expect(decoderElement()).toBeNull(); expect(bubble()!.textContent).toBe('5:00')
-      await leave(); layout(96)
+      // The time alone stays inside the player's sides too, as wide as its digits.
+      expect(spot()!.style.getPropertyValue('--media-bubble-ch')).toBe('4')
+      expect([spot()!.style.getPropertyValue('--media-preview-lo'), spot()!.style.getPropertyValue('--media-preview-hi')]).toEqual(['-192px', '808px'])
+      await leave(); layout(120)
       await point(500); await stay()
       expect(decoderElement()).not.toBeNull()
     })
@@ -887,7 +893,12 @@ describe('mounted player', () => {
       expect(rules).toMatch(/\.media-player__preview-frame\s*\{[^}]*aspect-ratio:\s*var\(--media-preview-ratio\)/)
       // A player shrinking under a shown frame folds it to nothing instead of letting it fall back to the picture's own size.
       expect(rules).toMatch(/--media-preview-height:\s*min\(var\(--media-preview-tall\),\s*max\(0px,\s*calc\(var\(--media-preview-room/)
-      expect(rules).toMatch(/\.media-player__preview\[data-frame\]\s*\{\s*left:\s*clamp\(calc\(var\(--media-preview-lo\)[^;]*var\(--media-preview-x\),\s*calc\(var\(--media-preview-hi\)/)
+      // The pointed unit stops inside the player's sides by its half width: the time's alone, or with a frame the wider of the two.
+      expect(block('.media-player__preview {')).toMatch(/left:\s*clamp\(calc\(var\(--media-preview-lo[^;]*var\(--media-preview-half\)[^;]*var\(--media-preview-x[^;]*calc\(var\(--media-preview-hi[^;]*var\(--media-preview-half\)/)
+      expect(block('.media-player__preview {')).toMatch(/--media-preview-half:\s*calc\(var\(--media-bubble-ch/)
+      expect(rules).toMatch(/\.media-player__preview\[data-frame\]\s*\{\s*--media-preview-half:\s*max\(calc\(var\(--media-preview-width\)\s*\/\s*2\)/)
+      // A shown frame never covers the start disc: the disc gives way.
+      expect(rules).toMatch(/\.media-player:has\(\.media-player__preview\[data-frame\]\)\s*\.media-player__start\s*\{[^}]*opacity:\s*0/)
       expect(rules).toMatch(/\.media-player__preview:not\(\[data-frame\]\)\s*>\s*\.media-player__preview-frame\s*\{[^}]*visibility:\s*hidden/)
       expect(block('@container (max-width: 511px)')).toMatch(/\.media-player__preview\s*\{[^}]*--media-preview-tall/)
       expect(block('@media (prefers-reduced-motion: reduce)')).toMatch(/\.media-player__preview-frame\s*\{\s*transition:\s*none/)
