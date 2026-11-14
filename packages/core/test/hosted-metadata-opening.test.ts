@@ -140,6 +140,40 @@ it('cancels an actual Unix opening promptly and cannot revive the released reade
   expect(onInitial).toHaveBeenCalledTimes(1)
 })
 
+it('cancels only the original pending Unix stream while its admitted peer and exact control stay on the shared carrier', async () => {
+  const f = await fixture(), loading = deferred(), release = deferred(), load = f.store.loadMetadata.bind(f.store)
+  cleanup.push(async () => { release.resolve() })
+  const fence = { runtimeId: f.owner.runtimeId, ownerInstanceId: f.owner.ownerInstanceId }
+  const peerEvents = vi.fn(), peerEnd = vi.fn()
+  const peer = await f.rpc.subscribe('runtime.events', { consumerId: 'original-admitted-peer', fence }, { onInitial() {}, onEvent: peerEvents, onEnd: peerEnd })
+  cleanup.push(() => peer.dispose())
+  const consumers = (f.service as unknown as { consumers: Map<string, unknown> }).consumers
+  const admittedPeer = [...consumers.entries()]
+  expect(admittedPeer).toHaveLength(1)
+  const carrier = (f.rpc as unknown as { route: { unix: { write(request: { method: string }): Promise<void> } } }).route.unix
+  const writes = vi.spyOn(carrier, 'write')
+  vi.spyOn(f.store, 'loadMetadata').mockImplementationOnce(async () => { loading.resolve(); await release.promise; return await load() })
+  const signal = new AbortController(), onInitial = vi.fn(), onEvent = vi.fn()
+  const pending = f.rpc.subscribe('runtime.events', { consumerId: 'original-cancelled-opening', fence }, { signal: signal.signal, onInitial, onEvent })
+    .then(value => ({ value }), error => ({ error }))
+  await loading.promise; signal.abort()
+  await expect(pending).resolves.toHaveProperty('error')
+  await vi.waitFor(() => expect([...consumers.entries()]).toEqual(admittedPeer))
+  expect(writes.mock.calls.map(([request]) => request.method)).toContain('system.opening.cancel')
+  expect((f.rpc as unknown as { route: { unix: unknown } }).route.unix).toBe(carrier)
+  expect(await f.rpc.call('runtime.owner.identity', {})).toEqual({ owner: f.owner })
+  expect(peerEnd).not.toHaveBeenCalled()
+  release.resolve(); await new Promise(resolve => setImmediate(resolve))
+  expect(onInitial).not.toHaveBeenCalled(); expect(onEvent).not.toHaveBeenCalled()
+  const before = peerEvents.mock.calls.length, updated = { ...original, updatedAt: original.updatedAt + 1 }
+  await f.inner.registry.put(updated, original.run); f.inner.publishSession(updated)
+  await vi.waitFor(() => expect(peerEvents.mock.calls.length).toBeGreaterThan(before))
+  expect(peerEnd).not.toHaveBeenCalled()
+  writes.mockClear(); await peer.dispose()
+  await vi.waitFor(() => expect(consumers.size).toBe(0))
+  expect(writes.mock.calls.map(([request]) => request.method)).toEqual(['system.subscription.cancel'])
+})
+
 it('ends the original service opening wait on cancellation while its readonly metadata read finishes later', async () => {
   const f = await fixture(), loading = deferred(), release = deferred(), load = f.store.loadMetadata.bind(f.store)
   cleanup.push(async () => { release.resolve() })
