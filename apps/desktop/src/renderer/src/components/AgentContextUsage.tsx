@@ -78,6 +78,10 @@ export function AgentContextUsage({ usage, source, visible = true }: { usage?: A
     return () => document.removeEventListener('keydown', dismissPreview, true)
   }, [open, document])
 
+  const presented = useRef(false)
+  if (visible) presented.current = true
+  if (!presented.current) return null
+
   const context = usage?.context
   // 「这个数知不知道」由 agent-usage 的 contextUsedPercent 独判——全窗口唯一一处。此处曾自己写那 6 行，
   // 项目活动行也照抄过一份；三份同源判定漂移，同一个 Agent 会在输入框、项目行、名册上给出三种说法。

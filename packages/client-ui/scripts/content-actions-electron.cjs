@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs/promises'), path = require('node:path')
 const { app, BrowserWindow } = require('electron')
-const [url, privateRoot, evidence, slice] = process.argv.slice(2)
+const [url, privateRoot, evidence, slice, scenario] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data')); app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const result = { passed: false, frames: [], operations: [], errors: [] }
 let win
@@ -171,10 +171,18 @@ app.whenReady().then(async () => {
         win.webContents.sendInputEvent({type:'mouseMove',...point}); await settle(); return point
       }
       const mouseClick = async selector => { const point = await move(selector); win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...point}); win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...point}); await settle() }
-      await until(() => document.querySelectorAll('.composer__context').length === 2)
-      for (const width of [1024,390]) {
+      await until(() => document.querySelector('#unreported .composer__context'))
+      assert.equal(await read(() => document.querySelector('#known .composer__context')),null)
+      assert.equal(await read(() => document.querySelector('#known .composer__context-card')),null)
+      await read(() => window.contextHoverFixture.compact()); await settle()
+      assert.equal(await read(() => document.querySelector('#known .composer__context')),null)
+      await read(() => window.contextHoverFixture.setVisible(true)); await settle()
+      assert.equal(await read(() => window.contextHoverFixture.layouts.find(entry => entry.visible)?.chip.includes('10%')),true)
+      await read(() => { window.contextHoverFixture.warmChip=document.querySelector('#known .composer__context');window.contextHoverFixture.warmCard=document.querySelector('#known .composer__context-card') })
+      result.operations.push({initialHiddenContextAbsent:true,defaultCallerEager:true,hiddenUpdateFirstParentLayoutCurrent:true})
+      for (const width of scenario === 'demand' ? [1024] : [1024,390]) {
         win.setContentSize(width,900); await settle()
-        for (const mode of ['dark','light']) {
+        for (const mode of scenario === 'demand' ? ['dark'] : ['dark','light']) {
           if (await read(() => document.documentElement.dataset.appearance) !== mode) await mouseClick('nav button')
           await read(() => { window.contextHoverFixture.reset(); document.querySelector('#known .tiptap').focus() }); await settle()
           await move('#known .composer__context'); await until(panelOpen)
@@ -196,25 +204,40 @@ app.whenReady().then(async () => {
       }
       await read(() => document.querySelector('#known .composer__context').focus()); await press('Enter'); await until(panelOpen)
       assert.equal(await read(() => document.activeElement === document.querySelector('#known .composer__context')),true)
-      await frame(`${slice}-keyboard-390.png`)
+      await frame(`${slice}-keyboard-${win.getContentSize()[0]}.png`)
       await read(() => { const h=document.querySelector('#known .composer__context-card h3'),r=document.createRange();r.selectNodeContents(h);getSelection().removeAllRanges();getSelection().addRange(r);window.contextHoverFixture.selectedText=getSelection().toString();window.contextHoverFixture.originalCard=document.querySelector('#known .composer__context-card');window.contextHoverFixture.compact() }); await settle()
       assert.equal(await read(() => document.querySelector('#known .composer__context-card') === window.contextHoverFixture.originalCard),true)
       assert.equal(await read(() => getSelection().toString().length > 0 && getSelection().toString() === window.contextHoverFixture.selectedText),true)
       assert.equal(await read(() => document.querySelector('#known .composer__context-card').textContent.includes('10% used')),true)
       await read(() => window.contextHoverFixture.switchSource()); await settle(); assert.equal(await read(panelOpen),false)
       await move('#unreported .composer__context'); await until(() => document.querySelector('#unreported .composer__context-card').matches(':popover-open'))
-      assert.equal(await read(() => document.querySelector('#unreported .composer__context-card').textContent.includes('Unavailable')),true)
+      assert.equal(await read(() => document.querySelector('#unreported .composer__context-card').textContent.includes('Used tokens and capacity not reported')),true)
       assert.equal(await read(() => document.querySelector('#unreported .composer__context-card').textContent.includes('% remaining')),false)
-      await frame(`${slice}-unknown-390.png`); await move('nav strong'); await press('Escape')
+      await frame(`${slice}-unknown-${win.getContentSize()[0]}.png`); await move('nav strong'); await press('Escape')
       const point = await win.webContents.executeJavaScript(`(() => {const r=document.querySelector('#known .composer__context').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
       win.webContents.debugger.attach('1.3')
       await win.webContents.debugger.sendCommand('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[point]})
       await win.webContents.debugger.sendCommand('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]})
       await until(panelOpen); assert.equal(await read(() => window.contextHoverFixture.pointers.includes('touch')),true)
-      await frame(`${slice}-touch-390.png`); win.webContents.debugger.detach()
+      await frame(`${slice}-touch-${win.getContentSize()[0]}.png`); win.webContents.debugger.detach()
       await read(() => window.contextHoverFixture.setVisible(false)); await settle(); assert.equal(await read(panelOpen),false)
+      assert.equal(await read(() => document.querySelector('#known .composer__context') === window.contextHoverFixture.warmChip && document.querySelector('#known .composer__context-card') === window.contextHoverFixture.warmCard),true)
       await read(() => window.contextHoverFixture.setVisible(true)); await settle(); assert.equal(await read(panelOpen),false)
-      result.operations.push({nativeKeyboard:true,nativeTouch:true,unknownCapacity:true,sameSourceCompactionPreservesReading:true,replacedSourceClosed:true,hiddenOccurrenceClosed:true})
+      await read(() => { const input=document.querySelector('#known .tiptap');input.focus();window.contextHoverFixture.ime=[];input.addEventListener('keydown',event=>window.contextHoverFixture.ime.push({key:event.key,isComposing:event.isComposing,isTrusted:event.isTrusted}));window.contextHoverFixture.beforeIme=document.querySelector('#known output').textContent })
+      await move('#known .composer__context'); await until(panelOpen)
+      win.webContents.debugger.attach('1.3')
+      await win.webContents.debugger.sendCommand('Input.imeSetComposition',{text:'中文',selectionStart:0,selectionEnd:2})
+      await press('Escape')
+      assert.equal(await read(() => window.contextHoverFixture.ime.some(event=>event.key==='Escape'&&event.isComposing&&event.isTrusted)),true)
+      // Chromium may itself light-dismiss its auto popover for this trusted Escape;
+      // the protected contract is the original composing input, focus and draft.
+      const imeNativePopoverClosed = !await read(panelOpen)
+      assert.equal(await read(() => document.activeElement === document.querySelector('#known .tiptap')),true)
+      await win.webContents.debugger.sendCommand('Input.imeSetComposition',{text:'',selectionStart:0,selectionEnd:0})
+      win.webContents.debugger.detach(); await settle()
+      assert.equal(await read(() => document.querySelector('#known output').textContent === window.contextHoverFixture.beforeIme),true)
+      await move('nav strong'); await move('#known .composer__context'); await until(panelOpen); await press('Escape'); assert.equal(await read(panelOpen),false)
+      result.operations.push({nativeKeyboard:true,nativeTouch:true,unknownCapacity:true,sameSourceCompactionPreservesReading:true,replacedSourceClosed:true,hiddenOccurrenceClosed:true,warmExactContextDOM:true,nativeImeEscapeOwnedByOriginalInput:true,imeNativePopoverClosed,warmReturnPassiveEscape:true})
     }
     assert.deepEqual(result.errors, []); result.passed = true
   } catch (error) {
