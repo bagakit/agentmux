@@ -13,6 +13,11 @@ import type { AgentMuxAgentSessionStore } from '../../../packages/core/src/agent
 import { AgentProviderRegistry } from '../../../packages/core/src/agent-provider'
 import type { AgentMuxStoredAgentSession, AgentTimelineSnapshot } from '@agentmux/core'
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
+import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
+import { mainFocusPresentation } from '../src/renderer/src/lib/focus-tab-projection'
+import { workbenchSelectionCatalog } from '../src/renderer/src/lib/desktop-focus-navigation'
+import { workbenchProjectionSlotId, workbenchRegionProjectionSlotId, type WorkbenchProjectionSelection } from '../src/renderer/src/lib/workbench-projection'
+import type { WorkbenchViewTargets } from '../src/renderer/src/lib/workbench-presentation'
 import { api } from '../src/renderer/src/lib/api'
 import { agentBookmarks } from '../src/renderer/src/lib/agent-bookmarks'
 import { agentInformationPreview } from '../src/renderer/src/lib/agent-information-preview'
@@ -32,10 +37,29 @@ const foreignRecap = '原远端自己的非空分析结论，沿原 Provider 和
 const SID = 'same-original-sid', localName = '原本机任务：核对分析结果', localRecap = '原本机已经核对的业务结论，不能借给另一个 Runtime。'
 const timeline = (sid: string, text: string): AgentTimelineSnapshot => ({ agentSessionId: sid, revision: 1, items: [{ id: 'original-answer', agentSessionId: sid, kind: 'assistant_message', title: 'Original answer', source: 'native-hook', status: 'complete', content: text, createdAt: 1, updatedAt: 1 }] })
 
+/** App's single window owner plus the exact Focus projection destination. */
+function MainFocusFixture({ navigate, regionOnly = false }: { navigate: (id: string) => void; regionOnly?: boolean }) {
+  const state = useAppStore(), catalog = workbenchSelectionCatalog(state)
+  const select = (reference: WorkbenchProjectionSelection) => { state.selectMainRegion(reference, state.workbenchSpaceSelection) }
+  const presentation = mainFocusPresentation(state.workbenchSpaceSelection, state.tabs, catalog, select, regionOnly ? 'region' : 'tab')
+  const projection = presentation.projection, reference = projection?.selection[0]
+  const viewTargets: WorkbenchViewTargets = reference && projection ? { [reference.tabId]: [{
+    hostId: (projection.entity.kind === 'region' ? workbenchRegionProjectionSlotId : workbenchProjectionSlotId)(`${projection.presentationId}-slot`, reference),
+    active: true, visible: true, surface: 'focus', retainedRegionId: reference.regionId, projection, reference,
+    onSelectRegion: regionId => select({ ...reference, regionId })
+  }] } : {}
+  return <>
+    <GlobalFocusSurface workspaceOpen={Boolean(state.workbenchSpaceSelection)} onSelectContext={navigate} onSelectLocation={select}
+      presentation={presentation} regionOnly={regionOnly} viewTargets={viewTargets} />
+    {[...new Set(Object.values(state.tabs).map(tab => tab.workspaceId))].map(workspaceId => <WorkspaceWorkbench key={workspaceId}
+      workspaceId={workspaceId} visible={state.mainSurface === 'workbench' && state.activeWorkspaceId === workspaceId} viewTargets={viewTargets} />)}
+  </>
+}
+
 /** Real original Core/Space and scoped Unix→Main→IPC→Preload→Renderer.
  * Native process state is the existing source fixture leaf. No unified hook,
  * Context, lane, card, filter, menu or preview implementation is mocked. */
-async function fixture(options: { foreign?: boolean; unavailable?: boolean; multiple?: boolean; missing?: boolean } = {}) {
+async function fixture(options: { foreign?: boolean; unavailable?: boolean; nativeUnavailable?: boolean; metadataUnknown?: boolean; sourceOnly?: boolean; legacyNoAdmission?: boolean; multiple?: boolean; missing?: boolean } = {}) {
   const privateCleanup: Array<() => unknown | Promise<unknown>> = []
   const original = await createSpaceSessionsFixture(privateCleanup)
   const privateRoots = new Set([original.b.root, original.d.root])
@@ -106,6 +130,18 @@ async function fixture(options: { foreign?: boolean; unavailable?: boolean; mult
     tabLayouts: { ...sourceDocument.graph.tabLayouts, [originalTab.tabId]: splitWorkbenchRegion(originalLayout, originalLayout.activeRegionId, 'right', secondRegion.regionId) } } })
   const nameTarget = { reference: original.reference, regionId: admitted.address.regionId, runtimeId: owner.owner.runtimeId, agentSessionId: SID, expectedAdmission: { kind: 'creation' as const, operationId: creationId } }
   if (!options.missing) await main.api.call('memberNameChange', { hostId: 'source-route', reference: original.reference, name: { object: 'agent', target: nameTarget, change: { kind: 'rename', operationId: 'source-name-operation', name: options.foreign ? '真正远端的独立任务' : localName, expectedNameRevision: 0, source: 'manual' } } })
+  if (options.legacyNoAdmission) {
+    const before = (await original.b.spatial.read())!, legacyRegionId = 'original-legacy-region'
+    const { creationOperationId: _pin, ...legacy } = before.graph.regions.find(region => region.regionId === admitted.address.regionId)!
+    const remap = (node: import('@agentmux/layout').WorkbenchViewLayout['root']): import('@agentmux/layout').WorkbenchViewLayout['root'] => node.type === 'leaf'
+      ? { ...node, regionId: node.regionId === admitted.address.regionId ? legacyRegionId : node.regionId }
+      : { ...node, first: remap(node.first), second: remap(node.second) }
+    const layout = before.graph.tabLayouts[originalTab.tabId]!
+    await original.b.spatial.commit({ expectedRevision: before.revision, allowEntityRemoval: true, graph: { ...before.graph,
+      tabs: before.graph.tabs.map(tab => tab.tabId === originalTab.tabId ? { ...tab, regionIds: tab.regionIds.map(id => id === admitted.address.regionId ? legacyRegionId : id) } : tab),
+      regions: [...before.graph.regions.filter(region => region.regionId !== admitted.address.regionId), { ...legacy, regionId: legacyRegionId }],
+      tabLayouts: { ...before.graph.tabLayouts, [originalTab.tabId]: { ...layout, root: remap(layout.root), activeRegionId: legacyRegionId } } } })
+  }
   vi.spyOn(api.spaceMounts, 'call').mockImplementation(async (method, input, signal) => {
     if (method === 'resources') {
       // The real original owner answers this witness; workspaces are this scene's
@@ -119,20 +155,32 @@ async function fixture(options: { foreign?: boolean; unavailable?: boolean; mult
   const sessionListeners = new Set<Parameters<typeof api.spaceMounts.sessions>[1]>()
   const sessionsRead = vi.spyOn(api.spaceMounts, 'sessions').mockImplementation(async (target, listener, signal) => {
     sessionListeners.add(listener); signal?.addEventListener('abort', () => sessionListeners.delete(listener), { once: true })
+    if (options.metadataUnknown) {
+      // The metadata observation edge is unavailable. Do not start its separate
+      // optional Native observer while proving independent name/history IO.
+      const snapshot = await main.api.call('snapshot', target, signal)
+      const opening = { reference: snapshot.reference, source: snapshot.source, revision: snapshot.revision }
+      listener({ type: 'observation', observation: { ...opening, type: 'member', member: {
+        hostId: 'D-in-B', runtimeId: owner.owner.runtimeId, agentSessionId: SID },
+        state: { status: 'unknown', issue: { code: 'ORIGINAL_METADATA_UNCONFIRMED', message: 'Original metadata is unconfirmed.' } } } })
+      return { initial: opening, dispose() {} }
+    }
     return await main.api.sessions(target, listener, signal)
   })
+  vi.spyOn(api.spaceMounts, 'reading').mockImplementation(main.api.reading)
   const member = vi.spyOn(api.spaceMounts, 'member').mockImplementation(async (input, listener, signal) => { const surface = await main.api.member(input, listener, signal); cleanup.push(() => surface.dispose()); return surface })
   if (options.unavailable) vi.spyOn(owner.core, 'readAgentSession').mockRejectedValue(Error('Exact original Session observation unavailable'))
+  if (options.nativeUnavailable) vi.spyOn(owner.core, 'runtimeSubject').mockRejectedValue(Error('The original Native observation is unavailable')).mockClear()
   vi.spyOn(api.workspaces, 'listBranches').mockResolvedValue({ kind: 'not-a-git-repository', hostId: 'local', workspacePath: '/b/project' })
   vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([])
   const local = { ...composerSession(SID), workspacePath: '/b/project', label: 'Local fallback should not override real name', status: { state: 'working' as const, source: 'native-hook' as const, observedAt: now }, semanticStatus: { state: 'working' as const, source: 'native-hook' as const, observedAt: now, stateEnteredAt: now } }
   const tab = createWorkbenchTab('ordinary-tab', { regionId: 'ordinary-region', workspaceId: 'original-b-project', kind: 'agent', phase: 'attached', sessionId: SID })
-  useAppStore.setState({ config, sessions: [local], agentNames: { [SID]: localName }, timelines: { [SID]: timeline(SID, localRecap) }, tabs: { [tab.id]: tab }, layouts: { 'original-b-project': createWorkspaceLayout('ordinary-group', [tab.id]) },
+  useAppStore.setState({ config, sessions: options.sourceOnly ? [] : [local], agentNames: { [SID]: localName }, timelines: { [SID]: timeline(SID, localRecap) }, tabs: { [tab.id]: tab }, layouts: { 'original-b-project': createWorkspaceLayout('ordinary-group', [tab.id]) },
     mainSurface: 'agents', focusView: 'list', loading: false, mountedSpaceInputs: {}, mountedSpaceObservations: {}, mountedSpaceSessions: {}, agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } }, scratchTopicSnapshots: {}, agentComposerDrafts: { [SID]: 'Keep this original local draft' } })
   const target = { hostId: 'source-route', reference: original.reference, zoneId: admitted.address.zoneId!, workspaceId: admitted.address.workspaceId! }
   useAppStore.getState().mountSpace(target, false)
   const navigate = vi.fn()
-  await dom.render(<GlobalFocusSurface workspaceOpen={false} onSelectContext={navigate} />)
+  await dom.render(<MainFocusFixture navigate={navigate} />)
   const settle = async (count: number) => { await vi.waitFor(async () => { await act(async () => {}); expect(useAppStore.getState().mountedSpaceObservations[spaceMountKey(target.reference)]?.snapshot).toBeDefined(); expect(Object.keys(useAppStore.getState().mountedSpaceSessions[spaceMountKey(target.reference)]?.members ?? {})).toHaveLength(1); expect(cards()).toHaveLength(count) }, { timeout: 10000 }) }
   return { ...original, owner, session, admitted, main, config, target, key: spaceMountKey(target.reference), member, navigate, settle, local, sessionsRead, missingRead, beginOriginalCheck, finishOriginalCheck,
     emitMetadataError: () => { for (const listener of sessionListeners) listener({ type: 'error', error: { code: 'ORIGINAL_METADATA_READER_UNAVAILABLE', message: 'The original metadata stream is unavailable; the independent member remains healthy.' } }) } }
@@ -182,7 +230,7 @@ it('different original Runtimes with the same raw SID remain separate ordinary c
   await vi.waitFor(async () => { await act(async () => {}); expect(cardWith('真正远端的独立任务').textContent).toContain(foreignRecap) })
   expect(remote.textContent).not.toContain(localRecap)
   expect(local.textContent).toContain(localRecap)
-  expect(remote.closest('.focus-project-lanes')).not.toBeNull()
+  expect(cardWith('真正远端的独立任务').closest('.focus-project-lanes')).not.toBeNull()
   expect(f.member).toHaveBeenCalledWith(expect.objectContaining({ target: expect.objectContaining({ runtimeId: f.d.owner.runtimeId, agentSessionId: SID, regionId: f.admitted.address.regionId }) }), expect.any(Function), expect.anything())
   expect(dom.container.querySelector('[data-mounted-focus-source]')).toBeNull()
   expect(dom.container.querySelector('[aria-label="Original project Agents"]')).toBeNull()
@@ -202,6 +250,77 @@ it('an unavailable exact foreign Session remains an ordinary unknown card and is
   await chooseFilter('state', 'unknown')
   await act(async () => { await vi.waitFor(() => expect(cards()).toHaveLength(1)) })
   expect(cards()[0]!.dataset.sessionId).not.toBe(SID)
+})
+
+it('an independent original name and bounded recap remain visible when Native observation is unavailable', async () => {
+  const f = await fixture({ foreign: true, nativeUnavailable: true }); await f.settle(2)
+  await vi.waitFor(() => expect(cards().find(card => card.dataset.sessionId !== SID)?.querySelector('strong')?.textContent).toBe('真正远端的独立任务'))
+  const remote = cardWith('真正远端的独立任务')
+  await vi.waitFor(() => expect(remote.querySelector('.focus-context__recap')?.textContent).toContain(foreignRecap))
+  expect(remote.textContent).toMatch(/unknown|unavailable|unconfirmed/i)
+  expect(remote.textContent).not.toContain(localRecap)
+})
+
+it('an existing Source-local legacy member keeps its full reader and direct original creation name without inventing a Region admission', async () => {
+  const f = await fixture({ sourceOnly: true, legacyNoAdmission: true }); await f.settle(1)
+  await vi.waitFor(() => expect(cardWith(localName).querySelector('.focus-context__recap')?.textContent).toContain(foreignRecap))
+  expect(f.member).toHaveBeenCalled()
+  expect(vi.mocked(api.spaceMounts.reading)).not.toHaveBeenCalled()
+  expect(vi.mocked(api.spaceMounts.call).mock.calls.some(([method, input]) => method === 'agentNameInspect' &&
+    (input as { name: { agentSessionId: string; createOperationId: string } }).name.agentSessionId === SID)).toBe(true)
+  const snapshot = await f.main.api.call('snapshot', { hostId: f.target.hostId, reference: f.reference })
+  const legacy = snapshot.scope.regions.find(region => region.regionId === 'original-legacy-region')
+  expect(legacy).toMatchObject({ kind: 'agent', agentSessionId: SID })
+  expect(legacy).not.toHaveProperty('creationOperationId')
+  expect(await f.owner.core.readAgentSession(SID)).toMatchObject({ run: f.session.run, creation: { createOperationId: 'original-source-creation' } })
+})
+
+it('a cold unknown member reads its original name and bounded recap without a current Run or Native query', async () => {
+  const f = await fixture({ foreign: true, nativeUnavailable: true, metadataUnknown: true }); await f.settle(2)
+  await vi.waitFor(() => expect(cards().find(card => card.dataset.sessionId !== SID)?.querySelector('strong')?.textContent).toBe('真正远端的独立任务'))
+  await vi.waitFor(() => expect(cardWith('真正远端的独立任务').querySelector('.focus-context__recap')?.textContent).toContain(foreignRecap))
+  expect(f.owner.core.runtimeSubject, JSON.stringify({member:f.member.mock.calls.map(call=>call[0]), reading:vi.mocked(api.spaceMounts.reading).mock.calls.map(call=>call[0])})).not.toHaveBeenCalled()
+  expect(f.member).not.toHaveBeenCalled()
+  expect(vi.mocked(api.spaceMounts.reading).mock.calls[0]![0].target).not.toHaveProperty('expectedRun')
+})
+
+it('the same original name and recap survive unavailable metadata and reconnect without a replacement task', async () => {
+  const f = await fixture({ foreign: true }); await f.settle(2)
+  await vi.waitFor(() => expect(cardWith('真正远端的独立任务').querySelector('.focus-context__recap')?.textContent).toContain(foreignRecap))
+  const identity = cardWith('真正远端的独立任务').dataset.sessionId
+  await act(async () => f.owner.disconnect())
+  await vi.waitFor(() => expect(Object.values(useAppStore.getState().mountedSpaceSessions[f.key]!.members)[0]?.state.status).toMatch(/unknown|unavailable/))
+  const retained = cards().find(card => card.dataset.sessionId === identity)!
+  expect(retained.querySelector('strong')?.textContent).toBe('真正远端的独立任务')
+  expect(retained.querySelector('.focus-context__recap')?.textContent).toContain(foreignRecap)
+  expect(retained.textContent).toMatch(/unknown|unavailable|unconfirmed|ended/i)
+  await act(async () => f.owner.reconnect())
+  await vi.waitFor(() => expect(Object.values(useAppStore.getState().mountedSpaceSessions[f.key]!.members)[0]?.state.status).toBe('observed'), { timeout: 10000 })
+  expect(cardWith('真正远端的独立任务').dataset.sessionId).toBe(identity)
+  expect(cardWith('真正远端的独立任务').querySelector('.focus-context__recap')?.textContent).toContain(foreignRecap)
+  expect((await f.owner.core.readAgentSession(SID))!.run).toEqual(f.session.run)
+})
+
+it('a late original name read cannot overwrite a newer explicit rename during refresh', async () => {
+  const f = await fixture({ foreign: true }); await f.settle(2)
+  await vi.waitFor(() => expect(cardWith('真正远端的独立任务').querySelector('.focus-context__recap')?.textContent).toContain(foreignRecap))
+  await act(async () => cardWith('真正远端的独立任务').dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
+  await vi.waitFor(() => expect(agentInformationPreview.get()?.context.access?.rename).toBeDefined())
+  const access = agentInformationPreview.get()!.context.access!, originalCall = vi.mocked(api.spaceMounts.call).getMockImplementation()!
+  let release!: () => void, observed = false
+  const pending = new Promise<void>(resolve => { release = resolve }); cleanup.push(() => release())
+  vi.mocked(api.spaceMounts.call).mockImplementation(async (method, input, signal) => {
+    const result = await originalCall(method, input as never, signal)
+    if (method === 'memberNameInspect') { observed = true; await pending }
+    return result as never
+  })
+  await act(async () => access.refresh())
+  await vi.waitFor(() => expect(observed).toBe(true))
+  await act(async () => { expect(await access.rename!('原任务的新名称', access.nameRevision!)).toBe(true) })
+  await vi.waitFor(() => expect(cardWith('原任务的新名称').querySelector('strong')?.textContent).toBe('原任务的新名称'))
+  await act(async () => release())
+  expect(cardWith('原任务的新名称').querySelector('strong')?.textContent).toBe('原任务的新名称')
+  expect(cardWith('原任务的新名称').querySelector('.focus-context__recap')?.textContent).toContain(foreignRecap)
 })
 
 it('project, type, state and text compose over the one real local task rather than keeping a bypass source list', async () => {
@@ -265,10 +384,10 @@ it('the ordinary source projection preserves the complete mixed Tab, narrows onl
   await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelectorAll('.global-session-workspace [data-source-region]')).toHaveLength(2) })
   expect(useAppStore.getState().mainSurface).toBe('agents')
   const before = useAppStore.getState(), originalInput = before.mountedSpaceInputs
-  await dom.render(<GlobalFocusSurface workspaceOpen={false} onSelectContext={f.navigate} regionOnly />)
+  await dom.render(<MainFocusFixture navigate={f.navigate} regionOnly />)
   expect(dom.container.querySelectorAll('.global-session-workspace [data-source-region]')).toHaveLength(1)
   expect(useAppStore.getState().mountedSpaceInputs).toBe(originalInput)
-  await dom.render(<GlobalFocusSurface workspaceOpen={false} onSelectContext={f.navigate} />)
+  await dom.render(<MainFocusFixture navigate={f.navigate} />)
   expect(dom.container.querySelectorAll('.global-session-workspace [data-source-region]')).toHaveLength(2)
   await act(async () => cardWith('真正远端的独立任务').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2 })))
   const view = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent?.includes('View in Space'))
