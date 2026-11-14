@@ -5,12 +5,14 @@
 | Module | Import | What it provides |
 | --- | --- | --- |
 | Conversation | `@agentmux/client-ui` (`ConversationView`, `ConversationMessage`), `components/ConversationRecordSequence` | Messages, native-history reading, reasoning and tool traces, permission and question cards, recorded images and files |
-| Composer | `AgentComposer`, `InlineComposer` | The Tiptap rich composer with references, commands, attachments, submit, queue and interrupt |
+| Composer | `components/AgentComposer`, `components/InlineComposer`, `components/ComposerEditFooter` | Rich message editing and the action row for a compact multiline edit |
 | Terminal | `@agentmux/client-ui/terminal/*` | xterm replay, live output, input encoding and the Unicode width table |
 | Notes | `@agentmux/client-ui/note/*`, `components/NoteReader` | The `.note.md` Markdown codec, wiki links, live three-way merge and a read-only Note reader |
 | Theme and icons | `@agentmux/client-ui/theme`, `@agentmux/client-ui/icons` | Theme catalog and built-in themes, semantic icons and their animations |
 | Native controls | `components/Button`, `components/IconButton`, `components/FormRow`, `input`, `components/Modal` | Buttons, form rows, text inputs and dialogs with one shared style owner |
 | Brand assets | `@agentmux/client-ui/brand/*` | App icons, hero art and illustrations ([brand sources](brand/README.md)) |
+
+Use the [component index](../../docs/design/agentmux-surface-density.md#按控件开始贡献) to find import paths, current consumers and design requirements. `components/` contains renderable components, `input/` owns native field primitives and their styles, and `lib/` provides the hooks and formatting that those components consume. Client adapters supply overlays, file and clipboard access, and business actions.
 
 Product requirements are defined by the [conversation behavior SSOT](../../docs/design/behavior/conversation-mode.md) and [presentation SSOT](../../docs/design/presentation/conversation-mode.md). The [mechanism map](../../docs/architecture/conversation.md) traces the current Desktop, Mobile, resource and public API consumers; sharing a component does not by itself make the two clients equivalent. How these components read and render today is described in the [Desktop reading chain](../../docs/architecture/conversation.md#desktop-阅读链): `useConversationView` reads accepted windows through Core's public Reader; `projectConversationRecordSequence` groups the ordered records into messages and process groups with stable display identities; `useConversationRecordLayout` is the one commit owner per reading position and protects selection, focus and the scroll anchor while a new layout is applied; and `ConversationBodyWork` mounts at most one heavy body per animation frame, so heavy content renders progressively inside a bounded window rather than through a full virtual list.
 
@@ -80,6 +82,28 @@ Import `Button` and `IconButton` from `@agentmux/client-ui/components/Button` an
 `Button` accepts `variant="secondary" | "primary" | "danger"` (default `secondary`). `IconButton` requires `aria-label`, uses it as the default native title, and accepts `intent="neutral" | "danger"`; an explicit title is kept. The `.small-button`, `.primary-button`, `.danger-button` and `.icon-button` classes have one owner in `styles/buttons.css`; include `@agentmux/client-ui/styles/buttons.css` when importing individual styles. Hosts keep surface-specific geometry and supply the theme tokens.
 
 ## Inputs
+
+### Compact editors
+
+Use `ComposerTextarea variant="compact"` with `ComposerEditFooter` for a short multiline edit inside an existing surface. The field handles IME, grows with content, and scrolls when it reaches its height limit. Put existing utilities or metadata in `leading` and the action buttons in reading order. Use the shared primary `Button` for the action at the right edge. Hosts importing styles individually need `input/styles.css`, `styles/buttons.css` and `styles/composer.css`.
+
+```tsx
+import { ComposerTextarea } from '@agentmux/client-ui/input'
+import { Button } from '@agentmux/client-ui/components/Button'
+import { ComposerEditFooter } from '@agentmux/client-ui/components/ComposerEditFooter'
+
+<ComposerTextarea variant="compact" aria-label="Message" value={draft} onValueChange={setDraft} />
+<ComposerEditFooter>
+  <Button onClick={onCancel}>Cancel</Button>
+  <Button variant="primary" disabled={saving} aria-busy={saving} onClick={onSave}>
+    {saving ? 'Saving' : 'Save'}
+  </Button>
+</ComposerEditFooter>
+```
+
+The [queued message editor](../../apps/desktop/src/renderer/src/components/ComposerQueuedMessageEditor.tsx) and [conversation annotation](../../apps/desktop/src/renderer/src/components/ConversationAnnotationNote.tsx) show the same field and footer with different action, draft and error owners.
+
+### Labels and single fields
 
 `FormRow` from `@agentmux/client-ui/components/FormRow` renders one native label with a separate title and description. Its child callback supplies `id`, `aria-labelledby` and `aria-describedby`; spread them onto the native control. The whole row is the label, and only the title supplies the accessible name. `controlId` keeps an explicit field ID when needed. The caller keeps the input's ref, name, value, checked state, handlers and disabled state. FormRow has no field state or validation model, clones no control and adds no styles; pass the surface's row class. Whole-save errors stay with the caller's save feedback.
 
