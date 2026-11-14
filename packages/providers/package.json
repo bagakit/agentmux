@@ -183,6 +183,18 @@
     "./hermes/provider": {
       "types": "./dist/hermes/provider.d.ts",
       "import": "./dist/hermes/provider.js"
+    },
+    "./pi/native-history": {
+      "types": "./dist/pi/native-history.d.ts",
+      "import": "./dist/pi/native-history.js"
+    },
+    "./opencode/native-history": {
+      "types": "./dist/opencode/native-history.d.ts",
+      "import": "./dist/opencode/native-history.js"
+    },
+    "./hermes/native-history": {
+      "types": "./dist/hermes/native-history.d.ts",
+      "import": "./dist/hermes/native-history.js"
     }
   },
   "files": [

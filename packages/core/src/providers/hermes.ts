@@ -3,7 +3,9 @@ import { executionEnvironmentValue, executionHomeDirectory, executionPath, type 
 import { HERMES_LAUNCH_OPTIONS } from './launch-options.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import { formatHookToolOutput } from '../hook-tool-outcome.js'
-import { readHermesSessionHistoryPage } from './hermes-native-history.js'
+import { createHermesNativeHistory } from '@agentmux/providers/hermes/native-history'
+import { AgentMuxError } from '../errors.js'
+import { SESSION_HISTORY_MAX_PAGE_BYTES } from '../session-history.js'
 import { catalog, hookToolFields, runScopedHookCommand, hookCommandTimeout } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
@@ -14,6 +16,8 @@ export const resolveHermesHome = (env?: ProviderExecutionEnvironment, workspaceP
   nativeHome(services, env, workspacePath)
 export const createHermesManagedHookPlan = (env?: ProviderExecutionEnvironment, workspacePath?: string) =>
   planHermesManagedHooks(services, env, workspacePath)
+
+const readHermesSessionHistoryPage = createHermesNativeHistory({ AgentMuxError, SESSION_HISTORY_MAX_PAGE_BYTES, resolveHermesHome })
 
 export function createHermesProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   return defineAgentProvider({

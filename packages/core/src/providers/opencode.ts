@@ -3,11 +3,11 @@ import { adaptOpenCodePayload, createOpenCodeHookSpecification, inspectOpenCodeH
   planOpenCodeManagedHooks, qualifyOpenCodeHookHost } from '@agentmux/providers/opencode/provider'
 import { executionEnvironmentValue, executionHomeDirectory, executionPath, type ProviderExecutionEnvironment } from './execution-environment.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
-import { readOpenCodeSessionHistoryPage } from './opencode-native-history.js'
+import { createOpenCodeNativeHistory } from '@agentmux/providers/opencode/native-history'
+import { AgentMuxError } from '../errors.js'
+import { SESSION_HISTORY_MAX_PAGE_BYTES } from '../session-history.js'
 import { catalog, hookToolFields } from './shared.js'
 import { hookDeliverySource } from '../agent-hook-delivery.js'
-
-export { readOpenCodeSessionHistoryPage } from './opencode-native-history.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -15,6 +15,8 @@ const services = { executionEnvironmentValue, executionHomeDirectory, executionP
 export const OPENCODE_HOOKS = createOpenCodeHookSpecification({ hookToolFields })
 export const createOpenCodeManagedHookPlan = (env?: ProviderExecutionEnvironment, workspacePath?: string) =>
   planOpenCodeManagedHooks(services, env, workspacePath)
+
+const readOpenCodeSessionHistoryPage = createOpenCodeNativeHistory({ AgentMuxError, SESSION_HISTORY_MAX_PAGE_BYTES })
 
 export function createOpenCodeProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   const provider = defineAgentProvider({

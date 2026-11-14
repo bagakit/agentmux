@@ -6,7 +6,11 @@ import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.j
 import { normalizeNativeSessionId, normalizeNativeTranscriptPath } from '../agent-native-locator.js'
 import { catalog, hookToolFields } from './shared.js'
 import { hookDeliverySource } from '../agent-hook-delivery.js'
-import { readPiConversationChanges, readPiSessionHistoryPage } from './pi-native-history.js'
+import { createPiNativeHistory } from '@agentmux/providers/pi/native-history'
+import { NativeJsonlHistoryReader, readNativeConversationChanges } from '../native-jsonl-history-reader.js'
+import { isNativeText, nativeJsonStringify, nativeTextConcat, type NativeText } from '../native-history-value.js'
+import type { AgentProviderSessionHistoryContext, AgentSessionHistoryItem } from '../types.js'
+import type { ProviderConversationChangesContext, ProviderConversationChangesPage } from '../session-history-changes.js'
 import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
@@ -15,6 +19,11 @@ const services = { executionEnvironmentValue, executionHomeDirectory, executionP
 export const PI_HOOKS = createPiHookSpecification({ hookToolFields, normalizeNativeSessionId, normalizeNativeTranscriptPath })
 export const createPiManagedHookPlan = (env?: ProviderExecutionEnvironment, workspacePath?: string) =>
   planPiManagedHooks(services, env, workspacePath)
+
+const { readPiSessionHistoryPage, readPiConversationChanges } = createPiNativeHistory<
+  NativeText, AgentProviderSessionHistoryContext, AgentSessionHistoryItem,
+  ProviderConversationChangesContext, ProviderConversationChangesPage, NativeJsonlHistoryReader
+>({ AgentMuxError, NativeJsonlHistoryReader, isNativeText, nativeJsonStringify, nativeTextConcat, readNativeConversationChanges })
 
 export function createPiProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   return defineAgentProvider({

@@ -1,0 +1,208 @@
+// Role/content interpretation follows Paseo PiHistoryMapper (3c6e4e39, Apache-2.0,
+// Copyright (c) 2025-present Mohamed Boudra). Modified for native v3 JSONL and exact ordered resources.
+// Branch semantics follow Pi 0.84.3 SessionManager._buildIndex/getBranch (ccfe79ed, MIT):
+// last durable entry, parent traversal, including history before compaction; no mutating loader.
+import type { NativeJsonlHistoryReader, NativeJsonlHistoryServices, NativeHistoryItem, NativeHistoryPart,
+  NativeHistoryTarget } from '../jsonl-history-services.js'
+
+type HistoryContext = NativeHistoryTarget & { workspacePath: string; limit: number }
+type PiHistoryReader<Text, Item> = NativeJsonlHistoryReader<Text, Item> & {
+  sourceSizeBytes: number
+  readBeforeChanges(): Promise<{ value: Record<string, unknown> } | null>
+  seekChanges(after?: string, tail?: boolean): Promise<void>
+  historyChangesCursor(): Promise<string>
+  historyReplayCursor(): Promise<string>
+}
+
+export function createPiNativeHistory<Text extends { length: number }, Context extends HistoryContext, Item,
+  Changes extends Context & { after?: string; tail?: boolean }, ChangesPage,
+  Reader extends PiHistoryReader<Text, Item>>(services: Omit<NativeJsonlHistoryServices<Text, Context, Item>, 'NativeJsonlHistoryReader'> & {
+  NativeJsonlHistoryReader: { open(context: Context): Promise<Reader> }
+  readNativeConversationChanges(reader: Reader, context: Changes,
+    convert: (record: Record<string, unknown>, start: number) => NativeHistoryItem<Text> | null): Promise<ChangesPage>
+}) {
+  const { AgentMuxError, NativeJsonlHistoryReader, isNativeText, nativeJsonStringify, nativeTextConcat,
+    readNativeConversationChanges } = services
+
+  function object(value: unknown): Record<string, unknown> | undefined {
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+  }
+
+  function parts(content: unknown, message?: Record<string, unknown>): NativeHistoryPart<Text>[] {
+    const isToolResult = message?.role === 'toolResult'
+    const callId = isToolResult && typeof message.toolCallId === 'string' && message.toolCallId ? message.toolCallId : undefined
+    const name = isToolResult && typeof message.toolName === 'string' && message.toolName ? message.toolName : undefined
+    const failed = isToolResult && message.isError === true ? true : undefined
+    const hasToolIdentity = callId !== undefined || name !== undefined || failed !== undefined
+
+    if (isNativeText(content)) {
+      if (isToolResult && hasToolIdentity) {
+        return [{ kind: 'tool-result', output: content, ...(name ? { name } : {}), ...(callId ? { callId } : {}), ...(failed ? { failed } : {}) }]
+      }
+      return [{ kind: 'text', text: content }]
+    }
+    if (!Array.isArray(content)) {
+      return content === undefined ? [] : [{ kind: 'text', text: nativeJsonStringify(content), contentEligibility: 'unconfirmed' }]
+    }
+    if (content.length === 0) {
+      if (isToolResult && hasToolIdentity) {
+        return [{ kind: 'tool-result', output: '', ...(name ? { name } : {}), ...(callId ? { callId } : {}), ...(failed ? { failed } : {}) }]
+      }
+      return []
+    }
+
+    const converted = content.flatMap((value): NativeHistoryPart<Text>[] => {
+      const block = object(value)
+      if (block?.type === 'text' && isNativeText(block.text)) {
+        if (isToolResult && hasToolIdentity) {
+          return [{ kind: 'tool-result', output: block.text, ...(name ? { name } : {}), ...(callId ? { callId } : {}), ...(failed ? { failed } : {}) }]
+        }
+        return [{ kind: 'text', text: block.text }]
+      }
+      if (block?.type === 'thinking') {
+        if (isNativeText(block.thinking)) {
+          const signature = isNativeText(block.thinkingSignature) ? block.thinkingSignature : undefined
+          const redacted = typeof block.redacted === 'boolean' ? block.redacted : undefined
+          return [{
+            kind: 'reasoning',
+            text: block.thinking,
+            ...(signature !== undefined ? { signature } : {}),
+            ...(redacted !== undefined ? { redacted } : {})
+          }]
+        }
+        return [{ kind: 'text', text: nativeJsonStringify(value), contentEligibility: 'unconfirmed' }]
+      }
+      if (block?.type === 'toolCall' && typeof block.name === 'string') {
+        const rawArgs = block.arguments
+        const input = isNativeText(rawArgs)
+          ? rawArgs
+          : rawArgs === undefined || rawArgs === null
+            ? ''
+            : nativeJsonStringify(rawArgs)
+        const callId = typeof block.id === 'string' && block.id ? block.id : undefined
+        return [{ kind: 'tool-call', name: block.name, input, ...(callId ? { callId } : {}) }]
+      }
+      if (block?.type === 'image' && isNativeText(block.data) && typeof block.mimeType === 'string') {
+        return [{ kind: 'resource', resourceType: 'image', reference: nativeTextConcat(`data:${block.mimeType};base64,`, block.data) }]
+      }
+      return [{ kind: 'text', text: nativeJsonStringify(value), contentEligibility: 'unconfirmed' }]
+    })
+
+    if (isToolResult && hasToolIdentity && !converted.some((p) => p.kind === 'tool-result')) {
+      return [
+        { kind: 'tool-result', output: '', ...(name ? { name } : {}), ...(callId ? { callId } : {}), ...(failed ? { failed } : {}) },
+        ...converted
+      ]
+    }
+
+    return converted
+  }
+
+  function invalid(message: string): never { throw new AgentMuxError(message, 'AGENT_SESSION_HISTORY_INVALID_TRANSCRIPT') }
+
+  function entryIdentity(entry: Record<string, unknown>): { id: string; parentId: string | null } {
+    if (typeof entry.id !== 'string' || !entry.id ||
+        (entry.parentId !== null && (typeof entry.parentId !== 'string' || !entry.parentId))) {
+      invalid('Pi transcript contains an invalid v3 entry.')
+    }
+    return { id: entry.id, parentId: entry.parentId }
+  }
+
+  async function validateHeader(reader: Reader,
+    context: Pick<Context, 'source' | 'workspacePath'>): Promise<void> {
+    const header = await reader.readFirst()
+    if (header?.type !== 'session' || header.version !== 3 || header.id !== context.source.nativeSessionId ||
+        header.cwd !== context.workspacePath) {
+      throw new AgentMuxError('Pi requires this native Session\'s v3 transcript and workspace.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+    }
+  }
+
+  function convert(entry: Record<string, unknown>): NativeHistoryItem<Text> {
+    const message = entry.type === 'message' ? object(entry.message) : undefined
+    const role = message?.role
+    const contentEligibility = entry.type === 'compaction' ? 'private'
+      : role === 'assistant' || role === 'toolResult' ? 'public' : 'unconfirmed'
+    const content = message?.content ?? (entry.type === 'custom_message' ? entry.content : entry.summary)
+    const blocks = Array.isArray(content) ? content : []
+    const hasAssistantText = (isNativeText(content) && content.length > 0) || blocks.some((block) => {
+      const obj = object(block)
+      return obj?.type === 'text' && isNativeText(obj.text) && obj.text.length > 0
+    })
+    const hasActivity = role === 'toolResult' || blocks.some((block) => {
+      const type = object(block)?.type
+      return type !== 'text' && type !== 'image' && type !== 'thinking'
+    })
+    const kind = !hasActivity && role === 'user' ? 'user-message'
+      : role === 'assistant' && (hasAssistantText || (!hasActivity && blocks.length > 0)) ? 'assistant-message'
+      : 'activity'
+    const time = typeof entry.timestamp === 'string' ? Date.parse(entry.timestamp) : NaN
+    return {
+      id: entry.id as string,
+      kind,
+      contentParts: (content === undefined && role !== 'toolResult'
+        ? [{ kind: 'text' as const, text: nativeJsonStringify(entry), contentEligibility: 'unconfirmed' as const }]
+        : parts(content, message)).map(part => ({ ...part, contentEligibility: contentEligibility === 'public' ? part.contentEligibility ?? 'public' : contentEligibility })),
+      ...(kind === 'activity' ? { title: `Pi ${typeof role === 'string' ? role : String(entry.type)}` } : {}),
+      ...(Number.isSafeInteger(time) && time >= 0 ? { startedAt: time } : {})
+    }
+  }
+
+  async function readPiSessionHistoryPage(context: Context) {
+    const reader = await NativeJsonlHistoryReader.open(context)
+    try {
+      await validateHeader(reader, context)
+      let parent = reader.continuation
+      const visited = new Set<string>()
+      const items: NativeHistoryItem<Text>[] = []
+      while (items.length < context.limit) {
+        context.signal.throwIfAborted()
+        const record = await reader.readPrevious()
+        if (!record || record.value.type === 'session') {
+          if (parent !== undefined) invalid('Pi transcript is missing a selected branch parent.')
+          break
+        }
+        const entry = record.value
+        const identity = entryIdentity(entry)
+        if (parent !== undefined && identity.id !== parent) continue
+        if (visited.has(identity.id)) invalid('Pi transcript contains a branch cycle.')
+        visited.add(identity.id)
+        items.push(convert(entry))
+        if (identity.parentId === null) { parent = undefined; break }
+        parent = identity.parentId
+      }
+      const nextCursor = parent === undefined ? (await reader.verifyUnchanged(), null) : await reader.nextCursor(parent)
+      return { source: context.source, items: await Promise.all(items.reverse().map(item => reader.materializeItem(item))), nextCursor,
+        changesCursor: await reader.historyChangesCursor(), replayCursor: await reader.historyReplayCursor(), sourceSizeBytes: reader.sourceSizeBytes }
+    } finally { await reader.close() }
+  }
+
+  /** Physical appends extend an accepted Pi branch only while each original parent
+   * is its preceding durable leaf. A branch change requires a fresh selected read. */
+  async function readPiConversationChanges(context: Changes): Promise<ChangesPage> {
+    const reader = await NativeJsonlHistoryReader.open(context)
+    try {
+      await validateHeader(reader, context)
+      // Pi parent links decide branch continuity; the original cut stays authoritative.
+      await reader.seekChanges(context.after, context.tail === true)
+      const previous = await reader.readBeforeChanges()
+      let leaf = previous && previous.value.type !== 'session' ? entryIdentity(previous.value).id : null
+      const visited = new Set(leaf === null ? [] : [leaf])
+      return await readNativeConversationChanges(reader, context, (entry, start) => {
+        if (entry.type === 'session') {
+          if (start !== 0) invalid('Pi transcript contains another Session header.')
+          return null
+        }
+        const identity = entryIdentity(entry)
+        if (identity.parentId !== leaf) {
+          throw new AgentMuxError('Pi selected a different native branch. Retain the original cut and read the current selected branch.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+        }
+        if (visited.has(identity.id)) invalid('Pi transcript contains a branch cycle.')
+        visited.add(identity.id)
+        leaf = identity.id
+        return convert(entry)
+      })
+    } finally { await reader.close() }
+  }
+
+  return { readPiSessionHistoryPage, readPiConversationChanges }
+}
