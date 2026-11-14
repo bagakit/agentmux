@@ -88,6 +88,26 @@ function browserAgentSource() {
 }
 
 describe('public Desktop spatial Control owner', () => {
+  it('external Coordinator references refuse only this legacy consumer before any local Session lookup or write', async () => {
+    const existing = agent('same-SID')
+    useAppStore.setState({ sessions: [existing], agentComposerDrafts: { [existing.id]: 'Original B draft' } })
+    const before = useAppStore.getState()
+    const lookup = vi.spyOn(api.sessions, 'creation'), resolve = vi.spyOn(api.sessions, 'resolveCreationSessionId')
+    const start = vi.spyOn(api.sessions, 'launchAgent'), commit = vi.mocked(api.spatial.commit); commit.mockClear()
+    // A decoded future Source DTO enters the original legacy port. This deliberately
+    // does not call a new parser or claim current Main accepts the public protocol.
+    const input: Extract<AgentMuxSpaceControlRequest, { operation: 'agent.open' }> = JSON.parse(JSON.stringify({ schemaVersion: 5, requestId: 'future-original-L', operation: 'agent.open', content: { kind: 'agent-session',
+      reference: { kind: 'coordinator-agent', runtimeId: 'original-A', binding: { bindingId: 'A-binding', agentSessionId: existing.id, createOperationId: 'A-C' } },
+      expectedResource: { runtimeId: 'original-B', workspaceId: 'repo', workspacePath: config.workspaces[0]!.path } },
+      destination: { spaceId: 'original-B-space', zoneId: 'original-B-zone', newTab: true }, focus: false }))
+    expect(Object.hasOwn(input.content, 'agentSessionId')).toBe(false)
+    const result = await useAppStore.getState().executeControl(input)
+    expect(result).toMatchObject({ operation: 'agent.open', agent: null, issues: [{ code: 'AGENT_OPEN_CONTRACT_UNCONFIRMED' }] })
+    expect(lookup).not.toHaveBeenCalled(); expect(resolve).not.toHaveBeenCalled(); expect(start).not.toHaveBeenCalled(); expect(commit).not.toHaveBeenCalled()
+    const after = useAppStore.getState()
+    expect(after.sessions).toBe(before.sessions); expect(after.tabs).toBe(before.tabs); expect(after.layouts).toBe(before.layouts)
+    expect(after.spatialRequests).toBe(before.spatialRequests); expect(after.agentComposerDrafts).toBe(before.agentComposerDrafts)
+  })
   it.each(['none', 'save', 'launch'] as const)('mounted Survey Browser creation keeps local focus and later %s navigation', async later => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
     vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })

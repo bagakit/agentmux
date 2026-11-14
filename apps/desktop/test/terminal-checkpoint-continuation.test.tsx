@@ -1148,3 +1148,77 @@ it.each(['missing-admission', 'old-optional-fields'] as const)('an already obser
     await act(async () => root.render(null))
   } finally { for (const close of cleanup.reverse()) await close() }
 })
+
+
+it('an association placeholder stays unconfirmed in the actual ordinary Workbench without borrowing the healthy same-SID local Pane', async () => {
+  const { desktopSpatialGraph } = await import('../src/renderer/src/lib/desktop-spatial-state')
+  const { parseAgentMuxSpatialGraph } = await import('@agentmux/core/spatial-graph')
+  const { WorkspaceWorkbench } = await import('../src/renderer/src/components/WorkspaceWorkbench')
+  const { SessionPane } = await import('../src/renderer/src/components/SessionPane')
+  const { DesktopClientUiProvider } = await import('../src/renderer/src/components/DesktopClientUiProvider')
+  const moveBefore = Object.getOwnPropertyDescriptor(Element.prototype, 'moveBefore')
+  Object.defineProperty(Element.prototype, 'moveBefore', { configurable: true, value(this: Element, node: Node, before: Node | null) { this.insertBefore(node, before) } })
+  try {
+    // Controlled incoming Source protocol, not a local create/association method.
+    // The shape matches T015's real owner output; no current-Main protocol support
+    // or authority is inferred from this presentation fixture.
+    const graph = desktopSpatialGraph(useAppStore.getState(), [])
+    const region = graph.regions.find(region => region.regionId === origin.regionId)!
+    Object.assign(region, { association: { operationId: 'original-B-association-L' }, agentSessionId: null, runId: null, execution: null })
+    delete region.creationOperationId
+    const data = graph.resources['region:' + region.regionId]
+    if (data && typeof data === 'object' && !Array.isArray(data)) { Reflect.deleteProperty(data, 'agentPresentation'); Reflect.deleteProperty(data, 'sessionId') }
+    const original = { schemaVersion: 1 as const, revision: 1, graph: parseAgentMuxSpatialGraph(graph) }
+    vi.spyOn(api.config, 'get').mockResolvedValue(configuration)
+    const snapshot = await api.sessions.snapshot()
+    vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ ...snapshot, sessions: [session] })
+    vi.spyOn(api.spatial, 'read').mockResolvedValue(original)
+    vi.spyOn(api.spatial, 'commit').mockResolvedValue(original)
+    const dispose = await useAppStore.getState().initialize(); releases.push(dispose)
+    useAppStore.setState({ sessions: [session], agentComposerDrafts: { [session.id]: 'Keep the healthy B input' } })
+    const local = useAppStore.getState().sessions, member = vi.spyOn(api.spaceMounts, 'member')
+    attach.mockClear(); write.mockClear()
+    await act(async () => root.render(<DesktopClientUiProvider><WorkspaceWorkbench workspaceId={origin.workspaceId} visible />
+      <SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} linkOrigin={origin} visible />
+    </DesktopClientUiProvider>))
+    await vi.waitFor(async () => { await act(async () => {}); expect(container.textContent).toContain('Original Agent reference unconfirmed'); expect(fixture.terminals).toHaveLength(1) })
+    expect(member).not.toHaveBeenCalled(); expect(attach).toHaveBeenCalledOnce(); expect(attach.mock.calls[0]![0]).toEqual(session.control)
+    fixture.terminals[0]!.input('still-healthy-local')
+    await vi.waitFor(() => expect(write).toHaveBeenCalledOnce())
+    expect(write.mock.calls[0]![0]).toEqual(session.control)
+    expect(useAppStore.getState().sessions.map(value => value.id)).toEqual(local.map(value => value.id))
+    expect(useAppStore.getState().sessions).toContainEqual(expect.objectContaining({ id: session.id, control: session.control }))
+    expect(useAppStore.getState().agentComposerDrafts[session.id]).toBe('Keep the healthy B input')
+    expect(useAppStore.getState().tabs[origin.tabId]!.regions[origin.regionId]).toMatchObject({ kind: 'agent', sessionId: null })
+    await act(async () => root.render(null))
+  } finally { if (moveBefore) Object.defineProperty(Element.prototype, 'moveBefore', moveBefore); else Reflect.deleteProperty(Element.prototype, 'moveBefore') }
+})
+
+it('a legacy local Region without execution metadata keeps its actual SDK Pane and input', async () => {
+  const { desktopSpatialGraph } = await import('../src/renderer/src/lib/desktop-spatial-state')
+  const { parseAgentMuxSpatialGraph } = await import('@agentmux/core/spatial-graph')
+  const { OrdinarySpaceMemberViewport } = await import('../src/renderer/src/components/OrdinarySpaceMemberViewport')
+  const { SessionPane } = await import('../src/renderer/src/components/SessionPane')
+  const { DesktopClientUiProvider } = await import('../src/renderer/src/components/DesktopClientUiProvider')
+  const graph = desktopSpatialGraph(useAppStore.getState(), [])
+  const region = graph.regions.find(region => region.regionId === origin.regionId)!
+  region.execution = null; delete region.creationOperationId
+  const original = { schemaVersion: 1 as const, revision: 1, graph: parseAgentMuxSpatialGraph(graph) }
+  vi.spyOn(api.spatial, 'read').mockResolvedValue(original)
+  const snapshot = await api.sessions.snapshot()
+  vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ ...snapshot, sessions: [session] })
+  const dispose = await useAppStore.getState().initialize(); releases.push(dispose)
+  useAppStore.setState({ sessions: [session], agentComposerDrafts: { [session.id]: 'Original legacy local input' } })
+  const member = vi.spyOn(api.spaceMounts, 'member')
+  attach.mockResolvedValue(replay('Original healthy local terminal\r\n')); attach.mockClear(); write.mockClear()
+  await act(async () => root.render(<DesktopClientUiProvider><OrdinarySpaceMemberViewport {...origin} sessionId={session.id} visible active>
+    <SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} linkOrigin={origin} visible />
+  </OrdinarySpaceMemberViewport></DesktopClientUiProvider>))
+  await vi.waitFor(async () => { await act(async () => {}); expect(fixture.terminals).toHaveLength(1) })
+  expect(contents(fixture.terminals[0]!)).toContain('Original healthy local terminal')
+  fixture.terminals[0]!.input('legacy-local-still-works')
+  await vi.waitFor(() => expect(write).toHaveBeenCalledOnce())
+  expect(write.mock.calls[0]![0]).toEqual(session.control); expect(member).not.toHaveBeenCalled()
+  expect(container.textContent).not.toContain('Original Agent reference unconfirmed')
+  expect(useAppStore.getState().agentComposerDrafts[session.id]).toBe('Original legacy local input')
+})
