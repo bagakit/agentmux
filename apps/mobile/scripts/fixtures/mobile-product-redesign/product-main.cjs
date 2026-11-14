@@ -154,6 +154,10 @@ app.whenReady().then(async () => {
     await require('./focus-state.cjs')({ win, read, until, resize, tap, button, capture, result, evidence })
     result.passed = true; return
   }
+  if (mode === 'brand-attention') {
+    await require('./brand-attention.cjs')({ win, read, until, resize, tap, button, capture, result })
+    result.passed = true; return
+  }
   if (mode === 'chrome-motion') {
     await require('./chrome-motion.cjs')({ win, read, until, resize, tap, button, capture, result })
     result.passed = true; return

@@ -7,6 +7,8 @@ import { relative, resolve } from 'node:path'
 // load or timeout failure is not mutation proof. Usage: verify-capture-mutations.mjs --<subset> <id>...
 const root = resolve(import.meta.dirname, '../../../../..'), capture = resolve(import.meta.dirname, 'capture-ui.mjs')
 const bearing = {
+  'focus-attention-rail': 'Focus attention cards have no decorative side rail',
+  'interaction-attention-rail': 'Interaction cards have no decorative side rail or duplicate outline',
   'header-extra-pixel': 'mote-main keeps one 52px header',
   'dismiss-button-highlight': 'Dismiss has no inherited button highlight',
   'narrow-avatar-hidden': 'Narrow headers retain the original identity avatar',
@@ -30,14 +32,14 @@ const run = args => new Promise((accept, reject) => {
   child.once('error', reject); child.once('close', (code, signal) => accept({ code, signal, out, log }))
 })
 try {
-  for (const label of ['baseline', ...ids]) {
-    const result = await run(label === 'baseline' ? [] : ['--mutation=' + label])
+  for (const label of ['baseline', ...ids, 'restored']) {
+    const result = await run(['baseline', 'restored'].includes(label) ? [] : ['--mutation=' + label])
     await writeFile(resolve(directory, label + '.log'), result.log)
     assert.equal(result.signal, null)
     const receiptFile = result.out.trim().split('\n').findLast(line => line.endsWith('receipt.json'))
     assert.ok(receiptFile, 'The capture wrote its receipt: ' + label)
     const captured = JSON.parse(await readFile(resolve(root, receiptFile), 'utf8'))
-    if (label === 'baseline') {
+    if (['baseline', 'restored'].includes(label)) {
       assert.equal(result.code, 0, result.log); assert.equal(captured.passed, true)
     } else {
       const override = captured.sourceOverride, error = captured.renderer?.error
