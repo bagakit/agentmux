@@ -3,20 +3,22 @@ import { spawn } from 'node:child_process'
 import { generateKeyPairSync } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, ipcMain } from 'electron'
 import { zipSync, strToU8 } from 'fflate'
 import { AgentMuxControlServer } from '@agentmux/core'
 import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
 import { BrowserProfileManager } from '../../../src/main/browser-profile-manager.js'
 import { BrowserProfileStore } from '../../../src/main/browser-profile-store.js'
 import { BrowserViewManager } from '../../../src/main/browser-view-manager.js'
+import { registerBrowserProfileEditorIpc } from '../../../src/main/browser-profile-editor-ipc.js'
+import { THEME_BOOTSTRAP_CHANNEL } from '../../../src/shared/theme-bootstrap.js'
 import { executeBrowserProfileControl } from '../../../src/main/browser-profile-control.js'
 
 const home = process.env.EXTENSIONS_HOME!, out = process.env.EXTENSIONS_OUT!, phase = process.env.EXTENSIONS_PHASE!, base = process.env.EXTENSIONS_BASE!, node = process.env.EXTENSIONS_NODE!
 app.setActivationPolicy?.('prohibited'); app.on('window-all-closed', () => {})
 const receipt: any = { passed: false, phase, pid: process.pid, cases: [], cli: [], approvals: [] }
 let host: BrowserWindow | undefined, profiles: BrowserProfileManager | undefined, browsers: BrowserViewManager | undefined, control: AgentMuxControlServer | undefined
-let consent = true, fresh = 0
+let consent = true, fresh = 0, guiSource = ''
 const originalBrowserId = 'extension-original-browser'
 const contents = (id = originalBrowserId) => browsers!.nativeOwner(id)!.view.webContents
 const token = (id: string) => profiles!.listProfiles().find(profile => profile.id === id)!.revision
@@ -64,9 +66,16 @@ async function prepare(profileId: string, sourcePath: string, operationId: strin
 async function apply(profileId: string, review: any, success = true) { return cli(['apply', '--profile', profileId, '--expected-revision', review.expectedRevision, '--review', review.reviewId], success) }
 async function main() {
   try {
-    host = new BrowserWindow({ show: false, width: 760, height: 640, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } }); await host.loadURL('data:text/html,Private extension workbench')
+    host = new BrowserWindow({ show: false, width: 760, height: 640, webPreferences: { sandbox: false, contextIsolation: true, nodeIntegration: false, preload: join(out, 'preload.cjs') } })
     const store = new BrowserProfileStore(join(home, 'profiles.json'))
     profiles = new BrowserProfileManager(store); await profiles.initialize()
+    registerBrowserProfileEditorIpc({ profiles, handle: (channel, listener) => ipcMain.handle(channel, (event, ...args) => {
+      if (event.sender !== host!.webContents || event.senderFrame !== host!.webContents.mainFrame) throw Error('Private fixture requires its original trusted Workbench frame')
+      return listener(event, ...args)
+    }) })
+    ipcMain.on(THEME_BOOTSTRAP_CHANNEL, event => { event.returnValue = { status: 'unavailable', message: 'Private appearance input is unavailable; this fixture proves extension operations.' } })
+    ipcMain.handle('ui:chooseFiles', () => [guiSource]) // Private file-selection input only, no approval authority.
+    await host.loadFile(join(out, 'renderer/index.html'))
     const retained = phase === 'second' ? JSON.parse(await readFile(join(home, 'retained.json'), 'utf8')) : null
     const profileId = retained?.profileId ?? profiles.defaultProfileId()
     profiles.extensions.setConfirmationHandler(async request => { receipt.approvals.push({ ...request, actualHumanReviewFixture: true, confirmed: consent }); return consent })
@@ -110,6 +119,26 @@ async function main() {
       assert.equal(await contents('extension-independent-browser').executeJavaScript('document.documentElement.dataset.extensionVersion'), undefined)
       assert.equal((await contents('extension-independent-browser').session.cookies.get({ name: 'profile-signin' })).length, 0)
       receipt.cases.push({ kind: 'actual-cli-human-boundary-content-script-and-mv3-worker', extensionId, nativeId, facts, independentProfileUnaffected: true })
+      for (let index = 0; index < 100 && !await host.webContents.executeJavaScript('Boolean(window.extensionsNative)'); index++) await pause(40)
+      host.webContents.debugger.attach('1.3')
+      const click = async (selector: string) => {
+        const point = await host!.webContents.executeJavaScript(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw Error('Missing real extension control');e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+        for (const type of ['mousePressed','mouseReleased']) await host!.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {type,...point,button:'left',clickCount:1})
+      }
+      const ready = async (expression: string) => { for (let index=0;index<100;index++) { if(await host!.webContents.executeJavaScript(expression))return; await pause(40) } throw Error('Actual GUI extension consumer did not reach '+expression) }
+      await click('.browser-profile-extensions__heading'); await ready('document.querySelectorAll(".browser-profile-extensions__list > li").length === 1')
+      guiSource = await source('1.1.0'); consent = false
+      await click('.browser-profile-extensions__list > li:first-child .browser-profile-extensions__actions > button:first-child')
+      await ready('Boolean(document.querySelector(".browser-profile-extensions__primary"))')
+      await click('.browser-profile-extensions__primary'); await ready('document.querySelector(".browser-profile-extensions__notice")?.textContent.includes("Nothing changed")')
+      const guiLoaded = await host.webContents.executeJavaScript(`extensionsNative.api.loadProfileExtension(${JSON.stringify(profileId)},${JSON.stringify(extensionId)})`)
+      assert.equal(guiLoaded.application.state, 'loaded')
+      await click('.browser-profile-extensions__list > li:first-child .browser-profile-extensions__actions > button:last-child')
+      for (let index=0;index<100 && !receipt.approvals.some((approval:any)=>approval.kind==='remove'&&!approval.confirmed);index++) await pause(30)
+      assert.ok(receipt.approvals.some((approval:any)=>approval.kind==='remove'&&!approval.confirmed)); consent = true
+      assert.equal((await cli(['ls','--profile',profileId])).extensions[0].version, '1.0.0')
+      host.webContents.debugger.detach()
+      receipt.cases.push({ kind: 'actual-production-component-renderer-api-preload-profile-ipc', installedNativeId: nativeId, actualPointerPrepareAndApplyCancelled: true, actualPointerRemovalCancelled: true, approvedLoad: guiLoaded.application, fixtureOnlyFileSelection: true })
       const update = await prepare(profileId, await source('2.0.0', { zip: true }), 'actual-update', extensionId)
       assert.ok(update.addedPermissions.includes('API: tabs')); await apply(profileId, update)
       const updated = await cli(['ls', '--profile', profileId]), second = await freshPage(profileId)

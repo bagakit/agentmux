@@ -19,10 +19,17 @@ const out = await mkdtemp(join(outputRoot, 'attempt-'))
 const home = await mkdtemp('/tmp/amux-profile-extensions-'), sources = new Map()
 const receipt = { schema: 'agentmux.browser-profile-extensions.native.v1', passed: false,
   candidate: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim(),
-  boundary: 'Compiled public CLI, original control socket, production Profile Manager/Store/Session and native BrowserViewManager WCV. The explicit host confirmation fixture tests consent ownership, not a real person clicking a native dialog. Second process reads original durable Profile/package/extension storage. Full Desktop Tab/Region/focus and healthy Agent Run restoration are outside this fixture.',
+  boundary: 'Compiled public CLI, original control socket and actual Renderer API/production preload/ProfileEditorIPC, production Profile Manager/Store/Session and native BrowserViewManager WCV. The explicit host confirmation fixture tests consent ownership, not a real person clicking a native dialog. Second process reads original durable Profile/package/extension storage. Full Desktop Tab/Region/focus and healthy Agent Run restoration are outside this fixture.',
   electron: { version: require('electron/package.json').version, executableSha256: hash(await readFile(electron)) },
   sources: {}, processes: [], out, cleanup: {} }
 let server
+const mutateResultBridge = (code, path) => {
+  if (process.env.EXTENSIONS_RESULT_MUTATION !== '1' || !path.endsWith('/shared/ipc-result.ts')) return code
+  const target = "'listProfileExtensions', 'prepareProfileExtension', 'applyProfileExtension', 'removeProfileExtension', 'loadProfileExtension', "
+  assert.equal(code.split(target).length, 2, 'Mutate the one actual production IPC result method list')
+  receipt.productionMutation = { target: 'BROWSER_PROFILE_RESULT_METHODS', kind: 'omit-extension-result-unwrapping', originalSha256: hash(code) }
+  return code.replace(target, '')
+}
 const loadedSource = { name: 'extensions-original-source', setup(builder) {
   builder.onResolve({ filter: /^[^./]/ }, async args => {
     if (args.pluginData?.resolvedExternal || args.path === 'electron' || args.path.startsWith('node:')) return
@@ -35,13 +42,13 @@ const loadedSource = { name: 'extensions-original-source', setup(builder) {
     const bytes = await readFile(args.path); sources.set(args.path, hash(bytes))
     // Keep each owning module's package-relative native/resource resolution.
     // Bundling must not redirect createRequire(import.meta.url) to this fixture.
-    const code = bytes.toString().replaceAll('import.meta.url', JSON.stringify(pathToFileURL(args.path).href))
+    const code = mutateResultBridge(bytes.toString(), args.path).replaceAll('import.meta.url', JSON.stringify(pathToFileURL(args.path).href))
       .replaceAll('import.meta.dirname', JSON.stringify(dirname(args.path))).replaceAll('import.meta.filename', JSON.stringify(args.path))
     return { contents: code, loader: args.path.endsWith('.tsx') ? 'tsx' : args.path.endsWith('.ts') ? 'ts' : 'js' }
   })
 } }
 try {
-  for (const path of [import.meta.filename, join(repo, 'apps/desktop/scripts/fixtures/browser-profile-extensions/page.html')]) sources.set(path, hash(await readFile(path)))
+  for (const path of [join(repo, 'apps/desktop/scripts/fixtures/browser-profile-extensions/index.html'), import.meta.filename, join(repo, 'apps/desktop/scripts/fixtures/browser-profile-extensions/page.html')]) sources.set(path, hash(await readFile(path)))
   const manifest = JSON.parse(await readFile(join(repo, 'packages/core/package.json'), 'utf8'))
   const alias = Object.fromEntries(Object.entries(manifest.exports).map(([name, value]) => [
     '@agentmux/core' + (name === '.' ? '' : name.slice(1)),
@@ -52,7 +59,16 @@ try {
     plugins: [loadedSource] }
   await build({ ...options, alias, entryPoints: [join(repo, 'apps/desktop/scripts/fixtures/browser-profile-extensions/main.ts')], outfile: join(out, 'main.mjs') })
   await build({ ...options, entryPoints: [join(repo, 'packages/core/src/agentmux.ts')], outfile: join(out, 'cli.mjs') })
-  receipt.bundles = Object.fromEntries(await Promise.all(['main.mjs', 'cli.mjs'].map(async name => [name, hash(await readFile(join(out, name)))])))
+  await build({ ...options, alias, format: 'cjs', banner: {}, entryPoints: [join(repo, 'apps/desktop/src/preload/index.ts')], outfile: join(out, 'preload.cjs') })
+  const { build: buildRenderer } = await import('vite')
+  await buildRenderer({ configFile: false, root: join(repo, 'apps/desktop/scripts/fixtures/browser-profile-extensions'), base: './', logLevel: 'error', define: { __AGENTMUX_WEB_PREVIEW__: 'false' }, plugins: [{ name: 'extension-real-renderer-source', enforce: 'pre', async transform(code, id) {
+    const path = id.split('?')[0]
+    if (!path.startsWith(repo + '/') || path.includes('/node_modules/') || !/\.(?:[cm]?[jt]sx?|css)$/.test(path)) return
+    sources.set(path, hash(await readFile(path)))
+    const changed = mutateResultBridge(code, path)
+    return changed === code ? undefined : { code: changed, map: null }
+  } }], build: { outDir: join(out, 'renderer'), emptyOutDir: true, minify: false, sourcemap: false, target: 'esnext', chunkSizeWarningLimit: 20000 } })
+  receipt.bundles = Object.fromEntries(await Promise.all(['main.mjs', 'cli.mjs', 'preload.cjs'].map(async name => [name, hash(await readFile(join(out, name)))])))
   await symlink(join(repo, 'apps/desktop/node_modules'), join(out, 'node_modules'))
   await writeFile(join(out, 'bootstrap.cjs'), `console.error('extensions-proof: bootstrap');const {app}=require('electron'),fs=require('node:fs'),path=require('node:path');for(const key of ['home','appData','userData','sessionData']){const value=path.join(process.env.EXTENSIONS_HOME,key==='userData'?'userdata':key);fs.mkdirSync(value,{recursive:true});app.setPath(key,value)}app.whenReady().then(()=>{console.error('extensions-proof: electron ready');return import('./main.mjs')}).catch(error=>{console.error(error);fs.writeFileSync(path.join(process.env.EXTENSIONS_OUT,process.env.EXTENSIONS_PHASE+'.json'),JSON.stringify({passed:false,failure:{message:error.message,stack:error.stack}}));app.exit(1)});`)
   for (const required of ['apps/desktop/src/main/browser-view-manager.ts', 'apps/desktop/src/main/browser-profile-extensions.ts',
