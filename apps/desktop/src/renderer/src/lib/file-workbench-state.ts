@@ -515,7 +515,7 @@ export function reduceDocumentRead(
   }
   // A recovered observation is not approval to discard a buffer whose prior
   // saved body was unavailable. Reload explicitly adopts this observed body.
-  if (hasRecoverableFileBuffer(current, unknown) && result.document.content !== current.content) return {
+  if (hasRecoverableFileBuffer(current, unknown) && result.document.revision !== current.revision && result.document.content !== current.content) return {
     ...state, documentObservationGenerations,
     documentIssues: { ...state.documentIssues, [key]: { kind: 'changed', observed: result.document } }
   }
@@ -523,11 +523,12 @@ export function reduceDocumentRead(
     const issue = state.documentIssues[key]
     const clearsIssue = issue?.kind === 'changed' || issue?.kind === 'deleted' || issue?.kind === 'read-error'
     const matchesCurrentContent = result.document.content === current.content
+    const sameSourceBaseline = Boolean(current.readSource && result.document.readSource && JSON.stringify(current.readSource) === JSON.stringify(result.document.readSource))
     return {
       ...state,
       documentObservationGenerations,
-      ...(matchesCurrentContent
-        ? { dirtyDocuments: { ...state.dirtyDocuments, [key]: false },
+      ...(matchesCurrentContent || sameSourceBaseline
+        ? { ...(matchesCurrentContent ? { dirtyDocuments: { ...state.dirtyDocuments, [key]: false } } : {}),
           documents: { ...state.documents, [key]: { ...withoutFileReadIdentity(current),
             ...(result.document.readSource ? { readSource: result.document.readSource } : {}),
             ...(result.document.legacyMainNote ? { legacyMainNote: result.document.legacyMainNote } : {}),

@@ -38,6 +38,14 @@ export const fileReadRequestIds = new Map<string, number>()
 export const fileReadInFlightCounts = new Map<string, number>()
 export const fileInvalidationSequences = new Map<string, number>()
 export const fileSaveTails = new Map<string, Promise<void>>()
+const admittedFileSaves = new Set<string>()
+/** Queued tails may wait for the very mutation projecting a result. Only admitted work is busy. */
+export const hasAdmittedFileSave = (key: string): boolean => admittedFileSaves.has(key)
+export async function withAdmittedFileSaves<T>(keys: readonly string[], work: () => Promise<T>): Promise<T> {
+  keys.forEach(key => admittedFileSaves.add(key))
+  try { return await work() }
+  finally { keys.forEach(key => admittedFileSaves.delete(key)) }
+}
 export const workspaceFileMutationTails = new Map<string, Promise<void>>()
 // Shared data verdicts: a document, a directory, or a failed read; no UI activation permission.
 export const fileOpenRequests = new Map<string, Promise<boolean | 'directory'>>()

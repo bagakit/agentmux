@@ -4,7 +4,7 @@ import { documentKey, workbenchSurfaces } from './workbench-tabs'
 import { findFileRenameProjectionCollision, reduceFileRename, type FileWorkbenchState } from './file-workbench-state'
 import { isPathWithinSubtree, remapPathWithinSubtree } from './workspace-paths'
 import { hasNoteComposition } from './note-live-merge'
-import { fileSaveTails } from './file-document-bookkeeping'
+import { hasAdmittedFileSave } from './file-document-bookkeeping'
 
 export type FileEffectDocument = { path: string; document: FileWorkbenchState['documents'][string]; generation: number; views: string }
 export type FileEffectProjection = { effect: FileMutationEffect; candidates: FileEffectDocument[]; unconfirmed: FileEffectDocument[]; sourcePath?: string; destinationPath?: string }
@@ -44,7 +44,7 @@ export function captureFileEffect(state: FileWorkbenchState, workspaceId: string
     if (origin && (!namespace(origin.resource, locator.resource) || origin.target.hostId !== locator.mount.hostId ||
       ('reference' in origin.target ? origin.target.reference.runtimeId : origin.target.expectedRuntimeId) !== locator.mount.reference.runtimeId)) return []
     const frozen = { path, document, generation: state.documentGenerations[key] ?? 0, views: views.get(path) ?? '[]' }
-    if (!origin || !document.readIdentity || state.savingDocuments[key] || fileSaveTails.has(key) || hasNoteComposition(key)) { unconfirmed.push(frozen); return [] }
+    if (!origin || !document.readIdentity || state.savingDocuments[key] || hasAdmittedFileSave(key) || hasNoteComposition(key)) { unconfirmed.push(frozen); return [] }
     return origin && namespace(origin.resource, locator.resource) &&
       ('reference' in origin.target ? origin.target.reference.runtimeId : origin.target.expectedRuntimeId) === locator.mount.reference.runtimeId &&
       origin.target.hostId === locator.mount.hostId &&
@@ -72,7 +72,7 @@ export function applyFileEffect(state: FileWorkbenchState, workspaceId: string, 
     const key = documentKey(workspaceId, candidate.path)
     // Final transaction consumes the same body/generation; new input and new Views remain intact.
     if (next.documents[key] !== candidate.document || (next.documentGenerations[key] ?? 0) !== candidate.generation ||
-      (views.get(candidate.path) ?? '[]') !== candidate.views || hasNoteComposition(key) || fileSaveTails.has(key) || next.savingDocuments[key]) {
+      (views.get(candidate.path) ?? '[]') !== candidate.views || hasNoteComposition(key) || hasAdmittedFileSave(key) || next.savingDocuments[key]) {
       const current = next.documents[key]
       // Only the same original Source/file lineage receives a late-projection notice.
       // A replacement document or another Source never inherits this operation.

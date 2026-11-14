@@ -389,6 +389,7 @@ import {
   regionDiffRequestIds,
   transferFileSaveTail,
   withWorkspaceFileMutation,
+  withAdmittedFileSaves,
   workspaceFileMutationTails
 } from './lib/file-document-bookkeeping'
 import {
@@ -2572,7 +2573,11 @@ async function refreshFileDocument(
   const requestId = (fileReadRequestIds.get(key) ?? 0) + 1
   fileReadRequestIds.set(key, requestId)
   const beforeReadGeneration = useAppStore.getState().documentGenerations[key] ?? 0
+  const beforeReadRevision = useAppStore.getState().documents[key]!.revision
+  const beforeReadSource = JSON.stringify(useAppStore.getState().documents[key]!.readSource)
+  const beforeReadObservation = useAppStore.getState().documentObservationGenerations[key] ?? 0
   const beforeReadIssue = useAppStore.getState().documentIssues[key]
+  const sameDiskObservation = (state: AppState) => (state.documentObservationGenerations[key] ?? 0) === beforeReadObservation && state.documentIssues[key] === beforeReadIssue
   const checkedWrite = beforeReadIssue?.kind === 'write-unknown' ? beforeReadIssue : undefined
   const noteResource = path.endsWith(NOTE_FILE_EXTENSION) ? watchNoteResource(workspaceId, useAppStore.getState().config?.workspaces.find(workspace => workspace.id === workspaceId)) : null
   fileReadInFlightCounts.set(key, (fileReadInFlightCounts.get(key) ?? 0) + 1)
@@ -2617,11 +2622,19 @@ async function refreshFileDocument(
     if (documentLifetime(key) !== expectedLifetime || fileReadRequestIds.get(key) !== requestId) return
     if (noteResource && !noteResource.current()) return
     if (result.status === 'read' && result.document.path !== path) result = { status: 'error', code: 'WORKSPACE_FILE_READ_TARGET_CHANGED', message: 'The read returned another file path. The original document and draft are retained.' }
-    if (await reconcileNoteRead(workspaceId, path, expectedLifetime, requestId, result, noteResource?.current)) return
+    const readStateCurrent = (state: AppState) => documentLifetime(key) === expectedLifetime && fileReadRequestIds.get(key) === requestId &&
+      state.documents[key]?.revision === beforeReadRevision && JSON.stringify(state.documents[key]?.readSource) === beforeReadSource && sameDiskObservation(state)
+    const readCurrent = () => readStateCurrent(useAppStore.getState()) && (!noteResource || noteResource.current())
+    if (!readCurrent()) return
+    if (await reconcileNoteRead(workspaceId, path, expectedLifetime, requestId, result, readCurrent)) return
     useAppStore.setState((state) => {
-      // A full read may refresh an unchanged body, but new local input cannot borrow
-      // that read's physical provenance after an await.
-      const observed = result.status === 'read' && (state.documentGenerations[key] ?? 0) !== beforeReadGeneration
+      if (!readStateCurrent(state)) return state
+      // Physical provenance binds the original saved baseline. Later draft input
+      // is kept; another Source, baseline or disk observation cannot borrow it.
+      const sameSourceBaseline = result.status === 'read' && result.document.readSource &&
+        JSON.stringify(result.document.readSource) === beforeReadSource && JSON.stringify(state.documents[key]?.readSource) === beforeReadSource &&
+        state.documents[key]?.revision === beforeReadRevision && result.document.revision === beforeReadRevision
+      const observed = result.status === 'read' && !sameSourceBaseline && (state.documentGenerations[key] ?? 0) !== beforeReadGeneration
         ? { ...result, document: withoutFileReadIdentity(result.document) } : result
       return reduceDocumentRead(state, workspaceId, path, observed, checkedWrite)
     })
@@ -3034,8 +3047,10 @@ async function enqueueNoteShareSave(tabId: string, regionId?: string, explicit?:
   }
   const keys = [...new Set([key, ...selected.map(ticket => documentKey(ticket.copy.source.workspaceId, ticket.copy.source.path))])]
   const waits = keys.map(id => fileSaveTails.get(id) ?? Promise.resolve())
+  const mutations = [...new Set(keys.map(id => id.slice(0, id.indexOf('\0'))))].map(id => workspaceFileMutationTails.get(id) ?? Promise.resolve())
   const operation = (async () => {
-    await Promise.all(waits.map(wait => wait.catch(() => {})))
+    await Promise.all([...waits, ...mutations].map(wait => wait.catch(() => {})))
+    return await withAdmittedFileSaves(keys, async () => {
     await Promise.all(keys.map(async id => { const separator = id.indexOf('\0'); await drainNoteInput(id.slice(0, separator), id.slice(separator + 1)) }))
     const state = useAppStore.getState(), currentSurface = explicit ?? fileSurface(state.tabs[tabId], regionId)
     if (!currentSurface || documentKey(currentSurface.workspaceId, currentSurface.path) !== key) throw Error('The original destination changed. Its pending sharing draft is kept.')
@@ -3124,6 +3139,7 @@ async function enqueueNoteShareSave(tabId: string, regionId?: string, explicit?:
     try { result = parseFileShareResult(await api.files.sharePublic(params), params) }
     catch (error) { result = unconfirmedNoteShare(params, error) }
     await applyNoteShareResult(key, attempt, result)
+    })
   })()
   const tail = operation.then(() => {}, () => {})
   keys.forEach(id => fileSaveTails.set(id, tail))
@@ -3166,7 +3182,7 @@ async function enqueueFileSave(
   const queuedLifetime = documentLifetime(key)
   const previous = fileSaveTails.get(key) ?? Promise.resolve()
   const mutation = workspaceFileMutationTails.get(initialSurface.workspaceId) ?? Promise.resolve()
-  const operation = Promise.all([previous.catch(() => {}), mutation.catch(() => {})]).then(async () => {
+  const operation = Promise.all([previous.catch(() => {}), mutation.catch(() => {})]).then(async () => withAdmittedFileSaves([key], async () => {
     await drainNoteInput(initialSurface.workspaceId, initialSurface.path)
     const state = useAppStore.getState()
     const tab = state.tabs[tabId]
@@ -3320,7 +3336,7 @@ async function enqueueFileSave(
     useAppStore.setState((current) => reduceDocumentSaving(current, surface.workspaceId, surface.path, false))
     await refreshFileDocument(surface.workspaceId, surface.path, savedLifetime)
     } finally { resourceWatch?.release() }
-  })
+  }))
   const tail = operation.then(() => {}, () => {})
   fileSaveTails.set(key, tail)
   try {
@@ -3336,7 +3352,7 @@ async function enqueueNoteHistoryAction(tabId: string, regionId: string, selecti
   if (!initial) throw Error('The original Note file occurrence is unavailable.')
   const key = documentKey(initial.workspaceId, initial.path), lifetime = documentLifetime(key)
   const previous = fileSaveTails.get(key) ?? Promise.resolve(), mutation = workspaceFileMutationTails.get(initial.workspaceId) ?? Promise.resolve()
-  const operation = Promise.all([previous.catch(() => {}), mutation.catch(() => {})]).then(async () => {
+  const operation = Promise.all([previous.catch(() => {}), mutation.catch(() => {})]).then(async () => withAdmittedFileSaves([key], async () => {
     await drainNoteInput(initial.workspaceId, initial.path)
     const state = useAppStore.getState(), surface = fileSurface(state.tabs[tabId], regionId)
     if (!surface || documentKey(surface.workspaceId, surface.path) !== key || documentLifetime(key) !== lifetime) throw Error('The original history target changed. No action was sent.')
@@ -3388,7 +3404,7 @@ async function enqueueNoteHistoryAction(tabId: string, regionId: string, selecti
     if (result.status === 'conflict') await refreshFileDocument(initial.workspaceId, initial.path, lifetime)
     throw Error(result.status === 'error' || result.status === 'unknown' ? result.message : 'The historical action conflicted. The current file and draft are retained.')
     } finally { resourceWatch.release() }
-  })
+  }))
   const tail = operation.then(() => {}, () => {}); fileSaveTails.set(key, tail)
   try { await operation } finally { if (fileSaveTails.get(key) === tail) fileSaveTails.delete(key) }
 }
