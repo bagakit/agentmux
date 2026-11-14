@@ -309,9 +309,11 @@ page choice, not the Profile bound to every visible Browser or a grant of input
 permission. Read each actual page's Main-confirmed Profile. Changing the view does
 not rebind, reload or copy live pages; mixed whole research keeps its original scope.
 
-Read pageReferences from that same list. To change only precise page membership use
+Read pageReferences from that same list in their saved order. To change only precise page membership or order use
 {collection:{pageReferences:[{regionId,browserId}],expectedPageReferences:originalPageReferences}}.
-Each changed scope requires its matching expected set; omitted scopes stay unchanged.
+Page arrays are ordered: reordering the same members is a change, and expectedPageReferences must
+match the complete original order. A stale order is refused without replacing later preferences.
+Zone membership uses its matching expected set; omitted scopes stay unchanged.
 Pages and Zone membership can share one input. New page references must match the original
 Region's actual Browser; unavailable saved references may remain. Current Tab/Zone and
 placement come from Core, not saved display coordinates. A replacement Browser in the
