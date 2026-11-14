@@ -165,15 +165,19 @@ it('an actual original Core mesh observation reaches the production explorer and
 },90000)
 
 
-it('an unobserved network shows an unpinned world map without empty topology controls', async () => {
+it('an unobserved network states the connection gap without an empty geography view', async () => {
   await render({ ...observation(), network: null, apply: { state: 'disabled' } })
   expect(container.querySelector('.mesh-explorer__canvas')).toBeNull()
   expect(container.querySelector('[aria-label="Fit observed topology"]')).toBeNull()
   expect(container.querySelector('[aria-label="Network objects"]')).toBeNull()
-  expect(container.querySelector('[aria-label="World map with no reported device locations"] img')).not.toBeNull()
+  expect(container.textContent).toContain('No connections to show')
   expect(container.querySelector('.mesh-explorer-node')).toBeNull()
-  expect(container.textContent).toContain('Mesh participation is disabled')
+  expect(container.textContent).toContain('Mesh Relay is off on this Core')
   expect(container.textContent).toContain('original-runtime')
+  const original = observation()
+  await render({ ...original, network: { ...original.network!, peers: [], records: [], routes: [], circuits: [] } })
+  expect(container.querySelector('.mesh-explorer__canvas')).toBeNull()
+  expect(container.textContent).toContain('No Relay peers observed')
 })
 
 it('a circuit search keeps its adopted path legible on the graph while unrelated peers may dim', async () => {

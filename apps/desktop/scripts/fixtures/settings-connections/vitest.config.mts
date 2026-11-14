@@ -22,7 +22,7 @@ const edits: Record<string, { file: string; before: string; after: string }> = {
   access: { file: base + 'HostSettingsPane.tsx', before: "data-host-access={id} hidden={selectedId !== id || panel !== 'agents'}", after: "data-host-access={id} hidden={selectedId !== id || panel !== 'connection'}" },
   route: { file: base + 'HostTopology.tsx', before: "host.user || 'SSH config'", after: "'borrowed-user'" },
   graph: { file: base + 'HostSettingsPane.tsx', before: 'onSelect={selectTopologyHost}', after: 'onSelect={() => {}}' },
-  'hidden-layout': { file: base + 'HostTopology.tsx', before: "if (!active || scope !== 'fleet' || compact) return", after: "if (scope !== 'fleet' || compact) return" },
+  'hidden-layout': { file: base + 'HostTopology.tsx', before: "if (!active || scope !== 'fleet') return", after: "if (scope !== 'fleet') return" },
   'hidden-layout-parent': { file: base + 'HostSettingsPane.tsx', before: '<HostTopology active={active && showTopology}', after: '<HostTopology active={active}' },
   catalog: { file: base + 'modules/mobile.tsx', before: "group: 'remote'", after: "group: 'resources'" },
   single: { file: base + 'HostSettingsPane.tsx', before: 'hosts.filter((host) => host.id === selectedId).map', after: 'hosts.filter(() => true).map' },

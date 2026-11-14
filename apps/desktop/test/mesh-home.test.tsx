@@ -31,13 +31,13 @@ it('the actual SettingsPanel opens a continuous Mesh homepage with saved connect
   await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} />); await ready()
   expect(dom.container.querySelector('[data-mesh-home-view]')?.getAttribute('data-mesh-home-view')).toBe('paths')
   expect([...dom.container.querySelectorAll('.settings-nav-children button')].map(button => button.textContent)).toEqual(['Gateways', 'Machines', 'Device connections'])
-  const map = dom.container.querySelector('[aria-label="Saved connection map"]')!
+  const map = dom.container.querySelector('[aria-label="Network relationship canvas"]')!
   expect(map).not.toBeNull()
   expect(map.closest('[hidden]')).toBeNull()
   expect([...map.querySelectorAll('[data-host-node]')].map(node => node.getAttribute('data-host-node'))).toEqual(['selected-farm', 'neighbor-farm'])
-  expect(map.textContent).toContain('Saved route')
+  expect(dom.container.querySelector('.mesh-explorer__legend')?.textContent).toContain('Saved connection')
   expect(map.textContent).toContain('not confirmed')
-  expect(dom.container.querySelector('[aria-label="World map with no reported device locations"]')?.closest('[hidden]')).not.toBeNull()
+  expect(dom.container.querySelector('[aria-label="Map source"]')).toBeNull()
   await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Saved gateway targets"]')?.textContent).toContain('saved-gateway.internal:8444'))
   expect(dom.container.querySelector('[aria-label="Saved gateway targets"]')?.textContent).toContain('Not observed')
   expect(dom.container.querySelector('[data-cluster-host="selected-farm"]')?.textContent).toContain('farm-original.internal')
@@ -58,7 +58,8 @@ it('the actual SettingsPanel opens a continuous Mesh homepage with saved connect
     expect(dom.container.querySelector('.cluster-machines-empty')?.textContent).not.toContain('No device connections have been saved')
   }
   await dom.click('.cluster-machines-empty button'); expect(dom.container.querySelectorAll('[data-cluster-host]')).toHaveLength(3)
-  expect(dom.container.querySelector('[aria-label="Find a peer, endpoint or circuit"]')).toBeNull()
+  expect(dom.container.querySelector('[aria-label="Find a device"]')).not.toBeNull()
+  expect(dom.container.querySelector('[aria-label="Network scope"]')).toBeNull()
   expect(vi.mocked(api.mesh.call).mock.calls).toHaveLength(reads)
   expect(save).not.toHaveBeenCalled()
 })
@@ -176,41 +177,57 @@ it('selects an exact saved Host from the diagram and shows its channel independe
   })
   await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} />)
   await ready()
-  await dom.click('[aria-label="Saved connection map"] [data-host-node="neighbor-farm"]')
+  await dom.click('[aria-label="Network relationship canvas"] [data-host-node="neighbor-farm"]')
   const detail = dom.container.querySelector('[aria-label="Selected saved connection"]')!
   expect(detail.textContent).toContain('neighbor.internal')
   expect(detail.textContent).toContain('Tailcat · Channel connected')
   expect(detail.textContent).not.toContain('Connection test')
-  await dom.click('[aria-label="Selected saved connection"] button')
+  await dom.click('[aria-label="Selected saved connection"] > button')
   expect(dom.container.querySelector('[data-resource-editor]')?.getAttribute('data-resource-editor')).toBe('neighbor-farm')
   expect(save).not.toHaveBeenCalled()
 })
 
-it('opens Mesh paths when a remote peer is observed and keeps the explicitly selected source on refresh', async () => {
+it('shows saved Hosts and observed Relay peers together, then keeps saved Hosts after Relay is turned off', async () => {
   const identity = { peerId: 'this-core', publicKey: 'fixture', epoch: 1 }
-  let next: MeshNetworkInspection = { ...observed, identity, apply: { state: 'active' }, network: {
+  let next = { ...observed, identity, apply: { state: 'active' }, network: {
     protocol: 1, networkId: 'fixture-network', state: 'active', identity,
-    peers: [{peerId: 'distant-gateway', state: 'connected', connectionId: 'mesh-fixture-link', rttMs: 11}],
+    peers: [{ peerId: 'distant-gateway', state: 'connected', connectionId: 'mesh-fixture-link', rttMs: 11 }],
     records: [], routes: [], circuits: [],
-  } }
-  vi.mocked(api.mesh.call).mockImplementation(async method => structuredClone(method === 'mesh.inspect' ? next : saved) as never)
+  } } as MeshNetworkInspection
+  let rejectObservation = false
+  vi.mocked(api.mesh.call).mockImplementation(async method => {
+    if (method === 'mesh.inspect' && rejectObservation) throw Error('Original Relay temporarily unavailable')
+    return structuredClone(method === 'mesh.inspect' ? next : saved) as never
+  })
   await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} />)
-  const savedButton = '[aria-label="Map source"] button:first-of-type'
-  const meshButton = '[aria-label="Map source"] button:last-of-type'
-  await vi.waitFor(() => expect(dom.container.querySelector(meshButton)?.getAttribute('aria-pressed')).toBe('true'))
-  expect(dom.container.querySelector('.mesh-explorer__canvas')?.closest('[hidden]')).toBeNull()
-  await dom.click(savedButton)
-  expect(dom.container.querySelector('[aria-label="Saved connection map"]')?.closest('[hidden]')).toBeNull()
-  await dom.click('.mesh-explorer__header-actions > button:last-child')
-  expect(dom.container.querySelector(savedButton)?.getAttribute('aria-pressed')).toBe('true')
-  next = { ...observed, identity, apply: { state: 'active' }, network: { ...next.network!, peers: [] } }
-  await dom.click('.mesh-explorer__header-actions > button:last-child')
-  await dom.click(meshButton)
-  expect(dom.container.querySelector('[aria-label="Saved connection map"]')?.closest('[hidden]')).not.toBeNull()
-  expect(dom.container.querySelector(meshButton)?.getAttribute('aria-pressed')).toBe('true')
+  const canvas = () => dom.container.querySelector('[aria-label="Network relationship canvas"]')
+  await vi.waitFor(() => {
+    expect(canvas()?.querySelector('[data-host-node="selected-farm"]')).not.toBeNull()
+    expect(canvas()?.querySelector('[data-id="relay:distant-gateway"]')).not.toBeNull()
+    expect(canvas()?.querySelectorAll('.react-flow')).toHaveLength(1)
+  })
+  expect(dom.container.querySelector('[aria-label="Map source"]')).toBeNull()
+  await dom.click('[data-id="relay:distant-gateway"] button')
+  await dom.click('[aria-label="Network scope"] button:last-of-type')
+  expect(canvas()?.querySelector('[data-host-node="selected-farm"]')).toBeNull()
+  await dom.click('[aria-label="Network scope"] button:first-of-type')
+  expect(canvas()?.querySelector('[data-host-node="selected-farm"]')).not.toBeNull()
+  const refresh = '.mesh-explorer__header > button:last-child'
+  rejectObservation = true
+  await dom.click(refresh)
+  expect(canvas()?.querySelector('[data-id="relay:distant-gateway"]')).not.toBeNull()
+  expect(dom.container.querySelector('.mesh-explorer__heading')?.textContent).toContain('Last confirmed')
+  await dom.click('[data-host-node="neighbor-farm"]')
+  rejectObservation = false
+  next = observed
+  await dom.click(refresh)
+  expect(canvas()?.querySelector('[data-id="relay:distant-gateway"]')).toBeNull()
+  expect(canvas()?.querySelector('[data-host-node="selected-farm"]')).not.toBeNull()
+  expect(dom.container.querySelector('[aria-label="Selected saved connection"]')?.textContent).toContain('neighbor.internal')
+  expect(dom.container.querySelector('.mesh-explorer__heading')?.textContent).toContain('Mesh Relay is off on this Core')
 })
 
-it('defaults to the saved map when Mesh has only a local peer', async () => {
+it('continues to show saved routes when Mesh has only a local peer', async () => {
   const identity = { peerId: 'this-core', publicKey: 'fixture', epoch: 1 }
   const own: MeshNetworkInspection = { ...observed, identity, apply: { state: 'active' }, network: {
     protocol: 1, networkId: 'fixture-network', state: 'active', identity, peers: [], records: [], routes: [], circuits: [],
@@ -218,6 +235,6 @@ it('defaults to the saved map when Mesh has only a local peer', async () => {
   vi.mocked(api.mesh.call).mockImplementation(async method => structuredClone(method === 'mesh.inspect' ? own : saved) as never)
   await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} />)
   await ready()
-  await vi.waitFor(() => expect(dom.container.querySelector('.mesh-explorer__heading')?.textContent).toContain('No Mesh peers observed'))
-  expect(dom.container.querySelector('[aria-label="Saved connection map"]')?.closest('[hidden]')).toBeNull()
+  await vi.waitFor(() => expect(dom.container.querySelector('.mesh-explorer__heading')?.textContent).toContain('No Relay peers observed'))
+  expect(dom.container.querySelector('[aria-label="Network relationship canvas"] [data-host-node="selected-farm"]')).not.toBeNull()
 })

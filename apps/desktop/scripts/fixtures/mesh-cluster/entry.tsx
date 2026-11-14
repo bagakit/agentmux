@@ -25,7 +25,7 @@ function observation(): MeshNetworkInspection {
 api.mesh.call = (async (method: string, params: any) => {
  if (state === 'unavailable') throw Object.assign(Error('This original Core has no durable Mesh settings owner.'), { code: 'MESH_OWNER_UNAVAILABLE' })
  if (state === 'settings-error' && method === 'settings.mesh.inspect') throw Error('The original settings reader is unavailable. The authenticated network is still observed.')
- if (method === 'mesh.inspect') { const result = observation(); return state === 'initial' ? { ...result, apply: { state: 'disabled' }, gateway: { state: 'disabled' }, network: null, coverage: { configuredOrigins: 0, observedOrigins: 0, complete: true } } : result }
+ if (method === 'mesh.inspect') { const result = observation(); return ['initial','empty'].includes(state) ? { ...result, apply: { state: 'disabled' }, gateway: { state: 'disabled' }, network: null, coverage: { configuredOrigins: 0, observedOrigins: 0, complete: true } } : result }
  if (method === 'settings.mesh.inspect') return settings
  if (method === 'mesh.link') { const offer = { ...params.offer, relay: { endpoint: 'cn1.example.com', useTls: true } }; return { offer, url: connectionLinkUrl('https://cn1.example.com', offer), observation: { owner: settings.owner, identity: own, activeRevision: 'saved-8', observedAt: Date.now(), route: observation().network!.routes[0], ingress: offer.relay } } }
  if (method === 'settings.mesh.configure') {
@@ -50,10 +50,10 @@ useAppStore.setState({ config: { version: 9, hosts: [{ id: 'local', kind: 'local
  { id:'build-secondary',kind:'ssh',label:'Build secondary',hostname:'build-secondary.internal',runtimeId:'runtime-build-secondary' },
  { id:'studio-tailcat',kind:'ssh',label:'Studio backup connection',hostname:'studio-backup.internal',runtimeId:'runtime-studio-tailcat',transport:'ssh-tailcat' },
  { id:'compute-east',kind:'ssh',label:'Compute East',hostname:'compute-east.internal',runtimeId:'runtime-compute-east' },
-] satisfies HostConfig[]) : [])], executors: {}, workspaces: [], appearance: { terminalTheme: 'graphite' }, browser: { toolbar: {} } } as never, sessions: [], meshSettingsDrafts: {}, hostTransports: {
+] satisfies HostConfig[]) : [])].filter(host => state !== 'empty' || host.kind === 'local'), executors: {}, workspaces: [], appearance: { terminalTheme: 'graphite' }, browser: { toolbar: {} } } as never, sessions: [], meshSettingsDrafts: {}, hostTransports: {
   studio: {state:'connected', transport:'ssh', fallback:false, observedAt:Date.now(), establishedAt:Date.now()-180000},
   'farm-cn1': {state:'disconnected', transport:'ssh', fallback:false, observedAt:Date.now(), establishedAt:Date.now()-180000},
   'studio-tailcat': {state:'connected', transport:'tailcat', fallback:true, observedAt:Date.now(), establishedAt:Date.now()-180000},
  } })
 createRoot(document.getElementById('root')!).render(<DesktopClientUiProvider><div className="mesh-review-shell"><SettingsPanel onClose={() => {}} initialSection="hosts" /><footer className="mesh-review-footer">Visual fixture · production Settings · controlled topology/resource observations; not live host telemetry</footer></div></DesktopClientUiProvider>)
-Object.assign(window, { meshFixture: { originalOffer, endpoint: () => { state = 'endpoint' }, theme: (mode: 'dark' | 'light') => updateThemeSelection({ appAppearance: mode }), failure: () => { state = 'failure'; settings = { ...settings, revision: 'saved-9' } } } })
+Object.assign(window, { meshFixture: { originalOffer, endpoint: () => { state = 'endpoint' }, relayOff: () => { state = 'initial' }, theme: (mode: 'dark' | 'light') => updateThemeSelection({ appAppearance: mode }), failure: () => { state = 'failure'; settings = { ...settings, revision: 'saved-9' } } } })
