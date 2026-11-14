@@ -7,6 +7,7 @@ import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { api } from '../src/renderer/src/lib/api'
 import * as conversationRecords from '@agentmux/client-ui/conversation-records'
+import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
 import { conversationPagePortFixture } from './helpers/conversation-page-port-fixture'
 import { inspectConversationConsumers } from '../src/renderer/src/lib/conversation-consumer-observation'
 
@@ -41,7 +42,9 @@ async function render(enabled: boolean, facts = { nativeHandle }) {
     conversationReading={{ reference, identity: 'original-run', enabled, nativeSourceFacts: facts }} />))
   if (enabled) await vi.waitFor(async () => {
     await act(async () => { await Promise.resolve() })
-    expect(host.querySelector('[data-submission-id="retained-original-input"]')).not.toBeNull()
+    const original = conversationMessageSourceKey(reference.agentSessionId, { kind: 'captured', recordId: records[0]!.id })
+    expect([...host.querySelectorAll<HTMLElement>('[data-message-source-key]')]
+      .some(node => node.dataset.messageSourceKey === original)).toBe(true)
     const consumer = inspectConversationConsumers(reference).consumers[0]
     expect(consumer?.loading).toBe(false); expect(consumer?.inFlight).toBe(false)
     expect(consumer?.dirty).toBe(false); expect(consumer?.watch.binding).toBe(false)
