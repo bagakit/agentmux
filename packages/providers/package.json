@@ -283,6 +283,10 @@
     "./codex/input-protocol": {
       "types": "./dist/codex/input-protocol.d.ts",
       "import": "./dist/codex/input-protocol.js"
+    },
+    "./codex/provider": {
+      "types": "./dist/codex/provider.d.ts",
+      "import": "./dist/codex/provider.js"
     }
   },
   "files": [
