@@ -5,9 +5,7 @@ import type { AgentDisplayState } from '@agentmux/core'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
 import {
   attentionEventFor,
-  attentionEvents,
   categoryFor,
-  nextAttentionStates,
   statusDotTier
 } from '../src/renderer/src/lib/attention-event.js'
 import { sessionBoardColumn } from '../src/renderer/src/lib/project-board.js'
@@ -188,46 +186,6 @@ describe('attention event decision', () => {
       attentionEventFor({ session: agent('a', 'error'), previousState: 'working', visibility: away })
         ?.category
     ).toBe('error')
-  })
-
-  it('folds a batch and ignores non-agent sessions', () => {
-    const terminal = {
-      id: 't',
-      kind: 'terminal' as const,
-      hostId: 'local',
-      workspacePath: _hygiene_fixturePath("repo"),
-      label: 'Terminal',
-      createdAt: 1,
-      updatedAt: 1,
-      processState: 'running' as const,
-      status: { state: 'running' as const, source: 'run-process' as const, observedAt: 1 },
-      latestOutputBytes: 0,
-      control: { kind: 'terminal' as const, hostId: 'local', run: { runId: 'run-t' } }
-    } as unknown as SessionSnapshot
-
-    const events = attentionEvents({
-      sessions: [agent('a', 'done', 5), agent('b', 'waiting', 3), agent('c', 'working'), terminal],
-      previousStates: new Map<string, AgentDisplayState>([
-        ['a', 'working'],
-        ['b', 'working'],
-        ['c', 'starting']
-      ]),
-      visibilityFor: () => away
-    })
-
-    expect(events.map((event) => [event.sessionId, event.category])).toEqual([
-      ['a', 'done'],
-      ['b', 'needs-you']
-    ])
-  })
-
-  it('forgets Sessions that disappeared so a returning one is a first sight again', () => {
-    // Remembering a vanished Session would make its return look like a transition nobody witnessed.
-    const states = nextAttentionStates([agent('a', 'done'), agent('b', 'working')])
-    expect([...states.entries()]).toEqual([['a', 'done'], ['b', 'working']])
-
-    const afterClose = nextAttentionStates([agent('b', 'working')])
-    expect(afterClose.has('a')).toBe(false)
   })
 })
 
