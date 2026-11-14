@@ -63,10 +63,7 @@ try {
   manager = new BrowserProfileManager(new BrowserProfileStore(join(directory, 'profiles.json')))
   await manager.initialize()
   const userStatePath = join(directory, 'workbench-user-state.json')
-  const userState = new WorkbenchUserStateStore(userStatePath, { read: async (path, encoding) => {
-    if (readFailure && path === userStatePath) throw Object.assign(new Error('Private draft read unconfirmed'), { code: 'EACCES' })
-    return await readFile(path, encoding)
-  } })
+  const userState = new WorkbenchUserStateStore(userStatePath)
   win = new BrowserWindow({
     width: 1180,
     height: 900,
@@ -102,7 +99,10 @@ try {
   registerBrowserProfileEditorIpc({ handle, profiles: manager })
   handle('config:get', () => structuredClone(DEFAULT_CONFIG))
   // Exactly the same trusted Main registrar and original Desktop document owner.
-  handle('ui:readWorkbenchState', () => userState.read())
+  handle('ui:readWorkbenchState', () => {
+    if (readFailure) throw Object.assign(new Error('Private draft read unconfirmed'), { code: 'EACCES' })
+    return userState.read()
+  })
   handle('ui:importWorkbenchState', (_event, value: string) => userState.importIfAbsent(value))
   handle('ui:writeWorkbenchState', (_event, value: string) => {
     if (writeFailure) throw new Error('Private draft write ACK unconfirmed')

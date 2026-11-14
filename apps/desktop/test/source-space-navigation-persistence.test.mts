@@ -43,7 +43,7 @@ async function launch(label:string,withSeed:boolean){
 async function stop(launched:Awaited<ReturnType<typeof launch>>){launched.cdp.close();const group=launched.child.pid;if(group)try{process.kill(-group,'SIGKILL')}catch{}children.delete(launched.child);await stopProbeProcesses(group,temporary)}
 let expression=''
 
-async function readNativeState(){const envelope=JSON.parse(await readFile(join(userData,'workbench-user-state.json'),'utf8')),state=envelope.state;return{selectedSpaceMount:state.selectedSpaceMount??null,activeWorkspaceId:state.activeWorkspaceId??null,selection:state.workbenchSpaceSelection??null,mountedSpaceInputs:state.mountedSpaceInputs,agentComposerDrafts:state.agentComposerDrafts??{},agentSteerQueues:state.agentSteerQueues??{},layouts:state.restoredWorkbench?.layouts??null,error:state.error??null,lastError:state.lastError??null,navigationNotice:state.desktopNavigationNotice??null}}
+async function readNativeState(process:Awaited<ReturnType<typeof launch>>){const envelope=JSON.parse(await process.cdp.evaluate('window.agentmux.ui.readWorkbenchState()')),state=envelope.state;return{selectedSpaceMount:state.selectedSpaceMount??null,activeWorkspaceId:state.activeWorkspaceId??null,selection:state.workbenchSpaceSelection??null,mountedSpaceInputs:state.mountedSpaceInputs,agentComposerDrafts:state.agentComposerDrafts??{},agentSteerQueues:state.agentSteerQueues??{},layouts:state.restoredWorkbench?.layouts??null,error:state.error??null,lastError:state.lastError??null,navigationNotice:state.desktopNavigationNotice??null}}
 
 beforeAll(async()=>{
   const temporaryBase=root.includes('/.worktrees/')?resolve(root,'../..','.tmp'):join(root,'.tmp')
@@ -109,8 +109,8 @@ test('two real Electron processes restore only the original project workface and
   for(const label of ['first','second']){
     const process=await launch(label,label==='first')
     try{
-      await waitFor(`${label} navigation settled`,async()=>{const value=await process.cdp.evaluate(expression);return value.originalRegion||value.originalProjectActiveRaw||value.mountedDestinations>0?value:null}).catch(async error=>{const state=await readNativeState(),dom=await process.cdp.evaluate(`document.body?.innerText.slice(0,3000)`);throw Error(`${error.message}: ${JSON.stringify({state,dom})}`)})
-      const native=await waitFor(`${label} native navigation`,async()=>{const state=await readNativeState();return state.selectedSpaceMount===null&&(state.activeWorkspaceId===expectedProjection.workspaceId||state.activeWorkspaceId==='private-original-workspace')&&state.agentSteerQueues[expectedInputOwnerKey]?.length===2&&!(state.mountedSpaceInputs?.[expectedSourceKey] as any)?.memberInputs?state:null})
+      await waitFor(`${label} navigation settled`,async()=>{const value=await process.cdp.evaluate(expression);return value.originalRegion||value.originalProjectActiveRaw||value.mountedDestinations>0?value:null}).catch(async error=>{const state=await readNativeState(process),dom=await process.cdp.evaluate(`document.body?.innerText.slice(0,3000)`);throw Error(`${error.message}: ${JSON.stringify({state,dom})}`)})
+      const native=await waitFor(`${label} native navigation`,async()=>{const state=await readNativeState(process);return state.selectedSpaceMount===null&&(state.activeWorkspaceId===expectedProjection.workspaceId||state.activeWorkspaceId==='private-original-workspace')&&state.agentSteerQueues[expectedInputOwnerKey]?.length===2&&!(state.mountedSpaceInputs?.[expectedSourceKey] as any)?.memberInputs?state:null})
       const value={...await process.cdp.evaluate(expression),...native};observed.push({pid:process.child.pid,seed:label==='first',value});console.error(`SOURCE_NAV_${label}`,JSON.stringify(value))
       assert.equal(value.selectedSpaceMount,null,`${label}: old Mounted selection must not survive`)
       assert.equal(value.activeWorkspaceId,expectedProjection.workspaceId)
@@ -156,15 +156,15 @@ test('two real Electron processes restore only the original project workface and
         const point=await process.cdp.evaluate(`(()=>{const handle=document.querySelector('[aria-label="Resize split"]');if(!handle)return null;const rect=handle.getBoundingClientRect();return{x:rect.x+rect.width/2,y:rect.y+rect.height/2}})()`)
         assert.ok(point,'the ordinary Source split handle is visible')
         await process.cdp.call('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',clickCount:2});await process.cdp.call('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',clickCount:2})
-        await waitFor('Source-only Group ratio persisted',async()=>{const state=await readNativeState();return state.layouts?.[expectedProjection.workspaceId]?.root?.ratio===.5?state:null})
+        await waitFor('Source-only Group ratio persisted',async()=>{const state=await readNativeState(process);return state.layouts?.[expectedProjection.workspaceId]?.root?.ratio===.5?state:null})
         expectedRatio=.5
         const focused=await process.cdp.evaluate(`(()=>{const region=Array.from(document.querySelectorAll('[data-workbench-region-id]')).find(element=>element.getAttribute('data-workbench-region-id')===${JSON.stringify(expectedProjection.regionId)}),editor=region?.querySelector('[data-agent-composer="true"] [aria-label="Message Agent"]');if(!editor)return false;editor.focus();const selection=window.getSelection();selection.selectAllChildren(editor);selection.collapseToEnd();return true})()`)
         assert.equal(focused,true,'the restored shared AgentSessionComposer must accept focus')
         await process.cdp.call('Input.insertText',{text:' · edited after restore'})
         expectedSharedDraft+=' · edited after restore'
-        await waitFor('canonical input-owner draft persisted after a real Message Tool edit',async()=>{const state=await readNativeState();return state.agentComposerDrafts[expectedInputOwnerKey]===expectedSharedDraft?state:null})
+        await waitFor('canonical input-owner draft persisted after a real Message Tool edit',async()=>{const state=await readNativeState(process);return state.agentComposerDrafts[expectedInputOwnerKey]===expectedSharedDraft?state:null})
         assert.equal((await process.cdp.evaluate(expression)).sharedDraft,expectedSharedDraft)
-        const afterEdit=await readNativeState()
+        const afterEdit=await readNativeState(process)
         assert.deepEqual(afterEdit.mountedSpaceInputs,expectedRestoredInputs,'the shared Message Tool edit must leave every legacy Mounted byte unchanged')
         assert.deepEqual(afterEdit.agentSteerQueues[expectedInputOwnerKey],expectedQueue,'editing a draft must not rewrite or send the original pending queue')
       }

@@ -204,7 +204,7 @@ app.whenReady().then(async () => {
     await openLibrary();await choose('Saved proxy asset',proxy.id)
     await input(`document.querySelector('textarea[aria-label="Proxy asset notes"]')`,'Retain this unsubmitted asset draft')
     await until(()=>evaluate(`localStorage.getItem('agentmux.browser-proxy-library-drafts.v1')===null`),'shipping Desktop does not store proxy draft in localStorage')
-    await until(async()=>{const bytes=await readFile(userStatePath,'utf8').catch(()=>null);if(!bytes)return false;const original=JSON.parse(bytes),raw=original.desktopFragments?.browserProxyLibraryDrafts;if(!raw)return false;return JSON.parse(raw).assets?.[proxy.id]?.active?.notes==='Retain this unsubmitted asset draft'},'actual original user-state file contains confirmed proxy draft')
+    await until(async()=>{const bytes=await workbenchUserState.read().catch(()=>null);if(!bytes)return false;const original=JSON.parse(bytes),raw=original.desktopFragments?.browserProxyLibraryDrafts;if(!raw)return false;return JSON.parse(raw).assets?.[proxy.id]?.active?.notes==='Retain this unsubmitted asset draft'},'actual original user-state file contains confirmed proxy draft')
     await capture('proxy-library-wide-light',1100,900,'light')
     await capture('proxy-library-narrow-dark',560,920,'dark')
     const metadata=await readFile(join(app.getPath('userData'),'browser-profiles.json'),'utf8')

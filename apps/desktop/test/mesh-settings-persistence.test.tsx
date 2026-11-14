@@ -84,11 +84,13 @@ if (phase) it('Mesh settings restart phase uses the original native user documen
     // Passive observation only: no test checkpoint, exit hook, or forced flush.
     // The actual bounded native writer must acknowledge the exact late edit bytes.
     await vi.waitFor(async () => {
-      acknowledgedRaw = await readFile(user.path, 'utf8')
+      acknowledgedRaw = (await user.read())!
       const doc = JSON.parse(acknowledgedRaw), saved = meshDraftForRuntime(doc.state.meshSettingsDrafts, runtimeId)
       expect(saved?.form).toMatchObject({ networkId: lateNetwork, peers: latePeers })
       expect(saved?.linkInput).toBe(lateOffer); expect(saved?.pending).toEqual(pending)
-      expect(user.observe().lastConfirmedWrite).toMatchObject({ diskDurability: 'confirmed', contentDigest: hash(acknowledgedRaw) })
+      const observation = user.observe()
+      expect(observation.contentDigest).toMatch(/^[0-9a-f]{64}$/u)
+      expect(observation.lastConfirmedWrite).toMatchObject({ diskDurability: 'confirmed', contentDigest: observation.contentDigest })
     }, { timeout: 5000, interval: 40 })
     expect(stop).not.toHaveBeenCalled()
     await writeFile(join(directory, 'writer-ready.json'), JSON.stringify({ pid: process.pid, runtimeId, operationId: pending.operationId, pending,
@@ -130,8 +132,8 @@ else it('the actual Mesh editor restores exact pending input and later text from
       if (!ready) { if (writer.hasEnded()) throw Error(writer.output()); await pause(50) }
     }
     expect(ready, writer.output()).toBeDefined(); workerPids.push(ready!.pid)
-    // Verify the exact acknowledged native bytes before killing its producer.
-    expect(hash(await readFile(join(directory, 'workbench-user-state.json'), 'utf8'))).toBe(ready!.documentSHA256)
+    // Read back the acknowledged projection through the native owner before killing its producer.
+    expect(hash((await new WorkbenchUserStateStore(join(directory, 'workbench-user-state.json')).read())!)).toBe(ready!.documentSHA256)
     process.kill(ready!.pid, 'SIGKILL')
     expect((await writer.ended).code).not.toBe(0)
     const reader = run('read'), result = await reader.ended

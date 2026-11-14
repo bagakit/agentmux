@@ -155,8 +155,8 @@ async function execute(phase) {
   for (const file of await readdir(directory)) if (file.startsWith(phase + '-') && file.endsWith('.png')) await copyFile(join(directory, file), join(output, file))
   if (native.passed) {
     receipt.savedState ??= []
-    for (const [path, owner] of [['state/spatial-state.json', 'core-spatial'], ['workbench-user-state.json', 'desktop-user-state']]) {
-      const bytes = await readFile(join(directory, path)), file = phase + '-saved-' + owner + '.json'
+    for (const [path, owner] of [['state/spatial-state.json', 'core-spatial'], ['workbench-user-state.sqlite', 'desktop-user-state']]) {
+      const bytes = await readFile(join(directory, path)), file = phase + '-saved-' + owner + (path.endsWith('.sqlite') ? '.sqlite' : '.json')
       await writeFile(join(output, file), bytes); receipt.savedState.push({ phase, owner, file, sha256: hash(bytes) })
     }
   }

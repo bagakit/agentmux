@@ -16,7 +16,7 @@ import { spawn } from 'node:child_process'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, session, type WebContentsView } from 'electron'
-import { durableWriteFile, AgentMuxFileAgentSessionStore, connectHostedAgentMux, connectAgentMuxRpc } from '@agentmux/core'
+import { AgentMuxFileAgentSessionStore, connectHostedAgentMux, connectAgentMuxRpc } from '@agentmux/core'
 import { RuntimeController } from '../../../src/main/runtime-controller'
 import { registerIpc } from '../../../src/main/ipc'
 import { ConfigStore, DEFAULT_CONFIG } from '../../../src/main/config-store'
@@ -120,10 +120,18 @@ async function run() {
  const releaseDetails = () => { receipt.addressDetailsReleased = true; releaseAddressDetails?.() }
  const probeAck={hold(){holdProbeAck=true},release(lose:boolean){releaseProbeAck?.(lose)}}
  releaseObservationFaults=()=>{switchPorts?.dispose();completeObserver?.dispose();for(const reader of completeReaders)void reader.dispose();rejectSurveyWrites=false;loseProfileDirectoryAck=false;probeAck.release(false)}
- const userState=new WorkbenchUserStateStore(join(directory,'workbench-user-state.json'),{write:async(path,value,options)=>{const parsed=JSON.parse(String(value));if(rejectSurveyWrites&&path.endsWith('workbench-user-state.json')&&parsed.state?.surveyPageReferences?.some((page:any)=>page.browserId===rejectedSurveyBrowserId)){rejectedWrites++;if(selectedCase==='profile-switch')(receipt.profileSwitchPreferenceFailures??=[]).push({browserId:rejectedSurveyBrowserId});throw Object.assign(new Error('Private fixture original preference writer unavailable'),{code:'EIO'})}return durableWriteFile(path,value,options)}})
+ const userState=new WorkbenchUserStateStore(join(directory,'workbench-user-state.json'))
  const originalSend=contents.send.bind(contents);contents.send=(channel,...args)=>{completeObserver?.event(channel,args);if(loseProfileDirectoryAck&&channel==='browser:profilesChanged'){receipt.droppedProfileListPushes=(receipt.droppedProfileListPushes??0)+1;return}if(switchPorts?.observeSend(channel,args,originalSend))return;originalSend(channel,...args)}
  const originalHandle=ipcMain.handle.bind(ipcMain);ipcMain.handle=(channel,handler)=>originalHandle(channel,async(event,...args)=>{
   if(channel.startsWith('browser:')||channel==='ui:writeWorkbenchState'||selectedCase==='complete'&&channel.startsWith('ui:workbenchWindows'))receipt.ipc.push({channel,exactSender:event.sender===contents,exactFrame:event.senderFrame===contents.mainFrame})
+  if (channel === 'ui:writeWorkbenchState' && rejectSurveyWrites) {
+    const request = JSON.parse(args[0].value)
+    if (request.state?.surveyPageReferences?.some((page: { browserId: string }) => page.browserId === rejectedSurveyBrowserId)) {
+      rejectedWrites++
+      if (selectedCase === 'profile-switch') (receipt.profileSwitchPreferenceFailures ??= []).push({ browserId: rejectedSurveyBrowserId })
+      throw Object.assign(new Error('Private fixture original preference writer unavailable'), { code: 'EIO' })
+    }
+  }
   if (selectedCase === 'address-selection' && channel === 'browser:listInputHistory' && args[1] !== 'saved' && !receipt.addressDetailsReleased) {
    receipt.addressDetailsHeld = true
    await new Promise<void>(resolve => { releaseAddressDetails = resolve })
@@ -174,7 +182,7 @@ async function run() {
  if(selectedCase==='settings'){await settingsCase({phase,directory,window,evaluate,result,receipt,probeAck});receipt.businessPassed=true;receipt.passed=true;return}
  if(selectedCase==='profile-switch'){
   assert.ok(switchPorts)
-  await profileSwitchCase({phase,directory,window,core,evaluate,result,cli,receipt,ports:switchPorts,taskWorkspaceId:workspaceId,legacyWorkspaceId,pageUrl})
+  await profileSwitchCase({phase,directory,window,core,evaluate,result,cli,receipt,ports:switchPorts,taskWorkspaceId:workspaceId,legacyWorkspaceId,pageUrl, readWorkbenchState: () => userState.read()})
   assert.equal(receipt.profileSwitch.completed,true,'Only the complete dedicated Profile workface oracle can qualify T002')
   receipt.businessPassed=true;receipt.passed=true;return
  }

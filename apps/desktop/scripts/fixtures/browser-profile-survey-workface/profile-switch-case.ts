@@ -14,6 +14,7 @@ type Context = {
   evaluate(expression: string): Promise<any>
   result(args: string[], input?: string): Promise<any>
   cli(args:string[],input?:string):Promise<any>
+  readWorkbenchState(): Promise<string | null>
 }
 const environment = '[aria-label="Survey environment"]'
 const pause = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds))
@@ -289,7 +290,7 @@ export async function profileSwitchCase(ctx: Context) {
     assert.equal((await owner(metadataPage.region.browserId)).surface.profileId, b.id)
     assert.deepEqual((await facts()).surveyProfileView, named(a.id), 'A later filter cannot retarget the original confirmed B binding')
     assert.equal((await memberList()).pageReferences.filter((page: any) => page.browserId === metadataPage.region.browserId).length, 1)
-    const savedAfterRepair = JSON.parse(await readFile(join(directory, 'workbench-user-state.json'), 'utf8'))
+    const savedAfterRepair = JSON.parse((await ctx.readWorkbenchState())!)
     assert.ok(savedAfterRepair.state.surveyPageReferences.some((page: any) => page.browserId === metadataPage.region.browserId), 'Metadata Retry reaches the original durable preference writer')
     mark('confirmed-native-binding-metadata-retry-no-replay', { reference: metadataPage.region, returned: bindingCall.returned })
 

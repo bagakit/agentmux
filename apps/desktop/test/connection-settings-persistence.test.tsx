@@ -97,7 +97,7 @@ if (phase) it('Connection settings restart phase uses the original native user d
     await selectHost('local')
     let acknowledgedRaw = ''
     await vi.waitFor(async () => {
-      acknowledgedRaw = await readFile(user.path, 'utf8')
+      acknowledgedRaw = (await user.read())!
       const doc = JSON.parse(acknowledgedRaw), raw = doc.state.tailcatConnectionDrafts
       expect(drafts(raw)?.value).toMatchObject({ tailcat: { keyFile: lateServer } })
       expect(drafts(raw)?.allowedText).toBe(lateAllowed)
@@ -105,7 +105,9 @@ if (phase) it('Connection settings restart phase uses the original native user d
       expect(raw.hostSelection).toMatchObject({ hostId: 'local' })
       expect(raw.incoming['opaque-incoming']).toEqual(opaque.incoming['opaque-incoming'])
       expect(raw.hosts['opaque-host']).toEqual(opaque.hosts['opaque-host'])
-      expect(user.observe().lastConfirmedWrite).toMatchObject({ diskDurability: 'confirmed', contentDigest: hash(acknowledgedRaw) })
+      const observation = user.observe()
+      expect(observation.contentDigest).toMatch(/^[0-9a-f]{64}$/u)
+      expect(observation.lastConfirmedWrite).toMatchObject({ diskDurability: 'confirmed', contentDigest: observation.contentDigest })
     }, { timeout: 5000, interval: 40 })
     expect(configSave).not.toHaveBeenCalled(); expect(onSave).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
     await writeFile(join(directory, 'writer-ready.json'), JSON.stringify({ pid: process.pid, configureCalls, configReads, configWrites,
@@ -151,7 +153,7 @@ else it('the relocated Connection editors restore exact incoming and Host drafts
       if (!ready) { if (writer.hasEnded()) break; await pause(50) }
     }
     expect(ready, writer.output()).toBeDefined(); workerPids.push(ready!.pid)
-    expect(hash(await readFile(join(directory, 'workbench-user-state.json'), 'utf8'))).toBe(ready!.documentSHA256)
+    expect(hash((await new WorkbenchUserStateStore(join(directory, 'workbench-user-state.json')).read())!)).toBe(ready!.documentSHA256)
     expect(ready!.configureCalls).toHaveLength(1)
     process.kill(ready!.pid, 'SIGKILL')
     expect((await writer.ended).code).not.toBe(0)

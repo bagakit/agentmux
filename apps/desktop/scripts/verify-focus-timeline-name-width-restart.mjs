@@ -268,6 +268,7 @@ async function launch(label, seed) {
     // Admit the one initial private seed through the original compiled Main owner.
     // Its synchronous queue admission precedes Renderer reads of the same tail.
     await assert.rejects(readFile(join(userData, 'workbench-user-state.json')), { code: 'ENOENT' })
+    await assert.rejects(readFile(join(userData, 'workbench-user-state.sqlite')), { code: 'ENOENT' })
     const admitted = await main.call('Debugger.evaluateOnCallFrame', { callFrameId: paused.callFrames[0].callFrameId,
       expression: `args.workbenchUserState.write(${JSON.stringify(JSON.stringify(seed))})`, returnByValue: false })
     assert.equal(admitted.exceptionDetails, undefined); assert.ok(admitted.result.objectId)
