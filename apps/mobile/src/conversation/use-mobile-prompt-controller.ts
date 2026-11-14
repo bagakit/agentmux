@@ -145,7 +145,7 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
   const automaticPause = useRef<{ target: import('@agentmux/core/agent-automation').AgentAutomationTarget; client: AgentMuxHostedClient } | null>(null)
   const pauseForExplicitInput = () => {
     if (!client || !session || session.agentSessionId !== agentSessionId) return
-    const owner = client.runtimeOwnerIdentity()
+    const owner = client.runtimeOwnerIdentity?.()
     if (!owner || owner.availability !== 'connected') {
       setPreparationIssue({ client, sessionId: agentSessionId, message: '暂时无法确认 Mac 身份，自动任务没有暂停；你可以继续输入。' }); return
     }

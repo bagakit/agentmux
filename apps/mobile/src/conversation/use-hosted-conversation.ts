@@ -81,10 +81,18 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
       if (readingActivity) { dirty = true; return }
       readingActivity = true
       try {
-        const original = latestSession!
+        const original = latestSession!, expectedOwner = client!.runtimeOwnerIdentity?.()
         const value = await client!.statusAgent(id!)
         if (!live || generation !== epoch) return
-        if (value.session.agentSessionId !== id || original.agentSessionId !== id || value.session.hostId !== original.hostId ||
+        // A status reply describes its original Run. Verify that the selected
+        // Session still owns that Run before presenting the reply as current.
+        const current = await readMetadata(), currentOwner = client!.runtimeOwnerIdentity?.()
+        if (!live || generation !== epoch) return
+        if (current && current.metadata.state !== 'unconfirmed') latestSession = current.session
+        if (!current || current.metadata.state !== 'active' || !current.session ||
+          (['runtimeId', 'ownerInstanceId'] as const).some(key => expectedOwner?.[key] && expectedOwner[key] !== currentOwner?.[key]) ||
+          current.session.hostId !== original.hostId || current.session.run.runId !== original.run.runId ||
+          value.session.agentSessionId !== id || original.agentSessionId !== id || value.session.hostId !== original.hostId ||
           value.session.run.runId !== original.run.runId || value.run.runId !== original.run.runId) { clearActivity(); return }
         if (expiry) clearTimeout(expiry); expiry = undefined
         const { observation } = value
@@ -106,7 +114,7 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
         clearActivity(); void readActivity()
       } else if (event.type === 'agent-error' && (!event.agentSessionId || event.agentSessionId === id)) {
         patch({ agentIssue: event.message })
-      } else if (event.type === 'run-removed' && event.agentSessionId === id || event.type === 'agent-session-record-deleted' && event.agentSessionId === id) {
+      } else if (event.type === 'run-removed' && (event.agentSessionId === id || event.run.runId === latestSession?.run.runId) || event.type === 'agent-session-record-deleted' && event.agentSessionId === id) {
         clearActivity(); void sessionMetadata()
       }
     })
