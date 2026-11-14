@@ -73,14 +73,13 @@ for the exact `goal focus --goal ID --runtime ID --namespace ID --section plan` 
 opening the link never creates a plan or executes work.
 For amux://agent/<SID>, use agent inspect --session SID or agent send --to-session SID --text TEXT.
 For spatial kinds, use space inspect with --region, --tab, --space or --zone and the decoded ID.
-For amux://mote/<SPACE>, keep its decoded stable Space identity and use app focus --mote SPACE.
-For amux://mote/<SPACE>/thread/<EVENT>, keep both decoded identities and use
-app focus --mote SPACE --thread EVENT. Read app --skill and app focus --help first.
-A Mote link opens its logical main conversation; a thread link opens that exact original
-work event within the same Mote. Neither is an Agent SID or a request to create a Session.
-The original Space ID already carries its identity scope; do not substitute a bare topicId,
-physical directory or a Host query. These links use the selected service's configured
-discovery scope, not a global cross-device address. Unknown sources retain the original link.
+For a copied amux://mote/LINK_ID?runtime=RUNTIME, keep the entire URI and use
+app focus --mote URI at its already authorized original Core. space link resolve --url URI
+reads the exact original {runtimeId,spaceId,eventId?} without registering or opening it.
+The opaque linkId is not a spaceId and grants no permission, connection or trust.
+Query-free saved amux://mote/<SPACE> and amux://mote/<SPACE>/thread/<EVENT> remain
+literal original Space/event inputs to app focus --mote SPACE [--thread EVENT]; preserve
+those original inputs and entities. Do not guess a target from a token, title, path or member.
 For amux://capsule/<ID>, read capsule --skill and use capsule inspect with JSON {capsuleId:ID}.
 Request display through capsule open with the same ID and an original operationId; its page
 owner resolves the service before Browser presentation. A Capsule is not a spatial selector.

@@ -209,7 +209,11 @@ Browser 使用同样定界，将首行的 `File` 换成 `Browser`。准确拼接
 
 ## 对象链接
 
-对象主链接为 `amux://KIND/ID`。`KIND` 区分大小写，直接对象取 `agent`、`region`、`tab`、`space`、`zone`、`capsule`、`mote`；`ID` 是该类型的一个非空原身份，以 `encodeURIComponent` 编为单个 path segment。`capsule` 引用本机命名空间内的原持久页面；`mote` 的 ID 是准确 Mote 已有的稳定 `spaceId`，打开其逻辑主对话，不取当前 Agent SID 或裸 topicId。只有 Mote 允许 `amux://mote/ID/thread/EVENT` 的原工作事件引用；EVENT 是该 Mote 范围内的原 eventId，独立编为一个 segment，不能以执行 Agent SID 代替。直接对象链接无 query、fragment 或自动执行参数；不接受未定义的额外路径，不能从名字、Run、当前物理目录或当前位置替换原 ID。
+直接对象链接为 `amux://KIND/ID`。`KIND` 区分大小写，取 `agent`、`region`、`tab`、`space`、`zone`、`capsule`；`ID` 是该类型的一个非空原身份，以 `encodeURIComponent` 编为单个 path segment。`capsule` 引用本机命名空间内的原持久页面。此类直接对象链接无 query、fragment 或自动执行参数；不接受未定义的额外路径，不能从名字、Run、当前物理目录或当前位置替换原 ID。Mote 的公开地址及旧输入分型如下，不把公开定位符混作 `spaceId`。
+
+Mote 的新公开 wire 为 `amux://mote/LINK_ID?runtime=RUNTIME`。LINK_ID 是原 Core 空间 owner 发行并耐久保存的不透明定位符，沿[产品 ID 分配](../design/behavior/spaces-and-layout.md#产品实体-id-分配)分配；RUNTIME 是持有该定位关系的原空间 authority 的 Runtime ID，按 `encodeURIComponent` 编码，不是执行 Host、当前路由别名或 owner instance。定位关系保存完整 `{spaceId,eventId?}` 目标：普通 Mote 地址解析到原逻辑主对话，thread 地址解析到同一原 Mote 的准确工作事件；两者均不在 URL 拼出原空间键、目录或 eventId。query 只允许一个固定顺序的 `runtime` 项，不接受 fragment、额外路径或自动执行参数。`space.link.ensure` 明确发行并确认持久写入，`space.link.resolve` 只读原定位关系；`amux space link ensure/resolve` 与 `app focus --mote URI` 消费同一 typed 合同。当前安装包的支持情况仍沿实际构建的能力发现核对。
+
+已保存的 `amux://mote/ID` 与 `amux://mote/ID/thread/EVENT` 是需要保全的原输入：无 query 时，ID 仍按原 literal `spaceId`、EVENT 按该 Mote 内原 eventId 解码，不按长度、Base58 外形、JSON 形状或路径判断改释为新定位符。旧输入和新地址解析后共用同一原目标与导航 owner，不重写历史 URI、原实体 ID 或工作面；新复制只发行上述不透明 wire。地址关系或原 Runtime 未确认时保留原引用并如实报告，不按同名对象、当前成员、裸 topicId 或其他 Runtime 猜目标。定位符及 URI 不携带访问或输入权限，不建立连接或批准信任；发行、只读解析、原身份保全与导航行为沿[对象地址、分享与方向](../design/behavior/public-control.md#对象地址分享与方向)。
 
 节点入口为 `amux://host/ALIAS`，原节点资源为 `amux://host/ALIAS/agent/SID` 或 `amux://host/ALIAS/capsule/CID`。ALIAS 使用节点发布接口确认的小写规范别名，SID／CID 仍是单个编码 segment 的原身份。三种节点链接都可在末尾带唯一的 `?runtime=RUNTIME`；RUNTIME 按 `encodeURIComponent` 编码，保留原语义 Runtime 身份。分享时带此身份；匹配的原 Runtime 可在别名改动后继续定位，不能因旧别名指向另一设备而换 owner。裸别名只是当前定位提示，在已配置且认证的 Host 范围内解析；同名、不可观察与缺失须分别说明，不猜首候选或扫描新设备。别名、Runtime pin 和合法链接都不授予访问或输入权限，不自动继承中间节点的连接。
 

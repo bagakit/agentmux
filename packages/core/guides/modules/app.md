@@ -31,6 +31,12 @@ operation. app focus selects a surface; it does not accept a task or certify inp
 Use app focus --surface focus --view map to open the same collaboration map, or --view
 list for execution contexts. Omitting --view preserves the existing Focus view; other
 surfaces cannot use --view. The Space surface always presents the original workbench.
+Use app focus --mote 'amux://mote/LINK_ID?runtime=RUNTIME' for a copied public Mote or
+thread address. The original spatial Core resolves it read-only before navigation, and the
+receipt retains the address and original target. Wrong/unavailable authority keeps the
+reference and current workface; no alternative is selected or address registered. Read
+space --skill for publication and resolution.
+
 Use app focus --mote SPACE to open the exact Mote's logical main conversation, or
 app focus --mote SPACE --thread EVENT to open its original work thread. SPACE is the Mote's
 stable spaceId from space ls; EVENT is the original scoped work eventId from dialogue read.

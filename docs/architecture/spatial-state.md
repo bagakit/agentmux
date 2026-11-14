@@ -10,6 +10,9 @@ Core 持有 Space、Zone、Tab、Group、Region 的稳定身份、拓扑、顺�
 
 事实模型由 [`AgentMuxSpatialGraph`](../../packages/core/src/spatial-graph.ts) 与 [`AgentMuxSpaceCatalog`](../../packages/core/src/space-control.ts) 定义。空间目录与地址是同一实体图的消费视角，没有独立的 Agent 组织 Space 注册表。资源、Session 和 Run 的身份关系见[系统职责地图](system-ownership.md#身份与位置分开)。
 
+Mote 的公开定位关系由同一 [`AgentMuxSpatialStateStore`](../../packages/core/src/spatial-state.ts) 在原图的 `owned:space-object-links` 元数据中持久保存；原空间锁与耐久写入同时保护定位符、完整目标 tuple 和发行 operation，不另建对象库。`space.link.ensure` 是该元数据的唯一发行入口，普通 graph commit 保留原 owned 元数据且拒绝伪造或重映射；`space.link.resolve` 只读原关系。原 `spaceId`、Zone、布局与执行资源键不因发行地址而变动。公共读取、URI 与旧输入保全规则见[对象地址、分享与方向](../design/behavior/public-control.md#对象地址分享与方向)和[对象链接 wire](../specs/amux-protocol.md#对象链接)。
+
+
 ## 持久化与跨进程观察
 
 Core 状态目录中的 `spatial-state.json` 保存同一空间图；`AGENTMUX_SPATIAL_STATE_STORE` 可指定绝对路径，宿主也可注入该路径。revision 校验和跨进程锁保护并发写入；原子提交保留此前有效文档。读取损坏或不可用不能变成空图，也不授权破坏性覆盖；从保留文档恢复须明确执行。

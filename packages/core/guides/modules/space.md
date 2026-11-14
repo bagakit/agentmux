@@ -7,6 +7,32 @@ when: "Inspect a visible layout or move an exact presentation"
 # space
 
 <!-- amux:content -->
+## Public Mote addresses
+
+A copied `amux://mote/LINK_ID?runtime=RUNTIME` names an opaque durable address at
+its original spatial Core. It contains neither a directory nor an original event key.
+Read it without registration or navigation:
+
+```sh
+amux space link resolve --url 'amux://mote/LINK_ID?runtime=RUNTIME'
+```
+
+Use the already authorized original endpoint. The Runtime pin must match; another local
+Mote with the same name or ID is not a substitute. A missing or unavailable relation keeps
+the exact URI for repair. A link grants no permission, trust or connection. Its linkId is
+not a spaceId; search and ordinary Space selectors cannot reinterpret it.
+
+Explicit publication uses `space link ensure --runtime RUNTIME --space SPACE
+--operation-id OP [--thread EVENT]`. Keep this exact target and operation after an unknown
+write. Only a confirmed durable publication supplies a copyable URL. Concurrent publication
+of the same complete target converges its original address; it does not rename, relocate or
+replace the Space, event, layout, draft or Session. Opening and resolve never publish.
+SDK callers use the same typed `space.link.ensure` and `space.link.resolve` methods.
+
+`app focus --mote 'amux://mote/LINK_ID?runtime=RUNTIME'` resolves at that original
+Core before navigating, preserving input by default. Query-free saved Mote/thread URIs
+remain literal original Space/event inputs; they are not rewritten or guessed as tokens.
+
 ## Saved Survey pages and research
 
 Survey references are client preferences over the original Browser/Region or Zone, not

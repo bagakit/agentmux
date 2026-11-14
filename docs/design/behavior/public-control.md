@@ -322,8 +322,8 @@ Toolkit 的设备列表只列原 Host 已确认连接中的设备，不铺离线
   - **Region** 回答“哪一格内容”：Tab 内的准确内容 leaf；物理位置命令必须使用已知准确 Region 与原展示上下文，不从一个 SID 猜唯一位置；
   - **Tab** 回答“哪张完整工作面”：只有其中恰好一个不同的 Agent Session ID 时才可用于语义发送；同一 SID 的多个 Region 投影仍是一个 Agent。既有 View 用语不形成另一层身份，Session、Run 与 View 的身份边界见[Session、Run 与 View](session-recovery.md#sessionrun-与-view)。
 
-- **对象分享直接复制 `amux://` 链接。** 对象类型与准确编码只见 [amux 协议的对象链接](../../specs/amux-protocol.md#对象链接)；每份只包含原对象类型与一个准确身份，不再复制身份名片、执行器资料或重复命令说明。Agent 链接始终指向 Core SID，不以原生会话 ID、显示名、执行器、Run 或空间位置替代。右键菜单按真实动作命名 Copy Agent/Region/Tab/Category/Topic Link，同一目标只保一个复制入口；复制本身不发送、不导航、不改变焦点、展示、草稿或健康 Run。
-  - 新 ID 的等长 Base58 规则见[产品实体 ID 分配](spaces-and-layout.md#产品实体-id-分配)，Session 既有 ID／持久创建重试保全见[Session、Run 与 View](session-recovery.md#sessionrun-与-view)；链接仍准确引用原对象身份，不增加分享别名或另一种地址格式。
+- **对象分享直接复制 `amux://` 链接。** 对象类型与准确编码只见 [amux 协议的对象链接](../../specs/amux-protocol.md#对象链接)；每份只包含对象类型与准确寻址所需字段，不再复制身份名片、执行器资料或重复命令说明。Agent 链接始终指向 Core SID，不以原生会话 ID、显示名、执行器、Run 或空间位置替代。右键菜单按真实动作命名 Copy Agent/Region/Tab/Category/Topic Link，同一目标只保一个复制入口；复制本身不发送、不导航、不改变焦点、展示、草稿或健康 Run。
+  - 新 ID 的等长 Base58 规则见[产品实体 ID 分配](spaces-and-layout.md#产品实体-id-分配)，Session 既有 ID／持久创建重试保全见[Session、Run 与 View](session-recovery.md#sessionrun-与-view)。对象地址可使用原 Core 持久保存的不透明定位符；定位关系不创建新业务实体、不替换原对象身份、不授予权限。Mote 的公开地址与已有资源身份分离，沿下述原 owner 解析，不通过改写实体 ID 隐去目录。
   - 生成与严格解析来自无 UI 依赖的同一 Core 公共出口，消费上述唯一格式合同；不附带正文、命令、父位置暗示或自动执行参数。格式有效不证明对象存在、健康、已呈现、跨设备可达或内容作者可信。非法 URI 只拒绝这次打开，保留工作面与其他健康能力，并明确原因和重取链接的恢复动作。
   - Desktop 的系统协议、正文、Terminal 与 Browser 对象链接入口共用同一 Main 打开编排，再沿原对象发现与导航 owner 执行；各入口不另写 URI 解析器、对象名册或位置选择规则。应用内已获准的对象打开直接汇入该编排，不经系统协议绕回本应用；入口可信性与授权仍由原来源核对，Browser 网页的询问与拒绝沿[应用链接边界](browser-workface.md#browser-工作面)，不能因内部路由跳过。
   - Agent 链接定位为唯一现有 Region 时，原 focus owner 在提交导航前按预期 SID 原子核对该格当前 Agent，导航回执保留该条件。位置已更换只拒绝这次导航，后续异步呈现或持久确认期间变化只报告未确认、保留用户后来工作面，不回滚或操作替换者。相同条件由已有 `space focus --region … --expect-session …` 可用，空间身份与 Agent 身份仍分开。
@@ -331,7 +331,8 @@ Toolkit 的设备列表只列原 Host 已确认连接中的设备，不铺离线
   - Core 持有 Session、耐久空间组成与全部 bindings，client 只消费原事实，不另建对象或位置名册。Agent 链接的语义收件人始终唯一；其多个展示不是多个 Agent，也不能据 SID 猜唯一 Region。打开时沿原空间发现与导航通路解析准确现有展示，多候选完整可辨并要求明确位置，无已知展示时说明本次位置未确认并提供原对象检查／打开／恢复入口，不把观察缺口冒成 Session 终局或创建替代 Agent。
   - Desktop/client 负责系统协议注册、外部冷／热启动接收、屏幕呈现与输入焦点。冷启动沿[原恢复合同](session-recovery.md#冷启动按需恢复p0-末位)先保全工作面并承接定位请求，不能因初始化未完成丢请求或猜目标不存在。热启动进入原对象的真实展示，导航与输入分别表达、默认保留输入；不更改 Session、健康 Run、执行 cwd、空间组成或草稿。未知、不可读、未找到与明确终局分别表达，失败保留原能力并提供具体原因与恢复入口。
 
-- **Mote 对象和 thread 沿原身份打开。** Mote 地址的 ID 是原稳定 Space 身份，thread 另保该 Mote 内的原工作事件 ID；准确格式见[对象链接](../../specs/amux-protocol.md#对象链接)。原 `app focus --mote SPACE [--thread EVENT]` 与 Main 对象链接接收共用同一 typed focus 和 Mote 导航，不把当前成员当逻辑 Main，不猜 thread 执行者；原 Session、健康 Run、草稿、未知输入及原工作面保持。身份未确认只拒绝本次准确打开并保原引用，不创建替代对象或改投。
+- **Mote 的可复制地址不暴露目录。** 新生成及复制的 Mote／thread 链接使用原 Core 空间 owner 持久保存的不透明地址，核对原 authority 后解析到准确原 Space 及原工作事件；不编码本机绝对路径、用户名、执行 cwd 或旧 Host／目录组合键，不按短 hash、标题、当前成员或首候选反推对象。地址不是访问或输入凭据，不建立连接、批准信任或启动 Agent；只在已有可确认的原 authority 范围内解析，未知或不可达时保留原引用，不借此建立另一套路由或连接平台。发行可在原 owner 保存首次定位关系；解析只读，不暗中注册、补号或改写。两者沿同一公共能力、严格回执与真实 CLI／Desktop 消费；耐久保存未确认时只说明本次地址尚未取得，不回退复制路径链接，原 Mote 与健康能力仍可用。
+- **新地址保全原身份和旧引用。** 公开地址关系不改原 Space／Zone／Topic、头像、目录、布局、焦点、草稿、Session／Run 或保存 cwd；同目标重复发行、并发及重启保持同一地址，已发地址不能改投另一对象。既有文档与保存内容中的旧路径链接仍经原严格解析抵达原对象，不批量改历史内容、不重发实体身份、不维护两套内部对象。原 `app focus --mote SPACE [--thread EVENT]` 与新地址解析结果、Main 对象链接接收共用同一 typed focus 和 Mote 导航，不把当前成员当逻辑 Main，不猜 thread 执行者。身份、原 authority 或地址关系未确认只拒绝本次准确打开并保原引用，不创建替代对象或改投；具体语法由[对象链接](../../specs/amux-protocol.md#对象链接)统一持有。
 
 - **对象链接在对话中的富呈现不改变地址语义。** 行内 Agent 名片只消费同一原 SID，消息与复制仍保原 URI；识别、当前资料和只读边界唯一见[对话正文中的 Agent 对象引用](conversation-mode.md#对话正文中的-agent-对象引用)，打开动作仍沿本节原导航与身份条件。
 - **已有的 Agent 上下文分享复用同一外框。** 编辑器的 Copy as Agent Context 和 Browser 的元素／批注上下文消费 [amux 协议的内容分享外框](../../specs/amux-protocol.md#内容分享外框)。它们是内容与来源分享，不冒称 Agent 身份，不强加 `ID`、`Exe` 或无关发送命令；外框只包原 owner 已产出的正文。
