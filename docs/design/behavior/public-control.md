@@ -205,6 +205,12 @@ Goal 模块同时面向管理者和执行者，沿[执行责任、停滞告警�
 
 一个 `--endpoint` descriptor 只定位同一公共服务，不承担资源或空间身份。普通 CLI 的 `system endpoint` 只描述选中地址，返回 `connection: "not-attempted"`，不连接、不证明可达；真正 RPC 的同名方法返回 `connection: "responded"`，只确认该次服务响应。
 
+CLI 的显式 `--source-host ID` 复用本机原 Unix 配置 owner 已保存的 SSH Host，和 `--endpoint` 互斥。配置只读一次，以准确 ID 取得完整连接目标和原绑定 Runtime；不注册、测试、安装或自动修复连接。私钥路径属于配置 owner 的机器，因此该选择只支持本机配置服务，不借远端配置中的路径读取本机密钥；本地 Host 和未绑定 Runtime 不猜目标，保留原默认与显式 endpoint 入口。传输使用原 SSH／Tailcat 转换与调用者凭据，Source 不承认原主体时明确拒绝，不能剥离 caller 或冒充 person。
+
+同一调用固定保存目标与原 Runtime，再从该 Source 取得本次 owner instance；普通调用、前置读取及各类订阅都携带同一 fence。业务参数中的 Host／空间／资源仍属于 Source 命名空间，配置 alias 不替代它们。配置后来改变不重解析或改投；已取得的原回执继续交还原请求，未知结果保留原 operationId，不自动重发。help、skill、version 不连接服务；本地分析、静态输出和原 Unix stdio 桥不借此选择冒充远端执行。
+
+该 selector 取得身份后，CLI 成功及错误信封保留本次 `source: {configuredHostId,runtimeId,ownerInstanceId}`，不放连接 descriptor 或凭据，不修改原业务 result。输出原 JSON-RPC 帧的 reader 先给一条独立 CLI Source 关联记录，再保原帧；特殊 reader 的 CLI 信封同样保关联。配置 alias 后来改变时，查旧操作须重新定位同一 Runtime，不能由当前 alias 的新 Runtime 代查；原 instance 只是这次捕获事实，跨重启可在同一 Runtime 取得 fresh instance 后查原操作，不把旧 instance 变成永久恢复门禁。取身份前的失败不补造 Source instance。
+
 `local` 指接收业务调用的 Core 服务本机，直接连接远端时不指 CLI 所在机器。聚合发现与检查保留原 Session 的 `hostId`，另返回该服务内可复用的 `routeHostId`，用于后续按 Host 范围准确读取；配置 Host ID 不是 SSH 地址或跨 endpoint 的全局机器 ID。`agent context` 的 `hostId` 是本次路由，`sourceHostId` 与 descriptor 保留源服务身份。发现结果只在同一 endpoint 范围续用，未知或多 owner 不按首项猜测。
 
 `agent context` 完整读取原 Store 已保留的 history metadata，包括创建来源、fork 祖先与分端工具执行绑定；公开解码复用原领域投影与 parser，严格拒绝未知字段、畸形结构及与本次已确认来源冲突的回包，不通过删除合法元数据绕过校验。创建时的 Run 与祖先身份仅表示原始来源，不能据此推断当前 Run／Session 或输入资格；Hook、能力秘密与生命周期控制不进入该只读投影。

@@ -7,6 +7,24 @@ must set both AGENTMUX_RPC_HTTP_BIND (host:port) and AGENTMUX_RPC_HTTP_TOKEN, an
 read AGENTMUX_RPC_HTTP_TOKEN. Unknown Host, missing Session, owner ambiguity and an unreachable
 service keep distinct errors and are never resolved by choosing the first candidate or rerouting.
 Select one transport with amux --endpoint <descriptor> <object> <action>.
+Or select a bound SSH Host saved by the original local Unix configuration owner:
+  amux --source-host source-b agent ls
+  amux --source-host source-b file stat --input source-path.json
+Use the actual saved ID and the original Source resource/Zone in the input JSON. --source-host and --endpoint
+are mutually exclusive. The selector reads settings hosts ls once, preserves the full saved
+SSH/Tailcat target and original caller, and fixes its Runtime/owner instance for calls and readers.
+It does not install, test, register or repair a Host. Unknown effects keep their original operation IDs.
+After identity is confirmed, CLI envelopes retain source:{configuredHostId,runtimeId,ownerInstanceId}.
+Generic raw-frame readers emit one CLI Source association record before the unchanged JSON-RPC frames.
+Keep this Source with an unknown operation. If the alias changes, use settings hosts ls to locate
+the same runtimeId before inspecting; another Runtime cannot replace it. A later instance on the
+same Runtime may inspect the original operation; the old instance is not a permanent recovery gate.
+Local Hosts and non-Unix configuration services use the original default or explicit endpoint;
+credential paths from another machine cannot be interpreted as local key files. An unbound saved
+Runtime remains unknown; inspect that Host before choosing a target. A Source must authenticate
+the original caller; the selector grants no person/device or cross-Host authority.
+Help, skill and version remain offline. Local/static commands and the Unix stdio bridge do not
+accept --source-host; system endpoint --inspect may observe the selected Source.
 Run system endpoint to discover the default without connecting.
 Endpoint, Host route and execution identity are separate:
 --endpoint selects one AgentMux service, not an execution destination.
