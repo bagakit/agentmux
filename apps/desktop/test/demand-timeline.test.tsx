@@ -16,9 +16,9 @@ const goal: DemandProjection = { id: 'original-goal', title: 'Keep the original 
   sessions: [], workspacePath: null, decisions: [decision], activities: [{ id: decision.id, kind: 'note', message: 'An ordinary note with the same local ID.', createdAt: fixtureEpoch(1, 1), actorId: null }] }
 async function render(demand = goal) {
   await act(async () => root.render(<GoalDetail demand={demand} onClose={() => {}} onOpenMote={() => {}} onGrill={() => {}} onGrounding={() => {}}
-    acknowledgementFeedback={EMPTY_GOAL_ACKNOWLEDGEMENT} onAcknowledgementFeedbackChange={() => {}} moteError={null} onRetryMote={() => {}} />))
+    onPlan={() => {}} acknowledgementFeedback={EMPTY_GOAL_ACKNOWLEDGEMENT} onAcknowledgementFeedbackChange={() => {}} moteError={null} onRetryMote={() => {}} />))
 }
-const activity = () => host.querySelector<HTMLDetailsElement>('.goals-activity')!
+const activity = () => host.querySelector<HTMLElement>('.goals-activity')!
 const details = () => host.querySelector<HTMLDetailsElement>('.goals-activity__decision')!
 beforeEach(() => { Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); host = document.createElement('div'); document.body.append(host); root = createClientUiRoot(host) })
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); window.getSelection()?.removeAllRanges() })
@@ -34,19 +34,19 @@ it('the real GoalDetail renders original decision fields and keeps ordinary acti
 })
 
 it('retains original disclosure nodes, expansion and selected text through activity arrival and decision updates', async () => {
-  await render(); activity().open = true; details().open = true
+  await render(); details().open = true
   const original = details(), question = original.querySelector('dd')!, range = document.createRange()
   range.selectNodeContents(question); window.getSelection()!.addRange(range)
   await render({ ...goal, decisions: [{ ...decision, decision: 'Continue the same original Agent after review' }],
     activities: [...goal.activities!, { ...goal.activities![0]!, id: 'new-note', createdAt: fixtureEpoch(1, 2) }] })
-  expect(details()).toBe(original); expect(details().open).toBe(true); expect(activity().open).toBe(true)
+  expect(details()).toBe(original); expect(details().open).toBe(true)
   expect(window.getSelection()!.toString()).toBe(decision.question)
 })
 
 it('does not transfer expansion to another Goal that reuses a local decision ID', async () => {
-  await render(); activity().open = true; details().open = true; const original = details()
+  await render(); details().open = true; const original = details()
   await render({ ...goal, id: 'another-goal', decisions: [{ ...decision, rationale: 'A separate original reason.' }] })
-  expect(details()).not.toBe(original); expect(details().open).toBe(false); expect(activity().open).toBe(false)
+  expect(details()).not.toBe(original); expect(details().open).toBe(false)
   expect(details().textContent).toContain('A separate original reason.')
 })
 

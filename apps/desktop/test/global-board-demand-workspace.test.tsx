@@ -14,8 +14,9 @@ function makeSession(id = 'session-1'): SessionSnapshot { return { id, hostId: '
 let root: Root, container: HTMLDivElement
 beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); container = document.createElement('div'); document.body.append(container); root = createRoot(container); useAppStore.setState({ config, sessions: [makeSession()], demands: { 'demand:one': { id: 'demand:one', title: 'Build auth flow', description: 'Keep the original intent.', status: 'in_progress', priority: 'normal', projectId: 'repo', projectName: 'Repo', sessionIds: ['session-1'], createdAt: 1, updatedAt: 2, source: 'default-topic' } }, selectedDemandId: null, mainSurface: 'board' }) })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(baseline, true); vi.restoreAllMocks() })
-// Linked Sessions are read in Collaboration under "People and related sessions".
-function relationships() { const details = container.querySelector<HTMLDetailsElement>('.goal-collaboration__relationships')!; expect(details).not.toBeNull(); return details }
+// People and linked Sessions are read and edited only in the detail's facts sidebar.
+function relationships() { const people = container.querySelector<HTMLElement>('[aria-label="Goal facts"] .goal-collaboration')!; expect(people).not.toBeNull(); return people }
+async function editDescription() { await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Edit goal description"]')!.click()); return container.querySelector<HTMLTextAreaElement>('[aria-label="Goal description"]')! }
 function relatedLine() { const line = [...relationships().querySelectorAll<HTMLElement>('.goal-collaboration__line')].find(node => node.querySelector('strong')?.textContent === 'Related discussions'); expect(line).toBeDefined(); return line! }
 
 describe('Goal reading workspace', () => {
@@ -24,15 +25,16 @@ describe('Goal reading workspace', () => {
     const row = container.querySelector<HTMLElement>('[data-demand-id="demand:one"]')!; expect(row).toBeTruthy()
     await act(async () => { row.focus(); row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
     expect(container.querySelector('.goals-list')).toBeTruthy(); expect(container.querySelector('.goals-detail')).toBeTruthy()
-    expect(container.querySelector('[aria-label="Goal title"]')).toBeTruthy(); expect(container.querySelector('[aria-label="Goal description"]')).toBeTruthy()
+    // The intent reads as rendered text; its original-text editor opens on Edit.
+    expect(container.querySelector('[aria-label="Goal title"]')).toBeTruthy(); expect(container.querySelector('[aria-label="Goal description"]')).toBeNull()
+    expect(container.querySelector('.goals-intent__reading')?.textContent).toContain('Keep the original intent.'); expect(await editDescription()).toBeTruthy()
     expect(container.querySelector('.xterm')).toBeNull(); expect(useAppStore.getState().mainSurface).toBe('board')
     await act(async () => (container.querySelector('[aria-label="Back to goals"]') as HTMLButtonElement).click())
     expect(useAppStore.getState().selectedDemandId).toBeNull(); expect(document.activeElement).toBe(row)
   })
   it('preserves a missing Session identity and shows recovery when execution is requested', async () => {
     useAppStore.setState({ sessions: [], selectedDemandId: 'demand:one' }); await act(async () => root.render(createElement(GlobalBoardSurface)))
-    // With no original work yet the relationships disclosure is open; the missing Session stays readable by its identity, with recovery.
-    expect(relationships().open).toBe(true)
+    // The missing Session stays readable by its identity, with recovery.
     const missing = relatedLine().querySelector<HTMLButtonElement>('.goal-collaboration__member')!
     expect(missing.textContent).toContain('session-1'); expect(missing.textContent).toContain('Identity unavailable · reference retained'); expect(missing.disabled).toBe(true)
     expect(container.querySelector<HTMLButtonElement>('[aria-label="Choose related Goal sessions"]')?.disabled).toBe(false)
@@ -48,7 +50,7 @@ describe('Goal reading workspace', () => {
     useAppStore.setState({ demands: { [original.id]: original } })
     useAppStore.setState({ selectedDemandId: original.id }); await act(async () => root.render(createElement(GlobalBoardSurface)))
     for (const [label, text] of [['Goal title', 'Readable goal'], ['Goal description', 'A directly editable body']]) {
-      const input = container.querySelector<HTMLTextAreaElement>(`[aria-label="${label}"]`)!
+      const input = label === 'Goal description' ? await editDescription() : container.querySelector<HTMLTextAreaElement>(`[aria-label="${label}"]`)!
       expect(input).toBeTruthy(); await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, text); input.dispatchEvent(new Event('input', { bubbles: true })) })
       await act(async () => { input.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); await host.settle() })
     }

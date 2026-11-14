@@ -254,11 +254,10 @@ describe('mounted original Goal delegation consumer', () => {
       supervisorAgentSessionId: 'original-owner', supervisorRunId: 'owner-run', occurrenceAt: _reshape_fixtureEpoch(0, 0, 20), agentMuxNote: 'Original reminder', preparedAt: _reshape_fixtureEpoch(0, 0, 21) } })
     record.delegationObservations = [{ ...observation(), attention: { state: 'confirmed', reason: 'The original reminder was received.' } }]
     vi.spyOn(api.demands, 'delegation').mockResolvedValue(result(record))
-    await mount(record, createElement(GoalExecution, { demand: { ...record, sessions: [], workspacePath: null }, onUpdate: vi.fn().mockResolvedValue(true) }))
-    const work = container.querySelector('.goal-delegation')!, relationships = container.querySelector<HTMLDetailsElement>('.goal-collaboration__relationships')!
-    expect(work.nextElementSibling).toBe(relationships)
-    expect(relationships.open).toBe(false)
-    expect(relationships.querySelector('summary')!.textContent).toContain('Supervisor · original-owner')
+    // Work records read in the main column; people and their configuration live in the facts sidebar.
+    await mount(record, createElement(GoalDelegationWork, { demand: { ...record, sessions: [], workspacePath: null } }))
+    const work = container.querySelector('.goal-delegation')!
+    expect(container.querySelector('.goal-collaboration')).toBeNull()
     const summary = work.querySelector('.goal-delegation__summary')!
     expect(summary.textContent).toBe('Original worker result'); expect(summary.closest('details')).toBeNull()
     expect(button('Collect report').classList.contains('primary-button')).toBe(true)
@@ -266,11 +265,11 @@ describe('mounted original Goal delegation consumer', () => {
     expect(notice.open).toBe(false); expect(notice.querySelector('summary')!.textContent).toBe('Supervisor reminder received')
     expect(work.querySelector('.goals-service')).toBeNull()
   })
-  it('finite-only GoalExecution reads original Start responsibility and preserves its native navigation and unknown report association', async () => {
+  it('finite-only work records read original Start responsibility and preserves its native navigation and unknown report association', async () => {
     const observed = { ...startObservation(), originalRun: { runId: 'original-run', state: 'exited' as const }, responsibility: 'original-worker-continuation' as const }
     const record = { ...goal(), delegations: [], dispatches: [finiteStart()], startObservations: [observed] }
     const read = vi.spyOn(api.demands, 'delegation').mockResolvedValue(result(record))
-    await mount(record, createElement(GoalExecution, { demand: { ...record, sessions: [], workspacePath: null }, onUpdate: vi.fn().mockResolvedValue(true) }))
+    await mount(record, createElement(GoalDelegationWork, { demand: { ...record, sessions: [], workspacePath: null } }))
     expect(read).toHaveBeenCalledWith('goal.delegations', { goalId: record.id })
     expect(container.textContent).toContain('Agent ended · Check Goal results or continue')
     expect(container.textContent).toContain('Original Start and input')
@@ -292,7 +291,6 @@ describe('mounted original Goal delegation consumer', () => {
       request: { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'original-creation', operation: 'agent.open',
         content: { kind: 'new-agent', executorId: 'fixture' }, destination: { spaceId: 'original-space', zoneId: 'original-zone', newTab: true }, focus: false } } } })
     await mount(record, createElement(GoalExecution, { demand: { ...record, sessions: [], workspacePath: null }, onUpdate: vi.fn().mockResolvedValue(true) }))
-    expect(container.querySelector<HTMLDetailsElement>('.goal-collaboration__relationships')!.open).toBe(false)
     const recovery = button('Check creation and relationship')
     expect(recovery.closest('details')).toBeNull(); expect(recovery.parentElement!.getAttribute('role')).toBe('status')
     expect(useAppStore.getState().goalAgentCreationDrafts[originalKey]!.operationId).toBe('original-creation')
@@ -454,10 +452,10 @@ describe('mounted original Goal delegation consumer', () => {
     const collections = calls.mock.calls.filter(([method]) => method === 'goal.collect')
     expect(collections).toHaveLength(2); expect(collections[1]).toEqual(collections[0])
   })
-  it('changes actual GoalExecution UI from original Run exit to reported work after the original Domain notification', async () => {
+  it('changes actual work records from original Run exit to reported work after the original Domain notification', async () => {
     let record = { ...goal(), delegationObservations: [observation('exited')] }
     const read = vi.spyOn(api.demands, 'delegation').mockImplementation(async () => result(record))
-    await mount(record, createElement(GoalExecution, { demand: { ...record, sessions: [], workspacePath: null }, onUpdate: async () => true }))
+    await mount(record, createElement(GoalDelegationWork, { demand: { ...record, sessions: [], workspacePath: null } }))
     expect(container.textContent).toContain('No report · Continue the original Agent')
     record = { ...record, updatedAt: record.updatedAt + 1, delegations: [{ ...delegation(), report: report() }] }
     await act(async () => notifyDomain(['original-goal'])); await settle()

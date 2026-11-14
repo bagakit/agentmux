@@ -44,6 +44,25 @@ const graph = () => dom.container.querySelector<HTMLElement>('.goals-detail [ari
 const nodes = [node('api'), node('docs'), node('ui', ['api'], { criterionIds: ['ui'] }), node('release', ['ui', 'docs'])]
 
 describe('Goal plan graph', () => {
+  it('the mounted Goal detail leads with its actual plan and owner progress before intent, work and editable facts', async () => {
+    const record = goal({ plan: plan(nodes, [pass('api')]), delegations: [reported('api')], description: '# Original intent\n\nKeep the exact original work.' })
+    seed(record)
+    await dom.render(<GlobalBoardSurface />)
+    const detail = dom.container.querySelector('.goals-detail')!
+    const main = detail.querySelector('.goals-detail__main')!
+    expect(main.firstElementChild).toBe(graph())
+    expect(detail.querySelector('[data-goal-meta-plan]')?.textContent).toBe('Plan 1 of 4 done')
+    expect(detail.querySelector('.goals-detail__side .goal-collaboration')).not.toBeNull()
+    expect(main.querySelector('.goal-collaboration')).toBeNull()
+    const intent = main.querySelector('.goals-original-intent .goals-intent__reading')!
+    expect(intent.textContent).toContain('Original intent')
+    expect(intent.textContent).not.toContain('# Original intent')
+    expect(main.querySelector('.goals-original-intent textarea')).toBeNull()
+    const edit = main.querySelector<HTMLButtonElement>('[aria-label="Edit goal description"]')!
+    await act(async () => edit.click())
+    expect(main.querySelector<HTMLTextAreaElement>('[aria-label="Goal description"]')?.value).toBe(record.description)
+  })
+
   it('places each node in its dependency column and shows the derived state', async () => {
     seed(goal({ plan: plan(nodes), delegations: [reported('api')] }))
     await dom.render(<GlobalBoardSurface />)

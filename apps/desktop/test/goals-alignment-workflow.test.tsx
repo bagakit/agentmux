@@ -55,6 +55,7 @@ function button(label: string) { const action = ['Clarify goal', 'Discuss change
 async function click(label: string, waitForTransport = true) { const target = button(label); await act(async () => { target.click(); if (waitForTransport) await host.settle() }); if (waitForTransport) await eventually(() => expect(target.isConnected && target.disabled).toBe(false)) }
 async function eventually(assertion: () => unknown | Promise<unknown>) { await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) }); await assertion() }) }
 // The Goals list groups rows by whose turn it is; read this Goal's own row, never whichever row is first.
+function intentReading() { return container.querySelector('.goals-intent__reading')?.textContent }
 function next() { return container.querySelector('[data-demand-id="goal"] .goals-row__next')?.textContent }
 function expectReloadOnly() {
   const recovery = container.querySelector('[data-goal-acknowledgement-failure]')
@@ -72,8 +73,11 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     await save(proposal); await mount()
     expect(container.querySelector('[data-goal-summary]')?.textContent).toBe(proposal.summary)
     expect([...container.querySelectorAll('[data-goal-success-criterion]')].map(node => node.textContent)).toEqual(proposal.criteria.map(criterion => criterion.text))
-    expect(container.querySelector<HTMLDetailsElement>('.goals-original-intent')?.open).toBe(false)
+    // The original intent follows the proposal as rendered reading; Edit opens the exact original text.
+    expect(container.querySelector('.goals-original-intent .goals-intent__reading')?.textContent).toContain('Keep the exact original work.')
+    await click('Edit goal description', false)
     expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Goal description"]')?.value).toBe(intent)
+    await click('Done', false)
     expect(next()).toContain('Goal ready for confirmation'); expect((await owner.get('goal'))!.alignment!.confirmedAt).toBeNull()
     let finish!: () => void
     finish = host.once('demand.confirm', { kind: 'hold-request' }).release
@@ -115,7 +119,7 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     expect(artwork.hidden).toBe(true)
     expect(button('Clarify goal').disabled).toBe(false)
     expect(host.executed('demand.confirm')).toEqual([])
-    expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Goal description"]')?.value).toBe(intent)
+    expect(intentReading()).toContain('A healthy Agent must remain available.')
     expect(container.querySelectorAll('.goals-clarification')).toHaveLength(1)
     expect(container.querySelector('.goals-alignment')).toBeNull(); expect(container.querySelector('.goals-grounding')).toBeNull()
     expect(container.querySelector('[data-goal-result-state]')).toBeNull(); expect(next()).toBe('Goal needs an outline')
@@ -179,7 +183,7 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     expect(await owner.get('goal')).toEqual(originalGoal)
     expect(readGoalDiscussionBinding(currentCoreSpatialGraph()!, 'goal')).toBeNull()
     expect(discussion.core.start).toHaveBeenCalledTimes(1) // Only the already-existing primary Mote.
-    expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Goal description"]')?.value).toBe(intent)
+    expect(intentReading()).toContain('A healthy Agent must remain available.')
     await click('Open discussion for Restore my work')
     await eventually(() => expect(container.querySelector('.goals-detail')?.textContent).toContain('The discussion could not be opened.'))
     expect(button('Retry opening discussion')).toBeTruthy()
