@@ -587,6 +587,9 @@ export class AgentMuxRpcService {
     const p = rpcRecord(params, AGENTMUX_HOSTED_RPC_FIELDS[method as AgentMuxHostedRuntimeMethod])
     if (!this.ports.hostedRuntime) throw new AgentMuxError('The borrowed Runtime Host business owner is unavailable. Existing Runs are retained.', 'CONTROL_UNAVAILABLE')
     const owner = await this.ports.hostedRuntime()
+    // Hosted call/subscribe dispatch precedes the ordinary service fence gate.
+    // A business/consumer fence does not replace this explicit wire target.
+    if (context.runtimeFence) owner.assertFence(context.runtimeFence)
     if (method === 'runtime.owner.identity' || method === 'runtime.owner.shutdown' || method === 'runtime.network.inspect' || method === 'runtime.profile.capture') return { owner, params: p }
     const consumer = rpcString(p.consumerId, 'Host consumer ID')
     const consumerId = createHash('sha256').update((hostRouteActorScope(context) ?? actor.kind + '\0' + principalId) + '\0' + consumer).digest('hex')
