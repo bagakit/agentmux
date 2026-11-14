@@ -110,6 +110,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const [filters, setFilters] = useState<FocusFilterSelection>(EMPTY_FOCUS_FILTERS)
   const [inspectingFilters, setInspectingFilters] = useState(false)
   const [allTimelineProjects, setAllTimelineProjects] = useState(false)
+  const toggleTimelineProjects = useCallback(() => setAllTimelineProjects(value => !value), [])
   const changeFilters = (next: FocusFilterSelection) => {
     if (filters.projects.length && !next.projects.length) setAllTimelineProjects(false)
     setFilters(next)
@@ -322,6 +323,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const lastIdentities = useRef<ReturnType<typeof identitySelector>>(new Map())
   const contextIdentities = useMemo(() => {
     if (visible) lastIdentities.current = identitySelector(navigationCatalog, identityTabs, filterContexts, config, layouts, agentRegionExecution, locationsKnown, executionBindings)
+    if (!sourceFacts.identities.size) return lastIdentities.current
     const merged = new Map(lastIdentities.current)
     for (const [key, identity] of sourceFacts.identities) {
       const previous = merged.get(key)
@@ -332,9 +334,9 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     }
     return merged
   }, [sourceFacts.identities, visible, identitySelector, navigationCatalog, identityTabs, filterContexts, config?.executors, config?.appearance.agentAvatars, config?.workspaces, layouts, locationsKnown, executionBindings])
-  const allLanes = useMemo(() => deriveFocusProjectLanes(laneContexts, config, facts, contextIdentities, Date.now(), topicSnapshots), [laneContexts, config, facts, tabs, topicSnapshots, contextIdentities])
+  const allLanes = useMemo(() => deriveFocusProjectLanes(laneContexts, config, facts, contextIdentities, Date.now(), topicSnapshots), [laneContexts, config, facts, topicSnapshots, contextIdentities])
   observedProjectLanes.current = allLanes
-  const coordinationLanes = useMemo(() => deriveFocusProjectLanes(coordinationContexts, config, undefined, contextIdentities, Date.now(), topicSnapshots), [coordinationContexts, config, tabs, topicSnapshots, contextIdentities])
+  const coordinationLanes = useMemo(() => deriveFocusProjectLanes(coordinationContexts, config, undefined, contextIdentities, Date.now(), topicSnapshots), [coordinationContexts, config, topicSnapshots, contextIdentities])
   const filterLanes = useMemo(() => [...allLanes, ...coordinationLanes], [allLanes, coordinationLanes])
   const survey = useAppStore(useShallow(state => ({ surveyCollectedZones: state.surveyCollectedZones, surveyOrganization: state.surveyOrganization, surveyExplorationNames: state.surveyExplorationNames })))
   const originContent = useAppStore(useShallow(state => ({ bindings: state.spaceZoneBindings, categories: state.topicCategories })))
@@ -710,7 +712,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
           </div> : <><AgentTopologySummary sessionIds={selectedSessionIds} sessions={sessions} tabs={tabs} config={config} /><SessionObservationRegions sessionIds={selectedSessionIds} contextId={`agent:${selectedId}`} /></>}
     </aside></> : null}
     </div>
-    <RecentFocusTimeline projectScope={timelineProjectScope} onToggleProjectScope={!filters.projects.length && timelineProject ? () => setAllTimelineProjects(value => !value) : undefined} entries={executionHistory} currentSessionId={selectedId} currentContext={currentContext} contexts={executionRows} lanes={allLanes} hierarchy={facts} onSelect={focusExecutionSession} onSelectContext={selectTimelineContext} onReveal={revealFocusRecord} historyWindowRequest={historyWindowRequest} catalogue={catalogue} visible={visible} />
+    <RecentFocusTimeline projectScope={timelineProjectScope} onToggleProjectScope={!filters.projects.length && timelineProject ? toggleTimelineProjects : undefined} entries={executionHistory} currentSessionId={selectedId} currentContext={currentContext} contexts={executionRows} lanes={allLanes} hierarchy={facts} onSelect={focusExecutionSession} onSelectContext={selectTimelineContext} onReveal={revealFocusRecord} historyWindowRequest={historyWindowRequest} catalogue={catalogue} visible={visible} />
     {visible && requestId ? <AttentionRequestPanel sessionId={requestId} onClose={() => setRequestId(null)} onReturnFocus={() => {
       if (useAppStore.getState().mainSurface === 'agents') searchRef.current?.focus()
     }} onSessionChange={focusExecutionSession} /> : null}

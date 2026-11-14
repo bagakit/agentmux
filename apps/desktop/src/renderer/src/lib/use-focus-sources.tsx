@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { shallow } from 'zustand/shallow'
 import type { SpaceSnapshot } from '@agentmux/core'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { msUntilSemanticStatusStale } from '@agentmux/core/agent-status'
@@ -13,6 +14,7 @@ import { requestWorkbenchReferenceClose } from './workbench-close-request'
 import { requestDesktopFocusWorkfaceReveal } from './desktop-presentation'
 import { agentRegionLocationBindings, confirmedOriginalRawLocations, ordinaryAgentSpaceMember, useAppStore } from '../store'
 import { workbenchSelectionCatalog } from './desktop-focus-navigation'
+import { workbenchNavigationTabs } from './workbench-navigation-catalog'
 import { mountedSpaceInputs, mountedSpaceRegions, mountedSpaceTarget, type MountedSpaceRegion } from './space-mount-view'
 import { mountedSessionFacts } from './space-mount-sessions'
 import { useSpaceSourceReader } from '../components/SpaceSourceReaders'
@@ -32,6 +34,9 @@ type SourceChoice = { locations: FocusContextAccess['locations']; choose(locatio
 type ReadFact = { key: string; session?: SessionSnapshot; name?: NameObservation;
   conversationPort?: ConversationReadApi; readConversation?: () => Promise<void>; reading?: ReturnType<typeof projectConversationWindow>;
   rename?: ((name: string | null, expectedRevision: number) => Promise<boolean>) | undefined; nameSaveIssue?: string | undefined; sessionIssue?: string | undefined; nameIssue?: string | undefined; readingIssue?: string | undefined; readingCurrent?: () => boolean }
+
+const NO_SOURCE_CONTEXTS: FocusContext[] = []
+const NO_SOURCE_IDENTITIES = new Map<string, FocusContextIdentity>()
 
 function SourceReader({ target, visible, revision }: { target: SpaceMountRecord; visible: boolean; revision: number }) {
   const refresh = useSpaceSourceReader(target, visible), previous = useRef(revision)
@@ -162,7 +167,22 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
   const metadata = useAppStore(state => state.mountedSpaceSessions), config = useAppStore(state => state.config)
   const history = useAppStore(state => state.agentFocus.execution.history)
   const historyNames = useMemo(() => focusSourceHistoryNames(history), [history])
-  const catalog = useAppStore(workbenchSelectionCatalog), tabs = useAppStore(state => state.tabs), layouts = useAppStore(state => state.layouts), bindings = useAppStore(agentRegionLocationBindings)
+  const catalog = useAppStore(workbenchSelectionCatalog), navigationTabs = useAppStore(state => workbenchNavigationTabs(state.tabs)), layouts = useAppStore(state => state.layouts), bindings = useAppStore(agentRegionLocationBindings)
+  // Source consumers need original Agent/projected positions, not an unrelated
+  // file's name/path or Browser page state. Keep the current relevant projection.
+  const previousTabs = useRef<Readonly<typeof navigationTabs>>({})
+  const tabs = useMemo(() => {
+    const next = Object.fromEntries(Object.entries(navigationTabs).filter(([, tab]) => tab.source ||
+      Object.values(tab.regions).some(region => region.kind === 'agent' || sourceRegionProjectionReference(region))))
+    if (!shallow(previousTabs.current, next)) previousTabs.current = next
+    return previousTabs.current
+  }, [navigationTabs])
+  const previousLocations = useRef<typeof catalog.locations>([])
+  const sourceLocations = useMemo(() => {
+    const next = catalog.locations.filter(location => tabs[location.tabId])
+    if (previousLocations.current.length !== next.length || next.some((location, index) => !shallow(location, previousLocations.current[index]))) previousLocations.current = next
+    return previousLocations.current
+  }, [catalog, tabs])
   const [facts, setFacts] = useState(new Map<string, ReadFact>())
   const [witnesses, setWitnesses] = useState(new Map<string, { runtimeId: string; host: HostConfig | undefined }>())
   const runtimes = useMemo(() => new Map([...witnesses].flatMap(([hostId, witness]) =>
@@ -194,7 +214,7 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
   const refresh = useCallback((key: string) => setRefreshes(previous => new Map(previous).set(key, (previous.get(key) ?? 0) + 1)), [])
   const ordinaryLocations = useMemo(() => {
     const result: Array<{ source: SpaceMountRecord; presentation: MountedSpaceRegion; reference: WorkbenchProjectionSelection }> = []
-    for (const location of catalog.locations) {
+    for (const location of sourceLocations) {
       const surface = tabs[location.tabId]?.regions[location.regionId]
       if (surface?.kind !== 'agent') continue
       const member = ordinaryAgentSpaceMember({ tabId: location.tabId, regionId: location.regionId, sessionId: surface.sessionId })
@@ -202,7 +222,7 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
         reference: { displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId, tabId: location.tabId, regionId: location.regionId } })
     }
     return result
-  }, [catalog, tabs, bindings])
+  }, [sourceLocations, tabs, bindings])
   const sources = useMemo(() => {
     const result = new Map<string, SpaceMountRecord>()
     try { for (const key of Object.keys(mountedSpaceInputs(inputs))) {
@@ -331,7 +351,7 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
         // Closing addresses an existing display occurrence; it never opens a Source to create one.
         const locations = surface !== 'close' ? candidate.locations : candidate.locations.flatMap(location => {
           if (location.reference) return [location]
-          const positions = [...rawLocations(location), ...catalog.locations.filter(reference => {
+          const positions = [...rawLocations(location), ...sourceLocations.filter(reference => {
             const source = sourceRegionProjectionReference(tabs[reference.tabId]?.regions[reference.regionId])
             return source && spaceMountKey(source.reference) === spaceMountKey(location.source.reference) &&
               source.tabId === location.tabId && source.regionId === location.regionId && source.agentSessionId === candidate.sid
@@ -448,7 +468,7 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
       readers.push(<SessionReader key={'session:' + candidate.key} candidate={candidate} visible={visible} publish={publish} refresh={refreshes.get(candidate.key) ?? 0} />)
       readers.push(<MemberReader key={'member:' + candidate.key} candidate={candidate} visible={visible} publish={publish} refresh={refreshes.get(candidate.key) ?? 0}  />)
     }
-    return { contexts: rows, identities, aliases, issues, readers: <Fragment>{readers}</Fragment> }
-  }, [sources, observations, metadata, candidates, contexts, ordinaryContexts, runtimes, facts, historyNames, refreshes, inputs, layouts, catalog, tabs, config, visible, clock, publish, refresh, onSelectLocation, onChooseLocation, onFocusContext])
+    return { contexts: rows.length ? rows : NO_SOURCE_CONTEXTS, identities: identities.size ? identities : NO_SOURCE_IDENTITIES, aliases, issues, readers: <Fragment>{readers}</Fragment> }
+  }, [sources, observations, metadata, candidates, contexts, ordinaryContexts, runtimes, facts, historyNames, refreshes, inputs, layouts, sourceLocations, tabs, config, visible, clock, publish, refresh, onSelectLocation, onChooseLocation, onFocusContext])
   return result
 }

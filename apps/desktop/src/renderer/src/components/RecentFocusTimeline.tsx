@@ -251,7 +251,7 @@ function focusTrackEventCleanup(key: string, onEventChanged: (key: string) => vo
   return () => onEventChanged(key)
 }
 
-const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMessages, recordedMessageTracks, retainedWork, observeWork, observing, window, now, scaleWidth, lane, time, onSelect, onPreview, onDismiss, onInspect, onInspectWork, onPresence, onEvent, onEventChanged, onCurrentPresence }: {
+const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMessages, recordedMessageTracks, retainedWork, observeWork, observing, window, now, scaleWidth, lanePath, laneProject, laneSummary, time, onSelect, onPreview, onDismiss, onInspect, onInspectWork, onPresence, onEvent, onEventChanged, onCurrentPresence }: {
   track: FocusTimelineTrack; selected: boolean; window: FocusTimeWindow; now: number; scaleWidth: number
   onEvent(trackKey: string, key: string, facts: FocusTimelineEventFacts, target: HTMLElement, immediate?: boolean): void
   onEventChanged(trackKey: string): void
@@ -261,7 +261,7 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
   retainedWork?: FocusWorkFacts | undefined
   observing: boolean
   observeWork(reference: SessionHistoryReference, items: readonly AgentTimelineItem[], identity: AgentFocusHistoryIdentity | undefined): void
-  lane?: FocusProjectLane | undefined
+  lanePath?: string | undefined; laneProject?: string | undefined; laneSummary?: string | null | undefined
   time: FocusTimeFormatters
   onSelect(id: string, context?: FocusContext): void; onPreview(message: ConversationRecord, target: HTMLElement, interactive: boolean, immediate?: boolean, records?: readonly ConversationRecord[]): void; onDismiss(messageId: string): void
   onInspect(segment: FocusTimeSegment, anchor: HTMLElement): void; onInspectWork(segment: FocusWorkInterval, track: FocusTimelineTrack, anchor: HTMLElement): void; onPresence(key: string, present: boolean): void
@@ -370,8 +370,8 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
   if (!present) return null
   const currentFact = `Run alive · ${currentStateLabel}${working && !work && !workIntervals.some(item => item.segment.end === 'current') ? ' · Work start unknown' : ''} · Run start unknown`
   const path = [identity?.branch, identity?.topicId].filter(Boolean).join(' / ')
-  const currentPath = lane?.labels.slice(1).join(' / ')
-  const project = context ? lane?.labels[0] ?? context.workspaceName : identity?.project?.name
+  const currentPath = lanePath
+  const project = context ? laneProject ?? context.workspaceName : identity?.project?.name
   const disclosure = {
     label: `Inspect ${name} Context`, scope: JSON.stringify([track.key, context?.runId, context?.hostId, context?.workspacePath, context?.topicId]),
     reference: () => {
@@ -386,7 +386,7 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
     content: <><header><strong>{context ? name : identity?.name ?? sessionId}</strong><span>{context ? currentStateLabel : 'Retained history'}</span></header>
       <p className="recent-focus__context-location">{project ?? 'Project not recorded'}{(context ? currentPath : path) ? <small>{context ? currentPath : path}</small> : null}</p>
       {context?.detail ? <p className="recent-focus__context-task">{context.detail}</p> : null}
-      {context && lane?.summary && lane.summary !== context.detail ? <p className="recent-focus__context-topic"><span>Topic summary</span>{lane.summary}</p> : null}
+      {context && laneSummary && laneSummary !== context.detail ? <p className="recent-focus__context-topic"><span>Topic summary</span>{laneSummary}</p> : null}
       <footer>{context?.lastActivityAt ? <span>Last activity <time>{dateClock(context.lastActivityAt)}</time></span> : !context ? <span>Observed identity · Current state not recorded</span> : <span>Current Context</span>}<span>{context ? 'Click to open' : segments.length ? 'Click to inspect' : 'Read-only history'}</span></footer>
     </>
   }
@@ -488,7 +488,10 @@ const FocusTimeProject = memo(function FocusTimeProject({ project, registered, c
       <span className="recent-focus__project-summary" aria-hidden="true" />
     </button>
     <div className="recent-focus__project-tracks" data-collapsed={collapsed} inert={collapsed} aria-hidden={collapsed || undefined}>
-      {project.tracks.map(track => <FocusTimeTrack key={track.key} track={track} selected={!!track.current && track.sessionId === currentContext?.id && track.current.hostId === currentContext.hostId} onEvent={onEvent} onEventChanged={onEventChanged} onCurrentPresence={onCurrentPresence} recordedMessageTracks={recordedMessageTracks.get(JSON.stringify([track.current?.hostId ?? track.inputReference?.hostId ?? track.identity?.hostId, track.sessionId]))} retainedWork={workByReference.get(JSON.stringify([track.current?.hostId ?? track.inputReference?.hostId ?? track.identity?.hostId, track.sessionId]))} observeWork={observeWork} observing={observing && !collapsed} nativeMessages={track.current ? messagesByReference.get(JSON.stringify([track.current.hostId, track.sessionId])) : messagesByTrack.get(track.key)} window={window} now={now} scaleWidth={scaleWidth} lane={track.current ? lanesByContext.get(focusContextIdentityKey(track.current.hostId, track.sessionId)) : undefined} time={time} onSelect={onSelect} onPreview={onPreview} onDismiss={onDismiss} onInspect={onInspect} onInspectWork={onInspectWork} onPresence={observePresence} />)}
+      {project.tracks.map(track => {
+        const lane = track.current ? lanesByContext.get(focusContextIdentityKey(track.current.hostId, track.sessionId)) : undefined
+        return <FocusTimeTrack key={track.key} track={track} selected={!!track.current && track.sessionId === currentContext?.id && track.current.hostId === currentContext.hostId} onEvent={onEvent} onEventChanged={onEventChanged} onCurrentPresence={onCurrentPresence} recordedMessageTracks={recordedMessageTracks.get(JSON.stringify([track.current?.hostId ?? track.inputReference?.hostId ?? track.identity?.hostId, track.sessionId]))} retainedWork={workByReference.get(JSON.stringify([track.current?.hostId ?? track.inputReference?.hostId ?? track.identity?.hostId, track.sessionId]))} observeWork={observeWork} observing={observing && !collapsed} nativeMessages={track.current ? messagesByReference.get(JSON.stringify([track.current.hostId, track.sessionId])) : messagesByTrack.get(track.key)} window={window} now={now} scaleWidth={scaleWidth} lanePath={lane?.labels.slice(1).join(' / ')} laneProject={lane?.labels[0]} laneSummary={lane?.summary} time={time} onSelect={onSelect} onPreview={onPreview} onDismiss={onDismiss} onInspect={onInspect} onInspectWork={onInspectWork} onPresence={observePresence} />
+      })}
     </div>
   </section>
 })
@@ -938,11 +941,13 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
     const recordedThrough = Math.min(Date.now(), range.end)
     return readInputTracks.filter(source => source.messages.some(message => message.recordedAt !== undefined && Number.isFinite(message.recordedAt) && message.recordedAt >= range.start && message.recordedAt <= recordedThrough) || source.work?.items.some(item => item.createdAt <= Math.min(now, range.end)))
   }, [readInputTracks, range, now])
+  const previewTargets = useRef({ readSources, contexts, selectContext }); previewTargets.current = { readSources, contexts, selectContext }
   const inspectMessage = useCallback((message: ConversationRecord, target: HTMLElement, interactive: boolean, immediate = false, records?: readonly ConversationRecord[]) => {
     cancelPreviewIntent()
     if (!interactive && previewRef.current?.interactive) return
     const open = () => {
       if (!target.isConnected || target.closest('[inert]') || document.visibilityState === 'hidden') return
+      const { readSources, contexts, selectContext } = previewTargets.current
       previewFocusIntent.current = interactive
       // Resolve the original presentation of the record's recipient, never its author or a same-ID Host.
       const source = interactive ? readSources.find(source => source.messages.includes(message)) : undefined
@@ -953,7 +958,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
     }
     if (interactive || immediate) open()
     else { previewTimers.current.messageId = message.id; previewTimers.current.open = setTimeout(open, 180) }
-  }, [cancelPreviewIntent, readSources, contexts, selectContext])
+  }, [cancelPreviewIntent])
   const messagesByTrack = useMemo(() => new Map(readInputTracks.map(source => [source.key, source.messages])), [readInputTracks])
   // Presentation routing of existing bounded records, not another fact store.
   // A read input gets one observed/unknown track even while its Session is live.
@@ -970,7 +975,12 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const orderCandidates = useMemo(() => focusTimelineOrderCandidates(contexts, lanes ?? [], entries, readInputTracks), [contexts, lanes, entries, readInputTracks])
   const [timelineOrder, setTimelineOrder] = useState(() => createFocusTimelineOrder(orderCandidates))
   useLayoutEffect(() => { setTimelineOrder(before => extendFocusTimelineOrder(before, orderCandidates)) }, [orderCandidates])
-  const groupedProjects = useMemo(() => orderFocusTimelineProjects(groupFocusTimeline(contexts, lanes ?? [], tracks, visibleInputTracks), timelineOrder), [contexts, lanes, tracks, visibleInputTracks, timelineOrder])
+  const previousGroups = useRef<FocusTimelineProject[]>([])
+  const groupedProjects = useMemo(() => {
+    const current = groupFocusTimeline(contexts, lanes ?? [], tracks, visibleInputTracks, previousGroups.current)
+    previousGroups.current = current
+    return orderFocusTimelineProjects(current, timelineOrder)
+  }, [contexts, lanes, tracks, visibleInputTracks, timelineOrder])
   const projects = groupedProjects.filter(project => !projectScope?.projects.length || projectScope.projects.some(selected => selected.id === project.key))
 
   const ticks = useMemo(() => focusRulerTicks(range, displayedRuler), [range, displayedRuler])

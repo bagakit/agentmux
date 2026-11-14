@@ -3,6 +3,7 @@ import type { FocusContext } from './focus-context'
 import { focusLanesByContext, type FocusProjectLane } from './focus-project-lanes'
 import { focusContextIdentityKey } from './focus-context-identity'
 import type { FocusTimeSegment } from './focus-time-window'
+import { shallow } from 'zustand/shallow'
 
 export type FocusTimelineTrack = {
   key: string
@@ -69,8 +70,24 @@ export function resolveFocusInputTrack(observations: ReadonlyMap<string, FocusIn
   return observed ?? { sessionId: reference.agentSessionId, identity: undefined, key: trackKey(reference.agentSessionId, undefined, reference.hostId) }
 }
 
-/** Historical segments use their own observation. Current ownership only describes current facts. */
-export function groupFocusTimeline(contexts: readonly FocusContext[], lanes: readonly FocusProjectLane[], segments: ReadonlyMap<string, readonly FocusTimeSegment[]>, readonlyInputTracks: readonly FocusInputTrack[] = []): FocusTimelineProject[] {
+function sameIdentity(left: FocusTimelineIdentity | undefined, right: FocusTimelineIdentity | undefined): boolean {
+  if (left === right) return true
+  if (!left || !right) return false
+  const { project: leftProject, source: leftSource, ...leftFacts } = left
+  const { project: rightProject, source: rightSource, ...rightFacts } = right
+  return shallow(leftFacts, rightFacts) && shallow(leftProject, rightProject) && shallow(leftSource, rightSource)
+}
+function sameTrack(left: FocusTimelineTrack, right: FocusTimelineTrack): boolean {
+  const { identity: leftIdentity, segments: leftSegments, ...leftFacts } = left
+  const { identity: rightIdentity, segments: rightSegments, ...rightFacts } = right
+  // Current Context and inputReference retain original identity; only the
+  // derived identity values and slices can be rebuilt from unchanged facts.
+  return shallow(leftFacts, rightFacts) && shallow(leftSegments, rightSegments) && sameIdentity(leftIdentity, rightIdentity)
+}
+
+/** Historical segments use their own observation. Current ownership only describes current facts.
+ * The current projection may share unchanged tracks; it never retains removed facts. */
+export function groupFocusTimeline(contexts: readonly FocusContext[], lanes: readonly FocusProjectLane[], segments: ReadonlyMap<string, readonly FocusTimeSegment[]>, readonlyInputTracks: readonly FocusInputTrack[] = [], previous: readonly FocusTimelineProject[] = []): FocusTimelineProject[] {
   const groups = new Map<string, FocusTimelineProject>()
   const tracks = new Map<string, FocusTimelineTrack>()
   const byContext = focusLanesByContext(lanes)
@@ -103,6 +120,11 @@ export function groupFocusTimeline(contexts: readonly FocusContext[], lanes: rea
     track.inputProjectObserved = !!readonlyInputTrack.identity?.project
     track.inputReference = readonlyInputTrack.reference
   }
+  const previousTracks = new Map(previous.flatMap(project => project.tracks.map(track => [track.key, track] as const)))
+  for (const project of groups.values()) project.tracks = project.tracks.map(track => {
+    const retained = previousTracks.get(track.key)
+    return retained && sameTrack(retained, track) ? retained : track
+  })
   return [...groups.values()]
 }
 
