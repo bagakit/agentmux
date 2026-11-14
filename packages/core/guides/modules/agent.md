@@ -18,6 +18,16 @@ executables, installs hooks or starts Native. An empty catalog is confirmed empt
 source is unavailable, and runtimeId=null means the semantic owner identity is unknown.
 Declarations do not prove current permissions or readiness.
 
+Use agent posture inspect --host HOST --session SID --run RUN for the exact original
+Provider target/controlDigest. Set one declared intent with agent posture set --input FILE|-
+using that target, operationId, controlId, modeId and expectedControlDigest. Only the original
+transport-approved person/device can set; managed Agents cannot grant themselves modes.
+Applied proves the intent's byte ACK, never the current native mode. For lost/unknown results,
+read agent posture inspect --host HOST --session SID --operation-id OP; keep that ID and do
+not reinput. Inspection remains a read even when the original Run is gone. A new owner
+can read the retained ACK but reports diskDurability=unconfirmed: readable bytes do not prove
+the previous producer received its directory-sync acknowledgement.
+
 For a complete participant set, page agent ls to nextCursor=null. Narrow by the actual
 Executor/Provider before reading status. Use semantic=active for current work; running alone
 does not mean active. status, semantic, readiness and unavailable facts remain distinct.
