@@ -186,6 +186,7 @@ async function sourceCloseFixture(split = false, file = false) {
 
 it.runIf(business).each([false, true])('the shared close owner retires an unobserved Source workface (split %s) without borrowing a same-SID local Run', async split => {
   const f = await sourceCloseFixture(split), original = await f.source.d.core.readAgentSession(f.agent.agentSessionId)
+  const oldSnapshot = await f.bridge.api.call('snapshot', { hostId: f.target.hostId, reference: f.target.reference })
   const record = await f.store.getState().prepareWorkbenchClose({ target: f.close, keepAgentSessions: false })
   expect(record.plan.projection.source).toMatchObject({ hostId: f.target.hostId, edit: { reference: f.source.reference } })
   expect(record.plan.projection.resources).toEqual([])
@@ -204,6 +205,8 @@ it.runIf(business).each([false, true])('the shared close owner retires an unobse
   expect(f.store.getState().agentComposerDrafts['healthy-region']).toBe('Original unsent Agent draft')
   const saved = (await f.source.b.spatial.read())!
   expect(saved.graph.regions.some(region => region.regionId === f.admitted.address.regionId)).toBe(false)
+  f.store.getState().observeSpaceMount(f.target, { snapshot: oldSnapshot, reading: false })
+  expect(f.store.getState().tabs[f.tabId]?.regions[f.regionId]).toBeUndefined()
   const snapshot = await f.bridge.api.call('snapshot', { hostId: f.target.hostId, reference: f.target.reference })
   f.store.getState().observeSpaceMount(f.target, { snapshot, reading: false })
   expect(f.store.getState().tabs[f.tabId]?.regions[f.regionId]).toBeUndefined()
