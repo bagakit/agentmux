@@ -125,6 +125,7 @@
     "brand",
     "dist",
     "docs/patterns",
+    "examples",
     "src"
   ],
   "scripts": {

@@ -1,0 +1,51 @@
+/* Layout for these examples. The controls import their own styles. */
+:root {
+  --sp-1: .125rem;
+  --sp-2: .25rem;
+  --sp-3: .375rem;
+  --sp-4: .5rem;
+  --sp-5: .625rem;
+  --fs-xs: .75rem;
+  --fs-micro: .75rem;
+  --fs-sm: .875rem;
+  --fs-meta: .875rem;
+  --fs-body: 1rem;
+  --dur-fast: 120ms;
+  --ease-enter: ease-out;
+}
+body {
+  margin: 0;
+  padding: clamp(.65rem, 4vw, 2rem);
+  background: var(--bg);
+  color: var(--text);
+  font: 1rem/1.4 var(--font-sans, sans-serif);
+}
+#app { display: grid; justify-items: start; gap: .6rem; max-inline-size: 32rem; margin-inline: auto; }
+fieldset {
+  display: grid;
+  gap: .6rem;
+  box-sizing: border-box;
+  inline-size: 100%;
+  min-inline-size: 0;
+  margin: 0;
+  padding: .7rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-0);
+}
+legend { padding-inline: .3rem; color: var(--text); font-weight: 600; }
+label:has(> span > strong) { display: grid; gap: .3rem; }
+label > span:has(> strong) { display: grid; grid-row: 1; gap: .12rem; }
+label small { color: var(--text-2); }
+button, input, textarea { font: inherit; }
+button { max-inline-size: 100%; }
+button:not([class]) {
+  padding: .25rem .55rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+}
+button:not([class]):disabled { color: var(--text-3); }
+button:not([class]):focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+fieldset :where(p, ul) { margin-block: 0; }
