@@ -1,0 +1,8 @@
+import { spawnSync } from 'node:child_process'
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { resolve } from 'node:path'
+const root=resolve(import.meta.dirname,'../../..'),base=resolve(root,'.local/state/mesh-network-access/ui-mutants');mkdirSync(base,{recursive:true})
+const definitions=[['lost-fence','actual Renderer bridge'],['wrong-method','actual Renderer bridge'],['lost-draft','actual editor submits'],['lost-unknown','lost write ACK']]
+const results=[],runId=String(Date.now())
+for(const [mutant,pattern] of definitions){const evidence=resolve(base,mutant,runId);mkdirSync(evidence,{recursive:true});const run=spawnSync(process.execPath,['node_modules/vitest/vitest.mjs','run','--config','apps/desktop/test/vitest.mesh-settings.config.mts','-t',pattern],{cwd:root,encoding:'utf8',env:{...process.env,AGENTMUX_MESH_UI_MUTANT:mutant,AGENTMUX_MESH_UI_EVIDENCE:evidence},timeout:60000,maxBuffer:8*1024*1024});writeFileSync(resolve(evidence,'test.log'),run.stdout+run.stderr);const hits=readFileSync(resolve(evidence,'mutation.jsonl'),'utf8').trim().split('\n').map(JSON.parse),assertionFailed=/AssertionError|expected .* to /u.test(run.stdout+run.stderr);const passed=run.status===1&&!run.error&&hits.some(hit=>hit.mutant===mutant)&&assertionFailed;results.push({mutant,passed,exitCode:run.status,assertionFailed,hits});if(!passed)throw Error('Mesh UI mutation was not a real loaded red: '+mutant)}
+writeFileSync(resolve(base,'proof.json'),JSON.stringify({passed:results.every(r=>r.passed),results},null,2));process.stdout.write(JSON.stringify({passed:true,mutants:results.length})+'\n')
