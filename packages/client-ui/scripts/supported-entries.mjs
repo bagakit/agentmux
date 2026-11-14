@@ -28,9 +28,10 @@ export const supportedExamples = {
   selection: {
     entries: {
       './components/Tabs': 'components/Tabs.tsx',
-      './components/SegmentedControl': 'components/SegmentedControl.tsx'
+      './components/SegmentedControl': 'components/SegmentedControl.tsx',
+      './components/SelectionIndicator': 'components/SelectionIndicator.tsx'
     },
-    styles: ['./styles/segmented-control.css']
+    styles: ['./styles/segmented-control.css', './styles/selection-indicator.css']
   },
   overlays: {
     entries: {

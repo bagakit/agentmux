@@ -1,0 +1,27 @@
+.selection-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: -1;
+  box-sizing: border-box;
+  border: 1px solid var(--selection-indicator-border, var(--line-soft));
+  border-radius: var(--radius-sm);
+  background: var(--selection-indicator-background, var(--surface-2));
+  box-shadow: var(--selection-indicator-shadow, none);
+  pointer-events: none;
+}
+
+.selection-indicator[hidden] { display: none; }
+.selection-indicator[data-selection-motion] {
+  transition-property: transform, width, height;
+  transition-duration: var(--selection-indicator-duration, var(--dur-enter));
+  transition-timing-function: var(--selection-indicator-ease, var(--ease-enter));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .selection-indicator[data-selection-motion] { transition: none; }
+}
+
+@media (forced-colors: active) {
+  .selection-indicator { border-color: Highlight; box-shadow: none; }
+}

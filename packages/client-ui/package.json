@@ -38,7 +38,13 @@
       "browser": "./src/components/SegmentedControl.tsx",
       "import": "./dist/components/SegmentedControl.js"
     },
+    "./components/SelectionIndicator": {
+      "types": "./src/components/SelectionIndicator.tsx",
+      "browser": "./src/components/SelectionIndicator.tsx",
+      "import": "./dist/components/SelectionIndicator.js"
+    },
     "./styles/segmented-control.css": "./src/styles/segmented-control.css",
+    "./styles/selection-indicator.css": "./src/styles/selection-indicator.css",
     "./components/Modal": {
       "types": "./src/components/Modal.tsx",
       "browser": "./src/components/Modal.tsx",
