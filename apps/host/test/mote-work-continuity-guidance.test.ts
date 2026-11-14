@@ -2,6 +2,8 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { readFile, writeFile, stat, appendFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createMoteInputFixture, moteInputTestSource } from '../../../packages/core/test/helpers/mote-input-owner.js'
+import { objectCliEnvironment } from '../../../packages/core/test/helpers/object-cli-rpc.js'
+import { runSourceObjectCli } from '../../../packages/core/test/helpers/source-object-cli.js'
 import { AgentMuxNotesStorage } from '../../../packages/core/src/notes-storage.js'
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client.js'
@@ -30,6 +32,8 @@ afterEach(async () => {
 // These are delivery assertions, not assertions that a model followed the guide.
 function concreteWorkGuidance(value: string) {
   for (const text of [
+    'Understand the outcome the user needs and look for a better way as you work.',
+    'improve the method and update memory only where it will help future work.',
     '## Continue the concrete work',
     'kind: "heartbeat"',
     'one useful next action within its existing authority',
@@ -83,6 +87,17 @@ it('the original managed FutureIntent freezes the new concrete-work guide throug
   if (process.env.MOTE_GUIDANCE_FACTS) await appendFile(process.env.MOTE_GUIDANCE_FACTS, JSON.stringify({ kind: 'future-intent', loopId: loop.loopId,
     futureIntentId: loop.futureIntentId, operationId: intent!.operationId, target: f.target, automaticWrites: f.writes.length,
     prompt: intent!.message.userContent, systemContext: intent!.message.systemContext }) + '\n')
+})
+
+it('the public Mote guide carries the follow-through into user-requested task reminders', async () => {
+  const f = await fixture()
+  const guide = await runSourceObjectCli(['mote', '--skill'], objectCliEnvironment(f.root))
+  expect(guide.code, guide.stderr).toBe(0)
+  concreteWorkGuidance(guide.stdout)
+  expect(guide.stdout).toContain('Record only what future work can use')
+  expect(guide.stdout).toContain('For work the user asks you to do later, include the outcome they need')
+  expect(guide.stdout).toContain('improve the method and save useful memory once the task is done')
+  expect(f.writes).toEqual([])
 })
 
 it('public logical Main input archives the same guidance without changing the original human request', async () => {
