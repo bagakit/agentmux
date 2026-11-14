@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, createElement } from 'react'
+import { act, createElement, useCallback } from 'react'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -38,6 +38,14 @@ import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { spaceMountTransport } from './helpers/space-mount-fixture'
 
 const dom = composerDOM({ agentInformation: true }), cleanup: Array<() => unknown | Promise<unknown>> = []
+const sourceProjectionObservation = vi.hoisted(() => ({ value: undefined as ReturnType<typeof import('../src/renderer/src/lib/use-focus-sources').useFocusSources> | undefined }))
+// Observe the original Hook result; facts, readers and routing remain unchanged.
+vi.mock('../src/renderer/src/lib/use-focus-sources', async importOriginal => {
+  const actual = await importOriginal<typeof import('../src/renderer/src/lib/use-focus-sources')>()
+  return { ...actual, useFocusSources(...args: Parameters<typeof actual.useFocusSources>) {
+    const result = actual.useFocusSources(...args); sourceProjectionObservation.value = result; return result
+  } }
+})
 afterEach(async () => { await dom.render(null); for (const dispose of cleanup.splice(0).reverse()) await dispose() })
 const foreignRecap = '原远端自己的非空分析结论，沿原 Provider 和有界阅读载体消费。'
 const SID = 'same-original-sid', localName = '原本机任务：核对分析结果', localRecap = '原本机已经核对的业务结论，不能借给另一个 Runtime。'
@@ -46,7 +54,7 @@ const timeline = (sid: string, text: string): AgentTimelineSnapshot => ({ agentS
 /** App's single window owner plus the exact Focus projection destination. */
 function MainFocusFixture({ navigate, regionOnly = false }: { navigate: (id: string) => void; regionOnly?: boolean }) {
   const state = useAppStore(), catalog = workbenchSelectionCatalog(state)
-  const select = (reference: WorkbenchProjectionSelection) => { state.selectMainRegion(reference, state.workbenchSpaceSelection) }
+  const select = useCallback((reference: WorkbenchProjectionSelection) => { const current = useAppStore.getState(); current.selectMainRegion(reference, current.workbenchSpaceSelection) }, [])
   const presentation = mainFocusPresentation(state.workbenchSpaceSelection, state.tabs, catalog, select, regionOnly ? 'region' : 'tab')
   const projection = presentation.projection, reference = projection?.selection[0]
   const focusVisible = state.mainSurface === 'agents' && state.focusView === 'list'
@@ -259,6 +267,24 @@ it('different original Runtimes with the same raw SID remain separate ordinary c
   expect(f.member).toHaveBeenCalledWith(expect.objectContaining({ target: expect.objectContaining({ runtimeId: f.d.owner.runtimeId, agentSessionId: SID, regionId: f.admitted.address.regionId }) }), expect.any(Function), expect.anything())
   expect(dom.container.querySelector('[data-mounted-focus-source]')).toBeNull()
   expect(dom.container.querySelector('[aria-label="Original project Agents"]')).toBeNull()
+})
+
+it('keeps the real foreign Source projection through unrelated file metadata and consumes its next original name', async () => {
+  const f = await fixture({ foreign: true }); await f.settle(2)
+  await vi.waitFor(() => expect(cardWith('真正远端的独立任务').textContent).toContain(foreignRecap))
+  const before = sourceProjectionObservation.value
+  expect(before).toBeDefined()
+  expect(before!.contexts).toHaveLength(1)
+  expect(before!.contexts[0]!.access?.rename).toBeDefined()
+  for (let index = 0; index < 3; index++) await act(async () => useAppStore.setState(state => ({ tabs: { ...state.tabs,
+    unrelated: createWorkbenchTab('unrelated', { kind: 'file', regionId: 'unrelated-region', workspaceId: 'original-b-project', path: `other-${index}.txt` }) } })))
+  expect(sourceProjectionObservation.value, 'Unrelated metadata must keep the original facts, readers and routing projection').toBe(before)
+  const access = before!.contexts[0]!.access!
+  await act(async () => { expect(await access.rename!('Original Source updated name', access.nameRevision!)).toBe(true) })
+  await vi.waitFor(() => expect(cardWith('Original Source updated name').textContent).toContain(foreignRecap))
+  expect(sourceProjectionObservation.value).not.toBe(before)
+  expect(cardWith(localName).textContent).toContain(localRecap)
+  expect(useAppStore.getState().agentComposerDrafts[SID]).toBe('Keep this original local draft')
 })
 
 it('an unavailable exact foreign Session remains an ordinary unknown card and is not classified as confirmed recovery', async () => {

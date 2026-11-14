@@ -1,7 +1,7 @@
 import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixtureIso as _hygiene_fixtureIso } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
-import { act, type ReactNode } from 'react'
+import { act, type ComponentProps, type ReactNode } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest'
@@ -43,7 +43,7 @@ const markers = () => [...host.querySelectorAll<HTMLButtonElement>('.recent-focu
 const rawIds = () => markers().flatMap(node => JSON.parse(node.dataset.messageRawIds!) as string[])
 const recordIds = () => markers().flatMap(node => JSON.parse(node.dataset.messageIds!) as string[])
 const recordCount = () => markers().reduce((count, node) => count + Number(node.dataset.recordCount), 0)
-async function render(extra?: ReactNode) { await act(async () => root.render(<><GlobalFocusSurface />{extra}</>)) }
+async function render(extra?: ReactNode, onSelectContext?: ComponentProps<typeof GlobalFocusSurface>['onSelectContext']) { await act(async () => root.render(<><GlobalFocusSurface onSelectContext={onSelectContext} />{extra}</>)) }
 async function wait(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check() }, { timeout: 3000, interval: 10 }) }
 async function click(selector: string) { const node = host.querySelector<HTMLElement>(selector) ?? overlay().querySelector<HTMLElement>(selector); expect(node, selector).not.toBeNull(); await act(async () => node!.click()) }
 async function plotRecord(id: string) {
@@ -135,6 +135,23 @@ afterEach(async () => {
     try { await action() } catch (error) { failures.push(error) }
   }
   if (failures.length) throw new AggregateError(failures, 'Original Focus fixture cleanup failed')
+})
+
+it('routes the original native preview through the latest Context and selection callback', async () => {
+  const originalSelect = vi.fn(), currentSelect = vi.fn()
+  await render(undefined, originalSelect)
+  // This producer has no confirmed Region placement. Read its original native
+  // records through the existing All projects control rather than borrowing the rail's project.
+  await click('[aria-label="Show all timeline projects"]')
+  await wait(() => expect(rawIds()).toContain('u'))
+  await render(undefined, currentSelect)
+  await act(async () => useAppStore.setState(state => ({ agentNames: { ...state.agentNames, [ID]: 'Current recipient name' } })))
+  await plotRecord('u')
+  expect(currentSelect).toHaveBeenCalledWith(ID, undefined)
+  expect(originalSelect).not.toHaveBeenCalled()
+  expect(overlay().querySelector('.recent-focus__message-body')?.textContent).toContain('Repeated original speech')
+  expect(host.querySelector(`[data-focus-timeline-id="${ID}"]`)?.textContent).toContain('Current recipient name')
+  healthy()
 })
 
 it('neighboring inputs and replies use the actual ruler width, keep original order and read each record with truthful seconds', async () => {
