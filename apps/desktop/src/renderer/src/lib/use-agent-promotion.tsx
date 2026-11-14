@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import type { AgentPromotionApply } from '@agentmux/core/agent-promotion'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import type { WorkbenchProjectionSelection } from './workbench-projection'
 import { focusAgentMenuLocation, requireFocusAgentMenuLocation } from './focus-agent-menu-location'
@@ -9,7 +10,11 @@ import { AgentPromotionDialog, type AgentPromotionSelection } from '../component
 export function useAgentPromotion(session: Extract<SessionSnapshot, { kind: 'agent' }> | null | undefined,
   title: string, reference?: WorkbenchProjectionSelection, regionId?: string) {
   const [selection, setSelection] = useState<AgentPromotionSelection | null>(null)
-  const [promoted, setPromoted] = useState(false)
+  const intents = useRef(new Map<string, AgentPromotionApply>())
+  const currentTarget = useRef<string | null>(null)
+  currentTarget.current = session ? JSON.stringify({ hostId: session.control.hostId, agentSessionId: session.control.agentSessionId }) : null
+  const selectedKey = selection ? JSON.stringify(selection.target) : null
+  const [promoted, setPromoted] = useState<string | null>(null)
   function open() {
     if (!session) return
     try {
@@ -24,6 +29,12 @@ export function useAgentPromotion(session: Extract<SessionSnapshot, { kind: 'age
     } catch (cause) { useAppStore.getState().reportError(cause) }
   }
   return { open: session ? open : undefined,
-    dialog: selection ? <AgentPromotionDialog key={JSON.stringify(selection.target)} selection={selection} onClose={() => setSelection(null)} onPromoted={() => setPromoted(true)} /> : null,
-    feedback: promoted ? <span className="agent-promotion-feedback" role="status">已晋升为 Mote<button type="button" className="icon-button" aria-label="关闭晋升提示" onClick={() => setPromoted(false)}>×</button></span> : null }
+    dialog: selection ? <AgentPromotionDialog key={selectedKey} selection={selection} initialIntent={intents.current.get(selectedKey!) ?? null}
+      onIntent={input => intents.current.set(JSON.stringify(input.target), input)} onClose={() => setSelection(null)} onPromoted={result => {
+        const key = JSON.stringify(result.target), held = intents.current.get(key)
+        if (!held || held.operationId !== result.operationId) return
+        intents.current.delete(key)
+        if (currentTarget.current === key) setPromoted(key)
+      }} /> : null,
+    feedback: promoted && promoted === currentTarget.current ? <span className="agent-promotion-feedback" role="status">已加入 Club<button type="button" className="icon-button" aria-label="关闭晋升提示" onClick={() => setPromoted(null)}>×</button></span> : null }
 }
