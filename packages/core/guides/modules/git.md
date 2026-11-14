@@ -28,3 +28,13 @@ Agent or deleting its cwd.
 
 Read amux git --help for repository/history contracts and amux git worktree close --help
 for the exact closeout journey.
+
+Use `git compare --workspace ID --host ID --workspace-path PATH --base BRANCH --target BRANCH
+--mode merge-base|two-point` to obtain the original fixed branch comparison. Both branches are
+exact local names from `refs/heads`, never arbitrary revision expressions. `merge-base` compares
+from their common ancestor; `two-point` compares the exact base and target commits. Each result
+entry supplies repository-relative `path` and `origPath` (including both sides of a rename).
+To read it, pass `{snapshot,file:{path,origPath}}` unchanged to `git diff --input FILE|-`.
+The snapshot's Host/repository and immutable OIDs remain authoritative if branch labels move.
+This calls the GUI's original Git comparison producer; it does not fetch, checkout or mutate
+Git, Workspaces, Sessions or execution cwd. Ordinary Git/GitHub write workflows stay with git/gh.
