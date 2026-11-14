@@ -20,7 +20,6 @@
 .host-install__choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); }
 .host-install__choice { display: grid; grid-template-columns: auto minmax(0, 1fr); align-content: start; column-gap: var(--sp-2); row-gap: var(--sp-2); padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius); cursor: pointer; transition: border-color 160ms, background-color 160ms; }
 .host-install__choice[data-selected=true] { border-color: var(--green); background: color-mix(in srgb, var(--green) 8%, transparent); }
-.host-install__choice:focus-within { outline: 2px solid var(--green); outline-offset: 2px; }
 .host-install__choice input { accent-color: var(--green); margin: 2px 0 0; }
 .host-install__choice strong { color: var(--text); font-size: var(--fs-meta); }
 .host-install__choice > span, .host-install__choice > p { grid-column: 2; }

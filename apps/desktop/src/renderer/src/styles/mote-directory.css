@@ -29,8 +29,7 @@
 .mote-directory[data-mote-directory-view="collaborators"] .mote-directory-current { position: absolute; left: 5px; top: 5px; }
 .mote-directory-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; border: 0; }
 .mote-directory-settings > label { min-width: 0; padding: 10px; border: 1px solid var(--line-soft); border-radius: var(--radius); cursor: pointer; }
-.mote-directory-settings > label[data-selected="true"] { background: var(--surface-2); border-color: var(--focus-line); }
-.mote-directory-settings > label:focus-within { outline: 1px solid var(--focus-line); outline-offset: 2px; }
+.mote-directory-settings > label[data-selected="true"] { background: var(--surface-2); border-color: var(--green-line); }
 .mote-directory-settings__preview { height: 68px; display: flex; align-items: center; justify-content: center; gap: 10px; }
 .mote-directory-settings__preview > span { display: flex; flex-direction: column; align-items: center; gap: 5px; }
 .mote-directory-settings__preview i { display: block; width: 27px; height: 27px; border-radius: 50%; background: var(--text-3); opacity: .6; }
