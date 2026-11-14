@@ -82,8 +82,8 @@ import { parseAppMemoryEvidence } from './app-memory-evidence.js'
 import { assertToolkitResultTarget, isToolkitOperation, parseToolkitRequest, parseToolkitResult } from './toolkit.js'
 import { parseDesktopFocusRequest, parseDesktopFocusSuccessReceipt } from './desktop-focus-parser.js'
 import { isBrowserTaskControlOperation, parseBrowserTaskControlPayload, parseBrowserTaskControlResult } from './browser-task-control.js'
-import { parseBrowserControl, parseBrowserProfileRef, parseBrowserTarget, parseBrowserTargetsResult, parseBrowserReleaseReceipt } from './control-browser-targets.js'
-import { isSpaceControlOperation, parseSpaceControlRequest, parseSpaceControlSuccessReceipt, spaceControlId } from './space-control-parser.js'
+import { parseBrowserOpenMismatch, parseBrowserControl, parseBrowserProfileRef, parseBrowserTarget, parseBrowserTargetsResult, parseBrowserReleaseReceipt } from './control-browser-targets.js'
+import { isSpaceControlOperation, parseSpaceControlRequest, parseSpaceControlSuccessReceipt, spaceControlId, parseSurveyPageAdmission } from './space-control-parser.js'
 import { parseGitOpenParams, parseGitOpenResult } from './public-rpc-git.js'
 import { settingsResourceBudget, settingsResourceEnvelope, settingsResourceRecord, settingsResourceValue } from './settings-resource-json.js'
 import { parseRemoteCoreInstallCheck, parseRemoteCoreInstallExpected, parseRemoteCoreInstallReceipt } from './remote-core-install-codec.js'
@@ -951,8 +951,16 @@ function parseBrowserRegion(value: unknown): AgentMuxBrowserRegion {
   const source = object(value, 'Control Browser Region result is invalid.', 'CONTROL_PROTOCOL_ERROR')
   if (source.mode !== undefined && source.mode !== 'normal' && source.mode !== 'private') throw new AgentMuxError('Browser mode result is invalid.', 'CONTROL_PROTOCOL_ERROR')
   const profile = source.profile === undefined ? undefined : parseBrowserProfileRef(source.profile)
-  if (profile && source.mode === 'private') throw new AgentMuxError('A private Browser has no Profile.', 'CONTROL_PROTOCOL_ERROR')
-  return { ...region, ...(source.mode === undefined ? {} : { mode: source.mode as 'normal' | 'private' }), ...(profile ? { profile } : {}) }
+  const profileId = source.profileId === undefined ? undefined : identity(source.profileId, 'Browser Profile ID is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  if ((profile || profileId) && source.mode === 'private' || profile && profileId !== undefined && profile.id !== profileId) {
+    throw new AgentMuxError('Browser Profile facts conflict with this page.', 'CONTROL_PROTOCOL_ERROR')
+  }
+  const profileIssue = source.profileIssue === undefined ? undefined : source.profileIssue
+  if (profileIssue !== undefined && (typeof profileIssue !== 'string' || !profileId || profile)) {
+    throw new AgentMuxError('Browser Profile label observation is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  }
+  return { ...region, ...(source.mode === undefined ? {} : { mode: source.mode as 'normal' | 'private' }),
+    ...(profileId === undefined ? {} : { profileId }), ...(profileIssue === undefined ? {} : { profileIssue }), ...(profile ? { profile } : {}) }
 }
 
 function parseTab(value: unknown) {
@@ -1557,7 +1565,13 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
   if (operation === 'inspect.region') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { region: parseRegion(result.region, true) } }
   if (isSpaceControlOperation(operation)) return parseSpaceControlSuccessReceipt(source)
   if (operation === 'open.terminal') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { region: parseTerminalRegion(result.region) } }
-  if (operation === 'open.browser') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { region: parseBrowserRegion(result.region) } }
+  if (operation === 'open.browser') {
+    const region = parseBrowserRegion(result.region), survey = parseSurveyPageAdmission(result.survey)
+    if (survey.reference && (survey.reference.regionId !== region.regionId || survey.reference.browserId !== region.browserId)) {
+      throw new AgentMuxError('Survey admission belongs to another original Browser Region.', 'CONTROL_PROTOCOL_ERROR')
+    }
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { region, survey } }
+  }
   if (operation === 'focus') return parseDesktopFocusSuccessReceipt(source)
   if (operation === 'arrange') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { tab: parseTab(result.tab) } }
   if (operation === 'promote.region') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { tabId: identity(result.tabId, 'Control promote result is invalid.', 'CONTROL_PROTOCOL_ERROR'), regionId: identity(result.regionId, 'Control promote result is invalid.', 'CONTROL_PROTOCOL_ERROR'), workspaceId: id(result.workspaceId, 'Control promote result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }
@@ -1878,12 +1892,17 @@ export function parseAgentMuxControlReceipt(value: unknown): AgentMuxControlRece
   }
   if (source.ok !== false) throw new AgentMuxError('Control receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
   if (source.result !== undefined) throw new AgentMuxError('Control receipt must contain exactly one result or error.', 'CONTROL_PROTOCOL_ERROR')
-  const error = rpcRecord(source.error, ['code', 'message', 'candidates', 'controlFailure', 'cause'], 'CONTROL_PROTOCOL_ERROR')
+  const error = rpcRecord(source.error, ['code', 'message', 'candidates', 'controlFailure', 'cause', 'details'], 'CONTROL_PROTOCOL_ERROR')
   const code = controlErrorCode(error.code)
   if (code === 'CONTROL_FAILED' && error.code !== 'CONTROL_FAILED') throw new AgentMuxError('Control error receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
   const message = text(error.message, 'Control error message', 'CONTROL_PROTOCOL_ERROR')
-  if (code === 'MESSAGE_TARGET_NOT_UNIQUE' && (Object.hasOwn(error, 'cause') || Object.hasOwn(error, 'controlFailure'))) {
+  if (code === 'MESSAGE_TARGET_NOT_UNIQUE' && (Object.hasOwn(error, 'cause') || Object.hasOwn(error, 'controlFailure') || Object.hasOwn(error, 'details'))) {
     throw new AgentMuxError('Addressing candidates cannot carry input failure facts.', 'CONTROL_PROTOCOL_ERROR')
+  }
+  const details = error.details
+  if (details && typeof details === 'object' && ['browser-open-profile-mismatch', 'browser-open-identity-mismatch'].includes(Object.getOwnPropertyDescriptor(details, 'kind')?.value)) {
+    if (code !== 'LAUNCH_RESULT_MISMATCH') throw new AgentMuxError('Browser mismatch facts require their original error code.', 'CONTROL_PROTOCOL_ERROR')
+    parseBrowserOpenMismatch(details)
   }
   const cause = error.cause === undefined ? undefined : parseAgentMuxErrorData(error.cause)
   if (cause?.code === 'MESSAGE_TARGET_NOT_UNIQUE') throw new AgentMuxError('Addressing candidates require their original Control union.', 'CONTROL_PROTOCOL_ERROR')
@@ -1895,7 +1914,7 @@ export function parseAgentMuxControlReceipt(value: unknown): AgentMuxControlRece
   const parsedError = code === 'MESSAGE_TARGET_NOT_UNIQUE'
     ? { code, message, candidates: candidates(error.candidates) ?? (() => { throw new AgentMuxError('Control error candidates are required.', 'CONTROL_PROTOCOL_ERROR') })() }
     : !Object.hasOwn(error, 'candidates')
-      ? { code, message, ...(cause === undefined ? {} : { cause }), ...(controlFailure === undefined ? {} : { controlFailure }) }
+      ? { code, message, ...(details === undefined ? {} : { details }), ...(cause === undefined ? {} : { cause }), ...(controlFailure === undefined ? {} : { controlFailure }) }
       : (() => { throw new AgentMuxError('Control error candidates are invalid.', 'CONTROL_PROTOCOL_ERROR') })()
   return {
     schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,

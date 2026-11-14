@@ -35,12 +35,14 @@ function controlError(error: AgentMuxControlError): Error {
   const original = receipt.error
   if (original.code !== 'MESSAGE_TARGET_NOT_UNIQUE' && original.cause) {
     const data = original.cause
-    const failure = new AgentMuxError(data.message, data.code, data.detail, data.controlFailure ?? original.controlFailure, data.logId)
+    const failure = Object.assign(new AgentMuxError(data.message, data.code, data.detail, data.controlFailure ?? original.controlFailure, data.logId),
+      original.details === undefined ? {} : { details: original.details })
     Object.defineProperty(failure, 'cause', { value: Object.assign(new Error(original.message), { code: original.code }) })
     return failure
   }
   return Object.assign(new Error(original.message), {
     code: original.code,
+    ...(original.code !== 'MESSAGE_TARGET_NOT_UNIQUE' && original.details ? { details: original.details } : {}),
     ...(original.code === 'MESSAGE_TARGET_NOT_UNIQUE' ? { candidates: original.candidates } : {}),
     ...(original.code !== 'MESSAGE_TARGET_NOT_UNIQUE' && original.controlFailure ? { controlFailure: original.controlFailure } : {})
   })

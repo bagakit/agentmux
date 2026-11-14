@@ -1,11 +1,11 @@
 import type { MainSurface } from '../store'
 import type { WorkbenchBrowserPresentation } from '../components/BrowserPresentationStage'
-import type { SurveyZoneSelection } from './survey-workface'
+import type { SurveySelection } from './survey-page-references'
 
 type SelectionState = {
   mainSurface: MainSurface
   layouts: Readonly<Record<string, { activeGroupId: string } | undefined>>
-  surveyZoneSelection: SurveyZoneSelection | null
+  surveyZoneSelection: SurveySelection | null
 }
 
 /** A Tab projection displays its Browser siblings independently of the focused Region. */

@@ -249,7 +249,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     [identitySelector, navigationCatalog, identityTabs, filterContexts, config?.executors, config?.appearance.agentAvatars, config?.workspaces, layouts, locationsKnown])
   const survey = useAppStore(useShallow(state => ({ surveyCollectedZones: state.surveyCollectedZones, surveyOrganization: state.surveyOrganization, surveyExplorationNames: state.surveyExplorationNames })))
   const originContent = useAppStore(useShallow(state => ({ bindings: state.spaceZoneBindings, categories: state.topicCategories })))
-  const surveyItems = useMemo(() => readSurveyPresentation({ ...survey, surveyZoneSelection: null, tabs }, navigationCatalog).items, [survey, tabs, navigationCatalog])
+  const surveyItems = useMemo(() => readSurveyPresentation({ ...survey, surveyPageReferences: [], surveyZoneSelection: null, tabs }, navigationCatalog).items, [survey, tabs, navigationCatalog])
   const laneMembership = JSON.stringify(filterLanes.map(lane => [lane.id, lane.hostId, lane.workspaceId, lane.projectWorkspaceId, lane.topicId, lane.objectKind, lane.contextIds]))
   const laneOrigins = useMemo(() => focusLaneOrigins(filterLanes, navigationCatalog, tabs, surveyItems, originContent), [laneMembership, navigationCatalog, tabs, surveyItems, originContent])
   const retainedProjects = useMemo(() => deriveRetainedFocusProjects(executionHistory, allLanes, {

@@ -128,10 +128,16 @@ export type AgentMuxSurveyOrganization = {
   groups: { groupId: string; name: string; collapsed: boolean; zoneIds: string[] }[]
 }
 /** Explicit client membership, independent of organization order and Core topology. */
-export type AgentMuxSurveyCollectionChange = { zoneIds: string[]; expectedZoneIds: string[] }
+export type AgentMuxSurveyPageReference = { regionId: string; browserId: string }
+export type AgentMuxSurveyPageAdmission = Pick<AgentMuxWorkfaceReport, 'save' | 'issues'> & {
+  outcome: 'not-requested' | 'registered' | 'partial' | 'unknown'
+  reference?: AgentMuxSurveyPageReference
+}
+export type AgentMuxSurveyCollectionChange = { zoneIds?: string[]; expectedZoneIds?: string[]; pageReferences?: AgentMuxSurveyPageReference[]; expectedPageReferences?: AgentMuxSurveyPageReference[] }
 export type AgentMuxSurveyListReport = AgentMuxWorkfaceReport & {
   scope: 'survey-list'
   collectedZoneIds: string[]
+  pageReferences: AgentMuxSurveyPageReference[]
   storedOrganization: AgentMuxSurveyOrganization
   effectiveOrganization: AgentMuxSurveyOrganization
   outcome: 'read' | 'changed' | 'unchanged' | 'partial' | 'unknown' | 'refused'
@@ -140,11 +146,12 @@ export type AgentMuxSurveyListReport = AgentMuxWorkfaceReport & {
 export type AgentMuxSurveyPresentation = {
   organization?: AgentMuxSurveyOrganization
   items: { zoneId: string; name: string; issue?: string }[]
+  pages: (AgentMuxSurveyPageReference & { name: string; profileId?: string; issue?: string })[]
   selection: {
     zoneId: string
     selection: { tabId: string; regionId: string }[]
     active: { tabId: string; regionId: string } | null
-  } | null
+  } | ({ kind:'page' } & AgentMuxSurveyPageReference) | null
   issue?: string
 }
 export type AgentMuxSpaceCatalog = {

@@ -36,6 +36,7 @@ import { GlobalBoardSurface } from './components/GlobalBoardSurface'
 import { GlobalFocusSurface } from './components/GlobalFocusSurface'
 import { GlobalRecallSurface } from './components/GlobalRecallSurface'
 import { GlobalSurveySurface } from './components/GlobalSurveySurface'
+import { isSurveyPage, surveyPageProjection } from './lib/survey-page-references'
 import { resolveBrowserStartPage } from '../../shared/browser-start-page'
 import { PmoTeamsTopicFloatingPanel } from './components/PmoTeamsTopicFloatingPanel'
 import { MoteWorkface } from './components/MoteWorkface'
@@ -337,6 +338,12 @@ function DesktopApp() {
     if (!state.surveyZoneSelection || JSON.stringify(state.surveyZoneSelection) !== JSON.stringify(surveySelection)) return
     const currentTopics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) ?? []
     const currentCatalog = spatialCatalog(state, currentTopics)
+    if (isSurveyPage(state.surveyZoneSelection)) {
+      const scope = surveyPageProjection(state.surveyZoneSelection, currentCatalog, state.tabs, () => {}, reference)
+      if (!scope?.selection.some(member => sameWorkbenchProjectionSelection(member, reference))) return
+      surveyOccurrence.current = reference
+      return
+    }
     const tab = state.tabs[reference.tabId]
     const scope = resolveWorkbenchZone(state.surveyZoneSelection.zoneId, currentCatalog, state.layouts, state.tabs, 'survey-workbench', [], () => {})
     const layout = scope?.composition ?? state.layouts[reference.displayWorkspaceId]
@@ -349,11 +356,14 @@ function DesktopApp() {
   }, [surveySelection])
   const surveyProjection = useMemo(() => {
     if (!surveySelection || !surveyCatalog) return null
+    if (isSurveyPage(surveySelection)) {
+      return surveyPageProjection(surveySelection, surveyCatalog, tabs, selectSurveyReference, surveyOccurrence.current)
+    }
     const projection = resolveWorkbenchZone(surveySelection.zoneId, surveyCatalog, layouts, tabs, 'survey-workbench',
       surveySelection.active ? [...surveySelection.selection, surveySelection.active] : surveySelection.selection, selectSurveyReference)
     return projection
   }, [surveySelection, surveyCatalog, layouts, tabs, selectSurveyReference])
-  const surveyCurrentSelection = useMemo(() => surveySelection ? surveyResolvedZoneSelection(surveySelection, surveyProjection, surveyOccurrence.current) : null,
+  const surveyCurrentSelection = useMemo(() => surveySelection && !isSurveyPage(surveySelection) ? surveyResolvedZoneSelection(surveySelection, surveyProjection, surveyOccurrence.current) : null,
     [surveySelection, surveyProjection])
   const recallOccurrence = useRef<WorkbenchProjectionSelection | null>(null)
   const selectRecallReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
@@ -796,7 +806,7 @@ function DesktopApp() {
                   <button className="primary-button" onClick={() => openSettings('hosts')}>Configure a host</button>
                 </section>
               ) : null}
-              {surveyVisited || mainSurface === 'survey' ? <GlobalSurveySurface onSelectReference={selectSurveyReference} visible={surveyVisible} controlsCoverPage={surveyToolsOpen && narrowControls} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} catalog={surveyCatalog} projection={surveyProjection} selection={surveyCurrentSelection} viewTargets={viewTargets}
+              {surveyVisited || mainSurface === 'survey' ? <GlobalSurveySurface onSelectReference={selectSurveyReference} visible={surveyVisible} controlsCoverPage={surveyToolsOpen && narrowControls} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} catalog={surveyCatalog} projection={surveyProjection} selection={surveyCurrentSelection} pageSelection={isSurveyPage(surveySelection)?surveySelection:null} viewTargets={viewTargets}
                 /> : null}
               {recallVisited || mainSurface === 'recall' ? <GlobalRecallSurface onSelectReference={selectRecallReference} visible={recallVisible} catalog={surveyCatalog} projection={recallProjection} selection={recallCurrentSelection} viewTargets={viewTargets} /> : null}
               {mainSurface === 'agents' || focusVisited ? <GlobalFocusSurface visible={focusVisible} workspaceOpen={focusWorkfaceView !== 'closed' && Boolean(workbenchSpaceSelection || focusWorkfaceView === 'unconfirmed')} onCloseWorkspace={() => setFocusWorkfaceView('closed')} onSelectContext={selectFocusContext} onSelectLocation={focusWorkfaceView === 'unconfirmed' ? undefined : selectFocusReference} regionOnly={focusRegionOnly} onToggleRegion={() => setFocusWorkfaceView(value => value === 'region' ? 'tab' : 'region')} presentation={focusPresentation} currentReference={timelineCurrentReference} directoryIssue={spatialDirectory.issue} viewTargets={viewTargets} /> : null}

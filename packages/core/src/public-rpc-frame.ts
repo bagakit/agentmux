@@ -1,3 +1,4 @@
+import { parseBrowserOpenMismatch } from './control-browser-targets.js'
 import { validateDeliveryLogId } from './delivery-attempt.js'
 import { JSONRPCErrorCode, createJSONRPCErrorResponse, type JSONRPCRequest, type JSONRPCResponse, type JSONRPCID } from 'json-rpc-2.0'
 import { AgentMuxError, parseAgentMuxCreationFailure, parseAgentMuxStorageFailure,
@@ -64,6 +65,11 @@ export function parseRpcResponse(value: unknown): JSONRPCResponse {
     if (error.data !== undefined) {
       const data = rpcRecord(error.data, ['code', 'detail', 'details', 'candidates', 'controlFailure', 'logId', 'creationFailure', 'storageFailure'], 'CONTROL_PROTOCOL_ERROR')
       if (typeof data.code !== 'string' || data.detail !== undefined && typeof data.detail !== 'string') throw new AgentMuxError('Invalid typed RPC error.', 'CONTROL_PROTOCOL_ERROR')
+      if (data.details && typeof data.details === 'object' &&
+          ['browser-open-profile-mismatch', 'browser-open-identity-mismatch'].includes(Object.getOwnPropertyDescriptor(data.details, 'kind')?.value)) {
+        if (data.code !== 'LAUNCH_RESULT_MISMATCH') throw new AgentMuxError('Browser mismatch facts require their original error code.', 'CONTROL_PROTOCOL_ERROR')
+        parseBrowserOpenMismatch(data.details)
+      }
       if (data.logId !== undefined) validateDeliveryLogId(data.logId)
       if (data.controlFailure !== undefined) parseRpcControlFailure(data.controlFailure)
       if (data.creationFailure !== undefined) parseAgentMuxCreationFailure(data.creationFailure)

@@ -62,11 +62,12 @@ const surveyReference = z.object({ tabId: id, regionId: id }).strict()
 /** Exact stored client preferences; catalog availability never filters this observation. */
 const survey = z.object({
   collectedZoneIds: z.array(id).refine(ids => new Set(ids).size === ids.length, 'Survey membership contains duplicate Zone IDs.'),
+  pageReferences:z.array(z.object({regionId:id,browserId:id}).strict()),
   organization: z.unknown().transform((value, context) => {
     try { return parseSurveyOrganization(value, 'CONTROL_PROTOCOL_ERROR') }
     catch (error) { context.addIssue({ code: 'custom', message: error instanceof Error ? error.message : 'Invalid Survey organization.' }); return z.NEVER }
   }),
-  selection: z.object({ zoneId: id, selection: z.array(surveyReference), active: surveyReference.nullable() }).strict().nullable()
+  selection: z.union([z.object({ zoneId: id, selection: z.array(surveyReference), active: surveyReference.nullable() }).strict(),z.object({kind:z.literal('page'),regionId:id,browserId:id}).strict()]).nullable()
 }).strict()
 export const desktopWorkbenchObservationSchema = z.object({
   loading: z.boolean(),

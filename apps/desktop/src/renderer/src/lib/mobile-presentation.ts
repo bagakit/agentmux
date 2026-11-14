@@ -1,6 +1,7 @@
 import { effectiveSurveyOrganization, surveyOrganizationZoneIds } from './survey-list'
 import { surveyExplorationName } from './survey-exploration-name'
 import type { SurveyZoneSelection } from './survey-workface'
+import { isSurveyPage, surveyPageOwner, type SurveySelection } from './survey-page-references'
 import type { WorkbenchTab } from './workbench-tabs'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { ScratchTopicSnapshot } from '../../../shared/contracts'
@@ -112,9 +113,11 @@ export async function readSpatialAppearance(state: State, catalog: AgentMuxSpace
 /** Preserve the original explicit research references, including temporarily missing topology. */
 export function readSurveyPresentation(state: {
   surveyCollectedZones: Record<string, true>
+  surveyPageReferences: import('@agentmux/core/control').AgentMuxSurveyPageReference[]
+  surveyPageReadRecovery?: { issue: string } | null
   surveyOrganization?: import('@agentmux/core/control').AgentMuxSurveyOrganization
   surveyExplorationNames: Record<string, string>
-  surveyZoneSelection: SurveyZoneSelection | null
+  surveyZoneSelection: SurveySelection | null
   tabs: Record<string, WorkbenchTab>
 }, catalog: AgentMuxSpaceCatalog): NonNullable<AgentMuxSpaceCatalog['survey']> {
   const zones = new Set(catalog.zones.map(zone => zone.zoneId))
@@ -126,12 +129,27 @@ export function readSurveyPresentation(state: {
   const organization = effectiveSurveyOrganization(state.surveyOrganization, state.surveyCollectedZones)
   return {
     organization,
+    ...(state.surveyPageReadRecovery ? { issue: state.surveyPageReadRecovery.issue } : {}),
+    pages: state.surveyPageReferences.map(page => {
+      const owner = surveyPageOwner(state.tabs, page)
+      const browser = owner?.surface.kind === 'browser' ? owner.surface : null
+      return {
+        ...page,
+        name: browser?.title || 'Retained page',
+        ...(browser?.mode === 'normal' && browser.profileId ? { profileId: browser.profileId } : {}),
+        ...(!owner ? { issue: 'The original Browser is not confirmed in this exact Region. Its reference is kept.' } : {})
+      }
+    }),
     items: surveyOrganizationZoneIds(organization).map(zoneId => {
       const tabs = tabsByZone.get(zoneId) ?? []
       return { zoneId, name: surveyExplorationName(state.surveyExplorationNames[zoneId], tabs),
         ...(!zones.has(zoneId) ? { issue: '研究工作面暂未确认，原引用保留。' } : {}) }
     }),
-    selection: state.surveyZoneSelection ? {
+    selection: isSurveyPage(state.surveyZoneSelection) ? {
+      kind: 'page',
+      regionId: state.surveyZoneSelection.regionId,
+      browserId: state.surveyZoneSelection.browserId
+    } : state.surveyZoneSelection ? {
       zoneId: state.surveyZoneSelection.zoneId,
       selection: state.surveyZoneSelection.selection.map(({ tabId, regionId }) => ({ tabId, regionId })),
       active: state.surveyZoneSelection.active ? { ...state.surveyZoneSelection.active } : null

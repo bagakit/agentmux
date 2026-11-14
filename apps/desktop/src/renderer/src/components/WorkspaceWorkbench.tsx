@@ -2217,7 +2217,10 @@ export function WorkspaceWorkbench({
         const projectedGroup = ownerId ? groupById.get(ownerId) : undefined
         const regionTarget = projection?.projection?.entity.kind === 'region' ? projection : undefined
         const projectedSurface = regionTarget?.reference ? tab.regions[regionTarget.reference.regionId] : undefined
-        const nativeRegionTarget = projectedSurface && projectedSurface.kind !== 'browser'
+        // The original Region portal already supplies its complete content at
+        // this exact destination, including a Browser's native stage. A second
+        // thin Browser destination at that same host would split its geometry.
+        const nativeRegionTarget = projectedSurface
           ? confirmedRegionTarget(regionTarget, tab.id, projectedSurface.regionId) : undefined
         const tabProjection = regionTarget ? undefined : projection
         const targetId = tabProjection?.hostId ?? null

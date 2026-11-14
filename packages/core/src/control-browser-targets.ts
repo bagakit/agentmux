@@ -1,3 +1,4 @@
+import { rpcRecord } from './rpc-data.js'
 import type { AgentMuxBrowserControl, AgentMuxBrowserSource, AgentMuxBrowserTarget, AgentMuxBrowserTargetsResult, AgentMuxBrowserResource, AgentMuxBrowserReleaseReceipt, AgentMuxBrowserRetention } from './browser-targets.js'
 import { BROWSER_PAGE_CAPABILITY_NAMES } from './browser-page-capability.js'
 import { AgentMuxError } from './errors.js'
@@ -190,4 +191,36 @@ function parseBrowserResource(value: unknown): AgentMuxBrowserResource {
   }
   if ((row.state === 'cold' || row.state === 'released') && processes?.length) throw new AgentMuxError('Unloaded Browser has native processes.', 'CONTROL_PROTOCOL_ERROR')
   return { state: row.state as AgentMuxBrowserResource['state'], locations, processes, ...(retention ? { retention } : {}) }
+}
+
+/** These original IDs remain queryable; this mismatch grants no cleanup authority. */
+export function parseBrowserOpenMismatch(value: unknown): import('./browser-targets.js').AgentMuxBrowserOpenMismatch {
+  const row = rpcRecord(value, ['kind', 'operationId', 'browserId', 'profileId', 'mode', 'requestedProfileId',
+    'requestedBrowserId', 'returnedBrowserId', 'creation'], 'CONTROL_PROTOCOL_ERROR')
+  if (row.kind === 'browser-open-identity-mismatch') {
+    if (Object.keys(row).length !== 5 || row.creation !== 'unconfirmed' || row.requestedBrowserId === row.returnedBrowserId) {
+      throw new AgentMuxError('Browser open mismatch facts are invalid.', 'CONTROL_PROTOCOL_ERROR')
+    }
+    return {
+      kind: 'browser-open-identity-mismatch',
+      operationId: text(row.operationId, 16384),
+      requestedBrowserId: text(row.requestedBrowserId, 16384),
+      returnedBrowserId: text(row.returnedBrowserId, 16384),
+      creation: 'unconfirmed'
+    }
+  }
+  if (Object.keys(row).length !== 6 || row.kind !== 'browser-open-profile-mismatch' ||
+      row.mode !== 'normal' && row.mode !== 'private' ||
+      row.mode === 'private' && row.profileId !== null ||
+      row.mode === 'normal' && row.profileId === row.requestedProfileId) {
+    throw new AgentMuxError('Browser open mismatch facts are invalid.', 'CONTROL_PROTOCOL_ERROR')
+  }
+  return {
+    kind: 'browser-open-profile-mismatch',
+    operationId: text(row.operationId, 16384),
+    browserId: text(row.browserId, 16384),
+    profileId: row.profileId === null ? null : text(row.profileId, 16384),
+    mode: row.mode,
+    requestedProfileId: text(row.requestedProfileId, 16384)
+  }
 }

@@ -1,6 +1,7 @@
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
   parseAgentMuxErrorData,
+  parseBrowserOpenMismatch,
   type AgentMuxControlError,
   type AgentMuxControlErrorCode
 } from '@agentmux/core/control'
@@ -111,7 +112,14 @@ function responseError(error: unknown): AgentMuxControlError {
     return { code: 'CONTROL_FAILED', message: 'Desktop Control owner returned unexpected message target candidates.' }
   }
   let cause
+  let details
   try {
+    details = source?.details
+    if (details && typeof details === 'object' &&
+        ['browser-open-profile-mismatch', 'browser-open-identity-mismatch'].includes(Object.getOwnPropertyDescriptor(details, 'kind')?.value)) {
+      if (code !== 'LAUNCH_RESULT_MISMATCH') throw new Error('Unexpected Browser mismatch facts.')
+      details = parseBrowserOpenMismatch(details)
+    }
     if (typeof source?.code === 'string' && (!controlErrorCode(source.code) || source.detail !== undefined || source.controlFailure !== undefined || source.logId !== undefined)) {
       cause = parseAgentMuxErrorData({ code: source.code, message,
         ...(source.detail === undefined ? {} : { detail: source.detail }),
@@ -124,6 +132,7 @@ function responseError(error: unknown): AgentMuxControlError {
   return {
     code,
     message: withRecovery(message, { code }),
+    ...(details === undefined ? {} : { details }),
     ...(cause ? { cause, ...(cause.controlFailure ? { controlFailure: cause.controlFailure } : {}) } : {})
   }
 }

@@ -175,6 +175,7 @@ import { compactNotificationIdentity, ownedNotificationIdentity, normalizeNotifi
 import { notificationDeliveryNotice } from './lib/notification-delivery-notice'
 import { persist } from 'zustand/middleware'
 import { learningReviewKey, restoredLearningReviewDrafts, type AgentLearningReviewDraft } from './lib/agent-learning-review-draft'
+import { isSurveyPage, surveyPageOwner, restoredSurveyPages, readSurveyPagePreferences, restoredSurveySelection, persistedSurveySelection, type SurveySelection } from './lib/survey-page-references'
 import { restoredSurveyCollection, restoredSurveyZoneSelection, persistedSurveyZoneSelection, surveyCollectionAfterClose, surveySelectionAfterClose, surveySelectionAfterPromote, surveySelectReference, type SurveyZoneSelection, type PersistedSurveyZoneSelection } from './lib/survey-workface'
 import { shallow } from 'zustand/shallow'
 import { configValuesEqual } from '../../shared/config-edit'
@@ -1174,8 +1175,13 @@ export type AppState = GitReadingActions & {
   setRecallSidebarWidth(width: number): void
   setRecallNotebook(notebookId: string | null, noteId?: string | null): void
   refreshNotesStorage(): Promise<void>
-  surveyZoneSelection: SurveyZoneSelection | null
+  surveyZoneSelection: SurveySelection | null
   /** Explicit Survey creation or saved display membership; Browser existence does not imply membership. */
+  surveyPageReadRecovery: import('./lib/survey-page-references').SurveyPageReadRecovery | null
+  retrySurveyPagesRead(): Promise<void>
+  surveyPageReferences: import('@agentmux/core/control').AgentMuxSurveyPageReference[]
+  setSurveyPageCollected(reference: import('@agentmux/core/control').AgentMuxSurveyPageReference, collected: boolean): Promise<import('@agentmux/core/control').AgentMuxSurveyListReport>
+  registerSurveyBrowserPage(reference: import('@agentmux/core/control').AgentMuxSurveyPageReference, profileId: string): Promise<import('@agentmux/core/control').AgentMuxSurveyPageAdmission>
   surveyCollectedZones: Record<string, true>
   surveyOrganization: import('@agentmux/core/control').AgentMuxSurveyOrganization
   setSurveyOrganization(organization: import('@agentmux/core/control').AgentMuxSurveyOrganization, expected: import('@agentmux/core/control').AgentMuxSurveyOrganization): Promise<import('@agentmux/core/control').AgentMuxSurveyListReport>
@@ -1187,7 +1193,7 @@ export type AppState = GitReadingActions & {
   surveySidebarCollapsed: boolean
   setSurveySidebarCollapsed(collapsed: boolean): void
   setSurveySidebarWidth(width: number): void
-  setSurveyZoneSelection(selection: SurveyZoneSelection | null): void
+  setSurveyZoneSelection(selection: SurveySelection | null): void
   setSurveyToolsOpen(open: boolean): void
   createSurveyBrowser(input: Parameters<typeof createSurveyBrowser>[1]): ReturnType<typeof createSurveyBrowser>
   /** Open an http(s) URL as a new Survey Browser through the same owner as system links; the current workface is kept. */
@@ -4006,7 +4012,8 @@ type PersistedAppState = {
   /** Previous persisted notebook context is transferred once into Recall. */
   surveyNotebookId?: string | null
   surveyNoteId?: string | null
-  surveyZoneSelection?: PersistedSurveyZoneSelection | null
+  surveyZoneSelection?: SurveySelection | null
+  surveyPageReferences?: unknown
   surveyCollectedZones?: Record<string, true>
   surveyOrganization?: import('@agentmux/core/control').AgentMuxSurveyOrganization
   surveyExplorationNames?: Record<string, string>
@@ -4054,6 +4061,8 @@ export type RestoredUiState = Pick<
   | 'recallSidebarCollapsed'
   | 'recallSidebarWidth'
   | 'surveyZoneSelection'
+  | 'surveyPageReadRecovery'
+  | 'surveyPageReferences'
   | 'surveyCollectedZones'
   | 'surveyOrganization'
   | 'surveyExplorationNames'
@@ -4153,7 +4162,8 @@ export function restorePersistedUiState(
     | 'recallSidebarCollapsed'
     | 'recallSidebarWidth'
     | 'surveyZoneSelection'
-    | 'surveyCollectedZones'
+  | 'surveyPageReferences'
+  | 'surveyCollectedZones'
   | 'surveyOrganization'
     | 'surveyExplorationNames'
     | 'noteBlockSelections'
@@ -4181,6 +4191,7 @@ export function restorePersistedUiState(
     | 'explorerShowIgnored'
   >
 ): RestoredUiState {
+  const surveyPages=readSurveyPagePreferences(persisted.surveyPageReferences)
   return {
     workspaceAgentOrder: restoreWorkspaceAgentOrder(persisted.workspaceAgentOrder),
     workbenchSpaceSelection: restoreWorkbenchSpaceSelection(persisted.workbenchSpaceSelection),
@@ -4195,7 +4206,9 @@ export function restorePersistedUiState(
     recallZoneSelection: restoredSurveyZoneSelection(persisted.recallZoneSelection ?? (persisted.surveyNotebookId ? persisted.surveyZoneSelection : null)),
     recallSidebarCollapsed: restoredBoolean(persisted.recallSidebarCollapsed, false),
     recallSidebarWidth: clampSurveySidebarWidth(persisted.recallSidebarWidth ?? SURVEY_SIDEBAR_DEFAULT_WIDTH),
-    surveyZoneSelection: restoredSurveyZoneSelection(persisted.surveyNotebookId ? null : persisted.surveyZoneSelection),
+    surveyZoneSelection: restoredSurveySelection(persisted.surveyNotebookId ? null : persisted.surveyZoneSelection),
+    surveyPageReferences: surveyPages.references,
+    surveyPageReadRecovery: surveyPages.recovery,
     surveyCollectedZones: restoredSurveyCollection(persisted.surveyCollectedZones),
     surveyOrganization: restoreSurveyOrganization(persisted.surveyOrganization),
     surveyExplorationNames: restoredSurveyExplorationNames(persisted.surveyExplorationNames),
@@ -4297,6 +4310,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     recallNotebookId: state.recallNotebookId, recallNoteId: state.recallNoteId,
     recallZoneSelection: state.recallZoneSelection, recallSidebarCollapsed: state.recallSidebarCollapsed, recallSidebarWidth: state.recallSidebarWidth,
     surveyZoneSelection: state.surveyZoneSelection,
+    surveyPageReferences: state.surveyPageReadRecovery ? state.surveyPageReadRecovery.source : state.surveyPageReferences,
     surveyCollectedZones: state.surveyCollectedZones,
     surveyOrganization: state.surveyOrganization,
     surveyExplorationNames: state.surveyExplorationNames,
@@ -4349,7 +4363,7 @@ function partializeAppState(state: AppState): PersistedAppState {
     ...presentation,
     recallNotebookId: presentation.recallNotebookId, recallNoteId: presentation.recallNoteId,
     recallZoneSelection: persistedSurveyZoneSelection(presentation.recallZoneSelection),
-    surveyZoneSelection: persistedSurveyZoneSelection(presentation.surveyZoneSelection),
+    surveyZoneSelection: persistedSurveySelection(presentation.surveyZoneSelection),
     documents: Object.fromEntries(Object.entries(documents).filter(([key, document]) => dirtyDocuments[key] || document.noteConversion || document.noteEditing?.attempt || document.noteEditing?.input || document.noteEditing?.share || document.noteEditing?.shareUndo)),
     dirtyDocuments: Object.fromEntries(Object.entries(dirtyDocuments).filter(([, dirty]) => dirty)),
     ...(!coreSpatialReady ? { projectGroups: projectGroups!, spaceZoneBindings: spaceZoneBindings!,
@@ -4680,15 +4694,19 @@ async function requestWorkbenchStorageFlush(includeSpatial = true, includeFileVi
     throw error
   }
 }
-async function saveWorkbenchSelection(layoutApplied: boolean): Promise<AgentMuxSpatialSave> {
+async function saveWorkbenchSelection(layoutApplied: boolean, includeSpatial = true): Promise<AgentMuxSpatialSave> {
   let clientStateWritten = false, storageFlushRequested = false, reason: string | null = null
   try {
     if (!workbenchWriteFence.isOpen()) throw new Error('The saved Workbench is still being restored.')
-    await requestWorkbenchStorageFlush()
+    if (!includeSpatial) {
+      await checkpointWorkbenchUserState()
+      clientStateWritten = true
+    }
+    await requestWorkbenchStorageFlush(includeSpatial)
     clientStateWritten = true
     storageFlushRequested = true
   } catch (error) { reason = presentError(error); useAppStore.getState().reportWorkbenchSaveFailure(error) }
-  return { layoutApplied, clientStateWritten, storageFlushRequested, diskDurability: storageFlushRequested && coreSpatialPersistence?.ready ? 'confirmed' : 'unconfirmed', reason }
+  return { layoutApplied, clientStateWritten, storageFlushRequested, diskDurability: includeSpatial && storageFlushRequested && coreSpatialPersistence?.ready ? 'confirmed' : 'unconfirmed', reason }
 }
 
 /** Explicit per-tool palette save; command configuration and Run identity are untouched. */
@@ -5190,8 +5208,8 @@ function surveyPresentationAfterClose(state: AppState, tabs: AppState['tabs']) {
   return { recallNoteId: closedPage ? null : state.recallNoteId,
     recallZoneSelection: closedPage ? null : surveySelectionAfterClose(state.tabs, tabs, state.recallZoneSelection),
     surveyCollectedZones,
-    surveyZoneSelection: state.surveyZoneSelection && state.surveyCollectedZones[state.surveyZoneSelection.zoneId] && !surveyCollectedZones[state.surveyZoneSelection.zoneId]
-      ? null : surveySelectionAfterClose(state.tabs, tabs, state.surveyZoneSelection) }
+    surveyZoneSelection: !isSurveyPage(state.surveyZoneSelection) && state.surveyZoneSelection && state.surveyCollectedZones[state.surveyZoneSelection.zoneId] && !surveyCollectedZones[state.surveyZoneSelection.zoneId]
+      ? null : isSurveyPage(state.surveyZoneSelection) ? state.surveyZoneSelection : surveySelectionAfterClose(state.tabs, tabs, state.surveyZoneSelection) }
 }
 
 export async function registerCreatedNote(receipt: NoteCreationReceipt): Promise<NoteCreationReceipt> {
@@ -5544,10 +5562,28 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     catch (error) { get().reportError(new Error('The original Note and draft are kept. File observation is unconfirmed; reopen this same Note to reconnect it. ' + presentError(error))) }
   },
   surveyZoneSelection: null,
+  surveyPageReadRecovery: null,
+  async retrySurveyPagesRead() {
+    const original = get().surveyPageReadRecovery
+    if (!original) return
+    try {
+      const raw = __AGENTMUX_WEB_PREVIEW__ ? window.localStorage.getItem(WORKBENCH_USER_STATE_KEY) : await api.ui.readWorkbenchState()
+      if (raw === null) throw new Error('The original Desktop preference document is unavailable; its retained page references are kept.')
+      const saved = JSON.parse(raw)
+      if (!saved || typeof saved.state !== 'object' || saved.state === null) throw new Error('The original Desktop preference source is unreadable.')
+      const read = readSurveyPagePreferences(saved.state.surveyPageReferences)
+      if (get().surveyPageReadRecovery !== original) return
+      set({ surveyPageReferences: read.references, surveyPageReadRecovery: read.recovery })
+    } catch {
+      if (get().surveyPageReadRecovery === original) set({ surveyPageReadRecovery: { ...original,
+        issue: 'The original Survey page preference source is still unavailable. Its data and healthy pages are kept; restore it and read again.' } })
+    }
+  },
+  surveyPageReferences: [],
   surveyCollectedZones: {},
   surveyOrganization: restoreSurveyOrganization(undefined),
   async setSurveyOrganization(organization, expected) {
-    return await executeSurveyList({ get, set, hasZone: confirmedSurveyZones(get()), save: () => saveWorkbenchSelection(false) },
+    return await executeSurveyList({ get, set, hasZone: confirmedSurveyZones(get()), hasPage: reference => Boolean(surveyPageOwner(get().tabs,reference)), save: () => saveWorkbenchSelection(false, false) },
       { schemaVersion: 5, requestId: mintObjectId(), operation: 'space.survey-list', organization, expected })
   },
   surveyExplorationNames: {},
@@ -5564,16 +5600,50 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   setSurveySidebarWidth(width) {
     set({ surveySidebarWidth: clampSurveySidebarWidth(width) })
     // Commit only the finished presentation gesture through the existing save owner.
-    void saveWorkbenchSelection(false)
+    void saveWorkbenchSelection(false, false)
   },
   surveyToolsOpen: false,
   setSurveyZoneSelection(selection) {
-    const surveyZoneSelection = persistedSurveyZoneSelection(selection)
+    const surveyZoneSelection = persistedSurveySelection(selection)
     // Re-emitting the current member preference is a refresh, not later navigation.
     if (sameSpatialValue(get().surveyZoneSelection, surveyZoneSelection)) return
     // Local Survey selection never navigates Work; explicit focus owns that handoff.
     set({ surveyZoneSelection })
-    void saveWorkbenchSelection(false)
+    void saveWorkbenchSelection(false, false)
+  },
+  async setSurveyPageCollected(reference, collected) {
+    const state = get(), pages = state.surveyPageReferences
+    const next = collected
+      ? [...pages.filter(page => page.regionId !== reference.regionId), { ...reference }]
+      : pages.filter(page => page.regionId !== reference.regionId || page.browserId !== reference.browserId)
+    return executeSurveyList({ get, set,
+      hasZone: zoneId => confirmedSurveyZones(get())(zoneId),
+      hasPage: page => Boolean(surveyPageOwner(get().tabs, page)),
+      save: () => saveWorkbenchSelection(false, false)
+    }, { schemaVersion: 5, requestId: mintObjectId(), operation: 'space.survey-list',
+      collection: { pageReferences: next, expectedPageReferences: pages } })
+  },
+  async registerSurveyBrowserPage(reference, profileId) {
+    const issue = (code: string, message: string) => ({ step: 'survey', code, message,
+      recovery: 'The original page is kept. Inspect its exact Region/Browser and space survey-list; retry only this reference change, never opening another page.' })
+    const owner = surveyPageOwner(get().tabs, reference)
+    if (!owner || owner.surface.kind !== 'browser' || owner.surface.mode !== 'normal' || owner.surface.profileId !== profileId) {
+      return { outcome: 'unknown', reference, save: null, issues: [issue('SURVEY_PAGE_BINDING_UNCONFIRMED',
+        'The exact Main-confirmed Profile and Browser Region binding is unavailable.')] }
+    }
+    const existing = get().surveyPageReferences.find(page => page.regionId === reference.regionId)
+    if (existing && existing.browserId !== reference.browserId) {
+      return { outcome: 'unknown', reference, save: null, issues: [issue('SURVEY_PAGE_OCCUPANT_CONFLICT',
+        'The original saved Region reference names another Browser. Its reference and the newly created page are kept.')] }
+    }
+    try {
+      const report = await get().setSurveyPageCollected(reference, true)
+      return { reference, save: report.save, issues: report.issues,
+        outcome: report.outcome === 'refused' || report.outcome === 'unknown' ? 'unknown' : report.outcome === 'partial' ? 'partial' : 'registered' }
+    } catch {
+      return { outcome: 'partial', reference, save: null, issues: [issue('SURVEY_PAGE_SAVE_UNCONFIRMED',
+        'The page was created, but its Survey reference save is unconfirmed.')] }
+    }
   },
   setSurveyZoneCollected(zoneId, collected) {
     const state = get()
@@ -5584,7 +5654,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!surveyCollectedZones) return false
     set({ surveyCollectedZones })
     // Membership is a discrete user action, not a drag that can wait for a trailing write.
-    void saveWorkbenchSelection(false)
+    void saveWorkbenchSelection(false, false)
     return true
   },
   setSurveyToolsOpen(surveyToolsOpen) { set({ surveyToolsOpen, workbenchNavigationInputPolicy: null, regionCaretFocus: null }) },
@@ -6442,7 +6512,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       throw Object.assign(new Error('Settings requests belong to the Main configuration owner.'), { code: 'CONTROL_FAILED' })
     }
     if (request.operation === 'space.survey-list') return { operation: request.operation, ...await executeSurveyList({ get,
-      set, hasZone: confirmedSurveyZones(get()), save: () => saveWorkbenchSelection(false) }, request) }
+      set, hasZone: confirmedSurveyZones(get()), hasPage: reference => Boolean(surveyPageOwner(get().tabs,reference)), save: () => saveWorkbenchSelection(false, false) }, request) }
     if (request.operation === 'space.agent-order') return { operation: request.operation, ...await executeWorkspaceAgentOrder({ get, resolveExecution: agentRegionExecution,
       set: (id, value) => set(state => ({ workspaceAgentOrder: { ...state.workspaceAgentOrder, [id]: value } })),
       save: () => saveWorkbenchSelection(false)
@@ -6611,7 +6681,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           if (localFocus) {
             if (!ownsLocalTarget(address)) return
             selecting = true
-            try { get().setSurveyZoneSelection(surveySelectReference(get().surveyZoneSelection!, address)) }
+            try { const selected=get().surveyZoneSelection; if(selected&&!isSurveyPage(selected)) get().setSurveyZoneSelection(surveySelectReference(selected, address)) }
             finally { expectedNavigation = fileNavigationSelection(get()); selecting = false }
             return
           }
@@ -6734,7 +6804,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         activeWorkspaceId: state.activeWorkspaceId, mainSurface: state.mainSurface,
         focus: { executionSessionId: state.agentFocus.execution.sessionId, pmoSessionId: state.agentFocus.pmo.sessionId },
         survey: { collectedZoneIds: Object.keys(state.surveyCollectedZones).filter(id => state.surveyCollectedZones[id] === true),
-          organization: state.surveyOrganization, selection: persistedSurveyZoneSelection(state.surveyZoneSelection) },
+          organization: state.surveyOrganization, pageReferences: state.surveyPageReferences, selection: persistedSurveySelection(state.surveyZoneSelection) },
         persistence: { userStatePending: persistentWorkbenchStorage.pending() || desktopUserDocument.unreadFragments().length > 0 || auxiliaryUserDataPending(),
           userStateContentDigest: (() => {
             const encoded = desktopUserDocument.encodeProjection({ state: partializeAppState(state), version: 1 })
@@ -7093,7 +7163,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       set((current) => ({
         ...(current.mainSurface === 'survey' || current.mainSurface === 'recall' ? {} : { retainedSpatialFocus: null,
           activeWorkspaceId: result.target.workspaceId, mainSurface: 'workbench' as const }),
-        surveyZoneSelection: surveySelectionAfterPromote(current.surveyZoneSelection, region, result.target),
+        surveyZoneSelection: isSurveyPage(current.surveyZoneSelection) ? current.surveyZoneSelection : surveySelectionAfterPromote(current.surveyZoneSelection, region, result.target),
         recallZoneSelection: surveySelectionAfterPromote(current.recallZoneSelection, region, result.target),
         tabs: result.tabs,
         layouts: result.layouts
@@ -7267,6 +7337,18 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!workspace) throw controlFailure('UNKNOWN_WORKSPACE', 'Control target Workspace is not configured.')
     const rollback = (surface: WorkbenchSurface): void => {
       set((current) => {
+        // Preparing a split intentionally balances its geometry. Restore the
+        // captured layout only while this original planned layout and Launcher
+        // are unchanged. Browser metadata/input updates keep their newer data;
+        // later layout edits use the ordinary temporary-leaf rollback instead.
+        const currentTab = current.tabs[plan.tabId]
+        if (request.operation === 'open.browser' && plan.kind === 'split' && surface === plan.launcher &&
+            currentTab && currentTab.layout === plan.tabs[plan.tabId]?.layout && currentTab.regions[plan.regionId] === surface &&
+            state.tabs[plan.tabId]) {
+          const regions = { ...currentTab.regions }
+          delete regions[plan.regionId]
+          return { tabs: { ...current.tabs, [plan.tabId]: { ...currentTab, regions, layout: state.tabs[plan.tabId]!.layout } } }
+        }
         const restored = rollbackControlOpen({ tabs: current.tabs, layouts: current.layouts }, plan, surface)
         return restored ? { tabs: restored.tabs, layouts: restored.layouts } : current
       })
@@ -7360,12 +7442,30 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const browser = request.capsuleId === undefined
         ? await api.browser.create(browserId, request.url, workspace.id, request.profileId, request.mode)
         : await api.browser.create(browserId, request.url, workspace.id, undefined, request.mode, undefined, request.capsuleId, request.requestId)
-      // The receipt names the Profile Main actually used, with the label from Main's one committed list.
-      const profile = browser.mode === 'normal' && request.capsuleId === undefined && browser.profileId
-        ? browserProfiles.get().profiles?.find(candidate => candidate.id === browser.profileId) ?? (await api.browser.listProfiles()).find(candidate => candidate.id === browser.profileId)
-        : undefined
-      createdBrowserId = browser.id
-      if (browser.id !== browserId) await cleanup(controlFailure('LAUNCH_RESULT_MISMATCH', 'Browser owner returned another Browser identity.'))
+      if (browser.id !== browserId) {
+        throw controlFailure('LAUNCH_RESULT_MISMATCH', 'Main returned another Browser identity. Its returned page is kept and is not this operation’s confirmed creation. Inspect the requested and returned Browser IDs in the structured failure facts before another action.', {
+          details: {
+            kind: 'browser-open-identity-mismatch',
+            operationId: request.requestId,
+            requestedBrowserId: browserId,
+            returnedBrowserId: browser.id,
+            creation: 'unconfirmed'
+          }
+        })
+      }
+      createdBrowserId = browserId
+      if (request.profileId !== undefined && (browser.mode !== 'normal' || browser.profileId !== request.profileId)) {
+        throw controlFailure('LAUNCH_RESULT_MISMATCH', 'Main did not confirm the requested Profile. Its original page is kept; inspect the exact Browser in the structured failure facts. Do not repeat opening it to repair the binding.', {
+          details: {
+            kind: 'browser-open-profile-mismatch',
+            operationId: request.requestId,
+            browserId: browser.id,
+            profileId: browser.profileId,
+            mode: browser.mode,
+            requestedProfileId: request.profileId
+          }
+        })
+      }
       if (signal?.aborted) await cleanup(controlCancellation(signal))
       const surface: BrowserWorkbenchSurface = {
         ...browser, regionId: plan.regionId, kind: 'browser', workspaceId: workspace.id, browserId
@@ -7383,10 +7483,29 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return { tabs: { ...current.tabs, [owner.tab.id]: updateWorkbenchRegion(owner.tab, plan.regionId, () => surface) } }
       })
       if (!attached) await cleanup(controlFailure('CONTROL_OWNER_LOST', 'Control Region owner disappeared during Browser creation.'))
+      // Once attached, Survey and display-label observations cannot revoke this healthy page.
+      const reference = { regionId: plan.regionId, browserId }
+      let survey: import('@agentmux/core/control').AgentMuxSurveyPageAdmission = { outcome: 'not-requested', save: null, issues: [] }
+      if (request.profileId !== undefined) {
+        try { survey = await get().registerSurveyBrowserPage(reference, browser.profileId!) }
+        catch {
+          survey = { outcome: 'partial', reference, save: null, issues: [{ step: 'survey', code: 'SURVEY_PAGE_REGISTRATION_UNCONFIRMED',
+            message: 'The page is attached, but its Survey registration is unconfirmed.',
+            recovery: 'Inspect this exact Region/Browser and space survey-list. Retry only the original reference change; do not open another page.' }] }
+        }
+      }
+      let profile: import('../../shared/contracts').BrowserProfileSummary | undefined, profileIssue: string | undefined
+      if (browser.mode === 'normal' && request.capsuleId === undefined && browser.profileId) {
+        profile = browserProfiles.get().profiles?.find(candidate => candidate.id === browser.profileId)
+        if (!profile) try { profile = (await api.browser.listProfiles()).find(candidate => candidate.id === browser.profileId) } catch { /* Keep the known Main binding. */ }
+        if (!profile) profileIssue = 'The Profile label is unconfirmed. Its Main-confirmed ID and original page are kept; refresh the Profile list.'
+      }
       return {
         operation: request.operation,
         region: { tabId: plan.tabId, regionId: plan.regionId, workspaceId: workspace.id, kind: 'browser', browserId, mode: browser.mode,
-          ...(profile ? { profile: { id: profile.id, label: profile.label } } : {}) }
+          ...(browser.mode === 'normal' && request.capsuleId === undefined && browser.profileId ? { profileId: browser.profileId } : {}),
+          ...(profileIssue ? { profileIssue } : {}), ...(profile ? { profile: { id: profile.id, label: profile.label } } : {}) },
+        survey
       }
     } catch (error) {
       rollback(plan.launcher)
@@ -7973,7 +8092,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set((state) => ({
       ...(state.mainSurface === 'survey' || state.mainSurface === 'recall' ? {} : { retainedSpatialFocus: null,
         activeWorkspaceId: result.target.workspaceId, mainSurface: 'workbench' as const }),
-      surveyZoneSelection: surveySelectionAfterPromote(state.surveyZoneSelection, { workspaceId, tabId, regionId }, result.target),
+      surveyZoneSelection: isSurveyPage(state.surveyZoneSelection) ? state.surveyZoneSelection : surveySelectionAfterPromote(state.surveyZoneSelection, { workspaceId, tabId, regionId }, result.target),
       recallZoneSelection: surveySelectionAfterPromote(state.recallZoneSelection, { workspaceId, tabId, regionId }, result.target),
       tabs: result.tabs,
       layouts: result.layouts
@@ -11066,6 +11185,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }
         return
       }
+      if (profileId !== undefined && mode !== 'private' && !capsuleId) {
+        const admission = await get().registerSurveyBrowserPage({ regionId, browserId: browser.id }, profileId)
+        if (admission.issues.length) get().reportError(new Error(admission.issues.map(issue => issue.message + ' ' + issue.recovery).join('\n')), { kind: 'process-degraded' })
+      }
     } catch (error) {
       get().reportError(error)
       throw error
@@ -13276,7 +13399,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       ? current.config!.appearance.spaceObjectIcons : retainedSpaceIconHandoff)
     state.botTaskSelections = restoredBotTaskSelections(state.botTaskSelections)
     return { ...state, moteMainCreationReferences: restoredMoteMainCreationReferences(state.moteMainCreationReferences), agentLearningReviewDrafts: restoredLearningReviewDrafts(state.agentLearningReviewDrafts), manualConnectionIntents: restoredManualConnectionIntents(state.manualConnectionIntents), manualConnectionSelections: restoredManualConnectionSelections(state.manualConnectionSelections), workspaceAgentOrder: restoreWorkspaceAgentOrder(state.workspaceAgentOrder), moteBotRequests: restoredMoteBotRequests(state.moteBotRequests), connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), connectorRoomDrafts: restoredConnectorRoomDrafts(state.connectorRoomDrafts), connectorServiceIntents: restoredConnectorServiceIntents(state.connectorServiceIntents), mailboxNotificationIntents: restoredMailboxNotificationIntents(state.mailboxNotificationIntents), mailboxNotificationFeedback: current.mailboxNotificationFeedback, mailboxNotificationHistory: current.mailboxNotificationHistory, moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), moteChatIntents: restoredMoteChatIntents(state.moteChatIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), capsuleQuestionEditors: restoredCapsuleQuestionEditors(state.capsuleQuestionEditors), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), goalFiniteStartIntents: restoredGoalFiniteStartIntents(state.goalFiniteStartIntents), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
-      agentComposerHistoryNavigation: {}, surveyOrganization: restoreSurveyOrganization(state.surveyOrganization), surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
+      agentComposerHistoryNavigation: {}, surveyPageReferences: readSurveyPagePreferences(state.surveyPageReferences).references, surveyPageReadRecovery: readSurveyPagePreferences(state.surveyPageReferences).recovery, surveyOrganization: restoreSurveyOrganization(state.surveyOrganization), surveyZoneSelection: restoredSurveySelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
   },
   partialize: partializeAppState
 }))

@@ -35,12 +35,30 @@ export function effectiveSurveyOrganization(organization: AgentMuxSurveyOrganiza
     groups: original.groups.map(group => ({ ...group, zoneIds: kept(group.zoneIds) })) }
 }
 
-type State = { surveyOrganization: AgentMuxSurveyOrganization; surveyCollectedZones: Record<string, true> }
-type Ports = { get(): State; set(state: State): void; hasZone(zoneId: string): boolean; save(): Promise<AgentMuxSpatialSave> }
+type Page = import('@agentmux/core/control').AgentMuxSurveyPageReference
+type State = {
+  surveyOrganization: AgentMuxSurveyOrganization
+  surveyCollectedZones: Record<string, true>
+  surveyPageReferences: Page[]
+  surveyPageReadRecovery?: { issue: string } | null
+}
+type Ports = {
+  get(): State
+  set(state: Omit<State, 'surveyPageReadRecovery'>): void
+  hasZone(zoneId: string): boolean
+  hasPage(reference: Page): boolean
+  save(): Promise<AgentMuxSpatialSave>
+}
 type Request = Extract<AgentMuxSpaceControlRequest, { operation: 'space.survey-list' }>
 
 export const surveyCollectedZoneIds = (collected: Readonly<Record<string, true>>): string[] => Object.keys(collected).filter(id => collected[id] === true)
 const sameMembers = (left: string[], right: string[]) => { const members = new Set(right); return left.length === members.size && left.every(id => members.has(id)) }
+export const samePage = (a: Page, b: Page) => a.regionId === b.regionId && a.browserId === b.browserId
+const pageKey = (page: Page) => JSON.stringify([page.regionId, page.browserId])
+const samePages = (left: readonly Page[], right: readonly Page[]) => {
+  const members = new Set(right.map(pageKey))
+  return left.length === members.size && left.every(page => members.has(pageKey(page)))
+}
 
 /** Original references may remain unavailable; only an explicit new member needs a confirmed Zone. */
 export function changeSurveyCollection(before: Record<string, true>, zoneIds: string[], hasZone: Ports['hasZone']): Record<string, true> | null {
@@ -55,41 +73,64 @@ export function changeSurveyCollection(before: Record<string, true>, zoneIds: st
 export async function executeSurveyList(ports: Ports, request: Request): Promise<AgentMuxSurveyListReport> {
   const state = ports.get(), before = state.surveyOrganization, originalMembers = surveyCollectedZoneIds(state.surveyCollectedZones)
   const report = (outcome: AgentMuxSurveyListReport['outcome'], issues: AgentMuxSurveyListReport['issues'] = [], save: AgentMuxSpatialSave | null = null,
-    applied = before, members = state.surveyCollectedZones): AgentMuxSurveyListReport => ({ scope: 'survey-list', storedOrganization: applied,
+    applied = before, members = state.surveyCollectedZones, pages = state.surveyPageReferences): AgentMuxSurveyListReport => ({
+    scope: 'survey-list', storedOrganization: applied, pageReferences: pages.map(page => ({ ...page })),
     collectedZoneIds: surveyCollectedZoneIds(members), effectiveOrganization: effectiveSurveyOrganization(applied, members),
-    changed: JSON.stringify(applied) !== JSON.stringify(before) || !sameMembers(surveyCollectedZoneIds(members), originalMembers), outcome, save, issues })
-  if (request.organization === undefined && request.collection === undefined) return report('read')
+    changed: JSON.stringify(applied) !== JSON.stringify(before) || !sameMembers(surveyCollectedZoneIds(members), originalMembers) || !samePages(pages, state.surveyPageReferences),
+    outcome, save, issues
+  })
+  const unread = state.surveyPageReadRecovery ? [{ step: 'survey-page-read', code: 'SURVEY_PAGE_PREFERENCES_UNREADABLE',
+    message: state.surveyPageReadRecovery.issue,
+    recovery: 'Keep the original pages and saved source. Restore that original preference source and read the Survey page references again.' }] : []
+  if (request.organization === undefined && request.collection === undefined) return report(unread.length ? 'unknown' : 'read', unread)
   let next = before, expected = before, collection: Request['collection']
   try {
     if (request.organization !== undefined) { next = parseSurveyOrganization(request.organization); expected = parseSurveyOrganization(request.expected) }
     if (request.collection !== undefined) collection = parseSurveyCollectionChange(request.collection)
+  } catch (error) {
+    return report('refused', [{ step: 'target', code: 'SURVEY_LIST_INVALID_ORGANIZATION',
+      message: error instanceof Error ? error.message : String(error),
+      recovery: 'Read this same list and provide each exact original item and group once. Existing work is retained.' }])
   }
-  catch (error) { return report('refused', [{ step: 'target', code: 'SURVEY_LIST_INVALID_ORGANIZATION',
-    message: error instanceof Error ? error.message : String(error), recovery: 'Read this same list and provide each exact original item and group once. Existing work is retained.' }]) }
   if (JSON.stringify(expected) !== JSON.stringify(before)) return report('refused', [{ step: 'target', code: 'SURVEY_LIST_CONFLICT',
     message: 'The original Survey list organization changed after it was read.', recovery: 'Read this same Survey list and review its current preference before changing it.' }])
-  if (collection && !sameMembers(collection.expectedZoneIds, originalMembers)) return report('refused', [{ step: 'target', code: 'SURVEY_LIST_COLLECTION_CONFLICT',
-    message: 'The original explicit Survey membership changed after it was read.', recovery: 'Read this same list and review its current members before another change.' }])
-  const appliedMembers = collection ? changeSurveyCollection(state.surveyCollectedZones, collection.zoneIds, ports.hasZone) : state.surveyCollectedZones
+  if (collection?.zoneIds !== undefined && !sameMembers(collection.expectedZoneIds!, originalMembers)) return report('refused', [{
+    step: 'target', code: 'SURVEY_LIST_COLLECTION_CONFLICT', message: 'The original explicit Survey membership changed after it was read.',
+    recovery: 'Read this same list and review its current members before another change.' }])
+  if (collection?.pageReferences !== undefined && !samePages(collection.expectedPageReferences!, state.surveyPageReferences)) return report('refused', [{
+    step: 'target', code: 'SURVEY_LIST_PAGE_CONFLICT', message: 'The exact Survey page membership changed after it was read.',
+    recovery: 'Read this same list before changing the original page references. Its pages remain available.' }])
+  const pages = collection?.pageReferences ?? state.surveyPageReferences
+  if (collection?.pageReferences !== undefined && unread.length) return report('unknown', unread)
+  const originals = new Set(state.surveyPageReferences.map(pageKey))
+  if (pages.some(page => !originals.has(pageKey(page)) && !ports.hasPage(page))) return report('refused', [{
+    step: 'target', code: 'SURVEY_LIST_PAGE_UNCONFIRMED', message: 'A new Survey reference has no confirmed original Browser in that Region.',
+    recovery: 'Inspect that exact Region and Browser ID. Existing references and healthy pages are kept.' }])
+  const appliedMembers = collection?.zoneIds !== undefined ? changeSurveyCollection(state.surveyCollectedZones, collection.zoneIds, ports.hasZone) : state.surveyCollectedZones
   if (!appliedMembers) return report('refused', [{ step: 'target', code: 'SURVEY_LIST_ZONE_UNCONFIRMED',
-    message: 'A new Survey member has no confirmed original Zone.', recovery: 'Inspect that exact Zone and retry this explicit change when its identity is confirmed. Existing references and work remain.' }])
-  const ids = surveyOrganizationZoneIds(next)
-  const originals = new Set([...surveyCollectedZoneIds(appliedMembers), ...surveyOrganizationZoneIds(before)])
-  if (ids.some(id => !originals.has(id))) return report('refused', [{ step: 'target', code: 'SURVEY_LIST_MEMBER_UNCONFIRMED',
+    message: 'A new Survey member has no confirmed original Zone.',
+    recovery: 'Inspect that exact Zone and retry this explicit change when its identity is confirmed. Existing references and work remain.' }])
+  const ids = surveyOrganizationZoneIds(next), zoneOriginals = new Set([...surveyCollectedZoneIds(appliedMembers), ...surveyOrganizationZoneIds(before)])
+  if (ids.some(id => !zoneOriginals.has(id))) return report('refused', [{ step: 'target', code: 'SURVEY_LIST_MEMBER_UNCONFIRMED',
     message: 'A requested Zone is not in the original explicit Survey list or its saved organization.',
     recovery: 'Read the same Survey list. Existing references, work surfaces and healthy Runs are retained.' }])
   // Omitted originals return to the ungrouped area; organization never removes membership.
   const requested = new Set(ids)
-  const applied = request.organization === undefined ? before : { ...next, ungrouped: [...next.ungrouped, ...[...originals].filter(id => !requested.has(id))] }
-  ports.set({ surveyOrganization: applied, surveyCollectedZones: appliedMembers })
+  const applied = request.organization === undefined ? before : { ...next, ungrouped: [...next.ungrouped, ...[...zoneOriginals].filter(id => !requested.has(id))] }
+  ports.set({ surveyOrganization: applied, surveyCollectedZones: appliedMembers, surveyPageReferences: pages.map(page => ({ ...page })) })
   let save: AgentMuxSpatialSave
-  try { save = await ports.save() } catch (error) { save = { layoutApplied: false, clientStateWritten: false,
-    storageFlushRequested: false, diskDurability: 'unconfirmed', reason: error instanceof Error ? error.message : String(error) } }
+  try { save = await ports.save() }
+  catch (error) {
+    save = { layoutApplied: false, clientStateWritten: false, storageFlushRequested: false, diskDurability: 'unconfirmed',
+      reason: error instanceof Error ? error.message : String(error) }
+  }
   // Core topology acknowledgements cannot confirm Chromium's separate preference flush.
   save = { ...save, diskDurability: 'unconfirmed' }
-  const issues = save.reason ? [{ step: 'save', code: 'SURVEY_LIST_SAVE_UNCONFIRMED', message: save.reason,
+  const saveIssues = save.reason || !save.clientStateWritten ? [{ step: 'save', code: 'SURVEY_LIST_SAVE_UNCONFIRMED',
+    message: save.reason ?? 'The original Survey preference write was not confirmed.',
     recovery: 'The applied organization is retained. Read this same Survey list before another change.' }] : []
-  const result = report(issues.length ? 'partial' : 'unchanged', issues, save, applied, appliedMembers)
+  const issues = [...unread, ...saveIssues]
+  const result = report(issues.length ? 'partial' : 'unchanged', issues, save, applied, appliedMembers, pages)
   if (!issues.length && result.changed) result.outcome = 'changed'
   return result
 }

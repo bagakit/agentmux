@@ -1,5 +1,25 @@
 export type AgentMuxBrowserMode = 'normal' | 'private'
 
+/** Main returned a healthy original page that does not match this explicit Profile request. */
+export type AgentMuxBrowserOpenProfileMismatch = {
+  kind: 'browser-open-profile-mismatch'
+  operationId: string
+  browserId: string
+  profileId: string | null
+  mode: AgentMuxBrowserMode
+  requestedProfileId: string
+}
+
+/** A foreign returned ID is an observation, never this operation's confirmed creation. */
+export type AgentMuxBrowserOpenIdentityMismatch = {
+  kind: 'browser-open-identity-mismatch'
+  operationId: string
+  requestedBrowserId: string
+  returnedBrowserId: string
+  creation: 'unconfirmed'
+}
+export type AgentMuxBrowserOpenMismatch = AgentMuxBrowserOpenProfileMismatch | AgentMuxBrowserOpenIdentityMismatch
+
 export type { BrowserSitePermission, BrowserSitePermissionRequest, BrowserSitePermissionDecision, BrowserSitePermissionState } from './browser-site-permissions.js'
 
 /** Original native TLS request awaiting the person. Discovery grants no approval. */

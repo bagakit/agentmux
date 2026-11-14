@@ -17,6 +17,8 @@ import type { AgentMuxBrowserCompletion } from './browser-completion-facts.js'
 import type { AgentMuxBrowserControl, AgentMuxBrowserMode, AgentMuxBrowserTarget, AgentMuxBrowserTargetsResult, AgentMuxBrowserReleaseReceipt } from './browser-targets.js'
 import type { BrowserDefaultPayload, BrowserDefaultResult } from './browser-default.js'
 import type { BrowserProfileControlPayload, BrowserProfileControlResult } from './browser-profile-control.js'
+export { parseBrowserOpenMismatch } from './control-browser-targets.js'
+export type { AgentMuxBrowserOpenProfileMismatch, AgentMuxBrowserOpenIdentityMismatch, AgentMuxBrowserOpenMismatch } from './browser-targets.js'
 export * from './browser-default.js'
 export * from './browser-profile-control.js'
 export * from './browser-profile-library.js'
@@ -39,7 +41,7 @@ export type { InputObservationReference, InputPerformanceSnapshot, InputPerforma
 import type { AgentMuxToolkitPort, ToolkitRequest, ToolkitResult } from './toolkit.js'
 export * from './toolkit.js'
 export type * from './space-control.js'
-export { parseSurveyOrganization, parseSurveyCollectionChange, parseSurveyZoneIds } from './survey-organization.js'
+export { parseSurveyOrganization, parseSurveyCollectionChange, parseSurveyZoneIds, parseSurveyPageReferences } from './survey-organization.js'
 export type * from './desktop-focus-control.js'
 export * from './mote-context-observation.js'
 import type { AgentMuxMoteContextEvidenceTarget, AgentMuxMoteContextObservation } from './mote-context-observation.js'
@@ -186,6 +188,9 @@ export type AgentMuxAgentRegion = AgentMuxRegionBase & {
 }
 export type AgentMuxTerminalRegion = AgentMuxRegionBase & { kind: 'terminal'; runId: string }
 export type AgentMuxBrowserRegion = AgentMuxRegionBase & { kind: 'browser'; browserId: string; mode?: AgentMuxBrowserMode
+  /** Main-confirmed identity remains available when only its display label cannot be read. */
+  profileId?: string
+  profileIssue?: string
   /** The Profile a normal page opened in; absent for private pages and Capsules. */
   profile?: import('./browser-targets.js').AgentMuxBrowserProfileRef }
 export type AgentMuxFileRegion = AgentMuxRegionBase & { kind: 'file'; path: string }
@@ -859,7 +864,7 @@ export type AgentMuxControlResult =
   | { operation: 'inspect.tab'; tab: AgentMuxInspectedTab }
   | { operation: 'inspect.region'; region: AgentMuxInspectedRegion }
   | { operation: 'open.terminal'; region: AgentMuxTerminalRegion }
-  | { operation: 'open.browser'; region: AgentMuxBrowserRegion }
+  | { operation: 'open.browser'; region: AgentMuxBrowserRegion; survey: import('./space-control.js').AgentMuxSurveyPageAdmission }
   | ({ operation: 'open.git' } & GitOpenResult)
   | AgentMuxDesktopFocusResult
   | { operation: 'arrange'; tab: AgentMuxInspectedTab }
@@ -1001,6 +1006,8 @@ export type AgentMuxControlError =
       code: Exclude<AgentMuxControlErrorCode, 'MESSAGE_TARGET_NOT_UNIQUE'>
       message: string
       controlFailure?: AgentMuxControlFailure
+      /** Original structured failure facts; Browser mismatch uses AgentMuxBrowserOpenMismatch. */
+      details?: unknown
       /** Original input failure, distinct from this finite Control classification. */
       cause?: AgentMuxErrorData
       candidates?: never

@@ -11,6 +11,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useStore } from 'zustand'
 import type { SurveyBrowserPreparation } from '../lib/survey-browser-creation'
+import { isSurveyPage, surveyPageOwner, type SurveyPageSelection } from '../lib/survey-page-references'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { surveyBrowserControl, surveyInitialZoneSelection, surveySelectReference, surveySelectedBrowser, surveyZoneItems, type ResolvedSurveyZoneSelection } from '../lib/survey-workface'
@@ -60,13 +61,14 @@ const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 
 
-export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible = true, controlsCoverPage = false, unconfirmedBrowserRegionIds, catalog, projection, selection, viewTargets, onSelectReference }: {
+export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible = true, controlsCoverPage = false, unconfirmedBrowserRegionIds, catalog, projection, selection, pageSelection = null, viewTargets, onSelectReference }: {
   visible?: boolean
   controlsCoverPage?: boolean
   unconfirmedBrowserRegionIds?: ReadonlySet<string> | undefined
   catalog: AgentMuxSpaceCatalog | null
   projection: WorkbenchProjection | null
   selection: ResolvedSurveyZoneSelection | null
+  pageSelection?: SurveyPageSelection | null
   onSelectReference?: (reference: WorkbenchProjectionSelection) => void
   viewTargets?: Parameters<typeof WorkspaceWorkbench>[0]['viewTargets']
 }) {
@@ -92,6 +94,8 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const list = useSurveyListOrganization()
   const contextOrganization = useRef(list.stored)
   const collected = useAppStore(state => state.surveyCollectedZones)
+  const pageReferences = useAppStore(state => state.surveyPageReferences)
+  const pageReadRecovery = useAppStore(state => state.surveyPageReadRecovery)
   const setCollected = useAppStore(state => state.setSurveyZoneCollected)
   const toolsOpen = useAppStore(state => state.surveyToolsOpen)
   const setSelection = useAppStore(state => state.setSurveyZoneSelection)
@@ -109,7 +113,9 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const sessions = useStore(store, state => state.sessions)
   const resourceWorkspaces = useMemo(() => new Map(config?.workspaces.map(workspace => [workspace.id, workspace]) ?? []), [config?.workspaces])
   const currentZone = catalog?.zones.find(zone => zone.zoneId === (selection?.zoneId))
-  const resourceWorkspaceId = currentZone?.workspaceId ?? (!selection ? SCRATCH_WORKSPACE_ID : null)
+  const resourceWorkspaceId = currentZone?.workspaceId ?? (pageSelection
+    ? surveyPageOwner(tabs, pageSelection)?.tab.workspaceId ?? null
+    : !selection ? SCRATCH_WORKSPACE_ID : null)
   const workspace = resourceWorkspaceId ? resourceWorkspaces.get(resourceWorkspaceId) : undefined
   const items = useMemo(() => catalog ? surveyZoneItems(catalog, collected) : [], [catalog, collected])
   const tabsByZone = useMemo(() => {
@@ -125,6 +131,21 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const [query, setQuery] = useState('')
   const [opening, setOpening] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  async function removePageReference(page: import('@agentmux/core/control').AgentMuxSurveyPageReference) {
+    const original = useAppStore.getState().surveyZoneSelection
+    try {
+      const report = await useAppStore.getState().setSurveyPageCollected(page, false)
+      if (report.outcome === 'refused' || report.outcome === 'unknown') {
+        setError(report.issues[0]?.message ?? 'The original Survey page reference is unconfirmed. Its page and selection are kept.')
+        return
+      }
+      if (report.issues.length) setError(report.issues.map(issue => issue.message).join('\n'))
+      if (useAppStore.getState().surveyZoneSelection === original && isSurveyPage(original) &&
+        original.regionId === page.regionId && original.browserId === page.browserId) setSelection(null)
+    } catch {
+      setError('Removing this Survey reference is unconfirmed. Its original page and current selection are kept; read the original Survey list before another action.')
+    }
+  }
   const [creationNotice, setCreationNotice] = useState<string | null>(null)
   const [capture, setCapture] = useState<{ title: string; sources: TopicKnowledgeSource[]; noteIds: string[] } | null>(null)
   const [recallCapture, setRecallCapture] = useState<RecallCaptureTarget | null>(null)
@@ -283,7 +304,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     if (!preparation) return
     setError(null)
     const created = await createItemBrowser(preparation)
-    if (created && held && intent.current === startedIntent && useAppStore.getState().surveyZoneSelection === held) {
+    if (created && held && !isSurveyPage(held) && intent.current === startedIntent && useAppStore.getState().surveyZoneSelection === held) {
       setSelection(surveySelectReference(held, preparation.reference))
     }
   }
@@ -460,6 +481,34 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         <button type="button" className="survey-icon-button" aria-label={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} title={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>{sidebarCollapsed ? <ThemeLayoutOpenLeftIcon size={16} /> : <ThemeLayoutCloseLeftIcon size={16} />}</button>
       </div>
       <aside className="survey-tabs" aria-label="Survey items" data-survey-workspace-id={resourceWorkspaceId ?? undefined}>
+        {pageReadRecovery ? <p className="survey-relation-notice" role="status" data-survey-page-read-recovery>
+          {pageReadRecovery.issue}
+          <button type="button" className="survey-tab-view" onClick={() => void useAppStore.getState().retrySurveyPagesRead()}>
+            Read original page references again
+          </button>
+        </p> : null}
+        {pageReferences.length > 0 ? <div aria-label="Saved Survey pages">
+          {pageReferences.map(page => {
+            const owner = surveyPageOwner(tabs, page)
+            const browser = owner?.surface.kind === 'browser' ? owner.surface : null
+            return <div className="survey-item-row" key={JSON.stringify(page)}
+              data-survey-page-region-id={page.regionId} data-survey-page-browser-id={page.browserId}
+              data-selected={pageSelection?.regionId === page.regionId && pageSelection.browserId === page.browserId}>
+              <button type="button" className="survey-item" onClick={() => setSelection({ kind: 'page', ...page })}>
+                <ThemeObjectBrowserIcon size={14} /><strong>{browser?.title || 'Retained page'}</strong>
+              </button>
+              <div className="survey-item-shortcuts">
+                <button type="button" className="survey-icon-button" aria-label="Remove page from Survey"
+                  title="Remove from Survey; keep the original page" onClick={() => void removePageReference(page)}>
+                  <ThemeActionCloseIcon size={13} />
+                </button>
+              </div>
+              {!owner ? <span role="status" className="survey-relation-notice">
+                The original Browser is unconfirmed. Its exact reference is kept.
+              </span> : null}
+            </div>
+          })}
+        </div> : null}
         <SurveyItemContextMenu returnFocus={() => contextOrigin.current} {...itemOptionsFor(contextZone)} grouping={contextZone ? list.groupingFor(contextZone.zoneId, contextOrganization.current) : undefined}>
         <SurveyItemList model={list} titles={itemTitles} selectedZoneId={selection?.zoneId} visible={visible && !controlsCoverPage} renderItem={(zoneId, dragHandle) => {
           const zone = displayedItems.get(zoneId)
@@ -514,7 +563,12 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         {Object.entries(itemBrowserRecoveries).map(([key, recovery]) => <p key={key} className="survey-error" role="alert" data-survey-browser-recovery={recovery.preparation.reference?.regionId}>
           {recovery.message}<button type="button" disabled={recovery.pending} onClick={() => void createItemBrowser(recovery.preparation)}>{recovery.pending ? 'Retrying original page…' : 'Retry original page'}</button>
         </p>)}
-        {!selection ? <BrowserStartPage config={resolveBrowserStartPage(config?.browser.startPage)} visible={visible && !controlsCoverPage} historyRevision={historyRevision}
+        {pageSelection ? <>{projection ? <WorkspaceWorkbench workspaceId={projection.displayWorkspaceId}
+          projection={projection} viewOwnership="projection" viewTargets={viewTargets} visible={visible && !controlsCoverPage}
+          leadingChrome={windowControlsInset} onCreateTab={groupId => void newBrowserTab(projection.displayWorkspaceId, groupId)} />
+          : <div role="status" className="survey-relation-notice">
+            The original Browser Region is not confirmed. Its page reference is kept; inspect the same Region and Browser before choosing its original location.
+          </div>}</> : !selection ? <BrowserStartPage config={resolveBrowserStartPage(config?.browser.startPage)} visible={visible && !controlsCoverPage} historyRevision={historyRevision}
           historyTarget={workspace ? { kind: 'workspace', workspaceId: workspace.id } : null}
           onChooseHistory={value => { setQuery(value); browserInput.current?.submit(value) }}>
           <form className="browser-start-page__input" onSubmit={event => { event.preventDefault(); browserInput.current?.submit() }}>
