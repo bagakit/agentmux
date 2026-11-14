@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict'), fs = require('node:fs/promises'), path = require('node:path'), vm = require('node:vm')
-const { app, BrowserWindow, ipcMain } = require('electron')
+const { app, BrowserWindow, ipcMain, nativeImage } = require('electron')
 const [html, privateRoot, evidence] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data')); app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const result = { schema: 'agentmux.focus-project-appearance-actual.v1', passed: false, frames: [], scenarios: [], rendererConsole: [],
@@ -8,36 +8,39 @@ let win
 app.whenReady().then(async () => { try {
   const imageRoot = path.join(privateRoot, 'project-image'), emptyRoot = path.join(privateRoot, 'project-empty')
   await fs.mkdir(imageRoot); await fs.mkdir(emptyRoot)
-  await fs.copyFile(path.join(process.cwd(), 'apps/desktop/resources/app-icons/classic.png'), path.join(imageRoot, 'icon.png'))
+  await fs.mkdir(path.join(imageRoot, 'apps/client/resources'), { recursive: true })
+  await fs.copyFile(path.join(process.cwd(), 'apps/desktop/resources/icon.png'), path.join(imageRoot, 'apps/client/resources/icon.png'))
   const { projectAppearance } = require(path.join(privateRoot, 'project-appearance.cjs'))
   const imageCalls = []
   ipcMain.handle('project-appearance-proof:read', async (_event, id) => {
     const root = id === 'alpha' ? imageRoot : emptyRoot
-    const value = await projectAppearance(root); imageCalls.push({ workspaceId: id, realImage: Boolean(value.icon), kind: value.kind }); return value
+    const value = await projectAppearance(root, bytes => nativeImage.createFromBuffer(bytes)); imageCalls.push({ workspaceId: id, realImage: Boolean(value.icon), kind: value.kind }); return value
   })
   const preload = path.join(privateRoot, 'appearance-preload.cjs')
   await fs.writeFile(preload, "const{contextBridge,ipcRenderer}=require('electron');contextBridge.exposeInMainWorld('projectAppearanceFixture',{read:id=>ipcRenderer.invoke('project-appearance-proof:read',id)});")
   win = new BrowserWindow({ width: 1440, height: 900, useContentSize: true, show: false, webPreferences: { preload, contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } })
   win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) result.rendererConsole.push(String(message).slice(0, 1600)) })
-  const read = async code => { new vm.Script(code); return win.webContents.executeJavaScript(code) }
+  const read = async code => { new vm.Script(code); try { return await win.webContents.executeJavaScript(code) } catch (error) { throw new Error(error.message + '\nEvaluation: ' + code.slice(0, 1200)) } }
   const pause = ms => new Promise(done => setTimeout(done, ms))
   const until = async (label, predicate) => { const end = Date.now() + 10000; do { if (await predicate()) return; await pause(40) } while (Date.now() < end); throw Error('Appearance scene did not settle: ' + label) }
   const settle = () => read('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))')
   const geometry = async target => read(`(()=>{
     const surface=document.querySelector('.global-focus-surface'),proof=window.appearanceProof.facts();
-    const selected=${target === 'menu' ? "document.querySelector('[data-focus-project-preferences]')" : "[...document.querySelectorAll('[data-project-group-key]')].find(e=>e.dataset.projectGroupKey===JSON.stringify(['local','alpha']))?.querySelector('.focus-project-frame__heading')"};
+    const selected=${target === 'collection' ? "[...document.querySelectorAll('[data-focus-container-key]')].find(e=>e.dataset.focusContainerKey===window.appearanceProof.collectionKey)" : target === 'search' ? "document.querySelector('.focus-search-results')" : target === 'local' ? "document.querySelector('.focus-local-inputs')" : target === 'menu' ? "document.querySelector('[data-focus-project-preferences]')" : "[...document.querySelectorAll('[data-project-group-key]')].find(e=>e.dataset.projectGroupKey===JSON.stringify(['local','alpha']))?.querySelector('.focus-project-frame__heading')"};
     const rect=e=>{if(!e)return null;const r=e.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}};
     const r=rect(selected),x=r?Math.min(innerWidth-1,Math.max(1,(r.left+r.right)/2)):0,y=r?Math.min(innerHeight-1,Math.max(1,(r.top+r.bottom)/2)):0;
-    return{mainSurface:proof.mainSurface,focusView:proof.focusView,focus:rect(surface),visible:!!surface&&!surface.hidden&&!surface.closest('[inert]')&&surface.getAttribute('aria-hidden')!=='true'&&getComputedStyle(surface).display!=='none'&&getComputedStyle(surface).visibility!=='hidden',target:rect(selected),targetHit:!!selected&&selected.contains(document.elementFromPoint(x,y)),viewport:{width:innerWidth,height:innerHeight}};
+    return{mainSurface:proof.mainSurface,focusView:proof.focusView,focus:rect(surface),inert:!!surface?.closest('[inert]'),visible:!!surface&&!surface.hidden&&(surface.getAttribute('aria-hidden')!=='true'||${JSON.stringify(target)}==='local')&&getComputedStyle(surface).display!=='none'&&getComputedStyle(surface).visibility!=='hidden',target:rect(selected),targetRole:selected?.closest('[role=dialog]')?.getAttribute('role'),targetHit:!!selected&&selected.contains(document.elementFromPoint(x,y)),viewport:{width:innerWidth,height:innerHeight}};
   })()`)
   const ensureFocus = async () => {
     if (!await read("(()=>{const e=document.querySelector('.global-focus-surface');return !!e&&!e.hidden&&!e.closest('[inert]')&&getComputedStyle(e).display!=='none'})()")) await click('button.surface-navigation__focus')
     await until('actual visible Focus surface', () => read("(()=>{const e=document.querySelector('.global-focus-surface');return window.appearanceProof.facts().mainSurface==='agents'&&!!e&&!e.hidden&&!e.closest('[inert]')&&e.getBoundingClientRect().height>0})()"))
   }
   const frame = async (file, label, target = 'group') => {
-    await ensureFocus(); await settle()
+    if (target !== 'local') await ensureFocus(); await settle()
     const before=await geometry(target)
-    assert.equal(before.mainSurface,'agents');assert.equal(before.focusView,'list');assert.ok(before.visible&&before.focus.width>0&&before.focus.height>0,'Actual non-inert Focus '+file)
+    assert.equal(before.mainSurface,'agents');assert.equal(before.focusView,'list');assert.ok(before.visible&&before.focus.width>0&&before.focus.height>0,'Actual Focus or its saved-input modal '+file)
+    if (target === 'local') assert.equal(before.targetRole, 'dialog', 'Actual saved-input modal owns its foreground')
+    assert.ok(!before.inert || target === 'local', 'Only the actual modal may make Focus inert')
     assert.ok(before.target?.width>0&&before.target.height>0&&before.targetHit,'Actual visible/hit target '+file)
     await fs.writeFile(path.join(evidence,file),(await win.webContents.capturePage()).toPNG())
     const after=await geometry(target);assert.equal(after.mainSurface,'agents');assert.ok(after.visible&&after.targetHit,'Focus kept throughout capture '+file)
@@ -58,9 +61,10 @@ app.whenReady().then(async () => { try {
   await read('window.filterProof.enter()');await click('button.surface-navigation__focus');await ensureFocus()
   await read("window.filterProof.theme('dark')")
   await until('one recognized image group', () => read("document.querySelectorAll('.focus-project-frame [data-project-watermark]').length===1"))
+  await read('window.appearanceProof.remember()')
   result.initial = await read('window.appearanceProof.facts()')
   const alpha = result.initial.groups.find(group => group.key === JSON.stringify(['local', 'alpha']))
-  assert.equal(alpha.entries, 1); assert.equal(alpha.branches, 3); assert.equal(alpha.watermarks, 1)
+  assert.equal(alpha.entries, 1); assert.equal(alpha.branches, 1); assert.equal(alpha.zones, 3); assert.equal(alpha.watermarks, 1)
   assert.ok(result.initial.groups.every(group => group.entries === 1 && group.watermarks <= 1))
   assert.ok(!result.initial.calls.some(id => id.startsWith('branch-') || id === 'orphan'), 'No branch is probed as a project root')
   for (const theme of ['dark', 'light']) {
@@ -98,6 +102,8 @@ app.whenReady().then(async () => { try {
     await key('Escape'); await until('editor dismissed', () => read('!document.querySelector("[data-focus-project-preferences]")'))
     await read('window.appearanceProof.failSave(false)')
   }
+  await require('./organization-scene.cjs')({ win, read, click, frame, until, settle, result })
+  await require('./reading-scene.cjs')({ win, read, click, frame, until, settle, result })
   result.final = await read('window.appearanceProof.facts()'); result.imageCalls = imageCalls
   assert.ok(imageCalls.some(call => call.workspaceId === 'alpha' && call.realImage), 'Original Main recognizer actually loaded a project image')
   result.passed = true

@@ -18,6 +18,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex'), inputs =
 const receipt = { schema: 'agentmux.focus-project-appearance-capture.v1', capturedPass: false, captureOnly: true, aestheticReview: 'not-performed', userAppRunRuntimeControlled: false,
   boundary: 'Private Electron Renderer with actual App, GlobalFocusSurface, FocusFilters, Store and Workbench; maintained typed preview API. Only PTY/Agent and unused Monaco painting leaves isolated. No live Runtime, native Run proof, installation, user navigation or restart.' }
 try {
+  assert.ok(!process.env.AGENTMUX_FOCUS_APPEARANCE_STYLE_MUTANT || ['oversized-menu', 'unbounded-menu', 'search-overflow', 'wrapped-footer'].includes(process.env.AGENTMUX_FOCUS_APPEARANCE_STYLE_MUTANT), 'Known actual style inverse')
   receipt.sourceResolution = { loadedDist: false, resolution: 'Current workspace public export source aliases; no Desktop build or unrelated dist scan.' }
   const workspaceSource = { name: 'current-workspace-public-sources', setup(builder) {
     // Preserve Vite's asset URL contract for the unused PDF leaf; emit the real
@@ -71,7 +72,7 @@ try {
       const source = await readFile(path, 'utf8'); inputs.set(path, hash(source))
       let contents = source
       const mutant = process.env.AGENTMUX_FOCUS_APPEARANCE_STYLE_MUTANT
-      if (mutant && path.endsWith('/styles/focus-context.css')) {
+      if (['oversized-menu', 'unbounded-menu'].includes(mutant) && path.endsWith('/styles/focus-context.css')) {
         assert.ok(['oversized-menu', 'unbounded-menu'].includes(mutant), 'Known original style inverse')
         const before = mutant === 'oversized-menu' ? 'width: min(248px, calc(100vw - 16px));' : 'max-height: calc(100vh - 16px);'
         const after = mutant === 'oversized-menu' ? 'width: min(500px, calc(100vw - 16px));' : 'max-height: none;'
@@ -79,12 +80,24 @@ try {
         contents = source.replace(before, after)
         transformations.push({ path: relative(root, path), mutant, before: hash(source), compiledSource: hash(contents) })
       }
+      if (mutant === 'wrapped-footer' && path.endsWith('/styles/focus-context.css')) {
+        const before = '.focus-zone-tags .focus-context__topic > span { display: block; overflow: hidden; white-space: nowrap;'
+        assert.equal(source.split(before).length, 2, 'Unique footer line source anchor')
+        contents = source.replace(before, '.focus-zone-tags .focus-context__topic > span { display: block; overflow: hidden; white-space: normal;')
+        transformations.push({ path: relative(root, path), mutant, before: hash(source), compiledSource: hash(contents) })
+      }
+      if (mutant === 'search-overflow' && path.endsWith('/styles/focus.css')) {
+        const before = '.focus-search-results { display: flex; flex-direction: column; overflow: hidden;'
+        assert.equal(source.split(before).length, 2, 'Unique search containment source anchor')
+        contents = source.replace(before, '.focus-search-results {')
+        transformations.push({ path: relative(root, path), mutant, before: hash(source), compiledSource: hash(contents) })
+      }
       return { contents, loader: 'css' }
     })
   } }
   for (const input of captureInputs) { const path = join(root, input); inputs.set(path, hash(await readFile(path))) }
   inputs.set(join(desktop, 'src/main/project-appearance.ts'), hash(await readFile(join(desktop, 'src/main/project-appearance.ts'))))
-  await build({ entryPoints: [join(desktop, 'src/main/project-appearance.ts')], outfile: join(privateRoot, 'project-appearance.cjs'), bundle: true, platform: 'node', format: 'cjs', logLevel: 'silent' })
+  await build({ entryPoints: [join(desktop, 'src/main/project-appearance.ts')], outfile: join(privateRoot, 'project-appearance.cjs'), bundle: true, platform: 'node', format: 'cjs', plugins: [workspaceSource], logLevel: 'silent' })
   const out = join(privateRoot, 'out'); await mkdir(out)
   const renderer = join(out, 'app.js'), buildResult = await build({ entryPoints: [join(fixture, 'entry.mjs')], outfile: renderer, bundle: true, platform: 'browser', format: 'esm', target: 'es2022', jsx: 'automatic', metafile: true,
     plugins: [workspaceSource], conditions: ['browser', 'import', 'production', 'default'], logLevel: 'silent', define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' }, loader: { '.png': 'file', '.avif': 'file', '.webp': 'file', '.gif': 'file', '.svg': 'file', '.woff2': 'file', '.woff': 'file', '.ttf': 'file' } })
