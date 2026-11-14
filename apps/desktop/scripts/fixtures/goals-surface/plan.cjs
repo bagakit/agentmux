@@ -56,6 +56,7 @@ module.exports = async ({ evaluate, size, click, pointer, capture, waitFor, pain
     if (width === 620) {
       assert.equal(geometry.columnFlow, 'row', 'Narrow graph reads as vertical dependency groups')
       assert.equal(geometry.edges, 'none', 'Narrow graph hides crossing curves')
+      await wholeDependencyNames()
       assert.ok(await evaluate(`[...document.querySelectorAll('[data-goal-plan-depends]')].every(node=>{const text=node.querySelector('.goal-plan-node__depends');return text&&getComputedStyle(text).display!=='none'&&text.textContent.includes('Depends on')})`),
         'Every narrow dependent card keeps its dependency names without requiring expansion')
     } else {
@@ -63,7 +64,6 @@ module.exports = async ({ evaluate, size, click, pointer, capture, waitFor, pain
       assert.ok(geometry.paths > 0, 'Wide graph has real dependency curves')
     }
     result.observations.push({ scene: 'plan-geometry', width, theme, geometry })
-    await wholeDependencyNames()
     const closed = await canvasGeometry()
     await restOn('Execution plan')
     await capture(`${width}-${theme}-plan-graph`, width)
@@ -94,6 +94,8 @@ module.exports = async ({ evaluate, size, click, pointer, capture, waitFor, pain
       await restOn()
       assert.equal(await evaluate(`document.querySelectorAll('.goals-activity__row').length`), 6, 'Recent activity reads directly while earlier records remain available')
       await capture(`${width}-${theme}-detail-activity`, width)
+      const earlierRecords = `document.querySelector('[data-goal-attempt="previous"]').closest('details:not([open])')`
+      if (await evaluate(`Boolean(${earlierRecords})`)) await click(`${earlierRecords}.querySelector('summary')`)
       await evaluate(`document.querySelector('[data-goal-attempt="previous"]').scrollIntoView({block:'center'})`)
       await click(`document.querySelector('[data-goal-attempt="previous"] .goal-delegation__source summary')`)
       await restOn()
