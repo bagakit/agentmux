@@ -204,7 +204,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
               title="Edit SOUL.md · New sessions use saved changes" onClick={editMote}><ThemeActionEditNoteIcon size={12} /></IconButton> : null}
             {archived ? <IconButton type="button" className="space-row-action" aria-label={`Restore Mote ${name}`} title="Restore Mote"
               disabled={archive.pending === id} onClick={() => void archive.change(topic, false)}><ThemeActionRestoreIcon size={12} /></IconButton> : null}
-            {bucket.some((session) => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={bucket} /> : null}
+            {bucket.some((session) => session.kind === 'agent') ? <ProjectActivity compact avatarMarker={directoryView === 'collaborators'} visible={visible} sessions={bucket} /> : null}
           </div>
           {topic.readError ? <div className="surface-inline-error" role="alert">{name}: {topic.readError}. Its work surface is retained.</div> : null}
           {topic.moteArchive?.state === 'unknown' ? <MoteArchiveNotice workspaceId={workspace.id} issue={topic.moteArchive.issue} /> : null}
