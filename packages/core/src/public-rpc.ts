@@ -482,7 +482,7 @@ type NativeResult = SpaceLinkResult & MeshNetworkResults & AgentPromotionResultM
   'browser.input.inspect': import('./agent-input-context-capture.js').AgentInputContextCaptureRead
   'agent.input.resource': import('./agent-input-resource.js').AgentInputResourceResult
   'agent.input.inspect': { activity?: import('./types.js').AgentInputActivity; sourceNow?:number; moteObservationId?:string; record: Awaited<ReturnType<AgentMuxClient['inspectAgentPromptSubmission']>>; input?: import('./agent-input-wait.js').AgentInputSubmissionReceipt | null }
-  'agent.input.observation': {inspection:import('./mote-input.js').MoteInputInspection|null}
+  'agent.input.observation': {inspection:import('./mote/input.js').MoteInputInspection|null}
   'agent.input.stop': import('./agent-input-wait.js').AgentInputWaitStopReceipt
   'agent.input.rejoin': import('./agent-input-wait.js').AgentInputSubmissionReceipt
   'agent.send': AgentMuxMessageReceipt & { agentSessionId?: string; inputReceipt?: import('./agent-input-wait.js').AgentInputSubmissionReceipt }

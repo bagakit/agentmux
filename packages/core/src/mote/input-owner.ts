@@ -1,14 +1,14 @@
 import { isDeepStrictEqual } from 'node:util'
-import { observePromptInput } from './prompt-submission.js'
+import { observePromptInput } from '../prompt-submission.js'
 import type {
   ConversationTimelineReadInput,
   AgentConversationReadPage,
   ConversationReadRecord
-} from './conversation-changes.js'
-import { AgentMuxError } from './errors.js'
-import type { DurableAgentMuxMessageQueue } from './agent-global-message-queue.js'
-import { agentPromptCondition, type AgentPromptInputKey } from './agent-prompt-condition.js'
-import { agentTurnCompletionIdentity } from './agent-session-identity.js'
+} from '../conversation-changes.js'
+import { AgentMuxError } from '../errors.js'
+import type { DurableAgentMuxMessageQueue } from '../agent-global-message-queue.js'
+import { agentPromptCondition, type AgentPromptInputKey } from '../agent-prompt-condition.js'
+import { agentTurnCompletionIdentity } from '../agent-session-identity.js'
 import {
   consumeConversationWindowPage,
   isCompleteConversationRecord,
@@ -17,10 +17,10 @@ import {
   type ConversationChangesPage,
   type ConversationObservationHandle,
   type ConversationWindowAssembly
-} from './conversation-changes.js'
-import type { AgentMuxAgentSession, AgentPromptExecutionEvidence } from './types.js'
-import type { AgentMuxMessageNotification } from './agent-message-notification.js'
-import type { ConversationWindowBoundary } from './conversation-changes.js'
+} from '../conversation-changes.js'
+import type { AgentMuxAgentSession, AgentPromptExecutionEvidence } from '../types.js'
+import type { AgentMuxMessageNotification } from '../agent-message-notification.js'
+import type { ConversationWindowBoundary } from '../conversation-changes.js'
 import {
   moteInputMember,
   moteInputNeedsObservation,
@@ -34,7 +34,7 @@ import {
   type MoteInputObservation,
   type MoteInputInspection,
   type MoteInputNoticePhase
-} from './mote-input.js'
+} from './input.js'
 
 type SourceRead = {
   input: MoteInputObservation['input']

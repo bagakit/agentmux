@@ -59,8 +59,8 @@ import { unavailableDiagnosticEvidence } from '@agentmux/diagnostic-evidence'
 import type { ReadingDiagnosticExactTarget, ReadingDiagnosticFindParams, ReadingDiagnosticFindResult } from './reading-diagnostic-query.js'
 import { runAgentMessageBroadcast, type AgentMuxMessageBroadcastInput, type AgentMuxMessageBroadcastReceipt } from './agent-message-broadcast.js'
 import { AgentMuxMessageNotifications, automaticNotification } from './agent-message-notifications.js'
-import { MoteInputOwner, type AutomaticInputOpportunity } from './mote-input-owner.js'
-import { moteInputObservationId, moteInputMember, type MoteInputOrigin, type MoteInputInspection } from './mote-input.js';
+import { MoteInputOwner, type AutomaticInputOpportunity } from './mote/input-owner.js'
+import { moteInputObservationId, moteInputMember, type MoteInputOrigin, type MoteInputInspection } from './mote/input.js';
 import type { AgentMuxMessageNotification, AgentMuxMessageNotificationStatus } from './agent-message-notification.js'
 import { isMessageNotificationInput } from './agent-message-notification.js'
 import { parseTerminalFrontendObservation, type AgentTerminalFrontend } from './agent-terminal-frontend.js'
@@ -6702,7 +6702,7 @@ export class AgentMuxClient {
       return observation
     } catch (error) { return { ...observation, unavailable: error } }
   }
-  private async readMoteInputSource(origin: MoteInputOrigin): Promise<{input: import('./mote-input.js').MoteInputObservation['input']; key?: AgentPromptInputKey; text:string|null; confirmedQuestion?:import('./mote-input.js').MoteInputObservation['confirmedQuestion']; result?: import('./mote-input.js').MoteInputObservation['result']}> {
+  private async readMoteInputSource(origin: MoteInputOrigin): Promise<{input: import('./mote/input.js').MoteInputObservation['input']; key?: AgentPromptInputKey; text:string|null; confirmedQuestion?:import('./mote/input.js').MoteInputObservation['confirmedQuestion']; result?: import('./mote/input.js').MoteInputObservation['result']}> {
     if (origin.kind === 'interaction') {
       const receipt = await this.inspectAgentInteractionOperation({agentSessionId:origin.agentSessionId,operationId:origin.operationId})
       if (!receipt || receipt.run.runId !== origin.runId || ['saved','unknown'].includes(receipt.delivery)) return {input:'unconfirmed',text:null}
@@ -6736,7 +6736,7 @@ export class AgentMuxClient {
     return await this.moteInputs.inspect(original.id)
   }
 
-  async submitAgentPrompt(input: AgentMuxAgentPromptInput, context?: AgentInputCallContext): Promise<void | AgentInputSubmissionReceipt | import('./mote-input.js').MoteInputSubmissionReference> {
+  async submitAgentPrompt(input: AgentMuxAgentPromptInput, context?: AgentInputCallContext): Promise<void | AgentInputSubmissionReceipt | import('./mote/input.js').MoteInputSubmissionReference> {
     const origin: MoteInputOrigin = {kind:'prompt',key:{kind:'prompt',agentSessionId:input.agentSessionId,expectedRun:input.expectedRun,submissionId:input.operationId}}
     const observationId = await this.moteInputs.prepare(origin,input.moteSource,input.authorHuman === true && !context?.externalAuthor)
     try {

@@ -46,7 +46,7 @@ import { parseAgentMuxMessagePrefix, renderAgentMuxMessageReferences } from './a
 import { AGENTMUX_A2A_REFERENCE_REMINDER } from './agent-messaging-guidance.js'
 import { MAX_A2A_NOTIFICATION_BYTES, validateMessageNotification, type AgentMuxMessageNotification, type AgentMuxMessageNotificationStatus } from './agent-message-notification.js'
 import { messageNotificationJournalSchema, initializeMessageNotificationReferenceIndex } from './agent-message-journal.js'
-import { parseMoteInputObservation, moteInputNeedsObservation, moteInputMember, moteInputNoticeId, moteInputNoticeWire, moteInputNoticeWireMatches, type MoteInputObservation, type MoteInputNoticePhase } from './mote-input.js'
+import { parseMoteInputObservation, moteInputNeedsObservation, moteInputMember, moteInputNoticeId, moteInputNoticeWire, moteInputNoticeWireMatches, type MoteInputObservation, type MoteInputNoticePhase } from './mote/input.js'
 
 const moteInputJournalSchema = `CREATE TABLE IF NOT EXISTS mote_input_observations
   (id TEXT PRIMARY KEY, member_id TEXT NOT NULL, primary_id TEXT, active INTEGER NOT NULL, state_sequence INTEGER NOT NULL);

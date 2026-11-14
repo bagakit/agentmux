@@ -8,7 +8,7 @@ import type { AgentMuxCreationAdmission } from './agent-creation-admission.js'
 import type { AgentInputImageReference, AgentInputResourceOwner } from './agent-input-resource.js'
 import type { AgentPromptCondition, AgentPromptAdmissionIntent } from './agent-prompt-condition.js'
 import type { AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
-import type { AgentInputMoteResolver } from './mote-input.js'
+import type { AgentInputMoteResolver } from './mote/input.js'
 import type { AgentStartupDiagnosticOwner } from './startup-diagnostic.js'
 import type { AgentExternalConversationAuthorityPort } from './external-conversation.js'
 import type { AgentMuxHostExecutorOwner } from './executor-owner.js'
@@ -105,7 +105,7 @@ type AgentMuxAgentPromptContent = {
   /** Explicit manual origin attributed by trusted host. */
   authorHuman?: boolean
   /** Original selected Mote workface; the Host verifies its primary and membership. */
-  moteSource?: import('./mote-input.js').AgentInputMoteSource
+  moteSource?: import('./mote/input.js').AgentInputMoteSource
   sourceDevice?: import('./types.js').AgentOperationDevice
   sourceChannel?: import('./types.js').AgentMessageChannel
   /** Explicit host-generated context; a tag inside prompt cannot supply this fact. */
@@ -156,7 +156,7 @@ export type AgentMuxAgentMessageInput = AgentMuxAgentMessageSubmission & { agent
 export type AgentMuxAgentInteractionInput = AgentMuxInteractionOperationIntent & {
   /** Trusted Host attribution, not an unmanaged RPC argument. */
   authorHuman?: true
-  moteSource?: import('./mote-input.js').AgentInputMoteSource
+  moteSource?: import('./mote/input.js').AgentInputMoteSource
   agentSessionId: string
   expectedRun: AgentMuxRunRef
   response: AgentMuxInteractionResponse

@@ -1,19 +1,19 @@
-import { AgentMuxError } from './errors.js'
+import { AgentMuxError } from '../errors.js'
 import { createHash } from 'node:crypto'
-import { validateAgentPromptInputKey, type AgentPromptInputKey } from './agent-prompt-condition.js'
+import { validateAgentPromptInputKey, type AgentPromptInputKey } from '../agent-prompt-condition.js'
 import {
   parseConversationCheckpoint,
   type ConversationCheckpoint,
   type ConversationWindowBoundary
-} from './conversation-changes.js'
-import { parseConversationLandmarkRef } from './conversation-landmarks.js'
-import { rpcRecord } from './rpc-data.js'
+} from '../conversation-changes.js'
+import { parseConversationLandmarkRef } from '../conversation-landmarks.js'
+import { rpcRecord } from '../rpc-data.js'
 import { isDeepStrictEqual } from 'node:util'
-import { moteInputNoticeWire } from './mote-input-notice.js'
-export { moteInputNoticeWire } from './mote-input-notice.js'
-import type { AgentMuxMessageNotificationStatus } from './agent-message-notification.js'
-import { parseAgentInputMoteSource, type AgentInputMoteSource } from './mote-input-source.js'
-export { parseAgentInputMoteSource, type AgentInputMoteSource } from './mote-input-source.js'
+import { moteInputNoticeWire } from './input-notice.js'
+export { moteInputNoticeWire } from './input-notice.js'
+import type { AgentMuxMessageNotificationStatus } from '../agent-message-notification.js'
+import { parseAgentInputMoteSource, type AgentInputMoteSource } from './input-source.js'
+export { parseAgentInputMoteSource, type AgentInputMoteSource } from './input-source.js'
 
 /** Host-owned snapshot. Later preference edits cannot redirect this original observation. */
 export type AgentInputMoteBinding = {

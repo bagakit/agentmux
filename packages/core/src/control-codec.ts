@@ -95,7 +95,7 @@ import { settingsResourceBudget, settingsResourceEnvelope, settingsResourceRecor
 import { parseRemoteCoreInstallCheck, parseRemoteCoreInstallExpected, parseRemoteCoreInstallReceipt } from './remote-core-install-codec.js'
 import { parseRemoteCoreUpgradeCheck, parseRemoteCoreUpgradeExpected, parseRemoteCoreUpgradeReceipt } from './remote-core-upgrade-codec.js'
 import { isWorkbenchLayoutPreset } from './workbench-layout-preset.js'
-import { parseMoteContextEvidenceTarget, parseMoteContextObservation } from './mote-context-observation.js'
+import { parseMoteContextEvidenceTarget, parseMoteContextObservation } from './mote/context-observation.js'
 import { parseClientNotificationsTarget, parseClientNotificationsObservation } from './client-notifications.js'
 import { isSplitDirection } from './split-direction-ssot.js'
 

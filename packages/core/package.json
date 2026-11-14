@@ -59,12 +59,12 @@
       "import": "./dist/mote/chat.js"
     },
     "./mote-input-source": {
-      "types": "./dist/mote-input-source.d.ts",
-      "import": "./dist/mote-input-source.js"
+      "types": "./dist/mote/input-source.d.ts",
+      "import": "./dist/mote/input-source.js"
     },
     "./mote-input-notice": {
-      "types": "./dist/mote-input-notice.d.ts",
-      "import": "./dist/mote-input-notice.js"
+      "types": "./dist/mote/input-notice.d.ts",
+      "import": "./dist/mote/input-notice.js"
     },
     "./browser-sdk": {
       "types": "./dist/browser-sdk.d.ts",

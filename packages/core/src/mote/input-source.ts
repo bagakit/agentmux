@@ -1,5 +1,5 @@
-import { AgentMuxError } from './errors.js'
-import { MOTE_SUPERVISION_GUIDANCE } from './mote/guidance.js'
+import { AgentMuxError } from '../errors.js'
+import { MOTE_SUPERVISION_GUIDANCE } from './guidance.js'
 
 /** A client-selected original workface. This is a locator, never an observer or authority. */
 export type AgentInputMoteSource = {

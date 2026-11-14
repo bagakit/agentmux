@@ -1,6 +1,6 @@
 import { parseAgentInputImageReference, type AgentInputImageReference } from './agent-input-resource.js'
 import { AgentMuxError } from './errors.js'
-import { parseAgentInputMoteSource, type AgentInputMoteSource } from './mote-input-source.js'
+import { parseAgentInputMoteSource, type AgentInputMoteSource } from './mote/input-source.js'
 import { rpcRecord } from './rpc-data.js'
 import { validateAgentDirectedPromptTarget, validateAgentPromptCondition, validateAgentPromptInputKey, type AgentPromptCondition, type AgentDirectedPromptTarget } from './agent-prompt-condition.js'
 import { parseBrowserInputContext, type BrowserInputContext } from './browser-input-context.js'

@@ -1,5 +1,5 @@
-import { AgentMuxError } from './errors.js'
-import { rpcRecord } from './rpc-data.js'
+import { AgentMuxError } from '../errors.js'
+import { rpcRecord } from '../rpc-data.js'
 
 /** Client action facts, independent of the host's UI and of Agent/Run health. */
 export type AgentMuxMoteContextReference = {

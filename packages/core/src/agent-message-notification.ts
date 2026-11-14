@@ -24,7 +24,7 @@ export type AgentMuxMessageNotification = {
   key: Extract<AgentPromptInputKey, { kind: 'prompt' }>
   messageIds: readonly string[]
   /** Exact original input observation, instead of Inbox MIDs; no synthetic A2A message. */
-  moteObservation?: { id: string; phase: import('./mote-input.js').MoteInputNoticePhase }
+  moteObservation?: { id: string; phase: import('./mote/input.js').MoteInputNoticePhase }
   wire: string
   condition: AgentPromptCondition
   mode: 'idle' | 'steer'

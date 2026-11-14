@@ -5,7 +5,7 @@ import { agentTurnCompletionIdentity, sameRun } from './agent-session-identity.j
 import type { DurableAgentMuxMessageQueue } from './agent-global-message-queue.js'
 import type { AgentMuxAutomaticNotification, AgentMuxMessageNotification } from './agent-message-notification.js'
 import type { AgentProvider } from './agent-provider.js'
-import type { AutomaticInputOpportunity } from './mote-input-owner.js'
+import type { AutomaticInputOpportunity } from './mote/input-owner.js'
 import type { AgentNativeHookSpecification } from './hook-normalizer.js'
 import type { AgentMuxAgentSession } from './types.js'
 import { sessionSemanticResumeSourceRuns } from './agent-session-resume-sources.js'

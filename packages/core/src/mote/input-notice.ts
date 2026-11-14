@@ -1,6 +1,6 @@
-import { parseAgentInputMoteSource, type AgentInputMoteSource } from './mote-input-source.js'
-import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
-import type { MoteInputInspection, MoteInputObservation, MoteInputOrigin, MoteInputNoticePhase } from './mote-input.js'
+import { parseAgentInputMoteSource, type AgentInputMoteSource } from './input-source.js'
+import { validateAgentPromptInputKey } from '../agent-prompt-condition.js'
+import type { MoteInputInspection, MoteInputObservation, MoteInputOrigin, MoteInputNoticePhase } from './input.js'
 
 /** A reading declaration from an already-qualified platform notice. It grants no input or authority. */
 export type MoteInputNotice = {
