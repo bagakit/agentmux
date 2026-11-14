@@ -174,7 +174,7 @@ export async function createSpaceMemberSurface(input: SpaceMountMemberRoute, por
     conversationUnwatch: async value => { const reader = conversations.get(value.readerId); conversations.delete(value.readerId); reader?.dispose() },
     attach: value => attach(value.afterByte),
     refreshAttachment: value => attach(value.afterByte, value.attachmentId),
-    replay: async value => { check(); requireLease(value.attachmentId); const result = await client.readRunReplay(originalRun(), value.afterByte, 'terminal'); check(); return { replay: result.replay, gap: result.gap } },
+    replay: async value => { check(); requireLease(value.attachmentId); const result = await client.readRunReplay(originalRun(), value.afterByte, 'raw'); check(); return { replay: result.replay, gap: result.gap } },
     detach: async value => { requireLease(value.attachmentId); leases.delete(value.attachmentId); if (!leases.size) await client.releaseRunAttachment(originalRun()) },
     resize: async value => { check(); requireLease(value.attachmentId); const result = await client.resizeTerminal(originalRun(), value.cols, value.rows); return { cols: result.cols, rows: result.rows } },
     write: async value => { check(); await client.writeAgent({ agentSessionId: input.target.agentSessionId, expectedRun: originalRun(), ...value }) },
