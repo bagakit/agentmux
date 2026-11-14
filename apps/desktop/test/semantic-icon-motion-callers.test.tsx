@@ -28,7 +28,7 @@ afterEach(() => release())
 const animated = (node: ParentNode = dom.container) => Array.from(node.querySelectorAll<HTMLElement>('[data-icon-animation]'))
 const presets = (node: ParentNode = dom.container) => animated(node).map(element => element.dataset.iconAnimation)
 
-it('animates only the confirmed working avatar and Focus item while the real Working category heading stays static', async () => {
+it('keeps Focus scan markers and decorative avatars static while the visible working avatar animates', async () => {
   const now = Date.now(), session = composerSession('working-motion')
   session.status = { state: 'working', source: 'native-hook', observedAt: now }
   session.semanticStatus = { state: 'working', source: 'native-hook', observedAt: now, stateEnteredAt: now - 1000 }
@@ -36,10 +36,21 @@ it('animates only the confirmed working avatar and Focus item while the real Wor
   const state = useAppStore.getState()
   const contexts = createFocusProjectionSelector()({ sessions: state.sessions, config: state.config, timelines: state.timelines, agentNames: state.agentNames, scratchTopicSnapshots: state.scratchTopicSnapshots }).contexts
   expect(contexts).toHaveLength(1); expect(contexts[0]!.bucket).toBe('working')
-  await dom.render(<><AgentAvatar label="Current original Agent" sessionId={session.id} /><FocusContextStateMark context={contexts[0]!} /><GlobalFocusSurface /></>)
-  const avatar = dom.container.querySelector('.agent-avatar__status')!, item = dom.container.querySelector('.focus-state-mark')!, heading = dom.container.querySelector('.focus-context-group__header[data-bucket="working"]')!
-  expect(avatar).not.toBeNull(); expect(item).not.toBeNull(); expect(heading).not.toBeNull()
-  expect(presets(avatar)).toEqual(['work']); expect(presets(item)).toEqual(['work'])
+  await dom.render(<>
+    <AgentAvatar label="Current original Agent" sessionId={session.id} />
+    <div data-decoration><AgentAvatar label="Decorative Agent" sessionId={session.id} visible={false} /></div>
+    <GlobalFocusSurface />
+  </>)
+  const avatar = dom.container.querySelector('.agent-avatar__status')!
+  const decoration = dom.container.querySelector('[data-decoration] .agent-avatar__status')!
+  const item = dom.container.querySelector('.focus-state-mark[data-focus-state-icon="working"]')!
+  const heading = dom.container.querySelector('.focus-context-group__header[data-bucket="working"]')!
+  expect(avatar).not.toBeNull(); expect(decoration).not.toBeNull(); expect(item).not.toBeNull(); expect(heading).not.toBeNull()
+  expect(presets(avatar)).toEqual(['work'])
+  expect(decoration.querySelector('[data-semantic-icon="status.working"]')).not.toBeNull()
+  expect(item.querySelector('[data-semantic-icon="status.working"]')).not.toBeNull()
+  expect(presets(decoration)).toEqual([])
+  expect(presets(item)).toEqual([])
   expect(heading.querySelector('[data-semantic-icon="status.working"]')).not.toBeNull(); expect(presets(heading)).toEqual([])
   expect(avatar.querySelector('svg')?.style.strokeWidth).toBe('2.4')
   const custom = structuredClone(GRAPHITE_THEME); custom.id = 'custom.motion-callers'; custom.name = 'Original drawings with explicit motion'; custom.icons['status.working'] = { kind: 'paths', paths: [{ d: 'M4 4H20V20H4Z' }] }
