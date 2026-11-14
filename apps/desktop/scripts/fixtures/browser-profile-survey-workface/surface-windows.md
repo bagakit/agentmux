@@ -11,3 +11,7 @@
 `--mutation steal-main-surface` 会让分离窗口内的导航同步改写主窗。相同的 Notebook 面包屑点击必须使保持 Focus 的断言失败。
 
 从来源页返回原网页时，公开 `app focus --surface survey --browser ID --region ID --input preserve` 必须在回执中区分主窗 Focus 与原 Survey 窗口的实际呈现。随后 `app focus --surface recall --input preserve` 定位原 Recall 窗口。两次导航都保留已选择的 Note 编辑器，检查窗口操作回执可确认没有新发原生聚焦请求。隔离应用按现有流程在后台启动，macOS 若未授予系统键盘焦点，回执须保留未确认状态。
+
+顶边验收覆盖 Survey、Recall、整个 Tab 与单个 Region。场景通过 Survey 的新建 Tab 按钮在同一研究中准备两个真实标签，切回原网页，核对标签条和左侧窗口控件同高起步。宽窗、窄窗、折叠目录以及窄窗 Browser tools 的截图保留正文和来源。macOS 仅在已授予屏幕录制权限时按该实例的窗口 ID 截取一张双标签系统窗口，系统拖动手势不在后台自动验收范围内。
+
+重启返回笔记后，场景分别按原 Workspace、Group、Tab、Region 打开两种空间窗口，核对原内容、文档标题、拖动区、返回控件，实点归还并检查原运行进程。`--mutation omit-recall-content-edge` 使 Recall 无法取得自己的窗口控件，真实原窗口的唯一 Return 断言应失败。
