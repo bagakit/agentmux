@@ -7,7 +7,11 @@ import { inspectConversationConsumers } from '../../../src/renderer/src/lib/conv
 import { api } from '../../../src/renderer/src/lib/api'
 import { createConversationReadApi } from '../../../src/renderer/src/lib/conversation-read-api'
 import { createRendererSessionEvents } from '../../../src/renderer/src/lib/session-events'
-import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
+import { unwrapSessionObservationResult } from '../../../src/shared/session-observation-result'
+import { unwrapSessionInputWriteResult } from '../../../src/shared/session-input-result'
+import type { AgentMuxDesktopApi } from '../../../src/shared/contracts'
+import type { Terminal } from '@xterm/xterm'
+import { addWorkbenchRegion, createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
 import { desktopSpatialGraph } from '../../../src/renderer/src/lib/desktop-spatial-state'
 import { createWorkspaceLayout } from '@agentmux/layout'
@@ -25,6 +29,8 @@ const inputHistoryReads: { reference: Parameters<typeof api.sessions.readHistory
 window.addEventListener('error', event => errors.push(event.error?.stack ?? event.message))
 window.addEventListener('unhandledrejection', event => errors.push(event.reason?.stack ?? String(event.reason)))
 const setup = await request('setup'), workspace = setup.config.workspaces[0]
+const terminalInstances: Terminal[] = []
+if (setup.terminalNeighbor) Object.assign(window, { terminals: terminalInstances })
 api.config.get = async () => setup.config
 api.providers.list = async (options?: any) => request('providers', options)
 api.demands.list = async () => []
@@ -46,6 +52,23 @@ api.sessions.readHistory = async (reference, input) => {
 }
 // These proof scenes contain no send intent. Any accidental control crosses a failing boundary.
 api.sessions.write = (...args) => request('terminal-protocol', ...args)
+const terminalEvents: Array<{ subscriber: string; run: string; bytes: number }> = []
+if (setup.terminalNeighbor) {
+  const production = window.agentmux!.sessions
+  const onEvent = createRendererSessionEvents(production.onEvent)
+  api.sessions.onEvent = (listener, control) => onEvent(event => {
+    const value = event.event
+    if (value.type === 'terminal-output' && control && control.kind !== 'host-observation')
+      terminalEvents.push({ subscriber: control.run.runId, run: value.run.runId, bytes: value.dataBytes.byteLength })
+    listener(event)
+  }, control)
+  api.sessions.attach = (...args) => production.attach(...args).then(unwrapSessionObservationResult)
+  api.sessions.refreshAttachment = (...args) => production.refreshAttachment(...args).then(unwrapSessionObservationResult)
+  api.sessions.detach = production.detach
+  api.sessions.replay = (...args) => production.replay(...args).then(unwrapSessionObservationResult)
+  api.sessions.resize = production.resize
+  api.sessions.write = (...args: Parameters<AgentMuxDesktopApi['sessions']['write']>) => production.write(...args).then(result => { unwrapSessionInputWriteResult(result) })
+}
 for (const name of ['paste', 'stop', 'submitPrompt', 'respondInteraction'] as const) {
   (api.sessions as any)[name] = (...args: unknown[]) => request('unexpected-control', name, ...args)
 }
@@ -111,7 +134,10 @@ for (const method of ['observeConversation', 'releaseConversationView'] as const
 let ids = setup.ids
 if (setup.phase === 'seed') {
   ids = await request('seed', setup.scene)
-  const tab = createWorkbenchTab('reading-tab', { regionId: 'reading-region', kind: 'agent', phase: 'attached', workspaceId: workspace.id, sessionId: ids.sessionId })
+  let tab = createWorkbenchTab('reading-tab', { regionId: 'reading-region', kind: 'agent', phase: 'attached', workspaceId: workspace.id, sessionId: ids.sessionId })
+  if (ids.terminal) tab = addWorkbenchRegion(tab, 'reading-region', 'right', {
+    regionId: 'terminal-region', kind: 'terminal', phase: 'attached', workspaceId: workspace.id, sessionId: ids.terminal.id
+  })
   const layout = createWorkspaceLayout('reading-group', [tab.id])
   const snapshot = await api.sessions.snapshot()
   await api.spatial.commit({ expectedRevision: 0, graph: desktopSpatialGraph({ ...useAppStore.getState(), config: setup.config,
@@ -123,6 +149,26 @@ if (setup.phase === 'seed') {
     viewModes: { [ids.sessionId]: 'activity' }, agentComposerDrafts: { [ids.sessionId]: draft },
     ...(setup.scene === 'surfaces' ? { agentSteerQueues: { [ids.sessionId]: [{ operationId: 'surface-paused-intent', runId: ids.runId, text: surfacePending, status: 'queued', awaitingExplicitSend: true, promptCondition: null, origin: 'manual' }] } } : {})
   } }))
+}
+if (setup.terminalNeighbor) {
+  let original: Terminal | undefined
+  Object.assign(window, { liveTerminalProof() {
+    const region = document.querySelector('[data-workbench-region-id="terminal-region"]')
+    const terminal = terminalInstances.find(value => value.element && region?.contains(value.element))
+    if (!terminal) return null
+    original ??= terminal
+    const bounds = terminal.element!.getBoundingClientRect(), buffer = terminal.buffer.active
+    return {
+      sameTerminal: terminal === original, termCount: terminalInstances.length,
+      bounds: { width: bounds.width, height: bounds.height, x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 },
+      grid: { cols: terminal.cols, rows: terminal.rows },
+      focused: document.activeElement === terminal.textarea,
+      buffer: { type: buffer.type, base: buffer.baseY, viewport: buffer.viewportY,
+        x: buffer.cursorX, y: buffer.cursorY, length: buffer.length,
+        top: buffer.getLine(buffer.viewportY)?.translateToString(true), tail: buffer.getLine(buffer.length - 2)?.translateToString(true) },
+      events: terminalEvents.slice()
+    }
+  } })
 }
 const heavyIds = new Set([...sceneRows(setup.scene), appendRow(setup.scene, `desktop-${setup.phase}`), appendRow(setup.scene, `mobile-${setup.phase}`)]
   .filter(row => row.payload?.content?.some((part: any) => part.text?.length > 2000)).map(row => row.payload.id))

@@ -16,6 +16,7 @@ const root = path.resolve(import.meta.dirname, '../../..'), fixture = path.join(
 const args = process.argv.slice(2), compileOnly = args.includes('--compile-only')
 const costPairs = args.includes('--cost-pairs')
 const readingPattern = args.includes('--reading-pattern')
+const terminalNeighbor = args.includes('--terminal-neighbor')
 const patternAttempts = Number(args.find(value => value.startsWith('--pattern-attempts='))?.slice('--pattern-attempts='.length) ?? 1)
 assert.ok(Number.isInteger(patternAttempts) && patternAttempts >= 1 && patternAttempts <= 5, 'Use one to five independent reading pattern attempts')
 const anchorAttempts = Number(args.find(value => value.startsWith('--anchor-attempts='))?.slice('--anchor-attempts='.length) ?? 0)
@@ -23,10 +24,10 @@ assert.ok(Number.isInteger(anchorAttempts) && anchorAttempts >= 0 && anchorAttem
 const preparation = args.includes('--prepare') || compileOnly || anchorAttempts > 0
 const sceneOption = args.find(value => value.startsWith('--scene='))?.slice('--scene='.length)
 const mobileFixture = args.find(value => value.startsWith('--mobile-fixture='))?.slice('--mobile-fixture='.length) ?? path.join(root, 'apps/mobile/scripts/fixtures/conversation-progressive-reading')
-const scenes = sceneOption ? [sceneOption] : costPairs ? ['dense', 'longbody'] : sceneNames
+const scenes = terminalNeighbor ? ['dense'] : sceneOption ? [sceneOption] : costPairs ? ['dense', 'longbody'] : sceneNames
 assert.ok(scenes.length && scenes.every(scene => sceneNames.includes(scene)), 'Select a known nonempty scene')
 if (anchorAttempts) assert.deepEqual(scenes, ['dense'], 'Anchor attempts exercise only the dense counterexample')
-if (readingPattern) assert.ok(!anchorAttempts && !costPairs && scenes.length === 1, 'Pattern trials exercise one scene in both original hosts')
+if (readingPattern) assert.ok(!anchorAttempts && !costPairs && !terminalNeighbor && scenes.length === 1, 'Pattern trials exercise one scene in both original hosts')
 if (costPairs) { assert.equal(anchorAttempts, 0); assert.deepEqual(scenes, ['dense', 'longbody'], 'Cost comparison keeps both approved transcript inputs') }
 const evidence = path.resolve(args.find(value => !value.startsWith('--')) ?? path.join(root, '.tmp/conversation-progressive-reading-' + crypto.randomUUID()))
 const require = createRequire(path.join(root, 'apps/desktop/package.json')), { build } = await import(pathToFileURL(require.resolve('vite')).href)
@@ -35,6 +36,10 @@ const privateRoot = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'a
 const hash = value => createHash('sha256').update(value).digest('hex')
 const files = async directory => (await Promise.all((await fs.readdir(directory, { withFileTypes: true })).map(entry => entry.isDirectory() ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]))).flat()
 const inputPaths = [...await files(fixture), path.join(import.meta.dirname, 'verify-conversation-progressive-reading.mjs'),
+  ...(terminalNeighbor ? [
+    path.join(import.meta.dirname, 'fixtures/terminal-wheel/xterm-instrumented.ts'),
+    path.join(root, 'apps/desktop/electron.vite.config.ts')
+  ] : []),
   ...await files(mobileFixture), ...await files(path.join(root, 'apps/mobile/src')),
   ...await files(path.join(root, 'packages/client-ui/brand')),
   path.join(import.meta.dirname, 'candidate-package-resolve.mjs'),
@@ -131,11 +136,28 @@ try {
     ...(name === 'preload' ? { ssr: { noExternal: true } } : {}),
     build: { ssr: path.join(fixture, `${name}.ts`), target: 'node24', outDir: path.join(privateRoot, name), emptyOutDir: true,
       rollupOptions: { makeAbsoluteExternalsRelative: false, external: name === 'main' ? ['electron', '@agentmux/core', /^@agentmux\/core\//] : ['electron'], output: { format, entryFileNames: `${name}.${format === 'es' ? 'mjs' : 'cjs'}` } } } })
-  const preloadCode = await fs.readFile(path.join(privateRoot, 'preload/preload.cjs'), 'utf8')
+  const fixturePreload = path.join(privateRoot, 'preload/preload.cjs')
+  if (terminalNeighbor) {
+    const desktop = path.join(root, 'apps/desktop')
+    const { resolveConfig } = await import(pathToFileURL(require.resolve('electron-vite')).href)
+    const { config } = await resolveConfig({ root: desktop, configFile: path.join(desktop, 'electron.vite.config.ts'), logLevel: 'error' }, 'build', 'production')
+    const preload = config?.preload
+    assert.ok(preload?.build?.rollupOptions?.input?.index, 'Build the exact production Desktop preload entry')
+    const { input, ...rollupOptions } = preload.build.rollupOptions
+    const outDir = path.join(privateRoot, 'production-preload')
+    await build({ ...preload, build: { ...preload.build, outDir, rollupOptions: { ...rollupOptions, input: { index: input.index } } } })
+    const production = await fs.readFile(path.join(outDir, 'index.cjs'), 'utf8'), fixtureBridge = await fs.readFile(fixturePreload, 'utf8')
+    await fs.writeFile(fixturePreload, `(() => {\n${production}\n})()\n;(() => {\n${fixtureBridge}\n})()\n`)
+    receipt.terminalPreload = { productionSHA256: hash(production), fixtureBridgeSHA256: hash(fixtureBridge),
+      entry: 'apps/desktop/src/preload/index.ts', config: 'apps/desktop/electron.vite.config.ts' }
+  }
+  const preloadCode = await fs.readFile(fixturePreload, 'utf8')
   const preloadRequires = [...preloadCode.matchAll(/\brequire\(["\x27]([^"\x27]+)["\x27]\)/gu)].map(match => match[1])
   assert.ok(preloadRequires.length > 0, 'The sandbox preload must consume its original Electron bridge')
   assert.deepEqual([...new Set(preloadRequires)], ['electron'], 'The sandbox preload must bundle workspace dependencies')
-  for (const variant of costPairs ? ['scheduled', 'immediate'] : ['scheduled']) await build({ ...common, base: './', resolve: { alias: [candidateAlias(root, { browser: true })] }, plugins: [plugin(true, variant)], worker: { format: 'es', plugins: () => [plugin(true, variant)] }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' },
+  for (const variant of costPairs ? ['scheduled', 'immediate'] : ['scheduled']) await build({ ...common, base: './', resolve: { alias: [candidateAlias(root, { browser: true }), ...(terminalNeighbor ? [{
+    find: /^@xterm\/xterm$/u, replacement: path.join(import.meta.dirname, 'fixtures/terminal-wheel/xterm-instrumented.ts')
+  }] : [])] }, plugins: [plugin(true, variant)], worker: { format: 'es', plugins: () => [plugin(true, variant)] }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' },
     build: { target: 'esnext', minify: false, reportCompressedSize: false, outDir: path.join(privateRoot, variant === 'scheduled' ? 'renderer' : 'renderer-immediate'), emptyOutDir: true } })
   for (const specifier of ['@agentmux/client-ui/styles/conversation-message.css', '@agentmux/client-ui/input/styles.css']) {
     const file = candidateResolve(root, specifier, { browser: true })
@@ -143,7 +165,7 @@ try {
   }
   receipt.transforms = [...transforms.values()]
   if (costPairs) assert.equal(receipt.transforms.length, 1)
-  if (mobileFixture && !anchorAttempts && !costPairs) {
+  if (mobileFixture && !anchorAttempts && !costPairs && !terminalNeighbor) {
     const { buildMobile } = await import(pathToFileURL(path.resolve(mobileFixture, 'build.mjs')).href)
     mobileBuild = await buildMobile({ root, output: path.join(privateRoot, 'renderer') })
     for (const [file, sha256] of Object.entries(mobileBuild.source)) if (!file.includes('/node_modules/') && !file.startsWith('node_modules/'))
@@ -174,7 +196,7 @@ try {
     // become part of the private Runtime socket address.
     const sceneRoot = path.join(privateRoot, `s${index}`); await fs.mkdir(path.join(sceneRoot, 'workspace'), { recursive: true })
     await fs.copyFile(path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), path.join(sceneRoot, 'fake-codex-cli.mjs'))
-    for (const phase of anchorAttempts || costPairs || readingPattern ? ['seed'] : ['seed', 'restore']) {
+    for (const phase of anchorAttempts || costPairs || readingPattern || terminalNeighbor ? ['seed'] : ['seed', 'restore']) {
       const processRoot = path.join(sceneRoot, 'process-' + phase); await fs.mkdir(processRoot)
       const env = privatePackageSmokeEnvironment(process.env, { userData: path.join(sceneRoot, 'user-data'), runtimeRoot: path.join(sceneRoot, 'runtime') })
       delete env.AGENTMUX_DESKTOP_READY_FILE; delete env.AGENTMUX_DESKTOP_EXIT_AFTER_READY
@@ -185,7 +207,7 @@ try {
       const resultFile = path.join(runEvidence, `${scene}-${phase}.json`)
       await fs.rm(resultFile, { force: true })
       const exit = await runProbeProcess(electron, [bootstrap, path.join(privateRoot, variant === 'immediate' ? 'renderer-immediate/index.html' : 'renderer/index.html'), sceneRoot, phase,
-        path.join(privateRoot, 'preload/preload.cjs'), runEvidence, process.execPath, scene, mobileBuild?.exercise ?? '', mobileBuild?.preload ?? '', costPairs ? 'cost' : anchorAttempts ? 'anchor' : readingPattern ? 'reading-pattern' : 'acceptance', path.join(privateRoot, 'main/main.mjs'), root],
+        path.join(privateRoot, 'preload/preload.cjs'), runEvidence, process.execPath, scene, mobileBuild?.exercise ?? '', mobileBuild?.preload ?? '', costPairs ? 'cost' : anchorAttempts ? 'anchor' : terminalNeighbor ? 'terminal-neighbor' : readingPattern ? 'reading-pattern' : 'acceptance', path.join(privateRoot, 'main/main.mjs'), root],
       { temporaryRoot: processRoot, cwd: root, env, timeoutMs: 180000, onLine: line => { log.push(line); void fs.appendFile(logFile, line + '\n') } })
       await fs.writeFile(logFile, log.join('\n'))
       assert.equal(exit.timedOut, false, `${scene}/${phase}: private watchdog fired; read its stderr log`)
@@ -196,7 +218,7 @@ try {
       else assert.ok(actual.delayedPageSelection && actual.reads?.length, 'An anchor attempt must reach the original earlier-page commit')
       const seed = receipt.phases.find(item => item.scene === scene && item.phase === 'seed').actual
       if (phase === 'restore') { assert.notEqual(actual.pid, seed.pid); assert.deepEqual(actual.runs, seed.runs, 'Exact original Run/PID survives the separate App process'); assert.deepEqual(actual.unrelatedRuns, seed.unrelatedRuns) }
-      const images = readingPattern ? ['current', 'ordinary-append'] : scene === 'surfaces' ? ['current', 'system', 'collaboration', 'captured-diff', 'captured-original', 'compact-mailbox', 'compact-mailbox-narrow', 'pending-terminal', 'narrow']
+      const images = terminalNeighbor ? ['current', 'terminal-neighbor'] : readingPattern ? ['current', 'ordinary-append'] : scene === 'surfaces' ? ['current', 'system', 'collaboration', 'captured-diff', 'captured-original', 'compact-mailbox', 'compact-mailbox-narrow', 'pending-terminal', 'narrow']
         : scene === 'integrity' ? ['current', 'find-loaded', 'find-code', 'ruler-captured', 'ruler-reopened', 'find-captured', 'narrow']
           : ['current', 'earlier', 'selected', 'narrow']
       for (const name of images) receipt.visualPaths.push({ path: path.relative(root, path.join(runEvidence, `${scene}-${phase}-${name}.png`)), sha256: hash(await fs.readFile(path.join(runEvidence, `${scene}-${phase}-${name}.png`))) })

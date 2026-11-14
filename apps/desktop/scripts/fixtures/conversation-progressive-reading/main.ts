@@ -1,3 +1,7 @@
+import { sessionObservationResult } from '../../../src/shared/session-observation-result'
+import { sessionInputWriteResult } from '../../../src/shared/session-input-result'
+import { THEME_BOOTSTRAP_CHANNEL } from '../../../src/shared/theme-bootstrap'
+import type { SessionControl } from '../../../src/shared/contracts'
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -36,6 +40,45 @@ const store = new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-se
 const spatial = new AgentMuxSpatialStateStore(path.join(privateRoot, 'spatial-state.json'))
 const unsubscribeSpatial = spatial.subscribe(state => { if (win && !win.isDestroyed()) win.webContents.send('reading-proof:spatial', state) })
 const runtime = new RuntimeController(store, async (host, owner) => { core = await localRuntimeConnector(host, owner); return core })
+const terminalNeighbor = proofMode === 'terminal-neighbor'
+const terminalCalls: Array<{ kind: string; runId?: string; attachmentId?: string; bytes?: number; source?: string }> = []
+let privateTerminal: { id: string; runId: string } | undefined
+const terminalInput = 'native-one'
+if (terminalNeighbor) {
+  ipcMain.on(THEME_BOOTSTRAP_CHANNEL, event => { event.returnValue = null })
+  const trusted = (event: Electron.IpcMainInvokeEvent) => assert.equal(event.sender.id, win.webContents.id)
+  ipcMain.handle('sessions:attach', (event, control: SessionControl, after) => sessionObservationResult(async () => {
+    trusted(event)
+    const receipt = await runtime.attachSession(event.sender.id, control, after, config)
+    terminalCalls.push({ kind: 'attach', runId: control.run.runId, attachmentId: receipt.attachmentId,
+      bytes: receipt.replay.reduce((total, item) => total + item.dataBytes.byteLength, 0) })
+    return receipt
+  }))
+  ipcMain.handle('sessions:detach', async (event, attachmentId) => {
+    trusted(event); terminalCalls.push({ kind: 'detach', attachmentId })
+    return runtime.detachSession(event.sender.id, attachmentId)
+  })
+  ipcMain.handle('sessions:replay', (event, attachmentId, after) => sessionObservationResult(async () => {
+    trusted(event); terminalCalls.push({ kind: 'replay', attachmentId })
+    return runtime.readSessionReplay(event.sender.id, attachmentId, after)
+  }))
+  ipcMain.handle('sessions:refreshAttachment', (event, control, attachmentId, after) => sessionObservationResult(async () => {
+    trusted(event); terminalCalls.push({ kind: 'refresh', attachmentId })
+    return runtime.refreshSessionAttachment(event.sender.id, control, attachmentId, after, config)
+  }))
+  ipcMain.handle('sessions:resize', async (event, attachmentId, cols, rows) => {
+    trusted(event); terminalCalls.push({ kind: 'resize', attachmentId })
+    return runtime.resizeSessionAttachment(event.sender.id, attachmentId, cols, rows)
+  })
+  ipcMain.handle('sessions:write', (event, control: SessionControl, data, source, observation) => sessionInputWriteResult(async () => {
+    trusted(event)
+    assert.equal(control.run.runId, privateTerminal?.runId)
+    assert.equal(source, 'user')
+    assert.equal(Buffer.from(data).toString(), terminalInput)
+    terminalCalls.push({ kind: 'write', runId: control.run.runId, bytes: Buffer.byteLength(data), source })
+    return runtime.write(control, data, source, observation, { webContentsId: event.sender.id, window: null })
+  }))
+}
 const calls: { operation: string; elapsedMs: number }[] = [], copies: string[] = []
 const mobileToken = randomUUID(), ownerInstanceId = randomUUID(), authenticated: string[] = []
 const result: Record<string, any> = { passed: false, phase, scene, pid: process.pid, samples: [],
@@ -58,7 +101,7 @@ ipcMain.handle('reading-proof:request', async (event, operation, ...args) => {
   const started = performance.now()
   try {
     switch (operation) {
-      case 'setup': return { config, phase, scene, ids: phase === 'restore' ? await ids() : null }
+      case 'setup': return { config, phase, scene, terminalNeighbor, ids: phase === 'restore' ? await ids() : null }
       case 'spatial-read': return await spatial.read()
       case 'spatial-commit': return await spatial.commit(args[0])
       case 'providers': return await runtime.providerCatalog(args[0])
@@ -71,7 +114,23 @@ ipcMain.handle('reading-proof:request', async (event, operation, ...args) => {
         assert.equal(phase, 'seed'); assert.equal(args[0], scene)
         const { session } = await runtime.launchAgent({ hostId: 'local', executorId: 'codex', workspacePath: config.workspaces[0]!.path }, config)
         const stored = await until(async () => { const value = await store.readMetadata(session.id); return value?.nativeHandle?.kind === 'provider' && value.nativeHandle.transcriptPath ? value : null }, 'original native handle')
-        const value = { sessionId: session.id, runId: session.control.run.runId, nativeSessionId: stored.nativeHandle!.sessionId }
+        if (terminalNeighbor) {
+          const executable = path.join(privateRoot, 'terminal-program.mjs')
+          await fs.writeFile(executable, String.raw`import assert from 'node:assert/strict'
+assert.ok(process.stdin.isTTY && process.stdout.isTTY)
+process.stdin.setRawMode(true)
+for (let row = 0; row < 320; row++) process.stdout.write('\u001b[32mprivate-history-'+row+'\u001b[0m\r\n')
+process.stdout.write('private-live-ready\r\n')
+process.stdin.on('data', bytes => process.stdout.write('private-echo:'+bytes.toString()+'\r\n'))
+`)
+          const quote = (text: string) => "'" + text.replaceAll("'", "'\\''") + "'"
+          const terminal = await runtime.launchTerminal({ hostId: 'local', workspacePath: config.workspaces[0]!.path,
+            shellCommand: 'exec ' + quote(nodeExecutable) + ' ' + quote(executable) }, config)
+          assert.equal(terminal.kind, 'terminal')
+          privateTerminal = { id: terminal.id, runId: terminal.control.run.runId }
+        }
+        const value = { sessionId: session.id, runId: session.control.run.runId, nativeSessionId: stored.nativeHandle!.sessionId,
+          ...(privateTerminal ? { terminal: privateTerminal } : {}) }
         await fs.writeFile(path.join(privateRoot, 'ids.json'), JSON.stringify(value))
         const seeded = scene === 'surfaces' ? surfaceRows() : sceneRows(scene), preparationStarted = performance.now()
         const lastTurn = seeded.findLast((row: any) => row.type === 'event_msg' && row.payload?.type === 'task_complete') as
@@ -336,6 +395,38 @@ app.whenReady().then(async () => {
       assert.equal(calls.filter(call => call.operation === 'seed').length, 0, 'Restart never reseeds the original workface')
     }
     await sample('first-readable'); await shot('current')
+    if (terminalNeighbor) {
+      const before = await ready(`(() => {
+        const current=window.liveTerminalProof?.();
+        return current?.buffer.base > 200 && current.buffer.tail==='private-live-ready' && current;
+      })()`)
+      assert.equal(before.buffer.viewport, before.buffer.base)
+      await click(`document.querySelector('[data-workbench-region-id="terminal-region"] .xterm-screen')`)
+      await ready('liveTerminalProof().focused')
+      const wheel = (bounds, deltaY) => win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',
+        { type: 'mouseWheel', x: bounds.x, y: bounds.y, deltaX: 0, deltaY })
+      await wheel(before.bounds, -420)
+      const up = await ready(`(() => { const state=liveTerminalProof(); return state.buffer.viewport < ${before.buffer.viewport} && state })()`)
+      assert.match(up.buffer.top, /^private-history-/u)
+      assert.ok(up.focused)
+      await wheel(before.bounds, 420)
+      await ready('liveTerminalProof().buffer.viewport===liveTerminalProof().buffer.base')
+      await win.webContents.debugger.sendCommand('Input.insertText', { text: terminalInput })
+      const after = await ready(`(() => {
+        const current=liveTerminalProof();
+        return current.buffer.tail==='private-echo:${terminalInput}' && current;
+      })()`)
+      assert.equal(after.sameTerminal, true)
+      assert.ok(after.focused)
+      assert.deepEqual(after.grid, before.grid)
+      const live = (await core.listRuns()).find(run => run.runId === privateTerminal!.runId)
+      assert.equal(live?.state, 'running')
+      assert.deepEqual(terminalCalls.filter(call => call.kind === 'write'), [{ kind: 'write', runId: privateTerminal!.runId, bytes: 10, source: 'user' }])
+      result.nativeTerminal = { before, up, after, live, calls: terminalCalls }
+      await shot('terminal-neighbor')
+      result.passed = true
+      return
+    }
     if (proofMode === 'reading-pattern') {
       const point = await read('(() => { const r=document.querySelector(".activity-feed").getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2} })()')
       await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0, deltaY: -250 })
