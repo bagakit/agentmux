@@ -141,3 +141,81 @@ it('adds project files to the existing QuickSwitcher Dialog, returns to the same
   expect(document.activeElement).toBe(source)
   expect([source.value, source.selectionStart, source.selectionEnd]).toEqual(['Original unsaved input', 2, 7])
 })
+
+const openListedFile = useAppStore.getState().openFileAndReveal
+it.each(['Quick Open', 'Explorer'])('%s opens a Source candidate under a topic-shaped name and preserves a conflicting draft', async picker => {
+  const { createWorkspaceLayout } = await import('@agentmux/layout')
+  const { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } = await import('@agentmux/host/mote-model')
+  const { documentKey } = await import('../src/renderer/src/lib/workbench-tabs')
+  const scratch = { ...workspace, id: SCRATCH_WORKSPACE_ID }
+  const root = scratchTopicDirectoryName('view:source'), path = root + '/same.md'
+  const key = documentKey(scratch.id, path)
+  const mount = { hostId: scratch.hostId, reference: { runtimeId: 'source-runtime', spaceId: 'original-space' }, workspaceId: scratch.id, zoneId: 'source-zone' }
+  const directory = { hostId: scratch.hostId, workspaceId: scratch.id, workspacePath: scratch.path, zoneId: mount.zoneId, zonePath: scratch.path + '/shared', path: 'shared' }
+  const selection = { workspace: scratch, target: mount, selection: { kind: 'mount' as const, mount }, locator: { mount, resource: directory } }
+  useAppStore.setState({ config: { ...composerConfig, workspaces: [scratch] }, activeWorkspaceId: scratch.id, mainSurface: 'workbench',
+    workbenchSpaceSelection: null, documents: {}, dirtyDocuments: {}, tabs: {}, layouts: { [scratch.id]: createWorkspaceLayout('files', []) },
+    openFileAndReveal: openListedFile, sourceFilesInputs: { selections: { [scratch.id]: selection }, creations: {}, pending: {}, folderRequests: {} } })
+  const source = vi.spyOn(api.sourceFiles, 'call').mockImplementation(async (_target, method, query) => {
+    if (!('path' in query)) throw Error('Missing original file path')
+    if (method === 'file.list' && 'mode' in query && query.mode === 'directory') return { carrierCurrent: true, result: {
+      resource: { ...directory, path: directory.path + '/' + root }, result: { status: 'directory-listed', complete: true, omitted: 'none', partialReason: null,
+        entries: [{ path: directory.path + '/' + path, name: 'same.md', isDirectory: false, isSymlink: false }] } } }
+    if (method === 'file.list') return { carrierCurrent: true, result: { resource: directory, result: { ...listing, files: [path] } } }
+    if (method === 'file.read' && [path, root + '/original.url'].includes(query.path ?? '')) {
+      const resource = { ...directory, path: 'shared/' + query.path }
+      return { carrierCurrent: true, result: { resource, result: { status: 'read', document: { path: resource.path, content: 'source body', revision: 'read-revision' } } } }
+    }
+    throw Error('Unexpected file operation ' + method)
+  })
+  const readMain = vi.spyOn(api.files, 'read').mockRejectedValue(new Error('Wrong Main folder'))
+  const observeMain = vi.spyOn(api.files, 'observe').mockRejectedValue(new Error('Main has no such file'))
+  let selector = '[role="option"]'
+  if (picker === 'Explorer') {
+    const { installFileTreeGeometry } = await import('./helpers/file-tree-geometry')
+    const { FileExplorer } = await import('../src/renderer/src/components/FileExplorer')
+    installFileTreeGeometry()
+    await dom.render(<FileExplorer workspaceId={scratch.id} rootPath={root} />)
+    selector = `[data-tree-path="${path}"] .tree-row__label`
+  } else await dom.render(<QuickOpenFiles onClose={() => {}} />)
+  await dom.click(selector)
+  await flush()
+  await vi.waitFor(() => expect(useAppStore.getState().documents[key]).toMatchObject({ content: 'source body', readSource: { target: mount, resource: { ...directory, path: 'shared/' + path } } }))
+  expect(source.mock.calls.filter(([, method]) => method === 'file.read')).toHaveLength(1)
+  const original = useAppStore.getState().documents[key]!
+  await act(async () => {
+    await useAppStore.getState().openFile(path, 'files', undefined, scratch.id, true, { displayWorkspaceId: scratch.id,
+      space: { spaceId: mount.reference.spaceId, zoneId: mount.zoneId }, resource: { hostId: scratch.hostId, path: scratch.path },
+      selection: { spaceId: mount.reference.spaceId, zoneId: mount.zoneId, workspaceId: scratch.id,
+        groupId: 'files', tabId: null, regionId: null, topicId: 'view:source' } })
+  })
+  expect(useAppStore.getState().documents[key]).toBe(original)
+  expect(useAppStore.getState().error).toContain('another folder')
+  const other = { path, content: 'keep unsaved object text', revision: 'main-revision' }
+  await act(async () => useAppStore.setState(state => ({ documents: { ...state.documents, [key]: other }, dirtyDocuments: { [key]: true }, error: null })))
+  await dom.click(selector)
+  await flush()
+  expect(useAppStore.getState().documents[key]).toBe(other)
+  expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
+  expect(useAppStore.getState().error).toContain('another folder')
+  if (picker === 'Quick Open') {
+    const tab = Object.values(useAppStore.getState().tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === path))!
+    const region = Object.values(tab.regions).find(region => region.kind === 'file' && region.path === path)!
+    await act(async () => {
+      useAppStore.setState(state => ({ documents: {}, dirtyDocuments: {}, sourceFilesInputs: { ...state.sourceFilesInputs,
+        readSources: { [tab.id + '\0' + region.regionId]: { workspaceId: scratch.id, path, source: original.readSource! } } } }))
+      await useAppStore.getState().attachPersistedFileDocument(scratch.id, path)
+    })
+    expect(useAppStore.getState().documents[key]).toMatchObject({ content: 'source body', readSource: original.readSource })
+    const readBookmark = vi.spyOn(api.files, 'readBookmark').mockRejectedValue(new Error('Wrong bookmark owner'))
+    const shortcut = root + '/original.url'
+    await act(async () => { await openListedFile(shortcut, 'files', undefined, scratch.id, undefined, selection) })
+    expect(readBookmark).not.toHaveBeenCalled()
+    expect(useAppStore.getState().documents[documentKey(scratch.id, shortcut)]?.readSource?.resource.path).toBe('shared/' + shortcut)
+    const media = root + '/picture.png'
+    await act(async () => { expect(await openListedFile(media, 'files', undefined, scratch.id, undefined, selection)).toBe(false) })
+    expect(useAppStore.getState().error).toContain('preview reader points to another folder')
+  }
+  expect(readMain).not.toHaveBeenCalled()
+  expect(observeMain).not.toHaveBeenCalled()
+})
