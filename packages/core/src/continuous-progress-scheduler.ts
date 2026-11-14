@@ -1,5 +1,6 @@
 export * from './continuous-progress-definition.js'
 import type { ContinuousProgressDefinition, ContinuousProgressGuidanceAdoption } from './continuous-progress-definition.js'
+import type { ContinuousProgressInputReference } from './continuous-progress-input.js'
 import { mintObjectId } from './object-id.js'
 import { AgentMuxError } from './errors.js'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
@@ -54,6 +55,8 @@ export type ContinuousProgressLoop = ContinuousProgressTarget & {
   futureIntentId?: string
   currentDefinition?: ContinuousProgressDefinition
   guidanceAdoptions?: ContinuousProgressGuidanceAdoption[]
+  /** Last prepared original input; later checks and definition changes do not redirect it. */
+  lastInputRef?: ContinuousProgressInputReference
   lastOccurrenceAt?: number
   intervalMs: number
   prompt: string

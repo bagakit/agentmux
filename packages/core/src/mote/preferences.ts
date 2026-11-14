@@ -1,4 +1,6 @@
 import { dequal } from 'dequal'
+import { parseContinuousProgressInputReading, type ContinuousProgressInputReading } from '../continuous-progress-input.js'
+export * from '../continuous-progress-input.js'
 import { parseContinuousProgressDefinitionReference, parseContinuousProgressDefinition, parseContinuousProgressGuidanceAdoption, parseContinuousProgressGuidanceAdoptions, type ContinuousProgressDefinitionReference, type ContinuousProgressDefinition, type ContinuousProgressGuidanceAdoption } from '../continuous-progress-definition.js'
 import { sameConnectionApplication } from '../connections-contract.js'
 import { parseConnectionApplication } from '../room-binding-codec.js'
@@ -36,7 +38,7 @@ export type MoteQuickDefaults = { executorId?: string; conversation?: MoteDefaul
 export type MoteGuidanceReading = { availableRevision: string; currentDefinition: ContinuousProgressDefinitionReference | ContinuousProgressDefinition | null; adoptedRevision: string | null; adoptions: ContinuousProgressGuidanceAdoption[] }
 export type MoteMaintenanceAdoption = ContinuousProgressGuidanceAdoption & { loopId: string }
 export type MoteGuidanceAdoptionAction = { kind: 'adopt-current-guidance'; expectedSchedule: { loopId: string; revision: number }; expectedMain: { roleRevision: string; reference: MoteDefaultConversation }; expectedDefinition: ContinuousProgressDefinitionReference; guidanceRevision: string }
-export type MotePresenceReading = { status: 'active' | 'paused' | 'disabled' | 'unbound' | 'unconfirmed'; schedule: import('../continuous-progress-scheduler.js').ContinuousProgressLoop | null; issue: string | null; guidance?: MoteGuidanceReading }
+export type MotePresenceReading = { status: 'active' | 'paused' | 'disabled' | 'unbound' | 'unconfirmed'; schedule: import('../continuous-progress-scheduler.js').ContinuousProgressLoop | null; issue: string | null; guidance?: MoteGuidanceReading; input?: ContinuousProgressInputReading }
 export interface MoteQuickPreferencesPort {
   read(input: MoteQuickPreferencesReadInput): Promise<MoteQuickPreferencesReadResult>
   save(input: MoteQuickPreferencesSaveParams, context?: import('../connection-enrollment-contract.js').ConnectionEnrollmentCallContext): Promise<MoteQuickPreferencesSaveResult>
@@ -300,9 +302,11 @@ export function parseMotePreferencesReadResult(value: unknown, input?: MotePrefe
   if (p.status === 'unconfirmed' && !p.issue) fail('Unconfirmed Mote preferences require their original reason.', code)
   let maintenance: MotePresenceReading | undefined
   if (p.maintenance !== undefined) {
-    const value = fields(p.maintenance, ['status','schedule','issue','guidance'], ['status','schedule','issue'], code)
+    const value = fields(p.maintenance, ['status','schedule','issue','guidance','input'], ['status','schedule','issue'], code)
     if (!['active','paused','disabled','unbound','unconfirmed'].includes(value.status as string) || value.issue !== null && typeof value.issue !== 'string') fail('Mote maintenance observation is invalid.', code)
-    maintenance = { status: value.status as MotePresenceReading['status'], schedule: value.schedule === null ? null : parseScheduleRecord(value.schedule), issue: value.issue as string | null, ...(value.guidance === undefined ? {} : { guidance: parseMoteGuidanceReading(value.guidance, code) }) }
+    const schedule = value.schedule === null ? null : parseScheduleRecord(value.schedule)
+    if (value.input !== undefined && !schedule?.lastInputRef) fail('Mote input observation requires its original saved schedule reference.', code)
+    maintenance = { status: value.status as MotePresenceReading['status'], schedule, issue: value.issue as string | null, ...(value.guidance === undefined ? {} : { guidance: parseMoteGuidanceReading(value.guidance, code) }), ...(value.input === undefined ? {} : { input: parseContinuousProgressInputReading(value.input, schedule!.lastInputRef!) }) }
   }
   return { kind: 'quick', target: base.target, status: p.status as 'ready' | 'unconfirmed', source, defaults, choices, main: p.main as boolean | null, issue: p.issue as string | null, ...(maintenance ? { maintenance } : {}) }
 }
