@@ -1,9 +1,9 @@
 import { dequal } from 'dequal'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
-import { parseAutomaticInputSource, type AutomaticInputSource } from './automatic-input-source.js'
+import { parseAutomaticInputSource, sameAutomaticInputSource, type AutomaticInputSource } from './automatic-input-source.js'
 import { agentPromptInputId, agentPromptNotApplied, validateAgentPromptInputKey, type AgentPromptInputKey } from './agent-prompt-condition.js'
-import type { AgentPromptSubmissionRecord } from './types.js'
+import type { AgentFuturePromptIntent, AgentPromptSubmissionRecord } from './types.js'
 
 /** Original automatic-input address only; never content, native location or input-control authority. */
 export type ContinuousProgressInputReference = {
@@ -13,14 +13,27 @@ export type ContinuousProgressInputReference = {
   managedSource?: AutomaticInputSource
   preparedAt: number
 }
-export type ContinuousProgressInputReading = {
+export type ContinuousProgressInputFacts = {
+  delivery: 'unconfirmed' | 'not-applied' | 'terminal-confirmed' | 'native-admitted'
+  nativeResult: { state: 'unknown' } | { state: 'unsupported' } |
+    { state: 'completed' | 'failed' | 'interrupted'; observedAt: number; nativeObservedAt?: number }
+  returnedIdle?: { state: 'returned-idle'; observedAt: number }
+}
+export type ContinuousProgressInputReading = ContinuousProgressInputFacts & {
   reference: ContinuousProgressInputReference
   /** The original record matched, not a claim that delivery or work succeeded. */
   status: 'confirmed' | 'unconfirmed'
-  delivery: 'unconfirmed' | 'not-applied' | 'terminal-confirmed' | 'native-admitted'
-  nativeResult: { state: 'unknown' | 'unsupported' } |
-    { state: 'completed' | 'failed' | 'interrupted'; observedAt: number; nativeObservedAt?: number }
-  returnedIdle?: { state: 'returned-idle'; observedAt: number }
+}
+
+/** Compare the original claim with one owner-qualified frozen definition. */
+export function matchesScheduledInputSource(reference: Omit<ContinuousProgressInputReference, 'preparedAt'>,
+  record: AgentPromptSubmissionRecord | null, intent: AgentFuturePromptIntent | null): boolean {
+  const key = reference.inputKey, admission = record?.admission, message = admission?.intent?.message
+  return !!record && record.agentSessionId === key.agentSessionId && dequal(record.run, key.expectedRun) &&
+    dequal(admission?.inputKey, key) && admission?.submissionId === agentPromptInputId(key) &&
+    dequal(admission.futureIntent, reference.futureIntent) && dequal(admission.intent?.run, key.expectedRun) &&
+    !!intent && intent.operationId === reference.definitionOperationId && sameAutomaticInputSource(intent.continuitySource, reference.managedSource) &&
+    !!message && message.userContent === intent.message.userContent && message.systemContext === intent.message.systemContext
 }
 const invalid = (code: string): never => { throw new AgentMuxError('The original automatic-input reference or safe reading is invalid.', code) }
 const identity = (value: unknown, code: string): string => typeof value === 'string' && !!value.trim() && value.length <= 16384 && !/[\0\r\n]/u.test(value) ? value : invalid(code)
@@ -43,26 +56,32 @@ export function parseContinuousProgressInputReading(value: unknown, expectedRefe
   const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['reference', 'status', 'delivery', 'nativeResult', 'returnedIdle'], code)
   const reference = parseContinuousProgressInputReference(p.reference, code)
   if (expectedReference && !dequal(reference, parseContinuousProgressInputReference(expectedReference))) return invalid(code)
-  if (typeof p.status !== 'string' || !['confirmed', 'unconfirmed'].includes(p.status) || typeof p.delivery !== 'string' || !['unconfirmed', 'not-applied', 'terminal-confirmed', 'native-admitted'].includes(p.delivery)) return invalid(code)
-  const native = rpcRecord(p.nativeResult, ['state', 'observedAt', 'nativeObservedAt'], code)
-  let nativeResult: ContinuousProgressInputReading['nativeResult']
-  if (native.state === 'unknown' || native.state === 'unsupported') {
-    if (native.observedAt !== undefined || native.nativeObservedAt !== undefined) return invalid(code)
-    nativeResult = { state: native.state }
-  } else {
-    if (typeof native.state !== 'string' || !['completed', 'failed', 'interrupted'].includes(native.state) || p.delivery !== 'native-admitted') return invalid(code)
-    nativeResult = { state: native.state as 'completed' | 'failed' | 'interrupted', observedAt: time(native.observedAt, code),
-      ...(native.nativeObservedAt === undefined ? {} : { nativeObservedAt: time(native.nativeObservedAt, code) }) }
-  }
+  if (p.status !== 'confirmed' && p.status !== 'unconfirmed') return invalid(code)
+  const { delivery, nativeResult } = parseContinuousProgressDelivery(p.delivery, p.nativeResult)
   let returnedIdle: ContinuousProgressInputReading['returnedIdle']
   if (p.returnedIdle !== undefined) {
     const idle = rpcRecord(p.returnedIdle, ['state', 'observedAt'], code)
     if (idle.state !== 'returned-idle') return invalid(code)
     returnedIdle = { state: 'returned-idle', observedAt: time(idle.observedAt, code) }
   }
-  if (p.status === 'unconfirmed' && (p.delivery !== 'unconfirmed' || nativeResult.state !== 'unknown' || returnedIdle)) return invalid(code)
-  return { reference, status: p.status as ContinuousProgressInputReading['status'], delivery: p.delivery as ContinuousProgressInputReading['delivery'], nativeResult,
-    ...(returnedIdle ? { returnedIdle } : {}) }
+  if (p.status === 'unconfirmed' && (delivery !== 'unconfirmed' || nativeResult.state !== 'unknown' || returnedIdle)) return invalid(code)
+  return { reference, status: p.status, delivery, nativeResult, ...(returnedIdle ? { returnedIdle } : {}) }
+}
+
+export function parseContinuousProgressDelivery(delivery: unknown, result: unknown): Pick<ContinuousProgressInputFacts, 'delivery' | 'nativeResult'> {
+  const code = 'CONTROL_PROTOCOL_ERROR'
+  if (delivery !== 'unconfirmed' && delivery !== 'not-applied' && delivery !== 'terminal-confirmed' && delivery !== 'native-admitted') return invalid(code)
+  const native = rpcRecord(result, ['state', 'observedAt', 'nativeObservedAt'], code)
+  let nativeResult: ContinuousProgressInputReading['nativeResult']
+  if (native.state === 'unknown' || native.state === 'unsupported') {
+    if (native.observedAt !== undefined || native.nativeObservedAt !== undefined) return invalid(code)
+    nativeResult = native.state === 'unknown' ? { state: 'unknown' } : { state: 'unsupported' }
+  } else {
+    if (typeof native.state !== 'string' || !['completed', 'failed', 'interrupted'].includes(native.state) || delivery !== 'native-admitted') return invalid(code)
+    nativeResult = { state: native.state as 'completed' | 'failed' | 'interrupted', observedAt: time(native.observedAt, code),
+      ...(native.nativeObservedAt === undefined ? {} : { nativeObservedAt: time(native.nativeObservedAt, code) }) }
+  }
+  return { delivery, nativeResult }
 }
 
 /** The original source owner qualifies access before calling. This projection cannot grant that access. */
@@ -72,6 +91,13 @@ export function projectContinuousProgressInput(value: ContinuousProgressInputRef
   const claim = original?.admission
   if (!original || original.agentSessionId !== key.agentSessionId || original.run.runId !== key.expectedRun.runId ||
       !claim || claim.submissionId !== id || !dequal(claim.inputKey, key) || !dequal(claim.futureIntent, reference.futureIntent)) return unknown
+  return parseContinuousProgressInputReading({ reference, status: 'confirmed', ...projectContinuousProgressInputFacts(original, claim, key) }, reference)
+}
+
+/** Safe receipt fields for an already source-qualified persisted input. */
+export function projectContinuousProgressInputFacts(original: AgentPromptSubmissionRecord, claim: NonNullable<AgentPromptSubmissionRecord['admission']>,
+  key: ContinuousProgressInputReference['inputKey']): ContinuousProgressInputFacts {
+  const id = agentPromptInputId(key)
   let delivery: ContinuousProgressInputReading['delivery'] = 'unconfirmed'
   if (agentPromptNotApplied({ run: original.run, promptCompletionAdmission: claim,
     ...(original.terminalPromptSubmission ? { terminalPromptSubmission: original.terminalPromptSubmission } : {}) })) delivery = 'not-applied'
@@ -86,7 +112,7 @@ export function projectContinuousProgressInput(value: ContinuousProgressInputRef
     nativeResult = { state: result.state, observedAt: result.observedAt,
       ...(result.nativeObservedAt === undefined ? {} : { nativeObservedAt: result.nativeObservedAt }) }
   const idle = original.semanticIdle
-  return parseContinuousProgressInputReading({ reference, status: 'confirmed', delivery, nativeResult,
+  return { delivery, nativeResult,
     ...(idle?.state === 'idle' && idle.run.runId === key.expectedRun.runId && idle.promptSubmissionId === id
-      ? { returnedIdle: { state: 'returned-idle', observedAt: idle.observedAt } } : {}) }, reference)
+      ? { returnedIdle: { state: 'returned-idle', observedAt: idle.observedAt } } : {}) }
 }

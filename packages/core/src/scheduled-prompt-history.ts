@@ -1,0 +1,128 @@
+import { createHash } from 'node:crypto'
+import type { DatabaseSync } from 'node:sqlite'
+import { parseAutomaticInputSource, sameAutomaticInputSource, type AutomaticInputSource } from './automatic-input-source.js'
+import { matchesScheduledInputSource, projectContinuousProgressInputFacts } from './continuous-progress-input.js'
+import { agentPromptInputId } from './agent-prompt-condition.js'
+import { AgentMuxError } from './errors.js'
+import { parsePromptSubmissionRecord } from './prompt-submission-record.js'
+import { parseScheduleRpcParams, scheduleHistoryPageSize, type ScheduleHistoryPage, type ScheduleHistoryQuery } from './public-rpc-schedules.js'
+import { rpcRecord } from './rpc-data.js'
+import type { AgentFuturePromptIntent, AgentPromptSubmissionRecord } from './types.js'
+
+type Target = { agentSessionId: string; providerId: string; workspacePath: string }
+export type ScheduledPromptHistoryRequest = {
+  query: ScheduleHistoryQuery
+  target: Target
+  definitions: { intentId: string; operationId: string }[]
+  managedSource?: AutomaticInputSource
+}
+export type ScheduledPromptHistory = Pick<ScheduleHistoryPage, 'coverage' | 'entries' | 'nextCursor'>
+type Position = readonly [occurrenceAt: number, runId: string, recordId: string]
+type Original = { position: Position; record: unknown }
+const unconfirmed = (): ScheduledPromptHistory => ({ coverage: 'unconfirmed', entries: [], nextCursor: null })
+const invalid = () => new AgentMuxError('Use the original schedule, published definitions and history cursor.', 'INVALID_CONTROL_REQUEST')
+
+function identity(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim() || value.length > 4096 || value.includes('\0')) throw invalid()
+  return value
+}
+export function parseScheduledPromptHistoryRequest(value: unknown): ScheduledPromptHistoryRequest {
+  const input = rpcRecord(value, ['query', 'target', 'definitions', 'managedSource'], 'INVALID_CONTROL_REQUEST')
+  const exact = rpcRecord(input.target, ['agentSessionId', 'providerId', 'workspacePath'], 'INVALID_CONTROL_REQUEST')
+  const target = { agentSessionId: identity(exact.agentSessionId), providerId: identity(exact.providerId), workspacePath: identity(exact.workspacePath) }
+  const query = parseScheduleRpcParams('schedule.history', input.query)
+  if (!Array.isArray(input.definitions) || !input.definitions.length) throw invalid()
+  const definitions = Array.from(input.definitions, value => {
+    const exact = rpcRecord(value, ['intentId', 'operationId'], 'INVALID_CONTROL_REQUEST')
+    return { intentId: identity(exact.intentId), operationId: identity(exact.operationId) }
+  })
+  if (new Set(definitions.map(definition => definition.intentId)).size !== definitions.length) throw invalid()
+  return { query, target, definitions,
+    ...(input.managedSource === undefined ? {} : { managedSource: parseAutomaticInputSource(input.managedSource) }) }
+}
+
+const compareText = (a: string, b: string) => Buffer.compare(Buffer.from(a), Buffer.from(b))
+const comparePosition = (a: Position, b: Position) => a[0] - b[0] || compareText(a[1], b[1]) || compareText(a[2], b[2])
+
+/** Scope survives pause or a later Run. A changed definition, window or owner requires a new read. */
+function readCursor(request: ScheduledPromptHistoryRequest, owner: string) {
+  const { query, target, managedSource, definitions } = request
+  const scope = createHash('sha256').update(JSON.stringify([owner, target, managedSource, [...definitions].sort((a,b) => compareText(a.intentId,b.intentId)),
+    query.scheduleId, query.from, query.to])).digest('base64url')
+  let before: Position | undefined
+  if (query.cursor) {
+    try {
+      const data = Buffer.from(query.cursor, 'base64url')
+      const [name, occurrenceAt, runId, recordId, ...excess] = JSON.parse(data.toString('utf8')) as unknown[]
+      if (data.toString('base64url') !== query.cursor || excess.length || name !== scope || !Number.isSafeInteger(occurrenceAt) ||
+          Number(occurrenceAt) < query.from || Number(occurrenceAt) >= query.to) throw invalid()
+      before = [Number(occurrenceAt), identity(runId), identity(recordId)]
+    } catch { throw invalid() }
+  }
+  return { before, next: (position: Position) => Buffer.from(JSON.stringify([scope, ...position])).toString('base64url') }
+}
+
+function page(request: ScheduledPromptHistoryRequest, owner: string, session: Target | null, recordId: (record: AgentPromptSubmissionRecord) => string,
+  readIntent: (intentId: string) => AgentFuturePromptIntent | null,
+  read: (intents: ReadonlySet<string>, before: Position | undefined, limit: number) => Original[]): ScheduledPromptHistory {
+  const { target, definitions, managedSource, query } = request
+  const cursor = readCursor(request, owner)
+  if (!session || session.agentSessionId !== target.agentSessionId || session.providerId !== target.providerId || session.workspacePath !== target.workspacePath) return unconfirmed()
+  const intents = new Map<string, AgentFuturePromptIntent>()
+  for (const definition of definitions) {
+    const intent = readIntent(definition.intentId)
+    if (intent && intent.operationId === definition.operationId && sameAutomaticInputSource(intent.continuitySource, managedSource)) intents.set(definition.intentId, intent)
+  }
+  const limit = scheduleHistoryPageSize(query)
+  const rows = intents.size ? read(new Set(intents.keys()), cursor.before, limit + 1) : []
+  const result: ScheduledPromptHistory = { coverage: intents.size === definitions.length ? 'recorded-inputs' : 'unconfirmed', entries: [],
+    nextCursor: rows.length > limit ? cursor.next(rows[limit - 1]!.position) : null }
+  for (const row of rows.slice(0, limit)) {
+    const original = parsePromptSubmissionRecord(row.record)
+    const claim = original.admission, key = claim?.inputKey, futureIntent = claim?.futureIntent
+    const intent = futureIntent && intents.get(futureIntent.intentId)
+    if (!claim || key?.kind !== 'prompt' || key.agentSessionId !== target.agentSessionId || !futureIntent || !intent ||
+        comparePosition([futureIntent.occurrenceAt, original.run.runId, recordId(original)], row.position) !== 0 ||
+        !matchesScheduledInputSource({ inputKey: key, futureIntent, definitionOperationId: intent.operationId, ...(managedSource ? { managedSource } : {}) }, original, intent)) {
+      result.coverage = 'unconfirmed'
+      continue
+    }
+    const { delivery, nativeResult } = projectContinuousProgressInputFacts(original, claim, key)
+    result.entries.push({ operationId: agentPromptInputId(key), occurrenceAt: futureIntent.occurrenceAt, delivery, nativeResult })
+  }
+  return result
+}
+
+export function readMemoryScheduledPromptHistory(request: ScheduledPromptHistoryRequest, owner: string,
+  session: (Target & { futurePromptIntents?: Record<string, AgentFuturePromptIntent> }) | null, records: Iterable<AgentPromptSubmissionRecord>,
+  recordId: (record: AgentPromptSubmissionRecord) => string): ScheduledPromptHistory {
+  return page(request, owner, session, recordId, intentId => session?.futurePromptIntents?.[intentId] ?? null, (intents, before, limit) => {
+    const rows: Original[] = []
+    for (const record of records) {
+      const claim = record.admission, occurrence = claim?.futureIntent
+      if (!occurrence || !intents.has(occurrence.intentId) || occurrence.occurrenceAt < request.query.from || occurrence.occurrenceAt >= request.query.to) continue
+      const row: Original = { position: [occurrence.occurrenceAt, record.run.runId, recordId(record)], record }
+      if (!before || comparePosition(row.position, before) < 0) rows.push(row)
+    }
+    return rows.sort((a,b) => comparePosition(b.position, a.position)).slice(0, limit)
+  })
+}
+
+export function readDatabaseScheduledPromptHistory(db: DatabaseSync, request: ScheduledPromptHistoryRequest, session: Target | null,
+  readIntent: (intentId: string) => AgentFuturePromptIntent | null, recordId: (record: AgentPromptSubmissionRecord) => string): ScheduledPromptHistory {
+  if (!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='prompt_admissions'").get()) return unconfirmed()
+  const owner = db.prepare('SELECT incarnation FROM identity').get()?.incarnation
+  if (typeof owner !== 'string') return unconfirmed()
+  return page(request, owner, session, recordId, readIntent, (intents, before, limit) => {
+    // The existing primary key bounds the visit to the selected Session. The
+    // short time window is filtered within it, outside all scheduler hot paths.
+    const occurrence = "json_extract(json,'$.admission.futureIntent.occurrenceAt')"
+    return db.prepare(`SELECT ${occurrence} AS occurrence, run_id, record_id, json FROM prompt_admissions
+      WHERE session_id=? AND json_extract(json,'$.admission.futureIntent.intentId') IN (SELECT value FROM json_each(?))
+        AND ${occurrence}>=? AND ${occurrence}<?
+        ${before ? `AND (${occurrence},run_id,record_id)<(?,?,?)` : ''}
+      ORDER BY occurrence DESC, run_id DESC, record_id DESC LIMIT ?`)
+      .all(request.target.agentSessionId, JSON.stringify([...intents]), request.query.from, request.query.to, ...(before ?? []), limit)
+      .map(row => ({ position: [Number(row.occurrence), String(row.run_id), String(row.record_id)], record: JSON.parse(String(row.json)) }))
+  })
+}

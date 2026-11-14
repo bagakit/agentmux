@@ -5,7 +5,7 @@ import { sameAutomaticInputSource } from '@agentmux/core/automatic-input-source'
 import { isDeepStrictEqual } from 'node:util'
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { AgentMuxError, AGENTMUX_AGENT_MESSAGING_ENTRY, continuousProgressRequestDigest, ContinuousProgressScheduler, isAgentSchedule, agentPromptCondition, decideContinuousProgress, decideFutureProgress, mintObjectId, type ContinuousProgressLoop, type ContinuousProgressPause, type ContinuousProgressPauseReason, type ContinuousProgressTarget, type ContinuousProgressObservation, type ContinuousProgressTaskSource, type AgentPromptCondition } from '@agentmux/core'
-import { parseScheduleRpcParams, type ScheduleMethod, type ScheduleParamsMap, type ScheduleResultMap, type AgentMuxRpcCallContext } from '@agentmux/core'
+import { parseScheduleRpcParams, type ScheduleHistoryPage, type ScheduleHistoryQuery, type ScheduleMethod, type ScheduleParamsMap, type ScheduleResultMap, type AgentMuxRpcCallContext } from '@agentmux/core'
 import { nextCalendarOccurrence, latestCalendarOccurrence, nextIntervalOccurrence, latestIntervalOccurrence } from '@agentmux/core/schedule-calendar'
 import { readContinuousProgressTaskSource, validateContinuousProgressTaskSource, decideGoalProgressSource, type GoalProgressReader, type GoalProgressRecord, type GoalProgressDecision } from './continuous-progress-task-source.js'
 import type { ContinuousProgressLoopStore } from './continuous-progress-loop-store.js'
@@ -29,6 +29,7 @@ export type FutureProgressInputOwner = {
   saveFutureIntent(loop: ContinuousProgressLoop, active: boolean, context?: AgentMuxRpcCallContext): Promise<void>
   inspectFutureIntent?(loop: ContinuousProgressLoop): Promise<{ active: boolean }>
   inspectInput?(loop: ContinuousProgressLoop): Promise<ContinuousProgressInputReading | undefined>
+  readHistory?(loop: ContinuousProgressLoop, query: ScheduleHistoryQuery, context?: AgentMuxRpcCallContext): Promise<Pick<ScheduleHistoryPage, 'coverage' | 'entries' | 'nextCursor'>>
   authorizeFutureIntent?(target: ContinuousProgressTarget, context?: AgentMuxRpcCallContext): Promise<void>
   observeCheckIn?(target: ContinuousProgressTarget, now: number, signal: AbortSignal): Promise<CheckInObservation>
 }
@@ -503,6 +504,7 @@ export class ContinuousProgressLoopManager {
   // The reason is a Host-owner argument, never a public caller assertion about its actor.
   async call<M extends ScheduleMethod>(method: M, input: ScheduleParamsMap[M], context?: AgentMuxRpcCallContext, pauseReason: ContinuousProgressPauseReason = 'manual'): Promise<ScheduleResultMap[M]> {
     const params = parseScheduleRpcParams(method, input)
+    if (method === 'schedule.history') return await this.readHistory(params as ScheduleHistoryQuery, context) as ScheduleResultMap[M]
     if (method === 'schedule.create' && (params as ScheduleParamsMap['schedule.create']).checkIn &&
         (context?.caller || !context?.principal || !['user','device'].includes(context.principal.kind))) throw new AgentMuxError('Quiet follow-up requires explicit opt-in from the authenticated user or device. Existing arrangements and manual input remain available.', 'SCHEDULE_CHECK_IN_OPT_IN_REQUIRED')
     if (method === 'schedule.list' || method === 'schedule.inspect') return this.callOwned(method, params, context)
@@ -514,6 +516,31 @@ export class ContinuousProgressLoopManager {
       : this.callOwned(method, params, context, undefined, pauseReason))
     this.mutations.set(key, operation)
     try { return await operation } finally { if (this.mutations.get(key) === operation) this.mutations.delete(key) }
+  }
+  private async readHistory(query: ScheduleHistoryQuery, context?: AgentMuxRpcCallContext): Promise<ScheduleHistoryPage> {
+    if (context?.caller || !context?.principal || !['user', 'device'].includes(context.principal.kind))
+      throw new AgentMuxError('Schedule history requires its authorized user or device.', 'CONTROL_PERMISSION_DENIED')
+    const starting = this.started
+    if (!starting) throw new AgentMuxError('The original schedule owner is not ready for observation.', 'CONTROL_UNAVAILABLE')
+    const signal = context.signal ?? new AbortController().signal
+    await awaitUntilCancelled(() => starting, signal)
+    await context.assertCurrent?.()
+    signal.throwIfAborted()
+    const loop = this.scheduler.get(query.scheduleId)
+    if (!loop || !isAgentSchedule(loop)) throw new AgentMuxError('The original schedule is unknown here.', 'UNKNOWN_SCHEDULE')
+    const { scheduleId, from, to } = query
+    let result: Awaited<ReturnType<NonNullable<FutureProgressInputOwner['readHistory']>>> | undefined
+    try {
+      result = await awaitUntilCancelled(async () => await this.futureInputs?.readHistory?.(loop, query, context), signal)
+    } catch (error) {
+      signal.throwIfAborted()
+      if (error instanceof AgentMuxError && error.code === 'INVALID_CONTROL_REQUEST') throw error
+      // An unavailable original record owner only affects this observation.
+    }
+    await context.assertCurrent?.()
+    signal.throwIfAborted()
+    return { scheduleId, from, to, executionScope: 'connected-host',
+      ...(result ?? { coverage: 'unconfirmed', entries: [], nextCursor: null }) }
   }
   private async callOwned<M extends ScheduleMethod>(method: M, input: ScheduleParamsMap[M], context?: AgentMuxRpcCallContext, assertCurrent?: () => void, pauseReason: ContinuousProgressPauseReason = 'manual'): Promise<ScheduleResultMap[M]> {
     const params = parseScheduleRpcParams(method, input)

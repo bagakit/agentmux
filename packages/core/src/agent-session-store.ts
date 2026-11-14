@@ -34,6 +34,8 @@ import { parseAgentMuxCreationOrigin } from './agent-creation-admission.js'
 import { parseAgentSpawnCreator } from './agent-spawn.js'
 import { agentSpawnIndexes, agentSpawnPage, parseAgentSpawnQuery, readAgentSpawnRows,
   type AgentMuxSpawnPage, type AgentMuxSpawnQuery, type AgentMuxSpawnRecord } from './agent-spawn-query.js'
+import { readDatabaseScheduledPromptHistory, readMemoryScheduledPromptHistory,
+  type ScheduledPromptHistory, type ScheduledPromptHistoryRequest } from './scheduled-prompt-history.js'
 import { assertCurrentAgentCapabilityBinding, type AgentCapabilityBinding } from './agent-capability.js'
 import { agentActivityTimelineItem } from './agent-activity-state.js'
 import { createHash } from 'node:crypto'
@@ -352,6 +354,8 @@ export type AgentMuxAgentSessionStore = {
   readContinuityControlReceipt(agentSessionId: string, operationId: string): Promise<ContinuityControlStoredResult | null>
   /** Exact original claim; history is never loaded into ordinary Session metadata. */
   readPromptAdmission(agentSessionId: string, run: AgentMuxRunRef, submissionId: string): Promise<AgentPromptSubmissionRecord | null>
+  /** Read a selected original schedule window without settling or writing any input. */
+  readScheduledPromptHistory(request: ScheduledPromptHistoryRequest, signal?: AbortSignal): Promise<ScheduledPromptHistory>
   /** Original outcome CAS. PTY evidence stays in the original record, including after retirement; it never rewrites current Session facts. */
   settlePromptAdmission(expected: AgentPromptSubmissionRecord, next: AgentPromptSubmissionRecord, signal?: AbortSignal): Promise<void>
   /** Resolve one original active/retired source and its reopen correlation, without catalog discovery. */
@@ -2120,6 +2124,14 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     return structuredClone(originals[0] ?? null)
   }
 
+  async readScheduledPromptHistory(request: ScheduledPromptHistoryRequest, signal?: AbortSignal): Promise<ScheduledPromptHistory> {
+    signal?.throwIfAborted()
+    const id = request.target.agentSessionId
+    this.assertMemoryRecordReadable(id)
+    return readMemoryScheduledPromptHistory(request, this.spawnQueryOwner, this.sessions.get(id) ?? null,
+      this.promptAdmissions.get(id)?.values() ?? [], promptRecordId)
+  }
+
   async settlePromptAdmission(expected: AgentPromptSubmissionRecord, next: AgentPromptSubmissionRecord, signal?: AbortSignal): Promise<void> {
     expected = structuredClone(expected); next = structuredClone(next)
     this.assertMemoryRecordReadable(expected.agentSessionId)
@@ -3304,6 +3316,14 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       return promptAdmissionRecords(document.sessions.find(s => s.agentSessionId === agentSessionId)).find(original => original.run.runId === run.runId &&
         [JSON.stringify(['submission', submissionId]), JSON.stringify(['original-slot', submissionId])].includes(promptRecordId(original))) ?? null
     }, undefined, true)
+  }
+
+  async readScheduledPromptHistory(request: ScheduledPromptHistoryRequest, signal?: AbortSignal): Promise<ScheduledPromptHistory> {
+    const id = request.target.agentSessionId
+    return await this.withReadDatabase(db => {
+      this.assertRecordReadable(db, id)
+      return readDatabaseScheduledPromptHistory(db, request, this.sessionMetadata(db, id), intentId => this.futureIntent(db, id, intentId), promptRecordId)
+    }, () => ({ coverage: 'unconfirmed', entries: [], nextCursor: null }), signal, 'observation')
   }
 
   async settlePromptAdmission(expected: AgentPromptSubmissionRecord, next: AgentPromptSubmissionRecord, signal?: AbortSignal): Promise<void> {

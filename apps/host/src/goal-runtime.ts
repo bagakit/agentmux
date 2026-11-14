@@ -21,7 +21,7 @@ import type { AgentInputContextCaptureReference } from '@agentmux/core/agent-inp
 import type { DemandDispatch } from '@agentmux/demand'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { CheckInObservation } from './agent-schedule-check-in.js'
-import { readOriginalScheduledInput } from './scheduled-input-source.js'
+import { readOriginalScheduledHistory, readOriginalScheduledInput } from './scheduled-input-source.js'
 
 /** One explicit Goal operation borrows this exact original input carrier. */
 export type GoalFiniteInputPort = {
@@ -68,6 +68,7 @@ export interface GoalRuntimePort {
   saveFutureIntent(loop: ContinuousProgressTarget & Pick<ContinuousProgressLoop, 'futureIntentId' | 'creationOperationId' | 'managedSource' | 'prompt' | 'checkIn' | 'currentDefinition' | 'guidanceAdoptions' | 'inputEpoch'>, active: boolean, context?: AgentMuxRpcCallContext): Promise<void>
   inspectFutureIntent(loop: ContinuousProgressLoop): Promise<{ active: boolean }>
   inspectInput(loop: ContinuousProgressLoop): Promise<import('@agentmux/core').ContinuousProgressInputReading | undefined>
+  readHistory?(loop: ContinuousProgressLoop, query: import('@agentmux/core').ScheduleHistoryQuery, context?: AgentMuxRpcCallContext): ReturnType<typeof readOriginalScheduledHistory>
   observeCheckIn(target: ContinuousProgressTarget, now: number, signal: AbortSignal): Promise<CheckInObservation>
   inspectContinuousProgressInitial(loop: ContinuousProgressLoop): Promise<'confirmed' | 'pending' | 'unconfirmed'>
 }
@@ -266,6 +267,12 @@ export function createGoalRuntime(options: {
       return { active: original.active }
     },
     inspectInput: async loop => readOriginalScheduledInput(loop, exact(loop.hostId)),
+    readHistory: async (loop, query, context) => {
+      const client = exact(loop.hostId)
+      const page = await readOriginalScheduledHistory(loop, query, client, context?.signal)
+      if (exact(loop.hostId) !== client) throw new AgentMuxError('The original schedule execution owner changed during observation.', 'CONTROL_UNAVAILABLE')
+      return page
+    },
     observeCheckIn: options.checkIn,
     inspectContinuousProgressInitial: async loop => {
       const initial = loop.initialDelivery

@@ -1,32 +1,49 @@
-import { isDeepStrictEqual } from 'node:util'
-import { AgentMuxError, agentPromptInputId, projectContinuousProgressInput, type ContinuousProgressLoop, type ContinuousProgressInputReference,
-  type ContinuousProgressInputReading, type AgentPromptSubmissionRecord, type AgentFuturePromptIntent } from '@agentmux/core'
+import { AgentMuxError, matchesScheduledInputSource, projectContinuousProgressInput, type ContinuousProgressLoop, type ContinuousProgressInputReference,
+  type ContinuousProgressInputReading, type AgentPromptSubmissionRecord, type AgentFuturePromptIntent, type ScheduleHistoryQuery } from '@agentmux/core'
 import { sameAutomaticInputSource } from '@agentmux/core/automatic-input-source'
 import type { GoalExecutionClient } from './goal-runtime.js'
 
 type Reference = Omit<ContinuousProgressInputReference, 'preparedAt'>
 /** Definition provenance belongs to the original loop. An unpublished preparation
  * is not a selected occurrence, even if its immutable Core object already exists. */
-export function scheduledDefinitionOperation(loop: ContinuousProgressLoop, intentId: string): string | null {
-  const operations = new Set<string>()
+function* publishedScheduleDefinitions(loop: ContinuousProgressLoop) {
   const base = loop.currentDefinition?.baseIntentId ?? loop.futureIntentId
-  if (base === intentId && loop.creationOperationId) operations.add(loop.creationOperationId)
-  for (const receipt of loop.guidanceAdoptions ?? []) if (receipt.publishedAt !== undefined && receipt.newDefinition.intentId === intentId) operations.add(receipt.newDefinition.operationId)
-  return operations.size === 1 ? [...operations][0]! : null
+  if (base && loop.creationOperationId) yield { intentId: base, operationId: loop.creationOperationId }
+  for (const receipt of loop.guidanceAdoptions ?? [])
+    if (receipt.publishedAt !== undefined) yield receipt.newDefinition
+}
+export function scheduledDefinitionOperation(loop: ContinuousProgressLoop, intentId: string): string | null {
+  let original: string | null = null
+  for (const definition of publishedScheduleDefinitions(loop)) {
+    if (definition.intentId !== intentId) continue
+    if (original !== null && original !== definition.operationId) return null
+    original = definition.operationId
+  }
+  return original
 }
 
 /** Consistency checks on exact typed owner facts; no nearest-input or text inference. */
 export function assertScheduledInputSource(loop: ContinuousProgressLoop, reference: Reference, record: AgentPromptSubmissionRecord | null, intent: AgentFuturePromptIntent | null): void {
-  const key = reference.inputKey, admission = record?.admission, message = admission?.intent?.message
+  const key = reference.inputKey
   if (key.agentSessionId !== loop.agentSessionId || !sameAutomaticInputSource(reference.managedSource, loop.managedSource) ||
       scheduledDefinitionOperation(loop, reference.futureIntent.intentId) !== reference.definitionOperationId ||
-      !record || record.agentSessionId !== key.agentSessionId || !isDeepStrictEqual(record.run, key.expectedRun) ||
-      !isDeepStrictEqual(admission?.inputKey, key) || admission?.submissionId !== agentPromptInputId(key) ||
-      !isDeepStrictEqual(admission.futureIntent, reference.futureIntent) || !isDeepStrictEqual(admission.intent?.run, key.expectedRun) ||
-      !intent || intent.operationId !== reference.definitionOperationId || !sameAutomaticInputSource(intent.continuitySource, reference.managedSource) ||
-      !message || message.userContent !== intent.message.userContent || message.systemContext !== intent.message.systemContext) {
+      !matchesScheduledInputSource(reference, record, intent)) {
     throw new AgentMuxError('The exact original scheduled input, definition or source is unconfirmed. Its original operation and Agent remain retained.', 'SCHEDULE_INPUT_SOURCE_UNCONFIRMED')
   }
+}
+
+export async function readOriginalScheduledHistory(loop: ContinuousProgressLoop, query: ScheduleHistoryQuery, client: GoalExecutionClient, signal?: AbortSignal) {
+  const published = new Map<string, string | null>()
+  for (const { intentId, operationId } of publishedScheduleDefinitions(loop)) {
+    const current = published.get(intentId)
+    published.set(intentId, current === undefined || current === operationId ? operationId : null)
+  }
+  const definitions = [...published].flatMap(([intentId, operationId]) => operationId === null ? [] : [{ intentId, operationId }])
+  if (!definitions.length) return { coverage: 'unconfirmed' as const, entries: [], nextCursor: null }
+  const { agentSessionId, providerId, workspacePath, managedSource } = loop
+  const result = await client.readScheduledPromptHistory({ query, target: { agentSessionId, providerId, workspacePath }, definitions,
+    ...(managedSource ? { managedSource } : {}) }, signal ? { signal } : {})
+  return definitions.length === published.size ? result : { ...result, coverage: 'unconfirmed' as const }
 }
 
 /** Only an original owner-held reference enters this reader, never a wire key.

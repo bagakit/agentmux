@@ -12,7 +12,7 @@ import type { AgentMuxHostEnvironmentSelector } from './host-environment.js'
 export const AGENTMUX_HOSTED_METHODS = [
   'hostEnvironment',
   'clientPerformanceDiagnostics', 'connectRuntime', 'readDeliveryAttempt', 'readReadingDiagnostic', 'findReadingDiagnostics', 'readAgentStartupDiagnostic', 'findAgentStartupDiagnostics', 'inspectAgentPromptSubmission', 'readAgentInputActivity', 'runtimeDiagnostics', 'runtimeResourceSnapshot', 'agentSessionResourceSnapshot', 'runningSavedAgentResourceSnapshot', 'observeRunStorage', 'probeAgent', 'probeExecutorAvailability',
-  'inspectAgentInput', 'inspectMoteInput', 'readAgentInputResource', 'readAgentInputMailbox', 'readAgentInputChanges', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting',
+  'inspectAgentInput', 'inspectMoteInput', 'readAgentInputResource', 'readAgentInputMailbox', 'readAgentInputChanges', 'readScheduledPromptHistory', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting',
   'readAgentInputEpoch', 'listHostExecutors', 'listNativeAgentSessions', 'listHostNativeAgentSessions', 'readNativeAgentHistory', 'readHostNativeAgentHistory',
   'readNativeAgentHistoryResource', 'readHostNativeAgentHistoryResource', 'configureHostExecutor', 'removeHostExecutor', 'createHostAgentWithDelivery',
   'agentCreationAuthority', 'attestAgentCreation', 'listTrustedCreationSources', 'trustCreationSource',
@@ -56,6 +56,7 @@ export const AGENTMUX_HOSTED_PREPARATION = {
   readAgentInputResource: 'owner',
   readAgentInputMailbox: 'owner',
   readAgentInputChanges: 'owner',
+  readScheduledPromptHistory: 'owner',
   stopAgentInputWaiting: 'owner',
   rejoinAgentInputWaiting: 'owner',
   listHostExecutors: 'owner',

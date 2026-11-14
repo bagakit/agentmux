@@ -1,5 +1,5 @@
 import { parseContinuousProgressDefinition, parseContinuousProgressGuidanceAdoptions } from './continuous-progress-definition.js'
-import { parseContinuousProgressInputReference, parseContinuousProgressInputReading, type ContinuousProgressInputReading } from './continuous-progress-input.js'
+import { parseContinuousProgressDelivery, parseContinuousProgressInputReference, parseContinuousProgressInputReading, type ContinuousProgressInputFacts, type ContinuousProgressInputReading } from './continuous-progress-input.js'
 export * from './continuous-progress-input.js'
 import { parseAutomaticInputSource, sameAutomaticInputSource, type AutomaticInputSource } from './automatic-input-source.js'
 import { AgentMuxError } from './errors.js'
@@ -11,9 +11,18 @@ import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
 
 export type ScheduleMutation = { scheduleId: string; expectedRevision: number; operationId: string }
 export type ScheduleScope = Pick<ContinuousProgressTarget, 'hostId' | 'workspacePath'>
+export type ScheduleHistoryQuery = { scheduleId: string; from: number; to: number; limit?: number; cursor?: string }
+export type ScheduleHistoryEntry = Pick<ContinuousProgressInputFacts, 'delivery' | 'nativeResult'> & { operationId: string; occurrenceAt: number }
+export type ScheduleHistoryPage = Pick<ScheduleHistoryQuery, 'scheduleId' | 'from' | 'to'> & {
+  executionScope: 'connected-host'
+  coverage: 'recorded-inputs' | 'unconfirmed'
+  entries: ScheduleHistoryEntry[]
+  nextCursor: string | null
+}
 export type ScheduleParamsMap = {
   'schedule.list': { target?: ContinuousProgressTarget; scope?: never } | { scope: ScheduleScope; target?: never }
   'schedule.inspect': { scheduleId?: string; operationId?: string }
+  'schedule.history': ScheduleHistoryQuery
   'schedule.create': { target: ContinuousProgressTarget; prompt: string; operationId: string; inputEpoch?:string; managedSource?: AutomaticInputSource } & AgentScheduleTiming
   'schedule.update': ScheduleMutation & { everyMs: number }
   'schedule.pause': ScheduleMutation
@@ -24,6 +33,7 @@ export type ScheduleReceipt = { schedule: ContinuousProgressLoop; diskDurability
 export type ScheduleResultMap = {
   'schedule.list': { schedules: ContinuousProgressLoop[]; executionScope: 'connected-host' }
   'schedule.inspect': { schedule: ContinuousProgressLoop | null; executionScope: 'connected-host'; input?: ContinuousProgressInputReading }
+  'schedule.history': ScheduleHistoryPage
   'schedule.create': ScheduleReceipt
   'schedule.update': ScheduleReceipt
   'schedule.pause': ScheduleReceipt
@@ -35,7 +45,7 @@ export interface AgentMuxRpcSchedulesOwner {
   call<M extends ScheduleMethod>(method: M, params: ScheduleParamsMap[M], context?: AgentMuxRpcCallContext): Promise<ScheduleResultMap[M]>
 }
 export const AGENTMUX_RPC_SCHEDULE_METHODS = {
-  'schedule.list': 'short', 'schedule.inspect': 'short', 'schedule.create': 'long',
+  'schedule.list': 'short', 'schedule.inspect': 'short', 'schedule.history': 'short', 'schedule.create': 'long',
   'schedule.update': 'long', 'schedule.pause': 'long', 'schedule.resume': 'long', 'schedule.cancel': 'long'
 } as const satisfies Record<ScheduleMethod, 'short' | 'long'>
 export function isScheduleMethod(value: unknown): value is ScheduleMethod {
@@ -48,12 +58,36 @@ function string(value: unknown, code: string, max = 4096): asserts value is stri
 function integer(value: unknown, code: string, min = 0): asserts value is number {
   if (!Number.isSafeInteger(value) || (value as number) < min) invalid('Schedule revision or occurrence is invalid.', code)
 }
+const historyMaxMs = 48 * 60 * 60 * 1000
+export const scheduleHistoryPageSize = (query: ScheduleHistoryQuery): number => query.limit ?? 25
+function historyWindow(value: Record<string, unknown>, code: string): Pick<ScheduleHistoryQuery, 'scheduleId' | 'from' | 'to'> {
+  string(value.scheduleId, code)
+  integer(value.from, code)
+  integer(value.to, code)
+  if (value.to <= value.from || value.to - value.from > historyMaxMs || value.to > 8_640_000_000_000_000)
+    invalid('Choose a nonempty schedule history window of at most 48 hours.', code)
+  return { scheduleId: value.scheduleId, from: value.from, to: value.to }
+}
+function historyCursor(value: unknown, code: string): asserts value is string {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,8192}$/u.test(value)) invalid('Use the original schedule history cursor.', code)
+}
+function parseScheduleHistoryQuery(value: unknown): ScheduleHistoryQuery {
+  const code = 'INVALID_CONTROL_REQUEST', p = rpcRecord(value, ['scheduleId', 'from', 'to', 'limit', 'cursor'], code)
+  const window = historyWindow(p, code)
+  if (p.limit !== undefined) {
+    integer(p.limit, code, 1)
+    if (p.limit > 100) invalid('Schedule history page size exceeds 100.', code)
+  }
+  if (p.cursor !== undefined) historyCursor(p.cursor, code)
+  return { ...window, ...(p.limit === undefined ? {} : { limit: p.limit }), ...(p.cursor === undefined ? {} : { cursor: p.cursor }) }
+}
 export function parseScheduleTarget(value: unknown, code = 'INVALID_CONTROL_REQUEST'): ContinuousProgressTarget {
   const p = rpcRecord(value, ['hostId','agentSessionId','providerId','workspacePath'], code)
   for (const key of ['hostId','agentSessionId','providerId','workspacePath']) string(p[key], code)
   return p as ContinuousProgressTarget
 }
 export function parseScheduleRpcParams<M extends ScheduleMethod>(method: M, value: unknown): ScheduleParamsMap[M] {
+  if (method === 'schedule.history') return parseScheduleHistoryQuery(value) as ScheduleParamsMap[M]
   const code = 'INVALID_CONTROL_REQUEST'
   const p = rpcRecord(value, method === 'schedule.list' ? ['target','scope'] : method === 'schedule.inspect' ? ['scheduleId','operationId'] :
     method === 'schedule.create' ? ['inputEpoch','target','calendar','afterMs','everyMs','prompt','operationId','checkIn','managedSource'] : method === 'schedule.update' ? ['scheduleId','expectedRevision','operationId','everyMs'] : ['scheduleId','expectedRevision','operationId'], code)
@@ -149,6 +183,7 @@ export function parseProgressTaskSource(value: unknown, code: 'INVALID_CONTROL_R
   return source as Exclude<import('./continuous-progress-scheduler.js').ContinuousProgressTaskSource, { kind: 'goal' }>
 }
 export function validateScheduleRpcResult<M extends ScheduleMethod>(method: M, value: unknown, params?: ScheduleParamsMap[M]): ScheduleResultMap[M] {
+  if (method === 'schedule.history') return parseScheduleHistoryPage(value, params as ScheduleHistoryQuery | undefined) as ScheduleResultMap[M]
   const code = 'CONTROL_PROTOCOL_ERROR'
   const p = rpcRecord(value, method === 'schedule.list' ? ['schedules','executionScope'] : method === 'schedule.inspect' ? ['schedule','executionScope','input'] : ['schedule','executionScope','diskDurability'], code)
   if (p.executionScope !== 'connected-host') invalid('The schedule execution scope is unconfirmed.', code)
@@ -187,6 +222,31 @@ export function validateScheduleRpcResult<M extends ScheduleMethod>(method: M, v
     }
   }
   return p as ScheduleResultMap[M]
+}
+
+function parseScheduleHistoryPage(value: unknown, request?: ScheduleHistoryQuery): ScheduleHistoryPage {
+  const code = 'CONTROL_PROTOCOL_ERROR'
+  const p = rpcRecord(value, ['scheduleId', 'from', 'to', 'executionScope', 'coverage', 'entries', 'nextCursor'], code)
+  const window = historyWindow(p, code)
+  if (p.executionScope !== 'connected-host' || p.coverage !== 'recorded-inputs' && p.coverage !== 'unconfirmed' ||
+      request && (request.scheduleId !== window.scheduleId || request.from !== window.from || request.to !== window.to) ||
+      !Array.isArray(p.entries) || p.entries.length > (request ? scheduleHistoryPageSize(request) : 100))
+    invalid('The schedule history page does not match its requested scope.', code)
+  if (p.nextCursor !== null) {
+    historyCursor(p.nextCursor, code)
+    if (p.nextCursor === request?.cursor) invalid('The schedule history cursor did not advance.', code)
+  }
+  let before = window.to
+  const entries = (p.entries as unknown[]).map(entry => {
+    const original = rpcRecord(entry, ['operationId', 'occurrenceAt', 'delivery', 'nativeResult'], code)
+    string(original.operationId, code)
+    integer(original.occurrenceAt, code)
+    if (original.occurrenceAt < window.from || original.occurrenceAt >= window.to || original.occurrenceAt > before)
+      invalid('A schedule history entry is outside its original time window or order.', code)
+    before = original.occurrenceAt
+    return { operationId: original.operationId, occurrenceAt: original.occurrenceAt, ...parseContinuousProgressDelivery(original.delivery, original.nativeResult) }
+  })
+  return { ...window, executionScope: 'connected-host', coverage: p.coverage, entries, nextCursor: p.nextCursor }
 }
 export function isScheduleRpcResult(method: ScheduleMethod, value: unknown): boolean {
   try { validateScheduleRpcResult(method, value); return true } catch { return false }

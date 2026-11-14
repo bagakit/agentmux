@@ -181,6 +181,7 @@ import type { AgentMuxExecutorProbeResult } from './control.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
 import { observeMessageJournal } from './agent-message-observer.js'
 import { assertAgentInputEpoch, optionalInputEpoch, agentPromptCondition, agentPromptInputId, agentPromptNotApplied, validateAgentPromptAdmissionIntent, validateAgentPromptCondition, validateAgentPromptInputKey, type AgentPromptAdmissionIntent, type AgentPromptInputKey } from './agent-prompt-condition.js';
+import { parseScheduledPromptHistoryRequest, type ScheduledPromptHistoryRequest, type ScheduledPromptHistory } from './scheduled-prompt-history.js';
 import { agentTurnCompletionIdentity, agentTurnEndEvidence, agentNativeTurnEnd, nativeTurnEndScopeMatches, agentNativeInteractionEnd, nativeInteractionEndScopeMatches, cloneSession, sameNativeHandle, sameRun } from './agent-session-identity.js'
 import { finalPromptNativeResult, promptNativeResult, queuedPromptNativeResult } from './prompt-native-result.js'
 import { transitionAgentSemanticStatus, activityEvidenceSupersedes, nextActivityEvidenceRevision } from './agent-semantic-state.js'
@@ -7288,6 +7289,11 @@ export class AgentMuxClient {
       }
       return original
     })
+  }
+
+  /** Read committed schedule receipts. Native settlement and restored input stay with their original owners. */
+  async readScheduledPromptHistory(request: ScheduledPromptHistoryRequest, options: { signal?: AbortSignal } = {}): Promise<ScheduledPromptHistory> {
+    return await this.store.readScheduledPromptHistory(parseScheduledPromptHistoryRequest(request), options.signal)
   }
 
   /** Read current native activity without preparing, admitting or dispatching input. */
