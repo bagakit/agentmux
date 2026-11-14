@@ -69,6 +69,27 @@ request; never automatically repeat the write. An assignment does not submit wor
 enable automatic supervision or authorize input. Source-qualified Start requires its
 own current execution access; a qualified reference is never converted to a legacy SID.
 
+## One-time Source-qualified Start
+
+Pass the original assigned reference to `goal start --agent-ref JSON --access JSON`.
+Access is this call's configured Source carrier, for example
+`{"source":{"hostId":"SOURCE_HOST"}}`; an external association also needs its
+independently authenticated `coordinator` carrier. Source membership does not grant
+Coordinator input permission. The Start owner obtains the actual Run, freezes the
+original operation, body and independent note, and uses the original Core controlled
+input API. It creates no Loop or automatic supervision permission.
+
+Keep the same `--operation-id` after an uncertain result. `goal inspect --goal GOAL
+--dispatch-operation OP --access JSON` checks the original input without sending it.
+An ordinary repeated Start also only checks an already submitted operation. To
+explicitly continue that retained request use `goal start --goal GOAL --agent-ref JSON
+--access JSON --operation-id OP --resume-original`. Core compares the same original
+content and source before rejoining its exact waiting reference. No new operation,
+Run or waiting generation is supplied. Unknown effects are not automatically resent;
+a missing read is not proof of non-submission. The qualified receipt retains its
+reference and Run instead of a synthetic local Session ID. Input acknowledgement
+is separate from current Run health, Goal completion and human acceptance.
+
 ## File evidence
 
 Grounding checks accept original reference strings and exact file evidence. A string

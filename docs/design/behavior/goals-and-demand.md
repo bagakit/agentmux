@@ -148,6 +148,10 @@ Goals 的原 Settings owner 保存「让提需 Agent 默认担任 Supervisor」�
 
 原 Goal 显式开始 owner 在同 Demand 中保存结构化业务 dispatch 记录：准确 Session、稳定 operation、原时间、prepared/submitted/confirmed/unknown 投递阶段及原回执引用；只记录业务提交，不持 Runtime 生命周期。该记录只能由实际开始 owner 建立，普通活动类别不能冒充执行。confirmed 依据才称正在推进，unknown 保留最后事实与原检查入口；多个无法唯一确定的当前依据表达歧义，不猜最近条目。原 Goal 的显式开始、其实际任务提交及已核对来源的委派关联共同提供当前推进依据；负责人、历史关联、Run 活跃或 loop tick 本身不足以证明正在推进。Agent Region 可呈现具有准确执行关系依据的当前 Goal 并导航其详情，多个依据或尚未恢复时明确表达相应事实。导航保持 Agent/Goal 身份、输入草稿和健康 Run，不改 Session/Tab 名称、执行 cwd，不发送 Grill 或隐式消息。关系随原领域事实恢复，未知不冒充完成或终局。
 
+Source-qualified 单次 Start 保留完整业务引用、原执行 Runtime／Session／Run、operation、正文与独立系统 note。creation 由原 Source 的准确 Region／C 成员事实定位；association 先核原 Source 的 L 与资源，再用独立当前通道核原 Coordinator 的 C 和输入资格。关系、标签、当前路径与已保存访问选择不授予输入权；没有该次准确权限时只拒这次动作，不借本机同 SID 或 Source transport 身份，原 Agent 与请求继续保留。旧裸 Session 的单次开始和持续安排仍沿原合同。
+
+原 Goal 先保存同一次提交，再进入 Core 原 controlled intake。submitted 或 unknown 后的普通重入与检查不再提交；用户可明确续办同一原 operation，由 Core 以同一冻结 key、正文、note 与来源仲裁，再沿原 waiting reference 续接。另一个 producer 的同 key 不同内容必须冲突，空读不证明原请求从未进入，未知效果不自动重放；不换 Run、operation 或创建空 Session。只有原 Core canonical admitted／terminal-confirmed 回执才能确认输入，保留回执不表示当前 Run 健康、Goal 已完成或人已接受。Core 继续独占 waiting、gate、attempt 与权限事实，Goal 不保存它们的副本。
+
 关键过程记录沿原 Demand activities owner，公共 Core/RPC/对象式 CLI 可追加并检查准确 operation。原 Session 作者由调用认证取得，业务正文不能冒充另一作者；稳定操作重读不重复写，同操作不同内容明确冲突。需求变化、进展、评审/测试证据、main SHA、发布版本、缺口和接手入口分类可读，证据保存路径/SHA 引用，不复制聊天全文或工具逐行输出。GUI 与 CLI 消费同条原活动，工作实现、main 集成、发布安装与人的成果接受分别成立。
 
 ### 状态、筛选与路由队列
