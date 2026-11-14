@@ -42,7 +42,7 @@ SDK 部分也须核对全部十类：`APIConnectionError`、`APITimeoutError`、
 
 | 原生信号 | 当前源码解释 | 暴露边界 |
 | --- | --- | --- |
-| `task_complete.error` 非空 | 当前轮失败，由 [`codexFailure`](../../packages/core/src/providers/codex-errors.ts) 归一化 | 保可读 message、原生码和实际提供的有效 HTTP 状态；缺码不填官方 API 码 |
+| `task_complete.error` 非空 | 当前轮失败，由 [`codexFailure`](../../packages/providers/src/codex/errors.ts) 归一化 | 保可读 message、原生码和实际提供的有效 HTTP 状态；缺码不填官方 API 码 |
 | `task_started`／`turn_context` | 当前原生轮 working | 必须有可证明的 turn 与 ordinal，不从对话文本补轮身份 |
 | `task_complete` 没有 error | 当前轮完成 | 真实轮边界与旧结果分别表达 |
 | `turn_aborted` | 明确 `reason: interrupted` 为中断；实际含 error 时为失败；其余结果未知 | 不转换为正常完成，也不从缺失原因补中断 |

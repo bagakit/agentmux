@@ -128,7 +128,7 @@ Codex 保存的 rollout 由首条 `session_meta` 中的 `history_mode` 声明格
 
 ### 原生结果的接线与能力边界
 
-[`AgentTurnOutcome`](../../packages/core/src/types.ts) 是记录上的结果合同，与计量、当前活动和 Run 健康分开。Codex 的 [`codexTurnOutcome`](../../packages/core/src/providers/codex-turn-outcome.ts) 由原生状态观察、输入完成证据与 saved-history 共用；[`codexFailure`](../../packages/core/src/providers/codex-errors.ts) 保留原生错误码、有限诊断以及 Provider 明确提供的公开摘要。Claude 的结构化主轮错误由它自己的 Hook 适配贡献，缺少可信 turn 身份的信号只作诊断。
+[`AgentTurnOutcome`](../../packages/core/src/types.ts) 是记录上的结果合同，与计量、当前活动和 Run 健康分开。Codex 的 [`codexTurnOutcome`](../../packages/core/src/providers/codex-turn-outcome.ts) 由原生状态观察、输入完成证据与 saved-history 共用；[`codexFailure`](../../packages/providers/src/codex/errors.ts) 保留原生错误码、有限诊断以及 Provider 明确提供的公开摘要。Claude 的结构化主轮错误由它自己的 Hook 适配贡献，缺少可信 turn 身份的信号只作诊断。
 
 Core 在当前活动排序与显示资格判断之前保存结果。历史归一、公共 wire、changes 与 deferred header 都保留 `turnOutcome`；native 记录与 captured witness 只凭明确的 `same-event` 关系归并，迟到的失败不覆盖新的一轮，也不被新的一轮抹去。共享 [`ConversationView`](../../packages/client-ui/src/components/ConversationView.tsx) 把失败卡放在过程折叠之外，原始详情按需读取。外部发布如何使用结果见 [Connector publication](#外部-publication-的接线)。
 
