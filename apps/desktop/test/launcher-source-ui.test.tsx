@@ -170,7 +170,7 @@ it('a late actual project registration retains its original confirmation without
     expect(useLauncherState.getState().drafts['region:first-slot']?.sourceExecution).toBeUndefined()
     expect(useLauncherState.getState().drafts['region:second-slot']?.sourceExecution).toBeUndefined()
     expect(useAppStore.getState().agentComposerDrafts).toMatchObject({ 'first-slot': 'Original first draft', 'second-slot': 'Original second draft' })
-    expect(Object.values(useAppStore.getState().mountedSpaceInputs as Record<string, unknown>)).toContainEqual(expect.objectContaining({ kind: 'folder-registration', submitted: true, confirmed: true }))
+    await vi.waitFor(() => expect(Object.values(useAppStore.getState().mountedSpaceInputs as Record<string, unknown>)).toContainEqual(expect.objectContaining({ kind: 'folder-registration', submitted: true, confirmed: true })))
     expect(calls).not.toContain('open'); expect(calls.filter(method => method === 'register')).toHaveLength(1)
   } finally { release() }
 })

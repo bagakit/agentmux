@@ -32,6 +32,7 @@ async function fixture() {
 }
 it('registered Main/preload reads the original frozen C association witness without preparing endpoints or changing its existing inspect result', async () => {
   const f = await fixture(), before = await readFile(join(f.root, 'bindings.sqlite')), starts = f.resolveHost.mock.calls.length
+  expect(await f.api.executionCoordinatorTarget()).toEqual(f.coordinator)
   const target = { coordinator: f.coordinator, reference: f.reference }, plain = await f.api.executionBinding(target)
   expect(plain).not.toHaveProperty('association')
   const witnessed = await f.api.executionBinding(target, 'association')
