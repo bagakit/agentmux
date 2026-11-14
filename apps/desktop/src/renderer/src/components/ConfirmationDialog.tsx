@@ -18,6 +18,7 @@ export function ConfirmationDialog({
   intent = 'danger',
   secondaryLabel,
   busy = false,
+  confirmDisabled = false,
   onCancel,
   onSecondary,
   onConfirm
@@ -31,6 +32,7 @@ export function ConfirmationDialog({
   intent?: 'danger' | 'neutral'
   secondaryLabel?: string
   busy?: boolean
+  confirmDisabled?: boolean
   onCancel: () => void
   onSecondary?: () => void
   onConfirm: () => void
@@ -78,7 +80,7 @@ export function ConfirmationDialog({
               variant={intent === 'danger' ? 'danger' : 'secondary'}
               className={intent === 'neutral' ? 'confirmation-dialog__confirm--neutral' : undefined}
               data-confirm-label={confirmLabel}
-              disabled={busy}
+              disabled={busy || confirmDisabled}
               onClick={onConfirm}
             >
               <span>{busy ? 'Working…' : confirmLabel}</span>

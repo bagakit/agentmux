@@ -14,7 +14,7 @@ type Pending = {
   destination: SourceWorkbenchCloseDestination; member: SourceWorkbenchCloseMember; subject: string
   choices: SourceWorkbenchCloseLocations; selected: string
   request?: SpaceClosePrepare; record?: SpaceCloseReceipt; issue?: string | undefined
-  applied?: boolean; submitted?: boolean
+  applied?: boolean; submitted?: boolean; reviewRequired?: boolean
 }
 const choiceKey = (location: SourceWorkbenchCloseLocations['locations'][number]) => JSON.stringify(location)
 
@@ -29,7 +29,7 @@ export function useSourceWorkbenchClose() {
   const finish = (applied: boolean) => { update(null); const done = resolve.current; resolve.current = null; done?.(applied) }
   function failed(value: Pending, error: unknown) {
     const issue = error instanceof Error ? error.message : String(error)
-    update({ ...value, issue })
+    update({ ...value, issue, reviewRequired: Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'SOURCE_CLOSE_REVIEW_REQUIRED') })
     useAppStore.getState().reportError(new Error(`Original close ${value.request?.operationId ?? 'position lookup'} on ${value.destination.hostId}: ${issue}. Keep the original operation; no close was replayed.`), { kind: 'indeterminate' })
   }
   function accept(value: Pending, record: SpaceCloseReceipt): void {
@@ -37,7 +37,7 @@ export function useSourceWorkbenchClose() {
     if (!target || record.operationId !== value.request?.operationId || !sourceWorkbenchCloseMemberMatches(record, value.member) ||
       target.kind !== actual.kind || target.displayWorkspaceId !== actual.displayWorkspaceId || target.groupId !== actual.groupId || target.tabId !== actual.tabId ||
       target.kind === 'region' && (actual.kind !== 'region' || target.regionId !== actual.regionId))
-      throw Error('This original plan contains a changed member or position. Its operation is retained; choose the current workface before another close.')
+      throw Object.assign(Error('This original plan contains a changed member or position. Its operation is retained. Return to the workface and close its current position.'), { code: 'SOURCE_CLOSE_REVIEW_REQUIRED' })
   }
   async function prepare(value: Pending) {
     const location = value.choices.locations.find(location => choiceKey(location) === value.selected)
@@ -78,7 +78,8 @@ export function useSourceWorkbenchClose() {
     const value = current.current
     if (!value || running.current) return
     if (value.applied) { finish(true); return }
-    if (!value.request) { if (value.selected) await prepare(value); else finish(false); return }
+    if (value.reviewRequired) { finish(false); return }
+    if (!value.request) { if (value.selected) await prepare(value); return }
     setBusy(true)
     try {
       const record = value.record
@@ -101,11 +102,15 @@ export function useSourceWorkbenchClose() {
   const ready = pending?.record?.phase === 'prepared' && pending.record.diskDurability === 'confirmed' && !pending.submitted
   const choosing = pending && !pending.request && pending.choices.locations.length > 1
   const terminalEffect = ready && pending?.record?.plan.projection.resources.some(resource => resource.kind === 'session' && resource.control.kind === 'terminal')
-  const dialog = <ConfirmationDialog open={pending !== null} busy={busy} intent={choosing || pending?.applied ? 'neutral' : 'danger'}
-    title={choosing ? 'Choose the original position' : pending?.applied ? 'Original view closed' : ready ? copy?.title ?? 'Close the original workface?' : pending?.request ? 'Original close status' : 'Original position unavailable'}
+  const selectedPosition = pending?.choices.locations.find(location => choiceKey(location) === pending.selected)
+  const dialog = <ConfirmationDialog open={pending !== null} busy={busy} confirmDisabled={Boolean(choosing && !pending.selected)} intent={choosing || pending?.applied ? 'neutral' : 'danger'}
+    title={choosing ? 'Choose the original position' : pending?.applied ? 'Original view closed' : pending?.reviewRequired ? 'Original position changed' : ready ? copy?.title ?? 'Close the original workface?' : pending?.request ? 'Original close status' : 'Original position unavailable'}
     description={pending?.applied ? 'The selected original position was closed. Retained Agent sessions and any other original positions remain available.' : ready ? (copy?.description ?? 'Review and close the selected original workface.') + (terminalEffect ? ' This also stops the original Terminal process shown in this workface.' : '') : pending?.issue ?? (pending?.record ? `Original close is ${pending.record.outcome}. Check its original owner before another close.` : 'Select the exact original display position before closing.')}
-    subject={pending?.subject ?? ''} confirmLabel={pending?.applied ? 'Done' : choosing ? 'Review close' : ready ? copy?.confirmLabel ?? 'Close' : pending?.request ? 'Check original status' : 'Done'}
-    feedback={choosing ? <SelectionField label="Original position" missingOptionLabel="Choose a position" value={pending.selected} options={pending.choices.locations.map(location => ({ value: choiceKey(location), label: `${location.displayWorkspaceId} · ${location.groupId}`, description: `Tab ${location.tabId} · Region ${location.regionId}` }))} onValueChange={selected => update({ ...pending, selected })} /> : pending?.request ? <p className="confirmation-dialog__description">Operation {pending.request.operationId}</p> : undefined}
+    subject={pending?.subject ?? ''} confirmLabel={pending?.applied ? 'Done' : pending?.reviewRequired ? 'Return to workface' : choosing ? 'Review close' : ready ? copy?.confirmLabel ?? 'Close' : pending?.request ? 'Check original status' : 'Done'}
+    feedback={choosing ? <SelectionField label="Original position" missingOptionLabel="Choose a position" value={pending.selected} options={pending.choices.locations.map(location => ({ value: choiceKey(location), label: `${location.displayWorkspaceId} · ${location.groupId}`, description: `Tab ${location.tabId} · Region ${location.regionId}` }))} onValueChange={selected => update({ ...pending, selected })} /> : pending?.request ? <>
+      {selectedPosition ? <p className="confirmation-dialog__description">Original position: {selectedPosition.displayWorkspaceId} · {selectedPosition.groupId}<br />Tab {selectedPosition.tabId}{pending.choices.kind === 'region' ? ` · Region ${selectedPosition.regionId}` : ''}</p> : null}
+      <details className="confirmation-dialog__description"><summary>Operation details</summary><p>{pending.request.operationId}</p></details>
+    </> : undefined}
     onCancel={() => { if (!busy) finish(Boolean(pending?.applied)) }} onConfirm={() => void confirm()} />
   return { request, dialog, busy }
 }
