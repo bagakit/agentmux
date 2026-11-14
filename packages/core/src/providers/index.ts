@@ -46,7 +46,7 @@ const historyServices = { AgentMuxError, NativeJsonlHistoryReader, isNativeText,
 const ACP_LAUNCH_OPTION = { id: 'interaction', choiceId: 'acp' } as const
 
 function createAntigravityProvider(defineAgentProvider: ProviderFactory): AgentProvider {
-  const { catalog: seed, planManagedHooks, ...provider } = antigravityProvider({
+  const { catalog: seed, planLocalHooks, ...provider } = antigravityProvider({
     formatHookToolOutput, hookToolFields, hookCommandTimeout, runScopedHookCommand
   })
   const { assertAntigravityHistorySource, readAntigravitySessionHistoryPage } =
@@ -137,7 +137,7 @@ function createAntigravityProvider(defineAgentProvider: ProviderFactory): AgentP
           async close() {} }
       }
     },
-    planManagedHooks: ({ env, workspacePath }) => planManagedHooks(executionPath(executionHomeDirectory(env), workspacePath)),
+    planManagedHooks: ({ env, workspacePath }) => planLocalHooks(executionPath(executionHomeDirectory(env), workspacePath)),
     discoverNativeSession: discoverAntigravityNativeSession,
     readSessionHistoryPage: readAntigravitySessionHistoryPage,
     observeSessionHistory: observeAntigravitySessionHistory

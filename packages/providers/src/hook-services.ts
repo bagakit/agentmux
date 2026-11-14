@@ -18,3 +18,8 @@ export type ProviderHookEnvironment = {
   executionHomeDirectory(env?: ProviderExecutionEnvironment): string
   executionPath(path: string, workspacePath?: string): string
 }
+
+export type GeneratedHookServices = ProviderHookEnvironment & {
+  hookDeliverySource(): string
+  identityRuntimeSource: string
+}

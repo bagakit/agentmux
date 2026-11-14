@@ -80,7 +80,7 @@ function managedHookPlan(services: ProviderHookServices<'antigravity'>, targetRo
 
 export function antigravityProvider(services: ProviderHookServices<'antigravity'>) {
   return {
-    planManagedHooks: (targetRoot: string) => managedHookPlan(services, targetRoot),
+    planLocalHooks: (targetRoot: string) => managedHookPlan(services, targetRoot),
     catalog: {
       id: 'antigravity', label: 'Antigravity', executable: 'agy', expectedProcess: 'agy',
       promptDelivery: 'flag-prompt-interactive',

@@ -171,6 +171,18 @@
     "./antigravity/acp-actor": {
       "types": "./dist/antigravity/acp-actor.d.ts",
       "import": "./dist/antigravity/acp-actor.js"
+    },
+    "./pi/provider": {
+      "types": "./dist/pi/provider.d.ts",
+      "import": "./dist/pi/provider.js"
+    },
+    "./opencode/provider": {
+      "types": "./dist/opencode/provider.d.ts",
+      "import": "./dist/opencode/provider.js"
+    },
+    "./hermes/provider": {
+      "types": "./dist/hermes/provider.d.ts",
+      "import": "./dist/hermes/provider.js"
     }
   },
   "files": [
