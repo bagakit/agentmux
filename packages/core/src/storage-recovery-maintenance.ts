@@ -156,20 +156,43 @@ export async function restoreMissingSemanticIdentity(options: SemanticRuntimeLoc
   }
   try {
     if (await inspectSemanticRuntimeIdentity(options)) return { state: 'unchanged' }
-    const generations = await owner.recovery.list()
     const sourceId = 'core.semantic'
-    const generation = generations.find(result => result.coverage?.some(member => member.sourceId === sourceId &&
-      semanticRuntimeIdentityMembers.some(name => name === member.memberId)))
-    if (!generation?.coverage) return { state: 'needs-backup', code: 'IDENTITY_SOURCE_MISSING' }
-    const selectors = generation.coverage.filter(member => member.sourceId === sourceId &&
-      semanticRuntimeIdentityMembers.some(name => name === member.memberId)).map(({ sourceId, memberId }) => ({ sourceId, memberId }))
-    const { generationId, manifestHash } = generation
-    const operationId = 'semantic-bootstrap-' + recoveryDigest(JSON.stringify({ generationId, manifestHash, selectors }))
-    const prepared = await owner.recovery.restorePreflight({ operationId, generationId, manifestHash, selectors })
-    if (prepared.state === 'unknown' || prepared.state === 'unavailable') return { state: 'needs-backup', code: 'IDENTITY_RECOVERY_UNCONFIRMED' }
-    const applied = await owner.recovery.restoreApply(operationId)
-    return applied.state === 'complete' && await inspectSemanticRuntimeIdentity(options)
-      ? { state: 'restored' } : { state: 'needs-backup', code: 'IDENTITY_RECOVERY_UNCONFIRMED' }
+    let found = false
+    for (const { generationId, manifestHash, coverage } of await owner.recovery.list()) {
+      const selectors = (coverage ?? []).filter(member => member.sourceId === sourceId &&
+        semanticRuntimeIdentityMembers.some(name => name === member.memberId)).map(({ sourceId, memberId }) => ({ sourceId, memberId }))
+      if (!selectors.length) continue
+      found = true
+      const operationBase = 'semantic-bootstrap-' + recoveryDigest(JSON.stringify({ generationId, manifestHash, selectors }))
+      const inspect = async (operationId: string) => await owner.recovery.restoreInspect(operationId).catch(error => {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+        throw error
+      })
+      let operationId = operationBase, prior = await inspect(operationId)
+      for (let attempt = 1; prior?.state === 'complete'; attempt++) {
+        // A fresh confirmed loss may use the same good source. An unresolved prior
+        // operation keeps its own identity and is never bypassed.
+        if (await inspectSemanticRuntimeIdentity(options)) return { state: 'unchanged' }
+        operationId = `${operationBase}-${attempt}`
+        prior = await inspect(operationId)
+      }
+      let prepared = prior
+      if (!prepared) {
+        // Preflight has made no identity writes. An invalid or missing backup
+        // must not prevent another still-verifiable generation from being used.
+        try { prepared = await owner.recovery.restorePreflight({ operationId, generationId, manifestHash, selectors }) }
+        catch (error) {
+          const code = (error as NodeJS.ErrnoException).code
+          if (code === 'ENOENT' || code === 'STORAGE_RECOVERY_INVALID') continue
+          throw error
+        }
+      }
+      if (prepared.state === 'unknown' || prepared.state === 'unavailable') return { state: 'needs-backup', code: 'IDENTITY_RECOVERY_UNCONFIRMED' }
+      const applied = await owner.recovery.restoreApply(operationId)
+      return applied.state === 'complete' && await inspectSemanticRuntimeIdentity(options)
+        ? { state: 'restored' } : { state: 'needs-backup', code: 'IDENTITY_RECOVERY_UNCONFIRMED' }
+    }
+    return { state: 'needs-backup', code: found ? 'IDENTITY_RECOVERY_UNCONFIRMED' : 'IDENTITY_SOURCE_MISSING' }
   } finally { await owner.close() }
 }
 
