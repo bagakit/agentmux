@@ -181,7 +181,7 @@ function isRelativePathWithin(path: string, root: string): boolean {
 // open", and a second error would answer nothing. Walk up to the nearest ancestor that still exists
 // inside the workspace so the caller can reveal the folder the file used to live in. Every candidate
 // is realpath-confined, so an intermediate symlink escaping the root still throws rather than reveals.
-export async function localExistingAncestorWithin(owner: string | WorkspaceRecord, requestedPath: string): Promise<LocalExistingPath> {
+export async function localExistingAncestorWithin(owner: Parameters<typeof localFileScope>[0], requestedPath: string): Promise<LocalExistingPath> {
   const { root, requested } = await localFileScope(owner, requestedPath)
   const realRoot = await realpath(root)
   let lexicalTarget = localPathWithin(root, requested)
@@ -786,7 +786,7 @@ export class WorkspaceFiles {
     return this.disposal
   }
 
-  async localPathForReveal(workspace: WorkspaceRecord, requestedPath: string): Promise<string> {
+  async localPathForReveal(workspace: Pick<WorkspaceRecord, 'hostId' | 'id' | 'path'>, requestedPath: string): Promise<string> {
     const host = this.hostFor(workspace.hostId)
     if (host.kind !== 'local') throw new Error('Reveal in file manager is available only for local paths')
     const resolved = await localExistingAncestorWithin(workspace, requestedPath || '.')

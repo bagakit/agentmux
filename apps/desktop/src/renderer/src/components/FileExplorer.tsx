@@ -21,6 +21,7 @@ import {
 } from '@dnd-kit/core'
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
 import { createPortal } from 'react-dom'
+import { originalNativeFileResource, sourceFileNativeHost, sourceTreeFileLocation } from '../../../shared/source-files'
 import { isFolderWorkspace, isScratchWorkspaceId } from '../../../shared/contracts'
 import { scratchTopicIdFromDirectoryName, scratchWorkspaceFilePath } from '@agentmux/host/mote-model'
 import { api } from '../lib/api'
@@ -36,6 +37,7 @@ import {
   isNavigationKey,
   resolveFileExplorerNavigationTarget
 } from './file-tree/file-explorer-keyboard-navigation'
+import { sourceFilePhysicalPath } from '../lib/source-file-native-path'
 import { getRevealAncestorPaths } from '../lib/workspace-paths'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { copyTextToClipboard, formatPathsForCopy } from '../lib/clipboard-copy'
@@ -153,8 +155,8 @@ function validName(value: string): boolean {
   return Boolean(name && name !== '.' && name !== '..' && !name.includes('/') && !name.includes('\\'))
 }
 
-export function canRenameFileExplorerNode(workspaceId: string, node: TreeNode): boolean {
-  return !(isScratchWorkspaceId(workspaceId) &&
+export function canRenameFileExplorerNode(workspaceId: string, node: TreeNode, workspaceRoot = true): boolean {
+  return !(workspaceRoot && isScratchWorkspaceId(workspaceId) &&
     node.isDirectory &&
     !node.path.includes('/') &&
     scratchTopicIdFromDirectoryName(node.path) !== null)
@@ -438,6 +440,10 @@ export function FileExplorer({
   const reportError = useAppStore((state) => state.reportError)
   const displayPath = usePathDisplay()
   const scratchTopics = useAppStore(state => scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace))
+  const locator = useAppStore(state => workspaceId && !objectDirectory ? state.sourceFilesInputs.selections[workspaceId]?.locator : undefined)
+  const fileHostId = locator ? sourceFileNativeHost({ target: locator.mount, resource: locator.resource }) : workspace?.hostId
+  const scratchRoot = locator ? locator.resource.hostId === 'local' && locator.resource.zonePath === locator.resource.workspacePath : workspace?.hostId === 'local'
+  const canRename = (id: string, node: TreeNode) => canRenameFileExplorerNode(locator?.resource.workspaceId ?? id, node, scratchRoot)
   const setConfig = useAppStore((state) => state.setConfig)
   const activePaneId = useAppStore((state) => (
     workspaceId ? state.layouts[workspaceId]?.activeGroupId : undefined
@@ -804,30 +810,47 @@ export function FileExplorer({
       : [node.path]
   }
 
+  function physicalFilePath(path: string, topics = scratchTopics): string | null {
+    if (!workspace) return null
+    if (locator) return sourceFilePhysicalPath({ target: locator.mount, resource: locator.resource, query: { path } }, workspace, topics)
+    return scratchWorkspaceFilePath(workspace, topics, path)
+  }
+
   function filePathTitle(node: TreeNode): string {
-    if (!workspace) return ''
-    const physical = scratchWorkspaceFilePath(workspace, scratchTopics, node.path)
-    return [physical === null ? '' : displayPath(physical, workspace.hostId),
-      node.isSymlink && node.linkTarget ? `→ ${displayPath(node.linkTarget, workspace.hostId)}` : ''
+    const path = physicalFilePath(node.path)
+    return [path === null ? '' : displayPath(path, fileHostId),
+      node.isSymlink && node.linkTarget ? `→ ${displayPath(node.linkTarget, fileHostId)}` : ''
     ].filter(Boolean).join(' ')
   }
 
-  function physicalFilePath(path: string): string | null {
-    if (!workspace) return null
-    const absolute = scratchWorkspaceFilePath(workspace,
-      scratchTopicsForWorkspace(useAppStore.getState().scratchTopicSnapshots, workspace), path)
-    if (absolute === null) reportError(new Error('The original directory read is not confirmed. Refresh Files and retry this operation.'))
+  async function nativeDirectoryPath(path: string): Promise<string> {
+    tree.assertCurrent()
+    if (locator) {
+      await originalNativeFileResource(sourceTreeFileLocation(locator, path), api.sourceFiles.call, 'directory')
+      tree.assertCurrent()
+    }
+    return confirmedPhysicalPath(path)
+  }
+
+  function confirmedPhysicalPath(path: string): string {
+    const absolute = physicalFilePath(path, scratchTopicsForWorkspace(useAppStore.getState().scratchTopicSnapshots, workspace))
+    if (absolute === null) throw new Error('The original directory read is not confirmed. Refresh Files and retry this operation.')
     return absolute
   }
 
   async function copyContextPaths(node: TreeNode, kind: 'absolute' | 'relative'): Promise<void> {
     if (!workspace) return
+    tree.assertCurrent()
     const paths = pathsForContext(node)
-    const absolutePaths = kind === 'absolute' ? paths.map(physicalFilePath) : null
-    if (absolutePaths?.some(path => path === null)) return
+    const topics = scratchTopicsForWorkspace(useAppStore.getState().scratchTopicSnapshots, workspace)
+    const absolutePaths = kind === 'absolute' ? paths.map(path => physicalFilePath(path, topics)) : null
+    if (absolutePaths?.some(path => path === null)) {
+      reportError(new Error('The original directory read is not confirmed. Refresh Files and retry this operation.'))
+      return
+    }
     // 缩写只对本机绝对路径做：相对路径不含 home，远程主机的路径套本机 home 会指向对面不存在的地方。
     const text = absolutePaths
-      ? absolutePaths.map(path => displayPath(path!, workspace.hostId)).join('\n')
+      ? absolutePaths.map(path => displayPath(path!, fileHostId)).join('\n')
       : formatPathsForCopy(paths, kind, workspace.path)
     await copyTextToClipboard(text, reportError)
   }
@@ -835,17 +858,22 @@ export function FileExplorer({
   async function openDirectoryInTerminal(node: TreeNode): Promise<void> {
     tree.assertCurrent()
     if (!node.isDirectory) return
-    if (onOpenTerminal) { await onOpenTerminal(node.path); return }
+    if (onOpenTerminal && !locator) { await onOpenTerminal(node.path); return }
     if (!workspace || !activePaneId) return
-    const path = physicalFilePath(node.path)
-    if (path === null) return
+    const path = await nativeDirectoryPath(node.path)
+    if (locator) {
+      const state = useAppStore.getState()
+      const activeWorkspace = state.config?.workspaces.find(item => item.id === state.activeWorkspaceId)
+      if (!fileHostId || activeWorkspace?.id !== workspaceId || activeWorkspace.hostId !== fileHostId)
+        throw new Error('This terminal cannot reach the original file Host. Open the terminal in its original Workspace.')
+    }
     await launchTerminal(activePaneId, undefined, path)
   }
 
   async function openDirectoryAsProject(node: TreeNode): Promise<void> {
-    tree.assertCurrent()
     if (!workspace || !node.isDirectory) return
     try {
+      tree.assertCurrent()
       const projectInput = createDirectoryProjectInput({
         workspace,
         relativePath: node.path,
@@ -853,10 +881,13 @@ export function FileExplorer({
         isDirectory: node.isDirectory
       })
       if (!projectInput) return
-      const path = physicalFilePath(node.path)
-      if (path === null) return
-      // Main resolves duplicates atomically and publishes before replying; do not replay a get snapshot.
-      const created = await api.workspaces.add({ ...projectInput, path })
+      const path = confirmedPhysicalPath(node.path)
+      const expectedHost = useAppStore.getState().config?.hosts.find(host => host.id === fileHostId)
+      if (!fileHostId || locator && !expectedHost) throw new Error('This Source uses another Host with no configured project connection. Open the folder on its original Host.')
+      // Main verifies the Source and its carrier at registration, then publishes the committed Workspace.
+      const created = locator
+        ? await api.workspaces.add({ ...projectInput, hostId: fileHostId, path, ...(expectedHost && { expectedHost }) }, sourceTreeFileLocation(locator, node.path))
+        : await api.workspaces.add({ ...projectInput, hostId: fileHostId, path })
       await useAppStore.getState().selectWorkspace(created.id)
     } catch (error) {
       reportError(error)
@@ -888,9 +919,11 @@ export function FileExplorer({
   }
 
   async function revealLocalPath(node: TreeNode): Promise<void> {
-    if (!workspaceId || workspace?.hostId !== 'local') return
+    if (!workspaceId || fileHostId !== 'local') return
     try {
-      await api.files.reveal(workspaceId, node.path)
+      tree.assertCurrent()
+      if (locator) await api.files.reveal(workspaceId, node.path, sourceTreeFileLocation(locator, node.path))
+      else await api.files.reveal(workspaceId, node.path)
     } catch (error) {
       reportError(error)
     }
@@ -898,7 +931,7 @@ export function FileExplorer({
 
   function beginRename(node: TreeNode): void {
     fileRevealRef.current?.abort()
-    if (!workspaceId || editSubmissionRef.current || !canRenameFileExplorerNode(workspaceId, node)) return
+    if (!workspaceId || editSubmissionRef.current || !canRename(workspaceId, node)) return
     setSelection(createSingleFileExplorerSelection(node.path))
     setInlineEdit({ id: ++editIntent.current, kind: 'rename', node, workspaceId, workspacePath, rootPath, sourceNamespace: tree.namespace })
     setEditValue(node.name)
@@ -1029,7 +1062,7 @@ export function FileExplorer({
       actionNode.isDirectory ? toggle(actionNode) : void openFile(actionNode.path)
     } else if (FILE_EXPLORER_RENAME_KEY.matches(event) && actionNode) {
       event.preventDefault()
-      if (workspaceId && canRenameFileExplorerNode(workspaceId, actionNode)) beginRename(actionNode)
+      if (workspaceId && canRename(workspaceId, actionNode)) beginRename(actionNode)
     } else if (FILE_EXPLORER_DELETE_KEY.matches(event) && actionNode) {
       event.preventDefault()
       if (workspaceId) setDeleteRequest({ node: actionNode, workspaceId, rootPath, sourceNamespace: tree.namespace })
@@ -1153,8 +1186,8 @@ export function FileExplorer({
               kind === 'file' ? 'create-file' : 'create-directory',
               node.isDirectory ? node.path : workspacePathParent(node.path)
             )}
-            onCopyPaths={(kind) => void copyContextPaths(node, kind)}
-      onOpenTerminal={() => void openDirectoryInTerminal(node).catch(() => {})}
+            onCopyPaths={(kind) => void copyContextPaths(node, kind).catch(reportError)}
+            onOpenTerminal={() => void openDirectoryInTerminal(node).catch(reportError)}
             onOpenAsProject={() => void openDirectoryAsProject(node)}
             onViewFile={() => {
               if (!node.isDirectory && !node.linkIssue) void openFile(node.path)
@@ -1163,7 +1196,7 @@ export function FileExplorer({
               setSelection(createSingleFileExplorerSelection(node.path))
               void movePathToDirectory(node.path, directoryPath).catch(() => {})
             }}
-            getMoveTargets={() => canRenameFileExplorerNode(workspaceId, node)
+            getMoveTargets={() => canRename(workspaceId, node)
               ? fileExplorerMoveTargets(moveIndex, node.path).filter(target => fileExplorerContains(rootPath, target.path)).map(target => target.path === rootPath ? { ...target, label: rootLabel } : target)
               : []}
             onCollapse={() => setExpanded((current) => {
@@ -1190,11 +1223,11 @@ export function FileExplorer({
             onToggle={() => toggle(node)}
             onRename={() => beginRename(node)}
             onDelete={() => setDeleteRequest({ node, workspaceId, rootPath, sourceNamespace: tree.namespace })}
-            canOpenTerminal={workspace?.hostId === 'local'}
-            canMove={canRenameFileExplorerNode(workspaceId, node)}
+            canOpenTerminal={fileHostId === 'local'}
+            canMove={canRename(workspaceId, node)}
             dropDisabled={isMoveDropDisabled(fileExplorerDropDirectory(node))}
-            canRename={canRenameFileExplorerNode(workspaceId, node)}
-            isLocal={workspace?.hostId === 'local'}
+            canRename={canRename(workspaceId, node)}
+            isLocal={fileHostId === 'local'}
             selectionSize={pathsForContext(node).length}
               />
               {createEdit?.parentPath === node.path ? createRow : null}

@@ -178,7 +178,8 @@ import { readBookmark } from './bookmark-file.js'
 import { bookmarkKindForPath } from '../shared/bookmark-file.js'
 
 import { mkdir, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { dirname, join, posix } from 'node:path'
+import { localFileScope, localPathWithin } from '@agentmux/host/ordinary-files'
 
 import {
   app,
@@ -321,6 +322,7 @@ import { desktopBusinessSocketPath } from './desktop-host.js'
 import { ScratchTopics } from './scratch-topics.js'
 import type { MoteAvatarInput, MoteAvatarRef } from '../shared/mote-avatars.js'
 import { configWithRuntimeBindings, confirmRuntimeConfig, saveRuntimeConfig } from './runtime-config-transaction.js'
+import { originalNativeFileResource, sourceFileNativeHost, type SourceFileReadLocation } from '../shared/source-files.js'
 import { WorkspaceFiles, workspaceFileObserverCount, LOCAL_WORKER_SOURCE } from './workspace-files.js'
 import { NoteFileWriter } from '@agentmux/host/note-file-writer'
 
@@ -1156,8 +1158,20 @@ export async function registerIpc(args: {
     })
     return result.workspace
   })
-  handle('workspaces:add', async (input: CreateWorkspaceInput) => {
-    return (await registerWorkspace(input, configOwner, id => args.runtime.executionHost(id))).workspace
+  handle('workspaces:add', async (input: CreateWorkspaceInput, source?: SourceFileReadLocation) => {
+    if (!source) return (await registerWorkspace(input, configOwner, id => args.runtime.executionHost(id))).workspace
+    if (input.hostId !== sourceFileNativeHost(source))
+      throw new Error('The selected project cannot be opened through this Host connection.')
+    const host = args.runtime.executionHost(input.hostId), carrier = args.runtime.executionHost(source.target.hostId)
+    const resource = await originalNativeFileResource(source, (target, method, query) => args.runtime.sourceFilesCall(target, method, query), 'directory')
+    const local = input.hostId === 'local' ? await localFileScope({ id: resource.workspaceId, hostId: resource.hostId, path: resource.workspacePath }, resource.path) : null
+    const path = local ? localPathWithin(local.root, local.requested) : posix.join(resource.zonePath, source.query.path)
+    if (input.path !== path) throw new Error('The original Source directory moved. Refresh its folder before opening the project.')
+    return (await registerWorkspace(input, configOwner, id => {
+      if (args.runtime.executionHost(id) !== host || args.runtime.executionHost(source.target.hostId) !== carrier)
+        throw new Error('The original Source connection changed before project registration.')
+      return host
+    })).workspace
   })
   handle('workspaces:listBranches', async (workspaceId: string) => await worktrees.list(workspaceId, config))
   handle('workspaces:openBranch', async (workspaceId: string, branch: string) => {
@@ -1427,8 +1441,15 @@ export async function registerIpc(args: {
     const error = await shell.openPath(await files.localPathForSystemOpen(workspace(config, workspaceId), path))
     if (error) throw new Error(error)
   })
-  handle('files:reveal', async (workspaceId: string, path: string) => {
-    shell.showItemInFolder(await files.localPathForReveal(workspace(config, workspaceId), path))
+  handle('files:reveal', async (workspaceId: string, path: string, source?: SourceFileReadLocation) => {
+    if (!source) {
+      shell.showItemInFolder(await files.localPathForReveal(workspace(config, workspaceId), path))
+      return
+    }
+    if (sourceFileNativeHost(source) !== 'local')
+      throw new Error('This file is on another Host. Its directory is unavailable in the local file manager.')
+    const resource = await originalNativeFileResource(source, (target, method, query) => args.runtime.sourceFilesCall(target, method, query))
+    shell.showItemInFolder(await files.localPathForReveal({ id: resource.workspaceId, path: resource.workspacePath, hostId: resource.hostId }, resource.path))
   })
   handle('scratch:readTopic', async (workspaceId: string, topicId: string, expectedResource?: import('@agentmux/core/mote-preferences').MotePreferencesTarget['expectedResource']) =>
     await args.scratchTopics.read(workspace(config, workspaceId, expectedResource), topicId)

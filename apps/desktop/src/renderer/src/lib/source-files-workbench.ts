@@ -1,3 +1,4 @@
+import { sourceFilesQuery, sourceFilesMappingMatches } from '../../../shared/source-files'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { parseFileDeleteParams, parseFileMkdirParams, parseFileMoveParams, type FileMutationEffect } from '@agentmux/core/files'
 import type { FolderDirectoryRegistration } from '@agentmux/core/space-folder'
@@ -38,18 +39,6 @@ export const sourceFilesWorkspaceMatches = (left: SourceFilesInput['workspace'],
 const sameFilesLocation = (left: SpaceMountRecord, right: SpaceMountRecord | undefined) => right?.hostId === left.hostId &&
   right.reference.runtimeId === left.reference.runtimeId && right.reference.spaceId === left.reference.spaceId &&
   right.zoneId === left.zoneId && right.workspaceId === left.workspaceId
-export function sourceFilesQuery(locator: Pick<SourceFilesLocator, 'resource'>, path: string) {
-  return { zoneId: locator.resource.zoneId, path: path || '.', expectedResource: {
-    hostId: locator.resource.hostId, workspaceId: locator.resource.workspaceId, workspacePath: locator.resource.workspacePath
-  } }
-}
-/** A live Zone may change independently; its later path cannot replace the selected mapping. */
-export function sourceFilesMappingMatches(locator: Pick<SourceFilesLocator, 'resource'>, resource: import('@agentmux/core/files').FileReadResource, path: string): boolean {
-  const base = locator.resource.path === '.' ? '' : locator.resource.path
-  const expected = !path || path === '.' ? base : base ? base + '/' + path : path
-  return ['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'logicalDirectory'].every(key =>
-    resource[key as keyof typeof resource] === locator.resource[key as keyof typeof resource]) && (resource.path === '.' ? '' : resource.path) === expected
-}
 
 /** Files in a selected Source are shown Zone-relative. Topic files keep their Workspace-relative editor keys. */
 export type FileMutationLocation = {

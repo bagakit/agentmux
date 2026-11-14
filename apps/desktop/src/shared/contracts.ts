@@ -538,7 +538,7 @@ export type AppConfig = {
 
 export type FileDocument = {
   /** Original Source binding acquired by a complete read; physical provenance is readIdentity. */
-  readSource?: { target: import('./space-mount').SpaceMountSourceTarget; resource: import('@agentmux/core/files').FileReadResource; query: Omit<import('@agentmux/core/files').FileReadParams, 'maxBytes'> }
+  readSource?: import('./source-files').SourceFileReadLocation
   /** Previously observed Main metadata, never merged into another Source's attribution. */
   legacyMainNote?: { noteId: string; resource: import('@agentmux/core/notebook-catalog').NoteResource;
     provenance?: import('@agentmux/core/note-provenance').NoteProvenanceSnapshot; target?: import('./note-file-editing').NoteFileHistoryTarget }
@@ -1802,7 +1802,7 @@ export type AgentMuxDesktopApi = {
     chooseLocalFolder(document?: WorkbenchWindowDocument): Promise<WorkspaceRecord | null>
     /** Pick a replacement directory while preserving the existing Workspace identity. */
     rebindLocalFolder(workspaceId: string, document?: WorkbenchWindowDocument): Promise<WorkspaceRecord | null>
-    add(input: CreateWorkspaceInput): Promise<WorkspaceRecord>
+    add(input: CreateWorkspaceInput, source?: import('./source-files').SourceFileReadLocation): Promise<WorkspaceRecord>
     listBranches(workspaceId: string): Promise<WorkspaceBranchesSnapshot>
     openBranch(workspaceId: string, branch: string): Promise<WorkspaceSelectionResult>
     createWorktreeForBranch(input: CreateWorktreeForBranchInput): Promise<WorkspaceSelectionResult>
@@ -1876,7 +1876,7 @@ export type AgentMuxDesktopApi = {
     onInvalidated(listener: (event: WorkspaceFileInvalidated) => void): () => void
     /** Open a local Workspace path with the host operating system's default handler. */
     openSystem(workspaceId: string, path: string): Promise<void>
-    reveal(workspaceId: string, path: string): Promise<void>
+    reveal(workspaceId: string, path: string, source?: import('./source-files').SourceFileReadLocation): Promise<void>
   }
   moteChat: {
     call<M extends import('@agentmux/core/mote-chat').MoteChatMethod>(method: M, params: import('@agentmux/core/mote-chat').MoteChatParamsMap[M], target?: ConnectionHostingTarget): Promise<import('@agentmux/core/mote-chat').MoteChatResultMap[M]>

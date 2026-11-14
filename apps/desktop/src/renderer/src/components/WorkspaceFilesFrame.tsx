@@ -60,7 +60,7 @@ export function WorkspaceFilesFrame({ workspace, visible, presentation, title, s
   </Panel>
   return <div className={`workspace-tool-explorer${directoryFirst ? ' workspace-tool-explorer--directory-first' : ''}${!showExplorer ? ' workspace-tool-explorer--content-only' : ''}`}>
     <div className="workspace-files-source">
-      {fileIssue ? null : <SourceFilesAccess key={JSON.stringify([workspace.id, workspace.hostId, workspace.path, directory])} workspace={workspace} objectDirectory={directory} objectZone={objectZone} visible={visible && showExplorer} />}
+      {fileIssue ? null : <SourceFilesAccess key={JSON.stringify([workspace.id, workspace.hostId, workspace.path, directory, objectZone])} workspace={workspace} objectDirectory={directory} objectZone={objectZone} visible={visible && showExplorer} />}
       {!directoryFirst ? context : null}
     </div>
     <PanelGroup direction="vertical" className={collapsed ? 'workspace-tools-collapsed' : 'workspace-tools-split'}
