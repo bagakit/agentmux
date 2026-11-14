@@ -45,6 +45,7 @@
 
 /* Grouped list: one surface per group, hairlines from the avatar's right edge. */
 .mobile-focus-project { margin-top: var(--sp-5); }
+.mobile-app[data-wide-shell][data-focus-root] .mobile-focus-projects { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); column-gap: 20px; align-items: start; }
 .mobile-spatial-panel .mobile-focus-project > h2 { display: flex; align-items: center; gap: var(--sp-3); min-height: 32px; margin: 0 var(--sp-1) var(--sp-2);
   color: var(--text-2); font-size: var(--fs-meta); font-weight: 600; }
 .mobile-focus-project > h2 > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); font-weight: 650; }

@@ -12,6 +12,7 @@ import { mobileKnowledgeDraftSource, useKnowledgeDraft, type MobileKnowledgeEdit
 
 export type TopicsRpc = NonNullable<AgentMuxHostedClient['forwardRpc']>
 export type MobileTopicKnowledgeProps = { rpc: TopicsRpc; topicId?: string; title: string; visible?: boolean;
+  wide?: boolean; sourceActive?: boolean; onNavigate?(): void;
   client?: AgentMuxHostedClient | null; connected?: boolean;
   initialReference?: MobileKnowledgeReference; onReferenceChange?(reference: MobileKnowledgeReference): void;
   openSource(source: TopicKnowledgeSource): void | Promise<void>; openHttpLink?: OpenHttpLink; onBackChange?(back: (() => void) | null): void }
@@ -33,7 +34,7 @@ export function MobileTopicKnowledge(props: MobileTopicKnowledgeProps) {
   return <KnowledgeScope key={props.topicId ?? 'all-topics'} {...props} />
 }
 function KnowledgeScope({ rpc, topicId, title, openSource, openHttpLink, onBackChange, client = null, connected,
-  initialReference, onReferenceChange, visible = true }: MobileTopicKnowledgeProps) {
+  initialReference, onReferenceChange, visible = true, wide = false, sourceActive = false, onNavigate }: MobileTopicKnowledgeProps) {
   const [query, setQuery] = useState(initialReference?.query ?? ''), [search, setSearch] = useState(initialReference?.query ?? '')
   const [entries, setEntries] = useState<TopicKnowledgeItem[]>([]), [selected, setSelected] = useState<TopicKnowledge | null>(null)
   const [selection, setSelection] = useState(targetReference(initialReference)), [selectedScope, setSelectedScope] = useState<MobileKnowledgeDraftScope | null>(null)
@@ -41,6 +42,8 @@ function KnowledgeScope({ rpc, topicId, title, openSource, openHttpLink, onBackC
   const [edit, setEdit] = useState<MobileKnowledgeEditTarget | null>(editReference(initialReference))
   const [editorKey, setEditorKey] = useState(initialReference?.draftKey ?? `${initialReference?.topicId ?? ''}:${initialReference?.entryId ?? ''}`)
   const [editorVisible, setEditorVisible] = useState(initialReference?.view === 'edit')
+  const directoryVisible = visible && (wide || !selection && !editorVisible) && (wide || !sourceActive)
+  const readingVisible = visible && !sourceActive
   const readIntent = useRef(0), latestClient = useRef(client), latestConnection = useRef(connected)
   latestClient.current = client; latestConnection.current = connected
   const receivedReference = useRef(initialReference ? referenceKey(initialReference) : null), pendingReference = useRef<string | null>(null)
@@ -48,10 +51,10 @@ function KnowledgeScope({ rpc, topicId, title, openSource, openHttpLink, onBackC
   const backToList = useCallback(() => { readIntent.current += 1; setSelected(null); setSelection(null) }, [])
   const activeBack = editorVisible ? backToReading : selection ? backToList : null
   useLayoutEffect(() => {
-    if (!visible || !onBackChange) return
+    if (!readingVisible || !onBackChange) return
     onBackChange(activeBack)
     return () => onBackChange(null)
-  }, [visible, onBackChange, activeBack])
+  }, [readingVisible, onBackChange, activeBack])
   useLayoutEffect(() => {
     if (!initialReference) return
     const key = referenceKey(initialReference)
@@ -77,7 +80,7 @@ function KnowledgeScope({ rpc, topicId, title, openSource, openHttpLink, onBackC
     receivedReference.current = referenceSignature; onReferenceChange(reference)
   }, [visible, referenceSignature, onReferenceChange])
   useEffect(() => {
-    if (!visible || connected === false || !topicId && !search) return
+    if (!directoryVisible || connected === false || !topicId && !search) return
     let live = true; setLoading(true)
     const request = search ? rpc('topic.knowledge.search', { ...(topicId ? { topicId } : {}), query: search })
       : rpc('topic.knowledge.ls', { topicId: topicId! })
@@ -87,9 +90,9 @@ function KnowledgeScope({ rpc, topicId, title, openSource, openHttpLink, onBackC
     }).catch(error => { if (live && latestConnection.current !== false) setIssue(`知识读取失败：${errorText(error)}。可以重试。`) })
       .finally(() => { if (live) setLoading(false) })
     return () => { live = false }
-  }, [rpc, topicId, search, refresh, visible, connected])
+  }, [rpc, topicId, search, refresh, directoryVisible, connected])
   useEffect(() => {
-    if (!visible || connected === false || !selection || selected?.topicId === selection.topicId && selected.entryId === selection.entryId) return
+    if (!readingVisible || connected === false || !selection || selected?.topicId === selection.topicId && selected.entryId === selection.entryId) return
     const token = ++readIntent.current, originalClient = client, source = mobileKnowledgeDraftSource(client, getDeviceWorkface())
     let live = true
     const valid = () => {
@@ -108,12 +111,14 @@ function KnowledgeScope({ rpc, topicId, title, openSource, openHttpLink, onBackC
         ? { ...previous, entry: result.entry!, scope: source?.scope ?? null } : previous)
     }).catch(error => { if (valid()) setIssue(`正文读取失败：${errorText(error)}。可以重试。`) })
     return () => { live = false; readIntent.current += 1 }
-  }, [visible, rpc, selection, selected, client, refresh, connected])
+  }, [readingVisible, rpc, selection, selected, client, refresh, connected])
   useEffect(() => () => { readIntent.current += 1 }, [])
   function read(entry: TopicKnowledgeItem) {
-    readIntent.current += 1; setSelected(null); setSelectedScope(null); setSelection({ topicId: entry.topicId, entryId: entry.entryId })
+    onNavigate?.()
+    readIntent.current += 1; setSelected(null); setSelectedScope(null); setEditorVisible(false); setSelection({ topicId: entry.topicId, entryId: entry.entryId })
   }
   function startEdit(entry?: TopicKnowledge) {
+    onNavigate?.()
     if (edit && (!entry || edit.topicId === entry.topicId && edit.entryId === entry.entryId)) { setEditorVisible(true); return }
     const id = entry?.topicId ?? topicId
     if (!id) return
@@ -126,21 +131,25 @@ function KnowledgeScope({ rpc, topicId, title, openSource, openHttpLink, onBackC
   }
   const draftKeyChanged = useCallback((draftKey: string) => setEdit(previous => previous && previous.draftKey !== draftKey ? { ...previous, draftKey } : previous), [])
   const readIssue = connected === false ? '连接中断，知识还没重新读取。' : issue
-  return <section className="mobile-topic-knowledge" aria-label={`${title}知识`}>
-    <form className="mobile-topics-search" hidden={Boolean(selection) || editorVisible} onSubmit={event => { event.preventDefault(); setSearch(query.trim()) }}>
+  return <section className="mobile-topic-knowledge" data-wide={wide || undefined} aria-label={`${title}知识`}>
+    <div className="mobile-knowledge-directory" aria-label="知识导航" hidden={!directoryVisible}>
+    <form className="mobile-topics-search" onSubmit={event => { event.preventDefault(); setSearch(query.trim()) }}>
       <TextInput aria-label="搜索知识" placeholder={topicId ? '搜索此 Topic 的知识' : '搜索 All Topics'} value={query} onChange={event => setQuery(event.target.value)} />
       <button type="submit">搜索</button>
     </form>
-    <div className="mobile-topics-actions" hidden={Boolean(selection) || editorVisible}><small>{topicId ? '已保存知识' : 'All Topics'}{loading ? ' · 读取中' : ''}</small>
+    <div className="mobile-topics-actions"><small>{topicId ? '已保存知识' : 'All Topics'}{loading ? ' · 读取中' : ''}</small>
       <button onClick={() => setRefresh(value => value + 1)}>刷新</button>
       {topicId && <button onClick={() => startEdit()}>{edit ? '继续编辑草稿' : '新建知识'}</button>}
     </div>
-    {readIssue && <MobileNotice identity={[readIssue]} className="mobile-topics-issue" role="status">{readIssue}</MobileNotice>}
-    {!selection && !editorVisible && <ul className="mobile-topics-list">{entries.map(entry => <li key={`${entry.topicId}:${entry.entryId}`}>
-      <button onClick={() => read(entry)}><strong>{'readError' in entry ? '条目读取未确认' : entry.title}</strong>
+    {readIssue && directoryVisible && <MobileNotice identity={[readIssue]} className="mobile-topics-issue" role="status">{readIssue}</MobileNotice>}
+    <ul className="mobile-topics-list">{entries.map(entry => <li key={`${entry.topicId}:${entry.entryId}`}>
+      <button aria-current={selection?.topicId === entry.topicId && selection.entryId === entry.entryId ? 'page' : undefined} onClick={() => read(entry)}><strong>{'readError' in entry ? '条目读取未确认' : entry.title}</strong>
         <small>{'readError' in entry ? entry.readError : certaintyLabels[entry.certainty]}{!topicId ? ` · ${entry.topicId}` : ''}</small></button>
-    </li>)}</ul>}
-    {connected !== false && !selection && !editorVisible && !entries.length && !loading && <p className="mobile-topics-empty">{!topicId && !search ? '输入关键词，搜索所有 Topic 的已保存知识。' : search ? '当前已确认结果没有匹配项。' : '此 Topic 暂无已确认知识条目。'}</p>}
+    </li>)}</ul>
+    {connected !== false && !entries.length && !loading && <p className="mobile-topics-empty">{!topicId && !search ? '输入关键词，搜索所有 Topic 的已保存知识。' : search ? '当前已确认结果没有匹配项。' : '此 Topic 暂无已确认知识条目。'}</p>}
+    </div>
+    <div className="mobile-knowledge-content" hidden={sourceActive || !selection && !editorVisible}>
+    {readIssue && !directoryVisible && <MobileNotice identity={[readIssue]} className="mobile-topics-issue" role="status">{readIssue}</MobileNotice>}
     {selection && <article className="mobile-topic-reading" hidden={editorVisible}>
       <div className="mobile-topics-actions"><button onClick={backToList}>返回知识列表</button>
         <button onClick={() => selected ? startEdit(selected) : setEditorVisible(Boolean(edit))}>{edit ? '继续编辑草稿' : '编辑知识'}</button></div>
@@ -155,7 +164,8 @@ function KnowledgeScope({ rpc, topicId, title, openSource, openHttpLink, onBackC
       rpc={rpc} onDraftKeyChange={draftKeyChanged} onClose={backToReading} onSaved={(entry, keepEditing) => {
         setSelected(entry); setSelection({ topicId: entry.topicId, entryId: entry.entryId }); setRefresh(value => value + 1)
         if (!keepEditing) setEditorVisible(false)
-      }} /></div>}
+    }} /></div>}
+    </div>
   </section>
 }
 

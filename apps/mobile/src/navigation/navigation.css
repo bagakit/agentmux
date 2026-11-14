@@ -1,4 +1,14 @@
 .mobile-spatial-panel { padding: 0 var(--mobile-gutter) var(--sp-6); }
+.mobile-space-navigation, .mobile-space-content { min-width: 0; min-height: 0; }
+.mobile-spatial-panel[data-wide-space] { display: grid; grid-template-columns: 300px minmax(0, 1fr); height: 100%; overflow: hidden; padding: 0; }
+.mobile-spatial-panel[data-wide-space] > .mobile-space-navigation { overflow-y: auto; overscroll-behavior: contain; padding: 0 var(--mobile-gutter) var(--sp-6); border-right: 1px solid var(--line-soft); }
+.mobile-spatial-panel[data-wide-space] > .mobile-space-content { overflow-y: auto; overscroll-behavior: contain; padding: 0 var(--mobile-gutter) var(--sp-6); }
+.mobile-space-content-heading > p { margin: 0 0 6px; color: var(--text-3); font-size: var(--fs-meta); }
+.mobile-space-content-heading > details { margin-bottom: 12px; }
+.mobile-space-content-heading > details code { overflow-wrap: anywhere; }
+.mobile-space-selection { display: grid; place-content: center; justify-items: center; min-height: 100%; padding: 24px; text-align: center; color: var(--text-3); }
+.mobile-space-selection h2 { margin: 12px 0 4px; color: var(--text-2); font-size: var(--fs-lead); font-weight: 600; }
+.mobile-space-selection p { margin: 0; font-size: var(--fs-meta); }
 .mobile-spatial-panel .mobile-section-heading { padding: 0; }
 .mobile-spatial-panel .mobile-section-heading > div:not(.mobile-section-actions) > p { display: none; }
 .mobile-spatial-search { position: relative; display: flex; align-items: center; color: var(--text-3); min-height: 44px; margin: 0 0 4px; }
@@ -10,6 +20,7 @@
 .mobile-spatial-tab h3 { font-size: var(--fs-meta); font-weight: 500; margin: 6px 0 0; color: var(--text-3); }
 .mobile-spatial-panel .mobile-session-list > li > button { min-height: 44px; padding: 5px 4px; gap: 8px; }
 .mobile-spatial-panel .mobile-session-list small { font-size: var(--fs-meta); margin-top: 0; }
+.mobile-space-children .mobile-session-list > li > button[aria-current='page'] { background: var(--mobile-group-press); border-radius: var(--mobile-radius-sm); }
 .mobile-spatial-panel .mobile-session-recap { display: block; min-width: 0; line-height: 1.35; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; }
 .mobile-space-children .mobile-session-project, .mobile-space-children .mobile-session-location { display: none; }
 .mobile-spatial-resource { display: flex; align-items: center; gap: 8px; padding: 8px 4px; color: var(--text-3); font-size: var(--fs-meta); }

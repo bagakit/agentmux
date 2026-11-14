@@ -31,6 +31,7 @@ import './navigation.css'
 type Catalog = AgentMuxRpcResult<'space.ls'>['catalog']
 export type MobileSpatialContext = { spaceId: string | null; tabId: string | null; regionId: string | null }
 export type MobileSpatialNavigationProps = { home: MobileHome; client: AgentMuxHostedClient | null; connected: boolean;
+  wide?: boolean;
   /** A view of this same directory, without retargeting its Space/Mote context. */
   focusTarget?: HTMLElement | null; focusVisible?: boolean;
   focusSelected?: { hostId: string; agentSessionId: string } | null;
@@ -48,7 +49,7 @@ type SessionReference = Pick<AgentMuxAgentSession, 'agentSessionId'> & Partial<P
 type ContentTarget = { key: string; spaceId: string; spaceName: string; tabName: string; tabId: string; zoneId: string | null; region: Region; zone?: Catalog['zones'][number] }
 const EMPTY_CONTEXT: MobileSpatialContext = { spaceId: null, tabId: null, regionId: null }
 const contentKey = (spaceId: string, zoneId: string | null, region: Region) => JSON.stringify([spaceId, zoneId, region.tabId, region.regionId, region.kind, region.browserId ?? null, region.file ?? null])
-export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ home, client, connected, sessions, openSession, openMainAgent, openProfile, openHttpLink, initialContext, onContextChange, onBackChange, onCreateAgent, recentMoteSpaceId, onSelectMote, needsYou = [], onPresentation, visible = true, focusTarget, focusVisible, focusSelected, openFocusSession }: MobileSpatialNavigationProps) {
+export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ home, wide = false, client, connected, sessions, openSession, openMainAgent, openProfile, openHttpLink, initialContext, onContextChange, onBackChange, onCreateAgent, recentMoteSpaceId, onSelectMote, needsYou = [], onPresentation, visible = true, focusTarget, focusVisible, focusSelected, openFocusSession }: MobileSpatialNavigationProps) {
   const observeCatalog = useMobileWebCatalogObservation()
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [issue, setIssue] = useState('')
@@ -57,6 +58,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
   const [focusQuery, setFocusQuery] = useState('')
   const focusActive = focusVisible ?? (visible && home === 'focus')
   const contentVisible = visible && home !== 'focus'
+  const wideSpace = wide && home === 'space'
   const catalogActive = contentVisible || focusActive
   const focusVisited = useRef(focusActive), contentVisited = useRef(contentVisible)
   if (focusActive) focusVisited.current = true
@@ -348,10 +350,11 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
         }).filter(region => region !== undefined).map(region => {
           const session = region.agentSessionId ? reference(region.agentSessionId) : undefined
           const occurrences = catalog?.locations.filter(value => value.spaceId === owner.spaceId && value.tabId === tab.tabId && value.regionId === region.regionId) ?? []
+          const currentContent = home === 'space' && !selectionChanged && context.spaceId === owner.spaceId && context.tabId === tab.tabId && context.regionId === region.regionId && selectedKey === contentKey(owner.spaceId, tab.zoneId, region)
           return session ? sessionRow(session, JSON.stringify([region.execution?.hostId, tab.tabId, region.regionId]), occurrences.length === 1 ? occurrences[0] : null, tab.regionIds.length === 1 ? tab.name : undefined, occurrences, region.execution?.hostId)
             : <li key={region.regionId}>{region.kind === 'launcher' && onCreateAgent ? <button type="button" aria-label="在此启动位新建 Agent" onClick={() => onCreateAgent({ spaceId: owner.spaceId, zoneId, tabId: tab.tabId, regionId: region.regionId })}>
               <SemanticIcon name="object.launcher" size={18} /><span><strong>新建 Agent</strong><small>在此启动位开始</small></span><SemanticIcon name="navigation.disclosure" size={16} /></button>
-              : ['file', 'browser'].includes(region.kind) ? <button type="button" onClick={() => openContent(owner, tab, region)}><SemanticIcon name={region.kind === 'file' ? 'object.file' : 'object.browser'} size={18} /><span><strong>{region.kind === 'file' ? region.file?.path.split('/').at(-1) ?? '文件名称未确认' : '查看网页'}</strong><small>{region.kind === 'file' ? region.file?.path.endsWith(NOTE_FILE_EXTENSION) ? '笔记' : '文件' : '网页'}</small></span><SemanticIcon name="navigation.disclosure" size={16} /></button>
+              : ['file', 'browser'].includes(region.kind) ? <button type="button" aria-current={currentContent ? 'page' : undefined} onClick={() => openContent(owner, tab, region)}><SemanticIcon name={region.kind === 'file' ? 'object.file' : 'object.browser'} size={18} /><span><strong>{region.kind === 'file' ? region.file?.path.split('/').at(-1) ?? '文件名称未确认' : '查看网页'}</strong><small>{region.kind === 'file' ? region.file?.path.endsWith(NOTE_FILE_EXTENSION) ? '笔记' : '文件' : '网页'}</small></span><SemanticIcon name="navigation.disclosure" size={16} /></button>
               : <div className="mobile-spatial-resource"><SemanticIcon name={region.kind === 'launcher' ? 'object.launcher' : 'object.region'} size={18} /><span>{region.kind === 'launcher' ? 'Launcher' : region.kind}<small>{region.agentSessionId ? '会话状态尚未核实' : '此内容在 Mac 上查看'}</small></span></div>}</li>
         })}</ul></section>})}</section>)}
       {!ownerTabs.length && <p className="mobile-spatial-empty">这个空间还没有绑定 Tab。</p>}
@@ -378,39 +381,42 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
             onOpen={() => (openFocusSession ?? openSession)(item.agentSessionId, object)} onAnswered={answered} />}</li>
         })}</ul>
       </section>}
-      {[...projectRows].map(([key, { project, values }]) => {
+      <div className="mobile-focus-projects">{[...projectRows].map(([key, { project, values }]) => {
         const matchingValues = filteredSessions(values)
         if (!matchingValues.length) return null
         return <section className="mobile-focus-project" key={key} data-project-key={key} data-project-confirmed={Boolean(project)}><h2 className="mobile-spatial-subheading">{project?.spaceId && <MobileIdentity appearanceRevision={revision} objectSpaceId={project.spaceId} appearance={directory.appearances.get(project.spaceId)} identity={{ name: project.name, project: project.name, ...(directory.owners.get(project.spaceId)?.kind === 'mote' ? { mote: moteIdentity(directory.owners.get(project.spaceId)!) } : {}) }} client={client} connected={connected} visible={focusActive} size={20} />}<strong>{project?.name ?? '其他'}</strong>{project?.hostId && project.hostId !== 'local' && <small>{project.hostId}</small>}<span>{matchingValues.length}</span></h2><ul className="mobile-session-list">{matchingValues.map(session => sessionRow(session, session.agentSessionId, undefined, undefined, undefined, undefined, true))}</ul></section>
-      })}
+      })}</div>
       {!rows.length && <p className="mobile-spatial-empty">Focus 列表还没确认，可以刷新重试。</p>}
       {catalog?.agentPresentation === undefined && metadata.sessions.length > 0 && <details><summary>其他已有会话</summary><ul className="mobile-session-list">{filteredSessions(metadata.sessions.filter(session => !directory.rows.has(session.agentSessionId))).map(session => sessionRow(session, session.agentSessionId, undefined, undefined, undefined, undefined, true))}</ul></details>}
 
   </section></MobileNoticeScope> : null
-  return <>{contentVisited.current && <MobileNoticeScope owner={client} identity={[home,spaceId,context.tabId,context.regionId]}><section className="mobile-spatial-panel" hidden={home === 'focus'}>
-    <div className="mobile-section-heading mobile-page-header"><MobileHeaderMenu hidden={Boolean(context.regionId && activeBack)} /><div><h1>{home === 'mote' ? 'Mote' : home === 'focus' ? 'Focus' : 'Space'}</h1>
+  return <>{contentVisited.current && <MobileNoticeScope owner={client} identity={[home,spaceId,context.tabId,context.regionId]}><section className="mobile-spatial-panel" data-wide-space={wideSpace || undefined} hidden={home === 'focus'}>
+    <div className="mobile-space-navigation" hidden={Boolean(context.regionId) && !wideSpace}>
+    <div className="mobile-section-heading mobile-page-header"><MobileHeaderMenu /><div><h1>{home === 'mote' ? 'Mote' : home === 'focus' ? 'Focus' : 'Space'}</h1>
       <p>{home === 'mote' ? '与你的协调 Agent 继续讨论' : home === 'focus' ? '需要你处理的事项与最近执行' : '按 Mac 上的工作空间继续'}</p></div>
       <div className="mobile-section-actions">{contentVisible && <MobileAvatarNoticeOutlet header />}<MobileDirectoryNotice issues={[...(issue ? [{ source: '空间目录', message: issue }] : []), ...(metadata.issue ? [{ source: '会话目录', message: metadata.issue }] : []), ...presentationIssues]} retry={() => refresh(count => count + 1)} />{onCreateAgent && <IconButton className="mobile-icon-button" aria-label="新建 Agent" onClick={() => onCreateAgent(spaceId ? { spaceId } : {})}><SemanticIcon name="action.create-agent" size={18} /></IconButton>}<IconButton className="mobile-icon-button" aria-label="刷新空间目录" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} animation={pending ? 'spin' : 'none'} /></IconButton></div></div>
     {!connected && <MobileNotice owner={client} identity={[connected]} className="mobile-spatial-notice" role="status">连接暂不可用，显示的是最近一次读取的目录。</MobileNotice>}
     <label className="mobile-spatial-search"><SemanticIcon name="action.search" size={16} /><TextInput value={query} onChange={event => setQuery(event.target.value)} placeholder={home === 'focus' ? '查找 Agent 或工作空间' : '查找工作空间'} aria-label="查找" /></label>
-    {context.regionId ? <>
+      {spaceId && !space && <MobileNotice identity={[spaceId]} className="mobile-spatial-notice" role="status">空间绑定还没重新确认，可以刷新目录。</MobileNotice>}
+      {catalog ? <MobileSpaceDirectory key={home} catalog={catalog} home={home === 'mote' ? 'mote' : 'space'} query={query} selectedSpaceId={spaceId}
+        onSelect={owner => { setContext(owner ? { spaceId: owner.spaceId, tabId: null, regionId: null } : EMPTY_CONTEXT); setSelectedKey(null); if (owner?.kind === 'mote') onSelectMote?.(owner.spaceId) }}
+        renderIdentity={owner => <MobileIdentity appearanceRevision={revision} objectSpaceId={owner.spaceId} appearance={directory.appearances.get(owner.spaceId)} identity={spaceIdentity(owner)} client={client} connected={connected} visible={contentVisible && (wideSpace || !context.regionId)} size={28} />}
+        {...(home === 'mote' ? { renderPrimary: mainAction, renderProfile: owner => openProfile && <button type="button" className="mobile-mote-profile-action"
+          aria-label={`查看 Mote 资料 · ${owner.name}`} onClick={() => openProfile(spaceIdentity(owner))}><SemanticIcon name="status.info" size={16} /><span>Profile</span></button> } : {})} renderContents={renderSpaceContents} /> : <p className="mobile-spatial-empty">{pending ? '正在读取 Mac 上的空间…' : '空间目录还没确认，可以在 Focus 中继续对话。'}</p>}
+    </div>
+    <div className="mobile-space-content" hidden={!context.regionId && !wideSpace}>
+    {context.regionId ? <header className="mobile-space-content-heading">
       <button className="mobile-text-button" type="button" onClick={backToSpace}><SemanticIcon name="navigation.back" size={16} />返回空间内容</button>
       <h2 className="mobile-spatial-subheading">{selected?.region.kind === 'file' ? selected.region.file?.path.split('/').at(-1) ?? '文件' : selected?.region.kind === 'browser' ? '网页' : '内容'}</h2>
       <p>{selected?.spaceName ?? space?.name ?? '空间'} · {selected?.tabName ?? '标签'}</p>
       {(selectionChanged || !selected) && <MobileNotice identity={[spaceId,context.tabId,context.regionId,selectionChanged]} role="status">这个位置的绑定还没重新确认，可以返回目录核对。</MobileNotice>}
       <details><summary>工作面位置</summary><code>{context.spaceId} / {context.tabId} / {context.regionId}</code></details>
-    </> : <>
-      {spaceId && !space && <MobileNotice identity={[spaceId]} className="mobile-spatial-notice" role="status">空间绑定还没重新确认，可以刷新目录。</MobileNotice>}
-      {catalog ? <MobileSpaceDirectory key={home} catalog={catalog} home={home === 'mote' ? 'mote' : 'space'} query={query} selectedSpaceId={spaceId}
-        onSelect={owner => { setContext(owner ? { spaceId: owner.spaceId, tabId: null, regionId: null } : EMPTY_CONTEXT); setSelectedKey(null); if (owner?.kind === 'mote') onSelectMote?.(owner.spaceId) }}
-        renderIdentity={owner => <MobileIdentity appearanceRevision={revision} objectSpaceId={owner.spaceId} appearance={directory.appearances.get(owner.spaceId)} identity={spaceIdentity(owner)} client={client} connected={connected} visible={contentVisible} size={28} />}
-        {...(home === 'mote' ? { renderPrimary: mainAction, renderProfile: owner => openProfile && <button type="button" className="mobile-mote-profile-action"
-          aria-label={`查看 Mote 资料 · ${owner.name}`} onClick={() => openProfile(spaceIdentity(owner))}><SemanticIcon name="status.info" size={16} /><span>Profile</span></button> } : {})} renderContents={renderSpaceContents} /> : <p className="mobile-spatial-empty">{pending ? '正在读取 Mac 上的空间…' : '空间目录还没确认，可以在 Focus 中继续对话。'}</p>}
-    </>}
+    </header> : <div className="mobile-space-selection"><SemanticIcon name="object.region" size={32} /><h2>选择一个工作面</h2><p>从左侧打开文件、笔记或网页。</p></div>}
     {visited.map(target => <div key={target.key} hidden={home === 'focus' || target.key !== selectedKey || !context.regionId}>
       {(target.region.kind === 'file' || target.region.kind === 'browser') && <MobileRegionContent client={client} connected={connected} showTitle={false}
         visible={contentVisible && target.key === selectedKey && Boolean(context.regionId)} tabId={target.tabId} regionId={target.region.regionId} zoneId={target.zoneId}
         kind={target.region.kind} browserId={target.region.browserId} {...(target.region.file ? { file: target.region.file } : {})} {...(openHttpLink ? { openHttpLink } : {})} />}
     </div>)}
+    </div>
   </section></MobileNoticeScope>}{focusTarget ? createPortal(focusView, focusTarget) : home === 'focus' ? focusView : null}</>
 })

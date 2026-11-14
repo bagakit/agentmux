@@ -156,6 +156,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
     value.spaceId === context.spaceId && value.tabId === context.tabId && value.regionId === context.regionId ? value : context), [])
   const topicId = topicsRoute.context.topicId, source = topicsRoute.sources.at(-1)?.source ?? null
   const sourceReference = topicsRoute.sources.at(-1)?.content
+  const navigateTopics = useCallback(() => setTopicsRoute(value => value.sources.length ? { ...value, sources: [] } : value), [])
   const sourceBytes = JSON.stringify(source)
   const updateSourceReference = useCallback((content: MobileTopicSourceContentReference) => setTopicsRoute(value => {
     const frame = value.sources.at(-1)
@@ -640,6 +641,17 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
       <span className="mobile-session-meta"><span ref={setConversationStatusTarget} className="mobile-session-status" hidden={!conversationVisible || welcomeVisible || historyVisible} />
         {headerContext ? <span className="mobile-session-context">{headerContext}</span> : null}</span></span>
   </>
+  // The source reader stays independent of the deferred directory module, including on cold entry.
+  const topicSourceActive = Boolean(source && source.kind !== 'topic')
+  const topicsSourceContent = source && source.kind !== 'topic' ? <div className="mobile-topic-source-content">
+          {source.kind === 'space' || source.kind === 'survey' ? <>
+            <button className="mobile-text-button" onClick={leaveSource}><ThemeNavigationBackIcon size={16} />返回知识</button>
+            <MobileZoneWorkface loadWhen={!showSession && secondary === 'topics'} onLoadReturn={returnToConversation} key={source.zoneId} client={client} zoneId={source.zoneId} name="来源工作面" visible={exposed && !showSession && secondary === 'topics'} tabId={source.tabId} regionId={source.regionId} openSession={openSession} />
+          </> : source.kind === 'file' || source.kind === 'note' || source.kind === 'notebook' ? <MobileTopicSource loadWhen={!showSession && secondary === 'topics'} onLoadReturn={returnToConversation} source={source} rpc={rpc} onBack={leaveSource} openHttpLink={openBrowserHttpLink}
+            visible={exposed && !showSession && secondary === 'topics'} onBackChange={registerSourceBack}
+            {...(sourceReference ? { initialReference: sourceReference } : {})} onReferenceChange={updateSourceReference}
+            openScope={scope => { openSource({ kind: 'space', zoneId: scope.zoneId }) }} /> : null}
+  </div> : null
   const moteContext = workspaceVisible && showSession && teamSpaceId && !workPanel ? moteRoot ? 'main' as const : 'member' as const : null
   return <MobileLocalDraftsOwner><MobileHeaderMenuContext.Provider value={menuButton}><MobileAgentMenuContext.Provider value={openAgentMenu}><MobileNoticeScope owner={client} identity={[ getDeviceWorkface().recordIdentity()]}><MobileGoalOperationSafety /><div className="mobile-app" data-wide-shell={wideShell || undefined} data-wide-workface={wideWorkface || undefined} data-sidebar-collapsed={sidebarCollapsed || undefined} data-focus-root={focusRoot || undefined} data-connection={connection.state} data-mobile-workface={moteConversation ? 'mote' : 'workspace'} data-page-header={primaryHeader ? 'inline' : 'shell'}>
     <aside ref={setFocusTarget} className="mobile-focus-pane" role={focusRoot ? 'main' : undefined} aria-label="Focus 会话列表" hidden={!focusShown} />
@@ -671,28 +683,19 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
     <main ref={mainRef} aria-hidden={focusRoot || undefined} className="mobile-main" tabIndex={-1} {...(screenMotion ? { 'data-motion': screenMotion.kind, 'data-motion-phase': screenMotion.key % 2 } : {})}>
       {!workspaceVisible && <MobileConnectPage connection={connection} appIcon={hostAppearance.appIcon} panel={connectionPanel} onDetails={() => setSheet('connection')} />}
       {workspaceVisible && <>
-        <div hidden={showSession || secondary !== null}><MobileSpatialNavigation loadingLabel={focusShown ? 'Focus' : home === 'mote' ? 'Mote' : home === 'focus' ? 'Focus' : 'Space'} loadWhen={!showSession && secondary === null || focusVisible} focusTarget={focusTarget} fallbackTarget={focusShown ? focusTarget : null} focusVisible={focusVisible} focusSelected={focusSelected} openFocusSession={openFocusSession} onLoadReturn={returnToConversation} onCreateAgent={createAgent} visible={exposed && !showSession && secondary === null} home={home} client={client} connected={connected} openSession={openSession} onPresentation={attention.publish} needsYou={needsYou} openMainAgent={openMainAgent} openProfile={openProfile} onBackChange={registerSpatialBack}
+        <div className="mobile-spatial-host" hidden={showSession || secondary !== null}><MobileSpatialNavigation wide={wideShell} loadingLabel={focusShown ? 'Focus' : home === 'mote' ? 'Mote' : home === 'focus' ? 'Focus' : 'Space'} loadWhen={!showSession && secondary === null || focusVisible} focusTarget={focusTarget} fallbackTarget={focusShown ? focusTarget : null} focusVisible={focusVisible} focusSelected={focusSelected} openFocusSession={openFocusSession} onLoadReturn={returnToConversation} onCreateAgent={createAgent} visible={exposed && !showSession && secondary === null} home={home} client={client} connected={connected} openSession={openSession} onPresentation={attention.publish} needsYou={needsYou} openMainAgent={openMainAgent} openProfile={openProfile} onBackChange={registerSpatialBack}
           recentMoteSpaceId={recentMoteSpaceId} onSelectMote={selectMote}
           initialContext={spatialContext} onContextChange={updateSpatialContext} openHttpLink={openBrowserHttpLink} /></div>
-        <div hidden={showSession || secondary !== 'topics' || Boolean(source && source.kind !== 'topic')}><MobileTopicsSurface loadWhen={!showSession && secondary === 'topics' && (!source || source.kind === 'topic')} onLoadReturn={returnToConversation} rpc={rpc} visible={exposed && !showSession && secondary === 'topics' && (!source || source.kind === 'topic')} topicId={topicId}
+        <div className="mobile-topics-host" data-wide={wideShell || undefined} data-source-active={topicSourceActive || undefined} hidden={showSession || secondary !== 'topics'}><div className="mobile-topics-directory-host" hidden={topicSourceActive && !wideShell}><MobileTopicsSurface wide={wideShell} sourceActive={topicSourceActive} onNavigate={navigateTopics} loadWhen={!showSession && secondary === 'topics' && (wideShell || !topicSourceActive)} onLoadReturn={returnToConversation} rpc={rpc} visible={exposed && !showSession && secondary === 'topics' && (wideShell || !topicSourceActive)} topicId={topicId}
           client={client} connected={connected} {...(topicsRoute.knowledge ? { initialKnowledge: topicsRoute.knowledge } : {})} onKnowledgeChange={updateKnowledgeReference}
           initialContext={topicsRoute.context} onContextChange={updateTopicsContext}
           {...(source?.kind === 'topic' ? { onLeaveTopic: leaveSource, topicBackLabel: '返回知识' } : {})}
           onOpenTopic={topic => updateTopicsContext({ ...topicsRoute.context, topicId: topic.topicId, mode: 'discussion' })} openSource={openSource} openHttpLink={openBrowserHttpLink} onBackChange={registerTopicsBack}
           renderWorkface={(topic, visible) => <MobileZoneWorkface loadWhen={visible} onLoadReturn={returnToConversation} key={topic.topicId} client={client} zoneId={topic.zoneId} name={topic.title} visible={visible} onCreateAgent={createAgent}
-            {...(source?.kind === 'topic' && source.topicId === topic.topicId ? { tabId: source.chatId, regionId: source.threadId } : {})} openSession={openSession} />} /></div>
+            {...(source?.kind === 'topic' && source.topicId === topic.topicId ? { tabId: source.chatId, regionId: source.threadId } : {})} openSession={openSession} />} /></div><div className="mobile-source-host" hidden={!topicSourceActive}>{topicsSourceContent}</div></div>
         <div hidden={showSession || secondary !== 'survey'}><MobileSurveySurface loadWhen={!showSession && secondary === 'survey'} onLoadReturn={returnToConversation} client={client} connected={connected} visible={exposed && !showSession && secondary === 'survey'} openSession={openSession}
           openTopic={openSurveyTopic} initialContext={surveyContext} onContextChange={updateSurveyContext} onBackChange={registerSurveyBack} openHttpLink={openBrowserHttpLink} /></div>
-        {source && source.kind !== 'topic' && <div hidden={showSession || secondary !== 'topics'}>
-          {source.kind === 'space' || source.kind === 'survey' ? <>
-            <button className="mobile-text-button" onClick={leaveSource}><ThemeNavigationBackIcon size={16} />返回知识</button>
-            <MobileZoneWorkface loadWhen={!showSession && secondary === 'topics'} onLoadReturn={returnToConversation} key={source.zoneId} client={client} zoneId={source.zoneId} name="来源工作面" visible={exposed && !showSession && secondary === 'topics'} tabId={source.tabId} regionId={source.regionId} openSession={openSession} />
-          </> : source.kind === 'file' || source.kind === 'note' || source.kind === 'notebook' ? <MobileTopicSource loadWhen={!showSession && secondary === 'topics'} onLoadReturn={returnToConversation} source={source} rpc={rpc} onBack={leaveSource} openHttpLink={openBrowserHttpLink}
-            visible={exposed && !showSession && secondary === 'topics'} onBackChange={registerSourceBack}
-            {...(sourceReference ? { initialReference: sourceReference } : {})} onReferenceChange={updateSourceReference}
-            openScope={scope => { openSource({ kind: 'space', zoneId: scope.zoneId }) }} /> : null}
-        </div>}
-        <div hidden={showSession || secondary !== 'goals'}><MobileGoalsSurface loadWhen={!showSession && secondary === 'goals'} onLoadReturn={returnToConversation} client={client} connected={connected} visible={exposed && !showSession && secondary === 'goals'} openSession={openSession} onBackChange={registerGoalsBack}
+        <div className="mobile-goals-host" hidden={showSession || secondary !== 'goals'}><MobileGoalsSurface wide={wideShell} loadWhen={!showSession && secondary === 'goals'} onLoadReturn={returnToConversation} client={client} connected={connected} visible={exposed && !showSession && secondary === 'goals'} openSession={openSession} onBackChange={registerGoalsBack}
           context={goalsContext} onContextChange={updateGoalsContext} copyText={platform.copyText} /></div>
       </>}
       <section className="mobile-goal-panel" hidden={!workspaceVisible || !showSession || !showGoalWork}>

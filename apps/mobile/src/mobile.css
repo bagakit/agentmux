@@ -560,7 +560,14 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-focus-facet .mobile-agent-row__open[aria-current="true"] .mobile-row-title strong { font-weight: 700; }
 
 /* Keep long directory rows readable without shrinking the wide shell and its navigation. */
-.mobile-app[data-wide-shell]:not([data-wide-workface]) .mobile-spatial-panel { width: 100%; max-width: 720px; margin-inline: auto; }
+.mobile-app[data-wide-shell]:not([data-wide-workface]) .mobile-spatial-panel:not(.mobile-focus-facet):not([data-wide-space]) { width: 100%; max-width: 720px; margin-inline: auto; }
+
+/* Fixed hosts keep the original editors and readers in place through rotation. */
+.mobile-goals-host, .mobile-topics-host, .mobile-topics-directory-host, .mobile-spatial-host { height: 100%; min-height: 0; min-width: 0; }
+.mobile-topics-host[data-wide][data-source-active] { display: grid; grid-template-columns: 272px minmax(0, 1fr); overflow: hidden; }
+.mobile-topics-host[data-wide][data-source-active] > .mobile-topics-directory-host { overflow: hidden; border-right: 1px solid var(--line-soft); }
+.mobile-source-host, .mobile-topic-source-content { height: 100%; min-width: 0; min-height: 0; }
+.mobile-source-host { overflow-y: auto; overscroll-behavior: contain; }
 
 /* The original More owner stays mounted while its position child is in front. */
 .mobile-sheet--underlay, .mobile-sheet-backdrop--underlay { visibility: hidden; pointer-events: none; }

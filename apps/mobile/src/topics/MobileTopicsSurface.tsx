@@ -15,6 +15,7 @@ const ThemeNavigationSubmenuIcon = semanticIconComponent('navigation.submenu')
 const ThemeObjectTopicIcon = semanticIconComponent('object.topic')
 
 export type MobileTopicsSurfaceProps = { rpc: TopicsRpc; visible?: boolean; topicId?: string | null; onOpenTopic(topic: KnowledgeTopic): void | Promise<void>;
+  wide?: boolean; sourceActive?: boolean; onNavigate?(): void;
   client?: AgentMuxHostedClient | null; connected?: boolean;
   initialKnowledge?: MobileKnowledgeReference; onKnowledgeChange?(reference: MobileKnowledgeReference): void;
   renderWorkface(topic: KnowledgeTopic, visible: boolean): ReactNode; openSource(source: TopicKnowledgeSource): void | Promise<void>;
@@ -24,7 +25,7 @@ export type MobileTopicsSurfaceProps = { rpc: TopicsRpc; visible?: boolean; topi
 /** Presentation references only; all category and Topic facts still come from their original owner. */
 export type MobileTopicsContext = { categoryId: string | null; topicId: string | null; mode: 'discussion' | 'knowledge' }
 /** Content discovery only; the host callback owns exact workface navigation and lifecycle. */
-export function MobileTopicsSurface({ rpc, client, connected, onOpenTopic, renderWorkface, openSource, openHttpLink, onBackChange, initialContext, onContextChange, initialKnowledge, onKnowledgeChange, onLeaveTopic, topicBackLabel, visible = true, topicId }: MobileTopicsSurfaceProps) {
+export function MobileTopicsSurface({ rpc, client, connected, onOpenTopic, renderWorkface, openSource, openHttpLink, onBackChange, initialContext, onContextChange, initialKnowledge, onKnowledgeChange, onLeaveTopic, topicBackLabel, visible = true, topicId, wide = false, sourceActive = false, onNavigate }: MobileTopicsSurfaceProps) {
   const initial = useRef(initialContext ?? { categoryId: null, topicId: null, mode: 'discussion' as const })
   const [categories, setCategories] = useState<TopicCategory[]>([]), [categoryId, setCategoryId] = useState(initial.current.categoryId)
   const category = categories.find(value => value.categoryId === categoryId) ?? null
@@ -44,6 +45,10 @@ export function MobileTopicsSurface({ rpc, client, connected, onOpenTopic, rende
   const [categoryIssue, setCategoryIssue] = useState(''), [openIssue, setOpenIssue] = useState(''), [loading, setLoading] = useState(false), [refresh, setRefresh] = useState(0)
   const [knowledgeBack, setKnowledgeBack] = useState<{ scopeId: string; back: () => void } | null>(null)
   const [organizationBack, setOrganizationBack] = useState<(() => void) | null>(null)
+  const directoryVisible = visible && !organizationBack && mode === 'topics' && (wide || !inTopic) && (wide || !sourceActive)
+  // The same catalog also supplies the current category heading and organization actions.
+  const metadataVisible = visible && (wide || !sourceActive)
+  const readingVisible = visible && !organizationBack && !sourceActive
   const leaveTopicRef = useRef(onLeaveTopic); leaveTopicRef.current = onLeaveTopic
   const reportOrganizationBack = useCallback((back: (() => void) | null) => setOrganizationBack(() => back), [])
   const reportKnowledgeBack = useCallback((scopeId: string, back: (() => void) | null) => {
@@ -53,17 +58,18 @@ export function MobileTopicsSurface({ rpc, client, connected, onOpenTopic, rende
   const backToDiscussion = useCallback(() => setMode('topics'), [])
   const backToCategory = useCallback(() => {
     if (leaveTopicRef.current) { leaveTopicRef.current(); return }
+    onNavigate?.()
     setSelectedTopicId(null); setMode('topics')
-  }, [])
+  }, [onNavigate])
   const backToAllCategories = useCallback(() => { setCategoryId(null); setQuery('') }, [])
   const activeScope = selectedTopicId ?? 'all-topics'
   const activeBack = organizationBack ?? (mode === 'knowledge' ? knowledgeBack && knowledgeBack.scopeId === activeScope ? knowledgeBack.back : backToDiscussion
     : inTopic ? backToCategory : categoryId ? backToAllCategories : null)
   useLayoutEffect(() => {
-    if (!visible || !onBackChange) return
+    if (!visible || sourceActive || !onBackChange) return
     onBackChange(activeBack)
     return () => onBackChange(null)
-  }, [visible, onBackChange, activeBack])
+  }, [visible, sourceActive, onBackChange, activeBack])
   const [deepLinkIssue, setDeepLinkIssue] = useState(''), [deepLinkRetry, setDeepLinkRetry] = useState(0)
   useEffect(() => {
     if (!initialContext) return
@@ -78,7 +84,7 @@ export function MobileTopicsSurface({ rpc, client, connected, onOpenTopic, rende
     if (!initialContext || initialContext.topicId !== topicId) setMode('topics')
   }, [topicId])
   useEffect(() => {
-    if (!visible || !selectedTopicId || currentTopic && deepLinkRetry === 0) return
+    if (!readingVisible || !selectedTopicId || currentTopic && deepLinkRetry === 0) return
     let live = true
     const target = selectedTopicId
     void rpc('topic.inspect', { topicId: target }).then(result => {
@@ -90,19 +96,19 @@ export function MobileTopicsSurface({ rpc, client, connected, onOpenTopic, rende
       setDeepLinkIssue(result.unavailable.map(item => `${item.message} ${item.recovery}`).join('\n'))
     }).catch(error => { if (live && contextRef.current.topicId === target) setDeepLinkIssue(`Topic 读取失败：${error instanceof Error ? error.message : String(error)}。可以重试。`) })
     return () => { live = false }
-  }, [rpc, selectedTopicId, visible, deepLinkRetry])
+  }, [rpc, selectedTopicId, readingVisible, deepLinkRetry])
   useEffect(() => { onContextChange?.(contextRef.current) }, [categoryId, selectedTopicId, mode, onContextChange])
   useEffect(() => {
-    if (!visible) return
+    if (!metadataVisible) return
     let live = true; setLoading(true)
     void rpc('topic.category.ls', {}).then(result => {
       if (live) { setCategories(previous => result.unavailable.length && !result.categories.length ? previous : result.categories); setCategoryIssue(result.unavailable.map(value => `${value.message} ${value.recovery}`).join('\n')) }
     }).catch(error => { if (live) setCategoryIssue(`分类读取失败：${error instanceof Error ? error.message : String(error)}。可以重试。`) })
       .finally(() => { if (live) setLoading(false) })
     return () => { live = false }
-  }, [rpc, refresh, visible])
+  }, [rpc, refresh, metadataVisible])
   useEffect(() => {
-    if (!visible || !categoryId) return
+    if (!metadataVisible || !categoryId) return
     let live = true
     const requestedCategoryId = categoryId
     setTopicLoading(requestedCategoryId)
@@ -111,8 +117,9 @@ export function MobileTopicsSurface({ rpc, client, connected, onOpenTopic, rende
     }).catch(error => { if (live) setTopicIssues(previous => ({ ...previous, [requestedCategoryId]: `Topic 读取失败：${error instanceof Error ? error.message : String(error)}。可以重试。` })) })
       .finally(() => { if (live) setTopicLoading(null) })
     return () => { live = false }
-  }, [rpc, categoryId, refresh, visible])
+  }, [rpc, categoryId, refresh, metadataVisible])
   function open(value: KnowledgeTopic) {
+    onNavigate?.()
     setDeepLinkIssue('')
     setSelectedTopicId(value.topicId); setMode('topics'); setVisited(values => values.some(item => item.topicId === value.topicId) ? values.map(item => item.topicId === value.topicId ? value : item) : [...values, value])
     const failed = (error: unknown) => setOpenIssue(`Topic 打开没有完成：${error instanceof Error ? error.message : String(error)}。`)
@@ -122,7 +129,7 @@ export function MobileTopicsSurface({ rpc, client, connected, onOpenTopic, rende
   const matchesCategory = (value: TopicCategory) => value.title.toLocaleLowerCase().includes(normalizedQuery)
   const matchesTopic = (value: KnowledgeTopic) => `${value.title} ${value.summary}`.toLocaleLowerCase().includes(normalizedQuery)
   const matchingCategories = categories.filter(value => matchesCategory(value) || (topicDirectories[value.categoryId] ?? []).some(matchesTopic))
-  return <MobileNoticeScope owner={client} identity={[categoryId,topicId]}><section className="mobile-topics" aria-label="Topics" hidden={!visible}>
+  return <MobileNoticeScope owner={client} identity={[categoryId,topicId]}><section className="mobile-topics mobile-topics-primary" aria-label="Topics" hidden={!visible}>
     <header className="mobile-topics-actions mobile-page-header">
       <MobileHeaderMenu hidden={Boolean(inTopic || categoryId)} />
       {inTopic ? <button aria-label={topicBackLabel ?? '返回分类目录'} onClick={backToCategory}>{topicBackLabel ?? '返回'}</button>
@@ -130,12 +137,12 @@ export function MobileTopicsSurface({ rpc, client, connected, onOpenTopic, rende
       <div className="mobile-topics-heading">{(inTopic || category) && <small>{category?.title ?? 'Topics'}</small>}<h1>{inTopic ? currentTopic?.title ?? 'Topic 未确认' : 'Topics'}</h1></div>
       {visible && <MobileAvatarNoticeOutlet header />}
     </header>
-    <MobileTopicOrganization rpc={rpc} categories={categories} category={category} topic={currentTopic} visible={visible} onBackChange={reportOrganizationBack} onRefresh={() => setRefresh(value => value + 1)} onChanged={() => setRefresh(value => value + 1)} />
+    <MobileTopicOrganization rpc={rpc} categories={categories} category={category} topic={currentTopic} visible={visible && !sourceActive} onBackChange={reportOrganizationBack} onRefresh={() => setRefresh(value => value + 1)} onChanged={() => setRefresh(value => value + 1)} />
     {[categoryIssue, openIssue].filter(Boolean).map((value, index) => <MobileNotice identity={[categoryId,topicId,value]} key={index} className="mobile-topics-issue" role="status">{value}</MobileNotice>)}
     {deepLinkIssue && <MobileNotice identity={[topicId,deepLinkIssue]} className="mobile-topics-issue" role="status">{deepLinkIssue}<button onClick={() => setDeepLinkRetry(value => value + 1)}>重试读取 Topic</button></MobileNotice>}
-    <div hidden={Boolean(organizationBack)}>
-    <div className="mobile-topics-tabs" role="group" aria-label="Topic 内容"><button aria-pressed={mode === 'topics'} onClick={() => setMode('topics')}>{inTopic ? '讨论' : 'Topics'}</button><button aria-pressed={mode === 'knowledge'} onClick={() => setMode('knowledge')}>知识</button></div>
-    <div hidden={inTopic || mode !== 'topics'}>
+    <div className="mobile-topics-tabs" hidden={Boolean(organizationBack) || sourceActive && !wide} role="group" aria-label="Topic 内容"><button aria-pressed={mode === 'topics'} onClick={() => { onNavigate?.(); setMode('topics') }}>{inTopic ? '讨论' : 'Topics'}</button><button aria-pressed={mode === 'knowledge'} onClick={() => { onNavigate?.(); setMode('knowledge') }}>知识</button></div>
+    <div className="mobile-topics-workspace" data-wide={wide || undefined} data-source-active={sourceActive || undefined} hidden={Boolean(organizationBack)}>
+    <div className="mobile-topics-directory" aria-label="Topic 导航" hidden={!directoryVisible}>
       <label className="mobile-topics-search"><TextInput aria-label="查找 Topic 或分类" value={query} placeholder="查找 Topic 或分类" onChange={event => setQuery(event.target.value)} /></label>
       <ul className="mobile-topics-list mobile-topics-tree" aria-label="Topic 分类目录">{matchingCategories.map(value => {
         const expanded = categoryId === value.categoryId
@@ -149,7 +156,7 @@ export function MobileTopicsSurface({ rpc, client, connected, onOpenTopic, rende
           {expanded && <div className="mobile-topics-branch" data-topic-branch={value.categoryId}>
             {issue && <details className="mobile-topics-service"><summary>此分类更新未确认</summary><p className="mobile-topics-issue" role="status">{issue}</p><button type="button" onClick={() => setRefresh(current => current + 1)}>重试此分类</button></details>}
             <ul aria-label={`${value.title}的 Topics`}>{matchingTopics.map(child => <li key={child.topicId}>
-              <button className="mobile-topics-topic" onClick={() => open(child)}><ThemeObjectTopicIcon size={15} aria-hidden="true" /><span><strong>{child.title}</strong><small>{child.readError ?? child.summary}</small></span></button>
+              <button className="mobile-topics-topic" aria-current={selectedTopicId === child.topicId ? 'page' : undefined} onClick={() => open(child)}><ThemeObjectTopicIcon size={15} aria-hidden="true" /><span><strong>{child.title}</strong><small>{child.readError ?? child.summary}</small></span></button>
             </li>)}</ul>
             {topicLoading === value.categoryId && <p className="mobile-topics-empty" role="status">读取此分类的 Topics…</p>}
             {topicLoading !== value.categoryId && !matchingTopics.length && <p className="mobile-topics-empty">{issue ? '目录还没确认。' : children.length ? '没有匹配的 Topic。' : '此分类暂无已确认 Topic。'}</p>}
@@ -159,13 +166,13 @@ export function MobileTopicsSurface({ rpc, client, connected, onOpenTopic, rende
       {!loading && !matchingCategories.length && <p className="mobile-topics-empty">{categoryIssue ? '目录还没确认。' : categories.length ? '没有匹配的分类或已读取 Topic。' : '暂无已确认分类。'}</p>}
       {categoryId && !category && !loading && <MobileNotice identity={[categoryId]} className="mobile-topics-issue" role="status">还没确认这个分类。可刷新目录或返回所有分类。</MobileNotice>}
     </div>
-    <div hidden={mode !== 'knowledge' || inTopic}><ScopedKnowledge reportBack={reportKnowledgeBack} reportReference={reportKnowledgeReference} client={client ?? null} {...(connected !== undefined ? { connected } : {})}
+    <div className="mobile-topics-knowledge-scope" hidden={mode !== 'knowledge' || inTopic || sourceActive && !wide}><ScopedKnowledge wide={wide} sourceActive={sourceActive} {...(onNavigate ? { onNavigate } : {})} reportBack={reportKnowledgeBack} reportReference={reportKnowledgeReference} client={client ?? null} {...(connected !== undefined ? { connected } : {})}
       {...(initialContext?.topicId === null && initialKnowledge ? { initialReference: initialKnowledge } : {})}
       visible={visible && !organizationBack && mode === 'knowledge' && !inTopic} rpc={rpc} title="All Topics" openSource={openSource} {...(openHttpLink ? { openHttpLink } : {})} /></div>
-    {visited.map(value => <div key={value.topicId} hidden={mode !== 'knowledge' || selectedTopicId !== value.topicId}><ScopedKnowledge reportBack={reportKnowledgeBack} reportReference={reportKnowledgeReference} client={client ?? null} {...(connected !== undefined ? { connected } : {})}
+    {visited.map(value => <div key={value.topicId} className="mobile-topics-knowledge-scope" hidden={mode !== 'knowledge' || selectedTopicId !== value.topicId || sourceActive && !wide}><ScopedKnowledge wide={wide} sourceActive={sourceActive} {...(onNavigate ? { onNavigate } : {})} reportBack={reportKnowledgeBack} reportReference={reportKnowledgeReference} client={client ?? null} {...(connected !== undefined ? { connected } : {})}
       {...(initialKnowledge?.topicId === value.topicId ? { initialReference: initialKnowledge } : {})}
       visible={visible && !organizationBack && mode === 'knowledge' && selectedTopicId === value.topicId} rpc={rpc} topicId={value.topicId} title={value.title} openSource={openSource} {...(openHttpLink ? { openHttpLink } : {})} /></div>)}
-    {visited.map(value => <div key={value.topicId} className="mobile-topic-workface" hidden={selectedTopicId !== value.topicId || mode !== 'topics'}>{renderWorkface(value, visible && selectedTopicId === value.topicId && mode === 'topics' && !organizationBack)}</div>)}
+    {visited.map(value => <div key={value.topicId} className="mobile-topic-workface" hidden={selectedTopicId !== value.topicId || mode !== 'topics' || sourceActive}>{renderWorkface(value, readingVisible && selectedTopicId === value.topicId && mode === 'topics')}</div>)}
     </div>
   </section></MobileNoticeScope>
 }
