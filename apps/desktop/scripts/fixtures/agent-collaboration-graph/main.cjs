@@ -51,7 +51,8 @@ app.whenReady().then(async () => {
     const key = async (value, modifiers = 0) => { for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key: value, code: value === 'a' ? 'KeyA' : value, modifiers, ...(value === 'Enter' ? { windowsVirtualKeyCode: 13, ...(type === 'keyDown' ? { text: '\r', unmodifiedText: '\r' } : {}) } : {}), ...(type === 'keyDown' && value === 'a' && modifiers === 4 ? { commands: ['selectAll'] } : type === 'keyDown' && value === 'Backspace' ? { commands: ['deleteBackward'] } : {}) }) }
     const frame = async (name, { motion = false, layoutOwner, immediateObservation } = {}) => {
       if (scenario === 'list-feedback' && name === 'workbench-entry') return
-      if (immediateObservation) assert.ok(scenario === 'list-feedback' && name === 'list-feedback-wide-dark-message-middle' && motion, 'Only the declared 120ms List middle observes immediately around real capturePage')
+      if (immediateObservation) assert.ok(scenario === 'list-feedback' && motion && (name === 'list-feedback-wide-dark-message-middle' ||
+        process.env.COLLABORATION_CAPTURE_LIST_COST_ONLY === '1' && require('./list-feedback-cost.cjs').visualLabels.includes(name)), 'Only the declared List middle or post-trace pending frames observe immediately around real capturePage')
       else await settle()
       if (layoutOwner) {
         assert.equal(scenario, 'region-headers', 'Only the declared settled-heading fold uses the delivered layout owner')

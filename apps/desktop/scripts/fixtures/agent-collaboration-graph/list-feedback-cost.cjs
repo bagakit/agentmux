@@ -5,6 +5,45 @@ const { createHash } = require('node:crypto')
 const { gzipSync } = require('node:zlib')
 const { summarize, unionMS } = require('./dispatch-motion.cjs')
 const scene = require('./list-feedback.cjs')
+const visualLabels = ['list-feedback-pending-wide-dark', 'list-feedback-pending-narrow-light', 'list-feedback-pending-narrow-light-reduce']
+
+function pendingVisualObservation(probe, detailProbe, subjects, operationId) {
+  const subject = subjects.sender, snapshot = probe(subjects)
+  const card = document.querySelector(`.focus-context-card[data-focus-agent-host=${JSON.stringify(subject.hostId)}][data-focus-agent-session=${JSON.stringify(subject.agentSessionId)}]`)
+  const item = [...card?.querySelectorAll('.agent-operation-feedback__item') ?? []].find(value => value.querySelector('code')?.textContent === operationId)
+  const animation = item?.getAnimations({ subtree: true }).find(value => value.animationName === 'agent-operation-shine')
+  const timing = animation?.effect.getComputedTiming()
+  const status = item?.querySelector('[role="status"]')
+  return { snapshot, detail: detailProbe(subject, operationId), status: status ? { text: status.textContent, dataText: status.dataset.text } : null,
+    clock: animation ? { pending: animation.pending, state: animation.playState, currentTime: animation.currentTime, startTime: animation.startTime,
+      duration: timing.duration, progress: timing.progress, iteration: timing.currentIteration, iterations: timing.iterations === Infinity ? 'infinite' : timing.iterations } : null }
+}
+
+function movingPending(before, after) {
+  const first = before?.clock, second = after?.clock
+  return first?.pending === false && second?.pending === false && first.state === 'running' && second.state === 'running' &&
+    Number.isFinite(first.startTime) && first.startTime === second.startTime && Number.isFinite(first.currentTime) && second.currentTime > first.currentTime &&
+    Number.isFinite(first.duration) && first.duration > 0 && first.duration === second.duration && first.iterations === 'infinite' && second.iterations === 'infinite' &&
+    Number.isInteger(first.iteration) && first.iteration >= 0 && first.iteration === second.iteration &&
+    second.progress > .35 && second.progress < .65 && after.snapshot.at > before.snapshot.at && after.snapshot.timeline > before.snapshot.timeline
+}
+
+function verifyPendingSnapshot(value, data, narrow, reduced) {
+  assert.equal(value.snapshot.hidden, false); assert.equal(value.snapshot.reduced, reduced)
+  assert.equal(value.snapshot.theme, narrow ? 'light' : 'dark'); assert.deepEqual(value.snapshot.viewport, narrow ? [620, 820] : [1440, 900])
+  const detail = value.detail
+  assert.equal(detail?.operationId, data.pending.operationId); assert.equal(detail.phase, 'pending')
+  assert.equal(detail.hostId, data.pending.control.hostId); assert.equal(detail.agentSessionId, data.pending.control.agentSessionId)
+  assert.equal(detail.open, false); assert.equal(detail.readerPresent, false)
+  assert.ok(detail.summary?.visible && detail.summary.insideClip && Number(detail.summary.opacity) > 0 && detail.summary.hits.length === 9 && detail.summary.hits.every(point => point.hit))
+  assert.ok(value.status?.text.trim()); assert.equal(value.status.dataText, value.status.text)
+  if (reduced) {
+    assert.equal(value.clock, null)
+    const operation = value.snapshot.cards.sender?.operations.find(item => item.operationId === data.pending.operationId)
+    assert.ok(operation && operation.animations.every(animation => animation.state !== 'running'))
+  }
+  else assert.ok(value.clock?.pending === false && value.clock.state === 'running' && value.clock.progress > 0 && value.clock.progress < 1)
+}
 
 function observe(subjects) {
   const snapshot = scene.observe(subjects)
@@ -43,7 +82,7 @@ function traceWindows(events, native) {
   })
 }
 
-function verify(data) {
+function verifyCosts(data) {
   assert.equal(data?.schema, 'agentmux.focus-list-feedback-cost.v1')
   assert.equal(data.costs.length, 8)
   assert.deepEqual(data.retention.map(item => item.sessions), [8, 128, 384])
@@ -83,10 +122,40 @@ function verify(data) {
   }
 }
 
+function verify(data, captured) {
+  verifyCosts(data)
+  assert.deepEqual(captured.map(frame => frame.label), data.baseline ? [] : visualLabels)
+  if (data.baseline) return
+  assert.equal(data.pendingVisuals?.length, visualLabels.length)
+  for (const [index, visual] of data.pendingVisuals.entries()) {
+    assert.equal(visual.label, visualLabels[index]); assert.equal(captured[index].file, visual.label + '.png')
+    const narrow = index > 0, reduced = index === 2
+    assert.deepEqual(captured[index].viewport, narrow ? [620, 820] : [1440, 900])
+    verifyPendingSnapshot(visual.after, data, narrow, reduced); verifyPendingSnapshot(visual.captured, data, narrow, reduced)
+    if (!reduced) {
+      assert.ok(movingPending(visual.before, visual.after), 'The original visible pending light must advance into its native middle before capture')
+      assert.equal(visual.captured.clock.startTime, visual.after.clock.startTime)
+      assert.equal(visual.captured.clock.iteration, visual.after.clock.iteration)
+      assert.ok(visual.captured.clock.progress > .35 && visual.captured.clock.progress < .65)
+      assert.ok(visual.captured.clock.currentTime >= visual.after.clock.currentTime)
+    }
+  }
+  assert.equal(data.visualStop.calls.length, 1); assert.equal(data.visualStop.calls[0].operationId, data.pending.operationId)
+  assert.deepEqual(data.visualStop.calls[0].control, data.pending.control)
+  assert.equal(data.visualStop.calls[0].settled, false)
+  const operation = Object.values(data.visualStop.operations).find(item => item.operationId === data.pending.operationId)
+  assert.equal(operation?.phase, 'pending'); assert.deepEqual(operation.control, data.pending.control)
+  for (const field of ['sameTabObjects', 'sameDrafts', 'draftMounted', 'sameDraft']) assert.equal(data.visualFacts[field], true)
+  assert.ok(data.beforeVisualFacts.tabDifference?.after && data.beforeVisualFacts.layoutDifference?.after)
+  for (const field of ['tabDifference', 'layoutDifference']) assert.deepEqual(data.visualFacts[field], data.beforeVisualFacts[field])
+  for (const field of ['originalRun', 'draft', 'storedDraft', 'range']) assert.deepEqual(data.visualFacts[field], data.original[field])
+  assert.deepEqual(data.visualFacts.controls, [...data.original.controls, 'stop'])
+}
+
 module.exports = async function listFeedbackCost(ctx) {
-  const { win, result, read, click, key, check, facts, until, pause, settle, rect, evidence } = ctx
+  const { win, result, read, click, key, check, facts, until, pause, settle, frame, rect, evidence } = ctx
   const data = result.listFeedbackCost = { schema: 'agentmux.focus-list-feedback-cost.v1', baseline: process.env.COLLABORATION_CAPTURE_LIST_BASELINE === '1', costs: [], retention: [],
-    boundary: 'Eight repeated Native traces only; no PNGs during trace. Original App List and one original confirmed pending Stop promise/control/Run remain. Old source has no List A2A feedback and may clip its Stop summary; candidate adds visible finite feedback and fixes sibling layout. Membership, output and pending intent are comparable, not pixel/geometry-equivalent UI. Differences are whole declared presentation-slice costs, never pure animation improvement, live PTY/Provider execution, aesthetic or CPU/GPU time.' }
+    boundary: 'Eight repeated Native traces, with three candidate pending visual frames only after all traces; no PNGs during trace. Original App List and one original confirmed pending Stop promise/control/Run remain. Old source has no List A2A feedback and may clip its Stop summary; candidate adds visible finite feedback and fixes sibling layout. Membership, output and pending intent are comparable, not pixel/geometry-equivalent UI. Differences are whole declared presentation-slice costs, never pure animation improvement, live PTY/Provider execution, aesthetic or CPU/GPU time. Document visibility is not qualified by the post-trace frames.' }
   data.subjects = await read('window.graphCapture.listCostSubjects()'); data.original = await facts(); data.initialStopStatus = await read('window.graphCapture.listStopStatus()')
   assert.equal(data.initialStopStatus.calls.length, 0)
   const probe = `(${scene.observe.toString()})`
@@ -112,9 +181,38 @@ module.exports = async function listFeedbackCost(ctx) {
       for (let repeat = 0; repeat < 2; repeat++) await trace(total, 2, repeat)
     }
     for (let repeat = 0; repeat < 2; repeat++) await trace(384, 4, repeat)
-    verify(data)
+    verifyCosts(data)
   })
   if (result.failures.length) throw Error('List Native cost failed; do not append another arm')
+  if (!data.baseline) await check('list-native-pending-visuals', async () => {
+    data.beforeVisualFacts = await facts(); data.pendingVisuals = []
+    const visualCode = `(${pendingVisualObservation.toString()})(${probe},${scene.detailObservation.toString()},${JSON.stringify(data.subjects)},${JSON.stringify(data.pending.operationId)})`
+    for (const [index, label] of visualLabels.entries()) {
+      const narrow = index > 0, reduced = index === 2
+      await read(`window.graphCapture.appearance(${JSON.stringify(narrow ? 'light' : 'dark')})`)
+      win.setContentSize(...(narrow ? [620, 820] : [1440, 900]))
+      await click('[aria-label="Search contexts"]')
+      await read(`(()=>{const subject=${JSON.stringify(data.subjects.sender)},card=document.querySelector('.focus-context-card[data-focus-agent-host='+JSON.stringify(subject.hostId)+'][data-focus-agent-session='+JSON.stringify(subject.agentSessionId)+']');const item=[...card.querySelectorAll('.agent-operation-feedback__item')].find(value=>value.querySelector('code')?.textContent===${JSON.stringify(data.pending.operationId)});item.querySelector('summary').scrollIntoView({block:'nearest',inline:'nearest',behavior:'instant'})})()`)
+      await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: reduced ? 'reduce' : 'no-preference' }] })
+      try {
+        await pause(180); await settle()
+        const visual = { label }
+        if (reduced) visual.after = await read(visualCode)
+        else await until('same original pending light advances into its visible middle', async () => {
+          visual.before = await read(visualCode); await settle(); visual.after = await read(visualCode)
+          return movingPending(visual.before, visual.after) && visual.after.clock.progress > .4 && visual.after.clock.progress < .6
+        })
+        verifyPendingSnapshot(visual.after, data, narrow, reduced)
+        visual.captured = await frame(label, { motion: true, immediateObservation: visualCode })
+        data.pendingVisuals.push(visual)
+      } finally {
+        await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] })
+      }
+    }
+    data.visualStop = await read('window.graphCapture.listStopStatus()'); data.visualFacts = await facts()
+    verify(data, result.frames)
+  })
+  if (result.failures.length) throw Error('List pending visual refresh failed; preserve its original evidence')
 
   async function selectProject() {
     const label = await read(`(()=>{const frame=[...document.querySelectorAll('[data-project-group-key]')].find(element=>element.querySelector('[data-project-id="fixture-protocol"]'));const button=frame?.querySelector('[data-focus-project-scope-control]')??document.querySelector('[data-project-id="fixture-protocol"] [data-focus-project-scope-control]');if(!button)throw Error('Original Project scope button is absent');button.setAttribute('data-list-cost-scope','');button.scrollIntoView({block:'nearest',inline:'nearest',behavior:'instant'});return button.textContent})()`)
@@ -181,3 +279,4 @@ module.exports = async function listFeedbackCost(ctx) {
   }
 }
 module.exports.verify = verify
+module.exports.visualLabels = visualLabels
