@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { spatialCatalog, nameTargetKey, AGENTMUX_DISPLAY_LABEL_RESOURCE, type AgentMuxSpatialGraph } from '../../../packages/core/src/spatial-graph.js'
 import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner.js'
 import { createHostSpatialPresentation } from '../src/spatial-presentation.js'
+import { configuredAgentFallbackLabel } from '../src/presentation-configuration.js'
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 
@@ -31,6 +32,14 @@ it('the original scoped directory reads each selected Session once and no unrela
   expect(remote.agentPresentation).toMatchObject([{ agentSessionId: 'selected-agent', providerId: '', presenceUnknown: true }])
   expect(read).not.toHaveBeenCalled()
   expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it.each(['', '   '])('a blank confirmed project name (%j) keeps the configured Workspace label', confirmedProjectName => {
+  expect(configuredAgentFallbackLabel({
+    workspaces: [{ id: 'source-workspace', hostId: 'local', name: 'Configured Source resource', path: '/b/source', kind: 'folder' }],
+    executors: { codex: { providerId: 'codex', label: 'Original Codex' } }
+  }, { executorId: 'codex', providerId: 'codex', hostId: 'local', workspacePath: '/b/source' }, confirmedProjectName))
+    .toBe('Original Codex · Configured Source resource')
 })
 
 it('a foreign locator keeps the unique Source project name and manual name without changing its real cwd', async () => {
