@@ -88,6 +88,7 @@ const previewOf = file => evaluate(`mediaPlaybackProbe.preview(${JSON.stringify(
 const overlaps = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
 // A shown frame never covers the start disc: the disc is absent, has given way, or sits clear of the pointed unit.
 const discClear = state => !state.disc || state.disc.opacity === 0 || !overlaps(state.disc, state.box)
+const barOf = file => evaluate(`mediaPlaybackProbe.bar(${JSON.stringify(file)})`)
 const mainOf = file => evaluate(`mediaPlaybackProbe.main(${JSON.stringify(file)})`)
 const timelineOf = file => evaluate(`mediaPlaybackProbe.timeline(${JSON.stringify(file)})`)
 const watchState = () => evaluate('mediaPlaybackProbe.watchState()')
@@ -432,6 +433,9 @@ async function previewPhase(size) {
     const shortDisc = await until(() => previewOf(file), discClear, 1000)
     checks.previewShort.disc = shortDisc.value.disc
     assert.ok(shortDisc.ms !== null, 'The shrunken frame leaves the start disc uncovered: ' + JSON.stringify(shortDisc.value))
+    checks.previewShort.bar = await barOf(file)
+    assert.ok([/^Full screen$/, /^(Un)?mute$/].every(label => checks.previewShort.bar.some(item => label.test(item.label))), 'The short picture\'s bar keeps mute and full screen: ' + JSON.stringify(checks.previewShort.bar))
+    assert.ok(checks.previewShort.bar.every(item => item.inside && item.reached), 'Every control the short picture shows lies inside it and is reachable: ' + JSON.stringify(checks.previewShort.bar))
     await frame('preview-short-dark')
     await releasePreview(file, short)
     const tiny = await roomFor(70, 8)
@@ -445,6 +449,8 @@ async function previewPhase(size) {
     checks.previewTooShort = { room: tiny.room, decoder: timeOnly.decoder !== null, frame: timeOnly.frame, bubble: timeOnly.bubble, idle: timeOnly.idle, box: timeOnly.box, stage: tiny.stage, inset: tiny.inset,
       unclampedRight: timeOnly.box ? tinyCentre + (timeOnly.box.right - timeOnly.box.left) / 2 : null, pointer: tinyX, timeline: { left: tiny.left, width: tiny.width } }
     assert.ok(!timeOnly.decoder && !timeOnly.frame && timeOnly.bubble && !timeOnly.idle, 'Too short a Region points at the time only: ' + JSON.stringify(checks.previewTooShort))
+    // Recorded, not judged: which controls a picture this small can hold is still an open rule.
+    checks.previewTooShort.bar = await barOf(file)
     assert.ok(checks.previewTooShort.unclampedRight > tiny.stage.right - tiny.inset, 'Centred on the pointer the time would cross the side, so its stop is exercised: ' + JSON.stringify(checks.previewTooShort))
     assert.ok(timeOnly.box.left >= tiny.stage.left + tiny.inset - 0.5 && timeOnly.box.right <= tiny.stage.right - tiny.inset + 0.5, 'The time alone stays inside the picture with the inset: ' + JSON.stringify(checks.previewTooShort))
     await frame('preview-too-short-dark')

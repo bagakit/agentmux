@@ -897,6 +897,8 @@ describe('mounted player', () => {
       expect(block('.media-player__preview {')).toMatch(/left:\s*clamp\(calc\(var\(--media-preview-lo[^;]*var\(--media-preview-half\)[^;]*var\(--media-preview-x[^;]*calc\(var\(--media-preview-hi[^;]*var\(--media-preview-half\)/)
       expect(block('.media-player__preview {')).toMatch(/--media-preview-half:\s*calc\(var\(--media-bubble-ch/)
       expect(rules).toMatch(/\.media-player__preview\[data-frame\]\s*\{\s*--media-preview-half:\s*max\(calc\(var\(--media-preview-width\)\s*\/\s*2\)/)
+      // The video controls follow the picture's own width, which a short Region narrows below the player's.
+      expect(block('.media-player__stage {')).toMatch(/container-type:\s*inline-size/)
       // A shown frame never covers the start disc: the disc gives way.
       expect(rules).toMatch(/\.media-player:has\(\.media-player__preview\[data-frame\]\)\s*\.media-player__start\s*\{[^}]*opacity:\s*0/)
       expect(rules).toMatch(/\.media-player__preview:not\(\[data-frame\]\)\s*>\s*\.media-player__preview-frame\s*\{[^}]*visibility:\s*hidden/)

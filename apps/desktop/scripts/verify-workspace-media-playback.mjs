@@ -61,6 +61,7 @@ if (receiptOnly) {
   assert.ok(checks.frameCallbacks.length > 0, 'Frame callback records were taken')
   assert.ok(checks.sweepMain.longTaskControl.some(ms => ms >= 50), 'The long-task watch recorded its deliberate task')
   assert.equal(checks.previewEdge.disc?.opacity, 0, 'The start disc gave way to a frame lying over it')
+  assert.ok(checks.previewShort.bar?.some(item => item.label === 'Full screen') && checks.previewShort.bar.every(item => item.inside && item.reached), 'Every control of the short picture lay inside it and was reachable')
   assert.ok(checks.previewTooShort.unclampedRight > checks.previewTooShort.stage.right - checks.previewTooShort.inset, 'The time alone was stopped at the picture\'s side')
   assert.deepEqual(checks.drag.pauseAnnounced, ['Paused'], 'Since the drag began, the announcement watch heard only a pause outside it')
   for (const name of ['preview-first-dark', 'preview-mid-dark', 'preview-edge-dark', 'preview-narrow-dark', 'preview-short-dark', 'preview-too-short-dark', 'drag-held-dark', 'preview-reduced-dark'])

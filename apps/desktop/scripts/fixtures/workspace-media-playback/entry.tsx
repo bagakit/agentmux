@@ -199,6 +199,15 @@ const probe = {
     return { currentTime: media.currentTime, seeking: media.seeking, readyState: media.readyState, paused: media.paused, ended: media.ended,
       disc: Boolean(region?.querySelector('.media-player__start')), playLabel: region?.querySelector('.media-player__bar button')?.getAttribute('aria-label') ?? null }
   },
+  /** Every shown control in the File's bar: whether it lies wholly inside the picture and a pointer there reaches it. */
+  bar(path: string) {
+    const region = regionOf(path)!, stage = region.querySelector('.media-player__stage')!.getBoundingClientRect()
+    return [...region.querySelectorAll<HTMLElement>('.media-player__bar button')].filter(button => getComputedStyle(button).display !== 'none').map(button => {
+      const box = button.getBoundingClientRect(), hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
+      return { label: button.getAttribute('aria-label'), left: box.left, right: box.right, stageRight: stage.right,
+        inside: box.width > 0 && box.left >= stage.left - 0.5 && box.right <= stage.right + 0.5, reached: hit === button || button.contains(hit) }
+    })
+  },
   facts() { const state = useAppStore.getState(); return { tabs: state.tabs, layouts: state.layouts, activeWorkspaceId: state.activeWorkspaceId } },
   /** What quitting the app does: commit the current workface to durable storage. */
   flush() { return prepareRendererUpdate('quit') },
