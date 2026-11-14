@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { readFile, writeFile, mkdir, mkdtemp, readdir, rm, stat } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, mkdtemp, readdir, rm, stat, symlink } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
@@ -17,35 +17,39 @@ const out = resolve('.local/browser-main-schema-bundle/proof')
 await mkdir(out, { recursive: true }); await rm(join(out, 'receipt.json'), { force: true })
 const configWork = await mkdtemp(join(out, 'config-'))
 const isolated = await mkdtemp(join(tmpdir(), 'agentmux-main-schema-'))
+await mkdir(join(isolated, 'node_modules/@agentmux'), { recursive: true })
+await symlink(resolve(repository, 'packages/core'), join(isolated, 'node_modules/@agentmux/core'), 'dir')
 const configPath = join(desktop, 'electron.vite.config.ts'), configSource = await readFile(configPath, 'utf8')
 const roots = ['@tiptap/core', '@tiptap/extension-unique-id', '@tiptap/starter-kit']
 const sha = value => createHash('sha256').update(value).digest('hex')
 const inputs = [
   'apps/desktop/electron.vite.config.ts', 'apps/desktop/package.json',
-  'apps/desktop/src/main/note-file-writer.ts', 'apps/desktop/src/shared/note-document.ts', 'apps/desktop/src/shared/note-content-schema.ts',
+  'apps/host/src/note-file-writer.ts',
   'packages/client-ui/src/note/note-content-schema.ts', 'packages/client-ui/src/note/note-document.ts',
   'packages/client-ui/src/note/note-provenance.ts', 'packages/client-ui/src/note/note-format.ts',
   'apps/desktop/scripts/verify-main-note-schema-bundle.mjs'
 ]
 const evidence = { sourceInputs: Object.fromEntries(await Promise.all(inputs.map(async path => [path, sha(await readFile(resolve(repository, path)))]))),
-  boundary: 'Production electron-vite Main configuration and original NoteFileWriter/shared schema, isolated single-file Node load; no user Main, Renderer or Runtime started', cases: [], passed: false }
+  boundary: 'Production electron-vite Main configuration and original NoteFileWriter/shared schema, isolated Node consumer with only the original external Core SDK available; no user Main, Renderer or Runtime started', cases: [], passed: false }
 const entry = join(configWork, 'consumer.ts')
 await writeFile(entry, `import assert from 'node:assert/strict';
-import {newNoteDocument,readNoteDocument} from ${JSON.stringify(join(desktop, 'src/shared/note-document.ts'))};
-import {NoteFileWriter} from ${JSON.stringify(join(desktop, 'src/main/note-file-writer.ts'))};
+import {newNoteDocument,readNoteDocument,serializeNoteDocument} from ${JSON.stringify(join(repository, 'packages/client-ui/src/note/note-document.ts'))};
+import {NoteFileWriter} from ${JSON.stringify(join(repository, 'apps/host/src/note-file-writer.ts'))};
 const note=newNoteDocument('Original schema content','original-note','original-block');
-const raw=JSON.stringify(note);const valid=readNoteDocument(raw);assert.equal(valid.status,'valid');
+const raw=serializeNoteDocument(note);const valid=readNoteDocument(raw);assert.equal(valid.status,'valid');
 assert.equal(valid.note.noteId,'original-note');assert.equal(valid.note.content.content[0].attrs.blockId,'original-block');
 const unsupported=structuredClone(note);unsupported.content.content[0].type='unsupported-note-node';
-const invalid=readNoteDocument(JSON.stringify(unsupported));assert.equal(invalid.status,'invalid');assert.match(invalid.message,/unsupported node/);
+assert.throws(()=>serializeNoteDocument(unsupported),/unsupported node/);
 const duplicate=structuredClone(note);duplicate.content.content.push(structuredClone(duplicate.content.content[0]));
-assert.equal(readNoteDocument(JSON.stringify(duplicate)).status,'invalid');
-let saved;const writer=new NoteFileWriter({read(){throw Error('A create does not read another baseline')},async write(workspace,input){saved=input.content;return{status:'written',revision:'proof-revision',content:input.content}}});
+assert.throws(()=>serializeNoteDocument(duplicate),/missing or duplicated/);
+let saved;const writer=new NoteFileWriter({read(){throw Error('A create does not read another baseline')},async write(workspace,input){saved=input.content;return{status:'written',revision:'proof-revision',content:input.content}}},undefined,
+{async readProvenance(){return null},async recordProvenance(record){return{...record,status:'recorded'}}});
 const result=await writer.write({id:'original-workspace',hostId:'local',name:'Original',kind:'folder',path:process.cwd()},
-{path:'original.note.json',content:raw,expectedRevision:null},{actor:{kind:'user',id:'original-person'}});
+{path:'original.note.md',content:raw,expectedRevision:null},{actor:{kind:'user',id:'original-person'}});
 assert.equal(result.status,'written');assert.equal(result.noteAttribution.status,'recorded');
 const consumed=readNoteDocument(saved);assert.equal(consumed.status,'valid');
-assert.equal(consumed.note.content.content[0].attrs.provenance.lastEdited.actor.id,'original-person');
+assert.equal(consumed.note.content.content[0].attrs.blockId,'original-block');
+assert.equal(result.noteProvenance.blocks['original-block'].lastEdited.actor.id,'original-person');
 console.log(JSON.stringify({passed:true,cases:['original-valid-schema','unsupported-node-rejected','duplicate-block-rejected','actual-file-writer-normalization'],noteId:consumed.note.noteId}));
 `)
 
@@ -96,11 +100,15 @@ async function run(label, revoked = false) {
   assert.equal(single.length, 1, 'The real schema consumer is a single isolated Main bundle')
   assert.deepEqual(await readdir(output), ['schema.mjs'])
   for (let parent = output; ; parent = dirname(parent)) {
-    assert.equal(await stat(join(parent, 'node_modules')).then(() => true, error => { if (error.code === 'ENOENT') return false; throw error }), false, 'Isolated loader has no ancestor node_modules')
+    if (parent === isolated) {
+      assert.deepEqual(await readdir(join(parent, 'node_modules')), ['@agentmux'])
+      assert.deepEqual(await readdir(join(parent, 'node_modules/@agentmux')), ['core'])
+    } else assert.equal(await stat(join(parent, 'node_modules')).then(() => true, error => { if (error.code === 'ENOENT') return false; throw error }), false, 'Isolated loader has no unrelated ancestor node_modules')
     if (parent === dirname(parent)) break
   }
   const code = await readFile(join(output, 'schema.mjs'), 'utf8'), processResult = await runNode(join(output, 'schema.mjs'), output)
-  const row = { label, result: revoked ? 'RED' : 'GREEN', bundledModules: Object.keys(single[0].modules), externalImports: single[0].imports,
+  const externalInputs = Object.fromEntries(await Promise.all(single[0].imports.filter(name => name.startsWith('@agentmux/core/')).map(async name => [name, sha(await readFile(new URL(import.meta.resolve(name))))])))
+  const row = { label, result: revoked ? 'RED' : 'GREEN', bundledModules: Object.keys(single[0].modules), externalImports: single[0].imports, externalInputs,
     bundleSha256: sha(code), bundleBytes: Buffer.byteLength(code), process: processResult }
   await writeFile(join(out, label + '.json'), JSON.stringify(row, null, 2))
   if (revoked) {
@@ -112,7 +120,7 @@ async function run(label, revoked = false) {
     assert.equal(processResult.code, 0, processResult.stderr)
     const result = JSON.parse(processResult.stdout.trim())
     assert.equal(result.passed, true); assert.deepEqual(result.cases, ['original-valid-schema', 'unsupported-node-rejected', 'duplicate-block-rejected', 'actual-file-writer-normalization'])
-    assert.ok(single[0].imports.every(name => name.startsWith('node:')), 'The original schema dependency closure has no workspace package import')
+    assert.ok(single[0].imports.every(name => name.startsWith('node:') || name.startsWith('@agentmux/core/')), 'Only the original Core SDK remains external; schema dependencies stay bundled')
     assert.ok(row.bundledModules.some(path => path.includes('@tiptap') && path.includes('pm')), 'The actual required peer closure is bundled')
   }
   evidence.cases.push({ label, result: row.result, receipt: label + '.json' }); console.log(label + ': ' + (revoked ? 'expected RED' : 'GREEN'))
