@@ -27,19 +27,6 @@ const variants = [
     before: 'role="switch"', after: 'role="checkbox"' }
 ]
 
-if (!args.includes('--mutations-only')) {
-  const directory = join(output, name, 'electron')
-  const receipt = await qualify(directory, false, false, { modes: [mode],
-    sources: [scenario, 'apps/desktop/scripts/verify-settings-inputs-workflows.mjs'] })
-  assert.equal(receipt.completed, true, `Actual Settings proof failed. Inspect ${directory}. ${JSON.stringify(receipt.failure)}`)
-  assert.deepEqual(receipt.remainingPrivateProcesses, [])
-  assert.equal(receipt.privateRootRemoved, true)
-  const actual = JSON.parse(await readFile(join(directory, mode + '.json'), 'utf8'))
-  assert.deepEqual(Object.keys(actual.workflowControls), ['profile', 'appearance', 'prompts', 'toolkit', 'channels', 'space', 'notes', 'automation'])
-  assert.ok(receipt.png.length >= 9 && receipt.sourceIdentity)
-  console.log(JSON.stringify({ directory, sourceIdentity: receipt.sourceIdentity, images: receipt.png.map(frame => frame.file) }))
-}
-
 if (!args.includes('--capture-only')) {
   await verifyRendererSourceMutations({
     name: name + '-mutations', evidenceRoot: output, tests, owningConfig, mutations: variants,
@@ -51,4 +38,17 @@ if (!args.includes('--capture-only')) {
       'apps/desktop/test/helpers/config-owner-fixture.ts', 'apps/desktop/src/main/config-owner.ts', 'apps/desktop/src/main/config-store.ts'
     ])]
   })
+}
+
+if (!args.includes('--mutations-only')) {
+  const directory = join(output, name, 'electron')
+  const receipt = await qualify(directory, false, false, { modes: [mode],
+    sources: [scenario, 'apps/desktop/scripts/verify-settings-inputs-workflows.mjs'] })
+  assert.equal(receipt.completed, true, `Actual Settings proof failed. Inspect ${directory}. ${JSON.stringify(receipt.failure)}`)
+  assert.deepEqual(receipt.remainingPrivateProcesses, [])
+  assert.equal(receipt.privateRootRemoved, true)
+  const actual = JSON.parse(await readFile(join(directory, mode + '.json'), 'utf8'))
+  assert.deepEqual(Object.keys(actual.workflowControls), ['profile', 'appearance', 'prompts', 'toolkit', 'channels', 'space', 'notes', 'automation'])
+  assert.ok(receipt.png.length >= 9 && receipt.sourceIdentity)
+  console.log(JSON.stringify({ directory, sourceIdentity: receipt.sourceIdentity, images: receipt.png.map(frame => frame.file) }))
 }
