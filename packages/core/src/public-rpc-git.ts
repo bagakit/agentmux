@@ -1,5 +1,5 @@
 import type {
-  GitBranchComparisonSnapshot, GitCommitDetailsInput, GitCommitDetailsResult, GitCommitSnapshot,
+  GitBranchComparisonSnapshot, GitBranchCompareInput, GitBranchComparisonResult, GitCommitDetailsInput, GitCommitDetailsResult, GitCommitSnapshot,
   GitDiffDescriptor, GitDiffSide, GitFileDiff, GitHistoryInput, GitHistoryResult, GitHistorySnapshot, GitWorktreesResult
 } from '@agentmux/git/types'
 import { isDeepStrictEqual } from 'node:util'
@@ -24,6 +24,7 @@ export type GitParameterMap = {
   'git.worktree.close': WorktreeCloseoutParams
   'git.history': GitTarget & GitHistoryInput
   'git.commit': GitTarget & GitCommitDetailsInput
+  'git.compare': GitTarget & { input: GitBranchCompareInput }
   'git.diff': GitTarget & { input: GitDiffDescriptor }
 }
 export type GitResultMap = {
@@ -31,6 +32,7 @@ export type GitResultMap = {
   'git.worktree.close': WorktreeCloseoutReceipt
   'git.history': GitHistoryResult
   'git.commit': GitCommitDetailsResult
+  'git.compare': GitBranchComparisonResult
   'git.diff': GitFileDiff
 }
 export type GitMethod = keyof GitParameterMap
@@ -45,7 +47,7 @@ export interface AgentMuxRpcGitOwner {
 }
 export const AGENTMUX_RPC_GIT_METHODS = {
   'git.worktrees': 'long',
-  'git.history': 'long', 'git.commit': 'long', 'git.diff': 'long', 'git.worktree.close': 'long'
+  'git.compare': 'long', 'git.history': 'long', 'git.commit': 'long', 'git.diff': 'long', 'git.worktree.close': 'long'
 } as const satisfies Record<GitMethod, 'short' | 'long'>
 export function isGitMethod(value: unknown): value is GitMethod {
   return typeof value === 'string' && Object.hasOwn(AGENTMUX_RPC_GIT_METHODS, value)
@@ -104,10 +106,15 @@ function historyCursor(value: unknown, code: string) {
   historySnapshot(p.snapshot, code); count(p.offset, code)
   return p as unknown as NonNullable<GitHistoryInput['cursor']>
 }
+function branchName(value: unknown, code: string): void {
+  text(value, code)
+  if (typeof value !== 'string' || !value || /[\r\n]/u.test(value)) invalid('An exact local branch name is required.', code)
+  // Git's original check-ref-format/refs/heads owner validates native grammar.
+}
 function branchSnapshot(value: unknown, code: string): GitBranchComparisonSnapshot {
   const p = rpcRecord(value, ['hostId', 'repoPath', 'mode', 'baseBranch', 'targetBranch', 'baseOid', 'targetOid', 'comparisonBaseOid'], code)
   identity(p.hostId, code); absolutePath(p.repoPath, code)
-  identity(p.baseBranch, code); identity(p.targetBranch, code)
+  branchName(p.baseBranch, code); branchName(p.targetBranch, code)
   if (p.mode !== 'merge-base' && p.mode !== 'two-point') invalid('Git comparison mode is invalid.', code)
   for (const key of ['baseOid', 'targetOid', 'comparisonBaseOid']) oid(p[key], code)
   return p as GitBranchComparisonSnapshot
@@ -139,6 +146,10 @@ export function parseGitParams<M extends GitMethod>(method: M, value: unknown, c
       if (cursor.snapshot.hostId !== (p.expectedResource as GitExpectedResource).hostId ||
           p.ref !== undefined && p.ref !== cursor.snapshot.selectedRef) invalid('Git cursor belongs to another Host or reference.', code)
     }
+  } else if (method === 'git.compare') {
+    const input = rpcRecord(p.input, ['baseBranch', 'targetBranch', 'mode'], code)
+    branchName(input.baseBranch, code); branchName(input.targetBranch, code)
+    if (input.mode !== 'merge-base' && input.mode !== 'two-point') invalid('Choose merge-base or two-point comparison explicitly.', code)
   } else if (method === 'git.diff') {
     const input = diffDescriptor(p.input, code)
     if (input.snapshot.hostId !== (p.expectedResource as GitExpectedResource).hostId) invalid('Git diff belongs to another Host.', code)
@@ -244,6 +255,20 @@ export function parseGitResult<M extends GitMethod>(method: M, value: unknown, p
   } else if (p.kind === 'not-a-git-repository') {
     rpcRecord(p, ['kind', 'hostId', 'workspacePath'], code)
     if (p.hostId !== params.expectedResource.hostId || p.workspacePath !== params.expectedResource.workspacePath) invalid('Git result belongs to another original resource.', code)
+  } else if (p.kind === 'ready' && method === 'git.compare') {
+    rpcRecord(p, ['kind', 'snapshot', 'entries', 'warnings'], code)
+    const snapshot = branchSnapshot(p.snapshot, code), input = (params as GitParameterMap['git.compare']).input
+    if (snapshot.hostId !== params.expectedResource.hostId || snapshot.baseBranch !== input.baseBranch ||
+      snapshot.targetBranch !== input.targetBranch || snapshot.mode !== input.mode ||
+      snapshot.mode === 'two-point' && snapshot.comparisonBaseOid !== snapshot.baseOid) invalid('Git comparison returned another original source or branch pair.', code)
+    const paths = new Set<string>()
+    array(p.entries, code, value => {
+      const entry = rpcRecord(value, ['path', 'origPath', 'change'], code)
+      filePath(entry.path, code); if (entry.origPath !== null) filePath(entry.origPath, code)
+      if (paths.has(entry.path as string) || !['added', 'deleted', 'modified', 'renamed', 'type-changed'].includes(String(entry.change))) invalid('Git comparison files are duplicated or invalid.', code)
+      paths.add(entry.path as string)
+    })
+    array(p.warnings, code, value => text(value, code))
   } else if (p.kind === 'ready' && method === 'git.history') {
     rpcRecord(p, ['kind', 'snapshot', 'commits', 'nextCursor'], code)
     const snapshot = historySnapshot(p.snapshot, code), input = params as GitParameterMap['git.history']

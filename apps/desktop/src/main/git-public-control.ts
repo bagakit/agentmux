@@ -7,7 +7,7 @@ import type { WorktreeService } from './worktree-service.js'
 export class GitPublicControl implements AgentMuxRpcGitOwner {
   constructor(private readonly ports: {
     config(): AppConfig
-    git: Pick<GitService, 'history' | 'commitDetails' | 'commitDiff' | 'branchDiff'>
+    git: Pick<GitService, 'history' | 'commitDetails' | 'commitDiff' | 'branchDiff' | 'compareBranches'>
     worktrees?: Pick<WorktreeService, 'observe'>
     closeWorktree?(params: WorktreeCloseoutParams): Promise<WorktreeCloseoutReceipt>
   }) {}
@@ -33,6 +33,9 @@ export class GitPublicControl implements AgentMuxRpcGitOwner {
     } else if (method === 'git.history') {
       const { workspaceId, expectedResource: _resource, ...input } = params as GitParameterMap['git.history']
       result = await this.ports.git.history(workspaceId, input, config)
+    } else if (method === 'git.compare') {
+      const { workspaceId, input } = params as GitParameterMap['git.compare']
+      result = await this.ports.git.compareBranches(workspaceId, input, config)
     } else if (method === 'git.commit') {
       const { workspaceId, expectedResource: _resource, ...input } = params as GitParameterMap['git.commit']
       result = await this.ports.git.commitDetails(workspaceId, input, config)
