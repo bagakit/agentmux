@@ -25,7 +25,7 @@ AppConfig 偏好的 GUI 与 CLI 写入都经过唯一 [Main ConfigOwner](../apps
 
 | 页面 | 可修改的内容或其他能力 | CLI 范围 | 字段与编辑入口 |
 | --- | --- | --- | --- |
-| My Profile | 本人称呼、头像、协作背景；是否分享给新 Agent。头像为界面资料，分享开关不代表访问隔离。 | `amux settings inspect profile`。 | [UI](../apps/desktop/src/renderer/src/components/settings/modules/profile.tsx)、[字段](../apps/desktop/src/shared/user-profile.ts)、[Main](../apps/desktop/src/main/settings/modules/profile.ts) |
+| My Profile | 本人称呼、头像、协作背景；是否分享给新 Agent。头像为界面资料，分享开关不代表访问隔离。 | `amux settings inspect profile`。 | [UI](../apps/desktop/src/renderer/src/components/settings/modules/profile.tsx)、[字段](../apps/host/src/mote-user-profile.ts)、[Main](../apps/desktop/src/main/settings/modules/profile.ts) |
 | Appearance | 五款 App 品牌图标、App 主题身份与明暗、终端主题与字号、Source/Diff 编辑字号及继承选项；Notes 正文另设。 | `amux settings inspect appearance`。 | [UI](../apps/desktop/src/renderer/src/components/settings/modules/appearance.tsx)、[Main](../apps/desktop/src/main/settings/modules/appearance.ts) |
 | Notifications | 通知模式和声音。 | `amux settings inspect notifications`。 | [UI](../apps/desktop/src/renderer/src/components/settings/modules/notifications.tsx)、[模式解析](../apps/desktop/src/shared/notification-presentation.ts)、[Main](../apps/desktop/src/main/settings/modules/notifications.ts) |
 | General | 路径显示和复制使用绝对路径还是家目录缩写；本机数据与恢复说明为只读，崩溃日志按钮为诊断动作。Agent 可用性检查在后台继续，不作为工作面加载门禁。 | `amux settings inspect copyPathsAsAbsolute`；`amux system crash-log inspect`、`amux system crash-log reveal` 为诊断动作。 | [UI](../apps/desktop/src/renderer/src/components/settings/modules/general.tsx)、[Main](../apps/desktop/src/main/settings/modules/general.ts) |
