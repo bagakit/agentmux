@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import path from 'node:path'
 
 const root = path.resolve(import.meta.dirname, '../../..')
@@ -14,10 +15,20 @@ await mkdir(directory, { recursive: true })
 try {
   // No action or wait: the delivery owner supplies original completed records.
   const ready = await json('.tmp/agent-location-details/delivery/ready.json')
-  assert.ok(ready.mode === 'renderer' || ready.mode === 'app-install')
+  assert.ok(['renderer', 'app-install', 'observed-install'].includes(ready.mode))
+  const observedInstall = ready.mode === 'observed-install'
   assert.equal(ready.sourceCommit, git('rev-parse', 'HEAD'))
   assert.equal(ready.sourceTree, git('rev-parse', 'HEAD^{tree}'))
-  git('merge-base', '--is-ancestor', ready.sourceCommit, 'main')
+  if (observedInstall) {
+    // Another delivery owner already installed this exact product. Only this
+    // evidence consumer may differ; observing it does not claim our failed install succeeded.
+    git('merge-base', '--is-ancestor', ready.deliverySourceCommit, 'main')
+    receipt.implementationCommit = 'b2e0608ed4062442c60a5f502ae4b5f0d99a961c'
+    git('merge-base', '--is-ancestor', receipt.implementationCommit, ready.deliverySourceCommit)
+    assert.equal(ready.deliverySourceTree, git('rev-parse', `${ready.deliverySourceCommit}^{tree}`))
+    assert.deepEqual(git('diff', '--name-only', ready.deliverySourceCommit, 'HEAD').split('\n'),
+      ['apps/desktop/scripts/verify-agent-location-details-delivery.mjs'])
+  } else git('merge-base', '--is-ancestor', ready.sourceCommit, 'main')
   const target = await json('.tmp/agent-location-details/before/targets.json')
   const record = async name => {
     assert.ok(ready.records[name], `Missing original ${name} record`)
@@ -25,25 +36,27 @@ try {
     receipt.evidence[name] = { file, sha256: sha(bytes) }
     return JSON.parse(bytes.toString())
   }
-  const build = await record('rendererBuild')
-  assert.equal(build.sourceCommit, ready.sourceCommit)
-  assert.equal(build.sourceTree, ready.sourceTree)
-  assert.equal(build.sourceStatus, '')
-  assert.equal(build.command, ready.mode === 'renderer' ? 'pnpm update:renderer' : 'pnpm package:mac:install --ui-only --app-only')
-  assert.equal(build.exitCode, 0)
-  assert.ok(Object.keys(build.sourceSHA256).length > 0)
-  for (const [file, digest] of Object.entries(build.sourceSHA256)) assert.equal(sha(await readFile(path.join(root, file))), digest)
   const release = await record('rendererRelease')
-  assert.equal(build.rendererReleaseSHA256, sha(await readFile(path.resolve(root, ready.records.rendererRelease))))
   assert.ok(release.id && Object.keys(release.files).length > 0)
-  if (ready.mode === 'renderer') {
-    const update = await record('rendererUpdate')
-    assert.equal(update.outcome, 'applied')
-    assert.equal(update.requested, release.id); assert.equal(update.current, release.id)
-    assert.ok(update.at >= build.startedAt)
+  if (!observedInstall) {
+    const build = await record('rendererBuild')
+    assert.equal(build.sourceCommit, ready.sourceCommit)
+    assert.equal(build.sourceTree, ready.sourceTree)
+    assert.equal(build.sourceStatus, '')
+    assert.equal(build.command, ready.mode === 'renderer' ? 'pnpm update:renderer' : 'pnpm package:mac:install --ui-only --app-only')
+    assert.equal(build.exitCode, 0)
+    assert.ok(Object.keys(build.sourceSHA256).length > 0)
+    for (const [file, digest] of Object.entries(build.sourceSHA256)) assert.equal(sha(await readFile(path.join(root, file))), digest)
+    assert.equal(build.rendererReleaseSHA256, sha(await readFile(path.resolve(root, ready.records.rendererRelease))))
+    if (ready.mode === 'renderer') {
+      const update = await record('rendererUpdate')
+      assert.equal(update.outcome, 'applied')
+      assert.equal(update.requested, release.id); assert.equal(update.current, release.id)
+      assert.ok(update.at >= build.startedAt)
+    }
   }
   const before = (await record('appBefore')).result.observation
-  const after = (await record('appAfter')).result.observation
+  const appAfter = await record('appAfter'), after = appAfter.result.observation
   for (const [name, key] of [['app', 'appBefore'], ['agent', 'agentBefore'], ['tab', 'tabBefore']]) {
     assert.equal(path.resolve(root, ready.records[key]), path.resolve(root, target.before[name].file))
     assert.equal(sha(await readFile(path.resolve(root, ready.records[key]))), target.before[name].sha256)
@@ -53,13 +66,31 @@ try {
     assert.deepEqual(after.main.package, before.main.package)
     assert.equal(after.main.pid, before.main.pid)
   } else {
-    const installed = await record('installedIdentity'), installation = await record('installation')
-    assert.equal(installed.sourceCommit, ready.sourceCommit)
-    assert.equal(installed.sourceTree, ready.sourceTree)
+    const installed = await record('installedIdentity')
+    assert.equal(installed.sourceCommit, observedInstall ? ready.deliverySourceCommit : ready.sourceCommit)
+    assert.equal(installed.sourceTree, observedInstall ? ready.deliverySourceTree : ready.sourceTree)
     assert.deepEqual(after.main.package, installed)
     assert.notEqual(after.main.pid, before.main.pid)
-    assert.equal(installation.intent, 'ui-only')
-    assert.equal(installation.native.status, 'deferred')
+    if (observedInstall) {
+      const installedRoot = path.join(homedir(), 'Applications/AgentMux.app/Contents/Resources/app')
+      for (const [name, relative, expected] of [
+        ['currentInstalledIdentity', 'package-identity.json', installed],
+        ['currentRendererRelease', 'out/renderer/release.json', release]
+      ]) {
+        const file = path.join(installedRoot, relative), bytes = await readFile(file)
+        receipt.evidence[name] = { file, sha256: sha(bytes) }
+        assert.deepEqual(JSON.parse(bytes.toString()), expected)
+      }
+      assert.equal(after.main.renderer.kind, 'bundled')
+      assert.equal(appAfter.operation, 'app.inspect')
+      assert.equal(appAfter.ok, true)
+      receipt.deliverySourceCommit = installed.sourceCommit
+      receipt.deliveryProof = 'observed actual loading; no installation outcome claimed'
+    } else {
+      const installation = await record('installation')
+      assert.equal(installation.intent, 'ui-only')
+      assert.equal(installation.native.status, 'deferred')
+    }
   }
   assert.equal(after.main.renderer.id, release.id)
   assert.deepEqual(after.main.renderer.identity, release.identity)
