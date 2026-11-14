@@ -2,12 +2,33 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 import { describe, expect, it } from 'vitest'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
 import type { WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
+import { createWorkspaceLayout } from '@agentmux/layout'
 import {
   buildQuickSwitchIndex,
+  buildSessionLocationItems,
   fuzzyScore,
   rankQuickSwitchItems,
   type QuickSwitchItem
 } from '../src/renderer/src/lib/quick-switch.js'
+
+describe('exact location labels', () => {
+  it('distinguishes colliding real Tab names and ID prefixes without changing either target', () => {
+    const ids = ['tab-same-prefix-alpha', 'tab-same-prefix-beta']
+    const tabs = Object.fromEntries(ids.map((id, index) => [id, createWorkbenchTab(id, { kind: 'agent', phase: 'attached', regionId: `region-${index}`, workspaceId: 'workspace', sessionId: 'original' }, 'Same name')]))
+    const references = ids.map((tabId, index) => ({ displayWorkspaceId: 'workspace', groupId: 'group', tabId, regionId: `region-${index}` }))
+    const items = buildSessionLocationItems({ label: 'Original Agent', references, config: null, tabs, layouts: { workspace: createWorkspaceLayout('group', ids) } })
+    expect(new Set(items.map(item => `${item.title}\n${item.subtitle}`)).size).toBe(2)
+    items.forEach((item, index) => { expect(item.subtitle).toContain(ids[index]); expect(item.target).toEqual({ kind: 'session-location', reference: references[index] }) })
+  })
+  it('distinguishes same-named Space contexts of one physical position', () => {
+    const tab = createWorkbenchTab('tab', { kind: 'agent', phase: 'attached', regionId: 'region', workspaceId: 'workspace', sessionId: 'original' }, 'Same name')
+    const references = ['space-same-prefix-alpha', 'space-same-prefix-beta'].map(spaceId => ({ displayWorkspaceId: 'workspace', groupId: 'group', tabId: tab.id, regionId: 'region', spaceId }))
+    const items = buildSessionLocationItems({ label: 'Original Agent', references, config: null, tabs: { tab }, layouts: { workspace: createWorkspaceLayout('group', [tab.id]) } })
+    expect(new Set(items.map(item => item.subtitle)).size).toBe(2)
+    items.forEach((item, index) => { expect(item.subtitle).toContain(references[index]!.spaceId); expect(item.target).toEqual({ kind: 'session-location', reference: references[index] }) })
+  })
+})
 
 function agent(id: string, label: string, state: SessionSnapshot['status']['state'], observedAt: number): SessionSnapshot {
   return {

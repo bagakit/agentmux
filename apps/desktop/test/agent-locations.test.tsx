@@ -110,6 +110,7 @@ it('Focus explicitly reselects the second Region while a held occurrence stays i
   expect(disclose()?.getAttribute('aria-label')).toContain('3 locations')
   await click(disclose())
   expect(selected()).toBe(before); expect(choices()).toHaveLength(3)
+  expect(new Set(choices().map(choice => choice.textContent)).size, 'Same-named Tabs must remain distinguishable in the actual picker').toBe(3)
   expect(choices()[0]?.textContent).toContain('Same name')
   await click(choices().find(one => one.title.includes('"regionId":"right"')))
   expect(selected()).toMatchObject({ workspaceId: 'workspace', groupId: 'group-a', tabId: 'first', regionId: 'right' })

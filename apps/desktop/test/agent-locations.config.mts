@@ -7,6 +7,7 @@ import { assertWorkspaceDistBuiltFromCurrentSource, staleDistComplaint } from '.
 
 const root = resolve(import.meta.dirname, '../../..')
 const variants = {
+  'label-collisions': { file: 'apps/desktop/src/renderer/src/lib/quick-switch.ts', before: "if (!others.length || item.target.kind !== 'session-location') return item", after: 'if (true) return item' },
   'first-item': { file: 'apps/desktop/src/renderer/src/store.ts', before: 'reference })\n  },\n  selectSession(id, preferredTabGroupId, options)', after: 'reference: sessionWorkbenchReferences(get().tabs, workbenchSelectionCatalog(get()), request.sessionId)[0] ?? reference })\n  },\n  selectSession(id, preferredTabGroupId, options)' },
   'lose-focus': { file: 'apps/desktop/src/renderer/src/store.ts', before: "const navigation = options?.keepSurface ? {} : { mainSurface: 'workbench' as const }", after: "const navigation = { mainSurface: 'workbench' as const }" },
   'unqualified-roster': { file: 'apps/desktop/src/renderer/src/lib/desktop-focus-navigation.ts', before: 'if (!subject || bound?.hostId !== subject.hostId)', after: 'if (false && (!subject || bound?.hostId !== subject.hostId))' },

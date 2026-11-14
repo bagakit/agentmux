@@ -82,6 +82,7 @@ app.whenReady().then(async()=>{
     await setup('dark',1080,760)
     await click(location(multiple,'.global-focus-surface'))
     const sample=await call(async()=>{for(let n=0;n<40;n++){await new Promise(resolve=>requestAnimationFrame(resolve));const dialog=document.querySelector('.quick-switch'),animation=dialog?.getAnimations().find(a=>a.effect?.getComputedTiming().iterations!==Infinity),p=animation?.effect?.getComputedTiming().progress;if(typeof p==='number'&&p>0&&p<1){const animations=document.getAnimations().filter(a=>a.effect?.getComputedTiming().iterations!==Infinity);animations.forEach(a=>a.pause());return{progress:p,opacity:getComputedStyle(dialog).opacity,transform:getComputedStyle(dialog).transform}}}throw Error('A non-endpoint actual opening frame was not observed')})
+    assert.equal(Number(sample.opacity),1,'Location picker remains opaque throughout its actual opening frame')
     result.operations.push({action:'opening-sample',...sample});await frame('locations-opening-wide-dark',{intermediate:true});await call(()=>document.getAnimations().filter(a=>a.playState==='paused').forEach(a=>a.play()));await key('Escape','Escape',27)
     await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]})
     await setup('light',640,600);const reduced=await open();assert.equal(await call(()=>matchMedia('(prefers-reduced-motion: reduce)').matches&&getComputedStyle(document.querySelector('.quick-switch')).animationName==='none'),true)

@@ -10,7 +10,7 @@ mkdirSync(directory, { recursive: true })
 const sourceFiles = ['store.ts', 'components/AgentLocationsButton.tsx', 'components/AgentRoster.tsx', 'components/FocusContextRow.tsx', 'components/WorkspaceAgentRow.tsx',
   'components/QuickSwitcher.tsx', 'components/GlobalFocusSurface.tsx', 'components/SurfaceToolDock.tsx', 'lib/desktop-focus-navigation.ts', 'lib/focus-context-identity.ts',
   'lib/quick-switch.ts', 'lib/desktop-spatial-state.ts', 'lib/workbench-navigation-catalog.ts'].map(file => 'apps/desktop/src/renderer/src/' + file)
-sourceFiles.push('packages/core/src/spatial-state.ts', 'apps/desktop/test/agent-locations.test.tsx', 'apps/desktop/test/agent-locations.config.mts', 'apps/desktop/scripts/verify-agent-locations.mjs')
+sourceFiles.push('packages/core/src/spatial-state.ts', 'apps/desktop/test/agent-locations.test.tsx', 'apps/desktop/test/quick-switch.test.ts', 'apps/desktop/test/quick-switch-demand.test.tsx', 'apps/desktop/test/agent-locations.config.mts', 'apps/desktop/scripts/verify-agent-locations.mjs')
 const sha = path => createHash('sha256').update(readFileSync(resolve(root, path))).digest('hex')
 const original = Object.fromEntries(sourceFiles.map(path => [path, sha(path)]))
 const receipt = { schema: 'agentmux.desktop-agent-locations.v1', passed: false, sourceSHA256: original, cases: [],
@@ -33,7 +33,10 @@ function run(name, mutation, bearing) {
     if (result.status === 0 || summary.numFailedTests !== 1 || failures.length !== 1 || !failures[0].fullName.includes(bearing) ||
       !failures[0].failureMessages.some(message => message.includes('AssertionError'))) throw new Error('Mutation did not fail its original behavior assertion: ' + name)
     if (!proofs.some(proof => proof.mutated && proof.originalSHA256 !== proof.loadedSHA256)) throw new Error('Mutated navigation owner was not evaluated: ' + name)
-  } else if (result.status !== 0 || !summary.success || summary.numFailedTests || summary.numPassedTests < 15) throw new Error('Original location consumer gate failed: ' + name)
+  } else {
+    const owned = summary.testResults.find(file => file.name.endsWith('/test/agent-locations.test.tsx'))
+    if (result.status !== 0 || !summary.success || summary.numFailedTests || !owned || owned.assertionResults.filter(test => test.status === 'passed').length < 15) throw new Error('Original location consumer gate failed: ' + name)
+  }
   unchanged()
   receipt.cases.push({ name, mutation: mutation ?? null, passed: summary.numPassedTests, failed: summary.numFailedTests, bearing: failures.map(test => test.fullName), loaded: relative(root, loaded), report: relative(root, report) })
   writeFileSync(resolve(directory, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
@@ -44,6 +47,7 @@ try {
   run('lose-focus', 'lose-focus', 'Focus explicitly reselects the second Region')
   run('drop-membership', 'drop-membership', 'an unknown source stays unknown')
   run('unqualified-roster', 'unqualified-roster', 'actual Roster marks a partially unconfirmed Region unknown missing-execution')
+  run('label-collisions', 'label-collisions', 'Focus explicitly reselects the second Region')
   run('restored')
   receipt.passed = true
   writeFileSync(resolve(directory, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
