@@ -62,6 +62,18 @@ export type AgentMuxBrowserProfileRef = { id: string; label: string }
 
 export type AgentMuxBrowserDialogType = 'alert' | 'confirm' | 'prompt' | 'beforeunload'
 
+/** Facts from this original page owner, independent of transport readiness or program completion. */
+export type AgentMuxBrowserNavigationObservation = {
+  requestedUrl: string
+  documentUrl: string
+  navigationId: string
+  /** A native commit for this owner's navigation epoch; null is unconfirmed, not last-successful. */
+  committedNavigationId: string | null
+  loading: boolean
+  /** Original owner issue only; its text never establishes control or lifecycle facts. */
+  error: string | null
+}
+
 export type AgentMuxBrowserTarget = {
   id: string
   workspaceId: string | null
@@ -77,6 +89,8 @@ export type AgentMuxBrowserTarget = {
   title: string
   /** Absent when an embedded durable description has no native document yet. */
   navigationId?: string
+  /** Absent when this adapter has no confirmed navigation observation; readiness remains independent. */
+  navigation?: AgentMuxBrowserNavigationObservation
   openedFrom?: AgentMuxBrowserSource
   /** Host-supported native dialog kinds; absent is unknown, not approval or current readiness. */
   dialogTypes?: readonly AgentMuxBrowserDialogType[]

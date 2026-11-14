@@ -658,10 +658,16 @@ export class BrowserViewManager {
       ...(sitePermissions ? { sitePermissions } : {}),
       url, ...(objectLink ? { objectLink } : {}), title: available ? contents.getTitle().slice(0, 512) : '',
       navigationId: entry.navigationId,
+      ...(available ? { navigation: this.navigationObservation(entry) } : {}),
       dialogTypes: DESKTOP_BROWSER_DIALOG_TYPES,
       capabilities: workspaceId ? [...BROWSER_PAGE_CAPABILITY_NAMES] : BROWSER_PAGE_CAPABILITY_NAMES.filter(name =>
         !['uploadFiles', 'download', 'readDownload', 'extractStructured', 'readResult'].includes(name)),
       ...(warnings ? { warning: warnings } : {}) }
+  }
+  private navigationObservation(entry: BrowserEntry): import('@agentmux/core').AgentMuxBrowserNavigationObservation {
+    const contents = entry.view.webContents
+    return { requestedUrl: entry.requestedUrl, documentUrl: contents.getURL(), navigationId: entry.navigationId,
+      committedNavigationId: entry.committedNavigationId, loading: contents.isLoading(), error: entry.error }
   }
   /** {id,label} for a normal page's Profile. Private pages and Capsules have none; an unread label stays unknown. */
   private profileRef(storage: BrowserStorage): { id: string; label: string } | undefined {
@@ -4059,6 +4065,7 @@ export class BrowserViewManager {
           url: view.webContents.getURL(),
           title: view.webContents.getTitle(),
           navigationId: entry.navigationId,
+          navigation: this.navigationObservation(entry),
           ...(entry.faviconDataUrl ? { faviconDataUrl: entry.faviconDataUrl } : {})
         }
       },

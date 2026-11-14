@@ -47,7 +47,8 @@ export type BrowserPageContext = {
   registerCleanup?(cleanup: () => Promise<void>): void
   session: BrowserPageTransport
   /** 当前页面身份。每次调用现取——导航可能发生在两次页面函数之间。 */
-  pageInfo(): { url: string; title: string; navigationId: string; faviconDataUrl?: string }
+  pageInfo(): { url: string; title: string; navigationId: string; faviconDataUrl?: string;
+    navigation?: import('@agentmux/core').AgentMuxBrowserNavigationObservation }
   /** 导航到一个地址，等它停下来。 */
   gotoUrl(url: string): Promise<void>
   /** 截图走 Electron 的 capturePage，与 Agent 无关的那条既有路径。 */

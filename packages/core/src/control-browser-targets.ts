@@ -1,5 +1,5 @@
 import { rpcRecord } from './rpc-data.js'
-import type { AgentMuxBrowserControl, AgentMuxBrowserSource, AgentMuxBrowserTarget, AgentMuxBrowserTargetsResult, AgentMuxBrowserResource, AgentMuxBrowserReleaseReceipt, AgentMuxBrowserRetention } from './browser-targets.js'
+import type { AgentMuxBrowserControl, AgentMuxBrowserSource, AgentMuxBrowserTarget, AgentMuxBrowserTargetsResult, AgentMuxBrowserResource, AgentMuxBrowserReleaseReceipt, AgentMuxBrowserRetention, AgentMuxBrowserNavigationObservation } from './browser-targets.js'
 import { BROWSER_PAGE_CAPABILITY_NAMES } from './browser-page-capability.js'
 import { AgentMuxError } from './errors.js'
 import { parseAmuxObjectLink } from './sharing.js'
@@ -26,6 +26,19 @@ const capabilities = new Set(BROWSER_PAGE_CAPABILITY_NAMES)
 function text(value: unknown, limit: number, empty = false): string {
   if (typeof value !== 'string' || value.length > limit || (!empty && !value.trim())) throw new AgentMuxError('Browser target fact is invalid.', 'CONTROL_PROTOCOL_ERROR')
   return value
+}
+function parseBrowserNavigation(value: unknown, navigationId: unknown): AgentMuxBrowserNavigationObservation {
+  const row = record(value), keys = ['requestedUrl', 'documentUrl', 'navigationId', 'committedNavigationId', 'loading', 'error']
+  if (!keys.every(key => Object.hasOwn(row, key)) ||
+    typeof row.requestedUrl !== 'string' || typeof row.documentUrl !== 'string' ||
+    typeof row.loading !== 'boolean' || row.navigationId !== navigationId ||
+    row.committedNavigationId !== null && row.committedNavigationId !== row.navigationId ||
+    row.error !== null && typeof row.error !== 'string') {
+    throw new AgentMuxError('Browser navigation observation is invalid for this target.', 'CONTROL_PROTOCOL_ERROR')
+  }
+  return { requestedUrl: row.requestedUrl, documentUrl: row.documentUrl,
+    navigationId: text(row.navigationId, 200), committedNavigationId: row.committedNavigationId === null ? null : text(row.committedNavigationId, 200),
+    loading: row.loading, error: row.error }
 }
 export function parseBrowserControl(value: unknown): AgentMuxBrowserControl {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new AgentMuxError('Browser control fact is invalid.', 'CONTROL_PROTOCOL_ERROR')
@@ -101,6 +114,7 @@ export function parseBrowserTarget(raw: unknown): AgentMuxBrowserTarget {
   const certificateRequest = row.certificateRequest === undefined ? undefined : row.certificateRequest === null ? null : parseBrowserCertificateRequest(row.certificateRequest)
   if (certificateRequest && (row.source !== 'embedded' || certificateRequest.navigationId !== row.navigationId)) throw new AgentMuxError('Browser certificate request belongs to another document.', 'CONTROL_PROTOCOL_ERROR')
   const sitePermissions = row.sitePermissions === undefined ? undefined : parseBrowserSitePermissionState(row.sitePermissions)
+  const navigation = row.navigation === undefined ? undefined : parseBrowserNavigation(row.navigation, row.navigationId)
   if (sitePermissions && (row.source !== 'embedded' || sitePermissions.requests.some(request => request.browserId !== id ||
     request.navigationId !== row.navigationId || request.profileId !== (profile?.id ?? null)))) {
     throw new AgentMuxError('Browser permission request belongs to another native target.', 'CONTROL_PROTOCOL_ERROR')
@@ -116,6 +130,7 @@ export function parseBrowserTarget(raw: unknown): AgentMuxBrowserTarget {
     status: row.status as AgentMuxBrowserTarget['status'], url: text(row.url, 8192, true), title: text(row.title, 512, true),
     ...(objectLink === undefined ? {} : { objectLink }),
     ...(row.navigationId === undefined ? {} : { navigationId: text(row.navigationId, 200) }), capabilities: [...row.capabilities] as string[],
+    ...(navigation === undefined ? {} : { navigation }),
     ...(row.dialogTypes === undefined ? {} : { dialogTypes: [...row.dialogTypes as import('./browser-targets.js').AgentMuxBrowserDialogType[]] }),
     ...(row.openedFrom === undefined ? {} : { openedFrom: parseBrowserSource(row.openedFrom) }),
     ...(row.cdpMethods === undefined ? {} : { cdpMethods: [...row.cdpMethods as string[]] }),
