@@ -40,7 +40,7 @@ Object.assign(api.hosts, {
 })
 function Fixture() {
   const [revision, setRevision] = useState(0)
-  Object.assign(window, { installPreview: { ready: true, calls, setMode: (next: string) => { mode = next; useAppStore.setState({ config }); setRevision(value => value + 1) },
+  Object.assign(window, { installPreview: { ready: true, revision, calls, setMode: (next: string) => { mode = next; useAppStore.setState({ config }); setRevision(value => value + 1); return revision + 1 },
     finish: () => release?.() } })
   return <DesktopClientUiProvider><div className="app-shell"><SettingsPanel key={revision} initialSection="hosts"
     navigationRequest={{ section: 'hosts', hostId: 'build' }} onClose={() => {}} /></div></DesktopClientUiProvider>
