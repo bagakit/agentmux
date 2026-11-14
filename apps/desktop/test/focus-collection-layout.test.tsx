@@ -382,8 +382,7 @@ it('keeps the original Collection discussion chooser while portaled focus defers
   expect(document.activeElement).toBe(recipient); expect(card('a1')).toBe(originalCard); expect(laneFor('a1')).toBe(research)
   expect(research.textContent).toContain('Update pending')
   for (const key of ['sessions', 'tabs', 'layouts', 'agentFocus', 'agentComposerDrafts'] as const) expect(useAppStore.getState()[key]).toBe(before[key])
-  const cancel = [...panel.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Cancel')!
-  await act(async () => cancel.click()); await act(async () => { later.focus(); later.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })) }); await settle()
+  await act(async () => trigger.click()); await act(async () => { later.focus(); later.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })) }); await settle()
   expect(laneFor('a1')).not.toBe(research); expect(laneFor('a1').textContent).toContain('Engineering')
 })
 

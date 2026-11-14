@@ -54,12 +54,40 @@ beforeEach(async () => {
 function button(label: string) { const node = document.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`); expect(node, label).not.toBeNull(); return node! }
 async function click(label: string) { await act(async () => button(label).click()) }
 async function note(text: string) {
+  const appearance=document.querySelector<HTMLButtonElement>('[aria-label="Project appearance"]')
+  if(appearance?.getAttribute('aria-expanded')==='false') await act(async()=>appearance.click())
   const field = document.querySelector<HTMLInputElement>('[aria-label="Project note"]')!; expect(field).not.toBeNull()
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, text); field.dispatchEvent(new Event('input', { bubbles: true })) })
 }
 function unchanged(before: ReturnType<typeof useAppStore.getState>) {
   for (const key of ['sessions', 'tabs', 'layouts', 'agentComposerDrafts', 'agentFocus', 'agentSteerQueues'] as const) expect(useAppStore.getState()[key]).toBe(before[key])
 }
+
+it('the actual default project menu is a compact action surface and appearance expansion keeps its unsaved draft',async()=>{
+ const save=vi.spyOn(api.config,'save')
+ await dom.render(<Harness/>);await click('Project preferences · Original project')
+ const panel=document.querySelector<HTMLElement>('[data-focus-project-preferences]')!
+ expect(panel.classList.contains('tab-context-menu')).toBe(true)
+ expect(panel.querySelector('[aria-label="Project note"]')).toBeNull()
+ expect(panel.querySelector('[aria-label="Pin project"]')).toBeNull()
+ expect(panel.querySelector('.focus-project-preferences__actions')).toBeNull()
+ for(const name of ['Copy project address','Open project in Space']){
+  const action=button(name);expect(action.classList.contains('tab-context-menu__item')).toBe(true);expect(action.classList.contains('small-button')).toBe(false)
+ }
+ const tasks=[...panel.querySelectorAll<HTMLButtonElement>('[data-mote-task-action-id]')]
+ expect(tasks).toHaveLength(3)
+ for(const task of tasks){
+  expect(task.classList.contains('tab-context-menu__item')).toBe(true)
+  expect(task.querySelector('small')).toBeNull()
+  expect(task.getAttribute('aria-description')).toBeTruthy();expect(task.title).toBe(task.getAttribute('aria-description'))
+ }
+ await note('Original unsaved appearance draft')
+ expect(panel.querySelector('.focus-project-preferences__actions')).not.toBeNull()
+ expect(panel.querySelector('[aria-label="Pin project"]')).not.toBeNull()
+ await click('Project appearance');expect(panel.querySelector('[aria-label="Project note"]')).toBeNull()
+ await click('Project appearance');expect(panel.querySelector<HTMLInputElement>('[aria-label="Project note"]')?.value).toBe('Original unsaved appearance draft')
+ expect(save).not.toHaveBeenCalled()
+})
 
 it('the actual non-active project menu copies its canonical root Space address without navigating or touching original work', async () => {
   const select = vi.spyOn(useAppStore.getState(), 'selectWorkspace'), launch = vi.spyOn(useAppStore.getState(), 'openLauncher')
@@ -115,6 +143,9 @@ it('the actual Collection menu does not borrow a member Project address or Space
   const trigger = collection.querySelector<HTMLButtonElement>('[aria-label^="Container preferences"]')!; expect(trigger).not.toBeNull()
   await act(async () => trigger.click())
   expect(document.querySelector('[data-focus-project-preferences]')).not.toBeNull()
+  expect(document.querySelector('[aria-label="Project appearance"]')).toBeNull()
+  expect(document.querySelector('.focus-project-preferences__actions')).toBeNull()
+  expect(document.querySelector('[aria-label="Project note"]')).toBeNull()
   expect(document.querySelector('[aria-label="Copy project address"]')).toBeNull()
   expect(document.querySelector('[aria-label="Open project in Space"]')).toBeNull()
 })

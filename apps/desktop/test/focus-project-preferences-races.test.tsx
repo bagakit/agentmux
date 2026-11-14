@@ -22,7 +22,13 @@ function button(label: string) {
   const element = document.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`) ?? [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === label)
   expect(element, label).not.toBeNull(); expect(element, label).not.toBeUndefined(); return element!
 }
-async function click(label: string) { await act(async () => button(label).click()) }
+async function click(label: string) {
+ await act(async()=>button(label).click())
+ if (label.startsWith('Project preferences ·')) {
+  const appearance=document.querySelector<HTMLButtonElement>('[aria-label="Project appearance"]')
+  if(appearance?.getAttribute('aria-expanded')==='false') await act(async()=>appearance.click())
+ }
+}
 function input() { return document.querySelector<HTMLInputElement>('[aria-label="Project note"]')! }
 async function note(value: string) {
   const element = input(); expect(element).not.toBeNull()

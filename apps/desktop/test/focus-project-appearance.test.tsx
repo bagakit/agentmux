@@ -22,6 +22,10 @@ function frame(project: string, host = 'local') { return [...dom.container.query
 async function click(label: string) {
   const button = document.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)
   expect(button, label).not.toBeNull(); await act(async () => button!.click())
+  if (label.startsWith('Project preferences ·')) {
+    const appearance=document.querySelector<HTMLButtonElement>('[aria-label="Project appearance"]')
+    if(appearance?.getAttribute('aria-expanded')==='false') await act(async()=>appearance.click())
+  }
 }
 async function scene() {
   const root = { ...composerConfig.workspaces[0]!, id: 'root', name: 'Project', path: fixturePath('appearance/root') }

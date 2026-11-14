@@ -13,7 +13,13 @@ import type { AppConfig } from '../src/shared/contracts'
 const dom = composerDOM(), key = focusZoneContainerKey('project','local','one'), second = focusZoneContainerKey('project','remote','one')
 const project = { key: JSON.stringify(['local','one']), pinned: true, note: 'Original note', color: 'blue' as const, collapsed: null }
 function button(name:string) { const node=[...document.querySelectorAll<HTMLButtonElement>('button')].find(node=>node.getAttribute('aria-label')===name || node.textContent===name);expect(node,name).not.toBeUndefined();return node! }
-async function click(name:string) { await act(async()=>button(name).click()) }
+async function click(name: string) {
+ await act(async()=>button(name).click())
+ if (name.startsWith('Project preferences ·')) {
+  const appearance=document.querySelector<HTMLButtonElement>('[aria-label="Project appearance"]')
+  if(appearance?.getAttribute('aria-expanded')==='false') await act(async()=>appearance.click())
+ }
+}
 function deferred<T>() { let resolve!:(value:T)=>void,reject!:(error:Error)=>void;const promise=new Promise<T>((a,b)=>{resolve=a;reject=b});return {promise,resolve,reject} }
 function setup() { useAppStore.setState({config:{...composerConfig,focus:{recentActivityHours:48,projects:[project]}}}) }
 it('a failed direct layout keeps its exact retry intent while newer note drafts and unrelated fields remain intact',async()=>{
