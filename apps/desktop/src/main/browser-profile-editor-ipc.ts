@@ -56,6 +56,8 @@ export function registerBrowserProfileEditorIpc(ports: {
     if (!ports.openBookmark) throw new Error('Bookmark opening is unavailable in this Browser host. The original library is kept.')
     return ports.profiles.bookmarks.open(profileId, bookmarkId, browserId, revision, operationId, url => ports.openBookmark!({ profileId, browserId, operationId }, url))
   }))
+  ports.handle('browser:inspectProfileStorage', (_event, profileId: string, operationId?: string) => ipcResult(async () => { await ports.profiles.initialize(); return ports.profiles.storage.inspect(profileId, operationId) }))
+  ports.handle('browser:clearProfileStorage', (_event, input: import('@agentmux/core/control').BrowserProfileStorageClearInput) => ipcResult(async () => { await ports.profiles.initialize(); return ports.profiles.storage.clear(input) }))
   ports.handle('browser:listProfileExtensions', (_event, id: string, operationId?: string) => ipcResult(async () => { await ports.profiles.initialize(); return ports.profiles.extensions.list(id, operationId) }))
   ports.handle('browser:prepareProfileExtension', (_event, id: string, revision: string, operationId: string, source: string, extensionId?: string) => ipcResult(async () => { await ports.profiles.initialize(); return ports.profiles.extensions.review(id, revision, operationId, source, extensionId) }))
   ports.handle('browser:applyProfileExtension', (_event, id: string, revision: string, reviewId: string) => ipcResult(async () => { await ports.profiles.initialize(); return ports.profiles.extensions.apply(id, revision, reviewId) }))

@@ -518,6 +518,14 @@ export async function registerIpc(args: {
   // workspace's host differently.
   const gh = new GhService((id) => args.runtime.executionHost(id), git)
   const browserProfiles = new BrowserProfileManager()
+  browserProfiles.storage.setConfirmationHandler(async input => {
+    const profile = browserProfiles.listProfiles().find(profile => profile.id === input.profileId)
+    if (!profile || profile.revision !== input.expectedRevision || args.window.isDestroyed()) return false
+    const answer = await dialog.showMessageBox(args.window, { type: 'warning', buttons: ['Cancel', 'Clear offline cache'], defaultId: 0, cancelId: 0,
+      message: `Clear offline cache for ${input.sites.length} selected site${input.sites.length === 1 ? '' : 's'} in “${profile.label}”?`,
+      detail: `${input.sites.reduce((count, site) => count + site.storageKeys.length, 0)} selected storage partitions in this Profile. All Cache API buckets present under these exact keys when the command runs are included, even when a bucket could not be measured. Unknown storage is never used to infer or enlarge the selected key set. Offline documents or unsynced materials may be lost.\n\nCookies, IndexedDB, local storage and Service Worker registrations are kept. Unselected origins and other Profiles are outside this operation. Websites can download caches again; measured disk changes are not a guaranteed amount freed.\n\nProfile: ${profile.id}\nSelected sites:\n${input.sites.map(site => site.origin + ' · ' + site.storageKeys.length + ' partitions').join('\n')}` })
+    return answer.response === 1
+  })
   browserProfiles.cookieFiles.setFileOwner(createProfileCookieFileIo({files,workspace:resource=>{
     const actual=workspace(config,resource.workspaceId)
     if(actual.hostId!==resource.hostId||actual.path!==resource.workspacePath)throw new Error('The exact Cookie Workspace file resource changed.')

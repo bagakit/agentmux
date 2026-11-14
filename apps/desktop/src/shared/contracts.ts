@@ -2233,6 +2233,9 @@ export type AgentMuxDesktopApi = {
     renameProfileFolder(folderId: string, label: string, expectedRevision: number): Promise<BrowserProfileFolder>
     deleteProfileFolder(folderId: string, expectedRevision: number): Promise<{ folderId: string; unassignedProfileIds: string[] }>
     deleteProfile(profileId: string, approval: BrowserProfileDeleteApproval, expectedRevision: string): Promise<import('@agentmux/core/control').BrowserProfileRecycleReceipt>
+    /** Original Profile Cache API disk observations and explicitly confirmed frozen-key actions. */
+    inspectProfileStorage(profileId: string, operationId?: string): Promise<import('@agentmux/core/control').BrowserProfileStorageInspect>
+    clearProfileStorage(input: import('@agentmux/core/control').BrowserProfileStorageClearInput): Promise<import('@agentmux/core/control').BrowserProfileStorageReceipt>
     /** Sites holding cookies in this Profile, for the person to pick one to clear. */
     listProfileSites(profileId: string): Promise<BrowserProfileSite[]>
     clearProfileSite(profileId: string, site: string, approval: BrowserProfileClearSiteApproval): Promise<void>

@@ -16,7 +16,7 @@ export function isBrowserProfileControlRequest(request: AgentMuxControlRequest):
 }
 
 export type BrowserProfileControlPorts = {
-  profiles: Pick<BrowserProfileManager, 'createIdentity' | 'inspectCreation' | 'networkHistory' | 'listProxies' | 'saveProxy' | 'deleteProxy' | 'assignProxy' | 'initialize' | 'listProfiles' | 'listRevision' | 'listSequence'  | 'updateProfile' | 'listViews' | 'saveView' | 'deleteView' | 'bulkUpdate' | 'listFolders'  | 'renameFolder' | 'deleteFolder' | 'setDefaultProfile' | 'refresh' | 'listTrash' | 'listLegacyPendingDeletes' | 'restoreProfile' | 'setTrashRetention' | 'purgeProfile' | 'inspectTrashPurge'> & { extensions?: BrowserProfileManager['extensions']; bookmarks?: BrowserProfileManager['bookmarks']; cookieFiles?:BrowserProfileManager['cookieFiles'] }
+  profiles: Pick<BrowserProfileManager, 'createIdentity' | 'inspectCreation' | 'networkHistory' | 'listProxies' | 'saveProxy' | 'deleteProxy' | 'assignProxy' | 'initialize' | 'listProfiles' | 'listRevision' | 'listSequence'  | 'updateProfile' | 'listViews' | 'saveView' | 'deleteView' | 'bulkUpdate' | 'listFolders'  | 'renameFolder' | 'deleteFolder' | 'setDefaultProfile' | 'refresh' | 'listTrash' | 'listLegacyPendingDeletes' | 'restoreProfile' | 'setTrashRetention' | 'purgeProfile' | 'inspectTrashPurge'> & { storage?: BrowserProfileManager['storage']; extensions?: BrowserProfileManager['extensions']; bookmarks?: BrowserProfileManager['bookmarks']; cookieFiles?:BrowserProfileManager['cookieFiles'] }
   usage: Pick<BrowserProfileUsageOwner, 'usage' | 'deleteProfile' | 'assertUnused'>
   openBookmark?: (request: BrowserProfileBookmarkOpen, url: string) => Promise<void>
   network: BrowserProfileNetworkControl
@@ -66,6 +66,14 @@ export async function executeBrowserProfileControl(request: ProfileRequest, port
     ...await owned(() => ports.profiles.createIdentity(request as Extract<BrowserProfileControlPayload, { operation: BrowserProfileCreationOperation }>, creationActor)) }
   if (request.operation === 'browser.profile.creation.inspect') return { operation: request.operation, ...await ports.profiles.inspectCreation(request.operationId, creationActor) }
   switch (request.operation) {
+    case 'browser.profile.storage.inspect':
+      if (!ports.profiles.storage) throw new AgentMuxError('Offline cache management is unavailable in this Browser host. Existing Profile work remains available.', 'HOST_CAPABILITY_UNAVAILABLE')
+      return { operation: request.operation, ...await ports.profiles.storage.inspect(request.profileId, request.operationId) }
+    case 'browser.profile.storage.clear': {
+      if (!ports.profiles.storage) throw new AgentMuxError('Offline cache management is unavailable in this Browser host. Existing Profile work remains available.', 'HOST_CAPABILITY_UNAVAILABLE')
+      const { operation: _operation, schemaVersion: _schemaVersion, requestId: _requestId, ...input } = request
+      return { operation: request.operation, receipt: await ports.profiles.storage.clear(input) }
+    }
     case 'browser.profile.cookie-file.prepare-import':return {operation:request.operation,review:await cookieFileOwner(ports).prepareImport(request.profileId,request.operationId,request.source,request.scope)}
     case 'browser.profile.cookie-file.import':return {operation:request.operation,receipt:await cookieFileOwner(ports).import(request.profileId,request.reviewId)}
     case 'browser.profile.cookie-file.export':return {operation:request.operation,receipt:await cookieFileOwner(ports).export(request.profileId,request.operationId,request.destination,request.scope)}

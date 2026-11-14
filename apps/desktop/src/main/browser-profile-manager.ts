@@ -1,5 +1,7 @@
 import type { AgentMuxNameActor, BrowserProfileCreationOperation, BrowserProfileControlPayload } from '@agentmux/core/control'
 import { BrowserProfileCookieFiles } from './browser-profile-cookie-files.js'
+import { BrowserProfileStorage } from './browser-profile-storage.js'
+import { openBrowserProfileStorageNative } from './browser-profile-storage-native.js'
 import { openProfileCookieFileNative } from './browser-profile-cookie-file-native.js'
 import { BrowserProfileBookmarks } from './browser-profile-bookmarks.js'
 import { emptyBookmarks } from './browser-profile-bookmark-record.js'
@@ -100,6 +102,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
   readonly extensions: BrowserProfileExtensions
   readonly bookmarks: BrowserProfileBookmarks
   readonly cookieFiles: BrowserProfileCookieFiles
+  readonly storage: BrowserProfileStorage
 
   constructor(private readonly store = new BrowserProfileStore(), sessions?: BrowserProfileSessions, private readonly sessionRoot: () => string = () => app.getPath('sessionData'),
     private readonly purgeOptions: { now?: () => number; assertExclusiveDataOwner?: () => Promise<void> } = {}) {
@@ -114,6 +117,18 @@ export class BrowserProfileManager implements BrowserProfileResolver {
       environment: profileId => (this.profiles.get(profileId) ?? this.archivedProfiles.get(profileId)?.profile)?.environment,
       defaultLanguage: () => app.getLocale(),
       openContents: () => webContents.getAllWebContents()
+    })
+    this.storage = new BrowserProfileStorage({
+      read: async profileId => {
+        this.resolvePartition(profileId)
+        const { snapshot, profile } = await this.store.inspectProfile(profileId)
+        this.adopt(snapshot)
+        return { revision: profile.revision, receipts: structuredClone(snapshot.storageReceipts?.[profileId] ?? []) }
+      },
+      root: profileId => { this.resolvePartition(profileId); return retainedPartitionPath(this.sessionRoot(), describeRetainedPartition(this.sessionRoot(), profileId, this.sessions.nativeSession(profileId).storagePath)) },
+      save: async (profileId, receipt, create) => { this.adopt(await this.store.changeStorageReceipt(profileId, receipt, create)) },
+      change: (profileId, action) => { this.resolvePartition(profileId); return this.configuration(profileId, action) },
+      native: profileId => { this.resolvePartition(profileId); return openBrowserProfileStorageNative(this.sessions.nativeSession(profileId)) }
     })
     this.cookieFiles=new BrowserProfileCookieFiles({
       track:job=>this.trackMutation(job),
