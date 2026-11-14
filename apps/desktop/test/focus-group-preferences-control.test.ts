@@ -17,7 +17,7 @@ import { configOwnerFixture } from './helpers/config-owner-fixture'
 import type { AppConfig } from '../src/shared/contracts'
 
 const project: FocusProjectPreference = { key: JSON.stringify(['original-host', 'original-project']), pinned: true, note: 'My original route', color: 'violet', collapsed: false }
-const collection: FocusProjectPreference = { key: focusCollectionPreferenceKey('original-host', ['category-a', 'category-b']), pinned: true, note: '', color: 'default', collapsed: null }
+const collection: FocusProjectPreference = { key: focusCollectionPreferenceKey('original-host', ['category-a', 'category-b']), pinned: true, note: 'Review every Friday', color: 'amber', collapsed: null }
 const mixed = [collection, project]
 const principal = { transport: 'unix', principal: { kind: 'user', id: 'group-preferences-test' } } as const
 const envelope = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'group-preferences' } as const
@@ -81,7 +81,7 @@ it('a conflicting or failed mixed preference save preserves original values and 
 })
 
 const phase = process.env.AGENTMUX_GROUP_PREFERENCES_PHASE
-it.runIf(phase === 'write' || phase === 'read')('retains mixed Pin order across independent configuration processes', async () => {
+it.runIf(phase === 'write' || phase === 'read')('retains group appearance and mixed Pin order across independent configuration processes', async () => {
   const file = process.env.AGENTMUX_GROUP_PREFERENCES_FILE!, receipt = process.env.AGENTMUX_GROUP_PREFERENCES_RECEIPT!
   expect(file).toBeTruthy(); expect(receipt).toBeTruthy()
   const store = new ConfigStore(file)
