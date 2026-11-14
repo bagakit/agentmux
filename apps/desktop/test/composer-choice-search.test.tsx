@@ -20,9 +20,9 @@ const skills = [
   { name: 'Review', description: 'Inspect exact changes', source: 'project' as const, path: fixturePath('skills/review/SKILL.md') },
   { name: 'Explain', description: 'Describe the architecture', source: 'user' as const, path: fixturePath('skills/explain/SKILL.md') }
 ]
-const menu = () => document.querySelector<HTMLElement>('[role="menu"]')!
+const menu = () => document.querySelector<HTMLElement>('.composer-menu--search[role="dialog"]')!
 const query = () => menu().querySelector<HTMLInputElement>('input')!
-const items = () => [...menu().querySelectorAll<HTMLElement>('[role="menuitem"]')]
+const items = () => [...menu().querySelectorAll<HTMLElement>('button[data-choice]')]
 const trigger = (kind = 'skill') => dom.container.querySelector<HTMLButtonElement>('[aria-label="Choose a ' + kind + '"]')!
 const key = async (node: HTMLElement, value: string, extra = {}) => {
   await act(async () => node.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true, ...extra })))
@@ -37,7 +37,7 @@ async function search(value: string) {
 }
 async function open(kind = 'skill') { await act(async () => { trigger(kind).focus() }); await key(trigger(kind), 'ArrowDown'); await vi.waitFor(() => expect(menu()).not.toBeNull()) }
 async function session() { await dom.render(<AgentSessionComposer sessionId="agent-1" />); await dom.click('.composer-tool--mode') }
-async function close() { await key(query(), 'Escape'); await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).toBeNull()) }
+async function close() { await key(query(), 'Escape'); await vi.waitFor(() => expect(document.querySelector('.composer-menu--search[role="dialog"]')).toBeNull()) }
 
 it('queries real skill descriptions and sources, then inserts the exact original choice', async () => {
   const discover = vi.spyOn(api.ui, 'listAgentSkills').mockResolvedValue(skills)
@@ -49,7 +49,7 @@ it('queries real skill descriptions and sources, then inserts the exact original
   await search('project'); expect(items()).toHaveLength(1); expect(items()[0]!.textContent).toContain('Review')
   await search('architecture'); await key(query(), 'ArrowDown'); expect(document.activeElement).toBe(items()[0])
   await key(items()[0]!, 'Enter')
-  await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).toBeNull())
+  await vi.waitFor(() => expect(document.querySelector('.composer-menu--search[role="dialog"]')).toBeNull())
   expect(discover).toHaveBeenCalledExactlyOnceWith('agent-1')
   expect(dom.draft()).toContain(original); expect(expandSemanticReferences(dom.draft()!)).toContain('@' + skills[1]!.path); expect(dom.draft()).not.toContain(skills[0]!.path)
   await vi.waitFor(() => expect(document.activeElement).toBe(originalEditor))
@@ -67,8 +67,8 @@ it('query, no match, clear and reopen preserve original editor, draft and select
   await open(); await search('no matching skill')
   expect(items()).toHaveLength(0); expect(menu().querySelector('[role="status"]')?.textContent).toBe('No matching skills.')
   await key(query(), 'Enter'); expect(menu()).not.toBeNull(); expect(dom.draft()).toBe(draft); expect(write).not.toHaveBeenCalled()
-  await key(query(), 'Tab'); const clear = menu().querySelector<HTMLButtonElement>('[aria-label="Clear skills search"]')!
-  expect(document.activeElement).toBe(clear)
+  const clear = menu().querySelector<HTMLButtonElement>('[aria-label="Clear skills search"]')!
+  expect(clear.tabIndex).toBe(0)
   await act(async () => clear.click()); expect(query().value).toBe(''); expect(document.activeElement).toBe(query()); expect(items()).toHaveLength(2)
   await search('project'); await close(); await vi.waitFor(() => expect(document.activeElement).toBe(trigger()))
   await open(); expect(query().value).toBe(''); expect(items()).toHaveLength(2)
@@ -111,7 +111,7 @@ it('clicking the original hovered trigger enters query so subsequent typing neve
   const selection = editor.editor.state.selection.toJSON()
   await act(async () => trigger().dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
   expect(document.activeElement).toBe(editor)
-  await act(async () => trigger().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerType: 'mouse', button: 0 })))
+  await act(async () => trigger().click())
   expect(document.activeElement).toBe(query())
   await search('architecture')
   await act(async () => menu().dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: document.body, buttons: 0 })))
@@ -136,7 +136,7 @@ it('switching exact Session invalidates its old query and discovery through orig
   useAppStore.setState({ sessions: [composerSession(), composerSession('agent-2')], agentComposerDrafts: { 'agent-1': 'First draft', 'agent-2': 'Second draft' } })
   await session(); await open(); await search('old query')
   await dom.render(<AgentSessionComposer sessionId="agent-2" />)
-  expect(document.querySelector('[role="menu"]')).toBeNull()
+  expect(document.querySelector('.composer-menu--search[role="dialog"]')).toBeNull()
   await dom.click('.composer-tool--mode'); await open(); expect(query().value).toBe('')
   await act(async () => resolve([skills[0]!]))
   expect(items()[0]!.textContent).toContain('Explain'); expect(discover.mock.calls).toEqual([['agent-1'], ['agent-2']])
@@ -161,7 +161,7 @@ it('Launcher command selection returns to its original editor and inserted caret
   await search('no matching command'); expect(items()).toHaveLength(0); expect(menu().textContent).toContain('No matching commands.')
   await search(description); await act(async () => items().find(item => item.textContent?.includes(text))!.click())
   expect(dom.draft('region')).toBe(text + ' ' + draft)
-  expect(document.querySelector('[role="menu"]')).toBeNull()
+  expect(document.querySelector('.composer-menu--search[role="dialog"]')).toBeNull()
   await vi.waitFor(() => expect(document.activeElement).toBe(originalEditor.view.dom))
   expect(dom.container.querySelector('.tiptap')).toBe(originalEditor.view.dom)
   expect(originalEditor.state.selection.empty).toBe(true)

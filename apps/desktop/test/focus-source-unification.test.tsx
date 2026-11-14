@@ -418,7 +418,7 @@ it('the ordinary foreign card opens its shared Reader and name menu against its 
   await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
   await act(async () => remote.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2, clientX: 20, clientY: 20 })))
   await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).not.toBeNull())
-  const rename = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent?.includes('Rename Agent'))
+  const rename = [...document.querySelectorAll<HTMLElement>('button[data-choice]')].find(node => node.textContent?.includes('Rename Agent'))
   expect(rename).toBeDefined()
   await act(async () => rename!.click())
   const input = dom.container.querySelector<HTMLInputElement>('[aria-label="Rename Agent 真正远端的独立任务"]')!
@@ -457,7 +457,7 @@ it('the ordinary source projection preserves the complete mixed Tab, narrows onl
   await dom.render(<MainFocusFixture navigate={f.navigate} />)
   expect(dom.container.querySelectorAll('.global-session-workspace [data-source-region]')).toHaveLength(2)
   await act(async () => cardWith('真正远端的独立任务').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2 })))
-  const view = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent?.includes('View in Space'))
+  const view = [...document.querySelectorAll<HTMLElement>('button[data-choice]')].find(node => node.textContent?.includes('View in Space'))
   expect(view).toBeDefined()
   await act(async () => view!.click())
   expect(useAppStore.getState().mainSurface).toBe('workbench')
@@ -1012,7 +1012,7 @@ it.each([true, false])('the original Source Skills menu inserts an exact origina
   await vi.waitFor(() => expect(workface()?.querySelector('[aria-label="Choose a skill"]')).not.toBeNull())
   const button = workface().querySelector<HTMLButtonElement>('[aria-label="Choose a skill"]')!
   await act(async () => button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' })))
-  const skill = () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent?.includes('Original workspace skill'))
+  const skill = () => [...document.querySelectorAll<HTMLElement>('button[data-choice]')].find(node => node.textContent?.includes('Original workspace skill'))
   await vi.waitFor(() => expect(skill(), document.body.textContent?.slice(-3000)).toBeDefined(), { timeout: 10000 })
   await act(async () => skill()!.click())
   const ownerKey = originalSourceInputOwnerKey(f.owner.owner.runtimeId, SID)

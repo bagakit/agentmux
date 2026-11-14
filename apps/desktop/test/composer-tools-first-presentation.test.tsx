@@ -94,12 +94,12 @@ it('actual Workspace Pane Composer editor and Mailbox stay live while only never
   expect(document.querySelector('[aria-label="Find skills"]')).toBe(query)
   expect(query.value).toBe('omega');expect(tools.dataset.mode).toBe('current')
   expect({from:bInput!.editor.state.selection.from,to:bInput!.editor.state.selection.to},'Original rich-editor selection remains through menu and warm navigation').toEqual(selection)
-  const omega=[...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item=>item.textContent?.includes('Original omega skill'))
+  const omega=[...document.querySelectorAll<HTMLElement>('button[data-choice]')].find(item=>item.textContent?.includes('Original omega skill'))
   await click(omega??null)
   expect(expandSemanticReferences(useAppStore.getState().agentComposerDrafts.b!)).toContain('@/private/omega/SKILL.md')
   const commandTrigger=tools.querySelector<HTMLElement>('[aria-label="Choose a command"]')!
   await act(async()=>commandTrigger.dispatchEvent(new PointerEvent('pointerover',{bubbles:true,pointerType:'mouse',buttons:0})))
-  const command=[...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item=>item.textContent?.includes('Read original status'))
+  const command=[...document.querySelectorAll<HTMLElement>('button[data-choice]')].find(item=>item.textContent?.includes('Read original status'))
   await click(command??null)
   expect(expandSemanticReferences(useAppStore.getState().agentComposerDrafts.b!)).toContain('Exact configured command body')
   const editedDraft=useAppStore.getState().agentComposerDrafts.b

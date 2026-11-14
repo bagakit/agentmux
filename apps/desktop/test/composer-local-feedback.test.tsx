@@ -74,7 +74,7 @@ it('skill discovery failure remains visible after the menu closes and retry disc
   const discover = vi.spyOn(api.ui, 'listAgentSkills').mockRejectedValueOnce(new Error('Skill folders unavailable')).mockResolvedValueOnce([{ name: 'Review', path: _hygiene_fixturePath("skills/review/SKILL.md"), source: 'project', description: 'Review changes' }])
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   await dom.click('.composer-tool--mode')
-  await act(async () => dom.container.querySelector('[aria-label="Choose a skill"]')!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' })))
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('[aria-label="Choose a skill"]')!.click())
   expect(failure()?.textContent).toContain('Skill folders unavailable')
   await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
   expect(failure()?.textContent).toContain('Skill folders unavailable')
@@ -175,7 +175,7 @@ it('reopening Skills successfully clears its previous error outside the menu', a
   await closeSkills()
   await openSkills()
   expect(failure()).toBeNull()
-  expect(document.querySelector('[role="menu"]')?.textContent).toContain('No skills found')
+  expect(document.querySelector('.composer-menu--search[role="dialog"]')?.textContent).toContain('No skills found')
 })
 it('two tool results in one React batch both append to the Launcher draft', async () => {
   let files!: (paths: string[]) => void
@@ -229,9 +229,9 @@ it.each(['resolve', 'reject'] as const)('old Provider %s cannot replace new skil
   await closeSkills()
   await selectClaude()
   await openSkills()
-  expect(document.querySelector('[role="menu"]')?.textContent).toContain('New provider skill')
+  expect(document.querySelector('.composer-menu--search[role="dialog"]')?.textContent).toContain('New provider skill')
   await act(async () => { if (outcome === 'resolve') resolve([]); else reject(new Error('Old request failed late')) })
-  expect(document.querySelector('[role="menu"]')?.textContent).toContain('New provider skill')
+  expect(document.querySelector('.composer-menu--search[role="dialog"]')?.textContent).toContain('New provider skill')
   expect(failure()).toBeNull()
 })
 it('a late old-Provider failure cannot erase the new Provider error', async () => {

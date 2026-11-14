@@ -29,8 +29,9 @@ const modeToggle = () => container.querySelector<HTMLButtonElement>('.composer-t
 async function revealTools() { await act(async () => modeToggle().click()) }
 const skillsButton = () => [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('Skills'))!
 async function reopen() {
-  await pointer(skillsButton(), 'pointerout')
-  await act(async () => document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })))
+  const search = document.querySelector<HTMLInputElement>('.composer-menu__search input')!
+  await act(async () => search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+  await vi.waitFor(() => expect(document.querySelector('.composer-menu--search[role="dialog"]')).toBeNull())
   await pointer(skillsButton(), 'pointerover')
 }
 
@@ -42,14 +43,14 @@ it('delegates discovery to loadSkills on each open and shows the result — cach
   await revealTools()
   await pointer(skillsButton(), 'pointerover')
   await act(async () => {})
-  expect(document.querySelector('[role="menu"]')?.textContent).toContain('review')
+  expect(document.querySelector('.composer-menu--search[role="dialog"]')?.textContent).toContain('review')
   expect(loadSkills).toHaveBeenCalledOnce()
   // Re-open: the component asks again (Core memoizes, so this is cheap) — it must NOT freeze on a
   // component-local snapshot that a launcher provider-switch could leave stale.
   await reopen()
   await act(async () => {})
   expect(loadSkills).toHaveBeenCalledTimes(2)
-  expect(document.querySelector('[role="menu"]')?.textContent).toContain('review')
+  expect(document.querySelector('.composer-menu--search[role="dialog"]')?.textContent).toContain('review')
 })
 
 it('shows a discovery failure and retries on the next open rather than freezing the error', async () => {
@@ -61,9 +62,9 @@ it('shows a discovery failure and retries on the next open rather than freezing 
   await revealTools()
   await pointer(skillsButton(), 'pointerover')
   await act(async () => {}) // let the rejected promise settle
-  expect(document.querySelector('[role="menu"]')?.textContent).toContain('discovery boom')
+  expect(document.querySelector('.composer-menu--search[role="dialog"]')?.textContent).toContain('discovery boom')
   await reopen()
   await act(async () => {})
   expect(loadSkills).toHaveBeenCalledTimes(2)
-  expect(document.querySelector('[role="menu"]')?.textContent).toContain('later')
+  expect(document.querySelector('.composer-menu--search[role="dialog"]')?.textContent).toContain('later')
 })

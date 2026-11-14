@@ -115,7 +115,7 @@ it('the Composer source menu starts a delayed region capture after the chosen co
   await mount(false)
   const trigger = dom.container.querySelector<HTMLElement>('[aria-label="Choose screenshot source"]')!
   await act(async () => { trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerType: 'mouse', button: 0 })) })
-  const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+  const items = [...document.querySelectorAll<HTMLElement>('button[data-choice]')]
   expect(items.map(item => item.textContent)).toEqual(['Screen region', 'Region in 3 s', 'Region in 5 s', 'Region in 10 s', 'Entire display…', 'Application window…'])
   await act(async () => { items.find(item => item.textContent === 'Region in 5 s')!.click() })
   await vi.waitFor(() => expect(captureScreenshot).toHaveBeenCalledOnce())

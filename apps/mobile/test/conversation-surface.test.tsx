@@ -529,7 +529,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'evidence')
       search.dispatchEvent(new Event('input', { bubbles: true }))
     })
-    const choices = [...document.querySelectorAll<HTMLButtonElement>('[aria-label="Skills"] [role="menuitem"]')]
+    const choices = [...document.querySelectorAll<HTMLButtonElement>('.mobile-command-menu[role="dialog"] button[data-choice]')]
     expect(view.element.querySelector('[aria-label="Skills"]')).toBeNull()
     expect(choices.map(choice => choice.querySelector('strong')!.textContent)).toEqual(['review-evidence'])
     await click(choices[0]!)
