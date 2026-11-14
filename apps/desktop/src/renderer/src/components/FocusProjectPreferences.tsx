@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import '../styles/focus-project-menu.css'
 import * as Popover from '@agentmux/client-ui/components/Modal'
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
@@ -90,7 +91,7 @@ export function FocusProjectPreferences({ projectKey, name, actions, discussion,
       <Popover.Title className="focus-project-preferences__name">{name}</Popover.Title>
       {actions}
       {discussion ? <div ref={setDiscussionHost} data-focus-group-discussion-host="" /> : null}
-      {error ? <div role="status" className="focus-project-preferences__error">{error}<button type="button" className="small-button" onClick={reviewCurrent} aria-label={`Review current ${subject.toLowerCase()} preferences`}>Review current settings</button></div> : null}
+      {error ? <div role="status" className="focus-project-preferences__error">{error}<Button type="button" onClick={reviewCurrent} aria-label={`Review current ${subject.toLowerCase()} preferences`}>Review current settings</Button></div> : null}
       {notice ? <p role="status">{notice}</p> : null}
       {projectKey ? <>
         <button type="button" className="tab-context-menu__item tab-context-menu__item--quiet focus-project-menu-action" aria-expanded={appearanceOpen} aria-label={appearanceLabel} aria-busy={pending || undefined} onClick={() => setAppearanceOpen(value => !value)}><SemanticIcon name={collection ? 'action.pin' : 'appearance.theme'} size={13} /><span>{pending ? `${appearanceLabel} · Saving…` : appearanceLabel}</span><SemanticIcon name="navigation.disclosure" size={11} /></button>
@@ -99,7 +100,7 @@ export function FocusProjectPreferences({ projectKey, name, actions, discussion,
           {!collection ? <><label className="focus-project-preferences__note"><span>Note</span><input aria-label="Project note" value={draft.note} placeholder="A familiar reminder" onChange={event => edit({ ...draft, note: event.target.value })} /></label>
           <div role="group" aria-label="Project background color" className="focus-project-preferences__color-row"><span>Color</span><div className="focus-project-preferences__colors">{FOCUS_PROJECT_COLORS.map(color => <button type="button" key={color} aria-label={`Project color · ${color}`} title={color} aria-pressed={draft.color === color}
             style={{ background: `color-mix(in srgb, ${focusProjectTint(color)} 26%, var(--surface-1))` }} onClick={() => edit({ ...draft, color })}>{draft.color === color ? <SemanticIcon name="status.selected" size={13} /> : null}</button>)}</div></div></> : null}
-          <div className="focus-project-preferences__actions"><button type="button" className="small-button" onClick={() => begin(false)}>Cancel</button><button type="button" className="small-button" disabled={pending} onClick={() => void save()} aria-label={`Save ${subject.toLowerCase()} preferences`}>{pending ? 'Saving…' : error ? 'Retry save' : 'Save'}</button></div>
+          <div className="focus-project-preferences__actions"><Button type="button" onClick={() => begin(false)}>Cancel</Button><Button type="button" disabled={pending} onClick={() => void save()} aria-label={`Save ${subject.toLowerCase()} preferences`}>{pending ? 'Saving…' : error ? 'Retry save' : 'Save'}</Button></div>
         </div> : null}
       </> : collection ? <p className="focus-project-preferences__notice">Pin needs a confirmed Collection. Original members and work surfaces remain available.</p> : null}
 

@@ -1,5 +1,7 @@
 import { COLLECTED_REPLY_TITLE } from '@agentmux/client-ui/conversation-sources'
 import { useConversationView } from '@agentmux/client-ui/use-conversation-view'
+import { Button } from '@agentmux/client-ui/components/Button'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { desktopConversationDiagnostics } from '../lib/conversation-diagnostic-options'
 import { FOCUS_READING_BYTES as MAX_WINDOW_BYTES } from '../lib/focus-reading-budget'
 import { TextInput } from '@agentmux/client-ui/input'
@@ -529,7 +531,7 @@ function FocusTimelineLegend({ active, reading, sources, serviceNotice, latestIn
           <p>{reading.trimmed ? 'Older read records or sources were released. Re-read a source or continue its earlier pages to inspect them.' : 'The history reading window retains up to 200 state observations, 90 native and 200 captured conversation records within 12 MiB. It does not cover the entire history.'}</p>
           <p>Scroll the tracks to see more Contexts. Focus visits are limited to retained observations.</p>
         </section>
-        <footer><button type="button" className="small-button" onClick={() => { readingNext.current = true; setOpen(false); if (trigger.current) onRead(trigger.current) }}>Open conversation records</button></footer>
+        <footer><Button type="button" onClick={() => { readingNext.current = true; setOpen(false); if (trigger.current) onRead(trigger.current) }}>Open conversation records</Button></footer>
       </Dialog.Content>
     </DocumentOverlayPortal>
   </Dialog.Root>
@@ -548,7 +550,7 @@ function FocusHistoryObservation({ segment, anchor, time, onClose }: { segment: 
         <dt>Project</dt><dd>{identity?.project?.name ?? 'Not recorded'}</dd><dt>Branch / Topic</dt><dd>{[identity?.branch, identity?.topicId].filter(Boolean).join(' / ') || 'Not recorded'}</dd>
         <dt>Workspace</dt><dd>{identity?.workspacePath ? displayPath(identity.workspacePath, identity.hostId) : 'Not recorded'}</dd><dt>Session</dt><dd>{segment.sessionId}</dd></dl>
       <p>Focus visits are retained here. Message and execution history coverage may be incomplete.</p>
-      <footer><Dialog.Close asChild><button type="button" className="small-button">Close</button></Dialog.Close></footer>
+      <footer><Dialog.Close asChild><Button type="button">Close</Button></Dialog.Close></footer>
     </Dialog.Content>
   </DocumentOverlayPortal></Dialog.Root>
 }
@@ -569,7 +571,7 @@ function FocusWorkingObservation({ segment, track, anchor, time, onClose }: {
         <dt>Boundary</dt><dd>{endings[segment.end]}</dd><dt>Run</dt><dd>{segment.run.runId}</dd><dt>Session</dt><dd>{track.sessionId}</dd>
         <dt>Project</dt><dd>{track.identity?.project?.name ?? 'Not recorded'} · Observed Context identity</dd></dl>
       <p>State observations do not measure CPU execution or prove task success. Older history or missing transitions may remain unknown.</p>
-      <footer><Dialog.Close asChild><button type="button" className="small-button">Close</button></Dialog.Close></footer>
+      <footer><Dialog.Close asChild><Button type="button">Close</Button></Dialog.Close></footer>
     </Dialog.Content>
   </DocumentOverlayPortal></Dialog.Root>
 }
@@ -1105,11 +1107,11 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
         event.stopPropagation()
         if (control instanceof HTMLButtonElement) event.preventDefault()
       }}>
-        {mode !== 'collapsed' ? <><FocusTimelineLegend active={documentVisible} reading={nativeWindow.window} sources={inputSources.length} serviceNotice={inputObservationNotice} latestIncomplete={!historical && latest.windowIncomplete} onRead={openInputRecords} /><button data-focus-window-control type="button" className="icon-button" aria-label="Locate current Context track" title="Scroll to the current Context without changing the time window" disabled={!currentContext || !currentTrackPresent} onClick={locateCurrentTrack}><ThemeActionLocateIcon size={12} /></button><button type="button" className="icon-button" aria-label="View conversation records" aria-expanded={readerOpen} title={`Conversation records${inputSource ? ` · ${inputSource.name}` : ''}, including speech without a recorded time${inputObservationNotice ? ` · ${inputObservationNotice}` : ''}`} onClick={event => openInputRecords(event.currentTarget)}><ThemeObjectConversationIcon size={12} /></button><TextInput data-focus-window-control type="datetime-local" className="recent-focus__date" aria-label="Focus history date and time" aria-invalid={dateError !== null} title={`Clock time in ${time.zone}`} value={dateDraft ?? time.dateInput(anchor ?? now)} onChange={event => inspectDate(event.target.value)} />
+        {mode !== 'collapsed' ? <><FocusTimelineLegend active={documentVisible} reading={nativeWindow.window} sources={inputSources.length} serviceNotice={inputObservationNotice} latestIncomplete={!historical && latest.windowIncomplete} onRead={openInputRecords} /><IconButton data-focus-window-control type="button" aria-label="Locate current Context track" title="Scroll to the current Context without changing the time window" disabled={!currentContext || !currentTrackPresent} onClick={locateCurrentTrack}><ThemeActionLocateIcon size={12} /></IconButton><IconButton type="button" aria-label="View conversation records" aria-expanded={readerOpen} title={`Conversation records${inputSource ? ` · ${inputSource.name}` : ''}, including speech without a recorded time${inputObservationNotice ? ` · ${inputObservationNotice}` : ''}`} onClick={event => openInputRecords(event.currentTarget)}><ThemeObjectConversationIcon size={12} /></IconButton><TextInput data-focus-window-control type="datetime-local" className="recent-focus__date" aria-label="Focus history date and time" aria-invalid={dateError !== null} title={`Clock time in ${time.zone}`} value={dateDraft ?? time.dateInput(anchor ?? now)} onChange={event => inspectDate(event.target.value)} />
         <button data-focus-window-control type="button" className="icon-button" aria-label="Previous focus window" onClick={() => inspectWindow((anchor ?? now) - hours * HOUR_MS)}><ThemeNavigationPreviousIcon size={12} /></button>
-        <button data-focus-window-control type="button" className="icon-button" aria-label="Zoom out Focus timeline" title="Zoom out · wider time window" disabled={zoomIndex === FOCUS_WINDOW_HOURS.length - 1} onClick={() => setHours(FOCUS_WINDOW_HOURS[zoomIndex + 1]!)}><ThemeActionZoomOutIcon size={12} /></button>
+        <IconButton data-focus-window-control type="button" aria-label="Zoom out Focus timeline" title="Zoom out · wider time window" disabled={zoomIndex === FOCUS_WINDOW_HOURS.length - 1} onClick={() => setHours(FOCUS_WINDOW_HOURS[zoomIndex + 1]!)}><ThemeActionZoomOutIcon size={12} /></IconButton>
         <select data-focus-window-control aria-label="Focus window size" value={hours} onChange={event => setHours(Number(event.target.value))}>{FOCUS_WINDOW_HOURS.map(size => <option key={size} value={size}>{focusWindowLabel(size)}</option>)}</select>
-        <button data-focus-window-control type="button" className="icon-button" aria-label="Zoom in Focus timeline" title="Zoom in · narrower time window" disabled={zoomIndex === 0} onClick={() => setHours(FOCUS_WINDOW_HOURS[zoomIndex - 1]!)}><ThemeActionZoomInIcon size={12} /></button>
+        <IconButton data-focus-window-control type="button" aria-label="Zoom in Focus timeline" title="Zoom in · narrower time window" disabled={zoomIndex === 0} onClick={() => setHours(FOCUS_WINDOW_HOURS[zoomIndex - 1]!)}><ThemeActionZoomInIcon size={12} /></IconButton>
         <button data-focus-window-control type="button" className="icon-button" aria-label="Next focus window" onClick={() => inspectWindow((anchor ?? now) + hours * HOUR_MS)}><ThemeNavigationNextIcon size={12} /></button>
         <button data-focus-window-control type="button" className="recent-focus__now" aria-label="Return to current focus window" aria-pressed={anchor === null} onClick={() => { setNow(Date.now()); inspectWindow(null) }}>Now</button></> : null}
         {mode !== 'collapsed' ? <FocusTimelineRulerSettings active={documentVisible} preferences={ruler} onChange={saveRuler} dateChoice={dateChoice} onSelectDate={inspectWindow} onCancelDate={() => setDateChoice(null)} /> : null}

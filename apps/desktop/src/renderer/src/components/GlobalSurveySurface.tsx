@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { isWorkbenchSurfaceDetached } from '../lib/workbench-window-registry'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { WindowReturnButton } from './SpatialWindowGrip'
@@ -831,13 +832,13 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
         {error ? <div className="survey-error" role="alert">
           <span>{error}</span>
           <div className="survey-error__actions">
-            {failedCreation.current?.createdBrowser ? <button type="button" className="small-button" disabled={opening} onClick={showOriginalPage}>Show original page</button> : null}
-            {failedCreation.current && !failedCreation.current.admission?.issues.some(issue => issue.code === 'SURVEY_PAGE_MEMBERSHIP_SUPERSEDED') ? <button type="button" className="small-button" disabled={opening} onClick={() => void openBrowser(query.trim() ? query : 'about:blank')}>{failedCreation.current.admission ? 'Retry Survey registration' : 'Retry original item'}</button> : null}
+            {failedCreation.current?.createdBrowser ? <Button type="button" disabled={opening} onClick={showOriginalPage}>Show original page</Button> : null}
+            {failedCreation.current && !failedCreation.current.admission?.issues.some(issue => issue.code === 'SURVEY_PAGE_MEMBERSHIP_SUPERSEDED') ? <Button type="button" disabled={opening} onClick={() => void openBrowser(query.trim() ? query : 'about:blank')}>{failedCreation.current.admission ? 'Retry Survey registration' : 'Retry original item'}</Button> : null}
           </div>
         </div> : null}
         {Object.entries(itemBrowserRecoveries).map(([key, recovery]) => <div key={key} className="survey-error" role="alert" data-survey-browser-recovery={recovery.preparation.reference?.regionId}>
           <span>{recovery.message}</span>
-          <div className="survey-error__actions"><button type="button" className="small-button" disabled={recovery.pending} onClick={() => void createItemBrowser(recovery.preparation)}>{recovery.pending ? 'Retrying original page…' : 'Retry original page'}</button></div>
+          <div className="survey-error__actions"><Button type="button" disabled={recovery.pending} onClick={() => void createItemBrowser(recovery.preparation)}>{recovery.pending ? 'Retrying original page…' : 'Retry original page'}</Button></div>
         </div>)}
         {pageSelection ? <>{pageSelection.presentationReadRecovery ? <div className="survey-relation-notice" role="status">{pageSelection.presentationReadRecovery.issue}</div> : null}
           {projection ? <WorkspaceWorkbench workspaceId={projection.displayWorkspaceId}

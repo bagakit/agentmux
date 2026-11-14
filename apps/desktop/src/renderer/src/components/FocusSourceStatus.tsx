@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { ServiceNoticeDisclosure } from './ServiceNoticeDisclosure'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import type { ServiceNoticeItem } from '../lib/use-service-notices'
@@ -31,7 +32,7 @@ export function FocusSourceStatus({ sourceError, loading, laneErrors, onRetrySou
     <ServiceNoticeDisclosure scope="focus:sources" notices={notices} available={!loading} visible={visible}
     title="Sources unavailable" className="focus-source-status" actions={<>
       {sourceError ? <button type="button" className="small-button" aria-busy={loading} onClick={onRetrySources}>Retry project sources</button> : null}
-      {laneErrors.length ? <button type="button" className="small-button" onClick={onRetryLanes}>Retry lane details</button> : null}
+      {laneErrors.length ? <Button type="button" onClick={onRetryLanes}>Retry lane details</Button> : null}
     </>}>
     {notices.map(item => <section key={item.id}>
       <ServiceWindowNotice notice={item.notice} />

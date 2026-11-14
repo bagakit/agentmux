@@ -1,3 +1,4 @@
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { FocusViewSwitch } from './FocusViewSwitch'
 import { TopRowLeadingChrome } from './TopRowChrome'
 import { TextInput } from '@agentmux/client-ui/input'
@@ -55,7 +56,7 @@ export function FocusToolbar({ active = true, children, selectedId, selected, ta
   return <header className="focus-toolbar">
     <TopRowLeadingChrome /><FocusViewSwitch />
     <div className="focus-toolbar__filters">{children}</div>
-    {onOpenCollaboration ? <button type="button" className="icon-button" aria-label="Locate Agent in map" title="Locate in map" onClick={onOpenCollaboration}><ThemeObjectCollaborationIcon size={15} /></button> : null}
+    {onOpenCollaboration ? <IconButton type="button" aria-label="Locate Agent in map" title="Locate in map" onClick={onOpenCollaboration}><ThemeObjectCollaborationIcon size={15} /></IconButton> : null}
     {(tab || selectedId) ? <FocusToolbarContext active={active} key={JSON.stringify([selectedId, tab?.id])} selectedId={selectedId} selected={selected} tab={tab} reference={reference} onReview={onReview} onCloseWorkspace={onCloseWorkspace} regionOnly={regionOnly} onToggleRegion={onToggleRegion} /> : null}
   </header>
 }
@@ -225,6 +226,6 @@ function FocusToolbarContext({ active, selectedId, selected, tab, reference, onR
         }
       }} className="tab-context-menu" align="end" collisionPadding={8} onEscapeKeyDown={() => { menuEscapeReturnRef.current = menuOriginRef.current }} onCloseAutoFocus={closeMenuFocus}><FocusTabMenuContent name={name} actions={actions} Label={DropdownMenu.Label} Item={DropdownMenu.Item} /></DropdownMenu.Content></DocumentOverlayPortal>
     </DropdownMenu.Root> : null}
-    <button type="button" className="icon-button" aria-label="Close Focus workspace" title="Collapse Focus workspace" onClick={onCloseWorkspace}><ThemeLayoutCloseRightIcon size={14} /></button>
+    <IconButton type="button" aria-label="Close Focus workspace" title="Collapse Focus workspace" onClick={onCloseWorkspace}><ThemeLayoutCloseRightIcon size={14} /></IconButton>
   </div>
 }

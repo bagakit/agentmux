@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { detachedFileSurface, knowledgeSurfacePresented } from '../lib/knowledge-surface-navigation'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { NoteSharedFileEditing } from './NoteSharedFileEditing'
@@ -213,7 +214,7 @@ export function NoteFileSurfaceView({ tabId, surface, visible = true }: { tabId:
         event.preventDefault()
         if (restoreChoiceFocus.current && presentation.active && choiceOpener.current?.isConnected) choiceOpener.current.focus({ preventScroll: true })
       }}>
-      <header><Dialog.Title>Open {choices[0] ? sourceName(choices[0].source) ?? choices[0].source.location.path : 'Note'}</Dialog.Title><Dialog.Close asChild><button type="button" className="small-button" aria-label="Close Note positions">Close</button></Dialog.Close></header>
+      <header><Dialog.Title>Open {choices[0] ? sourceName(choices[0].source) ?? choices[0].source.location.path : 'Note'}</Dialog.Title><Dialog.Close asChild><Button type="button" aria-label="Close Note positions">Close</Button></Dialog.Close></header>
       <Dialog.Description className="notebook-create-description">This note is open in several places. Choose where to show its block.</Dialog.Description>
       {notice ? <p className="note-knowledge-notice" role="status">{notice}</p> : null}
       <div className="note-source-choices" aria-label="Original Note positions">{choices.map(choice => <button type="button" className="note-backlink"

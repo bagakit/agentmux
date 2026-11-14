@@ -1,3 +1,5 @@
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { civilClock } from "../lib/civil-clock"
 import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -43,17 +45,17 @@ export function FocusTimelineRulerSettings({ active = true, preferences, onChang
   const intervalValid = interval.trim() !== '' && Number.isInteger(minutes) && minutes >= 1 && minutes <= 1440
   const valid = draft.mode !== 'uniform' || (intervalValid && phaseValid)
   return <Dialog.Root open={active && (open || dateChoice !== null)} onOpenChange={begin}>
-    <Dialog.Trigger asChild><button data-focus-window-control type="button" className="icon-button" aria-label="Focus timeline settings" title="Time ruler and time zone"><ThemeActionAdjustIcon size={12} /></button></Dialog.Trigger>
+    <Dialog.Trigger asChild><IconButton data-focus-window-control type="button" aria-label="Focus timeline settings" title="Time ruler and time zone"><ThemeActionAdjustIcon size={12} /></IconButton></Dialog.Trigger>
     <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content onCloseAutoFocus={event => { if (dormantClose.current) event.preventDefault() }} className="dialog-surface focus-ruler-settings" onPointerDownCapture={event => event.stopPropagation()}>
         <header><Dialog.Title>{dateChoice ? 'Choose this clock time' : 'Timeline settings'}</Dialog.Title><Dialog.Close asChild><button type="button" className="icon-button" aria-label="Close timeline settings"><ThemeActionCloseIcon size={14} /></button></Dialog.Close></header>
         <Dialog.Description>{dateChoice ? `${dateChoice.value.replace('T', ' ')} occurs twice in this time zone. Choose its UTC offset.` : 'Set the grid and time zone used throughout this timeline.'}</Dialog.Description>
-        {dateChoice ? <div className="focus-ruler-settings__dates">{dateChoice.candidates.map(candidate => <button type="button" className="small-button" key={candidate.instant} onClick={() => { onSelectDate(candidate.instant); setOpen(false) }}>{focusUtcOffset(candidate.offset)}<span>{new Date(candidate.instant).toISOString().replace('T', ' ').replace('.000Z', ' UTC')}</span></button>)}</div> : <>
+        {dateChoice ? <div className="focus-ruler-settings__dates">{dateChoice.candidates.map(candidate => <Button type="button" key={candidate.instant} onClick={() => { onSelectDate(candidate.instant); setOpen(false) }}>{focusUtcOffset(candidate.offset)}<span>{new Date(candidate.instant).toISOString().replace('T', ' ').replace('.000Z', ' UTC')}</span></Button>)}</div> : <>
           <fieldset className="focus-ruler-settings__modes"><legend>Time ruler</legend>{MODES.map(mode => <label key={mode.value} data-selected={draft.mode === mode.value}><input type="radio" name="focus-ruler-mode" value={mode.value} checked={draft.mode === mode.value} onChange={() => setDraft(value => ({ ...value, mode: mode.value }))} /><span><strong>{mode.label}</strong><small>{mode.description}</small></span></label>)}</fieldset>
           {draft.mode === 'uniform' ? <div className="focus-ruler-settings__interval"><label>Every (minutes)<TextInput aria-label="Time ruler interval in minutes" type="number" min="1" max="1440" step="1" value={interval} aria-invalid={!intervalValid} onChange={event => setInterval(event.target.value)} /></label><label>Clock offset<TextInput aria-label="Time ruler clock offset" type="time" value={phase} aria-invalid={!phaseValid} onChange={event => setPhase(event.target.value)} /></label></div> : null}
           <label className="focus-ruler-settings__zone">Time zone<SelectionField label="Focus timeline time zone" value={draft.timeZone} options={[{ value: 'system', label: 'System time zone' }, ...zones.map(zone => ({ value: zone, label: zone }))]} onValueChange={timeZone => setDraft(value => ({ ...value, timeZone }))} /></label>
-          <footer><Dialog.Close asChild><button type="button" className="small-button">Cancel</button></Dialog.Close><button type="button" className="small-button" disabled={!valid} onClick={() => { onChange({ ...draft, ...(draft.mode === 'uniform' ? { intervalMinutes: minutes, phaseMinutes: Number(phase.slice(0, 2)) * 60 + Number(phase.slice(3)) } : {}) }); setOpen(false) }}>Apply</button></footer>
+          <footer><Dialog.Close asChild><Button type="button">Cancel</Button></Dialog.Close><Button type="button" disabled={!valid} onClick={() => { onChange({ ...draft, ...(draft.mode === 'uniform' ? { intervalMinutes: minutes, phaseMinutes: Number(phase.slice(0, 2)) * 60 + Number(phase.slice(3)) } : {}) }); setOpen(false) }}>Apply</Button></footer>
         </>}
       </Dialog.Content>
     </DocumentOverlayPortal>

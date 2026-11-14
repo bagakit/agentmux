@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { readNoteMarkdownHeader } from '@agentmux/core/note-format'
@@ -60,8 +61,8 @@ export function NoteRecoveryDrawer({ tabId, surface, active, section, onSection,
     onCloseAutoFocus={onCloseAutoFocus} onPointerDownOutside={event => event.preventDefault()} onFocusOutside={event => event.preventDefault()}>
     <header className="note-recovery-drawer__header">
       <Dialog.Title>Versions &amp; recovery</Dialog.Title>
-      <div><button type="button" className="small-button" onClick={onExpand} aria-label={expanded ? 'Return to side panel' : 'Expand review'}>{expanded ? 'Return to side' : 'Expand'}</button>
-      <Dialog.Close asChild><button type="button" className="small-button" aria-label="Close versions and recovery"><CloseIcon size={15} /></button></Dialog.Close></div>
+      <div><Button type="button" onClick={onExpand} aria-label={expanded ? 'Return to side panel' : 'Expand review'}>{expanded ? 'Return to side' : 'Expand'}</Button>
+      <Dialog.Close asChild><Button type="button" aria-label="Close versions and recovery"><CloseIcon size={15} /></Button></Dialog.Close></div>
     </header>
     <Dialog.Description hidden>Review saved versions and kept input. Your current draft stays in the editor.</Dialog.Description>
     <SurfaceModeSwitch value={section} onChange={onSection} active={active} ariaLabel="Versions and recovery section" options={[
@@ -76,11 +77,11 @@ export function NoteRecoveryDrawer({ tabId, surface, active, section, onSection,
           <NoteConflictReview tabId={tabId} regionId={surface.regionId} workspaceId={surface.workspaceId} path={surface.path} active={active} />
           {conflict ? <section className="note-recovery-replace"><h4>Replace saved content</h4>
             <p>{issue.kind === 'deleted' ? 'The file was deleted. Overwrite recreates it using this draft.' : 'Overwrite replaces the current saved file with this draft. Review the changes above first.'}</p>
-            <button type="button" className="small-button small-button--warning" disabled={saving} onClick={() => {
+            <Button type="button" className="small-button--warning" disabled={saving} onClick={() => {
               const message = issue.kind === 'deleted' ? 'Recreate this file with the current draft?' : 'Replace the saved file with this entire draft?'
               if (hostDocument.defaultView?.confirm(message)) void useAppStore.getState().overwriteDocument(tabId, surface.regionId).catch(reportError)
-            }}>Overwrite with this draft</button>
-            {issue.kind === 'deleted' || !issue.noteMerge ? <button type="button" className="small-button" disabled={saving} onClick={() => void useAppStore.getState().reloadDocument(tabId, surface.regionId)}>Use current file; keep draft</button> : null}
+            }}>Overwrite with this draft</Button>
+            {issue.kind === 'deleted' || !issue.noteMerge ? <Button type="button" disabled={saving} onClick={() => void useAppStore.getState().reloadDocument(tabId, surface.regionId)}>Use current file; keep draft</Button> : null}
           </section> : null}
           <RetainedDocumentDrafts tabId={tabId} surface={surface} active={active} observation={observation} inPanel />
           {!drafts?.length && !doc?.noteConversion && !issue && !doc?.noteEditing?.attempt && doc?.noteEditing?.receipt?.noteHistory?.status !== 'unconfirmed' && doc?.noteEditing?.receipt?.noteTitleProjection?.status !== 'unconfirmed' && doc?.noteProvenance?.status !== 'unconfirmed' && doc?.noteWriteAttribution?.status !== 'unconfirmed' && !observation.issues.length && !observation.observationIssue ? <p className="note-recovery-empty">No kept drafts or recovery issues.</p> : null}

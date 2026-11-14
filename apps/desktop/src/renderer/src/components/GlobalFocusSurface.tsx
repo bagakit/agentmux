@@ -1,3 +1,5 @@
+import { Button } from '@agentmux/client-ui/components/Button'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import type { FocusContextAccess } from '../lib/focus-context-access'
 import { spaceMountKey } from '../../../shared/space-mount'
 import { originalSourceEntryForSelection } from '../lib/original-space-navigation'
@@ -82,12 +84,12 @@ function FocusLocationChoice({ reference, tab, workspaceName, groupIndex, region
   const sessionNameMetadata = useWorkbenchTabNameMetadata(tab)
   const names = useWorkbenchTabRecord('agentNames', tab)
   const timelines = useWorkbenchTabRecord('timelines', tab)
-  return <button type="button" className="small-button focus-location-choice" onClick={onSelect}
+  return <Button type="button" className="focus-location-choice" onClick={onSelect}
     title={`${reference.displayWorkspaceId} / ${reference.groupId} / ${reference.tabId} / ${reference.regionId}`}>
     <strong>{tab ? workbenchTabDisplayName(tab, sessions, names, timelines, sessionNameMetadata) : 'Original work surface'}</strong>
     <small>{workspaceName}{' · '}{groupIndex >= 0 ? `Group ${groupIndex + 1}` : 'Original Group'}
       {' · '}{regionIndex >= 0 ? `Region ${regionIndex + 1}` : 'Original Region'}</small>
-  </button>
+  </Button>
 }
 
 export function GlobalFocusSurface({ presentation, currentReference = null, directoryIssue = null, viewTargets, regionOnly, onToggleRegion, workspaceOpen, onCloseWorkspace, onSelectContext, onSelectLocation, visible: hostVisible = true }: {
@@ -587,7 +589,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
             regionIndex={tab ? regionIds(tab.layout.root).indexOf(reference.regionId) : -1}
             onSelect={() => openMoteContext(moteChoices.id, reference)} />
         })}
-        <button type="button" className="small-button" onClick={dismissMoteChoices}>Dismiss location choices</button>
+        <Button type="button" onClick={dismissMoteChoices}>Dismiss location choices</Button>
       </div> : null}
   </> : undefined
   return <SpaceSourceReaders><section className={`global-board-surface global-focus-surface ${showWorkspace ? 'global-board-surface--session-open' : ''}`} aria-label="Focus" data-desktop-focus-view="list" data-focus-reply-lines={replyLines} data-focus-topic-presentation={topicPresentation} hidden={!surfaceVisible} inert={!visible} aria-hidden={!surfaceVisible} style={{ ...focusSelectionStyle(config?.focus), display: surfaceVisible ? undefined : 'none', '--focus-workspace-width': `calc(${workspaceRatio * 100}% - 6px)`, '--focus-reply-lines': replyLines, '--focus-card-track-height': `${focusCardTrackHeight(replyLines)}px` } as CSSProperties}>
@@ -595,11 +597,11 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       <div className="focus-filters">
         <div className="global-board-toolbar__controls">
           <label className="global-board-search"><ThemeActionSearchIcon size={13} /><TextInput ref={searchRef} aria-label="Search contexts" placeholder="Search text, IDs or amux links" title="Filter names, activity, paths and original object IDs or links. Enter searches case-sensitive text in retained conversations." onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); historySearch.start() } }} value={query} onChange={(event) => setQuery(event.target.value)} /></label>
-          <button type="button" className="small-button focus-search-history-trigger" aria-label="Search retained conversation text" title="Search retained conversation text · Enter" disabled={!query.trim()} onClick={() => historySearch.start()}><ThemeActionSearchIcon size={13} /><span>History</span></button>
+          <Button type="button" className="focus-search-history-trigger" aria-label="Search retained conversation text" title="Search retained conversation text · Enter" disabled={!query.trim()} onClick={() => historySearch.start()}><ThemeActionSearchIcon size={13} /><span>History</span></Button>
           <LocalRetainedInputsPanel />
           <FocusFilters value={filters} onChange={changeFilters} onInspectChange={setInspectingFilters} visible={visible} onClear={clearLocalFilters} onHistory={() => historySearch.start()} historyAvailable={Boolean(trimmedQuery)}
             options={{ projects: projectOptions.map(option => ({ ...option, count: projectCounts.get(option.id) ?? 0 })), states: stateCounts, types: typeCounts }} />
-          <button type="button" className="icon-button" aria-label="Arrange projects by recent activity" title="Arrange unpinned projects by recent activity. Otherwise project positions stay fixed." onClick={() => setArrangeProjects(value => value + 1)}><ArrangeProjectsIcon size={13} /></button>
+          <IconButton type="button" aria-label="Arrange projects by recent activity" title="Arrange unpinned projects by recent activity. Otherwise project positions stay fixed." onClick={() => setArrangeProjects(value => value + 1)}><ArrangeProjectsIcon size={13} /></IconButton>
           <FocusSourceStatus sourceError={catalogue.error} loading={catalogue.loading} laneErrors={hierarchyErrors}
             onRetrySources={catalogue.refresh} onRetryLanes={refreshHierarchy} visible={visible && documentActive} />
         </div>
@@ -622,7 +624,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       {agentReveal ? <div className="focus-agent-reveal" role="status" aria-label="Focus Agent reveal">
         <span>{revealedContext ? revealOutsideFilters ? 'Showing ' + revealedContext.context.name + ' outside current filters.' : 'Located ' + revealedContext.context.name + '.'
           : 'Original Context is unconfirmed · ' + agentReveal.hostId + ' · ' + agentReveal.agentSessionId + '. The current filters and work are kept.'}</span>{' '}
-        <button type="button" className="small-button" onClick={clearReveal}>End reveal</button>
+        <Button type="button" onClick={clearReveal}>End reveal</Button>
       </div> : null}
       {revealedContext && revealedContext.lane !== 'execution' ? <div className="focus-agent-reveal-card" ref={separateRevealRef} data-focus-reveal-scroll>
         <WorkbenchPresentationContext.Provider value={cardPresentation}>
@@ -674,8 +676,8 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       }}
     /><aside className="global-session-workspace" aria-label="Focus workspace">
       {sourceChoices ? <div className="focus-location-choices" role="group" aria-label="Choose original workface">
-        <p>Choose the exact workface for this Agent.</p>{sourceChoices.locations.map(location => <button type="button" className="small-button focus-location-choice" key={JSON.stringify(location)} onClick={() => { sourceChoices.choose(location); setSourceChoices(null) }}><strong>Tab {location.tabId}</strong><small>Region {location.regionId}</small></button>)}
-        <button type="button" className="small-button" onClick={() => setSourceChoices(null)}>Dismiss location choices</button>
+        <p>Choose the exact workface for this Agent.</p>{sourceChoices.locations.map(location => <Button type="button" className="focus-location-choice" key={JSON.stringify(location)} onClick={() => { sourceChoices.choose(location); setSourceChoices(null) }}><strong>Tab {location.tabId}</strong><small>Region {location.regionId}</small></Button>)}
+        <Button type="button" onClick={() => setSourceChoices(null)}>Dismiss location choices</Button>
       </div> : projection
         ? <div className="focused-tab-workspace" data-focus-tab-id={selectedTab?.id}
           data-focus-zone-id={projection.entity.kind === 'zone' ? projection.entity.zoneId : undefined}>
@@ -685,8 +687,8 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
             title="Workface location unconfirmed" notice={{ kind: 'indeterminate', notice: {
               step: 'Focus work surface directory', mode: [directoryIssue, presentation?.issue].filter(Boolean).join('\n'),
               restore: 'The original work surface remains available. Recheck its current location to confirm the Space and Zone.'
-            } }} inlineActions={presentation?.issue && projection.selection[0] ? <button type="button" className="small-button"
-              onClick={() => (onSelectLocation ?? projection.onSelect)(projection.selection[0]!)}>Use current location</button> : null} /> : null}
+            } }} inlineActions={presentation?.issue && projection.selection[0] ? <Button type="button"
+              onClick={() => (onSelectLocation ?? projection.onSelect)(projection.selection[0]!)}>Use current location</Button> : null} /> : null}
           <WorkspaceWorkbench workspaceId={projection.displayWorkspaceId} projection={projection}
             viewOwnership="projection" viewTargets={viewTargets} visible={visible} />
         </div>
@@ -697,8 +699,8 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
               restore: placeless
                 ? `${placeless.runUnobserved ? 'The current Run state is unknown.' : `Its Run is ${placeless.processState}.`} Open the original conversation in a new Tab to read its history and review recovery. This only opens a view; its Session, Run and drafts are unchanged.`
                 : 'Choose a confirmed location. The original Session and work surfaces are retained.'
-            } }} actions={placeless ? <button type="button" className="small-button" data-focus-open-placeless=""
-              onClick={() => openPlaceless(placeless.id)}>Open in a new Tab</button> : null} />
+            } }} actions={placeless ? <Button type="button" data-focus-open-placeless=""
+              onClick={() => openPlaceless(placeless.id)}>Open in a new Tab</Button> : null} />
             {presentation?.references.length ? <div className="focus-location-choices" aria-label="Choose Focus location">{presentation.references.map(reference => {
               const layout = layouts[reference.displayWorkspaceId], tab = tabs[reference.tabId]
               const groupIndex = layout ? groupIds(layout.root).indexOf(reference.groupId) : -1

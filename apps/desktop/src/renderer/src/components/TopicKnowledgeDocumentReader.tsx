@@ -4,6 +4,7 @@ import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useState } from 'react'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { api } from '../lib/api'
 import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
@@ -73,8 +74,8 @@ export function TopicKnowledgeDocumentReader({ document: original, refresh, onCl
     if (event.key === 'Escape' && !isImeCompositionKeyDown(event)) { event.preventDefault(); event.stopPropagation(); onClose() }
   }}>
     <header><span><strong title={original.title}>{original.title}</strong><small title={original.target.path}>Original file · {original.target.path}</small></span>
-      <button type="button" className="icon-button" aria-label="Open original file" title="Open original file" onClick={() => void openOriginal()}><ThemeObjectFileIcon size={13} /></button>
-      <button type="button" className="icon-button" aria-label="Close document detail" title="Back to results" onClick={onClose}><ThemeActionCloseIcon size={13} /></button>
+      <IconButton type="button" aria-label="Open original file" title="Open original file" onClick={() => void openOriginal()}><ThemeObjectFileIcon size={13} /></IconButton>
+      <IconButton type="button" aria-label="Close document detail" title="Back to results" onClick={onClose}><ThemeActionCloseIcon size={13} /></IconButton>
     </header>
     <div className="topic-knowledge-entry__body">
       {reading ? <p className="topic-knowledge-hint" role="status">Reading original file…</p> : null}

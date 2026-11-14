@@ -4,6 +4,7 @@ import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { scratchTopicLogicalPath } from '@agentmux/host/mote-model'
 import { api } from '../lib/api'
@@ -131,14 +132,14 @@ export function TopicKnowledgePanel({ workspace, topic, topics = [], active = tr
   }
   return <section className="topic-knowledge-panel" aria-label={`Knowledge in ${title}`}>
     <header className="topic-knowledge-panel__header"><span className="topic-knowledge-scope" title={topic ? [title, current.map(category => category.title).join(' · ') || 'Category not confirmed'].join(' · ') : 'Search across all Topics'}><TopicIcon size={13} aria-hidden="true" /><strong>{title}</strong></span>
-      {topic && fact?.contentKind !== 'mote' && !topic.soul ? <button type="button" className="icon-button" aria-label="Move to category…" title="Move to category…" onClick={() => setMoveTarget({ topicId: topic.id, title: topic.title })}><ThemeActionExchangeIcon size={14} /></button> : null}
+      {topic && fact?.contentKind !== 'mote' && !topic.soul ? <IconButton type="button" aria-label="Move to category…" title="Move to category…" onClick={() => setMoveTarget({ topicId: topic.id, title: topic.title })}><ThemeActionExchangeIcon size={14} /></IconButton> : null}
       <button type="button" className="icon-button" aria-label="Refresh knowledge" onClick={() => setAttempt(value => value + 1)}><ThemeActionRefreshIcon size={13} /></button>
       {topic ? <button type="button" className="icon-button" aria-label="New knowledge" onClick={() => setEdit({ topicId: topic.id })}><ThemeActionCreateKnowledgeIcon size={14} /></button> : null}</header>
     <form className="topic-knowledge-search" role="search" onSubmit={event => { event.preventDefault(); setSearch(query.trim()); setAttempt(value => value + 1) }}>
       <ThemeActionSearchIcon size={14} aria-hidden="true" />
       <TextInput ref={searchInput} type="text" aria-label={topic ? 'Search this Topic' : 'Search all Topics'} value={query} placeholder="Search knowledge and files…" onChange={event => { setQuery(event.target.value); if (!event.target.value) clearSearch() }} onKeyDown={event => { if (event.key === 'Escape' && query && !isImeCompositionKeyDown(event)) { event.preventDefault(); event.stopPropagation(); clearSearch() } }} />
-      {query ? <button type="button" className="icon-button" aria-label="Clear search" title="Clear search" onClick={clearSearch}><ThemeActionClearIcon size={12} /></button> : null}
-      <button type="submit" className="icon-button topic-knowledge-search__submit" aria-label="Search" title="Search · Enter"><ThemeNavigationReturnIcon size={14} /></button>
+      {query ? <IconButton type="button" aria-label="Clear search" title="Clear search" onClick={clearSearch}><ThemeActionClearIcon size={12} /></IconButton> : null}
+      <IconButton type="submit" className="topic-knowledge-search__submit" aria-label="Search" title="Search · Enter"><ThemeNavigationReturnIcon size={14} /></IconButton>
     </form>
     {error || topic?.readError || issues.length || historyIssues.length ? <div className="topic-knowledge-status">
       {error || topic?.readError ? <div className="surface-inline-error" role="status">{error || topic?.readError} Existing discussions and files remain available.</div> : null}
@@ -175,10 +176,10 @@ export function TopicKnowledgePanel({ workspace, topic, topics = [], active = tr
       {!loading && !hasResults ? <div className="topic-knowledge-empty"><ThemeActionSearchIcon size={20} aria-hidden="true" /><strong>{incomplete ? 'Some sources could not be searched' : search ? 'No matches' : topic ? 'A place for useful knowledge' : 'Find something worth keeping'}</strong><p className="topic-knowledge-hint">{incomplete ? 'Narrow your search or open an original file. Existing files remain available.' : search ? 'No saved knowledge or text documents match this search.' : topic ? 'Keep useful references and conclusions from your discussions here.' : 'Search across all Topics to find saved knowledge and original text documents.'}</p></div> : null}
     </div>
     {selected ? <article className="topic-knowledge-entry" aria-label="Knowledge detail" onKeyDown={event => { if (event.key === 'Escape' && !isImeCompositionKeyDown(event)) { event.preventDefault(); event.stopPropagation(); closeDetail() } }}>
-      <header><span><strong title={selected.title}>{selected.title}</strong><small>{selected.certainty}{selected.scope ? ` · ${selected.scope}` : ''}</small></span><button type="button" className="icon-button" aria-label="Edit knowledge" title="Edit knowledge" onClick={() => setEdit({ topicId: selected.topicId, entry: selected })}><ThemeActionEditIcon size={13} /></button><button type="button" className="icon-button" aria-label="Close knowledge detail" title="Back to results" onClick={closeDetail}><ThemeActionCloseIcon size={13} /></button></header>
+      <header><span><strong title={selected.title}>{selected.title}</strong><small>{selected.certainty}{selected.scope ? ` · ${selected.scope}` : ''}</small></span><IconButton type="button" aria-label="Edit knowledge" title="Edit knowledge" onClick={() => setEdit({ topicId: selected.topicId, entry: selected })}><ThemeActionEditIcon size={13} /></IconButton><IconButton type="button" aria-label="Close knowledge detail" title="Back to results" onClick={closeDetail}><ThemeActionCloseIcon size={13} /></IconButton></header>
       <div className="topic-knowledge-entry__body">
       {!rootPath ? <div className="surface-inline-error" role="status">The source Topic directory is not confirmed. Text, sources and editing remain available; refresh the directory to open its file links.
-        <button type="button" className="icon-button" aria-label="Refresh source Topic directory" title="Refresh source Topic directory" onClick={() => void useAppStore.getState().refreshScratchTopics(workspace.id, true)}><ThemeActionRefreshIcon size={13} /></button>
+        <IconButton type="button" aria-label="Refresh source Topic directory" title="Refresh source Topic directory" onClick={() => void useAppStore.getState().refreshScratchTopics(workspace.id, true)}><ThemeActionRefreshIcon size={13} /></IconButton>
       </div> : null}
       <AgentMarkdown content={selected.content} className="topic-knowledge-prose" workspaceRoot={workspace.path} {...(rootPath ? {
         sourcePath: rootPath + '/knowledge/' + selected.entryId + '.json',

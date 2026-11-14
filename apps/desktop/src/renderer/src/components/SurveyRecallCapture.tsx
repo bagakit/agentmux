@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { presentKnowledgeSurface, sameKnowledgeSelections } from '../lib/knowledge-surface-navigation'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -100,11 +101,11 @@ export function SurveyRecallCapture({ target, onClose }: { target: CaptureTarget
         {saved ? <p role="status" className="survey-relation-notice"><ThemeObjectSurveyIcon key={cue.key} size={14} aria-hidden="true" animation={cue.animation} onAnimationEnd={cue.stop} /> Saved to {library?.notebooks[receipt.notebook?.notebookId ?? '']?.name ?? 'Recall'}.
           {draft.note !== receipt.draft ? ' Your newer input is still kept as a draft.' : ''}</p> : null}
         {error || receipt?.notebookIssue || libraryIssue || persistenceIssue ? <p role="status" className="surface-inline-error">{error ?? receipt?.notebookIssue ?? libraryIssue ?? persistenceIssue}</p> : null}
-        <footer><button type="button" className="small-button" disabled={busy} onClick={onClose}>{saved ? 'Done' : 'Cancel'}</button>
-          {saved ? <button type="button" className="small-button" disabled={busy} onClick={anotherFinding}>Another finding</button> : null}
-          {saved ? <button type="button" className="primary-button" disabled={busy} onClick={() => void openSaved()}>Open in Recall</button>
-            : <button type="button" className="primary-button" disabled={busy || !library || !notebookId || (!receipt && !draft.note.trim())} onClick={() => void save()}>
-              {busy ? 'Saving…' : receipt?.status === 'unknown' || receipt?.status === 'pending' ? 'Check this save' : receipt ? 'Continue this save' : 'Save finding'}</button>}
+        <footer><Button type="button" disabled={busy} onClick={onClose}>{saved ? 'Done' : 'Cancel'}</Button>
+          {saved ? <Button type="button" disabled={busy} onClick={anotherFinding}>Another finding</Button> : null}
+          {saved ? <Button type="button" variant="primary" disabled={busy} onClick={() => void openSaved()}>Open in Recall</Button>
+            : <Button type="button" variant="primary" disabled={busy || !library || !notebookId || (!receipt && !draft.note.trim())} onClick={() => void save()}>
+              {busy ? 'Saving…' : receipt?.status === 'unknown' || receipt?.status === 'pending' ? 'Check this save' : receipt ? 'Continue this save' : 'Save finding'}</Button>}
         </footer>
       </Dialog.Content>
     </DocumentOverlayPortal>

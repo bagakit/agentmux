@@ -1,4 +1,5 @@
 import type { AgentSessionHistoryDescriptor } from '@agentmux/core'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { searchFocus, FocusSearchLocation } from '../lib/focus-search'
 
 type SearchResult = ReturnType<typeof searchFocus>
@@ -43,7 +44,7 @@ export function FocusSearchLocations({ result, onSelect, onRead, describeLocatio
      {source.history?.observedNativeHandle ? <div><dt>Observed native</dt><dd>{source.history.observedNativeHandle.sessionId}</dd></div> : null}
      {source.history?.previousNativeHandle ? <div><dt>Previous native</dt><dd>{source.history.previousNativeHandle.sessionId}</dd></div> : null}
     </dl></details>
-    {onRead ? <button type="button" className="focus-search-result__read small-button" onClick={() => onRead(source)}>Read conversation</button> : null}
+    {onRead ? <Button type="button" className="focus-search-result__read" onClick={() => onRead(source)}>Read conversation</Button> : null}
    </article>)}</section> : null}
   </div> : null}
  </section>

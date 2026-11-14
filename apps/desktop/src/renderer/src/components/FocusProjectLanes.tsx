@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { HostBadge } from './HostBadge'
 import { FocusLaneHeadingMenu } from './FocusLaneHeadingMenu'
 import { hostIdentityProjection } from '../lib/region-execution-host'
@@ -171,11 +172,11 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
   }
   return <section className="focus-project-lanes" aria-label="Focus context scan">
     {preferencePending ? <div className="focus-project-order-status" role="status">Saving group preferences…</div> : null}
-    {orderFailure ? <div className="focus-project-order-error" role="status">{orderFailure.message}<button type="button" className="small-button" onClick={() => void saveProjectChange(orderFailure.change, orderFailure.original)}>Retry {orderFailure.change.kind === 'move' ? 'group order' : 'project visibility'}</button>
-      <button type="button" className="small-button" onClick={() => {
+    {orderFailure ? <div className="focus-project-order-error" role="status">{orderFailure.message}<Button type="button" onClick={() => void saveProjectChange(orderFailure.change, orderFailure.original)}>Retry {orderFailure.change.kind === 'move' ? 'group order' : 'project visibility'}</Button>
+      <Button type="button" onClick={() => {
         const current = useAppStore.getState().config?.focus?.projects ?? []
         void saveProjectChange(orderFailure.change, current)
-      }}>Retry using current settings</button></div> : null}
+      }}>Retry using current settings</Button></div> : null}
     <div className="focus-project-lanes__rows" ref={rowsRef}>
       {leading}
       {/* History-only projects keep the same keyed frame and history child as live projects. */}

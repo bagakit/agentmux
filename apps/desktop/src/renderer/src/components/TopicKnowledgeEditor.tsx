@@ -3,6 +3,7 @@ import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import type { KnowledgeTopic, TopicKnowledge, TopicKnowledgeSource } from '@agentmux/core/control'
 import { useEffect, useRef, useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
@@ -49,7 +50,7 @@ export function TopicKnowledgeEditor({ target, onClose, onSaved }: {
           <label>Applies to<TextInput value={scope} disabled={busy} placeholder="Optional context or limits" onChange={event => setScope(event.target.value)} /></label>
           {sources.length ? <details className="topic-knowledge-sources"><summary>{sources.length} original source{sources.length === 1 ? '' : 's'}</summary>{sources.map((source, index) => <p key={index}>{knowledgeSourceLabel(source)}</p>)}</details> : null}
           {error ? <p role="alert" className="surface-inline-error">{error}</p> : null}
-          <footer><button type="button" className="small-button" disabled={busy} onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy || !title.trim()}>{busy ? 'Saving…' : 'Save knowledge'}</button></footer>
+          <footer><Button type="button" disabled={busy} onClick={onClose}>Cancel</Button><button className="primary-button" disabled={busy || !title.trim()}>{busy ? 'Saving…' : 'Save knowledge'}</button></footer>
         </form>
       </Dialog.Content></DocumentOverlayPortal>
   </Dialog.Root>
@@ -101,7 +102,7 @@ export function TopicKnowledgeCapture({ target, onClose, onSaved }: { target: { 
       {topicId === '__new_topic__' ? <><label>Topic title<TextInput value={newTitle} maxLength={120} disabled={creating} onChange={event => setNewTitle(event.target.value)} /></label>
         <label>Category<select value={categoryId} disabled={creating} onChange={event => setCategoryId(event.target.value)}><option value="">未分类</option>{categories.filter(category => !category.readError).map(category => <option key={category.categoryId} value={category.categoryId}>{category.title}</option>)}</select></label></> : null}
       {error ? <p role="status" className="surface-inline-error">{error}</p> : null}{loading ? <p role="status">Reading Topics…</p> : null}
-      <footer><button type="button" className="small-button" disabled={creating} onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={creating || !topicId || (topicId === '__new_topic__' && !newTitle.trim())} onClick={() => void continueCapture()}>{creating ? 'Creating…' : 'Continue'}</button></footer>
+      <footer><Button type="button" disabled={creating} onClick={onClose}>Cancel</Button><Button type="button" variant="primary" disabled={creating || !topicId || (topicId === '__new_topic__' && !newTitle.trim())} onClick={() => void continueCapture()}>{creating ? 'Creating…' : 'Continue'}</Button></footer>
     </Dialog.Content></DocumentOverlayPortal></Dialog.Root>
     <TopicKnowledgeEditor target={edit} onClose={() => setEdit(null)} onSaved={entry => { onSaved?.(entry); setEdit(null); onClose() }} />
   </>

@@ -1,5 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { NoteLinkActions } from '@agentmux/client-ui/components/NoteLinkActions'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { useNoteAttachments } from '../lib/use-note-attachments'
 import { NoteFileContext, useNoteFileResource, resolveNoteSourceResource } from '@agentmux/client-ui/components/NoteFileContext'
 import { retainNoteDraftEditor, retainNoteDraftNavigation, observeNoteDraftNavigation, notePendingSourceDecorations, observeNotePendingSource } from '../lib/note-share-staging'
@@ -404,15 +405,15 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
   return <ReferenceContext.Provider value={{ knowledge: shared?.knowledge ?? knowledge, trail: [], sourceName, onOpen, onOpenLink }}><div className="note-editor" data-note-empty={note.content.content?.length === 1 && note.content.content[0]?.type === 'paragraph' && !note.content.content[0].content?.length}>
     {mappingIssue && <section className="note-knowledge-notice" aria-label="Incoming update recovery">
       <p>Both drafts are kept. If blocks moved or cannot be matched reliably, compare the drafts and choose which one to continue editing.</p>
-      <button type="button" className="small-button" onClick={() => snapshot.current?.retry()}>Retry incoming update</button>
+      <Button type="button" onClick={() => snapshot.current?.retry()}>Retry incoming update</Button>
       {mappingDrafts && <>
-        <button type="button" className="small-button" aria-expanded={compareIncoming} onClick={() => setCompareIncoming(value => !value)}>Compare incoming update</button>
-        {onKeepDisplayedDraft && <button type="button" className="small-button" onClick={() => {
+        <Button type="button" aria-expanded={compareIncoming} onClick={() => setCompareIncoming(value => !value)}>Compare incoming update</Button>
+        {onKeepDisplayedDraft && <Button type="button" onClick={() => {
           if (!editor || editor.isDestroyed || composing.current || editor.view.composing) return
           const current = props.current
           if (mappingDrafts.incoming !== serializeNoteDocument(current.note)) return
           current.onKeepDisplayedDraft?.(serializeNoteDocument({ ...current.note, content: editor.getJSON() }), mappingDrafts.incoming)
-        }}>Keep editing displayed draft</button>}
+        }}>Keep editing displayed draft</Button>}
         {compareIncoming && <><p>Displayed draft → incoming draft · read only. Source shows the incoming draft; retained drafts remain available.</p><div className="note-version-history__diff"><Suspense fallback={<p role="status">Opening draft comparison…</p>}><ReadonlyDiffEditor original={mappingDrafts.displayed} modified={mappingDrafts.incoming} wordWrap language="markdown" theme={MONACO_THEME_ID} /></Suspense></div></>}
       </>}
     </section>}
