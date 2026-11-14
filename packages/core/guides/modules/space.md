@@ -210,6 +210,47 @@ Folder/Zone/Tab work and does not change any Session cwd or create an Agent.
 
 [spatial](../shared/spatial.md "amux:include")
 
+## Save a Category or ordinary Topic avatar
+
+`space object avatar read --input FILE|-` reads an exact original target and its current
+appearance revision. Category targets are `{kind:"category",categoryId,objectKey}`;
+ordinary Topic targets are `{kind:"topic",workspaceId,topicId,objectKey}`. Use the IDs and
+content key from the original Topic/Category owner. `topic category ls` returns
+`categoryId` and `spaceId`: use `spaceId` as the Category `objectKey`. For an ordinary
+Topic, run `topic inspect --topic ID`; require its actual `contentKind:"topic"`,
+`workspaceId` and `contentIdentity`, then construct:
+`{kind:"topic",workspaceId:topic.workspaceId,topicId:topic.topicId,objectKey:topic.contentIdentity}`.
+The optional identity fields can be unavailable; keep the target unknown in that case.
+Do not decode `zoneId` or derive a key from `directoryPath`, a title or the caller's cwd.
+For example, feed `{target:{kind:"topic",workspaceId:"RETURNED_WORKSPACE_ID",topicId:"RETURNED_TOPIC_ID",objectKey:"RETURNED_CONTENT_IDENTITY"}}`
+to `space object avatar read --input -`, replacing all values from that same inspection.
+Reading never uploads, publishes or repairs a missing directory.
+
+For a semantic icon or reset, use `space object avatar save --input FILE|-` with
+`{target,beforeRevision,choice:"book"}` or `choice:null`. These are ordinary configuration
+CAS edits, including for an authenticated Agent. They have no asset operation or historical
+ACK. Inspect the same current value after an unknown save; do not infer that the old write
+was acknowledged. Confirmed remote object identities can use icon/reset even where this
+Desktop cannot write their image files.
+
+A PNG crop is one complete publication: `{target,operationId,beforeRevision,
+choice:{kind:"png",dataUrl:"data:image/png;base64,..."}}`. It uses the existing local object
+image directory and the original configuration owner. Supply the exact bounded static
+256×256 PNG; the service validates its bytes, and does not render an image on your behalf.
+The trusted transport fixes the original actor; actor/principal fields are not input.
+Keep the complete original request. Read `{target,operationId}` to inspect that publication.
+`readerIdentity` identifies this trusted query; `operation.actor` identifies the original
+publisher. A saved asset ACK must bind that reader to the original actor and the hash of
+the complete original request, including its target, baseline, operation and PNG. Another actor’s matching payload or operation is historical evidence, not this
+caller’s submission confirmation. A direct internal Mote history read without trusted
+context has no reader identity; old actorless history never acquires the present reader.
+`publication-unknown` and unconfirmed durability remain unknown even when current values
+look equal. Do not repeat it with a new operation ID. A later separately chosen appearance
+needs an explicit fresh intent and the currently inspected baseline; retain the old request.
+Old Mote publication records without an actor remain readable with unavailable attribution;
+reading cannot attribute or resume them as the present caller. These avatar operations do
+not create, replace, stop or change the execution directory of any Agent.
+
 ## Interact with one mounted member
 
 Use `connectSpaceMember(rpc, target)` from `@agentmux/core/space-member-client` for an original Hosted full Session and its existing terminal/input machinery. The target contains the original Space reference, Region, execution Runtime, Session and expected Run. Its membership and frozen route remain at the source Core; the execution Core separately authorizes the current viewer. The client never imports that Session into another Core’s local namespace.

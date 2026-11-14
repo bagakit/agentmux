@@ -10,6 +10,10 @@ when: "Discover or edit an original Topic/knowledge resource"
 The Topic owner holds categories, Topic identity and resource associations; knowledge
 stays in real filesystem sources. Begin with topic category ls, topic ls/inspect and exact
 knowledge ls/search/read. Preserve returned Host, resource path, Topic and document identity.
+For ordinary Topic appearance, `topic ls/inspect` retain the original optional `workspaceId`
+and `contentIdentity` alongside `contentKind`; these come from the original workspace and
+spatial owner. Use them for the exact `space object avatar` target. Missing identity stays
+unknown: neither `zoneId` decoding nor `directoryPath` hashing establishes it.
 A Mote display location is not its knowledge directory. Missing/unavailable sources stay
 explicit; do not replace a user's SOUL/Wiki or invent a parallel registry.
 

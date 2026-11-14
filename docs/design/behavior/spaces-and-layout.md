@@ -442,6 +442,8 @@ Topics 是从日常讨论持续积累知识的入口。临时交流可以先开�
 
 Survey 的整理入口沿[《Survey、临时 Zone 工作面与知识入口》](knowledge-workflows.md#survey临时-zone-工作面与知识入口)继续。普通 Topic 对应 Zone，不能再把另一套 Zone 嵌在 Topic 下；整项研究成为新 Topic 时保原研究 Zone 身份，加入所选 Category。整理到已有 Topic 时，以原内容引用、知识条目或准确 Tab/Region 展示关系进入目标 Topic，原研究 Zone、Note/Block 和其他绑定保留，不压扁研究布局或复制生命周期。
 
+普通 Topic 的公共发现沿原内容 owner 返回其原 workspaceId 与 spatial inspection 的 contentIdentity；二者缺失时目标保持未知。头像 target 复用这些事实，不从 Zone ID、目录路径或显示位置推导对象 key；Category 对应原 categoryId/spaceId。PNG 的 saved 回执须绑定可信本次 reader、原 publisher 与完整原请求 hash；其他主体的同 operation 历史与旧无主体记录仍可查询，不能冒充本次提交确认。
+
 **CUI 将 Topics 用作真实知识库。** 人与 Agent 经公共控制界面发现 Category/Topic，按范围搜索与读取知识及来源，创建讨论／知识、修订条目、转移 Topic 归属，并读取真实结果。GUI 与 CUI 消费同一内容、关系、权限与修订 owner；返回可继续寻址的稳定 ID、来源和准确目标，不从调用者 cwd、最近 Tab 或默认 Mote 猜目标。歧义返回候选，局部读取失败表达部分／未知；准确内容或资源 owner 不可用时只报告本次操作未知，未知保存不冒成功，也不盲重放创建。按原准确 Topic 发起的 inspect 与知识读取，在该 Topic 晋升为 Mote 后接续到同一对象并返回其实际类型，规则只见[《完成以后，接着原来的事》](companions-from-work.md#完成以后接着原来的事)。并发编辑沿原 revision-aware 保存与冲突合同，写入不隐式启动、发消息或续跑 Agent。具体命令、权限粒度与存储格式归公共接入合同；这些设计要求不声称当前 CLI 已交付全部知识能力，公共接入与分层仍见[《公共控制与跨客户端接入》](public-control.md)。
 
 **Mote 与普通 Topic 分开组织。** Mote 是带持久人格的协作对象，继续作为自己的 Space；Topics 是知识组织入口，普通 Topic 是 Category 中的主题 Zone。复用公共文件与工作面能力、具有全局工作能力或共享 Scratch，均不使普通 Topic/未绑定 Tab 自动属于某个 Mote。成员可包含通过原空间关系明确绑定的外来内容，不能按 cwd、标题、相邻位置或所有 Scratch Tab 猜成员。Mote 的选择、恢复和同一对象内操作须保持对象范围，具体约束见[《Mote 快捷入口与当前协调上下文》](motes-and-coordination.md#mote-快捷入口与当前协调上下文)。
