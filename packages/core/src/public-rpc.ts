@@ -292,6 +292,7 @@ type NativeParams = MeshNetworkParams & AgentPromotionParamsMap & NameControlPar
   'agent.creation.continue': import('./agent-creation-continue.js').AgentMuxCreationContinueParams
   'agent.inspect': { target: AgentMuxRpcSessionTarget }
   'agent.execution.inspect': import('./agent-execution-journal.js').AgentExecutionOperationKey & { hostId: string }
+  'agent.execution.admit': import('./agent-execution-coordinator.js').AgentExecutionOpenInput
   'agent.execution.create': import('./agent-execution-coordinator.js').AgentExecutionOpenInput
   'agent.execution.continue': import('./agent-execution-contract.js').AgentExecutionReference
   'agent.execution.binding': { bindingId: string; view?: 'association' }
@@ -420,6 +421,7 @@ type NativeResult = MeshNetworkResults & AgentPromotionResultMap & NameControlRe
   'agent.creation.continue': import('./agent-creation-continue.js').AgentMuxCreationContinueResult
   'agent.inspect': AgentMuxRpcAgentInspection
   'agent.execution.inspect': import('./agent-execution-journal.js').AgentExecutionOperation | null
+  'agent.execution.admit': import('./agent-execution-contract.js').AgentExecutionReference
   'agent.execution.create': { session: import('./types.js').AgentMuxAgentSession; execution: import('./agent-execution-coordinator.js').AgentExecutionInspection }
   'agent.execution.continue': AgentMuxRpcResult<'agent.execution.create'>
   'agent.execution.binding': import('./agent-execution-coordinator.js').AgentExecutionInspection | null
@@ -584,7 +586,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   ...NAME_CONTROL_METHODS, ...SPACE_MEMBER_METHODS, ...SPACE_SESSION_METHODS, ...SPACE_FOLDER_METHODS, ...SPACE_AUTHORITY_METHODS, ...AGENT_OPEN_METHODS,
   'space.state': 'short', 'space.commit': 'long', 'space.resolve': 'short', 'name.history': 'short', 'name.confirm': 'long',
   'agent.conversation.landmark.ls': 'short', 'agent.conversation.landmark.apply': 'long',
-  'agent.conversation.snapshot.ls': 'long', 'agent.conversation.snapshot.release': 'short', whoami: 'short', 'skill.ls': 'long', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.creation.continue': 'short', 'agent.execution.inspect': 'short', 'agent.execution.create': 'long', 'agent.execution.continue': 'long', 'agent.execution.binding': 'short', 'agent.execution.watch': 'short', 'agent.execution.rejoin': 'long', 'agent.restart': 'long', 'agent.restart.inspect': 'short', 'agent.stop.inspect': 'short', 'agent.refresh': 'short', 'agent.continuity.control': 'short', 'agent.native.confirm': 'long', 'agent.native.ls': 'long', 'agent.native.history': 'long', 'agent.native.history.resource': 'long', 'agent.context': 'long', 'agent.history': 'long', 'agent.conversation.record': 'long', 'agent.conversation.release': 'short', 'agent.conversation.inspect': 'long', 'agent.conversation.checkpoint': 'long', 'agent.conversation.changes': 'long', 'agent.conversation.watch': 'long', 'agent.history.usage': 'long', 'agent.history.record.inspect': 'long', 'agent.history.record.delete': 'long', 'agent.history.resource': 'long', 'agent.interaction.respond': 'long', 'agent.interaction.inspect': 'short', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
+  'agent.conversation.snapshot.ls': 'long', 'agent.conversation.snapshot.release': 'short', whoami: 'short', 'skill.ls': 'long', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.creation.continue': 'short', 'agent.execution.inspect': 'short', 'agent.execution.admit': 'long', 'agent.execution.create': 'long', 'agent.execution.continue': 'long', 'agent.execution.binding': 'short', 'agent.execution.watch': 'short', 'agent.execution.rejoin': 'long', 'agent.restart': 'long', 'agent.restart.inspect': 'short', 'agent.stop.inspect': 'short', 'agent.refresh': 'short', 'agent.continuity.control': 'short', 'agent.native.confirm': 'long', 'agent.native.ls': 'long', 'agent.native.history': 'long', 'agent.native.history.resource': 'long', 'agent.context': 'long', 'agent.history': 'long', 'agent.conversation.record': 'long', 'agent.conversation.release': 'short', 'agent.conversation.inspect': 'long', 'agent.conversation.checkpoint': 'long', 'agent.conversation.changes': 'long', 'agent.conversation.watch': 'long', 'agent.history.usage': 'long', 'agent.history.record.inspect': 'long', 'agent.history.record.delete': 'long', 'agent.history.resource': 'long', 'agent.interaction.respond': 'long', 'agent.interaction.inspect': 'short', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
   'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short', 'agent.spawn.ls': 'short',
   'agent.automation.pause': 'short', 'agent.automation.inspect': 'short',
   'agent.input.observation': 'short',

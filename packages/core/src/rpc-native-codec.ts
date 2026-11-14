@@ -440,6 +440,11 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
           session.toolExecution?.bindingId !== input.bindingId || execution.continuation?.createOperationId !== input.createOperationId) fail()
       return { session, execution }
     }
+    if (method === 'agent.execution.admit') {
+      const input = parseAgentExecutionCreate(params), result = parseAgentExecutionReference(value)
+      if (result.bindingId !== input.bindingId || result.agentSessionId !== input.agent.agentSessionId || result.createOperationId !== input.agent.createOperationId) fail()
+      return result
+    }
     if (method === 'agent.execution.create') {
       const input = parseAgentExecutionCreate(params), result = record(value, ['session', 'execution'])
       const session = parseRpcAgentSession(result.session)

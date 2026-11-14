@@ -4,9 +4,10 @@ import type { RuntimeController } from './runtime-controller'
 /** Desktop carries original Core operations and reader custody only. It never
  * opens execution state, owns a Coordinator or restores/closes helper bridges. */
 export function createCoreExecutionBindingClient(runtime: Pick<RuntimeController, 'callOriginalCore' | 'subscribeOriginalCore'>):
-  Pick<AgentExecutionBindingService, 'create' | 'inspect' | 'rejoin' | 'continueOriginal' | 'watch'> {
+  Pick<AgentExecutionBindingService, 'admit' | 'create' | 'inspect' | 'rejoin' | 'continueOriginal' | 'watch'> {
   const context = (value?: AgentMuxRpcCallContext) => value ?? { transport: 'unix' as const }
   return {
+    admit: (input, original) => runtime.callOriginalCore('local', 'agent.execution.admit', input, context(original)),
     create: (input, original) => runtime.callOriginalCore('local', 'agent.execution.create', input, context(original)),
     inspect: (bindingId, view, original?: AgentMuxRpcCallContext) => runtime.callOriginalCore('local', 'agent.execution.binding', { bindingId, ...(view ? { view } : {}) }, context(original)),
     rejoin: (bindingId, original) => runtime.callOriginalCore('local', 'agent.execution.rejoin', { bindingId }, context(original)),

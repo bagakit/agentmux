@@ -26,6 +26,8 @@ export interface AgentExecutionOpenInput {
   resourceHostId: string
   resourceRuntimeId: string
   resourceWorkspacePath: string
+  /** Original Source request identity; frozen with its full private contribution. */
+  sourceRequestDigest?: string
   resourceGrant: import('./agent-execution-helper.js').AgentExecutionResourceGrant
   agent: Omit<AgentMuxHostAgentCreateInput, 'toolExecution'> & { agentSessionId: string; createOperationId: string }
 }
@@ -231,7 +233,9 @@ export class AgentExecutionCoordinator {
       if (typeof input.agentRuntimeId !== 'string' || !input.agentRuntimeId || typeof input.resourceRuntimeId !== 'string' || !input.resourceRuntimeId ||
           typeof input.resourceWorkspacePath !== 'string' || !isAbsolute(input.resourceWorkspacePath)) return { state: 'unconfirmed', reference: original,
         issue: { code: 'EXECUTION_RUNTIME_WITNESS_UNCONFIRMED', message: 'The original journal has no complete frozen Runtime/resource tuple. Current routes were not substituted.' } }
-      return { state: 'confirmed', reference: original, agentRuntimeId: input.agentRuntimeId, resourceRuntimeId: input.resourceRuntimeId, resourceWorkspacePath: input.resourceWorkspacePath }
+      return { state: 'confirmed', reference: original, agentRuntimeId: input.agentRuntimeId, resourceRuntimeId: input.resourceRuntimeId, resourceWorkspacePath: input.resourceWorkspacePath,
+        agent: { executorId: input.agent.executorId, executorRevision: input.agent.executorRevision, workspacePath: input.agent.workspacePath },
+        ...(input.sourceRequestDigest === undefined ? {} : { sourceRequestDigest: input.sourceRequestDigest }) }
     })() : undefined
     return structuredClone({ ...(this.observations.get(bindingId) ?? { bindingId, agentHostId: record.input.agentHostId,
       resourceHostId: record.input.resourceHostId, agentSessionId: record.input.agent.agentSessionId,
@@ -355,20 +359,35 @@ export class AgentExecutionCoordinator {
     this.connectionFailures.delete(id)
     this.observe(record.input, undefined, record.notices)
   }
-  /** Original user-authorized creation; retries retain both Host identities and all original operation IDs. */
-  async create(value: AgentExecutionOpenInput, context?: AgentMuxRpcCallContext): Promise<{ session: AgentMuxAgentSession; execution: AgentExecutionInspection }> {
+  private creationInput(value: AgentExecutionOpenInput): AgentExecutionOpenInput {
     const input = structuredClone(value)
     for (const [route, runtimeId] of [[input.agentRoute, input.agentRuntimeId], [input.resourceRoute, input.resourceRuntimeId]] as const)
       if (route && parseAdoptedHostRoute(route).hops.at(-1)!.target.runtimeId !== runtimeId) throw fail('The adopted route ends at another original execution Runtime.', 'EXECUTION_HOST_CHANGED')
     if (['bindingId', 'agentHostId', 'agentRuntimeId', 'resourceHostId', 'resourceRuntimeId', 'resourceWorkspacePath'].some(key => typeof input[key as keyof AgentExecutionOpenInput] !== 'string' || !input[key as keyof AgentExecutionOpenInput]) || !input.agent?.agentSessionId || !input.agent.createOperationId || 'toolExecution' in input.agent || input.resourceGrant?.scope !== 'host-user' || input.resourceGrant.bindingId !== input.bindingId)
       throw fail('Execution creation requires its exact original binding, Session and create operation.')
-    return await this.serialize(input.bindingId, async () => {
-      let record = this.read(input.bindingId)
-      if (record && !isDeepStrictEqual(record.input, input)) throw fail('This execution binding already names another original creation.')
-      const routeAuthorization = await this.options.authorize?.(input, context, record?.routeAuthorization, !!record)
-      if (!record) { record = { input, ...(routeAuthorization ? { routeAuthorization } : {}) }; this.save(record) }
-      return await this.advance(record)
-    })
+    if (input.sourceRequestDigest !== undefined && (typeof input.sourceRequestDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(input.sourceRequestDigest))) throw fail('The original Source request digest must be its exact SHA-256 identity.')
+    return input
+  }
+  /** Called only inside this binding's lane. The durable write is independent
+   * of later network preparation and advancement; its ACK is never rolled back. */
+  private async freeze(input: AgentExecutionOpenInput, context?: AgentMuxRpcCallContext): Promise<RecordValue> {
+    let record = this.read(input.bindingId)
+    if (record && !isDeepStrictEqual(record.input, input)) throw fail('This execution binding already names another original creation.')
+    const routeAuthorization = await this.options.authorize?.(input, context, record?.routeAuthorization, !!record)
+    if (!record) { record = { input, ...(routeAuthorization ? { routeAuthorization } : {}) }; this.save(record) }
+    return record
+  }
+  /** Acknowledge the complete frozen intent only. No endpoint preparation,
+   * helper Start, Agent creation or first input belongs to this operation. */
+  async admit(value: AgentExecutionOpenInput, context?: AgentMuxRpcCallContext): Promise<AgentExecutionReference> {
+    const input = this.creationInput(value)
+    return await this.serialize(input.bindingId, async () => reference((await this.freeze(input, context)).input))
+  }
+  /** Convenience intake and advancement share one lane, without nesting a
+   * serialized public call or holding a DB transaction over remote work. */
+  async create(value: AgentExecutionOpenInput, context?: AgentMuxRpcCallContext): Promise<{ session: AgentMuxAgentSession; execution: AgentExecutionInspection }> {
+    const input = this.creationInput(value)
+    return await this.serialize(input.bindingId, async () => this.advance(await this.freeze(input, context)))
   }
   async continueOriginal(value: AgentExecutionReference, context?: AgentMuxRpcCallContext): Promise<{ session: AgentMuxAgentSession; execution: AgentExecutionInspection }> {
     const original = parseAgentExecutionReference(value)
@@ -518,6 +537,9 @@ export class AgentExecutionBindingService {
       void pending.catch(() => { if (this.owner === pending) this.owner = undefined })
     }
     return this.owner
+  }
+  async admit(input: AgentExecutionOpenInput, context?: AgentMuxRpcCallContext): ReturnType<AgentExecutionCoordinator['admit']> {
+    return await (await this.coordinator()).admit(input, context)
   }
   async create(input: AgentExecutionOpenInput, context?: AgentMuxRpcCallContext): ReturnType<AgentExecutionCoordinator['create']> {
     return await (await this.coordinator()).create(input, context)

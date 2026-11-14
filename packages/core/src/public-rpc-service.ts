@@ -238,6 +238,7 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
     originalContext?: AgentMuxRpcCallContext): Promise<CapsuleResultMap[M]> }
   executionBindings?: Pick<import('./agent-execution-coordinator.js').AgentExecutionCoordinator, 'create' | 'rejoin' | 'continueOriginal'> & {
     inspect(bindingId: string, view?: 'association', context?: AgentMuxRpcCallContext): import('./agent-execution-coordinator.js').AgentExecutionInspection | null | Promise<import('./agent-execution-coordinator.js').AgentExecutionInspection | null>
+    admit?: import('./agent-execution-coordinator.js').AgentExecutionBindingService['admit']
     watch?: import('./agent-execution-coordinator.js').AgentExecutionBindingService['watch']
   }
   capsuleInput?: CapsuleInputPort
@@ -451,6 +452,7 @@ const NATIVE_FIELDS = {
   'agent.inspect': ['target'],
   'agent.creation.continue': ['hostId', 'createOperationId', 'agentSessionId'],
   'agent.execution.inspect': ['hostId', 'bindingId', 'streamGeneration', 'nativeRequestId'],
+  'agent.execution.admit': AGENT_EXECUTION_CREATE_FIELDS,
   'agent.execution.create': AGENT_EXECUTION_CREATE_FIELDS,
   'agent.execution.continue': ['bindingId', 'agentSessionId', 'createOperationId'],
   'agent.execution.binding': ['bindingId','view'],
@@ -1938,13 +1940,15 @@ export class AgentMuxRpcService {
         context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
       }
     }
-    if (method === 'agent.execution.create' || method === 'agent.execution.continue' || method === 'agent.execution.binding' || method === 'agent.execution.rejoin' || method === 'agent.execution.watch') {
+    if (method === 'agent.execution.admit' || method === 'agent.execution.create' || method === 'agent.execution.continue' || method === 'agent.execution.binding' || method === 'agent.execution.rejoin' || method === 'agent.execution.watch') {
       assertExecutionBindingAuthority(context)
-      const input = method === 'agent.execution.create' ? parseAgentExecutionCreate(params) : method === 'agent.execution.continue' ? parseAgentExecutionReference(params) : parseAgentExecutionBinding(params, { associationView: method === 'agent.execution.binding' })
+      const input = method === 'agent.execution.admit' || method === 'agent.execution.create' ? parseAgentExecutionCreate(params) : method === 'agent.execution.continue' ? parseAgentExecutionReference(params) : parseAgentExecutionBinding(params, { associationView: method === 'agent.execution.binding' })
       const owner = this.ports.executionBindings
       if (!owner) throw new AgentMuxError('The original execution binding owner is unavailable. No helper or Agent was replaced.', 'CONTROL_UNAVAILABLE')
       context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
-      const result = method === 'agent.execution.create' ? await owner.create(input as import('./agent-execution-coordinator.js').AgentExecutionOpenInput, context)
+      if (method === 'agent.execution.admit' && !owner.admit) throw new AgentMuxError('The original Core cannot acknowledge a complete frozen execution intent. No Source placement or start was made.', 'CONTROL_UNAVAILABLE')
+      const result = method === 'agent.execution.admit' ? await owner.admit!(input as import('./agent-execution-coordinator.js').AgentExecutionOpenInput, context)
+        : method === 'agent.execution.create' ? await owner.create(input as import('./agent-execution-coordinator.js').AgentExecutionOpenInput, context)
         : method === 'agent.execution.continue' ? await owner.continueOriginal(input as import('./agent-execution-contract.js').AgentExecutionReference, context)
         : method === 'agent.execution.rejoin' ? await owner.rejoin(input.bindingId, context) : await owner.inspect(input.bindingId, 'view' in input && input.view === 'association' ? 'association' : undefined, context)
       context.signal?.throwIfAborted(); await context.assertCurrent?.()

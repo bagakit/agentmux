@@ -16,7 +16,7 @@ export function parseAgentExecutionBindingObservation(value: unknown, bindingId:
   return { bindingId, inspection: result.inspection === null ? null : parseAgentExecutionInspection(result.inspection, { bindingId }) }
 }
 
-export const AGENT_EXECUTION_CREATE_FIELDS = ['bindingId', 'agentHostId', 'agentRuntimeId', 'resourceHostId', 'resourceRuntimeId', 'resourceWorkspacePath', 'resourceGrant', 'agent', 'agentRoute', 'resourceRoute'] as const
+export const AGENT_EXECUTION_CREATE_FIELDS = ['bindingId', 'agentHostId', 'agentRuntimeId', 'resourceHostId', 'resourceRuntimeId', 'resourceWorkspacePath', 'resourceGrant', 'agent', 'agentRoute', 'resourceRoute', 'sourceRequestDigest'] as const
 const agentFields = ['agentSessionId', 'createOperationId', 'executorId', 'executorRevision', 'workspacePath', 'prompt', 'agentMuxNote', 'sourceAgentMuxNote', 'agentMuxTask',
   'optionalContext', 'launchOptions', 'cols', 'rows', 'nativeResumeSource', 'spatialIntent', 'initialMessageAdmission', 'threadId'] as const
 const invalid = (message: string, code: string): never => { throw new AgentMuxError(message, code) }
@@ -43,6 +43,7 @@ export function parseAgentExecutionCreate(value: unknown): AgentExecutionOpenInp
     const route = parseAdoptedHostRoute(input[field])
     if (route.hops.at(-1)!.target.runtimeId !== input[runtime]) invalid('The adopted route names another original endpoint Runtime.', code)
   }
+  if (input.sourceRequestDigest !== undefined && (typeof input.sourceRequestDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(input.sourceRequestDigest))) invalid('The original Source request digest must be SHA-256.', code)
   const grant = rpcRecord(input.resourceGrant, ['scope', 'bindingId'], code)
   if (grant.scope !== 'host-user' || grant.bindingId !== input.bindingId) invalid('The explicit resource grant must name this original execution binding.', code)
   const agent = rpcRecord(input.agent, agentFields, code)
@@ -89,16 +90,21 @@ export function parseAgentExecutionInspection(value: unknown, expected: { bindin
     if (original.bindingId !== result.bindingId || original.agentSessionId !== result.agentSessionId) invalid('Continuation identifies another original execution.', code)
   }
   if (expected.view === 'association') {
-    const witness = rpcRecord(result.association, ['state','reference','agentRuntimeId','resourceRuntimeId','resourceWorkspacePath','issue'], code)
+    const witness = rpcRecord(result.association, ['state','reference','agentRuntimeId','resourceRuntimeId','resourceWorkspacePath','agent','sourceRequestDigest','issue'], code)
     const original = parseAgentExecutionReference(witness.reference)
     if (original.bindingId !== result.bindingId || original.agentSessionId !== result.agentSessionId || !isDeepStrictEqual(witness.reference, result.continuation)) invalid('Association witness belongs to another original creation.', code)
     if (witness.state === 'confirmed') {
       identity(witness.agentRuntimeId, code); identity(witness.resourceRuntimeId, code); workspace(witness.resourceWorkspacePath, code)
+      if (witness.agent !== undefined) {
+        const agent = rpcRecord(witness.agent, ['executorId','executorRevision','workspacePath'], code)
+        identity(agent.executorId, code); identity(agent.executorRevision, code); workspace(agent.workspacePath, code)
+      }
+      if (witness.sourceRequestDigest !== undefined && (typeof witness.sourceRequestDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(witness.sourceRequestDigest))) invalid('The frozen Source request digest is invalid.', code)
       if (witness.resourceWorkspacePath !== result.resourceWorkspacePath || witness.issue !== undefined) invalid('Association witness has another resource or conflicting state.', code)
     } else if (witness.state === 'unconfirmed') {
       const issue = rpcRecord(witness.issue, ['code','message'], code)
       if (issue.code !== 'EXECUTION_RUNTIME_WITNESS_UNCONFIRMED' || typeof issue.message !== 'string' ||
-          witness.agentRuntimeId !== undefined || witness.resourceRuntimeId !== undefined || witness.resourceWorkspacePath !== undefined) invalid('Unconfirmed original Runtime facts cannot be filled from current routes.', code)
+          witness.agentRuntimeId !== undefined || witness.resourceRuntimeId !== undefined || witness.resourceWorkspacePath !== undefined || witness.agent !== undefined || witness.sourceRequestDigest !== undefined) invalid('Unconfirmed original Runtime facts cannot be filled from current routes.', code)
     } else invalid('Association witness has no explicit frozen fact state.', code)
   }
   if (result.helperStarts !== undefined) {

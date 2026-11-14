@@ -13,6 +13,9 @@ export type AgentExecutionAssociationWitness = {
   agentRuntimeId: string
   resourceRuntimeId: string
   resourceWorkspacePath: string
+  /** Safe original launch locator; absence never permits current-config reconstruction. */
+  agent?: { executorId: string; executorRevision: string; workspacePath: string }
+  sourceRequestDigest?: string
 } | {
   state: 'unconfirmed'
   reference: AgentExecutionReference
