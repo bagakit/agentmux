@@ -12,6 +12,7 @@ import { GlobalSurveySurface } from '../src/renderer/src/components/GlobalSurvey
 import { api } from '../src/renderer/src/lib/api'
 import { browserProfiles } from '../src/renderer/src/lib/browser-profiles'
 import { createWorkspaceLayout } from '@agentmux/layout'
+import { chooseField } from './helpers/selection-field'
 const initial = useAppStore.getState(), a = 'profile-a', b = 'profile-b'
 afterEach(() => { browserProfiles.reset(); vi.restoreAllMocks(); useAppStore.setState(initial, true) })
 function fixture() {
@@ -62,12 +63,13 @@ it('the actual picker always offers default without directory IO and preserves a
   const profiles = { revision: null, sequence: null, profiles: null, folders: null, views: null, error: 'Directory ACK unavailable', reading: false }
   try {
     await act(async () => root.render(<SurveyProfilePicker value={{ kind: 'default' }} profiles={profiles} collapsed={false} onExpand={() => {}} onChange={onChange} onRefresh={refresh} />))
-    const select = element.querySelector<HTMLSelectElement>('select[aria-label="Survey environment"]')!
-    expect([...select.options].map(option => option.value)).toEqual(['default'])
+    const select = element.querySelector<HTMLButtonElement>('button[aria-label="Survey environment"]')!
+    expect(select.dataset.value).toBe('default')
+    expect(select.textContent).toContain('Default environment')
     expect(select.disabled).toBe(false)
     expect(element.textContent).toContain('Default browsing is available')
     await act(async () => root.render(<SurveyProfilePicker value={{ kind: 'profile', profileId: b }} profiles={profiles} collapsed={false} onExpand={() => {}} onChange={onChange} onRefresh={refresh} />))
-    expect(element.querySelector<HTMLSelectElement>('select')!.value).toBe('profile:' + b)
+    expect(element.querySelector<HTMLButtonElement>('button[aria-label="Survey environment"]')!.dataset.value).toBe('profile:' + b)
     expect(element.textContent).toContain('Unavailable environment')
     expect(onChange).not.toHaveBeenCalled()
   } finally { await act(async () => root.unmount()); element.remove() }
@@ -78,10 +80,10 @@ it('the one-default picker does not duplicate that environment or silently rewri
   const profiles = { revision: 1, sequence: 1, profiles: [{ id: a, label: 'Personal', isDefault: true, createdAt: 1, source: null }], folders: [], views: [], error: null, reading: false }
   try {
     await act(async () => root.render(<SurveyProfilePicker value={{ kind: 'profile', profileId: a }} profiles={profiles} collapsed={false} onExpand={() => {}} onChange={changed} onRefresh={() => {}} />))
-    const select = element.querySelector<HTMLSelectElement>('select')!
-    expect([...select.options].map(option => option.value)).toEqual(['profile:' + a])
-    expect(select.value).toBe('profile:' + a); expect(changed).not.toHaveBeenCalled()
-    expect(select.title).toContain(a)
+    const select = element.querySelector<HTMLButtonElement>('button[aria-label="Survey environment"]')!
+    expect(select.querySelector('.selection-field__choice > span:last-child')?.textContent).toBe('Personal')
+    expect(select.dataset.value).toBe('profile:' + a); expect(changed).not.toHaveBeenCalled()
+    expect(select.closest('.survey-profile-picker')?.getAttribute('title')).toContain(a)
   } finally { await act(async () => root.unmount()); element.remove() }
 })
 
@@ -97,12 +99,12 @@ it('the actual Survey requires an explicit choice for unread view while its defa
     await act(async () => root.render(<GlobalSurveySurface visible catalog={null} projection={null} selection={null} />))
     const button = element.querySelector<HTMLButtonElement>('[aria-label="New webpage"]')!
     expect(button).not.toBeNull()
-    expect(element.querySelector<HTMLSelectElement>('[aria-label="Survey environment"]')!.value).toBe('unconfirmed')
+    expect(element.querySelector<HTMLButtonElement>('[aria-label="Survey environment"]')!.dataset.value).toBe('unconfirmed')
     await act(async () => button.click())
     expect(create).not.toHaveBeenCalled()
     expect(element.textContent).toContain('Choose an environment')
-    const select = element.querySelector<HTMLSelectElement>('[aria-label="Survey environment"]')!
-    await act(async () => { select.value = 'default'; select.dispatchEvent(new Event('change', { bubbles: true })) })
+    const select = element.querySelector<HTMLButtonElement>('button[aria-label="Survey environment"]')!
+    await chooseField(select, 'default')
     expect(useAppStore.getState().surveyProfileViewReadRecovery).toBeNull()
     await act(async () => button.click())
     expect(create).toHaveBeenCalledTimes(1)
@@ -132,8 +134,8 @@ it('the actual Survey freezes A at New browser and a later B choice wins over it
     await act(async () => button.click())
     expect(create).toHaveBeenCalledTimes(1)
     expect(create.mock.calls[0]![0]).toMatchObject({ profileId: a })
-    const select = element.querySelector<HTMLSelectElement>('[aria-label="Survey environment"]')!
-    await act(async () => { select.value = 'profile:' + b; select.dispatchEvent(new Event('change', { bubbles: true })) })
+    const select = element.querySelector<HTMLButtonElement>('button[aria-label="Survey environment"]')!
+    await chooseField(select, 'profile:' + b)
     await act(async () => finish())
     expect(useAppStore.getState().surveyProfileView).toEqual({ kind: 'profile', profileId: b })
     expect(useAppStore.getState().surveyZoneSelection).toBeNull()
@@ -207,16 +209,16 @@ it('clearing an incompatible Survey page keeps the environment select focused fo
   const element = document.createElement('div'); document.body.append(element); const root = createRoot(element)
   try {
     await act(async () => root.render(<CurrentSurvey />))
-    const select = element.querySelector<HTMLSelectElement>('[aria-label="Survey environment"]')!
+    const select = element.querySelector<HTMLButtonElement>('button[aria-label="Survey environment"]')!
     select.focus()
     expect(document.activeElement).toBe(select)
-    await act(async () => { select.value = 'profile:' + b; select.dispatchEvent(new Event('change', { bubbles: true })) })
+    await chooseField(select, 'profile:' + b)
     expect(useAppStore.getState().surveyZoneSelection).toBeNull()
     expect(useAppStore.getState().surveyProfileView).toEqual({ kind: 'profile', profileId: b })
     expect(document.activeElement).toBe(select)
     // A following environment choice still belongs to that control, with no
     // repeated focus call and no input escaping into the new start-page field.
-    await act(async () => { select.dispatchEvent(new KeyboardEvent('keydown', { key: 'S', bubbles: true })); select.value = 'profile:' + a; select.dispatchEvent(new Event('change', { bubbles: true })) })
+    await chooseField(select, 'profile:' + a)
     expect(document.activeElement).toBe(select)
     expect(useAppStore.getState().surveyProfileView).toEqual({ kind: 'profile', profileId: a })
     expect(element.querySelector<HTMLInputElement>('[aria-label="Search or enter a web address"]')!.value).toBe('')
