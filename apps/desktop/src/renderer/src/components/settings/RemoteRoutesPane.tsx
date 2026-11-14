@@ -36,7 +36,7 @@ export function RemoteRoutesPane({ config, active }: { config: AppConfig; active
   const current = identity?.key === carrierKey ? identity : undefined
   return <div className="remote-routes">
     <div className="remote-work-intro"><h3>Routes between devices</h3><p>Follow saved connections directly or through other nodes. Each device controls who can pass through it.</p></div>
-    <label className="host-route-owner"><span>Manage routes on</span><SelectionField label="Route policy device" value={hostId} options={config.hosts.map(item => ({ value: item.id, label: `${item.label}${item.kind === 'local' ? ' · This device' : ''}` }))} missingOptionLabel="Original saved device unavailable" missingOptionDescription={hostId} onValueChange={setHostId} /></label>
+    <label className="host-route-owner"><span>Manage routes on</span><SelectionField label="Route policy device" menuClassName="host-route-owner__menu" value={hostId} options={config.hosts.map(item => ({ value: item.id, label: `${item.label} · ${item.kind === 'local' ? 'This device' : item.id}` }))} missingOptionLabel="Original saved device unavailable" missingOptionDescription={hostId} onValueChange={setHostId} /></label>
     {host && current?.value ? <RoutePolicyEditor key={carrierKey + current.value.runtimeId} host={host} identity={current.value} active={active} />
       : <div className="remote-routes-empty"><HostIcon size={24} aria-hidden="true" /><p role="status">{current?.issue ?? (host ? 'Reading this device’s route owner…' : 'Select its saved Host connection. Existing routes and edits are retained.')}</p><button type="button" className="small-button" onClick={() => setRefresh(value => value + 1)}>Read route owner</button></div>}
   </div>

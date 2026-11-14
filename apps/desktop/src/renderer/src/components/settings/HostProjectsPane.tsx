@@ -150,7 +150,7 @@ export const HostProjectsPane = memo(function HostProjectsPane({ config, hostId,
       <label className="host-projects__path"><span>Folder path</span><TextInput value={path} placeholder="Project directory"
         onChange={event => setPath(event.target.value)} /></label>
       <label><span>Name <small>optional</small></span><TextInput value={name} placeholder="Project name" onChange={event => setName(event.target.value)} /></label>
-      <label><span>Prepare an Agent <small>optional</small></span><AgentExecutorPicker presentation="field" label="Prepare an Agent" selected={executorId} executors={executors} unsetLabel="Open without an Agent" onSelect={id => { setExecutorId(id); setSelectionHost(host ? structuredClone(host) : undefined) }} /></label>
+      <label className="host-projects__executor"><span>Prepare an Agent <small>optional</small></span><AgentExecutorPicker presentation="field" label="Prepare an Agent" selected={executorId} executors={executors} unsetLabel="Open without an Agent" onSelect={id => { setExecutorId(id); setSelectionHost(host ? structuredClone(host) : undefined) }} /></label>
       <p className="field-hint host-projects__path">Opens this folder on the saved Host. Prepare an Agent in its Launcher and review the work mode before starting.</p>
       {host?.kind === 'ssh' ? <div className="host-projects__path" role="status">
         <p className="field-hint">{inventoryMatches && inventory.state === 'error'
