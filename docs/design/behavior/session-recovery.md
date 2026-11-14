@@ -379,6 +379,8 @@ Settings 的 Execution 入口展示恢复策略的生效默认值与已配置值
 
 Region 提供从准确原会话发起 fork 的入口，复用已有分屏／打开位置选择，由用户选择旁边的分屏位置或新 Tab。起点包括当前会话，以及 Provider 实际支持时的准确历史消息位置；最低支持当前会话，不强求 Provider 没有的历史位置能力。历史起点未支持或未确认时说明原因并保原工作面，不能静默用当前会话替代；用户明确选择后可以从当前会话 fork。不以复制可见正文冒称完成 Provider 原生 fork。控件语言与反馈密度见[《Region fork 的位置选择》](../presentation/session-recovery.md#region-fork-的位置选择)。
 
+当前原生来源须由准确 Run 的进程事实与 Provider 原生身份协议共同确认；已有 locator 只提供查找位置，不独自授予当前来源资格。Provider 已提供可与进程生命周期核对的原生登记时，确认不能额外要求日志文件恰在写入或始终打开。来源冲突、登记过期或检查失败仍保留具体原因与重查路径，只限制无法确认的这次 fork，不影响原 Session、Run、草稿及健康输入。
+
 明确提交 fork 后创建新的 AgentMux Session 与 Region，并为新执行使用准确的新 Run 事实；原 Session、Run、来源、布局、未发送稿与健康输入保留。新实例沿 Core 的原平台注入通路得到准确的新 amux 身份与 system reminder，继承内容里的旧 amux 地址只能作为原来源记录，不能冒充新实例的 Session／Run／Region 或当前位置。注入的内容归属、投递及未知回执沿 [AgentMux 注入上下文](agent-capabilities-and-messaging.md#agentmux-注入上下文)，本次显式创建的身份提醒不宣称已有持续提醒调度。
 
 Provider 的 fork 能力仍围绕一个当前与用户交互的会话声明，来源 ancestry 可作可选元信息，不要求 Client 消费原生 Session 树。准确起点、目标位置、创建、原生 fork、实际挂载及提醒确认分别表达；取消不创建，重复或 unknown 请求沿原 operation 核对，不盲重做。同一创建操作还须核对准确的创建内容、执行配置与认证消息身份，内容已改变时拒绝那一次重试，不能借旧回执接受新意图。启动回执未知时保原创建身份，不能虚构 Run；已见真实 Run 而 Session 保存、Hook、握手、挂载或提醒未确认时保留健康执行并明确失败步骤，重启后沿原操作核对恢复，不重新启动或重放输入。创建与位置动作复用原 Core 与空间 owner，公共发现、执行和回执由同一能力提供。
