@@ -11,8 +11,8 @@ const heartbeatIcons = {
   unbound: 'object.heartbeat',
 } satisfies Record<MoteHeartbeatPresentation['state'], SemanticIconId>
 
-export function MoteHeartbeatGlyph({ state, deliveryCue }: { state: MoteHeartbeatPresentation['state']; deliveryCue: string | null }) {
+export function MoteHeartbeatGlyph({ state, deliveryCue, size = 14 }: { state: MoteHeartbeatPresentation['state']; deliveryCue: string | null; size?: number }) {
   const [initialCue] = useState(deliveryCue)
   const feedback = state === 'active' && deliveryCue !== null && deliveryCue !== initialCue
-  return <SemanticIcon key={feedback ? deliveryCue : undefined} name={heartbeatIcons[state]} size={12} animation={feedback ? 'feedback' : 'none'} />
+  return <SemanticIcon key={feedback ? deliveryCue : undefined} name={heartbeatIcons[state]} size={size} animation={feedback ? 'feedback' : 'none'} />
 }
