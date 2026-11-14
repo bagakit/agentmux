@@ -1,6 +1,6 @@
 # AgentMux 原生层
 
-`@agentmux/native-desktop` 提供无 Electron 依赖的 Node 客户端及页面 PNG 端口。macOS 系统能力由 `AgentMux Native.app`（`dev.agentmux.native`）持有；宿主提供准确应用路径，第一次系统请求时才启动它。它不持有 Agent Session、Run、PTY 或 Browser 导航。
+`@agentmux/native-desktop` 让 AgentMux 观察和操作 macOS：列出应用、窗口和显示器，读取窗口的辅助功能（AX）树，点击、输入、按键、滚动和拖拽，截取屏幕与窗口，读写剪贴板。系统能力由独立的 `AgentMux Native.app`（`dev.agentmux.native`）持有；本包提供不依赖 Electron 的 Node 客户端，以及与框架无关的页面 PNG 端口。宿主传入准确的应用路径，原生进程在第一次系统请求时才启动。它不持有 Agent Session、Run、PTY 或 Browser 导航。Agent 通过 `amux native` 使用这些能力，见 [`native` 指南](../core/guides/modules/native.md)。
 
 ```ts
 import { NativeDesktop, capturePageImage } from '@agentmux/native-desktop'
@@ -16,16 +16,31 @@ await native.dispose()
 const image = await capturePageImage({ capture: async () => ({ png: await originalPage.capture() }) })
 ```
 
-`NativeConnection` 连接当前用户的私有 Unix socket，通过一次性 token 与原生端准确 parent peer 验证。宿主自动连接使用 LaunchServices；独立开发可显式传 `executablePath`，没有任意命令或 shell 参数入口。构建脚本只组装 unsigned app，签名由 Desktop 正式持久身份管线统一负责。
+## 能力
 
-每次写有原 `instanceId/requestId/operationId`。超时或断线不重放，查询 `inspectOperation(operationId, instanceId)` 不启动替代进程。`completed` 仅表示原生请求回执到达；动作的实际效果以业务回执中的 verification 为准。迟到业务结果仍可取；结果按 32 MiB 总预算与 1024 条终态回执保留，淘汰后明确 unavailable/expired，不由结果缺失推断未发生。已提交的 operation ID 在 owner 生命周期内不能重新执行。
+`NativeDesktop` 为截图和剪贴板提供带校验的便捷方法（`captureDisplays`、`captureScreenshot`、`readClipboardText`、`writeClipboardText`、`readClipboardImage`、`writeClipboardImage`），其余方法通过 `request(method, params)` 调用。协议方法的完整参数与回执见 [macOS 协议](macos/PROTOCOL.md)。
 
-PNG 沿用 Desktop 的 18 MiB/16384 边长/32M 像素边界，不在页面热路径重编码。AX、录屏、剪贴板的系统资格互相独立。权限查询不发起系统授权，不以预读拒绝物理通路。具体 OS 协议见 [macOS 协议](macos/PROTOCOL.md)，长期行为见 [原生层行为合同](../../docs/design/behavior/native-desktop.md)。
+| 类别 | 方法 | 说明 |
+| --- | --- | --- |
+| 发现 | `listApps`、`listWindows`、`listDisplays` | 应用以 PID 加进程启动时间标识，窗口以原生窗口号标识；名称和标题只用于显示 |
+| 观察 | `getAppState`、`permissionStatus` | 读取准确进程与窗口的 AX 树，每个元素带原生动作名和窗口内坐标；默认不附截图 |
+| 输入 | `click`、`performSecondaryAction`、`setValue`、`typeText`、`pressKey`、`hotkey`、`pasteText`、`scroll`、`drag` | 每个动作都带操作 ID，回执说明走的是 AX、合成事件还是剪贴板路径，以及效果是否经回读核验 |
+| 采图 | `captureDisplays`、`captureScreenshot` | 每块屏一次抓取并附同一时刻的窗口列表；或截取指定显示器、矩形或窗口 |
+| 剪贴板 | `clipboardRead`、`clipboardWrite` | 文本或 PNG；写入以系统 pasteboard 的回执为准 |
 
-`node scripts/verify-client.mjs` 验证真实 Unix socket、生产客户端、页面源和非空变异；这是协议 fixture，不是系统权限或真实 UI 证据。
+几项设计上的保证：
 
-`node scripts/verify-native-frames.mjs` 用受控显示器列表、ScreenCaptureKit 与 PNG 编码编译生产 `captureDisplays` 源码，验证每屏一次抓取、每屏窗口列表（前后顺序、按 includeHostWindows 包含宿主、始终排除 helper 与不在像素中的窗口）、单屏问题隔离（含响应帧预算与显示器边界变化）、截图时刻先于首次抓取、未知模式（含 selection）不触发抓取与抓取租约独占，并跑单分支变异；不抓真实像素、不弹授权。
+- **目标准确。** 动作前重新核对进程启动时间和准确窗口；键盘、滚动和拖拽的每个事件都会再次核对接收者，接收者变化时停止，不会把剩余事件投给别的窗口。
+- **不重放。** 每次写入带 `instanceId`、`requestId` 和 `operationId`。超时或断线后不重放，`inspectOperation(operationId, instanceId)` 只查询，不会启动替代进程；同一 owner 生命周期内提交过的 operation ID 不能再次执行。`completed` 只表示收到了原生请求回执，动作的实际效果以回执中的 `verification` 为准。
+- **结果有界。** 迟到的业务结果仍可取回；结果总共保留 32 MiB、最多 1024 条终态回执，被淘汰的明确标为 unavailable / expired，不能据此推断动作没有发生。
+- **授权分开。** AX、录屏和剪贴板的系统资格互相独立。`permissionStatus` 只读系统预检结果，不弹授权，也不阻止实际操作去尝试；实际操作的结果才是准。
 
-`node scripts/build-macos.mjs --configuration debug --bare` 只构建开发裸程序；release 输出 `AgentMux Native.app`，两种 profile 不互相 fallback。Desktop 的 `predev`／`prebuild` 分别消费对应 profile，正式组包核对 Native 的编译文件、复制内容和来源，并与主 App 使用同一准确持久证书分别签名校验。构建回执只证明构建结果，不证明系统授权。
+PNG 使用与 Desktop 相同的上限：18 MiB、单边 16384 像素、总计 32M 像素，页面热路径上不重新编码。长期行为见[原生层行为合同](../../docs/design/behavior/native-desktop.md)。
 
-完整验证分层及未完成真机证据的续做方法见[原生层验证](../../docs/testing/native-desktop.md)。
+## 连接与构建
+
+`NativeConnection` 连接当前用户的私有 Unix socket，用一次性 token 并核对原生端的准确父进程完成认证。宿主自动连接时经 LaunchServices 启动应用；独立开发可以显式传 `executablePath`，没有任意命令或 shell 参数入口。
+
+构建原生层需要 macOS 上的 Xcode 或 Command Line Tools，以及 Swift 6 工具链（`macos/Package.swift` 声明 `swift-tools-version: 6.0`，最低部署目标 macOS 12）。`node scripts/build-macos.mjs --configuration debug --bare` 只构建开发用的裸程序；release 构建输出 `AgentMux Native.app`，两种 profile 互不替代。构建脚本只组装未签名的 app，签名由 Desktop 打包统一完成；构建回执只证明构建结果，不证明系统授权。开发与正式入口、签名身份见[原生层机制](../../docs/architecture/native-desktop.md)。
+
+验证分层、各命令能证明什么以及尚未完成的真机证据，见[原生层验证](../../docs/testing/native-desktop.md)。

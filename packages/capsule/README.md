@@ -1,15 +1,24 @@
 # @agentmux/capsule
 
-Capsule owns durable local static pages independently of a UI, Agent process, or
-Browser view. Its portable entry exports domain contracts and strict wire parsers.
-The `@agentmux/capsule/node` entry exports `NodeCapsuleOwner` and `CapsuleError`.
-There is no Core, Electron, React, or Agent runtime dependency.
+Capsule turns a page an Agent builds into a durable local artifact. Each page gets
+a stable ID and its own fixed loopback port, so you and the Agent can open the same
+address after an app restart, a Host restart or a process crash. Pages are either
+copied into a managed, versioned store or served from an existing directory, and
+can be shown in AgentMux's Browser, where a person can answer questions the page
+asks. Agents and scripts use it through `amux capsule`
+([capsule guide](../core/guides/modules/capsule.md)); product behavior is defined
+in the [Capsule PRD](../../docs/design/behavior/local-page-hosting.md).
 
-The independently installed `capsule-runtime` executable owns serving. Core may
-load its fixed entry as an ordinary ctxmux Run; neither Core nor Desktop needs to
-remain connected for published HTTP pages to stay available. Capsule does not
-supervise, replace or restart its own process. The Run owner manages process
-lifecycle, including explicit stop and a later authoritative replacement.
+The package has no Core, Electron, React or Agent runtime dependency. Its portable
+entry exports domain contracts and strict wire parsers; `@agentmux/capsule/node`
+exports `NodeCapsuleOwner` and `CapsuleError`; `@agentmux/capsule/runtime` exports
+the serving entry and its client.
+
+The `capsule-runtime` executable owns serving. Core runs its fixed entry as an
+ordinary ctxmux Run, so published pages stay available while neither Core nor
+Desktop is connected. Capsule does not supervise, replace or restart its own
+process; the Run owner manages that lifecycle, including an explicit stop and a
+later replacement.
 
 ```sh
 capsule-runtime serve --state-directory "$CAPSULE_STATE" --socket "$CAPSULE_SOCKET"

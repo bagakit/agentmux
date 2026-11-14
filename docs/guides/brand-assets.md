@@ -4,15 +4,7 @@
 
 ## 素材在哪里
 
-所有品牌位图只有一份源文件，放在 [`packages/client-ui/brand`](../../packages/client-ui/brand/)：
-
-| 目录 | 内容 |
-| --- | --- |
-| `app-icons/` | 五款 App 图标的源图，以及 Classic 的底板 SVG |
-| `heroes/` | 各境的大图：`<境>-launch` 用于启动，`<境>-banner` 用于 Launcher 背景与 Settings 概览 |
-| `illustrations/` | 工坊插画：`goals/`、`concepts/`、`mote-origin/` |
-
-[`brand-manifest.json`](../../packages/client-ui/brand/brand-manifest.json) 登记每个文件的种类、境（App 图标 id，工坊为 `commons`）、来源，以及是否跟随所选图标，同时指向留在原 owner 的素材：Main 运行时读取的 Mote 头像系列、Mote 默认图形、厂商标志和 README 的派生副本。[清单测试](../../packages/client-ui/test/brand-manifest.test.ts)保证清单与目录双向一致。
+所有品牌位图只有一份源文件，目录、清单字段与命名规则见[品牌源目录说明](../../packages/client-ui/brand/README.md)。
 
 代码一律按包路径引用：`import art from '@agentmux/client-ui/brand/…'`。不要把素材复制进某个 App，也不要写跨包的相对路径。
 
@@ -24,7 +16,7 @@
 
 ## 一个境的大图
 
-1. 一份母版出两种裁切：启动 16:9，宽幅约 3:1。龙放在右侧三分之一，左侧留给文字与操作，深浅主题下都要和界面覆盖渐变协调。
+1. 一份母版出两种裁切：启动用 16:9，Launcher 背景与 Settings 概览用宽幅约 3:1，文件按[品牌源目录说明](../../packages/client-ui/brand/README.md)的规则命名。龙放在右侧三分之一，左侧留给文字与操作，深浅主题下都要和界面覆盖渐变协调。
 2. 编码成 AVIF（`sips -s format avif -s formatOptions 85 源图 --out heroes/<境>-launch.avif`）。在相同显示倍率下和原图做 1:1 对比，确认没有可见损失。
 3. 在 [`brand-hero.ts`](../../apps/desktop/src/renderer/src/lib/brand-hero.ts) 的大图表里为这个境加一项。它是唯一列出大图文件的地方，启动、Launcher 与 Settings 概览都经同一个 `resolveBrandHero` 取图，表的类型要求原境一项必须存在。
 4. 在品牌清单里登记两条 `hero`，填写 `surface`。
@@ -36,6 +28,7 @@
 
 ## 核对
 
+- [清单测试](../../packages/client-ui/test/brand-manifest.test.ts)保证清单与目录双向一致。
 - `pnpm icons:dev` 打开品牌与图标工作台，默认进入「品牌」视图，开发模式下素材一改就刷新。`pnpm icons:build` 构建静态快照，图片以文件形式放在页面旁边。快照用 amux Capsule 常驻发布，之后对同一个页面身份更新。
 - 视觉改动按[独立 Agent 看图评审](agent-visual-e2e-review.md)实际采图评审。
 - 生成图的提示词、候选稿与评审过程属于过程资料，留在本机，不提交，边界见[过程资料规则](../process-directories.md)。

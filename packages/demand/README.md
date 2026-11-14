@@ -26,7 +26,9 @@ use an in-process queue, a nonblocking kernel FD lock on a permanent
 `store.lock` inode, an `fsync`ed temporary snapshot, and an atomic rename. The
 complete lock marker is published with a no-replace hard link while already
 locked; closing the handle or process death releases ownership. Waiting is
-asynchronous and bounded; ordinary reads and other roots remain available.
+asynchronous and bounded (by default `lockTimeoutMs` 5000 and `lockRetryMs` 25),
+so it never blocks the Core event loop; ordinary reads and other roots remain
+available.
 Protocol owners never replace or unlink the lock path.
 
 Old, incomplete or unrecognized lock files remain explicitly unknown. The store
@@ -37,7 +39,10 @@ legacy lock conversion, and this does not solve abandoned legacy locks. Manual
 replacement or deletion of a published lock is outside the protocol guarantee.
 
 Corrupt snapshots and lock failures raise `StoreError` with `code`,
-`phase`, and `path`; they never become an empty replacement.
+`phase`, and `path`; they never become an empty replacement. A write whose commit
+outcome is unknown is never replayed automatically: reread the same Goal and, when
+the call carries one, the same operation before deciding. The Goal's body,
+relations, revision and operation identity are kept.
 
 The standalone `agentmux-demand` binary reads the same API. Pass `--root` (or set
 `AGENTMUX_DEMAND_ROOT`). `agentmux-demand help` prints the current verbs, options
@@ -60,3 +65,22 @@ A locatable evidence reference does not claim that the owner verified its conten
 
 Browser clients consume the pure types, parsers and readiness helpers from
 `@agentmux/demand/goals`; this subpath has no filesystem or UI dependency.
+
+## Goal execution records
+
+The same store also keeps the records behind Supervisor execution, Goal plans
+and PMO patrol. They hold business intent and references to Agent work; Core
+keeps message transmission, input delivery and Run state.
+
+| Subpath | Records |
+| --- | --- |
+| `@agentmux/demand/delegations` | A Supervisor's delegation of work to a worker Agent: the frozen intent (owner and worker Sessions and Runs, thread, request text, the confirmed alignment revision and criteria, context sources and the plan node), the worker's report with its grounding proposal, the Supervisor's collection of that report, and attention notices |
+| `@agentmux/demand/goal-plan` | A Goal's plan as a dependency graph of nodes, each with an expected outcome, the criteria it covers, a check another party can repeat, and an optional executor. A review that passes a node must record the command it ran, the result and the evidence. Node state (`waiting`, `ready`, `working`, `review`, `changes`, `done`, `cancelled`, `unknown`) is derived from delegation and review facts and never stored |
+| `@agentmux/demand/relations` | The roles a Session plays on Goals: `assignee`, `supervisor`, `related`, `create`, `discussion` and `requirements` |
+| Root entry | Also exports Goal Start dispatch records, execution responsibility and progress, patrol attempts and reports, and discussion intents |
+
+Store methods follow the same pattern: `prepareDelegation`, `preparePatrol`
+and `prepareDispatch` freeze an intent before Core is asked to send anything,
+and the matching `mark…Attempt`, `record…` and `inspect…` methods keep each
+attempt and its outcome. Behavior is defined in
+[Goals and Demand](../../docs/design/behavior/goals-and-demand.md).
