@@ -1514,7 +1514,7 @@ it('Demand picker: failed pre-dispatch save retains the exact request and explic
   const workspace = { id: 'picker-chosen', name: 'Chosen directory', hostId: 'local', path, kind: 'folder' as const }
   config.workspaces = [...config.workspaces, workspace]; useAppStore.setState({ config, layouts: { ...useAppStore.getState().layouts, [workspace.id]: createWorkspaceLayout('picker-group') } })
   await act(async () => root.render(<PickerDetail />)); await pickerButton('Choose Goal assignees'); await pickerButton('New Agent')
-  await chooseField(document.querySelector<HTMLElement>('[aria-label="Project for this arrangement"]')!, workspace.id)
+  await chooseField(document.querySelector<HTMLElement>('[aria-label="Working folder for this arrangement"]')!, workspace.id)
   await pickerButton('Prepare locations')
   await chooseField(document.querySelector<HTMLElement>('[aria-label="New Session Agent configuration"]')!, 'picker-fixture')
   const originalWrite = window.localStorage.setItem.bind(window.localStorage)
