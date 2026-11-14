@@ -28,6 +28,7 @@ try {
   assert.equal(candidate.sourceCommit, execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim())
   assert.equal(ready.sourceCommit, candidate.sourceCommit)
   const target = await read('.tmp/agent-locations/before/targets.json')
+  for (const key of ['hostId', 'agentSessionId', 'runId', 'browserId', 'devicePrincipalId']) assert.ok(typeof target[key] === 'string' && target[key].length > 0, `Original ${key} is missing`)
   for (const [name, file] of Object.entries(ready.records)) {
     assert.equal(typeof file, 'string')
     receipt.evidence[name] = { file, sha256: sha(await readFile(path.resolve(root, file))) }
@@ -39,6 +40,7 @@ try {
   assert.equal(installed.sourceCommit, candidate.sourceCommit)
   assert.equal(installed.sourceTree, candidate.sourceTree)
   assert.deepEqual(afterApp.main.package, installed)
+  for (const app of [beforeApp, afterApp]) assert.ok(Number.isInteger(app.main.pid) && app.main.pid > 0)
   assert.notEqual(afterApp.main.pid, beforeApp.main.pid, 'A new UI OS process has not been observed')
   const renderer = await record('rendererRelease')
   assert.ok(renderer.id && renderer.identity && Object.keys(renderer.files).length > 0)
@@ -55,6 +57,7 @@ try {
     assert.equal(agent.status.run.runId, target.runId)
   }
   assert.equal(afterAgent.status.run.state, 'running')
+  assert.ok(Number.isInteger(beforeAgent.status.run.pid) && beforeAgent.status.run.pid > 0)
   assert.equal(afterAgent.status.run.pid, beforeAgent.status.run.pid)
   const beforeTab = (await record('tabBefore')).result.catalog
   const afterTab = (await record('tabAfter')).result.catalog
@@ -73,6 +76,7 @@ try {
   assert.equal(mobile.result.outcome.kind, 'completed')
   assert.equal(mobile.result.runOperation.browserId, target.browserId)
   const identity = mobile.result.result.identity
+  assert.ok(typeof identity.page.documentId === 'string' && identity.page.documentId.length > 0)
   assert.equal(identity.page.buildId, candidate.mobileRelease.buildId)
   assert.equal(identity.page.namespaceDigest, candidate.mobileRelease.digest)
   assert.equal(identity.loaded.accepted, true)
