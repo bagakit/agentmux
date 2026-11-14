@@ -26,6 +26,16 @@ export const MOTE_COMPANION_PARTS = {
 /** AgentMux drawings on the original 24-unit grid. Keep the theme pen, complete
  * still silhouette and negative space at 12–14px. Only declared parts can move. */
 export const AUTHORED_ICON_DEFINITIONS = {
+  "mote-heartbeat": {
+    shapes: [
+      ["path", {"d":"M2.5 15H6.5 M18.5 15H21.5"}],
+      ["path", {"d":"M6.5 15C8.3 15 8.7 12.8 9.5 10.2C10.1 8.1 10.5 6.8 11.5 6.8C12.6 6.8 12.9 8.6 13.4 10.8L14.6 15.7C15.1 17.9 16.1 18.1 17.1 16.6Q18 15 18.5 15", "data-semantic-icon-part":"heartbeat-curve"}]
+    ],
+    design: {
+      rest: "两端短线夹着一个圆峰和小回勾。开启的照看安排在头像角标和主对话共享这一笔，在线状态点仍单独显示。",
+      motion: { kind: "once", animation: "feedback", description: "中段沿固定基线抬起一次再落稳，两端保持原位。", trigger: "持续查看同一开启安排时，原安排的新一轮输入确认投递。首次读回和重复回执保持静止。" }
+    }
+  },
   "workflow-route": {
     shapes: [["rect", {"x":"3","y":"4","width":"6","height":"6","rx":"1.5"}], ["rect", {"x":"15","y":"14","width":"6","height":"6","rx":"1.5"}], ["path", {"d":"M9 7h6a3 3 0 0 1 3 3v4"}]],
     design: {

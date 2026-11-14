@@ -6,14 +6,14 @@ import { readMoteQuickTarget, type SavedMoteQuickMode } from './mote-quick-mode'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useAppStore } from '../store'
 import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingOpen } from './pmo-teams-topic-floating'
-import { moteHeartbeatReadingMatchesSource } from './mote-heartbeat-presentation'
+import { moteHeartbeatReadingMatchesSource, moteHeartbeatReadingPresentation } from './mote-heartbeat-presentation'
 import { validateScheduleRpcResult } from '@agentmux/core/schedule-rpc'
 import { api } from './api'
 import { parseMoteDialogueResult } from '@agentmux/core/mote-dialogue'
 import type { ContinuousProgressLoop } from '@agentmux/core/continuous-progress-scheduler'
 
-type Reading = { saved: SavedMoteQuickMode | null; loading: boolean; unavailable: boolean; issue: string | null }
-const empty: Reading = { saved: null, loading: false, unavailable: true, issue: null }
+type Reading = { saved: SavedMoteQuickMode | null; loading: boolean; unavailable: boolean; issue: string | null; deliveryCue: string | null }
+const empty: Reading = { saved: null, loading: false, unavailable: true, issue: null, deliveryCue: null }
 export type MoteHeartbeatInspection = { target: MotePreferencesTarget; original?: ContinuousProgressLoop }
 export type MoteHeartbeatNoticeReading = Reading & { key: string; target: MotePreferencesTarget; label: string; refresh(): void; inspect(original?: ContinuousProgressLoop): void }
 const readers = new Map<string, ReturnType<typeof createReader>>()
@@ -50,8 +50,28 @@ function createReader(key: string, target: MotePreferencesTarget, initialScope: 
   let scope = initialScope, state = empty, generation = 0, disposed = false, pending: Promise<void> | null = null, requested = false
   let needsSource = true, nextSourceRead = 0, retryDelay = 5000
   let reportPending = false
+  let deliveryBaseline: { loopId: string; intentId: string | undefined; through: number } | null = null
   const listeners = new Set<() => void>()
   const publish = (next: Reading) => { state = next; for (const listener of listeners) listener(); publishNotices() }
+  function updateDeliveryCue(saved: SavedMoteQuickMode, unavailable: boolean) {
+    const maintenance = saved.maintenance, schedule = maintenance?.schedule
+    if (unavailable || maintenance?.status !== 'active' || !schedule || saved.defaults.presence?.enabled === false) {
+      deliveryBaseline = null
+      return null
+    }
+    const reference = schedule.lastInputRef
+    const occurrence = reference && reference.futureIntent.intentId === schedule.futureIntentId ? reference.futureIntent.occurrenceAt : -1
+    if (deliveryBaseline?.loopId !== schedule.loopId || deliveryBaseline.intentId !== schedule.futureIntentId) {
+      deliveryBaseline = { loopId: schedule.loopId, intentId: schedule.futureIntentId, through: occurrence }
+      return null
+    }
+    if (moteHeartbeatReadingPresentation(saved, false).state !== 'active') return null
+    const input = maintenance.input
+    if (occurrence <= deliveryBaseline.through || input?.status !== 'confirmed' ||
+        (input.delivery !== 'terminal-confirmed' && input.delivery !== 'native-admitted')) return state.deliveryCue
+    deliveryBaseline.through = occurrence
+    return JSON.stringify([schedule.loopId, schedule.futureIntentId, occurrence])
+  }
   function readReports() {
     if (disposed || reportPending || document.hidden || !state.saved?.maintenance?.schedule?.lastInputRef) return
     reportPending = true
@@ -96,14 +116,15 @@ function createReader(key: string, target: MotePreferencesTarget, initialScope: 
         const unavailable = Boolean(sourceChanged || saved.issue || !saved.maintenance || saved.maintenance.status === 'unconfirmed' || !moteHeartbeatReadingMatchesSource(saved))
         if (full) { needsSource = unavailable; nextSourceRead = Date.now() + retryDelay; retryDelay = unavailable ? Math.min(30000, retryDelay * 2) : 5000 }
         if (sourceChanged) { needsSource = true; requested = true }
-        publish({ saved: unavailable && state.saved ? state.saved : saved, loading: false,
+        publish({ saved: unavailable && state.saved ? state.saved : saved, loading: false, deliveryCue: updateDeliveryCue(saved, unavailable),
           unavailable, issue: sourceChanged ? 'The original arrangement changed. Reading this Mote’s current heartbeat.' : saved.issue ?? saved.maintenance?.issue ?? null })
         readReports()
       }
     }).catch(error => {
       if (!disposed && cut === generation && !document.hidden) {
         if (full) { nextSourceRead = Date.now() + retryDelay; retryDelay = Math.min(30000, retryDelay * 2) }
-        publish({ ...state, loading: false, unavailable: true, issue: presentError(error) })
+        deliveryBaseline = null
+        publish({ ...state, loading: false, unavailable: true, issue: presentError(error), deliveryCue: null })
       }
     }).finally(() => {
       pending = null
@@ -111,7 +132,7 @@ function createReader(key: string, target: MotePreferencesTarget, initialScope: 
     })
   }
   const refresh = () => { needsSource = true; generation++; read() }
-  const foreground = () => { generation++; if (!document.hidden) { needsSource = true; read() } }
+  const foreground = () => { generation++; deliveryBaseline = null; if (!document.hidden) { needsSource = true; read() } }
   document.addEventListener('visibilitychange', foreground)
   const timer = window.setInterval(() => { if (!pending && (!needsSource || Date.now() >= nextSourceRead)) read() }, 5000)
   return {
@@ -131,7 +152,8 @@ function createReader(key: string, target: MotePreferencesTarget, initialScope: 
       const renamed = scope.topic.title !== next.topic.title, changed = quickRevision(scope) !== quickRevision(next)
       scope = next
       if (changed) {
-        publish({ ...state, unavailable: true, issue: 'The original settings changed. Reading this revision before confirming automatic care.' })
+        deliveryBaseline = null
+        publish({ ...state, unavailable: true, deliveryCue: null, issue: 'The original settings changed. Reading this revision before confirming automatic care.' })
         refresh()
       }
       else if (renamed) publishNotices()

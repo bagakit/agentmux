@@ -54,6 +54,7 @@
   --icon-feedback-content: semantic-icon-content-once;
   --icon-feedback-probe: semantic-icon-probe-once;
   --icon-feedback-flag: semantic-icon-flag-once;
+  --icon-feedback-heartbeat: semantic-icon-heartbeat-once;
 }
 [data-semantic-icon-part="demonstration-pen"] { animation: var(--icon-feedback-pen, none) .8s ease-in-out; transform-origin: 13px 19px; }
 [data-semantic-icon-part="feedback-mark"] { animation: var(--icon-feedback-mark, none) .64s ease-out; transform-box: fill-box; transform-origin: center; }
@@ -63,6 +64,7 @@
 [data-semantic-icon-part="agreement-flag"] { animation: var(--icon-selection-flag, var(--icon-feedback-flag, none)) var(--icon-selection-duration, .8s) ease-out; transform-box: view-box; transform-origin: 9px 9.5px; }
 [data-semantic-icon-part="note-content"] { animation: var(--icon-feedback-content, none) .8s ease-out; }
 [data-semantic-icon-part="survey-reflection"] { animation: var(--icon-feedback-probe, none) .8s ease-in-out; }
+[data-semantic-icon-part="heartbeat-curve"] { animation: var(--icon-feedback-heartbeat, none) .24s ease-out; transform-box: view-box; transform-origin: 12px 15px; }
 /* Only registered sand parts receive these instance selectors; custom drawings stay whole. */
 .semantic-icon-motion[data-icon-animation="wait"] {
   --icon-hourglass-frame-animation: semantic-icon-hourglass-turn;
@@ -160,7 +162,8 @@
 @keyframes semantic-icon-content-once { from { stroke-dasharray: 1; stroke-dashoffset: 1; } to { stroke-dasharray: 1; stroke-dashoffset: 0; } }
 @keyframes semantic-icon-flag-once { from { transform: scaleX(.35); } 65% { transform: scaleX(1.04); } to { transform: scaleX(1); } }
 @keyframes semantic-icon-probe-once { 0%, 100% { transform: none; } 38% { transform: translate(.6px, -.4px); } 68% { transform: translate(-.2px, .2px); } }
+@keyframes semantic-icon-heartbeat-once { 0%, 100% { transform: none; } 38% { transform: scaleY(1.18); } 72% { transform: scaleY(.97); } }
 @keyframes semantic-icon-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
-  .semantic-icon-motion[data-icon-animation] { --icon-motion-iterations: 0; --icon-feedback-content: none; --icon-feedback-probe: none; --icon-feedback-flag: none; animation: none; will-change: auto; }
+  .semantic-icon-motion[data-icon-animation] { --icon-motion-iterations: 0; --icon-feedback-content: none; --icon-feedback-probe: none; --icon-feedback-flag: none; --icon-feedback-heartbeat: none; animation: none; will-change: auto; }
 }

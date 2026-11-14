@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { SemanticIcon, type SemanticIconId } from '@agentmux/client-ui/icons'
 import type { MoteHeartbeatPresentation } from '../lib/mote-heartbeat-presentation'
 
@@ -10,6 +11,8 @@ const heartbeatIcons = {
   unbound: 'object.heartbeat',
 } satisfies Record<MoteHeartbeatPresentation['state'], SemanticIconId>
 
-export function MoteHeartbeatGlyph({ state }: { state: MoteHeartbeatPresentation['state'] }) {
-  return <SemanticIcon name={heartbeatIcons[state]} size={12} />
+export function MoteHeartbeatGlyph({ state, deliveryCue }: { state: MoteHeartbeatPresentation['state']; deliveryCue: string | null }) {
+  const [initialCue] = useState(deliveryCue)
+  const feedback = state === 'active' && deliveryCue !== null && deliveryCue !== initialCue
+  return <SemanticIcon key={feedback ? deliveryCue : undefined} name={heartbeatIcons[state]} size={12} animation={feedback ? 'feedback' : 'none'} />
 }

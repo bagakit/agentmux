@@ -27,7 +27,7 @@ export function MoteHeartbeatLamp({ scope, visible }: { scope: MoteWorkfaceScope
     <button ref={button} type="button" className="mote-heartbeat-lamp" data-mote-care={state.state} title={state.detail}
       aria-label={`${scope.topic.title} · ${state.label}. Review heartbeat`} aria-haspopup="dialog" aria-expanded={open}
       onClick={event => { invoker.current = event.currentTarget; setOriginal(undefined); setOpen(true) }}>
-      <span className="mote-heartbeat-lamp__signal" aria-hidden="true"><MoteHeartbeatGlyph state={state.state} /></span>
+      <span className="mote-heartbeat-lamp__signal" aria-hidden="true"><MoteHeartbeatGlyph key={visible ? key : ''} state={state.state} deliveryCue={reading.deliveryCue} /></span>
       <span className="mote-heartbeat-lamp__label">{state.label}</span>
     </button>
     {open && visible ? <MoteQuickModeDialog key={original ? JSON.stringify([original.loopId, original.pause?.episodeId, original.pendingCompletion?.operationId]) : 'current'} scope={scope} onOpenPath={path => useAppStore.getState().openFile(path, undefined, undefined, scope.workspace.id)} focusHeartbeat onClose={close}
