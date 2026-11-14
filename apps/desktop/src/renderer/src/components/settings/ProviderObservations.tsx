@@ -114,6 +114,7 @@ export function useProviderObservations(host: HostConfig | undefined, active: bo
 
 function SampleTime({ at }: { at: number }) {
   const date = new Date(at)
+  if (!Number.isFinite(date.getTime())) return <>Unknown time</>
   return <time dateTime={date.toISOString()}>{date.toLocaleTimeString()}</time>
 }
 
