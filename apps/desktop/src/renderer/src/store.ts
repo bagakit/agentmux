@@ -441,6 +441,10 @@ import {
   workbenchViewCloseAllowsSession,
   workbenchSessionCloseResource,
   workbenchViewCloseAllowsView,
+  workbenchRegionCloseTarget,
+  workbenchViewCloseStillApproved,
+  type WorkbenchViewClosePlan,
+  type WorkbenchViewCloseTarget,
   type WorkbenchViewCloseReceipt,
   type WorkbenchViewCloseReservation,
   type WorkbenchViewCloseResource
@@ -1411,7 +1415,7 @@ export type AppState = GitReadingActions & {
     workspaceId: string,
     tabGroupId: string,
     tabId: string,
-    options?: { keepAgentSessions?: boolean }
+    options?: { keepAgentSessions?: boolean; approved?: WorkbenchViewClosePlan }
   ): Promise<boolean>
   moveTab(
     workspaceId: string,
@@ -1473,7 +1477,7 @@ export type AppState = GitReadingActions & {
   // 唯一一格，落在源 Tab 紧邻其后的位置并激活。只剩一格的 Tab 促升无意义（它已经就是一张 Tab），是 no-op。
   promoteRegionToTab(workspaceId: string, tabId: string, regionId: string): void
   // Closing an Agent's last View stops its Run unless `keepAgentSessions`; the Region confirmation asks first.
-  closeRegion(workspaceId: string, tabId: string, regionId: string, options?: { keepAgentSessions?: boolean }): Promise<void>
+  closeRegion(workspaceId: string, tabId: string, regionId: string, options?: { keepAgentSessions?: boolean; approved?: WorkbenchViewCloseTarget }): Promise<void>
   // 键盘关 Tab 的入口：只投意图，真正的关闭（含确认）由活动 Tab 组件消费。见 closeTabRequest 状态注释。
   requestCloseTab(workspaceId: string, tabGroupId: string, tabId: string): void
   clearCloseTabRequest(nonce: number): void
@@ -7845,6 +7849,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       closing: closingWorkbenchReservations(state.closingWorkbenchViews)
     })
     if (!plan) return Promise.resolve(true)
+    if (options?.approved && (options.approved.workspaceId !== workspaceId || options.approved.tabGroupId !== tabGroupId ||
+      !workbenchViewCloseStillApproved(options.approved, plan, state.tabs[tabId]))) {
+      state.reportError(new Error('The content changed while its close confirmation was open. The current content and Sessions are kept. Close it again to review the current targets.'), { kind: 'indeterminate' })
+      return Promise.resolve(false)
+    }
     // Publish only the exact View deletion committed here, independently of cleanup receipts.
     const commitClose = (tab: WorkbenchTab | null): void => {
       let removedTab: WorkbenchTab | undefined
@@ -8169,14 +8178,17 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const surface = tab?.regions[regionId]
     if (!tab || tab.workspaceId !== workspaceId || !surface) return
     if (!removeWorkbenchRegion(tab, regionId)) return
+    const target = workbenchRegionCloseTarget({ tabs: current.tabs, sessions: current.sessions, tabId, regionId,
+      keepAgentSessions: options?.keepAgentSessions, closing: closingWorkbenchReservations(current.closingWorkbenchViews) })
+    if (options?.approved) {
+      if (!target || !workbenchViewCloseStillApproved(options.approved, target, tab)) {
+        current.reportError(new Error('The content changed while its close confirmation was open. The current content and Sessions are kept. Close it again to review the current targets.'), { kind: 'indeterminate' })
+        return
+      }
+    }
     // An Agent whose last View this Region is stops through the same step as Tab close. Only Sessions
     // confirmed in `sessions` are stopped; an unconfirmed one was named in the confirmation and is kept.
-    const stops = options?.keepAgentSessions ? [] : agentSessionsWithoutViewsAfterClosing({
-      tabs: current.tabs,
-      sessions: current.sessions,
-      isClosing: (candidate, candidateRegionId) => closingWorkbenchRegion(tabId, regionId)(candidate, candidateRegionId) ||
-        closingWorkbenchReservations(current.closingWorkbenchViews)(candidate, candidateRegionId)
-    }).sessions.map(workbenchSessionCloseResource)
+    const stops = target?.resources.filter((resource): resource is Extract<WorkbenchViewCloseResource, { kind: 'session' }> => resource.kind === 'session') ?? []
     if (stops.length > 0) {
       const reservation: WorkbenchViewCloseReservation = {
         tabId, regionId, reservedSessionIds: stops.map((resource) => resource.sessionId)
@@ -8211,7 +8223,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return
       }
     }
-    const previousTabs = get().tabs
+    const settled = get(), settledTarget = workbenchRegionCloseTarget({ tabs: settled.tabs, sessions: settled.sessions, tabId, regionId, keepAgentSessions: options?.keepAgentSessions })
+    if (!target || !settledTarget || !workbenchViewCloseStillApproved(target, settledTarget, settled.tabs[tabId])) {
+      settled.reportError(new Error('The content changed while it was closing. The current content and Sessions are kept. Close it again to review the current targets.'), { kind: 'indeterminate' })
+      return
+    }
+    const previousTabs = settled.tabs
     set((state) => {
       const liveTab = state.tabs[tabId]
       if (!liveTab || !sameWorkbenchSurfaceOwner(liveTab.regions[regionId], surface)) return state

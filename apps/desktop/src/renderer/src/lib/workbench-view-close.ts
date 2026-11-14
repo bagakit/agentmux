@@ -39,6 +39,9 @@ export type WorkbenchViewClosePlan = {
   reservedSessionIds: readonly string[]
 }
 
+/** Transient approved machine targets; the same close owner produces Tab and Region targets. */
+export type WorkbenchViewCloseTarget = Pick<WorkbenchViewClosePlan, 'tabId' | 'surfaces' | 'resources'>
+
 /**
  * What a close in progress holds. A Tab close stores its whole plan; a split close holds only its
  * Region (`regionId`) and the Sessions it is stopping.
@@ -58,7 +61,7 @@ export type WorkbenchViewCloseSurfaceOwner =
       runId: string | null
     }
   | { regionId: string; kind: 'browser'; browserId: string }
-  | { regionId: string; kind: 'file'; path: string }
+  | { regionId: string; kind: 'file'; workspaceId: string; path: string }
   | { regionId: string; kind: 'launcher' }
   | { regionId: string; kind: 'git'; identity: string }
   | { regionId: string; kind: 'git-diff'; identity: string }
@@ -99,19 +102,19 @@ export function planWorkbenchViewClose(input: {
     [input.workspaceId]: removeTab(layout, input.tabGroupId, input.tabId)
   }
   const closesView = !tabStillOpen(nextLayouts, input.tabId)
+  const sessions = new Map(input.sessions.map((session) => [session.id, session]))
   if (!closesView) {
     return freezePlan({
       workspaceId: input.workspaceId,
       tabGroupId: input.tabGroupId,
       tabId: input.tabId,
       closesView,
-      surfaces: [],
+      surfaces: workbenchSurfaces(tab).map(surface => ({ owner: surfaceOwner(surface, sessions, true), resourceKeys: [] })),
       resources: [],
       reservedSessionIds: []
     })
   }
 
-  const sessions = new Map(input.sessions.map((session) => [session.id, session]))
   const attachedOutsideView = sessionsShownOutsideClosingViews({
     tabs: input.tabs,
     sessions: input.sessions,
@@ -154,6 +157,37 @@ export function planWorkbenchViewClose(input: {
       resource.kind === 'session' ? [resource.sessionId] : []
     ))
   })
+}
+
+export function workbenchRegionCloseTarget(input: {
+  tabs: Readonly<Record<string, WorkbenchTab>>; sessions: readonly SessionSnapshot[]
+  tabId: string; regionId: string; keepAgentSessions?: boolean | undefined; closing?: WorkbenchViewClosing
+}): WorkbenchViewCloseTarget | null {
+  const surface = input.tabs[input.tabId]?.regions[input.regionId]
+  if (!surface) return null
+  const closing = closingWorkbenchRegion(input.tabId, input.regionId)
+  const resources: WorkbenchViewCloseResource[] = input.keepAgentSessions ? [] : agentSessionsWithoutViewsAfterClosing({
+    tabs: input.tabs, sessions: input.sessions, isClosing: (tab, regionId) =>
+      closing(tab, regionId) || input.closing?.(tab, regionId) === true
+  }).sessions.map(workbenchSessionCloseResource)
+  if (surface.kind === 'browser') resources.push({ key: `browser:${surface.browserId}`, kind: 'browser', browserId: surface.browserId })
+  return freezeCloseTarget({ tabId: input.tabId,
+    surfaces: [{ owner: surfaceOwner(surface, new Map(input.sessions.map(session => [session.id, session])), true), resourceKeys: resources.map(resource => resource.key) }], resources })
+}
+
+/** Metadata may change and new outside views may reduce work; neither authorizes a new resource target. */
+export function workbenchViewCloseStillApproved(approved: WorkbenchViewCloseTarget, current: WorkbenchViewCloseTarget,
+  tab: WorkbenchTab | undefined): boolean {
+  if (approved.tabId !== current.tabId || approved.surfaces.length !== current.surfaces.length) return false
+  const byId = new Map<string, SessionSnapshot>() // View identity does not require an old Run observation.
+  if (!approved.surfaces.every(({ owner }) => current.surfaces.some(surface => surface.owner.regionId === owner.regionId) &&
+    sameSurfaceOwner(tab?.regions[owner.regionId], owner.kind === 'agent' || owner.kind === 'terminal' ? { ...owner, runId: null } : owner, byId))) return false
+  const sameControl = (left: SessionControl, right: SessionControl): boolean => left.kind === right.kind &&
+    left.hostId === right.hostId && left.run.runId === right.run.runId &&
+    (left.kind === 'agent' ? right.kind === 'agent' && left.agentSessionId === right.agentSessionId : right.kind === 'terminal' && left.runId === right.runId)
+  return current.resources.every(resource => approved.resources.some(original => original.key === resource.key &&
+    (resource.kind === 'browser' ? original.kind === 'browser' && original.browserId === resource.browserId
+      : original.kind === 'session' && sameControl(original.control, resource.control))))
 }
 
 export function reconcileWorkbenchViewClose(input: {
@@ -256,6 +290,11 @@ export function applyWorkbenchViewCloseTopology(
 }
 
 function freezePlan(plan: WorkbenchViewClosePlan): WorkbenchViewClosePlan {
+  Object.freeze(plan.reservedSessionIds)
+  return freezeCloseTarget(plan)
+}
+
+function freezeCloseTarget<T extends WorkbenchViewCloseTarget>(plan: T): T {
   for (const surface of plan.surfaces) {
     Object.freeze(surface.owner)
     Object.freeze(surface)
@@ -263,7 +302,6 @@ function freezePlan(plan: WorkbenchViewClosePlan): WorkbenchViewClosePlan {
   for (const resource of plan.resources) Object.freeze(resource)
   Object.freeze(plan.surfaces)
   Object.freeze(plan.resources)
-  Object.freeze(plan.reservedSessionIds)
   return Object.freeze(plan)
 }
 
@@ -455,7 +493,7 @@ function surfaceOwner(
     case 'browser':
       return { regionId: surface.regionId, kind: surface.kind, browserId: surface.browserId }
     case 'file':
-      return { regionId: surface.regionId, kind: surface.kind, path: surface.path }
+      return { regionId: surface.regionId, kind: surface.kind, workspaceId: surface.workspaceId, path: surface.path }
     case 'git':
       return { regionId: surface.regionId, kind: surface.kind, identity: JSON.stringify([surface.workspaceId, surface.scope]) }
     case 'git-diff':
@@ -489,7 +527,7 @@ function sameSurfaceOwner(
     case 'browser':
       return right.kind === 'browser' && left.browserId === right.browserId
     case 'file':
-      return right.kind === 'file' && left.path === right.path
+      return right.kind === 'file' && left.workspaceId === right.workspaceId && left.path === right.path
     case 'git':
       return right.kind === 'git' && JSON.stringify([left.workspaceId, left.scope]) === right.identity
     case 'git-diff':

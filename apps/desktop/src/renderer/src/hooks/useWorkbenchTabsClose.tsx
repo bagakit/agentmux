@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { TabGroup } from '@agentmux/layout'
 import { useAppStore } from '../store'
 import { documentKey, workbenchSurfaces } from '../lib/workbench-tabs'
-import { closingWorkbenchTabs } from '../lib/workbench-view-close'
+import { closingWorkbenchTabs, planWorkbenchViewClose, type WorkbenchViewClosePlan } from '../lib/workbench-view-close'
 import { lastViewCloseConfirmation, lastViewCloseCopy, lastViewCloseStops, type LastViewCloseConfirmation } from '../lib/last-view-close-confirmation'
 import { ConfirmationDialog } from '../components/ConfirmationDialog'
 
@@ -15,12 +15,13 @@ export type WorkbenchTabsCloseRequest = {
 
 /** Shared human confirmation; the Store still owns the original close transaction. */
 export function useWorkbenchTabsClose() {
-  const [pending, setPending] = useState<(WorkbenchTabsCloseRequest & { confirmation: LastViewCloseConfirmation }) | null>(null)
+  const [pending, setPending] = useState<(WorkbenchTabsCloseRequest & { confirmation: LastViewCloseConfirmation; plans: Record<string, WorkbenchViewClosePlan> }) | null>(null)
   const [closing, setClosing] = useState(false)
 
-  async function closeTabs(request: WorkbenchTabsCloseRequest, keepAgentSessions = false): Promise<boolean> {
+  async function closeTabs(request: WorkbenchTabsCloseRequest & { plans?: Record<string, WorkbenchViewClosePlan> }, keepAgentSessions = false): Promise<boolean> {
     for (const tabId of request.tabIds) {
-      if (!await useAppStore.getState().closeTab(request.workspaceId, request.group.id, tabId, { keepAgentSessions })) return false
+      if (!await useAppStore.getState().closeTab(request.workspaceId, request.group.id, tabId, { keepAgentSessions,
+        ...(request.plans?.[tabId] ? { approved: request.plans[tabId] } : {}) })) return false
     }
     return true
   }
@@ -37,7 +38,14 @@ export function useWorkbenchTabsClose() {
     const confirmation = lastViewCloseConfirmation({ tabs: state.tabs, sessions: state.sessions,
       timelines: state.timelines, agentNames: state.agentNames, isClosing: closingWorkbenchTabs(tabIds), dirtyCount })
     const target = { ...request, tabIds }
-    if (confirmation) { setPending({ ...target, confirmation }); return }
+    if (confirmation) {
+      const plans = Object.fromEntries(tabIds.flatMap(tabId => {
+        const plan = planWorkbenchViewClose({ tabs: state.tabs, layouts: state.layouts, sessions: state.sessions,
+          workspaceId: request.workspaceId, tabGroupId: request.group.id, tabId, keepAgentSessions: false, closing: closingWorkbenchTabs(tabIds) })
+        return plan ? [[tabId, plan]] : []
+      }))
+      setPending({ ...target, confirmation, plans }); return
+    }
     setClosing(true)
     try { await closeTabs(target) } finally { setClosing(false) }
   }
@@ -47,8 +55,8 @@ export function useWorkbenchTabsClose() {
     const original = pending
     if (!keepAgentSessions && lastViewCloseStops(original.confirmation)) setPending(null)
     setClosing(true)
-    try { if (await closeTabs(original, keepAgentSessions)) setPending(current => current === original ? null : current) }
-    finally { setClosing(false) }
+    try { await closeTabs(original, keepAgentSessions) }
+    finally { setClosing(false); setPending(current => current === original ? null : current) }
   }
 
   const copy = pending ? lastViewCloseCopy(pending.confirmation, pending.tabIds.length > 1 ? 'tabs' : 'tab') : null

@@ -102,7 +102,7 @@ import {
   type WorkbenchTab
 } from '../lib/workbench-tabs'
 import { assertUnreachableSurface, isSessionSurface } from '../lib/workbench-surface-kinds'
-import { closingWorkbenchRegion } from '../lib/workbench-view-close'
+import { closingWorkbenchRegion, workbenchRegionCloseTarget, type WorkbenchViewCloseTarget } from '../lib/workbench-view-close'
 import {
   lastViewCloseConfirmation,
   lastViewCloseCopy,
@@ -752,7 +752,7 @@ function WorkbenchRegionContent({
   const closeRegionRequest = useAppStore((state) => state.closeRegionRequest)
   const clearCloseRegionRequest = useAppStore.getState().clearCloseRegionRequest
   const reportError = useAppStore.getState().reportError
-  const [confirmingClose, setConfirmingClose] = useState<LastViewCloseConfirmation | null>(null)
+  const [confirmingClose, setConfirmingClose] = useState<{ confirmation: LastViewCloseConfirmation; target: WorkbenchViewCloseTarget } | null>(null)
   const [closingRegion, setClosingRegion] = useState(false)
   const surface = tab.regions[node.regionId]
   const connector = useAgentConnectorMenu(node.regionId, surface ? addressableAgentSessionId(surface) : null, tab.id)
@@ -786,23 +786,24 @@ function WorkbenchRegionContent({
       isClosing: closingWorkbenchRegion(tab.id, node.regionId),
       dirtyCount: dirty ? 1 : 0
     })
-    if (confirmation) setConfirmingClose(confirmation)
+    const target = confirmation && workbenchRegionCloseTarget({ tabs: state.tabs, sessions: state.sessions, tabId: tab.id, regionId: node.regionId })
+    if (confirmation && target) setConfirmingClose({ confirmation, target })
     else void closeRegion(tab.workspaceId, tab.id, node.regionId)
   }
 
   async function confirmRegionClose(keepAgentSessions: boolean): Promise<void> {
     if (closingRegion || !confirmingClose) return
     const original = confirmingClose
-    if (!keepAgentSessions && lastViewCloseStops(original)) setConfirmingClose(null)
+    if (!keepAgentSessions && lastViewCloseStops(original.confirmation)) setConfirmingClose(null)
     setClosingRegion(true)
     try {
-      await closeRegion(tab.workspaceId, tab.id, node.regionId, { keepAgentSessions })
+      await closeRegion(tab.workspaceId, tab.id, node.regionId, { keepAgentSessions, approved: original.target })
     } finally {
       setClosingRegion(false)
       setConfirmingClose(current => current === original ? null : current)
     }
   }
-  const regionCloseCopy = confirmingClose ? lastViewCloseCopy(confirmingClose, 'split') : null
+  const regionCloseCopy = confirmingClose ? lastViewCloseCopy(confirmingClose.confirmation, 'split') : null
 
   // 消费键盘关格意图：只有意图点名的这张 Tab 的这一格才响应，跑与 X 相同的决定，然后清掉意图。本仓库
   // renderToStaticMarkup 不跑 effect，所以这条接线的断言在 store 层（意图投出/清除）与判定层
@@ -970,7 +971,7 @@ function WorkbenchRegionContent({
           : {})}
         busy={closingRegion}
         onCancel={() => !closingRegion && setConfirmingClose(null)}
-        onConfirm={() => void confirmRegionClose(!lastViewCloseStops(confirmingClose))}
+        onConfirm={() => void confirmRegionClose(!lastViewCloseStops(confirmingClose?.confirmation ?? null))}
       />
   </>
 }
