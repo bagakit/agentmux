@@ -11,7 +11,7 @@ export const FOCUS_RECENT_PROJECT_HOURS = 48
 export const FOCUS_TOPIC_PRESENTATIONS = ['cards', 'sections'] as const
 export type FocusTopicPresentation = typeof FOCUS_TOPIC_PRESENTATIONS[number]
 export function resolveFocusTopicPresentation(value: unknown): FocusTopicPresentation {
-  return value === 'sections' ? 'sections' : 'cards'
+  return value === 'cards' ? 'cards' : 'sections'
 }
 
 export const FOCUS_LINK_DESTINATIONS = ['region', 'tab'] as const

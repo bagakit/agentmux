@@ -5,10 +5,10 @@ import { FocusLaneGroups } from './FocusLaneGroups'
 import { FOCUS_BUCKET_PRESENTATION } from './FocusContextState'
 import { useFocusContextPlacements } from '../lib/use-focus-context-placements'
 import type { FocusLaneCounts, FocusLaneMetrics } from '../lib/focus-lane-layout'
-import type { FocusReplyLines, FocusTopicPresentation } from '../../../shared/focus-preferences'
+import { resolveFocusTopicPresentation, type FocusReplyLines, type FocusTopicPresentation } from '../../../shared/focus-preferences'
 
 /** The actual scan and its settings example share grouping, state heads and Topic presentation. */
-export function FocusScanLaneContent({ lane, contexts, heading, metrics, replyLines = 2, topicPresentation = 'cards', renderCards, compact = false }: {
+export function FocusScanLaneContent({ lane, contexts, heading, metrics, replyLines = 2, topicPresentation = resolveFocusTopicPresentation(undefined), renderCards, compact = false }: {
   compact?: boolean
   lane: FocusScanLane; contexts: readonly FocusContext[]; heading: ReactNode; metrics: FocusLaneMetrics
   replyLines?: FocusReplyLines; topicPresentation?: FocusTopicPresentation

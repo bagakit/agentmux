@@ -26,7 +26,7 @@ export const focusSettings = [
       return { ...config, focus: { ...config.focus, recentActivityHours: resolveFocusRecentActivityHours(next) } }
     }
   },
-  enumSetting('focus.topicPresentation', FOCUS_TOPIC_PRESENTATIONS, 'cards',
+  enumSetting('focus.topicPresentation', FOCUS_TOPIC_PRESENTATIONS, resolveFocusTopicPresentation(undefined),
     config => resolveFocusTopicPresentation(config.focus?.topicPresentation),
     (config, topicPresentation) => ({ ...config, focus: { recentActivityHours: resolveFocusRecentActivityHours(config.focus?.recentActivityHours), ...config.focus, topicPresentation } })),
   enumSetting('focus.linkDestination', FOCUS_LINK_DESTINATIONS, DEFAULT_FOCUS_LINK_DESTINATION,

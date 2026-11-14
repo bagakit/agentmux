@@ -224,7 +224,7 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
               {first.summary ? <span className="focus-project-lanes__summary" title={first.summary}>{first.summary}</span> : null}
               {first.recovery ? <span className="focus-project-lanes__recovery">{first.recovery === 'removed' ? 'Worktree removed' : 'Workspace unregistered'}</span> : null}</> : null}
             <FocusProjectActivity at={activityAt} now={now} />
-            {resourceMenus ? <FocusProjectPreferences projectKey={key} name={name} zoneKey={containerKey} zoneDefault="sections" /> : null}
+            {resourceMenus ? <FocusProjectPreferences projectKey={key} name={name} zoneKey={containerKey} zoneDefault={focusZonePresentation(null, 'project', undefined)} /> : null}
           </header>
         return <div key={frame.key} className={frame.project ? 'focus-project-frame' : undefined} data-project-group-key={frame.project ? key : undefined}
           data-focus-current={frame.project && currentProject || undefined} data-focus-zone-presentation={resourceMenus || frame.project ? mode : undefined} data-focus-container-key={containerKey ?? undefined}
@@ -269,7 +269,7 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
           {!frame.project || lane.labels.length > 1 ? <FocusProjectActivity at={lane.lastActivityAt ?? null} now={now} /> : null}
           {lane.locationUnconfirmed ? <span className="focus-project-lanes__recovery">Location unconfirmed</span> : null}
           {lane.recovery ? <span className="focus-project-lanes__recovery">{lane.recovery === 'removed' ? 'Worktree removed' : 'Workspace unregistered'}</span> : null}
-          {lane.collection && resourceMenus ? <FocusProjectPreferences name={lane.name} zoneKey={containerKey} zoneDefault={authoredTopicPresentation ?? 'cards'}
+          {lane.collection && resourceMenus ? <FocusProjectPreferences name={lane.name} zoneKey={containerKey} zoneDefault={focusZonePresentation(null, 'collection', undefined, authoredTopicPresentation)}
             zoneUnavailable="Zone layout needs one confirmed Collection. Original members and their work surfaces remain available." /> : null}</>}
         </div>
         , compact)}</div>

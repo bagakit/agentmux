@@ -7,12 +7,12 @@ import { configValuesEqual } from '../../../shared/config-edit'
 import { saveFocusPreferences } from '../lib/focus-preferences'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { FocusTopicPresentation } from '../../../shared/focus-preferences'
-import type { FocusZonePresentation } from '../../../shared/focus-zone-presentation'
+import { focusZonePresentation, type FocusZonePresentation } from '../../../shared/focus-zone-presentation'
 import { useAppStore } from '../store'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 /** Draft stays at its exact original project on a failed save; no workspace or runtime writes. */
-export function FocusProjectPreferences({ projectKey, name, zoneKey, zoneDefault = 'sections', zoneUnavailable }: {
+export function FocusProjectPreferences({ projectKey, name, zoneKey, zoneDefault = focusZonePresentation(null, projectKey ? 'project' : 'collection', undefined), zoneUnavailable }: {
   projectKey?: string; name: string; zoneKey?: string | null; zoneDefault?: FocusTopicPresentation; zoneUnavailable?: string
 }) {
   const projects = useAppStore(state => state.config?.focus?.projects)

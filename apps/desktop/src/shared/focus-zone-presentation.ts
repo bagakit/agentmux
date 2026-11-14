@@ -1,4 +1,4 @@
-import type { FocusTopicPresentation } from './focus-preferences'
+import { resolveFocusTopicPresentation, type FocusTopicPresentation } from './focus-preferences'
 
 /** Personal display choices address original containers, never a disposable scan lane. */
 export type FocusZonePresentation = { key: string; presentation: FocusTopicPresentation }
@@ -28,5 +28,5 @@ export function parseFocusZonePresentations(value: unknown): FocusZonePresentati
 export function focusZonePresentation(key: string | null, kind: 'project' | 'collection',
   preferences: readonly FocusZonePresentation[] | undefined, authoredTopicPresentation?: FocusTopicPresentation): FocusTopicPresentation {
   return (key ? preferences?.find(item => item.key === key)?.presentation : undefined)
-    ?? (kind === 'project' ? 'sections' : authoredTopicPresentation ?? 'cards')
+    ?? (kind === 'project' ? 'cards' : resolveFocusTopicPresentation(authoredTopicPresentation))
 }
