@@ -2044,9 +2044,9 @@ export class BrowserViewManager {
     const url = assertAllowedBrowserUrl(address)
     const { source, returnContext } = this.openingSource(parent)
     const window = { width: 1024, height: 768 }
+    const profileId = destination.profileId
     let storage = parent.storage
-    if (destination.profileId !== undefined) {
-      const profileId = destination.profileId
+    if (profileId !== undefined) {
       await this.profiles.prepareSession?.(profileId)
       if (!stillCurrent()) throw new Error('The original link changed before its Profile was ready.')
       storage = { mode: 'normal', profileId, partition: this.resolvePartition(profileId) }
@@ -2069,7 +2069,8 @@ export class BrowserViewManager {
     const child = this.require(id), opening = child.nativeChild!
     if (ownsPrivateStorage) opening.ownsPrivateStorage = true
     opening.opening = { context: returnContext, destination: destination.destination,
-      foreground: destination.destination !== 'tab' || destination.profileId !== undefined }
+      foreground: destination.destination !== 'tab' || profileId !== undefined,
+      ...(profileId !== undefined ? { collectInSurvey: true } : {}) }
     opening.projectionPending = true
     this.publishNativeChildOpening(child)
   }

@@ -1549,6 +1549,8 @@ export type BrowserBounds = {
 export type BrowserNativeOpening = {
   /** Original native disposition requests a foreground tab; Agent work stays in the background. */
   foreground?: boolean
+  /** The person explicitly chose a Profile for this new page. */
+  collectInSurvey?: true
   context: import('./workbench-windows').WorkbenchReturnContext | null
   destination: import('./browser-new-page-placement').BrowserNewPageDestination
 }

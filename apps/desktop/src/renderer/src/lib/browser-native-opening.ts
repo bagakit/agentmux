@@ -64,7 +64,8 @@ export async function finishNativeBrowserOpening(ports: {
   void ports.checkpoint().catch(report)
   if (!kept()) return
   const returnContext = nativeOpeningDestinationContext(context, target, event.browser.id, destination)
-  if (context?.surface === 'survey' && 'kind' in context.selection && context.selection.kind === 'page' && destination !== 'region') {
+  const fromSurveyPage = context?.surface === 'survey' && 'kind' in context.selection && context.selection.kind === 'page'
+  if (event.opening?.collectInSurvey || (fromSurveyPage && destination !== 'region')) {
     void admitPreparedSurveyPage(ports.get, { regionId: target.regionId, browserId: event.browser.id },
       event.browser, original.surveyPageReferences).then(({ admission }) => {
       if (admission.outcome === 'unknown' || admission.outcome === 'partial') report(admission.issues.map(issue => issue.message + ' ' + issue.recovery).join(' '))
