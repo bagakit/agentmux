@@ -1,6 +1,6 @@
 # AgentMux 原生层
 
-本文定义本机操作系统能力的统一行为边界。原生层承接应用、窗口、辅助功能对象、系统截图、剪贴板和原生输入；不持有 Agent Session、Run、PTY、Browser 导航或用户草稿。项目分层沿[系统职责](../../architecture/system-ownership.md)，截图与草稿沿[输入合同](conversation-input.md#message-tools-失败反馈与-browser-region-选中态)。本页是已确认需求，不表示实现、安装或授权已通过。
+本文定义本机操作系统能力的统一行为边界。原生层承接应用、窗口、辅助功能对象、系统截图、剪贴板和原生输入；不持有 Agent Session、Run、PTY、Browser 导航或用户草稿。项目分层沿[系统职责](../../architecture/system-ownership.md)，截图与草稿沿[截图合同](capture-and-recording.md#系统截图快捷键与选区)。本页是已确认需求，不表示实现、安装或授权已通过。
 
 ## 原生能力与接入
 
@@ -42,4 +42,4 @@ PNG 另存、临时贴图、公共调用及各输出的实际回执统一见[《
 
 ## 完成边界
 
-实现包含来源与 MIT notice、更名后的原生程序、Node 能力端口、正式构建签名、公共 RPC／CLI 和实际 Desktop 消费。验证真实成功、明确取消、权限拒绝、目标变化、回执未知、进程退出与恢复；变异和产品调用者均非空。原生 UI 的本批实拍与独立看图、真实安装与 A/B 授权连续性沿现有验收责任执行，不把源码存在或构建通过称为全部完成。
+原生层的完成清单与验证范围归[原生层验证](../../testing/native-desktop.md)，当前模块与构建机制见[原生层机制](../../architecture/native-desktop.md)。源码存在或构建通过不等于原生层已完成。

@@ -6,19 +6,20 @@
 
 **本页章节**
 
-- [范围与基础约束](#范围与基础约束)
+- [对象、消息与工作面的共同呈现](#对象消息与工作面的共同呈现)
 - [保护原则](#保护原则)
 - [UI 现代化的独立评估边界](#ui-现代化的独立评估边界)
 - [Agent 主观审美的判断边界](#agent-主观审美的判断边界)
 - [主题与样式 SSOT 规范](#主题与样式-ssot-规范)
 - [字号阶梯](#字号阶梯)
 - [间距刻度](#间距刻度)
+- [圆角](#圆角)
 - [颜色](#颜色)
 - [动效](#动效)
 - [控件语言](#控件语言)
 - [身份归属](#身份归属)
 - [密度预算](#密度预算)
-- [Owner](#owner)
+- [工作台控件与状态的 Owner](#工作台控件与状态的-owner)
 - [弹层作用域与层级](#弹层作用域与层级)
 - [响应式与可访问性](#响应式与可访问性)
 - [验收](#验收)
@@ -28,23 +29,21 @@
 - [动态视觉的渲染边界](#动态视觉的渲染边界)
 - [成熟产品界面的控件与分组](#成熟产品界面的控件与分组)
 
-## 范围与基础约束
+## 对象、消息与工作面的共同呈现
+
+本节收集跨多个专题出现的对象分享、消息阅读与工作面位置的呈现约束；行为、身份与资格仍只在所链接的交互合同中定义。
 
 Agent／Region／Tab／Category／Topic 的对象分享直接复制链接，菜单使用清楚的 Copy … Link 名称，同一对象不并列重复的名片或消息复制动作；沿既有菜单密度、图标与键盘焦点，不新增装饰或说明面。File／Browser 上下文分享保留原紧凑外框与正文阅读格式；身份、链接、命令发现及来源唯一引用[交互合同《寻址与复制》](../behavior/public-control.md#对象地址分享与方向)。普通路径、URL、选区及终端内容继续沿原复制语汇。
 
-Provider 完整性（Session 分析、对话模式与 trace 观察）的行为与能力边界统一见 [交互合同《Provider 能力对齐与移植边界》](../behavior/agent-capabilities-and-messaging.md#provider-能力对齐与移植边界)。同类消息、资源与观察事实沿既有公共组件呈现；缺口与流程降级沿既有服务窗表达，不能逐家制造另一套控件语言。 合法空或被遮蔽 reasoning 仍沿既有 trace 折叠可达，opaque 数据不铺成正文，不增加常驻控件；真实性只定义在该交互合同。
+Provider 完整性（Session 分析、对话模式与 trace 观察）的行为与能力边界统一见 [交互合同《Provider 能力对齐与移植边界》](../behavior/agent-capabilities-and-messaging.md#provider-能力对齐与移植边界)。同类消息、资源与观察事实沿既有公共组件呈现；缺口与流程降级沿既有服务窗表达，不能逐家制造另一套控件语言。合法空或被遮蔽 reasoning 仍沿既有 trace 折叠可达，opaque 数据不铺成正文，不增加常驻控件；真实性只定义在该交互合同。
 
 原生会话主记录与已提交旁写日志的来源、只读快照、预算、取消与变化诊断，唯一见交互合同[《Provider 能力对齐与移植边界》](../behavior/agent-capabilities-and-messaging.md#provider-能力对齐与移植边界)；读取缺口沿既有服务窗说明，保留共同消息行、已读内容与原阅读位置，不增加常驻指标或另一套历史界面。
-
-Outbox、Focus 时间轴与对话模式的全来源用户消息、作者、时间及投递边界见[用户消息来源](../behavior/conversation-mode.md#用户消息从-provider-原生会话取得)；轻量范围说明、缺时间与就地 History／Retry 呈现见[共同阅读密度](conversation-mode.md#共同阅读密度)，不在全局另定义消息面规则。
 
 Focus 的未知时间输入与旧窗覆盖说明沿既有紧凑输入入口和单条消息预览呈现，不能增加一条常驻工具栏或为每个空 Context 展开消息卡。按需入口可选择 Context、扫描输入和显式继续／刷新，正文、资源和链接复用共同对话消息组件；不复制一套聊天界面、不撑高约 24px 轨道。已固定的消息预览在可用宽度变化后仍须留在可见范围内，关闭和继续读取控件可操作，并保留原正文与选区。阅读预算、选区保持、未知作者／时间与来源变化只定义在[Focus 共同消息的有界阅读](../behavior/focus-context.md#共同消息的有界阅读)。 Focus 固定阅读中的复合头像、辅助归属和 Info 入口复用[《消息布局与身份密度》](conversation-mode.md#消息布局与身份密度)，轻量 hover 保持原摘录而不叠完整资料墙；共享正文与来源详情在332px中仍可读、可操作，不重复堆出第二组姓名和空字段。资料与来源的事实边界只见交互合同中的 Focus 共同正文消费约束。
 
 Focus 消息预览的完整表面不能被活跃 Region 的焦点描边穿过；标题、正文与底部动作连续清晰，描边在预览之外保持可辨，浮层尺寸与选择、关闭语义引用交互合同对应消息预览约束。
 
-共用 Zone→Tabs→Regions 工作面保同一内容与控件语言，外层 chrome 由当前展示位置提供；需要分辨时用紧凑可读说明表达实体来源与当前位置，不叠重复全局标题或把位置当内容归属。下钻某 Tab 或 Region 仍有准确原动作目标与可见焦点，未知呈现不假装可输入。多位置、取消绑定与实体关闭、真实呈现及恢复只定义在交互 SSOT[《Zone→Tabs→Regions 的实体与展示绑定》](../behavior/spaces-and-layout.md#zonetabsregions-的实体与展示绑定)。
-
-位置及公开导航回执的准确对应只定义在交互 SSOT[《Zone→Tabs→Regions 的实体与展示绑定》](../behavior/spaces-and-layout.md#zonetabsregions-的实体与展示绑定)；流程未确认的说明与原可用工作面保持可辨，不将校验未确认冒已失败的 Agent。
+共用 Zone→Tabs→Regions 工作面保同一内容与控件语言，外层 chrome 由当前展示位置提供；需要分辨时用紧凑可读说明表达实体来源与当前位置，不叠重复全局标题或把位置当内容归属。下钻某 Tab 或 Region 仍有准确原动作目标与可见焦点，未知呈现不假装可输入。流程未确认的说明与原可用工作面保持可辨，不把校验未确认呈现为 Agent 已失败。多位置、取消绑定与实体关闭、位置及公开导航回执的准确对应、真实呈现及恢复只定义在交互 SSOT[《Zone→Tabs→Regions 的实体与展示绑定》](../behavior/spaces-and-layout.md#zonetabsregions-的实体与展示绑定)。
 
 原生 Browser 多位置画面的活体导航、媒体与首击输入合同引用交互 SSOT[《Zone→Tabs→Regions 的实体与展示绑定》](../behavior/spaces-and-layout.md#zonetabsregions-的实体与展示绑定)。同一控件的可见画面、当前输入位置与尚未确认的交接应能分辨；失败提示停在旁侧，不遮盖健康原页面，不将「已显示」或「已聚焦」呈现为「这一击已生效」。镜像的可见画面不冒充已经证明原生输入可操作。
 
@@ -67,47 +66,34 @@ Agent CLI 导航桌面主画面、保留 Mote 对话输入及选择／呈现／c
 - 一个身份层级只在一个主要位置可见；低频信息进入 tooltip、context menu 或 Activity。
 - 视觉改动不得创建第二套 Agent、Terminal、Browser、Topic 或 Layout 生命周期。
 - Agent 操作 AgentMux 的反馈来自 Control receipt、语义状态或原生工作面变化。自有 Computer Use 的行为与分层约束见交互合同[《AgentMux 自操作与 Computer Use 边界》](../behavior/public-control.md#agentmux-自操作与-computer-use-边界)；目标、执行中与失败原因在同一操作反馈位置呈现，权限问题沿用可行动的服务窗，不能混同 Agent 运行状态或增加外部工具的专属常驻状态栏。
-- 打包来源身份属于安装与诊断边界，不在工作面新增常驻版本条、重复状态栏或第二套
-  运行时状态；需要核对时通过候选报告与文件元数据完成。安装失败的保留规则见交互合同
-  [《打包、安装与启动事实》](../behavior/session-recovery.md#打包安装与启动事实)，包括候选运行依赖完整和实际启动验收的约束；失败阶段停留在诊断面。
-- 发布审计与运行路径校验属于同一条诊断边界：候选、canonical 安装副本和当前运行
-  实例只通过身份报告对照，不在界面常驻显示版本号，也不复制一份 Session/Run 真相。
-- New Browser 的结果沿用交互合同中的可见成功/失败投影：不新增常驻版本或状态条；成功时
-  由聚焦 Pane 的 Tab/Region 承担变化，失败时由该工作面已有的服务窗/错误面承担反馈，
-  不能留下无变化的空白点击结果。
+- 打包来源身份、发布审计与运行路径校验属于安装与诊断边界：候选、canonical 安装副本和当前运行实例只通过身份报告与文件元数据对照，不在工作面常驻显示版本号、重复状态栏或第二套 Session／Run 状态，失败阶段停留在诊断面。安装失败的保留规则、候选运行依赖完整与实际启动验收见交互合同[《打包、安装与启动事实》](../behavior/session-recovery.md#打包安装与启动事实)。
+- New Browser 的结果沿用交互合同中的可见成功／失败投影，不新增常驻版本或状态条：成功时由聚焦 Pane 的 Tab／Region 承担变化，失败时由该工作面已有的服务窗或错误面承担反馈，不能留下无变化的空白点击结果。
 
-- 整体 review 延续 Graphite / Mint 与既有 Surface 层级：可靠性与焦点约束见交互合同[《整体 review 的可靠性约束》](../behavior/shared-rules.md#整体-review-的可靠性约束)。Prompt 验证降级复用 Session 服务窗，持续可见、不遮挡、不抢焦点；Board 读取失败用现有行内错误语汇，不能用无限 loading 或空态代替。高密度 Board 的排序与分组不应反复全表扫描或复制已分组成员。
+- 整体 review 延续 Graphite / Mint 与既有 Surface 层级：Prompt 验证降级的行为见交互合同[《P0 的共同交付边界》](../behavior/agent-capabilities-and-messaging.md#p0-的共同交付边界)，Board 读取的行为见[《Board 的工作线行》](../behavior/spaces-and-layout.md#board-的工作线行)。Prompt 验证降级复用 Session 服务窗，持续可见、不遮挡、不抢焦点；Board 读取失败用现有行内错误语汇，不能用无限 loading 或空态代替。高密度 Board 的排序与分组不应反复全表扫描或复制已分组成员。
 
 - 无独立动作的聚合头像沿用相同身份和状态色，但不显示按钮手势或交互抬升；可定位到 Session 的头像保留现有悬停与键盘焦点表现。
+- Shell 环境读取不完整时，复用服务窗的持续、中性、非模态告示，说明读取范围和恢复动作，不展示环境值，也不靠 toast 自动消失；行为归属见 [Desktop interaction](../agentmux-desktop-interaction.md) 的本地 shell 环境约束。登录 shell 降级时告示保持一行紧凑服务窗，说明「交互配置未确认，当前按登录／继承环境运行」，不显示 PATH、凭据或完整环境转储；非交互 fallback 成功后告示仍持续可见，直到下一次应用启动重新确认，布局、Session 与输入不被遮罩。
+- 兼容但归属未确认的 Runtime 使用持续的中性服务窗说明，不使用错误弹窗，不阻挡已有工作面；归属状态不展示路径、PID 或凭据。
 
 ## UI 现代化的独立评估边界
 
-用户希望单独评价 UI 现代化，以对象层级、阅读密度、字体与空间、表面层次、图标与身份，以及窄窗、失败、焦点与恢复中的可见行为为依据。保留 Graphite / Mint、terminal-first 与现有字号、间距、表面和状态 token；测试数量或某一页漂亮不能代替完整正常、窄窗、失败与恢复流程的判断。组件化评估只见 [交互合同《组件化的独立评估边界》](../behavior/shared-rules.md#组件化的独立评估边界)，此处不重复定义。
+UI 现代化的评估以对象层级、阅读密度、字体与空间、表面层次、图标与身份，以及窄窗、失败、焦点与恢复中的可见行为为依据，保留 Graphite / Mint、terminal-first 与现有字号、间距、表面和状态 token；测试数量或单页好看不能代替完整的正常、窄窗、失败与恢复流程判断。组件化评估只见[交互合同《组件化的独立评估边界》](../behavior/shared-rules.md#组件化的独立评估边界)。
 
-插件贡献注册被拒绝后的目录保持与修正重试也见上述交互合同，不新增视觉规则。
+现代化改动在正常、窄格、失败与恢复中使用同一对象层级和控件语言；服务窗持续说明失败步骤、当前能力与恢复路径，完整详情随时可达，同时保留可用的终端阅读和输入空间。当前对象的身份与状态在各层有明确且不同的用途；窄窗的摘要、工具和长字段不靠缩小正文字号或隐藏必要事实解决；深浅主题、键盘返回与减少动画偏好沿现设计系统保持一致。行为、组件贡献与 owner 边界只见上述交互合同，单次截图或评分不代替完整路径验收。
 
-用户要求把现代化实质优化到高水准并减少后续迭代绕路。正常、窄格、失败与恢复使用同一对象层级和控件语言；服务窗持续说明失败步骤、当前能力与恢复路径，完整详情随时可达，同时保留可用的终端阅读和输入空间。当前对象的身份与状态在各层有明确且不同的用途，窄窗的摘要、工具和长字段不得靠缩小正文字号或隐藏必要事实解决；深浅主题、键盘返回与减少动画偏好沿现设计系统保持一致。行为、组件贡献与 owner 边界只见上述交互合同，单次截图或评分不代替完整路径验收。
-
-用户明确整体视觉风格要「精致、现代、简约、紧凑」。精致体现为一致的字体层级、对齐、间距、边界和状态细节；现代与简约服从对象辨识和真实反馈；紧凑优先保留终端阅读与输入面积，同时让动作可发现、文字可读。紧凑不要求每个表面同一密度，等待舞台以舒展留白和清楚主次承载当前状态与原动作，具体构图归[《启动与恢复的分量分开》](session-recovery.md#启动与恢复的分量分开)。沿 Graphite / Mint 的既有 palette 与 token 收敛，不以堆叠卡片、装饰阴影、渐变或缩小正文字号代替信息组织。
-
-角色与动作插画以真实 3D 角色或场景形成体积和表演，采用镜面铬金属的复古未来方向，并探索伪二维的非写实着色。清楚剪影、经过设计的图形五官、受控明暗与随形体转折的反射共同形成质感；角色自信、友好、安静而有个性。造型、表情和材质共同设计，金属高光与暗部仍让神情可读，成人感与精致程度在真实小尺寸和连续表演中成立。方向先核成熟角色作品、模型与 shader 的原来源及适用边界，再选择造型和渲染能力；独立素材与实际整页分别评审。Mote 新头像、可编辑捏脸、Goals CTA 及其他美术素材共享这一角色与材质语言，具体角色和场景随真实用途选择；静态插画可由同一 3D 素材预渲染，动画与可编辑形体由对应真实能力证明。界面表面继续沿 Graphite / Mint，角色与关键动作承担美术重心，密集终端、工具条、列表和编辑区以文字与语义控件为主。深浅主题中材质仍有层次，完整页面保文字、动作和图形的清楚主次；大图细节或 shader 的存在不代称高级感。已保存头像与用户图片沿各对象原外观 owner 保持；插画辅助用途辨认，动作标签、当前值、状态与反馈继续表达真实事实。
-
-Space 与 Focus 使用同族的产品对象符号：Space 以开放工作舱表达容纳与组织，层叠壳体和开放工作面构成主要轮廓；Focus 以聚焦镜表达关注与观察，分离的四角框住当前工作。两者延续 Goals 的复古未来金属造物质感与 Mote 的 Mint，靠形体建立辨识。概念场景、简化轮廓与小尺寸导航图形保持同一对象的连续识别；小图形按实际尺寸提炼，不直接缩小复杂渲染图，也不把 Space 简化成通用文件夹。图形沿现有语义目录与共享 owner 复用，保留 Mote 的伙伴人格及 Goals 的[共识身份](goals-and-demand.md#goal-的共识身份与局部反馈)，不因新符号另造 Agent 身份或状态。紧凑设置介绍的应用强度沿[设置呈现](settings-and-observation.md#设置页现代化密度)。
-
-Space 小图形以横向并排工作面和分隔表达空间组织，保持开放、低宽的整体关系，避免竖向圆拱与独立底座组合产生墓碑联想。Survey 小图形以浏览框与探查镜表达浏览和探索；小尺寸优先用途辨认，不机械复刻立体造物的切面。大插画仍保持已确认的同族材质与物件设计。Space、Focus、Goals、Survey、Recall 共享画框与笔重，并按实际导航尺寸校准光学中心和视觉面积。
+整体视觉风格是「精致、现代、简约、紧凑」：精致体现为一致的字体层级、对齐、间距、边界和状态细节；现代与简约服从对象辨识和真实反馈；紧凑优先保留终端阅读与输入面积，同时让动作可发现、文字可读。紧凑不要求每个表面同一密度，等待舞台以舒展留白和清楚主次承载当前状态与原动作，具体构图归[《启动与恢复的分量分开》](session-recovery.md#启动与恢复的分量分开)。沿 Graphite / Mint 的既有 palette 与 token 收敛，不以堆叠卡片、装饰阴影、渐变或缩小正文字号代替信息组织。
 
 选中导航符号可沿自身结构做一次短促的展开、对焦或翻页，完成后停在清楚的静态轮廓；只由该实例当前选中事实触发，不因无关状态刷新重播，不将选择表现成持续运行或业务确认。未选中实例与其业务反馈独立，主题自定义图形保持完整；减少动态效果时直接静止，命中区和邻接排布全程稳定。
 
-Survey 与 Recall 的对象符号延续 Space／Focus 同族的石墨金属、Mint 透光体与暖金细边。Survey 采用探索棱镜，前后错开的斜切光学面与一体石墨承托构成有方向的开放轮廓；Recall 采用一体折页，两个清楚的 Mint 页面嵌入从封面延续到中央折脊的石墨壳体，形成简洁的展开书形。概念呈现保留既有深色场景、受控暖光与造物质感；正式素材与小图形沿同一结构提炼，不将整体换成浅底、银灰硬件产品照，也不重新引入古典罗盘指针、刻度、扇形叠页或卷曲书签。完成度来自可辨的专属轮廓、协调的比例、完整的部件连接、统一的曲率与边缘，以及各自明确的材质反射；不以通用图标挤出后镀金、全轮廓发光或重复噪纹代替造型设计。概念造型及小尺寸图形须分别判断，设置应用仍遵循原紧凑介绍与真实配置主体。
+角色插画、概念场景，以及 Space、Focus、Survey、Recall 等产品对象符号的共同美术语言归[品牌架构《共同美术语言》](brand-identity.md#共同美术语言)。
 
 ## Agent 主观审美的判断边界
 
-所有界面改动的通用视觉交付约束唯一见 interaction[《Agent 主观审美的端到端验证》](../behavior/shared-rules.md#agent-主观审美的端到端验证)，本节只定义判断边界。
-
+所有界面改动的通用视觉交付约束唯一见交互合同[《Agent 主观审美的端到端验证》](../behavior/shared-rules.md#agent-主观审美的端到端验证)，本节只定义判断边界。
 
 独立 Agent 基于已经看见的真实产品截图，结合当前任务和本合同判断层级、紧凑程度、对齐、留白，以及信息与控件是否清楚；结论须说明画面中的具体位置、为何影响阅读或操作，以及怎样修正。同一截图可有主观分歧，保留理由与未确认事项，不把评分或单个数字伪装成审美真相。
 
-具体像素阈值、截图差异分数或 CSS 字符串只能辅助核对明确的工程事实，不能自动判定精致、现代、简约或紧凑，也不能为了某一个画面的距离发明专用门槛。真实操作、采集身份、独立看图、每批执行证据、fixture 与需求一致性及失败保全只见交互 SSOT[《Agent 主观审美的端到端验证》](../behavior/shared-rules.md#agent-主观审美的端到端验证)；本节不另设场景清单或第二套设计规则。 用户要求独立审美评审到明确满意为止，修正／复拍及交付边界同样只归该交互章节，不以本节几何或评分替代。
+具体像素阈值、截图差异分数或 CSS 字符串只能辅助核对明确的工程事实，不能自动判定精致、现代、简约或紧凑，也不能为了某一个画面的距离发明专用门槛。真实操作、采集身份、独立看图、每批执行证据、fixture 与需求一致性及失败保全只见交互 SSOT[《Agent 主观审美的端到端验证》](../behavior/shared-rules.md#agent-主观审美的端到端验证)；本节不另设场景清单或第二套设计规则。独立评审到明确满意为止的修正、复拍与交付边界同样只归该交互章节，不以本节的几何或评分替代。
 
 ## 主题与样式 SSOT 规范
 
@@ -123,17 +109,15 @@ Survey 与 Recall 的对象符号延续 Space／Focus 同族的石墨金属、Mi
 - 三套主题的辨识来自完整色彩、表面材质、字体层级和图标语言。辐射 4 的工业磷光语言与复古未来的模拟科技语言须明显不同；装饰服从终端、正文、ANSI 和危险/警告/成功/未知的可读性。减少动画偏好继续生效。
 - 新增 token 必须有实际消费者、明确语义和从声明来源反推的契约检查。共享控件、菜单/弹层、浮窗与 Gallery 消费同一投影，不闪回旧主题；utility 层只能映射既有 token。Core 不依赖 UI 框架或主题包，Provider 不持有主题分支。
 
-主题编辑、预览、文件往返、冲突与保存反馈归[设置行为](../behavior/settings-and-observation.md#主题编辑与文件交换)，设置呈现归[设置呈现](settings-and-observation.md#主题编辑器)。真实产品操作、生产变异、独立技术 review 与完整原图审美分别证明各自结论，构建和概念图不能代签。
+主题编辑、预览、文件往返、冲突与保存反馈归[设置行为](../behavior/settings-and-observation.md#外观app-图标与主题文件)，设置呈现归[设置呈现](settings-and-observation.md#主题编辑器)。真实产品操作、生产变异、独立技术 review 与完整原图审美分别证明各自结论，构建和概念图不能代签。
 
 Terminal 的经典配色复用原生调色板目录与原设置 owner，以原作者的完整 ANSI 定义为来源。Dracula、Nord、Gruvbox Dark、Solarized Dark 和 Solarized Light 分别明确命名，保持原 Graphite / Catppuccin 选择；显式配色不随 App 明暗或主题变化改写。Workspace theme 是用户明确选择的配对项。静态预览、Desktop 与 Mobile 原生 Terminal、Main 的默认前景/背景及公开设置发现/写入消费同一目录，不另建经典配色存储、字体设置或执行插件。配色切换在现有实例内生效，保 buffer、阅读位置、选区、输入与原 Attachment；原 ANSI、警告/危险输出仍须辨认。
 
-设计语言要能被执行，前提是它在代码里**有一个可引用的名字**。散落的字面值不是"细微调整"，是把设计决策
-藏进 2000 多行样式表里：改一档字号要靠 grep，改错一处没人发现。因此三类尺度全部收进 token，
-**样式表里不再出现裸字面值**。
+字号、间距与颜色三类尺度都通过具名 token 使用，样式表不写裸字面值；token 之外确有必要的值按选择器具名列为例外。下面三节分别定义刻度与例外边界；具名例外清单与核对方法见测试策略[《界面规则与真实行为》](../../testing/strategy.md#界面规则与真实行为)。
 
 ## 字号阶梯
 
-以下六档是 Desktop App chrome 与常规内容的默认尺度。每一档有明确职责，选档看**这段文字是什么**，不看它想显得多大。手机按触屏阅读任务定义自己的[字号与几何](mobile-client.md#尺度与-token)，不直接套用本表的 Desktop 值；共享主题、角色语义与可访问性要求仍有效。
+以下六档是 Desktop App chrome 与常规内容的默认尺度。每一档有明确职责，选档看这段文字承担的职责，不看它想显得多大。手机按触屏阅读任务定义自己的[字号与几何](mobile-client.md#尺度与-token)，不直接套用本表的 Desktop 值；共享主题、角色语义与可访问性要求仍有效。
 
 | Token | 值 | 职责 |
 | --- | --- | --- |
@@ -150,18 +134,12 @@ Settings 中的当前分区标题属于工具工作面的区块 header，使用�
 
 等宽内容不另设字号档：它按所在位置取对应档位，与 `--font-mono` 配对即可。Terminal 字号仍由原 owner 原生渲染；Editor 的继承与显式 override 只见行为合同[《Explorer 与 Editor》](../behavior/files-and-git.md#explorer-与-editor)，实际字形与行距由 Monaco 原生渲染，不另设一份 App 默认值。
 
-
 约束：
 
-- **页面级标题只有一档**。Board 用 23px、New Tab 用 20px、Welcome 用 31px、
-  Discussion 用 19px，这些位置说的是同一件事——"这一屏叫什么"——却给了不同字号。它们全部收敛到
-  `--fs-display`，层级差异靠留白与位置表达，不靠尺度买。
-- **不使用半像素字号**。10.5/11.5px 在 DPR 切换时渲染不稳定，且它们的存在证明作者当时在两档之间
-  犹豫——那说明档位选错了，不是需要第八档。
-- **不低于 10px**。7px 与 9px 在密集界面里不是密度是失明。唯一例外是**状态点内嵌字形**
-  （`.status__dot::after` 的 `?`），它不是文字而是图形符号，随点尺寸缩放，故不受字号阶梯约束，
-  但必须在例外清单里具名。
-- 多级标题**字号相同**（见 Activity Turn Prose），这条与本节一致：层级不靠放大。
+- 页面级标题只有一档 `--fs-display`。Board、New Tab、Welcome 与 Discussion 回答的是同一个问题「这一屏叫什么」，不各用一个字号；层级差异靠留白与位置表达。
+- Desktop App chrome 不使用半像素字号（如 10.5px、11.5px）：DPR 切换时渲染不稳定，在两档之间犹豫说明应改选档位，而不是再加一档。手机字号由[手机呈现](mobile-client.md#尺度与-token)单独持有。
+- 字号不低于 10px（`--fs-micro`）。状态点的问号、叹号形状由语义图标 mask 绘制（`--native-presence-*-mask`，投影见 `packages/client-ui/src/theme/icon-sprite.ts`），不是文字，不受字号阶梯约束。
+- 多级标题字号相同，层级靠字重、颜色与留白区分；共同正文 Markdown 的标题规则见[《正文与 Markdown》](conversation-mode.md#正文与-markdown)。
 
 ## 间距刻度
 
@@ -179,16 +157,13 @@ Settings 中的当前分区标题属于工具工作面的区块 header，使用�
 | `--sp-8` | 32px | 空态与页面级留白 |
 | `--sp-page` / `--sp-page-wide` | 72px / 120px | Global Agents 等宽屏 surface 的响应式内边距上限 |
 
-约束：**奇数像素间距不进入刻度**。当前 5px/7px/9px 合计出现三百余次，它们不是设计决定而是"看着差一点
-就 ±1"的累积；这种微调在单个控件上无感，在整屏上表现为节奏抖动——同一层级的两个元素间距差 2px，
-眼睛读得出但说不清哪里不对。
+约束：奇数像素间距不进入刻度。同一层级的两个元素间距相差 1–2px，在单个控件上无感，在整屏上会表现为节奏抖动。
 
-刻度到 24/32px 为止，**再往上的值不是节奏而是几何**：给红绿灯让出的 80px、输入框右侧图标占的 28px、
-`clamp()` 在大屏上的上界。把它们塞进刻度会让刻度失去含义（一个含 80px 的"节奏刻度"约束不了任何
-东西），因此它们按**选择器**具名放行，而不是把数值加进白名单——数值一旦放开 30px，全表哪里都能写
-30px。具名了布局几何的选择器，它的常规间距仍要走刻度。
+刻度只到 24／32px；更大的值是布局几何而不是节奏，例如为 macOS 交通灯让出的 80px、输入框右侧图标占用的 28px、`clamp()` 在大屏上的上界。这类值按选择器与属性具名放行，不把数值加入全局白名单，否则放行一个 30px 后全表都能写 30px；具名了布局几何的选择器，其常规间距仍走刻度。刻度外的小值同样必须具名，例如 hairline 的 1px 与 Activity spine 的 104px 对齐点。
 
-刻度外的小值同样必须具名：hairline 的 1px、Activity spine 的 104px 对齐点。
+## 圆角
+
+圆角只使用 `--radius-sm`、`--radius`、`--radius-lg` 三档，只有两类例外：紧凑交互控件（24px 图标按钮、Tree/File Row、Tab 与 Region 的关闭键、Tab Group 动作等）在 6px 下显得过圆，取 4–5px；微标与装饰件（状态点、hairline 轨道、ruler tick、图标裁角、选中标记等）取 1–3px。面性容器（卡片、菜单、弹窗、输入框、工具坞）一律走 token，不因“看起来更合适”而硬编码。验证方法见[界面规则与真实行为](../../testing/strategy.md#界面规则与真实行为)。
 
 ## 颜色
 
@@ -203,32 +178,15 @@ Settings 中的当前分区标题属于工具工作面的区块 header，使用�
 
 约束：
 
-- **状态家族必须由 `color-mix()` 从基色派生**，不得写死为 hex。这是"调 `--red` 等于调整整个危险
-  语汇"这句话成立的前提；一旦写死，三个层级就会各自漂移，回到最初那三十多个手调近似值的状态。
-- **样式表内不出现裸 hex**。此前非 `:root` 区域有 330 处硬编码颜色，其中大量是
-  `#12151b`/`#13171d`/`#14171d` 这种彼此相差不到 2% 亮度的近似值——它们本该是同一个 Surface，
-  却因为分头手调而分裂成十几个。唯一的例外是 `color-mix()` 里的纯白与纯黑：那是**配料**不是界面色，
-  `color-mix(… var(--green) 88%, #ffffff)` 表达的正是"把这个 token 提亮"这种从 token 派生的关系。
-- **引用不存在的 token 是 bug，不是笔误**。`var(--text-1)`、`var(--border-subtle)`、`var(--shadow)`
-  曾被引用却从未定义，这些声明**静默失效**——Topic 标题那两行的颜色实际上从未生效过。CSS 不会
-  报错，所以必须由检查报错。
-- **定义了却无人引用的 token 一律删除**，不留"以后可能用得上"。一个没有落点的 token 比没有更糟：
-  它让下一个人以为这里已经有答案了。
-- **状态到颜色只说一次**。九个 Agent 状态（working/running、waiting/blocked、error/exited、done、
-  disconnected）到颜色的对照表只存在于状态语汇段：每个 `.status--<state>` 赋一次 `--status-ink`，
-  状态点使用它填充；Topic 头像保留 Provider 身份色，运行状态只由共享状态角标表达，
-  不再给头像加常驻边框。**新表面不得再列一遍九个状态**——那等于让同一个状态在两处各说一次，迟早说岔。
-  这条由 `apps/desktop/test/topic-agent-status.test.ts` 守住。
-
-
-这三节由 `apps/desktop/test/surface-scale-contract.test.ts` 守住：它从样式表反推出全部字号、
-间距与颜色字面值，核对是否落在 token 或已声明的例外清单内，并断言不存在悬空 token 引用。加一个
-未声明的字面值会红——这正是意图，一个新字面值要么该用 token，要么该被论证进例外清单。
+- 状态家族由 `color-mix()` 从基色派生，不写死为 hex；这样调整 `--red` 才会同步调整整套危险语汇，各层级不会各自漂移。
+- 样式表不写裸 hex。亮度只差 1–2% 的近似色应收敛为同一 Surface token；唯一例外是 `color-mix()` 中作为配料的纯白与纯黑，例如 `color-mix(… var(--green) 88%, #ffffff)` 表达「把这个 token 提亮」。
+- 引用不存在的 token 是缺陷：CSS 会静默丢弃该声明而不报错，所以须由检查发现（核对方法见[《界面规则与真实行为》](../../testing/strategy.md#界面规则与真实行为)）。
+- 定义了却无人引用的 token 删除，不为「以后可能用得上」保留。
+- Agent 状态到颜色的对照只定义一次：状态语汇段为每个 `.status--<state>`（working、running、waiting、blocked、error、exited、done、disconnected）赋一次 `--status-ink`，状态点用它填充。Topic 头像保留 Provider 身份色，运行状态只由共享状态角标表达，不给头像加常驻边框；新表面不再列一遍状态到颜色的映射（核对方法见[《界面规则与真实行为》](../../testing/strategy.md#界面规则与真实行为)）。
 
 ## 动效
 
-动效与字号、间距同为尺度，**节奏与曲线也是 token**，不在各表面手写毫秒数。刻度按"这个动作是什么"
-选，不按"想显得多快"选。
+动效的时长与曲线同为 token，不在各表面手写毫秒数；按动作的性质选档，不按想显得多快选。
 
 | Token | 用途 |
 | --- | --- |
@@ -242,11 +200,9 @@ Settings 中的当前分区标题属于工具工作面的区块 header，使用�
 
 约束：
 
-- **一个 App 只有一条通用 spinner**：语义图标 `status.loading` 以 `animation="spin"` 呈现，只转图形声明的 spin 部件，由语义图标动画 owner 持有唯一的旋转关键帧。它属于**行内**尺度——按钮里、行首、面板 header
-  这类 11–16px 的位置。别处不另写整图旋转。它不携带品牌，也不该携带：十六处行内加载各自长出一个品牌动画，等于没有品牌。
-- **应用启动与 Region 等待使用不同构图**。品牌主体限应用启动面；Region 恢复与停泊采用开放阅读构图，保真实阶段、活动信号和原动作。材质、布局与动态唯一见[《启动与恢复的分量分开》](session-recovery.md#启动与恢复的分量分开)，不能把品牌大屏缩小到终端格。
-- **动效不得是唯一的信息载体**。减少动态时，静态画面、阶段文案和动作仍须准确表达忙碌、停泊
-  或失败，不能只留下看不出状态的静图。这条对所有新动效成立，不只恢复态。
+- 一个 App 只有一条通用 spinner：语义图标 `status.loading` 以 `animation="spin"` 呈现，只转图形声明的 spin 部件，由语义图标动画 owner 持有唯一的旋转关键帧。它属于按钮内、行首、面板 header 这类 11–16px 的行内尺度，别处不另写整图旋转，也不携带品牌。
+- 应用启动与 Region 等待使用不同构图。品牌主体限应用启动面；Region 恢复与停泊采用开放阅读构图，保真实阶段、活动信号和原动作。材质、布局与动态唯一见[《启动与恢复的分量分开》](session-recovery.md#启动与恢复的分量分开)，不能把品牌大屏缩小到终端格。
+- 动效不得是唯一的信息载体。减少动态时，静态画面、阶段文案和动作仍须准确表达忙碌、停泊或失败，不能只留下看不出状态的静图；这条对所有新动效成立。
 
 ## 控件语言
 
@@ -257,22 +213,24 @@ Settings 中的当前分区标题属于工具工作面的区块 header，使用�
 | 层级 | 视觉语言 | 用途 |
 | --- | --- | --- |
 | Primary | 实心品牌绿渐变、深色文字、顶部高光 | 页面唯一主操作 |
-| Secondary | 干净 Surface 填充、软高光、无常驻描边 | 次级操作与行内确认。**Desktop 落地类名只有 `.small-button` 一个**，见下「一档控件只有一个类名」 |
+| Secondary | 干净 Surface 填充、软高光、无常驻描边 | 次级操作与行内确认；Desktop 落地类名只有 `.small-button`，见下方按钮类名约束 |
 | Ghost / Icon | 透明底，hover 才提升 Surface | 图标按钮与工具栏动作 |
-| Selected | 单一几何信号；实心图标格或底部横条 | Project、Segment 与 Tab 选中态 |
+| Selected | 单一几何信号；实心图标格或底部横条 | Project、Segment 与 Tab 选中态；Tab 选中态使用轻微背景和底部 2px 横条，不使用顶部高光或整圈描边 |
 | Danger | 实心红色变体、深色文字、顶部高光 | 删除、移除等破坏性主操作 |
 
 补充规则：
 
-- **最高信噪比。** 让用户需要的信息清楚可辨，减少重复文字、无意义装饰和额外阅读负担。能用图标表达清楚就不用文字、能用一行表达清楚就不用多行，都是具体应用，取舍以理解效率为准。图标保留 tooltip、可访问名称和键盘焦点，必要正文、错误原因与恢复动作保持可读。
+- 最高信噪比：让用户需要的信息清楚可辨，减少重复文字、无意义装饰和额外阅读负担。能用图标表达清楚就不用文字、能用一行表达清楚就不用多行，都是具体应用，取舍以理解效率为准。图标保留 tooltip、可访问名称和键盘焦点，必要正文、错误原因与恢复动作保持可读。
+- 品牌强调色只表达焦点、状态或页面唯一主操作（色彩角色归[品牌架构《色彩角色》](brand-identity.md#色彩角色)），说明性卡片不挂装饰性彩色图标格。
 - 同一语义在不同容器中使用同一控件层级。高频按钮与图标按钮共用原生控件入口和唯一样式 owner，统一正常、选中、忙碌、禁用与键盘焦点；动作资格、草稿及保存／重试仍由原调用者决定，忙碌反馈不自行撤销可用能力。局部视图切换共用材质、对齐与选中语言，同时保留原 tabs、按钮组或配置字段的语义与键盘规则。
+- hover 提升 Surface 明度；active 用内阴影表达按下，不靠边框位移。
 - 同类布尔设置行共用原生控件、标签和说明的关联与排列；整行点击沿原生 label，键盘与当前 checked、disabled 仍由原 input 和调用者持有，不自写第二套切换状态。说明可通过辅助技术读取，整体保存错误继续留在原保存区，没有字段无效事实时不把整次失败标成某个字段无效。
-- 文本输入聚焦用一条清楚、克制的焦点边界，与原控件边缘对齐；内嵌提问、改名、创建和配置字段不叠粗亮外圈、内边与光晕。复合输入由整个输入容器表达焦点，内部文本框不再画第二圈；独立输入的键盘焦点仍须可辨。深浅主题和强制颜色下保留焦点、错误及禁用的区别，不改变原草稿、IME、保存与取消语义。基础单行、多行与组合输入使用共享 client-ui 输入模块；模块持有原生控件和呈现，入口持有草稿与业务动作。富文本消息编辑复用既有共享 Composer，保持与原生字段分层。
+- 文本输入聚焦统一使用 `--focus-line` 与 `--focus-ring`，形成一条清楚、克制的焦点边界，与原控件边缘对齐；内嵌提问、改名、创建和配置字段不叠粗亮外圈、内边与光晕。复合输入由整个输入容器表达焦点，内部文本框不再画第二圈；独立输入的键盘焦点仍须可辨。深浅主题和强制颜色下保留焦点、错误及禁用的区别，不改变原草稿、IME、保存与取消语义。基础单行、多行与组合输入使用共享 client-ui 输入模块；模块持有原生控件和呈现，入口持有草稿与业务动作。富文本消息编辑复用既有共享 Composer，保持与原生字段分层。
 - Mote 等内嵌提问入口使用轻而可辨的组合输入：淡底色、单层完整边界，文字保留横向留白；单行约 38px、左留白 12px，不以零 padding 或仅底部细线表达可编辑区域。聚焦时完整边界与底色清楚响应，行动按钮位置固定且有轻底座，内容就绪后使用柔和 Mint 色；长问题自然增高并有界阅读。普通改名和搜索保留紧凑尺度。准备讨论的原业务语义不变，快捷键须尊重组字，在途与失败沿真实读取状态表达并保留问题；行内忙态复用共同 spinner。
-- **一档控件只有一个类名。** Desktop 上表五档各自只有一个落地类名：Primary＝`.primary-button`、Secondary＝`.small-button`、Ghost/Icon＝`.icon-button`、Danger＝`.danger-button`。**不得按表里的档位名另造一个类名**——那个名字读起来像"就该存在"，于是没人会去查它有没有规则。实证：`.secondary-button` 被这样写出来过一次（启动页 Resume），全仓零规则，而 `base.css` 的全局 `button` 只重置 `font`/`color`、**不重置 `background`**，于是它落到 macOS 原生按钮样式——一颗浅灰实心药丸，在深色主题里比紧邻的品牌绿主操作还重，恰好推翻上表"Primary＝页面唯一主操作"。这条由 `apps/desktop/test/rendered-class-has-rule.test.ts` 守住：它的扫描面除 BEM 记号外**还收 `-button` 结尾的扁平类名**，渲染了却没有规则即红。扁平名此前整族在扫描面之外（判据只认 `__`/`--`），这不是漏登记而是结构性缺席，所以修的是判据形状而不是加一条豁免。
-- **`justify-content: space-between` 是一份「有几簇」的契约，不是"把东西摊开"的通用手法。** 它把自由空间**摊在子元素之间**，所以结果是子元素**个数**的纯函数：两簇时各抱一端（这才是它的用途），三个以上松散子元素则被甩向两极、中间留出大洞。这份"应该有几簇"的期待写在 CSS 里，而供给子元素的是另一个文件里的 JSX，两边没有任何东西对齐它们——**供错形状不报错，只是默默排错**，而本仓测试跑在 happy-dom 下不算布局，没有任何 gate 会红。因此：**space-between 只用于子元素集合固定且已知的容器**；凡是"一个留在左缘、其余聚到右缘"的工具栏与页脚，一律用 `justify-content: flex-end` 配首元素 `margin-right:auto`——它对 2、3、4 个子元素都成立，**契约本身被删掉了**，而不是被记在文档里等人遵守。这套写法本仓已有多处（`surfaces.css` 的 `.settings-pane-actions`、`dock.css` 的 `.workspace-composer > footer`、`board.css` 的 `.discussion-canvas__footer`）。实证：`.composer__toolbar` 与 `.settings-pane-toolbar` 都配了 `> div` 的两簇写法，各自有一个调用方老实给两簇、另一个调用方给四个松散子元素，于是同一条规则在两个界面上同时排错。
-- **选中态一律不用左侧竖条（inset 竖线）**。一条贴边的亮色竖线是"AI 生成的管理后台"最容易辨认的印记：它既不是填充也不是描边，只是一根贴在行左缘的装饰，在密集列表里连成一片噪音。选中由**单一几何信号**表达——干净的 Surface 填充，必要时配实心图标格。这条对所有列表行成立（Project Rail、Topic、Tree、Segment、Settings 分区），没有例外；`box-shadow: inset <n>px 0 ...` 与 `border-left: <n>px ...`（含 `border-inline-start`）这两种拼法都不得用于表达选中——它们在屏幕上是同一根线，禁的是那根线而不是某一种画法。这条由 `apps/desktop/test/surface-selection-contract.test.ts` 守住：它从 CSS 推出两种拼法的所有左缘竖条并在选中态类名上断言其不存在，加回一条会红；两个形状判定各自带一条自证（拿合法的容器分隔线与内容引用条当样本），因为一个认不出竖条的检查会因"没找到"而全绿。
-- **一列全同的图标不是信息，是宽度开销**。若某个列表里每一行的行首图标都相同（重复的 Topic 类型图标、纯文件列表的文件图标），去掉它——图标的价值在于区分，无可区分时它只在挤压标题的可读宽度。行首位置留给真正有区分度的东西（对象的手动或自动身份、状态、Provider 身份）或干脆留白；Space 的共用对象身份槽遵守[《Project Rail 与 Topic 行密度》](spaces-and-layout.md#project-rail-与-topic-行密度)。
+- 每档动作按钮在 Desktop 只有一个落地类名：Primary＝`.primary-button`、Secondary＝`.small-button`、Ghost/Icon＝`.icon-button`、Danger＝`.danger-button`。不按档位名另造类名（如 `.secondary-button`）：全局 `button` 重置只覆盖字体与颜色、不覆盖背景，没有规则的类名会让按钮落回平台原生样式。扫描方法与事故样本见[《界面规则与真实行为》](../../testing/strategy.md#界面规则与真实行为)。
+- `justify-content: space-between` 只用于子元素数量固定且已知的容器：它把剩余空间分摊到子元素之间，两簇时各靠一端，三个以上松散子元素会被推向两极、中间留空；组件测试不计算布局，这类错误不会让测试变红（验证方法见[《界面规则与真实行为》](../../testing/strategy.md#界面规则与真实行为)）。「首元素靠左、其余靠右」的工具栏与页脚改用 `justify-content: flex-end` 加首元素 `margin-right: auto`，子元素数量变化时仍成立。
+- 选中态不用左侧竖条。贴在行左缘的亮色竖线既不是填充也不是描边，在密集列表里会连成噪音；选中由单一几何信号表达：干净的 Surface 填充，必要时配实心图标格。这条对所有列表行成立（Project Rail、Topic、Tree、Segment、Settings 分区）：`box-shadow: inset <n>px 0 …` 与 `border-left`／`border-inline-start` 在屏幕上是同一根线，都不得用于表达选中；容器分隔线与内容引用条不属于选中表达。扫描方法见[《界面规则与真实行为》](../../testing/strategy.md#界面规则与真实行为)。
+- 一列全同的行首图标不提供区分，只占用标题宽度。若列表每行的行首图标都相同（重复的 Topic 类型图标、纯文件列表的文件图标），去掉它；行首位置留给有区分度的对象身份、状态或 Provider 身份，或者留白。Space 的共用对象身份槽遵守[《Project Rail 与 Topic 行密度》](spaces-and-layout.md#project-rail-与-topic-行密度)。
 
 Mailbox 原生输入的来源更新与有界阅读告示引用交互文档[《用户消息从 Provider 原生会话取得》](../behavior/conversation-mode.md#用户消息从-provider-原生会话取得)；沿原有就地边界与服务窗语言，不新增常驻工具栏、另一套状态或消息表面。
 
@@ -312,51 +270,49 @@ macOS Dock 的系统徽标只显示当前待用户处理数，零时不显示；
 | Project Rail Footer / Corner Badge | 32px / 28px | Footer 只容纳两个 24px 图标入口 |
 | Project Rail Section Label | `--fs-micro`；轻字重；紧凑上下留白；尾部常驻 `+` | Motes、Topics、Folders 是分组标签，不是重复页面标题；项目名称保持主要阅读层级，分区创建的含义归交互合同 |
 | Project Rail Group Header | 随行密度为 20–24px；`--fs-micro`；字重 560；紧凑字距；折叠与类型共用一槽 | 共同父目录名只显示最后一段，完整路径进 tooltip；只领一个成员时不渲染。分类标签轻于对象标题，折叠只为真实子项提供，不在叶节点预留箭头槽。hover 只提亮文字，不借用对象行的 Surface；折叠后保留可读组名和紧凑地址，完整成员及状态仍可获知。 |
-| Project Rail Group Collapse | 折叠态持久化；折叠后头上补地址与角标 | 用户「分组上面是不是应该有些操作？」——折叠是这个位置唯一说得通的动作。分组是从磁盘路径**派生**的，不是可重命名/删除/配置的实体，给它挂那类操作就是凭空发明一个注册表。<br><br>用户「后退的时候，是不是应该显示它的地址之类的元信息呀」——折叠就是那个"后退"。成员一藏，这一行就是那几个项目在界面上唯一的痕迹，于是它必须自己答出身份：**地址保留尾部三段**（`~/proj/kit`），因为同一台机器上路径开头几段大都相同，分辨力全在末尾——这也是不能用 CSS `text-overflow` 的原因，它砍掉的正是唯一有信息的那一头；以及**成员数**。<br><br>展开时地址与角标都不渲染：下面那几行项目名已经答完"这是哪儿"，每行也各自带着角标，再挂一份就是同一事实占两处。<br><br>折叠**必须把注意力卷上来**（复用项目行那一个 rollup 与那一套配色）。这是一个已经犯过一次的错：项目行只显示 workspace 计数时，"一个 Agent 正在里面等你"的折叠项目看起来和空闲的一模一样；分组折叠会在分组这一层原样复现那个洞。折叠状态的 key 必须带 hostId——两台机器上同名的 `…/kit` 不是一个分组。 |
-| Project Rail Row | 28–32px 单行；标题从统一左缘起；尾部独立运行状态槽 | 选中只用中性 Surface；运行中的 Agent 在相关项目行显示独立活动控件；行首图区分项目、仓库和目录。**一行只占一行**——标题与状态同处一行，不为常驻元信息另起次行。尾部计数是**在跑的 Agent 数**，不是 worktree 数：用户问的是"这个项目现在有没有人在干活"，worktree 有几个是仓库结构，答的不是同一个问题，降级进 tooltip。计数为零时不显示数字（一列全是 `1` 的徽章不携带信息，见控件语言同一条理由）。Host 只在**不是本机**时占位——`This Mac` 每行都一样，属于一列全同的元信息 |
+| Project Rail Group Collapse | 折叠态持久化；折叠后组头补地址、成员数与注意力角标 | 分组从磁盘路径派生，不是可重命名、删除或配置的实体，组头唯一的动作是折叠，不为它另建注册表。折叠后成员行隐藏，组头须自己说明身份：地址保留尾部三段（如 `~/proj/kit`），因为同一台机器上路径的前几段大多相同，不能用 CSS `text-overflow` 截掉有区分度的末尾；同时显示成员数。展开时地址与角标都不渲染，由成员行各自表达。折叠必须把成员的注意力汇总到组头（复用项目行的 rollup 与配色），否则有 Agent 等待处理的折叠组会看起来与空闲组相同。折叠状态的 key 包含 hostId，两台机器上同名的 `…/kit` 不是同一分组。 |
+| Project Rail Row | 28–32px 单行；标题从统一左缘起；尾部独立运行状态槽 | 选中只用中性 Surface；运行中的 Agent 在相关项目行显示独立活动控件；行首图区分项目、仓库和目录。一行只占一行：标题与状态同处一行，不为常驻元信息另起次行。尾部计数是正在运行的 Agent 数，回答「这个项目现在有没有 Agent 在工作」；worktree 数属于仓库结构，降级进 tooltip。计数为零时不显示数字（一列全是同值的徽章不携带信息，理由同控件语言的行首图标规则）。Host 只在不是本机时占位，`This Mac` 对每行都相同。 |
 | Project Rail Nesting Indent | 分类成员一级 12px；真实父子每层 12px、最多 3 层；三档密度均保持可辨 | Motes、Topics、Folders 的成员身份图形相对分类身份图形增加 12px 阅读缩进，成员标题相对分类标题至少增加 12px；同级对象身份槽与标题共用基准。不把分类当作实体目录；路径聚合组与真实后代另按每层 12px 增加层级。只保留一份必要外缘，不叠加容器留白、空箭头槽或空图标槽；Pinned child 遵守同一层级差，无连接线。 |
-| Project Rail Pinned Child | 比 Project Row 小一档；hover 只下划线；靠一层缩进与 pin 标记表达归属 | Pinned Topic/Branch 是导航入口，但视觉上是从属内容。标记不携带选中或注意力状态，不画虚线、树干或拐线，也不把子项重新当成一个顶层项目 |
-| Explorer / Branch Header | 32–34px | 不形成第二层大 Topbar |
+| Project Rail Pinned Child | 唯一见[《Project Rail 与 Topic 行密度》](spaces-and-layout.md#project-rail-与-topic-行密度) | 层级差遵守上一行 Project Rail Nesting Indent；本表不另定义 pinned child 的字号与 hover。 |
 | Tree Row | 24px | 保持键盘扫描和专家密度 |
 | Tool Dock Width | 默认 300px；最小 236px；最大 440px | 同时容纳 Explorer / Branches，保留主工作面容量 |
 | Tool Content Padding | 8–12px | 仅用于局部卡片，不包住整栏 |
-| Context Menu | 176px 最小宽；26px Row；8px 横向 Padding；5px 容器 Padding | 全部 Context Menu 共用一套基座。Surface 填充 + 阴影 + 顶部高光建立层级，**不使用描边**；hover 提升明度并把图标转为品牌绿；破坏性项 hover 保持红色语义，不被绿色 hover 覆盖。菜单从指针处生长（120ms），表明它是这次点击召唤出来的，而非盖在界面上的一层浮层 |
+| Context Menu | 176px 最小宽；26px Row；8px 横向 Padding；4px（`--sp-2`）容器 Padding | 全部 Context Menu 共用一套基座。Surface 填充 + 阴影 + 顶部高光建立层级，不使用描边；hover 提升明度并把图标转为品牌绿；破坏性项 hover 保持红色语义，不被绿色 hover 覆盖。菜单从指针处生长（120ms），表明它是这次点击召唤出来的，而非盖在界面上的一层浮层 |
 | Activity Log Row | 平铺机器行与记录型过程的槽位、缩进及宽窄变体唯一见[共同过程组件密度](conversation-mode.md#可复用对话与-workflow-组件密度)。 | 仅机器事件走此寄存器；user／assistant 正文消费共同消息，不在通用预算表另造一套过程布局。 |
-| Scratch Topic Row | 标题 11px、摘要 10px 次行；presence 18px 成簇锚定行右缘并垂直居中；结构摘要使用 `--fs-micro` | 一行回答 Topic 身份和工作面结构。Agent 用 Provider 图标成簇表达身份与状态；**同一可复用 presence 组件同时给出 Tab 数量与 Region 结构**。hover 显示 Tab 顺序/标题、分屏布局、每个 Region 的 Executor 和最近活动摘要；没有摘要明确显示 `No recent activity`。键盘 focus 时显示同一结构摘要，不能把 hover 当作唯一信息来源。**不重复呈现同一事实**：不再另挂无法定位的总 Agent 数；结构详情只在一处出现，定位动作仍走全局 `selectSession`。行首不用重复的 Topic 类型图标；对象的共用手动身份遵守[《Project Rail 与 Topic 行密度》](spaces-and-layout.md#project-rail-与-topic-行密度)。选中态使用 Surface 填充，不用左侧竖条。 |
+| Scratch Topic Row | 标题 11px、摘要 10px 次行；presence 18px 成簇锚定行右缘并垂直居中；结构摘要使用 `--fs-micro` | 一行回答 Topic 身份和工作面结构。Agent 用 Provider 图标成簇表达身份与状态；同一可复用 presence 组件同时给出 Tab 数量与 Region 结构。hover 显示 Tab 顺序/标题、分屏布局、每个 Region 的 Executor 和最近活动摘要；没有摘要明确显示 `No recent activity`。键盘 focus 时显示同一结构摘要，不能把 hover 当作唯一信息来源。不重复呈现同一事实：不再另挂无法定位的总 Agent 数；结构详情只在一处出现，定位动作仍走全局 `selectSession`。行首不用重复的 Topic 类型图标；对象的共用手动身份遵守[《Project Rail 与 Topic 行密度》](spaces-and-layout.md#project-rail-与-topic-行密度)。选中态使用 Surface 填充，不用左侧竖条。 |
 | Activity Turn Row | 正文与机器寄存器分开，阅读高度随内容；身份、时间与原操作紧凑 | user_message／assistant_message 使用[共同消息呈现](conversation-mode.md#消息布局与身份密度)，作者停靠、气泡与头像不在预算表再定义。完整正文、原生 assistant 与 A2A 作者边界保持；过程步骤仍沿机器行／Workflow 的原展开规则。 |
-| Activity Turn Prose | 标题全部 13px（与正文同号）靠 600 字重与上下留白分级；表格 4×9px 单元、hairline 行分隔；引用块左缩 9px 配 2px 竖线；水平线 1px | 对话回合的正文渲染 GFM 子集：标题、强调、删除线、行内与围栏代码、有序/无序含嵌套列表、表格（含列对齐）、引用块、水平线、链接。**多级标题字号完全相同**——密度合同对字号设下限并禁止用尺度买层级，故 h1..h6 只靠字重、颜色与留白区分，绝不放大。解析器（remark-parse + remark-gfm）只产 mdast **语法树、从不产 HTML**：节点映射为 React 元素，`dangerouslySetInnerHTML` 从不出现，因此不可信的 Agent 输出**没有东西需要 sanitise**——风险面是构造性为零而非"已过滤"。raw HTML 只有[有限白名单](../behavior/files-and-git.md#markdown-的-html-子集与-github-提示块)按语义投影为同样的数据节点，其余按字面文本呈现，绝不成为可执行标签。宽表在自己的 `overflow-x` 容器里横向滚动，不得撑宽回合、更不得让整个 feed 横向滚动。链接渲染为 button 而非 `<a href>`，经既有 openExternal seam 打开（不可信输出里的 `<a>` 是导航逃逸口）。只在 turn register 渲染；机器行保持纯文本，纯文本也不进解析器以免重排从来不是 markdown 的句子 |
+| Activity Turn Prose | 正文、标题、列表、引用、表格与代码的尺度唯一见[《正文与 Markdown》](conversation-mode.md#正文与-markdown)与[《长内容、代码与局部查找》](conversation-mode.md#长内容代码与局部查找) | 只在 turn register 渲染 Markdown；机器行保持纯文本，不进解析器。Agent 输出解析为语法树后映射为 React 元素；raw HTML 只按[有限白名单](../behavior/files-and-git.md#markdown-的-html-子集与提示块)投影为数据节点，其余按字面文本呈现，不成为可执行标签。代码着色与公式是例外：两者由受控渲染器在可终止的 worker 中生成 HTML 后插入，输入与输出都有字节与元素上限，公式渲染不信任命令（KaTeX `trust: false`、`strict: 'error'`），超限或失败时显示原文。链接渲染为按钮，经宿主注入的打开入口处理，不输出 `<a href>`。宽表与长代码在自身容器内横向滚动，不撑宽回合或整个 feed。 |
 | Activity 历史读取入口 | 当前与较早记录沿同一共同阅读面；消息、过程、来源与等待的层级唯一见[共同阅读密度](conversation-mode.md#共同阅读密度)，不在通用控件表另定义辅助聊天或浮动加载变体。 | 原较早／回到最新／Return／恢复动作、来源、读取与选区保护沿行为专题[《History 使用共同对话阅读面》](../behavior/conversation-mode.md#history-使用共同对话阅读面)；局部反馈不授予业务状态或制造另一读取 owner。 |
 | Activity Ruler | 顶部sticky；一行紧凑起止／已加载记录数与范围入口；一排24px参与者轨＋14px状态标尺 | 默认24h，可选6h／12h／24h／3d／7d／全部时间；初始和扩大范围沿共同阅读合同异步补读，缩小仅收窄概览。真实已载成员决定起止，记录不足时收紧轴，不铺空白时段；耗时与偏移进入悬停／键盘说明，无跨度序数退化。身份、密度、状态与可见区共用唯一坐标与原目标。低对比较早记录和较亮最近已记录一小时，最多48桶微高度表达记录密度；连续实线表示已记录工作、轻虚线表示已记录空闲，等待回应独立色，缺事实中性未知。可见范围以14px轨内清楚的轻填充边框标出，置于状态装饰之上、事件刻度之下；正文遮挡按实际sticky高度，折叠过程标题代理原记录，展开后按真实步骤观察。可见区观察不进滚动热路径。详细事实边界只见交互专题的顶部参与者轨约束。 |
 | Activity 时间读数 | 统一时刻／时长格式、数字密度和紧凑过程的时间披露唯一见[时刻与时长读数](conversation-mode.md#时刻与时长读数)。 | 源记录时刻、记录范围及未知的事实边界只见[Activity 记录时间](../behavior/conversation-mode.md#activity-记录时间的直接阅读)，观察跨度不升级为执行耗时或完成事实。 |
 | Activity 对话轴 | 一排24px高；头像16px，单标记命中24px，参与者簇命中64px | 沿共同消息头像；簇露出最多三个唯一参与者＋余数，完整记录原菜单可达并明确This agent／Sender。完整命中框容纳头像及余数，端点可内侧避让，真实刻度不移位。稀疏原话预览、键盘／Escape共享协议；按实际宽度聚合，不改来源或时间事实。 |
-| Tool Dock Header | 30–34px；10px 左缩进；24px 图标按钮 | 各工具坞标题共享同一左缘。分屏时上下堆叠的标题必须对齐，近似对齐比不对齐更伤观感 |
+| Tool Dock Header（Explorer／Branches 等） | 不高于 root Tabbar 的 36px；24px 图标按钮 | 各工具坞标题共享同一左缘，不形成第二层大 Topbar；分屏时上下堆叠的标题必须对齐。 |
 | 跨会话注意力入口 | 沿[Focus 与底部状态入口](settings-and-observation.md#全局通知与底部状态入口)的原紧凑预算 | Working／Needs you／Error 聚合值、请求处理及结果查看只见[Focus 行为 owner](../behavior/focus-context.md#focus-执行上下文项目泳道与底部时间音轨)。不在此另立全宽 Attention Bar、第二 roster 或另一份状态事实 |
-| Agent Provider Catalog | 142px 最小列宽；44px Card；最多 268px 高 | 容器独立滚动，不扩大 Launcher。**「不扩大」是容器自己的约束，不是"卡片少所以碰巧没长"**：容器必须带有界高度与独立 `overflow`，Agent 装多少都不得把下方的 prompt 推下去。这条由 `apps/desktop/test/surface-scale-contract.test.ts` 守住——它判 `.agent-catalog` 的规则体里 `max-height` 与 `overflow` 同时在场（先断言确实扫到了这条规则）。守的是"有界"这件事而不是 268 这个数：把数字抄进测试等于同一个值住两处，改一处就漂 |
-| Settings Pane | 两层容器，不是一层：**可操作/主内容**卡＝`--surface-1` + `--elev-2` + `--hl` + `--radius-lg`（抬起）；**信息/次级**块＝与页面同底的平铺 `--surface-0` + 一条 `--line-soft` 发丝线，无阴影、不成盒。卡片/区块标题走 `--fs-title`(14)，说明降到 `--fs-meta`/`--text-3` 读作从属；区块头句首大写 `--text-2`，不叠第三层大写字距 | 此前一条规则把合成器、只读说明、执行器分组、工作区列表压成同一个平面，于是整屏一样重、读不出主次——两层的"抬起 vs 平铺"对比**就是**这次重做。**装饰性 hero 说明卡已退役**（见控件语言"装饰性强调图标格"）：绿只留给状态与唯一主操作。侧栏选中＝干净 Surface 填充（`--surface-2` + `--hl`，与 Project Rail active 同语汇），绿落在该项图标或 `aria-current` 上，**不画整圈描边**——侧栏本身是 `--surface-1`，往选中态填 `--surface-1` 等于没填，会让 hover 反而比选中更"实"。每节导航前缀图标各不相同，予以保留。入场用 `--dur-enter`/`--ease-enter` 的淡入上浮，不做长时遮罩揭幕或光标跟随——那类破坏工具身份 |
+| Agent Provider Catalog | 有界最大高度、独立纵向滚动；紧凑密度更矮 | 容器独立滚动，不扩大 Launcher：有界高度与独立 `overflow` 是容器自身的约束，不依赖卡片数量少，Agent 装得再多也不把下方的 prompt 推出屏幕。具体高度由 `.agent-catalog` 规则持有。 |
+| Settings Pane | 两层容器：可操作／主内容卡＝`--surface-1` + `--elev-2` + `--hl` + `--radius-lg`（抬起）；信息／次级块＝与页面同底的平铺 `--surface-0` + 一条 `--line-soft` 发丝线，无阴影、不成盒。卡片／区块标题走 `--fs-title`（14px），说明降到 `--fs-meta`／`--text-3` 读作从属；区块头句首大写 `--text-2`，不叠第三层大写字距 | 合成器、只读说明、执行器分组与工作区列表不压成同一平面，「抬起」与「平铺」的对比承担主次。说明区块的强调色沿[《控件语言》](#控件语言)的通用规则。侧栏选中＝干净 Surface 填充（`--surface-2` + `--hl`，与 Project Rail active 同语汇），绿落在该项图标或 `aria-current` 上，不画整圈描边；侧栏本身是 `--surface-1`，选中态再填 `--surface-1` 会让 hover 比选中更实。每节导航前缀图标各不相同，予以保留。入场用 `--dur-enter`／`--ease-enter` 的淡入上浮，不做长时遮罩揭幕或光标跟随。 |
 | 操作与元数据文字 | 11–13px；微标不低于 10px | 不用 7–9px 冒充密度 |
 | Terminal / Editor | 字号、行距沿[原渲染 owner](#字号阶梯) | 由 xterm／Monaco 原生 DPR 渲染，不用 CSS transform；不在 App 密度表另设默认值 |
 | Terminal replay recovery | 有界批次；批次间让出事件循环；连续 live bytes 合并成视觉批次；输入/切换控件不被输出队列饿死；切回时按视口记忆停在上次位置或最新输出 | 大量 scrollback 恢复时优先保持界面可操作，避免一次性 parser 工作造成假死、逐字绘制或把回放过程暴露成从顶部滚落 |
 | Terminal link span | 裸 URL 下划线只覆盖 ASCII URL 本身；相邻 CJK 文字/标点保持普通终端字形 | 链接边界只见[《Terminal 链接 hover 范围与单元格》](../behavior/terminal-reading.md#terminal-链接-hover-范围与单元格)；不因相邻中文输出改变 URL 的目标或悬停范围 |
-| Terminal link readout | 延迟出现的边角被动读出；目标为主层、真实类型 / 来源和打开方式为紧凑次层；长目标保留可辨部分，宽度不超过 Region | 用户要求「hover 浮窗信息不清晰」：提高真实目标与动作说明的可扫读层级，用平面、轻边界与共享可读刻度，不加图标按钮、快捷键胶囊或重复路径。事实、清除、避字与打开边界唯一见交互 SSOT[《Terminal 链接读出与目的地面的信息归属》](../behavior/terminal-reading.md#terminal-链接读出与目的地面的信息归属)及[《Terminal 链接 hover 范围与单元格》](../behavior/terminal-reading.md#terminal-链接-hover-范围与单元格) |
+| Terminal link readout | 延迟出现的边角被动读出；目标为主层、真实类型 / 来源和打开方式为紧凑次层；长目标保留可辨部分，宽度不超过 Region | 读出须清晰：提高真实目标与动作说明的可扫读层级，用平面、轻边界与共享可读刻度，不加图标按钮、快捷键胶囊或重复路径。事实、清除、避字与打开边界唯一见交互 SSOT[《Terminal 链接读出与目的地面的信息归属》](../behavior/terminal-reading.md#terminal-链接读出与目的地面的信息归属)及[《Terminal 链接 hover 范围与单元格》](../behavior/terminal-reading.md#terminal-链接-hover-范围与单元格) |
 | Terminal restart projection | 保留原 durable Tab／Region；Runtime 未确认时就地显示中性等待／不可用事实及原动作，旧 Run 明确丢失时表达真实状态 | Run／PTY 缺失不授权删除持久工作面；移除、明确关闭与恢复资格只见[《工作面持久恢复与启动边界》](../behavior/session-recovery.md#工作面持久恢复与启动边界)。未知不冒充可输入、终局或新 Session |
 | Confirmed Agent crash notice | 沿用现有服务窗与唯一错误提示；由同一分类派生 ARIA 音量 | 行为边界归交互合同[《我们的流程坏了，不等于 Agent 坏了》](../behavior/session-recovery.md#我们的流程坏了不等于-agent-坏了)。不另造弹窗、严重度颜色表或覆盖工作面的遮罩 |
 | Managed Hook notice | 服务窗/状态行；不覆盖 Terminal 内容、不抢焦点 | Hook 路径失效属于流程降级，Agent 仍可用；说明如何让当前 App 重新校正配置 |
 | Provider capability notice | 服务窗/状态行；与 Managed Hook notice 共用告示槽 | Provider 的 Hook、resume 或探测能力缺失/降级时只在对应 Agent 旁说明，不覆盖工作面、不抢焦点；unsupported 与暂时 unavailable 必须分开，不画一个看似可点击但必然失败的 Resume 按钮 |
 
+- Topic presence 的静息密度：Region mosaic 的 Agent 头像只在真实 Region 单元格内出现，背景 Agent 头像与它们不重复；结束态不渲染，未知/断开仍可见并保持中性状态。焦点 Region 沿用共享 1px token，Tab/Region 结构详情通过 hover 与键盘 focus 进入，不增加常驻大卡或第二层状态条。
 
-- Topic presence 的静息密度已经收口：Region mosaic 的 Agent 头像只在真实 Region 单元格内出现，背景 Agent 头像与它们不重复；结束态不渲染，未知/断开仍可见并保持中性状态。焦点 Region 沿用共享 1px token，Tab/Region 结构详情通过 hover 与键盘 focus 进入，不增加常驻大卡或第二层状态条。
-
-## Owner
+## 工作台控件与状态的 Owner
 
 | 控件 / 状态 | Owner | 下游行为 |
 | --- | --- | --- |
-| `projectsOpen` | Renderer Store | 只展开或收起 Project Rail |
+| `projectRailOpen` | Renderer Store | 只展开或收起 Project Rail |
 | `toolsOpen` | Renderer Store | 收起或恢复同一个 Workspace Tool Dock |
-| `workspaceTool` | Renderer Store | `files-branches / agents / browser-favorites` 三选一 |
+| `workspaceTool` | Renderer Store | 在 `surface-tool-dock.ts` 的 `WORKSPACE_TOOL_IDS` 中三选一：`files-branches`、`agents`、`git` |
 | `toolDockWidth` | Renderer Store | 拖拽中更新 owner DOM，结束时写回唯一状态 |
-| Explorer / Topics | Workspace Tool Panel | 枚举真实文件系统并打开到 Focused View |
-| Agents | Workspace Tool Panel | 投影现有 Agent Session，不创建第二 Registry |
-| Browser Favorites | Workspace Tool Panel | 只路由 Main-owned Browser View |
+| Explorer / Topics（`files-branches`） | Workspace Tool Panel | 枚举真实文件系统并打开到 Focused View |
+| Agents（`agents`） | Workspace Tool Panel | 投影现有 Agent Session，不创建第二 Registry |
+| Git（`git`） | Workspace Tool Panel | 消费原 Git owner 的事实；Scratch 与 Mote 范围不显示该工具 |
 | Agent Launch | Universal New Tab / Topic Launcher | 通过 Core 创建 Session，不属于 Tools 状态 |
 | Goals 清单／看板 | Goals Surface | 消费同一 Goal／Demand 投影；不另立 Branch × 状态矩阵 |
 | Titlebar drag | Titlebar Plane | Breadcrumb 可拖拽；按钮、Tab、输入区全部 no-drag |
@@ -371,7 +327,7 @@ macOS Dock 的系统徽标只显示当前待用户处理数，零时不显示；
 
 ## 响应式与可访问性
 
-长选择字段的查询在原菜单顶部使用紧凑、稳定的输入；当前选择标志、键盘高亮、完整名称与说明各自清楚。结果和空匹配在同一有界滚动面内，清除与原入口在短矮窄窗、明暗和触屏下可达，不另叠选择窗口或为少量选项增加常驻搜索。行为见[原选择字段约束](../behavior/shared-rules.md#ui-架构实施原则)。
+长选择字段的查询在原菜单顶部使用紧凑、稳定的输入；当前选择标志、键盘高亮、完整名称与说明各自清楚。结果和空匹配在同一有界滚动面内，清除与原入口在短矮窄窗、明暗和触屏下可达，不另叠选择窗口或为少量选项增加常驻搜索。行为见[原选择字段约束](../behavior/shared-rules.md#共享控件的选择与键盘行为)。
 
 Note 与截图标注工具栏的组内键盘焦点使用原 focus-visible 语汇，当前工具／格式状态与焦点位置分开表达；方向移动不触发选中或执行。窄窗换行和不可用动作仍沿原密度，Tab 可离开，不因减少停点隐藏可操作项。
 
@@ -379,25 +335,22 @@ Note 与截图标注工具栏的组内键盘焦点使用原 focus-visible 语汇
 - 每个图标按钮必须有 tooltip、`aria-label` 和可见键盘 focus。正常、禁用与忙碌状态由同一公共控件表达；禁用时不响应 hover 或按下效果，不用可点击指针暗示仍能执行。业务动作是否可用仍由原 owner 决定。
 - Tab 名称始终单行；过长省略，空间不足时由 Pane 内横向 overflow 解决。
 - Surface 明度和状态色必须保持足够对比；不可只靠颜色区分选中、危险或不可用。
-- 共享状态点（`.status--{state} .status__dot`，StatusDot 与 Focus 注意力汇总同源复用）中，"需要你"（`waiting`/`blocked`）必须带**形状**而非仅靠颜色：琥珀圆点内嵌 `?` 字形，使其在色盲与快速一瞥下仍与其他琥珀含义可辨。`disconnected` 是掉线而非请求关注，从琥珀让出、改用中性空心环，令琥珀唯一地表示"需要你"。5px 角标（Tab 角、Rail 行）容不下字形也无需字形——颜色加角落位置已足够区分，字形只在全尺寸状态点上浮现。
-- **Agent 字母牌**（叠压头像簇里同 provider 多个 Agent 的判别器，可见判别见[对应呈现合同](spaces-and-layout.md#agent-头像簇的可见判别)）：与项目字母牌共享字形与几何语汇——`--fs-micro`、`font-weight: 640`、`line-height: 1`、`overflow: hidden`（emoji 比字母宽，会撑破格子），色相走既有派生并在规则里**声明**默认值（不藏进 `var()` 兜底，全表守卫读的是声明）。不为 Agent 新挑尺寸或配色，保持既有 Provider/会话身份语言。Space 自动对象身份的低彩度约束只见[《Project Rail 与 Topic 行密度》](spaces-and-layout.md#project-rail-与-topic-行密度)，不改变 Agent 头像的既有派生色相。
-  - **10px 不需要豁免，它就是刻度的最小值。** 曾在此写过「字母受 10px 下限约束、须先放大头像格」——那是把「低于 10px 需要具名豁免」错记成「10px 需要豁免」。事实：字号刻度含 10（`--fs-micro`），而 `FONT_SIZE_EXCEPTIONS` 被恒等断言冻结在 7px 且每条都必须真画 `content` 字形，所以字母**根本走不到也不需要**那条豁免路；`.project-rail-row__icon[data-monogram]` 正是在 **16px** 格子里画 10px 字母，一直合规。**头像格不必为字母放大**。这条更正的意义不止于本条：涉及尺寸的约束必须从刻度与守卫的断言反推，"我记得有个下限"不是判据。
-  - **一个格子里放第二个记号，本仓的既有答案是角标溢出而非扩容。** 注意力那枚 `?`/`!` 就是这么做的（8px 见方、探出格外），因此第二个记号不以牺牲品牌图标为代价。字母若落在这个位置，须先解决与注意力角标的占位冲突（两者不能同时在同一角），这是一个**取位**决定，不是尺寸决定——裁决见下条。
+- 共享状态点（`.status--{state} .status__dot`，StatusDot 与 Focus 注意力汇总同源复用）中，"需要你"（`waiting`/`blocked`）必须带形状而非仅靠颜色：琥珀状态点使用问号形状的语义图标 mask，使其在色盲与快速一瞥下仍与其他琥珀含义可辨。`disconnected` 是掉线而非请求关注，从琥珀让出、改用中性空心环，令琥珀唯一地表示"需要你"。5px 角标（Tab 角、Rail 行）容不下也无需形状：颜色加角落位置已足够区分，形状只在全尺寸状态点上出现。
+- Agent 字母牌是叠压头像簇里同一 Provider 多个 Agent 的判别器，可见判别归[《状态标记与 Executor 叠加密度》](agent-capabilities-and-messaging.md#状态标记与-executor-叠加密度)。它与项目字母牌共用字形与几何语汇：`--fs-micro`（10px，即刻度最小值，不需要豁免）、`font-weight: 640`、`line-height: 1`、`overflow: hidden`（emoji 比字母宽，会撑破格子）；色相沿既有派生，并在规则里声明默认值，不藏进 `var()` 兜底。不为 Agent 新挑尺寸或配色，头像格也不为字母放大：`.project-rail-row__icon[data-monogram]` 已在 16px 格内绘制 10px 字母。Space 自动对象身份的低彩度约束只见[《Project Rail 与 Topic 行密度》](spaces-and-layout.md#project-rail-与-topic-行密度)，不改变 Agent 头像的既有派生色相。
+  - 同一格子放第二个记号时采用角标溢出而非扩容：注意力 `?`／`!` 为 8px 见方并探出格外，不以牺牲品牌图标为代价。两个记号不能同时占同一角，落角由下条的统一分配决定。
 
-- **叠压头像簇的角位分配：可见的两角归"必须始终可见"的两枚，其余记号让位。** 这条裁掉上面那个悬而未决的取位问题，也修正它与交互合同里"两条左缘都空闲"的同一处错算。
+- 叠压头像簇的角位统一分配：可见的两个角留给必须始终可见的两种记号，其余记号让位。
 
-  **几何前提**（从样式表反推，不照注释抄）：头像 18px，`.selector-presence__slot + .selector-presence__slot` 负 `margin-left: calc(-1 * var(--sp-3))` = 6px，z-index 随 DOM 序左→右递增，故**右压左**——每一枚自己的**右 6px 被右邻座整枚盖住，左侧在上**。于是四角里只有**左上、左下**落在可见带上；右上、右下对"非簇尾那几枚"恒不可见。
-
-  **可见角只有两个，而记号有四种**（此前两份文档都把它数成三种，漏了用户自定义徽标 `.agent-avatar__badge`——它一直占着左上，所以"两条左缘都空闲"从来不成立）。因此必须排序，判据是**看不见的代价谁更大**：
+  几何前提：头像 18px，相邻槽 `.selector-presence__slot + .selector-presence__slot` 以 `margin-left: calc(-1 * var(--sp-3))` 叠压 6px，z-index 随 DOM 顺序从左到右递增，右侧头像盖住左侧头像右侧的 6px；悬停或键盘聚焦的头像临时置顶。因此对非簇尾头像，只有左上、左下两个角始终可见。
 
   | 记号 | 落角 | 理由 |
   |---|---|---|
-  | 注意力 `?`/`!`（`.agent-avatar__status`） | **左上** | 全产品最响的通报"这个 Agent 在等你／出错了"。看不见＝用户不知道该去响应，代价最大，拿第一个可见角。 |
-  | provider 归并计数（`.agent-avatar__count`） | **左下** | 它回答"这一枚代表几个"，读错会数错 Agent 数量。拿第二个可见角。 |
-  | 用户自定义徽标（`.agent-avatar__badge`） | **右上**（让位） | 用户自己挑的静态装饰，不通报任何变化中的事实；被邻座盖住只损失装饰，不损失信息。四者里唯一可让的一个。 |
-  | 显示名字母牌（f-27a8f3deq/T-002） | **右下** | 它的判别力只在"簇里有多枚"时才被需要，而多枚正是它被盖住的场景——所以它**不能靠角标位交付**，取右下只是登记占位。这条因此同时是对那个 task 的约束：字母牌要真正可用，出路是换载体（名字直接可见）或另给尺寸，不是抢一个角。 |
+  | 注意力 `?`／`!`（`.agent-avatar__status`） | 左上 | 表达「这个 Agent 在等你／出错了」；看不见时用户不知道该响应，代价最大。 |
+  | Provider 归并计数（`.agent-avatar__count`） | 左下 | 回答「这一枚代表几个 Agent」；看不见会数错数量。 |
+  | 用户自定义徽标（`.agent-avatar__badge`） | 右上（让位） | 用户选择的静态装饰，不表达变化中的事实；被邻座盖住只损失装饰。 |
+  | 显示名字母牌 | 右下 | 字母牌只在簇内有多枚时才需要判别，而那正是它被盖住的场景，所以不能靠角标位交付；右下只是登记占位，字母牌要真正可用须换载体（名字直接可见）或另给尺寸。 |
 
-  **这是一处统一决定，不是每种记号各自就近挑角。** 四种记号的落角从同一份分配取值（`presence-mark-corner.ts`），而不是各自在自己的 CSS 规则里写死一个方位——各写各的，下一个新记号仍会就近落进被盖的右侧带，这个缺陷会原样复发。
+  四种记号的落角从同一份分配取值（`packages/client-ui/src/lib/presence-mark-corner.ts` 的 `PRESENCE_MARK_CORNERS`），不在各自 CSS 规则里写死方位，否则下一个新记号仍会就近落进被盖住的右侧带。
 
 ## 验收
 
@@ -406,12 +359,11 @@ Note 与截图标注工具栏的组内键盘焦点使用原 focus-visible 语汇
 - Rail 与 Tool Dock 的四种开关组合都保持固定顶部按钮、正确内容起点和可操作角标。
 - Terminal、Editor 和 Browser 的内容缩放由各自 owner 管理，不建立全局缩放补偿层。
 - 视觉改动通过项目统一检查和目标窗口交互验证；截图只证明渲染，不替代状态和安全测试。
-- 受 Radix `Presence` 管理的节点（Dialog/Menu 的 `Content`、`SubContent`、`Overlay`）上的入场 keyframe 动画必须限定在 `[data-state='open']`。有意的退出可以限定在 `[data-state='closed']`，但必须使用与入场不同的动画名、真实定义的 keyframes 和明确的有限时长，并由真实 Native Renderer 证明完成与卸载；静态守护本身不能证明退出完成。Presence 关闭时读取计算出的 `animation-name`；无条件入场会让它等一个永不触发的 `animationend`，留下失效节点。这条由 `apps/desktop/test/presence-exit-animation.test.ts` 从 Desktop 与共享 UI 包的实际组件源码推导受管节点，集合必须非空，不维护手抄类名；同时保留入场动画的断言，不能靠删动效满足。
+- 受 Radix `Presence` 管理的节点（Dialog/Menu 的 `Content`、`SubContent`、`Overlay`）上的入场 keyframe 动画必须限定在 `[data-state='open']`：Presence 关闭时读取计算出的 `animation-name`，无条件的入场动画会让它等待一个永不触发的 `animationend`，留下失效节点。有意的退出动画可以限定在 `[data-state='closed']`，但必须使用与入场不同的动画名、真实定义的 keyframes 和明确的有限时长，退出的完成与卸载须在真实 Native Renderer 上证明，不能靠删除入场动效满足检查（方法见[《界面规则与真实行为》](../../testing/strategy.md#界面规则与真实行为)）。
 
 ## 样式表的组织
 
-一个 2551 行的 `styles.css` 不是"文件大"的问题，是**找不到东西**的问题：改 Topic 行要先 grep 出
-它散在哪几段，改完不知道有没有漏。样式按**表面**分文件，与组件目录同构；同一表面的默认、状态与响应式规则由同一 owner 持有，窄布局按实际可用容器生效，不由后置无条件规则覆写。共同对话样式归 `packages/client-ui/src/styles`，组件正常呈现所需的 overlay、尺寸与可访问性规则也随组件归包；宿主提供主题 token、Portal 容器与平台能力，不补另一份共享组件必需样式。以下清单按 Desktop 入口的实际层叠顺序排列，Desktop 在原层叠位置导入，其他 Client 直接消费共享包样式：
+样式按表面分文件，与组件目录同构，改一个表面时能在一处找到它的全部规则；同一表面的默认、状态与响应式规则由同一 owner 持有，窄布局按实际可用容器生效，不由后置无条件规则覆写。共同对话样式归 `packages/client-ui/src/styles`，组件正常呈现所需的 overlay、尺寸与可访问性规则也随组件归包；宿主提供主题 token、Portal 容器与平台能力，不补另一份共享组件必需样式。以下清单按 Desktop 入口的实际层叠顺序排列，Desktop 在原层叠位置导入，其他 Client 直接消费共享包样式：
 
 ```
 styles/
@@ -464,6 +416,7 @@ styles/
   settings-toolkit.css  Settings 工具目录
   toolkit-custom.css  自定义工具的动作、参数与结果
   mobile-connection.css  手机连接浮层：连接码与连接步骤
+  phone-connection-visuals.css  手机连接视觉：设置设备页、手机连接浮窗与其工具设置共用的二维码卡片、网络选择与在线设备
   toolkit-agent-cards.css  工具结果里的 Agent 卡片：原 Agent 头像与有界身份信息
   settings-keyboard-shortcuts.css  Settings 键盘快捷键
   settings-workview-layout.css  Settings 的 Space、Goals 与 Focus 偏好：密度、视图示例与布局
@@ -487,6 +440,7 @@ styles/
   collaboration.css  Focus 协作图：画布、筛选、关系与检视面
   focus.css  Focus 三段工作面：历史、状态、选中的 Session
     focus-context.css  同一入口先读的查找、上下文卡片与位置选择
+  agent-operation-feedback.css  Agent 卡片及 Region 的异步操作短状态、边沿轨迹与原操作详情
   agent-input-recap.css  Focus 卡片里的原输入回看与图片缩略
   agent-bookmarks.css  Agent 信息阅读窗里的书签、更新提示与问题
   focus-timeline-ruler.css  Focus 时间轴与有界标尺
@@ -553,7 +507,6 @@ styles/
   automation.css  连续推进与自动化：概览、编辑、间隔与目标
   launcher.css  新 Agent 启动入口
   session-takeover.css  Session 接管层与恢复选择
-  agent-operation-feedback.css  Agent 卡片及 Region 的异步操作短状态、边沿轨迹与原操作详情
   session-learning.css  Session 学习：来源与状态
   resume.css  已有 Session 恢复入口
   launcher-resume-actions.css  启动器里恢复入口的动作与复制
@@ -603,43 +556,27 @@ styles/
   connector-experience.css  连接器任务画布：引导、注册与 Bot 任务
 ```
 
-这张清单由 `stylesheet-organisation.test.ts` 钉住：文件名集合必须与 `index.css` 的 `@import`
-列表逐一对上，拆一刀而忘了改这里当场红。描述那一列不锁——它是写给人看的判断，不是清单。
+这张清单由 `apps/desktop/test/stylesheet-organisation.test.ts` 核对：测试解析本节以 `styles/` 开头的代码块，两空格缩进的文件名须与 `index.css` 顶层 `@import` 的顺序和集合逐一一致，四空格缩进的子表不参与比对。拆分或调整样式文件时同步本清单；描述列只供阅读，不参与核对。
 
 约束：
 
 - 全局主题值的唯一 owner 与消费边界见[《主题与样式 SSOT 规范》](#主题与样式-ssot-规范)；组织守护检查真实声明的归属，不把读取现有外观的选择器判成第二份主题值。
-- 分文件是**按表面切**而不是按属性切（不设 `typography.css`/`colors.css`）——改一个表面时想看到的是
-  它的全部规则，而不是在三个文件间来回跳。
+- 按表面分文件，不按属性分（不设 `typography.css`／`colors.css`），修改一个表面时不必在多个文件之间来回查找。
 - 入口按上述顺序 `@import`，层叠顺序即文件顺序；不依赖选择器特异性打架来决定胜负。
-- 单文件超过 400 行时按表面继续拆，不靠注释分节假装分层。**拆出去的表面块在原入口的合法顶层 `@import` 中保持原层叠位置**——
-  层叠顺序即文件顺序，排到别处就不是搬家而是在改层叠。守护就是上面那条文件顺序断言。
-- **没有孤儿文件**：每个 `.css` 都要沿 `index.css` 的导入图可达，子表可由原表面的入口递归 `@import`。一个没进入口导入图的样式文件是死文件——
-  规则永不生效，而契约测试会照常扫描它并放行。
-- 契约测试读的是**整张表**（`test/helpers/styles.ts` 按 `@import` 顺序拼接），不硬编码单个文件路径；
-  否则下一次再拆一刀，它们会扫到空内容却全绿。这条对**任何**读样式的测试都成立，不只是那几条以
-  "contract" 命名的：一条判「某个 class 有没有规则」的断言，只要来源写死了某个 `.css`，它守的就变成了
-  「规则在那个文件里」——而按表面拆分是常规动作。拆走之后红算走运，拆走之后恰好不再被覆盖就是静默
-  失守。守护：`stylesheet-organisation.test.ts` 会扫出任何硬编码 `styles/*.css` 的测试。
+- 单文件超过 400 行时按表面继续拆，不靠注释分节代替分层。拆出的表面块在原入口的合法顶层 `@import` 中保持原层叠位置：层叠顺序即文件顺序，换位置等于改变层叠。上面的文件顺序核对覆盖这条。
+- 没有孤儿文件：每个 `.css` 都要沿 `index.css` 的导入图可达，子表可由原表面的入口递归 `@import`。不在导入图中的样式文件规则永不生效，扫描却仍会读到它。
+- 读取样式的测试经 `apps/desktop/test/helpers/styles.ts` 沿导入图按层叠顺序读取整张样式表，不硬编码单个 `.css` 路径：按表面再拆分是常规动作，写死路径的断言会在规则搬走后扫到空内容而保持绿色。`apps/desktop/test/stylesheet-organisation.test.ts` 会报出硬编码 `styles/*.css` 路径的测试。
 
 ## 非目标
-
 
 - 不建设主题市场、账号服务、任意 CSS / 脚本插件或通用扩展框架。声明式主题编辑与本地文件导入导出属于已确认范围。
 - 不为没有规模证据的虚拟列表、文件拖动或移动端布局预建状态。
 - 不在正式设计合同保留来源路径、固定 commit、Copy/Adapt/Omit 表或已完成任务流水。
-- **不引入 CSS-in-JS、Tailwind 或预处理器**。问题是"字面值没有名字"，不是"CSS 不够强"；
-  原生 custom property 已经足以给尺度命名，换一套构建期方案只会在解决同一个问题的同时新增一层工具链。
-- 应用外观支持深色、浅色和跟随系统；选择持久化，系统模式在系统外观改变时更新。全局 Surface、文字、控件和编辑器保持一致，终端调色板仍可单独选择。
-
-- Shell 环境读取不完整时，复用服务窗的持续、中性、非模态告示；说明读取范围和恢复动作，不展示环境值、不靠 toast 自动消失。行为归属见 [Desktop interaction](../agentmux-desktop-interaction.md) 的本地 shell 环境约束。
-- 登录 shell 降级时告示保持一行紧凑服务窗：说明“交互配置未确认，当前按登录/继承环境运行”，不显示 PATH、凭据或完整环境转储。非交互 fallback 成功后告示仍持续可见，直到下一次应用启动重新确认；布局、Session 和输入不被遮罩。
-
-- 兼容但归属未确认的 Runtime 使用持续的中性服务窗说明，不使用错误弹窗，不阻挡已有工作面；归属状态不展示路径、PID 或凭据。
+- 不引入 CSS-in-JS、Tailwind 或预处理器：原生 custom property 已足以给尺度命名，换用构建期方案只会多一层工具链。
 
 ## 语义图标密度与性能
 
-- App 品牌与界面语义图标分别沿自己的共享呈现入口。品牌组件只绘制调用方明确提供的已观察选择，宿主负责配置、资源读取和系统投影；业务页面不直连某份默认 PNG。macOS Dock 与包图标由构建层输出带透明留白的圆角轮廓，视觉体量与相邻标准 App 图标协调；界面和 iOS 资源按各自宿主呈现，不复用 Dock 专有留白。Classic 保留原低多边形龙，配克制的复古未来感圆角底板；底板是该款共享品牌资源的组成部分。五款品牌选择用完整预览、名称与非颜色选中标记表达，尺寸与留白保持同级，深浅主题及窄面都可辨。境、大图、题款与品牌出现的位置归[品牌架构](brand-identity.md)；保存与系统生效范围见[App icon 行为](../behavior/settings-and-observation.md#主题编辑与文件交换)。
+- App 品牌与界面语义图标分别沿自己的共享呈现入口。品牌组件只绘制调用方明确提供的已观察选择，宿主负责配置、资源读取和系统投影；业务页面不直连某份默认 PNG。App 图标的轮廓、底板、选择呈现及品牌出现的位置归[品牌架构](brand-identity.md)；保存与系统生效范围见[App icon 行为](../behavior/settings-and-observation.md#外观app-图标与主题文件)。
 - semantic icon 按状态、对象、动作、导航、层级五类组织；同一语义在 Gallery、Workflow、Activity、聊天状态栏中使用同一几何和尺寸契约。
 - 开发受控 UI 图标时先按实际对象、动作目标或导航目的地复用共享目录的稳定语义身份，不能仅凭同名动词或相似图形借位，确需新含义才扩展原目录；React 组件与原生/DOM 适配都通过共享投影引用语义，不在业务页面另建默认映射或直接绑定库字形。目录定义含义与可选图形，业务状态、权限与动作资格仍由原事实 owner 持有，不能从图标反推。
 - 项目自绘图标共用 24 单位网格、轮廓与留白语言，线宽和端点沿主题与实例参数继承；静态、单色及小尺寸下先保证语义可辨，颜色与动画只作辅助。全目录按真实消费者核对图形与含义，牵强或误导的默认映射改用同族自绘，不限于 Activity；清楚的标准方向、键盘、选择控件、小状态点及带明确文案的创建加号继续沿原惯例。同一语义身份被用于不同含义时修正实际调用或拆分语义，不用更泛化的图形掩盖误绑。

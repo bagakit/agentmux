@@ -15,8 +15,8 @@
 | 主题 token、尺度、控件、样式归属及视觉验收 | [全局视觉、尺度与样式 Owner](presentation/shared-rules.md) |
 | 品牌：龙的五个境、大图与题款、共用工坊、IP 形象与品牌出现的位置 | [品牌架构](presentation/brand-identity.md) |
 | Mote／Work／Know 导航分组、对象层次、Tab／Region 几何和 Launcher 密度 | [空间与布局的呈现](presentation/spaces-and-layout.md) |
-| Survey 浏览起点与 Zone 工作面 | [Survey 的 Zone 工作面与液体玻璃](presentation/spaces-and-layout.md#survey-的-zone-工作面与液体玻璃) |
-| Recall 目录、书写和来源层级 | [Recall 的目录、阅读与来源](presentation/spaces-and-layout.md#recall-的目录阅读与来源) |
+| Survey 浏览起点与 Zone 工作面 | [Survey 的 Zone 工作面与液体玻璃](presentation/knowledge-workflows.md#survey-的-zone-工作面与液体玻璃) |
+| Recall 目录、书写、Note 图谱和来源层级 | [Recall 的目录、阅读与来源](presentation/knowledge-workflows.md#recall-的目录阅读与来源) |
 | Topics 分类与主题树、讨论和知识内容层级 | [Topics 知识库的导航与内容层级](presentation/spaces-and-layout.md#topics-知识库的导航与内容层级) |
 | Mote 身份、快捷面、浮窗及协调控件 | [Mote 与协调面的呈现](presentation/motes-and-coordination.md) |
 | 伙伴诞生的三幕用户故事板与设置教程 Banner | [伙伴故事板](presentation/motes-and-coordination.md#伙伴从哪里来用户故事板与教程-banner) |
@@ -26,7 +26,7 @@
 | 连接、恢复、启动、服务窗和版本边界 | [Session 与恢复的呈现](presentation/session-recovery.md) |
 | 对话消息、身份、正文／资源、过程与请求卡密度 | [对话模式的呈现](presentation/conversation-mode.md) |
 | 输入工具、队列、Mailbox 容器与持续推进密度 | [输入工具与邮箱的呈现](presentation/conversation-input.md) |
-| 系统截图选区、来源选择、贴图与共享图片编辑的控件层级 | [系统截图选区呈现](presentation/conversation-input.md#系统截图选区) · [共享标记呈现](presentation/browser-workface.md#browser-任务工具与证据的紧凑呈现)；行为归[截图与录制](behavior/capture-and-recording.md) |
+| 系统截图选区、来源选择、贴图与共享图片编辑的控件层级 | [截图与录制的呈现](presentation/capture-and-recording.md) · [共享标记呈现](presentation/browser-workface.md#browser-任务工具与证据的紧凑呈现)；行为归[截图与录制](behavior/capture-and-recording.md) |
 | 身份、能力、Agent 状态、注入上下文与消息队列 | [Agent 身份与消息的呈现](presentation/agent-capabilities-and-messaging.md) |
 | 终端字形、历史、恢复阅读和链接提示 | [Terminal 阅读的呈现](presentation/terminal-reading.md) |
 | Browser 工具、证据、控制权和确认层次 | [Browser 工作面的呈现](presentation/browser-workface.md) |
@@ -39,6 +39,4 @@
 
 ## 更新与保全
 
-新约束原位合入所属专题，同一事实只定义一次，其他正文链接到 owner。入口只维护主题导航，不按日期、Task 或聊天轮次追加完整需求。
-
-修改时同步受影响引用，保留原要求的权限、恢复、健康 Run、工作面、相关成本及交付责任；纯文档证据不替代产品行为验收。过程资料只留本机，其 Git 与留存边界见 [过程目录](../process-directories.md)。
+新约束原位合入所属专题，同一事实只定义一次，其他正文链接到 owner。入口只维护主题导航，不按日期、Task 或聊天轮次追加完整需求。修改步骤与检查见[完成一次文档修改](../guides/document-truth-and-maintenance.md#完成一次文档修改)，过程资料的留存边界见[过程目录](../process-directories.md)。

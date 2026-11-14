@@ -6,10 +6,11 @@
 
 | 要了解什么 | 入口 |
 | --- | --- |
+| 多层注意力的分层依据、边界与验证 | [多层注意力](design/multi-layer-attention.md) |
 | 产品定位、安装与 Core 使用概览 | [项目 README](../README.md)（英文）· [中文版](../README.zh-CN.md) |
 | Mote／Work／Know 产品分组、空间模型、Space 入口与实体 | [空间模型与概念](design/behavior/spaces-and-layout.md#空间模型) |
 | 伙伴的两条来源、Topic 晋升与内部 Agent 的成长 | [伙伴从哪里来：从 Topic 到 Mote](design/behavior/companions-from-work.md) · [用户故事板](design/presentation/motes-and-coordination.md#伙伴从哪里来用户故事板与教程-banner) |
-| 浏览研究与知识积累、创建和继续工作 | [Survey／Recall 工作流](design/behavior/knowledge-workflows.md)、[Launcher 工作起点](design/behavior/workface-launcher.md) |
+| 浏览研究与知识积累、创建和继续工作 | [Survey／Recall 工作流](design/behavior/knowledge-workflows.md)（[呈现](design/presentation/knowledge-workflows.md)）、[Launcher 工作起点](design/behavior/workface-launcher.md) |
 | 空间持久化、准确位置与跨视图导航怎样实现 | [空间状态与导航机制](architecture/spatial-state.md) |
 | 用户数据怎样保存、确认并跨进程恢复 | [用户数据与本地持久化](design/behavior/persistence.md) |
 | 项目分层、身份与唯一事实 owner | [系统职责地图](architecture/system-ownership.md) |
@@ -24,11 +25,12 @@
 | 分屏树代数 / 目标存储 | [Layout](../packages/layout/README.md)、[Demand](../packages/demand/README.md) |
 | 对话视图的目标、场景、交互与产品验收 | [对话视图 PRD](design/behavior/conversation-mode.md) · [呈现 SSOT](design/presentation/conversation-mode.md) |
 | 对话模式怎样接到 Core、Desktop、Mobile 与公共协议 | [机制与接线](architecture/conversation.md) · [公共协议](specs/conversation-protocol.md) |
-| 对话组件如何分层、收敛阅读保护并支持渐进加载 | [客户端目标技术设计](design/conversation-client-architecture.md) |
+| 对话组件如何分层、收敛阅读保护并支持渐进加载 | [对话机制《Desktop 阅读链》](architecture/conversation.md#desktop-阅读链) |
 | amux 信封、业务标记、内容分享与对象链接的格式 | [amux 可读协议 SSOT](specs/amux-protocol.md) |
 | Agent 发现、A2A 广播、双向事件、spawn、协作图与通信责任 | [A2A 协作业务 SSOT](design/behavior/a2a-collaboration.md) |
 | Composer、邮箱、草稿、队列与持续推进 | [输入与邮箱](design/behavior/conversation-input.md) |
 | 共享对话组件、Composer 与客户端平台适配 | [Client UI](../packages/client-ui/README.md) |
+| 手机客户端的导航、对话、附件、终端阅读与网页更新行为 | [手机客户端](design/behavior/mobile-client.md)；设备接入与 Relay 连接见[手机版 Relay 连接](design/behavior/public-control.md#手机版-relay-连接) |
 | 改手机界面：尺度、控件、文案、状态、动效与采图验收 | [手机客户端的呈现](design/presentation/mobile-client.md) |
 | 手机 Web 与既有行为／呈现要求的共用范围、差异和未核实项 | [Mobile 对齐索引](design/agentmux-mobile-alignment.md) |
 
@@ -44,20 +46,27 @@
 | Dialog、菜单、tooltip 与原生 Browser 的层级接线 | [UI 弹层实现归属](architecture/ui-layering.md) · [共享层级呈现](design/presentation/shared-rules.md#弹层作用域与层级) |
 | 开发复用或扩展图标、打开当前目录工作台 | [语义图标开发指南](guides/semantic-icons.md) |
 | 品牌结构，或增改 App 图标、大图、插画与 IP 素材 | [品牌架构](design/presentation/brand-identity.md) · [品牌素材指南](guides/brand-assets.md) |
-| 终端复制、粘贴、键盘、IME、链接的机制判别 | [终端交互分层](design/agentmux-terminal-interaction-layers.md) |
+| 终端复制、粘贴、键盘、IME、链接的机制判别 | [终端交互分层](architecture/terminal-interaction-layers.md) |
+| 终端 palette、OSC 颜色回复与主题边界 | [Terminal 外观](architecture/terminal-appearance.md) |
+| Note 编辑时远端新稿的合入、富文本映射与保存对账 | [Note 编辑与文件会话](architecture/note-editing.md) |
+| 文件读写的修订与原子发布、Git 操作、worktree 与扇出怎样实现 | [文件、编辑与 Git](design/behavior/files-and-git.md) · [当前机制](architecture/files-and-git.md) |
+| 接入外部聊天平台：绑定身份、群入口、成员访问、双向交付与凭据 | [外部对话渠道](design/behavior/conversation-channels.md) · [Connection 公共协议](specs/connection-protocol.md) · [连接器包](../packages/connectors/README.md) |
 | Agent Session 启动、恢复阶段与唯一恢复 owner | [Session 恢复行为](design/behavior/session-recovery.md) · [恢复模块](architecture/agent-session-recovery.md) |
 | 字节到画面、Attachment 与 viewport 链路 | [Terminal Runtime 架构](architecture/terminal-runtime.md) |
 | Renderer 更新、应用安装与 Native 保全 | [Desktop 更新架构](architecture/desktop-updates.md) |
 | 并行开发中快速打包、安装、续做和清理 | [macOS 打包指南](guides/macos-packaging.md) |
 | 防止流程失败阻断健康能力 | [红线判定](../RED-LINES.md) |
-| 原生系统能力的需求与模块边界 | [AgentMux 原生层](design/behavior/native-desktop.md) · [目标架构](design/native-desktop-architecture.md) |
-| 系统／Browser 截图、共享编辑、PNG／贴图及 GIF／长截图评估 | [截图与录制](design/behavior/capture-and-recording.md) · [选区呈现](design/presentation/conversation-input.md#系统截图选区) · [标记呈现](design/presentation/browser-workface.md#browser-任务工具与证据的紧凑呈现) |
+| 原生系统能力的需求与模块边界 | [AgentMux 原生层](design/behavior/native-desktop.md) · [当前机制](architecture/native-desktop.md) |
+| 原生层源码、Swift、系统操作与正式安装的验证范围 | [原生层验证](testing/native-desktop.md) |
+| 系统／Browser 截图、共享编辑、PNG／贴图及 GIF／长截图评估 | [截图与录制](design/behavior/capture-and-recording.md) · [选区呈现](design/presentation/capture-and-recording.md#系统截图选区) · [标记呈现](design/presentation/browser-workface.md#browser-任务工具与证据的紧凑呈现) |
 | 新功能需要哪些 JSON-RPC／CLI、如何接线交付 | [公共能力贡献约定](guides/public-capability-contributions.md) |
 | 跨模块观测诊断、证据与错误码、历史/采样接入边界 | [Diagnostic Evidence 设计](design/diagnostic-evidence.md) |
 | 模块接入统一证据查询 | [Diagnostic Evidence 协议](specs/diagnostic-evidence-protocol.md) · [接入指南](guides/diagnostic-evidence-integration.md) |
 | 任务验证、变异、调用者、假绿防护 | [测试策略](testing/strategy.md) · [从需求到行为场景](testing/product-behavior-validation.md) |
+| 运行 opt-in 的真实 Codex lifecycle 测试 | [隔离输入与清理](guides/real-codex-private-lifecycle-test.md) |
+| 核对 Codex 原生错误与 AgentMux 的适配范围 | [Codex Provider 错误资料](guides/codex-provider-errors.md) |
 | UI 场景采图与独立审美评审 | [视觉验收指南](guides/agent-visual-e2e-review.md) |
-| Agent 用 CLI 操作原工作面 | [对象操作指南](guides/agentmux-cli-object-control.md) |
+| Agent 用 CLI 操作原工作面：委派、打开位置与焦点的选择 | [Delegation and opening playbook](../packages/core/guides/shared/spatial.md#delegation-and-opening-playbook-advisory)；按任务找命令用法见[指南导航](guides/agentmux-cli-object-control.md) |
 | 整理具有长期价值的事故案例 | [事故案例写作指南](guides/incident-writing.md) |
 | 查看全部设置、管理入口及 GUI/CLI 范围 | [设置目录](settings-catalog.md) |
 | 新增设置能力 | [Settings 贡献约定](settings-module-contributions.md) |
@@ -73,12 +82,22 @@
 
 ## 历史与本机过程资料
 
-[事故复盘](casestudy/) 保留当时现场和改进动作，其中[终端丢色案例](casestudy/terminal-colors-lost-after-resume.md)说明长寿命 Runtime 的环境继承与显式 unset，[磁盘有空间却无法恢复 Session](casestudy/all-sessions-unrecoverable-with-disk-space.md)说明共享持久化容量、事务分类和原身份恢复的证据边界，[Performance 合法观察误拒](casestudy/performance-valid-observations-rejected.md)说明协议包装、叶子预算和管道回压的组合缺口，[新 Agent 终端退出、首输入未发](casestudy/new-agent-terminal-exits-before-first-input.md)说明辅助历史观察与原输入、前台恢复的互锁，[正常突发中的 RPC 断开](casestudy/rpc-disconnects-during-normal-bursts.md)说明人工 ACK 账本、传输背压与连接放大的区别；[Benchmark 协议](benchmarks/agentmux-daemon-cutover.md) 定义测量方法，历史数值不成为当前预算或排名。
+[事故复盘](casestudy/) 保留当时的现场、根因和改进动作，每份说明一个可复用的教训：
 
-[历史清理改坏引用与候选代码](casestudy/history-hygiene-changes-semantics.md)记录隐私扫描越过语义边界的红线事件，区分候选验证故障、审查拒收与尚未证实的线上影响。
+- [磁盘仍有空间，重启后所有 Session 都无法恢复](casestudy/all-sessions-unrecoverable-with-disk-space.md)：共享持久化的容量、事务分类和原身份恢复的证据边界。
+- [一个还活着的 Agent 永远收不到消息了](casestudy/prompt-refused-after-readiness-consumed.md)：内部记账许可没有续期，永久拒绝健康 Run 的输入。
+- [新 Agent 的终端退出，原后台却等不到首条输入](casestudy/new-agent-terminal-exits-before-first-input.md)：辅助历史观察与原输入、前台恢复的互锁。
+- [重开后 Terminal 无法加载，原进程却仍在运行](casestudy/terminals-stuck-after-reopen.md)：原 Attachment 已取得，回执投影却误等全局恢复；完整调用链的准入与回归边界。
+- [后台仍在运行，RPC 却在正常突发中被拒绝](casestudy/rpc-disconnects-during-normal-bursts.md)：人工 ACK 账本、传输背压与连接放大的区别。
+- [原页面可读，Browser 呈现仍黑屏](casestudy/browser-presentation-readiness-and-document-identity.md)：资源加载门槛与可变原生 frame 引用的错位，以及怎样保留健康呈现并验证准确文档身份。
+- [Performance 合法观察被防御规则误拒](casestudy/performance-valid-observations-rejected.md)：协议包装、叶子预算和管道回压的组合缺口。
+- [新建 Agent 与 resume 后终端丢色](casestudy/terminal-colors-lost-after-resume.md)：长寿命 Runtime 的环境继承与显式 unset。
+- [Agent 正在执行却显示空闲，改过的名字又变了](casestudy/working-agents-idle-and-names-reset.md)：活动状态投影与显示名写入。
+- [新安装包无法启动，随后只显示界面超时](casestudy/packaged-app-could-not-start.md)：preload 外置与签名资格，启动检查须留下真正的首错。
+- [安装包更新后黑屏：菜单 Hook 读到空 dispatcher](casestudy/packaged-renderer-duplicate-react-black-screen.md)：Renderer 依赖必须单例。
+- [功能已经做过，界面却像没做过：启动了旧 App 包](casestudy/stale-package-feature-disappearance.md)：运行实例与当前源码的身份核对。
+- [历史清理改坏引用与候选代码](casestudy/history-hygiene-changes-semantics.md)：隐私扫描越过语义边界的红线事件，区分候选验证故障、审查拒收与尚未证实的线上影响。
 
-[重开后 Terminal 无法加载](casestudy/terminals-stuck-after-reopen.md)说明原 Attachment 已取得、回执投影却误等全局恢复的故障，以及完整调用链的准入与回归边界。
-
-[Browser 呈现误拒](casestudy/browser-presentation-readiness-and-document-identity.md)说明资源加载门槛与可变原生 frame 引用的错位，以及如何保留健康呈现并验证准确文档身份。
+[Benchmark 协议](benchmarks/agentmux-daemon-cutover.md) 定义测量方法，历史数值不成为当前预算或排名。
 
 **过程性文档不提交。** 调研、计划、评审、交接、交付清单、状态快照和原型留本机，目录与已有暂存文件的保全规则见[过程资料边界](process-directories.md)。它们帮助追溯，不取代长期设计或官方任务状态。受控仓库中的长期入口应独立可读；本机资料缺席须明确缺证，不把缺席伪装成通过。

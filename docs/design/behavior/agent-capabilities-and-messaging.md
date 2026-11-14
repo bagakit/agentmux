@@ -9,7 +9,6 @@
 - [AgentMux 消息与分享格式](#agentmux-消息与分享格式)
 - [AgentMux 注入上下文](#agentmux-注入上下文)
 - [启动握手与自命名](#启动握手与自命名)
-- [A2A 协作与可观测性](a2a-collaboration.md)
 - [Agent 已经这样多久了](#agent-已经这样多久了)
 - [Agent 当前阶段与动作的可见表达](#agent-当前阶段与动作的可见表达)
 - [Provider Launch Option](#provider-launch-option)
@@ -24,6 +23,8 @@
 - [Provider 与人机交互的分层收敛](#provider-与人机交互的分层收敛)
 - [Agent 全局状态：唯一事实与投影](#agent-全局状态唯一事实与投影)
 - [Steer 与 Provider 输入能力](#steer-与-provider-输入能力)
+- [输入环境判定与复用边界](#输入环境判定与复用边界)
+- [自动推进的触发、暂停与认领](#自动推进的触发暂停与认领)
 - [Executor 标识的归属](#executor-标识的归属)
 - [插件扩展边界](#插件扩展边界)
 - [状态投影、Browser 页面与 Scratch Topic 工作面](#状态投影browser-页面与-scratch-topic-工作面)
@@ -35,6 +36,7 @@
 - [跨重启的 Prompt 投递凭据](#跨重启的-prompt-投递凭据)
 - [Hook 配置隔离与非 AgentMux 会话](#hook-配置隔离与非-agentmux-会话)
 - [按 amux id 搜索 Agent](#按-amux-id-搜索-agent)
+- [Hook 事件与原生记录的生命周期](#hook-事件与原生记录的生命周期)
 
 ## AgentMux 消息与分享格式
 
@@ -98,24 +100,27 @@ Agent 的状态和动作应可具象辨认：原身份旁显示当前有依据�
 
 ## Provider Launch Option
 
-- Provider 以数据形式声明自己可供选择的启动项（例如 model、权限或沙箱模式）。每个 choice 把 UI 展示的标签与兑现它的 argv 写在同一处，两者不可能漂移。
-- 契约分成两半：describe 半边是纯数据，跨 IPC 供 Renderer 渲染；argv 半边只留在 Core。**Renderer 永远看不到命令行**，Launcher 也永远不知道 Provider 的名字——任何调用点都不得按 `providerId` 分支决定启动项。
-- 未声明即不渲染。Provider 落地速度不同是常态，没有声明的启动项在界面上完全不出现，而不是显示一个禁用控件。给某个 Provider 后补一项能力，不需要改动 Renderer 任何一行。
-- 作用域是**启动时**，这不是过渡方案而是运行时的全部事实：Agent 是经 PTY 驱动的真实 CLI 进程，当前没有 Provider 走 ACP，不存在能让运行中进程改换 model 的通道。把选择编码进 spawn 时的 argv 是运行时唯一能兑现的形式，类型系统据实表达这一点，不得用暗示"运行中可切换"的控件掩盖它。将来某个 Provider 具备 ACP 后，实时能力作为**并列**的另一项能力加入，启动时这一条不被拆除。
-- 只声明对着真实二进制核实过的 flag。核实不了的一律不声明——这正是部分 Provider 目前不提供任何启动项的原因。核实的对象是 Provider 真正的可执行文件（如 cursor 是 `cursor-agent` 而非 `cursor`），拿错二进制核实等于没核实。
-- **不声明自由字符串 model**。gemini / grok / traex / hermes / antigravity 以及 codex / cursor 的 `--model` 都收任意字符串、无枚举，手写一张模型名清单会在厂商改动阵容时立刻过期，故一律不声明、依"未声明即不渲染"保持无按钮，绝不为对称而编造一张会过期的清单；只有当 CLI 自身 `--help` 给出可声明的取值才声明，且据实区分它给取值的两种方式——claude 的 `--model` 是**例举式**（`--help` 以 e.g. 举出 fable / opus / sonnet，并非严格 possible-values），我们只把这组指向"最新模型"的**稳定别名**据实声明（它同时也接受模型全名，但**全名不声明**，出自同一条会过期的理由），措辞按"稳定别名"表述、绝不写成一份穷举清单；claude 的 `--effort` 则是**严格 possible-values 枚举** low / medium / high / xhigh / max。核实到的是**枚举**才落一个选项：gemini `--approval-mode`、grok/claude/traex `--permission-mode`、codex/traex `--sandbox` 都是显式 possible-values；hermes `--yolo`、antigravity `--sandbox` 是布尔开关，落成两档 choice（保守档贡献空 argv，激进档贡献 flag）。每档 tier 据实标注：绕过审批或沙箱为 `danger`，收窄一类为 `caution`，保守默认为 `safe`（agy 的 `--sandbox` 是**加**限制，故开启档才是 `safe`，无沙箱的默认档为 `caution`）。
-- **model 与 effort 不带 tier**。claude 的 model 与 effort 是仅有的两处按**能力**（而非权限）据实声明的启动项。RiskTier 分级的是审批/沙箱姿态的危险程度，而选模型或选推理深度既不放宽也不收紧任何权限——给它标一档 tier，会在名册行上打出一个无人记录过的假风险标记。claude 的启动项里只有 permission-mode 真正移动权限姿态，故只有它带 tier。
-- Permission option 是并列的一套按 Provider 声明（见 `packages/core/src/agent-interaction.ts` 的 `TerminalPermissionOption`）：与 launch option 同构地拆成 describe/contribute 两半——DESCRIBE 半边（id/label/kind/description/tier）跨 IPC，CONTRIBUTE 半边（回答提示的 PTY 按键 `input`）只留在 Core，于 reply 时解析。两者的区别在于作用时机：launch option 作用在 spawn 的 argv，permission option 作用在运行中 Provider 自己的编号提示上；同样只声明位置稳定、对真实 CLI 核实过的行。
-- Posture control 是第三套并列声明（见 `packages/core/src/agent-interaction.ts` 的 `PostureControlDeclaration` 与 `createPostureControl`），是 Composer 上"这些权限设置也要能在聊天框上设"这一诉求唯一诚实的兑现方式。它专治运行时的 live 权限姿态：与 permission option 同处 Provider 的 interaction protocol 声明，同样拆成 DESCRIBE 半边（`AgentPostureControl`：control 的 id/label + 每个 mode 的 id/label/description/tier）跨 IPC，CONTRIBUTE 半边（每个 mode 的 in-band 按键 `input`）只留在 Core，由 `planPostureSet(modeId)` 在 set 时解析、经既有 PTY-input 通道（`setAgentPosture` → `writeAgentInput`）写入。诚实性由结构强制：一个 posture control **必须**声明 ≥2 个 mode，每个 mode 的按键**非空且互异**——因此一个只有盲态 Shift+Tab cycle（一枚按键在读不到的状态间轮转）的 Provider 结构上无法被表达成 set-mode 控件，绝不会伪装成"切到 mode X"。**盲发按键是真实风险，故只声明效果确定、可寻址的控件**：仅当存在能指名目标态的 slash 命令时才声明。据此对着真实二进制复核后，只有 grok 合格——它的 `/always-approve [on|off]`（clap ValueEnum 核实）给出 Ask / Auto-approve 两个各由独立 slash 命令 SET 的具名 mode；claude、gemini、codex 只有盲态 cycle（codex 另有无法盲导航的 `/approvals` 弹窗），一律不声明，Composer 对它们不画任何控件（未声明即不渲染）。控件是 fire-and-forget 的 SET，不是有状态开关：Composer 从不标记"当前 mode"，因为 live 姿态活在读不到的 CLI TUI 里，标一个 active mode 就是谎称掌握了它——菜单只提供可寻址的目标态，当前落点归 CLI 自己。
+Provider 启动项的当前声明唯一见 [launch-options.ts](../../../packages/core/src/providers/launch-options.ts)；运行中姿态控件的当前声明在各 Provider 的 interaction protocol（例如 [grok.ts](../../../packages/core/src/providers/grok.ts) 的 `GROK_POSTURE`）。本节只定义声明规则，不抄写各 Provider 的 flag 清单。
+
+- **启动项以数据声明，标签与 argv 写在同一处。** Provider 以数据形式声明可供选择的启动项（例如 model、权限或沙箱模式）；每个 choice 把界面标签与兑现它的 argv 放在一起，两者不会漂移。
+- **describe 与 argv 分开。** describe 半边是纯数据，跨 IPC 供 Renderer 渲染；argv 半边只留在 Core。Renderer 看不到命令行，Launcher 也不知道 Provider 的名字，任何调用点都不按 `providerId` 分支决定启动项。
+- **未声明即不渲染。** 没有声明的启动项在界面上完全不出现，而不是显示一个禁用控件；给某个 Provider 后补一项能力，不需要改动 Renderer。
+- **作用域是启动时。** 选择编码进 spawn 时的 argv；当前没有 Provider 声明 ACP 等可在运行中改换启动项的通道（各 Provider 的 `acpStrategy` 均为 `none`），类型系统据实表达这一点，不用暗示“运行中可切换”的控件掩盖。将来 Provider 提供经核实的运行中通道时，实时能力作为并列的另一项能力加入，启动时这一项不拆除。
+- **只声明对着真实二进制核实过的 flag。** 核实的对象是 Provider 真正启动的可执行文件（例如 cursor 是 `cursor-agent` 而非 `cursor`），核实不了的一律不声明；这也是部分 Provider 不提供任何启动项的原因。
+- **名册行显示启动时固定的授权范围。** 来源是 Core Session 记录中已持久化的 launch-option 选择：Desktop 只取得 choice id，标签由 Renderer 用该 Provider 的 catalog 声明解析，argv 不离开 Core。创建时未收窄任何一项则不显示，不写「默认」（那是无人记录过的事实）；选择对应的 option 或 choice 若 Provider 已不再声明，该项丢弃而不渲染裸 id（裸 id 会像已核实的授权）。每行最多一枚风险标记，取该行各范围中最宽的一档；Provider 未声明 tier 的选项不被补成 `safe`。
+- **只把枚举落成选项。** 收任意字符串的 `--model` 不声明：手写模型名清单会在厂商调整阵容时过期，也不为界面对称编造一张清单。CLI 自身 `--help` 给出取值时据实区分两种方式：严格 possible-values 枚举可完整声明；只以“例如”举出的取值（例如 claude 的 `--model`）只声明其中指向最新模型的稳定别名，按“稳定别名”表述，不写成穷举清单，也不声明会过期的模型全名。布尔开关落成两档 choice：保守档贡献空 argv，激进档贡献 flag。
+- **tier 只表达权限姿态。** 每档 tier 据实标注：绕过审批或沙箱为 `danger`，收窄一类为 `caution`，保守默认为 `safe`；开启时加限制的开关（例如 antigravity 的 `--sandbox`）开启档才是 `safe`，无沙箱的默认档为 `caution`。model 与 effort 按能力而非权限声明，不带 tier：选模型或推理深度既不放宽也不收紧权限，标一档 tier 会在名册上打出一个无人记录过的假风险标记。
+- **Permission option 与启动项同构。** Permission option 按 Provider 声明（`packages/core/src/agent-interaction.ts` 的 `TerminalPermissionOption`），同样拆成两半：describe 半边（id／label／kind／description／tier）跨 IPC，contribute 半边（回答提示的 PTY 按键 `input`）只留在 Core，于回答时解析。启动项作用在 spawn 的 argv，permission option 作用在运行中 Provider 自己的编号提示上；同样只声明位置稳定、对真实 CLI 核实过的行。
+- **Posture control 只声明效果确定、可寻址的控件。** Composer 上设置运行中权限姿态的唯一方式是 posture control（`PostureControlDeclaration` 与 `createPostureControl`）：与 permission option 同处 Provider 的 interaction protocol，describe 半边（`AgentPostureControl`：control 的 id／label 与每个 mode 的 id／label／description／tier）跨 IPC，contribute 半边（每个 mode 的 in-band 按键 `input`）只留在 Core，由 `planPostureSet(modeId)` 在设置时解析，经既有 PTY 输入通道（`setAgentPosture` → `writeAgentInput`）写入。结构上要求至少两个 mode、每个 mode 的按键非空且互异，因此只有盲态循环按键（例如一枚 Shift+Tab 在读不到的状态间轮转）的 Provider 无法被表达成“切到 mode X”的控件。盲发按键是真实风险：只有存在能指名目标态的 slash 命令时才声明，没有的 Provider 不画任何控件。控件是一次性的 SET，不是有状态开关：live 姿态在读不到的 CLI TUI 里，Composer 不标记“当前 mode”，只提供可寻址的目标态，当前落点归 CLI 自己。
 
 ## Provider 能力对齐与移植边界
 
-- 用户要求「很多 Provider 的实现不完整」，全面分析后对照最新参考实现逐家完善，尤其是 Agent 的 Session 分析、对话模式与 trace 观察。每个 Provider 的能力闭环必须分别可验证：原生 Session 身份与记录解析、完整对话与资源顺序、工具与推理等观察事实、恢复与交互能力不能只凭启动成功或 Hook 存在宣称完成。已有参考实现的能力应核验并复用；缺少协议依据时如实保留未知或不支持，不能把观察缺口变成健康 Agent 的阻断。完善任务按 Provider 分开验收，共享协议与展示只有一个 owner。
-- 用户进一步要求「实现达到成熟产品级别，且交互体验和性能远超竞品，所有功能你自己也要测试后满意」。Provider 完善必须经实际使用链与独立复核验收，覆盖真实身份接入、重启后原 Session 与工作面、对话阅读、trace 展开与完整复制；测试通过不替代交互验收。阅读与刷新只处理目标 Session 的有界记录，不因其他健康会话增加扫描或轮询工作。竞品比较须在相同输入、数据规模与观测条件下有实测证据，不能将结构更简单或合成测试更快直接称为领先。终端连续阅读及成本底线仍以[《Terminal 连续向上阅读历史》](terminal-reading.md#terminal-连续向上阅读历史)为唯一合同。
+- **每个 Provider 的能力闭环分别可验证。** Provider 对照最新参考实现逐家完善，尤其是 Agent 的 Session 分析、对话模式与 trace 观察：原生 Session 身份与记录解析、完整对话与资源顺序、工具与推理等观察事实、恢复与交互能力不能只凭启动成功或 Hook 存在宣称完成。已有参考实现的能力应核验并复用；缺少协议依据时如实保留未知或不支持，不能把观察缺口变成健康 Agent 的阻断。完善任务按 Provider 分开验收，共享协议与展示只有一个 owner。
+- **以成熟产品的交互体验与性能为交付标准。** 实现者须自己实际使用并测试至满意；Provider 完善经实际使用链与独立复核验收，覆盖真实身份接入、重启后原 Session 与工作面、对话阅读、trace 展开与完整复制；测试通过不替代交互验收。阅读与刷新只处理目标 Session 的有界记录，不因其他健康会话增加扫描或轮询工作。竞品比较须在相同输入、数据规模与观测条件下有实测证据，不能将结构更简单或合成测试更快直接称为领先。终端连续阅读及成本底线仍以[《Terminal 连续向上阅读历史》](terminal-reading.md#terminal-连续向上阅读历史)为唯一合同。
 - 外部对照只提供对照证据，不是 AgentMux 的第二份 Provider 注册表。每个 AgentMux Provider 必须以真实可执行文件与真实运行回执为准，分别声明 launch、ready、Hook、permission、status、resume 与 reply-correlation 能力；未核实的能力保持未声明，不用 UI 对称性或终端字节推断补齐。
 - Executor 的启动包装不改变 Provider 的语义归属。对应 Provider 解释真实执行链、原生配置与可用协议通道，Host、Desktop 和通用输入层不按包装名称或另抄一份参数名单判断原生能力；已确认同一原生协议与等价启动时，不能只因包装形式不同丢失能力。适配优先复用原生主体已解析的配置与真实通道，不能近似重建参数而改变权限、信任、认证、网络、工作目录或恢复语义；真实差异和未确认范围分别说明，`providerId` 相同本身不证明通道存在或本次操作已获授权。
 - 可执行文件检查使用这次 Provider 最终启动计划的 command、执行环境和 Workspace；发现列表没有 Workspace 时不猜相对路径。文件确证缺失与检查失败分别呈现：准确命令的文件观察失败不能单独封闭已授权的 Native 启动或原身份恢复，由原 Runtime 执行给出结果，并保留失败步骤、当前 Run 与重查动作的非阻塞服务窗。`installed` 不因允许执行尝试而改为 true；Provider 未贡献准确文件观察、真实不支持、身份或授权不足仍守本次操作合同。GUI、Doctor 与公开 API／RPC／CLI 复用同一探测事实；公开发现输入不泄露环境正文，未知启动回执不重放。
-- 现有 Provider 的 parity 工作按能力闭环推进：Grok 与 Gemini 若二进制支持 native resume，就必须同时接通可信 native handle、resume argv、managed Hook 与事件字段归一化；Pi 的 resume 与扩展部署是两件事，不能只做 locator；Claude、Hermes、Cursor 的事件/信任细节分别按各自 CLI 合同接入。Cursor 没有 native resume 时必须明确保持 unsupported，不伪造恢复入口。
+- **native resume 整条闭环一起接通。** 二进制支持 native resume 的 Provider 须同时接通可信 native handle、resume argv、managed Hook 与事件字段归一化；resume 与扩展部署是两件事，只做 locator 不算支持 resume。没有 native resume 的 Provider 明确保持 unsupported（当前声明见各 Provider 的 `resumeStrategy`），不伪造恢复入口；各 Provider 的事件与信任细节按各自 CLI 合同接入。
 - Hook 入口同时接受厂商的 camelCase 与 snake_case 字段，但在 Core 内收敛到同一 canonical event；`sessionId` 等 provider-native handle 只能由对应 Provider 解释，不能由 ctxmux 或 Desktop 猜测。流程探测或 Hook 安装失败属于非阻断降级，必须在服务窗说明当前状态与恢复动作。
 - 尚未纳入的 Agent 分成三类：具备完整 Hook/session/resume 证据的优先纳入；只有 status/Hook 的按实际需要纳入；只有 launch 配置或宿主专属 wrapper 的明确记录为暂不纳入。**同名不等于同身份**：TraeX (`traex`) 与 Trae CLI (`traecli`) 是两个不同 Provider，二进制与合同都不同，不得合并身份。
 - 所有 Provider、Agent Session、Hook 与 semantic resume 逻辑归 `packages/core`；ctxmux 只持有 Run、PTY、ordered bytes、Replay、Gap、Attachment 与进程事实。Provider parity 不得在 ctxmux 复制第二套实现。
@@ -152,6 +157,7 @@ Provider 必须将原生协议实际暴露的请求与轮结果归一为准确�
 - 原生重试中的请求失败、最终请求失败、轮完成、轮中断与进程退出分别表达。重试通知不伪造成最终失败或成功；同请求后续成功按真实关系收敛当前提示，原失败观察仍可读。完成事实不代签用户任务验收，metrics、最终回复样式、普通 Stop、终端字节或观察静默均不独立证明完成。可被否决或追加上下文继续的收尾 Hook 不授予最终 turn-end 或下一次自动操作。
 - 原主轮／子轮结果与现有子任务聚合使用唯一原生身份；名称和类型只作描述，缺身份不猜人数，不伪造成功或永久 working。准确原主结果或 Runtime 终局可收敛原聚合，普通终端输入与原身份保持可用。
 - 工作面与公共检查入口保留原因、已知码／未知边界和恢复指引；当前恢复正常后服务提示收口，原历史结果仍由[同一对话阅读面](conversation-mode.md#原生请求与轮结果)可达。请求失败、分类失败、读取失败或保存失败均不关闭健康 Run，不删除 Session、Tab、Region、历史或草稿；失败步骤沿原非阻塞服务窗说明。不自动重试输入、换模型、重启或创建替代 Session，尤其不重放结果未知的操作。
+- 错误摘要及已确认结果的本地阅读不等待外部投递，外部投递结果未知也不启动模型重试。连接器外发缺少 Provider 提供的 `publicMessage` 时，使用固定的通用失败文案，不外发本地原始错误，也不包装成 Agent 发言；共享字段合同见[原生请求与轮结果协议](../../specs/conversation-protocol.md#native-request-and-turn-outcomes)。
 - Provider 的能力发现分别说明结果观察与历史读取的实际覆盖；支持、当前不可用与未知不能混用，`complete-events` 不代签全部结果语义。声明必须与注册贡献一致，缺实现不能等到真实用户操作时才被发现为不支持。SDK、JSON-RPC／CLI、对话与连接器消费同一 Core 事实；官方资料覆盖不表示 CLI 暴露全部 API／SDK 字段或产品已通过验收。Focus 的当前结果资格只见[《项目归属、任务状态与恢复》](focus-context.md#项目归属任务状态与恢复)。
 
 ## 同一 Run 内的原生会话切换
@@ -177,7 +183,7 @@ AgentMux Session 持有一个已确认的原生语义目标；原生前台正在
 - Agent 完成后，结果附近应能直接进入工作区变更、已确认的开发预览或同一 Session 的后续对话。完成、变更存在、预览可用和任务成功必须分别表达，不能把停机或进程退出当成成功。
 - 预览只能使用已确认的通用开发服务事实；没有端口、发现失败或服务状态未知时保留工作面并说明当前事实，不猜测 URL。
 - 终端、对话、审批和审查切换时保留同一 Agent Session、草稿、附件和待回答交互；重连失败不能清空工作面或删除健康 Session。
-- 移动端、语音、Watch、Push 和 Remote/SSH 不属于本轮闭环，后续必须基于 Core/ctxmux 的公开能力另立需求。
+- 移动端、语音、Watch、Push 和 Remote/SSH 不属于本闭环，后续必须基于 Core／ctxmux 的公开能力另立需求；移动端已另立的行为见[手机客户端](mobile-client.md)。
 
 - Needs you 不保证一定有可回答的结构化请求；没有 typed request 时只提供定位原 Session 和真实状态，不能猜允许/拒绝按钮。聚合入口中的回答属于显式交互入口，不改变 Board 观察 Region 禁止发送和生命周期修改的约束。
 - 请求以 Core 当前 Session、Run 与 request 身份为准。提交中禁止重复点击；失败保留问题与用户选择，不自动重发或跳过；旧请求已被替换时刷新投影，不把旧回答送给新请求。成功按 Core 确认收敛后才进入下一项；到末项返回空状态和稳定焦点，不自动批准下一项。 在 Focus 中关闭请求面板时，原请求入口仍可见就归还焦点；最后一项确认后入口已收起，则回到当前可见的检索控件。用户随后已转到其他控件时，关闭回调不得抢回焦点。
@@ -187,8 +193,8 @@ AgentMux Session 持有一个已确认的原生语义目标；原生前台正在
 
 ## Agents 入口与 Activity 详情归一
 
-- Activity 工作线展开的每个 Agent 必须显示所属 Project/Workspace、Provider、执行状态、最近活动与等待/停止时长；统计至少区分总数、running、needs you、error，缺失事实显示 unknown。
-- Agents 列表只有一个主入口。左侧 Projects/Agents 工具作为统一入口，右侧重复的 Agents roster 不再单独占位；原有定位、筛选和状态统计能力并入统一入口。
+- Activity 入口的成员、整体状态汇总与 Agent 行沿[Activity 活跃入口与空间级联](focus-context.md#activity-活跃入口与空间级联)，状态时长沿本页[Agent 已经这样多久了](#agent-已经这样多久了)；缺失事实显示 unknown。
+- Agents 列表只有一个主入口。左侧 Projects/Agents 工具作为统一入口，右侧不另放重复的 Agents roster；原有定位、筛选和状态统计能力并入统一入口。
 
 ## 共享 Agent 菜单
 
@@ -198,11 +204,11 @@ Focus 卡片、Agents 列表、Agent Region 的右键与 More 使用同一个共
 
 菜单中的 Executor 头像提供复制对应原生 Session ID 的直接动作，与 `Copy Agent Link` 的 amux 对象链接明确区分。原生 ID 只取准确 Agent 由 Core 已采用的 typed `nativeHandle` 中的原生 Session ID，完整复制原值；不从标题、终端文字、记录路径、amux Session ID、Run ID、未采用的观察或候选推导。该动作只读已有身份，不自动检查、采用、切换或恢复对话。原生身份未知、类型或对象不匹配时明确说明本次没有复制，不将占位文字或其他身份写入剪贴板；这次复制的缺口不影响原菜单、健康 Agent、输入或其他已确认能力。头像图形复用[Executor 身份组件](#executor-身份组件与信息面板)，本次复制动作与完整键鼠说明由共享菜单持有。
 
-通用复制和已有一级布局动作保持直接可达；长说明、连接设置与维护等低频内容按需进入，不把所有资料和系统扩展平铺成整页长菜单。按需收纳不删除能力、隐藏必要服务问题或改写权限：失败步骤、当前运行状态与可达恢复入口仍沿原服务窗可发现，准确目标不成立只拒绝该次操作。复用与扩展不增加逐卡历史扫描、后台轮询或无关 Session 订阅；原确认取消、菜单关闭和返回仍保较晚主动焦点、草稿、原工作面与健康 Run。具体密度只定义在[Agent 菜单的动作层级](../presentation/spaces-and-layout.md#agent-more-的动作层级)。
+通用复制和已有一级布局动作保持直接可达；长说明、连接设置与维护等低频内容按需进入，不把所有资料和系统扩展平铺成整页长菜单。按需收纳不删除能力、隐藏必要服务问题或改写权限：失败步骤、当前运行状态与可达恢复入口仍沿原服务窗可发现，准确目标不成立只拒绝该次操作。复用与扩展不增加逐卡历史扫描、后台轮询或无关 Session 订阅；原确认取消、菜单关闭和返回仍保较晚主动焦点、草稿、原工作面与健康 Run。具体密度只定义在[共享 Agent 菜单的动作层级](../presentation/agent-capabilities-and-messaging.md#共享-agent-菜单的动作层级)。
 
 ## Agent 派生动作
 
-派生动作从一个准确的原 Session 出发另起一个新会话，原 Session、Run、工作面与未发送草稿保持不变，不向原 Session 发送任何输入。它与会话生命周期分开：菜单先列派生动作组，再列会话生命周期组（Restart Session、Stop Agent，Stop 末项），两组的成员、顺序与分隔呈现只见[Agent More 的动作层级](../presentation/spaces-and-layout.md#agent-more-的动作层级)。
+派生动作从一个准确的原 Session 出发另起一个新会话，原 Session、Run、工作面与未发送草稿保持不变，不向原 Session 发送任何输入。它与会话生命周期分开：菜单先列派生动作组，再列会话生命周期组（Restart Session、Stop Agent，Stop 末项），两组的成员、顺序与分隔呈现只见[共享 Agent 菜单的动作层级](../presentation/agent-capabilities-and-messaging.md#共享-agent-菜单的动作层级)。
 
 - **官方动作。** Take over、Fork current conversation 与 Pass on experience 为官方默认提供，行为与确认各归原合同：[接手原会话的工作](session-recovery.md#接手原会话的工作)、[从 Region 显式 fork 到新工作面](session-recovery.md#从-region-显式-fork-到新工作面)与[Agent 工作经验的转正](knowledge-workflows.md#agent-工作经验的转正)。官方动作只读，用户只能显示或隐藏；隐藏只影响菜单，不移除恢复失败时等其他入口的 Take over。
 - **用户动作。** 用户可新增自己的派生动作：菜单名、起点（新 Agent 读取原工作，可任选 Agent；或 Provider 原生 Fork 当前对话）、动作自有的指令正文，以及仅对新 Agent 起点有意义的默认 Agent。指令归动作所有，不引用 Prompts：Prompt 是输入框片段且需识别词，派生指令是交给新会话的任务说明。默认 Agent 只决定候选的首位与初始焦点，不跳过选择或自动创建。
@@ -216,7 +222,10 @@ Focus 卡片、Agents 列表、Agent Region 的右键与 More 使用同一个共
 - Agents 二级菜单优先呈现对象、当前动作和下一步，不堆叠 provider、配置名、路径和重复状态；详细信息在展开或 hover 中补充。
 - 进程 running、语义 working、输入可用与业务完成分别消费[状态事实 owner](#provider-与人机交互的分层收敛)。最近动作已确认时优先显示动作，未知如实说明；不从正在输出推断 working，也不以进程运行证明输入可用。
 - Agent 的用户显示名、Provider 名和配置名必须分别标注，不能把 Provider/配置名伪装成用户给 Agent 起的名字。
-- 消息队列项必须可展开后删除或立即发送，保留原消息和失败原因，发件列表逐条表达受阻与失败，未读提醒通过统一邮箱红点表达。**「自动发送失败后停止重试」只对真的失败成立，不对「我们没看清」成立。** 这条原先写成无条件停止重试，那是把 AGENTS.md 第 11 条的第 2 类写成了第 1 类：readiness 还没观察到（`epoch-missing`）时 Agent 进程活着、PTY 照收字节，停止重试等于我们自己的观测没走通就把用户的消息判了死刑。用户原话：「即使当时发不出去，它也应该还是在队列里面一直等着，对吗？」——对。因此：Agent 仍可工作时，条目**留在队列里并继续等下一次可投递时机**，同时如实说明当前没投出去和原因。这里「如实说明」是硬约束而不是补充：投递受阻必须是一个**与正常排队并列的独立状态**，不能复用「排队中」那一档。只有两档（排队中／失败）时，受阻只能借「排队中」的文案，数量标识会**肯定地**说「N messages queued for delivery」，而真相是此刻投不出去——那是第 11 条的另一侧边界：不许静默降级。反过来也不许借「失败」那一档：Agent 好着，画成报错样子是往第 1 类说谎。所以三档各说各的话，且各自要求另外两档的说法**不在场**；受阻这一档说明哪一步没走通、当前状态与可达动作；能否继续等待或需要明确重试沿本节准备等待合同，不能无依据承诺自动恢复。同一条受阻**只在第一次发现时上报一次**：用户刚敲完回车那次必须说（邮箱红点与收件通知让真正原因可发现），之后的自动重试保持安静——已读后的驻留状态由邮箱中的当前问题表达，不靠反复弹窗。只有权威 Runtime 确认原 Run 终局，或 Core 确认原操作已被终局拒绝时，才停止该次自动尝试；未接纳、准备超时与观察未知不证明终局，原消息及可达恢复动作继续保留。
+- 消息队列项可展开后删除或立即发送，保留原消息和失败原因；发件列表逐条表达受阻与失败。邮箱入口的未读数字只沿[《入口提示的清楚含义》](conversation-input.md#入口提示的清楚含义)，待发数在 Inputs 呈现；数字的视觉（中性数字、不画红点）只见[同名呈现小节](../presentation/conversation-input.md#入口提示的清楚含义)。
+- **自动发送只在真实终局后停止重试。** readiness 尚未观察到（`epoch-missing`）时，Agent 进程仍活着、PTY 仍接收字节；此时停止重试，等于因自己的观测没有走通就判定用户消息失败。Agent 仍可工作时，条目留在队列里等待下一次可投递时机，同时如实说明当前没有投出及原因。只有权威 Runtime 确认原 Run 终局，或 Core 确认原操作已被终局拒绝时，才停止该次自动尝试；未接纳、准备超时与观察未知不证明终局，原消息及可达恢复动作继续保留。区分依据沿 [AGENTS《健康能力与未知状态》](../../../AGENTS.md#健康能力与未知状态)。
+- **排队、受阻与失败是三种独立状态。** 受阻不能借用“排队中”的说法，否则数量标识会肯定地说“N messages queued for delivery”，而事实是此刻投不出去；也不能借用“失败”的样子，因为 Agent 仍然健康。三种状态各说各的事实，彼此的说法不同时出现。受阻状态说明哪一步没有走通、当前状态与可达动作；能否继续等待或需要明确重试沿[准备等待合同](#跨重启的-prompt-投递凭据)，不无依据承诺自动恢复。
+- **同一条受阻只在首次发现时上报一次。** 用户刚提交的那一次必须说明，并让邮箱入口与收件通知能找到真正原因；之后的自动重试保持安静，已读后的驻留状态由邮箱中的当前问题表达，不靠反复弹窗。
 - **一个未投出的条目不得堵住它后面能投的条目。** 保序是「按作者顺序投递」，不是「卡在第一个上」。一个条目进了终局，队列不能因此整条停摆——那会让一次失败升级成整个 Session 再也发不出消息。
 Message Tools 的形态、工具入口与启动页编辑行为只由[快捷输入区](conversation-input.md#可收起的-agent-快捷输入区)定义；消息准备、排队与投递资格仍由本节及后文持有。
 
@@ -265,7 +274,7 @@ AgentMux 不接管 harness 的模型循环、工具执行、上下文压缩或�
 - 人机交互反馈分为：当前输入组件内的操作结果、Session 的待答请求/持续服务窗、跨工作区的注意力摘要。每一层消费同一个请求或结果身份；已关闭 transient 提示不因重放复活，尚未解决的持久问题仍可找到并定位原对象。
 - 同一请求在 Session 与注意力面板中必须显示相同的可回答性和终端确认原因；其他视图处理后，不再保留“Needs you”的旧文案。回答失败保留当前选择和请求，原因留在回答处，允许明确重试；旧 Session、Run 或 request 的迟到结果不得写到替换后的卡片。Session 的持续问题可从全局告示定位，阅读或收起告示不能抹掉未解决事实。
 
- 用户要求：Agent 需要用户确认一些选项时，聊天视图当中应出现对应选项，并用清楚的样式表示需要用户交互。当前待答请求在同一 Session 的对话阅读面内可见：显示真实问题、Core 已验证的原选项及“需要你回答”，选择仍只走上述 typed response；没有请求就不占位。Terminal 与聊天复用同一请求 owner，不制造第二份可回答请求或把当前请求写成历史消息。只读聊天可观察问题和待处理事实，但不能回答；历史记录中的旧同步 pending 请求只作阅读，不重新获得当前请求的响应资格。Provider 已明确的原生异步问题沿[原生异步问题与答复](conversation-mode.md#原生异步问题与答复)使用原问题引用和明确答复入口，不将其冒充当前同步 pending 请求。unsupported 或无法确认投递/结束时，保原问题事实及准确原终端出口，不从正文、时间、toolInput 或状态猜选项、答案或完成。提交中不重复投递，失败保原问题与选择，只经用户明确重试；切换 Activity/History/Terminal、当前请求/Run 替换与迟到结果保持原阅读正文、选区、展开、滚动与草稿，不把旧回答或本地错误绑定给新请求。
+Agent 需要用户确认选项时，聊天视图中出现对应选项，并以清楚的样式表示需要用户交互。当前待答请求在同一 Session 的对话阅读面内可见：显示真实问题、Core 已验证的原选项及“需要你回答”，选择仍只走上述 typed response；没有请求就不占位。Terminal 与聊天复用同一请求 owner，不制造第二份可回答请求或把当前请求写成历史消息。只读聊天可观察问题和待处理事实，但不能回答；历史记录中的旧同步 pending 请求只作阅读，不重新获得当前请求的响应资格。Provider 已明确的原生异步问题沿[原生异步问题与答复](conversation-mode.md#原生异步问题与答复)使用原问题引用和明确答复入口，不将其冒充当前同步 pending 请求。unsupported 或无法确认投递/结束时，保原问题事实及准确原终端出口，不从正文、时间、toolInput 或状态猜选项、答案或完成。提交中不重复投递，失败保原问题与选择，只经用户明确重试；切换 Activity/History/Terminal、当前请求/Run 替换与迟到结果保持原阅读正文、选区、展开、滚动与草稿，不把旧回答或本地错误绑定给新请求。
 
 - 重启／重装／暂缺快照时先恢复原 durable 空间，再按[冷启动恢复合同](session-recovery.md#冷启动按需恢复p0-末位)续接准确 Session。超时、旧 lease 与探测失败不删除投影；移除资格只沿[Session 恢复 owner](session-recovery.md#工作面持久恢复与启动边界)，unknown／unavailable 不冒终局。投递与 typed 回答不得串到替换后的 Run。
 - 此次收敛以现有状态、interaction、delivery queue、continuous-progress scheduler 与持久化接口为起点；消除重复 owner 和重复判断，不要求将所有状态改成事件溯源，不新增自演化引擎、通用 Job/Workflow/插件平台或平行兼容实现。已有 loop 复用统一观察与投递边界，任务完成真值仍归任务来源。
@@ -278,7 +287,7 @@ AgentMux 不接管 harness 的模型循环、工具执行、上下文压缩或�
 
 普通当前终端输入保持其原目标合同；显式寻址原生对话的意图必须携带准确原来源，并由 Provider 核对的原生输入通道、轮次及请求合同接纳。已保存历史可读不代表读取它的进程拥有原 actor 写资格，原生 client correlation 也不代表可重放。无原通道、错来源或失效目标只拒绝该次定向操作，保留原操作及健康终端输入。共同信箱、采用关系及接入方边界分别见[输入与邮箱](conversation-input.md#统一发送信箱与原生采用)和[Conversation 协议](../../specs/conversation-protocol.md#mailbox-consumption)，不由各客户端重定义。
 
-用户反馈工作中的 steer 被“composer readiness epoch already consumed”拒绝。Provider 负责具体 CLI 的可用输入方式及就绪证据，Core 负责同一 Run 的并发提交、去重和交付。不能把 turn 完成信号当成所有输入的唯一机会，使本可接受 steer 的健康 Agent 被内部纪元卡住；也不能绕过尚未完成的提交或把未知输入状态猜成安全。已入队未投出的消息必须保留；提示准确说清当前等待对象，不能承诺永远等不到的自动恢复，也不能建议结束健康 Session 来修复流程。
+工作中的 steer 不能因 readiness 纪元已被消费而被拒绝（例如 `composer readiness epoch already consumed`）。Provider 负责具体 CLI 的可用输入方式及就绪证据，Core 负责同一 Run 的并发提交、去重和交付。不能把 turn 完成信号当成所有输入的唯一机会，使本可接受 steer 的健康 Agent 被内部纪元卡住；也不能绕过尚未完成的提交或把未知输入状态猜成安全。已入队未投出的消息必须保留；提示准确说清当前等待对象，不能承诺永远等不到的自动恢复，也不能建议结束健康 Session 来修复流程。
 
 人工明确发送允许复用原 Session／Run 的当前终端输入，由原生 CLI 按其当前草稿、附件、界面和执行状态处理输入；不要求启动时未保证存在的外部 Native 接口，也不承诺只提交 Message Tool 这一条正文。直接发送和对应快捷键立即提交到这条原输入通路，不添加 interrupt、ESC、清草稿或刷新动作；原生 CLI 决定开始、steer 或排队，平台不能由字节 ACK 宣称已经按立即意图接纳。Provider 只在自己的边界编码受支持终端协议，Core 复用同一逻辑 submission、输入 phase、原 Run、作者与去重 owner，Client 不增加厂商按键或独立检测器。持久保存、终端字节确认、原生接纳和业务完成分别表达；字节已经确认时结束本次写入等待并明确说明，不能冒充原生消费，也不能因为未取得原生接纳继续显示发送中。用户操作、快捷键及单条授权范围只见[《Composer 静息形态与主操作》](conversation-input.md#composer-静息形态与主操作)。
 
@@ -288,9 +297,9 @@ AgentMux 不接管 harness 的模型循环、工具执行、上下文压缩或�
 
 运行中的人工消息沿原当前终端输入提交，不要求所有 Agent 先空闲。模型、effort、状态栏、提示语或历史阅读方式属于展示，不能作为发送资格的合同；压缩上下文等状态由原生 CLI 自己处理，平台只按准确已知协议事实说明暂时阻塞，不从画面猜测。写入后真实接纳仍未知时保留这一说明，不能冒充原生接纳或业务完成。
 
-### 输入环境判定与复用边界
+## 输入环境判定与复用边界
 
-项目级控制事实规则归 [AGENTS《通用机制与 Provider 适配》](../../../AGENTS.md#通用机制与-provider-适配)。Message Tool、公共 SDK／RPC／CLI、Mobile、人工直接发送、普通队列与自动消费使用同一 Core 输入业务 owner；相同原消息、目标与执行意图不得因入口不同得到另一套资格、权限或去重事实。
+项目级控制事实规则归 [AGENTS《通用机制与 Provider 适配》](../../../AGENTS.md#通用机制与-provider-适配)。本节持有消息输入的高阶输入环境语义与复用边界；同一 Core 输入 owner 的其他合同分别是：原请求与回执见[原请求与输入回执](#原请求与输入回执)，人工显式发送与 steer 见[Steer 与 Provider 输入能力](#steer-与-provider-输入能力)，投递凭据、未知投递、等待与重试见[跨重启的 Prompt 投递凭据](#跨重启的-prompt-投递凭据)，自动推进见[自动推进的触发、暂停与认领](#自动推进的触发暂停与认领)，Composer 队列见[《Composer 消息队列与紧凑状态》](conversation-input.md#composer-消息队列与紧凑状态)。Message Tool、公共 SDK／RPC／CLI、Mobile、人工直接发送、普通队列与自动消费使用同一 Core 输入业务 owner；相同原消息、目标与执行意图不得因入口不同得到另一套资格、权限或去重事实。
 
 输入的承载范围由本次实际 Provider／Runtime 通道和原持久记录合同决定。Core 与客户端不能把统一的正文长度、终端观察行数或可选上下文预算当成所有输入的容量上限；检查对象是实际冻结的完整 UTF-8 输入与所选计划，以及承载层编码后的完整帧。原记录必须在认领和外发前沿既有解析 owner 确认可持久读取；既有记录上限与协议明确拒绝仍如实保留，不另造重复校验或绕过实际承载限制。
 
@@ -304,6 +313,7 @@ AgentMux 不接管 harness 的模型循环、工具执行、上下文压缩或�
 - **原生输入适配沿真实版本合同维护。** 当前 CLI 版本的原生输入资格由 Provider 沿实际启动、认证、准确原生对象、操作及回执确认；已核旧版本的目录声明或版本白名单不能代替当前版本适配，也不能仅因版本号相近就承诺兼容。可选受管准备尚未资格化时保留原先可用的启动形式，不因此拒绝创建；一种机制的资格不能外推到另一种。磁盘当前可执行文件的版本不证明已有 Run 启动时加载的版本或原协议；新建、合法恢复和原健康 Run 分别沿自己的身份与能力核对，不为升级适配重启、热换或替换已有 writer。原生立即开始／追加与耐久排队分别依原协议表达，排队接纳不冒充立即执行、原生采用或完成；定向原生意图不可静默降为另一种机制，已有当前终端输入继续按原意图使用。可信原输入的采用关联与普通 Terminal 手动发言的公开来源资格分别成立，不为当前版本的受管输入适配新增平行 Store、队列或客户端厂商分支。
 - **新入口保原启动语义，队列与直接输入分别确认。** 为原 Run 增加机器输入入口须保留原生主体完整已解析的配置、权限、信任、认证、网络、工作目录及恢复语义；参数近似、换启动模式或另解析配置不能代签等价。同一进程不单独证明同一 backend，另一个协议客户端进程也不单独证明新增了模型 writer，均核实际原生主体及消费者。持久会话队列只按明确队列意图及其保存、消费、去重、取消和恢复合同使用，不能把入队 ACK、空闲后执行或跨恢复消费冒充原 Run 的直接接纳与忙时 steer。
 - **Core 负责统一准入与继续。** ctxmux 的 Run、PTY、输入 owner、字节与 ACK 事实和 Provider 的原生语义各守用途；Core 核对原 Session／Run、本次机制所需的来源身份、权限、意图、前驱条件与冻结投递，再决定该次操作是否能开始、继续、等待或具名拒绝。原生接纳、输入字节 ACK、消息持久保存和任务完成分别记录，不能互相代签。工具底层的可复用实现属于这条 Core／Provider 边界，不属于某个面板、按钮、宿主包装或客户端专用 parser。
+- **原输入冻结后不再依赖捕获方。** 带可信场景捕获的输入，Core 在首次冻结前经原 Host 的非 wire reader 有界读取准确 Main owner；读取期间不占用输入派发事务，回到原 owner 后核对同一输入 ID 再冻结。Main 只有内存确认时如实报告磁盘未确认，不冒称 durable，也不因此撤销真实的 live 捕获。冻结后，同一输入的重试、stop／rejoin 与 continuity 恢复复用原 source、proof、context 与 wire，不再依赖 Main 在线或重新观察网页。已确认整条未应用（known-not-applied）后，显式 Resume & send 复用原输入 ID 与场景；unknown 或 launch-carried 不因此获得重新派发资格。未知提交按原 key 查询，重启后不按当前页面或新版 formatter 重组、改投或自动补发。捕获引用、证明与 wire 合同见 [amux 协议《场景捕获来源与原输入》](../../specs/amux-protocol.md#场景捕获来源与原输入)。
 - **恢复后的首条请求沿同一输入合同交接。** 恢复启动回执只确认原会话的恢复操作，不证明新的原生输入通道已可接纳请求。Provider 按原生协议确认准确主体及提交机制，Core 保留原请求、授权、输入 key 与投递进度；多行正文的传输定界和正式提交各按该机制兑现。接纳未确认时如实保留观察缺口，不把字节回执或连接器表情当作 Agent 已接手，不靠固定延时、展示检测或额外回车补造成功。启动期观察失败不剥夺健康 Run 已有的人工终端能力，未知原输入不自动重放。
 - **展示观察只服务呈现与诊断。** 终端画面、标题、提示和输入回显可用于显示及解释现场，不能证明当前输入 owner、原生权限、回合状态、原消息接纳或允许提交。窗口大小、主题、语言、自定义状态栏和阅读位置变化，不改变原协议已确认的输入能力。终端控制序列与有序字节可确认其明确协议所保证的传输事实，不能由同步重绘、光标位置或新输出猜测 Prompt 接纳。
 - **未知保全能力，真实边界仍成立。** 目标、授权、当前协议机制或原请求条件无法确认时，说明准确缺失事实和本次操作结果；保留原消息、草稿、pending interaction、原身份、已确认回执、可用终端与可达恢复动作。原生不支持某一语义输入通道不等于 Agent 已坏；不能自动接另一原生 writer、重放 unknown 输入、代答权限／问题、清空草稿或添加中断、额外 Enter、刷新动作来绕过未确认环境。普通手动 Terminal 输入与该次语义投递的资格分别表达。
@@ -329,6 +339,10 @@ AgentMux 不接管 harness 的模型循环、工具执行、上下文压缩或�
 
 Readiness 是 Provider 协议提供并绑定原对象和用途的输入环境事实，不是输入框显示识别或健康 Run 的永久发送许可证。一次未取得、超时、已消费的旧事实不得封闭后续人工发送或 steer 路径；事务冲突、未完成投递、错 Run 和待回答交互仍由各自权威 owner 处理。缺少所需协议事实时说明未知与可达动作，只在同一原边界取得真实事实后清除不确定性。
 
+## 自动推进的触发、暂停与认领
+
+自动推进（自动续跑与普通持续进度）沿上文输入环境边界与同一 Core 输入 owner，不借用人工发送授权。
+
 自动续跑以当前 Run 的实际 turn 完成事实作为触发机会，每个完成事实最多推进一次；working、待回答交互、未知完成状态仍不自动发送。其去重必须由持久化调度 owner 持有，不靠屏幕 readiness 恰好成功或被消费来间接阻止重复。
 
 自动推进的领域调度由独立 Host 持有，客户端连接与桌面退出不改变原已保存的执行意图；实际投递仍经过同一 Core 的原 Session／Run、授权、完成事实、输入认领和暂停边界。客户端开始编辑时，以 `agent.automation.pause` 取消准确 Session／Run／owner instance 上的自动推进，并以原 operation 查询确认；该操作不发送输入、不清空或上传草稿，也不授予后续输入资格。缺少桌面观察不能推断草稿为空；取消结果未知时保原意图、操作和健康人工输入，不自动重放。原普通进度通过 `agent.progress` 消费同一 manager；动作只核原目标和调度领域快照，不以标签、解释文案或观察展示字段决定资格，也不增加第二份持久版本事实。普通进度的新建、配置更新、恢复和立即检查需要原认证的人或设备；受管 Agent 可在原准确目标授权内读取、暂停或停止，不能借普通进度安排绕过原有署名消息输入边界。
@@ -343,14 +357,16 @@ Readiness 是 Provider 协议提供并绑定原对象和用途的输入环境事
 
 ## Executor 标识的归属
 
-- 用户明确：固定 Icon 直接在 Executor／Execution 配置里，这不算显示配置，而是为了标识 Executor。颜色叠加与左上 Icon 和该 Executor 一起编辑、保存；外观设置不再另放一份入口或配置。
-- 所有代表具体 Agent 的图标都显示其 Executor 标识，不再只显示 Provider 标识；同 Provider 不同 Executor 可区分。Provider 图形作为未自定义时的默认底图。纯 Provider 能力目录仍表示 Provider，不凭空关联 Executor。
-- 菜单、Tab／Region、Topic、列表、消息工具与设置预览消费同一 Executor 标识；状态角标与身份保持独立。此约束取代此前放在显示设置下的方案，视觉轮廓仍遵循密度 SSOT。
+- 固定 Icon 属于 Executor／Execution 配置，用来标识 Executor，不是显示配置。颜色叠加与左上 Icon 和该 Executor 一起编辑、保存；外观设置不另放一份入口或配置。
+- 所有代表具体 Agent 的图标都显示其 Executor 标识，而不只是 Provider 标识；同 Provider 不同 Executor 可区分。Provider 图形作为未自定义时的默认底图。纯 Provider 能力目录仍表示 Provider，不凭空关联 Executor。
+- 菜单、Tab／Region、Topic、列表、消息工具与设置预览消费同一 Executor 标识；状态角标与身份保持独立，视觉轮廓仍遵循密度 SSOT。
 
 ## 插件扩展边界
 
 - Provider、Skill 和命令通过 `packages/core` 暴露的类型化插件合同发现和注册。宿主先读取清单，再按用户选择激活；编辑器只消费统一目录和能力，不为某个厂商写分支。
 - 插件拥有自己的声明和生命周期投影，但 Run、PTY、ordered bytes、Replay、Gap 与 Session 权威事实仍归 Core/ctxmux；插件不能复制一套进程或终端状态。流程探测失败作为服务窗提示，不阻断健康 Agent。
+- **managed Hook 安装由同一注册对象完整贡献。** 组件化改进以减少后续迭代绕路为目标。Provider 的 managed Hook 安装能力由同一注册对象完整贡献，真实检查、启动与恢复消费同一贡献及其原工作区、环境和 endpoint；新增自定义 Provider 不应要求修改客户端或第二份内建能力名单。贡献替换后下一次消费使用新对象，非法替换保留原对象；上下文不足、计划失败与真实安装结果准确区分，流程失败不阻断健康 Run，既有 installer 保持唯一写盘责任。此要求不宣称任意活跃语义 Provider 热卸载已经成立。Desktop 的组合入口仍归 client，草稿、附件、Session、Run 与截图子进程各保持原 owner；可复用的展示必须在 Session 与新建工作面均有实际消费者，不能以拆文件或新增插件框架代替能力闭合。
+- **插件注册先整体校验，再进入目录。** 插件 Provider 贡献的合法性及 duplicate 检查必须在本次任何贡献进入目录前全部成立。注册被拒绝时，原 Provider 对象目录、已注册插件与 Skill、command、PMO metadata 保持不变；修正后原 pluginId 可以直接重试。Provider 注册校验与提交保持同一 Registry owner，插件入口不复制校验规则，不先写入再回滚，不新增 Registry 或 transaction 平台，也不操作或阻断健康 Run。
 
 ## 状态投影、Browser 页面与 Scratch Topic 工作面
 
@@ -360,8 +376,8 @@ Readiness 是 Provider 协议提供并绑定原对象和用途的输入环境事
 
 ## Executor 身份组件与信息面板
 
-- 所有显示 Executor/Provider 身份的地方，包括顶部 Tab、Project/Topic 列表、Session、Board 和 Browser 操作条，都必须使用同一个可复用 Executor identity 组件。Provider 图标、较小的 Executor 自定义图标、珐琅式外轮廓和状态标记只能由这一组件组合，不能在调用方各自画点、描边或叠加。
-- Executor 面板在 hover 或键盘 focus 时以统一的 tooltip 信息面板出现，展示可读名称、Provider、当前状态和可用的上下文；不要求先点击才能看见。面板的字号、内边距、颜色和动作区与其他信息面板一致，不能因为来源不同出现另一套密度。
+- 所有显示 Executor／Provider 身份的地方，包括顶部 Tab、Project／Topic 列表、Session、Board 和 Browser 操作条，都使用同一个可复用 Executor identity 组件。Provider 图标、Executor 自定义图标、外轮廓和状态标记只由这一组件组合，调用方不各自画点、描边或叠加；组合方式与尺寸只见[状态标记与 Executor 叠加密度](../presentation/agent-capabilities-and-messaging.md#状态标记与-executor-叠加密度)。
+- Executor 面板在 hover 或键盘 focus 时以统一的 tooltip 信息面板出现，展示可读名称、Provider、当前状态和可用的上下文；不要求先点击才能看见。面板沿统一信息面板的密度与动作区（见[Executor identity 的统一密度](../presentation/agent-capabilities-and-messaging.md#executor-identity-的统一密度)），不因来源不同另立一套。
 - 自定义头像属于 Executor 配置，不属于 Appearance。面板只提供一个小型设置入口；点击后进入该 Executor 对应的模板设置，不能跳到 Appearance，也不能在信息面板内复制一套配置表单。身份 ID、Session 绑定和工作区事实保持稳定。
 - 头像编辑归属 Executor 模板；移动设置入口不能改变已有身份外观、丢弃已存头像，或因头像问题阻断应用启动。仍存在的 Appearance 头像按原 Executor ID 继续显示，新的 Executor 编辑写入其稳定配置；未匹配的旧记录保留原样，不猜测新身份。
 
@@ -369,9 +385,8 @@ Readiness 是 Provider 协议提供并绑定原对象和用途的输入环境事
 
 - `working` 必须有一个明确的活动字形，表达 Agent 正在产出；普通 `running`／idle 只表示进程仍可用，不在头像右上角放常驻标记。
 - 等待用户、阻塞、断联和真实错误属于需要用户知道的特殊事实，保留各自的提醒形状；错误行优先显示 Runtime 提供的具体原因，无法取得详情时才使用短的事实说明。
-- Executor 自定义图标与 Provider 图标先合成一个身份图，再应用共享的珐琅外轮廓。Executor 图标应小而紧，叠在 Provider 图标内部，不得成为围在外面的第二圈。
-- 状态语义只通过右上角的小型标记或活动字形表达；普通身份不使用外描边制造状态。
-- 活动菜单必须保留可读的原因、项目和 Provider 信息；长内容在有界菜单内换行或滚动，不能被固定宽度裁成看不懂的尾巴。
+- 状态与身份分开表达：状态只经状态标记或活动字形表达，不改写身份图，普通身份不用外描边制造状态。身份图的合成、叠加位置、外轮廓与活动菜单的宽度、换行只见[状态标记与 Executor 叠加密度](../presentation/agent-capabilities-and-messaging.md#状态标记与-executor-叠加密度)。
+- 活动菜单保留可读的原因、项目和 Provider 信息，长内容不被裁成看不懂的尾巴。
 
 ## Agents 全局层级与拓扑图
 
@@ -383,9 +398,11 @@ Focus 与 Space、Goals 位于同一组全局工作面。Focus 打开时 Project
 
 ## P0 的共同交付边界
 
+发送时调整终端尺寸属于观察被替换。payload 已接受且权威 Run 仍在运行时，同一提交必须继续完成并明确展示验证降级，不能留下占用后只叫用户重发；确认必须使用输入边界之后的新输出。Run 已退出或连线状态无法确认时，不得谎称交付成功。
+
 零输入字节只能证明当前失败尝试没有写入，不能证明更早一轮已结束。原 operationId 的恢复继续走幂等路径；换成另一条消息且回合仍未知时，必须有这条消息自己的明确继续选择，不能借用上一条消息的批准。
 
-用户要求完成当前六项 P0 的设计与实现，包括此前只规划的可读 A2A 协议。各项约束仍归其所属章节；“代码已有”不能代表交付，必须证明真实入口、失败分支和重启后的恢复。发送与恢复的检查失败不能拿走健康 Agent 的工作能力；无法确认的事实保持未知，并在原工作面持续说明恢复动作。Browser 批准只授权被确认的目标和操作；Demand 详情保留原需求身份与编辑能力。
+各 P0 项的约束归其所属章节；代码已有不代表交付，必须证明真实入口、失败分支和重启后的恢复。发送与恢复的检查失败不能拿走健康 Agent 的工作能力；无法确认的事实保持未知，并在原工作面持续说明恢复动作。Browser 批准只授权被确认的目标和操作；Demand 详情保留原需求身份与编辑能力。
 
 ## 跨重启的 Prompt 投递凭据
 
@@ -405,7 +422,7 @@ Focus 与 Space、Goals 位于同一组全局工作面。Focus 打开时 Project
 - 原输入的跨 Host 当前授权仍由原授权 owner 核对，不把一次读取或持久作者字段当 grant。必要远端授权读取不得占住 Host 全局消息日志事务；本次观察取消后，迟到结果不得认领或施效，其他 Session 的日志与正常输入继续可用。观察取消不冒充已撤回原 effect。
 - Core 在同 Session 独占 scope 中核对原输入记录、意图与当前资格，再认领一次派发。显式前驱条件只允许沿原条件准入或核对原操作；条件已被后来输入改变时拒绝本次新派发，保原结果与后续事实，不能无限重试或自动更换条件。timeout、丢 ACK、unknown 和零游标不证明原输入尚未 admission。原 Native 输入 unknown 时，同一 `inputKey` 只核对原回执，不重新准备或重播；合法不同 key 的独立 manual 输入仍可在准确原 actor、当前授权与本次协议资格下接纳，不能因旧观察丢回执永久禁用健康能力。旧 claim、TTY partial 与缺来源记录完整保留，不覆盖或冒充 Native 未应用；不同协议输入面是否独立须有 Provider 的机器合同与真实证据，未确认时保留未知及原可用通路。
 - 一个仍能接受输入的 Agent 必须有明确可达的发送路径。回合结束回执缺失不能把 readiness 变成永久许可闸；无法确认回合边界时说明风险，人工显式发送按「Cmd+Enter 直接 steer」执行；自动消费仍不能猜测空输入框等于回合已结束。已被接受但未确认的 Prompt 使用原 operation identity 续做，不重新发送正文；排队消息不因无关 Runtime 事件反复提交。
-- Message Tool「先前能发，长运行后又发不进」的复发必须单独核对：消息进入 mailbox 只说明意图已保留，点「直接发送」也不等于 Agent 已收到。手动 Terminal 打字正常时，不能把消息投递流程失败说成整个 Run 或共享 owner 已停止；必须就原消息说明卡在哪一步、哪些字节已确认、哪些送达仍未知，保留原消息、草稿与工作面。已绑定当前 Run 的显式发送不能因为展示工作面的保存未确认而被挡，保存失败仍持续说明；发送受据与界面保存分别确认，不因此放开后台队尾、未绑定恢复或退出／更新的保存资格。运行时长或相邻 OUTPUT_GAP 不证明根因；恢复原投递仍遵守原身份与受据边界，不能用新 operation 重发未知正文，也不能把这条消息的未知变成健康 Session 永久无法显式发送。
+- **长时间运行后显式发送失败时按原消息说明卡点。** Message Tool 曾经能发、运行一段时间后发不进时，须单独核对：消息进入 mailbox 只说明意图已保留，点「直接发送」也不等于 Agent 已收到。手动 Terminal 打字正常时，不能把消息投递流程失败说成整个 Run 或共享 owner 已停止；必须就原消息说明卡在哪一步、哪些字节已确认、哪些送达仍未知，保留原消息、草稿与工作面。已绑定当前 Run 的显式发送不能因为展示工作面的保存未确认而被挡，保存失败仍持续说明；发送受据与界面保存分别确认，不因此放开后台队尾、未绑定恢复或退出／更新的保存资格。运行时长或相邻 OUTPUT_GAP 不证明根因；恢复原投递仍遵守原身份与受据边界，不能用新 operation 重发未知正文，也不能把这条消息的未知变成健康 Session 永久无法显式发送。
 
 - **每次失败仍可手动重试并可追查。** Desktop 与 Mobile 中未确认发送的原消息必须持续保留“发送”动作，不能因失败过一次、观测未知或旧回执而永久置灰、收起或静默跳过。只有该条实际发送正在进行时短暂显示忙碌；完成或失败后恢复动作。用户再次点击沿原消息身份、原目标和已确认输入进度核对并续做；上述整条输入确证未应用后，沿同一逻辑输入继续唯一后继物理尝试并保留前序诊断；不能把旧物理 operation 的稳定拒绝解释为原消息永久不可重试。自动继续仍限于原意图有效且当前资格成立的等待或确证未应用，不重新写入已确认字节；错误目标或授权仍明确拒绝这一尝试，健康 Agent 与原消息保留。
 - **输入身份、等待代次与控制动作分开。** 不可变 `inputKey` 保留接收时的原 Session／Run 与原 SDK operationId 或 A2A messageId，A2A 原 Control operationId 仍只标识 ingress；逻辑 key 与首次或后继物理尝试的实际派发 Run 的关系只由[Composer 队列合同](conversation-input.md#composer-消息队列与紧凑状态)定义，不以当前 Run 改写旧 key。首次保存 ACK 丢失时，按原输入 key 或原 Control key 读取 owner 保存的原目标与结果，不要求尚未返回的等待代次，也不重新解析 Tab／Region 或生成新消息。`waitRef` 在原 key 上绑定准确等待代次；停止动作有自己的幂等身份和不可变回执，迟到停止不能作用于下一代，同动作重读仍返回原结果。key、设备信息与 envelope 不授予权限。
@@ -414,7 +431,12 @@ Focus 与 Space、Goals 位于同一组全局工作面。Focus 打开时 Project
 - **当前占用不从历史记录推导。** 已确认并归档的输入历史不占用当前输入面；草稿、实际在途写入及相关活跃意图分别按原 owner 判断。归档不证明 unknown 已终结，接纳不证明任务完成。客户端保留旧未知消息的原正文、身份、条件与回执，同时允许用户建立明确的新独立意图到 Core 核验；不能把一次旧观察失败变成整个 Session 的客户端锁，也不能借新意图重放同一未知消息。
 - **观察取消释放其原等待，不授予后续操作。** 准确停止先于派发 gate 胜出后，旧只读授权检查即使迟迟不返回，也不得继续占住后续输入准备；迟到结果只结束旧观察，不恢复旧派发。新输入仍重新取得当前作者、准确目标与原派发资格。派发已授权后的真实受据仍沿原操作核对，取消观察不承诺撤回。
 - **原输入恢复按准确对象查证。** 原 owner、输入 key/ref 与权限能够精确核实时，inspect、停止等待及持久 Inbox 消费不以无关 Session 全目录投影、活跃展示或 Native 输送连接正常为前提。真实缺记录、未知 owner、错误作者与过期代次仍拒绝；停止旧等待不发送、不重建 Session。持久 Inbox 继续由原 journal 在短事务中核对当前作者、readerRun、generation 与消费游标。
-- **接收方继续处理不取得原作者身份。** 对已保存的外部 message，准确接收 Agent 可通过公共原输入入口继续仍获授权的原请求；用户无需记住来源、重发消息或切到另一界面代办。Core 必须核对本次继续入口的准确调用者资格（接收 Agent 入口为其当前 capability）、原作者 owner 的当前权限、准确 `waitRef`、原逻辑目标与冻结内容，并核对准确原代次的控制事实。首次派发须确认原代次仍 `enabled`、既无 admission、也未授权派发；已有 claim 的原请求只有满足上述整条输入确证未应用合同，才可建立唯一后继物理尝试。检查不可读不等于尚未派发或未应用。原 Run 改变时，原接收 Agent 显式继续，或[原收件 owner 自动继续](conversation-mode.md#共同来源与双向交付)的外部 `manual-actor` 请求，可沿[首次实际投递目标合同](conversation-input.md#composer-消息队列与紧凑状态)核验准确语义恢复；两者都只继续当前仍获授权的原等待，不能改写旧 key 或用当前 Run 替代原环境证据。原作者 owner 仍验证原 envelope／Run／意图与当前权限，实际恢复目标由 Core 单独裁决。尚未派发的原等待在准确语义恢复后的首次派发仍保留同一 `waitRef`；整条输入确证未应用后的后继尝试才按上述合同推进代次并保留准确前序。继续不重新开启已停止输入，也不以旧 `waitRef` 采纳并发出现的新代次。停止、未经确认的目标变更，以及尚未确证整条未应用的已有派发、未知／部分效果仍沿原回执核对，不能因先前 inspect 合格而越过随后变化；真实 claim 继续由原 journal 与 Session owner 裁决。原作者、operation、message、quote 与 wire 均保留，接收方 capability 只证明调用者，不改成作者或扩大记录读取权限。此能力复用 Core 原等待链及 SDK／JSON-RPC／CLI，不由连接器私下代发、不新增授权库或 Provider 分支；本机 prompt 与其他作者类型仍守各自原权限合同。
+- **接收方继续处理不取得原作者身份。** 对已保存的外部 message，准确接收 Agent 可通过公共原输入入口继续仍获授权的原请求；用户无需记住来源、重发消息或切到另一界面代办。此能力复用 Core 原等待链及 SDK／JSON-RPC／CLI，不由连接器私下代发、不新增授权库或 Provider 分支；本机 prompt 与其他作者类型仍守各自原权限合同。
+  - **每次继续前核对的事实。** Core 核对本次继续入口的准确调用者资格（接收 Agent 入口为其当前 capability）、原作者 owner 的当前权限、准确 `waitRef`、原逻辑目标与冻结内容，以及准确原代次的控制事实。检查不可读不等于尚未派发或未应用。
+  - **首次派发与后继尝试。** 首次派发须确认原代次仍 `enabled`、既无 admission、也未授权派发；已有 claim 的原请求只有满足上文“整条输入确证未应用”合同，才可建立唯一后继物理尝试，并按该合同推进代次、保留准确前序。尚未派发的原等待在准确语义恢复后的首次派发仍保留同一 `waitRef`。
+  - **原 Run 改变时。** 原接收 Agent 显式继续，或[原收件 owner 自动继续](conversation-channels.md#共同来源与双向交付)的外部 `manual-actor` 请求，可沿[首次实际投递目标合同](conversation-input.md#composer-消息队列与紧凑状态)核验准确语义恢复；两者都只继续当前仍获授权的原等待，不改写旧 key，也不用当前 Run 替代原环境证据。原作者 owner 仍验证原 envelope／Run／意图与当前权限，实际恢复目标由 Core 单独裁决。
+  - **继续不越过的边界。** 继续不重新开启已停止输入，也不以旧 `waitRef` 采纳并发出现的新代次。停止、未经确认的目标变更，以及尚未确证整条未应用的已有派发、未知／部分效果，仍沿原回执核对，不能因先前 inspect 合格而越过随后的变化；真实 claim 继续由原 journal 与 Session owner 裁决。
+  - **身份与读取权限不变。** 原作者、operation、message、quote 与 wire 均保留；接收方 capability 只证明调用者，不改成作者，也不扩大记录读取权限。
 - **连接与句柄不冒充持久主体。** 同一原生主体的当前连接、FD 别名及本次观察代次，只用于核对这次准确原对象；它们改变不能单独推导原 actor、thread 或来源已换。新的独立输入按当前原对象重新资格化，旧 unknown 不跨连接重放；真实 peer、process birth、来源或 thread 改变仍拒绝本次错误目标。
 - **准备等待保留原意图，并由 Core 统一继续。** 原消息先保存；暂不能接纳或所需协议事实未知时，说明正在等待哪项事实，保留原消息与停止等待动作。只读准备的一次超时不把消息判成终局失败。Core 根据准确原对象的相关事实变化或用户明确重试重新核验；客户端不另建投递循环，不将诊断中的零输入、错误码或“可取消”字样当成重试或取消回执。Provider 已确认的暂时状态可以沿原操作有界退避观察；没有可推进事实的明确不支持保留具名说明与可达动作，不反复探测或承诺自行恢复。输入环境取得后仍须在 claim 与实际派发前核验原目标、意图条件、来源、pending interaction 与当前作者授权。旧 unknown／部分输入先取回原回执，不能重新准备或派发；保存接纳与等待不冒充原生接纳或 delivered。
 - **停止等待必须有原 owner 的真实回执。** 原消息 journal 对准确 `waitRef` 的停止与派发授权用短事务裁决，派发 gate 先于新输入 claim：停止先胜只确认该代不会派发，保原消息供有授权的新明确等待；gate 先胜则只能停止观察，即使物理输入尚未写出也不承诺撤回或零派发。跨 journal／Session 保存或回执未知时保原事实，不从缺记录补未应用。草稿取消、关闭读连接或本地停止计时不代替 Core 停止回执；已派发、回执丢失或旧结果未知不改成“未发送”或“已撤回”。取消保正文、原回执与健康 Terminal，不中断、stop 或恢复 Agent。重启不从旧 envelope、标签或新 Run 的 capability 恢复旧自动发送授权；重新等待仍核原 author 与目标，不重播已授权派发或 unknown 输入。
@@ -446,7 +468,7 @@ Hook 对原生主会话的解释同时使用当前已校验的 Session／Run／P
 
 ## 按 amux id 搜索 Agent
 
-- 用户原话：「加个功能快速合入 main: 支持按 amux id 搜索 agent」。快速切换的既有搜索应能找到当前入口已提供的 Agent，按 Core 权威 Agent Session ID 检索；Run ID、Provider 原生会话 ID 和普通 Terminal 的身份不是 amux Agent ID。Focus 的对象链接、其他身份和历史正文范围沿[同一搜索合同](focus-context.md#搜索上下文对象身份与历史正文)，不把其他对象 ID 改称 Agent SID。
+- 快速切换的既有搜索按 Core 权威 Agent Session ID（amux id）找到当前入口已提供的 Agent；Run ID、Provider 原生会话 ID 和普通 Terminal 的身份不是 amux Agent ID。Focus 的对象链接、其他身份和历史正文范围沿[同一搜索合同](focus-context.md#搜索上下文对象身份与历史正文)，不把其他对象 ID 改称 Agent SID。
 - ID 输入去除首尾空白后按原大小写连续匹配，支持完整 ID、前缀和中间连续片段；不把散落字符的模糊匹配用于 ID。前缀或片段命中多个 Agent 时展示全部匹配，由用户明确选择，不静默猜一个；这是一组现有行的搜索结果，不改变 CLI 唯一前缀寻址的合同。
 - 原名称、上下文、Provider 等已有文本搜索规则与排序保持；快速切换的 ID-only 命中使用中性匹配权重，原注意力、文本质量与观察时间排序不另设 ID 优先级。快速切换只添加已有可见 Agent 行的 ID 匹配，不扩展候选集合；Focus 的筛选和对象结果沿同一搜索合同。
 - 选中结果沿原 Focus 或快速切换动作进入同一 Agent 工作面；搜索本身不创建或恢复 Session，不改变原焦点、布局或健康 Run。匹配依现有已加载事实完成，不另建 Core 索引、轮询或第二份身份。
