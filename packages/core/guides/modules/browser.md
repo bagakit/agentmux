@@ -171,7 +171,8 @@ Read only the matching local help:
 - amux browser profile extension --help: per-Profile approved extension packages.
   `extension ls --profile ID` reads configured identities and current native load facts without
   creating a native Profile. `prepare --profile ID --expected-revision TOKEN --operation-id ID
-  (--source PATH | --package-url URL | --update-manifest URL --addon-id ID) [--extension ID]`
+  (--source PATH | --package-url URL | --update-manifest URL --addon-id ID |
+  --recorded-source --extension ID) [--extension ID]`
   stages a local directory/ZIP/CRX, an explicit HTTPS package, or the exact add-on from a standard
   Chromium XML / WebExtensions JSON update manifest. Online acquisition uses no website cookies.
   The host supports numeric versions with one to four components; manifest identity/version and
@@ -179,6 +180,13 @@ Read only the matching local help:
   ID --expected-revision TOKEN --review ID` asks the original host human-confirmation owner;
   neither an Agent request nor package text grants approval. Source identity changes are separate
   installs, never silent replacement of an old extension. A changed permission scope stays explicit.
+  `check --profile ID --extension ID` reads only the exact retained manifest: update-available
+  and current describe its observed versions; unknown reports an unreadable or changed source.
+  Manual means choose an explicit source because this installation has no retained manifest.
+  Checking downloads no package, starts no native Profile, grants no consent and changes no bytes.
+  `prepare --recorded-source --extension ID` uses that installation's private original manifest,
+  reads it again and freezes the actual new package for review; the earlier check is no approval.
+  Display-only declared update URLs are never used in place of a retained acquisition address.
   After a missing apply reply, `extension ls --profile ID --operation-id REVIEW` reads that original
   durable change receipt and pending dispatch intent, including after a host restart. A null receipt
   does not prove that no native code ran. Pending original operations cannot be dispatched again. Unknown changes
