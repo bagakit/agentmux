@@ -1,4 +1,5 @@
 import { parseSpaceMemberRoute } from '@agentmux/core/space-member-codec'
+import { spaceMountMemberCallHasReceipt } from '../shared/space-mount'
 import { parseHostRouteAgentTarget } from '@agentmux/core/host-route'
 import { parseAgentOpenDescribe } from '@agentmux/core/agent-open-contract'
 import { parseNameControlParams } from '@agentmux/core/name-control'
@@ -145,18 +146,29 @@ export function registerSpaceMountIpc(ports: {
     return { initial: surface.initial, dispose: async () => { if (members.get(key) === surface) members.delete(key); await surface.dispose() } }
   }))
   const memberFields: { [M in keyof SpaceMountMemberMethods]: string[] } = {
+    retainImage: ['bytes', 'mimeType'], 'file.upload.inspect': ['hostId', 'agentSessionId', 'expectedRun', 'operationId', 'name', 'mimeType', 'byteLength', 'revision'],
+    inputEpoch: [],
+    'agent.progress.list': ['target', 'operationId'],
+    'agent.progress.create': ['target', 'intervalMs', 'prompt', 'taskSource', 'operationId', 'inputEpoch'],
+    'agent.progress.action': ['target', 'loopId', 'action', 'expectedLoop', 'operationId'],
+    'agent.progress.update': ['target', 'loopId', 'expectedLoop', 'intervalMs', 'prompt', 'operationId'],
     history: ['input'], historyResource: ['input'], inputMailbox: ['input'], skills: [],
     read: [], attach: ['afterByte'], refreshAttachment: ['attachmentId','afterByte'], replay: ['attachmentId','afterByte'], detach: ['attachmentId'],
     conversationRead: ['input'], conversationCheckpoint: ['input'], conversationChanges: ['input'], conversationRelease: ['view'], conversationWatch: ['view'], conversationUnwatch: ['readerId'],
     resize: ['attachmentId','cols','rows'], write: ['data','source','observation'], paste: ['text','terminalData','observation'],
     inspectInteraction: ['operationId']
   }
-  ports.handle('spaceMounts:memberCall', (event, token: string, memberToken: string, method: unknown, value: unknown) => sessionInputOperationResult(() => reads.read(event.sender, token, async signal => {
+  ports.handle('spaceMounts:memberCall', (event, token: string, memberToken: string, method: unknown, value: unknown) => sessionInputOperationResult(async () => {
+    let obtained: SpaceMountMemberMethods[keyof SpaceMountMemberMethods]['result'] | undefined
+    try { return await reads.read(event.sender, token, async signal => {
     if (typeof method !== 'string' || !Object.hasOwn(memberFields, method)) throw new Error('Unknown fixed original member operation.')
     const surface = members.get(`${event.sender.id}:${memberToken}`)
     if (!surface) throw new Error('This original member view is closed. Its Session and input are retained.')
     const original = method as keyof SpaceMountMemberMethods
-    return await surface.call(original, fields(value, memberFields[original]) as SpaceMountMemberMethods[typeof original]['input'], signal)
-  })))
+    const result = await surface.call(original, fields(value, memberFields[original]) as SpaceMountMemberMethods[typeof original]['input'], signal)
+    if (spaceMountMemberCallHasReceipt(original)) obtained = result
+    return result
+    }) } catch (cause) { if (obtained !== undefined) return obtained; throw cause }
+  }))
   return { dispose: () => reads.dispose() }
 }

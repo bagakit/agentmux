@@ -11,7 +11,7 @@ import type { AgentMuxSpatialStateStore } from './spatial-state.js'
 import type { HostRouteGateway } from './host-route-gateway.js'
 import type { AgentMuxRpcCallContext, AgentMuxRpcCoreClient } from './public-rpc-service.js'
 import type { SpaceMemberParams, SpaceMemberCallMethod, SpaceMemberStreamMethod } from './space-member.js'
-import { SPACE_MEMBER_INPUT_READING_INVOCATIONS, SPACE_MEMBER_NATIVE_CALLS } from './space-member.js'
+import { SPACE_MEMBER_INPUT_READING_INVOCATIONS, SPACE_MEMBER_NATIVE_CALLS, isSpaceMemberNativeWrite } from './space-member.js'
 import type { AgentMuxHostedStreamEvent } from './hosted-client-contract.js'
 
 type RuntimePort = {
@@ -59,14 +59,22 @@ export async function spaceMemberRuntime(ports: {
     const p = rpcRecord(params)
     return typeof p.consumerId === 'string' ? { ...p, consumerId: key + ':' + p.consumerId } : p
   }
+  const executionContext = (method: SpaceMemberCallMethod, params: unknown, current: AgentMuxRpcCallContext): AgentMuxRpcCallContext => {
+    // The incoming wire fence selected the Source Core. The next hop has its
+    // own exact owner: Hosted params already carry it; Native calls acquire it
+    // from that destination's identity before issuing the original operation.
+    const { runtimeFence: _sourceFence, ...author } = current
+    const fence = (SPACE_MEMBER_NATIVE_CALLS as readonly string[]).includes(method) ? current.runtimeFence : rpcRecord(params).fence
+    return { ...author, ...(fence ? { runtimeFence: fence as import('./hosted-client-contract.js').AgentMuxRuntimeFence } : {}) }
+  }
   let port: RuntimePort
   if (initial.adoptedRoute) {
     if (!ports.gateway || !initial.createOperationId) throw new AgentMuxError('This member has no original verified current-viewer route.', 'HOST_ROUTE_AUTHORIZATION_REQUIRED')
     const authorization = await ports.gateway.authorizeMemberControl({ ...input, createOperationId: initial.createOperationId }, context)
-    const rpc = executionRouteRpc(ports.gateway, initial.adoptedRoute, authorization, undefined, context)
+    const { runtimeFence: _sourceFence, ...author } = context
+    const rpc = executionRouteRpc(ports.gateway, initial.adoptedRoute, authorization, undefined, author)
     port = {
-      call: (method, params, callContext) => rpc.call(method, params as import('./public-rpc.js').AgentMuxRpcParams<SpaceMemberCallMethod>, {
-        ...(original.signal ? { signal: original.signal } : {}), ...(callContext.runtimeFence ? { runtimeFence: callContext.runtimeFence } : {}) }),
+      call: (method, params, callContext) => rpc.call(method, params as import('./public-rpc.js').AgentMuxRpcParams<SpaceMemberCallMethod>, executionContext(method, params, callContext)),
       subscribe: async (method, params, emit) => {
         let initial: unknown
         const reader = await rpc.subscribe(method, params as import('./hosted-client-contract.js').AgentMuxHostedRuntimeParameterMap[SpaceMemberStreamMethod], {
@@ -85,7 +93,7 @@ export async function spaceMemberRuntime(ports: {
     const client = matches[0]!.client
     if (!client.forwardRpc || !client.subscribeRpc) throw new AgentMuxError('The original carrier has no public member interaction transport.', 'RUNTIME_UNAVAILABLE')
     port = {
-      call: (method, params, callContext) => client.forwardRpc!(method, scoped(params) as import('./public-rpc.js').AgentMuxRpcParams<SpaceMemberCallMethod>, callContext),
+      call: (method, params, callContext) => client.forwardRpc!(method, scoped(params) as import('./public-rpc.js').AgentMuxRpcParams<SpaceMemberCallMethod>, executionContext(method, params, callContext)),
       subscribe: async (method, params, emit) => {
         let initial: unknown
         const reader = await client.subscribeRpc!(method, scoped(params) as import('./hosted-client-contract.js').AgentMuxHostedRuntimeParameterMap[SpaceMemberStreamMethod], {
@@ -103,7 +111,7 @@ export async function spaceMemberRuntime(ports: {
     const originalPort = port
     port = { ...originalPort, call: async (method, params, callContext) => {
       const result = await originalPort.call(method, params, { ...callContext, runtimeFence })
-      await assertCurrent()
+      if (!isSpaceMemberNativeWrite(method)) await assertCurrent()
       return result
     } }
     return { port, context, assertCurrent }

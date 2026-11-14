@@ -736,7 +736,7 @@ export class AgentMuxRpcService {
     return await spaceMemberRuntime({ store: this.spatial, clients: hostId => this.clients(hostId, { signal: context.openingSignal ?? context.signal }),
       ...(this.ports.hostRoutes ? { gateway: this.ports.hostRoutes } : {}), local: {
         call: async (method, params, original) => {
-          if (method === 'skill.ls') return await this.callOwnedBusiness(method, params as AgentMuxRpcParams<typeof method>, original)
+          if (method === 'skill.ls' || isAgentProgressMethod(method) || method === 'file.upload' || method === 'file.upload.inspect') return await this.callOwnedBusiness(method, params as AgentMuxRpcParams<typeof method>, original)
           const endpoint = await this.hosted(method as AgentMuxRpcMethod, params, original); return await endpoint.owner.call(method, endpoint.params, original)
         },
         subscribe: async (method, params, emit, original) => { const endpoint = await this.hosted(method as AgentMuxRpcMethod, params, original); return await endpoint.owner.subscribe(method, endpoint.params, emit, original) }

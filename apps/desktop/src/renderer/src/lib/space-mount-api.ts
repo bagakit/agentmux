@@ -1,5 +1,6 @@
 import type { SpaceMountPreloadApi, SpaceMountPort, SpaceMountMemberRoute, SpaceMountMemberSurface } from '../../../shared/space-mount'
 import { unwrapSessionInputOperationResult } from '../../../shared/session-input-result'
+import { spaceMountMemberCallHasReceipt } from '../../../shared/space-mount'
 
 const cancellation = (signal?: AbortSignal) => signal ? { onAbort: (cancel: () => void) => {
   if (signal.aborted) { cancel(); return () => {} }
@@ -14,7 +15,7 @@ export function createRendererSpaceMount(preload: SpaceMountPreloadApi): SpaceMo
       return { initial: result.initial, dispose: result.dispose, call: async (method, input, requestSignal) => {
         requestSignal?.throwIfAborted()
         const reply = await result.call(method, input, cancellation(requestSignal))
-        requestSignal?.throwIfAborted()
+        if (!spaceMountMemberCallHasReceipt(method)) requestSignal?.throwIfAborted()
         return reply
       } }
     } catch (error) { await result.dispose(); throw error }

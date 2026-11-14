@@ -2,12 +2,14 @@ import { AgentMuxError } from './errors.js'
 import { rpcRecord, rpcString } from './rpc-data.js'
 import { decodeHostedValue } from './hosted-value.js'
 import { AGENTMUX_HOSTED_RPC_FIELDS } from './hosted-client-contract.js'
-import { parseSpaceMemberIdentity, SPACE_MEMBER_CALLS, SPACE_MEMBER_STREAMS, SPACE_MEMBER_INVOCATIONS, parseSpaceMemberAdmission, type SpaceMemberTarget, type SpaceMemberRoute, type SpaceMemberParams } from './space-member.js'
+import { parseSpaceMemberIdentity, SPACE_MEMBER_CALLS, SPACE_MEMBER_STREAMS, SPACE_MEMBER_INVOCATIONS, SPACE_MEMBER_NATIVE_SESSION_CALLS, parseSpaceMemberAdmission, type SpaceMemberTarget, type SpaceMemberRoute, type SpaceMemberParams } from './space-member.js'
 import { validateAgentInputControlId, validateAgentInputWaitRef } from './agent-input-wait.js'
 import { parseConversationTimelineReadInput, parseConversationCheckpointInput, parseConversationChangesInput, parseConversationWatchInput, parseConversationViewReleaseInput } from './conversation-changes.js'
 import { validateSessionHistoryReadInput, type AgentSessionHistoryReadInput } from './session-history-read-codec.js'
 import { parseSessionHistoryResourceParams } from './session-history-resource.js'
 import { parseAgentInputMailboxRead } from './agent-input-mailbox.js'
+import { isAgentProgressMethod, parseAgentProgressParams } from './agent-progress.js'
+import { parseFileUploadParams, parseFileUploadIdentity } from './public-rpc-files.js'
 
 function mismatch(): never { throw new AgentMuxError('This operation does not identify the original Space member and Run. Its Session and other controls are retained.', 'SPACE_MEMBER_TARGET_MISMATCH') }
 export { parseSpaceMemberIdentity } from './space-member.js'
@@ -18,19 +20,33 @@ export function parseSpaceMemberTarget(value: unknown): SpaceMemberTarget {
 }
 export function parseSpaceMemberRoute(value: unknown): SpaceMemberRoute {
   const p = rpcRecord(value)
-  if (p.kind !== 'conversation') return parseSpaceMemberTarget(value)
+  if (p.kind !== 'conversation' && p.kind !== 'session') return parseSpaceMemberTarget(value)
   rpcRecord(p, ['kind', 'reference', 'regionId', 'runtimeId', 'agentSessionId', 'expectedAdmission'])
   const { kind: _kind, ...identity } = p
-  return { ...parseSpaceMemberIdentity(identity), kind: 'conversation', expectedAdmission: parseSpaceMemberAdmission(p.expectedAdmission) }
+  return { ...parseSpaceMemberIdentity(identity), kind: p.kind, expectedAdmission: parseSpaceMemberAdmission(p.expectedAdmission) }
 }
 /** A finite target check shared with the routed receiver; full argument semantics
  * and effects still belong to the original Hosted/Provider/Native methods. */
 export function assertSpaceMemberCall(target: SpaceMemberRoute, call: { method: string; params: unknown }, stream: boolean): void {
   const allowed: readonly string[] = stream ? SPACE_MEMBER_STREAMS : SPACE_MEMBER_CALLS
   if (!allowed.includes(call.method)) throw new AgentMuxError('This method is outside the original Space member interaction surface.', 'CONTROL_PERMISSION_DENIED')
+  if ('kind' in target && target.kind === 'session' && call.method !== 'runtime.owner.identity' && !(SPACE_MEMBER_NATIVE_SESSION_CALLS as readonly string[]).includes(call.method)) throw new AgentMuxError(
+    'This original Session purpose permits only its finite durable tools, without Native observation, attachment or direct input.', 'CONTROL_PERMISSION_DENIED')
   if (call.method === 'skill.ls') {
     const p = rpcRecord(call.params, ['hostId', 'agentSessionId'])
     if (p.hostId !== 'local' || p.agentSessionId !== target.agentSessionId) mismatch()
+    return
+  }
+  if (isAgentProgressMethod(call.method)) {
+    const input = parseAgentProgressParams(call.method, call.params)
+    if (input.target.hostId !== 'local' || input.target.agentSessionId !== target.agentSessionId) mismatch()
+    if (call.method !== 'agent.progress.list' && (!('kind' in target) || target.kind !== 'session')) throw new AgentMuxError(
+      'Conversation access does not authorize future Agent input. Choose its original Session purpose for an explicit arrangement.', 'CONTROL_PERMISSION_DENIED')
+    return
+  }
+  if (call.method === 'file.upload' || call.method === 'file.upload.inspect') {
+    const file = call.method === 'file.upload' ? parseFileUploadParams(call.params) : parseFileUploadIdentity(call.params)
+    if (!('expectedRun' in target) || !target.expectedAdmission || file.hostId !== 'local' || file.agentSessionId !== target.agentSessionId || file.expectedRun.runId !== target.expectedRun.runId) mismatch()
     return
   }
   if (!('expectedRun' in target) && (call.method === 'runtime.bootstrap' || call.method === 'runtime.events')) throw new AgentMuxError(
@@ -135,7 +151,7 @@ export function assertSpaceMemberCall(target: SpaceMemberRoute, call: { method: 
 }
 export function parseSpaceMemberParams<M extends keyof SpaceMemberParams>(method: M, value: unknown): SpaceMemberParams[M] {
   const p = rpcRecord(value, ['target', 'call']), target = parseSpaceMemberRoute(p.target), call = rpcRecord(p.call, ['method', 'params'])
-  const original = { method: rpcString(call.method, 'Original Hosted method'), params: call.params }
+  const original = { method: rpcString(call.method, 'Original member method'), params: call.params }
   assertSpaceMemberCall(target, original, method === 'space.member.watch')
   return { target, call: original } as SpaceMemberParams[M]
 }

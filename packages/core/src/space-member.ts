@@ -31,7 +31,9 @@ export type SpaceMemberTarget = SpaceMemberIdentity & { expectedRun: AgentMuxRun
 export type PinnedSpaceMemberIdentity = SpaceMemberIdentity & { expectedAdmission: SpaceMemberAdmission }
 /** Durable conversation access cannot grant Native observation, attachment or input. */
 export type SpaceMemberReadingTarget = PinnedSpaceMemberIdentity & { kind: 'conversation' }
-export type SpaceMemberRoute = SpaceMemberTarget | SpaceMemberReadingTarget
+/** A durable Session purpose, never a current Run, process observation or input grant. */
+export type SpaceMemberSessionTarget = PinnedSpaceMemberIdentity & { kind: 'session' }
+export type SpaceMemberRoute = SpaceMemberTarget | SpaceMemberReadingTarget | SpaceMemberSessionTarget
 export const SPACE_MEMBER_INPUT_READING_INVOCATIONS = ['readAgentSessionHistory', 'sessionHistoryResource', 'readAgentInputMailbox'] as const
 export const SPACE_MEMBER_INVOCATIONS = [
   'readAgentInputEpoch', 'readAgentSession', 'runtimeSubject', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
@@ -44,7 +46,13 @@ export const SPACE_MEMBER_INVOCATIONS = [
 export type SpaceMemberInvocation = typeof SPACE_MEMBER_INVOCATIONS[number]
 export const SPACE_MEMBER_HOSTED_CALLS = ['runtime.owner.identity', 'runtime.bootstrap', 'runtime.invoke', 'runtime.release-consumer'] as const
 /** Original public owners, not additional Hosted SDK invocations. */
-export const SPACE_MEMBER_NATIVE_CALLS = ['skill.ls'] as const
+export const SPACE_MEMBER_NATIVE_SESSION_CALLS = ['skill.ls', 'agent.progress.list', 'agent.progress.create', 'agent.progress.action', 'agent.progress.update'] as const
+export const SPACE_MEMBER_NATIVE_READING_CALLS = ['skill.ls', 'agent.progress.list', 'file.upload.inspect'] as const
+export const SPACE_MEMBER_NATIVE_WRITING_CALLS = ['agent.progress.create', 'agent.progress.action', 'agent.progress.update', 'file.upload'] as const
+export const SPACE_MEMBER_NATIVE_CALLS = [...SPACE_MEMBER_NATIVE_READING_CALLS, ...SPACE_MEMBER_NATIVE_WRITING_CALLS] as const
+export function isSpaceMemberNativeWrite(method: string): boolean {
+  return (SPACE_MEMBER_NATIVE_WRITING_CALLS as readonly string[]).includes(method)
+}
 export const SPACE_MEMBER_CALLS = [...SPACE_MEMBER_HOSTED_CALLS, ...SPACE_MEMBER_NATIVE_CALLS] as const
 export const SPACE_MEMBER_STREAMS = ['runtime.events', 'runtime.attachment-watch', 'runtime.replay-watch', 'runtime.conversation-watch'] as const
 export type SpaceMemberCallMethod = typeof SPACE_MEMBER_CALLS[number]

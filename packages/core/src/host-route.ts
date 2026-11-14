@@ -90,7 +90,7 @@ export type HostRouteSpatialOperation = {
 export type HostRouteReadOperation = { kind: 'input-epoch-reader'; targetRuntimeId: string; agentRoute?: AdoptedHostRoute } | { kind: 'space-reader'; runtimeId: string; spaceId: string } | { kind: 'creation-reader'; createOperationId: string }
 export type HostRouteObservationScope = { kind: 'observation'; targetRuntimeId: string; agentSessionIds: string[]; source: HostRouteReadOperation }
 /** A safe projection of one exact current-viewer call, not a creator's input grant. */
-export type HostRouteMemberOperation = { kind: 'space-member'; runtimeId: string; spaceId: string; regionId: string; targetRuntimeId: string; agentSessionId: string; method: string; paramsDigest: string; expectedAdmission?: SpaceMemberAdmission } & ({ runId: string; access?: never } | { access: 'conversation'; runId?: never })
+export type HostRouteMemberOperation = { kind: 'space-member'; runtimeId: string; spaceId: string; regionId: string; targetRuntimeId: string; agentSessionId: string; method: string; paramsDigest: string; expectedAdmission?: SpaceMemberAdmission } & ({ runId: string; access?: never } | { access: 'conversation' | 'session'; runId?: never })
 export type HostRouteMemberNameOperation = { kind: 'space-member-name'; runtimeId: string; spaceId: string; regionId: string; targetRuntimeId: string; agentSessionId: string; expectedAdmission: SpaceMemberAdmission; object: 'agent' | 'tab'; method: 'agent.name.inspect' | 'agent.name.change'; paramsDigest: string }
 export type HostRouteMemberNameScope = { kind: 'member-name'; operation: HostRouteMemberNameOperation }
 export type HostRouteMemberScope = { kind: 'member-control'; operation: HostRouteMemberOperation; createOperationId: string }
@@ -227,9 +227,9 @@ export function parseHostRouteOperation(value: unknown): HostRouteOperation {
   if (kind === 'space-member') {
     const fields = ['runtimeId','spaceId','regionId','targetRuntimeId','agentSessionId','method','paramsDigest'] as const
     const p = rpcRecord(value, ['kind',...fields,'runId','access','expectedAdmission'])
-    const access = p.access === 'conversation' && p.runId === undefined ? { access: 'conversation' as const }
-      : p.access === undefined ? { runId: originalString(p.runId, 'Original member Run') } : invalid('Use the original member Run or conversation-only access.')
-    if (p.access === 'conversation' && p.expectedAdmission === undefined) invalid('Conversation access requires the original member C/L.')
+    const access = (p.access === 'conversation' || p.access === 'session') && p.runId === undefined ? { access: p.access }
+      : p.access === undefined ? { runId: originalString(p.runId, 'Original member Run') } : invalid('Use the original member Run or explicit durable purpose.')
+    if (p.access !== undefined && p.expectedAdmission === undefined) invalid('A durable purpose requires the original member C/L.')
     return { kind, ...Object.fromEntries(fields.map(key => [key, originalString(p[key], `Original member ${key}`)])),
       ...access, ...(p.expectedAdmission === undefined ? {} : { expectedAdmission: parseSpaceMemberAdmission(p.expectedAdmission) }) } as HostRouteMemberOperation
   }

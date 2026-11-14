@@ -1,6 +1,9 @@
 import { AgentMuxError, type AgentMuxRuntimeSubject } from '@agentmux/core'
 import { connectSpaceMember, type SpaceMemberClient } from '@agentmux/core/space-member-client'
 import { mintObjectId } from '@agentmux/core/object-id'
+import { isSpaceMemberNativeWrite, SPACE_MEMBER_NATIVE_SESSION_CALLS, type SpaceMemberNativeCall } from '@agentmux/core/space-member'
+import { fileUploadRevision, parseFileUploadIdentity, parseFileUploadResult } from '@agentmux/core/files'
+import { spaceMountMemberCallHasReceipt } from '../shared/space-mount.js'
 import type { AgentMuxRpcClient } from '@agentmux/core'
 import type { SessionSnapshot } from '../shared/contracts.js'
 import type { SpaceMountMemberRoute, SpaceMountMemberSurface, SpaceMountMemberEvent, SpaceMountMemberMethods } from '../shared/space-mount.js'
@@ -9,10 +12,12 @@ type Actions = { [M in keyof SpaceMountMemberMethods]: (input: SpaceMountMemberM
 /** A sender-owned original SDK reader, not another Session or attachment owner. */
 export async function createSpaceMemberSurface(input: SpaceMountMemberRoute, ports: {
   rpc: Pick<AgentMuxRpcClient, 'call' | 'subscribe'>; assertCurrent(): void
+  retainedRpc?: Pick<AgentMuxRpcClient, 'call' | 'subscribe'>
   project(subject: AgentMuxRuntimeSubject, catalog: import('@agentmux/core').AgentCatalogEntry[]): SessionSnapshot
 }, emit: (event: SpaceMountMemberEvent) => void, signal: AbortSignal): Promise<SpaceMountMemberSurface & { start(): void }> {
   const client = await connectSpaceMember(ports.rpc, input.target) as SpaceMemberClient
   const readingOnly = !('expectedRun' in input.target)
+  const sessionOnly = 'kind' in input.target && input.target.kind === 'session'
   const originalRun = () => {
     if (!('expectedRun' in input.target)) throw new AgentMuxError('This original surface grants conversation reading only.', 'CONTROL_PERMISSION_DENIED')
     return input.target.expectedRun
@@ -69,8 +74,34 @@ export async function createSpaceMemberSurface(input: SpaceMountMemberRoute, por
         replay: attached.replay, gap: attached.gap, terminal: attached.terminal, resizeRevision: attached.resizeRevision }
     } catch (cause) { if (!leases.size) await client.releaseRunAttachment(originalRun()).catch(report); throw cause }
   }
+  const nativeProgress = async <M extends import('@agentmux/core').AgentProgressMethod>(method: M, value: import('@agentmux/core').AgentProgressParams[M], requestSignal?: AbortSignal): Promise<import('@agentmux/core').AgentProgressResults[M]> => {
+    const rpc = isSpaceMemberNativeWrite(method) ? ports.retainedRpc ?? ports.rpc : ports.rpc
+    const result = await rpc.call('space.member.call', { target: input.target, call: { method, params: value } as SpaceMemberNativeCall }, requestSignal ? { signal: requestSignal } : {})
+    if (!isSpaceMemberNativeWrite(method)) check()
+    return result as import('@agentmux/core').AgentProgressResults[M]
+  }
   const actions: Actions = {
     read,
+    retainImage: async (value, requestSignal) => {
+      const bytes = Buffer.from(value.bytes), upload = parseFileUploadIdentity({ ...conversationReference, expectedRun: originalRun(),
+        operationId: mintObjectId(), name: 'image', mimeType: value.mimeType, byteLength: bytes.length, revision: fileUploadRevision(bytes) })
+      try {
+        const reply = parseFileUploadResult(await (ports.retainedRpc ?? ports.rpc).call('space.member.call', { target: input.target,
+          call: { method: 'file.upload', params: { ...upload, dataBase64: bytes.toString('base64') } } }, requestSignal ? { signal: requestSignal } : {}), upload)
+        return { upload, observation: reply.status === 'uploaded' ? 'confirmed' : 'unavailable',
+          ...(reply.status === 'unknown' || reply.status === 'error' ? { issue: { code: reply.code, message: reply.message } } : {}) }
+      } catch (cause) { return { upload, observation: 'unavailable', issue: { ...(cause instanceof AgentMuxError ? { code: cause.code } : {}), message: cause instanceof Error ? cause.message : String(cause) } } }
+    },
+    'file.upload.inspect': async (value, requestSignal) => {
+      const reply = parseFileUploadResult(await ports.rpc.call('space.member.call', { target: input.target,
+        call: { method: 'file.upload.inspect', params: value } }, requestSignal ? { signal: requestSignal } : {}), value)
+      check(); return reply
+    },
+    inputEpoch: async () => { const epoch = await client.readAgentInputEpoch(); check(); return epoch ?? null },
+    'agent.progress.list': (value, signal) => nativeProgress('agent.progress.list', value, signal),
+    'agent.progress.create': (value, signal) => nativeProgress('agent.progress.create', value, signal),
+    'agent.progress.action': (value, signal) => nativeProgress('agent.progress.action', value, signal),
+    'agent.progress.update': (value, signal) => nativeProgress('agent.progress.update', value, signal),
     skills: async (_value, requestSignal) => {
       const page = await ports.rpc.call('space.member.call', { target: input.target,
         call: { method: 'skill.ls', params: conversationReference } }, requestSignal ? { signal: requestSignal } : {}) as import('@agentmux/core').AgentMuxRpcResult<'skill.ls'>
@@ -150,7 +181,10 @@ export async function createSpaceMemberSurface(input: SpaceMountMemberRoute, por
   if (signal.aborted) { await dispose(); signal.throwIfAborted() }
   return { initial, call: async (method, value, requestSignal) => {
     requestSignal?.throwIfAborted(); check()
-    if (readingOnly && !method.startsWith('conversation') && method !== 'history' && method !== 'historyResource' && method !== 'inputMailbox' && method !== 'skills') throw new AgentMuxError('This original surface grants conversation reading only.', 'CONTROL_PERMISSION_DENIED')
-    const result = await actions[method](value, requestSignal); requestSignal?.throwIfAborted(); return result
+    if (sessionOnly ? method !== 'skills' && !(SPACE_MEMBER_NATIVE_SESSION_CALLS as readonly string[]).includes(method)
+      : readingOnly && !method.startsWith('conversation') && !['history', 'historyResource', 'inputMailbox', 'skills', 'inputEpoch', 'agent.progress.list'].includes(method)) throw new AgentMuxError('This original surface does not grant that purpose. Its Agent and input are retained.', 'CONTROL_PERMISSION_DENIED')
+    const result = await actions[method](value, requestSignal)
+    if (!spaceMountMemberCallHasReceipt(method)) requestSignal?.throwIfAborted()
+    return result
   }, start: () => { if (!readingOnly) void client.connect().then(refresh).catch(report) }, dispose }
 }

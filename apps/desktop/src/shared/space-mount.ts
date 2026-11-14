@@ -2,6 +2,7 @@ import type { SpaceAuthorityRef, SpaceSnapshot, SpaceApply, SpaceApplyReceipt, S
 import type { FolderSpaceRegistration, FolderSpaceReceipt, FolderSpaceRegisterInput } from '@agentmux/core/space-folder'
 import type { WorkspaceLayout, WorkbenchViewLayout } from '@agentmux/layout'
 import type { SpaceSessionsOpening, SpaceSessionsObservation } from '@agentmux/core/space-sessions'
+import { isSpaceMemberNativeWrite } from '@agentmux/core/space-member'
 
 /** Host ID is only this client's carrier. Every inner entity ID belongs to reference.runtimeId. */
 export type SpaceMountSourceTarget = { hostId: string; expectedRuntimeId: string } | SpaceMountTarget
@@ -42,7 +43,7 @@ export type SpaceMountWatch = SpaceMountTarget & { after?: SpaceWatch['after'] }
 export type SpaceMountEvent = { type: 'snapshot'; snapshot: SpaceSnapshot } | { type: 'error'; error: { code: string; message: string } }
 export type SpaceMountSessionsEvent = { type: 'observation'; observation: SpaceSessionsObservation } | { type: 'error'; error: { code: string; message: string } }
 export type SpaceMountPort = {
-  member(input: SpaceMountMemberTarget, listener: (event: SpaceMountMemberEvent) => void, signal?: AbortSignal): Promise<SpaceMountMemberSurface>
+  member(input: SpaceMountMemberTarget | SpaceMountSessionTarget, listener: (event: SpaceMountMemberEvent) => void, signal?: AbortSignal): Promise<SpaceMountMemberSurface>
   reading(input: SpaceMountReadingTarget, listener: (event: SpaceMountMemberEvent) => void, signal?: AbortSignal): Promise<SpaceMountReadingSurface>
   call<M extends keyof SpaceMountMethods>(method: M, input: SpaceMountMethods[M]['input'], signal?: AbortSignal): Promise<SpaceMountMethods[M]['result']>
   watch(input: SpaceMountWatch, listener: (event: SpaceMountEvent) => void, signal?: AbortSignal): Promise<{ initial: SpaceSnapshot; dispose(): void }>
@@ -62,8 +63,12 @@ export const spaceMountKey = (reference: SpaceAuthorityRef) => JSON.stringify([r
 /** One viewing surface; inner identities always remain at their original Core. */
 export type SpaceMountMemberTarget = { hostId: string; target: import('@agentmux/core/space-member').SpaceMemberTarget }
 export type SpaceMountReadingTarget = { hostId: string; target: import('@agentmux/core/space-member').SpaceMemberReadingTarget }
+export type SpaceMountSessionTarget = { hostId: string; target: import('@agentmux/core/space-member').SpaceMemberSessionTarget }
 export type SpaceMountMemberRoute = { hostId: string; target: import('@agentmux/core/space-member').SpaceMemberRoute }
 export type SpaceMountMemberIdentity = { id: string; hostId: string }
+export type SpaceMountInputImageRetention = { upload: import('@agentmux/core/files').FileUploadIdentity; observation: 'confirmed' | 'unavailable'; issue?: { code?: string; message: string } }
+/** Keep an obtained effect receipt separate from the lifetime of its reply reader. */
+export function spaceMountMemberCallHasReceipt(method: string): boolean { return method === 'retainImage' || isSpaceMemberNativeWrite(method) }
 export type SpaceMountMemberEvent =
   | { type: 'session'; session: import('./contracts').SessionSnapshot }
   | { type: 'runtime'; event: import('./contracts').RuntimeEvent }
@@ -71,6 +76,9 @@ export type SpaceMountMemberEvent =
   | { type: 'observation-error'; error: { code: string; message: string } }
   | { type: 'error'; error: { code: string; message: string } }
 export type SpaceMountMemberMethods = {
+  retainImage: { input: { bytes: Uint8Array; mimeType: string }; result: SpaceMountInputImageRetention }
+  'file.upload.inspect': { input: import('@agentmux/core/files').FileUploadIdentity; result: import('@agentmux/core/files').FileUploadResult }
+  inputEpoch: { input: Record<string, never>; result: string | null }
   skills: { input: Record<string, never>; result: import('@agentmux/core').AgentSkill[] }
   read: { input: Record<string, never>; result: import('./contracts').SessionSnapshot }
   history: { input: { input: Omit<import('@agentmux/core').AgentSessionHistoryReadInput, 'hostId' | 'agentSessionId'> }; result: import('@agentmux/core').AgentSessionHistoryReadPage }
@@ -90,13 +98,13 @@ export type SpaceMountMemberMethods = {
   write: { input: { data: import('@agentmux/core').AgentMuxRunInputData; source: import('@agentmux/core').AgentMuxAgentWriteInput['source']; observation?: import('@agentmux/core/control').InputObservationReference }; result: void }
   paste: { input: { text: string; terminalData: string; observation?: import('@agentmux/core/control').InputObservationReference }; result: void }
   inspectInteraction: { input: { operationId: string }; result: import('@agentmux/core').AgentMuxInteractionOperationReceipt | null }
-}
+} & { [M in import('@agentmux/core').AgentProgressMethod]: { input: import('@agentmux/core').AgentProgressParams[M]; result: import('@agentmux/core').AgentProgressResults[M] } }
 export type SpaceMountMemberSurface = {
   initial: SpaceMountMemberIdentity
   call<M extends keyof SpaceMountMemberMethods>(method: M, input: SpaceMountMemberMethods[M]['input'], signal?: AbortSignal): Promise<SpaceMountMemberMethods[M]['result']>
   dispose(): void | Promise<void>
 }
-export type SpaceMountReadingMethods = Pick<SpaceMountMemberMethods, 'conversationRead' | 'conversationCheckpoint' | 'conversationChanges' | 'conversationRelease' | 'conversationWatch' | 'conversationUnwatch' | 'history' | 'historyResource' | 'inputMailbox' | 'skills'>
+export type SpaceMountReadingMethods = Pick<SpaceMountMemberMethods, 'conversationRead' | 'conversationCheckpoint' | 'conversationChanges' | 'conversationRelease' | 'conversationWatch' | 'conversationUnwatch' | 'history' | 'historyResource' | 'inputMailbox' | 'skills' | 'inputEpoch' | 'agent.progress.list'>
 export type SpaceMountReadingSurface = Pick<SpaceMountMemberSurface, 'initial' | 'dispose'> & {
   call<M extends keyof SpaceMountReadingMethods>(method: M, input: SpaceMountReadingMethods[M]['input'], signal?: AbortSignal): Promise<SpaceMountReadingMethods[M]['result']>
 }
