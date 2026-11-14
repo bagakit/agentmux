@@ -172,6 +172,7 @@ app.whenReady().then(async()=>{try{
  await click('.mesh-explorer__canvas [data-host-node="farm-cn1"]')
  assert.ok(await evaluate("document.querySelector('[aria-label=\"Selected saved connection\"]').textContent.includes('Estimated from public egress · ±120 km')"))
  assert.ok(await evaluate("Boolean(document.querySelector('[data-geographic-point=\"saved:host:farm-cn1\"][data-approximate]'))"))
+ assert.ok(await evaluate("document.querySelector('[data-host-node=\"farm-cn1\"]').textContent.includes('IP · ±120 km')"))
  await frame('egress-estimate-dark')
  await button('Clear');await click('[aria-label="Fit observed topology"]')
  await click('[aria-label="Zoom in network"]');await frame('geographic-zoom-dark')
