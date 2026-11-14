@@ -271,6 +271,10 @@
     "./codex/session-status": {
       "types": "./dist/codex/session-status.d.ts",
       "import": "./dist/codex/session-status.js"
+    },
+    "./claude/provider": {
+      "types": "./dist/claude/provider.d.ts",
+      "import": "./dist/claude/provider.js"
     }
   },
   "files": [
