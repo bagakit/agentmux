@@ -2831,6 +2831,13 @@ export class RuntimeController {
     const { rpc, context } = await this.mountedSpaceControl(target, signal)
     return await rpc.call('space.inspect', { target: { operationId: requestId } }, context)
   }
+  async continueMountedSpaceExecution(target: SpaceMountTarget, execution: import('@agentmux/core').AgentExecutionReference, signal?: AbortSignal) {
+    const { rpc, context } = await this.mountedSpaceControl(target, signal)
+    const result = await rpc.call('agent.execution.continue', execution, context)
+    if (result.session.agentSessionId !== execution.agentSessionId || result.session.creation?.createOperationId !== execution.createOperationId)
+      throw new AgentMuxError('The response did not confirm this original Session and creation. Keep its original request.', 'AGENT_CREATION_UNCONFIRMED')
+    return { agentSessionId: result.session.agentSessionId, createOperationId: result.session.creation.createOperationId }
+  }
   private async mountedNameClient(target: SpaceMountSourceTarget, signal?: AbortSignal) {
     const { rpc, context } = await this.mountedSpaceControl(target, signal)
     return createNameControlClient({ call: (method, input) => rpc.call(method, input, context) })

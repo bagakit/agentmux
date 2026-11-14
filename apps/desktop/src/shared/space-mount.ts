@@ -30,6 +30,7 @@ export type SpaceMountMethods = {
   executors: { input: SpaceMountSourceTarget & { agentHostId: string; executorId?: string }; result: import('@agentmux/core').AgentMuxRpcResult<'settings.executors.discover'> }
   open: { input: SpaceMountTarget & { request: import('@agentmux/core').AgentMuxRpcParams<'agent.open'> }; result: import('@agentmux/core').AgentMuxRpcResult<'agent.open'> }
   inspect: { input: SpaceMountTarget & { requestId: string }; result: import('@agentmux/core').AgentMuxRpcResult<'space.inspect'> }
+  continueExecution: { input: SpaceMountTarget & { execution: import('@agentmux/core').AgentExecutionReference }; result: { agentSessionId: string; createOperationId: string } }
   memberNameInspect: { input: SpaceMountTarget & { name: import('@agentmux/core/name-control').NameControlParams['space.member.name.inspect'] }; result: import('@agentmux/core/name-control').NameObservation }
   memberNameChange: { input: SpaceMountTarget & { name: import('@agentmux/core/name-control').NameControlParams['space.member.name.change'] }; result: import('@agentmux/core/name-control').NameChangeResult }
   agentNameInspect: { input: { hostId: string; expectedRuntimeId: string; name: import('@agentmux/core/name-control').NameControlParams['agent.name.inspect'] }; result: import('@agentmux/core/name-control').NameObservation }

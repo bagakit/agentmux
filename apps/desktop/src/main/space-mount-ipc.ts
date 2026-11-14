@@ -4,7 +4,7 @@ import { parseNameControlParams } from '@agentmux/core/name-control'
 import type { AppConfig } from '../shared/contracts.js'
 import type { IpcMainInvokeEvent } from 'electron'
 import { parseFolderSpaceRegistration, parseFolderSpaceRegisterInput } from '@agentmux/core/space-folder'
-import { parseSpaceAuthorityRef, parseSpaceAuthorityParams, rpcControlRequest } from '@agentmux/core'
+import { parseAgentExecutionReference, parseSpaceAuthorityRef, parseSpaceAuthorityParams, rpcControlRequest } from '@agentmux/core'
 import type { RuntimeController } from './runtime-controller.js'
 import { SessionHistoryReadOwners } from './session-history-read.js'
 import { sessionInputOperationResult } from '../shared/session-input-result.js'
@@ -27,7 +27,7 @@ export function sourceTarget(p: Record<string, unknown>): import('../shared/spac
 export function registerSpaceMountIpc(ports: {
   handle<T extends unknown[], R>(channel: string, listener: (event: IpcMainInvokeEvent, ...values: T) => R | Promise<R>): void
   config?(): AppConfig
-  runtime: Pick<RuntimeController, 'openMountedSpaceMember' | 'spaceMountResources' | 'describeMountedSpace' | 'mountedSpaceHostChoices' | 'mountedSpaceRouteChoices' | 'mountedSpaceRouteExecutors' | 'registerFolderSpace' | 'inspectFolderSpace' | 'readMountedSpace' | 'applyMountedSpace' | 'watchMountedSpace' | 'mountedSpaceExecutors' | 'openMountedSpace' | 'inspectMountedSpaceRequest' | 'watchMountedSpaceSessions' | 'inspectMountedMemberName' | 'changeMountedMemberName' | 'inspectOriginalAgentName' | 'changeOriginalAgentName'>
+  runtime: Pick<RuntimeController, 'openMountedSpaceMember' | 'spaceMountResources' | 'describeMountedSpace' | 'mountedSpaceHostChoices' | 'mountedSpaceRouteChoices' | 'mountedSpaceRouteExecutors' | 'registerFolderSpace' | 'inspectFolderSpace' | 'readMountedSpace' | 'applyMountedSpace' | 'watchMountedSpace' | 'mountedSpaceExecutors' | 'openMountedSpace' | 'inspectMountedSpaceRequest' | 'continueMountedSpaceExecution' | 'watchMountedSpaceSessions' | 'inspectMountedMemberName' | 'changeMountedMemberName' | 'inspectOriginalAgentName' | 'changeOriginalAgentName'>
 }) {
   const reads = new SessionHistoryReadOwners()
   const members = new Map<string, SpaceMountMemberSurface>()
@@ -67,6 +67,10 @@ export function registerSpaceMountIpc(ports: {
     }
     if (method === 'executors') { const p = fields(value, ['hostId', 'reference', 'expectedRuntimeId', 'agentHostId', 'executorId']);
       return await ports.runtime.mountedSpaceExecutors(sourceTarget(p), host(p.agentHostId), signal, p.executorId === undefined ? undefined : host(p.executorId)) }
+    if (method === 'continueExecution') {
+      const p = fields(value, ['hostId', 'reference', 'execution'])
+      return await ports.runtime.continueMountedSpaceExecution({ hostId: host(p.hostId), reference: parseSpaceAuthorityRef(p.reference) }, parseAgentExecutionReference(p.execution), signal)
+    }
     if (method === 'open' || method === 'inspect') {
       const p = fields(value, ['hostId', 'reference', ...(method === 'open' ? ['request'] : ['requestId'])])
       const target = { hostId: host(p.hostId), reference: parseSpaceAuthorityRef(p.reference) }

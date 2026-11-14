@@ -9,6 +9,7 @@ import { useAppStore } from '../store'
 import { mountedSpaceInput, mountedSpaceTarget, mountedSpaceRegions, mountedRegionKey, projectMountedSpaceView, type MountedSpaceRegion } from '../lib/space-mount-view'
 import { MountedExecutionRelation } from './MountedExecutionRelation'
 import { MountedSpaceLauncher } from './MountedSpaceLauncher'
+import { MountedCreationRecovery } from './MountedCreationRecovery'
 import { WorkbenchTabStrip } from './WorkbenchTabStrip'
 import { SurfaceState } from './SurfaceState'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
@@ -76,11 +77,16 @@ function MountedSpaceRegionView({ member, draft, onDraft, session, sessionError,
   useLayoutEffect(() => { if (draft?.length && draftDetails.current) draftDetails.current.open = true }, [draft, waiting])
   const reference = <dl><div><dt>Source Runtime</dt><dd><code>{member.reference.runtimeId}</code></dd></div>
     <div><dt>Agent reference</dt><dd><code>{original.agentSessionId ?? 'Not created'}</code></dd></div>
-    <div><dt>Source Host alias</dt><dd>{original.execution?.hostId ?? 'Unconfirmed'}</dd></div>
+    <div><dt>Agent Host alias</dt><dd>{original.execution?.hostId ?? 'Unconfirmed'}</dd></div>
     <div><dt>Execution Runtime</dt><dd><code>{original.execution?.runtimeId ?? 'Unconfirmed'}</code></dd></div>
   </dl>
+  const privateDraft = onDraft ? <details ref={draftDetails} className="mounted-space-session-draft"><summary>Unsent draft</summary>
+    <label><span>Private task draft</span><textarea aria-label="Mounted Space task draft" value={draft ?? ''} onChange={event => onDraft(event.target.value)} /></label>
+  </details> : undefined
   return <section className={`mounted-space-region${waiting ? ' mounted-space-region--connecting' : ''}`} data-source-region={member.key}>
-    {waiting ? <FullPageLoadingSurface scope="region" visible={visible !== false} phase={checking ? 'loading' : 'parked'} eyebrow="Session connection"
+    {waiting ? target && original.creationOperationId ? <MountedCreationRecovery target={target} member={member} visible={visible !== false}
+      onRefresh={onRefresh} reference={<><MountedExecutionRelation member={member} target={target} occurrence={session?.occurrence} />{reference}</>}
+      supplement={privateDraft} sessionIssue={issue} /> : <FullPageLoadingSurface scope="region" visible={visible !== false} phase={checking ? 'loading' : 'parked'} eyebrow="Session connection"
       title={checking ? 'Checking the original session' : state?.status === 'missing' ? 'Original session unavailable' : 'Session connection unconfirmed'}
       description={checking ? 'Reading this session from its original device.' : state?.status === 'missing'
         ? 'The original device did not return this session. Its current state is still unknown.'
@@ -88,9 +94,7 @@ function MountedSpaceRegionView({ member, draft, onDraft, session, sessionError,
       detail={checking ? 'Your workspace and draft stay here while the original session is checked.' : 'Check the execution device, then try again. Your workspace and draft are kept.'}
       actions={onRefresh ? <button type="button" className="primary-button" onClick={onRefresh}>Check again</button> : undefined}
       details={{ summary: 'Connection details', content: <>{issue ? <p>{issue}</p> : null}{reference}</> }}
-      supplement={onDraft ? <details ref={draftDetails} className="mounted-space-session-draft"><summary>Unsent draft</summary>
-        <label><span>Private task draft</span><textarea aria-label="Mounted Space task draft" value={draft ?? ''} onChange={event => onDraft(event.target.value)} /></label>
-      </details> : undefined} /> : <>
+      supplement={privateDraft} /> : <>
     <header>{original.agentSessionId ? <MountedExecutionRelation member={member} target={target} occurrence={session?.occurrence} /> : <AgentIcon size={14} aria-hidden="true" />}<strong>{original.kind === 'agent' ? 'Original Agent' : original.kind === 'launcher' ? 'New work' : original.kind}</strong></header>
     <details><summary>Original reference</summary>{reference}</details>
     {original.agentSessionId ? <MountedSessionMetadata {...session} error={sessionError} /> : null}
