@@ -1,6 +1,6 @@
 import { SpaceSourceReaders } from './components/SpaceSourceReaders'
 import { AgentCollaborationMap } from './components/AgentCollaborationMapEntry'
-import { workbenchDocuments, subscribeWorkbenchWindows, workbenchDocumentIdentity, isWorkbenchSurfaceDetached, useWorkbenchSurfaceDocument, workbenchSurfaceDocument } from './lib/workbench-window-registry'
+import { workbenchDocuments, subscribeWorkbenchWindows, workbenchDocumentIdentity, isWorkbenchSurfaceDetached, useWorkbenchSurfaceDocument, useWorkbenchDocumentVisibility, workbenchSurfaceDocument } from './lib/workbench-window-registry'
 import { useWorkbenchWindows, WorkbenchWindowNotices, focusWorkbenchWindow } from './lib/workbench-windows'
 import { GitHistoryProvider } from './features/git/history/GitHistoryContext'
 import { workspaceZoneContext } from './lib/workspace-zone-context'
@@ -254,6 +254,10 @@ function DesktopApp() {
   }, [])
   const recallVisible = recallDetached || mainSurface === 'recall' && !settingsOpen
   const surveyVisible = surveyDetached || mainSurface === 'survey' && !settingsOpen
+  const surveyDocumentVisible = useWorkbenchDocumentVisibility(surveyDocument)
+  const recallDocumentVisible = useWorkbenchDocumentVisibility(recallDocument)
+  const observeSurvey = surveyVisible && surveyDocumentVisible
+  const observeRecall = recallVisible && recallDocumentVisible
   const previousWorkSurface = useRef<'agents' | 'workbench' | 'board'>('agents')
   const previousDetached = useRef({ survey: false, recall: false })
   useLayoutEffect(() => {
@@ -267,11 +271,12 @@ function DesktopApp() {
   useEffect(() => { if (mainSurface === 'agents') setFocusVisited(true) }, [mainSurface])
   const surveyBindings = useAppStore(state => state.spaceZoneBindings)
   const surveyTopicSnapshots = useAppStore(state => state.scratchTopicSnapshots)
-  const surveySessionIds = useMemo(() => [...new Set(Object.values(tabs).flatMap(tab =>
-    Object.values(tab.regions).flatMap(surface => isSessionSurface(surface) ? [surface.sessionId] : [])))], [tabs])
+  const spatialDirectoryVisible = observeSurvey || observeRecall || focusVisible || moteFloating.open || Boolean(moteFloating.preview)
+  const surveySessionIds = useMemo(() => spatialDirectoryVisible ? [...new Set(Object.values(tabs).flatMap(tab =>
+    Object.values(tab.regions).flatMap(surface => isSessionSurface(surface) ? [surface.sessionId] : [])))] : [], [spatialDirectoryVisible, tabs])
   // The spatial directory reads execution identity, never status/output clocks.
   const surveySessions = useAppStore(useShallow(state => {
-    if ((!surveyVisible && !recallVisible && !focusVisible && !moteFloating.open && !moteFloating.preview) || surveySessionIds.length === 0) return []
+    if (surveySessionIds.length === 0) return []
     const byId = sessionPresentationById(state.sessions)
     return surveySessionIds.flatMap(id => {
       const session = byId.get(id)
@@ -282,7 +287,7 @@ function DesktopApp() {
   const surveyTopics = scratchTopicsForWorkspace(surveyTopicSnapshots, topicsWorkspace)
   const retainedSurveyCatalog = useRef<AgentMuxSpaceCatalog | null>(null)
   const spatialDirectory = useMemo(() => {
-    if (!surveyVisible && !recallVisible && !focusVisible && !moteFloating.open && !moteFloating.preview) return { catalog: retainedSurveyCatalog.current, issue: null }
+    if (!spatialDirectoryVisible) return { catalog: retainedSurveyCatalog.current, issue: null }
     try {
       const catalog = spatialCatalog(useAppStore.getState(), surveyTopics ?? [])
       retainedSurveyCatalog.current = catalog
@@ -291,7 +296,7 @@ function DesktopApp() {
       // Directory validation is a presentation failure, never a reason to stop a healthy Session.
       return { catalog: retainedSurveyCatalog.current, issue: `The work surface directory could not be confirmed: ${error instanceof Error ? error.message : String(error)}` }
     }
-  }, [surveyVisible, recallVisible, focusVisible, moteFloating.open, moteFloating.preview, config, tabs, layouts, surveyBindings, surveySessions, surveyTopics])
+  }, [spatialDirectoryVisible, config, tabs, layouts, surveyBindings, surveySessions, surveyTopics])
   const surveyCatalog = spatialDirectory.catalog
   const selectMoteReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
     const state = useAppStore.getState(), current = readPmoTeamsTopicFloatingState(), tab = state.tabs[reference.tabId]
@@ -943,7 +948,7 @@ function DesktopApp() {
                 <WorkbenchSurfaceHost surface="survey" homeId="survey-surface-home" visible={surveyVisible}>
                   {surveyVisited || surveyVisible ? <GlobalSurveySurface
                     windowAction={surveyDetached ? null : <SurfaceWindowButton surface="survey" />}
-                    visible={surveyVisible} controlsCoverPage={surveyToolsOpen && narrowControls}
+                    visible={surveyVisible} observeWork={observeSurvey} controlsCoverPage={surveyToolsOpen && narrowControls}
                     onSelectReference={selectSurveyReference} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds}
                     catalog={surveyCatalog} projection={surveyProjection} selection={surveyCurrentSelection}
                     pageSelection={isSurveyPage(surveySelection) ? surveySelection : null} viewTargets={viewTargets} /> : null}
@@ -953,7 +958,7 @@ function DesktopApp() {
                 <WorkbenchSurfaceHost surface="recall" homeId="recall-surface-home" visible={recallVisible}>
                   {recallVisited || recallVisible ? <GlobalRecallSurface
                     windowAction={recallDetached ? null : <SurfaceWindowButton surface="recall" />}
-                    visible={recallVisible} onSelectReference={selectRecallReference} catalog={surveyCatalog}
+                    visible={recallVisible} observeWork={observeRecall} onSelectReference={selectRecallReference} catalog={surveyCatalog}
                     projection={recallProjection} selection={recallCurrentSelection} viewTargets={viewTargets} /> : null}
                 </WorkbenchSurfaceHost>
               </div>

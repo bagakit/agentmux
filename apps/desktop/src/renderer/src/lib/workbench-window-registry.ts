@@ -14,6 +14,12 @@ const hosts = new Map<string, WorkbenchHost>()
 const placements = new Map<string, WorkbenchWindowPlacement>()
 const placementRequests = new Map<string, object>()
 const listeners = new Set<() => void>()
+const surfaceListeners = { survey: new Set<() => void>(), recall: new Set<() => void>() }
+function surfaceDocumentChanged(target: AppWindowTarget, previous: Document): void {
+  if (target.kind === 'surface' && previous !== workbenchSurfaceDocument(target.surface)) {
+    for (const listener of surfaceListeners[target.surface]) listener()
+  }
+}
 const documents = new Map<Document, WorkbenchWindowDocument>()
 const nativeVisibility = new Map<Document, boolean>()
 const visibilityListeners = new Map<Document, Set<() => void>>()
@@ -35,23 +41,33 @@ export function registerWorkbenchHost(entry: WorkbenchHost): () => void {
   const previous = hosts.get(key)
   if (previous && previous.host !== entry.host) throw new Error('Original workface host is ambiguous; no duplicate window was created.')
   hosts.set(key, entry); changed()
-  return () => { if (hosts.get(key) === entry) { hosts.delete(key); changed() } }
+  if (entry.target.kind === 'surface') surfaceDocumentChanged(entry.target, previous?.host.ownerDocument ?? document)
+  return () => {
+    if (hosts.get(key) !== entry) return
+    hosts.delete(key); changed()
+    surfaceDocumentChanged(entry.target, entry.host.ownerDocument)
+  }
 }
 export function originalWorkbenchHost(target: AppWindowTarget): WorkbenchHost | null { return hosts.get(workbenchTargetKey(target)) ?? null }
 export function workbenchWindowPlacement(target: AppWindowTarget | null): WorkbenchWindowPlacement | null {
   return target ? placements.get(workbenchTargetKey(target)) ?? null : null
 }
 const surfaceTargets = { survey: { kind: 'surface', surface: 'survey' }, recall: { kind: 'surface', surface: 'recall' } } as const
-const ignoreChanges = () => () => {}
 /** The committed owner document, including while an opening or return is pending. */
 export function workbenchSurfaceDocument(surface?: string): Document {
   if (surface === 'survey' || surface === 'recall') return originalWorkbenchHost(surfaceTargets[surface])?.host.ownerDocument ?? document
   return document
 }
 export function isWorkbenchSurfaceDetached(surface: WorkbenchSurface): boolean { return typeof document !== 'undefined' && workbenchSurfaceDocument(surface) !== document }
+export function subscribeWorkbenchSurfaceDocument(surface: string | undefined, listener: () => void): () => void {
+  if (surface !== 'survey' && surface !== 'recall') return () => {}
+  const consumers = surfaceListeners[surface]
+  consumers.add(listener)
+  return () => { consumers.delete(listener) }
+}
 export function useWorkbenchSurfaceDocument(surface?: string): Document {
-  const relevant = surface === 'survey' || surface === 'recall'
-  return useSyncExternalStore(relevant ? subscribeWorkbenchWindows : ignoreChanges, () => workbenchSurfaceDocument(surface))
+  const subscribe = useCallback((listener: () => void) => subscribeWorkbenchSurfaceDocument(surface, listener), [surface])
+  return useSyncExternalStore(subscribe, () => workbenchSurfaceDocument(surface))
 }
 export function useWorkbenchSurfaceDetached(surface: WorkbenchSurface): boolean { return useWorkbenchSurfaceDocument(surface) !== document }
 
@@ -65,20 +81,20 @@ export async function placeWorkbenchWindow(target: AppWindowTarget, placement: W
   const key = workbenchTargetKey(target), previous = placements.get(key), request = {}
   placementRequests.set(key, request)
   if (placement) placements.set(key, placement); else placements.delete(key)
+  const previousDocument = entry.host.ownerDocument
   changed()
-  try {
-    await entry.place(placement)
-    // Sibling React trees can own Regions inside the adopted surface. Refresh
-    // their original document bindings only after the physical move commits.
-    if (target.kind === 'surface') changed()
-  }
+  try { await entry.place(placement) }
   catch (error) {
     if (placementRequests.get(key) === request) {
       if (previous) placements.set(key, previous); else placements.delete(key)
       changed()
     }
     throw error
-  } finally { if (placementRequests.get(key) === request) placementRequests.delete(key) }
+  } finally {
+    if (placementRequests.get(key) === request) placementRequests.delete(key)
+    // Observe the actual adoption, including when a transfer reply was lost.
+    surfaceDocumentChanged(target, previousDocument)
+  }
 }
 export function registerWorkbenchDocument(doc: Document, identity: WorkbenchWindowDocument): () => void {
   documents.set(doc, identity)

@@ -82,7 +82,8 @@ const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const emptyZoneTabs: ReadonlyMap<string, readonly string[]> = new Map()
 
 
-export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAction, visible = true, controlsCoverPage = false, unconfirmedBrowserRegionIds, catalog, projection, selection, pageSelection = null, viewTargets, onSelectReference }: {
+export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAction, visible = true, observeWork = visible, controlsCoverPage = false, unconfirmedBrowserRegionIds, catalog, projection, selection, pageSelection = null, viewTargets, onSelectReference }: {
+  observeWork?: boolean
   windowAction?: import('react').ReactNode
   visible?: boolean
   controlsCoverPage?: boolean
@@ -118,7 +119,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
   const collected = useAppStore(state => state.surveyCollectedZones)
   const profileView = useAppStore(state => state.surveyProfileView)
   const profileViewRecovery = useAppStore(state => state.surveyProfileViewReadRecovery)
-  const profiles = useBrowserProfiles(visible)
+  const profiles = useBrowserProfiles(observeWork)
   const pageReferences = useAppStore(state => state.surveyPageReferences)
   const pageReadRecovery = useAppStore(state => state.surveyPageReadRecovery)
   const pinnedItems = useAppStore(state => state.pinnedItems)
@@ -136,7 +137,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
   const selectWorkspace = useAppStore(state => state.selectWorkspace)
   const topicsWorkspace = config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
   const store = useMemo(() => ({ getState: useAppStore.getState, getInitialState: useAppStore.getInitialState,
-    subscribe: visible ? useAppStore.subscribe : () => () => {} }), [visible])
+    subscribe: observeWork ? useAppStore.subscribe : () => () => {} }), [observeWork])
   const tabs = useStore(store, state => state.tabs)
   const layouts = useStore(store, state => state.layouts)
   const sessions = useStore(store, state => state.sessions)
@@ -283,7 +284,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
   const [availableWidth, setAvailableWidth] = useState(0)
   useLayoutEffect(() => {
     const surface = surfaceRef.current
-    if (!visible || !surface) return
+    if (!observeWork || !surface) return
     const measure = () => {
       const width = surface.getBoundingClientRect().width
       if (!width) return
@@ -296,7 +297,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
     observer.observe(surface)
     if (managementRef.current) observer.observe(managementRef.current)
     return () => observer.disconnect()
-  }, [visible, toolsOpen, controlsCoverPage])
+  }, [observeWork, toolsOpen, controlsCoverPage])
   const { minWidth, maxWidth } = surveySidebarBounds(availableWidth)
   const effectiveSidebarWidth = clampSidebarResizeWidth(sidebarWidth, minWidth, maxWidth)
   const reportDraftWidth = useCallback((width: number) => {
@@ -720,11 +721,11 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
   }
   const pageItems = (references: typeof profileReferences.pages, reorderable = false) => references.length ? <SortableContext items={reorderable ? references.map(surveyPageOrderKey) : []} strategy={verticalListSortingStrategy}><div aria-label="Saved Survey pages">{references.map(page => {
           const owner = surveyPageOwner(tabs, page, catalog), browser = owner?.surface.kind === 'browser' ? owner.surface : null
-          const item = (dragHandle?: ReactNode) => <SurveyPageItem dragHandle={dragHandle} {...pinOptions({ kind: 'page', ...page })} selection={selectionFor({ kind: 'page', ...page })} key={JSON.stringify(page)} page={page} browser={browser} enabled={visible && !controlsCoverPage}
+          const item = (dragHandle?: ReactNode) => <SurveyPageItem dragHandle={dragHandle} {...pinOptions({ kind: 'page', ...page })} selection={selectionFor({ kind: 'page', ...page })} key={JSON.stringify(page)} page={page} browser={browser} enabled={observeWork && !controlsCoverPage}
             selected={pageSelection?.regionId === page.regionId && pageSelection.browserId === page.browserId} onSelect={() => setSelection({ kind: 'page', ...page })} onClose={browser ? () => closePage({ kind: 'page', ...page }) : undefined}
             onContextMenu={button => { contextOrigin.current = button; setContextItem({ kind: 'page', ...page }) }}
             actions={<SurveyItemOptions {...pageOptionsFor({ kind: 'page', ...page })} rowAction compact />} />
-          return reorderable ? <SortableSurveyPage key={JSON.stringify(page)} page={page} order={references} title={browser?.title || 'Retained page'} enabled={visible && !controlsCoverPage}>{item}</SortableSurveyPage> : item()
+          return reorderable ? <SortableSurveyPage key={JSON.stringify(page)} page={page} order={references} title={browser?.title || 'Retained page'} enabled={observeWork && !controlsCoverPage}>{item}</SortableSurveyPage> : item()
         })}</div></SortableContext> : null
   const selectionControls = selectingContent ? <div className="survey-composition-toolbar" role="group" aria-label="Select content to combine">
     {selectingContent ? <><span role="status">{selectedSources.length} selected</span><Menu.Root modal={false}>
@@ -788,7 +789,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
             const itemOptions = itemOptionsFor(zone, status.details)
             return <SurveyZoneItem pinned={pinnedKeys.has(surveyPinKey({ kind: 'zone', zoneId }))} selection={selectionFor({ kind: 'research', zoneId: zone.zoneId })} compositionEnabled={compositionEnabled} dragHandle={dragHandle} key={zone.zoneId} zone={zone} title={itemTitle(zone)} glyph={itemGlyph(zone)} selected={selection?.zoneId === zone.zoneId || currentPageZoneId === zone.zoneId}
               showTitle={selectingContent || sidebarCollapsed || itemTabs.length < 2 || Boolean(explorationNames[zone.zoneId]?.trim())}
-              tabColumns={itemTabs.length > 1 ? <div className="survey-item-tabs" aria-label={`Tabs in ${itemTitle(zone)}`}>{itemTabs.map(tabId => <SurveyTabColumn active={visible && !controlsCoverPage && !sidebarCollapsed} selection={selectionFor({ kind: 'tab', tabId })} compositionEnabled={compositionEnabled} key={tabId} tab={tabs[tabId]!} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} selected={selection?.zoneId === zone.zoneId && selection.active?.tabId === tabId || currentPageOwner?.tab.id === tabId} onSelect={() => chooseTab(zone.zoneId, tabId)} onClose={title => closeItemTab(zone.zoneId, tabId, title)} />)}</div> : null}
+              tabColumns={itemTabs.length > 1 ? <div className="survey-item-tabs" aria-label={`Tabs in ${itemTitle(zone)}`}>{itemTabs.map(tabId => <SurveyTabColumn active={observeWork && !controlsCoverPage && !sidebarCollapsed} selection={selectionFor({ kind: 'tab', tabId })} compositionEnabled={compositionEnabled} key={tabId} tab={tabs[tabId]!} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} selected={selection?.zoneId === zone.zoneId && selection.active?.tabId === tabId || currentPageOwner?.tab.id === tabId} onSelect={() => chooseTab(zone.zoneId, tabId)} onClose={title => closeItemTab(zone.zoneId, tabId, title)} />)}</div> : null}
               onCloseSingleTab={itemTabs.length === 1 ? () => closeItemTab(zone.zoneId, itemTabs[0]!, itemTitle(zone)) : undefined}
               options={<SurveyItemOptions {...itemOptions} rowAction compact />}
               onContextMenu={button => { contextOrigin.current = button; contextOrganization.current = list.stored; setContextItem({ kind: 'zone', zoneId: zone.zoneId }) }} activity={status.summary} activityDescription={status.description} editing={renamingZoneId === zone.zoneId} nameDraft={itemNameDraft.current?.zoneId === zone.zoneId ? itemNameDraft.current : undefined} onEdit={editing => editItemName(zone, editing)}
@@ -864,7 +865,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
         </>}
       </div>
       {workspace && (toolsVisited || toolsOpen) ? <aside ref={managementRef} id="survey-management" className="survey-management" aria-label="Browser management controls" hidden={!toolsOpen} inert={!toolsOpen || !visible} aria-hidden={!toolsOpen || !visible}>
-        <header><strong>Browser tools · {workspace.name}</strong><button type="button" aria-label="Close browser management" onClick={() => setToolsOpen(false)}><ThemeActionCloseIcon size={14} /></button></header><BrowserToolsPanel workspace={workspace} visible={visible && toolsOpen} />
+        <header><strong>Browser tools · {workspace.name}</strong><button type="button" aria-label="Close browser management" onClick={() => setToolsOpen(false)}><ThemeActionCloseIcon size={14} /></button></header><BrowserToolsPanel workspace={workspace} visible={observeWork && toolsOpen} />
       </aside> : null}
     </div>
     <SurveyRecallCapture target={visible && !controlsCoverPage ? recallCapture : null} onClose={() => setRecallCapture(null)} />

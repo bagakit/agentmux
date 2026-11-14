@@ -47,7 +47,8 @@ const RelationshipsIcon = semanticIconComponent('object.relationships')
 
 
 /** Recall only presents the existing Notebook directory and original file owners. */
-export const GlobalRecallSurface = memo(function GlobalRecallSurface({ windowAction, visible = true, catalog, projection, selection, viewTargets, onSelectReference }: {
+export const GlobalRecallSurface = memo(function GlobalRecallSurface({ windowAction, visible = true, observeWork = visible, catalog, projection, selection, viewTargets, onSelectReference }: {
+  observeWork?: boolean
   windowAction?: import('react').ReactNode
   visible?: boolean; catalog: AgentMuxSpaceCatalog | null; projection: WorkbenchProjection | null; selection: ResolvedSurveyZoneSelection | null
   onSelectReference?: (reference: WorkbenchProjectionSelection) => void
@@ -109,10 +110,10 @@ export const GlobalRecallSurface = memo(function GlobalRecallSurface({ windowAct
   const surfaceRef = useRef<HTMLElement>(null), resizeHandle = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
   useLayoutEffect(() => {
-    const surface = surfaceRef.current; if (!visible || !surface) return
+    const surface = surfaceRef.current; if (!observeWork || !surface) return
     const measure = () => { const next = surface.getBoundingClientRect().width; if (next) setWidth(next) }
     measure(); const observer = new ResizeObserver(measure); observer.observe(surface); return () => observer.disconnect()
-  }, [visible])
+  }, [observeWork])
   const normalBounds = surveySidebarBounds(width)
   const navigationStacked = !sidebarCollapsed && width > 0 && normalBounds.maxWidth < SURVEY_SIDEBAR_MIN_WIDTH
   const { minWidth, maxWidth } = navigationStacked ? { minWidth: width, maxWidth: width } : normalBounds
