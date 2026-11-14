@@ -10,7 +10,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { AgentMuxNotebookStore, AgentMuxNotesStorage } from '@agentmux/core/notebook-store'
 import { noteHistoryRevision } from '@agentmux/core/note-history'
-import { newNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
+import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { NoteFileWriter } from '../../host/src/note-file-writer.js'
 import { WorkbenchUserStateStore } from '../src/main/workbench-user-state.js'
 import { OrdinaryWorkspaceFiles } from '../../host/src/ordinary-files.js'
@@ -610,7 +610,10 @@ it.runIf(business)('Source reference copying cannot serialize a Main capability,
   const { copyNoteBlock, writeNoteShareClipboard, readNoteShareClipboard } = await import('../src/renderer/src/lib/note-share-staging.js')
   if (!document.execCommand) Object.defineProperty(document, 'execCommand', { configurable: true, value: () => false })
   const command = vi.spyOn(document, 'execCommand').mockReturnValue(true), target = f.store.getState().documents[key]!.readSource!
-  expect(() => copyNoteBlock({} as never, 0, source, target.query)).toThrow('shared reference is not confirmed')
+  const { Editor } = await import('@tiptap/core'), { noteContentExtensions } = await import('@agentmux/client-ui/note/note-content-schema')
+  const actual = readNoteDocument(f.store.getState().documents[key]!.content); if (actual.status !== 'valid') throw Error('Actual Source Note body must parse')
+  const editor = new Editor({ extensions: noteContentExtensions(), content: actual.note.content }); cleanup.push(() => editor.destroy())
+  expect(() => copyNoteBlock(editor, 0, source, target.query)).toThrow('shared reference is not confirmed')
   const { NoteSharedFileEditing } = await import('../src/renderer/src/components/NoteSharedFileEditing.js')
   const { NoteSharedContext } = await import('../src/renderer/src/lib/note-shared-context.js')
   const { noteKnowledge } = await import('@agentmux/client-ui/note/note-knowledge')
