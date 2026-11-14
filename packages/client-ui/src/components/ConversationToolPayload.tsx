@@ -2,6 +2,7 @@ import { applyEdits, format } from 'jsonc-parser'
 import { useMemo, useState, type ReactNode } from 'react'
 import { useConversationToolLabels } from '../platform.js'
 import { ContentCopyButton } from './ContentCopyButton.js'
+import { Button } from './Button.js'
 import { ConversationProgressiveBody, needsProgressiveText } from './ConversationProgressiveBody.js'
 import { MarkdownCodeBlock } from './MarkdownCodeBlock.js'
 import { SemanticIcon } from '../theme/icons.js'
@@ -48,9 +49,14 @@ function ConversationToolPayloadBody({ text, identity, sourceIdentity, callId, c
         </ConversationRetainedDetails> : null}
       </div> : null}
       <span className="conversation-tool-payload__tools">
-      {validJson ? <button type="button" className="conversation-tool-trace__format" aria-label={labels.formatJson}
+      {validJson ? <Button className="conversation-tool-trace__format" aria-label={labels.formatJson}
         aria-pressed={formatted} title={labels.formatJsonHint}
-        onClick={() => setView({ text, sourceIdentity, formatted: !formatted })}><SemanticIcon name={formatted ? 'action.confirm' : 'file.structured-data'} size={12} />{labels.formatJson}</button> : null}
+        onClick={() => setView(previous => {
+          const current = previous.text === text && previous.sourceIdentity === sourceIdentity
+          return { text, sourceIdentity, formatted: !(current && previous.formatted) }
+        })}>
+        <SemanticIcon name="file.structured-data" size={12} />{labels.formatJson}
+      </Button> : null}
       {text.length > 0 ? <ContentCopyButton text={text} identity={identity} label={copyLabel} /> : null}
       </span>
     </div>

@@ -10,11 +10,9 @@
 .conversation-tool-payload__call[open] > summary svg { transform: rotate(90deg); }
 .conversation-tool-payload__call-original { display: block; padding-block: var(--sp-2); overflow-wrap: anywhere; white-space: normal; }
 .conversation-tool-payload__tools { display: inline-flex; flex: none; align-items: center; justify-content: flex-end; gap: var(--sp-2); margin-inline-start: auto; white-space: nowrap; }
-.conversation-tool-trace__format, .conversation-tool-payload__tools > .content-copy { display: inline-flex; align-items: center; gap: var(--sp-1); min-height: 24px; padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; box-shadow: none; font: inherit; cursor: pointer; }
-.conversation-tool-payload__tools > :is(.conversation-tool-trace__format, .content-copy):hover { color: var(--text); background: transparent; box-shadow: none; }
-.conversation-tool-trace__format[aria-pressed='true'] { color: var(--text); background: transparent; }
-.conversation-tool-trace__format[aria-pressed='true'] > .semantic-icon { color: var(--green-2); }
-.conversation-tool-trace__format:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
+.conversation-tool-trace__format { gap: var(--sp-1); min-height: 24px; padding: 0 var(--sp-2); }
+.conversation-tool-payload__tools > .content-copy { display: inline-flex; align-items: center; gap: var(--sp-1); min-height: 24px; padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; box-shadow: none; font: inherit; cursor: pointer; }
+.conversation-tool-payload__tools > .content-copy:hover { color: var(--text); background: transparent; box-shadow: none; }
 .conversation-tool-payload__code .md-block-code { margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; font: var(--fs-meta)/1.6 var(--font-mono); }
 .conversation-tool-payload__code .md-block-code code { font: inherit; }
 @media (pointer: coarse) { .conversation-tool-trace__format, .conversation-tool-payload__tools > .content-copy, .conversation-tool-payload__call > summary { min-height: 44px; } }
