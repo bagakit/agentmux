@@ -187,6 +187,22 @@ function focusedWindow(policy: 'preserve' | 'target' = 'target') {
       input: { policy, outcome: policy === 'preserve' ? 'preserved' : 'transferred', before: observed, after: observed } } }
 }
 describe('original desktop document facts', () => {
+  it('keeps main Focus selection while confirming an exact saved page in the independent Survey document', () => {
+    const receipt = focusedWindow('preserve'), result = receipt.result
+    const page = { kind: 'page' as const, browserId: 'survey-browser', regionId: 'survey-region' }
+    result.navigation.requested = { kind: 'survey', selection: page }
+    result.navigation.selection = { ...result.navigation.selection, mainSurface: 'agents', surface: 'focus', focusView: 'map', survey: page }
+    Object.assign(result.presentation, { surface: 'survey', tabId: 'survey-tab', regionId: page.regionId })
+    expect(parseDesktopFocusSuccessReceipt(receipt)).toEqual(receipt)
+    for (const change of [{ surface: 'recall' }, { regionId: 'other' }, { state: 'main-visible' }, { documentGeneration: null }]) {
+      const mutated = structuredClone(receipt)
+      Object.assign(mutated.result.presentation, change)
+      expect(() => parseDesktopFocusSuccessReceipt(mutated)).toThrow()
+    }
+    const missing = structuredClone(receipt)
+    delete (missing.result.presentation as { surface?: string }).surface
+    expect(() => parseDesktopFocusSuccessReceipt(missing)).toThrow()
+  })
   it('accepts confirmed original window focus without guessing main-window presentation', () => {
     const receipt = focusedWindow()
     expect(parseDesktopFocusSuccessReceipt(receipt)).toEqual(receipt)

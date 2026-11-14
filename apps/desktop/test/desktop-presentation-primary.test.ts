@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentMuxDesktopSelection } from '@agentmux/core'
-import { installDesktopPresentationOwner, readDesktopPresentation } from '../src/renderer/src/lib/desktop-presentation'
+import { desktopSurfaceWindow, installDesktopPresentationOwner, readDesktopPresentation } from '../src/renderer/src/lib/desktop-presentation'
+import { registerWorkbenchDocument, registerWorkbenchHost, observeWorkbenchNativeVisibility } from '../src/renderer/src/lib/workbench-window-registry'
 import { workbenchRegionProjectionSlotId, type WorkbenchProjectionSelection } from '../src/renderer/src/lib/workbench-projection'
 import type { WorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 
@@ -43,6 +44,29 @@ function addRegion(parent: HTMLElement, role: 'primary' | 'native' | 'secondary'
 }
 
 describe('exact primary presentation observation', () => {
+  it('observes only the original visible Recall surface document beside the main Focus map', () => {
+    const frame = document.createElement('iframe')
+    document.body.append(frame)
+    const doc = frame.contentDocument!
+    const host = doc.createElement('div'), page = doc.createElement('section')
+    page.dataset.knowledgeSurface = 'recall'; host.append(page); doc.body.append(host)
+    vi.spyOn(page, 'getBoundingClientRect').mockReturnValue(main.getBoundingClientRect())
+    const id = { windowId: 'recall', documentGeneration: 'original-document' }
+    let unregister = registerWorkbenchDocument(doc, id)
+    const releaseHost = registerWorkbenchHost({ target: { kind: 'surface', surface: 'recall' }, host, place: async () => {} })
+    try {
+      const window = desktopSurfaceWindow('recall')
+      const mainSelection = { ...selection, surface: 'focus' as const, mainSurface: 'agents' as const, focusView: 'map' as const }
+      const read = () => readDesktopPresentation(mainSelection, tabs, window).presentation
+      expect(read()).toMatchObject({ surface: 'recall', ...id, state: 'window', tabId: null, regionId: null })
+      observeWorkbenchNativeVisibility([{ ...id, target: { kind: 'surface', surface: 'recall' }, presentation: 'hidden', bounds: null, focused: false }])
+      expect(read()).toMatchObject({ surface: 'recall', ...id, state: 'pending' })
+      unregister()
+      unregister = registerWorkbenchDocument(doc, { ...id, documentGeneration: 'replacement' })
+      expect(read()).toMatchObject({ state: 'pending' })
+      expect(read().documentGeneration).toBeUndefined()
+    } finally { releaseHost(); unregister(); frame.remove() }
+  })
   it.each([true, false])('reports the original borrowed View independently of secondary-first DOM order (%s)', secondaryFirst => {
     const secondary = addRegion(main, 'secondary'), primary = addRegion(panel, 'primary')
     if (!secondaryFirst) document.body.prepend(panel)

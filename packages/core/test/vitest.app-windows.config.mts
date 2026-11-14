@@ -7,6 +7,7 @@ const root = resolve(import.meta.dirname, '../../..')
 const protocol = 'packages/core/src/public-rpc-windows.ts', service = 'packages/core/src/public-rpc-service.ts', focus = 'packages/core/src/desktop-focus-parser.ts'
 const changes = {
   collapseSurface: [protocol, "return { kind: 'surface', surface: p.surface }", "return { kind: 'surface', surface: 'survey' }"],
+  ignoreSurfaceDocument: [focus, 'const presentedSurface = independent ?? navigation.selection.surface', 'const presentedSurface = navigation.selection.surface'],
   exactIdentity: [protocol, "value === 'self'", 'false'],
   exactIntent: [protocol, 'JSON.stringify(operation.input) !== JSON.stringify(input)', 'false'],
   uniqueOwner: [protocol, 'new Set(borrowed).size !== borrowed.length', 'false'],
