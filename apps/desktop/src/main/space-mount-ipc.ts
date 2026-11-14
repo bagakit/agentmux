@@ -163,16 +163,16 @@ export function registerSpaceMountIpc(ports: {
     inspectInteraction: ['operationId']
   }
   ports.handle('spaceMounts:memberCall', (event, token: string, memberToken: string, method: unknown, value: unknown) => sessionInputOperationResult(async () => {
-    let obtained: SpaceMountMemberMethods[keyof SpaceMountMemberMethods]['result'] | undefined
+    let obtained = false, originalResult: SpaceMountMemberMethods[keyof SpaceMountMemberMethods]['result'] | undefined
     try { return await reads.read(event.sender, token, async signal => {
     if (typeof method !== 'string' || !Object.hasOwn(memberFields, method)) throw new Error('Unknown fixed original member operation.')
     const surface = members.get(`${event.sender.id}:${memberToken}`)
     if (!surface) throw new Error('This original member view is closed. Its Session and input are retained.')
     const original = method as keyof SpaceMountMemberMethods
     const result = await surface.call(original, fields(value, memberFields[original]) as SpaceMountMemberMethods[typeof original]['input'], signal)
-    if (spaceMountMemberCallHasReceipt(original)) obtained = result
+    if (spaceMountMemberCallHasReceipt(original)) { originalResult = result; obtained = true }
     return result
-    }) } catch (cause) { if (obtained !== undefined) return obtained; throw cause }
+    }) } catch (cause) { if (obtained) return originalResult; throw cause }
   }))
   return { dispose: () => reads.dispose() }
 }

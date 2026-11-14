@@ -68,7 +68,9 @@ export type SpaceMountMemberRoute = { hostId: string; target: import('@agentmux/
 export type SpaceMountMemberIdentity = { id: string; hostId: string }
 export type SpaceMountInputImageRetention = { upload: import('@agentmux/core/files').FileUploadIdentity; observation: 'confirmed' | 'unavailable'; issue?: { code?: string; message: string } }
 /** Keep an obtained effect receipt separate from the lifetime of its reply reader. */
-export function spaceMountMemberCallHasReceipt(method: string): boolean { return method === 'retainImage' || isSpaceMemberNativeWrite(method) }
+export function spaceMountMemberCallHasReceipt(method: string): boolean {
+  return method === 'write' || method === 'paste' || method === 'resize' || method === 'retainImage' || isSpaceMemberNativeWrite(method)
+}
 export type SpaceMountMemberEvent =
   | { type: 'session'; session: import('./contracts').SessionSnapshot }
   | { type: 'runtime'; event: import('./contracts').RuntimeEvent }

@@ -15,7 +15,9 @@ export async function createSpaceMemberSurface(input: SpaceMountMemberRoute, por
   retainedRpc?: Pick<AgentMuxRpcClient, 'call' | 'subscribe'>
   project(subject: AgentMuxRuntimeSubject, catalog: import('@agentmux/core').AgentCatalogEntry[]): SessionSnapshot
 }, emit: (event: SpaceMountMemberEvent) => void, signal: AbortSignal): Promise<SpaceMountMemberSurface & { start(): void }> {
-  const client = await connectSpaceMember(ports.rpc, input.target) as SpaceMemberClient
+  // Reads still check this view after awaiting. An obtained effect ACK belongs
+  // to its original operation even when this carrier changes before adoption.
+  const client = await connectSpaceMember(ports.retainedRpc ?? ports.rpc, input.target) as SpaceMemberClient
   const readingOnly = !('expectedRun' in input.target)
   const sessionOnly = 'kind' in input.target && input.target.kind === 'session'
   const originalRun = () => {
@@ -167,10 +169,10 @@ export async function createSpaceMemberSurface(input: SpaceMountMemberRoute, por
     refreshAttachment: value => attach(value.afterByte, value.attachmentId),
     replay: async value => { check(); requireLease(value.attachmentId); const result = await client.readRunReplay(originalRun(), value.afterByte, 'terminal'); check(); return { replay: result.replay, gap: result.gap } },
     detach: async value => { requireLease(value.attachmentId); leases.delete(value.attachmentId); if (!leases.size) await client.releaseRunAttachment(originalRun()) },
-    resize: async value => { check(); requireLease(value.attachmentId); const result = await client.resizeTerminal(originalRun(), value.cols, value.rows); check(); return { cols: result.cols, rows: result.rows } },
-    write: async value => { check(); await client.writeAgent({ agentSessionId: input.target.agentSessionId, expectedRun: originalRun(), ...value }); check() },
-    paste: async value => { check(); await client.pasteAgent({ agentSessionId: input.target.agentSessionId, expectedRun: originalRun(), ...value }); check() },
-    inspectInteraction: async value => { check(); return await client.inspectAgentInteractionOperation({ agentSessionId: input.target.agentSessionId, operationId: value.operationId }) }
+    resize: async value => { check(); requireLease(value.attachmentId); const result = await client.resizeTerminal(originalRun(), value.cols, value.rows); return { cols: result.cols, rows: result.rows } },
+    write: async value => { check(); await client.writeAgent({ agentSessionId: input.target.agentSessionId, expectedRun: originalRun(), ...value }) },
+    paste: async value => { check(); await client.pasteAgent({ agentSessionId: input.target.agentSessionId, expectedRun: originalRun(), ...value }) },
+    inspectInteraction: async value => { check(); const result = await client.inspectAgentInteractionOperation({ agentSessionId: input.target.agentSessionId, operationId: value.operationId }); check(); return result }
   }
   const dispose = async () => {
     if (closed) return
