@@ -90,18 +90,18 @@ describe('Gemini provider', () => {
       })
     })
 
-    it('工具失败与成功在时间轴上分得开（tool_response 是 Claude 拼法）', () => {
+    it('原 ToolResult.error 和 llmContent 分别保留失败与正文', () => {
       const call = { tool_name: 'run_shell_command', tool_input: { command: 'npm test' } }
       const failed = gemini.normalizeHook({
         receiptId: 'r-fail', agentSessionId: 's-gemini', runId: 'run-gemini', providerId: 'gemini',
-        payload: { hook_event_name: 'AfterTool', session_id: 'g', ...call, tool_response: { output: 'boom', is_error: true } }
+        payload: { hook_event_name: 'AfterTool', session_id: 'g', ...call, tool_response: { error: { message: 'boom', type: 'EXECUTION_FAILED' } } }
       }, {})
       const failedItem = failed.timeline.find((m) => m.type !== 'update' && m.item.kind === 'tool_call')
       expect(failedItem && failedItem.type !== 'update' && failedItem.item.status).toBe('failed')
 
       const ok = gemini.normalizeHook({
         receiptId: 'r-ok', agentSessionId: 's-gemini', runId: 'run-gemini', providerId: 'gemini',
-        payload: { hook_event_name: 'AfterTool', session_id: 'g', ...call, tool_response: { output: 'fine' } }
+        payload: { hook_event_name: 'AfterTool', session_id: 'g', ...call, tool_response: { llmContent: [{ text: 'fine' }] } }
       }, {})
       const okItem = ok.timeline.find((m) => m.type !== 'update' && m.item.kind === 'tool_call')
       expect(okItem && okItem.type !== 'update' && okItem.item.status).toBe('complete')

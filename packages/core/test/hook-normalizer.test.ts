@@ -172,7 +172,7 @@ describe('native hook normalization', () => {
 
   /**
    * 接线层。采集规则再对，normalizer 不去调它、或调了不把结果放进 item，整个功能就是死的——
-   * 而只测 `hookToolOutcome` 的用例仍会全绿。本仓库这一季反复栽在这个位置，所以这几条专守接线。
+   * 而只测 Provider 结果贡献的用例仍会全绿。本仓库这一季反复栽在这个位置，所以这几条专守接线。
    */
   describe('工具结果进时间轴', () => {
     const post = (payload: Record<string, unknown>, eventName = 'PostToolUse') =>
@@ -205,8 +205,8 @@ describe('native hook normalization', () => {
       const failed = item(post({
         tool_name: 'Bash',
         tool_input: { command: 'exit 1' },
-        tool_response: { is_error: true, stderr: 'command failed' }
-      }))
+        error: 'command failed'
+      }, 'PostToolUseFailure'))
       const succeeded = item(post({
         tool_name: 'Bash',
         tool_input: { command: 'exit 0' },
@@ -240,20 +240,14 @@ describe('native hook normalization', () => {
       const event = post({
         tool_name: 'Bash',
         tool_input: { command: 'exit 1' },
-        tool_response: { is_error: true, stdout: 'boom' }
-      })
+        error: 'boom'
+      }, 'PostToolUseFailure')
       const items = applyAgentTimelineMutation([], event.timeline[0]!)
       expect(items[0]).toMatchObject({ toolOutput: 'boom', status: 'failed' })
     })
 
-    /**
-     * snake_case 的 Provider 也必须分得出成败——这是「事件名归一化」真正兑现的地方。
-     *
-     * 此前判据是 `eventName.startsWith('Post')`，只对 PascalCase 成立。Hermes 的 `post_tool_call`
-     * 与 Pi 的 `tool_execution_end` 都读不出结果：两家都声明了 `timeline: 'complete-events'`，
-     * 可一条失败的命令和一条成功的命令在时间轴上长得**一模一样**。归一化把判据换成 canonical
-     * 的 `tool-use-end`，这几条就是它兑现的证据——把映射表里那两行删掉，这里立刻发红。
-     */
+    // Canonical end enables the originating Provider's own outcome. Hermes
+    // emits result/status in raw.extra; Pi's generated end emits neither.
     it('Hermes 的 post_tool_call 带得出结果与失败态，不再因命名法被判成事前', () => {
       const hermes = (payload: Record<string, unknown>, eventName: string) =>
         providers.get('hermes').normalizeHook({
@@ -268,12 +262,12 @@ describe('native hook normalization', () => {
       const failed = hermes({
         tool_name: 'shell',
         tool_input: { command: 'exit 1' },
-        tool_response: { is_error: true, stderr: 'boom' }
+        extra: { status: 'error', result: 'boom', error_message: 'tool failed' }
       }, 'post_tool_call')
       const succeeded = hermes({
         tool_name: 'shell',
         tool_input: { command: 'exit 0' },
-        tool_response: 'ok'
+        extra: { status: 'ok', result: 'ok' }
       }, 'post_tool_call')
 
       expect(failed.lifecycleEvent).toBe('tool-use-end')
@@ -288,25 +282,14 @@ describe('native hook normalization', () => {
       const before = hermes({
         tool_name: 'shell',
         tool_input: { command: 'ls' },
-        tool_response: { is_error: true }
+        extra: { status: 'error', result: 'must not be sampled before execution' }
       }, 'pre_tool_call')
       expect(before.lifecycleEvent).toBe('tool-use-start')
       expect(item(before as ReturnType<typeof post>).toolOutput).toBeUndefined()
     })
 
-    /**
-     * Hermes 的 shell-hook wire 是**两层**的，而上面那几条 Hermes 用例把字段预先摊平在顶层，
-     * 于是恰好绕开了 `flattenNestedPayload` 存在的唯一理由。
-     *
-     * 真实形状（本机 `agent/shell_hooks.py` 的 `_serialize_payload`）：顶层只有
-     * `hook_event_name`/`tool_name`/`tool_input`/`session_id`/`cwd` 五个固定键，其余每个事件专属
-     * kwarg 都被塞进 `extra` 子对象——也就是说 `post_tool_call` 的成败、结果正文、关联 id
-     * **全在 `extra` 里**。实测：把 `flattenNestedPayload` 的函数体改成 `return payload`
-     * （不解包），hook-normalizer + agent-provider + provider-conformance 89 条全绿。
-     *
-     * 三条症状同时发生，所以这里三条一起钉：失败被画成成功、输出全丢、Pre/Post 在时间轴上并排
-     * 两行而不是收敛成一条。
-     */
+    // Hermes sends result/status/call ID in raw.extra. Results are Provider-owned;
+    // the existing global nesting/ID behavior remains separately protected here.
     it('Hermes 的事件专属字段藏在 extra 子对象里也读得出——这才是它真实的两层形状', () => {
       // `update` 那一支不带 item，故必须显式收窄：不收窄时 vitest 照旧全绿而 tsc 退 2。
       const landed = (event: { timeline: readonly AgentTimelineMutation[] }) => {
@@ -335,15 +318,15 @@ describe('native hook normalization', () => {
         }, {})
 
       const failed = hermesNested('post_tool_call', {
-        tool_response: { is_error: true, stdout: 'boom' },
+        status: 'error', result: 'boom',
         tool_call_id: 'call_NESTED'
       })
       const failedItem = landed(failed)
 
-      // 1. 失败读得出来。不解包时 `is_error` 在 extra 里看不见，这一步会收敛成 complete——
+      // 1. 失败读得出来。不读取原 extra.status 时失败事实不可见，这一步会收敛成 complete——
       //    一条挂了的命令和一条跑成的命令在时间轴上逐字相同。
       expect(failedItem.status).toBe('failed')
-      // 2. 输出带得出来。不解包时 `tool_response` 也在 extra 里，正文整段丢失。
+      // 2. 输出带得出来。原 result 也只在 extra 里，正文整段丢失。
       expect(failedItem.toolOutput).toBe('boom')
       // Hermes 尚未声明原生身份资格；调用 ID 不能单独晋升为跨事件关联。
       expect(failed.timeline[0]!.type).toBe('append')
@@ -351,7 +334,7 @@ describe('native hook normalization', () => {
 
       // 成功那侧独立承重：只钉失败时，把解包改成「无论如何都判 failed」也能全绿。
       const succeeded = hermesNested('post_tool_call', {
-        tool_response: 'ok',
+        status: 'ok', result: 'ok',
         tool_call_id: 'call_NESTED_OK'
       }, 'receipt-hermes-success')
       const okItem = landed(succeeded)
@@ -370,33 +353,23 @@ describe('native hook normalization', () => {
         payload: {
           tool_name: 'shell',
           tool_input: { command: 'ls' },
-          extra: { tool_name: 'from-extra', tool_response: 'ok' }
+          extra: { tool_name: 'from-extra', status: 'ok', result: 'ok' }
         }
       }, {})
       expect(landed(topLevelWins).toolName).toBe('shell')
     })
 
-    it('Pi 的 tool_execution_end 同样带得出结果——判据是生命周期而非名字形状', () => {
-      const pi = (payload: Record<string, unknown>, eventName: string) =>
-        providers.get('pi').normalizeHook({
-          receiptId: `receipt-pi-${eventName}`,
-          agentSessionId: 'semantic-pi',
-          runId: 'run-pi-tool',
-          providerId: 'pi',
-          eventName,
-          payload: { session_id: 'pi-tool-native', ...payload }
-        }, {})
-
-      const failed = pi({
-        tool_name: 'bash',
-        tool_input: { command: 'exit 2' },
-        tool_response: { is_error: true, stderr: 'nope' }
-      }, 'tool_execution_end')
-      expect(failed.lifecycleEvent).toBe('tool-use-end')
-      expect(item(failed as ReturnType<typeof post>).status).toBe('failed')
-
-      const started = pi({ tool_name: 'bash', tool_input: { command: 'ls' } }, 'tool_execution_start')
-      expect(started.lifecycleEvent).toBe('tool-use-start')
+    it('Pi 的原 extension end 没有结果与失败，仍由 canonical end 进入完成条目', () => {
+      const pi = (eventName: string, values: Record<string, unknown> = {}) => providers.get('pi').normalizeHook({
+        receiptId: `receipt-pi-${eventName}`, agentSessionId: 'semantic-pi', runId: 'run-pi-tool',
+        providerId: 'pi', eventName, payload: { session_id: 'pi-tool-native', tool_name: 'bash', ...values }
+      }, {})
+      const ended = pi('tool_execution_end')
+      expect(ended.lifecycleEvent).toBe('tool-use-end')
+      expect(item(ended)).toMatchObject({ status: 'complete', toolName: 'bash' })
+      expect(item(ended).toolOutput).toBeUndefined()
+      expect(item(pi('tool_execution_end', { tool_response: { is_error: true, stderr: 'foreign' } })).status).toBe('complete')
+      expect(pi('tool_execution_start', { tool_input: { command: 'ls' } }).lifecycleEvent).toBe('tool-use-start')
     })
 
     it('Antigravity 的 PostInvocation 不是工具结果，尽管它以 Post 开头', () => {
@@ -501,9 +474,9 @@ describe('native hook normalization', () => {
           tool_name: 'Bash',
           tool_input: { command: 'exit 1' },
           tool_use_id: 'toolu_FAIL',
-          tool_response: { is_error: true, stderr: 'boom' }
+          error: 'boom'
         },
-        'PostToolUse',
+        'PostToolUseFailure',
         'receipt-post'
       )
       const items = applyAgentTimelineMutation(

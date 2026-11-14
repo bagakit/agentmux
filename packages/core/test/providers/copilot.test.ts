@@ -11,7 +11,6 @@ import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import { COPILOT_HOOK_EVENTS, COPILOT_HOOKS, createCopilotManagedHookPlan } from '../../src/providers/copilot.js'
 import { HOOK_COMMAND_TIMEOUT_SECONDS } from '../../src/providers/shared.js'
 import { canonicalHookLifecycleEvent as declaredHookLifecycleEvent } from '../../src/agent-hook-event.js'
-import { hookToolOutcome } from '../../src/hook-tool-outcome.js'
 import { releaseSubagentRoster } from '../../src/hook-normalizer.js'
 import type { AgentSemanticState } from '../../src/types.js'
 
@@ -166,14 +165,14 @@ describe('Copilot provider', () => {
       // 只有 `"failure"` 触发。于是那三类失败会照常走 postToolUse——不读 resultType，它们在时间轴上
       // 和成功长得一模一样。这正是 Provider parity 验收明令禁止的缺陷。
       for (const resultType of ['rejected', 'denied', 'timeout', 'failure']) {
-        const outcome = hookToolOutcome({
+        const outcome = copilot.hook.toolOutcome!('postToolUse', {
           toolName: 'bash', toolResult: { resultType, textResultForLlm: 'nope' }
         })
         expect(outcome.failed, resultType).toBe(true)
         expect(outcome.output, resultType).toBe('nope')
       }
       // success 必须仍判成功——否则上面四条会因为"一律报红"而假绿。
-      const ok = hookToolOutcome({ toolResult: { resultType: 'success', textResultForLlm: 'fine' } })
+      const ok = copilot.hook.toolOutcome!('postToolUse', { toolResult: { resultType: 'success', textResultForLlm: 'fine' } })
       expect(ok.failed).toBe(false)
       expect(ok.output).toBe('fine')
     })

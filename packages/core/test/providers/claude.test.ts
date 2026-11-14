@@ -651,7 +651,7 @@ describe('Claude provider', () => {
         tool_response: { stdout: '12 passed' }
       }))
       expect(success.item.status).toBe('complete')
-      expect(success.item.toolOutput).toBe('12 passed')
+      expect(success.item.toolOutput).toBe('{"stdout":"12 passed"}')
     })
 
     it('PostToolUseFailure 与 PreToolUse 收敛到同一条，而不是并排两行', () => {
@@ -665,11 +665,13 @@ describe('Claude provider', () => {
       expect(failure.item.id).toBe(pre.item.id)
     })
 
-    it('只有 is_interrupt 没有 error 时不判失败——它证明不了这一步的成败', () => {
+    it('原 Failure 事件报告失败，is_interrupt 自身不赋予成功事件失败事实', () => {
       const blank = toolMutation(hook('PostToolUseFailure', {
         tool_name: 'Bash', tool_input: {}, tool_use_id: 'tu-x', is_interrupt: true
       }))
-      expect(blank.item.status).toBe('complete')
+      expect(blank.item.status).toBe('failed')
+      expect(blank.item.toolOutput).toBeUndefined()
+      expect(toolMutation(hook('PostToolUse', { tool_name: 'Bash', tool_use_id: 'success-interrupt', is_interrupt: true })).item.status).toBe('complete')
     })
   })
 

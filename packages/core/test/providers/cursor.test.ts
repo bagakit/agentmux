@@ -169,11 +169,12 @@ describe('Cursor provider', () => {
       expect(failure.item.toolOutput).toBe('exit status 1: 3 tests failed')
     })
 
-    it('空的 error_message 不算失败——证明不了任何事的字段不该翻红', () => {
+    it('原 Failure 事件即失败，空 error_message 不伪造正文', () => {
       const blank = toolMutation(hook('postToolUseFailure', {
         tool_name: 'Shell', tool_input: {}, tool_use_id: 'tu-88', error_message: '   '
       }))
-      expect(blank.item.status).toBe('complete')
+      expect(blank.item.status).toBe('failed')
+      expect(blank.item.toolOutput).toBeUndefined()
     })
   })
 

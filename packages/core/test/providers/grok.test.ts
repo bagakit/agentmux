@@ -135,7 +135,7 @@ describe('Grok provider', () => {
       expect(before.item.status).toBe('streaming')
       expect(before.type).toBe('append')
 
-      const failed = toolMutation(hook('post_tool_use_failure', { ...call, toolResult: { stdout: 'boom', exit_code: 2 } }))
+      const failed = toolMutation(hook('post_tool_use_failure', { ...call, error: 'boom' }))
       expect(failed.item.status).toBe('failed')
       expect(failed.item.toolOutput).toContain('boom')
       // 事后走 upsert 并复用事前那条 id：时间轴上一次调用就是一行。
@@ -143,7 +143,7 @@ describe('Grok provider', () => {
       expect(failed.item.id).toBe(before.item.id)
 
       // 成功与失败必须长得不一样——这正是「失败的命令和成功的长得一模一样」那个缺陷的守卫。
-      const ok = toolMutation(hook('post_tool_use', { ...call, toolResult: { stdout: 'all good', exit_code: 0 } }))
+      const ok = toolMutation(hook('post_tool_use', { ...call, toolResult: 'all good' }))
       expect(ok.item.status).toBe('complete')
       expect(ok.item.status).not.toBe(failed.item.status)
     })

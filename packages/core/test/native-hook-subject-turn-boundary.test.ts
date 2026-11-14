@@ -92,6 +92,10 @@ async function harness(mode: Mode, shape: Shape, tracking = false) {
         payload: prompt, renderedText: prompt, submit: '\r' })
     } : {}),
     hook: {
+      // This synthetic protocol owns this selected result field. It does not
+      // borrow a built-in Provider's result aliases or failure rules.
+      toolOutcome: (_eventName, payload) => ({ failed: false,
+        ...(typeof payload.tool_response === 'string' ? { output: payload.tool_response } : {}) }),
       subagentSubject: p => typeof p.agent_name === 'string' || p.scope === 'child',
       nativeHandle: { sessionIdKeys: ['session_id'], transcriptPathKeys: ['transcript_path'] },
       ...(tracking ? { subagentTracking: { startEvents: ['child_open'], stopEvents: ['child_close'],
