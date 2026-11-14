@@ -43,7 +43,11 @@ presentation or inspecting it never changes either execution identity.
 
 Read the client-owned Agent list order with amux space agent-order --display-workspace WORKSPACE.
 With --input FILE|- provide {order:[{hostId,agentSessionId}],expectedOrder?:[...]} to change that
-exact Workspace preference. An empty order restores creation order; new Sessions append.
+exact Workspace preference. Confirmed derivation trees stay adjacent, parent before descendants;
+moving any member orders its whole tree. An empty order restores automatic order: startup order
+with observed A2A peers nearby. Saved manual groups retain precedence; new groups follow them.
+effectiveOrder includes confirmed retained members; the GUI's + Closed checkbox only filters
+presentation. Relationship observation gaps remain issues, never permission to stop an Agent.
 This changes no placement, focus or Run. Applied order and confirmed storage durability are
 separate receipts. After a partial/unknown save, read that exact scope before another write.
 

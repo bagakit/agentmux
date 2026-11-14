@@ -9,3 +9,5 @@
 默认验证命令另运行公共顺序测试：编译的真实 CLI 经公开 RPC 调用原 Store owner，覆盖发现、读写、保存、冲突与未知回执。JSON report 必须确认两个消费测试文件实际执行、用例非空且全部通过。此公共调用链证据与上面的私有 Renderer presentation/Stop I/O 边界分别记录。
 
 其中一张卡片使用与原 `control.agentSessionId` 不同的 presentation id；真实多选、复制、关闭及重启顺序检查都核对原身份，不能把显示定位别名当作执行对象。
+
+派生组场景从 `node apps/desktop/scripts/verify-space-agent-relations.mjs` 进入，同一真实 Dock／共享卡片入口消费明确的私有 `creation.createdBy`、A2A 元数据和 retained descriptor。父、子、孙与独立通信组同时出现，默认隐藏已关闭；复选后与状态筛选叠加，并确认隐藏父项时仍只有整组移动目标。CDP 实际指针和键盘移动后退出 Electron，同 profile 新 PID 启动，不重新 seed，核对原组序、两 Region 布局与草稿。宽、窄、深浅完整 PNG 和编译输入写入本机 receipt；原 PTY 和 Provider I/O 是隔离边界，图片不证明真实厂商恢复。真实恢复 owner、未知不重发和 Core 明确未应用的重试由 `space-agent-relations.test.tsx` 的产品消费者验证，变异入口为 `verify-space-agent-relations-mutations.mjs`。
