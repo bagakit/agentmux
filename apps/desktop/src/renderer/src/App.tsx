@@ -8,7 +8,7 @@ import { observeLastSeenBrowserFavicons } from './lib/browser-last-seen-favicons
 import { ExecutorIdentityContext } from './components/AgentAvatar'
 import { SettingsNavigation, type SettingsNavigationRequest, type MoteLarkSettingsOrigin, type ChannelSettingsOrigin } from './components/SettingsNavigation'
 import { settingsCatalog, settingsModules } from './components/settings/settings-modules'
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { BrandIcon } from './components/BrandIcon'
 import { useAgentAttentionNotifications } from './hooks/useAgentAttentionNotifications'
@@ -58,7 +58,6 @@ import { isMacPlatform } from './lib/host-platform'
 import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import { useNativeOverlayChrome } from './hooks/useNativeOverlayChrome'
 import { RendererResourceOwners } from './components/RendererResourceOwners'
-import { WorkflowComponentGallery } from './components/WorkflowComponentGallery'
 import { FullPageLoadingSurface } from './components/FullPageLoadingSurface'
 import { beginRendererStartup } from './lib/startup-progress'
 import { StartupLoadingSurface } from './components/StartupLoadingSurface'
@@ -78,6 +77,7 @@ import { isSessionSurface } from './lib/workbench-surface-kinds'
 import { SpaceContentPresentationContext, useSpaceContentPresentationOwner } from './lib/space-content-presentation'
 import { MoteSpaceFrame } from './components/MoteSpaceFrame'
 
+const WorkflowComponentGallery = lazy(() => import('./components/WorkflowComponentGallery').then(module => ({ default: module.WorkflowComponentGallery })))
 const WorkspaceWorkbench = memo(WorkspaceWorkbenchView)
 
 /** Retain equal presentation addresses; the original callbacks and projection stay authoritative. */
@@ -106,7 +106,7 @@ export function App() {
   useEffect(() => observeLastSeenBrowserFavicons(), [])
   const workflowComponentGallery = typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('agentmux-component-gallery') === '1'
-  if (workflowComponentGallery) return <WorkflowComponentGallery />
+  if (workflowComponentGallery) return <Suspense fallback={<FullPageLoadingSurface scope="region" phase="loading" title="Loading gallery" detail="Preparing component previews" />}><WorkflowComponentGallery /></Suspense>
   return <DesktopApp />
 }
 

@@ -1,4 +1,3 @@
-import { fixtureEpoch as _reshape_fixtureEpoch, fixturePath as _reshape_fixturePath } from "../../../../../../test/fixture-values.mjs"
 import { useEffect, useState } from 'react'
 import type { AppConfig, ComposerShortcut, ScratchTopicSnapshot, SessionSnapshot } from '../../../shared/contracts'
 import { DEFAULT_MOTE_FACE } from '../../../shared/mote-avatars'
@@ -40,7 +39,7 @@ const GALLERY_PROMPT: ComposerShortcut = {
 const workingStatus: SessionSnapshot['status'] = {
   state: 'working',
   source: 'native-hook',
-  observedAt: _reshape_fixtureEpoch(0, 0, 0)
+  observedAt: 0
 }
 
 const degradedNotice: RenderableServiceNotice = {
@@ -71,7 +70,7 @@ const galleryConversationReading = projectConversationReading({ agentSessionId: 
 export function ObservationSurfaceGallery() {
   const feedback = useComposerFeedback('gallery')
   const inbox = useServiceNotices('gallery', [{ id: 'delivery', notice: degradedNotice }])
-  const [draft, setDraft] = useState(() => `${appendSemanticReference('请检查 ', { token: '', label: 'review', kind: 'skill', reference: '@/skills/review/SKILL.md' })}${("@" + _reshape_fixturePath("gallery/.agentmux/pasted/capture.png") + " ")}`)
+  const [draft, setDraft] = useState(() => `${appendSemanticReference('请检查 ', { token: '', label: 'review', kind: 'skill', reference: '@/skills/review/SKILL.md' })}${("@" + "gallery/.agentmux/pasted/capture.png" + " ")}`)
   const [queued, setQueued] = useState<ComposerQueuedMessage[]>([
     { id: 'gallery-q-1', text: 'Run the focused tests', status: 'deferred', deliverable: true, error: 'The Agent is not ready to accept another message yet.' },
     { id: 'gallery-q-2', text: 'Summarize the remaining risk', status: 'failed', deliverable: false, error: 'Previous run ended before delivery' }
@@ -113,7 +112,7 @@ export function ObservationSurfaceGallery() {
         <AgentComposer
           primaryAction="stop"
           onInterrupt={() => setComposerAction('Example current reply interrupted; Session retained')}
-          contextUsage={<AgentContextUsage usage={{ inputTokens: 24000, outputTokens: 0, totalTokens: 24000, observedAt: _reshape_fixtureEpoch(0, 0, 1), context: { usedTokens: 24000, capacityTokens: 100000 } }} />}
+          contextUsage={<AgentContextUsage usage={{ inputTokens: 24000, outputTokens: 0, totalTokens: 24000, observedAt: 1000, context: { usedTokens: 24000, capacityTokens: 100000 } }} />}
           readPastedImage={async () => ({ dataUrl: `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160" viewBox="0 0 240 160"><rect width="240" height="160" fill="#e9edf4"/><rect x="12" y="12" width="216" height="20" rx="4" fill="#7586ab"/><rect x="12" y="44" width="60" height="102" rx="4" fill="#bbc8de"/><rect x="84" y="44" width="144" height="62" rx="4" fill="#8ba9dd"/><rect x="84" y="118" width="108" height="8" rx="4" fill="#7586ab"/></svg>')}` })}
           feedback={<ComposerFeedback failure={feedback.failure} onDismiss={feedback.dismiss} />}
           onAttach={() => setComposerAction('Example file picker requested')}
@@ -157,7 +156,7 @@ function AgentLinksSample() {
     { id: 'gallery-linked-reviewer', label: 'Interface reviewer', providerId: 'codex', executorId: 'gallery-reviewer' },
     { id: 'gallery-linked-builder', label: '负责共享对话组件与行内对象呈现的同事', providerId: 'claude', executorId: 'gallery-builder' }
   ].map((identity, index) => ({ ...identity, kind: 'agent', hostId: workspace.hostId, workspacePath: index === 1 ? mote.directoryPath : new URL("./projects/amux", import.meta.url).pathname,
-    createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 1), agentSessionUpdatedAt: _reshape_fixtureEpoch(0, 0, 1), processState: 'running', latestOutputBytes: 0,
+    createdAt: 1000, updatedAt: 1000, agentSessionUpdatedAt: 1000, processState: 'running', latestOutputBytes: 0,
     status: { state: index === 0 ? 'working' : 'done', source: 'native-hook', observedAt: Date.now() },
     capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
     control: { kind: 'agent', hostId: workspace.hostId, agentSessionId: identity.id, run: { runId: 'gallery-only-' + identity.id } } }))
