@@ -336,6 +336,29 @@ it('recovers an after-replace lost ACK by validating the same leaf before the fi
   expect((await lstat(h.locator.workspacePath)).ino).toBe(before.ino)
 })
 
+it('retained validate-only performs no additional state-directory fsync after the helper lock barrier', async () => {
+  const h = await ownedFixture()
+  await h.client.prepareAgentExecutionHelper(h.input)
+  const fs = createRequire(import.meta.url)('node:fs/promises') as typeof import('node:fs/promises')
+  const original = fs.open.bind(fs)
+  let stateSyncs = 0
+  vi.spyOn(fs, 'open').mockImplementation((async (path: any, flags: any, mode?: any) => {
+    const handle = await original(path, flags, mode)
+    if (String(path) === h.root && flags === 'r') {
+      const sync = handle.sync.bind(handle)
+      vi.spyOn(handle, 'sync').mockImplementation(async () => {
+        stateSyncs++
+        if (stateSyncs > 1) throw new Error('unrelated validate-only state fsync')
+        await sync()
+      })
+    }
+    return handle
+  }) as any)
+  syncBuiltinESMExports()
+  await expect(h.client.prepareAgentExecutionHelper(h.input)).resolves.toMatchObject({ prepared: { workspacePath: h.locator.workspacePath } })
+  expect(stateSyncs).toBe(1)
+})
+
 it('fails closed before allocation when directory fsync cannot be acknowledged', async () => {
   const h = await ownedFixture()
   const fs = createRequire(import.meta.url)('node:fs/promises') as typeof import('node:fs/promises')
