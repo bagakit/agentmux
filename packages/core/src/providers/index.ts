@@ -23,7 +23,10 @@ import { createCursorProvider } from './cursor.js'
 import { droidProvider } from '@agentmux/providers/droid/provider'
 import { droidNativeHistory } from '@agentmux/providers/droid/native-history'
 import { geminiProvider } from '@agentmux/providers/gemini/provider'
-import { createGrokProvider } from './grok.js'
+import { grokProvider } from '@agentmux/providers/grok/provider'
+import { observeGrokSessionHistory, readGrokSessionHistoryPage, readGrokConversationChanges, readGrokSessionHistoryRecord, grokRecoveryFiles } from './grok-native-history.js'
+import { readGrokInputInitialization } from './grok-input-initialization.js'
+import { observeGrokSessionStatus, readGrokPromptExecutionEvidence } from './grok-session-status.js'
 import { createHermesProvider } from './hermes.js'
 import { kimiProvider } from '@agentmux/providers/kimi/provider'
 import { kimiNativeHistory } from '@agentmux/providers/kimi/native-history'
@@ -65,6 +68,7 @@ const hookServices = { formatHookToolOutput, hookCommandTimeout, hookToolFields,
 export function createBuiltInAgentProviders(defineAgentProvider: ProviderFactory): readonly AgentProvider[] {
   const gemini = geminiProvider({ ...hookServices, executionTemporaryDirectory })
   const copilot = copilotProvider({ ...hookServices, normalizeNativeSessionId })
+  const grok = grokProvider({ ...hookServices, normalizeNativeSessionId })
   const kimi = kimiProvider(hookServices)
   const { hookDisableKey, ...droid } = droidProvider(hookServices)
   const { readKimiSessionHistoryPage } = kimiNativeHistory<NativeText, AgentProviderSessionHistoryContext, AgentSessionHistoryItem>({
@@ -80,7 +84,15 @@ export function createBuiltInAgentProviders(defineAgentProvider: ProviderFactory
     createTraexProvider(defineAgentProvider),
     createHermesProvider(defineAgentProvider),
     createPiProvider(defineAgentProvider),
-    createGrokProvider(defineAgentProvider),
+    defineAgentProvider({ ...grok, catalog: catalog(grok.catalog),
+      readSessionHistoryPage: readGrokSessionHistoryPage,
+      recoveryFiles: grokRecoveryFiles,
+      readSessionHistoryRecord: readGrokSessionHistoryRecord,
+      observeSessionHistory: observeGrokSessionHistory,
+      readConversationChanges: readGrokConversationChanges,
+      readInputInitialization: readGrokInputInitialization,
+      observeSessionStatus: observeGrokSessionStatus,
+      readPromptExecutionEvidence: readGrokPromptExecutionEvidence }),
     defineAgentProvider({ ...gemini, catalog: catalog(gemini.catalog) }),
     createAntigravityProvider(defineAgentProvider),
     createCursorProvider(defineAgentProvider),
@@ -96,7 +108,6 @@ export function createBuiltInAgentProviders(defineAgentProvider: ProviderFactory
 export { createClaudeProvider } from './claude.js'
 export { createCodexProvider } from './codex.js'
 export { createCursorProvider } from './cursor.js'
-export { createGrokProvider } from './grok.js'
 export { createHermesProvider } from './hermes.js'
 export { createOpenCodeProvider } from './opencode.js'
 export { createPiProvider } from './pi.js'
