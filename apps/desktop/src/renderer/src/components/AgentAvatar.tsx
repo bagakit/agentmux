@@ -1,6 +1,6 @@
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { useWorkbenchDocument } from '../lib/workbench-document'
-import { createContext, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { ModalAttachmentDismissal } from '@agentmux/client-ui/components/Modal'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -22,6 +22,37 @@ import { useWindowOverlayHost } from './WindowOverlayHost'
 
 const ThemeObjectSettingsIcon = semanticIconComponent('object.settings')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
+
+type AvatarTimerRef = RefObject<ReturnType<typeof setTimeout> | undefined>
+
+// Long-lived registrations own only DOM/timer refs and the latest committed close,
+// never the render scope containing a caller's onOpen and its retained Session.
+function avatarTimerCleanup(closeTimer: AvatarTimerRef, openTimer: AvatarTimerRef) {
+  return () => {
+    clearTimeout(closeTimer.current)
+    clearTimeout(openTimer.current)
+  }
+}
+
+function listenForAvatarDisclosureDismissal(document: Document, trigger: RefObject<HTMLElement | null>,
+  panel: RefObject<HTMLElement | null>, close: RefObject<() => void>, closeTimer: AvatarTimerRef, openTimer: AvatarTimerRef) {
+  const dismiss = (event: Event) => {
+    if (event.type === 'visibilitychange' && document.visibilityState !== 'hidden') return
+    if (event.type === 'pointerdown' && (trigger.current?.contains(event.target as Node) || panel.current?.contains(event.target as Node))) return
+    close.current()
+  }
+  const escape = (event: KeyboardEvent) => { if (event.key === 'Escape' && !event.defaultPrevented) close.current() }
+  const clearTimers = avatarTimerCleanup(closeTimer, openTimer)
+  document.addEventListener('visibilitychange', dismiss)
+  document.addEventListener('pointerdown', dismiss)
+  document.addEventListener('keydown', escape)
+  return () => {
+    clearTimers()
+    document.removeEventListener('visibilitychange', dismiss)
+    document.removeEventListener('pointerdown', dismiss)
+    document.removeEventListener('keydown', escape)
+  }
+}
 
 
 /** Desktop presentation only; Core continues to own the Session and Provider facts. */
@@ -134,6 +165,8 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
     setPosition(null)
     if (target?.isConnected) target.focus({ preventScroll: true })
   }
+  const latestClose = useRef(closeNow)
+  useLayoutEffect(() => { latestClose.current = closeNow })
   function closeToTrigger() {
     closeNow()
     suppressFocusPreview.current = true
@@ -175,28 +208,11 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
     document.addEventListener('pointerdown', outside, true)
     return () => document.removeEventListener('pointerdown', outside, true)
   }, [Boolean(position), Boolean(actionDisclosure), document])
-  useEffect(() => () => {
-    clearTimeout(closeTimer.current)
-    clearTimeout(openTimer.current)
-  }, [])
+  useEffect(() => avatarTimerCleanup(closeTimer, openTimer), [])
   useEffect(() => {
     if (!disclosure) return
     closeNow()
-    const dismiss = (event: Event) => {
-      if (event.type === 'visibilitychange' && document.visibilityState !== 'hidden') return
-      if (event.type === 'pointerdown' && (trigger.current?.contains(event.target as Node) || panel.current?.contains(event.target as Node))) return
-      closeNow()
-    }
-    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape' && !event.defaultPrevented) closeNow() }
-    document.addEventListener('visibilitychange', dismiss)
-    document.addEventListener('pointerdown', dismiss)
-    document.addEventListener('keydown', escape)
-    return () => {
-      clearTimeout(openTimer.current); clearTimeout(closeTimer.current)
-      document.removeEventListener('visibilitychange', dismiss)
-      document.removeEventListener('pointerdown', dismiss)
-      document.removeEventListener('keydown', escape)
-    }
+    return listenForAvatarDisclosureDismissal(document, trigger, panel, latestClose, closeTimer, openTimer)
   }, [disclosure?.scope, document])
   useEffect(() => {
     if (!position) return
