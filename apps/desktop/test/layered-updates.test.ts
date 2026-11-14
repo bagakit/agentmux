@@ -7,15 +7,7 @@ it('uses frontend updates only for the same shell and runtime; unknown runtime r
   expect(updateRoute({ shell: 's', ctxmux: 'c' }, { shell: 's', ctxmux: 'new' })).toBe('runtime-review')
   expect(updateRoute({ shell: '', ctxmux: '' }, { shell: '', ctxmux: '' })).toBe('runtime-review')
 })
-it('production installer checks runtime before quitting and never escalates a normal app quit', () => {
-  const source = readFileSync(new URL('../scripts/package-macos.mjs', import.meta.url), 'utf8')
-  const quit = source.slice(source.indexOf('async function quitInstalledApplication'), source.indexOf('async function', source.indexOf('async function quitInstalledApplication') + 10))
-  expect(quit.length).toBeGreaterThan(100)
-  expect(quit).not.toContain('signalProcessIds(')
-  expect(quit).toContain('remaining.length === 0')
-  expect(source).toContain('runtime-review')
-})
-
+// Graceful quit, survivor detection and cutover ordering are exercised in package-install-restart.test.ts.
 it('a runtime bump is installable only by producing the review it demands', () => {
   // 这条守的是**门不能是死路**：runtime 变了必须先 review，但 review 做完要有一条路能装。
   // 少了这条路，任何 ctxmux 升级都永远装不上——门就从"先 review"退化成"不许升级"。

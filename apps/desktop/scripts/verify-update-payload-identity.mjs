@@ -158,6 +158,10 @@ try {
   receipt.copy = { copies: payload.copies.length, generated: payload.generated.length, publications: payload.avatar.publication.report,
     wrapper: sha(await readFile(join(appResources, 'out/bin/amux'))), identity: JSON.parse(await readFile(join(appResources, 'package-identity.json'), 'utf8')) }
   for (const item of payload.generated) assert.equal(await readFile(join(appResources, item.target), 'utf8'), item.contents)
+  await node('copied-demand-entry', `import assert from 'node:assert/strict';import {fileURLToPath} from 'node:url';
+const entry=fileURLToPath(import.meta.resolve('@agentmux/demand'));
+assert.ok(entry.startsWith(${JSON.stringify(join(appResources, 'node_modules/@agentmux/demand/dist') + '/')}));
+await import('@agentmux/demand');`, appResources)
   async function consumeHost(label, message) {
     let result
     try { await command(label, process.execPath, [join(appResources, 'out/main/agentmux-host.js')], temporary, { env: { PATH: process.env.PATH, NODE_PATH: '' } }) }

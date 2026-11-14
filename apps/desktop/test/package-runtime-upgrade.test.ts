@@ -14,7 +14,13 @@ it('passes the actual outgoing GUI baseline, including explicit null, into servi
   expect(activation?.body).toBeDefined()
   const assertions = calls(activation!, 'assertUiRuntimeObservation')
   expect(assertions).toHaveLength(1)
-  expect(assertions[0]!.arguments.map(argument => argument.getText(parsed))).toEqual(['observed', 'await confirmUiRuntime(runtimePlan)', 'before'])
+  const confirmations = calls(activation!, 'confirmUiRuntime')
+  expect(confirmations).toHaveLength(1)
+  expect(confirmations[0]!.arguments[0]!.getText(parsed)).toBe('runtimePlan')
+  const binding = confirmations[0]!.parent.parent.parent
+  expect(ts.isVariableDeclaration(binding)).toBe(true)
+  if (!ts.isVariableDeclaration(binding)) throw new Error('The Runtime confirmation must be bound')
+  expect(assertions[0]!.arguments.map(argument => argument.getText(parsed))).toEqual(['observed', binding.name.getText(parsed), 'before'])
 })
 
 function calls(node: ts.Node, name: string): ts.CallExpression[] {
@@ -99,11 +105,9 @@ it('reports the actual UI and Native results independently to the product caller
 })
 
 it('cold installation never requests quit and rechecks actual GUI scope immediately before moving the original directory', () => {
-  const outcome = install.body!.statements.flatMap(node => ts.isTryStatement(node) ? [...node.tryBlock.statements] : [])
-    .find(node => ts.isVariableStatement(node) && node.declarationList.declarations[0]?.name.getText(parsed) === 'quitOutcome')
-  expect(outcome).toBeDefined()
-  if (!outcome || !ts.isVariableStatement(outcome)) throw new Error('The actual quit decision must exist')
-  const expression = outcome.declarationList.declarations[0]!.initializer!
+  const requests = calls(install, 'quit')
+  expect(requests).toHaveLength(1)
+  const expression = requests[0]!.parent.parent
   expect(ts.isConditionalExpression(expression)).toBe(true)
   if (!ts.isConditionalExpression(expression)) throw new Error('Quit must depend on an actual outgoing process')
   expect(expression.condition.getText(parsed)).toBe('previouslyInstalled && running.length > 0')
@@ -122,7 +126,7 @@ it('cold UI qualification remains unknown and cannot launch an unqualified previ
   const branches: ts.IfStatement[] = []
   const visit = (node: ts.Node): void => { if (ts.isIfStatement(node)) branches.push(node); ts.forEachChild(node, visit) }
   visit(install)
-  const cold = branches.find(node => node.expression.getText(parsed) === "intent === 'ui-only' && !before")
+  const cold = branches.find(node => node.expression.getText(parsed) === "!before && (previouslyInstalled || intent === 'ui-only')")
   expect(cold).toBeDefined()
   expect(cold!.thenStatement.getText(parsed)).toContain("status: 'unknown'")
   expect(cold!.thenStatement.getText(parsed)).toContain('observation: observed')

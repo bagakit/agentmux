@@ -127,6 +127,7 @@ async function consumeOriginalMain(scenario: Scenario) {
       }
       return await rm(...args)
     },
+    publishPackageArtifact: async () => ({ publication: { status: 'fixture' }, cleanup: { status: 'fixture' } }),
     preservePackageSmokeFailure: async (...args: Parameters<typeof preservePackageSmokeFailure>) => {
       facts.inputPresentAtDiagnostic = await exists(join(args[0], 'dmg-root'))
       observedError = args[2]; diagnostics = await preservePackageSmokeFailure(...args)
