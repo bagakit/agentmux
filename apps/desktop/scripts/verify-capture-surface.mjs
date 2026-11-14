@@ -13,7 +13,8 @@ const root = process.cwd(), require = createRequire(resolve('apps/desktop/packag
 const { build } = createRequire(require.resolve('vite'))('esbuild')
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const surface = 'apps/desktop/src/main/capture-surface.ts'
-const originalSurface = await readFile(surface, 'utf8')
+const screenCapture = 'apps/desktop/src/main/screen-capture.ts'
+const originals = Object.fromEntries(await Promise.all([surface, screenCapture].map(async file => [file, await readFile(file, 'utf8')])))
 const mutations = [
   { id: 'host-opacity-write', from: '    const needsSecond = active.visibleHosts > 0',
     to: '    for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed() && window.isVisible() && !window.isMinimized() && window.getOpacity() > 0) window.setOpacity(0)\n    const needsSecond = active.visibleHosts > 0',
@@ -26,10 +27,12 @@ const mutations = [
       to: '      const initialCrop = this.continued(frame, active.session.continuation ?? (this as any).recall)' },
     { from: "    active.end({ state: 'completed' })\n    return { status: 'completed' } satisfies SystemScreenshotEditorFinish",
       to: "    ;(this as any).recall = this.continuation(frameInput, source.rect)\n    active.end({ state: 'completed' })\n    return { status: 'completed' } satisfies SystemScreenshotEditorFinish" }
-  ], expected: 'every fresh capture starts without initialCrop', reached: native => native.grabs.length >= 4 && native.cases.length >= 2 }
+  ], expected: 'every fresh capture starts without initialCrop', reached: native => native.grabs.length >= 4 && native.cases.length >= 2 },
+  { id: 'retake-reuses-timing', file: screenCapture, from: 'const surfaceTiming = retaking ? startCaptureRequestTiming() : timing', to: 'const surfaceTiming = timing',
+    expected: 'each actual capture surface has its own diagnostic identity', reached: native => native.grabs.length === 16 && native.cases.length === 15 }
 ]
 const mutated = (source, mutation) => (mutation?.edits ?? (mutation ? [{ from: mutation.from, to: mutation.to }] : [])).reduce((text, edit) => text.replace(edit.from, edit.to), source)
-for (const mutation of mutations) for (const edit of mutation.edits ?? [mutation]) assert.equal(originalSurface.split(edit.from).length, 2, 'Unique production mutation anchor: ' + mutation.id)
+for (const mutation of mutations) for (const edit of mutation.edits ?? [mutation]) assert.equal(originals[mutation.file ?? surface].split(edit.from).length, 2, 'Unique production mutation anchor: ' + mutation.id)
 
 await mkdir(resolve('.local/capture-surface'), { recursive: true })
 const out = await mkdtemp(resolve('.local/capture-surface/run-'))
@@ -55,16 +58,18 @@ try {
     const consumed = []
     const result = await build({ entryPoints: ['apps/desktop/scripts/fixtures/capture-surface/main.ts'], outfile: join(mainRoot, 'main.js'), bundle: true, platform: 'node', format: 'esm',
       external: ['electron', '@agentmux/core', '@agentmux/core/*', '@agentmux/host/*'], banner: { js: "import { createRequire as fixtureRequire } from 'node:module';const require=fixtureRequire(import.meta.url);" }, alias, metafile: true, logLevel: 'silent',
-      plugins: [{ name: 'exact-capture-surface-production-source', setup(builder) { builder.onLoad({ filter: /\/apps\/desktop\/src\/main\/capture-surface\.ts$/ }, async args => {
-        assert.equal(args.path, resolve(surface))
+      plugins: [{ name: 'exact-capture-surface-production-source', setup(builder) { builder.onLoad({ filter: /\/apps\/desktop\/src\/main\/(?:capture-surface|screen-capture)\.ts$/ }, async args => {
+        const file = [surface, screenCapture].find(path => args.path === resolve(path))
+        assert.ok(file)
         const original = await readFile(args.path, 'utf8')
-        assert.equal(original, originalSurface, 'CaptureSurface changed while the proof was building')
-        const contents = mutated(original, mutation)
-        consumed.push({ file: surface, original: sha(original), consumed: sha(contents), mutation: mutation?.id ?? null })
+        assert.equal(original, originals[file], file + ' changed while the proof was building')
+        const applied = mutation && (mutation.file ?? surface) === file ? mutation : null
+        const contents = mutated(original, applied)
+        consumed.push({ file, original: sha(original), consumed: sha(contents), mutation: applied?.id ?? null })
         return { contents, loader: 'ts', resolveDir: dirname(args.path) }
       }) } }] })
-    assert.equal(consumed.length, 1, label + ': the production CaptureSurface must actually load once')
-    assert.equal(consumed[0].consumed, mutation ? sha(mutated(originalSurface, mutation)) : sha(originalSurface), label + ': exact consumed source')
+    assert.equal(consumed.length, 2, label + ': both production owners must actually load once')
+    for (const row of consumed) assert.equal(row.consumed, mutation && (mutation.file ?? surface) === row.file ? sha(mutated(originals[row.file], mutation)) : sha(originals[row.file]), label + ': exact consumed source')
     results.push(result)
     receipt.build.push({ label, outputs: result.metafile.outputs })
 
@@ -105,7 +110,7 @@ try {
   files.add(htmlFile); files.add('apps/desktop/scripts/verify-capture-surface.mjs'); files.add('apps/desktop/scripts/fixtures/capture-surface/scenario.md')
   receipt.inputs = Object.fromEntries(await Promise.all([...files].map(async file => [file, sha(await readFile(file))])))
   for (const [file, hash] of Object.entries(receipt.inputs)) assert.equal(sha(await readFile(file)), hash, 'Candidate changed during proof: ' + file)
-  if (withMutations) assert.equal(receipt.mutations.length, 3, 'all three exact production mutations must be killed')
+  if (withMutations) assert.equal(receipt.mutations.length, 4, 'all four exact production mutations must be killed')
   receipt.passed = true
 } finally {
   await writeFile(join(out, 'receipt.json'), JSON.stringify(receipt, null, 2))

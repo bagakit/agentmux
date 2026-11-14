@@ -98,8 +98,14 @@ it('after the original draft has its image, a retake that expands only copies, a
   await firstFinish(image)
   expect(firstDelivered, 'the window editor delivery is the selection the next capture opens on').toHaveBeenCalledOnce()
   const saved = (await readdir(f.home, { recursive: true })).filter(name => String(name).endsWith('.png')).length
+  const firstTiming = f.present.mock.calls[0]![0].timing!
+  const retakeStartedAt = performance.now()
   void retake()
   await vi.waitFor(() => expect(f.edit).toHaveBeenCalledTimes(2))
+  const retakeTiming = f.present.mock.calls[1]![0].timing!
+  expect(retakeTiming.requestId, 'each surface has its own diagnostic identity').not.toBe(firstTiming.requestId)
+  expect(retakeTiming.startedAt, 'Retake does not include the time spent editing').toBeGreaterThanOrEqual(retakeStartedAt)
+  expect(retakeTiming.screenCaptureMs).toBeNull()
   expect(f.present.mock.calls[1]![0].attachToDraft, 'a retaken surface does not attach to the delivered draft again').toBe(false)
   expect(secondAttach, 'a retaken editor does not attach to the delivered draft again').toBe(false)
   await secondFinish(image)

@@ -379,7 +379,16 @@ async function run() {
   receipt.cases.push({ label: 'actual-expand-copy-retake-continuation-then-empty-fresh-capture', crop: retaken.infos[0].initialCrop })
   surface.dispose(); editor.dispose(); host.destroy()
   assert.equal(BrowserWindow.getAllWindows().length, 0)
-  assert.equal(receipt.timings.length, 8)
+  const timingGroups = new Map<string, any[]>()
+  for (const timing of receipt.timings) {
+    const group = timingGroups.get(timing.requestId) ?? []
+    group.push(timing); timingGroups.set(timing.requestId, group)
+  }
+  assert.equal(timingGroups.size, 8, 'each actual capture surface has its own diagnostic identity')
+  for (const group of timingGroups.values()) {
+    assert.deepEqual(group.map(timing => timing.final), [false, true], 'each surface records its first show and its final alternate')
+    assert.equal(group[1].shownMs, group[0].shownMs, 'the final diagnostic preserves the original first-show time')
+  }
   assert.ok(receipt.timings.every((timing: any) => timing.framesMs>=0&&timing.shownMs>=timing.framesMs&&timing.presentedMs.length===2&&timing.presentedMs.every((value: any) => value === null ? timing.shownMs >= 1500 : typeof value==='number'&&value>=0&&value<=timing.shownMs)))
   receipt.passed = true
 }
