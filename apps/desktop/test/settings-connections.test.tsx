@@ -69,9 +69,12 @@ function deferred<T>() { let resolve!: (value: T) => void; const promise = new P
 describe('Conversation Channels settings', () => {
   it('catalog: every navigation projection has the same conversation channel contributions without authorization guesses', async () => {
     const groups = settingsNavGroups(''), connections = groups.find(group => group.id === 'conversation-channels')
-    expect(groups.find(group => group.id === 'environment')?.items.map(item => item.id), 'Environment groups the distinct Host, Remote and device owners').toEqual(['network-node', 'hosts', 'remote-execution', 'mobile'])
+    expect(groups.find(group => group.id === 'cluster')?.items.map(item => item.id), 'Cluster groups Node publication, Host connections and Remote work').toEqual(['network-node', 'hosts', 'remote-execution'])
     expect(connections?.items.map(item => item.id), 'Conversation Channels owns only the in-app and external conversations').toEqual(['inapp-conversation', 'lark', 'discord', 'telegram'])
     expect(hostsSettingsModule.title).toBe('Hosts')
+    expect(groups.find(group => group.id === 'cluster')?.title).toBe('Cluster')
+    expect(groups.find(group => group.id === 'preferences')?.items.slice(0, 2).map(item => item.id)).toEqual(['profile', 'mobile'])
+    expect(groups.find(group => group.id === 'cluster')?.items.find(item => item.id === 'network-node')?.title).toBe('Node')
     expect(groups.find(group => group.id === 'toolkit')?.items.map(item => item.id)).not.toContain('lark')
     expect(groups.some(group => group.id === 'connections')).toBe(false)
     expect(groups.flatMap(group => group.id === 'resources' ? group.items : []).some(item => ['hosts', 'mobile', 'inapp-conversation'].includes(item.id))).toBe(false)
@@ -81,15 +84,17 @@ describe('Conversation Channels settings', () => {
     expect(visibleSettingsSections('ssh').map(item => item.id)).toContain('hosts')
     expect(new Set(settingsModules.map(item => item.id)).size).toBe(settingsModules.length)
     expect(settingsModules.some(item => (item.id as string) === 'amux-conversation')).toBe(false)
-    expect(inappConversationSettingsModule.savedSummary()).toBe('Conversation view and shared preferences')
+    expect(inappConversationSettingsModule.savedSummary(config)).toContain('阅读详情')
     expect(mobileSettingsModule.savedSummary()).toBe('Phone and device access')
     await dom.render(<Shell section="overview" />)
     expect(dom.container.querySelector('#settings-overview-conversation-channels')).not.toBeNull()
-    expect(dom.container.querySelector('#settings-overview-environment')).not.toBeNull()
+    expect(dom.container.querySelector('#settings-overview-cluster')).not.toBeNull()
+    expect(dom.container.querySelector('[aria-labelledby="settings-overview-preferences"] [data-settings-section="mobile"]')).not.toBeNull()
+    expect(dom.container.querySelector('[data-settings-section="network-node"] .settings-overview__entry-label')?.textContent).toBe('Node')
     expect([...dom.container.querySelectorAll<HTMLElement>('[aria-labelledby="settings-overview-conversation-channels"] [data-settings-section]')]
       .map(node => node.dataset.settingsSection)).toEqual(['inapp-conversation', 'lark', 'discord', 'telegram'])
-    expect([...dom.container.querySelectorAll<HTMLElement>('[aria-labelledby="settings-overview-environment"] [data-settings-section]')]
-      .map(node => node.dataset.settingsSection)).toEqual(['network-node', 'hosts', 'remote-execution', 'mobile'])
+    expect([...dom.container.querySelectorAll<HTMLElement>('[aria-labelledby="settings-overview-cluster"] [data-settings-section]')]
+      .map(node => node.dataset.settingsSection)).toEqual(['network-node', 'hosts', 'remote-execution'])
     expect(dom.container.querySelectorAll('[data-settings-pane]')).toHaveLength(0)
     expect(api.deviceManagement.ls).not.toHaveBeenCalled()
   })
