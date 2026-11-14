@@ -49,7 +49,7 @@ try {
   } }
   await build({ entryPoints: [join(fixture, 'entry.tsx')], outfile: join(output, 'app.js'), bundle: true, platform: 'browser', conditions: ['browser', 'production'], format: 'esm', target: 'es2022', jsx: 'automatic', minify: true,
     plugins: [source], logLevel: 'silent', define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' },
-    loader: { '.png': 'file', '.gif': 'file', '.jpg': 'file', '.jpeg': 'file', '.webp': 'file', '.svg': 'file', '.woff2': 'file', '.woff': 'file', '.ttf': 'file' } })
+    loader: { '.png': 'file', '.gif': 'file', '.jpg': 'file', '.jpeg': 'file', '.webp': 'file', '.avif': 'file', '.svg': 'file', '.woff2': 'file', '.woff': 'file', '.ttf': 'file' } })
   for (const file of ['components/QuickSwitcher.tsx', 'components/QuickOpenFiles.tsx', 'lib/quick-switch.ts', 'components/SurfaceModeSwitch.tsx']) {
     const path = 'apps/desktop/src/renderer/src/' + file; assert.equal(loaded[path], hash(await readFile(join(root, path))), 'Actual production module consumed: ' + path)
   }

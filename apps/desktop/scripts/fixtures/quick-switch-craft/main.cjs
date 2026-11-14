@@ -30,6 +30,26 @@ async function close() {
   assert.equal(await call(() => document.activeElement?.getAttribute('aria-label')), 'Original unsaved draft', 'Cancel restores the retained source')
   assert.equal(await call(() => document.querySelector('[aria-label="Original unsaved draft"]').value), 'Keep the original draft and selection.')
 }
+async function intermediateFrame(name) {
+  const sample = await call(async () => {
+    for (let index = 0; index < 30; index++) {
+      await new Promise(resolve => requestAnimationFrame(resolve))
+      const dialog = document.querySelector('.quick-switch')
+      const animation = dialog?.getAnimations().find(one => one.effect?.getComputedTiming().iterations !== Infinity)
+      const progress = animation?.effect?.getComputedTiming().progress
+      if (typeof progress !== 'number' || progress <= 0 || progress >= 1) continue
+      // Freeze this naturally reached frame only for capture, then resume the original animations.
+      const animations = document.getAnimations().filter(one => one.effect?.getComputedTiming().iterations !== Infinity)
+      animations.forEach(one => one.pause())
+      return { progress, opacity: getComputedStyle(dialog).opacity, transform: getComputedStyle(dialog).transform, animations: animations.length }
+    }
+    throw Error('A real non-endpoint opening frame was not observed')
+  })
+  const file = name + '.png', bytes = (await win.webContents.capturePage()).toPNG()
+  await fs.writeFile(path.join(evidence, file), bytes)
+  result.frames.push({ file, sha256: createHash('sha256').update(bytes).digest('hex'), intermediate: true, sample })
+  await call(() => document.getAnimations().filter(one => one.playState === 'paused').forEach(one => one.play()))
+}
 async function frame(name) {
   await call(() => Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {})))); await paint()
   const geometry = await call(() => { const e = document.querySelector('.quick-switch'), r = e.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: innerWidth, height: innerHeight, scroll: e.scrollWidth, client: e.clientWidth } })
@@ -71,6 +91,22 @@ app.whenReady().then(async () => {
     await frame('sessions-wide-dark-no-workfaces')
     await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
     assert.equal(await call(() => getComputedStyle(document.querySelector('.quick-switch')).animationName), 'none', 'Reduced motion remains static')
+    await close()
+    for (const [theme, width, height] of [['dark', 1080, 760], ['light', 380, 620]]) {
+      await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false })
+      await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: theme === 'dark' ? 'no-preference' : 'reduce' }] })
+      await call(theme => quickCraft.locations(theme), theme)
+      if (theme === 'dark') await intermediateFrame('locations-opening-dark')
+      await wait(() => document.querySelectorAll('.quick-switch__row').length === 3); await paint()
+      assert.equal(await call(() => document.querySelector('.quick-switch__modes')), null, 'Session locations remain scoped')
+      assert.equal(await call(() => document.activeElement === document.querySelector('[aria-label="Search Session locations"]')), true)
+      await key('ArrowDown', 'ArrowDown', 40)
+      await frame('locations-' + theme + '-' + width)
+      await call(() => quickCraft.stale()); await paint()
+      assert.equal(await call(() => { const notice = document.querySelector('.quick-switch__notice'); return notice && notice.getBoundingClientRect().height > 0 && notice.textContent.includes('no longer contains the original Session') }), true, 'Stale target reason is actually visible')
+      await frame('locations-stale-' + theme + '-' + width)
+      await close()
+    }
     result.checks.push({ typedGlyphs: glyphs, activeDescendant: true, retainedDraftAndFocus: true, reducedMotion: true, privatePreviewOnly: true }); result.passed = true
   } catch (error) { result.failure = { name: error.name, message: error.message, stack: error.stack } }
   finally { await fs.writeFile(path.join(evidence, 'render.json'), JSON.stringify(result, null, 2)); win?.destroy(); app.exit(result.passed ? 0 : 1) }

@@ -1,4 +1,7 @@
 // @vitest-environment happy-dom
+import { createWorkspaceLayout } from '@agentmux/layout'
+import { registerWorkbenchDocument } from '../src/renderer/src/lib/workbench-window-registry'
+import * as windowFocus from '../src/renderer/src/lib/workbench-windows'
 import { act } from 'react'
 import { expect, it, vi } from 'vitest'
 import { QuickSwitcher } from '../src/renderer/src/components/QuickSwitcher'
@@ -198,4 +201,86 @@ it('keeps an unknown tab glyph navigable without treating its display text as a 
   expect(rows()[0]!.querySelector('[data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe('object.terminal')
   await key(document.querySelector<HTMLInputElement>('[role="combobox"]')!, 'Enter')
   expect(activate).toHaveBeenCalledExactlyOnceWith('workspace', 'original-group', 'original-tab')
+})
+
+function locationFacts(count: number) {
+  sessions(count)
+  const first = workbenchTabs.createWorkbenchTab('first', { regionId: 'first-region', workspaceId: 'workspace', kind: 'agent', phase: 'attached', sessionId: originalId })
+  const second = workbenchTabs.createWorkbenchTab('second', { regionId: 'second-region', workspaceId: 'workspace', kind: 'agent', phase: 'attached', sessionId: originalId })
+  useAppStore.setState({ tabs: { first, second }, layouts: { workspace: createWorkspaceLayout('group', ['first', 'second']) },
+    sessionLocationRequest: null, mainSurface: 'board' })
+}
+
+it.each([1, 32, 100])('derives location choices only on structural demand across %i Sessions', async count => {
+  locationFacts(count)
+  const build = vi.spyOn(quickSwitch, 'buildSessionLocationItems'), work = cost()
+  await dom.render(surface(false))
+  expect(build).not.toHaveBeenCalled()
+  await act(async () => expect(useAppStore.getState().selectSession(originalId)).toBe(false))
+  expect(build).toHaveBeenCalledTimes(1)
+  expect(rows()).toHaveLength(2)
+  build.mockClear(); work.clear()
+  for (let index = 0; index < 5; index++) await status(900 + index)
+  expect(build).not.toHaveBeenCalled()
+  expectIdle(work)
+  const state = useAppStore.getState()
+  await act(async () => useAppStore.setState({ tabs: { ...state.tabs, first: { ...state.tabs.first!, name: 'Current location name' } } }))
+  expect(build).toHaveBeenCalledTimes(1)
+  expect([...rows()].some(row => row.textContent?.includes('Current location name'))).toBe(true)
+})
+
+it('a failed normal Session activation retains the same open query and does not report successful close', async () => {
+  sessions(1)
+  const close = vi.fn(), choose = vi.spyOn(useAppStore.getState(), 'selectSession').mockReturnValue(false)
+  await dom.render(<QuickSwitcher open onClose={close} />)
+  const field = document.querySelector<HTMLInputElement>('[role="combobox"]')!
+  await input(field, 'Original')
+  await key(field, 'Enter')
+  expect(choose).toHaveBeenCalledWith(originalId)
+  expect(close).not.toHaveBeenCalled()
+  expect(document.activeElement).toBe(field)
+  expect(field.value).toBe('Original')
+})
+
+it('a background picker requests only its registered main document and ignores an old focus receipt after dismissal', async () => {
+  locationFacts(2)
+  const identity = { windowId: 'original-main', documentGeneration: 'original-generation' }
+  const unregister = registerWorkbenchDocument(document, identity)
+  vi.spyOn(document, 'hasFocus').mockReturnValue(false)
+  let confirm: (result: boolean) => void
+  const focus = vi.spyOn(windowFocus, 'focusWorkbenchWindow').mockImplementation(() => new Promise(resolve => { confirm = resolve }))
+  try {
+    await dom.render(surface(false))
+    await act(async () => expect(useAppStore.getState().selectSession(originalId)).toBe(false))
+    expect(focus).toHaveBeenCalledExactlyOnceWith(identity)
+    const request = useAppStore.getState().sessionLocationRequest!
+    await act(async () => useAppStore.getState().dismissSessionLocationRequest(request.requestId))
+    const current = document.createElement('input'); document.body.append(current); current.focus()
+    await act(async () => confirm!(true))
+    expect(document.activeElement).toBe(current)
+    expect(useAppStore.getState().mainSurface).toBe('board')
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    current.remove()
+  } finally { unregister() }
+})
+
+it('normal Session search enters location mode in the same Dialog and keeps the request out of durable inputs', async () => {
+  locationFacts(2)
+  const close = vi.fn()
+  await dom.render(<QuickSwitcher open onClose={close} />)
+  const dialog = document.querySelector('[role="dialog"]'), field = document.querySelector<HTMLInputElement>('[role="combobox"]')!
+  await input(field, 'Original')
+  await key(field, 'Enter')
+  expect(document.querySelector('[role="dialog"]')).toBe(dialog)
+  expect(document.querySelector('[aria-label="Search Session locations"]')).toBe(field)
+  expect(document.activeElement).toBe(field)
+  expect(rows()).toHaveLength(2)
+  expect(field.value).toBe('')
+  expect(close).not.toHaveBeenCalled()
+  const state = useAppStore.getState(), partialize = useAppStore.persist.getOptions().partialize!
+  expect(partialize(state)).not.toHaveProperty('sessionLocationRequest')
+  await key(field, 'Enter')
+  expect(close).toHaveBeenCalledTimes(1)
+  expect(useAppStore.getState().sessionLocationRequest).toBeNull()
+  expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ workspaceId: 'workspace', groupId: 'group', regionId: expect.stringMatching(/^(first|second)-region$/) })
 })

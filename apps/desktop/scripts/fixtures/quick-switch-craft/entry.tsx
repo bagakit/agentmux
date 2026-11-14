@@ -1,6 +1,8 @@
 import { useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
+import { SessionObservationRegions } from '../../../src/renderer/src/components/SessionObservationRegions'
+import { addWorkbenchRegion } from '../../../src/renderer/src/lib/workbench-tabs'
 import { QuickSwitcher } from '../../../src/renderer/src/components/QuickSwitcher'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../../../src/renderer/src/store'
@@ -25,15 +27,34 @@ api.files.list = async () => ({ status: 'listed', files: ['src/main.ts', 'docs/i
   complete: true, omitted: 'git-ignored', partialReason: null })
 mountThemeRuntime(window, { ...config.appearance, appAppearance: 'dark' })
 let openSwitch: () => void
+let showLocationConsumer: () => void
 function Consumer() {
-  const [open, setOpen] = useState(false), source = useRef<HTMLTextAreaElement>(null)
+  const [open, setOpen] = useState(false), [locations, setLocations] = useState(false), source = useRef<HTMLTextAreaElement>(null)
+  showLocationConsumer = () => { source.current?.focus(); setLocations(true) }
   openSwitch = () => { source.current?.focus(); setOpen(true) }
   return <><textarea ref={source} className="ui-input" aria-label="Original unsaved draft" defaultValue="Keep the original draft and selection." />
+    {locations && <SessionObservationRegions sessionIds={['original-session']} contextId="location-preview" />}
     <QuickSwitcher open={open} onClose={() => setOpen(false)} returnFocus={() => source.current} /></>
 }
 flushSync(() => createRoot(document.getElementById('root')!).render(<Consumer />))
 Object.assign(window, { quickCraft: {
   show(mode: 'dark' | 'light') { updateThemeSelection({ ...config.appearance, appAppearance: mode }); flushSync(() => openSwitch()) },
+  locations(mode: 'dark' | 'light') {
+    updateThemeSelection({ ...config.appearance, appAppearance: mode })
+    const first = { ...createWorkbenchTab('first-location', { regionId: 'first-region', kind: 'agent', phase: 'attached', workspaceId: workspace.id, sessionId: 'original-session' }), name: 'UI interaction architecture' }
+    const second = { ...addWorkbenchRegion(createWorkbenchTab('second-location', { regionId: 'second-region', kind: 'agent', phase: 'attached', workspaceId: workspace.id, sessionId: 'original-session' }), 'second-region', 'right', { regionId: 'third-region', kind: 'agent', phase: 'attached', workspaceId: workspace.id, sessionId: 'original-session' }), name: 'Original research and interaction review — preserve the existing workface' }
+    flushSync(() => { useAppStore.setState({ sessionLocationRequest: null, tabs: { [first.id]: first, [second.id]: second },
+      layouts: { [workspace.id]: { ...layout, groups: [{ ...layout.groups[0]!, tabOrder: [first.id, second.id], activeTabId: first.id }] } }, sessions: [], agentFocus: { ...useAppStore.getState().agentFocus, execution: { sessionId: null, reference: null } }, mainSurface: 'board' }); showLocationConsumer() })
+    const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(one => one.textContent === 'Open Session')!
+    flushSync(() => button.click())
+  },
+  stale() {
+    const state = useAppStore.getState(), request = state.sessionLocationRequest!
+    const ref = JSON.parse(document.querySelector<HTMLButtonElement>('.quick-switch__row')!.title)
+    const tab = state.tabs[ref.tabId]!, surface = tab.regions[ref.regionId]!
+    flushSync(() => useAppStore.setState({ tabs: { ...state.tabs, [tab.id]: { ...tab, regions: { ...tab.regions, [ref.regionId]: { ...surface, sessionId: 'different-session' } as never } } } }))
+    flushSync(() => { useAppStore.getState().chooseSessionLocation(request.requestId, ref) })
+  },
   empty() { flushSync(() => useAppStore.setState({ tabs: {} })) },
   facts() { const state = useAppStore.getState(); return { layout: state.layouts[workspace.id], workspaceId: state.activeWorkspaceId } }
 } })

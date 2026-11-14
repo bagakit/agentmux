@@ -13,6 +13,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { addWorkbenchRegion, createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
 import { SessionObservationRegions } from '../src/renderer/src/components/SessionObservationRegions'
+import { QuickSwitcher } from '../src/renderer/src/components/QuickSwitcher'
 import { SessionResultReview } from '../src/renderer/src/components/SessionResultReview'
 
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
@@ -61,6 +62,7 @@ beforeEach(async () => {
   dispose = await useAppStore.getState().initialize()
   useAppStore.setState({ sessions: [agent('a'), agent('b')], activeWorkspaceId: 'repo', mainSurface: 'board' })
   container = document.createElement('div')
+  const overlay = document.createElement('div'); overlay.dataset.overlayHost = ''; container.append(overlay)
   document.body.append(container)
   root = createRoot(container)
 })
@@ -152,26 +154,129 @@ describe('existing Session projection navigation', () => {
     expect(graph).toHaveLength(1)
   })
 
-  it('a second display keeps Open Session from guessing until the held occurrence chooses one, without rewriting the other', async () => {
-    await moveIntoTopic({ duplicate: true })
-    const tabs = structuredClone(useAppStore.getState().tabs)
-    const graph = placements()
-    await act(async () => root.render(<SessionObservationRegions sessionIds={['a']} contextId="private-board" />))
+  async function openLocations() {
+    await act(async () => root.render(<><SessionObservationRegions sessionIds={['a']} contextId="private-board" /><QuickSwitcher open={false} onClose={() => {}} /></>))
     await click('Open Session')
-    expect(useAppStore.getState().notificationEvents.at(-1)?.message).toMatch(/no unique confirmed display occurrence/)
+    expect(document.querySelector('[aria-label="Choose a Session location"]')).not.toBeNull()
+  }
+  const locationRows = () => [...document.querySelectorAll<HTMLButtonElement>('.quick-switch__row')]
+  const field = () => document.querySelector<HTMLInputElement>('[aria-label="Search Session locations"]')!
+  async function key(value: string, isComposing = false) {
+    await act(async () => field().dispatchEvent(new KeyboardEvent('keydown', { key: value, isComposing, bubbles: true, cancelable: true })))
+  }
+
+  it('real Open Session scopes the shared picker and opens the exact chosen durable occurrence without new work', async () => {
+    await moveIntoTopic({ duplicate: true })
+    useAppStore.setState({ agentComposerDrafts: { a: 'Original unsent input' } })
+    const before = useAppStore.getState(), tabs = structuredClone(before.tabs), graph = placements()
+    const start = vi.spyOn(api.sessions, 'launchAgent'), stop = vi.spyOn(api.sessions, 'stop'), recover = vi.spyOn(api.sessions, 'recover')
+    await openLocations()
+    expect(locationRows()).toHaveLength(2)
+    expect(locationRows().map(row => JSON.parse(row.title))).toEqual(expect.arrayContaining([
+      { displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: 'topic-group', tabId: 'target', regionId: 'a-region' },
+      { displayWorkspaceId: 'other', groupId: 'other-group', tabId: 'duplicate', regionId: 'duplicate-region' }
+    ]))
     expect(useAppStore.getState().activeWorkspaceId).toBe('repo')
     expect(useAppStore.getState().mainSurface).toBe('board')
     expect(useAppStore.getState().tabs).toEqual(tabs)
+    expect(useAppStore.getState().layouts).toBe(before.layouts)
+    expect(useAppStore.getState().agentFocus).toBe(before.agentFocus)
+    const chosen = locationRows().find(row => JSON.parse(row.title).tabId === 'target')!
+    // A later observation may hold another occurrence; the person's explicit row still owns this choice.
+    await act(async () => { expect(useAppStore.getState().focusExecutionSession('a',
+      { displayWorkspaceId: 'other', groupId: 'other-group', tabId: 'duplicate', regionId: 'duplicate-region' }, { navigate: false })).toBe(true) })
+    await act(async () => chosen.click())
+    const after = useAppStore.getState()
+    expect(after.sessionLocationRequest).toBeNull()
+    expect(after.activeWorkspaceId).toBe(SCRATCH_WORKSPACE_ID)
+    expect(after.workbenchSpaceSelection).toMatchObject({ workspaceId: SCRATCH_WORKSPACE_ID, groupId: 'topic-group', tabId: 'target', regionId: 'a-region' })
+    expect(after.regionCaretFocus).toMatchObject({ regionId: 'a-region', nonce: expect.any(Number) })
+    expect(after.tabs.duplicate).toEqual(tabs.duplicate)
+    expect(after.agentComposerDrafts.a).toBe('Original unsent input')
+    expect(after.sessions).toBe(before.sessions)
     expect(placements()).toEqual(graph)
+    expect(start).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
+  })
+
+  it('IME cannot select; keyboard selection uses the complete Group and Region even before snapshots return', async () => {
+    await moveIntoTopic({ duplicate: true })
+    const state = useAppStore.getState(), tab = state.tabs.duplicate!
+    const twoRegions = addWorkbenchRegion(tab, 'duplicate-region', 'right', { regionId: 'second-a', workspaceId: 'other', kind: 'agent', phase: 'attached', sessionId: 'a' })
+    const layout = state.layouts.other!
+    useAppStore.setState({ sessions: [], tabs: { ...state.tabs, duplicate: twoRegions }, layouts: { ...state.layouts,
+      other: { ...layout, root: { type: 'split', direction: 'horizontal', ratio: 0.5, first: layout.root, second: { type: 'leaf', groupId: 'second-group' } },
+        groups: [...layout.groups, { ...layout.groups[0]!, id: 'second-group' }] } } })
+    await openLocations()
+    expect(locationRows()).toHaveLength(5)
+    const index = locationRows().findIndex(row => { const ref = JSON.parse(row.title); return ref.groupId === 'second-group' && ref.regionId === 'second-a' })
+    expect(index).toBeGreaterThanOrEqual(0)
+    await key('Enter', true)
+    expect(useAppStore.getState().mainSurface).toBe('board')
+    for (let at = 0; at < index; at++) await key('ArrowDown')
+    expect(field().getAttribute('aria-activedescendant')).toBe(locationRows()[index]!.id)
+    await key('Enter')
+    expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ workspaceId: 'other', groupId: 'second-group', tabId: 'duplicate', regionId: 'second-a' })
+    expect(useAppStore.getState().sessions).toEqual([])
+    expect(useAppStore.getState().tabs.duplicate!.regions).toEqual(twoRegions.regions)
+  })
+
+  it('cancel keeps the original workface and draft, while an explicitly held occurrence still opens directly', async () => {
+    await moveIntoTopic({ duplicate: true })
+    useAppStore.setState({ agentComposerDrafts: { a: 'Keep this draft' } })
+    const before = useAppStore.getState()
+    await openLocations()
+    await key('Escape')
+    expect(useAppStore.getState().sessionLocationRequest).toBeNull()
+    expect(useAppStore.getState().activeWorkspaceId).toBe(before.activeWorkspaceId)
+    expect(useAppStore.getState().tabs).toBe(before.tabs)
+    expect(useAppStore.getState().layouts).toBe(before.layouts)
+    expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
     await act(async () => { expect(useAppStore.getState().focusExecutionSession('a',
       { displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: 'topic-group', tabId: 'target', regionId: 'a-region' }, { navigate: false })).toBe(true) })
     await click('Open Session')
+    expect(useAppStore.getState().sessionLocationRequest).toBeNull()
     expect(useAppStore.getState().activeWorkspaceId).toBe(SCRATCH_WORKSPACE_ID)
-    expect(useAppStore.getState().tabs.target!.layout.activeRegionId).toBe('a-region')
-    expect(useAppStore.getState().tabs.duplicate).toEqual(tabs.duplicate)
-    expect(placements()).toEqual(graph)
-    expect(graph).toHaveLength(2)
-    expect(graph).toEqual(expect.arrayContaining([{ workspaceId: SCRATCH_WORKSPACE_ID, tabId: 'target' }, { workspaceId: 'other', tabId: 'duplicate' }]))
+  })
+
+  it.each(['replaced', 'removed'] as const)('rechecks a %s target, retains the request and never falls through to creating a projection', async change => {
+    await moveIntoTopic({ duplicate: true })
+    await openLocations()
+    const stale = locationRows().find(row => JSON.parse(row.title).tabId === 'duplicate')!
+    const state = useAppStore.getState(), requestId = state.sessionLocationRequest!.requestId
+    const reference = JSON.parse(stale.title)
+    await act(async () => useAppStore.setState({ tabs: change === 'removed' ? {} : { ...state.tabs,
+      duplicate: { ...state.tabs.duplicate!, regions: { 'duplicate-region': { ...state.tabs.duplicate!.regions['duplicate-region']!, sessionId: 'b' } as never } } } }))
+    const before = useAppStore.getState(), start = vi.spyOn(api.sessions, 'launchAgent')
+    await act(async () => expect(useAppStore.getState().chooseSessionLocation(requestId, reference)).toBe(false))
+    expect(document.querySelector('[role="dialog"]')?.textContent).toMatch(/no longer contains the original Session/)
+    expect(useAppStore.getState().sessionLocationRequest?.requestId).toBe(requestId)
+    expect(useAppStore.getState().tabs).toBe(before.tabs)
+    expect(useAppStore.getState().layouts).toBe(before.layouts)
+    expect(useAppStore.getState().mainSurface).toBe('board')
+    expect(start).not.toHaveBeenCalled()
+  })
+
+  it('a removed highlighted row cannot silently retarget Enter, and stale request callbacks cannot cancel or choose a newer request', async () => {
+    await moveIntoTopic({ duplicate: true })
+    await openLocations()
+    const first = JSON.parse(locationRows()[0]!.title), oldId = useAppStore.getState().sessionLocationRequest!.requestId
+    const state = useAppStore.getState(), layout = state.layouts[first.displayWorkspaceId]!
+    await act(async () => useAppStore.setState({ layouts: { ...state.layouts, [first.displayWorkspaceId]: { ...layout,
+      groups: layout.groups.map(group => group.id === first.groupId ? { ...group, tabOrder: group.tabOrder.filter(id => id !== first.tabId), activeTabId: null } : group) } } }))
+    expect(locationRows()).toHaveLength(1)
+    expect(field().hasAttribute('aria-activedescendant')).toBe(false)
+    await key('Enter')
+    expect(useAppStore.getState().mainSurface).toBe('board')
+    // A fresh request owns its own callbacks, independent of the previous modal render.
+    await act(async () => { useAppStore.setState({ tabs: state.tabs, layouts: state.layouts }); expect(useAppStore.getState().selectSession('a')).toBe(false) })
+    const newId = useAppStore.getState().sessionLocationRequest!.requestId
+    expect(newId).not.toBe(oldId)
+    await act(async () => {
+      useAppStore.getState().dismissSessionLocationRequest(oldId)
+      expect(useAppStore.getState().chooseSessionLocation(oldId, first)).toBe(false)
+    })
+    expect(useAppStore.getState().sessionLocationRequest?.requestId).toBe(newId)
+    expect(useAppStore.getState().mainSurface).toBe('board')
   })
 
   it('missing durable Tab Group reports failure and preserves the projection instead of falling back to execution cwd', async () => {
