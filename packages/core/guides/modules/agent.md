@@ -19,6 +19,23 @@ owns Run/process/bytes. Executor, durable Session, current Run and display Regio
 Begin with agent ls/inspect for the exact Session and routeHostId; preserve original identities
 and unknown receipts. A failed observation never authorizes stopping a healthy Run.
 
+Read status.observation.semantic for the whole Agent and its confirmed child work.
+status.observation.mainSession describes the original native main session independently;
+subagentSessions retains native child IDs, turn/source ordering, states and original
+observation times. These native children do not create AgentMux Sessions. A main idle
+observation does not complete a task or permit idle-only input while child work remains.
+After an owner restart, mainSessionActivity retains the original main observation;
+currentActivity remains separately qualified for live input decisions.
+
+For startup waits, agent input inspect exposes control.waiting.initialization on the
+original saved input: reason, source, scope, original Provider/Run and observedAt.
+A prerequisite reports native configuration or account requirements; request means
+an actual native protocol request. Unknown inspection never becomes permission to
+answer a setup screen. Authentication, onboarding, directory trust, permission, hook
+trust and upgrade are distinct reasons only when their native evidence exists.
+Use the original terminal for required confirmation, then inspect or rejoin that same
+input. No check automatically approves a request or resends an unknown delivery.
+
 To create from an existing Browser, first read browser --skill and browser agent-workspace
 prepare --help. Its ready receipt supplies the original execution Workspace; preparation
 does not create an Agent. Choose the display target separately through space --skill and
