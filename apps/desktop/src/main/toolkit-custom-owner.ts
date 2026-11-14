@@ -20,7 +20,7 @@ type Tool = { id: string; loading: Promise<void> | null; latest: ToolkitConfirme
   error: string | null; sourceError: string | null; definition: ToolkitToolDefinition | null; sequence: number; leases: Set<Lease>; live: Execution | null
   parent: Tool | null; display: Tool | null; displayReaders: number; saving: Promise<void>; successful: ToolkitConfirmedResult | null
   evaluationRequest: Promise<ToolkitSnapshot> | null; createIntent: unknown; loadError: string | null; launchSaveError: string | null
-  pendingLaunch?: ToolkitScriptSnapshot['pendingLaunch']; releasedLaunches: ToolkitAdmission[]; manualStartRequired: boolean }
+  pendingLaunch?: ToolkitScriptSnapshot['pendingLaunch']; preparationPending: boolean; releasedLaunches: ToolkitAdmission[]; manualStartRequired: boolean }
 type Execution = { capture: CapturedToolkitPackage | null; snapshotRoot: string | null; tool: Tool; admission: ToolkitAdmission; port: ToolkitRunPort | null; cursor: number; rawBytes: number
   decoder: TextDecoder; replayText: string | null; failure: string | null; creating: boolean; attaching: boolean; ended: boolean; stopRequested: boolean
   terminalHint: boolean; uncertain: boolean; done: Promise<void>; complete(): void
@@ -30,7 +30,7 @@ type Execution = { capture: CapturedToolkitPackage | null; snapshotRoot: string 
   finishing: Promise<'running' | void> | null; starting: Promise<void> | null; stopSubmission: Promise<void> | null
   releaseLifecycle: (() => void) | null; statusAgain: boolean }
 type LaneReceipt = { latestConfirmed: ToolkitConfirmedResult | null; admission: ToolkitAdmission | null; lastSucceeded?: ToolkitConfirmedResult; createIntent?: unknown
-  releasedLaunches?: ToolkitAdmission[]; manualStartRequired?: boolean }
+  preparationPending?: true; releasedLaunches?: ToolkitAdmission[]; manualStartRequired?: boolean }
 type Receipt = LaneReceipt & { display?: LaneReceipt }
 type PendingLaunchAction = { kind: 'cancel' | 'release'; signal: AbortSignal }
 // A code unit may cost six JSON bytes; leave room for the fixed owner explanation.
@@ -59,7 +59,7 @@ export class CustomToolkitOwner {
   private newTool(id: string, parent: Tool | null = null): Tool {
     return { id, parent, display: null, displayReaders: 0, saving: Promise.resolve(), successful: null, evaluationRequest: null, loading: null,
       latest: null, admission: null, error: null, sourceError: null, definition: null, sequence: 0, leases: new Set(), live: null, createIntent: undefined, loadError: null, launchSaveError: null,
-      releasedLaunches: [], manualStartRequired: false }
+      preparationPending: false, releasedLaunches: [], manualStartRequired: false }
   }
   private displayTool(tool: Tool): Tool { return tool.display ??= this.newTool(tool.id, tool) }
   private state(tool: Tool, definition: ToolkitToolDefinition) {
@@ -76,11 +76,12 @@ export class CustomToolkitOwner {
       ? this.displaySnapshot(this.displayTool(tool), definition) : undefined
     const releasedLaunch = !tool.admission && tool.manualStartRequired ? tool.releasedLaunches.at(-1) : undefined
     const reason = tool.error ?? tool.loadError ?? (tool.admission ?? releasedLaunch ?? tool.latest)?.reason ?? null
+    const pendingLaunch = tool.preparationPending && tool.createIntent === undefined ? 'not-observed' : tool.pendingLaunch
     return structuredClone({ schema: 'agentmux.toolkit.v1', kind: 'script', toolId: tool.id, definition,
       state: this.state(tool, definition),
       reason: tool.launchSaveError ? [reason, tool.launchSaveError].filter(Boolean).join(' ') : reason, admission: tool.admission,
       latestConfirmed: tool.latest, consumerCount: tool.leases.size, sequence: tool.sequence,
-      ...(tool.admission?.state === 'unknown' && !tool.admission.run && tool.pendingLaunch ? { pendingLaunch: tool.pendingLaunch } : {}),
+      ...(tool.admission?.state === 'unknown' && !tool.admission.run && pendingLaunch ? { pendingLaunch } : {}),
       ...(releasedLaunch ? { releasedLaunch } : {}),
       ...(display ? { display } : {}) })
   }
@@ -222,7 +223,7 @@ export class CustomToolkitOwner {
         if (receipt === null) return
         if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt) ||
             !Object.hasOwn(receipt, 'admission') || !Object.hasOwn(receipt, 'latestConfirmed') ||
-            Object.keys(receipt).some(key => !['admission', 'latestConfirmed', 'display', 'createIntent', 'releasedLaunches', 'manualStartRequired'].includes(key))) {
+            Object.keys(receipt).some(key => !['admission', 'latestConfirmed', 'display', 'createIntent', 'preparationPending', 'releasedLaunches', 'manualStartRequired'].includes(key))) {
           throw new AgentMuxError('Tool receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
         }
         const saved = receipt as Receipt
@@ -237,6 +238,10 @@ export class CustomToolkitOwner {
           ...(saved.display ? { display: { ...displayReceipt, state: saved.display.admission?.state ?? saved.display.latestConfirmed?.state ?? 'idle',
             reason: saved.display.admission?.reason ?? saved.display.latestConfirmed?.reason ?? null, sequence: 0 } } : {}) })
         if (parsed.kind !== 'script') throw new AgentMuxError('Tool receipt has another kind.', 'CONTROL_PROTOCOL_ERROR')
+        if (Object.hasOwn(saved, 'preparationPending') && (saved.preparationPending !== true ||
+            parsed.admission?.definition.mode !== 'tui' || parsed.admission.run !== null ||
+            parsed.admission.state !== 'pending' && parsed.admission.state !== 'unknown' || Object.hasOwn(saved, 'createIntent')))
+          throw new AgentMuxError('The original TUI preparation stage is unconfirmed.', 'CONTROL_PROTOCOL_ERROR')
         if (saved.releasedLaunches !== undefined && !Array.isArray(saved.releasedLaunches) ||
             saved.manualStartRequired !== undefined && (saved.manualStartRequired !== true || !saved.releasedLaunches?.length || saved.admission !== null))
           throw new AgentMuxError('The original released Tool launch receipt is unconfirmed.', 'CONTROL_PROTOCOL_ERROR')
@@ -249,6 +254,7 @@ export class CustomToolkitOwner {
           return old.releasedLaunch
         })
         value.manualStartRequired = saved.manualStartRequired === true
+        value.preparationPending = saved.preparationPending === true
         value.latest = parsed.latestConfirmed; value.admission = parsed.admission
         // Launch material is private and consumed only by an explicit original create continuation.
         value.createIntent = saved.createIntent
@@ -309,6 +315,7 @@ export class CustomToolkitOwner {
       const { releasedLaunches = lane.releasedLaunches, manualStartRequired = lane.manualStartRequired, ...value } = replacement?.lane === lane
         ? replacement.value : { latestConfirmed: lane.latest, admission: lane.admission }
       return { ...value, ...(value.admission && lane.createIntent !== undefined ? { createIntent: lane.createIntent } : {}),
+        ...(value.admission && lane.preparationPending && lane.createIntent === undefined ? { preparationPending: true } : {}),
         ...(releasedLaunches.length ? { releasedLaunches } : {}), ...(manualStartRequired ? { manualStartRequired: true } : {}),
         ...(lane.parent && lane.successful && value.latestConfirmed?.executionId !== lane.successful.executionId ? { lastSucceeded: lane.successful } : {}) }
     }
@@ -323,6 +330,11 @@ export class CustomToolkitOwner {
     })
     root.saving = write.catch(() => {})
     await write
+  }
+  private saveAdmission(execution: Execution): Promise<void> {
+    const tool = execution.tool
+    return this.save(tool, { latestConfirmed: tool.latest, admission: execution.admission, manualStartRequired: false },
+      () => { tool.manualStartRequired = false })
   }
   private unknown(execution: Execution, error: unknown) {
     if (execution.tool.live !== execution) return
@@ -471,11 +483,16 @@ export class CustomToolkitOwner {
         if (tool.live?.starting) await tool.live.starting
         else if (tool.pendingLaunch && tool.pendingLaunch !== 'not-observed') await this.observeOriginalExecution(tool)
         else if (tool.admission.state === 'unknown') {
+          signal.throwIfAborted()
+          const needsPreparation = tool.preparationPending && tool.createIntent === undefined
           const retained = this.execution(tool, tool.admission)
           tool.live = retained; retained.replayText = ''
           retained.admission.state = 'pending'; retained.admission.reason = 'Continuing the original request.'
           retained.starting = Promise.resolve().then(async () => {
-            try { await this.save(tool); await this.start(retained, true) }
+            try {
+              await this.saveAdmission(retained)
+              await this.start(retained, !needsPreparation)
+            }
             catch (error) { this.unknown(retained, error) }
           }).finally(() => { retained.starting = null })
           this.publish(tool)
@@ -512,6 +529,7 @@ export class CustomToolkitOwner {
         definition: structuredClone(definition), expectedLatestExecutionId: input.expectedLatestExecutionId, action,
         target: { workspacePath: definition.workspacePath }, run: null, startedAt: this.now(), text: '', state: 'pending', reason: null }
       tool.admission = admission
+      tool.preparationPending = definition.mode === 'tui'
       tool.loadError = null
       tool.pendingLaunch = undefined
       execution = this.execution(tool, admission); execution.capture = resolved.capture; tool.live = execution
@@ -519,7 +537,7 @@ export class CustomToolkitOwner {
       // Register the entire admitted work before any durable wait, so disposal cannot return ahead of a late create.
       admitted.starting = Promise.resolve().then(async () => {
         try {
-          await this.save(tool, { latestConfirmed: tool.latest, admission, manualStartRequired: false }, () => { tool.manualStartRequired = false })
+          await this.saveAdmission(admitted)
         }
         catch (error) { this.unknown(admitted, 'Tool admission save is unconfirmed: ' + message(error)); throw error }
         if (this.closed) await this.confirm(admitted, 'stopped', 'Owner closed before the script started.', null)
@@ -646,6 +664,7 @@ export class CustomToolkitOwner {
       }
       execution.tool.createIntent = { hostId: 'local', prepared }
       await this.save(execution.tool)
+      execution.tool.preparationPending = false
       if (this.closed) { this.unknown(execution, 'Owner closed before this TUI creation could be confirmed.'); return }
       execution.creating = true
       const run = await execution.port.createPrepared(structuredClone(prepared))
@@ -976,7 +995,7 @@ export class CustomToolkitOwner {
       try {
         await this.save(tool, { latestConfirmed: confirmed, admission: null }, () => {
           tool.latest = confirmed; tool.admission = null; tool.live = null; tool.createIntent = undefined; tool.loadError = null
-          tool.launchSaveError = null; tool.pendingLaunch = undefined
+          tool.launchSaveError = null; tool.pendingLaunch = undefined; tool.preparationPending = false
           execution.ended = true; execution.complete()
         })
         execution.releaseLifecycle?.(); execution.releaseLifecycle = null
@@ -1026,7 +1045,7 @@ export class CustomToolkitOwner {
       await this.save(tool, { latestConfirmed: tool.latest, admission: null, releasedLaunches, manualStartRequired: true }, () => {
         tool.releasedLaunches = releasedLaunches; tool.manualStartRequired = true
         tool.admission = null; tool.live = null; tool.createIntent = undefined; tool.loadError = null
-        tool.launchSaveError = null; tool.pendingLaunch = undefined
+        tool.launchSaveError = null; tool.pendingLaunch = undefined; tool.preparationPending = false
         execution.complete()
       })
       this.publish(tool)
