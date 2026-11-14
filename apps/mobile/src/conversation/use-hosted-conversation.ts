@@ -9,9 +9,9 @@ import { readMobileConversationSession, type MobileConversationMetadata } from '
 /** `paired` says whether this device holds a Mac connection link; absent when the owner has not established it. */
 export type MobileConnection = { state: 'unavailable' | 'connecting' | 'connected' | 'disconnected'; message: string; issue?: string; paired?: boolean }
 type PageOwner = { client: AgentMuxHostedClient; agentSessionId: string; hostId?: string; workspacePath?: string }
-type Metadata = { owner: AgentMuxHostedClient | null; id: string | null; session: AgentMuxAgentSession | null; metadata: MobileConversationMetadata; disconnected: boolean;
+type Metadata = { owner: AgentMuxHostedClient | null; id: string | null; session: AgentMuxAgentSession | null; metadata: MobileConversationMetadata; agentIssue: string | null; disconnected: boolean;
   activity: { owner: object; hostId: string; runId: string; observation: AgentObservation } | null }
-const empty = (id: string | null, owner: AgentMuxHostedClient | null): Metadata => ({ owner, id, session: null, metadata: { state: 'loading', issue: null }, disconnected: false, activity: null })
+const empty = (id: string | null, owner: AgentMuxHostedClient | null): Metadata => ({ owner, id, session: null, metadata: { state: 'loading', issue: null }, agentIssue: null, disconnected: false, activity: null })
 const sameSource = (a: AgentSessionHistoryPage, b: AgentSessionHistoryPage) => a.agentSessionId === b.agentSessionId && a.sourceHostId === b.sourceHostId && a.source.providerId === b.source.providerId && a.source.nativeSessionId === b.source.nativeSessionId
 
 /** Complete accepted public Reader frames; transport loss retains the original view and resource owner. */
@@ -98,6 +98,8 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
         clearActivity(); void sessionMetadata()
       } else if ((event.type === 'agent-status' || event.type === 'process-state') && event.agentSessionId === id) {
         clearActivity(); void readActivity()
+      } else if (event.type === 'agent-error' && (!event.agentSessionId || event.agentSessionId === id)) {
+        patch({ agentIssue: event.message })
       } else if (event.type === 'run-removed' && event.agentSessionId === id || event.type === 'agent-session-record-deleted' && event.agentSessionId === id) {
         clearActivity(); void sessionMetadata(true)
       }
@@ -110,7 +112,7 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
   const refresh = useCallback(async () => { await Promise.all([view.refresh(), readMetadata()]) }, [view.refresh, readMetadata])
   const activity = active && selected.activity?.owner === activityOwner &&
     selected.activity.hostId === selected.session?.hostId && selected.activity.runId === selected.session?.run.runId ? selected.activity.observation : null
-  return { id: selected.id, metadataClient: selected.owner, session: selected.session, metadata: selected.metadata, disconnected: selected.disconnected, activity, readProcessDetail: view.readProcessDetail, held: view.held, acceptHeld: view.acceptHeld, page: reading?.historyPage ?? null, timeline: reading?.captured ?? null, projection: reading,
+  return { id: selected.id, metadataClient: selected.owner, agentIssue: selected.agentIssue, session: selected.session, metadata: selected.metadata, disconnected: selected.disconnected, activity, readProcessDetail: view.readProcessDetail, held: view.held, acceptHeld: view.acceptHeld, page: reading?.historyPage ?? null, timeline: reading?.captured ?? null, projection: reading,
     readError: view.error, readActivity: { sourceRead: view.sourceRead, loading: view.loading },
     pageOwner: view.snapshot ? pageOwner.current?.owner ?? null : null, answerContext, reading: view.loading,
     olderWindow: view.historical, capturedHasMore: view.hasMore, newerAvailable: view.newerAvailable || view.held,

@@ -138,7 +138,7 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
   async function readSession(source: AgentMuxHostedClient, id: string) {
     const observed = await readMobileConversationSession(source, id)
     if (!observed.session || observed.metadata.state !== 'active') throw Object.assign(new Error(observed.metadata.issue ??
-      (observed.metadata.state === 'retired' ? '这段对话已结束，草稿仍保留。' : observed.metadata.state === 'deleted' ? '这段对话的记录已删除，草稿仍保留。' : '对话信息还没确认，可以重新核对。')), { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
+      (observed.metadata.state === 'retired' ? '这段对话已退役，草稿仍保留。' : observed.metadata.state === 'deleted' ? '这段对话的记录已删除，草稿仍保留。' : '对话信息还没确认，可以重新核对。')), { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
     return observed.session
   }
   const automaticPause = useRef<{ target: import('@agentmux/core/agent-automation').AgentAutomationTarget; client: AgentMuxHostedClient } | null>(null)
