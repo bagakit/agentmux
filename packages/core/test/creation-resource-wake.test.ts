@@ -6,7 +6,7 @@ import { mkdir, mkdtemp, realpath, rm, writeFile, access, readFile } from 'node:
 import { tmpdir } from 'node:os'
 import { join, resolve, basename } from 'node:path'
 import { afterAll, afterEach, expect, it, vi } from 'vitest'
-import type { AgentMuxAgentCreateInput } from '../src/client.js'
+import type { AgentMuxAgentCreateInput } from "../src/client-contract.js";
 import type { AgentMuxAgentSession, AgentMuxClientEvent } from '../src/types.js'
 const core: typeof import('./fixtures/creation-resource-wake-source.js') = process.env.AGENTMUX_TEST_CREATION_WAKE_ENTRY
   ? await import(/* @vite-ignore */ process.env.AGENTMUX_TEST_CREATION_WAKE_ENTRY) : await import('./fixtures/creation-resource-wake-source.js')

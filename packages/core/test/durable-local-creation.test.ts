@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { build } from 'esbuild'
 import * as Source from '../src/index.js'
-import type { AgentMuxAgentCreateInput } from '../src/client.js'
+import type { AgentMuxAgentCreateInput } from "../src/client-contract.js";
 import type { AgentMuxAgentSession } from '../src/types.js'
 import { agentLifecycleOperationIdentity } from '../src/agent-session-store.js'
 

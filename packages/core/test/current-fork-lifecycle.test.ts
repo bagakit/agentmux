@@ -7,7 +7,8 @@ import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
-import { AgentMuxClient, type AgentMuxAgentCreateInput } from '../src/client.js'
+import { AgentMuxClient } from '../src/client.js';
+import type { AgentMuxAgentCreateInput } from "../src/client-contract.js";
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { issueAgentCapability, hashAgentCapability } from '../src/agent-capability.js'
 import { AgentMuxFileAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js'

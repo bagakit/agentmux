@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { AgentMuxFileAgentSessionStore, sessionHistoryMetadata } from '../src/agent-session-store.js'
 import { AgentMuxError } from '../src/errors.js'
-import type { AgentMuxAgentCreateInput } from '../src/client.js'
+import type { AgentMuxAgentCreateInput } from "../src/client-contract.js";
 import { parseAgentSpawnCreator } from '../src/agent-spawn.js'
 import { parseAgentMuxCliInvocation } from '../src/agentmux-cli-commands.js'
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'

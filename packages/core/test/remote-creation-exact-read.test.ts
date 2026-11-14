@@ -4,7 +4,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AgentMuxClient, hostAgentCreationIntent, type AgentMuxHostAgentCreateInput } from '../src/client.js'
+import { AgentMuxClient, hostAgentCreationIntent } from '../src/client.js';
+import type { AgentMuxHostAgentCreateInput } from "../src/client-contract.js";
 import { AgentMuxCreationAuthority, agentCreationIntentDigest } from '../src/agent-creation-authority.js'
 import { AgentMuxHostExecutorOwner } from '../src/executor-owner.js'
 import { AgentMuxFileAgentSessionStore, AgentMuxMemoryAgentSessionStore, agentLifecycleOperationIdentity, type AgentMuxAgentSessionStore } from '../src/agent-session-store.js'

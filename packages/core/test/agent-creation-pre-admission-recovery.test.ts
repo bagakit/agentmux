@@ -11,7 +11,7 @@ import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import { defineAgentProvider } from '../src/agent-provider.js'
 import { AgentMuxError } from '../src/errors.js'
 import type { AgentMuxClientEvent } from '../src/types.js'
-import type { AgentMuxAgentCreateInput } from '../src/client.js'
+import type { AgentMuxAgentCreateInput } from "../src/client-contract.js";
 import type { AgentMuxAgentSession } from '../src/types.js'
 import { agentLifecycleOperationIdentity } from '../src/agent-session-store.js'
 import { AgentMuxCreationAuthority } from '../src/agent-creation-authority.js'

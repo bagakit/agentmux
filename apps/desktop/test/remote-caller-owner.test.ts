@@ -3,7 +3,8 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxError } from '../../../packages/core/src/errors.js'
-import { hostAgentCreationIntent, type AgentMuxHostAgentCreateInput } from '../../../packages/core/src/client.js'
+import { hostAgentCreationIntent } from '../../../packages/core/src/client.js';
+import type { AgentMuxHostAgentCreateInput } from "@agentmux/core";
 import runtimeControllerSource from '../src/main/runtime-controller.ts?raw'
 
 // Execute the production methods together, without importing Electron or replacing their routing.

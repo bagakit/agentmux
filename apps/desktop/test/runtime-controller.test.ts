@@ -9,7 +9,8 @@ import { mkdir, mkdtemp, readFile, realpath, readdir, rm, writeFile } from 'node
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { AgentMuxClient as ActualCoreClient, type AgentMuxAgentPromptInput } from '../../../packages/core/src/client.js'
+import { AgentMuxClient as ActualCoreClient } from '../../../packages/core/src/client.js';
+import type { AgentMuxAgentPromptInput } from "@agentmux/core";
 import { AgentMuxMemoryAgentSessionStore as ActualCoreMemoryStore } from '../../../packages/core/src/agent-session-store.js'
 import { AgentProviderRegistry } from '../../../packages/core/src/agent-provider.js'
 import type { AgentMuxAgentSessionRegistry } from '../../../packages/core/src/agent-session-registry.js'

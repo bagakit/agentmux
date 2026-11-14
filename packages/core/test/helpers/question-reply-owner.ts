@@ -5,7 +5,7 @@ import { once } from 'node:events'
 import { createRequire } from 'node:module'
 import { expect, vi } from 'vitest'
 import type { AgentProvider, AgentProviderPreparedNativeInput } from '../../src/agent-provider.js'
-import type { AgentMuxSessionQuestionReplyInput } from '../../src/client.js'
+import type { AgentMuxSessionQuestionReplyInput } from "../../src/client-contract.js";
 import { prepareCodexNativeInput } from '../../src/providers/codex-native-input.js'
 import { agentPromptCondition } from '../../src/agent-prompt-condition.js'
 import { AgentMuxFileAgentSessionStore } from '../../src/agent-session-store.js'

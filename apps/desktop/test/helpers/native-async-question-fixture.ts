@@ -2,7 +2,8 @@ import { fixturePath as _hygiene_fixturePath } from "../../scripts/lib/fixture-v
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AgentMuxClient, type AgentMuxSessionQuestionReplyInput } from '../../../../packages/core/dist/client.js';
+import { AgentMuxClient } from '../../../../packages/core/dist/client.js';
+import type { AgentMuxSessionQuestionReplyInput } from "@agentmux/core";
 import { AgentMuxFileAgentSessionStore, loadAgentSessions } from '../../../../packages/core/dist/agent-session-store.js';
 import { agentPromptCondition } from '../../../../packages/core/dist/agent-prompt-condition.js';
 import { codexQuestionRequest } from '../../../../packages/core/dist/providers/codex-question.js';

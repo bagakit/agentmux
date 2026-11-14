@@ -6,7 +6,8 @@ import { once } from 'node:events'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AgentMuxClient as DefaultClient, hostAgentCreationIntent, type AgentMuxHostAgentCreateInput } from '../src/client.js'
+import { AgentMuxClient as DefaultClient, hostAgentCreationIntent } from '../src/client.js';
+import type { AgentMuxHostAgentCreateInput } from "../src/client-contract.js";
 import { AgentMuxCreationAuthority } from '../src/agent-creation-authority.js'
 import { AgentMuxHostExecutorOwner } from '../src/executor-owner.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'

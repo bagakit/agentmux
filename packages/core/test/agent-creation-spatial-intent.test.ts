@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
-import { AgentMuxClient, type AgentMuxAgentCreateInput } from '../src/client.js'
+import { AgentMuxClient } from '../src/client.js';
+import type { AgentMuxAgentCreateInput } from "../src/client-contract.js";
 import { AgentMuxFileAgentSessionStore, parseAgentCreationFact } from '../src/agent-session-store.js'
 import { AgentMuxCreationAuthority } from '../src/agent-creation-authority.js'
 import { AgentMuxHostExecutorOwner } from '../src/executor-owner.js'

@@ -6,7 +6,7 @@ import { connectAgentMuxRpc } from '../../src/public-rpc-client.js'
 import { AgentMuxSpatialStateStore } from '../../src/spatial-state.js'
 import { AgentMuxCreationAuthority } from '../../src/agent-creation-authority.js'
 import { AgentMuxHostExecutorOwner } from '../../src/executor-owner.js'
-import type { AgentMuxAgentCreateInput } from '../../src/client.js'
+import type { AgentMuxAgentCreateInput } from "../../src/client-contract.js";
 import type { AgentMuxAgentSession } from '../../src/types.js'
 import type { CtxmuxAdapterRun } from '../../src/ctxmux-run-adapter.js'
 import { rpcOwnerFixture } from './public-rpc-owner.js'

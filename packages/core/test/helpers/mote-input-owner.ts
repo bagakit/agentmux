@@ -1,7 +1,8 @@
 import { expect, vi } from 'vitest'
 import { appendFile, mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { AgentMuxClient, type AgentMuxClientOptions } from '../../src/client.js'
+import { AgentMuxClient } from '../../src/client.js';
+import type { AgentMuxClientOptions } from "../../src/client-contract.js";
 import { AgentMuxFileAgentSessionStore } from '../../src/agent-session-store.js'
 import { AgentMuxSpatialStateStore, type AgentMuxSpatialGraph } from '../../src/spatial-state.js'
 import { createWorkspaceLayout } from '../../src/spatial-layout.js'

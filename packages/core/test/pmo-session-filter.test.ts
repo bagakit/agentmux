@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import type { AgentMuxAgentRuntimeStatus } from '../src/client.js'
+import type { AgentMuxAgentRuntimeStatus } from "../src/client-contract.js";
 import { agentSessionMatches, agentSessionStatus } from '../src/rpc-agent-filter.js'
 
 /**

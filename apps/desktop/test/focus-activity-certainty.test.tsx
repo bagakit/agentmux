@@ -3,7 +3,7 @@ import { fixtureTime as _hygiene_fixtureTime } from "../scripts/lib/fixture-valu
 import { act, createElement } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import type { AgentMuxAgentRuntimeStatus } from '../../../packages/core/src/client.js'
+import type { AgentMuxAgentRuntimeStatus } from "@agentmux/core";
 import type { AgentTimelineSnapshot } from '../../../packages/core/src/types.js'
 import { activityCertaintyClient } from '../../../packages/core/test/fixtures/activity-certainty-client.js'
 import type { SessionSnapshot } from '../src/shared/contracts'
