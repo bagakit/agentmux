@@ -48,6 +48,15 @@ const actionBasis = (loop: ContinuousProgressLoop) => ({ loopId: loop.loopId, ho
   providerId: loop.providerId, workspacePath: loop.workspacePath, intervalMs: loop.intervalMs, prompt: loop.prompt,
   taskSource: loop.taskSource, creationOperationId: loop.creationOperationId, status: loop.status, pause: loop.pause, revision: loop.revision ?? 0 })
 
+function hasHeldScheduledInput(loop: Readonly<ContinuousProgressLoop>): boolean {
+  if (!isAgentSchedule(loop) || loop.pause?.reason !== 'input-unconfirmed' && loop.pause?.reason !== 'persistence-unconfirmed' ||
+    loop.lastMutation?.action !== 'update' && loop.lastMutation?.phase === 'prepared') return false
+  const input = loop.lastInputRef, pending = loop.pendingCompletion
+  return !!input && !!pending?.futureIntent && input.inputKey.agentSessionId === loop.agentSessionId &&
+    input.inputKey.submissionId === pending.operationId && input.inputKey.expectedRun.runId === pending.condition?.expectedRun.runId &&
+    isDeepStrictEqual(input.futureIntent, pending.futureIntent)
+}
+
 /** A maintenance source's answer for one due occurrence. Only a confirmed change pauses; a gap only defers. */
 export type MaintenanceSourceDecision = { action: 'continue' } | { action: 'pause'; reason: string; pauseReason?: ContinuousProgressPauseReason } | { action: 'defer'; reason: string }
 /** The first wait after an unconfirmed source, doubling to the limit. Shared by the scheduler and its maintenance owner. */
@@ -894,7 +903,7 @@ export class ContinuousProgressLoopManager {
     catch (error) {
       const current = this.require(loopId)
       if (current.status === 'active' && isDeepStrictEqual(current, saving)) {
-        this.deferCheck(loopId, checkAt)
+        this.deferCheck(loopId, Math.max(checkAt, this.now()))
         this.patch(loopId, { lastOutcome: 'skipped', lastDecision: 'The original schedule could not save this check before dispatch. It remains due and will be checked again. ' + String(error) })
         for (const listener of this.listeners) listener(this.require(loopId))
       }
@@ -903,7 +912,9 @@ export class ContinuousProgressLoopManager {
   }
   private persistenceFailed(loopId: string, error: unknown): void {
     const original = this.require(loopId)
-    const status = original.managedSource && original.status === 'active' && !original.pendingCompletion ? 'active' : original.taskSource?.kind === 'goal' && original.status === 'stopped' ? 'stopped' : 'paused'
+    const safeToWait = original.status === 'active' && !original.pendingCompletion &&
+      (original.managedSource || isAgentSchedule(original) && original.lastOutcome !== 'unknown')
+    const status = safeToWait ? 'active' : original.taskSource?.kind === 'goal' && original.status === 'stopped' ? 'stopped' : 'paused'
     if (status === 'paused' && original.status === 'active') this.pauseWithReason(loopId, 'persistence-unconfirmed')
     this.patch(loopId, { status, lastDecision: `Loop persistence is unconfirmed. Manual input remains available. ${error instanceof Error ? error.message : String(error)}` })
     for (const listener of this.listeners) listener(this.require(loopId))
@@ -928,11 +939,18 @@ export class ContinuousProgressLoopManager {
     }
   }
   private async runDue(checkAt: number, now: number | undefined, onlyLoopId?: string): Promise<void> {
-    const pending = this.scheduler.due(checkAt, onlyLoopId, id => !this.checks.has(id) && (this.deferredChecks.get(id)?.until ?? 0) <= checkAt).map(selected => {
-      const controller = new AbortController(), target = this.targetKey(selected)
+    const pending = this.scheduler.due(checkAt, onlyLoopId, id => !this.checks.has(id) && (this.deferredChecks.get(id)?.until ?? 0) <= checkAt,
+      this.futureInputs?.inspectInput && this.futureInputs.inspectFutureIntent ? hasHeldScheduledInput : undefined).map(selected => {
+      const controller = new AbortController()
+      const reconciling = selected.status === 'paused'
+      const target = reconciling ? undefined : this.targetKey(selected)
       this.activeDeliveries.set(selected.loopId, controller)
-      const previous = this.targetChecks.get(target)
+      const previous = target === undefined ? undefined : this.targetChecks.get(target)
       const run = async () => {
+        if (reconciling) {
+          await this.reconcileScheduledInput(selected, checkAt, controller.signal)
+          return
+        }
         if (previous) {
           try { await awaitUntilCancelled(() => previous, controller.signal) }
           catch { return }
@@ -945,10 +963,13 @@ export class ContinuousProgressLoopManager {
         if (this.activeDeliveries.get(selected.loopId) === controller) this.activeDeliveries.delete(selected.loopId)
       })
       // A cancelled waiter can finish before its predecessor releases the target.
-      const tail = Promise.allSettled(previous ? [previous, checking] : [checking]).then(() => {
-        if (this.targetChecks.get(target) === tail) this.targetChecks.delete(target)
-      })
-      this.checks.set(selected.loopId, checking); this.targetChecks.set(target, tail)
+      if (target !== undefined) {
+        const tail = Promise.allSettled(previous ? [previous, checking] : [checking]).then(() => {
+          if (this.targetChecks.get(target) === tail) this.targetChecks.delete(target)
+        })
+        this.targetChecks.set(target, tail)
+      }
+      this.checks.set(selected.loopId, checking)
       return checking
     })
     // An exact target owns its failure; unrelated due objects still finish their work.
@@ -1124,23 +1145,15 @@ export class ContinuousProgressLoopManager {
       }
       else {
         const { pendingCompletion: _, ...settled } = current
-        if (outcome === 'skipped' && newCheckInClaim && settled.checkInState) {
-          const { unanswered: _, ...state } = settled.checkInState
-          settled.checkInState = state
+        if (outcome === 'skipped' && newCheckInClaim) {
+          this.clearUnsentFollowUp(settled, checkAt)
           settled.lastDecision = 'This follow-up was not delivered. The original due occurrence remains available.'
         }
         if (outcome === 'sent') {
           if (current.taskSource && settled.lastDecision) settled.lastDecision += ' Host accepted the request; a new Agent turn is not yet confirmed.'
           else delete settled.lastDecision
           if (isAgentSchedule(current) && pending?.futureIntent) {
-            const nextDue = current.calendar ? nextCalendarOccurrence(current.calendar, checkAt) : current.everyMs !== undefined ? nextIntervalOccurrence(pending.futureIntent.occurrenceAt, checkAt, current.everyMs) : null
-            settled.lastOccurrenceAt = pending.futureIntent.occurrenceAt
-            settled.nextCheckAt = nextDue ?? current.nextCheckAt
-            if (nextDue === null && current.everyMs !== undefined && current.status !== 'stopped') { settled.status = 'paused'; settled.pause = this.pauseFacts(current, 'timing-unrepresentable') }
-            else if (nextDue === null) settled.status = 'stopped'
-            settled.lastDecision = nextDue === null && current.everyMs !== undefined
-              ? 'Host accepted the original message; the next occurrence is unrepresentable. Inspect the original arrangement.'
-              : 'Host accepted the original future message; a new Agent turn is not yet confirmed.'
+            this.completeScheduledOccurrence(settled, pending.futureIntent.occurrenceAt, checkAt)
           }
         }
         this.scheduler.replace(current.loopId, { ...settled, lastOutcome: outcome, ...(outcome === 'sent' && pending ? { lastCompletionId: pending.id } : {}) })
@@ -1152,6 +1165,78 @@ export class ContinuousProgressLoopManager {
       for (const listener of this.listeners) listener(this.require(loopId))
     } else await this.persist(claim.loop.loopId)
   }
+
+  private completeScheduledOccurrence(loop: ContinuousProgressLoop, occurrenceAt: number, now: number): void {
+    const nextDue = loop.calendar ? nextCalendarOccurrence(loop.calendar, now) : loop.everyMs !== undefined
+      ? nextIntervalOccurrence(occurrenceAt, now, loop.everyMs) : null
+    loop.lastOccurrenceAt = occurrenceAt
+    loop.nextCheckAt = nextDue ?? loop.nextCheckAt
+    if (nextDue === null && loop.everyMs !== undefined && loop.status !== 'stopped') {
+      loop.pause = this.pauseFacts(loop, 'timing-unrepresentable')
+      loop.status = 'paused'
+    } else if (nextDue === null) loop.status = 'stopped'
+    loop.lastDecision = nextDue === null && loop.everyMs !== undefined
+      ? 'Host accepted the original message; the next occurrence is unrepresentable. Inspect the original arrangement.'
+      : 'Host accepted the original future message; a new Agent turn is not yet confirmed.'
+  }
+
+  private clearUnsentFollowUp(loop: ContinuousProgressLoop, claimAt: number): void {
+    if (loop.checkInState?.unanswered?.claimAt !== claimAt) return
+    const { unanswered: _, ...state } = loop.checkInState
+    loop.checkInState = state
+  }
+
+  /** Settle from the Core record, without going back through the send path. */
+  private async reconcileScheduledInput(loop: ContinuousProgressLoop, checkAt: number, signal: AbortSignal): Promise<void> {
+    const owner = this.maintenanceOwner
+    const current = () => this.running && !signal.aborted && !this.mutations.has(loop.loopId) &&
+      isDeepStrictEqual(this.scheduler.get(loop.loopId), loop)
+    const defer = () => { if (current()) this.deferCheck(loop.loopId, Math.max(checkAt, this.now())) }
+    if (!current()) return
+    const pending = loop.pendingCompletion!, reference = loop.lastInputRef!, inputs = this.futureInputs
+    if (!inputs?.inspectInput || !inputs.inspectFutureIntent) return
+    let reading: ContinuousProgressInputReading | undefined
+    try {
+      reading = await awaitUntilCancelled(() => inputs.inspectInput!(loop), signal)
+      if (!current()) return
+      if (!reading || reading.status !== 'confirmed' || !isDeepStrictEqual(reading.reference, reference) ||
+          reading.delivery === 'unconfirmed') { defer(); return }
+      if (loop.managedSource && (!owner || (await awaitUntilCancelled(() => owner.qualify(loop), signal)).action !== 'continue' || owner !== this.maintenanceOwner)) { defer(); return }
+      const definition = await awaitUntilCancelled(() => inputs.inspectFutureIntent!(loop), signal)
+      if (!definition.active) { defer(); return }
+    } catch { defer(); return }
+    if (!current() || loop.managedSource && owner !== this.maintenanceOwner) return
+    const { pendingCompletion: _, pause: __, ...rest } = loop
+    const settled: ContinuousProgressLoop = { ...rest, status: 'active' }
+    const occurrenceAt = reference.futureIntent.occurrenceAt
+    if (reading.delivery === 'not-applied') {
+      this.clearUnsentFollowUp(settled, reference.preparedAt)
+      // Core already reserved this occurrence. The next one is distinct;
+      // a one-shot arrangement still needs an explicit recovery decision.
+      const nextDue = loop.calendar ? nextCalendarOccurrence(loop.calendar, occurrenceAt) : loop.everyMs !== undefined
+        ? nextIntervalOccurrence(occurrenceAt, occurrenceAt, loop.everyMs) : null
+      if (nextDue === null) { defer(); return }
+      settled.nextCheckAt = nextDue
+      settled.lastOutcome = 'skipped'
+      settled.lastDecision = 'Core confirmed this occurrence was not delivered. The original repeating arrangement remains active.'
+    } else {
+      settled.lastOutcome = 'sent'
+      settled.lastCompletionId = pending.id
+      this.completeScheduledOccurrence(settled, occurrenceAt, Math.max(checkAt, this.now()))
+    }
+    this.scheduler.replace(loop.loopId, settled)
+    try { await this.saveLoops() }
+    catch (error) {
+      // A failed settlement keeps the original reference. A later persisted
+      // pause or cancellation wins over an older attempted settlement.
+      if (isDeepStrictEqual(this.scheduler.get(loop.loopId), settled)) this.scheduler.replace(loop.loopId, loop)
+      defer()
+      throw error
+    }
+    this.deferredChecks.delete(loop.loopId)
+    for (const listener of this.listeners) listener(this.require(loop.loopId))
+  }
+
   private cancelDelivery(loopId: string, reason?: Error): void {
     this.deferredChecks.delete(loopId)
     for (const controller of this.activations.get(loopId) ?? []) controller.abort(reason)
