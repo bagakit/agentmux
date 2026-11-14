@@ -8,7 +8,7 @@ import { promisify } from 'node:util'
 import { pathToFileURL } from 'node:url'
 import { connectAgentMuxRpc } from '../../../packages/core/dist/public-rpc-client.js'
 import { connectHostedAgentMux } from '../../../packages/core/dist/hosted-client.js'
-import { ensureMacosHostService, macosHostService, macosHostServiceRegistration,
+import { ensureMacosHostService, inspectMacosHostProcess, macosHostService, macosHostServiceRegistration,
   reloadReplacedMacosHost } from '../../host/dist/macos-service.js'
 
 assert.equal(process.platform + '-' + process.arch, 'darwin-arm64')
@@ -117,7 +117,13 @@ try {
   try { await disconnect() }
   finally {
     try {
-      if (await macosHostServiceRegistration(service)) await exec('/bin/launchctl', ['bootout', service.target])
+      const registration = await macosHostServiceRegistration(service)
+      if (registration) {
+        const process = registration.pid ? await inspectMacosHostProcess(registration.pid) : null
+        await exec('/bin/launchctl', ['bootout', service.target])
+        if (process) await observe(() => inspectMacosHostProcess(process.pid), value => value?.birth !== process.birth,
+          'The private Host did not release its Store before cleanup')
+      }
       if (previousHost && previousHost.exitCode === null && previousHost.signalCode === null) {
         previousHost.kill('SIGTERM'); await once(previousHost, 'exit')
       }
