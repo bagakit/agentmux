@@ -74,8 +74,8 @@ async function openEditor(ctx) {
   await ctx.waitFor('the current Browser activity reader is visible', () => ctx.probe.cdp.evaluate(`(${ctx.selectors('[aria-label="Browser activity trace"]')}).length===1`))
 }
 async function waitAsset(ctx, id) { return ctx.waitFor('the exact original asset is projected', async () => (await state(ctx)).assets.find(a => a.id === id) ?? null) }
-async function reviewFailureControlGeometry(ctx) {
-  const read = () => ctx.probe.cdp.evaluate(`(()=>{
+async function readFailureControlGeometry(ctx) {
+  return ctx.probe.cdp.evaluate(`(()=>{
     const rect=e=>{const r=e.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom}};
     return Array.from(document.querySelectorAll(${q(editor + ' .browser-task-step-failure')})).filter(e=>e.checkVisibility()).map(group=>{
       const rail=group.closest('.browser-trace-rail'),bounds=rect(group),clip=rect(rail);
@@ -84,26 +84,35 @@ async function reviewFailureControlGeometry(ctx) {
         fields:Array.from(group.children).map(label=>({columns:getComputedStyle(label).gridTemplateColumns,label:rect(label.querySelector('span')),select:rect(label.querySelector('select'))}))};
     });
   })()`)
-  const violations = groups => {
-    assert.ok(groups.length > 0 && groups.some(group => group.inViewport), 'The real editor must expose nonempty failure controls in its viewport')
-    const failures = []
-    for (const group of groups) {
-      assert.equal(group.fields.length, 2)
-      const boxes = group.fields.flatMap(field => [field.label, field.select])
-      for (const box of boxes) {
-        assert.ok(box.width > 0 && box.height > 0, 'Actual labels and selects need positive geometry')
-        if (box.x < group.bounds.x - 1 || box.right > group.bounds.right + 1) failures.push({ stepId: group.stepId, kind: 'control-overflow' })
-      }
-      if (group.bounds.x < group.clip.x - 1 || group.bounds.right > group.clip.right + 1) failures.push({ stepId: group.stepId, kind: 'group-overflow' })
-      for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
-        if (Math.min(boxes[i].right, boxes[j].right) - Math.max(boxes[i].x, boxes[j].x) > .5 &&
-            Math.min(boxes[i].bottom, boxes[j].bottom) - Math.max(boxes[i].y, boxes[j].y) > .5) failures.push({ stepId: group.stepId, kind: 'overlap', pair: [i, j] })
-      }
+}
+function failureControlViolations(groups) {
+  assert.ok(groups.length > 0 && groups.some(group => group.inViewport), 'The real editor must expose nonempty failure controls in its viewport')
+  const failures = []
+  for (const group of groups) {
+    assert.equal(group.fields.length, 2)
+    const boxes = group.fields.flatMap(field => [field.label, field.select])
+    for (const box of boxes) {
+      assert.ok(box.width > 0 && box.height > 0, 'Actual labels and selects need positive geometry')
+      if (box.x < group.bounds.x - 1 || box.right > group.bounds.right + 1) failures.push({ stepId: group.stepId, kind: 'control-overflow' })
     }
-    return failures
+    if (group.bounds.x < group.clip.x - 1 || group.bounds.right > group.clip.right + 1) failures.push({ stepId: group.stepId, kind: 'group-overflow' })
+    for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+      if (Math.min(boxes[i].right, boxes[j].right) - Math.max(boxes[i].x, boxes[j].x) > .5 &&
+          Math.min(boxes[i].bottom, boxes[j].bottom) - Math.max(boxes[i].y, boxes[j].y) > .5) failures.push({ stepId: group.stepId, kind: 'overlap', pair: [i, j] })
+    }
   }
+  return failures
+}
+async function reviewFailureControlGeometry(ctx, label) {
   await ctx.probe.cdp.evaluate(`document.querySelector(${q(editor + ' .browser-task-step-failure')}).scrollIntoView({block:'nearest'});null`)
-  const original = await read(); assert.deepEqual(violations(original), [])
+  const groups = await readFailureControlGeometry(ctx), observation = { label, groups }
+  ;(ctx.receipt.taskData.currentFailureControlGeometry ??= []).push(observation)
+  observation.violations = failureControlViolations(groups)
+  assert.deepEqual(observation.violations, [])
+  return groups
+}
+async function reviewFailureControlCssCounterexample(ctx, original) {
+  original ??= await reviewFailureControlGeometry(ctx, 'css-counterexample-original')
   const id = 'task-data-original-failure-css-counterexample'
   // Restore only the previous failure grid and its original winning path rule.
   // !important lets those old declarations override the newly fixed specificity.
@@ -113,11 +122,11 @@ async function reviewFailureControlGeometry(ctx) {
   let counterexample
   try {
     await ctx.probe.cdp.evaluate(`(()=>{if(document.getElementById(${q(id)}))throw new Error('CSS counterexample already exists');const s=document.createElement('style');s.id=${q(id)};s.textContent=${q(css)};document.head.append(s);})()`)
-    counterexample = await read()
-    assert.ok(violations(counterexample).length > 0, 'The original bad CSS must fail the actual label/select geometry oracle')
+    counterexample = await readFailureControlGeometry(ctx)
+    assert.ok(failureControlViolations(counterexample).length > 0, 'The original bad CSS must fail the actual label/select geometry oracle')
   } finally { await ctx.probe.cdp.evaluate(`document.getElementById(${q(id)})?.remove();null`) }
-  const restored = await read(); assert.deepEqual(violations(restored), [])
-  ctx.receipt.taskData.failureControlGeometry = { original, cssCounterexample: { css, groups: counterexample, violations: violations(counterexample) }, restored,
+  const restored = await readFailureControlGeometry(ctx); assert.deepEqual(failureControlViolations(restored), [])
+  ctx.receipt.taskData.failureControlGeometry = { original, cssCounterexample: { css, groups: counterexample, violations: failureControlViolations(counterexample) }, restored,
     scope: 'Same actual App CSS-only RED to restored GREEN; no task action, product source mutation or business replay.' }
 }
 async function recorded(ctx, runId) {
@@ -173,7 +182,7 @@ async function durablePrivacy(ctx, secret) {
   return files
 }
 
-async function privateCounterexamples(ctx, sdk, zone, mainAsset, mainRegion) {
+export async function prepareTaskDataPrivateCounterexamples(ctx, sdk, zone, mainAsset, mainRegion) {
   const url = new URL('/private', ctx.pageUrl).href
   const opened = await ctx.rpc.call('browser.open', { url, destination: { kind: 'new-tab', after: { kind: 'tab', tabId: mainRegion.tabId } } })
   const other = { ...ctx, browserId: opened.region.browserId, pageUrl: url }
@@ -325,15 +334,25 @@ export async function prepareTaskDataOutcomes(ctx) {
   await ctx.waitFor('the original task result projection is visible', () => ctx.probe.cdp.evaluate("document.querySelector('[data-task-recorded-outcome]')?.dataset.taskRecordedOutcome==='passed'"))
   for (const [label, width, height] of [['normal', 1440, 900], ['narrow', 1000, 720], ['short', 1000, 660]]) {
     await ctx.resize(ctx.probe, width, height)
-    if (label === 'normal') await reviewFailureControlGeometry(ctx)
+    const groups = await reviewFailureControlGeometry(ctx, label)
+    if (label === 'narrow' && ctx.receipt.case === 'daily-workface') await reviewFailureControlCssCounterexample(ctx, groups)
     await ctx.probe.cdp.evaluate(`document.querySelector(${q(editor + ' .browser-task-asset__progress')}).scrollIntoView({block:'start'});null`)
+    const reader = await ctx.waitFor('the task activity reader fits its Browser and retains a visible Close action', () => ctx.probe.cdp.evaluate(`(()=>{
+      const progress=document.querySelector(${q(editor + ' .browser-task-asset__progress')}),rail=progress?.closest('.browser-trace-rail');
+      const pane=document.querySelector(${q(`[data-browser-surface=${q(ctx.browserId)}]`)}),close=rail?.querySelector('[aria-label="Close browser activity timeline"]');
+      if(!pane||!close||!close.checkVisibility())return null;
+      const p=pane.getBoundingClientRect(),r=rail.getBoundingClientRect(),c=close.getBoundingClientRect();
+      if(r.left<p.left-1||r.right>p.right+1||r.top<p.top-1||r.bottom>p.bottom+1||!close.contains(document.elementFromPoint(c.x+c.width/2,c.y+c.height/2)))return null;
+      return {pane:p.toJSON(),rail:r.toJSON(),close:c.toJSON()};
+    })()`))
+    ;(report.readerBoundaries ??= []).push({ label, ...reader })
     await ctx.capture(ctx.probe, label + '-task-data-outcomes', 'task-assets', ctx.pageUrl)
   }
   await ctx.resize(ctx.probe, 1440, 900)
   await ctx.click(ctx.probe.cdp, ctx.selectors(`[data-task-result-operation="${producers[0]}"]`))
   await ctx.waitFor('the original structured field reader is visible in its actual result viewport', () => ctx.probe.cdp.evaluate(`(()=>{
     const surface=document.querySelector('[aria-label="Recorded structured fields"]'),rail=surface?.closest('.browser-trace-rail');
-    if(!surface||!rail)return false;const clip=rail.getBoundingClientRect();
+    if(!surface||!rail||surface.closest('.browser-step-evidence')?.querySelector('header strong')?.textContent!=='Recorded fields')return false;const clip=rail.getBoundingClientRect();
     return [surface.querySelector('.browser-structured-fields__summary'),surface.querySelector('.browser-structured-fields__values dt')].every(element=>{
       if(!element||!element.checkVisibility())return false;const r=element.getBoundingClientRect();
       return Math.max(0,clip.top,r.top)<Math.min(innerHeight,clip.bottom,r.bottom)&&Math.max(0,clip.left,r.left)<Math.min(innerWidth,clip.right,r.right);
@@ -350,7 +369,6 @@ export async function prepareTaskDataOutcomes(ctx) {
   assert.equal(guiRaw.text.includes('\uFFFD'), false, 'The GUI must preserve native Unicode chunk decoding')
   assert.ok(guiRaw.text.includes('"value":0') && guiRaw.text.includes('"value":false') && guiRaw.text.includes('"value":""'))
   await ctx.probe.cdp.evaluate(`document.querySelector('[aria-label="Recorded JSON chunk"]').scrollIntoView({block:'nearest'});null`)
-  await ctx.probe.cdp.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(null))))')
   const guiViewport = await ctx.waitFor('the original JSON chunk is visible for independent review', () => ctx.probe.cdp.evaluate(`(()=>{
     const raw=document.querySelector('[aria-label="Recorded JSON chunk"]'),rail=raw?.closest('.browser-trace-rail');
     if(!raw?.checkVisibility()||!rail)return null;const r=raw.getBoundingClientRect(),clip=rail.getBoundingClientRect();
@@ -358,7 +376,6 @@ export async function prepareTaskDataOutcomes(ctx) {
   })()`))
   report.guiResultRead = { range: guiRaw.range, utf8Bytes: Buffer.byteLength(guiRaw.text), originalArtifactSha256: report.artifacts[0].sha256, viewport: guiViewport }
   await ctx.capture(ctx.probe, 'normal-task-data-original-fields', 'structured-output', ctx.pageUrl)
-  await privateCounterexamples(ctx, sdk, ctx.zone, asset, ctx.region)
   await ctx.waitFor('both deliberate producers reached the real HTTP fixture', () => ctx.receipt.taskDataRequests.actions.length === 2)
   report.actionCount = ctx.receipt.taskDataRequests.actions.length
   report.pageUrl = ctx.pageUrl
@@ -373,6 +390,11 @@ export async function recoverTaskDataOutcomes(ctx) {
   assert.deepEqual(restoredArtifacts, report.artifacts)
   assert.equal(ctx.receipt.taskDataRequests.actions.length, report.actionCount, 'Reading original outcomes cannot replay a producer')
   assert.equal(await ctx.nativePageScript(ctx.probe, 'globalThis.taskDataActions', ctx.pageUrl), 0)
+  return { artifacts: restoredArtifacts, actionCount: ctx.receipt.taskDataRequests.actions.length }
+}
+
+export async function recoverTaskDataPrivateCounterexamples(ctx) {
+  const report = ctx.receipt.taskData
   const originalPrivate = report.privateCounterexamples
   const privateUrl = new URL('/private', ctx.pageUrl).href
   const nativeBefore = await contentsFor(ctx, privateUrl)
@@ -385,11 +407,13 @@ export async function recoverTaskDataOutcomes(ctx) {
   report.coldRead = { browserId: privateContext.browserId, operationId: coldArtifact.reference.operationId,
     artifactSha256: coldArtifact.sha256, nativeBefore, nativeAfter: [], actionCount: report.actionCount }
   report.cases.push('cold-original-artifact-read-without-native-page')
+}
+
+export async function presentRecoveredTaskDataOutcomes(ctx) {
   await openEditor(ctx)
   await ctx.waitFor('the original historical task completion projects after restart', () => ctx.probe.cdp.evaluate("document.querySelector('[data-task-recorded-outcome]')?.dataset.taskRecordedOutcome==='passed'"))
   await ctx.probe.cdp.evaluate(`document.querySelector(${q(editor + ' .browser-task-asset__progress')}).scrollIntoView({block:'start'});null`)
   await ctx.capture(ctx.probe, 'normal-task-data-restored', 'task-assets', ctx.pageUrl)
-  return { artifacts: restoredArtifacts, actionCount: ctx.receipt.taskDataRequests.actions.length }
 }
 
 export async function reviewTaskDataOutcomes(ctx) {
@@ -426,6 +450,8 @@ export async function reviewTaskDataOutcomes(ctx) {
     await ctx.nativePageScript(ctx.probe, "document.cookie='task-data-login=original; Max-Age=86400; SameSite=Lax';null")
     ctx.zone = zone; ctx.region = opened.region
     await prepareTaskDataOutcomes(ctx)
+    await reviewFailureControlCssCounterexample(ctx)
+    await prepareTaskDataPrivateCounterexamples(ctx, sdk, ctx.zone, report.asset, ctx.region)
     const graph = await ctx.probe.cdp.evaluate('window.agentmux.spatial.read()')
     const draft = await ctx.probe.cdp.evaluate(`document.querySelector(${q(draftSelector)}).textContent`)
     const actionCount = ctx.receipt.taskDataRequests.actions.length
@@ -450,6 +476,8 @@ export async function reviewTaskDataOutcomes(ctx) {
       (await contentsFor(ctx, ctx.pageUrl)).length === 1 && await ctx.nativePageScript(ctx.probe, 'document.readyState', ctx.pageUrl) === 'complete')
     assert.equal(await ctx.nativePageScript(ctx.probe, 'document.cookie', ctx.pageUrl), 'task-data-login=original')
     const restored = await recoverTaskDataOutcomes(ctx)
+    await recoverTaskDataPrivateCounterexamples(ctx)
+    await presentRecoveredTaskDataOutcomes(ctx)
     report.recovered = { secondAck, run: await exact(), graph: after, ...restored }
     await preserveDurable(ctx, 'second-process')
     report.cases.push('ordinary-second-pid-original-run-new-input-ack', 'original-file-draft-cookie-and-layout', 'readonly-original-artifacts-no-replay')

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '../../../packages/core/src/control-host'
+import { BrowserOperationFileStore, BrowserOperationJournal } from '@agentmux/browser/browser-operation-journal'
 import { assertNativeBrowserMeasurements, collectBrowserCapabilityMeasurements, summarizeBrowserOutcomeCollection } from '../scripts/lib/browser-capability-cost-collector.mjs'
 
 // Source contract models and one actual public socket consumer; no Native extraction, GUI or user Run is claimed.
@@ -23,8 +24,8 @@ function packet() {
   const { operation, recordedResult, sibling } = facts()
   const sample = (actual: typeof operation, cursor: number, events: any[]) => ({ operationId: actual.id, browserId: actual.browserId,
     afterSequence: cursor, opened: { at: 10, runOperation: actual, gap: null }, events, ends: [{ at: 113, reason: 'closed' }], disposedAt: 112 })
-  const related = [{ sequence: 8, event: { operationId: operation.id, type: 'phase-changed', phase: 'completed' } }]
-  const replay = [{ sequence: 3, event: { operationId: sibling.id, type: 'phase-changed', phase: 'completed' } }]
+  const related = [{ sequence: 8, event: { operationId: operation.id, type: 'operation-finished', operation } }]
+  const replay = [{ sequence: 3, event: { operationId: sibling.id, type: 'operation-finished', operation: sibling } }]
   return { schema: 'agentmux.browser-capability-native-measurements.v1', passed: true, boundary: 'native-producer-and-public-journal',
     candidateCommit: 'a'.repeat(40), sourceIdentity: { 'apps/desktop/scripts/lib/browser-capability-cost-collector.mjs': 'b'.repeat(64) },
     producer: { operation, recordedResult, totals: summarizeBrowserOutcomeCollection(recordedResult, operation) },
@@ -48,7 +49,7 @@ describe('actual cost fact consumer', () => {
       subscribe: async (_method: string, request: any, handlers: any) => {
         const actual = request.operationId === operation.id ? operation : sibling, sequence = actual === operation ? 8 : 3
         handlers.onInitial({ runOperation: actual, gap: null })
-        if (request.afterSequence < sequence) handlers.onEvent({ type: 'progress', data: { sequence, event: { operationId: actual.id, type: 'phase-changed', phase: 'completed' } } })
+        if (request.afterSequence < sequence) handlers.onEvent({ type: 'progress', data: { sequence, event: { operationId: actual.id, type: 'operation-finished', operation: actual } } })
         return { subscriptionId: actual.id, dispose: async () => handlers.onEnd() }
       } }, waitFor: async (_label: string, read: () => unknown) => { expect(read()).toBe(true) } }
     try {
@@ -88,19 +89,39 @@ describe('actual cost fact consumer', () => {
       const x = packet(); change(x.journal.unrelated); expect(() => assertNativeBrowserMeasurements(x)).toThrow()
     }
   })
+  it('accepts only the exact local reader cancellation after its explicit disposal request', () => {
+    const local = packet(), sample = local.journal.unrelated
+    sample.ends = [{ at: sample.disposedAt, reason: 'error', error: 'RPC reader was cancelled', errorCode: 'CONTROL_CANCELLED', disposalRequested: true }] as any
+    expect(() => assertNativeBrowserMeasurements(local)).not.toThrow()
+    for (const change of [(end: any) => { end.disposalRequested = false }, (end: any) => { end.at-- },
+      (end: any) => { end.errorCode = 'CONTROL_UNAVAILABLE' }]) {
+      const failed = structuredClone(local); change(failed.journal.unrelated.ends[0])
+      expect(() => assertNativeBrowserMeasurements(failed)).toThrow('Public stream errors')
+    }
+  })
   it('rejects an invented cursor, empty related callbacks and unrelated delivery amplification', () => {
     const x = packet(); x.journal.unrelated.afterSequence = 99
     expect(() => assertNativeBrowserMeasurements(x)).toThrow('actual prior final sequence')
     const y = packet(); y.journal.related.events = []
     expect(() => assertNativeBrowserMeasurements(y)).toThrow('related public callback')
-    const z = packet(); z.journal.unrelated.events.push({ sequence: 4, event: { operationId: 'sibling-operation', type: 'phase-changed', phase: 'completed' } })
+    const z = packet(); z.journal.unrelated.events.push({ sequence: 4, event: { operationId: 'sibling-operation', type: 'operation-finished', operation: facts().sibling } })
     expect(() => assertNativeBrowserMeasurements(z)).toThrow('Unrelated actual callbacks')
   })
   it('requires the entire prior sibling replay from cursor zero to the completed operation', () => {
-    const incomplete = packet(); incomplete.journal.preparation.events[0]!.event.phase = 'running'
+    const incomplete = packet(); incomplete.journal.preparation.events[0]!.event.operation.phase = 'running'
     expect(() => assertNativeBrowserMeasurements(incomplete)).toThrow('prior replay must finish')
     const prior = packet(); prior.journal.preparation.afterSequence = 2
     expect(() => assertNativeBrowserMeasurements(prior)).toThrow('prior replay from its actual beginning')
+  })
+  it('requires the original finish event even when the opening or another event says completed', () => {
+    for (const event of [
+      { type: 'phase-changed', phase: 'completed', operationId: facts().sibling.id },
+      { type: 'operation-checked', operation: facts().sibling, operationId: facts().sibling.id }
+    ]) {
+      const value = packet(); value.journal.preparation.events[0]!.event = event as any
+      expect(value.journal.preparation.opened.runOperation.phase).toBe('completed')
+      expect(() => assertNativeBrowserMeasurements(value)).toThrow('prior replay must finish')
+    }
   })
   it('rejects same-operation unrelated samples, foreign callbacks and incomplete observation windows', () => {
     const x = packet(); x.journal.preparation = structuredClone(x.journal.related); x.journal.unrelated = structuredClone(x.journal.related)
@@ -111,8 +132,21 @@ describe('actual cost fact consumer', () => {
     const z = packet(); z.journal.window.endedAt = 60
     expect(() => assertNativeBrowserMeasurements(z)).toThrow('complete actual fixed observation window')
   })
-  it('collects actual callbacks through the real public Core stream and never executes browser.run', async () => {
-    const { operation, recordedResult, sibling } = facts(), root = await mkdtemp(join(tmpdir(), 'amx-cost-source-')), socket = join(root, 'control.sock')
+  it('collects actual finished journal callbacks through the public Core stream without browser.run', async () => {
+    const fixture = facts(), { recordedResult } = fixture, root = await mkdtemp(join(tmpdir(), 'amx-cost-source-')), socket = join(root, 'control.sock')
+    const journal = new BrowserOperationJournal(new BrowserOperationFileStore(join(root, 'journal.json')))
+    for (const actual of [fixture.operation, fixture.sibling]) {
+      await journal.start(actual)
+      const step = await journal.startStep(actual.id, { method: 'extractStructured', label: 'Read original fields' })
+      await journal.finishStep(actual.id, step!.sequence, { status: 'completed' })
+      await journal.finish(actual.id, 'completed')
+    }
+    const operation = (await journal.get(fixture.operation.id))!, sibling = (await journal.get(fixture.sibling.id))!
+    const originalReplay = await journal.subscribe(operation.id, 0, () => {})
+    const siblingReplay = await journal.subscribe(sibling.id, 0, () => {})
+    originalReplay.dispose(); siblingReplay.dispose()
+    expect(originalReplay.backlog.at(-1)?.event).toMatchObject({ type: 'operation-finished', operation: { phase: 'completed' } })
+    expect(originalReplay.backlog.some(item => item.event.type === 'phase-changed')).toBe(false)
     const requests: string[] = [], subscriptions: Array<{ operationId: string; afterSequence: number }> = [], disposals: string[] = []
     const server = new AgentMuxControlServer({
       async execute(request: any) {
@@ -123,12 +157,9 @@ describe('actual cost fact consumer', () => {
       },
       async subscribeBrowserOperation(request: any, callback: any) {
         subscriptions.push({ operationId: request.operationId, afterSequence: request.afterSequence })
-        const actual = request.operationId === operation.id ? operation : sibling, sequence = actual === operation ? 8 : 3
-        if (request.afterSequence < sequence) {
-          if (actual === operation) callback({ sequence: sequence - 1, event: { operationId: actual.id, type: 'phase-changed', phase: 'running' } })
-          callback({ sequence, event: { operationId: actual.id, type: 'phase-changed', phase: 'completed' } })
-        }
-        return { runOperation: actual, gap: null, dispose: () => disposals.push(actual.id) }
+        const sub = await journal.subscribe(request.operationId, request.afterSequence, callback)
+        queueMicrotask(() => { for (const event of sub.backlog) callback(event) })
+        return { runOperation: sub.operation, gap: sub.gap, dispose: () => { sub.dispose(); disposals.push(request.operationId) } }
       }
     } as any, socket)
     try {
@@ -138,14 +169,12 @@ describe('actual cost fact consumer', () => {
         rpc,
         waitFor: async (_label: string, read: any) => { for (let i = 0; i < 100; i++) { const value = read(); if (value) return value; await new Promise(done => setTimeout(done, 2)) } throw new Error('Source observation budget exceeded') } }
       const result = await collectBrowserCapabilityMeasurements(ctx, { relatedOperationId: operation.id, siblingBrowserId: sibling.browserId })
-      expect(result.journal.related.events).toEqual([
-        { sequence: 7, event: { operationId: operation.id, type: 'phase-changed', phase: 'running' } },
-        { sequence: 8, event: { operationId: operation.id, type: 'phase-changed', phase: 'completed' } }
-      ])
+      expect(result.journal.related.events).toEqual(originalReplay.backlog)
       expect(result.journal.related).toMatchObject({ opened: { runOperation: { id: operation.id }, gap: null } })
       expect(result.journal.unrelated.events).toEqual([])
+      expect(result.journal.unrelated.ends).toEqual([expect.objectContaining({ reason: 'error', errorCode: 'CONTROL_CANCELLED', disposalRequested: true })])
       expect(requests).toEqual(['browser.operation', 'browser.history'])
-      expect(subscriptions).toEqual([{ operationId: sibling.id, afterSequence: 0 }, { operationId: sibling.id, afterSequence: 3 }, { operationId: operation.id, afterSequence: 0 }])
+      expect(subscriptions).toEqual([{ operationId: sibling.id, afterSequence: 0 }, { operationId: sibling.id, afterSequence: siblingReplay.backlog.at(-1)!.sequence }, { operationId: operation.id, afterSequence: 0 }])
       expect(result.producer.totals.physicalMetadataBytes).toBe(34)
       await vi.waitFor(() => expect(disposals.sort()).toEqual([sibling.id, sibling.id, operation.id].sort()))
     } finally { await server.stop(); await rm(root, { recursive: true, force: true }) }

@@ -22,7 +22,8 @@ const privateCase = process.argv.includes('--case-private')
 const collaborationCase = process.argv.includes('--case-collaboration')
 const zoomCase = process.argv.includes('--case-zoom')
 const taskDataCase = process.argv.includes('--case-task-data-outcomes')
-const bootstrapCase = collaborationCase || zoomCase || taskDataCase
+const dailyCase = process.argv.includes('--case-daily-workface')
+const bootstrapCase = collaborationCase || zoomCase || taskDataCase || dailyCase
 const ordinaryCase = privateCase || bootstrapCase
 const privateApp = process.env.AGENTMUX_BROWSER_PRIVATE_APP ? resolve(process.env.AGENTMUX_BROWSER_PRIVATE_APP) : null
 assert.ok(!privateApp || privateCase, 'The optional qualification App belongs only to the private Browser case')
@@ -50,7 +51,8 @@ const launchedProbes = new Set()
 const privateCrash = process.argv.includes('--private-crash')
 const privateVisual = process.argv.includes('--private-visual')
 assert.ok(!privateCrash || privateCase); assert.ok(!privateVisual || privateCase)
-const deadline = Date.now() + (collaborationCase || taskDataCase ? 360_000 : privateCase ? 180_000 : 120_000)
+// Original human approval does not consume later observation budgets; each Daily wait stays finite.
+const deadline = dailyCase ? Infinity : Date.now() + (collaborationCase || taskDataCase ? 360_000 : privateCase ? 180_000 : 120_000)
 const receipt = { schema: 'agentmux.browser-recovery-restart.v1', completeGate: false, cleanup: {} }
 const downloadCase = process.argv.includes('--case-download')
 const uploadCase = process.argv.includes('--case-upload')
@@ -78,7 +80,7 @@ assert.ok(!observeNativeBounds || structuredCase, 'Main bounds observation belon
 if(observeRestartLifecycle)receipt.diagnosticMode='passive-original-second-process-lifecycle'
 if(observeStageDelivery)receipt.diagnosticMode='original-stage-conditional-breakpoints'
 if(overlayCase && process.env.AGENTMUX_OVERLAY_OBSERVE_ORIGINAL_PAINT === '1')receipt.diagnosticMode='original-overlay-paint-conditional-breakpoints'
-assert.ok([downloadCase,uploadCase,demonstrationCase,overlayCase,taskAssetsCase,taskDownloadCase,framesCase,localRecoveryCase,browserToolsCase,structuredCase,outcomeCase,continuityCase,zoomCase,privateCase,collaborationCase,taskDataCase].filter(Boolean).length<=1,'A product scenario has one owning outcome')
+assert.ok([downloadCase,uploadCase,demonstrationCase,overlayCase,taskAssetsCase,taskDownloadCase,framesCase,localRecoveryCase,browserToolsCase,structuredCase,outcomeCase,continuityCase,zoomCase,privateCase,collaborationCase,taskDataCase,dailyCase].filter(Boolean).length<=1,'A product scenario has one owning outcome')
 const downloadPayload = Buffer.from([0,255,128,13,10,1,2,0,254])
 const downloadRequests = []
 if(downloadCase)receipt.case='download'
@@ -87,6 +89,7 @@ if(demonstrationCase)receipt.case='demonstration'
 if(overlayCase)receipt.case='overlay'
 if(taskAssetsCase)receipt.case='task-assets'
 if(taskDataCase){receipt.case='task-data-outcomes';receipt.taskDataProbeId=process.env.AGENTMUX_TASK_DATA_PROBE_ID??randomUUID()}
+if(dailyCase){receipt.case='daily-workface';receipt.dailyProbeId=process.env.AGENTMUX_DAILY_PROBE_ID??randomUUID()}
 if(taskDownloadCase)receipt.case='task-outcome-download'
 if(framesCase)receipt.case='frames'
 if(localRecoveryCase){receipt.case='local-recovery';receipt.localRecoveryKind=localRecoveryKind}
@@ -103,13 +106,27 @@ receipt.visual = { captureDirectory, captureOnly: true, aestheticReview: 'not-pe
   compositorBoundary: 'The original Renderer webContents and native Browser WebContentsView are captured separately without compositing. These images are not an OS whole-window capture. Actual DOM and native bounds prove their shared geometry.' }
 const fixtureEnvironment = { HOME: privateHome, AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),
   AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'private-messages.ndjson'), CODEX_HOME: codexHome }
-let phase = 'prepare', failure, first, second, server
+let phase = 'prepare', failure, first, second, server, dailyExtensionFixture, dailySupport, ownedResourcePending
+const sampleOwnedResources = stage => {
+  if(!dailySupport)return Promise.resolve()
+  if(ownedResourcePending)return ownedResourcePending
+  ownedResourcePending=(async()=>{
+    let pids=[]
+    try{pids=await listProbeProcesses(0,root)}catch(error){receipt.ownedResourcePidObservationError={code:error.code??null,message:error.message}}
+    await dailySupport.recordDailyOwnedResources(receipt,{stage,root,captureDirectory,pids:[process.pid,...pids,...[...children].map(child=>child.pid)]})
+  })().catch(error=>{
+    const observation={stage,at:new Date().toISOString(),state:'unconfirmed',code:error.code??null,message:error.message}
+    ;(receipt.ownedResourceObservationErrors??=[]).push(observation)
+    try{process.stdout.write(JSON.stringify({ownedResourceObservation:observation})+'\n')}catch{}
+  }).finally(()=>{ownedResourcePending=null})
+  return ownedResourcePending
+}
 async function waitFor(label, read, budget = 20_000) {
   const end = Math.min(deadline, Date.now() + budget)
   while (Date.now() < end) { const result = await read(); if (result) return result; await delay(60) }
   throw new Error(`Browser recovery timed out: ${label}`)
 }
-async function connectCdp(url, role) {
+async function connectCdp(url, role, observeDiagnosticEvent) {
   const socket = new WebSocket(url), pending = new Map(), pauses = []
   const error = (message, method, requestId) => Object.assign(new Error(message), {
     privateCdp: { role, method, ...(requestId === undefined ? {} : { requestId }) }
@@ -125,6 +142,7 @@ async function connectCdp(url, role) {
   socket.addEventListener('message', ({ data }) => {
     const message = JSON.parse(data)
     if (message.method === 'Debugger.paused') pauses.push(message.params)
+    if (message.method) observeDiagnosticEvent?.(message)
     const request = pending.get(message.id)
     if (!request) return
     pending.delete(message.id); clearTimeout(request.timer)
@@ -190,12 +208,12 @@ async function identity() {
     ...(observeNativeBounds ? ['apps/desktop/scripts/browser-native-bounds-observer.mjs'] : []),
     ...(observeRestartLifecycle ? ['apps/desktop/scripts/browser-native-restart-lifecycle-observer.mjs'] : []),
     ...(observeStageDelivery ? ['apps/desktop/scripts/browser-stage-delivery-observer.mjs'] : []),
-    ...(demonstrationCase || taskAssetsCase || taskDownloadCase || localRecoveryCase || taskDataCase ? ['apps/desktop/src/main/browser-demonstration-recorder.ts','apps/desktop/src/main/browser-demonstration-capture.ts',
+    ...(demonstrationCase || taskAssetsCase || taskDownloadCase || localRecoveryCase || taskDataCase || dailyCase ? ['apps/desktop/src/main/browser-demonstration-recorder.ts','apps/desktop/src/main/browser-demonstration-capture.ts',
       'apps/desktop/src/main/browser-semantic-target.ts','apps/desktop/src/shared/browser-demonstration.ts','apps/desktop/src/main/browser-cdp-session.ts',
       'apps/desktop/src/renderer/src/components/BrowserDemonstrationSurface.tsx','apps/desktop/scripts/browser-demonstration-probe-scenario.mjs',
       'apps/desktop/scripts/browser-demonstration-probe-diagnostics.mjs',
       'apps/desktop/scripts/verify-browser-demonstration.mjs'] : []),
-    ...(taskAssetsCase || taskDownloadCase || localRecoveryCase || taskDataCase ? ['apps/desktop/src/main/browser-task-assets.ts','apps/desktop/src/main/browser-replay-compiler.ts',
+    ...(taskAssetsCase || taskDownloadCase || localRecoveryCase || taskDataCase || dailyCase ? ['apps/desktop/src/main/browser-task-assets.ts','apps/desktop/src/main/browser-replay-compiler.ts',
       'apps/desktop/src/shared/browser-task-assets.ts','apps/desktop/src/renderer/src/components/BrowserTaskAssetEditor.tsx',
       'apps/desktop/src/renderer/src/styles/browser-task-assets.css','apps/desktop/scripts/browser-task-assets-probe-scenario.mjs',
       'apps/desktop/scripts/verify-browser-task-assets.mjs','apps/desktop/src/main/browser-outcome-criteria.ts',
@@ -203,7 +221,7 @@ async function identity() {
       'packages/browser/src/browser-page-dispatch.ts','apps/desktop/src/main/browser-downloads.ts',
       'packages/browser/src/model/browser-download.ts','apps/desktop/src/main/workspace-files.ts'] : []),
     ...(taskDownloadCase ? ['apps/desktop/scripts/browser-task-download-outcome-probe-scenario.mjs'] : []),
-    ...(taskDataCase ? ['apps/desktop/scripts/browser-task-data-outcomes-probe-scenario.mjs','apps/desktop/scripts/verify-browser-task-data-outcomes.mjs',
+    ...(taskDataCase || dailyCase ? ['apps/desktop/scripts/browser-task-data-outcomes-probe-scenario.mjs','apps/desktop/scripts/verify-browser-task-data-outcomes.mjs',
       'apps/desktop/src/shared/browser-task-completion.ts','packages/browser/src/browser-operation-result.ts',
       'apps/desktop/src/shared/browser-task-reliability.ts','apps/desktop/src/renderer/src/components/BrowserTaskExtractEditor.tsx',
       'apps/desktop/src/renderer/src/components/BrowserTaskStepFailure.tsx','packages/core/src/browser-task-control.ts',
@@ -218,7 +236,7 @@ async function identity() {
     ...(localRecoveryCase ? ['apps/desktop/scripts/browser-local-recovery-probe-scenario.mjs','apps/desktop/scripts/verify-browser-local-recovery.mjs',
       'apps/desktop/scripts/browser-outcome-probe-scenario.mjs','packages/core/src/browser-completion-facts.ts',
       'packages/core/src/control.ts','packages/core/src/control-host.ts','packages/browser/src/browser-outcome-journal.ts'] : []),
-    ...(framesCase ? ['apps/desktop/scripts/browser-frame-probe-scenario.mjs','apps/desktop/scripts/verify-browser-frame-observation.mjs',
+    ...(framesCase || dailyCase ? ['apps/desktop/scripts/browser-frame-probe-scenario.mjs','apps/desktop/scripts/verify-browser-frame-observation.mjs',
       'packages/browser/src/browser-page-snapshot.ts','packages/browser/src/browser-snapshot-query.ts',
       'packages/browser/src/browser-frame-documents.ts','apps/desktop/src/main/browser-cdp-session.ts',
       'packages/browser/src/browser-page-dispatch.ts','packages/browser/src/browser-ref-resolve.ts',
@@ -227,8 +245,8 @@ async function identity() {
     ...(overlayCase ? ['apps/desktop/src/main/native-overlay-surfaces.ts','apps/desktop/src/shared/native-overlay.ts',
       'apps/desktop/src/renderer/src/lib/native-overlay-regions.ts','apps/desktop/src/renderer/src/hooks/useNativeOverlayChrome.ts',
       'apps/desktop/src/renderer/src/components/browser-screenshot/ScreenshotEditor.tsx',
-      'apps/desktop/src/renderer/src/components/browser-screenshot/canvas-render.ts',
-      'apps/desktop/src/renderer/src/components/browser-screenshot/drawing-model.ts',
+      'apps/desktop/src/renderer/src/components/image-annotation/canvas-render.ts',
+      'apps/desktop/src/renderer/src/components/image-annotation/drawing-model.ts',
       'apps/desktop/scripts/browser-overlay-probe-scenario.mjs','apps/desktop/scripts/browser-native-chrome-stage-observer.mjs',
       'apps/desktop/scripts/browser-native-page-paint-diagnostic.mjs',
       'apps/desktop/scripts/verify-browser-overlay-visibility.mjs'] : []),
@@ -244,7 +262,7 @@ async function identity() {
       'apps/host/src/workspace-file-bytes.ts','packages/core/src/browser-page-capability.ts',
       'packages/core/src/control-host.ts','apps/desktop/scripts/verify-browser-files.mjs'] : []),
     ...(browserToolsCase ? ['apps/desktop/src/renderer/src/App.tsx',
-      'apps/desktop/src/renderer/src/components/GlobalSearchSurface.tsx','apps/desktop/src/renderer/src/components/SearchBrowserTools.tsx',
+      'apps/desktop/src/renderer/src/components/BrowserPane.tsx','apps/desktop/src/renderer/src/components/BrowserToolsPanel.tsx',
       'apps/desktop/src/renderer/src/components/BrowserToolbarPreferences.tsx','apps/desktop/src/renderer/src/components/BrowserAnnotationsPanel.tsx',
       'apps/desktop/src/renderer/src/components/SurfaceNavigation.tsx','apps/desktop/src/renderer/src/components/TopRowChrome.tsx',
       'apps/desktop/src/renderer/src/lib/surface-tool-dock.ts','apps/desktop/src/shared/client-observation.ts',
@@ -255,7 +273,7 @@ async function identity() {
       'apps/desktop/src/main/config-owner.ts','apps/desktop/src/main/config-store.ts',
       'apps/desktop/scripts/browser-tools-probe-scenario.mjs','apps/desktop/scripts/verify-browser-tools.mjs',
       'apps/desktop/scripts/browser-demonstration-probe-scenario.mjs','apps/desktop/scripts/browser-demonstration-probe-diagnostics.mjs'] : []),
-    ...(structuredCase || outcomeCase || taskDataCase ? ['packages/browser/src/browser-structured-output.ts','packages/browser/src/browser-structured-target.ts',
+    ...(structuredCase || outcomeCase || taskDataCase || dailyCase ? ['packages/browser/src/browser-structured-output.ts','packages/browser/src/browser-structured-target.ts',
       'packages/browser/src/browser-page-dispatch.ts','packages/browser/src/browser-page-snapshot.ts',
       'packages/browser/src/browser-snapshot-query.ts','packages/browser/src/browser-frame-documents.ts',
       'apps/desktop/src/main/browser-cdp-session.ts','packages/browser/src/browser-result-artifact.ts',
@@ -264,7 +282,7 @@ async function identity() {
       'apps/desktop/src/renderer/src/styles/browser-structured-fields.css','packages/core/src/browser-page-capability.ts',
       'packages/core/src/control.ts','packages/core/src/control-host.ts','packages/core/dist/browser-page-capability.js',
       'apps/desktop/scripts/browser-structured-probe-scenario.mjs','apps/desktop/scripts/verify-browser-structured-output.mjs'] : []),
-    ...(outcomeCase || taskDataCase ? ['packages/core/src/browser-completion-facts.ts','packages/core/dist/browser-completion-facts.js',
+    ...(outcomeCase || taskDataCase || dailyCase ? ['packages/core/src/browser-completion-facts.ts','packages/core/dist/browser-completion-facts.js',
       'apps/desktop/scripts/lib/browser-capability-cost-collector.mjs',
       'apps/desktop/src/main/browser-completion-control.ts','apps/desktop/src/main/browser-outcome-criteria.ts',
       'packages/browser/src/browser-outcome-journal.ts','packages/browser/src/model/browser-outcome-criteria.ts',
@@ -277,7 +295,38 @@ async function identity() {
       'apps/desktop/src/main/browser-recovery-preview.ts','apps/desktop/src/renderer/src/lib/browser-last-seen-favicons.ts',
       'apps/desktop/src/renderer/src/components/GlobalSurveySurface.tsx','apps/desktop/src/renderer/src/components/SurveyZoneItem.tsx',
       'apps/desktop/src/renderer/src/components/BrowserFindBar.tsx','apps/desktop/src/renderer/src/components/BrowserPresentationStage.tsx',
-      'apps/desktop/src/shared/browser-page-shortcuts.ts','apps/desktop/src/renderer/src/lib/browser-shortcuts.ts'] : [])]
+      'apps/desktop/src/shared/browser-page-shortcuts.ts','apps/desktop/src/renderer/src/lib/browser-shortcuts.ts'] : []),
+    ...(dailyCase ? ['apps/desktop/scripts/browser-daily-workface-probe-scenario.mjs','apps/desktop/scripts/browser-daily-extension-hooks.mjs',
+      'apps/desktop/scripts/browser-daily-workface-support.mjs','apps/desktop/scripts/verify-browser-daily-workface.mjs',
+      'apps/desktop/scripts/fixtures/browser-profile-extensions/https-source.mjs',
+      'apps/desktop/out/main/agentmux-host.js','apps/desktop/out/renderer/release.json',
+      'apps/desktop/src/main/native-desktop-owner.ts','packages/native-desktop/macos/.build/debug/agentmux-native-macos',
+      'packages/native-desktop/macos/Package.swift','packages/native-desktop/scripts/build-macos.mjs',
+      'apps/desktop/src/main/control-ipc-bridge.ts','apps/desktop/test/desktop-focus-navigation.test.tsx',
+      'apps/desktop/src/main/browser-profile-extensions.ts','apps/desktop/src/main/browser-profile-extension-online.ts',
+      'apps/desktop/src/main/browser-profile-extension-package.ts','apps/desktop/src/main/browser-profile-extension-record.ts',
+      'apps/desktop/src/main/browser-profile-manager.ts','apps/desktop/src/main/browser-profile-store.ts',
+      'apps/desktop/src/main/browser-profile-session.ts','apps/desktop/src/main/browser-profile-environment.ts',
+      'apps/desktop/src/renderer/src/components/settings/BrowserProfileExtensions.tsx',
+      'packages/client-ui/src/components/InlineComposer.tsx','packages/client-ui/src/components/AgentComposer.tsx',
+      'packages/client-ui/src/components/ComposerHost.tsx','packages/client-ui/src/components/ComposerCompletionEditor.tsx',
+      'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx','apps/desktop/src/renderer/src/components/SessionPane.tsx',
+      'apps/desktop/test/browser-store-consumer-costs.test.tsx','apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx',
+      'apps/desktop/src/renderer/src/lib/workbench-session-subscriptions.ts',
+      'apps/desktop/scripts/browser-frame-probe-scenario.mjs','apps/desktop/scripts/lib/browser-capability-cost-collector.mjs'] : [])]
+  if (dailyCase) {
+    const collect = async directory => {
+      for (const entry of await readdir(join(repositoryRoot, directory), { withFileTypes: true })) {
+        const path = directory + '/' + entry.name
+        if (entry.isDirectory()) await collect(path)
+        else if (path.endsWith('.ts') && directory.includes('/src') || path.endsWith('.js') && directory.includes('/dist') || path.endsWith('.swift') && directory.includes('/Sources')) files.push(path)
+      }
+    }
+    // The original Core SDK/CLI eagerly imports its exported module closure.
+    // Bind the current provider/capability/ACK sources and compiled modules,
+    // including the peer changes that deliberately invalidate older proof caches.
+    for (const directory of ['packages/core/src', 'packages/core/dist', 'packages/native-desktop/src', 'packages/native-desktop/dist', 'packages/native-desktop/macos/Sources']) await collect(directory)
+  }
   const values = await Promise.all(files.map(async name => {
     let source = join(repositoryRoot, name)
     if (packageRoot && name.startsWith('apps/desktop/out/')) source = join(packageRoot, name.slice('apps/desktop/'.length))
@@ -308,15 +357,16 @@ async function identity() {
   return Object.fromEntries(values)
 }
 async function launch(label) {
+  const launchStartedAt = new Date().toISOString()
   phase = `launch-${label}`
   for (const name of ['AGENTMUX_DESKTOP_RECOVERY_SEED', 'AGENTMUX_DESKTOP_RECOVERY_REPORT', 'AGENTMUX_DESKTOP_EXIT_AFTER_READY']) assert.equal(process.env[name], undefined, `Ordinary launch inherited ${name}`)
   const readyFile = join(root, `ready-${label}.json`)
   let entryPath = mainPath
   if (bootstrapCase) {
     // Configure the private Electron host before importing the unmodified ordinary Main.
-    // A sibling entry preserves app.getAppPath(); no source breakpoint or readiness hook is needed.
+    // Keep the ordinary Desktop application identity; only its persistent paths are private.
     entryPath = join(desktopRoot, 'out/main/private-' + receipt.case + '-' + label + '.cjs')
-    const bootstrap = `const{app}=require('electron');${zoomCase ? `app.setAppPath(${JSON.stringify(desktopRoot)});` : ''}${[['home', privateHome], ['appData', join(root, 'app-data')], ['userData', userData], ['sessionData', userData]].map(([name, path]) => `app.setPath(${JSON.stringify(name)},${JSON.stringify(path)});`).join('')}globalThis.__amxPrivatePathsConfigured=true;import(${JSON.stringify(pathToFileURL(mainPath).href)}).catch(error=>{console.error(error);app.exit(1)});`
+    const bootstrap = `const{app}=require('electron');app.setAppPath(${JSON.stringify(desktopRoot)});${[['home', privateHome], ['appData', join(root, 'app-data')], ['userData', userData], ['sessionData', userData]].map(([name, path]) => `app.setPath(${JSON.stringify(name)},${JSON.stringify(path)});`).join('')}globalThis.__amxPrivatePathsConfigured=true;import(${JSON.stringify(pathToFileURL(mainPath).href)}).catch(error=>{console.error(error);app.exit(1)});`
     await writeFile(entryPath, bootstrap)
     receipt.privateElectronHosts ??= []
     receipt.privateElectronHosts.push({ label, entry: entryPath, source: bootstrap, sha256: digest(bootstrap), main: mainPath,
@@ -339,6 +389,7 @@ async function launch(label) {
   const alive = () => { if (spawnError) throw spawnError; if (child.exitCode !== null || child.signalCode !== null) throw new Error(`${label} exited ${child.exitCode}/${child.signalCode}: ${diagnostics}`) }
   const main = await connectCdp(await waitFor(`${label} Main inspector`, () => { alive(); return mainUrl }), `${label}:main`)
   const probe = { child, main }
+  probe.stderrSnapshot = () => ({ observedAt: new Date().toISOString(), stderr: diagnostics })
   launchedProbes.add(probe)
   await main.call('Runtime.enable')
   let home
@@ -391,6 +442,7 @@ async function launch(label) {
   await main.call('Debugger.resume')
   }
   let ready
+  const readyStartedAt = new Date().toISOString()
   try { ready = await waitFor(`${label} ready`, async () => {
     alive()
     if (ordinaryCase) return main.evaluate(`(()=>{${bootstrapCase ? 'if(globalThis.__amxPrivatePathsConfigured!==true)return null;' : ''}const {app,BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
@@ -399,17 +451,34 @@ async function launch(label) {
     try { return JSON.parse(await readFile(readyFile, 'utf8')) } catch (error) { if (error.code === 'ENOENT') return null; throw error }
   }) }
   catch (error) {
-    const observed = { pid: child.pid, exitCode: child.exitCode, signal: child.signalCode, stderr: diagnostics,
+    const observed = { launchStartedAt, readyStartedAt, failedAt: new Date().toISOString(), pid: child.pid, exitCode: child.exitCode, signal: child.signalCode, stderr: diagnostics,
       mainUrl, rendererUrl, readyFile: { exists: false }, mainPauses: main.pauses.slice(-4).map(pause => ({ reason: pause.reason,
         hitBreakpoints: pause.hitBreakpoints, frames: pause.callFrames.slice(0,4).map(frame => ({ name: frame.functionName, url: frame.url, location: frame.location })) })) }
     const bounded = action => Promise.race([action, new Promise((_, reject) => setTimeout(() => reject(new Error('Launch diagnostic timed out after 2s')), 2000))])
     try { observed.readyFile = { exists: true, text: (await readFile(readyFile, 'utf8')).slice(0,4096) } }
     catch (failure) { observed.readyFile.error = failure.code ?? failure.message }
-    try { observed.main = await bounded(main.evaluate(`(()=>{const {app,BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');return{ready:app.isReady(),windows:BrowserWindow.getAllWindows().slice(0,8).map(window=>({id:window.id,visible:window.isVisible(),minimized:window.isMinimized(),focused:window.isFocused(),bounds:window.getBounds(),url:window.webContents.getURL(),loading:window.webContents.isLoading(),views:window.contentView.children.slice(0,16).map(view=>({id:view.webContents?.id,url:view.webContents?.getURL(),visible:view.getVisible(),bounds:view.getBounds()}))}))}})()`)) }
+    try { observed.main = await bounded(main.evaluate(`(()=>{const {app,BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');return{ready:app.isReady(),windows:BrowserWindow.getAllWindows().slice(0,8).map(window=>({id:window.id,visible:window.isVisible(),minimized:window.isMinimized(),focused:window.isFocused(),bounds:window.getBounds(),url:window.webContents.getURL(),loading:window.webContents.isLoading(),loadingMainFrame:window.webContents.isLoadingMainFrame(),crashed:window.webContents.isCrashed(),rendererPid:window.webContents.getOSProcessId(),views:window.contentView.children.slice(0,16).map(view=>({id:view.webContents?.id,url:view.webContents?.getURL(),visible:view.getVisible(),bounds:view.getBounds()}))}))}})()`)) }
     catch (failure) { observed.mainError = failure.message }
     if (rendererUrl) {
-      try { observed.rendererTargets = (await (await fetch(`http://${new URL(rendererUrl).host}/json/list`, { signal: AbortSignal.timeout(2000) })).json()).slice(0,8).map(target=>({id:target.id,type:target.type,url:target.url,title:target.title})) }
-      catch (failure) { observed.rendererError = failure.message }
+      try {
+        const targets = await (await fetch(`http://${new URL(rendererUrl).host}/json/list`, { signal: AbortSignal.timeout(2000) })).json()
+        observed.rendererTargets = targets.slice(0,8).map(target=>({id:target.id,type:target.type,url:target.url,title:target.title}))
+        const pages = targets.filter(target=>target.type==='page')
+        const renderer = observed.rendererObservation = { state: 'unconfirmed', pageCount: pages.length, errors: [], errorsTruncated: false }
+        if(pages.length===1 && pages[0].webSocketDebuggerUrl){
+          let diagnostic
+          try {
+            renderer.targetId = pages[0].id
+            diagnostic = await bounded(connectCdp(pages[0].webSocketDebuggerUrl, `${label}:failed-renderer`, event=>{
+              if(event.method==='Runtime.exceptionThrown'||event.method==='Log.entryAdded'&&event.params?.entry?.level==='error'){if(renderer.errors.length<64)renderer.errors.push(event);else renderer.errorsTruncated=true}
+            }))
+            await bounded(diagnostic.call('Runtime.enable')); await bounded(diagnostic.call('Log.enable'))
+            renderer.page = await bounded(diagnostic.evaluate(`(()=>{const resources=performance.getEntriesByType('resource');return{readyState:document.readyState,href:location.href,title:document.title,prepareRendererUpdate:typeof window.agentmuxPrepareRendererUpdate,navigation:performance.getEntriesByType('navigation').map(entry=>entry.toJSON()),resources:resources.slice(0,256).map(entry=>entry.toJSON()),resourceCount:resources.length,resourcesTruncated:resources.length>256}})()`))
+            renderer.state = 'observed'
+          } catch(failure) { renderer.error = { state: 'unconfirmed', message: failure.message } }
+          finally { diagnostic?.close() }
+        }else renderer.reason = 'No unique original page target with a debugger endpoint was available'
+      } catch (failure) { observed.rendererError = { state: 'unconfirmed', message: failure.message } }
     }
     receipt.launchDiagnostics ??= {}; receipt.launchDiagnostics[label] = observed
     throw error
@@ -437,8 +506,9 @@ async function launch(label) {
   if (ordinaryCase) {
     assert.equal(ready.pid, child.pid); assert.equal(ready.home, privateHome)
     assert.equal(await realpath(ready.userData), await realpath(userData))
-    if(collaborationCase || taskDataCase){assert.equal(ready.appData,join(root,'app-data'));assert.equal(ready.sessionData,userData)}
+    if(collaborationCase || taskDataCase || dailyCase){assert.equal(ready.appData,join(root,'app-data'));assert.equal(ready.sessionData,userData)}
     if (privateApp) assert.equal(await realpath(ready.appPath), await realpath(packageRoot))
+    if (bootstrapCase) assert.equal(await realpath(ready.appPath), await realpath(desktopRoot), 'The private host must use the ordinary Desktop application root')
     const release = JSON.parse(await readFile(join(packageRoot ?? desktopRoot, 'out/renderer/release.json'), 'utf8'))
     try { ordinaryInitialization = await waitFor(`${label} ordinary loaded Desktop owner`, async () => {
       alive()
@@ -506,6 +576,8 @@ async function runBrowser(browserId, code) {
 }
 async function openBrowser(url, destination) { const result=await rpc.call('browser.open',{url,destination});return result.region }
 async function normalQuit(probe) {
+  const failedLaunch = Object.values(receipt.launchDiagnostics ?? {}).find(item=>item.pid===probe.child.pid)
+  if(failedLaunch&&!failedLaunch.normalQuitRequestedAt)failedLaunch.normalQuitRequestedAt=new Date().toISOString()
   phase = 'normal-quit'
   if(probe.drainStageDelivery){
     receipt.stageDelivery??={}
@@ -588,9 +660,9 @@ async function actualWorkbench(probe, expected) {
 }
 async function resize(probe, width, height) {
   const actual = await probe.main.evaluate(`(() => { const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
-    const win=BrowserWindow.getAllWindows()[0];win.setSize(${width},${height});return win.getSize() })()`)
-  await waitFor('actual Renderer resize',()=>probe.cdp.evaluate(`Math.abs(innerWidth-${actual[0]}/window.agentmux.ui.getZoomFactor())<=1`))
-  return actual
+    const win=BrowserWindow.getAllWindows()[0];win.setSize(${width},${height});return {size:win.getSize(),content:win.getContentSize()} })()`)
+  await waitFor('actual Renderer resize',()=>probe.cdp.evaluate(`(()=>{const zoom=window.agentmux.ui.getZoomFactor();return Math.abs(innerWidth-${actual.content[0]}/zoom)<=1&&Math.abs(innerHeight-${actual.content[1]}/zoom)<=1})()`))
+  return actual.size
 }
 async function observeNativeFrameReady(probe, url) {
   const attempts = []
@@ -617,26 +689,33 @@ async function observeNativeFrameReady(probe, url) {
 async function capture(probe, label, content = 'operations', pageUrl) {
   // The original webContents.capturePage below awaits the actual image, including in an occluded window.
   const observation = await probe.cdp.evaluate(`(() => {
-    const visible=e=>e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden';
-    const rows=Array.from(document.querySelectorAll('.browser-rsi-timeline__step')).filter(visible);
-    const rail=Array.from(document.querySelectorAll('.browser-trace-rail')).find(visible),stage=rail?.previousElementSibling??Array.from(document.querySelectorAll('[data-native-browser-stage]')).find(visible);
+    const visible=e=>e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden',scopedPage=${JSON.stringify(content === 'page' && !!pageUrl)},hasPageUrl=${JSON.stringify(!!pageUrl)};
+    const surfaces=hasPageUrl?Array.from(document.querySelectorAll('[data-browser-surface]')).filter(e=>e.querySelector('[aria-label="Browser address"]')?.value.split('#')[0]===${JSON.stringify(pageUrl?.split('#')[0])}):[];
+    if(hasPageUrl&&surfaces.length!==1)throw Error('Capture requires the unique original Browser surface');
+    const reading=scopedPage?surfaces[0]:document,browserId=surfaces[0]?.dataset.browserSurface;
+    const rail=scopedPage?undefined:Array.from(document.querySelectorAll('.browser-trace-rail')).find(visible),floating=rail?.classList.contains('browser-trace-rail--floating')??false;
+    const stages=hasPageUrl?Array.from(surfaces[0].querySelectorAll('[data-native-browser-stage]')).filter(e=>e.dataset.nativeBrowserStage===browserId&&e.checkVisibility()&&visible(e)):[];
+    if(stages.length>1)throw Error('Capture Browser stage ownership is ambiguous');
+    const stage=hasPageUrl?stages[0]:(!floating&&rail?.previousElementSibling)||Array.from(document.querySelectorAll('[data-native-browser-stage]')).find(visible);
+    const rows=scopedPage?[]:Array.from(document.querySelectorAll('.browser-rsi-timeline__step')).filter(visible);
     const rect=e=>{const r=e.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}};
-    return {viewport:{width:innerWidth,height:innerHeight},rows:rows.map(e=>({sequence:e.dataset.sequence,status:e.querySelector('.browser-rsi-timeline__status').textContent,
+    return {observedAt:Date.now(),viewport:{width:innerWidth,height:innerHeight},browserSurface:hasPageUrl?{browserId,url:surfaces[0].querySelector('[aria-label="Browser address"]')?.value,regionId:surfaces[0].closest('[data-workbench-region-id]')?.dataset.workbenchRegionId,visible:surfaces[0].checkVisibility()&&visible(surfaces[0]),bounds:rect(surfaces[0])}:undefined,
+      selectedStageBrowserId:stage?.dataset.nativeBrowserStage,stages:Array.from(document.querySelectorAll('[data-native-browser-stage]')).map(e=>({browserId:e.dataset.nativeBrowserStage,url:e.closest('[data-browser-surface]')?.querySelector('[aria-label="Browser address"]')?.value,bounds:rect(e),checkVisibility:e.checkVisibility(),cssVisibility:getComputedStyle(e).visibility})),rows:rows.map(e=>({sequence:e.dataset.sequence,status:e.querySelector('.browser-rsi-timeline__status').textContent,
       selected:e.querySelector('button').getAttribute('aria-pressed'),expanded:e.querySelector('button').getAttribute('aria-expanded')})),
-      operationStatus:(()=>{const s=document.querySelector('.browser-operation-status');return s&&{phase:s.dataset.phase,control:s.dataset.control,operationId:s.dataset.operationId,
+      operationStatus:(()=>{const s=reading.querySelector('.browser-operation-status');return s&&{phase:s.dataset.phase,control:s.dataset.control,operationId:s.dataset.operationId,
         taskRunId:s.dataset.taskRunId,taskVersion:s.dataset.taskVersion,trigger:s.querySelector('button')?.getAttribute('aria-label'),insideToolbar:!!s.closest('.browser-toolbar')};})(),
-      trace:rail&&rect(rail),stage:stage&&rect(stage),payloadCount:document.querySelectorAll('.browser-rsi-timeline__step-detail').length,
+      trace:rail&&rect(rail),traceMode:rail&&(floating?'floating':'docked'),stage:stage&&rect(stage),payloadCount:reading.querySelectorAll('.browser-rsi-timeline__step-detail').length,
       emptyHistory:rail&&{histories:Array.from(rail.querySelectorAll('.browser-rsi-history')).filter(visible).length,
         empties:Array.from(rail.querySelectorAll('.browser-rsi-history__empty')).filter(visible).map(node=>node.textContent),
         timelines:Array.from(rail.querySelectorAll('.browser-rsi-timeline')).filter(visible).length,
         loading:rail.querySelector('.browser-rsi-history small')?.textContent==='Loading…',errors:rail.querySelectorAll('.browser-rsi-history__error').length},
-      demonstration:(()=>{const surface=document.querySelector('[aria-label="Human demonstration draft"]');return surface&&{id:surface.dataset.demonstrationId,
+      demonstration:(()=>{const surface=scopedPage?null:reading.querySelector('[aria-label="Human demonstration draft"]');return surface&&{id:surface.dataset.demonstrationId,
         status:surface.querySelector('[role="status"]')?.textContent,stepsOpen:surface.querySelector('.browser-demonstration__steps')?.open,
         steps:Array.from(surface.querySelectorAll('[data-sequence]')).map(step=>({sequence:step.dataset.sequence,text:step.textContent}))};})(),
-      taskAsset:(()=>{const surface=document.querySelector('[aria-label="Editable Browser task asset"]');return surface&&{id:surface.dataset.taskAssetId,
+      taskAsset:(()=>{const surface=scopedPage?null:reading.querySelector('[aria-label="Editable Browser task asset"]');return surface&&{id:surface.dataset.taskAssetId,
         steps:Array.from(surface.querySelectorAll('[data-task-step-id]')).map(step=>({id:step.dataset.taskStepId,text:step.textContent})),
         version:surface.querySelector('[aria-label="Task asset version"]')?.value,progress:(()=>{const p=surface.querySelector('.browser-task-asset__progress');return p&&{text:p.textContent,status:p.dataset.runStatus,runId:p.dataset.runId,version:p.dataset.runVersion,bounds:rect(p)}})()};})(),
-      structured:(()=>{const surface=document.querySelector('[aria-label="Recorded structured fields"]');return surface&&{summary:surface.querySelector('.browser-structured-fields__summary')?.textContent,
+      structured:(()=>{const surface=scopedPage?null:reading.querySelector('[aria-label="Recorded structured fields"]');return surface&&{summary:surface.querySelector('.browser-structured-fields__summary')?.textContent,
         fields:Array.from(surface.querySelectorAll('.browser-structured-fields__values > div')).map(field=>({key:field.querySelector('dt')?.textContent,status:field.dataset.fieldStatus,text:field.querySelector('dd')?.textContent})),
         rawRange:surface.querySelector('.browser-structured-fields__range')?.textContent,rawCharacters:surface.querySelector('pre')?.textContent.length??0};})(),
       floatingContent:Array.from(document.body.children).filter(node=>node.id!=='root').flatMap(node=>[node,...node.querySelectorAll('[data-state="open"],[role="tooltip"],[role="dialog"],[role="menu"]')]).filter(visible).map(node=>({role:node.getAttribute('role'),state:node.getAttribute('data-state'),bounds:rect(node)})),
@@ -674,22 +753,59 @@ async function capture(probe, label, content = 'operations', pageUrl) {
     assert.equal(nativeBounds.length,1,'Search preserves the original unique native owner')
   } else {
 
-  assert.ok(observation.stage.width>0&&observation.stage.height>0,'The actual page keeps positive visible geometry')
+  assert.ok(observation.stage?.width>0&&observation.stage?.height>0,'The actual page keeps positive visible geometry')
   if(observation.trace){
     const s=observation.stage,t=observation.trace
-    const horizontal=s.x+s.width<=t.x+1||t.x+t.width<=s.x+1
-    const vertical=s.y+s.height<=t.y+1||t.y+t.height<=s.y+1
-    assert.ok(horizontal||vertical,'Trace does not overlay the native stage')
-    observation.traceRelationship=horizontal?'beside':'below'
+    if(observation.traceMode==='floating'){
+      assert.ok(t.width>0&&t.height>0&&t.x>=-1&&t.y>=-1&&t.x+t.width<=observation.viewport.width+1&&t.y+t.height<=observation.viewport.height+1,'The original floating trace is visible within the viewport')
+      observation.traceRelationship='floating'
+    }else{
+      const horizontal=s.x+s.width<=t.x+1||t.x+t.width<=s.x+1
+      const vertical=s.y+s.height<=t.y+1||t.y+t.height<=s.y+1
+      assert.ok(horizontal||vertical,'Trace does not overlay the native stage')
+      observation.traceRelationship=horizontal?'beside':'below'
+    }
   }
   else assert.ok(content==='overlay'||content==='page','Operation and demonstration review requires its actual details surface')
+    try {
     nativeBounds=await waitFor('native page bounds inside the actual stage',async()=>{
     const bounds=await probe.main.evaluate(`(() => { const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
-      return BrowserWindow.getAllWindows()[0].contentView.children.filter(v=>v.webContents&&!v.webContents.isDestroyed()&&${localRecoveryCase ? `(()=>{const r=v.getBounds(),s=${JSON.stringify(observation.stage)},z=${observation.uiZoomFactor};return ['x','y','width','height'].every(key=>Math.abs(r[key]-s[key]*z)<=2)})()` : pageUrl ? `v.webContents.getURL().split('#')[0]===${JSON.stringify(pageUrl)}` : "v.webContents.getURL().startsWith('http://127.0.0.1:')"}).map(v=>({...v.getBounds(),webContentsId:v.webContents.id,browserUrl:v.webContents.getURL()})); })()`)
+      return BrowserWindow.getAllWindows()[0].contentView.children.filter(v=>v.webContents&&!v.webContents.isDestroyed()&&${localRecoveryCase ? `(()=>{const r=v.getBounds(),s=${JSON.stringify(observation.stage)},z=${observation.uiZoomFactor};return ['x','y','width','height'].every(key=>Math.abs(r[key]-s[key]*z)<=2)})()` : pageUrl ? `v.webContents.getURL().split('#')[0]===${JSON.stringify(pageUrl)}` : "v.webContents.getURL().startsWith('http://127.0.0.1:')"}).map(v=>({...v.getBounds(),visible:v.getVisible(),loading:v.webContents.isLoading(),webContentsId:v.webContents.id,browserUrl:v.webContents.getURL()})); })()`)
     const factor=observation.uiZoomFactor,s={x:observation.stage.x*factor,y:observation.stage.y*factor,width:observation.stage.width*factor,height:observation.stage.height*factor}
-    return bounds.length===1&&bounds[0].width>0&&bounds[0].height>0&&bounds[0].x>=s.x-1&&bounds[0].y>=s.y-1&&
-      bounds[0].x+bounds[0].width<=s.x+s.width+1&&bounds[0].y+bounds[0].height<=s.y+s.height+1?bounds:null
+    receipt.visual.lastCaptureObservation.nativeFrame={expectedStage:s,owners:bounds}
+    const sourceReady=bounds.length===1&&!bounds[0].loading&&bounds[0].width>0&&bounds[0].height>0
+    if(sourceReady&&bounds[0].visible&&bounds[0].x>=s.x-1&&bounds[0].y>=s.y-1&&
+      bounds[0].x+bounds[0].width<=s.x+s.width+1&&bounds[0].y+bounds[0].height<=s.y+s.height+1){
+      observation.presentationProof={kind:'native-fit',webContentsId:bounds[0].webContentsId};return bounds
+    }
+    if(!sourceReady||!pageUrl||!observation.browserSurface?.browserId)return null
+    const preview=await probe.cdp.evaluate(`(()=>{
+      const browserId=${JSON.stringify(observation.browserSurface?.browserId)},url=${JSON.stringify(pageUrl?.split('#')[0])};
+      const surfaces=Array.from(document.querySelectorAll('[data-browser-surface]')).filter(e=>e.dataset.browserSurface===browserId&&e.querySelector('[aria-label="Browser address"]')?.value.split('#')[0]===url);
+      const stages=surfaces.flatMap(e=>Array.from(e.querySelectorAll('[data-native-browser-stage]'))).filter(e=>e.dataset.nativeBrowserStage===browserId);
+      if(surfaces.length!==1||stages.length!==1)return {passed:false,browserId,url,surfaces:surfaces.length,stages:stages.length};
+      const stage=stages[0],rect=e=>{const r=e.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}},stageBounds=rect(stage);
+      const inside=r=>r.width>0&&r.height>0&&r.x>=stageBounds.x-1&&r.y>=stageBounds.y-1&&r.x+r.width<=stageBounds.x+stageBounds.width+1&&r.y+r.height<=stageBounds.y+stageBounds.height+1;
+      const videos=Array.from(stage.querySelectorAll('video')).map(video=>{
+        const stream=typeof MediaStream!=='undefined'&&video.srcObject instanceof MediaStream?video.srcObject:null,tracks=stream?.getVideoTracks().map(t=>({id:t.id,kind:t.kind,readyState:t.readyState}))??[];
+        const bounds=rect(video),style=getComputedStyle(video),visible=video.checkVisibility({checkOpacity:true,checkVisibilityCSS:true,contentVisibilityAuto:true});
+        const scale=Math.min(bounds.width/video.videoWidth,bounds.height/video.videoHeight),paint={x:bounds.x+(bounds.width-video.videoWidth*scale)/2,y:bounds.y+(bounds.height-video.videoHeight*scale)/2,width:video.videoWidth*scale,height:video.videoHeight*scale};
+        return{bounds,paint,visible,objectFit:style.objectFit,objectPosition:style.objectPosition,readyState:video.readyState,paused:video.paused,ended:video.ended,width:video.videoWidth,height:video.videoHeight,
+          stream:stream?{id:stream.id,active:stream.active,tracks}:null,passed:!!stream&&stream.active&&tracks.length>0&&tracks.every(t=>t.kind==='video'&&t.readyState==='live')&&video.readyState>=HTMLMediaElement.HAVE_CURRENT_DATA&&!video.paused&&!video.ended&&video.videoWidth>0&&video.videoHeight>0&&visible&&style.objectFit==='contain'&&style.objectPosition==='50% 50%'&&inside(bounds)&&inside(paint)};
+      });
+      return{observedAt:Date.now(),browserId,url,stage:stageBounds,stageVisible:stage.checkVisibility(),videos,passed:stage.checkVisibility()&&videos.length===1&&videos[0].passed};
+    })()`)
+    receipt.visual.lastCaptureObservation.preview=preview
+    if(!preview.passed)return null
+    observation.presentationProof={kind:'renderer-preview',webContentsId:bounds[0].webContentsId,preview};return bounds
   })
+    } catch(error) {
+      try { receipt.visual.lastCaptureObservation.failureWindow=await probe.main.evaluate(`(()=>{const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');return {pid:process.pid,windows:BrowserWindow.getAllWindows().map(w=>({size:w.getSize(),contentSize:w.getContentSize(),bounds:w.getBounds(),visible:w.isVisible(),minimized:w.isMinimized(),focused:w.isFocused(),zoom:w.webContents.getZoomFactor()}))}})()`) }
+      catch(diagnosticError) { receipt.visual.lastCaptureObservation.failureWindow={state:'unconfirmed',message:diagnosticError.message} }
+      try { receipt.visual.lastCaptureObservation.failureDocument=await probe.cdp.evaluate(`({observedAt:Date.now(),visibilityState:document.visibilityState,hidden:document.hidden,focused:document.hasFocus(),width:innerWidth,height:innerHeight,browserId:${JSON.stringify(observation.browserSurface?.browserId??observation.selectedStageBrowserId??null)},stages:Array.from(document.querySelectorAll('[data-native-browser-stage]')).filter(e=>e.dataset.nativeBrowserStage===${JSON.stringify(observation.browserSurface?.browserId??observation.selectedStageBrowserId??null)}).map(e=>{const r=e.getBoundingClientRect();return{browserId:e.dataset.nativeBrowserStage,bounds:{x:r.x,y:r.y,width:r.width,height:r.height},checkVisibility:e.checkVisibility()}})})`) }
+      catch(diagnosticError) { receipt.visual.lastCaptureObservation.failureDocument={state:'unconfirmed',message:diagnosticError.message} }
+      throw error
+    }
   }
   if (!receipt.visual.osFrames?.some(frame => frame.label === label)) {
     await captureOsWindow({probe,desktopRoot,receipt,nativePageParked:content==='search-tools'},label)
@@ -701,11 +817,11 @@ async function capture(probe, label, content = 'operations', pageUrl) {
     return {captureSource:'renderer-webcontents',size:image.getSize(),sha256:process.getBuiltinModule('crypto').createHash('sha256').update(png).digest('hex')};})()`)
   const pageFile=join(captureDirectory,`${label}-native-page.png`)
   const nativePage=content==='search-tools'?{captureSource:'native-browser-parked',owners:nativeBounds}:await probe.main.evaluate(`(async()=>{const {BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
-    const views=BrowserWindow.getAllWindows()[0].contentView.children.filter(v=>v.webContents&&!v.webContents.isDestroyed()&&v.getVisible()&&!v.webContents.isLoading()&&${localRecoveryCase ? `(()=>{const r=v.getBounds(),s=${JSON.stringify(observation.stage)},z=${observation.uiZoomFactor};return ['x','y','width','height'].every(key=>Math.abs(r[key]-s[key]*z)<=2)})()` : pageUrl ? `v.webContents.getURL().split('#')[0]===${JSON.stringify(pageUrl)}` : "v.webContents.getURL().startsWith('http://127.0.0.1:')"});
-    if(views.length!==1)throw new Error('Native capture requires one current visible owner');const view=views[0];
+    const views=BrowserWindow.getAllWindows()[0].contentView.children.filter(v=>v.webContents&&!v.webContents.isDestroyed()&&${observation.presentationProof?.kind==='renderer-preview'?'true':'v.getVisible()'}&&!v.webContents.isLoading()&&${localRecoveryCase ? `(()=>{const r=v.getBounds(),s=${JSON.stringify(observation.stage)},z=${observation.uiZoomFactor};return ['x','y','width','height'].every(key=>Math.abs(r[key]-s[key]*z)<=2)})()` : pageUrl ? `v.webContents.getURL().split('#')[0]===${JSON.stringify(pageUrl)}` : "v.webContents.getURL().startsWith('http://127.0.0.1:')"});
+    if(views.length!==1||views[0].webContents.id!==${JSON.stringify(nativeBounds[0].webContentsId)})throw new Error('Native capture requires one original loaded source');const view=views[0];
 
     const image=await view.webContents.capturePage();if(image.isEmpty())throw new Error('Empty native page frame');const png=image.toPNG();
-    process.getBuiltinModule('fs').writeFileSync(${JSON.stringify(pageFile)},png);return {captureSource:'native-browser-webcontents',webContentsId:view.webContents.id,browserUrl:view.webContents.getURL(),file:${JSON.stringify(pageFile)},bounds:view.getBounds(),size:image.getSize(),
+    process.getBuiltinModule('fs').writeFileSync(${JSON.stringify(pageFile)},png);return {captureSource:'native-browser-webcontents',captureRole:${JSON.stringify(observation.presentationProof?.kind==='renderer-preview'?'execution-source':'native-stage')},webContentsId:view.webContents.id,browserUrl:view.webContents.getURL(),file:${JSON.stringify(pageFile)},bounds:view.getBounds(),visible:view.getVisible(),size:image.getSize(),
       sha256:process.getBuiltinModule('crypto').createHash('sha256').update(png).digest('hex')};})()`)
   receipt.visual.frames.push({label,content,file,...frame,observation,nativeBounds,nativePage})
 }
@@ -961,6 +1077,7 @@ function lastReceiptPath() {
   if(zoomCase)return join(repositoryRoot,'.tmp/browser-zoom-restart-last.json')
   if(collaborationCase)return join(repositoryRoot,'.tmp/browser-collaboration-recovery-last.json')
   if(taskDataCase)return join(repositoryRoot,'.tmp/browser-task-data-outcomes-last.json')
+  if(dailyCase)return join(repositoryRoot,'.tmp/browser-daily-workface-last.json')
   return join(repositoryRoot,'.tmp',privateCase?(privateCrash?'browser-private-crash-restart-last.json':'browser-private-restart-last.json'):localRecoveryCase?`browser-local-recovery-${localRecoveryKind}-last.json`:framesCase?'browser-frame-observation-last.json':taskDownloadCase?'browser-task-outcome-download-last.json':downloadCase?'browser-files-download-last.json':uploadCase?'browser-files-upload-last.json':demonstrationCase?'browser-demonstration-last.json':overlayCase?'browser-overlay-last.json':taskAssetsCase?'browser-task-assets-last.json':browserToolsCase?'browser-tools-last.json':structuredCase?'browser-structured-output-last.json':outcomeCase?'browser-outcome-last.json':continuityCase?'browser-continuity-last.json':'browser-recovery-restart-last.json')
 }
 if(process.env.AGENTMUX_BROWSER_NATIVE_PROOF_INDEX) {
@@ -974,6 +1091,9 @@ try {
   const taskAssets = taskAssetsCase ? await import('./browser-task-assets-probe-scenario.mjs') : null
   const taskDownload = taskDownloadCase ? await import('./browser-task-download-outcome-probe-scenario.mjs') : null
   const taskData = taskDataCase ? await import('./browser-task-data-outcomes-probe-scenario.mjs') : null
+  const daily = dailyCase ? await import('./browser-daily-workface-probe-scenario.mjs') : null
+  const dailyExtensions = dailyCase ? await import('./browser-daily-extension-hooks.mjs') : null
+  dailySupport = dailyCase ? await import('./browser-daily-workface-support.mjs') : null
   const frames = framesCase ? await import('./browser-frame-probe-scenario.mjs') : null
   const localRecovery = localRecoveryCase ? await import('./browser-local-recovery-probe-scenario.mjs') : null
   const browserTools = browserToolsCase ? await import('./browser-tools-probe-scenario.mjs') : null
@@ -988,11 +1108,12 @@ try {
     rpc,
     diagnoseTarget:process.argv.includes('--diagnose-demonstration-target'),
     capture:(probe,label,content,actualPageUrl=pageUrl)=>capture(probe,label,content??(demonstrationCase||taskAssetsCase||taskDownloadCase?'demonstration':overlayCase?'overlay':browserToolsCase?'page':structuredCase?'structured-output':'operations'),actualPageUrl),desktopRoot,userData,workspacePath,repositoryRoot,coreRoot})
-  await Promise.all([mkdir(userData,{recursive:true}),mkdir(workspacePath,{recursive:true}),mkdir(codexHome,{recursive:true,mode:0o700}),mkdir(runtimeDirectory,{recursive:true}),...(collaborationCase || taskDataCase?[mkdir(join(root,'app-data'),{recursive:true})]:[])])
+  await Promise.all([mkdir(userData,{recursive:true}),mkdir(workspacePath,{recursive:true}),mkdir(codexHome,{recursive:true,mode:0o700}),mkdir(runtimeDirectory,{recursive:true}),...(collaborationCase || taskDataCase || dailyCase?[mkdir(join(root,'app-data'),{recursive:true})]:[])])
   receipt.identityBefore=await identity();receipt.sourceCommit=collaborationCase?JSON.parse(await readFile(process.env.AGENTMUX_COLLABORATION_BUILD,'utf8')).candidate:(await exec('git',['rev-parse','HEAD'],{cwd:qualificationRoot})).stdout.trim()
   if (privateApp) receipt.verifierCommit=(await exec('git',['rev-parse','HEAD'],{cwd:repositoryRoot})).stdout.trim()
   server=createServer((request,response)=>{
     if(privateScenario?.handlePrivateRequest(request,response,receipt))return
+    if(daily?.handleDailyRequest(request,response,receipt))return
     if(taskData?.handleTaskDataRequest(request,response,receipt))return
     if(localRecovery?.handleLocalRecoveryDisconnect(request,response,receipt))return
     if(continuity?.handleContinuityRequest(request,response,receipt))return
@@ -1027,11 +1148,33 @@ try {
   })
   await new Promise((done,fail)=>{server.once('error',fail);server.listen(0,'127.0.0.1',done)})
   const address=server.address();assert.ok(address&&typeof address==='object');const urls=['a','b'].map(path=>`http://127.0.0.1:${address.port}/${path}`)
-  await writeFile(join(userData,'agentmux.config.json'),JSON.stringify({version:9,hosts:[{id:'local',kind:'local',label:'Private local'}],executors:collaborationCase || taskDataCase?{collaboration:{label:'Recovery collaborator',providerId:'codex',command:join(coreRoot,'test/fixtures/fake-codex-cli.mjs'),args:[],injectAgentMuxGuide:false,env:{AGENTMUX_FAKE_READY_MODE:'working-until-resume',AGENTMUX_FAKE_NATIVE_RECORD:'1',AGENTMUX_FAKE_NATIVE_RECORD_DIRECTORY:join(codexHome,'sessions'),AGENTMUX_FAKE_NATIVE_PRESERVE:'1',AGENTMUX_FAKE_NATIVE_CONTEXT:'Original retained Browser collaboration conversation'}}}:{},workspaces:[{id:workspaceId,name:workspaceName,hostId:'local',path:workspacePath,kind:'folder'}],appearance:{terminalTheme:'graphite'},browser:{agentAutomation:true,agentControl:{showDiscussion:false},toolbar:{selectElement:true,screenshot:true,devTools:true,viewport:true,saveBookmark:true,more:true}},notifications:{mode:'off'}}))
+  let sourceConsumerMeasurements, privateTaskDataReference, extensionHooks
+  if (dailyCase) {
+    phase='prepare-daily-original-producers'
+    privateTaskDataReference=await dailySupport.retainedPrivateTaskDataReference(repositoryRoot)
+    sourceConsumerMeasurements=await dailySupport.prepareDailySourceConsumers({repositoryRoot,captureDirectory,receipt})
+    const extensionEvidence=join(captureDirectory,'extension-source');await mkdir(extensionEvidence)
+    dailyExtensionFixture=await dailyExtensions.prepareDailyExtensionFixture({repositoryRoot,privateHome,evidenceDirectory:extensionEvidence,pageUrl:urls[0]})
+    assert.deepEqual(Object.keys(dailyExtensionFixture.environment),['NODE_EXTRA_CA_CERTS'])
+    Object.assign(fixtureEnvironment,dailyExtensionFixture.environment)
+    await dailySupport.retainDailyEvidence(receipt,join(extensionEvidence,'fixture-ca.pem'),'private-fixture-public-ca')
+    extensionHooks=dailyExtensions.createDailyExtensionHooks({fixture:dailyExtensionFixture,
+      confirmNativeReview:dailySupport.createDailyNativeReviewPort({receipt,captureDirectory})})
+  }
+  await writeFile(join(userData,'agentmux.config.json'),JSON.stringify({version:9,hosts:[{id:'local',kind:'local',label:'Private local'}],executors:dailyCase?daily.dailyProbeExecutors({coreRoot,codexHome,privateHome}):collaborationCase || taskDataCase?{collaboration:{label:'Recovery collaborator',providerId:'codex',command:join(coreRoot,'test/fixtures/fake-codex-cli.mjs'),args:[],injectAgentMuxGuide:false,env:{AGENTMUX_FAKE_READY_MODE:'working-until-resume',AGENTMUX_FAKE_NATIVE_RECORD:'1',AGENTMUX_FAKE_NATIVE_RECORD_DIRECTORY:join(codexHome,'sessions'),AGENTMUX_FAKE_NATIVE_PRESERVE:'1',AGENTMUX_FAKE_NATIVE_CONTEXT:'Original retained Browser collaboration conversation'}}}:{},workspaces:[{id:workspaceId,name:workspaceName,hostId:'local',path:workspacePath,kind:'folder'}],appearance:{terminalTheme:'graphite'},browser:{agentAutomation:true,agentControl:{showDiscussion:false},toolbar:{selectElement:true,screenshot:true,devTools:true,viewport:true,saveBookmark:true,more:true}},notifications:{mode:'off'}}))
+  if(dailyCase){
+    receipt.dailyUserFocusBefore=await dailySupport.readDailyForegroundApplication()
+    assert.equal(receipt.dailyUserFocusBefore.activationPolicy,0,'The real GUI fixture needs an ordinary user desktop; no private App was launched.')
+    assert.notEqual(receipt.dailyUserFocusBefore.bundleId,'com.apple.loginwindow','The foreground authentication/system app is retained; no private App was launched.')
+  }
   first=await launch('first');phase='create-actual-browser-split'
   if(collaboration){
     await collaboration.reviewCollaboration({...scenarioContext(first,null,urls[0]),workspaceId,runtimeDirectory,privateHome,state,launch,normalQuit,
       retainSecond:probe=>{second=probe}})
+  } else if(daily) {
+    await daily.reviewDailyWorkface({...scenarioContext(first,null,urls[0]),workspaceId,runtimeDirectory,privateHome,state,launch,normalQuit,
+      contextFor:scenarioContext,retainSecond:probe=>{second=probe},extensionHooks,sourceConsumerMeasurements,privateTaskDataReference,
+      fixtureTlsEnvironment:dailyExtensionFixture.environment})
   } else if(taskData) {
     await taskData.reviewTaskDataOutcomes({...scenarioContext(first,null,urls[0]),workspaceId,runtimeDirectory,privateHome,state,launch,normalQuit,
       retainSecond:probe=>{second=probe}})
@@ -1121,15 +1264,22 @@ try {
   receipt.identityAfter=await identity();assert.deepEqual(receipt.identityAfter,receipt.identityBefore)
   receipt.completeGate=true
 } catch(error) {
-  failure={phase,message:error.message,stack:error.stack,...(error.privateCdp ? { privateCdp: error.privateCdp } : {})};const active=second??first
-  if(active&&active.child.exitCode===null&&active.child.signalCode===null){try{receipt.failureWorkbench=await state(active.cdp);receipt.failureDom=await active.cdp.evaluate('document.body.innerText.slice(-5000)')}catch(error){receipt.diagnosticError=error.message}}
-  if(collaborationCase){
+  failure={phase,name:error.name,code:error.code??null,message:error.message,stack:error.stack,...(error.privateCdp ? { privateCdp: error.privateCdp } : {})};const active=second??first
+  if(active&&active.child.exitCode===null&&active.child.signalCode===null){try{receipt.failureWorkbench=dailyCase?await active.cdp.evaluate('window.agentmux.spatial.read()'):await state(active.cdp);receipt.failureDom=await active.cdp.evaluate('document.body.innerText.slice(-5000)')}catch(error){receipt.diagnosticError=error.message}}
+  if(dailyCase&&active)receipt.failureStderr=active.stderrSnapshot?.()
+  if(collaborationCase||dailyCase){
     receipt.failureOwnerLogs={}
     for(const name of ['agentmux-host.log','crash-log.ndjson'])try{receipt.failureOwnerLogs[name]=(await readFile(join(userData,name),'utf8')).slice(-32768)}catch(error){receipt.failureOwnerLogs[name]={code:error.code??null}}
   }
 } finally {
+  if(ownedResourcePending)await ownedResourcePending
+  if(dailyCase&&dailySupport)await sampleOwnedResources('before-private-shutdown')
   const errors=[]
   try{await rpc.dispose()}catch(error){errors.push(error.message)}
+  if(dailyCase&&receipt.dailyUserFocusBefore){
+    try{receipt.dailyUserFocusReturn=await dailySupport.restoreDailyForegroundApplication(receipt.dailyUserFocusBefore,[...launchedProbes].map(probe=>probe.child.pid))}
+    catch(error){receipt.dailyUserFocusReturn={outcome:'unconfirmed',code:error.code??null,message:error.message}}
+  }
   for(const probe of [...launchedProbes].reverse()){if(probe.child.exitCode===null&&probe.child.signalCode===null){try{await normalQuit(probe)}catch(error){errors.push(error.message)}}}
   for(const connection of connections){try{connection.close()}catch(error){errors.push(error.message)}}
   // launchd restarts the private Host after every exit, so its job leaves before the owned processes are reaped.
@@ -1137,16 +1287,42 @@ try {
   try{if(await macosHostServiceRegistration(privateService))await exec('/bin/launchctl',['bootout',privateService.target],{timeout:10_000})
     for(const deadline=Date.now()+10_000;await macosHostServiceRegistration(privateService);await delay(200))if(Date.now()>deadline)throw new Error('The private Host job is still registered with launchd')}catch(error){errors.push(error.message)}
   const ownedCleanup=await cleanupOwnedProbes(root)
+  const nativeObservers=dailyCase?await cleanupOwnedProbes(captureDirectory):null
+  if(nativeObservers){
+    errors.push(...nativeObservers.errors)
+    try{await dailySupport.retainDailyNativeObserverEvidence(receipt,captureDirectory)}catch(error){errors.push(error.message)}
+  }
   const cleanupObservations=privateCase&&ownedCleanup.remaining?.length===0?ownedCleanup.errors:[]
   if(!privateCase||ownedCleanup.remaining?.length!==0)errors.push(...ownedCleanup.errors)
   const remaining=ownedCleanup.remaining
   try{if(server){server.closeAllConnections();await new Promise((done,fail)=>server.close(error=>error?fail(error):done()))}}catch(error){errors.push(error.message)}
-  receipt.cleanup={remaining:remaining??null,errors,...(cleanupObservations.length?{observations:cleanupObservations}:{}),privateProcessesReaped:errors.length===0&&remaining?.length===0,temporaryRootRemoved:false}
+  if(dailyExtensionFixture){
+    try{await dailyExtensionFixture.close();receipt.dailyExtensionFixture={sourceIdentity:dailyExtensionFixture.sourceIdentity,requests:dailyExtensionFixture.requests}
+      for(const artifact of dailyExtensionFixture.artifacts)await dailySupport.retainDailyEvidence(receipt,artifact.file,artifact.kind)
+    }catch(error){errors.push(error.message)}
+  }
+  receipt.cleanup={remaining:remaining??null,errors,...(nativeObservers?{nativeObservers}:{}),...(cleanupObservations.length?{observations:cleanupObservations}:{}),privateProcessesReaped:errors.length===0&&remaining?.length===0&&(!nativeObservers||nativeObservers.remaining?.length===0),temporaryRootRemoved:false}
+  if(dailyCase&&dailySupport)await sampleOwnedResources('before-owned-root-removal')
   if(receipt.cleanup.privateProcessesReaped){try{await rm(root,{recursive:true,force:true});receipt.cleanup.temporaryRootRemoved=true}catch(error){errors.push(error.message)}}
+  if(dailyCase){
+    try{receipt.dailyUserFocusFinal=await dailySupport.readDailyForegroundApplication()}catch(error){receipt.dailyUserFocusFinal={outcome:'unconfirmed',message:error.message}}
+    try{const file=join(captureDirectory,'user-app-focus.json');await writeFile(file,JSON.stringify({before:receipt.dailyUserFocusBefore,return:receipt.dailyUserFocusReturn,final:receipt.dailyUserFocusFinal},null,2)+'\n');await dailySupport.retainDailyEvidence(receipt,file,'original-app-level-focus')}
+    catch(error){receipt.dailyUserFocusEvidenceError={code:error.code??null,message:error.message}}
+  }
   if(errors.length&&!failure)failure={phase:'cleanup',message:errors.join('; ')}
 }
 receipt.passed=!failure&&receipt.completeGate;receipt.failure=failure??null
 await mkdir(join(repositoryRoot,'.tmp'),{recursive:true})
-await writeFile(lastReceiptPath(),JSON.stringify(receipt,null,2)+'\n')
+try{await writeFile(lastReceiptPath(),JSON.stringify(receipt,null,2)+'\n')}
+catch(error){
+  // The existing stdout pipe is emergency evidence only, never a second Store
+  // or an accepted receipt. Other legacy case receipts keep their original boundary.
+  // Only this private daily fixture receipt has the reviewed stdout boundary.
+  if(dailyCase){
+    try{await new Promise((done,fail)=>process.stdout.write(JSON.stringify({receiptUnpersisted:true,writeFailure:{code:error.code??null,message:error.message},receipt})+'\n',outputError=>outputError?fail(outputError):done()))}
+    catch(outputError){error.emergencyOutputError={code:outputError.code??null,message:outputError.message}}
+  }
+  throw error
+}
 process.stdout.write(JSON.stringify({passed:receipt.passed,completeGate:receipt.completeGate,failure:receipt.failure,cleanup:receipt.cleanup})+'\n')
 process.exitCode=receipt.passed?0:1

@@ -84,8 +84,8 @@ function fixture() {
   const nativeMeasurement = put('native-measurements.json', { schema: 'agentmux.browser-capability-native-measurements.v1', ...bound, passed: true, boundary: 'native-producer-and-public-journal',
     producer: { operation: measuredOperation, recordedResult, totals: { extractCalls: 1, extractStepSequences: [1], visitedElements: 1, attributeReads: 1, attributeReadBytes: 1,
       persistedPayloadBytes: 64, returnedBytes: 64, physicalMetadataBytes: 17, physicalPayloadBytes: 64 } },
-    journal: { preparation: sample(sibling, 0, [{ sequence: 3, event: { operationId: sibling.id, type: 'phase-changed', phase: 'completed' } }]),
-      related: sample(measuredOperation, 0, [{ sequence: 8, event: { operationId: measuredOperation.id, type: 'phase-changed', phase: 'completed' } }]), unrelated: sample(sibling, 3, []),
+    journal: { preparation: sample(sibling, 0, [{ sequence: 3, event: { operationId: sibling.id, type: 'operation-finished', operation: sibling } }]),
+      related: sample(measuredOperation, 0, [{ sequence: 8, event: { operationId: measuredOperation.id, type: 'operation-finished', operation: measuredOperation } }]), unrelated: sample(sibling, 3, []),
       window: { startedAt: 9, bothOpenedAt: 11, endedAt: 111, fixedQuietWindowMs: 100 } } })
   const outcomeReference = native[5]!, outcomeReceipt = JSON.parse(files.get(outcomeReference.path)!)
   outcomeReceipt.capabilityMeasurements = JSON.parse(files.get(nativeMeasurement.path)!)
@@ -460,7 +460,7 @@ describe('Browser exact-candidate proof join', () => {
   })
   it('requires the complete prior Native sibling replay from cursor zero through actual completion', async () => {
     const mutate = (change: (r: any) => void, message: string) => rejects(x => changeCapturedNativeMeasurements(x, change), message)
-    await mutate(r => { r.journal.preparation.events.at(-1).event.phase = 'running' }, 'prior replay must finish')
+    await mutate(r => { r.journal.preparation.events.at(-1).event.operation.phase = 'running' }, 'prior replay must finish')
     await mutate(r => { r.journal.preparation.afterSequence = 2 }, 'prior replay from its actual beginning')
   })
   it('requires both observed public Session identities rather than equal missing fields', async () => {
