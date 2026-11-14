@@ -173,15 +173,39 @@ export function bindNativeDevice(options: {
   } }
 }
 
+export type MobileViewportSnapshot = Readonly<{ width: number; height: number }>
+const viewports = new WeakMap<Window, { snapshot: MobileViewportSnapshot; listeners: Set<() => void> }>()
+function viewportState(window: Window) {
+  let state = viewports.get(window)
+  if (!state) {
+    state = { snapshot: { width: window.innerWidth, height: window.visualViewport?.height ?? window.innerHeight }, listeners: new Set() }
+    viewports.set(window, state)
+  }
+  return state
+}
+/** Read-only layout facts from the same viewport producer; subscribing adds no OS listeners. */
+export const readMobileViewport = (window: Window): MobileViewportSnapshot => viewportState(window).snapshot
+export function subscribeMobileViewport(window: Window, listener: () => void): () => void {
+  const state = viewportState(window); state.listeners.add(listener)
+  return () => { state.listeners.delete(listener) }
+}
+
 /** Follow the visible viewport, including Safari keyboard panning. Native resize is never subtracted twice. */
 export function bindMobileViewport(window: Window, root: HTMLElement): () => void {
   const viewport = window.visualViewport
+  const state = viewportState(window)
   let frame: number | undefined
   const update = () => {
     frame = undefined
     if (viewport && viewport.scale !== 1) return
     root.style.setProperty('--mobile-viewport-height', `${viewport?.height ?? window.innerHeight}px`)
     root.style.setProperty('--mobile-viewport-top', `${viewport?.offsetTop ?? 0}px`)
+    const next = { width: window.innerWidth, height: viewport?.height ?? window.innerHeight }
+    root.style.setProperty('--mobile-viewport-width', `${next.width}px`)
+    if (next.width !== state.snapshot.width || next.height !== state.snapshot.height) {
+      state.snapshot = next
+      for (const listener of state.listeners) listener()
+    }
     if (!root.dataset.mobileKeyboard) {
       const focused = window.document.activeElement
       const editing = focused instanceof HTMLElement && (focused.isContentEditable || /^(INPUT|TEXTAREA)$/u.test(focused.tagName))
@@ -199,6 +223,7 @@ export function bindMobileViewport(window: Window, root: HTMLElement): () => voi
     window.document.removeEventListener('focusout', schedule)
     if (frame !== undefined) window.cancelAnimationFrame(frame)
     root.style.removeProperty('--mobile-viewport-height'); root.style.removeProperty('--mobile-viewport-top')
+    root.style.removeProperty('--mobile-viewport-width')
     delete root.dataset.browserKeyboard
   }
 }

@@ -1,0 +1,19 @@
+/* One stable pair of tracks; resize changes geometry without moving an editor's parent. */
+.mobile-workface-frame {
+  --mobile-workface-navigation-width: clamp(200px, min(30%, calc(var(--mobile-viewport-height, 100dvh) * .6)), 300px);
+  --mobile-workface-column: 100%;
+  --mobile-workface-gap: 0px;
+  display: grid; grid-template-columns: minmax(0, var(--mobile-workface-column)) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr); column-gap: var(--mobile-workface-gap);
+  height: 100%; min-width: 0; min-height: 0; overflow: hidden;
+  transition: grid-template-columns 140ms var(--ease-enter, ease), column-gap 140ms var(--ease-enter, ease);
+}
+.mobile-workface-frame:not([data-split])[data-single-pane='content'] { --mobile-workface-column: 0px; }
+.mobile-workface-frame[data-split] { --mobile-workface-column: var(--mobile-workface-navigation-width); --mobile-workface-gap: 12px; }
+.mobile-workface-frame[hidden] { display: none !important; }
+.mobile-workface-pane { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.mobile-workface-pane[data-pane='navigation'] { grid-area: 1 / 1; }
+.mobile-workface-pane[data-pane='content'] { grid-area: 1 / 2; }
+.mobile-workface-pane[hidden] { display: none !important; }
+.mobile-workface-readable { max-width: 720px; margin-inline: auto; min-width: 0; }
+@media (prefers-reduced-motion: reduce) { .mobile-workface-frame { transition: none; } }

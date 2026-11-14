@@ -89,15 +89,13 @@
 .mobile-goal-discussion-heading h3 { margin: 0 0 3px; font-weight: 600; }
 
 /* One retained navigation and work tree; only their available space changes. */
-.mobile-goals-layout, .mobile-goals-directory, .mobile-goals-work { min-width: 0; min-height: 0; }
-.mobile-goals-directory[hidden], .mobile-goals-work[hidden] { display: none; }
 .mobile-goals-notices:empty { display: none; }
 .mobile-app .mobile-goals-list button[aria-current="true"] { background: var(--mobile-group-press); }
 .mobile-goals-list button[aria-current="true"] .mobile-goal-row-copy > strong { font-weight: 700; }
-.mobile-goals[data-wide]:not([hidden]) { max-width: none; height: 100%; display: grid; grid-template-rows: auto auto auto auto minmax(0, 1fr); }
-.mobile-goals[data-wide] > .mobile-goals-start { grid-row: 3; width: 100%; max-width: 720px; }
-.mobile-goals[data-wide] > .mobile-goal-create { grid-row: 4; }
-.mobile-goals[data-wide] > .mobile-goals-layout { grid-row: 5; display: grid; grid-template-columns: clamp(264px, 30%, 320px) minmax(0, 1fr); column-gap: var(--sp-6); overflow: hidden; }
-.mobile-goals[data-wide] .mobile-goals-directory, .mobile-goals[data-wide] .mobile-goals-work { overflow-y: auto; overscroll-behavior: contain; padding-bottom: var(--sp-6); }
-.mobile-goals[data-wide] .mobile-goals-work > div { max-width: 720px; margin-inline: auto; }
+.mobile-goals:not([hidden]) { height: 100%; display: grid; grid-template-rows: auto auto auto auto minmax(0, 1fr); }
+.mobile-goals[data-wide] { max-width: none; }
+.mobile-goals > .mobile-goals-start { grid-row: 3; width: 100%; max-width: 720px; }
+.mobile-goals > .mobile-goal-create { grid-row: 4; }
+.mobile-goals > .mobile-goals-layout { grid-row: 5; }
+.mobile-goals-directory, .mobile-goals-work { padding-bottom: var(--sp-6); }
 .mobile-goals-unselected { margin: 0; padding: var(--sp-7); color: var(--text-3); text-align: center; align-self: center; }

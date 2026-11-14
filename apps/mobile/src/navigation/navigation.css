@@ -1,8 +1,7 @@
 .mobile-spatial-panel { padding: 0 var(--mobile-gutter) var(--sp-6); }
-.mobile-space-navigation, .mobile-space-content { min-width: 0; min-height: 0; }
-.mobile-spatial-panel[data-wide-space] { display: grid; grid-template-columns: 300px minmax(0, 1fr); height: 100%; overflow: hidden; padding: 0; }
-.mobile-spatial-panel[data-wide-space] > .mobile-space-navigation { overflow-y: auto; overscroll-behavior: contain; padding: 0 var(--mobile-gutter) var(--sp-6); border-right: 1px solid var(--line-soft); }
-.mobile-spatial-panel[data-wide-space] > .mobile-space-content { overflow-y: auto; overscroll-behavior: contain; padding: 0 var(--mobile-gutter) var(--sp-6); }
+.mobile-spatial-panel.mobile-workface-frame { padding: 0; }
+.mobile-space-navigation, .mobile-space-content { padding: 0 var(--mobile-gutter) var(--sp-6); }
+.mobile-spatial-panel[data-wide-space] > .mobile-space-navigation { border-right: 1px solid var(--line-soft); }
 .mobile-space-content-heading > p { margin: 0 0 6px; color: var(--text-3); font-size: var(--fs-meta); }
 .mobile-space-content-heading > details { margin-bottom: 12px; }
 .mobile-space-content-heading > details code { overflow-wrap: anywhere; }

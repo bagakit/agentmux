@@ -27,6 +27,8 @@ import { MobileNeedsYouAnswer } from './MobileNeedsYouAnswer'
 import './focus-home.css'
 import { useMobileWebCatalogObservation } from '../mobile-web/use-mobile-web-observation'
 import './navigation.css'
+import { MobileWorkfaceFrame, MobileWorkfacePane } from '../layout/MobileWorkfaceFrame'
+import { workfacePanes } from '../layout/workface-presentation'
 
 type Catalog = AgentMuxRpcResult<'space.ls'>['catalog']
 export type MobileSpatialContext = { spaceId: string | null; tabId: string | null; regionId: string | null }
@@ -59,7 +61,6 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
   const focusActive = focusVisible ?? (visible && home === 'focus')
   const contentVisible = visible && home !== 'focus'
   const wideSpace = wide && home === 'space'
-  const catalogActive = contentVisible || focusActive
   const focusVisited = useRef(focusActive), contentVisited = useRef(contentVisible)
   if (focusActive) focusVisited.current = true
   if (contentVisible) contentVisited.current = true
@@ -69,6 +70,8 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
   const [visited, setVisited] = useState<ContentTarget[]>([])
   const [spaceSelectedKey, setSpaceSelectedKey] = useState<string | null>(null), [moteSelectedKey, setMoteSelectedKey] = useState<string | null>(null)
   const context = home === 'space' ? spaceContext : home === 'mote' ? moteContext : EMPTY_CONTEXT
+  const panes = workfacePanes({ active: contentVisible, split: wideSpace, hasSelection: Boolean(context.regionId) })
+  const catalogActive = panes.navigation.observed || panes.content.observed || focusActive
   const selectedKey = home === 'space' ? spaceSelectedKey : home === 'mote' ? moteSelectedKey : null
   const setContext = useCallback((value: MobileSpatialContext | ((previous: MobileSpatialContext) => MobileSpatialContext)) => {
     if (home === 'mote') setMoteContext(value)
@@ -390,8 +393,8 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
       {catalog?.agentPresentation === undefined && metadata.sessions.length > 0 && <details><summary>其他已有会话</summary><ul className="mobile-session-list">{filteredSessions(metadata.sessions.filter(session => !directory.rows.has(session.agentSessionId))).map(session => sessionRow(session, session.agentSessionId, undefined, undefined, undefined, undefined, true))}</ul></details>}
 
   </section></MobileNoticeScope> : null
-  return <>{contentVisited.current && <MobileNoticeScope owner={client} identity={[home,spaceId,context.tabId,context.regionId]}><section className="mobile-spatial-panel" data-wide-space={wideSpace || undefined} hidden={home === 'focus'}>
-    <div className="mobile-space-navigation" hidden={Boolean(context.regionId) && !wideSpace}>
+  return <>{contentVisited.current && <MobileNoticeScope owner={client} identity={[home,spaceId,context.tabId,context.regionId]}><MobileWorkfaceFrame className="mobile-spatial-panel" presentation={panes} data-wide-space={wideSpace || undefined} hidden={home === 'focus'}>
+    <MobileWorkfacePane className="mobile-space-navigation" pane="navigation" presentation={panes.navigation}>
     <div className="mobile-section-heading mobile-page-header"><MobileHeaderMenu /><div><h1>{home === 'mote' ? 'Mote' : home === 'focus' ? 'Focus' : 'Space'}</h1>
       <p>{home === 'mote' ? '与你的协调 Agent 继续讨论' : home === 'focus' ? '需要你处理的事项与最近执行' : '按 Mac 上的工作空间继续'}</p></div>
       <div className="mobile-section-actions">{contentVisible && <MobileAvatarNoticeOutlet header />}<MobileDirectoryNotice issues={[...(issue ? [{ source: '空间目录', message: issue }] : []), ...(metadata.issue ? [{ source: '会话目录', message: metadata.issue }] : []), ...presentationIssues]} retry={() => refresh(count => count + 1)} />{onCreateAgent && <IconButton className="mobile-icon-button" aria-label="新建 Agent" onClick={() => onCreateAgent(spaceId ? { spaceId } : {})}><SemanticIcon name="action.create-agent" size={18} /></IconButton>}<IconButton className="mobile-icon-button" aria-label="刷新空间目录" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} animation={pending ? 'spin' : 'none'} /></IconButton></div></div>
@@ -403,8 +406,8 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
         renderIdentity={owner => <MobileIdentity appearanceRevision={revision} objectSpaceId={owner.spaceId} appearance={directory.appearances.get(owner.spaceId)} identity={spaceIdentity(owner)} client={client} connected={connected} visible={contentVisible && (wideSpace || !context.regionId)} size={28} />}
         {...(home === 'mote' ? { renderPrimary: mainAction, renderProfile: owner => openProfile && <button type="button" className="mobile-mote-profile-action"
           aria-label={`查看 Mote 资料 · ${owner.name}`} onClick={() => openProfile(spaceIdentity(owner))}><SemanticIcon name="status.info" size={16} /><span>Profile</span></button> } : {})} renderContents={renderSpaceContents} /> : <p className="mobile-spatial-empty">{pending ? '正在读取 Mac 上的空间…' : '空间目录还没确认，可以在 Focus 中继续对话。'}</p>}
-    </div>
-    <div className="mobile-space-content" hidden={!context.regionId && !wideSpace}>
+    </MobileWorkfacePane>
+    <MobileWorkfacePane className="mobile-space-content" pane="content" presentation={panes.content}>
     {context.regionId ? <header className="mobile-space-content-heading">
       <button className="mobile-text-button" type="button" onClick={backToSpace}><SemanticIcon name="navigation.back" size={16} />返回空间内容</button>
       <h2 className="mobile-spatial-subheading">{selected?.region.kind === 'file' ? selected.region.file?.path.split('/').at(-1) ?? '文件' : selected?.region.kind === 'browser' ? '网页' : '内容'}</h2>
@@ -414,9 +417,9 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
     </header> : <div className="mobile-space-selection"><SemanticIcon name="object.region" size={32} /><h2>选择一个工作面</h2><p>从左侧打开文件、笔记或网页。</p></div>}
     {visited.map(target => <div key={target.key} hidden={home === 'focus' || target.key !== selectedKey || !context.regionId}>
       {(target.region.kind === 'file' || target.region.kind === 'browser') && <MobileRegionContent client={client} connected={connected} showTitle={false}
-        visible={contentVisible && target.key === selectedKey && Boolean(context.regionId)} tabId={target.tabId} regionId={target.region.regionId} zoneId={target.zoneId}
+        visible={panes.content.observed && target.key === selectedKey} tabId={target.tabId} regionId={target.region.regionId} zoneId={target.zoneId}
         kind={target.region.kind} browserId={target.region.browserId} {...(target.region.file ? { file: target.region.file } : {})} {...(openHttpLink ? { openHttpLink } : {})} />}
     </div>)}
-    </div>
-  </section></MobileNoticeScope>}{focusTarget ? createPortal(focusView, focusTarget) : home === 'focus' ? focusView : null}</>
+    </MobileWorkfacePane>
+  </MobileWorkfaceFrame></MobileNoticeScope>}{focusTarget ? createPortal(focusView, focusTarget) : home === 'focus' ? focusView : null}</>
 })

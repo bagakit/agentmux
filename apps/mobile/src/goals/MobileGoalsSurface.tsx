@@ -27,6 +27,8 @@ import type { MobileGoalsContext } from '../recovery/presentation-route'
 import type { MobileGoalDraftScope } from '../recovery/goal-drafts'
 import { mobileGoalDraftSource, useGoalDraft } from './useGoalDraft'
 import { MobileGoalDraftEditor } from './MobileGoalDraftEditor'
+import { MobileWorkfaceFrame, MobileWorkfacePane } from '../layout/MobileWorkfaceFrame'
+import { workfacePanes } from '../layout/workface-presentation'
 
 export type MobileGoalsSurfaceProps = {
   client: AgentMuxHostedClient | null
@@ -56,8 +58,9 @@ export function MobileGoalsSurface({ client, connected, visible, wide = false, o
     contextRef.current = next; setLocalContext(next); onContextChange?.(next)
   }, [onContextChange])
   const selected = context.goalId, discussionTab = context.discussion
-  const listVisible = visible && (wide || selected === null && !discussionTab)
-  const detailVisible = visible && selected !== null && !discussionTab
+  const panes = workfacePanes({ active: visible, split: wide, hasSelection: Boolean(selected || discussionTab) })
+  const listVisible = panes.navigation.observed
+  const detailVisible = panes.content.observed && selected !== null && !discussionTab
   const directoryPane = useRef<HTMLDivElement>(null), workPane = useRef<HTMLDivElement>(null)
   const previousWide = useRef(wide)
   useLayoutEffect(() => {
@@ -162,7 +165,7 @@ export function MobileGoalsSurface({ client, connected, visible, wide = false, o
   }
   const visibleGoals = useMemo(() => goals?.filter(goal => (!status || goal.status === status) && `${goal.title} ${goal.description} ${goal.projectName ?? ''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())), [goals, status, query])
   const confirmedEmpty = goals?.length === 0 && listStatus === '' && !status && !query && !issue
-  return <MobileNoticeScope owner={client}><section className="mobile-goals" data-wide={wide || undefined} aria-label="Goals" hidden={!visible}>
+  return <MobileNoticeScope owner={client}><section className="mobile-goals" data-wide={wide || undefined} aria-label="Goals">
     <header className="mobile-page-header"><MobileHeaderMenu hidden={Boolean(selected || discussionTab)} />{(selected || discussionTab) && <button className="mobile-goals-back" aria-label={discussionTab ? '返回目标' : '返回目标列表'} onClick={discussionTab ? backToGoal : backToList}><SemanticIcon name="navigation.back" size={18} /><span>返回</span></button>}<h1>Goals</h1><div className="mobile-section-actions">{!selected && !discussionTab && <><button type="button" className="mobile-icon-button mobile-goals-new" aria-label="新建目标" title="新建目标" aria-expanded={createOpen} onClick={() => setCreateOpen(value => !value)}><SemanticIcon name="action.add-item" size={20} /></button><details className="mobile-goal-lookup"><summary aria-label="按 Goal ID 打开" title="按 Goal ID 打开"><SemanticIcon name="action.search" size={18} /><span className="mobile-visually-hidden">按 Goal ID 打开</span></summary><div className="mobile-goal-lookup__panel"><form onSubmit={event => {
         event.preventDefault()
         if (!client?.forwardRpc) { setLookupIssue('读取未发送：Mac 上的目标服务暂不可用。'); return }
@@ -177,12 +180,12 @@ export function MobileGoalsSurface({ client, connected, visible, wide = false, o
     {!client?.forwardRpc && <MobileNotice owner={client} role="status">Mac 上的目标服务暂不可用，已读目标仍可查看。</MobileNotice>}
     {issue && <MobileNotice identity={[issue]} role="status">{issue}</MobileNotice>}
     {goals?.length === 1000 && <MobileNotice identity={[goals?.length]} role="status">目录只读到前 1000 个目标，搜索只覆盖这些；其他目标可按 Goal ID 打开。</MobileNotice>}</div>
-    {visible && !selected && !discussionTab && <section className={`mobile-goals-start${confirmedEmpty ? ' mobile-goals-start--empty' : ''}`} aria-label="目标工坊">
+    {!selected && !discussionTab && <section className={`mobile-goals-start${confirmedEmpty ? ' mobile-goals-start--empty' : ''}`} aria-label="目标工坊">
       <img className="mobile-goals-start__art" src={confirmedEmpty ? goalsEmpty : goalsCompanions} alt="" width={confirmedEmpty ? 160 : 84} height={confirmedEmpty ? 107 : 58} loading="lazy" decoding="async" />
       <div className="mobile-goals-start__copy"><strong>{confirmedEmpty ? '从一个想法开始' : '把目标落到成果'}</strong><p>{confirmedEmpty ? '还没有目标。和 Mote 一起开始。' : '拆清目标，协作推进，核对成果。'}</p></div>
       {!createOpen && <Button variant="primary" className="mobile-goals-start__create" aria-label="开始新目标" onClick={() => setCreateOpen(true)}><SemanticIcon name="action.add-item" size={16} />新建目标</Button>}
     </section>}
-      <MobileGoalCreate client={client} expanded={createOpen} visible={visible && selected === null && !discussionTab} openDiscussion={openDiscussion} beginPresentation={beginPresentation} created={(goal, present) => {
+      <MobileGoalCreate client={client} expanded={createOpen} presented={selected === null && !discussionTab} visible={visible && selected === null && !discussionTab} openDiscussion={openDiscussion} beginPresentation={beginPresentation} created={(goal, present) => {
         factEpoch.current.list += 1
         setGoals(previous => previous ? [...previous.filter(value => value.id !== goal.id), goal] : previous)
         setDetails(values => ({ ...values, [goal.id]: goal }))
@@ -195,8 +198,8 @@ export function MobileGoalsSurface({ client, connected, visible, wide = false, o
           setDetailIssue(''); setDecisionIssue('')
         }
       }} />
-    <div className="mobile-goals-layout">
-    <div className="mobile-goals-directory" ref={directoryPane} hidden={!listVisible}>
+    <MobileWorkfaceFrame className="mobile-goals-layout" presentation={panes}>
+    <MobileWorkfacePane className="mobile-goals-directory" ref={directoryPane} pane="navigation" presentation={panes.navigation}>
     <div>
       <div className="mobile-goals-filters"><TextInput aria-label="搜索目标" placeholder="搜索目标或项目" value={query} onChange={event => setQuery(event.target.value)} />
         <select aria-label="筛选工作状态" value={status} onChange={event => setStatus(event.target.value)}><option value="">全部状态</option>{AGENTMUX_DEMAND_STATUSES.map(value => <option key={value} value={value}>{statuses[value]}</option>)}</select></div>
@@ -209,12 +212,12 @@ export function MobileGoalsSurface({ client, connected, visible, wide = false, o
       </>}
 
     </div>
-    </div>
-    <div className="mobile-goals-work" ref={workPane} tabIndex={-1} role="region" aria-label="目标工作面" hidden={!wide && selected === null && !discussionTab}>
-    {[...new Set([...Object.keys(details), ...(selected ? [selected] : [])])].map(id => { const detail = details[id]; return <div key={id} hidden={selected !== id || !!discussionTab}>{selected === id && [detailIssue, decisionIssue].filter(Boolean).map((value, index) => <MobileNotice identity={[id,value]} key={index} role="status">{value}</MobileNotice>)}
-      <GoalDetail key={id} goalId={id} goal={detail ?? null} factScope={detailScopes[id] ?? null} visible={detailVisible && selected === id} editing={context.mode === 'edit' && selected === id} edit={editing => setContext(value => ({ ...value, mode: editing ? 'edit' : 'detail' }))} decisions={decisions[id] ?? null} client={client} connected={connected} updated={updated} refresh={() => refresh(value => value + 1)} copyText={copyText}>
+    </MobileWorkfacePane>
+    <MobileWorkfacePane className="mobile-goals-work" ref={workPane} pane="content" presentation={panes.content} tabIndex={-1} role="region" aria-label="目标工作面">
+    {[...new Set([...Object.keys(details), ...(selected ? [selected] : [])])].map(id => { const detail = details[id]; return <div className="mobile-workface-readable" key={id} hidden={selected !== id || !!discussionTab}>{selected === id && [detailIssue, decisionIssue].filter(Boolean).map((value, index) => <MobileNotice identity={[id,value]} key={index} role="status">{value}</MobileNotice>)}
+      <GoalDetail key={id} goalId={id} goal={detail ?? null} factScope={detailScopes[id] ?? null} presented={panes.content.presented && selected === id && !discussionTab} editing={context.mode === 'edit' && selected === id} edit={editing => setContext(value => ({ ...value, mode: editing ? 'edit' : 'detail' }))} decisions={decisions[id] ?? null} client={client} connected={connected} updated={updated} refresh={() => refresh(value => value + 1)} copyText={copyText}>
         {detail && <>
-        <MobileGoalAlignment visible={detailVisible && selected === id} client={client} goal={detail} updated={updated} openDiscussion={openDiscussion} beginPresentation={beginPresentation} />
+        <MobileGoalAlignment visible={panes.content.presented && selected === id && !discussionTab} client={client} goal={detail} updated={updated} openDiscussion={openDiscussion} beginPresentation={beginPresentation} />
         </>}
       </GoalDetail>
       {detail && <><MobileGoalSessions client={client} goal={detail} factScope={detailScopes[id] ?? null} sessionIds={detail.sessionIds} visible={detailVisible && selected === detail.id} openSession={openSession} />
@@ -229,23 +232,23 @@ export function MobileGoalsSurface({ client, connected, visible, wide = false, o
         openSession={(id, identity) => { if (id !== discussionTab.agentSessionId || discussionTab.hostId !== 'local') { setIssue('这个讨论在另一台 Mac 上，当前连接还打不开。'); return }; openSession?.(id, identity) }} />
       : <MobileNotice identity={[discussionTab.goalId, discussionTab.tabId, discussionTab.regionId, discussionTab.hostId, discussionTab.agentSessionId]} role="status">还没确认讨论所在的 Mac 和位置，请返回目标后重新打开讨论。</MobileNotice>}</div>}
     {wide && selected === null && !discussionTab && <p className="mobile-goals-unselected">选择一个目标，阅读正文与成果。</p>}
-    </div>
-    </div>
+    </MobileWorkfacePane>
+    </MobileWorkfaceFrame>
   </section></MobileNoticeScope>
 }
 
-function GoalDetail({ goalId, goal, factScope, visible, decisions, client, connected, updated, refresh, children, editing, edit, copyText }: {
-  goalId: string; goal: AgentMuxRpcGoal | null; factScope: MobileGoalDraftScope | null; visible: boolean; decisions: Decisions | null; client: AgentMuxHostedClient | null; connected: boolean
+function GoalDetail({ goalId, goal, factScope, presented, decisions, client, connected, updated, refresh, children, editing, edit, copyText }: {
+  goalId: string; goal: AgentMuxRpcGoal | null; factScope: MobileGoalDraftScope | null; presented: boolean; decisions: Decisions | null; client: AgentMuxHostedClient | null; connected: boolean
   updated(goal: AgentMuxRpcGoal, fields: Array<keyof AgentMuxRpcGoal>): void; refresh(): void; children: ReactNode
   editing: boolean; edit(editing: boolean): void; copyText?: ClientUiPlatform['copyText'] | undefined
 }) {
   const model = useGoalDraft(goalId, goal, factScope, client, connected, updated)
   const editor = <MobileGoalDraftEditor model={model} editing={editing} onEditingChange={edit} refresh={refresh} copyText={copyText} />
-  if (!goal) return <article aria-label="目标详情" hidden={!visible}><h2>目标</h2><MobileNotice identity={[goalId]} role="status">还没读到这个目标，可以重新读取。</MobileNotice><code>{goalId}</code>{editor}<button onClick={refresh}>读取当前目标</button></article>
+  if (!goal) return <article aria-label="目标详情" hidden={!presented}><h2>目标</h2><MobileNotice identity={[goalId]} role="status">还没读到这个目标，可以重新读取。</MobileNotice><code>{goalId}</code>{editor}<button onClick={refresh}>读取当前目标</button></article>
   const { saving, save } = model
   const alignment = goal.alignment, grounding = goal.grounding
   const currentReport = !!alignment && grounding?.alignmentRevision === alignment.revision
-  return <article aria-label="目标详情" hidden={!visible}>
+  return <article aria-label="目标详情" hidden={!presented}>
     {!editing && <><h2>{goal.title || '待定义目标'}</h2><p className="mobile-goals-body">{goal.description || '还没有目标说明。'}</p></>}
     {editor}
     <section aria-label="目标与成功标准"><h3>目标与成功标准</h3>

@@ -13,8 +13,8 @@ type Creation = { recordId: string | null; input: GoalCreationInput; target: Goa
 export type GoalDiscussionReceipt = AgentMuxRpcResult<'goal.discuss'>['receipt']
 
 /** One explicit click, one caller-held identity, and the original Goal owner. */
-export function MobileGoalCreate({ client, visible, expanded, created, openDiscussion, beginPresentation }: {
-  client: AgentMuxHostedClient | null; visible: boolean; expanded: boolean; created(goal: AgentMuxRpcGoal, present: () => boolean): void
+export function MobileGoalCreate({ client, visible, presented = true, expanded, created, openDiscussion, beginPresentation }: {
+  client: AgentMuxHostedClient | null; visible: boolean; presented?: boolean; expanded: boolean; created(goal: AgentMuxRpcGoal, present: () => boolean): void
   openDiscussion(receipt: GoalDiscussionReceipt): void
   beginPresentation(): () => boolean
 }) {
@@ -104,7 +104,7 @@ export function MobileGoalCreate({ client, visible, expanded, created, openDiscu
     finally { flight.current = false; setBusy(false) }
   }
   return <section className="mobile-goal-create" aria-label="新建目标">
-    <div className="mobile-goal-create__form" hidden={!visible || !expanded}>
+    <div className="mobile-goal-create__form" hidden={!presented || !expanded}>
 
       <label>新目标的项目<select ref={projectInput} aria-label="新目标项目" value={projectId} disabled={busy} onChange={event => setProjectId(event.target.value)}><option value="">未分配项目</option>{projectId && !projects.some(project => project.projectId === projectId) && <option value={projectId}>项目未确认</option>}{projects.map(project => <option key={project.projectId} value={project.projectId}>{project.name}</option>)}</select></label><Button type="button" onClick={() => reread(value => value + 1)}>刷新项目目录</Button>
       <Button variant="primary" type="button" disabled={busy || !!retained || !!request && request.phase !== 'ready'} onClick={() => void invoke('new')}>{busy ? '处理中…' : '创建目标'}</Button>
