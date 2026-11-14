@@ -21,6 +21,7 @@
 | Note 中 Agent 与人的协同编辑、并发与历史回滚 | [协同编辑产品要求](design/behavior/knowledge-workflows.md#note-中-agent-与人的协同编辑) |
 | Agent 的目标、边界和交付责任 | [AGENTS.md](../AGENTS.md) |
 | Core 公共 API、Provider 与 Session | [Core 接入说明](../packages/core/README.md) |
+| Agent Hook 为什么保留、怎样隔离配置与更新、各 Provider 的取舍 | [Agent Hook 设计](design/behavior/agent-hooks.md) |
 | 人与 Agent 共用的系统使用指南 | [Core guides](../packages/core/guides/README.md)：Markdown 正文与 CLI 读取入口 |
 | 分屏树代数 / 目标存储 | [Layout](../packages/layout/README.md)、[Demand](../packages/demand/README.md) |
 | 对话视图的目标、场景、交互与产品验收 | [对话视图 PRD](design/behavior/conversation-mode.md) · [呈现 SSOT](design/presentation/conversation-mode.md) |
