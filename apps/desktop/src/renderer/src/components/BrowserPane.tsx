@@ -20,7 +20,7 @@ import { WorkbenchLayoutMenuRows } from './WorkbenchLayoutMenuRows'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { StableWorkbenchView } from './StableWorkbenchView'
-import { createRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { createRef, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { flushSync } from 'react-dom'
 import {
   type BrowserScreenshotCapture,
@@ -141,6 +141,61 @@ export function browserCaptureMatchesIdentity(
   identity: BrowserIdentity
 ): boolean {
   return capture.browserId === identity.id && capture.navigationId === identity.navigationId
+}
+
+/** Presentation React identity follows this original Region within its navigation context and Group.
+ * Full Tab-bearing occurrence addresses still route every actual action and native stage. */
+function browserPresentationViewKey(presentation: WorkbenchBrowserPresentation): string {
+  const { target, occurrence: { location } } = presentation
+  return JSON.stringify([target.projection?.presentationId ?? target.surface ?? 'space', target.moteContextKey ?? null,
+    location.displayWorkspaceId, location.groupId, location.regionId])
+}
+
+/** An exact Region projection is one navigation View even when its confirmed location changes. */
+function browserPresentationContentKey(presentation: WorkbenchBrowserPresentation): string {
+  return presentation.target.projection?.entity.kind === 'region'
+    ? JSON.stringify([presentation.target.projection.presentationId, presentation.target.moteContextKey ?? null, presentation.occurrence.location.regionId])
+    : browserPresentationViewKey(presentation)
+}
+
+type BrowserFramePlacement = { frame: object; hostId: string | undefined }
+function BrowserFrameSlot({ frame, publish, children }: {
+  frame: object; publish: import('react').Dispatch<import('react').SetStateAction<BrowserFramePlacement | null>>; children: ReactNode
+}) {
+  const { tabHostId } = useContext(WorkbenchPresentationContext)
+  useLayoutEffect(() => {
+    const receipt = { frame, hostId: tabHostId }; publish(receipt)
+    return () => publish(current => current === receipt ? null : current)
+  }, [frame, tabHostId, publish])
+  return children
+}
+
+/** A local presentation keeps its content while its thin frame changes role or physical slot. */
+function BrowserPresentationView({ presentation, primary, primaryHomeId, slotId, renderPane, renderFrame }: {
+  presentation: WorkbenchBrowserPresentation; primary: boolean; primaryHomeId: string; slotId: string
+  renderPane(presentation: WorkbenchBrowserPresentation): ReactNode
+  renderFrame?: ((content: ReactNode, target: WorkbenchViewTarget) => ReactNode) | undefined
+}) {
+  const [placement, setPlacement] = useState<BrowserFramePlacement | null>(null)
+  // A newly mounted or retargeted frame must confirm its own placement, never inherit an older receipt.
+  const frame = useMemo(() => ({}), [primary, presentation.stageHostId])
+  const frameVisible = primary || placement?.frame === frame && placement.hostId === presentation.stageHostId
+  const targetId = primary ? primaryHomeId : slotId
+  return <>
+    {!primary && renderFrame ? <StableWorkbenchView kind="region" homeId={`${presentation.stageHostId}:parked`} targetId={presentation.stageHostId}
+      reference={presentation.occurrence.location} active={presentation.active} visible={presentation.visible}
+      retainedRegionId={presentation.occurrence.location.regionId}>
+      <BrowserFrameSlot frame={frame} publish={setPlacement}>{renderFrame(<div id={slotId} className="workbench-region-slot" />, presentation.target)}</BrowserFrameSlot>
+    </StableWorkbenchView> : null}
+    <StableWorkbenchView key="content" kind="region" homeId={`${slotId}:parked`} targetId={targetId}
+      reference={presentation.occurrence.location} active={presentation.active} visible={presentation.visible}
+      retainedRegionId={presentation.occurrence.location.regionId} surface={presentation.target.surface}
+      moteContextKey={presentation.target.moteContextKey} moteInputIntent={presentation.target.moteInputIntent}
+      survey={presentation.target.surface === 'survey'} controlsOpen={presentation.target.controlsOpen} projection={presentation.target.projection}>
+      <WorkbenchPresentationContext.Consumer>{({ tabHostId }) => renderPane({ ...presentation,
+        visible: presentation.visible && frameVisible && tabHostId === targetId })}</WorkbenchPresentationContext.Consumer>
+    </StableWorkbenchView>
+  </>
 }
 
 type BrowserPaneProps = Omit<Parameters<typeof BrowserPaneContent>[0], 'addressDraft' | 'connection'>
@@ -1863,23 +1918,18 @@ function BrowserPaneContent({
   )
   }
   const primary = presentations.find(presentation => presentation.target.hostId === presentationTargetId) ?? presentations[0]
+  const primaryHomeId = `browser-pane-home:${JSON.stringify([tab.regionId, tab.browserId])}`
+  const contentSlot = (presentation: WorkbenchBrowserPresentation) => `browser-pane-content:${JSON.stringify([tab.regionId, tab.browserId, browserPresentationContentKey(presentation)])}`
+  const panePresentations = renderPresentationFrame ? presentations : primary ? [primary] : []
   return <>
-    {renderPane(primary)}
+    {primary ? <div id={primaryHomeId} className="workbench-region-slot" /> : renderPane()}
     {discussion.dialog}
     {creationOptions ? <BrowserAgentCreationOptionsDialog browserId={tab.browserId} context={creationOptions.context} hostLabel={creationOptions.hostLabel}
       ownerDocument={creationOptions.document} onClose={() => setCreationOptions(null)} onCreate={options => startBrowserAgent(creationOptions.target,
         { ...options, expectedPage: creationOptions.expectedPage, ...(creationOptions.context.workspace ? { expectedExecution: {
           hostId: creationOptions.context.workspace.hostId, path: creationOptions.context.workspace.path } } : {}) })} /> : null}
-    {renderPresentationFrame ? presentations.filter(presentation => presentation !== primary).map(presentation =>
-      <StableWorkbenchView key={presentation.occurrence.presentationId} kind="region"
-        homeId={`${presentation.stageHostId}:parked`} targetId={presentation.stageHostId}
-        reference={presentation.occurrence.location}
-        active={presentation.active} visible={presentation.visible}
-        retainedRegionId={presentation.occurrence.location.regionId}>
-        <WorkbenchPresentationContext.Consumer>
-          {({ tabHostId }) => renderPresentationFrame(renderPane({ ...presentation,
-            visible: presentation.visible && tabHostId === presentation.stageHostId }), presentation.target)}
-        </WorkbenchPresentationContext.Consumer>
-      </StableWorkbenchView>) : null}
+    {panePresentations.map(presentation => <BrowserPresentationView key={browserPresentationContentKey(presentation)}
+      presentation={presentation} primary={presentation === primary} primaryHomeId={primaryHomeId} slotId={contentSlot(presentation)}
+      renderPane={renderPane} renderFrame={renderPresentationFrame} />)}
   </>
 }
