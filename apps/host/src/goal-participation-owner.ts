@@ -34,7 +34,7 @@ export function createGoalParticipationOwner(options: {
     if (!goal || input.creationOperationId !== undefined && goal.creationOrigin?.operationId !== input.creationOperationId) throw new AgentMuxError('The exact original Goal creation is unconfirmed. Retain its input operation and existing Agent.', 'CONTROL_REQUEST_CONFLICT')
     const originalClient = options.client(input.hostId)
     const created = await originalClient.inspectAgentCreation(input.agentSessionId)
-    if (created.agentSessionId !== input.agentSessionId || created.kind === 'retired-agent') throw new AgentMuxError('The original Goal participation Session is unavailable. Its identity and input operation are retained.', 'CONTROL_UNAVAILABLE')
+    if (created.agentSessionId !== input.agentSessionId || created.kind !== 'agent') throw new AgentMuxError('The original Goal participation Session is unavailable. Its identity and input operation are retained.', 'CONTROL_UNAVAILABLE')
     let messageSource: { sessionId: string; runId: string } | undefined
     if (input.creationOperationId !== undefined && input.operationId !== await goalPmoOperation({ goalId: goal.id, creationOperationId: input.creationOperationId }, input.evidence === 'creation-input' ? 'create' : 'discussion'))
       throw new AgentMuxError('The original Goal source operation belongs to another request. No input was sent.', 'CONTROL_REQUEST_CONFLICT')

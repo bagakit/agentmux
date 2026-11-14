@@ -76,13 +76,11 @@ export class AgentLearningOwner implements AgentLearningPort {
       if (!worker || worker.state === 'prepared' || worker.state === 'not-applied') continue
       try {
         const original = await this.options.core().inspectAgentCreation(worker.agentSessionId)
-        const creation = original.kind === 'retired-agent' ? original.history?.creation : original.creation
+        if (original.kind !== 'agent' && original.kind !== 'retired-agent')
+          fail('LEARNING_CREATION_UNCONFIRMED', 'The original worker creation is not a committed Session. Inspect its exact Core creation; its request and any native work are retained.')
+        const creation = original.kind === 'agent' ? original.creation : original.history?.creation
         if (!creation || original.agentSessionId !== worker.agentSessionId || creation.createOperationId !== worker.createOperationId)
           fail('LEARNING_CREATION_CONFLICT', 'The original Core creation belongs to another exact intent. No replacement Agent was used.')
-        if (original.kind !== 'agent' && original.kind !== 'retired-agent') {
-          worker.state = 'unknown'
-          fail('LEARNING_CREATION_UNCONFIRMED', 'The original creation has no confirmed Session or Run. Its exact operation is retained; inspect that creation without starting another Agent.')
-        }
         worker.state = original.kind === 'agent' ? 'created' : 'retired'
         worker.runId = original.run.runId
         worker.initialPrompt = creation.initialPrompt

@@ -134,6 +134,7 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
         ])
         if (owner.kind === 'retired-agent' || worker.kind === 'retired-agent') throw new AgentMuxError(
           'An original delegation participant is closed. Its Goal, request and history are retained; explicitly recover the Session before a new delegation.', 'AGENT_SESSION_RETIRED')
+        if (owner.kind !== 'agent' || worker.kind !== 'agent') throw new AgentMuxError('An original delegation creation is unconfirmed. Keep its exact request and participants.', 'CONTROL_UNAVAILABLE')
         if (owner.agentSessionId !== intent.ownerAgentSessionId || owner.run.runId !== intent.ownerRunId ||
             worker.agentSessionId !== intent.workerAgentSessionId || worker.run.runId !== intent.workerRunId ||
             authority.runId !== intent.ownerRunId) throw new AgentMuxError(
@@ -200,6 +201,7 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
           const owner = await this.runtime.agentCreation(saved.hostId, saved.ownerAgentSessionId)
           if (owner.kind === 'retired-agent') throw new AgentMuxError(
             'The original report recipient is closed. Keep the worker report and its original operation; explicitly recover the recipient before sending.', 'AGENT_SESSION_RETIRED')
+          if (owner.kind !== 'agent') throw new AgentMuxError('The original report recipient creation is unconfirmed. Keep its exact report and operation.', 'CONTROL_UNAVAILABLE')
           if (!sessionSemanticResumeSourceRuns(owner).includes(saved.ownerRunId)) throw new AgentMuxError(
             'The original report recipient has no confirmed semantic recovery to its current Run. Inspect that Session recovery; the report, operation and healthy input are retained.', 'CONTROL_REQUEST_CONFLICT')
           await core.call(delegationWorkerHostId(saved), 'agent.send', { target: { kind: 'agent-session', agentSessionId: saved.ownerAgentSessionId, hostId: saved.hostId },

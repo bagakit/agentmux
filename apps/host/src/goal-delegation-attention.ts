@@ -132,6 +132,7 @@ export class GoalDelegationAttentionOwner {
       if (!ended && !delegation.report && !observation?.recoverableReport) return
       const supervisor = await this.runtime.agentCreation(delegation.hostId, goal.supervisorSessionId)
       if (supervisor.kind === 'retired-agent') throw new Error('The original Supervisor is closed. Its Goal responsibility and reminder are retained; explicitly recover that Session to continue.')
+      if (supervisor.kind !== 'agent') throw new Error('The original Supervisor creation is unconfirmed. Its reminder remains retained.')
       const digest = createHash('sha256').update(JSON.stringify([goal.id, delegation.operationId, delegation.sourceMessageId])).digest('hex')
       const agentMuxNote = JSON.stringify({ schema: 'agentmux.goal-attention.v1', goalId: goal.id,
         operationId: delegation.operationId, sourceMessageId: delegation.sourceMessageId, hostId: delegation.hostId, workerHostId: delegationWorkerHostId(delegation),

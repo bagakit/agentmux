@@ -123,6 +123,7 @@ export class GoalStartResponsibilityOwner {
     if (attention?.attemptedAt !== undefined) return
     const supervisor = await this.runtime.agentCreation(start.hostId, goal.supervisorSessionId)
     if (supervisor.kind === 'retired-agent') throw new Error('The original Supervisor is closed. Its Goal responsibility and reminder are retained; explicitly recover that Session to continue.')
+    if (supervisor.kind !== 'agent') throw new Error('The original Supervisor creation is unconfirmed. Its exact responsibility remains retained.')
     if (supervisor.agentSessionId !== goal.supervisorSessionId || supervisor.hostId !== start.hostId)
       throw new Error('The original Goal Supervisor is not confirmed at the Start Host. No replacement responsibility was chosen.')
     if (supervisor.agentSessionId === start.agentSessionId && supervisor.run.runId === start.runId)

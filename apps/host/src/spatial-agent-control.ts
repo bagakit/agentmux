@@ -120,7 +120,7 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
           session.executorId !== record.executorId || session.workspacePath !== record.execution.workspacePath ||
           record.execution.executorRevision && creation.executorRevision !== record.execution.executorRevision ||
           record.executionBinding && (session.toolExecution?.bindingId !== record.executionBinding.bindingId ||
-            session.toolExecution.resourceRuntimeId !== record.placement?.runtimeId || record.placement.runtimeId !== options.runtime().ownerIdentity().runtimeId ||
+            session.toolExecution.resourceRuntimeId !== record.placement?.runtimeId || record.placement?.runtimeId !== options.runtime().ownerIdentity().runtimeId ||
             session.toolExecution.workspacePath !== record.placement?.workspacePath)) throw new AgentMuxError(
         'Core has not confirmed this original creation identity and execution target. The healthy Session is retained.', 'AGENT_CREATION_UNCONFIRMED')
       report.agent = { ...spatialAgentFact(session, record.execution.hostId), ...(record.takeover ? { takeover: record.takeover } : {}) }
