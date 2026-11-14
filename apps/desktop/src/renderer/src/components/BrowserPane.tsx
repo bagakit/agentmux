@@ -1917,12 +1917,13 @@ function BrowserPaneContent({
     </section>
   )
   }
-  const primary = presentations.find(presentation => presentation.target.hostId === presentationTargetId) ?? presentations[0]
+  const primary = presentations.find(presentation => presentation.target.hostId === presentationTargetId)
+    ?? (!renderPresentationFrame ? presentations[0] : undefined)
   const primaryHomeId = `browser-pane-home:${JSON.stringify([tab.regionId, tab.browserId])}`
   const contentSlot = (presentation: WorkbenchBrowserPresentation) => `browser-pane-content:${JSON.stringify([tab.regionId, tab.browserId, browserPresentationContentKey(presentation)])}`
   const panePresentations = renderPresentationFrame ? presentations : primary ? [primary] : []
   return <>
-    {primary ? <div id={primaryHomeId} className="workbench-region-slot" /> : renderPane()}
+    {primary ? <div id={primaryHomeId} className="workbench-region-slot" /> : panePresentations.length === 0 ? renderPane() : null}
     {discussion.dialog}
     {creationOptions ? <BrowserAgentCreationOptionsDialog browserId={tab.browserId} context={creationOptions.context} hostLabel={creationOptions.hostLabel}
       ownerDocument={creationOptions.document} onClose={() => setCreationOptions(null)} onCreate={options => startBrowserAgent(creationOptions.target,
