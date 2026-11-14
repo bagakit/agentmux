@@ -27,7 +27,7 @@ import type { AgentSessionRecoveryPorts } from './ports.js'
 
 type AgentContinuityAttemptContext = {
   ports: AgentSessionRecoveryPorts
-  supervisor: Pick<AgentSessionContinuitySupervisor, 'retainedAutomaticIntent' | 'completedRuntimeRestartIntent' | 'observe' | 'schedule'>
+  supervisor: Pick<AgentSessionContinuitySupervisor, 'retainedAutomaticIntent' | 'completedRuntimeRestartIntent' | 'unadmittedPolicyDecision' | 'observe' | 'schedule'>
   lifecycle: Pick<AgentSessionRunLifecycle, 'buildResumePlan' | 'resumeAgentRun' | 'completePreparedResume' | 'resolvePreparedResume' | 'settleContinuityMessageInput'>
   reconciler: AgentSessionRecoveryReconciler
   signal: AbortSignal
@@ -133,7 +133,23 @@ export async function performAgentContinuity(
     return { kind: 'pending', agentSessionId: input.agentSessionId, previousRun: { ...input.expectedRun },
       reason: 'operation-unconfirmed', evidence, continuity }
   }
-  let retained = current && supervisor.retainedAutomaticIntent(current, input)
+  const lifecycleConfirmedClear = !reservation && !reservationObservationUnknown
+  const pointed = current?.continuity && current.continuityOperations?.[current.continuity.operationId]
+  let reevaluatedPolicy = current && pointed && lifecycleConfirmedClear && supervisor.unadmittedPolicyDecision(current, input, pointed)
+    ? structuredClone(pointed) : undefined
+  const assertPolicyLifecycle = async () => {
+    if (reevaluatedPolicy && await ports.sessions.store.readLifecycleReservation(input.agentSessionId)) throw new AgentMuxError(
+      'The original policy decision acquired a lifecycle before this startup. Keep its original operation and reconcile that lifecycle.',
+      'AGENT_CONTINUITY_SUPERSEDED', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
+  }
+  const assertPolicyDecision = (value: AgentMuxStoredAgentSession) => {
+    if (!reevaluatedPolicy) return
+    const root = value.continuityOperations?.[reevaluatedPolicy.operationId]
+    if (!root || !isDeepStrictEqual(root, reevaluatedPolicy) || !supervisor.unadmittedPolicyDecision(value, input, root)) throw new AgentMuxError(
+      'The original policy decision changed before this startup was admitted. Its receipts, target and cancellation remain retained.',
+      'AGENT_CONTINUITY_SUPERSEDED', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
+  }
+  let retained = current && supervisor.retainedAutomaticIntent(current, input, undefined, lifecycleConfirmedClear)
   let completedRuntimeIntent: { rootId: string; activeId: string } | undefined
   let retainedRun: Awaited<ReturnType<typeof ports.runtime.kernel.status>> | undefined
   if (current && retained?.kind === 'resumed' && retained.newRun && sameRun(retained.newRun, current.run) &&
@@ -142,7 +158,7 @@ export async function performAgentContinuity(
       retainedRun = await ports.runtime.kernel.status(current.run.runId)
       ports.runtime.assertAgentRun(current, retainedRun)
       const original = retained
-      retained = supervisor.retainedAutomaticIntent(current, input, retainedRun)
+      retained = supervisor.retainedAutomaticIntent(current, input, retainedRun, lifecycleConfirmedClear)
       if (!retained) completedRuntimeIntent = { rootId: original.intentOperationId ?? original.operationId, activeId: original.operationId }
     } catch (error) {
       if (error instanceof AgentMuxError && error.code === 'AGENT_SESSION_RUN_MISMATCH') throw error
@@ -340,8 +356,10 @@ export async function performAgentContinuity(
       delete receipt.supervision.nextAttemptAt
     }
     if (current) {
+      await assertPolicyLifecycle()
       try {
         current = await ports.sessions.updateExactAgentSession(current.agentSessionId, current.run, value => {
+          assertPolicyDecision(value)
           absenceChanged = false
           reusedObservation = undefined
           const latest = value.continuityOperations?.[receipt.operationId]
@@ -398,6 +416,7 @@ export async function performAgentContinuity(
             ...(originalMessage(value) ? { messageInput: originalMessage(value)! } : {}),
             ...(supervision ? { supervision } : {}) } } }
         })
+        if (current.continuity?.operationId === receipt.operationId) reevaluatedPolicy = undefined
         if (!absenceChanged && !reusedObservation) ports.events.publishSession(current)
       } catch (error) {
         reusedObservation = undefined
@@ -766,8 +785,10 @@ export async function performAgentContinuity(
     ...receipt.supervision, phase: 'observing', activeAttemptOperationId: receipt.operationId, attemptCount: 1,
     attemptLimit: receipt.supervision?.attemptLimit ?? Math.min(Number.MAX_SAFE_INTEGER, 1 + policy.retryMaxAttempts), observedAt: now, reason: 'start-pending' }
   // Persist admission before the first irreversible start. This does not acquire a lifecycle lease.
+  await assertPolicyLifecycle()
   current = await ports.sessions.updateExactAgentSession(input.agentSessionId, input.expectedRun, value => {
     if (standing) assertStanding(value.futurePromptIntents?.[standing.intentId], value)
+    assertPolicyDecision(value)
     if (completedRuntimeIntent) {
       const pointer = value.continuity?.intentOperationId ?? value.continuity?.operationId
       const root = value.continuityOperations?.[completedRuntimeIntent.rootId]
@@ -792,6 +813,7 @@ export async function performAgentContinuity(
     return { ...retainExecutor(value), continuity: original,
       continuityOperations: { ...value.continuityOperations, [receipt.operationId]: original } }
   }, standing?.intentId)
+  reevaluatedPolicy = undefined // The new operation now owns its separately admitted lifecycle.
   try {
     const session = await lifecycle.resumeAgentRun({ agentSessionId: input.agentSessionId, operationId: input.operationId,
       ...(input.args === undefined ? {} : { args: input.args }), ...(input.env === undefined ? {} : { env: input.env }),

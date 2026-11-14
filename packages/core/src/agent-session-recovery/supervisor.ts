@@ -74,7 +74,8 @@ export class AgentSessionContinuitySupervisor {
   }
 
   /** A fresh automatic observer joins the original current intent, never resets its budget or cancellation. */
-  retainedAutomaticIntent(session: AgentMuxStoredAgentSession, input: AgentMuxAgentContinuityInput, observedRun?: CtxmuxAdapterRun): AgentMuxContinuityOperation | undefined {
+  retainedAutomaticIntent(session: AgentMuxStoredAgentSession, input: AgentMuxAgentContinuityInput, observedRun?: CtxmuxAdapterRun,
+    lifecycleConfirmedClear = false): AgentMuxContinuityOperation | undefined {
     const manualFrontend = input.trigger === 'manual' && session.nativeActor?.frontendControl
     const requested = session.continuityOperations?.[input.operationId]
     const observer = manualFrontend && requested?.kind === 'pending' && requested.reason === 'recovery-supervised' &&
@@ -110,13 +111,9 @@ export class AgentSessionContinuitySupervisor {
     // parallel budget or replace an unknown child action. Closed intents stay history.
     if (manualFrontend && !observer && (supervision.phase === 'cancelled' || supervision.phase === 'paused' &&
       !reobservableReasons.includes(supervision.reason))) return
-    // Manual policy parked this intent before any recovery action was admitted.
-    // A fresh startup may apply its newly authored automatic policy without
-    // resetting a started, cancelled, or otherwise unresolved original action.
-    if (input.trigger === 'startup' && input.policy?.activeRecovery !== 'manual' &&
-      root.kind === 'pending' && root.reason === 'active-manual' && root.policy.activeRecovery === 'manual' &&
-      supervision.phase === 'paused' && supervision.attemptCount === 0 && active.operationId === root.operationId &&
-      !root.newRun && !root.frontendReconnect && !root.launchInput && !root.messageInput) return
+    // Only a fresh startup with no original lifecycle may return to the shared
+    // admission decision. The old policy receipt and its budget remain history.
+    if (lifecycleConfirmedClear && this.unadmittedPolicyDecision(session, input, root)) return
     // An earlier startup parked an identity-less Session as idle-unknown, before Core could answer
     // that it holds no native conversation. A fresh startup re-decides it; nothing was admitted.
     if (input.trigger === 'startup' && root.kind === 'pending' && root.reason === 'idle-unknown' &&
@@ -128,6 +125,28 @@ export class AgentSessionContinuitySupervisor {
     if (input.trigger === 'startup' && supervision.phase === 'paused' && supervision.reason === 'frontend-retry-budget-exhausted' &&
       (active.kind === 'reattachable' && active.frontendReconnect?.frontendId || active.kind === 'resumed' && active.newRun)) return
     return active
+  }
+
+  /** A policy-only decision has admitted neither an action nor an input. */
+  unadmittedPolicyDecision(session: AgentMuxStoredAgentSession, input: AgentMuxAgentContinuityInput,
+    root: AgentMuxContinuityOperation): boolean {
+    const supervision = root.supervision
+    return Boolean(input.trigger === 'startup' && !input.input && !input.messageInputRef && !input.standingIntent &&
+      !input.moteMainEntry && !input.timingOverride && !session.continuityOperations?.[input.operationId] &&
+      session.hostId === 'local' && session.agentSessionId === input.agentSessionId && sameRun(session.run, input.expectedRun) &&
+      session.continuity?.operationId === root.operationId && !session.continuity.intentOperationId &&
+      session.continuityOperations?.[root.operationId] === root && root.agentSessionId === session.agentSessionId &&
+      !['manual', 'input'].includes(root.trigger) && sameRun(root.previousRun, session.run) &&
+      root.kind === 'pending' && ['active-manual', 'idle-unknown', 'not-active', 'idle-window-expired', 'resume-disabled'].includes(root.reason) &&
+      ['run-ended', 'run-missing'].includes(root.evidence.kind) &&
+      supervision?.phase === 'paused' && supervision.reason === root.reason && supervision.attemptCount === 0 &&
+      supervision.activeAttemptOperationId === root.operationId && !supervision.cancellation && !supervision.controlOperations &&
+      !supervision.process && !supervision.contextEvidence && !supervision.observationError && supervision.nextAttemptAt === undefined &&
+      !root.action && !root.intentOperationId && !root.standingIntent && !root.moteMainEntry && !root.timingOverride &&
+      !root.newRun && !root.frontendReconnect && !root.initializationRecovery && !root.resolution && !root.restartLaunch &&
+      !root.launchInput && !root.messageInput && !root.recoveryInputs && !root.recoveryDelivery && !root.resumedInputBoundary &&
+      root.nextActionAt === undefined && root.nativeTarget?.providerId === session.providerId &&
+      matchesProviderNativeSessionTarget(root.nativeTarget, session.nativeHandle))
   }
 
   /** Positive authority check, reused at the admission CAS after asynchronous observations. */
