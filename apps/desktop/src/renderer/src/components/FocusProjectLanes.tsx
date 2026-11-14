@@ -186,19 +186,29 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
         const containerKey = frame.project ? focusZoneContainerKey('project', first.hostId, first.projectId)
           : category ? focusZoneContainerKey('collection', category.hostId, category.spaceId) : null
         const mode = focusZonePresentation(containerKey, frame.project ? 'project' : 'collection', resourceMenus ? zonePreferences : undefined, resourceMenus ? authoredTopicPresentation : undefined)
-        const zoneHeadings = new Map(frame.lanes.map(zone => [zone.id, <span className="focus-zone-heading" data-focus-zone-id={zone.id} key={zone.id}>
-          <FocusLaneHeadingMenu enabled={resourceMenus} lane={zone} onRename={renameCategory} onChangeIcon={changeIcon}>
+        const zoneHeadings = new Map(frame.lanes.map(zone => {
+          const zoneName = zone.labels.slice(1).join(' / ') || 'Root'
+          const control = <FocusLaneHeadingMenu enabled={resourceMenus} lane={zone} onRename={renameCategory} onChangeIcon={changeIcon}>
             <button type="button" className="focus-project-lanes__axis focus-zone-heading__axis" data-focus-project-scope-control
               aria-current={zone.id === currentLaneId ? 'location' : undefined} aria-pressed={selectedProjectKey === focusLaneProjectKey(zone)}
               title={[zone.name, displayPath(zone.path, zone.hostId), zone.summary, origins?.get(zone.id)?.label, ...(origins?.get(zone.id)?.locations ?? []), ...(origins?.get(zone.id)?.addresses ?? [])].filter(Boolean).join('\n')} onClick={() => onSelect(focusLaneProjectKey(zone))}>
-              <ThemeObjectBranchIcon size={11} /><span className="focus-project-lanes__label"><strong>{zone.labels.slice(1).join(' / ') || 'Root'}</strong></span>
+              <ThemeObjectBranchIcon size={11} /><span className="focus-project-lanes__label"><strong>{zoneName}</strong></span>
             </button>
           </FocusLaneHeadingMenu>
-          {origins?.get(zone.id)?.kind === 'unknown' ? <span className="focus-project-lanes__source">Source unknown</span> : null}
-          {zone.locationUnconfirmed ? <span className="focus-project-lanes__recovery">Location unconfirmed</span> : null}
-          {zone.recovery ? <span className="focus-project-lanes__recovery">{zone.recovery === 'removed' ? 'Worktree removed' : 'Workspace unregistered'}</span> : null}
-          {zone.summary ? <span className="focus-project-lanes__summary" title={zone.summary}>{zone.summary}</span> : null}
-        </span>]))
+          const hasNotice = origins?.get(zone.id)?.kind === 'unknown' || zone.locationUnconfirmed || zone.recovery !== null
+          const notice = hasNotice ? <span className="focus-zone-notice" data-focus-zone-notice={zone.id} key={zone.id} title={zone.name}>
+            <span className="focus-zone-notice__name">{zoneName} · </span>
+            {origins?.get(zone.id)?.kind === 'unknown' ? <span className="focus-project-lanes__source">Source unknown</span> : null}
+            {zone.locationUnconfirmed ? <span className="focus-project-lanes__recovery">Location unconfirmed</span> : null}
+            {zone.recovery ? <span className="focus-project-lanes__recovery">{zone.recovery === 'removed' ? 'Worktree removed' : 'Workspace unregistered'}</span> : null}
+          </span> : undefined
+          return [zone.id, {
+            section: <span className="focus-zone-heading" data-focus-zone-id={zone.id} key={zone.id}>{control}{notice}
+              {zone.summary ? <span className="focus-project-lanes__summary" title={zone.summary}>{zone.summary}</span> : null}</span>,
+            tag: <span className="focus-zone-heading" data-focus-zone-id={zone.id} key={zone.id}>{control}</span>,
+            notice
+          }] as const
+        }))
         const references = (field: 'contextRefs' | 'activeAgentRefs') => [...new Map(frame.lanes.flatMap(zone => zone[field]).map(ref => [JSON.stringify([ref.hostId, ref.id]), ref])).values()]
         const scanLanes: readonly FocusScanLane[] = frame.project ? [{ ...first, id: frame.key, labels: [name], name,
           zones: frame.lanes, zoneHeadings, zonePresentation: mode, contextRefs: references('contextRefs'), activeAgentRefs: references('activeAgentRefs'),

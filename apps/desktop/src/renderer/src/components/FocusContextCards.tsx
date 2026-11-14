@@ -12,6 +12,7 @@ import { focusCardTrackHeight } from '../lib/focus-lane-layout'
 import { focusContextHeat, focusContextVisit } from '../lib/focus-attention'
 import { focusTopicContextKey, type FocusTopicHeading } from '../lib/focus-collection-lanes'
 import { FocusTopicLabel } from './FocusTopicLabel'
+import { FocusZoneFooter } from './FocusZoneFooter'
 
 const contextKey = (context: FocusContext) => JSON.stringify([context.hostId, context.id])
 
@@ -121,16 +122,15 @@ export function FocusContextCards({ contexts, columns, scrollRef, visible, layou
     const selected = selectedKey === undefined ? selectedId === context.id : selectedKey === contextKey(context)
     const sourceKey = focusTopicContextKey(context.hostId, context.id), topic = topics?.get(sourceKey), section = sections?.get(sourceKey)
     return <Fragment key={contextKey(context)}>{section ? <div className="focus-topic-section" data-focus-topic-section={section.kind === 'worktree' ? undefined : section.id} aria-label={`${section.kind === 'worktree' ? 'Zone' : 'Topic'} · ${section.name}`} data-focus-zone-section={section.kind === 'worktree' ? section.id : undefined}>{section.content ?? <FocusTopicLabel topic={section} />}</div> : null}
-    <div className="focus-context-card" style={{ display: 'grid', minHeight: cardHeight + (topic ? 28 : 0) }}
+    <div className="focus-context-card" style={{ display: 'flex', flexDirection: 'column', minHeight: cardHeight + (topic ? 22 : 0) }}
       data-focus-card-key={contextKey(context)} data-focus-card-body={full ? 'mounted' : 'pending'} data-focus-heat={focusContextHeat(context, visits ? focusContextVisit(context, visits) : undefined, Date.now())}
       data-focus-agent-host={context.control?.hostId ?? context.hostId} data-focus-agent-session={context.control?.agentSessionId ?? context.id}
       data-focus-presentation-session={context.id} data-focus-agent-selected={selected ? 'true' : undefined}>
-      {topic?.content ? <div className="focus-zone-tags" data-focus-zone-tags="">{topic.content}</div> : null}
       {full ? <FocusContextCardBody context={context} summaryActive={visible} goalLinks={goalLinks.get(focusGoalCardKey(context.hostId, context.id))}
-        identity={identities.get(focusContextIdentityKey(context.hostId, context.id))} selected={selected} onSelect={onSelect} topic={topic?.content ? undefined : topic} />
+        identity={identities.get(focusContextIdentityKey(context.hostId, context.id))} selected={selected} onSelect={onSelect} />
         : <button type="button" className={`focus-context focus-context--card${selected ? ' is-selected' : ''}`}
           data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic}
-          aria-pressed={selected} aria-label={`${topic ? `${topic.kind === 'worktree' ? 'Zone' : 'Topic'} · ${topic.name} · ` : ''}${context.name} · ${context.stateLabel}${context.detailKind === 'service' ? ` · ${context.detail}` : ''}`} aria-description={context.originAddress}
+          aria-pressed={selected} aria-label={`${context.name} · ${context.stateLabel}${context.detailKind === 'service' ? ` · ${context.detail}` : ''}${topic ? ` · ${topic.kind === 'worktree' ? 'Zone' : 'Topic'} · ${topic.name}` : ''}`} aria-description={context.originAddress}
           onMouseDown={event => { if (event.button === 0) event.preventDefault() }}
           onClick={() => onSelect(context.id)}
           onFocus={event => { reveal(context, event.currentTarget.parentElement as HTMLDivElement) }}
@@ -138,7 +138,9 @@ export function FocusContextCards({ contexts, columns, scrollRef, visible, layou
             event.preventDefault(); event.stopPropagation()
             const button = reveal(context, event.currentTarget.parentElement as HTMLDivElement)
             button?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: event.clientX, clientY: event.clientY }))
-          }}><span className="focus-context__copy">{topic && !topic.content ? <FocusTopicLabel topic={topic} /> : null}<strong>{context.name}</strong>{context.kind === 'agent' ? <AgentWorkModeBadge source={context} embedded /> : null}<span className="focus-context__detail">{context.stateLabel}</span></span></button>}
+          }}><span className="focus-context__copy"><strong>{context.name}</strong>{context.kind === 'agent' ? <AgentWorkModeBadge source={context} embedded /> : null}<span className="focus-context__detail">{context.stateLabel}</span></span></button>}
+      {topic?.notice ? <div className="focus-zone-notices" data-focus-zone-notices="" role="status">{topic.notice}</div> : null}
+      <FocusZoneFooter zone={topic} />
     </div></Fragment>
   })}</div>
 }

@@ -5,12 +5,13 @@ import type { FocusContext } from './focus-context'
 import type { FocusProjectLane } from './focus-project-lanes'
 import { focusContextIdentityKey } from './focus-context-identity'
 
-export type FocusTopicHeading = { id: string; name: string; summary: string | null; kind?: 'worktree'; content?: ReactNode }
+export type FocusTopicHeading = { id: string; name: string; summary: string | null; kind?: 'worktree'; content?: ReactNode; tagContent?: ReactNode; notice?: ReactNode }
+export type FocusZoneHeadingView = { section: ReactNode; tag: ReactNode; notice?: ReactNode }
 export type FocusScanLane = FocusProjectLane & {
   /** Disposable scan projection; none of these IDs is a new Core Space/Session. */
   /** Original worktree lanes, held by one stable project scan in either organization mode. */
   zones?: readonly FocusProjectLane[]
-  zoneHeadings?: ReadonlyMap<string, ReactNode>
+  zoneHeadings?: ReadonlyMap<string, FocusZoneHeadingView>
   zonePresentation?: import('../../../shared/focus-preferences').FocusTopicPresentation
   collection?: { categories: readonly TopicCategory[]; topics: readonly FocusProjectLane[]; confirmed: boolean; pending?: boolean }
 }
@@ -94,9 +95,10 @@ export function focusCollectionTopics(lane: FocusScanLane): ReadonlyMap<string, 
   const memberships = new Map<string, FocusTopicHeading[]>()
   for (const topic of lane.zones ?? lane.collection?.topics ?? []) {
     if (lane.zones?.length === 1 && topic.labels.length === 1) continue
+    const view = lane.zoneHeadings?.get(topic.id)
     const heading: FocusTopicHeading = { id: lane.zones ? topic.id : JSON.stringify([topic.hostId, topic.workspaceId, topic.topicId]),
       name: lane.zones ? topic.labels.slice(1).join(' / ') || 'Root' : topic.labels.at(-1) ?? topic.name,
-      summary: topic.summary, ...(lane.zones ? { kind: 'worktree' as const, content: lane.zoneHeadings?.get(topic.id) } : {}) }
+      summary: topic.summary, ...(lane.zones ? { kind: 'worktree' as const, content: view?.section, tagContent: view?.tag, notice: view?.notice } : {}) }
     for (const ref of topic.contextRefs) {
       const key = focusTopicContextKey(ref.hostId, ref.id), held = memberships.get(key) ?? []
       if (!held.some(item => item.id === heading.id)) held.push(heading)
@@ -106,7 +108,8 @@ export function focusCollectionTopics(lane: FocusScanLane): ReadonlyMap<string, 
   for (const [key, held] of memberships) result.set(key, held.length === 1 ? held[0]! : {
     id: JSON.stringify(held.map(item => item.id)), name: held.map(item => item.name).join(' / '),
     summary: held.map(item => item.summary).filter(Boolean).join('\n') || null,
-    ...(lane.zones ? { kind: 'worktree' as const, content: held.map(item => item.content) } : {})
+    ...(lane.zones ? { kind: 'worktree' as const, content: held.map(item => item.content), tagContent: held.map(item => item.tagContent),
+      ...(held.some(item => item.notice !== undefined) ? { notice: held.map(item => item.notice) } : {}) } : {})
   })
   return result
 }

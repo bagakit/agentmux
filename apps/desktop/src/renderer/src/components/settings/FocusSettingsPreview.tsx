@@ -10,10 +10,11 @@ import { ResolvedAgentAvatar } from '../AgentAvatar'
 import { AgentInputEntry, type InputPresentation } from '../AgentInputEntry'
 import { AgentInformationSummary } from '../AgentInformationDetails'
 import { deriveFocusProjectLanes } from '../../lib/focus-project-lanes'
-import { deriveFocusCollectionLanes, focusTopicContextKey, type FocusTopicHeading } from '../../lib/focus-collection-lanes'
+import { deriveFocusCollectionLanes, focusTopicContextKey } from '../../lib/focus-collection-lanes'
 import { FocusProjectLanes } from '../FocusProjectLanes'
 import { FocusScanLaneContent } from '../FocusScanLaneContent'
 import { FocusTopicLabel } from '../FocusTopicLabel'
+import { FocusZoneFooter } from '../FocusZoneFooter'
 import { focusCardTrackHeight, type FocusLaneMetrics } from '../../lib/focus-lane-layout'
 import type { FocusContext } from '../../lib/focus-context'
 import { focusContextIdentityKey, type FocusContextIdentity } from '../../lib/focus-context-identity'
@@ -124,8 +125,8 @@ export function FocusSettingsPreview({ values, active, scene, onScene, previewRe
   useEffect(() => { setPeek(false); setInspected(null); setResourceOpen(false); setAgentOpen(false) }, [scene])
   useEffect(() => { if (!enabled) { intent.cancel(); setPeek(false) } }, [enabled, intent.cancel])
   const style = { '--focus-reply-lines': values.replyLines, '--focus-card-track-height': `${focusCardTrackHeight(values.replyLines)}px` } as CSSProperties
-  const card = (context: FocusContext, interactive = false, topic?: FocusTopicHeading) => {
-    const content = <AgentContextContent context={context} presentation="card" topic={topic} identity={<ResolvedAgentAvatar label="Example Executor" providerId="codex" size={18} />} />
+  const card = (context: FocusContext, interactive = false) => {
+    const content = <AgentContextContent context={context} presentation="card" identity={<ResolvedAgentAvatar label="Example Executor" providerId="codex" size={18} />} />
     if (!interactive) return <div className="focus-context focus-context--card" data-example-agent={context.id} data-bucket={context.bucket}>{content}</div>
     return <button type="button" className="focus-context focus-context--card" tabIndex={interactive ? 0 : -1} data-example-agent={context.id} data-bucket={context.bucket} aria-label={`Example Agent: ${context.name}`} ref={interactive ? cardRef : undefined}
     onPointerEnter={interactive ? intent.schedule : undefined} onPointerLeave={interactive ? intent.cancel : undefined}
@@ -146,8 +147,8 @@ export function FocusSettingsPreview({ values, active, scene, onScene, previewRe
               metrics={boardMetrics} replyLines={values.replyLines} topicPresentation={values.topicPresentation}
               renderCards={(rows, columns, topics, sections) => <div className="focus-context-group__cards" style={{ '--focus-card-columns': columns } as CSSProperties}>
                 {rows.map(context => { const key = focusTopicContextKey(context.hostId, context.id), topic = topics?.get(key), section = sections?.get(key)
-                  return <Fragment key={key}>{section ? <div className="focus-topic-section" data-focus-topic-section={section.id} aria-label={`Topic · ${section.name}`}><FocusTopicLabel topic={section} /></div> : null}
-                    <div className="focus-context-card" style={{ minHeight: focusCardTrackHeight(values.replyLines) + (topic ? 28 : 0) }}>{card(context, false, topic)}</div></Fragment>
+                  return <Fragment key={key}>{section ? <div className="focus-topic-section" data-focus-topic-section={section.id} aria-label={`Topic · ${section.name}`}>{section.content ?? <FocusTopicLabel topic={section} />}</div> : null}
+                    <div className="focus-context-card" data-example-card={context.id} style={{ display: 'flex', flexDirection: 'column', minHeight: focusCardTrackHeight(values.replyLines) + (topic ? 22 : 0) }}>{card(context)}{topic?.notice ? <div className="focus-zone-notices" data-focus-zone-notices="" role="status">{topic.notice}</div> : null}<FocusZoneFooter zone={topic} /></div></Fragment>
                 })}
               </div>} />
           </div>} />
