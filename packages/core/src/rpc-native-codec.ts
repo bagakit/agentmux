@@ -208,10 +208,11 @@ export function parseRpcAgentSession(value: unknown): ReturnType<typeof normaliz
       count(loss.since); string(loss.code); if (loss.reason !== undefined) text(loss.reason)
       session.hookDeliveryObservation = structuredClone(loss) as NonNullable<typeof session.hookDeliveryObservation>
     }
-    if (source.currentActivity !== undefined) {
-      const activity = record(source.currentActivity, ['state', 'source', 'run', 'nativeSessionId', 'nativeTurnId',
-        'sourceId', 'sequence', 'hookReceiptId', 'observedAt', 'interruption'])
+    for (const field of ['currentActivity', 'mainSessionActivity'] as const) if (source[field] !== undefined) {
+      const activity = record(source[field], ['state', 'source', 'run', 'nativeSessionId', 'nativeTurnId',
+        'sourceId', 'sequence', 'hookReceiptId', 'observedAt', 'interruption', 'mainState'])
       member(activity.state, ['active', 'idle', 'unknown']); member(activity.source, ['native-hook'])
+      if (activity.mainState !== undefined) member(activity.mainState, ['active', 'idle', 'unknown'])
       if (runRef(activity.run).runId !== session.run.runId || session.nativeHandle?.kind !== 'provider' ||
           activity.nativeSessionId !== session.nativeHandle.sessionId) fail()
       for (const key of ['nativeSessionId', 'sourceId', 'hookReceiptId']) string(activity[key])
@@ -221,7 +222,7 @@ export function parseRpcAgentSession(value: unknown): ReturnType<typeof normaliz
         if (activity.state !== 'idle') fail()
         member(activity.interruption, ['interrupted', 'not-interrupted'])
       }
-      session.currentActivity = structuredClone(activity) as NonNullable<typeof session.currentActivity>
+      session[field] = structuredClone(activity) as NonNullable<typeof session.currentActivity>
     }
     return session
   } catch { return fail() }
@@ -266,6 +267,12 @@ function status(value: unknown, expected?: ReturnType<typeof normalizeAgentSessi
     member(observation.reason, ['activity-stale', 'activity-unconfirmed'])
     if (observation.semantic !== 'unknown' || observation.process !== 'running') fail()
   }
+  if (observation.mainSession !== undefined) {
+    const main = record(observation.mainSession, ['semantic', 'source', 'observedAt', 'nativeTurnId'])
+    member(main.semantic, ['active', 'idle', 'awaiting-input', 'unknown', 'unsupported']); string(main.source); count(main.observedAt)
+    if (main.nativeTurnId !== undefined) string(main.nativeTurnId)
+  }
+  if (observation.subagentSessions !== undefined && !isDeepStrictEqual(observation.subagentSessions, session.nativeSubagents)) fail()
   if (observation.lastKnownActivity !== undefined) {
     if (observation.reason === undefined) fail()
     const last = record(observation.lastKnownActivity, ['state', 'source', 'observedAt'])

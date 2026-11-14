@@ -1,3 +1,4 @@
+import { parseNativeSubagents, agentHasActiveSubagents, subagentScopeMatches } from './agent-subagent-state.js'
 import { sessionUsageWindow, sessionUsageMeasurement, type AgentSessionUsagePage } from './agent-session-usage.js'
 import { parseAgentSessionRecordDeletion, deletedAgentSessionRecord } from './agent-session-record.js'
 import { agentNativeTurnEnd } from './agent-session-identity.js'
@@ -412,7 +413,7 @@ function promptAdmissionRecords(session: AgentMuxStoredAgentSession | null | und
   const idle = session.recoveryActivity
   for (const original of originals) {
     const inputId = original.admission?.submissionId ?? original.launch?.key?.submissionId
-    if (inputId && idle?.state === 'idle' && idle.nativeTurnId && idle.promptSubmissionId === inputId &&
+    if (inputId && !(subagentScopeMatches(session.nativeSubagents, session) && (session.nativeSubagents.unconfirmed || agentHasActiveSubagents(session.nativeSubagents))) && idle?.state === 'idle' && idle.nativeTurnId && idle.promptSubmissionId === inputId &&
         original.run.runId === idle.run.runId) {
       original.semanticIdle = { ...structuredClone(idle), state: 'idle', source: 'native-hook',
         nativeTurnId: idle.nativeTurnId, promptSubmissionId: inputId }
@@ -1239,7 +1240,6 @@ function semanticStatus(value: unknown): AgentStatus {
       if (source.idleEvidenceConsumed !== true || source.state !== 'done') throw new AgentMuxError('Invalid consumed completion.', 'INVALID_AGENT_SESSION_STORE')
       return true as const
     })() }),
-    ...(source.aggregateActivityAt === undefined ? {} : { aggregateActivityAt: timestamp(source.aggregateActivityAt, 'semanticStatus.aggregateActivityAt') })
   }
 }
 
@@ -1934,6 +1934,7 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
       ? {}
       : { terminalOutputChannel: terminalOutputChannel(source.terminalOutputChannel, currentRun) }),
     ...(source.semanticStatus === undefined ? {} : { semanticStatus: semanticStatus(source.semanticStatus) }),
+    ...(source.nativeSubagents === undefined ? {} : { nativeSubagents: parseNativeSubagents(source.nativeSubagents) }),
     ...(source.pendingInteraction === undefined
       ? {}
       : { pendingInteraction: pendingInteraction(source.pendingInteraction) }),
@@ -1981,6 +1982,9 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
     ...(source.hookReceipt === undefined ? {} : { hookReceipt: hookReceipt(source.hookReceipt) }),
     ...(source.turnUsage === undefined ? {} : { turnUsage: turnUsage(source.turnUsage) })
   }
+  if (session.nativeSubagents && (session.nativeSubagents.providerId !== session.providerId ||
+      ![currentRun, ...priorRuns].some(run => run.runId === session.nativeSubagents!.run.runId) ||
+      session.nativeSubagents.sessions.some(child => child.observedAt > session.updatedAt))) throw new AgentMuxError('Child observation scope is invalid.', 'INVALID_AGENT_SESSION_STORE')
   const inputKey = session.promptCompletionAdmission?.inputKey
   const initialKey = session.creation?.initialInputKey
   if (initialKey && (initialKey.agentSessionId !== session.agentSessionId ||
@@ -1998,8 +2002,7 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
     (session.nativeSourceObservation && (session.nativeSourceObservation.run.runId !== session.run.runId ||
       session.nativeSourceObservation.observedAt > session.updatedAt || session.nativeSourceObservation.state === 'changed' && !session.observedNativeHandle)) ||
     (session.nativeConfirmation && !nativeConfirmationMatchesSession(session.nativeConfirmation, session)) ||
-    (session.observedNativeHandle?.kind === 'provider' && session.observedNativeHandle.providerId !== session.providerId) ||
-    (session.semanticStatus?.aggregateActivityAt !== undefined && session.semanticStatus.aggregateActivityAt > session.updatedAt)) {
+    (session.observedNativeHandle?.kind === 'provider' && session.observedNativeHandle.providerId !== session.providerId)) {
     throw new AgentMuxError('Native/activity facts do not match this Session.', 'INVALID_AGENT_SESSION_STORE')
   }
   if (session.nativeHandle?.kind === 'provider'  && session.nativeHandle.providerId !== session.providerId) {
@@ -2151,7 +2154,7 @@ function recoveryActivity(value: unknown, session: AgentMuxAgentSession): AgentR
   const run = runRef(source.run)
   const handle = session.nativeHandle
   if (Object.keys(source).some(key => !['state', 'interruption', 'nativeSessionId', 'nativeTurnId', 'sourceId',
-    'sequence', 'run', 'hookReceiptId', 'observedAt', 'promptSubmissionId'].includes(key)) ||
+    'sequence', 'run', 'hookReceiptId', 'observedAt', 'promptSubmissionId', 'mainState'].includes(key)) ||
     !['active', 'idle', 'unknown'].includes(String(source.state)) || run.runId !== session.run.runId ||
     handle?.kind !== 'provider' || handle.providerId !== session.providerId || source.nativeSessionId !== handle.sessionId ||
     source.interruption !== undefined && (source.state !== 'idle' || !['interrupted', 'not-interrupted'].includes(String(source.interruption)))) {
@@ -2161,7 +2164,9 @@ function recoveryActivity(value: unknown, session: AgentMuxAgentSession): AgentR
   if (observedAt > session.updatedAt) {
     throw new AgentMuxError('Recovery activity exceeds the Session time.', 'INVALID_AGENT_SESSION_STORE')
   }
+  if (source.mainState !== undefined && !['active', 'idle', 'unknown'].includes(String(source.mainState))) throw new AgentMuxError('Main activity is invalid.', 'INVALID_AGENT_SESSION_STORE')
   return { run, state: source.state as AgentRecoveryActivity['state'],
+    ...(source.mainState === undefined ? {} : { mainState: source.mainState as AgentRecoveryActivity['state'] }),
     nativeSessionId: string(source.nativeSessionId, 'recoveryActivity.nativeSessionId'),
     sourceId: string(source.sourceId, 'recoveryActivity.sourceId'),
     sequence: positiveInteger(source.sequence, 'recoveryActivity.sequence'),

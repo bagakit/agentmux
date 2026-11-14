@@ -1353,8 +1353,12 @@ export type AgentMuxAgentSession = {
   terminalPromptDelivery?: AgentTerminalPromptDeliveryState
   terminalOutputChannel?: AgentTerminalOutputChannelState
   semanticStatus?: AgentStatus
+  /** Original-Run native child facts; main status remains independent. */
+  nativeSubagents?: import('./agent-subagent-state.js').AgentNativeSubagents
   /** Live, ordered native main-turn activity. Not a task result or durable recovery proof. */
   currentActivity?: AgentCurrentActivity
+  /** Original durable main observation, without restoring live input qualification. */
+  mainSessionActivity?: AgentCurrentActivity
   pendingInteraction?: AgentMuxPendingInteraction
   nativeHandle?: AgentNativeSessionHandle
   /** Live Core save acknowledgement for this locator; readable post-replacement bytes are unconfirmed. Never stored. */
@@ -1634,7 +1638,7 @@ export type AgentHookDeliveryObservation = {
  * PTY, process, replay, terminal snapshot, terminal output bytes or ephemeral Hook observation. */
 export type AgentMuxNativeCreationKeys = { keys: readonly string[]; coverage: 'complete' | 'partial' }
 
-export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngressObservation' | 'hookDeliveryObservation' | 'nativeHandlePersistence' | 'currentActivity' | 'terminalFrontend'> & {
+export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngressObservation' | 'hookDeliveryObservation' | 'nativeHandlePersistence' | 'currentActivity' | 'mainSessionActivity' | 'terminalFrontend'> & {
   /** Private original adopted machine keys, not Native liveness or a public role catalog. */
   nativeCreationKeys?: AgentMuxNativeCreationKeys
   /** Original creation input frozen before Start; only its key is public. */
@@ -2113,8 +2117,6 @@ export type AgentStatus = {
   currentActivityRevision?: number
   /** Current idle evidence was consumed; the historical completion remains intact. */
   idleEvidenceConsumed?: true
-  /** Proven child activity clock, independent of the main turn/completion clock. */
-  aggregateActivityAt?: number
   state: AgentDisplayState
   source: AgentMuxEvidenceSource
   observedAt: number
@@ -2375,6 +2377,8 @@ export type NativeHookEnvelope = {
 /** Provider-owned ordered activity facts; an observation gap never ends a task. */
 export type AgentNativeActivityEvent = {
   state: 'active' | 'idle' | 'unknown'
+  /** Native main-turn activity, independently of unclassified background work. */
+  mainState?: 'active' | 'idle' | 'unknown'
   /** Exact native turn outcome only; an idle turn does not by itself prove interruption or task completion. */
   interruption?: 'interrupted' | 'not-interrupted'
   nativeSessionId: string
@@ -2423,7 +2427,7 @@ export type NormalizedHookEvent = {
    * 什么。归一化的结果放在 `lifecycleEvent`，两者并存——原始名负责可诊断，canonical 值负责可判断。
    */
   eventName: string
-  /** Direct main-subject contribution; false still permits proven roster-derived parent end. */
+  /** Direct main-subject contribution; a child never synthesizes a parent end. */
   mainSubject: boolean
   currentActivity?: AgentNativeActivityEvent
   /** Provider diagnosis accompanying an ordered unknown activity; never a control predicate. */
@@ -2435,6 +2439,7 @@ export type NormalizedHookEvent = {
   toolInvocation?: AgentHookToolInvocation
   subject?: AgentHookSubject
   childActivity?: boolean
+  subagentSessions?: import('./agent-subagent-state.js').AgentNativeSubagents
   /**
    * 这条事件归一化后的 Core canonical 生命周期事件，**认不出时缺席**。
    *

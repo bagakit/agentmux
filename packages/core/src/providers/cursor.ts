@@ -101,7 +101,7 @@ export const CURSOR_HOOKS: AgentNativeHookSpecification = {
     }
   ],
   subagentTracking: {
-    startEvents: ['subagentStart'], stopEvents: ['subagentStop'], mainStopEvents: ['stop'], idKeys: ['subagent_id']
+    startEvents: ['subagentStart'], stopEvents: ['subagentStop'], idKeys: ['subagent_id']
   },
   nativeHandle: { sessionIdKeys: ['conversation_id'], transcriptPathKeys: ['transcript_path'] }
 }

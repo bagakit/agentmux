@@ -1,3 +1,4 @@
+import { subagentScopeMatches } from './agent-subagent-state.js'
 import { createHash } from 'node:crypto'
 import { AgentMuxError } from './errors.js'
 import { rpcCount, rpcRecord, rpcString } from './rpc-business-codec.js'
@@ -16,6 +17,7 @@ export type AgentDiscoveryFilters = {
 }
 export type AgentDiscoveryActivity = Pick<AgentStatus, 'state' | 'source' | 'observedAt' | 'nativeTurnId'> & {
   run: AgentMuxAgentSession['run']
+  nativeAgentId?: string
 }
 export type AgentDiscoveryObservation = AgentMuxAgentRuntimeStatus & { routeHostId: string; lastActivity: AgentDiscoveryActivity | null }
 export type AgentDiscoveryPage = {
@@ -32,13 +34,18 @@ type Candidate = { key: string; scope: Scope } & ({ session: AgentMuxAgentSessio
 /** A historical typed event, never current work, polling time or metadata edit time. */
 export function agentDiscoveryActivity(session: AgentMuxAgentSession): AgentDiscoveryActivity | null {
   const retained = session.semanticStatus
-  if (!retained || !isAgentActivityStatusSource(retained.source)) return null
   const projected = currentAgentSemanticStatus(retained)
   const activity = projected?.state === 'running' ? retained : projected
-  if (!activity || !['working', 'waiting', 'blocked', 'done', 'error'].includes(activity.state)) return null
-  return { state: activity.state, source: activity.source, observedAt: activity.observedAt, run: { ...session.run },
-    ...(activity.nativeTurnId === undefined || activity !== retained && retained.aggregateActivityAt !== undefined
-      ? {} : { nativeTurnId: activity.nativeTurnId }) }
+  let latest: AgentDiscoveryActivity | null = activity && isAgentActivityStatusSource(activity.source) &&
+    ['working', 'waiting', 'blocked', 'done', 'error'].includes(activity.state)
+    ? { state: activity.state, source: activity.source, observedAt: activity.observedAt, run: { ...session.run },
+        ...(activity.nativeTurnId ? { nativeTurnId: activity.nativeTurnId } : {}) } : null
+  if (subagentScopeMatches(session.nativeSubagents, session)) for (const child of session.nativeSubagents.sessions) {
+    if (child.state === 'unknown' || latest && child.observedAt <= latest.observedAt) continue
+    latest = { state: child.state, source: 'native-hook', observedAt: child.observedAt, run: { ...session.run },
+      nativeAgentId: child.nativeAgentId, ...(child.nativeTurnId ? { nativeTurnId: child.nativeTurnId } : {}) }
+  }
+  return latest
 }
 
 export function parseAgentDiscoveryFilters(value: unknown): AgentDiscoveryFilters {

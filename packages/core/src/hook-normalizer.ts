@@ -56,12 +56,15 @@ export type AgentNativeSubagentTracking = {
   turnIdentity?: (payload: Readonly<Record<string, unknown>>) => {
     nativeTurnId: string; sourceId: string; sequence: number
   } | undefined
-  /** 子代理开始事件（roster 加一）。 */
+  /** Provider-confirmed child state/outcome; absent adapters supply only lifecycle observation. */
+  readState?: (eventName: string, payload: Readonly<Record<string, unknown>>) =>
+    Pick<import('./agent-subagent-state.js').AgentSubagentSession, 'state' | 'outcome' | 'waitingFor'> | undefined
+  /** 子代理开始事件。 */
   startEvents: readonly string[]
-  /** 子代理结束事件（roster 减一）。归零且主 Agent 已请求收尾时，这一步收敛为 `done`。 */
+  /** 子代理结束事件；不产生主轮结果。 */
   stopEvents: readonly string[]
-  /** 主 Agent 的收尾事件——roster 非空时压成 `working`，为空时才放行 rules 给出的 `done`。 */
-  mainStopEvents: readonly string[]
+  /** Update only an already observed, same-turn child; never opens or ends a turn. */
+  stateEvents?: readonly string[]
   /** 唯一原生子主体 ID 键；名称与类型不能充当身份。缺失保持未确认。 */
   idKeys?: readonly string[]
 }
@@ -184,78 +187,7 @@ export type AgentNativeHookSpecification = {
 
 export type { AgentHookEventNameSource }
 
-/**
- * 一个 run 一份子代理花名册。
- *
- * `live` 按 `agent_id` 去重——hook 会重投（agent-hook-command.ts 的 fetch 重试用同一 receiptId），
- * 用 Set 而不是裸计数器，重复的 start/stop 天然幂等。`mainStopPending` 记「主 Agent 已请求收尾但被子
- * 代理压住」——好让最后一个子代理结束时能收敛到 `done`，而不是永远卡在 working。
- *
- * 缺唯一 ID 只保留一个未确认事实，不按名称、类型或事件计数猜人数。子回调不能消除它；
- * 原主 Native 结果或 Runtime 终局释放同一份 roster，未知不伪造成功或永久 working。
- */
-type SubagentRoster = {
-  live: Map<string, { nativeTurnId: string; sourceId: string; sequence: number } | undefined>
-  unidentified: boolean
-  sourceId?: string
-  mainStopPending: boolean
-}
-
-// 进程级、按 `runId` 归档。normalizer 本身是纯函数逐事件调用，子代理在途是**跨事件**的事实（一个孤立
-// 的 Stop 信封看不出还有没有子代理活着），所以状态必须落在这里。runId 由 ctxmux 全局唯一签发、`bindRun`
-// 拒绝任何 runId 变更，故它单独就够区分并发的 run——这与本文件 T-002 给时间轴 item 定 id 的口径一致
-// （`${runId}:…`，不掺 session/provider）。仅 subagentTracking 的 Provider 会写入；归零即删除条目。
-const subagentRosters = new Map<string, SubagentRoster>()
-
-function subagentRosterKey(envelope: NativeHookEnvelope): string {
-  return envelope.runId
-}
-
-/**
- * run 进程终结（exited/interrupted）时清掉它的子代理花名册。
- *
- * 为什么必须有这条路径：子代理被信号/OOM 杀死、或它的 SubagentStop 两次 fetch 都失败时，SubagentStop
- * 永不投递——花名册里那条 id 永不删除，Map 条目随进程泄漏，主 Stop 被压住的 pending 也再无事件兑现。
- * 进程退出是「这个 run 再不会有 hook 事件」的权威终点，在此归零给「子代理事件丢失」一个终结路径。
- * 返回是否确实清掉了一条，供调用方判定是否需要把语义状态收敛。
- */
-export function releaseSubagentRoster(runId: string): boolean {
-  return subagentRosters.delete(runId)
-}
-
-/** Query the existing roster; main idle cannot settle a still-running child. */
-export function agentHasActiveSubagents(runId: string): boolean {
-  const roster = subagentRosters.get(runId)
-  return roster !== undefined && subagentRosterAlive(roster)
-}
-
-/** Missing or conflicting child identity cannot settle current main activity. */
-export function agentSubagentActivityUnconfirmed(runId: string, mainSourceId?: string): boolean {
-  const roster = subagentRosters.get(runId)
-  return roster !== undefined && (roster.unidentified ||
-    mainSourceId !== undefined && roster.sourceId !== undefined && mainSourceId !== roster.sourceId)
-}
-
-function subagentRosterAlive(roster: SubagentRoster): boolean {
-  return roster.live.size > 0 || roster.unidentified
-}
-
-/** Share the existing parent/child aggregate across Hook and exact native main-end facts. */
-export function observeSubagentMainEnd(runId: string, state: AgentSemanticState): AgentSemanticState {
-  const roster = subagentRosters.get(runId)
-  if (state === 'done' && roster && subagentRosterAlive(roster)) {
-    roster.mainStopPending = true
-    return roster.unidentified ? 'unknown' : 'working'
-  }
-  if (roster && subagentRosterAlive(roster)) {
-    // A failed parent cannot promise later success or silently end healthy children.
-    roster.mainStopPending = false
-    return state
-  }
-  subagentRosters.delete(runId)
-  return state
-}
-
+/** Native child state is a pure proposal. Core adopts it with the original receipt CAS. */
 function subagentId(
   tracking: AgentNativeSubagentTracking,
   payload: Record<string, unknown>
@@ -278,65 +210,56 @@ export function nativeHookHasSubagentSubject(
 }
 
 /**
- * Child observations keep their neutral main contribution while updating the existing roster.
- * Only a known child settling a pending successful parent end can contribute a main turn-end.
- * Aggregation may withhold success, but never an authoritative parent end or manual readiness.
+ * Pure child transition for the original Session metadata transaction.
+ * A child event never supplies a main turn outcome or main input readiness.
  */
-function applySubagentTracking(
+export function nextSubagentSessions(
   specification: AgentNativeHookSpecification,
   envelope: NativeHookEnvelope,
-  eventName: string,
-  payload: Record<string, unknown>,
-  observation: { semanticState: AgentSemanticState; lifecycleEvent: AgentHookLifecycleEvent | null | undefined }
-): typeof observation {
+  context: AgentProviderHookNormalizationContext,
+  subject: AgentHookSubject,
+  observedAt: number
+): import('./agent-subagent-state.js').AgentNativeSubagents | undefined {
   const tracking = specification.subagentTracking
-  if (!tracking) return observation
-  const key = subagentRosterKey(envelope)
-  const id = subagentId(tracking, payload)
-  if (observation.lifecycleEvent === 'user-prompt-submit' || observation.lifecycleEvent === 'turn-start') {
-    const roster = subagentRosters.get(key)
-    // New main work invalidates only the previous parent's pending success, not live child facts.
-    if (roster) roster.mainStopPending = false
+  if (!tracking || subject.kind !== 'child' && subject.kind !== 'main') return
+  const payload = envelope.payload ?? {}, eventName = resolveHookEventName(envelope.eventName, payload, specification.eventNameSource) ?? 'unknown'
+  if (!(tracking.matches?.(eventName, payload) ?? true)) return
+  const starts = tracking.startEvents.includes(eventName), ends = tracking.stopEvents.includes(eventName)
+  const changes = tracking.stateEvents?.includes(eventName) === true
+  if (!starts && !ends && !changes) return
+  const native = context.nativeHandle
+  if (native?.kind !== 'provider' || native.providerId !== envelope.providerId) return
+  const retained = context.nativeSubagents
+  const previous = retained?.run.runId === envelope.runId && retained.providerId === envelope.providerId &&
+    retained.nativeSessionId === native.sessionId ? retained : undefined
+  const next: import('./agent-subagent-state.js').AgentNativeSubagents = previous ? { ...structuredClone(previous) } : { run: { runId: envelope.runId }, providerId: envelope.providerId,
+    nativeSessionId: native.sessionId, unconfirmed: false, sessions: [] }
+  const id = subagentId(tracking, payload), identity = tracking.turnIdentity?.(payload)
+  const expectedSource = next.sourceId ?? context.nativeActivitySourceId
+  if (identity && expectedSource !== undefined && identity.sourceId !== expectedSource) {
+    next.sourceId = expectedSource
+    next.unconfirmed = true
+    next.sessions = next.sessions.map(child => child.phase === 'running' ? { ...child, state: 'unknown' } : child)
+    return next
   }
-  const trackedSubject = tracking.matches?.(eventName, payload) ?? true
-  if (trackedSubject && tracking.startEvents.includes(eventName)) {
-    const roster: SubagentRoster = subagentRosters.get(key) ?? { live: new Map(), unidentified: false, mainStopPending: false }
-    const identity = tracking.turnIdentity?.(payload)
-    if (tracking.turnIdentity && !identity) { roster.unidentified = true; subagentRosters.set(key, roster); return observation }
-    const previous = id ? roster.live.get(id) : undefined
-    if (identity && roster.sourceId !== undefined && roster.sourceId !== identity.sourceId) {
-      roster.unidentified = true
-      subagentRosters.set(key, roster)
-      return observation
-    }
-    if (identity) roster.sourceId = identity.sourceId
-    if (previous && identity && identity.sequence <= previous.sequence) return observation
-    if (id) roster.live.set(id, identity)
-    else roster.unidentified = true
-    subagentRosters.set(key, roster)
-    return observation
+  if (!id || tracking.turnIdentity && !identity) {
+    next.unconfirmed = true
+    return next
   }
-  if (trackedSubject && tracking.stopEvents.includes(eventName)) {
-    const roster = subagentRosters.get(key)
-    const identity = tracking.turnIdentity?.(payload), previous = id ? roster?.live.get(id) : undefined
-    if (tracking.turnIdentity && (!identity || !previous || previous.sourceId !== identity.sourceId ||
-        previous.nativeTurnId !== identity.nativeTurnId || identity.sequence <= previous.sequence)) return observation
-    // Orphan, duplicate and unknown child stops carry no parent completion evidence.
-    if (!roster || !id || !roster.live.delete(id)) return observation
-    if (subagentRosterAlive(roster)) return observation
-    const pending = roster.mainStopPending
-    subagentRosters.delete(key)
-    return pending ? { semanticState: 'done', lifecycleEvent: 'turn-end' } : observation
-  }
-  if (tracking.mainStopEvents.includes(eventName) && observation.lifecycleEvent === 'turn-end') {
-    return { ...observation, semanticState: observeSubagentMainEnd(key, observation.semanticState) }
-  }
-
-  // An authoritative non-success main end must not later become a roster's successful completion.
-  if (observation.lifecycleEvent === 'turn-end') observeSubagentMainEnd(key, observation.semanticState)
-  return observation
+  const index = next.sessions.findIndex(item => item.nativeAgentId === id), before = next.sessions[index]
+  if (before?.hookReceiptId === envelope.receiptId) return
+  if (identity && before?.sequence !== undefined && identity.sequence <= before.sequence) return
+  if ((ends || changes) && (!before || before.phase === 'ended' || tracking.turnIdentity && (!identity ||
+      before.sourceId !== identity.sourceId || before.nativeTurnId !== identity.nativeTurnId))) return
+  if (identity) next.sourceId = identity.sourceId
+  const state = tracking.readState?.(eventName, payload)
+  if (tracking.readState && !state) return
+  const item: import('./agent-subagent-state.js').AgentSubagentSession = { nativeAgentId: id, hookReceiptId: envelope.receiptId, observedAt,
+    state: starts ? 'working' : 'unknown', ...state, phase: ends ? 'ended' : 'running', ...identity }
+  if (index >= 0) next.sessions[index] = item
+  else next.sessions.push(item)
+  return next
 }
-
 
 function stringField(payload: Record<string, unknown>, ...names: string[]): string | undefined {
   for (const name of names) {
@@ -701,19 +624,9 @@ export function normalizeNativeHook(
     !specification.subagentTracking?.stopEvents.includes(eventName)
   // Main contributions share the same subject boundary as locator and interaction promotion.
   // Native lifecycle is retained separately for child tool results and trace; it cannot open or
-  // end the main turn. The existing roster can settle only an observed pending parent end.
-  const { semanticState, lifecycleEvent } = nativeSessionMatches
-    ? applySubagentTracking(
-        specification,
-        envelope,
-        eventName,
-        payload,
-        {
-          semanticState: mainSubject ? rule?.state ?? 'unknown' : 'unknown',
-          lifecycleEvent: mainSubject && rule?.lifecycleEvent !== null ? nativeLifecycleEvent : null
-        }
-      )
-    : { semanticState: 'unknown' as const, lifecycleEvent: null }
+  // end the main turn. Child observations never synthesize a parent result.
+  const semanticState = mainSubject ? rule?.state ?? 'unknown' : 'unknown'
+  const lifecycleEvent = mainSubject && rule?.lifecycleEvent !== null ? nativeLifecycleEvent : null
   const observedAt = Date.now()
   const nativeTurnId = mainSubject
     ? specification.nativeTurnIdKeys?.map(key => payload[key]).find((value): value is string => typeof value === 'string' && value.trim().length > 0)
@@ -762,6 +675,7 @@ export function normalizeNativeHook(
     // This optional observation cannot consume the original activity/receipt on failure.
     continuityObservationFailure = { code: 'AGENT_CONTINUITY_HOOK_UNCONFIRMED', message: `Native recovery observation failed. ${error instanceof Error ? error.message : String(error)}` }
   }
+  const subagentSessions = nextSubagentSessions(specification, { ...envelope, eventName }, context, subject, observedAt)
   return {
     agentSessionId: envelope.agentSessionId,
     run: {
@@ -791,6 +705,7 @@ export function normalizeNativeHook(
         ? { toolInvocation: { nativeSessionId: toolSubject.nativeSessionId, nativeToolCallId, toolName, toolInput } } : {}
     })(),
     semanticState,
+    ...(subagentSessions ? { subagentSessions } : {}),
     status,
     timeline: buildTimeline(specification, envelope, eventName, nativeLifecycleEvent, payload, tool, observedAt, toolSubject, childSpeaker),
     ...(handle ? { nativeHandle: handle } : {}),

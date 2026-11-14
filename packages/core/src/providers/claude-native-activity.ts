@@ -14,6 +14,8 @@ import type { AgentHookObservationFailure, AgentNativeActivityEvent } from '../t
  * observations, and shown as a delivery gap until Core confirms it.
  */
 export const CLAUDE_ASKED_TOOL_END_EVENT = 'AgentMuxAskedToolEnded'
+/** A native child call's scoped permission/question wait, never a main-session request. */
+export const CLAUDE_CHILD_ACTIVITY_EVENT = 'AgentMuxChildActivity'
 
 /** The managed module asks Core at each genuinely answered main turn end whether a notice is waiting. */
 export const CLAUDE_TURN_END_EVENT = 'AgentMuxTurnEnd'
@@ -62,6 +64,13 @@ export function claudeNativeObservationFailure(
   eventName: string,
   payload: Readonly<Record<string, unknown>>
 ): AgentHookObservationFailure | undefined {
+  if (eventName === 'AgentMuxActivityUnavailable' && ['delivery-gap', 'source-changed'].includes(String(payload.reason)) &&
+      payload.agent_id === undefined && payload.agentId === undefined) {
+    const source = observationIdentity(payload)
+    if (source) return { code: 'AGENT_NATIVE_ACTIVITY_UNAVAILABLE',
+      source: { sourceId: source.sourceId, sequence: source.sequence },
+      message: 'The original native observer lost source continuity. Its main and same-source child activity are unconfirmed; original identities, observations and input remain available.' }
+  }
   if (eventName !== 'AgentMuxActivityUnavailable' || payload.reason !== 'source-identity-unavailable' ||
       payload.session_id !== undefined || payload.agent_id !== undefined || payload.agentId !== undefined ||
       typeof payload.sourceId !== 'string' || !payload.sourceId.trim() ||
@@ -91,6 +100,7 @@ export function claudeNativeActivity(
   const state = eventName === 'turn.start' ? 'active' :
     payload.reason === 'answer' && payload.backgroundWork === 'none' ? 'idle' : 'unknown'
   return { ...base, nativeTurnId: payload.turnId, state,
+    mainState: eventName === 'turn.start' ? 'active' : 'idle',
     ...(state === 'idle' ? { interruption: payload.isAborted ? 'interrupted' as const : 'not-interrupted' as const } : {}) }
 }
 
@@ -98,8 +108,8 @@ export function claudeNativeActivity(
 /**
  * Claude mods run without Node globals. The public process API launches the existing passive Hook
  * runner, which owns authenticated delivery, its bounded retries, and the original receipt ID.
- * Callbacks never wait for ingress and return the native middleware result unchanged. The one
- * payload addition is the asked call's own tool_use_id on Claude's classic ask, which omits it.
+ * Callbacks never wait for ingress and return the native middleware result unchanged. Main asks
+ * gain their original tool_use_id; child call scopes report permission/question waits separately.
  */
 export function claudeNativeActivitySource(): string {
   return `// AgentMux managed native activity observer. Generated; makes no answer or approval decision, and queues
@@ -116,6 +126,7 @@ let overflowReported = false
 let delivery = Promise.resolve()
 let mainTurn
 const ASKED_END = ${JSON.stringify(CLAUDE_ASKED_TOOL_END_EVENT)}
+const CHILD_ACTIVITY = ${JSON.stringify(CLAUDE_CHILD_ACTIVITY_EVENT)}
 
 // The launching Core names its own runner in the Run environment, so these files carry no install path.
 // --launch-scoped marks a call this launch declared; the runner ignores unmarked leftovers in such a Run.
@@ -177,6 +188,7 @@ async function deliver($, eventName, event, sourceSequence) {
       ...(unavailable ? { reason: identityUnavailable ? 'source-identity-unavailable' : sourceChanged ? 'source-changed' : 'delivery-gap' } : {
         turnId: event.turnId,
         ...(event.agentId === undefined ? {} : { agent_id: event.agentId }),
+        ...(eventName === CHILD_ACTIVITY ? { state: event.state, reason: event.reason, tool_use_id: event.toolUseId } : {}),
         ...(eventName === 'turn.complete' ? { reason: event.reason, isAborted: event.isAborted,
           ...(event.agentId === undefined ? { backgroundWork: event.backgroundWork } : {}) } : {})
       })
@@ -194,6 +206,27 @@ async function deliver($, eventName, event, sourceSequence) {
 // Each entry: { tool, input, identified, end }; identified once its classic ask carries the id, end
 // the reserved position of its exact end. An entry stays until Core confirms that end.
 const askedCalls = new Map()
+
+// Native observer scopes, not a second activity Store. A tool callback retains the exact
+// turn object it entered, so a resumed child cannot inherit a late permission or finally.
+const childTurns = new Map()
+const childCalls = new Map()
+
+function childCall(event) {
+  const call = typeof event?.tool_use_id === 'string' ? childCalls.get(event?.agentId)?.get(event.tool_use_id) : undefined
+  return call && call.agentId === event?.agentId && call.tool === event?.tool ? call : undefined
+}
+
+function childActivity($, scope, trigger) {
+  if (!initialSessionId || sourceChanged || childTurns.get(scope.agentId) !== scope) return
+  const pending = [...(childCalls.get(scope.agentId)?.values() || [])].filter(call => call.scope === scope)
+  const waiting = pending.find(call => call.waitingReason)
+  const uncertain = pending.find(call => call.permissionObserved)
+  const evidence = waiting || uncertain || trigger
+  observe($, CHILD_ACTIVITY, { agentId: scope.agentId, turnId: scope.turnId, toolUseId: evidence.id,
+    state: waiting ? 'waiting' : uncertain ? 'unknown' : 'working',
+    reason: waiting?.waitingReason || trigger.waitingReason || 'permission' })
+}
 
 // A stable rendering of tool arguments, independent of property insertion order.
 function canonical(value) {
@@ -274,6 +307,8 @@ export function register(on) {
   on('turn.start', ($, event, next) => {
     if (event?.agentId === undefined && typeof event?.turnId === 'string' && event.turnId.trim()) {
       mainTurn = { turnId: event.turnId, backgroundWork: 'unknown' }
+    } else if (typeof event?.agentId === 'string' && event.agentId.trim() && typeof event?.turnId === 'string' && event.turnId.trim()) {
+      childTurns.set(event.agentId, { agentId: event.agentId, turnId: event.turnId })
     }
     observe($, 'turn.start', event)
     return next(event)
@@ -297,7 +332,12 @@ export function register(on) {
       const backgroundWork = event?.reason === 'answer' && mainTurn?.turnId === event?.turnId ? mainTurn.backgroundWork : 'unknown'
       if (mainTurn?.turnId === event?.turnId) mainTurn = undefined
       observe($, 'turn.complete', { ...event, backgroundWork })
-    } else observe($, 'turn.complete', event)
+    } else {
+      observe($, 'turn.complete', event)
+      const scope = childTurns.get(event?.agentId)
+      if (scope?.turnId === event?.turnId && typeof event.isAborted === 'boolean' &&
+          ['answer', 'aborted', 'refusal', 'error'].includes(event.reason) && (event.reason === 'aborted') === event.isAborted) childTurns.delete(event.agentId)
+    }
     // Only an answered main turn of the original session asks; the queue runs a notice as its own next turn.
     if (event?.agentId === undefined && event?.reason === 'answer' && typeof event?.turnId === 'string' && initialSessionId && !sourceChanged) {
       void askTurnEndNotice($, event.turnId)
@@ -307,7 +347,14 @@ export function register(on) {
   // Classic Hooks report no end for a declined asked call. Only calls this session asked about
   // send one exact end, after the native call settles; other tools add no work.
   on('tool.check', async ($, event, next) => {
+    const child = childCall(event)
     const result = await next(event)
+    // An ask is only a policy candidate: the mode may still settle it without a person.
+    // Only its actual classic PermissionRequest below publishes a permission wait.
+    if (child && childCalls.get(child.agentId)?.get(child.id) === child && result?.decision === 'ask') {
+      child.input = canonical(event.input)
+      child.asked = true
+    }
     // A child Agent's call belongs to its own subject; only main-session asks are reported.
     if (initialSessionId && !sourceChanged && event?.agentId === undefined && result?.decision === 'ask' &&
         typeof event?.tool_use_id === 'string' && event.tool_use_id.trim() && typeof event?.tool === 'string') {
@@ -319,6 +366,31 @@ export function register(on) {
   // Attach the one exact main call this ask belongs to. Each recorded ask is used once; two
   // equal candidates stay unidentified. Nothing else in the payload changes.
   on('classic.PermissionRequest', ($, event, next) => {
+    if (typeof event?.agent_id === 'string') {
+      if (!initialSessionId || sourceChanged || event.session_id !== initialSessionId) return next(event)
+      const input = canonical(event.tool_input)
+      const matches = [...(childCalls.get(event.agent_id)?.values() || [])].filter(call => call.asked &&
+        !call.permissionIdentified && call.tool === event.tool_name && call.input === input)
+      // Include still-open old scopes in the uniqueness check. Their late callbacks
+      // cannot borrow a new turn just because a resumed child kept its native id.
+      if (matches.length === 1) {
+        const call = matches[0]
+        call.permissionIdentified = true
+        if (childTurns.get(call.agentId) === call.scope) {
+          // This version has no permission-resolved execution event. Keep the
+          // original request cause, without claiming it still awaits a person.
+          call.permissionObserved = true
+          childActivity($, call.scope, call)
+        }
+      } else if (matches.length > 1) {
+        const current = matches.filter(call => childTurns.get(call.agentId) === call.scope)
+        if (current.length > 1) {
+          for (const call of current) call.permissionObserved = true
+          childActivity($, current[0].scope, current[0])
+        }
+      }
+      return next(event)
+    }
     if (sourceChanged || event?.agent_id !== undefined || event?.tool_use_id !== undefined) return next(event)
     const input = canonical(event?.tool_input)
     const matches = [...askedCalls].filter(([, call]) => !call.identified && call.end === undefined && call.tool === event?.tool_name && call.input === input)
@@ -328,8 +400,24 @@ export function register(on) {
   }).catch(($, event, next) => next(event))
   on('tool.call', async ($, event, next) => {
     const id = event?.tool_use_id
+    const scope = typeof event?.agentId === 'string' ? childTurns.get(event.agentId) : undefined
+    const calls = scope ? childCalls.get(scope.agentId) || new Map() : undefined
+    const child = scope && typeof id === 'string' && id.trim() && typeof event.tool === 'string' && !calls.has(id)
+      ? { id, agentId: event.agentId, tool: event.tool, scope } : undefined
+    if (child) {
+      childCalls.set(child.agentId, calls); calls.set(id, child)
+      if (event.tool === 'AskUserQuestion') {
+        child.waitingReason = 'question'
+        childActivity($, scope, child)
+      }
+    }
     try { return await next(event) }
     finally {
+      if (child && childCalls.get(child.agentId)?.get(id) === child) {
+        calls.delete(id)
+        if (calls.size === 0) childCalls.delete(child.agentId)
+        if (child.waitingReason || child.permissionObserved) childActivity($, scope, child)
+      }
       // tool.check (and the ask it records) runs inside next, after tool.call begins.
       const call = event?.agentId === undefined && typeof id === 'string' ? askedCalls.get(id) : undefined
       // Each asked call ends once; the native result is never inspected or altered.

@@ -112,7 +112,6 @@ export const GROK_HOOKS: AgentNativeHookSpecification = {
   subagentTracking: {
     startEvents: ['subagent_start'],
     stopEvents: [],
-    mainStopEvents: ['stop_failure', 'stop_cancelled'],
     idKeys: ['sessionId']
   },
   // grok 的负载键一律 camelCase：`sessionId`，不是 Claude 的 `session_id`。它不报 transcript 路径，

@@ -151,7 +151,6 @@ export const CODEX_HOOKS: AgentNativeHookSpecification = {
   subagentTracking: {
     startEvents: ['SubagentStart'],
     stopEvents: [],
-    mainStopEvents: [],
     idKeys: ['agent_id', 'agentId']
   },
   nativeHandle: {

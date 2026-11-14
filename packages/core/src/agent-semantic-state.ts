@@ -21,8 +21,8 @@ export function invalidateAgentIdleEvidence(
   current: AgentMuxStoredAgentSession
 ): AgentMuxStoredAgentSession {
   const status = current.semanticStatus
-  if (status?.state !== 'done' || (status.idleEvidenceConsumed && status.aggregateActivityAt === undefined)) return current
-  const { stateEnteredAt: _consumedEntryTime, aggregateActivityAt: _consumedChildActivity, ...semanticStatus } = status
+  if (status?.state !== 'done' || status.idleEvidenceConsumed) return current
+  const { stateEnteredAt: _consumedEntryTime, ...semanticStatus } = status
   return { ...current, semanticStatus: { ...semanticStatus, idleEvidenceConsumed: true,
     currentActivityRevision: (status.currentActivityRevision ?? 0) + 1 } }
 }

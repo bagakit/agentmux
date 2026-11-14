@@ -105,9 +105,11 @@ export type AgentWorkspaceTrustReceipt = {
 }
 
 export type AgentProviderHookNormalizationContext = Readonly<{
-  nativeHandle?: Readonly<AgentNativeSessionHandle>
+  nativeHandle?: Readonly<AgentNativeSessionHandle> | undefined
   /** Only the existing durable receipt of this exact Core Run. */
   previousHookReceipt?: Readonly<AgentHookReceipt>
+  nativeActivitySourceId?: string | undefined
+  nativeSubagents?: Readonly<import('./agent-subagent-state.js').AgentNativeSubagents> | undefined
   /** This Run was started for an exact semantic resume target; Hook observations cannot redirect it. */
   protectedNativeTarget?: boolean
   processNativeHandle?: Readonly<AgentNativeSessionHandle>

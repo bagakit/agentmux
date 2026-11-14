@@ -130,7 +130,6 @@ export const COPILOT_HOOKS: AgentNativeHookSpecification = {
   subagentTracking: {
     startEvents: ['subagentStart'],
     stopEvents: [],
-    mainStopEvents: [],
     idKeys: ['agentId']
   },
   // 负载键是 camelCase `sessionId`/`transcriptPath`（实测）。**不**声明 requireTranscriptPath：

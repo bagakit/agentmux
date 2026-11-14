@@ -215,6 +215,9 @@ export type AgentObservation = {
    *   叫用户去等一个永远不来的信号是错的。
    */
   semantic: 'active' | 'idle' | 'awaiting-input' | 'unknown' | 'unsupported'
+  /** Main-native activity and child observations remain independently addressable. */
+  mainSession?: { semantic: 'active' | 'idle' | 'awaiting-input' | 'unknown' | 'unsupported'; source: AgentMuxEvidenceSource; observedAt: number; nativeTurnId?: string }
+  subagentSessions?: import('./agent-subagent-state.js').AgentNativeSubagents
   /**
    * 就绪性：Agent 现在能不能接你的一条普通输入。
    *
@@ -268,10 +271,12 @@ export function agentActivityRemainingMs(observation: Pick<AgentObservation, 'se
 export function observeAgent(
   input: {
     process: AgentMuxRunState
-    status: Pick<AgentStatus, 'state' | 'source' | 'observedAt'>
+    status: Pick<AgentStatus, 'state' | 'source' | 'observedAt' | 'nativeTurnId'>
     /** Original native fact, retained when a client has decayed its display status. */
     retainedStatus?: AgentStatus | undefined
     currentActivity?: AgentCurrentActivity | undefined
+    mainSessionActivity?: AgentCurrentActivity | undefined
+    subagentSessions?: import('./agent-subagent-state.js').AgentNativeSubagents
     timelineCapability: AgentCapabilities['timeline']
     awaitingRequest: boolean
     terminalCapabilityUnverified: boolean
@@ -281,10 +286,13 @@ export function observeAgent(
   const running = input.process === 'running'
   const state = input.status.state
   const declared = isAgentActivityStatusSource(input.status.source)
-  const currentActivity = input.currentActivity
+  const durable = input.mainSessionActivity
+  const semanticSupersedes = durable && input.status.observedAt >= durable.observedAt &&
+    ['done', 'error', 'waiting', 'blocked'].includes(input.status.state)
+  const currentActivity = input.currentActivity ?? (semanticSupersedes ? undefined : durable)
   const currentFresh = currentActivity?.state === 'unknown' || currentActivity?.state === 'idle' || currentActivity?.state === 'active' &&
     !agentEvidenceStale({ observedAt: currentActivity.observedAt }, now)
-  const semantic: AgentObservation['semantic'] = input.timelineCapability === 'unavailable'
+  const mainSemantic: AgentObservation['semantic'] = input.timelineCapability === 'unavailable'
     ? 'unsupported'
     : !running
       ? 'unknown'
@@ -308,6 +316,19 @@ export function observeAgent(
           : semanticStatusCanDecay(state) && !agentEvidenceStale(input.status, now)
             ? 'active'
             : state === 'done' || state === 'error' ? 'idle' : 'unknown'
+  const mainEvidence = !input.awaitingRequest && currentActivity && currentFresh ? currentActivity : undefined
+  const childSessions = input.subagentSessions
+  const childWorking = running && childSessions?.sessions.some(child => child.phase === 'running' &&
+    child.state === 'working' && !agentEvidenceStale(child, now)) === true
+  const childWaiting = running && childSessions?.sessions.some(child => child.phase === 'running' && child.state === 'waiting') === true
+  const childUnknown = running && (childSessions?.unconfirmed || childSessions?.sessions.some(child =>
+    child.phase === 'running' && (child.state === 'unknown' || child.state === 'working' && agentEvidenceStale(child, now))))
+  const semantic: AgentObservation['semantic'] = !running || mainSemantic === 'unsupported' ? mainSemantic
+    : childWorking ? 'active' : mainSemantic === 'awaiting-input' ? 'awaiting-input'
+    : mainSemantic === 'active' ? 'active' : childWaiting ? 'awaiting-input'
+    : childUnknown ? 'unknown' : mainSemantic
+  const childEvidence = childWorking ? childSessions?.sessions.reduce<import('./agent-subagent-state.js').AgentSubagentSession | undefined>((latest, child) =>
+    child.phase === 'running' && child.state === 'working' && (!latest || child.observedAt > latest.observedAt) ? child : latest, undefined) : undefined
   const readiness: AgentObservation['readiness'] = !running
     ? 'unknown'
     : input.awaitingRequest || input.terminalCapabilityUnverified
@@ -322,13 +343,18 @@ export function observeAgent(
   const lastKnownActivity = reason && isAgentActivityStatusSource(retained.source)
     && (retained.state === 'working' || retained.state === 'waiting' || retained.state === 'blocked' || retained.state === 'done' || retained.state === 'error')
     ? { state: retained.state, source: retained.source, observedAt: retained.observedAt } : undefined
+  const mainTurnId = mainEvidence?.nativeTurnId ?? input.status.nativeTurnId
   return {
     process: input.process,
     semantic,
+    mainSession: { semantic: mainEvidence?.mainState ?? mainSemantic,
+      source: mainEvidence?.source ?? input.status.source, observedAt: mainEvidence?.observedAt ?? input.status.observedAt,
+      ...(mainTurnId ? { nativeTurnId: mainTurnId } : {}) },
+    ...(childSessions ? { subagentSessions: structuredClone(childSessions) } : {}),
     readiness,
-    source: currentActivity && currentFresh ? currentActivity.source : input.status.source,
-    observedAt: currentActivity && currentFresh ? currentActivity.observedAt : input.status.observedAt,
-    stale: currentActivity && currentFresh ? false : agentEvidenceStale(input.status, now),
+    source: childEvidence ? 'native-hook' : mainEvidence?.source ?? input.status.source,
+    observedAt: childEvidence?.observedAt ?? mainEvidence?.observedAt ?? input.status.observedAt,
+    stale: childEvidence || mainEvidence ? false : agentEvidenceStale(input.status, now),
     ...(reason ? { reason } : {}),
     ...(lastKnownActivity ? { lastKnownActivity } : {})
   }
@@ -337,9 +363,6 @@ export function observeAgent(
 /** Project current activity without rewriting the retained main completion identity. */
 export function currentAgentSemanticStatus(status: AgentStatus | undefined): AgentStatus | undefined {
   if (!status) return undefined
-  if (!status.failure && status.aggregateActivityAt !== undefined && status.aggregateActivityAt >= status.observedAt) {
-    return { ...status, state: 'working', observedAt: status.aggregateActivityAt }
-  }
   if (status.state === 'done' && status.idleEvidenceConsumed) {
     return { ...status, state: 'running', detail: 'Prior completion consumed; waiting for a new native activity observation.' }
   }

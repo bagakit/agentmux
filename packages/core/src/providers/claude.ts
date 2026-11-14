@@ -9,6 +9,7 @@ import { prepareClaudeNativeInput } from './claude-native-input.js'
 import { prepareClaudeOwnedWorkspaceTrust } from './claude-workspace-trust.js'
 import {
   CLAUDE_ASKED_TOOL_END_EVENT,
+  CLAUDE_CHILD_ACTIVITY_EVENT,
   claudeNativeActivity,
   claudePlugin,
   CLAUDE_TURN_END_DECISION,
@@ -149,10 +150,25 @@ export const CLAUDE_HOOKS: AgentNativeHookSpecification = {
   subagentTracking: {
     startEvents: ['turn.start'],
     stopEvents: ['turn.complete'],
+    stateEvents: [CLAUDE_CHILD_ACTIVITY_EVENT],
     // Child IDs survive resume. Only this exact native turn can settle the existing roster entry.
     matches: (_eventName, payload) => typeof payload.agent_id === 'string' && payload.agent_id.length > 0,
     turnIdentity: claudeNativeTurnIdentity,
-    mainStopEvents: ['StopFailure'],
+    readState: (event, payload) => {
+      if (!claudeNativeTurnIdentity(payload)) return
+      if (event === 'turn.start') return { state: 'working' }
+      if (event === CLAUDE_CHILD_ACTIVITY_EVENT) {
+        if (typeof payload.tool_use_id !== 'string' || !payload.tool_use_id.trim() ||
+            !['working', 'waiting', 'unknown'].includes(String(payload.state)) || !['permission', 'question'].includes(String(payload.reason))) return
+        const state = payload.state as 'working' | 'waiting' | 'unknown'
+        return { state, ...(state === 'working' ? {} : { waitingFor: payload.reason as 'permission' | 'question' }) }
+      }
+      if (event !== 'turn.complete' || typeof payload.isAborted !== 'boolean' ||
+          !['answer', 'aborted', 'refusal', 'error'].includes(String(payload.reason)) ||
+          (payload.reason === 'aborted') !== payload.isAborted) return
+      return payload.reason === 'answer' ? { state: 'done', outcome: 'completed' } : payload.reason === 'error'
+        ? { state: 'error', outcome: 'failed' } : { state: 'unknown', outcome: payload.reason === 'aborted' ? 'interrupted' : 'refused' }
+    },
     idKeys: ['agent_id', 'agentId']
   },
   nativeHandle: {
