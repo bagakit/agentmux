@@ -14,11 +14,7 @@ import { useAppStore } from '../store'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { formatRelativeAge } from '../lib/relative-age'
 import type { FocusLaneOrigin } from '../lib/focus-lane-origin'
-import type { AgentFocusHistoryEntry } from '../lib/agent-focus'
-import type { FocusLaneMetrics } from '../lib/focus-lane-layout'
-import type { FocusReplyLines } from '../../../shared/focus-preferences'
-import { FocusLaneGroups } from './FocusLaneGroups'
-import { ResolvedAgentAvatar } from './AgentAvatar'
+import { FocusSavedTaskRow } from './FocusSavedTaskRow'
 import { focusCollectionTopicCount, focusScanPreferenceKey, focusScanProjectKey, type FocusScanLane } from '../lib/focus-collection-lanes'
 import { categorySpaceIconTarget, type SpaceIconOverrides, type SpaceIconTarget } from '../lib/space-object-appearance'
 import { useWorkbenchDocument } from '../lib/workbench-document'
@@ -39,7 +35,6 @@ const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosu
 const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
 const CollectionIcon = semanticIconComponent('object.folder')
 const ThemeObjectHistoryIcon = semanticIconComponent('object.history')
-const UNMEASURED_CARDS: FocusLaneMetrics = { width: 0, padding: 4, gap: 2, cardGap: 2 }
 const EMPTY_PROJECT_HISTORY: readonly FocusRetainedProject[] = []
 type ProjectChange = { kind: 'move'; key: string; target: string; after: boolean } | { kind: 'visibility'; key: string; collapsed: boolean }
 function applyProjectChange(original: readonly FocusProjectPreference[], change: ProjectChange) {
@@ -69,7 +64,7 @@ function FocusCollectionHeadingIcon({ lane, icons, resourceMenus }: { lane: Focu
 }
 
 
-export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, revealRequestId, onSelect, renderLane, rowsRef, boardHistory = EMPTY_PROJECT_HISTORY, revealHistory = false, onRead, visible = true, origins, leading, cardMetrics = UNMEASURED_CARDS, replyLines = 2, resourceMenus = false, quietLanes, protectedLanes, forceExpanded = false, revealedLaneIds, renderDiscussion }: {
+export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, revealRequestId, onSelect, renderLane, rowsRef, boardHistory = EMPTY_PROJECT_HISTORY, revealHistory = false, onRead, visible = true, origins, leading, resourceMenus = false, quietLanes, protectedLanes, forceExpanded = false, revealedLaneIds, renderDiscussion }: {
   quietLanes?: ReadonlySet<string>; protectedLanes?: ReadonlySet<string>; forceExpanded?: boolean; revealedLaneIds?: ReadonlySet<string>
   /** Only a real resource consumer opts in; Settings examples remain static. */
   resourceMenus?: boolean
@@ -85,7 +80,6 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
   boardHistory?: readonly FocusRetainedProject[]
   revealHistory?: boolean
   onRead?(at: number): void
-  cardMetrics?: FocusLaneMetrics; replyLines?: FocusReplyLines
 }) {
   const displayPath = usePathDisplay()
   const icons = useAppStore(state => state.spaceObjectIcons)
@@ -289,11 +283,11 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
         , compact)}</div>
       </FocusLaneArticle>})}
           {history ? <FocusProjectObservation key="history" project={history} projectName={name} revealHistory={revealHistory}
-            onRead={onRead} cardMetrics={cardMetrics} replyLines={replyLines} /> : null}
+            onRead={onRead} /> : null}
         </div>
       }), ...boardHistory.filter(project => !projects.has(project.key)).map(project =>
         <div className="focus-project-lanes__row" data-project-id={project.projectId} data-project-key={project.key} data-observed-project="true" key={project.key}>
-          <FocusProjectObservation key="history" project={project} recent onRead={onRead} cardMetrics={cardMetrics} replyLines={replyLines} />
+          <FocusProjectObservation key="history" project={project} recent onRead={onRead} />
         </div>)]}
     </div>
     {!leading && lanes.length === 0 && boardHistory.length === 0 ? <p className="focus-project-lanes__empty">No matching contexts</p> : null}
@@ -334,11 +328,11 @@ function FocusProjectActivity({ at, now }: { at: number | null; now: number }) {
   </span>
 }
 
-const FocusProjectObservation = memo(function FocusProjectObservation({ project, projectName, recent = false, onRead, cardMetrics, replyLines, showCards = true, revealHistory = false }: {
+const FocusProjectObservation = memo(function FocusProjectObservation({ project, projectName, recent = false, onRead, showCards = true, revealHistory = false }: {
   project: FocusRetainedProject; recent?: boolean; onRead: ((at: number) => void) | undefined
   projectName?: string
   revealHistory?: boolean
-  cardMetrics: FocusLaneMetrics; replyLines: FocusReplyLines; showCards?: boolean
+  showCards?: boolean
 }) {
   const withinProject = projectName !== undefined
   const [expanded, setExpanded] = useState(!withinProject)
@@ -374,51 +368,20 @@ const FocusProjectObservation = memo(function FocusProjectObservation({ project,
     </>}</span>
     <span className="focus-retained-projects__date">{activity ? 'Last active' : 'Last focused'} {at === null ? '· Time unknown' : <time dateTime={new Date(at).toISOString()}>{time.dateClock(at)}</time>}</span>
     </button> : null}
-    {showHistory ? <FocusLaneGroups counts={[0, 0, 0, project.observations.length]} metrics={cardMetrics} replyLines={replyLines}>{layout =>
-      <section className="focus-context-group" aria-label={`Saved tasks in ${projectName ?? project.name}`} style={{ '--focus-card-columns': layout.columns[3], '--focus-group-width': `${layout.widths[3]}px` } as CSSProperties}>
+    {showHistory ? <section aria-label={`Saved tasks in ${projectName ?? project.name}`}>
         {!withinProject ? <header className="focus-context-group__header" title={status}><strong>Saved</strong><span className="focus-context-group__count">{project.observations.length}</span></header> : null}
-        <div className="focus-context-group__cards" role="list">{project.observations.map(entry =>
-          <FocusSavedTaskCard key={JSON.stringify([entry.identity!.hostId, entry.sessionId])} entry={entry} time={time} displayPath={displayPath} onRead={onRead} />
+        <div className="focus-saved-tasks" role="list">{project.observations.map(entry =>
+          <FocusSavedTaskRow key={JSON.stringify([entry.identity!.hostId, entry.sessionId])} entry={entry} time={time} displayPath={displayPath} onRead={onRead} />
         )}</div>
-      </section>
-    }</FocusLaneGroups> : null}
+    </section> : null}
     </div>
-  </div>
-})
-
-/** Original observations use the shared card geometry without subscribing to
- * current Agent state, mounting previews or inventing a control reference. */
-const FocusSavedTaskCard = memo(function FocusSavedTaskCard({ entry, time, displayPath, onRead }: {
-  entry: AgentFocusHistoryEntry; time: ReturnType<typeof createFocusTimeFormatters>
-  displayPath: ReturnType<typeof usePathDisplay>; onRead: ((at: number) => void) | undefined
-}) {
-  const identity = entry.identity!
-  const name = identity.name || entry.sessionId
-  const dated = Number.isSafeInteger(entry.focusedAt) && entry.focusedAt > 0 && entry.focusedAt <= Date.now()
-  const location = [identity.branch, identity.topicId].filter(Boolean).join(' / ')
-  const Element = dated && onRead ? 'button' : 'div'
-  return <div className="focus-context-card" role="listitem" data-saved-focus-session={entry.sessionId} data-saved-focus-host={identity.hostId}>
-    <Element className="focus-context focus-context--card" type={Element === 'button' ? 'button' : undefined}
-      aria-label={Element === 'button' ? `View ${name} saved focus history` : undefined}
-      title={[name, `Saved observation · ${entry.sessionId}`, identity.hostId, displayPath(identity.workspacePath, identity.hostId), location, dated ? time.detailed(entry.focusedAt) : 'Focus time not recorded'].filter(Boolean).join('\n')}
-      onPointerDown={event => { if (event.button === 0 && Element === 'button') event.preventDefault() }}
-      onClick={Element === 'button' ? () => onRead?.(entry.focusedAt) : undefined}>
-      <span className="focus-context__copy">
-        <span className="focus-context__identity"><span className="focus-context__avatar" aria-hidden="true">
-          {identity.providerId ? <ResolvedAgentAvatar label={name} providerId={identity.providerId} size={18} /> : <ThemeObjectHistoryIcon size={16} />}
-        </span><strong>{name}</strong></span>
-        {location ? <span className="focus-context__detail">{location}</span> : null}
-        {dated ? <span className="focus-retained-projects__date">Last focused <time dateTime={new Date(entry.focusedAt).toISOString()}>{time.dateClock(entry.focusedAt)}</time></span> : null}
-      </span>
-    </Element>
   </div>
 })
 
 /** A lightweight view of the original focus observations, not another lane or
  * Session directory. Unknown spatial/control facts remain absent. */
-export function FocusRetainedProjects({ projects, total, onRead, cardMetrics = UNMEASURED_CARDS, replyLines = 2 }: {
+export function FocusRetainedProjects({ projects, total, onRead }: {
   projects: readonly FocusRetainedProject[]; total: number; onRead(at: number): void
-  cardMetrics?: FocusLaneMetrics; replyLines?: FocusReplyLines
 }) {
   const [expanded, setExpanded] = useState(false)
   if (!total) return null
@@ -428,7 +391,7 @@ export function FocusRetainedProjects({ projects, total, onRead, cardMetrics = U
       <span className="focus-retained-projects__count">{projects.length === total ? total : `${projects.length} of ${total}`}</span>
     </button>
     <div className="focus-retained-projects__rows" hidden={!expanded}>
-      {projects.map(project => <FocusProjectObservation key={project.key} project={project} onRead={onRead} cardMetrics={cardMetrics} replyLines={replyLines} showCards={expanded} />)}
+      {projects.map(project => <FocusProjectObservation key={project.key} project={project} onRead={onRead} showCards={expanded} />)}
       {projects.length === 0 ? <p className="focus-project-lanes__empty">No matching historical projects</p> : null}
     </div>
   </section>

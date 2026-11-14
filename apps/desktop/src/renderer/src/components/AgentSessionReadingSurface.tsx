@@ -6,12 +6,12 @@ import { ActivityView } from './ActivityView'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 /** Explicit reading host; the original conversation reader owns its data. */
-function AgentSessionActionSurface({ title, description, returnTrigger, onClose, children }: {
-  title: string; description: string; returnTrigger?: HTMLElement | null | undefined; onClose(): void; children: ReactNode
+export function AgentSessionActionSurface({ title, description, returnTrigger, onClose, children, compact = false }: {
+  title: string; description: string; returnTrigger?: HTMLElement | null | undefined; onClose(): void; children: ReactNode; compact?: boolean
 }) {
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}>
     <DocumentOverlayPortal component={Dialog.Portal}><Dialog.Overlay className="dialog-scrim" />
-      <Dialog.Content className="dialog-surface agent-session-action-surface" onCloseAutoFocus={event => {
+      <Dialog.Content className="dialog-surface agent-session-action-surface" data-compact={compact || undefined} onCloseAutoFocus={event => {
         event.preventDefault()
         const focused = document.activeElement
         if (returnTrigger?.isConnected && (focused === document.body || focused instanceof HTMLElement && focused.closest('.agent-session-action-surface'))) returnTrigger.focus({ preventScroll: true })

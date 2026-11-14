@@ -46,6 +46,9 @@ export type TakeoverSource = TakeoverSourceDetails & (
 )
 
 export function takeoverOperationSubject(source: TakeoverSource) {
+  if (source.kind === 'saved' && !source.origin.regionId) {
+    return { hostId: source.hostId!, agentSessionId: source.agentSessionId, regionId: undefined }
+  }
   const state = useAppStore.getState()
   const snapshot = state.sessions.find(item => item.id === (source.kind === 'session' ? source.presentationSessionId : source.agentSessionId))
   const graph = currentCoreSpatialGraph()
@@ -256,16 +259,20 @@ export async function inspectTakeoverOperation(source: TakeoverSource, requestId
 
 /** Renderer navigation consumes a confirmed result, including later inspection. */
 export function focusTakeoverResult(source: TakeoverSource, report: AgentMuxSpaceMutationReport): void {
-  if (!['opened', 'partial'].includes(report.outcome) || !report.to || !report.agent || !ownsTakeoverRegion(source)) return
+  const provenance = report.agent?.takeover?.source
+  const historyReceipt = source.kind === 'saved' && !source.origin.regionId && source.agentSessionId &&
+    provenance?.hostId === source.hostId && provenance?.agentSessionId === source.agentSessionId &&
+    (!source.expectedRuntimeId || provenance.runtimeId === source.expectedRuntimeId)
+  if (!['opened', 'partial'].includes(report.outcome) || !report.to || !report.agent || (!historyReceipt && !ownsTakeoverRegion(source))) return
   const state = useAppStore.getState()
   const exact = { ...source, hostId: source.hostId ?? report.agent.hostId, cwd: source.cwd ?? report.agent.cwd }
-  if ((state.sessions.some(item => item.id === source.agentSessionId) || (source.agentSessionId && state.pendingAgentLaunches[source.agentSessionId]?.request)) && !ownsTakeoverSource(exact)) return
+  if (!historyReceipt && (state.sessions.some(item => item.id === source.agentSessionId) || (source.agentSessionId && state.pendingAgentLaunches[source.agentSessionId]?.request)) && !ownsTakeoverSource(exact)) return
   const target = report.to, region = state.tabs[target.tabId]?.regions[target.regionId]
   if (region?.kind !== 'agent') return
   const session = state.sessions.find(session => session.id === region.sessionId)
   const original = currentCoreSpatialGraph()?.regions.find(item => item.regionId === target.regionId && item.tabId === target.tabId)
   if (session ? session.kind !== 'agent' || session.control.hostId !== report.agent.hostId || session.control.agentSessionId !== report.agent.agentSessionId
-    : source.coreRequest ? original?.agentSessionId !== report.agent.agentSessionId || original.execution?.hostId !== report.agent.hostId
+    : historyReceipt || source.coreRequest ? original?.agentSessionId !== report.agent.agentSessionId || original.execution?.hostId !== report.agent.hostId
       : region.sessionId !== report.agent.agentSessionId) return
   state.activateTab(target.displayWorkspaceId, target.groupId, target.tabId)
   state.focusRegion(target.displayWorkspaceId, target.tabId, target.regionId, 'pointer', target.groupId)
@@ -353,7 +360,8 @@ function takeoverReport(result: AgentMuxRpcResult<'agent.open'>): AgentMuxSpaceM
 async function originalTakeoverSource(source: TakeoverSource): Promise<AgentTakeoverSource> {
   if (!source.hostId) throw new Error('The original Takeover Host is not confirmed. Its work remains available.')
   const state = useAppStore.getState()
-  const snapshot = state.sessions.find(session => session.kind === 'agent' &&
+  // A saved history row has no current Run claim. Core checks its exact Host and Session.
+  const snapshot = source.kind === 'saved' && !source.origin.regionId ? undefined : state.sessions.find(session => session.kind === 'agent' &&
     (session.id === (source.kind === 'session' ? source.presentationSessionId : source.agentSessionId)))
   if (snapshot && (snapshot.kind !== 'agent' || snapshot.control.hostId !== source.hostId)) throw new Error('The original Agent route changed. No replacement source was selected.')
   const agentSessionId = takeoverOperationSubject(source).agentSessionId

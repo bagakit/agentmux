@@ -55,7 +55,8 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, onSu
     label: `${config?.workspaces.find(workspace => workspace.id === displayWorkspaceId)?.name ?? 'Workspace'} · Group ${index + 1}`
   }))), [facts.layouts, config?.workspaces])
   const initialPlacement = { displayWorkspaceId: source.destination?.displayWorkspaceId ?? source.origin.workspaceId, groupId: source.destination?.groupId ?? source.origin.tabGroupId }
-  const [placementKey, setPlacementKey] = useState(JSON.stringify([initialPlacement.displayWorkspaceId, initialPlacement.groupId]))
+  const [placementKey, setPlacementKey] = useState(initialPlacement.displayWorkspaceId && initialPlacement.groupId
+    ? JSON.stringify([initialPlacement.displayWorkspaceId, initialPlacement.groupId]) : '')
   const placement = placements.find(item => item.value === placementKey)
   // Resource and display choices remain independent: mounting a menu never creates
   // every Zone × display Group combination in this window.
@@ -330,18 +331,19 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, onSu
       </details> : null}
       {!source.derived && subject.hostId && subject.agentSessionId ? <AgentPromotionRecovery target={{ hostId: subject.hostId, agentSessionId: subject.agentSessionId }} /> : null}
       {!source.derived ? <>
-        <SelectionField label="Takeover destination" value={destinationKey} missingOptionLabel="Selected destination unavailable" missingOptionDescription="The original resource choice is retained. Choose another destination or return after its observation recovers." onValueChange={value => { setDestinationKey(value); setSelected(null) }} disabled={busy || creatingClub || unconfirmed || closedRequest !== null}
-          options={[{ value: '', label: source.destinationKind === 'club' ? 'Choose an existing Club' : 'Choose a destination' }, ...destinations]} />
-        <details className="session-takeover__placement"><summary>Show in · {placement?.label ?? 'Choose a display location'}</summary>
+        {placement ? <SelectionField label="Takeover destination" value={destinationKey} missingOptionLabel="Selected destination unavailable" missingOptionDescription="The original resource choice is retained. Choose another destination or return after its observation recovers." onValueChange={value => { setDestinationKey(value); setSelected(null) }} disabled={busy || creatingClub || unconfirmed || closedRequest !== null}
+          options={[{ value: '', label: source.destinationKind === 'club' ? 'Choose an existing Club' : 'Choose a destination' }, ...destinations]} /> : null}
+        <details className="session-takeover__placement" open={!placement || undefined}><summary>Show in · {placement?.label ?? 'Choose a display location'}</summary>
           <SelectionField label="Takeover display location" value={placementKey} missingOptionLabel="Selected display location unavailable" onValueChange={value => { setPlacementKey(value); setSelected(null) }}
-            disabled={busy || creatingClub || unconfirmed || closedRequest !== null} options={placements} />
+            disabled={busy || creatingClub || unconfirmed || closedRequest !== null}
+            options={[{ value: '', label: 'Choose a display location' }, ...placements]} />
         </details>
-        {!destinations.length ? <p>No destination is confirmed yet. Open its existing Project or Club, then return to this work.</p> : null}
+        {placement && !destinations.length ? <p>No destination is confirmed for this Group. Choose another display location.</p> : null}
         {source.destinationKind === 'club' ? <div className="session-takeover__club-create"><Button type="button" disabled={busy || creatingClub || unconfirmed || Boolean(workingSource.clubPreparation) || operations.some(operation => operation.takeoverSource.clubPreparation && !operation.takeoverSource.coreRequest) || closedRequest !== null || config?.promotion?.enabled === false} onClick={() => { void createClub() }}><MoteIcon size={14} />{creatingClub ? 'Creating Club…' : 'Create a Club first'}</Button><small>Two steps: create the team, then choose its Agent.</small></div> : null}
       </> : null}
       {notice ? <p className="session-takeover__notice" role="status">{notice}</p> : null}
       {source.derived || destination || workingSource.coreRequest ? <AgentExecutorPicker executors={executors} selected={selected} preferred={preferred} active={active && !closing} disabled={busy || creatingClub || unconfirmed || closedRequest !== null || !source.derived && !destination}
-        onSelect={id => { void choose(id) }} /> : <p className="session-takeover__notice">{source.destinationKind === 'club' ? 'Choose a Club to see available Agents.' : 'Choose a destination to see available Agents.'}</p>}
+        onSelect={id => { void choose(id) }} /> : <p className="session-takeover__notice">{!placement ? 'Choose where to show the new Agent.' : source.destinationKind === 'club' ? 'Choose a Club to see available Agents.' : 'Choose a destination to see available Agents.'}</p>}
       <div className="session-takeover__footer" aria-live="polite">
         {busy ? <span><ThemeStatusLoadingIcon size={13} animation="spin" />{unconfirmed || closedRequest ? 'Checking the original request…' : 'Passing the work to your Agent…'}</span>
           : <span>{source.derived ? 'The original work is read automatically. Your original session stays here.' : 'Context follows automatically. Your original session stays here.'}</span>}

@@ -22,6 +22,7 @@ export type AgentInformationPreview = {
 type Opening = Omit<AgentInformationPreview, 'session' | 'control' | 'sourceKey' | 'sourceRuntimeId' | 'pinned' | 'contentChanged' | 'bookmark'>
 let current: readonly AgentInformationPreview[] = []
 const listeners = new Set<() => void>()
+const transientSuspensions = new WeakMap<Document, number>()
 let pending: { token: object; cancel(): void } | null = null
 function cancelIntent(token?: object) {
   if (pending && (!token || pending.token === token)) { const intent = pending; pending = null; intent.cancel() }
@@ -75,9 +76,21 @@ export const agentInformationPreview = {
   getAll: () => current,
   cancelIntent,
   subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener) } },
+  suspendTransient(document: Document): () => void {
+    transientSuspensions.set(document, (transientSuspensions.get(document) ?? 0) + 1)
+    cancelIntent()
+    const visible = current.filter(item => item.pinned || item.anchor.ownerDocument !== document)
+    if (visible.length !== current.length) publish(visible)
+    return () => {
+      const remaining = (transientSuspensions.get(document) ?? 1) - 1
+      if (remaining) transientSuspensions.set(document, remaining)
+      else transientSuspensions.delete(document)
+    }
+  },
   schedule(token: object, cancel: () => void): boolean { cancelIntent(); pending = { token, cancel }; return true },
   show(request: Opening): boolean {
     cancelIntent()
+    if (transientSuspensions.has(request.anchor.ownerDocument)) return false
     const session = original(request)
     const existing = request.context.access ? current.find(item => sourceBookmarkMatches(item.bookmark, request.context)) : session?.kind === 'agent' ? current.find(item => item.bookmark?.hostId === session.control.hostId && item.bookmark.agentSessionId === session.control.agentSessionId) : undefined
     if (existing) {

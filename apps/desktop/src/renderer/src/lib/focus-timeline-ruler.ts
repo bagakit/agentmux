@@ -99,6 +99,7 @@ export type FocusTimeFormatters = {
   zone: string
   clock(instant: number): string
   ruler(instant: number): string
+  shortDate(instant: number): string
   dateClock(instant: number): string
   detailed(instant: number): string
   dateInput(instant: number): string
@@ -112,12 +113,14 @@ export function createFocusTimeFormatters(timeZone: string, locale?: string): Fo
   if (existing) return existing
   const clock = new Intl.DateTimeFormat(locale, { timeZone: zone, hour: '2-digit', minute: '2-digit', second: '2-digit' })
   const ruler = new Intl.DateTimeFormat(locale, { timeZone: zone, hour: '2-digit', minute: '2-digit' })
+  const shortDate = new Intl.DateTimeFormat(locale, { timeZone: zone, month: 'short', day: 'numeric' })
   const dateClock = new Intl.DateTimeFormat(locale, { timeZone: zone, month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
   const detailed = new Intl.DateTimeFormat(locale, { timeZone: zone, year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'shortOffset' })
   const result: FocusTimeFormatters = {
     zone,
     clock: (instant: number) => clock.format(instant),
     ruler: (instant: number) => ruler.format(instant),
+    shortDate: (instant: number) => shortDate.format(instant),
     dateClock: (instant: number) => dateClock.format(instant),
     detailed: (instant: number) => detailed.format(instant),
     dateInput: (instant: number) => DateTime.fromMillis(instant, { zone }).toFormat("yyyy-MM-dd'T'HH:mm")
