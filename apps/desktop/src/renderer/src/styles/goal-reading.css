@@ -1,11 +1,55 @@
-/* The original Goal remains one mounted document, with explicit reading destinations. */
-.goals-detail__reading-nav { --selection-indicator-shadow: inset 0 -2px 0 var(--text-2); --selection-indicator-duration: 320ms; --selection-indicator-ease: var(--goal-motion-ease); position: sticky; top: var(--goal-detail-toolbar-height, 38px); z-index: 1; isolation: isolate; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: 0 0 var(--sp-4); padding-block: var(--sp-2); border-bottom: 1px solid var(--line-soft); background: var(--surface-0); }
-.goals-detail__reading-nav > button { position: relative; padding: var(--sp-2) var(--sp-4); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: 550 var(--fs-body)/1.5 var(--font-sans); cursor: pointer; }
-.goals-detail__reading-nav > button:hover { color: var(--text); background: var(--surface-2); }
-.goals-detail__reading-nav > button[aria-current="location"] { border-color: var(--line-soft); background: var(--surface-2); color: var(--text); font-weight: 650; box-shadow: inset 0 -2px 0 var(--text-2); }
-.goals-detail__reading-nav:has(> .selection-indicator:not([hidden])) > button[aria-current="location"] { border-color: transparent; background: transparent; box-shadow: none; }
-.goals-detail__reading-nav > button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
-.goals-detail__reading-nav > .goals-detail__copy { margin-left: auto; color: var(--text-3); font-size: var(--fs-meta); }
+/* The location stays in the workbench toolbar while the document scrolls beneath it. */
+.goals-detail .goals-detail__toolbar { justify-content: space-between; gap: var(--sp-3); }
+.goal-outline__trail, .goal-outline__tools { display: flex; align-items: center; min-width: 0; }
+.goal-outline__trail { gap: var(--sp-2); font-size: var(--fs-body); line-height: 1.4; }
+.goal-outline__trail i { flex: none; color: var(--text-3); font-style: normal; opacity: .6; }
+.goal-outline__project { display: flex; align-items: baseline; gap: var(--sp-3); min-width: 0; max-width: 22ch; color: var(--text-2); }
+.goal-outline__project > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.goal-outline__tools .goal-outline__discussion > svg { display: none; }
+.goal-outline__tools { flex: none; gap: var(--sp-3); }
+.goal-outline__back, .goal-outline__trigger, .goals-detail__toolbar .goals-detail__team-link {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); flex: none; min-height: 28px;
+  padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2);
+  font: inherit; cursor: pointer; transition: color 120ms ease, background-color 120ms ease;
+}
+.goal-outline__trigger { color: var(--text); font-weight: 600; }
+.goal-outline__back:hover, .goal-outline__trigger:hover, .goal-outline__trigger[data-state="open"], .goals-detail__toolbar .goals-detail__team-link:is(:hover,[aria-pressed="true"]) { background-color: var(--wash-2); color: var(--text); }
+.goal-outline__trail button:focus-visible, .goals-detail__toolbar .goals-detail__team-link:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.goal-outline__chevron { color: var(--text-3); transition: transform var(--dur-enter) var(--ease-enter); }
+.goal-outline__trigger[data-state="open"] .goal-outline__chevron { transform: rotate(180deg); }
+.tab-context-menu.goal-outline__menu { min-width: min(188px,var(--radix-dropdown-menu-content-available-width,100vw)); }
+.tab-context-menu.goal-outline__menu[data-state="open"] { --outline-offset: -4px; animation: goal-outline-enter var(--dur-enter) var(--ease-enter) both; }
+.tab-context-menu.goal-outline__menu[data-side="top"] { --outline-offset: 4px; }
+@keyframes goal-outline-enter { from { transform: translateY(var(--outline-offset)) scale(.985); } to { transform: translateY(0) scale(1); } }
+@media (prefers-reduced-motion: no-preference) {
+  .goal-outline__menu[data-state="open"] .goal-outline__item { animation: goal-outline-item-enter var(--dur-enter) var(--ease-enter); }
+}
+@keyframes goal-outline-item-enter { from { opacity: .8; } to { opacity: 1; } }
+.goal-outline__menu .goal-outline__item { min-height: 32px; gap: var(--sp-3); }
+.goal-outline__item[aria-current="location"] { color: var(--text); font-weight: 600; }
+.goal-outline__address-issue { display: grid; gap: var(--sp-2); max-width: 28ch; padding: var(--sp-3); color: var(--text-2); font-size: var(--fs-meta); }
+.goals-detail__toolbar .goals-detail__team-link { display: none; }
+@container goal-detail (width < 960px) {
+  .goals-detail__toolbar .goals-detail__team-link { display: inline-flex; font-size: var(--fs-meta); }
+}
+@container goal-detail (width < 560px) {
+  .goal-outline__project, .goals-detail__toolbar .goals-detail__team-link span { display: none; }
+  .goal-outline__tools { gap: var(--sp-1); }
+  .goal-outline__tools .goal-outline__discussion { width: 28px; padding: 0; }
+  .goal-outline__tools .goal-outline__discussion > svg { display: block; }
+  .goal-outline__tools .goal-outline__discussion > span { display: none; }
+  .goals-detail__toolbar .goals-detail__team-link { width: 28px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  @container goal-detail (width < 960px) {
+    .goals-detail[data-goal-view="supervisor"] .goals-detail__side { animation: goal-supervisor-enter var(--dur-enter) var(--ease-enter); }
+  }
+}
+@keyframes goal-supervisor-enter { from { opacity: .75; transform: translateX(5px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .tab-context-menu.goal-outline__menu[data-state="open"] { animation: none; }
+  .goal-outline__chevron, .goal-outline__item, .goal-outline__trail button, .goals-detail__toolbar .goals-detail__team-link { transition: none; }
+}
 .goals-detail__brief, .goals-detail__plan, .goals-detail__activity { min-width: 0; scroll-margin-top: var(--goal-detail-reading-offset, 90px); }
 .goals-detail__brief:focus, .goals-detail__plan:focus, .goals-detail__activity:focus { outline: none; }
 .goals-detail__stage { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-4); }
@@ -39,10 +83,6 @@
 .goal-work-area .goal-delegation__heading { min-height: 0; }
 .goal-work-area .goal-delegation__heading:empty { display: none; }
 .goals-detail__activity { border-top: 1px solid var(--line-soft); }
-.goals-detail__reading-nav .goals-detail__address-issue { margin-inline-start: auto; color: var(--text-3); font-size: var(--fs-meta); }
-.goals-document .goals-detail__address-issue > summary { font-size: inherit; }
-.goals-detail__address-issue[open] { flex-basis: 100%; }
-.goals-detail__address-issue[open] p { margin-block: var(--sp-2); }
 .goals-detail__properties > summary { min-height: 28px; color: var(--text-2); font-weight: 550; }
 .goals-detail__properties > summary > span { color: var(--text-3); font-weight: 400; }
 .goals-detail__properties > summary:focus-visible { border-radius: var(--radius-sm); outline: 2px solid var(--focus-line); outline-offset: 3px; }
@@ -54,8 +94,12 @@
 .goals-detail__properties > .goals-common-properties { margin-top: var(--sp-4); }
 @media (prefers-reduced-motion: reduce) { .goals-detail__properties-chevron { transition: none; } }
 @container goal-detail (width < 960px) {
-  .goals-detail[data-goal-view='work'] .goals-detail__side,
-  .goals-detail[data-goal-view='supervisor'] .goals-detail__main { display: none; }
+  .goals-detail[data-goal-view='work'] .goals-detail__side { display: none; }
+  /* Keep the plan at its original width while the inspector occupies the document. */
+  .goals-detail[data-goal-view='supervisor'] .goals-detail__body { position: relative; overflow: clip; }
+  .goals-detail[data-goal-view='supervisor'] .goals-detail__main {
+    position: absolute; inset-inline: 0; visibility: hidden; pointer-events: none;
+  }
   .goals-detail[data-goal-view='supervisor'] .goals-detail__side { margin-top: 0; padding-top: 0; border-top: 0; }
 }
 .goals-detail__relationships { min-width: 0; }
@@ -69,7 +113,5 @@
   .goals-detail__brief .goals-intent__reading--clamped { max-height: calc(min(var(--goals-intent-lines), 8) * 1.65em); }
 }
 @container goal-detail (width < 640px) {
-  .goals-detail__reading-nav { gap: var(--sp-2); }
-  .goals-detail__reading-nav > .goals-detail__copy { margin-left: 0; }
   .goal-work-area__overview { gap: var(--sp-5); }
 }

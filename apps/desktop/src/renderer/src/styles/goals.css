@@ -171,7 +171,6 @@
 .goals-service.goals-creation { flex: none; margin: var(--sp-4) var(--sp-5); }
 .goals-detail { container: goal-detail / inline-size; display: flex; flex-direction: column; flex: 1 1 0; min-width: 0; min-height: 0; overflow: auto; background: var(--surface-0); }
 .goals-detail__toolbar { position: sticky; top: 0; z-index: 2; background: var(--surface-0); display: flex; flex: none; align-items: center; gap: var(--sp-4); min-height: 38px; padding: var(--sp-2) var(--sp-6); border-bottom: 1px solid var(--line-soft); }
-.goals-detail__toolbar > span { min-width: 0; flex: 1; color: var(--text-3); font-size: var(--fs-meta); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .goals-delete-action { color: var(--red-text); }
 .goals-detail__queue { display: inline-flex; align-items: center; gap: var(--sp-3); color: var(--text-3); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; }
 /* One short ring when a shown Goal changes group because its facts changed; still when motion is reduced. */
@@ -189,9 +188,6 @@
 .goals-detail__pending-review, .goals-detail__progress { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; }
 .goals-detail__pending-review { padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--amber) 12%, transparent); color: var(--amber-text); }
 .goals-detail__progress svg { color: var(--green-text); }
-.goals-detail__team-link { display: inline-flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) 0; border: 0; background: none; color: var(--text-2); font: 500 var(--fs-meta)/1.5 var(--font-sans); cursor: pointer; }
-.goals-detail__team-link:hover { color: var(--text); }
-.goals-detail__team-link:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; }
 .goals-detail__edit-status { flex-basis: 100%; margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
 .goals-detail__edit-status:empty { display: none; }
 .goals-detail__body { display: flex; flex-direction: column; min-width: 0; }
