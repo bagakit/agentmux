@@ -19,8 +19,9 @@ const publish = (value: Snapshot) => {
 
 function observe() {
   if (reading || snapshot.restoring) return
+  const observed = snapshot
   reading = api.ui.readLocalRuntimeRecovery().then(
-    result => { if (!snapshot.restoring) publish({ result, restoring: false }) },
+    result => { if (snapshot === observed) publish({ result, restoring: false }) },
     () => {}
   ).finally(() => { reading = undefined })
 }
