@@ -1,3 +1,4 @@
+import { nativeProcessEnvironment } from './agent-native-process.js'
 import { decodePreparedRun, type PreparedRun } from './prepared-run.js'
 import { mintObjectId } from './object-id.js'
 import { observeRead } from './observation-read.js'
@@ -1247,6 +1248,17 @@ export class CtxmuxRunAdapter {
       }
       throw translated
     }
+  }
+
+  /** Private original-process environment; additive RunSpec overrides are not a complete snapshot. */
+  async readRunEnvironment(runId: string, signal: AbortSignal): Promise<Readonly<Record<string, string>> | undefined> {
+    const owner = this.requireClient(), run = await owner.status(runId)
+    if (run.state.type !== 'running' || run.pid === null) return
+    const env = await nativeProcessEnvironment(run.pid, signal)
+    signal.throwIfAborted()
+    const current = await owner.status(runId)
+    if (current.state.type !== 'running' || current.pid !== run.pid) return
+    return env
   }
 
   private launchCommand(input: { program: string; args: readonly string[]; env?: Readonly<Record<string, string>> }) {

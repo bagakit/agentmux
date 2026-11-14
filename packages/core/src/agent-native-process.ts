@@ -1,4 +1,4 @@
-import { linuxNativeProcessFiles } from './agent-native-process-linux.js'
+import { linuxNativeProcessEnvironment, linuxNativeProcessFiles } from './agent-native-process-linux.js'
 import { runProcess } from './process-runner.js'
 import { AgentMuxError } from './errors.js'
 import { normalizeNativeTranscriptPath } from './agent-native-locator.js'
@@ -206,7 +206,7 @@ export async function nativeProcessBirth(processId: number, signal: AbortSignal)
   return processBirthReceipt(value, processId, 'native-process-identity')
 }
 
-function processBirthReceipt(value: unknown, processId: number, type: 'native-process-identity' | 'native-socket-peer'): string {
+function processBirthReceipt(value: unknown, processId: number, type: 'native-process-identity' | 'native-socket-peer' | 'native-process-environment'): string {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw unavailable('The kernel process identity receipt is incomplete.')
   const identity = value as Record<string, unknown>
   if (identity.type !== type || identity.schema !== 1 || identity.pid !== processId ||
@@ -216,4 +216,41 @@ function processBirthReceipt(value: unknown, processId: number, type: 'native-pr
     throw unavailable('The kernel process identity receipt does not belong to the original process.')
   }
   return JSON.stringify(['darwin', processId, identity.uid, identity.startSec, identity.startUsec])
+}
+
+/** Private launch-environment observation. Never persist, publish or include these bytes in errors. */
+export async function nativeProcessEnvironment(processId: number, signal: AbortSignal): Promise<Readonly<Record<string, string>>> {
+  signal.throwIfAborted()
+  if (!['darwin', 'linux'].includes(process.platform) || !Number.isSafeInteger(processId) || processId <= 0) throw unavailable('The original process environment is unavailable on this Host.')
+  try {
+    let bytes: Buffer
+    if (process.platform === 'linux') bytes = await linuxNativeProcessEnvironment(processId, signal)
+    else {
+      const birth = await nativeProcessBirth(processId, signal)
+      const helper = fileURLToPath(new URL('../dist/native-socket-peer-darwin', import.meta.url))
+      // The C reader bounds its allocation and machine receipt by the kernel's KERN_ARGMAX.
+      const result = await runProcess(helper, ['--process-environment', String(processId)], { signal, timeoutMs: 2_000 })
+      if (result.exitCode !== 0 || result.stderr) throw unavailable('The original process environment is unconfirmed.')
+      const receipt: unknown = JSON.parse(result.stdout)
+      if (processBirthReceipt(receipt, processId, 'native-process-environment') !== birth) throw unavailable('The original process environment changed its identity.')
+      const value = receipt as Record<string, unknown>
+      if (Object.keys(value).some(key => !['type', 'schema', 'pid', 'uid', 'startSec', 'startUsec', 'environmentHex'].includes(key)) ||
+          typeof value.environmentHex !== 'string' || !/^(?:[0-9a-f]{2})*$/u.test(value.environmentHex) ||
+          await nativeProcessBirth(processId, signal) !== birth) throw unavailable('The original process environment receipt is incomplete.')
+      bytes = Buffer.from(value.environmentHex, 'hex')
+    }
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    if (text && !text.endsWith('\0')) throw unavailable('The original process environment is incomplete.')
+    const entries: Array<[string, string]> = [], seen = new Set<string>()
+    for (const item of text ? text.slice(0, -1).split('\0') : []) {
+      const at = item.indexOf('='), key = item.slice(0, at)
+      if (at <= 0 || seen.has(key)) throw unavailable('The original process environment cannot be represented exactly.')
+      seen.add(key); entries.push([key, item.slice(at + 1)])
+    }
+    signal.throwIfAborted()
+    return Object.fromEntries(entries)
+  } catch {
+    signal.throwIfAborted()
+    throw unavailable('The original process environment is unconfirmed. The Run and input are kept.')
+  }
 }

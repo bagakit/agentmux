@@ -29,7 +29,7 @@ async function descriptors(directory: string): Promise<string[]> {
 /** OS start ticks for a native registry, with a pinned process lifetime recheck.
  * This is an ephemeral witness, not a durable Agent or native Session identity. */
 export async function linuxNativeProcessStart(processId: number, signal: AbortSignal): Promise<{
-  startTicks: string; lifetime: string; assertCurrent(): Promise<void>; dispose(): Promise<void>
+  directory: string; startTicks: string; lifetime: string; assertCurrent(): Promise<void>; dispose(): Promise<void>
 }> {
   signal.throwIfAborted()
   if (!Number.isSafeInteger(processId) || processId <= 0) throw unavailable('The original Linux process is unconfirmed.')
@@ -46,9 +46,26 @@ export async function linuxNativeProcessStart(processId: number, signal: AbortSi
       }
     }
     await assertCurrent()
-    return { startTicks: original.start, lifetime: JSON.stringify([String(object.dev), String(object.ino), original.start]),
+    return { directory, startTicks: original.start, lifetime: JSON.stringify([String(object.dev), String(object.ino), original.start]),
       assertCurrent, dispose: () => handle.close() }
   } catch (error) { await handle.close(); throw error }
+}
+
+/** Read only this pinned original proc object's launch environment, never another PID's replacement. */
+export async function linuxNativeProcessEnvironment(processId: number, signal: AbortSignal): Promise<Buffer> {
+  let original: Awaited<ReturnType<typeof linuxNativeProcessStart>> | undefined
+  try {
+    original = await linuxNativeProcessStart(processId, signal)
+    const owner = BigInt(process.getuid!())
+    if ((await stat(original.directory, { bigint: true })).uid !== owner) throw unavailable('The original process environment owner is unconfirmed.')
+    const bytes = await readFile(original.directory + '/environ', { signal })
+    await original.assertCurrent()
+    if ((await stat(original.directory, { bigint: true })).uid !== owner) throw unavailable('The original process environment owner changed.')
+    return bytes
+  } catch {
+    signal.throwIfAborted()
+    throw unavailable('The original process environment is unavailable. The Run and input are kept.')
+  } finally { await original?.dispose().catch(() => undefined) }
 }
 
 /** Only target process objects are opened. A pinned proc directory never resolves a reused PID
