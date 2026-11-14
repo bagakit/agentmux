@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { createMoteConversationStartFixture } from './helpers/mote-conversation-start-fixture.js'
 import { moteMainBindingInput, spatialAgentOpenRecord } from '../../../packages/core/src/spatial-agent-open-contract.js'
 import { moteQuickBaseline } from '../../../packages/core/src/mote-preferences.js'
-import { MOTE_INPUT_GUIDANCE } from '../../../packages/core/src/mote-input-source.js'
+import { MOTE_INPUT_GUIDANCE } from '../../../packages/core/src/mote/input-source.js'
 import { AgentMuxError } from '../../../packages/core/src/errors.js'
 
 let close: (() => Promise<void>) | undefined

@@ -11,7 +11,7 @@ const mutations: Record<string, { path: string; before: string; after: string }>
   'input-status': { path: 'packages/client-ui/src/components/ConversationMoteNotice.tsx',
     before: "case 'terminal-confirmed': return '新输入已送入终端，是否采用待确认'", after: "case 'terminal-confirmed': return '成员已接收新输入'" },
   'eager-read': { path: 'packages/client-ui/src/components/ConversationMoteNotice.tsx', before: '!active || !open || !read || !target', after: '!active || !read || !target' },
-  'inspection-match': { path: 'packages/core/src/mote-input-notice.ts', before: 'original.id === notice.observationId', after: 'true' }
+  'inspection-match': { path: 'packages/core/src/mote/input-notice.ts', before: 'original.id === notice.observationId', after: 'true' }
 }
 const name = process.env.AGENTMUX_MOTE_NOTICE_MUTATION
 if (name && !mutations[name]) throw Error('Unknown Mote notice mutation: ' + name)

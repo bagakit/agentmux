@@ -11,7 +11,7 @@ import { createHostMoteMainReader, createHostMoteDialogue } from '../../../apps/
 import { createHostContent } from '../../../apps/host/src/content-owner.js'
 import { HostMoteQuickPreferences } from '../../../apps/host/src/mote-quick-preferences.js'
 import { spatialCatalog } from '../src/spatial-state.js'
-import { MOTE_INPUT_GUIDANCE } from '../src/mote-input-source.js'
+import { MOTE_INPUT_GUIDANCE } from '../src/mote/input-source.js'
 import { agentPromptSubmissionOutcome, parseMoteDialogueResult } from '../src/mote-dialogue.js'
 import type { AgentPromptSubmissionRecord } from '../src/types.js'
 import { createAgentInputContextCaptureRecord, type AgentInputContextCaptureReader, type AgentInputContextCaptureRecord } from '../src/agent-input-context-capture.js'

@@ -7,11 +7,11 @@ import { promisify } from 'node:util'
 import { DatabaseSync } from 'node:sqlite'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
-import { moteInputObservationId } from '../src/mote-input.js'
+import { moteInputObservationId } from '../src/mote/input.js'
 import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
 import { consumeConversationWindowPage } from '../src/conversation-changes.js'
-import { MoteInputOwner } from '../src/mote-input-owner.js'
-import { moteInputNoticeWireMatches } from '../src/mote-input.js'
+import { MoteInputOwner } from '../src/mote/input-owner.js'
+import { moteInputNoticeWireMatches } from '../src/mote/input.js'
 import { serializeMoteQuickMode } from '../../../apps/host/src/mote-model.js'
 import { questionReplyOwner } from './helpers/question-reply-owner.js'
 import { withInteractionOperation } from './fixtures/interaction-client.js'
@@ -628,7 +628,7 @@ it('a reply read before its turn completion keeps the exact reply reference in t
     expect((await f.read('split')).inspection?.observation.result).toMatchObject({ kind: 'native-turn', status: 'completed' })
   )
   const result = (await f.read('split')).inspection!.observation.result as Extract<
-    import('../src/mote-input.js').MoteInputObservation['result'],
+    import('../src/mote/input.js').MoteInputObservation['result'],
     { kind: 'native-turn' }
   >
   // The reply record read in the first batch must survive into the final result references.

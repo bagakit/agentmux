@@ -80,7 +80,7 @@ import { newDeliveryLogId, type DeliveryAttempt } from '../../../packages/core/s
 import { parseDiagnosticEvidenceParams, parseDiagnosticEvidenceResult } from '../../../packages/core/src/diagnostic-evidence-codec'
 import { parseAgentMuxControlRequest, parseAgentMuxControlReceipt } from '../../../packages/core/src/control-codec'
 import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner'
-import type { AgentMuxMoteContextEvidenceTarget } from '../../../packages/core/src/mote-context-observation'
+import type { AgentMuxMoteContextEvidenceTarget } from '../../../packages/core/src/mote/context-observation'
 import { sourceMoteDiagnosticsCli, stageMoteSourceListener, moteRendererImportGraph } from './helpers/mote-diagnostics-cli'
 
 let app: MoteAppFixture, disposeMain: (() => Promise<void>) | null
@@ -305,7 +305,7 @@ it('returns a structured query budget outcome when the safe source envelope itse
 
 it('bundles the actual Renderer inspector through browser-safe control, without Core index or Node Runtime', async () => {
   const graph = await moteRendererImportGraph(), inputs = Object.keys(graph.inputs)
-  expect(inputs.some(path => path.endsWith('packages/core/src/mote-context-observation.ts'))).toBe(true)
+  expect(inputs.some(path => path.endsWith('packages/core/src/mote/context-observation.ts'))).toBe(true)
   expect(inputs.some(path => /packages\/core\/src\/(?:index|notes-storage|client|ctxmux-run-adapter)\.ts$/.test(path))).toBe(false)
   expect(Object.values(graph.outputs).flatMap(output => output.imports).some(item => item.path.startsWith('node:') || item.path.includes('fs-native-extensions'))).toBe(false)
 })

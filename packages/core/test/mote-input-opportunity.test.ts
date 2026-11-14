@@ -4,8 +4,8 @@ import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
 import type { AgentMuxMessageNotification } from '../src/agent-message-notification.js'
-import { MoteInputOwner, type AutomaticInputOpportunity } from '../src/mote-input-owner.js'
-import { moteInputObservationId, type MoteInputObservation } from '../src/mote-input.js'
+import { MoteInputOwner, type AutomaticInputOpportunity } from '../src/mote/input-owner.js'
+import { moteInputObservationId, type MoteInputObservation } from '../src/mote/input.js'
 
 // Opportunity-policy proof only: the production owner, journal and codecs are real.
 // The source and native admission ports are finite fixtures, not a live Provider/E2E.

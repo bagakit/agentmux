@@ -9,7 +9,7 @@ const mutations = {
   'runtime-participant-ignored': ['packages/core/src/client.ts', 'if (caller && !await this.localMessageParticipant(messages[0]!, caller.agentSessionId))', 'if (false)'],
   'rpc-disconnected': ['packages/core/src/public-rpc-service.ts', 'await this.ports.moteDialogue.supervision(parseMoteDialogueParams(method, params), original)', "await Promise.reject(new AgentMuxError('Original supervision owner disconnected', 'CONTROL_UNAVAILABLE'))"],
   'observation-detached': ['packages/core/src/mote/supervision.ts', 'item.sequence !== links[index]?.sequence', 'false'],
-  'input-guidance-disconnected': ['packages/core/src/mote-input-source.ts', '+ "\\n\\n" + MOTE_SUPERVISION_GUIDANCE', '+ ""']
+  'input-guidance-disconnected': ['packages/core/src/mote/input-source.ts', '+ "\\n\\n" + MOTE_SUPERVISION_GUIDANCE', '+ ""']
 } as const
 const mutant = process.env.MOTE_SUPERVISION_MUTANT as keyof typeof mutations | undefined
 if (mutant && !mutations[mutant]) throw Error('Choose an exact supervision mutation')
