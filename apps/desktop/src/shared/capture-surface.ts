@@ -34,7 +34,7 @@ export type CaptureSurfaceInput = {
   /** Whether ⌘E may move these marks into the window editor. */
   expandable: boolean
   theme: ThemeBootstrap
-  /** The selection last delivered on this display while its frame and scale stay the same, in frozen-frame pixels; only a starting point. */
+  /** Explicit same-capture Retake geometry in frozen-frame pixels; a fresh capture omits it. */
   initialCrop?: NormalizedRect
   background: CaptureBackground
   backgrounds: Record<CaptureBackground, CaptureSurfaceFrame>
@@ -61,7 +61,7 @@ export type CaptureSurfaceApi = {
   finish(requestId: string, background: CaptureBackground, image: BrowserPng, selection: CaptureSurfaceRect): Promise<SystemScreenshotEditorFinish>
   /** `selection` is in this display's frozen-frame pixels; Main places the pin there. */
   pin(requestId: string, background: CaptureBackground, operationId: string, image: BrowserPng, selection: CaptureSurfaceRect): Promise<import('@agentmux/core').ImageResult>
-  savePng(requestId: string, background: CaptureBackground, image: BrowserPng): Promise<ScreenshotFileResult>
+  savePng(requestId: string, background: CaptureBackground, image: BrowserPng, selection: CaptureSurfaceRect): Promise<ScreenshotFileResult>
   copyText(requestId: string, text: string): Promise<SystemScreenshotEditorFinish>
   expand(requestId: string, background: CaptureBackground, handoff: CaptureSurfaceHandoff): Promise<void>
   cancel(requestId: string): Promise<void>

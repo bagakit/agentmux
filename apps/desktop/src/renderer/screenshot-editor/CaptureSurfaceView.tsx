@@ -83,24 +83,25 @@ export function CaptureSurfaceView({ input, api }: { input: CaptureSurfaceInput;
   })
 
   async function output(edit: ImageAnnotationInput, kind: 'finish' | 'save' | 'pin'): Promise<boolean> {
-    if (pending.current || switching) return false
+    const selection = edit.crop
+    if (!selection || pending.current || switching) return false
     pending.current = true; setBusy(true); setStatus(null)
     try {
-      // A remembered selection output unchanged was never claimed by a gesture.
+      // A continued selection output unchanged was never claimed by a gesture.
       if (!await claim()) return false
       const image = await composeScreenshot({ ...edit, outputScale: 1, document: edit.image.ownerDocument })
       if (kind === 'finish') {
-        const result = await api.finish(input.requestId, background, image, selectionOf(edit))
+        const result = await api.finish(input.requestId, background, image, selection)
         if (result.status === 'failed') setStatus(result.message)
         return result.status === 'completed'
       }
       if (kind === 'pin') {
-        const result = await api.pin(input.requestId, background, mintObjectId(), image, selectionOf(edit))
+        const result = await api.pin(input.requestId, background, mintObjectId(), image, selection)
         if (result.recordedOperation?.state === 'completed') setStatus('Reference pinned')
         else setStatus(result.recordedOperation?.message ?? 'The original pin operation is unconfirmed. Keep that operation before another pin.')
         return result.recordedOperation?.state === 'completed'
       }
-      const result = await api.savePng(input.requestId, background, image)
+      const result = await api.savePng(input.requestId, background, image, selection)
       if (result.status === 'saved') setStatus('PNG saved · ' + result.path)
       else if (result.status !== 'cancelled') setStatus(result.message)
       return result.status === 'saved'
@@ -131,9 +132,4 @@ export function CaptureSurfaceView({ input, api }: { input: CaptureSurfaceInput;
       onPresented={() => void api.presented(input.requestId, background).catch(() => {})}
       onCancel={() => void api.cancel(input.requestId)} onError={cause => setStatus(presentError(cause))} />
   </main>
-}
-
-/** The selection is the editor's crop, in this display's frozen-frame pixels. */
-function selectionOf(edit: ImageAnnotationInput) {
-  return edit.crop ?? { x: 0, y: 0, width: edit.displayWidth, height: edit.displayHeight }
 }

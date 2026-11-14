@@ -15,10 +15,15 @@ import { saveScreenshotPng } from './screenshot-files'
 const PRESENT_FALLBACK_MS = 1500
 
 /** One capture's consumer: its primary delivery, and whether ⌘E may move the marks to the window editor. */
+export type CaptureSurfaceContinuation = { displayId: number; frame: CaptureSurfaceRect; scale: number; rect: CaptureSurfaceRect }
 export type CaptureSurfaceSession = {
   attachToDraft: boolean
   /** Initial Desktop background; public native selection passes excluded explicitly. */
   background?: CaptureBackground
+  /** Explicit geometry from Copy in this same ScreenCapture.capture call; never retained by CaptureSurface. */
+  continuation?: CaptureSurfaceContinuation
+  /** Public native selection requires its requested source; the GUI may explicitly switch frozen backgrounds. */
+  allowBackgroundFallback?: boolean
   expandable: boolean
   /** Another app was in front at capture start; closing the surface gives it focus back. */
   returnFocus: boolean
@@ -30,8 +35,8 @@ export type CaptureSurfaceOutcome =
   | { state: 'cancelled' }
   /** The marks move to the window editor on this display's full frozen frame; `source.rect` is the selection. */
   | { state: 'expanded'; image: BrowserPng; source: ScreenshotCaptureSource; handoff: CaptureSurfaceHandoff
-      /** Called once the window editor delivers this selection, so the next capture opens on it. */
-      delivered(): void }
+      /** Returns the delivered geometry for an explicit Retake in the same capture call. No document history crosses into the new surface. */
+      delivered(): CaptureSurfaceContinuation }
 
 /** Latest capture's phase offsets only; never pixels, filenames or draft content. */
 export type CaptureSurfaceTiming = {
@@ -85,14 +90,10 @@ type Active = {
   focused: BrowserWindow | null
   end(outcome: CaptureSurfaceOutcome | Error): void
 }
-/** The selection the last primary delivery confirmed, with its display as it was then; this process only, never persisted. */
-type Recall = { displayId: number; frame: CaptureSurfaceRect; scale: number; rect: CaptureSurfaceRect }
-
 /** Desktop's one capture surface: a transparent overlay per display over that display's frozen frame. */
 export class CaptureSurface {
   private active: Active | null = null
   private disposed = false
-  private recall: Recall | null = null
 
   constructor(private readonly ports: Ports) {
     ipcMain.handle(CAPTURE_SURFACE_CHANNEL, (event, action, input) => this.invoke(event, action, input))
@@ -165,6 +166,11 @@ export class CaptureSurface {
     const results = { included, excluded }
     const usable = (mode: CaptureBackground) => !(results[mode] instanceof Error) && (results[mode] as NativeDisplayFrames).displays.some(frame => frame.issue === undefined)
     if (!usable('included') && !usable('excluded')) throw new Error('No display returned usable screenshot pixels. Take the screenshot again.')
+    if (active.session.allowBackgroundFallback === false && !usable(active.background)) {
+      const requested = results[active.background]
+      if (requested instanceof Error) throw requested
+      throw Object.assign(new Error('The requested screenshot background is unavailable on every display. Take the screenshot again.'), { code: 'capture_unavailable' })
+    }
     const successful = included instanceof Error ? excluded as NativeDisplayFrames : included
     if (successful.displays.length !== displays.length || active.overlays.length !== displays.length || (!(excluded instanceof Error) && excluded.displays.length !== displays.length))
       throw Object.assign(new Error('The display layout changed while the screen was captured. Take the screenshot again.'), { code: 'display_configuration_changed' })
@@ -181,7 +187,7 @@ export class CaptureSurface {
           throw Object.assign(new Error('The display layout changed between screenshot backgrounds. Take the screenshot again.'), { code: 'display_configuration_changed' })
         return overlayFrame(variant, result.capturedAt)
       }
-      const initialCrop = this.recalled(frame)
+      const initialCrop = this.continued(frame, active.session.continuation)
       const includedFrame = background(included)
       const input: CaptureSurfaceInput = { requestId: mintObjectId(), displayId: frame.displayId, frame: frame.frame, scale: frame.scale, safeTop: frame.safeTop,
         attachToDraft: active.session.attachToDraft, expandable: active.session.expandable, theme, background: active.background,
@@ -235,7 +241,7 @@ export class CaptureSurface {
     for (const { window } of active.overlays) window.showInactive()
     const pointer = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).id
     const target = active.overlays.find(overlay => overlay.display.id === pointer) ?? active.overlays[0]
-    // A remembered selection is the one Enter and the arrows act on, so its display takes the keys.
+    // An explicitly continued selection is the one Enter and the arrows act on, so its display takes the keys.
     const keys = active.overlays.find(overlay => overlay.input?.initialCrop) ?? target
     if (process.platform === 'darwin') app.focus({ steal: true })
     keys?.window.focus()
@@ -299,13 +305,13 @@ export class CaptureSurface {
       if (!active.session.expandable) throw new Error('This capture returns its selection directly. Finish it with Done or cancel it.')
       const handoff = params.handoff
       if (!handoff || !Array.isArray(handoff.shapes) || typeof handoff.tool !== 'string' || !handoff.crop) throw new Error('Keep the original marks and selection to expand.')
-      const source = this.source(active, frameInput, handoff.crop), remembered = this.remember(frameInput, source.rect)
-      active.end({ state: 'expanded', image: captured.image, source, handoff, delivered: () => { this.recall = remembered } })
+      const source = this.source(active, frameInput, handoff.crop)
+      active.end({ state: 'expanded', image: captured.image, source, handoff, delivered: () => this.continuation(frameInput, source.rect) })
       return
     }
     pngBytes(params.image!)
-    if (action === 'save-png') return await saveScreenshotPng(params.image!, overlay.window, { capturedAt: captured.capturedAt })
     const source = this.source(active, frameInput, params.selection)
+    if (action === 'save-png') return await saveScreenshotPng(params.image!, overlay.window, { capturedAt: captured.capturedAt })
     if (action === 'pin') {
       if (typeof params.operationId !== 'string' || !params.operationId.trim()) throw new Error('Keep the original pin operation.')
       // The pin opens on the selection at the image's own logical size.
@@ -320,21 +326,19 @@ export class CaptureSurface {
     try { await active.session.complete(params.image!, source, captured.engine) }
     catch (error) { return { status: 'failed', message: message(error) } satisfies SystemScreenshotEditorFinish }
     finally { active.finishing = false }
-    if (this.active === active) this.recall = this.remember(frameInput, source.rect)
     active.end({ state: 'completed' })
     return { status: 'completed' } satisfies SystemScreenshotEditorFinish
   }
 
-  /** The remembered selection in this frame's pixels, only on its own display while that display's frame and scale are unchanged. */
-  /** The selection a delivery confirms, with its display as it was then. */
-  private remember(input: CaptureSurfaceInput, rect: CaptureSurfaceRect): Recall {
+  /** Geometry returned to the same capture caller after its independent editor confirms Copy. */
+  private continuation(input: CaptureSurfaceInput, rect: CaptureSurfaceRect): CaptureSurfaceContinuation {
     return { displayId: input.displayId, frame: input.frame, scale: input.scale, rect }
   }
-  private recalled({ displayId, frame, scale }: NativeDisplayFrame): CaptureSurfaceHandoff['crop'] | undefined {
-    const last = this.recall
-    if (!last || last.displayId !== displayId || last.scale !== scale || !sameRect(last.frame, frame)) return undefined
-    return { x: Math.round((last.rect.x - frame.x) * scale), y: Math.round((last.rect.y - frame.y) * scale),
-      width: Math.round(last.rect.width * scale), height: Math.round(last.rect.height * scale) }
+  /** The explicit continuation in this frame's pixels, only on its unchanged display. */
+  private continued({ displayId, frame, scale }: NativeDisplayFrame, continuation: CaptureSurfaceContinuation | undefined): CaptureSurfaceHandoff['crop'] | undefined {
+    if (!continuation || continuation.displayId !== displayId || continuation.scale !== scale || !sameRect(continuation.frame, frame)) return undefined
+    return { x: Math.round((continuation.rect.x - frame.x) * scale), y: Math.round((continuation.rect.y - frame.y) * scale),
+      width: Math.round(continuation.rect.width * scale), height: Math.round(continuation.rect.height * scale) }
   }
 
   /** The selection in global points: this display's origin plus its frozen-frame pixels over the display scale. */
@@ -351,7 +355,7 @@ export class CaptureSurface {
   async captureSelection(returnFocus: boolean): Promise<NativeDesktopPayloadMap['native.capture']> {
     let result: NativeDesktopPayloadMap['native.capture'] | null = null
     try {
-      const outcome = await this.present({ attachToDraft: false, background: 'excluded', expandable: false, returnFocus, complete: async (image, source, engine) => {
+      const outcome = await this.present({ attachToDraft: false, background: 'excluded', allowBackgroundFallback: false, expandable: false, returnFocus, complete: async (image, source, engine) => {
         result = { state: 'captured', engine, selectionRect: source.rect,
           screenshot: { format: 'png', data: image.dataUrl.slice('data:image/png;base64,'.length), width: image.width, height: image.height, scale: source.scale } }
       } })

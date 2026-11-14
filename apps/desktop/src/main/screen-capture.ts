@@ -3,7 +3,7 @@ import type { CaptureParams, NativeDesktop } from '@agentmux/native-desktop'
 import { pngBytes } from '@agentmux/native-desktop/image'
 import type { BrowserPng } from '../shared/contracts.js'
 import type { ScreenshotEditContext } from '../shared/system-screenshot-editor.js'
-import type { CaptureSurfaceOutcome, CaptureSurfaceSession } from './capture-surface.js'
+import type { CaptureSurfaceContinuation, CaptureSurfaceOutcome, CaptureSurfaceSession } from './capture-surface.js'
 import { SCREENSHOT_DELAYS, type ScreenshotDelaySeconds } from '../shared/screenshot-countdown.js'
 import type { ScreenshotCaptureMode, ScreenshotCaptureOptions } from '../shared/screenshot-source.js'
 import { savePastedImage, type PastedImageWriteReceipt } from './pasted-image-write.js'
@@ -80,13 +80,16 @@ export class ScreenCapture {
         // Retake in the window editor presents the surface again for this same consumer. Its surface gives focus back to
         // that editor, which a cancel returns to and a completion closes, so the editor's own close returns focus as before.
         const held: { editor: Promise<void> | null } = { editor: null }
+        // Request-local only: Copy returns crop geometry for a later Retake in this capture call. A fresh call starts with none.
+        let continuation: CaptureSurfaceContinuation | undefined
         const surface = async (retaking: boolean): Promise<CaptureSurfaceOutcome['state']> => {
           // Once the original draft has its image, a retaken surface and its editor only copy; the draft is never attached twice.
           const attaching = attachToDraft && !originalDelivered
-          const outcome = await this.ports.present({ attachToDraft: attaching, expandable: true, returnFocus: returnFocus && !retaking, complete, background })
+          const outcome = await this.ports.present({ attachToDraft: attaching, expandable: true, returnFocus: returnFocus && !retaking, complete, background,
+            ...(retaking && continuation ? { continuation } : {}) })
           if (outcome.state !== 'expanded') return outcome.state
-          // The window editor's first confirmed delivery makes this selection the one the next capture opens on.
-          const deliverHere = (final: BrowserPng) => complete(final).then(() => outcome.delivered())
+          // Only the confirmed independent-editor Copy creates a continuation; shapes and Undo stay in that editor.
+          const deliverHere = (final: BrowserPng) => complete(final).then(() => { continuation = outcome.delivered() })
           const editing = this.ports.edit(outcome.image, attaching, deliverHere,
             { source: outcome.source, initialState: { shapes: outcome.handoff.shapes, crop: outcome.handoff.crop }, initialTool: outcome.handoff.tool,
               ...(returnFocus ? { returnFocus } : {}), retake: () => surface(true) })

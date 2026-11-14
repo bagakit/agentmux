@@ -14,7 +14,7 @@ if (process.isMainFrame) {
     },
     finish: (requestId, background, image, selection) => ipcRenderer.invoke(CAPTURE_SURFACE_CHANNEL, 'finish', { requestId, background, image, selection }),
     pin: (requestId, background, operationId, image, selection) => ipcRenderer.invoke(CAPTURE_SURFACE_CHANNEL, 'pin', { requestId, background, operationId, image, selection }),
-    savePng: (requestId, background, image) => ipcRenderer.invoke(CAPTURE_SURFACE_CHANNEL, 'save-png', { requestId, background, image }),
+    savePng: (requestId, background, image, selection) => ipcRenderer.invoke(CAPTURE_SURFACE_CHANNEL, 'save-png', { requestId, background, image, selection }),
     copyText: (requestId, text) => ipcRenderer.invoke(CAPTURE_SURFACE_CHANNEL, 'copy-text', { requestId, text }),
     expand: (requestId, background, handoff) => ipcRenderer.invoke(CAPTURE_SURFACE_CHANNEL, 'expand', { requestId, background, handoff }),
     cancel: requestId => ipcRenderer.invoke(CAPTURE_SURFACE_CHANNEL, 'cancel', { requestId })
