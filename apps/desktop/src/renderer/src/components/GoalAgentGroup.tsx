@@ -1,7 +1,8 @@
-import { memo, useMemo, type ReactNode } from 'react'
+import { Fragment, memo, useId, useMemo, useState, type ReactNode } from 'react'
 import { AvatarGroup } from '@agentmux/client-ui/components/AvatarGroup'
 import { compactReferenceId } from '@agentmux/client-ui/display-name'
-import { demandAgentReferenceKey, demandAgentReferenceLabel, goalSupervisorHostWitnesses, type DemandAgentReference } from '@agentmux/demand/relations'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { demandAgentReferenceKey, goalSupervisorHostWitnesses, type DemandAgentReference, type DemandSpaceMemberReference } from '@agentmux/demand/relations'
 import type { DemandProjection } from '../lib/global-demand-board'
 import { agentSessionPresentationIndex, createFirstPromptSelector, sessionStatusLabel } from '../lib/session-presentation'
 import { goalAgentPresentation } from '../lib/goal-agent-selection'
@@ -16,7 +17,20 @@ import '@agentmux/client-ui/styles/avatar-group.css'
 import '../styles/goal-agent-group.css'
 
 type Subject = { id: string; hostId: string; agentSessionId: string; runId: string }
-type Face = { key: string; name: string; label: string; identity: string; roles: string; subject: Subject | undefined; executorId: string | undefined; providerId: string | undefined; appearance: ReturnType<typeof executorAvatarAppearance> }
+type Face = {
+  key: string
+  name: string | undefined
+  label: string
+  sessionId: string
+  reference: DemandSpaceMemberReference | undefined
+  roles: string
+  subject: Subject | undefined
+  executorId: string | undefined
+  providerId: string | undefined
+  appearance: ReturnType<typeof executorAvatarAppearance>
+}
+const ReferenceChevron = semanticIconComponent('navigation.forward')
+const LOCATION_UNCONFIRMED = 'Location unconfirmed'
 
 function createGoalAgentGroupSelector(demand: DemandProjection) {
   const assignments = new Map<string, { reference: DemandAgentReference; roles: string[] }>()
@@ -38,24 +52,30 @@ function createGoalAgentGroupSelector(demand: DemandProjection) {
       const key = session ? JSON.stringify(['actor', session.control.hostId, session.control.agentSessionId]) : referenceKey
       const original = faces.get(key)
       if (original) { original.roles = [...new Set([...original.roles, ...roles])]; continue }
-      let name = compactReferenceId(typeof reference === 'string' ? reference : reference.execution.agentSessionId)
+      const sessionId = session?.control.agentSessionId ?? (typeof reference === 'string' ? reference : reference.execution.agentSessionId)
+      let name: string | undefined
       if (session) {
         const prompt = prompts.get(session.id) ?? createFirstPromptSelector(session.id); prompts.set(session.id, prompt)
         name = agentDisplayName({ userName: state.agentNames[session.id], firstPrompt: prompt(state), fallbackLabel: session.label, providerLabel: session.providerId })
       }
-      const identity = session ? `${session.control.agentSessionId} · Host ${session.control.hostId}` : `${demandAgentReferenceLabel(reference)}${typeof reference === 'string' ? '' : ` · Source ${reference.source.runtimeId} · Region ${reference.source.regionId}`} · Current presentation unconfirmed`
       const subject = session ? { id: session.id, hostId: session.control.hostId, agentSessionId: session.control.agentSessionId, runId: session.control.run.runId } : undefined
-      faces.set(key, { key, name, identity, roles, subject, label: '', executorId: session?.executorId, providerId: session?.providerId, appearance: executorAvatarAppearance(state.config, session?.executorId) })
+      faces.set(key, { key, name, sessionId, reference: typeof reference === 'string' ? undefined : reference, roles, subject, label: '', executorId: session?.executorId, providerId: session?.providerId, appearance: executorAvatarAppearance(state.config, session?.executorId) })
     }
     const next = [...faces.values()].map(face => {
-      const label = `${face.name} · ${face.roles.join(' / ')} · ${face.identity}`
+      const roles = face.roles.join(' / ')
+      const label = face.name ? `${face.name} · ${roles}` : `${roles} · Session ${memberReference(face).join(' · ')} · ${LOCATION_UNCONFIRMED}`
       const previous = held.find(item => item.key === face.key)
       return previous?.label === label && previous.providerId === face.providerId && previous.executorId === face.executorId && previous.appearance === face.appearance && previous.subject?.id === face.subject?.id && previous.subject?.runId === face.subject?.runId ? previous
-        : { key: face.key, name: face.name, label, identity: face.identity, roles: face.roles.join(' / '), subject: face.subject, providerId: face.providerId, executorId: face.executorId, appearance: face.appearance }
+        : { ...face, label, roles }
     })
     if (next.length !== held.length || next.some((face, i) => face !== held[i])) held = next
     return held
   }
+}
+
+function memberReference({ sessionId, reference }: Pick<Face, 'sessionId' | 'reference'>) {
+  const id = compactReferenceId(sessionId)
+  return reference ? [id, compactReferenceId(reference.source.runtimeId)] : [id]
 }
 
 /** Resolve only the exact held presentation; no local namesake or unrelated timeline reading. */
@@ -71,7 +91,7 @@ function faceContext(face: Face) {
   return agentContextForSession(session, state.timelines[session.id], state.agentNames[session.id], workspaceForSession(state.config, session, topics), topicIdForSession(state.config, session, topics))
 }
 function FaceAvatar({ face }: { face: Face }) {
-  return <ResolvedAgentAvatar label={face.name} providerId={face.providerId} executorId={face.executorId} appearance={face.appearance} size={22} />
+  return <ResolvedAgentAvatar label={face.name ?? face.roles} providerId={face.providerId} executorId={face.executorId} appearance={face.appearance} size={22} />
 }
 function GoalAgentButton({ face, row = false, branch }: { face: Face; row?: boolean; branch?: ReturnType<typeof Menu.useHoverMenuBranch> }) {
   const preview = useAgentInformationPreview(undefined, true, undefined, undefined, () => { useAppStore.getState().selectSession(face.subject!.id) },
@@ -86,19 +106,44 @@ function GoalAgentButton({ face, row = false, branch }: { face: Face; row?: bool
   return row ? <Menu.Item asChild onSelect={event => event.preventDefault()}>{button}</Menu.Item> : button
 }
 function MemberText({ face }: { face: Face }) {
-  const status = useAppStore(state => { const session = faceSession(face, state); return session ? sessionStatusLabel(session) : 'Current presentation unconfirmed' })
-  return <span className="goal-agent-menu__text"><strong>{face.name}</strong><small>{face.roles} · {status}</small><small className="goal-agent-menu__identity">{face.identity}</small></span>
+  const status = useAppStore(state => { const session = faceSession(face, state); return session ? sessionStatusLabel(session) : LOCATION_UNCONFIRMED })
+  return <span className="goal-agent-menu__text">
+    <strong>{face.name ?? face.roles}</strong>
+    <small>{face.name ? face.roles : <>Session {memberReference(face).map((part, index) => <Fragment key={index}>
+      {index ? ' · ' : null}<span className="goal-agent-menu__reference">{part}</span>
+    </Fragment>)}</>}</small>
+    <small className="goal-agent-menu__status">{status}</small>
+  </span>
+}
+function RetainedMember({ face }: { face: Face }) {
+  const [open, setOpen] = useState(false)
+  const detailsId = useId(), reference = face.reference
+  return <>
+    <Menu.Item className="tab-context-menu__item goal-agent-menu__member" aria-expanded={open} aria-controls={open ? detailsId : undefined}
+      onSelect={event => { event.preventDefault(); setOpen(value => !value) }}>
+      <FaceAvatar face={face} /><MemberText face={face} />
+      <ReferenceChevron className="goal-agent-menu__chevron" size={13} aria-hidden="true" />
+    </Menu.Item>
+    {open ? <dl id={detailsId} className="goal-agent-menu__source">
+      <div><dt>Session</dt><dd>{face.sessionId}</dd></div>
+      {reference ? <>
+        <div><dt>Execution runtime</dt><dd>{reference.execution.runtimeId}</dd></div>
+        <div><dt>Source runtime</dt><dd>{reference.source.runtimeId}</dd></div>
+        <div><dt>Space</dt><dd>{reference.source.spaceId}</dd></div>
+        <div><dt>Region</dt><dd>{reference.source.regionId}</dd></div>
+      </> : null}
+    </dl> : null}
+  </>
 }
 function GoalTeamMember({ face }: { face: Face }) {
   const branch = Menu.useHoverMenuBranch()
-  return face.subject ? <GoalAgentButton face={face} row branch={branch} />
-    : <Menu.Label className="goal-agent-menu__member"><FaceAvatar face={face} /><MemberText face={face} /></Menu.Label>
+  return face.subject ? <GoalAgentButton face={face} row branch={branch} /> : <RetainedMember face={face} />
 }
 function GoalTeamMenu({ faces, children, className, label }: { faces: readonly Face[]; children: ReactNode; className: string; label: string }) {
   return <Menu.Root><Menu.Trigger className={className} aria-label={label} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>{children}</Menu.Trigger>
     <Menu.Portal><Menu.Content className="tab-context-menu goal-agent-menu" side="bottom" align="end" sideOffset={6} collisionPadding={8}
       onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
-      <Menu.Label className="goal-agent-menu__heading">{faces.length === 1 ? 'Goal agent' : `Goal agents · ${faces.length}`}</Menu.Label>
+      {faces.length > 1 ? <Menu.Label className="goal-agent-menu__heading">Goal agents</Menu.Label> : null}
       {faces.map(face => <GoalTeamMember key={face.key} face={face} />)}
     </Menu.Content></Menu.Portal></Menu.Root>
 }
