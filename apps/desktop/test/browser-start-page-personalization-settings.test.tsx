@@ -29,7 +29,7 @@ const click = async (selector: string) => act(async () => {
 })
 const saved = async (f: Awaited<ReturnType<typeof renderSettings>>) => {
   await act(async () => { await f.uiSave.mock.results.at(-1)!.value })
-  expect(host.querySelector('[data-settings-save-bar]')?.textContent).toContain('Changes saved')
+  expect(host.querySelector('[data-settings-save-bar]')?.textContent).toContain('Start page saved')
 }
 async function renderSettings() {
   const f = await configOwnerFixture()
