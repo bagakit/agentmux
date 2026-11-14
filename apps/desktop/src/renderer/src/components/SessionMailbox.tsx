@@ -728,7 +728,7 @@ export function SessionMailbox({ pendingLayout, system, queued: workbenchQueue, 
             {observationError ? <SourceNotice title="Automatic native updates are unavailable" message={observationError.message} action="Refresh source" onAction={() => void refresh()} /> : null}
             {windowFrozen ? <SourceNotice title="The native source changed" message="This reading window is kept." action="Read latest records" onAction={() => void refresh()} /> : null}
             {historyError && !historyError.message.includes('unavailable in the web preview') ? <SourceNotice title="Failed to read native conversation history" message={historyError.message} action="Retry" onAction={() => void refresh()} /> : null}
-            {archive.error ? <SourceNotice title="Reading the saved input archive failed" message={archive.error} action="Retry saved inputs" onAction={() => void archive.refresh()} /> : null}
+            {archive.error ? <SourceNotice title="Saved input archive unavailable" message={archive.error} action="Retry saved inputs" onAction={() => void archive.refresh()} explainRetention={false} /> : null}
             {inputHistory ? <InputHistoryList history={inputHistory.history}
               localEntries={inputHistory.localEntries} onCopy={inputHistory.copy} {...(inputHistory.canFill !== false ? { onFill: inputHistory.fill, onFillLocal: inputHistory.fillLocal } : {})}
               onRefresh={() => { void inputMailbox.refresh(); void refresh(); void archive.refresh() }}
@@ -743,7 +743,7 @@ export function SessionMailbox({ pendingLayout, system, queued: workbenchQueue, 
               {hasMore ? <div className="composer-mailbox__boundary"><button type="button" className="composer-tool" onClick={() => void loadEarlier()}>Load earlier messages</button></div> : null}
             </>}
             {archive.loading ? <p role="status" className="composer-mailbox__boundary">Reading saved inputs…</p> : null}
-            {archive.nextCursor !== null ? <div className="composer-mailbox__boundary"><button type="button" className="composer-tool" disabled={archive.loading} onClick={archive.loadEarlier}>Load earlier saved inputs</button></div> : null}
+            {archive.nextCursor !== null ? <div className="composer-mailbox__boundary"><Button disabled={archive.loading} onClick={archive.loadEarlier}>Load earlier saved inputs</Button></div> : null}
           </>}
           </InputMailboxFrame>
         </> : null}

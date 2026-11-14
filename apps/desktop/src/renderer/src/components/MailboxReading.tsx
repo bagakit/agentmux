@@ -11,10 +11,10 @@ const CopyIcon = semanticIconComponent('action.copy')
 const DoneIcon = semanticIconComponent('status.selected')
 const WarningIcon = semanticIconComponent('status.warning')
 
-export function MailboxSourceNotice({ title, message, action, onAction }: { title: string; message: string; action: string; onAction(): void }) {
+export function MailboxSourceNotice({ title, message, action, onAction, explainRetention = true }: { title: string; message: string; action: string; onAction(): void; explainRetention?: boolean }) {
   return <Notice density="compact" tone="unknown" className="composer-mailbox__source-notice"
     actions={<button type="button" className="composer-tool" onClick={onAction} title={action} aria-label={action}><ThemeActionRefreshIcon size={14} aria-hidden="true" /></button>}>
-    <details><summary>{title}</summary><p>{message}</p><p>Existing records are kept. {action} to read this same source again.</p></details>
+    <details><summary>{title}</summary><p>{message}</p>{explainRetention ? <p>Existing records are kept. {action} to read this same source again.</p> : null}</details>
   </Notice>
 }
 

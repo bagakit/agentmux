@@ -5,6 +5,7 @@ import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { restoreComposerInput } from '@agentmux/client-ui/composer-semantic-reference'
+import { originalInputDeliveryConfirmed } from '@agentmux/client-ui/input-receipt-projection'
 import { currentCoreSpatialGraph, useAppStore } from '../store'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { localRetainedInputs, type LocalInputTarget, type LocalRetainedInput } from '../lib/local-retained-inputs'
@@ -15,7 +16,19 @@ import { useWorkbenchDocumentVisibility } from '../lib/workbench-window-registry
 
 const SavedInputIcon = semanticIconComponent('action.save')
 
-function LocalInput({ input }: { input: LocalRetainedInput }) {
+function savedInputReceipt(entry: NonNullable<LocalRetainedInput['entry']>): string {
+  const receipt = entry.inputReceipt
+  if (receipt && originalInputDeliveryConfirmed(receipt)) {
+    switch (receipt.status) {
+      case 'terminal-confirmed': return 'Terminal input confirmed'
+      case 'launch-carried': return 'Input carried at launch'
+      case 'admitted': return 'Input admitted'
+    }
+  }
+  return receipt ? `${receipt.status} · ${receipt.persistence}` : entry.resumeInputReceipt?.state ?? 'Not recorded here'
+}
+
+function LocalInput({ input, archived = false }: { input: LocalRetainedInput; archived?: boolean }) {
   const [copied, setCopied] = useState(false)
   const [open, setOpen] = useState(false)
   const body = open ? restoreComposerInput(input.text, input.entry?.inputImages) : ''
@@ -26,8 +39,8 @@ function LocalInput({ input }: { input: LocalRetainedInput }) {
     {open ? <>
       <dl className="session-record-details__facts"><div><dt>Original key</dt><dd>{input.key}</dd></div>
         {input.entry ? <><div><dt>Operation</dt><dd>{input.entry.operationId}</dd></div>
-          <div><dt>Saved state</dt><dd>{input.entry.status}{input.entry.archived ? ' · retained' : ''}{input.entry.movedToDraft ? ' · moved to draft' : ''}{input.entry.awaitingExplicitSend ? ' · explicit send required' : ''}</dd></div>
-          <div><dt>Original delivery receipt</dt><dd>{input.entry.inputReceipt ? `${input.entry.inputReceipt.status} · ${input.entry.inputReceipt.persistence}` : input.entry.resumeInputReceipt?.state ?? 'Not recorded here'}</dd></div></> : null}
+          <div><dt>Saved state</dt><dd>{archived ? 'Archived' : input.entry.status}{!archived && input.entry.archived ? ' · retained' : ''}{input.entry.movedToDraft ? ' · moved to draft' : ''}{input.entry.awaitingExplicitSend ? ' · explicit send required' : ''}</dd></div>
+          <div><dt>Delivery receipt</dt><dd>{savedInputReceipt(input.entry)}</dd></div></> : null}
         <div><dt>Association</dt><dd>{source ? `Runtime ${source.runtimeId} / ${source.agentSessionId}` : input.target ? `${input.target.hostId} / ${input.target.agentSessionId}` : 'Unknown · original key kept'}</dd></div>
       </dl>
       <textarea aria-label="Original saved input" readOnly value={body} rows={Math.min(8, Math.max(3, body.split('\n').length))} />
@@ -56,7 +69,7 @@ export function LocalRetainedInputs({ target }: { target?: LocalInputTarget }) {
     <p>Saved in this client. Copying does not send, retry or restore an Agent.</p>
     {!target ? <p className="muted">Old entries without a confirmed binding keep their original key and remain available here.</p> : null}
     {inputs.slice(0, limit).map((input, index) => <LocalInput key={JSON.stringify([input.kind, input.key, input.entry?.operationId, index])} input={input} />)}
-    {archived.map(input => <LocalInput key={JSON.stringify([input.key, input.entry!.operationId])} input={input} />)}
+    {archived.map(input => <LocalInput key={JSON.stringify([input.key, input.entry!.operationId])} input={input} archived />)}
     {!inputs.length && !archived.length && !archive.loading && !archive.error && archive.nextCursor === null ? <p>{target ? 'No exactly associated local inputs are listed. Unassociated entries remain in Focus → Drafts & queue.' : 'No saved drafts or queue entries are listed in this client.'}</p> : null}
     {inputs.length > limit ? <Button type="button" onClick={() => setLimit(value => value + 30)}>Show more ({inputs.length - limit})</Button> : null}
     {archive.loading ? <p role="status">Reading saved inputs…</p> : null}
