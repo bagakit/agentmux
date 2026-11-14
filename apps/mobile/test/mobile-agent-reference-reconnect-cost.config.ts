@@ -10,7 +10,7 @@ function replaceOnce(code: string, marker: string, replacement: string): string 
   if (code.split(marker).length !== 2) throw new Error('Reconnect cost probe did not match its loaded consumer or production hook')
   return code.replace(marker, replacement)
 }
-export default mergeConfig(base, { plugins: [{
+const config = mergeConfig(base, { plugins: [{
   name: 'measure-reference-reconnect-materialization', enforce: 'pre' as const,
   transform(code: string, id: string) {
     const path = id.split('?')[0]!
@@ -27,3 +27,5 @@ export default mergeConfig(base, { plugins: [{
     }
   }
 }] })
+config.test!.include = ['test/mobile-agent-reference-reconnect.test.tsx']
+export default config
