@@ -898,6 +898,8 @@ export async function registerIpc(args: {
   handle('config:save', (next: AppConfig, expected: AppConfig) => sessionInputOperationResult(() => configOwner.edit(expected, next)))
   const hostRuntimeReads = registerHostRuntimeObservationIpc({ handle: handleWithEvent,
     call: callUserRpc })
+  handleWithEvent('hosts:prepareTailcatKey', (_event, input: import('@agentmux/core').AgentMuxRpcParams<'settings.hosts.tailcat-key'>) =>
+    sessionInputOperationResult(() => callUserRpc('settings.hosts.tailcat-key', input)))
   handle('hosts:check', async (input: HostConfig) => await checkSettingsHost(input, args.runtime))
   const creationTrustPorts = { savedHost: (id: string) => config.hosts.find(host => host.id === id), call: callUserRpc }
   handleWithEvent('hosts:creationTrust', async (event, input: HostConfig) => {
@@ -2525,6 +2527,7 @@ export async function registerIpc(args: {
     goalControl: (request, _name, originalContext) => executeGoal(request, originalContext),
     applicationAccess: args.applicationAccess,
     hostConfiguration: hostId => structuredClone(configOwner.current.hosts.find(host => host.id === hostId) ?? null),
+    hostTailcatKey: (input, signal) => args.runtime.callOriginalCore('local', 'settings.hosts.tailcat-key', input, { transport: 'unix', ...(signal ? { signal } : {}) }),
     hostTailcat: async (hostId, signal) => (await args.runtime.callOriginalCore(hostId, 'settings.hosts.inspect', { hostId: 'local' }, { transport: 'unix', ...(signal ? { signal } : {}) })).tailcat,
     coreClients: () => args.runtime.rpcClients(),
     callOriginalCore: (hostId, method, params, context) => args.runtime.callOriginalCore(hostId, method, params, context),

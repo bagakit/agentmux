@@ -192,6 +192,7 @@ const api: AgentMuxPreloadApi = {
     }
   },
   hosts: {
+    prepareTailcatKey: async input => unwrapSessionInputOperationResult(await ipcRenderer.invoke('hosts:prepareTailcatKey', input)),
     home: async (host, context) => {
       const token = mintObjectId()
       const pending = ipcRenderer.invoke('hosts:home', token, host)

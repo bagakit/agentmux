@@ -43,3 +43,10 @@
 .remote-local-address-list > span > span { color: var(--text-3); }
 .remote-local-address-list code { margin: 0; font-family: var(--font-mono); overflow-wrap: anywhere; }
 .remote-local-address-detail small { color: var(--text-3); font-size: inherit; }
+.host-tailcat-preparation { display: grid; gap: var(--sp-2); padding: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); min-width: 0; }
+.host-tailcat-preparation__action { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); }
+.host-tailcat-preparation__action > span { flex: 1 1 180px; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.host-tailcat-preparation__receipt { margin: 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; }
+.host-tailcat-preparation .host-check-detail { margin: 0; }
+.host-tailcat-preparation input { font-family: var(--font-mono); }
+[data-tailcat-client] > .host-edit-grid { margin-top: var(--sp-3); }

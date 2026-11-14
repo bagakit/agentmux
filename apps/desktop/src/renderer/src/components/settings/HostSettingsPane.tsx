@@ -1,6 +1,7 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { parseHostConfigurations } from '@agentmux/host/host-configuration'
 import { HostTailcatListenerFields } from './HostTailcatListenerFields'
+import { HostTailcatClientFields } from './HostTailcatClientFields'
 import { hostConnectionSummary } from '../../lib/host-transport'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -23,8 +24,8 @@ import { HostTopology } from './HostTopology'
 import { HostRuntimePanel } from './HostRuntimePanel'
 import { HostNetworkPanel } from './HostNetworkPanel'
 import { hostNetworkSummary } from './host-network-view'
-import { HostNetworkMap } from './HostNetworkMap'
 import { localHostAddress } from './local-host-address'
+import { HostNetworkMap } from './HostNetworkMap'
 import { currentHostNetwork, useHostNetworkObservation } from './use-host-network-observation'
 import { HostApplicationAccessPanel } from './HostApplicationAccessPanel'
 import { HostSessionSummary, HostExecutorsSummary } from './HostWorkSummary'
@@ -92,6 +93,9 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   const network = useHostNetworkObservation(active && panel === 'overview' && !pendingHostNavigation && (measuredWide === true || view === 'editor')
     ? hosts.find(host => host.id === selectedId) ?? null : null,
     active ? config.hosts.find(host => host.kind === 'local') ?? null : null)
+  // Local connection drafts do not change the saved Owner's observed interfaces.
+  const addressForLocalHost = (host: HostConfig) => localHostAddress(currentHostNetwork(network.reads[host.id],
+    config.hosts.find(saved => saved.id === host.id && saved.kind === 'local') ?? host))
   const editor = useRef<HTMLDivElement>(null)
   const [removeRequest, setRemoveRequest] = useState<SshHostConfig | null>(null)
   useEffect(() => { if (!active) setRemoveRequest(null) }, [active])
@@ -251,14 +255,14 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
         {showTopology ? active ? <HostTopology selectedId={selectedId} onSelect={selectTopologyHost}
           onOpenLink={() => { if (selectedNetworkHost) selectTopologyHost(selectedNetworkHost.id) }}
           linkView={selectedNetworkHost ? <HostNetworkMap key={selectedNetworkHost.id} host={selectedNetworkHost} committed={config.hosts.find(host => host.id === selectedNetworkHost.id)} state={network.reads[selectedNetworkHost.id]} onRead={network.read} active={active && !pendingHostNavigation && panel === 'overview'} visible={network.visible} /> : null}
-          items={hosts.filter(host => matches(host.id)).map(host => ({ host, localAddress: host.kind === 'local' ? localHostAddress(currentHostNetwork(network.reads[host.id], host)) : undefined, network: hostNetworkSummary(currentHostNetwork(network.reads[host.id], host)), check: currentHostCheck(checks[host.id], host), projectCount: projectFacts.get(host.id)?.count ?? 0, sessionCount: sessionsByHost.get(host.id)?.length ?? 0 }))} /> : <div /> : <HostConnectionLibrary selectedId={selectedId} panel={panel} query={filter.query} onQuery={filterHosts} onSelect={selectHostPanel} focusRequest={returnFocus}
+          items={hosts.filter(host => matches(host.id)).map(host => ({ host, localAddress: host.kind === 'local' ? addressForLocalHost(host) : undefined, network: hostNetworkSummary(currentHostNetwork(network.reads[host.id], host)), check: currentHostCheck(checks[host.id], host), projectCount: projectFacts.get(host.id)?.count ?? 0, sessionCount: sessionsByHost.get(host.id)?.length ?? 0 }))} /> : <div /> : <HostConnectionLibrary selectedId={selectedId} panel={panel} query={filter.query} onQuery={filterHosts} onSelect={selectHostPanel} focusRequest={returnFocus}
           items={hosts.filter((host) => matches(host.id)).map((host) => {
             const check = currentHostCheck(checks[host.id], host)
             const projects = projectFacts.get(host.id)?.count ?? 0
             return {
               id: host.id, name: host.label,
               projectCount: projects,
-              detail: `${host.kind === 'local' ? localHostAddress(currentHostNetwork(network.reads[host.id], host)).label : hostConnectionSummary(host)}${projects ? ` · ${projects} ${projects === 1 ? 'project' : 'projects'}` : ''}`,
+              detail: `${host.kind === 'local' ? addressForLocalHost(host).label : hostConnectionSummary(host)}${projects ? ` · ${projects} ${projects === 1 ? 'project' : 'projects'}` : ''}`,
               mark: <HostIcon kind={host.kind} size={18} />,
               status: <span className={`settings-resource-row__check check-pill--${check?.state === 'error' ? check.result?.outcome ?? 'check-failed' : check?.state ?? 'idle'}`} role="img" aria-label={hostCheckLabel(check ?? { state: 'idle' })} title={hostCheckLabel(check ?? { state: 'idle' })}>{check?.state === 'checking' ? <ThemeStatusLoadingIcon animation="spin" size={13} /> : check?.state === 'ready' ? <ThemeStatusCompletedIcon size={13} /> : <ThemeStatusInfoIcon size={13} />}<span>{hostCheckLabel(check ?? { state: 'idle' })}</span></span>
             }
@@ -387,10 +391,7 @@ function HostConnectionFields({ host, open, onOpenChange, onChange, onClear }: {
         const next = event.target.value as NonNullable<SshHostConfig['transport']>
         onChange({ transport: next, ...(next !== 'ssh' && host.tailcat === undefined ? { tailcat: { address: '', keyFile: '' } } : {}) })
       }}><option value="ssh">SSH</option><option value="ssh-tailcat">SSH first, Tailcat backup</option><option value="tailcat">Tailcat only</option></select></label>
-      {transport !== 'ssh' ? <div className="host-edit-grid" data-tailcat-client>
-        <label className="host-edit-grid__wide"><span>Tailcat address <small>private credential</small></span><TextInput type="password" autoComplete="off" spellCheck={false} aria-label="Tailcat address" value={host.tailcat?.address ?? ''} onChange={event => onChange({ tailcat: { keyFile: host.tailcat?.keyFile ?? '', address: event.target.value } })} placeholder="tc…" /></label>
-        <label className="host-edit-grid__wide"><span>Client key file or name</span><TextInput aria-label="Tailcat client key" value={host.tailcat?.keyFile ?? ''} onChange={event => onChange({ tailcat: { address: host.tailcat?.address ?? '', keyFile: event.target.value } })} placeholder="agentmux-client" /></label>
-      </div> : null}
+      {transport !== 'ssh' ? <HostTailcatClientFields host={host} onChange={tailcat => onChange({ tailcat })} /> : null}
       <p className="settings-group-note">{transport === 'ssh' ? 'Use an alias from your SSH config, or a hostname. ' : transport === 'ssh-tailcat' ? 'Try SSH first; use Tailcat when channel setup fails. ' : 'Connect using the other Host’s private Tailcat address and your saved client key. '}Connects to an existing AgentMux service; Test verifies this connection.</p>
       <details className="host-edit-disclosure" open={open} onToggle={(event) => onOpenChange(event.currentTarget.open)}>
         <summary><span><strong>Connection options</strong><small>User, key, and service overrides</small></span><ThemeNavigationDownIcon size={13} /></summary>
