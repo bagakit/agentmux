@@ -9,11 +9,14 @@ const root = resolve(import.meta.dirname, '../../..')
 const evidence = process.env.AGENTMUX_SELECTION_EVIDENCE
 assert.ok(evidence, 'Explicit SelectionField evidence directory')
 const mutant = process.env.AGENTMUX_SELECTION_MUTANT ?? 'baseline'
-const file = 'apps/desktop/src/renderer/src/components/SelectionField.tsx'
+const file = 'packages/client-ui/src/components/SelectionField.tsx'
+const consumer = 'apps/desktop/src/renderer/src/components/SelectionField.tsx'
 const edits = {
   'saved-inference': { before: "missingOptionLabel = 'Not in current options'", after: "missingOptionLabel = 'Saved selection · not in current options'" },
   'drop-description': { before: 'aria-describedby={describedByIds} aria-labelledby={labelledBy}', after: 'aria-describedby={descriptionId} aria-labelledby={labelledBy}' },
-  'disable-missing': { before: '<Menu.RadioItem className="tab-context-menu__item selection-field__option" value={value} data-missing disabled={disabled}>', after: '<Menu.RadioItem className="tab-context-menu__item selection-field__option" value={value} data-missing disabled>' },
+  'disable-missing': { before: 'row({ value, label: labelForValue }, true)', after: 'row({ value, label: labelForValue, disabled: true }, true)' },
+  'menu-roles': { before: "role: hasDialog ? 'dialog' : 'listbox'", after: "role: hasDialog ? 'dialog' : 'menu'" },
+  'missing-return-focus': { before: 'if (!restoreSelectionFocus.current) return', after: 'if (!restoreSelectionFocus.current) { event.preventDefault(); return }' },
 }
 assert.ok(mutant === 'baseline' || edits[mutant], 'Known SelectionField mutation')
 const sha = text => createHash('sha256').update(text).digest('hex')
@@ -28,11 +31,11 @@ export default defineConfig({
     transform(input, id) {
       if (id.includes('?')) return
       const path = relative(root, id)
-      if (path !== file) return
+      if (path !== file && path !== consumer) return
       const original = readFileSync(id, 'utf8')
       assert.equal(input, original, 'Actual SelectionField source before transform')
       let code = input, applied = false
-      const edit = edits[mutant]
+      const edit = path === file ? edits[mutant] : undefined
       if (edit) {
         assert.equal(code.split(edit.before).length, 2, 'One unique SelectionField mutation target')
         code = code.replace(edit.before, edit.after)

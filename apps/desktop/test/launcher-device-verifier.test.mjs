@@ -15,11 +15,12 @@ const sources = {
   [sourceRoot + 'components/SourceAgentTargetSetup.tsx']: 'source-source',
   [sourceRoot + 'components/AgentWorkProjectAnchor.tsx']: 'anchor-source',
   [sourceRoot + 'components/LauncherAgentDevice.tsx']: 'device-source',
-  [sourceRoot + 'components/SelectionField.tsx']: 'selection-source',
+  [sourceRoot + 'components/SelectionField.tsx']: 'selection-host',
+  'packages/client-ui/src/components/SelectionField.tsx': 'selection-source',
 }
 const styles = {
   [sourceRoot + 'components/agent-work-mode.css']: 'setup-style',
-  [sourceRoot + 'styles/selection-field.css']: 'selection-style',
+  ['packages/client-ui/src/styles/selection-field.css']: 'selection-style',
 }
 const failureText = {
   'dialog-root-scroll': 'Location Cancel and Apply are visible before any scrolling in a short Region',
@@ -37,7 +38,7 @@ const mutationFile = {
   'dialog-path-disclosure': sourceRoot + 'components/AgentWorkProjectAnchor.tsx',
   'dialog-menu-boundary': sourceRoot + 'components/LauncherAgentDevice.tsx',
   'dialog-device-tail': sourceRoot + 'components/SourceAgentTargetSetup.tsx',
-  'dialog-device-scroll': sourceRoot + 'components/SelectionField.tsx',
+  'dialog-device-scroll': 'packages/client-ui/src/components/SelectionField.tsx',
 }
 let importSequence = 0
 

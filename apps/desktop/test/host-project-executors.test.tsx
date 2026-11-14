@@ -43,7 +43,7 @@ async function choose(id = 'shared') {
 }
 async function options() {
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Prepare an Agent"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
-  return [...document.querySelectorAll('.selection-field__menu [role="menuitemradio"]')]
+  return [...document.querySelectorAll('.selection-field__menu [role="option"]')]
 }
 async function open() {
   await act(async () => {

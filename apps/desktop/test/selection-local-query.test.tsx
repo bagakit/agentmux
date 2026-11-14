@@ -20,45 +20,45 @@ const settle = () => act(async () => { await new Promise(resolve => setTimeout(r
 const key = async (node: HTMLElement, value: string, extra: KeyboardEventInit = {}) => { await act(async () => node.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true, ...extra }))); await settle() }
 const field = (label = 'Goal project') => document.querySelector<HTMLButtonElement>(`[aria-label="${label}"].selection-field`)!
 const input = () => document.querySelector<HTMLInputElement>('.selection-field__search input')!
-const items = () => [...document.querySelectorAll<HTMLElement>('[role=menuitemradio][data-value]')]
+const items = () => [...document.querySelectorAll<HTMLElement>('[role=option][data-value]')]
 async function fill(value: string) { const node = input(); expect(node, 'original menu has a query input').not.toBeNull(); await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(node, value); node.dispatchEvent(new Event('input', { bubbles: true })) }); await settle() }
 async function mountGoal(demand = goal()) { const onUpdate = vi.fn(); useAppStore.setState({ config: { ...composerConfig, workspaces } }); await dom.render(<GoalCommonProperties demand={demand} onUpdate={onUpdate} />); await key(field(), 'ArrowDown'); return onUpdate }
 
 it('filters the original Goal project locally without changing saved value until explicit selection', async () => {
   const changed = await mountGoal()
   expect(input()).not.toBeNull(); expect(document.activeElement).toBe(input())
-  expect(document.querySelector('[aria-checked=true]')?.textContent).toContain('Project 3')
+  expect(document.querySelector('[aria-selected=true]')?.textContent).toContain('Project 3')
   await fill('Project 12')
   expect(items().map(item => item.dataset.value)).toEqual([projectId(12)])
   expect(field().dataset.value).toBe(projectId(3)); expect(changed).not.toHaveBeenCalled()
   await key(input(), 'Enter'); expect(changed).not.toHaveBeenCalled()
   await key(input(), 'ArrowDown', { ctrlKey: true }); expect(document.activeElement).toBe(input()); expect(changed).not.toHaveBeenCalled()
-  await key(input(), 'ArrowDown'); expect(document.activeElement).toBe(items()[0]); expect(items()[0]!.getAttribute('aria-checked')).toBe('false'); expect(changed).not.toHaveBeenCalled()
-  await key(items()[0]!, 'Enter'); expect(changed).toHaveBeenCalledExactlyOnceWith({ projectId: projectId(12), projectName: 'Project 12' }); expect(document.querySelector('[role=menu]')).toBeNull(); expect(document.activeElement).toBe(field())
+  await key(input(), 'ArrowDown'); expect(document.activeElement).toBe(items()[0]); expect(items()[0]!.getAttribute('aria-selected')).toBe('false'); expect(changed).not.toHaveBeenCalled()
+  await key(items()[0]!, 'Enter'); expect(changed).toHaveBeenCalledExactlyOnceWith({ projectId: projectId(12), projectName: 'Project 12' }); expect(document.querySelector('.selection-field__menu')).toBeNull(); expect(document.activeElement).toBe(field())
 })
-it('keeps no-match, clear and IME local, then returns focus through the original Radix menu', async () => {
+it('keeps no-match, clear and IME local, then returns focus through the original selection trigger', async () => {
   const changed = await mountGoal()
   await fill('not observed')
   expect(items()).toHaveLength(0); expect(document.querySelector('[role=status]')?.textContent).toBe('No matching options.'); expect(changed).not.toHaveBeenCalled()
-  await key(input(), 'Tab'); const clear = document.querySelector<HTMLButtonElement>('[aria-label="Clear option search"]')!; expect(document.activeElement).toBe(clear)
+  const clear = document.querySelector<HTMLButtonElement>('[aria-label="Clear option search"]')!; expect(clear.tabIndex).toBe(0)
   await act(async () => clear.click()); expect(input().value).toBe(''); expect(document.activeElement).toBe(input())
   await fill('研究'); await key(input(), 'ArrowDown', { isComposing: true }); expect(document.activeElement).toBe(input()); await key(input(), 'Enter', { keyCode: 229 }); expect(changed).not.toHaveBeenCalled()
-  await key(input(), 'Escape', { isComposing: true }); expect(document.querySelector('[role=menu]')).not.toBeNull()
+  await key(input(), 'Escape', { isComposing: true }); expect(document.querySelector('.selection-field__menu')).not.toBeNull()
   await key(input(), 'ArrowDown'); expect(document.activeElement?.textContent).toContain('研究计划'); expect(changed).not.toHaveBeenCalled()
-  await key(document.activeElement as HTMLElement, 'Escape'); expect(document.querySelector('[role=menu]')).toBeNull(); expect(document.activeElement).toBe(field()); expect(changed).not.toHaveBeenCalled()
+  await key(document.activeElement as HTMLElement, 'Escape'); expect(document.querySelector('.selection-field__menu')).toBeNull(); expect(document.activeElement).toBe(field()); expect(changed).not.toHaveBeenCalled()
   await key(field(), 'ArrowDown'); expect(input().value).toBe('')
 })
 it('preserves unknown and disabled original choices and searches descriptions without granting eligibility', async () => {
   const changed = vi.fn()
   await dom.render(<SelectionField label="Original choices" value="original-unknown" options={options} onValueChange={changed} />)
-  await key(field('Original choices'), 'ArrowDown'); expect(document.querySelector('[aria-checked=true]')?.textContent).toContain('Not in current options')
+  await key(field('Original choices'), 'ArrowDown'); expect(document.querySelector('[aria-selected=true]')?.textContent).toContain('Not in current options')
   await fill('Distinct original'); expect(items().map(item => item.dataset.value)).toEqual(['project-7']); expect(field('Original choices').dataset.value).toBe('original-unknown')
   await fill('Project 5'); expect(items()).toHaveLength(1); expect(items()[0]!.getAttribute('aria-disabled')).toBe('true'); await act(async () => items()[0]!.click()); expect(changed).not.toHaveBeenCalled()
   await key(input(), 'ArrowDown'); expect(document.activeElement).toBe(input()); expect(changed).not.toHaveBeenCalled()
 })
 it('retains an unavailable Goal project as original saved identity while filtering other current projects', async () => {
   const changed = await mountGoal({ ...goal(), projectId: 'unavailable-project', projectName: 'Original project' })
-  expect(document.querySelector('[aria-checked=true]')?.textContent).toContain('Original project · Unavailable')
+  expect(document.querySelector('[aria-selected=true]')?.textContent).toContain('Original project · Unavailable')
   await fill('Original project'); expect(items()).toHaveLength(1); expect(items()[0]!.getAttribute('aria-disabled')).toBe('true'); await act(async () => items()[0]!.click()); expect(changed).not.toHaveBeenCalled()
   expect(field().dataset.value).toBe('unavailable-project')
 })
@@ -71,9 +71,9 @@ it('preserves a same-source query through option refresh, but closes it across o
   expect(input()).toBe(original); expect(document.activeElement).toBe(original); expect(input().value).toBe('Project 12'); expect(items()).toHaveLength(0); expect(input().selectionStart).toBe(2); expect(input().selectionEnd).toBe(6)
   await act(async () => useAppStore.setState({ config: { ...composerConfig, workspaces } })); await settle()
   expect(input()).toBe(original); expect(document.activeElement).toBe(original); expect(input().value).toBe('Project 12'); expect(items().map(item => item.dataset.value)).toEqual([projectId(12)])
-  await dom.render(<GoalCommonProperties demand={goal('source-b')} onUpdate={changed} />); await settle(); expect(document.querySelector('[role=menu]')).toBeNull(); expect(changed).not.toHaveBeenCalled()
+  await dom.render(<GoalCommonProperties demand={goal('source-b')} onUpdate={changed} />); await settle(); expect(document.querySelector('.selection-field__menu')).toBeNull(); expect(changed).not.toHaveBeenCalled()
   await key(field(), 'ArrowDown'); expect(input().value).toBe(''); await fill('Project 1')
-  await dom.render(<GoalCommonProperties demand={goal()} onUpdate={changed} />); await settle(); expect(document.querySelector('[role=menu]')).toBeNull(); await key(field(), 'ArrowDown'); expect(input().value).toBe('')
+  await dom.render(<GoalCommonProperties demand={goal()} onUpdate={changed} />); await settle(); expect(document.querySelector('.selection-field__menu')).toBeNull(); await key(field(), 'ArrowDown'); expect(input().value).toBe('')
 })
 it('uses the original Parent goal consumer while short and remote-owned choices retain their simple menu', async () => {
   const changed = vi.fn(), demand = goal()
@@ -82,7 +82,7 @@ it('uses the original Parent goal consumer while short and remote-owned choices 
   await act(async () => { const details = dom.container.querySelector('details')!; details.open = true; details.dispatchEvent(new Event('toggle')) }); await settle()
   await key(field('Parent goal'), 'ArrowDown'); await fill('Project 8'); await key(input(), 'ArrowDown'); await key(document.activeElement as HTMLElement, 'Enter'); expect(changed).toHaveBeenCalledExactlyOnceWith({ parentDemandId: 'project-8' })
   await dom.render(<SelectionField label="Remote results" value="project-3" options={options} onValueChange={changed} searchable={false} />); await key(field('Remote results'), 'ArrowDown'); expect(input()).toBeNull(); await key(document.activeElement as HTMLElement, 'Escape')
-  await dom.render(<GoalCommonProperties demand={demand} onUpdate={changed} />); await key(field('Goal priority'), 'ArrowDown'); expect(input()).toBeNull(); await key(document.querySelector('[role=menu]')!, 'u'); expect(document.activeElement?.textContent).toContain('Urgent')
+  await dom.render(<GoalCommonProperties demand={demand} onUpdate={changed} />); await key(field('Goal priority'), 'ArrowDown'); expect(input()).toBeNull(); await key(document.querySelector('.selection-field__menu')!, 'u'); expect(document.activeElement?.textContent).toContain('Urgent')
 })
 it('filters original Agent creation directories by description without creating a Session or saving relationships', async () => {
   const { GoalAgentPicker } = await import('../src/renderer/src/components/GoalAgentPicker')

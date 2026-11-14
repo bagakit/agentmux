@@ -80,9 +80,9 @@ it('routes the actual selector menu and its keyboard selection to its workface d
   await render(document,field); const trigger=host.querySelector<HTMLButtonElement>('button')!
   await migrate(child,field)
   await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true})))
-  await vi.waitFor(()=>expect(child.querySelector('[role=menu]')).not.toBeNull())
-  expect(document.querySelector('[role=menu]')).toBeNull()
-  const second=child.querySelector<HTMLElement>('[data-value=second][role=menuitemradio]')!
+  await vi.waitFor(()=>expect(child.querySelector('[role=listbox]')).not.toBeNull())
+  expect(document.querySelector('[role=listbox]')).toBeNull()
+  const second=child.querySelector<HTMLElement>('[data-value=second][role=option]')!
   await act(async()=>{second.focus();second.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))})
   expect(changed).toHaveBeenCalledExactlyOnceWith('second')
 })

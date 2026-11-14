@@ -52,7 +52,7 @@ it('marks the unknown placeholder disabled when the whole field is disabled', as
   const trigger = container.querySelector<HTMLButtonElement>('button')!
   await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))); await settle()
   await act(async () => root.render(<SelectionField label="Original choice" value="unsaved-draft" options={options} onValueChange={changed} disabled />)); await settle()
-  const missing = document.querySelector<HTMLElement>('.selection-field__menu [role="menuitemradio"][aria-checked="true"]')!
+  const missing = document.querySelector<HTMLElement>('.selection-field__menu [role="option"][aria-selected="true"]')!
   expect(missing.getAttribute('aria-disabled')).toBe('true')
   expect(changed).not.toHaveBeenCalled()
 })
@@ -62,9 +62,39 @@ it('keeps an unknown missing value visible and selectable without marking it dis
   const trigger = container.querySelector<HTMLButtonElement>('button')!
   expect(trigger.disabled).toBe(false)
   await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))); await settle()
-  expect(document.querySelector('[role="menu"]')).not.toBeNull()
-  const missing = document.querySelector<HTMLElement>('.selection-field__menu [role="menuitemradio"][aria-checked="true"]')!
+  expect(document.querySelector('.selection-field__menu[role=listbox]')).not.toBeNull()
+  expect(document.querySelector('[role=menu]')).toBeNull()
+  const missing = document.querySelector<HTMLElement>('.selection-field__menu [role="option"][aria-selected="true"]')!
   expect(missing.getAttribute('aria-disabled')).not.toBe('true')
   expect(missing.textContent).toContain('Not in current options')
   expect(missing.querySelector('span[title]')?.getAttribute('title')).toBe('unsaved-draft')
+})
+
+
+it('moves focus independently from the selected value and cancels to the original control', async () => {
+  const changed = vi.fn()
+  await act(async () => root.render(<div dir="rtl"><SelectionField label="Original choice" value="b"
+    options={[...options, { value: 'c', label: 'Charlie' }, { value: 'd', label: 'Unavailable', disabled: true }]} onValueChange={changed} /></div>))
+  const trigger = container.querySelector<HTMLButtonElement>('button')!
+  const key = async (target: HTMLElement, key: string) => {
+    await act(async () => target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })))
+    await settle()
+  }
+  trigger.style.direction = 'rtl'
+  trigger.focus()
+  await key(trigger, 'ArrowDown')
+  const listbox = document.querySelector<HTMLElement>('.selection-field__menu[role=listbox]')!
+  expect(listbox).not.toBeNull()
+  expect(listbox.dir).toBe('rtl')
+  expect((document.activeElement as HTMLElement).dataset.value).toBe('b')
+  await key(document.activeElement as HTMLElement, 'Home')
+  expect((document.activeElement as HTMLElement).dataset.value).toBe('a')
+  await key(document.activeElement as HTMLElement, 'End')
+  expect((document.activeElement as HTMLElement).dataset.value).toBe('c')
+  expect(listbox.querySelector('[aria-selected=true]')?.textContent).toBe('Bravo')
+  expect(changed).not.toHaveBeenCalled()
+  await key(document.activeElement as HTMLElement, 'Escape')
+  expect(document.activeElement).toBe(trigger)
+  expect(document.querySelector('.selection-field__menu')).toBeNull()
+  expect(trigger.dataset.value).toBe('b')
 })
