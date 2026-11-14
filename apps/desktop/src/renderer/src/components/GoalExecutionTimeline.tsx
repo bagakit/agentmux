@@ -69,6 +69,15 @@ export function GoalExecutionTimeline({ demand, nodes, selected, onSelect }: { d
     }
     rows.unshift(schedule)
   }
+  const onlyRow = rows.length === 1 ? rows[0] : undefined
+  if (wholeGoal && onlyRow?.events.length && !onlyRow.target && !onlyRow.active && !onlyRow.planned) {
+    return <section className="goal-execution-time" aria-label="Execution timeline" data-goal-execution-time>
+      <h3><TimelineIcon size={14} aria-hidden="true" />Execution timeline</h3>
+      <ul className="goal-execution-time__receipts" data-goal-time-row={onlyRow.id}>{onlyRow.events.map(event => <li key={event.id}>
+        <strong>{onlyRow.title}</strong><span>{event.label}</span><time dateTime={new Date(event.at).toISOString()}>{format.format(event.at)}</time>
+      </li>)}</ul>
+    </section>
+  }
   const byId = new Map(nodes.map(item => [item.node.id, item]))
   let start = Infinity, end = -Infinity
   for (const row of rows) {

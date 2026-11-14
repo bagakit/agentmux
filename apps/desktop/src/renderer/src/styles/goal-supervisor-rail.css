@@ -30,3 +30,7 @@
 .goal-supervisor-rail__detail { min-width: 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; }
 .goal-supervisor-rail__detail > summary { width: fit-content; cursor: pointer; color: var(--text-3); }
 .goal-supervisor-rail__detail p { margin: var(--sp-2) 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.goals-document .goal-supervisor-rail__record > summary { display: flex; flex-direction: row-reverse; justify-content: flex-end; gap: var(--sp-2); color: var(--text); }
+.goals-document .goal-supervisor-rail__record > summary::before { width: 10px; height: 10px; color: var(--text-3); }
+.goals-document .goal-supervisor-rail__coordination { padding-top: var(--sp-5); }

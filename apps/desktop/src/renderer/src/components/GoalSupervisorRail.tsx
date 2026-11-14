@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import { compactReferenceId } from '@agentmux/client-ui/display-name'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { demandAgentReferenceLabel, goalSupervisorHostWitnesses } from '@agentmux/demand/relations'
 import { delegationWorkerHostId, type DemandDelegation } from '@agentmux/demand/delegations'
@@ -93,6 +92,8 @@ export function GoalSupervisorRail({ demand, currentDelivery, onOpenDiscussion, 
   const [all, setAll] = useState(false)
   const entries = useMemo(() => coordinationEntries(demand), [demand.plan, demand.delegations, demand.patrols, demand.decisions])
   const supervisor = demand.supervisorSessionId, hosts = goalSupervisorHostWitnesses(demand)
+  const observation = demand.responsibility?.supervisor
+  const diagnostic = observation && { ended: 'Supervisor Run ended', blocked: 'Supervisor needs attention', unknown: 'Supervisor observation unconfirmed', missing: 'Supervisor unassigned', available: '', busy: '' }[observation.state]
   const rows = demand.responsibility?.executions ?? []
   const next = rows.find(row => row.nextOwner.kind === 'manager' && row.alert !== null)
     ?? rows.find(row => row.nextOwner.kind === 'manager' && row.phase !== 'closed')
@@ -104,11 +105,15 @@ export function GoalSupervisorRail({ demand, currentDelivery, onOpenDiscussion, 
     <div className="goal-supervisor-rail__identity">
       {supervisor ? typeof supervisor !== 'string' || hosts.length === 1
         ? <GoalContinuationAgent agentSessionId={supervisor} {...(typeof supervisor === 'string' ? { hostId: hosts[0]! } : {})} active={active} size={32} />
-        : <strong title={demandAgentReferenceLabel(supervisor)}>Session {compactReferenceId(supervisor)}</strong>
+        : <strong title={demandAgentReferenceLabel(supervisor)}>{hosts.length ? 'Supervisor Host is conflicting' : 'Supervisor Host is unconfirmed'}</strong>
         : <strong>No Supervisor assigned</strong>}
     </div>
-    {typeof supervisor === 'string' ? <p className="goal-supervisor-rail__source">{hosts.length === 1 ? `Host ${hosts[0]}` : hosts.length ? 'Supervisor Host is conflicting' : 'Supervisor Host is unconfirmed'}</p> : null}
-    {demand.responsibility && !['available', 'busy'].includes(demand.responsibility.supervisor.state) ? <p className="goal-supervisor-rail__issue" role="status">{demand.responsibility.supervisor.reason}</p> : null}
+    {diagnostic ? <p className="goal-supervisor-rail__issue" role="status">{diagnostic}</p> : null}
+    {typeof supervisor === 'string' || diagnostic ? <details className="goal-supervisor-rail__detail" data-goal-supervisor-source>
+      <summary>Supervisor source</summary>
+      {typeof supervisor === 'string' ? <p className="goal-supervisor-rail__source">{hosts.length === 1 ? `Host ${hosts[0]}` : hosts.length ? 'Supervisor Host is conflicting' : 'Supervisor Host is unconfirmed'} · Session {supervisor}</p> : null}
+      {diagnostic ? <p>{observation?.reason}</p> : null}
+    </details> : null}
     {currentDelivery ? <button type="button" className="goal-supervisor-rail__review" onClick={event => onRevealAttempt(currentDelivery.nodeId, currentDelivery.operationId, event.currentTarget)}>
       <ReviewIcon size={16} aria-hidden="true" /><span>Awaiting review<small>{currentDelivery.title}</small></span><ForwardIcon size={14} aria-hidden="true" />
     </button> : null}
@@ -120,14 +125,17 @@ export function GoalSupervisorRail({ demand, currentDelivery, onOpenDiscussion, 
     <section className="goal-supervisor-rail__coordination" aria-label="Coordination history">
       <h3>Coordination timeline</h3>
       {entries.length ? <ol className="goal-supervisor-rail__timeline">{shown.map(entry => <li key={entry.key} data-goal-coordination={entry.key}>
-        <strong className="goal-supervisor-rail__event-title">{entry.label}</strong>
+        <details className="goal-supervisor-rail__detail goal-supervisor-rail__record">
+          <summary><strong className="goal-supervisor-rail__event-title">{entry.label}</strong></summary>
+          {entry.detail ? <p>{entry.detail}</p> : null}
+          <span className="goal-supervisor-rail__operation">{entry.sourceKind} · <code>{entry.sourceId}</code></span>
+        </details>
         <div className="goal-supervisor-rail__event-head"><time dateTime={new Date(entry.at).toISOString()} title={new Date(entry.at).toLocaleString()}>{coordinationTime.format(entry.at)}</time><span aria-hidden="true">·</span>
           {entry.author?.kind === 'agent' && entry.author.hostId ? <CoordinationAgentAuthor author={entry.author} />
             : <span className="goal-supervisor-rail__author">{authorLabel(entry.author)}</span>}</div>
         {entry.attempt ? <button type="button" className="goal-supervisor-rail__attempt" data-goal-coordination-node={entry.attempt.nodeId} data-goal-coordination-attempt={entry.attempt.operationId}
           aria-label={`Read ${entry.attempt.title} · ${entry.label}`} onClick={event => onRevealAttempt(entry.attempt!.nodeId, entry.attempt!.operationId, event.currentTarget)}>{entry.attempt.title}<span aria-hidden="true">↗</span></button> : null}
-        {entry.detail ? <details className="goal-supervisor-rail__detail"><summary>Read record</summary><p>{entry.detail}</p></details> : null}
-        <span className="goal-supervisor-rail__operation" title={`${entry.sourceKind} ${entry.sourceId}`} aria-label={`${entry.sourceKind} ${entry.sourceId}`}>{entry.sourceKind} · <code>{compactReferenceId(entry.sourceId)}</code></span>
+
       </li>)}</ol> : <p className="goal-supervisor-rail__empty">No coordination records yet.</p>}
       {entries.length > RECENT ? <Button type="button" aria-expanded={all} onClick={() => setAll(value => !value)}>{all ? 'Show recent only' : `Show ${entries.length - RECENT} earlier`}</Button> : null}
     </section>

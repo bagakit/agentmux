@@ -100,7 +100,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
     if (details) details.open = true
     revealWork(section)
   }
-  function revealOriginalWork(source: Extract<GoalNextStepSource, { kind: 'start' | 'delegation' }>) {
+  function revealOriginalWork(source: Extract<GoalNextStepSource, { kind: 'start' | 'delegation' | 'patrol' }>) {
     const operation = CSS.escape(source.operationId)
     const detail = detailRef.current
     const pending = source.kind === 'start' ? detail?.querySelector<HTMLElement>(`[data-goal-retained-operation="${operation}"]`) : null
@@ -189,7 +189,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   const projection = useMemo(() => goalPlanProjection(demand, fact), [demand, fact])
   const deliveries = useMemo(() => goalPlanDeliveries(projection), [projection])
   const currentDelivery = deliveries[0]
-  const currentWork = !acknowledgementFeedback.failure && (fact.source.kind === 'start' || fact.source.kind === 'delegation') ? fact.source : null
+  const currentWork = !acknowledgementFeedback.failure && (fact.source.kind === 'start' || fact.source.kind === 'delegation' || fact.source.kind === 'patrol') ? fact.source : null
   const plan = <div ref={planRef} tabIndex={-1} className="goals-detail__plan" data-goal-reading-section="plan" data-goal-reading-id={demand.id} data-goal-reading-runtime={demand.address?.runtimeId} data-goal-reading-namespace={demand.address?.namespace}>
     <GoalPlanGraph demand={demand} projection={projection} reveal={planReveal} onOpenGoalWork={currentWork ? () => revealOriginalWork(currentWork) : undefined}
       planLink={demand.address ? <Button type="button" onClick={() => void copyLink('plan')}>{copied === 'plan' ? 'Plan link copied' : 'Copy plan link'}</Button> : null}
@@ -210,7 +210,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
         <div className="goals-detail__identity"><GoalStageMark stage={stage} />
           <div className="goals-detail__title">
             <ComposerTextarea className="goals-title" aria-label="Goal title" value={title} onValueChange={value => editGoalDraft(demand.id, 'title', value)} rows={1} onBlur={() => { if (titleDirty && title.trim()) void saveGoalDrafts(demand.id, ['title']) }} />
-            <p className="goals-detail__stage" data-goal-detail-stage><strong>{next}</strong></p>
+            <p className="goals-detail__stage"><strong data-goal-detail-stage>{next}</strong>{currentWork ? <button type="button" className="goals-detail__current-work" onClick={() => revealOriginalWork(currentWork)}>{currentWork.kind === 'patrol' ? 'View original inspection' : 'View current work'}<ThemeNavigationForwardIcon size={12} aria-hidden="true" /></button> : null}</p>
           </div>
         </div>
         <div className="goals-detail__actions">
@@ -218,7 +218,6 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
           {projection.progress ? <span className="goals-detail__progress" data-goal-meta-plan={`${projection.progress.done}/${projection.progress.total}`}>
             <ThemeDoneIcon size={14} aria-hidden="true" />Plan {projection.progress.done} of {projection.progress.total} done</span> : null}
           {currentDelivery ? <Button variant="primary" onClick={event => revealAttempt(currentDelivery.node.id, currentDelivery.delegation.operationId, event.currentTarget)}>View delivery<ThemeNavigationForwardIcon size={13} aria-hidden="true" /></Button> : null}
-          {currentWork ? <Button className="goals-detail__current-work" onClick={() => revealOriginalWork(currentWork)}>View current work<ThemeNavigationForwardIcon size={12} aria-hidden="true" /></Button> : null}
           {(fact.source.kind === 'definition' || fact.source.kind === 'results') && !acknowledgementFeedback.failure
             ? <Button type="button" onClick={() => revealGoalReview(fact.source.kind === 'definition')}>{fact.source.kind === 'results' ? 'Read results' : 'Read success criteria'}</Button> : null}
           {queue && queue.total > 1 ? <span className="goals-detail__queue" data-goal-queue><span>{GOAL_GROUP_LABELS[queue.stage]} · {queue.index} of {queue.total}</span>{queue.nextId ? <Button type="button" data-goal-queue-next aria-label={`Next goal that ${QUEUE_NAMES[queue.stage]}`} onClick={() => onOpenGoal?.(queue.nextId!)}>Next<ThemeNavigationForwardIcon size={13} /></Button> : null}</span> : null}
@@ -232,8 +231,8 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
           {hasActivity ? <button type="button" aria-current={visibleSection === 'activity' ? 'location' : undefined} onClick={() => revealWork(activityRef.current)}>Activity</button> : null}
           <button type="button" className="goals-detail__team-link" aria-current={visibleSection === 'supervisor' ? 'location' : undefined} onClick={() => revealSupervisor()}>Supervisor</button>
           {demand.address ? <button type="button" className="goals-detail__copy" onClick={() => void copyLink('goal')}>{copied === 'goal' ? 'Goal link copied' : 'Copy goal link'}</button> : null}
-        </nav>
         {!demand.address ? <details className="goals-detail__address-issue"><summary>Goal address unconfirmed</summary><p className="goals-caption">{demand.addressIssue ?? 'The original Goal owner has not confirmed its address. You can keep reading and working with this goal.'}</p></details> : null}
+        </nav>
         {copyIssue ? <p className="goals-service" role="status">Link could not be copied. {copyIssue}</p> : null}
         {moteError ? <div className="goals-service" role="status">{moteError.mode === 'open' ? 'Goal saved. The discussion could not be opened.' : `${moteError.mode === 'plan' ? 'Planning' : moteError.mode === 'grill' ? 'Goal' : 'Check'} request delivery is unconfirmed. Your goal and current work are kept.`} <span>{moteError.message}</span><Button type="button" disabled={Boolean(motePending)} onClick={onRetryMote}>{moteError.mode === 'open' ? 'Retry opening discussion' : moteError.mode === 'plan' ? 'Check planning request' : moteError.mode === 'grill' ? 'Retry goal request' : 'Retry check request'}</Button></div> : null}
         <div className="goals-detail__main">

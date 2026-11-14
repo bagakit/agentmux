@@ -106,7 +106,9 @@ export function GoalPatrolControl({ demand, compact = false, embedded = false, p
     targetHostId && manager.hostId === targetHostId && manager.state !== 'ended' && manager.state !== 'unknown' && !patrol.attempts.some(a => a.attemptedAt) && (!attempt || attempt.target.runId !== manager.runId)
   const openConversation = targetSessionId ? <Button type="button" onClick={() => requestAgentConversationFloatingOpen(targetHostId ? targetSessionId : null, targetHostId,
     targetHostId ? undefined : 'The original Supervisor destination is unconfirmed. Check the retained inspection to read its destination.', undefined, entryContext)}>{targetName ? `Open ${targetName} conversation` : 'Open owner conversation'}</Button> : null
-  return <div className={`goal-patrol${compact ? ' goal-patrol--compact' : ''}`} aria-label="PMO 巡查" onClick={event => event.stopPropagation()}>
+  return <div className={`goal-patrol${compact ? ' goal-patrol--compact' : ''}`} aria-label="PMO 巡查"
+    data-goal-work-kind={embedded && patrol ? 'patrol' : undefined} data-goal-work-operation={embedded ? patrol?.operationId : undefined}
+    tabIndex={embedded && patrol ? -1 : undefined} onClick={event => event.stopPropagation()}>
     <div className="goal-patrol__actions">
       <button type="button" className={(primary ?? !pending) && !needsSupervisor && !firstDestination ? 'primary-button' : 'small-button'} aria-busy={busy}
         aria-label={pending ? 'Check original inspection' : targetName ? `Request inspection from ${targetName}` : 'Request owner inspection'} onClick={() => {

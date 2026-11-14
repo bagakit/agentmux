@@ -76,7 +76,11 @@ export function GoalDelegationWork({ demand, active = true, compact = false, emb
     } catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
   }
   const startRecords = starts.map(row => ({ key: `start:${row.start.operationId}`, element: <GoalStartWork key={row.start.operationId} rows={[row]} supervisorSessionId={current.supervisorSessionId} active={active} openAgent={openAgent} review={review} embedded={embedded} responsibilities={embedded ? responsibilities : undefined} focus={focus} primary={primary} /> }))
+  const planTitles = new Map(current.plan?.nodes.map(node => [node.id, node.title]))
   const delegationRecords = rows.map(row => ({ key: `delegation:${row.delegation.operationId}`, element: <article className="goal-delegation__item" key={row.delegation.operationId} tabIndex={-1} aria-label={row.next} data-goal-work-operation={row.delegation.operationId} data-goal-work-kind="delegation" data-goal-attempt={row.previousAttempt ? 'previous' : undefined}>
+      {embedded && row.delegation.planNodeId && planTitles.has(row.delegation.planNodeId) ? <p className="goal-work-area__plan-task" data-goal-work-node={row.delegation.planNodeId}>
+        Plan task · {planTitles.get(row.delegation.planNodeId)}
+      </p> : null}
       {row.previousAttempt ? <span className="goals-caption">Previous attempt</span> : null}
       <strong data-goal-current-conclusion={focus?.kind === 'delegation' && focus.operationId === row.delegation.operationId ? true : undefined} data-goal-current-source={focus?.kind === 'delegation' && focus.operationId === row.delegation.operationId ? 'delegation' : undefined}>{row.next}</strong>
       <p className="goal-delegation__identity">Agent <span><GoalContinuationAgent agentSessionId={row.delegation.workerAgentSessionId} hostId={delegationWorkerHostId(row.delegation)} active={active} size={14} /></span> · Follow-up {current.supervisorSessionId
