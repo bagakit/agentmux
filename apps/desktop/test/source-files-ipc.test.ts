@@ -5,6 +5,8 @@ import { sourceFilesHosts } from './helpers/source-files-hosts.js'
 import { registerSourceFilesIpc } from '../src/main/source-files-ipc.js'
 import { registerSpaceMountIpc } from '../src/main/space-mount-ipc.js'
 import { createPreloadSourceFiles } from '../src/preload/source-files.js'
+import { createPreloadSpaceMount } from '../src/preload/space-mount.js'
+import { createRendererSpaceMount } from '../src/renderer/src/lib/space-mount-api.js'
 import { createRendererSourceFiles } from '../src/renderer/src/lib/source-files-api.js'
 import { unwrapSessionInputOperationResult } from '../src/shared/session-input-result.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
@@ -76,4 +78,23 @@ it('the actual IPC owner preserves a Core result obtained before a late cancella
   const response = unwrapSessionInputOperationResult(await pending) as any
   expect(response).toMatchObject({ result: { operationId: params.operationId, result: { filesystem: 'created' } } })
   expect(await readdir(f.source.project)).toContain(params.path)
+}, 60000)
+
+it('a real directory registration ACK survives late cancellation through Main, preload and Renderer without another registration', async () => {
+  const f = await fixture(), spaces = createRendererSpaceMount(createPreloadSpaceMount(f.ipc as any)), target = f.target
+  const selected = await f.api.resolve(target, { kind: 'directory', path: f.sources[0]!.project })
+  expect(selected.status).toBe('registration-required')
+  if (selected.status !== 'registration-required') throw new Error('Original second directory packet missing')
+  const controller = new AbortController(), register = f.runtime.registerFolderSpace.bind(f.runtime)
+  const calls = vi.spyOn(f.runtime, 'registerFolderSpace').mockImplementation(async (...args: any[]) => {
+    const result = await (register as any)(...args)
+    controller.abort()
+    return result
+  })
+  const response = spaces.call('register', { hostId: f.source.id, registration: selected.registration }, controller.signal)
+  await expect(response).resolves.toMatchObject({ diskDurability: 'confirmed', created: true, directory: selected.registration.directory })
+  expect(calls).toHaveBeenCalledTimes(1)
+  const observed = await f.api.resolve(target, { kind: 'directory', path: f.sources[0]!.project, expectedResource: selected.registration.directory })
+  expect(observed.status).toBe('located')
+  expect(calls).toHaveBeenCalledTimes(1)
 }, 60000)
