@@ -26,6 +26,7 @@ import '@agentmux/client-ui/styles.css'
 
 type Call = { sequence: number; observedAt: number; method: string; params: unknown }
 const responsiveFixture = new URLSearchParams(location.search).get('responsive-primary-workfaces') === '1'
+const focusAvailabilityFixture = new URLSearchParams(location.search).get('focus-availability') === '1'
 const exactFirstReadFixture = new URLSearchParams(location.search).get('exact-first-read') === '1'
 const exactFirstReadFresh = exactFirstReadFixture && localStorage.getItem('mobile-product-fixture-initialized') !== 'true'
 const composerFixture = new URLSearchParams(location.search).get('mote-composer') === '1'
@@ -139,6 +140,7 @@ let holdFileUpload = false
 let releaseFileUpload: (() => void) | null = null
 let directoryComparisons = 0, inspectFails = false
 let directoryReadFails = false, missingSessionMetadata = false
+let focusPresentationMissing = focusAvailabilityFixture
 let responsiveWorkfaces = false
 const responsiveSource = { kind: 'file' as const, hostId: 'host-original', path: fixturePath('mote-resources') + '/BEHAVIOR.md' }
 const responsiveKnowledge = () => responsiveWorkfaces ? { ...knowledge, sources: [responsiveSource] } : knowledge
@@ -392,6 +394,11 @@ const client = {
     }
     if (method === 'space.inspect' && (params.target as { spaceId?: string }).spaceId === 'space-original') return { catalog: { ...catalog, appearance: [...catalog.appearance!, { spaceId: 'space-original', preset: __AGENTMUX_MOBILE_PROJECT_APPEARANCE__.kind, image: { dataUrl: __AGENTMUX_MOBILE_PROJECT_APPEARANCE__.icon } }] } }
     if ((method === 'space.ls' || method === 'space.inspect') && directoryReadFails) throw Error('本次目录读取失败 [DIRECTORY_READ_FAILED]；已读目录仍可使用，请核对 Mac 连接后重试。')
+    if (method === 'space.ls' && focusPresentationMissing) {
+      const { agentPresentation: _, ...directory } = catalog
+      return { catalog: directory, presentation: { region: null, tab: null, unavailable: [{ code: 'FOCUS_PRESENTATION_UNAVAILABLE',
+        message: '本次原 Focus 呈现资料未返回；原会话与位置保留。', recovery: '重新读取同一 Mac 的 Focus。' }] } }
+    }
     if (method === 'space.ls' || method === 'space.inspect') return { catalog: responsiveWorkfaces ? selectSpatialCatalog(catalog, params.target as AgentMuxRpcParams<'space.ls'>['target']) : { ...catalog } }
     if (method === 'app.snapshot') return { agents: [], projects: [], executors: [], workspaces: responsiveWorkfaces ? [{ workspaceId: 'workspace-original', hostId: 'host-original', name: '资料工作区', path: fixturePath('mote-resources'), kind: 'folder', projectId: null, repoPath: null, branch: null }] : [], unavailable: [] }
     if (method === 'agent.inspect') {
@@ -430,7 +437,7 @@ const client = {
   }
 } as unknown as AgentMuxHostedClient
 if (!localStorage.getItem('mobile-product-fixture-initialized')) {
-  localStorage.setItem('agentmux-mobile-home', densityWorkfacesFixture || exactFirstReadFixture ? 'focus' : 'mote')
+  localStorage.setItem('agentmux-mobile-home', densityWorkfacesFixture || exactFirstReadFixture || focusAvailabilityFixture ? 'focus' : 'mote')
   if (responsiveFixture || densityWorkfacesFixture || composerFixture || exactFirstReadFixture) {
     await getDeviceWorkface().replaceBackup(emptyDeviceWorkface())
     await getDeviceWorkface().confirmHost({ origin: 'http://127.0.0.1', hostId: 'relay-original' })
@@ -636,6 +643,7 @@ function Scene() {
           group: 'idle', state: 'disconnected', stateMark: 'unknown', stateLabel: '状态未确认', presenceUnknown: true, providerId: '', recap: null }]
     },
     setDirectoryReadFailure: (value: boolean) => { directoryReadFails = value },
+    setFocusPresentationAvailable: (value: boolean) => { focusPresentationMissing = !value },
     resolveDirectoryIssues: () => { directoryReadFails = false; for (const space of catalog.spaces) delete space.issue },
     unconfirmSelectedMetadata: () => {
       missingSessionMetadata = true
@@ -755,6 +763,7 @@ function Scene() {
       densityFixture: densityWorkfacesFixture ? { goals: densityGoals, sessions, catalog } : null,
       directoryScope: { sessions: sessions.length, regions: catalog.regions.length, locations: catalog.locations.length, spaces: catalog.spaces.length, motes: catalog.spaces.filter(owner => owner.kind === 'mote').length },
       menuAgentName, expectedReply: ordinaryReply, auxiliaryRecords: auxiliaryDensityScene ? auxiliaryDensityTimeline(main) : null, copiedTexts, joinedNotice, controlledCopy: agentMenuScene || joinedNotice !== null, controlledSdk: true, physicalPhone: false,
+      focusPresentation: catalog.agentPresentation?.map(row => ({ agentSessionId: row.agentSessionId, name: row.name })),
       intendedOccurrence: catalog.locations.find(location => location.regionId === 'region-mote'), sessionIds: sessions.map(session => ({ sessionId: session.agentSessionId, runId: session.run.runId })) })
   } })
   if (connectScene) return <MobileApp key={'connect-' + connectScene.state + String(connectScene.paired)} client={null} connection={connectScene} platform={platform}
