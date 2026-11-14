@@ -14,7 +14,6 @@ const packageRoot = 'packages/client-ui'
 const packageName = '@agentmux/client-ui'
 const manifestPath = packageRoot + '/package.json'
 const bindingPath = '.local/state/client-ui-migration/inputs.json'
-const baseline = 'ce6e37c9697b'
 const hosts = {
   Desktop: 'apps/desktop/src',
   Mobile: 'apps/mobile/src',
@@ -208,6 +207,10 @@ function bind(files, digests) {
   for (const file of files) assert.equal(digests?.[file], digest(readFileSync(resolve(root, file))), 'Product receipt did not bind the original input ' + file)
 }
 const paths = JSON.parse(read(bindingPath))
+assert.match(paths.baseline, /^[\da-f]{7,40}$/u, 'The migration requires its exact original baseline commit')
+const baseline = git('rev-parse', '--verify', paths.baseline + '^{commit}').trim()
+assert.notEqual(baseline, candidate, 'The baseline and migrated candidate are distinct')
+git('merge-base', '--is-ancestor', baseline, candidate)
 const product = Object.fromEntries(Object.entries(hosts).map(([host]) => [host, evidence(paths[host])]))
 const desktop = product.Desktop.data
 assert.equal(desktop.candidate, candidate)
@@ -227,6 +230,48 @@ assert.equal(mobile.phases.length, 6)
 assert.ok(mobile.phases.every(phase => phase.actual.mobile?.passed && phase.actual.mobile.anchorSample?.stillMounted))
 bind(['apps/mobile/src/MobileApp.tsx', 'apps/mobile/src/conversation/MobileConversationSurface.tsx'],
   mobile.mobileVariants.candidate.source)
+const reading = evidence(paths.readingQualification)
+const paired = reading.data
+const anchorOwner = packageRoot + '/src/lib/use-conversation-record-layout.ts'
+assert.equal(paired.revision, candidate)
+assert.equal(paired.rawReceiptSHA256, product.Mobile.binding.sha256)
+assert.equal(paired.candidateOwner, mobile.inputs[anchorOwner])
+assert.deepEqual(paired.priorOwner, mobile.priorOwnerSource)
+assert.deepEqual(mobile.inputDrift, [])
+const order = [[1, 'prior'], [1, 'candidate'], [2, 'candidate'], [2, 'prior'], [3, 'prior'], [3, 'candidate']]
+assert.deepEqual(mobile.phases.map(phase => [phase.pair, phase.variant]), order)
+assert.deepEqual(paired.order, order)
+assert.deepEqual(paired.result.map(report => report.host), ['Desktop', 'Mobile'])
+const improvement = paired.result.map(report => {
+  assert.equal(report.paired.length, 3)
+  assert.deepEqual(report.stableTimingRegressions, [], report.host + ' exceeded paired timing noise')
+  for (const [index, reported] of report.paired.entries()) {
+    const pair = index + 1
+    assert.ok(reported.matched && reported.pair === pair)
+    const samples = ['prior', 'candidate'].map(variant => {
+      const actual = mobile.phases.find(phase => phase.pair === pair && phase.variant === variant).actual
+      return (report.host === 'Desktop' ? actual : actual.mobile).anchorSample
+    })
+    const [prior, current] = samples
+    assert.ok(prior.stillMounted && current.stillMounted && prior.recordId && prior.tailDistance > 64 && current.tailDistance > 64)
+    assert.equal(prior.recordId, current.recordId)
+    assert.deepEqual(prior.viewport, current.viewport)
+    assert.ok(prior.visibleRecords.length > 0 && prior.rootNodeCount > 0)
+    assert.deepEqual(prior.visibleRecords, current.visibleRecords)
+    assert.equal(prior.rootNodeCount, current.rootNodeCount)
+    assert.deepEqual(reported.queries, samples.map(sample => sample.layoutKeyQueries))
+    assert.ok(reported.queries.every(value => Number.isSafeInteger(value) && value >= 0))
+    assert.ok(reported.queries[1] <= reported.queries[0], report.host + ' gained repeated reading work')
+  }
+  const comparisons = report.paired.map(row => row.queries[0] - row.queries[1]).sort((a, b) => a - b)
+  const timings = report.paired.map(row => row.queries[0])
+  const noise = Math.max(...timings) - Math.min(...timings)
+  assert.equal(report.baselineRange, noise)
+  assert.equal(report.provedImprovement, comparisons[0] > 0 && comparisons[1] > noise)
+  return report.provedImprovement
+})
+assert.ok(improvement.some(Boolean), 'The same real reading scenario must eliminate repeated work')
+
 
 const host = product.Host.data
 assert.ok(host.normal?.passed && host.restored?.passed && host.normal.editedBlocks.length > 1 && host.normal.nodeFiles > 0)
@@ -262,7 +307,7 @@ const examples = Object.fromEntries(Object.entries(entries.supportedExamples).ma
 const output = '.local/state/client-ui-migration/verification.json'
 mkdirSync(resolve(root, dirname(output)), { recursive: true })
 writeFileSync(resolve(root, output), JSON.stringify({
-  schema: 'agentmux.client-ui-consumer-migration.v1', passed: true, candidate, baseline, counts, priorCounts, consumers, examples, css, mutations,
+  schema: 'agentmux.client-ui-consumer-migration.v1', passed: true, candidate, baseline, counts, priorCounts, consumers, examples, css, mutations, readingQualification: reading.binding,
   exportDelta: { before: Object.keys(oldExports).length, after: Object.keys(manifest.exports).length,
     removed: Object.keys(oldExports).filter(key => !Object.hasOwn(manifest.exports, key)) },
   product: Object.fromEntries(Object.entries(product).map(([key, value]) => [key, value.binding]))
