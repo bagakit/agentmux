@@ -6,6 +6,7 @@ import { demandExecutionKey, demandHandoffDestinations, demandProgressBusinessCu
 import type { AgentMuxAgentRuntimeStatus } from "./client-contract.js";
 import { currentAgentSemanticStatus } from './agent-status-freshness.js'
 import type { AgentObservation } from './agent-status-freshness.js'
+import { parseAgentObservation } from './agent-observation-codec.js'
 import { AgentMuxError } from './errors.js'
 
 /** Turn-end and a subsequent report/handoff may be separate operations. This only delays a notice. */
@@ -155,14 +156,7 @@ export function parseGoalResponsibility(value: unknown, references: readonly Dem
       r.alert !== null && !['stalled', 'error', 'ended', 'manager-review', 'unknown'].includes(String(r.alert))) throw new AgentMuxError('Invalid original responsibility phase.', 'CONTROL_PROTOCOL_ERROR')
     const next = record(r.nextOwner, ['kind', 'agentSessionId', 'agentReference', 'action'])
     if (!['worker', 'manager', 'human', 'external'].includes(String(next.kind))) throw new AgentMuxError('Invalid next responsibility.', 'CONTROL_PROTOCOL_ERROR')
-    let observation: AgentObservation | undefined
-    if (r.observation !== undefined) {
-      const o = record(r.observation, ['process', 'semantic', 'readiness', 'source', 'observedAt', 'stale', 'reason', 'lastKnownActivity'])
-      if (!['running', 'exited', 'interrupted'].includes(String(o.process)) || !['active', 'idle', 'awaiting-input', 'unknown', 'unsupported'].includes(String(o.semantic)) ||
-        !['ready', 'pending', 'unknown'].includes(String(o.readiness)) || typeof o.stale !== 'boolean') throw new AgentMuxError('Invalid original Core observation.', 'CONTROL_PROTOCOL_ERROR')
-      text(o.source); time(o.observedAt)
-      observation = o as unknown as AgentObservation
-    }
+    const observation = r.observation === undefined ? undefined : parseAgentObservation(r.observation, execution)
     const progress = r.progress === undefined ? undefined : parseDemandProgress(r.progress)
     if (progress && !sameDemandExecution(progress.execution, execution)) throw new AgentMuxError('Progress belongs to another execution.', 'CONTROL_PROTOCOL_ERROR')
     return { execution, binding: r.binding as GoalResponsibilityRow['binding'], phase: r.phase as GoalResponsibilityPhase,
