@@ -13,12 +13,13 @@ import { decodeResponse, isNativeMutation, NATIVE_PROTOCOL_VERSION, NATIVE_PROVI
 const MAX_FRAME_BYTES = 26 * 1024 * 1024
 const RESULT_CACHE_BYTES = 32 * 1024 * 1024
 const MAX_TIMING_MS = 150_000
-const NATIVE_FRAME_TIMING = ['contentMs', 'windowListMs', 'totalMs'] as const
+const NATIVE_FRAME_TIMING = ['contentMs', 'windowListMs', 'responseSerializationMs', 'totalMs'] as const
 const DISPLAY_FRAME_TIMING = ['captureMs', 'pngMs', 'base64Ms', 'totalMs'] as const
-const NODE_TIMING = ['requestMs', 'validationMs'] as const
+const NODE_TIMING = ['lazyConnectionMs', 'socketReadMs', 'jsonParseMs', 'requestMs', 'validationMs'] as const
 function hasBoundedTiming(value: unknown, keys: readonly string[]): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const timing = value as Record<string, unknown>
+  if (Object.keys(timing).some(key => !keys.includes(key))) return false
   return keys.every(key => typeof timing[key] === 'number' && Number.isFinite(timing[key]) && (timing[key] as number) >= 0 && (timing[key] as number) <= MAX_TIMING_MS)
 }
 
@@ -46,7 +47,15 @@ interface Pending {
   reject(error: Error): void
   timer: NodeJS.Timeout
   operation?: NativeOperation
+  onTiming?(timing: NativeTransportTiming): void
   settled: boolean
+}
+
+export interface NativeTransportTiming {
+  /** Zero for an already established NativeConnection; NativeDesktop supplies lazy work. */
+  lazyConnectionMs: number
+  socketReadMs: number
+  jsonParseMs: number
 }
 
 export interface NativeConnectionOptions {
@@ -58,6 +67,8 @@ export interface NativeRequestOptions {
   operationId?: string; expectedInstanceId?: string; timeoutMs?: number
   /** Original host authority, checked after lazy connection and immediately before submission. */
   beforeSubmit?(): void | Promise<void>
+  /** Per-response transport measurements; no response body or second result store is retained. */
+  onTiming?(timing: NativeTransportTiming): void
 }
 
 /** One authenticated native connection. Lost writes are never re-sent. */
@@ -70,6 +81,7 @@ export class NativeConnection {
   private resultBytes = 0
   private chunks: Buffer[] = []
   private bufferedBytes = 0
+  private fragmentedReadMs = 0
   private closed = false
   private instance = ''
   private constructor(private socket: Socket, private options: NativeConnectionOptions) {
@@ -133,6 +145,7 @@ export class NativeConnection {
     }
     return await new Promise<Json>((resolve, reject) => {
       const pending: Pending = { resolve, reject, settled: false,
+        ...(options.onTiming ? { onTiming: options.onTiming } : {}),
         timer: setTimeout(() => {
           pending.settled = true
           if (operation) operation.state = 'unknown'
@@ -152,24 +165,33 @@ export class NativeConnection {
     if (this.closed) return
     let cursor = 0
     while (cursor < bytes.byteLength) {
+      const readStarted = performance.now()
       const end = bytes.indexOf(10, cursor)
       const part = bytes.subarray(cursor, end < 0 ? bytes.byteLength : end)
       this.bufferedBytes += part.byteLength
       if (this.bufferedBytes > MAX_FRAME_BYTES) { this.protocolFailure(); return }
       this.chunks.push(part)
-      if (end < 0) return
+      if (end < 0) {
+        this.fragmentedReadMs += performance.now() - readStarted
+        return
+      }
       const line = (this.chunks.length === 1 ? this.chunks[0]! : Buffer.concat(this.chunks, this.bufferedBytes)).toString('utf8')
       this.chunks = []
       this.bufferedBytes = 0
+      const socketReadMs = this.fragmentedReadMs + performance.now() - readStarted
+      this.fragmentedReadMs = 0
       cursor = end + 1
       let response: NativeResponse
+      const parseStarted = performance.now()
       try { response = decodeResponse(JSON.parse(line)) } catch { this.protocolFailure(); return }
+      const jsonParseMs = performance.now() - parseStarted
       const pending = this.pending.get(response.id)
       // A timed-out read can arrive late; it grants no new authority.
       if (!pending) continue
       if ((!this.instance && response.id !== 1) || (this.instance && response.instanceId !== this.instance) ||
           response.operationId !== pending.operation?.operationId) { this.protocolFailure(); return }
       this.instance ||= response.instanceId
+      pending.onTiming?.({ lazyConnectionMs: 0, socketReadMs, jsonParseMs })
       this.pending.delete(response.id)
       clearTimeout(pending.timer)
       if (pending.operation) {
@@ -220,6 +242,7 @@ export class NativeConnection {
     this.closed = true
     this.chunks = []
     this.bufferedBytes = 0
+    this.fragmentedReadMs = 0
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer)
       if (pending.operation) pending.operation.state = 'unknown'
@@ -249,20 +272,27 @@ export class NativeDesktop {
 
   async request(method: NativeMethod, params: JsonObject = {}, options: NativeRequestOptions = {}): Promise<Json> {
     if (this.disposed) throw new NativeRequestError('unavailable', 'The native desktop owner is disposed')
+    const onTiming = options.onTiming
+    const previousConnection = this.connection
+    const connectionStarted = onTiming ? performance.now() : 0
     const connection = await this.ensureConnection()
+    const lazyConnectionMs = onTiming && (previousConnection !== connection || previousConnection.isClosed)
+      ? performance.now() - connectionStarted : 0
     if (this.disposed) throw new NativeRequestError('unavailable', 'The native desktop owner is disposed')
     const beforeSubmit = async () => {
       await options.beforeSubmit?.()
       if (this.disposed) throw new NativeRequestError('unavailable', 'The native desktop owner is disposed')
     }
+    const requestOptions: NativeRequestOptions = { ...options, beforeSubmit,
+      ...(onTiming ? { onTiming: (timing: NativeTransportTiming) => onTiming({ ...timing, lazyConnectionMs }) } : {}) }
     if (isNativeMutation(method, params)) {
       const operationId = options.operationId ?? randomUUID()
       if (this.submittedOperationIds.has(operationId)) throw new NativeRequestError('duplicate_operation', 'Inspect the original operation; it will not be executed again')
       if (options.expectedInstanceId !== undefined && options.expectedInstanceId !== connection.instanceId) throw new NativeRequestError('instance_mismatch', 'The original native instance is unavailable')
       this.submittedOperationIds.add(operationId)
-      return await connection.request(method, params, { ...options, operationId, beforeSubmit })
+      return await connection.request(method, params, { ...requestOptions, operationId })
     }
-    return await connection.request(method, params, { ...options, beforeSubmit })
+    return await connection.request(method, params, requestOptions)
   }
 
   inspectOperation(operationId: string, instanceId: string): NativeOperation | { operationId: string; instanceId: string; state: 'unknown'; reason: string } {
@@ -308,7 +338,10 @@ export class NativeDesktop {
    * Native PID filtering includes or excludes host pixels and matching normal-layer window metadata. */
   async captureDisplays({ includeHostWindows = false }: { includeHostWindows?: boolean } = {}): Promise<NativeDisplayFrames> {
     const requestStarted = performance.now()
-    const raw = await this.request('captureDisplays', { includeHostWindows }, { timeoutMs: 120_000 })
+    const transport: { timing?: NativeTransportTiming } = {}
+    const raw = await this.request('captureDisplays', { includeHostWindows }, {
+      timeoutMs: 120_000, onTiming: timing => { transport.timing = timing }
+    })
     const requestMs = performance.now() - requestStarted
     const validationStarted = performance.now()
     const invalid = (message: string) => new NativeRequestError('invalid_display_frames', message)
@@ -353,8 +386,14 @@ export class NativeDesktop {
     }
     if (!result.displays.some(display => display.png !== undefined)) throw invalid('Native display capture returned no pixels')
     const validationMs = performance.now() - validationStarted
-    result.timing = { ...result.timing, requestMs, validationMs }
-    if (!hasBoundedTiming(result.timing, NODE_TIMING)) throw invalid('Native display capture lost its bounded Node timing')
+    const transportTiming = transport.timing
+    if (!transportTiming) throw invalid('Native display capture lost its measured transport timing')
+    result.timing = { ...result.timing,
+      lazyConnectionMs: transportTiming.lazyConnectionMs,
+      socketReadMs: transportTiming.socketReadMs,
+      jsonParseMs: transportTiming.jsonParseMs,
+      requestMs, validationMs }
+    if (!hasBoundedTiming(result.timing, [...NATIVE_FRAME_TIMING, ...NODE_TIMING])) throw invalid('Native display capture lost its bounded response timing')
     return result
   }
 

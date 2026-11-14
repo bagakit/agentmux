@@ -70,8 +70,16 @@ export interface NativeDisplayFramesTiming {
   contentMs: number
   /** The one native window-server list read. */
   windowListMs: number
-  /** Whole native captureDisplays operation. */
+  /** Whole native captureDisplays operation, before response JSON serialization. */
   totalMs: number
+  /** The one actual native response JSON encoding, excluding socket writes. */
+  responseSerializationMs: number
+  /** NativeDesktop lazy launch/authenticated connection work; 0 when already connected. */
+  lazyConnectionMs: number
+  /** Actual NDJSON buffering and UTF-8 decoding for this response, including fragments. */
+  socketReadMs: number
+  /** Actual JSON.parse and response envelope decoding for this response. */
+  jsonParseMs: number
   /** Node request round trip, including transport and native work. */
   requestMs: number
   /** Node result validation, excluding the request. */

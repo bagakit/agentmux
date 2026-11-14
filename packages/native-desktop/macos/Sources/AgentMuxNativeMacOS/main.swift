@@ -3967,6 +3967,19 @@ private func handleRequest(
 
 
 private func writeJSON(_ object: Any, to fd: Int32?) {
+    var object = object
+    let nativeResponseSerializationMarker = "__agentmux_native_response_serialization__"
+    var measuresResponseSerialization = false
+    if var envelope = object as? [String: Any], envelope["ok"] as? Bool == true,
+       var result = envelope["result"] as? [String: Any], result["state"] as? String == "captured",
+       result["displays"] is [[String: Any]], var timing = result["timing"] as? [String: Any],
+       timing["contentMs"] != nil, timing["windowListMs"] != nil, timing["totalMs"] != nil {
+        timing["responseSerializationMs"] = nativeResponseSerializationMarker
+        result["timing"] = timing
+        envelope["result"] = result
+        object = envelope
+        measuresResponseSerialization = true
+    }
     func failure(_ code: String, _ message: String) -> Data? {
         guard let original = object as? [String: Any], let id = original["id"], let instanceID = original["instanceId"] else { return nil }
         var envelope: [String: Any] = ["id": id, "instanceId": instanceID, "ok": false, "error": ["code": code, "message": message]]
@@ -3975,7 +3988,23 @@ private func writeJSON(_ object: Any, to fd: Int32?) {
     }
     var data: Data?
     if JSONSerialization.isValidJSONObject(object) {
+        let responseSerializationStarted = DispatchTime.now().uptimeNanoseconds
         data = try? JSONSerialization.data(withJSONObject: object, options: [.withoutEscapingSlashes])
+        if measuresResponseSerialization, let encoded = data {
+            let responseSerializationMs = Double(DispatchTime.now().uptimeNanoseconds - responseSerializationStarted) / 1_000_000
+            // A self-measured value cannot be known before encoding. Replace only this
+            // unique structural string token in the one real encoded response; never
+            // encode the full pixel payload a second time. The tiny splice is not JSON encoding.
+            let marker = Data("\"responseSerializationMs\":\"\(nativeResponseSerializationMarker)\"".utf8)
+            if let range = encoded.range(of: marker) {
+                let replacement = Data("\"responseSerializationMs\":\(responseSerializationMs)".utf8)
+                var timed = encoded
+                timed.replaceSubrange(range, with: replacement)
+                data = timed
+            } else {
+                data = nil
+            }
+        }
     }
     if data == nil {
         data = failure("response_encoding_failed", "native operation receipt could not be encoded; the original operation must not be replayed")
