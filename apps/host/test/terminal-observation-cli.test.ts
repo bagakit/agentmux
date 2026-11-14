@@ -114,11 +114,13 @@ it('pages discovery on the original Native owner and never leaks active or retir
 
 it('does not treat an unavailable persisted ownership read as raw permission or stop the healthy process', async () => {
   const f = await fixture()
-  vi.spyOn(f.store, 'loadRetiredAgentSessions').mockRejectedValue(new Error('private retained metadata unavailable'))
-  await expect(f.rpc.call('terminal.inspect', { target: f.target })).rejects.toThrow('private retained metadata unavailable')
-  await expect(f.rpc.subscribe('terminal.output', { target: f.target }, { onInitial() {}, onEvent() {} })).rejects.toThrow('private retained metadata unavailable')
+  const ownership = vi.spyOn(f.store, 'hasAgentRun').mockRejectedValue(new Error('private original Run ownership unavailable'))
+  await expect(f.rpc.call('terminal.inspect', { target: f.target })).rejects.toThrow('private original Run ownership unavailable')
+  await expect(f.rpc.subscribe('terminal.output', { target: f.target }, { onInitial() {}, onEvent() {} })).rejects.toThrow('private original Run ownership unavailable')
   expect((await f.native.client.status(f.run.runId)).state.type).toBe('running')
   await f.host.client.writeTerminalBytes(f.target.run, 'still-healthy')
+  ownership.mockRestore()
+  expect((await f.rpc.call('terminal.inspect', { target: f.target })).run.runId).toBe(f.run.runId)
 })
 
 it('binds opening and ordered bytes to the original raw identity and byte cursor', async () => {
