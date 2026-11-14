@@ -15,7 +15,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { createFocusProjectionSelector, agentContextForSession, retainedFocusContext } from '../lib/focus-context'
 import { FocusContextCards } from './FocusContextCards'
 import { useFocusHierarchy } from '../lib/use-focus-hierarchy'
-import { deriveFocusProjectLanes, deriveRetainedFocusProjects, focusProjectKey, focusLaneProjectKey, focusLanesByContext } from '../lib/focus-project-lanes'
+import { deriveFocusProjectLanes, deriveRetainedFocusProjects, focusProjectKey, focusLaneProjectKey, focusLanesByContext, type FocusProjectLane } from '../lib/focus-project-lanes'
 import { useFocusHistorySources } from '../lib/focus-history-sources'
 import type { ExecutionFocusPresentation } from '../lib/focus-tab-projection'
 import { AttentionRequestPanel } from './AttentionRequestPanel'
@@ -108,11 +108,14 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const {contexts: ordinaryRows, laneContexts: ordinaryLaneContexts, coordinationContexts, pmoAttention} = useAppStore(useShallow(state => contextSelector(state, visible, query.trim() ? 'full' : 'metadata', filtering || inspectingFilters)))
   const [sourceChoices, setSourceChoices] = useState<{ locations: FocusContextAccess['locations']; choose(location: FocusContextAccess['locations'][number]): void } | null>(null)
   const chooseSourceLocation = useCallback((request: NonNullable<typeof sourceChoices>) => setSourceChoices(request), [])
+  const observedProjectLanes = useRef<readonly FocusProjectLane[]>([])
   const recordSourceFocus = useCallback((context: import('../lib/focus-context').FocusContext) => {
+    const memberships = observedProjectLanes.current.filter(lane => lane.contextRefs.some(ref => ref.hostId === context.hostId && ref.id === context.id))
+    const project = memberships.length === 1 ? memberships[0] : undefined
     useAppStore.getState().focusExecutionSession(context.id, undefined, { navigate: false, identity: {
       name: context.name, kind: context.kind, providerId: context.providerId, hostId: context.hostId, workspacePath: context.workspacePath,
       ...(context.access ? { source: context.access.identity } : {}),
-      ...(context.workspace ? { project: { id: context.workspace.repoPath ?? context.workspace.path, name: context.workspaceName } } : {})
+      ...(project ? { project: { id: project.projectId, name: project.name } } : {})
     } })
   }, [])
   const sourceFacts = useFocusSources({ visible, contexts: ordinaryRows, onFocusContext: recordSourceFocus, onChooseLocation: chooseSourceLocation, ...(onSelectLocation ? { onSelectLocation } : {}) })
@@ -303,6 +306,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     return merged
   }, [sourceFacts.identities, visible, identitySelector, navigationCatalog, identityTabs, filterContexts, config?.executors, config?.appearance.agentAvatars, config?.workspaces, layouts, locationsKnown, executionBindings])
   const allLanes = useMemo(() => deriveFocusProjectLanes(laneContexts, config, facts, contextIdentities, Date.now(), topicSnapshots), [laneContexts, config, facts, tabs, topicSnapshots, contextIdentities])
+  observedProjectLanes.current = allLanes
   const coordinationLanes = useMemo(() => deriveFocusProjectLanes(coordinationContexts, config, undefined, contextIdentities, Date.now(), topicSnapshots), [coordinationContexts, config, tabs, topicSnapshots, contextIdentities])
   const filterLanes = useMemo(() => [...allLanes, ...coordinationLanes], [allLanes, coordinationLanes])
   const orderedLanes = useFocusProjectOrder(allLanes, visible, boardRowsRef, scanInteraction)
