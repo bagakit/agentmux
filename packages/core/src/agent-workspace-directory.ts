@@ -191,18 +191,14 @@ export class AgentWorkspaceDirectory {
   }
 
   private async ensureNamespace(path: string, expectedRealpath: string): Promise<DirectoryProof> {
-    let created = false
-    try {
-      await mkdir(path, { mode: 0o700 })
-      created = true
-    } catch (error) {
+    try { await mkdir(path, { mode: 0o700 }) } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
     }
     const proof = await this.proveDirectory(path, expectedRealpath)
-    if (created) {
-      await this.syncDirectory(this.stateDirectory)
-      await this.syncDirectory(path)
-    }
+    // EEXIST may be another creator's unacknowledged entry. Every survivor
+    // confirms the parent entry it depends on, not only its own mkdir winner path.
+    await this.syncDirectory(this.stateDirectory)
+    await this.syncDirectory(path)
     return proof
   }
 
