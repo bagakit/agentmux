@@ -42,6 +42,10 @@
       "types": "./dist/space-close.d.ts",
       "import": "./dist/space-close.js"
     },
+    "./space-authority-codec": {
+      "types": "./dist/space-authority-codec.d.ts",
+      "import": "./dist/space-authority-codec.js"
+    },
     "./remote-transport-observation": {
       "types": "./dist/remote-transport-observation.d.ts",
       "import": "./dist/remote-transport-observation.js"
