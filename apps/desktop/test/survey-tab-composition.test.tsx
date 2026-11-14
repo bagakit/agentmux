@@ -39,6 +39,7 @@ import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapsh
 import { moteDefaultConversation } from '../src/renderer/src/lib/mote-quick-preferences'
 import { directoryIdentity } from '../src/shared/space-addresses'
 import { scratchTopicIdentityPath } from '@agentmux/host/mote-model'
+import { connectWorkbenchCloseApiOwner } from './helpers/workbench-close-api-owner'
 
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => <textarea aria-label="Original Agent input" defaultValue="Unsent Agent input" /> }))
@@ -47,6 +48,7 @@ vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: () => 
 
 const initialStore = useAppStore.getState()
 let restartFiles: WorkspaceFiles | undefined
+let headerCloseOwner: Awaited<ReturnType<typeof connectWorkbenchCloseApiOwner>> | undefined
 let root: Root, container: HTMLDivElement, overlay: HTMLDivElement, dispose: (() => void) | undefined
 const dom = { async render(element: React.ReactNode) { await act(async () => root.render(element)) } }
 let suppressObservation = false
@@ -121,6 +123,7 @@ beforeEach(async () => {
   original = useAppStore.getState()
 })
 afterEach(async () => {
+  await headerCloseOwner?.dispose(); headerCloseOwner = undefined
   await act(async () => root.unmount())
   vi.mocked(api.ui.requestStorageFlush).mockResolvedValue(undefined)
   await prepareRendererUpdate(); dispose?.(); dispose = undefined
@@ -1589,4 +1592,95 @@ it('[detach] keyboard arrows can reach the same exact list-group destination and
   await vi.waitFor(() => expect(useAppStore.getState().surveyOrganization.groups[0]!.zoneIds).toHaveLength(1))
   expect(catalog().tabs.find(tab => tab.tabId === 'composition-tab')!.zoneId).toBe(useAppStore.getState().surveyOrganization.groups[0]!.zoneIds[0])
   expect(vi.mocked(api.spatial.commit)).toHaveBeenCalledOnce()
+})
+
+// Survey header consumes the same actual App, Core file owner and original close confirmation.
+async function showHeaderPage() {
+  headerCloseOwner = await connectWorkbenchCloseApiOwner()
+  const page = { regionId: 'composition-page', browserId: 'composition-page' }
+  useAppStore.setState({ surveyPageReferences: [page], surveyZoneSelection: { kind: 'page', ...page } })
+  await checkpointSpatialWorkbench()
+  await dom.render(<App />)
+  await vi.waitFor(() => expect(document.querySelector('.survey-page-tab-header')).not.toBeNull())
+  return page
+}
+const pageHeader = () => document.querySelector<HTMLElement>('.survey-page-tab-header')!
+const headerClose = () => pageHeader().querySelector<HTMLButtonElement>('[aria-label^="Close page:"]')!
+
+it('[survey-header] original research strip selects every actual member without changing the original Work selection or content', async () => {
+  const native = await api.browser.create('header-second-browser', 'https://header.example.test/second', resource.id)
+  const second = createWorkbenchTab('header-second-tab', { ...native, kind: 'browser', browserId: native.id,
+    regionId: 'header-second-region', workspaceId: resource.id, title: 'Second source' })
+  second.space = source().space!
+  const state = useAppStore.getState()
+  useAppStore.setState({ tabs: { ...state.tabs, [second.id]: second }, layouts: { ...state.layouts,
+    [resource.id]: addTabOccurrence(state.layouts[resource.id]!, 'source-group', second.id)! } })
+  await checkpointSpatialWorkbench(); await dom.render(<App />)
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="Original file input"]')).not.toBeNull())
+  const before = useAppStore.getState(), file = document.querySelector('[aria-label="Original file input"]')
+  const strip = document.querySelector('.global-survey-surface .workbench-zone .workbench-tab-strip')!
+  expect(strip).not.toBeNull()
+  const tabs = [...strip.querySelectorAll<HTMLButtonElement>('button[data-workbench-tab-id]')]
+  expect(tabs.map(tab => tab.dataset.workbenchTabId)).toEqual([source().id, second.id])
+  await click(tabs[1]!)
+  expect(useAppStore.getState().surveyZoneSelection?.active).toEqual({ tabId: second.id, regionId: 'header-second-region' })
+  expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
+  expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
+  expect(document.querySelector('[aria-label="Original file input"]')).toBe(file)
+})
+
+it('[survey-header] exact mixed page has one accurate header and its original Region slot, and closes only that Browser', async () => {
+  const page = await showHeaderPage(), before = useAppStore.getState()
+  const original = source(), file = original.regions['composition-file'], agent = original.regions['composition-agent-region']
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="Original file input"]')).not.toBeNull())
+  const fileInput = document.querySelector<HTMLTextAreaElement>('[aria-label="Original file input"]')!
+  fileInput.value = 'Original header-surviving draft'
+  const projection = surveyPageProjection(page, catalog(), before.tabs, () => {})!
+  const reference = projection.selection[0]!
+  expect(projection.entity).toEqual({ kind: 'region', regionId: page.regionId })
+  expect(document.getElementById(workbenchRegionProjectionSlotId('survey-workbench-slot', reference))).not.toBeNull()
+  expect(pageHeader().querySelectorAll('.workbench-tab')).toHaveLength(1)
+  const browser = original.regions[page.regionId]!
+  expect(pageHeader().querySelector('.workbench-tab__label')!.textContent).toBe(browser.kind === 'browser' ? browser.title : '')
+  expect(pageHeader().querySelector('button button')).toBeNull()
+  const closeTab = vi.spyOn(before, 'closeTab'), close = vi.spyOn(api.browser, 'close').mockResolvedValue(undefined)
+  await click(headerClose())
+  await vi.waitFor(() => expect(named('Close')).toBeDefined()); await click(named('Close'))
+  await vi.waitFor(() => expect(source().regions[page.regionId]).toBeUndefined())
+  expect(close).toHaveBeenCalledExactlyOnceWith(page.browserId); expect(closeTab).not.toHaveBeenCalled()
+  expect(source().regions['composition-file']).toBe(file); expect(source().regions['composition-agent-region']).toBe(agent)
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
+  expect(useAppStore.getState().dirtyDocuments[documentKey(resource.id, 'draft.txt')]).toBe(true)
+  expect(document.querySelector('[aria-label="Original file input"]')).toBe(fileInput)
+  expect(fileInput.value).toBe('Original header-surviving draft')
+  expect(useAppStore.getState().surveyPageReferences).toEqual([])
+})
+
+it('[survey-header] an unconfirmed Native close keeps the same header, page choice and sibling input', async () => {
+  const page = await showHeaderPage(), before = useAppStore.getState(), original = source()
+  const header = pageHeader(), field = document.querySelector<HTMLTextAreaElement>('[aria-label="Original file input"]')!
+  field.value = 'Keep this draft after close failure'
+  const close = vi.spyOn(api.browser, 'close').mockRejectedValue(new Error('Original close receipt unknown'))
+  await click(headerClose())
+  await vi.waitFor(() => expect(named('Close')).toBeDefined()); await click(named('Close'))
+  await vi.waitFor(() => expect(close).toHaveBeenCalledOnce())
+  expect(source()).toBe(original); expect(pageHeader()).toBe(header)
+  expect(useAppStore.getState().surveyPageReferences).toEqual([page])
+  expect(useAppStore.getState().surveyZoneSelection).toBe(before.surveyZoneSelection)
+  expect(document.querySelector('[aria-label="Original file input"]')).toBe(field)
+  expect(field.value).toBe('Keep this draft after close failure')
+})
+
+it('[survey-header] exact page creation uses the current browsing environment and keeps its source mixed Tab untouched', async () => {
+  const scratch = { ...scratchWorkspace, path: join(directory, 'header-scratch') }, state = useAppStore.getState()
+  useAppStore.setState({ config: { ...state.config!, workspaces: [...state.config!.workspaces, scratch] },
+    layouts: { ...state.layouts, [scratch.id]: createWorkspaceLayout('header-scratch-group') } })
+  const page = await showHeaderPage(), original = source(), native = vi.spyOn(api.browser, 'create')
+  await click(pageHeader().querySelector<HTMLButtonElement>('[aria-label="New webpage"]')!)
+  await vi.waitFor(() => expect(native).toHaveBeenCalledOnce())
+  await vi.waitFor(() => expect(useAppStore.getState().surveyPageReferences).toHaveLength(2))
+  expect(native.mock.calls[0]![1]).toBe('about:blank'); expect(native.mock.calls[0]![2]).toBe(scratch.id)
+  expect(source()).toBe(original)
+  expect(useAppStore.getState().surveyPageReferences).toContainEqual(page)
+  expect(useAppStore.getState().surveyZoneSelection).toMatchObject({ kind: 'page', regionId: native.mock.calls[0]![0] })
 })
