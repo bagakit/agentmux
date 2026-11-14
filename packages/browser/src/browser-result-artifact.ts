@@ -3,7 +3,7 @@ import { constants } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { mkdir, open, readdir, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
-import { durableWriteFile } from '@agentmux/core'
+import { durableWriteFile, DurableWriteError } from '@agentmux/core'
 import {
   BROWSER_RESULT_MAX_BYTES, BROWSER_RESULT_MAX_READ_BYTES,
   type BrowserResultArtifactChunk, type BrowserResultArtifactReference,
@@ -76,6 +76,8 @@ export class BrowserResultArtifactStore {
     const source = { workspaceId, browserId: context.browserId, operationId: context.operationId, navigationId: context.navigationId }
     const write = this.tail.catch(() => {}).then(async () => {
       await this.ready()
+      // Finish earlier committed retention before admitting another bounded candidate.
+      await this.trim()
       const bytes = await load()
       JSON.parse(bytes.toString('utf8')) // A result is JSON, not an arbitrary file transfer.
       let id: string
@@ -89,22 +91,28 @@ export class BrowserResultArtifactStore {
       const document = JSON.stringify({ schema: SCHEMA, reference, chunks } satisfies Metadata)
       const size = bytes.length + Buffer.byteLength(document)
       if (Buffer.byteLength(document) > MAX_METADATA_BYTES) throw new Error('Result metadata exceeds its storage budget.')
-      // Retention only examines this store's bounded owned index, not Browser/Session state.
-      for (const [oldId, old] of [...this.files].sort((a, b) => a[1].at - b[1].at)) {
-        if (this.files.size < MAX_ARTIFACTS && this.totalBytes + size <= MAX_STORE_BYTES) break
-        await this.remove(oldId)
-        this.files.delete(oldId)
-        this.totalBytes -= old.bytes
-      }
+      // The original tail admits just one candidate, bounded by the single-result limit.
       try {
         await durableWriteFile(join(this.directory, `${id}.data`), bytes)
-        await durableWriteFile(join(this.directory, `${id}.json`), document)
+        // This directory ACK also confirms the preceding payload entry in the same directory.
+        await durableWriteFile(join(this.directory, `${id}.json`), document, { requireDirectorySync: true })
       } catch (error) {
-        await this.remove(id)
+        // A replaced entry with a missing ACK is not an unpublished-file failure.
+        // Preserve its exact candidate; the next explicit write first confirms/reindexes this directory.
+        this.loaded = false
+        if (!(error instanceof DurableWriteError && error.phase === 'after-replace')) {
+          try { await this.remove(id) } catch (cleanup) {
+            console.warn('Browser result candidate cleanup failed; original write error retained.', { id, error: cleanup })
+          }
+        }
         throw error
       }
       this.files.set(id, { bytes: size, at: reference.capturedAt })
       this.totalBytes += size
+      try { await this.trim(id) } catch (error) {
+        this.loaded = false
+        console.warn('Browser result committed; retention cleanup remains incomplete.', { reference, error })
+      }
       return reference
     })
     this.tail = write
@@ -168,12 +176,29 @@ export class BrowserResultArtifactStore {
     await rm(join(this.directory, `${id}.data`), { force: true })
   }
 
+  private async trim(keepId?: string): Promise<void> {
+    if (this.files.size <= MAX_ARTIFACTS && this.totalBytes <= MAX_STORE_BYTES) return
+    // Retention only examines this store's owned index, not Browser/Session state.
+    for (const [oldId, old] of [...this.files].sort((a, b) => a[1].at - b[1].at)) {
+      if (this.files.size <= MAX_ARTIFACTS && this.totalBytes <= MAX_STORE_BYTES) break
+      if (oldId === keepId) continue // A wall-clock rollback cannot revoke this just-confirmed reference.
+      await this.remove(oldId)
+      this.files.delete(oldId)
+      this.totalBytes -= old.bytes
+    }
+  }
+
   private async ready(): Promise<void> {
     if (this.loaded) return
     await mkdir(this.directory, { recursive: true, mode: 0o700 })
+    // Confirm any preserved replacement before another candidate can be created.
+    const directory = await open(this.directory, 'r')
+    try { await directory.sync() } finally { await directory.close() }
     // Startup index scan is store-local. Segment reads never scan the directory.
     const names = await readdir(this.directory)
     const present = new Set(names)
+    this.files.clear()
+    this.totalBytes = 0
     for (const name of names) {
       const payloadId = name.replace(/\.data$/, '')
       if (name === `${payloadId}.data` && storedId(payloadId) && !present.has(`${payloadId}.json`)) {
