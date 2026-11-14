@@ -71,7 +71,8 @@ describe('Remote execution Settings', () => {
     await pane()
     expect(dom.container.textContent?.match(/No remote work yet/gu)).toHaveLength(1)
     expect(dom.container.querySelector('.remote-execution-bindings__body')).toBeNull()
-    expect(dom.container.querySelector('.agent-work-setup')).toBeNull()
+    expect(dom.container.querySelector('[role=tab][aria-selected=true]')?.getAttribute('aria-controls')).toMatch(/-start$/u)
+    expect(dom.container.querySelector('.agent-work-setup')?.closest('[hidden]')).toBeNull()
   })
   it('reveals the same guide after retained narrow binding detail without replacing original work', async () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({ width: 600 } as DOMRect))

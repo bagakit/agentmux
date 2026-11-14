@@ -5,7 +5,8 @@ import { expect, it, vi } from 'vitest'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import type { SettingsNavigationRequest } from '../src/renderer/src/components/SettingsNavigation'
 import { WorkbenchDocumentContext } from '../src/renderer/src/lib/workbench-document'
-import { composerDOM } from './helpers/composer-dom-fixture'
+import { useAppStore } from '../src/renderer/src/store'
+import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM()
 const workRequest = { section: 'remote-execution', field: 'bindings' } as const
@@ -21,7 +22,7 @@ it('routes real Settings tabs with their original IDs and keyboard focus in the 
       </WorkbenchDocumentContext.Provider>, owner.body))
   }
   try {
-    await render()
+    await render({ section: 'remote-execution', field: 'routes' })
     const list = owner.querySelector<HTMLElement>('.remote-work-tasks[role="tablist"]')!
     expect(list).not.toBeNull()
     const [routes, prepare, work] = Array.from(list.querySelectorAll<HTMLButtonElement>('button[role="tab"]'))
@@ -76,4 +77,19 @@ it('routes real Settings tabs with their original IDs and keyboard focus in the 
     await dom.render(null)
     frame.remove()
   }
+})
+
+it('starts at the work the user can do, and keeps an explicit task selection when a Session appears', async () => {
+  const selected = () => dom.container.querySelector('[role="tablist"] [aria-selected="true"]')?.getAttribute('aria-controls')
+  const show = async () => dom.render(<SettingsPanel initialSection="remote-execution" onClose={() => {}} />)
+  useAppStore.setState({ sessions: [] })
+  await show()
+  expect(selected()).toMatch(/-start$/u)
+  const remote = { ...composerSession('device-agent'), hostId: 'remote', workPlacement: { agentHostId: 'remote', resourceHostId: 'local' } }
+  await act(async () => { useAppStore.setState({ sessions: [remote] }) })
+  expect(selected()).toMatch(/-start$/u)
+  await dom.render(null)
+  await show()
+  expect(selected()).toMatch(/-existing$/u)
+  expect(dom.container.querySelector('[data-resource-row="device-agent"]')).not.toBeNull()
 })
