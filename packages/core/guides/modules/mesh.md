@@ -13,6 +13,8 @@ become a business signer, local user or managed Agent.
 [configure settings](../protocol.md "amux:generated command:settings.mesh.configure")
 [inspect network](../protocol.md "amux:generated command:mesh.inspect")
 [select ingress](../protocol.md "amux:generated command:mesh.link")
+[share a peer code](../protocol.md "amux:generated command:mesh.code")
+[read a peer code](../protocol.md "amux:generated command:mesh.code.read")
 
 Settings belong to this original Core’s state directory. Read its full current
 configuration and revision, then save `{expectedRevision,operationId,configuration}`
@@ -24,7 +26,7 @@ after an unknown reply and use `settings mesh inspect --operation-id ID`; inspec
 may confirm the same already saved bytes, without replaying an old configuration.
 
 To manage one saved remote Core, keep the CLI connected to your original entry
-Core and add `--host HOST --expected-runtime RUNTIME` to these four Mesh commands.
+Core and add `--host HOST --expected-runtime RUNTIME` when reading or managing Mesh on that Host.
 JSON-RPC accepts the same optional `target:{hostId,expectedRuntimeId}`; CLI JSON
 can contain it instead of those two flags, never both. The entry authenticates
 its real local caller and freezes that saved operator route. The receiving Core
@@ -60,12 +62,20 @@ A minimal outbound participant can be constructed without reading source:
    configuration: COMPLETE_CONFIGURATION}` in a file and run
    `amux settings mesh configure --input FILE`. Inspect live adoption separately.
 
+For Desktop pairing, open Mesh and choose **Join this device to a network**.
+Paste the gateway’s saved connection code to see its network, public peer identity
+and advertised dial addresses. Add it and save. Copy this device’s saved code back
+to the gateway operator, who adds that peer and saves on the gateway. A gateway
+can dial its own upstream while keeping its dedicated listener and published addresses.
+The CLI reads the same public code with `amux mesh code`; `amux mesh code read CODE`
+previews it offline. Reading and sharing a code leaves both configurations untouched.
+
 For an actual paired neighbor, explicitly include its pinned `{peerId,publicKey}`
-in `members` and add `{peerId, endpoints:[{endpoint:"gateway.example:443",useTls:true}]}`
+in `members` and add `{peerId, endpoints:[{endpoint:"gateway.example",useTls:true}]}`
 to `peers`. A peer accepting only your outbound connection may list you with
 `endpoints:[]`; both still explicitly admit the other's public identity.
 To accept ingress, choose `role:"gateway"`, `listen:{host:"127.0.0.1",port:8443}`
-and the independently authored client `advertisedIngress:[{endpoint:"gateway.example:443",useTls:true}]`.
+and the independently authored client `advertisedIngress:[{endpoint:"gateway.example",useTls:true}]`.
 The externally terminated TLS ingress need not equal the private bind endpoint.
 An explicit external publisher admission is `{serverId,tokenHash}` in `publishers`;
 the token hash uses the Relay package's `hashPublisherToken` and never the token itself.
@@ -103,11 +113,16 @@ it is not remote Native, Agent health, business completion or complete fleet dis
 Authenticated advertisements and candidate paths can become stale. Circuit opening
 independently checks its actual next neighbor and original terminal publisher.
 
-For `mesh link`, supply `{offer: ORIGINAL_CONNECTION_OFFER}`. The returned complete
-offer/url keeps the original `serverId` and `daemonPublicKeyB64` and selects this
+For `mesh link`, supply `{offer: ORIGINAL_CONNECTION_OFFER}` to the chosen gateway.
+To choose one of its published addresses, add `ingress:{endpoint,useTls}`.
+Omitting that field selects its first advertised ingress. An address outside the
+gateway's active configuration is refused. The returned complete offer/url keeps the original `serverId` and `daemonPublicKeyB64` and selects this
 Core’s confirmed route through its explicit advertised ingress. Use that returned
-URL unchanged with `amux --endpoint URL ...` or the existing directly authorized
-device SDK. The original endpoint still verifies its E2EE key and device permission;
+URL unchanged. On the accessing Mac choose **Mesh → Use another device**,
+open that URL and copy the access key from its device workspace. On the original
+target Core, add that key to endpoint access and save. Reconnect from the same
+device workspace. Directly authorized device SDK clients and `amux --endpoint URL ...`
+consume the same offer. The original endpoint still verifies its E2EE key and device permission;
 the network gateway never invokes business RPC as a substitute caller.
 
 Unknown paths or missing ingress refuse only this read and retain the original offer.
