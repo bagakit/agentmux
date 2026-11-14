@@ -2,9 +2,9 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxFileAgentSessionStore, AgentMuxMemoryAgentSessionStore, type AgentMuxAgentSessionStore } from '../src/agent-session-store.js'
-import { parsePromptSubmissionRecord, terminalPromptPhaseOperationIdentity } from '../src/prompt-submission-record.js'
+import { parsePromptSubmissionRecord, terminalPromptPhaseOperationIdentity, mergePtyPromptRecord } from '../src/prompt-submission-record.js'
 import { agentPromptSubmissionOutcome } from '../src/agent-input-wait.js'
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
 import type { AgentMuxStoredAgentSession, AgentPromptSubmissionRecord } from '../src/types.js'
@@ -16,19 +16,19 @@ function session(): AgentMuxStoredAgentSession {
     executorId: 'codex', hostId: 'local', workspacePath: tmpdir(), retiredRuns: [], hookBindingId: 'original-hook',
     hookToken: 'test-only', createdAt: 1, updatedAt: 1 }
 }
-function record(owner = session(), id = 'original-input', complete = true): AgentPromptSubmissionRecord {
-  const plan = { kind: 'render-then-submit' as const, payload: body, renderedText: body, submit: '\r' }, start = 10
+function record(owner = session(), id = 'original-input', complete = true, text = body): AgentPromptSubmissionRecord {
+  const plan = { kind: 'render-then-submit' as const, payload: text, renderedText: text, submit: '\r' }, start = 10
   const phase = (name: 'payload' | 'submit', data: string, offset: number, acknowledged: boolean) => ({
     operationId: terminalPromptPhaseOperationIdentity(owner, id, name, data),
     inputByteRange: { startByte: offset, endByte: offset + Buffer.byteLength(data) }, acknowledged })
-  const payload = phase('payload', body, start, true), submit = phase('submit', '\r', payload.inputByteRange.endByte, complete)
+  const payload = phase('payload', text, start, true), submit = phase('submit', '\r', payload.inputByteRange.endByte, complete)
   return { agentSessionId: owner.agentSessionId, run: owner.run, nativeResult: { state: 'unsupported', reason: 'uncorrelated-carrier' },
     admission: { operationId: payload.operationId, submissionId: id,
       inputKey: { kind: 'prompt', agentSessionId: owner.agentSessionId, expectedRun: owner.run, submissionId: id },
       inputDispatch: { ref: { key: { kind: 'prompt', agentSessionId: owner.agentSessionId, expectedRun: owner.run, submissionId: id }, waitGeneration: 1 }, gateId: 'original-gate' },
       startByte: start, endByte: submit.inputByteRange.endByte, acknowledged: complete,
-      intent: { run: owner.run, ownerInstanceId: 'test-runtime', prompt: body, plan, message: { userContent: body }, execution: 'immediate' } },
-    terminalPromptSubmission: { run: owner.run, submissionId: id, promptDigest: createHash('sha256').update(body).digest('base64url'),
+      intent: { run: owner.run, ownerInstanceId: 'test-runtime', prompt: text, plan, message: { userContent: text }, execution: 'immediate' } },
+    terminalPromptSubmission: { run: owner.run, submissionId: id, promptDigest: createHash('sha256').update(text).digest('base64url'),
       outputCursorBytes: 1, payload, submit } }
 }
 function project(owner: AgentMuxStoredAgentSession, value: AgentPromptSubmissionRecord): AgentMuxStoredAgentSession {
@@ -215,4 +215,18 @@ it('keeps legacy absent refresh history absent through the original record decod
   const original = record()
   expect(parsePromptSubmissionRecord(original)).toEqual(original)
   expect(parsePromptSubmissionRecord(original)).not.toHaveProperty('ptyRefreshHistory')
+})
+
+it.each(['plain text', '原文 🙂', 'lone surrogate \ud800', 'x'.repeat(4096)])('decodes original PTY receipts without Node globals for %s', text => {
+  const original = record(session(), 'portable-original-input', true, text)
+  const prepared = record(session(), 'portable-original-input', false, text)
+  const expected = createHash('sha256').update(JSON.stringify(['agentmux-terminal-prompt-v1', original.agentSessionId,
+    original.run.runId, original.terminalPromptSubmission!.submissionId, 'payload', text])).digest('base64url')
+  expect(original.terminalPromptSubmission!.payload.operationId).toBe(expected)
+  vi.stubGlobal('Buffer', undefined)
+  try {
+    expect(parsePromptSubmissionRecord(original)).toMatchObject(original)
+    expect(mergePtyPromptRecord(prepared, original, true)).toMatchObject(original)
+  }
+  finally { vi.unstubAllGlobals() }
 })
