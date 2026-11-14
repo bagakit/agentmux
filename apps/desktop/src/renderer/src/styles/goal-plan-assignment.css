@@ -1,0 +1,14 @@
+.goal-node-assignment {
+  display: grid;
+  gap: 8px;
+  padding-block: 10px 2px;
+  border-top: 1px solid var(--line-soft);
+  min-width: 0;
+}
+.goal-node-assignment h4 { margin: 0; font: inherit; font-weight: 600; }
+.goal-node-assignment__actions, .goal-node-assignment__choice { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.goal-node-assignment__choice .selection-field { min-width: min(180px, 100%); }
+.goal-node-assignment p { margin: 0; overflow-wrap: anywhere; }
+.goal-node-assignment details { color: var(--text-2); font-size: var(--fs-meta); }
+.goal-node-assignment code { overflow-wrap: anywhere; }
+.goal-node-assignment__qualifier { color: var(--text-2); font-size: .92em; }

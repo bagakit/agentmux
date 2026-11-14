@@ -5,7 +5,9 @@ import type { GoalPlanReviewInput } from '@agentmux/demand/goal-plan'
 export type GoalEditField = 'title' | 'description' | 'tags'
 export type GoalEditDraft = { value: string; revision: string; issue?: string }
 export type GoalPlanReviewDraft = { command: string; result: string; evidence: string; note: string; request?: { goalId: string; review: GoalPlanReviewInput } }
-export type GoalEditDrafts = Record<string, Partial<Record<GoalEditField, GoalEditDraft>> & { planReviews?: Record<string, GoalPlanReviewDraft> }>
+export type NodeAssignmentRequest = import('@agentmux/core/goal-delegation').GoalDelegationParamsMap['goal.plan.assignment'] & { expectedOwner: { runtimeId: string; namespace: string } }
+export type NodeAssignmentDraft = { choice?: { executor: { hostId: string; agentSessionId: string }; revision: number }; request?: NodeAssignmentRequest }
+export type GoalEditDrafts = Record<string, Partial<Record<GoalEditField, GoalEditDraft>> & { planReviews?: Record<string, GoalPlanReviewDraft>; assignments?: Record<string, NodeAssignmentDraft> }>
 const fields: readonly GoalEditField[] = ['title', 'description', 'tags']
 export const goalPlanReviewDraftKey = (nodeId: string, delegationOperationId: string) => JSON.stringify([nodeId, delegationOperationId])
 
