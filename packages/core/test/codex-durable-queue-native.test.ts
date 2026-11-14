@@ -33,11 +33,12 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs() })
  * Runtime status/byte port is the explicit fixture boundary; no real model or
  * user Run participates. A native protocol receipt is not model task adoption. */
 it.runIf(process.platform === 'darwin').each(['wrapper', 'direct'] as const)('public A2A reference reaches the original %s native thread and MID remains queryable', async carrier => {
-  const h = await rpcOwnerFixture(['sender', 'recipient']), root = h.root, home = join(root, 'native-home'), helper = join(root, 'native-process-proof')
   const command = process.env.AGENTMUX_TEST_CODEX_BINARY ?? 'codex'
+  const version = process.env.AGENTMUX_TEST_CODEX_VERSION ?? '0.169.0'
+  const h = await rpcOwnerFixture(['sender', 'recipient']), root = h.root, home = join(root, 'native-home'), helper = join(root, 'native-process-proof')
   const nativeVersion = await runner.runProcess(command, ['--version'], { timeoutMs: 3000 })
   expect(nativeVersion).toMatchObject({ exitCode: 0, stderr: '' })
-  expect(nativeVersion.stdout.trim()).toBe('codex-cli ' + (process.env.AGENTMUX_TEST_CODEX_VERSION ?? '0.169.0'))
+  expect(nativeVersion.stdout.trim()).toBe('codex-cli ' + version)
   const compiled = await runner.runProcess('cc', ['-Wall', '-Wextra', '-Werror', fileURLToPath(new URL('../native/native-socket-peer.c', import.meta.url)), '-lproc', '-o', helper], { timeoutMs: 10_000 })
   expect(compiled).toMatchObject({ exitCode: 0, stderr: '' })
   const originalRunProcess = runner.runProcess

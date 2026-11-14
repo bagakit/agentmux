@@ -14,7 +14,7 @@ export async function verifyProviderNativeCapabilities(scope) {
   const hash = bytes => createHash('sha256').update(bytes).digest('hex')
   const inputs = ['packages/core/src/agent-provider.ts', 'packages/core/src/prompt-submission.ts',
     'packages/core/src/client.ts', 'packages/core/src/agent-native-process.ts', 'packages/core/native/native-socket-peer.c',
-    'packages/core/src/providers/codex-native-input.ts', 'packages/core/src/providers/codex-native-queue.ts',
+    'packages/core/src/providers/codex-native-input.ts', 'packages/providers/src/codex/native-queue.ts',
     ...scopes[scope], config, 'packages/core/scripts/verify-provider-native-capabilities.mjs']
   // These subprocess fixtures are actual proof inputs, outside Vite's loaded graph.
   if (scope === 'resume') inputs.push('packages/core/scripts/verify-codex-resume-invocation.mjs',
@@ -104,7 +104,7 @@ export async function verifyProviderNativeCapabilities(scope) {
     }
     receipt.baseline = await run('baseline', scopes[scope])
     for (const [name, change] of Object.entries(mutations).filter(([, value]) => value[0] === scope)) {
-      const selected = scope === 'input' ? [change[1].endsWith('/codex-native-queue.ts') ? scopes.input[2]
+      const selected = scope === 'input' ? [change[1].endsWith('/codex/native-queue.ts') ? scopes.input[2]
         : change[1].endsWith('/agent-native-process.ts') ? scopes.input[3] : scopes.input[0]]
         : scope === 'resume' ? [scopes.resume[0]]
         : scope === 'resume-failure' ? [scopes[scope][name === 'resume-unknown-start-is-fatal' ? 1 : 0]] : scopes.history

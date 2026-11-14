@@ -4,9 +4,9 @@ import { defineConfig } from 'vitest/config'
 import source from '../../../apps/desktop/scripts/fixtures/agent-schedules/vitest.config.mjs'
 
 const root = resolve(import.meta.dirname, '../../..')
-const owner = 'packages/core/src/providers/codex-native-queue.ts'
+const owner = 'packages/providers/src/codex/native-queue.ts'
 export const mutations: Record<string, [string, string]> = {
-  'version-gate': ['  await assertFile(executable)\n', "  await assertFile(executable)\n  if ((await (await import('../process-runner.js')).runProcess(executable.path, ['--version'], { signal })).stdout.trim() !== 'codex-cli 0.167.0') throw unavailable()\n"],
+  'version-gate': ['  await assertFile(executable)\n', "  await assertFile(executable)\n  if ((await import('node:child_process')).execFileSync(executable.path, ['--version'], { encoding: 'utf8', signal }).trim() !== 'codex-cli 0.167.0') throw unavailable()\n"],
   'skip-queue-contract': ["const queue = await helper.request('thread/queue/list', { threadId: original.id, limit: 1 })", 'const queue = { data: [] }'],
   'require-peer-correlation': ['(item as Record<string, unknown>).clientUserMessageId != null && typeof (item as Record<string, unknown>).clientUserMessageId', 'typeof (item as Record<string, unknown>).clientUserMessageId'],
   'lose-correlation': ['item.clientUserMessageId !== frozen.clientCorrelation', 'false'],
@@ -14,11 +14,15 @@ export const mutations: Record<string, [string, string]> = {
   'lose-frozen-target': ['!isDeepStrictEqual({ ...frozen, clientCorrelation: undefined }, { ...plan, clientCorrelation: undefined })', 'false'],
   'borrow-helper-queue': ['!sameFile(helperStores.queue, storage.queue)', 'false'],
   'lose-file-identity': ['a.device === b.device && a.inode === b.inode', 'true'],
-  'ignore-birth': ['await nativeProcessBirth(processId, signal) !== rootBirth || await nativeProcessBirth(owner, signal) !== ownerBirth ||\n          await nativeProcessBirth(helper.processId, signal) !== helperBirth', 'false'],
+  'ignore-birth': ['await nativeProcessBirth(processId, signal) !== rootBirth || await nativeProcessBirth(owner, signal) !== ownerBirth ||\n            await nativeProcessBirth(helper.processId, signal) !== helperBirth', 'false'],
 }
 const mutation = process.env.AGENTMUX_QUEUE_CONTRACT_MUTATION
 if (mutation && !Object.hasOwn(mutations, mutation)) throw new Error('Unknown original Codex queue mutation')
 export default defineConfig({ ...source,
+  resolve: { ...source.resolve, alias: [
+    { find: '@agentmux/providers/codex/native-queue', replacement: resolve(root, owner) },
+    ...(Array.isArray(source.resolve?.alias) ? source.resolve.alias : [])
+  ] },
   cacheDir: resolve(root, '.local/state/codex-native-queue-contract/cache', mutation ?? 'candidate'),
   plugins: [...(source.plugins ?? []), { name: 'actual-codex-queue-owner', enforce: 'pre', transform(original, id) {
     if (relative(root, id.split('?')[0]!) !== owner) return
