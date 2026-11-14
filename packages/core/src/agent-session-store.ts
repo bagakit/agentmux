@@ -720,7 +720,7 @@ function lifecycleReservation(value: unknown): AgentMuxLifecycleReservation {
         'The original resume resolution changed its exact prepared target.', 'INVALID_AGENT_SESSION_STORE')
       resolution = { request, receipt }
     }
-    if (source.ownerReleased !== undefined && (source.ownerReleased !== true || !restart && !resolution)) throw new AgentMuxError('Invalid resume owner release.', 'INVALID_AGENT_SESSION_STORE')
+    if (source.ownerReleased !== undefined && (source.ownerReleased !== true || !preparedSession && !restart && !resolution)) throw new AgentMuxError('Invalid resume owner release.', 'INVALID_AGENT_SESSION_STORE')
     return { ...base, kind: 'resume', expectedRun: expectedRun!, ...(preparedSession ? { preparedSession } : {}),
       ...(source.preparedDispatch === undefined ? {} : { preparedDispatch: preparedResumeDispatch(source.preparedDispatch, preparedSession, base.operationId) }),
       ...(restart ? { restart } : {}), ...(resolution ? { resolution } : {}), ...(source.ownerReleased === true ? { ownerReleased: true as const } : {}) }
@@ -3414,7 +3414,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
 
   async releaseReopenOwner(ownerId: string): Promise<void> {
     for (const [id, reservation] of this.reservations) {
-      if ((reservation.kind === 'reopen' || reservation.kind === 'create' && reservation.preparedCreation || reservation.kind === 'resume' && (reservation.restart || reservation.resolution)) && reservation.ownerId === ownerId) this.reservations.set(id, { ...reservation, ownerReleased: true })
+      if ((reservation.kind === 'reopen' || reservation.kind === 'create' && reservation.preparedCreation || reservation.kind === 'resume' && (reservation.preparedSession || reservation.restart || reservation.resolution)) && reservation.ownerId === ownerId) this.reservations.set(id, { ...reservation, ownerReleased: true })
     }
   }
 
@@ -4533,7 +4533,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
 
   async releaseReopenOwner(ownerId: string): Promise<void> {
     await this.enqueue(async () => {
-      const retained = (item: AgentMuxLifecycleReservation) => (item.kind === 'reopen' || item.kind === 'create' && item.preparedCreation || item.kind === 'resume' && (item.restart || item.resolution)) && item.ownerId === ownerId
+      const retained = (item: AgentMuxLifecycleReservation) => (item.kind === 'reopen' || item.kind === 'create' && item.preparedCreation || item.kind === 'resume' && (item.preparedSession || item.restart || item.resolution)) && item.ownerId === ownerId
       // Reservations are the open lifecycle operations only; reading them all never touches Sessions or history.
       for (const row of this.db.prepare('SELECT json FROM reservations ORDER BY rowid').all()) {
         const item = lifecycleReservation(JSON.parse(String(row.json)))
