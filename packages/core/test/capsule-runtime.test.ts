@@ -22,6 +22,7 @@ async function fixture() {
     program: process.execPath, args: [], cwd: frozen.workspacePath, env: { AGENTMUX_LIFECYCLE_OPERATION_ID: frozen.createOperationId },
     initial_size: { cols: 80, rows: 24 }, declared_inputs: [] } })
   const client = {
+    withExecutionDirectoryAdmission: async <T>(_cwd: string, work: () => Promise<T>) => work(),
     connectRuntime: async () => {}, prepareTerminal: () => structuredClone(frozen),
     terminalCreationRuntimeIdentity: () => ({ runtimeId: 'fixture-lineage', instanceId: 'fixture-owner', buildIdentity: 'fixture-build', protocolVersion: 1 }),
     createPreparedTerminal: async () => { creates++; await creationGate; if (unknownCreation) throw new AgentMuxError('Original Start ACK lost', 'CAPSULE_RUNTIME_CREATION_UNKNOWN')
