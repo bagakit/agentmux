@@ -1,5 +1,5 @@
 import { constants } from 'node:fs'
-import { open, stat } from 'node:fs/promises'
+import { lstat, open, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { blake3 } from '@noble/hashes/blake3.js'
@@ -185,16 +185,17 @@ export async function resolveGrokUpdatesPath(
 export async function verifyGrokSummaryIdentity(
   sessionDir: string,
   context: GrokHistorySourceContext,
-  budget: NativeHistoryReadBudget
+  budget: NativeHistoryReadBudget,
+  requireStable = false
 ): Promise<void> {
   context.signal.throwIfAborted()
   const summaryPath = join(sessionDir, GROK_SUMMARY_FILE)
 
   let file
   try {
-    file = await open(summaryPath, constants.O_RDONLY | constants.O_NONBLOCK)
+    file = await open(summaryPath, constants.O_RDONLY | constants.O_NONBLOCK | (requireStable ? constants.O_NOFOLLOW : 0))
   } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+    if (!requireStable && (err as NodeJS.ErrnoException).code === 'ENOENT') {
       // Summary absence is ONLY valid when sessionDir is the exact native directory:
       // <grokHome>/sessions/<encoded_cwd>/<nativeSessionId>
       const grokHome = context.env.GROK_HOME ? resolve(context.env.GROK_HOME) : join(homedir(), '.grok')
@@ -210,6 +211,7 @@ export async function verifyGrokSummaryIdentity(
 
   try {
     context.signal.throwIfAborted()
+    const before = requireStable ? await file.stat({ bigint: true }) : undefined
     const st = await file.stat()
     context.signal.throwIfAborted()
     if (!st.isFile()) {
@@ -245,6 +247,13 @@ export async function verifyGrokSummaryIdentity(
     const cwd = extractString(info.cwd)
     if (!cwd || cwd !== context.workspacePath) {
       throw new AgentMuxError('Grok transcript belongs to another native Session.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+    }
+    if (before) {
+      const after = await file.stat({ bigint: true }), current = await lstat(summaryPath, { bigint: true })
+      if (!current.isFile() || [after, current].some(value => value.dev !== before.dev || value.ino !== before.ino ||
+          value.size !== before.size || value.mtimeNs !== before.mtimeNs || value.ctimeNs !== before.ctimeNs)) {
+        throw new AgentMuxError('The original Grok summary changed during source qualification.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+      }
     }
   } finally {
     await file.close()
