@@ -200,11 +200,20 @@ try {
   report.mutations.embeddedCore = { sha256: embeddedCore.sha256, sourceSha256: digest(await readFile(join(root, coreFile))), rejectedBy: 'archive inventory' }
   const sourceResolution = await mutation('source-fallback', async directory => {
     const file = join(directory, 'package.json'), value = await readJSON(file)
-    value.exports['./components/Button'].browser = './src/components/Button.tsx'
+    const browser = './src/components/Button.tsx'
+    const { types, import: compiled } = value.exports['./components/Button']
+    value.exports['./components/Button'] = { types, browser, import: compiled }
+    value.files.push('src')
+    const target = join(directory, browser)
+    await mkdir(dirname(target), { recursive: true })
+    await copyFile(join(pkg, browser), target)
     await writeJSON(file, value)
   })
   await assert.rejects(inspect(sourceResolution, originalPaths), /source-dependent target/u)
-  report.mutations.sourceFallback = { sha256: sourceResolution.sha256, rejectedBy: 'archive export conditions' }
+  await installVariant(sourceResolution)
+  await verifyInstalled(sourceResolution)
+  rejected(buildHost('source-fallback', evidence), /Browser resolved private or source inputs/u)
+  report.mutations.sourceFallback = { sha256: sourceResolution.sha256, rejectedBy: 'archive exports and installed Vite consumer' }
 
   await installVariant(normal)
   const locationSource = join(host, 'locations.tsx')
