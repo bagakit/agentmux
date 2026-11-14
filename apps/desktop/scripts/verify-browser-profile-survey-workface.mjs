@@ -16,7 +16,7 @@ const { build } = browserSourceBuild(createRequire(join(root, 'packages/core/pac
 const { build: viteBuild } = require('vite')
 const args = process.argv.slice(2), outputIndex = args.indexOf('--output'), caseIndex = args.indexOf('--case'), mutationIndex = args.indexOf('--mutation')
 const selectedCase = caseIndex < 0 ? 'complete' : args[caseIndex + 1]
-assert.ok(['admission', 'profile-switch', 'settings', 'complete', 'surface-windows'].includes(selectedCase), 'Choose an exact Profile Survey case')
+assert.ok(['admission', 'profile-switch', 'settings', 'complete', 'surface-windows', 'context-menu'].includes(selectedCase), 'Choose an exact Profile Survey case')
 const mutation = mutationIndex < 0 ? null : args[mutationIndex + 1]
 const mutationCases = { 'surface-windows': {
   'omit-recall-content-edge': { file: 'apps/desktop/src/renderer/src/components/GlobalRecallSurface.tsx',
@@ -33,6 +33,10 @@ const mutationCases = { 'surface-windows': {
   'close-on-weak-save': { file: 'apps/desktop/src/renderer/src/store.ts', before: 'try { survey = await get().registerSurveyBrowserPage(reference, browser.profileId!) }', after: "try { survey = await get().registerSurveyBrowserPage(reference, browser.profileId!); if (survey.outcome !== 'registered') await api.browser.close(browserId) }" }
 }, 'profile-switch': {
   'steal-environment-keyboard-focus': { file: 'apps/desktop/src/renderer/src/components/GlobalSurveySurface.tsx', before: 'if (!toolsOpen && !selection && focused instanceof HTMLElement && surface?.contains(focused) &&', after: 'if (false && !toolsOpen && !selection && focused instanceof HTMLElement && surface?.contains(focused) &&' }
+}, 'context-menu': {
+  'omit-context-profile-admission': { file: 'apps/desktop/src/renderer/src/lib/browser-native-opening.ts',
+    before: "if (event.opening?.collectInSurvey || (fromSurveyPage && destination !== 'region')) {",
+    after: "if (fromSurveyPage && destination !== 'region') {" }
 } }
 const mutations = mutationCases[selectedCase] ?? {}
 assert.ok(mutation === null || Object.hasOwn(mutations, mutation), 'Only an exact production mutation for the selected case is supported')
@@ -50,6 +54,7 @@ const receipt = { schema: 'agentmux.browser-profile-survey-workface.proof.v1', p
   mutation: mutation ? { name: mutation, applied: [] } : null,
   independentVisualReview: 'not-performed', physicalInputQualified: false, launches: [],
   boundary: 'Actual BrowserPane/Store and production sandbox preload/registerIpc/BrowserViewManager/RuntimeController, real isolated Core Sessions and stock Electron, public RPC and current-source CLI. A second private process reads the first process saved data. No user App, Browser, Run, clipboard, credentials or upstream model is used.' }
+if (selectedCase === 'context-menu') receipt.boundary = 'One private production App, Store, preload and BrowserViewManager. Real Chromium pointer hits build the Menu. The fixture intercepts the OS popup and supplies the window focus observation. No user App, Browser, Run, clipboard or credentials are used.'
 await mkdir(output, { recursive: true }); await mkdir(dist, { recursive: true })
 async function bind(file) {
   const absolute = resolve(file), name = relative(root, absolute), bytes = await readFile(absolute), digest = hash(bytes)
@@ -222,12 +227,18 @@ try {
   for(const file of [dist,join(directory,'renderer'),join(directory,'preload.cjs'),join(directory,'bootstrap.cjs')])await bindArtifact(file)
   receipt.sourceCount = sources.size; assert.ok(sources.size > 0); await save()
   if (mutation) assert.ok(receipt.mutation.applied.length > 0, 'The production mutation must reach the actual Renderer bundle')
-  const first = await execute('first'), restart = await execute('restart')
-  assert.notEqual(first.pid, restart.pid, 'Recovery uses a second physical process')
-  assert.equal(first.businessPassed, true, 'Boot or gallery rendering cannot qualify admission'); assert.equal(restart.businessPassed, true); assert.deepEqual(restart.recoveredIdentity, first.savedIdentity, 'Second PID must read original Profile/Browser/Region/Survey and mixed Task data without reseeding')
-  if (selectedCase === 'surface-windows') for (const phase of [first, restart]) assert.ok(phase.cases.some(item => item.kind === 'surface-windows' && item.passed), 'The two-window workface must complete its own oracle')
-  if(selectedCase==='profile-switch')for(const phase of [first,restart]){assert.equal(phase.profileSwitch?.completed,true);assert.ok(phase.cases.some(item=>item.kind==='profile-switch-dedicated-oracle'&&item.passed),'No admission fallthrough can qualify profile-switch')}
-  if(selectedCase==='complete')for(const phase of [first,restart]){assert.equal(phase.complete?.completed,true);assert.ok(phase.complete.cases.length>0);assert.ok(phase.cases.some(item=>item.kind==='complete-dedicated-oracle'&&item.passed),'No admission/profile-switch fallthrough can qualify complete')}
+  const first = await execute('first')
+  assert.equal(first.businessPassed, true, 'Boot or gallery rendering cannot qualify admission')
+  if (selectedCase === 'context-menu') {
+    assert.ok(first.cases.some(item => item.kind === 'context-menu-profile-admission' && item.passed), 'The native Menu and Store must complete the exact Profile admission oracle')
+  } else {
+    const restart = await execute('restart')
+    assert.notEqual(first.pid, restart.pid, 'Recovery uses a second physical process')
+    assert.equal(restart.businessPassed, true); assert.deepEqual(restart.recoveredIdentity, first.savedIdentity, 'Second PID must read original Profile/Browser/Region/Survey and mixed Task data without reseeding')
+    if (selectedCase === 'surface-windows') for (const phase of [first, restart]) assert.ok(phase.cases.some(item => item.kind === 'surface-windows' && item.passed), 'The two-window workface must complete its own oracle')
+    if(selectedCase==='profile-switch')for(const phase of [first,restart]){assert.equal(phase.profileSwitch?.completed,true);assert.ok(phase.cases.some(item=>item.kind==='profile-switch-dedicated-oracle'&&item.passed),'No admission fallthrough can qualify profile-switch')}
+    if(selectedCase==='complete')for(const phase of [first,restart]){assert.equal(phase.complete?.completed,true);assert.ok(phase.complete.cases.length>0);assert.ok(phase.cases.some(item=>item.kind==='complete-dedicated-oracle'&&item.passed),'No admission/profile-switch fallthrough can qualify complete')}
+  }
   for (const [file, digest] of sources) assert.equal(hash(await readFile(resolve(root, file))), digest, 'Qualification candidate remained unchanged: ' + file)
   for(const [file,binding] of artifacts)assert.equal(hash(await readFile(join(directory,file))),binding.sha256,'The exact loaded native artifact remained unchanged: '+file)
   receipt.passed = true; await save()
@@ -244,6 +255,6 @@ try {
   receipt.originRequests = origins.requests
   await save()
   await origins.close()
-  if (selectedCase === 'surface-windows') await rm(directory, { recursive: true, force: true })
+  if (selectedCase === 'surface-windows' || selectedCase === 'context-menu') await rm(directory, { recursive: true, force: true })
 }
 // Receipts and screenshots remain in the original evidence directory.

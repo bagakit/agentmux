@@ -7,6 +7,7 @@ import { profileSwitchCase } from './profile-switch-case'
 import { surfaceWindowsCase } from './surface-windows-case'
 import { completeCase } from './complete-case'
 import { completePorts } from './complete-ports'
+import { contextMenuCase } from './context-menu-case'
 import { cliFollow } from './cli-follow'
 import { browserProfilePartition } from '../../../src/main/browser-profile-store'
 import { settingsCase } from './settings-case'
@@ -110,7 +111,7 @@ async function run() {
  access=createDesktopApplicationAccessOwner(runtime,join(directory,'application-access.sqlite'))
  let rejectSurveyWrites=false, rejectedWrites=0, rejectedSurveyBrowserId:string|null=null, loseProfileDirectoryAck=selectedCase==='profile-switch'&&phase==='first'
  const switchPorts=selectedCase==='profile-switch'||selectedCase==='complete'?profileSwitchPorts(window,receipt,enabled=>{loseProfileDirectoryAck=enabled},browserId=>{rejectSurveyWrites=browserId!==null;rejectedSurveyBrowserId=browserId},()=>{rejectSurveyWrites=true;rejectedSurveyBrowserId=null}):null
- const completeObserver=selectedCase==='complete'?completePorts(receipt):null
+ const completeObserver=selectedCase==='complete'||selectedCase==='context-menu'?completePorts(receipt):null
  const completeReaders:ReturnType<typeof cliFollow>[]=[]
  let holdProbeAck=false, releaseProbeAck: ((lose:boolean)=>void)|undefined
  const probeAck={hold(){holdProbeAck=true},release(lose:boolean){releaseProbeAck?.(lose)}}
@@ -137,6 +138,12 @@ async function run() {
  const click=async(selector:string)=>{const point=await until(()=>evaluate(`(()=>{const e=[...document.querySelectorAll(${JSON.stringify(selector)})].find(node=>node.checkVisibility());if(!e)return null;e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`),'actual pointer target');for(const type of ['mouseMoved','mousePressed','mouseReleased'])await contents.debugger.sendCommand('Input.dispatchMouseEvent',{type,x:point.x,y:point.y,...(type==='mouseMoved'?{}:{button:'left',clickCount:1})});await delay(80)}
  receipt.initial=await facts()
  assert.ok(await evaluate('Boolean(document.querySelector(".surface-navigation"))'),'Full production App must mount')
+ if(selectedCase==='context-menu'){
+  assert.ok(completeObserver)
+  receipt.boundary='One private production App, preload, BrowserViewManager and compiled CLI. Chromium receives real pointer events. The fixture observes the built Menu without displaying the OS popup and supplies the window focus observation.'
+  await contextMenuCase({window,observation:completeObserver,evaluate,result,cli,receipt,workspaceId,pageUrl})
+  receipt.businessPassed=true;receipt.passed=true;return
+ }
  if(selectedCase==='complete'){
   assert.ok(switchPorts&&completeObserver)
   await completeCase({phase,directory,window,core,store,evaluate,result,cli,receipt,ports:switchPorts,observation:completeObserver,taskWorkspaceId:workspaceId,pageUrl,

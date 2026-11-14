@@ -1,6 +1,7 @@
 import { BrowserViewManager } from '../../../src/main/browser-view-manager'
 import { BrowserOperationJournal } from '@agentmux/browser/browser-operation-journal'
 import { session } from 'electron'
+import type { BrowserSnapshot } from '../../../src/shared/contracts'
 
 /** Private counters around the actual owners. Every original return, callback and refusal is kept. */
 export function completePorts(receipt: any) {
@@ -61,6 +62,9 @@ export function completePorts(receipt: any) {
     },
     native(browserId: string) { return manager?.entries.get(browserId)?.view ?? null },
     childOf(browserId: string) { return facts.browserEvents.find((event: any) => event.type === 'native-opened' && event.browser.source?.browserId === browserId) ?? null },
+    childrenOf(browserId: string): { browser: BrowserSnapshot }[] {
+      return facts.browserEvents.filter((event: any) => event.type === 'native-opened' && event.browser.source?.browserId === browserId)
+    },
     dispose() { for (const restore of restorations.reverse()) restore() }
   }
 }

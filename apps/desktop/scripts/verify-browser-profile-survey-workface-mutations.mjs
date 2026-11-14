@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '../../..')
 const args=process.argv.slice(2), onlyIndex=args.indexOf('--only'), caseIndex=args.indexOf('--case'), only=onlyIndex<0?null:args[onlyIndex+1], redOnly=args.includes('--red-only')
 const selectedCase=caseIndex<0?'admission':args[caseIndex+1]
-assert.ok(['admission','profile-switch'].includes(selectedCase),'Choose an implemented exact business case')
+assert.ok(['admission','profile-switch','context-menu'].includes(selectedCase),'Choose an implemented exact business case')
 assert.ok(args.every((value,index)=>value==='--only'||value==='--red-only'||value==='--case'||onlyIndex>=0&&index===onlyIndex+1||caseIndex>=0&&index===caseIndex+1),'Only --case CASE, --only NAME and --red-only are supported')
 const output = join(root, '.tmp/browser-profile-survey-workface-mutations', randomUUID())
 const script = join(root, 'apps/desktop/scripts/verify-browser-profile-survey-workface.mjs')
@@ -24,6 +24,8 @@ const caseRules = { admission: [
   ['close-on-weak-save', 'Weak Survey failure must preserve the Main-created Browser', native => ['partial', 'unknown'].includes(native.weak?.survey.outcome)]
 ], 'profile-switch': [
   ['steal-environment-keyboard-focus', 'Changing the Survey environment keeps keyboard focus', native=>native.profileSwitch.cases.some(value=>value.kind==='default-no-custom-shared-native-sign-in')&&native.profileSwitch.input.some(value=>value.kind==='keyboard-select'&&value.steps.some(step=>step.changes?.some(change=>change.trusted)))]
+], 'context-menu': [
+  ['omit-context-profile-admission', 'Only the explicit context Profile page is admitted', native => native.contextMenu?.frameChild && native.contextMenu.hits.length === 2]
 ] }
 const rules=caseRules[selectedCase]
 assert.ok(rules.length>0,'An implemented case must have nonempty production mutation rules')
@@ -69,15 +71,15 @@ try {
   assert.equal(receipt.productionMutations.length,only===null?rules.length:1)
   receipt.redPassed=true
   if(redOnly){
-    process.stdout.write('Profile Survey native mutation RED confirmed; restored dual-PID proof remains for the official task gate\n'+join(output,'receipt.json')+'\n')
+    process.stdout.write('Profile Survey native mutation RED confirmed. The original build is checked by the task gate.\n'+join(output,'receipt.json')+'\n')
   }else{
     const restored = await run(null)
     assert.equal(restored.code, 0)
     assert.equal(restored.proof.passed, true)
     assert.equal(restored.proof.mutation, null)
-    assert.equal(restored.proof.phases.length, 2)
+    assert.equal(restored.proof.phases.length, selectedCase === 'context-menu' ? 1 : 2)
     receipt.restored = { passed: true, destination: restored.destination, phases: restored.proof.phases }
     receipt.passed = true
-    process.stdout.write('Profile Survey native mutations: RED → restored dual-PID GREEN\n' + join(output, 'receipt.json') + '\n')
+    process.stdout.write('Profile Survey native mutations: RED → restored GREEN\n' + join(output, 'receipt.json') + '\n')
   }
 } finally { await save() }
