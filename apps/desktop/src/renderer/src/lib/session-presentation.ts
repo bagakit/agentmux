@@ -10,7 +10,9 @@ import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
 import type { AgentTimelineSnapshot } from '../../../shared/contracts'
 import type { SessionViewMode } from './session-state'
 
-const sessionIndexes = new WeakMap<readonly SessionSnapshot[], ReadonlyMap<string, SessionSnapshot>>()
+type AgentSessionSnapshot = Extract<SessionSnapshot, { kind: 'agent' }>
+type SessionPresentationIndex = { byId: ReadonlyMap<string, SessionSnapshot>; takeovers: readonly AgentSessionSnapshot[] }
+const sessionIndexes = new WeakMap<readonly SessionSnapshot[], SessionPresentationIndex>()
 let indexedAgentSessions: readonly SessionSnapshot[] | undefined
 let agentIndex: ReadonlyMap<string, readonly Extract<SessionSnapshot, { kind: 'agent' }>[]> = new Map()
 type SessionPaths = {
@@ -21,11 +23,27 @@ const pathIndexes = new WeakMap<readonly SessionSnapshot[], SessionPaths>()
 const NO_SESSIONS: readonly SessionSnapshot[] = []
 const NO_PATHS: ReadonlySet<string> = new Set()
 
+function sessionPresentations(sessions: readonly SessionSnapshot[]): SessionPresentationIndex {
+  let index = sessionIndexes.get(sessions)
+  if (!index) {
+    const byId = new Map<string, SessionSnapshot>(), takeovers: AgentSessionSnapshot[] = []
+    for (const session of sessions) {
+      byId.set(session.id, session)
+      if (session.kind === 'agent' && session.creation?.takeover) takeovers.push(session)
+    }
+    index = { byId, takeovers }
+    sessionIndexes.set(sessions, index)
+  }
+  return index
+}
+
 /** Shared lookup over the immutable Store projection; references remain owned by the Store. */
 export function sessionPresentationById(sessions: readonly SessionSnapshot[]): ReadonlyMap<string, SessionSnapshot> {
-  let index = sessionIndexes.get(sessions)
-  if (!index) { index = new Map(sessions.map(session => [session.id, session])); sessionIndexes.set(sessions, index) }
-  return index
+  return sessionPresentations(sessions).byId
+}
+
+export function sessionTakeoverPresentations(sessions: readonly SessionSnapshot[]): readonly AgentSessionSnapshot[] {
+  return sessionPresentations(sessions).takeovers
 }
 
 /** Canonical references may have multiple Host-qualified presentations; callers qualify the exact target. */

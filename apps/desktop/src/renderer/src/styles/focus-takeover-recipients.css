@@ -1,0 +1,39 @@
+.focus-takeover-recipients {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: 3px var(--sp-2);
+  border-top: 1px solid var(--line);
+  color: var(--text-2);
+  font-size: var(--fs-meta);
+  line-height: 1.35;
+}
+.focus-takeover-recipients__agent, .focus-takeover-recipients__more, .focus-takeover-recipients__summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+  min-height: 24px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.focus-takeover-recipients__agent { padding: 0 2px; }
+.focus-takeover-recipients__single-text { min-width: 0; text-align: start; overflow-wrap: anywhere; }
+.focus-takeover-recipients__single-text > span { white-space: nowrap; }
+.focus-takeover-recipients__agent > .agent-avatar { flex: none; }
+.focus-takeover-recipients__more { padding: 0; }
+.focus-takeover-recipients__summary { text-align: start; padding: 0 2px; }
+.focus-takeover-recipients > span:last-child, .focus-takeover-recipients__summary { text-wrap: balance; }
+.focus-takeover-recipients .avatar-group { --avatar-group-surface: var(--surface-1); --avatar-group-size: 23px; }
+.focus-takeover-recipients :is(button:hover, button:focus-visible) { color: var(--text); background: var(--surface-2); }
+.focus-takeover-recipients button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }
+.focus-takeover-recipients__menu { width: min(320px, calc(100vw - 24px)); max-height: min(320px, var(--radix-dropdown-menu-content-available-height)); overflow-y: auto; }
+.focus-takeover-recipients__menu .tab-context-menu__item { gap: var(--sp-2); align-items: center; white-space: normal; }
+.focus-takeover-recipients__menu .tab-context-menu__item > .agent-avatar { flex: none; }
+.focus-takeover-recipients__menu .tab-context-menu__item > span:last-child { display: grid; min-width: 0; overflow-wrap: anywhere; }
+.focus-takeover-recipients__menu small { color: var(--text-2); font-size: var(--fs-meta); }

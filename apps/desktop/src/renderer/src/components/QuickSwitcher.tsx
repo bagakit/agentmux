@@ -19,7 +19,8 @@ import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 import { AgentAvatar } from './AgentAvatar'
 import { StatusDot } from './StatusDot'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
-import { useAppStore } from '../store'
+import { agentRegionExecutionForSession, useAppStore } from '../store'
+import { sessionPresentationById } from '../lib/session-presentation'
 import { QuickOpenFiles } from './QuickOpenFiles'
 import { desktopElementVisible } from '../lib/desktop-presentation'
 import { SurfaceModeSwitch } from './SurfaceModeSwitch'
@@ -120,10 +121,21 @@ export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; o
     return () => { current = false }
   }, [requestId, ownerDocument])
 
-  const locationItems = useMemo(() => locationRequest ? buildSessionLocationItems({
-    label: locationRequest.label, config, tabs, layouts, catalog: workbenchSelectionCatalog(useAppStore.getState()),
-    references: sessionWorkbenchLocationChoices(tabs, workbenchSelectionCatalog(useAppStore.getState()), locationRequest.sessionId, locationRequest.groupId)
-  }) : NO_ITEMS, [requestId, config, tabs, layouts, scratchTopicSnapshots, spaceZoneBindings, topicCategories, projectGroups])
+  const locationItems = useMemo(() => {
+    if (!locationRequest) return NO_ITEMS
+    const catalog = workbenchSelectionCatalog(useAppStore.getState())
+    let references = sessionWorkbenchLocationChoices(tabs, catalog, locationRequest.sessionId, locationRequest.groupId)
+    const subject = locationRequest.subject
+    if (subject?.expectedRunId !== undefined) {
+      const session = sessionPresentationById(sessions).get(locationRequest.sessionId)
+      references = session?.control.run.runId === subject.expectedRunId ? references.filter(reference => {
+        const execution = agentRegionExecutionForSession(reference, session)
+        return execution?.hostId === subject.hostId && execution.runtimeId === subject.runtimeId
+      }) : []
+    }
+    return buildSessionLocationItems({ label: locationRequest.label, config, tabs, layouts, catalog, references })
+  }, [locationRequest, locationRequest?.subject?.expectedRunId === undefined ? null : sessions,
+    config, tabs, layouts, scratchTopicSnapshots, spaceZoneBindings, topicCategories, projectGroups])
 
   const items = useMemo(
     () => open && !locationRequest && mode === 'sessions' ?

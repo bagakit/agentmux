@@ -91,6 +91,10 @@ function OperationFeedbackItem({ operation, compact, active, visible }: { operat
   const phase = feedbackPhase(operation)
   const takeover = operation.kind === 'takeover' ? operation : null
   const request = takeover?.takeoverSource.coreRequest
+  const report = takeover?.report
+  const recordedCreation = report?.requestId === operation.operationId && (report.outcome === 'opened' || report.outcome === 'partial' || report.outcome === 'retired')
+    ? report.agent : null
+  const recordedRetirement = report?.requestId === operation.operationId && report.outcome === 'retired'
   const hasRequest = request?.operationId === operation.operationId && request?.content.kind === 'takeover-agent'
   const canCancel = hasRequest && !['succeeded', 'retired', 'cancelled'].includes(operation.phase) &&
     (!cancellation || cancellation.dispatch === 'not-submitted')
@@ -147,6 +151,9 @@ function OperationFeedbackItem({ operation, compact, active, visible }: { operat
       : created ? cancellation?.result?.initialInput === 'held' ? '新 Agent 已创建。尚未发送的接手步骤已撤销。' : '新 Agent 已保留。首条输入按原回执核对。'
       : cancellation?.pending ? '等待原工作区确认取消。'
       : cancellation ? '取消结果仍待确认。可以检查原请求。'
+      : phase === 'retired' || recordedRetirement ? '接手 Agent 已创建，后来关闭了。'
+      : recordedCreation ? recordedCreation.initialPrompt === 'confirmed' ? '接手 Agent 已创建，首条交接已确认。'
+        : recordedCreation.initialPrompt === 'not-requested' ? '接手 Agent 已创建，尚无首条交接记录。' : '接手 Agent 已创建，首条交接待确认。'
       : hasRequest ? '取消会撤销尚未执行的接手步骤，原会话和草稿会保留。' : '旧记录缺少完整请求，只能检查结果。'}</p>
       : operation.message ? <p>{operation.message}</p> : null}
     {cancelPreparationIssue ? <p className="agent-operation-feedback__action-note" role="status">{cancelPreparationIssue.message}</p> : null}

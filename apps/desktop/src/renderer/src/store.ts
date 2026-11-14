@@ -132,7 +132,7 @@ import { refreshTopicSpatial } from './lib/topic-knowledge-actions'
 import { categoriesFromSpatial } from '@agentmux/host/topic-categories'
 import {DesktopSpatialPersistence,SpatialConflictError,SpatialSaveStalledError,desktopSpatialGraph,desktopWorkbenchFromSpatial,desktopBindingsFromSpatial} from './lib/desktop-spatial-state'
 import { sameSpatialValue } from './lib/spatial-merge'
-import { desktopAgentPresentationFromSpatial } from './lib/desktop-agent-presentation'
+import { desktopAgentExecutionFromSpatial, desktopAgentPresentationFromSpatial } from './lib/desktop-agent-presentation'
 import { workfaceSaveRecorder } from './lib/workface-save-diagnostics'
 import { acknowledgedNameProjection, projectedNameRevision } from './lib/name-authority'
 import type { AgentMuxDisplayLabel, AgentMuxNameTarget, AgentMuxDisplayLabelResult } from '@agentmux/core/spatial-graph'
@@ -1513,8 +1513,8 @@ export type AppState = GitReadingActions & {
   ): Promise<AgentMuxControlResult>
   /** Whether the original display selection was committed. Refusal preserves the current context.
    * `keepSurface` places and selects the same occurrence without leaving the current main surface (Focus shows it in place). */
-  sessionLocationRequest: { requestId: string; sessionId: string; label: string; groupId?: string; keepSurface?: boolean; subject?: { hostId: string; agentSessionId: string; runtimeId?: string }; issue?: string } | null
-  requestSessionLocations(sessionId: string, options?: { keepSurface?: boolean; subject?: { hostId: string; agentSessionId: string; runtimeId?: string } | null }): boolean
+  sessionLocationRequest: { requestId: string; sessionId: string; label: string; groupId?: string; keepSurface?: boolean; subject?: SessionLocationSubject; issue?: string } | null
+  requestSessionLocations(sessionId: string, options?: { keepSurface?: boolean; subject?: SessionLocationSubject | null }): boolean
   dismissSessionLocationRequest(requestId: string): void
   chooseSessionLocation(requestId: string, reference: SessionLocationReference): boolean
   selectSession(id: string, tabGroupId?: string, options?: { keepSurface?: boolean; reference?: SessionLocationReference }): boolean
@@ -4907,6 +4907,7 @@ async function commitDisplayName(target: AgentMuxNameTarget, value: string | nul
 const agentRegionExecutionIndex = new WeakMap<readonly import('@agentmux/core/spatial-graph').AgentMuxSpatialGraph['regions'][number][], Map<string, import('@agentmux/core/spatial-graph').AgentMuxSpatialGraph['regions'][number]>>()
 
 export type AgentRegionReference = { tabId: string; regionId: string; agentSessionId: string; expectedRunId?: string }
+type SessionLocationSubject = { hostId: string; agentSessionId: string; runtimeId?: string; expectedRunId?: string }
 
 /** The existing Core document owns execution identity; display placement never supplies a Host. */
 /** Availability of the original spatial owner, not Agent or Run health. */
@@ -4938,7 +4939,7 @@ export function agentRegionLocationBindings(): readonly import('@agentmux/core/s
   return coreSpatialPersistence?.current?.graph.regions ?? null
 }
 
-export function agentRegionExecution(reference: AgentRegionReference) {
+function originalAgentRegion(reference: Pick<AgentRegionReference, 'tabId' | 'regionId'>) {
   const regions = coreSpatialPersistence?.current?.graph.regions
   if (!regions) return null
   let byRegion = agentRegionExecutionIndex.get(regions)
@@ -4946,7 +4947,16 @@ export function agentRegionExecution(reference: AgentRegionReference) {
     byRegion = new Map(regions.map(region => [JSON.stringify([region.tabId, region.regionId]), region]))
     agentRegionExecutionIndex.set(regions, byRegion)
   }
-  const region = byRegion.get(JSON.stringify([reference.tabId, reference.regionId]))
+  return byRegion.get(JSON.stringify([reference.tabId, reference.regionId])) ?? null
+}
+
+export function agentRegionExecutionForSession(reference: Pick<AgentRegionReference, 'tabId' | 'regionId'>, session: SessionSnapshot) {
+  const region = originalAgentRegion(reference)
+  return region ? desktopAgentExecutionFromSpatial(region, session) : null
+}
+
+export function agentRegionExecution(reference: AgentRegionReference) {
+  const region = originalAgentRegion(reference)
   if (region?.kind === 'agent' && region.agentSessionId === reference.agentSessionId) return region.execution ?? null
   // An Agent may be presented through its original Terminal Region. Terminal
   // facts have no Agent SID, so only that exact retained Run can qualify it.
@@ -8654,11 +8664,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // A held reading names its original Agent, even if this Renderer alias was reused.
     // Refuse only the mismatched navigation; existing content, input and Runs stay available.
     if (options?.subject === null || options?.subject && (original?.control.kind !== 'agent' ||
-      original.control.hostId !== options.subject.hostId || original.control.agentSessionId !== options.subject.agentSessionId)) return false
+      original.control.hostId !== options.subject.hostId || original.control.agentSessionId !== options.subject.agentSessionId ||
+      options.subject.expectedRunId !== undefined && original.control.run.runId !== options.subject.expectedRunId)) return false
     set({ sessionLocationRequest: { requestId: mintObjectId(), sessionId, label: original?.label ?? sessionId,
       keepSurface: options?.keepSurface ?? current.mainSurface === 'agents',
       ...(original?.control.kind === 'agent' ? { subject: { hostId: original.control.hostId, agentSessionId: original.control.agentSessionId,
-        ...(options?.subject?.runtimeId === undefined ? {} : { runtimeId: options.subject.runtimeId }) } } : {}),
+        ...(options?.subject?.runtimeId === undefined ? {} : { runtimeId: options.subject.runtimeId }),
+        ...(options?.subject?.expectedRunId === undefined ? {} : { expectedRunId: options.subject.expectedRunId }) } } : {}),
       ...(!agentRegionLocationsKnown() ? { issue: 'Location sources are not confirmed yet. The original Agent and workface are kept.' } : {}) } })
     return true
   },
@@ -8673,7 +8685,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       set({ sessionLocationRequest: { ...request, issue: 'The original Agent identity has changed. Choose its confirmed location again.' } })
       return false
     }
-    const execution = request.subject ? agentRegionExecution({ tabId: reference.tabId, regionId: reference.regionId, agentSessionId: request.subject.agentSessionId }) : null
+    const execution = request.subject?.expectedRunId !== undefined
+      ? original?.control.run.runId === request.subject.expectedRunId ? agentRegionExecutionForSession(reference, original) : null
+      : request.subject ? agentRegionExecution({ tabId: reference.tabId, regionId: reference.regionId, agentSessionId: request.subject.agentSessionId }) : null
     if (request.subject && (execution?.hostId !== request.subject.hostId || request.subject.runtimeId !== undefined && execution?.runtimeId !== request.subject.runtimeId)) {
       set({ sessionLocationRequest: { ...request, issue: 'The original Agent binding at this location is unconfirmed. Its workface is kept; refresh the original Host or choose a confirmed location.' } })
       return false
