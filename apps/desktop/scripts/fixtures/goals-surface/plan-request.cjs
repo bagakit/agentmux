@@ -6,9 +6,10 @@ module.exports = async ({ evaluate, size, pointer, capture, waitFor, result }) =
     {width:1280,theme:'light',state:'unknown'}, {width:620,theme:'dark',state:'stale'}
   ]
   const filter=process.env.AGENTMUX_GOAL_PLAN_REQUEST_SCENE
-  assert.ok(!filter||filter==='wide-no-supervisor','Select the finite changed planning scene only')
+  assert.ok(!filter||['wide-no-supervisor','current-recipient'].includes(filter),'Select the finite changed planning scene only')
   result.sceneFilter=filter??null
-  const selected=filter?scenes.filter(scene=>scene.width===1280&&scene.state==='none'):scenes
+  const selected=filter==='wide-no-supervisor'?scenes.filter(scene=>scene.width===1280&&scene.state==='none')
+    :filter==='current-recipient'?scenes.filter(scene=>scene.width===620&&scene.theme==='light'&&scene.state==='delivered'):scenes
   for (const {width,theme,state} of selected) {
     await evaluate(`goalsPlan.request(${JSON.stringify(state)});goalsVisual.appearance(${JSON.stringify(theme)})`)
     await size(width)
@@ -20,9 +21,9 @@ module.exports = async ({ evaluate, size, pointer, capture, waitFor, result }) =
     assert.equal(facts.hasGraph,false,'Prepared or delivered input is not a saved graph')
     assert.equal(facts.overflow,false,'Controls stay readable within the actual workface')
     if(state==='none')assert.ok(facts.buttons.some(button=>button.text==='Choose Supervisor to plan'))
-    else assert.ok(facts.text.includes('Mira')&&facts.text.includes('planning'))
+    else { assert.ok(facts.text.includes('Mira')&&facts.text.includes('planning')); assert.ok(facts.buttons.some(button=>button.text==='Check request to Mira')) }
     result.observations.push({scene:'planning-request',width,theme,state,facts})
     await capture(`${width}-${theme}-planning-${state}`,width)
   }
-  assert.equal(result.frames.length,filter?2:12,'All selected exact planning-request states were captured')
+  assert.equal(result.frames.length,filter==='current-recipient'?1:filter?2:12,'All selected exact planning-request states were captured')
 }

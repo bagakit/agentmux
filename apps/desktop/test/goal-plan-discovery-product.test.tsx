@@ -240,6 +240,7 @@ it('a planning input reaches the Supervisor and only its saved public plan repla
 
 it('without a Supervisor the original action is saved before the picker and only an explicit later click sends', async () => {
   await save(true, null)
+  await act(async () => useAppStore.setState(state => ({ agentNames: { ...state.agentNames, [fixture.primary.agentSessionId]: 'Planning Supervisor' } })))
   const before = (await fixture.host.demands.get('discovery'))!
   await act(async () => container.querySelector<HTMLButtonElement>('[data-goal-plan-request]')!.click())
   await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull())
@@ -250,9 +251,11 @@ it('without a Supervisor the original action is saved before the picker and only
   await act(async () => { [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Cancel')!.click() })
   await act(async () => useAppStore.getState().updateDemand('discovery', { supervisorSessionId: fixture.primary.agentSessionId, assigneeSessionIds: [fixture.primary.agentSessionId] }))
   expect(fixture.host.executed('demand.discuss')).toEqual([])
+  expect(container.querySelector('[data-goal-plan-request]')?.textContent).toBe('Ask Planning Supervisor to plan')
   await nativeState('done'); const request = await requestPlan()
   expect(request.requestId).toBe(reference.requestId)
   expect(planningRequest().supervisorAgentSessionId).toBe(fixture.primary.agentSessionId)
+  expect(container.querySelector('[data-goal-plan-request]')?.textContent).toBe('Check request to Planning Supervisor')
 })
 
 it('missing alignment keeps its real gap in the Supervisor request and refuses a fabricated plan', async () => {
@@ -267,6 +270,7 @@ it('missing alignment keeps its real gap in the Supervisor request and refuses a
 
 it('lost planning receipt retains the original request through Renderer rehydrate without repeating input', async () => {
   await save(); await nativeState('done')
+  await act(async () => useAppStore.setState(state => ({ agentNames: { ...state.agentNames, [fixture.primary.agentSessionId]: 'Original Supervisor' } })))
   const gate = fixture.host.once('demand.discuss', { kind: 'lose-receipt' }, request => request.mode === 'plan')
   const request = await requestPlan(); await gate.committed
   const accepted = [...fixture.core.writes], original = (await fixture.host.demands.get('discovery'))!.patrols!.find(item => item.purpose === 'plan')!
@@ -275,6 +279,7 @@ it('lost planning receipt retains the original request through Renderer rehydrat
   expect(userWrites.some(write => write.payload.includes(request.requestId))).toBe(true)
   expect(user.observe().lastConfirmedWrite?.diskDurability).toBe('confirmed')
   await act(async () => root.unmount()); await useAppStore.persist.rehydrate(); root = createRoot(container); await mount()
+  expect(container.querySelector('[data-goal-plan-request]')?.textContent).toBe('Check request to Original Supervisor')
   await requestPlan()
   const attempts = fixture.host.executed('demand.discuss').filter(value => value.mode === 'plan')
   expect(attempts.map(value => value.requestId)).toEqual([request.requestId, request.requestId])
