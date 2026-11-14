@@ -43,6 +43,8 @@ const draft = 'Keep the original width restart draft'
 const projectPreferences = [{ key: JSON.stringify(['local', workspaceId]), pinned: true, note: 'Original retained work', color: 'blue', collapsed: false },
   { key: JSON.stringify(['remote-proof', workspaceId]), pinned: true, note: 'Separate Host reference retained', color: 'violet', collapsed: null }]
 const serializedProjects = JSON.stringify(projectPreferences)
+const zonePresentations = [{ key: JSON.stringify(['project', 'local', workspaceId]), presentation: 'cards' }]
+const serializedZones = JSON.stringify(zonePresentations)
 const joinPreferences = { mode: 'uniform', timeZone: 'America/New_York', intervalMinutes: 90, phaseMinutes: 1425 }
 const receipt = { schema: projectRoutesJoin ? 'agentmux.focus-stable-routes-restart.v1' : 'agentmux.focus-timeline-name-width-restart.v1', passed: false, processes: [], controls: [], cleanup: {},
   privateRuntime: true, userRuntimeTouched: false,
@@ -74,7 +76,7 @@ async function files(directory, prefix) {
 }
 async function binding() {
   const names = ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'apps/desktop/package.json', 'apps/host/package.json',
-    'apps/desktop/scripts/verify-focus-timeline-name-width-restart.mjs', ...(projectRoutesJoin ? ['apps/desktop/scripts/verify-focus-stable-routes-restart.mjs'] : []), 'apps/desktop/scripts/probe-process.mjs',
+    'apps/desktop/scripts/verify-focus-timeline-name-width-restart.mjs', ...(projectRoutesJoin ? ['apps/desktop/scripts/verify-focus-stable-routes-restart.mjs', 'apps/desktop/resources/icon.png'] : []), 'apps/desktop/scripts/probe-process.mjs',
     'apps/desktop/scripts/fixtures/settings-cli/desktop.mjs', 'packages/core/test/fixtures/fake-codex-cli.mjs', 'packages/core/bin/amux',
     ...await files(join(desktopRoot, 'resources/toolkit'), 'apps/desktop/resources/toolkit'),
     ...await files(join(desktopRoot, 'src'), 'apps/desktop/src'), ...await files(join(desktopRoot, 'out'), 'apps/desktop/out'),
@@ -277,7 +279,7 @@ async function launch(label, seed) {
 }
 async function surface(probe) {
   if (workfaceJoin) {
-    const value = projectRoutesJoin ? await probe.cdp.evaluate(`(async()=>{const raw=await window.agentmux.ui.readWorkbenchState();if(!raw)throw Error('Original Main user-state document is unavailable');const saved=JSON.parse(raw).state,config=await window.agentmux.config.get(),group=[...document.querySelectorAll('.focus-project-frame[data-project-group-key]')].find(n=>n.dataset.projectGroupKey===JSON.stringify(['local',${JSON.stringify(workspaceId)}]));return{selection:saved.workbenchSpaceSelection,focus:saved.agentFocus,draft:saved.agentComposerDrafts[${JSON.stringify(session.agentSessionId)}],projectPreferences:JSON.stringify(config.focus?.projects??[]),projectGroup:group?{pinned:group.dataset.pinned,color:group.dataset.focusProjectColor,note:group.querySelector('[data-focus-project-note]')?.textContent,text:group.textContent,headings:group.querySelectorAll(':scope > .focus-project-frame__heading').length,preferenceEntries:group.querySelectorAll('.focus-project-preferences__trigger').length,lanes:group.querySelectorAll('[data-lane-id]').length}:null,regions:[...document.querySelectorAll('[data-workbench-region-id]')].filter(n=>n.getClientRects().length&&getComputedStyle(n).visibility==='visible').map(n=>n.dataset.workbenchRegionId).sort()}})()`) : await probe.cdp.evaluate(`(() => { const saved=JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state;return{selection:saved.workbenchSpaceSelection,focus:saved.agentFocus,draft:saved.agentComposerDrafts[${JSON.stringify(session.agentSessionId)}],topicPresentation:document.querySelector('.global-focus-surface')?.dataset.focusTopicPresentation,regions:[...document.querySelectorAll('[data-workbench-region-id]')].filter(n=>n.getClientRects().length&&getComputedStyle(n).visibility==='visible').map(n=>n.dataset.workbenchRegionId).sort()}})()`)
+    const value = projectRoutesJoin ? await probe.cdp.evaluate(`(async()=>{const raw=await window.agentmux.ui.readWorkbenchState();if(!raw)throw Error('Original Main user-state document is unavailable');const saved=JSON.parse(raw).state,config=await window.agentmux.config.get(),group=[...document.querySelectorAll('.focus-project-frame[data-project-group-key]')].find(n=>n.dataset.projectGroupKey===JSON.stringify(['local',${JSON.stringify(workspaceId)}]));return{selection:saved.workbenchSpaceSelection,focus:saved.agentFocus,draft:saved.agentComposerDrafts[${JSON.stringify(session.agentSessionId)}],projectPreferences:JSON.stringify(config.focus?.projects??[]),zonePresentations:JSON.stringify(config.focus?.zonePresentations??[]),projectGroup:group?{pinned:group.dataset.pinned,color:group.dataset.focusProjectColor,note:group.querySelector('[data-focus-project-note]')?.textContent,text:group.textContent,organization:group.dataset.focusZonePresentation,artwork:(()=>{const e=group.querySelector('img[data-project-watermark]');if(!e)return null;const data=e.src.split(',')[1]??'';return{loaded:e.complete&&e.naturalWidth>0,width:e.naturalWidth,height:e.naturalHeight,png:e.src.startsWith('data:image/png;base64,'),bytes:data.length*3/4-(data.match(/=*$/)?.[0].length??0)}})(),headings:group.querySelectorAll('.focus-project-frame__heading').length,preferenceEntries:group.querySelectorAll('.focus-project-preferences__trigger').length,lanes:group.querySelectorAll('[data-lane-id]').length}:null,regions:[...document.querySelectorAll('[data-workbench-region-id]')].filter(n=>n.getClientRects().length&&getComputedStyle(n).visibility==='visible').map(n=>n.dataset.workbenchRegionId).sort()}})()`) : await probe.cdp.evaluate(`(() => { const saved=JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state;return{selection:saved.workbenchSpaceSelection,focus:saved.agentFocus,draft:saved.agentComposerDrafts[${JSON.stringify(session.agentSessionId)}],topicPresentation:document.querySelector('.global-focus-surface')?.dataset.focusTopicPresentation,regions:[...document.querySelectorAll('[data-workbench-region-id]')].filter(n=>n.getClientRects().length&&getComputedStyle(n).visibility==='visible').map(n=>n.dataset.workbenchRegionId).sort()}})()`)
     const spatial = await new core.AgentMuxSpatialStateStore().read()
     assert.ok(spatial?.graph?.tabs.some(tab => tab.tabId === tabId), 'Original Tab must exist in the actual Core durable workface')
     assert.ok(spatial.graph.layouts[workspaceId] && spatial.graph.tabLayouts[tabId], 'Original Group and split layout must be nonempty')
@@ -329,10 +331,11 @@ async function durableCollectionPreference(expected, checkpoint) {
 async function durableProjectPreference(checkpoint) {
   const bytes = await readFile(join(userData, 'agentmux.config.json')), config = JSON.parse(bytes)
   assert.deepEqual(config.focus?.projects, projectPreferences)
+  assert.deepEqual(config.focus?.zonePresentations, zonePresentations)
   const file = `project-config-${checkpoint}.json`; await writeFile(join(output, file), bytes, { flag: 'wx', mode: 0o600 })
-  return { file, sha256: digest(bytes), value: config.focus.projects }
+  return { file, sha256: digest(bytes), value: config.focus.projects, zonePresentations: config.focus.zonePresentations }
 }
-const projectRendered = value => value.projectPreferences === serializedProjects && value.projectGroup?.pinned === 'true' && value.projectGroup?.color === 'blue' && value.projectGroup?.note === projectPreferences[0].note && value.projectGroup.headings === 1 && value.projectGroup.preferenceEntries === 1 && value.projectGroup.lanes > 0
+const projectRendered = value => value.projectPreferences === serializedProjects && value.zonePresentations === serializedZones && value.projectGroup?.organization === 'cards' && value.projectGroup?.artwork?.loaded && value.projectGroup.artwork.png && value.projectGroup.artwork.width === 512 && value.projectGroup.artwork.height === 512 && value.projectGroup.artwork.bytes <= 256 * 1024 && value.projectGroup?.pinned === 'true' && value.projectGroup?.color === 'blue' && value.projectGroup?.note === projectPreferences[0].note && value.projectGroup.headings === 1 && value.projectGroup.preferenceEntries === 1 && value.projectGroup.lanes > 0
 async function setProjectPreferences(probe) {
   stage = 'project-cli-discovery'
   const found = await collectionCommand(['settings', 'inspect', 'focus.projects'], 'settings.inspect')
@@ -346,6 +349,12 @@ async function setProjectPreferences(probe) {
   const operationId = randomUUID(); receipt.projectOperation = { operationId, key: 'focus.projects', value: serializedProjects }
   const saved = await collectionCommand(['settings', 'set', 'focus.projects', serializedProjects, '--operation-id', operationId], 'settings.set')
   assert.equal(saved.entry.key, 'focus.projects'); assert.equal(saved.entry.value, serializedProjects)
+  stage = 'zone-cli-discovery'
+  assert.deepEqual((await collectionCommand(['settings', 'inspect', 'focus.zonePresentations'], 'settings.inspect')).entries,
+    [{ key: 'focus.zonePresentations', kind: 'string', value: '[]', default: '[]' }])
+  const zoneOperationId = randomUUID(); receipt.zoneOperation = { operationId: zoneOperationId, key: 'focus.zonePresentations', value: serializedZones }
+  const zoneSaved = await collectionCommand(['settings', 'set', 'focus.zonePresentations', serializedZones, '--operation-id', zoneOperationId], 'settings.set')
+  assert.equal(zoneSaved.entry.key, 'focus.zonePresentations'); assert.equal(zoneSaved.entry.value, serializedZones)
   stage = 'project-renderer-consumption'
   const edited = await waitFor('actual Focus consumes the public project preference', async()=>{ const value=await surface(probe); return projectRendered(value) ? value : null })
   receipt.projectConfigAfterSave = await durableProjectPreference('after-save'); return edited
@@ -460,6 +469,12 @@ try {
   for (const name of inheritedCallerNames) delete process.env[name]
   Object.assign(process.env, environment)
   for (const path of [privateHome, userData, workspacePath, topicsPath, codexHome]) await mkdir(path, { recursive: true, mode: 0o700 })
+  if (projectRoutesJoin) {
+    const bytes = await readFile(join(desktopRoot, 'resources/icon.png'))
+    assert.ok(bytes.length > 256 * 1024 && bytes.length <= 1024 * 1024, 'Actual large project artwork exercises bounded native publication')
+    await copyFile(join(desktopRoot, 'resources/icon.png'), join(workspacePath, 'icon.png'))
+    receipt.projectArtworkInput = { sha256: digest(bytes), bytes: bytes.length }
+  }
   receipt.privateNotes = await preparePrivateNotesIsolation({ root: privateRoot, privateHome, environment })
   stage = 'private-original-run'
   const executable = join(privateRoot, 'private-codex.sh'), quote = text => `'${text.replace(/'/g, `'\\''`)}'`
@@ -558,7 +573,7 @@ try {
     stage = 'collection-preference-and-workface-restored'
     assert.equal(projectRoutesJoin ? restored.projectPreferences : restored.topicPresentation, projectRoutesJoin ? serializedProjects : 'sections'); assert.deepEqual(restored.regions, before.regions)
     if (projectRoutesJoin) {
-      receipt.projectConfigAfterRestart = await durableProjectPreference('after-restart'); receipt.projectPreferencesRestored = true
+      receipt.projectConfigAfterRestart = await durableProjectPreference('after-restart'); receipt.projectPreferencesRestored = true; receipt.zonePresentationsRestored = true
       assert.ok(projectRendered(restored)); assert.ok(restored.projectGroup.text.includes(projectPreferences[0].note))
     } else { receipt.collectionConfigAfterRestart = await durableCollectionPreference('sections', 'after-restart'); receipt.collectionPreferencesRestored = true }
   } else { assert.equal(restored.width, 244); assert.equal(restored.renderedWidth, 244); assert.equal(restored.height, before.height); assert.deepEqual(restored.tracks, edited.tracks) }
