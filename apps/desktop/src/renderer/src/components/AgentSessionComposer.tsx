@@ -9,7 +9,7 @@ import { reportMessageDeliveryDiagnostics } from '../lib/message-delivery-diagno
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { PosturePicker } from './PosturePicker'
 import { createFirstPromptSelector, createSessionViewModeSelector, sessionPresentationById } from '../lib/session-presentation'
-import { useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import type { ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
 import { AgentContextUsage } from './AgentContextUsage'
 import { AgentComposerTools } from './AgentComposerTools'
@@ -57,6 +57,26 @@ const EMPTY_QUEUE: readonly AgentSteerQueueEntry[] = Object.freeze([])
 // The resubmit guard survives a Composer remount within the same application run.
 // Drafts remain owned by the store; transient operation feedback stays with the mounted Composer.
 const lastSubmitBySession = new ComposerResubmitGuard()
+
+// The mailbox retains this layout across Composer renders. Its methods need only
+// the supplied layout and the original rollover node, not the Composer's Session.
+function rolloverDeliveryLayout(pendingLayout: PendingDeliveryLayout | undefined, rolloverSurface: RefObject<HTMLDetailsElement | null>): PendingDeliveryLayout | undefined {
+  return pendingLayout ? {
+    ...pendingLayout,
+    readOverlapTop(popup) {
+      const original = pendingLayout.readOverlapTop(popup), surface = rolloverSurface.current
+      if (!surface?.isConnected || surface.closest('[hidden], [inert]')) return original
+      const rect = surface.getBoundingClientRect()
+      return popup.left < rect.right && popup.right > rect.left && popup.top < rect.bottom && popup.bottom > rect.top
+        ? Math.min(original ?? rect.top, rect.top) : original
+    },
+    subscribe(onChange) {
+      const stop = pendingLayout.subscribe(onChange), resize = new ResizeObserver(onChange)
+      if (rolloverSurface.current) resize.observe(rolloverSurface.current)
+      return () => { stop(); resize.disconnect() }
+    }
+  } : undefined
+}
 
 
 export function agentComposerAvailability(
@@ -129,21 +149,7 @@ export function AgentSessionComposer({
   const rolloverSurface = useRef<HTMLDetailsElement>(null)
   // The existing pending popup must clear the original continuation controls,
   // just as it already clears an interaction card in this workface.
-  const deliveryLayout = useMemo<PendingDeliveryLayout | undefined>(() => pendingLayout ? {
-    ...pendingLayout,
-    readOverlapTop(popup) {
-      const original = pendingLayout.readOverlapTop(popup), surface = rolloverSurface.current
-      if (!surface?.isConnected || surface.closest('[hidden], [inert]')) return original
-      const rect = surface.getBoundingClientRect()
-      return popup.left < rect.right && popup.right > rect.left && popup.top < rect.bottom && popup.bottom > rect.top
-        ? Math.min(original ?? rect.top, rect.top) : original
-    },
-    subscribe(onChange) {
-      const stop = pendingLayout.subscribe(onChange), resize = new ResizeObserver(onChange)
-      if (rolloverSurface.current) resize.observe(rolloverSurface.current)
-      return () => { stop(); resize.disconnect() }
-    }
-  } : undefined, [pendingLayout, rollovers.length > 0])
+  const deliveryLayout = useMemo(() => rolloverDeliveryLayout(pendingLayout, rolloverSurface), [pendingLayout, rollovers.length > 0])
   const memberInput = motePresentation.moteInputIntent === 'member' || Boolean(moteWorkface?.memberIntent)
   const openRollover = (entry: AgentSteerQueueEntry) => {
     if (!entry.mainRollover || !moteWorkface?.startRollover) return
@@ -291,6 +297,7 @@ export function AgentSessionComposer({
   const dialogDocument = useWorkbenchWindowDocument() ?? undefined
 
   const [fileReferencesOpen, setFileReferencesOpen] = useState(false)
+  const onRemoteFiles = useMemo(() => setFileReferencesOpen.bind(null, true), [setFileReferencesOpen])
   const attachmentScope = JSON.stringify([sessionId, session?.hostId, session?.workspacePath, resource.address, workspace?.id])
   useEffect(() => { setFileReferencesOpen(false) }, [attachmentScope, visible])
   const attachments = useComposerAttachments({ scope: attachmentScope, sessionControl: session?.kind === 'agent' ? session.control : undefined, hostId: session?.hostId,
@@ -299,7 +306,7 @@ export function AgentSessionComposer({
       fileResource: workspace ? { hostId: workspace.hostId, workspacePath: workspace.path } : null
     } : {}),
     disabled: !submitMode.canType, insertion: insertionRef, feedback,
-    document: dialogDocument, shortcutActive: visible && !readOnly, ...(workspace ? { onRemoteFiles: () => setFileReferencesOpen(true) } : {}) })
+    document: dialogDocument, shortcutActive: visible && !readOnly, ...(workspace ? { onRemoteFiles } : {}) })
 
   const notices: ServiceNoticeItem[] = sessionServiceNotices(session, queuedEntries, sendingId,
     nativeService).map(notice => notice.id === 'timeline-observation'
