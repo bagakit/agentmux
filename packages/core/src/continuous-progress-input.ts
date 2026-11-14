@@ -2,7 +2,7 @@ import { dequal } from 'dequal'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseAutomaticInputSource, sameAutomaticInputSource, type AutomaticInputSource } from './automatic-input-source.js'
-import { agentPromptInputId, agentPromptNotApplied, validateAgentPromptInputKey, type AgentPromptInputKey } from './agent-prompt-condition.js'
+import { agentPromptInputId, agentPromptNotApplied, optionalInputEpoch, validateAgentPromptInputKey, type AgentPromptInputKey } from './agent-prompt-condition.js'
 import type { AgentFuturePromptIntent, AgentPromptSubmissionRecord } from './types.js'
 
 /** Original automatic-input address only; never content, native location or input-control authority. */
@@ -25,6 +25,26 @@ export type ContinuousProgressInputReading = ContinuousProgressInputFacts & {
   status: 'confirmed' | 'unconfirmed'
 }
 
+export type ScheduledInputRecoverySource = {
+  reference: ContinuousProgressInputReference
+  providerId: string
+  workspacePath: string
+  inputEpoch?: string
+}
+
+/** On a committed Session snapshot, a different Run fences the original
+ * producer. The future-intent watermark and exact admission must both agree. */
+export function supersededInputWasUnclaimed(source: ScheduledInputRecoverySource,
+  session: Pick<import('./types.js').AgentMuxStoredAgentSession, 'agentSessionId' | 'providerId' | 'workspacePath' | 'run' | 'retiredRuns' | 'inputEpoch'> | null,
+  intent: AgentFuturePromptIntent | null, admission: AgentPromptSubmissionRecord | null): boolean {
+  const { inputKey, futureIntent, managedSource, definitionOperationId } = source.reference
+  return !!session && session.agentSessionId === inputKey.agentSessionId && session.providerId === source.providerId &&
+    session.workspacePath === source.workspacePath && session.inputEpoch === source.inputEpoch && session.run.runId !== inputKey.expectedRun.runId &&
+    session.retiredRuns.some(run => run.runId === inputKey.expectedRun.runId) &&
+    !admission && !!intent?.active && intent.operationId === definitionOperationId && sameAutomaticInputSource(intent.continuitySource, managedSource) &&
+    (intent.lastOccurrenceAt === undefined || intent.lastOccurrenceAt < futureIntent.occurrenceAt)
+}
+
 /** Compare the original claim with one owner-qualified frozen definition. */
 export function matchesScheduledInputSource(reference: Omit<ContinuousProgressInputReference, 'preparedAt'>,
   record: AgentPromptSubmissionRecord | null, intent: AgentFuturePromptIntent | null): boolean {
@@ -38,6 +58,13 @@ export function matchesScheduledInputSource(reference: Omit<ContinuousProgressIn
 const invalid = (code: string): never => { throw new AgentMuxError('The original automatic-input reference or safe reading is invalid.', code) }
 const identity = (value: unknown, code: string): string => typeof value === 'string' && !!value.trim() && value.length <= 16384 && !/[\0\r\n]/u.test(value) ? value : invalid(code)
 const time = (value: unknown, code: string): number => Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : invalid(code)
+
+export function parseScheduledInputRecoverySource(value: unknown): ScheduledInputRecoverySource {
+  const code = 'INVALID_CONTROL_REQUEST'
+  const source = rpcRecord(value, ['reference', 'providerId', 'workspacePath', 'inputEpoch'], code)
+  return { reference: parseContinuousProgressInputReference(source.reference, code), providerId: identity(source.providerId, code),
+    workspacePath: identity(source.workspacePath, code), ...optionalInputEpoch(source.inputEpoch) }
+}
 
 export function parseContinuousProgressInputReference(value: unknown, code = 'CONTROL_PROTOCOL_ERROR'): ContinuousProgressInputReference {
   const p = rpcRecord(value, ['inputKey', 'futureIntent', 'definitionOperationId', 'managedSource', 'preparedAt'], code)

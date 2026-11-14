@@ -23,7 +23,7 @@ export const AGENTMUX_HOSTED_METHODS = [
   'inspectAgentExecutionOperation', 'prepareAgentExecutionHelper', 'prepareTerminal', 'createPreparedTerminal', 'inspectPreparedTerminal', 'terminalCreationRuntimeIdentity', 'retirePreparedTerminalCreation', 'observePreparedTerminalCreationRetirement', 'prepareTerminalStop', 'stopPreparedTerminal', 'controlTerminal', 'inspectTerminalControl', 'inspectTerminalCreation', 'retireTerminalCreation', 'createTerminal', 'recoverTerminal', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
   'removeTerminal', 'releaseRunAttachment', 'writeTerminal', 'writeTerminalBytes', 'resizeTerminal', 'signalTerminal', 'stopTerminal',
   'createAgent', 'createAgentWithDelivery', 'resolveAgentCreationSessionId', 'inspectAgentCreation', 'resolveAgentCreation', 'cancelAgentCreation', 'inspectAgentCreationCancellation', 'continueAgentCreation', 'listAgentSpawns', 'reattachAgent', 'ensureAgentContinuity', 'controlAgentContinuity',
-  'restartAgent', 'inspectAgentRestart', 'inspectAgentStop', 'resumeAgent', 'reopenAgent', 'reconcileAgentReopen', 'respawnAgent', 'writeAgent', 'pasteAgent', 'submitAgentPrompt', 'submitAgentMessage', 'notifyMessages', 'inspectMessageNotification', 'saveAgentFuturePromptIntent', 'replySessionQuestion',
+  'restartAgent', 'inspectAgentRestart', 'inspectAgentStop', 'resumeAgent', 'reopenAgent', 'reconcileAgentReopen', 'respawnAgent', 'writeAgent', 'pasteAgent', 'submitAgentPrompt', 'supersededScheduledInputWasUnclaimed', 'submitAgentMessage', 'notifyMessages', 'inspectMessageNotification', 'saveAgentFuturePromptIntent', 'replySessionQuestion',
   'respondAgentInteraction', 'inspectAgentInteractionOperation', 'inspectAgentPosture', 'setAgentPosture', 'resizeAgent', 'signalAgent', 'stopAgent',
   'authorizeAgentCaller', 'authorizeRetainedAgentCaller', 'authorizeAgentMessage', 'checkDeliveries', 'ackDeliveryBatch',
   'answerAsk', 'cancelAsk', 'startDiscussion', 'handOff', 'openDispatch', 'recordDispatchEvent', 'showDispatch', 'readMessage', 'listMessages', 'listMessageEvents', 'broadcastMessages', 'inspectMessageBroadcast', 'readDispatch', 'listDispatches'
@@ -155,6 +155,7 @@ export const AGENTMUX_HOSTED_PREPARATION = {
   writeAgent: 'runtime',
   pasteAgent: 'runtime',
   submitAgentPrompt: 'input-admission',
+  supersededScheduledInputWasUnclaimed: 'owner',
   submitAgentMessage: 'input-admission',
   notifyMessages: 'owner',
   inspectMessageNotification: 'owner',

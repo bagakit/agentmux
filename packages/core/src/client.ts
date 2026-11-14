@@ -16,6 +16,7 @@ import { readContinuityExecutor } from './agent-session-recovery/executor.js'
 import { RunControlOperations } from './run-control-operations.js'
 import { parsePostureSet, parsePostureInspect, postureControlDigest, type PostureInspect, type PostureInspection, type PostureReceipt } from './agent-posture.js'
 import type { AgentMuxAgentCreateInput, AgentMuxHostAgentCreateInput, AgentMuxTerminalCreateInput, AgentMuxAgentPromptInput, AgentMuxSessionQuestionReplyInput, AgentMuxAgentMessageInput, AgentMuxAgentInteractionInput, AgentMuxAgentPostureInput, AgentMuxAgentRespawnInput, AgentMuxAgentAttachment, AgentMuxClientOptions, AgentMuxAgentRuntimeStatus } from './client-contract.js'
+import { parseScheduledInputRecoverySource, type ScheduledInputRecoverySource } from './continuous-progress-input.js'
 import { agentSessionHasCreationKey, agentSessionRetirementRevision } from './agent-session-store.js'
 import { nativeSnapshotSigningKey } from './native-snapshot-key.js'
 import { decodeNativeSnapshotCursor } from './native-snapshot-cursor.js'
@@ -7218,6 +7219,22 @@ export class AgentMuxClient {
       return observationId ? receipt ? {...receipt,moteObservationId:observationId} : {moteObservationId:observationId,inputKey:origin.key} : receipt
     }
     finally { if (input.moteSource) this.moteInputs.changed(input.agentSessionId) }
+  }
+
+  /** Only a committed cut may confirm that the superseded Run never claimed a scheduled input. */
+  async supersededScheduledInputWasUnclaimed(value: ScheduledInputRecoverySource, options: { signal?: AbortSignal } = {}): Promise<boolean> {
+    const source = parseScheduledInputRecoverySource(value), expectedRun = source.reference.inputKey.expectedRun
+    options.signal?.throwIfAborted()
+    this.requireConnected()
+    try {
+      const run = await this.kernel.status(expectedRun.runId)
+      if (run.runId !== expectedRun.runId || run.state.type === 'running') return false
+    } catch (error) {
+      if (!(error instanceof AgentMuxError) || error.code !== 'CTXMUX_run_not_found') throw error
+      return false
+    }
+    // Observe the journal after the old Run is unable to admit fresh input.
+    return await this.store.supersededScheduledInputWasUnclaimed(source, options.signal)
   }
   private async submitAgentPromptOwned(input: AgentMuxAgentPromptInput, context?: AgentInputCallContext): Promise<void | AgentInputSubmissionReceipt> {
     context?.requestSignal?.throwIfAborted()

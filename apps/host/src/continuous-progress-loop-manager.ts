@@ -29,6 +29,7 @@ export type FutureProgressInputOwner = {
   saveFutureIntent(loop: ContinuousProgressLoop, active: boolean, context?: AgentMuxRpcCallContext): Promise<void>
   inspectFutureIntent?(loop: ContinuousProgressLoop): Promise<{ active: boolean }>
   inspectInput?(loop: ContinuousProgressLoop): Promise<ContinuousProgressInputReading | undefined>
+  supersededInputWasUnclaimed?(loop: ContinuousProgressLoop, signal: AbortSignal): Promise<boolean>
   readHistory?(loop: ContinuousProgressLoop, query: ScheduleHistoryQuery, context?: AgentMuxRpcCallContext): Promise<Pick<ScheduleHistoryPage, 'coverage' | 'entries' | 'nextCursor'>>
   authorizeFutureIntent?(target: ContinuousProgressTarget, context?: AgentMuxRpcCallContext): Promise<void>
   observeCheckIn?(target: ContinuousProgressTarget, now: number, signal: AbortSignal): Promise<CheckInObservation>
@@ -1186,7 +1187,7 @@ export class ContinuousProgressLoopManager {
     loop.checkInState = state
   }
 
-  /** Settle from the Core record, without going back through the send path. */
+  /** Settle the held occurrence from the original Core record or a committed Run cut. */
   private async reconcileScheduledInput(loop: ContinuousProgressLoop, checkAt: number, signal: AbortSignal): Promise<void> {
     const owner = this.maintenanceOwner
     const current = () => this.running && !signal.aborted && !this.mutations.has(loop.loopId) &&
@@ -1196,20 +1197,30 @@ export class ContinuousProgressLoopManager {
     const pending = loop.pendingCompletion!, reference = loop.lastInputRef!, inputs = this.futureInputs
     if (!inputs?.inspectInput || !inputs.inspectFutureIntent) return
     let reading: ContinuousProgressInputReading | undefined
+    let unclaimedAfterRunChange = false
     try {
       reading = await awaitUntilCancelled(() => inputs.inspectInput!(loop), signal)
       if (!current()) return
-      if (!reading || reading.status !== 'confirmed' || !isDeepStrictEqual(reading.reference, reference) ||
-          reading.delivery === 'unconfirmed') { defer(); return }
+      if (!reading || !isDeepStrictEqual(reading.reference, reference) ||
+          reading.status === 'confirmed' && reading.delivery === 'unconfirmed') { defer(); return }
       if (loop.managedSource && (!owner || (await awaitUntilCancelled(() => owner.qualify(loop), signal)).action !== 'continue' || owner !== this.maintenanceOwner)) { defer(); return }
       const definition = await awaitUntilCancelled(() => inputs.inspectFutureIntent!(loop), signal)
       if (!definition.active) { defer(); return }
+      if (reading.status === 'unconfirmed') {
+        if (!current() || !inputs.supersededInputWasUnclaimed) { defer(); return }
+        unclaimedAfterRunChange = await awaitUntilCancelled(() => inputs.supersededInputWasUnclaimed!(loop, signal), signal)
+        if (!unclaimedAfterRunChange) { defer(); return }
+      }
     } catch { defer(); return }
     if (!current() || loop.managedSource && owner !== this.maintenanceOwner) return
     const { pendingCompletion: _, pause: __, ...rest } = loop
     const settled: ContinuousProgressLoop = { ...rest, status: 'active' }
     const occurrenceAt = reference.futureIntent.occurrenceAt
-    if (reading.delivery === 'not-applied') {
+    if (unclaimedAfterRunChange) {
+      this.clearUnsentFollowUp(settled, reference.preparedAt)
+      settled.lastOutcome = 'skipped'
+      settled.lastDecision = 'The prior Run never claimed this input. The original occurrence remains due on the recovered Agent.'
+    } else if (reading.delivery === 'not-applied') {
       this.clearUnsentFollowUp(settled, reference.preparedAt)
       // Core already reserved this occurrence. The next one is distinct;
       // a one-shot arrangement still needs an explicit recovery decision.

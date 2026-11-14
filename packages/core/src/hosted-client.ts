@@ -242,7 +242,8 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
   const invoke = async (method: AgentMuxHostedMethod, args: unknown[]): Promise<unknown> => {
     args = sanitizeInputObservationArguments(method, args)
     if (disposed) throw new AgentMuxError('Hosted consumer is disposed.', 'CONTROL_CANCELLED')
-    const sourceSignal = method === 'readScheduledPromptHistory' ? (args[1] as { signal?: AbortSignal } | undefined)?.signal
+    const scheduledInputRead = method === 'readScheduledPromptHistory' || method === 'supersededScheduledInputWasUnclaimed'
+    const sourceSignal = scheduledInputRead ? (args[1] as { signal?: AbortSignal } | undefined)?.signal
       : method === 'sessionHistorySources' || method === 'runtimeDiagnostics' || method === 'runtimeResourceSnapshot' || method === 'agentSessionResourceSnapshot' || method === 'runningSavedAgentResourceSnapshot'
         ? (args[0] as { signal?: AbortSignal } | undefined)?.signal : undefined
     if (sourceSignal !== undefined && !isAbortSignal(sourceSignal)) throw new AgentMuxError('Source observation requires an AbortSignal.', 'INVALID_AGENT_SESSION_HISTORY_OPTIONS')
@@ -279,7 +280,7 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
       }
     }
     let signal: AbortSignal | undefined, wireArgs = args
-    if (method === 'readScheduledPromptHistory') { signal = sourceSignal; wireArgs = args.slice(0, 1) }
+    if (scheduledInputRead) { signal = sourceSignal; wireArgs = args.slice(0, 1) }
     let hostEnvironmentSelector: AgentMuxHostEnvironmentSelector | undefined
     if (method === 'hostEnvironment') {
       if (args.length > 1) throw new AgentMuxError('Host environment reads accept zero arguments or one exact Agent Session selector.', 'INVALID_CONTROL_REQUEST')
@@ -324,6 +325,8 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
     })
     if (method === 'connectRuntime') await connectControl(true)
     const decoded = decodeHostedValue(response.value)
+    if (method === 'supersededScheduledInputWasUnclaimed' && typeof decoded !== 'boolean')
+      throw new AgentMuxError('The original committed input observation is unconfirmed.', 'CONTROL_PROTOCOL_ERROR')
     if (method === 'hostEnvironment') return hostEnvironmentSelector
       ? parseSelectedHostEnvironment(decoded, hostEnvironmentSelector, invocationOwner!.runtimeId)
       : parseHostEnvironment(decoded)

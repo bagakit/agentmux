@@ -68,6 +68,7 @@ export interface GoalRuntimePort {
   saveFutureIntent(loop: ContinuousProgressTarget & Pick<ContinuousProgressLoop, 'futureIntentId' | 'creationOperationId' | 'managedSource' | 'prompt' | 'checkIn' | 'currentDefinition' | 'guidanceAdoptions' | 'inputEpoch'>, active: boolean, context?: AgentMuxRpcCallContext): Promise<void>
   inspectFutureIntent(loop: ContinuousProgressLoop): Promise<{ active: boolean }>
   inspectInput(loop: ContinuousProgressLoop): Promise<import('@agentmux/core').ContinuousProgressInputReading | undefined>
+  supersededInputWasUnclaimed(loop: ContinuousProgressLoop, signal: AbortSignal): Promise<boolean>
   readHistory?(loop: ContinuousProgressLoop, query: import('@agentmux/core').ScheduleHistoryQuery, context?: AgentMuxRpcCallContext): ReturnType<typeof readOriginalScheduledHistory>
   observeCheckIn(target: ContinuousProgressTarget, now: number, signal: AbortSignal): Promise<CheckInObservation>
   inspectContinuousProgressInitial(loop: ContinuousProgressLoop): Promise<'confirmed' | 'pending' | 'unconfirmed'>
@@ -267,6 +268,12 @@ export function createGoalRuntime(options: {
       return { active: original.active }
     },
     inspectInput: async loop => readOriginalScheduledInput(loop, exact(loop.hostId)),
+    supersededInputWasUnclaimed: async (loop, signal) => {
+      const { lastInputRef: reference, providerId, workspacePath, pendingCompletion } = loop
+      if (!reference || !pendingCompletion?.condition) return false
+      return await exact(loop.hostId).supersededScheduledInputWasUnclaimed({ reference, providerId, workspacePath,
+        ...optionalInputEpoch(pendingCompletion.condition.inputEpoch) }, { signal })
+    },
     readHistory: async (loop, query, context) => {
       const client = exact(loop.hostId)
       const page = await readOriginalScheduledHistory(loop, query, client, context?.signal)

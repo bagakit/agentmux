@@ -353,6 +353,12 @@ export class AgentMuxHostedRuntimeService {
     if (continuityControl && invocation.args.length !== 1) throw new AgentMuxError('Recovery control accepts one exact packet; authority is supplied by the original Host.', 'INVALID_CONTROL_REQUEST')
     if ((invocation.method === 'notifyMessages' || invocation.method === 'inspectMessageNotification') && (context.caller || !context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError(
       'Notification operations require a trusted user/device.', 'CONTROL_PERMISSION_DENIED')
+    if (invocation.method === 'supersededScheduledInputWasUnclaimed') {
+      if (context.caller || !context.principal || !['user', 'device'].includes(context.principal.kind))
+        throw new AgentMuxError('Original scheduled recovery requires its trusted Host or connected device.', 'CONTROL_PERMISSION_DENIED')
+      if (invocation.args.length !== 1) throw new AgentMuxError('Read exactly one original scheduled input.', 'INVALID_CONTROL_REQUEST')
+      invocation.args[1] = context.signal ? { signal: context.signal } : {}
+    }
     let messageIntake = false
     if (invocation.method === 'submitAgentMessage' && invocation.args[0]?.envelope?.sender?.kind === 'agent-session' &&
         (invocation.args[0].execution ?? 'default') === 'default' && invocation.args[0].admissionIntent === undefined) {

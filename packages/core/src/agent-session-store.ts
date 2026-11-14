@@ -17,6 +17,7 @@ import { parseCreationRuntime, type AgentMuxCreationRuntime } from './terminal-c
 import { rpcRecord } from './rpc-data.js'
 import { parseAgentToolExecutionBinding } from './agent-tool-execution.js'
 import { readInputNamespace } from './agent-input-epoch.js'
+import { supersededInputWasUnclaimed, type ScheduledInputRecoverySource } from './continuous-progress-input.js'
 import { mintObjectId } from './object-id.js'
 import { parseAgentExternalInteractionAuthor } from './external-author.js'
 import { parseAgentContinuityControlReceipts, type AgentMuxContinuityControlReceipt } from './agent-session-recovery/control-contract.js'
@@ -354,6 +355,8 @@ export type AgentMuxAgentSessionStore = {
   readContinuityControlReceipt(agentSessionId: string, operationId: string): Promise<ContinuityControlStoredResult | null>
   /** Exact original claim; history is never loaded into ordinary Session metadata. */
   readPromptAdmission(agentSessionId: string, run: AgentMuxRunRef, submissionId: string): Promise<AgentPromptSubmissionRecord | null>
+  /** Exact committed evidence; never read an absent claim from a rescued projection. */
+  supersededScheduledInputWasUnclaimed(source: ScheduledInputRecoverySource, signal?: AbortSignal): Promise<boolean>
   /** Read a selected original schedule window without settling or writing any input. */
   readScheduledPromptHistory(request: ScheduledPromptHistoryRequest, signal?: AbortSignal): Promise<ScheduledPromptHistory>
   /** Original outcome CAS. PTY evidence stays in the original record, including after retirement; it never rewrites current Session facts. */
@@ -2114,6 +2117,10 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
   }
 
   async readPromptAdmission(agentSessionId: string, run: AgentMuxRunRef, submissionId: string): Promise<AgentPromptSubmissionRecord | null> {
+    return structuredClone(this.promptAdmission(agentSessionId, run, submissionId))
+  }
+
+  private promptAdmission(agentSessionId: string, run: AgentMuxRunRef, submissionId: string): AgentPromptSubmissionRecord | null {
     this.assertMemoryRecordReadable(agentSessionId)
 
     const originals = ['submission', 'original-slot'].flatMap(kind => {
@@ -2121,7 +2128,15 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
       return value ? [value] : []
     })
     if (originals.length > 1) throw new AgentMuxError('The original input location is ambiguous.', 'AGENT_PROMPT_OPERATION_CONFLICT')
-    return structuredClone(originals[0] ?? null)
+    return originals[0] ?? null
+  }
+
+  async supersededScheduledInputWasUnclaimed(source: ScheduledInputRecoverySource, signal?: AbortSignal): Promise<boolean> {
+    signal?.throwIfAborted()
+    const { inputKey, futureIntent } = source.reference
+    const session = this.sessions.get(inputKey.agentSessionId) ?? null
+    return supersededInputWasUnclaimed(source, session, session?.futurePromptIntents?.[futureIntent.intentId] ?? null,
+      this.promptAdmission(inputKey.agentSessionId, inputKey.expectedRun, agentPromptInputId(inputKey)))
   }
 
   async readScheduledPromptHistory(request: ScheduledPromptHistoryRequest, signal?: AbortSignal): Promise<ScheduledPromptHistory> {
@@ -3316,6 +3331,16 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       return promptAdmissionRecords(document.sessions.find(s => s.agentSessionId === agentSessionId)).find(original => original.run.runId === run.runId &&
         [JSON.stringify(['submission', submissionId]), JSON.stringify(['original-slot', submissionId])].includes(promptRecordId(original))) ?? null
     }, undefined, true)
+  }
+
+  async supersededScheduledInputWasUnclaimed(source: ScheduledInputRecoverySource, signal?: AbortSignal): Promise<boolean> {
+    const { inputKey, futureIntent } = source.reference
+    const id = inputKey.agentSessionId
+    return await this.withReadDatabase(db => {
+      this.assertRecordReadable(db, id)
+      return supersededInputWasUnclaimed(source, this.sessionMetadata(db, id), this.futureIntent(db, id, futureIntent.intentId),
+        this.promptAdmission(db, id, inputKey.expectedRun, agentPromptInputId(inputKey)))
+    }, () => false, signal, 'observation')
   }
 
   async readScheduledPromptHistory(request: ScheduledPromptHistoryRequest, signal?: AbortSignal): Promise<ScheduledPromptHistory> {
