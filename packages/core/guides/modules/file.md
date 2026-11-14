@@ -12,6 +12,32 @@ Identify the original Host, Zone/workspace and literal path independently from t
 display Tab/Region. file read/ls access resources; file open/view access presentation. Opening
 does not save or overwrite a file. Inspect the original view and preserve unsaved user drafts.
 
+Use file stat --input FILE|- to observe one exact entry or absence. JSON is
+{zoneId,path,expectedResource:{hostId,workspaceId,workspacePath},spaceId?}. It returns the
+complete original resource, root/parent witnesses, entry kind and helper implementation.
+It does not read file bodies or freeze directory children; file read still supplies content revisions.
+
+For one direct directory use file mkdir --input FILE|- with
+{operationId,zoneId,path,expectedResource:COMPLETE_STAT_RESOURCE,expectedAbsent:true,
+expected:{root:STAT_ROOT_WITNESS,parent:STAT_PARENT_WITNESS},spaceId?}. Preserve the
+original JSON. Select the original Host Core endpoint through the existing --endpoint routing;
+this operation never falls back to an SSH shell. No missing parent or later occupant is replaced.
+Directory scope CAS pins device/inode/birth generation, not a frozen listing of all children.
+A null birthtimeNs reports missing native generation; implementation.mkdir then says
+generation-unavailable. Only that exact mutation is unavailable; ordinary reads remain usable.
+The original Host supplies actor/caller scope; JSON cannot supply actor.
+
+After a missing/unknown mkdir reply use file mutation inspect --input FILE|- with
+{operationId,zoneId,path,expectedResource:COMPLETE_ORIGINAL_STAT_RESOURCE,spaceId?}.
+The query returns the retained original request and separate filesystem/durability observations.
+It does not rerun the producer, infer a delete from absence, or turn a current read into an old ACK.
+A managed Agent reads only its own original actor/Host operation. Repeating the exact original
+mkdir only joins or observes its original record; it never republishes an unconfirmed action.
+An existing private admission with a missing/corrupt request member stays unconfirmed; missing
+member bytes never authorize a new producer. Keep the original admission for recovery.
+Changing input/target/actor under that same operation ID is refused. Keep all original IDs and
+bytes; observation failure does not remove views, alter drafts or stop healthy Runs.
+
 Import ordinary attachment bytes with file import at an exactly read absent destination; use its
 original resource, operation ID, byte length and SHA-256. This is separate from Session upload and
 never writes a Note draft. After unknown, read that same target; current bytes do not prove a lost

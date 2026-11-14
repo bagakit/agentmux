@@ -45,6 +45,15 @@ Git、配置与空间持久化结果分别成立。失败保原事实和可接�
 - Editor 字号可设置，默认跟随 App 字号：缺省使用现有 App 正文大小；显式 override 与恢复继承在现有 Appearance 设置中完成，只由原 ConfigOwner 保存一个可选 Editor 字号值，恢复继承清除 override，不回填第二份 App 默认或新增并行偏好。Source 与只读 Diff 使用相同解析结果，修改大小就地更新现有编辑器，不重建模型、丢选择／滚动／草稿或改变保存冲突与未知结果。Terminal 字号仍属原偏好。
 - Editor 已保存事实作为安静的状态表达，原 Save 快捷键与必要保存动作保持可达；saving、dirty、冲突、读取失败与保存 unknown 仍准确可辨并沿原 owner 操作。More 菜单保原真实选项、键盘打开／导航／Escape 与焦点返回，压低正常态视觉不能把未确认写入显示为 Saved，不能隐藏可执行的恢复动作。
 
+### 准确路径发现与目录创建
+
+- 原 Host Files owner 统一持有路径变更；公共 API、CLI 与 GUI 消费同一边界。路径先经原 Zone／Host／Workspace 映射，展示 Tab、焦点与 Session cwd 不授予文件权限，也不被 mkdir 改动。普通配置变更不因此引入操作记录；这里的记录只承担真实文件系统效果与丢失回执的恢复。
+- `file stat` 只观察准确 root、parent 与 entry／absence，不读正文或遍历子树。目录 scope witness 固定原对象的 device、inode 与真实 birth generation，不冻结目录内所有成员；完整元数据快照不能冒充子树内容 CAS。文件正文 revision 继续沿原 `file read`。symlink 只观察原 entry，不沿它越过写边界。
+- `file mkdir` 只创建准确、明确应缺席的一个直接目录，不补父目录，不覆盖后来占位的 entry。actor 与调用方 Host scope 来自原 transport，不能从请求 JSON、目录名或展示位置构造。物理操作仍由原 native helper 持有的 root／parent fd、原目录代次与原子 no-replace 发布承担；目录操作借用原 Note 写 lease，普通文件读写不因此等待无关 Note 操作。
+- 发布前，原 Files 域以独占 admission 目录保留操作身份，完整原 operation／请求／actor 必须已持久确认；admission 已存在而请求成员丢失或损坏时只报未知，不把成员缺失解释为从未执行，也不重建或重发。新 stage／entry 的准确身份经 helper 的专用协议交回原 Files 私有记录，保存确认前不得放行 publish。Workspace 内可被普通文件写入触及的标记或同名目录不成为权威 producer 回执。成功只回收准确的空原 stage；未知保留原身份与材料，不递归清除用户内容。
+- `file mutation inspect` 只查原 operation、原请求与原 producer 身份。当前 target 缺席不能证明未发生，当前读到记录不能补认原写入 ACK；filesystem effect 与 durability 分开。进程重开、观察失败或同 ID 显式重复都不能自动重跑未确认的 producer；同 ID 新 actor／目标／输入明确拒绝。原 live 映射不可用时保留历史原请求，不能改到新 Host 补做。
+- 平台资格按真实 helper／内核／文件系统能力逐项表达。Linux 使用已有 no-follow fd、statx birth generation 与 renameat2 no-replace；缺少真实代次或原子发布能力时只拒绝相应准确动作，保留 read、原文件和健康 Agent，不用 shell fallback 或 macOS 证明代签 Linux 运行。
+
 ### Revision-aware 保存与外部冲突
 
 - Desktop Main 唯一持有 Workspace Root 约束、磁盘 revision、原子替换、单文件观察和磁盘错误事实；Renderer 只经 typed read、write、observe 和 move 能力访问文件。
