@@ -1,3 +1,4 @@
+import { registerMeshNetworkIpc } from './mesh-network-ipc.js'
 import { registerSourceFilesIpc } from './source-files-ipc.js'
 import { SpaceObjectAvatarOwner } from './space-object-avatar.js'
 import { createSpaceObjectAvatarResolver } from './space-object-avatar-target.js'
@@ -999,8 +1000,8 @@ export async function registerIpc(args: {
 
   // The original Unix transport supplies the local user principal after the
   // original trusted Renderer check; the request cannot assert human provenance.
-  const callUserRpc = async <M extends import('@agentmux/core').AgentMuxRpcMethod>(method: M, input: import('@agentmux/core').AgentMuxRpcParams<M>, options?: { signal?: AbortSignal }) => {
-    const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: control.path } })
+  const callUserRpc = async <M extends import('@agentmux/core').AgentMuxRpcMethod>(method: M, input: import('@agentmux/core').AgentMuxRpcParams<M>, options?: { signal?: AbortSignal; runtimeFence?: import('@agentmux/core/mesh-network').MeshOwner }) => {
+    const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: control.path }, ...(options?.runtimeFence ? { runtimeFence: options.runtimeFence } : {}) })
     try { return await client.call(method, input, options) }
     finally { await client.dispose() }
   }
@@ -1029,6 +1030,7 @@ export async function registerIpc(args: {
   handle('config:save', (next: AppConfig, expected: AppConfig) => sessionInputOperationResult(() => configOwner.edit(expected, next)))
   const sourceFileReads = registerSourceFilesIpc({ handle: handleWithEvent, runtime: args.runtime })
   const spaceMountReads = registerSpaceMountIpc({ handle: handleWithEvent, runtime: args.runtime, config: () => configOwner.current })
+  const meshReads = registerMeshNetworkIpc({ handle: handleWithEvent, call: callUserRpc })
   const nodePublishingReads = registerNodePublishingIpc({ handle: handleWithEvent, call: callUserRpc, owner: (target, method, params, context) => args.runtime.callNodeOwner(target, method, params, context) })
   const hostRouteReads = registerHostRoutesIpc({ handle: handleWithEvent, call: (target, method, params, signal) => args.runtime.callHostRoute(target, method, params, signal) })
   const hostRuntimeReads = registerHostRuntimeObservationIpc({ handle: handleWithEvent,
@@ -2800,7 +2802,7 @@ export async function registerIpc(args: {
       { owner: 'channel-metadata', dispose: () => channelMetadata?.dispose() },
       { owner: 'runtime-attachment', dispose: () => detach() },
       { owner: 'history-observations', dispose: () => historyObservations.dispose() },
-      { owner: 'host-runtime-reads', dispose: () => { hostRuntimeReads.dispose(); nodePublishingReads.dispose(); hostRouteReads.dispose(); spaceMountReads.dispose(); sourceFileReads.dispose() } },
+      { owner: 'host-runtime-reads', dispose: () => { hostRuntimeReads.dispose(); nodePublishingReads.dispose(); meshReads.dispose(); hostRouteReads.dispose(); spaceMountReads.dispose(); sourceFileReads.dispose() } },
       { owner: 'search-reads', dispose: () => searchReads.dispose() },
       { owner: 'history-reads', dispose: () => historyReads.dispose() },
       { owner: 'conversation-reads', dispose: () => conversationReads.dispose() },

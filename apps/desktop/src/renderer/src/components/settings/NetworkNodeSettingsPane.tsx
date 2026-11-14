@@ -46,7 +46,7 @@ export function NetworkNodeSettingsPane({ config, active, onNavigate, navigation
   }, [route, active, refresh, publication])
   const target = identity?.route === route ? identity.target : undefined
   return <div className="settings-pane-stack network-node-settings" data-settings-host={host?.id}>
-    <div className="network-node-intro"><h3>Manage a node</h3><p>Select a saved Host to manage what its original Core publishes. Connecting and starting work stay separate.</p><button type="button" className="small-button" onClick={() => onNavigate('hosts')}>View Host connections</button></div>
+    <div className="network-node-intro"><h3>Manage a node</h3><p>Select a saved Host to manage what its original Core publishes. Connecting and starting work stay separate.</p><button type="button" className="small-button" onClick={() => onNavigate('hosts')}>Open Mesh</button></div>
     <label className="network-node-field"><span>Node to manage</span><select aria-label="Node to manage" value={selected} onChange={event => setSelected(event.target.value)}>
       {!host ? <option value={selected}>Original saved Host unavailable</option> : null}
       {config.hosts.map(item => <option key={item.id} value={item.id}>{item.label} · {item.kind === 'local' ? 'This device' : 'Remote Host'}</option>)}

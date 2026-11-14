@@ -1,0 +1,75 @@
+.mesh-settings-pane { min-width: 0; height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.mesh-settings-pane > [data-mesh-view] { flex: 1; min-height: 0; }
+.mesh-settings-pane > [data-mesh-view="network"] { overflow: auto; overscroll-behavior: contain; padding-bottom: var(--sp-4); }
+.mesh-settings-pane > [data-mesh-view="connections"] { overflow: hidden; }
+.mesh-settings-pane > [hidden] { display: none; }
+.mesh-view-tabs { flex: none; display: flex; gap: 4px; padding-bottom: var(--sp-4); margin-bottom: var(--sp-4); border-bottom: 1px solid var(--line-soft); }
+.mesh-view-tabs button { color: var(--text-3); background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 6px 12px; font: inherit; cursor: pointer; }
+.mesh-view-tabs button[aria-current] { color: var(--text); background: var(--surface-2); border-color: var(--line-soft); font-weight: 600; }
+.mesh-network-settings { display: grid; gap: var(--sp-5); min-width: 0; }
+.mesh-network-heading, .mesh-network-section > header, .mesh-network-map > header { display: flex; justify-content: space-between; align-items: start; gap: var(--sp-3); }
+.mesh-network-settings h3, .mesh-network-settings h4, .mesh-network-settings h5 { margin: 0; font-weight: 600; }
+.mesh-network-settings h3 { font-size: var(--fs-h3); }
+.mesh-network-settings h4 { font-size: var(--fs-body); }
+.mesh-network-settings h5 { font-size: var(--fs-meta); color: var(--text-3); margin-bottom: var(--sp-2); }
+.mesh-network-settings p { margin: 0; line-height: 1.5; }
+.mesh-network-heading p, .mesh-network-section > header > span { color: var(--text-3); font-size: var(--fs-meta); margin-top: var(--sp-2); }
+.mesh-network-status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; font-size: var(--fs-meta); }
+.mesh-network-status > strong { color: var(--text); font-weight: 600; }
+.mesh-network-status > span { color: var(--text-3); overflow-wrap: anywhere; }
+.mesh-network-section { display: grid; gap: var(--sp-3); padding-top: var(--sp-4); border-top: 1px solid var(--line-soft); min-width: 0; }
+.mesh-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+.mesh-form-grid label, .mesh-form-field { display: grid; gap: 6px; min-width: 0; color: var(--text-2); font-size: var(--fs-body); }
+.mesh-network-settings select, .mesh-network-settings textarea { width: 100%; box-sizing: border-box; color: var(--text); background: var(--surface-0); border: 1px solid var(--line-soft); border-radius: 6px; padding: 7px 9px; font: inherit; min-height: 32px; }
+.mesh-network-settings textarea { resize: vertical; font: var(--fs-meta)/1.5 var(--font-mono); overflow-wrap: anywhere; }
+.mesh-network-settings code { font-family: var(--font-mono); font-size: var(--fs-meta); overflow-wrap: anywhere; user-select: text; }
+.mesh-gateway-fields { display: grid; gap: var(--sp-3); }
+.mesh-toggle { display: flex; align-items: center; gap: 8px; font-size: var(--fs-body); }
+.mesh-advanced { color: var(--text-3); font-size: var(--fs-meta); }
+.mesh-advanced > summary { cursor: pointer; padding: 6px 0; }
+.mesh-advanced[open] > :not(summary) { margin-top: var(--sp-3); }
+.mesh-network-note, .mesh-network-notice { padding: 10px 12px; background: var(--surface-1); border: 1px solid var(--line-soft); border-radius: var(--radius); font-size: var(--fs-meta); color: var(--text-2); }
+.mesh-conflict, .mesh-pending { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--text-2); font-size: var(--fs-meta); }
+.mesh-conflict > span { flex: 1 1 220px; }
+.mesh-pending code { flex: 1 1 150px; }
+.mesh-link-result { display: grid; gap: 8px; min-width: 0; font-size: var(--fs-meta); }
+.mesh-link-result button { justify-self: start; }
+.mesh-link-result small { color: var(--text-3); }
+.mesh-copy-feedback { color: var(--text-3); font-size: var(--fs-meta); }
+.mesh-network-map { min-width: 0; border: 1px solid var(--line-soft); border-radius: var(--radius); overflow: hidden; }
+.mesh-network-map > header { padding: 12px; align-items: baseline; flex-wrap: wrap; }
+.mesh-network-map > header > span { color: var(--text-3); font-size: var(--fs-meta); }
+.mesh-network-map > .field-hint { padding: 4px 12px 12px; }
+.mesh-topology-canvas { height: 190px; background: var(--surface-0); border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
+.mesh-peer-node { min-width: 160px; padding: 10px 12px; border: 1px solid var(--line-soft); border-radius: 7px; background: var(--surface-1); display: grid; gap: 6px; }
+.mesh-peer-node small { font-size: 9px; letter-spacing: .06em; color: var(--text-3); }
+.mesh-peer-node strong { font: 11px var(--font-mono); color: var(--text); }
+.mesh-peer-node[data-selected] { background: var(--surface-2); border-color: var(--text-2); box-shadow: 0 0 0 1px var(--line-soft); }
+.mesh-peer-node .react-flow__handle { width: 5px; height: 5px; background: var(--text-3); border-color: var(--surface-1); }
+.mesh-edge .react-flow__edge-path { stroke: var(--line-strong, var(--text-3)); stroke-width: 1.5; }
+.mesh-edge-selected .react-flow__edge-path { stroke: var(--text); stroke-width: 2; }
+.mesh-map-lists { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); padding: 12px; min-width: 0; }
+.mesh-map-lists > div { min-width: 0; }
+.mesh-peer-list, .mesh-route-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; }
+.mesh-peer-list li { display: grid; gap: 3px; padding: 5px 0; font-size: var(--fs-meta); }
+.mesh-peer-list li > span { color: var(--text-3); }
+.mesh-route-list button { width: 100%; display: flex; align-items: center; gap: 6px; border: 1px solid transparent; border-radius: 5px; padding: 5px 6px; text-align: left; background: transparent; color: var(--text-3); font: var(--fs-meta)/1.4 var(--font-ui); cursor: pointer; }
+.mesh-route-name { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); }
+.mesh-route-list button[aria-pressed=true] { border-color: var(--line-soft); background: var(--surface-2); color: var(--text); }
+.mesh-selected-path { padding: 0 12px 8px; color: var(--text-2); overflow-wrap: anywhere; font-size: var(--fs-meta); }
+.mesh-observation-time { display: block; padding: 0 12px 12px; color: var(--text-3); font-size: 10px; }
+@media (max-width: 680px) { .mesh-form-grid, .mesh-map-lists { grid-template-columns: 1fr; } .mesh-topology-canvas { height: 170px; } .mesh-network-heading { flex-wrap: wrap; } }
+.mesh-map-actions { display: flex; gap: 4px; margin-left: auto; }
+.mesh-link-result dl { display: grid; gap: 6px; }
+.mesh-link-result dt { color: var(--text-3); }
+.mesh-link-result dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
+.mesh-network-settings { container-type: inline-size; }
+.mesh-topology-list { display: none; list-style: none; margin: 0; padding: 0 12px 12px; gap: 8px; }
+.mesh-topology-list li { display: grid; gap: 4px; padding: 8px 0; border-bottom: 1px solid var(--line-soft); font-size: var(--fs-meta); }
+.mesh-topology-list strong { font-weight: 550; }
+.mesh-topology-list small { color: var(--text-3); overflow-wrap: anywhere; }
+@container (max-width: 620px) { .mesh-topology-canvas { display: none; } .mesh-topology-list { display: grid; } .mesh-map-lists { grid-template-columns: 1fr; } .mesh-form-grid { grid-template-columns: 1fr; } }
+@media (max-width: 680px) { .mesh-topology-canvas { display: none; } .mesh-topology-list { display: grid; } }
+
+@container (max-width: 620px) { .mesh-map-actions { display: none; } }
+@media (max-width: 680px) { .mesh-map-actions { display: none; } }

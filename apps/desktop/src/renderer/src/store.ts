@@ -94,6 +94,7 @@ import { executeGlobalGoalPatrol } from './lib/goal-global-patrol'
 import { initializeGoalResponsibilityObservation, refreshKnownGoalResponsibilities } from './lib/goal-delegation-work'
 import { goalCreationDraftKey, restoredGoalAgentCreationDrafts, restoredGoalAgentSelectionDrafts, type GoalAgentSelectionDraft, type GoalAgentCreationDraft } from './lib/goal-agent-selection'
 import { nodePublicationDraftRecord, nodePublicationDraftForRuntime, restoredNodePublicationDrafts, type NodePublicationDraft } from './lib/node-publication-draft'
+import { meshDraftRecord, meshDraftForRuntime, restoredMeshDrafts, type MeshSettingsDraft } from './lib/mesh-settings-draft'
 import type { DemandContentReference } from '@agentmux/demand'
 import { confirmedGoalContentReference, goalContentSource } from '../../shared/goal-content-references'
 import { describeError } from '@agentmux/client-ui/error-presentation'
@@ -1176,6 +1177,7 @@ export type AppState = GitReadingActions & {
   agentLearningReviewDrafts: Record<string, AgentLearningReviewDraft>
   /** Opaque unrelated/invalid records stay in the original user document until explicitly resolved. */
   nodePublicationDrafts: unknown
+  meshSettingsDrafts: unknown
   hostRouteDrafts: unknown
   tailcatConnectionDrafts: unknown
   capsuleQuestionEditors: Record<string, CapsuleQuestionEditor>
@@ -4191,6 +4193,7 @@ type PersistedAppState = {
   agentComposerDrafts?: Record<string, string>
   agentLearningReviewDrafts?: Record<string, AgentLearningReviewDraft>
   nodePublicationDrafts?: unknown
+  meshSettingsDrafts?: unknown
   hostRouteDrafts?: unknown
   tailcatConnectionDrafts?: unknown
   capsuleQuestionEditors?: Record<string, CapsuleQuestionEditor>
@@ -4508,6 +4511,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     agentComposerDrafts: state.agentComposerDrafts,
     agentLearningReviewDrafts: state.agentLearningReviewDrafts,
     nodePublicationDrafts: state.nodePublicationDrafts,
+    meshSettingsDrafts: state.meshSettingsDrafts,
     hostRouteDrafts: state.hostRouteDrafts,
     tailcatConnectionDrafts: state.tailcatConnectionDrafts,
     capsuleQuestionEditors: state.capsuleQuestionEditors,
@@ -5338,6 +5342,22 @@ export async function updateNodePublicationDraft(runtimeId: string,
     await persistentWorkbenchStorage.checkpoint(WORKBENCH_USER_STATE_KEY, { state: partializeAppState(useAppStore.getState()), version: 1 })
   } catch (cause) { useAppStore.getState().reportWorkbenchSaveFailure(cause, 'local-storage'); throw cause }
 }
+/** Authored Mesh edits use the same original private user-document owner. */
+export async function updateMeshSettingsDraft(runtimeId: string, update: (current: MeshSettingsDraft | undefined) => MeshSettingsDraft | undefined, flush = false): Promise<void> {
+  const raw = useAppStore.getState().meshSettingsDrafts, entries = meshDraftRecord(raw), current = meshDraftForRuntime(raw, runtimeId), next = update(current)
+  if (next && next.baseline.owner.runtimeId !== runtimeId) throw new Error('This Mesh edit belongs to another original Runtime. Its input is retained.')
+  if (!configValuesEqual(entries[runtimeId], next)) {
+    const values = { ...entries }
+    if (next) values[runtimeId] = next
+    else delete values[runtimeId]
+    useAppStore.setState({ meshSettingsDrafts: values })
+  }
+  if (!flush) return
+  try {
+    if (!workbenchWriteFence.isOpen()) throw new Error('The original user document is still restoring. The Mesh edit is retained in memory.')
+    await persistentWorkbenchStorage.checkpoint(WORKBENCH_USER_STATE_KEY, { state: partializeAppState(useAppStore.getState()), version: 1 })
+  } catch (cause) { useAppStore.getState().reportWorkbenchSaveFailure(cause, 'local-storage'); throw cause }
+}
 /** Checkpoint this authored route intent through the original private user document. */
 export async function checkpointHostRouteDrafts(): Promise<void> {
   try {
@@ -6064,6 +6084,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   agentComposerDrafts: {},
   agentLearningReviewDrafts: {},
   nodePublicationDrafts: {},
+  meshSettingsDrafts: {},
   hostRouteDrafts: {},
   tailcatConnectionDrafts: {},
   capsuleQuestionEditors: {},
@@ -14088,6 +14109,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const state = { ...current, ...persisted as Partial<AppState> }
     state.pendingAgentLaunches = { ...restoredPendingAgentLaunches(local.pendingAgentLaunches), ...current.pendingAgentLaunches }
     state.nodePublicationDrafts = restoredNodePublicationDrafts(state.nodePublicationDrafts)
+    state.meshSettingsDrafts = restoredMeshDrafts(state.meshSettingsDrafts)
     state.mountedSpaceObservations = current.mountedSpaceObservations
     state.mountedSpaceSessions = current.mountedSpaceSessions
     if (state.agentSteerQueues) {

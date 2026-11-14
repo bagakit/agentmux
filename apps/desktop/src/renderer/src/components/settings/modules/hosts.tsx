@@ -1,6 +1,6 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AppConfig, HostConfig, WorkspaceRecord } from '../../../../../shared/contracts'
-import { HostSettingsPane } from '../HostSettingsPane'
+import { MeshSettingsPane } from '../MeshSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
 import { saveConfigSlice } from '../save-config-slice'
 
@@ -14,12 +14,13 @@ async function saveHosts(hosts: HostConfig[], workspaces: WorkspaceRecord[], exp
 export const hostsSettingsModule = {
   id: 'hosts', archetype: 'console',
   group: 'cluster',
-  title: 'Hosts',
-  description: 'Your environments and their saved connections.',
+  title: 'Mesh',
+  description: 'Connect nodes, inspect network routes, and manage saved connections.',
   icon: ThemeObjectHostIcon,
-  keywords: 'topology monitor runtime host hosts ssh tailcat tunnel listener remote hostname user port key test connection apps access trust permission environment project folder workspace worktree register open',
-  savedSummary: (config) => `${config.hosts.length} ${config.hosts.length === 1 ? 'host' : 'hosts'}`,
+  keywords: 'mesh gateway participant peer network route topology monitor runtime host hosts ssh tailcat tunnel listener remote hostname user port key test connection apps access trust permission environment project folder workspace worktree register open',
+  searchTargets: [{ id: 'mesh-configuration', title: 'Mesh participation', description: 'Network role, peer trust and device access.', kind: 'field' }, { id: 'mesh-link', title: 'Original node access link', description: 'Reach an original endpoint through this Mesh gateway.', kind: 'action' }],
+  savedSummary: (config) => `${config.hosts.length} saved ${config.hosts.length === 1 ? 'connection' : 'connections'}`,
   Pane({ config, active, onClose, onNavigate, navigationRequest }) {
-    return <HostSettingsPane config={config} onSave={saveHosts} active={active} onClose={onClose} navigationRequest={navigationRequest} onRemoteWork={() => onNavigate('remote-execution')} />
+    return <MeshSettingsPane config={config} onSave={saveHosts} active={active} onClose={onClose} navigationRequest={navigationRequest} onRemoteWork={() => onNavigate('remote-execution')} />
   }
 } as const satisfies SettingsModule

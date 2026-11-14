@@ -1708,6 +1708,7 @@ export type AgentMuxDesktopApi = {
       params: import('@agentmux/core').ApplicationAccessParameterMap[M]): Promise<import('@agentmux/core').ApplicationAccessResultMap[M]>
   }
   nodePublishing: import('./node-publishing.js').DesktopNodePublishingPort
+  mesh: import('./mesh-network.js').DesktopMeshNetworkPort
   hostRoutes: import('./host-routes.js').DesktopHostRoutes
   sourceFiles: import('./source-files-client.js').SourceFilesApi
   spaceMounts: import('./space-mount.js').SpaceMountPort
@@ -2327,7 +2328,7 @@ export type AgentMuxDesktopApi = {
   }
 }
 
-export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks' | 'search' | 'browser' | 'hosts' | 'nodePublishing' | 'hostRoutes' | 'spaceMounts' | 'applications' | 'conversation' | 'landmarks' | 'toolkit' | 'workbenchClose' | 'sourceFiles'> & {
+export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks' | 'search' | 'browser' | 'hosts' | 'nodePublishing' | 'mesh' | 'hostRoutes' | 'spaceMounts' | 'applications' | 'conversation' | 'landmarks' | 'toolkit' | 'workbenchClose' | 'sourceFiles'> & {
   workbenchClose: { call<M extends import('@agentmux/core').SpaceCloseMethod>(method: M, input: import('@agentmux/core').SpaceCloseParams[M]): Promise<import('./ipc-result').IpcResult<import('@agentmux/core').SpaceCloseResults[M]>> }
   hostRoutes: import('./host-routes.js').PreloadHostRoutes
   sourceFiles: import('./source-files-client.js').SourceFilesPreloadApi
@@ -2346,6 +2347,7 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
       params: import('@agentmux/core').ApplicationAccessParameterMap[M]): Promise<SessionInputOperationResult<import('@agentmux/core').ApplicationAccessResultMap[M]>>
   }
   conversation: import('./conversation-read').ConversationReadPreloadApi
+  mesh: import('./mesh-network.js').MeshNetworkPreloadPort
   nodePublishing: { call<M extends import('./node-publishing.js').NodePublicMethod>(method: M, params: import('@agentmux/core/node-publishing').NodePublishingParams[M], context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core/node-publishing').NodePublishingResults[M]>>; owner<M extends import('./node-publishing.js').NodeOwnerMethod>(target: import('./node-publishing.js').NodeOwnerTarget, method: M, params: import('@agentmux/core/node-publishing').NodePublishingParams[M], context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core/node-publishing').NodePublishingResults[M]>> }
   hosts: Omit<AgentMuxDesktopApi['hosts'], 'inspect' | 'network' | 'home' | 'agentResources'> & {
     home(host: HostConfig, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<AgentMuxRpcResult<'settings.hosts.home'>>>
