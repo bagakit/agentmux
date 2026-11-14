@@ -40,7 +40,7 @@ function PreviousAttemptAuthor({ attempt }: { attempt: DemandDelegation }) {
 }
 
 /** Human review reaches the existing public owner; no command is executed here. */
-export function GoalPlanDelivery({ demand, item, author, draft, onDraft, previousDrafts, onReadGoal, onConfirmed }: { demand: DemandProjection; item: GoalPlanNodeView; author: ReactNode;
+export function GoalPlanDelivery({ demand, item, historical, author, draft, onDraft, previousDrafts, onReadGoal, onConfirmed }: { demand: DemandProjection; item: GoalPlanNodeView; historical: boolean; author: ReactNode;
   draft?: GoalPlanReviewDraft | undefined; onDraft(value: GoalPlanReviewDraft): void; previousDrafts: Readonly<Record<string, GoalPlanReviewDraft>>; onReadGoal(): void; onConfirmed(request: NonNullable<GoalPlanReviewDraft['request']>): void }) {
   const delegation = item.delegation, report = delegation?.report
   const current = draft ?? { command: item.node.check, result: '', evidence: '', note: '' }
@@ -51,7 +51,7 @@ export function GoalPlanDelivery({ demand, item, author, draft, onDraft, previou
     if (recorded && request) onConfirmed(request)
   }, [recorded, request, onConfirmed])
   if (!delegation || !report) return null
-  const previous = (demand.delegations ?? []).filter(attempt => attempt.planNodeId === item.node.id && attempt.operationId !== delegation.operationId)
+  const previous = historical ? [] : (demand.delegations ?? []).filter(attempt => attempt.planNodeId === item.node.id && attempt.operationId !== delegation.operationId)
   async function submit(verdict?: GoalPlanReviewInput['verdict']) {
     if (busy.current || current.pending) return
     let original = request
@@ -99,20 +99,20 @@ export function GoalPlanDelivery({ demand, item, author, draft, onDraft, previou
       {item.review.check.evidence.length ? <GoalEvidence evidence={item.review.check.evidence} criterion="Independent review" /> : null}
     </div> : null}
     {acknowledged ? <p ref={receipt} tabIndex={-1} role="status" className="goal-delivery__receipt">Review saved · {recorded?.verdict === 'pass' ? 'Node passed' : 'Changes requested'}. Goal acceptance remains separate.</p> : null}
-    {item.state === 'review' || request ? <div className="goal-delivery__review" aria-label="Independent node review">
+    {!historical && item.state === 'review' || request ? <div className="goal-delivery__review" aria-label="Independent node review">
       {!acknowledged && request ? <div className="goals-service" role="status">
         {current.pending ? 'Saving or reading the original review…' : current.issue ?? 'Original review request retained.'}
         <div className="goals-inline-actions"><button type="button" className="small-button" disabled={current.pending} onClick={() => void readOriginal()}>Read original Goal</button>
-          {current.reread && item.state === 'review' && delegation.operationId === request.review.delegationOperationId ? <button type="button" className="small-button" disabled={current.pending} onClick={() => void submit()}>Submit original review</button> : null}</div>
+          {!historical && current.reread && item.state === 'review' && delegation.operationId === request.review.delegationOperationId ? <button type="button" className="small-button" disabled={current.pending} onClick={() => void submit()}>Submit original review</button> : null}</div>
       </div> : current.issue ? <p className="goals-service" role="status">{current.issue}</p> : null}
-      <details className="goal-delivery__form"><summary>Record review</summary>
+      {!historical ? <details className="goal-delivery__form"><summary>Record review</summary>
       <p className="goals-caption">Run the declared check independently and record what you observed. This reviews this attempt only.</p>
       <label>Check performed<input aria-label="Review check performed" value={current.command} readOnly={Boolean(request)} onChange={event => onDraft({ ...current, command: event.target.value })} /></label>
       <label>Observed result<textarea aria-label="Review observed result" rows={2} value={current.result} readOnly={Boolean(request)} onChange={event => onDraft({ ...current, result: event.target.value })} /></label>
       <label>Evidence locations <small>One per line</small><textarea aria-label="Review evidence locations" rows={2} value={current.evidence} readOnly={Boolean(request)} onChange={event => onDraft({ ...current, evidence: event.target.value })} /></label>
       <label>Review note<textarea aria-label="Review note" rows={2} value={current.note} readOnly={Boolean(request)} onChange={event => onDraft({ ...current, note: event.target.value })} /></label>
       {!request ? <div className="goals-inline-actions"><button type="button" className="primary-button" onClick={() => void submit('pass')}>Pass node</button><button type="button" className="small-button" onClick={() => void submit('changes')}>Request changes</button></div> : null}
-      </details>
+      </details> : null}
       {request ? <details><summary>Original review request</summary><pre>{JSON.stringify(request, null, 2)}</pre></details> : null}
     </div> : null}
     <GoalPlanThread delegation={delegation} />
