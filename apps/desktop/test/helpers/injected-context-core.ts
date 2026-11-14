@@ -31,7 +31,7 @@ export async function injectedContextCore(root: string, initial?: AgentMuxStored
   } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
   const persistNative = async () => writeFile(nativePath, JSON.stringify({ receipts: [...receipts], cursors: [...cursors], writes }))
   let loseAck = false
-  const start = vi.fn(async (input: { cwd: string }) => {
+  const start = vi.fn(async (input: { cwd: string; operationKey?: string }) => {
     const created = run(`private-fresh-run-${start.mock.calls.length}`, input.cwd)
     runs.set(created.runId, created); return created
   }), stop = vi.fn()
@@ -46,6 +46,8 @@ export async function injectedContextCore(root: string, initial?: AgentMuxStored
     vi.spyOn(core, 'connect').mockResolvedValue()
     Object.assign(inner.kernel, { isConnected: () => true,
       identity: () => ({ daemonInstanceId: 'private-original-daemon', protocolVersion: 18, buildIdentity: 'private-io' }),
+      creationRuntimeIdentity: () => ({ runtimeId: 'private-original-runtime', instanceId: 'private-original-daemon', protocolVersion: 18, buildIdentity: 'private-io' }),
+      startPrepared: async (request: { cwd: string }, operationKey: string) => start({ ...request, operationKey }),
       status: async (id: string) => { const value = runs.get(id); if (!value) throw new Error(`Unknown private Run ${id}`); return { ...value, acceptedInputBytes: cursors.get(id) ?? 0 } },
       list: async () => [...runs.values()], start, stop,
       input: async (runId: string, input: { operationId: string; expectedByte: number; data: string }) => {
@@ -64,7 +66,7 @@ export async function injectedContextCore(root: string, initial?: AgentMuxStored
           appliedByteRange: { startByte: input.expectedByte, endByte: input.expectedByte + Buffer.byteLength(input.data) } }
       } })
     inner.hookServer.isRunning = () => true
-    inner.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43), endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) },
+    inner.hookServer.createBinding = (_sessionId: string, _providerId: string, bindingId: string) => ({ bindingId, endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) },
       bindRun: async () => {}, close: async () => {} })
     vi.spyOn(core as unknown as { probePreparedAgent: typeof core.probeAgent }, 'probePreparedAgent').mockImplementation(async id => ({ providerId: id, executable: id, installed: true,
       capabilities: new AgentProviderRegistry().get(id).catalog.capabilities }))
