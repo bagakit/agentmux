@@ -67,8 +67,7 @@ try:
         port = free_port()
         ports[label] = port
         # This test owns the complete environment, including the absence of inherited credentials.
-        env = {key: value for key, value in os.environ.items()
-               if not key.startswith(('AGENTMUX_', 'OPENCODE_', 'XDG_'))}
+        env = {'PATH': os.environ['PATH'], 'LANG': 'en_US.UTF-8'}
         env.update(host['env'])
         env['TERM'] = 'xterm-256color'
         master, slave = pty.openpty()
@@ -81,8 +80,8 @@ try:
         reader = threading.Thread(target=drain, args=(master, root / (label + '.pty')), daemon=True)
         reader.start()
         children.append((process, master, reader, label))
-        # Native first-use dependency installation writes this shared config directory.
-        # Warm it before adding another live Worker; all three remain concurrent below.
+        # The runner preloads the verified official SDK dependency tree; native
+        # loading still runs unchanged, with npm offline and all Workers concurrent below.
         deadline = time.monotonic() + 45
         while time.monotonic() < deadline:
             if process.poll() is not None:

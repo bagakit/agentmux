@@ -1,10 +1,11 @@
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 import { expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import { AgentHookServer } from '../../src/hook-server.js'
@@ -12,12 +13,19 @@ import type { NativeHookEnvelope } from '../../src/types.js'
 
 it('loads shared product plugin in simultaneous native TUI Workers and authenticates only their original Core Runs', async () => {
   const binary = process.env.AGENTMUX_OPENCODE_NATIVE_BINARY
+  const dependencies = process.env.AGENTMUX_OPENCODE_NATIVE_DEPENDENCIES
   expect(binary, 'Native proof requires an explicitly selected verified artifact').toBeTruthy()
+  expect(dependencies, 'Native proof requires the verified pinned dependency input prepared by its runner').toBeTruthy()
   const root = await mkdtemp(join(tmpdir(), 'amx-opencode-native-'))
   const workspace = join(root, 'workspace'), config = join(root, 'config', 'opencode')
   const acknowledgement = join(root, 'accepted'), observed: NativeHookEnvelope[] = []
   const server = new AgentHookServer(event => { observed.push(event) }, 0)
-  await mkdir(workspace); await server.start()
+  await mkdir(workspace); await mkdir(config, { recursive: true })
+  for (const name of ['package.json', 'package-lock.json', 'node_modules']) {
+    if (process.platform === 'darwin') await promisify(execFile)('/bin/cp', ['-cR', join(dependencies!, name), join(config, name)])
+    else await cp(join(dependencies!, name), join(config, name), { recursive: true })
+  }
+  await server.start()
   const provider = new AgentProviderRegistry().get('opencode')
   const hosts: { label: string; env: Record<string, string> }[] = []
   for (const label of ['a', 'b', 'outside']) {
@@ -26,6 +34,7 @@ it('loads shared product plugin in simultaneous native TUI Workers and authentic
       HOME: home, XDG_CONFIG_HOME: join(root, 'config'), XDG_DATA_HOME: join(home, 'data'),
       XDG_STATE_HOME: join(home, 'state'), XDG_CACHE_HOME: join(root, 'cache'),
       npm_config_cache: join(root, 'npm-cache'),
+      npm_config_offline: 'true',
       OPENCODE_DISABLE_AUTOUPDATE: '1', OPENCODE_DISABLE_PRUNE: '1',
       OPENCODE_DISABLE_MODELS_FETCH: '1', OPENCODE_DISABLE_PROJECT_CONFIG: '1',
       OPENCODE_DISABLE_DEFAULT_PLUGINS: '1', OPENCODE_CONFIG_CONTENT: JSON.stringify({ enabled_providers: [] })
@@ -90,11 +99,12 @@ it('loads shared product plugin in simultaneous native TUI Workers and authentic
         originalRunIds: [...new Set(observed.map(event => event.runId))].sort(), observedEvents: observed.length,
         errorsDelivered: observed.filter(event => event.eventName === 'session.error').length,
         outsideIngress: false, sharedServerForeignSubjectFenced: true,
-        sharedPluginUnchanged: true, childrenReaped: cleaned }, null, 2) + '\n')
+        sharedPluginUnchanged: true, childrenReaped: cleaned, preloadedNativeDependencies: true,
+        dependencyInputManifestSHA256: process.env.AGENTMUX_OPENCODE_NATIVE_DEPENDENCIES_SHA256 }, null, 2) + '\n')
   } finally {
     await writeFile(acknowledgement, 'finish private probe')
     if (child.exitCode === null) await closed
     lines.close(); await server.stop()
-    if (child.exitCode === 0 && cleaned) await rm(root, { recursive: true, force: true })
+    if (cleaned) await rm(root, { recursive: true, force: true })
   }
 }, 120_000)

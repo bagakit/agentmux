@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, readFile, readdir, readlink, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
@@ -16,6 +16,52 @@ const config = 'packages/core/test/vitest.opencode-hook-binding.config.mts'
 const owner = join(root, 'packages/core/src/providers/opencode.ts')
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const original = hash(await readFile(owner))
+
+// Native OpenCode waits for an npm dependency reify before loading any plugin. Prepare
+// that official, pinned test input separately; native Workers then run offline.
+async function nativeDependencies() {
+  const supplied = process.env.AGENTMUX_OPENCODE_NATIVE_DEPENDENCIES
+  const directory = supplied ?? join(evidence, 'native-dependencies-' + version)
+  const manifestPath = join(directory, 'verified-tree.json')
+  async function identity() {
+    for (const name of ['plugin', 'sdk']) {
+      const value = JSON.parse(await readFile(join(directory, 'node_modules/@opencode-ai', name, 'package.json'), 'utf8'))
+      assert.equal(value.name, '@opencode-ai/' + name); assert.equal(value.version, version)
+    }
+    const lock = JSON.parse(await readFile(join(directory, 'package-lock.json'), 'utf8'))
+    assert.equal(lock.packages[''].dependencies['@opencode-ai/plugin'], version)
+    const files = []
+    async function walk(path, key) {
+      const info = await lstat(path)
+      if (info.isSymbolicLink()) {
+        const target = await readlink(path)
+        assert(resolve(dirname(path), target).startsWith(join(directory, 'node_modules') + '/'), 'Dependency input links outside its package tree')
+        files.push([key, 'link', target])
+      } else if (info.isDirectory()) for (const name of (await readdir(path)).sort()) await walk(join(path, name), key + '/' + name)
+      else { assert(info.isFile()); files.push([key, hash(await readFile(path))]) }
+    }
+    await walk(join(directory, 'node_modules'), 'node_modules')
+    return { version, packageSHA256: hash(await readFile(join(directory, 'package.json'))),
+      lockSHA256: hash(await readFile(join(directory, 'package-lock.json'))), moduleTreeSHA256: hash(JSON.stringify(files)), files: files.length }
+  }
+  try {
+    assert.deepEqual(JSON.parse(await readFile(manifestPath, 'utf8')), await identity(), 'Verified native dependency input changed')
+  } catch (error) {
+    if (error.code !== 'ENOENT' || supplied) throw error
+    const home = join(directory, 'private-home')
+    await mkdir(home, { recursive: true, mode: 0o700 })
+    for (const name of ['user.npmrc', 'global.npmrc']) await writeFile(join(directory, name), '')
+    await writeFile(join(directory, 'package.json'), JSON.stringify({ name: 'agentmux-opencode-native-proof', private: true,
+      version: '0.0.0', dependencies: { '@opencode-ai/plugin': version } }))
+    await exec('npm', ['install', '--prefer-offline', '--ignore-scripts', '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org'], {
+      cwd: directory, timeout: 45_000, maxBuffer: 1024 * 1024, env: { PATH: process.env.PATH, HOME: home,
+        npm_config_userconfig: join(directory, 'user.npmrc'), npm_config_globalconfig: join(directory, 'global.npmrc'),
+        npm_config_cache: join(evidence, 'native-npm-cache'), npm_config_update_notifier: 'false' }
+    })
+    await writeFile(manifestPath, JSON.stringify(await identity(), null, 2) + '\n', { mode: 0o600 })
+  }
+  return { directory, manifestSHA256: hash(await readFile(manifestPath)) }
+}
 
 async function nativeBinary() {
   const supplied = process.env.AGENTMUX_OPENCODE_NATIVE_BINARY
@@ -68,6 +114,9 @@ async function run(mutant) {
   if (mutant) env.AGENTMUX_OPENCODE_MUTANT = mutant
   else {
     env.AGENTMUX_OPENCODE_NATIVE_BINARY = await nativeBinary()
+    const dependencies = await nativeDependencies()
+    env.AGENTMUX_OPENCODE_NATIVE_DEPENDENCIES = dependencies.directory
+    env.AGENTMUX_OPENCODE_NATIVE_DEPENDENCIES_SHA256 = dependencies.manifestSHA256
     env.AGENTMUX_OPENCODE_NATIVE_RECEIPT = join(evidence, 'native-receipt.json')
   }
   let result
@@ -91,6 +140,8 @@ async function run(mutant) {
     assert.equal(native.sharedServerForeignSubjectFenced, true)
     assert.equal(native.childrenReaped, true); assert.equal(native.sharedPluginUnchanged, true)
     assert.equal(native.originalRunIds.length, 2)
+    assert.equal(native.preloadedNativeDependencies, true)
+    assert.equal(native.dependencyInputManifestSHA256, env.AGENTMUX_OPENCODE_NATIVE_DEPENDENCIES_SHA256)
   }
   return { label, code: result.code, loadedOwner: actual.length, assertionsExecuted: true }
 }
