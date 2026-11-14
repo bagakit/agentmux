@@ -986,11 +986,12 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
     const value = await invoke(method, args)
     // An exact durable read observes its owner without updating the Hosted cache.
     if (method === 'readAgentSession') return value
-    if (value && typeof value === 'object') {
+    if (bootstrap && value && typeof value === 'object') {
       const result = value as { agentSessionId?: string; session?: AgentMuxAgentSession }
       const updated = result.agentSessionId ? value as AgentMuxAgentSession : result.session
       // A read receipt is not another mutation. Re-publishing the same Session
       // lets an observer's status read trigger its own next read indefinitely.
+      // Before a directory snapshot there is no cache to update or compare.
       const previous = updated?.kind === 'agent' ? bootstrap?.sessions.find(session => session.agentSessionId === updated.agentSessionId) : undefined
       const projected = updated?.kind === 'agent' && sessionProjection === 'summary' ? hostedAgentSessionSummary(updated) : updated
       if (projected?.kind === 'agent' && !dequal(previous, projected)) emit({ type: 'agent-session', session: projected })
