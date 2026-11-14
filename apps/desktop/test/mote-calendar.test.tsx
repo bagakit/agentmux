@@ -59,7 +59,10 @@ async function edit(label: string, value: string) {
     input.dispatchEvent(new Event(input instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }))
   })
 }
-async function openForm() { await act(async () => { const element = dom.container.querySelector<HTMLDetailsElement>('.schedule-create')!; element.open = true; element.dispatchEvent(new Event('toggle')) }) }
+async function openForm() {
+  if (dom.container.querySelector('button[aria-label="New arrangement"]')) { await button('New arrangement'); return }
+  await act(async () => { const disclosure = dom.container.querySelector<HTMLDetailsElement>('.schedule-create')!; disclosure.open = true; disclosure.dispatchEvent(new Event('toggle')) })
+}
 
 describe('Mote calendar original schedule consumer', () => {
   it('keeps an earlier completed event with its frozen recap after the latest input moves', async () => {
@@ -414,6 +417,35 @@ describe('Mote calendar original schedule consumer', () => {
     expect(dom.container.querySelectorAll('[data-calendar-hour]')).toHaveLength(24)
     expect(dom.container.querySelector('[data-mote-date]')?.getAttribute('data-mote-date')).toBe(date)
   })
+  it('opens at the selected hour, returns focus, and only moves a kept draft on request', async () => {
+    await owner([])
+    const day = DateTime.fromMillis(now, { zone: 'UTC' }).plus({ days: 1 })
+    const date = day.toISODate()!
+    await dom.render(<MoteCalendar scope={scope} reference={reference} active />)
+    await button('Week')
+    const slot = dom.container.querySelector<HTMLButtonElement>(`[data-calendar-hour="${date}:14"]`)!
+    await act(async () => slot.click())
+    const trigger = dom.container.querySelector<HTMLButtonElement>('[aria-label="New arrangement"]')!
+    await act(async () => trigger.click())
+    const dialog = () => dom.container.querySelector<HTMLElement>('[role="dialog"][aria-label="New arrangement"]')
+    expect(dialog()!.querySelector<HTMLInputElement>('input[type="time"]')!.value).toBe('14:00')
+    expect(dialog()!.querySelector<HTMLInputElement>('input[type="date"]')!.value).toBe(date)
+    await edit('Arranged message', 'Keep my request')
+    const message = dialog()!.querySelector('textarea')!
+    await act(async () => { message.focus(); message.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' })) })
+    expect(dialog()).toBeNull()
+    expect(document.activeElement).toBe(trigger)
+    const next = dom.container.querySelector<HTMLButtonElement>(`[data-calendar-hour="${date}:16"]`)!
+    await act(async () => next.click())
+    await act(async () => trigger.click())
+    expect(dialog()!.textContent).toContain('Existing draft')
+    expect(dialog()!.querySelector<HTMLInputElement>('input[type="time"]')!.value).toBe('14:00')
+    const move = [...dialog()!.querySelectorAll('button')].find(button => button.textContent?.startsWith('Move draft to'))!
+    await act(async () => move.click())
+    expect(dialog()!.querySelector<HTMLInputElement>('input[type="time"]')!.value).toBe('16:00')
+    expect(dialog()!.querySelector('textarea')!.value).toBe('Keep my request')
+    expect(api.schedule.create).not.toHaveBeenCalled()
+  })
   it('date shortcuts keep edited timing, message and a pending original creation intact', async () => {
     await owner([])
     const today = DateTime.fromMillis(now, { zone: 'UTC' }), firstDate = today.plus({ days: 1 }).toISODate()!, nextDate = today.plus({ days: 2 }).toISODate()!
@@ -488,7 +520,7 @@ describe('Mote calendar original schedule consumer', () => {
     const date = DateTime.fromMillis(now, { zone: 'UTC' }).plus({ days: 1 }).toISODate()!
     await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-mote-date="' + date + '"]')!.click())
     await button('New arrangement')
-    expect(dom.container.querySelector('.schedule-create')?.textContent).toContain('Original discussion · ' + neighborAgent.control.agentSessionId)
+    expect(dom.container.querySelector('.schedule-create')?.textContent).toContain('To · ' + neighborAgent.control.agentSessionId)
     await edit('Arrangement timing', 'afterMs')
     await edit('Arranged message', 'Keep my explicit original discussion'); await button('Save arrangement')
     await vi.waitFor(() => expect(api.schedule.create).toHaveBeenCalledTimes(1))
