@@ -47,20 +47,22 @@ it.each(['shared', 'desktop'])('uses native primary and each exact submission fa
     expect(entry.dataset.nativeReadable).toBe('true')
     expect(entry.querySelector<HTMLDetailsElement>('details')!.open).toBe(false)
     const summary = entry.querySelector('summary')!
-    expect(summary.textContent).toContain('消息输入'); expect(summary.querySelector('time')?.textContent).toBe(formatClock(submission().createdAt))
+    expect(summary.textContent).toContain('原生记录已对应'); expect(summary.querySelector('time')?.textContent).toBe(formatClock(submission().createdAt))
     expect(summary.textContent).not.toContain('Original device'); expect(summary.textContent).not.toContain('消息工具')
     expect(summary.textContent).not.toContain('source-owner'); expect(summary.querySelector('.log-turn__body')).toBeNull()
     const preview = summary.querySelector<HTMLElement>('.message-disclosure__preview')!
     expect(preview.textContent).toBe(original.replace(/\s+/gu, ' ').trim())
   }
-  expect(entries[0]!.querySelector('summary')!.textContent).toContain('Agent 接收未确认')
-  expect(entries[1]!.dataset.status).toBe('failed'); expect(entries[1]!.querySelector('summary')!.textContent).toContain('送达 Agent 未确认')
+  expect(entries[0]!.querySelector('summary')!.textContent).toContain('原生记录已对应')
+  expect(entries[1]!.dataset.status).toBe('failed'); expect(entries[1]!.querySelector('summary')!.textContent).toContain('送达待核实')
   expect(entries[1]!.querySelector('summary')!.textContent).not.toContain('已进入对话')
-  await openDetails(entries[0]!.querySelector<HTMLDetailsElement>('details')!); expect(entries[0]!.textContent).toContain('original-input'); expect(entries[0]!.textContent).toContain('source-owner')
-  expect(entries[0]!.textContent).toContain('不是原生接纳或执行完成时间')
+  await openDetails(entries[0]!.querySelector<HTMLDetailsElement>('details')!)
+  expect(entries[0]!.querySelector('dl.conversation-input-details__facts')).toBeNull()
   expect(paragraphs(entries[0]!.querySelector('.log-turn__body')!)).toBe(original)
   await act(async () => entries[0]!.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!.click()); expect(copy.mock.calls.at(-1)?.[0]).toBe(original)
   await act(async () => entries[0]!.querySelector<HTMLButtonElement>('[aria-label="Message details"]')!.click())
+  expect(entries[0]!.textContent).toContain('original-input'); expect(entries[0]!.textContent).toContain('source-owner')
+  expect(entries[0]!.textContent).toContain('不是原生接纳或执行完成时间')
   expect(entries[0]!.textContent).toContain('Original device'); expect(entries[0]!.textContent).toContain('消息工具')
   const raw = [...entries[0]!.querySelectorAll<HTMLDetailsElement>('details')].find(detail => detail.firstElementChild?.textContent === 'Original record JSON')!
   expect(raw).toBeDefined(); await openDetails(raw)
@@ -75,7 +77,8 @@ it.each(['shared', 'desktop'])('uses native primary and each exact submission fa
 it('does not turn a streaming submission record into confirmed adoption or success', async () => {
   await render(<ConversationView sessionId={sid} page={page()} timeline={snapshot([submission('unconfirmed-submit', true, 'streaming')])} />)
   const metadata = host.querySelector('[data-submission-record]')!
-  expect(metadata.textContent).toContain('已保存 · 等待 Agent')
+  expect(metadata.textContent).toContain('等待 Agent')
+  expect(metadata.textContent).not.toContain('Agent 已接收')
   expect(metadata.textContent).not.toContain('已送入终端')
   expect(metadata.textContent).not.toContain('已采用'); expect(metadata.textContent).not.toContain('已进入对话')
   expect(metadata.getAttribute('data-status')).toBe('streaming')
@@ -90,10 +93,11 @@ it.each(['shared', 'desktop'])('uses one original message card when the exactly 
   const t = snapshot([submission('native-empty-input')])
   await render(surface === 'shared' ? <ConversationView sessionId={sid} executionHostId="selected-route" page={emptyNative} timeline={t} />
     : <ActivityView sessionId={sid} executionHostId="selected-route" nativeHistoryPage={emptyNative} timelineSnapshot={t} items={t.items} capability="complete-events" />)
+  await openDetails(host.querySelector<HTMLDetailsElement>('.conversation-send-receipt > details')!)
   const card = capturedCard('native-empty-input')
   expect(paragraphs(card.querySelector('.log-turn__body')!)).toBe(original)
   expect(host.querySelectorAll('.log-turn')).toHaveLength(1)
-  expect(card.textContent).toContain('Agent 接收未确认')
+  expect(card.textContent).toMatch(/Agent 接收(?:未确认|待核实)/u)
   expect(card.querySelector('[aria-label="Copy message"]')).not.toBeNull()
   const native = host.querySelector<HTMLDetailsElement>('[data-original-contribution]')!
   expect(native).not.toBeNull(); expect(native.open).toBe(false)
@@ -109,7 +113,7 @@ it.each(['shared', 'desktop'])('keeps unassociated originals as independently re
   expect(host.querySelectorAll('[data-conversation-event-id]')).toHaveLength(2)
   expect([...host.querySelectorAll('.log-turn__body')].map(paragraphs)).toEqual([original, original])
   const card = capturedCard('same-text'), key = card.dataset.messageSourceKey
-  expect(card.textContent).toContain('Agent 接收未确认')
+  expect(card.textContent).toMatch(/Agent 接收(?:未确认|待核实)/u)
   await act(async () => card.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!.click())
   expect(copy.mock.calls.at(-1)?.[0]).toBe(original)
   await act(async () => card.querySelector<HTMLButtonElement>('[aria-label="Message details"]')!.click())

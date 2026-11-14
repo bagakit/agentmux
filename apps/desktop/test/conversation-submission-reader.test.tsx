@@ -43,12 +43,12 @@ it('the actual Reader through IPC renders an unassociated A2A message card and a
   const row = host.querySelector<HTMLElement>('.log-turn[data-message-id="captured:original-message"]')!
   expect(row, host.textContent).not.toBeNull()
   expect(row.querySelector('.log-turn__body')?.textContent).toContain('Original ending.')
-  expect(row.querySelector('.conversation-submission-summary')?.textContent).toContain('原输入状态未确认')
+  expect(row.querySelector('.conversation-submission-summary')?.textContent).toContain('接收待核实')
   expect(row.dataset.speakerRole).toBe('agent')
   const nativeCard = host.querySelector('[data-native-record-id="exact-native"]')!
   expect(nativeCard.querySelector('[data-submission-record]')).not.toBeNull()
   expect(nativeCard.querySelectorAll('[data-original-contribution]')).toHaveLength(0)
-  expect(nativeCard.querySelector('[data-submission-record] summary')?.textContent).toContain('原输入状态未确认')
+  expect(nativeCard.querySelector('[data-submission-record] summary')?.textContent).toContain('原生记录已对应')
   expect(nativeCard.querySelector('[data-submission-record] details[open]')).toBeNull()
   expect(host.querySelector('[data-submission-id="exact-message"]')).toBeNull()
   const originalRef = row.dataset.conversationItemRef, originalId = row.dataset.conversationEventId
