@@ -2,8 +2,8 @@ import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 const leaf = 'packages/core/src/continuous-progress-input.ts', rpc = 'packages/core/src/public-rpc-schedules.ts', prefs = 'packages/core/src/mote/preferences.ts'
 export const mutations = {
-  'coerce-array-status': [leaf, [["typeof p.status !== 'string' || !['confirmed', 'unconfirmed'].includes(p.status)", "!['confirmed', 'unconfirmed'].includes(String(p.status))"]], 'array-coerced status'],
-  'coerce-array-delivery': [leaf, [["typeof p.delivery !== 'string' || !['unconfirmed', 'not-applied', 'terminal-confirmed', 'native-admitted'].includes(p.delivery)", "!['unconfirmed', 'not-applied', 'terminal-confirmed', 'native-admitted'].includes(String(p.delivery))"]], 'array-coerced status'],
+  'coerce-array-status': [leaf, [["p.status !== 'confirmed' && p.status !== 'unconfirmed')", "!['confirmed', 'unconfirmed'].includes(String(p.status)))"]], 'array-coerced status'],
+  'coerce-array-delivery': [leaf, [["delivery !== 'unconfirmed' && delivery !== 'not-applied' && delivery !== 'terminal-confirmed' && delivery !== 'native-admitted')", "!['unconfirmed', 'not-applied', 'terminal-confirmed', 'native-admitted'].includes(String(delivery)))"]], 'array-coerced status'],
   'coerce-array-native-state': [leaf, [["typeof native.state !== 'string' || !['completed', 'failed', 'interrupted'].includes(native.state)", "!['completed', 'failed', 'interrupted'].includes(String(native.state))"]], 'array-coerced status'],
   'borrow-other-session': [leaf, [['original.agentSessionId !== key.agentSessionId || ', '']], 'mismatched SID'],
   'borrow-other-run': [leaf, [['original.run.runId !== key.expectedRun.runId ||', 'false ||']], 'mismatched record-Run'],
