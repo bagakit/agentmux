@@ -1,6 +1,7 @@
 import { createContext, createElement, useContext, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react'
 import { getDeviceWorkface } from '../recovery/device-workface'
 import { mobileUpdateFragment } from '../connection/reload-identity'
+import { mobilePageNamespaceDigest } from '@agentmux/core/mobile-web-codec'
 import { createAttachmentPageOwner, type AttachmentPageOwner } from '../conversation/attachment-page-owner'
 
 export type MobileWebUpdateResult = { status: 'navigating' } | { status: 'blocked'; message: string }
@@ -106,7 +107,7 @@ export function MobileWebUpdateSafetyProvider({ children, verifyConnection, prep
         workfaceStillSaved = result.workface
         const response = result.response
         const destination = new URL(response.url)
-        if (!response.ok || destination.origin !== location.origin || !/^\/mobile\/[^/]+\/[a-f0-9]{64}\/index\.html$/u.test(destination.pathname)) {
+        if (!response.ok || destination.origin !== location.origin || !mobilePageNamespaceDigest(destination.pathname)) {
           return blocked('新版入口暂时无法确认；当前页面和工作内容保留，请恢复连接后重试。')
         }
       } catch {

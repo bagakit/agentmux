@@ -9,6 +9,8 @@ import type { AgentMuxRpcMethod, AgentMuxRpcParams, AgentMuxRpcResult, AgentMuxR
 import type { AgentMuxRpcSubscriptionOptions, AgentMuxRpcSubscription } from './public-rpc-client.js'
 import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
 import { randomClientRequestId } from './client-request-id.js'
+import { parseAgentMuxRpcDeviceResult } from './public-rpc-device.js'
+import { parseConnectionOffer } from '@agentmux/relay/offer'
 
 type RuntimeSubscription = Parameters<AgentMuxHostedRpcPort['subscribe']>
 type OutputSubscription = Parameters<AgentMuxHostedOutputRpcPort['subscribe']>
@@ -24,8 +26,17 @@ export class HostedRelayRpcPort implements AgentMuxHostedRpcPort {
   private readonly pending = new Set<() => void>()
   private closed = false
   private readonly relay: AgentMuxRpcRelayClient
-  constructor(options: AgentMuxRpcRelayOptions) { this.relay = createAgentMuxRpcRelayClient(options) }
-  async hello(name: string): Promise<void> { await this.exchange('device.hello', { name }) }
+  private readonly hostId: string
+  constructor(options: AgentMuxRpcRelayOptions) {
+    this.hostId = parseConnectionOffer(options.offer).serverId
+    this.relay = createAgentMuxRpcRelayClient(options)
+  }
+  async hello(name: string): Promise<void> {
+    const { value } = await this.exchange('device.hello', { name })
+    const result = parseAgentMuxRpcDeviceResult('device.hello', value, { name })
+    // The public description supplies routing. The original encrypted reply confirms its subject.
+    if (result.hostId !== this.hostId) throw protocol()
+  }
 
   private exchange(method: string, params: object, handlers?: Handlers,
     context: Pick<AgentMuxRpcCallContext, 'signal' | 'runtimeFence'> = {}): Promise<{

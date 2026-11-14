@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { connectRelayHostedClient } from '@agentmux/core/relay-hosted'
-import { parseConnectionOffer, type ConnectionOffer } from '@agentmux/relay/offer'
+import { parseConnectionOffer, readPinnedConnectionOffer, type ConnectionOffer, type ConnectionPin } from '@agentmux/relay/offer'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import { MobileApp } from '../MobileApp'
 import type { MobileConnection } from '../conversation/use-hosted-conversation'
@@ -20,8 +20,8 @@ function reloadRecordIdentity(hostId: string): string | null {
   if (issue || record.host?.origin !== location.origin || record.host.hostId !== hostId) throw new Error('这台设备的工作面记录暂时无法完整读取。')
   return record.recordId ?? null
 }
-export function MobileConnectionRoot({ platform, native, focusComposer, offer, linkIssue }: {
-  platform: ClientUiPlatform; native: boolean; focusComposer?: () => boolean; offer?: ConnectionOffer; linkIssue?: string
+export function MobileConnectionRoot({ platform, native, focusComposer, offer, pin, linkIssue }: {
+  platform: ClientUiPlatform; native: boolean; focusComposer?: () => boolean; offer?: ConnectionOffer; pin?: ConnectionPin; linkIssue?: string
 }) {
   const [client, setClient] = useState<AgentMuxHostedClient | null>(null)
   const [connection, setConnection] = useState<MobileConnection>({ state: 'connecting', message: '正在连接 Mac' })
@@ -55,42 +55,58 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
   useEffect(() => {
     const controller = new AbortController()
     let owned: AgentMuxHostedClient | undefined, release: (() => void) | undefined, timer: ReturnType<typeof setTimeout> | undefined
-    let attempt = 0, working = false, bindingNotice = '', offerNotice = ''
+    let pinKey: KeyPair | undefined
+    let attempt = 0, working = false, pinAwaitingRetry = false, bindingNotice = '', offerNotice = ''
     // Saving the verified link only lets this device reconnect later without opening it again.
     // A failed save is reported beside the connection; it never stops the connection itself.
     const keepOffer = (value: ConnectionOffer) => {
-      try { localStorage.setItem(OFFER_KEY, JSON.stringify(value)); offerNotice = '' }
-      catch { offerNotice = '这次的连接链接没有保存到这台设备；当前连接可继续使用，下次请从 Mac 重新打开连接链接。' }
+      try { localStorage.setItem(OFFER_KEY, JSON.stringify(value)); offerNotice = ''; return true }
+      catch { offerNotice = '这次的连接链接没有保存到这台设备；当前连接可继续使用，下次请从 Mac 重新打开连接链接。'; return false }
     }
-    let selected: ConnectionOffer | undefined, unpaired = false
+    let selected: ConnectionOffer | undefined, original: ConnectionOffer | undefined, saved: string | null = null, unpaired = false
+    const pinOrigin = location.origin, pinRecord = getDeviceWorkface().recordIdentity()
+    const pinSourceCurrent = () => {
+      try { return !controller.signal.aborted && location.origin === pinOrigin && getDeviceWorkface().recordIdentity() === pinRecord && localStorage.getItem(OFFER_KEY) === saved }
+      catch { return false }
+    }
+    const checkOffer = (value: ConnectionOffer) => {
+      const previous = getDeviceWorkface().snapshot().record.host
+      if (previous && previous.hostId !== value.serverId) throw new Error('这个链接属于另一台 Mac，请打开之前那台 Mac 的连接链接。')
+      if (original && original.serverId === value.serverId && original.daemonPublicKeyB64 !== value.daemonPublicKeyB64) throw new Error('这台 Mac 的加密身份已变化，请先在 Mac 上恢复原来的身份。')
+    }
     try {
       if (linkIssue) throw new Error(linkIssue)
-      let saved: string | null
       try { saved = localStorage.getItem(OFFER_KEY) }
       catch { throw new Error('这台设备暂时读不到 Mac 连接记录，请恢复设备存储后重新检查。') }
-      let original: ConnectionOffer | undefined
       if (saved) try { original = parseConnectionOffer(JSON.parse(saved)) }
       catch { throw new Error('Mac 连接记录无法完整读取，请恢复这条记录后重新检查。') }
-      selected = offer ?? original
-      if (!selected) { unpaired = true; throw new Error('请在 Mac 的手机连接中复制链接，在这台设备打开。') }
-      const previous = getDeviceWorkface().snapshot().record.host
-      if (previous && previous.hostId !== selected.serverId) throw new Error('这个链接属于另一台 Mac，请打开之前那台 Mac 的连接链接。')
-      if (offer && original && original.serverId === offer.serverId && original.daemonPublicKeyB64 !== offer.daemonPublicKeyB64) throw new Error('这台 Mac 的加密身份已变化，请先在 Mac 上恢复原来的身份。')
+      selected = pin ? undefined : offer ?? original
+      if (!selected && !pin) { unpaired = true; throw new Error('请在 Mac 的手机连接中复制链接，在这台设备打开。') }
+      if (selected) checkOffer(selected)
       if (offer && (native || location.hash !== mobileUpdateFragment)) keepOffer(offer)
     } catch (error) {
       setConnection({ state: 'unavailable', message: error instanceof Error ? error.message : String(error), ...(selected ? { paired: true } : unpaired ? { paired: false } : {}) })
       return
     }
-    setConnection({ state: 'connecting', message: '正在连接 Mac', paired: true })
+    setConnection({ state: 'connecting', message: pin ? '正在读取连接…' : '正在连接 Mac', paired: true })
     const connect = async () => {
-      if (controller.signal.aborted || working) return
+      if (controller.signal.aborted || working || pinAwaitingRetry) return
       if (owned) { if (binding.current?.state !== 'unavailable') void owned.connect().catch(() => {}); return }
       working = true
       try {
+        if (pin && !selected) {
+          const value = await readPinnedConnectionOffer(pinOrigin, pin, controller.signal)
+          if (!pinSourceCurrent()) { pinAwaitingRetry = true; throw new Error('读取连接时原工作面或连接记录已变化，请核对后重新读取。') }
+          checkOffer(value)
+          selected = value
+          setConnection({ state: 'connecting', message: '正在连接 Mac', paired: true })
+        }
         const updating = !native && location.hash === mobileUpdateFragment
-        const keyPair = updating ? await existingDeviceRelayIdentity() : await deviceRelayIdentity()
+        const keyPair = pinKey ?? (updating ? await existingDeviceRelayIdentity() : await deviceRelayIdentity())
+        if (pin && keyPair) pinKey = keyPair
         if (!keyPair || updating && !matchesReloadIdentity(keyPair, reloadOfferIdentity(selected!), reloadRecordIdentity(selected!.serverId))) throw new Error('更新网页后，设备身份、工作面或 Mac 连接对不上，请恢复后重试。')
         if (controller.signal.aborted) return
+        if (pin && !pinSourceCurrent()) { pinAwaitingRetry = true; throw new Error('连接前原工作面或连接记录已变化，请核对后重新读取。') }
         if (updating && offer) keepOffer(offer)
         if (updating) {
           // All DeviceWorkface writers take this same cross-page lock. React's
@@ -106,6 +122,13 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
         const name = /iPhone/.test(navigator.userAgent) ? 'iPhone' : /iPad/.test(navigator.userAgent) ? 'iPad' : /Android/.test(navigator.userAgent) ? 'Android' : '浏览器'
         const value = await connectRelayHostedClient({ offer: selected!, keyPair, name, signal: controller.signal, sessions: 'summary' })
         if (controller.signal.aborted) { await value.dispose(); return }
+        if (pin) {
+          if (!pinSourceCurrent()) { pinAwaitingRetry = true; await value.dispose(); throw new Error('连接期间原工作面或连接记录已变化，请核对后重新读取。') }
+          if (keepOffer(selected!)) {
+            saved = JSON.stringify(selected)
+            try { history.replaceState(null, '', location.pathname + location.search) } catch { /* The original pin remains available. */ }
+          }
+        }
         if (updating) try {
           if (!matchesReloadIdentity(keyPair, reloadOfferIdentity(selected!), reloadRecordIdentity(selected!.serverId))) throw new Error('重新连接期间工作面发生了变化，请恢复后重试。')
         } catch (error) { await value.dispose(); throw error }
@@ -140,6 +163,10 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
         publish()
       } catch (error) {
         if (controller.signal.aborted) return
+        const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined
+        if (pin && (!selected || pinAwaitingRetry || !pinSourceCurrent() || code === 'CONTROL_PROTOCOL_ERROR' || code === 'CONTROL_PERMISSION_DENIED' || code === 'AGENT_CAPABILITY_INVALID')) {
+          pinAwaitingRetry = true; setConnection({ state: 'unavailable', message: `这次连接尚未确认。${error instanceof Error ? error.message : String(error)}。可重新读取连接或从原 Mac 重新复制。`, paired: true }); return
+        }
         if (error && typeof error === 'object' && 'code' in error && error.code === 'AGENT_CAPABILITY_INVALID') { setConnection({ state: 'unavailable', message: '这台设备的授权未通过确认，请重新确认授权后连接。', paired: true }); return }
         setConnection({ state: 'disconnected', message: `暂时无法连接，正在自动重试。${error instanceof Error ? error.message : String(error)}`, paired: true })
         timer = setTimeout(() => { void connect() }, Math.min(30000, 1000 * 2 ** Math.min(attempt++, 5)))
@@ -149,7 +176,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
     window.addEventListener('online', resume); document.addEventListener('visibilitychange', resume)
     void connect()
     return () => { controller.abort(); clearTimeout(timer); release?.(); if (binding.current?.client === owned) binding.current = null; void owned?.dispose(); window.removeEventListener('online', resume); document.removeEventListener('visibilitychange', resume) }
-  }, [offer, linkIssue, connectionRetry])
+  }, [offer, pin, linkIssue, connectionRetry])
   if (updatePending) return <main className="mobile-chat-start mobile-update-recovery" aria-live="polite">
     <strong>正在接回工作面</strong><p>{connection.message}</p>
     <p>如果无法返回上一页，请恢复这台设备的工作面、身份与 Mac 连接后重新检查。</p>

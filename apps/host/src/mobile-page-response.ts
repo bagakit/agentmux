@@ -1,16 +1,11 @@
 import { createHash } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { isMobileBuildId } from '@agentmux/core/mobile-web-codec'
+import { mobilePageNamespaceDigest } from '@agentmux/core/mobile-web-codec'
 
 /** Entry navigation is separate from the immutable scripts and styles it loads. */
 export function isMobilePageEntry(path: string): boolean {
   if (path === '/' || path === '/index.html') return true
-  const segment = /^\/mobile\/([^/]+)\/[a-f0-9]{64}\/index\.html$/u.exec(path)?.[1]
-  if (!segment) return false
-  try {
-    const buildId = decodeURIComponent(segment)
-    return isMobileBuildId(buildId) && encodeURIComponent(buildId) === segment
-  } catch { return false }
+  return mobilePageNamespaceDigest(path) !== null
 }
 
 const recoveryScript = `document.getElementById('retry').addEventListener('click',()=>location.reload());document.getElementById('back').addEventListener('click',()=>{if(history.length>1)history.back();else document.getElementById('result').textContent='没有可返回的上一页，请稍后重试。'});`

@@ -11,6 +11,28 @@ const isText = (value: unknown, max: number): value is string =>
   typeof value === 'string' && Boolean(value) && !/[\0\r\n]/u.test(value) && size(value) <= max + 2
 /** The same build identity bound used by manifests and page observations. */
 export const isMobileBuildId = (value: unknown): value is string => isText(value, 128)
+/** A reversible content address, not a shortened hash or a mutable alias. */
+export function mobileAssetNamespace(digest: string): string {
+  if (!/^sha256:[a-f0-9]{64}$/u.test(digest)) throw new AgentMuxError('Invalid mobile content identity.', 'INVALID_CONTROL_REQUEST')
+  const bytes = Uint8Array.from(digest.slice(7).match(/../gu)!, byte => Number.parseInt(byte, 16))
+  return '/m/' + btoa(String.fromCharCode(...bytes)).replace(/\+/gu, '-').replace(/\//gu, '_').replace(/=+$/u, '') + '/'
+}
+/** Read only the original document URL; a later active release is never consulted. */
+export function mobilePageNamespaceDigest(path: string, buildId?: string | null): string | null {
+  if (buildId === null) return null
+  const short = /^\/m\/([A-Za-z0-9_-]{43})\/$/u.exec(path)
+  if (short) {
+    const bytes = atob(short[1]!.replace(/-/gu, '+').replace(/_/gu, '/') + '=')
+    const digest = 'sha256:' + [...bytes].map(byte => byte.charCodeAt(0).toString(16).padStart(2, '0')).join('')
+    return mobileAssetNamespace(digest) === path ? digest : null
+  }
+  const full = /^\/mobile\/([^/]+)\/([a-f0-9]{64})\/index\.html$/u.exec(path)
+  if (!full) return null
+  try {
+    const decoded = decodeURIComponent(full[1]!)
+    return isMobileBuildId(decoded) && encodeURIComponent(decoded) === full[1] && (buildId === undefined || decoded === buildId) ? 'sha256:' + full[2] : null
+  } catch { return null }
+}
 const sameProducer = (a: MobileWebProducer, b: MobileWebProducer | undefined) =>
   a.devicePrincipalId === b?.devicePrincipalId && a.documentId === b.documentId
 function boundary(result = false) {

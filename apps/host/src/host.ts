@@ -33,7 +33,7 @@ import { DeviceAuthority } from './device-authority.js'
 import { networkInterfaces } from 'node:os'
 import { startLocalRelay } from '@agentmux/relay/local'
 import { startRelayTransport, type RelayTransportController, type RelayLogger } from '@agentmux/relay/server'
-import { connectionOfferUrl } from '@agentmux/relay/offer'
+import { connectionLinkUrl, CONNECTION_METADATA_PATH, type ConnectionOffer } from '@agentmux/relay/offer'
 import { createInterfacePortLabels, defaultRouteInterface, mobileLinkCandidates } from './mobile-link-candidates.js'
 import { exportPublicKey } from '@agentmux/relay/e2ee'
 import { loadOrCreateRelayKeyPair } from '@agentmux/core/relay-identity'
@@ -96,7 +96,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   let mobileState: AgentMuxRpcMobileAccessState = { state: 'starting', message: '正在启动手机连接' }
   // The link for one chosen local address; candidates are read when a link is requested.
   const interfacePortLabels = createInterfacePortLabels()
-  let offerUrl: ((address?: string) => Promise<{ url: string; candidates: AgentMuxRpcMobileLinkCandidate[] }>) | undefined
+  let offerUrl: ((address?: string) => Promise<{ url: string; offer: ConnectionOffer; candidates: AgentMuxRpcMobileLinkCandidate[] }>) | undefined
   const getAuthority = (): Promise<DeviceAuthority> => {
     if (disposal) return Promise.reject(new AgentMuxError('This Host device owner is closed. Original Agents are retained.', 'CONTROL_CANCELLED'))
     if (authority) return Promise.resolve(authority)
@@ -264,7 +264,25 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
         const owner = await getAuthority()
         const keyPair = await loadOrCreateRelayKeyPair(join(dirname(options.store.path), 'agentmux-relay-keypair.json'))
         await mobileAssets.initialize(options.mobileBuildDirectory!)
-        local = await startLocalRelay({ serverId: owner.hostId, port: options.mobilePort ?? 8443, route: mobileAssets.route })
+        const linkFor = (address: string) => {
+          const endpoint = new URL(`http://${address}:${local!.port}/`).host
+          const offer: ConnectionOffer = { v: 2, serverId: owner.hostId, daemonPublicKeyB64: exportPublicKey(keyPair.publicKey), relay: { endpoint, useTls: false } }
+          return { offer, url: connectionLinkUrl(`http://${endpoint}/`, offer) }
+        }
+        local = await startLocalRelay({ serverId: owner.hostId, port: options.mobilePort ?? 8443, route: (request, response) => {
+          let path: URL
+          try { path = new URL(request.url ?? '/', 'http://localhost') } catch { mobileAssets.route(request, response); return }
+          if (path.pathname !== CONNECTION_METADATA_PATH) { mobileAssets.route(request, response); return }
+          response.setHeader('Cache-Control', 'no-store'); response.setHeader('X-Content-Type-Options', 'nosniff'); response.setHeader('Referrer-Policy', 'no-referrer')
+          if (request.method !== 'GET') { response.writeHead(405, { Allow: 'GET' }); response.end(); return }
+          try {
+            const target = new URL('http://' + request.headers.host)
+            const current = Object.values(networkInterfaces()).flat().some(value => value?.family === 'IPv4' && value.address === target.hostname)
+            if (!local || path.search || Number(target.port || 80) !== local.port || target.username || target.password || target.pathname !== '/' || target.search || target.hash || !current) throw new Error('Original listener address is unavailable')
+            const { offer } = linkFor(target.hostname)
+            response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' }); response.end(JSON.stringify(offer))
+          } catch { response.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' }); response.end('Original mobile connection description is unavailable.') }
+        } })
         const originalServer = runtime!.server
         offerUrl = async address => {
           const interfaces = networkInterfaces()
@@ -273,8 +291,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
           if (!candidates.length) throw new AgentMuxError('当前没有可用的局域网地址；Agent 会话仍可使用。', 'CONTROL_UNAVAILABLE')
           const chosen = address === undefined ? candidates[0]! : candidates.find(candidate => candidate.address === address)
           if (!chosen) throw new AgentMuxError('这个地址不是这台 Mac 当前的局域网地址；请从候选地址中选择。', 'INVALID_CONTROL_REQUEST')
-          const endpoint = `${chosen.address}:${local!.port}`
-          return { url: connectionOfferUrl(`http://${endpoint}/`, { v: 2, serverId: owner.hostId, daemonPublicKeyB64: exportPublicKey(keyPair.publicKey), relay: { endpoint, useTls: false } }), candidates }
+          return { ...linkFor(chosen.address), candidates }
         }
         const logger: RelayLogger = { child: () => logger, info: () => {}, debug: () => {}, warn: () => {} }
         relay = startRelayTransport({ logger, serverId: owner.hostId, daemonKeyPair: keyPair,

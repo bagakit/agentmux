@@ -17,7 +17,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { loadOrCreateRelayKeyPair } from './rpc-relay-keypair.js'
 import { createAgentMuxRpcRelayClient, type AgentMuxRpcRelayClient } from './public-rpc-relay.js'
-import { hasConnectionOffer, parseConnectionOfferUrl } from '@agentmux/relay/offer'
+import { hasConnectionOffer, parseConnectionOfferUrl, parseConnectionLinkUrl, readPinnedConnectionOffer } from '@agentmux/relay/offer'
 import { type KeyPair } from '@agentmux/relay/e2ee'
 import { openAgentMuxRpcHttpRequest } from './public-rpc-http.js'
 import { createConnection, Socket } from 'node:net'
@@ -86,6 +86,18 @@ export function agentMuxRpcEnvironmentCredentials(env: Readonly<Record<string, s
     throw new AgentMuxError('Managed credentials require both exact Session claim and capability.', 'MANAGED_AGENT_CONTEXT_REQUIRED')
   }
   return agentSessionId && capability ? { agentSessionId, capability } : undefined
+}
+
+/** Async discovery is opt-in through an explicit key-pin selector. Full endpoint parsing stays pure. */
+export async function resolveAgentMuxRpcEndpoint(selector?: string, env: Readonly<Record<string, string | undefined>> = process.env): Promise<AgentMuxRpcEndpoint> {
+  const value = selector ?? env.AGENTMUX_RPC_ENDPOINT
+  if (value && hasConnectionOffer(value)) {
+    let link
+    try { link = parseConnectionLinkUrl(value) }
+    catch (error) { throw new AgentMuxError(error instanceof Error ? error.message : 'Invalid Relay offer.', 'INVALID_CLI_ARGUMENT') }
+    if (link?.kind === 'pin') return { transport: 'relay', offer: await readPinnedConnectionOffer(value, link.pin) }
+  }
+  return agentMuxRpcEndpoint(selector, env)
 }
 
 export function agentMuxRpcEndpoint(selector?: string, env: Readonly<Record<string, string | undefined>> = process.env): AgentMuxRpcEndpoint {
@@ -546,7 +558,11 @@ class RpcClient implements AgentMuxRpcClient {
     }
     if (isAgentMuxRpcStream(method, rpcRecord(params))) throw new AgentMuxError('This method returns a subscription; use subscribe().', 'INVALID_CONTROL_REQUEST')
     const exchange = await this.exchange(method, params, undefined, options.signal, options)
-    try { return resultBody(method, exchange.response.result, params, options.credentials ?? this.credentials) as AgentMuxRpcResult<M> }
+    try {
+      const result = resultBody(method, exchange.response.result, params, options.credentials ?? this.credentials) as AgentMuxRpcResult<M>
+      if (method === 'device.hello' && this.endpoint.transport === 'relay' && (result as AgentMuxRpcResult<'device.hello'>).hostId !== this.endpoint.offer.serverId) throw new AgentMuxError('The encrypted reply belongs to another original Host.', 'CONTROL_PROTOCOL_ERROR')
+      return result
+    }
     catch (error) { retainUnconfirmedReply(error); throw error }
     finally { await exchange.reader.dispose(); this.readers.delete(exchange.reader) }
   }
@@ -605,7 +621,7 @@ export async function connectAgentMuxRpc(options: { endpoint?: AgentMuxRpcEndpoi
   prepareUnixConnection?: (signal: AbortSignal) => Promise<void>
 } = {}): Promise<AgentMuxRpcClient> {
   if (options.credentials) { rpcRecord(options.credentials, ['agentSessionId', 'capability']); rpcString(options.credentials.agentSessionId, 'Caller Session ID'); rpcString(options.credentials.capability, 'Caller capability') }
-  const endpoint = options.endpoint ?? agentMuxRpcEndpoint()
+  const endpoint = options.endpoint ?? await resolveAgentMuxRpcEndpoint()
   const relayKeyPair = endpoint.transport === 'relay' ? options.relayKeyPair ?? await loadOrCreateRelayKeyPair(join(homedir(), '.agentmux', 'relay-client-keypair.json')) : undefined
   return new RpcClient(endpoint, options.credentials, options.runtimeFence, relayKeyPair, options.forwarding, options.prepareUnixConnection)
 }

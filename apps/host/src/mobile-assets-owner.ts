@@ -10,6 +10,7 @@ import type { MobileAssetRelease, MobileAssetsActivateParams, MobileAssetsActiva
 import { loadMobileSnapshot, mobileCandidateDirectory, mobileDigest, MobileAssetCapacityError, MOBILE_ASSET_LIMITS, type MobileAsset, type MobileSnapshot } from './mobile-assets.js'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { isMobilePageEntry, mobilePageUnavailable, mobileResourceUnavailable } from './mobile-page-response.js'
+import { mobileAssetNamespace } from '@agentmux/core/mobile-web-codec'
 
 function acceptsGzip(value: string | undefined): boolean {
   const encodings = (value ?? '').toLowerCase().split(',').map(item => item.trim().split(';').map(part => part.trim()))
@@ -143,21 +144,26 @@ export class MobileAssetsOwner implements MobileAssetsPort {
     const entry = isMobilePageEntry(path)
     let snapshot: MobileSnapshot | undefined, file: MobileAsset | undefined
     const openCurrent = () => {
-      response.writeHead(302, { Location: this.namespace(this.active!) + 'index.html' + target.search,
+      response.writeHead(302, { Location: this.namespace(this.active!) + target.search,
         'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); response.end()
     }
     if ((path === '/' || path === '/index.html') && this.active && readable) {
       openCurrent(); return
     }
     else for (const candidate of this.retained) {
-      const prefix = this.namespace(candidate)
-      if (path.startsWith(prefix)) { snapshot = candidate; file = candidate.files.get(path.slice(prefix.length)); break }
+      const short = this.namespace(candidate)
+      const prefixes = [short, '/mobile/' + encodeURIComponent(candidate.release.buildId) + '/' + candidate.release.digest.slice(7) + '/']
+      const prefix = prefixes.find(value => path.startsWith(value))
+      if (readable && path === this.namespace(candidate) + 'index.html') {
+        response.writeHead(302, { Location: this.namespace(candidate) + target.search, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); response.end(); return
+      }
+      if (prefix) { snapshot = candidate; file = candidate.files.get(path.slice(prefix.length) || (prefix === short ? 'index.html' : '')); break }
     }
     if (!readable || !file || !snapshot) {
       if (readable && entry) {
         if (this.active) openCurrent()
-        else mobilePageUnavailable(request, response, path.startsWith('/mobile/') ? 410 : 503)
-      } else mobileResourceUnavailable(request, response, path.startsWith('/mobile/') ? 410 : 404)
+        else mobilePageUnavailable(request, response, path.startsWith('/mobile/') || path.startsWith('/m/') ? 410 : 503)
+      } else mobileResourceUnavailable(request, response, path.startsWith('/mobile/') || path.startsWith('/m/') ? 410 : 404)
       return
     }
     if (this.responseCount >= MOBILE_ASSET_LIMITS.responses) {
@@ -182,7 +188,7 @@ export class MobileAssetsOwner implements MobileAssetsPort {
     void this.send(file.bytes, response, compress).catch(() => response.destroy())
   }
   private namespace(snapshot: MobileSnapshot): string {
-    return '/mobile/' + encodeURIComponent(snapshot.release.buildId) + '/' + snapshot.release.digest.slice('sha256:'.length) + '/'
+    return mobileAssetNamespace(snapshot.release.digest)
   }
   private *chunks(bytes: Buffer): Generator<Buffer> {
     for (let offset = 0; offset < bytes.length; offset += MOBILE_ASSET_LIMITS.chunk) yield bytes.subarray(offset, offset + MOBILE_ASSET_LIMITS.chunk)

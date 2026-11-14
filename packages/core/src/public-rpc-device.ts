@@ -1,8 +1,10 @@
-import { isIP } from 'node:net'
-import { parseConnectionOfferUrl } from '@agentmux/relay/offer'
+import { parseConnectionLinkUrl } from '@agentmux/relay/offer'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
+
+// The public device codec is also consumed by the browser's encrypted hello.
+const isIPv4 = (value: string) => /^(?:0|[1-9][0-9]{0,2})(?:\.(?:0|[1-9][0-9]{0,2})){3}$/u.test(value) && value.split('.').every(octet => Number(octet) <= 255)
 
 /** Public projection of the original Host Authority. Credentials remain private. */
 export interface TrustedDevice {
@@ -76,7 +78,7 @@ export function parseAgentMuxRpcDeviceParams<M extends AgentMuxRpcDeviceMethod>(
   const keys = method === 'device.revoke' ? ['deviceId'] : method === 'device.hello' ? ['name'] : method === 'device.link' ? ['address'] : []
   const p = rpcRecord(value, keys)
   if (method === 'device.link') {
-    if (p.address !== undefined && (typeof p.address !== 'string' || isIP(p.address) !== 4)) throw new AgentMuxError('A link address must be one IPv4 address.', 'INVALID_CONTROL_REQUEST')
+    if (p.address !== undefined && (typeof p.address !== 'string' || !isIPv4(p.address))) throw new AgentMuxError('A link address must be one IPv4 address.', 'INVALID_CONTROL_REQUEST')
     return p as AgentMuxRpcDeviceParams<M>
   }
   if (Object.keys(p).length !== keys.length) throw new AgentMuxError('Device method requires its exact parameters.', 'INVALID_CONTROL_REQUEST')
@@ -116,22 +118,25 @@ export function parseAgentMuxRpcDeviceResult<M extends AgentMuxRpcDeviceMethod>(
   identifier(p.hostId, code)
   if (method === 'device.link') {
     if (typeof p.url !== 'string') fail()
-    const offer = parseConnectionOfferUrl(p.url as string)
-    if (!offer || offer.serverId !== p.hostId) fail()
+    const link = parseConnectionLinkUrl(p.url as string)
+    if (!link) fail()
     const page = new URL(p.url as string); page.hash = ''
     const relay = rpcRecord(p.relay, ['endpoint', 'useTls'], code)
-    if (p.pageUrl !== page.href || relay.endpoint !== offer!.relay.endpoint || relay.useTls !== offer!.relay.useTls) fail()
+    if (p.pageUrl !== page.href) fail()
+    if (link!.kind === 'offer') {
+      if (link!.offer.serverId !== p.hostId || relay.endpoint !== link!.offer.relay.endpoint || relay.useTls !== link!.offer.relay.useTls) fail()
+    } else if (relay.endpoint !== page.host || relay.useTls !== (page.protocol === 'https:') || page.username || page.password || page.search) fail()
     const access = rpcRecord(p.mobileAccess, ['state', 'message', 'origin'], code)
     if (!['starting', 'connected', 'disconnected', 'unavailable'].includes(access.state as string) || typeof access.message !== 'string' || access.message.length > 4096 || access.origin !== page.origin) fail()
     if (!Array.isArray(p.candidates) || p.candidates.length > 32) fail()
     const seen = new Set<string>()
     for (const raw of p.candidates as unknown[]) {
       const c = rpcRecord(raw, ['address', 'interface', 'label', 'preferred'], code)
-      if (typeof c.address !== 'string' || isIP(c.address) !== 4 || seen.has(c.address) || typeof c.interface !== 'string' || !c.interface || c.interface.length > 64 ||
+      if (typeof c.address !== 'string' || !isIPv4(c.address) || seen.has(c.address) || typeof c.interface !== 'string' || !c.interface || c.interface.length > 64 ||
         c.label !== undefined && (typeof c.label !== 'string' || !c.label || c.label.length > 128) || typeof c.preferred !== 'boolean') fail()
       seen.add(c.address as string)
     }
-    const host = new URL(`ws://${offer!.relay.endpoint}`).hostname
+    const host = new URL(`ws://${relay.endpoint}`).hostname
     if ((p.candidates as unknown[]).length && !seen.has(host)) fail()
     const requested = (params as AgentMuxRpcDeviceParams<'device.link'>).address
     if (requested !== undefined && host !== requested) fail()

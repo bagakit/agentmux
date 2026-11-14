@@ -13,7 +13,7 @@ import { writeCliResourceDocument } from './cli-resource-document.js'
 import process from 'node:process'
 import packageManifest from '../package.json' with { type: 'json' }
 import {
-  agentMuxRpcEndpoint,
+  resolveAgentMuxRpcEndpoint,
   type AgentMuxRpcClient, type AgentMuxRpcMethod, type AgentMuxRpcParams,
   type AgentMuxRpcStreamMethod, type AgentMuxRpcStreamParams
 } from './control-host.js'
@@ -248,7 +248,7 @@ async function main(): Promise<number> {
     write({ ok: result.status === 'analysed', operation: method, result }); return result.status === 'analysed' ? 0 : 2
   }
   assertAgentToolContextAvailable()
-  const endpoint = agentMuxRpcEndpoint(invocation.endpoint)
+  const endpoint = await resolveAgentMuxRpcEndpoint(invocation.endpoint)
   if (method === 'system.endpoint' && !invocation.params.inspect) {
     if (invocation.params.stdio) {
       const controller = new AbortController()

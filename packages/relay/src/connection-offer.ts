@@ -10,6 +10,9 @@ export function isLocalNetworkHost(host: string): boolean {
       parts[0] === 172 && parts[1]! >= 16 && parts[1]! <= 31 || parts[0] === 169 && parts[1] === 254)
 }
 export type ConnectionOffer = { v: 2; serverId: string; daemonPublicKeyB64: string; relay: { endpoint: string; useTls: boolean } }
+export type ConnectionPin = { daemonPublicKeyB64: string }
+export type ConnectionLink = { kind: 'offer'; offer: ConnectionOffer } | { kind: 'pin'; pin: ConnectionPin }
+export const CONNECTION_METADATA_PATH = '/.well-known/agentmux/connection'
 export function parseConnectionOffer(value: unknown): ConnectionOffer {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid connection offer.')
   const p = value as Record<string, unknown>, relay = p.relay as Record<string, unknown> | undefined
@@ -59,13 +62,14 @@ const base64urlDecode = (text: string) => {
  */
 export function hasConnectionOffer(input: string): boolean {
   const fragment = new URL(input).hash.slice(1)
-  return fragment.startsWith('offer=') || /^A[g-z0-9_-]/.test(fragment)
+  return fragment.startsWith('offer=') || /^A[g-z0-9_-]/.test(fragment) || fragment.startsWith('B')
 }
 
 /** The offer in a link, or null when the link carries none. A malformed offer fragment is refused. */
 export function parseConnectionOfferUrl(input: string): ConnectionOffer | null {
   if (!hasConnectionOffer(input)) return null
   const url = new URL(input), fragment = url.hash.slice(1)
+  if (fragment.startsWith('B')) throw new Error('This pinned connection link requires its original Host description.')
   if (fragment.startsWith('offer=')) throw new Error('This connection link format is no longer supported. Copy a new link from the original Mac.')
   if (fragment.length > MAX_FRAGMENT) throw new Error('Invalid connection link.')
   const bytes = base64urlDecode(fragment)
@@ -85,6 +89,20 @@ export function parseConnectionOfferUrl(input: string): ConnectionOffer | null {
     relay: { endpoint, useTls: url.protocol === 'https:' } })
 }
 
+/** A pin is explicit input, never an absent offer or a fabricated Host identity. */
+export function parseConnectionLinkUrl(input: string): ConnectionLink | null {
+  if (!hasConnectionOffer(input)) return null
+  const url = new URL(input), fragment = url.hash.slice(1)
+  if (fragment.startsWith('B')) {
+    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLocalNetworkHost(url.hostname)) || url.username || url.password || url.search) throw new Error('Invalid pinned connection address.')
+    if (fragment.length !== 44) throw new Error('Invalid connection pin.')
+    const bytes = base64urlDecode(fragment)
+    if (bytes.length !== 33 || bytes[0] !== 4 || base64urlEncode(bytes) !== fragment) throw new Error('Invalid connection pin.')
+    return { kind: 'pin', pin: { daemonPublicKeyB64: btoa(String.fromCharCode(...bytes.slice(1))) } }
+  }
+  return { kind: 'offer', offer: parseConnectionOfferUrl(input)! }
+}
+
 export function connectionOfferUrl(appUrl: string, offer: ConnectionOffer): string {
   const url = new URL(appUrl)
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLocalNetworkHost(url.hostname))) throw new Error('The mobile application requires HTTPS outside the local network.')
@@ -99,4 +117,24 @@ export function connectionOfferUrl(appUrl: string, offer: ConnectionOffer): stri
   const bytes = Uint8Array.from([FORMAT | (sameEndpoint ? 0 : EXPLICIT_ENDPOINT), ...key, ...text(value.serverId), ...(sameEndpoint ? [] : text(value.relay.endpoint))])
   url.hash = base64urlEncode(bytes)
   return url.href
+}
+
+/** Only a same-origin local Relay can discover its Host while retaining the complete key pin. */
+export function connectionLinkUrl(appUrl: string, offer: ConnectionOffer): string {
+  const full = connectionOfferUrl(appUrl, offer), url = new URL(full)
+  if (!isLocalNetworkHost(url.hostname) || offer.relay.endpoint !== url.host || offer.relay.useTls !== (url.protocol === 'https:')) return full
+  const key = Uint8Array.from(atob(offer.daemonPublicKeyB64), c => c.charCodeAt(0))
+  url.hash = base64urlEncode(Uint8Array.from([4, ...key]))
+  return url.href
+}
+
+/** Read public description only for an explicit complete key pin, never discover a saved connection. */
+export async function readPinnedConnectionOffer(appUrl: string, pin: ConnectionPin, signal?: AbortSignal): Promise<ConnectionOffer> {
+  const page = new URL(appUrl)
+  if (page.protocol !== 'https:' && !(page.protocol === 'http:' && isLocalNetworkHost(page.hostname)) || page.username || page.password) throw new Error('Invalid pinned connection address.')
+  const response = await fetch(new URL(CONNECTION_METADATA_PATH, page.origin), { cache: 'no-store', credentials: 'same-origin', redirect: 'error', ...(signal ? { signal } : {}) })
+  if (!response.ok || new URL(response.url).origin !== page.origin) throw new Error('The original Host connection description is unavailable.')
+  const offer = parseConnectionOffer(await response.json())
+  if (offer.daemonPublicKeyB64 !== pin.daemonPublicKeyB64 || offer.relay.endpoint !== page.host || offer.relay.useTls !== (page.protocol === 'https:')) throw new Error('The connection description does not match the original key pin and address.')
+  return offer
 }
