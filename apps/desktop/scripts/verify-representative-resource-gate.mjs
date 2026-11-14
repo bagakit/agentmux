@@ -8,6 +8,7 @@ const harness = await read('./measure-desktop-resources.mjs')
 const measure = await read('../src/main/representative-resource-probe.ts')
 const resourceProbe = await read('../src/main/resource-probe.ts')
 const main = await read('../src/main/index.ts')
+const ipc = await read('../src/main/ipc.ts')
 
 const transpile = source => ts.transpileModule(source, {
   compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext }
@@ -106,14 +107,29 @@ const reportPath = 'private-report.json'
 const outcome = { status: 'budget-exceeded', evidence: { rendererPid } }
 const env = { AGENTMUX_DESKTOP_RESOURCE_REPORT: reportPath, AGENTMUX_DESKTOP_RESOURCE_WORKFACE: fixture }
 const window = { webContents: {} }, runtime = {}, configStore = {}
+const terminalView = { runId: 'original-run' }
+const terminalSignal = new AbortController().signal
+const terminalReadBinding = syntax(ipc, node => ts.isExpressionStatement(node) &&
+  node.expression.getText().startsWith('args.resourceProbeTerminalReader?.('))
+let resourceProbeTerminalReader
+await new AsyncFunction('args', 'controlBridge', 'AGENTMUX_CONTROL_SCHEMA_VERSION', 'mintObjectId',
+  transpile(terminalReadBinding))({ resourceProbeTerminalReader: read => { resourceProbeTerminalReader = read } },
+  { execute: async (request, signal) => {
+    assert.equal(request.operation, 'inspect.region')
+    assert.deepEqual(request.target, { kind: 'region', regionId: 'original-region' })
+    assert.equal(signal, terminalSignal)
+    return { operation: 'inspect.region', region: { terminalView } }
+  } }, 1, () => 'fixture-request')
+assert.equal(await resourceProbeTerminalReader('original-region', terminalSignal), terminalView)
 let receipt
 const entry = declaration(resourceProbe, 'runDesktopResourceProbe')
 const dependency = "await import('./representative-resource-probe.js')"
 assert.equal(entry.split(dependency).length, 2)
 const runDesktopResourceProbe = await new AsyncFunction('process', 'fixtureMeasure', 'resourceIdentity', 'writeFile',
   transpile(entry.replace(/^export /u, '').replace(dependency, '{ measureRepresentativeWorkface: fixtureMeasure }')) + '\nreturn runDesktopResourceProbe')(
-    { env, pid: 42 }, async (seenWindow, seenRuntime, seenFixture) => {
+    { env, pid: 42 }, async (seenWindow, seenRuntime, seenFixture, inspectTerminal) => {
       assert.equal(seenWindow, window); assert.equal(seenRuntime, runtime); assert.equal(seenFixture, fixture)
+      assert.equal(inspectTerminal, resourceProbeTerminalReader)
       return outcome
     }, () => ({ agentmuxCommit: 'original-identity' }), async (path, data) => {
       assert.equal(path, reportPath)
@@ -122,8 +138,8 @@ const runDesktopResourceProbe = await new AsyncFunction('process', 'fixtureMeasu
 const mainCall = syntax(main, node => ts.isIfStatement(node) && node.expression.getText().startsWith('await runDesktopResourceProbe('))
 let quit = false
 await new AsyncFunction('runDesktopResourceProbe', 'window', 'runtime', 'configStore', 'app', 'process', 'appReadyAtMs',
-  'windowCreationStartedAtMs', 'rendererLoadedAtMs', mainCall)(
-  runDesktopResourceProbe, window, runtime, configStore, { quit: () => { quit = true } }, { env }, 1, 2, 3)
+  'windowCreationStartedAtMs', 'rendererLoadedAtMs', 'resourceProbeTerminalReader', mainCall)(
+  runDesktopResourceProbe, window, runtime, configStore, { quit: () => { quit = true } }, { env }, 1, 2, 3, resourceProbeTerminalReader)
 assert.equal(quit, true)
 assert.deepEqual(receipt.representative, outcome)
 assert.equal(receipt.mainPid, 42)
