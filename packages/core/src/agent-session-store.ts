@@ -1,3 +1,4 @@
+import { parseAgentCreationCancellation, parseAgentCreationCancellationRecord, type AgentCreationCancellation } from './agent-creation-cancellation.js'
 import { MAX_ID_BYTES, MAX_PATH_BYTES, record, string, timestamp, positiveInteger, runRef, normalizeSessionHistoryMetadata, launchOptionSelection, nativeHandle, nativeConfirmation, nativeConfirmationMatchesSession, parseAgentCreationFact, normalizeAgentSession, normalizeInteractionOperationReceipt } from './agent-session-codec.js'
 import { agentLifecycleOperationIdentity } from './agent-session-identity.js'
 import { parseCreationResolveInput, parseCreationResolution, type AgentMuxCreationResolveInput, type AgentMuxCreationResolution } from './agent-creation-resolution.js'
@@ -413,6 +414,8 @@ export type AgentMuxAgentSessionStore = {
    */
   recordRestartAdmission(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, mode?: 'continue' | 'restore'): Promise<AgentMuxStoredAgentSession>
   prepareCreate(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'create' }>, seed: AgentMuxPreparedCreation, dispatch?: AgentMuxPreparedAgentDispatch): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'create' }>>
+  readCreationCancellation(createOperationId: string): Promise<AgentCreationCancellation | null>
+  admitCreationCancellation(input: AgentCreationCancellation): Promise<void>
   loadClosedCreation(agentSessionId: string): Promise<AgentMuxClosedCreation | null>
   admitCreationResolution(original: AgentMuxClosedCreation, request: AgentMuxCreationResolveInput, claim: AgentMuxLifecycleClaim & { reservationId: string }, authority?: AgentMuxCreationResolutionAdmission): Promise<AgentMuxClosedCreation>
   closeCreation(original: AgentMuxClosedCreation, runtime: AgentMuxCreationRuntime): Promise<AgentMuxClosedCreation>
@@ -518,6 +521,14 @@ function promptAdmissionRecords(session: AgentMuxStoredAgentSession | null | und
       nativeSessionId: session.nativeHandle.sessionId, nativeTurnId: claim.native.turnId, promptSubmissionId: inputId }
   }
   return structuredClone(originals)
+}
+
+/** A cancellation and a first-input claim serialize at this original Session owner. Receipt settlement and independent later inputs stay writable. */
+function assertInitialCreationInputNotCancelled(previous: AgentMuxStoredAgentSession | null | undefined, next: AgentMuxStoredAgentSession | null | undefined, cancellation: AgentCreationCancellation | null | undefined): void {
+  if (cancellation && newPromptClaim(previous, next) && next?.initialInput?.key &&
+    next.agentSessionId === cancellation.agentSessionId && next.creation?.createOperationId === cancellation.createOperationId &&
+    isDeepStrictEqual(next.promptCompletionAdmission?.inputKey, next.initialInput.key)) throw new AgentMuxError(
+      'The original creation first input was cancelled before admission. Independent inputs remain available.', 'AGENT_CREATION_CANCELLED')
 }
 
 function newPromptClaim(previous: AgentMuxStoredAgentSession | null | undefined, next: AgentMuxStoredAgentSession | null | undefined): boolean {
@@ -1992,6 +2003,14 @@ type MemoryCapturedHistory = { stream: AgentCapturedTimelinePage['stream'];
 export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStore {
   async readInputEpoch(): Promise<string | undefined> { return undefined }
 
+  private readonly creationCancellations = new Map<string, AgentCreationCancellation>()
+  async readCreationCancellation(createOperationId: string) { return structuredClone(this.creationCancellations.get(createOperationId) ?? null) }
+  async admitCreationCancellation(input: AgentCreationCancellation) {
+    parseAgentCreationCancellation({ createOperationId: input.createOperationId, agentSessionId: input.agentSessionId, operationId: input.operationId })
+    const previous = this.creationCancellations.get(input.createOperationId)
+    if (previous && !isDeepStrictEqual(previous, input)) throw new AgentMuxError('The original creation has another cancellation. Keep its original control.', 'AGENT_CREATION_CANCELLATION_CONFLICT')
+    this.creationCancellations.set(input.createOperationId, structuredClone(input))
+  }
   private readonly closedCreations = new Map<string, AgentMuxClosedCreation>()
   private readonly sessionRunIds = new Set<string>()
   private retiredRunIds = new Set<string>()
@@ -2071,6 +2090,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
 
   private stageSession(id: string, next: AgentMuxStoredAgentSession | null): () => void {
     const previous = this.sessions.get(id)
+    assertInitialCreationInputNotCancelled(previous, next, next?.creation?.createOperationId ? this.creationCancellations.get(next.creation.createOperationId) : undefined)
     const originals = [...promptAdmissionRecords(previous), ...promptAdmissionRecords(next, newPromptClaim(previous, next))]
     const writes = new Map<string, AgentPromptSubmissionRecord>()
     for (const value of originals) {
@@ -2888,6 +2908,28 @@ function sessionRuns(...values: Array<AgentMuxStoredAgentSession | null>): Agent
 }
 
 export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore {
+  async readCreationCancellation(createOperationId: string): Promise<AgentCreationCancellation | null> {
+    await this.tail
+    return await this.withReadDatabase(db => {
+      if (!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='creation_cancellations'").get()) return null
+      const row = db.prepare('SELECT json FROM creation_cancellations WHERE creation_operation=?').get(createOperationId)
+      if (!row) return null
+      const value = parseAgentCreationCancellationRecord(JSON.parse(String(row.json)))
+      if (value.createOperationId !== createOperationId || typeof value.runtimeId !== 'string' || !value.runtimeId) throw new AgentMuxError('The original creation cancellation is unreadable.', 'AGENT_CREATION_CANCELLATION_UNCONFIRMED')
+      return value
+    }, () => null)
+  }
+  async admitCreationCancellation(input: AgentCreationCancellation) {
+    parseAgentCreationCancellation({ createOperationId: input.createOperationId, agentSessionId: input.agentSessionId, operationId: input.operationId })
+    await this.enqueue(async () => {
+      this.db.exec('CREATE TABLE IF NOT EXISTS creation_cancellations (creation_operation TEXT PRIMARY KEY, control_operation TEXT NOT NULL UNIQUE, json TEXT NOT NULL)')
+      const row = this.db.prepare('SELECT json FROM creation_cancellations WHERE creation_operation=?').get(input.createOperationId)
+      if (row && !isDeepStrictEqual(JSON.parse(String(row.json)), input)) throw new AgentMuxError('The original creation has another cancellation. Keep its original control.', 'AGENT_CREATION_CANCELLATION_CONFLICT')
+      if (!row) this.db.prepare('INSERT INTO creation_cancellations(creation_operation,control_operation,json) VALUES(?,?,?)').run(input.createOperationId, input.operationId, JSON.stringify(input))
+      this.dirty = true
+    }, undefined, input.agentSessionId)
+  }
+
   async readInputEpoch(): Promise<string | undefined> {
     await this.tail
     return await this.withReadDatabase(db => readInputNamespace(db).inputEpoch, () => undefined)
@@ -4363,6 +4405,10 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     const id = session.agentSessionId
     const current = this.sessionMetadata(db, id)
     const createsInput=!receipt&&captureNewInput&&newPromptClaim(current??undefined,session)
+    if (createsInput && session.initialInput?.key && isDeepStrictEqual(session.promptCompletionAdmission?.inputKey, session.initialInput.key) && session.creation?.createOperationId && db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='creation_cancellations'").get()) {
+      const cancellation = db.prepare('SELECT json FROM creation_cancellations WHERE creation_operation=?').get(session.creation.createOperationId)
+      if (cancellation) assertInitialCreationInputNotCancelled(current, session, parseAgentCreationCancellationRecord(JSON.parse(String(cancellation.json))))
+    }
     let namespace:ReturnType<typeof readInputNamespace>={}
     try{namespace=readInputNamespace(db)}catch(error){
       if(createsInput)throw new AgentMuxError('The original input namespace is unconfirmed. Keep this original request and inspect its owner.','AGENT_PROMPT_INPUT_UNCONFIRMED','unknown')

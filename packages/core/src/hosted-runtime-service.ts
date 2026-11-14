@@ -1,3 +1,4 @@
+import { parseAgentCreationCancellation } from './agent-creation-cancellation.js'
 import { parseCreationResolveInput } from './agent-creation-resolution.js'
 import { parseCreationInspection } from './agent-creation-inspection.js'
 import { parseTerminalCreationRetire, parseTerminalCreationInspect } from './terminal-creation.js'
@@ -285,6 +286,11 @@ export class AgentMuxHostedRuntimeService {
       if (invocation.args.length > 1) throw new AgentMuxError('Host environment reads accept zero arguments or one exact Agent Session selector.', 'INVALID_CONTROL_REQUEST')
       if (invocation.args.length === 1) invocation.args[0] = parseHostEnvironmentSelector(invocation.args[0])
     }
+    if (invocation.method === 'cancelAgentCreation' || invocation.method === 'inspectAgentCreationCancellation') {
+      if (context.caller || !context.principal || !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError('Creation cancellation requires the original transport-approved person/device.', 'CONTROL_PERMISSION_DENIED')
+      if (invocation.args.length !== 1) throw new AgentMuxError('Control one exact original creation.', 'INVALID_CONTROL_REQUEST')
+      invocation.args[0] = parseAgentCreationCancellation(invocation.args[0])
+    }
     if (invocation.method === 'resolveAgentCreation') {
       if (context.caller || !context.principal || !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError('Explicit creation resolution requires its original transport-approved person/device.', 'CONTROL_PERMISSION_DENIED')
       if (invocation.args.length !== 1) throw new AgentMuxError('Resolve one exact original creation.', 'INVALID_CONTROL_REQUEST')
@@ -467,7 +473,7 @@ export class AgentMuxHostedRuntimeService {
         ...(context.signal ? { requestSignal: context.signal } : {}),
         ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {})
       }
-      if (invocation.method === 'continueAgentCreation' || invocation.method === 'resolveAgentCreation') {
+      if (invocation.method === 'continueAgentCreation' || invocation.method === 'resolveAgentCreation' || invocation.method === 'cancelAgentCreation') {
         await context.assertCurrent?.()
         context.signal?.throwIfAborted(); this.assertFence(p.fence)
       }
