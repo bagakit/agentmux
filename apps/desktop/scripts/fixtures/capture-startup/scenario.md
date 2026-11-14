@@ -10,7 +10,9 @@ with the exact pre-optimization Git `ref`. A moving branch, invented tree, ident
 candidate or stale baseline fails. Baseline and candidate each build their own production
 Main, shared contracts, preload, screenshot Renderer and annotation editor from their own
 Git tree. The fixture driver may be shared, but every production input records its actual
-consumed hash. Mixing an old Main with the current Renderer is not a complete A/B proof.
+consumed hash. Workspace packages reached through dependency links are labeled as shared
+workspace dependencies rather than misattributed to the baseline Git tree. Mixing an old
+Main with the current Renderer is not a complete A/B proof.
 
 The production mutation suite removes window/native overlap, skips current-input readiness,
 strands an early load on cancel, reorders background delivery, drops the final deferred
