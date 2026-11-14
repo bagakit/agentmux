@@ -1,5 +1,5 @@
 import { AgentMuxError, matchesScheduledInputSource, projectContinuousProgressInput, type ContinuousProgressLoop, type ContinuousProgressInputReference,
-  type ContinuousProgressInputReading, type AgentPromptSubmissionRecord, type AgentFuturePromptIntent, type ScheduleHistoryQuery } from '@agentmux/core'
+  type ContinuousProgressInputReading, type AgentPromptSubmissionRecord, type AgentFuturePromptIntent, type ScheduleHistoryQuery, type ScheduleHistoryPage } from '@agentmux/core'
 import { sameAutomaticInputSource } from '@agentmux/core/automatic-input-source'
 import type { GoalExecutionClient } from './goal-runtime.js'
 
@@ -32,7 +32,7 @@ export function assertScheduledInputSource(loop: ContinuousProgressLoop, referen
   }
 }
 
-export async function readOriginalScheduledHistory(loop: ContinuousProgressLoop, query: ScheduleHistoryQuery, client: GoalExecutionClient, signal?: AbortSignal) {
+export async function readOriginalScheduledHistory(loop: ContinuousProgressLoop, query: ScheduleHistoryQuery, client: GoalExecutionClient, signal?: AbortSignal): Promise<Pick<ScheduleHistoryPage, 'coverage' | 'entries' | 'nextCursor'>> {
   const published = new Map<string, string | null>()
   for (const { intentId, operationId } of publishedScheduleDefinitions(loop)) {
     const current = published.get(intentId)
