@@ -9,6 +9,15 @@ import { join } from 'node:path'
 import { LocalExecutionHost } from '@agentmux/core'
 import { AgentMuxNotebookStore } from '@agentmux/core/notebook-store'
 import { createWorkspaceLayout } from '@agentmux/layout'
+const canvasModule = vi.hoisted(() => ({ loads: 0, failNext: false }))
+vi.mock('../src/renderer/src/components/NoteCanvas', async importOriginal => {
+  canvasModule.loads++
+  if (canvasModule.failNext) {
+    canvasModule.failNext = false
+    throw new Error('Notebook graph module unavailable')
+  }
+  return importOriginal()
+})
 vi.mock('react-resizable-panels', async () => { const { createRequire } = await import('node:module'); return createRequire(import.meta.url)('../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js') })
 vi.mock('../src/renderer/src/monaco', () => ({}))
 vi.mock('@monaco-editor/react', () => ({ default: () => <textarea aria-label="Original source editor" /> }))
@@ -79,10 +88,19 @@ async function graphReady() { await vi.waitFor(() => { const caption = dom.conta
 
 it('opens the current Notebook Graph directly beside an open page and returns to the same dirty original workface', async () => {
   await dom.render(<Recall />); await noteReady()
+  expect(canvasModule.loads).toBe(0)
   expect(api.notebooks.graph).not.toHaveBeenCalled()
   await act(async () => { editor().view.focus(); editor().commands.setTextSelection(editor().state.doc.content.size - 1); editor().commands.insertContent(' Unsaved research') })
   const before = useAppStore.getState(), draft = before.documents[sourceKey], selection = before.recallZoneSelection, tabs = before.tabs, blockSelections = before.noteBlockSelections
-  await dom.click('.recall-directory-graph'); await graphReady()
+  canvasModule.failNext = true
+  await dom.click('.recall-directory-graph')
+  await vi.waitFor(() => expect(dom.container.textContent).toContain('Could not open the Notebook graph.'))
+  expect(canvasModule.loads).toBe(1)
+  expect(api.notebooks.graph).not.toHaveBeenCalled()
+  expect(useAppStore.getState().documents[sourceKey]).toBe(draft)
+  const retry = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Retry graph')!
+  await act(async () => retry.click()); await graphReady()
+  expect(canvasModule.loads).toBe(2)
   expect(useAppStore.getState().recallNoteId).toBe('source'); expect(useAppStore.getState().recallNotebookId).toBe('quick-notes')
   expect(useAppStore.getState().recallZoneSelection).toBe(selection); expect(useAppStore.getState().tabs).toBe(tabs)
   expect(useAppStore.getState().documents[sourceKey]).toBe(draft); expect(useAppStore.getState().dirtyDocuments[sourceKey]).toBe(true)
