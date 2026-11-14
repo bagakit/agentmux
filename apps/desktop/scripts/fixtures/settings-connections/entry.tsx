@@ -7,6 +7,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import type { SessionSnapshot } from '../../../src/shared/contracts'
 import type { HostConfig, HostCreationTrustSnapshot } from '../../../src/shared/contracts'
+import type { DesktopHostRouteTarget } from '../../../src/shared/host-routes'
 import { SettingsPanel } from '../../../src/renderer/src/components/SettingsPanel'
 import { SettingsNavigation } from '../../../src/renderer/src/components/SettingsNavigation'
 import type { SettingsPageId } from '../../../src/renderer/src/components/settings/settings-modules'
@@ -88,11 +89,29 @@ api.hosts.upgradeCheck = async host => {
   const expected = { targetDigest: 'c'.repeat(64), runtimeId: host.kind === 'ssh' ? host.runtimeId ?? 'controlled-target-runtime' : 'controlled-local-runtime',
     ownerInstanceId: 'controlled-core-instance', processId: 42000, startTicks: '123', candidateDigest: 'd'.repeat(64),
     nativeInstanceId: 'controlled-native-instance', nativeProcessId: 42001, nativeStartTicks: '456' }
-  return { input: structuredClone(host), eligible: false, reason: 'unverified', detail: 'An original operation is awaiting verification.',
+  return { input: structuredClone(host), current: { state: 'unavailable', observedAt: Date.now(), code: 'CONTROLLED_CURRENT_UNCONFIRMED', detail: 'Controlled current deployment observation is unavailable.' }, eligible: false, reason: 'unverified', detail: 'An original operation is awaiting verification.',
     candidate: { digest: expected.candidateDigest, sourceCommit: 'e'.repeat(40), protocolVersion: 22 },
     latestOperation: { input: structuredClone(host), operationId: 'controlled-original-upgrade', expected, status: 'unknown', stage: 'verifying',
       detail: 'Original operation result is unconfirmed.', updatedAt: Date.now() - 90_000 } } satisfies RemoteCoreUpgradeCheck
 }
+api.executors.discover = async hostId => {
+  calls.push({ kind: 'controlled-executor-discovery', input: { hostId } })
+  return { routeHostId: hostId, runtimeId: 'controlled-executor-runtime', executors: [
+    { executorId: 'shared', label: 'Remote Agent', providerId: 'claude', command: _historyFixturePath("remote/claude"), configRevision: 'controlled-shared-revision', source: 'registered', availability: 'available' },
+    { executorId: 'remote-only', label: 'Remote exclusive Agent', providerId: 'codex', command: _historyFixturePath("remote/exclusive"), configRevision: 'controlled-exclusive-revision', source: 'registered', availability: 'available' }
+  ] }
+}
+// Controlled public route DTOs let the real route editor render its saved-connection picker.
+// No route write, SSH connection, device trust or physical network observation is performed.
+api.hostRoutes.call = (async (target: DesktopHostRouteTarget, method: string) => {
+  calls.push({ kind: 'controlled-host-route', input: { target: structuredClone(target), method } })
+  const identity = { runtimeId: target.expectedRuntimeId ?? `${target.hostId}-controlled-runtime`, publicKey: 'controlled-route-key', fingerprint: 'f'.repeat(64) }
+  if (method === 'route.identity') return identity
+  if (method === 'route.inspect') return { identity, revision: 'controlled-route-revision', operation: null, routes: [], grants: [] }
+  if (method === 'route.edges') return { identity, actor: { source: identity, kind: 'user', id: 'controlled-preview-user' },
+    edges: [{ edgeId: 'D', label: 'Build node', kind: 'ssh', runtimeId: 'controlled-build-runtime' }], observedAt: Date.now() }
+  throw new Error('Controlled route preview only reads identity, policy and saved connections. No route write was sent.')
+}) as typeof api.hostRoutes.call
 // Controlled metadata for real application UI. Domain transfer/verification is proved separately through actual connectors.
 const applications = { configurations: [] as ApplicationAccessConfiguration[], operations: [] as ApplicationAccessOperation[], plans: [] as ApplicationAccessPlan[] }
 api.applications.call = (async (method: string, input: Record<string, unknown>) => {
