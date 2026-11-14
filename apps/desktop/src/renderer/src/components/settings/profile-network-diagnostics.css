@@ -1,0 +1,18 @@
+.profile-network-diagnostics { min-width: 0; }
+.profile-network-diagnostics__heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.profile-network-diagnostics__heading h4 { margin: 0; }
+.profile-network-diagnostics__facts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; margin: 10px 0 6px; border: 1px solid var(--line-soft); border-radius: 7px; overflow: hidden; }
+.profile-network-diagnostics__facts > div { display: grid; grid-template-columns: 108px minmax(0, 1fr); align-items: baseline; gap: 8px; padding: 8px 10px; }
+.profile-network-diagnostics__facts > div + div { border-top: 1px solid var(--line-soft); }
+.profile-network-diagnostics__facts dt { color: var(--text-3); font-size: 11px; }
+.profile-network-diagnostics__facts dd { margin: 0; overflow-wrap: anywhere; font-size: 12px; }
+.profile-network-diagnostics__notice { color: var(--text-2); font-size: 11px; line-height: 1.5; }
+.profile-network-diagnostics__history { margin-top: 10px; min-width: 0; font-size: 11px; }
+.profile-network-diagnostics__history summary { cursor: pointer; color: var(--text-2); }
+.profile-network-diagnostics__history ol { list-style: none; padding: 0; margin: 7px 0; }
+.profile-network-diagnostics__history li + li { border-top: 1px solid var(--line-soft); }
+.profile-network-diagnostics__history li button { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; width: 100%; padding: 8px 0; background: transparent; color: var(--text-2); border: 0; cursor: pointer; text-align: left; }
+.profile-network-diagnostics__history li button span { overflow-wrap: anywhere; }
+.profile-network-diagnostics__history li button:hover { color: var(--text); }
+.profile-network-diagnostics__history li button:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.profile-network-diagnostics__history > .browser-profile-editor__link + .browser-profile-editor__link { margin-left: 10px; }

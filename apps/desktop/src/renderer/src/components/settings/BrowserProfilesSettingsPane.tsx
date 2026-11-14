@@ -15,6 +15,7 @@ import { PROFILE_HUES, ProfileMark, profileTone, assignProfileHues } from '../Pr
 import { BrowserProfileLibrary } from './BrowserProfileLibrary'
 import { BrowserProfileTrash } from './BrowserProfileTrash'
 import { ProfileExitCheck, ProfileNetworkRoute, ProfileProxySignIn } from './BrowserProfileNetwork'
+import { ProfileNetworkDiagnostics } from './ProfileNetworkDiagnostics'
 import { ProfileEnvironmentEditor } from './ProfileEnvironmentEditor'
 import { BrowserProfileOrganization } from './BrowserProfileOrganization'
 import * as Menu from '../HoverDropdownMenu'
@@ -374,6 +375,7 @@ function ProfileEditor({ assignment, profile, revision, uses, busy, run, error, 
 
       {/* A reading belongs to the route and check address that produced it, including late results. */}
       <ProfileExitCheck key={JSON.stringify([profile.network ?? null, exitCheckUrl])} profile={profile} address={exitCheckUrl} />
+      <ProfileNetworkDiagnostics profile={profile} />
 
       <section className="browser-profile-editor__section" aria-label="In use">
         <h4>In use</h4>
