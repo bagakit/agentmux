@@ -1,6 +1,7 @@
 import { parseAppearanceObservation } from './public-rpc-settings-observation.js'
 import { connectHostedAgentMux, type AgentMuxHostedBootstrap, type AgentMuxHostedInvocation,
   type AgentMuxHostedRpcPort, type AgentMuxHostedOutputRpcPort, type AgentMuxHostedSubscription } from './hosted.js'
+import type { AgentMuxHostedSessionProjection } from './hosted-session-summary.js'
 import { AgentMuxError, AgentMuxRpcError, parseRpcRequest, parseRpcResponse, rpcRecord,
   rpcResponseError } from './public-rpc-http.js'
 import { createAgentMuxRpcRelayClient, type AgentMuxRpcRelayClient, type AgentMuxRpcRelayOptions, type AgentMuxRpcRelayReader } from './public-rpc-relay.js'
@@ -96,7 +97,7 @@ export class HostedRelayRpcPort implements AgentMuxHostedRpcPort {
     })
   }
 
-  call(method: 'runtime.bootstrap', params: { consumerId: string }): Promise<AgentMuxHostedBootstrap>
+  call(method: 'runtime.bootstrap', params: { consumerId: string; sessions?: AgentMuxHostedSessionProjection }): Promise<AgentMuxHostedBootstrap>
   call(method: 'runtime.invoke', params: { consumerId: string; invocation: AgentMuxHostedInvocation }, options?: { signal?: AbortSignal }): Promise<{ value: unknown }>
   call(method: 'runtime.release-consumer', params: { consumerId: string }): Promise<{ released: boolean }>
   async call(method: string, params: object, options?: { signal?: AbortSignal }): Promise<never> {
@@ -167,14 +168,14 @@ export class HostedRelayRpcPort implements AgentMuxHostedRpcPort {
   }
 }
 
-export async function connectRelayHostedClient(options: AgentMuxRpcRelayOptions & { name: string; signal: AbortSignal }) {
+export async function connectRelayHostedClient<P extends AgentMuxHostedSessionProjection = 'full'>(options: AgentMuxRpcRelayOptions & { name: string; signal: AbortSignal; sessions?: P }) {
   const rpc = new HostedRelayRpcPort(options)
   const abort = () => rpc.dispose()
   options.signal.addEventListener('abort', abort, { once: true })
   try {
     options.signal.throwIfAborted()
     await rpc.hello(options.name)
-    const client = await connectHostedAgentMux({ rpc, forwardRpc: (method, params, context) => rpc.forward(method, params, context),
+    const client = await connectHostedAgentMux({ rpc, ...(options.sessions === undefined ? {} : { sessions: options.sessions }), forwardRpc: (method, params, context) => rpc.forward(method, params, context),
       subscribeRpc: (method, params, handlers) => rpc.subscribePublic(method, params, handlers) })
     const dispose = client.dispose.bind(client)
     client.dispose = async () => {

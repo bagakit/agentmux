@@ -208,13 +208,13 @@ export function parseHostedTransferChunk(value: unknown): AgentMuxHostedTransfer
 }
 export function parseHostedMessageQueuePath(value: unknown): string { return wireString(value) }
 
-export function parseHostedBootstrap(value: unknown): import('./hosted-client-contract.js').AgentMuxHostedBootstrap {
+export function parseHostedBootstrap(value: unknown, projection: import('./hosted-session-summary.js').AgentMuxHostedSessionProjection = 'full'): import('./hosted-client-contract.js').AgentMuxHostedBootstrap {
   const p = wireRecord(value, ['owner', 'connection', 'storePath', 'hostProcessId', 'catalog', 'sessions', 'messageQueuePath'])
   parseHostedRuntimeOwnerIdentity(p.owner); wireCount(p.hostProcessId); parseHostedMessageQueuePath(p.messageQueuePath)
   if (p.storePath !== null) wireString(p.storePath)
   if (!Array.isArray(p.sessions) || !Array.isArray(p.catalog)) throw new AgentMuxError(
     'Runtime bootstrap is malformed.', 'CONTROL_PROTOCOL_ERROR')
-  for (const session of p.sessions) parseHostedAgentSessionRead(session, (session as { agentSessionId: string }).agentSessionId)
+  for (const session of p.sessions) parseHostedAgentSessionRead(session, (session as { agentSessionId: string }).agentSessionId, projection)
   for (const entry of p.catalog) {
     const route = (entry as import('./types.js').AgentCatalogEntry | null)?.capabilities?.asyncQuestionReply
     if (route !== undefined && route !== 'native-input') throw new AgentMuxError(
@@ -224,11 +224,26 @@ export function parseHostedBootstrap(value: unknown): import('./hosted-client-co
   return p as unknown as import('./hosted-client-contract.js').AgentMuxHostedBootstrap
 }
 /** Bind an exact metadata reply to its request; the Core owns the public Session projection. */
-export function parseHostedAgentSessionRead(value: unknown, agentSessionId: string): import('./types.js').AgentMuxAgentSession | null {
+export function parseHostedAgentSessionRead(value: unknown, agentSessionId: string,
+  projection: import('./hosted-session-summary.js').AgentMuxHostedSessionProjection = 'full'): import('./types.js').AgentMuxAgentSession | null {
   if (value === null) return null
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new AgentMuxError(
     'The original Session metadata reply is malformed.', 'CONTROL_PROTOCOL_ERROR')
   const session = value as Record<string, unknown>
+  if (projection === 'summary') {
+    if (session.sessionProjection !== 'summary') throw new AgentMuxError('The Host did not supply the requested Session summary.', 'CONTROL_PROTOCOL_ERROR')
+    if (session.promptCompletionAdmission !== undefined) {
+      if (!session.promptCompletionAdmission || typeof session.promptCompletionAdmission !== 'object' || Array.isArray(session.promptCompletionAdmission)) throw new AgentMuxError('The Session admission summary is malformed.', 'CONTROL_PROTOCOL_ERROR')
+      const admission = session.promptCompletionAdmission as Record<string, unknown>
+      if (admission.intent !== undefined) throw new AgentMuxError('Session summaries cannot carry frozen prompt bodies.', 'CONTROL_PROTOCOL_ERROR')
+      if (admission.intentSummary !== undefined) {
+        const intent = wireRecord(admission.intentSummary, ['run', 'ownerInstanceId', 'planKind', 'execution', 'promptBytes'])
+        wireString(wireRecord(intent.run, ['runId']).runId); wireString(intent.ownerInstanceId); wireCount(intent.promptBytes)
+        if (!['single-phase', 'render-then-submit', 'native-rpc', 'runtime-launch'].includes(String(intent.planKind))) throw new AgentMuxError('The Session prompt plan summary is malformed.', 'CONTROL_PROTOCOL_ERROR')
+        if (intent.execution !== undefined && intent.execution !== 'default' && intent.execution !== 'immediate') throw new AgentMuxError('The Session prompt execution summary is malformed.', 'CONTROL_PROTOCOL_ERROR')
+      }
+    }
+  } else if (session.sessionProjection !== undefined) throw new AgentMuxError('An exact Session read must retain its full projection.', 'CONTROL_PROTOCOL_ERROR')
   if (session.kind !== 'agent' || session.agentSessionId !== agentSessionId ||
       ['hookBindingId', 'hookToken', 'nativeTurnEnds', 'interactionOperations', 'continuityExecutors', 'activityCommit', 'futurePromptIntents'].some(key => Object.hasOwn(session, key))) throw new AgentMuxError(
     'The Session metadata reply does not match its original public identity.', 'CONTROL_PROTOCOL_ERROR')

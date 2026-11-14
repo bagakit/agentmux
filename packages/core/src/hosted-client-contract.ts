@@ -5,6 +5,7 @@ import type { AgentCatalogEntry, AgentMuxAgentSession, AgentMuxClientEvent, Agen
   AgentSessionHistoryObservation, AgentSessionHistoryObservationHandle } from './types.js'
 import type { AgentMuxRpcStreamParams } from './public-rpc.js'
 import type { AgentMuxRpcSubscriptionOptions } from './public-rpc-client.js'
+import type { AgentMuxHostedSession, AgentMuxHostedSessionProjection } from './hosted-session-summary.js'
 
 /** The finite SDK surface delegated by a Client to the single semantic Host. */
 export const AGENTMUX_HOSTED_METHODS = [
@@ -188,7 +189,7 @@ type DelegatedMethods = { [M in AgentMuxHostedMethod]:
 export type AgentMuxHostedOutputObservation = Awaited<ReturnType<AgentMuxClient['observeAgentOutput']>>
 
 /** Metadata and Session values are read projections. No Provider implementation or Store lives here. */
-export type AgentMuxHostedClient = DelegatedMethods & {
+export type AgentMuxHostedClient<P extends AgentMuxHostedSessionProjection = 'full'> = DelegatedMethods & {
   readonly providers: { catalog(): AgentCatalogEntry[]; get(id: string): { catalog: AgentCatalogEntry } }
   connect(): Promise<void>
   dispose(): Promise<void>
@@ -203,9 +204,9 @@ export type AgentMuxHostedClient = DelegatedMethods & {
   disconnect(): void
   runtimeIdentity(): AgentMuxRuntimeIdentity
   catalog(): AgentCatalogEntry[]
-  agentSessions(): AgentMuxAgentSession[]
-  agentSession(id: string): AgentMuxAgentSession
-  resolveAgentSession(lookup: Parameters<AgentMuxClient['resolveAgentSession']>[0]): AgentMuxAgentSession
+  agentSessions(): AgentMuxHostedSession<P>[]
+  agentSession(id: string): AgentMuxHostedSession<P>
+  resolveAgentSession(lookup: Parameters<AgentMuxClient['resolveAgentSession']>[0]): AgentMuxHostedSession<P>
   agentMessageQueuePath(): string
   observeAgentOutput(...args: Parameters<AgentMuxClient['observeAgentOutput']>): Promise<AgentMuxHostedOutputObservation>
   observeSessionHistory(id: string, listener: (observation: AgentSessionHistoryObservation) => void,
@@ -234,13 +235,13 @@ export type AgentMuxHostedSubscribeRpc = <M extends import('./public-rpc.js').Ag
   handlers: import('./public-rpc-client.js').AgentMuxRpcSubscriptionOptions<M>
 ) => Promise<import('./public-rpc-client.js').AgentMuxRpcSubscription>
 
-export type AgentMuxHostedBootstrap = {
+export type AgentMuxHostedBootstrap<P extends AgentMuxHostedSessionProjection = 'full'> = {
   owner: AgentMuxRuntimeOwnerIdentity
   connection: Extract<AgentMuxClientEvent, { type: 'connection-state' }> | null
   storePath: string | null
   hostProcessId: number
   catalog: AgentCatalogEntry[]
-  sessions: AgentMuxAgentSession[]
+  sessions: AgentMuxHostedSession<P>[]
   messageQueuePath: string
 }
 export type AgentMuxHostedTransferChunk = { transferId: string; index: number; dataBase64: string; final: boolean }
@@ -262,10 +263,10 @@ export type AgentMuxHostedRuntimeParameterMap = {
   'runtime.owner.shutdown': { fence: AgentMuxRuntimeFence }
   'runtime.network.inspect': { fence: AgentMuxRuntimeFence }
   'runtime.profile.capture': import('./runtime-v8-profile.js').RuntimeV8ProfileInput
-  'runtime.bootstrap': { consumerId: string; fence: AgentMuxRuntimeFence }
+  'runtime.bootstrap': { consumerId: string; fence: AgentMuxRuntimeFence; sessions?: AgentMuxHostedSessionProjection }
   'runtime.invoke': { consumerId: string; fence: AgentMuxRuntimeFence; invocation: AgentMuxHostedInvocation }
   'runtime.release-consumer': { consumerId: string; fence: AgentMuxRuntimeFence }
-  'runtime.events': { consumerId: string; fence: AgentMuxRuntimeFence }
+  'runtime.events': { consumerId: string; fence: AgentMuxRuntimeFence; sessions?: AgentMuxHostedSessionProjection }
   'runtime.conversation-watch': { consumerId: string; fence: AgentMuxRuntimeFence; reference: import('./conversation-changes.js').ConversationWatchInput; options?: Omit<import('./conversation-changes.js').ConversationReadOptions, 'signal'> }
   'runtime.history-watch': { consumerId: string; fence: AgentMuxRuntimeFence; agentSessionId: string;
     options?: Omit<NonNullable<Parameters<AgentMuxClient['observeSessionHistory']>[2]>, 'signal'> }
@@ -308,8 +309,8 @@ export const AGENTMUX_HOSTED_RPC_METHODS = {
 export const AGENTMUX_HOSTED_RPC_FIELDS = {
   'runtime.owner.identity': ['expectedRuntimeId'], 'runtime.owner.shutdown': ['fence'],
   'runtime.network.inspect': ['fence'], 'runtime.profile.capture': ['fence', 'processId', 'durationMs'],
-  'runtime.bootstrap': ['consumerId', 'fence'], 'runtime.invoke': ['consumerId', 'fence', 'invocation'],
-  'runtime.release-consumer': ['consumerId', 'fence'], 'runtime.events': ['consumerId', 'fence'],
+  'runtime.bootstrap': ['consumerId', 'fence', 'sessions'], 'runtime.invoke': ['consumerId', 'fence', 'invocation'],
+  'runtime.release-consumer': ['consumerId', 'fence'], 'runtime.events': ['consumerId', 'fence', 'sessions'],
   'runtime.conversation-watch': ['consumerId', 'fence', 'reference', 'options'],
   'runtime.history-watch': ['consumerId', 'fence', 'agentSessionId', 'options'],
   'runtime.attachment-watch': ['consumerId', 'fence', 'target', 'afterByte', 'view', 'refresh', 'operationId'],

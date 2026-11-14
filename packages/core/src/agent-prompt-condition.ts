@@ -1,6 +1,7 @@
 import { AgentMuxError } from './errors.js'
 import type { AgentLaunchPromptInputPlan, AgentMuxAgentSession, AgentMuxRunRef } from './types.js'
 import { normalizeNativeSessionId, normalizeNativeTranscriptPath } from './agent-native-locator.js'
+import type { AgentMuxHostedAgentSessionSummary } from './hosted-session-summary.js'
 
 /** Capture once before the first possibly executing RPC; retain with the sending intent. */
 export type AgentPromptCondition = {
@@ -134,21 +135,24 @@ export function agentPromptPredecessor(session: Pick<AgentMuxAgentSession, 'prom
 export type AgentPromptNotApplied = { submissionId: string; run: AgentMuxRunRef }
 
 export function agentPromptNotApplied(
-  session: Pick<AgentMuxAgentSession, 'run' | 'promptCompletionAdmission' | 'terminalPromptSubmission'>
+  session: Pick<AgentMuxAgentSession | AgentMuxHostedAgentSessionSummary, 'run' | 'promptCompletionAdmission' | 'terminalPromptSubmission'>
 ): AgentPromptNotApplied | undefined {
   const admission = session.promptCompletionAdmission
+  const summary = admission && 'intentSummary' in admission ? admission.intentSummary : undefined
+  const intentRun = admission?.intent?.run ?? summary?.run
+  const planKind = admission?.intent?.plan.kind ?? summary?.planKind
   if (!admission?.submissionId || !admission.notApplied || admission.acknowledged ||
-      admission.intent?.run.runId !== session.run.runId || admission.frameRefresh?.notApplied) return undefined
+      intentRun?.runId !== session.run.runId || !planKind || admission.frameRefresh?.notApplied) return undefined
   const submission = session.terminalPromptSubmission
   if (admission.transport === 'native') {
-    return admission.native?.outcome === 'not-applied' && admission.intent.plan.kind === 'native-rpc' && !submission
+    return admission.native?.outcome === 'not-applied' && planKind === 'native-rpc' && !submission
       ? { submissionId: admission.submissionId, run: { ...session.run } } : undefined
   }
   if (admission.transport === 'launch') {
-    return admission.launch.outcome === 'not-applied' && admission.intent.plan.kind === 'runtime-launch' && !submission
+    return admission.launch.outcome === 'not-applied' && planKind === 'runtime-launch' && !submission
       ? { submissionId: admission.submissionId, run: { ...session.run } } : undefined
   }
-  if (admission.intent.plan.kind === 'single-phase') {
+  if (planKind === 'single-phase') {
     if (submission || admission.chunks?.some(chunk => chunk.acknowledged)) return undefined
   } else {
     if (!submission || submission.submissionId !== admission.submissionId || submission.run.runId !== session.run.runId) return undefined

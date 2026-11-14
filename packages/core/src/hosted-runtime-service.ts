@@ -17,6 +17,7 @@ import { readNetworkInterfaces } from './runtime-network.js'
 import { observeRead as observe } from './observation-read.js'
 import { parseAgentMuxCreationTrustInput } from './agent-creation-admission.js'
 import { rpcString } from './rpc-business-codec.js'
+import { hostedAgentSessionSummary, hostedSessionProjection, projectHostedSessionEvent, type AgentMuxHostedSessionProjection } from './hosted-session-summary.js'
 import { parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor, type AgentExternalInputAuthorityPort } from './external-author.js'
 import { AGENTMUX_HOSTED_METHODS, AGENTMUX_HOSTED_PREPARATION, AGENTMUX_HOSTED_RPC_FIELDS, type AgentMuxHostedRuntimeMethod, type AgentMuxHostedBootstrap, type AgentMuxHostedInvocation,
   type AgentMuxHostedStreamEvent, type AgentMuxHostedTransferChunk,
@@ -29,10 +30,10 @@ type Context = { principal?: import('./public-rpc.js').AgentMuxRpcPrincipal; cal
   recordDeviceOperation?: (source: import('./types.js').AgentOperationDevice, method: string, args: unknown[], result: 'confirmed' | 'failed' | 'unknown', operationId: string) => Promise<void>; signal?: AbortSignal; afterResponse?: Array<() => void | Promise<void>> }
 type Reader = { enqueue(chunks: AgentMuxHostedTransferChunk[], metadata?: AgentMuxClientEvent): void; fail(error: unknown): void;
   start(): Promise<void>; close(): void;
-  readonly initialId: string; readonly closed: boolean; readonly eventDestination?: Reader }
+  readonly initialId: string; readonly closed: boolean; readonly eventDestination?: Reader; readonly sessions: AgentMuxHostedSessionProjection }
 type InitialReader = Reader & { metadataIds(): readonly string[]; coverMetadata(id: string, retain: (queued: readonly AgentMuxClientEvent[]) => AgentMuxClientEvent | null): void;
   begin(initial: unknown): void; readonly opening: boolean }
-function reader(emit: Emit, initial: unknown, onFailure: () => void, opening = false): InitialReader {
+function reader(emit: Emit, initial: unknown, onFailure: () => void, opening = false, sessions: AgentMuxHostedSessionProjection = 'full'): InitialReader {
   const initialId = mintObjectId()
   let closed = false, started = false, pumping = false, queuedBytes = 0, initialReady = false
   const queue: Array<{ chunks: AgentMuxHostedTransferChunk[]; metadata?: AgentMuxClientEvent | undefined }> = []
@@ -52,7 +53,7 @@ function reader(emit: Emit, initial: unknown, onFailure: () => void, opening = f
     finally { pumping = false }
   }
   const output: InitialReader = {
-    initialId, get closed() { return closed }, get opening() { return !initialReady },
+    initialId, sessions, get closed() { return closed }, get opening() { return !initialReady },
     metadataIds() { return [...new Set(queue.flatMap(entry => metadataId(entry.metadata) ? [metadataId(entry.metadata)!] : []))] },
     coverMetadata(id, retain) {
       if (closed) return
@@ -65,7 +66,7 @@ function reader(emit: Emit, initial: unknown, onFailure: () => void, opening = f
         insertion = index
       }
       if (observation) {
-        const chunks = hostedTransfer({ kind: 'event', event: observation }, mintObjectId())
+        const chunks = hostedTransfer({ kind: 'event', event: projectHostedSessionEvent(observation, sessions) }, mintObjectId())
         queuedBytes += size(chunks); queue.splice(insertion, 0, { chunks, metadata: observation })
       }
     },
@@ -189,24 +190,31 @@ export class AgentMuxHostedRuntimeService {
     const recipients = new Set<Reader>(matching ? [...matching].map(reader => reader.eventDestination ?? reader) : [])
     if (!terminal) for (const consumer of this.consumers.values()) if (consumer.events && !consumer.events.closed) recipients.add(consumer.events)
     if (!recipients.size) return
-    let chunks: AgentMuxHostedTransferChunk[]
-    try { chunks = hostedTransfer({ kind: 'event', event: event,
-      ...(event.type === 'connection-state' && event.state === 'restored' ? { owner: this.owner() } : {}) }, mintObjectId()) }
-    catch (error) { for (const reader of recipients) reader.fail(error); return }
+    // Encode once per requested projection, without serializing unused full prompt bodies.
+    const projections = new Map<AgentMuxHostedSessionProjection, AgentMuxHostedTransferChunk[]>()
     for (const reader of recipients) {
       // The initial snapshot takes the current connection cut synchronously with begin().
       // Replaying an earlier retrying/lost afterward could revoke a now-confirmed Native.
       if ('opening' in reader && reader.opening && event.type === 'connection-state') continue
-      reader.enqueue(chunks, event.type === 'agent-session' || event.type === 'run-removed' || event.type === 'attachment-state' ? event : undefined)
+      try {
+        const projection = event.type === 'agent-session' ? reader.sessions : 'full'
+        let chunks = projections.get(projection)
+        if (!chunks) {
+          chunks = hostedTransfer({ kind: 'event', event: projectHostedSessionEvent(event, projection),
+            ...(event.type === 'connection-state' && event.state === 'restored' ? { owner: this.owner() } : {}) }, mintObjectId())
+          projections.set(projection, chunks)
+        }
+        reader.enqueue(chunks, event.type === 'agent-session' || event.type === 'run-removed' || event.type === 'attachment-state' ? event : undefined)
+      } catch (error) { reader.fail(error) }
     }
   }
-  async bootstrap(): Promise<AgentMuxHostedBootstrap> {
+  async bootstrap(projection: AgentMuxHostedSessionProjection = 'full'): Promise<AgentMuxHostedBootstrap> {
     const sessions = await this.client.readAgentSessions()
-    return this.bootstrapSnapshot(sessions)
+    return this.bootstrapSnapshot(sessions, projection)
   }
-  private bootstrapSnapshot(sessions: AgentMuxHostedBootstrap['sessions']): AgentMuxHostedBootstrap {
+  private bootstrapSnapshot(sessions: AgentMuxHostedBootstrap['sessions'], projection: AgentMuxHostedSessionProjection = 'full'): AgentMuxHostedBootstrap {
     return { owner: this.owner(), connection: structuredClone(this.connection), storePath: this.storePath,
-      hostProcessId: process.pid, catalog: this.client.catalog(), sessions,
+      hostProcessId: process.pid, catalog: this.client.catalog(), sessions: projection === 'summary' ? sessions.map(hostedAgentSessionSummary) : sessions,
       messageQueuePath: this.client.agentMessageQueuePath() }
   }
   async call(method: 'runtime.owner.identity', params: unknown, context?: Context): Promise<{ owner: AgentMuxRuntimeOwnerIdentity }>
@@ -228,7 +236,7 @@ export class AgentMuxHostedRuntimeService {
       return { owner: this.owner(), accepted: true }
     }
     const id = identifier(p.consumerId)
-    if (method === 'runtime.bootstrap') return await observe(this.bootstrap(), context.signal)
+    if (method === 'runtime.bootstrap') return await observe(this.bootstrap(hostedSessionProjection(p.sessions)), context.signal)
     if (method === 'runtime.release-consumer') return { released: await this.releaseConsumer(id) }
     if (method !== 'runtime.invoke') throw new AgentMuxError('Unknown hosted public method.', 'RPC_METHOD_NOT_FOUND')
     const input = record(decodeHostedValue(sanitizeHostedInputInvocation(p.invocation)), ['method', 'args'])
@@ -388,7 +396,7 @@ export class AgentMuxHostedRuntimeService {
       const events = original?.events
       if (!events || events.closed) throw new AgentMuxError('This invocation needs an output destination. Open the exact Attachment reader; general Session observation is optional.', 'CONTROL_UNAVAILABLE')
       const previous = original!.runs.get(runId)
-      const destination: Reader = { initialId: '', eventDestination: events, get closed() { return events.closed },
+      const destination: Reader = { initialId: '', sessions: events.sessions, eventDestination: events, get closed() { return events.closed },
         enqueue: chunks => events.enqueue(chunks), fail: error => events.fail(error),
         start: async () => {}, close: () => {} }
       const attached = await this.acquire(target, invocation.args[1] ?? 0, invocation.args[2] ?? 'raw',
@@ -499,6 +507,7 @@ export class AgentMuxHostedRuntimeService {
     this.assertFence(p.fence)
     const owner = this.owner()
     if (method === 'runtime.events') {
+      const projection = hostedSessionProjection(p.sessions)
       const consumer = this.observationConsumer(id)
       if (consumer.events && !consumer.events.closed) throw new AgentMuxError('Host consumer already has an event owner.', 'CONTROL_OWNER_BUSY')
       let events: InitialReader
@@ -513,7 +522,7 @@ export class AgentMuxHostedRuntimeService {
         this.pruneConsumer(id, consumer)
         await Promise.all(releases.map(release => release()))
       }
-      try { events = reader(emit, undefined, () => { void dispose().catch(error => this.releaseUnconfirmed(error)) }, true) }
+      try { events = reader(emit, undefined, () => { void dispose().catch(error => this.releaseUnconfirmed(error)) }, true, projection) }
       catch (error) { this.pruneConsumer(id, consumer); throw error }
       consumer.events = events
       consumer.stopMessages = this.client.onEvent(event => {
@@ -540,7 +549,7 @@ export class AgentMuxHostedRuntimeService {
         }, context.signal), context.signal)
         context.signal?.throwIfAborted(); this.assertFence(p.fence)
         if (events.closed || consumer.events !== events) throw new AgentMuxError('Host opening was released.', 'CONTROL_CANCELLED')
-        events.begin(this.bootstrapSnapshot([...sessions.values()]))
+        events.begin(this.bootstrapSnapshot([...sessions.values()], projection))
       } catch (error) { context.signal?.removeEventListener('abort', abort); await dispose(); throw error }
       return { initial: { owner, transferId: events.initialId }, start: () => events.start(), dispose: async () => {
         context.signal?.removeEventListener('abort', abort); await dispose()
@@ -616,7 +625,7 @@ export class AgentMuxHostedRuntimeService {
     }
     const pending: AgentMuxHostedTransferChunk[][] = []
     let bytes = 0, failed: unknown, output: Reader | undefined, acquired: Awaited<ReturnType<AgentMuxHostedRuntimeService['acquire']>> | undefined
-    const destination: Reader = { initialId: '', get closed() { return output?.closed ?? failed !== undefined },
+    const destination: Reader = { initialId: '', sessions: 'full', get closed() { return output?.closed ?? failed !== undefined },
       enqueue(chunks, metadata) {
         // A newly opening reader confirms its own initial cut. Existing readers receive
         // the recovery fact once; replaying it through both leases duplicates the notice.

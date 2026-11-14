@@ -104,7 +104,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
           if (controller.signal.aborted) return
         }
         const name = /iPhone/.test(navigator.userAgent) ? 'iPhone' : /iPad/.test(navigator.userAgent) ? 'iPad' : /Android/.test(navigator.userAgent) ? 'Android' : '浏览器'
-        const value = await connectRelayHostedClient({ offer: selected!, keyPair, name, signal: controller.signal })
+        const value = await connectRelayHostedClient({ offer: selected!, keyPair, name, signal: controller.signal, sessions: 'summary' })
         if (controller.signal.aborted) { await value.dispose(); return }
         if (updating) try {
           if (!matchesReloadIdentity(keyPair, reloadOfferIdentity(selected!), reloadRecordIdentity(selected!.serverId))) throw new Error('重新连接期间工作面发生了变化，请恢复后重试。')

@@ -1,6 +1,7 @@
 import { MOTE_INPUT_GUIDANCE } from '@agentmux/core/mote-input-source'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import { isHostedAgentSessionSummary } from '@agentmux/core/hosted'
 import type { AgentInputMoteSource, AgentInputSubmissionReceipt, AgentMuxAgentSession, AgentTimelineSnapshot } from '@agentmux/core'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { agentPromptCondition, agentPromptNotApplied, validateAgentPromptCondition } from '@agentmux/core/prompt-condition'
@@ -664,7 +665,18 @@ export function useMobilePromptController({ local, client, agentSessionId, moteS
       if (originalRuntimeId && originalClient.runtimeOwnerIdentity?.()?.runtimeId !== originalRuntimeId) {
         throw Object.assign(new Error('当前连接的不是这条消息所在的 Mac，不会发到另一台 Mac。'), { code: 'STALE_AGENT_SESSION' })
       }
-      const originalSession = originalClient.agentSession(originalId)
+      let originalSession = originalClient.agentSession(originalId)
+      // A summary identifies the matching original operation, never its frozen body.
+      // Read that one Session only when this retained unknown input needs it.
+      if (original.phase === 'unknown' && isHostedAgentSessionSummary(originalSession) &&
+          originalSession.promptCompletionAdmission?.submissionId === original.operationId) {
+        const full = await originalClient.readAgentSession(originalId)
+        if (action.cancelled || attempts.current.get(originalKey) !== original) return
+        if (!full || isHostedAgentSessionSummary(full) || full.agentSessionId !== originalId ||
+            full.hostId !== originalSession.hostId || full.run.runId !== originalSession.run.runId) throw Object.assign(
+          new Error('原消息正文还没完整核实，保留原消息，可以稍后再核对。'), { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
+        originalSession = full
+      }
       if (original.moteMain && (originalSession.agentSessionId !== original.moteMain.reference.sessionId || originalSession.hostId !== original.moteMain.reference.hostId)) {
         throw Object.assign(new Error('主对话的目标还没对上，不会改发给其他 Agent。'), { code: 'MOTE_MAIN_INPUT_TARGET_MISMATCH' })
       }

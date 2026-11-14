@@ -32,6 +32,7 @@ import { parseRemoteTransportObservation } from './remote-transport-observation.
 import { parseSessionHistoryResourceOptions, parseSessionHistoryResourceReadResult } from './session-history-resource.js'
 import { parseOutputGapEvidence } from './output-gap-evidence.js'
 import { createHostedOutputObservation } from './hosted-output-observer.js'
+import { projectHostedSessionEvent, type AgentMuxHostedSessionProjection } from './hosted-session-summary.js'
 import { parseAgentSessionHistoryReadPage, type AgentSessionHistoryReadInput } from './session-history-read-codec.js'
 
 function isAbortSignal(value: unknown): value is AbortSignal {
@@ -39,11 +40,13 @@ function isAbortSignal(value: unknown): value is AbortSignal {
 }
 
 /** A consumer connection to the Host. Disposing this object never owns the Core or a Run. */
-export async function connectHostedAgentMux(options: {
+export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProjection = 'full'>(options: {
   rpc: AgentMuxHostedRpcPort; consumerId?: string; waitForReady?: boolean; expectedStorePath?: string;
+  sessions?: P
   expectedRuntimeId?: string; forwardRpc?: AgentMuxHostedForwardRpc; subscribeRpc?: AgentMuxHostedSubscribeRpc
-}): Promise<AgentMuxHostedClient> {
+}): Promise<AgentMuxHostedClient<P>> {
   const consumerId = options.consumerId ?? randomClientRequestId(), rpc = options.rpc
+  const sessionProjection = options.sessions ?? 'full'
   const publisher = new AgentMuxClientEventPublisher()
   // This consumer owns reply/observation readers, never an admitted durable operation.
   const observationLifetime = new AbortController()
@@ -106,6 +109,7 @@ export async function connectHostedAgentMux(options: {
     await controlConnecting
   }
   const emit = (event: AgentMuxClientEvent): void => {
+    event = projectHostedSessionEvent(event, sessionProjection)
     if (event.type === 'agent-session-record-deleted') {
       try { parseAgentSessionRecordDeletionEvent(event) }
       catch {
@@ -219,7 +223,7 @@ export async function connectHostedAgentMux(options: {
       // Main needs the original Provider declarations to present these Subjects.
       // Their read-only bootstrap does not require the general event lease to open.
       const expected = fence(), epoch = controlEpoch
-      const observed = parseHostedBootstrap(await rpc.call('runtime.bootstrap', { consumerId, fence: expected }, { signal: observationSignal(sourceSignal) }))
+      const observed = parseHostedBootstrap(await rpc.call('runtime.bootstrap', { consumerId, fence: expected, ...(options.sessions ? { sessions: options.sessions } : {}) }, { signal: observationSignal(sourceSignal) }), sessionProjection)
       if (disposed || epoch !== controlEpoch || controlOwner?.runtimeId !== expected.runtimeId ||
           controlOwner.ownerInstanceId !== expected.ownerInstanceId) throw new AgentMuxError(
         'The original Host changed during its Runtime metadata observation.', 'CONTROL_CANCELLED')
@@ -455,7 +459,7 @@ export async function connectHostedAgentMux(options: {
         void releaseAcquired().catch(connectionFailure).finally(reconnect)
       }
       try {
-        acquired = await rpc.subscribe('runtime.events', { consumerId, fence: expected }, {
+        acquired = await rpc.subscribe('runtime.events', { consumerId, fence: expected, ...(options.sessions ? { sessions: options.sessions } : {}) }, {
           signal: observationSignal(),
           onInitial: value => {
             requireObservation()
@@ -472,7 +476,7 @@ export async function connectHostedAgentMux(options: {
               if (!received) return
               if (received.kind === 'initial') {
                 if (initialSeen) throw new AgentMuxError('Runtime repeated its initial observation.', 'CONTROL_PROTOCOL_ERROR')
-                const observed = parseHostedBootstrap(received.value)
+                const observed = parseHostedBootstrap(received.value, sessionProjection)
                 if (observed.owner.runtimeId !== expected.runtimeId || observed.owner.ownerInstanceId !== expected.ownerInstanceId) throw new AgentMuxError('Runtime bootstrap belongs to another owner.', 'RUNTIME_OWNER_CHANGED')
                 if (options.expectedStorePath !== undefined && observed.storePath !== options.expectedStorePath) throw new AgentMuxError('This Host owns a different durable Session Store. The original workbench is retained.', 'CONTROL_OWNER_BUSY')
                 bootstrap = structuredClone(observed); initialSeen = true
@@ -896,5 +900,5 @@ export async function connectHostedAgentMux(options: {
   if (options.waitForReady === false) {
     void connect().catch(error => { connectionState('lost', error); reconnect() })
   } else await connect()
-  return client as AgentMuxHostedClient
+  return client as AgentMuxHostedClient<P>
 }
