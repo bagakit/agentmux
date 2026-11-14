@@ -61,12 +61,13 @@ it('actual Node editor preserves a later draft and keeps listener/other Host con
  expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Node alias"]')!.value).toBe('later-edit')
  expect(dom.container.textContent).toContain('Publication: unsaved changes')
  const toggle=dom.container.querySelector<HTMLInputElement>('[aria-label="Allow Tailcat connections"]')!;await act(async()=>toggle.click())
- const configSave=vi.spyOn(api.config,'save').mockImplementation(async next=>next)
+ const configSave=vi.spyOn(api.hosts,'configureTailcat').mockResolvedValue({} as never)
  const before=useAppStore.getState().config!,other={id:'peer',kind:'ssh' as const,label:'A newer peer',hostname:'peer.invalid'}
  useAppStore.setState({config:{...before,hosts:[...before.hosts,other]}})
  await dom.click('[data-settings-save-bar] button')
- expect(configSave).toHaveBeenCalledOnce();expect(configSave.mock.calls[0]![0].hosts).toContainEqual(other)
- expect(configSave.mock.calls[0]![0].hosts.find(host=>host.kind==='local')?.tailcat?.enabled).toBe(true)
+ expect(configSave).toHaveBeenCalledOnce();expect(configSave.mock.calls[0]![0]).toMatchObject({hostId:'local',candidate:{enabled:true}})
+ expect(configSave.mock.calls[0]![0].expected).toEqual(before.hosts.find(host=>host.kind==='local')?.tailcat??null)
+ expect(useAppStore.getState().config!.hosts).toContainEqual(other)
  expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Node alias"]')!.value).toBe('later-edit')
 })
 it('a lost publication reply retains its original operation and only inspects it instead of repeating the save',async()=>{
