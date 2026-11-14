@@ -9,10 +9,8 @@ import { agentSessionPresentationIndex } from '../lib/session-presentation'
 import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
 import { AgentTopologySummary } from './AgentTopologySummary'
 import { GoalAgentFace, GoalAgentPicker, type GoalRelationSave } from './GoalAgentPicker'
-import { GoalDelegationWork } from './GoalDelegationWork'
 
 const ThemeNavigationSpaceIcon = semanticIconComponent('navigation.space')
-const ThemeObjectTeamIcon = semanticIconComponent('object.team')
 const ThemeActionChooseAssigneeIcon = semanticIconComponent('action.choose-assignee')
 
 
@@ -41,18 +39,12 @@ export function GoalExecution({ demand, onUpdate }: { demand: DemandProjection; 
     catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
   }
   const members = (items: typeof rows, empty: string) => items.length ? items.map(row => <button key={row.id} type="button" className="goal-collaboration__member" data-session-state={row.session?.status.state} disabled={!row.session} title={`${row.name} · ${row.status}\n${row.id}`} onClick={() => { if (row.session) selectSession(row.session.id) }}><GoalAgentFace row={row} /><span>{row.name}<small>{row.status}</small></span>{row.session ? <ThemeNavigationSpaceIcon size={11} /> : null}</button>) : <span className="goals-caption">{empty}</span>
-  const hasOriginalWork = Boolean(demand.delegations?.length || demand.dispatches?.some(start => start.execution === 'finite'))
   return <section className="goal-collaboration" aria-label="Goal collaboration">
-    <div className="goals-section-heading"><h2><ThemeObjectTeamIcon size={15} />Collaboration</h2></div>
-    <GoalDelegationWork demand={demand} />
-    <details className="goal-collaboration__relationships" open={!hasOriginalWork || !demand.supervisorSessionId}>
-      <summary>People and related sessions <span className="goals-caption" title={supervisor?.name ?? demand.supervisorSessionId ?? 'Not selected'}>Supervisor · {supervisor?.name ?? demand.supervisorSessionId ?? 'Not selected'}</span></summary>
-    <div className="goal-collaboration__line"><strong>Execution Agents</strong><div>{members(assignees, 'No assignees yet')}</div><button type="button" className="small-button" onClick={() => setRole('assignees')} aria-label="Choose Goal assignees"><ThemeActionChooseAssigneeIcon size={12} />Choose</button></div>
-    <div className="goal-collaboration__line"><strong>Related discussions</strong><div>{members(related, 'No related sessions')}</div><button type="button" className="small-button" onClick={() => setRole('related')} aria-label="Choose related Goal sessions">Edit</button></div>
-    <div className="goal-collaboration__line"><strong>Follow-up Agent</strong><div>{supervisor ? members([supervisor], '') : <span className="goals-caption">Not selected</span>}</div><button type="button" className="small-button" onClick={() => setRole('supervisor')} aria-label="Choose Goal Supervisor">Choose</button></div>
+    <div className="goal-collaboration__line"><strong>Supervisor</strong><button type="button" className="small-button" onClick={() => setRole('supervisor')} aria-label="Choose Goal Supervisor">Choose</button><div>{supervisor ? members([supervisor], '') : <span className="goals-caption">Not selected</span>}</div></div>
     {!supervisor && recommended.length ? <div className="goal-collaboration__recommendations"><span className="goals-caption">Recommended</span>{recommended.map(row => <button key={row.id} type="button" className="small-button" aria-label={`Assign ${row.name} as Supervisor`} title={row.id} onClick={() => void recommend(row.id)}><GoalAgentFace row={row} /><span>{row.name}</span><span className="goal-collaboration__assign">Assign</span></button>)}</div> : null}
     {!supervisor && demand.creationOrigin?.supervisorDefaultPending ? <p className="goals-condition">The original requester is not yet confirmed. You can choose a Supervisor explicitly.</p> : null}
-    </details>
+    <div className="goal-collaboration__line"><strong>Execution Agents</strong><button type="button" className="small-button" onClick={() => setRole('assignees')} aria-label="Choose Goal assignees"><ThemeActionChooseAssigneeIcon size={12} />Choose</button><div>{members(assignees, 'No assignees yet')}</div></div>
+    <div className="goal-collaboration__line"><strong>Related discussions</strong><button type="button" className="small-button" onClick={() => setRole('related')} aria-label="Choose related Goal sessions">Edit</button><div>{members(related, 'No related sessions')}</div></div>
     {creationDrafts.map(draft => <p key={draft.operationId} className="goals-service" role="status">Original Agent creation retained.<button type="button" className="small-button" onClick={() => setRole(draft.role)}>Check creation and relationship</button></p>)}
     {issue ? <p className="goals-service" role="status">{issue}</p> : null}
     <GoalContinuationControl demand={demand} onChooseSupervisor={() => setRole('supervisor')} />
