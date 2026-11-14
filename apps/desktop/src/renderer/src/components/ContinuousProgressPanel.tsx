@@ -8,13 +8,17 @@ const ThemeActionStopIcon = semanticIconComponent('action.stop')
 
 const decisionLabels: Record<Extract<ContinuousProgressDecision, { kind: 'skip' }>['reason'], string> = {
   working: 'The Agent is still working. No continuation is needed yet.',
-  'stale-working': 'The last known turn is still working; its completion is not confirmed.',
+  'stale-working': 'The Agent was last seen working. Its current activity is unconfirmed.',
   'interaction-pending': 'The Agent is waiting for a reply or permission. Respond in the original conversation.',
   'readiness-unconfirmed': 'The Agent’s readiness is unconfirmed. Check its original conversation.',
   'completion-consumed': 'This completed turn has already been used by an input. Waiting for the next completed turn.',
   'duplicate-tick': 'This check has already been handled.',
   'user-input-changed': 'Your input takes priority. Automatic continuation was skipped.',
   'unknown-status': 'A completed, ready Agent turn could not be confirmed. This check sent no continuation.'
+}
+
+export function describeContinuousProgressDecision(decision: string): string {
+  return Object.hasOwn(decisionLabels, decision) ? decisionLabels[decision as keyof typeof decisionLabels] : decision
 }
 
 export type ContinuousProgressPanelLoop = {
@@ -55,6 +59,6 @@ export function ContinuousProgressPanel({ loop, onPause, onResume, onStop, onChe
       <p className="continuous-progress-control__help">{loop.loopState === 'paused' ? 'Resume checks this Agent now and restarts periodic checks.' : 'Continuation is sent only after a completed, ready Agent turn.'} Stop loop does not stop the Agent.</p>
     </> : null}
     {notice ? <p className="continuous-progress-control__notice" role="status">{notice}</p> : null}
-    {loop.lastDecision && loop.lastDecision !== notice ? <div className="continuous-progress-panel__decision"><h4>Latest decision</h4><p>{Object.hasOwn(decisionLabels, loop.lastDecision) ? decisionLabels[loop.lastDecision as keyof typeof decisionLabels] : loop.lastDecision}</p></div> : null}
+    {loop.lastDecision && loop.lastDecision !== notice ? <div className="continuous-progress-panel__decision"><h4>Latest decision</h4><p>{describeContinuousProgressDecision(loop.lastDecision)}</p></div> : null}
   </section>
 }

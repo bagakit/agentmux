@@ -14,7 +14,7 @@
 .schedule-arrangement__when time { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 500; }
 .schedule-arrangement__when span { color: var(--text-3); }
 .schedule-arrangement__message { color: var(--text); overflow-wrap: anywhere; }
-.schedule-arrangement__caption { display: grid; gap: var(--sp-1); color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.schedule-arrangement__caption, .schedule-arrangement__outcome { display: grid; gap: var(--sp-1); color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
 .schedule-arrangement__details { color: var(--text-2); font-size: var(--fs-meta); min-width: 0; }
 .schedule-arrangement__details > summary, .schedule-create > summary { cursor: pointer; color: var(--text-2); padding-block: var(--sp-2); }
 .schedule-arrangement__details > :not(summary) { margin-top: var(--sp-3); }

@@ -6,6 +6,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { api } from '../lib/api'
 import { useScheduleOperation } from '../lib/schedule-controller'
 import { ScheduleOperationNotice } from './ScheduleOperationNotice'
+import { describeContinuousProgressDecision } from './ContinuousProgressPanel'
 
 const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 const HeartbeatIcon = semanticIconComponent('object.heartbeat')
@@ -87,6 +88,7 @@ export function ScheduleArrangementRow({ schedule, timezone, now, onReceipt, dis
       </> : null}
       {quickActions && schedule.status !== 'stopped' ? <button type="button" className="automation-button schedule-arrangement__toggle" disabled={operation.busy || !!operation.pending || schedule.revision === undefined} onClick={() => mutate(schedule.status === 'active' ? 'pause' : 'resume')}>{schedule.status === 'active' ? 'Pause' : 'Resume'}</button> : null}
     </div>
+    {schedule.lastOutcome === 'skipped' ? <p className="schedule-arrangement__outcome">Last attempt skipped</p> : null}
     <details className="schedule-arrangement__details">
       <summary>Details and controls</summary>
       {calendarSummary || quickActions || schedule.prompt.includes('\n') ? <p className="calendar-schedules__context">{schedule.prompt}</p> : null}
@@ -95,7 +97,7 @@ export function ScheduleArrangementRow({ schedule, timezone, now, onReceipt, dis
       {schedule.checkIn ? <><p>Quiet follow-up · {schedule.checkIn.quiet.start}–{schedule.checkIn.quiet.end} quiet · at least {schedule.checkIn.silenceMs / 3600000}h silence · {schedule.checkIn.minIntervalMs / 3600000}h between attempts · {schedule.checkIn.dailyBudget} per local day</p>
         {schedule.checkInState?.unanswered ? <p>{schedule.lastOutcome === 'sent' ? 'Waiting for your next confirmed reply.' : 'Previous follow-up is unconfirmed. Reconcile its original operation.'}</p> : null}
         {schedule.checkInState?.budgetDate ? <p>{schedule.checkInState.budgetUsed} attempt used on {schedule.checkInState.budgetDate}.</p> : null}</> : null}
-      {schedule.lastDecision ? <p className="calendar-schedules__notice">{schedule.lastDecision}</p> : null}
+      {schedule.lastDecision ? <p className="calendar-schedules__notice">{describeContinuousProgressDecision(schedule.lastDecision)}</p> : null}
       <div className="calendar-schedules__actions">
         <Button type="button" onClick={() => void inspectSaved()}>Check original arrangement</Button>
         {onOpenDiscussion ? <Button type="button" onClick={() => onOpenDiscussion(schedule)}>Open original discussion</Button> : null}
