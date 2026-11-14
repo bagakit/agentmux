@@ -29,6 +29,7 @@ async function located() {
 it('actual Main uses Source directory registration and Native Files without an Agent metadata bootstrap or alias rewrite', async () => {
   const f = await sourceFilesHosts(cleanup), [a, b] = f.sources
   const reads = vi.spyOn(b!.client, 'readAgentSessions').mockRejectedValue(new Error('Unrelated Agent metadata unavailable'))
+  const ownerReads = vi.spyOn(b!.client, 'readRuntimeOwnerIdentity').mockRejectedValue(new Error('Hosted owner projection observation unavailable'))
   vi.spyOn(b!.client, 'runtimeOwnerIdentity').mockReturnValue(null)
   const target = { hostId: b!.id, expectedRuntimeId: b!.identity.runtimeId }
   const found = await f.runtime.resolveSourceFiles(target, { kind: 'directory', path: b!.project })
@@ -44,6 +45,7 @@ it('actual Main uses Source directory registration and Native Files without an A
     expectedResource: { hostId: 'local', workspaceId: mount.workspaceId, workspacePath: b!.project } })
   expect(result).toMatchObject({ carrierCurrent: true, result: { resource: { hostId: 'local', workspacePath: b!.project }, result: { status: 'read', document: { content: 'source-b original body' } } } })
   expect(reads).not.toHaveBeenCalled()
+  expect(ownerReads).not.toHaveBeenCalled()
   expect((await a!.rpc.call('app.snapshot', { include: ['spaces'] })).spaces).toEqual([])
   expect(await readFile(join(a!.project, 'original.txt'), 'utf8')).toBe('source-a original body')
   await expect(f.runtime.sourceFilesCall({ ...target, expectedRuntimeId: a!.identity.runtimeId }, 'file.stat', { zoneId: mount.zoneId, path: '.', expectedResource: { hostId: 'local', workspaceId: mount.workspaceId, workspacePath: b!.project } })).rejects.toMatchObject({ code: 'RUNTIME_OWNER_MISMATCH' })
@@ -153,6 +155,7 @@ it('production-shaped client server borrows the real Core fence with no hostedRu
 it('original Files watch retains its exact fence without metadata bootstrap and ends only the stale carrier reader', async () => {
   const f = await located(), events: unknown[] = [], end = vi.fn()
   const metadata = vi.spyOn(f.b.client, 'readAgentSessions').mockRejectedValue(new Error('Unrelated metadata unavailable'))
+  const ownerReads = vi.spyOn(f.b.client, 'readRuntimeOwnerIdentity').mockRejectedValue(new Error('Hosted owner projection observation unavailable'))
   vi.spyOn(f.b.client, 'runtimeOwnerIdentity').mockReturnValue(null)
   const controller = new AbortController()
   const initial = vi.fn()
@@ -169,12 +172,14 @@ it('original Files watch retains its exact fence without metadata bootstrap and 
   await vi.waitFor(() => expect(end).toHaveBeenCalledWith(expect.objectContaining({ code: 'RUNTIME_OWNER_MISMATCH' })))
   expect(events).toHaveLength(1)
   expect(metadata).not.toHaveBeenCalled()
+  expect(ownerReads).not.toHaveBeenCalled()
   controller.abort()
   expect(await readFile(join(f.b.project, 'watch.txt'), 'utf8')).toBe('original watch body')
 })
 
 it('a cancelled late Source subscription is disposed without adopting its opening or bootstrapping Agent metadata', async () => {
   const f = await located(), controller = new AbortController(), metadata = vi.spyOn(f.b.client, 'readAgentSessions').mockRejectedValue(new Error('Unrelated metadata unavailable'))
+  const ownerReads = vi.spyOn(f.b.client, 'readRuntimeOwnerIdentity').mockRejectedValue(new Error('Hosted owner projection observation unavailable'))
   vi.spyOn(f.b.client, 'runtimeOwnerIdentity').mockReturnValue(null)
   const real = f.b.client.subscribeRpc!.bind(f.b.client), dispose = vi.fn(), end = vi.fn()
   vi.spyOn(f.b.client, 'subscribeRpc').mockImplementation(async (...args) => {
@@ -187,6 +192,7 @@ it('a cancelled late Source subscription is disposed without adopting its openin
   expect(dispose).toHaveBeenCalledTimes(1)
   expect(end).toHaveBeenCalledTimes(1)
   expect(metadata).not.toHaveBeenCalled()
+  expect(ownerReads).not.toHaveBeenCalled()
   expect(await readFile(join(f.b.project, 'original.txt'), 'utf8')).toBe('source-b original body')
 })
 
