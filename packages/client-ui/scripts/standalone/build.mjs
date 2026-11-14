@@ -6,7 +6,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { radixOverlayAliases } from '../radix-overlay-aliases.ts'
-import { supportedExamples, supportedExportMap } from '../supported-entries.mjs'
+import { standalonePatternDocs, supportedExamples, supportedExportMap } from '../supported-entries.mjs'
 import { writeNotices } from './licenses.mjs'
 
 const pkg = resolve(import.meta.dirname, '../..')
@@ -72,13 +72,28 @@ async function copyDocumentation(directory) {
   const readme = await readFile(join(pkg, 'README.md'), 'utf8')
   const portable = /^## Portable entries\n([\s\S]*?)^## Workspace modules/mu.exec(readme)?.[1]?.trim()
   assert.ok(portable, 'The package README must contain its portable entry documentation')
-  const pattern = 'docs/patterns/agent-work-location.md'
-  for (const file of [pattern, 'examples/host.css', ...Object.keys(supportedExamples).map(name => `examples/${name}.tsx`)]) {
+  for (const file of [...standalonePatternDocs, 'examples/host.css', ...Object.keys(supportedExamples).map(name => `examples/${name}.tsx`)]) {
     const destination = join(directory, file)
     await mkdir(dirname(destination), { recursive: true })
     await copyFile(join(pkg, file), destination)
   }
-  await writeFile(join(directory, 'README.md'), `# @agentmux/client-ui\n\nThis private archive contains the components and patterns available to a standalone React host. It is intended for local qualification.\n\n## Portable entries\n\n${portable}\n\n[Find an Agent's work](${pattern}) documents the location pattern and the original facts a host supplies. See [Third-party notices](THIRD_PARTY_NOTICES.md) for bundled material.\n`)
+  const patternLinks = await Promise.all(standalonePatternDocs.map(async file => {
+    const source = await readFile(join(directory, file), 'utf8')
+    const title = /^# ([^\n]+)/u.exec(source)?.[1]
+    assert.ok(title, 'A standalone pattern must have a title ' + file)
+    return `- [${title}](${file})`
+  }))
+  const sections = [
+    '# @agentmux/client-ui',
+    'This private archive contains the components and patterns available to a standalone React host. It is intended for local qualification.',
+    '## Portable entries',
+    portable,
+    '## Pattern contracts',
+    'The location pattern includes an independent React entry. Reading continuity and interaction receipts describe behaviors an independent host can implement.',
+    patternLinks.join('\n'),
+    'See [Third-party notices](THIRD_PARTY_NOTICES.md) for bundled material.',
+  ]
+  await writeFile(join(directory, 'README.md'), sections.join('\n\n') + '\n')
 }
 
 export async function stagePortableArchive(directory, { mutateScroll = false } = {}) {

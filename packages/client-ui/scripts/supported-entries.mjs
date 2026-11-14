@@ -51,6 +51,12 @@ export const supportedExamples = {
   }
 }
 
+export const standalonePatternDocs = [
+  'docs/patterns/agent-work-location.md',
+  'docs/patterns/read-while-work-continues.md',
+  'docs/patterns/interaction-receipts.md',
+]
+
 function moduleExport(source, distribution) {
   const module = source.replace(/\.tsx?$/, '.js')
   if (distribution) return { types: './dist/' + module.replace(/\.js$/, '.d.ts'), import: './dist/' + module }
