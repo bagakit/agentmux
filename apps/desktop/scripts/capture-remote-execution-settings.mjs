@@ -14,7 +14,7 @@ const repository = resolve(import.meta.dirname, '../../..')
 const require = createRequire(join(repository, 'apps/desktop/package.json'))
 const fixture = join(import.meta.dirname, 'fixtures/remote-execution-settings')
 const args = process.argv.slice(2)
-assert(args.length === 1 && args[0] === '--prepare' || (args.length === 2 || args.length === 3 && ['--first', '--guidance'].includes(args[2])) && args[0] === '--run', 'Use --prepare, then --run the exact prepared directory')
+assert(args.length === 1 && args[0] === '--prepare' || (args.length === 2 || args.length === 3 && ['--first', '--guidance', '--tabs'].includes(args[2])) && args[0] === '--run', 'Use --prepare, then --run the exact prepared directory')
 assert(!process.env.TOOL_EXECUTION_UI_MUTANT, 'A visual candidate cannot inherit a test mutation')
 const outputRoot = join(repository, '.tmp/remote-execution-settings')
 const directory = args[0] === '--run' ? resolve(args[1]) : join(outputRoot, 'capture-' + randomUUID())
@@ -57,7 +57,8 @@ async function captureDriverHashes() {
   return Object.fromEntries(await Promise.all(driverFiles.map(async file => [relative(repository, file), hash(await readFile(file))])))
 }
 const first = args[2] === '--first'
-const mode = first ? 'first' : args[2] === '--guidance' ? 'guidance' : 'complete'
+const mode = first ? 'first' : args[2] === '--guidance' ? 'guidance' : args[2] === '--tabs' ? 'tabs' : 'complete'
+const outputPrefix = first ? 'first-' : mode === 'tabs' ? 'tabs-' : ''
 const sourcePath = join(directory, 'source.json')
 const boundary = 'Production SettingsPanel, Remote execution and Mote Settings, WorkspaceWorkbench, Launcher, Store and CSS in private Electron. External Session/binding/API facts are controlled typed preview inputs. No Main, SSH, model, native execution, user App or physical input claim.'
 
@@ -137,11 +138,11 @@ if (args[0] === '--prepare') {
   try {
     receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(directory, 'compiled/index.html'), privateRoot, directory, mode],
       { cwd: repository, env, temporaryRoot: privateRoot, timeoutMs: 120000, onLine: line => { logs.push(line); if (line.startsWith('{\"frame\":')) console.log(line) } })
-    receipt.capture = JSON.parse(await readFile(join(directory, first ? 'first-capture.json' : 'capture.json'), 'utf8'))
+    receipt.capture = JSON.parse(await readFile(join(directory, outputPrefix + 'capture.json'), 'utf8'))
     assert.equal(receipt.process.exitCode, 0, receipt.capture.failure?.message)
     assert.equal(receipt.process.timedOut, false)
     assert.equal(receipt.capture.passed, true)
-    assert.equal(receipt.capture.frames.length, first ? 1 : mode === 'guidance' ? 9 : 17, 'The selected scenario must produce its complete frame set')
+    assert.equal(receipt.capture.frames.length, first ? 1 : mode === 'guidance' ? 9 : mode === 'tabs' ? 3 : 17, 'The selected scenario must produce its complete frame set')
     for (const [file, digest] of Object.entries(compiled)) assert.equal(hash(await readFile(join(directory, file))), digest, 'Captured assets changed')
     await checkInputs()
     assert.deepEqual(await captureDriverHashes(), captureDrivers, 'Actual capture drivers stay fixed through execution')
@@ -152,8 +153,8 @@ if (args[0] === '--prepare') {
     receipt.cleanup = { remaining: await listProbeProcesses(-1, privateRoot) }
     if (receipt.cleanup.remaining.length) { receipt.passed = false; process.exitCode = 1 }
     else { await rm(privateRoot, { recursive: true, force: true }); receipt.cleanup.privateProfileRemoved = true }
-    await writeFile(join(directory, first ? 'first-native.log' : 'native.log'), logs.join('\n'))
-    await writeFile(join(directory, first ? 'first-receipt.json' : 'receipt.json'), JSON.stringify(receipt, null, 2))
-    console.log(JSON.stringify({ passed: receipt.passed, captureOnly: true, independentVisualReview: 'not-performed', directory, receipt: join(directory, first ? 'first-receipt.json' : 'receipt.json') }))
+    await writeFile(join(directory, outputPrefix + 'native.log'), logs.join('\n'))
+    await writeFile(join(directory, outputPrefix + 'receipt.json'), JSON.stringify(receipt, null, 2))
+    console.log(JSON.stringify({ passed: receipt.passed, captureOnly: true, independentVisualReview: 'not-performed', directory, receipt: join(directory, outputPrefix + 'receipt.json') }))
   }
 }

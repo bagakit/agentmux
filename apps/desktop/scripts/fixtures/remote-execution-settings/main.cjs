@@ -67,6 +67,35 @@ app.whenReady().then(async () => {
     console.log(JSON.stringify({ frame: path.join(directory, file), captureOnly: true }))
   }
   const top = async () => { await read('document.querySelector(".remote-execution-settings")?.scrollIntoView({block:"start"})'); await paint() }
+  if (mode === 'tabs') {
+    const tabs = '.remote-work-tasks [role=tab]'
+    const tab = (suffix, selected = false) => `${tabs}[aria-controls$="-${suffix}"]${selected ? '[aria-selected=true]' : ''}`
+    const node = selector => `document.querySelector(${JSON.stringify(selector)})`
+    await until(`Boolean(window.remoteExecutionVisual?.ready && ${node(tab('routes', true))})`)
+    const frameTabs = async (name, task) => {
+      const state = await read(`(() => {
+        const tab = ${node(tab(task, true))}
+        const panel = tab && document.getElementById(tab.getAttribute('aria-controls'))
+        return { focused: tab === document.activeElement && tab.matches(':focus-visible'), linked: panel && !panel.hidden && panel.getAttribute('aria-labelledby') === tab.id }
+      })()`)
+      assert.equal(state.linked, true, 'The selected tab presents its original panel')
+      if (task !== 'routes') assert.equal(state.focused, true, 'The keyboard-selected tab has visible focus')
+      await frame(name)
+    }
+    await frameTabs('remote-tabs-routes-wide', 'routes')
+    await read(`${node(tab('routes'))}.focus()`)
+    await key('Right')
+    await frameTabs('remote-tabs-prepare-focused', 'start')
+    await viewport(600, 840)
+    await read('remoteExecutionVisual.theme("light")')
+    await key('End')
+    await frameTabs('remote-tabs-work-narrow', 'existing')
+    const facts = await read('remoteExecutionVisual.facts()')
+    assert.deepEqual(facts.forbiddenCalls, [], 'Switching Settings panels does not change original Agents')
+    assert.deepEqual(facts.readers, [], 'An unselected Work list does not start a reader')
+    receipt.passed = true
+    return
+  }
   await until('Boolean(window.remoteExecutionVisual?.ready && document.querySelector("[data-remote-prepare]"))')
   receipt.original = await read('remoteExecutionVisual.facts()')
   assert.equal(receipt.original.sessions.length, 2)
@@ -202,6 +231,6 @@ app.whenReady().then(async () => {
 }).catch(error => { receipt.failure = { message: error.message, stack: error.stack }; process.exitCode = 1 }).finally(async () => {
   if (win && !win.isDestroyed()) win.destroy()
   receipt.cleanup = { windowDestroyed: !win || win.isDestroyed() }
-  await fs.writeFile(path.join(directory, mode === 'first' ? 'first-capture.json' : 'capture.json'), JSON.stringify(receipt, null, 2))
+  await fs.writeFile(path.join(directory, mode === 'first' ? 'first-capture.json' : mode === 'tabs' ? 'tabs-capture.json' : 'capture.json'), JSON.stringify(receipt, null, 2))
   app.exit(receipt.passed ? 0 : 1)
 })
