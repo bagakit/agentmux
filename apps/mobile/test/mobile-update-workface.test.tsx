@@ -42,7 +42,10 @@ it('shows the original offline conversation and device draft after matching the 
   const view = await mount(<MobileConnectionRoot platform={createBrowserPlatform()} native={false} />)
   await vi.waitFor(() => expect(ports.connect).toHaveBeenCalled())
   await vi.waitFor(() => expect(view.element.querySelector('.mobile-app')).not.toBeNull())
-  expect(view.element.textContent).toContain('暂时无法连接')
+  await click(button(view.element, '当前对话操作'))
+  const diagnostic = document.body.querySelector('.mobile-session-diagnostic')!
+  expect(diagnostic.textContent).toContain('暂时无法连接')
+  expect(diagnostic.textContent).toContain('original Host offline')
   expect(view.element.querySelector('[contenteditable="true"]')?.textContent).toContain('original offline draft')
   expect(view.element.textContent).not.toContain('重新检查连接')
   const original = mounted.pop()!

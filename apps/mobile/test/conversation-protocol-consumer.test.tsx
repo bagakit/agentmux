@@ -641,7 +641,8 @@ it('authenticated Mobile pages the original captured stream beyond the recent wi
     content: index === 1 ? `Complete 原文中🙂\n${'原文中🙂\n'.repeat(8000)}END retained` : `Complete retained ${index}`, createdAt: index + 1, updatedAt: index + 1 }))
   for (const item of items) await f.store.applyTimelineMutation({ type: 'append', agentSessionId: sid, item })
   const raw = vi.spyOn(f.store, 'readCapturedHistory')
-  const view = await mount(f.surface())
+  const onStatusChange = vi.fn()
+  const view = await mount(f.surface(onStatusChange))
   await vi.waitFor(() => expect(view.element.textContent).toContain('Complete retained 719'))
   await paste(view.element, 'Original retained draft')
   const originalIds = [...view.element.querySelectorAll<HTMLElement>('[data-message-id^="captured:retained-mobile:"]')].map(node => node.dataset.messageId?.slice(9))
@@ -653,7 +654,7 @@ it('authenticated Mobile pages the original captured stream beyond the recent wi
   })
   await vi.waitFor(() => expect(button(view.element, '更早消息').disabled).toBe(false))
   await click(button(view.element, '更早消息'))
-  await vi.waitFor(() => expect(view.element.textContent).toContain('Conversation data changed scope, version or shape.'))
+  await vi.waitFor(() => expect(onStatusChange.mock.calls.at(-1)?.[0].readingIssue).toContain('Conversation data changed scope, version or shape.'))
   expect([...view.element.querySelectorAll<HTMLElement>('[data-message-id^="captured:retained-mobile:"]')].map(node => node.dataset.messageId?.slice(9))).toEqual(originalIds)
   expect(editor(view.element).textContent).toContain('Original retained draft')
   foreignSource = false

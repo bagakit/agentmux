@@ -227,19 +227,26 @@ it('does not show the old Mote Host and Run failure while the new original obser
   const pending = deferred<unknown>()
   let calls = 0
   const f = originalClient(kind, async () => {
-    if (++calls === 1) throw Error('旧 Host 头像原失败')
+    calls += 1
+    const source = f.sessions.get(sid)
+    if (source?.hostId === original.hostId && source.run.runId === original.run.runId) throw Error('旧 Host 头像原失败')
     return pending.promise
   })
+  const original = f.sessions.get(sid)!
   await open(kind, f)
   await waitForElement(document, '.mobile-avatar-notice')
   expect((await reveal()).textContent).toContain('旧 Host 头像原失败')
+  const before = calls
   await act(async () => f.emit({ type: 'agent-session', session: { ...f.sessions.get(sid)!, hostId: 'host-other', run: { runId: 'run-other' } } } as any))
-  await vi.waitFor(() => expect(calls).toBeGreaterThan(1))
+  await vi.waitFor(() => expect(calls).toBeGreaterThan(before))
   expect([...document.querySelectorAll('summary')].some(node => node.textContent?.includes('头像外观未确认'))).toBe(false)
   await act(async () => pending.reject(Error('新 Host 头像原失败')))
   await waitForElement(document, '.mobile-avatar-notice')
   expect((await reveal()).textContent).toContain('新 Host 头像原失败')
-  expect(document.body.textContent).not.toContain('旧 Host 头像原失败')
+  // The independent team owner retains its last issue in hidden Threads.
+  // The current avatar and visible workface must show only the new source.
+  expect([...document.querySelectorAll('.mobile-avatar-notice')].map(node => node.textContent).join('')).not.toContain('旧 Host 头像原失败')
+  expect(visibleText(document.body)).not.toContain('旧 Host 头像原失败')
   expect(f.client.agentSession(sid).run.runId).toBe('run-other')
   expect(f.submit).not.toHaveBeenCalled()
 })

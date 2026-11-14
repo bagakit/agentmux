@@ -369,12 +369,12 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
   })
 
   it('retains reading when a history probe fails and accepts healthy Session input without gating on that probe', async () => {
-    const f = fixture(), view = await mount(<MobileConversationSurface {...props(f)} />)
+    const f = fixture(), onStatusChange = vi.fn(), view = await mount(<MobileConversationSurface {...props(f)} onStatusChange={onStatusChange} />)
     f.readHistory.mockRejectedValueOnce(new Error('native transcript temporarily unavailable'))
     await refreshOriginal(view.element)
     expect([...view.element.querySelectorAll('[data-native-record-id]')].map(value => value.getAttribute('data-native-record-id')))
       .toEqual(['native-input', 'native-answer'])
-    expect(view.element.textContent).toContain('native transcript temporarily unavailable')
+    expect(onStatusChange.mock.calls.at(-1)?.[0].readingIssue).toContain('native transcript temporarily unavailable')
     await paste(view.element, '健康会话继续工作')
     await click(button(view.element, 'Send'))
     expect(f.submit).toHaveBeenCalledOnce()

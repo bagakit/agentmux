@@ -71,7 +71,8 @@ describe('original conversation observation recovery', () => {
     const f = fixture(), old = { ...history(), nextCursor: null, items: [{ id: 'old-reading', kind: 'assistant-message' as const,
       contentParts: [{ kind: 'text' as const, text: 'Original older reading stays' }] }] }
     f.readHistory.mockImplementation(async (_id, options) => options?.cursor ? old : history())
-    const surface = (state: 'connected' | 'disconnected', visible = true) => <MobileConversationSurface client={f.client} agentSessionId="session-original"
+    const onStatusChange = vi.fn()
+    const surface = (state: 'connected' | 'disconnected', visible = true) => <MobileConversationSurface onStatusChange={onStatusChange} client={f.client} agentSessionId="session-original"
       connection={{ state, message: state }} visible={visible} platform={createBrowserPlatform()} />
     const view = await mount(surface('connected'))
     await click(button(view.element, '更早消息'))
@@ -91,7 +92,7 @@ describe('original conversation observation recovery', () => {
     f.sessions.set('session-original', current)
     await act(async () => f.emit({ type: 'agent-session', session: current }))
     await view.render(surface('connected', false)); await view.render(surface('connected'))
-    expect(view.element.textContent).toContain('The original conversation scope changed')
+    expect(onStatusChange.mock.calls.at(-1)?.[0].readingIssue).toContain('The original conversation scope changed')
     expect(view.element.querySelector('[data-native-record-id="old-reading"]')).toBe(row)
     expect(view.element.querySelector('[data-native-record-id="foreign-reading"]')).toBeNull()
     expect(editor(view.element).textContent).toContain('with offline edits')
