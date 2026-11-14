@@ -1,7 +1,7 @@
 import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { formatAmuxSharing, formatSessionAddress, formatRegionAddress, formatTabAddress,
-  formatSpaceAddress, formatZoneAddress, formatAmuxObjectLink, parseAmuxObjectLink, type AmuxObjectLinkTarget } from '../src/sharing.js'
+  formatSpaceAddress, formatZoneAddress, formatMoteAddress, formatAmuxObjectLink, parseAmuxObjectLink, type AmuxObjectLinkTarget } from '../src/sharing.js'
 
 describe('amux object sharing', () => {
   it('copies one original typed link without metadata, instructions or a guessed location', () => {
@@ -39,5 +39,22 @@ describe('amux object sharing', () => {
     const original = ' path:3-9\n\n```ts\n  x\n```\n'
     expect(formatAmuxSharing('File', original)).toBe('--- amux : File ---\n' + original + '\n-----')
     expect(formatAmuxSharing('Browser', original)).toBe('--- amux : Browser ---\n' + original + '\n-----')
+  })
+
+  it('addresses a persistent Mote independently of its current Agent and scopes each thread to its original Space', () => {
+    const spaceId = '["original-host","identity/directory"]', eventId = 'work/thread ?#中文'
+    const main = formatMoteAddress({ spaceId }), thread = formatMoteAddress({ spaceId, eventId })
+    expect(main).toBe(`amux://mote/${encodeURIComponent(spaceId)}`)
+    expect(thread).toBe(`${main}/thread/${encodeURIComponent(eventId)}`)
+    expect(parseAmuxObjectLink(main)).toEqual({ kind: 'mote', spaceId })
+    expect(parseAmuxObjectLink(thread)).toEqual({ kind: 'mote', spaceId, eventId })
+    expect(formatMoteAddress({ spaceId: 'another-host-same-topic', eventId })).not.toBe(thread)
+    expect(() => formatMoteAddress({ spaceId, eventId: '' })).toThrow()
+    const invalid = ['amux://mote/A/thread/', 'amux://mote/A/agent/B', 'amux://mote/A/B',
+      'amux://mote/A/thread/%42', 'amux://mote/A/thread/%2f', 'amux://mote/A/thread/%ZZ',
+      'amux://mote/A?host=other', 'amux://mote/A/thread/B?host=other', 'amux://mote/A/thread/B#x',
+      'amux://agent/A/thread/B', 'amux://space/A/thread/B', `${thread}/`]
+    expect(invalid).toHaveLength(12)
+    for (const uri of invalid) expect(() => parseAmuxObjectLink(uri), uri).toThrow()
   })
 })

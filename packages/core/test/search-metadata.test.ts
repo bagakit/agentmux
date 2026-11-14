@@ -21,6 +21,21 @@ const facts = (): AgentMuxSearchMetadata => ({
 })
 
 describe('Core original-object metadata search', () => {
+  it('matches Mote links by exact durable Space and never treats a plain Space or uninspected event as that Mote', () => {
+    const input = facts()
+    expect(searchAgentMuxMetadata('amux://mote/FolderSpace', input).sessions).toEqual([])
+    input.catalog.spaces.push({ spaceId: 'Unplaced', kind: 'container', name: 'Unrelated container', hostId: 'host-a', directoryPath: 'container-root', projectId: null })
+    expect(searchAgentMuxMetadata('amux://mote/Unplaced', input).unplaced).toEqual([])
+    input.catalog.spaces[0] = { ...input.catalog.spaces[0]!, kind: 'mote', topicId: 'launcher:leader' }
+    const linked = searchAgentMuxMetadata('amux://mote/FolderSpace', input)
+    expect(linked.sessions).toEqual([{ hostId: 'host-a', agentSessionId: 'CaseAgent', kind: 'agent' }])
+    expect(linked.locations.map(location => location.reference.groupId)).toEqual(['GroupOne', 'GroupTwo'])
+    const event = searchAgentMuxMetadata('amux://mote/FolderSpace/thread/original-event', input)
+    expect(event.issue).toContain('original Mote thread')
+    expect(event.sessions).toEqual([])
+    expect(event.locations).toEqual([])
+  })
+
   it('separates literal identity matching, text and typed Agent links from Terminal identity', () => {
     const input = facts(), before = structuredClone(input)
     for (const query of ['RetainedRun', 'NativeConversation', 'READABLE TASK', 'feature/blue', 'real-project']) {

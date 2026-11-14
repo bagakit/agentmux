@@ -305,3 +305,28 @@ describe('each original opening completes independently', () => {
     await expect(ingress.receive(zone('healthy-retry'))).resolves.toBeNull()
   })
 })
+
+it('routes Mote and original thread URIs through the same exact typed logical focus without guessing an Agent', async () => {
+  const ingress = new SpatialLinkIngress(), p = ports()
+  const id = JSON.stringify(['resource-host', 'original-mote-identity'])
+  ingress.ready(p.execute, p.report)
+  await expect(ingress.receive(formatAmuxObjectLink({ kind: 'mote', spaceId: id }))).resolves.toBeNull()
+  await expect(ingress.receive(formatAmuxObjectLink({ kind: 'mote', spaceId: id, eventId: 'original/event?scope' }))).resolves.toBeNull()
+  expect(p.requests.map(request => request.target)).toEqual([{ kind: 'mote', spaceId: id }, { kind: 'mote', spaceId: id, eventId: 'original/event?scope' }])
+  expect(p.requests.every(request => request.inputPolicy === 'preserve')).toBe(true)
+  expect(p.execute).toHaveBeenCalledTimes(2)
+})
+it('retains unknown Mote navigation and original event without another location discovery or replacement', async () => {
+  const ingress = new SpatialLinkIngress(), p = ports()
+  p.execute.mockImplementationOnce(async request => {
+    if (request.operation !== 'focus') throw new Error('Expected focus')
+    const value = focusFacts(request)
+    return { ...value, navigation: { ...value.navigation, state: 'unconfirmed' }, issues: [{ step: 'presentation', code: 'MOTE_PRESENTATION_UNCONFIRMED', message: 'The original event is unavailable.', recovery: 'Read that same original event.' }] }
+  })
+  ingress.ready(p.execute, p.report)
+  const uri = formatAmuxObjectLink({ kind: 'mote', spaceId: 'exact-mote', eventId: 'original-event' })
+  expect(await ingress.receive(uri)).toContain('MOTE_PRESENTATION_UNCONFIRMED')
+  expect(p.execute).toHaveBeenCalledTimes(1)
+  expect(p.execute.mock.calls[0]![0]).toMatchObject({ target: { kind: 'mote', spaceId: 'exact-mote', eventId: 'original-event' } })
+  ingress.ready(p.execute, p.report); await settled(); expect(p.execute).toHaveBeenCalledTimes(1)
+})
