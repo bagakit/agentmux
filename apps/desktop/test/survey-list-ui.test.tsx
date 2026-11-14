@@ -218,6 +218,30 @@ async function drop(x: number, y: number, pointerType = 'mouse') {
   await vi.waitFor(() => expect(dom.container.querySelector('.survey-page-list')?.hasAttribute('data-dragging')).toBe(false))
 }
 
+it.each(['item', 'group'] as const)('[survey-sort-feedback] a dragged %s stays in its navigation column until the genuine release', async kind => {
+  await write(kind === 'group' ? groups() : { ungrouped: [...fixture.zones], groups: [] })
+  const commit = vi.spyOn(useAppStore.getState(), 'setSurveyOrganization')
+  await render()
+  const before = protectedFacts(), original = organization()
+  const terminal = dom.container.querySelector('[data-original-terminal="survey-session-0"]')
+  const source = kind === 'group' ? group('group-a') : row(0)
+  const left = source.getBoundingClientRect().left
+  await pickUp(button(kind === 'group' ? 'Move survey group: First group' : 'Move survey item: Research A'), 50, kind === 'group' ? 200 : 100)
+  const targetY = kind === 'group' ? 360 : 300
+  await pointer(document, 'pointermove', 235, targetY)
+  await new Promise(resolve => setTimeout(resolve, 30))
+  expect(source.getBoundingClientRect().left, 'Moving across members must keep the original sorting feedback inside its navigation column').toBe(left)
+  expect(dom.container.contains(source)).toBe(true)
+  expect(dom.container.querySelector('[data-original-terminal="survey-session-0"]')).toBe(terminal)
+  expect(commit).not.toHaveBeenCalled()
+  expect(organization()).toBe(original)
+  await drop(235, targetY)
+  await vi.waitFor(() => expect(kind === 'group' ? organization().groups.map(one => one.groupId) : organization().ungrouped)
+    .toEqual(kind === 'group' ? ['group-b', 'group-a'] : [fixture.zones[1], fixture.zones[2], fixture.zones[0]]))
+  expect(commit).toHaveBeenCalledTimes(1)
+  unchanged(before)
+})
+
 it.each(['original row', 'same-container gap', 'outside', 'Escape'] as const)('[survey-pointer-cancel] %s does not write or move the original workface', async destination => {
   await write({ ungrouped: [...fixture.zones], groups: [] })
   const commit = vi.spyOn(useAppStore.getState(), 'setSurveyOrganization')
