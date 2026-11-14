@@ -29,6 +29,7 @@ import { currentConversationSpeakerMetadata } from '../lib/conversation-sender-d
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { AgentInformationDetails, AgentInformationSummary, type AgentInformationTab } from './AgentInformationDetails'
 import { AgentLocationsButton } from './AgentLocationsButton'
+import { AgentTakeoverRelations } from './AgentTakeoverRelations'
 import { FocusContextStateMark } from './FocusContextState'
 import { ConversationMessageAvatar } from './ConversationMessageAvatar'
 import { WorkbenchTabGlyph } from './WorkbenchTopology'
@@ -267,6 +268,10 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
       <div><dt>Run</dt><dd>{context.runId}</dd></div><div><dt>Project</dt><dd>{context.workspaceName}</dd></div>
       <div><dt>Directory</dt><dd>{path}</dd></div>{context.originAddress ? <div><dt>Origin</dt><dd>{context.originAddress}</dd></div> : null}
     </dl>
+    {context.kind === 'agent' ? <AgentTakeoverRelations subject={request.control ?? request.bookmark} access={context.access} sourceRuntimeId={request.sourceRuntimeId ?? request.bookmark?.sourceRuntimeId}
+      snapshot={session ?? request.session} active={visible} beforeOpen={() => {
+        if (!request.pinned) { request.restoreFocus(); agentInformationPreview.dismiss(request.token) }
+      }} /> : null}
     {request.contentChanged ? <p>Original card content changed. Close and reopen its preview to read the latest observed text.</p> : null}
     <p>Text, positions and Goal links were captured for this preview. Status and usage follow the same confirmed Run and source.</p>
     <p>This preview contains the latest observed reply and recent inputs. Earlier records remain in the Agent’s History.</p>

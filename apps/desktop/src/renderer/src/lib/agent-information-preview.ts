@@ -4,7 +4,8 @@ import { agentBookmarks, type AgentBookmark, type AgentBookmarkBounds } from './
 import type { FocusContext } from './focus-context'
 import type { FocusContextIdentity } from './focus-context-identity'
 import type { FocusGoalLinks } from './focus-goal-links'
-import { useAppStore } from '../store'
+import { agentRegionLocationBindings, useAppStore } from '../store'
+import { desktopAgentExecutionFromSpatial } from './desktop-agent-presentation'
 
 /** Disposable reading intent; durable bookmark data never contains these callbacks or control facts. */
 export type AgentInformationPreview = {
@@ -13,11 +14,12 @@ export type AgentInformationPreview = {
   anchor: HTMLButtonElement; keepOpen(): void; restoreFocus(): void; openWorkface(): void
   readingBranch?: { attach(element: HTMLElement): () => void; retainedEscape(event: KeyboardEvent): boolean } | undefined
   session: SessionSnapshot | undefined; control: AgentSessionControl | undefined; sourceKey: string | undefined
+  sourceRuntimeId?: string | undefined
   enterReading: boolean; pinned: boolean; contentChanged: boolean
   focusReading?: object | undefined
   bookmark?: AgentBookmark | undefined
 }
-type Opening = Omit<AgentInformationPreview, 'session' | 'control' | 'sourceKey' | 'pinned' | 'contentChanged' | 'bookmark'>
+type Opening = Omit<AgentInformationPreview, 'session' | 'control' | 'sourceKey' | 'sourceRuntimeId' | 'pinned' | 'contentChanged' | 'bookmark'>
 let current: readonly AgentInformationPreview[] = []
 const listeners = new Set<() => void>()
 let pending: { token: object; cancel(): void } | null = null
@@ -28,6 +30,14 @@ function publish(next: readonly AgentInformationPreview[]) { current = next; for
 function original(request: Opening) {
   if (request.context.access) return undefined
   return useAppStore.getState().sessions.find(session => session.id === request.context.id && session.hostId === request.context.hostId && session.control.run.runId === request.context.runId)
+}
+function originalRuntime(session: SessionSnapshot | undefined): string | undefined {
+  if (session?.kind !== 'agent') return
+  const runtimes = new Set(agentRegionLocationBindings()?.flatMap(region => {
+    const execution = desktopAgentExecutionFromSpatial(region, session)
+    return execution ? [execution.runtimeId] : []
+  }))
+  return runtimes.size === 1 ? [...runtimes][0] ?? undefined : undefined
 }
 function sourceBookmarkMatches(bookmark: AgentBookmark | undefined, context: FocusContext) {
   return Boolean(bookmark && context.access && bookmark.sourceRuntimeId !== undefined && bookmark.sourceRuntimeId === context.access.identity.runtimeId &&
@@ -77,7 +87,7 @@ export const agentInformationPreview = {
     }
     if (current.some(item => item.token === request.token)) return true
     const control = session?.kind === 'agent' && session.control.hostId === request.context.hostId ? session.control : undefined
-    publish([...current.filter(item => item.pinned), { ...request, session, control, sourceKey: session?.kind === 'agent' ? nativeBindingKey(session) : undefined, pinned: false, contentChanged: false }])
+    publish([...current.filter(item => item.pinned), { ...request, session, control, sourceRuntimeId: request.context.access?.identity.runtimeId ?? originalRuntime(session), sourceKey: session?.kind === 'agent' ? nativeBindingKey(session) : undefined, pinned: false, contentChanged: false }])
     return true
   },
   noteContent(token: object, context: FocusContext) {

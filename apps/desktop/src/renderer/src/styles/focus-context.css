@@ -225,6 +225,19 @@
 .agent-information-reader__source > div { display: grid; grid-template-columns: 60px minmax(0, 1fr); gap: 8px; }
 .agent-information-reader__source dt { color: var(--text-3); }
 .agent-information-reader__source dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
+.agent-information-takeovers { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.agent-information-takeovers h4 { margin: 12px 0 6px; font-size: var(--fs-body); font-weight: 600; }
+.agent-information-takeovers p { margin: 6px 0; overflow-wrap: anywhere; }
+.agent-information-takeovers ul { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.agent-information-takeovers li { padding: 8px 0; border-bottom: 1px solid var(--line-soft); }
+.agent-information-takeovers li > p { margin: 6px 0; }
+.agent-information-takeovers .agent-information-takeovers__heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 10px; color: var(--text); }
+.agent-information-takeovers__heading > span { color: var(--text-2); font-size: var(--fs-micro); }
+.agent-information-takeovers .agent-information-takeovers__route { color: var(--text); }
+.agent-information-takeovers .agent-information-takeovers__reference { color: var(--text-3); font-size: var(--fs-micro); }
+.agent-information-takeovers [role='status'] { color: var(--text-2); }
+.agent-information-takeovers details { margin: 8px 0; }
+.agent-information-takeovers summary { color: var(--text-2); cursor: pointer; }
 .focus-context-hover__state { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; min-width: 0; color: var(--text-3); font-size: var(--fs-micro); }
 .focus-context-hover__state-label { display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); line-height: 1.35; }
 .focus-context-hover__state-label .focus-state-mark { flex: none; }
