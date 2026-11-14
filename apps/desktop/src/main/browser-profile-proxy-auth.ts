@@ -31,7 +31,7 @@ export type BrowserProfileProxyAuthPorts = {
 
 const storedSchema = z.object({
   version: z.literal(1),
-  profiles: z.record(z.string(), z.object({ username: z.string(), password: z.string() }).strict())
+  profiles: z.record(z.string(), z.object({ username: z.string(), password: z.string(), proxy: z.object({ host: z.string(), port: z.number().int().min(1).max(65535) }).strict().nullable().optional() }).strict())
 }).strict()
 type Stored = z.infer<typeof storedSchema>
 
@@ -106,8 +106,20 @@ export function createBrowserProfileProxyAuth(ports: BrowserProfileProxyAuthPort
       return issue && sameProxy(ports.proxyOf(profileId), issue.proxy) ? issue.reason : null
     },
 
+    /** Before a route changes, retain the original endpoint of an existing older sign-in record. */
+    bindCurrentProxy(profileId: string): Promise<void> {
+      return serial(async () => {
+        const current = await read(profileId), entry = current.profiles[profileId]
+        if (!entry || entry.proxy !== undefined) return
+        const proxy = ports.proxyOf(profileId)
+        await write({ version: 1, profiles: { ...current.profiles, [profileId]: { ...entry, proxy: proxy ? { ...proxy } : null } } })
+      })
+    },
+
     /** Keep a sign-in for this Profile's proxy. The password is encrypted before it reaches disk. */
     set(profileId: string, credential: BrowserProfileProxyCredential): Promise<void> {
+      const admittedProxy = ports.proxyOf(profileId)
+      const savedProxy = admittedProxy ? { ...admittedProxy } : null
       return serial(async () => {
         if (!ports.crypto.available()) {
           throw new BrowserProfileProxyAuthUnavailable('The system keychain is not available, so a proxy password cannot be kept. The Profile and its route are unchanged.')
@@ -118,7 +130,7 @@ export function createBrowserProfileProxyAuth(ports: BrowserProfileProxyAuthPort
         let password: string
         try { password = ports.crypto.encrypt(credential.password).toString('base64') }
         catch { throw new BrowserProfileProxyAuthUnavailable('The proxy password could not be encrypted by the system keychain. Nothing was saved; retry when the keychain is available.') }
-        await write({ version: 1, profiles: { ...current.profiles, [profileId]: { username, password } } })
+        await write({ version: 1, profiles: { ...current.profiles, [profileId]: { username, password, proxy: savedProxy } } })
         for (const key of [...attempts.keys()]) if (key.startsWith(profileId + '\0')) attempts.delete(key)
         report(profileId, null)
       })
@@ -172,6 +184,13 @@ export function createBrowserProfileProxyAuth(ports: BrowserProfileProxyAuthPort
       try { entry = (await read(profileId)).profiles[profileId] }
       catch { return false }
       if (!entry) { report(profileId, 'The proxy asks for a sign-in. Add its user name and password to this Profile.', proxy); return false }
+      // A new route does not acquire an old server's sign-in. Legacy scope is fixed before any route edit.
+      if (entry.proxy !== undefined && (!entry.proxy || !sameProxy(entry.proxy, proxy))) {
+        report(profileId, 'The saved sign-in belongs to a different proxy server. Set a sign-in for this Profile’s current proxy.', proxy)
+        return false
+      }
+      if (contents.isDestroyed() || ports.profileOfSession(contents.session) !== profileId || !sameProxy(ports.proxyOf(profileId), proxy)) return false
+
       const key = `${profileId}\0${proxy.host}:${proxy.port}`
       // Chromium marks the first challenge of a request; a fresh request after a working sign-in starts counting again.
       if (firstAttempt) attempts.delete(key)

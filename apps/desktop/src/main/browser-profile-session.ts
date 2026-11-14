@@ -1,4 +1,4 @@
-import type { BrowserProfileEnvironment } from '@agentmux/core/control'
+import type { BrowserProfileNetworkApplication, BrowserProfileEnvironment } from '@agentmux/core/control'
 import type { BrowserProfilePageEnvironmentPorts } from './browser-profile-page-environment.js'
 import { createBrowserProfileEnvironment } from './browser-profile-environment.js'
 import type { Session, WebContents } from 'electron'
@@ -25,7 +25,7 @@ export type BrowserProfileSessionPorts = {
 export class BrowserProfileNetworkUnavailable extends Error {
   readonly code = 'BROWSER_PROFILE_NETWORK_UNAVAILABLE'
   constructor(readonly profileId: string, cause: unknown) {
-    super('This Profile’s network route could not be applied, so its pages were not opened. Nothing was sent directly. Retry, or edit the Profile’s network.', { cause })
+    super('The Profile’s requested network configuration could not be confirmed. Its saved settings and Browser controls remain available. Inspect the original route before retrying.', { cause })
   }
 }
 
@@ -38,25 +38,28 @@ export function createBrowserProfileSessions(ports: BrowserProfileSessionPorts) 
     session: ports.session, settings: ports.environment, defaultLanguage: ports.defaultLanguage
   }) : undefined
   // What each session currently uses, and the one application in flight for it.
-  const applied = new WeakMap<Session, string>()
+  const applied = new WeakMap<Session, { key: string; confirmed: boolean }>()
+  const owners = new Map<string, Session>()
   const pending = new WeakMap<Session, { key: string; done: Promise<void> }>()
   // Sessions whose route is a proxy: their pages must not send WebRTC around it.
   const proxied = new WeakSet<Session>()
 
   async function apply(target: Session, network: BrowserProfileNetwork | undefined, profileId: string): Promise<void> {
     const key = routeKey(network)
-    if (applied.get(target) === key) return
+    if (applied.get(target)?.key === key && applied.get(target)!.confirmed) return
     const running = pending.get(target)
     if (running?.key === key) return await running.done
     const done = (async () => {
       // One route at a time per session: a newer route waits for the one in flight, then wins.
       await running?.done.catch(() => {})
+      owners.set(profileId, target)
+      applied.delete(target)
       try {
         await target.setProxy(browserProfileProxyConfig(network ?? { mode: 'system' }))
         // Connections opened under the old route would keep using it.
         await target.closeAllConnections()
       } catch (cause) { throw new BrowserProfileNetworkUnavailable(profileId, cause) }
-      applied.set(target, key)
+      applied.set(target, { key, confirmed: true })
       if (network?.mode === 'proxy') proxied.add(target)
       else proxied.delete(target)
       const policy = network?.mode === 'proxy' ? 'disable_non_proxied_udp' : 'default'
@@ -77,10 +80,17 @@ export function createBrowserProfileSessions(ports: BrowserProfileSessionPorts) 
     prepare(profileId: string): Promise<void> | undefined {
       environment?.prepare(profileId)
       const target = ports.session(profileId), network = ports.network(profileId)
+      owners.set(profileId, target)
       const key = routeKey(network)
-      if (applied.get(target) === key) return undefined
-      if (!applied.has(target) && !pending.has(target) && network === undefined) { applied.set(target, key); return undefined }
+      if (applied.get(target)?.key === key) return undefined
+      if (!applied.has(target) && !pending.has(target) && network === undefined) { applied.set(target, { key, confirmed: false }); return undefined }
       return apply(target, network, profileId)
+    },
+
+    networkApplication(profileId: string, configured: BrowserProfileNetwork | undefined): BrowserProfileNetworkApplication | undefined {
+      const target = owners.get(profileId), key = routeKey(configured)
+      if (!target && configured === undefined) return undefined
+      return { scope: 'session-proxy-config', status: !target ? 'unknown' : pending.get(target)?.key === key ? 'pending' : applied.get(target)?.key === key && applied.get(target)!.confirmed ? 'applied' : 'unknown' }
     },
 
     applyEnvironment(profileId: string): void { environment?.prepare(profileId); environment?.applyPages(profileId) },

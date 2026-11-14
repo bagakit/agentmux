@@ -1,3 +1,4 @@
+import { parseBrowserProxyEdit, parseBrowserProxyAsset, parseBrowserProxyBinding, parseBrowserProfileNetworkApplication, type BrowserProxyEdit, type BrowserProxyAsset, type BrowserProxyBinding, type BrowserProfileNetworkApplication } from './browser-proxy-library.js'
 import { AgentMuxError } from './errors.js'
 import { parseBrowserProfileQuery, parseBrowserProfileView, parseBrowserProfileSelection, parseBrowserProfileBulkAction, type BrowserProfileQuery, type BrowserProfileView, type BrowserProfileSelectionItem, type BrowserProfileBulkAction, type BrowserProfileBulkItemResult } from './browser-profile-library.js'
 
@@ -6,7 +7,7 @@ import { parseBrowserProfileQuery, parseBrowserProfileView, parseBrowserProfileS
  * typed requests and checks the shape of the owner's answers. No partition, cookie path or
  * credential is returned by this contract. A proxy sign-in write carries a password only to Main.
  */
-export const BROWSER_PROFILE_CONTROL_OPERATIONS = ['browser.profile.ls', 'browser.profile.inspect', 'browser.profile.create',
+export const BROWSER_PROFILE_CONTROL_OPERATIONS = ['browser.profile.proxy.ls', 'browser.profile.proxy.create', 'browser.profile.proxy.update', 'browser.profile.proxy.delete', 'browser.profile.proxy.assign', 'browser.profile.ls', 'browser.profile.inspect', 'browser.profile.create',
   'browser.profile.folder.create', 'browser.profile.folder.rename', 'browser.profile.folder.delete',
   'browser.profile.view.create', 'browser.profile.view.update', 'browser.profile.view.delete', 'browser.profile.bulk-update',
   'browser.profile.copy', 'browser.profile.update', 'browser.profile.set-default', 'browser.profile.delete',
@@ -24,6 +25,11 @@ export type BrowserProfileControlEdit = { label?: string; hue?: number | null; n
   environment?: BrowserProfileEnvironment | null; tags?: string[]; folderId?: string | null; pinned?: boolean }
 
 export type BrowserProfileControlPayload =
+  | { operation: 'browser.profile.proxy.ls' }
+  | { operation: 'browser.profile.proxy.create'; edit: BrowserProxyEdit }
+  | { operation: 'browser.profile.proxy.update'; proxyId: string; expectedRevision: string; edit: BrowserProxyEdit }
+  | { operation: 'browser.profile.proxy.delete'; proxyId: string; expectedRevision: string }
+  | { operation: 'browser.profile.proxy.assign'; proxyId: string; expectedRevision: string; items: BrowserProfileSelectionItem[] }
   | { operation: 'browser.profile.ls'; query?: BrowserProfileQuery; viewId?: string }
   | { operation: 'browser.profile.view.create'; label: string; query: BrowserProfileQuery; expectedRevision: number }
   | { operation: 'browser.profile.view.update'; viewId: string; label: string; query: BrowserProfileQuery; expectedRevision: number }
@@ -356,6 +362,8 @@ export type BrowserProfileControlProfile = {
   folderId?: string
   pinned?: true
   network?: BrowserProfileControlNetwork
+  proxyBinding?: BrowserProxyBinding
+  networkApplication?: BrowserProfileNetworkApplication
   environment?: BrowserProfileEnvironment
   environmentApplication?: BrowserProfileEnvironmentApplication
   /** false when the person turned Agents off for this Profile; absent means Agents may use it. */
@@ -367,6 +375,10 @@ export type BrowserProfileControlUse = { browserId: string; workspaceId?: string
 export type BrowserProfileControlUsage = { browsers: BrowserProfileControlUse[]; complete: boolean }
 
 export type BrowserProfileControlResult =
+  | { operation: 'browser.profile.proxy.ls'; revision: number; proxies: BrowserProxyAsset[] }
+  | { operation: 'browser.profile.proxy.create' | 'browser.profile.proxy.update'; revision: number; proxy: BrowserProxyAsset }
+  | { operation: 'browser.profile.proxy.delete'; revision: number; proxyId: string; deleted: true }
+  | { operation: 'browser.profile.proxy.assign'; revision: number; proxyId: string; proxyRevision: string; results: BrowserProfileBulkItemResult[] }
   | { operation: 'browser.profile.ls'; revision: number; sequence: number; profiles: BrowserProfileControlProfile[]; folders: BrowserProfileFolder[]; views: BrowserProfileView[]; filter?: { query: BrowserProfileQuery; evaluatedAt: number; viewId?: string } }
   | { operation: 'browser.profile.view.create' | 'browser.profile.view.update'; revision: number; view: BrowserProfileView }
   | { operation: 'browser.profile.view.delete'; revision: number; viewId: string; deleted: true }
@@ -444,6 +456,8 @@ export function parseBrowserProfileControlPayload(source: Record<string, unknown
   const operation = source.operation
   if (!isBrowserProfileControlOperation(operation)) fail(code, 'Browser Profile operation is invalid.')
   const fields: Record<BrowserProfileControlOperation, readonly string[]> = {
+    'browser.profile.proxy.ls': [], 'browser.profile.proxy.create': ['edit'], 'browser.profile.proxy.update': ['proxyId', 'expectedRevision', 'edit'],
+    'browser.profile.proxy.delete': ['proxyId', 'expectedRevision'], 'browser.profile.proxy.assign': ['proxyId', 'expectedRevision', 'items'],
     'browser.profile.ls': ['query', 'viewId'],
     'browser.profile.view.create': ['label', 'query', 'expectedRevision'], 'browser.profile.view.update': ['viewId', 'label', 'query', 'expectedRevision'], 'browser.profile.view.delete': ['viewId', 'expectedRevision'], 'browser.profile.bulk-update': ['items', 'action'], 'browser.profile.folder.create': ['label', 'expectedRevision'],
     'browser.profile.folder.rename': ['folderId', 'label', 'expectedRevision'], 'browser.profile.folder.delete': ['folderId', 'expectedRevision'], 'browser.profile.inspect': ['profileId'], 'browser.profile.create': ['label'], 'browser.profile.copy': ['profileId', 'expectedRevision', 'label'],
@@ -453,6 +467,11 @@ export function parseBrowserProfileControlPayload(source: Record<string, unknown
   record(source, [...envelope, ...fields[operation]], code, 'Browser Profile request')
   for (const key of fields[operation]) if (operation !== 'browser.profile.ls' && !Object.hasOwn(source, key)) fail(code, `Browser Profile ${key} is required.`)
   switch (operation) {
+    case 'browser.profile.proxy.ls': return { operation }
+    case 'browser.profile.proxy.create': return { operation, edit: parseBrowserProxyEdit(source.edit) }
+    case 'browser.profile.proxy.update': return { operation, proxyId: identity(source.proxyId, code, 'Proxy ID'), expectedRevision: identity(source.expectedRevision, code, 'Proxy configuration token'), edit: parseBrowserProxyEdit(source.edit) }
+    case 'browser.profile.proxy.delete': return { operation, proxyId: identity(source.proxyId, code, 'Proxy ID'), expectedRevision: identity(source.expectedRevision, code, 'Proxy configuration token') }
+    case 'browser.profile.proxy.assign': return { operation, proxyId: identity(source.proxyId, code, 'Proxy ID'), expectedRevision: identity(source.expectedRevision, code, 'Proxy configuration token'), items: parseBrowserProfileSelection(source.items) }
     case 'browser.profile.proxy-sign-in.set': return { operation, profileId: identity(source.profileId, code, 'Browser Profile ID'), signIn: parseBrowserProfileProxySignIn(source.signIn) }
     case 'browser.profile.folder.create': case 'browser.profile.folder.rename': {
       const label = text(source.label, code, 'Folder name', 512)
@@ -540,7 +559,7 @@ function network(value: unknown, code: string): BrowserProfileControlNetwork {
 }
 
 function profile(value: unknown, code: string): BrowserProfileControlProfile {
-  const row = record(value, ['id', 'label', 'revision', 'createdAt', 'isDefault', 'source', 'hue', 'notes', 'network', 'agentAccess', 'environment', 'environmentApplication', 'tags', 'folderId', 'pinned', 'activity'], code, 'Browser Profile')
+  const row = record(value, ['id', 'label', 'revision', 'createdAt', 'isDefault', 'source', 'hue', 'notes', 'network', 'agentAccess', 'environment', 'environmentApplication', 'tags', 'folderId', 'pinned', 'activity', 'proxyBinding', 'networkApplication'], code, 'Browser Profile')
   const canonicalTags = row.tags === undefined ? undefined : tags(row.tags, code)
   if (canonicalTags && JSON.stringify(canonicalTags) !== JSON.stringify(row.tags)) fail(code, 'Stored Profile tags are not canonical.')
   if (row.pinned !== undefined && row.pinned !== true) fail(code, 'Stored Profile pinned flag is invalid.')
@@ -558,6 +577,8 @@ function profile(value: unknown, code: string): BrowserProfileControlProfile {
     ...(row.pinned === true ? { pinned: true as const } : {}), ...(row.hue === undefined ? {} : { hue: hue(row.hue, code) }),
     ...(row.notes === undefined ? {} : { notes: text(row.notes, code, 'Browser Profile notes', 8192) }),
     ...(row.network === undefined ? {} : { network: network(row.network, code) }),
+    ...(row.proxyBinding === undefined ? {} : { proxyBinding: parseBrowserProxyBinding(row.proxyBinding, code) }),
+    ...(row.networkApplication === undefined ? {} : { networkApplication: parseBrowserProfileNetworkApplication(row.networkApplication, code) }),
     ...(row.environment === undefined ? {} : { environment: parseBrowserProfileEnvironment(row.environment) }),
     ...(row.environmentApplication === undefined ? {} : { environmentApplication: environmentApplication(row.environmentApplication, code) }),
     ...(row.agentAccess === false ? { agentAccess: false as const } : {}) }
@@ -585,6 +606,8 @@ export type BrowserProfileControlResultBody = OmitEach<BrowserProfileControlResu
 export function parseBrowserProfileControlResult(operation: BrowserProfileControlOperation, value: unknown): BrowserProfileControlResultBody {
   const code = 'CONTROL_PROTOCOL_ERROR'
   const keys: Record<BrowserProfileControlOperation, readonly string[]> = {
+    'browser.profile.proxy.ls': ['revision', 'proxies'], 'browser.profile.proxy.create': ['revision', 'proxy'], 'browser.profile.proxy.update': ['revision', 'proxy'],
+    'browser.profile.proxy.delete': ['revision', 'proxyId', 'deleted'], 'browser.profile.proxy.assign': ['revision', 'proxyId', 'proxyRevision', 'results'],
     'browser.profile.ls': ['revision', 'sequence', 'profiles', 'folders', 'views', 'filter'],
     'browser.profile.view.create': ['revision', 'view'], 'browser.profile.view.update': ['revision', 'view'], 'browser.profile.view.delete': ['revision', 'viewId', 'deleted'], 'browser.profile.bulk-update': ['revision', 'results'],
     'browser.profile.folder.create': ['revision', 'folder'], 'browser.profile.folder.rename': ['revision', 'folder'],
@@ -620,6 +643,22 @@ export function parseBrowserProfileControlResult(operation: BrowserProfileContro
     fail(code, 'Profile network check is invalid.')
   }
   const revision = count(row.revision, code, 'Browser Profile revision')
+  if (operation === 'browser.profile.proxy.ls') {
+    if (!Array.isArray(row.proxies)) fail(code, 'Proxy library is invalid.')
+    const proxies = row.proxies.map(value => parseBrowserProxyAsset(value, code))
+    if (new Set(proxies.map(proxy => proxy.id)).size !== proxies.length) fail(code, 'Proxy identities are duplicated.')
+    return { revision, proxies }
+  }
+  if (operation === 'browser.profile.proxy.create' || operation === 'browser.profile.proxy.update') return { revision, proxy: parseBrowserProxyAsset(row.proxy, code) }
+  if (operation === 'browser.profile.proxy.delete') {
+    if (row.deleted !== true) fail(code, 'Proxy removal is unconfirmed.')
+    return { revision, proxyId: identity(row.proxyId, code, 'Proxy ID'), deleted: true }
+  }
+  if (operation === 'browser.profile.proxy.assign') {
+    const parsed = parseBrowserProfileControlResult('browser.profile.bulk-update', { revision, results: row.results })
+    if (!('results' in parsed)) fail(code, 'Proxy assignment results are invalid.')
+    return { revision, proxyId: identity(row.proxyId, code, 'Proxy ID'), proxyRevision: identity(row.proxyRevision, code, 'Assigned proxy configuration token'), results: parsed.results }
+  }
   switch (operation) {
     case 'browser.profile.ls': {
       if (!Array.isArray(row.profiles)) fail(code, 'Browser Profile list is invalid.')
@@ -678,6 +717,19 @@ export function parseBrowserProfileControlResult(operation: BrowserProfileContro
 
 /** The answer must be about the Profile this request named. */
 export function assertBrowserProfileControlTarget(request: BrowserProfileControlPayload, result: BrowserProfileControlResult): void {
+  if (request.operation === 'browser.profile.proxy.ls') return
+  if (request.operation === 'browser.profile.proxy.create' || request.operation === 'browser.profile.proxy.update') {
+    if (result.operation !== request.operation || !('proxy' in result) || result.proxy.label !== request.edit.label || (request.operation === 'browser.profile.proxy.update' && result.proxy.id !== request.proxyId)) fail('CONTROL_PROTOCOL_ERROR', 'Proxy receipt belongs to another asset.')
+    return
+  }
+  if (request.operation === 'browser.profile.proxy.delete') {
+    if (result.operation !== request.operation || result.proxyId !== request.proxyId) fail('CONTROL_PROTOCOL_ERROR', 'Proxy removal belongs to another asset.')
+    return
+  }
+  if (request.operation === 'browser.profile.proxy.assign') {
+    if (result.operation !== request.operation || result.proxyId !== request.proxyId || result.proxyRevision !== request.expectedRevision || result.results.length !== request.items.length || result.results.some((item, index) => item.profileId !== request.items[index]!.profileId || item.expectedRevision !== request.items[index]!.expectedRevision || (item.outcome === 'updated' && (item.profile.proxyBinding?.proxyId !== request.proxyId || item.profile.proxyBinding.revision !== request.expectedRevision)))) fail('CONTROL_PROTOCOL_ERROR', 'Proxy assignment does not preserve the exact asset, selection and tokens.')
+    return
+  }
   if (request.operation === 'browser.profile.bulk-update') {
     if (result.operation !== request.operation || result.results.length !== request.items.length || result.results.some((item, index) => item.profileId !== request.items[index]!.profileId || item.expectedRevision !== request.items[index]!.expectedRevision)) fail('CONTROL_PROTOCOL_ERROR', 'Bulk result does not preserve the exact requested selection and tokens.')
     return

@@ -1,4 +1,4 @@
-import { parseBrowserProfileQuery, parseBrowserProfileView, type BrowserProfileView, type BrowserProfileQuery, parseBrowserProfileEnvironment, normalizeBrowserProfileTags, type BrowserProfileEnvironment } from '@agentmux/core/control'
+import { parseBrowserProxyEdit, parseBrowserProxyAsset, type BrowserProxyAsset, type BrowserProxyEdit, type BrowserProxyBinding, parseBrowserProfileQuery, parseBrowserProfileView, type BrowserProfileView, type BrowserProfileQuery, parseBrowserProfileEnvironment, normalizeBrowserProfileTags, type BrowserProfileEnvironment } from '@agentmux/core/control'
 import { mintObjectId, isObjectId } from '@agentmux/core/object-id'
 import { createHash } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
@@ -8,7 +8,7 @@ import { durableWriteFile } from '@agentmux/core'
 import { z } from 'zod'
 import { clearsSemanticHues } from '../renderer/src/lib/conversation-avatar-color.js'
 import { BROWSER_PROFILE_COOKIE_SKIP_REASONS } from '../shared/browser-profile-import-skip.js'
-import { normalizeBrowserProfileNetwork, type BrowserProfileStoredNetwork } from '../shared/browser-profile-network.js'
+import { formatBrowserProfileProxyServer, normalizeBrowserProfileNetwork, type BrowserProfileStoredNetwork } from '../shared/browser-profile-network.js'
 import type {
   BrowserProfileEdit,
   BrowserProfileImportedSource,
@@ -84,6 +84,7 @@ const profileRecordSchema = z
     folderId: folderIdSchema.optional(),
     pinned: z.literal(true).optional(),
     network: profileNetworkSchema.optional(),
+    proxyBinding: z.object({ proxyId: z.string().refine(isObjectId), revision: z.string().refine(isObjectId) }).strict().optional(),
     environment: z.custom<BrowserProfileEnvironment>(value => {
       try { parseBrowserProfileEnvironment(value); return true } catch { return false }
     }, 'Browser Profile environment is invalid').optional(),
@@ -91,6 +92,17 @@ const profileRecordSchema = z
     agentAccess: z.literal(false).optional()
   })
   .strict()
+
+const proxyAssetSchema = z.unknown().transform((value, context): BrowserProxyAsset => {
+  try {
+    const asset = parseBrowserProxyAsset(value)
+    if (!isObjectId(asset.id) || !isObjectId(asset.revision)) throw new Error('Invalid proxy identity')
+    const route = normalizeBrowserProfileNetwork({ mode: 'proxy', server: asset.server, bypass: asset.bypass })
+    if (route.mode !== 'proxy' || formatBrowserProfileProxyServer(route.server) !== asset.server) throw new Error('Invalid proxy server')
+    return asset
+  } catch { context.addIssue({ code: 'custom', message: 'Stored proxy asset is invalid' }); return z.NEVER }
+})
+const proxyBindingSchema = z.object({ proxyId: z.string().refine(isObjectId), revision: z.string().refine(isObjectId) }).strict()
 
 const pendingImportSchema = z
   .object({
@@ -117,12 +129,21 @@ const metadataSchema = z
     profiles: z.array(profileRecordSchema).min(1),
     folders: z.array(folderSchema).optional(),
     views: z.array(viewSchema).optional(),
+    proxyAssets: z.array(proxyAssetSchema).optional(),
     pendingImports: z.array(pendingImportSchema),
     /** Profiles already removed from the list whose site data is not confirmed cleared yet. */
     pendingDeletes: z.array(profileIdSchema).optional()
   })
   .strict()
   .superRefine((metadata, context) => {
+    const proxyIds = new Set<string>()
+    for (const [index, proxy] of (metadata.proxyAssets ?? []).entries()) {
+      if (proxyIds.has(proxy.id)) context.addIssue({ code: 'custom', path: ['proxyAssets', index, 'id'], message: 'Duplicate proxy identity' })
+      proxyIds.add(proxy.id)
+    }
+    for (const [index, profile] of metadata.profiles.entries()) {
+      if (profile.proxyBinding && (!proxyIds.has(profile.proxyBinding.proxyId) || profile.network?.mode !== 'proxy')) context.addIssue({ code: 'custom', path: ['profiles', index, 'proxyBinding'], message: 'Profile proxy binding is missing its asset or route' })
+    }
     const folderIds = new Set<string>()
     for (const [index, folder] of (metadata.folders ?? []).entries()) {
       if (folderIds.has(folder.id)) context.addIssue({ code: 'custom', path: ['folders', index, 'id'], message: 'Duplicate Profile folder identity' })
@@ -185,7 +206,7 @@ type BrowserProfileRecord = z.infer<typeof profileRecordSchema>
 export type PendingBrowserProfileImport = z.infer<typeof pendingImportSchema>
 
 /** The whole committed list after one write; the manager replaces its cache with it. */
-export type BrowserProfileSnapshot = { revision: number; sequence: number; profiles: BrowserProfileSummary[]; defaultProfileId: string; folders: BrowserProfileFolder[]; views: BrowserProfileView[]; activitySources: Record<string, string> }
+export type BrowserProfileSnapshot = { proxyAssets?: BrowserProxyAsset[]; revision: number; sequence: number; profiles: BrowserProfileSummary[]; defaultProfileId: string; folders: BrowserProfileFolder[]; views: BrowserProfileView[]; activitySources: Record<string, string> }
 
 function cloneImportedSource(source: z.infer<typeof importedSourceSchema> | null): BrowserProfileImportedSource | null {
   if (source === null) return null
@@ -194,7 +215,7 @@ function cloneImportedSource(source: z.infer<typeof importedSourceSchema> | null
 }
 
 function snapshotOf(metadata: BrowserProfileMetadata): BrowserProfileSnapshot {
-  return { activitySources: Object.fromEntries(metadata.profiles.filter(profile => profile.activity).map(profile => [profile.id, profile.activity!.checkpoint.observerId])),
+  return { proxyAssets: structuredClone(metadata.proxyAssets ?? []), activitySources: Object.fromEntries(metadata.profiles.filter(profile => profile.activity).map(profile => [profile.id, profile.activity!.checkpoint.observerId])),
     views: structuredClone(metadata.views ?? []), revision: metadata.revision ?? 0, sequence: metadata.sequence ?? metadata.revision ?? 0, defaultProfileId: metadata.defaultProfileId, folders: (metadata.folders ?? []).map(folder => ({ ...folder })),
     profiles: metadata.profiles.map((profile) => profileSummary(profile, metadata.defaultProfileId)) }
 }
@@ -216,6 +237,7 @@ function profileSummary(profile: BrowserProfileRecord, defaultProfileId: string)
     ...(profile.pinned === true ? { pinned: true as const } : {}),
     ...(profile.notes === undefined || profile.notes === '' ? {} : { notes: profile.notes }),
     ...(profile.network === undefined ? {} : { network: structuredClone(profile.network) }),
+    ...(profile.proxyBinding === undefined ? {} : { proxyBinding: { ...profile.proxyBinding } }),
     ...(profile.environment === undefined ? {} : { environment: structuredClone(profile.environment) }),
     ...(profile.agentAccess === false ? { agentAccess: false as const } : {})
   }
@@ -304,7 +326,7 @@ export class BrowserProfileStore {
     })
   }
 
-  updateProfile(profileId: string, edit: BrowserProfileEdit, expectedRevision: string): Promise<{ snapshot: BrowserProfileSnapshot; profile: BrowserProfileSummary }> {
+  updateProfile(profileId: string, edit: BrowserProfileEdit, expectedRevision: string, binding?: BrowserProxyBinding): Promise<{ snapshot: BrowserProfileSnapshot; profile: BrowserProfileSummary }> {
     return this.enqueue(async () => {
       const validatedProfileId = profileIdSchema.parse(profileId)
       const metadata = await this.readMetadata()
@@ -337,6 +359,15 @@ export class BrowserProfileStore {
       if (edit.agentAccess === true) delete updated.agentAccess
       else if (edit.agentAccess === false) updated.agentAccess = false
       else if (edit.agentAccess !== undefined) throw new Error('Browser Profile Agent access must be on or off')
+      if (edit.network !== undefined) delete updated.proxyBinding
+      if (binding !== undefined) {
+        const target = proxyBindingSchema.parse(binding)
+        const proxy = this.exactProxy(metadata, target.proxyId, target.revision)
+        const route = normalizeBrowserProfileNetwork(edit.network)
+        const assetRoute = normalizeBrowserProfileNetwork({ mode: 'proxy', server: proxy.server, bypass: proxy.bypass })
+        if (JSON.stringify(route) !== JSON.stringify(assetRoute)) throw new Error('Proxy assignment must apply the exact asset route')
+        updated.proxyBinding = target
+      }
       if (edit.network === null) delete updated.network
       else if (edit.network !== undefined) {
         const network = normalizeBrowserProfileNetwork(edit.network)
@@ -410,11 +441,46 @@ export class BrowserProfileStore {
         ...(original.tags === undefined ? {} : { tags: [...original.tags] }),
         ...(original.folderId === undefined ? {} : { folderId: original.folderId }),
         ...(original.network === undefined ? {} : { network: structuredClone(original.network) }),
+        ...(original.proxyBinding === undefined ? {} : { proxyBinding: { ...original.proxyBinding } }),
         ...(original.environment === undefined ? {} : { environment: structuredClone(original.environment) }),
         ...(original.agentAccess === false ? { agentAccess: false as const } : {}) }
       const snapshot = await this.commit({ ...metadata, profiles: [...metadata.profiles, profile] })
       return { snapshot, profile: profileSummary(profile, snapshot.defaultProfileId) }
     })
+  }
+
+  inspectProxy(proxyId: string, expectedRevision: string): Promise<BrowserProxyAsset> {
+    return this.enqueue(async () => structuredClone(this.exactProxy(await this.readMetadata(), proxyId, expectedRevision)))
+  }
+
+  saveProxy(editInput: BrowserProxyEdit, proxyId?: string, expectedRevision?: string): Promise<{ snapshot: BrowserProfileSnapshot; proxy: BrowserProxyAsset }> {
+    return this.enqueue(async () => {
+      if ((proxyId === undefined) !== (expectedRevision === undefined)) throw Object.assign(new Error('Proxy updates need both the original asset identity and its configuration token. Create supplies neither.'), { code: 'BROWSER_PROXY_ARGUMENT_INVALID' })
+      const edit = parseBrowserProxyEdit(editInput), metadata = await this.readMetadata()
+      if (proxyId !== undefined) this.exactProxy(metadata, proxyId, expectedRevision!)
+      const route = normalizeBrowserProfileNetwork({ mode: 'proxy', server: edit.server, bypass: edit.bypass })
+      if (route.mode !== 'proxy') throw new Error('A proxy asset needs a proxy route')
+      const proxy: BrowserProxyAsset = { id: proxyId ?? this.createUnusedProfileId(metadata), revision: mintObjectId(), label: edit.label, server: formatBrowserProfileProxyServer(route.server), ...(route.bypass?.length ? { bypass: route.bypass } : {}), ...(edit.notes ? { notes: edit.notes } : {}) }
+      const assets = metadata.proxyAssets ?? []
+      const snapshot = await this.commit({ ...metadata, proxyAssets: proxyId === undefined ? [...assets, proxy] : assets.map(item => item.id === proxyId ? proxy : item) })
+      return { snapshot, proxy: structuredClone(proxy) }
+    })
+  }
+
+  deleteProxy(proxyId: string, expectedRevision: string): Promise<BrowserProfileSnapshot> {
+    return this.enqueue(async () => {
+      const metadata = await this.readMetadata()
+      this.exactProxy(metadata, proxyId, expectedRevision)
+      if (metadata.profiles.some(profile => profile.proxyBinding?.proxyId === proxyId)) throw Object.assign(new Error('This proxy is still bound to a Profile. Keep it or explicitly change those routes first.'), { code: 'BROWSER_PROXY_IN_USE' })
+      return this.commit({ ...metadata, proxyAssets: (metadata.proxyAssets ?? []).filter(proxy => proxy.id !== proxyId) })
+    })
+  }
+
+  private exactProxy(metadata: BrowserProfileMetadata, proxyId: string, expectedRevision: string): BrowserProxyAsset {
+    const proxy = (metadata.proxyAssets ?? []).find(item => item.id === proxyId)
+    if (!proxy) throw Object.assign(new Error('The exact proxy asset is unavailable. Read the library before changing it.'), { code: 'BROWSER_PROXY_NOT_FOUND' })
+    if (proxy.revision !== expectedRevision) throw Object.assign(new Error('The proxy asset changed. Inspect its current configuration before assigning or editing it.'), { code: 'BROWSER_PROXY_REVISION_CONFLICT' })
+    return proxy
   }
 
   saveView(label: string, query: BrowserProfileQuery, expectedRevision: number, viewId?: string): Promise<{ snapshot: BrowserProfileSnapshot; view: BrowserProfileView }> {
@@ -623,7 +689,7 @@ export class BrowserProfileStore {
     do { id = mintObjectId() } while (
       metadata.profiles.some((profile) => profile.id === id) ||
       metadata.pendingImports.some((pending) => pending.profileId === id) ||
-      (metadata.pendingDeletes ?? []).includes(id) || (metadata.views ?? []).some(view => view.id === id) || (metadata.folders ?? []).some(folder => folder.id === id)
+      (metadata.proxyAssets ?? []).some(proxy => proxy.id === id) || (metadata.pendingDeletes ?? []).includes(id) || (metadata.views ?? []).some(view => view.id === id) || (metadata.folders ?? []).some(folder => folder.id === id)
     )
     return id
   }

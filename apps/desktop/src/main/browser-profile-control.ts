@@ -14,7 +14,7 @@ export function isBrowserProfileControlRequest(request: AgentMuxControlRequest):
 }
 
 export type BrowserProfileControlPorts = {
-  profiles: Pick<BrowserProfileManager, 'initialize' | 'listProfiles' | 'listRevision' | 'listSequence' | 'createProfile' | 'copyProfile' | 'updateProfile' | 'listViews' | 'saveView' | 'deleteView' | 'bulkUpdate' | 'listFolders' | 'createFolder' | 'renameFolder' | 'deleteFolder' | 'setDefaultProfile'>
+  profiles: Pick<BrowserProfileManager, 'listProxies' | 'saveProxy' | 'deleteProxy' | 'assignProxy' | 'initialize' | 'listProfiles' | 'listRevision' | 'listSequence' | 'createProfile' | 'copyProfile' | 'updateProfile' | 'listViews' | 'saveView' | 'deleteView' | 'bulkUpdate' | 'listFolders' | 'createFolder' | 'renameFolder' | 'deleteFolder' | 'setDefaultProfile'>
   usage: Pick<BrowserProfileUsageOwner, 'usage' | 'deleteProfile'>
   network: BrowserProfileNetworkControl
 }
@@ -43,6 +43,14 @@ export async function executeBrowserProfileControl(request: ProfileRequest, port
   actor: AgentMuxNameActor | undefined): Promise<ProfileResult> {
   await ports.profiles.initialize()
   switch (request.operation) {
+    case 'browser.profile.proxy.ls': return { operation: request.operation, revision: ports.profiles.listRevision(), proxies: ports.profiles.listProxies() }
+    case 'browser.profile.proxy.create': return { operation: request.operation, ...await owned(() => ports.profiles.saveProxy(request.edit)) }
+    case 'browser.profile.proxy.update': return { operation: request.operation, ...await owned(() => ports.profiles.saveProxy(request.edit, request.proxyId, request.expectedRevision)) }
+    case 'browser.profile.proxy.delete': return { operation: request.operation, ...await owned(() => ports.profiles.deleteProxy(request.proxyId, request.expectedRevision)) }
+    case 'browser.profile.proxy.assign': {
+      const results = await owned(() => ports.profiles.assignProxy(request.proxyId, request.expectedRevision, request.items))
+      return { operation: request.operation, revision: ports.profiles.listRevision(), proxyId: request.proxyId, proxyRevision: request.expectedRevision, results }
+    }
     case 'browser.profile.proxy-sign-in.set':
     case 'browser.profile.proxy-sign-in.clear': {
       if (!actor?.verified || (actor.kind !== 'user' && actor.kind !== 'device')) {

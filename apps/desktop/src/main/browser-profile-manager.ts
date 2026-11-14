@@ -1,4 +1,4 @@
-import { parseBrowserProfileQuery, parseBrowserProfileSelection, parseBrowserProfileBulkAction, type BrowserProfileQuery, type BrowserProfileView, type BrowserProfileViewSaveReceipt, type BrowserProfileBulkAction, type BrowserProfileSelectionItem, type BrowserProfileBulkItemResult } from '@agentmux/core/control'
+import { type BrowserProxyAsset, type BrowserProxyEdit, type BrowserProxyBinding, parseBrowserProfileQuery, parseBrowserProfileSelection, parseBrowserProfileBulkAction, type BrowserProfileQuery, type BrowserProfileView, type BrowserProfileViewSaveReceipt, type BrowserProfileBulkAction, type BrowserProfileSelectionItem, type BrowserProfileBulkItemResult } from '@agentmux/core/control'
 import { mintCapabilityToken, mintObjectId } from '@agentmux/core/object-id'
 import { app, BrowserWindow, session, webContents, type Session } from 'electron'
 import type {
@@ -38,6 +38,7 @@ function cloneProfile(profile: BrowserProfileSummary): BrowserProfileSummary {
     ...profile,
     ...(profile.activity ? { activity: { ...profile.activity } } : {}),
     ...(profile.tags ? { tags: [...profile.tags] } : {}),
+    ...(profile.proxyBinding ? { proxyBinding: { ...profile.proxyBinding } } : {}),
     source: profile.source ? { ...profile.source } : null,
     ...(profile.environment ? { environment: structuredClone(profile.environment) } : {})
   }
@@ -57,6 +58,7 @@ function throwPublicBrowserProfileError(message: string, cause: unknown): never 
 export class BrowserProfileManager implements BrowserProfileResolver {
   private folders: BrowserProfileFolder[] = []
   private views: BrowserProfileView[] = []
+  private proxyAssets: BrowserProxyAsset[] = []
   private readonly profiles = new Map<string, BrowserProfileSummary>()
   private readonly sourceTokens = new Map<string, ImportSourceToken>()
   private readonly importWindows = new Set<BrowserWindow>()
@@ -69,6 +71,8 @@ export class BrowserProfileManager implements BrowserProfileResolver {
   private sequence = 0
   private activitySources: Record<string, string> = {}
   readonly activityObserverId = mintObjectId()
+  /** Original encrypted credential owner pins its current endpoint before this Profile changes routes. */
+  bindProxyCredentialsBeforeNetworkChange?: (profileId: string) => Promise<void>
   private readonly configurationTails = new Map<string, Promise<unknown>>()
   private initialization: Promise<void> | null = null
   private initializationError: Error | null = null
@@ -235,33 +239,100 @@ export class BrowserProfileManager implements BrowserProfileResolver {
 
   async updateProfile(profileId: string, edit: BrowserProfileEdit, expectedRevision: string): Promise<BrowserProfileSummary> {
     this.resolvePartition(profileId)
+    return this.configuration(profileId, () => this.applyProfileEdit(profileId, edit, expectedRevision))
+  }
+
+  private async applyProfileEdit(profileId: string, edit: BrowserProfileEdit, expectedRevision: string, binding?: BrowserProxyBinding): Promise<BrowserProfileSummary> {
     const network = edit.network === undefined ? undefined : edit.network === null ? null : normalizeBrowserProfileNetwork(edit.network)
-    return this.configuration(profileId, async () => {
-      const { profile: current } = await this.store.inspectProfile(profileId)
-      if (expectedRevision !== current.revision) throw new BrowserProfileConfigurationConflict(current.revision)
-      if (network !== undefined) {
+    const observed = await this.store.inspectProfile(profileId), current = observed.profile
+    if (observed.snapshot.sequence > this.sequence) this.adopt(observed.snapshot)
+    if (expectedRevision !== current.revision) throw new BrowserProfileConfigurationConflict(current.revision)
+    if (network !== undefined) {
+      if (JSON.stringify(current.network ?? { mode: 'system' }) !== JSON.stringify(network ?? { mode: 'system' })) await this.bindProxyCredentialsBeforeNetworkChange?.(profileId)
+      let saved: Awaited<ReturnType<BrowserProfileStore['updateProfile']>>
+      let writeAttempted = false
+      try {
         await this.sessions.apply(profileId, network === null || network.mode === 'system' ? undefined : network)
-        try {
-          const { snapshot, profile } = await this.store.updateProfile(profileId, { ...edit, ...(network === null ? { network: null } : { network }) }, expectedRevision)
-          this.adopt(snapshot)
-          this.sessions.applyEnvironment?.(profileId)
-          return this.presentProfile(profile)
-        } catch (error) {
-          try { await this.sessions.apply(profileId, current.network) }
-          catch (rollbackError) { throw new AggregateError([error, rollbackError], 'The Profile change was not saved and its previous network route could not be confirmed. Browser controls remain available; retry the original route in Profile settings.') }
-          throw error
+        writeAttempted = true
+        saved = await this.store.updateProfile(profileId, { ...edit, ...(network === null ? { network: null } : { network }) }, expectedRevision, binding)
+      } catch (error) {
+        let restore = current.network
+        if (writeAttempted) {
+          const snapshot = await this.observeUnconfirmedWrite(error)
+          const actual = snapshot.profiles.find(profile => profile.id === profileId)
+          if (!actual) throw Object.assign(new Error('The original Profile metadata is unavailable after an unconfirmed write. Its native page and request are retained; no substitute route was applied.', { cause: error }), { code: 'BROWSER_PROFILE_WRITE_UNCONFIRMED' })
+          restore = actual.network
         }
+        try { await this.sessions.apply(profileId, restore) }
+        catch (rollbackError) { throw Object.assign(new AggregateError([error, rollbackError], 'The Profile metadata mutation and its network restoration did not both receive confirmation. Browser controls remain available; inspect the original Profile and route before retrying.'), { code: error && typeof error === 'object' && 'code' in error ? String(error.code) : 'BROWSER_PROFILE_NETWORK_UNAVAILABLE' }) }
+        throw error
       }
-      const { snapshot, profile } = await this.store.updateProfile(profileId, edit, expectedRevision)
+      this.adopt(saved.snapshot)
+      this.sessions.applyEnvironment?.(profileId)
+      return this.presentProfile(saved.profile)
+    }
+    const { snapshot, profile } = await this.store.updateProfile(profileId, edit, expectedRevision)
+    this.adopt(snapshot)
+    if (edit.environment !== undefined) this.sessions.applyEnvironment?.(profileId)
+    return this.presentProfile(profile)
+  }
+
+  listProxies(): BrowserProxyAsset[] { this.assertInitialized(); return structuredClone(this.proxyAssets) }
+
+  async saveProxy(edit: BrowserProxyEdit, proxyId?: string, expectedRevision?: string): Promise<{ proxy: BrowserProxyAsset; revision: number }> {
+    this.assertInitialized()
+    return this.trackMutation((async () => {
+      let saved: Awaited<ReturnType<BrowserProfileStore['saveProxy']>>
+      try { saved = await this.store.saveProxy(edit, proxyId, expectedRevision) }
+      catch (error) { await this.observeUnconfirmedWrite(error); throw error }
+      this.adopt(saved.snapshot)
+      return { proxy: saved.proxy, revision: saved.snapshot.revision }
+    })())
+  }
+
+  async deleteProxy(proxyId: string, expectedRevision: string): Promise<{ proxyId: string; revision: number; deleted: true }> {
+    this.assertInitialized()
+    return this.trackMutation((async () => {
+      let snapshot: BrowserProfileSnapshot
+      try { snapshot = await this.store.deleteProxy(proxyId, expectedRevision) }
+      catch (error) { await this.observeUnconfirmedWrite(error); throw error }
       this.adopt(snapshot)
-      if (edit.environment !== undefined) this.sessions.applyEnvironment?.(profileId)
-      return this.presentProfile(profile)
-    })
+      return { proxyId, revision: snapshot.revision, deleted: true as const }
+    })())
+  }
+
+  /** Read actual original bytes after an uncertain write; never replay it or sign durability from a read. */
+  private async observeUnconfirmedWrite(cause: unknown): Promise<BrowserProfileSnapshot> {
+    try {
+      const snapshot = await this.store.list()
+      this.adopt(snapshot)
+      return snapshot
+    } catch (readError) {
+      throw Object.assign(new AggregateError([cause, readError], 'The original Profile metadata write and readback are unconfirmed. Original bytes, native pages and input are retained. Repair the original metadata access before retrying; no write was replayed.'), { code: 'BROWSER_PROFILE_WRITE_UNCONFIRMED' })
+    }
+  }
+
+  async assignProxy(proxyId: string, expectedRevision: string, input: BrowserProfileSelectionItem[]): Promise<BrowserProfileBulkItemResult[]> {
+    this.assertInitialized()
+    const items = parseBrowserProfileSelection(input), results: BrowserProfileBulkItemResult[] = []
+    for (const item of items) {
+      try {
+        const profile = await this.configuration(item.profileId, async () => {
+          this.resolvePartition(item.profileId)
+          const proxy = await this.store.inspectProxy(proxyId, expectedRevision)
+          return this.applyProfileEdit(item.profileId, { network: { mode: 'proxy', server: proxy.server, ...(proxy.bypass ? { bypass: proxy.bypass } : {}) } }, item.expectedRevision, { proxyId, revision: expectedRevision })
+        })
+        results.push({ ...item, outcome: 'updated', profile })
+      } catch (cause) {
+        results.push({ ...item, outcome: 'failed', code: cause && typeof cause === 'object' && 'code' in cause ? String(cause.code) : 'BROWSER_PROXY_ASSIGNMENT_FAILED', message: cause instanceof Error ? cause.message : 'The exact Profile assignment is unconfirmed. Inspect its current configuration before retrying.' })
+      }
+    }
+    return results
   }
 
   private presentProfile(profile: BrowserProfileSummary): BrowserProfileSummary {
-    const application = this.sessions.environmentApplication?.(profile.id)
-    return { ...cloneProfile(profile), ...(profile.activity && this.activitySources[profile.id] !== this.activityObserverId && profile.activity.state === 'running'
+    const application = this.sessions.environmentApplication?.(profile.id), networkApplication = this.sessions.networkApplication?.(profile.id, profile.network)
+    return { ...cloneProfile(profile), ...(networkApplication ? { networkApplication } : {}), ...(profile.activity && this.activitySources[profile.id] !== this.activityObserverId && profile.activity.state === 'running'
       ? { activity: { ...profile.activity, state: 'unknown' as const } } : {}), ...(application ? { environmentApplication: application } : {}) }
   }
 
@@ -494,6 +565,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
   private replace(snapshot: BrowserProfileSnapshot): void {
     this.profiles.clear()
     this.views = structuredClone(snapshot.views)
+    this.proxyAssets = structuredClone(snapshot.proxyAssets ?? [])
     this.folders = snapshot.folders.map(folder => ({ ...folder }))
     for (const profile of snapshot.profiles) if (!this.deleting.has(profile.id)) this.profiles.set(profile.id, cloneProfile(profile))
     this.defaultId = snapshot.defaultProfileId
@@ -508,7 +580,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     this.replace(snapshot)
     for (const listener of this.changeListeners) {
       // A subscriber cannot turn a committed write into a failure.
-      try { listener({ activitySources: { ...this.activitySources }, sequence: snapshot.sequence, revision: snapshot.revision, defaultProfileId: snapshot.defaultProfileId, profiles: this.listProfiles(), folders: this.listFolders(), views: this.listViews() }) }
+      try { listener({ proxyAssets: this.listProxies(), activitySources: { ...this.activitySources }, sequence: snapshot.sequence, revision: snapshot.revision, defaultProfileId: snapshot.defaultProfileId, profiles: this.listProfiles(), folders: this.listFolders(), views: this.listViews() }) }
       catch (error) { console.error('A Browser Profile change subscriber failed; the change itself is committed.', error) }
     }
   }

@@ -494,6 +494,7 @@ export async function registerIpc(args: {
     void profileProxyAuth.answer(contents, authInfo, callback, details.firstAuthAttempt === true).then(answered => { if (!answered) callback() }, () => callback())
   }
   app.on('login', answerProfileProxy)
+  browserProfiles.bindProxyCredentialsBeforeNetworkChange = profileId => profileProxyAuth.bindCurrentProxy(profileId)
   // A sign-in belongs to one Profile's proxy: forget it when that Profile is gone or no longer uses a proxy.
   // This listens to every committed list, so the GUI, the public CLI and deletion all reach it.
   const disposeProfileProxyAuthSync = browserProfiles.onChange(({ profiles }) => {
@@ -2124,8 +2125,8 @@ export async function registerIpc(args: {
     return await browsers.switchProfile(id, profileId)
   })
   // Every surface renders Main's one committed list; the manager announces each commit once.
-  browserProfiles.onChange(({ revision, sequence, profiles, folders, views }) => {
-    if (!contents.isDestroyed()) contents.send('browser:profilesChanged', { revision, sequence, profiles, folders, views })
+  browserProfiles.onChange(({ revision, sequence, profiles, folders, views, proxyAssets }) => {
+    if (!contents.isDestroyed()) contents.send('browser:profilesChanged', { revision, sequence, profiles, folders, views, proxies: proxyAssets })
   })
   // Native application changes do not invent a persistent metadata revision.
   browserProfiles.onEnvironmentApplicationChange(() => {
@@ -2136,6 +2137,18 @@ export async function registerIpc(args: {
   handleWithEvent('browser:listProfiles', (event) => ipcResult(async () => {
     await browserProfiles.initialize()
     return browserProfiles.listProfiles()
+  }))
+  handleWithEvent('browser:saveProxy', (event, edit: import('@agentmux/core/control').BrowserProxyEdit, proxyId?: string, expectedRevision?: string) => ipcResult(async () => {
+    await browserProfiles.initialize()
+    return browserProfiles.saveProxy(edit, proxyId, expectedRevision)
+  }))
+  handleWithEvent('browser:deleteProxy', (event, proxyId: string, expectedRevision: string) => ipcResult(async () => {
+    await browserProfiles.initialize()
+    return browserProfiles.deleteProxy(proxyId, expectedRevision)
+  }))
+  handleWithEvent('browser:assignProxy', (event, proxyId: string, expectedRevision: string, items: import('@agentmux/core/control').BrowserProfileSelectionItem[]) => ipcResult(async () => {
+    await browserProfiles.initialize()
+    return browserProfiles.assignProxy(proxyId, expectedRevision, items)
   }))
   handleWithEvent('browser:createProfile', (event, label: string) => ipcResult(() => browserProfiles.createProfile(label)))
   handleWithEvent('browser:copyProfile', (_event, profileId: string, label: string, expectedRevision: string) => ipcResult(() => browserProfiles.copyProfile(profileId, label, expectedRevision)))

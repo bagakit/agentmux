@@ -9,7 +9,8 @@ export function readBrowserProfileSnapshot(profiles: BrowserProfileManager): Bro
     sequence: profiles.listSequence(),
     profiles: profiles.listProfiles(),
     folders: profiles.listFolders(),
-    views: profiles.listViews()
+    views: profiles.listViews(),
+    proxies: profiles.listProxies()
   }
 }
 

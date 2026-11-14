@@ -1188,6 +1188,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'browser.targets': 'short',
   'browser.history': 'short',
   // Profile reads answer from Main's cached list; usage also reads saved Tabs, still local and bounded.
+  'browser.profile.proxy.ls': 'short', 'browser.profile.proxy.create': 'long', 'browser.profile.proxy.update': 'long', 'browser.profile.proxy.delete': 'long', 'browser.profile.proxy.assign': 'long',
   'browser.profile.ls': 'short',
   'browser.profile.inspect': 'short',
   // Writes wait for the durable metadata write; delete also clears the Profile's website data.
@@ -1294,3 +1295,5 @@ export * from './public-rpc-image.js'
 export { parsePngImage, pngImageDimensions } from './png-image.js'
 
 export * from './app-capture.js'
+
+export * from './browser-proxy-library.js'

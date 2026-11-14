@@ -1367,6 +1367,8 @@ export type BrowserProfileSummary = {
   pinned?: true
   /** How this Profile's pages reach the network; absent follows the system settings. Never holds a password. */
   network?: import('./browser-profile-network.js').BrowserProfileStoredNetwork
+  proxyBinding?: import('@agentmux/core/control').BrowserProxyBinding
+  networkApplication?: import('@agentmux/core/control').BrowserProfileNetworkApplication
   environment?: import('@agentmux/core/control').BrowserProfileEnvironment
   /** Transient native application receipt; never stored with Profile metadata. */
   environmentApplication?: import('@agentmux/core/control').BrowserProfileEnvironmentApplication
@@ -1374,7 +1376,7 @@ export type BrowserProfileSummary = {
   agentAccess?: false
 }
 
-export type BrowserProfileList = { revision: number; sequence: number; profiles: BrowserProfileSummary[]; folders: BrowserProfileFolder[]; views: import('@agentmux/core/control').BrowserProfileView[] }
+export type BrowserProfileList = { proxies?: import('@agentmux/core/control').BrowserProxyAsset[]; revision: number; sequence: number; profiles: BrowserProfileSummary[]; folders: BrowserProfileFolder[]; views: import('@agentmux/core/control').BrowserProfileView[] }
 
 /** Fields a person can change; null clears the chosen hue, an empty string clears the notes. */
 export type BrowserProfileEdit = { label?: string; hue?: number | null; notes?: string; tags?: string[]; folderId?: string | null; pinned?: boolean
@@ -2051,6 +2053,9 @@ export type AgentMuxDesktopApi = {
     listProfiles(): Promise<BrowserProfileSummary[]>
     /** The same list with the revision Main committed; edits must name this revision. */
     readProfiles(): Promise<BrowserProfileList>
+    saveProxy(edit: import('@agentmux/core/control').BrowserProxyEdit, proxyId?: string, expectedRevision?: string): Promise<{ proxy: import('@agentmux/core/control').BrowserProxyAsset; revision: number }>
+    deleteProxy(proxyId: string, expectedRevision: string): Promise<{ proxyId: string; revision: number; deleted: true }>
+    assignProxy(proxyId: string, expectedRevision: string, items: import('@agentmux/core/control').BrowserProfileSelectionItem[]): Promise<import('@agentmux/core/control').BrowserProfileBulkItemResult[]>
     /** Main publishes the whole list after every committed change, in revision order. */
     onProfilesChanged(listener: (list: BrowserProfileList) => void): () => void
     updateProfile(profileId: string, edit: BrowserProfileEdit, expectedRevision: string): Promise<BrowserProfileSummary>

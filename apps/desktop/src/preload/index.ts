@@ -792,6 +792,9 @@ const api: AgentMuxPreloadApi = {
     switchProfile: (id: string, profileId: string) => ipcRenderer.invoke('browser:switchProfile', id, profileId),
     listProfiles: () => ipcRenderer.invoke('browser:listProfiles'),
     readProfiles: () => ipcRenderer.invoke('browser:readProfiles'),
+    saveProxy: (edit, proxyId, expectedRevision) => ipcRenderer.invoke('browser:saveProxy', edit, proxyId, expectedRevision),
+    deleteProxy: (proxyId, expectedRevision) => ipcRenderer.invoke('browser:deleteProxy', proxyId, expectedRevision),
+    assignProxy: (proxyId, expectedRevision, items) => ipcRenderer.invoke('browser:assignProxy', proxyId, expectedRevision, items),
     onProfilesChanged(listener) {
       const wrapped = (_event: unknown, list: Parameters<typeof listener>[0]): void => listener(list)
       ipcRenderer.on('browser:profilesChanged', wrapped)

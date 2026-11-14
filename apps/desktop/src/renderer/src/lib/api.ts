@@ -1449,6 +1449,9 @@ const mockApi: AgentMuxDesktopApi = {
       browserListeners.forEach((listener) => listener({ type: 'updated', browser: structuredClone(browser) }))
       return structuredClone(browser)
     },
+    saveProxy: async () => { throw new Error('Proxy library editing needs the connected Desktop Profile owner.') },
+    deleteProxy: async () => { throw new Error('Proxy library editing needs the connected Desktop Profile owner.') },
+    assignProxy: async () => { throw new Error('Proxy assignment needs the connected Desktop Profile owner.') },
     listProfiles: async () => structuredClone(mockBrowserProfiles),
     readProfiles: async () => ({ revision: mockBrowserProfileRevision, sequence: mockBrowserProfileRevision, profiles: structuredClone(mockBrowserProfiles), folders: [], views: [] }),
     onProfilesChanged(listener) {
