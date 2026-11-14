@@ -135,4 +135,10 @@ it('one original Context in two worktree Zones keeps both exact actionable label
  const current=frames[0]!.querySelector('[data-focus-zone-id="second"] button')!
  expect(current.getAttribute('aria-current')).toBe('location'); expect(current.hasAttribute('data-focus-project-scope-control')).toBe(true)
  expect(current.getAttribute('title')).toContain('/second')
+ const rootOnly={...lane('single'),labels:['Original project'],summary:'Original retained root explanation'}
+ await dom.render(<FocusProjectLanes resourceMenus lanes={[rootOnly]} selectedProjectKey={projectKey} onSelect={()=>{}}
+   origins={new Map([['single',{kind:'mixed',label:'Project · Survey',locations:['Original survey'],addresses:['amux://space/original-source']}]])}
+   renderLane={(_scan,heading)=>heading}/> )
+ const originalTitle=dom.container.querySelector('.focus-project-frame__heading button[data-focus-project-scope-control]')!.getAttribute('title')!
+ expect(originalTitle).toContain('Original retained root explanation'); expect(originalTitle).toContain('Original survey'); expect(originalTitle).toContain('amux://space/original-source')
 })
