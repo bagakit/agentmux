@@ -74,7 +74,7 @@ async function details(anchor = document.querySelector<HTMLButtonElement>('.focu
   await click(reader.querySelector('[aria-label="Agent information: usage, Goals, message relationships and source"]'))
   expect(reader.querySelector('.agent-locations')).toBeNull()
   await click([...reader.querySelectorAll('.agent-information-details__tabs button')].find(button => button.textContent === 'Source'))
-  expect(reader.querySelector('.agent-locations')).not.toBeNull()
+  expect(reader.querySelector('.agent-locations')?.getAttribute('aria-haspopup')).toBe('dialog')
   return anchor
 }
 function disclose() { return document.querySelector('.agent-information-reader .agent-locations') }
@@ -139,7 +139,7 @@ it('Takeover Source keeps the exact Runtime through the real chooser, rejects a 
   }
   await binding(runtimeId)
   useAppStore.setState(state => ({ sessions: [...state.sessions, source] }))
-  const owner = { runtimeId, ownerInstanceId: 'original-instance', protocolVersion: 2 as const, processId: null, availability: 'connected' as const, ctxmux: null }
+  const owner = { runtimeId, ownerInstanceId: 'original-instance', protocolVersion: 2 as const, processId: 1, availability: 'connected' as const, ctxmux: null }
   vi.spyOn(api.spatial, 'owner').mockResolvedValue({ owner })
   vi.spyOn(api.sessions, 'owner').mockResolvedValue({ owner })
   vi.spyOn(api.sessions, 'creation').mockResolvedValue({ kind: 'agent', agentSessionId: source.id, hostId: 'local', providerId: source.providerId,
@@ -151,7 +151,7 @@ it('Takeover Source keeps the exact Runtime through the real chooser, rejects a 
       takeover: { source: { hostId: 'local', runtimeId, agentSessionId: source.id, run: source.control.run, organization: null },
         destination: { owner: { runtimeId }, address: { spaceId: null, zoneId: null, workspaceId: 'workspace', ...reference }, organization: null }, nature: null } }]
   } satisfies AgentTakeoverPage))
-  const context = { ...agentContextForSession(source, undefined, 'Original source', composerConfig.workspaces[0]),
+  const context = { ...agentContextForSession(source, undefined, 'Original source', composerConfig.workspaces[0], null),
     access: { identity: { runtimeId, agentSessionId: source.id }, session: source, locations: [], select() {}, open() {}, refresh() {}, isCurrent: () => true } }
   await dom.render(<><WorkspaceAgentRow context={context} selected={false} selecting={false} disabled={false} onToggle={() => {}} onOpen={() => { throw Error('Reading does not navigate') }} />{picker}</>)
   const anchor = document.querySelector<HTMLButtonElement>('.focus-context')!
@@ -271,6 +271,41 @@ it('held Source accepts the same exact Host and canonical SID after its Run chan
   for (const call of lifecycle) expect(call).not.toHaveBeenCalled()
 })
 
+it('Source keeps its original Runtime and request while the exact destination is rebound', async () => {
+  const originalRuntime = 'qualified-runtime-on-original-host'
+  const start = (await api.spatial.read())!, originalGraph = structuredClone(start.graph)
+  for (const region of originalGraph.regions) if (region.agentSessionId === id && region.execution) region.execution.runtimeId = originalRuntime
+  spatialFixtures[0]!.holdNotifications()
+  await api.spatial.commit({ expectedRevision: start.revision, graph: originalGraph })
+  await rereadAgentRegionExecution({ tabId: 'first', regionId: 'right', agentSessionId: id })
+
+  await dom.render(surface()); await details(); await click(disclose())
+  const request = useAppStore.getState().sessionLocationRequest!
+  expect(request.subject?.runtimeId).toBe(originalRuntime)
+  const before = selected(), drafts = useAppStore.getState().agentComposerDrafts
+  const current = (await api.spatial.read())!, graph = structuredClone(current.graph)
+  const region = graph.regions.find(one => one.tabId === 'first' && one.regionId === 'right')!
+  region.execution = { ...region.execution!, runtimeId: 'different-runtime-on-original-host' }
+  spatialFixtures[0]!.holdNotifications()
+  await act(async () => {
+    await api.spatial.commit({ expectedRevision: current.revision, graph })
+    await rereadAgentRegionExecution({ tabId: 'first', regionId: 'right', agentSessionId: id })
+  })
+  await click(choices().find(choice => choice.title.includes('"regionId":"right"')))
+  expect(selected()).toBe(before)
+  expect(useAppStore.getState().sessionLocationRequest).toMatchObject({ requestId: request.requestId, issue: expect.stringContaining('binding at this location is unconfirmed') })
+  expect(useAppStore.getState().agentComposerDrafts).toBe(drafts)
+  await key(document.querySelector('[role="combobox"]')!, 'Escape')
+  await details(); await click(disclose())
+  const next = useAppStore.getState().sessionLocationRequest!
+  const stale = { displayWorkspaceId: 'workspace', groupId: 'group-a', tabId: 'first', regionId: 'left' }
+  expect(next.requestId).not.toBe(request.requestId)
+  await act(async () => expect(useAppStore.getState().chooseSessionLocation(request.requestId, stale)).toBe(false))
+  expect(selected()).toBe(before)
+  expect(useAppStore.getState().sessionLocationRequest).toBe(next)
+  for (const call of lifecycle) expect(call).not.toHaveBeenCalled()
+})
+
 it('Source details count current spatial bindings rather than a card identity captured before reading', async () => {
   await dom.render(surface())
   const anchor = document.querySelector('.focus-context')!
@@ -284,8 +319,18 @@ it('Source details count current spatial bindings rather than a card identity ca
   await rereadAgentRegionExecution({ tabId: 'first', regionId: 'right', agentSessionId: id })
   await click(reader.querySelector('[aria-label="Agent information: usage, Goals, message relationships and source"]'))
   await click([...reader.querySelectorAll('.agent-information-details__tabs button')].find(button => button.textContent === 'Source'))
-  expect(disclose()?.getAttribute('aria-label')).toContain('locations unconfirmed')
+  expect(disclose()?.getAttribute('aria-label')).toContain('Locations unconfirmed')
   expect(disclose()?.textContent).toContain('Locations unconfirmed')
+})
+
+it('a changed Zone cannot be ignored when choosing the otherwise exact Region', async () => {
+  await dom.render(surface()); await details(); await click(disclose())
+  const before = selected(), request = useAppStore.getState().sessionLocationRequest!
+  const reference = JSON.parse(choices().find(choice => choice.title.includes('"regionId":"right"'))!.title)
+  delete reference.spaceId
+  await act(async () => expect(useAppStore.getState().chooseSessionLocation(request.requestId, { ...reference, zoneId: 'another-zone' })).toBe(false))
+  expect(selected()).toBe(before)
+  expect(useAppStore.getState().sessionLocationRequest?.requestId).toBe(request.requestId)
 })
 
 it('a removed exact Region cannot redirect to the surviving first candidate and keeps its picker', async () => {
@@ -322,7 +367,12 @@ it.each([0, 1])('actively opens %i positions without creating a view or Run', as
   useAppStore.setState({ tabs: count ? { first: { ...first, layout: createWorkbenchTab('x', first.regions.left!).layout, regions: { left: first.regions.left! } } } : {}, layouts: { workspace: createWorkspaceLayout('group-a', count ? ['first'] : []) } })
   await dom.render(surface()); await details(); expect(disclose()?.getAttribute('aria-label')).toContain(`${count} location`)
   const before = useAppStore.getState(); await click(disclose())
-  expect(choices()).toHaveLength(count); expect(selected()).toBe(before.workbenchSpaceSelection); expect(useAppStore.getState().tabs).toBe(before.tabs)
+  expect(choices()).toHaveLength(count)
+  if (!count) {
+    expect(document.querySelector('.quick-switch__empty')?.textContent).toContain('No locations to choose')
+    expect(document.querySelector('.quick-switch__footer')?.textContent).not.toContain('to open')
+  }
+  expect(selected()).toBe(before.workbenchSpaceSelection); expect(useAppStore.getState().tabs).toBe(before.tabs)
   for (const call of lifecycle.splice(0)) expect(call).not.toHaveBeenCalled()
 })
 
@@ -331,8 +381,10 @@ it('an unknown source stays unknown and a changed Host cannot inherit an old pic
   const dispose = await useAppStore.getState().initialize()
   const fixture = spatialFixtures[0]!
   spatialFixtures.push({ ...fixture, directory: '', dispose })
-  await dom.render(surface()); await details(); expect(disclose()?.getAttribute('aria-label')).toContain('locations unconfirmed')
+  await dom.render(surface()); await details(); expect(disclose()?.getAttribute('aria-label')).toContain('Locations unconfirmed')
   await click(disclose()); expect(document.querySelector('[role="dialog"]')?.textContent).toContain('not confirmed')
+  expect(document.querySelector('.quick-switch__empty')).toBeNull()
+  expect(document.querySelector('.quick-switch__footer')?.textContent).not.toContain('to open')
   const request = useAppStore.getState().sessionLocationRequest!, before = selected()
   await act(async () => expect(useAppStore.getState().chooseSessionLocation(request.requestId, { displayWorkspaceId: 'workspace', groupId: 'group-a', tabId: 'first', regionId: 'left' })).toBe(false))
   expect(selected()).toBe(before); expect(useAppStore.getState().sessionLocationRequest?.issue).toContain('binding at this location is unconfirmed')
@@ -344,7 +396,7 @@ it('an unknown source stays unknown and a changed Host cannot inherit an old pic
 
 it.each([1, 32, 100])('actual Roster does no location count work across %i Sessions and details count only their exact subject', async count => {
   arrange(count)
-  const work = vi.spyOn(navigation, 'sessionWorkbenchLocationCounts'), build = vi.spyOn(quickSwitch, 'buildSessionLocationItems')
+  const work = vi.spyOn(navigation, 'sessionWorkbenchLocationSummary'), build = vi.spyOn(quickSwitch, 'buildSessionLocationItems')
   await dom.render(<><AgentRoster total={count} />{picker}</>)
   const trigger = document.querySelector('.agent-roster__trigger')!
   await act(async () => trigger.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true })))
@@ -358,8 +410,8 @@ it.each([1, 32, 100])('actual Roster does no location count work across %i Sessi
   expect(work).not.toHaveBeenCalled(); expect(build).not.toHaveBeenCalled()
   await dom.render(surface()); await details()
   expect(work).toHaveBeenCalledTimes(1)
-  expect(work.mock.calls[0]?.[2](id)).toEqual({ hostId: 'local', agentSessionId: id })
-  expect(work.mock.calls[0]?.[2]('unrelated-0')).toBeNull()
+  expect(work.mock.calls[0]?.[2]).toBe(id)
+  expect(work.mock.calls[0]?.[3]).toMatchObject({ hostId: 'local', agentSessionId: id })
   await click(disclose())
   expect(choices()).toHaveLength(3); expect(build).toHaveBeenCalledTimes(1)
 })
@@ -393,7 +445,7 @@ it.each([1, 32, 100])('actual Focus keeps position membership cached across unre
     beforeSequence: null, afterSequence: options?.afterSequence ?? 0, throughSequence: 0, incarnation: 'location-journal', messageId: null, broadcastOperationId: null, events: [], nextAfterSequence: null, nextBeforeSequence: null }))
   vi.spyOn(api.sessions, 'spawns').mockImplementation(async (subject, options) => ({ ...subject, participantSessionId: subject.agentSessionId, direction: options.direction,
     creatorRuntimeId: null, records: [], nextCursor: null, coverage: { scope: 'selected-owner', history: 'recorded-creations' } }))
-  const lookups = vi.spyOn(storeOwner, 'agentRegionExecution'), counts = vi.spyOn(navigation, 'sessionWorkbenchLocationCounts')
+  const lookups = vi.spyOn(storeOwner, 'agentRegionExecution'), counts = vi.spyOn(navigation, 'sessionWorkbenchLocationSummary')
   await dom.render(<><GlobalFocusSurface />{picker}</>)
   expect(document.querySelectorAll('.global-focus-surface .agent-locations')).toHaveLength(0)
   expect(lookups.mock.calls.length).toBeGreaterThan(0); expect(counts).not.toHaveBeenCalled()
@@ -421,7 +473,7 @@ it.each(['missing-execution', 'wrong-canonical', 'wrong-host'] as const)('actual
   expect(useAppStore.getState().tabs).toBe(originalTabs)
   await dom.render(surface()); await details()
   const location = disclose()!
-  expect(location.getAttribute('aria-label')).toContain('locations unconfirmed')
+  expect(location.getAttribute('aria-label')).toContain('Locations unconfirmed')
   expect(location.textContent).toContain('Locations unconfirmed')
   expect(location.getAttribute('aria-label')).not.toContain('0 locations')
   await click(location)

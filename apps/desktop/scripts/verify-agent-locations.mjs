@@ -10,7 +10,7 @@ mkdirSync(directory, { recursive: true })
 const sourceFiles = ['store.ts', 'components/AgentLocationsButton.tsx', 'components/AgentInformationPreview.tsx', 'components/AgentInformationReader.tsx', 'components/AgentInformationDetails.tsx', 'components/AgentRoster.tsx', 'components/FocusContextRow.tsx', 'components/WorkspaceAgentRow.tsx',
   'components/QuickSwitcher.tsx', 'components/GlobalFocusSurface.tsx', 'components/SurfaceToolDock.tsx', 'lib/desktop-focus-navigation.ts', 'lib/focus-context-identity.ts',
   'lib/quick-switch.ts', 'lib/desktop-spatial-state.ts', 'lib/workbench-navigation-catalog.ts'].map(file => 'apps/desktop/src/renderer/src/' + file)
-sourceFiles.push('packages/core/src/spatial-state.ts', 'apps/desktop/test/agent-locations.test.tsx', 'apps/desktop/test/quick-switch.test.ts', 'apps/desktop/test/quick-switch-demand.test.tsx', 'apps/desktop/test/agent-locations.config.mts', 'apps/desktop/scripts/verify-agent-locations.mjs')
+sourceFiles.push('packages/core/src/spatial-state.ts', 'packages/client-ui/src/patterns/agent-work-location.tsx', 'packages/client-ui/test/agent-work-location.test.tsx', 'apps/desktop/test/agent-locations.test.tsx', 'apps/desktop/test/quick-switch.test.ts', 'apps/desktop/test/quick-switch-demand.test.tsx', 'apps/desktop/test/agent-locations.config.mts', 'apps/desktop/scripts/verify-agent-locations.mjs')
 const sha = path => createHash('sha256').update(readFileSync(resolve(root, path))).digest('hex')
 const original = Object.fromEntries(sourceFiles.map(path => [path, sha(path)]))
 const receipt = { sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), schema: 'agentmux.desktop-agent-locations.v1', passed: false, sourceSHA256: original, cases: [],
@@ -20,7 +20,7 @@ function run(name, mutation, bearing) {
   unchanged()
   const loaded = resolve(directory, name + '-loaded.jsonl'), report = resolve(directory, name + '.json')
   const args = ['exec', 'vitest', 'run', '--config', 'apps/desktop/test/agent-locations.config.mts', '--reporter=json', '--outputFile', report, '--maxWorkers=2']
-  if (bearing) args.push('test/agent-locations.test.tsx', '-t', bearing)
+  if (bearing) args.push('agent-locations.test.tsx', '-t', bearing)
   const result = spawnSync('pnpm', args, { cwd: root, env: { ...process.env, VITEST_MAX_THREADS: '2', VITEST_MAX_FORKS: '2', AGENT_LOCATIONS_LOADED: loaded,
     ...(mutation ? { AGENT_LOCATIONS_MUTANT: mutation } : { AGENT_LOCATIONS_MUTANT: '' }) }, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 })
   writeFileSync(resolve(directory, name + '.log'), (result.stdout ?? '') + (result.stderr ?? ''))
@@ -34,6 +34,8 @@ function run(name, mutation, bearing) {
       !failures[0].failureMessages.some(message => message.includes('AssertionError'))) throw new Error('Mutation did not fail its original behavior assertion: ' + name)
     if (!proofs.some(proof => proof.mutated && proof.originalSHA256 !== proof.loadedSHA256)) throw new Error('Mutated navigation owner was not evaluated: ' + name)
   } else {
+    const neutral = summary.testResults.find(file => file.name.endsWith('/client-ui/test/agent-work-location.test.tsx'))
+    if (!neutral || neutral.assertionResults.filter(test => test.status === 'passed').length < 2) throw new Error('Independent location pattern consumer was not verified')
     const owned = summary.testResults.find(file => file.name.endsWith('/test/agent-locations.test.tsx'))
     if (result.status !== 0 || !summary.success || summary.numFailedTests || !owned || owned.assertionResults.filter(test => test.status === 'passed').length < 23) throw new Error('Original location consumer gate failed: ' + name)
   }
@@ -51,6 +53,10 @@ try {
   run('persistent-card-action', 'persistent-card-action', 'Focus explicitly reselects the second Region')
   run('missing-details-action', 'missing-details-action', 'Focus explicitly reselects the second Region')
   run('admission-bypass', 'admission-bypass', 'held Source refuses a changed host under the same Renderer id')
+  run('merge-aliases', 'merge-aliases', 'Space aliases count one physical occurrence')
+  run('unknown-as-zero', 'unknown-as-zero', 'an unknown source stays unknown')
+  run('drop-runtime', 'drop-runtime', 'Source keeps its original Runtime and request')
+  run('drop-zone', 'drop-zone', 'a changed Zone cannot be ignored')
   run('restored')
   receipt.passed = true
   writeFileSync(resolve(directory, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
