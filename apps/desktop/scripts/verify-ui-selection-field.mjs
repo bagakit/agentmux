@@ -21,10 +21,11 @@ const modes = {
   },
   '--host-project-unavailable': {
     config: 'apps/desktop/test/ui-host-project-unavailable.config.mts', evidence: 'AGENTMUX_EXECUTOR_EVIDENCE', mutant: 'AGENTMUX_EXECUTOR_MUTANT',
-    mutants: ['unavailable-selected', 'stale-connection-filter'],
+    mutants: ['unavailable-selected', 'stale-connection-filter', 'label-sensitive'],
     expected: {
       'unavailable-selected': ['does not re-enable an unavailable saved Executor when connection configuration changes', 'aria-disabled'],
       'stale-connection-filter': ['does not substitute a same-ID executor after the selected connection changes', 'aria-disabled'],
+      'label-sensitive': ['keeps the selected Agent when only the Host display name changes', "not to be 'true'"],
     },
   },
 }

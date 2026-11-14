@@ -85,6 +85,12 @@ describe('Workspace add built CLI consumes the public owner without a caller or 
     expect(seen).toEqual([{ ...base, requestId: expect.any(String), operation, input }])
   })
 
+  it('forwards the original Host configuration witness without rewriting its label or route', async () => {
+    const input = { hostId: 'remote', path: 'project', expectedHost: { id: 'remote', kind: 'ssh', label: 'Original display', hostname: 'host.invalid' } }
+    expect(success(await run([...command, '--input', '-'], JSON.stringify(input))).result).toEqual({ item: committed, changed: true })
+    expect(seen).toEqual([{ ...base, requestId: expect.any(String), operation, input }])
+  })
+
   it('preserves generic own keys and nested literal JSON instead of defining a host schema or defaults', async () => {
     const input = JSON.parse('{"__proto__":{"literal":"data"},"constructor":"--help","futureField":[null,false,4,{"text":"one\\ntwo"}]}')
     success(await run([...command, '--input', '-'], JSON.stringify(input)))

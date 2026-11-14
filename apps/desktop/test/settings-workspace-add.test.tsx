@@ -1,4 +1,5 @@
 import { selectSettingsHost } from './helpers/settings-host-ui'
+import { chooseField } from './helpers/selection-field'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -97,6 +98,22 @@ it('registers on the exact committed Host despite unknown checks, without openin
   expect(useAppStore.getState().agentComposerDrafts).toEqual(drafts); expect(close).not.toHaveBeenCalled(); expect(saveHosts).not.toHaveBeenCalled()
   expect(pane().querySelector('[data-folder-stage]')!.textContent).toContain('Folder registered on Remote')
   expect(useAppStore.getState().checkHost).not.toHaveBeenCalled(); expect(useAppStore.getState().detectExecutors).not.toHaveBeenCalled()
+})
+
+it('preserves the original Agent choice through a Host display rename in the real registration owner', async () => {
+  await show(); await fill('Project directory', _hygiene_fixturePath("owned-renamed"))
+  await chooseField(pane().querySelector<HTMLButtonElement>('[aria-label="Prepare an Agent"]')!, 'codex')
+  useAppStore.setState({ selectWorkspace: vi.fn(async id => { useAppStore.setState({ activeWorkspaceId: id, layouts: { [id]: createWorkspaceLayout('target-group') } }) }) })
+  vi.mocked(api.workspaces.add).mockImplementationOnce(async input => {
+    await f.owner.update(current => ({ ...current, hosts: current.hosts.map(host => host.id === 'remote' ? { ...host, label: 'Renamed display' } : host) }))
+    return (await registerWorkspace(input, f.owner, () => ({}))).workspace
+  })
+  await click('[data-open-folder]'); await settle()
+  const saved = (await f.disk()).workspaces.find(workspace => workspace.path === _hygiene_fixturePath("owned-renamed"))!
+  expect(saved?.hostId).toBe('remote')
+  const tab = Object.values(useAppStore.getState().tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'launcher' && region.workspaceId === saved.id))
+  expect(tab?.regions[tab.layout.activeRegionId]).toMatchObject({ kind: 'launcher', workspaceId: saved.id, executorId: 'codex' })
+  expect(useAppStore.getState().launchAgent).not.toHaveBeenCalled()
 })
 
 it('opens only the returned registered identity and preserves unrelated owner publications', async () => {

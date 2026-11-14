@@ -4,7 +4,7 @@ import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { execFile } from 'node:child_process'
 import { EventEmitter } from 'node:events'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -99,6 +99,11 @@ async function registered() {
   await server.start()
   const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path } })
   return { root, store, prepare, commit, save, trace, publications, published, execute,
+    saveConfig: async (next: AppConfig, expected: AppConfig) => {
+      const handler = ipc.handlers.get('config:save')
+      if (!handler) throw new Error('The original config save handler is unavailable')
+      return await handler({ senderFrame: Reflect.get(sender as object, 'mainFrame'), sender } as unknown as IpcMainInvokeEvent, next, expected)
+    },
     bytes: () => readFile(store.filePath, 'utf8'),
     disk: async () => JSON.parse(await readFile(store.filePath, 'utf8')) as AppConfig,
     rpc, path,
@@ -121,6 +126,22 @@ async function registered() {
 }
 
 describe('Control writes settle through the registered Main owner', () => {
+  it('registers the original Host through public RPC after its display name changes', async () => {
+    const f = await registered()
+    try {
+      const before = await f.disk(), expectedHost = before.hosts.find(host => host.id === 'local')!
+      await f.saveConfig({ ...before, hosts: before.hosts.map(host => host.id === 'local' ? { ...host, label: 'Renamed display' } : host) }, before)
+      const path = join(f.root, 'renamed-host')
+      expect(await f.rpc.call('settings.workspaces.register', { input: { hostId: 'local', path, expectedHost } })).toMatchObject({ changed: true, item: { value: { hostId: 'local', path } } })
+      expect((await f.disk()).workspaces.some(workspace => workspace.hostId === 'local' && workspace.path === path)).toBe(true)
+      const cliPath = join(f.root, 'renamed-host-cli'), inputFile = join(f.root, 'workspace-input.json')
+      await writeFile(inputFile, JSON.stringify({ hostId: 'local', path: cliPath, expectedHost }))
+      const output = await exec(process.execPath, [resolve('packages/core/bin/amux'), '--endpoint', `unix://${f.path}`, 'settings', 'workspaces', 'register', '--input', inputFile],
+        { timeout: 10_000, env: objectCliEnvironment(f.root) })
+      expect(JSON.parse(output.stdout)).toMatchObject({ ok: true, operation: 'settings.workspaces.register', result: { changed: true, item: { value: { hostId: 'local', path: cliPath } } } })
+      expect((await f.disk()).workspaces.some(workspace => workspace.hostId === 'local' && workspace.path === cliPath)).toBe(true)
+    } finally { await f.dispose() }
+  })
   it('waits past the old short budget for actual durable save, commit and publication before replying', async () => {
     const f = await registered(), before = await f.bytes(), hold = f.holdSave()
     let settled = false

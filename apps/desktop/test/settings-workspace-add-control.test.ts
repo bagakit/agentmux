@@ -121,6 +121,15 @@ describe('Workspace registration owns current Main facts for UI and public CLI',
    expect(JSON.parse(await f.bytes()).workspaces.some((item:WorkspaceRecord)=>item.hostId==='local'&&item.path===path)).toBe(true)
   }finally{await f.dispose()}
  })
+ it('keeps public registration on the original Host after a display rename',async()=>{
+  const f=await fixture();try{
+   const before=await f.current(),expectedHost=before.hosts.find(host=>host.id==='local')!,path=join(f.root,'renamed-host')
+   await f.invoke('config:save',{...before,hosts:before.hosts.map(host=>host.id==='local'?{...host,label:'Renamed display'}:host)},before)
+   const result=await f.cli({hostId:'local',path,expectedHost})
+   expect(result).toMatchObject({operation:'settings.workspaces.add',changed:true,item:{value:{hostId:'local',path}}})
+   expect(JSON.parse(await f.bytes()).workspaces.some((item:WorkspaceRecord)=>item.hostId==='local'&&item.path===path)).toBe(true)
+  }finally{await f.dispose()}
+ })
  it('registers literal paths/default names and returns the actual original record for UI-first and CLI-first duplicates',async()=>{
   const f=await fixture();try{
    const literal=join(f.root,'~not-expanded ') // no existing directory or creation is required
@@ -179,6 +188,13 @@ describe('Workspace registration owns current Main facts for UI and public CLI',
    expect(await f.bytes()).toBe(baseline);expect(f.publications).toHaveLength(0)
    expect((await f.current()).workspaces).toHaveLength(1)
   }finally{await f.dispose()}
+ })
+ it('registers against the same Host when only its display name changed',async()=>{
+  const f=await configOwnerFixture({hosts:[DEFAULT_CONFIG.hosts[0]!,{id:'remote',kind:'ssh',label:'Owned remote',hostname:'private.invalid'}]})
+  const expectedHost=f.owner.current.hosts.find(host=>host.id==='remote')!
+  await f.owner.update(current=>({...current,hosts:current.hosts.map(host=>host.id==='remote'?{...host,label:'Renamed display'}:host)}))
+  const result=await registerWorkspace({hostId:'remote',path:_hygiene_fixturePath("literal"),expectedHost},f.owner,()=>({}))
+  expect(result.workspace.hostId).toBe('remote')
  })
  it('rejects a same-ID Host replacement instead of registering on a different connection',async()=>{
   const f=await configOwnerFixture({hosts:[DEFAULT_CONFIG.hosts[0]!,{id:'remote',kind:'ssh',label:'Owned remote',hostname:'private.invalid'}]})

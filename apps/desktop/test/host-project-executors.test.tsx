@@ -11,6 +11,7 @@ import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import type { HostConfig } from '../src/shared/contracts'
 const dom = composerDOM()
+const discoverHostExecutors = useAppStore.getState().discoverHostExecutors
 const remote: HostConfig = { id: 'remote', kind: 'ssh', label: 'Remote', hostname: 'original.invalid' }
 function inventory(host = remote): HostExecutorInventoryState {
   return { input: host, state: 'ready', result: { routeHostId: host.id, runtimeId: 'target-runtime', executors: [
@@ -94,6 +95,58 @@ it('does not substitute a same-ID executor after the selected connection changes
   expect(useAppStore.getState().launchAgent).not.toHaveBeenCalled()
   expect(dom.container.textContent).toContain('Agent Launcher was not prepared')
   expect(useAppStore.getState().activeWorkspaceId).toBe('new-folder')
+})
+it.each(['address', 'keyFile'] as const)('does not reuse the selected Agent after the Tailcat %s changes', async field => {
+  const original = { ...remote, transport: 'tailcat' as const, tailcat: { address: 'tcOriginal', keyFile: 'original-key' } } satisfies HostConfig
+  useAppStore.setState(state => ({ config: { ...state.config!, hosts: [state.config!.hosts[0]!, original] }, hostExecutorInventories: { remote: inventory(original) } }))
+  await show(); await choose()
+  const changed: HostConfig = { ...original, tailcat: { ...original.tailcat, [field]: field === 'address' ? 'tcReplacement' : 'replacement-key' } }
+  await act(async () => { const config = useAppStore.getState().config!; useAppStore.setState({ config: { ...config, hosts: [config.hosts[0]!, changed] }, hostExecutorInventories: { remote: inventory(changed) } }) })
+  const selected = (await options()).find(item => item.getAttribute('data-value') === 'shared')!
+  expect(selected.getAttribute('aria-disabled')).toBe('true')
+})
+it('keeps the selected Agent when only the Host display name changes', async () => {
+  await show(); await choose()
+  const renamed: HostConfig = { ...remote, label: 'Renamed display' }
+  await act(async () => { const config = useAppStore.getState().config!; useAppStore.setState({ config: { ...config, hosts: [config.hosts[0]!, renamed] }, hostExecutorInventories: { remote: inventory(renamed) } }) })
+  const selected = (await options()).find(item => item.getAttribute('data-value') === 'shared')!
+  expect(selected.getAttribute('aria-disabled')).not.toBe('true')
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Prepare an Agent"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  await open()
+  const tab = Object.values(useAppStore.getState().tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'launcher' && region.workspaceId === 'new-folder'))
+  expect(tab?.regions[tab.layout.activeRegionId]).toMatchObject({kind:'launcher',workspaceId:'new-folder',executorId:'shared'})
+})
+it('keeps the original Executor inventory when only the Host display name changes', async () => {
+  await show(); await choose()
+  const renamed: HostConfig = { ...remote, label: 'Renamed display' }
+  await act(async () => { const config = useAppStore.getState().config!; useAppStore.setState({ config: { ...config, hosts: [config.hosts[0]!, renamed] } }) })
+  expect((await options()).map(item => item.dataset.value)).toContain('remote-only')
+  expect(useAppStore.getState().discoverHostExecutors).not.toHaveBeenCalled()
+})
+it.each([false, true])('accepts an in-flight discovery across a display rename but not a route replacement: replace=%s', async replace => {
+  let complete!: (value: NonNullable<HostExecutorInventoryState['result']>) => void
+  vi.spyOn(api.executors, 'discover').mockImplementationOnce(() => new Promise(resolve => { complete = resolve }))
+  useAppStore.setState({ discoverHostExecutors, hostExecutorInventories: {} })
+  let pending!: Promise<void>
+  await act(async () => { pending = discoverHostExecutors(remote.id) })
+  const changed: HostConfig = replace ? { ...remote, hostname: 'replacement.invalid' } : { ...remote, label: 'Renamed display' }
+  await act(async () => { const config = useAppStore.getState().config!; useAppStore.setState({ config: { ...config, hosts: [config.hosts[0]!, changed] } }) })
+  await act(async () => { complete(inventory().result!); await pending })
+  const observation = useAppStore.getState().hostExecutorInventories.remote!
+  expect(observation.state).toBe(replace ? 'checking' : 'ready')
+  expect(observation.result?.runtimeId).toBe(replace ? undefined : 'target-runtime')
+})
+it('keeps the original Agent when the Host display name changes during folder registration', async () => {
+  await show(); await choose()
+  const add = vi.mocked(api.workspaces.add).getMockImplementation()!
+  vi.mocked(api.workspaces.add).mockImplementationOnce(async input => {
+    const result = await add(input), config = useAppStore.getState().config!
+    useAppStore.setState({ config: { ...config, hosts: [config.hosts[0]!, { ...remote, label: 'Renamed display' }] } })
+    return result
+  })
+  await open()
+  const tab = Object.values(useAppStore.getState().tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'launcher' && region.workspaceId === 'new-folder'))
+  expect(tab?.regions[tab.layout.activeRegionId]).toMatchObject({kind:'launcher',workspaceId:'new-folder',executorId:'shared'})
 })
 it('fences a connection replacement during registration without losing the returned folder', async () => {
   await show(); await choose()

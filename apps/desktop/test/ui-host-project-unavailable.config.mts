@@ -9,8 +9,12 @@ const root = resolve(import.meta.dirname, '../../..')
 const evidence = process.env.AGENTMUX_EXECUTOR_EVIDENCE
 assert.ok(evidence, 'Explicit Executor mutation evidence directory')
 const mutant = process.env.AGENTMUX_EXECUTOR_MUTANT ?? 'baseline'
-assert.ok(['baseline', 'unavailable-selected', 'stale-connection-filter'].includes(mutant), 'Known Executor mutation')
-const target = mutant === 'stale-connection-filter' ? {
+assert.ok(['baseline', 'unavailable-selected', 'stale-connection-filter', 'label-sensitive'].includes(mutant), 'Known Executor mutation')
+const target = mutant === 'label-sensitive' ? {
+  file: 'apps/host/src/host-configuration.ts',
+  before: 'if (!left || !right || left.id !== right.id || left.kind !== right.kind) return false',
+  after: 'if (!left || !right || left.id !== right.id || left.kind !== right.kind || left.label !== right.label) return false',
+} : mutant === 'stale-connection-filter' ? {
   file: 'apps/desktop/src/renderer/src/components/settings/HostProjectsPane.tsx',
   before: 'const pickerExecutors = selectionCurrent ? executors : executors.filter(item => item.id !== executorId)',
   after: 'const pickerExecutors = executors',
@@ -26,6 +30,7 @@ mkdirSync(evidence, { recursive: true })
 export default defineConfig({
   ...baseConfig,
   root,
+  resolve: { ...baseConfig.resolve, alias: [{ find: '@agentmux/host/host-configuration', replacement: resolve(root, 'apps/host/src/host-configuration.ts') }, ...(baseConfig.resolve!.alias as import('vite').Alias[])] },
   cacheDir: resolve(evidence, 'cache'),
   plugins: [...(baseConfig.plugins ?? []), {
     name: 'executor-unavailable-loaded-source', enforce: 'pre',
