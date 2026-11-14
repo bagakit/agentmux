@@ -185,6 +185,11 @@ export class AgentWorkspaceDirectory {
       join(root.realpath, basename(location.agentWorkspace.workspacePath)), expected)
   }
 
+  private async proveMarkerNamespace(location: AgentWorkspaceDirectoryLocation): Promise<DirectoryProof> {
+    const stateRealpath = await realpath(this.stateDirectory)
+    return await this.proveDirectory(dirname(location.markerPath), join(stateRealpath, 'agent-workspace-identities'))
+  }
+
   private async ensureNamespace(path: string, expectedRealpath: string): Promise<DirectoryProof> {
     let created = false
     try {
@@ -202,6 +207,11 @@ export class AgentWorkspaceDirectory {
   }
 
   private async readMarker(location: AgentWorkspaceDirectoryLocation): Promise<{ raw: string; value: Marker } | null> {
+    try { await lstat(dirname(location.markerPath)) } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw error
+    }
+    await this.proveMarkerNamespace(location)
     let handle
     try {
       handle = await open(location.markerPath, constants.O_RDONLY | constants.O_NOFOLLOW)
@@ -283,6 +293,7 @@ export class AgentWorkspaceDirectory {
     await this.syncDirectory(root.realpath)
     const witnessedLeaf = await this.proveLeaf(location)
     const provisioned: Marker = { ...pending.value, phase: 'provisioned', leaf: witnessedLeaf.identity }
+    await this.proveMarkerNamespace(location)
     await durableWriteFile(location.markerPath, JSON.stringify(provisioned) + '\n', { mode: 0o600, requireDirectorySync: true })
     return await this.validateLocation(location)
   }
