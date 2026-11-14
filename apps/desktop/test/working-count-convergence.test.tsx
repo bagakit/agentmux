@@ -2,14 +2,20 @@
 import { URL as FileURL } from 'node:url'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
+import { act } from 'react'
 import { expect, it, vi } from 'vitest'
 import type { AgentDisplayState } from '@agentmux/core'
 import { msUntilSemanticStatusStale } from '@agentmux/core/agent-status'
 import type { SessionSnapshot } from '../src/shared/contracts'
 import { createFocusProjectionSelector, focusBucketForSession, focusNavigationSummary } from '../src/renderer/src/lib/focus-context'
-import { composerSession } from './helpers/composer-dom-fixture'
+import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { moteConfig, moteSessions, moteTopics, scratchWorkspace, ordinaryTopicId } from './fixtures/mote-workface'
-import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
+import * as scratchTopics from '../src/renderer/src/lib/scratch-topic-snapshots'
+import { FocusNavigationButton } from '../src/renderer/src/components/FocusNavigationButton'
+import { useAppStore } from '../src/renderer/src/store'
+
+const { scratchTopicsScope } = scratchTopics
+const dom = composerDOM()
 
 // Core owns the state union. Derive the covered cases from its declaration, never a drifting list.
 function displayStates(): AgentDisplayState[] {
@@ -74,6 +80,23 @@ it('matches complete Focus grouping without reading conversation bodies across e
     }
   } finally { clock.mockRestore() }
 })
+it('skips unrelated Timeline and name updates in the mounted Focus navigation count', async () => {
+  const sessions = Array.from({ length: 26 }, (_, index) => agent(`working-${index}`, 'working'))
+  useAppStore.setState({ sessions, config: composerConfig, scratchTopicSnapshots: {}, timelines: {}, agentNames: {} })
+  const reads = vi.spyOn(scratchTopics, 'scratchTopicsForConfig')
+  await dom.render(<FocusNavigationButton aria-label="Focus">Focus</FocusNavigationButton>)
+  const count = (kind: string) => dom.container.querySelector(`[data-focus-count="${kind}"]`)?.textContent
+  expect(count('working')).toBe('26')
+  expect(reads.mock.calls.length).toBeGreaterThan(0)
+  reads.mockClear()
+  for (let index = 0; index < 10; index++) await act(() => useAppStore.setState({ timelines: {}, agentNames: {} }))
+  expect(reads.mock.calls.length).toBe(0)
+  await act(() => useAppStore.setState({ sessions: [agent(sessions[0]!.id, 'waiting'), ...sessions.slice(1)] }))
+  expect(count('working')).toBe('25')
+  expect(count('requests')).toBe('1')
+  expect(reads.mock.calls.length).toBeGreaterThan(0)
+})
+
 it('the product projection delegates turn work rather than copying a literal status comparison', () => {
   const source = ts.createSourceFile('focus-context.ts', readFileSync(new FileURL('../../../packages/client-ui/src/lib/agent-presentation.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true)
   const owner = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'agentPresentationBucket')
