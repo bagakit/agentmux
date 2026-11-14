@@ -8,18 +8,22 @@ export type GoalDelegationRow = {
   replyMessageId?: string
   report?: import('@agentmux/demand').DemandDelegationReportInput
   attention?: NonNullable<DemandRecord['delegationObservations']>[number]['attention']
+  previousAttempt?: true
 }
 
 /** Reading projection only; no display label authorizes input, recovery or acceptance. */
-export function goalDelegationRows(goal: Pick<DemandRecord, 'delegations' | 'delegationObservations' | 'delegationObservationIssue' | 'grounding'>): GoalDelegationRow[] {
+export function goalDelegationRows(goal: Pick<DemandRecord, 'delegations' | 'delegationObservations' | 'delegationObservationIssue' | 'grounding' | 'planState'>): GoalDelegationRow[] {
   const observations = new Map(goal.delegationObservations?.map(item => [item.operationId, item]))
+  const planNodes = new Map(goal.planState?.nodes.map(item => [item.id, item]))
   return (goal.delegations ?? []).map(delegation => {
     const observation = observations.get(delegation.operationId)
     const report = delegation.report ?? observation?.recoverableReport
     const issue = goal.delegationObservationIssue ?? observation?.unknown ?? (!report && !delegation.linkedAt
       ? 'The original dispatch association is unconfirmed. The task and Agent are retained.'
       : observation && !observation.communication && !report ? 'Original communication has not been observed; report availability is unknown.' : undefined)
+    const planNode = delegation.planNodeId ? planNodes.get(delegation.planNodeId) : undefined
     const original = { delegation, ...(issue ? { issue } : {}), ...(report ? { report } : {}),
+      ...(planNode && planNode.attempt?.delegationOperationId !== delegation.operationId ? { previousAttempt: true as const } : {}),
       ...(observation?.attention ? { attention: observation.attention } : {}) }
     if (delegation.collection) {
       const accepted = goal.grounding?.acceptedAt != null && goal.grounding.submissionId === delegation.collection.groundingSubmissionId

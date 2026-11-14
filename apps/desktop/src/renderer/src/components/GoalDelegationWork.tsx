@@ -71,7 +71,8 @@ export function GoalDelegationWork({ demand, active = true, compact = false }: {
     <div className="goal-delegation__heading"><strong>Delegated work</strong><button type="button" className="small-button" onClick={() => void refresh()}>Refresh reports</button></div>
     {current.delegationObservationIssue || issue ? <p className="goals-service" role="status">{issue ?? current.delegationObservationIssue} Original Agents, tasks and last confirmed reports are kept.</p> : null}
     <GoalStartWork rows={starts} supervisorSessionId={current.supervisorSessionId} active={active} openAgent={openAgent} review={review} />
-    {rows.map(row => <article className="goal-delegation__item" key={row.delegation.operationId}>
+    {rows.map(row => <article className="goal-delegation__item" key={row.delegation.operationId} data-goal-attempt={row.previousAttempt ? 'previous' : undefined}>
+      {row.previousAttempt ? <span className="goals-caption">Previous attempt</span> : null}
       <strong>{row.next}</strong>
       <p className="goal-delegation__identity">Agent <span><GoalContinuationAgent agentSessionId={row.delegation.workerAgentSessionId} hostId={delegationWorkerHostId(row.delegation)} active={active} size={14} /></span> · Follow-up {current.supervisorSessionId
         ? <span><GoalContinuationAgent agentSessionId={current.supervisorSessionId} active={active} size={14} /></span> : 'needs an assigned Supervisor'}</p>
