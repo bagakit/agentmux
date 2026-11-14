@@ -1,17 +1,21 @@
 import { ComposerTextarea } from '@agentmux/client-ui/input'
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { ComposerQueuedMessage } from './ComposerOutbox'
 
 export type EditQueuedMessage = (id: string, expectedText: string, nextText: string) => Promise<void>
+const editorLabel = '编辑待发消息'
 
 /** Local edit draft; the queue owner rechecks identity, original text and admission on Save. */
-export function ComposerQueuedMessageEditor({ entry, onSave, onCancel }: {
+export function ComposerQueuedMessageEditor({ entry, onSave, onCancel, status, tools }: {
   entry: ComposerQueuedMessage
   onSave: EditQueuedMessage
   onCancel: () => void
+  status?: ReactNode
+  tools?: ReactNode
 }) {
+  const fieldId = useId()
   const editorRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [original] = useState(entry.text)
@@ -31,10 +35,19 @@ export function ComposerQueuedMessageEditor({ entry, onSave, onCancel }: {
     event.stopPropagation()
     if (!isImeOwnedKeyboardEvent(event) && event.key === 'Escape' && !saving) { event.preventDefault(); onCancel() }
   }}>
-    <label>编辑待发消息<ComposerTextarea ref={textareaRef} autoFocus aria-label="编辑待发消息" value={text} onValueChange={setText} readOnly={saving} /></label>
+    <div className="composer-queued-editor__heading">
+      <label htmlFor={fieldId}>{editorLabel}</label>
+      {status}
+    </div>
+    <ComposerTextarea id={fieldId} ref={textareaRef} autoFocus aria-label={editorLabel} rows={3} value={text} onValueChange={setText} readOnly={saving} />
     {!entry.editable ? <p role="status">原消息已锁定，不能保存修改；编辑稿仍保留，可复制。</p> : null}
     {error ? <p role="alert">{error}</p> : null}
-    <div className="composer-queued-editor__actions"><button type="button" className="composer-tool" onClick={onCancel} disabled={saving}>取消</button>
-      <button type="button" className="composer-mailbox__send" aria-label="保存待发消息" disabled={saving || !entry.editable || !text.trim()} onClick={() => { void save() }}>{saving ? '保存中' : '保存'}</button></div>
+    <div className="composer-queued-editor__footer">
+      {tools}
+      <div className="composer-queued-editor__actions">
+        <button type="button" className="composer-tool" onClick={onCancel} disabled={saving}>取消</button>
+        <button type="button" className="composer-queued-editor__save" aria-label="保存待发消息" disabled={saving || !entry.editable || !text.trim()} onClick={() => { void save() }}>{saving ? '保存中' : '保存'}</button>
+      </div>
+    </div>
   </div>
 }

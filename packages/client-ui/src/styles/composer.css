@@ -150,12 +150,19 @@
 @keyframes composer-pending-copied { from { opacity: .35; transform: scale(.65); } to { opacity: 1; transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .composer-pending__card { --queue-view-depth: 0; --queue-view-tilt: 0; animation-name: none; transition: none; } .composer-pending__copy[data-copy-state='copied'] > svg { animation: none; } }
 
-.composer-queued-editor { display: grid; gap: 6px; min-width: 0; }
-.composer-queued-editor label { display: grid; gap: 5px; font-size: var(--fs-meta); color: var(--text-2); }
-.composer-queued-editor textarea { box-sizing: border-box; width: 100%; min-height: 64px; max-height: 120px; padding: 6px 8px; resize: vertical; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-1); color: var(--text); font: inherit; line-height: 1.45; }
-.composer-queued-editor textarea:focus { outline: 1px solid var(--focus-line); }
-.composer-queued-editor p { margin: 0; color: var(--amber); font-size: var(--fs-micro); overflow-wrap: anywhere; }
-.composer-queued-editor__actions { display: flex; justify-content: end; gap: 6px; }
+.composer-queued-editor { display: grid; gap: 8px; min-width: 0; }
+.composer-queued-editor__heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.composer-queued-editor__heading label { font-size: var(--fs-meta); font-weight: 600; color: var(--text); }
+.composer-queued-editor textarea { box-sizing: border-box; width: 100%; min-width: 0; max-height: 132px; margin: 0; padding: 8px 10px; resize: vertical; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text); font: inherit; font-size: var(--fs-body); line-height: 1.5; overscroll-behavior: contain; }
+.composer-queued-editor textarea:focus { outline: 1px solid var(--focus-line); outline-offset: -1px; }
+.composer-queued-editor p { margin: 0; color: var(--amber-text); font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.composer-queued-editor__footer { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.composer-queued-editor__actions { display: flex; gap: 4px; margin-inline-start: auto; }
+.composer-queued-editor__actions > button { display: inline-flex; align-items: center; justify-content: center; min-height: 28px; padding: 0 10px; border-radius: var(--radius-sm); font: inherit; white-space: nowrap; }
+.composer-queued-editor__save { border: 1px solid var(--green-line); background: var(--green-bg); color: var(--green-text); cursor: pointer; }
+.composer-queued-editor__save:hover:enabled { background: var(--green-bg-hover); }
+.composer-queued-editor__save:disabled { opacity: .45; cursor: default; }
+.composer-queued-editor__save:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 1px; }
 /* Whole-card distance uses cached layout bounds, never a pointer geometry walk. */
 @media (hover: hover) and (pointer: fine) {
   .composer-pending__card {
@@ -163,7 +170,7 @@
     --queue-material: clamp(72%, calc(94% - max(0px, calc(var(--queue-distance) - 64px)) / 220px * 22%), 94%);
     /* Distance changes the glass, while status and operation text keep their ink. */
   }
-  .composer-pending__card:has(:focus-visible), .composer-pending__card[data-editing='true'] { --queue-material: 94%; opacity: 1; }
+  .composer-pending__card:has(:focus-visible) { --queue-material: 94%; opacity: 1; }
 }
 @media (hover: none), (pointer: coarse) {
   .composer-pending__card { opacity: 1; background: color-mix(in srgb, var(--surface-2) 72%, transparent); backdrop-filter: blur(12px) saturate(140%); }
@@ -174,17 +181,13 @@
 .composer-pending__recover.composer-tool { width: auto; padding: 0 6px; color: var(--text); font: inherit; font-size: var(--fs-micro); }
 .composer-pending__more.composer-tool { width: auto; min-width: 24px; padding: 0 3px; font: inherit; font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
 .composer-pending__more > span { position: relative; white-space: nowrap; }
-.composer-pending__card[data-editing='true'] { height: auto; grid-template-columns: auto minmax(0, 1fr); padding: 7px; }
-.composer-pending__card[data-editing='true'] > .composer-pending__state { align-self: start; margin-top: 3px; }
-.composer-pending__card[data-editing='true'] > .composer-pending__actions { position: absolute; left: 7px; bottom: 7px; }
-.composer-pending__card[data-editing='true'] .composer-pending__archive, .composer-pending__card[data-editing='true'] .composer-pending__send { display: none; }
-.composer-pending__card .composer-queued-editor label { font-size: 0; gap: 0; }
-.composer-pending__card .composer-queued-editor textarea { min-height: 48px; padding: 2px 8px; border: 0; border-radius: 0; background: transparent; font-size: var(--fs-meta); resize: none; }
-.composer-pending__card .composer-queued-editor__actions { gap: 4px; min-height: 24px; padding-left: 64px; }
-.composer-pending__card[data-editing='true']:focus-within { border-color: var(--focus-line); }
-.composer-pending__card .composer-queued-editor__actions > button { min-height: 24px; padding: 0 6px; font: inherit; border-radius: 4px; }
-.composer-pending__card .composer-mailbox__send { background: transparent; color: var(--green-text); }
-.composer-pending__card .composer-mailbox__send:disabled { color: var(--text-3); }
+.composer-pending[data-editing='true'] { width: min(360px, calc(100vw - 16px)); }
+/* The positioned surface bounds the combined edit card and existing notice. */
+.composer-pending[data-editing='true'] > .composer-pending__cards { max-height: none; }
+.composer-pending__card[data-editing='true'] { height: auto; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 10px 12px; border-radius: var(--radius); background: var(--surface-2); box-shadow: var(--elev-2); }
+.composer-pending__card[data-editing='true'] textarea { resize: none; }
+.composer-pending__card[data-editing='true'] > .composer-pending__retry { grid-area: auto; }
+.composer-queued-editor .composer-pending__more:disabled { opacity: 1; color: var(--text-3); cursor: default; }
 
 .composer-outbox__inline { margin: 0 var(--sp-3) var(--sp-3); min-width: 0; }
 .composer-outbox__actions { margin-top: 0; }

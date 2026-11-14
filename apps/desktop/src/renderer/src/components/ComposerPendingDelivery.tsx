@@ -228,7 +228,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, composerRe
   }
   return <WindowOverlayPortal>
     <section ref={surfaceRef} className="composer-pending" aria-label={selected ? '待发消息' : 'Message Tool 提醒'} hidden={suppressed} data-state={suppressed ? 'closed' : 'open'}
-      data-mailbox-returning={returning || undefined}
+      data-mailbox-returning={returning || undefined} data-editing={(selected?.id === editingId && Boolean(onEdit)) || undefined}
       data-operation-id={selected?.id} data-count={queued.length}
       onPointerLeave={() => setHoveredId(null)}
       onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setSelectedId(null) }}
@@ -252,13 +252,23 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, composerRe
             const editing = entry.id === editingId && Boolean(onEdit)
             const explained = !editing && Boolean(entry.inputReceipt || entry.preparationWait || entry.unconfirmed || entry.error || entry.status === 'failed' || !entry.deliverable || pendingInteraction)
             const copied = copyResult?.id === entry.id && copyResult.text === entry.text ? copyResult.state : 'idle'
+            const status = <span className="composer-pending__state" aria-label={state.label} title={state.detail}><Icon size={12} animation={state.busy ? 'spin' : 'none'} aria-hidden="true" /><span className={explained ? 'composer-pending__reason' : 'composer-pending__sr-only'}>{state.label}</span></span>
+            const actions = <div className="composer-pending__actions">
+              {!editing && entry.id === selected?.id ? <button key="archive" type="button" className="composer-tool composer-pending__archive" aria-label="归档这条待发消息" title="归档原条目，保留原文和投递记录" disabled={Boolean(editingId) || state.busy || !onArchive} onClick={() => { void onArchive?.(entry.id, entry.text, true) }}><ThemeActionArchiveIcon size={12} aria-hidden="true" /></button> : null}
+              {!editing && conditionChanged && onMoveToDraft ? <button type="button" className="composer-tool composer-pending__recover" disabled={Boolean(editingId) || state.busy} title="保留原投递记录，将正文追加到当前草稿；不会立即发送" onClick={() => { void onMoveToDraft(entry.id, entry.text) }}>移至草稿</button> : null}
+              {!editing && !conditionChanged ? <button key="send" type="button" className="composer-pending__send" aria-label={immediate ? '立即发送这条待发消息' : '发送这条待发消息'} title={canSend ? immediate ? '立即发送这条消息' : '只发送这条消息' : !onSend ? '当前显示面只读' : state.detail}
+                disabled={!canSend} onClick={() => onSend?.(entry.id)}><ThemeActionSubmitIcon size={14} aria-hidden="true" /></button> : null}
+              <button key="copy" type="button" className="composer-tool composer-pending__copy" aria-label="复制这条待发消息" title={copied === 'copied' ? '已复制' : copied === 'failed' ? '复制未确认，请重试' : '复制全文'} data-copy-state={copied} disabled={!onCopy}
+                onClick={() => { void copy(entry) }}>{copied === 'copied' ? <ThemeStatusCopiedIcon size={13} aria-hidden="true" /> : copied === 'failed' ? <ThemeStatusWarningIcon size={13} aria-hidden="true" /> : <ThemeActionCopyIcon size={13} aria-hidden="true" />}</button>
+              <button key="more" type="button" className="composer-tool composer-pending__more" aria-label="在 Outbox 查看待发消息和操作" title="在 Mail 查看全文、状态和原操作" disabled={Boolean(editingId)} onClick={() => onMore(entry.id)}><span>{index + 1}/{queued.length}</span></button>
+            </div>
             return <li key={entry.id} className="composer-pending__card" data-operation-id={entry.id}
               data-queue-index={index} style={{ '--queue-depth': Math.min(4, Math.abs(index - currentIndex)) } as CSSProperties} data-selected={entry.id === selected?.id} data-busy={state.busy} data-editing={editing} data-explained={explained}
               tabIndex={0} aria-label={'待发 ' + (index + 1) + ': ' + entry.text}
               onPointerMove={event => { if (!editingId && event.pointerType !== 'touch' && entry.id !== hoveredId) setHoveredId(entry.id) }}
               onPointerLeave={() => setHoveredId(current => current === entry.id ? null : current)} onFocus={() => select(entry.id)}>
-              <span className="composer-pending__state" aria-label={state.label} title={state.detail}><Icon size={12} animation={state.busy ? 'spin' : 'none'} aria-hidden="true" /><span className={explained ? 'composer-pending__reason' : 'composer-pending__sr-only'}>{state.label}</span></span>
-              {editing && onEdit ? <ComposerQueuedMessageEditor key={entry.id} entry={entry} onSave={onEdit} onCancel={() => {
+              {editing ? null : status}
+              {editing && onEdit ? <ComposerQueuedMessageEditor key={entry.id} entry={entry} status={status} tools={actions} onSave={onEdit} onCancel={() => {
                 setEditingId(null)
                 if (surfaceRef.current?.contains(document.activeElement)) listRef.current?.querySelector<HTMLElement>('[data-selected="true"]')?.focus()
               }} /> : <button type="button" className="composer-pending__preview" aria-label="编辑这条待发消息" disabled={!entry.editable || !onEdit || Boolean(editingId)}
@@ -267,15 +277,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, composerRe
                 {(entry.preparationWait?.state === 'waiting' || entry.inputReceipt?.status === 'waiting') && onCancelPreparation ? <button type="button" className="composer-tool" onClick={() => onCancelPreparation(entry.id)}>停止等待</button> : null}
               </p> : null}
               {entry.id === selected?.id && queuedInputFailure(entry) ? <QueuedDeliveryFailure entry={entry} copy={onCopy} /> : null}
-              <div className="composer-pending__actions">
-                {entry.id === selected?.id ? <button key="archive" type="button" className="composer-tool composer-pending__archive" aria-label="归档这条待发消息" title="归档原条目，保留原文和投递记录" disabled={Boolean(editingId) || state.busy || !onArchive} onClick={() => { void onArchive?.(entry.id, entry.text, true) }}><ThemeActionArchiveIcon size={12} aria-hidden="true" /></button> : null}
-                {conditionChanged && onMoveToDraft ? <button type="button" className="composer-tool composer-pending__recover" disabled={Boolean(editingId) || state.busy} title="保留原投递记录，将正文追加到当前草稿；不会立即发送" onClick={() => { void onMoveToDraft(entry.id, entry.text) }}>移至草稿</button> : null}
-                {!conditionChanged ? <button key="send" type="button" className="composer-pending__send" aria-label={immediate ? '立即发送这条待发消息' : '发送这条待发消息'} title={canSend ? immediate ? '立即发送这条消息' : '只发送这条消息' : !onSend ? '当前显示面只读' : state.detail}
-                  disabled={!canSend} onClick={() => onSend?.(entry.id)}><ThemeActionSubmitIcon size={14} aria-hidden="true" /></button> : null}
-                <button key="copy" type="button" className="composer-tool composer-pending__copy" aria-label="复制这条待发消息" title={copied === 'copied' ? '已复制' : copied === 'failed' ? '复制未确认，请重试' : '复制全文'} data-copy-state={copied} disabled={!onCopy}
-                  onClick={() => { void copy(entry) }}>{copied === 'copied' ? <ThemeStatusCopiedIcon size={13} aria-hidden="true" /> : copied === 'failed' ? <ThemeStatusWarningIcon size={13} aria-hidden="true" /> : <ThemeActionCopyIcon size={13} aria-hidden="true" />}</button>
-                <button key="more" type="button" className="composer-tool composer-pending__more" aria-label="在 Outbox 查看待发消息和操作" title="在 Mail 查看全文、状态和原操作" disabled={Boolean(editingId)} onClick={() => onMore(entry.id)}><span>{index + 1}/{queued.length}</span></button>
-              </div>
+              {editing ? null : actions}
             </li>
           })}
         </ol>
