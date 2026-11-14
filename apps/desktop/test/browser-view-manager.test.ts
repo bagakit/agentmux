@@ -34,6 +34,10 @@ const fakeElectron = vi.hoisted(() => {
     destroyed = false
     mainFrame = { framesInSubtree: [{ osProcessId: 10, detached: false }] }
     zoomFactor = 1
+    /** The view's zoomFactor preference, which Chromium gives a site without a zoom of its own after the commit. */
+    preferredZoom: number | undefined
+    /** Chromium keeps one zoom per site of the Profile; this fake keeps them for its own page. */
+    readonly siteZooms = new Map<string, number>()
     backgroundThrottling = true
     readonly getBackgroundThrottling = vi.fn(() => this.backgroundThrottling)
     readonly setBackgroundThrottling = vi.fn((value: boolean) => { this.backgroundThrottling = value })
@@ -115,17 +119,19 @@ const fakeElectron = vi.hoisted(() => {
     setWindowOpenHandler(handler: (details: { url: string }) => { action: string }) {
       this.windowOpenHandler = handler
     }
-    setZoomFactor(value: number) { this.zoomFactor = value }
+    setZoomFactor(value: number) { this.zoomFactor = value; this.siteZooms.set(new URL(this.url || 'about:blank').host, value) }
     getZoomFactor() { return this.zoomFactor }
 
     finishLoad(url: string) {
       this.loading = true
       this.emitDetails('did-start-navigation', { url, isSameDocument: false, isMainFrame: true })
       this.emit('did-start-loading')
-      this.zoomFactor = 1
+      const stored = this.siteZooms.get(new URL(url).host)
+      this.zoomFactor = stored ?? 1
       this.url = url
       this.title = url === 'about:blank' ? '' : new URL(url).hostname
       this.emit('did-navigate', url)
+      if (stored === undefined && this.preferredZoom !== undefined) this.setZoomFactor(this.preferredZoom)
       this.emit('did-finish-load')
       this.loading = false
       this.emit('did-stop-loading')
@@ -143,7 +149,6 @@ const fakeElectron = vi.hoisted(() => {
       this.loading = true
       this.emitDetails('did-start-navigation', { url: this.url, isSameDocument: false, isMainFrame: true })
       this.emit('did-start-loading')
-      this.zoomFactor = 1
       this.emit('did-finish-load')
       this.loading = false
       this.emit('did-stop-loading')
@@ -168,6 +173,8 @@ const fakeElectron = vi.hoisted(() => {
 
     constructor(options?: { webContents?: FakeWebContents; webPreferences?: Record<string, unknown> }) {
       this.webContents = options?.webContents ?? new FakeWebContents()
+      // A page Chromium created for window.open ignores the preference; only a new view's page carries it.
+      if (!options?.webContents) this.webContents.preferredZoom = options?.webPreferences?.zoomFactor as number | undefined
       FakeWebContentsView.instances.push(this)
       this.webPreferences = options?.webPreferences
       this.partition = options?.webPreferences?.partition as string | undefined
@@ -1358,7 +1365,8 @@ describe('BrowserViewManager', () => {
     expect(view.webPreferences).toMatchObject({
       contextIsolation: true,
       sandbox: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      zoomFactor: DEFAULT_BROWSER_ZOOM_FACTOR
     })
     expect(view.visible).toBe(false)
     expect(view.webContents.zoomFactor).toBe(DEFAULT_BROWSER_ZOOM_FACTOR)
@@ -1959,7 +1967,8 @@ describe('BrowserViewManager', () => {
     expect(original.webContents.isDestroyed()).toBe(true)
     expect(candidate.visible).toBe(false)
     expect(candidate.bounds).toEqual({ x: 10, y: 21, width: 800, height: 501 })
-    expect(candidate.webContents.zoomFactor).toBe(1.25)
+    // The work Profile has no zoom of its own for the site; the 1.25 stays with the original Profile.
+    expect(candidate.webContents.zoomFactor).toBe(DEFAULT_BROWSER_ZOOM_FACTOR)
     expect(candidate.webContents.enableDeviceEmulation).toHaveBeenLastCalledWith(expect.objectContaining({
       screenPosition: 'mobile',
       viewSize: { width: 390, height: 844 }
