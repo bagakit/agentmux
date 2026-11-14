@@ -2,10 +2,11 @@ import assert from 'node:assert/strict'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { ipcMain } from 'electron'
+import { beginAnchorSample } from '../../../../desktop/scripts/fixtures/conversation-progressive-reading/anchor-sample.mjs'
 import { connectAgentMuxRpc, AgentMuxError } from '@agentmux/core'
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms))
 const draft='保留这份移动端尚未发送的阅读反馈。'
-export async function runMobile({BrowserWindow,setup,evidence,phase,scene,preload,appendDuringSelection}) {
+export async function runMobile({BrowserWindow,setup,evidence,phase,scene,preload,appendDuringSelection,readingPattern=false}) {
   const mobile=setup.mobile??setup
   const result={passed:false,scene,phase,images:[],samples:[],operations:[],errors:[],boundary:'Actual MobileConversationSurface → original Hosted SDK → private IPC transport bridge → original authenticated HTTP RPC → shared Core and Run in private Chromium. No physical phone or Relay claim.'}
   const win=new BrowserWindow({width:390,height:844,show:false,webPreferences:{preload,nodeIntegration:false,contextIsolation:true,sandbox:true,offscreen:true,backgroundThrottling:false,partition:'persist:conversation-progressive-mobile'}})
@@ -40,7 +41,7 @@ export async function runMobile({BrowserWindow,setup,evidence,phase,scene,preloa
     try{return {ok:true,value:await dispatch(...args)}}catch(error){return {ok:false,error:failure(error)}}
   })
   const read=code=>win.webContents.executeJavaScript(code)
-  const until=async(code,label=code)=>{for(let i=0;i<240;i++){if(await read(code))return;await pause(35)}throw Error('Original Mobile condition absent: '+label)}
+  const until=async(code,label=code)=>{for(let i=0;i<240;i++){const result=await read(code);if(result)return result;await pause(35)}throw Error('Original Mobile condition absent: '+label)}
   const sample=async name=>{await pause(80);const state=await read(`(()=>{const feed=document.querySelector('.mobile-conversation__reading'),bounds=feed.getBoundingClientRect();return {facts:mobileReading.facts(),nodes:feed.querySelectorAll('*').length,bodies:feed.querySelectorAll('.log-turn__body:not(.conversation-progressive-body__placeholder)').length,markdown:feed.querySelectorAll('[data-markdown-root],.md-paragraph').length,scroll:{top:feed.scrollTop,height:feed.scrollHeight,client:feed.clientHeight},visible:[...feed.querySelectorAll('[data-native-record-id]')].filter(n=>{const r=n.getBoundingClientRect();return r.bottom>bounds.top&&r.top<bounds.bottom}).map(n=>n.getAttribute('data-native-record-id')),editor:document.querySelector('[contenteditable=true]')?.textContent,overflow:document.querySelector('.mobile-app').scrollWidth>document.querySelector('.mobile-app').clientWidth}})()`);result.samples.push({name,...state});return state}
   const capture=async name=>{const file=`${scene}-${phase}-mobile-${name}.png`;await writeFile(join(evidence,file),(await win.webContents.capturePage()).toPNG());result.images.push(file)}
   const tap=async (selector,{skipDisabled=false}={})=>{
@@ -68,6 +69,23 @@ export async function runMobile({BrowserWindow,setup,evidence,phase,scene,preloa
     const latestNativeId=await read(`[...document.querySelectorAll('.mobile-conversation__reading [data-native-record-id]')].at(-1)?.dataset.nativeRecordId`)
     assert.equal(typeof latestNativeId,'string','The original current window exposes its latest native record')
     assert.equal(initial.facts.owner.runtimeId,mobile.runtimeId)
+    if (readingPattern) {
+      await wheel(-250)
+      await until(`(() => { const feed=document.querySelector('.mobile-conversation__reading'); return feed.scrollHeight-feed.clientHeight-feed.scrollTop>64 })()`, 'normal reading gesture leaves the live tail')
+      await capture('current')
+      const finish = await beginAnchorSample(read, win.webContents.debugger, '.mobile-conversation__reading')
+      const ordinary = await appendDuringSelection('seed-anchor-sample')
+      const receipt = await until(`(() => {
+        const receipts=mobileReading.facts().conversationReads, id=${JSON.stringify(ordinary.recordId)};
+        const recorded=receipts.findLast(r=>r.hostId==='local'&&r.agentSessionId===${JSON.stringify(mobile.agentSessionId)}&&r.nativeIds.includes(id));
+        return recorded && [...document.querySelectorAll('.mobile-conversation__reading [data-native-record-id]')].some(n=>n.dataset.nativeRecordId===id) && recorded;
+      })()`, 'The original accepted native append reaches its unchanged mobile reading section')
+      await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+      result.anchorSample = { ...await finish(), recordId: ordinary.recordId, receipt }
+      await capture('ordinary-append')
+      result.passed = true
+      return result
+    }
     if(phase==='restore')assert.equal(initial.editor,draft,'The second real process restores the original device draft without refilling')
     else {
       await tap('.mobile-conversation [contenteditable=true]');win.webContents.insertText(draft)

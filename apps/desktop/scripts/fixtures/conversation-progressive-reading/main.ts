@@ -13,6 +13,7 @@ import { registerConversationReadIpc } from '../../../src/main/conversation-read
 import { localRuntimeConnector } from '../../../test/helpers/local-runtime-connector'
 import type { AppConfig } from '../../../src/shared/contracts'
 import { sceneRows, appendRow, draft } from './scene.mjs'
+import { beginAnchorSample } from './anchor-sample.mjs'
 import { surfaceRows, surfaceCaptured, exerciseSurfaces } from './surfaces.mjs'
 import { exerciseIsolation } from './isolation.mjs'
 import { integrityCaptured, exerciseIntegrity } from './integrity.mjs'
@@ -258,8 +259,9 @@ app.whenReady().then(async () => {
     result.mobileAttempted = true
     const { runMobile } = await import(pathToFileURL(mobileExercise).href)
     result.mobile = await runMobile({ BrowserWindow, setup: { mobile: result.mobileSetup }, evidence, scene, phase, preload: mobilePreload,
-      appendDuringSelection: async () => {
-        const row = appendRow(scene, `mobile-${phase}`)
+      readingPattern: proofMode === 'reading-pattern',
+      appendDuringSelection: async (suffix = phase) => {
+        const row = appendRow(scene, `mobile-${suffix}`)
         await append([row])
         return { recordId: row.payload.id }
       } })
@@ -334,6 +336,24 @@ app.whenReady().then(async () => {
       assert.equal(calls.filter(call => call.operation === 'seed').length, 0, 'Restart never reseeds the original workface')
     }
     await sample('first-readable'); await shot('current')
+    if (proofMode === 'reading-pattern') {
+      const point = await read('(() => { const r=document.querySelector(".activity-feed").getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2} })()')
+      await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0, deltaY: -250 })
+      await ready(`(() => { const feed=document.querySelector('.activity-feed'); return readingProof.events.some(event => event.type==='wheel' && event.detail.trusted && event.detail.deltaY===-250) && feed.scrollHeight-feed.clientHeight-feed.scrollTop>64 })()`)
+      await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+      const ordinary = appendRow(scene, 'desktop-anchor-sample'), cut = await read('readingProof.nativeCut()')
+      assert.ok(cut, 'The original native frontier is observed before appending')
+      const finish = await beginAnchorSample(read, win.webContents.debugger, '.activity-feed')
+      await append([ordinary])
+      const accepted = await ready(`readingProof.appendDisposition(${JSON.stringify(cut)},${JSON.stringify(ordinary.payload.id)},false)`)
+      await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+      result.anchorSample = { ...await finish(), recordId: ordinary.payload.id, acceptedRevision: accepted.accepted.revision }
+      await shot('ordinary-append')
+      await runMobileOnce()
+      assert.equal(result.mobile?.passed, true, 'Mobile also presented its original measured append')
+      result.passed = true
+      return
+    }
     if (scene === 'surfaces') result.surfaces = await exerciseSurfaces({ read, click, shot, until, copies,
       resize: async (width: number) => { win.setContentSize(width, win.getContentSize()[1]); await ready(`innerWidth === ${width}`) } })
     else if (scene === 'integrity') result.integrity = await exerciseIntegrity({ read, click, shot, until, append, appendRow, phase,

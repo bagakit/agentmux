@@ -89,6 +89,25 @@ it('holds coverage and original contributors in the same frame, while independen
   await release(); expect(host.textContent).toContain('new version'); expect(host.textContent).toContain('New frame coverage')
 })
 
+it('admits ordinary appends without remeasuring a retained original reading frame', async () => {
+  host.setAttribute('data-workbench-reading-scroll', '')
+  host.getBoundingClientRect = () => new DOMRect(0, 0, 400, 300)
+  const original = item('original'), next = frame(page(original, item('appended')))
+  const controller: { current: ConversationPresentationController | null } = { current: null }
+  const presentation = { controller, pending: false, onRelease: vi.fn() }
+  await draw(frame(page(original)), { presentation })
+  const section = host.querySelector('.conversation-native-thread')!
+  const node = section.querySelector<HTMLElement>('[data-native-record-id="original"]')!
+  const measure = vi.spyOn(node, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 30, 400, 80))
+  const queries = vi.spyOn(section, 'querySelectorAll')
+  expect(controller.current!.canPresent(next, { preserveAnchor: true })).toBe(true)
+  expect(queries.mock.calls.some(([selector]) => selector === '[data-conversation-layout-key]')).toBe(false)
+  expect(measure).not.toHaveBeenCalled()
+  await draw(next, { presentation })
+  expect(section.querySelector('[data-native-record-id="original"]')).toBe(node)
+  expect(section.querySelector('[data-native-record-id="appended"]')).not.toBeNull()
+})
+
 it('retains the visible reading anchor without a selection when the candidate evicts it', async () => {
   const initial = frame(page(item('visible'), item('later')))
   await draw(initial)

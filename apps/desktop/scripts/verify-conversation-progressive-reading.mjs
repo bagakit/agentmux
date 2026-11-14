@@ -15,6 +15,9 @@ import { immediateFirstMount, compareReadingCosts } from './fixtures/conversatio
 const root = path.resolve(import.meta.dirname, '../../..'), fixture = path.join(import.meta.dirname, 'fixtures/conversation-progressive-reading')
 const args = process.argv.slice(2), compileOnly = args.includes('--compile-only')
 const costPairs = args.includes('--cost-pairs')
+const readingPattern = args.includes('--reading-pattern')
+const patternAttempts = Number(args.find(value => value.startsWith('--pattern-attempts='))?.slice('--pattern-attempts='.length) ?? 1)
+assert.ok(Number.isInteger(patternAttempts) && patternAttempts >= 1 && patternAttempts <= 5, 'Use one to five independent reading pattern attempts')
 const anchorAttempts = Number(args.find(value => value.startsWith('--anchor-attempts='))?.slice('--anchor-attempts='.length) ?? 0)
 assert.ok(Number.isInteger(anchorAttempts) && anchorAttempts >= 0 && anchorAttempts <= 10, 'Use at most ten sequential anchor attempts')
 const preparation = args.includes('--prepare') || compileOnly || anchorAttempts > 0
@@ -23,6 +26,7 @@ const mobileFixture = args.find(value => value.startsWith('--mobile-fixture='))?
 const scenes = sceneOption ? [sceneOption] : costPairs ? ['dense', 'longbody'] : sceneNames
 assert.ok(scenes.length && scenes.every(scene => sceneNames.includes(scene)), 'Select a known nonempty scene')
 if (anchorAttempts) assert.deepEqual(scenes, ['dense'], 'Anchor attempts exercise only the dense counterexample')
+if (readingPattern) assert.ok(!anchorAttempts && !costPairs && scenes.length === 1, 'Pattern trials exercise one scene in both original hosts')
 if (costPairs) { assert.equal(anchorAttempts, 0); assert.deepEqual(scenes, ['dense', 'longbody'], 'Cost comparison keeps both approved transcript inputs') }
 const evidence = path.resolve(args.find(value => !value.startsWith('--')) ?? path.join(root, '.tmp/conversation-progressive-reading-' + crypto.randomUUID()))
 const require = createRequire(path.join(root, 'apps/desktop/package.json')), { build } = await import(pathToFileURL(require.resolve('vite')).href)
@@ -40,13 +44,16 @@ const inputPaths = [...await files(fixture), path.join(import.meta.dirname, 'ver
   ...['package.json', 'tsconfig.base.json', 'apps/desktop/package.json', 'apps/desktop/tsconfig.json',
     'apps/mobile/package.json', 'apps/mobile/tsconfig.json', 'apps/host/package.json', 'apps/host/scripts/build.mjs'].map(file => path.join(root, file)),
   ...await files(path.join(root, 'apps/host/src')), ...await files(path.join(root, 'apps/host/dist')),
-  ...await files(path.join(root, 'apps/desktop/src')), ...await files(path.join(root, 'packages/client-ui/src')), ...await files(path.join(root, 'packages/core/src')),
-  ...await files(path.join(root, 'packages/core/dist')), ...await files(path.join(root, 'packages/layout/src')),
-  ...(await Promise.all(['identity', 'demand', 'relay', 'git', 'diagnostic-evidence', 'connectors', 'capsule'].flatMap(pkg => ['src', 'dist'].map(directory => files(path.join(root, 'packages', pkg, directory)))))).flat()]
+  ...await files(path.join(root, 'apps/desktop/src'))]
 for (const entry of await fs.readdir(path.join(root, 'packages'), { withFileTypes: true })) {
   if (!entry.isDirectory()) continue
-  const manifest = path.join(root, 'packages', entry.name, 'package.json')
-  try { await fs.access(manifest); inputPaths.push(manifest) } catch (error) { if (error.code !== 'ENOENT') throw error }
+  const directory = path.join(root, 'packages', entry.name)
+  const inputs = await fs.readdir(directory, { withFileTypes: true })
+  if (!inputs.some(input => input.isFile() && input.name === 'package.json')) continue
+  inputPaths.push(path.join(directory, 'package.json'))
+  for (const input of inputs) {
+    if (input.isDirectory() && (input.name === 'src' || input.name === 'dist')) inputPaths.push(...await files(path.join(directory, input.name)))
+  }
 }
 const hashes = async () => Object.fromEntries(await Promise.all(inputPaths.map(async file => [path.relative(root, file), hash(await fs.readFile(file))])))
 const loaded = [], cssInputs = {}, emitted = [], transforms = new Map()
@@ -143,6 +150,7 @@ try {
       assert.equal(sha256, receipt.inputs[file], 'Actual Mobile first-party input was absent from or changed after the original inventory: ' + file)
     receipt.mobileBuild = mobileBuild
   }
+  if (readingPattern) assert.ok(mobileBuild?.source['apps/mobile/src/conversation/MobileConversationSurface.tsx'], 'Original Mobile reading consumer not compiled')
   for (const name of ['App.tsx', 'SessionPane.tsx', 'ActivityView.tsx']) assert.ok(loaded.some(value => value.kind === 'module' && value.path.endsWith('/' + name)), 'Actual Desktop consumer not compiled: ' + name)
   for (const name of ['ConversationView.tsx', 'ConversationMessage.tsx']) assert.ok(loaded.some(value => value.kind === 'module' && value.path.endsWith('/' + name)), 'Actual shared consumer not compiled: ' + name)
   receipt.loaded = loaded
@@ -155,6 +163,7 @@ try {
   resolver = registerHooks({ resolve(specifier, context, next) { return specifier.startsWith('@agentmux/') ? { url: pathToFileURL(candidateResolve(root, specifier)).href, shortCircuit: true } : next(specifier, context) } })
   const Core = await import(pathToFileURL(path.join(root, 'packages/core/dist/index.js')).href)
   const runs = anchorAttempts ? Array.from({ length: anchorAttempts }, (_, index) => ({ scene: 'dense', attempt: index + 1 }))
+    : readingPattern ? Array.from({ length: patternAttempts }, (_, index) => ({ scene: scenes[0], attempt: index + 1 }))
     : costPairs ? scenes.flatMap(scene => [1, 2, 3].flatMap(pair => (pair % 2 ? ['scheduled', 'immediate'] : ['immediate', 'scheduled']).map(variant => ({ scene, pair, variant }))))
     : scenes.map(scene => ({ scene }))
   for (const [index, { scene, attempt, pair, variant = 'scheduled' }] of (compileOnly ? [] : runs).entries()) {
@@ -165,7 +174,7 @@ try {
     // become part of the private Runtime socket address.
     const sceneRoot = path.join(privateRoot, `s${index}`); await fs.mkdir(path.join(sceneRoot, 'workspace'), { recursive: true })
     await fs.copyFile(path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), path.join(sceneRoot, 'fake-codex-cli.mjs'))
-    for (const phase of anchorAttempts || costPairs ? ['seed'] : ['seed', 'restore']) {
+    for (const phase of anchorAttempts || costPairs || readingPattern ? ['seed'] : ['seed', 'restore']) {
       const processRoot = path.join(sceneRoot, 'process-' + phase); await fs.mkdir(processRoot)
       const env = privatePackageSmokeEnvironment(process.env, { userData: path.join(sceneRoot, 'user-data'), runtimeRoot: path.join(sceneRoot, 'runtime') })
       delete env.AGENTMUX_DESKTOP_READY_FILE; delete env.AGENTMUX_DESKTOP_EXIT_AFTER_READY
@@ -176,7 +185,7 @@ try {
       const resultFile = path.join(runEvidence, `${scene}-${phase}.json`)
       await fs.rm(resultFile, { force: true })
       const exit = await runProbeProcess(electron, [bootstrap, path.join(privateRoot, variant === 'immediate' ? 'renderer-immediate/index.html' : 'renderer/index.html'), sceneRoot, phase,
-        path.join(privateRoot, 'preload/preload.cjs'), runEvidence, process.execPath, scene, mobileBuild?.exercise ?? '', mobileBuild?.preload ?? '', costPairs ? 'cost' : anchorAttempts ? 'anchor' : 'acceptance', path.join(privateRoot, 'main/main.mjs'), root],
+        path.join(privateRoot, 'preload/preload.cjs'), runEvidence, process.execPath, scene, mobileBuild?.exercise ?? '', mobileBuild?.preload ?? '', costPairs ? 'cost' : anchorAttempts ? 'anchor' : readingPattern ? 'reading-pattern' : 'acceptance', path.join(privateRoot, 'main/main.mjs'), root],
       { temporaryRoot: processRoot, cwd: root, env, timeoutMs: 180000, onLine: line => { log.push(line); void fs.appendFile(logFile, line + '\n') } })
       await fs.writeFile(logFile, log.join('\n'))
       assert.equal(exit.timedOut, false, `${scene}/${phase}: private watchdog fired; read its stderr log`)
@@ -187,7 +196,7 @@ try {
       else assert.ok(actual.delayedPageSelection && actual.reads?.length, 'An anchor attempt must reach the original earlier-page commit')
       const seed = receipt.phases.find(item => item.scene === scene && item.phase === 'seed').actual
       if (phase === 'restore') { assert.notEqual(actual.pid, seed.pid); assert.deepEqual(actual.runs, seed.runs, 'Exact original Run/PID survives the separate App process'); assert.deepEqual(actual.unrelatedRuns, seed.unrelatedRuns) }
-      const images = scene === 'surfaces' ? ['current', 'system', 'collaboration', 'captured-diff', 'captured-original', 'compact-mailbox', 'compact-mailbox-narrow', 'pending-terminal', 'narrow']
+      const images = readingPattern ? ['current', 'ordinary-append'] : scene === 'surfaces' ? ['current', 'system', 'collaboration', 'captured-diff', 'captured-original', 'compact-mailbox', 'compact-mailbox-narrow', 'pending-terminal', 'narrow']
         : scene === 'integrity' ? ['current', 'find-loaded', 'find-code', 'ruler-captured', 'ruler-reopened', 'find-captured', 'narrow']
           : ['current', 'earlier', 'selected', 'narrow']
       for (const name of images) receipt.visualPaths.push({ path: path.relative(root, path.join(runEvidence, `${scene}-${phase}-${name}.png`)), sha256: hash(await fs.readFile(path.join(runEvidence, `${scene}-${phase}-${name}.png`))) })
